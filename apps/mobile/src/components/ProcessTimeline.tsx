@@ -1,3 +1,4 @@
+import { HandoffSuccessRow } from "@/components/DebriefBlock";
 import {
   InterjectionBubbles,
   type InterjectionItem,
@@ -10,6 +11,7 @@ import {
   escalationDetail,
 } from "@/components/TeamView";
 import { toolDetail, toolLabel } from "@/components/assistantLabels";
+import { isSuccessfulHandoff } from "@/components/handoffBrief";
 import {
   codeDiagnosticsSummary,
   extractCodeDiagnostics,
@@ -917,6 +919,19 @@ const TOOL_STATUS: Record<ToolStepData["status"], string> = {
  *  result. While running, the status shows the coarse phase (Searching / Queued / Trying fallback,
  *  from the live `phase`) + an elapsed timer — a live waiting cue instead of a static「Running」. */
 function ToolStep({
+  step,
+  phase,
+}: {
+  step: ToolStepData;
+  phase?: ToolPhase;
+}) {
+  if (isSuccessfulHandoff(step.tool_name, step.status)) {
+    return <HandoffSuccessRow args={step.arguments} />;
+  }
+  return <GenericToolStep step={step} phase={phase} />;
+}
+
+function GenericToolStep({
   step,
   phase,
 }: {

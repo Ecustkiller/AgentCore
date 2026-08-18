@@ -307,10 +307,12 @@ class FileBatchTool:
                 await context.backend.mkdir(path)
             except AlreadyExists:
                 return "skip", f"mkdir {path}（已存在）", []
-            except OutsideWorkspace:
+            except OutsideWorkspace as e:
                 return (
                     "fail",
-                    _outside_workspace_msg(path, location=context.backend.location),
+                    _outside_workspace_msg(
+                        path, location=context.backend.location, reason=str(e)
+                    ),
                     [],
                 )
             except WorkspaceError as e:
@@ -343,10 +345,12 @@ class FileBatchTool:
                 await context.backend.delete(path, permanent=permanent)
             except PathNotFound:
                 return "skip", f"delete {path}（不存在）", []
-            except OutsideWorkspace:
+            except OutsideWorkspace as e:
                 return (
                     "fail",
-                    _outside_workspace_msg(path, location=context.backend.location),
+                    _outside_workspace_msg(
+                        path, location=context.backend.location, reason=str(e)
+                    ),
                     [],
                 )
             except WorkspaceError as e:
@@ -402,7 +406,9 @@ class FileBatchTool:
                 "fail",
                 (
                     f"{op} {source} → {destination}："
-                    + _outside_workspace_msg(str(e), location=context.backend.location)
+                    + _outside_workspace_msg(
+                        str(e), location=context.backend.location, reason=str(e)
+                    )
                 ),
                 [],
             )

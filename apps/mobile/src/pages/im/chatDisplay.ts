@@ -1,6 +1,10 @@
 // IM bubble/composer display helpers (mobile-local; mirrors desktop chatDisplay
 // semantics without sharing implementation — cross-platform-frontend.mdc).
-import { type ChatMessageDetail, isImageAttachment } from "@/api/messaging";
+import {
+  type ChatMessageDetail,
+  type ChatSummary,
+  isImageAttachment,
+} from "@/api/messaging";
 import type { components } from "@/types/api.generated";
 
 type Schemas = components["schemas"];
@@ -13,6 +17,54 @@ export type MessageReplyTo = Schemas["ReplyToSnapshot"];
 
 /** Visible body token for `@所有人` (display only; truth is `kind: "everyone"`). */
 export const EVERYONE_MENTION_LABEL = "所有人";
+
+type ChatParticipant = Schemas["ChatParticipant"];
+
+/** Visible governance mark (platform / 群主 / 管理员). */
+export type GovernanceBadgeKind = "platform" | "owner" | "admin";
+
+export interface MemberGovernanceBadge {
+  kind: GovernanceBadgeKind;
+  label: string;
+  shortLabel: string;
+}
+
+/**
+ * One roster/bubble badge. Platform admin wins over group role;
+ * owner → 群主; group admin → 管理员. Mirrors desktop chatDisplay.
+ */
+export function memberGovernanceBadge(
+  member: Pick<ChatParticipant, "is_admin" | "group_role">,
+): MemberGovernanceBadge | null {
+  if (member.is_admin) {
+    return { kind: "platform", label: "平台管理员", shortLabel: "平台" };
+  }
+  if (member.group_role === "owner") {
+    return { kind: "owner", label: "群主", shortLabel: "群主" };
+  }
+  if (member.group_role === "admin") {
+    return { kind: "admin", label: "管理员", shortLabel: "管理员" };
+  }
+  return null;
+}
+
+/**
+ * Bubble circle: own auth URL; DM peer; group roster member; official session
+ * icon. DM / group never fall back to `chat.avatar_url`.
+ */
+export function bubbleAvatarUrl(opts: {
+  mine: boolean;
+  chatType: ChatSummary["type"] | null | undefined;
+  myAvatarUrl: string | null | undefined;
+  peerAvatarUrl: string | null | undefined;
+  memberAvatarUrl: string | null | undefined;
+  chatAvatarUrl: string | null | undefined;
+}): string | null {
+  if (opts.mine) return opts.myAvatarUrl ?? null;
+  if (opts.chatType === "group") return opts.memberAvatarUrl ?? null;
+  if (opts.chatType === "dm") return opts.peerAvatarUrl ?? null;
+  return opts.chatAvatarUrl ?? null;
+}
 
 /** Max chars for a reply quote preview (composer bar + bubble quote). */
 export const REPLY_BODY_PREVIEW_MAX = 80;

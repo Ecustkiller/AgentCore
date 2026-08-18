@@ -133,16 +133,17 @@ def format_coordination_events(
     lines.append("")
     from agentcore.runtime.resolve.ceo_surface import COORDINATION_PERIOD_HINT
 
-    hint = COORDINATION_PERIOD_HINT
-    if session.harvest_closing and hint.endswith(_COORD_HINT_CLOSED_TAIL):
-        hint = hint[: -len(_COORD_HINT_CLOSED_TAIL)].rstrip()
-    lines.append(hint)
     first_turn_all_completed = (not session.harvest_closing) and any(
         ev.kind is CoordinationEventKind.ALL_COMPLETED for ev in events
     )
-    if first_turn_all_completed:
-        close_line = "本回合勿做最终合成；可见收口由系统收口回合完成。"
-    elif session.harvest_closing:
+    # 首回合 ALL_COMPLETED 与 harvest 收口同为「现在写终稿」：剥掉未来时尾巴，
+    # 避免与 close_line 自相矛盾（旧文案曾一边说合成、一边说本回合勿做）。
+    closing_now = session.harvest_closing or first_turn_all_completed
+    hint = COORDINATION_PERIOD_HINT
+    if closing_now and hint.endswith(_COORD_HINT_CLOSED_TAIL):
+        hint = hint[: -len(_COORD_HINT_CLOSED_TAIL)].rstrip()
+    lines.append(hint)
+    if closing_now:
         close_line = _HARVEST_CLOSE_LINE[_harvest_close_kind(session, events)]
     else:
         close_line = "全部完成后做最终合成（走 content_delta），然后退出协调。"
@@ -259,22 +260,6 @@ def _format_one(session: CoordinationSession, ev: CoordinationEvent) -> str:
         done = p.get("completed", 0)
         total = p.get("total", session.total_workers)
         failed = p.get("failed")
-        if not session.harvest_closing:
-            if p.get("cancelled") or p.get("error"):
-                return (
-                    f"- all_completed：调度中断（{done}/{total}）。"
-                    "本回合可见面只留人已派出，勿做最终合成。"
-                )
-            if p.get("criteria_met") is False:
-                failed_n = failed if isinstance(failed, int) else 0
-                return (
-                    f"- all_completed：团队调度结束（完成 {done}/{total}，失败 {failed_n}），"
-                    "但批次验收未满足。本回合可见面只留人已派出，勿做最终合成。"
-                )
-            return (
-                f"- all_completed：团队已结束（{done}/{total}）。"
-                "本回合可见面只留人已派出，勿做最终合成。"
-            )
         if p.get("cancelled") or p.get("error"):
             lines = [
                 f"- all_completed：调度中断，基于已完成部分收口（{done}/{total}）。"

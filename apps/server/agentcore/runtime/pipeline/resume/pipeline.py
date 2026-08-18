@@ -303,6 +303,7 @@ async def resume_chat_pipeline(
             excluded_run_ids=excluded_run_ids,
             write_capability_overrides=write_capability_overrides,
             model_overrides=model_overrides,
+            suspension_saver=suspension_saver,
         )
         pre_pause = recovered.pre_pause
         settled = recovered.settled

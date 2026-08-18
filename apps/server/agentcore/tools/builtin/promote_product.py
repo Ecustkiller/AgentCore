@@ -24,6 +24,7 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory
+from agentcore.tools.builtin.file_ops.errors import _outside_workspace_msg
 from agentcore.tools.file_products import file_product
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
@@ -197,8 +198,13 @@ class PromoteProductTool:
             except PathNotFound:
                 skipped.append((source, "源文件不存在（可能已被移动或删除）"))
                 continue
-            except OutsideWorkspace:
-                skipped.append((source, f"目标 `{target}` 超出工作区范围"))
+            except OutsideWorkspace as e:
+                skipped.append((
+                    source,
+                    _outside_workspace_msg(
+                        target, location=context.backend.location, reason=str(e)
+                    ),
+                ))
                 continue
             except WorkspaceError as exc:
                 dead = _maybe_channel_dead(exc, start)

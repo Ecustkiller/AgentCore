@@ -19,6 +19,7 @@ from .admin import (
     AdminGoWindows,
     AdminObservabilitySummary,
     AdminOverview,
+    AdminReplayTurnFinalState,
     AdminResetPasswordResponse,
     AdminSetPasswordRequest,
     AdminSystemStatus,
@@ -242,6 +243,7 @@ from .messaging import (
     MessageMention,
     MessageMentionEveryone,
     MessageMentionUser,
+    PersonPublic,
     ReplyToSnapshot,
     SendChatMessageRequest,
     StartDmRequest,
@@ -414,6 +416,7 @@ __all__ = [
     "ReplayMessage",
     "ReplayConversation",
     "AdminConversationReplay",
+    "AdminReplayTurnFinalState",
     # conversations + folders
     "CreateConversationRequest",
     "ContextGapModel",
@@ -651,6 +654,7 @@ __all__ = [
     "DailyCost",
     "UsageSummary",
     # messaging (IM)
+    "PersonPublic",
     "UserSearchResult",
     "UserSearchResponse",
     "ChatParticipant",

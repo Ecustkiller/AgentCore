@@ -40,3 +40,11 @@ export async function deletePlatformCredential(
 ): Promise<void> {
   await api.delete(`/v1/admin/platform-credentials/${credentialId}`);
 }
+
+export async function clearPlatformCredentialRuntime(
+  credentialId: string,
+): Promise<PlatformCredentialView> {
+  return api.post<PlatformCredentialView>(
+    `/v1/admin/platform-credentials/${credentialId}/clear-runtime`,
+  );
+}

@@ -146,7 +146,7 @@ class MemberView:
     """A group member for the roster: their user plus moderation-relevant flags.
 
     ``is_admin`` = platform ``users.role == admin`` (创始团队). ``group_role`` =
-    ``chat_members.role`` (内测群版主 = ``admin``). Clients badge both and gate
+    ``chat_members.role`` (内测群管理员 = ``admin``). Clients badge both and gate
     kick/mute on either platform admin or group moderator.
     """
 
@@ -373,10 +373,10 @@ class MessagingService:
         await self._chats.set_membership_flags(chat_id, user_id, muted=muted, pinned=pinned)
         return await self.chat_view(chat_id=chat_id, user_id=user_id)
 
-    # --- Moderation (审核治理: 平台 admin 或群级版主) ---
+    # --- Moderation (审核治理: 平台 admin 或群管理员) ---
     # Actor authority is enforced here (routes use AuthUser). Platform admin is
     # always a moderator; group-level ``chat_members.role in {owner,admin}`` also
-    # qualifies. Appointment of 内测群版主 is admin-console-only.
+    # qualifies. Appointment of 内测群管理员 is admin-console-only.
 
     async def kick_member(self, *, chat_id: str, actor_id: str, target_id: str) -> None:
         """Remove a member from a group (踢人) and post a system notice.
@@ -456,7 +456,7 @@ class MessagingService:
         return BETA_GROUP_ID, title, users
 
     async def set_beta_group_moderator(self, *, user_id: str, actor_id: str) -> User:
-        """Appoint a 内测群版主 (``chat_members.role=admin``). Admin-console only.
+        """Appoint a 内测群管理员 (``chat_members.role=admin``). Admin-console only.
 
         Ensures membership (re-adds leavers). Idempotent if already admin.
         """
@@ -480,7 +480,7 @@ class MessagingService:
         return user
 
     async def clear_beta_group_moderator(self, *, user_id: str, actor_id: str) -> None:
-        """Revoke 内测群版主 (role → ``member``). Leaves membership intact."""
+        """Revoke 内测群管理员 (role → ``member``). Leaves membership intact."""
         from agentcore.db.repositories.chat import BETA_GROUP_ID
 
         chat = await self._chats.get_chat(BETA_GROUP_ID)

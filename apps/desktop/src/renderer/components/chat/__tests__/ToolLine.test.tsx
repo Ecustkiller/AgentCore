@@ -2,8 +2,9 @@
 /**
  * Render test for ToolLine 过程工具默认折叠: every process tool (web_search / code_execute /
  * file_write / str_replace / …) stays collapsed on the running→done edge — aligned with
- * Cursor/Claude「过程收敛、答案突出」. Folded rows keep inlineCount / peek; expand is a click
- * away. Failures also stay collapsed (red ✗ + red peek). The block comment detaches the
+ * Cursor/Claude「过程收敛、答案突出」. Folded rows keep inlineMeta / inlineBody /
+ * peek; expand is a click away. Failures also stay collapsed (red ✗ + red peek).
+ * The block comment detaches the
  * @vitest-environment directive from the import block so organizeImports keeps it file-leading.
  */
 
@@ -22,6 +23,10 @@ vi.mock("@/stores/sidePanel", () => ({
   ),
 }));
 
+vi.mock("@/components/chat/Markdown", () => ({
+  Markdown: ({ content }: { content: string }) => <div>{content}</div>,
+}));
+
 import { ComposingToolLine, ToolLine, ToolLineGroup } from "../ToolLine";
 import { toolDetail, toolGroupSummary } from "../message-bubble/constants";
 
@@ -33,6 +38,11 @@ beforeEach(() => {
 
 function renderWithTooltip(ui: ReactElement) {
   return render(<TooltipProvider>{ui}</TooltipProvider>);
+}
+
+/** Collapsed result subline (`text-xs` under the title). Null when the row is one line. */
+function collapsedSubline(container: HTMLElement): HTMLElement | null {
+  return container.querySelector("span.block.truncate.text-xs");
 }
 
 type ToolStep = Extract<ProcessStep, { kind: "tool" }>;
@@ -193,7 +203,7 @@ describe("ToolLine · 过程工具默认折叠", () => {
   });
 
   it("keeps str_replace diff collapsed on the running→done edge", () => {
-    const { rerender } = render(
+    const { rerender, container } = render(
       <ToolLine
         step={step({
           tool_name: "str_replace",
@@ -225,6 +235,9 @@ describe("ToolLine · 过程工具默认折叠", () => {
     );
     expect(screen.queryByText("+1")).toBeNull();
     expect(screen.queryByText("-1")).toBeNull();
+    expect(screen.queryByText(/已编辑/)).toBeNull();
+    expect(screen.getByText("src/foo.ts")).toBeTruthy();
+    expect(collapsedSubline(container)).toBeNull();
 
     fireEvent.click(screen.getByText("Edit file"));
     expect(screen.getByText("+1")).toBeTruthy();
@@ -232,7 +245,7 @@ describe("ToolLine · 过程工具默认折叠", () => {
   });
 
   it("keeps file_write content card collapsed on the running→done edge", () => {
-    const { rerender } = render(
+    const { rerender, container } = render(
       <ToolLine
         step={step({
           tool_name: "file_write",
@@ -241,7 +254,7 @@ describe("ToolLine · 过程工具默认折叠", () => {
         })}
       />,
     );
-    // Line-count footer is expanded-only (collapsed peek reads「已写入 …」).
+    // Line-count footer is expanded-only; collapsed row is title + path only.
     expect(screen.queryByText(/1 行 ·/)).toBeNull();
 
     rerender(
@@ -255,9 +268,76 @@ describe("ToolLine · 过程工具默认折叠", () => {
       />,
     );
     expect(screen.queryByText(/1 行 ·/)).toBeNull();
+    expect(screen.queryByText(/已写入/)).toBeNull();
+    expect(screen.getByText("src/new.ts")).toBeTruthy();
+    expect(collapsedSubline(container)).toBeNull();
 
     fireEvent.click(screen.getByText("Write file"));
     expect(screen.getByText(/1 行 ·/)).toBeTruthy();
+  });
+
+  it("inlines write diagnostics into the title and stays one line", () => {
+    const { container } = render(
+      <ToolLine
+        step={step({
+          tool_name: "file_write",
+          arguments: { path: "src/new.ts", content: "export const x = 1" },
+          result: "已写入 src/new.ts",
+          display: {
+            kind: "code_diagnostics",
+            status: "ok",
+            diagnostics: [
+              {
+                path: "src/new.ts",
+                line: 1,
+                column: 1,
+                severity: "error",
+                message: "boom",
+              },
+            ],
+          },
+          status: "success",
+        })}
+      />,
+    );
+    expect(screen.getByText(/1 个类型错误/)).toBeTruthy();
+    expect(screen.queryByText(/已写入/)).toBeNull();
+    expect(collapsedSubline(container)).toBeNull();
+  });
+
+  it("suppresses file_append ack peek — title path is enough", () => {
+    const { container } = render(
+      <ToolLine
+        step={step({
+          tool_name: "file_append",
+          arguments: { path: "notes.md", content: "tail" },
+          result: "已追加 notes.md",
+          status: "success",
+        })}
+      />,
+    );
+    expect(screen.getByText("Append file")).toBeTruthy();
+    expect(screen.getByText("notes.md")).toBeTruthy();
+    expect(screen.queryByText(/已追加/)).toBeNull();
+    expect(collapsedSubline(container)).toBeNull();
+  });
+
+  it("inlines grep match count into the title row when collapsed", () => {
+    const { container } = render(
+      <ToolLine
+        step={step({
+          tool_name: "grep",
+          arguments: { pattern: "include_usage|stream_options" },
+          result:
+            "1 处匹配，分布在 1 个文件中（/include_usage|stream_options/）\nsrc/a.ts:1: include_usage",
+          status: "success",
+        })}
+      />,
+    );
+    expect(screen.getByText("Grep code")).toBeTruthy();
+    expect(screen.getByText("include_usage|stream_options")).toBeTruthy();
+    expect(screen.getByText(/1 处匹配 · 1 个文件/)).toBeTruthy();
+    expect(collapsedSubline(container)).toBeNull();
   });
 
   it("suppresses the peek for consult_memory — only the self-sufficient title shows", () => {
@@ -671,6 +751,108 @@ describe("ToolLineGroup · 混杂组浏览器 CTA", () => {
   });
 });
 
+describe("ToolLine · handoff brief card", () => {
+  const receipt = "已收尾并提交交接简报。";
+
+  it("peeks arguments.summary and never the protocol receipt", () => {
+    const { container } = render(
+      <ToolLine
+        step={step({
+          tool_name: "handoff",
+          arguments: { summary: "交叉验证完成，建议一周内表态" },
+          result: receipt,
+          status: "success",
+        })}
+      />,
+    );
+    expect(screen.getByText("Handoff")).toBeTruthy();
+    expect(screen.getByText("交叉验证完成，建议一周内表态")).toBeTruthy();
+    expect(screen.queryByText(receipt)).toBeNull();
+    expect(screen.queryByText("交接简报")).toBeNull();
+    expect(collapsedSubline(container)).toBeNull();
+  });
+
+  it("summary-only has no chevron and does not expand", () => {
+    const { container } = render(
+      <ToolLine
+        step={step({
+          tool_name: "handoff",
+          arguments: { summary: "只写了结论" },
+          result: receipt,
+          status: "success",
+        })}
+      />,
+    );
+    expect(screen.getByText("只写了结论")).toBeTruthy();
+    expect(collapsedSubline(container)).toBeNull();
+    expect(container.querySelector(".lucide-chevron-right")).toBeNull();
+    expect(container.querySelector(".lucide-chevron-down")).toBeNull();
+    fireEvent.click(screen.getByText("Handoff"));
+    expect(screen.queryByText("关键要点")).toBeNull();
+    expect(screen.queryByText(receipt)).toBeNull();
+  });
+
+  it("expands details with DebriefDetails layout, no 交接简报 heading", () => {
+    const { container } = render(
+      <ToolLine
+        step={step({
+          tool_name: "handoff",
+          arguments: {
+            summary: "交叉验证完成",
+            key_points: ["共识：一周内需清晰立场"],
+            assumptions: "争议事实以公开报道为准",
+            next_steps: "若用户同意，建议开辩",
+          },
+          result: receipt,
+          status: "success",
+        })}
+      />,
+    );
+    expect(screen.getByText("交叉验证完成")).toBeTruthy();
+    expect(screen.queryByText("关键要点")).toBeNull();
+    expect(container.querySelector(".lucide-chevron-right")).toBeTruthy();
+    fireEvent.click(screen.getByText("Handoff"));
+    expect(screen.getByText("关键要点")).toBeTruthy();
+    expect(screen.getByText("共识：一周内需清晰立场")).toBeTruthy();
+    expect(screen.getByText("关键假设")).toBeTruthy();
+    expect(screen.getByText("建议下一步")).toBeTruthy();
+    expect(screen.queryByText("交接简报")).toBeNull();
+    expect(screen.queryByText(receipt)).toBeNull();
+  });
+
+  it("keeps failed / running rows as ordinary tool lines", () => {
+    const { rerender } = render(
+      <ToolLine
+        step={step({
+          tool_name: "handoff",
+          arguments: { summary: "半成品结论" },
+          status: "running",
+        })}
+      />,
+    );
+    expect(screen.getByText("Handoff")).toBeTruthy();
+    expect(screen.queryByText("半成品结论")).toBeNull();
+
+    rerender(
+      <ToolLine
+        step={step({
+          tool_name: "handoff",
+          arguments: { summary: "半成品结论" },
+          result: "空交付不得交接：本轮正文 0 字",
+          status: "error",
+          failure: {
+            message: "空交付不得交接。",
+            code: "HANDOFF_EMPTY",
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText("空交付不得交接。")).toBeTruthy();
+    expect(screen.queryByText("半成品结论")).toBeNull();
+    expect(screen.queryByText("关键要点")).toBeNull();
+  });
+});
+
 describe("toolDetail · title chip", () => {
   it("prefers path / name over long prose bodies", () => {
     expect(toolDetail({ path: "a/b.md", draft: "## 长草稿\n更多" })).toBe(
@@ -698,6 +880,10 @@ describe("toolDetail · title chip", () => {
   it("still chips a short one-line code snippet", () => {
     expect(toolDetail({ code: "print(1)" })).toBe("print(1)");
     expect(toolDetail({ code: "line1\nline2\nline3\nline4\nline5" })).toBe("");
+  });
+
+  it("does not chip handoff summary into toolDetail (ToolLine inlines peek instead)", () => {
+    expect(toolDetail({ summary: "交叉验证完成，建议一周内表态" })).toBe("");
   });
 });
 

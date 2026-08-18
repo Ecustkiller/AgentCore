@@ -1,5 +1,6 @@
 import { Markdown } from "@/components/chat/Markdown";
 import { CollapsibleSpeech } from "@/components/chat/debate/CollapsibleSpeech";
+import { processHasSuccessfulHandoff } from "@/components/chat/handoffBrief";
 import { ProcessTimeline } from "@/components/chat/message-bubble/ProcessTimeline";
 import { RunInterveneControls } from "@/components/graph/RunInterveneControls";
 import {
@@ -375,9 +376,9 @@ export function RunDetailBody({
         </div>
       )}
 
-      {run.debrief ? (
+      {run.debrief && !processHasSuccessfulHandoff(process) ? (
         <DebriefSection debrief={run.debrief} />
-      ) : run.outputSummary ? (
+      ) : run.outputSummary && !run.debrief ? (
         <Section title="结论">
           <Markdown content={run.outputSummary} />
         </Section>

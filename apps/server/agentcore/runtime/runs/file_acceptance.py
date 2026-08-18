@@ -4,7 +4,9 @@ At run wrap-up each landed path gets ``accepted`` or ``rejected`` (+ reason).
 ``delivery_status.delivered_files`` / CEO「已交付」only count ``accepted``.
 Cite-tier / contract failures that name a path reject that path even when the
 run soft-COMPLETEDs — so soft-COMPLETED must not smuggle those paths into the
-delivered list.
+delivered list. Declared artifact / ``artifact_dir`` vs landed path is a pure
+string compare (``REASON_PATH_MISMATCH``); delivery reconciliation applies it
+so a file that landed in a non-declared directory cannot stay ``accepted``.
 
 调研两阶段（``citation_mode=two_phase``）：阶段 A 草案仅内部态，不写入本表；
 阶段 B 过闸 → ``accepted``；不过 → ``rejected(citations_unverified)``。draft 永不
@@ -13,6 +15,7 @@ delivered list.
 
 from __future__ import annotations
 
+import fnmatch
 import re
 from collections.abc import Sequence
 from typing import Any
@@ -23,6 +26,8 @@ from agentcore.tools.file_products import FileProduct
 REASON_CITATIONS_UNVERIFIED = "citations_unverified"
 REASON_CONTRACT_FAILED = "contract_failed"
 REASON_RUN_FAILED = "run_failed"
+# Declared artifact / artifact_dir vs landed path (pure string after normalize).
+REASON_PATH_MISMATCH = "path_mismatch"
 
 # Citation / bibliography failures from ``_artifact_citation_failures``.
 _CITE_PATH_RE = re.compile(r"^`([^`]+)`\s*[：:]\s*(.*)$", re.DOTALL)
@@ -37,6 +42,80 @@ _SOFT_NOTE_MARKERS = (
     "素材覆盖提醒（软）",
     "契约软提醒",
 )
+
+
+def normalize_delivery_relpath(path: str) -> str:
+    """Workspace-relative POSIX path for declared-vs-landed comparison."""
+    from agentcore.runtime.runs.contract import _normalize_artifact_relpath
+
+    return _normalize_artifact_relpath(path)
+
+
+def landed_matches_declared(landed: str, declared: str) -> bool:
+    """True when ``landed`` satisfies one declared pattern (no basename heuristic).
+
+    Exact equality after normalize; trailing-``/`` is a directory prefix; glob
+    chars in the declaration match the full relative path only.
+    """
+    actual = normalize_delivery_relpath(landed)
+    pattern = normalize_delivery_relpath(declared)
+    if not actual or not pattern:
+        return False
+    if pattern.endswith("/"):
+        return actual == pattern.rstrip("/") or actual.startswith(pattern)
+    if any(ch in pattern for ch in "*?["):
+        return fnmatch.fnmatch(actual, pattern)
+    return actual == pattern
+
+
+def declaration_allows_landed(
+    landed: str,
+    *,
+    artifacts: list[str] | None,
+    artifact_dir: str = "",
+) -> bool:
+    """True when ``landed`` matches declared artifacts, or sits under ``artifact_dir``.
+
+    Empty artifacts + empty artifact_dir → no path constraint (caller should skip).
+    Non-empty artifacts: only those patterns (exact / dir / glob). ``artifact_dir``
+    alone: prefix match after normalize.
+    """
+    declared = [str(a).strip() for a in (artifacts or []) if str(a).strip()]
+    if declared:
+        return any(landed_matches_declared(landed, a) for a in declared)
+    dir_pat = (artifact_dir or "").strip()
+    if not dir_pat:
+        return True
+    from agentcore.runtime.runs.artifact_dir import normalize_artifact_dir
+
+    prefix = f"{normalize_artifact_dir(dir_pat)}/"
+    if prefix == "/":
+        return True
+    actual = normalize_delivery_relpath(landed)
+    return bool(actual) and (actual.startswith(prefix) or actual == prefix.rstrip("/"))
+
+
+def apply_declared_path_acceptance(
+    row: dict[str, Any],
+    *,
+    artifacts: list[str] | None,
+    artifact_dir: str = "",
+) -> dict[str, Any]:
+    """Reject an accepted row whose path misses declared artifacts / artifact_dir."""
+    if row.get("status") != "accepted":
+        return row
+    declared = [str(a).strip() for a in (artifacts or []) if str(a).strip()]
+    dir_pat = (artifact_dir or "").strip()
+    if not declared and not dir_pat:
+        return row
+    path = str(row.get("path") or "")
+    if declaration_allows_landed(path, artifacts=declared, artifact_dir=dir_pat):
+        return row
+    out = dict(row)
+    out["status"] = "rejected"
+    out["reason"] = REASON_PATH_MISMATCH
+    out["detail"] = f"声明路径未匹配：实际 `{path}`"
+    return out
 
 
 def path_rejections_from_contract_messages(

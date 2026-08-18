@@ -37,9 +37,8 @@ import pytest
 
 from agentcore.runtime.resolve.prompt import _CEO_CORE_HINT, assemble_ceo_core
 
-# 当次实测 19085（编排姿态【非阻塞问·压单】入常驻核：派活前可能未 consult，
-# 不能进按需 skill。较原 18860 上限 +230）。
-_CORE_CAP = 19090
+# 当次实测 19055（区外两步交付 HOW 已搬去 external_mount_readonly 挂门手册）。
+_CORE_CAP = 19060
 
 # (门工具, 该手册的签名字面) —— 手册只在门开的回合出现，不许常驻。
 _GATED_MANUALS: tuple[tuple[str, str], ...] = (
@@ -47,6 +46,7 @@ _GATED_MANUALS: tuple[tuple[str, str], ...] = (
     ("host_shell", "通识长文当交付"),
     ("browser_navigate", "ask_user(browser_login=true)"),
     ("external_mount_readonly", "【授权后发现】"),
+    ("external_mount_readonly", "先写工作区"),
 )
 
 

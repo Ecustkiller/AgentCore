@@ -29,6 +29,7 @@ import {
   canActAsGroupModerator,
   filterMentionsInContent,
   findImMentionDraft,
+  mentionRoleSubtitle,
 } from "./chatDisplay";
 
 /** Composer-local reply target (id + snapshot for the quote bar / send). */
@@ -226,7 +227,12 @@ export function ChatComposer({
         kind: "user",
         userId: m.id,
         label,
-        subtitle: m.username ? `@${m.username}` : undefined,
+        subtitle: isGroup
+          ? mentionRoleSubtitle(m)
+          : m.username
+            ? `@${m.username}`
+            : undefined,
+        avatarUrl: m.avatar_url ?? null,
       });
     }
     return items;

@@ -172,3 +172,44 @@ async def test_journal_uses_telemetry_pool_not_primary(monkeypatch):
     await writer.flush()
     assert fut is not None and fut.done()
     assert used == ["telemetry"]
+
+
+class _LevelSpy:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str, dict]] = []
+
+    def _record(self, level: str, event: str, **kwargs) -> None:
+        self.events.append((level, event, kwargs))
+
+    def debug(self, event: str, **kwargs) -> None:
+        self._record("debug", event, **kwargs)
+
+    def info(self, event: str, **kwargs) -> None:
+        self._record("info", event, **kwargs)
+
+    def warning(self, event: str, **kwargs) -> None:
+        self._record("warning", event, **kwargs)
+
+    def error(self, event: str, **kwargs) -> None:
+        self._record("error", event, **kwargs)
+
+
+async def test_proxy_spend_enqueued_is_debug(monkeypatch, spend_queue):
+    """Per-call proxy enqueue ack is debug so jsonl keeps llm.call (ledger is Postgres)."""
+    spy = _LevelSpy()
+    monkeypatch.setattr(queue_mod, "logger", spy)
+
+    rid = spend_queue.enqueue(
+        user_id="u1",
+        conversation_id="c1",
+        model="deepseek-v4-flash",
+        usage=_usage(),
+        message_id="m1",
+        run_id="run-1",
+        role="member",
+        persona="调研员",
+    )
+    assert rid is not None
+    names = [(level, event) for level, event, _ in spy.events]
+    assert ("debug", "inference.proxy_spend_enqueued") in names
+    assert ("info", "inference.proxy_spend_enqueued") not in names

@@ -3,6 +3,13 @@ import {
   browserResultPeek,
   isBrowserDisplay,
 } from "@/components/chat/BrowserActivityCard";
+import { DebriefDetails } from "@/components/chat/detail/sections/RunDebrief";
+import {
+  debriefFromHandoffArgs,
+  hasDebriefDetails,
+  handoffSummaryPeek,
+  isSuccessfulHandoff,
+} from "@/components/chat/handoffBrief";
 import { PromptDocument } from "@/components/prompt/PromptDocument";
 import { cleanSourceTitle } from "@/lib/citations";
 import type {
@@ -137,6 +144,11 @@ function isConversationLogDisplay(d: unknown): d is ConversationLogDisplay {
  * non-empty text result. Drives ProcessToolRow's click-to-expand affordance. */
 export function hasToolResultBody(d: ToolResultData): boolean {
   if (d.status === "running") return false;
+  // Successful handoff: expandable only when the brief has details (not summary-only).
+  // The protocol receipt is never a body.
+  if (isSuccessfulHandoff(d.toolName, d.status)) {
+    return hasDebriefDetails(debriefFromHandoffArgs(d.args));
+  }
   if (d.display) return true;
   if (isFileEdit(d)) return true;
   if (isFileWrite(d)) return true;
@@ -170,6 +182,9 @@ export function toolResultPeek(d: ToolResultData): string {
   if (d.status === "error") {
     const product = d.failure?.message?.trim();
     if (product) return clampLine(product);
+  }
+  if (isSuccessfulHandoff(d.toolName, d.status)) {
+    return clampLine(handoffSummaryPeek(d.args));
   }
   if (isWebSearchDisplay(d.display)) {
     const n = d.display.results.length;
@@ -238,7 +253,21 @@ export function toolResultPeek(d: ToolResultData): string {
     const path = asString(d.args.path);
     return path ? `已写入 ${path}` : "已写入文件";
   }
+  if (d.toolName === "grep") return grepCollapsedPeek(d.result);
   const line = (d.result ?? "").split("\n").find((l) => l.trim()) ?? "";
+  return clampLine(line);
+}
+
+/** Collapsed grep meta — pattern already lives in the ToolLine title, so drop it
+ * from the count line. Unknown shapes fall back to the first result line. */
+function grepCollapsedPeek(result: string | null): string {
+  const line = (result ?? "").split("\n").find((l) => l.trim())?.trim() ?? "";
+  if (!line) return "";
+  const hits = line.match(/^(\d+) 处匹配，分布在 (\d+) 个文件/);
+  if (hits) return `${hits[1]} 处匹配 · ${hits[2]} 个文件`;
+  const files = line.match(/^(\d+) 个文件匹配/);
+  if (files) return `${files[1]} 个文件`;
+  if (line.startsWith("本次 grep 未匹配")) return "未匹配";
   return clampLine(line);
 }
 
@@ -674,6 +703,16 @@ function TextResult({
  */
 export function ToolResultView({ data }: { data: ToolResultData }) {
   const diagnostics = extractCodeDiagnostics(data.display);
+
+  if (isSuccessfulHandoff(data.toolName, data.status)) {
+    const debrief = debriefFromHandoffArgs(data.args);
+    if (!hasDebriefDetails(debrief)) return null;
+    return (
+      <div className="mt-1">
+        <DebriefDetails debrief={debrief} />
+      </div>
+    );
+  }
 
   if (isWebSearchDisplay(data.display)) {
     return <WebSearchResult display={data.display} />;

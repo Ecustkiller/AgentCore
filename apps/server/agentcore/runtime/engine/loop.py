@@ -347,9 +347,28 @@ async def react_loop(
 
     tool_defs = _resolve_tool_defs()
 
-    emit_content = on_content or (lambda delta: sink.emit(content_delta(delta)))
+    _emit_content_raw = on_content or (lambda delta: sink.emit(content_delta(delta)))
+    _emit_reset_raw = on_reset or (lambda reason: sink.emit(content_reset(reason)))
+
+    def emit_content(delta: str) -> None:
+        _emit_content_raw(delta)
+        if role == "captain" and (delta or "").strip():
+            from agentcore.runtime.coordination.session import active_coordination
+
+            coord = active_coordination()
+            if coord is not None:
+                coord.note_attached_inject_visible_close(delta)
+
+    def emit_reset(reason: str) -> None:
+        _emit_reset_raw(reason)
+        if role == "captain":
+            from agentcore.runtime.coordination.session import active_coordination
+
+            coord = active_coordination()
+            if coord is not None:
+                coord.clear_attached_inject_visible_close()
+
     emit_reasoning = on_reasoning or (lambda delta: sink.emit(reasoning_delta(delta)))
-    emit_reset = on_reset or (lambda reason: sink.emit(content_reset(reason)))
 
     total_usage = TokenUsage()
     final_content = ""

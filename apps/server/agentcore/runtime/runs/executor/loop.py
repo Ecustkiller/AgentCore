@@ -211,19 +211,27 @@ async def run_contract_loop(
         pass_token_budget = _retry_token_budget(
             ceiling=token_ceiling, spent=run_usage.total_tokens
         )
-        pass_profile = profile
+        is_light_pass = light_mode
+        pass_max = _pass_max_rounds(
+            light_pass=is_light_pass,
+            profile_max=profile.max_rounds,
+            spent=run_rounds,
+        )
+        if pass_max <= 0:
+            logger.info(
+                "contract.retry_skipped_budget",
+                run_id=spec.run_id,
+                reason="round_cap",
+                rounds=run_rounds,
+            )
+            break
+        pass_profile = replace(profile, max_rounds=pass_max)
         pass_tools = worker_tools
         pass_allowed = allowed_tools
-        is_light_pass = light_mode
-        if light_mode:
-            # Dedicated short-pass cap (not leftover from the exhausted main pool).
+        if is_light_pass:
+            # Dedicated short-pass cap (not leftover from the exhausted main pool),
+            # then clipped by the cross-attempt total in ``_pass_max_rounds``.
             # Tools narrow; run_rounds still accumulates whatever this pass spends.
-            pass_profile = replace(
-                profile,
-                max_rounds=_pass_max_rounds(
-                    light_pass=True, profile_max=profile.max_rounds
-                ),
-            )
             pass_tools, pass_allowed = _narrow_for_light_repair(
                 worker_tools,
                 allowed_tools,
@@ -662,10 +670,16 @@ async def run_contract_loop(
                 handoff_ok=False,
             )
             break
-        if _can_light_repair(
-            verdict=verdict,
-            handoff_ok=handoff_ok,
-            light_repair_used=light_repair_used,
+        if (
+            _can_light_repair(
+                verdict=verdict,
+                handoff_ok=handoff_ok,
+                light_repair_used=light_repair_used,
+            )
+            and _pass_max_rounds(
+                light_pass=True, profile_max=profile.max_rounds, spent=run_rounds
+            )
+            > 0
         ):
             light_repair_used = True
             light_mode = True
@@ -695,11 +709,17 @@ async def run_contract_loop(
                 rounds_spent=run_rounds,
             )
             continue
-        if _can_write_pass(
-            verdict=verdict,
-            files_expected=files_expected,
-            files_written=product_files_written,
-            write_pass_used=write_pass_used,
+        if (
+            _can_write_pass(
+                verdict=verdict,
+                files_expected=files_expected,
+                files_written=product_files_written,
+                write_pass_used=write_pass_used,
+            )
+            and _pass_max_rounds(
+                light_pass=True, profile_max=profile.max_rounds, spent=run_rounds
+            )
+            > 0
         ):
             write_pass_used = True
             light_mode = True  # reuse narrow write/handoff surface + short rounds
@@ -726,6 +746,17 @@ async def run_contract_loop(
                 "contract.write_pass_exhausted",
                 run_id=spec.run_id,
                 failures=verdict.failures,
+            )
+            break
+        retry_cap = _pass_max_rounds(
+            light_pass=False, profile_max=profile.max_rounds, spent=run_rounds
+        )
+        if retry_cap <= 0:
+            logger.info(
+                "contract.retry_skipped_budget",
+                run_id=spec.run_id,
+                reason="round_cap",
+                rounds=run_rounds,
             )
             break
         parts = []

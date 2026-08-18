@@ -8,6 +8,7 @@ import {
   unblockUser,
 } from "@/services/messaging";
 import { useEffect, useState } from "react";
+import { PresenceAvatar } from "./PresenceAvatar";
 import { avatarInitial } from "./chatDisplay";
 
 interface Props {
@@ -61,9 +62,12 @@ export function BlockedUsersDialog({ open, onClose }: Props) {
             <ul className="py-1">
               {users.map((u) => (
                 <li key={u.id} className="flex items-center gap-3 px-5 py-2">
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-medium text-primary">
-                    {avatarInitial(u.display_name || u.username)}
-                  </span>
+                  <PresenceAvatar
+                    label={avatarInitial(u.display_name || u.username)}
+                    url={u.avatar_url}
+                    sizeClass="size-9"
+                    textClass="text-sm"
+                  />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm text-foreground">
                       {u.display_name || u.username}

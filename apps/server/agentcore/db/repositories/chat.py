@@ -186,7 +186,7 @@ class ChatRepository:
         await self._session.commit()
 
     async def set_member_role(self, chat_id: str, user_id: str, *, role: str) -> ChatMember | None:
-        """Update ``chat_members.role`` (群级版主 / member). Returns None if not a member."""
+        """Update ``chat_members.role`` (群管理员 / member). Returns None if not a member."""
         result = await self._session.execute(
             update(ChatMember)
             .where(ChatMember.chat_id == chat_id, ChatMember.user_id == user_id)

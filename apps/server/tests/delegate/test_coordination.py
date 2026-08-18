@@ -1581,11 +1581,12 @@ def test_coordination_budget_scales_with_batch_size():
     assert coordination_budget_for_batch(20) == 16  # cap
 
 
-def test_first_turn_all_completed_inject_forbids_final_synthesis():
+def test_first_turn_all_completed_inject_asks_final_synthesis():
+    """首回合 ALL_COMPLETED：当场写终稿；禁止与「勿做最终合成」同块并存。"""
     from agentcore.runtime.coordination.inject import format_coordination_events
 
     session = CoordinationSession(execution_id="e", total_workers=2)
-    product = "【队员成品】不应出现在首回合注入"
+    product = "【队员成品】调研报告正文……"
     text = format_coordination_events(
         session,
         [
@@ -1595,12 +1596,40 @@ def test_first_turn_all_completed_inject_forbids_final_synthesis():
             )
         ],
     )
-    assert "勿做最终合成" in text
-    assert "本回合可见面只留人已派出" in text
-    assert "请做最终合成" not in text
-    assert "团队成品" not in text
-    assert product not in text
-    assert "本回合勿做最终合成" in text
+    assert "勿做最终合成" not in text
+    assert "本回合勿做最终合成" not in text
+    assert "本回合可见面只留人已派出" not in text
+    assert "可见收口由系统收口回合完成" not in text
+    assert "全部完成后做最终合成" not in text
+    assert "报告本波结果" in text
+    assert "本波结果按终稿纪律向用户交代" in text
+    assert "团队成品" in text
+    assert product in text
+
+
+def test_note_attached_inject_visible_close_is_structural():
+    """只认非空 content_delta + attached_inject；空串 / harvest 收口不得打标。"""
+    session = CoordinationSession(execution_id="e-note", total_workers=1)
+    session.note_attached_inject_visible_close("终稿")
+    assert session.attached_inject_visible_close is False
+
+    session.all_completed_injected = True
+    session.mark_settled("attached_inject")
+    session.note_attached_inject_visible_close("   ")
+    assert session.attached_inject_visible_close is False
+    session.note_attached_inject_visible_close("交付正文")
+    assert session.attached_inject_visible_close is True
+    session.clear_attached_inject_visible_close()
+    assert session.attached_inject_visible_close is False
+    session.note_attached_inject_visible_close("重写终稿")
+    assert session.attached_inject_visible_close is True
+
+    harvest = CoordinationSession(execution_id="e-h", total_workers=1)
+    harvest.all_completed_injected = True
+    harvest.harvest_closing = True
+    harvest.mark_settled("harvest")
+    harvest.note_attached_inject_visible_close("收口正文")
+    assert harvest.attached_inject_visible_close is False
 
 
 def test_all_completed_inject_carries_output_and_audit_hint():
@@ -1860,7 +1889,9 @@ async def test_wait_shortcircuit_guard_when_terminal_missing(monkeypatch):
     assert elapsed < 2.0
     assert len(msgs) == 1
     assert "all_completed" in (msgs[0].content or "")
-    assert "团队已全部结束" not in (msgs[0].content or "")
+    assert "团队已全部结束" in (msgs[0].content or "")
+    assert "报告本波结果" in (msgs[0].content or "")
+    assert "勿做最终合成" not in (msgs[0].content or "")
     assert session.active is False
     assert session.all_completed_injected is True
 

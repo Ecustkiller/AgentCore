@@ -30,11 +30,17 @@ import {
   opReadLines,
 } from "./read";
 import { opErr, opOk } from "./result";
-import { resolveSessionMode, sessionRootAccessError } from "./sessionRoot";
+import {
+  resolveSessionMode,
+  sessionRootAccessError,
+  splitRootCopyError,
+  splitRootMoveError,
+} from "./sessionRoot";
 import { opEnsureTurnBaseline } from "./turnBaseline";
 import {
   opAppend,
   opCopy,
+  opCopyFromBytes,
   opDelete,
   opMkdir,
   opMove,
@@ -47,8 +53,31 @@ import {
 export {
   resolveSessionMode,
   sessionRootAccessError,
+  splitRootCopyError,
+  splitRootMoveError,
   type SessionRootMode,
 } from "./sessionRoot";
+
+/** Envelope dest root is ``dstRoot``; ``src_root_id`` (if other) is looked up independently. */
+function resolveOpSrcRoot(
+  dstRoot: StoredRoot,
+  args: Record<string, unknown>,
+): { ok: true; root: StoredRoot } | { ok: false; error: WorkspaceOpResult } {
+  const raw = args.src_root_id;
+  const srcRootId =
+    typeof raw === "string" && raw.trim() ? raw.trim() : null;
+  if (!srcRootId || srcRootId === dstRoot.id) {
+    return { ok: true, root: dstRoot };
+  }
+  const srcRoot = getRoot(srcRootId);
+  if (!srcRoot) {
+    return {
+      ok: false,
+      error: opErr("WorkspaceIOError", "本地目录未授权或已移除"),
+    };
+  }
+  return { ok: true, root: srcRoot };
+}
 
 function normalizeRevealPaths(raw: unknown): ReadonlySet<string> | undefined {
   if (!Array.isArray(raw) || raw.length === 0) return undefined;
@@ -596,18 +625,34 @@ export async function executeWorkspaceOp(
           String(args.path ?? ""),
           Boolean(args.permanent),
         );
-      case "copy":
+      case "copy": {
+        const srcData =
+          typeof args.src_data === "string" ? args.src_data : "";
+        if (srcData) {
+          return await opCopyFromBytes(root, String(args.dst ?? ""), srcData);
+        }
+        const srcRoot = resolveOpSrcRoot(root, args);
+        if (!srcRoot.ok) return srcRoot.error;
+        const copyErr = splitRootCopyError(srcRoot.root, root);
+        if (copyErr) return opErr("OutsideWorkspace", copyErr);
         return await opCopy(
+          srcRoot.root,
           root,
           String(args.src ?? ""),
           String(args.dst ?? ""),
         );
-      case "move":
+      }
+      case "move": {
+        const srcRoot = resolveOpSrcRoot(root, args);
+        if (!srcRoot.ok) return srcRoot.error;
+        const moveErr = splitRootMoveError(srcRoot.root, root);
+        if (moveErr) return opErr("OutsideWorkspace", moveErr);
         return await opMove(
           root,
           String(args.src ?? ""),
           String(args.dst ?? ""),
         );
+      }
       case "replace":
         return await opReplace(
           root,

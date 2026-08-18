@@ -190,6 +190,14 @@ async def handle_tool_calls_round(
     # successful lead-in to work the user already got — it is still the
     # product they saw (e.g. CEO 案件简介 before a rejected ``debate`` call).
     # Keep it so a later retry / pause cannot silently drop streamed body.
+    #
+    # Exception: CEO attached_inject closing round. After wait ate
+    # ALL_COMPLETED the same-turn prose is the deliverable (终稿), not a
+    # lead-in — even if a still-offered non-terminal tool (closed
+    # ``update_synthesis`` returns success so as not to burn a retry)
+    # runs in that round. Workers / debaters / mid-turn CEO narration
+    # still roll back: skip only when the live bubble already holds
+    # post-inject visible close (same predicate as harvest skip).
     if deliverable_only and round_result_content and not outcome.all_tools_failed:
         # A run whose LIVE display shares the deliverable channel (worker /
         # debater / revision: on_reset routes run_output_reset, and the card
@@ -199,9 +207,21 @@ async def handle_tool_calls_round(
         # streams to a SEPARATE process timeline (on_reset is None): its
         # narration stays visible there (透明可见), only its persisted content
         # (messages.content, 旁路 conformance) is trimmed.
-        if on_reset is not None:
-            emit_reset("narration")
-        final_content = content_before_round
+        from agentcore.runtime.coordination.session import (
+            active_coordination,
+            attached_inject_closed_visibly,
+        )
+
+        coord = active_coordination(tool_context.execution_id)
+        attached_inject_closing = (
+            on_reset is None
+            and coord is not None
+            and attached_inject_closed_visibly(coord)
+        )
+        if not attached_inject_closing:
+            if on_reset is not None:
+                emit_reset("narration")
+            final_content = content_before_round
     controller.record(outcome.attempts)
     # Mark post-delegate mode if delegate was called
     note_delegate_batches(controller, tool_calls, outcome.attempts)

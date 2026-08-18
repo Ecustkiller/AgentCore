@@ -19,12 +19,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const build = vi.hoisted(() => ({ sha: "unknown" }));
 
 vi.mock("@/services/adminSystem", () => ({ fetchSystemStatus: vi.fn() }));
-vi.mock("@/services/adminPlatformCredentials", () => ({
-  listPlatformCredentials: vi.fn().mockResolvedValue({ data: [], fallback: "env" }),
-  createPlatformCredential: vi.fn(),
-  updatePlatformCredential: vi.fn(),
-  deletePlatformCredential: vi.fn(),
-}));
 vi.mock("@/lib/clientBuildInfo", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/clientBuildInfo")>()),
   clientGitSha: () => build.sha,
@@ -139,5 +133,13 @@ describe("SystemPage 假告警", () => {
     await renderPage();
 
     expect(screen.queryByText("发布漂移")).toBeNull();
+  });
+
+  it("不再挂号池卡或全局额度明细——那些在平台额度页", async () => {
+    await renderPage();
+
+    expect(screen.queryByText("平台额度账号")).toBeNull();
+    expect(screen.queryByText("全局配额默认值")).toBeNull();
+    expect(screen.queryByText("计费模式")).toBeNull();
   });
 });

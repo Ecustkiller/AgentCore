@@ -81,6 +81,14 @@ def test_catalog_registers_failure_and_build_provenance_fields():
     assert "git_sha" in started
 
 
+def test_execute_end_registers_shell_observe_fields():
+    """terminal/host_shell 观测字段登记在册（command_preview 截断，不分类写盘）。"""
+    fields = get_registry().requires("tool.execute_end").fields
+    assert fields["command_preview"].name == "str"
+    assert fields["cwd_preview"].name == "str"
+    assert fields["subcommand"].name == "str"
+
+
 def test_event_spec_rejects_bare_name():
     with pytest.raises(ValueError, match="component.action"):
         EventSpec(name="bare")

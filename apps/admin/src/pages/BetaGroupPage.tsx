@@ -147,13 +147,13 @@ export function BetaGroupPage() {
       return;
     }
     if (moderators.some((m) => m.id === userId)) {
-      toast.error("该用户已经是内测群版主");
+      toast.error("该用户已经是内测群管理员");
       return;
     }
     setAppointing(true);
     try {
       const row = await appointBetaGroupModerator(userId);
-      toast.success(`已任命 ${row.display_name || row.username} 为内测群版主`);
+      toast.success(`已任命 ${row.display_name || row.username} 为内测群管理员`);
       setAppointUserId("");
       setPicked(null);
       setSearchQ("");
@@ -171,7 +171,7 @@ export function BetaGroupPage() {
     setBusyId(mod.id);
     try {
       await revokeBetaGroupModerator(mod.id);
-      toast.success(`已撤销 ${mod.display_name || mod.username} 的版主身份`);
+      toast.success(`已撤销 ${mod.display_name || mod.username} 的管理员身份`);
       setRevoking(null);
       setModerators((prev) => prev.filter((m) => m.id !== mod.id));
       setTotal((n) => Math.max(0, n - 1));
@@ -198,14 +198,14 @@ export function BetaGroupPage() {
         title="内测群"
         description={
           <>
-            任命 / 撤销「内测群版主」（群内{" "}
+            任命 / 撤销「内测群管理员」（群内{" "}
             <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
               chat_members.role=admin
             </code>
             ）· 共 {fmtCount(total, totalKnown)} 人
           </>
         }
-        note="版主只获得该群的治理能力，不会获得管理后台或平台级权限；平台 admin 已自带群治理权，无需任命。"
+        note="群管理员只获得该群的治理能力，不会获得管理后台或平台级权限；平台 admin 已自带群治理权，无需任命。"
         actions={
           <Button
             variant="outline"
@@ -236,7 +236,7 @@ export function BetaGroupPage() {
 
       <Card className="mb-5">
         <SectionHeader
-          title="任命版主"
+          title="任命管理员"
           description="输入用户 ID，或按用户名 / 显示名搜索后选中。任命会确保其已加入内测群。"
         />
         <div className="p-5">
@@ -314,7 +314,7 @@ export function BetaGroupPage() {
                         <span className="ml-2 text-muted-foreground">@{u.username}</span>
                       </span>
                       <span className="flex shrink-0 items-center gap-1.5">
-                        {already && <Badge tone="success">已是版主</Badge>}
+                        {already && <Badge tone="success">已是管理员</Badge>}
                         {u.role === "admin" && <Badge tone="primary">平台 admin</Badge>}
                       </span>
                     </button>
@@ -336,8 +336,8 @@ export function BetaGroupPage() {
             <Card>
               <EmptyState
                 icon={UsersRound}
-                title="还没有内测群版主"
-                description="这里只列群内角色为 admin 的成员。平台 admin 本身已有群治理权，不需要任命；要把某位内测用户提为版主，用上方表单。"
+                title="还没有内测群管理员"
+                description="这里只列群内角色为 admin 的成员。平台 admin 本身已有群治理权，不需要任命；要把某位内测用户提为管理员，用上方表单。"
               />
             </Card>
           ) : (
@@ -369,7 +369,7 @@ export function BetaGroupPage() {
                           平台 admin（自带群治理）
                         </Badge>
                       ) : (
-                        <span className="text-muted-foreground">群版主</span>
+                        <span className="text-muted-foreground">群管理员</span>
                       )}
                     </Td>
                     <Td align="right">
@@ -420,7 +420,7 @@ function RevokeDialog({
       open
       onClose={onClose}
       busy={busy}
-      title="撤销内测群版主"
+      title="撤销内测群管理员"
       description="角色降为普通群成员，仍留在群内"
       footer={
         <>
@@ -444,7 +444,7 @@ function RevokeDialog({
         <span className="font-medium text-foreground">
           {moderator.display_name || moderator.username}
         </span>
-        （@{moderator.username}）的内测群版主身份？这不会影响其平台账号角色。
+        （@{moderator.username}）的内测群管理员身份？这不会影响其平台账号角色。
         {moderator.is_platform_admin &&
           "该用户是平台 admin，撤销后仍可通过平台权限治理该群。"}
       </p>

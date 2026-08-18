@@ -25,19 +25,25 @@ import { clock } from "@/lib/time";
 import { usePolling } from "@/lib/usePolling";
 import { useStickScroll } from "@/lib/useStickScroll";
 import { ChatImageGallery } from "@/pages/im/ChatImageGallery";
-import { ImAvatar, userAvatarPath } from "@/pages/im/ImAvatar";
+import { ImAvatar } from "@/pages/im/ImAvatar";
 import {
+  type MemberGovernanceBadge,
   type MessageReplyTo,
+  bubbleAvatarUrl,
   buildReplySnapshot,
+  memberGovernanceBadge,
   messageMentionsUser,
   splitContentByMentions,
 } from "@/pages/im/chatDisplay";
 import {
   ArrowDown,
   ChevronLeft,
+  Crown,
   Loader2,
   MoreHorizontal,
   Send,
+  Shield,
+  UserCog,
 } from "lucide-react";
 // 消息线程 (/im/c/:chatId) — one human↔human thread. REST + polling (no SSE): the open
 // thread refetches the most-recent page every 4s and merges by id, so sends from the peer
@@ -320,9 +326,9 @@ export function ChatThreadPage() {
 
   const title = chat ? chatTitle(chat) : "对话";
   const isDm = chat?.type === "dm";
+  const isGroup = chat?.type === "group";
   const isOfficial = chat?.type === "official";
-  const peerAvatarUrl =
-    chat?.avatar_url ?? (chat?.peer?.id ? userAvatarPath(chat.peer.id) : null);
+  const peerAvatarUrl = chat?.peer?.avatar_url ?? null;
   const myAvatarUrl = meUser?.avatar_url ?? null;
   const myAvatarName = meUser?.display_name || meUser?.username || "?";
 
@@ -403,26 +409,32 @@ export function ChatThreadPage() {
             const senderName = member
               ? member.display_name || member.username
               : undefined;
+            const senderGovernance =
+              isGroup && !mine && member
+                ? memberGovernanceBadge(member)
+                : null;
             const avatarName = mine
               ? myAvatarName
               : isDm
                 ? title
                 : (senderName ?? "?");
-            const avatarUrl = mine
-              ? myAvatarUrl
-              : isDm
-                ? peerAvatarUrl
-                : m.sender_user_id
-                  ? userAvatarPath(m.sender_user_id)
-                  : null;
+            const avatarUrl = bubbleAvatarUrl({
+              mine,
+              chatType: chat?.type,
+              myAvatarUrl,
+              peerAvatarUrl,
+              memberAvatarUrl: member?.avatar_url,
+              chatAvatarUrl: chat?.avatar_url,
+            });
             return (
               <MessageRow
                 key={m.id}
                 message={m}
                 mine={mine}
                 chatId={chatId ?? ""}
-                isGroup={!isDm}
+                isGroup={isGroup}
                 senderName={senderName}
+                senderGovernance={senderGovernance}
                 avatarName={avatarName}
                 avatarUrl={avatarUrl}
                 myUserId={myId}
@@ -574,12 +586,27 @@ export function ChatThreadPage() {
   );
 }
 
+function SenderRoleMark({ badge }: { badge: MemberGovernanceBadge }) {
+  const Icon =
+    badge.kind === "platform" ? UserCog : badge.kind === "owner" ? Crown : Shield;
+  return (
+    <span
+      className={`im-role ${badge.kind === "platform" ? "im-role-platform" : "im-role-group"}`}
+      aria-label={badge.label}
+    >
+      <Icon size={12} aria-hidden />
+      {badge.shortLabel}
+    </span>
+  );
+}
+
 function MessageRow({
   message,
   mine,
   chatId,
   isGroup,
   senderName,
+  senderGovernance,
   avatarName,
   avatarUrl,
   myUserId,
@@ -592,6 +619,7 @@ function MessageRow({
   chatId: string;
   isGroup: boolean;
   senderName?: string;
+  senderGovernance?: MemberGovernanceBadge | null;
   avatarName: string;
   avatarUrl?: string | null;
   myUserId: string | null;
@@ -629,7 +657,12 @@ function MessageRow({
         />
         <div className="im-msg-body">
           {!mine && isGroup && senderName && (
-            <span className="im-sender">{senderName}</span>
+            <span className="im-sender-row">
+              <span className="im-sender">{senderName}</span>
+              {senderGovernance && (
+                <SenderRoleMark badge={senderGovernance} />
+              )}
+            </span>
           )}
           {(hasText || reply) && (
             <div className={bubbleClass}>

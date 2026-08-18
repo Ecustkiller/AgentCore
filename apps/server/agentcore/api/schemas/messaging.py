@@ -31,12 +31,21 @@ MessageMention = Annotated[
 ]
 
 
-class UserSearchResult(BaseModel):
-    """A discoverable user surfaced by people-search (任意搜人, exact match)."""
+class PersonPublic(BaseModel):
+    """Public human identity shared by IM person-side DTOs.
+
+    ``avatar_url`` uses the same relative-path formula as ``UserResponse``
+    (``/v1/users/<id>/avatar?v=<hash>``); None when the user has no avatar.
+    """
 
     id: str
     username: str
     display_name: str
+    avatar_url: str | None = None
+
+
+class UserSearchResult(PersonPublic):
+    """A discoverable user surfaced by people-search (任意搜人, exact match)."""
 
     model_config = {"from_attributes": True}
 
@@ -46,16 +55,13 @@ class UserSearchResponse(BaseModel):
     total: int
 
 
-class ChatParticipant(BaseModel):
+class ChatParticipant(PersonPublic):
     """A human shown on a chat (the peer of a dm; members of a group)."""
 
-    id: str
-    username: str
-    display_name: str
     # Platform ``users.role == admin`` (创始团队). Badge「平台管理员」; exempt from
-    # kick/mute. Distinct from ``group_role`` (群级版主).
+    # kick/mute. Distinct from ``group_role`` (群管理员).
     is_admin: bool = False
-    # Per-chat role from ``chat_members.role`` (内测群版主 = ``admin``; no owner yet).
+    # Per-chat role from ``chat_members.role`` (内测群管理员 = ``admin``; no owner yet).
     group_role: Literal["owner", "admin", "member"] = "member"
     # Admin-imposed 禁言 (Stage 3): this group member can read but not send.
     muted_by_admin: bool = False
@@ -67,7 +73,7 @@ class ChatParticipant(BaseModel):
 
 
 class BetaGroupModerator(BaseModel):
-    """One 内测群版主 row for the admin console appoint surface."""
+    """One 内测群管理员 row for the admin console appoint surface."""
 
     id: str
     username: str
@@ -261,11 +267,7 @@ class BlockUserRequest(BaseModel):
     user_id: str = Field(..., min_length=1, max_length=64)
 
 
-class BlockedUser(BaseModel):
-    id: str
-    username: str
-    display_name: str
-
+class BlockedUser(PersonPublic):
     model_config = {"from_attributes": True}
 
 
@@ -274,12 +276,9 @@ class BlockListResponse(BaseModel):
     total: int
 
 
-class UserProfile(BaseModel):
+class UserProfile(PersonPublic):
     """资料卡 (消息IM.md §9.3)."""
 
-    id: str
-    username: str
-    display_name: str
     online: bool = False
     relation: Literal[
         "self",
@@ -292,10 +291,7 @@ class UserProfile(BaseModel):
     request_id: str | None = None
 
 
-class FriendSummary(BaseModel):
-    id: str
-    username: str
-    display_name: str
+class FriendSummary(PersonPublic):
     online: bool = False
 
 

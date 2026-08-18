@@ -97,6 +97,7 @@ export function ContactsDialog({ open, onClose, onOpenProfile }: Props) {
                       >
                         <PresenceAvatar
                           label={avatarInitial(f.display_name || f.username)}
+                          url={f.avatar_url}
                           sizeClass="size-9"
                           textClass="text-sm"
                           online={!!f.online}

@@ -333,6 +333,9 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "duration_ms": "int",
         "reason": "str",
         "index_status": "str",
+        "subcommand": "str",
+        "command_preview": "str",
+        "cwd_preview": "str",
     },
     "tool.args_parse_failed": {
         "pos": "int",
@@ -348,6 +351,10 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "chars": "int",
         "body_chars": "int",
         "has_motion_card": "bool",
+    },
+    "worker.prepare_phase": {
+        "phase": "str",
+        "ms": "int",
     },
     "react.round_start": {"round": "int"},
     "react.round_end": {
@@ -828,6 +835,7 @@ KEY_DESC: dict[str, str] = {
     "tool.execute_end": "工具执行结束（status/duration_ms；error 时带 reason）",
     "tool.args_salvaged": "handoff 参数 JSON 窄 salvage 成功（裸字符串字段 / 截断闭合）",
     "worker.handoff": "worker 交接（chars=summary 长；body_chars=交付正文长）",
+    "worker.prepare_phase": "worker 冷开分段耗时（phase + ms；每 phase 一行）",
     "react.round_end": "ReAct 轮结束（reasoning_tokens/tools）",
     "engine.loop_nudge": "收敛治理：循环提醒",
     "engine.loop_finalize": "收敛治理：强制收尾",

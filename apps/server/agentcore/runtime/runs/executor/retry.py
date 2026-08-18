@@ -11,7 +11,7 @@ from typing import Any
 
 from agentcore.config import settings
 from agentcore.llm.provider.protocol import LLMMessage
-from agentcore.runtime.runs.constants import HANDOFF_TOOL_NAME
+from agentcore.runtime.runs.constants import HANDOFF_TOOL_NAME, MAX_RUN_TOTAL_ROUNDS
 from agentcore.runtime.runs.contract import (
     ContractVerdict,
     is_format_repairable,
@@ -40,19 +40,25 @@ _LIGHT_REPAIR_MAX_ROUNDS = 4
 ROUND_BUDGET_AWARENESS_PREFIX = "[系统提示] 轮次余额"
 
 
-def _pass_max_rounds(*, light_pass: bool, profile_max: int) -> int:
-    """ReAct cap for this produce pass.
+def _pass_max_rounds(*, light_pass: bool, profile_max: int, spent: int = 0) -> int:
+    """ReAct cap for this produce pass, clipped by the cross-attempt total.
 
-    ``light_repair`` / ``write_pass`` / cite-upgrade short passes get a dedicated
-    :data:`_LIGHT_REPAIR_MAX_ROUNDS` — not leftover from the main pool.
-    Those passes start only after the main ReAct finished (often at
-    ``max_rounds``), so ``min(4, max(1, pool - spent))`` collapses to 1 in the
-    only scene the constant exists for. Cross-attempt total-round caps are
-    intentionally not applied here.
+    ``light_repair`` / ``write_pass`` / cite-upgrade short passes still get a
+    dedicated :data:`_LIGHT_REPAIR_MAX_ROUNDS` — not leftover from the main
+    pool — so a format fix after 56/56 still sees 4 when the total cap has
+    room. ``spent`` is cumulative produce rounds already finished on this
+    run (main + prior retries / short passes). The total
+    :data:`MAX_RUN_TOTAL_ROUNDS` stops contract.retry from opening another
+    full segment (56+54 stacking). ``0`` means no rounds remain under the
+    total; callers must skip the pass rather than start a ``max_rounds=0``
+    loop.
     """
+    remaining = max(0, MAX_RUN_TOTAL_ROUNDS - max(0, int(spent)))
+    if remaining <= 0:
+        return 0
     if light_pass:
-        return _LIGHT_REPAIR_MAX_ROUNDS
-    return max(1, int(profile_max))
+        return min(_LIGHT_REPAIR_MAX_ROUNDS, remaining)
+    return min(max(0, int(profile_max)), remaining)
 
 
 def format_round_budget_awareness(*, used: int, limit: int) -> str:
@@ -93,8 +99,8 @@ def sync_round_budget_awareness(
 
     ``limit <= 0`` ⇒ skip (no cap to report). Refresh = drop stale copy then
     insert, so the transcript never carries two contradicting balances.
-    Counts are this pass's ``used`` / ``pass_profile.max_rounds`` — not
-    cross-attempt ``run_rounds`` (that accumulator is billing/logs only).
+    Counts are this pass's ``used`` / ``pass_profile.max_rounds`` (already
+    clipped by the cross-attempt total), not cumulative ``run_rounds``.
 
     Default appends at the tail (adjacent to the next think). ``before_last_user``
     parks the fact under the latest user instruction (light_repair / retry
@@ -199,8 +205,11 @@ def _retry_token_budget(*, ceiling: int, spent: int) -> int:
     """Remaining token budget for a correction pass (总预算约束).
 
     ``ceiling <= 0`` means the hard ceiling is disabled (pass through 0).
-    When already at/over the ceiling, return 1 so the next react_loop hits the
-    hard top immediately（二次触顶立即收口）instead of resetting to a fresh ceiling.
+    A new react_loop's usage counter starts at 0, so returning ``1`` when
+    already at/over the ceiling still allows one full produce round (the
+    engine checks the cap at round start). Callers must skip opening a new
+    pass when ``spent >= ceiling`` (loop already does) — do not rely on
+    this sentinel to stop the first retry round.
     """
     if ceiling <= 0:
         return 0

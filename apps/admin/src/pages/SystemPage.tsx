@@ -1,4 +1,3 @@
-import { PlatformCredentialsCard } from "@/components/PlatformCredentialsCard";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card, Page, PageHeader, SectionHeader } from "@/components/ui/Page";
@@ -8,7 +7,7 @@ import {
   StaleDataNotice,
   TableSkeleton,
 } from "@/components/ui/States";
-import { cn, fmtCompact, fmtCny, fmtInt, fmtTime, nanoToYuan } from "@/lib/utils";
+import { cn, fmtInt, fmtTime } from "@/lib/utils";
 import {
   clientGitSha,
   clientVersion,
@@ -44,10 +43,6 @@ function fmtBuiltAt(raw: string): string {
   return fmtTime(raw);
 }
 
-function quotaLimit(value: string): ReactNode {
-  return value === "0" ? <span className="text-muted-foreground">不限</span> : value;
-}
-
 export function SystemPage() {
   const [data, setData] = useState<AdminSystemStatus | null>(null);
   const [drift, setDrift] = useState<ReleaseDriftSnapshot | null>(null);
@@ -79,7 +74,7 @@ export function SystemPage() {
     <Page>
       <PageHeader
         title="系统状态"
-        description="部署快照 · 计费模式、全局配额、数据库健康、版本 · 平台额度账号池"
+        description="部署快照 · 数据库健康、版本、账号规模"
         actions={
           <Button
             variant="outline"
@@ -95,7 +90,7 @@ export function SystemPage() {
 
       {!data && loading && (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {Array.from({ length: 6 }, (_, i) => (
+          {Array.from({ length: 4 }, (_, i) => (
             <TableSkeleton key={`card-${i}`} rows={4} columns={2} />
           ))}
         </div>
@@ -115,17 +110,6 @@ export function SystemPage() {
             active={loading}
             className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"
           >
-            <StatusCard title="计费模式">
-              <Badge tone="primary">
-                {data.billing_mode === "byok" ? "BYOK · 自带 Key" : "平台付费"}
-              </Badge>
-              <p className="mt-3 text-muted-foreground text-xs">
-                {data.billing_mode === "byok"
-                  ? "对话跑在用户自带的 DeepSeek Key 上，配额防线休眠。"
-                  : "平台全局 Key + 配额防线生效。"}
-              </p>
-            </StatusCard>
-
             <StatusCard title="数据库">
               <Badge tone={data.database_ok ? "success" : "destructive"}>
                 {data.database_ok ? "正常" : "不可达"}
@@ -184,51 +168,12 @@ export function SystemPage() {
               </StatusCard>
             )}
 
-            <StatusCard title="全局配额默认值">
-              <Row label="日 token">
-                {quotaLimit(
-                  data.quota.daily_tokens === 0
-                    ? "0"
-                    : fmtCompact(data.quota.daily_tokens),
-                )}
-              </Row>
-              <Row label="月成本">
-                {quotaLimit(
-                  data.quota.monthly_cost_nano === 0
-                    ? "0"
-                    : fmtCny(nanoToYuan(data.quota.monthly_cost_nano)),
-                )}
-              </Row>
-              <Row label="日成本">
-                {quotaLimit(
-                  data.quota.daily_cost_nano === 0
-                    ? "0"
-                    : fmtCny(nanoToYuan(data.quota.daily_cost_nano)),
-                )}
-              </Row>
-              <Row label="日请求">
-                {quotaLimit(
-                  data.quota.daily_requests === 0
-                    ? "0"
-                    : fmtInt(data.quota.daily_requests),
-                )}
-              </Row>
-              {/* 上限是部署期配置，口径恒为人民币（`fmtCny`）；随接口下发币种的花销一律
-                  走 `fmtMoney`，否则 BYOK 的估算会被标成 ¥。 */}
-              <p className="mt-3 text-muted-foreground text-xs">
-                0 = 不限 · 每用户可在「用户管理」覆盖。成本上限恒按人民币（¥）配置；BYOK
-                的估算金额自带币种、平台不做汇率换算，两者不可直接比较。
-              </p>
-            </StatusCard>
-
             <StatusCard title="账号">
               <Row label="总数">{fmtInt(data.users_total)}</Row>
               <Row label="活跃">{fmtInt(data.users_active)}</Row>
               <Row label="管理员">{fmtInt(data.admins)}</Row>
             </StatusCard>
           </Refreshing>
-
-          <PlatformCredentialsCard />
         </div>
       )}
     </Page>

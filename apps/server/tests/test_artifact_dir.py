@@ -114,11 +114,14 @@ def test_contract_root_write_warns_under_artifact_dir():
     assert not any("约定文档目录" in w for w in ok.warnings)
 
 
-def test_artifact_dir_warning_stays_soft_on_delivery_status():
-    """Contract artifact_dir path hint → delivery_gaps soft → state=notes."""
+def test_artifact_dir_mismatch_is_blocking_on_delivery_status():
+    """Contract artifact_dir 文案仍可 warning 盖戳；交付对账升为失配，错位文件不进 delivered。"""
     from agentcore.runtime.delegate.delivery_status import build_delivery_status
     from agentcore.runtime.runs.executor.shared import _delivery_gaps_from_warnings
-    from agentcore.runtime.runs.file_acceptance import build_file_acceptance
+    from agentcore.runtime.runs.file_acceptance import (
+        REASON_PATH_MISMATCH,
+        build_file_acceptance,
+    )
     from agentcore.runtime.runs.plan import RunPlan
     from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 
@@ -134,7 +137,16 @@ def test_artifact_dir_warning_stays_soft_on_delivery_status():
     assert any(g.get("severity") == "warning" for g in gaps)
     assert any(g.get("reason") == "path_hint" for g in gaps)
 
-    plan = RunPlan(nodes=[RunSpec(run_id="w1", task="调研 Miro", role="竞品分析师")])
+    plan = RunPlan(
+        nodes=[
+            RunSpec(
+                run_id="w1",
+                task="调研 Miro",
+                role="竞品分析师",
+                deliverable=d,
+            )
+        ]
+    )
     results = {
         "w1": RunState(
             phase=RunPhase.COMPLETED,
@@ -149,9 +161,15 @@ def test_artifact_dir_warning_stays_soft_on_delivery_status():
     }
     payload = build_delivery_status(plan, results, execution_id="e-adir-pipe")
     assert payload is not None
-    assert payload["state"] == "notes"
-    assert all(g.get("severity") == "warning" for g in payload["gaps"])
-    assert payload["delivered_files"] == ["miro-research.md"]
+    assert payload["state"] == "partial"
+    assert payload["state"] != "delivered"
+    assert payload["delivered_files"] == []
+    assert any(g.get("reason") == REASON_PATH_MISMATCH for g in payload["gaps"])
+    assert all(
+        g.get("severity") != "warning"
+        for g in payload["gaps"]
+        if g.get("reason") == REASON_PATH_MISMATCH
+    )
 
 
 def test_build_run_plan_injects_default_drafts_dir():

@@ -24,9 +24,12 @@ import { GroupInfoDialog } from "./GroupInfoDialog";
 import { PresenceAvatar } from "./PresenceAvatar";
 import {
   avatarInitial,
+  bubbleAvatarUrl,
   buildReplySnapshot,
+  chatCircleAvatarUrl,
   chatDisplayName,
   isGroupModeratorRole,
+  memberGovernanceBadge,
 } from "./chatDisplay";
 
 interface Props {
@@ -106,6 +109,12 @@ export function ChatThread({ chatId }: Props) {
     }
     return map;
   }, [members, chat?.peer, myId, user?.displayName, user?.username]);
+
+  const memberById = useMemo(() => {
+    const map = new Map<string, (typeof members)[number]>();
+    for (const m of members) map.set(m.id, m);
+    return map;
+  }, [members]);
 
   const threadItems = useMemo(() => buildImThreadItems(messages), [messages]);
 
@@ -217,6 +226,7 @@ export function ChatThread({ chatId }: Props) {
           >
             <PresenceAvatar
               label={avatarInitial(name || "?")}
+              url={chatCircleAvatarUrl(chat)}
               sizeClass="size-7"
               textClass="text-xs"
               online={peerOnline}
@@ -236,6 +246,7 @@ export function ChatThread({ chatId }: Props) {
           <>
             <PresenceAvatar
               label={avatarInitial(name || "?")}
+              url={chat ? chatCircleAvatarUrl(chat) : null}
               sizeClass="size-7"
               textClass="text-xs"
               online={false}
@@ -314,10 +325,21 @@ export function ChatThread({ chatId }: Props) {
                     : isGroup
                       ? (senderName ?? "成员")
                       : peerName;
-                  const senderAvatarUrl = mine
-                    ? (user?.avatarUrl ?? null)
-                    : !isGroup
-                      ? (chat?.avatar_url ?? null)
+                  const senderMember =
+                    isGroup && m.sender_user_id
+                      ? memberById.get(m.sender_user_id)
+                      : undefined;
+                  const senderAvatarUrl = bubbleAvatarUrl({
+                    mine,
+                    chatType: chat?.type,
+                    myAvatarUrl: user?.avatarUrl,
+                    peerAvatarUrl: chat?.peer?.avatar_url,
+                    memberAvatarUrl: senderMember?.avatar_url,
+                    chatAvatarUrl: chat?.avatar_url,
+                  });
+                  const senderGovernance =
+                    isGroup && !mine && senderMember
+                      ? memberGovernanceBadge(senderMember)
                       : null;
                   return (
                     <ChatBubble
@@ -325,6 +347,7 @@ export function ChatThread({ chatId }: Props) {
                       message={m}
                       mine={mine}
                       senderName={senderName}
+                      senderGovernance={senderGovernance}
                       avatarName={avatarName}
                       senderAvatarUrl={senderAvatarUrl}
                       layout={item.layout}

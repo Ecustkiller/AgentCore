@@ -15,6 +15,8 @@ import time
 from typing import Any
 
 from agentcore.core.types import ToolApproval, ToolCategory
+from agentcore.runtime.facts import CROSS_TURN_RETRY_KEY, CrossTurnRetry
+from agentcore.tools.builtin.file_ops.errors import _outside_workspace_msg
 from agentcore.tools.builtin.file_ops.path_hints import enrich_missing_path_message
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
@@ -144,8 +146,14 @@ class GrepTool:
 
         try:
             result = await context.backend.grep(query)
-        except OutsideWorkspace:
-            return _fail(_outside_workspace_msg(rel_dir), start)
+        except OutsideWorkspace as e:
+            return _fail(
+                _outside_workspace_msg(
+                    rel_dir, location=context.backend.location, reason=str(e)
+                ),
+                start,
+                metadata={CROSS_TURN_RETRY_KEY: CrossTurnRetry.FUTILE.value},
+            )
         except PathNotFound:
             base = f"路径不存在：{rel_dir}"
             return _fail(
@@ -167,7 +175,10 @@ class GrepTool:
                         "请缩小范围或换策略后重试；禁止原样重试同一操作。"
                     ),
                     start,
-                    metadata=op_liveness_timeout_metadata(),
+                    metadata={
+                        **op_liveness_timeout_metadata(),
+                        CROSS_TURN_RETRY_KEY: CrossTurnRetry.NOT_FUTILE.value,
+                    },
                 )
             # Surface regex failures without the generic "搜索失败" wrapper so the
             # model sees the dialect hint immediately.
@@ -248,15 +259,6 @@ def _is_access_permission_error(msg: str) -> bool:
         or "permission denied" in text
         or "access is denied" in text
         or "access denied" in text
-    )
-
-
-def _outside_workspace_msg(path: str) -> str:
-    """Actionable OutsideWorkspace text (mirrors ``file_ops``)."""
-    return (
-        f"路径 '{path}' 超出了工作区范围。请使用工作区相对路径"
-        "（如 AgentCore/文档/research/report.md；`.` 或裸 `/` 表示整仓）；"
-        "勿使用工作区外的绝对路径（如 /etc、盘符）。"
     )
 
 

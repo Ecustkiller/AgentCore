@@ -12,6 +12,7 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory
+from agentcore.runtime.facts import CROSS_TURN_RETRY_KEY, CrossTurnRetry
 from agentcore.storage._archive import (
     ZipExtractLimitError,
     ZipSlipError,
@@ -131,11 +132,12 @@ class ArchiveExtractTool:
             return _fail(
                 f"dest `{dest_path}` 超出工作区范围。请使用工作区相对路径。",
                 start,
+                cross_turn_retry=CrossTurnRetry.FUTILE,
             )
 
         scope_err = write_scope_rejection(context, dest_path)
         if scope_err:
-            return _fail(scope_err, start)
+            return _fail(scope_err, start, cross_turn_retry=CrossTurnRetry.FUTILE)
 
         backend = context.backend
         location = getattr(backend, "location", None)
@@ -145,10 +147,11 @@ class ArchiveExtractTool:
             return _fail(f"找不到压缩包：`{archive_path}`", start)
         except NotAFile:
             return _fail(f"`{archive_path}` 不是文件", start)
-        except OutsideWorkspace:
+        except OutsideWorkspace as e:
             return _fail(
-                _outside_workspace_msg(archive_path, location=location),
+                _outside_workspace_msg(archive_path, location=location, reason=str(e)),
                 start,
+                cross_turn_retry=CrossTurnRetry.FUTILE,
             )
         except WorkspaceIOError as e:
             detail = str(e)
@@ -206,15 +209,17 @@ class ArchiveExtractTool:
                     f"{scope_err}（已写出 {len(written)} 个文件后停下）",
                     start,
                     products=_extracted_products(written),
+                    cross_turn_retry=CrossTurnRetry.FUTILE,
                 )
             try:
                 n = await backend.write_bytes(out_path, content)
-            except OutsideWorkspace:
+            except OutsideWorkspace as e:
                 return _fail(
-                    _outside_workspace_msg(out_path, location=location)
+                    _outside_workspace_msg(out_path, location=location, reason=str(e))
                     + f"（已写出 {len(written)} 个文件后停下）",
                     start,
                     products=_extracted_products(written),
+                    cross_turn_retry=CrossTurnRetry.FUTILE,
                 )
             except WorkspaceIOError as e:
                 return _fail(
@@ -278,14 +283,18 @@ def _fail(
     *,
     contract_failure: bool = False,
     products: list[FileProduct] | None = None,
+    cross_turn_retry: CrossTurnRetry | None = None,
 ) -> ToolResult:
     """Failed extract. ``products`` = 中途停下前已真正落盘的成员（部分成功不抹账）。"""
+    meta: dict[str, Any] = {"contract_failure": True} if contract_failure else {}
+    if cross_turn_retry is not None:
+        meta[CROSS_TURN_RETRY_KEY] = cross_turn_retry.value
     return ToolResult(
         tool_call_id="",
         success=False,
         output="",
         error=error,
         duration_ms=int((time.monotonic() - start) * 1000),
-        metadata={"contract_failure": True} if contract_failure else {},
+        metadata=meta,
         file_products=list(products or []),
     )

@@ -2,7 +2,9 @@ import type { ChatMessageDetail } from "@/api/messaging";
 import { describe, expect, it } from "vitest";
 import {
   EVERYONE_MENTION_LABEL,
+  bubbleAvatarUrl,
   buildReplySnapshot,
+  memberGovernanceBadge,
   mentionAtToken,
   messageMentionsUser,
   replyBodyPreview,
@@ -129,5 +131,72 @@ describe("IM mention helpers", () => {
       { type: "text", text: " see " },
       { type: "mention", text: "@所有人", self: true },
     ]);
+  });
+});
+
+describe("group governance badges", () => {
+  it("splits platform / owner / admin and prefers platform", () => {
+    expect(
+      memberGovernanceBadge({ is_admin: true, group_role: "admin" }),
+    ).toEqual({
+      kind: "platform",
+      label: "平台管理员",
+      shortLabel: "平台",
+    });
+    expect(
+      memberGovernanceBadge({ is_admin: false, group_role: "owner" }),
+    ).toEqual({ kind: "owner", label: "群主", shortLabel: "群主" });
+    expect(
+      memberGovernanceBadge({ is_admin: false, group_role: "admin" }),
+    ).toEqual({ kind: "admin", label: "管理员", shortLabel: "管理员" });
+    expect(
+      memberGovernanceBadge({ is_admin: false, group_role: "member" }),
+    ).toBeNull();
+  });
+});
+
+describe("bubbleAvatarUrl", () => {
+  const urls = {
+    myAvatarUrl: "https://api.example/me.png",
+    peerAvatarUrl: "/v1/users/peer/avatar?v=1",
+    memberAvatarUrl: "/v1/users/mem/avatar?v=2",
+    chatAvatarUrl: "/v1/chats/c1/avatar",
+  };
+
+  it("uses auth URL for own bubbles", () => {
+    expect(bubbleAvatarUrl({ mine: true, chatType: "dm", ...urls })).toBe(
+      urls.myAvatarUrl,
+    );
+  });
+
+  it("uses peer for dm and roster member for group, never chat.avatar_url", () => {
+    expect(bubbleAvatarUrl({ mine: false, chatType: "dm", ...urls })).toBe(
+      urls.peerAvatarUrl,
+    );
+    expect(bubbleAvatarUrl({ mine: false, chatType: "group", ...urls })).toBe(
+      urls.memberAvatarUrl,
+    );
+    expect(
+      bubbleAvatarUrl({
+        mine: false,
+        chatType: "dm",
+        ...urls,
+        peerAvatarUrl: null,
+      }),
+    ).toBeNull();
+    expect(
+      bubbleAvatarUrl({
+        mine: false,
+        chatType: "group",
+        ...urls,
+        memberAvatarUrl: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("uses the session icon only for official bubbles", () => {
+    expect(bubbleAvatarUrl({ mine: false, chatType: "official", ...urls })).toBe(
+      urls.chatAvatarUrl,
+    );
   });
 });

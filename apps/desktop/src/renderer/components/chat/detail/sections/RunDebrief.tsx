@@ -1,4 +1,5 @@
 import { Markdown } from "@/components/chat/Markdown";
+import { hasDebriefDetails } from "@/components/chat/handoffBrief";
 import { Button } from "@/components/ui";
 import type { MotionCard, RunDebrief } from "@/types/events";
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -22,15 +23,6 @@ function isDegradedDebrief(debrief: RunDebrief): boolean {
   return (
     "degraded" in debrief &&
     (debrief as { degraded?: unknown }).degraded === true
-  );
-}
-
-function hasDebriefDetails(debrief: RunDebrief): boolean {
-  return Boolean(
-    (debrief.key_points && debrief.key_points.length > 0) ||
-      debrief.assumptions ||
-      debrief.next_steps ||
-      debrief.motion_card,
   );
 }
 
@@ -88,7 +80,7 @@ export function DebriefSection({ debrief }: { debrief: RunDebrief }) {
   );
 }
 
-function DebriefDetails({ debrief }: { debrief: RunDebrief }) {
+export function DebriefDetails({ debrief }: { debrief: RunDebrief }) {
   const { key_points, assumptions, next_steps, motion_card } = debrief;
   return (
     <div className="space-y-3">

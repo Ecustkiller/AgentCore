@@ -107,6 +107,7 @@ export function FriendRequestsDialog({ open, onClose, onOpenProfile }: Props) {
                     >
                       <PresenceAvatar
                         label={avatarInitial(label)}
+                        url={u?.avatar_url}
                         sizeClass="size-9"
                         textClass="text-sm"
                       />
@@ -163,6 +164,7 @@ export function FriendRequestsDialog({ open, onClose, onOpenProfile }: Props) {
                       >
                         <PresenceAvatar
                           label={avatarInitial(label)}
+                          url={u?.avatar_url}
                           sizeClass="size-9"
                           textClass="text-sm"
                         />

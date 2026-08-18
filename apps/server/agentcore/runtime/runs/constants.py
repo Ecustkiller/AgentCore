@@ -48,6 +48,21 @@ MAX_RUN_RETRIES = 3
 DEFAULT_CONTRACT_RETRIES = 1
 MAX_CONTRACT_RETRIES = 3
 
+# Absolute ceiling on task / CEO ``max_rounds`` input (builder clamps; ``<1``
+# still drops to None → profile default). Member default is 56; this bound
+# equals that default so a CEO cannot inflate a single produce segment past
+# the worker profile. Repair playbooks stamp 4–6 and are unaffected.
+MAX_TASK_ROUNDS = 56
+
+# Cross-attempt produce-round cap for one worker run (main pass +
+# contract.retry + light_repair / write_pass). Per-pass default 56 is
+# unchanged; a second full 56-round segment after contract retry is what
+# this stops (online: 56+54 stacked to 109, 4.46M input tokens, no
+# product). 80 = 56 + 24: after a full first pass the correction slice is
+# less than half a default segment — enough to rewrite / handoff, not
+# another investigation. 56+54 is strictly above this cap.
+MAX_RUN_TOTAL_ROUNDS = 80
+
 # 带现场续派（乙）唤回闸：一条作者链累计可被续写（CEO continue_from_run_id + redirect
 # 热修共用）的次数上限，防无限打磨；辩论编排续写豁免（轮次上限归 RoundPolicy）。参照
 # contract 的「一次自动返工」略宽到 3；超限后续派项拒绝并提示回落甲（冷 delegate）。
@@ -113,10 +128,11 @@ DEP_POINTER_MAX_FILES = 20
 # 单文件截断上限；多文件合计另受调用方清单约束。
 CONTEXT_INJECT_CHARS = 2400
 
-# Wave3 B：同一相对路径【整读】成功 file_read 次数上限。
+# Wave3 B：同一相对路径成功 file_read 次数上限。
 # 从第 1 行要满安全顶（双省 offset/limit、只传 offset=1、只传 limit=行顶）计次；
-# offset>1 或 limit<行顶的定点窗不计次、不触顶。
-# 仅当投影窗口仍有该 path 正文且无再读授额时硬拒（逼模型吃已有正文）；正文已清理或写成功后可再整读。
+# 开窗仅当本次请求行范围已被此前交付覆盖、且投影窗内仍有该 path 正文时计次。
+# 新范围分页不计次。仅当投影窗口仍有该 path 正文且无再读授额时硬拒（逼模型吃已有正文）；
+# 正文已清理或写成功（计数与已交付范围一并清）后可再读。
 # 同轮并行同 path 多 call 在 execute_tools 扇出去重，只计一次成功读。
 FILE_READ_SAME_PATH_MAX = 5
 

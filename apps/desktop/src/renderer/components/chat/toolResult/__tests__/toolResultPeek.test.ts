@@ -153,10 +153,47 @@ describe("toolResultPeek", () => {
     ).toBe("上周方案 · 已截断");
   });
 
+  it("successful handoff peeks arguments.summary, never the protocol receipt", () => {
+    expect(
+      toolResultPeek(
+        data({
+          toolName: "handoff",
+          args: { summary: "交叉验证完成，建议一周内表态" },
+          result: "已收尾并提交交接简报。",
+        }),
+      ),
+    ).toBe("交叉验证完成，建议一周内表态");
+  });
+
   it("falls back to the first non-empty result line", () => {
     expect(
       toolResultPeek(data({ toolName: "grep", result: "match line\nmore" })),
     ).toBe("match line");
+  });
+
+  it("compacts grep hit / files_only / empty summaries for the title row", () => {
+    expect(
+      toolResultPeek(
+        data({
+          toolName: "grep",
+          result:
+            "1 处匹配，分布在 1 个文件中（/include_usage/）\nsrc/a.ts:1: include_usage",
+        }),
+      ),
+    ).toBe("1 处匹配 · 1 个文件");
+    expect(
+      toolResultPeek(
+        data({ toolName: "grep", result: "3 个文件匹配 /foo/\na.ts: 2" }),
+      ),
+    ).toBe("3 个文件");
+    expect(
+      toolResultPeek(
+        data({
+          toolName: "grep",
+          result: "本次 grep 未匹配 /Nope/。不要据此断定代码不存在。可执行下一步：① 收窄",
+        }),
+      ),
+    ).toBe("未匹配");
   });
 
   it("prefers failure.message over model-facing result on error", () => {
@@ -267,5 +304,29 @@ describe("hasToolResultBody", () => {
     expect(hasToolResultBody(data({ toolName: "grep", result: "  " }))).toBe(
       false,
     );
+  });
+
+  it("successful handoff is expandable only when the brief has details", () => {
+    expect(
+      hasToolResultBody(
+        data({
+          toolName: "handoff",
+          args: { summary: "只写了结论" },
+          result: "已收尾并提交交接简报。",
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      hasToolResultBody(
+        data({
+          toolName: "handoff",
+          args: {
+            summary: "交叉验证完成",
+            key_points: ["共识：一周内需清晰立场"],
+          },
+          result: "已收尾并提交交接简报。",
+        }),
+      ),
+    ).toBe(true);
   });
 });

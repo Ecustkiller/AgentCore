@@ -174,10 +174,40 @@
   align-items: flex-start;
 }
 
-.im-sender {
+.im-sender-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
   margin: 0 4px 2px;
+  min-width: 0;
+}
+
+.im-sender {
+  margin: 0;
   font-size: 12px;
   color: var(--muted);
+}
+
+.im-role {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.im-role-platform {
+  color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+}
+
+.im-role-group {
+  color: var(--muted);
+  background: color-mix(in oklch, var(--muted) 12%, transparent);
 }
 
 .im-bubble {

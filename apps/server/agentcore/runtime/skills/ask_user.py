@@ -152,7 +152,8 @@ _ASK_USER_MIDTASK = """\
 - 看/分析本机某目录（含桌面）→ **只读静默** `external_mount_readonly`（path 和/或 \
   well_known+target_name）；【禁止】为只读新发 `grant_readonly_folder` 决策卡；\
   【禁止】把挂载当「同时开发两项目」的默认步。\
-  整理/写回 → `grant_organize_folder`（仍确认）。与绑定正交：云端草稿 + 桌面在线亦可\
+  整理/写回 → `grant_organize_folder`（仍确认）；交付：先写工作区，再 `file_copy` 到 \
+  `external/<别名>/…`。与绑定正交：云端草稿 + 桌面在线亦可\
   挂载（经桌面通道读 `external/`）；勿要求先 bind/open_project；勿用 bind 冒充「看一眼」。
 - 【口头同意闭环】用户已明确「可以整理 / 允许」→ **须立刻**发带 `grant_organize_folder`\
   的确认卡并履约；**禁止**空心「等待确认」/纯文本劝授权；成败均须可见反馈。

@@ -479,7 +479,9 @@ class CostLedgerQueue:
     def _log_enqueued(self, payload: dict[str, Any], *, medium: str) -> None:
         runs = payload.get("runs") or []
         calls = payload.get("calls") or []
-        logger.info(
+        # Per-call happy path: debug so jsonl rotation keeps llm.call. Ledger
+        # truth is Postgres, not this enqueue ack.
+        logger.debug(
             "cost.ledger_enqueued",
             record_id=payload.get("id"),
             run_id=_run_id_from_payload(runs, calls),
@@ -653,7 +655,7 @@ class CostLedgerQueue:
                 error=str(e),
             )
             return True
-        logger.info(
+        logger.debug(
             "cost.ledger_drained",
             record_id=payload.get("id"),
             run_id=_run_id_from_payload(payload.get("runs") or [], payload.get("calls") or []),
@@ -725,7 +727,7 @@ class CostLedgerQueue:
                 await asyncio.sleep(_DRAIN_RETRY_BACKOFF_S)
                 return "retry"
 
-        logger.info(
+        logger.debug(
             "cost.ledger_drained",
             record_id=record_id,
             run_id=_run_id_from_payload(runs, calls),

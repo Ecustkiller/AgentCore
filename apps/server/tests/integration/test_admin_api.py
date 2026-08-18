@@ -985,6 +985,11 @@ async def test_admin_observability_requires_auth(client):
     assert (
         await client.get(f"/v1/admin/observability/conversations/{new_id()}")
     ).status_code == 401
+    assert (
+        await client.get(
+            f"/v1/admin/observability/conversations/{new_id()}/messages/{new_id()}/final-state"
+        )
+    ).status_code == 401
 
 
 async def test_non_admin_cannot_access_observability(client):
@@ -992,6 +997,11 @@ async def test_non_admin_cannot_access_observability(client):
     assert (await client.get("/v1/admin/observability/summary")).status_code == 403
     assert (
         await client.get(f"/v1/admin/observability/conversations/{new_id()}")
+    ).status_code == 403
+    assert (
+        await client.get(
+            f"/v1/admin/observability/conversations/{new_id()}/messages/{new_id()}/final-state"
+        )
     ).status_code == 403
 
 
@@ -1283,6 +1293,8 @@ async def test_admin_conversation_replay_merges_timeline(client, make_admin, ses
     assert user_msg["spans"] == []
     assert user_msg["origin"] is None
     assert user_msg["harvest_kind"] is None
+    assert user_msg["attachments"] == []
+    assert user_msg["agent_mentions"] == []
 
     # The assistant message merges its turn telemetry (by trace_id) + spend
     # (by message_id) onto the thread row.
@@ -1319,6 +1331,9 @@ async def test_admin_conversation_replay_merges_timeline(client, make_admin, ses
     assert spans[1]["result_preview"] == "file body"
     # Plain tool journal (no team surface) → empty runs list.
     assert assistant_msg["runs"] == []
+    assert assistant_msg["runs_payload"] is None
+    assert assistant_msg["projected"] is None
+    assert assistant_msg["has_final_state"] is False
 
 
 async def test_admin_conversation_replay_projects_execution_harvest_origin(
@@ -1359,6 +1374,67 @@ async def test_admin_conversation_replay_projects_execution_harvest_origin(
     assert harvest["harvest_kind"] == "cancelled"
     assert assistant["origin"] is None
     assert assistant["harvest_kind"] is None
+
+
+async def test_admin_conversation_replay_surfaces_user_attachments_and_mentions(
+    client, make_admin, session_factory
+):
+    """User-row chips reuse MessageDetail shapes (metadata only, no file text)."""
+    username, password = await make_admin()
+    await login_admin(client, username, password)
+    alice = await _seed_user(session_factory, "alice_replay_chips")
+    async with session_factory() as session:
+        conv = await ConversationRepository(session).create(
+            user_id=alice, title="附件复盘"
+        )
+        conv_id = conv.id
+        await MessageRepository(session).create(
+            conversation_id=conv_id,
+            role="user",
+            content="看这个",
+            attachments=[
+                {
+                    "name": "brief.pdf",
+                    "path": "inbox/brief.pdf",
+                    "truncated": False,
+                    "kind": "file",
+                    "workspace_path": "attachments/brief.pdf",
+                    "size_bytes": 2048,
+                    "thumb_path": None,
+                    "binary": True,
+                    "text": "SHOULD_NOT_SHIP",
+                }
+            ],
+            agent_mentions=[{"agent_id": "researcher", "role": "研究员"}],
+        )
+        await MessageRepository(session).create(
+            conversation_id=conv_id,
+            role="assistant",
+            content="收到",
+            trace_id=uuid4().hex,
+        )
+
+    r = await client.get(f"/v1/admin/observability/conversations/{conv_id}")
+    assert r.status_code == 200, r.text
+    user_msg, assistant_msg = r.json()["messages"]
+    assert user_msg["role"] == "user"
+    assert user_msg["attachments"] == [
+        {
+            "name": "brief.pdf",
+            "path": "inbox/brief.pdf",
+            "truncated": False,
+            "kind": "file",
+            "workspace_path": "attachments/brief.pdf",
+            "conversation_id": None,
+            "size_bytes": 2048,
+            "thumb_path": None,
+            "binary": True,
+        }
+    ]
+    assert "text" not in user_msg["attachments"][0]
+    assert user_msg["agent_mentions"] == [{"agent_id": "researcher", "role": "研究员"}]
+    assert assistant_msg["attachments"] == []
+    assert assistant_msg["agent_mentions"] == []
 
 
 async def test_admin_conversation_replay_projects_multi_agent_runs(
@@ -1482,6 +1558,25 @@ async def test_admin_conversation_replay_projects_multi_agent_runs(
     assert runs[0]["parent_run_id"] == "cap"
     assert runs[0]["status"] == "completed"
     assert any(s["run_id"] == "r1" and s["kind"] == "tool" for s in assistant_msg["spans"])
+    # List stays summary-sized: heavy pair is on-demand, not inlined.
+    assert assistant_msg["runs_payload"] is None
+    assert assistant_msg["projected"] is None
+    assert assistant_msg["has_final_state"] is True
+
+    final = await client.get(
+        f"/v1/admin/observability/conversations/{conv_id}/messages/{assistant_msg['id']}/final-state"
+    )
+    assert final.status_code == 200, final.text
+    body = final.json()
+    assert body["message_id"] == assistant_msg["id"]
+    # User-end / conformance homology: projected is project_turn(events).
+    # turn_end → runs_payload.finish_reason (not a message_end event), so
+    # projected.status stays the fold-of-events value — do not splice a fake end.
+    assert body["projected"] is not None
+    assert body["projected"]["runs"][0]["id"] == "r1"
+    assert body["runs_payload"] is not None
+    assert body["runs_payload"]["finish_reason"] == "end_turn"
+    assert any(e["type"] == "run_plan" for e in body["runs_payload"]["events"])
 
 
 async def test_admin_conversation_replay_surfaces_textless_error_turn(
@@ -1540,6 +1635,113 @@ async def test_admin_conversation_replay_unknown_404(client, make_admin):
     await login_admin(client, username, password)
     r = await client.get(f"/v1/admin/observability/conversations/{new_id()}")
     assert r.status_code == 404
+    missing = await client.get(
+        f"/v1/admin/observability/conversations/{new_id()}/messages/{new_id()}/final-state"
+    )
+    assert missing.status_code == 404
+
+
+async def test_admin_replay_turn_final_state_scopes_to_conversation(
+    client, make_admin, session_factory
+):
+    """Final-state is conversation-scoped: foreign message ids 404, user rows are empty."""
+    username, password = await make_admin()
+    await login_admin(client, username, password)
+    alice = await _seed_user(session_factory, "alice_final_state")
+    conv_a, assistant_a = await _seed_conversation_with_turn(
+        session_factory, user_id=alice, status="ok"
+    )
+    conv_b, _assistant_b = await _seed_conversation_with_turn(
+        session_factory, user_id=alice, status="ok"
+    )
+
+    list_a = await client.get(f"/v1/admin/observability/conversations/{conv_a}")
+    assert list_a.status_code == 200, list_a.text
+    user_id = next(m["id"] for m in list_a.json()["messages"] if m["role"] == "user")
+
+    crossed = await client.get(
+        f"/v1/admin/observability/conversations/{conv_b}/messages/{assistant_a}/final-state"
+    )
+    assert crossed.status_code == 404
+
+    user_row = await client.get(
+        f"/v1/admin/observability/conversations/{conv_a}/messages/{user_id}/final-state"
+    )
+    assert user_row.status_code == 200, user_row.text
+    assert user_row.json()["runs_payload"] is None
+    assert user_row.json()["projected"] is None
+    assert user_row.json()["message_id"] == user_id
+
+
+
+async def test_admin_conversation_replay_keeps_latest_window(
+    client, make_admin, session_factory, monkeypatch
+):
+    """Hard cap must drop the oldest side, not the newest (ops triage)."""
+    from datetime import UTC, datetime, timedelta
+
+    from agentcore.api.routes.admin import observability as observability_mod
+    from agentcore.db.models import Message
+
+    monkeypatch.setattr(observability_mod, "_REPLAY_MAX_MESSAGES", 2)
+    username, password = await make_admin()
+    await login_admin(client, username, password)
+    alice = await _seed_user(session_factory, "alice_replay_window")
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    async with session_factory() as session:
+        conv = await ConversationRepository(session).create(
+            user_id=alice, title="长会话复盘"
+        )
+        conv_id = conv.id
+        for i, text in enumerate(("oldest", "mid", "newest")):
+            session.add(
+                Message(
+                    id=new_id(),
+                    conversation_id=conv_id,
+                    role="user",
+                    content=text,
+                    created_at=base + timedelta(minutes=i),
+                )
+            )
+        await session.commit()
+
+    r = await client.get(f"/v1/admin/observability/conversations/{conv_id}")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["has_more_before"] is True
+    texts = [m["content"] for m in body["messages"]]
+    assert texts == ["mid", "newest"]
+    assert "oldest" not in texts
+
+
+async def test_admin_conversation_replay_includes_soft_deleted(
+    client, make_admin, session_factory
+):
+    """Roster defaults to include tombstones; replay must not 404 those rows."""
+    username, password = await make_admin()
+    await login_admin(client, username, password)
+    alice = await _seed_user(session_factory, "alice_replay_deleted")
+    conv_id, _ = await _seed_conversation_with_turn(session_factory, user_id=alice)
+
+    async with session_factory() as session:
+        ok = await ConversationRepository(session).soft_delete(conv_id, user_id=alice)
+        assert ok is True
+
+    roster = await client.get("/v1/admin/conversations")
+    assert roster.status_code == 200, roster.text
+    assert any(row["id"] == conv_id for row in roster.json()["data"])
+
+    r = await client.get(f"/v1/admin/observability/conversations/{conv_id}")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["conversation"]["id"] == conv_id
+    assert body["conversation"]["deleted_at"] is not None
+    assert [m["role"] for m in body["messages"]] == ["user", "assistant"]
+    assistant_id = next(m["id"] for m in body["messages"] if m["role"] == "assistant")
+    final = await client.get(
+        f"/v1/admin/observability/conversations/{conv_id}/messages/{assistant_id}/final-state"
+    )
+    assert final.status_code == 200, final.text
 
 
 # --- 用户详情下钻 (用户管理 P0 drill-down) ---

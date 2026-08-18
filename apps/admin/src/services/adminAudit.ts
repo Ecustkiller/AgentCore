@@ -34,4 +34,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "user.delete": "注销账号",
   "account.change_password": "修改密码",
   "conversation.replay": "回放对话",
+  "platform_credential.create": "新增平台账号",
+  "platform_credential.update": "修改平台账号",
+  "platform_credential.delete": "删除平台账号",
+  "platform_credential.clear_runtime": "解封平台账号",
 };

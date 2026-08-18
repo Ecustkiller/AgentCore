@@ -3,6 +3,7 @@
 from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, TokenUsage, ToolCallDelta
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.runs.builder import build_run_plan
+from agentcore.runtime.runs.constants import MAX_RUN_TOTAL_ROUNDS, MAX_TASK_ROUNDS
 from agentcore.runtime.runs.executor import build_agent_executor
 from agentcore.runtime.runs.executor.retry import (
     _LIGHT_REPAIR_MAX_ROUNDS,
@@ -29,6 +30,51 @@ def test_light_pass_rounds_are_dedicated_when_main_pool_exhausted():
     assert _pass_max_rounds(light_pass=True, profile_max=pool) == 4
     assert _pass_max_rounds(light_pass=True, profile_max=1) == 4
     assert _pass_max_rounds(light_pass=False, profile_max=56) == 56
+    # After a full first pass, light repair still gets its dedicated 4 (total cap has room).
+    assert _pass_max_rounds(light_pass=True, profile_max=pool, spent=spent) == 4
+
+
+def test_pass_max_rounds_clips_retry_to_cross_attempt_total():
+    """Contract retry leftover cannot reopen a 56+54-style second segment."""
+    first_pass = 56
+    leftover = _pass_max_rounds(
+        light_pass=False, profile_max=first_pass, spent=first_pass
+    )
+    assert leftover == MAX_RUN_TOTAL_ROUNDS - first_pass
+    assert leftover < 54
+    assert leftover > 0
+    assert _pass_max_rounds(light_pass=False, profile_max=56, spent=0) == 56
+    assert (
+        _pass_max_rounds(
+            light_pass=False, profile_max=56, spent=MAX_RUN_TOTAL_ROUNDS
+        )
+        == 0
+    )
+    assert (
+        _pass_max_rounds(
+            light_pass=True, profile_max=56, spent=MAX_RUN_TOTAL_ROUNDS
+        )
+        == 0
+    )
+
+
+def test_max_rounds_input_clamped_to_absolute_cap():
+    plan, errs = build_run_plan(
+        [{"role": "A", "task": "a", "max_rounds": 9999}],
+        id_prefix="t",
+    )
+    assert errs == []
+    assert plan.nodes[0].max_rounds == MAX_TASK_ROUNDS
+    plan_ok, _ = build_run_plan(
+        [{"role": "A", "task": "a", "max_rounds": 8}],
+        id_prefix="t",
+    )
+    assert plan_ok.nodes[0].max_rounds == 8
+    plan_low, _ = build_run_plan(
+        [{"role": "A", "task": "a", "max_rounds": 0}],
+        id_prefix="t",
+    )
+    assert plan_low.nodes[0].max_rounds is None
 
 
 def test_round_budget_awareness_is_numbers_only():
@@ -400,6 +446,68 @@ async def test_light_repair_runs_two_rounds_after_main_exhaustion():
     assert any("本段上限 4 轮" in text and "已用 0 轮" in text for text in repair_facts)
     assert any("本段上限 4 轮" in text and "已用 1 轮" in text for text in repair_facts)
     assert all("本段上限 1 轮" not in text for text in repair_facts)
+
+
+async def test_contract_retry_cross_attempt_rounds_respect_total_cap(monkeypatch):
+    """Full contract.retry leftover is clipped by the run total, not a fresh segment."""
+    import agentcore.runtime.runs.executor.retry as retry_mod
+
+    monkeypatch.setattr(retry_mod, "MAX_RUN_TOTAL_ROUNDS", 5)
+    plan, _ = build_run_plan(
+        [
+            {
+                "role": "W",
+                "task": "emit json",
+                "max_rounds": 4,
+                "deliverable": {"output_format": "json"},
+            }
+        ],
+        id_prefix="t",
+    )
+    provider = _AlwaysWriteProvider()
+    reg = ToolRegistry()
+    reg.register(_FileWriteTool())
+    executor = build_agent_executor(
+        plan=plan,
+        llm=provider,
+        tools=reg,
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="req",
+        execution_id="e",
+        approval_gate=None,
+    )
+    res = await WaveScheduler().run(plan, executor)
+    state = res["t_1"]
+    # Produce rounds (not LLM calls): max_rounds ceiling_finalize may add one extra
+    # model call per pass after the cap. Without the total cap, retry would be a
+    # fresh 4-round segment (8 produce rounds).
+    assert state.rounds == 5
+    assert provider.calls > 4
+
+
+class _AlwaysWriteProvider:
+    """Burn ReAct rounds with file_write so each pass actually hits max_rounds."""
+
+    base_url = "http://test.invalid/v1"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def stream(self, request):  # noqa: ANN001
+        self.calls += 1
+        n = self.calls
+        yield LLMChunk(
+            delta_tool_calls=[
+                ToolCallDelta(
+                    index=0,
+                    id=f"w{n}",
+                    function_name="file_write",
+                    arguments_delta=f'{{"path": "s{n}.txt", "content": "x"}}',
+                )
+            ]
+        )
 
 
 class _ScriptedRoundsWithRequests:

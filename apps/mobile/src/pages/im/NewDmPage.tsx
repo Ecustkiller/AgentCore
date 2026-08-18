@@ -7,7 +7,7 @@ import {
   startDm,
   unblockUser,
 } from "@/api/messaging";
-import { ImAvatar, userAvatarPath } from "@/pages/im/ImAvatar";
+import { ImAvatar } from "@/pages/im/ImAvatar";
 // 找人 (/im/new) — exact-match people search to start a DM, plus 黑名单 management.
 //
 // Search is server-visibility-filtered (任意搜人 护栏: a user who isn't discoverable, or
@@ -133,7 +133,7 @@ export function NewDmPage() {
               >
                 <ImAvatar
                   name={u.display_name || u.username}
-                  url={userAvatarPath(u.id)}
+                  url={u.avatar_url ?? null}
                 />
                 <span className="im-result-text">
                   <span className="im-name">
@@ -151,7 +151,7 @@ export function NewDmPage() {
               <div key={b.id} className="im-search-result">
                 <ImAvatar
                   name={b.display_name || b.username}
-                  url={userAvatarPath(b.id)}
+                  url={b.avatar_url ?? null}
                 />
                 <span className="im-result-text">
                   <span className="im-name">

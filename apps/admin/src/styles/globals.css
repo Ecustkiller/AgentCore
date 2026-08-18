@@ -103,6 +103,17 @@
   --agent-6: oklch(0.58 0.07 285);
   --agent-7: oklch(0.58 0.07 310);
   --agent-8: oklch(0.58 0.07 335);
+
+  /* Syntax tokens: light values from packages/design-tokens/src/tokens.css.
+   * Ink on `--muted` code surfaces, not on a self-tint, so the package L is
+   * already dark enough here (unlike status badges). */
+  --syntax-keyword: oklch(0.5 0.18 300);
+  --syntax-string: oklch(0.5 0.13 150);
+  --syntax-number: oklch(0.55 0.15 50);
+  --syntax-comment: oklch(0.6 0.02 255);
+  --syntax-function: oklch(0.5 0.16 255);
+  --syntax-attr: oklch(0.52 0.12 220);
+  --syntax-builtin: oklch(0.55 0.16 25);
 }
 
 * {
@@ -260,6 +271,61 @@ body {
   background: transparent;
   font-size: 0.8em;
   line-height: 1.45;
+}
+
+/* highlight.js token classes → syntax tokens (no stock hljs theme / hex). */
+.markdown-body .hljs-comment,
+.markdown-body .hljs-quote {
+  color: var(--syntax-comment);
+  font-style: italic;
+}
+.markdown-body .hljs-keyword,
+.markdown-body .hljs-selector-tag,
+.markdown-body .hljs-subst,
+.markdown-body .hljs-section {
+  color: var(--syntax-keyword);
+}
+.markdown-body .hljs-string,
+.markdown-body .hljs-doctag,
+.markdown-body .hljs-regexp,
+.markdown-body .hljs-addition {
+  color: var(--syntax-string);
+}
+.markdown-body .hljs-number,
+.markdown-body .hljs-literal {
+  color: var(--syntax-number);
+}
+.markdown-body .hljs-title,
+.markdown-body .hljs-name,
+.markdown-body .hljs-title.function_,
+.markdown-body .hljs-title.class_ {
+  color: var(--syntax-function);
+}
+.markdown-body .hljs-attr,
+.markdown-body .hljs-attribute,
+.markdown-body .hljs-variable,
+.markdown-body .hljs-template-variable,
+.markdown-body .hljs-property {
+  color: var(--syntax-attr);
+}
+.markdown-body .hljs-built_in,
+.markdown-body .hljs-builtin-name,
+.markdown-body .hljs-type,
+.markdown-body .hljs-symbol,
+.markdown-body .hljs-bullet {
+  color: var(--syntax-builtin);
+}
+.markdown-body .hljs-meta {
+  color: var(--muted-foreground);
+}
+.markdown-body .hljs-deletion {
+  color: var(--destructive);
+}
+.markdown-body .hljs-emphasis {
+  font-style: italic;
+}
+.markdown-body .hljs-strong {
+  font-weight: 600;
 }
 
 .markdown-body table {

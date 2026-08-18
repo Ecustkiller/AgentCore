@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -258,6 +259,31 @@ def clear_account_runtime_state(credential_id: str) -> None:
     if not cid:
         return
     get_pool_state_store().clear(cid)
+
+
+@dataclass(frozen=True, slots=True)
+class AdminAccountRuntime:
+    """Admin-facing overlay. ``degraded`` is unused this round and reads healthy."""
+
+    status: Literal["healthy", "cooling", "exhausted", "blocked"]
+    recovery_at: datetime | None
+    limit_name: str | None
+
+
+def account_runtime_for_admin(credential_id: str) -> AdminAccountRuntime:
+    """Read pool-state for the credentials list. Absence = healthy."""
+    cid = (credential_id or "").strip()
+    if not cid:
+        return AdminAccountRuntime("healthy", None, None)
+    record = get_pool_state_store().get(cid)
+    if record is None or record.status not in {"cooling", "exhausted", "blocked"}:
+        return AdminAccountRuntime("healthy", None, None)
+    recovery = (
+        datetime.fromtimestamp(record.recovery_at, tz=UTC)
+        if record.recovery_at is not None
+        else None
+    )
+    return AdminAccountRuntime(record.status, recovery, record.limit_name)
 
 
 def platform_pool_unavailable_error(

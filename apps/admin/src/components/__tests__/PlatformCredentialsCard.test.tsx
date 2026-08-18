@@ -6,6 +6,7 @@
 
 import { PlatformCredentialsCard } from "@/components/PlatformCredentialsCard";
 import {
+  clearPlatformCredentialRuntime,
   createPlatformCredential,
   deletePlatformCredential,
   listPlatformCredentials,
@@ -20,6 +21,7 @@ vi.mock("@/services/adminPlatformCredentials", () => ({
   createPlatformCredential: vi.fn(),
   updatePlatformCredential: vi.fn(),
   deletePlatformCredential: vi.fn(),
+  clearPlatformCredentialRuntime: vi.fn(),
 }));
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
@@ -39,6 +41,9 @@ const row = {
   masked_key: "••••aaaa",
   created_at: "2026-08-18T00:00:00Z",
   updated_at: "2026-08-18T00:00:00Z",
+  status: "healthy" as const,
+  recovery_at: null,
+  limit_name: null,
 };
 
 describe("PlatformCredentialsCard", () => {
@@ -73,6 +78,39 @@ describe("PlatformCredentialsCard", () => {
     );
     expect(toast.success).toHaveBeenCalled();
     expect(deletePlatformCredential).not.toHaveBeenCalled();
+  });
+
+  it("clears runtime on a blocked member without toggling enabled", async () => {
+    const blocked = {
+      ...row,
+      status: "blocked" as const,
+    };
+    vi.mocked(listPlatformCredentials).mockResolvedValue({
+      data: [blocked],
+      fallback: "pool",
+    });
+    vi.mocked(clearPlatformCredentialRuntime).mockResolvedValue({
+      ...blocked,
+      status: "healthy",
+    });
+    render(<PlatformCredentialsCard />);
+    fireEvent.click(await screen.findByText("解封"));
+    await waitFor(() =>
+      expect(clearPlatformCredentialRuntime).toHaveBeenCalledWith(blocked.id),
+    );
+    expect(toast.success).toHaveBeenCalled();
+    expect(updatePlatformCredential).not.toHaveBeenCalled();
+  });
+
+  it("reloads the pool when refreshEpoch changes", async () => {
+    const { rerender } = render(<PlatformCredentialsCard refreshEpoch={0} />);
+    expect(await screen.findByText("Go-A")).toBeTruthy();
+    expect(listPlatformCredentials).toHaveBeenCalledTimes(1);
+
+    rerender(<PlatformCredentialsCard refreshEpoch={1} />);
+    await waitFor(() =>
+      expect(listPlatformCredentials).toHaveBeenCalledTimes(2),
+    );
   });
 
   it("opens the create dialog from 新增", async () => {

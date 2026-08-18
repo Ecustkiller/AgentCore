@@ -20,7 +20,10 @@ import type {
   ReplayMessage,
   ReplayRun,
 } from "@/services/adminObservability";
-import { fetchConversationReplay } from "@/services/adminObservability";
+import {
+  fetchConversationReplay,
+  fetchReplayTurnFinalState,
+} from "@/services/adminObservability";
 import {
   cleanup,
   fireEvent,
@@ -33,6 +36,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/adminObservability", () => ({
   fetchConversationReplay: vi.fn(),
+  fetchReplayTurnFinalState: vi.fn(),
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -90,13 +94,22 @@ function msg(
     models: [],
     origin: null,
     runs: [],
+    runs_payload: null,
+    projected: null,
+    has_final_state: false,
     spans: [],
     trace_id: null,
     ...p,
   };
 }
 
-function replay(messages: ReplayMessage[]): AdminConversationReplay {
+function replay(
+  messages: ReplayMessage[],
+  extra: Omit<Partial<AdminConversationReplay>, "conversation"> & {
+    conversation?: Partial<AdminConversationReplay["conversation"]>;
+  } = {},
+): AdminConversationReplay {
+  const { conversation, ...rest } = extra;
   return {
     conversation: {
       created_at: "2026-08-01T00:00:00Z",
@@ -105,11 +118,14 @@ function replay(messages: ReplayMessage[]): AdminConversationReplay {
       title: "一次多 Agent 会话",
       user_id: "u1",
       username: "alice",
+      ...conversation,
     },
     cost_total: 0,
     errors: 0,
+    has_more_before: false,
     messages,
     turns: 1,
+    ...rest,
   };
 }
 
@@ -158,9 +174,10 @@ function renderReplay(
   return { ...view, onBack };
 }
 
-/** Opens the worker dock the only way the UI allows: pick a node in the team graph. */
+/** Opens the worker dock: select the turn, then the ops 队员 control. */
 async function openDock() {
-  fireEvent.click(await screen.findByText("研究员"));
+  fireEvent.click(await screen.findByText("CEO 汇总"));
+  fireEvent.click(await screen.findByRole("button", { name: "打开队员面板" }));
   return screen.findByRole("separator");
 }
 
@@ -172,7 +189,7 @@ describe("ConversationReplay layout", () => {
 
     expect(await screen.findAllByText("CEO 汇总")).toHaveLength(1);
     expect(screen.getAllByText("帮我查一下")).toHaveLength(1);
-    expect(screen.getAllByText("协作 · 1 队员")).toHaveLength(1);
+    expect(screen.getAllByLabelText("对话终态")).toHaveLength(1);
   });
 
   it("正文不再用视口高度硬算（无 100vh 魔法数）", async () => {
@@ -247,6 +264,141 @@ describe("ConversationReplay layout", () => {
     fireEvent.click(await screen.findByRole("button", { name: "返回" }));
 
     expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("moves execution_harvest to the ops bar, not the user column", async () => {
+    vi.mocked(fetchConversationReplay).mockResolvedValue(
+      replay([
+        msg({
+          id: "h1",
+          role: "user",
+          origin: "execution_harvest",
+          harvest_kind: "cancelled",
+          content:
+            "【系统收口】后台团队任务已取消或中断。请基于已完成部分向老板简要收尾。",
+        }),
+        ...MESSAGES,
+      ]),
+    );
+
+    renderReplay();
+    await screen.findByText("CEO 汇总");
+
+    expect(screen.getByLabelText("运维信号").textContent).toContain("系统收口");
+    expect(screen.getByText("已取消")).toBeTruthy();
+    expect(
+      screen.queryByText(
+        "【系统收口】后台团队任务已取消或中断。请基于已完成部分向老板简要收尾。",
+      ),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByText("已取消"));
+    expect(
+      await screen.findByText(
+        "【系统收口】后台团队任务已取消或中断。请基于已完成部分向老板简要收尾。",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("falls back to 系统收口 in the ops bar when only the prefix is present", async () => {
+    vi.mocked(fetchConversationReplay).mockResolvedValue(
+      replay([
+        msg({
+          id: "h1",
+          role: "user",
+          content: "【系统收口】后台团队任务已全部完成。请综合队员产出。",
+        }),
+        msg({ id: "a1", role: "assistant", content: "综合产出" }),
+      ]),
+    );
+
+    renderReplay();
+    await screen.findByText("综合产出");
+
+    expect(screen.getByLabelText("运维信号").textContent).toContain("系统收口");
+    expect(screen.getByText("已完成")).toBeTruthy();
+    expect(
+      screen.queryByText("【系统收口】后台团队任务已全部完成。请综合队员产出。"),
+    ).toBeNull();
+  });
+
+  it("keeps span ops in the header after selecting a turn", async () => {
+    vi.mocked(fetchConversationReplay).mockResolvedValue(
+      replay([
+        msg({ id: "u1", role: "user", content: "帮我查一下" }),
+        msg({
+          id: "a1",
+          role: "assistant",
+          content: "查完了",
+          spans: [
+            {
+              args_preview: "q=foo",
+              finish_reason: null,
+              input_tokens: 10,
+              kind: "llm",
+              name: null,
+              output_tokens: 20,
+              result_preview: null,
+              round_idx: 0,
+              run_id: null,
+              success: true,
+            },
+            {
+              args_preview: "q=foo",
+              finish_reason: null,
+              input_tokens: null,
+              kind: "tool",
+              name: "web_search",
+              output_tokens: null,
+              result_preview: "3 hits",
+              round_idx: null,
+              run_id: null,
+              success: true,
+            },
+          ],
+        }),
+      ]),
+    );
+
+    renderReplay();
+    fireEvent.click(await screen.findByText("查完了"));
+    expect(screen.getByText("1 次模型调用 · 1 次工具")).toBeTruthy();
+    expect(screen.queryByText("web_search")).toBeNull();
+
+    fireEvent.click(screen.getByText("1 次模型调用 · 1 次工具"));
+    expect(await screen.findByText("web_search")).toBeTruthy();
+  });
+
+  it("tells ops when earlier messages were truncated", async () => {
+    vi.mocked(fetchConversationReplay).mockResolvedValue(
+      replay(MESSAGES, { has_more_before: true }),
+    );
+
+    renderReplay();
+    await screen.findByText("CEO 汇总");
+    expect(screen.getByRole("status").textContent).toContain(
+      "更早的消息已被截断",
+    );
+  });
+
+  it("shows 会话已删 beside the title when the conversation is a tombstone", async () => {
+    vi.mocked(fetchConversationReplay).mockResolvedValue(
+      replay(MESSAGES, {
+        conversation: { deleted_at: "2026-08-10T00:00:00Z" },
+      }),
+    );
+
+    renderReplay();
+    expect(await screen.findByText("会话已删")).toBeTruthy();
+    expect(screen.getByText("一次多 Agent 会话")).toBeTruthy();
+  });
+
+  it("does not show 会话已删 on a live conversation", async () => {
+    vi.mocked(fetchConversationReplay).mockResolvedValue(replay(MESSAGES));
+
+    renderReplay();
+    await screen.findByText("一次多 Agent 会话");
+    expect(screen.queryByText("会话已删")).toBeNull();
   });
 });
 
@@ -363,5 +515,97 @@ describe("ConversationReplay 回合锚点", () => {
     expect(screen.getByTestId("loc-search").textContent).toBe(
       "?trace=t-2&turn=a1",
     );
+  });
+});
+
+describe("ConversationReplay 按需终态", () => {
+  it("does not fetch final state until a journaled assistant turn is selected", async () => {
+    vi.mocked(fetchConversationReplay).mockResolvedValue(
+      replay([
+        msg({ id: "u1", role: "user", content: "帮我查一下" }),
+        msg({
+          id: "a1",
+          role: "assistant",
+          content: "CEO 汇总",
+          has_final_state: true,
+        }),
+      ]),
+    );
+    vi.mocked(fetchReplayTurnFinalState).mockResolvedValue({
+      message_id: "a1",
+      runs_payload: {
+        finish_reason: "end_turn",
+        process: [{ kind: "tool", tool_name: "web_search", status: "success" }],
+      },
+      projected: null,
+    });
+
+    renderReplay();
+    await screen.findByText("CEO 汇总");
+    expect(fetchReplayTurnFinalState).not.toHaveBeenCalled();
+    expect(screen.queryByText("web_search")).toBeNull();
+
+    fireEvent.click(screen.getByText("CEO 汇总"));
+    await waitFor(() =>
+      expect(fetchReplayTurnFinalState).toHaveBeenCalledWith("c1", "a1"),
+    );
+    expect(await screen.findByText("web_search")).toBeTruthy();
+    expect(screen.getByText("finish end_turn")).toBeTruthy();
+  });
+
+  it("hydrates the URL-anchored turn on first paint", async () => {
+    vi.mocked(fetchConversationReplay).mockResolvedValue(
+      replay(ANCHOR_MESSAGES.map((m) =>
+        m.id === "a2" ? { ...m, has_final_state: true } : m,
+      )),
+    );
+    vi.mocked(fetchReplayTurnFinalState).mockResolvedValue({
+      message_id: "a2",
+      runs_payload: {
+        finish_reason: "end_turn",
+        process: [{ kind: "tool", tool_name: "read_file", status: "success" }],
+      },
+      projected: null,
+    });
+
+    renderReplay({ search: "?turn=a2" });
+    await waitFor(() =>
+      expect(fetchReplayTurnFinalState).toHaveBeenCalledWith("c1", "a2"),
+    );
+    expect(await screen.findByText("read_file")).toBeTruthy();
+  });
+
+  it("retries a failed final-state fetch without reloading the thread", async () => {
+    vi.mocked(fetchConversationReplay).mockResolvedValue(
+      replay([
+        msg({
+          id: "a1",
+          role: "assistant",
+          content: "CEO 汇总",
+          has_final_state: true,
+        }),
+      ]),
+    );
+    vi.mocked(fetchReplayTurnFinalState)
+      .mockRejectedValueOnce(new Error("终态失败"))
+      .mockResolvedValueOnce({
+        message_id: "a1",
+        runs_payload: {
+          finish_reason: "end_turn",
+          process: [{ kind: "tool", tool_name: "web_search", status: "success" }],
+        },
+        projected: null,
+      });
+
+    renderReplay();
+    fireEvent.click(await screen.findByText("CEO 汇总"));
+    expect(
+      await screen.findByRole("button", { name: "重试加载终态" }),
+    ).toBeTruthy();
+    expect(fetchConversationReplay).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "重试加载终态" }));
+    expect(await screen.findByText("web_search")).toBeTruthy();
+    expect(fetchConversationReplay).toHaveBeenCalledTimes(1);
   });
 });

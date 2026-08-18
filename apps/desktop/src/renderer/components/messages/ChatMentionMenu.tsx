@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui";
 import { Users } from "lucide-react";
 import { useEffect, useRef } from "react";
+import { PresenceAvatar } from "./PresenceAvatar";
 import { avatarInitial } from "./chatDisplay";
 
 /** One row in the IM @-person menu (not the AI-chat file mention menu). */
@@ -11,6 +12,7 @@ export type ChatMentionMenuItem =
       userId: string;
       label: string;
       subtitle?: string;
+      avatarUrl?: string | null;
     };
 
 interface Props {
@@ -70,9 +72,12 @@ export function ChatMentionMenu({
                       <Users size={14} />
                     </span>
                   ) : (
-                    <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
-                      {avatarInitial(item.label)}
-                    </span>
+                    <PresenceAvatar
+                      label={avatarInitial(item.label)}
+                      url={item.avatarUrl}
+                      sizeClass="size-7"
+                      textClass="text-xs"
+                    />
                   )}
                   <span className="min-w-0 flex-1 text-left">
                     <span className="block truncate text-sm text-foreground">

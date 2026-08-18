@@ -24,6 +24,10 @@ from agentcore.llm.platform_credential_service import (
     PlatformCredentialView as ServiceView,
 )
 from agentcore.llm.platform_pool import pick_enabled_platform_pool_member
+from agentcore.llm.platform_pool_scheduler import (
+    account_runtime_for_admin,
+    clear_account_runtime_state,
+)
 
 router = APIRouter(tags=["admin"])
 
@@ -35,6 +39,7 @@ def get_platform_credential_service(
 
 
 def _view(row: ServiceView) -> PlatformCredentialView:
+    runtime = account_runtime_for_admin(row.id)
     return PlatformCredentialView(
         id=row.id,
         label=row.label,
@@ -44,6 +49,9 @@ def _view(row: ServiceView) -> PlatformCredentialView:
         masked_key=row.masked_key,
         created_at=row.created_at,
         updated_at=row.updated_at,
+        status=runtime.status,
+        recovery_at=runtime.recovery_at,
+        limit_name=runtime.limit_name,
     )
 
 
@@ -153,3 +161,28 @@ async def delete_platform_credential(
         target_id=credential_id,
     )
     return StatusResponse(status="ok")
+
+
+@router.post(
+    "/platform-credentials/{credential_id}/clear-runtime",
+    response_model=PlatformCredentialView,
+)
+async def clear_platform_credential_runtime(
+    credential_id: str,
+    admin: AdminUser,
+    db: AsyncSession = Depends(get_db),
+    service: PlatformCredentialService = Depends(get_platform_credential_service),
+) -> PlatformCredentialView:
+    """Drop cooling / exhausted / blocked flags so the member is schedulable again."""
+    view = await service.get_credential(credential_id)
+    prior = account_runtime_for_admin(credential_id)
+    clear_account_runtime_state(credential_id)
+    await record_admin_audit(
+        db,
+        actor_id=admin.user_id,
+        action="platform_credential.clear_runtime",
+        target_type="platform_credential",
+        target_id=view.id,
+        detail={**_audit_detail(view), "cleared_status": prior.status},
+    )
+    return _view(view)

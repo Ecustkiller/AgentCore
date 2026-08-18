@@ -340,9 +340,15 @@ class CoordinationSession:
     progress_reported_completed: set[str] = field(default_factory=set)
     cancel_ids: set[str] = field(default_factory=set)
     active: bool = True
-    # True after ALL_COMPLETED was injected into a live CEO wait. That is not a
-    # user-visible closing appearance — harvest may still spawn a new turn.
+    # True after ALL_COMPLETED was injected into a live CEO wait. Inject itself
+    # is not a user-visible close — harvest still runs unless
+    # ``attached_inject_visible_close`` is already True.
     all_completed_injected: bool = False
+    # Process-local: captain bubble *currently* has non-empty prose after
+    # attached ALL_COMPLETED inject. ``content_delta`` sets it; ``content_reset``
+    # clears it (终态，不是流式锁存). Harvest skip requires this True at arm
+    # time — never cancel at inject time. Not snapshotted (restore → harvest).
+    attached_inject_visible_close: bool = False
     # True while the system harvest closing turn is the attached CEO (最终合成).
     harvest_closing: bool = False
     # ALL_COMPLETED.output already inlined into the synthetic harvest user row
@@ -597,6 +603,25 @@ class CoordinationSession:
                 via=label,
             )
         self.settled_via = label
+
+    def note_attached_inject_visible_close(self, delta: str) -> None:
+        """Record that the captain bubble currently has post-inject visible prose.
+
+        Structural only: non-empty ``content_delta``, ``settled_via=attached_inject``.
+        Does not inspect prose. ``content_reset`` must clear this — it is the
+        live bubble, not a one-shot latch.
+        """
+        if not (delta or "").strip():
+            return
+        if self.harvest_closing or not self.all_completed_injected:
+            return
+        if self.settled_via != "attached_inject":
+            return
+        self.attached_inject_visible_close = True
+
+    def clear_attached_inject_visible_close(self) -> None:
+        """``content_reset`` emptied the captain bubble; harvest skip is invalid until it fills again."""
+        self.attached_inject_visible_close = False
 
     def check_terminal_settlement(self) -> None:
         """终态对账：terminal 必须收敛到附着注入或收口 harvest（user_stop 豁免）。"""
@@ -1950,9 +1975,9 @@ def finish_detached_coordination(session: CoordinationSession) -> None:
     fire-and-forget ``end_turn``'d without waiting, or turn teardown may have
     released a different ContextVar eid after cross-turn append — leaving this
     session flagged attached forever. Defer briefly so a still-live CEO turn can
-    finish (harvest defers while the slot is busy); then always harvest. Same-turn
-    ``wait`` inject does **not** cancel harvest — inject is not a user-visible
-    closing appearance.
+    finish (harvest defers while the slot is busy); then harvest unless the
+    attached turn already streamed a visible close. Same-turn ``wait`` inject
+    does **not** cancel harvest — inject is not a user-visible closing appearance.
     """
     if session.user_stopped:
         if session.active:
@@ -1970,7 +1995,8 @@ def finish_detached_coordination(session: CoordinationSession) -> None:
         return
     # all_completed_injected ≠ 可见收口。同回合 wait 吃到终态后 CEO 仍可能
     # 留下等待气泡并 end_turn；清 session / 取消 harvest 会让用户再也看不到
-    # 第二条 CEO 消息。注入不在这里短路。
+    # 第二条 CEO 消息。注入不在这里短路——跳过只发生在 ``_arm_harvest_now``，
+    # 且要求 ``attached_inject_visible_close`` 已为真。
     # Empty conversation_id: orphan / unit sessions sync-clear only when already
     # detached. turn_attached=True must keep attach-grace semantics (same as with
     # a cid) so same-turn CEO wait can inject — never sync-clear into a false
@@ -2032,8 +2058,32 @@ def _retain_harvest_task(
     task.add_done_callback(_on_done)
 
 
+def attached_inject_closed_visibly(session: CoordinationSession) -> bool:
+    """True when the captain bubble currently holds post-inject visible prose."""
+    return (
+        session.settled_via == "attached_inject"
+        and session.all_completed_injected
+        and not session.harvest_closing
+        and session.attached_inject_visible_close
+    )
+
+
 def _arm_harvest_now(session: CoordinationSession) -> None:
     """Mark settled, emit execution_completed, schedule async closing turn."""
+    if attached_inject_closed_visibly(session):
+        logger.info(
+            "coordination.harvest_skipped_attached_visible_close",
+            execution_id=session.execution_id,
+            conversation_id=session.conversation_id or "",
+            completed=len(session.completed_run_ids),
+            total=session.total_workers,
+        )
+        session.harvest_scheduled = False
+        from agentcore.runtime.coordination.harvest import emit_execution_completed
+
+        emit_execution_completed(session)
+        _close_detached_session(session)
+        return
     session.mark_settled("harvest")
     # Emit *before* scheduling the async harvest so owners that
     # ``await_live_detached_drive`` still have the turn sink open and can push
@@ -2058,8 +2108,8 @@ async def _run_harvest_after_attach_grace(session: CoordinationSession) -> None:
     """Wait for detach; on grace expiry force-harvest stale attach.
 
     ``all_completed_injected`` is ignored here: the live turn may still be the
-    waiting bubble. Harvest after detach (or stale-attach force) is the
-    user-visible closing appearance.
+    waiting bubble. After detach (or stale-attach force), ``_arm_harvest_now``
+    skips only when ``attached_inject_visible_close`` already happened.
     """
     loop = asyncio.get_running_loop()
     deadline = loop.time() + _HARVEST_ATTACH_GRACE_S

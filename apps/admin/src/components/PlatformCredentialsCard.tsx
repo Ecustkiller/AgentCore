@@ -11,12 +11,14 @@ import {
   TableSkeleton,
 } from "@/components/ui/States";
 import { TableFrame, TableRow, THead, Td, Th } from "@/components/ui/Table";
+import { fmtTime } from "@/lib/utils";
 import { errorMessage } from "@/services/api";
 import {
   type CreatePlatformCredentialRequest,
   type PlatformCredentialListResponse,
   type PlatformCredentialView,
   type UpdatePlatformCredentialRequest,
+  clearPlatformCredentialRuntime,
   createPlatformCredential,
   deletePlatformCredential,
   listPlatformCredentials,
@@ -40,12 +42,42 @@ const FALLBACK_HINT: Record<
   PlatformCredentialListResponse["fallback"],
   string
 > = {
-  pool: "选钥使用池中第一个启用账号。封号请立刻禁用，不必删行。",
+  pool: "选钥 fill-first 并会话粘号；429/403 换号，401 封禁。封禁/冷却可解封，不必删行。",
   env: "当前无启用成员，平台调用回落 env 里的 PLATFORM_API_KEY（与改池前行为一致）。",
   none: "池中无启用成员，且未配置 PLATFORM_API_KEY。平台代付不可用。",
 };
 
-export function PlatformCredentialsCard() {
+type RuntimeStatus = NonNullable<PlatformCredentialView["status"]>;
+
+const RUNTIME_LABEL: Record<RuntimeStatus, string> = {
+  healthy: "健康",
+  cooling: "冷却中",
+  exhausted: "月额度耗尽",
+  blocked: "已封禁",
+};
+
+function runtimeStatus(row: PlatformCredentialView): RuntimeStatus {
+  return row.status ?? "healthy";
+}
+
+function runtimeTone(
+  status: RuntimeStatus,
+): "success" | "warning" | "destructive" {
+  if (status === "blocked") return "destructive";
+  if (status === "cooling" || status === "exhausted") return "warning";
+  return "success";
+}
+
+function canClearRuntime(status: RuntimeStatus): boolean {
+  return status === "blocked" || status === "cooling";
+}
+
+export function PlatformCredentialsCard({
+  refreshEpoch = 0,
+}: {
+  /** Parent bumps this to reload the pool (page-header refresh). */
+  refreshEpoch?: number;
+}) {
   const [data, setData] = useState<PlatformCredentialListResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -69,7 +101,7 @@ export function PlatformCredentialsCard() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, refreshEpoch]);
 
   const onSaved = (row: PlatformCredentialView) => {
     setData((prev) => {
@@ -92,7 +124,7 @@ export function PlatformCredentialsCard() {
     <Card>
       <SectionHeader
         title="平台额度账号"
-        description="池成员可热更；空池回落 env 单 key。本阶段只选一个启用号，不自动换号。"
+        description="池成员可热更；空池回落 env 单 key。选钥 fill-first 并会话粘号，429/403 自动换号。"
         action={
           <Button
             size="sm"
@@ -122,7 +154,7 @@ export function PlatformCredentialsCard() {
         {error && !data ? (
           <ErrorState message={error} onRetry={() => void load()} />
         ) : !data && loading ? (
-          <TableSkeleton rows={3} columns={5} />
+          <TableSkeleton rows={3} columns={8} />
         ) : data && data.data.length === 0 ? (
           <EmptyState
             title="还没有池成员"
@@ -133,7 +165,7 @@ export function PlatformCredentialsCard() {
             <p className="text-muted-foreground text-sm">
               {FALLBACK_HINT[data.fallback]}
             </p>
-            <TableFrame minWidth={880}>
+            <TableFrame minWidth={1100}>
               <THead>
                 <Th>名称</Th>
                 <Th>标识</Th>
@@ -141,10 +173,14 @@ export function PlatformCredentialsCard() {
                 <Th>订阅日</Th>
                 <Th>Key</Th>
                 <Th>状态</Th>
+                <Th>运行态</Th>
+                <Th>恢复时间</Th>
                 <Th align="right">操作</Th>
               </THead>
               <tbody>
-                {data.data.map((row) => (
+                {data.data.map((row) => {
+                  const status = runtimeStatus(row);
+                  return (
                   <TableRow key={row.id}>
                     <Td className="font-medium">{row.label}</Td>
                     <Td>
@@ -160,8 +196,36 @@ export function PlatformCredentialsCard() {
                         {row.enabled ? "启用" : "已禁用"}
                       </Badge>
                     </Td>
+                    <Td>
+                      <div className="flex flex-col gap-0.5">
+                        <Badge tone={runtimeTone(status)}>
+                          {RUNTIME_LABEL[status]}
+                        </Badge>
+                        {row.limit_name ? (
+                          <span className="text-muted-foreground text-xs">
+                            {row.limit_name}
+                          </span>
+                        ) : null}
+                      </div>
+                    </Td>
+                    <Td className="tabular-nums text-muted-foreground">
+                      {row.recovery_at ? fmtTime(row.recovery_at) : "—"}
+                    </Td>
                     <Td align="right">
                       <div className="flex justify-end gap-1">
+                        {canClearRuntime(status) ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              void clearRuntime(row).then((updated) => {
+                                if (updated) onSaved(updated);
+                              })
+                            }
+                          >
+                            解封
+                          </Button>
+                        ) : null}
                         <Button
                           variant="ghost"
                           size="sm"
@@ -192,7 +256,8 @@ export function PlatformCredentialsCard() {
                       </div>
                     </Td>
                   </TableRow>
-                ))}
+                  );
+                })}
               </tbody>
             </TableFrame>
           </Refreshing>
@@ -231,6 +296,19 @@ async function toggleEnabled(
       enabled: !row.enabled,
     });
     toast.success(updated.enabled ? "已启用" : "已禁用，选钥不再使用该号");
+    return updated;
+  } catch (err) {
+    toast.error(errorMessage(err));
+    return null;
+  }
+}
+
+async function clearRuntime(
+  row: PlatformCredentialView,
+): Promise<PlatformCredentialView | null> {
+  try {
+    const updated = await clearPlatformCredentialRuntime(row.id);
+    toast.success("已解封，选钥可再次使用该号");
     return updated;
   } catch (err) {
     toast.error(errorMessage(err));

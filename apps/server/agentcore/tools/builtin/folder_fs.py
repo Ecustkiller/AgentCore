@@ -120,6 +120,8 @@ async def _open_target_folder(
         workspace_channel=workspace_channel,
         shared_workspace=True,
         file_read_counts={},
+        file_read_delivered_ranges={},
+        file_read_line_totals={},
         file_read_reread_remaining={},
         file_read_verbatim_paths=None,
     )

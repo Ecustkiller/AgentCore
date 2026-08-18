@@ -9,7 +9,9 @@ harvester:
 
 If a concurrent user turn has already re-attached (``turn_attached=True``), the
 harvester no-ops — that turn's CEO will consume ``ALL_COMPLETED``. Same-turn
-``wait`` inject alone does **not** skip harvest (inject ≠ user-visible close).
+``wait`` inject alone does **not** skip harvest (inject ≠ user-visible close);
+skip is decided at harvest-arm time when attached inject already streamed a
+visible close.
 
 If the conversation slot is busy, the harvester **defers** (keeps the registry)
 and retries — never treats deferral as success then ``_close_detached_session``.

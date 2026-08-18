@@ -10,7 +10,7 @@
 
 import { AdminShell } from "@/components/AdminShell";
 import { useAuthStore } from "@/stores/auth";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -51,6 +51,8 @@ function renderShell(path: string, element: React.ReactNode = <div>页面内容<
           <Route path="/users" element={element} />
           <Route path="/conversations/:segment" element={element} />
           <Route path="/replay/:id" element={element} />
+          <Route path="/quota" element={element} />
+          <Route path="/system" element={element} />
           <Route path="/account" element={element} />
         </Route>
       </Routes>
@@ -64,16 +66,37 @@ function currentNavLabel(): string | undefined {
 }
 
 describe("AdminShell navigation", () => {
-  it("groups the eight sections instead of listing them flat", () => {
+  it("groups the nine sections instead of listing them flat", () => {
     renderShell("/overview");
     for (const group of ["监控", "排查", "管理"]) {
       expect(screen.getByText(group)).toBeTruthy();
     }
+    const nav = screen.getByRole("navigation", { name: "主导航", hidden: true });
+    expect(
+      within(nav)
+        .getAllByRole("link", { hidden: true })
+        .map((a) => a.textContent?.trim()),
+    ).toEqual([
+      "概览",
+      "分析",
+      "对话",
+      "审计",
+      "用户",
+      "公告",
+      "内测群",
+      "平台额度",
+      "系统",
+    ]);
   });
 
   it("marks the section matching the current route", () => {
     renderShell("/overview");
     expect(currentNavLabel()).toBe("概览");
+  });
+
+  it("marks 平台额度 on its own route", () => {
+    renderShell("/quota");
+    expect(currentNavLabel()).toBe("平台额度");
   });
 
   it("keeps 对话 lit while drilled into a replay", () => {

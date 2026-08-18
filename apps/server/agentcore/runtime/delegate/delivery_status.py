@@ -47,11 +47,14 @@ handoff 不硬降档。``requires_draft_ack`` 扩至 ``evidence_deficit`` /
 仍是全量文件清单，本事件承载「诚实对账」而非全量枚举）。finalize 终态发射幂等：同一
 ``execution_id`` 同一结论只发一次；结论变了（补跑覆盖）仍发。
 
-严重度：``severity=warning``（示例/虚构自注 / 路径建议 / 交接备注等）不单独撑起
+严重度：``severity=warning``（示例/虚构自注 / 交接备注等）不单独撑起
 partial/blocked。轻 B：无 blocking 且 warnings **除去** ``unverified_note`` 后为空、
-且已有 ``delivered_files`` → state=``delivered``（gaps 仍可保留 soft 行）；若还有
-``path_hint`` 或其他 soft reason → 仍 ``notes``。blocking 缺口才标「部分未满足 /
-未满足」。成篇未写完改由对话框接着说——不再发 ``continue_writing`` 一键按钮。
+且已有 ``delivered_files`` → state=``delivered``（gaps 仍可保留 soft 行）；其余
+soft reason → 仍 ``notes``。声明路径 vs 实际落盘是纯字符串比对：失配为
+``path_mismatch`` blocking（不得 accepted / 不得进 ``delivered_files`` /
+state 不得 ``delivered``），不再当 ``path_hint`` 路径建议。blocking 缺口才标
+「部分未满足 / 未满足」。成篇未写完改由对话框接着说——不再发
+``continue_writing`` 一键按钮。
 """
 
 from __future__ import annotations
@@ -77,6 +80,7 @@ _MAX_GAPS = 12
 
 REASON_UNVERIFIED_NOTE = "unverified_note"
 REASON_PATH_HINT = "path_hint"
+REASON_PATH_MISMATCH = "path_mismatch"
 REASON_FILES_NOT_LANDED = "files_not_landed"
 # No-exec worker shipped a table file while this turn had an opaque source
 # data file (attachment / workspace type signal — not body scan).
@@ -102,7 +106,7 @@ REASON_EMPTY_HANDOFF_STORM = "empty_handoff_storm"
 REASON_CANCELLED = "cancelled"
 REASON_OVER_SEAT = "over_seat"
 _WRITING_CUTOFF_REASONS = frozenset({"token_budget", "worker_timeout"})
-_SOFT_GAP_REASONS = frozenset({REASON_UNVERIFIED_NOTE, REASON_PATH_HINT, REASON_FILES_NOT_LANDED})
+_SOFT_GAP_REASONS = frozenset({REASON_UNVERIFIED_NOTE, REASON_FILES_NOT_LANDED})
 # Gaps that latch finish_guard draft acknowledgment (扩出文献 evidence_deficit /
 # 能力4：契约硬失败 / 节点 FAILED / rejected 产物 —— 不扩姿势 A 词表).
 _DRAFT_ACK_GAP_REASONS = frozenset(
@@ -180,9 +184,9 @@ _SOFT_REMINDER_MARKERS = (
     "素材覆盖提醒（软）",
     "契约软提醒",
 )
-# Contract path-reconciliation warnings (artifacts / artifact_dir) — warning-only
-# at contract.py; must stay soft on the delivery card (notes, never partial).
-_SOFT_PATH_HINT_MARKERS = (
+# Contract path-reconciliation copy (artifacts / artifact_dir). Delivery card
+# treats these as path_mismatch blocking — not notes / 路径建议.
+_PATH_MISMATCH_MARKERS = (
     "产物未写入约定文档目录",
     "声明的交付物路径未落盘",
 )
@@ -328,10 +332,14 @@ def _collect_artifacts(
     Self-reported ``kind`` / ``derived_from`` ride along so the client's 主清单 can
     show the export and fold its source (see :func:`_product_meta`).
     """
-    from agentcore.runtime.runs.file_acceptance import normalize_acceptance_row
+    from agentcore.runtime.runs.file_acceptance import (
+        apply_declared_path_acceptance,
+        normalize_acceptance_row,
+    )
     from agentcore.workspace.locate import format_workspace_id
 
     desk_by_run: dict[str, str] = {}
+    deliverable_by_run: dict[str, Any] = {}
     if plan is not None:
         for node in plan.nodes:
             rid = str(getattr(node, "run_id", "") or "").strip()
@@ -341,6 +349,9 @@ def _collect_artifacts(
             tf_s = str(tf).strip() if tf else ""
             if tf_s:
                 desk_by_run[rid] = format_workspace_id(folder_id=tf_s, conversation_id="")
+            deliverable = getattr(node, "deliverable", None)
+            if deliverable is not None:
+                deliverable_by_run[rid] = deliverable
 
     by_path: dict[str, dict[str, Any]] = {}
     order: list[str] = []
@@ -348,10 +359,17 @@ def _collect_artifacts(
         if state is None:
             continue
         workspace_id = desk_by_run.get(str(run_id))
+        deliverable = deliverable_by_run.get(str(run_id))
         for raw in _acceptance_rows_for_state(state):
             row = normalize_acceptance_row(raw)
             if row is None:
                 continue
+            if deliverable is not None:
+                row = apply_declared_path_acceptance(
+                    row,
+                    artifacts=getattr(deliverable, "artifacts", None),
+                    artifact_dir=str(getattr(deliverable, "artifact_dir", "") or ""),
+                )
             if workspace_id:
                 row = {**row, "workspace_id": workspace_id}
             meta = _product_meta(raw)
@@ -388,6 +406,87 @@ def _artifact_rejected_gaps(artifacts: list[dict[str, Any]]) -> list[dict[str, A
             reason=REASON_ARTIFACT_REJECTED,
         )
     ]
+
+
+def _path_declaration_of(node: Any) -> tuple[list[str], str]:
+    """Return ``(artifacts, artifact_dir)`` from a plan node; empty = no constraint."""
+    deliverable = getattr(node, "deliverable", None)
+    if deliverable is None:
+        return [], ""
+    artifacts = [
+        str(a).strip() for a in (getattr(deliverable, "artifacts", None) or []) if str(a).strip()
+    ]
+    artifact_dir = str(getattr(deliverable, "artifact_dir", "") or "").strip()
+    return artifacts, artifact_dir
+
+
+def _declared_path_mismatch_gaps(
+    plan: RunPlan,
+    results: dict[str, RunState],
+) -> list[dict[str, Any]]:
+    """Blocking gaps when declared artifacts / artifact_dir have no accepted match."""
+    from agentcore.runtime.runs.file_acceptance import (
+        apply_declared_path_acceptance,
+        declaration_allows_landed,
+        landed_matches_declared,
+        normalize_acceptance_row,
+    )
+
+    gaps: list[dict[str, Any]] = []
+    for node in plan.nodes:
+        artifacts, artifact_dir = _path_declaration_of(node)
+        if not artifacts and not artifact_dir:
+            continue
+        state = results.get(node.run_id)
+        if state is None:
+            continue
+        accepted: list[str] = []
+        for raw in _acceptance_rows_for_state(state):
+            row = normalize_acceptance_row(raw)
+            if row is None:
+                continue
+            row = apply_declared_path_acceptance(
+                row, artifacts=artifacts, artifact_dir=artifact_dir
+            )
+            if row.get("status") == "accepted" and row.get("path"):
+                accepted.append(str(row["path"]))
+        missing: list[str] = []
+        if artifacts:
+            missing = [
+                pat
+                for pat in artifacts
+                if not any(landed_matches_declared(p, pat) for p in accepted)
+            ]
+        elif not any(
+            declaration_allows_landed(p, artifacts=[], artifact_dir=artifact_dir) for p in accepted
+        ):
+            missing = [f"{artifact_dir.rstrip('/')}/"]
+        if not missing:
+            continue
+        role = node.role or node.agent_name or node.run_id
+        listed = "、".join(f"`{p}`" for p in missing[:6])
+        more = f" 等 {len(missing)} 处" if len(missing) > 6 else ""
+        gaps.append(
+            _annotate_gap(
+                role,
+                f"声明的交付物路径未落盘：{listed}{more}",
+                reason=REASON_PATH_MISMATCH,
+            )
+        )
+    return gaps
+
+
+def _dedupe_gap_rows(gaps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop duplicate (reason, description) rows; first occurrence wins."""
+    seen: set[tuple[str, str]] = set()
+    out: list[dict[str, Any]] = []
+    for gap in gaps:
+        key = (str(gap.get("reason") or ""), str(gap.get("description") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(gap)
+    return out
 
 
 def _has_completed_revision(run_id: str, results: dict[str, RunState]) -> bool:
@@ -431,17 +530,17 @@ def _covering_replacement_ran(
 
 
 def _is_path_hint(text: str, reason: str = "") -> bool:
-    """True for contract path-reconciliation suggestions (artifact_dir / artifacts)."""
-    if reason == REASON_PATH_HINT:
+    """True for declared-vs-landed path mismatch (legacy path_hint copy included)."""
+    if reason in (REASON_PATH_HINT, REASON_PATH_MISMATCH):
         return True
-    return any(marker in (text or "") for marker in _SOFT_PATH_HINT_MARKERS)
+    return any(marker in (text or "") for marker in _PATH_MISMATCH_MARKERS)
 
 
 def _is_soft_reminder(text: str, reason: str = "") -> bool:
-    """True when this gap row is a soft note (待核实 / 路径建议等), not blocking."""
-    if reason in _SOFT_GAP_REASONS:
-        return True
+    """True when this gap row is a soft note (待核实等), not blocking."""
     if _is_path_hint(text, reason):
+        return False
+    if reason in _SOFT_GAP_REASONS:
         return True
     return any(marker in text for marker in _SOFT_REMINDER_MARKERS)
 
@@ -478,13 +577,13 @@ def _annotate_gap(
 ) -> dict[str, Any]:
     """Build one gap row; soft reminders get severity=warning + optional paths."""
     item: dict[str, Any] = {"role": role, "description": text}
+    if _is_path_hint(text, reason):
+        item["reason"] = REASON_PATH_MISMATCH
+        return item
     soft = severity == "warning" or _is_soft_reminder(text, reason)
     if soft:
         item["severity"] = "warning"
-        if _is_path_hint(text, reason):
-            item["reason"] = reason or REASON_PATH_HINT
-        else:
-            item["reason"] = reason or REASON_UNVERIFIED_NOTE
+        item["reason"] = reason or REASON_UNVERIFIED_NOTE
         paths = _soft_paths(text)
         if paths:
             item["paths"] = paths
@@ -835,14 +934,16 @@ def _build_summary(
 ) -> str:
     """Human summary: separate 未完成 vs 待核实; writing cutoff → 成篇未写完."""
     warn_hits, warn_files = _warning_note_stats(warnings)
-    path_only = bool(warnings) and all(g.get("reason") == REASON_PATH_HINT for g in warnings)
+    path_only = bool(warnings) and all(
+        g.get("reason") in (REASON_PATH_HINT, REASON_PATH_MISMATCH) for g in warnings
+    )
     degraded_only = bool(warnings) and all(
         g.get("reason") == REASON_DEGRADED_HANDOFF for g in warnings
     )
     warn_bit = ""
     if warn_hits:
         if path_only:
-            warn_bit = f"{warn_hits} 处路径建议"
+            warn_bit = f"{warn_hits} 处路径失配"
         elif degraded_only:
             warn_bit = f"{warn_hits} 处交接备注"
         else:
@@ -1003,10 +1104,13 @@ def build_delivery_status(
             raw_gaps.append(_annotate_gap("验收", text))
     # ③ 失败 / 未执行 / 取消的计划节点（热修已接手的取消节点不算缺口）。
     raw_gaps.extend(_node_gaps(plan, results))
-    # ③b 拒收产物（file_acceptance rejected）→ 结构化 gap + draft_ack（能力4 残差）。
+    # ③b 声明路径 vs 实际落盘（纯字符串）→ path_mismatch blocking。
+    raw_gaps.extend(_declared_path_mismatch_gaps(plan, results))
+    # ③c 拒收产物（file_acceptance rejected）→ 结构化 gap + draft_ack（能力4 残差）。
     # 与 delivered_files / synthesis「路径已核」同源；不扫盘上「缺席」散文。
     raw_gaps.extend(_artifact_rejected_gaps(artifacts))
-    # ③c B1：空交接风暴 / cancel·0 产出 → blocking + draft_ack（强制 PARTIAL 缺口清单）。
+    raw_gaps = _dedupe_gap_rows(raw_gaps)
+    # ③d B1：空交接风暴 / cancel·0 产出 → blocking + draft_ack（强制 PARTIAL 缺口清单）。
     storm = _empty_handoff_storm_gap(plan, results, files_landed=files_landed)
     if storm is not None:
         raw_gaps.append(storm)
@@ -1110,7 +1214,7 @@ def build_delivery_status(
     if not blocking and not warnings:
         state = "delivered"
     elif not blocking and warnings:
-        # 轻 B：仅 soft 自注（unverified_note）不降档；path_hint 等仍 notes。
+        # 轻 B：仅 soft 自注（unverified_note）不降档；path_mismatch 已是 blocking。
         non_self_note = [g for g in warnings if g.get("reason") != REASON_UNVERIFIED_NOTE]
         state = "delivered" if not non_self_note and delivered else "notes"
     elif files_landed:

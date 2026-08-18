@@ -10,10 +10,15 @@ from agentcore.llm.provider.protocol import LLMMessage, ToolCall
 from agentcore.runtime.always_confirm import requires_always_confirm
 from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate, tool_call_requires_approval
 from agentcore.runtime.events import EventSink, tool_use_end
+from agentcore.runtime.facts import CrossTurnRetry, cross_turn_retry_meta
 from agentcore.runtime.loop_controller import ToolAttempt
 from agentcore.tools.protocol import ToolContext, ToolSchema
 
-from .tool_exec_args import _attempt_meta_with_landing_path, _failed_tool_message
+from .tool_exec_args import (
+    _attempt_meta_with_landing_path,
+    _failed_tool_message,
+    _shell_observe_log_fields,
+)
 from .tool_failure_face import tool_failure_fields
 
 logger = get_logger(__name__)
@@ -201,6 +206,7 @@ async def _check_safety_and_approval_gates(
             status="circuit_breaker_deny",
             rule_id=breaker.rule_id,
             duration_ms=0,
+            **_shell_observe_log_fields(name, args),
         )
         return _ToolGateDenied(
             message=_failed_tool_message(tc.id, denial),
@@ -357,6 +363,7 @@ async def _check_safety_and_approval_gates(
                 tool=name,
                 status=no_gate_status,
                 duration_ms=0,
+                **_shell_observe_log_fields(name, args),
             )
             return _ToolGateDenied(
                 message=_failed_tool_message(tc.id, denial),
@@ -429,7 +436,13 @@ async def _check_safety_and_approval_gates(
                         run_id=event_run_id,
                     )
                 )
-                logger.info("tool.execute_end", tool=name, status="denied", duration_ms=0)
+                logger.info(
+                    "tool.execute_end",
+                    tool=name,
+                    status="denied",
+                    duration_ms=0,
+                    **_shell_observe_log_fields(name, args),
+                )
                 return _ToolGateDenied(
                     message=_failed_tool_message(tc.id, denial),
                     attempt=ToolAttempt(
@@ -437,7 +450,11 @@ async def _check_safety_and_approval_gates(
                         name,
                         success=False,
                         policy_failure=True,
-                        meta=_attempt_meta_with_landing_path(name, args),
+                        meta=_attempt_meta_with_landing_path(
+                            name,
+                            args,
+                            cross_turn_retry_meta(CrossTurnRetry.FUTILE),
+                        ),
                     ),
                 )
     else:

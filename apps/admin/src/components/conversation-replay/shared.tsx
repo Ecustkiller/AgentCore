@@ -27,6 +27,16 @@ export const STATUS_TONE: Record<
 const COLLAPSE_CHARS = 480;
 const COLLAPSE_LINES = 10;
 
+export function formatProcessSummary(
+  llmCount: number,
+  toolCount: number,
+): string {
+  const parts: string[] = [];
+  if (llmCount > 0) parts.push(`${llmCount} 次模型调用`);
+  if (toolCount > 0) parts.push(`${toolCount} 次工具`);
+  return parts.join(" · ") || "过程";
+}
+
 export function credentialSourceLabel(
   source: "user" | "platform" | null | undefined,
 ): string | null {

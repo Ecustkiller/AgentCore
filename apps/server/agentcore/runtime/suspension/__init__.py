@@ -704,18 +704,83 @@ SuspensionSaver = Callable[["TurnSuspension"], Awaitable[None]]
 SuspensionDeleter = Callable[[str], Awaitable[None]]
 
 
-def find_tool_call_id(transcript: list[LLMMessage], tool_name: str) -> str:
+# Parallel same-batch pauses (two ``ask_user`` in one assistant message) must each
+# claim a distinct tool_call_id. Keyed by message_id so gather tasks share it.
+_CLAIMED_PAUSE_TOOL_CALLS: dict[str, set[str]] = {}
+
+
+def find_tool_call_id(
+    transcript: list[LLMMessage],
+    tool_name: str,
+    *,
+    exclude_ids: set[str] | None = None,
+) -> str:
     """The id of the trailing ``tool_name`` tool_call in a captured CEO transcript.
 
     The pause happened inside that call, so the transcript ends with the assistant
     message that issued it; the resumed tool result must echo this id. Scans from the
-    end for the last assistant message carrying a ``tool_name`` tool_call. Empty
-    string when none is found (capture then degrades — the face skips it).
+    end for the last assistant message carrying a ``tool_name`` tool_call. ``exclude_ids``
+    skips already-claimed siblings in the same batch. Empty string when none is found
+    (capture then degrades — the face skips it).
     """
+    skip = exclude_ids or set()
     for msg in reversed(transcript):
         if msg.role != "assistant" or not msg.tool_calls:
             continue
         for tc in msg.tool_calls:
-            if tc.function.name == tool_name:
+            if tc.function.name == tool_name and tc.id not in skip:
                 return tc.id
     return ""
+
+
+def claim_next_tool_call_id(
+    message_id: str, transcript: list[LLMMessage], tool_name: str
+) -> str:
+    """Claim the next unused ``tool_name`` id on the trailing assistant message.
+
+    Does not pop the claim set: a later claim in the same persist batch must
+    still see occupied ids (the third claim returns empty, not the first id
+    again). :func:`release_claimed_pause_tool_calls_if_complete` drops the
+    entry after the batch has claimed every id.
+    """
+    key = message_id or ""
+    claimed = _CLAIMED_PAUSE_TOOL_CALLS.setdefault(key, set())
+    tool_call_id = find_tool_call_id(transcript, tool_name, exclude_ids=claimed)
+    if tool_call_id:
+        claimed.add(tool_call_id)
+    return tool_call_id
+
+
+def _trailing_named_tool_call_ids(
+    transcript: list[LLMMessage], tool_name: str
+) -> set[str]:
+    """``tool_name`` ids on the last assistant message that issued any."""
+    for msg in reversed(transcript):
+        if msg.role != "assistant" or not msg.tool_calls:
+            continue
+        ids = {tc.id for tc in msg.tool_calls if tc.function.name == tool_name}
+        if ids:
+            return ids
+    return set()
+
+
+def release_claimed_pause_tool_calls_if_complete(
+    message_id: str,
+    transcript: list[LLMMessage],
+    tool_name: str = "ask_user",
+) -> None:
+    """Pop the claim set once this round's ``tool_name`` ids are all claimed.
+
+    Persist is serialized per ``message_id``; the process dict must survive the
+    batch so sibling claims stay distinct. Pop only after a successful save
+    has claimed every trailing id — a later round on the same ``message_id``
+    can then reclaim reused model ids (e.g. ``call_0``). Not a
+    WeakValueDictionary: the entry must live across sequential persists.
+    """
+    key = message_id or ""
+    claimed = _CLAIMED_PAUSE_TOOL_CALLS.get(key)
+    if not claimed:
+        return
+    trailing = _trailing_named_tool_call_ids(transcript, tool_name)
+    if trailing and trailing <= claimed:
+        _CLAIMED_PAUSE_TOOL_CALLS.pop(key, None)

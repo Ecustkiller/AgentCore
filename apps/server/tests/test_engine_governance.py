@@ -573,6 +573,116 @@ async def test_captain_coordination_wait_aside_not_in_deliverable():
         clear_active_coordination()
 
 
+async def test_attached_inject_closing_round_keeps_body_despite_successful_tool():
+    """收口轮正文是交付物：同轮成功的非终端工具不得 narration 回滚。
+
+    Wait 已吃 ALL_COMPLETED（session 关闭、settled_via=attached_inject）后，
+    CEO 写出终稿并调仍返回 success 的 ``update_synthesis``。闸若仍把正文当旁白，
+    persist 被裁空、harvest skip 会变成零终稿。修闸后：正文保留、harvest 跳过、
+    不开第二条收口消息。
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from structlog.testing import capture_logs
+
+    import agentcore.runtime.coordination.session as session_mod
+    from agentcore.runtime.coordination.session import (
+        CoordinationSession,
+        bind_host_journal,
+        clear_active_coordination,
+        finish_detached_coordination,
+        set_active_coordination,
+    )
+    from agentcore.runtime.coordination.tools import UpdateSynthesisTool
+
+    class _HarvestJournalWriter:
+        def __init__(self) -> None:
+            self.entries: list[dict] = []
+
+        def schedule_append(self, entry: dict):
+            self.entries.append(entry)
+            loop = asyncio.get_running_loop()
+            fut: asyncio.Future[int | None] = loop.create_future()
+            fut.set_result(len(self.entries))
+            return fut
+
+        async def flush(self) -> None:
+            return None
+
+    eid = "exec-close-round-keep"
+    writer = _HarvestJournalWriter()
+    session = CoordinationSession(
+        execution_id=eid,
+        total_workers=1,
+        conversation_id="conv-close-round-keep",
+    )
+    session.turn_attached = True
+    session.all_completed_injected = True
+    session.mark_settled("attached_inject")
+    session.close()
+    bind_host_journal(session, writer=writer)
+    set_active_coordination(session)
+    sink = _RecordingSink()
+    tools = ToolRegistry()
+    tools.register(UpdateSynthesisTool(sink=sink))
+    try:
+        provider = _ScriptedProvider(
+            [
+                [
+                    _content_chunk("交付终稿：团队结论如下。"),
+                    _tool_chunk("update_synthesis", '{"draft": "不应覆盖终稿"}'),
+                ]
+            ]
+        )
+        content, _r, _u, _rounds = await react_loop(
+            messages=[LLMMessage(role="user", content="go")],
+            llm=provider,
+            tools=tools,
+            sink=sink,
+            tool_context=ToolContext.create(
+                execution_id=eid,
+                run_id="s",
+                agent_id="a",
+                backend=ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
+                user_id="u",
+            ),
+            profile=make_profile_params(max_rounds=20),
+            turn_model="m",
+            role="captain",
+            deliverable_only=True,
+            approval_gate=None,
+        )
+        assert content == "交付终稿：团队结论如下。"
+        assert session.attached_inject_visible_close is True
+        assert [e for e in sink.emitted if e.type == EventType.CONTENT_RESET] == []
+
+        with (
+            patch.object(session_mod, "_HARVEST_ATTACH_GRACE_S", 2.0),
+            patch.object(session_mod, "_HARVEST_ATTACH_POLL_S", 0.02),
+            patch(
+                "agentcore.runtime.coordination.harvest.harvest_detached_execution",
+                new_callable=AsyncMock,
+            ) as harvest,
+            capture_logs() as logs,
+        ):
+            finish_detached_coordination(session)
+            assert session.harvest_scheduled is True
+            harvest.assert_not_awaited()
+            session.turn_attached = False
+            await asyncio.sleep(0.1)
+            harvest.assert_not_awaited()
+            assert session.harvest_scheduled is False
+            assert session.settled_via == "attached_inject"
+            assert any(
+                e.get("event") == "coordination.harvest_skipped_attached_visible_close"
+                for e in logs
+            )
+            assert any(e.get("kind") == "execution_completed" for e in writer.entries)
+            assert session_mod.active_coordination(eid) is None
+    finally:
+        clear_active_coordination()
+
+
 async def test_deliverable_only_keeps_prose_when_all_tools_fail():
     """Failed non-terminal tool must not silently drop already-streamed body.
 

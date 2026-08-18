@@ -29,6 +29,7 @@ from agentcore.runtime.runs.constants import (
     DEFAULT_ON_FAILURE,
     MAX_DELEGATION_TASKS,
     MAX_RUN_RETRIES,
+    MAX_TASK_ROUNDS,
     VALID_ON_FAILURE,
 )
 from agentcore.runtime.runs.plan import RunPlan, RunPlanError
@@ -861,12 +862,17 @@ def _inline_spec(
 
 
 def _parse_max_rounds(raw: Any) -> int | None:
-    """Optional per-task ReAct round cap (repair / light posture)."""
+    """Optional per-task ReAct round cap (repair / light posture).
+
+    Values ``<1`` (and non-ints) drop to ``None`` (profile default). Values
+    above :data:`MAX_TASK_ROUNDS` are clamped — the CEO cannot request an
+    unbounded per-segment budget.
+    """
     if isinstance(raw, bool) or not isinstance(raw, int):
         return None
     if raw < 1:
         return None
-    return raw
+    return min(raw, MAX_TASK_ROUNDS)
 
 
 def _parse_replaces_run_id(raw: Any) -> str | None:

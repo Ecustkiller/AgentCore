@@ -478,3 +478,55 @@ async def test_stop_cancels_before_final_drain(monkeypatch, ledger_queue, tmp_pa
 
     assert order == ["loop_enter", "loop_cancelled", "final_drain"]
     assert ledger_queue._task is None
+
+
+class _LevelSpy:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str, dict]] = []
+
+    def _record(self, level: str, event: str, **kwargs) -> None:
+        self.events.append((level, event, kwargs))
+
+    def debug(self, event: str, **kwargs) -> None:
+        self._record("debug", event, **kwargs)
+
+    def info(self, event: str, **kwargs) -> None:
+        self._record("info", event, **kwargs)
+
+    def warning(self, event: str, **kwargs) -> None:
+        self._record("warning", event, **kwargs)
+
+    def error(self, event: str, **kwargs) -> None:
+        self._record("error", event, **kwargs)
+
+
+async def test_enqueue_and_drain_happy_path_logs_are_debug(monkeypatch, ledger_queue):
+    """Per-call enqueue/drain acks must not flood info-level jsonl (ledger is Postgres)."""
+    spy = _LevelSpy()
+    monkeypatch.setattr(queue_mod, "logger", spy)
+
+    class Repo:
+        def __init__(self, _session):
+            pass
+
+        async def record_runs(self, **_kw):
+            return 1
+
+    monkeypatch.setattr("agentcore.db.base.telemetry_session_factory", lambda: _FakeSession())
+    monkeypatch.setattr("agentcore.db.repositories.CostEventRepository", Repo)
+
+    rid = ledger_queue.enqueue_runs(
+        user_id="u1",
+        conversation_id="c1",
+        message_id="m1",
+        runs=_sample_runs(),
+        source="turn",
+    )
+    assert rid is not None
+    assert await ledger_queue.drain_once() == 1
+
+    names = [(level, event) for level, event, _ in spy.events]
+    assert ("debug", "cost.ledger_enqueued") in names
+    assert ("debug", "cost.ledger_drained") in names
+    assert ("info", "cost.ledger_enqueued") not in names
+    assert ("info", "cost.ledger_drained") not in names

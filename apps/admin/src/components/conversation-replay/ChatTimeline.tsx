@@ -1,27 +1,23 @@
-import { CopyableId } from "@/components/CopyableId";
-import { ProcessTimeline } from "@/components/conversation-replay/ProcessTimeline";
+import { ChatView } from "@/components/chat/ChatView";
+import { UserBubble } from "@/components/chat/UserBubble";
+import { chatTurnFromReplay } from "@/components/chat/chatTurn";
 import {
-  CollapsibleBody,
   EmptyPanel,
   ROLE_LABEL,
-  credentialSourceLabel,
 } from "@/components/conversation-replay/shared";
-import { Badge } from "@/components/ui/Badge";
-import {
-  harvestKindLabel,
-  isExecutionHarvestMessage,
-} from "@/lib/executionHarvest";
-import { cn, fmtCny, fmtMs, fmtTime, nanoToYuan } from "@/lib/utils";
+import { Spinner } from "@/components/ui/Spinner";
+import { isExecutionHarvestMessage } from "@/lib/executionHarvest";
+import { cn, fmtTime } from "@/lib/utils";
 import type { ReplayMessage } from "@/services/adminObservability";
-import { Users } from "lucide-react";
-import { type KeyboardEvent, useEffect, useRef } from "react";
+import { type KeyboardEvent, useEffect, useMemo, useRef } from "react";
 
 /**
- * Bubble containers are click-to-select, and they used to swallow every Enter/Space
- * that bubbled up from the controls inside them — `preventDefault` on the ancestor
- * cancels the button's own activation, so 展开全文 / 过程 / 工具 could be opened with a
- * mouse and no other way. Selecting the turn is only what *this* element was asked to
- * do; anything aimed at a nested control is left alone.
+ * User-perspective replay column. Assistant rows go through ChatView
+ * (`chatTurnFromReplay`); harvest rows stay out of this lane.
+ *
+ * Bubble containers are click-to-select. Enter/Space on a nested control must
+ * not be swallowed — selecting the turn is only what *this* element was asked
+ * to do.
  */
 function activateOnSelfKey(
   e: KeyboardEvent<HTMLDivElement>,
@@ -40,6 +36,10 @@ export function ChatTimeline({
   onSelect,
   onSelectRun,
   isAnchored,
+  hasMoreBefore = false,
+  hydratingId = null,
+  hydrateError = null,
+  onRetryHydrate,
   className,
 }: {
   messages: ReplayMessage[];
@@ -48,10 +48,18 @@ export function ChatTimeline({
   onSelect: (id: string) => void;
   onSelectRun: (runId: string) => void;
   isAnchored: (m: ReplayMessage) => boolean;
+  hasMoreBefore?: boolean;
+  hydratingId?: string | null;
+  hydrateError?: string | null;
+  onRetryHydrate?: () => void;
   /** Sizing comes from the page's layout row — this pane just scrolls inside it. */
   className?: string;
 }) {
   const refs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const visible = useMemo(
+    () => messages.filter((m) => !isExecutionHarvestMessage(m)),
+    [messages],
+  );
 
   useEffect(() => {
     if (!selectedId) return;
@@ -69,37 +77,39 @@ export function ChatTimeline({
         className,
       )}
     >
-      {messages.map((m) => (
+      {hasMoreBefore && (
+        <div
+          role="status"
+          className="rounded-lg border border-dashed border-border bg-muted/40 px-3 py-2 text-muted-foreground text-xs"
+        >
+          更早的消息已被截断，当前只显示最近窗口
+        </div>
+      )}
+      {visible.map((m) => (
         <div
           key={m.id}
-          // Bubbles keep their own height: a flex column that is allowed to scroll
-          // will otherwise squeeze every message to fit the pane it lives in.
           className="shrink-0"
           ref={(node) => {
             if (node) refs.current.set(m.id, node);
             else refs.current.delete(m.id);
           }}
         >
-          {isExecutionHarvestMessage(m) ? (
-            <SystemHarvestBubble
-              message={m}
-              selected={m.id === selectedId}
-              anchored={isAnchored(m)}
-              onSelect={() => onSelect(m.id)}
-            />
-          ) : m.role === "user" ? (
-            <UserBubble
+          {m.role === "user" ? (
+            <UserTurn
               message={m}
               selected={m.id === selectedId}
               anchored={isAnchored(m)}
               onSelect={() => onSelect(m.id)}
             />
           ) : (
-            <AssistantBubble
+            <AssistantTurn
               message={m}
               selected={m.id === selectedId}
               selectedRunId={m.id === selectedId ? selectedRunId : null}
               anchored={isAnchored(m)}
+              hydrating={m.id === hydratingId}
+              hydrateError={m.id === selectedId ? hydrateError : null}
+              onRetryHydrate={onRetryHydrate}
               onSelect={() => onSelect(m.id)}
               onSelectRun={(runId) => {
                 onSelect(m.id);
@@ -109,12 +119,12 @@ export function ChatTimeline({
           )}
         </div>
       ))}
-      {messages.length === 0 && <EmptyPanel text="该会话暂无消息" />}
+      {visible.length === 0 && <EmptyPanel text="该会话暂无用户可见消息" />}
     </div>
   );
 }
 
-function UserBubble({
+function UserTurn({
   message,
   selected,
   anchored,
@@ -129,8 +139,6 @@ function UserBubble({
     <div
       role="button"
       tabIndex={0}
-      // Which turn is open is otherwise carried by a ring alone — nothing a screen
-      // reader or a shared-link test can see.
       aria-current={selected ? "true" : undefined}
       onClick={onSelect}
       onKeyDown={(e) => activateOnSelfKey(e, onSelect)}
@@ -154,82 +162,24 @@ function UserBubble({
           </span>
           <span className="tabular-nums">{fmtTime(message.created_at)}</span>
         </div>
-        {message.content ? (
-          <CollapsibleBody content={message.content} />
-        ) : (
-          <div className="text-muted-foreground text-sm italic">（无正文）</div>
-        )}
+        <UserBubble
+          content={message.content}
+          attachments={message.attachments}
+          agentMentions={message.agent_mentions}
+        />
       </div>
     </div>
   );
 }
 
-/** Synthetic harvest closing prompt — ops-visible, not painted as a user bubble. */
-function SystemHarvestBubble({
-  message,
-  selected,
-  anchored,
-  onSelect,
-}: {
-  message: ReplayMessage;
-  selected: boolean;
-  anchored: boolean;
-  onSelect: () => void;
-}) {
-  const kindLabel = harvestKindLabel(message.harvest_kind, message.content);
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      aria-current={selected ? "true" : undefined}
-      onClick={onSelect}
-      onKeyDown={(e) => activateOnSelfKey(e, onSelect)}
-      className={cn(
-        "flex justify-start outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-xl",
-        selected && "ring-1 ring-primary/30",
-        anchored && !selected && "ring-1 ring-primary/20",
-      )}
-    >
-      <div
-        className={cn(
-          "max-w-[min(100%,42rem)] rounded-xl border border-dashed px-4 py-2.5",
-          selected
-            ? "border-primary/40 bg-primary/5"
-            : "border-border/70 bg-muted/30",
-        )}
-      >
-        <div className="mb-1 flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
-          <span className="font-medium text-foreground">系统收口</span>
-          {kindLabel && (
-            <Badge
-              tone={
-                kindLabel === "已取消"
-                  ? "warning"
-                  : kindLabel === "有失败"
-                    ? "destructive"
-                    : "success"
-              }
-            >
-              {kindLabel}
-            </Badge>
-          )}
-          <span className="tabular-nums">{fmtTime(message.created_at)}</span>
-        </div>
-        {message.content ? (
-          <CollapsibleBody content={message.content} />
-        ) : (
-          <div className="text-muted-foreground text-sm italic">（无正文）</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function AssistantBubble({
+function AssistantTurn({
   message,
   selected,
   selectedRunId,
   anchored,
+  hydrating,
+  hydrateError,
+  onRetryHydrate,
   onSelect,
   onSelectRun,
 }: {
@@ -237,14 +187,13 @@ function AssistantBubble({
   selected: boolean;
   selectedRunId: string | null;
   anchored: boolean;
+  hydrating: boolean;
+  hydrateError: string | null;
+  onRetryHydrate?: () => void;
   onSelect: () => void;
   onSelectRun: (runId: string) => void;
 }) {
-  const metrics = message.metrics;
-  const isError = metrics?.status === "error";
-  const multi = message.runs.length > 0 || metrics?.delegated;
-  const credLabel = credentialSourceLabel(message.credential_source);
-  const models = message.models ?? [];
+  const turn = chatTurnFromReplay(message);
 
   return (
     <div
@@ -266,66 +215,40 @@ function AssistantBubble({
         <span className="text-muted-foreground text-xs tabular-nums">
           {fmtTime(message.created_at)}
         </span>
-        {multi && (
-          <Badge tone="primary">
-            <Users size={10} className="mr-0.5" />
-            多 Agent
-            {metrics?.workers ? ` · ${metrics.workers}` : ""}
-          </Badge>
-        )}
-        {message.cost_total > 0 && (
-          <span className="ml-auto text-muted-foreground text-xs tabular-nums">
-            {fmtCny(nanoToYuan(message.cost_total))}
-          </span>
-        )}
       </div>
-
-      <ProcessTimeline
-        message={message}
+      {hydrating && (
+        <p
+          role="status"
+          className="mb-2 flex items-center gap-1.5 text-muted-foreground text-xs"
+        >
+          <Spinner className="size-3" />
+          正在加载终态
+        </p>
+      )}
+      {hydrateError && !hydrating && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+          <p className="text-destructive">{hydrateError}</p>
+          {onRetryHydrate && (
+            <button
+              type="button"
+              className="rounded-md border border-border px-2 py-0.5 text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRetryHydrate();
+              }}
+            >
+              重试加载终态
+            </button>
+          )}
+        </div>
+      )}
+      <ChatView
+        content={turn.content}
+        runsPayload={turn.runsPayload}
+        projected={turn.projected}
         selectedRunId={selectedRunId}
         onSelectRun={onSelectRun}
       />
-
-      {isError && metrics?.error && (
-        <div className="mt-2 rounded-lg bg-destructive/10 px-3 py-2 text-destructive text-xs">
-          {metrics.error}
-        </div>
-      )}
-
-      {(models.length > 0 || credLabel) && (
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          {credLabel && <Badge tone="neutral">{credLabel}</Badge>}
-          {models.map((m) => (
-            <span
-              key={m}
-              className="rounded-lg border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-xs text-muted-foreground"
-            >
-              {m}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {metrics && (
-        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-border border-t pt-2 text-muted-foreground text-xs">
-          <Badge tone={isError ? "destructive" : "success"}>
-            {metrics.finish_reason ?? metrics.status}
-          </Badge>
-          <span className="tabular-nums">{metrics.rounds} 轮</span>
-          <span className="tabular-nums">{fmtMs(metrics.duration_ms)}</span>
-          {metrics.delegated && (
-            <span className="tabular-nums">委派 {metrics.workers} 队员</span>
-          )}
-          {metrics.trace_id && (
-            <CopyableId
-              value={metrics.trace_id}
-              label="trace_id"
-              display={metrics.trace_id.slice(0, 8)}
-              titleHint={`${metrics.trace_id}（点击复制 → log_timeline --trace / --pack）`}
-            />
-          )}
-        </div>
-      )}
     </div>
   );
 }

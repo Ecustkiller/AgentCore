@@ -178,6 +178,12 @@ class PlatformCredentialService:
         await reload_platform_credential_pool(self._session)
         return views
 
+    async def get_credential(self, credential_id: str) -> PlatformCredentialView:
+        existing = await self._repo.get(credential_id)
+        if existing is None:
+            raise NotFoundError("平台账号不存在")
+        return self._view(existing, enc=self._encryptor())
+
     async def create_credential(
         self,
         *,

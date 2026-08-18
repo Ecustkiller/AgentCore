@@ -1,4 +1,4 @@
-"""Admin 内测群版主任命 (群级 ``chat_members.role=admin``, 非平台 admin).
+"""Admin 内测群管理员任命 (群级 ``chat_members.role=admin``, 非平台 admin).
 
 - ``GET    /v1/admin/beta-group/moderators``           list
 - ``PUT    /v1/admin/beta-group/moderators/{user_id}`` appoint
@@ -23,7 +23,7 @@ async def list_beta_group_moderators(
     _admin: AdminUser,
     svc: MessagingService = Depends(get_messaging_service),
 ):
-    """List 内测群版主 (``chat_members.role=admin``)."""
+    """List 内测群管理员 (``chat_members.role=admin``)."""
     chat_id, title, users = await svc.list_beta_group_moderators()
     data = [
         BetaGroupModerator(
@@ -48,7 +48,7 @@ async def appoint_beta_group_moderator(
     admin: AdminUser,
     svc: MessagingService = Depends(get_messaging_service),
 ):
-    """Appoint a user as 内测群版主 (ensures membership)."""
+    """Appoint a user as 内测群管理员 (ensures membership)."""
     user = await svc.set_beta_group_moderator(user_id=user_id, actor_id=admin.user_id)
     return BetaGroupModerator(
         id=user.user_id,
@@ -67,6 +67,6 @@ async def revoke_beta_group_moderator(
     admin: AdminUser,
     svc: MessagingService = Depends(get_messaging_service),
 ):
-    """Revoke 内测群版主 (role → member; stays in group)."""
+    """Revoke 内测群管理员 (role → member; stays in group)."""
     await svc.clear_beta_group_moderator(user_id=user_id, actor_id=admin.user_id)
     return StatusResponse()

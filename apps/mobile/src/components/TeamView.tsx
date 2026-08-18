@@ -20,7 +20,7 @@ import {
   type BrowserLoginSubmitKind,
   type OpenBrowserLiveOpts,
 } from "@/components/BrowserLoginDecisionCard";
-import { DebriefBlock } from "@/components/DebriefBlock";
+import { DebriefBlock, HandoffSuccessRow } from "@/components/DebriefBlock";
 import { EvidenceLedgerProvider } from "@/components/EvidenceLedgerContext";
 import { Markdown } from "@/components/Markdown";
 import { Modal } from "@/components/Modal";
@@ -32,6 +32,10 @@ import {
   toolLabel,
   toolPhaseText,
 } from "@/components/assistantLabels";
+import {
+  hasSuccessfulHandoff,
+  isSuccessfulHandoff,
+} from "@/components/handoffBrief";
 import { escalationWaitNote } from "@/lib/escalationWaitCopy";
 import { buildLedgerMap } from "@/lib/evidenceLedger";
 import { isFileReadCeilingGuidance } from "@/lib/fileReadCeiling";
@@ -1059,7 +1063,7 @@ function revisionChainFor(
 /**
  * 深度检视单个队员 (RunDetail): a mobile-native bottom-sheet reduction of the desktop RunDetail
  * drawer, pinned to one worker run. Sections mirror the desktop order (头部 → 任务/本轮焦点 →
- * 轮次/修订链 → 升级 → 收到的上下文 → 思考 → 工具明细 → 输出/交接简报 → 资源 → 关系); 诊断/审计
+ * 轮次/修订链 → 升级 → 收到的上下文 → 思考 → 工具明细 → 输出/降级简报 → 资源 → 关系); 诊断/审计
  * are intentionally omitted (power-user desktop surfaces). Reads only the fold's ProjectedTurn
  * fields + the transport-only {@link RunToolCall} side channel — no desktop import, no new fold.
  * Navigates to another run (修订链切换 / 关系跳转) via `onSelect`, which re-pins the panel.
@@ -1269,13 +1273,14 @@ function RunDetailPanel({
           </RunSection>
         )}
 
-        {run.debrief ? (
-          <DebriefBlock debrief={run.debrief} />
-        ) : run.outputSummary ? (
-          <RunSection title="结论">
-            <Markdown content={run.outputSummary} evidence />
-          </RunSection>
-        ) : null}
+        {!hasSuccessfulHandoff(toolCalls) &&
+          (run.debrief ? (
+            <DebriefBlock debrief={run.debrief} />
+          ) : run.outputSummary ? (
+            <RunSection title="结论">
+              <Markdown content={run.outputSummary} evidence />
+            </RunSection>
+          ) : null)}
 
         {hasResources && <ResourceBlock run={run} agent={agent} />}
 
@@ -1592,8 +1597,16 @@ function RunRefGroup({
 
 /** One worker tool call (RunDetail · 工具明细) — reuses the CEO-side ToolStep visual language
  *  (.tool*): 中文名 + 参数 detail + status, click to expand the raw args / result pre block. The
- *  rich 6-类 tool rendering (desktop) is intentionally NOT ported (架构决策③). */
+ *  rich 6-类 tool rendering (desktop) is intentionally NOT ported (架构决策③).
+ *  成功 handoff 例外：行即简报卡（与页脚是否跳过 DebriefBlock 同一判定）。 */
 function RunToolRow({ call }: { call: RunToolCall }) {
+  if (isSuccessfulHandoff(call.toolName, call.status)) {
+    return <HandoffSuccessRow args={call.arguments} />;
+  }
+  return <GenericRunToolRow call={call} />;
+}
+
+function GenericRunToolRow({ call }: { call: RunToolCall }) {
   const [open, setOpen] = useState(false);
   const args = Object.keys(call.arguments).length > 0 ? call.arguments : null;
   const detail = toolDetail(call.arguments);

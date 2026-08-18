@@ -1,10 +1,21 @@
 /**
  * Lightweight Markdown for admin conversation replay.
- * react-markdown + remark-gfm only — no katex / mermaid / highlight / citations.
+ * react-markdown + remark-gfm + rehype-highlight. No katex / mermaid / citations.
+ *
+ * Highlight is lowlight → `<span class="hljs-*">` at render time — no eval,
+ * workers, or theme scripts, so it holds under production `script-src 'self'`.
  */
-import { memo } from "react";
+import { type ComponentPropsWithoutRef, memo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
+import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
+
+type ReactMarkdownProps = ComponentPropsWithoutRef<typeof ReactMarkdown>;
+
+const remarkPlugins: ReactMarkdownProps["remarkPlugins"] = [remarkGfm];
+const rehypePlugins: ReactMarkdownProps["rehypePlugins"] = [
+  [rehypeHighlight, { ignoreMissing: true }],
+];
 
 const components: Components = {
   a({ href, children, ...props }) {
@@ -31,7 +42,11 @@ const components: Components = {
 export const Markdown = memo(function Markdown({ content }: { content: string }) {
   return (
     <div className="markdown-body">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
+        components={components}
+      >
         {content}
       </ReactMarkdown>
     </div>

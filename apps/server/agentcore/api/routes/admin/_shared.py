@@ -9,11 +9,14 @@ health rollup maps to the wire).
 
 from __future__ import annotations
 
+from typing import Any
+
 from agentcore.api.schemas import (
     AdminUserListItem,
     AdminUserResponse,
     ReplayRun,
     ReplaySpan,
+    RunsPayload,
     TurnHealthWindow,
 )
 from agentcore.db.models import User
@@ -73,31 +76,43 @@ def _project_spans(entries: list[dict]) -> list[ReplaySpan]:
     return spans
 
 
-def _project_runs(entries: list[dict]) -> list[ReplayRun]:
-    """Project a turn's journal to the lightweight multi-agent run list (会话复盘).
+def fold_replay_journal(
+    entries: list[dict],
+) -> tuple[list[ReplayRun], dict[str, Any] | None, RunsPayload | None]:
+    """One journal → (ReplayRun[], ProjectedTurn | None, RunsPayload | None).
 
-    Reuses the existing display fold — ``runs_from_entries`` rebuilds wire events,
-    ``project_turn`` folds the team tree — then lifts ``message_final`` content for
-    full worker text. Returns ``[]`` for plain chat (no team surface). Does NOT
-    ship ``RunsPayload.events``; tool/LLM detail stays on ``ReplaySpan``.
+    Reuses the user-end / conformance pipeline only: ``runs_from_entries`` then
+    ``project_turn(events)``. Does not synthesize a display event vector from the
+    process lane (that would reopen the retired journal→live-stream heuristic).
     """
     from agentcore.conformance.projection import project_turn
-    from agentcore.runtime.facts import FactKind
     from agentcore.runtime.journal.fold import runs_from_entries
 
     payload = runs_from_entries(entries)
     if not payload:
-        return []
+        return [], None, None
+    display = RunsPayload.model_validate(payload)
     events = payload.get("events") or []
-    if not events:
+    projected = project_turn(events) if events else None
+    return _replay_runs_from_projected(projected, entries), projected, display
+
+
+def _replay_runs_from_projected(
+    projected: dict[str, Any] | None, entries: list[dict]
+) -> list[ReplayRun]:
+    """Lift the existing lightweight ReplayRun list from a ProjectedTurn.
+
+    ``message_final`` supplies verbatim worker text (deltas are synthesized for
+    the client fold). Empty when there is no team surface.
+    """
+    from agentcore.runtime.facts import FactKind
+
+    if not projected:
         return []
-    projected = project_turn(events)
     projected_runs = projected.get("runs") or []
     if not projected_runs:
         return []
 
-    # Prefer the source message_final fact for full deliverable text (deltas are
-    # synthesized for client fold; admin wants the verbatim body).
     finals: dict[str, str] = {}
     for entry in entries:
         if entry.get("kind") != FactKind.MESSAGE_FINAL.value:
@@ -140,6 +155,17 @@ def _project_runs(entries: list[dict]) -> list[ReplayRun]:
             )
         )
     return out
+
+
+def _project_runs(entries: list[dict]) -> list[ReplayRun]:
+    """Project a turn's journal to the lightweight multi-agent run list (会话复盘).
+
+    Reuses the existing display fold — ``runs_from_entries`` rebuilds wire events,
+    ``project_turn`` folds the team tree — then lifts ``message_final`` content for
+    full worker text. Returns ``[]`` for plain chat (no team surface).
+    """
+    runs, _, _ = fold_replay_journal(entries)
+    return runs
 
 
 def _health_window(agg: dict) -> TurnHealthWindow:

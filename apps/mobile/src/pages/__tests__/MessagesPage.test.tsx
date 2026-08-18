@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/api/client", () => ({
   getTokens: () => ({ access_token: "a", refresh_token: "r" }),
+  BASE_URL: "",
 }));
 
 const { listChats } = vi.hoisted(() => ({
@@ -52,5 +53,82 @@ describe("MessagesPage", () => {
     expect(
       await screen.findByText("还没有会话。点右上角发起新聊天。"),
     ).toBeTruthy();
+  });
+
+  it("uses peer.avatar_url for DM rows and ignores chat.avatar_url", async () => {
+    const peer = {
+      id: "u2",
+      username: "alice",
+      display_name: "Alice",
+      group_role: "member" as const,
+      is_admin: false,
+      muted_by_admin: false,
+      online: false,
+    };
+    listChats.mockResolvedValue([
+      {
+        id: "c1",
+        type: "dm",
+        muted: false,
+        pinned: false,
+        state: "accepted",
+        unread: 0,
+        avatar_url: "/chats/c1.png",
+        peer: { ...peer, avatar_url: "/avatars/alice.png" },
+      },
+      {
+        id: "c2",
+        type: "dm",
+        muted: false,
+        pinned: false,
+        state: "accepted",
+        unread: 0,
+        avatar_url: "/chats/c2.png",
+        peer: { ...peer, id: "u3", username: "bob", display_name: "Bob" },
+      },
+    ]);
+    render(<MessagesPage />);
+    await screen.findByText("Alice");
+    const rows = document.querySelectorAll(".im-row");
+    expect(rows[0]?.querySelector("img")?.getAttribute("src")).toBe(
+      "/avatars/alice.png",
+    );
+    const bob = rows[1]?.querySelector(".im-avatar");
+    expect(bob?.tagName).toBe("SPAN");
+    expect(bob?.textContent).toBe("B");
+    expect(document.body.innerHTML).not.toContain("/chats/c2.png");
+    expect(document.body.innerHTML).not.toContain("/v1/users/");
+  });
+
+  it("uses chat.avatar_url as the group session icon", async () => {
+    listChats.mockResolvedValue([
+      {
+        id: "g1",
+        type: "group",
+        muted: false,
+        pinned: false,
+        state: "accepted",
+        unread: 0,
+        title: "内测群",
+        avatar_url: "/chats/g1.png",
+      },
+      {
+        id: "g2",
+        type: "group",
+        muted: false,
+        pinned: false,
+        state: "accepted",
+        unread: 0,
+        title: "无图标群",
+      },
+    ]);
+    render(<MessagesPage />);
+    await screen.findByText("内测群");
+    const rows = document.querySelectorAll(".im-row");
+    expect(rows[0]?.querySelector("img")?.getAttribute("src")).toBe(
+      "/chats/g1.png",
+    );
+    expect(rows[1]?.querySelector(".im-avatar")?.tagName).toBe("SPAN");
+    expect(rows[1]?.querySelector(".im-avatar")?.textContent).toBe("无");
   });
 });

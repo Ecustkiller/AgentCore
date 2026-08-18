@@ -356,7 +356,12 @@ async def test_record_local_turn_logs_tool_failures(monkeypatch):
         trace_id=_TRACE,
         tool_failures=[
             {"tool": "web_search", "code": "searxng_unreachable", "message": "down"},
-            {"tool": "read_url", "code": "egress_connect", "message": "connect"},
+            {"tool": "read_url", "code": "other", "message": "HTTP 403 from example.com"},
+            {
+                "tool": "file_read",
+                "code": "other",
+                "message": "Timeout: execution exceeded 30s",
+            },
         ],
     )
 
@@ -366,14 +371,56 @@ async def test_record_local_turn_logs_tool_failures(monkeypatch):
             {
                 "conversation_id": "c1",
                 "message_id": "m1",
-                "count": 2,
-                "codes": ["searxng_unreachable", "egress_connect"],
-                "tools": ["web_search", "read_url"],
+                "count": 3,
+                "codes": ["searxng_unreachable", "other", "other"],
+                "tools": ["web_search", "read_url", "file_read"],
+                "messages": [
+                    "down",
+                    "HTTP 403 from example.com",
+                    "Timeout: execution exceeded 30s",
+                ],
             },
         )
     ]
     finalize.assert_awaited_once()
     assert "tool_failures" not in finalize.await_args.kwargs
+
+
+async def test_record_local_turn_caps_logged_failure_messages(monkeypatch):
+    logged: list[tuple] = []
+
+    class _Logger:
+        def info(self, event, **kwargs):
+            logged.append((event, kwargs))
+
+    monkeypatch.setattr(local_turn_mod, "logger", _Logger())
+    finalize = AsyncMock(
+        return_value={
+            "user_message_id": "u1",
+            "assistant_message_id": "a1",
+            "title": None,
+            "followups": None,
+            "noop": False,
+        }
+    )
+    monkeypatch.setattr(
+        local_turn_mod,
+        "get_cloud_store",
+        lambda: type("S", (), {"finalize": finalize})(),
+    )
+
+    await record_local_turn(
+        conversation_id="c1",
+        user_id="u1",
+        user_message="hi",
+        assistant_content="ok",
+        user_message_id="u1",
+        message_id="m1",
+        trace_id=_TRACE,
+        tool_failures=[{"tool": "read_url", "code": "other", "message": "x" * 250}],
+    )
+
+    assert logged[0][1]["messages"] == ["x" * 200]
 
 
 async def test_record_local_turn_skips_log_when_no_failures(monkeypatch):

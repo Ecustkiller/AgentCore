@@ -302,7 +302,9 @@ class ConversationRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_by_id_unscoped(self, conversation_id: str) -> Conversation | None:
+    async def get_by_id_unscoped(
+        self, conversation_id: str, *, include_deleted: bool = False
+    ) -> Conversation | None:
         """Cross-owner fetch for trusted internal / admin callers — the turn pipeline,
         background consolidation/compaction, admin cross-user views — that operate on an
         already-authorized ``conversation_id`` without a user in hand.
@@ -310,13 +312,15 @@ class ConversationRepository:
         The explicit ``_unscoped`` name keeps the un-scoped surface greppable and out of
         user-facing routes (SEC-002); it is not reachable from a user request without an
         upstream owner check.
+
+        ``include_deleted`` is for admin tombstone views (名册默认含软删，复盘必须对得上).
+        The turn pipeline and other product callers must keep the default (False) so a
+        soft-deleted conversation stays invisible to owner-scoped work.
         """
-        result = await self._session.execute(
-            select(Conversation).where(
-                Conversation.id == conversation_id,
-                Conversation.deleted_at.is_(None),
-            )
-        )
+        cond = [Conversation.id == conversation_id]
+        if not include_deleted:
+            cond.append(Conversation.deleted_at.is_(None))
+        result = await self._session.execute(select(Conversation).where(*cond))
         return result.scalar_one_or_none()
 
     async def get_folder_id(self, conversation_id: str) -> str | None:

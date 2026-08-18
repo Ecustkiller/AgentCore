@@ -358,14 +358,50 @@ export async function opDelete(
   }
 }
 
+/**
+ * Cloud scratch → organize: dest is local; src bytes ride COPY (not write_bytes).
+ * Same no-overwrite / pathGuard as path-to-path copy.
+ */
+export async function opCopyFromBytes(
+  dstRoot: StoredRoot,
+  dst: string,
+  base64Data: string,
+): Promise<WorkspaceOpResult> {
+  const dstTarget = await resolveWritable(dstRoot, dst);
+  if (!dstTarget) return opErr("OutsideWorkspace", dst);
+  if (dstTarget === dstRoot.absPath) return opErr("OutsideWorkspace", dst);
+  let dstExists = true;
+  try {
+    await fs.lstat(dstTarget);
+  } catch {
+    dstExists = false;
+  }
+  if (dstExists) return opErr("AlreadyExists", dst);
+  try {
+    await fs.mkdir(dirname(dstTarget), { recursive: true });
+    await atomicWrite(dstTarget, Buffer.from(base64Data, "base64"));
+  } catch (e) {
+    return opErr("WorkspaceIOError", toReason(e));
+  }
+  return opOk(null);
+}
+
+/**
+ * Copy ``src`` under ``srcRoot`` to ``dst`` under ``dstRoot``.
+ *
+ * Same-root copy passes the same object twice. Cross-root (workspace → organize)
+ * still runs ``resolveLexical`` / ``realInside`` on the source root and
+ * ``resolveWritable`` on the dest root — same algorithms, separate roots.
+ */
 export async function opCopy(
-  root: StoredRoot,
+  srcRoot: StoredRoot,
+  dstRoot: StoredRoot,
   src: string,
   dst: string,
 ): Promise<WorkspaceOpResult> {
-  const srcAbs = resolveLexical(root, src);
+  const srcAbs = resolveLexical(srcRoot, src);
   if (!srcAbs) return opErr("OutsideWorkspace", src);
-  if (srcAbs === root.absPath) return opErr("OutsideWorkspace", src);
+  if (srcAbs === srcRoot.absPath) return opErr("OutsideWorkspace", src);
   try {
     await fs.lstat(srcAbs);
   } catch (e) {
@@ -374,16 +410,16 @@ export async function opCopy(
     }
     return opErr("WorkspaceIOError", toReason(e));
   }
-  const srcReal = await realInside(root, srcAbs);
+  const srcReal = await realInside(srcRoot, srcAbs);
   if (!srcReal.ok) {
     return srcReal.code === "out_of_root"
       ? opErr("OutsideWorkspace", src)
       : opErr("PathNotFound", src);
   }
 
-  const dstTarget = await resolveWritable(root, dst);
+  const dstTarget = await resolveWritable(dstRoot, dst);
   if (!dstTarget) return opErr("OutsideWorkspace", dst);
-  if (dstTarget === root.absPath) return opErr("OutsideWorkspace", dst);
+  if (dstTarget === dstRoot.absPath) return opErr("OutsideWorkspace", dst);
 
   // 禁止把目录复制进自身或其子树（否则 fs.cp 会自我递归）。
   const intoRel = relative(srcReal.path, dstTarget);

@@ -1337,6 +1337,7 @@ def test_ask_user_midtask_skill_teaches_fork_annotate_and_nonblocking():
     assert "禁止" in body and "文件名" in body
     # 口头同意闭环 + 歧义 2～3 候选（非系统选文件夹）+ 失败分型
     assert "口头同意" in body
+    assert "先写工作区" in body and "file_copy" in body
     assert "等待确认" in body and "禁止" in body
     assert "2～3" in body or "2-3" in body
     assert "失败分型" in body

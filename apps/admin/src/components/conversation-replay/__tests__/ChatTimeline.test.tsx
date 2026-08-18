@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 /**
- * Conversation replay chat-layout pins:
- * - user/assistant bubbles + process tool summary
- * - inline team graph click → onSelectRun (dock opens via parent)
- * - worker prose stays out of the timeline (in dock, not ProcessNode bodies)
+ * Conversation replay main column (user perspective):
+ * - user/assistant bubbles via UserBubble + ChatView
+ * - execution_harvest stays out of this lane
+ * - worker prose stays out of the timeline (in dock)
+ * - team node click → onSelectRun (dock opens via parent)
  */
 import { ChatTimeline } from "@/components/conversation-replay/ChatTimeline";
 import { InspectorPanel } from "@/components/conversation-replay/InspectorPanel";
@@ -68,6 +69,9 @@ function msg(p: Partial<ReplayMessage> & { id: string; role: string }): ReplayMe
     models: [],
     origin: null,
     runs: [],
+    runs_payload: null,
+    projected: null,
+    has_final_state: false,
     spans: [],
     trace_id: null,
     ...p,
@@ -75,7 +79,7 @@ function msg(p: Partial<ReplayMessage> & { id: string; role: string }): ReplayMe
 }
 
 describe("ChatTimeline chat layout", () => {
-  it("renders user bubble and assistant process + final body", () => {
+  it("renders user bubble and assistant ChatView body", () => {
     const messages: ReplayMessage[] = [
       msg({ id: "u1", role: "user", content: "帮我查一下" }),
       msg({
@@ -114,12 +118,52 @@ describe("ChatTimeline chat layout", () => {
 
     expect(screen.getByText("帮我查一下")).toBeTruthy();
     expect(screen.getByText("查完了，结论如下。")).toBeTruthy();
-    expect(screen.getByText("1 次模型调用 · 1 次工具")).toBeTruthy();
-    // Collapsed by default — tool name not visible until expand
+    expect(screen.getByLabelText("对话终态")).toBeTruthy();
+    // Span ops left the main column — not folded into ChatView, not reverse-engineered.
+    expect(screen.queryByText("1 次模型调用 · 1 次工具")).toBeNull();
     expect(screen.queryByText("web_search")).toBeNull();
   });
 
-  it("renders execution_harvest synthetic row as 系统收口 (not 用户)", () => {
+  it("paints user attachment and @Agent chips without download links", () => {
+    const messages: ReplayMessage[] = [
+      msg({
+        id: "u1",
+        role: "user",
+        content: "看这份",
+        attachments: [
+          {
+            binary: false,
+            kind: "file",
+            name: "brief.pdf",
+            path: "attachments/brief.pdf",
+            size_bytes: 2048,
+            truncated: false,
+          },
+        ],
+        agent_mentions: [{ agent_id: "researcher", role: "调研员" }],
+      }),
+    ];
+
+    render(
+      <ChatTimeline
+        messages={messages}
+        selectedId={null}
+        selectedRunId={null}
+        onSelect={vi.fn()}
+        onSelectRun={vi.fn()}
+        isAnchored={() => false}
+      />,
+    );
+
+    expect(screen.getByLabelText("@Agent").textContent).toContain("@调研员");
+    expect(screen.getByLabelText("附件").textContent).toContain("brief.pdf");
+    expect(screen.getByText("文件")).toBeTruthy();
+    expect(
+      screen.queryByRole("link", { name: /brief\.pdf/ }),
+    ).toBeNull();
+  });
+
+  it("omits execution_harvest from the user-facing timeline", () => {
     const messages: ReplayMessage[] = [
       msg({
         id: "h1",
@@ -147,17 +191,18 @@ describe("ChatTimeline chat layout", () => {
       />,
     );
 
-    expect(screen.getByText("系统收口")).toBeTruthy();
-    expect(screen.getByText("已取消")).toBeTruthy();
+    expect(screen.queryByText("系统收口")).toBeNull();
+    expect(screen.queryByText("已取消")).toBeNull();
     expect(screen.queryByText("用户")).toBeNull();
     expect(
-      screen.getByText(
+      screen.queryByText(
         "【系统收口】后台团队任务已取消或中断。请基于已完成部分向老板简要收尾。",
       ),
-    ).toBeTruthy();
+    ).toBeNull();
+    expect(screen.getByText("按已完成部分收尾。")).toBeTruthy();
   });
 
-  it("falls back to 系统收口 when only 【系统收口】 prefix is present", () => {
+  it("omits prefix-only harvest rows from the timeline too", () => {
     const messages: ReplayMessage[] = [
       msg({
         id: "h1",
@@ -177,9 +222,10 @@ describe("ChatTimeline chat layout", () => {
       />,
     );
 
-    expect(screen.getByText("系统收口")).toBeTruthy();
-    expect(screen.getByText("已完成")).toBeTruthy();
+    expect(screen.queryByText("系统收口")).toBeNull();
+    expect(screen.queryByText("已完成")).toBeNull();
     expect(screen.queryByText("用户")).toBeNull();
+    expect(screen.getByText("该会话暂无用户可见消息")).toBeTruthy();
   });
 
   it("does not dump worker body into the timeline; graph click selects run", () => {
@@ -199,6 +245,17 @@ describe("ChatTimeline chat layout", () => {
             status: "completed",
           }),
         ],
+        projected: {
+          runs: [
+            {
+              id: "r-worker",
+              role: "研究员",
+              status: "completed",
+              task: "搜集资料",
+            },
+          ],
+          progress: { completed: 1, total: 1 },
+        },
       }),
     ];
 
@@ -214,28 +271,30 @@ describe("ChatTimeline chat layout", () => {
     );
 
     expect(screen.getByText("CEO 汇总")).toBeTruthy();
-    expect(screen.getByText("协作 · 1 队员")).toBeTruthy();
+    expect(screen.getByLabelText("团队")).toBeTruthy();
     expect(screen.queryByText(workerBody)).toBeNull();
 
     fireEvent.click(screen.getByText("研究员"));
     expect(onSelectRun).toHaveBeenCalledWith("r-worker");
   });
 
-  it("气泡不再吞掉内部控件的键盘事件（折叠区块可键盘展开）", () => {
+  it("气泡不再吞掉内部控件的键盘事件（协作图节点可键盘点选）", () => {
     const onSelect = vi.fn();
+    const onSelectRun = vi.fn();
     const messages: ReplayMessage[] = [
       msg({
         id: "a1",
         role: "assistant",
         content: "结论",
-        spans: [
-          span({
-            kind: "tool",
-            name: "web_search",
-            args_preview: "q=foo",
-            result_preview: "3 hits",
-          }),
-        ],
+        projected: {
+          runs: [
+            {
+              id: "r-worker",
+              role: "研究员",
+              status: "completed",
+            },
+          ],
+        },
       }),
     ];
 
@@ -245,23 +304,77 @@ describe("ChatTimeline chat layout", () => {
         selectedId="a1"
         selectedRunId={null}
         onSelect={onSelect}
-        onSelectRun={vi.fn()}
+        onSelectRun={onSelectRun}
         isAnchored={() => false}
       />,
     );
 
-    // 回车落在「过程」折叠按钮上：气泡若照旧 preventDefault，浏览器就不会派发 click，
-    // 折叠区块便只剩鼠标能开。
-    const toggle = screen.getByText("1 次工具");
-    fireEvent.keyDown(toggle, { key: "Enter" });
-    fireEvent.keyDown(toggle, { key: " " });
+    const node = screen.getByText("研究员").closest("button");
+    expect(node).toBeTruthy();
+    fireEvent.keyDown(node as HTMLElement, { key: "Enter" });
+    fireEvent.keyDown(node as HTMLElement, { key: " " });
     expect(onSelect).not.toHaveBeenCalled();
 
-    // 落在气泡自身上的回车仍然选中该回合。
-    const bubble = toggle.closest('[role="button"]');
+    const bubble = (node as HTMLElement).parentElement?.closest(
+      '[role="button"]',
+    );
     expect(bubble).toBeTruthy();
     fireEvent.keyDown(bubble as HTMLElement, { key: "Enter" });
     expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a truncation banner when earlier messages were cut", () => {
+    render(
+      <ChatTimeline
+        messages={[msg({ id: "a1", role: "assistant", content: "最近一条" })]}
+        selectedId={null}
+        selectedRunId={null}
+        onSelect={vi.fn()}
+        onSelectRun={vi.fn()}
+        isAnchored={() => false}
+        hasMoreBefore
+      />,
+    );
+
+    expect(
+      screen.getByRole("status").textContent,
+    ).toContain("更早的消息已被截断");
+  });
+
+  it("shows a loading status while a turn's final state hydrates", () => {
+    render(
+      <ChatTimeline
+        messages={[msg({ id: "a1", role: "assistant", content: "最近一条" })]}
+        selectedId="a1"
+        selectedRunId={null}
+        onSelect={vi.fn()}
+        onSelectRun={vi.fn()}
+        isAnchored={() => false}
+        hydratingId="a1"
+      />,
+    );
+
+    expect(screen.getByRole("status").textContent).toContain("正在加载终态");
+    expect(screen.getByText("最近一条")).toBeTruthy();
+  });
+
+  it("offers a retry when hydrating final state failed", () => {
+    const onRetry = vi.fn();
+    render(
+      <ChatTimeline
+        messages={[msg({ id: "a1", role: "assistant", content: "最近一条" })]}
+        selectedId="a1"
+        selectedRunId={null}
+        onSelect={vi.fn()}
+        onSelectRun={vi.fn()}
+        isAnchored={() => false}
+        hydrateError="发生未知错误"
+        onRetryHydrate={onRetry}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "重试加载终态" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -329,5 +442,34 @@ describe("InspectorPanel worker dock", () => {
     expect(screen.queryByText("执行")).toBeNull();
     expect(screen.queryByText("检视")).toBeNull();
     expect(screen.getByText("写手")).toBeTruthy();
+  });
+
+  it("keeps harvest attribution in the dock, not as a user bubble", () => {
+    const harvest = msg({
+      id: "h1",
+      role: "user",
+      origin: "execution_harvest",
+      harvest_kind: "cancelled",
+      content:
+        "【系统收口】后台团队任务已取消或中断。请基于已完成部分向老板简要收尾。",
+    });
+
+    render(
+      <InspectorPanel
+        message={harvest}
+        selectedRunId={null}
+        onSelectRun={vi.fn()}
+        onClearRun={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByText("系统收口").length).toBeGreaterThan(0);
+    expect(screen.getByText("已取消")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "【系统收口】后台团队任务已取消或中断。请基于已完成部分向老板简要收尾。",
+      ),
+    ).toBeTruthy();
   });
 });

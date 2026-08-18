@@ -10,9 +10,11 @@ import { LoginPage } from "@/pages/LoginPage";
 import { MfaSetupPage } from "@/pages/MfaSetupPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 import { OverviewPage } from "@/pages/OverviewPage";
+import { PreviewPage } from "@/pages/PreviewPage";
 import { ReplayPage } from "@/pages/ReplayPage";
 import { BetaGroupPage } from "@/pages/BetaGroupPage";
 import { NoticesPage } from "@/pages/NoticesPage";
+import { PlatformQuotaPage } from "@/pages/PlatformQuotaPage";
 import { SystemPage } from "@/pages/SystemPage";
 import { UsersPage } from "@/pages/UsersPage";
 import { setUnauthorizedHandler } from "@/services/api";
@@ -101,9 +103,11 @@ export function App() {
           <Route path="conversations" element={<Navigate to="/conversations/conversations" replace />} />
           <Route path="conversations/:segment" element={<ConversationsPage />} />
           <Route path="replay/:conversationId" element={<ReplayPage />} />
+          <Route path="preview" element={<PreviewPage />} />
           <Route path="audit" element={<AuditPage />} />
           <Route path="notices" element={<NoticesPage />} />
           <Route path="beta-group" element={<BetaGroupPage />} />
+          <Route path="quota" element={<PlatformQuotaPage />} />
           <Route path="system" element={<SystemPage />} />
           <Route path="account" element={<AccountPage />} />
           <Route path="*" element={<NotFoundPage />} />

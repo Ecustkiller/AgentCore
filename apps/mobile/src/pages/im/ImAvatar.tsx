@@ -1,19 +1,12 @@
 import { BASE_URL } from "@/api/client";
-// IM avatar circle: public user avatar URLs work as bare <img src> (no Bearer).
-// Missing / broken images fall back to the name initial — same pattern as desktop
-// ChatAvatar, plus onError so we can try `/v1/users/{id}/avatar` without a
-// prior "has avatar" flag (ChatParticipant has no avatar_url).
+// IM avatar circle: only a server-provided url (relative paths get BASE_URL).
+// Missing / broken images fall back to the name initial.
 import { useState } from "react";
 
 /** Resolve a backend-relative avatar path for <img src>. */
 export function avatarSrc(url: string | null | undefined): string | null {
   if (!url) return null;
   return url.startsWith("/") ? `${BASE_URL}${url}` : url;
-}
-
-/** Public avatar path for a user id (404 when unset — ImAvatar falls back). */
-export function userAvatarPath(userId: string): string {
-  return `/v1/users/${userId}/avatar`;
 }
 
 /** First character for a fallback avatar (CJK-safe). */

@@ -8,6 +8,8 @@ export type DailyTurns = components["schemas"]["DailyTurns"];
 export type TurnMetricLine = components["schemas"]["TurnMetricLine"];
 export type AdminConversationReplay =
   components["schemas"]["AdminConversationReplay"];
+export type AdminReplayTurnFinalState =
+  components["schemas"]["AdminReplayTurnFinalState"];
 export type ReplayMessage = components["schemas"]["ReplayMessage"];
 export type ReplayConversation = components["schemas"]["ReplayConversation"];
 export type ReplaySpan = components["schemas"]["ReplaySpan"];
@@ -32,5 +34,19 @@ export async function fetchConversationReplay(
 ): Promise<AdminConversationReplay> {
   return api.get<AdminConversationReplay>(
     `/v1/admin/observability/conversations/${encodeURIComponent(conversationId)}`,
+  );
+}
+
+/**
+ * One assistant turn's user-end final state (`runs_payload` + `projected`).
+ * The conversation list omits this pair; call after the operator opens a turn
+ * whose `has_final_state` is true.
+ */
+export async function fetchReplayTurnFinalState(
+  conversationId: string,
+  messageId: string,
+): Promise<AdminReplayTurnFinalState> {
+  return api.get<AdminReplayTurnFinalState>(
+    `/v1/admin/observability/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/final-state`,
   );
 }

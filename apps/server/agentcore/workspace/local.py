@@ -41,6 +41,8 @@ from agentcore.workspace._paths import normalize_workspace_path
 from agentcore.workspace.channel import WorkspaceChannel, WorkspaceOp
 from agentcore.workspace.external_mounts import (
     ExternalMount,
+    cross_root_copy_error,
+    cross_root_move_error,
     external_mutation_allowed,
     external_ns,
     is_external_namespace,
@@ -66,6 +68,7 @@ from agentcore.workspace.protocol import (
     ReplaceOutcome,
     TreeEntry,
     TreeResult,
+    WorkspaceIOError,
 )
 
 if TYPE_CHECKING:
@@ -473,18 +476,62 @@ class LocalWorkspace:
     async def copy(self, src: str, dst: str) -> None:
         src_root, src_rel, src_alias = self._route(src, write=False)
         dst_root, dst_rel, dst_alias = self._route(dst, write=True, op="copy")
-        if src_alias != dst_alias or src_root != dst_root:
+        copy_err = cross_root_copy_error(src_alias, dst_alias)
+        if copy_err:
+            raise OutsideWorkspace(copy_err)
+        if src_root == dst_root:
+            await self._channel.request(
+                WorkspaceOp.COPY, {"src": src_rel, "dst": dst_rel}, root_id=src_root
+            )
+        elif src_alias is None and dst_alias is not None:
+            # Workspace → organize: dest root is the mutation target (copy is
+            # already on the organize allow-set). ``src_root_id`` lets the
+            # desktop resolve src against the workspace root independently —
+            # same guard algorithm, separate root, not a weakened boundary.
+            src_id = src_root if src_root is not None else self._channel.root_id
+            if not (isinstance(src_id, str) and src_id.strip()):
+                # Cloud scratch lives on the API disk — path copy would look for
+                # src inside the organize root. Use copy_from_bytes instead.
+                raise WorkspaceIOError("工作区源不在本机，无法按路径复制到授权目录")
+            await self._channel.request(
+                WorkspaceOp.COPY,
+                {"src": src_rel, "dst": dst_rel, "src_root_id": src_id},
+                root_id=dst_root,
+            )
+        else:
             raise OutsideWorkspace("不能跨会话授权目录与工作区复制文件")
+        self._mark_mutated()
+
+    def ensure_copy_dest(self, dst: str) -> None:
+        """Raise if ``dst`` is not a copy-allowed dest (readonly / write deny)."""
+        self._route(dst, write=True, op="copy")
+
+    async def copy_from_bytes(self, dst: str, data: bytes) -> None:
+        """Place ``data`` at dest via COPY (organize allow-set). Src is not local.
+
+        Not ``write_bytes``: organize still denies write; copy is already allowed
+        and keeps the no-overwrite contract.
+        """
+        max_bytes = int(settings.workspace_upload_max_bytes)
+        if len(data) > max_bytes:
+            raise WorkspaceIOError(f"文件超出 {max_bytes} 字节的交付上限")
+        root_id, rel, _ = self._route(dst, write=True, op="copy")
         await self._channel.request(
-            WorkspaceOp.COPY, {"src": src_rel, "dst": dst_rel}, root_id=src_root
+            WorkspaceOp.COPY,
+            {
+                "dst": rel,
+                "src_data": base64.b64encode(data).decode("ascii"),
+            },
+            root_id=root_id,
         )
         self._mark_mutated()
 
     async def move(self, src: str, dst: str) -> None:
         src_root, src_rel, src_alias = self._route(src, write=True, op="move")
         dst_root, dst_rel, dst_alias = self._route(dst, write=True, op="move")
-        if src_alias != dst_alias or src_root != dst_root:
-            raise OutsideWorkspace("不能跨会话授权目录与工作区移动文件")
+        move_err = cross_root_move_error(src_alias, dst_alias)
+        if move_err or src_root != dst_root:
+            raise OutsideWorkspace(move_err or "不能跨会话授权目录与工作区移动文件")
         await self._channel.request(
             WorkspaceOp.MOVE, {"src": src_rel, "dst": dst_rel}, root_id=src_root
         )

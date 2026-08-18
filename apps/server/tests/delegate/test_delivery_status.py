@@ -10,9 +10,9 @@ from agentcore.runtime.delegate.delivery_status import (
     maybe_emit_delivery_status,
 )
 from agentcore.runtime.events import EventSink, EventType
-from agentcore.runtime.runs.file_acceptance import build_file_acceptance
+from agentcore.runtime.runs.file_acceptance import REASON_PATH_MISMATCH, build_file_acceptance
 from agentcore.runtime.runs.plan import RunPlan
-from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
+from agentcore.runtime.runs.types import Deliverable, RunPhase, RunSpec, RunState
 from agentcore.tools.builtin.delegate import DelegateTool
 from agentcore.tools.registry import ToolRegistry
 from tests.delegate.conftest import LocalBackend, Provider, ctx, local_ctx
@@ -599,9 +599,16 @@ def test_soft_unverified_note_only_is_delivered_not_notes():
     assert payload["actions"] == []
 
 
-def test_unverified_note_mixed_with_path_hint_stays_notes():
-    """轻 B 不解耦路径对账：unverified_note + path_hint → 仍 notes。"""
-    plan = _plan(RunSpec(run_id="w1", task="写调研", role="调研员"))
+def test_unverified_note_mixed_with_path_mismatch_is_partial():
+    """路径失配为 blocking：unverified_note + 声明目录未落 → partial，错位文件不进 delivered。"""
+    plan = _plan(
+        RunSpec(
+            run_id="w1",
+            task="写调研",
+            role="调研员",
+            deliverable=Deliverable(form="files", artifact_dir="docs/research"),
+        )
+    )
     results = {
         "w1": RunState(
             phase=RunPhase.COMPLETED,
@@ -623,10 +630,12 @@ def test_unverified_note_mixed_with_path_hint_stays_notes():
     }
     payload = build_delivery_status(plan, results, execution_id="e-mix-soft")
     assert payload is not None
-    assert payload["state"] == "notes"
+    assert payload["state"] == "partial"
+    assert payload["state"] != "delivered"
+    assert "findings.md" not in payload["delivered_files"]
     reasons = {g.get("reason") for g in payload["gaps"]}
     assert "unverified_note" in reasons
-    assert "path_hint" in reasons
+    assert REASON_PATH_MISMATCH in reasons
 
 
 def test_overlay_soft_criteria_gaps_are_delivered_not_partial():
@@ -659,9 +668,100 @@ def test_overlay_soft_criteria_gaps_are_delivered_not_partial():
     assert payload["actions"] == []
 
 
-def test_artifact_dir_path_hint_only_is_notes_not_partial():
-    """Accepted files + only artifact_dir path suggestion → notes (not partial)."""
-    plan = _plan(RunSpec(run_id="w1", task="调研 Miro 落盘", role="竞品分析师"))
+def test_declared_path_a_landed_b_is_mismatch_not_in_delivered_files():
+    """声明 A 实际落 B → 失配失败；B 不得 accepted / 不得进 delivered_files。"""
+    declared = "external/AgentCode/research/01-topic.md"
+    landed = "docs/01-topic.md"
+    plan = _plan(
+        RunSpec(
+            run_id="w1",
+            task="写调研",
+            role="调研员",
+            deliverable=Deliverable(form="files", artifacts=[declared]),
+        )
+    )
+    results = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="ok",
+            files_touched=[landed],
+            file_acceptance=_accepted(landed),
+        )
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-path-mismatch")
+    assert payload is not None
+    assert payload["state"] == "partial"
+    assert payload["state"] != "delivered"
+    assert payload["delivered_files"] == []
+    assert landed not in payload["delivered_files"]
+    by_path = {a["path"]: a for a in payload["artifacts"]}
+    assert by_path[landed]["status"] == "rejected"
+    assert by_path[landed]["reason"] == REASON_PATH_MISMATCH
+    mismatch = [g for g in payload["gaps"] if g.get("reason") == REASON_PATH_MISMATCH]
+    assert mismatch
+    assert any(declared in (g.get("description") or "") for g in mismatch)
+    assert all(g.get("severity") != "warning" for g in mismatch)
+
+
+def test_declared_path_match_still_delivered():
+    """声明路径与落盘一致 → 仍可 accepted / delivered。"""
+    path = "external/AgentCode/research/01-topic.md"
+    plan = _plan(
+        RunSpec(
+            run_id="w1",
+            task="写调研",
+            role="调研员",
+            deliverable=Deliverable(form="files", artifacts=[path]),
+        )
+    )
+    results = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="ok",
+            files_touched=[path],
+            file_acceptance=_accepted(path),
+        )
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-path-ok")
+    assert payload is not None
+    assert payload["state"] == "delivered"
+    assert payload["delivered_files"] == [path]
+
+
+def test_workspace_prefix_declared_matches_relative_landing():
+    """``/workspace/A`` 与相对 ``A`` 是同一路径（normalize），不是失配。"""
+    plan = _plan(
+        RunSpec(
+            run_id="w1",
+            task="写首页",
+            role="前端",
+            deliverable=Deliverable(form="files", artifacts=["/workspace/index.html"]),
+        )
+    )
+    results = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="ok",
+            files_touched=["index.html"],
+            file_acceptance=_accepted("index.html"),
+        )
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-ws-norm")
+    assert payload is not None
+    assert payload["state"] == "delivered"
+    assert payload["delivered_files"] == ["index.html"]
+
+
+def test_artifact_dir_landed_outside_is_mismatch_not_delivered():
+    """仅声明 artifact_dir 时，落到目录外的文件不得进 delivered_files。"""
+    plan = _plan(
+        RunSpec(
+            run_id="w1",
+            task="调研 Miro 落盘",
+            role="竞品分析师",
+            deliverable=Deliverable(form="files", artifact_dir="docs/research"),
+        )
+    )
     results = {
         "w1": RunState(
             phase=RunPhase.COMPLETED,
@@ -682,18 +782,29 @@ def test_artifact_dir_path_hint_only_is_notes_not_partial():
     }
     payload = build_delivery_status(plan, results, execution_id="e-adir")
     assert payload is not None
-    assert payload["state"] == "notes"
-    assert payload["gaps"][0]["severity"] == "warning"
-    assert payload["gaps"][0]["reason"] == "path_hint"
-    assert "约定文档目录" in payload["gaps"][0]["description"]
-    assert "路径建议" in payload["summary"]
-    assert payload["delivered_files"] == ["miro-research.md"]
-    assert payload["actions"] == []
+    assert payload["state"] == "partial"
+    assert payload["state"] != "delivered"
+    assert payload["delivered_files"] == []
+    assert payload["artifacts"][0]["status"] == "rejected"
+    assert payload["artifacts"][0]["reason"] == REASON_PATH_MISMATCH
+    assert any(g.get("reason") == REASON_PATH_MISMATCH for g in payload["gaps"])
+    assert all(
+        g.get("severity") != "warning"
+        for g in payload["gaps"]
+        if g.get("reason") == REASON_PATH_MISMATCH
+    )
 
 
-def test_artifact_dir_path_hint_from_warnings_alone_is_notes():
-    """Raw contract warning text (no pre-stamped severity) still soft via markers."""
-    plan = _plan(RunSpec(run_id="w1", task="调研", role="研究员"))
+def test_artifact_dir_path_mismatch_from_warnings_alone_is_blocking():
+    """未预盖 severity 的契约文案经 marker 升为 path_mismatch blocking。"""
+    plan = _plan(
+        RunSpec(
+            run_id="w1",
+            task="调研",
+            role="研究员",
+            deliverable=Deliverable(form="files", artifact_dir="docs/research"),
+        )
+    )
     results = {
         "w1": RunState(
             phase=RunPhase.COMPLETED,
@@ -707,28 +818,11 @@ def test_artifact_dir_path_hint_from_warnings_alone_is_notes():
     }
     payload = build_delivery_status(plan, results, execution_id="e-adir-warn")
     assert payload is not None
-    assert payload["state"] == "notes"
-    assert payload["gaps"][0]["severity"] == "warning"
-    assert payload["gaps"][0]["reason"] == "path_hint"
-
-
-def test_declared_artifact_path_mismatch_is_notes_not_partial():
-    """Sibling path-reconciliation warning (declared artifacts) stays soft too."""
-    plan = _plan(RunSpec(run_id="w1", task="写 README", role="文档"))
-    results = {
-        "w1": RunState(
-            phase=RunPhase.COMPLETED,
-            content="ok",
-            files_touched=["other.md"],
-            file_acceptance=_accepted("other.md"),
-            warnings=["声明的交付物路径未落盘：`README.md`"],
-        )
-    }
-    payload = build_delivery_status(plan, results, execution_id="e-art-path")
-    assert payload is not None
-    assert payload["state"] == "notes"
-    assert payload["gaps"][0]["severity"] == "warning"
-    assert payload["gaps"][0]["reason"] == "path_hint"
+    assert payload["state"] == "partial"
+    assert payload["delivered_files"] == []
+    mismatch = [g for g in payload["gaps"] if g.get("reason") == REASON_PATH_MISMATCH]
+    assert mismatch
+    assert all(g.get("severity") != "warning" for g in mismatch)
 
 
 def test_partial_writing_cutoff_summary_without_continue_writing():

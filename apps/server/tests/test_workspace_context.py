@@ -170,6 +170,7 @@ def test_cloud_scratch_facts():
     assert "external_mount_readonly" in out
     assert "grant_organize_folder" in out
     assert "与工作区绑定正交" in out
+    assert "先写工作区" in out and "file_copy" in out
     assert "区外目录授权需先处在本地工作区" not in out
     assert "云端无法直接授权本机区外路径" not in out
     assert "选择器兜底" not in out
@@ -187,6 +188,7 @@ def test_cloud_scratch_facts():
     assert granted.count("【授权后发现】") == 1
     assert "well_known" in granted
     assert "首轮文本题要文件名/绝对路径" in granted
+    assert "先写工作区" in granted and "file_copy" in granted
     assert "well_known" not in out
     assert "在哪工作" in out
     assert "仅新建会话" in out

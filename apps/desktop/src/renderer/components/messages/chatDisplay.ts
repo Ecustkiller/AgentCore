@@ -11,16 +11,16 @@ import {
 /** Visible body token for `@所有人` (display only; truth is `kind: "everyone"`). */
 export const EVERYONE_MENTION_LABEL = "所有人";
 
-/** Group roster roles that count as 群版主 (aligned with backend chat_members.role). */
+/** Group roster roles that count as 群管理员 (aligned with backend chat_members.role). */
 export type GroupRole = ChatParticipant["group_role"];
 
-/** Whether a group_role is owner/admin (群版主). */
+/** Whether a group_role is owner/admin (群管理员). */
 export function isGroupModeratorRole(role: string | null | undefined): boolean {
   return role === "owner" || role === "admin";
 }
 
 /**
- * Platform admin or group 版主 may kick/mute/announce/@所有人 (server still enforces).
+ * Platform admin or group 管理员 may kick/mute/announce/@所有人 (server still enforces).
  * Platform admin alone for protected recall (system_card / official).
  */
 export function canActAsGroupModerator(
@@ -30,16 +30,52 @@ export function canActAsGroupModerator(
   return isPlatformAdmin || isGroupModeratorRole(groupRole);
 }
 
+/** Visible governance mark (platform / 群主 / 管理员). */
+export type GovernanceBadgeKind = "platform" | "owner" | "admin";
+
+export interface MemberGovernanceBadge {
+  kind: GovernanceBadgeKind;
+  /** Roster / a11y: 平台管理员 | 群主 | 管理员 */
+  label: string;
+  /** Bubble / @ subtitle: 平台 | 群主 | 管理员 */
+  shortLabel: string;
+}
+
 /**
- * Roster badge labels. Platform admin →「平台管理员」; group mod and not
- * platform →「群管理员」. Both → platform only (prefer platform).
+ * One roster/bubble badge. Platform admin → platform (wins over group role);
+ * owner → 群主; group admin → 管理员. 内测群仍无 owner（消息IM.md）.
  */
+export function memberGovernanceBadge(
+  member: Pick<ChatParticipant, "is_admin" | "group_role">,
+): MemberGovernanceBadge | null {
+  if (member.is_admin) {
+    return { kind: "platform", label: "平台管理员", shortLabel: "平台" };
+  }
+  if (member.group_role === "owner") {
+    return { kind: "owner", label: "群主", shortLabel: "群主" };
+  }
+  if (member.group_role === "admin") {
+    return { kind: "admin", label: "管理员", shortLabel: "管理员" };
+  }
+  return null;
+}
+
+/** Label list for callers that only need copy (tests / simple maps). */
 export function memberGovernanceBadges(
   member: Pick<ChatParticipant, "is_admin" | "group_role">,
 ): string[] {
-  if (member.is_admin) return ["平台管理员"];
-  if (isGroupModeratorRole(member.group_role)) return ["群管理员"];
-  return [];
+  const badge = memberGovernanceBadge(member);
+  return badge ? [badge.label] : [];
+}
+
+/** @-menu subtitle: `管理员 · @alice` (or just `@alice` for members). */
+export function mentionRoleSubtitle(
+  member: Pick<ChatParticipant, "username" | "is_admin" | "group_role">,
+): string | undefined {
+  const handle = member.username.trim() ? `@${member.username}` : undefined;
+  const badge = memberGovernanceBadge(member);
+  if (badge && handle) return `${badge.shortLabel} · ${handle}`;
+  return badge?.shortLabel ?? handle;
 }
 
 /**
@@ -63,6 +99,35 @@ export function canModerateMemberTarget(opts: {
 export function avatarSrc(url: string | null | undefined): string | null {
   if (!url) return null;
   return url.startsWith("/") ? `${BASE_URL}${url}` : url;
+}
+
+/**
+ * List / header circle: DM uses the peer's photo; group / official use the
+ * session icon only. Never treat a user photo as `chat.avatar_url`.
+ */
+export function chatCircleAvatarUrl(
+  chat: Pick<ChatSummary, "type" | "avatar_url" | "peer">,
+): string | null {
+  if (chat.type === "dm") return chat.peer?.avatar_url ?? null;
+  return chat.avatar_url ?? null;
+}
+
+/**
+ * Bubble circle: own auth URL; DM peer; group roster member; official session
+ * icon. DM / group never fall back to `chat.avatar_url`.
+ */
+export function bubbleAvatarUrl(opts: {
+  mine: boolean;
+  chatType: ChatSummary["type"] | null | undefined;
+  myAvatarUrl: string | null | undefined;
+  peerAvatarUrl: string | null | undefined;
+  memberAvatarUrl: string | null | undefined;
+  chatAvatarUrl: string | null | undefined;
+}): string | null {
+  if (opts.mine) return opts.myAvatarUrl ?? null;
+  if (opts.chatType === "group") return opts.memberAvatarUrl ?? null;
+  if (opts.chatType === "dm") return opts.peerAvatarUrl ?? null;
+  return opts.chatAvatarUrl ?? null;
 }
 
 /** Max chars for a reply quote preview (composer bar + bubble quote). */
@@ -124,7 +189,7 @@ export const EDIT_WINDOW_MS = 15 * 60 * 1000;
 
 /**
  * Whether the viewer may be offered a recall menu item (server still enforces).
- * Own message within 2 minutes; platform admin or group 版主 for other group
+ * Own message within 2 minutes; platform admin or group 管理员 for other group
  * messages; platform admin only for system_card / official; never for an
  * already-recalled row.
  */

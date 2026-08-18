@@ -43,6 +43,8 @@ from agentcore.workspace.declared_dirs import is_declared_latent_dir
 from agentcore.workspace.external_mounts import (
     ExternalMount,
     build_external_env,
+    cross_root_copy_error,
+    cross_root_move_error,
     external_mutation_allowed,
     external_ns,
     is_external_namespace,
@@ -1217,7 +1219,50 @@ class ServerWorkspace:
             self._mark_mutated()
             await self._emit_shared_mutation(path, "file_deleted")
 
+    async def _copy_workspace_to_channel_dest(self, src: str, dst: str) -> None:
+        """Workspace-on-server → desktop organize: COPY carries bytes, not a path.
+
+        Dest stays on the organize allow-set (copy, not write_bytes). Per-file
+        ceiling is ``workspace_upload_max_bytes``.
+        """
+        bridge = self._require_external_bridge()
+        bridge.ensure_copy_dest(dst)
+        if await bridge.exists(dst):
+            raise AlreadyExists(dst)
+        source = self._safe(src, write=False)
+        if not source.exists():
+            raise PathNotFound(src)
+        if source.is_symlink():
+            raise WorkspaceIOError("不能复制符号链接")
+        if source.is_dir():
+            await self._copy_tree_to_channel(source, dst, bridge)
+            return
+        data = await asyncio.to_thread(source.read_bytes)
+        await bridge.copy_from_bytes(dst, data)
+
+    async def _copy_tree_to_channel(
+        self, source: Path, dst: str, bridge: LocalWorkspace
+    ) -> None:
+        await bridge.mkdir(dst)
+        for child in sorted(source.iterdir(), key=lambda p: p.name):
+            if child.is_symlink():
+                continue
+            child_dst = f"{dst.rstrip('/')}/{child.name}"
+            if child.is_dir():
+                await self._copy_tree_to_channel(child, child_dst, bridge)
+            else:
+                data = await asyncio.to_thread(child.read_bytes)
+                await bridge.copy_from_bytes(child_dst, data)
+
     async def copy(self, src: str, dst: str) -> None:
+        dst_on_channel = self._external_needs_channel(dst)
+        src_is_workspace = (
+            not is_external_namespace(src) and parse_shared_path(src) is None
+        )
+        if dst_on_channel and src_is_workspace:
+            await self._copy_workspace_to_channel_dest(src, dst)
+            self._mark_mutated()
+            return
         if self._external_needs_channel(src, dst):
             await self._require_external_bridge().copy(src, dst)
             self._mark_mutated()
@@ -1229,10 +1274,13 @@ class ServerWorkspace:
             dest = self._safe(dst, write=True, op="copy")
             src_ext = parse_external_path(src)
             dst_ext = parse_external_path(dst)
-            if bool(src_ext) != bool(dst_ext):
-                raise OutsideWorkspace("不能跨会话授权目录与工作区复制文件")
-            if src_ext and dst_ext and src_ext[0] != dst_ext[0]:
-                raise OutsideWorkspace("不能跨会话授权目录复制文件")
+            # Dest mode (readonly vs organize) is already gated by ``_safe(..., op="copy")``.
+            copy_err = cross_root_copy_error(
+                src_ext[0] if src_ext else None,
+                dst_ext[0] if dst_ext else None,
+            )
+            if copy_err:
+                raise OutsideWorkspace(copy_err)
             if src_ext is None:
                 root = self._root.resolve()
                 if source == root or dest == root:
@@ -1267,10 +1315,12 @@ class ServerWorkspace:
             dest = self._safe(dst, write=True, op="move")
             src_ext = parse_external_path(src)
             dst_ext = parse_external_path(dst)
-            if bool(src_ext) != bool(dst_ext):
-                raise OutsideWorkspace("不能跨会话授权目录与工作区移动文件")
-            if src_ext and dst_ext and src_ext[0] != dst_ext[0]:
-                raise OutsideWorkspace("不能跨会话授权目录移动文件")
+            move_err = cross_root_move_error(
+                src_ext[0] if src_ext else None,
+                dst_ext[0] if dst_ext else None,
+            )
+            if move_err:
+                raise OutsideWorkspace(move_err)
             if src_ext is None:
                 root = self._root.resolve()
                 if source == root or dest == root:

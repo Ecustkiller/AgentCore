@@ -1,14 +1,18 @@
 import { CopyableId } from "@/components/CopyableId";
 import { ChatTimeline } from "@/components/conversation-replay/ChatTimeline";
 import { InspectorPanel } from "@/components/conversation-replay/InspectorPanel";
+import { TurnOpsBar } from "@/components/conversation-replay/TurnOpsBar";
 import { Badge } from "@/components/ui/Badge";
 import { Page, PageHeader } from "@/components/ui/Page";
 import { ErrorState, TableSkeleton } from "@/components/ui/States";
+import { isExecutionHarvestMessage } from "@/lib/executionHarvest";
 import { cn, fmtCny, fmtInt, fmtTime, nanoToYuan } from "@/lib/utils";
 import {
   type AdminConversationReplay,
+  type AdminReplayTurnFinalState,
   type ReplayMessage,
   fetchConversationReplay,
+  fetchReplayTurnFinalState,
 } from "@/services/adminObservability";
 import { errorMessage } from "@/services/api";
 import { ArrowLeft, Users } from "lucide-react";
@@ -91,6 +95,12 @@ export function ConversationReplay({
   const [dockOpen, setDockOpen] = useState(false);
   const [dockWidth, setDockWidth] = useState(readDockWidth);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const [finalById, setFinalById] = useState<
+    Record<string, AdminReplayTurnFinalState>
+  >({});
+  const [hydratingId, setHydratingId] = useState<string | null>(null);
+  const [hydrateError, setHydrateError] = useState<string | null>(null);
+  const [hydrateNonce, setHydrateNonce] = useState(0);
 
   // RR hands back a fresh setter whenever the search string changes; holding both the
   // setter and the state to forward in refs keeps the writer identity stable.
@@ -127,6 +137,26 @@ export function ConversationReplay({
     void load();
   }, [load]);
 
+  useEffect(() => {
+    setFinalById({});
+    setHydratingId(null);
+    setHydrateError(null);
+    setHydrateNonce(0);
+  }, [conversationId]);
+
+  const displayMessages = useMemo(() => {
+    if (!data) return [];
+    return data.messages.map((m) => {
+      const extra = finalById[m.id];
+      if (!extra) return m;
+      return {
+        ...m,
+        runs_payload: extra.runs_payload,
+        projected: extra.projected,
+      };
+    });
+  }, [data, finalById]);
+
   const assistantTurns = useMemo(
     () => (data?.messages ?? []).filter((m) => m.role === "assistant"),
     [data],
@@ -137,6 +167,11 @@ export function ConversationReplay({
     [assistantTurns],
   );
 
+  const harvests = useMemo(
+    () => (data?.messages ?? []).filter(isExecutionHarvestMessage),
+    [data],
+  );
+
   /**
    * Selection is read back off the URL instead of being mirrored in state, so a pasted
    * link, a reload and 后退 cannot disagree about which turn is open. An anchor that no
@@ -145,7 +180,7 @@ export function ConversationReplay({
    * starts from, rather than blank or thrown.
    */
   const selected = useMemo(() => {
-    const messages = data?.messages ?? [];
+    const messages = displayMessages;
     const byTurn = anchorTurn
       ? messages.find((m) => m.id === anchorTurn)
       : undefined;
@@ -155,9 +190,62 @@ export function ConversationReplay({
       ? messages.find((m) => m.trace_id === anchorTrace)
       : undefined;
     return byTrace ?? null;
-  }, [data, anchorTrace, anchorTurn]);
+  }, [displayMessages, anchorTrace, anchorTurn]);
 
   const selectedId = selected?.id ?? null;
+
+  useEffect(() => {
+    if (
+      loading ||
+      !data ||
+      data.conversation.id !== conversationId ||
+      !selected ||
+      selected.role !== "assistant" ||
+      !selected.has_final_state ||
+      finalById[selected.id]
+    ) {
+      return;
+    }
+    const id = selected.id;
+    let cancelled = false;
+    setHydratingId(id);
+    setHydrateError(null);
+    void fetchReplayTurnFinalState(conversationId, id)
+      .then((state) => {
+        if (cancelled) return;
+        setFinalById((prev) => ({ ...prev, [id]: state }));
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setHydrateError(errorMessage(err));
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setHydratingId((cur) => (cur === id ? null : cur));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    conversationId,
+    data,
+    loading,
+    selected,
+    finalById,
+    hydrateNonce,
+  ]);
+
+  const retryHydrate = useCallback(() => {
+    if (!selectedId) return;
+    setFinalById((prev) => {
+      const next = { ...prev };
+      delete next[selectedId];
+      return next;
+    });
+    setHydrateError(null);
+    setHydrateNonce((n) => n + 1);
+  }, [selectedId]);
 
   const selectTurn = useCallback(
     (id: string) => {
@@ -244,6 +332,11 @@ export function ConversationReplay({
       ? fmtCny(nanoToYuan(selected.cost_total))
       : null;
 
+  const dockHarvest =
+    selected && data
+      ? precedingHarvest(displayMessages, selected)
+      : null;
+
   /**
    * The turn the dock is showing, and the single condition behind both the dock and
    * the timeline's narrow-screen hiding. Editing the anchor out of the address bar
@@ -274,7 +367,14 @@ export function ConversationReplay({
           {/* Fixed block: the panes below take whatever height is left over. */}
           <div className="shrink-0">
             <PageHeader
-              title={data.conversation.title || "未命名会话"}
+              title={
+                <span className="inline-flex items-center gap-2">
+                  {data.conversation.title || "未命名会话"}
+                  {data.conversation.deleted_at ? (
+                    <Badge tone="neutral">会话已删</Badge>
+                  ) : null}
+                </span>
+              }
               description={
                 <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <span>
@@ -341,12 +441,23 @@ export function ConversationReplay({
                 </div>
               }
               filters={
-                <TurnPills
-                  turns={assistantTurns}
-                  selectedId={selectedId}
-                  onSelect={selectTurn}
-                  anchorTrace={anchorTrace}
-                />
+                <div className="flex w-full min-w-0 flex-col gap-2">
+                  <TurnPills
+                    turns={assistantTurns}
+                    selectedId={selectedId}
+                    onSelect={selectTurn}
+                    anchorTrace={anchorTrace}
+                  />
+                  <TurnOpsBar
+                    selected={selected}
+                    harvests={harvests}
+                    onSelectHarvest={(id) => {
+                      selectTurn(id);
+                      setDockOpen(true);
+                    }}
+                    onOpenDock={() => setDockOpen(true)}
+                  />
+                </div>
               }
             />
           </div>
@@ -361,12 +472,16 @@ export function ConversationReplay({
           <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row lg:gap-0">
             <ChatTimeline
               className={cn("min-w-0 flex-1", dockMessage && "hidden lg:flex")}
-              messages={data.messages}
+              messages={displayMessages}
               selectedId={selectedId}
               selectedRunId={selectedRunId}
               onSelect={selectTurn}
               onSelectRun={selectRun}
               isAnchored={isAnchored}
+              hasMoreBefore={data.has_more_before}
+              hydratingId={hydratingId}
+              hydrateError={hydrateError}
+              onRetryHydrate={retryHydrate}
             />
 
             {dockMessage && (
@@ -405,6 +520,7 @@ export function ConversationReplay({
                     onClearRun={clearRun}
                     onClose={closeDock}
                     cnyLabel={dockCny}
+                    harvest={dockHarvest}
                   />
                 </div>
               </>
@@ -414,6 +530,17 @@ export function ConversationReplay({
       )}
     </Page>
   );
+}
+
+function precedingHarvest(
+  messages: ReplayMessage[],
+  selected: ReplayMessage,
+): ReplayMessage | null {
+  if (isExecutionHarvestMessage(selected)) return null;
+  const idx = messages.findIndex((m) => m.id === selected.id);
+  if (idx <= 0) return null;
+  const prev = messages[idx - 1];
+  return isExecutionHarvestMessage(prev) ? prev : null;
 }
 
 function KpiChip({

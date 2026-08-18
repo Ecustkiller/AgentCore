@@ -129,6 +129,41 @@ def test_tool_call_fact_omits_empty_code_writes_nonempty():
     assert with_code["code"] == "git_timeout"
 
 
+def test_tool_call_fact_omits_unknown_cross_turn_retry():
+    empty = (
+        ToolCallFact(run_id="r", tool_call_id="c", name="git", success=False, result="x")
+        .to_fact()
+        .entry()["payload"]
+    )
+    assert "cross_turn_retry" not in empty
+    invalid = (
+        ToolCallFact(
+            run_id="r",
+            tool_call_id="c",
+            name="git",
+            success=False,
+            result="x",
+            cross_turn_retry="maybe",
+        )
+        .to_fact()
+        .entry()["payload"]
+    )
+    assert "cross_turn_retry" not in invalid
+    stamped = (
+        ToolCallFact(
+            run_id="r",
+            tool_call_id="c",
+            name="git",
+            success=False,
+            result="x",
+            cross_turn_retry="futile",
+        )
+        .to_fact()
+        .entry()["payload"]
+    )
+    assert stamped["cross_turn_retry"] == "futile"
+
+
 def test_note_and_message_final_fact_shapes():
     note = (
         NoteFact(role="user", content="停止使用工具", reason="finalize", run_id="captain")

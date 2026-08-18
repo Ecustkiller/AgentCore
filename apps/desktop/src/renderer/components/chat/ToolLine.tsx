@@ -1,9 +1,14 @@
+import { isSuccessfulHandoff } from "@/components/chat/handoffBrief";
 import {
   type ToolResultData,
   ToolResultView,
   hasToolResultBody,
   toolResultPeek,
 } from "@/components/chat/toolResult/ToolResultView";
+import {
+  codeDiagnosticsPeek,
+  extractCodeDiagnostics,
+} from "@/components/chat/toolResult/codeDiagnostics";
 import { isFileReadCeilingGuidance } from "@/components/chat/toolResult/fileReadCeiling";
 import { isVerifyBudgetExceeded } from "@/components/chat/toolResult/verifyBudget";
 import { Badge, Button } from "@/components/ui";
@@ -80,6 +85,11 @@ const PEEK_SUPPRESSED = new Set([
   // 用户认的是「上次那场讨论」，不是一串 id。
   "file_read",
   "file_list",
+  // 写盘家族：标题已有 path；成功 ack「已写入/已编辑/已追加」与 path 重复。
+  // 类型诊断不走第二行，折叠态并进标题（见 writeFamilyDiagnosticPeek）。
+  "file_write",
+  "file_append",
+  "str_replace",
   // CEO 协调原语：标题已自解释（撤队员 / 裁决求助另挂角色名），peek 只是操作确认文案。
   "update_synthesis",
   "replan",
@@ -96,6 +106,18 @@ const PEEK_SUPPRESSED = new Set([
   "host_service_restart",
   "host_package_install",
 ]);
+
+const WRITE_FAMILY = new Set(["file_write", "file_append", "str_replace"]);
+
+/** Write-family collapsed row: only surface diagnostics (errors / unavailable).
+ * Clean「未发现类型错误」falls through to the path title — same as a suppressed ack. */
+function writeFamilyDiagnosticPeek(data: ToolResultData): string | null {
+  const diag = extractCodeDiagnostics(data.display);
+  if (!diag) return null;
+  const text = codeDiagnosticsPeek(diag);
+  if (diag.status === "unavailable" || text !== "未发现类型错误") return text;
+  return null;
+}
 
 /** 模型流式组装工具调用 JSON 时的心跳行（不持久化）。 */
 export function ComposingToolLine({
@@ -279,6 +301,8 @@ export function ToolLine({
     conversationId,
   };
   const hasBody = hasToolResultBody(data);
+  const successfulHandoff = isSuccessfulHandoff(step.tool_name, step.status);
+  const peek = toolResultPeek(data);
   const running = step.status === "running";
   const ceilingGuidance = isToolCeilingGuidance(step);
   const isWebSearch = step.tool_name === "web_search";
@@ -302,15 +326,21 @@ export function ToolLine({
         .filter(Boolean)
         .join(" · ")
     : "";
-  // web_search 的「N results」是元计数（类比 read_url 组的「N sources」）：成功时并入标题行、
-  // 不再另起一行 peek——顶层折叠态与「Read page · N sources」同构（单行 + 行尾 chevron）。
-  const inlineCount =
-    !nested &&
-    step.tool_name === "web_search" &&
-    step.status === "success" &&
-    hasBody
-      ? toolResultPeek(data)
+  // 完成态元信息并进标题行、不另起 peek：web_search「N results」、grep 匹配计数、
+  // write 家族类型诊断。handoff summary 走 inlineBody（标题主内容，随 label truncate）。
+  const writeDiagPeek =
+    step.status === "success" && WRITE_FAMILY.has(step.tool_name)
+      ? writeFamilyDiagnosticPeek(data)
       : null;
+  const inlineMeta =
+    step.status !== "success"
+      ? null
+      : !nested && step.tool_name === "web_search" && hasBody
+        ? peek || null
+        : step.tool_name === "grep"
+          ? peek || null
+          : writeDiagPeek;
+  const inlineBody = successfulHandoff && peek ? peek : null;
   return (
     <div className="min-w-0">
       <Button
@@ -330,19 +360,30 @@ export function ToolLine({
                   : "text-sm text-muted-foreground"
               }`}
             >
-              <span className="min-w-0 truncate">
+              <span className="min-w-0 flex-1 truncate">
                 <span className={nested ? "font-medium" : undefined}>
                   {label}
                 </span>
                 {detail && (
                   <span className="ml-1.5 text-muted-foreground">{detail}</span>
                 )}
-                {inlineCount && (
-                  <span className="ml-1.5 text-muted-foreground/70">
-                    · {inlineCount}
+                {inlineBody && (
+                  <span className="ml-1.5 text-muted-foreground">
+                    {inlineBody}
                   </span>
                 )}
               </span>
+              {inlineMeta && (
+                <span
+                  className={`ml-1.5 max-w-[50%] shrink-0 truncate ${
+                    writeDiagPeek
+                      ? "text-warning/80"
+                      : "text-muted-foreground/70"
+                  }`}
+                >
+                  · {inlineMeta}
+                </span>
+              )}
               <ToolRowTail
                 status={step.status}
                 nested={nested}
@@ -356,19 +397,23 @@ export function ToolLine({
                 {runningHint}
               </span>
             )}
-            {hasBody && !open && !inlineCount && !suppressesPeek && (
-              <span
-                className={`block truncate text-xs ${
-                  ceilingGuidance
-                    ? "text-warning/80"
-                    : step.status === "error"
-                      ? "text-destructive/80"
-                      : "text-muted-foreground/70"
-                }`}
-              >
-                {toolResultPeek(data)}
-              </span>
-            )}
+            {(hasBody || (successfulHandoff && !!peek)) &&
+              !open &&
+              !inlineMeta &&
+              !inlineBody &&
+              !suppressesPeek && (
+                <span
+                  className={`block truncate text-xs ${
+                    ceilingGuidance
+                      ? "text-warning/80"
+                      : step.status === "error"
+                        ? "text-destructive/80"
+                        : "text-muted-foreground/70"
+                  }`}
+                >
+                  {peek}
+                </span>
+              )}
           </span>
         </span>
       </Button>

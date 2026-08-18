@@ -152,7 +152,81 @@ const mockExecution: Execution = {
   teamNotes: [],
 };
 
+const HANDOFF_RECEIPT = "已收尾并提交交接简报。";
+
+const handoffStep = {
+  kind: "tool" as const,
+  id: "h1",
+  tool_name: "handoff",
+  arguments: {
+    summary: "交叉验证完成",
+    key_points: ["共识：一周内需清晰立场"],
+  },
+  result: HANDOFF_RECEIPT,
+  status: "success" as const,
+};
+
 describe("RunDetailBody process timeline", () => {
+  it("hides footer 交接简报 when process already has a successful handoff", () => {
+    const prevDebrief = run.debrief;
+    const prevProcess = run.process;
+    run.debrief = {
+      summary: "交叉验证完成",
+      key_points: ["共识：一周内需清晰立场"],
+    };
+    run.process = [
+      { kind: "reasoning", text: "收尾。" },
+      handoffStep,
+    ];
+    try {
+      render(
+        <MemoryRouter>
+          <RunDetailBody messageId="m1" runId="r1" />
+        </MemoryRouter>,
+      );
+      expect(screen.getByText("Handoff")).toBeTruthy();
+      expect(screen.getByText("交叉验证完成")).toBeTruthy();
+      expect(screen.queryByText("交接简报")).toBeNull();
+      expect(screen.queryByText("简报由系统降级生成")).toBeNull();
+    } finally {
+      run.debrief = prevDebrief;
+      run.process = prevProcess;
+    }
+  });
+
+  it("keeps footer degraded debrief when process has no successful handoff", () => {
+    const prevDebrief = run.debrief;
+    const prevProcess = run.process;
+    run.debrief = {
+      summary: "正文切片当简报",
+      degraded: true,
+    } as typeof run.debrief & { degraded: true };
+    run.process = [
+      { kind: "reasoning", text: "没打到 handoff。" },
+      {
+        kind: "tool",
+        id: "tc1",
+        tool_name: "web_search",
+        arguments: { query: "竞品定价" },
+        result: "命中 3 条",
+        status: "success",
+      },
+    ];
+    try {
+      render(
+        <MemoryRouter>
+          <RunDetailBody messageId="m1" runId="r1" />
+        </MemoryRouter>,
+      );
+      expect(screen.getByText("交接简报")).toBeTruthy();
+      expect(screen.getByText("简报由系统降级生成")).toBeTruthy();
+      expect(screen.queryByText("正文切片当简报")).toBeNull();
+    } finally {
+      run.debrief = prevDebrief;
+      run.process = prevProcess;
+    }
+  });
+
   it("renders interleaved ProcessTimeline instead of partitioned 思考/工具/输出", () => {
     render(
       <MemoryRouter>

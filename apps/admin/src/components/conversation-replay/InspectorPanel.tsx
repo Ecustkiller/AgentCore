@@ -4,7 +4,12 @@ import {
   STATUS_TONE,
   SpanRow,
 } from "@/components/conversation-replay/shared";
+import { LlmProcessRow, ToolLine } from "@/components/conversation-replay/ToolLine";
 import { Badge } from "@/components/ui/Badge";
+import {
+  harvestKindLabel,
+  isExecutionHarvestMessage,
+} from "@/lib/executionHarvest";
 import { cn, fmtMs } from "@/lib/utils";
 import type {
   ReplayMessage,
@@ -26,8 +31,8 @@ function runMessageBody(run: ReplayRun): string | null {
 }
 
 /**
- * Right dock: turn metrics strip + 队员 list/detail.
- * Tool/model steps live in the main ProcessTimeline — no separate 执行 tab.
+ * Right dock: harvest attribution, span details, worker full text.
+ * Main column is user-perspective — this is where ops signals landed.
  */
 export function InspectorPanel({
   message,
@@ -36,6 +41,7 @@ export function InspectorPanel({
   onClearRun,
   onClose,
   cnyLabel,
+  harvest,
   className,
 }: {
   message: ReplayMessage;
@@ -45,6 +51,8 @@ export function InspectorPanel({
   onClose: () => void;
   /** Pre-formatted turn cost for ops strip, e.g. "¥0.12". */
   cnyLabel?: string | null;
+  /** Preceding harvest, when the selected row is the assistant that followed it. */
+  harvest?: ReplayMessage | null;
   /** Height and width come from the page's layout row, not from the viewport. */
   className?: string;
 }) {
@@ -54,6 +62,8 @@ export function InspectorPanel({
     () => runs.find((r) => r.run_id === selectedRunId) ?? null,
     [runs, selectedRunId],
   );
+  const selfHarvest = isExecutionHarvestMessage(message);
+  const shownHarvest = selfHarvest ? message : (harvest ?? null);
 
   return (
     <aside
@@ -63,7 +73,9 @@ export function InspectorPanel({
       )}
     >
       <div className="flex shrink-0 items-center justify-between gap-2 border-border border-b px-3 py-2">
-        <span className="text-xs font-medium text-foreground">队员</span>
+        <span className="text-xs font-medium text-foreground">
+          {selfHarvest ? "系统收口" : "队员"}
+        </span>
         <button
           type="button"
           onClick={onClose}
@@ -73,18 +85,102 @@ export function InspectorPanel({
           <X size={14} />
         </button>
       </div>
-      <OpsStrip message={message} cnyLabel={cnyLabel} />
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        <WorkerPanel
-          run={selectedRun}
-          runs={runs}
-          spans={spans}
-          selectedRunId={selectedRunId}
-          onSelectRun={onSelectRun}
-          onClearRun={onClearRun}
-        />
+      {!selfHarvest && <OpsStrip message={message} cnyLabel={cnyLabel} />}
+      <div className="min-h-0 flex-1 overflow-y-auto p-3 space-y-4">
+        {shownHarvest && (
+          <HarvestBlock
+            message={shownHarvest}
+            asTrigger={!selfHarvest}
+          />
+        )}
+        {!selfHarvest && spans.length > 0 && (
+          <TurnSpanList message={message} />
+        )}
+        {!selfHarvest && (
+          <WorkerPanel
+            run={selectedRun}
+            runs={runs}
+            spans={spans}
+            selectedRunId={selectedRunId}
+            onSelectRun={onSelectRun}
+            onClearRun={onClearRun}
+          />
+        )}
       </div>
     </aside>
+  );
+}
+
+function HarvestBlock({
+  message,
+  asTrigger,
+}: {
+  message: ReplayMessage;
+  asTrigger: boolean;
+}) {
+  const kindLabel = harvestKindLabel(message.harvest_kind, message.content);
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-xs font-medium text-foreground">
+          {asTrigger ? "本回合由系统收口触发" : "系统收口"}
+        </span>
+        {kindLabel && (
+          <Badge
+            tone={
+              kindLabel === "已取消"
+                ? "warning"
+                : kindLabel === "有失败"
+                  ? "destructive"
+                  : "success"
+            }
+          >
+            {kindLabel}
+          </Badge>
+        )}
+      </div>
+      {message.content ? (
+        <CollapsibleBody content={message.content} />
+      ) : (
+        <p className="text-muted-foreground text-xs italic">（无正文）</p>
+      )}
+    </div>
+  );
+}
+
+function TurnSpanList({ message }: { message: ReplayMessage }) {
+  const labels = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const r of message.runs) {
+      map.set(r.run_id, r.role || r.agent_id);
+    }
+    return map;
+  }, [message.runs]);
+  const multi = message.runs.length > 0;
+
+  return (
+    <div>
+      <div className="mb-1.5 text-muted-foreground text-xs font-medium">
+        过程明细 · {message.spans.length}
+      </div>
+      <div className="space-y-1.5">
+        {message.spans.map((span, i) =>
+          span.kind === "tool" ? (
+            <ToolLine
+              key={`tool-${i}`}
+              span={span}
+              runLabel={
+                multi && span.run_id
+                  ? (labels.get(span.run_id) ?? null)
+                  : null
+              }
+            />
+          ) : (
+            <LlmProcessRow key={`llm-${i}`} span={span} />
+          ),
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -133,7 +229,7 @@ function WorkerPanel({
   if (runs.length === 0) {
     return (
       <p className="text-muted-foreground text-xs">
-        本回合无多 Agent 委派。工具与模型调用见主栏过程时间线。
+        本回合无多 Agent 委派。工具与模型调用见上方过程明细。
       </p>
     );
   }

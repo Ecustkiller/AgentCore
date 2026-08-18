@@ -50,7 +50,7 @@ async def persist_suspension(
     """
     if not can_persist_suspension(tool):
         return False
-    from agentcore.runtime.suspension import AskUserSuspension, find_tool_call_id
+    from agentcore.runtime.suspension import AskUserSuspension, claim_next_tool_call_id
 
     def build_frame(capture: SuspensionCapture) -> AskUserSuspension:
         return AskUserSuspension(
@@ -59,7 +59,9 @@ async def persist_suspension(
             user_id=context.user_id,
             captain_run_id=tool.captain_run_id or "",
             checkpoint_id=checkpoint_id,
-            tool_call_id=find_tool_call_id(capture.transcript, "ask_user"),
+            tool_call_id=claim_next_tool_call_id(
+                tool.message_id or "", capture.transcript, "ask_user"
+            ),
             base_system_prompt=tool.base_system_prompt,
             user_message=tool.user_message,
             folder_id=tool.folder_id,
@@ -90,6 +92,7 @@ async def persist_suspension(
         saver=tool.suspension_saver,  # type: ignore[arg-type]
         sink=tool.sink,
         suspension_kind="ask_user",
+        message_id=tool.message_id or "",
     )
 
 

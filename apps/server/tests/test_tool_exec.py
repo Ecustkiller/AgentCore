@@ -1078,6 +1078,164 @@ async def test_execute_end_forwards_code_search_index_status():
     assert ends[0]["index_status"] == "ready"
 
 
+_SHELL_OBSERVE_KEYS = frozenset({"command_preview", "subcommand", "cwd_preview"})
+
+
+def test_shell_observe_log_fields_records_facts_not_write_guess():
+    from agentcore.core.text import clip_preview
+    from agentcore.runtime.engine.tool_exec_args import (
+        _SHELL_COMMAND_PREVIEW_MAX,
+        _shell_observe_log_fields,
+    )
+
+    start = _shell_observe_log_fields(
+        "terminal",
+        {"subcommand": "start", "command": "pnpm dev", "cwd": "apps/web"},
+    )
+    assert start == {
+        "subcommand": "start",
+        "command_preview": "pnpm dev",
+        "cwd_preview": "apps/web",
+    }
+    listed = _shell_observe_log_fields("terminal", {"subcommand": "list"})
+    assert listed == {"subcommand": "list"}
+    host = _shell_observe_log_fields("host_shell", {"command": "Get-ChildItem"})
+    assert host == {"command_preview": "Get-ChildItem"}
+    secret_tail = "TOKEN=supersecret"
+    long_cmd = "echo hello " + ("n" * 200) + " " + secret_tail
+    clipped = _shell_observe_log_fields("host_shell", {"command": long_cmd})
+    assert clipped["command_preview"] == clip_preview(long_cmd, _SHELL_COMMAND_PREVIEW_MAX)
+    assert secret_tail not in clipped["command_preview"]
+    assert set(clipped) <= _SHELL_OBSERVE_KEYS
+    assert _shell_observe_log_fields("code_execute", {"command": long_cmd}) == {}
+    assert _shell_observe_log_fields("file_write", {"path": "a.py", "command": "x"}) == {}
+    assert _shell_observe_log_fields("terminal", "not-a-dict") == {}
+
+
+def test_shell_observe_redacts_secret_shapes_clipping_would_keep():
+    """Clip 不等于脱敏：短命令里的 key / Bearer 必须被 redact 掉。
+
+    ``logging.mdc`` 禁记 token。上一个用例的 secret 靠超长命令被 clip 掉，覆盖不到
+    「凭据出现在命令开头」这一形状——那时 clip 是空操作。启发式兜底，非完整检测器。
+    """
+    from agentcore.core.secrets import REDACTED
+    from agentcore.runtime.engine.tool_exec_args import _shell_observe_log_fields
+
+    key_cmd = "OPENAI_API_KEY=sk-abcdefgh12345678 node run.js"
+    key_preview = _shell_observe_log_fields("host_shell", {"command": key_cmd})[
+        "command_preview"
+    ]
+    assert "sk-abcdefgh12345678" not in key_preview
+    assert REDACTED in key_preview
+    # 非凭据部分保留，否则这条埋点就没法用来判断命令在干什么。
+    assert "node run.js" in key_preview
+
+    bearer_preview = _shell_observe_log_fields(
+        "terminal",
+        {"subcommand": "start", "command": 'curl -H "Authorization: Bearer abcdefgh1234" api'},
+    )["command_preview"]
+    assert "abcdefgh1234" not in bearer_preview
+    assert REDACTED in bearer_preview
+
+
+async def test_execute_end_terminal_list_records_subcommand():
+    """terminal list 免审，execute_end 记 subcommand 事实。"""
+    reg = ToolRegistry()
+    reg.register(_OkTool("terminal"))
+    with capture_logs() as logs:
+        await execute_tools(
+            [_call("c1", "terminal", json.dumps({"subcommand": "list"}))],
+            reg,
+            _ctx(),
+            EventSink(),
+            approval_gate=None,
+            run_id="r1",
+        )
+    ends = [e for e in logs if e.get("event") == "tool.execute_end"]
+    assert len(ends) == 1
+    end = ends[0]
+    assert end["tool"] == "terminal"
+    assert end["status"] == "ok"
+    assert end["subcommand"] == "list"
+    assert "command_preview" not in end
+    assert "is_write" not in end
+
+
+async def test_execute_end_terminal_start_no_gate_still_records_preview():
+    """无闸 terminal start 拒执行，仍记 command_preview（只观测，不猜写盘）。"""
+    reg = ToolRegistry()
+    reg.register(_OkTool("terminal"))
+    args = json.dumps(
+        {
+            "subcommand": "start",
+            "command": "echo hello",
+            "cwd": "src",
+        }
+    )
+    with capture_logs() as logs:
+        await execute_tools(
+            [_call("c1", "terminal", args)],
+            reg,
+            _ctx(),
+            EventSink(),
+            approval_gate=None,
+            run_id="r1",
+        )
+    ends = [e for e in logs if e.get("event") == "tool.execute_end"]
+    assert len(ends) == 1
+    end = ends[0]
+    assert end["tool"] == "terminal"
+    assert end["status"] == "grantable_no_gate"
+    assert end["subcommand"] == "start"
+    assert end["command_preview"] == "echo hello"
+    assert end["cwd_preview"] == "src"
+    assert "is_write" not in end
+
+
+async def test_execute_end_host_shell_records_command_preview():
+    reg = ToolRegistry()
+    # Stub NEVER：本测只锁 execute_end 字段；真 host_shell 仍是 GRANTABLE。
+    reg.register(_OkTool("host_shell"))
+    args = json.dumps({"command": "hostname"})
+    with capture_logs() as logs:
+        await execute_tools(
+            [_call("c1", "host_shell", args)],
+            reg,
+            _ctx(),
+            EventSink(),
+            approval_gate=None,
+            run_id="r1",
+        )
+    ends = [e for e in logs if e.get("event") == "tool.execute_end"]
+    assert len(ends) == 1
+    end = ends[0]
+    assert end["tool"] == "host_shell"
+    assert end["status"] == "ok"
+    assert end["command_preview"] == "hostname"
+    assert "subcommand" not in end
+    assert "is_write" not in end
+
+
+async def test_execute_end_other_tool_omits_command_preview():
+    """command 参数只对 terminal/host_shell 进 execute_end，避免扩大命令泄漏面。"""
+    reg = ToolRegistry()
+    reg.register(_OkTool("ok"))
+    with capture_logs() as logs:
+        await execute_tools(
+            [_call("c1", "ok", json.dumps({"command": "echo should-not-log"}))],
+            reg,
+            _ctx(),
+            EventSink(),
+            approval_gate=None,
+            run_id="r1",
+        )
+    ends = [e for e in logs if e.get("event") == "tool.execute_end"]
+    assert len(ends) == 1
+    assert ends[0]["tool"] == "ok"
+    assert "command_preview" not in ends[0]
+    assert "cwd_preview" not in ends[0]
+
+
 @pytest.mark.asyncio
 async def test_same_batch_handoff_waits_for_sibling_write(tmp_path: Path):
     """同批 file_write+handoff：handoff 须在 write 之后执行，才能看到 prose stamp。"""

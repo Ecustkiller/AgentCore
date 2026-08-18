@@ -44,7 +44,8 @@ const ERROR_PREVIEW_LIMIT = 5;
 /**
  * 概览: the console's landing hub. It surfaces today's pulse as summary tiles +
  * a deployment-health strip + the two 7-day trends + a short recent-errors preview,
- * each one a *link* into the single page that owns the detail (分析 / 用户 / 系统).
+ * each one a *link* into the single page that owns the detail
+ * （分析 / 用户 / 系统 / 平台额度）.
  * It deliberately does not re-render the full tables those pages own.
  */
 export function OverviewPage() {
@@ -152,26 +153,34 @@ export function OverviewPage() {
               />
             </div>
 
-            <button
-              type="button"
-              onClick={() => navigate("/system")}
-              className="flex flex-wrap items-center gap-x-8 gap-y-3 rounded-xl border border-border bg-card px-5 py-4 text-left text-sm outline-none transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-x-1 gap-y-1 rounded-xl border border-border bg-card px-3 py-2 text-sm">
+              <button
+                type="button"
+                onClick={() => navigate("/system")}
+                className="flex items-center gap-2 rounded-lg px-2 py-2 text-left outline-none transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring"
+              >
                 <span className="text-muted-foreground">数据库</span>
                 <Badge tone={data.database_ok ? "success" : "destructive"}>
                   {data.database_ok ? "正常" : "不可达"}
                 </Badge>
-              </div>
-              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-0.5 text-muted-foreground text-xs">
+                  系统
+                  <ChevronRight size={14} />
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate("/quota")}
+                className="flex items-center gap-2 rounded-lg px-2 py-2 text-left outline-none transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring"
+              >
                 <span className="text-muted-foreground">计费模式</span>
                 <Badge tone="primary">{byok ? "BYOK · 自带 Key" : "平台付费"}</Badge>
-              </div>
-              <span className="ml-auto inline-flex items-center gap-0.5 text-muted-foreground text-xs">
-                系统状态
-                <ChevronRight size={14} />
-              </span>
-            </button>
+                <span className="inline-flex items-center gap-0.5 text-muted-foreground text-xs">
+                  平台额度
+                  <ChevronRight size={14} />
+                </span>
+              </button>
+            </div>
 
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <Card>

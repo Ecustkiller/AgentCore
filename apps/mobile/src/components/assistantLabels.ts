@@ -61,6 +61,7 @@ const TOOL_LABEL: Record<string, string> = {
   consult: "Consult",
   revise: "Revise",
   escalate: "Escalate",
+  handoff: "Handoff",
 };
 
 export const toolLabel = (name: string): string => TOOL_LABEL[name] ?? name;

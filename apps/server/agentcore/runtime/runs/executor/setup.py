@@ -5,11 +5,14 @@ Split from ``.node`` — pure move; consumed only by the node facade.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+import time
+from collections.abc import Awaitable, Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import Any
 
 from agentcore.config import settings
+from agentcore.core.logging import get_logger
 from agentcore.llm.profiles import ProfileParams
 from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.events import (
@@ -59,6 +62,34 @@ from agentcore.tools.protocol import (
 )
 from agentcore.tools.registry import ToolRegistry
 
+logger = get_logger(__name__)
+
+
+def _emit_prepare_phase(phase: str, started: float) -> None:
+    """One ``worker.prepare_phase`` line (phase + ms) at info — default jsonl keeps it.
+
+    debug is dropped in default jsonl (see ``cost.prefix_cache``); do not downgrade.
+    """
+    logger.info(
+        "worker.prepare_phase",
+        phase=phase,
+        ms=int((time.monotonic() - started) * 1000),
+    )
+
+
+@contextmanager
+def _prepare_phase(phase: str) -> Iterator[None]:
+    started = time.monotonic()
+    try:
+        yield
+    finally:
+        _emit_prepare_phase(phase, started)
+
+
+async def _timed_phase[T](phase: str, awaitable: Awaitable[T]) -> T:
+    with _prepare_phase(phase):
+        return await awaitable
+
 
 @dataclass
 class AgentNodePrepared:
@@ -95,6 +126,30 @@ async def prepare_agent_node(
     resolutions: dict[str, dict[str, Any]],
 ) -> AgentNodePrepared:
     """Resolve profile/tools/identity and assemble the worker opening transcript."""
+    started = time.monotonic()
+    try:
+        return await _prepare_agent_node(
+            env,
+            spec,
+            completed,
+            agent_id,
+            messages=messages,
+            resolutions=resolutions,
+        )
+    finally:
+        _emit_prepare_phase("total", started)
+
+
+async def _prepare_agent_node(
+    env: AgentExecutorEnv,
+    spec: RunSpec,
+    completed: Mapping[str, RunState],
+    agent_id: str,
+    *,
+    messages: list[LLMMessage],
+    resolutions: dict[str, dict[str, Any]],
+) -> AgentNodePrepared:
+    """Inner cold-open body; wall-clock wrapped by ``prepare_agent_node``."""
     deliverable = spec.deliverable
     profile = env.profiles.agent()
     if spec.max_rounds is not None and spec.max_rounds > 0:
@@ -111,16 +166,19 @@ async def prepare_agent_node(
     if spec.target_folder_id:
         from agentcore.runtime.delegate.target_desktop import apply_target_desktop
 
-        applied = await apply_target_desktop(
-            target_folder_id=spec.target_folder_id,
-            session_folder_id=env.session_folder_id,
-            env_system_prompt=env.system_prompt,
-            base_tool_context=env.base_tool_context,
-            worker_tools=env.tools,
-            sink=env.sink,
-            local_root_claims=env.local_root_claims,
-            memory_enabled=env.memory_enabled,
-            permission_axes=env.permission_axes_obj,
+        applied = await _timed_phase(
+            "target_desktop",
+            apply_target_desktop(
+                target_folder_id=spec.target_folder_id,
+                session_folder_id=env.session_folder_id,
+                env_system_prompt=env.system_prompt,
+                base_tool_context=env.base_tool_context,
+                worker_tools=env.tools,
+                sink=env.sink,
+                local_root_claims=env.local_root_claims,
+                memory_enabled=env.memory_enabled,
+                permission_axes=env.permission_axes_obj,
+            ),
         )
         worker_tools_base = applied.worker_tools
         system_prompt = applied.system_prompt
@@ -210,6 +268,7 @@ async def prepare_agent_node(
         ),
     )
     # 阶段2 嵌套子任务: hand this worker delegation tools when opted in.
+    _trim_started = time.monotonic()
     worker_tools = worker_tools_base
     # 真纯丙：不再用 spec.tools 做 allow-list；默认全开相关工具面。
     allowed_tools = None
@@ -333,6 +392,7 @@ async def prepare_agent_node(
         # a dead decision.
         if allowed_tools is not None and AMEND_NOTE_TOOL_NAME not in allowed_tools:
             allowed_tools = [*allowed_tools, AMEND_NOTE_TOOL_NAME]
+    _emit_prepare_phase("tool_trim", _trim_started)
     from agentcore.runtime.audit.hooks import on_permission_effective
 
     on_permission_effective(
@@ -349,10 +409,11 @@ async def prepare_agent_node(
     # batch (see ``env.preexisting_files``); peer products are layered on per worker
     # from the completion map inside ``_build_messages``.
     # Target-desktop workers list their own root (not the session default desk).
-    if spec.target_folder_id and tool_ctx.backend is not env.base_tool_context.backend:
-        index_paths = await _safe_index_files(tool_ctx.backend)
-    else:
-        index_paths = await env.preexisting_files()
+    with _prepare_phase("workspace_index"):
+        if spec.target_folder_id and tool_ctx.backend is not env.base_tool_context.backend:
+            index_paths = await _safe_index_files(tool_ctx.backend)
+        else:
+            index_paths = await env.preexisting_files()
     # Wave3 B: force-inject skeleton/contract summaries before first file_read.
     context_inject = await load_context_inject_files(
         tool_ctx.backend,
@@ -395,21 +456,22 @@ async def prepare_agent_node(
             spec.run_id, messages, from_context_blocks=False
         )
     else:
-        messages[:] = _build_messages(
-            env.plan,
-            spec,
-            completed,
-            system_prompt,
-            env.user_message,
-            deliverable,
-            identity=identity,
-            index_paths=index_paths,
-            blocks_sink=received_blocks,
-            team_brief=env.team_brief,
-            shared_workspace=bool(tool_ctx.shared_workspace),
-            context_inject=context_inject or None,
-            captain_recon=env.captain_recon,
-        )
+        with _prepare_phase("build_messages"):
+            messages[:] = _build_messages(
+                env.plan,
+                spec,
+                completed,
+                system_prompt,
+                env.user_message,
+                deliverable,
+                identity=identity,
+                index_paths=index_paths,
+                blocks_sink=received_blocks,
+                team_brief=env.team_brief,
+                shared_workspace=bool(tool_ctx.shared_workspace),
+                context_inject=context_inject or None,
+                captain_recon=env.captain_recon,
+            )
         # Worker window head (§8.3): journal the opening task-prompt so
         # ``window_from_journal(run_id=…)`` anchors on THIS run's system+user, not the
         # turn-level CEO ``turn_started``. ``user_origin=context_blocks`` marks the

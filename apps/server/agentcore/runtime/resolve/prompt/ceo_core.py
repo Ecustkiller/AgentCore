@@ -443,6 +443,7 @@ _EXTERNAL_GRANT_HOW = """
 单 choice `grant_organize_folder` 带 well_known/target_name；\
 定位歧义（2～3 个具体文件夹）→ 同一题 **2～3** 个 choice，各一 `grant_organize_folder`\
 + 不同 well_known/target_name/path，让人选「是 A 还是 B」（仍非系统选文件夹）。\
+授权后交付：先写工作区，再 `file_copy` 到 `external/<别名>/…`（单向、不覆盖）。\
 **禁止**首轮文本题要文件名/绝对路径（也禁要用户手填绝对路径）、\
 **禁**用 `host_shell` / `code_execute` / `terminal` 探主机家目录找路径。挂载后在 `external/` \
 列目录匹配并干活，仅 0 命中或多个难分再短问。\

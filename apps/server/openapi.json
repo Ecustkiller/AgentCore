@@ -1205,7 +1205,7 @@
         "type": "object"
       },
       "AdminConversationReplay": {
-        "description": "One conversation's 复盘 timeline (``GET /v1/admin/observability/conversations/{id}``).\n\nMerges the three turn sources by trace_id / message_id: the message thread\n(bodies, from ``messages``), per-turn outcome/quality (``turn_metrics``), and\nper-turn spend (``cost_events``). Admin-only, cross-user — the drill-down target\nof the 观测看板's 近期错误 feed (opens a failed turn in full context).",
+        "description": "One conversation's 复盘 timeline (``GET /v1/admin/observability/conversations/{id}``).\n\nMerges the three turn sources by trace_id / message_id: the message thread\n(bodies, from ``messages``), per-turn outcome/quality (``turn_metrics``), and\nper-turn spend (``cost_events``). Admin-only, cross-user — the drill-down target\nof the 观测看板's 近期错误 feed (opens a failed turn in full context).\n\n``messages`` is the **latest** window (newest-first fetch, returned chronological)\nso a long thread keeps the recent side ops need. ``has_more_before`` is true\nwhen older rows exist past the cap.\n\nAssistant-row ``runs_payload`` / ``projected`` are always null here; fetch\n``AdminReplayTurnFinalState`` per turn instead of paging the list.",
         "properties": {
           "conversation": {
             "$ref": "#/components/schemas/ReplayConversation"
@@ -1217,6 +1217,11 @@
           "errors": {
             "title": "Errors",
             "type": "integer"
+          },
+          "has_more_before": {
+            "default": false,
+            "title": "Has More Before",
+            "type": "boolean"
           },
           "messages": {
             "items": {
@@ -1515,6 +1520,42 @@
           "billing_mode"
         ],
         "title": "AdminOverview",
+        "type": "object"
+      },
+      "AdminReplayTurnFinalState": {
+        "description": "On-demand user-end final state for one 会话复盘 assistant turn.\n\n``GET /v1/admin/observability/conversations/{id}/messages/{message_id}/final-state``.\n\nSame pair the user client reads on reload (no third projection):\n``runs_payload`` is ``runs_from_entries`` verbatim (same as ``MessageDetail.runs``);\n``projected`` is ``project_turn(runs_payload.events)`` — the same oracle as\nconformance golden, fed the journal's display events (not a reconstructed live\nvector). ``projected`` is null when there are no foldable display events\n(plain chat, or process-only single-agent — process then lives on\n``runs_payload.process``). Terminal ``finish_reason`` / process / captain\ncontext stay on ``runs_payload`` (journal ``turn_end`` is not a ``message_end``\nevent — same as GET /messages). Both null when the turn journaled nothing\nreplayable. Not a live-stream rebuild, and not a truncated/summarized pair.",
+        "properties": {
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "projected": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projected"
+          },
+          "runs_payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunsPayload"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "message_id"
+        ],
+        "title": "AdminReplayTurnFinalState",
         "type": "object"
       },
       "AdminResetPasswordResponse": {
@@ -2906,7 +2947,7 @@
         "type": "object"
       },
       "BetaGroupModerator": {
-        "description": "One 内测群版主 row for the admin console appoint surface.",
+        "description": "One 内测群管理员 row for the admin console appoint surface.",
         "properties": {
           "display_name": {
             "title": "Display Name",
@@ -3061,6 +3102,17 @@
       },
       "BlockedUser": {
         "properties": {
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url"
+          },
           "display_name": {
             "title": "Display Name",
             "type": "string"
@@ -4217,6 +4269,17 @@
       "ChatParticipant": {
         "description": "A human shown on a chat (the peer of a dm; members of a group).",
         "properties": {
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url"
+          },
           "display_name": {
             "title": "Display Name",
             "type": "string"
@@ -8075,6 +8138,17 @@
       },
       "FriendSummary": {
         "properties": {
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url"
+          },
           "display_name": {
             "title": "Display Name",
             "type": "string"
@@ -11462,7 +11536,7 @@
         "type": "object"
       },
       "PlatformCredentialView": {
-        "description": "Admin view of one platform-pool member — never the plaintext key.",
+        "description": "Admin view of one platform-pool member — never the plaintext key.\n\n``status`` / ``recovery_at`` / ``limit_name`` are live pool-state (Redis or\nprocess memory), not Postgres columns. Absence of a store record is healthy.",
         "properties": {
           "base_url": {
             "title": "Base Url",
@@ -11492,6 +11566,17 @@
             "title": "Label",
             "type": "string"
           },
+          "limit_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Name"
+          },
           "masked_key": {
             "anyOf": [
               {
@@ -11502,6 +11587,29 @@
               }
             ],
             "title": "Masked Key"
+          },
+          "recovery_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery At"
+          },
+          "status": {
+            "default": "healthy",
+            "enum": [
+              "healthy",
+              "cooling",
+              "exhausted",
+              "blocked"
+            ],
+            "title": "Status",
+            "type": "string"
           },
           "subscription_day": {
             "maximum": 31.0,
@@ -12065,6 +12173,18 @@
             "title": "Created At",
             "type": "string"
           },
+          "deleted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At"
+          },
           "display_name": {
             "anyOf": [
               {
@@ -12141,8 +12261,23 @@
         "type": "object"
       },
       "ReplayMessage": {
-        "description": "One message in a 会话复盘 timeline (the thread + per-turn overlays).\n\nAn assistant message carries its turn's telemetry (``metrics``, joined by\ntrace_id), spend (``cost_total``, summed from cost_events by message_id), and the\nturn's execution spans (``spans``, projected from turn_journal); user messages\nhave none. ``content`` is the raw message text (the prompt / reply) — the\nsubstance of the post-mortem. Multi-agent turns also carry ``runs`` (lightweight\ntree nodes for triage — not the desktop team canvas).\n\n``models`` / ``credential_source`` come from ``cost_calls`` (call authority):\nmessage rows join by ``message_id``; bare text-less turn markers join by\n``trace_id``. No ledger → empty models + null source.",
+        "description": "One message in a 会话复盘 timeline (the thread + per-turn overlays).\n\nAn assistant message carries its turn's telemetry (``metrics``, joined by\ntrace_id), spend (``cost_total``, summed from cost_events by message_id), and the\nturn's execution spans (``spans``, projected from turn_journal); user messages\nhave none. ``content`` is the raw message text (the prompt / reply) — the\nsubstance of the post-mortem. Multi-agent turns also carry ``runs`` (lightweight\ntree nodes for triage — not the desktop team canvas).\n\nThe conversation list is deliberately summary-sized: compressed ``spans`` /\nlightweight ``runs`` / ``metrics`` / ``cost_total`` travel with every row.\nThe user-end final-state pair (``runs_payload`` + ``projected``) does **not** —\nit is fetched per assistant turn via\n``GET .../messages/{id}/final-state`` when ``has_final_state`` is true.\nThose two fields stay on this model so the admin client can merge the\non-demand pair onto the same row; on the list endpoint they are always null.\n\n``models`` / ``credential_source`` come from ``cost_calls`` (call authority):\nmessage rows join by ``message_id``; bare text-less turn markers join by\n``trace_id``. No ledger → empty models + null source.\n\nUser rows also carry ``attachments`` / ``agent_mentions`` in the same shapes as\n``MessageDetail`` (metadata chips only — no extracted file text).",
         "properties": {
+          "agent_mentions": {
+            "items": {
+              "$ref": "#/components/schemas/AgentMention"
+            },
+            "maxItems": 10,
+            "title": "Agent Mentions",
+            "type": "array"
+          },
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/StoredAttachment"
+            },
+            "title": "Attachments",
+            "type": "array"
+          },
           "content": {
             "anyOf": [
               {
@@ -12190,6 +12325,11 @@
             ],
             "title": "Harvest Kind"
           },
+          "has_final_state": {
+            "default": false,
+            "title": "Has Final State",
+            "type": "boolean"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -12223,6 +12363,18 @@
             ],
             "title": "Origin"
           },
+          "projected": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projected"
+          },
           "role": {
             "title": "Role",
             "type": "string"
@@ -12234,6 +12386,16 @@
             },
             "title": "Runs",
             "type": "array"
+          },
+          "runs_payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunsPayload"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "spans": {
             "default": [],
@@ -17048,6 +17210,17 @@
       "UserProfile": {
         "description": "资料卡 (消息IM.md §9.3).",
         "properties": {
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url"
+          },
           "display_name": {
             "title": "Display Name",
             "type": "string"
@@ -17184,6 +17357,17 @@
       "UserSearchResult": {
         "description": "A discoverable user surfaced by people-search (任意搜人, exact match).",
         "properties": {
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url"
+          },
           "display_name": {
             "title": "Display Name",
             "type": "string"
@@ -19387,7 +19571,7 @@
     },
     "/v1/admin/beta-group/moderators": {
       "get": {
-        "description": "List 内测群版主 (``chat_members.role=admin``).",
+        "description": "List 内测群管理员 (``chat_members.role=admin``).",
         "operationId": "list_beta_group_moderators_v1_admin_beta_group_moderators_get",
         "parameters": [
           {
@@ -19453,7 +19637,7 @@
     },
     "/v1/admin/beta-group/moderators/{user_id}": {
       "delete": {
-        "description": "Revoke 内测群版主 (role → member; stays in group).",
+        "description": "Revoke 内测群管理员 (role → member; stays in group).",
         "operationId": "revoke_beta_group_moderator_v1_admin_beta_group_moderators__user_id__delete",
         "parameters": [
           {
@@ -19526,7 +19710,7 @@
         ]
       },
       "put": {
-        "description": "Appoint a user as 内测群版主 (ensures membership).",
+        "description": "Appoint a user as 内测群管理员 (ensures membership).",
         "operationId": "appoint_beta_group_moderator_v1_admin_beta_group_moderators__user_id__put",
         "parameters": [
           {
@@ -20662,7 +20846,7 @@
     },
     "/v1/admin/observability/conversations/{conversation_id}": {
       "get": {
-        "description": "会话复盘 (观测 P2): one conversation's merged timeline — the message thread\n(bodies) overlaid with each turn's outcome/quality (turn_metrics), spend\n(cost_events), execution spans, and multi-agent runs (turn_journal), joined by\ntrace_id / message_id. Per-message ``models`` / ``credential_source`` come from\n``cost_calls`` (message_id; bare turn markers fall back to trace_id).\n\nAdmin-only and cross-user (any account's conversation), unlike the owner-scoped\n``/v1/conversations/*``. The drill-down target of the 近期错误 feed: open a\nfailed turn in full context (prompt + reply/error + rounds/latency + ¥ + the\nturn's tool/LLM spans + member tree).",
+        "description": "会话复盘 (观测 P2): one conversation's merged timeline — the message thread\n(bodies) overlaid with each turn's outcome/quality (turn_metrics), spend\n(cost_events), execution spans, and multi-agent runs (turn_journal), joined by\ntrace_id / message_id. Per-message ``models`` / ``credential_source`` come from\n``cost_calls`` (message_id; bare turn markers fall back to trace_id).\n\nAssistant-row ``runs_payload`` / ``projected`` stay off this list (always\nnull) so a long thread does not re-inflate the payload ``ReplaySpan`` was\nbuilt to drop. ``has_final_state`` marks turns whose pair is available via\n``GET .../messages/{id}/final-state``. The thread is the latest window\n(not oldest-first 500). Soft-deleted conversations are readable (roster\ndefault includes them).\n\nAdmin-only and cross-user (any account's conversation), unlike the owner-scoped\n``/v1/conversations/*``. The drill-down target of the 近期错误 feed: open a\nfailed turn in full context (prompt + reply/error + rounds/latency + ¥ + the\nturn's tool/LLM spans + member tree).",
         "operationId": "observability_conversation_v1_admin_observability_conversations__conversation_id__get",
         "parameters": [
           {
@@ -20730,6 +20914,91 @@
           }
         },
         "summary": "Observability Conversation",
+        "tags": [
+          "admin",
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/observability/conversations/{conversation_id}/messages/{message_id}/final-state": {
+      "get": {
+        "description": "On-demand user-end final state for one 会话复盘 assistant turn.\n\nSame pair as ``MessageDetail.runs`` + ``project_turn`` of its events. The\nconversation list omits this pair so opening a long thread stays on the\ncompressed spans/runs view. Soft-deleted conversations are readable.",
+        "operationId": "observability_conversation_turn_final_state_v1_admin_observability_conversations__conversation_id__messages__message_id__final_state_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminReplayTurnFinalState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Observability Conversation Turn Final State",
         "tags": [
           "admin",
           "admin"
@@ -21166,6 +21435,82 @@
           }
         },
         "summary": "Update Platform Credential",
+        "tags": [
+          "admin",
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/platform-credentials/{credential_id}/clear-runtime": {
+      "post": {
+        "description": "Drop cooling / exhausted / blocked flags so the member is schedulable again.",
+        "operationId": "clear_platform_credential_runtime_v1_admin_platform_credentials__credential_id__clear_runtime_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credential_id",
+            "required": true,
+            "schema": {
+              "title": "Credential Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformCredentialView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear Platform Credential Runtime",
         "tags": [
           "admin",
           "admin"

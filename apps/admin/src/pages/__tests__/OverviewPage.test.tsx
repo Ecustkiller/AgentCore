@@ -113,6 +113,8 @@ function renderOverview() {
       <Routes>
         <Route path="/overview" element={<OverviewPage />} />
         <Route path="/replay/:id" element={<ReplayProbe />} />
+        <Route path="/quota" element={<div>平台额度页</div>} />
+        <Route path="/system" element={<div>系统页</div>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -200,5 +202,23 @@ describe("OverviewPage", () => {
     vi.mocked(fetchOverview).mockResolvedValue(overview());
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     expect(await screen.findByText("今日活跃用户")).toBeTruthy();
+  });
+
+  it("sends 计费模式 to 平台额度", async () => {
+    vi.mocked(fetchOverview).mockResolvedValue(overview());
+    renderOverview();
+    await screen.findByText("今日活跃用户");
+
+    fireEvent.click(screen.getByRole("button", { name: /计费模式/ }));
+    expect(await screen.findByText("平台额度页")).toBeTruthy();
+  });
+
+  it("sends 数据库 to 系统", async () => {
+    vi.mocked(fetchOverview).mockResolvedValue(overview());
+    renderOverview();
+    await screen.findByText("今日活跃用户");
+
+    fireEvent.click(screen.getByRole("button", { name: /数据库/ }));
+    expect(await screen.findByText("系统页")).toBeTruthy();
   });
 });

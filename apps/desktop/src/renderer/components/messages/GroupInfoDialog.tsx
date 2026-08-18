@@ -15,9 +15,11 @@ import {
   avatarInitial,
   canActAsGroupModerator,
   canModerateMemberTarget,
+  chatCircleAvatarUrl,
   chatDisplayName,
-  memberGovernanceBadges,
+  memberGovernanceBadge,
 } from "./chatDisplay";
+import { GovernanceBadge } from "./GovernanceBadge";
 
 interface Props {
   chatId: string;
@@ -228,9 +230,12 @@ export function GroupInfoDialog({ chatId, open, onClose }: Props) {
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="max-w-sm" aria-describedby={undefined}>
         <div className="flex flex-col items-center gap-2 border-b border-border px-5 py-5">
-          <span className="flex size-14 items-center justify-center rounded-full bg-primary/10 text-xl font-medium text-primary">
-            {avatarInitial(name)}
-          </span>
+          <PresenceAvatar
+            label={avatarInitial(name)}
+            url={chatCircleAvatarUrl(chat)}
+            sizeClass="size-14"
+            textClass="text-xl"
+          />
           <DialogTitle className="text-center">{name}</DialogTitle>
           <span className="text-xs text-muted-foreground">
             {isOfficial ? "官方广播" : `${members.length} 名成员`}
@@ -307,7 +312,7 @@ export function GroupInfoDialog({ chatId, open, onClose }: Props) {
             </p>
             <ul className="max-h-60 overflow-y-auto px-2 pb-2">
               {members.map((m) => {
-                const badges = memberGovernanceBadges(m);
+                const badge = memberGovernanceBadge(m);
                 return (
                   <li key={m.id} className="py-0.5">
                     <button
@@ -318,6 +323,7 @@ export function GroupInfoDialog({ chatId, open, onClose }: Props) {
                     >
                       <PresenceAvatar
                         label={avatarInitial(m.display_name || m.username)}
+                        url={m.avatar_url}
                         sizeClass="size-8"
                         textClass="text-sm"
                         online={!!m.online}
@@ -327,14 +333,7 @@ export function GroupInfoDialog({ chatId, open, onClose }: Props) {
                           <span className="truncate text-sm text-foreground">
                             {m.display_name || m.username}
                           </span>
-                          {badges.map((label) => (
-                            <span
-                              key={label}
-                              className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary"
-                            >
-                              {label}
-                            </span>
-                          ))}
+                          {badge && <GovernanceBadge badge={badge} />}
                           {m.muted_by_admin && (
                             <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
                               已禁言

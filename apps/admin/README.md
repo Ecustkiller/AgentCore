@@ -42,6 +42,7 @@ pnpm gen:types
 | `pnpm build` | 类型检查 + 生产构建 |
 | `pnpm typecheck` | 仅 `tsc --noEmit` |
 | `pnpm test` | vitest（jsdom 渲染测试）|
+| `pnpm conformance` | 多 Agent golden `projected` → ChatView 渲染门禁 |
 | （仓库根）`pnpm gen:types` | 重生成契约类型（含 admin 透传源） |
 
 ## 界面约定

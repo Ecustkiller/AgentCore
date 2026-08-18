@@ -86,7 +86,7 @@ function renderPage() {
 }
 
 describe("BetaGroupPage", () => {
-  it("渲染版主名册与群信息", async () => {
+  it("渲染管理员名册与群信息", async () => {
     vi.mocked(listBetaGroupModerators).mockResolvedValue(
       rosterResp([
         moderator({ id: "u1", username: "alice", display_name: "爱丽丝" }),
@@ -128,7 +128,7 @@ describe("BetaGroupPage", () => {
   it("用户名形态的输入不会打到接口", async () => {
     vi.mocked(listBetaGroupModerators).mockResolvedValue(rosterResp([]));
     renderPage();
-    await screen.findByText("还没有内测群版主");
+    await screen.findByText("还没有内测群管理员");
 
     fireEvent.change(screen.getByLabelText("用户 ID"), {
       target: { value: "@alice" },
@@ -141,7 +141,7 @@ describe("BetaGroupPage", () => {
     );
   });
 
-  it("已经是版主的用户不会被重复任命", async () => {
+  it("已经是管理员的用户不会被重复任命", async () => {
     vi.mocked(listBetaGroupModerators).mockResolvedValue(
       rosterResp([moderator({ id: "u1", username: "alice" })]),
     );
@@ -155,7 +155,7 @@ describe("BetaGroupPage", () => {
 
     expect(vi.mocked(appointBetaGroupModerator)).not.toHaveBeenCalled();
     expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
-      expect.stringContaining("已经是内测群版主"),
+      expect.stringContaining("已经是内测群管理员"),
     );
   });
 
@@ -166,7 +166,7 @@ describe("BetaGroupPage", () => {
     );
 
     renderPage();
-    await screen.findByText("还没有内测群版主");
+    await screen.findByText("还没有内测群管理员");
 
     fireEvent.change(screen.getByLabelText("搜索用户"), {
       target: { value: "bob" },
@@ -181,7 +181,7 @@ describe("BetaGroupPage", () => {
 
   /**
    * `total` 起手是 0，直接印进标题就会在名册压根没读到时写「共 0 人」——和正文的红字
-   * 报错同框，截图上报时会被读成「版主全没了」。
+   * 报错同框，截图上报时会被读成「管理员全没了」。
    */
   it("名册加载失败时标题写「共 —」而不是「共 0 人」", async () => {
     vi.mocked(listBetaGroupModerators).mockRejectedValue(
@@ -199,7 +199,7 @@ describe("BetaGroupPage", () => {
     vi.mocked(listBetaGroupModerators).mockResolvedValue(rosterResp([]));
     renderPage();
 
-    expect(await screen.findByText("还没有内测群版主")).toBeTruthy();
+    expect(await screen.findByText("还没有内测群管理员")).toBeTruthy();
     expect(screen.getByText(/平台 admin 本身已有群治理权/)).toBeTruthy();
     expect(screen.queryByRole("table")).toBeNull();
     // 读到了、确实是 0：这时候「共 0 人」才是事实，不该退化成「—」。

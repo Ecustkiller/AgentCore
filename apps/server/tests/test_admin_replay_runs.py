@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from agentcore.api.routes.admin._shared import _project_runs, _project_spans
+from agentcore.api.routes.admin._shared import (
+    _project_runs,
+    _project_spans,
+    fold_replay_journal,
+)
+from agentcore.conformance.projection import project_turn
+from agentcore.runtime.journal.fold import runs_from_entries
 
 
 def _multi_agent_journal() -> list[dict]:
@@ -139,3 +145,43 @@ def test_project_runs_lifts_message_final_and_tree():
 
 def test_project_runs_empty_entries():
     assert _project_runs([]) == []
+
+
+def test_fold_replay_journal_projected_matches_project_turn():
+    """Admin final-state is the existing oracle, not a third projection."""
+    entries = _multi_agent_journal()
+    runs, projected, display = fold_replay_journal(entries)
+    folded = runs_from_entries(entries)
+    assert folded is not None
+    assert projected == project_turn(folded["events"])
+    assert display is not None
+    assert display.events == folded["events"]
+    assert display.finish_reason == "end_turn"
+    assert len(runs) == 1
+    assert runs[0].content == "调研全文：方案 A 最优"
+
+
+def test_fold_replay_journal_process_only_keeps_display_without_inventing_events():
+    """Single-agent process_* lives on runs_from_entries.process — do not synthesize events."""
+    entries = [
+        {"kind": "turn_started", "payload": {"user_message": "find x"}, "ts": None},
+        {
+            "kind": "process_tool",
+            "payload": {
+                "kind": "tool",
+                "id": "c1",
+                "tool_name": "web_search",
+                "result": "r",
+                "status": "success",
+            },
+            "ts": None,
+        },
+        {"kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": None},
+    ]
+    runs, projected, display = fold_replay_journal(entries)
+    assert runs == []
+    assert projected is None
+    assert display is not None
+    assert display.events == []
+    assert display.process is not None
+    assert display.process[0]["tool_name"] == "web_search"

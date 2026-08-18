@@ -17,14 +17,36 @@ D11 failure kinds (callers must treat differently):
 
 from __future__ import annotations
 
+import asyncio
+import threading
+import weakref
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
 from agentcore.core.logging import get_logger
-from agentcore.runtime.suspension import TurnSuspension
+from agentcore.runtime.suspension import (
+    TurnSuspension,
+    release_claimed_pause_tool_calls_if_complete,
+)
 
 logger = get_logger(__name__)
+
+# Same-turn parallel SUSPEND faces (two ``ask_user`` in one gather) share one
+# lock per message_id so each snapshot keeps prior sibling ``*_required`` cards.
+# Weak values: the entry lives exactly as long as a caller holds the lock, so a
+# long-running process does not retain one lock per paused message forever.
+_PAUSE_LOCKS_GUARD = threading.Lock()
+_PAUSE_LOCKS: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+
+
+def _pause_persist_lock(message_id: str) -> asyncio.Lock:
+    with _PAUSE_LOCKS_GUARD:
+        lock = _PAUSE_LOCKS.get(message_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            _PAUSE_LOCKS[message_id] = lock
+        return lock
 
 
 class SuspensionPersistError(Exception):
@@ -59,6 +81,7 @@ async def persist_suspension_capture(
     sink: Any | None = None,
     suspension_kind: str,
     turn_paused_extras: dict[str, Any] | None = None,
+    message_id: str = "",
 ) -> bool:
     """Capture transcript + the fact-log snapshot (+ ``turn_paused``), build, and save.
 
@@ -71,9 +94,46 @@ async def persist_suspension_capture(
     so the durable pause path is never blocked by capture-side gaps.
     ``turn_paused_extras`` is optional adjunct data stored on the same fact (e.g. a
     demo-tape frame cursor) — live faces leave it unset.
+    ``message_id`` serializes same-turn sibling persists so later snapshots keep
+    earlier ``*_required`` cards (``turn_journal.record`` replaces wholesale).
     """
+    if message_id:
+        async with _pause_persist_lock(message_id):
+            return await _persist_suspension_capture_unlocked(
+                checkpoint_id=checkpoint_id,
+                required_event=required_event,
+                build_frame=build_frame,
+                saver=saver,
+                sink=sink,
+                suspension_kind=suspension_kind,
+                turn_paused_extras=turn_paused_extras,
+                message_id=message_id,
+            )
+    return await _persist_suspension_capture_unlocked(
+        checkpoint_id=checkpoint_id,
+        required_event=required_event,
+        build_frame=build_frame,
+        saver=saver,
+        sink=sink,
+        suspension_kind=suspension_kind,
+        turn_paused_extras=turn_paused_extras,
+        message_id="",
+    )
+
+
+async def _persist_suspension_capture_unlocked(
+    *,
+    checkpoint_id: str,
+    required_event: Any,
+    build_frame: Callable[[SuspensionCapture], TurnSuspension],
+    saver: Callable[[TurnSuspension], Awaitable[None]],
+    sink: Any | None,
+    suspension_kind: str,
+    turn_paused_extras: dict[str, Any] | None,
+    message_id: str,
+) -> bool:
     from agentcore.core.log_context import get_log_value
-    from agentcore.runtime.facts import snapshot_fact_log
+    from agentcore.runtime.facts import Fact, record_turn_fact, snapshot_fact_log
     from agentcore.runtime.suspension import captain_transcript, turn_citations, turn_history
 
     transcript = captain_transcript.get()
@@ -138,4 +198,18 @@ async def persist_suspension_capture(
             error=str(e),
         )
         raise SuspensionPersistError(checkpoint_id, e) from e
+    if suspension_kind == "ask_user" and message_id:
+        release_claimed_pause_tool_calls_if_complete(
+            message_id, capture.transcript, "ask_user"
+        )
+    # After save, land this card on the ambient log so a later sibling persist
+    # (same message_id lock) keeps it — ``save_paused_turn`` replaces the journal.
+    raw_payload = required_entry.get("payload")
+    record_turn_fact(
+        Fact(
+            kind=str(required_entry["kind"]),
+            payload=dict(raw_payload) if isinstance(raw_payload, dict) else {},
+            ts=required_entry.get("ts") if isinstance(required_entry.get("ts"), str) else None,
+        )
+    )
     return True

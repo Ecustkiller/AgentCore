@@ -105,7 +105,9 @@ class ProxySpendQueue:
                 conversation_id=conversation_id,
             )
         else:
-            logger.info(
+            # Per-call happy path: debug so jsonl rotation keeps llm.call. Ledger
+            # truth is Postgres, not this enqueue ack.
+            logger.debug(
                 "inference.proxy_spend_enqueued",
                 record_id=record_id,
                 call_id=call.call_id,

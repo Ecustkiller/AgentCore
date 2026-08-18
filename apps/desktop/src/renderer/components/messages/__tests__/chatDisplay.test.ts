@@ -3,18 +3,23 @@ import { describe, expect, it } from "vitest";
 import {
   EVERYONE_MENTION_LABEL,
   OFFICIAL_CHAT_DISPLAY_NAME,
+  avatarSrc,
+  bubbleAvatarUrl,
   buildReplySnapshot,
   canActAsGroupModerator,
   canModerateMemberTarget,
   canOfferEdit,
   canOfferRecall,
+  chatCircleAvatarUrl,
   chatDisplayName,
   filterMentionsInContent,
   findImMentionDraft,
   findOfficialChatId,
   isGroupModeratorRole,
+  memberGovernanceBadge,
   memberGovernanceBadges,
   mentionAtToken,
+  mentionRoleSubtitle,
   messageMentionsUser,
   replyBodyPreview,
   splitContentByMentions,
@@ -258,14 +263,48 @@ describe("group governance helpers", () => {
 
   it("badges platform admin over group role", () => {
     expect(
-      memberGovernanceBadges({ is_admin: true, group_role: "admin" }),
+      memberGovernanceBadge({ is_admin: true, group_role: "admin" }),
+    ).toEqual({
+      kind: "platform",
+      label: "平台管理员",
+      shortLabel: "平台",
+    });
+    expect(
+      memberGovernanceBadges({ is_admin: true, group_role: "owner" }),
     ).toEqual(["平台管理员"]);
     expect(
-      memberGovernanceBadges({ is_admin: false, group_role: "owner" }),
-    ).toEqual(["群管理员"]);
+      memberGovernanceBadge({ is_admin: false, group_role: "owner" }),
+    ).toEqual({ kind: "owner", label: "群主", shortLabel: "群主" });
+    expect(
+      memberGovernanceBadge({ is_admin: false, group_role: "admin" }),
+    ).toEqual({ kind: "admin", label: "管理员", shortLabel: "管理员" });
     expect(
       memberGovernanceBadges({ is_admin: false, group_role: "member" }),
     ).toEqual([]);
+  });
+
+  it("builds @-menu subtitle with short role + handle", () => {
+    expect(
+      mentionRoleSubtitle({
+        username: "alice",
+        is_admin: false,
+        group_role: "admin",
+      }),
+    ).toBe("管理员 · @alice");
+    expect(
+      mentionRoleSubtitle({
+        username: "root",
+        is_admin: true,
+        group_role: "member",
+      }),
+    ).toBe("平台 · @root");
+    expect(
+      mentionRoleSubtitle({
+        username: "bob",
+        is_admin: false,
+        group_role: "member",
+      }),
+    ).toBe("@bob");
   });
 
   it("hides moderate targets for self / platform / peer group mods", () => {
@@ -460,5 +499,126 @@ describe("IM mention helpers", () => {
       end: 1,
       query: "",
     });
+  });
+});
+
+describe("avatarSrc", () => {
+  it("prefixes a relative path and leaves null / absolute alone", () => {
+    expect(avatarSrc(null)).toBeNull();
+    expect(avatarSrc(undefined)).toBeNull();
+    expect(avatarSrc("")).toBeNull();
+    expect(avatarSrc("/v1/users/u1/avatar?v=a")).toBe(
+      "http://localhost:8000/v1/users/u1/avatar?v=a",
+    );
+    expect(avatarSrc("https://cdn.example/a.png")).toBe(
+      "https://cdn.example/a.png",
+    );
+  });
+});
+
+describe("chatCircleAvatarUrl", () => {
+  it("uses peer.avatar_url for dms, never chat.avatar_url", () => {
+    expect(
+      chatCircleAvatarUrl(
+        chat({
+          id: "d1",
+          type: "dm",
+          avatar_url: "/v1/chats/d1/avatar",
+          peer: {
+            id: "u1",
+            username: "alice",
+            display_name: "Alice",
+            online: false,
+            is_admin: false,
+            group_role: "member",
+            muted_by_admin: false,
+            avatar_url: "/v1/users/u1/avatar?v=1",
+          },
+        }),
+      ),
+    ).toBe("/v1/users/u1/avatar?v=1");
+    expect(
+      chatCircleAvatarUrl(
+        chat({
+          id: "d1",
+          type: "dm",
+          avatar_url: "/v1/chats/d1/avatar",
+          peer: {
+            id: "u1",
+            username: "alice",
+            display_name: "Alice",
+            online: false,
+            is_admin: false,
+            group_role: "member",
+            muted_by_admin: false,
+            avatar_url: null,
+          },
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("uses chat.avatar_url only for group / official session icons", () => {
+    expect(
+      chatCircleAvatarUrl(
+        chat({
+          id: "g1",
+          type: "group",
+          title: "内测群",
+          avatar_url: "/v1/chats/g1/avatar",
+        }),
+      ),
+    ).toBe("/v1/chats/g1/avatar");
+    expect(
+      chatCircleAvatarUrl(
+        chat({ id: "o1", type: "official", avatar_url: null }),
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("bubbleAvatarUrl", () => {
+  const urls = {
+    myAvatarUrl: "https://api.example/me.png",
+    peerAvatarUrl: "/v1/users/peer/avatar?v=1",
+    memberAvatarUrl: "/v1/users/mem/avatar?v=2",
+    chatAvatarUrl: "/v1/chats/c1/avatar",
+  };
+
+  it("uses auth URL for own bubbles", () => {
+    expect(bubbleAvatarUrl({ mine: true, chatType: "dm", ...urls })).toBe(
+      urls.myAvatarUrl,
+    );
+  });
+
+  it("uses peer for dm and roster member for group, never chat.avatar_url", () => {
+    expect(bubbleAvatarUrl({ mine: false, chatType: "dm", ...urls })).toBe(
+      urls.peerAvatarUrl,
+    );
+    expect(bubbleAvatarUrl({ mine: false, chatType: "group", ...urls })).toBe(
+      urls.memberAvatarUrl,
+    );
+    expect(
+      bubbleAvatarUrl({
+        mine: false,
+        chatType: "dm",
+        ...urls,
+        peerAvatarUrl: null,
+      }),
+    ).toBeNull();
+    expect(
+      bubbleAvatarUrl({
+        mine: false,
+        chatType: "group",
+        ...urls,
+        memberAvatarUrl: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("uses the session icon only for official bubbles", () => {
+    expect(bubbleAvatarUrl({ mine: false, chatType: "official", ...urls })).toBe(
+      urls.chatAvatarUrl,
+    );
   });
 });

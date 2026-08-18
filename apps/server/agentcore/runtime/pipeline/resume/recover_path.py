@@ -12,11 +12,13 @@ from agentcore.runtime.checkpoints import CheckpointDecision
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.pipeline.resume.settle import (
     append_resumed_tool_results,
+    next_pending_ask_user_suspension,
     persist_resumed_tool_results,
+    unclosed_tool_call_ids,
 )
 from agentcore.runtime.pipeline.resume.window import pre_pause_content, resumed_captain_window
-from agentcore.runtime.recover import recover_turn
-from agentcore.runtime.suspension import TurnSuspension, captain_transcript
+from agentcore.runtime.recover import SettledSuspension, recover_turn
+from agentcore.runtime.suspension import SuspensionSaver, TurnSuspension, captain_transcript
 from agentcore.runtime.turn.state import TurnState
 
 logger = get_logger(__name__)
@@ -47,6 +49,7 @@ async def recover_and_rebuild_window(
     excluded_run_ids: list[str] | None = None,
     write_capability_overrides: list[dict[str, str]] | None = None,
     model_overrides: dict[str, dict[str, str]] | None = None,
+    suspension_saver: SuspensionSaver | None = None,
 ) -> RecoveredResume:
     """Settle the paused frame and rebuild the CEO message window.
 
@@ -122,6 +125,25 @@ async def recover_and_rebuild_window(
         sink=sink,
         tool_name=getattr(suspension.kind, "value", "") or "",
     )
+
+    # Same-batch sibling cards: close only the answered call. Remaining open
+    # calls stay pending — matching sibling re-pauses on the next card (one
+    # frame per message). Unmatched unclosed ids also re-pause: feeding the CEO
+    # an incomplete tool pair is a 400. No skip placeholder either way.
+    if unclosed_tool_call_ids(messages):
+        from agentcore.runtime.facts import snapshot_fact_log
+
+        entries = snapshot_fact_log() or list(suspension.journal_entries)
+        sibling = next_pending_ask_user_suspension(suspension, messages, entries)
+        if sibling is not None:
+            sibling.journal_entries = entries
+            if suspension_saver is not None:
+                await suspension_saver(sibling)
+        return RecoveredResume(
+            messages=messages,
+            pre_pause=pre_pause,
+            settled=SettledSuspension(settled.output, None, ToolEffect.SUSPEND),
+        )
 
     # 终稿多段衔接: when the pause kept deliverable prose, steer the resumed answer
     # round to continue it (join_segments alone can't invent transitions). Skip when

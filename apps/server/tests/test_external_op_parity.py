@@ -4,7 +4,8 @@ The session-grant gate is hand-maintained on both ends (server routing layer +
 desktop ``workspace/sessionRoot.ts``). Both are whitelists, so a newly added
 ``WorkspaceOp`` must be classified on both ends before it can run against a W3
 session grant — this ratchet is what makes that "ring" instead of defaulting to
-allow on the desktop and deny on the server.
+allow on the desktop and deny on the server. Deny-sentence copy is the same
+mirror (file_ops must recognize the desktop wording without a hand-copied scrape).
 
 Same spirit (and same regex-extraction approach) as
 ``test_workspace_ignore_parity.py``.
@@ -51,6 +52,14 @@ def _ts_op_names(src: str) -> frozenset[str]:
     return frozenset(names)
 
 
+def _ts_string_const(src: str, name: str) -> str:
+    """Value of ``const NAME = "…"`` (assignment may break across lines)."""
+    m = re.search(rf"const {re.escape(name)}\s*=\s*\"([^\"]+)\"", src)
+    if not m:
+        raise AssertionError(f"TypeScript const {name!r} not found in {_TS_GATE.name}")
+    return m.group(1)
+
+
 @pytest.fixture(scope="module")
 def ts_gate() -> str:
     assert _TS_GATE.is_file(), f"missing desktop gate: {_TS_GATE}"
@@ -74,6 +83,20 @@ def test_desktop_gate_mirrors_server_policy(ts_gate: str):
     assert _ts_op_set(ts_gate, "ORGANIZE_MUTATION_OPS") == em.ORGANIZE_MUTATION_OPS
     assert _ts_op_set(ts_gate, "ORGANIZE_DENIED_OPS") == em.ORGANIZE_DENIED_OPS
     assert em.READONLY_ALLOWED_OPS | em.ORGANIZE_MUTATION_OPS == em.ORGANIZE_ALLOWED_OPS
+
+
+def test_desktop_gate_mirrors_server_copy(ts_gate: str):
+    """Deny sentences must match; a wording change on either end turns this red."""
+    assert _ts_string_const(ts_gate, "READONLY_MSG") == em._READONLY_MSG
+    assert _ts_string_const(ts_gate, "ORGANIZE_DENY_MSG") == em._ORGANIZE_DENY_MSG
+    assert _ts_string_const(ts_gate, "PERMANENT_EXTERNAL_MSG") == em._PERMANENT_EXTERNAL_MSG
+
+
+def test_copy_wording_drift_turns_red(ts_gate: str):
+    """Sanity: the copy ratchet is not a tautology that stays green after a rewrite."""
+    drifted = ts_gate.replace(em._READONLY_MSG, em._READONLY_MSG + "（改词）", 1)
+    assert drifted != ts_gate
+    assert _ts_string_const(drifted, "READONLY_MSG") != em._READONLY_MSG
 
 
 def test_policy_is_exhaustive_over_workspace_ops(ts_gate: str):

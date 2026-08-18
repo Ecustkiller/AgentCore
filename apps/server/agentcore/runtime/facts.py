@@ -269,6 +269,44 @@ class LlmCallFact:
         )
 
 
+class CrossTurnRetry(StrEnum):
+    """Whether repeating the same action on a later turn is futile.
+
+    Answers: 跨回合同一动作还值不值得再试. Distinct from loop-controller
+    ``error_class``, which answers: 本轮还该不该继续用这个工具/这条路. Do not
+    merge the two — e.g. ``liveness_timeout`` is in-turn ``permanent`` (stop
+    using this tool this round) but cross-turn ``not_futile`` (the next turn
+    may succeed).
+
+    Three-state: ``futile`` / ``not_futile`` / omitted. Unknown must be omitted
+    — never default, never guess. This field is a recorded fact, not a gate.
+    """
+
+    FUTILE = "futile"
+    NOT_FUTILE = "not_futile"
+
+
+CROSS_TURN_RETRY_KEY = "cross_turn_retry"
+
+
+def normalize_cross_turn_retry(raw: object) -> str:
+    """Known values only; anything else is unknown (empty → omit)."""
+    if isinstance(raw, CrossTurnRetry):
+        text = raw.value
+    elif isinstance(raw, str):
+        text = raw.strip()
+    else:
+        text = ""
+    if text in {CrossTurnRetry.FUTILE.value, CrossTurnRetry.NOT_FUTILE.value}:
+        return text
+    return ""
+
+
+def cross_turn_retry_meta(value: CrossTurnRetry) -> dict[str, str]:
+    """Stamp for ``ToolResult.metadata`` / ``ToolAttempt.meta`` — never infers."""
+    return {CROSS_TURN_RETRY_KEY: value.value}
+
+
 @dataclass(frozen=True, slots=True)
 class ToolCallFact:
     """One completed tool call's FULL model-facing result — the window's tool message.
@@ -294,6 +332,9 @@ class ToolCallFact:
     success: bool = True
     # Coarse failure code for local-turn write-back stats (omitted when empty).
     code: str = ""
+    # Cross-turn: same-action retry worth it? See :class:`CrossTurnRetry`.
+    # Orthogonal to ``error_class`` (in-turn breaker). Empty = unknown; omit.
+    cross_turn_retry: str = ""
     kind: ClassVar[FactKind] = FactKind.TOOL_CALL
 
     def to_fact(self, ts: str | None = None) -> Fact:
@@ -309,6 +350,9 @@ class ToolCallFact:
         code = (self.code or "").strip()
         if code:
             payload["code"] = code
+        retry = normalize_cross_turn_retry(self.cross_turn_retry)
+        if retry:
+            payload[CROSS_TURN_RETRY_KEY] = retry
         return Fact(
             kind=self.kind.value,
             payload=payload,

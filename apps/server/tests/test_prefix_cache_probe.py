@@ -325,8 +325,11 @@ def test_observe_emits_one_line_and_advances_the_chain(monkeypatch):
     captured: list[dict] = []
 
     class _Spy:
+        def debug(self, event: str, **kwargs: object) -> None:
+            captured.append({"event": event, "level": "debug", **kwargs})
+
         def info(self, event: str, **kwargs: object) -> None:
-            captured.append({"event": event, **kwargs})
+            captured.append({"event": event, "level": "info", **kwargs})
 
     monkeypatch.setattr("agentcore.observability.prefix_cache.logger", _Spy())
     bind_log_context(conversation_id="conv-1", trace_id="t1", agent_id="ceo")
@@ -354,6 +357,7 @@ def test_observe_emits_one_line_and_advances_the_chain(monkeypatch):
         cache_miss_tokens=232,
     )
     assert [row["event"] for row in captured] == ["cost.prefix_cache", "cost.prefix_cache"]
+    assert all(row["level"] == "debug" for row in captured)
     assert captured[0]["breach"] == BREACH_COLD_CHAIN
     assert captured[1]["breach"] == BREACH_HISTORY_GROWTH
     assert captured[1]["reusable_tokens"] == 800
@@ -365,6 +369,9 @@ def test_observe_skips_calls_with_no_chain_identity_or_no_tokens(monkeypatch):
     captured: list[dict] = []
 
     class _Spy:
+        def debug(self, event: str, **kwargs: object) -> None:
+            captured.append({"event": event, **kwargs})
+
         def info(self, event: str, **kwargs: object) -> None:
             captured.append({"event": event, **kwargs})
 
@@ -401,7 +408,10 @@ def test_observe_skips_calls_with_no_chain_identity_or_no_tokens(monkeypatch):
 def test_separate_runs_in_one_conversation_do_not_diff_against_each_other(monkeypatch):
     monkeypatch.setattr(
         "agentcore.observability.prefix_cache.logger",
-        type("_Spy", (), {"info": lambda self, event, **kw: None})(),
+        type("_Spy", (), {
+            "info": lambda self, event, **kw: None,
+            "debug": lambda self, event, **kw: None,
+        })(),
     )
     messages = [LLMMessage(role="system", content="SYS"), LLMMessage(role="user", content="q")]
     bind_log_context(conversation_id="conv-1", trace_id="t1", agent_id="ceo")
@@ -431,7 +441,14 @@ def test_separate_runs_in_one_conversation_do_not_diff_against_each_other(monkey
 def _mute_probe_log(monkeypatch) -> None:
     monkeypatch.setattr(
         "agentcore.observability.prefix_cache.logger",
-        type("_Spy", (), {"info": lambda self, event, **kw: None})(),
+        type(
+            "_Spy",
+            (),
+            {
+                "info": lambda self, event, **kw: None,
+                "debug": lambda self, event, **kw: None,
+            },
+        )(),
     )
 
 
@@ -715,6 +732,7 @@ def test_a_growing_source_ledger_is_attributable_to_its_own_section():
             recent_team_graph="",
             prior_delivery_gaps="",
             prior_delegate_retry="",
+            prior_futile_retries="",
             pending_questions="",
             attachment_context="",
             registered_sources=sources,

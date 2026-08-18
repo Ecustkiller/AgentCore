@@ -33,6 +33,7 @@ from agentcore.tools.builtin.file_ops import (
     _prepare_write_relpath,
     write_scope_rejection,
 )
+from agentcore.tools.builtin.file_ops.errors import CROSS_TURN_RETRY_KEY, CrossTurnRetry
 from agentcore.tools.builtin.web.read_url import _safe_request
 from agentcore.tools.file_products import file_product
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
@@ -194,7 +195,7 @@ class DownloadUrlTool:
 
         scope_err = write_scope_rejection(context, rel_path)
         if scope_err:
-            return _fail(scope_err, start)
+            return _fail(scope_err, start, cross_turn_retry=CrossTurnRetry.FUTILE)
 
         max_bytes = _max_bytes()
         backend = context.backend
@@ -260,8 +261,12 @@ class DownloadUrlTool:
 
         try:
             written = await backend.write_bytes(rel_path, data)
-        except OutsideWorkspace:
-            return _fail(_outside_workspace_msg(rel_path, location=location), start)
+        except OutsideWorkspace as e:
+            return _fail(
+                _outside_workspace_msg(rel_path, location=location, reason=str(e)),
+                start,
+                cross_turn_retry=CrossTurnRetry.FUTILE,
+            )
         except WorkspaceIOError as e:
             return _fail(f"写入 `{rel_path}` 失败：{e}", start)
 
@@ -321,8 +326,11 @@ def _fail(
     start: float,
     *,
     contract_failure: bool = False,
+    cross_turn_retry: CrossTurnRetry | None = None,
 ) -> ToolResult:
     meta: dict[str, Any] = {"contract_failure": True} if contract_failure else {}
+    if cross_turn_retry is not None:
+        meta[CROSS_TURN_RETRY_KEY] = cross_turn_retry.value
     return ToolResult(
         tool_call_id="",
         success=False,

@@ -7,6 +7,7 @@ import {
 } from "@/services/messaging";
 import { X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { PresenceAvatar } from "./PresenceAvatar";
 import { avatarInitial } from "./chatDisplay";
 
 interface Props {
@@ -135,9 +136,12 @@ export function NewChatDialog({ open, onClose, onOpenProfile }: Props) {
                     className="h-auto w-full justify-start gap-3 rounded-none px-4 py-2 font-normal"
                   >
                     <span className="flex w-full items-center gap-3 text-left">
-                      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-medium text-primary">
-                        {avatarInitial(u.display_name || u.username)}
-                      </span>
+                      <PresenceAvatar
+                        label={avatarInitial(u.display_name || u.username)}
+                        url={u.avatar_url}
+                        sizeClass="size-8"
+                        textClass="text-sm"
+                      />
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className="truncate text-sm text-foreground">
                           {u.display_name || u.username}

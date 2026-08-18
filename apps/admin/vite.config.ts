@@ -2,7 +2,7 @@ import { fileURLToPath, URL } from "node:url";
 
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig, searchForWorkspaceRoot } from "vite";
 import { viteClientBuildDefine } from "../../scripts/client-build-info.mjs";
 import { viteCspPlugin } from "../../scripts/vite-csp.mjs";
 
@@ -22,6 +22,8 @@ export default defineConfig({
   server: {
     port: 5174,
     strictPort: true,
+    // Offline /preview globs committed conformance vectors from the monorepo.
+    fs: { allow: [searchForWorkspaceRoot(process.cwd())] },
   },
   // XSS-001: disable Vite's inline modulepreload polyfill so the prod build has NO inline
   // <script>, letting the injected `script-src 'self'` CSP hold without 'unsafe-inline'.

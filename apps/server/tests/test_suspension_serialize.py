@@ -375,6 +375,65 @@ def test_find_tool_call_id_picks_trailing_matching_call():
     assert find_tool_call_id(transcript, "ask_user") == "call_ask"
 
 
+def test_find_tool_call_id_skips_excluded_sibling():
+    transcript = [
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(id="ask_a", function=ToolCallFunction(name="ask_user", arguments="{}")),
+                ToolCall(id="ask_b", function=ToolCallFunction(name="ask_user", arguments="{}")),
+            ],
+        ),
+    ]
+    assert find_tool_call_id(transcript, "ask_user") == "ask_a"
+    assert find_tool_call_id(transcript, "ask_user", exclude_ids={"ask_a"}) == "ask_b"
+
+
+def test_claim_next_tool_call_id_distinct_for_parallel_ask_user():
+    from agentcore.runtime.suspension import claim_next_tool_call_id
+
+    transcript = [
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(id="ask_a", function=ToolCallFunction(name="ask_user", arguments="{}")),
+                ToolCall(id="ask_b", function=ToolCallFunction(name="ask_user", arguments="{}")),
+            ],
+        ),
+    ]
+    mid = "msg-claim-parallel-ask"
+    assert claim_next_tool_call_id(mid, transcript, "ask_user") == "ask_a"
+    assert claim_next_tool_call_id(mid, transcript, "ask_user") == "ask_b"
+    assert claim_next_tool_call_id(mid, transcript, "ask_user") == ""
+
+
+def test_claim_batch_release_allows_reuse_on_same_message_id():
+    from agentcore.runtime.suspension import (
+        claim_next_tool_call_id,
+        release_claimed_pause_tool_calls_if_complete,
+    )
+
+    transcript = [
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(id="ask_a", function=ToolCallFunction(name="ask_user", arguments="{}")),
+                ToolCall(id="ask_b", function=ToolCallFunction(name="ask_user", arguments="{}")),
+            ],
+        ),
+    ]
+    mid = "msg-claim-release-reuse"
+    assert claim_next_tool_call_id(mid, transcript, "ask_user") == "ask_a"
+    release_claimed_pause_tool_calls_if_complete(mid, transcript)
+    assert claim_next_tool_call_id(mid, transcript, "ask_user") == "ask_b"
+    assert claim_next_tool_call_id(mid, transcript, "ask_user") == ""
+    release_claimed_pause_tool_calls_if_complete(mid, transcript)
+    assert claim_next_tool_call_id(mid, transcript, "ask_user") == "ask_a"
+
+
 def test_find_tool_call_id_empty_when_absent():
     transcript = [LLMMessage(role="user", content="hi")]
     assert find_tool_call_id(transcript, "delegate") == ""

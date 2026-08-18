@@ -158,7 +158,9 @@ export function toolPhaseText(phase: string | undefined): string | null {
  * 内部标识（run_id / conversation_id / interjection_id）不在此列，且**不要再加回来**：
  * 用户在协作图上认的是角色名，`Cancel worker r-a3f2e1c8-…` 让他无从判断 CEO 撤的是谁、
  * 处置得对不对。撤队员 / 裁决求助的标题改挂角色名（{@link RUN_TARGET_ARG_TOOLS}），
- * 查阅历史对话改挂对话标题（结果 peek）。 */
+ * 查阅历史对话改挂对话标题（结果 peek）。
+ * `summary` 故意不在此列：handoff 摘要由 ToolLine 在标题行内联，不经 toolDetail
+ * 再塞一遍（否则和内联摘要重复）。 */
 const TOOL_DETAIL_KEYS = [
   "query",
   "url",

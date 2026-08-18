@@ -22,6 +22,7 @@ from agentcore.runtime.events import (
     tool_use_progress,
     tool_use_start,
 )
+from agentcore.runtime.facts import CrossTurnRetry, cross_turn_retry_meta
 from agentcore.runtime.loop_controller import (
     ERROR_CLASS_PERMANENT,
     ERROR_CLASS_PERMISSION,
@@ -41,6 +42,7 @@ from .tool_exec_args import (
     _failed_tool_message,
     _format_args_parse_error,
     _missing_tool_feedback,
+    _shell_observe_log_fields,
     _short_tool_error_reason,
     with_tool_failed_marker,
 )
@@ -303,6 +305,7 @@ async def run_one_tool(
                     {
                         "error_class": ERROR_CLASS_PERMISSION,
                         "permission_kind": "allowlist",
+                        **cross_turn_retry_meta(CrossTurnRetry.FUTILE),
                     },
                 ),
             ),
@@ -345,7 +348,15 @@ async def run_one_tool(
                 success=False,
                 policy_failure=policy_failure,
                 error_summary=error_msg,
-                meta=_attempt_meta_with_landing_path(name or raw_name, args),
+                meta=_attempt_meta_with_landing_path(
+                    name or raw_name,
+                    args,
+                    (
+                        cross_turn_retry_meta(CrossTurnRetry.FUTILE)
+                        if status != "not_found"
+                        else None
+                    ),
+                ),
             ),
             [],
         )
@@ -503,6 +514,7 @@ async def run_one_tool(
         }
         if name == "git" and isinstance(args.get("subcommand"), str):
             timeout_fields["subcommand"] = args["subcommand"]
+        timeout_fields.update(_shell_observe_log_fields(name, args))
         logger.warning("tool.execute_end", **timeout_fields)
         return (
             _failed_tool_message(tc.id, timeout_msg),
@@ -519,6 +531,7 @@ async def run_one_tool(
                         "liveness_timeout": True,
                         "timeout_layer": "outer",
                         "error_class": ERROR_CLASS_PERMANENT,
+                        **cross_turn_retry_meta(CrossTurnRetry.NOT_FUTILE),
                     },
                 ),
             ),
@@ -559,6 +572,7 @@ async def run_one_tool(
             tool=name,
             status="crash",
             duration_ms=duration_ms,
+            **_shell_observe_log_fields(name, args),
         )
         return (
             _failed_tool_message(tc.id, error_msg),
@@ -645,6 +659,7 @@ async def run_one_tool(
         end_fields["timeout_layer"] = meta["timeout_layer"]
     if isinstance(meta.get("index_status"), str) and meta["index_status"]:
         end_fields["index_status"] = meta["index_status"]
+    end_fields.update(_shell_observe_log_fields(name, args))
     logger.info("tool.execute_end", **end_fields)
 
     citations = result.citations if (result.success and result.citations) else []

@@ -400,7 +400,7 @@ def build_workspace_context(
             "`external_mount_readonly`（静默、无决策卡），"
             "整理走 ask_user 选项 `action=grant_organize_folder`（仍须确认）；"
             "授权后以 `external/<别名>/…` 访问（经桌面通道、仅本次对话、可撤销），"
-            "与工作区绑定正交。"
+            "与工作区绑定正交。交付：先写工作区，再 `file_copy` 到该路径。"
         )
         if is_local:
             desktop_line = (

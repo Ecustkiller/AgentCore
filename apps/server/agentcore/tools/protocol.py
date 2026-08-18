@@ -482,11 +482,15 @@ class ToolContext:
     # signal only — ``dataclasses.replace`` drops this bool. Handoff / executor
     # body-floor exemption must read ``landed_artifact_kinds`` (prose) instead.
     has_landed_files: bool = False
-    # Wave3 B：本 run 内各相对路径成功【整读】``file_read`` 次数（共享可变 dict；
-    # ``dataclasses.replace`` 浅拷贝仍指向同一计数器）。从第 1 行要满安全顶计次；
-    # offset>1 或 limit<行顶的定点窗不计入。
+    # Wave3 B：本 run 内各相对路径成功 ``file_read`` 次数（共享可变 dict；
+    # ``dataclasses.replace`` 浅拷贝仍指向同一计数器）。从第 1 行要满安全顶的整读计次；
+    # 开窗仅当本次请求行范围已被此前交付覆盖、且投影窗内仍有该 path 正文时计次。
     # 超 ``FILE_READ_SAME_PATH_MAX`` 且投影窗内仍有该 path 正文、又无再读授额时拒绝。
     file_read_counts: dict[str, int] = field(default_factory=dict)
+    # 已交付行范围（path → 合并后的闭区间）+ 最近一次成功读的总行数（供把请求裁到 EOF）。
+    # 与 ``file_read_counts`` 同生命周期：写成功必须一并清，否则写后核对会按旧范围误拒。
+    file_read_delivered_ranges: dict[str, list[tuple[int, int]]] = field(default_factory=dict)
+    file_read_line_totals: dict[str, int] = field(default_factory=dict)
     # R1 tool_clear 双态：engine 在每轮 ``execute_tools`` 前对 canonical 再跑
     # ``project_cleared_window`` 后写入。``None`` = 未同步（单测/旁路）→ 视为正文仍在，
     # 保持纯 ``FILE_READ_SAME_PATH_MAX`` 硬顶。``frozenset`` = 投影窗内仍有 verbatim

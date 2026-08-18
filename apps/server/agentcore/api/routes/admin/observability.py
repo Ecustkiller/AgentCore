@@ -21,12 +21,13 @@ from agentcore.api.dependencies import (
 from agentcore.api.routes.admin._shared import (
     _TREND_DAYS,
     _health_window,
-    _project_runs,
     _project_spans,
+    fold_replay_journal,
 )
 from agentcore.api.schemas import (
     AdminConversationReplay,
     AdminObservabilitySummary,
+    AdminReplayTurnFinalState,
     DailyTurns,
     ReplayConversation,
     ReplayMessage,
@@ -48,8 +49,9 @@ router = APIRouter(tags=["admin"])
 # 观测看板「近期错误」feed length — the recent failures worth a glance (the long tail
 # is for the drill-down, not the dashboard).
 _ERROR_FEED = 20
-# 会话复盘 message cap: one conversation's thread is bounded for the timeline payload
-# (a conversation rarely exceeds this; deeper history is a paginated concern later).
+# 会话复盘 message cap: latest window (newest-first fetch, chronological return).
+# Older history past this cap is signalled by ``has_more_before`` — ops triage
+# needs the recent side, not the oldest 500.
 _REPLAY_MAX_MESSAGES = 500
 
 
@@ -134,17 +136,28 @@ async def observability_conversation(
     trace_id / message_id. Per-message ``models`` / ``credential_source`` come from
     ``cost_calls`` (message_id; bare turn markers fall back to trace_id).
 
+    Assistant-row ``runs_payload`` / ``projected`` stay off this list (always
+    null) so a long thread does not re-inflate the payload ``ReplaySpan`` was
+    built to drop. ``has_final_state`` marks turns whose pair is available via
+    ``GET .../messages/{id}/final-state``. The thread is the latest window
+    (not oldest-first 500). Soft-deleted conversations are readable (roster
+    default includes them).
+
     Admin-only and cross-user (any account's conversation), unlike the owner-scoped
     ``/v1/conversations/*``. The drill-down target of the 近期错误 feed: open a
     failed turn in full context (prompt + reply/error + rounds/latency + ¥ + the
     turn's tool/LLM spans + member tree).
     """
-    conv = await conversations.get_by_id_unscoped(conversation_id)  # admin cross-user
+    conv = await conversations.get_by_id_unscoped(
+        conversation_id, include_deleted=True
+    )  # admin cross-user; roster includes tombstones
     if conv is None:
         raise NotFoundError("对话不存在")
 
     owner = await users.get_by_id(conv.user_id)
-    rows, _ = await messages_repo.list_by_conversation(conversation_id, limit=_REPLAY_MAX_MESSAGES)
+    rows, has_more_before = await messages_repo.list_latest(
+        conversation_id, limit=_REPLAY_MAX_MESSAGES
+    )
     metrics = await metrics_repo.list_for_conversation(conversation_id)
     # Only the assistant reply carries a trace_id (the user prompt's is NULL), so a
     # trace overlays exactly one message — its turn's outcome/quality.
@@ -170,6 +183,9 @@ async def observability_conversation(
     # that assistant message (overlay); a text-less turn (e.g. an early hard error
     # that persisted no reply) has no message to ride, so it joins as a bare turn
     # marker — 复盘 must never hide a failure. Its spend stays in the rollup below.
+    # Bare markers older than the latest-N window stay out so the cap keeps the
+    # recent side (conversation-wide turn/error/cost rollups are unchanged).
+    window_start = rows[0].created_at if rows else None
     timeline: list[ReplayMessage] = []
     consumed: set[str] = set()
     for m in rows:
@@ -179,6 +195,11 @@ async def observability_conversation(
         journal = journals.get(m.id, [])
         models, cred_src = call_by_message.get(m.id, ([], None))
         origin, harvest_kind = _usage_origin_fields(m.usage)
+        runs = []
+        has_final_state = False
+        if m.role == "assistant":
+            runs, _, payload = fold_replay_journal(journal)
+            has_final_state = payload is not None
         timeline.append(
             ReplayMessage(
                 id=m.id,
@@ -193,11 +214,18 @@ async def observability_conversation(
                 origin=origin,
                 harvest_kind=harvest_kind,
                 spans=_project_spans(journal),
-                runs=_project_runs(journal) if m.role == "assistant" else [],
+                runs=runs,
+                runs_payload=None,
+                projected=None,
+                has_final_state=has_final_state,
+                attachments=m.attachments or [],
+                agent_mentions=m.agent_mentions or [],
             )
         )
     for tm in metrics:
         if not tm.trace_id or tm.trace_id in consumed:
+            continue
+        if window_start is not None and tm.created_at < window_start:
             continue
         models, cred_src = call_by_trace.get(tm.trace_id, ([], None))
         timeline.append(
@@ -238,9 +266,48 @@ async def observability_conversation(
             created_at=conv.created_at,
             model_profile_id=conv.model_profile_id,
             model_profile_name=expanded.name,
+            deleted_at=conv.deleted_at,
         ),
         messages=timeline,
         turns=len(metrics),
         errors=sum(1 for m in metrics if m.status == "error"),
         cost_total=sum(cost_by_message.values()),
+        has_more_before=has_more_before,
+    )
+
+
+@router.get(
+    "/observability/conversations/{conversation_id}/messages/{message_id}/final-state",
+    response_model=AdminReplayTurnFinalState,
+)
+async def observability_conversation_turn_final_state(
+    conversation_id: str,
+    message_id: str,
+    admin: AdminUser,
+    conversations: ConversationRepository = Depends(get_conversation_repo),
+    messages_repo: MessageRepository = Depends(get_message_repo),
+    journal_repo: TurnJournalRepository = Depends(get_turn_journal_repo),
+) -> AdminReplayTurnFinalState:
+    """On-demand user-end final state for one 会话复盘 assistant turn.
+
+    Same pair as ``MessageDetail.runs`` + ``project_turn`` of its events. The
+    conversation list omits this pair so opening a long thread stays on the
+    compressed spans/runs view. Soft-deleted conversations are readable.
+    """
+    conv = await conversations.get_by_id_unscoped(
+        conversation_id, include_deleted=True
+    )
+    if conv is None:
+        raise NotFoundError("对话不存在")
+    message = await messages_repo.get_by_id(message_id, conversation_id=conversation_id)
+    if message is None:
+        raise NotFoundError("消息不存在")
+    if message.role != "assistant":
+        return AdminReplayTurnFinalState(message_id=message_id)
+    journal = await journal_repo.load_owned(message_id, conversation_id)
+    _, projected, runs_payload = fold_replay_journal(journal)
+    return AdminReplayTurnFinalState(
+        message_id=message_id,
+        runs_payload=runs_payload,
+        projected=projected,
     )

@@ -5,7 +5,14 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from agentcore.runtime.facts import (
+    CROSS_TURN_RETRY_KEY,
+    CrossTurnRetry,
+    normalize_cross_turn_retry,
+)
 from agentcore.tools.protocol import ToolResult
+from agentcore.workspace import external_mounts as _external_mounts
+from agentcore.workspace import shared_mounts as _shared_mounts
 from agentcore.workspace.limits import (
     FILE_TOO_LARGE_DETAIL,
     OFFICE_EXTRACT_MAX_BYTES,
@@ -28,6 +35,7 @@ def _error(
     metadata: dict[str, Any] | None = None,
     failure_code: str | None = None,
     user_face: bool = True,
+    cross_turn_retry: CrossTurnRetry | str | None = None,
 ) -> ToolResult:
     """Build a failed ToolResult with elapsed timing.
 
@@ -37,6 +45,9 @@ def _error(
     skips normal failure tallies — see :class:`~agentcore.tools.protocol.ToolResult`.
     Explicit ``retire_tools`` in ``metadata`` still hard-disables named tools
     (e.g. workspace channel dead).
+
+    ``cross_turn_retry`` is a recorded fact (futile / not_futile); unknown stays
+    omitted — never default. Orthogonal to loop-controller ``error_class``.
 
     User face (``tool_use_end.failure``):
     - ``user_face=True`` (default) → product Chinese in ``error`` also fills
@@ -51,6 +62,9 @@ def _error(
     elif code is None:
         raw = meta.get("code")
         code = raw.strip() if isinstance(raw, str) and raw.strip() else None
+    retry = normalize_cross_turn_retry(cross_turn_retry)
+    if retry:
+        meta[CROSS_TURN_RETRY_KEY] = retry
     # Prefer curated-by-code when a stable code is present; only pass through
     # ``error`` as failure_message when the call site opts into dynamic product copy
     # without a code (filenames / paths).
@@ -120,6 +134,7 @@ def _op_liveness_timeout_error(detail: str, start: float) -> ToolResult:
         start,
         metadata=op_liveness_timeout_metadata(),
         user_face=False,
+        cross_turn_retry=CrossTurnRetry.NOT_FUTILE,
     )
 
 
@@ -164,15 +179,65 @@ def _path_missing_error(error: str, start: float) -> ToolResult:
     return _error(error, start, contract_failure=True)
 
 
-def _outside_workspace_msg(path: str, *, location: str | None = None) -> str:
+# Backend ``OutsideWorkspace`` is reused for two different facts:
+# 1) path is not inside any known root (traversal) — message is the path;
+# 2) path *is* inside a mounted root (``external/<alias>/`` / ``shared/…``)
+#    but the op is not authorized — message is a policy sentence.
+# File tools must not rewrite (2) into 「超出了工作区范围」: that root is legal;
+# the model then copies the in-project example and writes into a forbidden tree.
+# Markers are the module ``*_MSG`` constants (imported, never re-spelled). A
+# prefix / 「（拒绝」 scrape would go silent the moment either end retouched
+# copy — that is how the model last got an inaccurate reason.
+# Desktop ``sessionRoot.ts`` mirrors the three external-grant sentences;
+# ``tests/test_external_op_parity.py`` ratchets that mirror.
+_MOUNT_OP_DENIED_MARKERS: tuple[str, ...] = (
+    _external_mounts._READONLY_MSG,
+    _external_mounts._ORGANIZE_DENY_MSG,
+    _external_mounts._PERMANENT_EXTERNAL_MSG,
+    _external_mounts._CROSS_COPY_MSG,
+    _external_mounts._CROSS_MOUNT_COPY_MSG,
+    _external_mounts._CROSS_MOVE_MSG,
+    _external_mounts._CROSS_MOUNT_MOVE_MSG,
+    _shared_mounts._READONLY_MSG,
+    _shared_mounts._REVOKED_MSG,
+)
+
+
+def _is_mount_op_denied_reason(text: str) -> bool:
+    """True when ``OutsideWorkspace`` carries a mount-policy sentence, not a path."""
+    t = (text or "").strip()
+    return bool(t) and any(m in t for m in _MOUNT_OP_DENIED_MARKERS)
+
+
+def _outside_workspace_msg(
+    path: str,
+    *,
+    location: str | None = None,
+    reason: str | None = None,
+) -> str:
     """Actionable OutsideWorkspace text.
 
-    Path contract lives in ``normalize_workspace_path`` / ``resolve_safe_path``;
-    this message only points at remaining rejects (true out-of-root absolutes).
+    Two cases (do not collapse them):
 
-    On cloud (``location=server``), redirect to Composer import / Git —
-    do not teach bind/open_local as the product path.
+    - Mounted root, op not authorized: surface the backend sentence as-is.
+      ``external/<alias>/`` is a legal root — never say the path is out of
+      range, and never offer an in-project relative-path example.
+    - True out-of-root: keep the existing range + relative-path hint.
+
+    Path contract lives in ``normalize_workspace_path`` / ``resolve_safe_path``.
+    On cloud (``location=server``), the out-of-root branch redirects to
+    Composer import / Git — do not teach bind/open_local as the product path.
+
+    ``reason`` is ``str(OutsideWorkspace)``. Callers that historically stuffed
+    ``str(e)`` into ``path`` (move/copy) are also recognized here so the
+    policy sentence is not interpolated into 「路径 '…' 超出了工作区范围」.
     """
+    detail = (reason or "").strip()
+    if _is_mount_op_denied_reason(detail):
+        return detail
+    if _is_mount_op_denied_reason(path):
+        return path.strip()
+
     relative_fix = (
         "请使用工作区相对路径（如 AgentCore/文档/research/report.md；"
         "`.` 或裸 `/` 表示整仓）；勿使用工作区外的绝对路径（如 /etc、盘符）。"
@@ -188,4 +253,19 @@ def _outside_workspace_msg(path: str, *, location: str | None = None) -> str:
             f"若本意是工作区内文件：{relative_fix}"
         )
     return f"路径 '{path}' 超出了工作区范围。{relative_fix}"
+
+
+def _outside_workspace_error(
+    path: str,
+    start: float,
+    *,
+    location: str | None = None,
+    reason: str | None = None,
+) -> ToolResult:
+    """OutsideWorkspace / mount-policy deny — same action next turn is futile."""
+    return _error(
+        _outside_workspace_msg(path, location=location, reason=reason),
+        start,
+        cross_turn_retry=CrossTurnRetry.FUTILE,
+    )
 

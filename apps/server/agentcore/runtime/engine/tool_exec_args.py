@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any, Literal
 
+from agentcore.core.secrets import redact_secrets
+from agentcore.core.text import clip_preview
 from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.loop_controller import (
     ERROR_CLASS_PERMANENT,
@@ -35,6 +37,11 @@ TOOL_FAILED_MARKER = "<!--agentcore:tool_failed-->"
 
 # Aggregable tip length for ``tool.execute_end`` reason (status=error).
 _TOOL_ERROR_REASON_MAX = 200
+
+# terminal / host_shell 观测：命令可能含 token，先 redact 再 clip。
+_SHELL_OBSERVE_TOOLS = frozenset({"terminal", "host_shell"})
+_SHELL_COMMAND_PREVIEW_MAX = 160
+_SHELL_CWD_PREVIEW_MAX = 80
 
 
 def _attempt_meta_with_landing_path(
@@ -74,6 +81,35 @@ def _short_tool_error_reason(text: str, *, limit: int = _TOOL_ERROR_REASON_MAX) 
     if len(collapsed) <= limit:
         return collapsed
     return collapsed[: max(0, limit - 1)].rstrip() + "…"
+
+
+def _shell_observe_log_fields(name: str, args: Any) -> dict[str, Any]:
+    """Facts for ``tool.execute_end`` on terminal / host_shell. No write-intent guess.
+
+    CEO 可持这两条工具，落盘不进 ``file_products``；查询时靠 preview + subcommand
+    由人判断是否写了工作区。命令可能含 token / key，故先 ``redact_secrets`` 再 clip。
+    """
+    if name not in _SHELL_OBSERVE_TOOLS or not isinstance(args, dict):
+        return {}
+    fields: dict[str, Any] = {}
+    command = args.get("command")
+    if isinstance(command, str):
+        # Redact BEFORE clipping: clipping first can cut a secret's recognizable
+        # prefix and leave the tail in the log.
+        preview = clip_preview(redact_secrets(command), _SHELL_COMMAND_PREVIEW_MAX)
+        if preview:
+            fields["command_preview"] = preview
+    subcommand = args.get("subcommand")
+    if isinstance(subcommand, str):
+        sub = subcommand.strip()
+        if sub:
+            fields["subcommand"] = sub
+    cwd = args.get("cwd")
+    if isinstance(cwd, str):
+        cwd_preview = clip_preview(cwd, _SHELL_CWD_PREVIEW_MAX)
+        if cwd_preview:
+            fields["cwd_preview"] = cwd_preview
+    return fields
 
 
 def with_tool_failed_marker(content: str) -> str:

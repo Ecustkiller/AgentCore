@@ -519,7 +519,9 @@ def observe_prefix_cache(
         ChainState(digests=digests, input_tokens=input_tokens, calls=probe.chain_calls),
         _MAX_CHAINS,
     )
-    logger.info(
+    # Per-call probe: debug so a long sidecar session does not rotate llm.call
+    # out of the 20MB×5 jsonl window. Raise LOG_LEVEL=DEBUG to keep D4 lines.
+    logger.debug(
         "cost.prefix_cache",
         scenario=scenario,
         model=model,

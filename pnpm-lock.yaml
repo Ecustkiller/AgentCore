@@ -36,6 +36,9 @@ importers:
       '@agentcore/contract-rest-types':
         specifier: workspace:*
         version: link:../../packages/contract-rest-types
+      '@agentcore/protocol-conformance':
+        specifier: workspace:*
+        version: link:../../packages/protocol-conformance
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
@@ -54,6 +57,9 @@ importers:
       react-router-dom:
         specifier: ^7.18.2
         version: 7.18.2(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      rehype-highlight:
+        specifier: ^7.0.2
+        version: 7.0.2
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1

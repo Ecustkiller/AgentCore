@@ -412,6 +412,8 @@ async def test_file_read_allows_up_to_same_path_max(tmp_path: Path):
         assert result.success is True, i
         assert "CONTRACT" in (result.output or "")
     assert ctx.file_read_counts.get("site/CONTRACT.md") == FILE_READ_SAME_PATH_MAX
+    assert "再开窗" not in (result.output or "")
+    assert "已在对话正文中" in (result.output or "")
 
 
 async def test_file_read_rejects_same_path_over_max(tmp_path: Path):
@@ -529,33 +531,158 @@ async def test_file_read_reread_refresh_after_citation_rework(tmp_path: Path):
     assert ctx.file_read_reread_remaining["draft.md"] == 0
 
 
-async def test_file_read_ranged_does_not_count_or_ceiling(tmp_path: Path):
-    """offset>1 or limit<行顶 point windows neither bump counts nor hit the ceiling."""
+async def test_file_read_pagination_new_windows_never_hit_ceiling(tmp_path: Path):
+    """Consecutive new offset/limit windows neither increment nor reject."""
+    from agentcore.runtime.runs.constants import FILE_READ_SAME_PATH_MAX
+
+    lines = "\n".join(f"L{i}" for i in range(1, 81))
+    (tmp_path / "page.md").write_text(lines + "\n", encoding="utf-8")
+    ctx = _ctx(tmp_path)
+    tool = FileReadTool()
+    first = await tool.execute({"path": "page.md", "offset": 1, "limit": 5}, ctx)
+    assert first.success is True
+    assert ctx.file_read_counts.get("page.md", 0) == 0
+    # Extending past the delivered span is a new range (not a repeat).
+    expand = await tool.execute({"path": "page.md", "offset": 3, "limit": 8}, ctx)
+    assert expand.success is True
+    assert ctx.file_read_counts.get("page.md", 0) == 0
+    # More new windows than MAX, each starting after the last delivered end.
+    starts = list(range(11, 11 + 5 * (FILE_READ_SAME_PATH_MAX + 4), 5))
+    for start in starts:
+        result = await tool.execute(
+            {"path": "page.md", "offset": start, "limit": 5}, ctx
+        )
+        assert result.success is True, start
+        assert f"L{start}" in (result.output or "")
+    assert ctx.file_read_counts.get("page.md", 0) == 0
+
+
+async def test_file_read_repeat_delivered_window_hits_ceiling(tmp_path: Path):
+    """Same already-delivered window + body still in projection → counts and rejects."""
     from agentcore.runtime.runs.constants import FILE_READ_SAME_PATH_MAX
 
     lines = "\n".join(f"L{i}" for i in range(1, 21))
-    (tmp_path / "big.md").write_text(lines + "\n", encoding="utf-8")
+    (tmp_path / "rep.md").write_text(lines + "\n", encoding="utf-8")
     ctx = _ctx(tmp_path)
     tool = FileReadTool()
-    for _ in range(FILE_READ_SAME_PATH_MAX):
-        assert (await tool.execute({"path": "big.md"}, ctx)).success is True
-    assert ctx.file_read_counts.get("big.md") == FILE_READ_SAME_PATH_MAX
-    # Full read would hard-reject (verbatim None ⇒ body present).
-    blocked = await tool.execute({"path": "big.md"}, ctx)
+    first = await tool.execute({"path": "rep.md", "offset": 3, "limit": 4}, ctx)
+    assert first.success is True
+    assert ctx.file_read_counts.get("rep.md", 0) == 0
+    for i in range(FILE_READ_SAME_PATH_MAX):
+        ok = await tool.execute({"path": "rep.md", "offset": 3, "limit": 4}, ctx)
+        assert ok.success is True, i
+        if i == FILE_READ_SAME_PATH_MAX - 1:
+            assert "再开窗" not in (ok.output or "")
+            assert "已在对话正文中" in (ok.output or "")
+    assert ctx.file_read_counts["rep.md"] == FILE_READ_SAME_PATH_MAX
+    blocked = await tool.execute({"path": "rep.md", "offset": 3, "limit": 4}, ctx)
     assert blocked.success is False
     assert blocked.contract_failure is True
-    # Ranged still succeeds and does not advance the counter.
-    ranged = await tool.execute({"path": "big.md", "offset": 3, "limit": 2}, ctx)
-    assert ranged.success is True
-    assert "L3" in (ranged.output or "")
-    assert "L4" in (ranged.output or "")
-    assert ctx.file_read_counts.get("big.md") == FILE_READ_SAME_PATH_MAX
-    # Many ranged reads still do not fill or advance the ceiling.
-    for _ in range(FILE_READ_SAME_PATH_MAX + 2):
+    assert "已多次读取" in (blocked.error or "")
+    # Subset of an already-delivered span also hits.
+    subset = await tool.execute({"path": "rep.md", "offset": 4, "limit": 2}, ctx)
+    assert subset.success is False
+    # A new range is still pagination and must not hit.
+    nxt = await tool.execute({"path": "rep.md", "offset": 10, "limit": 3}, ctx)
+    assert nxt.success is True
+    assert "L10" in (nxt.output or "")
+    assert ctx.file_read_counts["rep.md"] == FILE_READ_SAME_PATH_MAX
+
+
+async def test_file_read_window_inside_prior_full_read_counts(tmp_path: Path):
+    """After a fill-cap read, a window inside that delivered span counts."""
+    from agentcore.runtime.runs.constants import FILE_READ_SAME_PATH_MAX
+
+    lines = "\n".join(f"L{i}" for i in range(1, 21))
+    (tmp_path / "full.md").write_text(lines + "\n", encoding="utf-8")
+    ctx = _ctx(tmp_path)
+    tool = FileReadTool()
+    assert (await tool.execute({"path": "full.md"}, ctx)).success is True
+    assert ctx.file_read_counts.get("full.md") == 1
+    for _ in range(FILE_READ_SAME_PATH_MAX - 1):
         assert (
-            await tool.execute({"path": "big.md", "offset": 1, "limit": 1}, ctx)
+            await tool.execute({"path": "full.md", "offset": 5, "limit": 3}, ctx)
         ).success is True
-    assert ctx.file_read_counts.get("big.md") == FILE_READ_SAME_PATH_MAX
+    assert ctx.file_read_counts["full.md"] == FILE_READ_SAME_PATH_MAX
+    blocked = await tool.execute({"path": "full.md", "offset": 5, "limit": 3}, ctx)
+    assert blocked.success is False
+    assert "勿再读此文件" in (blocked.error or "")
+
+
+async def test_file_read_cleared_verbatim_window_does_not_hit(tmp_path: Path):
+    """Projection dropped the body: repeating a delivered window is recovery."""
+    from agentcore.runtime.runs.constants import FILE_READ_SAME_PATH_MAX
+
+    lines = "\n".join(f"L{i}" for i in range(1, 16))
+    (tmp_path / "clr.md").write_text(lines + "\n", encoding="utf-8")
+    ctx = _ctx(tmp_path)
+    tool = FileReadTool()
+    assert (await tool.execute({"path": "clr.md", "offset": 2, "limit": 3}, ctx)).success
+    for _ in range(FILE_READ_SAME_PATH_MAX):
+        assert (
+            await tool.execute({"path": "clr.md", "offset": 2, "limit": 3}, ctx)
+        ).success is True
+    assert ctx.file_read_counts["clr.md"] == FILE_READ_SAME_PATH_MAX
+    ctx.file_read_verbatim_paths = frozenset()
+    recovered = await tool.execute({"path": "clr.md", "offset": 2, "limit": 3}, ctx)
+    assert recovered.success is True
+    assert "L2" in (recovered.output or "")
+    assert ctx.file_read_counts["clr.md"] == FILE_READ_SAME_PATH_MAX
+
+
+async def test_file_read_reread_grant_allows_delivered_window(tmp_path: Path):
+    """Grant remaining > 0: delivered-window re-read succeeds even at max."""
+    from agentcore.runtime.runs.constants import FILE_READ_SAME_PATH_MAX
+
+    lines = "\n".join(f"L{i}" for i in range(1, 16))
+    (tmp_path / "grant.md").write_text(lines + "\n", encoding="utf-8")
+    ctx = _ctx(tmp_path)
+    tool = FileReadTool()
+    assert (await tool.execute({"path": "grant.md", "offset": 1, "limit": 4}, ctx)).success
+    for _ in range(FILE_READ_SAME_PATH_MAX):
+        assert (
+            await tool.execute({"path": "grant.md", "offset": 1, "limit": 4}, ctx)
+        ).success is True
+    ctx.file_read_verbatim_paths = frozenset({"grant.md"})
+    ctx.file_read_reread_remaining["grant.md"] = 1
+    ok = await tool.execute({"path": "grant.md", "offset": 1, "limit": 4}, ctx)
+    assert ok.success is True
+    assert ctx.file_read_reread_remaining["grant.md"] == 0
+    assert ctx.file_read_counts["grant.md"] == FILE_READ_SAME_PATH_MAX + 1
+    blocked = await tool.execute({"path": "grant.md", "offset": 1, "limit": 4}, ctx)
+    assert blocked.success is False
+    assert "勿再读此文件" in (blocked.error or "")
+
+
+async def test_file_read_write_success_allows_same_window_reread(tmp_path: Path):
+    """Write clears counts + delivered ranges so the same window is not rejected."""
+    from agentcore.runtime.runs.constants import FILE_READ_SAME_PATH_MAX
+
+    (tmp_path / "draft.md").write_text(
+        "\n".join(f"L{i}" for i in range(1, 12)) + "\n", encoding="utf-8"
+    )
+    ctx = _ctx(tmp_path)
+    tool = FileReadTool()
+    assert (await tool.execute({"path": "draft.md", "offset": 2, "limit": 3}, ctx)).success
+    for _ in range(FILE_READ_SAME_PATH_MAX):
+        assert (
+            await tool.execute({"path": "draft.md", "offset": 2, "limit": 3}, ctx)
+        ).success is True
+    blocked = await tool.execute({"path": "draft.md", "offset": 2, "limit": 3}, ctx)
+    assert blocked.success is False
+
+    w = await FileWriteTool().execute(
+        {"path": "draft.md", "content": "\n".join(f"N{i}" for i in range(1, 12)) + "\n"},
+        ctx,
+    )
+    assert w.success is True
+    assert ctx.file_read_counts.get("draft.md", -1) == 0
+    assert "draft.md" not in ctx.file_read_delivered_ranges
+    assert "draft.md" not in ctx.file_read_line_totals
+    verify = await tool.execute({"path": "draft.md", "offset": 2, "limit": 3}, ctx)
+    assert verify.success is True
+    assert "N2" in (verify.output or "")
+    assert ctx.file_read_counts.get("draft.md", 0) == 0
 
 
 async def test_file_read_long_file_window_footer_and_output_limit(tmp_path: Path):
@@ -672,9 +799,10 @@ async def test_file_read_from_line1_fill_cap_counts_toward_ceiling(tmp_path: Pat
             ctx,
         )
     ).success is False
-    ok = await tool.execute({"path": "cap.md", "offset": 1, "limit": 1}, ctx)
-    assert ok.success is True
-    assert "body" in (ok.output or "")
+    # Covered window after fill-cap reads: already delivered + body present → reject.
+    covered = await tool.execute({"path": "cap.md", "offset": 1, "limit": 1}, ctx)
+    assert covered.success is False
+    assert covered.contract_failure is True
     assert ctx.file_read_counts.get("cap.md") == FILE_READ_SAME_PATH_MAX
 
 
@@ -771,6 +899,8 @@ async def test_file_write_resets_read_ceiling_for_verify(tmp_path: Path):
     )
     assert w.success is True
     assert ctx.file_read_counts.get("draft.md", -1) == 0
+    assert "draft.md" not in ctx.file_read_delivered_ranges
+    assert "draft.md" not in ctx.file_read_line_totals
     assert ctx.file_read_reread_remaining.get("draft.md") == 1
 
     verify = await tool.execute({"path": "draft.md"}, ctx)
@@ -795,6 +925,7 @@ async def test_str_replace_success_resets_read_ceiling(tmp_path: Path):
     )
     assert ok.success is True
     assert ctx.file_read_counts.get("edit.md", -1) == 0
+    assert "edit.md" not in ctx.file_read_delivered_ranges
     assert ctx.file_read_reread_remaining.get("edit.md") == 1
     verify = await tool.execute({"path": "edit.md"}, ctx)
     assert verify.success is True

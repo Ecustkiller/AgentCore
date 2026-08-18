@@ -354,9 +354,94 @@ def test_log_exporter_emits_structured_line(monkeypatch):
     assert line["message_id"] == "m1"
     assert "turn_id" not in line
     assert line["conversation_id"] == "c1"
+    assert line["truncated"] is False
+    assert line["dropped"] == 0
     # The file handler always renders JSON Lines (logs/dev.jsonl is parsed line by line),
     # so the whole payload — span tree included — has to survive a JSON round trip.
     assert json.loads(json.dumps(line))["spans"][0]["span_id"] == "turn"
+
+
+def test_log_exporter_truncates_with_markers_and_keeps_late_failures(monkeypatch):
+    """DFS[:N] used to drop later members' tools (and their failures) with no marker."""
+    monkeypatch.setattr(spans_mod, "_MAX_LOGGED_SPANS", 6)
+    entries = [
+        _started(),
+        _run_started("cap", "cap", kind="captain", ts="t0"),
+        _run_started("w1", "w1", kind="agent", parent="cap", ts="t1"),
+        _fact(
+            "tool_call",
+            {"run_id": "w1", "tool_call_id": "ok1", "name": "read_url", "success": True},
+        ),
+        _run_started("w2", "w2", kind="agent", parent="cap", ts="t2"),
+        _fact(
+            "tool_call",
+            {"run_id": "w2", "tool_call_id": "err2", "name": "file_read", "success": False},
+        ),
+        _run_started("w3", "w3", kind="agent", parent="cap", ts="t3"),
+        _fact(
+            "tool_call",
+            {"run_id": "w3", "tool_call_id": "ok3", "name": "read_url", "success": True},
+        ),
+        _run_completed("w1", "w1", ts="t4"),
+        _run_completed("w2", "w2", ts="t5"),
+        _run_completed("w3", "w3", ts="t6"),
+        _run_completed("cap", "cap", ts="t7"),
+        _fact("turn_end", {"finish_reason": "end_turn"}),
+    ]
+    root = spans_from_entries(entries)
+    assert [s.span_id for s in root.flatten()] == [
+        "turn",
+        "run:cap",
+        "run:w1",
+        "tool:ok1",
+        "run:w2",
+        "tool:err2",
+        "run:w3",
+        "tool:ok3",
+    ]
+    spy = LogSpy()
+    monkeypatch.setattr(spans_mod, "logger", spy)
+    LogSpanExporter().export(root, trace_id="tr", conversation_id="c1", message_id="m1")
+    line = spy.get("obs.turn_spans")
+    assert line["span_count"] == 8
+    assert line["truncated"] is True
+    assert line["dropped"] == 2
+    ids = [s["span_id"] for s in line["spans"]]
+    assert ids == ["turn", "run:cap", "run:w1", "run:w2", "tool:err2", "run:w3"]
+    assert "tool:ok1" not in ids
+    assert "tool:ok3" not in ids
+    assert "tool:err2" in ids
+
+
+def test_select_logged_spans_keeps_in_flight_over_ok_tools(monkeypatch):
+    from agentcore.runtime.spans import _select_logged_spans
+
+    monkeypatch.setattr(spans_mod, "_MAX_LOGGED_SPANS", 3)
+    root = Span(span_id="turn", parent_span_id=None, name="chat", operation="chat")
+    run = Span(
+        span_id="run:w1",
+        parent_span_id="turn",
+        name="invoke_agent w1",
+        operation="invoke_agent",
+    )
+    hang = Span(
+        span_id="tool:hang",
+        parent_span_id="run:w1",
+        name="execute_tool host_shell",
+        operation="execute_tool",
+        status="unset",
+        attributes={"agentcore.tool.in_flight": True},
+    )
+    ok = Span(
+        span_id="tool:ok",
+        parent_span_id="run:w1",
+        name="execute_tool read_url",
+        operation="execute_tool",
+        status="ok",
+    )
+    kept, dropped = _select_logged_spans([root, run, hang, ok])
+    assert dropped == 1
+    assert [s.span_id for s in kept] == ["turn", "run:w1", "tool:hang"]
 
 
 def test_export_turn_spans_uses_injected_exporter():

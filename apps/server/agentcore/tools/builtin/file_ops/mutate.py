@@ -37,7 +37,7 @@ from agentcore.workspace.protocol import (
 from .errors import (
     _error,
     _maybe_channel_dead_error,
-    _outside_workspace_msg,
+    _outside_workspace_error,
     _path_missing_error,
 )
 from .integrity import (
@@ -529,12 +529,11 @@ class FileWriteTool:
 
         try:
             written = await context.backend.write(rel_path, write_content)
-        except OutsideWorkspace:
+        except OutsideWorkspace as e:
             if coordinator is not None and release_on_fail:
                 coordinator.release(rel_path, context.run_id)
-            return _error(
-                _outside_workspace_msg(rel_path, location=context.backend.location),
-                start,
+            return _outside_workspace_error(
+                rel_path, start, location=context.backend.location, reason=str(e)
             )
         except WorkspaceError as e:
             if coordinator is not None and release_on_fail:
@@ -721,12 +720,11 @@ class FileAppendTool:
 
         try:
             appended = await context.backend.append(rel_path, content)
-        except OutsideWorkspace:
+        except OutsideWorkspace as e:
             if coordinator is not None and release_on_fail:
                 coordinator.release(rel_path, context.run_id)
-            return _error(
-                _outside_workspace_msg(rel_path, location=context.backend.location),
-                start,
+            return _outside_workspace_error(
+                rel_path, start, location=context.backend.location, reason=str(e)
             )
         except NotAFile:
             if coordinator is not None and release_on_fail:
@@ -887,12 +885,11 @@ class StrReplaceTool:
             outcome = await context.backend.replace(
                 rel_path, old_string, new_string, all_=replace_all
             )
-        except OutsideWorkspace:
+        except OutsideWorkspace as e:
             if coordinator is not None and release_on_fail:
                 coordinator.release(rel_path, context.run_id)
-            return _error(
-                _outside_workspace_msg(rel_path, location=context.backend.location),
-                start,
+            return _outside_workspace_error(
+                rel_path, start, location=context.backend.location, reason=str(e)
             )
         except PathNotFound:
             if coordinator is not None and release_on_fail:
@@ -1092,12 +1089,11 @@ class WriteSectionTool:
         if from_file:
             try:
                 body = await context.backend.read(from_file)
-            except OutsideWorkspace:
+            except OutsideWorkspace as e:
                 if coordinator is not None and release_on_fail:
                     coordinator.release(rel_path, context.run_id)
-                return _error(
-                    _outside_workspace_msg(from_file, location=context.backend.location),
-                    start,
+                return _outside_workspace_error(
+                    from_file, start, location=context.backend.location, reason=str(e)
                 )
             except PathNotFound:
                 if coordinator is not None and release_on_fail:
@@ -1123,12 +1119,11 @@ class WriteSectionTool:
 
         try:
             old = await context.backend.read(rel_path)
-        except OutsideWorkspace:
+        except OutsideWorkspace as e:
             if coordinator is not None and release_on_fail:
                 coordinator.release(rel_path, context.run_id)
-            return _error(
-                _outside_workspace_msg(rel_path, location=context.backend.location),
-                start,
+            return _outside_workspace_error(
+                rel_path, start, location=context.backend.location, reason=str(e)
             )
         except PathNotFound:
             if coordinator is not None and release_on_fail:
@@ -1179,12 +1174,11 @@ class WriteSectionTool:
 
         try:
             await context.backend.write(rel_path, new_html)
-        except OutsideWorkspace:
+        except OutsideWorkspace as e:
             if coordinator is not None and release_on_fail:
                 coordinator.release(rel_path, context.run_id)
-            return _error(
-                _outside_workspace_msg(rel_path, location=context.backend.location),
-                start,
+            return _outside_workspace_error(
+                rel_path, start, location=context.backend.location, reason=str(e)
             )
         except WorkspaceError as e:
             if coordinator is not None and release_on_fail:

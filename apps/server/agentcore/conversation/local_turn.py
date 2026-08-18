@@ -56,6 +56,9 @@ async def record_local_turn(
         if failures:
             codes = [str(f.get("code") or "other") for f in failures]
             tools = [str(f.get("tool") or "") for f in failures]
+            # Wire already carries ``message`` (≤200); log it so the ``other`` bucket
+            # can be split (timeout / sandbox / fence / HTTP) without a client change.
+            messages = [str(f.get("message") or "")[:200] for f in failures]
             logger.info(
                 "chat.local_turn_tool_failures",
                 conversation_id=conversation_id,
@@ -63,6 +66,7 @@ async def record_local_turn(
                 count=len(failures),
                 codes=codes,
                 tools=tools,
+                messages=messages,
             )
         # Harvest / origin write-backs are not this-send creates (cloud continue
         # / workflow pass False). Ordinary startTurn write-back is this-send.

@@ -36,7 +36,7 @@ vi.mock("@/api/messaging", async () => {
   return { ...actual, ...messaging };
 });
 
-vi.mock("@/api/auth", () => ({
+const auth = vi.hoisted(() => ({
   me: vi.fn(async () => ({
     id: "me",
     username: "me",
@@ -45,8 +45,10 @@ vi.mock("@/api/auth", () => ({
     created_at: "2026-01-01T00:00:00Z",
     password_must_change: false,
     role: "user",
+    avatar_url: null as string | null,
   })),
 }));
+vi.mock("@/api/auth", () => auth);
 
 vi.mock("@/lib/keyboardInsets", () => ({
   useKeyboardInsetBridge: vi.fn(),
@@ -98,7 +100,7 @@ vi.mock("react-router-dom", async () => {
 import { useKeyboardInsetBridge } from "@/lib/keyboardInsets";
 import { ChatThreadPage } from "@/pages/im/ChatThreadPage";
 
-function peer() {
+function peer(overrides: { avatar_url?: string | null; group_role?: "owner" | "admin" | "member" } = {}) {
   return {
     id: "u2",
     username: "alice",
@@ -107,6 +109,7 @@ function peer() {
     is_admin: false,
     muted_by_admin: false,
     online: false,
+    ...overrides,
   };
 }
 
@@ -134,6 +137,18 @@ function officialChat(): ChatSummary {
   };
 }
 
+function groupChat(): ChatSummary {
+  return {
+    id: "c1",
+    type: "group",
+    muted: false,
+    pinned: false,
+    state: "accepted",
+    unread: 0,
+    title: "内测群",
+  };
+}
+
 function emptyPage() {
   return {
     messages: [] as ChatMessageDetail[],
@@ -153,6 +168,22 @@ function sentMsg(content: string): ChatMessageDetail {
     sender_type: "user",
     sender_user_id: "me",
   };
+}
+
+function peerMsg(): ChatMessageDetail {
+  return {
+    id: "m-peer",
+    chat_id: "c1",
+    content: "hi",
+    content_type: "text",
+    created_at: "2026-01-01T00:00:02Z",
+    sender_type: "user",
+    sender_user_id: "u2",
+  };
+}
+
+function pageOf(messages: ChatMessageDetail[]) {
+  return { messages, total: messages.length, page: 1, pageSize: 100 };
 }
 
 beforeEach(() => {
@@ -240,6 +271,130 @@ describe("ChatThreadPage", () => {
     expect(quote.className).toMatch(/im-reply-quote/);
     expect(quote.querySelector(".im-reply-quote-body")?.textContent).toBe(
       quoted,
+    );
+  });
+
+  it("does not badge official senders and uses the session icon", async () => {
+    route.chat = {
+      ...officialChat(),
+      avatar_url: "/chats/official.png",
+    };
+    messaging.listMembers.mockResolvedValue([
+      peer({
+        avatar_url: "/avatars/alice.png",
+        group_role: "admin",
+      }),
+    ]);
+    messaging.listMessages.mockResolvedValue(pageOf([peerMsg()]));
+    render(<ChatThreadPage />);
+    await screen.findByText("hi");
+    expect(screen.queryByLabelText("管理员")).toBeNull();
+    expect(screen.queryByText("管理员")).toBeNull();
+    expect(document.querySelector(".im-msg-avatar")?.getAttribute("src")).toBe(
+      "/chats/official.png",
+    );
+    expect(document.body.innerHTML).not.toContain("/avatars/alice.png");
+  });
+
+  it("marks group admin next to the sender name", async () => {
+    route.chat = groupChat();
+    messaging.listMembers.mockResolvedValue([
+      {
+        id: "u2",
+        username: "alice",
+        display_name: "Alice",
+        group_role: "admin" as const,
+        is_admin: false,
+        muted_by_admin: false,
+        online: false,
+      },
+    ]);
+    messaging.listMessages.mockResolvedValue({
+      messages: [
+        {
+          id: "m-mod",
+          chat_id: "c1",
+          content: "hi",
+          content_type: "text",
+          created_at: "2026-01-01T00:00:02Z",
+          sender_type: "user",
+          sender_user_id: "u2",
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 100,
+    });
+    render(<ChatThreadPage />);
+    expect(await screen.findByText("Alice")).toBeTruthy();
+    expect(screen.getByLabelText("管理员")).toBeTruthy();
+    expect(screen.getByText("管理员")).toBeTruthy();
+  });
+
+  it("renders the DM peer avatar from peer.avatar_url", async () => {
+    route.chat = { ...dmChat(), peer: peer({ avatar_url: "/avatars/alice.png" }) };
+    messaging.listMessages.mockResolvedValue(pageOf([peerMsg()]));
+    render(<ChatThreadPage />);
+    await screen.findByText("hi");
+    const img = document.querySelector(".im-msg-avatar");
+    expect(img?.tagName).toBe("IMG");
+    expect(img?.getAttribute("src")).toBe("/avatars/alice.png");
+  });
+
+  it("shows initials when the DM peer has no avatar_url", async () => {
+    route.chat = { ...dmChat(), avatar_url: "/chats/c1.png" };
+    messaging.listMessages.mockResolvedValue(pageOf([peerMsg()]));
+    render(<ChatThreadPage />);
+    await screen.findByText("hi");
+    const avatar = document.querySelector(".im-msg-avatar");
+    expect(avatar?.tagName).toBe("SPAN");
+    expect(avatar?.textContent).toBe("A");
+    expect(document.querySelector("img.im-msg-avatar")).toBeNull();
+    expect(document.body.innerHTML).not.toContain("/v1/users/");
+    expect(document.body.innerHTML).not.toContain("/chats/c1.png");
+  });
+
+  it("renders a group sender avatar from the member DTO", async () => {
+    route.chat = groupChat();
+    messaging.listMembers.mockResolvedValue([
+      peer({ avatar_url: "/avatars/alice.png", group_role: "admin" }),
+    ]);
+    messaging.listMessages.mockResolvedValue(pageOf([peerMsg()]));
+    render(<ChatThreadPage />);
+    await screen.findByText("hi");
+    expect(document.querySelector(".im-msg-avatar")?.getAttribute("src")).toBe(
+      "/avatars/alice.png",
+    );
+  });
+
+  it("shows initials when a group sender has no avatar_url", async () => {
+    route.chat = groupChat();
+    messaging.listMembers.mockResolvedValue([peer()]);
+    messaging.listMessages.mockResolvedValue(pageOf([peerMsg()]));
+    render(<ChatThreadPage />);
+    await screen.findByText("hi");
+    const avatar = document.querySelector(".im-msg-avatar");
+    expect(avatar?.tagName).toBe("SPAN");
+    expect(avatar?.textContent).toBe("A");
+    expect(document.body.innerHTML).not.toContain("/v1/users/");
+  });
+
+  it("renders own bubble avatar from /me avatar_url", async () => {
+    auth.me.mockResolvedValueOnce({
+      id: "me",
+      username: "me",
+      display_name: "我",
+      email: null,
+      created_at: "2026-01-01T00:00:00Z",
+      password_must_change: false,
+      role: "user",
+      avatar_url: "/avatars/me.png",
+    });
+    messaging.listMessages.mockResolvedValue(pageOf([sentMsg("hello")]));
+    render(<ChatThreadPage />);
+    await screen.findByText("hello");
+    expect(document.querySelector(".im-msg-avatar")?.getAttribute("src")).toBe(
+      "/avatars/me.png",
     );
   });
 

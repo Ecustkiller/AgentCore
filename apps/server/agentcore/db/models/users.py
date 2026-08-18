@@ -49,7 +49,8 @@ class User(Base):
     # Object-storage key of the user's avatar (头像), e.g.
     # ``avatars/<user_id>/<hash>.webp``; NULL = no avatar (UI shows the initial).
     # Stores the storage key, not a URL — the served URL is derived at the API edge
-    # (UserResponse.avatar_url) so the backend stays agnostic of its public origin.
+    # (UserResponse / IM PersonPublic.avatar_url) so the backend stays agnostic of
+    # its public origin.
     # The bytes live in object storage (storage/assets.py), never in the row.
     avatar_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     role: Mapped[str] = mapped_column(String(20), default="user", server_default=text("'user'"))

@@ -65,6 +65,9 @@ class SectionOrder(IntEnum):
     # Cross-turn soft nudge when the prior turn journal fingerprints empty-delegate /
     # unproductive (history drops tool I/O — same volatile-tail reason as recent graph).
     PRIOR_DELEGATE_RETRY = 860
+    # Cross-turn one-shot when the prior other turn has tool_call.cross_turn_retry=futile
+    # (history drops tool I/O; prompt information only — not a gate).
+    PRIOR_FUTILE_RETRIES = 862
     # Sticky pending non-blocking questions (fold pending, not prior-turn one-shot).
     PENDING_QUESTIONS = 865
     ATTACHMENT = 900

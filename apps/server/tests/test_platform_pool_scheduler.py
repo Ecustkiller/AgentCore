@@ -9,6 +9,7 @@ from agentcore.core.errors import RETRY_AFTER_FROM_HEADER
 from agentcore.core.log_context import log_context
 from agentcore.llm.platform_pool import PlatformPoolMember, replace_platform_pool_snapshot
 from agentcore.llm.platform_pool_scheduler import (
+    account_runtime_for_admin,
     classify_go_limit_name,
     clear_account_runtime_state,
     failover_member,
@@ -191,6 +192,62 @@ def test_regionerror_blocks_and_is_not_picked_again(monkeypatch):
     nxt = failover_member(api_key=a.api_key, base_url=a.base_url)
     assert nxt is not None
     assert nxt.id == b.id
+
+
+def test_account_runtime_for_admin_maps_store():
+    assert account_runtime_for_admin("missing").status == "healthy"
+    store = get_pool_state_store()
+    store.set(
+        _A,
+        AccountRecord(
+            status="blocked",
+            recovery_at=None,
+            limit_name=None,
+            source="upstream_401",
+        ),
+    )
+    blocked = account_runtime_for_admin(_A)
+    assert blocked.status == "blocked"
+    assert blocked.recovery_at is None
+    assert blocked.limit_name is None
+
+    future = time.time() + 120.0
+    store.set(
+        _A,
+        AccountRecord(
+            status="cooling",
+            recovery_at=future,
+            limit_name="5 hour",
+            source="retry_after",
+        ),
+    )
+    cooling = account_runtime_for_admin(_A)
+    assert cooling.status == "cooling"
+    assert cooling.limit_name == "5 hour"
+    assert cooling.recovery_at is not None
+    assert abs(cooling.recovery_at.timestamp() - future) < 1.0
+
+    store.set(
+        _A,
+        AccountRecord(
+            status="exhausted",
+            recovery_at=future,
+            limit_name="monthly",
+            source="retry_after",
+        ),
+    )
+    assert account_runtime_for_admin(_A).status == "exhausted"
+
+    store.set(
+        _A,
+        AccountRecord(
+            status="degraded",
+            recovery_at=None,
+            limit_name=None,
+            source="unused",
+        ),
+    )
+    assert account_runtime_for_admin(_A).status == "healthy"
 
 
 def test_admin_clear_unblocks(monkeypatch):

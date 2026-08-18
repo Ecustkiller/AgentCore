@@ -7,9 +7,10 @@ and 会话复盘. All admin-gated (管理员后台.md); reuses the per-user usag
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .auth import SessionSummary
+from .messages import AgentMention, RunsPayload, StoredAttachment
 from .usage import (
     CostBreakdown,
     DailyCost,
@@ -214,7 +215,11 @@ class AdminGoWindows(BaseModel):
 
 
 class PlatformCredentialView(BaseModel):
-    """Admin view of one platform-pool member — never the plaintext key."""
+    """Admin view of one platform-pool member — never the plaintext key.
+
+    ``status`` / ``recovery_at`` / ``limit_name`` are live pool-state (Redis or
+    process memory), not Postgres columns. Absence of a store record is healthy.
+    """
 
     id: str
     label: str
@@ -224,6 +229,9 @@ class PlatformCredentialView(BaseModel):
     masked_key: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    status: Literal["healthy", "cooling", "exhausted", "blocked"] = "healthy"
+    recovery_at: datetime | None = None
+    limit_name: str | None = None
 
 
 class PlatformCredentialListResponse(BaseModel):
@@ -625,9 +633,20 @@ class ReplayMessage(BaseModel):
     substance of the post-mortem. Multi-agent turns also carry ``runs`` (lightweight
     tree nodes for triage — not the desktop team canvas).
 
+    The conversation list is deliberately summary-sized: compressed ``spans`` /
+    lightweight ``runs`` / ``metrics`` / ``cost_total`` travel with every row.
+    The user-end final-state pair (``runs_payload`` + ``projected``) does **not** —
+    it is fetched per assistant turn via
+    ``GET .../messages/{id}/final-state`` when ``has_final_state`` is true.
+    Those two fields stay on this model so the admin client can merge the
+    on-demand pair onto the same row; on the list endpoint they are always null.
+
     ``models`` / ``credential_source`` come from ``cost_calls`` (call authority):
     message rows join by ``message_id``; bare text-less turn markers join by
     ``trace_id``. No ledger → empty models + null source.
+
+    User rows also carry ``attachments`` / ``agent_mentions`` in the same shapes as
+    ``MessageDetail`` (metadata chips only — no extracted file text).
     """
 
     id: str
@@ -657,6 +676,31 @@ class ReplayMessage(BaseModel):
     spans: list[ReplaySpan] = []
     # Multi-agent run tree (empty for plain chat / user prompts).
     runs: list[ReplayRun] = []
+    # Always null on GET conversation. Hydrate via the per-turn final-state
+    # endpoint — the pair is the heavy DURABLE replay (full events / projected).
+    runs_payload: RunsPayload | None = None
+    projected: dict[str, Any] | None = None
+    # True when ``runs_from_entries`` would return a payload (process-only
+    # included). False for user rows and plain chat with nothing to replay.
+    has_final_state: bool = False
+    # Same as MessageDetail: persisted attachment chips (no extracted ``text``).
+    attachments: list[StoredAttachment] = Field(default_factory=list)
+    # Same as MessageDetail: conversation-page @Agent chips. Empty on assistant /
+    # pre-feature / bare-turn-marker rows.
+    agent_mentions: list[AgentMention] = Field(default_factory=list, max_length=10)
+
+    @field_validator("agent_mentions", mode="before")
+    @classmethod
+    def _agent_mentions_from_row(cls, v: object) -> object:
+        from agentcore.conversation.mentions import to_stored_agent_mentions
+
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return to_stored_agent_mentions(
+                [item if isinstance(item, dict) else {} for item in v]
+            )
+        return []
 
 
 class ReplayConversation(BaseModel):
@@ -672,6 +716,9 @@ class ReplayConversation(BaseModel):
     # account default. Display name always comes from expand (effective combo).
     model_profile_id: str | None = None
     model_profile_name: str | None = None
+    # Soft-delete stamp. Roster includes tombstones by default; replay must match
+    # (null = live). Not an owner-scoped recycle-bin field.
+    deleted_at: datetime | None = None
 
 
 class AdminConversationReplay(BaseModel):
@@ -681,6 +728,13 @@ class AdminConversationReplay(BaseModel):
     (bodies, from ``messages``), per-turn outcome/quality (``turn_metrics``), and
     per-turn spend (``cost_events``). Admin-only, cross-user — the drill-down target
     of the 观测看板's 近期错误 feed (opens a failed turn in full context).
+
+    ``messages`` is the **latest** window (newest-first fetch, returned chronological)
+    so a long thread keeps the recent side ops need. ``has_more_before`` is true
+    when older rows exist past the cap.
+
+    Assistant-row ``runs_payload`` / ``projected`` are always null here; fetch
+    ``AdminReplayTurnFinalState`` per turn instead of paging the list.
     """
 
     conversation: ReplayConversation
@@ -690,3 +744,27 @@ class AdminConversationReplay(BaseModel):
     errors: int
     # Total turn spend (integer nano-CNY); clients format ¥ as ``cost_total / 1e9``.
     cost_total: int
+    # True when the latest-window cap dropped older messages (scroll-up remains later).
+    has_more_before: bool = False
+
+
+class AdminReplayTurnFinalState(BaseModel):
+    """On-demand user-end final state for one 会话复盘 assistant turn.
+
+    ``GET /v1/admin/observability/conversations/{id}/messages/{message_id}/final-state``.
+
+    Same pair the user client reads on reload (no third projection):
+    ``runs_payload`` is ``runs_from_entries`` verbatim (same as ``MessageDetail.runs``);
+    ``projected`` is ``project_turn(runs_payload.events)`` — the same oracle as
+    conformance golden, fed the journal's display events (not a reconstructed live
+    vector). ``projected`` is null when there are no foldable display events
+    (plain chat, or process-only single-agent — process then lives on
+    ``runs_payload.process``). Terminal ``finish_reason`` / process / captain
+    context stay on ``runs_payload`` (journal ``turn_end`` is not a ``message_end``
+    event — same as GET /messages). Both null when the turn journaled nothing
+    replayable. Not a live-stream rebuild, and not a truncated/summarized pair.
+    """
+
+    message_id: str
+    runs_payload: RunsPayload | None = None
+    projected: dict[str, Any] | None = None

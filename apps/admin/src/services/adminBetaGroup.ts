@@ -6,7 +6,7 @@ export type BetaGroupModeratorsResponse =
   components["schemas"]["BetaGroupModeratorsResponse"];
 export type StatusResponse = components["schemas"]["StatusResponse"];
 
-/** List 内测群版主 (``chat_members.role=admin``, not platform admin). */
+/** List 内测群管理员 (``chat_members.role=admin``, not platform admin). */
 export async function listBetaGroupModerators(
   signal?: AbortSignal,
 ): Promise<BetaGroupModeratorsResponse> {
@@ -16,7 +16,7 @@ export async function listBetaGroupModerators(
   );
 }
 
-/** Appoint a user as 内测群版主 (ensures group membership). */
+/** Appoint a user as 内测群管理员 (ensures group membership). */
 export async function appointBetaGroupModerator(
   userId: string,
 ): Promise<BetaGroupModerator> {
@@ -25,7 +25,7 @@ export async function appointBetaGroupModerator(
   );
 }
 
-/** Revoke 内测群版主 (role → member; stays in group). */
+/** Revoke 内测群管理员 (role → member; stays in group). */
 export async function revokeBetaGroupModerator(
   userId: string,
 ): Promise<StatusResponse> {

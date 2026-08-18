@@ -424,8 +424,10 @@ class WorkspaceBackend(Protocol):
 
         Supports binary files and recursive directory trees. Refuses to copy
         the root, overwrite an existing ``dst``, or copy a directory into
-        itself / a descendant. Raises ``OutsideWorkspace`` / ``PathNotFound`` /
-        ``AlreadyExists`` / ``WorkspaceIOError``.
+        itself / a descendant. One-way copy from the workspace into an
+        ``organize`` external mount is allowed; reverse, readonly dest, and
+        cross-mount copy stay denied. Raises ``OutsideWorkspace`` /
+        ``PathNotFound`` / ``AlreadyExists`` / ``WorkspaceIOError``.
         """
         ...
 

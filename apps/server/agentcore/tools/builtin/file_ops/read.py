@@ -47,7 +47,7 @@ from .errors import (
     _map_workspace_read_error,
     _maybe_channel_dead_error,
     _office_extract_budget_error,
-    _outside_workspace_msg,
+    _outside_workspace_error,
     _path_missing_error,
 )
 from .path_hints import enrich_missing_path_message
@@ -179,16 +179,106 @@ def _effective_line_limit(limit: object) -> int:
 
 
 def _is_ceiling_counted_read(offset: object, limit: object) -> bool:
-    """From line 1 filling the safety cap — counts toward the same-path ceiling.
+    """From line 1 filling the safety cap — always counts toward the same-path ceiling.
 
     双省 / 只传 offset=1 / 只传 limit=行顶 (and offset=1+limit≥行顶) count.
-    offset>1 or limit<行顶 windows do not.
+    Point windows count only when the requested span was already delivered
+    and the path body is still in the projection window (see
+    ``_file_read_should_count``).
     """
     if _effective_offset(offset) > 1:
         return False
     if limit is None:
         return True
     return _as_int(limit) >= FILE_READ_SAFETY_LINE_CAP
+
+
+def _file_read_body_present(context: ToolContext, path_key: str) -> bool:
+    """``None`` verbatim set = projection not synced → treat body as still present."""
+    verbatim = context.file_read_verbatim_paths
+    return verbatim is None or path_key in verbatim
+
+
+def _merge_line_range(
+    ranges: list[tuple[int, int]], start: int, end: int
+) -> list[tuple[int, int]]:
+    """Union ``[start, end]`` into sorted inclusive ranges (adjacent merge)."""
+    if end < start:
+        return list(ranges)
+    merged: list[tuple[int, int]] = []
+    pending_start, pending_end = start, end
+    placed = False
+    for a, b in ranges:
+        if b < pending_start - 1:
+            merged.append((a, b))
+            continue
+        if pending_end < a - 1:
+            if not placed:
+                merged.append((pending_start, pending_end))
+                placed = True
+            merged.append((a, b))
+            continue
+        pending_start = min(pending_start, a)
+        pending_end = max(pending_end, b)
+    if not placed:
+        merged.append((pending_start, pending_end))
+    return merged
+
+
+def _line_range_covered(ranges: list[tuple[int, int]], start: int, end: int) -> bool:
+    if end < start:
+        return False
+    return any(a <= start and end <= b for a, b in ranges)
+
+
+def _request_range_already_delivered(
+    context: ToolContext, path_key: str, offset: object, limit: object
+) -> bool:
+    """True when the requested span (clipped to last-seen EOF) is already delivered."""
+    ranges = context.file_read_delivered_ranges.get(path_key)
+    if not ranges:
+        return False
+    start = _effective_offset(offset)
+    end = start + _effective_line_limit(limit) - 1
+    total = context.file_read_line_totals.get(path_key)
+    if total is not None:
+        if start > total:
+            return False
+        end = min(end, total)
+    return _line_range_covered(ranges, start, end)
+
+
+def _file_read_should_count(
+    context: ToolContext, path_key: str, offset: object, limit: object
+) -> bool:
+    """Whether this successful read increments ``file_read_counts``.
+
+    Fill-cap whole reads always count. A point window counts only when the
+    requested line range was already delivered *and* the path body is still in
+    the projection window. A new range (pagination) never counts.
+    """
+    if _is_ceiling_counted_read(offset, limit):
+        return True
+    return _file_read_body_present(
+        context, path_key
+    ) and _request_range_already_delivered(context, path_key, offset, limit)
+
+
+def _record_file_read_delivery(
+    context: ToolContext,
+    path_key: str,
+    start_line: int,
+    end_line: int,
+    total_lines: int,
+) -> None:
+    if total_lines > 0:
+        context.file_read_line_totals[path_key] = int(total_lines)
+    if end_line < start_line:
+        return
+    prev = context.file_read_delivered_ranges.get(path_key) or []
+    context.file_read_delivered_ranges[path_key] = _merge_line_range(
+        prev, start_line, end_line
+    )
 
 
 def _trim_to_char_cap(lines: list[str]) -> tuple[list[str], bool]:
@@ -479,9 +569,10 @@ def _note_file_read_success(
     *,
     using_reread: bool,
 ) -> str:
-    """Bump ``file_read_counts`` for a ceiling-counted read; consume grant; tip.
+    """Bump ``file_read_counts`` for a counted read; consume grant; tip.
 
-    Only from-line-1 fill-cap reads call this. Point windows do not count or tip.
+    Counted = fill-cap whole read, or a window whose requested span was already
+    delivered while the path body is still in the projection window.
     """
     from agentcore.runtime.runs.constants import FILE_READ_SAME_PATH_MAX
 
@@ -492,15 +583,15 @@ def _note_file_read_success(
         if context.file_read_reread_remaining[path_key] <= 0:
             output += (
                 f"\n\n[系统提示] `{path_key}` 的再读授额已用尽；"
-                "请依据本次正文推进；若正文仍在对话中请勿空转整读，"
+                "请依据本次正文推进；若正文仍在对话中请勿空转再读，"
                 "正文已被清理时可再读，或落盘 / 换其它文件。"
             )
         return output
     if context.file_read_counts[path_key] >= FILE_READ_SAME_PATH_MAX:
         output += (
-            f"\n\n[系统提示] 本 run 对 `{path_key}` 的整读 file_read 已达上限 "
-            f"（{FILE_READ_SAME_PATH_MAX} 次）；正文仍在对话中时请停止重复整读，"
-            "改用已有正文落盘；若页脚已截断或只需片段再开窗。"
+            f"\n\n[系统提示] 本 run 对 `{path_key}` 的 file_read 已达上限 "
+            f"（{FILE_READ_SAME_PATH_MAX} 次）；请求的行范围已在对话正文中，"
+            "请依据已有正文推进或落盘，勿再读此文件。"
         )
     return output
 
@@ -510,17 +601,22 @@ def _format_extracted_read(
     *,
     offset: object,
     limit: object,
-) -> str:
+) -> tuple[str, int, int, int]:
     """Apply the same file_read window (offset/limit + safety caps) to extract text."""
     selected, start_line, end_line, total, cap_kind = _select_line_window(
         text.splitlines(), offset=offset, limit=limit
     )
-    return _format_line_window(
-        selected,
-        start_line=start_line,
-        end_line=end_line,
-        total_lines=total,
-        cap_kind=cap_kind,
+    return (
+        _format_line_window(
+            selected,
+            start_line=start_line,
+            end_line=end_line,
+            total_lines=total,
+            cap_kind=cap_kind,
+        ),
+        start_line,
+        end_line,
+        total,
     )
 
 class FileReadTool:
@@ -548,10 +644,10 @@ class FileReadTool:
                 "含糊「根」/ `.` / 仅根标签勿当文件整读——先 file_list/grep 钉真实路径。"
                 "回执为编号行；未截断页脚「全文 N 行」，截断为「第 a–b 行，共 N 行」"
                 "并标明行顶或字符顶（视图截断非磁盘残缺，勿把页脚当正文去 str_replace）。"
-                "同一相对路径本 run 对【整读】有成功次数上限（从第 1 行要满安全顶计次；"
-                "offset>1 或 limit<行顶的定点窗不计入、不触顶）；触顶且正文仍在对话中、"
-                "又无再读授额时仅拒绝该路径，其它文件仍可 file_read。"
-                "正文已被清理或写成功后可再整读核对。"
+                "同一相对路径本 run 对成功 file_read 有次数上限（从第 1 行要满安全顶的整读计次；"
+                "开窗仅当本次请求行范围此前已交付且正文仍在对话中时计次；新范围分页不计）。"
+                "触顶且正文仍在对话中、又无再读授额时仅拒绝该路径，其它文件仍可 file_read。"
+                "正文已被清理或写成功后可再读核对。"
                 "已落盘产物优先以写/append 回执中的 artifact manifest 验真。"
             ),
             parameters={
@@ -587,12 +683,11 @@ class FileReadTool:
         rel_path = arguments.get("path", "")
         offset = arguments.get("offset")
         limit = arguments.get("limit")
-        counts_ceiling = _is_ceiling_counted_read(offset, limit)
 
-        # Same-path ceiling (from-line-1 fill-cap only): hard-reject empty spin
-        # when verbatim body is still in the projected window AND no reread grant.
-        # Point windows skip the gate and do not bump counts.
-        # Cleared body → allow recovery read even with remaining == 0.
+        # Same-path ceiling: fill-cap whole reads always count; a point window
+        # counts only when its requested span was already delivered AND the path
+        # body is still in the projected window. New ranges (pagination) skip
+        # the gate. Cleared body → allow recovery even with remaining == 0.
         from agentcore.runtime.runs.constants import FILE_READ_SAME_PATH_MAX
         from agentcore.workspace.project_shell import rewrite_project_shell_relpath
 
@@ -600,29 +695,27 @@ class FileReadTool:
             rel_path, context, register=False
         )
         path_key = (rel_path or "").strip().replace("\\", "/")
+        should_count = bool(path_key) and _file_read_should_count(
+            context, path_key, offset, limit
+        )
         using_reread = False
-        if path_key and counts_ceiling:
+        if should_count:
             prior = int(context.file_read_counts.get(path_key, 0))
             if prior >= FILE_READ_SAME_PATH_MAX:
                 remaining = int(context.file_read_reread_remaining.get(path_key, 0))
                 if remaining > 0:
                     # Grant overrides even when stale verbatim is still present.
                     using_reread = True
-                else:
-                    verbatim = context.file_read_verbatim_paths
-                    # None = projection not synced (unit tests / non-engine) →
-                    # treat as body still present.
-                    body_present = verbatim is None or path_key in verbatim
-                    if body_present:
-                        return _file_read_path_ceiling_error(
-                            (
-                                f"已多次读取 `{path_key}`（本 run 上限 "
-                                f"{FILE_READ_SAME_PATH_MAX} 次）。正文已在对话中，勿再读此文件；"
-                                "可换其它文件，或基于已有正文落盘 / handoff。"
-                            ),
-                            start,
-                        )
-                    # Cleared: allow recovery full-read (no grant required).
+                elif _file_read_body_present(context, path_key):
+                    return _file_read_path_ceiling_error(
+                        (
+                            f"已多次读取 `{path_key}`（本 run 上限 "
+                            f"{FILE_READ_SAME_PATH_MAX} 次）。正文已在对话中，勿再读此文件；"
+                            "可换其它文件，或基于已有正文落盘 / handoff。"
+                        ),
+                        start,
+                    )
+                # Cleared: allow recovery read (no grant required).
 
         ext = extension_of(path_key or rel_path)
         if ext in SKIP_EXTENSIONS and not _is_run_landed_path(context, path_key):
@@ -640,6 +733,7 @@ class FileReadTool:
                 path_key=path_key,
                 offset=offset,
                 limit=limit,
+                should_count=should_count,
                 using_reread=using_reread,
                 start=start,
                 context=context,
@@ -653,10 +747,9 @@ class FileReadTool:
             result = await context.backend.read_lines(
                 rel_path, offset=eff_offset, limit=eff_limit
             )
-        except OutsideWorkspace:
-            return _error(
-                _outside_workspace_msg(rel_path, location=context.backend.location),
-                start,
+        except OutsideWorkspace as e:
+            return _outside_workspace_error(
+                rel_path, start, location=context.backend.location, reason=str(e)
             )
         except PathNotFound:
             return await _file_not_found_error(rel_path, start=start, context=context)
@@ -678,10 +771,14 @@ class FileReadTool:
             total_lines=result.total_lines,
             cap_kind=cap_kind,
         )
-        if path_key and counts_ceiling:
-            output = _note_file_read_success(
-                context, path_key, output, using_reread=using_reread
+        if path_key:
+            _record_file_read_delivery(
+                context, path_key, start_line, end_line, result.total_lines
             )
+            if should_count:
+                output = _note_file_read_success(
+                    context, path_key, output, using_reread=using_reread
+                )
         return _file_read_ok(output, start)
 
     async def _read_office_or_pdf(
@@ -691,6 +788,7 @@ class FileReadTool:
         path_key: str,
         offset: object,
         limit: object,
+        should_count: bool,
         using_reread: bool,
         start: float,
         context: ToolContext,
@@ -705,10 +803,9 @@ class FileReadTool:
                 text = sidecar_text
         except PathNotFound:
             pass
-        except OutsideWorkspace:
-            return _error(
-                _outside_workspace_msg(rel_path, location=context.backend.location),
-                start,
+        except OutsideWorkspace as e:
+            return _outside_workspace_error(
+                rel_path, start, location=context.backend.location, reason=str(e)
             )
         except NotAFile:
             pass
@@ -718,10 +815,9 @@ class FileReadTool:
         if text is None:
             try:
                 data = await context.backend.read_bytes(rel_path)
-            except OutsideWorkspace:
-                return _error(
-                    _outside_workspace_msg(rel_path, location=context.backend.location),
-                    start,
+            except OutsideWorkspace as e:
+                return _outside_workspace_error(
+                    rel_path, start, location=context.backend.location, reason=str(e)
                 )
             except PathNotFound:
                 return await _file_not_found_error(
@@ -762,11 +858,15 @@ class FileReadTool:
                 )
 
         assert text is not None
-        output = _format_extracted_read(text, offset=offset, limit=limit)
-        if path_key and _is_ceiling_counted_read(offset, limit):
-            output = _note_file_read_success(
-                context, path_key, output, using_reread=using_reread
-            )
+        output, start_line, end_line, total = _format_extracted_read(
+            text, offset=offset, limit=limit
+        )
+        if path_key:
+            _record_file_read_delivery(context, path_key, start_line, end_line, total)
+            if should_count:
+                output = _note_file_read_success(
+                    context, path_key, output, using_reread=using_reread
+                )
         return _file_read_ok(output, start)
 
 
@@ -962,10 +1062,9 @@ class FileListTool:
                 # AI noise — otherwise「空目录」is a flat lie about a full directory.
                 if list_truncated:
                     output += f"\n\n{_LIST_TRUNCATED_NOTE}"
-        except OutsideWorkspace:
-            return _error(
-                _outside_workspace_msg(directory, location=context.backend.location),
-                start,
+        except OutsideWorkspace as e:
+            return _outside_workspace_error(
+                directory, start, location=context.backend.location, reason=str(e)
             )
         except NotADirectory:
             if _looks_like_external_directory(str(directory)):

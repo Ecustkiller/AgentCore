@@ -20,11 +20,13 @@ import { Download, FileText, Folder, Pencil, Reply, Undo2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { ChatImageGallery } from "./ChatImageGallery";
 import { ProductNoticeCard } from "./ProductNoticeCard";
+import { GovernanceBadge } from "./GovernanceBadge";
+import { PresenceAvatar } from "./PresenceAvatar";
 import {
   avatarInitial,
-  avatarSrc,
   canOfferEdit,
   canOfferRecall,
+  type MemberGovernanceBadge,
   messageMentionsUser,
   splitContentByMentions,
 } from "./chatDisplay";
@@ -36,6 +38,8 @@ interface Props {
   mine: boolean;
   /** Sender's display name, shown above the bubble in group threads (others only). */
   senderName?: string;
+  /** Group governance mark next to the sender name (others only). */
+  senderGovernance?: MemberGovernanceBadge | null;
   /** Fallback label for the avatar initial. */
   avatarName?: string;
   /** Profile image when available. */
@@ -47,7 +51,7 @@ interface Props {
   myUserId?: string | null;
   /** Platform admin — may recall others' group / system_card messages. */
   isAdmin?: boolean;
-  /** Group 版主 (owner/admin) — may recall others' group messages (not system_card). */
+  /** Group 管理员 (owner/admin) — may recall others' group messages (not system_card). */
   isGroupModerator?: boolean;
   /** Active chat type (gates admin recall menu). */
   chatType?: ChatType | null;
@@ -80,50 +84,6 @@ function textBubbleRadius(
   if (position === "first") return "rounded-xl rounded-bl-sm";
   if (position === "middle") return "rounded-lg rounded-l-xl";
   return "rounded-xl rounded-tl-sm";
-}
-
-/** Circular avatar: image when a URL exists, else a themed initial. */
-function ChatAvatar({
-  name,
-  url,
-  onClick,
-}: {
-  name: string;
-  url?: string | null;
-  onClick?: () => void;
-}) {
-  const src = avatarSrc(url);
-  const interactive = Boolean(onClick);
-  const wrap = (node: ReactNode) =>
-    interactive ? (
-      <button
-        type="button"
-        onClick={onClick}
-        aria-label={`查看 ${name} 的资料`}
-        className="shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        {node}
-      </button>
-    ) : (
-      node
-    );
-  if (src) {
-    return wrap(
-      <img
-        src={src}
-        alt=""
-        className="size-8 shrink-0 rounded-full object-cover"
-      />,
-    );
-  }
-  return wrap(
-    <span
-      className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary"
-      aria-hidden
-    >
-      {avatarInitial(name)}
-    </span>,
-  );
 }
 
 /** A human-readable byte size for a file chip (e.g. "1.2 MB"). */
@@ -259,6 +219,7 @@ export function ChatBubble({
   message,
   mine,
   senderName,
+  senderGovernance = null,
   avatarName,
   senderAvatarUrl,
   layout,
@@ -368,8 +329,11 @@ export function ChatBubble({
       className={`flex min-w-0 flex-col ${mine ? "items-end" : "items-start"}`}
     >
       {!mine && layout.showSenderName && senderName && (
-        <span className="mb-0.5 px-1 text-xs text-muted-foreground">
-          {senderName}
+        <span className="mb-0.5 flex min-w-0 flex-wrap items-center gap-1 px-1 text-xs text-muted-foreground">
+          <span className="truncate">{senderName}</span>
+          {senderGovernance && (
+            <GovernanceBadge badge={senderGovernance} compact />
+          )}
         </span>
       )}
 
@@ -494,9 +458,11 @@ export function ChatBubble({
           className={`mt-0.5 shrink-0 ${layout.showAvatar ? "" : "invisible"}`}
           aria-hidden={!layout.showAvatar}
         >
-          <ChatAvatar
-            name={avatarLabel}
+          <PresenceAvatar
+            label={avatarInitial(avatarLabel)}
             url={senderAvatarUrl}
+            sizeClass="size-8"
+            textClass="text-xs"
             onClick={
               layout.showAvatar &&
               !mine &&
@@ -505,6 +471,7 @@ export function ChatBubble({
                 ? () => onAvatarClick(message.sender_user_id as string)
                 : undefined
             }
+            ariaLabel={`查看 ${avatarLabel} 的资料`}
           />
         </div>
 

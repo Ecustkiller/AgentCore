@@ -531,6 +531,38 @@ class NoopSpanExporter:
 _MAX_LOGGED_SPANS = 256
 
 
+def _span_priority(span: Span) -> int:
+    """Lower ranks stay when the flattened tree exceeds ``_MAX_LOGGED_SPANS``.
+
+    DFS preorder alone drops later members' tool spans (and their failures). Prefer
+    the run skeleton, then error / in-flight tools, then the remaining DFS fill.
+    """
+    if span.operation in ("chat", "invoke_agent"):
+        return 0
+    if span.status == "error":
+        return 1
+    attrs = span.attributes
+    if attrs.get("agentcore.tool.in_flight") or attrs.get("agentcore.tool.orphan_start"):
+        return 2
+    return 3
+
+
+def _select_logged_spans(flat: list[Span]) -> tuple[list[Span], int]:
+    """Bound the emitted span list without silently dropping the tail.
+
+    Under the cap the DFS preorder is unchanged. Over it, keep the run skeleton and
+    failure / in-flight tool spans first, then fill remaining slots in DFS order.
+    The returned list stays DFS-ordered so parent/child is still readable inline.
+    """
+    limit = _MAX_LOGGED_SPANS
+    if len(flat) <= limit:
+        return flat, 0
+    ranked = sorted(enumerate(flat), key=lambda item: (_span_priority(item[1]), item[0]))
+    keep_ids = {s.span_id for _, s in ranked[:limit]}
+    kept = [s for s in flat if s.span_id in keep_ids]
+    return kept, len(flat) - len(kept)
+
+
 class LogSpanExporter:
     """Emit the tree as one structured ``obs.turn_spans`` log line (greppable by trace_id).
 
@@ -555,16 +587,19 @@ class LogSpanExporter:
         message_id: str,
     ) -> None:
         flat = root.flatten()
+        kept, dropped = _select_logged_spans(flat)
         logger.info(
             "obs.turn_spans",
             trace_id=trace_id,
             message_id=message_id,
             conversation_id=conversation_id,
             span_count=len(flat),
+            truncated=dropped > 0,
+            dropped=dropped,
             duration_ms=root.duration_ms,
             finish_reason=root.attributes.get("agentcore.finish_reason"),
             workers=root.attributes.get("agentcore.workers", 0),
-            spans=[s.to_log_dict() for s in flat[:_MAX_LOGGED_SPANS]],
+            spans=[s.to_log_dict() for s in kept],
         )
 
 

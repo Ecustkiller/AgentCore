@@ -25,7 +25,7 @@ from agentcore.workspace.protocol import (
 from .errors import (
     _error,
     _maybe_channel_dead_error,
-    _outside_workspace_msg,
+    _outside_workspace_error,
     _path_missing_error,
 )
 from .integrity import (
@@ -138,12 +138,11 @@ class FileDeleteTool:
 
         try:
             await context.backend.delete(rel_path, permanent=permanent)
-        except OutsideWorkspace:
+        except OutsideWorkspace as e:
             if coordinator is not None and release_on_fail:
                 coordinator.release(rel_path, context.run_id)
-            return _error(
-                _outside_workspace_msg(rel_path, location=context.backend.location),
-                start,
+            return _outside_workspace_error(
+                rel_path, start, location=context.backend.location, reason=str(e)
             )
         except PathNotFound:
             if coordinator is not None and release_on_fail:
@@ -272,7 +271,9 @@ class FileMoveTool:
                     coordinator.release(source, context.run_id)
                 if release_dst:
                     coordinator.release(destination, context.run_id)
-            return _error(_outside_workspace_msg(str(e), location=context.backend.location), start)
+            return _outside_workspace_error(
+                str(e), start, location=context.backend.location, reason=str(e)
+            )
         except PathNotFound:
             if coordinator is not None:
                 if release_src:
@@ -319,7 +320,7 @@ class FileMoveTool:
 
 
 class FileCopyTool:
-    """Copy a file or directory tree within the workspace (binary-safe)."""
+    """Copy a file or directory tree (binary-safe); dst may be a granted external mount."""
 
     registration = ToolRegistration(
         surface=ToolSurface.BUILTIN,
@@ -332,11 +333,11 @@ class FileCopyTool:
         return ToolSchema(
             name="file_copy",
             description=(
-                "在工作区内复制文件或【目录树】（含二进制）。目标路径缺失的上级"
-                "目录会自动创建；若目标已存在则失败——【不会覆盖】。不能复制到"
+                "复制文件或【目录树】（含二进制）：工作区内互拷，或从工作区拷到"
+                "已授权整理的区外挂载（目标写 `external/<别名>/…`）。目标路径缺失"
+                "的上级目录会自动创建；若目标已存在则失败——【不会覆盖】。不能复制到"
                 "自身或其子目录。约定文档前缀下目标路径可能被扁平化；与源规范化后"
-                "相同则视为已到位（幂等成功）。两个路径都必须是相对于工作区的"
-                "相对路径。"
+                "相同则视为已到位（幂等成功）。两个路径都必须是相对路径。"
             ),
             parameters={
                 "type": "object",
@@ -347,7 +348,9 @@ class FileCopyTool:
                     },
                     "destination": {
                         "type": "string",
-                        "description": "目标相对路径（必须尚不存在）",
+                        "description": (
+                            "目标相对路径（必须尚不存在；区外交付写 `external/<别名>/…`）"
+                        ),
                     },
                 },
                 "required": ["source", "destination"],
@@ -394,7 +397,9 @@ class FileCopyTool:
         try:
             await context.backend.copy(source, destination)
         except OutsideWorkspace as e:
-            return _error(_outside_workspace_msg(str(e), location=context.backend.location), start)
+            return _outside_workspace_error(
+                str(e), start, location=context.backend.location, reason=str(e)
+            )
         except PathNotFound:
             return _path_missing_error(f"源路径不存在：{source}", start)
         except AlreadyExists:
@@ -481,10 +486,9 @@ class MkdirTool:
 
         try:
             await context.backend.mkdir(rel_path)
-        except OutsideWorkspace:
-            return _error(
-                _outside_workspace_msg(rel_path, location=context.backend.location),
-                start,
+        except OutsideWorkspace as e:
+            return _outside_workspace_error(
+                rel_path, start, location=context.backend.location, reason=str(e)
             )
         except AlreadyExists:
             return _error(f"路径已存在：{rel_path}", start)

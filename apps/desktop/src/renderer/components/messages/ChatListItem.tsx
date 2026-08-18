@@ -4,7 +4,11 @@ import type { ChatSummary } from "@/services/messaging";
 import { useMessagingStore } from "@/stores/messaging";
 import { BadgeCheck, BellOff, Pin, Users } from "lucide-react";
 import { PresenceAvatar } from "./PresenceAvatar";
-import { avatarInitial, chatDisplayName } from "./chatDisplay";
+import {
+  avatarInitial,
+  chatCircleAvatarUrl,
+  chatDisplayName,
+} from "./chatDisplay";
 
 interface Props {
   chat: ChatSummary;
@@ -41,6 +45,7 @@ export function ChatListItem({ chat, active, onSelect }: Props) {
       <span className="flex w-full items-center gap-3 text-left">
         <PresenceAvatar
           label={avatarInitial(name)}
+          url={chatCircleAvatarUrl(chat)}
           sizeClass="size-9"
           textClass="text-sm"
           online={peerOnline}

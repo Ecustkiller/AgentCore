@@ -1250,8 +1250,8 @@ def test_core_guides_out_of_workspace_absolute_paths():
     assert "禁止" in hint and "文件名" in hint
     assert "手填" in hint
     assert "ask_user_*" in hint  # 手册指针
-    # 可履约手册不常驻，装配后才挂。
-    for manual_only in ("授权后发现", "well_known", "口头同意", "失败分型", "没找着"):
+    # 可履约手册不常驻，装配后才挂（含授权后两步交付：先写工作区再 copy）。
+    for manual_only in ("授权后发现", "well_known", "口头同意", "失败分型", "没找着", "先写工作区"):
         assert manual_only not in hint, f"{manual_only} 应只在装配后的手册里"
     granted = assemble_ceo_core({"external_mount_readonly"})
     assert "授权后发现" in granted
@@ -1262,6 +1262,7 @@ def test_core_guides_out_of_workspace_absolute_paths():
     assert "失败分型" in granted
     assert "没找着" in granted
     assert "禁止" in granted and "grant_readonly_folder" in granted
+    assert "先写工作区" in granted and "file_copy" in granted
     # 不得无条件鼓动「立即发卡」——本机 Host/区外叙述只留在 workspace_context。
     assert "立即发卡" not in hint
     assert "立即发卡" not in granted

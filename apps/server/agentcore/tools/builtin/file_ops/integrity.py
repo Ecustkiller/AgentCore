@@ -11,6 +11,7 @@ import re
 from typing import Literal
 
 from agentcore.core.logging import get_logger
+from agentcore.runtime.facts import CrossTurnRetry
 from agentcore.tools.protocol import ToolContext, ToolResult
 
 from .errors import _error
@@ -392,7 +393,9 @@ def _reject_write_scope(
     if msg is None:
         return None
     logger.info(event, path=path, write_scope=getattr(context, "write_scope", None))
-    return _error(msg, start, contract_failure=True)
+    return _error(
+        msg, start, contract_failure=True, cross_turn_retry=CrossTurnRetry.FUTILE
+    )
 
 
 def _mark_landed_files(
@@ -407,8 +410,9 @@ def _mark_landed_files(
     append allowed. Existing ``prose`` is never downgraded.
     First writer of ``path`` is recorded in ``landed_artifact_authors`` (setdefault).
 
-    Successful land also resets the same-path ``file_read`` ceiling (counts → 0 +
-    sticky reread grant) so post-write verify / citation refresh is not blocked.
+    Successful land also resets the same-path ``file_read`` ceiling (counts → 0,
+    delivered ranges cleared, sticky reread grant) so post-write verify /
+    citation refresh is not blocked.
     Failure paths never call this — no grant on failed ``str_replace`` receipts.
     """
     context.has_landed_files = True
@@ -417,6 +421,8 @@ def _mark_landed_files(
         return
     # Post-write verify: clear same-path read ceiling and refresh sticky grant.
     context.file_read_counts[path_key] = 0
+    context.file_read_delivered_ranges.pop(path_key, None)
+    context.file_read_line_totals.pop(path_key, None)
     from agentcore.runtime.engine.tool_clear import refresh_file_read_reread_grant
 
     refresh_file_read_reread_grant(context, [path_key])

@@ -18,7 +18,10 @@ from typing import Literal
 EXTERNAL_PREFIX = "external/"
 _ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _ALIAS_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
-_READONLY_MSG = "会话授权目录为只读，不能写入；请把产出写到对话工作区"
+_READONLY_MSG = (
+    "会话授权目录为只读授权，不能改动；如需在此目录交付或整理，"
+    "请让用户升级为整理授权（交付：先写工作区，再 `file_copy` 到此目录）"
+)
 _ORGANIZE_DENY_MSG = (
     "整理授权不允许此操作（仅 list/read/grep/stat + move/copy/mkdir + 回收站删除）"
 )
@@ -234,6 +237,38 @@ def normalize_mount_mode(raw: str | None) -> ExternalMountMode:
     if text == "organize":
         return "organize"
     return "readonly"
+
+
+_CROSS_COPY_MSG = "不能跨会话授权目录与工作区复制文件"
+_CROSS_MOUNT_COPY_MSG = "不能跨会话授权目录复制文件"
+_CROSS_MOVE_MSG = "不能跨会话授权目录与工作区移动文件"
+_CROSS_MOUNT_MOVE_MSG = "不能跨会话授权目录移动文件"
+
+
+def cross_root_copy_error(src_alias: str | None, dst_alias: str | None) -> str | None:
+    """Deny message for copy across roots, or ``None`` if the direction is allowed.
+
+    Same alias (including both ``None`` = primary workspace) is in-root copy.
+    Workspace → external is allowed here; the caller still gates dest with
+    ``op="copy"`` so readonly mounts stay denied. Reverse and cross-mount stay
+    denied. Does not add ops to the external allow-set.
+    """
+    if src_alias == dst_alias:
+        return None
+    if src_alias is None and dst_alias is not None:
+        return None
+    if src_alias is not None and dst_alias is not None:
+        return _CROSS_MOUNT_COPY_MSG
+    return _CROSS_COPY_MSG
+
+
+def cross_root_move_error(src_alias: str | None, dst_alias: str | None) -> str | None:
+    """Deny message for move across roots. Cross-root move is never allowed."""
+    if src_alias == dst_alias:
+        return None
+    if src_alias is not None and dst_alias is not None:
+        return _CROSS_MOUNT_MOVE_MSG
+    return _CROSS_MOVE_MSG
 
 
 def external_mutation_allowed(

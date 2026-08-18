@@ -137,6 +137,7 @@ export function UserProfileDialog({
           ) : (
             <PresenceAvatar
               label={avatarInitial(name)}
+              url={profile?.avatar_url}
               sizeClass="size-14"
               textClass="text-xl"
               online={!!profile?.online}

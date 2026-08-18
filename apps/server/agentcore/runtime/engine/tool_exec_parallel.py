@@ -9,7 +9,10 @@ from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolEffect
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall, llm_content_text
 from agentcore.runtime.approvals import ApprovalGate
-from agentcore.runtime.engine.tool_call_fact_code import tool_call_fact_code
+from agentcore.runtime.engine.tool_call_fact_code import (
+    tool_call_fact_code,
+    tool_call_fact_cross_turn_retry,
+)
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.facts import ToolCallFact, record_turn_fact
@@ -186,6 +189,7 @@ async def execute_tools(
                 result=llm_content_text(message.content),
                 success=attempt.success,
                 code=tool_call_fact_code(attempt),
+                cross_turn_retry=tool_call_fact_cross_turn_retry(attempt),
             ).to_fact()
         )
 

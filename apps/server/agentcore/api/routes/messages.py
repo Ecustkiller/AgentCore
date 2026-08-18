@@ -44,6 +44,7 @@ from agentcore.api.schemas import (
     UserSearchResponse,
     UserSearchResult,
 )
+from agentcore.api.schemas._helpers import _avatar_url
 from agentcore.config import settings
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
 from agentcore.core.errors import ValidationError
@@ -69,6 +70,7 @@ def _participant(
         id=user.user_id,
         username=user.username,
         display_name=user.display_name,
+        avatar_url=_avatar_url(user.user_id, user.avatar_key),
         is_admin=is_admin,
         group_role=role,  # type: ignore[arg-type]
         muted_by_admin=muted_by_admin,
@@ -77,11 +79,21 @@ def _participant(
 
 
 def _search_result(user) -> UserSearchResult:
-    return UserSearchResult(id=user.user_id, username=user.username, display_name=user.display_name)
+    return UserSearchResult(
+        id=user.user_id,
+        username=user.username,
+        display_name=user.display_name,
+        avatar_url=_avatar_url(user.user_id, user.avatar_key),
+    )
 
 
 def _blocked_user(user) -> BlockedUser:
-    return BlockedUser(id=user.user_id, username=user.username, display_name=user.display_name)
+    return BlockedUser(
+        id=user.user_id,
+        username=user.username,
+        display_name=user.display_name,
+        avatar_url=_avatar_url(user.user_id, user.avatar_key),
+    )
 
 
 def _chat_summary(
@@ -125,6 +137,7 @@ def _friend_summary(user, *, online: bool = False) -> FriendSummary:
         id=user.user_id,
         username=user.username,
         display_name=user.display_name,
+        avatar_url=_avatar_url(user.user_id, user.avatar_key),
         online=online,
     )
 
@@ -134,6 +147,7 @@ def _user_profile(view: ProfileView, *, online: bool = False) -> UserProfile:
         id=view.user.user_id,
         username=view.user.username,
         display_name=view.user.display_name,
+        avatar_url=_avatar_url(view.user.user_id, view.user.avatar_key),
         online=online,
         relation=view.relation,
         request_id=view.request_id,
@@ -259,7 +273,7 @@ async def leave_chat(
     return StatusResponse()
 
 
-# --- Moderation (审核治理: 平台 admin 或群级版主; AuthUser + service gate) ---
+# --- Moderation (审核治理: 平台 admin 或群管理员; AuthUser + service gate) ---
 
 
 @router.delete("/chats/{chat_id}/members/{target_id}", response_model=StatusResponse)

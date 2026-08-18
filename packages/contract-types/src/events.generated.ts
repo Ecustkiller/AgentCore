@@ -912,7 +912,8 @@ export interface DeliveryPromotion {
  * LATEST per ``execution_id`` (reflects the most recent batch's reconciliation).
  * ``state``: delivered = 无 blocking 缺口且有落盘产物; partial = 有产物也有
  * blocking 缺口; blocked = 有 blocking 缺口且无落盘产物;
- * notes = 仍有 soft 提醒且非「仅 unverified_note」（如 path_hint；轻提醒，非「部分未满足」）。
+ * notes = 仍有 soft 提醒且非「仅 unverified_note」（轻提醒，非「部分未满足」）；
+ * 声明路径失配为 path_mismatch blocking，不得 delivered。
  * ``artifacts``: path-level acceptance (accepted+rejected); ``delivered_files``
  * remains accepted-only for older clients.
  * ``promoted``: 这张对账卡上已 ``promote_product`` 归位的成品（``{from, to}``）。CEO 在
