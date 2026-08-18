@@ -284,8 +284,8 @@ async function main() {
     ]);
 
     printStep(n++, "Android APK（与桌面 tag 分轨 android-v*）", [
-      "pnpm -C apps/mobile release:android   # 打签 APK → draft upload；CDN 由脚本末尾 sync",
-      "真机冒烟（安装启动 / 登录 / SSE）",
+      "pnpm -C apps/mobile release:android   # 打签 APK → draft upload；CDN 由脚本末尾 sync；出包前自动跑公网 Capacitor CORS 预检",
+      "真机冒烟（签名安装 / 系统 WebView 渲染 / 端到端 SSE）",
       `冒烟绿后转正: gh release edit android-v${v.mobile} --repo Lawofall/AgentCore-releases --draft=false`,
       "本清单不自动跑 release:android；漏 Publish 则官网/CDN 停在旧版",
     ]);

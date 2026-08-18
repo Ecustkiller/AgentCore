@@ -99,7 +99,7 @@ pnpm -C apps/mobile release:android
 pnpm -C apps/mobile release:android -- --skip-draft
 ```
 
-6. 真机侧载 `release/<ver>/AgentCore-<ver>-android.apk` 冒烟后转正：
+6. 真机侧载 `release/<ver>/AgentCore-<ver>-android.apk` 冒烟（签名安装 / 系统 WebView 渲染 / 端到端 SSE）后转正：
 
 ```bash
 gh release edit android-v<ver> --repo Lawofall/AgentCore-releases --draft=false
@@ -113,7 +113,7 @@ node deploy/scripts/sync-release-cdn.mjs --android apps/mobile/release/<ver>/Age
 
 7. App 内更新提示：原生壳用 CapacitorHttp 拉 `https://downloads…/android/latest.json`（绕过 WebView CORS），与本地 `clientVersion()` 做 semver 比较；仅 Android；`dev` 不提示。官网下载按钮另走 GitHub Releases 资产探测。下载站对 `latest.json` 须有公开 CORS（`pnpm sync:release-cdn --install-nginx`），以便旧壳 WebView `fetch` 仍可用。
 
-8. **生产 API CORS**：后端 `CORS_ALLOW_ORIGINS` 须含 `https://localhost`（及 `capacitor://localhost` / `http://localhost`）。缺则壳内「无法连接后端」。补洞脚本：`node deploy/scripts/add-capacitor-cors.mjs`。
+8. **生产 API CORS**：后端 `CORS_ALLOW_ORIGINS` 须含 `https://localhost`（及 `capacitor://localhost` / `http://localhost`）。缺则壳内「无法连接后端」。`release:android` 出包前对公网 `/api` 自动 OPTIONS 预检（`pnpm check:capacitor-cors` 可单跑）；明确拒绝才失败，网络抖动 fail-open。补洞脚本：`node deploy/scripts/add-capacitor-cors.mjs`。
 
 ## FCM 推送（原生）
 

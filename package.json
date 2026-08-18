@@ -32,6 +32,7 @@
     "publish:notice:help": "node scripts/release-notice.mjs --help",
     "sync:release-cdn": "node deploy/scripts/sync-release-cdn.mjs",
     "probe:updater-cdn": "node deploy/scripts/probe-updater-cdn.mjs",
+    "check:capacitor-cors": "node deploy/scripts/check-capacitor-cors.mjs",
     "sync:logs": "node scripts/sync-prod-logs.mjs",
     "town:build": "powershell -ExecutionPolicy Bypass -File apps/town/scripts/build-unity.ps1",
     "town:build:webgl": "powershell -ExecutionPolicy Bypass -File apps/town/scripts/build-unity.ps1 -Target WebGL",

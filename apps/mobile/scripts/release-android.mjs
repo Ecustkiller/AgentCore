@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * Android APK release: sync version → Vite build → cap sync → signed
- * assembleRelease → `gh release upload` to Lawofall/AgentCore-releases.
+ * Android APK release: public Capacitor CORS preflight → sync version →
+ * Vite build → cap sync → signed assembleRelease → `gh release upload`
+ * to Lawofall/AgentCore-releases.
  *
  *   pnpm -C apps/mobile release:android
  *   pnpm -C apps/mobile release:android -- --skip-draft   # draft already exists
@@ -21,6 +22,7 @@ import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertCapacitorCors } from "../../../deploy/scripts/check-capacitor-cors.mjs";
 import {
   REPO_ROOT,
   loadDeployEnv,
@@ -219,7 +221,7 @@ function uploadAndVerify(tag, version, path) {
   console.log(`✓ remote assets verified on ${tag}: ${name}`);
 }
 
-function main() {
+async function main() {
   loadDeployEnv();
   ensureKeystore();
   ensureAndroidSdk();
@@ -228,11 +230,11 @@ function main() {
   const version = readMobileVersion();
   const tag = `android-v${version}`;
   const apiUrl = resolveApiUrl();
-
   const googleServices = join(ANDROID_DIR, "app", "google-services.json");
   const pushEnabled = existsSync(googleServices);
   console.log(`→ android release ${version}`);
   console.log(`  VITE_API_URL=${apiUrl}`);
+  await assertCapacitorCors({ apiBaseUrl: apiUrl });
   console.log(
     `  VITE_PUSH_ENABLED=${pushEnabled} (google-services.json ${pushEnabled ? "found" : "missing — push gated off to avoid native crash"})`,
   );
@@ -286,4 +288,7 @@ function main() {
   );
 }
 
-main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
