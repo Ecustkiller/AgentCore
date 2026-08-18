@@ -170,7 +170,6 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
         CEO_SYNTHESIS_BUDGET,
         CEO_SYNTHESIS_POINTER_CHARS,
     )
-    from agentcore.runtime.runs.contract import node_has_dependents
     from agentcore.runtime.runs.fidelity import allocate, truncate_head_tail
     from agentcore.runtime.runs.types import RunPhase
 
@@ -229,13 +228,33 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
         return "pass_through"
 
     modes = {node.run_id: _mode(node) for node in plan.nodes}
+
+    def _has_structured_brief(debrief: dict[str, Any] | None) -> bool:
+        if not debrief:
+            return False
+        raw_kps = debrief.get("key_points")
+        has_kps = (
+            any(str(p).strip() for p in raw_kps)
+            if isinstance(raw_kps, list)
+            else bool(raw_kps)
+        )
+        return bool(
+            (debrief.get("summary") or "").strip()
+            or has_kps
+            or (debrief.get("next_steps") or "").strip()
+        )
+
+    # 只有「无结构化摘要」的 pass_through 节点才回退正文、才占共享额度；
+    # 有结构化摘要的节点三段替代正文，不消耗 allowance（否则 allowance 序列错位）。
+    prose_nodes = [
+        node
+        for node in plan.nodes
+        if modes[node.run_id] == "pass_through"
+        and not _has_structured_brief(cleaned[node.run_id][1])
+    ]
     allowances = iter(
         allocate(
-            [
-                len(cleaned[node.run_id][0])
-                for node in plan.nodes
-                if modes[node.run_id] == "pass_through"
-            ],
+            [len(cleaned[node.run_id][0]) for node in prose_nodes],
             CEO_SYNTHESIS_BUDGET,
         )
     )
@@ -276,41 +295,31 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
         fidelity = ""
         truncated = False
         if mode == "pointer":
-            # Prefer structured handoff (summary + key_points + files) over a long
+            # Prefer structured handoff (结论/证据/待办 + files) over a long
             # prose digest — full artifact is on disk / in the UI.
             body = _compact_worker_body(
                 clean=clean,
                 author_summary=author_summary,
                 key_points=key_points,
+                next_steps=next_steps,
                 prose_limit=CEO_SYNTHESIS_POINTER_CHARS,
-                prefer_brief=True,
             )
             fidelity, truncated = "pointer", True
         elif mode == "pass_through":
-            allowance = next(allowances)
-            # Leaves (no files, no downstream): after debrief de-conclusioning the
-            # conclusion lives in the body — include it, sized to the shared budget
-            # (do not clip to CEO_SYNTHESIS_POINTER_CHARS). Intermediate nodes:
-            # downstream already read the full body via the 16k dep-context pool;
-            # CEO only needs the brief.
-            prefer_brief = bool(author_summary or key_points) and node_has_dependents(
-                plan, node.run_id
-            )
-            if author_summary or key_points:
+            # R-12：有结构化摘要（结论/证据/待办）就替代全文复述——无论有无下游，
+            # CEO 只吃三段摘要写概览；完整正文在产物/UI，用户自行查看。
+            if author_summary or key_points or next_steps:
                 body = _compact_worker_body(
                     clean=clean,
                     author_summary=author_summary,
                     key_points=key_points,
-                    prose_limit=allowance,
-                    prefer_brief=prefer_brief,
+                    next_steps=next_steps,
+                    prose_limit=0,
                 )
-                # Mid-node prefer_brief drops the body — that is a cut, not "intact".
-                truncated = (
-                    bool(clean.strip())
-                    if prefer_brief
-                    else len(clean) > allowance
-                )
+                # 正文被结构化摘要替代 = 一次「截断」，非「完整」。
+                truncated = bool(clean.strip())
             else:
+                allowance = next(allowances)
                 body = truncate_head_tail(clean, allowance)
                 truncated = len(clean) > allowance
             fidelity = "pass_through"
@@ -383,24 +392,31 @@ def _compact_worker_body(
     clean: str,
     author_summary: str,
     key_points: list[str],
+    next_steps: str,
     prose_limit: int,
-    prefer_brief: bool,
 ) -> str:
-    """Brief-first body: summary + short bullets; optional prose when not prefer_brief."""
+    """结构化三段（结论/证据/待办）替代全文复述；无结构化字段时回退正文。
+
+    R-12：CEO 收口只吃「结论 / 证据 / 待办」摘要来写概览——完整正文留在产物 / UI，
+    用户自行查看，不再把 worker 全文贴进 CEO prompt（叶子节点同样适用）。
+    无任何结构化字段（无 debrief）时才回退正文，保证信息不丢。
+    """
     from agentcore.runtime.runs.fidelity import truncate_head_tail
 
     parts: list[str] = []
     if author_summary:
-        parts.append(f"交接结论：{author_summary}")
+        parts.append(f"结论：{author_summary}")
     if key_points:
         bullets = "\n".join(f"- {p}" for p in key_points[:6])
-        parts.append(f"要点：\n{bullets}")
-    if prefer_brief and (author_summary or key_points):
-        # Pointer / mid-node: structured brief present — skip dumping the full body.
-        return "\n\n".join(parts) if parts else "（无摘要）"
+        parts.append(f"证据：\n{bullets}")
+    if next_steps:
+        parts.append(f"待办：{next_steps}")
+    if parts:
+        # 结构化摘要已替代全文复述。
+        return "\n\n".join(parts)
     if clean.strip():
-        parts.append(truncate_head_tail(clean, prose_limit))
-    return "\n\n".join(parts) if parts else "（无输出）"
+        return truncate_head_tail(clean, prose_limit)
+    return "（无输出）"
 
 
 def _synthesis_char_cap(raw_chars: int) -> int:
@@ -677,17 +693,8 @@ def build_ceo_synthesis(
     cards_block = motion_cards_block(products, auto_adopt=auto_adopt)
     if cards_block:
         lines.append(cards_block)
-    # 完工交接简报: surface each worker's 建议下一步 (proactive, non-blocking — distinct from the
-    # escalation block's 待决问题) as ONE advisory section so the CEO can relay the worthwhile
-    # ones to the user. Empty when nobody suggested anything.
-    suggestions = [(wp["role"], wp["next_steps"]) for wp in products if wp.get("next_steps")]
-    if suggestions:
-        lines.append(
-            "\n### 队员建议的下一步（供参考，由你与用户定夺，非必须执行）\n"
-            "以下是各队员完工时顺带提的后续方向（非阻塞、不是待决问题）。择其有价值者，在你给"
-            "用户的概览里自然带出『团队建议接下来可以…』即可；无价值的忽略，不要逐条复述。\n"
-            + "\n".join(f"- {role}：{ns}" for role, ns in suggestions)
-        )
+    # R-12：建议下一步已作为「待办」归位到每个 worker 的三段结构化摘要里，不再单列
+    # advisory 专节（避免 next_steps 重复出现）。
     # 团队便签 → 合·对账 (§2.3): surface the team's outstanding broadcast 决定 / 认领 so the CEO
     # reconciles the assembled result against them in the closing instruction (the wall is 对账 的
     # 现成输入). Empty wall / a CEO that never delegated ⇒ "" → nothing added.

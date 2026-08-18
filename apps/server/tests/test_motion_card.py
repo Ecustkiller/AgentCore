@@ -402,5 +402,5 @@ def test_format_for_ceo_no_motion_card_section_when_absent():
     # 专节 intro 缺席（收尾指引里的条件句「上方若有【建议开辩】」仍可出现）
     assert "队员提交的命题卡" not in out
     assert "消费指引" not in out
-    # 无卡时既有下一步专节仍在
-    assert "队员建议的下一步" in out
+    # R-12：无卡时 next_steps 归位到三段「待办」，不再走独立建议专节
+    assert "待办：可补资料" in out

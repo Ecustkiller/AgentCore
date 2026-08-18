@@ -328,10 +328,9 @@ def test_format_for_ceo_short_prose_passes_through_whole():
     assert "中间省略" not in out
 
 
-def test_format_for_ceo_surfaces_next_steps_advisory_and_leads_with_summary():
-    # 完工交接简报: structured brief still leads; a leaf (no files, no dependents)
-    # also keeps the body — conclusions now live there after debrief de-conclusioning.
-    # The 240-char pointer cap must not clip that body, and truncated follows allowance.
+def test_format_for_ceo_structured_brief_replaces_full_body():
+    # R-12: 结构化简报（结论/证据/待办）替代全文复述；叶子（无文件、无下游）
+    # 也不再贴正文——CEO 只吃三段摘要写概览，完整正文在产物/UI。
     t = tool(Provider([]))
     plan = RunPlan(nodes=[RunSpec(run_id="w1", task="调研", role="研究员")])
     long_tail = "详" * 300
@@ -348,18 +347,17 @@ def test_format_for_ceo_surfaces_next_steps_advisory_and_leads_with_summary():
     }
     products = worker_products(t, plan, results)
     assert products[0]["fidelity"] == "pass_through"
-    assert products[0]["truncated"] is False
+    assert products[0]["truncated"] is True  # 正文被结构化摘要替代
     out = format_for_ceo(t, plan, results)
-    assert "队员建议的下一步" in out
-    assert "补做竞品对比" in out
-    assert "交接结论：结论是甲" in out
-    assert "要点一" in out and "要点二" in out
-    assert "一段研究综述正文。" in out
-    assert long_tail in out
+    assert "结论：结论是甲" in out
+    assert "要点一" in out and "要点二" in out  # 证据段 bullets
+    assert "待办：补做竞品对比" in out
+    assert "一段研究综述正文。" not in out  # 替代全文复述
+    assert long_tail not in out
 
 
 def test_format_for_ceo_mid_node_with_dependents_keeps_brief_only():
-    """有下游的中间节点：CEO 只吃简报；叶子仍带正文。"""
+    """R-12：无论有无下游，有结构化摘要就替代全文复述（叶子也不贴正文）。"""
     t = tool(Provider([]))
     plan = RunPlan(
         nodes=[
@@ -384,22 +382,25 @@ def test_format_for_ceo_mid_node_with_dependents_keeps_brief_only():
     }
     products = worker_products(t, plan, results)
     by_id = {p["run_id"]: p for p in products}
-    assert "交接结论：接力给撰稿" in by_id["w1"]["body"]
+    assert "结论：接力给撰稿" in by_id["w1"]["body"]
     assert "一段研究综述正文。" not in by_id["w1"]["body"]
     assert by_id["w1"]["truncated"] is True
-    assert "终稿正文。" in by_id["w2"]["body"]
+    assert "结论：稿已成" in by_id["w2"]["body"]
+    assert "终稿正文。" not in by_id["w2"]["body"]
     out = format_for_ceo(t, plan, results)
     assert "一段研究综述正文。" not in out
-    assert "终稿正文。" in out
+    assert "终稿正文。" not in out
+    assert "结论：稿已成" in out
 
 
-def test_format_for_ceo_no_next_steps_section_when_none():
+def test_format_for_ceo_no_debrief_falls_back_to_body():
+    # R-12：无结构化摘要（无 debrief）时回退正文，信息不丢；不出现待办段/建议区。
     t = tool(Provider([]))
     plan = RunPlan(nodes=[RunSpec(run_id="w1", task="调研", role="研究员")])
     results = {"w1": RunState(phase=RunPhase.COMPLETED, content="只有正文，没有交接简报小节。")}
     out = format_for_ceo(t, plan, results)
-    # The advisory SECTION (its unique intro) is absent; the closing instruction's conditional
-    # mention of 『队员建议的下一步』 may still appear and is fine.
+    assert "只有正文，没有交接简报小节。" in out  # 回退正文
+    assert "待办：" not in out
     assert "顺带提的后续方向" not in out
 
 
@@ -442,7 +443,7 @@ def test_worker_products_failed_with_body_surfaces_error_not_pass_through():
 
 
 def test_worker_products_empty_body_with_files_and_debrief_is_pointer():
-    """A3: 空正文 + files_touched + debrief → pointer，交接结论不丢；失败节点不装交付。"""
+    """A3: 空正文 + files_touched + debrief → pointer，结论不丢；失败节点不装交付。"""
     t = tool(Provider([]))
     plan = RunPlan(
         nodes=[
@@ -475,17 +476,17 @@ def test_worker_products_empty_body_with_files_and_debrief_is_pointer():
     ok = by_id["w_ok"]
     assert ok["fidelity"] == "pointer"
     assert ok["status"] == "completed"
-    assert "交接结论：报告已落盘" in ok["body"]
+    assert "结论：报告已落盘" in ok["body"]
     assert "结论甲" in ok["body"]
     assert "文件产出（路径已核）" in ok["body"]
     fail = by_id["w_fail"]
     assert fail["fidelity"] == ""
     assert fail["status"] == "failed"
     assert "失败" in fail["body"] and "契约未达标" in fail["body"]
-    assert "交接结论" not in fail["body"]  # 勿把失败装成已交付 pointer
+    assert "结论：" not in fail["body"]  # 勿把失败装成已交付 pointer
     out = format_for_ceo(t, plan, results)
-    assert "交接结论：报告已落盘" in out
-    assert "可做竞品对比" in out  # debrief.next_steps 仍进建议区
+    assert "结论：报告已落盘" in out
+    assert "待办：可做竞品对比" in out  # debrief.next_steps 归位待办段
 
 
 def test_format_for_ceo_footer_is_lean_but_keeps_iron_laws():
@@ -627,6 +628,6 @@ def test_format_for_ceo_caps_short_raw_expansion_ratio():
     # Prefer-brief keeps natural size well under the old ~6k regime (log ratio~12).
     assert metric["final_chars"] < 3500
     assert metric["ratio_capped"] is False  # natural size under cap
-    assert "交接结论" in out and "要点：" in out
+    assert "结论：" in out and "证据：" in out
     assert "队员终态名册" in out or "写手0" in out
     assert "文件产出" in out or "out/0.md" in out
