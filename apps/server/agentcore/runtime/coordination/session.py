@@ -2054,6 +2054,28 @@ def _retain_harvest_task(
         session._harvest_tasks.discard(done)
         if done.cancelled():
             _log_harvest_cancelled(session, done)
+            return
+        # R-19 完成审计：harvest 非取消结束也留断点日志——异常 / 正常结算各一条，让
+        # 「立刻武装入口 harvest 零终稿且零日志」（2026-08-17 观测未决）类问题复发时
+        # 能从日志读出 harvest 是否执行、是否异常、以何种方式结算（settled_via）。
+        exc = done.exception()
+        if exc is not None:
+            logger.error(
+                "coordination.harvest_task_exception",
+                execution_id=session.execution_id,
+                conversation_id=session.conversation_id or "",
+                error=repr(exc),
+            )
+            return
+        logger.info(
+            "coordination.harvest_task_done",
+            execution_id=session.execution_id,
+            conversation_id=session.conversation_id or "",
+            settled_via=session.settled_via,
+            harvest_scheduled=session.harvest_scheduled,
+            completed=len(session.completed_run_ids),
+            total=session.total_workers,
+        )
 
     task.add_done_callback(_on_done)
 
