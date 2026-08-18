@@ -42,6 +42,7 @@ solely for exhausted re-read grants — recovery full-reads remain allowed.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import replace
 
 from agentcore.llm.provider.protocol import LLMMessage
@@ -211,10 +212,16 @@ def project_cleared_window(
     min_chars: int,
     summary_max_chars: int = 0,
     already_executed: bool = False,
+    keep_recent_by_tool: Mapping[str, int] | None = None,
 ) -> list[LLMMessage]:
     """Return ``messages`` with old clearable tool results collapsed to pointers.
 
     ``already_executed`` selects the exec-family pointer (no re-fetch invite).
+
+    R-09 ``keep_recent_by_tool``: per-tool keep-window override map (e.g.
+    ``{"read_url": 1}`` to keep only the latest page fetch verbatim while other
+    investigation tools keep the global ``keep_recent``). Empty / None keeps the
+    existing global-window behaviour byte-for-byte.
 
     Returns the SAME list object unchanged when nothing qualifies (a short turn with
     few reads never triggers clearing), so callers can cheaply detect a no-op with
@@ -256,10 +263,30 @@ def project_cleared_window(
             continue
         clearable_indices.append(index)
 
-    # Keep the most recent ``keep_recent`` verbatim; clear everything older.
-    if len(clearable_indices) <= keep_recent:
-        return messages
-    to_clear = set(clearable_indices[: len(clearable_indices) - keep_recent])
+    if keep_recent_by_tool:
+        # R-09 按工具差异化保留：每个工具各自保留其最近 keep_recent_by_tool[name] 条
+        # （缺省回落全局 keep_recent），其余转指针。多工具混用调查轮里，每个工具的近期
+        # 结果都可见，而不是被全局窗挤掉。
+        positions_by_tool: dict[str, list[int]] = {}
+        for index in clearable_indices:
+            name = call_info[messages[index].tool_call_id][0]  # present by construction
+            positions_by_tool.setdefault(name, []).append(index)
+        to_clear: set[int] = set()
+        for name, positions in positions_by_tool.items():
+            k = int(keep_recent_by_tool.get(name, keep_recent))
+            if k < 0:
+                continue
+            if len(positions) <= k:
+                continue
+            for idx in positions[: len(positions) - k]:
+                to_clear.add(idx)
+        if not to_clear:
+            return messages
+    else:
+        # Keep the most recent ``keep_recent`` verbatim; clear everything older.
+        if len(clearable_indices) <= keep_recent:
+            return messages
+        to_clear = set(clearable_indices[: len(clearable_indices) - keep_recent])
 
     projected: list[LLMMessage] = []
     for index, message in enumerate(messages):
@@ -364,6 +391,7 @@ def apply_file_read_clear_state(
         keep_recent=keep,
         min_chars=min_c,
         summary_max_chars=sum_max,
+        keep_recent_by_tool=settings.engine_tool_clear_keep_recent_by_tool,
     )
     verbatim = collect_file_read_verbatim_paths(projected)
 

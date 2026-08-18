@@ -551,3 +551,67 @@ async def test_loop_clears_old_exec_in_request_window(monkeypatch):
     assert _cleared_ids(window) == ["h0", "h1", "h2"]
     stub = next(m for m in window if m.tool_call_id == "h0")
     assert "勿仅为回看而重跑" in (stub.content or "")
+
+
+# --- R-09: 按工具差异化 keep_recent 窗口（keep_recent_by_tool）--------
+
+
+def _merged_pairs() -> list[LLMMessage]:
+    """两个工具（file_read / web_search）各 3 条大结果，交错累积。"""
+    msgs: list[LLMMessage] = []
+    for i in range(3):
+        msgs += _read_pair(f"fr{i}", f"/p/{i}", "x" * 5000, tool="file_read")
+        msgs += _read_pair(f"ws{i}", f"/q/{i}", "y" * 5000, tool="web_search")
+    return msgs
+
+
+def test_keep_recent_by_tool_overrides_per_tool() -> None:
+    """read_url 类 token 大户单独收紧到 1：该工具只剩最近 1 条全文，其余转指针；
+    其它工具仍按全局窗保留最近 2 条。"""
+    msgs = _merged_pairs()
+    out = project_cleared_window(
+        msgs,
+        clearable_tools=CLEARABLE,
+        keep_recent=2,
+        min_chars=100,
+        keep_recent_by_tool={"web_search": 1},
+    )
+    assert out is not msgs
+    cleared = [m.tool_call_id for m in out if "[已清理" in (m.content or "")]
+    # web_search k=1 只保留 ws2（清 ws0/ws1），file_read 全局 k=2 保留 fr1/fr2（清 fr0）
+    assert cleared == ["fr0", "ws0", "ws1"]
+    kept = {m.tool_call_id for m in out if m.tool_call_id is not None and m.tool_call_id in {f"fr{i}" for i in range(3)} | {f"ws{i}" for i in range(3)} and "[已清理" not in (m.content or "")}
+    assert kept == {"fr1", "fr2", "ws2"}
+
+
+def test_keep_recent_by_tool_empty_preserves_global_behaviour() -> None:
+    """空映射（默认）→ 逐字保持原全局窗口行为（最近 2 条全文，其余清理）。"""
+    msgs = _merged_pairs()
+    out = project_cleared_window(
+        msgs,
+        clearable_tools=CLEARABLE,
+        keep_recent=2,
+        min_chars=100,
+        keep_recent_by_tool={},
+    )
+    assert out is not msgs
+    cleared = [m.tool_call_id for m in out if "[已清理" in (m.content or "")]
+    # 全局窗保留最近 2 条（fr2/ws2），清其余 4 条
+    assert cleared == ["fr0", "ws0", "fr1", "ws1"]
+    kept = {m.tool_call_id for m in out if m.tool_call_id is not None and m.tool_call_id in {f"fr{i}" for i in range(3)} | {f"ws{i}" for i in range(3)} and "[已清理" not in (m.content or "")}
+    assert kept == {"fr2", "ws2"}
+
+
+def test_keep_recent_by_tool_negative_keeps_everything_for_that_tool() -> None:
+    """k<0 → 该工具任何结果都不清理（如保留全部网页抓取做深读对照）。"""
+    msgs = _merged_pairs()
+    out = project_cleared_window(
+        msgs,
+        clearable_tools=CLEARABLE,
+        keep_recent=2,
+        min_chars=100,
+        keep_recent_by_tool={"web_search": -1},
+    )
+    cleared = [m.tool_call_id for m in out if "[已清理" in (m.content or "")]
+    # 只有 file_read 的 fr0 被清（fr1/fr2 保留），web_search 全保留
+    assert cleared == ["fr0"]

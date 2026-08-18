@@ -76,6 +76,12 @@ class EngineSettings(BaseModel):
     # （那伤单次读手感）。host_shell / terminal 走独立 exec 窗，不进本集合。
     engine_tool_clear_keep_recent: int = 2
     engine_tool_clear_min_chars: int = 2000
+    # R-09 按工具差异化投影窗：{tool_name: keep_recent}，覆盖全局
+    # engine_tool_clear_keep_recent。空 = 全部调查工具共享全局窗（现状，行为不变）。
+    # 例：{"read_url": 1} 让网页抓取结果只留最近 1 条全文（read_url 常为大 HTML，token
+    # 大户），file_read 等仍按全局窗。exec 窗（engine_tool_clear_exec_keep_recent）
+    # 独立、不受本映射影响。
+    engine_tool_clear_keep_recent_by_tool: dict[str, int] = {}
     # host_shell / terminal 当轮 stdout 独立投影窗（不进 investigation_tools，
     # 以免改空转治理）。指针禁止教重跑。1 = 只留最近一条全文。code_execute /
     # test_run 不在此列（改码对照 / 验证诚实性）。

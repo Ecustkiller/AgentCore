@@ -69,6 +69,7 @@ def build_request_window(
             keep_recent=settings.engine_tool_clear_keep_recent,
             min_chars=settings.engine_tool_clear_min_chars,
             summary_max_chars=settings.engine_tool_clear_file_read_summary_max_chars,
+            keep_recent_by_tool=settings.engine_tool_clear_keep_recent_by_tool,
         )
         if cleared is not window:
             chars_saved = sum(
