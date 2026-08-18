@@ -125,6 +125,10 @@ class InteractionRequest:
     ``payload`` is the request body emitted to the client (kept so a future
     ``list_pending`` consumer can re-render a pending card on reconnect); ``future``
     settles with the kind-specific result the resolve endpoint delivers.
+    ``extra_waiters`` (R-16 同卡合并): additional Futures created via
+    :meth:`InteractionRegistry.attach` for waiters merged onto the SAME card (e.g. two
+    workers escalating the identical question). They settle with the same result as
+    ``future`` when the card resolves.
     """
 
     id: str
@@ -132,6 +136,7 @@ class InteractionRequest:
     conversation_id: str
     future: asyncio.Future[Any]
     payload: dict[str, Any] = field(default_factory=dict)
+    extra_waiters: list[asyncio.Future[Any]] = field(default_factory=list)
 
 
 class InteractionRegistry:
@@ -176,8 +181,9 @@ class InteractionRegistry:
     def resolve(self, request_id: str, result: Any, *, conversation_id: str) -> bool:
         """Settle a pending interaction with its (kind-specific) result.
 
-        Returns False if the request is unknown, already settled, or belongs to a
-        different conversation than the caller claims.
+        Broadcasts the same result to any ``extra_waiters`` merged onto this card
+        (R-16 同卡合并). Returns False if the request is unknown, already settled, or
+        belongs to a different conversation than the caller claims.
         """
         pending = self._pending.get(request_id)
         if pending is None or pending.future.done():
@@ -185,7 +191,34 @@ class InteractionRegistry:
         if pending.conversation_id != conversation_id:
             return False
         pending.future.set_result(result)
+        for waiter in pending.extra_waiters:
+            if not waiter.done():
+                waiter.set_result(result)
         return True
+
+    def attach(
+        self,
+        request_id: str,
+        conversation_id: str,
+        *,
+        kind: InteractionKind,
+    ) -> asyncio.Future[Any] | None:
+        """R-16 同卡合并：给一个已存在（未结算）的 pending interaction 加一个附加 waiter。
+
+        用于同 conversation 同 question 的重复 escalate 合并到同一张卡——多个 worker 等
+        同一张卡的结算，resolve 时广播同一结果（同问题同答案，语义无损）。未知 / 已结算 /
+        会话不符 / kind 不符 → 返回 None，调用方回落独立挂起（现状）。
+        """
+        pending = self._pending.get(request_id)
+        if pending is None or pending.future.done():
+            return None
+        if pending.conversation_id != conversation_id:
+            return None
+        if pending.kind is not kind:
+            return None
+        fut: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+        pending.extra_waiters.append(fut)
+        return fut
 
     async def suspend(
         self,

@@ -122,6 +122,69 @@ def build_escalation_channel(
         if parked >= ESCALATION_CONCURRENCY_CAP:
             logger.info("worker.escalate.cap_degraded", run_id=run_id, parked=parked)
             return EscalationOutcome(status="degraded")
+        # R-16 同卡合并（经典直挂用户路径）：同 conversation 已有 pending ESCALATION 卡且
+        # question 完全相同 → attach 到同一张卡（附加 waiter），用户答一次、多 worker 共享
+        # 同一答案，不叠新卡（不同 question 仍各自独立卡）。attach 竞态失败（卡已结算/
+        # 会话不符/kind 不符）→ 回落独立挂起（现状）。经 asyncio.CancelledError 时同样
+        # 上抛（与 suspend 同姿态：ask_user soft-stop 取消 drive）。
+        if not awaiting_ceo and parked > 0:
+            for r in bridge.list_pending(env.conversation_id):
+                if r.kind is not InteractionKind.ESCALATION:
+                    continue
+                if str((r.payload or {}).get("question") or "") != question:
+                    continue
+                attached = bridge.attach(
+                    r.id, env.conversation_id, kind=InteractionKind.ESCALATION
+                )
+                if attached is None:
+                    break  # 竞态：卡已结算 → 回落独立挂起
+                try:
+                    if env.escalation_timeout is None:
+                        merged_result = await attached
+                    else:
+                        merged_result = await asyncio.wait_for(
+                            attached, timeout=env.escalation_timeout
+                        )
+                except TimeoutError:
+                    status, answer = "timed_out", ""
+                except asyncio.CancelledError:
+                    raise
+                else:
+                    # 与 suspend 结算同口径（主卡 resolve 的同一结果被广播）
+                    if isinstance(merged_result, dict) and merged_result.get(
+                        "use_assumption"
+                    ):
+                        status, answer = "assumed", ""
+                    elif isinstance(merged_result, dict):
+                        status, answer = (
+                            "resolved",
+                            str(merged_result.get("answer") or "").strip(),
+                        )
+                    else:
+                        status, answer = "resolved", str(merged_result or "").strip()
+                resolutions[question] = {"status": status, "answer": answer}
+                logger.info(
+                    "worker.escalate.merged",
+                    run_id=run_id,
+                    parent_escalation_id=r.id,
+                    status=status,
+                    awaiting=who,
+                )
+                env.sink.emit(
+                    escalation_resolved(
+                        run_id,
+                        agent_id,
+                        escalation_id=r.id,
+                        status=status,
+                        answer=answer,
+                        arbitrated_by="user",
+                        via_user=None,
+                    )
+                )
+                return EscalationOutcome(
+                    status=status,
+                    answer=answer if status == "resolved" else None,
+                )
         escalation_id = new_id()
         esc_kind = kind if kind in ("normal", "scope", "dep") else "normal"
 
