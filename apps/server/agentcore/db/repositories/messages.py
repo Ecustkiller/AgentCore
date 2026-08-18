@@ -742,6 +742,24 @@ class MessageRepository:
         )
         return result.scalar_one_or_none()
 
+    async def conversation_id_for_message(
+        self, message_id: str, *, user_id: str
+    ) -> str | None:
+        """Resolve the owning ``conversation_id`` for a message, scoped by owner.
+
+        Used by the cost endpoint's live-状态判定: before the first LLM call lands a
+        ``cost_event`` row there is no ledger to read a ``conversation_id`` from, so
+        we go straight to the message→conversation join (owner-scoped) to locate the
+        slot in the in-process ``turn_runs`` registry. Returns ``None`` for an
+        unknown / non-owned message — never leaks existence.
+        """
+        result = await self._session.execute(
+            select(Message.conversation_id)
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .where(Message.id == message_id, Conversation.user_id == user_id)
+        )
+        return result.scalar_one_or_none()
+
     async def update_content(
         self, message_id: str, content: str, *, commit: bool = True
     ) -> None:

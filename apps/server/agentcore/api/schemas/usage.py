@@ -77,6 +77,9 @@ class TurnCost(BaseModel):
     Rebuilt from the ``cost_events`` ledger by message_id, so it replays a past
     turn's payroll on reload. ``agents`` is empty when the turn has no ledger
     rows (e.g. unknown / non-owned message — never leaks existence).
+
+    R-07 实时状态：``live``/``status`` 标记该回合是否仍在执行——进行中查询到的账是
+    **部分账**（多 worker 并行时聚合持续增长），前端据此显示「进行中」而非终态。
     """
 
     message_id: str
@@ -85,6 +88,8 @@ class TurnCost(BaseModel):
     estimated_cost: CostBreakdown | None = None
     rounds: int
     agents: list[AgentCostLine]
+    live: bool = False
+    status: str = "terminal"
 
 
 class ConversationCost(BaseModel):

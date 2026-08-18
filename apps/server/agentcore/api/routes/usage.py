@@ -19,6 +19,7 @@ from agentcore.api.dependencies import (
     AuthUser,
     get_conversation_repo,
     get_cost_event_repo,
+    get_message_repo,
     get_user_repo,
 )
 from agentcore.api.schemas import (
@@ -37,6 +38,7 @@ from agentcore.db.models import CostEvent
 from agentcore.db.repositories import (
     ConversationRepository,
     CostEventRepository,
+    MessageRepository,
     UserRepository,
 )
 from agentcore.llm.pricing import CURRENCY_CNY
@@ -94,6 +96,7 @@ async def get_message_cost(
     message_id: str,
     user: AuthUser,
     repo: CostEventRepository = Depends(get_cost_event_repo),
+    message_repo: MessageRepository = Depends(get_message_repo),
 ) -> TurnCost:
     """The team payroll for one assistant turn (per-Agent cost + the turn total).
 
@@ -137,6 +140,27 @@ async def get_message_cost(
             )
         )
     usage, cost, estimated, rounds = _sum_rows(rows)
+    # R-07 实时状态：回合进行中（进程内 turn_runs 有该会话的活 task 且未 done）→
+    # 账是部分账，标记 live 让前端显示「进行中」。终态/无活回合 → terminal。
+    # conversation_id 优先从消息本身解析（owner-scoped join），这样在回合早期
+    # 尚未落任何 cost_event 行时也能判定 live；成本行可作为兜底（历史消息无消息行
+    # 但账已物化的罕见路径）。无法定位会话归属（如 account-level role=assist）→
+    # 保守回 terminal。
+    live = False
+    conv_id = await message_repo.conversation_id_for_message(
+        message_id, user_id=user.user_id
+    )
+    if not conv_id:
+        for row in rows:
+            conv_id = (getattr(row, "conversation_id", None) or "").strip()
+            if conv_id:
+                break
+    if conv_id:
+        from agentcore.runtime.turn.runs import turn_runs
+
+        current = turn_runs.get(conv_id)
+        if current is not None and not getattr(current.task, "done", lambda: True)():
+            live = True
     return TurnCost(
         message_id=message_id,
         usage=usage_breakdown(usage),
@@ -144,6 +168,8 @@ async def get_message_cost(
         estimated_cost=estimated_cost_breakdown(cost=estimated),
         rounds=rounds,
         agents=agents,
+        live=live,
+        status="running" if live else "terminal",
     )
 
 
