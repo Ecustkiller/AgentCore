@@ -1,19 +1,24 @@
-"""Plan-time retrieval budget (检索与交付约束前置提案 A1).
+"""Plan-time retrieval budget (检索与交付约束前置提案 A1 + R-02 搜/读分池).
 
-Structured defaults on ``RunSpec.retrieval_budget`` + strip search tools when the
-resolved limit is 0. Runtime counter lives on ``ToolContext.retrieval_budget``
-(:class:`~agentcore.tools.protocol.RetrievalBudgetState`); enforce in
-``tool_exec`` (orthogonal to LoopController / team_gate). Cache hits and A3
-query-contract rejects do not consume budget. CEO / delegate schema 不可配置该
-字段；额度只来自统一常量（辩手有约定文档窄例外由辩论内部 writer 补写）。
+Structured defaults on ``RunSpec.retrieval_budget`` (搜索池) + ``RunSpec.retrieval_read_budget``
+(读池) + strip the matching tool when the resolved limit is 0. Runtime counter lives on
+``ToolContext.retrieval_budget`` (:class:`~agentcore.tools.protocol.RetrievalBudgetState`);
+enforce in ``tool_exec`` (orthogonal to LoopController / team_gate). Cache hits and A3
+query-contract rejects do not consume budget. CEO / delegate schema 不可配置该字段；额度只
+来自统一常量（辩手有约定文档窄例外由辩论内部 writer 补写）。
+
+R-02：``web_search`` 与 ``read_url`` 拆两池——搜索按「调用一次」计一 slot，深读按「页」计
+（页 = :data:`READ_PAGE_CHARS` 字符，``read_url`` 按正文量扣页）。读池预留按请求 ``max_chars``
+的上界，执行后回退到实际正文页数。二者相互独立，不再共用一池。
 
 预算感知：花过额度的 worker 每轮由 :func:`sync_retrieval_budget_awareness` 注入一条
-当前余额（含分工具已用），临界告知并进同一条——不改共享池语义，只让模型别盲搜。
+当前余额（搜索+读池分列），临界告知并进同一条——只让模型别盲搜/盲读。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import ceil
 from typing import TYPE_CHECKING, Any
 
 from agentcore.llm.provider.protocol import LLMMessage
@@ -28,6 +33,7 @@ __all__ = [
     "BUDGET_EXHAUSTED_FEEDBACK",
     "DEFAULT_RETRIEVAL_BUDGET",
     "DEFAULT_RETRIEVAL_BUDGET_DEBATER_WITH_DOSSIER",
+    "READ_PAGE_CHARS",
     "RETRIEVAL_BUDGET_AWARENESS_PREFIX",
     "RETRIEVAL_BUDGET_CRITICAL_REMAINING",
     "RETRIEVAL_TOOL_NAMES",
@@ -38,6 +44,7 @@ __all__ = [
     "budget_exhausted_output",
     "charges_retrieval_budget",
     "default_retrieval_budget",
+    "default_retrieval_read_budget",
     "drop_retrieval_budget_awareness",
     "exclude_retrieval_tools",
     "format_retrieval_budget_awareness_prompt",
@@ -45,14 +52,19 @@ __all__ = [
     "format_retrieval_budget_line",
     "is_retrieval_budget_critical",
     "parse_retrieval_budget",
+    "read_pages_for_chars",
+    "retrieval_charge_quantity",
+    "retrieval_reserve_quantity",
     "rework_refill_slots",
     "sync_retrieval_budget_awareness",
 ]
 
-# Tools that share one per-run retrieval budget (web_search + read_url combined).
+# Tools that each own an independent per-run retrieval pool (R-02).
 RETRIEVAL_TOOL_NAMES: frozenset[str] = frozenset({"web_search", "read_url"})
+SEARCH_TOOL_NAME = "web_search"
+READ_TOOL_NAME = "read_url"
 
-# 全员统一默认：普通 worker → 14（含 form=prose）。开发期无真实产线数据，14 为假设
+# 全员统一默认：普通 worker 搜索池 → 14（含 form=prose）。开发期无真实产线数据，14 为假设
 # 统一阀（原 RESEARCH 档复用；已删 prose→0 / ROOT/DOWNSTREAM / 透镜 base/gap /
 # CEO 显式覆盖）。不做批级共享池 / 按 worker 数缩放——接受 N×线性税。
 DEFAULT_RETRIEVAL_BUDGET = 14
@@ -60,6 +72,9 @@ DEFAULT_RETRIEVAL_BUDGET = 14
 # 约定文档充分时残搜 3 次几乎全是噪声域名，正文引用几乎全来自约定文档 → 校准为 2。
 # 窄硬例外（内部 writer 写入 RunSpec，非 CEO 可配置），不是结构猜档。无约定文档路径不动。
 DEFAULT_RETRIEVAL_BUDGET_DEBATER_WITH_DOSSIER = 2
+
+# R-02 读池计量粒度：一「页」= 2000 字符正文。一次默认 8000 字深读 ≈ 4 页。
+READ_PAGE_CHARS = 2000
 
 # 同轮超订缓解：剩余槽位 ≤ 此值时经 reflection 注入提前告知，避免当轮 fan-out 超订被挡回。
 RETRIEVAL_BUDGET_CRITICAL_REMAINING = 2
@@ -90,10 +105,10 @@ def parse_retrieval_budget(raw: Any) -> int | None:
 
 
 def default_retrieval_budget(spec: RunSpec, *, complexity_hint: str = "standard") -> int:
-    """Structured default — unified single value for all ordinary workers.
+    """Structured default — unified single value for all ordinary workers (搜索池).
 
     R-04：优先 settings.engine_retrieval_budget（回落 :data:`DEFAULT_RETRIEVAL_BUDGET`
-    =14）；settings 不可用（unit stubs）或 ≤0 语义由调用方处理（≤0 → 卸检索工具）。
+    =14）；settings 不可用（unit stubs）或 ≤0 语义由调用方处理（≤0 → 卸 web_search）。
     ``form`` / role 不参与分档。辩手有约定文档残搜 2 由辩论内部 writer 在 plan 建成后
     写入，不经本函数。``complexity_hint`` 保留签名兼容，**不再**参与分档。
     """
@@ -108,22 +123,83 @@ def default_retrieval_budget(spec: RunSpec, *, complexity_hint: str = "standard"
         return DEFAULT_RETRIEVAL_BUDGET
 
 
+def default_retrieval_read_budget(spec: RunSpec) -> int:
+    """Structured default for the read pool (read_url 深读页数，R-02).
+
+    优先 settings.engine_retrieval_read_budget；回落与搜索池同值（`default_retrieval_budget`
+    的 int）。settings 不可用（unit stubs）时回落 :data:`DEFAULT_RETRIEVAL_BUDGET`。
+    ≤0 语义由调用方处理（≤0 → 卸 read_url）。
+    """
+    try:
+        from agentcore.config import settings
+
+        return int(settings.engine_retrieval_read_budget)
+    except Exception:  # noqa: BLE001 — settings optional in unit stubs
+        return default_retrieval_budget(spec)
+
+
+def read_pages_for_chars(chars: int) -> int:
+    """How many read pages ``chars`` of body text consume (≥1 per live read)."""
+    if chars <= 0:
+        return 1
+    return max(1, ceil(chars / READ_PAGE_CHARS))
+
+
+def _read_max_chars_from_args(args: dict[str, Any]) -> int:
+    """Requested ``max_chars`` from a ``read_url`` call (clamped to the tool's cap)."""
+    raw = args.get("max_chars", 8000)
+    try:
+        raw = int(raw)
+    except (TypeError, ValueError):
+        raw = 8000
+    return max(1, min(raw, 30000))
+
+
+def retrieval_reserve_quantity(tool: str, args: dict[str, Any]) -> int:
+    """Units to reserve up front for a live ``tool`` call.
+
+    ``web_search`` = 1 slot; ``read_url`` = page-count upper bound from the requested
+    ``max_chars`` (refunded down to the actual page count after execution).
+    """
+    if tool != READ_TOOL_NAME:
+        return 1
+    return read_pages_for_chars(_read_max_chars_from_args(args))
+
+
+def retrieval_charge_quantity(tool: str, result: ToolResult) -> int:
+    """Units a charged ``tool`` result actually consumes (after a live, non-cached call).
+
+    ``web_search`` = 1; ``read_url`` = pages for ``metadata.content_chars`` (≥1).
+    """
+    if tool != READ_TOOL_NAME:
+        return 1
+    meta = result.metadata or {}
+    try:
+        content_chars = int(meta.get("content_chars") or 0)
+    except (TypeError, ValueError):
+        content_chars = 0
+    return read_pages_for_chars(content_chars)
+
+
 def exclude_retrieval_tools(
     tools: list[str] | None,
     valid_tools: set[str] | None,
+    *,
+    only: frozenset[str] = RETRIEVAL_TOOL_NAMES,
 ) -> list[str] | None:
-    """Remove web_search/read_url from an allow-list (预算 0 → 不装配检索工具).
+    """Remove the ``only`` retrieval tools from an allow-list (预算 0 → 不装配).
 
-    Unrestricted (``None``) becomes an explicit list of ``valid_tools`` minus
-    retrieval tools when ``valid_tools`` is known. Returns ``[]`` (not ``None``)
-    when the stripped set is empty — unlike builder._tools, empty here means
+    ``only`` narrows which tools to strip (e.g. just ``read_url`` when the read pool
+    is 0 but search stays open). Unrestricted (``None``) becomes an explicit list of
+    ``valid_tools`` minus ``only`` when ``valid_tools`` is known. Returns ``[]`` (not
+    ``None``) when the stripped set is empty — unlike builder._tools, empty here means
     "no tools from the declared set" so the engine does not re-open all tools;
     escalate / notes are re-granted later by the executor.
     """
     if tools is not None:
-        return [t for t in tools if t not in RETRIEVAL_TOOL_NAMES]
+        return [t for t in tools if t not in only]
     if valid_tools is not None:
-        return sorted(valid_tools - RETRIEVAL_TOOL_NAMES)
+        return sorted(valid_tools - only)
     return None
 
 
@@ -153,27 +229,55 @@ def _apply_one(
     spec: RunSpec, *, valid_tools: set[str] | None, complexity_hint: str = "standard"
 ) -> None:
     # 额度只来自结构化默认；CEO/task 字段不再写入。内部 writer（辩手有约定文档）在
-    # apply 之后补写 RunSpec.retrieval_budget，故此处仅填 None。
+    # apply 之后补写 RunSpec.retrieval_budget / retrieval_read_budget，故此处仅填 None。
     if spec.retrieval_budget is None:
         spec.retrieval_budget = default_retrieval_budget(spec, complexity_hint=complexity_hint)
-    if spec.retrieval_budget == 0:
-        # 复用 tasks[].tools 白名单：预算 0 → 不装配检索工具（引擎/测试手工构造）。
-        stripped = exclude_retrieval_tools(spec.tools, valid_tools)
+    if spec.retrieval_read_budget is None:
+        spec.retrieval_read_budget = default_retrieval_read_budget(spec)
+    # R-02 分池剥工具：搜索 0 卸 web_search，读 0 卸 read_url，二者独立。
+    strip_only = _strip_target_tools(spec)
+    if strip_only:
+        stripped = exclude_retrieval_tools(spec.tools, valid_tools, only=strip_only)
         if stripped is not None:
             spec.tools = stripped
 
 
-def format_retrieval_budget_line(budget: int | None) -> str:
-    """Worker-facing one-liner for the deliverable / context block."""
-    if budget is None:
+def _strip_target_tools(spec: RunSpec) -> frozenset[str]:
+    """Retrieval tools to drop from the allow-list when their pool resolves to 0."""
+    targets: set[str] = set()
+    if spec.retrieval_budget == 0:
+        targets.add(SEARCH_TOOL_NAME)
+    if spec.retrieval_read_budget == 0:
+        targets.add(READ_TOOL_NAME)
+    return frozenset(targets)
+
+
+def format_retrieval_budget_line(
+    budget: int | None, read_budget: int | None = None
+) -> str:
+    """Worker-facing one-liner for the deliverable / context block (R-02 分池)."""
+    if budget is None and read_budget is None:
         return ""
-    if budget <= 0:
+    search_off = budget is not None and budget <= 0
+    read_off = read_budget is not None and read_budget <= 0
+    if search_off and read_off:
         return (
             "- 检索预算：0（本任务不装配 web_search / read_url；"
             "基于上游与台账现有证据交付，缺口在交接中标注）"
         )
+    parts: list[str] = []
+    if budget is not None:
+        if budget <= 0:
+            parts.append("web_search 0 次（不装配）")
+        else:
+            parts.append(f"web_search 最多 {budget} 次")
+    if read_budget is not None:
+        if read_budget <= 0:
+            parts.append("read_url 0 页（不装配）")
+        else:
+            parts.append(f"read_url 最多 {read_budget} 页")
     return (
-        f"- 检索预算：本 run 合计最多 {budget} 次 web_search/read_url"
+        f"- 检索预算：{'；'.join(parts)}"
         "（缓存命中不计）；用尽后基于台账现有证据交付并在交接中标注检索缺口。"
     )
 
@@ -190,40 +294,30 @@ def is_retrieval_budget_critical(remaining: int, *, limit: int) -> bool:
     return 0 < remaining <= RETRIEVAL_BUDGET_CRITICAL_REMAINING
 
 
-def _spend_clause(searches: int | None, reads: int | None) -> str:
-    """``；已用 N 次：web_search a · read_url b`` — empty when no split is known."""
-    if searches is None or reads is None:
-        return ""
-    return f"；已用 {searches + reads} 次：web_search {searches} · read_url {reads}"
-
-
-def format_retrieval_budget_critical_prompt(
-    *, remaining: int, limit: int, searches: int | None = None, reads: int | None = None
-) -> str:
+def format_retrieval_budget_critical_prompt(state: RetrievalBudgetState) -> str:
     """``[系统提示]`` steer when retrieval slots are critically low (同轮超订缓解).
 
-    Also the 临界轮的余额播报：分项用量并进同一条，不另发一段预算文字。
+    Also the 临界轮的余额播报：搜索+读池余额并进同一条，不另发一段预算文字。
     """
     return (
-        f"{RETRIEVAL_BUDGET_AWARENESS_PREFIX}：仅剩 {remaining} 次"
-        f"（本 run 上限 {limit} 次 web_search/read_url，共用一池、缓存命中不计"
-        f"{_spend_clause(searches, reads)}）。"
-        "下一轮请只发起不超过剩余次数的检索调用，"
+        f"{RETRIEVAL_BUDGET_AWARENESS_PREFIX}：检索余额告急——"
+        f"web_search 剩余 {state.remaining}/{state.limit} 次，"
+        f"read_url 剩余 {state.read_remaining}/{state.read_limit} 页"
+        "（缓存命中不计）。下一轮请只发起不超过剩余额度的检索调用，"
         "优先深读最关键来源；勿并行扇出超过剩余槽位的查询——超订会被挡回并浪费本轮。"
         "若现有证据已够，请直接基于台账交付并在交接中标注检索缺口。"
     )
 
 
-def format_retrieval_budget_awareness_prompt(
-    *, remaining: int, limit: int, searches: int, reads: int
-) -> str:
-    """Per-round balance readout for a worker that already spent slots."""
+def format_retrieval_budget_awareness_prompt(state: RetrievalBudgetState) -> str:
+    """Per-round balance readout for a worker that already spent slots (R-02 分池)."""
     return (
-        f"{RETRIEVAL_BUDGET_AWARENESS_PREFIX}：已用 {searches + reads} 次"
-        f"（web_search {searches} · read_url {reads}），剩余 {remaining} 次"
-        f"（本 run 上限 {limit} 次 web_search/read_url，共用一池、缓存命中不计）。"
-        "请按剩余额度规划：先明确这一轮要验证什么再检索，避免重复查询与低价值扇出；"
-        "额度用尽后只能基于台账现有证据交付，并在交接中标注检索缺口。"
+        f"{RETRIEVAL_BUDGET_AWARENESS_PREFIX}："
+        f"web_search 已用 {state.searches_used}/{state.limit} 次 · 剩余 {state.remaining} 次；"
+        f"read_url 已读 {state.reads_used}/{state.read_limit} 页 · 剩余 {state.read_remaining} 页"
+        "（缓存命中不计）。请按剩余额度规划：先明确这一轮要验证什么再检索，"
+        "避免重复查询与低价值扇出；额度用尽后只能基于台账现有证据交付，"
+        "并在交接中标注检索缺口。"
     )
 
 
@@ -234,10 +328,21 @@ class RetrievalBudgetAwareness:
     text: str
     critical: bool
     limit: int
+    read_limit: int
     used: int
+    read_used: int
     remaining: int
+    read_remaining: int
     searches: int
     reads: int
+
+
+def _budget_critical(state: RetrievalBudgetState) -> bool:
+    """Critical when any still-open pool is critically low (search or read)."""
+    return (
+        is_retrieval_budget_critical(state.remaining, limit=state.limit)
+        or is_retrieval_budget_critical(state.read_remaining, limit=state.read_limit)
+    )
 
 
 def _is_awareness_message(msg: LLMMessage) -> bool:
@@ -267,40 +372,37 @@ def sync_retrieval_budget_awareness(
 
     预算感知（BATS）：花过额度的 worker 每轮都要看到「已用多少 / 还剩多少」，否则只能盲搜。
     Skipped for a worker that never spent a slot（生产上多数 worker 一次都不检索，注入是纯
-    噪音）、关闭额度（``limit <= 0``）、以及已耗尽（收尾话术归 wind_down，行为不变）。
-    临界（剩余 ≤ :data:`RETRIEVAL_BUDGET_CRITICAL_REMAINING`）与提前告知合并成同一条。
+    噪音）、两池全关（``limit <= 0`` 且 ``read_limit <= 0``）、以及两池全耗尽（收尾话术归
+    wind_down，行为不变）。临界（任一开放池剩余 ≤ :data:`RETRIEVAL_BUDGET_CRITICAL_REMAINING`）
+    与提前告知合并成同一条。
     Refreshing = drop the stale copy then append, so the transcript never carries two
     contradicting balances and the current one stays adjacent to the next think round.
     """
     drop_retrieval_budget_awareness(messages)
-    limit = state.limit
-    used = state.used
-    if limit <= 0 or used <= 0:
+    if state.limit <= 0 and state.read_limit <= 0:
         return None
-    remaining = state.remaining
-    if remaining <= 0:
+    if state.used <= 0 and state.read_used <= 0:
         return None
-    searches = state.searches_used
-    reads = state.reads_used
-    critical = is_retrieval_budget_critical(remaining, limit=limit)
+    if state.any_exhausted:
+        return None
+    critical = _budget_critical(state)
     text = (
-        format_retrieval_budget_critical_prompt(
-            remaining=remaining, limit=limit, searches=searches, reads=reads
-        )
+        format_retrieval_budget_critical_prompt(state)
         if critical
-        else format_retrieval_budget_awareness_prompt(
-            remaining=remaining, limit=limit, searches=searches, reads=reads
-        )
+        else format_retrieval_budget_awareness_prompt(state)
     )
     messages.append(LLMMessage(role="user", content=text))
     return RetrievalBudgetAwareness(
         text=text,
         critical=critical,
-        limit=limit,
-        used=used,
-        remaining=remaining,
-        searches=searches,
-        reads=reads,
+        limit=state.limit,
+        read_limit=state.read_limit,
+        used=state.used,
+        read_used=state.read_used,
+        remaining=state.remaining,
+        read_remaining=state.read_remaining,
+        searches=state.searches_used,
+        reads=state.reads_used,
     )
 
 

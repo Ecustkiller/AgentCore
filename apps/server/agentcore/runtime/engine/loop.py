@@ -1384,8 +1384,8 @@ async def react_loop(
                 role == "worker"
                 and not wind_down_active
                 and rb is not None
-                and rb.limit > 0
-                and rb.remaining <= 0
+                and (rb.limit > 0 or rb.read_limit > 0)
+                and rb.any_exhausted
             ):
                 _enter_wind_down("retrieval_budget")
                 logger.info(
@@ -1393,6 +1393,8 @@ async def react_loop(
                     run_id=run_id,
                     limit=rb.limit,
                     used=rb.used,
+                    read_limit=rb.read_limit,
+                    read_used=rb.read_used,
                 )
             if role == "worker" and rb is not None and wind_down_active:
                 # 收尾窗口已禁检索：上一轮那条余额播报会跟「禁止再检索」自相矛盾。
@@ -1420,6 +1422,9 @@ async def react_loop(
                             remaining=awareness.remaining,
                             limit=awareness.limit,
                             used=awareness.used,
+                            read_remaining=awareness.read_remaining,
+                            read_limit=awareness.read_limit,
+                            read_used=awareness.read_used,
                         )
                     spend = (awareness.searches, awareness.reads)
                     # Trajectory rows only when the split moved (a row per round would
@@ -1436,6 +1441,9 @@ async def react_loop(
                             searches=awareness.searches,
                             reads=awareness.reads,
                             remaining=awareness.remaining,
+                            read_limit=awareness.read_limit,
+                            read_used=awareness.read_used,
+                            read_remaining=awareness.read_remaining,
                             critical=awareness.critical,
                             final=False,
                         )
@@ -1481,7 +1489,11 @@ async def react_loop(
         # 分工具用量分布的落账行：轮尾埋点跑不到末轮（末轮搜完就交卷 / 被取消 / 撞硬顶），
         # 每个花过额度的 worker 在这里留一行最终分项，一行一 run 直接聚合。
         rb_exit = getattr(tool_context, "retrieval_budget", None)
-        if role == "worker" and rb_exit is not None and rb_exit.used > 0:
+        if (
+            role == "worker"
+            and rb_exit is not None
+            and (rb_exit.used > 0 or rb_exit.read_used > 0)
+        ):
             from agentcore.runtime.runs.retrieval_budget import (
                 is_retrieval_budget_critical,
             )
@@ -1495,8 +1507,16 @@ async def react_loop(
                 searches=rb_exit.searches_used,
                 reads=rb_exit.reads_used,
                 remaining=rb_exit.remaining,
-                critical=is_retrieval_budget_critical(
-                    rb_exit.remaining, limit=rb_exit.limit
+                read_limit=rb_exit.read_limit,
+                read_used=rb_exit.read_used,
+                read_remaining=rb_exit.read_remaining,
+                critical=(
+                    is_retrieval_budget_critical(
+                        rb_exit.remaining, limit=rb_exit.limit
+                    )
+                    or is_retrieval_budget_critical(
+                        rb_exit.read_remaining, limit=rb_exit.read_limit
+                    )
                 ),
                 final=True,
             )

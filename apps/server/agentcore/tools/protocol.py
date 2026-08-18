@@ -222,16 +222,18 @@ class TurnProjectShell:
 
 @dataclass
 class RetrievalBudgetState:
-    """Per-run ``web_search`` / ``read_url`` counter (提案 A1).
+    """Per-run ``web_search`` / ``read_url`` counter (提案 A1 + R-02 搜/读分池).
 
-    Wired onto :class:`ToolContext` by the worker executor. ``used`` is reserved
-    before a live call and refunded on cache hits / uncharged results so parallel
-    tool_exec calls cannot overshoot ``limit``.
+    Wired onto :class:`ToolContext` by the worker executor. ``used`` (search) and
+    ``read_used`` (read pages) are reserved before a live call and refunded on cache
+    hits / uncharged results so parallel tool_exec calls cannot overshoot their pool.
 
-    ``used_by_tool`` splits the same shared pool by tool name — bookkeeping only,
-    reserve / refund semantics are unchanged. Feeds the per-round budget-awareness
-    injection and the 分工具用量分布 telemetry (下一阶段据此决定是否拆池). Mutated
-    under the same lock as ``used`` so parallel calls keep ``∑ used_by_tool == used``.
+    R-02: ``web_search`` and ``read_url`` no longer share one pool. Search is metered
+    per call (``limit``/``used``); read is metered per page (``read_limit``/``read_used``,
+    page = ``READ_PAGE_CHARS`` chars, defined in runtime.runs.retrieval_budget to avoid a
+    protocol→runtime import cycle). ``read_url`` reserves a page-count upper bound (from
+    ``max_chars``) up front and refunds the excess down to the actual page count after
+    execution. Both pools mutate under the same lock so parallel calls stay consistent.
 
     ``consecutive_empty_searches`` tracks live empty SERPs in this run so the
     search tool can require a strategy change after a streak (成篇质量定案).
@@ -242,26 +244,39 @@ class RetrievalBudgetState:
     """
 
     limit: int
+    read_limit: int = 0
     used: int = 0
-    used_by_tool: dict[str, int] = field(default_factory=dict)
+    read_used: int = 0
     consecutive_empty_searches: int = 0
     evidence_gap: bool = False
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
     @property
     def remaining(self) -> int:
+        """Search slots still open."""
         return max(0, self.limit - self.used)
 
     @property
+    def read_remaining(self) -> int:
+        """Read pages still open."""
+        return max(0, self.read_limit - self.read_used)
+
+    @property
     def searches_used(self) -> int:
-        """Charged ``web_search`` calls (names mirror ``RETRIEVAL_TOOL_NAMES``,
-        which lives in runtime.runs.retrieval_budget and imports this module)."""
-        return self.used_by_tool.get("web_search", 0)
+        """Charged ``web_search`` calls."""
+        return self.used
 
     @property
     def reads_used(self) -> int:
-        """Charged ``read_url`` calls."""
-        return self.used_by_tool.get("read_url", 0)
+        """Charged ``read_url`` pages (not calls)."""
+        return self.read_used
+
+    @property
+    def any_exhausted(self) -> bool:
+        """True when BOTH pools are closed for new charges (检索整体不可用)."""
+        search_closed = self.limit <= 0 or self.used >= self.limit
+        read_closed = self.read_limit <= 0 or self.read_used >= self.read_limit
+        return search_closed and read_closed
 
     def note_search_empty(self) -> int:
         """Record an empty SERP; return the new consecutive-empty streak."""
@@ -276,34 +291,39 @@ class RetrievalBudgetState:
         """Sticky-set academic literature evidence-gap (never clears mid-run)."""
         self.evidence_gap = True
 
-    async def try_reserve(self, tool: str) -> bool:
-        """Reserve one slot for ``tool``. False ⇒ exhausted (caller must not run it).
+    async def try_reserve(self, tool: str, quantity: int = 1) -> bool:
+        """Reserve ``quantity`` units for ``tool``. False ⇒ that pool is exhausted.
 
-        ``tool`` only splits the ledger; the pool stays shared across retrieval tools.
+        ``web_search`` charges the search pool (1 slot per live call); ``read_url``
+        charges the read pool (``quantity`` pages). ``quantity`` is clamped to ≥1 —
+        a real live call always consumes at least one unit.
         """
+        q = max(1, int(quantity))
         async with self._lock:
-            if self.used >= self.limit:
-                return False
-            self.used += 1
-            self.used_by_tool[tool] = self.used_by_tool.get(tool, 0) + 1
+            if tool == "read_url":
+                if self.read_limit <= 0 or self.read_used + q > self.read_limit:
+                    return False
+                self.read_used += q
+            else:
+                if self.limit <= 0 or self.used + q > self.limit:
+                    return False
+                self.used += q
             return True
 
-    async def refund(self, tool: str) -> None:
-        """Return a reserved slot (cache hit / uncharged call), split ledger included."""
+    async def refund(self, tool: str, quantity: int = 1) -> None:
+        """Return ``quantity`` reserved units (cache hit / uncharged / excess reserve)."""
+        q = max(1, int(quantity))
         async with self._lock:
-            if self.used > 0:
-                self.used -= 1
-            spent = self.used_by_tool.get(tool, 0)
-            if spent > 1:
-                self.used_by_tool[tool] = spent - 1
-            elif spent == 1:
-                del self.used_by_tool[tool]
+            if tool == "read_url":
+                self.read_used = max(0, self.read_used - q)
+            else:
+                self.used = max(0, self.used - q)
 
     async def refill(self, extra: int) -> int:
-        """Grant ``extra`` additional retrieval slots (contract rework slice).
+        """Grant ``extra`` additional SEARCH slots (contract rework slice).
 
         Raises the ``limit`` (not a used-reset) so prior charges stay honest while
-        the rework pass gets a fresh slice. Returns the new remaining count.
+        the rework pass gets a fresh slice. Returns the new search remaining count.
         Prefer :meth:`refill_within_cap` for budget-bounded rework.
         """
         async with self._lock:
@@ -312,17 +332,30 @@ class RetrievalBudgetState:
             return max(0, self.limit - self.used)
 
     async def refill_within_cap(self, extra: int, *, cap: int) -> int:
-        """Grant up to ``extra`` slots without raising ``limit`` above ``cap``.
+        """Grant up to ``extra`` SEARCH slots without raising ``limit`` above ``cap``.
 
         Contract rework must not bypass the original retrieval budget ceiling.
         When ``cap <= 0`` or there is no headroom, this is a no-op (returns current
-        remaining). Returns the new remaining count.
+        remaining). Returns the new search remaining count.
         """
         async with self._lock:
             add = max(0, int(extra))
             add = min(add, max(0, int(cap) - self.limit)) if cap > 0 else 0
             self.limit += add
             return max(0, self.limit - self.used)
+
+    async def refill_read_within_cap(self, extra: int, *, cap: int) -> int:
+        """Grant up to ``extra`` READ pages without raising ``read_limit`` above ``cap``.
+
+        Read-pool twin of :meth:`refill_within_cap` (R-02 分池): contract rework must
+        also be able to re-read sources, bounded by the original read budget. Returns
+        the new read remaining count.
+        """
+        async with self._lock:
+            add = max(0, int(extra))
+            add = min(add, max(0, int(cap) - self.read_limit)) if cap > 0 else 0
+            self.read_limit += add
+            return max(0, self.read_limit - self.read_used)
 
 
 @dataclass

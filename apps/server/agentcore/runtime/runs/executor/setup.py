@@ -52,7 +52,6 @@ from agentcore.runtime.runs.executor.shared import (
     _registry_without,
 )
 from agentcore.runtime.runs.notewall import NOTE_NUDGE_TEXT, format_notes_for_injection
-from agentcore.runtime.runs.retrieval_budget import RETRIEVAL_TOOL_NAMES
 from agentcore.runtime.runs.types import ContextBlock, RunPhase, RunSpec, RunState
 from agentcore.runtime.runs.website_visual_critic import MAX_VISUAL_REWORK
 from agentcore.tools.protocol import (
@@ -250,9 +249,12 @@ async def _prepare_agent_node(
                 supersede_mode=note.supersede_mode,
             )
         ),
-        # 检索预算 (提案 A1): per-run counter for tool_exec; None = no enforce.
+        # 检索预算 (提案 A1 + R-02 分池): per-run counter for tool_exec; None = no enforce.
         retrieval_budget=(
-            RetrievalBudgetState(limit=spec.retrieval_budget)
+            RetrievalBudgetState(
+                limit=spec.retrieval_budget,
+                read_limit=spec.retrieval_read_budget or 0,
+            )
             if spec.retrieval_budget is not None
             else None
         ),
@@ -345,12 +347,17 @@ async def _prepare_agent_node(
         files_expected=files_expected,
         has_execution_tools=node_holds_execution_tools(spec),
     )
-    # 检索预算 0 (提案 A1): strip web_search/read_url even for unrestricted workers
-    # (builder already tightens tasks[].tools when valid_tools is known).
+    # 检索预算 0 (提案 A1 + R-02 分池): strip the matching tool when its pool is 0 —
+    # 搜索 0 卸 web_search，读 0 卸 read_url，二者独立（builder already tightens
+    # tasks[].tools when valid_tools is known).
     if spec.retrieval_budget == 0:
-        worker_tools = _registry_without(worker_tools, *RETRIEVAL_TOOL_NAMES)
+        worker_tools = _registry_without(worker_tools, "web_search")
         if allowed_tools is not None:
-            allowed_tools = [t for t in allowed_tools if t not in RETRIEVAL_TOOL_NAMES]
+            allowed_tools = [t for t in allowed_tools if t != "web_search"]
+    if spec.retrieval_read_budget == 0:
+        worker_tools = _registry_without(worker_tools, "read_url")
+        if allowed_tools is not None:
+            allowed_tools = [t for t in allowed_tools if t != "read_url"]
     # 非协作批次 (env.collaboration=False, e.g. debate): strip the 团队便签 tools from the
     # offered registry so even an UNRESTRICTED worker (allowed_tools=None → "offer all
     # team tools") is never handed post/read/amend — "no env.collaboration" means no channel

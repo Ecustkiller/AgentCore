@@ -1,4 +1,4 @@
-"""检索预算 A1: structured defaults (CEO 不可配置), tool_exec charge / exhaust."""
+"""检索预算 A1 + R-02 搜/读分池: structured defaults, tool_exec charge / exhaust, awareness."""
 
 from __future__ import annotations
 
@@ -97,10 +97,11 @@ def test_retrieval_budget_critical_helpers():
     assert is_retrieval_budget_critical(3, limit=14) is False
     assert is_retrieval_budget_critical(0, limit=14) is False
     assert is_retrieval_budget_critical(1, limit=0) is False
-    prompt = format_retrieval_budget_critical_prompt(remaining=2, limit=14)
+    state = RetrievalBudgetState(limit=14, read_limit=14)
+    state.used = 12  # 搜索剩余 2 → 临界
+    prompt = format_retrieval_budget_critical_prompt(state)
     assert prompt.startswith("[系统提示]")
-    assert "仅剩 2" in prompt
-    assert "14" in prompt
+    assert "剩余 2/14 次" in prompt
     assert "扇出" in prompt
 
 
@@ -163,11 +164,12 @@ def test_charges_skips_cache_and_failures():
 
 
 def test_budget_line_describes_limit_without_ceo_override_hint():
-    line = format_retrieval_budget_line(5)
+    line = format_retrieval_budget_line(5, 6)
     assert "5" in line
+    assert "6" in line
     assert "retrieval_budget" not in line
     assert "continue_from_run_id" not in line
-    zero = format_retrieval_budget_line(0)
+    zero = format_retrieval_budget_line(0, 0)
     assert "0" in zero
     assert "不装配" in zero
 
@@ -198,12 +200,14 @@ class _SearchStub:
         cached: bool = False,
         fail: bool = False,
         crash: bool = False,
+        content_chars: int = 0,
     ) -> None:
         self.calls = 0
         self._name = name
         self._cached = cached
         self._fail = fail
         self._crash = crash
+        self._content_chars = content_chars
 
     @property
     def schema(self) -> ToolSchema:
@@ -220,7 +224,9 @@ class _SearchStub:
             raise RuntimeError("stub blew up")
         if self._fail:
             return ToolResult(tool_call_id="", success=False, error="bad query")
-        meta = {"cached": True} if self._cached else {}
+        meta: dict[str, Any] = {"cached": True} if self._cached else {}
+        if self._content_chars:
+            meta["content_chars"] = self._content_chars
         return ToolResult(tool_call_id="", success=True, output="hits", metadata=meta)
 
 
@@ -310,93 +316,113 @@ def test_rework_refill_slots_zero_for_write_disk_form():
     ) == 4
 
 
-# ── 分工具记账 + 预算感知注入 ──────────────────────────────────
+# ── R-02 搜/读分池 + 预算感知注入 ─────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_split_ledger_counts_and_refunds_by_tool():
-    """共享池语义不变，只是分项记账；退款按工具回退，∑分项 == used。"""
-    rb = RetrievalBudgetState(limit=14)
+async def test_split_pools_reserve_independently():
+    """搜索池（按次）与读池（按页）彻底独立，不再共用一池。"""
+    rb = RetrievalBudgetState(limit=14, read_limit=14)
     assert await rb.try_reserve("web_search")
     assert await rb.try_reserve("web_search")
-    assert await rb.try_reserve("read_url")
-    assert rb.used == 3
-    assert rb.searches_used == 2
-    assert rb.reads_used == 1
-    assert rb.remaining == 11
-
-    await rb.refund("read_url")
+    assert await rb.try_reserve("read_url", 4)  # 一次 8000 字深读 ≈ 4 页
     assert rb.used == 2
+    assert rb.read_used == 4
     assert rb.searches_used == 2
-    assert rb.reads_used == 0
-    assert "read_url" not in rb.used_by_tool
-    assert rb.searches_used + rb.reads_used == rb.used
+    assert rb.reads_used == 4
+    assert rb.remaining == 12
+    assert rb.read_remaining == 10
+    assert not rb.any_exhausted
 
-    # 未记账过的工具退款不把分项压成负数（也不动共享池以外的语义）。
-    await rb.refund("read_url")
-    assert rb.used == 1
-    assert rb.reads_used == 0
-    assert rb.used_by_tool == {"web_search": 2}
-
-
-@pytest.mark.asyncio
-async def test_tool_exec_splits_usage_and_refunds_cache_hit_per_tool():
-    """read_url 走同一池；缓存命中退款只回退 read_url 分项。"""
-    state = RetrievalBudgetState(limit=4)
-    sink = EventSink()
-
-    live = ToolRegistry()
-    live.register(_SearchStub(name="read_url"))
-    await execute_tools(
-        [_call("c1", "read_url")], live, _ctx(budget=state), sink, approval_gate=None, run_id="r1"
-    )
-    assert (state.used, state.searches_used, state.reads_used) == (1, 0, 1)
-
-    search = ToolRegistry()
-    search.register(_SearchStub())
-    await execute_tools(
-        [_call("c2")], search, _ctx(budget=state), sink, approval_gate=None, run_id="r1"
-    )
-    assert (state.used, state.searches_used, state.reads_used) == (2, 1, 1)
-
-    cached = ToolRegistry()
-    cached.register(_SearchStub(name="read_url", cached=True))
-    await execute_tools(
-        [_call("c3", "read_url")],
-        cached,
-        _ctx(budget=state),
-        sink,
-        approval_gate=None,
-        run_id="r1",
-    )
-    assert (state.used, state.searches_used, state.reads_used) == (2, 1, 1)
+    await rb.refund("read_url", 4)
+    assert rb.read_used == 0
+    assert rb.used == 2  # 搜索池不受读池退款影响
 
 
 @pytest.mark.asyncio
-async def test_tool_exec_crash_and_reject_refund_split_ledger():
-    """崩溃 / 契约拒绝都不计费，分项计数同步回退到零。"""
-    state = RetrievalBudgetState(limit=4)
+async def test_search_exhausted_read_still_open():
+    """搜索池耗尽 ≠ 读池耗尽：另一池仍可用（any_exhausted 两池全关才翻转）。"""
+    rb = RetrievalBudgetState(limit=1, read_limit=14)
+    assert await rb.try_reserve("web_search")
+    assert not await rb.try_reserve("web_search")  # 搜索池已满
+    assert await rb.try_reserve("read_url", 4)  # 读池仍开放
+    assert rb.used == 1 and rb.read_used == 4
+    assert not rb.any_exhausted
+
+
+@pytest.mark.asyncio
+async def test_both_pools_exhausted_flips_any_exhausted():
+    rb = RetrievalBudgetState(limit=1, read_limit=4)
+    assert await rb.try_reserve("web_search")
+    assert await rb.try_reserve("read_url", 4)
+    assert rb.any_exhausted
+
+
+@pytest.mark.asyncio
+async def test_tool_exec_read_url_page_metering():
+    """read_url 按页计量：预留上界 4 页，执行后按实际正文量回退到 3 页。"""
+    stub = _SearchStub(name="read_url", content_chars=4500)  # 4500 字 → 3 页
+    reg = ToolRegistry()
+    reg.register(stub)
+    state = RetrievalBudgetState(limit=14, read_limit=14)
+    await execute_tools(
+        [_call("c1", "read_url")], reg, _ctx(budget=state), EventSink(),
+        approval_gate=None, run_id="r1",
+    )
+    assert stub.calls == 1
+    assert state.read_used == 3
+    assert state.used == 0
+
+
+@pytest.mark.asyncio
+async def test_tool_exec_read_cache_hit_no_charge():
+    """read_url 缓存命中：预留的页数全额退款，读池不扣。"""
+    stub = _SearchStub(name="read_url", cached=True)
+    reg = ToolRegistry()
+    reg.register(stub)
+    state = RetrievalBudgetState(limit=14, read_limit=14)
+    await execute_tools(
+        [_call("c1", "read_url")], reg, _ctx(budget=state), EventSink(),
+        approval_gate=None, run_id="r1",
+    )
+    assert stub.calls == 1
+    assert state.read_used == 0
+
+
+@pytest.mark.asyncio
+async def test_tool_exec_read_crash_refunds_reserve():
+    """read_url 崩溃：预留页数全额退款。"""
+    stub = _SearchStub(name="read_url", crash=True)
+    reg = ToolRegistry()
+    reg.register(stub)
+    state = RetrievalBudgetState(limit=14, read_limit=14)
+    await execute_tools(
+        [_call("c1", "read_url")], reg, _ctx(budget=state), EventSink(),
+        approval_gate=None, run_id="r1",
+    )
+    assert state.read_used == 0
+
+
+@pytest.mark.asyncio
+async def test_search_exhausted_retires_only_search_but_read_still_works():
+    """搜索池 0：web_search 挡回，read_url 照常执行（分池退休，不连坐）。"""
+    reg = ToolRegistry()
+    reg.register(_SearchStub())  # web_search
+    reg.register(_SearchStub(name="read_url", content_chars=2000))
+    state = RetrievalBudgetState(limit=0, read_limit=14)
     sink = EventSink()
 
-    crashed = ToolRegistry()
-    crashed.register(_SearchStub(name="read_url", crash=True))
-    await execute_tools(
-        [_call("c1", "read_url")],
-        crashed,
-        _ctx(budget=state),
-        sink,
-        approval_gate=None,
-        run_id="r1",
+    msgs, _, _ = await execute_tools(
+        [_call("c1", "web_search")], reg, _ctx(budget=state), sink,
+        approval_gate=None, run_id="r1",
     )
-    assert (state.used, state.reads_used) == (0, 0)
+    assert BUDGET_EXHAUSTED_FEEDBACK in (msgs[0].content or "")
 
-    rejected = ToolRegistry()
-    rejected.register(_SearchStub(fail=True))
     await execute_tools(
-        [_call("c2")], rejected, _ctx(budget=state), sink, approval_gate=None, run_id="r1"
+        [_call("c2", "read_url")], reg, _ctx(budget=state), sink,
+        approval_gate=None, run_id="r1",
     )
-    assert (state.used, state.searches_used) == (0, 0)
-    assert state.used_by_tool == {}
+    assert state.read_used == 1  # 2000 字 → 1 页
 
 
 def _awareness_lines(messages: list[LLMMessage]) -> list[str]:
@@ -412,7 +438,7 @@ def _awareness_lines(messages: list[LLMMessage]) -> list[str]:
 async def test_awareness_not_injected_without_charged_retrieval():
     """一次都没扣费的 worker（生产上占多数）不注入——纯噪音。"""
     messages = [LLMMessage(role="system", content="sys")]
-    rb = RetrievalBudgetState(limit=DEFAULT_RETRIEVAL_BUDGET)
+    rb = RetrievalBudgetState(limit=DEFAULT_RETRIEVAL_BUDGET, read_limit=DEFAULT_RETRIEVAL_BUDGET)
     assert sync_retrieval_budget_awareness(messages, rb) is None
     assert _awareness_lines(messages) == []
 
@@ -426,18 +452,19 @@ async def test_awareness_not_injected_without_charged_retrieval():
 
 @pytest.mark.asyncio
 async def test_awareness_injected_every_round_with_current_numbers():
-    """发生检索后每轮注入，数字跟着走，且始终只有一条、贴在队尾。"""
+    """发生检索后每轮注入，搜索/读池分列余额，且始终只有一条、贴在队尾。"""
     messages = [LLMMessage(role="system", content="sys")]
-    rb = RetrievalBudgetState(limit=DEFAULT_RETRIEVAL_BUDGET)
+    rb = RetrievalBudgetState(limit=DEFAULT_RETRIEVAL_BUDGET, read_limit=DEFAULT_RETRIEVAL_BUDGET)
     assert await rb.try_reserve("web_search")
-    assert await rb.try_reserve("read_url")
+    assert await rb.try_reserve("read_url", 4)
 
     first = sync_retrieval_budget_awareness(messages, rb)
     assert first is not None
-    assert (first.searches, first.reads, first.remaining) == (1, 1, 12)
-    assert "已用 2 次（web_search 1 · read_url 1）" in first.text
-    assert "剩余 12 次" in first.text
-    assert str(DEFAULT_RETRIEVAL_BUDGET) in first.text
+    assert (first.searches, first.reads, first.remaining) == (1, 4, 13)
+    assert first.read_remaining == 10
+    assert "web_search 已用 1/14 次" in first.text
+    assert "read_url 已读 4/14 页" in first.text
+    assert "剩余 13 次" in first.text
     assert not first.critical
     assert _awareness_lines(messages) == [first.text]
 
@@ -454,51 +481,47 @@ async def test_awareness_injected_every_round_with_current_numbers():
         assert await rb.try_reserve("web_search")
     third = sync_retrieval_budget_awareness(messages, rb)
     assert third is not None
-    assert (third.searches, third.reads, third.used, third.remaining) == (4, 1, 5, 9)
-    assert "已用 5 次（web_search 4 · read_url 1）" in third.text
+    assert (third.searches, third.reads, third.used, third.remaining) == (4, 4, 4, 10)
+    assert "web_search 已用 4/14 次" in third.text
     assert _awareness_lines(messages) == [third.text]
     assert messages[0].role == "system"
 
 
 @pytest.mark.asyncio
 async def test_awareness_merges_critical_into_one_message():
-    """剩余 ≤2：临界劝阻与余额播报合成一条，不出现两段预算文字。"""
+    """任一开放池剩余 ≤2：临界劝阻与余额播报合成一条，不出现两段预算文字。"""
     messages = [LLMMessage(role="system", content="sys")]
-    rb = RetrievalBudgetState(limit=DEFAULT_RETRIEVAL_BUDGET)
-    for _ in range(9):
+    rb = RetrievalBudgetState(limit=DEFAULT_RETRIEVAL_BUDGET, read_limit=DEFAULT_RETRIEVAL_BUDGET)
+    for _ in range(12):
         assert await rb.try_reserve("web_search")
-    for _ in range(3):
-        assert await rb.try_reserve("read_url")
     assert rb.remaining == RETRIEVAL_BUDGET_CRITICAL_REMAINING
 
     merged = sync_retrieval_budget_awareness(messages, rb)
     assert merged is not None
     assert merged.critical
     assert _awareness_lines(messages) == [merged.text]
-    # 一条里既有临界劝阻，也有分项余额。
+    # 一条里既有临界劝阻，也有分池余额。
     assert "扇出" in merged.text
-    assert "仅剩 2 次" in merged.text
-    assert "已用 12 次：web_search 9 · read_url 3" in merged.text
-    # 不重复：只有一个余额段头、一处剩余次数、没有非临界那句规划话术。
+    assert "剩余 2/14 次" in merged.text
+    assert "read_url 剩余 14/14 页" in merged.text
+    # 不重复：只有一个余额段头、一处临界前缀。
     assert merged.text.count(RETRIEVAL_BUDGET_AWARENESS_PREFIX) == 1
-    assert merged.text.count("仅剩") == 1
     assert "请按剩余额度规划" not in merged.text
-    assert merged.text == format_retrieval_budget_critical_prompt(
-        remaining=2, limit=DEFAULT_RETRIEVAL_BUDGET, searches=9, reads=3
-    )
+    assert merged.text == format_retrieval_budget_critical_prompt(rb)
 
 
 @pytest.mark.asyncio
 async def test_awareness_silent_when_exhausted_and_leaves_wind_down_intact():
-    """耗尽后不再播报余额（收尾归 wind_down），且撤掉上一轮那条。"""
+    """两池全耗尽后不再播报余额（收尾归 wind_down），且撤掉上一轮那条。"""
     messages = [LLMMessage(role="system", content="sys")]
-    rb = RetrievalBudgetState(limit=2)
+    rb = RetrievalBudgetState(limit=2, read_limit=2)
     assert await rb.try_reserve("web_search")
     stale = sync_retrieval_budget_awareness(messages, rb)
     assert stale is not None
 
-    assert await rb.try_reserve("read_url")
-    assert rb.remaining == 0
+    assert await rb.try_reserve("web_search")
+    assert await rb.try_reserve("read_url", 2)
+    assert rb.any_exhausted
     wind_down = LLMMessage(
         role="user",
         content=(
@@ -578,7 +601,7 @@ async def test_react_loop_skips_balance_for_worker_that_never_retrieves():
     provider = _LoopProvider(
         [_tool_round("c1", "code_search"), [LLMChunk(delta_content="交付")]]
     )
-    budget = RetrievalBudgetState(limit=DEFAULT_RETRIEVAL_BUDGET)
+    budget = RetrievalBudgetState(limit=DEFAULT_RETRIEVAL_BUDGET, read_limit=DEFAULT_RETRIEVAL_BUDGET)
     messages = await _run_worker_loop(provider, reg, budget)
     assert provider.seen == [[], []]
     assert _awareness_lines(messages) == []
@@ -597,17 +620,17 @@ async def test_react_loop_injects_balance_each_round_after_first_charge():
             [LLMChunk(delta_content="交付")],
         ]
     )
-    budget = RetrievalBudgetState(limit=DEFAULT_RETRIEVAL_BUDGET)
+    budget = RetrievalBudgetState(limit=DEFAULT_RETRIEVAL_BUDGET, read_limit=DEFAULT_RETRIEVAL_BUDGET)
     messages = await _run_worker_loop(provider, reg, budget)
 
     assert budget.searches_used == 2
     round0, round1, round2 = provider.seen
     assert round0 == []  # 还没花过额度
     assert len(round1) == 1
-    assert "已用 1 次（web_search 1 · read_url 0）" in round1[0]
+    assert "web_search 已用 1/14 次" in round1[0]
     assert "剩余 13 次" in round1[0]
     assert len(round2) == 1
-    assert "已用 2 次（web_search 2 · read_url 0）" in round2[0]
+    assert "web_search 已用 2/14 次" in round2[0]
     assert "剩余 12 次" in round2[0]
     assert len(_awareness_lines(messages)) == 1
 
@@ -624,7 +647,8 @@ async def test_react_loop_drops_balance_when_budget_exhausted():
             [LLMChunk(delta_content="交付")],
         ]
     )
-    budget = RetrievalBudgetState(limit=2)
+    # 读池关闭（read_limit=0）→ 搜索池耗尽即两池全关，触发 wind_down（分池语义）。
+    budget = RetrievalBudgetState(limit=2, read_limit=0)
     messages = await _run_worker_loop(provider, reg, budget)
 
     assert budget.remaining == 0
@@ -667,7 +691,7 @@ async def test_react_loop_logs_per_tool_spend_with_final_row(monkeypatch):
 
     reg = ToolRegistry()
     reg.register(_SearchStub())
-    reg.register(_SearchStub(name="read_url"))
+    reg.register(_SearchStub(name="read_url", content_chars=2000))  # 1 页
     provider = _LoopProvider(
         [
             _tool_round("c1", "web_search"),
@@ -675,7 +699,7 @@ async def test_react_loop_logs_per_tool_spend_with_final_row(monkeypatch):
             [LLMChunk(delta_content="交付")],
         ]
     )
-    budget = RetrievalBudgetState(limit=DEFAULT_RETRIEVAL_BUDGET)
+    budget = RetrievalBudgetState(limit=DEFAULT_RETRIEVAL_BUDGET, read_limit=DEFAULT_RETRIEVAL_BUDGET)
     await _run_worker_loop(provider, reg, budget)
 
     rows = [kw for ev, kw in spy.infos if ev == "engine.retrieval_budget_awareness"]
@@ -683,9 +707,11 @@ async def test_react_loop_logs_per_tool_spend_with_final_row(monkeypatch):
     assert trajectory == [(1, 0), (1, 1)]
     final = [r for r in rows if r["final"]]
     assert len(final) == 1
-    assert (final[0]["searches"], final[0]["reads"], final[0]["used"]) == (1, 1, 2)
+    assert (final[0]["searches"], final[0]["reads"], final[0]["used"]) == (1, 1, 1)
     assert final[0]["limit"] == DEFAULT_RETRIEVAL_BUDGET
-    assert final[0]["remaining"] == DEFAULT_RETRIEVAL_BUDGET - 2
+    assert final[0]["read_limit"] == DEFAULT_RETRIEVAL_BUDGET
+    assert final[0]["remaining"] == DEFAULT_RETRIEVAL_BUDGET - 1
+    assert final[0]["read_remaining"] == DEFAULT_RETRIEVAL_BUDGET - 1
     assert final[0]["critical"] is False
 
 
@@ -703,18 +729,25 @@ def test_drop_awareness_only_touches_balance_line():
 
 @pytest.mark.asyncio
 async def test_refill_within_cap_does_not_raise_past_original():
-    rb = RetrievalBudgetState(limit=4)
+    # 搜索池：limit=4 已耗尽（used=4）→ within_cap 不能越过 cap=4。
+    rb = RetrievalBudgetState(limit=4, read_limit=0)
     assert await rb.try_reserve("web_search")
     assert await rb.try_reserve("web_search")
-    assert await rb.try_reserve("read_url")
-    assert await rb.try_reserve("read_url")
+    assert await rb.try_reserve("web_search")
+    assert await rb.try_reserve("web_search")
     assert rb.remaining == 0
-    # Exhausted within original — within_cap cannot grow past cap=4.
     remaining = await rb.refill_within_cap(2, cap=4)
     assert remaining == 0
     assert rb.limit == 4
+    # 读池：read_limit=4 已耗尽（read_used=4 页）→ refill_read_within_cap 不能越过 cap=4。
+    rb_read = RetrievalBudgetState(limit=0, read_limit=4)
+    assert await rb_read.try_reserve("read_url", 4)
+    assert rb_read.read_remaining == 0
+    read_remaining = await rb_read.refill_read_within_cap(2, cap=4)
+    assert read_remaining == 0
+    assert rb_read.read_limit == 4
     # Headroom below cap still works (simulate partial spend after a lower limit).
-    rb2 = RetrievalBudgetState(limit=2)
+    rb2 = RetrievalBudgetState(limit=2, read_limit=2)
     await rb2.try_reserve("web_search")
     await rb2.try_reserve("web_search")
     rem2 = await rb2.refill_within_cap(3, cap=5)

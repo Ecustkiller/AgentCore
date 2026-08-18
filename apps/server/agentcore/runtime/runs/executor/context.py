@@ -298,7 +298,9 @@ def _build_context_blocks(
     deliverable_text = describe_deliverable(deliverable or spec.deliverable)
     from agentcore.runtime.runs.retrieval_budget import format_retrieval_budget_line
 
-    budget_line = format_retrieval_budget_line(spec.retrieval_budget)
+    budget_line = format_retrieval_budget_line(
+        spec.retrieval_budget, spec.retrieval_read_budget
+    )
     if budget_line:
         deliverable_text = (
             f"{deliverable_text}\n{budget_line}" if deliverable_text else budget_line

@@ -792,6 +792,9 @@ async def run_contract_loop(
         # 引用类失败例外——它本就需要重读来源，且上面已发放 sticky reread。
         rb = tool_ctx.retrieval_budget
         original_rb = int(spec.retrieval_budget or (rb.limit if rb else 0) or 0)
+        original_read_rb = int(
+            spec.retrieval_read_budget or (rb.read_limit if rb else 0) or 0
+        )
         wind_down = budget_wind_down
         write_disk_form = bool(files_expected) and not cite_fail_retry
         slice_n = rework_refill_slots(
@@ -799,8 +802,17 @@ async def run_contract_loop(
             wind_down_entered=wind_down,
             write_disk_form=write_disk_form,
         )
-        if rb is not None and slice_n > 0:
+        # R-02 分池：读池同 slice 独立 refill——返工既要补搜也要补读（搜了新来源得能深读）。
+        read_slice_n = rework_refill_slots(
+            original_limit=original_read_rb,
+            wind_down_entered=wind_down,
+            write_disk_form=write_disk_form,
+        )
+        if rb is not None and (slice_n > 0 or read_slice_n > 0):
             new_remaining = await rb.refill_within_cap(slice_n, cap=original_rb)
+            new_read_remaining = await rb.refill_read_within_cap(
+                read_slice_n, cap=original_read_rb
+            )
             logger.info(
                 "retrieval_budget.rework_refill",
                 run_id=spec.run_id,
@@ -808,6 +820,10 @@ async def run_contract_loop(
                 remaining=new_remaining,
                 limit=rb.limit,
                 cap=original_rb,
+                read_added=read_slice_n,
+                read_remaining=new_read_remaining,
+                read_limit=rb.read_limit,
+                read_cap=original_read_rb,
                 wind_down=wind_down,
             )
         elif wind_down or write_disk_form:
@@ -816,6 +832,7 @@ async def run_contract_loop(
                 run_id=spec.run_id,
                 reason="wind_down" if wind_down else "write_disk_form",
                 original_limit=original_rb,
+                original_read_limit=original_read_rb,
             )
         logger.info(
             "contract.retry",

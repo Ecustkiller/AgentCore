@@ -381,16 +381,32 @@ async def run_one_tool(
     # approval / breaker denials never consume budget. Orthogonal to
     # LoopController.investigation_calls / team_gate.
     from agentcore.runtime.runs.retrieval_budget import (
+        READ_TOOL_NAME,
         RETRIEVAL_TOOL_NAMES,
         budget_exhausted_output,
         charges_retrieval_budget,
+        retrieval_charge_quantity,
+        retrieval_reserve_quantity,
     )
 
     budget_state = context.retrieval_budget
     budget_reserved = False
+    budget_reserved_qty = 0
     if name in RETRIEVAL_TOOL_NAMES and budget_state is not None:
-        if not await budget_state.try_reserve(name):
+        # R-02 分池：读池按「页」计量——预留按请求 max_chars 的页数上界，执行后按
+        # 实际正文量回退到实际页数（见下方退款）。搜索池恒为 1 slot。
+        reserve_qty = retrieval_reserve_quantity(name, args)
+        if not await budget_state.try_reserve(name, reserve_qty):
             exhausted = budget_exhausted_output()
+            # 池耗尽只退休对应工具：搜索池空 ≠ 读池空，另一池仍可用（R-02 分池）。
+            retire_only = [name]
+            retire_message = (
+                "搜索预算已尽：web_search 本回合已停用——"
+                "请基于已有材料交付，禁止再调用 web_search（仍可深读已命中来源）。"
+                if name != READ_TOOL_NAME
+                else "读预算已尽：read_url 本回合已停用——"
+                "请基于已有材料交付，禁止再调用 read_url（仍可继续检索新来源）。"
+            )
             sink.emit(
                 tool_use_end(
                     tc.id,
@@ -408,6 +424,8 @@ async def run_one_tool(
                 duration_ms=0,
                 retrieval_budget_limit=budget_state.limit,
                 retrieval_budget_used=budget_state.used,
+                retrieval_read_limit=budget_state.read_limit,
+                retrieval_read_used=budget_state.read_used,
             )
             return (
                 _failed_tool_message(tc.id, exhausted),
@@ -423,17 +441,15 @@ async def run_one_tool(
                         {
                             "error_class": ERROR_CLASS_PERMANENT,
                             "code": "retrieval_budget_exhausted",
-                            "retire_tools": sorted(RETRIEVAL_TOOL_NAMES),
-                            "retire_message": (
-                                "检索预算已尽：web_search / read_url 本回合已停用——"
-                                "请基于已有材料交付，禁止再调用检索工具。"
-                            ),
+                            "retire_tools": retire_only,
+                            "retire_message": retire_message,
                         },
                     ),
                 ),
                 [],
             )
         budget_reserved = True
+        budget_reserved_qty = reserve_qty
 
     # 工具执行阶段进度 (联网搜索前端展示优化): inject a per-call phase callback so a
     # long-running tool (web_search) can report a coarse EXECUTION phase mid-flight. The
@@ -485,7 +501,7 @@ async def run_one_tool(
         # attempt so a tool that keeps timing out trips convergence governance.
         # Liveness (hang) ≠ capacity contract — steer forbids identical retry.
         if budget_reserved and budget_state is not None:
-            await budget_state.refund(name)
+            await budget_state.refund(name, budget_reserved_qty)
         duration_ms = int((time.monotonic() - started) * 1000)
         ceiling = timeout if timeout is not None else 0.0
         timeout_msg = (
@@ -543,7 +559,7 @@ async def run_one_tool(
         # result so the loop can adapt; SUSPEND terminals are unaffected (they return
         # normally, never raise).
         if budget_reserved and budget_state is not None:
-            await budget_state.refund(name)
+            await budget_state.refund(name, budget_reserved_qty)
         duration_ms = int((time.monotonic() - started) * 1000)
         # Always carry the exception type: some builtins (e.g. NotImplementedError)
         # stringify to "" and the model would see a blank reason and retry blindly.
@@ -591,8 +607,15 @@ async def run_one_tool(
     result.tool_call_id = tc.id
 
     # 缓存命中 / A3 拒绝等不计预算：reserved slot refunded when not charged.
-    if budget_reserved and budget_state is not None and not charges_retrieval_budget(result):
-        await budget_state.refund(name)
+    # R-02 分池：读池预留的是请求 max_chars 的页数上界，执行成功后按实际正文页数
+    # 回退多预留的部分（≥1 页，见 retrieval_charge_quantity）。
+    if budget_reserved and budget_state is not None:
+        if charges_retrieval_budget(result):
+            actual_qty = retrieval_charge_quantity(name, result)
+            if budget_reserved_qty > actual_qty:
+                await budget_state.refund(name, budget_reserved_qty - actual_qty)
+        else:
+            await budget_state.refund(name, budget_reserved_qty)
 
     if result.success:
         output = result.output

@@ -259,7 +259,6 @@ async def _continue_run_scoped(
         priced_model, request_model = resolve_run_models(
             profiles, spec.model, cost_role=cost_role
         )
-        from agentcore.runtime.runs.retrieval_budget import RETRIEVAL_TOOL_NAMES
         from agentcore.tools.protocol import RetrievalBudgetState
 
         tool_ctx = replace(
@@ -268,7 +267,10 @@ async def _continue_run_scoped(
             agent_id=agent_id,
             execution_id=execution_id,
             retrieval_budget=(
-                RetrievalBudgetState(limit=spec.retrieval_budget)
+                RetrievalBudgetState(
+                    limit=spec.retrieval_budget,
+                    read_limit=spec.retrieval_read_budget or 0,
+                )
                 if spec.retrieval_budget is not None
                 else None
             ),
@@ -298,9 +300,15 @@ async def _continue_run_scoped(
         if spec.retrieval_budget == 0:
             from agentcore.runtime.runs.executor.shared import _registry_without
 
-            worker_tools = _registry_without(worker_tools, *RETRIEVAL_TOOL_NAMES)
+            worker_tools = _registry_without(worker_tools, "web_search")
             if allowed_tools is not None:
-                allowed_tools = [t for t in allowed_tools if t not in RETRIEVAL_TOOL_NAMES]
+                allowed_tools = [t for t in allowed_tools if t != "web_search"]
+        if spec.retrieval_read_budget == 0:
+            from agentcore.runtime.runs.executor.shared import _registry_without
+
+            worker_tools = _registry_without(worker_tools, "read_url")
+            if allowed_tools is not None:
+                allowed_tools = [t for t in allowed_tools if t != "read_url"]
         can_execute = worker_tools.get_optional("code_execute") is not None
         # Same as executor.node: restricted allow-list must still keep handoff.
         if allowed_tools is not None and HANDOFF_TOOL_NAME not in allowed_tools:

@@ -285,12 +285,16 @@ class RunSpec:
     # 同人续派：目标 run 的现场根（RunSession 键）。设了则执行走 continue_run 而非冷开局；
     # wire 的 continues_run_id 恒等于该值（星型）。校验与闸在驱动层，调度器不读。
     continue_from_run_id: str | None = None
-    # 检索预算（提案 A1）：本 run ``web_search``+``read_url`` 合计次数上限。
+    # 检索预算·搜索池（提案 A1 / R-02）：本 run ``web_search`` 次数上限。
     # ``None`` = 未解析（手工构造的 spec / 测试）；经 ``build_run_plan`` /
     # ``apply_retrieval_budgets`` 后恒为 ``>=0`` 的 int（全员统一默认；CEO 不可配置）。
     # 辩手有约定文档等内部 writer 可在 apply 后覆写为窄例外常量。
     # Enforce 在 engine ``tool_exec``（有 run 身份处），与 LoopController 正交。
     retrieval_budget: int | None = None
+    # 检索预算·读池（R-02）：本 run ``read_url`` 深读页数上限（按 READ_PAGE_CHARS 字符/页）。
+    # ``None`` = 未解析 → apply 时回落默认（与搜索池同值）；``0`` = 卸 read_url 但保留 web_search。
+    # 与 ``retrieval_budget`` 相互独立，不再共用一池。
+    retrieval_read_budget: int | None = None
     # Per-run web_search posture (结构化信号，禁止靠 prompt 触发)。
     # ``""`` = 默认调研；``"debate_evidence"`` = 庭前取证员 / 辩手 speech research
     # （weak 档与商城/词典/医院百科硬剔）；``"academic_literature"`` = 成文综述

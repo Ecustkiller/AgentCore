@@ -13,10 +13,14 @@ class EngineSettings(BaseModel):
     # DEFAULT_WINDOW=8）。同参/交替失败在窗内计数达 engine_unproductive_threshold
     # → NUDGE，再触发 → FINALIZE。
     engine_loop_window: int = 8
-    # R-04 检索预算（web_search + read_url 共用 per-run 池；回落
-    # retrieval_budget.DEFAULT_RETRIEVAL_BUDGET=14）。≤0 → 卸检索工具。搜/读分池
-    # （R-02）落地后本值语义随拆池调整。
+    # R-04/R-02 检索预算·搜索池（web_search per-run 槽位；回落
+    # retrieval_budget.DEFAULT_RETRIEVAL_BUDGET=14）。≤0 → 卸 web_search。
+    # R-02 起搜/读分池：read_url 走独立读池（见 engine_retrieval_read_budget），
+    # 不再与搜索池共用一个额度。
     engine_retrieval_budget: int = 14
+    # R-02 检索预算·读池（read_url 深读，按「页」计量，页 = retrieval_budget.READ_PAGE_CHARS
+    # 字符）。回落与搜索池同值 14 页（约 3.5 次 8000 字全文深读）。≤0 → 卸 read_url。
+    engine_retrieval_read_budget: int = 14
     # R-03 前缀缓存观测（审计 D4，observability/prefix_cache.py）：观测已常驻（每
     # llm.call 一条 cost.prefix_cache 探针），默认 debug 级不落 jsonl（长会话避免挤掉
     # llm.call 的 20MB×5 窗口）。置 True → 提升为 info 落盘，无需全局 LOG_LEVEL=DEBUG，
