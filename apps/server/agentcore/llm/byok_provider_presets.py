@@ -88,6 +88,24 @@ BYOK_PROVIDER_PRESETS: tuple[ByokProviderPreset, ...] = (
             "openrouter/auto",
             "anthropic/claude-sonnet-4",
             "google/gemini-2.5-pro",
+            # ":free" models — $0/M, 20 RPM / 50 RPD free tier (1,000 RPD after
+            # a lifetime $10 top-up). Good for non-sensitive background/worker slots.
+            "nvidia/nemotron-3-ultra-550b-a55b:free",
+            "cohere/north-mini-code:free",
+            "poolside/laguna-s-2.1:free",
+        ),
+    ),
+    ByokProviderPreset(
+        id="groq",
+        label="Groq",
+        base_url="https://api.groq.com/openai/v1",
+        default_model="llama-3.3-70b-versatile",
+        # Free tier is per-model and volatile; these are the most stable free
+        # seeds as of 2026-08 (verify against console.groq.com/settings/limits).
+        models=(
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+            "deepseek-r1-distill-llama-70b",
         ),
     ),
     ByokProviderPreset(

@@ -128,6 +128,44 @@ def test_opencode_zen_and_go_urls_do_not_cross_match():
     assert match_byok_provider_preset("https://opencode.ai/zen/v1/extra") is None
 
 
+def test_groq_preset_defaults_and_models():
+    preset = match_byok_provider_preset("https://api.groq.com/openai/v1")
+    assert preset is not None
+    assert preset.id == "groq"
+    assert preset.label == "Groq"
+    assert preset.default_model == "llama-3.3-70b-versatile"
+    assert preset.models == (
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "deepseek-r1-distill-llama-70b",
+    )
+
+
+def test_groq_trailing_slash_matches():
+    preset = match_byok_provider_preset("https://api.groq.com/openai/v1/")
+    assert preset is not None
+    assert preset.id == "groq"
+    assert preset_models_for_base_url("https://api.groq.com/openai/v1/") == (
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "deepseek-r1-distill-llama-70b",
+    )
+
+
+def test_openrouter_preset_includes_free_models():
+    preset = match_byok_provider_preset("https://openrouter.ai/api/v1")
+    assert preset is not None
+    assert preset.id == "openrouter"
+    assert preset.default_model == "openrouter/auto"
+    # Paid seed stays intact.
+    assert "anthropic/claude-sonnet-4" in preset.models
+    assert "google/gemini-2.5-pro" in preset.models
+    # ":free" models present for non-sensitive background/worker slots.
+    assert "nvidia/nemotron-3-ultra-550b-a55b:free" in preset.models
+    assert "cohere/north-mini-code:free" in preset.models
+    assert "poolside/laguna-s-2.1:free" in preset.models
+
+
 def test_byok_preset_base_urls_are_unique():
     seen: set[str] = set()
     for preset in BYOK_PROVIDER_PRESETS:

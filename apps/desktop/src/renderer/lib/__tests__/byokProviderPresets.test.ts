@@ -101,6 +101,15 @@ describe("resolveByokProviderFromConfig", () => {
     ).toBe("hy");
   });
 
+  it("matches Groq base_url", () => {
+    expect(resolveByokProviderFromConfig("https://api.groq.com/openai/v1")).toBe(
+      "groq",
+    );
+    expect(
+      resolveByokProviderFromConfig("https://api.groq.com/openai/v1/"),
+    ).toBe("groq");
+  });
+
   it("falls back to custom for unknown endpoints", () => {
     expect(resolveByokProviderFromConfig("https://my-proxy.example/v1")).toBe(
       "custom",
@@ -203,6 +212,31 @@ describe("getByokProviderPreset", () => {
     const labels = listByokProviderOptions().map((opt) => opt.label);
     expect(labels).toContain("OpenCode Zen");
     expect(labels).toContain("OpenCode Go");
+  });
+
+  it("returns OpenRouter metadata with :free models", () => {
+    const preset = getByokProviderPreset("openrouter");
+    expect(preset.defaultModel).toBe("openrouter/auto");
+    expect(preset.models).toContain("anthropic/claude-sonnet-4");
+    expect(preset.models).toContain("nvidia/nemotron-3-ultra-550b-a55b:free");
+    expect(preset.models).toContain("cohere/north-mini-code:free");
+    expect(preset.models).toContain("poolside/laguna-s-2.1:free");
+  });
+
+  it("returns Groq metadata with free-tier seed", () => {
+    const preset = getByokProviderPreset("groq");
+    expect(preset.id).toBe("groq");
+    expect(preset.label).toBe("Groq");
+    expect(preset.baseUrl).toBe("https://api.groq.com/openai/v1");
+    expect(preset.defaultModel).toBe("llama-3.3-70b-versatile");
+    expect(preset.models).toEqual([
+      "llama-3.3-70b-versatile",
+      "llama-3.1-8b-instant",
+      "deepseek-r1-distill-llama-70b",
+    ]);
+    expect(preset.keyHelpUrl).toBe("https://console.groq.com/keys");
+    const labels = listByokProviderOptions().map((opt) => opt.label);
+    expect(labels).toContain("Groq");
   });
 
   it("keeps preset base_urls unique after normalize (Zen vs Go)", () => {
