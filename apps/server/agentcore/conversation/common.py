@@ -30,7 +30,11 @@ from agentcore.memory import (
     TitleResult,
 )
 from agentcore.runtime.events import EventSink, title_generated
-from agentcore.workspace.locate import LocalBinding
+from agentcore.workspace.locate import (
+    LocalBinding,
+    bare_chat_local_subpath,
+    resolve_conversation_local_binding,
+)
 
 logger = get_logger(__name__)
 
@@ -38,36 +42,6 @@ logger = get_logger(__name__)
 # ``_inflight`` dedupes a burst; ``_tasks`` holds refs so a pass is not GC'd mid-flight.
 _title_inflight: set[str] = set()
 _title_tasks: set[asyncio.Task] = set()
-
-
-def log_cost_recorded(conversation_id: str, message_id: str | None, cost_runs: list[dict]) -> None:
-    """Emit ``cost.recorded`` after a turn's ledger rows persist successfully.
-
-    ``by_role`` breaks spend by structural role (captain / member / vision / …)
-    so ``log_stats`` and timeline triage can split team burn without joining DB.
-    """
-    total_nano = sum(int(r.get("cost_total_nano", 0) or 0) for r in cost_runs)
-    models = sorted({str(r.get("model", "?")) for r in cost_runs if r.get("model")})
-    by_role: dict[str, dict[str, int]] = {}
-    for row in cost_runs:
-        role = str(row.get("role") or "?")
-        bucket = by_role.setdefault(role, {"runs": 0, "total_nano": 0, "input": 0, "output": 0})
-        bucket["runs"] += 1
-        bucket["total_nano"] += int(row.get("cost_total_nano", 0) or 0)
-        tokens = row.get("tokens") or {}
-        bucket["input"] += int(tokens.get("input", 0) or 0)
-        bucket["output"] += int(tokens.get("output", 0) or 0)
-    logger.info(
-        "cost.recorded",
-        conversation_id=conversation_id,
-        message_id=message_id,
-        runs=len(cost_runs),
-        total_nano=total_nano,
-        total_usd=round(total_nano / 1e9, 6),
-        models=models,
-        by_role=by_role,
-    )
-
 
 # Markdown / list decoration a pasted task card opens with ("## 1. **目标**"),
 # dropped so the degraded label reads as a topic rather than as punctuation.
@@ -153,10 +127,6 @@ async def resolve_local_binding(session: AsyncSession, conv: Conversation) -> Lo
       Cloud SSE turns honor both so sidecar-written files stay visible when the
       turn falls back from sidecar to cloud.
     """
-    from agentcore.conversation.scratch import (
-        bare_chat_local_subpath,
-        resolve_conversation_local_binding,
-    )
     from agentcore.db.repositories import FolderRepository
 
     if conv.folder_id:
@@ -182,7 +152,6 @@ async def resolve_folder_local_binding(
     session: AsyncSession, folder_id: str
 ) -> LocalBinding | None:
     """Local binding for a registered Folder (landing / target desk), or None if cloud."""
-    from agentcore.conversation.scratch import resolve_conversation_local_binding
     from agentcore.db.repositories import FolderRepository
 
     cleaned = folder_id.strip() if isinstance(folder_id, str) else ""

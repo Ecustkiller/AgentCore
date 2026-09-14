@@ -20,6 +20,7 @@ def test_list_retained_event_types_derived_not_hand_copied():
     assert EventType.RUN_PLAN.value in retained
     assert EventType.MESSAGE_END.value in retained
     assert EventType.DELIVERY_STATUS.value in retained
+    assert EventType.INTERACTION_ORPHANED.value in retained
     for spec in INTERACTION_KIND_SPECS.values():
         if spec.journal_surface:
             assert spec.required_event in retained
@@ -78,6 +79,23 @@ def test_slim_runs_payload_keeps_complete_when_all_retained():
     assert out["events_complete"] is True
     assert out["run_processes"] == runs["run_processes"]
     assert len(out["events"]) == 4
+
+
+def test_slim_runs_payload_keeps_interaction_orphaned():
+    runs = {
+        "events": [
+            {"type": "approval_required", "payload": {"approval_id": "a1"}},
+            {
+                "type": "interaction_orphaned",
+                "payload": {"interaction_id": "a1", "kind": "approval"},
+            },
+        ],
+        "finish_reason": "interrupted",
+    }
+    out = slim_runs_payload(runs)
+    types = [ev["type"] for ev in out["events"]]
+    assert types == ["approval_required", "interaction_orphaned"]
+    assert out["events_complete"] is True
 
 
 def _assistant_row(*, usage=None):

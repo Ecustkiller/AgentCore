@@ -850,6 +850,14 @@ def test_resolve_tool_timeout_by_face():
         resolve_tool_timeout(_schema(ToolFace.BOARD))
         == settings.tool_default_timeout_seconds
     )
+    assert (
+        resolve_tool_timeout(_schema(ToolFace.TABLE))
+        == settings.tool_default_timeout_seconds
+    )
+    assert (
+        resolve_tool_timeout(_schema(ToolFace.DOC))
+        == settings.tool_default_timeout_seconds
+    )
     # an explicit per-tool override wins over the face rule — even the exemption
     assert resolve_tool_timeout(_schema(ToolFace.ORCHESTRATION, 12.5)) == 12.5
     assert resolve_tool_timeout(_schema(ToolFace.EXECUTION, 5.0)) == 5.0
@@ -1458,7 +1466,7 @@ async def test_productive_round_resets_unproductive_streak():
 
 # --- investigation-round finalize retired (engine wiring) ----------------
 #
-# Factory always passes convergence_finalize_rounds=0 (settings cannot revive it).
+# Factory always passes convergence_finalize_rounds=0 (no settings knob).
 # Different-target reads do not force-finalize; same-target spin still does
 # (covered by the repeated-call tests above). Soft nudge stays gone.
 
@@ -1513,10 +1521,8 @@ async def test_few_different_target_reads_have_no_convergence_steer():
     assert _convergence_steers(messages) == []
 
 
-async def test_many_different_target_reads_do_not_force_finalize(monkeypatch):
-    # Settings >0 must not revive investigation-round finalize. Many distinct
-    # file_read targets still reach the model's own answer; no 收工 prompt.
-    monkeypatch.setattr(settings, "engine_convergence_finalize_rounds", 6)
+async def test_many_different_target_reads_do_not_force_finalize():
+    # Many distinct file_read targets still reach the model's own answer; no 收工 prompt.
     reg = ToolRegistry()
     reg.register(_StubTool(name="file_read"))
     provider = _read_then_answer(12)
@@ -1527,10 +1533,9 @@ async def test_many_different_target_reads_do_not_force_finalize(monkeypatch):
     assert _finalizes(messages) == []
 
 
-async def test_many_different_target_reads_do_not_force_finalize_with_delegate(monkeypatch):
+async def test_many_different_target_reads_do_not_force_finalize_with_delegate():
     # Same contract with an ORCHESTRATION tool present — no flavor-specific
     # round-count finalize either.
-    monkeypatch.setattr(settings, "engine_convergence_finalize_rounds", 6)
     reg = ToolRegistry()
     reg.register(_StubTool(name="file_read"))
     reg.register(_StubTool(name="delegate", face=ToolFace.ORCHESTRATION))

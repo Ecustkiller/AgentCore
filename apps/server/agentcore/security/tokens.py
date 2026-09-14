@@ -267,6 +267,52 @@ def decode_account_token(token: str) -> str:
     return sub
 
 
+def create_workspaces_token(
+    user_id: str, *, expires_delta: timedelta | None = None
+) -> str:
+    """Mint a scoped token for sidecar cloud-desk file ops.
+
+    Desktop exchanges its cookie session for THIS token and passes
+    ``workspacesAuth: {baseUrl, apiKey}`` into the on-machine engine (same shape
+    as folders / account). ``baseUrl`` is ``…/v1/workspaces``; ``apiKey`` is this
+    JWT. Distinct ``type`` (``workspaces``) means it can ONLY authorize the
+    cloud workspace file REST family — never folders roster, never account
+    logs, never inference, never cookie-auth UI. Sidecar must never receive an
+    access token.
+    """
+    now = datetime.now(UTC)
+    expire = now + (
+        expires_delta or timedelta(minutes=settings.workspaces_token_expire_minutes)
+    )
+    claims = {
+        "sub": user_id,
+        "type": "workspaces",
+        "iat": int(now.timestamp()),
+        "exp": int(expire.timestamp()),
+    }
+    return jwt.encode(claims, settings.jwt_secret_key, algorithm=_JWT_ALGORITHM)
+
+
+def decode_workspaces_token(token: str) -> str:
+    """Return the subject (user_id) of a valid workspaces narrow token.
+
+    Raises ``AuthenticationError`` for any invalid, tampered, expired, or
+    wrong-type token (including ``access``, ``inference``, ``folders``, and
+    ``account``).
+    """
+    try:
+        claims = jwt.decode(token, settings.jwt_secret_key, algorithms=[_JWT_ALGORITHM])
+    except JWTError as exc:
+        raise AuthenticationError("Invalid or expired workspaces token") from exc
+
+    if claims.get("type") != "workspaces":
+        raise AuthenticationError("Wrong token type")
+    sub = claims.get("sub")
+    if not sub:
+        raise AuthenticationError("Token missing subject")
+    return sub
+
+
 class PreviewTokenClaims(NamedTuple):
     """Decoded ``type=preview`` JWT: who, which conversation, which process, which port."""
 

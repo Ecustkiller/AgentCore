@@ -34,8 +34,8 @@ def _mcp_call_tool_applied() -> list[SSEEvent]:
     """MCP：worker 调动态工具 → mcp_op_required 运输 → 工具成功 → 回合收尾。
 
     ``mcp_op_required`` is transport-only (desktop stdio Client + settle); it does not
-    pause the turn or alter ``ProjectedTurn`` — same no-op fold as ``host_op_required`` /
-    ``board_op_required``. The ``mcp_*`` tool step still lands on the process timeline.
+    pause the turn or alter ``ProjectedTurn`` — same no-op fold as ``host_op_required``.
+    The ``mcp_*`` tool step still lands on the process timeline.
     """
     return [
         message_start("m1", conversation_id=_CONV),

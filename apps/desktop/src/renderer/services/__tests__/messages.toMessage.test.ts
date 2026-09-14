@@ -447,7 +447,7 @@ describe("toMessage (reload hydrate)", () => {
     expect(usePausedTurnStore.getState().pending).toHaveLength(0);
   });
 
-  it("maps status=incomplete to interrupted when usage/runs are not cancelled", () => {
+  it("does not map status=incomplete to interrupted when usage/runs have no finish", () => {
     const msg = toMessage(
       row({
         id: "m-incomplete",
@@ -457,7 +457,25 @@ describe("toMessage (reload hydrate)", () => {
       }),
     );
     expect(msg.isStreaming).toBe(false);
+    expect(msg.status).toBe("incomplete");
+    expect(msg.finishReason).toBeUndefined();
+  });
+
+  it("status=incomplete + runs.finish_reason=interrupted keeps the engine verdict", () => {
+    const msg = toMessage(
+      row({
+        id: "m-interrupted-runs",
+        role: "assistant",
+        content: "半截",
+        status: "incomplete",
+        runs: {
+          events: [],
+          finish_reason: "interrupted",
+        },
+      }),
+    );
     expect(msg.finishReason).toBe("interrupted");
+    expect(msg.isStreaming).toBe(false);
   });
 
   it("status=incomplete + runs.finish_reason=cancelled → cancelled, not interrupted", () => {
@@ -501,5 +519,32 @@ describe("toMessage (reload hydrate)", () => {
     );
     expect(msg.finishReason).toBe("cancelled");
     expect(msg.finishReason).not.toBe("interrupted");
+  });
+
+  it("orphans leftover hot approval when reload finish_reason is interrupted", () => {
+    toMessage(
+      row({
+        id: "m-dead-approval",
+        role: "assistant",
+        content: "要删文件",
+        status: "incomplete",
+        runs: {
+          events: [
+            {
+              type: "approval_required",
+              timestamp: "2026-01-01T00:00:01.000Z",
+              payload: {
+                approval_id: "a1",
+                tool_call_id: "a1",
+                tool_name: "file_delete",
+                arguments: { permanent: true },
+              },
+            },
+          ],
+          finish_reason: "interrupted",
+        },
+      }),
+    );
+    expect(useInteractionStore.getState().get("a1")?.status).toBe("orphaned");
   });
 });

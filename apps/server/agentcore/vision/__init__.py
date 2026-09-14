@@ -1,4 +1,4 @@
-"""Vision (读图) port for the collaborative whiteboard (AI协作白板.md §九)."""
+"""Vision (读图) port — conversation attachments and CEO ``read_image``."""
 
 from agentcore.vision.capability import vision_capability_available
 from agentcore.vision.factory import (

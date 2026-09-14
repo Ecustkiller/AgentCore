@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agentcore.conversation.store import reset_conversation_store_for_tests
+from agentcore.runtime.conversation_store import reset_conversation_store_for_tests
 from agentcore.runtime.turn.queue import new_queued_turn, turn_queue
 from agentcore.runtime.turn.runs import turn_runs
 from agentcore.sidecar import protocol

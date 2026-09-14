@@ -1,5 +1,4 @@
 import {
-  COST_ESTIMATE_LABEL,
   chunksTailText,
   estimateTokensFromCharCount,
   formatAlignedCostParts,
@@ -7,7 +6,6 @@ import {
   formatBytesPerSecond,
   formatCompact,
   formatCost,
-  formatCostCaption,
   formatDateDivider,
   formatDisplayCost,
   formatDownloadProgress,
@@ -123,11 +121,6 @@ describe("formatDisplayCost / pickCostMoney (BYOK ≈)", () => {
     expect(
       pickCostMoney({ total: 0, currency: "USD", estimated_total: 999 }),
     ).toEqual({ nano: 999, estimated: true, currency: "USD" });
-  });
-
-  it("appends 自带密钥·估算 caption for estimates", () => {
-    expect(formatCostCaption(YUAN, true)).toBe(`≈¥1.00 ${COST_ESTIMATE_LABEL}`);
-    expect(formatCostCaption(YUAN, false)).toBe("¥1.00");
   });
 });
 

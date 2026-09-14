@@ -1574,15 +1574,18 @@ def test_progress_tool_resets_spin_streak():
     assert c.convergence_action() is Intervention.CONTINUE
 
 
-# --- delivery_idle: 交文件空转已退役；recon 调查空转仍在（不中途 FINALIZE）---
+# --- delivery_idle / 调查轮绝对顶：factory 关死；LoopController 显式构造仍可测梯子 ---
 
 
-def test_factory_ignores_convergence_finalize_rounds_setting(monkeypatch):
-    """Factory 永远传 finalize_rounds=0；settings >0 不能把调查轮顶救活。"""
+def test_factory_convergence_finalize_setting_absent():
+    """调查轮绝对顶无 settings 旋钮；factory 永远 finalize_rounds=0。"""
     from agentcore.config import settings
     from agentcore.runtime.engine.governance import create_loop_controller
 
-    monkeypatch.setattr(settings, "engine_convergence_finalize_rounds", 6)
+    assert not hasattr(settings, "engine_convergence_finalize_rounds")
+    assert not hasattr(settings, "engine_delivery_idle_nudge_rounds")
+    assert not hasattr(settings, "engine_delivery_idle_narrow_rounds")
+    assert not hasattr(settings, "engine_recon_idle_nudge_rounds")
     c = create_loop_controller(frozenset({"file_read", "web_search"}))
     for i in range(12):
         c.record([ToolAttempt(fingerprint=f"f{i}", tool_name="file_read", success=True)])

@@ -183,7 +183,10 @@ interface CloudFileClient {
   ): Promise<void>;
   /** Raw bytes (no save dialog) — backs 「用本机默认应用打开」's temp copy. */
   fetchBytes(path: string): Promise<Blob>;
-  exportMdToDocx(path: string): Promise<{ path: string; warnings: string[] }>;
+  exportMdToDocx(
+    path: string,
+    layout?: "standard" | "official",
+  ): Promise<{ path: string; warnings: string[] }>;
   listFileIndex?(): Promise<FileIndexListing>;
 }
 
@@ -318,7 +321,7 @@ function makeCloudSource(
     ...(caps.edit
       ? {
           copy: (src: string, dst: string) => client.copy(src, dst),
-          exportMdToDocx: (path: string) => client.exportMdToDocx(path),
+          exportMdToDocx: (path, layout) => client.exportMdToDocx(path, layout),
         }
       : {}),
   };
@@ -349,7 +352,8 @@ export function createWorkspaceSource(
         ? downloadWorkspaceArchive(conversationId, path, filename)
         : downloadWorkspaceFile(conversationId, path, filename),
     fetchBytes: (path) => fetchWorkspaceFileBlob(conversationId, path),
-    exportMdToDocx: (path) => exportWorkspaceMdToDocx(conversationId, path),
+    exportMdToDocx: (path, layout) =>
+      exportWorkspaceMdToDocx(conversationId, path, layout),
   });
   // 桌面专属 HTML 完整效果出口（web stub 不提供 → 面板源码 + 下载兜底）。
   return withCloudHtmlEntries(source, {
@@ -389,7 +393,7 @@ export function createCloudWorkspaceSource(
           ? wsDownloadArchive(wsId, path, filename)
           : wsDownloadFile(wsId, path, filename),
       fetchBytes: (path) => wsFetchFileBlob(wsId, path),
-      exportMdToDocx: (path) => wsExportMdToDocx(wsId, path),
+      exportMdToDocx: (path, layout) => wsExportMdToDocx(wsId, path, layout),
       listFileIndex: () => wsListFileIndex(wsId),
     },
     readonly ? CLOUD_READONLY_CAPS : CLOUD_CAPS,

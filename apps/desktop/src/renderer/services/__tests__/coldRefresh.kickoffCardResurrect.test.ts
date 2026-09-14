@@ -3,8 +3,8 @@
  *
  * 生产冷开序（ConversationPage）：硬刷新清 notedSettled / IX / execution →
  * adoptMessageWindow(磁盘 cache，不跑 toMessage) → GET messages 的 toMessage
- * 水合 IX（窗口被 isMessageWindowStrictlyRicher 拒写也不回滚）→ ResumePrompt
- * 走 selectVisibleColdResumes（leftover team_preview 不画可点开工壳）→ 图走 shouldShowTeamGraph
+ * 后采用服务器窗 → ResumePrompt 走 selectVisibleColdResumes
+ * （leftover team_preview 不画可点开工壳）→ 图走 shouldShowTeamGraph
  * （只看 IX 原始 status + execution.runs，不复用 settled 判据）。
  *
  * 事件字段抄自 conformance `gates._team_preview_finalized` / `team_preview_resolved`
@@ -14,7 +14,6 @@ import { shouldShowTeamGraph } from "@/components/chat/debatePreviewPlacement";
 import {
   type Message,
   getRuntime,
-  isMessageWindowStrictlyRicher,
   useConversationStore,
 } from "@/stores/conversation";
 import {
@@ -256,11 +255,7 @@ describe("Ctrl+R after 开做 — leftover 不画可点开工壳 + 图消失", (
     expect(useInteractionStore.getState().byId.size).toBe(0);
 
     const getMsg = toMessage(backendRow(pauseSnapshotEvents()));
-    const existing = getRuntime(CID).messages;
-    const incoming = [seededUserMessage(), getMsg];
-    const wrote = isMessageWindowStrictlyRicher(incoming, existing);
-    // cache 更厚 → GET 拒写；leftover 开工卡事件不再水合 IX
-    expect(wrote).toBe(false);
+    adoptCache([seededUserMessage(), getMsg]);
     expect(useInteractionStore.getState().byId.get(TP)).toBeUndefined();
 
     const snap = paint();
@@ -298,7 +293,7 @@ describe("Ctrl+R after 开做 — leftover 不画可点开工壳 + 图消失", (
     expect(snap.sendNotStop).toBe(false);
   });
 
-  it("GET 有 resolved 但窗口拒写：卡仍被 IX.status 挡住（不是本 bug）", () => {
+  it("GET 有 resolved：更厚 cache 仍被服务器窗覆盖，卡不画", () => {
     seedUser();
     const cached = toMessage(backendRow(pauseSnapshotEvents()));
     useInteractionStore.getState().clear();
@@ -315,27 +310,18 @@ describe("Ctrl+R after 开做 — leftover 不画可点开工壳 + 图消失", (
       },
     ]);
 
-    toMessage(backendRow(postKickoffEvents(), { paused: false }));
-    expect(
-      isMessageWindowStrictlyRicher(
-        [
-          seededUserMessage(),
-          toMessage(backendRow(postKickoffEvents(), { paused: false })),
-        ],
-        getRuntime(CID).messages,
-      ),
-    ).toBe(false);
-    // leftover 事件对不再 upsert IX
-    expect(useInteractionStore.getState().byId.get(TP)).toBeUndefined();
+    const getMsg = toMessage(
+      backendRow(postKickoffEvents(), { paused: false }),
+    );
+    adoptCache([seededUserMessage(), getMsg]);
 
     const snap = paint();
     // eslint-disable-next-line no-console
-    console.log("REJECT_WINDOW_BUT_IX_RESOLVED", JSON.stringify(snap, null, 2));
+    console.log("ADOPT_GET_RESOLVED", JSON.stringify(snap, null, 2));
 
-    expect(snap.journalHasResolved).toBe(false);
     expect(snap.ixStatus).toBeNull();
-    expect(snap.settled).toBe(false);
     expect(snap.cards).toEqual([]);
+    expect(snap.graph).toBe(true);
   });
 
   it("isColdCheckpointSettled 在坏序三腿皆空：这就是卡闸没挡住的原因", () => {

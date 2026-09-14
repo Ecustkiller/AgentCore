@@ -86,7 +86,7 @@ def _ask_frame() -> AskUserSuspension:
 async def test_settlement_prewrite_priority_and_dedupe(monkeypatch: pytest.MonkeyPatch) -> None:
     store = _FakeStore()
     monkeypatch.setattr(
-        "agentcore.conversation.store.get_conversation_store",
+        "agentcore.runtime.conversation_store.get_conversation_store",
         lambda: store,
     )
 
@@ -131,7 +131,7 @@ async def test_settlement_prewrite_failure_propagates(monkeypatch: pytest.Monkey
     store = _FakeStore()
     store.fail_kinds.add("approval_resolved")
     monkeypatch.setattr(
-        "agentcore.conversation.store.get_conversation_store",
+        "agentcore.runtime.conversation_store.get_conversation_store",
         lambda: store,
     )
 
@@ -152,7 +152,7 @@ async def test_concurrent_writers_use_db_seq_none(monkeypatch: pytest.MonkeyPatc
     """Two writers enqueue concurrently; both pass seq=None (DB allocates)."""
     store = _FakeStore()
     monkeypatch.setattr(
-        "agentcore.conversation.store.get_conversation_store",
+        "agentcore.runtime.conversation_store.get_conversation_store",
         lambda: store,
     )
 
@@ -185,7 +185,7 @@ async def test_cold_resume_settlement_fail_skips_claim(
     store = _FakeStore()
     store.fail_kinds.add("checkpoint_resolved")
     monkeypatch.setattr(
-        "agentcore.conversation.store.get_conversation_store",
+        "agentcore.runtime.conversation_store.get_conversation_store",
         lambda: store,
     )
 
@@ -230,7 +230,7 @@ async def test_cold_resume_pipeline_emit_dedupes_prewrite(
     """D8 冷路：预写后 resume writer 种子化 dedupe ⇒ pipeline 重放 emit 不重复落库."""
     store = _FakeStore()
     monkeypatch.setattr(
-        "agentcore.conversation.store.get_conversation_store",
+        "agentcore.runtime.conversation_store.get_conversation_store",
         lambda: store,
     )
 
@@ -386,7 +386,7 @@ async def test_stage_card_resolved_not_blocked_by_required_row(
     """宿主回合已有 required 行（resume 种子化进 dedupe）⇒ resolved 落库不得被吞."""
     store = _FakeStore()
     monkeypatch.setattr(
-        "agentcore.conversation.store.get_conversation_store",
+        "agentcore.runtime.conversation_store.get_conversation_store",
         lambda: store,
     )
 
@@ -410,7 +410,7 @@ async def test_stage_card_orphan_not_blocked_by_required_row(
     """被取代的兄弟卡：required 行在场时 interaction_orphaned 落库不得被吞."""
     store = _FakeStore()
     monkeypatch.setattr(
-        "agentcore.conversation.store.get_conversation_store",
+        "agentcore.runtime.conversation_store.get_conversation_store",
         lambda: store,
     )
 
@@ -436,7 +436,7 @@ async def test_stage_card_double_resolve_still_dedupes(
     """同一 resolved 事实双写（预写 + awaiter emit）仍只落一行."""
     store = _FakeStore()
     monkeypatch.setattr(
-        "agentcore.conversation.store.get_conversation_store",
+        "agentcore.runtime.conversation_store.get_conversation_store",
         lambda: store,
     )
 
@@ -506,7 +506,7 @@ async def test_hot_path_awaiter_still_records_fact_log_after_prewrite(
 
     store = _FakeStore()
     monkeypatch.setattr(
-        "agentcore.conversation.store.get_conversation_store",
+        "agentcore.runtime.conversation_store.get_conversation_store",
         lambda: store,
     )
 

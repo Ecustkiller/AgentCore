@@ -6,8 +6,8 @@ import { typeOut } from "../motion/primitives";
  * (nodes / edges / positions / wave schedule / streaming copy / debate axis) and
  * the current scene-local frame, produce ReactFlow node/edge state for GraphStage.
  *
- * Video-specific schedule tables and node ids live in the video package — this
- * module must not import videos/.
+ * Sample-graph schedule tables live in kit/hero — this module must not
+ * import kit/ or videos/.
  */
 
 export interface SchedEntry {

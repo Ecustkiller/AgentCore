@@ -10,8 +10,8 @@ from agentcore.llm.provider.protocol import LLMMessage, ToolCall
 from agentcore.runtime.always_confirm import requires_always_confirm
 from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate, tool_call_requires_approval
 from agentcore.runtime.events import EventSink, tool_use_end
-from agentcore.runtime.facts import CrossTurnRetry, cross_turn_retry_meta
 from agentcore.runtime.loop_controller import ToolAttempt
+from agentcore.tools.cross_turn_retry import CrossTurnRetry, cross_turn_retry_meta
 from agentcore.tools.protocol import ToolContext, ToolSchema
 
 from .tool_exec_args import (

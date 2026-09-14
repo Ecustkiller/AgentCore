@@ -130,7 +130,7 @@ export async function continuePausedTurn(opts: {
     });
   } catch (err) {
     if (isAbort(err)) {
-      finalizeHonestStopAbort(conversationId);
+      finalizeHonestStopAbort(conversationId, err);
       restorePausedSurface(conversationId, messageId, pausedSnap);
       return;
     }

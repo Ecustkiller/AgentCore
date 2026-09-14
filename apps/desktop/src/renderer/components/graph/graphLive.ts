@@ -19,7 +19,7 @@ import type { InjectGraphOverlay } from "@/lib/causalInject";
 import {
   chunksTailText,
   estimateTokensFromCharCount,
-  formatCostCaption,
+  formatDisplayCost,
   headText,
   pickCostMoney,
   sumChunkChars,
@@ -408,7 +408,7 @@ export function deriveAgentNodeLive(
     realTokens,
     costText:
       costNano > 0
-        ? formatCostCaption(costNano, costEstimated, costCurrency)
+        ? formatDisplayCost(costNano, costEstimated, costCurrency)
         : undefined,
     handleDirection: opts.handleDirection,
     isSubtask,

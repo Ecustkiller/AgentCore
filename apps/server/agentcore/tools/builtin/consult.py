@@ -57,6 +57,7 @@ class ConsultTool:
         audience=AUDIENCE_BOTH,
         # Wired by hand when the merged catalog is non-empty (单一 has_entries 门控).
         ceo_wire=CeoWire.CONSULT,
+        catalog_summary="按名查阅按需目录",
     )
 
     source: Consultable

@@ -17,8 +17,6 @@ from agentcore.conversation.common import (
 )
 from agentcore.conversation.compaction import compact_before_turn
 from agentcore.conversation.history import load_chat_context
-from agentcore.conversation.inline_body import plain_text
-from agentcore.conversation.mentions import to_stored_agent_mentions
 from agentcore.conversation.midflight_persist import load_or_create_turn_user_message
 from agentcore.conversation.turn_backend import build_turn_backend
 from agentcore.conversation.turn_persistence import (
@@ -31,20 +29,25 @@ from agentcore.conversation.turn_runner import (
     suspension_callbacks,
 )
 from agentcore.conversation.turn_stats import turn_worker_stats
-from agentcore.conversation.zero_output_rollback import maybe_delete_zero_output_send
+from agentcore.conversation.zero_output_rollback import (
+    maybe_delete_zero_output_send,
+    result_from_unstarted_close,
+)
 from agentcore.core.error_codes import ErrorCode
-from agentcore.core.errors import error_fields_for
+from agentcore.core.inline_body import plain_text
 from agentcore.core.log_context import log_context, new_trace_id
 from agentcore.core.logging import get_logger
+from agentcore.core.mentions import to_stored_agent_mentions
 from agentcore.core.types import new_id
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import (
-    BoardRepository,
     ConversationRepository,
     MessageRepository,
+    TableRepository,
 )
 from agentcore.llm.resolve import LLMCredentials, resolve_turn_model
 from agentcore.runtime.checkpoints import CheckpointResponse
+from agentcore.runtime.error_fields import error_fields_for
 from agentcore.runtime.events import EventSink, FinishReason, error_event, message_end, turn_saved
 from agentcore.runtime.leases import (
     acquire_turn_lease,
@@ -115,6 +118,7 @@ async def stream_chat(
     llm_supports_tools: bool | None = None,
     x_client_platform: str | None = None,
     agent_mentions: list[dict] | None = None,
+    table_selection: list[str] | None = None,
     existing_user_message_id: str | None = None,
 ) -> None:
     """Main entry: persist user message, run pipeline, persist assistant reply.
@@ -145,12 +149,12 @@ async def stream_chat(
             profile_set = await resolve_profile_set(session, conv, user_id)
             permission_axes = await resolve_permission_axes(session, conversation_id)
 
-            # AI 协作白板 (§六 M2): if this conversation is a board's dedicated thread, the
-            # turn is a 白板会话 — hand its board id to the pipeline so the CEO gets board_ops.
-            board = await BoardRepository(session).get_by_conversation_id(
+            # If this conversation is a table's dedicated thread, hand its table id
+            # to the pipeline so the CEO gets table_ops / table_read.
+            table = await TableRepository(session).get_by_conversation_id(
                 conversation_id, user_id=user_id
             )
-            board_id = board.id if board else None
+            table_id = table.id if table else None
 
         backend = await build_turn_backend(
             user_id=user_id,
@@ -201,23 +205,33 @@ async def stream_chat(
             conversation_id=conversation_id,
             user_id=user_id,
         ):
-            turn_result = await run_and_persist(
-                conversation_id=conversation_id,
-                user_message=user_message,
-                user_id=user_id,
-                folder_id=folder_id,
-                sink=sink,
-                history=history[:-1],
-                attachments=resident_attachments,
-                backend=backend,
-                llm_credentials=llm_credentials,
-                profile_set=profile_set,
-                permission_axes=permission_axes,
-                board_id=board_id,
-                llm_supports_tools=llm_supports_tools,
-                x_client_platform=x_client_platform,
-                agent_mentions=agent_mentions,
-            )
+            try:
+                turn_result = await run_and_persist(
+                    conversation_id=conversation_id,
+                    user_message=user_message,
+                    user_id=user_id,
+                    folder_id=folder_id,
+                    sink=sink,
+                    history=history[:-1],
+                    attachments=resident_attachments,
+                    backend=backend,
+                    llm_credentials=llm_credentials,
+                    profile_set=profile_set,
+                    permission_axes=permission_axes,
+                    table_id=table_id,
+                    table_selection=table_selection,
+                    llm_supports_tools=llm_supports_tools,
+                    x_client_platform=x_client_platform,
+                    agent_mentions=agent_mentions,
+                )
+            except asyncio.CancelledError:
+                await maybe_delete_zero_output_send(
+                    conversation_id=conversation_id,
+                    user_message_id=user_msg.id,
+                    result=result_from_unstarted_close(sink=sink),
+                    user_created_this_send=True,
+                )
+                raise
             await maybe_delete_zero_output_send(
                 conversation_id=conversation_id,
                 user_message_id=user_msg.id,
@@ -334,10 +348,10 @@ async def regenerate_chat(
                 local_binding = await resolve_local_binding(session, conv)
             profile_set = await resolve_profile_set(session, conv, user_id)
             permission_axes = await resolve_permission_axes(session, conversation_id)
-            board = await BoardRepository(session).get_by_conversation_id(
+            table = await TableRepository(session).get_by_conversation_id(
                 conversation_id, user_id=user_id
             )
-            board_id = board.id if board else None
+            table_id = table.id if table else None
 
             if (
                 edited_content is not None
@@ -389,7 +403,7 @@ async def regenerate_chat(
             llm_credentials=llm_credentials,
             profile_set=profile_set,
             permission_axes=permission_axes,
-            board_id=board_id,
+            table_id=table_id,
             llm_supports_tools=llm_supports_tools,
             agent_mentions=stored_mentions or None,
         )
@@ -480,13 +494,10 @@ async def resume_chat(
 
         async with async_session_factory() as session:
             history = await load_chat_context(session, conversation_id)
-            # AI 协作白板 (§六 M2): re-derive the board binding (authoritative in the DB, not
-            # carried in the frame) so a board turn paused at a checkpoint regains board_ops
-            # on resume — symmetric with the send path's lookup in ``stream_chat``.
-            board = await BoardRepository(session).get_by_conversation_id(
+            table = await TableRepository(session).get_by_conversation_id(
                 conversation_id, user_id=user_id
             )
-            board_id = board.id if board else None
+            table_id = table.id if table else None
 
         backend = await build_turn_backend(
             user_id=user_id,
@@ -573,7 +584,7 @@ async def resume_chat(
                             sink=sink,
                             backend=backend,
                             history=history[:-1],
-                            board_id=board_id,
+                            table_id=table_id,
                             llm_credentials=llm_credentials,
                             profile_set=profile_set,
                             session_saver=session_saver,
@@ -779,10 +790,10 @@ async def continue_chat(
 
         async with async_session_factory() as session:
             history = await load_chat_context(session, conversation_id)
-            board = await BoardRepository(session).get_by_conversation_id(
+            table = await TableRepository(session).get_by_conversation_id(
                 conversation_id, user_id=user_id
             )
-            board_id = board.id if board else None
+            table_id = table.id if table else None
 
         backend = await build_turn_backend(
             user_id=user_id,
@@ -845,7 +856,7 @@ async def continue_chat(
                         sink=sink,
                         backend=backend,
                         history=history[:-1] if history else None,
-                        board_id=board_id,
+                        table_id=table_id,
                         folder_id=ws_folder_id,
                         llm_credentials=llm_credentials,
                         profile_set=profile_set,

@@ -163,6 +163,7 @@ class ListFolderDirTool:
         surface=ToolSurface.CEO_ORCHESTRATION,
         audience=AUDIENCE_CEO_ONLY,
         ceo_wire=CeoWire.ALWAYS,
+        catalog_summary="列出另一张桌的目录",
     )
 
     @property
@@ -218,6 +219,7 @@ class ReadFolderFileTool:
         surface=ToolSurface.CEO_ORCHESTRATION,
         audience=AUDIENCE_CEO_ONLY,
         ceo_wire=CeoWire.ALWAYS,
+        catalog_summary="读另一张桌的文件",
     )
 
     @property

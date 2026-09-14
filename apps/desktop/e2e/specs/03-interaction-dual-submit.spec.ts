@@ -31,7 +31,7 @@ test.describe("交互卡闭环（双提交面）", () => {
     );
     await expectHashConversation(page);
 
-    await expect(page.getByText("Agent 请求执行")).toBeVisible({
+    await expect(page.getByText("请求执行")).toBeVisible({
       timeout: 30_000,
     });
     await page.getByRole("button", { name: "允许一次" }).click();

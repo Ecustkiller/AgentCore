@@ -72,7 +72,7 @@ Cursor 规则 ↔ AgentCore 用户规则 · E2E 探针（L1 合成，非真实�
   uv run python scripts/probe_product_rules_e2e.py --approvals-only
 
 结构校验（零 LLM）：
-  uv run python -m agentcore.evals --lint-only --suite product_rules
+  uv run python -m agentcore.evals lint --suite product_rules
 """
 
 
@@ -94,7 +94,7 @@ def _print_no_credentials() -> None:
     print("   3) 可选校验：uv run python scripts/archive/probe_turn.py \"ping\"")
     print("  显式覆盖：导出 EVAL_DEEPSEEK_API_KEY（建议低额度账号）")
     print("  最后才用：apps/server/.env 的 PLATFORM_API_KEY（本地 dogfood 勿默认依赖）")
-    print("  结构校验可零 LLM：python -m agentcore.evals --lint-only --suite product_rules")
+    print("  结构校验可零 LLM：python -m agentcore.evals lint --suite product_rules")
     print("=" * 88)
 
 

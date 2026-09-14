@@ -2,6 +2,18 @@ import { resolve } from "path";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  plugins: [
+    {
+      name: "vitest-image-url",
+      enforce: "pre",
+      load(id) {
+        const path = id.split("?")[0] ?? id;
+        if (/\.(jpe?g|png)$/i.test(path)) {
+          return `export default ${JSON.stringify(path)}`;
+        }
+      },
+    },
+  ],
   test: {
     globals: true,
     environment: "node",

@@ -68,6 +68,7 @@ class EscalateTool:
     registration = ToolRegistration(
         surface=ToolSurface.WORKER_ONLY,
         audience=AUDIENCE_WORKER_ONLY,
+        catalog_summary="队员向上请示",
     )
 
     @property

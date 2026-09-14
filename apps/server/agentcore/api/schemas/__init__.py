@@ -72,19 +72,12 @@ from .auth import (
     UserResponse,
 )
 from .boards import (
-    BoardConversationResponse,
     BoardDetail,
     BoardSceneWriteRequest,
     BoardSummary,
     BoardWriteResult,
     CreateBoardRequest,
     UpdateBoardRequest,
-)
-from .bookmarks import (
-    BookmarkIdsResponse,
-    BookmarkItem,
-    BookmarkListResponse,
-    CreateBookmarkRequest,
 )
 from .browser import (
     BrowserInputEvent,
@@ -288,6 +281,15 @@ from .notices import (
 )
 from .search import SearchItem, SearchResponse, SearchSection
 from .sharing import CreateShareRequest, ShareListResponse, ShareSummary
+from .tables import (
+    CreateTableRequest,
+    TableConversationResponse,
+    TableDetail,
+    TableOpsRequest,
+    TableOpsResult,
+    TableSummary,
+    UpdateTableRequest,
+)
 from .tools import (
     CapabilitiesResponse,
     CapabilityGuidelines,
@@ -449,11 +451,17 @@ __all__ = [
     # boards (AI 协作白板)
     "CreateBoardRequest",
     "UpdateBoardRequest",
+    "CreateTableRequest",
+    "UpdateTableRequest",
+    "TableSummary",
+    "TableDetail",
+    "TableOpsRequest",
+    "TableOpsResult",
+    "TableConversationResponse",
     "BoardSummary",
     "BoardDetail",
     "BoardSceneWriteRequest",
     "BoardWriteResult",
-    "BoardConversationResponse",
     # docs (creation-tool 文档)
     "CreateDocRequest",
     "UpdateDocRequest",
@@ -461,11 +469,6 @@ __all__ = [
     "DocDetail",
     "DocBodyWriteRequest",
     "DocWriteResult",
-    # bookmarks (消息收藏)
-    "CreateBookmarkRequest",
-    "BookmarkItem",
-    "BookmarkListResponse",
-    "BookmarkIdsResponse",
     # 浏览器输入注入
     "MouseInputEvent",
     "KeyInputEvent",

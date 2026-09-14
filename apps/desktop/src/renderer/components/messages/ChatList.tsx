@@ -104,9 +104,6 @@ export function ChatList({
           <EmptyHint
             className="py-10"
             title={chats.length === 0 ? "还没有会话" : "没有匹配的会话"}
-            hint={
-              chats.length === 0 ? "点击右上角查找用户或打开通讯录" : undefined
-            }
           />
         ) : (
           <div className="space-y-0.5">

@@ -830,8 +830,13 @@ async def test_search_tool_excludes_host(monkeypatch):
 
 def test_search_schema_is_folder_default_and_body_when():
     schema = SearchConversationsTool().schema
-    assert "正文" in schema.description
-    assert "续做" in schema.description
+    desc = schema.description
+    assert "正文" in desc
+    assert "read_conversation" in desc
+    assert "偏好" in desc
+    assert "续做" not in desc
+    assert "不含本场" not in desc
+    assert "记忆主题" not in desc
     scope = schema.parameters["properties"]["scope"]
     assert scope.get("default") == "folder"
     archived = schema.parameters["properties"]["include_archived"]

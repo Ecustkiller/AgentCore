@@ -9,5 +9,5 @@
     { "name": "FinishReason" },
     { "name": "Delegated" }
   ],
-  "rubric": "多文件重构落盘：需读写多个路径并保持行为，应委派团队/worker，禁止口头伪交付。"
+  "rubric": "多路径读写可切开，过程不该进 CEO 窗。应派，禁止口头伪交付。"
 }

@@ -1,6 +1,6 @@
 """Hooks for crash-lease recover (injection seam for production + tests).
 
-Production installs :func:`agentcore.runtime.crash_delegate.production_crash_delegate_factory`
+Production installs :func:`agentcore.conversation.crash_delegate.production_crash_delegate_factory`
 via ``set_crash_delegate_factory`` in the app lifespan. When the factory is unset
 (tests / miswired boot), ``build_crash_delegate_tool`` warns and the sweeper
 salvages to ``interrupted``. Unit tests may inject a fake tool to prove

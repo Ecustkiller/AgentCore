@@ -62,7 +62,8 @@ async def run_chat_pipeline(
     user_id: str,
     backend: WorkspaceBackend,
     folder_id: str | None = None,
-    board_id: str | None = None,
+    table_id: str | None = None,
+    table_selection: list[str] | None = None,
     attachments: list[dict] | None = None,
     approvals_enabled: bool = True,
     permission_axes: PermissionAxes | None = None,
@@ -104,10 +105,9 @@ async def run_chat_pipeline(
     the memory SCOPE so a project conversation also gets that project's memory layer
     injected (global + project), and ``consult`` searches both (Agent记忆与知识系统 §二).
 
-    ``board_id`` marks this turn as a 白板会话 (AI协作白板.md §六 M2): when set, the CEO
-    gains the ``board_ops`` tool + a :class:`BoardChannel` bound to that board, so it can
-    apply structured ops to the user's open whiteboard canvas. ``None`` for every ordinary
-    chat — then ``board_ops`` is neither wired nor reachable.
+    ``table_id`` marks a 表格会话: the CEO gains ``table_read`` / ``table_ops`` (server-side
+    ``apply_ops`` on DB). ``None`` → those tools fail cleanly. ``table_selection`` is this
+    turn's selected row ids for ``<表格>`` (not stored on the message).
 
     ``x_client_platform`` is the raw ``X-Client-Platform`` header (desktop / mobile-web /
     …). Gates ``ask_user``'s ``action=bind_local_folder`` advertisement and the
@@ -150,9 +150,6 @@ async def run_chat_pipeline(
     fact_log_token = current_fact_log.set(fact_log)
     # Append-on-emit: every fact is durably written before its SSE event is delivered.
     from agentcore.core.log_context import get_log_value
-    from agentcore.runtime.kickoff.stage_card import reset_stage_card_turn_flags
-
-    reset_stage_card_turn_flags()
 
     journal_writer = TurnJournalWriter(
         turn_id=message_id,
@@ -242,7 +239,8 @@ async def run_chat_pipeline(
                 backend=backend,
                 sink=sink,
                 folder_id=folder_id,
-                board_id=board_id,
+                table_id=table_id,
+                table_selection=table_selection,
                 attachments=attachments,
                 permission_axes=permission_axes,
                 llm_credentials=llm_credentials,
@@ -383,9 +381,6 @@ async def run_chat_pipeline(
     finally:
         # Every ``await`` below runs through ``teardown_step``: a second Stop (or an
         # overlap supersede) must not pierce the block and skip the remaining flushes.
-        from agentcore.conversation.stage_card_resolve import (
-            maybe_orphan_stage_cards_at_turn_end,
-        )
         from agentcore.runtime.interaction_orphan import orphan_registry_pending
         from agentcore.runtime.pipeline.teardown import teardown_step
 
@@ -393,11 +388,6 @@ async def run_chat_pipeline(
         await teardown_step(
             orphan_registry_pending(conversation_id, turn_id=message_id),
             step="orphan_registry_pending",
-        )
-        # 批 B 失效修订：收尾时未调 debate / 未起 MLR → pending stage_card 落 orphan 事实
-        await teardown_step(
-            maybe_orphan_stage_cards_at_turn_end(conversation_id, sink=sink),
-            step="orphan_stage_cards",
         )
         current_fact_log.reset(fact_log_token)
         # Drain the append-on-emit journal BEFORE dropping the writer: an abandoned in-flight

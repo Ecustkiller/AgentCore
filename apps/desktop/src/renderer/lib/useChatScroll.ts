@@ -48,6 +48,51 @@ import {
  * append-only and needs none of the windowing here.
  */
 
+/**
+ * Scroll reset identity across conversation id changes.
+ *
+ * Draft first-send promote copies the transcript onto a new id. Treating that
+ * as a context switch re-pins the viewport and feels like a full refresh.
+ * Keep the key minted when the first bubble appeared; real switches (A→B,
+ * leave to a new draft) mint a new key.
+ */
+export function nextTranscriptResetKey(args: {
+  prevConversationId: string | null;
+  conversationId: string | null;
+  prevResetKey: string | null;
+  firstMessageId: string | null;
+}): string | null {
+  const { prevConversationId, conversationId, prevResetKey, firstMessageId } =
+    args;
+  if (conversationId === prevConversationId) {
+    if (prevResetKey != null) return prevResetKey;
+    return firstMessageId ?? conversationId;
+  }
+  const isDraftPromote =
+    prevConversationId === null &&
+    conversationId !== null &&
+    prevResetKey != null;
+  if (isDraftPromote) return prevResetKey;
+  return firstMessageId ?? conversationId;
+}
+
+export function useTranscriptResetKey(
+  conversationId: string | null,
+  firstMessageId: string | null,
+): string | null {
+  const prevConvRef = useRef(conversationId);
+  const keyRef = useRef<string | null>(firstMessageId ?? conversationId);
+  const next = nextTranscriptResetKey({
+    prevConversationId: prevConvRef.current,
+    conversationId,
+    prevResetKey: keyRef.current,
+    firstMessageId,
+  });
+  prevConvRef.current = conversationId;
+  keyRef.current = next;
+  return next;
+}
+
 /** Fetch the previous page once the user scrolls within this of the top. */
 const TOP_LOAD_THRESHOLD_PX = 240;
 /** Fetch the next page once within this of a historical window's bottom. */
@@ -56,7 +101,9 @@ const BOTTOM_LOAD_THRESHOLD_PX = 240;
 interface ChatScrollOptions {
   firstMessageId: string | null;
   hasTranscript: boolean;
-  /** Conversation id — a change re-sticks to the latest item. */
+  /** Transcript identity — a change re-sticks to the latest item.
+   * ChatView uses {@link useTranscriptResetKey} so draft→persisted promote
+   * (same messages, new conversation id) does not reset. */
   resetKey: string | null;
   /** Test override; live ChatView uses {@link useActiveStickContentKey}. */
   contentKey?: string;

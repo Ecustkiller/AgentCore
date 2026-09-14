@@ -115,6 +115,21 @@ describe("resolveInteraction (统一 choke point)", () => {
     expect(post).not.toHaveBeenCalled();
   });
 
+  it("sidecar origin: missing live target does not POST cloud", async () => {
+    sidecarTarget.mockReturnValue(null);
+
+    await expect(
+      resolveInteraction(
+        "conv-1",
+        "ix-dead",
+        { kind: "approval", decision: "approve" },
+        "sidecar",
+      ),
+    ).rejects.toMatchObject({ code: "sidecar_settle_unavailable" });
+    expect(post).not.toHaveBeenCalled();
+    expect(respondMock).not.toHaveBeenCalled();
+  });
+
   it("regression: cloud fulfill settle uses HTTP even when a sidecar turn is active", async () => {
     // Same conversation can host a live local sidecar turn AND cloud-bridged
     // CLIENT_TOOL ops on the device fulfill stream. Guessing by activeSidecarTurns

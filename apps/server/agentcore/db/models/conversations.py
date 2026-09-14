@@ -502,43 +502,6 @@ class MemoryUpdateRow(Base):
     )
 
 
-# --- Message bookmarks (消息收藏: 对话内消息 bookmark → 侧栏「已收藏」) ---
-# A user's saved pointer to one message, so an important reply can be found again
-# from any device (跨设备 = server-stored, fetched on demand — not a device-local
-# star). Per-user and message-level: the (user_id, message_id) pair is unique, so
-# re-bookmarking is idempotent and un-bookmarking is a single delete. No DB FK
-# (app-level cascade, per repo convention): the row is dropped when its message /
-# conversation is hard-deleted (regenerate / single-message delete / conversation
-# purge), and the「已收藏」list INNER JOINs live messages+conversations so a
-# not-yet-cascaded or soft-deleted-conversation row never renders anyway.
-
-
-class MessageBookmark(Base):
-    __tablename__ = "message_bookmarks"
-    __table_args__ = (
-        # One bookmark per user per message; re-adding the same pair is a no-op.
-        UniqueConstraint(
-            "user_id", "message_id", name="uq_message_bookmarks_user_message"
-        ),
-        # The「已收藏」list read: a user's bookmarks, newest-first.
-        Index("ix_message_bookmarks_user_created", "user_id", "created_at"),
-        # Per-conversation star-state read + conversation-purge cascade.
-        Index("ix_message_bookmarks_conversation", "conversation_id"),
-    )
-
-    id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
-    # The bookmarking user (app-level FK → users; account注销 cascades these rows).
-    user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False))
-    # The owning conversation (denormalized so a jump / star-state / purge cascade
-    # needs no message round-trip).
-    conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False))
-    # The bookmarked message.
-    message_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=text("now()")
-    )
-
-
 # --- External directory grants (W3 区外授权: 对话级持久, 非进程生命周期) ---
 # Server holds alias / root_id / label / mode only. Absolute OS paths stay on the
 # desktop (``fs-session-grants.json``). Orthogonal to workspace binding. Cleared on

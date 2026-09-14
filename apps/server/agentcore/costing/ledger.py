@@ -17,10 +17,11 @@ ROLE_MEMBER = "member"
 ROLE_ARENA = "arena"
 ROLE_TITLE = "title"
 ROLE_MEMORY = "memory"
-# ``vision`` tags a board_read 读图 sub-call (AI协作白板.md §九.4): an in-turn tool-layer
-# call to a SEPARATE vision model (qwen-vl ≠ the run's DeepSeek). It is NOT a Run/Agent —
-# it gets its own priced ledger row (one model = one row, 同跨档不复价) so its spend shows
-# as its own line on the turn team payroll (``GET /messages/{id}/cost``).
+# ``vision`` tags a 读图 sub-call (attachment eye→text / ``read_image``): an in-turn
+# tool-layer call to a SEPARATE vision model (qwen-vl ≠ the run's chat model). It is
+# NOT a Run/Agent — it gets its own priced ledger row (one model = one row,
+# 同跨档不复价) so its spend shows as its own line on the turn team payroll
+# (``GET /messages/{id}/cost``).
 ROLE_VISION = "vision"
 # ``assist`` tags an **account-level** product-chrome call — AI 改写（划词改写）与
 # 文档 description 自动补: real spend that belongs to no conversation at all, so its

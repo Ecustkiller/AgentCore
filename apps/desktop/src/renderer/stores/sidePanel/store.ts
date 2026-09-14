@@ -19,6 +19,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
   changesFocusMessageId: null,
   dismissedContexts: new Set(),
   pendingBadge: 0,
+  fileTabChrome: {},
 
   ...createAutoSurfaceActions(set, get),
   ...createTabsActions(set, get),

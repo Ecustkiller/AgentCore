@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 import agentcore.docs_export.md_to_pdf as md_to_pdf_mod
+from agentcore.docs_export.layout import BODY_PT, first_line_indent_mm
 from agentcore.docs_export.md_to_pdf import (
     convert_markdown_to_pdf,
     discover_cjk_font,
@@ -110,19 +111,19 @@ def _text_positions(pdf_bytes: bytes) -> list[tuple[float, float]]:
 
 def test_default_layout_centers_h1_without_first_line_indent():
     """默认档与 md_to_docx 同口径：大标题居中，正文左边界与二级标题、列表齐平。"""
-    h1, h2, body, item = _text_positions(convert_markdown_to_pdf(_PLEADING_MD).pdf_bytes)
+    h1, h2, body, item = _text_positions(convert_markdown_to_pdf(_PLEADING_MD).pdf_bytes)[:4]
     assert h2[0] == body[0] == item[0]
     assert h1[0] > body[0] + 20  # 居中 → 起笔远离左边界
 
 
 def test_official_layout_indents_body_first_line():
-    """公文档：只有正文首行右移两字（11pt 正文 → 22pt），标题与列表不动。"""
-    plain = _text_positions(convert_markdown_to_pdf(_PLEADING_MD).pdf_bytes)
-    official = _text_positions(
-        convert_markdown_to_pdf(_PLEADING_MD, layout="official").pdf_bytes
-    )
-    assert official[2][0] == pytest.approx(plain[2][0] + 2 * 11, abs=0.01)
-    assert [official[i] for i in (0, 1, 3)] == [plain[i] for i in (0, 1, 3)]
+    """公文档：正文相对同页二级标题 / 列表右移两字。Td 是 pt，两字 = 2 × 小四。"""
+    pos = _text_positions(convert_markdown_to_pdf(_PLEADING_MD, layout="official").pdf_bytes)
+    h1, h2, body, item = pos[:4]
+    indent_pt = first_line_indent_mm(BODY_PT) * 72 / 25.4
+    assert body[0] == pytest.approx(h2[0] + indent_pt, abs=0.3)
+    assert item[0] == pytest.approx(h2[0], abs=0.3)
+    assert h1[0] > h2[0] + 10
 
 
 def test_layout_never_inferred_from_body_text():
@@ -148,6 +149,8 @@ async def test_export_markdown_to_pdf_path_layout_defaults_to_standard(tmp_path:
     official = _text_positions((root / "起诉状.pdf").read_bytes())
 
     assert official[2][0] > plain[2][0]
+    indent_pt = first_line_indent_mm(BODY_PT) * 72 / 25.4
+    assert official[2][0] == pytest.approx(official[1][0] + indent_pt, abs=0.3)
 
 
 @pytest.mark.asyncio

@@ -17,8 +17,8 @@ import contextlib
 from enum import StrEnum
 from typing import Any
 
-from agentcore.conversation.store.merge import MESSAGE_STATUS_INCOMPLETE, pick_monotonic_content
 from agentcore.core.logging import get_logger
+from agentcore.core.message_merge import MESSAGE_STATUS_INCOMPLETE, pick_monotonic_content
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import MessageRepository, TurnJournalRepository
 from agentcore.runtime.events import FinishReason
@@ -46,7 +46,11 @@ class TurnInterruptReason(StrEnum):
     # indistinguishable here from one whose process died, and labelling the guess
     # 「process_kill」sent case 519270db's root-cause hunt down the wrong road twice.
     PROCESS_KILL = "process_kill"
+    # Cloud sweeper only: it watched the lease stop beating. Sidecar cancel /
+    # exception / desktop found-dead must not borrow this name.
     LEASE_EXPIRED = "lease_expired"
+    # Found dead; nobody saw how. Dump bucket — not a specific infra cause.
+    UNKNOWN = "unknown"
     REDRIVE_FAILED = "redrive_failed"
     # Newer message took the conversation slot. Not a user Stop — do not inherit
     # the USER_STOP silence whitelist.
@@ -54,7 +58,12 @@ class TurnInterruptReason(StrEnum):
 
 
 def normalize_interrupt_reason(reason: str | TurnInterruptReason) -> TurnInterruptReason:
-    """Map legacy sweeper / recover reason strings onto the closed enum."""
+    """Map sweeper / recover / sidecar strings onto the closed enum.
+
+    Each value has an owner: only the cloud sweeper writes ``lease_expired``;
+    only a witnessed kill writes ``process_kill``; empty / ``no_dag`` / junk
+    collapse to ``unknown``.
+    """
     if isinstance(reason, TurnInterruptReason):
         return reason
     raw = (reason or "").strip()
@@ -67,8 +76,12 @@ def normalize_interrupt_reason(reason: str | TurnInterruptReason) -> TurnInterru
         return TurnInterruptReason.PROCESS_KILL
     if raw == TurnInterruptReason.OVERLAP.value:
         return TurnInterruptReason.OVERLAP
-    # no_dag / lease_expired / unknown → we found it dead, we did not see it die
-    return TurnInterruptReason.LEASE_EXPIRED
+    if raw == TurnInterruptReason.LEASE_EXPIRED.value:
+        return TurnInterruptReason.LEASE_EXPIRED
+    if raw == TurnInterruptReason.UNKNOWN.value:
+        return TurnInterruptReason.UNKNOWN
+    # no_dag / unspecified / junk → we found it dead, we did not see it die
+    return TurnInterruptReason.UNKNOWN
 
 
 def finish_reason_for(reason: TurnInterruptReason) -> FinishReason:
@@ -92,9 +105,9 @@ REDRIVE_FAILED_USER_VISIBLE = (
 # 旧稿留下的正文标记：升级前已挂上说明的回合再次收口时，靠它保持幂等（勿删）。
 _LEGACY_REDRIVE_MARKERS = ("后台恢复失败",)
 
-# 案 519270db-team-synthesis-discarded-empty-bubble：团队跑满 19 分钟、delegate 综述已产出，
-# CEO 终稿尚未开写就被清扫收口 → 用户拿到 0 字空泡，连「失败了」都无从得知。StatusStrip 的
-# chrome 救不了一个空气泡：历史里它就是一条什么都没说的助手消息。
+# Historical empty-interrupt body (writers stopped emitting it). List preview still
+# strips leftover rows. Live verdict is the composer sentence in fold-kit
+# ``TURN_INTERRUPTED_EMPTY_MESSAGE`` — 一回合一处判决, not a second bubble note.
 INTERRUPTED_EMPTY_USER_VISIBLE = "【中断说明】本轮意外中断，未产出回复。可直接发送下一条继续。"
 
 OVERLAP_EMPTY_USER_VISIBLE = (
@@ -114,8 +127,7 @@ TOKEN_BUDGET_EMPTY_USER_VISIBLE = (
 _EMPTY_CLOSE_BY_REASON: dict[str, str] = {
     TurnInterruptReason.USER_STOP.value: "",
     TurnInterruptReason.OVERLAP.value: OVERLAP_EMPTY_USER_VISIBLE,
-    TurnInterruptReason.LEASE_EXPIRED.value: INTERRUPTED_EMPTY_USER_VISIBLE,
-    TurnInterruptReason.PROCESS_KILL.value: INTERRUPTED_EMPTY_USER_VISIBLE,
+    # unknown / lease_expired / process_kill: empty body — composer owns the face.
     "harvest_yield": HARVEST_YIELD_EMPTY_USER_VISIBLE,
     "max_rounds": MAX_ROUNDS_EMPTY_USER_VISIBLE,
     "token_budget": TOKEN_BUDGET_EMPTY_USER_VISIBLE,
@@ -139,15 +151,15 @@ def empty_close_user_visible(reason: str | TurnInterruptReason) -> str:
 def compose_interrupt_body(content: str, *, reason: TurnInterruptReason) -> str:
     """Return captain text for an interrupted turn.
 
-    USER_STOP / PROCESS_KILL: streamed content only — stop/interrupt chrome stays in
-    message metadata + StatusStrip (no parenthetical body notes). Truncate at the
-    first DSML open tag so unfinished tool XML never enters the incomplete bubble
-    (``upsert_assistant`` still runs sanitize + length ceiling).
+    USER_STOP / PROCESS_KILL / UNKNOWN / LEASE_EXPIRED: streamed content only —
+    stop/interrupt chrome stays in message metadata + composer / StatusStrip (no
+    parenthetical body notes; empty unexpected interrupt does not duplicate the
+    composer sentence). Truncate at the first DSML open tag so unfinished tool
+    XML never enters the incomplete bubble (``upsert_assistant`` still runs
+    sanitize + length ceiling).
 
-    Nothing streamed is the exception: an empty bubble states nothing at all, so it
-    gets the honesty note. Silence is whitelisted to USER_STOP alone — the user
-    pressed stop and already knows why the turn ended; every other way a turn can die
-    owes them words, including reasons added later.
+    Specific empty closes still owe a body sentence: OVERLAP, harvest_yield,
+    max_rounds, token_budget. USER_STOP empty stays silent — the user pressed stop.
 
     REDRIVE_FAILED: always leave a user-visible honesty note in the body so a
     kickoff bubble cannot freeze as「已开工」while the team was silently cleared.
@@ -203,8 +215,8 @@ async def _reconcile_interrupted_turn_cost(
         drain_cost_ledger_before_reconcile,
         reconcile_turn_cost_ledger,
     )
-    from agentcore.conversation.common import log_cost_recorded
     from agentcore.db.repositories import ConversationRepository, MessageRepository
+    from agentcore.observability.cost_log import log_cost_recorded
     from agentcore.runtime.costing import aggregate_cost, aggregate_usage_tokens
 
     # Drain before main-pool session (same discipline as cloud finalize / handoff).
@@ -467,6 +479,16 @@ async def close_turn_interrupted(
                 conversation_id=conversation_id,
                 trace_id=resolved_trace,
             )
+
+        from agentcore.runtime.interaction_orphan import (
+            orphan_hot_pending_after_terminal_persist,
+        )
+
+        await orphan_hot_pending_after_terminal_persist(
+            turn_id=message_id,
+            conversation_id=conversation_id,
+            trace_id=resolved_trace,
+        )
 
         logger.info(
             "turn.interrupt_closed",

@@ -117,6 +117,8 @@ const TOOL_FACE_ORDER = [
   "execution",
   "host_browser",
   "board",
+  "table",
+  "doc",
   "orchestration",
 ] as const;
 

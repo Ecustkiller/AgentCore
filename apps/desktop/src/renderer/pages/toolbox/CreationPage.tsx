@@ -46,6 +46,7 @@ const CREATION_TOOLS: CreationTool[] = [
     title: "多维表格",
     description: "带类型列的表。",
     icon: Table2,
+    href: "/tables",
   },
   {
     kind: "slides",
@@ -55,7 +56,7 @@ const CREATION_TOOLS: CreationTool[] = [
   },
 ];
 
-/** 工具箱 · 创作。白板、文档可点进列表；未开工三项 muted，不可点。 */
+/** 工具箱 · 创作。白板、文档、多维表格可点进列表；未开工两项 muted，不可点。 */
 export function CreationPage() {
   const navigate = useNavigate();
   return (

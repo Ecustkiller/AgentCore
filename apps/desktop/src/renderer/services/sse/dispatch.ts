@@ -5,7 +5,6 @@ import { traceTurnFirstSSE } from "@/services/turnTrace";
 import { allowsSseEvent } from "@/stores/conversation/turnPhase";
 import { getTurnPhase } from "@/stores/conversation/turnPhaseActions";
 import type { SSEEvent } from "@/types/events";
-import { handleBoardEvent } from "./handlers/board";
 import { handleDesktopEvent } from "./handlers/desktop";
 import { handleExecutionEvent } from "./handlers/execution";
 import { handleInteractionEvent } from "./handlers/interaction";
@@ -19,7 +18,6 @@ const HANDLERS = [
   handleInteractionEvent,
   handleMetaEvent,
   handleWorkspaceEvent,
-  handleBoardEvent,
   handleDesktopEvent,
   handleExecutionEvent,
 ] as const;

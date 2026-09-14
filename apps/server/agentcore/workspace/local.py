@@ -22,7 +22,7 @@ on the user's real machine (双模式工作区 P2d 执行门):
 * **Timeout**: ``execute`` extends the channel's transport deadline to the code's
   own ``timeout_seconds`` plus a slack, so the desktop's execution limit stays
   authoritative and a long but legal run is not cut off by the flat file-op
-  deadline. A dropped desktop still fails as a ``WorkspaceIOError`` (never hangs).
+  deadline. A dropped desktop still fails as a ``WorkspaceLivenessTimeout`` (never hangs).
 """
 
 from __future__ import annotations

@@ -22,7 +22,6 @@ from agentcore.core.types import ToolApproval, ToolEffect, ToolFace
 from agentcore.tools.file_products import FileProduct
 
 if TYPE_CHECKING:
-    from agentcore.board.channel import BoardChannel
     from agentcore.desktop.channel import DesktopClientChannel
     from agentcore.runtime.costing import RunCost
     from agentcore.vision.protocol import VisionReader
@@ -398,13 +397,9 @@ class ToolContext:
     # the assumption fallback); this channel owns the mechanism (cap / suspend / events /
     # RunState recording) so the tool stays off the event vocabulary (引擎纯化).
     escalation: EscalationChannel | None = None
-    # AI 协作白板 (AI协作白板.md §六 M2): the per-run channel that lets ``board_ops`` apply
-    # structured ops to the user's open whiteboard canvas via the bound desktop. Set per
-    # run by the assembler ONLY when the conversation is bound to a board (a 白板会话);
-    # ``None`` for every ordinary chat / worker / test — then ``board_ops`` returns a clean
-    # "not on a board" error instead of touching anything. The channel owns the mechanism
-    # (suspend / emit / await the desktop); the tool owns only the op→result mapping (引擎纯化).
-    board_channel: BoardChannel | None = None
+    # Creation-tool 多维表格: conversation bound to a table. ``None`` everywhere else —
+    # ``table_ops`` / ``table_read`` then fail cleanly. Tools talk to DB, not a client channel.
+    table_id: str | None = None
     # Desktop Client Tools: per-run channel for Host + MCP + external mount.
     # Set when the desktop client is online (local workspace **or** cloud +
     # ``desktop_online``) so tools can backfill via ClientTool SSE; ``None`` when
@@ -417,14 +412,14 @@ class ToolContext:
     # ``diagnostics`` still leave the short-lived sidecar and land in the
     # desktop main process. ``None`` on cloud-only runs.
     workspace_channel: WorkspaceChannel | None = None
-    # AI 协作白板 / 对话读图: optional vision port (``board_read`` / attachment
-    # eye→text). Wired by ``resolve_vision_reader_for_conversation``: vision slot,
-    # else image-accepting main credentials, else platform ``VISION_*``; ``None`` ⇒
-    # clean「读图能力未配置」. CEO context only (not workers).
+    # 对话读图: optional vision port (attachment eye→text / ``read_image``). Wired by
+    # ``resolve_vision_reader_for_conversation``: vision slot, else image-accepting main
+    # credentials, else platform ``VISION_*``; ``None`` ⇒ clean「读图能力未配置」.
+    # CEO context only (not workers).
     vision_reader: VisionReader | None = None
-    # Turn-level sink for priced ``role=vision`` ledger rows (board_read + conversation
-    # image attachments). Shared by every derived run via ``replace`` (list by reference).
-    # ``None`` in tests / paths with no vision billing.
+    # Turn-level sink for priced ``role=vision`` ledger rows (conversation image
+    # attachments / ``read_image``). Shared by every derived run via ``replace``
+    # (list by reference). ``None`` in tests / paths with no vision billing.
     cost_sink: list[RunCost] | None = None
     # 项目共享工作区 (folder 绑定): True ⇒ CEO overview / worker manifest 用稀疏清单
     # (附件 + 「另有 N 个」)；False ⇒ 裸聊 scratch，非附件文件照常列入。
@@ -450,6 +445,10 @@ class ToolContext:
     # by the executor (引擎纯化, twin of ``on_phase``). ``None`` for call sites without a live sink
     # (tests / evals) — the tool simply skips the ping.
     on_progress: Callable[[str, dict[str, Any] | None], None] | None = None
+    # Successful disk land → sibling verify cache is stale (typecheck/build).
+    # Engine closes over ``active_coordination``; called with ``execution_id``.
+    # ``None`` in tests / unscoped writes — the leaf skips the ping.
+    on_file_landed: Callable[[str], None] | None = None
     # 检索预算 (提案 A1): per-run counter for ``web_search`` / ``web_fetch``. Wired by the
     # worker executor from ``RunSpec.retrieval_budget``; ``None`` for CEO / tests without a
     # budget (no enforcement). Shared by reference across ``replace`` so parallel tool

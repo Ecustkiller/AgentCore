@@ -95,7 +95,7 @@ export const INTERACTION_KIND_WIRE: Readonly<Record<UserInteractionKind, Interac
     idField: "stage_card_id",
     hot: false,
     pausesTurn: false,
-    reconnectAnswerable: true,
+    reconnectAnswerable: false,
     journalSurface: true,
     attention: false,
   },

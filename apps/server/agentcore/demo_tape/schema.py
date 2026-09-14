@@ -61,8 +61,6 @@ PAUSE_RESOLVED_KINDS = frozenset(
 CLIENT_TOOL_REQUIRED_KINDS = frozenset(
     {
         "workspace_op_required",
-        "board_op_required",
-        "board_read_required",
         "external_mount_required",
         "host_op_required",
     }

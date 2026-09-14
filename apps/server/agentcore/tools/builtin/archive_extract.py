@@ -12,7 +12,6 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolFace
-from agentcore.runtime.facts import CROSS_TURN_RETRY_KEY, CrossTurnRetry
 from agentcore.storage._archive import (
     ZipExtractLimitError,
     ZipSlipError,
@@ -23,6 +22,7 @@ from agentcore.tools.builtin.file_ops import (
     prepared_write_relpath,
     write_scope_rejection,
 )
+from agentcore.tools.cross_turn_retry import CROSS_TURN_RETRY_KEY, CrossTurnRetry
 from agentcore.tools.file_products import FileProduct, file_product
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (

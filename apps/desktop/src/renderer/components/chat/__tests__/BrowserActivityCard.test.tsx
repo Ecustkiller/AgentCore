@@ -30,15 +30,6 @@ vi.mock("@/services/workspace", () => ({
   fetchWorkspaceFileBlob: vi.fn(),
 }));
 
-const showBrowser = vi.fn();
-vi.mock("@/stores/sidePanel", () => ({
-  useSidePanelStore: Object.assign(
-    (selector: (s: { showBrowser: typeof showBrowser }) => unknown) =>
-      selector({ showBrowser }),
-    { getState: () => ({ showBrowser }) },
-  ),
-}));
-
 const hydrateConversation = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/stores/browserSessions", () => ({
   useBrowserSessionsStore: {
@@ -51,6 +42,8 @@ import { fetchWorkspaceFileBlob } from "@/services/workspace";
 import {
   BrowserActivityCard,
   BrowserResult,
+  browserExpandExtras,
+  browserHasExpandBody,
   browserResultPeek,
   browserResultTail,
   browserSubline,
@@ -74,7 +67,6 @@ beforeAll(() => {
 beforeEach(() => {
   mockFetch.mockReset();
   mockFetch.mockResolvedValue(new Blob(["jpeg-bytes"], { type: "image/jpeg" }));
-  showBrowser.mockReset();
   hydrateConversation.mockClear();
 });
 
@@ -202,7 +194,7 @@ describe("browserSubline · 展开卡一行副文", () => {
 });
 
 describe("browserResultPeek · 单步折叠一行", () => {
-  it("tail prefers detail over title/url", () => {
+  it("tail prefers detail over title/url for non-navigate", () => {
     expect(
       browserResultTail({
         kind: "browser",
@@ -214,15 +206,36 @@ describe("browserResultPeek · 单步折叠一行", () => {
     ).toBe("点击元素 e13");
   });
 
+  it("navigate prefers page title over 打开-url detail", () => {
+    expect(
+      browserResultTail({
+        kind: "browser",
+        action: "navigate",
+        url: "https://ex.com",
+        title: "示例首页",
+        detail: "打开 https://ex.com",
+      }),
+    ).toBe("示例首页");
+  });
+
   it("prefers detail, falls back to title/url", () => {
     expect(
       browserResultPeek({
         kind: "browser",
         action: "navigate",
         url: "https://ex.com",
+        title: "示例首页",
         detail: "打开示例首页",
       }),
-    ).toBe("Navigate · 打开示例首页");
+    ).toBe("Navigate · 示例首页");
+    expect(
+      browserResultPeek({
+        kind: "browser",
+        action: "navigate",
+        url: "https://ex.com",
+        detail: "打开 https://ex.com",
+      }),
+    ).toBe("Navigate · https://ex.com");
     expect(
       browserResultPeek({
         kind: "browser",
@@ -230,6 +243,44 @@ describe("browserResultPeek · 单步折叠一行", () => {
         url: "https://ex.com/list",
       }),
     ).toBe("Scroll · https://ex.com/list");
+  });
+
+  it("expand extras is the url when the title chip is the page title", () => {
+    expect(
+      browserExpandExtras({
+        kind: "browser",
+        action: "navigate",
+        url: "https://ex.com/",
+        title: "示例首页",
+        detail: "打开 https://ex.com",
+      }),
+    ).toBe("https://ex.com/");
+    expect(
+      browserHasExpandBody({
+        kind: "browser",
+        action: "navigate",
+        url: "https://ex.com/",
+        title: "示例首页",
+      }),
+    ).toBe(true);
+  });
+
+  it("expand extras are empty when the title chip is already the url", () => {
+    expect(
+      browserExpandExtras({
+        kind: "browser",
+        action: "navigate",
+        url: "https://ex.com/",
+        detail: "打开 https://ex.com",
+      }),
+    ).toBe("");
+    expect(
+      browserHasExpandBody({
+        kind: "browser",
+        action: "navigate",
+        url: "https://ex.com/",
+      }),
+    ).toBe(false);
   });
 });
 
@@ -259,6 +310,8 @@ describe("BrowserActivityCard · 卡渲染", () => {
     // 折叠态不平铺步骤明细。
     expect(screen.queryByText("打开示例站")).toBeNull();
     expect(screen.queryByText("点击登录按钮")).toBeNull();
+    expect(screen.queryByText("打开浏览器")).toBeNull();
+    expect(screen.queryByText("查看直播")).toBeNull();
   });
 
   it("expands into a step list with action + one subline", () => {
@@ -388,8 +441,8 @@ describe("BrowserActivityCard · 含 frame 的回放重建", () => {
   });
 });
 
-describe("BrowserResult · 单步富卡", () => {
-  it("renders the action header + key-frame from display", async () => {
+describe("BrowserResult · 单步展开", () => {
+  it("renders the key-frame without restating the action header", async () => {
     render(
       <BrowserResult
         display={{
@@ -403,77 +456,47 @@ describe("BrowserResult · 单步富卡", () => {
         conversationId="conv-1"
       />,
     );
-    expect(screen.getByText("Navigate")).toBeTruthy();
-    expect(screen.getByText("打开示例站 · https://example.com")).toBeTruthy();
+    expect(screen.queryByText("Navigate")).toBeNull();
+    expect(screen.queryByText("打开示例站 · https://example.com")).toBeNull();
+    expect(screen.queryByText("打开浏览器")).toBeNull();
+    expect(screen.getByText("https://example.com")).toBeTruthy();
     await waitFor(() =>
       expect(mockFetch).toHaveBeenCalledWith("conv-1", "browser/step-0001.jpg"),
     );
   });
 
-  it("does not repeat url under navigate detail that already contains it", () => {
+  it("shows the destination url when navigate titled the page and there is no frame", () => {
     render(
       <BrowserResult
         display={{
           kind: "browser",
           action: "navigate",
-          url: "http://localhost:5174/",
-          title: "白板",
-          detail: "打开 http://localhost:5174/",
+          url: "https://www.baidu.com/",
+          title: "百度一下，你就知道",
+          detail: "打开 https://www.baidu.com",
         }}
         conversationId="conv-1"
       />,
     );
-    expect(screen.getByText(/白板/)).toBeTruthy();
-    expect(screen.getByText("打开 http://localhost:5174/")).toBeTruthy();
-    expect(screen.queryByText("http://localhost:5174/")).toBeNull();
-  });
-
-  it("shows 打开浏览器 CTA and reveals the browser tab on click", () => {
-    render(
-      <BrowserResult
-        display={{
-          kind: "browser",
-          action: "navigate",
-          url: "https://example.com",
-          detail: "打开示例站",
-        }}
-        conversationId="conv-1"
-      />,
-    );
-    const cta = screen.getByText("打开浏览器");
-    expect(cta).toBeTruthy();
-    fireEvent.click(cta);
-    expect(showBrowser).toHaveBeenCalledTimes(1);
-  });
-
-  it("hides the browser CTA when conversationId is null", () => {
-    render(
-      <BrowserResult
-        display={{
-          kind: "browser",
-          action: "click",
-          url: "https://example.com",
-          detail: "点击链接",
-        }}
-        conversationId={null}
-      />,
-    );
+    expect(screen.getByText("https://www.baidu.com/")).toBeTruthy();
+    expect(screen.queryByText("Navigate")).toBeNull();
     expect(screen.queryByText("打开浏览器")).toBeNull();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it("shows a no-frame note when the step carries no key-frame", () => {
-    render(
+  it("renders nothing when the title chip already is the url and there is no frame", () => {
+    const { container } = render(
       <BrowserResult
         display={{
           kind: "browser",
-          action: "click",
+          action: "navigate",
           url: "https://example.com",
-          detail: "点击链接",
+          detail: "打开 https://example.com",
         }}
         conversationId="conv-1"
       />,
     );
-    expect(screen.getByText("（无关键帧）")).toBeTruthy();
+    expect(container.textContent).toBe("");
     expect(mockFetch).not.toHaveBeenCalled();
   });
 });

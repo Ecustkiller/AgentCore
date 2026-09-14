@@ -34,6 +34,7 @@ from agentcore.workspace.locate import (
     workspace_internal_root,
     workspace_storage_key,
 )
+from agentcore.workspace.remote import RemoteCloudWorkspace
 from agentcore.workspace.server import ServerWorkspace
 
 
@@ -206,6 +207,23 @@ def test_build_workspace_falls_back_to_cloud_when_unbound(tmp_path: Path, monkey
     )
     assert isinstance(ws, ServerWorkspace)
     assert ws.location == "server"
+
+
+def test_build_workspace_sidecar_unbound_uses_remote(monkeypatch):
+    monkeypatch.setattr(
+        "agentcore.sidecar.server_pkg.core.is_sidecar_process", lambda: True
+    )
+    ws = build_workspace(
+        user_id="u1",
+        folder_id="f1",
+        folder_rel_path="f1",
+        conversation_id="c1",
+        sink=EventSink(),
+        local_binding=None,
+    )
+    assert isinstance(ws, RemoteCloudWorkspace)
+    assert ws.location == "server"
+    assert ws._ws_id == "folder:f1"  # noqa: SLF001
 
 
 # --- storage key: id-derived, deliberately NOT the on-disk path ---

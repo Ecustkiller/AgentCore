@@ -47,7 +47,7 @@ class PlatformSettings(BaseModel):
     doubao_api_key: str = ""
     doubao_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
 
-    # --- AI 协作白板 / 对话读图 ---
+    # --- 对话读图 ---
     # Platform fallback when profile vision slot is null: requires billing_mode=platform
     # + VISION_API_KEY + VISION_BASE_URL. A filled vision slot builds the reader from that
     # slot's credentials even under billing_mode=byok.

@@ -34,8 +34,7 @@ from agentcore.tools.sandbox.desk_process import (
 )
 from agentcore.workspace.channel import WorkspaceOp
 from agentcore.workspace.limits import (
-    is_liveness_timeout_detail,
-    is_presence_disconnected_detail,
+    workspace_channel_failure_kind,
 )
 from agentcore.workspace.protocol import WorkspaceError
 
@@ -152,9 +151,10 @@ def _workspace_error(e: WorkspaceError, start: float) -> ToolResult:
     plain I/O failure; ``str(e)`` alone flattens all three into one sentence.
     """
     detail = str(e) or e.__class__.__name__
-    if is_presence_disconnected_detail(detail):
+    kind = workspace_channel_failure_kind(e)
+    if kind == "presence":
         return _error(detail, start, code="workspace_channel_dead")
-    if is_liveness_timeout_detail(detail):
+    if kind == "liveness":
         return _error(detail, start, code="liveness_timeout")
     return _error(detail, start, code=_WORKSPACE_IO_ERROR)
 

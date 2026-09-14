@@ -10,6 +10,21 @@ Aligned with desktop ``WORKSPACE_READ_MAX`` (``apps/desktop/src/main/fs/constant
 
 from __future__ import annotations
 
+from typing import Literal
+
+from agentcore.core.errors import LOCAL_CHANNEL_DEAD, LOCAL_ROOT_NOT_HELD
+from agentcore.workspace.protocol import (
+    WorkspaceError,
+    WorkspaceLivenessTimeout,
+    WorkspacePresenceDisconnected,
+    WorkspaceReconnect,
+)
+
+WorkspaceChannelFailureKind = Literal["presence", "liveness", "reconnect"]
+
+# Prepare-abort product copy (``LocalChannelDeadError``); tools import from here.
+CHANNEL_DEAD_PREPARE_ABORT = LOCAL_CHANNEL_DEAD
+
 # Whole-file read ceiling for **text** views (code / md). Office/PDF extract
 # uses the ingest caps below instead of this gate.
 WORKSPACE_READ_MAX_BYTES = 5 * 1024 * 1024  # 5 MiB — mirrors desktop Local
@@ -185,22 +200,9 @@ EXEC_ENV_DEAD_USER_VISIBLE_BY_CODE: dict[str, str] = {
     ),
 }
 
-# Prepare / turn-start abort when local prepare IO hangs or the budget is exhausted.
-# Not a mid-turn presence miss — execution-phase timeouts fail that op only.
-CHANNEL_DEAD_PREPARE_ABORT = (
-    "本机工作区通道无响应（已挂起 / channel dead）。请检查桌面连接后重试。"
-)
-
-# A desktop holds workspace caps but not this bound root. Shared by the turn-start
-# presence gate (``runtime/pipeline/errors.py`` case 2, re-exported there as
-# ``LOCAL_ROOT_NOT_HELD``) and by mid-turn op delivery, which meets the same fact
-# after the gate has run — roots can be revoked while the turn is in flight. Lives
-# here so the delivery side reaches it without importing the pipeline package.
-LOCAL_ROOT_NOT_HELD = (
-    "桌面已在线，但未声明持有本会话的本地目录"
-    "（授权可能已移除，或已换用其他电脑）。"
-    "请在这台电脑上重新授权该文件夹后再试。"
-)
+# Prepare / turn-start abort copy and mid-turn ``ROOT_NOT_HELD`` sentence:
+# product literals live on the ``AgentCoreError`` types in ``core.errors``.
+# Re-exported here so delivery / tools reach them without importing pipeline.
 
 WORKSPACE_CHANNEL_DEAD_RETIRE_STEER = (
     "工作区/本地文件连不上：本回合停用全部本地文件读写工具（桌面重新连上后会恢复）。"
@@ -267,11 +269,6 @@ def is_liveness_timeout_detail(detail: str | None) -> bool:
     return any(m.lower() in text for m in LIVENESS_TIMEOUT_DETAIL_MARKERS)
 
 
-def is_channel_dead_detail(detail: str | None) -> bool:
-    """True when prepare-abort copy still names ``channel dead`` (not a settle timeout)."""
-    return "channel dead" in (detail or "").lower()
-
-
 def is_presence_disconnected_detail(detail: str | None) -> bool:
     """True when a workspace I/O failure is desktop-gone, not a hang or capacity miss."""
     text = detail or ""
@@ -289,6 +286,37 @@ def is_presence_disconnected_detail(detail: str | None) -> bool:
     from agentcore.fulfill.origin import ORIGIN_DEVICE_OFFLINE
 
     return ORIGIN_DEVICE_OFFLINE in text
+
+
+def workspace_channel_failure_kind(
+    exc_or_detail: BaseException | str | None,
+) -> WorkspaceChannelFailureKind | None:
+    """Classify channel-family failures.
+
+    Types first; sentence fallback for old desktop envelopes and wrapped details.
+    """
+    if isinstance(exc_or_detail, WorkspacePresenceDisconnected):
+        return "presence"
+    if isinstance(exc_or_detail, WorkspaceLivenessTimeout):
+        return "liveness"
+    if isinstance(exc_or_detail, WorkspaceReconnect):
+        return "reconnect"
+    if isinstance(exc_or_detail, BaseException) and not isinstance(
+        exc_or_detail, WorkspaceError
+    ):
+        return None
+    detail = (
+        str(exc_or_detail)
+        if isinstance(exc_or_detail, BaseException)
+        else exc_or_detail
+    )
+    if is_presence_disconnected_detail(detail):
+        return "presence"
+    if is_liveness_timeout_detail(detail):
+        return "liveness"
+    if is_workspace_reconnect_detail(detail):
+        return "reconnect"
+    return None
 
 
 def op_liveness_timeout_metadata() -> dict[str, object]:

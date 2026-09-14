@@ -159,7 +159,10 @@ export type TurnOutcome = {
    * retry control — including team-strip turns that closed the bubble card.
    */
   showFooter: boolean;
-  /** Empty user-stop, nothing else to show: omit the bubble. kind is `ok`. */
+  /**
+   * Empty user-stop, or an empty shell with no engine/server verdict: omit the
+   * bubble. kind is `ok`. Do not invent ``interrupted`` to fill the hole.
+   */
   hideEmptyBubble: boolean;
   /**
    * StatusStrip FailureStrip. Follow this, not `execution.status==="failed"`.
@@ -502,7 +505,9 @@ export function arbitrateTurnOutcome(input: TurnOutcomeInput): TurnOutcome {
   const recovery = deriveRecovery(input, face, kind);
   const attestedContinue = isAttestedPauseContinue({ kind, recovery });
 
-  const hideEmptyBubble = emptyShell(input) && isCancelCode(face?.code);
+  const hideEmptyBubble =
+    emptyShell(input) &&
+    (isCancelCode(face?.code) || (kind === "ok" && face == null));
   const sessionCopy = (input.conversationError ?? "").trim();
   const hasTeamStrip = Boolean(input.hasTeamStrip);
   const hasBody = Boolean((input.content ?? "").trim());

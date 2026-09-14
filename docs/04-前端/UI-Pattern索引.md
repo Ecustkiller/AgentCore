@@ -33,13 +33,14 @@ skip_if:
 | PatternCardHeader | 后台任务卡头 | `BackgroundTaskCard.tsx` |
 | SurfaceRow | 侧栏/文件树/对话管理/设置导航/工具箱库存 | `SurfaceRow*`；库存行组合 → `pages/toolbox/InventoryRow.tsx` |
 | ToolLine | 过程工具行 | `ToolLine` |
+| LiveFlow | 过程活标题字形流光 | `data-live-flow` · `LiveFlow.tsx` |
 | PanelShell | 右坞；Web 应用内浮窗；桌面真 OS 窗 | `SidePanel` / `FloatingPanelShell` + `SidePanelFloatHost`；真窗 `DesktopFloatWindowBridge` + `FloatWindowPage`（`#/float?cid&tab`） |
 | SearchField / *SearchTrigger | 筛选 / 全局入口 | → CommandPalette |
 | BrandMark | 登录/TitleBar/侧栏/关于 | `brand/BrandMark.tsx`（仅 Latin `font-brand`） |
 | EmptyHint | 列表 / 网格页空态 | `EmptyHint`；**对话草稿**仍走 `DraftEmptyState` |
 | PageHeader | 设置 / 工具箱深页 / 枢纽页 | L2 `PageHeader`；深页 `back`；窄屏设置不重复 h1 |
 | CanvasShell | 白板 / 工作流画布深页 | `layout/CanvasShell`：返回 IconButton + 标题槽 + 状态字 + 右动作 + 可选顶栏下横幅 + 铺满剩余画布。不抽引擎、不抽画布内工具条 |
-| CatalogTile | 工具箱市场货架 / 创作套件 / 提示词概览 | L2 `CatalogTile`（身份行 / 简介 / tags / footer）。工作流库存偏行；禁止再手写第三套磁贴 |
+| CatalogTile | 工具箱市场货架 / 创作套件 / 提示词概览 | L2 `CatalogTile`（身份行 / 简介槽固定两行 / tags / footer）。工作流库存偏行；禁止再手写第三套磁贴 |
 | SectionTabs | 同一页分区（工具箱种类） | L2 `SectionTabs`；选中 `bg-accent` 胶囊 + 线框图标。**不是**右坞 `TabChip`，也不是 `SegmentedControl`（灰槽抬卡），也不是 inverse |
 | SegmentedControl | 表单里就地二选一 / 三选一（登录↔注册、提示词角色身份） | L2 `SegmentedControl`；槽底抬起选中项。**不是** `SectionTabs`，也不是右坞 `TabChip` |
 
@@ -104,14 +105,14 @@ node scripts/check-ui-tokens.mjs --src apps/desktop/src/renderer
 | 认路选中 | 浅底 + 线框图标 `currentColor`：画布 `bg-accent text-accent-foreground`，侧栏 `bg-sidebar-accent text-sidebar-accent-foreground`。**否决**导航用 inverse（深底浅字）。inverse 只给 `IconButton` 停止生成 |
 | 页头一行 | `PageHeader`：h1 单行 + 可选同行 meta / 动作；禁副标题。设置 / 工具箱深页 / 枢纽页同一组件，用有没有 `back` 区分。工具箱壳不走 `PageHeader`；画布深页走 `CanvasShell` → [页头层级](#页头层级) |
 | 列表空态同一骨架 | 标题 + 可选一句说明 + 可选主操作 = `EmptyHint`。`DraftEmptyState` 仍是对话草稿特例 |
-| 货架卡 | 工具箱市场 / 创作 / 提示词概览 = `CatalogTile`。禁止再手写第三套磁贴。身份行：左色板图标、右名称、可选副标题；右上 `accessory` 只放状态或唯一身份（已装 / 有更新 / 尚未开放 / 官方 / 开场即用）。通栏两行简介。底栏 `tags` 放分类元数据（市场提示词 = 场景组名；出厂工具 = 能力面）。点卡 = 居中 Dialog。市场发现首页按集合折行网格（封顶 +「查看全部」）；提示词页出厂闭集与我的同一套折行网格。不另开卡面、不用横滑条。工作流库存偏行列表。格子宽随画布（min 240，1200 画布四列约 280）。出厂工具与连接器在提示词目录，走同一套货架卡 |
+| 货架卡 | 工具箱市场 / 创作 / 提示词概览 = `CatalogTile`。禁止再手写第三套磁贴。身份行：左色板图标、右名称、可选副标题；右上 `accessory` 只放状态或唯一身份（已装 / 有更新 / 尚未开放 / 官方 / 开场即用）。通栏两行简介（空也占位）。提示词概览由 `promptShelfTile` 填槽，禁止再按叶子手写一套。官方 HOW 简介是 UI 专用句 `blurb`，不进模型目录。底栏 `tags` 放分类元数据（市场提示词与装进目录的副本 / 已上架的我的 = 场景组名；官方 HOW = CEO / 队员，全员不打；出厂工具 = 需审批与 CEO / 队员，默认不打。区标题已是能力面 / 官方 / 连接器则卡上不再重复）。点卡 = 居中 Dialog。市场发现首页按集合折行网格（封顶 +「查看全部」）；提示词页出厂闭集与我的同一套折行网格。不另开卡面、不用横滑条。工作流库存偏行列表。格子宽随画布（min 240，1200 画布四列约 280）。出厂工具与连接器在提示词目录，走同一套货架卡 |
 | 盖层分工 | 确认 = `ConfirmDialog`；填一小段 = 居中 `Dialog` `size=md`；读卡 / 安装 = 居中 `Dialog` `size=lg`（市场 listing；提示词读卡同档）。挨着按钮 = 弹出菜单；一句结果 = Toast（跨对话提醒只写「对话名 + 要你干什么」，禁止贴卡正文）。命令面板 = `size=xl` + `position=top`；双栏阅读（收到的上下文）= `size=2xl`。宽度只走 `DialogContent.size`，禁止再手写 `max-w-*`。铬条：`DialogHeader` + 可选 `DialogBody` + 有按钮才 `DialogFooter`（取消 `outline` → 主 `primary`）。**禁止**用对话框伪装右侧抽屉。对话坞只挂在聊天页 |
 | 分区 vs 打开的内容 | 同一页切块 = `SectionTabs`；表单里就地互斥 = `SegmentedControl`；右坞同时开着的文件/终端/浏览器 = `TabChip`。工具箱市场种类 = 筛选 chip，不是 `SectionTabs` → [前端 UX · 工具箱](/docs/04-前端/前端UX设计.md) |
 | 状态 / 角色 / 所选胶囊 | 文字标签走 `Badge`（`pill`）。计数圆点、进度条、头像圈不是徽章 |
 | 动作底栏 | Decision / Dialog 右下锚点；不扫输入框、工具条、协作图干预 |
 | 新面先点名 L3 | 新页 / 新交付物须先说用哪套 Primitive / Pattern，禁止第三套壳。白板**画布工具条** / 辩论室保持登记例外（控件仍用同一套按钮与徽章） |
 | 消息操作行 | 窄屏常显；md+ hover / focus-within。助手复制·重新生成、用户复制·编辑、IM 回复与时间共用 `MESSAGE_ACTION_REVEAL_CLASS` |
-| 文档 tab 动作 | 内容撑宽横条（VS Code 编辑器 tab）：关闭/弹出 **overlay** 标题尾，闲置不占槽。活跃 tab 常显 × 并留右槽（避免压住末字）；弹出仅 hover / focus-within。`TabChip`。**否决** Chrome 均分宽 + 流内占位（右坞不是均分条）；**否决** `opacity-0` 仍占 `size-5` |
+| 文档 tab 动作 | 内容撑宽横条（VS Code 编辑器 tab）：关闭/弹出 **overlay** 标题尾，闲置不占槽。活跃 tab 常显 × 并留右槽（避免压住末字）；弹出仅 hover / focus-within。未保存 = 标题前 primary 圆点（`dirty`），不改 ×。`TabChip`。**否决** Chrome 均分宽 + 流内占位（右坞不是均分条）；**否决** `opacity-0` 仍占 `size-5` |
 | 列表行动作 | 固定列宽（VS Code 资源管理器 / 对话行）：hover / focus-within 才进流，标题 truncate。**否决** 对流内槽 `opacity-0`（闲置仍吃标题宽）。对话行已是；文件夹头 / Git 悬停动作对齐。最近删除右侧由保留期 Badge 定宽，不套 overlay |
 | 品牌字体 | 仅 BrandMark Latin；正文系统栈 |
 | 品牌文案 | 权威 → [产品定位与品牌](/docs/01-产品/产品定位与品牌.md) |
@@ -141,7 +142,9 @@ node scripts/check-ui-tokens.mjs --src apps/desktop/src/renderer
 
 ## 运动要点（细节权威 = design-tokens）
 
-时长两档：`--motion-duration-fast` 150ms / `--motion-duration` 200ms。桌面 `@theme` 映射 `duration-fast` / `duration-normal`。尊重 `prefers-reduced-motion`（调用点 `motion-reduce:transition-none`；具名入场动画见 `globals.css`）。**否决**逐字打字机；流式答案尾光标走 `data-stream-caret`。触达即用 token，不专项改已有 `transition-*`。
+时长两档：`--motion-duration-fast` 150ms / `--motion-duration` 200ms。桌面 `@theme` 映射 `duration-fast` / `duration-normal`。活过程另有持续周期 `--motion-live-flow` 1.8s（标题字形流光、匀速，不是切换过渡）。尊重 `prefers-reduced-motion`（调用点 `motion-reduce:transition-none`；具名入场动画与 `[data-live-flow]` 见 `globals.css`）。
+
+活过程三层，禁止再给单个工具发明心跳：**叙事活表面**（当前正在跑的工具行 / 折叠组头 / 空思考 / 组装参数）走 `data-live-flow` 标题字形流光；**内容在长**（思考或答案正文）只靠文字变长，答案尾光标走 `data-stream-caret`；**铬条状态**（协作图状态条 / 节点小圆标 / 侧栏灯）仍走转圈或灯，不铺流光。搜索骨架只留结果形，活感在标题。折叠组只亮组头标题，展开后亮当前行标题。等你拍板保持静。减少动效时流光停、退回 `ThinkingDots`。**否决**逐字打字机；**否决**整行扫光带；**否决**已完成行继续闪。触达即用 token，不专项改已有 `transition-*`。
 
 ## 配色要点（细节权威 = color-tokens）
 

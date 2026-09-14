@@ -55,6 +55,12 @@ vi.mock("@/services/accountToken", () => ({
   looksLikeAccountTokenFailure: vi.fn(() => false),
 }));
 
+vi.mock("@/services/workspacesToken", () => ({
+  resolveSidecarWorkspacesAuth: vi.fn(),
+  clearSidecarWorkspacesAuth: vi.fn(),
+  looksLikeWorkspacesTokenFailure: vi.fn(() => false),
+}));
+
 vi.mock("@/services/chatContext", () => ({
   fetchChatContext: vi.fn(async () => []),
   CHAT_CONTEXT_UNAVAILABLE_MESSAGE: "未能加载对话历史，请稍后重试。",
@@ -82,8 +88,13 @@ import {
 } from "@/services/inferenceToken";
 import { takeRecentSidecarFailure } from "@/services/sidecarStatus";
 import { dispatchSSEEvent } from "@/services/streamConversation";
+import {
+  looksLikeWorkspacesTokenFailure,
+  resolveSidecarWorkspacesAuth,
+} from "@/services/workspacesToken";
 import { useAuthStore } from "@/stores/auth";
 import { useConversationStore } from "@/stores/conversation";
+import { useInteractionStore } from "@/stores/interactions";
 import { resetSidecarEventPumpForTests } from "../sidecarEventPump";
 import {
   resumeConversationViaSidecar,
@@ -104,6 +115,12 @@ const looksLikeFoldersTokenFailureMock = vi.mocked(
 const resolveSidecarAccountAuthMock = vi.mocked(resolveSidecarAccountAuth);
 const looksLikeAccountTokenFailureMock = vi.mocked(
   looksLikeAccountTokenFailure,
+);
+const resolveSidecarWorkspacesAuthMock = vi.mocked(
+  resolveSidecarWorkspacesAuth,
+);
+const looksLikeWorkspacesTokenFailureMock = vi.mocked(
+  looksLikeWorkspacesTokenFailure,
 );
 const notifyWarningMock = vi.mocked(notifyWarning);
 const getConversationsMock = vi.mocked(getConversations);
@@ -185,6 +202,10 @@ beforeEach(() => {
   resolveSidecarAccountAuthMock.mockResolvedValue(null);
   looksLikeAccountTokenFailureMock.mockReset();
   looksLikeAccountTokenFailureMock.mockReturnValue(false);
+  resolveSidecarWorkspacesAuthMock.mockReset();
+  resolveSidecarWorkspacesAuthMock.mockResolvedValue(null);
+  looksLikeWorkspacesTokenFailureMock.mockReset();
+  looksLikeWorkspacesTokenFailureMock.mockReturnValue(false);
   fetchChatContextMock.mockReset();
   fetchChatContextMock.mockResolvedValue([]);
 
@@ -455,6 +476,45 @@ describe("streamConversationViaSidecar", () => {
     );
   });
 
+  it("remints workspaces with force when pre-event token fails", async () => {
+    resolveSidecarWorkspacesAuthMock
+      .mockResolvedValueOnce({
+        baseUrl: "https://api.test.example/v1/workspaces",
+        apiKey: "stale-workspaces",
+      })
+      .mockResolvedValueOnce({
+        baseUrl: "https://api.test.example/v1/workspaces",
+        apiKey: "fresh-workspaces",
+      });
+    looksLikeWorkspacesTokenFailureMock.mockReturnValue(true);
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+    startTurnMock
+      .mockRejectedValueOnce(new Error("workspaces list unauthorized (401)"))
+      .mockResolvedValueOnce(turnResult());
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好",
+      optimisticUserId: "u-opt",
+      history: [],
+    });
+
+    expect(resolveSidecarWorkspacesAuthMock).toHaveBeenNthCalledWith(1);
+    expect(resolveSidecarWorkspacesAuthMock).toHaveBeenNthCalledWith(2, {
+      force: true,
+    });
+    expect(startTurnMock).toHaveBeenCalledTimes(2);
+    expect(startTurnMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        workspacesAuth: {
+          baseUrl: "https://api.test.example/v1/workspaces",
+          apiKey: "fresh-workspaces",
+        },
+      }),
+    );
+  });
+
   it("forwards foldersAuth on startTurn when mint succeeds", async () => {
     resolveSidecarFoldersAuthMock.mockResolvedValue({
       baseUrl: "https://api.test.example",
@@ -542,6 +602,51 @@ describe("streamConversationViaSidecar", () => {
 
     expect(startTurnMock).toHaveBeenCalledWith(
       expect.objectContaining({ accountAuth: undefined }),
+    );
+  });
+
+  it("forwards workspacesAuth on startTurn when mint succeeds", async () => {
+    resolveSidecarWorkspacesAuthMock.mockResolvedValue({
+      baseUrl: "https://api.test.example/v1/workspaces",
+      apiKey: "workspaces-jwt",
+    });
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+    startTurnMock.mockResolvedValue(turnResult());
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好",
+      optimisticUserId: "u-opt",
+      history: [],
+    });
+
+    expect(resolveSidecarWorkspacesAuthMock).toHaveBeenCalledWith();
+    expect(startTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspacesAuth: {
+          baseUrl: "https://api.test.example/v1/workspaces",
+          apiKey: "workspaces-jwt",
+        },
+      }),
+    );
+  });
+
+  it("omits workspacesAuth on startTurn when mint fails (undefined, no fake success)", async () => {
+    resolveSidecarWorkspacesAuthMock.mockResolvedValue(null);
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+    startTurnMock.mockResolvedValue(turnResult());
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好",
+      optimisticUserId: "u-opt",
+      history: [],
+    });
+
+    expect(startTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({ workspacesAuth: undefined }),
     );
   });
 
@@ -1039,6 +1144,61 @@ describe("streamConversationViaSidecar", () => {
     expect(se.serverMessage).not.toContain("找不到 Python");
   });
 
+  it("maps startTurn turn interrupted to AbortError Interrupted (not 本地引擎出错)", async () => {
+    takeRecentSidecarFailureMock.mockReturnValue(
+      "找不到 Python，无法启动本地引擎",
+    );
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+    startTurnMock.mockRejectedValue(
+      new Error(
+        "Error invoking remote method 'sidecar:startTurn': Error: turn interrupted",
+      ),
+    );
+
+    const err = await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好",
+      optimisticUserId: "u-opt",
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(DOMException);
+    expect((err as DOMException).name).toBe("AbortError");
+    expect((err as DOMException).message).toBe("Interrupted");
+    expect(err).not.toBeInstanceOf(StreamError);
+  });
+
+  it("orphans leftover hot approval when startTurn dies without message_end", async () => {
+    useInteractionStore.getState().clear();
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+    startTurnMock.mockImplementation(async () => {
+      useInteractionStore.getState().upsertRequired({
+        kind: "approval",
+        conversationId: "c1",
+        messageId: "m-live",
+        origin: "sidecar",
+        payload: {
+          approval_id: "a-live",
+          tool_name: "file_delete",
+          arguments: { permanent: true },
+        },
+      });
+      throw new Error("sidecar process exited");
+    });
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好",
+      optimisticUserId: "u-opt",
+      history: [],
+    }).catch(() => undefined);
+
+    expect(useInteractionStore.getState().get("a-live")?.status).toBe(
+      "orphaned",
+    );
+  });
+
   it("does not report turnCommit when outbox flush is still pending", async () => {
     flushTurnMock.mockResolvedValue({
       ok: false,
@@ -1184,6 +1344,39 @@ describe("resumeConversationViaSidecar", () => {
         accountAuth: {
           baseUrl: "https://api.test.example/v1/account",
           apiKey: "fresh-account",
+        },
+      }),
+    );
+  });
+
+  it("remints workspaces with force when pre-event token fails on resume", async () => {
+    resolveSidecarWorkspacesAuthMock
+      .mockResolvedValueOnce({
+        baseUrl: "https://api.test.example/v1/workspaces",
+        apiKey: "stale-workspaces",
+      })
+      .mockResolvedValueOnce({
+        baseUrl: "https://api.test.example/v1/workspaces",
+        apiKey: "fresh-workspaces",
+      });
+    looksLikeWorkspacesTokenFailureMock.mockReturnValue(true);
+    seedOriginalUserBubble("c1", "u-orig", "原始问题");
+    resumeMock
+      .mockRejectedValueOnce(new Error("workspaces list unauthorized (401)"))
+      .mockResolvedValueOnce(turnResult());
+
+    await resumeConversationViaSidecar(baseRequest);
+
+    expect(resolveSidecarWorkspacesAuthMock).toHaveBeenNthCalledWith(1);
+    expect(resolveSidecarWorkspacesAuthMock).toHaveBeenNthCalledWith(2, {
+      force: true,
+    });
+    expect(resumeMock).toHaveBeenCalledTimes(2);
+    expect(resumeMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        workspacesAuth: {
+          baseUrl: "https://api.test.example/v1/workspaces",
+          apiKey: "fresh-workspaces",
         },
       }),
     );
@@ -1533,6 +1726,7 @@ describe("resumeConversationViaSidecar", () => {
     const err = await p.catch((e: unknown) => e);
     expect(err).toBeInstanceOf(DOMException);
     expect((err as DOMException).name).toBe("AbortError");
+    expect((err as DOMException).message).toBe("Aborted");
     expect(flushTurnMock).not.toHaveBeenCalled();
   });
 
@@ -1558,6 +1752,54 @@ describe("resumeConversationViaSidecar", () => {
     const err = await p.catch((e: unknown) => e);
     expect(err).toBeInstanceOf(DOMException);
     expect((err as DOMException).name).toBe("AbortError");
+    expect((err as DOMException).message).toBe("Aborted");
     expect(flushTurnMock).not.toHaveBeenCalled();
+  });
+
+  it("maps turn interrupted to AbortError Interrupted (not sidecar banner, not user stop)", async () => {
+    takeRecentSidecarFailureMock.mockReturnValue(
+      "找不到 Python，无法启动本地引擎",
+    );
+    seedOriginalUserBubble("c1", "u-orig", "原始问题");
+    resumeMock.mockRejectedValue(
+      new Error(
+        "Error invoking remote method 'sidecar:resume': Error: turn interrupted",
+      ),
+    );
+
+    const err = await resumeConversationViaSidecar(baseRequest).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(DOMException);
+    expect((err as DOMException).name).toBe("AbortError");
+    expect((err as DOMException).message).toBe("Interrupted");
+    expect(err).not.toBeInstanceOf(StreamError);
+    expect(flushTurnMock).not.toHaveBeenCalled();
+  });
+
+  it("does not treat turn interrupted as user stop even while stopping", async () => {
+    seedOriginalUserBubble("c1", "u-orig", "原始问题");
+
+    let rejectResume: (e: unknown) => void = () => {};
+    resumeMock.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectResume = reject;
+        }),
+    );
+
+    const p = resumeConversationViaSidecar(baseRequest);
+    p.catch(() => {});
+
+    await vi.waitFor(() => expect(resumeMock).toHaveBeenCalled());
+    useConversationStore.getState().setTurnPhase("stopping", "c1");
+    rejectResume(new Error("turn interrupted"));
+
+    const err = await p.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(DOMException);
+    expect((err as DOMException).name).toBe("AbortError");
+    expect((err as DOMException).message).toBe("Interrupted");
+    expect((err as DOMException).message).not.toBe("Aborted");
+    expect(err).not.toBeInstanceOf(StreamError);
   });
 });

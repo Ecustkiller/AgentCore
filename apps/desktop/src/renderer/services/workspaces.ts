@@ -117,13 +117,14 @@ export async function wsUploadFile(
 export async function wsExportMdToDocx(
   wsId: string,
   path: string,
+  layout: "standard" | "official" = "standard",
 ): Promise<{ path: string; warnings: string[] }> {
   const res = await api.post<{
     path: string;
     source_path: string;
     size_bytes: number;
     warnings: string[];
-  }>(`${wsPath(wsId)}/export-docx`, { path });
+  }>(`${wsPath(wsId)}/export-docx`, { path, layout });
   return { path: res.path, warnings: res.warnings ?? [] };
 }
 
@@ -132,6 +133,7 @@ export async function convertMdToDocx(input: {
   markdown: string;
   images: Record<string, string | null>;
   sourceName: string;
+  layout?: "standard" | "official";
 }): Promise<{
   docxBase64: string;
   warnings: string[];
@@ -145,6 +147,7 @@ export async function convertMdToDocx(input: {
     markdown: input.markdown,
     images: input.images,
     source_name: input.sourceName,
+    layout: input.layout ?? "standard",
   });
   return {
     docxBase64: res.docx_base64,

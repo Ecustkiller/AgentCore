@@ -55,8 +55,7 @@ export interface SceneElement {
   points?: Array<[number, number]>;
   /** Horizontal alignment of a `text` element's lines (omit = left). */
   textAlign?: TextAlign;
-  /** image: the picture as a data URL (base64 PNG/JPEG), downscaled on import. Like 手绘,
-   * its meaning lives in pixels → read via vision (board_read). */
+  /** image: the picture as a data URL (base64 PNG/JPEG), downscaled on import. */
   src?: string;
   /** Clockwise rotation in radians about the element's box center (omit = 0). Linear
    * elements (`arrow`/`line`) and `freedraw` are not rotated (their geometry is the points).
@@ -138,10 +137,8 @@ export interface WhiteboardApi {
   setOverlay(elements: SceneElement[]): void;
   /** Append persistent elements as one history step. No-op for `[]`. */
   addElements(elements: SceneElement[]): void;
-  /** Rasterize a subset of elements to a PNG for the AI's vision reader (board_read). */
+  /** Rasterize a subset of elements to a PNG (selection export). */
   rasterizeElements(ids: string[]): { pngBase64: string; w: number; h: number };
-  /** Apply a batch of AI board ops; returns the ids created this batch (in op order). */
-  applyOps(ops: import("@/types/events").BoardOp[]): { created: string[] };
   undo(): void;
   redo(): void;
   deleteSelected(): void;

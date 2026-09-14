@@ -9,10 +9,9 @@
 | 项 | 值 |
 |---|---|
 | 磁带文件 | 本地自备（**不入公开仓**）；导出后放到 `demos/tapes/` 并由 gitignore / 私有拷贝管理 |
-| 说明 | 早期 LV 商标辩题打样磁带与全场录像已从仓库移除，避免真实会话全量导出随仓库公开 |
+| 说明 | 真实会话全量导出不随仓库公开 |
 
 - 磁带源 = 直播流录制导出（`demos/recordings/<message_id>.json` → `demo_tape_export.py`）。
-- 宣传分镜见 `video-plan-lv-molihua.md` / `video-script-lv-molihua.md`（结论段留白，不对真实一审判决表态）。
 
 ## 桌面端主路径：准备模式（录屏推荐）
 
@@ -54,7 +53,7 @@ pnpm dev
 ### C. 命令面板 · 准备会话
 
 1. **Ctrl/Cmd+K** 打开命令面板。
-2. 搜「演示回放」或磁带标题（如「茉莉」）→ 选 **「演示回放 · …」**（hint：开发 · 准备）。
+2. 搜「演示回放」或磁带标题 → 选 **「演示回放 · …」**（hint：开发 · 准备）。
 3. 桌面新建**云端**空会话并绑定磁带，**不**自动开回合；建议开场词已复制到剪贴板。
 4. 在输入框粘贴/照磁带原话打字，发送任意消息 → 磁带接管推流（多幕盘播**当前幕**；该幕结束后再发下一条消息推进下一幕）。
 5. 看到 **开工卡 / team_preview** 时，在真实 UI 点「授权开赛」。
@@ -71,10 +70,10 @@ pnpm dev
 ```bash
 cd apps/server
 # 主路径：prepare → 发消息 → SSE → resume
-uv run python scripts/demo_tape_http_walk.py --tape lv-molihua-trademark
+uv run python scripts/demo_tape_http_walk.py --tape <tape-id>
 
 # 备选：auto-start（等同 POST /start）
-uv run python scripts/demo_tape_http_walk.py --tape lv-molihua-trademark --autostart
+uv run python scripts/demo_tape_http_walk.py --tape <tape-id> --autostart
 ```
 
 准备模式脚本会：`POST /v1/demo-tape/prepare` → `POST …/messages`（触发文本）→ SSE 收到 `team_preview_required` → `POST …/resume` continue → 继续收流到结束，并校验会话中用户消息 = 发送文本、节奏上限。
@@ -99,7 +98,7 @@ uv run python scripts/demo_tape_http_walk.py --tape lv-molihua-trademark --autos
 ```bash
 cd apps/server
 uv run python scripts/demo_tape_bind.py --latest \
-  --tape demos/tapes/lv-molihua-trademark.json \
+  --tape demos/tapes/<tape-id>.json \
   --speed 4 \
   --max-gap-ms 2000
 ```
@@ -199,8 +198,8 @@ Seek 语义：目标点之前的事件去延时爆发注入；向后 seek = 重�
 
 ## 倍速实操备忘
 
-- 原速 = `SPEED=1` + `MAX_GAP_MS` 抬到碰不着（如 `600000`）。本盘磁带回放总时长约 **22.3 分钟**，辩手深度思考时仍可能出现数十秒级静默——原速下的长静默是真实节奏，不是卡死。判断卡死的标准：发消息后 **3 秒内**连首批搜索活动都不出现。
-- 宣传录屏建议：`SPEED=6` + `MAX_GAP_MS=2000`（辩论段墙钟约 3.5–4.5 分钟）；精剪审片可用 `SPEED=4`。录屏想压掉极端长等待：`MAX_GAP_MS=10000~15000`，其余节奏仍为真实。
+- 原速 = `SPEED=1` + `MAX_GAP_MS` 抬到碰不着（如 `600000`）。辩手深度思考时仍可能出现数十秒级静默——原速下的长静默是真实节奏，不是卡死。判断卡死的标准：发消息后 **3 秒内**连首批搜索活动都不出现。
+- 宣传录屏建议：`SPEED=6` + `MAX_GAP_MS=2000`；精剪审片可用 `SPEED=4`。录屏想压掉极端长等待：`MAX_GAP_MS=10000~15000`，其余节奏仍为真实。
 - `DEMO_TAPE_RECORD_ENABLED` / `DEMO_TAPE_REPLAY_ENABLED` 开启时 `__main__.py` **自动关 WatchFiles**：原速 SSE 可达十几分钟，热重载的 `timeout_graceful_shutdown=2` 会硬杀 worker（桌面表现为「无法连接后端」、无 Traceback）。改代码后需手动重启后端。
 
 ## 设计决策（为什么长这样）
@@ -221,20 +220,15 @@ Seek 语义：目标点之前的事件去延时爆发注入；向后 seek = 重�
 
 开 `DEMO_TAPE_RECORD_ENABLED=true` 跑任何满意的真实回合 → 云端落 `demos/recordings/`、sidecar 本地落 `<userData>/sidecar/recordings/` → `demo_tape_recordings.py` 定位原片 → `demo_tape_export.py --message-id <id> --title … --out ../../demos/tapes/<新名字>.json`（sidecar 录制加 `--recording <绝对路径>`）→ 命令面板自动多出该磁带的准备/立即两条入口。也可：`uv run python scripts/log_timeline.py <conversation_id>`。
 
-Promo 截图脚本（默认仍是茉莉花盘；新盘可直接换 tape）。导演台全流程已并入 `full` 子命令（勿再找已删除的 `*_director.mjs`）：
+Promo 捕获（任意磁带 → `apps/promo/assets/<tape-id>/`）见 [`apps/promo/README.md`](/apps/promo/README.md) §二。导演台全流程在 `full` 子命令：
 
 ```bash
-# 默认 = lv-molihua-trademark → apps/promo/assets/lv-molihua/
 cd apps/desktop
-pnpm promo:lv:full
-# 等价：node scripts/promo_capture_lv_molihua.mjs full
-
-# 新盘（输出默认 apps/promo/assets/<tape-id>/；可用 --out 覆盖）
-node scripts/promo_capture_lv_molihua.mjs full --tape <新磁带stem>
-node scripts/promo_capture_lv_molihua.mjs full --tape <新磁带stem> --out ../promo/assets/my-demo
+pnpm promo:capture full --tape <tape-id>
+# 等价：node scripts/promo_capture.mjs full --tape <tape-id>
 ```
 
-也可用环境变量 `PROMO_TAPE` / `PROMO_OUT`。SHOT_MARKERS 仍偏茉莉花辩题文案——题材相近可复用，差异大时需改脚本内正则。
+也可用环境变量 `PROMO_TAPE` / `PROMO_OUT`。
 
 ## 边界
 

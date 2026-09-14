@@ -1,4 +1,4 @@
-"""Creation-tool 文档 live draft API (folder-hung block body)."""
+"""Creation-tool 文档 live draft API (folder-hung markdown body)."""
 
 from pathlib import Path
 
@@ -62,37 +62,10 @@ async def test_create_save_reopen_doc(client, _fs_data_dir):
     assert body["can_write"] is True
     doc_id = body["id"]
 
+    markdown = "# 结论\n\n可以发\n\n- 甲\n- 乙\n\n| 项 | 值 |\n| --- | --- |\n| 甲 | 1 |\n| 乙 | 2 |\n"
     saved = await client.put(
         f"/v1/docs/{doc_id}/body",
-        json={
-            "baseline": 1,
-            "body": {
-                "schemaVersion": 1,
-                "blocks": [
-                    {"id": "h1", "type": "heading", "level": 1, "text": "结论"},
-                    {"id": "p1", "type": "paragraph", "text": "可以发"},
-                    {
-                        "id": "l1",
-                        "type": "list",
-                        "ordered": False,
-                        "items": ["甲", "乙"],
-                    },
-                    {
-                        "id": "t1",
-                        "type": "table",
-                        "columns": ["项", "值"],
-                        "rows": [["甲", "1"], ["乙", "2"]],
-                    },
-                    {
-                        "id": "ch1",
-                        "type": "chart",
-                        "title": "季度",
-                        "items": [{"label": "Q1", "value": 3}],
-                    },
-                    {"id": "x", "type": "html", "text": "<script>"},
-                ],
-            },
-        },
+        json={"baseline": 1, "body": {"markdown": markdown}},
     )
     assert saved.status_code == 200, saved.text
     write = saved.json()
@@ -103,16 +76,8 @@ async def test_create_save_reopen_doc(client, _fs_data_dir):
     loaded = await client.get(f"/v1/docs/{doc_id}")
     assert loaded.status_code == 200, loaded.text
     detail = loaded.json()
-    types = [b["type"] for b in detail["body"]["blocks"]]
-    assert types == ["heading", "paragraph", "list", "table", "chart"]
-    assert detail["body"]["blocks"][0]["text"] == "结论"
-    table = detail["body"]["blocks"][3]
-    assert table["columns"] == ["项", "值"]
-    assert table["rows"] == [["甲", "1"], ["乙", "2"]]
-    chart = detail["body"]["blocks"][4]
-    assert chart["kind"] == "bar"
-    assert chart["title"] == "季度"
-    assert chart["items"] == [{"label": "Q1", "value": 3.0}]
+    assert detail["body"] == {"markdown": markdown}
+    assert "blocks" not in detail["body"]
     assert detail["version"] == 2
 
     listed = await client.get("/v1/docs")
@@ -134,7 +99,7 @@ async def test_doc_cas_conflict_does_not_clobber(client, _fs_data_dir):
         f"/v1/docs/{doc_id}/body",
         json={
             "baseline": 1,
-            "body": {"blocks": [{"type": "paragraph", "text": "A"}]},
+            "body": {"markdown": "A"},
         },
     )
     assert first.status_code == 200
@@ -142,14 +107,14 @@ async def test_doc_cas_conflict_does_not_clobber(client, _fs_data_dir):
         f"/v1/docs/{doc_id}/body",
         json={
             "baseline": 1,
-            "body": {"blocks": [{"type": "paragraph", "text": "B"}]},
+            "body": {"markdown": "B"},
         },
     )
     assert stale.status_code == 200
     result = stale.json()
     assert result["ok"] is False
     assert result["conflict"] is True
-    assert result["doc"]["body"]["blocks"][0]["text"] == "A"
+    assert result["doc"]["body"]["markdown"] == "A"
 
 
 async def test_doc_rejects_local_folder_and_stranger(
@@ -203,7 +168,7 @@ async def test_doc_viewer_reads_editor_writes(client, new_client, _fs_data_dir):
         assert (
             await viewer.put(
                 f"/v1/docs/{doc_id}/body",
-                json={"baseline": 1, "body": {"blocks": []}},
+                json={"baseline": 1, "body": {"markdown": ""}},
             )
         ).status_code == 403
         assert (await viewer.delete(f"/v1/docs/{doc_id}")).status_code == 403

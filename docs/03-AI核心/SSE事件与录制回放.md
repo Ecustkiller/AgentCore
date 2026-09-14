@@ -66,7 +66,7 @@ skip_if:
 - **扇出是进程内的**：`turn_runs` / `conversation_hub` 均为进程内单例，故多 worker 启动即拒 → [部署拓扑 §六](/docs/05-平台与运维/部署拓扑与环境.md)。
 - **已收口回合对迟到端不可见**：无 live run 时 `follow=false` 回 204、`follow=true` 只挂空闲心跳；历史走 REST 消息窗重载，不由事件流补。故**消费方义务**：重连后若确认空闲，须自行拉一次消息窗对账，否则断线期间另一端整跑完的回合在本端永不出现。三端各按自己的重连形态挂：桌面 `reconcileAfterReconnect`（静默退避，重连后空段即补）；手机 `planFollowIdle`（横幅手动重连 / 回前台解冻 / 服务端关流后自动重挂三处触发）；IM firehose 同款 `catchUp`。
 - **迟到接入者看到成品、不是打字过程**：delta 类是 DERIVED 不落 journal，process 车道是语义边界步粒度，重放把它们还原成整块。逐 delta 节奏只有 dev 录制器保留（见下节）。
-- **慢消费者丢的是流畅度、不是正确性**：每订阅者一条 1000 帧有界队列，积压满即弃最旧帧并记 `event_sink.backpressure_drop`（同 IM firehose 口径）。事实源是 journal——重连整段重放即补齐，故丢帧不构成数据缺失。真正留下缺口的只有「卡到积压上千帧、之后又自行恢复且始终不重连」的连接，本端不知道自己丢过帧（`dropped` 只在服务端）。排期时按流畅度问题看待，勿当作静默丢正文。
+- **慢消费者丢的是流畅度、不是正确性**：每订阅者一条 1000 帧有界队列，积压满即弃最旧**过程帧**（delta / 工具过程 / 相位）并记 `event_sink.backpressure_drop`。每人关帧（`run_completed` / `run_failed` / `run_cancelled` / `run_skipped`）、整场 `execution_completed`、回合 `message_end` / `error` **不让过程挤掉**——图按最后看到的画，收工不到就会假转。`execution_detached` 是进后台的章，不算收工。事实源仍是 journal——重连整段重放即补齐过程。真正留下关帧缺口的只有队列里已经全是关帧（病态）或「卡满又不重连且关帧根本没发出」。IM firehose 仍是整帧弃最旧（聊天消息不是协作图关帧）。本端不知道自己丢过过程帧（`dropped` 只在服务端）。
 
 ### ⏳ 目标：多人同看
 

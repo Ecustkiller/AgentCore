@@ -247,6 +247,12 @@ export type WorkspaceOpResult =
   | { ok: true; value: unknown }
   | { ok: false; error: { kind: string; detail: string; count?: number } };
 
+/** Wire ``error.kind`` — must match Python ``WorkspaceError`` subclass names. */
+export const WORKSPACE_LIVENESS_TIMEOUT_KIND = "WorkspaceLivenessTimeout";
+export const WORKSPACE_PRESENCE_DISCONNECTED_KIND =
+  "WorkspacePresenceDisconnected";
+export const WORKSPACE_RECONNECT_KIND = "WorkspaceReconnect";
+
 /** 主进程 → renderer 的目录变更事件（watch 命中后发出）。 */
 export interface FsChangedEvent {
   rootId: string;
@@ -597,7 +603,7 @@ export interface FsApi {
    * 失败不抛异常，统一以 `WorkspaceOpResult` 的类型化 `error` 返回。
    *
    * 可选顶层 `timeoutMs`（勿塞进 `args`）：主进程墙钟 Promise.race，超时先回
-   * `WorkspaceIOError` 活性信封；底层 op 可能继续跑（与渲染 abort 同构）。
+   * `WorkspaceLivenessTimeout` 活性信封；底层 op 可能继续跑（与渲染 abort 同构）。
    *
    * 可选 `correlation`：仅观测用（conversation_id / request_id），对齐服务端
    * `workspace.op_timeout`；不改调度语义。

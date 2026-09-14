@@ -722,7 +722,7 @@ class ReplayMessage(BaseModel):
     @field_validator("agent_mentions", mode="before")
     @classmethod
     def _agent_mentions_from_row(cls, v: object) -> object:
-        from agentcore.conversation.mentions import to_stored_agent_mentions
+        from agentcore.core.mentions import to_stored_agent_mentions
 
         if v is None:
             return []

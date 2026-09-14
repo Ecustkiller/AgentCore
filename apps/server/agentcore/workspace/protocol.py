@@ -91,7 +91,35 @@ class AmbiguousMatch(WorkspaceError):
 
 
 class WorkspaceIOError(WorkspaceError):
-    """A low-level I/O failure (read/write) that is not one of the above."""
+    """A low-level I/O failure (read/write) that is not one of the above.
+
+    Channel-family failures that tools must branch on are subclasses below.
+    They stay ``WorkspaceIOError`` so ``except WorkspaceIOError`` still works.
+    They are never ``AgentCoreError`` — mid-turn IO must not enter Class B
+    send-as-if-never-happened. Turn-start presence is a separate coded type.
+    """
+
+
+class WorkspaceLivenessTimeout(WorkspaceIOError):
+    """Channel settle hang or desktop deadline abort.
+
+    Fails this op only. Does not mean the desktop is disconnected.
+    """
+
+
+class WorkspacePresenceDisconnected(WorkspaceIOError):
+    """Fulfiller gone: no fulfiller, origin device offline, or root not held.
+
+    Mid-turn file tools retire the family. Turn-start presence is
+    ``AgentCoreError`` (``LOCAL_*``), not this type.
+    """
+
+
+class WorkspaceReconnect(WorkspaceIOError):
+    """Fulfill transport dropped while the desktop was already running this op.
+
+    Retry is not futile; not a presence disconnect.
+    """
 
 
 @dataclass(frozen=True)

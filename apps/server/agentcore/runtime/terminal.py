@@ -21,6 +21,10 @@ Run 关帧事件是**有意不同的集合**（格：product ⊂ stream-flush �
   走另一条路，fold 不在此拼 delta。
 - :data:`RUN_STREAM_FLUSH_EVENT_TYPES` — 流式 checkpointer 冲刷边。completed /
   failed / cancelled（skipped 没有缓冲 delta）。
+- :data:`LIVE_SETTLE_EVENT_TYPES` — live SSE 有界队列保送，不是第四种终态。
+  occupancy close ∪ ``message_end`` ∪ ``error`` ∪ ``execution_completed``。
+  过程帧可丢；这些关帧不能被过程挤掉。``execution_detached`` 是进后台的章，
+  不算收工。
 
 专门的中止收口（user stop / lease salvage）仍看 ``runtime.turn.interrupt``，
 不要把它的 ``CANCELLED|INTERRUPTED`` 当成通用「回合终态」。
@@ -70,7 +74,18 @@ RUN_STREAM_FLUSH_EVENT_TYPES: frozenset[EventType] = frozenset(
     }
 )
 
+# Live SSE backpressure: fluency may drop; these must ride the same connection.
+# Graph last-known stays in-progress until a close frame arrives — shedding a
+# settle frame for a delta pins the canvas "running". Not DURABLE-at-large
+# (``tool_use_end`` would fill the keep set) and not the background stamp.
+LIVE_SETTLE_EVENT_TYPES: frozenset[EventType] = RUN_CLOSE_EVENT_TYPES | {
+    EventType.MESSAGE_END,
+    EventType.ERROR,
+    EventType.EXECUTION_COMPLETED,
+}
+
 assert RUN_PRODUCT_EVENT_TYPES <= RUN_STREAM_FLUSH_EVENT_TYPES <= RUN_CLOSE_EVENT_TYPES
+assert RUN_CLOSE_EVENT_TYPES < LIVE_SETTLE_EVENT_TYPES
 
 
 def _terminal_phases() -> frozenset[Any]:
@@ -99,6 +114,11 @@ def is_run_stream_flush_event(event_type: object) -> bool:
     return event_type in RUN_STREAM_FLUSH_EVENT_TYPES
 
 
+def is_live_settle_event(event_type: object) -> bool:
+    """True when live SSE must not shed this frame for a process/delta frame."""
+    return event_type in LIVE_SETTLE_EVENT_TYPES
+
+
 def is_gate_pause_finish(finish_reason: object) -> bool:
     """True when the stream closed as a gate pause (outcome stays ``None``)."""
     raw = getattr(finish_reason, "value", finish_reason)
@@ -115,6 +135,7 @@ def __getattr__(name: str) -> Any:
 
 __all__ = [
     "FinishReason",
+    "LIVE_SETTLE_EVENT_TYPES",
     "PRODUCED_OUTCOMES",
     "RUN_CLOSE_EVENT_TYPES",
     "RUN_PRODUCT_EVENT_TYPES",
@@ -122,6 +143,7 @@ __all__ = [
     "TurnOutcome",
     "coerce_produced_outcome",
     "is_gate_pause_finish",
+    "is_live_settle_event",
     "is_run_close_event",
     "is_run_phase_terminal",
     "is_run_product_event",

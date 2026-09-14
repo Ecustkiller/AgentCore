@@ -1,0 +1,13 @@
+{
+  "id": "routing_self_in_window_save",
+  "category": "routing",
+  "user_message": "把下面三条原样存成 notes/tips.md，不要改写：\n\n- 先写验收再动手\n- 路径用工作区相对 POSIX\n- 猜错会做错才问\n",
+  "path": "team",
+  "mode": "economy",
+  "checks": [
+    { "name": "FinishReason" },
+    { "name": "NotDelegated" },
+    { "name": "ToolCalled", "tool": "file_write" }
+  ],
+  "rubric": "全文已在窗里的一眼小落盘：切不出去、编码≈做完，CEO 自己 file_write。对照成篇/800 字落盘该派——不是『有路径就派』。"
+}

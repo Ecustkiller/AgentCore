@@ -20,8 +20,8 @@ from agentcore.runtime.journal.pending_interactions import settlement_dedupe_key
 from agentcore.runtime.journal.writer import TurnJournalWriter, current_journal_writer
 
 # Settlement event kinds that participate in prewrite + dedupe.
-# Resolved events + reconnect-only required (stage_card is posted as a settlement
-# fact on a closed host turn) + the cross-kind orphan fact. Derived from
+# Resolved events + reconnect-answerable required (none today: leftover
+# ``stage_card`` is journal-only) + the cross-kind orphan fact. Derived from
 # INTERACTION_KIND_SPECS so a new kind cannot silently miss the dedupe set.
 SETTLEMENT_EVENT_KINDS: frozenset[str] = frozenset(
     {
@@ -80,7 +80,7 @@ async def prewrite_settlement_direct(
     Idempotent: if the same ``(turn_id, kind, id)`` is already in journal, skip the write
     (still registers ambient-writer dedupe when present).
     """
-    from agentcore.conversation.store import get_conversation_store
+    from agentcore.runtime.conversation_store import get_conversation_store
 
     entry = entry_from_sse(event)
     key = settlement_dedupe_key(turn_id, event.type.value, dict(event.payload))

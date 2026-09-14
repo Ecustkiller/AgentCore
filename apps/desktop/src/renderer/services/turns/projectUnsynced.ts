@@ -121,14 +121,13 @@ export function projectUnsyncedTurns(
     const rows = summaryToBackendMessages(conversationId, u);
     for (const row of rows) {
       const msg = toMessage(row);
-      // Open ghost (sidecar died mid-turn): surface as interrupted, not streaming.
+      // Open in-flight: stop streaming; interrupted only from finish_reason or dead salvage.
       // Empty cancelled/dead: keep terminal finish (cancelled → synthetic cancelled
-      // face; blank dead → interrupted「已中断」) so product face is never blank.
+      // face; dead / explicit interrupted →「已中断」).
       if (row.role === "assistant") {
         const empty = !(msg.content ?? "").trim();
         if (u.phase === "open" && msg.status === "incomplete") {
           msg.isStreaming = false;
-          msg.finishReason = msg.finishReason ?? "interrupted";
         } else if (empty && !msg.error?.message?.trim()) {
           const fr = u.finish_reason ?? msg.finishReason;
           if (fr === "cancelled") {
@@ -138,7 +137,7 @@ export function projectUnsyncedTurns(
             if (msg.runs) {
               msg.runs = { ...msg.runs, finishReason: "cancelled" };
             }
-          } else if (u.phase === "dead" || (!fr && u.phase === "ready")) {
+          } else if (fr === "interrupted" || u.phase === "dead") {
             msg.isStreaming = false;
             msg.status = "incomplete";
             msg.finishReason = "interrupted";

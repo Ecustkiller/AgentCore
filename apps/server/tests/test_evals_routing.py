@@ -196,11 +196,13 @@ def test_seeded_routing_suite_loads_and_lints_clean() -> None:
         "routing_delegate_readme_tweak",
         "routing_delegate_config_line",
         "routing_delegate_multi_file",
-        "routing_delegate_paste_bugfix",
     ):
         assert by_id[cid].workspace_fixture == "probe_workspace"
     # 打开软件：无本机打开能力时产品终向 ASK，金标 NotDelegated（勿强迫委派）。
     assert "NotDelegated" in {s["name"] for s in by_id["routing_delegate_run_app"].checks}
+    # 信息判据对照：互不依赖短查证该派；窗里已有的一眼小落盘自己写。
+    assert "Delegated" in {s["name"] for s in by_id["routing_delegate_independent_lookups"].checks}
+    assert "NotDelegated" in {s["name"] for s in by_id["routing_self_in_window_save"].checks}
 
     fixture = (
         Path(__file__).resolve().parents[1]

@@ -1185,10 +1185,6 @@ async def test_tape_followups_ignored_on_persist(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
     monkeypatch.setattr(
-        "agentcore.runtime.kickoff.stage_card.emit_stage_card_for_motion",
-        AsyncMock(return_value=None),
-    )
-    monkeypatch.setattr(
         cloud_mod.settings, "workspace_snapshot_enabled", False, raising=False
     )
 

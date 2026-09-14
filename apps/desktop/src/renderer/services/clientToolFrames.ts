@@ -1,6 +1,4 @@
 import { logEvent } from "@/lib/log";
-import { performBoardOp } from "@/services/boardOps";
-import { performBoardRead } from "@/services/boardRead";
 import { abortClientToolRequest } from "@/services/clientToolFulfill";
 import { performExternalMount } from "@/services/externalMountOps";
 import { performHostOp } from "@/services/hostOps";
@@ -8,8 +6,6 @@ import type { InteractionSettleOrigin } from "@/services/interaction";
 import { performMcpOp } from "@/services/mcpOps";
 import { performWorkspaceOp } from "@/services/workspaceOps";
 import type {
-  BoardOpRequiredPayload,
-  BoardReadRequiredPayload,
   ExternalMountRequiredPayload,
   HostOpRequiredPayload,
   McpOpRequiredPayload,
@@ -20,7 +16,7 @@ import type {
 export type { InteractionSettleOrigin };
 
 /**
- * Six CLIENT_TOOL `*_required` wire types. Both engines deliver them on a
+ * CLIENT_TOOL `*_required` wire types. Both engines deliver them on a
  * fulfill channel — cloud on the device SSE, sidecar on its stdio push — never
  * on the conversation event stream.
  */
@@ -28,8 +24,6 @@ export const CLIENT_TOOL_REQUIRED_TYPES = [
   "workspace_op_required",
   "host_op_required",
   "mcp_op_required",
-  "board_op_required",
-  "board_read_required",
   "external_mount_required",
 ] as const;
 
@@ -88,20 +82,6 @@ export function dispatchClientToolRequired(
     case "mcp_op_required":
       void performMcpOp(
         payload as McpOpRequiredPayload,
-        conversationId,
-        origin,
-      );
-      return;
-    case "board_op_required":
-      void performBoardOp(
-        payload as BoardOpRequiredPayload,
-        conversationId,
-        origin,
-      );
-      return;
-    case "board_read_required":
-      void performBoardRead(
-        payload as BoardReadRequiredPayload,
         conversationId,
         origin,
       );

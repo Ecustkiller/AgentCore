@@ -1,4 +1,4 @@
-import { FileDetail } from "@/components/files/FileDetail";
+import { FileDetail, type FileDirtyState } from "@/components/files/FileDetail";
 import { MemoryProfileSplitEditor } from "@/components/files/MemoryProfileSplitEditor";
 import type { FileSortBy } from "@/components/files/fileTreeTypes";
 import { DetailTabs } from "@/components/files/fileWorkbench/DetailTabs";
@@ -77,6 +77,7 @@ import {
 } from "@/services/sources/workspaceSource";
 import type { WorkspaceInfo } from "@/services/workspaces";
 import { useFoldersStore } from "@/stores/folders";
+import { UNSAVED_CLOSE_COPY } from "@/stores/sidePanel";
 import { FileText, FolderOpen, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -528,10 +529,34 @@ export function FileWorkbench({
     setActiveKey(key);
   };
 
+  const reportDirty = useCallback((key: string, state: FileDirtyState) => {
+    setTabs((prev) => {
+      let changed = false;
+      const next = prev.map((t) => {
+        if (tabKey(t.wsId, t.path) !== key) return t;
+        if (
+          t.dirty === state.dirty &&
+          t.confirmDiscard === state.confirmDiscard
+        ) {
+          return t;
+        }
+        changed = true;
+        return {
+          ...t,
+          dirty: state.dirty,
+          confirmDiscard: state.confirmDiscard,
+        };
+      });
+      return changed ? next : prev;
+    });
+  }, []);
+
   // 关标签：关的是激活页则跳到相邻页（优先右、否则左），全关则回空态。
   const closeTab = (key: string) => {
     const idx = tabs.findIndex((t) => tabKey(t.wsId, t.path) === key);
     if (idx === -1) return;
+    const target = tabs[idx];
+    if (target?.confirmDiscard && !window.confirm(UNSAVED_CLOSE_COPY)) return;
     const next = tabs.filter((_, i) => i !== idx);
     setTabs(next);
     if (activeKey === key) {
@@ -566,11 +591,24 @@ export function FileWorkbench({
   const closeOthers = (key: string) => {
     const keep = tabs.find((t) => tabKey(t.wsId, t.path) === key);
     if (!keep) return;
+    const dropping = tabs.filter((t) => tabKey(t.wsId, t.path) !== key);
+    if (
+      dropping.some((t) => t.confirmDiscard) &&
+      !window.confirm(UNSAVED_CLOSE_COPY)
+    ) {
+      return;
+    }
     setTabs([keep]);
     setActiveKey(key);
   };
 
   const closeAll = () => {
+    if (
+      tabs.some((t) => t.confirmDiscard) &&
+      !window.confirm(UNSAVED_CLOSE_COPY)
+    ) {
+      return;
+    }
     setTabs([]);
     setActiveKey(null);
   };
@@ -871,6 +909,7 @@ export function FileWorkbench({
                             path={t.path}
                             name={t.name}
                             onClose={() => closeTab(key)}
+                            onDirtyChange={(state) => reportDirty(key, state)}
                           />
                         )
                       ) : (

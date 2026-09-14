@@ -100,3 +100,30 @@ describe("FileTreeRowMenu 目录下载", () => {
     expect(screen.queryByText("下载")).toBeNull();
   });
 });
+
+describe("FileTreeRowMenu 导出 Word", () => {
+  it("Markdown 可写源出现两档，正式文书传 official", async () => {
+    const exportMdToDocx = vi
+      .fn()
+      .mockResolvedValue({ path: "a.docx", warnings: [] });
+    openMenu(
+      { path: "a.md", name: "a.md", isDir: false },
+      stubSource({ exportMdToDocx }),
+    );
+    expect(await screen.findByText(/^导出 Word$/)).toBeTruthy();
+    fireEvent.click(screen.getByText("导出 Word（正式文书）"));
+    expect(exportMdToDocx).toHaveBeenCalledWith("a.md", "official");
+  });
+
+  it("导出 Word 传 standard", async () => {
+    const exportMdToDocx = vi
+      .fn()
+      .mockResolvedValue({ path: "a.docx", warnings: [] });
+    openMenu(
+      { path: "note.md", name: "note.md", isDir: false },
+      stubSource({ exportMdToDocx }),
+    );
+    fireEvent.click(await screen.findByText(/^导出 Word$/));
+    expect(exportMdToDocx).toHaveBeenCalledWith("note.md", "standard");
+  });
+});

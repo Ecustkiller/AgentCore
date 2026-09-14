@@ -14,6 +14,9 @@ import { MessagesPage } from "@/pages/MessagesPage";
 import { MorePage } from "@/pages/MorePage";
 import { OnboardingPreviewPage } from "@/pages/OnboardingPreviewPage";
 import { PreviewPage } from "@/pages/PreviewPage";
+import { TableEditorPage } from "@/pages/TableEditorPage";
+import { TablesPage } from "@/pages/TablesPage";
+import { TablesPreviewPage } from "@/pages/TablesPreviewPage";
 import { TurnDetailPage } from "@/pages/TurnDetailPage";
 import { WhiteboardCanvasPage } from "@/pages/WhiteboardCanvasPage";
 import { WhiteboardPage } from "@/pages/WhiteboardPage";
@@ -29,6 +32,7 @@ import { MoreIndexRedirect } from "@/pages/more/MoreIndexRedirect";
 import { ProviderSettings } from "@/pages/more/ProviderSettings";
 import { RedirectToOfficialChat } from "@/pages/more/RedirectToOfficialChat";
 import { ShortcutsSettings } from "@/pages/more/ShortcutsSettings";
+import { SponsorSettings } from "@/pages/more/SponsorSettings";
 import { UsageSettings } from "@/pages/more/UsageSettings";
 import { CreationPage } from "@/pages/toolbox/CreationPage";
 import { GuidelinesPage } from "@/pages/toolbox/GuidelinesPage";
@@ -107,6 +111,22 @@ export const router = createHashRouter([
         element: (
           <NarrowBlockedPage>
             <WhiteboardCanvasPage />
+          </NarrowBlockedPage>
+        ),
+      },
+      {
+        path: "tables",
+        element: (
+          <NarrowBlockedPage>
+            <TablesPage />
+          </NarrowBlockedPage>
+        ),
+      },
+      {
+        path: "tables/:tableId",
+        element: (
+          <NarrowBlockedPage>
+            <TableEditorPage />
           </NarrowBlockedPage>
         ),
       },
@@ -218,6 +238,7 @@ export const router = createHashRouter([
       // Companion offline preview for the self-built whiteboard canvas (a scene surface, not an
       // SSE vector — see preview/whiteboardScenes.ts + scripts/shoot-whiteboard.mjs).
       { path: "preview/whiteboard", element: <WhiteboardPreviewPage /> },
+      { path: "preview/tables", element: <TablesPreviewPage /> },
       // Preview：已退役 ask 开场布局对照（现生产 = 通用澄清卡）。
       { path: "preview/ask-commence", element: <AskCommencePreviewPage /> },
       // Preview 首启体验（草稿空态两态 + composer 生成中插话态）.
@@ -278,6 +299,7 @@ export const router = createHashRouter([
             element: <Navigate to={APP_PATHS.more.about} replace />,
           },
           { path: "about", element: <AboutSettings /> },
+          { path: "sponsor", element: <SponsorSettings /> },
           { path: "legal/:docId", element: <LegalSettingsPage /> },
         ],
       },

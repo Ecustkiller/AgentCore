@@ -319,7 +319,7 @@ export async function runRegenerate(
     }
   } catch (err) {
     if (isAbort(err)) {
-      finalizeHonestStopAbort(conversationId);
+      finalizeHonestStopAbort(conversationId, err);
       return;
     }
     // A mid-stream drop no longer means the turn died (1a: it runs detached) —
@@ -512,7 +512,7 @@ export async function runResume(
     }
   } catch (err) {
     if (isAbort(err)) {
-      finalizeHonestStopAbort(conversationId);
+      finalizeHonestStopAbort(conversationId, err);
       return;
     }
     // A mid-stream drop no longer means the turn died (1a: it runs detached) —

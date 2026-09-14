@@ -2,9 +2,9 @@
  * Render a Remotion composition by id.
  *
  * Usage (cwd = apps/promo):
- *   node scripts/render.mjs Promo out/promo.mp4
+ *   node scripts/render.mjs Kit-Logo out/logo.mp4
  *   node scripts/render.mjs PixelCheck out/pixel-check.png --still
- *   pnpm render -- Promo out/promo.mp4
+ *   pnpm render -- Kit-GraphRun out/graph-run.mp4
  *
  * Extra flags after the output path are forwarded to `remotion render` / `still`.
  */
@@ -15,7 +15,7 @@ const stillIdx = args.indexOf("--still");
 const isStill = stillIdx >= 0;
 if (isStill) args.splice(stillIdx, 1);
 
-const compositionId = args[0] ?? "Promo";
+const compositionId = args[0] ?? "Kit-Logo";
 const out =
   args[1] ??
   (isStill ? `out/${compositionId}.png` : `out/${compositionId}.mp4`);

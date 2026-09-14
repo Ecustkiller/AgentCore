@@ -14,6 +14,7 @@ export const APP_STATIC_ROUTES: readonly string[] = [
   "/files",
   "/docs",
   "/whiteboard",
+  "/tables",
   "/messages",
   APP_PATHS.toolbox.root,
   APP_PATHS.toolbox.mine.skills,
@@ -43,6 +44,7 @@ export const APP_STATIC_ROUTES: readonly string[] = [
   APP_PATHS.toolbox.manual.reference,
   "/preview",
   "/preview/whiteboard",
+  "/preview/tables",
   "/preview/ask-commence",
   "/preview/onboarding",
   "/preview/conversations",
@@ -56,6 +58,7 @@ export const APP_STATIC_ROUTES: readonly string[] = [
   APP_PATHS.more.general,
   APP_PATHS.more.shortcuts,
   APP_PATHS.more.about,
+  APP_PATHS.more.sponsor,
   APP_PATHS.more.legal.terms,
   APP_PATHS.more.legal.privacy,
 ] as const;
@@ -69,6 +72,7 @@ export function isKnownAppRoute(pathname: string): boolean {
   if (/^\/conversations\/[^/]+\/turn\/[^/]+$/.test(pathname)) return true;
   if (/^\/whiteboard\/[^/]+$/.test(pathname)) return true;
   if (/^\/docs\/[^/]+$/.test(pathname)) return true;
+  if (/^\/tables\/[^/]+$/.test(pathname)) return true;
   if (/^\/messages\/[^/]+$/.test(pathname)) return true;
   if (/^\/more\/legal\/[^/]+$/.test(pathname)) return true;
   if (/^\/toolbox\/workflows\/[^/]+$/.test(pathname)) return true;

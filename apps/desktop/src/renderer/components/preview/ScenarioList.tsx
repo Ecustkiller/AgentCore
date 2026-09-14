@@ -31,7 +31,6 @@ const FAMILIES: { id: string; label: string }[] = [
   { id: "multi_agent", label: "多 Agent" },
   { id: "approval", label: "审批" },
   { id: "plan_review", label: "计划复核" },
-  { id: "board_ops", label: "白板操作" },
 ];
 
 const OTHER = { id: "other", label: "其他" };

@@ -9,8 +9,8 @@ from typing import Any, Literal
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolFace
-from agentcore.runtime.engine.write_args_clear import cleared_write_stub_rejection
 from agentcore.tools.builtin.write_diagnostics import attach_write_diagnostics
+from agentcore.tools.cleared_write_stub import cleared_write_stub_rejection
 from agentcore.tools.file_products import file_product
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
@@ -341,74 +341,6 @@ async def _assemble_str_replace_fail_receipt(
     joined = "\n\n".join(blocks)
     return head + ("\n\n" + joined if joined else "") + guidance
 
-def _promote_research_landed_refs(rel_path: str, content: str) -> None:
-    """方向笔记落盘后：正文已引用的台账 id 升 selected，供 CEO 汇总继承。"""
-    from agentcore.workspace.stage_dirs import RESEARCH_PREFIX
-
-    norm = (rel_path or "").replace("\\", "/").lstrip("./")
-    if not norm.startswith(RESEARCH_PREFIX) or not norm.endswith(".md"):
-        return
-    try:
-        from agentcore.runtime.suspension import turn_evidence_ledger
-    except Exception:  # noqa: BLE001
-        return
-    ledger = turn_evidence_ledger.get()
-    if ledger is None:
-        return
-    try:
-        newly = ledger.promote_refs_cited_in_landed_note(content)
-    except Exception:  # noqa: BLE001 — 晋升失败不挡写入回执
-        return
-    if newly:
-        logger.info(
-            "evidence.promote_landed_note_refs",
-            path=norm,
-            newly=len(newly),
-        )
-
-
-def _maybe_inject_research_ledger_anchors(
-    rel_path: str, content: str, context: ToolContext
-) -> str:
-    """约定文档 ``research/`` 落盘时若正文无 ``#rN``，用本 worker 台账条目补脚注（一层兜底）。"""
-    from agentcore.workspace.stage_dirs import RESEARCH_PREFIX
-
-    norm = (rel_path or "").replace("\\", "/").lstrip("./")
-    if not norm.startswith(RESEARCH_PREFIX) or not norm.endswith(".md"):
-        return content
-    try:
-        from agentcore.runtime.debate.research_dossier import (
-            ensure_research_file_anchors,
-        )
-        from agentcore.runtime.suspension import turn_evidence_ledger
-    except Exception:  # noqa: BLE001 — 导入失败不挡写入
-        return content
-    ledger = turn_evidence_ledger.get()
-    if ledger is None:
-        return content
-    try:
-        entries = list(ledger.all_entries())
-    except Exception:  # noqa: BLE001
-        return content
-    registrant = f"worker:{context.agent_id}" if context.agent_id else ""
-    mine = [
-        e
-        for e in entries
-        if isinstance(e, dict)
-        and (not registrant or str(e.get("registrant") or "") == registrant)
-    ]
-    # 本 worker 无登记时不跨员拼脚注（避免四路透镜互染）。
-    if not mine:
-        return content
-    try:
-        return ensure_research_file_anchors(content, mine)
-    except Exception:  # noqa: BLE001
-        logger.warning(
-            "research.ledger_anchor_inject_failed",
-            path=norm,
-            error="ensure_failed",
-        )
-        return content
 
 class FileWriteTool:
     """Write content to a file within the workspace."""
@@ -418,6 +350,7 @@ class FileWriteTool:
         audience=AUDIENCE_BOTH,
         file_products=FileProductsContract.SELF_REPORT,
         workspace_io=True,
+        catalog_summary="写工作区文件",
     )
 
     @property
@@ -487,12 +420,6 @@ class FileWriteTool:
             return denied
         coordinator = context.write_coordinator
 
-        # 幕1 约定文档落盘锚：AgentCore/文档/research/ 下若正文无 #rN，
-        # 用本回合台账条目写脚注（一层兜底）。
-        write_content = _maybe_inject_research_ledger_anchors(
-            rel_path, content, context
-        )
-
         # Pre-read for stale-overwrite CAS (concurrent writer).
         old_content: str | None = None
         try:
@@ -536,7 +463,7 @@ class FileWriteTool:
                 )
 
         try:
-            written = await context.backend.write(rel_path, write_content)
+            written = await context.backend.write(rel_path, content)
         except OutsideWorkspace as e:
             if coordinator is not None and release_on_fail:
                 coordinator.release(rel_path, context.run_id)
@@ -561,26 +488,17 @@ class FileWriteTool:
                 )
             return _write_io_error(e, start)
 
-        _promote_research_landed_refs(rel_path, write_content)
-
-        anchor_note = (
-            "；已补写来源台账锚脚注"
-            if write_content != content
-            else ""
-        )
-        kind = classify_write_kind(write_content)
+        kind = classify_write_kind(content)
         path_key = _norm_rel_path(rel_path)
         output = format_artifact_manifest(
             path=rel_path,
-            content=write_content,
+            content=content,
             chars_written=written,
             kind=kind,
             action="write",
         )
         if rename_note:
             output = f"{output}\n{rename_note}"
-        if anchor_note:
-            output += anchor_note
         _mark_landed_files(context, path_key, kind=kind)
         result = ToolResult(
             tool_call_id="",
@@ -600,6 +518,7 @@ class StrReplaceTool:
         audience=AUDIENCE_BOTH,
         file_products=FileProductsContract.SELF_REPORT,
         workspace_io=True,
+        catalog_summary="改工作区文件里的一段",
     )
 
     @property

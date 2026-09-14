@@ -9,5 +9,5 @@
     { "name": "NotDelegated" },
     { "name": "MaxRounds", "args": { "budget": 3 } }
   ],
-  "rubric": "单点概念对比：几句话可答清，CEO 直答，过度编排优先判失败。"
+  "rubric": "对比必须同一窗看，切不出去，编码≈做完。不是『同一问里多块就派』。"
 }

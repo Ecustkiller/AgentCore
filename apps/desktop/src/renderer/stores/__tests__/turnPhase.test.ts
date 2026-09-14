@@ -6,6 +6,7 @@ import {
   enterTurnStreaming,
   getRuntime,
   getTurnPhase,
+  restoreWritingFromOccupancy,
   throwIfCannotOpenStream,
   useConversationStore,
 } from "@/stores/conversation";
@@ -642,6 +643,17 @@ describe("turn stop lifecycle", () => {
     expect(getTurnPhase(CID)).toBe("preflight");
     enterTurnStreaming(CID);
     expect(getTurnPhase(CID)).toBe("streaming");
+  });
+
+  it("本机还在写：failed 也可直接拨回 streaming", () => {
+    useConversationStore.getState().setTurnPhase("failed", CID);
+    useConversationStore.getState().setGenerating(false, CID);
+    enterTurnStreaming(CID);
+    expect(getTurnPhase(CID)).toBe("failed");
+
+    restoreWritingFromOccupancy(CID);
+    expect(getTurnPhase(CID)).toBe("streaming");
+    expect(getRuntime(CID).isGenerating).toBe(true);
   });
 });
 

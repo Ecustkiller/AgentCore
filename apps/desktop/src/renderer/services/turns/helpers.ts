@@ -28,18 +28,34 @@ export function finalizeGeneratingIfNeeded(conversationId: string): void {
 
 /**
  * Honest-stop Abort 收口：RPC 可能先于 ``message_end`` reject。
- * ``stopping`` → ``stopped``，清 ``isGenerating``，并盖 ``finishReason=cancelled``
- * （原先只清 ``isStreaming``，条会假「进行中」直到刷新）。
+ * ``stopping`` → ``stopped``，清 ``isGenerating``。用户停止盖 ``cancelled``；
+ * ``AbortError`` message 为 ``Interrupted`` 时不得盖成 cancelled，尾巴若还没
+ * ``finishReason`` 则盖 ``interrupted``。
  * Shared by sendTurn / resume / regenerate / rejoin / stage-card（midFlight 除外：
  * Stop ≠ 取消排队）。
  */
-export function finalizeHonestStopAbort(conversationId: string): void {
+export function finalizeHonestStopAbort(
+  conversationId: string,
+  err?: unknown,
+): void {
+  const interrupted = isInterruptAbort(err);
   const wasStopping = getTurnPhase(conversationId) === "stopping";
   if (wasStopping) {
     completeTurnPhase(conversationId, "stopped");
   }
   finalizeGeneratingIfNeeded(conversationId);
+  if (interrupted) {
+    stampInterruptedIfMissing(conversationId);
+    return;
+  }
   if (wasStopping) stampHonestStopCancelled(conversationId);
+}
+
+/** Engine interrupt — same AbortError class as user-stop, different message. */
+export function isInterruptAbort(err: unknown): boolean {
+  return (
+    isAbort(err) && err instanceof DOMException && err.message === "Interrupted"
+  );
 }
 
 /** Cover finishReason so StatusStrip / hydrate see user-stop, not a dangling stream. */
@@ -57,6 +73,25 @@ function stampHonestStopCancelled(conversationId: string): void {
       isStreaming: false,
       finishReason: "cancelled",
       runs: tail.runs ? { ...tail.runs, finishReason: "cancelled" } : tail.runs,
+    },
+    conversationId,
+  );
+}
+
+/** Cover a missing finishReason so interrupt is not a dangling stream or user-stop. */
+function stampInterruptedIfMissing(conversationId: string): void {
+  const store = useConversationStore.getState();
+  const tail = getRuntime(conversationId).messages?.at(-1);
+  if (!tail || tail.role !== "assistant") return;
+  if (tail.finishReason || tail.runs?.finishReason) return;
+  store.updateMessage(
+    tail.id,
+    {
+      isStreaming: false,
+      finishReason: "interrupted",
+      runs: tail.runs
+        ? { ...tail.runs, finishReason: "interrupted" }
+        : tail.runs,
     },
     conversationId,
   );

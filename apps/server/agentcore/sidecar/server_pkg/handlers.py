@@ -22,6 +22,7 @@ from agentcore.sidecar.identity import resolve_sidecar_user_id
 from agentcore.sidecar.paused_store import LocalPausedTurnStore
 from agentcore.sidecar.run_session_store import LocalRunSessionStore
 from agentcore.sidecar.server_pkg.result import parse_decision
+from agentcore.workspace.cloud_credentials import WorkspacesCredentials
 
 logger = get_logger(__name__)
 
@@ -60,6 +61,7 @@ class HandlerMixin:
         self._creds = self._parse_inference(params.get("inference"))
         self._folders_creds = self._parse_folders_auth(params)
         self._account_creds = self._parse_account_auth(params)
+        self._workspaces_creds = self._parse_workspaces_auth(params)
         self._apply_browser_bridge(params)
         self._approvals_enabled = bool(params.get("approvalsEnabled", True))
         self._permission_axes = self._parse_permission_axes(params) or DEFAULT_PERMISSION_AXES
@@ -68,11 +70,11 @@ class HandlerMixin:
         self._outbox_store = self._build_outbox_store(data_dir)
         self._run_session_store = self._build_run_session_store(data_dir)
         if self._outbox_store is not None:
-            from agentcore.conversation.store import set_conversation_store
+            from agentcore.runtime.conversation_store import bind_conversation_store
 
             # Swap the process-wide ConversationStore so EventSink checkpoints +
             # TurnJournalWriter appends land in the local outbox (not CloudStore).
-            set_conversation_store(self._outbox_store)
+            bind_conversation_store(self._outbox_store)
         # Same DEMO_TAPE_RECORD_ENABLED gate as cloud lifespan; land under
         # ``<dataDir>/recordings`` (sibling of paused/outbox) — never repo demos/.
         self._install_recorder_if_enabled(data_dir)
@@ -431,6 +433,32 @@ class HandlerMixin:
             return cls._parse_account_creds(params.get("accountAuth"))
         return None
 
+    @staticmethod
+    def _parse_workspaces_creds(raw: Any) -> WorkspacesCredentials | None:
+        """Build workspaces narrow-ticket creds from ``workspaces`` / ``workspacesAuth``.
+
+        Shape matches folders: ``{baseUrl, apiKey}`` where ``baseUrl`` is
+        ``…/v1/workspaces`` and ``apiKey`` is the ``type=workspaces`` JWT. Never
+        accepts an access / folders / account token — desktop mints via
+        ``POST /v1/workspaces/token``.
+        """
+        if not isinstance(raw, dict):
+            return None
+        base_url = str(raw.get("baseUrl") or "").strip()
+        api_key = str(raw.get("apiKey") or "").strip()
+        if not base_url or not api_key:
+            return None
+        return WorkspacesCredentials(api_key=api_key, base_url=base_url)
+
+    @classmethod
+    def _parse_workspaces_auth(cls, params: dict[str, Any]) -> WorkspacesCredentials | None:
+        """Prefer ``workspaces``; accept ``workspacesAuth`` as an alias (desktop contract)."""
+        if "workspaces" in params:
+            return cls._parse_workspaces_creds(params.get("workspaces"))
+        if "workspacesAuth" in params:
+            return cls._parse_workspaces_creds(params.get("workspacesAuth"))
+        return None
+
     def _refresh_creds(self, params: dict[str, Any]) -> None:
         """Refresh session creds from a per-turn ``inference`` block when present.
 
@@ -447,6 +475,8 @@ class HandlerMixin:
             self._folders_creds = self._parse_folders_auth(params)
         if "account" in params or "accountAuth" in params:
             self._account_creds = self._parse_account_auth(params)
+        if "workspaces" in params or "workspacesAuth" in params:
+            self._workspaces_creds = self._parse_workspaces_auth(params)
         # Bridge creds: always apply when key present (including explicit null → clear).
         if "browserBridge" in params:
             self._apply_browser_bridge(params)

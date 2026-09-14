@@ -28,6 +28,7 @@ import { clearSidecarFoldersAuth } from "@/services/foldersToken";
 import { clearSidecarInference } from "@/services/inferenceToken";
 import { clearDefaultPermissionAxesCache } from "@/services/permissionAxes";
 import { disablePush } from "@/services/push";
+import { clearSidecarWorkspacesAuth } from "@/services/workspacesToken";
 import type { AuthUser } from "@/stores/auth";
 import type { components } from "@/types/api.generated";
 import { restPath } from "@agentcore/contract-rest-types/paths";
@@ -99,6 +100,7 @@ export async function login(
     clearSidecarInference();
     clearSidecarFoldersAuth();
     clearSidecarAccountAuth();
+    clearSidecarWorkspacesAuth();
     clearDefaultPermissionAxesCache();
     return user;
   }
@@ -116,6 +118,7 @@ export async function login(
   clearSidecarInference();
   clearSidecarFoldersAuth();
   clearSidecarAccountAuth();
+  clearSidecarWorkspacesAuth();
   clearDefaultPermissionAxesCache(); // 自主度同为按用户的设置，换人重取
   await persistDesktopAuthCookies();
   return user;
@@ -163,6 +166,7 @@ export async function verifyRegister(
   clearSidecarInference(); // fresh session → drop any prior-user token (see login)
   clearSidecarFoldersAuth();
   clearSidecarAccountAuth();
+  clearSidecarWorkspacesAuth();
   clearDefaultPermissionAxesCache();
   return user;
 }
@@ -243,6 +247,7 @@ export async function logout(): Promise<void> {
     clearSidecarInference(); // session ended → next login re-mints
     clearSidecarFoldersAuth();
     clearSidecarAccountAuth();
+    clearSidecarWorkspacesAuth();
     clearDefaultPermissionAxesCache();
   }
 }
@@ -380,6 +385,7 @@ export async function deleteAccount(password: string): Promise<void> {
   clearSidecarInference(); // account gone → drop any cached inference token
   clearSidecarFoldersAuth();
   clearSidecarAccountAuth();
+  clearSidecarWorkspacesAuth();
   clearDefaultPermissionAxesCache();
 }
 
@@ -524,6 +530,7 @@ async function devAutoLogin(): Promise<DevLoginResult> {
     clearSidecarInference();
     clearSidecarFoldersAuth();
     clearSidecarAccountAuth();
+    clearSidecarWorkspacesAuth();
     clearDefaultPermissionAxesCache();
     await persistDesktopAuthCookies();
     return { kind: "ok", user };

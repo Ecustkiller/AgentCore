@@ -18,8 +18,23 @@ vi.mock("@/lib/toast", () => ({
 }));
 
 const fillMock = vi.fn();
+const { SidecarSettleUnavailableError } = vi.hoisted(() => {
+  class SidecarSettleUnavailableError extends Error {
+    readonly code = "sidecar_settle_unavailable";
+    constructor() {
+      super("本地交互已失效");
+      this.name = "SidecarSettleUnavailableError";
+    }
+  }
+  return { SidecarSettleUnavailableError };
+});
 vi.mock("@/services/interaction", () => ({
   resolveInteraction: vi.fn(),
+  SidecarSettleUnavailableError,
+  isSidecarSettleUnavailableError: (err: unknown) =>
+    err instanceof SidecarSettleUnavailableError ||
+    (err instanceof Error &&
+      (err as { code?: string }).code === "sidecar_settle_unavailable"),
 }));
 vi.mock("@/services/turns", () => ({
   runResume: vi.fn(),
@@ -81,6 +96,48 @@ describe("submitInteraction path table", () => {
       "cloud",
     );
     expect(store().get("a1")?.status).toBe("resolved");
+  });
+
+  it("hot path: sidecar origin settles sidecar, never cloud", async () => {
+    store().upsertRequired({
+      kind: "approval",
+      conversationId: "c1",
+      messageId: "m1",
+      origin: "sidecar",
+      payload: { approval_id: "a1", tool_name: "file_delete", arguments: {} },
+    });
+    const result = await submitInteraction({
+      id: "a1",
+      kind: "approval",
+      conversationId: "c1",
+      hotBody: { kind: "approval", decision: "approve" },
+    });
+    expect(result).toBe("ok");
+    expect(resolveMock).toHaveBeenCalledWith(
+      "c1",
+      "a1",
+      { kind: "approval", decision: "approve" },
+      "sidecar",
+    );
+  });
+
+  it("sidecar settle unavailable → orphaned (no cloud POST retry)", async () => {
+    store().upsertRequired({
+      kind: "approval",
+      conversationId: "c1",
+      messageId: "m1",
+      origin: "sidecar",
+      payload: { approval_id: "a1", tool_name: "file_delete", arguments: {} },
+    });
+    resolveMock.mockRejectedValue(new SidecarSettleUnavailableError());
+    const result = await submitInteraction({
+      id: "a1",
+      kind: "approval",
+      conversationId: "c1",
+      hotBody: { kind: "approval", decision: "approve" },
+    });
+    expect(result).toBe("orphaned");
+    expect(store().get("a1")?.status).toBe("orphaned");
   });
 
   it("cold path: ask_user → runResume", async () => {

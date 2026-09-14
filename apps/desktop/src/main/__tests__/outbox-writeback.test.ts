@@ -53,6 +53,7 @@ import {
   noteOccupiedLocalTurn,
   outboxDir,
   resetLocalTurnProjectionForTests,
+  resetOccupiedConversationIdsProviderForTests,
   shouldDeleteOutboxAfterAck,
   toRecordTurnBody,
   toolFailuresFromJournal,
@@ -103,6 +104,7 @@ describe("drainOutbox", () => {
     rmSync(deadLetterDir(), { recursive: true, force: true });
     h.bearerPostJson.mockReset();
     resetLocalTurnProjectionForTests();
+    resetOccupiedConversationIdsProviderForTests();
   });
 
   it("POSTs ready records and deletes on ack (at-least-once)", async () => {
@@ -858,7 +860,7 @@ describe("drainOutbox", () => {
     ]);
   });
 
-  it("salvageOpen promotes settled open rows as cancelled (no retain-open)", async () => {
+  it("salvageOpen promotes settled open rows as interrupted (no retain-open)", async () => {
     const { recoverLocalPersistence } = await import("../outbox-writeback");
     writeReady("u-retain", {
       phase: "open",
@@ -896,7 +898,7 @@ describe("drainOutbox", () => {
     const body = h.bearerPostJson.mock.calls[0]?.[1] as {
       finish_reason?: string;
     };
-    expect(body.finish_reason).toBe("cancelled");
+    expect(body.finish_reason).toBe("interrupted");
     expect(existsSync(join(dir(), "u-retain.json"))).toBe(false);
   });
 
@@ -934,7 +936,7 @@ describe("drainOutbox", () => {
       finish_reason?: string;
       journal?: unknown[];
     };
-    expect(body.finish_reason).toBe("cancelled");
+    expect(body.finish_reason).toBe("interrupted");
     expect(Array.isArray(body.journal) && body.journal.length).toBeGreaterThan(
       0,
     );
@@ -971,7 +973,7 @@ describe("drainOutbox", () => {
     expect(existsSync(join(dir(), "u-done.json"))).toBe(false);
   });
 
-  it("salvageOpen promotes abandoned open rows as cancelled (not error)", async () => {
+  it("salvageOpen promotes abandoned open rows as interrupted (not error)", async () => {
     const { recoverLocalPersistence } = await import("../outbox-writeback");
     writeReady("u-open", {
       phase: "open",
@@ -993,7 +995,7 @@ describe("drainOutbox", () => {
     const body = h.bearerPostJson.mock.calls[0]?.[1] as {
       finish_reason?: string;
     };
-    expect(body.finish_reason).toBe("cancelled");
+    expect(body.finish_reason).toBe("interrupted");
   });
 
   it("salvageOpen promotes open rows with empty content from captain stream_segments", async () => {
@@ -1027,7 +1029,7 @@ describe("drainOutbox", () => {
     };
     expect(body.content).toBe("half reply from flush");
     expect(body.reasoning_content).toBe("mid think");
-    expect(body.finish_reason).toBe("cancelled");
+    expect(body.finish_reason).toBe("interrupted");
   });
 
   it("OPEN drain posts journal once then only newly appended seqs", async () => {
@@ -1140,7 +1142,7 @@ describe("drainOutbox", () => {
     }
   });
 
-  it("salvageOpen seals user_message-only open shells as cancelled writeback", async () => {
+  it("salvageOpen seals user_message-only open shells as interrupted writeback", async () => {
     const { recoverLocalPersistence } = await import("../outbox-writeback");
     writeReady("u-um-only", {
       phase: "open",
@@ -1172,8 +1174,108 @@ describe("drainOutbox", () => {
     };
     expect(body.user_message).toBe("hello before crash");
     expect(body.content).toBe("");
-    expect(body.finish_reason).toBe("cancelled");
+    expect(body.finish_reason).toBe("interrupted");
     expect(existsSync(join(dir(), "u-um-only.json"))).toBe(false);
+  });
+
+  it("unscoped salvage skips OPEN of a conversation still writing", async () => {
+    const { recoverLocalPersistence, setOccupiedConversationIdsProvider } =
+      await import("../outbox-writeback");
+    setOccupiedConversationIdsProvider(() => ["c-live"]);
+    writeReady("u-live", {
+      phase: "open",
+      conversation_id: "c-live",
+      content: "still writing",
+    });
+    writeReady("u-dead", {
+      phase: "open",
+      conversation_id: "c-dead",
+      content: "abandoned",
+    });
+    h.bearerPostJson.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: {
+        user_message_id: "u-dead",
+        assistant_message_id: "m-dead",
+        title: null,
+      },
+    });
+    await recoverLocalPersistence();
+    const umids = h.bearerPostJson.mock.calls.map(
+      (c) => (c[1] as { user_message_id?: string }).user_message_id,
+    );
+    expect(umids).toEqual(["u-dead"]);
+    expect(existsSync(join(dir(), "u-live.json"))).toBe(true);
+    expect(existsSync(join(dir(), "u-dead.json"))).toBe(false);
+  });
+
+  it("dead-sidecar allowlist salvages that conversation even if still in the live table", async () => {
+    const { recoverLocalPersistence, setOccupiedConversationIdsProvider } =
+      await import("../outbox-writeback");
+    setOccupiedConversationIdsProvider(() => ["c-dead", "c-live"]);
+    writeReady("u-dead", {
+      phase: "open",
+      conversation_id: "c-dead",
+      content: "this engine died",
+    });
+    writeReady("u-live", {
+      phase: "open",
+      conversation_id: "c-live",
+      content: "other engine still writing",
+    });
+    h.bearerPostJson.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: {
+        user_message_id: "u-dead",
+        assistant_message_id: "m-dead",
+        title: null,
+      },
+    });
+    await recoverLocalPersistence({ conversationIds: ["c-dead"] });
+    const umids = h.bearerPostJson.mock.calls.map(
+      (c) => (c[1] as { user_message_id?: string }).user_message_id,
+    );
+    expect(umids).toEqual(["u-dead"]);
+    expect(existsSync(join(dir(), "u-live.json"))).toBe(true);
+    expect(existsSync(join(dir(), "u-dead.json"))).toBe(false);
+  });
+
+  it("occupied-turn failure salvages only that OPEN file", async () => {
+    const { handleOccupiedTurnSidecarFailure } = await import(
+      "../outbox-writeback"
+    );
+    writeReady("u-fail", {
+      phase: "open",
+      conversation_id: "c-fail",
+      content: "this attempt died",
+    });
+    writeReady("u-other", {
+      phase: "open",
+      conversation_id: "c-other",
+      content: "must not salvage",
+    });
+    h.bearerPostJson.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: {
+        user_message_id: "u-fail",
+        assistant_message_id: "m-fail",
+        title: null,
+      },
+    });
+    await handleOccupiedTurnSidecarFailure({
+      conversationId: "c-fail",
+      userMessageId: "u-fail",
+      messageId: "m1",
+    });
+    const umids = h.bearerPostJson.mock.calls.map(
+      (c) => (c[1] as { user_message_id?: string }).user_message_id,
+    );
+    expect(umids).toEqual(["u-fail"]);
+    expect(existsSync(join(dir(), "u-other.json"))).toBe(true);
+    expect(existsSync(join(dir(), "u-fail.json"))).toBe(false);
   });
 
   it("ready drain fills captain stream_segments into POST body", async () => {

@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agentcore.conversation.common import resolve_local_binding
-from agentcore.conversation.scratch import bare_chat_local_subpath
 from agentcore.db.models import Conversation, Folder
+from agentcore.workspace.locate import bare_chat_local_subpath
 
 
 def _conv(**kwargs) -> Conversation:

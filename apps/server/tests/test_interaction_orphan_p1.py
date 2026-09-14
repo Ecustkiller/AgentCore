@@ -9,6 +9,7 @@ import pytest
 from agentcore.runtime.audit.projector import project_journal_entry
 from agentcore.runtime.interaction import InteractionKind, InteractionRegistry
 from agentcore.runtime.interaction_orphan import (
+    orphan_journal_pending,
     orphan_live_turn_hot_pending,
     orphan_registry_pending,
 )
@@ -214,3 +215,40 @@ def test_fold_three_hot_kinds_all_pending() -> None:
         "approval",
         "escalation",
     }
+
+
+@pytest.mark.asyncio
+async def test_orphan_journal_pending_writes_fact_after_turn_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``turn_end`` empties fold pending; the writer must still persist the fact."""
+    written: list[tuple[str, str]] = []
+
+    async def fake_emit(**kwargs):
+        written.append((kwargs["interaction_id"], kwargs["kind"]))
+
+    monkeypatch.setattr(
+        "agentcore.runtime.interaction_orphan.emit_orphan_fact",
+        fake_emit,
+    )
+    entries = [
+        {
+            "kind": "approval_required",
+            "payload": {
+                "approval_id": "a1",
+                "conversation_id": "c1",
+                "tool_call_id": "a1",
+                "tool_name": "file_delete",
+                "arguments": {},
+            },
+        },
+        {"kind": "turn_end", "payload": {"finish_reason": "interrupted"}},
+    ]
+    ids = await orphan_journal_pending(
+        turn_id="m1",
+        conversation_id="c1",
+        entries=entries,
+        trace_id="tr",
+    )
+    assert ids == ["a1"]
+    assert written == [("a1", "approval")]

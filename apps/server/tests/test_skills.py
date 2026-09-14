@@ -235,11 +235,21 @@ def test_lead_subteam_is_not_ceo_coordination():
     assert "凡大活必嵌套" in body
     assert "阻塞" in body
     assert "优先先" in body and "delegate" in body
+    assert "你这张任务卡" in body
+    assert "交上来" in body
     assert "立即返回" not in body
     assert "可静默" not in body
     assert "ask_user" not in body
     assert "staffing" not in body
     assert "探路" not in body
+    assert "节点合同" not in body
+    assert "已钉薄壳" not in body
+    assert "上卷" not in body
+    assert "单切片" not in body
+    assert "切不出去的现场" not in body
+    assert "为编排而编排" not in body
+    assert "为了编排而编排" in body
+    assert "空仓库" in body
 
 
 async def test_expand_skill_tool_names_unlocks_lead_subteam():
@@ -366,6 +376,17 @@ def test_system_skill_summaries_are_short_when_triggers():
 
     for skill in LEGAL_SKILLS:
         assert len(skill.summary) <= 80, (skill.name, len(skill.summary), skill.summary)
+
+
+def test_system_skill_blurbs_stay_off_directory():
+    """货架简介只给工具箱，不进 <按需目录>。"""
+    registry = build_system_skill_registry()
+    directory = render_skill_directory(registry, _FULL_TOOLS)
+    for skill in registry.list_all():
+        assert skill.blurb.strip(), skill.name
+        assert skill.blurb != skill.summary, skill.name
+        assert len(skill.blurb) <= 80, (skill.name, skill.blurb)
+        assert skill.blurb not in directory, skill.name
 
 
 def test_product_help_consult_carved_out_and_owned_by_catalog():
@@ -677,11 +698,17 @@ def test_team_orchestration_skill_teaches_staffing_constitution():
     assert "结论真冲突" not in body
     assert "人数不是优化目标" in body
     assert "活本身是一块" in body
-    assert "单 lead" in body and "二选一" in body
-    assert "先摸清入口就停" in body
+    assert "一个队长" in body and "二选一" in body
+    assert "单 lead" not in body
+    assert "相对 POSIX" not in body
+    assert "凭据写入供填 env" not in body
+    assert "根侧多节点" not in body
+    assert "先定位入口就停" in body
+    assert "先摸清入口就停" not in body
     assert "定位入口" in body
     assert "打开正文" in body
     assert "不必先自己摸完" in body
+    assert "必读顺序" in body
     assert "成品文件只装成品" in body
     assert "专业方案归专家" in body
     assert "同一套原文" in body
@@ -744,6 +771,7 @@ def test_team_orchestration_skill_teaches_opening_and_writing_without_lettered_t
     assert "明示成文不拦" not in body
     assert "自动多人" not in body
     assert "闲聊" in DELEGATE_DESCRIPTION and "不必派" in DELEGATE_DESCRIPTION
+    assert "必读顺序" not in DELEGATE_DESCRIPTION
     assert "闲聊自己回" not in body
     assert "干活默认派" not in body
     assert "consumer_deps" not in body
@@ -754,10 +782,11 @@ def test_team_orchestration_skill_teaches_opening_and_writing_without_lettered_t
     assert "点名开辩" in body or "debate" in body
     assert "0～1" not in body
     assert "定位入口" in body
-    assert "先摸清入口就停" in body
+    assert "先定位入口就停" in body
     assert "打开正文" in body
     assert "不必先自己摸完" in body
     assert "了解到什么算够" in body
+    assert "必读顺序" in body
     assert "够用即停" not in body
     assert "一页地图" not in body
     assert "一句目标" not in body
@@ -799,9 +828,15 @@ def test_product_help_skill_teaches_short_answers_and_manual_deeplinks():
     assert help_body.count("https://fashitianxia.xyz/download") == 1
     assert help_body.count("https://app.fashitianxia.xyz") == 1
     assert "同名他品" not in help_body
-    assert "只用下方【官网 / 下载】域名" in help_body or "域名只许用这三条" in help_body
+    assert "若要给官网 / 下载地址，只用下面三条" in help_body
+    assert "域名只许用这三条" not in help_body
+    assert "只用下方【官网 / 下载】域名" not in help_body
     assert "ask_user" in help_body  # teach: don't say these to users
-    assert "功能总览" in help_body and "≤3" in help_body
+    assert "【功能总览】" in help_body
+    assert "功能总览骨架" not in help_body
+    assert "最多三句" not in help_body
+    assert "试一试：直接说你想完成的事即可" not in help_body
+    assert "点名官网 / 你的网站 / 下载才用【官网 / 下载】" in help_body
     assert "product_help_map" not in help_body
     assert "product_help_faq" not in help_body
     assert "【入口地图】" in help_body
@@ -815,6 +850,12 @@ def test_product_help_skill_teaches_short_answers_and_manual_deeplinks():
     assert "【产品面地图·高频入口】" in help_body
     assert "唯一对话入口" in help_body
     assert "怎么用本产品" in help_body
+    assert "本机传统" not in help_body
+    assert "对外口径" not in help_body
+    assert "能力柱" not in help_body
+    assert "结构真相" not in help_body
+    assert "深链" not in help_body
+    assert "退出注入" not in help_body
     assert "模型与偏好等" in help_body
     assert "产物与「完整预览」" not in help_body
     assert "HTML「完整预览」（仅桌面）" in help_body or "仅桌面" in help_body
@@ -855,7 +896,7 @@ def test_product_help_skill_teaches_short_answers_and_manual_deeplinks():
     assert f"约 {settings.workspace_retention_days} 天后由系统自动清理" in help_body
     assert "立即永久清除" in help_body and "不可恢复" in help_body
     assert "进「最近删除」后也可以彻底删除" in help_body
-    assert "这张桌的 AI 设定退出注入" in help_body
+    assert "这张桌的 AI 设定不再带进对话" in help_body
     assert "这张桌的设定一起带回来" in help_body
     # 本机磁盘不受影响（线上 trace 曾编造「删本地项目会动本机目录」）
     assert "两种删法都不动你电脑上的文件" in help_body
@@ -986,7 +1027,7 @@ def test_delivery_skill_teaches_empty_desk_no_project_shell():
     assert "court-game/" not in desk
     assert "要不要再套一层" not in desk
     assert "结构目录" in desc
-    assert "src/" in desc
+    assert "src/" not in desc
     assert "套应用名/话题名当工程根" in desc
     assert "whiteboard" not in desc
     assert "【空桌勿套工程壳】" not in orch
@@ -1031,7 +1072,7 @@ def test_team_orchestration_skill_teaches_delegate_knobs():
     assert "并行写盘" not in body
     assert "sibling_artifact" not in body
     assert "假两段" not in body
-    assert "单 lead" in body and "二选一" in body
+    assert "一个队长" in body and "二选一" in body
     assert "再平铺" in body
     assert "人已派出" not in body
     assert "谁还在跑" not in body
@@ -1085,7 +1126,7 @@ def test_delivery_skill_teaches_presentation_pptx_honesty():
     body = _body("delivery")
     orch = _body("staffing")
     assert "本回合工具表" in body
-    assert "静默" in body and ".md" in body
+    assert "悄悄改成交" in body and ".md" in body
     assert "交付缺口" in body or "标缺口" in body
     assert "CEO 派写盘" in body or "artifacts" in body
     assert "file_copy" in body
@@ -1112,7 +1153,12 @@ def test_delivery_skill_teaches_presentation_pptx_honesty():
     assert "SmartArt" not in body and "DrawingML" not in body
     assert "凭印象" in body
     assert "先干" in body
-    assert "载体·手段" in body
+    assert "交什么格式" in body and "用什么手段" in body
+    assert "载体·手段" not in body
+    assert "与执行正交" not in body
+    assert "外环已跑通" not in body
+    assert "静默降成" not in body
+    assert "空转" not in body
     assert "点名载体/手段" not in body
     assert "开场表" not in body
     assert "顾问短对齐" not in body
@@ -1132,8 +1178,8 @@ def test_delivery_skill_teaches_deterministic_word_pdf_export():
     assert "md_to_docx" in body
     assert "python-docx" not in body
     assert "不可产" in body
-    assert "与执行正交" in body
-    assert "确定性导出器" in body
+    assert "有没有 `run` 不影响" in body
+    assert "专用导出器" in body
     assert "`.docx`/`.pptx`/`.xlsx` 等且能力行" not in body
     assert "与执行正交" not in orch
 
@@ -1183,7 +1229,7 @@ def test_orchestration_skill_teaches_cloud_install_boundary():
     body = _body("delivery")
     orch = _body("staffing")
     assert "install" in body.lower()
-    assert "外环已跑通" in body
+    assert "用户机器上已经跑通" in body
     assert "结构自检" not in body
     assert "export_to_local" in body
     assert "consult(delivery)" not in orch
@@ -1280,7 +1326,7 @@ def test_delivery_landing_how_lives_in_skills_not_core():
     ):
         assert token not in hint, token
 
-    assert "src/" in mkdir_desc
+    assert "src/" not in mkdir_desc
     assert "mkdir" in desk
     assert "create_folder" in desk and "工程根" in desk
     assert "court-game/" not in desk
@@ -1355,7 +1401,7 @@ def test_slice_honesty_how_lives_in_skills_not_core():
     assert "你可以组队" in orch and "先组队" in orch
     assert "已经拆好团队" in orch
     assert "已拆编制" not in orch
-    assert "单 lead" in orch and "二选一" in orch
+    assert "一个队长" in orch and "二选一" in orch
     assert "薄旁路" not in orch
     assert "薄旁路" not in hint
 
@@ -1380,7 +1426,7 @@ def test_orchestration_skill_teaches_software_admission():
     assert "轻切片" not in body
     assert "尚无工程清单" not in body
     assert "范围没钉" not in body
-    assert "单 lead" in body
+    assert "一个队长" in body
     assert "可提交长文" in PLAYBOOKS["cite_write_review"].summary
     assert 'playbook="build_app"' not in body
     assert "手写 1 人" not in body
@@ -1525,7 +1571,13 @@ def test_debate_skill_teaches_adversarial_entry_and_dual_products():
     assert "motion" in body and "sides" in body
     assert "决策简报" in body and "交锋叙事线" in body
     assert "delegate" in body and "ask_user" in body
-    assert "审校岗" in body
+    assert "审校" in body
+    assert "审校岗" not in body
+    assert "Evidence Pack" not in body
+    assert "约定文档桥" not in body
+    assert "元问题" not in body
+    assert "派完你还要收口" in body
+    assert "发言期来源台账" in body
     assert "多视角" in body
     assert "原样传达" in body or "保留意见" in body
     assert "别抹平证据状态" not in body
@@ -1547,7 +1599,8 @@ def test_debate_skill_teaches_adversarial_entry_and_dual_products():
 def test_debate_skill_teaches_intent_alignment_before_opening():
     """开辩前：对立极不得偷换；指代模糊先澄清；已有调研仍开辩 ≠ 跳过调研。"""
     body = _body("debate_and_review")
-    assert "对立极" in body
+    assert "对立双方" in body
+    assert "对立极" not in body
     assert "偷换" in body
     assert "先澄清" in body
     assert "ask_user" in body
@@ -1656,7 +1709,7 @@ def test_ask_user_kickoff_skill_teaches_short_clarify():
     assert "DESIGN" not in body
     assert "任务卡" not in body
     assert "checkpoint_after" not in body
-    # 派工跟勾选/人话走；空 continue 才「按确认默认」
+    # 派工跟勾选和用户原话走；空 continue 才「按确认默认」
     assert "未点名主体" in body
     assert "按确认默认" in body
     assert "default" in body
@@ -1715,7 +1768,10 @@ def test_ask_user_kickoff_skill_teaches_short_clarify():
     assert "consult(delivery)" not in body
     assert "图形组织图" not in body
     assert "直接拒" not in body
-    assert "说满" in body and "空派" in body
+    assert "不派活" in body
+    assert "说满" not in body and "空派" not in body
+    assert "载体审讯" not in body
+    assert "人话" not in body
     assert "桌上结果" not in body
     assert "零摩擦" not in body
     assert "短问" not in body
@@ -1804,6 +1860,8 @@ def test_page_ui_skill_teaches_direction_before_pixels():
     assert "未点名换皮" in body
     assert "层级先于装饰" in body
     assert "方向句" in body
+    assert "美学钉" not in body
+    assert "主菜" not in body
     assert "task" in body
     assert "路径" in body and "Office" in body
     assert "build_website" not in body
@@ -1961,6 +2019,8 @@ def test_run_skill_teaches_command_face():
     assert "code_diagnostics" in body
     assert "tsc -b" in body
     assert "写盘回执" in body
+    assert "后台自己分" not in body
+    assert "短内联" not in body
     assert "CEO 只启停" not in body
     assert "验收与短命令由队员" not in body
     assert "禁止自己跑" not in body
@@ -2048,6 +2108,8 @@ def test_data_file_landing_skill_teaches_script_transform_and_invariants():
     assert "无法可靠解析的源数据文件" in body
     assert "账单" in body and "报表" in body and "导出记录" in body
     assert "看原件" in body
+    assert "单 worker 线性" not in body
+    assert "三件套" not in body
     assert "认形态" not in body
     assert "一次性变换脚本" in body
     # Technique only — library names live in cloud_python.txt, not this skill.

@@ -69,6 +69,10 @@ describe("sidecar IPC contract (TS ↔ Python single source)", () => {
       { baseUrl: "http://127.0.0.1:9", token: "bridge-tok" },
       { baseUrl: "https://api.example.com", apiKey: "folders-tok" },
       { baseUrl: "https://api.example.com/v1/account", apiKey: "account-tok" },
+      {
+        baseUrl: "https://api.example.com/v1/workspaces",
+        apiKey: "workspaces-tok",
+      },
     );
     // Optional auth keys omitted when empty — exact-key sample excludes userId.
     assertExactKeys(withInference, [
@@ -86,6 +90,10 @@ describe("sidecar IPC contract (TS ↔ Python single source)", () => {
       baseUrl: "https://api.example.com/v1/account",
       apiKey: "account-tok",
     });
+    expect(withInference.workspacesAuth).toEqual({
+      baseUrl: "https://api.example.com/v1/workspaces",
+      apiKey: "workspaces-tok",
+    });
 
     const withoutInference = buildSidecarResumeRpcParams(req);
     assertExactKeys(withoutInference, [
@@ -94,6 +102,7 @@ describe("sidecar IPC contract (TS ↔ Python single source)", () => {
           k !== "inference" &&
           k !== "foldersAuth" &&
           k !== "accountAuth" &&
+          k !== "workspacesAuth" &&
           k !== "browserBridge" &&
           k !== "userId",
       ),
@@ -234,6 +243,17 @@ describe("sidecar IPC contract (TS ↔ Python single source)", () => {
     assertExactKeys(accountAuth, sidecarIpc.accountAuth.keys);
     expect(sidecarIpc.accountAuth.required).toEqual(
       sidecarIpc.accountAuth.keys,
+    );
+  });
+
+  it("workspacesAuth block keys align with SidecarWorkspacesAuth", () => {
+    const workspacesAuth = {
+      baseUrl: "https://x/v1/workspaces",
+      apiKey: "k",
+    };
+    assertExactKeys(workspacesAuth, sidecarIpc.workspacesAuth.keys);
+    expect(sidecarIpc.workspacesAuth.required).toEqual(
+      sidecarIpc.workspacesAuth.keys,
     );
   });
 });

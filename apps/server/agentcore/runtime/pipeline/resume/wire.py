@@ -7,7 +7,6 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from agentcore.board.channel import BoardChannel
 from agentcore.config import settings
 from agentcore.core.types import DEFAULT_PERMISSION_AXES, PermissionAxes, new_id
 from agentcore.desktop.channel import DesktopClientChannel
@@ -36,10 +35,16 @@ from agentcore.tools.builtin import (
 )
 from agentcore.tools.ceo_toolset import wire_worker_consult
 from agentcore.tools.protocol import ToolContext
-from agentcore.tools.registration import host_class_tool_names, register_board_ceo_tools
+from agentcore.tools.registration import (
+    host_class_tool_names,
+    register_table_ceo_tools,
+)
 from agentcore.tools.registry import ToolRegistry
 from agentcore.vision import resolve_vision_reader_for_conversation
-from agentcore.workspace.locate import workspace_channel_for_tools
+from agentcore.workspace.locate import (
+    resolve_conversation_local_binding,
+    workspace_channel_for_tools,
+)
 from agentcore.workspace.protocol import WorkspaceBackend
 
 if TYPE_CHECKING:
@@ -91,7 +96,6 @@ class ResumedWiring:
     chat_tools: ToolRegistry
     bound_execution_id: str
     execution_id_token: object
-    board_channel: BoardChannel | None
 
 
 async def _wire_continuation_toolset(
@@ -99,7 +103,7 @@ async def _wire_continuation_toolset(
     llm: Any,
     sink: EventSink,
     backend: WorkspaceBackend,
-    board_id: str | None,
+    table_id: str | None = None,
     conversation_id: str,
     message_id: str,
     captain_run_id: str,
@@ -181,29 +185,23 @@ async def _wire_continuation_toolset(
     # still consult (提示词瘦身 P2).
     # The CEO prompt itself is replayed from the stored transcript
     # (already slim + 按需目录), so no directory re-render.
-    # AI 协作白板 (§六 M2): a board-bound turn regains its BoardChannel so the
-    # continued CEO loop can still reach the user's open canvas via ``board_ops``.
-    # Rebuilt fresh (channels aren't serializable) from the caller's re-derived
-    # ``board_id`` + this continuation's sink. ``None`` ⇒ ordinary chat.
-    board_channel = (
-        BoardChannel(
-            user_id=user_id,
-            conversation_id=conversation_id,
-            board_id=board_id,
-            registry=default_interaction_registry(),
-            timeout_seconds=settings.board_op_timeout_seconds,
-        )
-        if board_id
-        else None
-    )
+    if table_id is None:
+        from agentcore.table.context import lookup_table_id
+
+        try:
+            table_id = await lookup_table_id(
+                conversation_id=conversation_id, user_id=user_id
+            )
+        except Exception:
+            table_id = None
     # desktop_channel created earlier (MCP discovery); reuse.
     workspace_channel = workspace_channel_for_tools(
         backend,
         user_id=user_id,
         conversation_id=conversation_id,
     )
-    # AI 协作白板 §九.4 Gap ②: vision cost sink shared by reference across derived
-    # run contexts — symmetric with the fresh-turn path (run.py).
+    # Vision cost sink shared by reference across derived run contexts — symmetric
+    # with the fresh-turn path (run.py).
     vision_cost_sink: list[RunCost] = []
     from agentcore.runtime.journal import execution_id_from_journal
 
@@ -219,6 +217,10 @@ async def _wire_continuation_toolset(
     # Resume has no turn attachments carrier — materials empty; attachments/
     # path exemption on the list helpers still applies.
     backend.ai_list_materials = frozenset()
+    from agentcore.runtime.coordination.session import (
+        invalidate_verify_cache_for_execution,
+    )
+
     base_tool_context = ToolContext.create(
         execution_id=resume_execution_id,
         run_id=new_id(),
@@ -231,7 +233,7 @@ async def _wire_continuation_toolset(
         ),
         deep_research_auto=deep_research_auto,
         deep_research_auto_debate_count=deep_research_auto_debate_count,
-        board_channel=board_channel,
+        table_id=table_id,
         desktop_channel=desktop_channel,
         workspace_channel=workspace_channel,
         # Profile vision slot → reader; else platform VISION_* when billing_mode=platform.
@@ -240,11 +242,17 @@ async def _wire_continuation_toolset(
         ),
         cost_sink=vision_cost_sink,
         shared_workspace=folder_id is not None,
+        ownership_desk_id=(
+            str(folder_id).strip()
+            if isinstance(folder_id, str) and folder_id.strip()
+            else None
+        ),
         material_paths=frozenset(),
         attachment_context="",
         folder_binding_injected=folder_binding_injected,
         folder_local_root_id=folder_local_root_id,
         folder_local_subpath=folder_local_subpath,
+        on_file_landed=invalidate_verify_cache_for_execution,
     )
     if folder_id is None:
         from agentcore.runtime.delegate.target_desktop import (
@@ -355,17 +363,15 @@ async def _wire_continuation_toolset(
         user_id=user_id,
     )
 
-    # AI 协作白板: re-give the CEO board tools (``board_ops`` §六 M2 + ``board_read``
-    # §九) so it can keep drawing / reading. Only in a 白板会话.
-    if board_channel is not None:
-        register_board_ceo_tools(chat_tools)
+    if table_id:
+        register_table_ceo_tools(chat_tools)
+        chat_tools.offer("table_ops")
 
     # Same explore-pending sink as fresh assemble (resume mid-explore: suppress
     # structured files_written inference + worker write_scope=explore_memory until
     # update_folder_profile clears the flag).
     # Named-refresh via resolve_hard_explore_reason（与 assemble 同源）.
     if folder_id:
-        from agentcore.conversation.scratch import resolve_conversation_local_binding
         from agentcore.memory.explore_profile import (
             resolve_hard_explore_reason,
             resolve_turn_explore_gate,
@@ -416,7 +422,6 @@ async def _wire_continuation_toolset(
         chat_tools=chat_tools,
         bound_execution_id=bound_execution_id,
         execution_id_token=execution_id_token,
-        board_channel=board_channel,
     )
 
 
@@ -426,7 +431,7 @@ async def wire_resume_turn(
     llm: Any,
     sink: EventSink,
     backend: WorkspaceBackend,
-    board_id: str | None,
+    table_id: str | None = None,
     conversation_id: str,
     message_id: str,
     captain_run_id: str,
@@ -443,7 +448,7 @@ async def wire_resume_turn(
         llm=llm,
         sink=sink,
         backend=backend,
-        board_id=board_id,
+        table_id=table_id,
         conversation_id=conversation_id,
         message_id=message_id,
         captain_run_id=captain_run_id,
@@ -471,7 +476,7 @@ async def wire_crash_turn(
     llm: Any,
     sink: EventSink,
     backend: WorkspaceBackend,
-    board_id: str | None,
+    table_id: str | None = None,
     conversation_id: str,
     message_id: str,
     captain_run_id: str,
@@ -497,7 +502,7 @@ async def wire_crash_turn(
         llm=llm,
         sink=sink,
         backend=backend,
-        board_id=board_id,
+        table_id=table_id,
         conversation_id=conversation_id,
         message_id=message_id,
         captain_run_id=captain_run_id,

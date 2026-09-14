@@ -1,7 +1,8 @@
 /**
- * Whole-window write gates (step 1): residency + richer-only + generating +
- * active+hasMoreAfter soft refresh.
- * Step 4: trusted write refreshes offline opened cache; rejects do not.
+ * Latest-window write gates: residency + live stream + active+hasMoreAfter
+ * soft refresh + empty GET must not wipe a nonempty slice.
+ * Unconfirmed optimistic tail is kept when REST is still the previous window.
+ * Successful adopt refreshes offline opened cache; rejects do not.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -24,11 +25,7 @@ vi.mock("@/services/offlineCache", () => ({
   persistOpenedCache: (...args: unknown[]) => persistOpenedCache(...args),
 }));
 
-import {
-  getRuntime,
-  isMessageWindowStrictlyRicher,
-  useConversationStore,
-} from "@/stores/conversation";
+import { getRuntime, useConversationStore } from "@/stores/conversation";
 import type { Message } from "@/stores/conversation";
 import { useInteractionStore } from "@/stores/interactions";
 import { loadLatestWindow } from "../messages";
@@ -90,30 +87,6 @@ beforeEach(() => {
   useInteractionStore.getState().clear();
 });
 
-describe("isMessageWindowStrictlyRicher", () => {
-  it("rejects thinner / equal windows; accepts longer or same-id richer", () => {
-    const thick = [
-      msg("m1", "user", "first"),
-      msg("m2", "assistant", "reply-full", {
-        runs: {
-          events: [{ type: "message_start" } as never],
-          finishReason: "stop",
-        },
-      }),
-    ];
-    const thin = [msg("m1", "user", "first"), msg("m2", "assistant", "reply")];
-    expect(isMessageWindowStrictlyRicher(thin, thick)).toBe(false);
-    expect(isMessageWindowStrictlyRicher(thick, thick)).toBe(false);
-    expect(isMessageWindowStrictlyRicher(thick, thin)).toBe(true);
-    expect(
-      isMessageWindowStrictlyRicher(
-        [...thick, msg("m3", "user", "next")],
-        thick,
-      ),
-    ).toBe(true);
-  });
-});
-
 describe("loadLatestWindow write gates", () => {
   it("does not resurrect a slice after eviction (background soft refresh)", async () => {
     store().switchConversation("a");
@@ -149,7 +122,7 @@ describe("loadLatestWindow write gates", () => {
     );
   });
 
-  it("does not replace a thick local window with a thinner snapshot", async () => {
+  it("adopts the server window even when the local journal is thicker", async () => {
     store().switchConversation("a");
     const thick = [
       msg("m1", "user", "first"),
@@ -175,23 +148,29 @@ describe("loadLatestWindow write gates", () => {
       msg("m1", "user", "first"),
       msg("m2", "assistant", "reply1"),
       msg("m3", "user", "second"),
-      msg("m4", "assistant", "reply2"), // same ids, thinner content / no runs
+      msg("m4", "assistant", "没派团队，36 篇是我直接写的。"),
+      msg("m5", "user", "精简一点"),
+      msg("m6", "assistant", "改完了"),
     ]);
-    await loadLatestWindow("a", { softRefresh: true });
+    await expect(loadLatestWindow("a", { softRefresh: true })).resolves.toBe(
+      true,
+    );
 
     expect(getRuntime("a").messages.map((m) => m.id)).toEqual([
       "m1",
       "m2",
       "m3",
       "m4",
+      "m5",
+      "m6",
     ]);
-    expect(getRuntime("a").messages.at(-1)?.content).toBe("reply2-full");
-    expect(persistOpenedCache).not.toHaveBeenCalled();
+    expect(getRuntime("a").messages.at(-1)?.content).toBe("改完了");
+    expect(persistOpenedCache).toHaveBeenCalledTimes(1);
     expect(logEvent).toHaveBeenCalledWith(
       "info",
       "conversation.slice_diag",
       expect.objectContaining({
-        action: "reject_not_richer",
+        action: "load_latest_window",
         conversation_id: "a",
       }),
     );
@@ -313,7 +292,32 @@ describe("loadLatestWindow write gates", () => {
     expect(persistOpenedCache).not.toHaveBeenCalled();
   });
 
-  it("persists opened cache after soft refresh richer write", async () => {
+  it("does not wipe a nonempty slice with an empty GET", async () => {
+    store().switchConversation("a");
+    store().setMessageWindow(
+      [msg("m1", "user", "first"), msg("m2", "assistant", "reply")],
+      { hasMoreBefore: false, hasMoreAfter: false },
+      "a",
+    );
+
+    mockWindow([], { before: false, after: false });
+    await expect(loadLatestWindow("a", { softRefresh: true })).resolves.toBe(
+      false,
+    );
+
+    expect(getRuntime("a").messages.map((m) => m.id)).toEqual(["m1", "m2"]);
+    expect(persistOpenedCache).not.toHaveBeenCalled();
+    expect(logEvent).toHaveBeenCalledWith(
+      "info",
+      "conversation.slice_diag",
+      expect.objectContaining({
+        action: "reject_empty_window",
+        conversation_id: "a",
+      }),
+    );
+  });
+
+  it("persists opened cache after soft refresh server-window write", async () => {
     store().switchConversation("a");
     store().setMessageWindow(
       [msg("m1", "user", "first")],
@@ -354,6 +358,42 @@ describe("loadLatestWindow write gates", () => {
       "info",
       "conversation.slice_diag",
       expect.objectContaining({ action: "reject_not_resident" }),
+    );
+  });
+
+  it("keeps optimistic Thinking when REST is still the previous window", async () => {
+    store().switchConversation("a");
+    store().setMessageWindow(
+      [
+        msg("m1", "user", "old"),
+        msg("m2", "assistant", "done"),
+        msg("u-opt", "user", "hello"),
+        msg("a-opt", "assistant", "", { isStreaming: true }),
+      ],
+      { hasMoreBefore: false, hasMoreAfter: false },
+      "a",
+    );
+    store().setGenerating(true, "a");
+
+    mockWindow([msg("m1", "user", "old"), msg("m2", "assistant", "done")]);
+    await expect(loadLatestWindow("a", { softRefresh: true })).resolves.toBe(
+      true,
+    );
+
+    const ids = getRuntime("a").messages.map((m) => m.id);
+    expect(ids).toEqual(["m1", "m2", "u-opt", "a-opt"]);
+    expect(getRuntime("a").messages.at(-1)?.isStreaming).toBe(true);
+    expect(getRuntime("a").isGenerating).toBe(true);
+    expect(persistOpenedCache).toHaveBeenCalledTimes(1);
+    const persisted = persistOpenedCache.mock.calls[0]?.[1] as Message[];
+    expect(persisted.map((m) => m.id)).toEqual(["m1", "m2"]);
+    expect(logEvent).toHaveBeenCalledWith(
+      "info",
+      "conversation.slice_diag",
+      expect.objectContaining({
+        action: "load_latest_window",
+        kept_unconfirmed_tail: true,
+      }),
     );
   });
 

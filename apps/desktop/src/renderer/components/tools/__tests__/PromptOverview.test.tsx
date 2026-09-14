@@ -86,11 +86,15 @@ function mineItem(over: {
 }
 
 function capTool(name: string, resident: boolean): CapabilityTool {
+  const summaries: Record<string, string> = {
+    file_read: "读工作区文件",
+    host: "本机排查 / 修理 / 查看这台电脑",
+  };
   return {
     name,
     face: "file",
     resident,
-    summary: name,
+    summary: summaries[name] ?? name,
     description: name,
     parameters: {},
     approval: "never",
@@ -150,13 +154,14 @@ function filledRail(): PromptRail {
         group: "factory",
         label: "薄技能",
         depth: 0,
-        tocGroup: "",
+        tocGroup: "编排",
         parentId: null,
         skill: {
           name: "thin_skill",
           summary: "薄技能",
           body: "thin-body",
-          group: "",
+          group: "编排",
+          blurb: "写一条按需薄技能",
         },
       },
     ],
@@ -179,7 +184,6 @@ function renderOverview(
       showConnectors={false}
       creatingFolder={false}
       busy={false}
-      installedCopyIds={new Set()}
       onOpenItem={vi.fn()}
       onOpenUpdates={vi.fn()}
       onCreateMine={vi.fn()}
@@ -272,9 +276,7 @@ describe("PromptOverview", () => {
   it("按需先铺我的夹再官方；工具与连接器跟在两轨后面", () => {
     renderOverview({
       showConnectors: true,
-      connectors: [
-        { id: "connector:fs", label: "Filesystem", description: "npx" },
-      ],
+      connectors: [{ id: "connector:fs", label: "Filesystem" }],
       onAddConnector: vi.fn(),
     });
     const always = screen.getByTestId("prompt-rail-always");
@@ -341,5 +343,41 @@ describe("PromptOverview", () => {
     });
     expect(screen.getByText("拖到这里")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "拖到这里" })).toBeNull();
+  });
+
+  it("货架卡走同一套填槽：身份不塞正文、官方 HOW 不打组名、连接器不标本机", () => {
+    renderOverview({
+      showConnectors: true,
+      connectors: [{ id: "connector:fs", label: "Filesystem" }],
+    });
+    expect(screen.getByText("三套互斥身份，点开看全文")).toBeTruthy();
+    expect(screen.queryByText("xxxxxxxxxxxx")).toBeNull();
+    expect(screen.getByText("写一条按需薄技能")).toBeTruthy();
+    expect(
+      within(screen.getByTestId("prompt-rail-official")).queryByText("编排"),
+    ).toBeNull();
+    expect(
+      within(
+        screen.getByTestId(`prompt-tile-${skillCatalogId("thin_skill")}`),
+      ).queryByText("官方"),
+    ).toBeNull();
+    expect(
+      within(screen.getByTestId("prompt-rail-connectors")).queryByText("本机"),
+    ).toBeNull();
+    expect(
+      within(screen.getByTestId("prompt-tile-tool:file_read")).queryByText(
+        "文件",
+      ),
+    ).toBeNull();
+    expect(
+      within(screen.getByTestId("prompt-tile-tool:file_read")).getByText(
+        "读工作区文件",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(screen.getByTestId("prompt-tile-tool:host")).getByText(
+        "本机排查 / 修理 / 查看这台电脑",
+      ),
+    ).toBeTruthy();
   });
 });

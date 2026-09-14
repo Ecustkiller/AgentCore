@@ -264,6 +264,7 @@ const sidecarApi: SidecarApi = {
     ipcRenderer.invoke(SIDECAR_CHANNELS.cancelQueuedTurn, req),
   listQueuedTurns: (req) =>
     ipcRenderer.invoke(SIDECAR_CHANNELS.listQueuedTurns, req),
+  occupancy: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.occupancy, req),
   resume: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.resume, req),
   probe: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.probe, req),
   warmCodeIndex: (req) =>

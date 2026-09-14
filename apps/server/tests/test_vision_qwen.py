@@ -1,6 +1,6 @@
-"""QwenVLReader + build_vision_reader / resolve_vision_reader (AI协作白板.md §九.4).
+"""QwenVLReader + build_vision_reader / resolve_vision_reader.
 
-Verifies the reader sends the board PNG as an OpenAI-compatible multimodal message
+Verifies the reader sends a PNG as an OpenAI-compatible multimodal message
 (``image_url`` data URL), parses the text reading back, maps upstream HTTP errors to
 typed LLM errors, and that the factory builds a reader from (a) profile vision-slot
 credentials, (b) empty slot + image-accepting main, or (c) platform ``VISION_*``.
@@ -58,7 +58,7 @@ async def test_read_sends_image_as_data_url_and_returns_text():
     reading = await reader.read(_PNG, "把这张手绘当 brief，描述结构与意图")
 
     assert reading.text == "草图：登录 → 校验 → 首页"
-    # 读图入账 (§九.4 Gap ②): the reading carries the sub-call usage + model so board_read
+    # 读图入账: the reading carries the sub-call usage + model so the caller
     # can price it. The OpenAI usage block has no cache split, so cache_hit/miss stay 0 on
     # the raw usage — calculate_cost reconciles the whole prompt to a miss at pricing time.
     assert reading.model == "qwen-vl-max"

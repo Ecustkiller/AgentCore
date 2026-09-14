@@ -47,6 +47,8 @@ _BUILTIN_ORDER = [
     "grep",
     "code_search",
     "code_diagnostics",
+    "docs_read",
+    "docs_write",
     "git",
     "run",
 ]
@@ -91,8 +93,8 @@ _CATALOG_ORCHESTRATION_ORDER = [
     "update_folder_profile",
     "ask_user",
     "read_image",
-    "board_ops",
-    "board_read",
+    "table_ops",
+    "table_read",
 ]
 
 _CATALOG_AVAILABLE_TO: dict[str, tuple[str, ...]] = {
@@ -106,6 +108,8 @@ _CATALOG_AVAILABLE_TO: dict[str, tuple[str, ...]] = {
     "code_search": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "code_diagnostics": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "git": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
+    "docs_read": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
+    "docs_write": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     # Write / execute: CEO + worker (same GRANTABLE ApprovalGate)
     "file_write": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "str_replace": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
@@ -140,8 +144,8 @@ _CATALOG_AVAILABLE_TO: dict[str, tuple[str, ...]] = {
     "update_folder_profile": (AVAILABLE_TO_CEO,),
     "ask_user": (AVAILABLE_TO_CEO,),
     "read_image": (AVAILABLE_TO_CEO,),
-    "board_ops": (AVAILABLE_TO_CEO,),
-    "board_read": (AVAILABLE_TO_CEO,),
+    "table_ops": (AVAILABLE_TO_CEO,),
+    "table_read": (AVAILABLE_TO_CEO,),
 }
 
 
@@ -202,6 +206,8 @@ def test_tool_registry_builtin_approvals_snapshot():
         "code_search",
         "code_diagnostics",
         "git",
+        "docs_read",
+        "docs_write",
     }
     grantable = set(_BUILTIN_ORDER) - never
     for name in never:
@@ -294,6 +300,8 @@ def test_tool_registry_declarations_cover_roster():
         "code_search",
         "code_diagnostics",
         "git",
+        "docs_read",
+        "docs_write",
     } | frozenset(_BROWSER_CEO_ORDER)
 
     declared = declared_tools()
@@ -333,7 +341,7 @@ def test_tool_registry_declarations_cover_roster():
                     assert reg.host_class, schema.name
                     assert not reg.execution_class, schema.name
 
-    # CEO orchestration wire gates (construction stays in prepare / ceo_surface / board).
+    # CEO orchestration wire gates (construction stays in prepare / ceo_surface).
     wire_by_name = {
         declared_tool_name(cls): tool_registration(cls).ceo_wire
         for cls in declared_tools(surface=ToolSurface.CEO_ORCHESTRATION)
@@ -353,8 +361,8 @@ def test_tool_registry_declarations_cover_roster():
         "update_folder_profile": CeoWire.MEMORY,
         "ask_user": CeoWire.CHECKPOINT,
         "read_image": CeoWire.ALWAYS,
-        "board_ops": CeoWire.BOARD,
-        "board_read": CeoWire.BOARD,
+        "table_ops": CeoWire.TABLE,
+        "table_read": CeoWire.TABLE,
     }
 
     # 指挥面同样「CEO 永不持 GRANTABLE」，唯一破例是 delete_folder：删文件夹每次都要

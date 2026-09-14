@@ -9,5 +9,5 @@
     { "name": "NotDelegated" },
     { "name": "MaxRounds", "args": { "budget": 3 } }
   ],
-  "rubric": "轻量解释类：CEO 应直接简洁作答，零编排、不委派团队。"
+  "rubric": "一句话解释：切不出去，编码≈做完，直答。"
 }

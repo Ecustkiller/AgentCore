@@ -49,15 +49,19 @@ function makeSource(overrides: Partial<FileSource> = {}): FileSource {
   } as FileSource;
 }
 
-function renderView(source: FileSource, name = "index.html") {
+function renderView(
+  source: FileSource,
+  name = "index.html",
+  extra: {
+    onDirtyChange?: (state: {
+      dirty: boolean;
+      confirmDiscard: boolean;
+    }) => void;
+  } = {},
+) {
   return render(
     <TooltipProvider>
-      <FilePreviewView
-        source={source}
-        path={name}
-        name={name}
-        onClose={vi.fn()}
-      />
+      <FilePreviewView source={source} path={name} name={name} {...extra} />
     </TooltipProvider>,
   );
 }
@@ -75,6 +79,13 @@ describe("FilePreviewView — HTML 源码视图（静态快照已取消）", () 
     expect(screen.queryByRole("button", { name: "查看源码" })).toBeNull();
     expect(screen.queryByRole("button", { name: "预览效果" })).toBeNull();
     expect(screen.queryByText(/这是网页文件的源码/)).toBeNull();
+  });
+
+  it("tab host: no back control or repeating filename", async () => {
+    renderView(makeSource(), "index.html");
+    await screen.findByText(HTML_TEXT);
+    expect(screen.queryByRole("button", { name: "返回文件列表" })).toBeNull();
+    expect(screen.queryByText("index.html")).toBeNull();
   });
 
   it("编辑回归：HTML 可编辑（铅笔入口），不再渲染写入归因", async () => {
@@ -237,6 +248,22 @@ describe("FilePreviewView — 非 md 文本编辑走 CAS（不静默覆盖）", 
     });
     expect(writeBytes).not.toHaveBeenCalled();
     expect(screen.queryByRole("textbox")).toBeNull(); // 存完回预览
+  });
+
+  it("reports dirty with confirmDiscard so the host tab can mark unsaved", async () => {
+    const onDirtyChange = vi.fn();
+    const source = textSource();
+    renderView(source, "notes.txt", { onDirtyChange });
+    await screen.findByRole("button", { name: "编辑" });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    });
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "edited" } });
+    expect(onDirtyChange).toHaveBeenCalledWith({
+      dirty: true,
+      confirmDiscard: true,
+    });
   });
 
   it("磁盘已改动 → 冲突横幅 + 保留草稿；「仍然覆盖」以磁盘版本为基线重写", async () => {

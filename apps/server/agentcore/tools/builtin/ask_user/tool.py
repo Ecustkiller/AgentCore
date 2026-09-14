@@ -62,6 +62,7 @@ class AskUserTool:
         surface=ToolSurface.CEO_ORCHESTRATION,
         audience=AUDIENCE_CEO_ONLY,
         ceo_wire=CeoWire.CHECKPOINT,
+        catalog_summary="向用户提问或请拍板",
     )
 
     sink: EventSink

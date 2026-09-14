@@ -20,7 +20,29 @@ from agentcore.runtime.turn.delivery import (
 from agentcore.runtime.turn.queue import QueuedTurn, set_queue_starter
 from agentcore.runtime.turn.runs import turn_runs
 from agentcore.sidecar import protocol
-from agentcore.sidecar.server_pkg.turns import parse_client_turn_ids, rpc_agent_mentions
+from agentcore.sidecar.server_pkg.turns import (
+    parse_client_turn_ids,
+    rpc_agent_mentions,
+    rpc_table_selection,
+)
+
+
+async def _await_turn_runs(
+    conversation_id: str,
+    occupying: asyncio.Task[None],
+    *,
+    timeout_s: float = 30,
+) -> None:
+    """Wait until ``turn_runs`` matches an already-started ``_turns`` task."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    while loop.time() < deadline:
+        live = turn_runs.get(conversation_id)
+        if live is not None and not live.task.done():
+            return
+        if occupying.done():
+            return
+        await asyncio.sleep(0.05)
 
 
 class DeliveryMixin:
@@ -35,6 +57,9 @@ class DeliveryMixin:
         raise NotImplementedError
 
     async def _reply(self, request_id: Any, result: Any) -> None:
+        raise NotImplementedError
+
+    def live_turn_task(self, conversation_id: str) -> asyncio.Task[None] | None:
         raise NotImplementedError
 
     def _install_local_queue_starter(self) -> None:
@@ -77,6 +102,7 @@ class DeliveryMixin:
                     "userMessage": item.content,
                     "agentMentions": list(item.agent_mentions),
                     "attachments": list(item.attachments),
+                    "tableSelection": list(item.table_selection),
                 },
             )
         )
@@ -114,6 +140,7 @@ class DeliveryMixin:
                     "delivery": params.get("delivery"),
                     "attachments": _rpc_attachment_dicts(params),
                     "agent_mentions": rpc_agent_mentions(params),
+                    "table_selection": rpc_table_selection(params),
                 }
             )
         except ValidationError as e:
@@ -141,6 +168,11 @@ class DeliveryMixin:
             return
 
         live = turn_runs.get(conversation_id)
+        if live is None or live.task.done():
+            occupying = self.live_turn_task(conversation_id)
+            if occupying is not None and not occupying.done():
+                await _await_turn_runs(conversation_id, occupying)
+                live = turn_runs.get(conversation_id)
         if live is None or live.task.done():
             await self._send(
                 protocol.make_error(
@@ -183,6 +215,7 @@ class DeliveryMixin:
                 user_id=self._user_id,
                 attachments=att_dicts,
                 agent_mentions=mention_dicts,
+                table_selection=list(body.table_selection),
                 persist_attachments_fn=None,
                 wait_for_start=False,
                 require_live=True,

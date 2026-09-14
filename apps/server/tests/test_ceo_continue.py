@@ -648,10 +648,6 @@ async def test_continue_ceo_rebuilds_worker_base_not_chat_prompt(monkeypatch):
         "agentcore.runtime.interaction_orphan.orphan_registry_pending",
         AsyncMock(return_value=None),
     )
-    monkeypatch.setattr(
-        "agentcore.conversation.stage_card_resolve.maybe_orphan_stage_cards_at_turn_end",
-        AsyncMock(),
-    )
 
     journal = [
         {

@@ -8,7 +8,11 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.runtime.delegate.target_desktop_gate import TargetDesktopError
-from agentcore.workspace.locate import LocalBinding, build_workspace
+from agentcore.workspace.locate import (
+    LocalBinding,
+    build_workspace,
+    resolve_conversation_local_binding,
+)
 from agentcore.workspace.protocol import WorkspaceBackend
 
 logger = get_logger(__name__)
@@ -62,7 +66,6 @@ async def load_target_folder_binding(
     With folders narrow-ticket credentials (sidecar), uses cloud ``GET /folders/{id}``
     instead of the local FolderRepository.
     """
-    from agentcore.conversation.scratch import resolve_conversation_local_binding
     from agentcore.folders.credentials import (
         FoldersCloudError,
         cloud_get_folder,

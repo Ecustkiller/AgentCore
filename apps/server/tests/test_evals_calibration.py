@@ -5,7 +5,7 @@
 2. gold-set 加载器对结构错误的早失败；
 3. ``calibrate`` 用脚本化假裁判验证判↔人一致度聚合、kappa 门、分歧排序、偏置。
 
-真模型留给手动 / 夜跑校准。
+真模型留给维护者本地 ``calibrate``。
 """
 
 import asyncio

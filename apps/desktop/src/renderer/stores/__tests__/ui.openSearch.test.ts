@@ -7,7 +7,6 @@ beforeEach(() => {
   useUIStore.setState({
     searchOpen: false,
     searchInitialQuery: "",
-    searchInitialBookmarks: false,
   });
 });
 
@@ -20,19 +19,11 @@ describe("useUIStore openSearch", () => {
     expect(store().searchOpen).toBe(true);
     expect(store().searchInitialQuery).toBe("");
     expect(typeof store().searchInitialQuery).toBe("string");
-    expect(store().searchInitialBookmarks).toBe(false);
   });
 
   it("openSearch(q) prefills the query", () => {
     store().openSearch("foo");
     expect(store().searchOpen).toBe(true);
     expect(store().searchInitialQuery).toBe("foo");
-  });
-
-  it("openSearch with bookmarks opens the bookmarks facet", () => {
-    store().openSearch(undefined, { bookmarks: true });
-    expect(store().searchOpen).toBe(true);
-    expect(store().searchInitialQuery).toBe("");
-    expect(store().searchInitialBookmarks).toBe(true);
   });
 });

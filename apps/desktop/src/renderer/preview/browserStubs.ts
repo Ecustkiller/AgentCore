@@ -114,6 +114,7 @@ const sidecarApi: SidecarApi = {
   },
   cancelQueuedTurn: async () => ({ status: "not_found" as const }),
   listQueuedTurns: async () => ({ items: [] }),
+  occupancy: async () => ({ occupied: false }),
   resume: async () => {
     throw new Error("sidecar unavailable in web preview");
   },

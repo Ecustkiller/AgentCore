@@ -30,13 +30,13 @@ SKILL_GROUP_ORDER: tuple[str, ...] = (
 class SystemSkill:
     """One code-defined capability doc, surfaced in the catalog and pulled by consult.
 
-    ``summary`` is the one-line trigger description shown in the always-on catalog
-    (tells the model WHEN to pull it); ``body`` is the full HOW guidance, returned
-    only when ``consult(name)`` is called. ``requires_tools`` gates the
-    catalog entry: the skill appears only when every named tool is wired this turn
-    (e.g. ``ask_kickoff`` / ``ask_midtask`` need the ``ask_user`` tool, which is
-    live-user only), so the prompt never advertises a capability the CEO cannot
-    act on. ``audience`` is who may *see* the entry (CEO vs worker). Default both.
+    ``summary`` is the consult-directory one-liner (what this is). ``blurb`` is the
+    toolbox card description only — never injected into ``<按需目录>`` or consult.
+    ``body`` is HOW, returned only when ``consult(name)`` is called.
+    ``requires_tools`` gates the catalog entry: the skill appears only when every
+    named tool is wired this turn (e.g. ``ask_kickoff`` / ``ask_midtask`` need
+    ``ask_user``), so the prompt never advertises a capability the CEO cannot act
+    on. ``audience`` is who may *see* the entry (CEO vs worker). Default both.
     ``group`` is the Chinese 能力指引 subtitle (编排 / 工作区 / 交付 / 产品 / 工具).
     Directory listing and ``consult`` fetch share this filter — do not advertise
     a name the same source cannot fetch. Not a task-intent classifier.
@@ -48,6 +48,7 @@ class SystemSkill:
     requires_tools: tuple[str, ...] = ()
     audience: tuple[str, ...] = AUDIENCE_BOTH
     group: str = ""
+    blurb: str = ""
 
 
 class SkillRegistry:

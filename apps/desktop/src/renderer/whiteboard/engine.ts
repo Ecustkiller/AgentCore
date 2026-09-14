@@ -9,7 +9,6 @@
  * pan/zoom do NOT fire `onChange` (so navigation never triggers autosave).
  */
 
-import type { BoardOp } from "@/types/events";
 import { cloneElements } from "./clone";
 import { type Palette, readPalette } from "./colors";
 import {
@@ -27,7 +26,6 @@ import { ImageCache, loadImageForImport } from "./images";
 import { type KeyCommands, handleKeyDown, handleKeyUp } from "./keymap";
 import { layoutGrid } from "./layout";
 import { layoutDagre } from "./layoutDagre";
-import { applyBoardOps } from "./ops";
 import { renderScene, selectionHandlesScreen } from "./render";
 import * as selOps from "./selectionOps";
 import { computeMoveSnap as snapMove } from "./snap";
@@ -317,11 +315,10 @@ export class WhiteboardEngine {
   }
 
   /**
-   * Rasterize a subset of elements (by id) to a PNG — the host hands this to the AI's
-   * vision reader for `board_read` (AI协作白板.md §九 混合 payload: 只有手绘 / 截图子集才走视觉).
+   * Rasterize a subset of elements (by id) to a PNG — used by selection export.
    * Renders the chosen elements alone onto an offscreen canvas under a synthetic viewport
-   * (no selection chrome), capped at {@link MAX_RASTER} px on the long side (§九.2 体积护栏).
-   * Throws if no element matches — the host maps that to a clean board_read failure.
+   * (no selection chrome), capped at {@link MAX_RASTER} px on the long side.
+   * Throws if no element matches.
    */
   rasterizeElements(ids: string[]): {
     pngBase64: string;
@@ -377,17 +374,6 @@ export class WhiteboardEngine {
     this.cb.onSelectionChange([]);
     this.cb.onViewportChange(this.viewport.zoom);
     this.scheduleRender();
-  }
-
-  applyOps(ops: BoardOp[]): { created: string[] } {
-    this.commitEditing();
-    const before = this.elements;
-    const { elements, created } = applyBoardOps(before, ops);
-    this.elements = elements;
-    this.history.push(before);
-    this.reconcileSelection();
-    this.emitChange();
-    return { created };
   }
 
   undo(): void {

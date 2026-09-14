@@ -68,16 +68,101 @@ async function recordTransientFailure(record: OutboxRecord): Promise<void> {
 /** Recent successful writebacks — fills synthetic flushTurn ack when the file is already gone. */
 const recentSyncedConversation = new Map<string, string>();
 
+/**
+ * Live conversation ids (sidecar ``this.turns``). Unscoped salvage must skip
+ * these — OPEN files belong to a turn that is still writing.
+ */
+let occupiedConversationIdsProvider: () => readonly string[] = () => [];
+
+export function setOccupiedConversationIdsProvider(
+  fn: () => readonly string[],
+): void {
+  occupiedConversationIdsProvider = fn;
+}
+
+export function resetOccupiedConversationIdsProviderForTests(): void {
+  occupiedConversationIdsProvider = () => [];
+}
+
+function occupiedConversationIdSet(): Set<string> {
+  const ids = new Set<string>();
+  for (const id of occupiedConversationIdsProvider()) {
+    const trimmed = id.trim();
+    if (trimmed) ids.add(trimmed);
+  }
+  return ids;
+}
+
+export type RecoverLocalPersistenceOpts = {
+  /** Only these conversations (dead sidecar). Occupied skip does not apply. */
+  conversationIds?: readonly string[];
+  /** Only these outbox files (failed occupy). Occupied skip does not apply. */
+  userMessageIds?: readonly string[];
+  /**
+   * When promoting OPEN: found-dead default is ``interrupted``. Occupied RPC
+   * stop ownership passes ``cancelled`` / ``interrupted`` / ``error``.
+   */
+  salvageFinishReason?: "interrupted" | "error" | "cancelled";
+  /** Observed RPC error text when ``salvageFinishReason`` is ``error``. */
+  salvageErrorMessage?: string;
+};
+
+function inScopeForOpenSalvage(
+  record: OutboxRecord,
+  opts: {
+    salvageOpen: boolean;
+    conversationIds?: ReadonlySet<string>;
+    userMessageIds?: ReadonlySet<string>;
+  },
+): boolean {
+  if (!opts.salvageOpen || record.phase !== PHASE_OPEN) return false;
+  if (opts.userMessageIds) {
+    return opts.userMessageIds.has(record.user_message_id);
+  }
+  if (opts.conversationIds) {
+    return opts.conversationIds.has(record.conversation_id);
+  }
+  return !occupiedConversationIdSet().has(record.conversation_id);
+}
+
 async function processOneOutboxRecord(
   record: OutboxRecord,
-  opts: { salvageOpen: boolean; bypassBackoff: boolean },
+  opts: {
+    salvageOpen: boolean;
+    bypassBackoff: boolean;
+    conversationIds?: ReadonlySet<string>;
+    userMessageIds?: ReadonlySet<string>;
+    salvageFinishReason?: "interrupted" | "error" | "cancelled";
+    salvageErrorMessage?: string;
+  },
 ): Promise<OutboxSyncedPayload | null> {
-  const salvageOpen = opts.salvageOpen;
   const bypassBackoff = opts.bypassBackoff;
-  if (salvageOpen && record.phase === PHASE_OPEN) {
+  if (inScopeForOpenSalvage(record, opts)) {
     if (shouldSalvageOpenRecord(record)) {
       record.phase = PHASE_READY;
-      record.finish_reason = record.finish_reason || "cancelled";
+      record.finish_reason =
+        record.finish_reason || opts.salvageFinishReason || "interrupted";
+      if (
+        record.finish_reason === "error" &&
+        (opts.salvageErrorMessage || "").trim()
+      ) {
+        const prior =
+          record.runs &&
+          typeof record.runs === "object" &&
+          !Array.isArray(record.runs)
+            ? (record.runs as Record<string, unknown>)
+            : {};
+        if (prior.error == null) {
+          record.runs = {
+            ...prior,
+            finish_reason: "error",
+            error: {
+              code: "PIPELINE_ERROR",
+              message: (opts.salvageErrorMessage ?? "").trim().slice(0, 2000),
+            },
+          };
+        }
+      }
       try {
         await writeRecord(record);
       } catch (err) {
@@ -247,16 +332,32 @@ export async function drainOutbox(): Promise<OutboxStatusSnapshot> {
 }
 
 async function drainOutboxDetailed(opts?: {
-  /** Promote abandoned open records (app-restart salvage). Never use while turns may still run. */
+  /**
+   * Promote abandoned OPEN records. Unscoped = app start / unknown dead engine:
+   * skip conversations that are still writing. Scoped allowlists (dead sidecar /
+   * failed occupy) bypass that skip for those ids only.
+   */
   salvageOpen?: boolean;
   /** User-initiated flushTurn: ignore next_attempt_at and try immediately. */
   bypassBackoff?: boolean;
+  conversationIds?: readonly string[];
+  userMessageIds?: readonly string[];
+  salvageFinishReason?: "interrupted" | "error" | "cancelled";
+  salvageErrorMessage?: string;
 }): Promise<{
   status: OutboxStatusSnapshot;
   synced: OutboxSyncedPayload[];
 }> {
   const salvageOpen = opts?.salvageOpen === true;
   const bypassBackoff = opts?.bypassBackoff === true;
+  const salvageFinishReason = opts?.salvageFinishReason;
+  const salvageErrorMessage = opts?.salvageErrorMessage;
+  const conversationIds = opts?.conversationIds
+    ? new Set(opts.conversationIds)
+    : undefined;
+  const userMessageIds = opts?.userMessageIds
+    ? new Set(opts.userMessageIds)
+    : undefined;
   // Coalesce regular polls only; salvage / flushTurn wait then run their own pass.
   if (drainInFlight) {
     if (!salvageOpen && !bypassBackoff) return drainInFlight;
@@ -272,6 +373,10 @@ async function drainOutboxDetailed(opts?: {
         const payload = await processOneOutboxRecord(record, {
           salvageOpen,
           bypassBackoff,
+          conversationIds,
+          userMessageIds,
+          salvageFinishReason,
+          salvageErrorMessage,
         });
         if (payload) synced.push(payload);
       });
@@ -347,20 +452,40 @@ export async function flushTurn(
  * Local-persistence recovery (as-built: 双模式工作区 §10.4): pause stale-claim
  * recovery is owned by the Python store on sidecar start; here we drain outbox,
  * salvage abandoned open rows with body/process, and discard begin-only empty shells.
+ *
+ * Unscoped (app start): skip conversations still writing.
+ * ``conversationIds``: this dead sidecar only.
+ * ``userMessageIds``: this failed occupy only — never a full sweep.
  */
-export async function recoverLocalPersistence(): Promise<void> {
-  await drainOutboxDetailed({ salvageOpen: true });
+export async function recoverLocalPersistence(
+  opts?: RecoverLocalPersistenceOpts,
+): Promise<void> {
+  await drainOutboxDetailed({
+    salvageOpen: true,
+    conversationIds: opts?.conversationIds,
+    userMessageIds: opts?.userMessageIds,
+    salvageFinishReason: opts?.salvageFinishReason,
+    salvageErrorMessage: opts?.salvageErrorMessage,
+  });
 }
 
-/** After occupy succeeded: salvage salvageable OPEN rows; abort begin-only shells only. */
+/** After occupy succeeded: salvage or abort **this** OPEN file only. */
 export async function handleOccupiedTurnSidecarFailure(args: {
   conversationId: string;
   userMessageId: string;
   messageId: string;
+  /** Occupied RPC stop ownership; default is observed RPC error. */
+  finishReason?: "cancelled" | "interrupted" | "error";
+  errorMessage?: string;
 }): Promise<void> {
-  const record = await readOutboxRecord(args.userMessageId.trim());
+  const userMessageId = args.userMessageId.trim();
+  const record = await readOutboxRecord(userMessageId);
   if (shouldSalvageOpenRecord(record)) {
-    await recoverLocalPersistence();
+    await recoverLocalPersistence({
+      userMessageIds: [userMessageId],
+      salvageFinishReason: args.finishReason ?? "error",
+      salvageErrorMessage: args.errorMessage,
+    });
     return;
   }
   await abortLocalTurnPlaceholder(args);

@@ -83,7 +83,7 @@ describe("ManualReference", () => {
     expect(screen.getByText(/MCP（本机连接器）/)).toBeTruthy();
     expect(screen.getByText(/A2A（规划中）/)).toBeTruthy();
     expect(screen.getByText(/其他创作工具（尚未开放）/)).toBeTruthy();
-    expect(screen.getByText(/白板（画布可用）/)).toBeTruthy();
+    expect(screen.getByText(/可自由摆元素的无限画布/)).toBeTruthy();
     expect(screen.getByText("用的什么模型？")).toBeTruthy();
     expect(screen.getByText(/平台代付，开箱即可对话/)).toBeTruthy();
     expect(screen.getByText(/OpenAI \/ DeepSeek \/ Kimi \/ 智谱/)).toBeTruthy();

@@ -49,7 +49,7 @@ _TRACE_HEX32 = re.compile(r"^[0-9a-fA-F]{32}$")
 logger = get_logger(__name__)
 
 QueueStarter = Callable[[str, "QueuedTurn"], Awaitable[None]]
-# Sidecar installs a local pipeline+outbox starter. Default remains cloud ``stream_chat``.
+# Sidecar installs a local pipeline+outbox starter. Default remains TurnDriver.start_turn.
 _queue_starter: QueueStarter | None = None
 
 
@@ -60,7 +60,7 @@ def set_queue_starter(starter: QueueStarter | None) -> None:
 
 
 def reset_queue_starter() -> None:
-    """Restore the cloud ``stream_chat`` drain (tests / sidecar shutdown)."""
+    """Restore the default TurnDriver drain (tests / sidecar shutdown)."""
     set_queue_starter(None)
 
 
@@ -72,6 +72,7 @@ class QueuedTurn:
     content: str
     attachments: list[dict[str, Any]] = field(default_factory=list)
     agent_mentions: list[dict[str, Any]] = field(default_factory=list)
+    table_selection: list[str] = field(default_factory=list)
     requires_tools: bool = False
     x_client_platform: str | None = None
     # Which device sent this message. Captured at enqueue because the drain runs
@@ -416,14 +417,14 @@ def _waiter_still_alive(item: QueuedTurn) -> bool:
 async def _start_queued_turn(conversation_id: str, item: QueuedTurn) -> None:
     """Spawn the turn; hand the sink to a waiting SSE if still connected.
 
-    Emits ``turn_queue_started`` as the new sink's first frame (before ``stream_chat``),
+    Emits ``turn_queue_started`` as the new sink's first frame (before ``start_turn``),
     carrying the queued item's ``content`` (and attachments / mentions when present).
     """
     import asyncio
 
-    from agentcore.conversation.service import stream_chat
     from agentcore.fulfill.origin import origin_device
     from agentcore.runtime.events import EventSink, turn_queue_started
+    from agentcore.runtime.turn.driver import get_turn_driver
 
     from .runs import turn_runs
 
@@ -452,7 +453,7 @@ async def _start_queued_turn(conversation_id: str, item: QueuedTurn) -> None:
     # message's own device — not the drain's ambient one — owns its CLIENT_TOOLs.
     with origin_device(item.origin_device_id):
         task = asyncio.create_task(
-            stream_chat(
+            get_turn_driver().start_turn(
                 conversation_id=conversation_id,
                 user_message=item.content,
                 user_id=item.user_id,
@@ -462,6 +463,7 @@ async def _start_queued_turn(conversation_id: str, item: QueuedTurn) -> None:
                 llm_supports_tools=item.llm_supports_tools,
                 x_client_platform=item.x_client_platform,
                 agent_mentions=item.agent_mentions,
+                table_selection=item.table_selection or None,
                 existing_user_message_id=item.user_message_id,
             )
         )
@@ -479,6 +481,7 @@ def new_queued_turn(
     user_id: str,
     attachments: list[dict[str, Any]] | None = None,
     agent_mentions: list[dict[str, Any]] | None = None,
+    table_selection: list[str] | None = None,
     requires_tools: bool = False,
     x_client_platform: str | None = None,
     origin_device_id: str | None = None,
@@ -495,6 +498,7 @@ def new_queued_turn(
         content=content,
         attachments=list(attachments or []),
         agent_mentions=list(agent_mentions or []),
+        table_selection=list(table_selection or []),
         requires_tools=requires_tools,
         x_client_platform=x_client_platform,
         origin_device_id=origin_device_id,

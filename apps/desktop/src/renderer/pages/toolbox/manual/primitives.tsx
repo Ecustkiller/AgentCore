@@ -306,6 +306,11 @@ const DEFAULT_SETTINGS_ROWS: { label: string; desc: string; to: string }[] = [
     to: APP_PATHS.more.shortcuts,
   },
   { label: "关于", desc: "版本、产品手册与法律信息", to: APP_PATHS.more.about },
+  {
+    label: "赞助",
+    desc: "自愿打赏（收款码不随公开仓）",
+    to: APP_PATHS.more.sponsor,
+  },
 ];
 
 /** 设置速查行——内容源可传入 rows；旧章 SettingsTable 仍用默认列表。 */

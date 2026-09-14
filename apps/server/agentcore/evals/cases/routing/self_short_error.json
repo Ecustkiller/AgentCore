@@ -9,5 +9,5 @@
     { "name": "NotDelegated" },
     { "name": "MaxRounds", "args": { "budget": 3 } }
   ],
-  "rubric": "短错误释义：说明含义与常见处理即可，不落盘、不委派改环境。"
+  "rubric": "错误原文已在窗里，释义切不出去，编码≈做完。不落盘、不派改环境。"
 }

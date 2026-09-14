@@ -13,7 +13,6 @@ from agentcore.billing.gate import BackgroundLlmResult, BackgroundLlmSkip, run_b
 from agentcore.config import settings
 from agentcore.conversation.common import (
     fallback_title,
-    log_cost_recorded,
     log_title_degraded,
 )
 from agentcore.conversation.common import (
@@ -50,6 +49,7 @@ from agentcore.llm.factory import build_provider
 from agentcore.llm.resolve import resolve_turn_model as resolve_user_model
 from agentcore.memory import TitleResult
 from agentcore.memory.consolidation import schedule_consolidation
+from agentcore.observability.cost_log import log_cost_recorded
 from agentcore.runtime.events import (
     EventSink,
     FinishReason,
@@ -59,8 +59,12 @@ from agentcore.runtime.events import (
 from agentcore.runtime.journal import (
     KIND_TURN_END,
     ensure_cancelled_turn_end,
+    ensure_turn_end,
     journal_entries_from_display_runs,
     persist_turn_journal,
+)
+from agentcore.runtime.journal.pending_interactions import (
+    append_unrecorded_hot_orphan_facts,
 )
 from agentcore.runtime.turn.outcome import coerce_produced_outcome
 from agentcore.workspace.protocol import WorkspaceBackend
@@ -77,6 +81,13 @@ _SKIP_DERIVED_FINISH = frozenset(
         FinishReason.PAUSED.value,
         FinishReason.ERROR.value,
         FinishReason.CANCELLED.value,
+        FinishReason.INTERRUPTED.value,
+    }
+)
+_INCOMPLETE_FINISH = frozenset(
+    {
+        FinishReason.CANCELLED.value,
+        FinishReason.INTERRUPTED.value,
     }
 )
 
@@ -105,21 +116,18 @@ def _compose_hardkill_harvest_empty_close(
 
     Live sidecar salvage stamps ``origin`` / ``harvest_kind`` and already composed
     (or chose USER_STOP silence). Desktop ``salvageOpen`` after a dead sidecar
-    promotes OPEN→READY cancelled without composing, and ``begin_turn`` never
+    promotes OPEN→READY interrupted without composing, and ``begin_turn`` never
     persisted those stamps — that is the only gap this closer fills.
 
-    Regular empty cancelled has neither stamp nor the harvest user prefix.
+    Regular empty cancelled / interrupted has neither stamp nor the harvest user prefix.
     """
     if (origin or "").strip() or (harvest_kind or "").strip():
         return ""
     if not (user_message or "").strip().startswith(_HARVEST_USER_PREFIX):
         return ""
-    from agentcore.runtime.turn.interrupt import (
-        TurnInterruptReason,
-        compose_interrupt_body,
-    )
+    from agentcore.runtime.turn.interrupt import empty_close_user_visible
 
-    return compose_interrupt_body("", reason=TurnInterruptReason.LEASE_EXPIRED)
+    return empty_close_user_visible("harvest_yield")
 
 
 def _is_synthetic_local_user_message(user_message: str) -> bool:
@@ -595,12 +603,14 @@ class CloudStore:
                     message_id=message_id,
                     conversation_id=conversation_id,
                     trace_id=trace_id,
-                    entries=ensure_cancelled_turn_end(
-                        journal_entries_from_display_runs(
-                            {
-                                "events": journal,
-                                "finish_reason": FinishReason.CANCELLED.value,
-                            }
+                    entries=append_unrecorded_hot_orphan_facts(
+                        ensure_cancelled_turn_end(
+                            journal_entries_from_display_runs(
+                                {
+                                    "events": journal,
+                                    "finish_reason": FinishReason.CANCELLED.value,
+                                }
+                            )
                         )
                     ),
                     replace=False,
@@ -978,7 +988,7 @@ class CloudStore:
                 await self.clear_stream_segments(turn_id=message_id)
 
         # END_TURN 不再因 motion_card 登记阶段推进卡（开辩须用户点名）。
-        # emit_stage_card_for_motion 仍留给旧卡 / 显式测试。CEO→user followups 仍下线。
+        # CEO→user followups 仍下线。
 
         schedule_consolidation(conversation_id)
         await schedule_compaction_if_due(conversation_id, result.get("input_tokens", 0))
@@ -1165,12 +1175,12 @@ class CloudStore:
         origin = (origin or "").strip() or None
         execution_id = (execution_id or "").strip() or None
         harvest_kind = (harvest_kind or "").strip() or None
-        from agentcore.conversation.mentions import to_stored_agent_mentions
+        from agentcore.core.mentions import to_stored_agent_mentions
 
         stored_mentions = to_stored_agent_mentions(agent_mentions)
         finish_value = finish_reason
         is_paused = finish_value == FinishReason.PAUSED.value
-        is_incomplete = finish_value == FinishReason.CANCELLED.value
+        is_incomplete = finish_value in _INCOMPLETE_FINISH
         skip_derived = finish_value in _SKIP_DERIVED_FINISH
 
         synthetic_user = _is_synthetic_local_user_message(user_message)
@@ -1373,7 +1383,9 @@ class CloudStore:
             usage_metadata["paused"] = False
             if is_incomplete:
                 usage_metadata["incomplete"] = True
-                usage_metadata["finish_reason"] = FinishReason.CANCELLED.value
+                usage_metadata["finish_reason"] = (
+                    finish_value or FinishReason.CANCELLED.value
+                )
             elif finish_value is not None:
                 usage_metadata["finish_reason"] = finish_value
         run_error = runs.get("error") if isinstance(runs, dict) else None
@@ -1499,10 +1511,11 @@ class CloudStore:
                         finish_reason=finish_value,
                     )
                 if is_incomplete:
-                    # User stop: journal must close with turn_end(cancelled).
-                    # Progressive / pause snapshots omit it or close paused —
-                    # persist keep-tail must not leave that as the last word.
-                    durable = ensure_cancelled_turn_end(durable)
+                    # User stop → turn_end(cancelled); found-dead → interrupted.
+                    durable = ensure_turn_end(
+                        durable,
+                        finish_value or FinishReason.CANCELLED.value,
+                    )
                 if durable is not None:
                     # Outbox writeback holds this turn's authoritative prefix
                     # (pause snapshot or resume complete rewrite). Replace the
@@ -1542,6 +1555,16 @@ class CloudStore:
             # 时序不变量: local terminal/pause snapshot landed → drop segments.
             with contextlib.suppress(Exception):
                 await self.clear_stream_segments(turn_id=message_id)
+            if not is_paused and assistant_message_id:
+                from agentcore.runtime.interaction_orphan import (
+                    orphan_hot_pending_after_terminal_persist,
+                )
+
+                await orphan_hot_pending_after_terminal_persist(
+                    turn_id=assistant_message_id,
+                    conversation_id=conversation_id,
+                    trace_id=trace_id,
+                )
 
         if skip_derived:
             # Mirror cloud: ERROR/CANCELLED still arm compaction; PAUSED does not.

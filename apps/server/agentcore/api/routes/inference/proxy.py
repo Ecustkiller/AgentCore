@@ -21,7 +21,6 @@ from agentcore.core.errors import (
     LLMError,
     QuotaExceededError,
     ValidationError,
-    error_fields_for,
 )
 from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
@@ -49,6 +48,7 @@ from agentcore.llm.resolve import (
     platform_llm_credentials,
     resolve_conversation_model_selection,
 )
+from agentcore.runtime.error_fields import error_fields_for
 
 logger = get_logger(__name__)
 

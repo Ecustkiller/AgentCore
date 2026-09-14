@@ -1,4 +1,4 @@
-"""Public 文档 shares: freeze snapshot, /shared/<id>, desk can_write, cascades."""
+"""Public 文档 shares: publish snapshot, /shared/<id>, desk can_write, cascades."""
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -59,7 +59,7 @@ async def _doc_with_paragraph(
         f"/v1/docs/{doc_id}/body",
         json={
             "baseline": 1,
-            "body": {"blocks": [{"type": "paragraph", "text": text}]},
+            "body": {"markdown": text},
         },
     )
     assert saved.status_code == 200, saved.text
@@ -100,7 +100,9 @@ async def test_create_list_view_revoke(client, new_client, _fs_data_dir):
     assert (await client.get(f"/v1/docs/{doc_id}/shares")).json()["total"] == 0
 
 
-async def test_snapshot_is_frozen_against_later_edits(client, new_client, _fs_data_dir):
+async def test_unpublished_edits_do_not_change_public_page(
+    client, new_client, _fs_data_dir
+):
     await register_and_login(client, "docshare_freeze")
     folder = await _cloud_folder(client, "桌")
     doc_id = await _doc_with_paragraph(
@@ -111,7 +113,7 @@ async def test_snapshot_is_frozen_against_later_edits(client, new_client, _fs_da
         f"/v1/docs/{doc_id}/body",
         json={
             "baseline": 2,
-            "body": {"blocks": [{"type": "paragraph", "text": "稍后才改的内容"}]},
+            "body": {"markdown": "稍后才改的内容"},
         },
     )
     assert later.status_code == 200
@@ -121,6 +123,36 @@ async def test_snapshot_is_frozen_against_later_edits(client, new_client, _fs_da
         page = await anon.get(share["url"])
         assert "最初的段落" in page.text
         assert "稍后才改的内容" not in page.text
+
+
+async def test_republish_updates_same_url(client, new_client, _fs_data_dir):
+    await register_and_login(client, "docshare_republish")
+    folder = await _cloud_folder(client, "桌")
+    doc_id = await _doc_with_paragraph(
+        client, folder_id=folder["id"], title="发布", text="第一版"
+    )
+    first = await client.post(f"/v1/docs/{doc_id}/shares")
+    assert first.status_code == 201, first.text
+    share = first.json()
+    later = await client.put(
+        f"/v1/docs/{doc_id}/body",
+        json={
+            "baseline": 2,
+            "body": {"markdown": "第二版"},
+        },
+    )
+    assert later.status_code == 200
+    again = await client.post(f"/v1/docs/{doc_id}/shares")
+    assert again.status_code == 200, again.text
+    assert again.json()["id"] == share["id"]
+    assert again.json()["url"] == share["url"]
+    listed = await client.get(f"/v1/docs/{doc_id}/shares")
+    assert listed.json()["total"] == 1
+
+    async with new_client() as anon:
+        page = await anon.get(share["url"])
+        assert "第二版" in page.text
+        assert "第一版" not in page.text
 
 
 async def test_viewer_forbidden_editor_can_mint_and_revoke_others(
@@ -149,12 +181,12 @@ async def test_viewer_forbidden_editor_can_mint_and_revoke_others(
         minted = await editor.post(
             f"/v1/docs/{doc_id}/shares", json={"expires_in_days": 7}
         )
-        assert minted.status_code == 201, minted.text
+        assert minted.status_code == 200, minted.text
+        assert minted.json()["id"] == owner_share["id"]
         listed = await editor.get(f"/v1/docs/{doc_id}/shares")
         assert listed.status_code == 200
-        ids = {row["id"] for row in listed.json()["data"]}
-        assert owner_share["id"] in ids
-        assert minted.json()["id"] in ids
+        assert listed.json()["total"] == 1
+        assert listed.json()["data"][0]["id"] == owner_share["id"]
         assert (
             await editor.delete(f"/v1/docs/{doc_id}/shares/{owner_share['id']}")
         ).status_code == 200
@@ -257,11 +289,7 @@ async def test_public_view_escapes_xss(client, new_client, _fs_data_dir):
         f"/v1/docs/{doc_id}/body",
         json={
             "baseline": 1,
-            "body": {
-                "blocks": [
-                    {"type": "paragraph", "text": "<script>alert('x')</script> hello"}
-                ]
-            },
+            "body": {"markdown": "<script>alert('x')</script> hello"},
         },
     )
     share = (await client.post(f"/v1/docs/{doc_id}/shares")).json()

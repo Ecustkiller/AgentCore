@@ -745,6 +745,7 @@ export function hydrateInteractionsFromJournal(
   conversationId: string,
   messageId: string,
   events: Array<{ type: string; payload: unknown }>,
+  finishReason?: string | null,
 ): void {
   for (const ev of events) {
     applyInteractionWireEvent(
@@ -753,5 +754,50 @@ export function hydrateInteractionsFromJournal(
       conversationId,
       messageId,
     );
+  }
+  const finish = finishReason || terminalFinishFromEvents(events);
+  if (!finish || finish === "paused") return;
+  orphanHotPendingOnMessage(conversationId, messageId);
+}
+
+function terminalFinishFromEvents(
+  events: Array<{ type: string; payload: unknown }>,
+): string {
+  let finish = "";
+  for (const ev of events) {
+    if (ev.type !== "turn_end" && ev.type !== "message_end") continue;
+    const p = asRecord(ev.payload);
+    const raw = p.finish_reason;
+    if (typeof raw === "string" && raw) finish = raw;
+  }
+  return finish;
+}
+
+function asRecord(v: unknown): Record<string, unknown> {
+  return v && typeof v === "object" && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : {};
+}
+
+function orphanHotPendingOnMessage(
+  conversationId: string,
+  messageId: string,
+): void {
+  const store = useInteractionStore.getState();
+  const ids: string[] = [];
+  for (const e of store.byId.values()) {
+    if (e.conversationId !== conversationId) continue;
+    if (e.messageId && e.messageId !== messageId) continue;
+    if (e.status !== "pending" && e.status !== "submitting") continue;
+    if (!isHotInteractionKind(e.kind)) continue;
+    ids.push(e.id);
+  }
+  for (const id of ids) {
+    const entry = store.byId.get(id);
+    store.markOrphaned(id, {
+      kind: entry?.kind,
+      conversationId,
+      messageId,
+    });
   }
 }

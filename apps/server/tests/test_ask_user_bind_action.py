@@ -612,5 +612,6 @@ def test_ask_user_organize_how_lives_in_skill():
     assert "consult(team_local_desk)" not in midtask.body
     assert "整题要把本机文件夹接到工作区" not in midtask.body
     assert "工作区以外的目录授权" not in midtask.body
-    assert "旁根" in desk.body
+    assert "旁边挂上的本机目录" in desk.body
+    assert "旁根" not in desk.body
     assert "可写授权" in desk.body

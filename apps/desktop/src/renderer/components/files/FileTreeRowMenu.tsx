@@ -149,6 +149,25 @@ export function FileTreeRowMenu({
   // viewer) hides mutate actions; download still rides on `caps.transfer`.
   const canMutate = source.caps.edit;
   const canDownload = source.caps.transfer && !!source.download;
+  const exportMdToDocx = async (
+    path: string,
+    layout: "standard" | "official",
+  ) => {
+    try {
+      const result = await source.exportMdToDocx?.(path, layout);
+      if (!result) return;
+      onReloadDir(parentDir(path));
+      if (result.warnings.length > 0) {
+        notifySuccess(
+          `已导出 ${baseName(result.path)}（${result.warnings.length} 条警告）`,
+        );
+      } else {
+        notifySuccess(`已导出 ${baseName(result.path)}`);
+      }
+    } catch (e) {
+      notifyActionError("导出 Word 失败", e);
+    }
+  };
   const downloadItem = canDownload ? (
     <ContextMenuItem
       onSelect={() =>
@@ -193,29 +212,24 @@ export function FileTreeRowMenu({
             <span className="flex-1 truncate">打开</span>
           </ContextMenuItem>
           {canMutate && isMarkdownPath(node.path) && source.exportMdToDocx && (
-            <ContextMenuItem
-              onSelect={() => {
-                void (async () => {
-                  try {
-                    const result = await source.exportMdToDocx?.(node.path);
-                    if (!result) return;
-                    onReloadDir(parentDir(node.path));
-                    if (result.warnings.length > 0) {
-                      notifySuccess(
-                        `已导出 ${baseName(result.path)}（${result.warnings.length} 条警告）`,
-                      );
-                    } else {
-                      notifySuccess(`已导出 ${baseName(result.path)}`);
-                    }
-                  } catch (e) {
-                    notifyActionError("导出 Word 失败", e);
-                  }
-                })();
-              }}
-            >
-              <FileType size={14} className="shrink-0" />
-              <span className="flex-1 truncate">导出 Word</span>
-            </ContextMenuItem>
+            <>
+              <ContextMenuItem
+                onSelect={() => {
+                  void exportMdToDocx(node.path, "standard");
+                }}
+              >
+                <FileType size={14} className="shrink-0" />
+                <span className="flex-1 truncate">导出 Word</span>
+              </ContextMenuItem>
+              <ContextMenuItem
+                onSelect={() => {
+                  void exportMdToDocx(node.path, "official");
+                }}
+              >
+                <FileType size={14} className="shrink-0" />
+                <span className="flex-1 truncate">导出 Word（正式文书）</span>
+              </ContextMenuItem>
+            </>
           )}
         </>
       )}

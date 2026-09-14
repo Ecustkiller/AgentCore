@@ -50,6 +50,7 @@ export const APP_PATHS = {
     /** Legacy; `#/more/notices` redirects to the IM official chat. */
     notices: "/more/notices",
     about: "/more/about",
+    sponsor: "/more/sponsor",
     legal: {
       terms: "/more/legal/terms",
       privacy: "/more/legal/privacy",

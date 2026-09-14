@@ -1,5 +1,6 @@
 import {
   BrowserResult,
+  browserHasExpandBody,
   browserResultPeek,
   isBrowserDisplay,
 } from "@/components/chat/BrowserActivityCard";
@@ -210,6 +211,9 @@ export function hasToolResultBody(d: ToolResultData): boolean {
   } else if (isConversationLogDisplay(d.display)) {
     // Title already has the conversation name +「打开」; expand only for transcript.
     return Boolean(d.result?.trim());
+  } else if (isBrowserDisplay(d.display)) {
+    // Title holds verb + identity; expand is URL leftover and/or key-frame.
+    return browserHasExpandBody(d.display);
   } else if (d.display) {
     return true;
   }

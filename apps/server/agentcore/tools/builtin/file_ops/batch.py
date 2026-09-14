@@ -16,7 +16,7 @@ from agentcore.tools.registration import (
     ToolSurface,
 )
 from agentcore.workspace.host_path import GrantMode
-from agentcore.workspace.limits import is_presence_disconnected_detail
+from agentcore.workspace.limits import workspace_channel_failure_kind
 from agentcore.workspace.protocol import (
     AlreadyExists,
     OutsideWorkspace,
@@ -32,6 +32,26 @@ logger = get_logger(__name__)
 
 _BATCH_OPS = frozenset({"move", "copy", "delete", "mkdir"})
 _BATCH_MAX_OPS = 50
+
+
+def _workspace_item_fail(
+    prefix: str, e: WorkspaceError
+) -> tuple[str, str, list[FileProduct]]:
+    if workspace_channel_failure_kind(e) == "presence":
+        raise
+    return "fail", f"{prefix}：{e}", []
+
+
+def _stop_if_presence(
+    exc_or_detail: BaseException | str,
+    start: float,
+    products: list[FileProduct],
+) -> ToolResult | None:
+    if workspace_channel_failure_kind(exc_or_detail) != "presence":
+        return None
+    dead = _liveness_workspace_error(str(exc_or_detail), start)
+    dead.file_products = products
+    return dead
 
 
 def _batch_op_label(item: dict[str, Any]) -> str:
@@ -169,14 +189,14 @@ class FileBatchTool:
             try:
                 status, detail, landed = await self._run_one(op, item, context)
             except Exception as e:  # noqa: BLE001 — batch must continue
+                dead = _stop_if_presence(e, start, products)
+                if dead is not None:
+                    return dead
                 fail_n += 1
                 lines.append(f"{i}. 失败 · {label}：{e}")
                 continue
-            if status == "fail" and is_presence_disconnected_detail(detail):
-                # Presence disconnect: stop the batch and stamp family retire.
-                dead = _liveness_workspace_error(detail, start)
-                # 中途中断不抹账：前面成功的那几件确实躺在盘上（漏账才是事故）。
-                dead.file_products = products
+            dead = _stop_if_presence(detail, start, products) if status == "fail" else None
+            if dead is not None:
                 return dead
             if status == "ok":
                 ok_n += 1
@@ -240,6 +260,9 @@ class FileBatchTool:
             try:
                 status, detail, landed = await self._run_one(op, item, context)
             except Exception as e:  # noqa: BLE001
+                dead = _stop_if_presence(e, start, products)
+                if dead is not None:
+                    return dead
                 fail_n += 1
                 lines.append(f"{i}. 失败 · {e}")
                 continue
@@ -321,7 +344,7 @@ class FileBatchTool:
                     [],
                 )
             except WorkspaceError as e:
-                return "fail", f"mkdir {path}：{e}", []
+                return _workspace_item_fail(f"mkdir {path}", e)
             detail = f"mkdir {path}"
             if rename_note:
                 detail = f"{detail}。{rename_note}"
@@ -362,7 +385,7 @@ class FileBatchTool:
                     [],
                 )
             except WorkspaceError as e:
-                return "fail", f"delete {path}：{e}", []
+                return _workspace_item_fail(f"delete {path}", e)
             mode = "永久删除" if permanent else "可逆删除"
             detail = f"delete {path}（{mode}）"
             if rename_note:
@@ -428,7 +451,7 @@ class FileBatchTool:
                 [],
             )
         except WorkspaceError as e:
-            return "fail", f"{op} {source} → {destination}：{e}", []
+            return _workspace_item_fail(f"{op} {source} → {destination}", e)
         detail = f"{op} {source} → {destination}"
         if rename_note:
             detail = f"{detail}。{rename_note}"

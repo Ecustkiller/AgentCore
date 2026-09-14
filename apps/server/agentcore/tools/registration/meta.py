@@ -66,7 +66,7 @@ class CeoWire(StrEnum):
     # Unified on-demand catalog non-empty → ``consult`` (技能 ∪ 规则 ∪ 记忆主题).
     CONSULT = "consult"
     CHECKPOINT = "checkpoint"
-    BOARD = "board"
+    TABLE = "table"
     # Advertised in catalog; runtime inject via ``ceo_surface`` (idle/coord gate).
     COORDINATION = "coordination"
 
@@ -115,7 +115,8 @@ class ToolRegistration:
     produces_formats: tuple[str, ...] = ()
     # Opening FC table when assembled. False → ``<按需目录>`` until ``consult``.
     resident: bool = True
-    # One-line catalog trigger ("这是什么"). Required when ``resident`` is False.
+    # One-line "这是什么" for the toolbox shelf (and the on-demand directory when
+    # ``resident`` is False). Required for every declared tool — empty = blank card.
     catalog_summary: str = ""
     # Takes workspace-relative paths / may land files. Ratchet landing surface
     # (with ``execution_class``); not a grouping axis — grouping is ``ToolFace``.

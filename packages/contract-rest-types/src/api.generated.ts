@@ -1689,31 +1689,6 @@ export interface paths {
         patch: operations["update_board_v1_boards__board_id__patch"];
         trace?: never;
     };
-    "/v1/boards/{board_id}/conversation": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Ensure Board Conversation
-         * @description Get (or lazily mint) the board's dedicated AI conversation (AI协作白板.md §三 A / M2).
-         *
-         *     Idempotent: returns the existing ``conversation_id`` if the board already has one;
-         *     otherwise creates a bare chat (titled like the board, no folder) and binds it.
-         *     Both repos share one session so the create + link commit together. The canvas calls
-         *     this before its first AI turn, then runs the turn on the returned conversation.
-         */
-        post: operations["ensure_board_conversation_v1_boards__board_id__conversation_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/boards/{board_id}/scene": {
         parameters: {
             query?: never;
@@ -1731,79 +1706,6 @@ export interface paths {
         put: operations["write_board_scene_v1_boards__board_id__scene_put"];
         post?: never;
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/bookmarks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Bookmarks
-         * @description The user's「已收藏」list, newest-first (跨设备 — server-stored).
-         *
-         *     Bookmarks whose message/conversation was removed or whose conversation was
-         *     soft-deleted are filtered out by the repository join, so every item is
-         *     jump-able.
-         */
-        get: operations["list_bookmarks_v1_bookmarks_get"];
-        put?: never;
-        /**
-         * Create Bookmark
-         * @description Bookmark a message (idempotent — re-adding returns the existing row).
-         *
-         *     404 when the user doesn't own the conversation or the message isn't in it, so a
-         *     bookmark can never point at another account's content.
-         */
-        post: operations["create_bookmark_v1_bookmarks_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/bookmarks/ids": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Bookmark Ids
-         * @description The bookmarked message ids within one conversation (client star state).
-         *
-         *     Owner-scopes the conversation first (404 for a non-owner) so ids never leak.
-         */
-        get: operations["list_bookmark_ids_v1_bookmarks_ids_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/bookmarks/{message_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Remove Bookmark
-         * @description Un-bookmark a message (idempotent — a no-match is still 200).
-         */
-        delete: operations["remove_bookmark_v1_bookmarks__message_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3916,8 +3818,11 @@ export interface paths {
         /** List Doc Shares */
         get: operations["list_doc_shares_v1_docs__doc_id__shares_get"];
         put?: never;
-        /** Create Doc Share */
-        post: operations["create_doc_share_v1_docs__doc_id__shares_post"];
+        /**
+         * Publish Doc Share
+         * @description First publish mints a URL (201). Later POSTs update that snapshot (200).
+         */
+        post: operations["publish_doc_share_v1_docs__doc_id__shares_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5337,6 +5242,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/tables": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Tables */
+        get: operations["list_tables_v1_tables_get"];
+        put?: never;
+        /** Create Table */
+        post: operations["create_table_v1_tables_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tables/{table_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Table */
+        get: operations["get_table_v1_tables__table_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Table */
+        delete: operations["delete_table_v1_tables__table_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Table */
+        patch: operations["update_table_v1_tables__table_id__patch"];
+        trace?: never;
+    };
+    "/v1/tables/{table_id}/conversation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ensure Table Conversation */
+        post: operations["ensure_table_conversation_v1_tables__table_id__conversation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tables/{table_id}/ops": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Table Ops */
+        post: operations["apply_table_ops_v1_tables__table_id__ops_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/usage/summary": {
         parameters: {
             query?: never;
@@ -6221,6 +6197,26 @@ export interface paths {
          *     Does not touch a workspace. Auth required so the surface is not a public converter.
          */
         post: operations["convert_md_to_pdf_v1_workspaces_convert_md_to_pdf_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint Workspaces Token
+         * @description Exchange the caller's cookie/Bearer access session for a workspaces narrow ticket.
+         */
+        post: operations["mint_workspaces_token_v1_workspaces_token_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8167,20 +8163,10 @@ export interface components {
             username: string;
         };
         /**
-         * BoardConversationResponse
-         * @description The board's dedicated AI conversation id (existing or just-created).
-         */
-        BoardConversationResponse: {
-            /** Conversation Id */
-            conversation_id: string;
-        };
-        /**
          * BoardDetail
          * @description A board plus its full scene (the canvas load payload).
          */
         BoardDetail: {
-            /** Conversation Id */
-            conversation_id?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -8213,8 +8199,6 @@ export interface components {
         };
         /** BoardSummary */
         BoardSummary: {
-            /** Conversation Id */
-            conversation_id?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -8244,46 +8228,6 @@ export interface components {
             ok: boolean;
             /** Version */
             version: number;
-        };
-        /**
-         * BookmarkIdsResponse
-         * @description The bookmarked message ids within one conversation (client star state).
-         */
-        BookmarkIdsResponse: {
-            /** Message Ids */
-            message_ids: string[];
-        };
-        /**
-         * BookmarkItem
-         * @description One saved message in the「已收藏」view.
-         *
-         *     ``id`` = bookmark id; ``created_at`` = when it was bookmarked (the list sort
-         *     key). ``conversation_id`` / ``message_id`` are the jump target;
-         *     ``conversation_title`` + ``role`` + ``snippet`` give recognisable context.
-         */
-        BookmarkItem: {
-            /** Conversation Id */
-            conversation_id: string;
-            /** Conversation Title */
-            conversation_title?: string | null;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Id */
-            id: string;
-            /** Message Id */
-            message_id: string;
-            /** Role */
-            role?: string | null;
-            /** Snippet */
-            snippet?: string | null;
-        };
-        /** BookmarkListResponse */
-        BookmarkListResponse: {
-            /** Data */
-            data: components["schemas"]["BookmarkItem"][];
         };
         /**
          * BrowserInputRequest
@@ -8422,8 +8366,18 @@ export interface components {
          * @description A system Skill in the catalog (渐进披露): its catalog ``summary`` (the always-on
          *     one-line trigger) plus the full ``body`` guidance the CEO pulls via consult.
          *     ``group`` is the Chinese 能力指引 subtitle (编排 / 工作区 / 交付 / 产品 / 工具).
+         *     ``blurb`` is the toolbox shelf description only — not the consult directory.
+         *     ``audience`` is who may see the entry (ceo / worker), same tokens as tool
+         *     ``available_to``.
          */
         CapabilitySkill: {
+            /** Audience */
+            audience?: string[];
+            /**
+             * Blurb
+             * @default
+             */
+            blurb: string;
             /** Body */
             body: string;
             /**
@@ -9087,6 +9041,13 @@ export interface components {
             images?: {
                 [key: string]: string | null;
             };
+            /**
+             * Layout
+             * @description 排版档位：standard=技术报告；official=正式文书。默认 standard。
+             * @default standard
+             * @enum {string}
+             */
+            layout: "standard" | "official";
             /** Markdown */
             markdown: string;
             /**
@@ -9112,6 +9073,13 @@ export interface components {
          * @description Stateless Markdown → PDF conversion (local desktop UI).
          */
         ConvertMdToPdfRequest: {
+            /**
+             * Layout
+             * @description 排版档位：standard=技术报告；official=正式文书。默认 standard。
+             * @default standard
+             * @enum {string}
+             */
+            layout: "standard" | "official";
             /** Markdown */
             markdown: string;
             /**
@@ -9166,13 +9134,6 @@ export interface components {
         CreateBoardRequest: {
             /** Title */
             title?: string | null;
-        };
-        /** CreateBookmarkRequest */
-        CreateBookmarkRequest: {
-            /** Conversation Id */
-            conversation_id: string;
-            /** Message Id */
-            message_id: string;
         };
         /** CreateConversationRequest */
         CreateConversationRequest: {
@@ -9364,6 +9325,11 @@ export interface components {
         CreateSnapshotRequest: {
             /** Label */
             label?: string | null;
+        };
+        /** CreateTableRequest */
+        CreateTableRequest: {
+            /** Title */
+            title?: string | null;
         };
         /** CreateWorkflowRequest */
         CreateWorkflowRequest: {
@@ -9773,7 +9739,7 @@ export interface components {
         };
         /**
          * DocDetail
-         * @description A doc plus its full block body (editor load payload).
+         * @description A doc plus its markdown body (editor load payload).
          */
         DocDetail: {
             /** Body */
@@ -10114,6 +10080,13 @@ export interface components {
          * @description Export a workspace Markdown file to a sibling ``.docx`` (确定性转换器).
          */
         ExportDocxRequest: {
+            /**
+             * Layout
+             * @description 排版档位：standard=技术报告；official=正式文书。默认 standard。
+             * @default standard
+             * @enum {string}
+             */
+            layout: "standard" | "official";
             /** Path */
             path: string;
         };
@@ -10136,6 +10109,13 @@ export interface components {
          * @description Export a workspace Markdown file to a sibling ``.pdf`` (确定性转换器).
          */
         ExportPdfRequest: {
+            /**
+             * Layout
+             * @description 排版档位：standard=技术报告；official=正式文书。默认 standard。
+             * @default standard
+             * @enum {string}
+             */
+            layout: "standard" | "official";
             /** Path */
             path: string;
         };
@@ -12867,6 +12847,8 @@ export interface components {
              * @default false
              */
             requires_tools: boolean;
+            /** Table Selection */
+            table_selection?: string[];
         };
         /** SessionListResponse */
         SessionListResponse: {
@@ -13340,6 +13322,137 @@ export interface components {
          * @enum {string}
          */
         SuspensionKind: "plan_review" | "ask_user";
+        /** TableColumn */
+        TableColumn: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Options */
+            options?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Type */
+            type: string;
+        };
+        /** TableConversationResponse */
+        TableConversationResponse: {
+            /** Conversation Id */
+            conversation_id: string;
+        };
+        /** TableDetail */
+        TableDetail: {
+            /** Active View Id */
+            active_view_id: string;
+            /** Columns */
+            columns: components["schemas"]["TableColumn"][];
+            /** Conversation Id */
+            conversation_id?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Id */
+            id: string;
+            /** Rows */
+            rows: components["schemas"]["TableRowOut"][];
+            /** Schema Version */
+            schema_version: number;
+            /** Title */
+            title: string;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Views */
+            views: components["schemas"]["TableViewOut"][];
+        };
+        /** TableOpsRequest */
+        TableOpsRequest: {
+            /**
+             * Confirm
+             * @default false
+             */
+            confirm: boolean;
+            /** Ops */
+            ops: {
+                [key: string]: unknown;
+            }[];
+            /** Schema Baseline */
+            schema_baseline?: number | null;
+        };
+        /** TableOpsResult */
+        TableOpsResult: {
+            /** Batch Id */
+            batch_id?: string | null;
+            /**
+             * Conflict
+             * @default false
+             */
+            conflict: boolean;
+            /** Error */
+            error?: string | null;
+            /** Level */
+            level: string;
+            /**
+             * Needs Confirmation
+             * @default false
+             */
+            needs_confirmation: boolean;
+            /** Ok */
+            ok: boolean;
+            /** Summary */
+            summary: string;
+            table?: components["schemas"]["TableDetail"] | null;
+        };
+        /** TableRowOut */
+        TableRowOut: {
+            /** Cells */
+            cells: {
+                [key: string]: unknown;
+            };
+            /** Id */
+            id: string;
+            /** Position */
+            position: number;
+        };
+        /** TableSummary */
+        TableSummary: {
+            /** Conversation Id */
+            conversation_id?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Row Count */
+            row_count: number;
+            /** Schema Version */
+            schema_version: number;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** TableViewOut */
+        TableViewOut: {
+            /** Config */
+            config: {
+                [key: string]: unknown;
+            };
+            /** Display Mode */
+            display_mode: string;
+            /** Id */
+            id: string;
+            /**
+             * Is Default
+             * @default false
+             */
+            is_default: boolean;
+            /** Name */
+            name: string;
+        };
         /**
          * TeamBatchInFlight
          * @description 本波 kickoff 编制已派出、尚未全部收工。``worker_count`` 不含 captain / 历史队员。
@@ -13456,7 +13569,7 @@ export interface components {
          *     are wired, not a dumpster for this enum.
          * @enum {string}
          */
-        ToolFace: "file" | "folder" | "search" | "web" | "execution" | "host_browser" | "board" | "orchestration";
+        ToolFace: "file" | "folder" | "search" | "web" | "execution" | "host_browser" | "board" | "table" | "doc" | "orchestration";
         /**
          * ToolSurfaceLimits
          * @description Operator-declared upstream tool-surface caps on one pool member.
@@ -13899,6 +14012,11 @@ export interface components {
              * @description Self-selected handle; stored lowercase after claim.
              */
             username?: string | null;
+        };
+        /** UpdateTableRequest */
+        UpdateTableRequest: {
+            /** Title */
+            title?: string | null;
         };
         /** UpdateWorkflowRequest */
         UpdateWorkflowRequest: {
@@ -14516,6 +14634,19 @@ export interface components {
             mtime_ms: number;
             /** Ok */
             ok: boolean;
+        };
+        /**
+         * WorkspacesTokenResponse
+         * @description Freshly minted workspaces narrow token + lifetime (sidecar cloud-desk auth).
+         *
+         *     Desktop: ``baseUrl`` for ``workspacesAuth`` is ``{apiOrigin}/v1/workspaces``;
+         *     ``apiKey`` is ``token``. Mint path: ``POST /v1/workspaces/token``.
+         */
+        WorkspacesTokenResponse: {
+            /** Expires In Sec */
+            expires_in_sec: number;
+            /** Token */
+            token: string;
         };
     };
     responses: never;
@@ -17619,41 +17750,6 @@ export interface operations {
             };
         };
     };
-    ensure_board_conversation_v1_boards__board_id__conversation_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                board_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoardConversationResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     write_board_scene_v1_boards__board_id__scene_put: {
         parameters: {
             query?: never;
@@ -17680,147 +17776,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BoardWriteResult"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_bookmarks_v1_bookmarks_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BookmarkListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_bookmark_v1_bookmarks_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateBookmarkRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BookmarkItem"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_bookmark_ids_v1_bookmarks_ids_get: {
-        parameters: {
-            query: {
-                /** @description 限定某对话，返回其中已收藏的消息 id */
-                conversation_id: string;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BookmarkIdsResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    remove_bookmark_v1_bookmarks__message_id__delete: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                message_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -21733,7 +21688,7 @@ export interface operations {
             };
         };
     };
-    create_doc_share_v1_docs__doc_id__shares_post: {
+    publish_doc_share_v1_docs__doc_id__shares_post: {
         parameters: {
             query?: never;
             header?: {
@@ -21753,7 +21708,7 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            201: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -24603,6 +24558,259 @@ export interface operations {
             };
         };
     };
+    list_tables_v1_tables_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TableSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_table_v1_tables_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTableRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TableDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_table_v1_tables__table_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                table_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TableDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_table_v1_tables__table_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                table_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_table_v1_tables__table_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                table_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateTableRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TableSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ensure_table_conversation_v1_tables__table_id__conversation_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                table_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TableConversationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_table_ops_v1_tables__table_id__ops_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                table_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TableOpsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TableOpsResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_usage_summary_v1_usage_summary_get: {
         parameters: {
             query?: never;
@@ -26687,6 +26895,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConvertMdToPdfResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mint_workspaces_token_v1_workspaces_token_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacesTokenResponse"];
                 };
             };
             /** @description Validation Error */

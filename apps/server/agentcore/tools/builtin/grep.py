@@ -16,9 +16,9 @@ import time
 from typing import Any
 
 from agentcore.core.types import ToolApproval, ToolFace
-from agentcore.runtime.facts import CROSS_TURN_RETRY_KEY, CrossTurnRetry
 from agentcore.tools.builtin.file_ops.errors import _outside_workspace_msg
 from agentcore.tools.builtin.file_ops.path_hints import enrich_missing_path_message
+from agentcore.tools.cross_turn_retry import CROSS_TURN_RETRY_KEY, CrossTurnRetry
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_BOTH,
@@ -29,10 +29,8 @@ from agentcore.tools.registration import (
 from agentcore.workspace.limits import (
     channel_dead_error_message,
     channel_dead_retire_metadata,
-    is_liveness_timeout_detail,
-    is_presence_disconnected_detail,
-    is_workspace_reconnect_detail,
     op_liveness_timeout_metadata,
+    workspace_channel_failure_kind,
 )
 from agentcore.workspace.protocol import (
     GrepQuery,
@@ -57,6 +55,7 @@ class GrepTool:
         audience=AUDIENCE_BOTH,
         file_products=FileProductsContract.READ_ONLY,
         workspace_io=True,
+        catalog_summary="在工作区搜正文",
     )
 
     @property
@@ -72,17 +71,11 @@ class GrepTool:
                 "properties": {
                     "pattern": {
                         "type": "string",
-                        "description": (
-                            "要搜索的正则表达式（ripgrep / Rust regex 语法）。"
-                            "禁止把字面 \\n 当正则；不支持 lookahead/lookbehind（`(?!` `(?=`）。"
-                        ),
+                        "description": "要搜索的正则表达式（ripgrep / Rust regex 语法）。",
                     },
                     "path": {
                         "type": "string",
-                        "description": (
-                            "搜索范围：相对目录或单文件（默认整仓）。不确定时省略。"
-                            "已证实路径：目录递归；单文件只搜该文件（glob 忽略）。"
-                        ),
+                        "description": "相对目录或单文件（默认整仓）。",
                         "default": ".",
                     },
                     "glob": {
@@ -166,20 +159,21 @@ class GrepTool:
                 start,
             )
         except WorkspaceError as e:
+            kind = workspace_channel_failure_kind(e)
             msg = str(e)
-            if is_presence_disconnected_detail(msg):
+            if kind == "presence":
                 return _fail(
                     channel_dead_error_message(msg),
                     start,
                     metadata=channel_dead_retire_metadata(),
                 )
-            if is_workspace_reconnect_detail(msg):
+            if kind == "reconnect":
                 return _fail(
                     msg,
                     start,
                     metadata={CROSS_TURN_RETRY_KEY: CrossTurnRetry.NOT_FUTILE.value},
                 )
-            if is_liveness_timeout_detail(msg):
+            if kind == "liveness":
                 return _fail(
                     (
                         f"本地工作区通道操作超时（活性挂起）：{msg}。"

@@ -153,6 +153,8 @@ export interface Tab {
   wsId: string;
   path: string;
   name: string;
+  dirty?: boolean;
+  confirmDiscard?: boolean;
 }
 
 /** Stable per-file key (a workspace's path is unique within it). */

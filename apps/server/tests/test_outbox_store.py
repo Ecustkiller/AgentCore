@@ -7,7 +7,6 @@ import json
 
 import pytest
 
-from agentcore.conversation.store import reset_conversation_store_for_tests
 from agentcore.conversation.store.outbox import (
     PHASE_OPEN,
     PHASE_READY,
@@ -16,7 +15,8 @@ from agentcore.conversation.store.outbox import (
     list_outbox_records,
     to_record_turn_body,
 )
-from agentcore.runtime.turn.interrupt import INTERRUPTED_EMPTY_USER_VISIBLE
+from agentcore.core.error_codes import ErrorCode
+from agentcore.runtime.conversation_store import reset_conversation_store_for_tests
 
 
 @pytest.fixture(autouse=True)
@@ -201,7 +201,7 @@ def test_salvage_seals_ready_when_settlement_has_resume_frame(tmp_path):
     assert record["phase"] == PHASE_READY
     assert "salvage" in record["ops"]
     assert "salvage_retain_open" not in record.get("ops", [])
-    assert record.get("finish_reason") == "cancelled"
+    assert record.get("finish_reason") == "interrupted"
 
 
 def test_salvage_seals_ready_even_when_later_gate_pending(tmp_path):
@@ -254,7 +254,7 @@ def test_salvage_seals_ready_even_when_later_gate_pending(tmp_path):
 
     record = _drive(run())
     assert record["phase"] == PHASE_READY
-    assert record.get("finish_reason") == "cancelled"
+    assert record.get("finish_reason") == "interrupted"
     assert "salvage" in record["ops"]
     assert "salvage_retain_open" not in record.get("ops", [])
 
@@ -283,10 +283,10 @@ def test_salvage_marks_ready(tmp_path):
     record = _drive(run())
     assert record["phase"] == PHASE_READY
     assert record["content"] == "partial+"
-    assert record["finish_reason"] == "cancelled"
+    assert record["finish_reason"] == "interrupted"
     assert "salvage" in record["ops"]
     body = to_record_turn_body(record)
-    assert body["finish_reason"] == "cancelled"
+    assert body["finish_reason"] == "interrupted"
     assert body["journal"] == [{"kind": "x"}]
 
 
@@ -338,7 +338,7 @@ def test_to_record_turn_body_includes_sorted_journal(tmp_path):
         {"kind": "run_started", "payload": {"id": "r1"}, "ts": "t0"},
         {"kind": "run_completed", "payload": {"id": "r1"}, "ts": None},
     ]
-    assert body["finish_reason"] == "cancelled"
+    assert body["finish_reason"] == "interrupted"
     # Sidecar emit / outbox journal stay progressive — PG finalize fills turn_end.
     assert all(e.get("kind") != "turn_end" for e in body["journal"])
 
@@ -453,8 +453,8 @@ def test_stream_segments_monotonic_and_ready_sealed(tmp_path):
 
 def test_outbox_process_journal_visible_at_semantic_boundary(tmp_path):
     """Local mid-run: process_* lands in outbox before finalize (D6 / attach isomorphic)."""
-    from agentcore.conversation.store import set_conversation_store
     from agentcore.conversation.store.outbox import journal_entries_from_map
+    from agentcore.runtime.conversation_store import bind_conversation_store
     from agentcore.runtime.events import EventSink, content_delta, tool_use_start
     from agentcore.runtime.facts import TurnFactLog, current_fact_log
     from agentcore.runtime.journal.writer import TurnJournalWriter, current_journal_writer
@@ -467,7 +467,7 @@ def test_outbox_process_journal_visible_at_semantic_boundary(tmp_path):
         message_id="m1",
         trace_id="j" * 32,
     )
-    set_conversation_store(store)
+    bind_conversation_store(store)
 
     async def run() -> None:
         await store.begin_turn(conversation_id="c1", message_id="m1", trace_id="j" * 32)
@@ -694,6 +694,7 @@ def test_concurrent_turns_isolate_context_and_salvage_onto_umid(tmp_path):
             conversation_id="c1",
             trace_id="a" * 32,
             message_id="mA",
+            interrupt_reason="user_stop",
         )
 
         # B keeps going then finalizes.
@@ -1006,8 +1007,8 @@ def test_to_record_turn_body_includes_harvest_origin(tmp_path):
     assert body["harvest_kind"] == "success"
 
 
-def test_salvage_empty_non_user_stop_writes_honesty_note(tmp_path):
-    """Local salvage used to seal an empty cancelled bubble; user saw nothing."""
+def test_salvage_empty_non_user_stop_is_interrupted_without_bubble_note(tmp_path):
+    """Found-dead empty salvage: interrupted finish, composer owns the sentence."""
     store = OutboxStore(tmp_path / "outbox")
     store.bind_turn(
         conversation_id="c1",
@@ -1029,8 +1030,8 @@ def test_salvage_empty_non_user_stop_writes_honesty_note(tmp_path):
         return json.loads((tmp_path / "outbox" / "u1.json").read_text(encoding="utf-8"))
 
     record = _drive(run())
-    assert record["content"] == INTERRUPTED_EMPTY_USER_VISIBLE
-    assert record["finish_reason"] == "cancelled"
+    assert record["content"] == ""
+    assert record["finish_reason"] == "interrupted"
 
 
 def test_salvage_empty_user_stop_stays_silent(tmp_path):
@@ -1059,6 +1060,35 @@ def test_salvage_empty_user_stop_stays_silent(tmp_path):
     record = _drive(run())
     assert record["content"] == ""
     assert record["finish_reason"] == "cancelled"
+
+
+def test_salvage_engine_error_stamps_error_finish(tmp_path):
+    store = OutboxStore(tmp_path / "outbox")
+    store.bind_turn(
+        conversation_id="c1",
+        user_message_id="u1",
+        user_message="hi",
+        message_id="m1",
+        trace_id="e" * 32,
+    )
+
+    async def run() -> dict:
+        await store.begin_turn(conversation_id="c1", message_id="m1", trace_id="e" * 32)
+        await store.salvage(
+            journal=[],
+            content="half",
+            conversation_id="c1",
+            trace_id="e" * 32,
+            message_id="m1",
+            error="engine boom",
+        )
+        return json.loads((tmp_path / "outbox" / "u1.json").read_text(encoding="utf-8"))
+
+    record = _drive(run())
+    assert record["content"] == "half"
+    assert record["finish_reason"] == "error"
+    assert record["runs"]["error"]["code"] == ErrorCode.PIPELINE_ERROR.value
+    assert record["runs"]["error"]["message"] == "engine boom"
 
 
 def test_salvage_copies_harvest_origin_from_bind(tmp_path):

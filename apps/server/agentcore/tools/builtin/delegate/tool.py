@@ -95,6 +95,7 @@ class DelegateTool:
         surface=ToolSurface.CEO_ORCHESTRATION,
         audience=AUDIENCE_CEO_ONLY,
         ceo_wire=CeoWire.ALWAYS,
+        catalog_summary="把任务派给队员",
     )
 
     def __init__(

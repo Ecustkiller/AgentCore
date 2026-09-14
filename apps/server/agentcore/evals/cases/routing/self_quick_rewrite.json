@@ -9,5 +9,5 @@
     { "name": "NotDelegated" },
     { "name": "MaxRounds", "args": { "budget": 3 } }
   ],
-  "rubric": "单点改写+翻译、未要求落盘：直接给出结果，不组队。"
+  "rubric": "原文已在窗里的短改写+翻译：切不出去，编码≈做完。"
 }

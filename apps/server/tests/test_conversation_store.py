@@ -178,13 +178,13 @@ def test_d7_merge_usage_clears_paused_on_explicit_false_while_running():
 def test_hardkill_harvest_empty_close_only_fills_unstamped_harvest_prefix():
     """Leg 2: hard-kill harvest (prefix, no origin) gets the same compose as salvage."""
     from agentcore.conversation.store.cloud import _compose_hardkill_harvest_empty_close
-    from agentcore.runtime.turn.interrupt import INTERRUPTED_EMPTY_USER_VISIBLE
+    from agentcore.runtime.turn.interrupt import HARVEST_YIELD_EMPTY_USER_VISIBLE
 
     filled = _compose_hardkill_harvest_empty_close(
         user_message="【系统收口】后台团队任务已全部完成。",
         origin=None,
     )
-    assert filled == INTERRUPTED_EMPTY_USER_VISIBLE
+    assert filled == HARVEST_YIELD_EMPTY_USER_VISIBLE
     assert "已完成" not in filled
     assert "已交付" not in filled
 
@@ -1615,10 +1615,6 @@ async def test_finalize_local_fills_journal_via_persist(monkeypatch):
         cloud_mod, "build_provider", lambda *_a, **_k: SimpleNamespace(close=AsyncMock())
     )
     monkeypatch.setattr(cloud_mod, "resolve_user_model", lambda *_a, **_k: "m")
-    monkeypatch.setattr(
-        "agentcore.runtime.kickoff.stage_card.emit_stage_card_for_motion",
-        AsyncMock(return_value=None),
-    )
 
     result = await CloudStore().finalize(
         mode="local",
@@ -1762,10 +1758,6 @@ async def test_finalize_local_does_not_mint_followups(monkeypatch):
     monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", _NoopMetricsRepo)
     monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
-    monkeypatch.setattr(
-        "agentcore.runtime.kickoff.stage_card.emit_stage_card_for_motion",
-        AsyncMock(return_value=None),
-    )
 
     result = await CloudStore().finalize(
         mode="local",
@@ -1786,7 +1778,6 @@ async def test_finalize_local_does_not_mint_followups(monkeypatch):
 
 async def test_finalize_local_end_turn_does_not_emit_stage_card(monkeypatch):
     """新调研 end_turn 不再因命题卡登记推进卡。"""
-    stage = AsyncMock(return_value="sc_1")
 
     class MsgRepo:
         def __init__(self, _s):
@@ -1828,9 +1819,6 @@ async def test_finalize_local_end_turn_does_not_emit_stage_card(monkeypatch):
     monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", _NoopMetricsRepo)
     monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
-    monkeypatch.setattr(
-        "agentcore.runtime.kickoff.stage_card.emit_stage_card_for_motion", stage
-    )
 
     result = await CloudStore().finalize(
         mode="local",
@@ -1866,12 +1854,10 @@ async def test_finalize_local_end_turn_does_not_emit_stage_card(monkeypatch):
         finish_reason=FinishReason.END_TURN.value,
     )
     assert result is not None
-    stage.assert_not_awaited()
 
 
 async def test_finalize_local_skips_stage_when_not_end_turn(monkeypatch):
-    """Stage card (and former followups) only on end_turn + non-empty body."""
-    stage = AsyncMock(return_value="sc_1")
+    """Former followups still skip when the turn is not end_turn."""
 
     class MsgRepo:
         def __init__(self, _s):
@@ -1913,7 +1899,6 @@ async def test_finalize_local_skips_stage_when_not_end_turn(monkeypatch):
     monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", _NoopMetricsRepo)
     monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
-    monkeypatch.setattr("agentcore.runtime.kickoff.stage_card.emit_stage_card_for_motion", stage)
 
     result = await CloudStore().finalize(
         mode="local",
@@ -1928,7 +1913,6 @@ async def test_finalize_local_skips_stage_when_not_end_turn(monkeypatch):
         finish_reason=FinishReason.DEGRADED.value,
     )
     assert result is not None
-    stage.assert_not_awaited()
     assert result["followups"] is None
 
 

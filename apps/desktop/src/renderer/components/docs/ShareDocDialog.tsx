@@ -18,7 +18,7 @@ import {
   type Share,
   shareLink,
 } from "@/services/sharing";
-import { Check, Copy, Link2, Loader2, Plus, Trash2 } from "lucide-react";
+import { Check, Copy, Link2, Loader2, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 type ShareExpiryChoice =
@@ -32,8 +32,9 @@ const EXPIRY_OPTIONS: { value: ShareExpiryChoice; label: string }[] = [
 ];
 
 /**
- * Mint / list / revoke frozen 文档 snapshots. Creating a link flushes the live
- * draft first (所见即所享). Later edits never change an already-issued URL.
+ * Publish / update / revoke the public 文档 page. First publish mints a stable
+ * `/shared/<id>`; later publishes overwrite that snapshot. Live draft does not
+ * auto-follow. Flush pending edits before every publish.
  */
 export function ShareDocDialog({
   docId,
@@ -72,14 +73,14 @@ function ShareDialogBody({
   onFlush: () => Promise<boolean>;
 }) {
   const [shares, setShares] = useState<Share[] | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   const [expiry, setExpiry] = useState<ShareExpiryChoice>(30);
 
   const reload = useCallback(async () => {
     try {
       setShares(await listDocShares(docId));
     } catch (e) {
-      notifyError(e, "加载分享链接失败");
+      notifyError(e, "加载公开页失败");
       setShares([]);
     }
   }, [docId]);
@@ -88,24 +89,27 @@ function ShareDialogBody({
     void reload();
   }, [reload]);
 
-  const handleCreate = async () => {
-    setCreating(true);
+  const published = (shares ?? []).length > 0;
+
+  const handlePublish = async () => {
+    setPublishing(true);
     try {
       const flushed = await onFlush();
       if (!flushed) {
-        notifyError("保存失败，无法按当前内容分享");
+        notifyError("保存失败，无法按当前内容发布");
         return;
       }
-      const options: CreateShareOptions = {
-        expires_in_days: expiry === "never" ? null : expiry,
-      };
+      const options: CreateShareOptions | undefined = published
+        ? undefined
+        : { expires_in_days: expiry === "never" ? null : expiry };
       const share = await createDocShare(docId, options);
-      setShares((prev) => [share, ...(prev ?? [])]);
+      await reload();
       await copyText(shareLink(share));
+      notifySuccess(published ? "客户页已更新" : "已发布，链接已复制");
     } catch (e) {
-      notifyError(e, "创建分享链接失败");
+      notifyError(e, published ? "更新发布失败" : "发布失败");
     } finally {
-      setCreating(false);
+      setPublishing(false);
     }
   };
 
@@ -127,30 +131,32 @@ function ShareDialogBody({
   return (
     <DialogContent size="md">
       <DialogHeader>
-        <DialogTitle>分享文档</DialogTitle>
+        <DialogTitle>发布文档</DialogTitle>
         <DialogDescription>
           {title ? `「${title}」` : "该文档"}
-          的只读公开链接。链接是分享时的快照，之后改稿不会出现；可随时撤销。
+          的只读公开页。网址不变；客户看到的是上次发布的内容，编辑器里未发布的改动不会出现。可随时撤销。
         </DialogDescription>
       </DialogHeader>
 
-      <DialogBody className="pb-2">
-        <p className="mb-2 text-xs text-muted-foreground">链接有效期</p>
-        <div className="flex flex-wrap gap-2">
-          {EXPIRY_OPTIONS.map((opt) => (
-            <Button
-              key={String(opt.value)}
-              type="button"
-              variant={expiry === opt.value ? "primary" : "neutral"}
-              className="h-8 px-3 text-xs"
-              disabled={creating}
-              onClick={() => setExpiry(opt.value)}
-            >
-              {opt.label}
-            </Button>
-          ))}
-        </div>
-      </DialogBody>
+      {published ? null : (
+        <DialogBody className="pb-2">
+          <p className="mb-2 text-xs text-muted-foreground">链接有效期</p>
+          <div className="flex flex-wrap gap-2">
+            {EXPIRY_OPTIONS.map((opt) => (
+              <Button
+                key={String(opt.value)}
+                type="button"
+                variant={expiry === opt.value ? "primary" : "neutral"}
+                className="h-8 px-3 text-xs"
+                disabled={publishing}
+                onClick={() => setExpiry(opt.value)}
+              >
+                {opt.label}
+              </Button>
+            ))}
+          </div>
+        </DialogBody>
+      )}
 
       <DialogBody className="max-h-[40vh]">
         {shares === null ? (
@@ -160,7 +166,7 @@ function ShareDialogBody({
           </div>
         ) : shares.length === 0 ? (
           <p className="py-6 text-sm text-muted-foreground">
-            还没有分享链接。点击下方「新建分享链接」生成一个。
+            还没有公开页。点击下方「发布」生成一个客户能打开的网址。
           </p>
         ) : (
           <ul className="flex flex-col gap-2 py-1">
@@ -179,11 +185,11 @@ function ShareDialogBody({
                       className="truncate text-xs text-muted-foreground"
                       title={share.title}
                     >
-                      快照标题：{share.title}
+                      发布标题：{share.title}
                     </div>
                   ) : null}
                   <div className="text-xs text-muted-foreground">
-                    {formatMessageTime(share.created_at)} 创建
+                    {formatMessageTime(share.created_at)} 发布
                     {share.expires_at
                       ? ` · ${formatMessageTime(share.expires_at)} 过期`
                       : " · 永不过期"}
@@ -197,9 +203,9 @@ function ShareDialogBody({
                     <Copy size={14} />
                   </IconButton>
                 </SimpleTooltip>
-                <SimpleTooltip label="撤销链接">
+                <SimpleTooltip label="撤销公开页">
                   <IconButton
-                    aria-label="撤销链接"
+                    aria-label="撤销公开页"
                     onClick={() => void handleRevoke(share)}
                     className="hover:bg-destructive/10 hover:text-destructive"
                   >
@@ -215,19 +221,17 @@ function ShareDialogBody({
       <DialogFooter>
         <Button
           className="h-9 px-4"
-          disabled={creating || shares === null}
+          disabled={publishing || shares === null}
           icon={
-            creating ? (
+            publishing ? (
               <Loader2 size={14} className="animate-spin" />
-            ) : shares && shares.length > 0 ? (
-              <Plus size={14} />
             ) : (
               <Check size={14} />
             )
           }
-          onClick={() => void handleCreate()}
+          onClick={() => void handlePublish()}
         >
-          {shares && shares.length > 0 ? "新建分享链接" : "创建分享链接"}
+          {published ? "更新发布" : "发布"}
         </Button>
       </DialogFooter>
     </DialogContent>

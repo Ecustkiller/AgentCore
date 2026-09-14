@@ -66,7 +66,7 @@ async def resume_chat_pipeline(
     sink: EventSink,
     backend: WorkspaceBackend,
     history: list[dict] | None = None,
-    board_id: str | None = None,
+    table_id: str | None = None,
     llm_credentials: LLMCredentials | None = None,
     profile_set: ProfileSet | None = None,
     session_saver: SessionSaver | None = None,
@@ -96,13 +96,6 @@ async def resume_chat_pipeline(
     frame, so resume is fully re-entrant. ``selected`` carries the user's option picks
     (ask_user only).
     Returns the same result shape as :func:`run_chat_pipeline`.
-
-    ``board_id`` marks the resumed turn as a 白板会话 (AI协作白板.md §六 M2): re-derived by
-    the caller from the conversation's board binding (authoritative in the DB, not stored in
-    the frame), so a board turn that paused at a checkpoint regains the ``board_ops`` tool +
-    its :class:`BoardChannel` on resume and can keep drawing on the user's canvas. ``None``
-    for every ordinary chat — then ``board_ops`` is neither wired nor reachable, exactly as
-    on the fresh-turn path.
 
     ``permission_axes`` mirrors :func:`run_chat_pipeline`: the conversation's CURRENT
     three-axis permission mode, resolved by the caller at resume time — not frozen
@@ -227,7 +220,7 @@ async def resume_chat_pipeline(
             llm=llm,
             sink=sink,
             backend=backend,
-            board_id=board_id,
+            table_id=table_id,
             conversation_id=conversation_id,
             message_id=message_id,
             captain_run_id=captain_run_id,
@@ -462,9 +455,6 @@ async def resume_chat_pipeline(
     finally:
         # Cancel-safe teardown (see ``teardown_step``): a second Stop lands on the
         # first ``await`` here and would otherwise skip every later flush/release.
-        from agentcore.conversation.stage_card_resolve import (
-            maybe_orphan_stage_cards_at_turn_end,
-        )
         from agentcore.runtime.interaction_orphan import orphan_registry_pending
         from agentcore.runtime.pipeline.teardown import teardown_step
 
@@ -472,10 +462,6 @@ async def resume_chat_pipeline(
         await teardown_step(
             orphan_registry_pending(conversation_id, turn_id=message_id),
             step="orphan_registry_pending",
-        )
-        await teardown_step(
-            maybe_orphan_stage_cards_at_turn_end(conversation_id, sink=sink),
-            step="orphan_stage_cards",
         )
         current_fact_log.reset(fact_log_token)
         # Drain the append-on-emit journal BEFORE dropping the writer: an abandoned in-flight
@@ -518,5 +504,5 @@ async def resume_chat_pipeline(
                     )
             current_execution_id.reset(execution_id_token)
         # Do NOT close the sink here (see run_chat_pipeline): its owner closes it, so the
-        # resumed turn's persist_turn_result tail (title / stage_card) still reaches the client.
+        # resumed turn's persist_turn_result tail (title mint) still reaches the client.
         await teardown_step(llm.close(), step="llm_close")

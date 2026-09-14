@@ -1,6 +1,5 @@
 import { Markdown } from "@/components/chat/Markdown";
 import { FilePreviewBody } from "@/components/files/FilePreviewBody";
-import { FileTypeIcon } from "@/components/files/FileTypeIcon";
 import { Centered, InlineError } from "@/components/files/parts";
 import { Button, IconButton } from "@/components/ui";
 import { noticeChipNeutral } from "@/components/ui/tone-presets";
@@ -20,7 +19,6 @@ import { LocalFsError } from "@/services/sources/localRootSource";
 import {
   AlertTriangle,
   AppWindow,
-  ChevronLeft,
   Download,
   ExternalLink,
   FolderSearch,
@@ -46,9 +44,9 @@ interface EditSession {
 
 /**
  * In-panel preview of one file from a {@link FileSource}, with opt-in editing for
- * whole text files. Takes over the files section (with a back arrow); a header
- * download button (when the source can transfer) pulls the raw file. Binary /
- * oversized files fall back to a download-only notice.
+ * whole text files. Hosted in a file tab (右坞 / 文件中枢)：认路在 TabChip，这里只留
+ * 动作条（无返回、无文件名）。A header download button (when the source can transfer)
+ * pulls the raw file. Binary / oversized files fall back to a download-only notice.
  *
  * 编辑走的是**带 CAS 的编辑契约**（`readForEdit` 取全文 + 版本基线 → `writeText` 写前比对），
  * 与 `MarkdownFileEditor` 同一套：同回合 Agent 正在写同一个文件时，保存返回冲突而不是盲
@@ -63,12 +61,15 @@ export function FilePreviewView({
   source,
   path,
   name,
-  onClose,
+  onDirtyChange,
 }: {
   source: FileSource;
   path: string;
   name: string;
-  onClose: () => void;
+  onDirtyChange?: (state: {
+    dirty: boolean;
+    confirmDiscard: boolean;
+  }) => void;
 }) {
   const [result, setResult] = useState<FilePreviewResult | null>(null);
   const [error, setError] = useState(false);
@@ -191,6 +192,13 @@ export function FilePreviewView({
     !!source.writeText;
   const dirty = edit !== null && draft !== edit.baseText;
 
+  useEffect(() => {
+    onDirtyChange?.({ dirty, confirmDiscard: dirty });
+  }, [dirty, onDirtyChange]);
+  useEffect(() => {
+    return () => onDirtyChange?.({ dirty: false, confirmDiscard: false });
+  }, [onDirtyChange]);
+
   // 进/重进编辑：预览可能被截断或做过换行归一，故正文与基线都取自 `readForEdit`，
   // 保证保存写回的是「读到什么就写什么」。
   const openEditSession = useCallback(async () => {
@@ -261,12 +269,8 @@ export function FilePreviewView({
     [saving, source, path, draft, edit, conflictVersion],
   );
 
-  // Confirm before discarding unsaved edits (back to list, cancel editing, or
-  // taking the disk version on a conflict).
-  const requestClose = () => {
-    if (dirty && !window.confirm("有未保存的改动，确定放弃并返回？")) return;
-    onClose();
-  };
+  // Confirm before discarding unsaved edits (cancel editing, or taking the
+  // disk version on a conflict). Tab × uses confirmDiscard on the host.
   const cancelEdit = () => {
     if (dirty && !window.confirm("有未保存的改动，确定放弃编辑？")) return;
     setEdit(null);
@@ -292,128 +296,127 @@ export function FilePreviewView({
     return () => window.removeEventListener("keydown", onKey);
   }, [editing, onSave]);
 
+  const showActionBar =
+    editing ||
+    canEdit ||
+    (isHtml && !!source.openInAppPreview) ||
+    (isHtml && !!source.openInBrowser) ||
+    (!isHtml && canOpenExternal) ||
+    !!source.revealInOsFileManager ||
+    !!source.download;
+
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border pl-1 pr-1">
-        <SimpleTooltip label="返回文件列表">
-          <IconButton onClick={requestClose} aria-label="返回文件列表">
-            <ChevronLeft size={16} />
-          </IconButton>
-        </SimpleTooltip>
-        <FileTypeIcon name={name} path={path} size={13} />
-        <SimpleTooltip label={path}>
-          <span className="min-w-0 flex-1 truncate text-xs font-medium">
-            {dirty && <span className="text-primary">● </span>}
-            {name}
-          </span>
-        </SimpleTooltip>
-        {editing ? (
-          <>
-            <Button
-              className="shrink-0 disabled:opacity-60"
-              disabled={saving}
-              onClick={() => void onSave()}
-              icon={
-                saving ? (
-                  <Loader2 size={13} className="animate-spin" />
-                ) : (
-                  <Save size={13} />
-                )
-              }
-            >
-              保存
-            </Button>
-            <SimpleTooltip label="取消编辑">
-              <IconButton onClick={cancelEdit} aria-label="取消编辑">
-                <X size={14} />
-              </IconButton>
-            </SimpleTooltip>
-          </>
-        ) : (
-          <>
-            {canEdit && (
-              <SimpleTooltip label="编辑">
-                <IconButton
-                  disabled={opening}
-                  onClick={startEdit}
-                  aria-label="编辑"
-                >
-                  {opening ? (
-                    <Loader2 size={14} className="animate-spin" />
+      {showActionBar ? (
+        <div className="flex h-9 shrink-0 items-center justify-end gap-1.5 border-b border-border px-1">
+          {editing ? (
+            <>
+              <Button
+                className="shrink-0 disabled:opacity-60"
+                disabled={saving}
+                onClick={() => void onSave()}
+                icon={
+                  saving ? (
+                    <Loader2 size={13} className="animate-spin" />
                   ) : (
-                    <Pencil size={14} />
-                  )}
+                    <Save size={13} />
+                  )
+                }
+              >
+                保存
+              </Button>
+              <SimpleTooltip label="取消编辑">
+                <IconButton onClick={cancelEdit} aria-label="取消编辑">
+                  <X size={14} />
                 </IconButton>
               </SimpleTooltip>
-            )}
-            {isHtml && source.openInAppPreview && (
-              <SimpleTooltip label="完整预览（内置浏览器 · 跑 JS）">
-                <IconButton
-                  disabled={openingPreview}
-                  onClick={() => void onOpenInAppPreview()}
-                  aria-label="完整预览"
-                >
-                  {openingPreview ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <AppWindow size={14} />
-                  )}
-                </IconButton>
-              </SimpleTooltip>
-            )}
-            {isHtml && source.openInBrowser && (
-              <SimpleTooltip label="在浏览器打开（完整效果）">
-                <IconButton
-                  disabled={openingInBrowser}
-                  onClick={() => void onOpenInBrowser()}
-                  aria-label="在浏览器打开"
-                >
-                  {openingInBrowser ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <Globe size={14} />
-                  )}
-                </IconButton>
-              </SimpleTooltip>
-            )}
-            {!isHtml && canOpenExternal && (
-              <SimpleTooltip label="用默认程序打开">
-                <IconButton
-                  onClick={() => void onOpenExternal()}
-                  aria-label="用默认程序打开"
-                >
-                  <ExternalLink size={14} />
-                </IconButton>
-              </SimpleTooltip>
-            )}
-            {source.revealInOsFileManager && (
-              <SimpleTooltip label="在资源管理器中显示">
-                <IconButton
-                  onClick={() => void onReveal()}
-                  aria-label="在资源管理器中显示"
-                >
-                  <FolderSearch size={14} />
-                </IconButton>
-              </SimpleTooltip>
-            )}
-            {source.download && (
-              <SimpleTooltip label="下载文件">
-                <IconButton
-                  disabled={downloading}
-                  onClick={() => void onDownload()}
-                  aria-label="下载文件"
-                >
-                  {downloading ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <Download size={14} />
-                  )}
-                </IconButton>
-              </SimpleTooltip>
-            )}
-          </>
-        )}
-      </div>
+            </>
+          ) : (
+            <>
+              {canEdit && (
+                <SimpleTooltip label="编辑">
+                  <IconButton
+                    disabled={opening}
+                    onClick={startEdit}
+                    aria-label="编辑"
+                  >
+                    {opening ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <Pencil size={14} />
+                    )}
+                  </IconButton>
+                </SimpleTooltip>
+              )}
+              {isHtml && source.openInAppPreview && (
+                <SimpleTooltip label="完整预览（内置浏览器 · 跑 JS）">
+                  <IconButton
+                    disabled={openingPreview}
+                    onClick={() => void onOpenInAppPreview()}
+                    aria-label="完整预览"
+                  >
+                    {openingPreview ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <AppWindow size={14} />
+                    )}
+                  </IconButton>
+                </SimpleTooltip>
+              )}
+              {isHtml && source.openInBrowser && (
+                <SimpleTooltip label="在浏览器打开（完整效果）">
+                  <IconButton
+                    disabled={openingInBrowser}
+                    onClick={() => void onOpenInBrowser()}
+                    aria-label="在浏览器打开"
+                  >
+                    {openingInBrowser ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <Globe size={14} />
+                    )}
+                  </IconButton>
+                </SimpleTooltip>
+              )}
+              {!isHtml && canOpenExternal && (
+                <SimpleTooltip label="用默认程序打开">
+                  <IconButton
+                    onClick={() => void onOpenExternal()}
+                    aria-label="用默认程序打开"
+                  >
+                    <ExternalLink size={14} />
+                  </IconButton>
+                </SimpleTooltip>
+              )}
+              {source.revealInOsFileManager && (
+                <SimpleTooltip label="在资源管理器中显示">
+                  <IconButton
+                    onClick={() => void onReveal()}
+                    aria-label="在资源管理器中显示"
+                  >
+                    <FolderSearch size={14} />
+                  </IconButton>
+                </SimpleTooltip>
+              )}
+              {source.download && (
+                <SimpleTooltip label="下载文件">
+                  <IconButton
+                    disabled={downloading}
+                    onClick={() => void onDownload()}
+                    aria-label="下载文件"
+                  >
+                    {downloading ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <Download size={14} />
+                    )}
+                  </IconButton>
+                </SimpleTooltip>
+              )}
+            </>
+          )}
+        </div>
+      ) : null}
 
       {/* 冲突三态与 md 编辑器同一套语汇：说明「会覆盖」+ 两个明确出口，绝不静默落盘。 */}
       {conflictVersion && (

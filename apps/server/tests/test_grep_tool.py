@@ -165,11 +165,14 @@ def test_regex_error_message_rewrites_lookaround_instead_of_pcre2():
     assert "多次 grep" in msg
 
 
-def test_grep_schema_forbids_literal_newline_as_regex():
+def test_grep_regex_footguns_live_in_receipt_not_schema():
     desc = GrepTool().schema.parameters["properties"]["pattern"]["description"]
-    assert "禁止把字面" in desc
-    assert "\\n" in desc
-    assert "lookahead" in desc
+    assert "禁止把字面" not in desc
+    assert "lookahead" not in desc
+    from agentcore.workspace.rg_grep import _LOOKAROUND_STEER, _NEWLINE_STEER
+
+    assert "lookahead" in _LOOKAROUND_STEER
+    assert "\\n" in _NEWLINE_STEER
 
 
 def test_grep_schema_teaches_omit_path_when_unsure():
@@ -180,10 +183,14 @@ def test_grep_schema_teaches_omit_path_when_unsure():
     assert "`glob`" in schema.description
     assert "file_list" not in schema.description
     path = schema.parameters["properties"]["path"]["description"]
-    assert "不确定时省略" in path
+    assert "不确定时省略" not in path
     assert "不要猜测" not in path
     assert "禁止猜测" not in path
     assert "Desktop" not in path
+    from agentcore.tools.builtin.grep import _empty_result_note
+
+    note = _empty_result_note(pattern="x", rel_dir=".", glob="")
+    assert "省略 path" in note
 
 
 async def test_grep_rejects_path_outside_workspace(tmp_path: Path):

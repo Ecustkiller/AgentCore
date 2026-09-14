@@ -109,6 +109,20 @@ class SendMessageRequest(BaseModel):
     # Locality is conversation/project state (birth-time bind), not a per-turn field —
     # auto-promote is vetoed (双模式工作区).
     requires_tools: bool = False
+    # This turn's selected table row ids. Injected as ``<表格>``; empty → omit.
+    # Not stored on the message row. Over-budget lists are truncated, not 422.
+    table_selection: list[str] = Field(default_factory=list)
+
+    @field_validator("table_selection", mode="before")
+    @classmethod
+    def _cap_table_selection(cls, v: object) -> object:
+        from agentcore.table.context import sanitize_table_selection
+
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return sanitize_table_selection([str(item) for item in v])
+        return []
 
     @model_validator(mode="after")
     def _require_content_or_attachments(self) -> "SendMessageRequest":
@@ -774,7 +788,7 @@ class MessageDetail(BaseModel):
     @field_validator("agent_mentions", mode="before")
     @classmethod
     def _agent_mentions_from_row(cls, v: object) -> object:
-        from agentcore.conversation.mentions import to_stored_agent_mentions
+        from agentcore.core.mentions import to_stored_agent_mentions
 
         if v is None:
             return []
@@ -1346,7 +1360,7 @@ class QueuedTurnItem(BaseModel):
     @field_validator("agent_mentions", mode="before")
     @classmethod
     def _queued_agent_mentions(cls, v: object) -> object:
-        from agentcore.conversation.mentions import to_stored_agent_mentions
+        from agentcore.core.mentions import to_stored_agent_mentions
 
         if not isinstance(v, list):
             return []

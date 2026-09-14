@@ -1,9 +1,5 @@
 import { InlineInput } from "@/components/files/FileTreeInline";
-import {
-  FACE_META,
-  FACE_ORDER,
-  RESIDENT_LABEL,
-} from "@/components/tools/catalogMeta";
+import { FACE_META, FACE_ORDER } from "@/components/tools/catalogMeta";
 import {
   Badge,
   Button,
@@ -16,8 +12,16 @@ import type {
   PromptRail,
   PromptRailFolder,
 } from "@/lib/promptCatalog";
-import { buildAlwaysRows, formatAlwaysRowChars } from "@/lib/promptSizes";
+import {
+  PROMPT_SHELF_AFFORDANCE,
+  type PromptShelfChip,
+  promptConnectorShelfCopy,
+  promptItemShelfCopy,
+  promptMineShelfOpts,
+} from "@/lib/promptShelfTile";
+import { buildAlwaysRows } from "@/lib/promptSizes";
 import { cn } from "@/lib/utils";
+import type { SkillStoreListing } from "@/services/skillStore";
 import {
   BookOpen,
   FileText,
@@ -40,7 +44,7 @@ export type PromptDropDest =
 export type PromptOverviewConnector = {
   id: string;
   label: string;
-  description: string;
+  runtimeError?: string | null;
   accessory?: ReactNode;
 };
 
@@ -56,7 +60,8 @@ export function PromptOverview({
   showConnectors,
   creatingFolder,
   busy,
-  installedCopyIds,
+  listings = [],
+  installedListings = [],
   onOpenItem,
   onOpenUpdates,
   onCreateMine,
@@ -80,7 +85,8 @@ export function PromptOverview({
   showConnectors: boolean;
   creatingFolder: boolean;
   busy: boolean;
-  installedCopyIds: Set<string>;
+  listings?: SkillStoreListing[];
+  installedListings?: SkillStoreListing[];
   onOpenItem: (id: string) => void;
   onOpenUpdates: () => void;
   onCreateMine: () => void;
@@ -144,10 +150,10 @@ export function PromptOverview({
             <ItemTile
               key={row.catalogId}
               item={row.item}
-              description={row.meta}
-              subtitle={formatAlwaysRowChars(row.chars) ?? undefined}
+              alwaysChars={row.chars}
               selected={selectedId === row.catalogId}
-              installedCopyIds={installedCopyIds}
+              listings={listings}
+              installedListings={installedListings}
               onOpen={() => onOpenItem(row.catalogId)}
               renderMineTile={renderMineTile}
             />
@@ -158,10 +164,10 @@ export function PromptOverview({
                 <ItemTile
                   key={row.catalogId}
                   item={row.item}
-                  description={row.meta}
-                  subtitle={formatAlwaysRowChars(row.chars) ?? undefined}
+                  alwaysChars={row.chars}
                   selected={selectedId === row.catalogId}
-                  installedCopyIds={installedCopyIds}
+                  listings={listings}
+                  installedListings={installedListings}
                   onOpen={() => onOpenItem(row.catalogId)}
                   renderMineTile={renderMineTile}
                 />
@@ -172,10 +178,10 @@ export function PromptOverview({
             <ItemTile
               key={row.catalogId}
               item={row.item}
-              description={row.meta}
-              subtitle={formatAlwaysRowChars(row.chars) ?? undefined}
+              alwaysChars={row.chars}
               selected={selectedId === row.catalogId}
-              installedCopyIds={installedCopyIds}
+              listings={listings}
+              installedListings={installedListings}
               onOpen={() => onOpenItem(row.catalogId)}
               renderMineTile={renderMineTile}
             />
@@ -195,8 +201,8 @@ export function PromptOverview({
           <CatalogTile
             icon={<Plus size={18} />}
             colorVar={artifactColorVar("guidelines")}
-            title="新建条目"
-            description="写一条按需提示词"
+            title={PROMPT_SHELF_AFFORDANCE.createEntry.title}
+            description={PROMPT_SHELF_AFFORDANCE.createEntry.description}
             onClick={busy ? undefined : onCreateMine}
           />
           {creatingFolder ? (
@@ -212,8 +218,8 @@ export function PromptOverview({
             <CatalogTile
               icon={<FolderPlus size={18} />}
               colorVar={artifactColorVar("guidelines")}
-              title="新建夹"
-              description="给提示词分组"
+              title={PROMPT_SHELF_AFFORDANCE.createFolder.title}
+              description={PROMPT_SHELF_AFFORDANCE.createFolder.description}
               onClick={busy ? undefined : onStartCreateFolder}
             />
           )}
@@ -236,8 +242,8 @@ export function PromptOverview({
                     <CatalogTile
                       icon={<Plus size={18} />}
                       colorVar={artifactColorVar("guidelines")}
-                      title="拖到这里"
-                      description="放到这个夹"
+                      title={PROMPT_SHELF_AFFORDANCE.dropHere.title}
+                      description={PROMPT_SHELF_AFFORDANCE.dropHere.description}
                       className="border-dashed"
                     />
                   ) : (
@@ -245,9 +251,9 @@ export function PromptOverview({
                       <ItemTile
                         key={item.id}
                         item={item}
-                        description={mineDescription(item)}
                         selected={selectedId === item.id}
-                        installedCopyIds={installedCopyIds}
+                        listings={listings}
+                        installedListings={installedListings}
                         onOpen={() => onOpenItem(item.id)}
                         renderMineTile={renderMineTile}
                       />
@@ -271,9 +277,9 @@ export function PromptOverview({
               <ItemTile
                 key={item.id}
                 item={item}
-                description={skillDescription(item)}
                 selected={selectedId === item.id}
-                installedCopyIds={installedCopyIds}
+                listings={listings}
+                installedListings={installedListings}
                 onOpen={() => onOpenItem(item.id)}
               />
             ))}
@@ -300,28 +306,32 @@ export function PromptOverview({
               onDragOver={onRejectDrag}
               onDrop={onRejectDrag}
             >
-              {connectors.map((row) => (
-                <CatalogTile
-                  key={row.id}
-                  icon={<Unplug size={18} />}
-                  colorVar={artifactColorVar("connectors")}
-                  title={row.label}
-                  description={row.description || undefined}
-                  accessory={row.accessory}
-                  className={
-                    selectedId === row.id
-                      ? "ring-1 ring-inset ring-primary"
-                      : undefined
-                  }
-                  onClick={() => onOpenItem(row.id)}
-                />
-              ))}
+              {connectors.map((row) => {
+                const copy = promptConnectorShelfCopy(row);
+                return (
+                  <CatalogTile
+                    key={row.id}
+                    icon={<Unplug size={18} />}
+                    colorVar={artifactColorVar("connectors")}
+                    title={copy.title}
+                    description={copy.description}
+                    accessory={row.accessory}
+                    tags={shelfTags(copy.tags)}
+                    className={
+                      selectedId === row.id
+                        ? "ring-1 ring-inset ring-primary"
+                        : undefined
+                    }
+                    onClick={() => onOpenItem(row.id)}
+                  />
+                );
+              })}
               {onAddConnector ? (
                 <CatalogTile
                   icon={<Plus size={18} />}
                   colorVar={artifactColorVar("connectors")}
-                  title="添加连接器"
-                  description="本机插头"
+                  title={PROMPT_SHELF_AFFORDANCE.addConnector.title}
+                  description={PROMPT_SHELF_AFFORDANCE.addConnector.description}
                   onClick={onAddConnector}
                 />
               ) : null}
@@ -349,9 +359,9 @@ export function PromptOverview({
                 <ItemTile
                   key={item.id}
                   item={item}
-                  description={item.tool.summary}
                   selected={selectedId === item.id}
-                  installedCopyIds={installedCopyIds}
+                  listings={listings}
+                  installedListings={installedListings}
                   onOpen={() => onOpenItem(item.id)}
                 />
               ))}
@@ -479,34 +489,39 @@ function ShelfBlock({
 
 function ItemTile({
   item,
-  description,
-  subtitle,
+  alwaysChars,
   selected,
-  installedCopyIds,
+  listings,
+  installedListings,
   onOpen,
   renderMineTile,
 }: {
   item: PromptCatalogItem;
-  description?: string;
-  subtitle?: string;
+  alwaysChars?: number;
   selected: boolean;
-  installedCopyIds: Set<string>;
+  listings: SkillStoreListing[];
+  installedListings: SkillStoreListing[];
   onOpen: () => void;
   renderMineTile?: (row: {
     item: PromptCatalogItem;
     children: ReactNode;
   }) => ReactNode;
 }) {
-  const visual = tileVisual(item, installedCopyIds);
+  const mineOpts =
+    item.kind === "mine"
+      ? promptMineShelfOpts(item, listings, installedListings)
+      : {};
+  const copy = promptItemShelfCopy(item, { ...mineOpts, alwaysChars });
+  const visual = tileVisual(item);
   const tile = (
     <CatalogTile
       icon={visual.icon}
       colorVar={visual.colorVar}
-      title={item.label}
-      subtitle={subtitle}
-      description={description || undefined}
-      accessory={visual.accessory}
-      tags={visual.tags}
+      title={copy.title}
+      subtitle={copy.subtitle}
+      description={copy.description}
+      accessory={shelfChips(copy.accessory)}
+      tags={shelfTags(copy.tags)}
       className={selected ? "ring-1 ring-inset ring-primary" : undefined}
       onClick={onOpen}
     />
@@ -528,48 +543,26 @@ function ItemTile({
   );
 }
 
-function skillDescription(item: PromptCatalogItem): string {
-  if (item.kind !== "skill") return "";
-  const summary = item.skill.summary.trim();
-  if (summary && summary !== item.label) return summary;
-  return "";
-}
-
-function mineDescription(item: PromptCatalogItem): string {
-  if (item.kind !== "mine") return "";
-  const description = item.description.trim();
-  if (description && description !== item.label) return description;
-  return "";
-}
-
-function tileVisual(
-  item: PromptCatalogItem,
-  installedCopyIds: Set<string>,
-): {
+function tileVisual(item: PromptCatalogItem): {
   icon: ReactNode;
   colorVar: string;
-  accessory?: ReactNode;
-  tags?: ReactNode;
 } {
   if (item.kind === "shared") {
     return {
       icon: <ScrollText size={18} />,
       colorVar: artifactColorVar("guidelines"),
-      accessory: sourceBadge("官方"),
     };
   }
   if (item.kind === "identity") {
     return {
       icon: <UserRound size={18} />,
       colorVar: artifactColorVar("guidelines"),
-      accessory: sourceBadge("官方"),
     };
   }
   if (item.kind === "skill") {
     return {
       icon: <BookOpen size={18} />,
       colorVar: artifactColorVar("guidelines"),
-      accessory: sourceBadge("官方"),
     };
   }
   if (item.kind === "tool") {
@@ -578,20 +571,9 @@ function tileVisual(
     return {
       icon: <Icon size={18} />,
       colorVar: catalogCategoryColorVar(item.tool.face),
-      accessory: sourceBadge(
-        item.tool.resident ? RESIDENT_LABEL.resident : RESIDENT_LABEL.deferred,
-      ),
-      tags: meta ? (
-        <Badge tone="muted" pill>
-          {meta.label}
-        </Badge>
-      ) : undefined,
     };
   }
   if (item.kind === "mine") {
-    const fromMarket = Boolean(
-      item.mineId && installedCopyIds.has(item.mineId),
-    );
     const Icon =
       item.memoryKind === "preferences"
         ? SlidersHorizontal
@@ -601,9 +583,6 @@ function tileVisual(
     return {
       icon: <Icon size={18} />,
       colorVar: artifactColorVar("guidelines"),
-      accessory: sourceBadge(
-        item.disputed ? "已停用" : fromMarket ? "市场" : "我的",
-      ),
     };
   }
   return {
@@ -612,10 +591,15 @@ function tileVisual(
   };
 }
 
-function sourceBadge(label: string) {
-  return (
-    <Badge tone="muted" pill>
-      {label}
+function shelfTags(tags: string[]) {
+  return shelfChips(tags.map((label) => ({ label })));
+}
+
+function shelfChips(chips: PromptShelfChip[]) {
+  if (!chips.length) return undefined;
+  return chips.map((chip) => (
+    <Badge key={chip.label} tone={chip.tone ?? "muted"} pill>
+      {chip.label}
     </Badge>
-  );
+  ));
 }

@@ -10,7 +10,7 @@ name: Web client smoke (nightly, real turn)
 #   the cloud SSE path (web never routes to the local sidecar).
 # Script: apps/desktop/scripts/smoke-webapp.mjs (no --boot → full mode).
 #
-# Cost & flake control (mirrors evals-nightly.yml): one real LLM turn costs money and
+# Cost & flake control: one real LLM turn costs money and
 # depends on DeepSeek being up, so this only runs nightly / on demand, is bounded by a
 # job timeout + concurrency, and SKIPS (never reds) when EVAL_DEEPSEEK_API_KEY is unset
 # — so forks and unconfigured repos stay green while the per-PR boot gate still guards
@@ -18,7 +18,7 @@ name: Web client smoke (nightly, real turn)
 on:
   workflow_dispatch:
   schedule:
-    - cron: "30 18 * * *" # 18:30 UTC nightly (after evals-nightly's 18:00)
+    - cron: "30 18 * * *" # 18:30 UTC nightly
 
 # One run at a time; overlapping nightlies only re-bill the turn.
 concurrency:

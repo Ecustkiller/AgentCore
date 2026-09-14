@@ -1,10 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Drive the回填 through the REAL api.post by stubbing global fetch (not by
-// mocking the api module). vitest instruments its own mock fns and surfaces
-// their rejected-promise results as failures even when the SUT catches them; a
-// rejection from the real request (user code) is tracked normally, so the
-// stale-404 swallow can be asserted cleanly. Mirrors auth.test.ts.
 import { BASE_URL } from "@/services/api";
 import {
   WORKSPACE_RECONNECT_DETAIL,
@@ -18,6 +13,15 @@ import {
 } from "@/services/workspaceOps";
 import { useWorkspaceChannelStore } from "@/stores/workspaceChannel";
 import type { WorkspaceOpRequiredPayload } from "@/types/events";
+// Drive the回填 through the REAL api.post by stubbing global fetch (not by
+// mocking the api module). vitest instruments its own mock fns and surfaces
+// their rejected-promise results as failures even when the SUT catches them; a
+// rejection from the real request (user code) is tracked normally, so the
+// stale-404 swallow can be asserted cleanly. Mirrors auth.test.ts.
+import {
+  WORKSPACE_LIVENESS_TIMEOUT_KIND,
+  WORKSPACE_RECONNECT_KIND,
+} from "@shared/ipc-contract";
 
 vi.mock("@/services/sidecarRouting", () => ({
   resolveConversationLocalTarget: vi.fn(() => Promise.resolve(null)),
@@ -417,7 +421,7 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
       error: { kind: string; detail: string };
     };
     expect(body.ok).toBe(false);
-    expect(body.error.kind).toBe("WorkspaceIOError");
+    expect(body.error.kind).toBe(WORKSPACE_LIVENESS_TIMEOUT_KIND);
     expect(body.error.detail).toContain("活性挂起");
     expect(useWorkspaceChannelStore.getState().notReady).toBe(true);
   });
@@ -449,7 +453,7 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
       error: { kind: string; detail: string };
     };
     expect(body.ok).toBe(false);
-    expect(body.error.kind).toBe("WorkspaceIOError");
+    expect(body.error.kind).toBe(WORKSPACE_RECONNECT_KIND);
     expect(body.error.detail).toBe(WORKSPACE_RECONNECT_DETAIL);
     expect(useWorkspaceChannelStore.getState().notReady).toBe(false);
   });

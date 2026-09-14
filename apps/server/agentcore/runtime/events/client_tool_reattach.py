@@ -1,6 +1,6 @@
 """CLIENT_TOOL ``*_required`` frames: registry payload + fulfill-side re-hang.
 
-``*_op_required`` / board_read stay EPHEMERAL (not journaled). Delivery
+``*_op_required`` stay EPHEMERAL (not journaled). Delivery
 goes through the device-level fulfill hub (:func:`push_client_tool_required`),
 not the turn display EventSink. On fulfiller connect / reconnect / root binding,
 :func:`rehang_pending_client_tools` re-pushes still-open registry entries so an
@@ -28,7 +28,6 @@ from typing import Any, NamedTuple
 from agentcore.core.logging import get_logger
 from agentcore.fulfill import grace
 from agentcore.fulfill.origin import current_origin_device
-from agentcore.runtime.events.board import board_op_required, board_read_required
 from agentcore.runtime.events.desktop import (
     external_mount_required,
     host_op_required,
@@ -45,8 +44,6 @@ logger = get_logger(__name__)
 CHANNEL_HOST = "host"
 CHANNEL_MCP = "mcp"
 CHANNEL_WORKSPACE = "workspace"
-CHANNEL_BOARD = "board"
-CHANNEL_BOARD_READ = "board_read"
 CHANNEL_EXTERNAL_MOUNT = "external_mount"
 
 # Meta keys on the registry payload (not forwarded into the SSE wire body).
@@ -107,23 +104,6 @@ def build_client_tool_required(req: InteractionRequest) -> SSEEvent | None:
             op=str(params.get("op") or ""),
             args=dict(params.get("args") or {}),
             timeout_ms=timeout_ms,
-        )
-    if channel == CHANNEL_BOARD:
-        ops = params.get("ops")
-        return board_op_required(
-            request_id=rid,
-            conversation_id=cid,
-            board_id=str(params.get("board_id") or ""),
-            ops=list(ops) if isinstance(ops, list) else [],
-            summary=str(params.get("summary") or ""),
-        )
-    if channel == CHANNEL_BOARD_READ:
-        ids = params.get("ids")
-        return board_read_required(
-            request_id=rid,
-            conversation_id=cid,
-            board_id=str(params.get("board_id") or ""),
-            ids=list(ids) if isinstance(ids, list) else [],
         )
     if channel == CHANNEL_HOST:
         return host_op_required(
@@ -475,8 +455,6 @@ def _channel_from_event_type(event_type: Any) -> str | None:
         return None
     return {
         "workspace_op_required": CHANNEL_WORKSPACE,
-        "board_op_required": CHANNEL_BOARD,
-        "board_read_required": CHANNEL_BOARD_READ,
         "host_op_required": CHANNEL_HOST,
         "mcp_op_required": CHANNEL_MCP,
         "external_mount_required": CHANNEL_EXTERNAL_MOUNT,

@@ -442,6 +442,7 @@ class FileReadTool:
         audience=AUDIENCE_BOTH,
         file_products=FileProductsContract.READ_ONLY,
         workspace_io=True,
+        catalog_summary="读工作区文件",
     )
 
     @property
@@ -480,9 +481,8 @@ class FileReadTool:
                     "start_page": {
                         "type": "integer",
                         "description": (
-                            "PDF 抽取起始页（1-based）。每窗最多约 40 页；"
-                            "后面的页请提高 start_page 再读。"
-                            "offset/limit 仍是本窗抽出文本的行号。其它格式忽略。"
+                            "PDF 抽取起始页（1-based）；其它格式忽略。"
+                            "offset/limit 仍是本窗行号。"
                         ),
                         "minimum": 1,
                     },
@@ -894,6 +894,7 @@ class FileListTool:
         audience=AUDIENCE_BOTH,
         file_products=FileProductsContract.READ_ONLY,
         workspace_io=True,
+        catalog_summary="列出工作区当前层",
     )
 
     @property

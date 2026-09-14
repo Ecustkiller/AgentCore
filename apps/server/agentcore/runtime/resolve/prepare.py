@@ -12,7 +12,7 @@ Attachment rendering lives beside this facade:
 
 from __future__ import annotations
 
-from agentcore.conversation.mentions import format_agent_mention_prompt
+from agentcore.core.mentions import format_agent_mention_prompt
 from agentcore.memory import (
     default_memory_store,  # noqa: F401 — monkeypatch seam (ceo_toolset imports it here)
 )

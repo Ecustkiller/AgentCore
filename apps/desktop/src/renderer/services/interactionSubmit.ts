@@ -1,6 +1,9 @@
 import { notifyError, notifyInfo } from "@/lib/toast";
 import { ApiError } from "@/services/api";
-import { resolveInteraction } from "@/services/interaction";
+import {
+  isSidecarSettleUnavailableError,
+  resolveInteraction,
+} from "@/services/interaction";
 import type { ResolveInteractionBody } from "@/services/interaction";
 import type { PlanReviewUserDecision } from "@/services/planReview";
 import { isPausedFrameGone, runResume } from "@/services/turns";
@@ -168,7 +171,10 @@ export async function submitInteraction(args: {
       });
       return "ok";
     } catch (err) {
-      if (isInteractionOrphanedError(err)) {
+      if (
+        isInteractionOrphanedError(err) ||
+        isSidecarSettleUnavailableError(err)
+      ) {
         store.markOrphaned(args.id);
         return "orphaned";
       }

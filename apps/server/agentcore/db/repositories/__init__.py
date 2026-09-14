@@ -35,7 +35,6 @@ from .auth import (
 )
 from .billing import CostEventRepository
 from .boards import BoardRepository
-from .bookmarks import BookmarkRepository
 from .chat import ChatRepository
 from .conversation_shares import ConversationShareRepository
 from .conversations import ConversationRepository
@@ -63,6 +62,7 @@ from .runs import (
 )
 from .skill_store import SkillStoreRepository
 from .stream_state import TurnStreamStateRepository
+from .tables import TableRepository
 from .user_workflows import UserWorkflowRepository
 from .users import (
     UserBlockRepository,
@@ -77,7 +77,6 @@ __all__ = [
     "AdminAuditRepository",
     "AgentAuditEventRepository",
     "AdminMfaRepository",
-    "BookmarkRepository",
     "BoardRepository",
     "ChatRepository",
     "ConversationRepository",
@@ -104,6 +103,7 @@ __all__ = [
     "RefreshTokenRepository",
     "RunSessionRepository",
     "SkillStoreRepository",
+    "TableRepository",
     "TurnJournalRepository",
     "TurnMetricsRepository",
     "TurnStreamStateRepository",

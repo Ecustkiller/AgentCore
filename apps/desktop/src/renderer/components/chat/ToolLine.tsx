@@ -36,14 +36,12 @@ import {
   useStreamAwareDisclosure,
 } from "@/stores/disclosure";
 import { useMessageExecution } from "@/stores/execution";
-import { useSidePanelStore } from "@/stores/sidePanel";
 import type { ProcessStep } from "@/types/events";
 import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
   ExternalLink,
-  Radio,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -57,7 +55,11 @@ import {
   WebFetchSourceCollection,
   isWebFetchSourceGroup,
 } from "./WebFetchSourceCollection";
-import { ThinkingDots } from "./message-bubble/Thinking";
+import {
+  LiveFlow,
+  LiveFlowDots,
+  LiveFlowText,
+} from "./message-bubble/LiveFlow";
 import {
   RUN_TARGET_ARG_TOOLS,
   WRITE_FAMILY_TOOLS,
@@ -106,8 +108,6 @@ const PEEK_SUPPRESSED = new Set([
   "archive_create",
   "download_url",
   "read_image",
-  "board_ops",
-  "board_read",
   "code_search",
   "git",
   "code_diagnostics",
@@ -171,18 +171,20 @@ export function ComposingToolLine({
   const { Icon, label } = toolMeta(tool.toolName);
   const charLabel = composingWriteChars(tool.toolName, tool.chars);
   return (
-    <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+    <LiveFlow
+      active
+      className="inline-flex items-center gap-2 text-sm text-muted-foreground"
+    >
+      <LiveFlowDots active />
       <Icon size={14} className="shrink-0 text-primary" />
-      <span>
-        {label}
-        {charLabel && (
-          <span className="text-muted-foreground/70">
-            {" · "}
-            {charLabel}
-          </span>
-        )}
-      </span>
-    </span>
+      <LiveFlowText>{label}</LiveFlowText>
+      {charLabel && (
+        <span className="text-muted-foreground/70">
+          {" · "}
+          {charLabel}
+        </span>
+      )}
+    </LiveFlow>
   );
 }
 
@@ -235,18 +237,17 @@ function useRunTargetRole(
   return looksLikeInternalId(raw) ? "" : raw;
 }
 
-/** Shimmer placeholder rows shown while web_search is running — turns the bare waiting
- * spinner into a「结果正在来」affordance. The search is atomic (nothing to stream), so
- * this only previews the result cards' shape until the real hits land. */
+/** Result-card shape shown while web_search is running. Liveness is the title
+ * sheen on the parent `LiveFlow` — this is only the silhouette until real hits land. */
 function WebSearchSkeleton() {
   return (
     <div className="mt-1 space-y-1.5" aria-hidden>
       {[0, 1, 2].map((i) => (
         <div key={i} className="flex items-start gap-2 px-2 py-1">
-          <div className="mt-0.5 size-4 shrink-0 animate-pulse rounded bg-muted" />
+          <div className="mt-0.5 size-4 shrink-0 rounded bg-muted" />
           <div className="min-w-0 flex-1 space-y-1">
-            <div className="h-3 w-1/2 animate-pulse rounded bg-muted" />
-            <div className="h-3 w-4/5 animate-pulse rounded bg-muted/70" />
+            <div className="h-3 w-1/2 rounded bg-muted" />
+            <div className="h-3 w-4/5 rounded bg-muted/70" />
           </div>
         </div>
       ))}
@@ -369,7 +370,7 @@ function runCloudPreview(
   return { conversationId, processId, ports };
 }
 
-/** 混杂组「打开浏览器」同款 chip：换票后在系统浏览器打开。 */
+/** 云端 run 预览 chip：换票后在系统浏览器打开。 */
 function CloudPreviewButtons({
   conversationId,
   processId,
@@ -584,6 +585,7 @@ export function ToolLine({
         <span className="flex h-5 shrink-0 items-center justify-center text-muted-foreground">
           <Icon size={14} />
         </span>
+        {running && <LiveFlowDots active />}
         <span className="min-w-0 flex-1 overflow-hidden">
           <span
             className={`flex h-5 min-w-0 items-center overflow-hidden ${
@@ -593,11 +595,13 @@ export function ToolLine({
             }`}
           >
             <span className="min-w-0 flex-1 truncate">
-              <span className={nested ? "font-medium" : undefined}>
+              <LiveFlowText className={nested ? "font-medium" : undefined}>
                 {label}
-              </span>
+              </LiveFlowText>
               {detail && (
-                <span className="ml-1.5 text-muted-foreground">{detail}</span>
+                <span className="ml-1.5 text-muted-foreground">
+                  <LiveFlowText>{detail}</LiveFlowText>
+                </span>
               )}
               {phaseText && (
                 <span className="ml-1.5 text-muted-foreground/70">
@@ -636,11 +640,19 @@ export function ToolLine({
       </span>
     </Button>
   );
+  const liveChrome = (
+    <>
+      {titleBtn}
+      {running && isWebSearch && <WebSearchSkeleton />}
+    </>
+  );
   return (
     <div className="min-w-0 max-w-full">
       {preview || openConversationId ? (
         <div className="flex min-w-0 items-center gap-1.5">
-          <div className="min-w-0 flex-1 overflow-hidden">{titleBtn}</div>
+          <LiveFlow active={running} className="min-w-0 flex-1 overflow-hidden">
+            {liveChrome}
+          </LiveFlow>
           {preview ? (
             <CloudPreviewButtons
               conversationId={preview.conversationId}
@@ -653,9 +665,10 @@ export function ToolLine({
           ) : null}
         </div>
       ) : (
-        titleBtn
+        <LiveFlow active={running} className="min-w-0 w-full">
+          {liveChrome}
+        </LiveFlow>
       )}
-      {running && isWebSearch && <WebSearchSkeleton />}
       {open && hasBody && <ToolResultView data={data} />}
     </div>
   );
@@ -756,27 +769,24 @@ function DefaultToolLineGroup({
     turnKey != null && groupKey != null ? `${turnKey}:tgrp:${groupKey}` : null,
     isStreaming,
   );
-  const showBrowser = useSidePanelStore((s) => s.showBrowser);
 
   const summary = toolGroupSummary(tools);
   const groupFault = !expanded ? toolGroupFaultLabel(tools) : null;
   const running = tools.some((t) => t.status === "running");
-  // 混杂组（含 browser_* + 他工具）走默认壳，无活动卡 CTA——组头挂同款「打开浏览器」/
-  // 「查看直播」，勿在子 ToolLine 再刷。纯 browser ≥2 已由 BrowserActivityCard 接管。
-  const showBrowserCta =
-    conversationId != null && tools.some((t) => isBrowserTool(t.tool_name));
-
+  const headerLive = running && !expanded;
   return (
     <div className="min-w-0 max-w-full">
-      <div className="flex min-w-0 items-center gap-1.5">
+      <LiveFlow active={headerLive} className="min-w-0 w-full">
         <Button
           variant="ghost"
           onClick={toggleExpanded}
-          className="h-auto min-w-0 flex-1 justify-start gap-2 overflow-hidden px-0 py-0 text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground"
+          className="h-auto min-w-0 w-full justify-start gap-2 overflow-hidden px-0 py-0 text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground"
         >
           <span className="flex min-w-0 items-center gap-2 overflow-hidden">
-            {running && <ThinkingDots />}
-            <span className="min-w-0 truncate text-left">{summary}</span>
+            {headerLive && <LiveFlowDots active />}
+            <LiveFlowText className="min-w-0 truncate text-left">
+              {summary}
+            </LiveFlowText>
             {groupFault && (
               <span
                 data-testid="tool-group-fault"
@@ -793,17 +803,7 @@ function DefaultToolLineGroup({
               ))}
           </span>
         </Button>
-        {showBrowserCta && (
-          <button
-            type="button"
-            onClick={showBrowser}
-            className="flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary hover:bg-primary/15"
-          >
-            <Radio size={12} className="shrink-0" />
-            {running ? "查看直播" : "打开浏览器"}
-          </button>
-        )}
-      </div>
+      </LiveFlow>
       {expanded && (
         <div className="mt-1.5 space-y-2 pl-3">
           {tools.map((t) => (

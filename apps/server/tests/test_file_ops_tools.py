@@ -1467,8 +1467,8 @@ async def test_copy_refuses_overwrite(tmp_path: Path):
 def test_mkdir_schema_teaches_structure_not_app_shell():
     desc = MkdirTool().schema.description
     assert "结构目录" in desc
-    assert "src/" in desc
-    assert "不必先 mkdir" in desc
+    assert "src/" not in desc
+    assert "不必先 mkdir" not in desc
     assert "套应用名/话题名当工程根" in desc
     assert "≠" in desc
     assert "whiteboard" not in desc
@@ -1570,7 +1570,8 @@ def test_glob_schema_requires_pattern():
     assert "path" in props
     assert "directory" not in props
     assert "recursive" not in props
-    assert "pkg/*/name" in props["pattern"]["description"]
+    assert "无斜杠" in props["pattern"]["description"]
+    assert "`**`" in props["pattern"]["description"]
     assert "pkg/*/name" in schema.description
     path_desc = props["path"]["description"]
     assert "Desktop" not in path_desc
@@ -2110,3 +2111,13 @@ async def test_write_scope_explore_memory_str_replace_rejects_outside(tmp_path: 
     )
     assert result.success is False
     assert "AgentCore/" in (result.error or "")
+
+
+def test_mark_landed_files_notifies_on_file_landed(tmp_path: Path):
+    seen: list[str] = []
+    ctx = _ctx(tmp_path)
+    ctx = replace(ctx, on_file_landed=seen.append)
+    from agentcore.tools.builtin.file_ops.integrity import _mark_landed_files
+
+    _mark_landed_files(ctx, "notes.md", kind="prose")
+    assert seen == ["e"]

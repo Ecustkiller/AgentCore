@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * 设置二级导航的信息架构：三组九项（关于在偏好末项）。
+ * 设置二级导航的信息架构：三组十项（赞助在偏好末项）。
  */
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -20,13 +20,13 @@ afterEach(() => {
 });
 
 describe("MorePage 导航分组", () => {
-  it("groups the nine sub-pages under three headings", () => {
+  it("groups the ten sub-pages under three headings", () => {
     const { container } = renderNav();
     const groups = Array.from(container.querySelectorAll("nav h2")).map(
       (h) => h.textContent,
     );
     expect(groups).toEqual(["账户", "模型", "偏好"]);
-    expect(container.querySelectorAll("nav a")).toHaveLength(9);
+    expect(container.querySelectorAll("nav a")).toHaveLength(10);
   });
 
   it("keeps every group multi-item, so no heading outweighs its content", () => {
@@ -36,7 +36,7 @@ describe("MorePage 导航分组", () => {
     }
   });
 
-  it("points 偏好 at 通用 / 消息隐私 / 快捷键 / 关于", () => {
+  it("points 偏好 at 通用 / 消息隐私 / 快捷键 / 关于 / 赞助", () => {
     renderNav();
     expect(
       screen.getByRole("link", { name: "通用" }).getAttribute("href"),
@@ -50,6 +50,9 @@ describe("MorePage 导航分组", () => {
     expect(
       screen.getByRole("link", { name: "关于" }).getAttribute("href"),
     ).toBe("/more/about");
+    expect(
+      screen.getByRole("link", { name: "赞助" }).getAttribute("href"),
+    ).toBe("/more/sponsor");
     expect(screen.queryByRole("link", { name: "外观" })).toBeNull();
     expect(screen.queryByRole("link", { name: "反馈" })).toBeNull();
   });

@@ -17,8 +17,9 @@ import { hasLocalConversationStream } from "@/services/turns/streamOwnership";
 import {
   type MemoryUpdate,
   type Message,
+  adoptLatestWindowMessages,
+  hasUnconfirmedLocalTail,
   isMessageWindowResident,
-  isMessageWindowStrictlyRicher,
   overlayIncomingWithRicherExisting,
   useConversationStore,
 } from "@/stores/conversation";
@@ -211,10 +212,9 @@ function executionIdOf(events: SSEEvent[]): string | null {
   return id ?? null;
 }
 
-/** Reload finishReason: cancelled on usage/runs wins over incomplete → interrupted. */
+/** Reload finishReason: only usage/runs (or pause). Incomplete is lifecycle, not interrupted. */
 function hydrateFinishReason(
   paused: boolean,
-  status: BackendMessage["status"],
   runsFinish: string | null | undefined,
   usageFinish: string | null | undefined,
 ): string | undefined {
@@ -224,7 +224,6 @@ function hydrateFinishReason(
   }
   if (runsFinish) return runsFinish;
   if (usageFinish) return usageFinish;
-  if (status === "incomplete") return "interrupted";
   return undefined;
 }
 
@@ -234,16 +233,28 @@ function hydrateFinishReason(
 export function toMessage(m: BackendMessage): Message {
   const events = m.runs?.events ?? [];
   const executionId = executionIdOf(events);
+  const paused = Boolean(m.paused);
+  const finishReason = hydrateFinishReason(
+    paused,
+    m.runs?.finish_reason,
+    m.usage?.finish_reason,
+  );
   // Journal → InteractionStore (P2 unified store; reload path).
   // Cold/hot cards render from InteractionStore — no Message field dual-write.
+  // ``runs.finish_reason`` (from journal ``turn_end``) is the terminal signal:
+  // leftover hot cards become orphaned so refresh does not paint a clickable ghost.
   if (events.length > 0) {
-    hydrateInteractionsFromJournal(m.conversation_id, m.id, events);
+    hydrateInteractionsFromJournal(
+      m.conversation_id,
+      m.id,
+      events,
+      finishReason,
+    );
   }
   // Cold-path pause latch: generating chrome off. Clickable ResumePrompt on
   // reopen comes from recovery.paused (still-waiting), not this journal replay.
   // `force`: hydrate no longer mints a pausedTurns shell, so the helper's
   // "has a pause frame" latch would otherwise no-op and leave the spinner on.
-  const paused = Boolean(m.paused);
   if (paused && m.role === "assistant") {
     finalizeGeneratingForPausedConversation(m.conversation_id, {
       force: true,
@@ -277,17 +288,10 @@ export function toMessage(m: BackendMessage): Message {
   // resume guards (`isClientOnlyResumeKey`) match the live path (message_start stamp)
   // and do not treat a hydrated assistant as client-only.
   const role = m.role === "assistant" ? "assistant" : "user";
-  // P4: running → stream-style partial; incomplete / interrupted finish → interrupted chip.
+  // P4: running → stream-style partial. Interrupted only when usage/runs say so.
   // Cold-path pause latch: write keeps status=running + paused=true; hydrate as paused
   // (not streaming) so reopen does not setGenerating / spinner forever.
-  // usage/runs already cancelled must not map incomplete → interrupted (user-stop).
   const status = m.status ?? null;
-  const finishReason = hydrateFinishReason(
-    paused,
-    status,
-    m.runs?.finish_reason,
-    m.usage?.finish_reason,
-  );
   const isStreaming = role === "assistant" && status === "running" && !paused;
   // Keep the journal whenever events exist — classic turns may have DURABLE
   // `user_interjection` (and delivery_status) without a `run_plan`. Previously
@@ -612,10 +616,10 @@ export async function loadNewerMessages(conversationId: string): Promise<void> {
 }
 
 /**
- * Soft background refresh (harvest / detached catch-up): applies the full
- * whole-window write gates, including active+hasMoreAfter (do not yank the
- * user off mid-history). Intentional snap (composer send / 「跳到最新」) omit
- * this flag so hasMoreAfter + non-dominating latest windows may still apply.
+ * Soft background refresh (harvest / detached catch-up): applies residency /
+ * live-stream / active+hasMoreAfter gates (do not yank the user off mid-history).
+ * Intentional snap (composer send / 「跳到最新」) omit this flag so hasMoreAfter
+ * latest windows may still apply.
  */
 export type LoadLatestWindowOpts = {
   softRefresh?: boolean;
@@ -626,6 +630,7 @@ export type LoadLatestWindowOpts = {
 /**
  * Warm open write policy (消息窗写入契约 step 3):
  * - local stream pumping → keep live slice (no network window replace)
+ * - unconfirmed local tail (optimistic send) → keep; REST is not the live end
  * - destination (pendingFocus / ?msg=) → keep current slice for jump/load-around
  * - else (sidebar reopen / A→B→A) → explicit latest snap (not softRefresh)
  */
@@ -634,14 +639,17 @@ export type WarmOpenAction = "skip_generating" | "keep_anchor" | "snap_latest";
 export function decideWarmOpenAction(opts: {
   hasLocalStream: boolean;
   hasDestination: boolean;
+  hasUnconfirmedTail?: boolean;
 }): WarmOpenAction {
-  if (opts.hasLocalStream) return "skip_generating";
+  if (opts.hasLocalStream || opts.hasUnconfirmedTail) return "skip_generating";
   if (opts.hasDestination) return "keep_anchor";
   return "snap_latest";
 }
 
 /**
- * Reload the latest window, replacing whatever is on screen. Used to snap back
+ * Reload the latest persisted window. Idle slices take the server list as the
+ * whole window. An unconfirmed local tail (optimistic send) is overlaid, not
+ * replaced, so Thinking survives a GET that raced the send. Used to snap back
  * to the live head before a new turn when the user is reading a historical
  * window (a search-hit jump left `hasMoreAfter`), so the turn appends at the
  * true tail rather than into a mid-conversation gap.
@@ -719,20 +727,19 @@ export async function loadLatestWindow(
   }
 
   const existing = rt?.messages ?? [];
-  const snapPastHistory =
-    !softRefresh &&
-    store.currentConversationId === conversationId &&
-    (rt?.hasMoreAfter ?? false);
-  if (
-    existing.length > 0 &&
-    !snapPastHistory &&
-    !isMessageWindowStrictlyRicher(win.messages, existing)
-  ) {
-    return reject("reject_not_richer", {
+  if (win.messages.length === 0 && existing.length > 0) {
+    return reject("reject_empty_window", {
       before_count: existing.length,
-      after_count: win.messages.length,
+      after_count: 0,
     });
   }
+
+  const applied = adoptLatestWindowMessages(win.messages, existing, {
+    isGenerating: rt?.isGenerating ?? false,
+  });
+  const keptUnconfirmedTail = hasUnconfirmedLocalTail(existing, {
+    isGenerating: rt?.isGenerating ?? false,
+  });
 
   logEvent("info", "conversation.slice_diag", {
     action: "load_latest_window",
@@ -741,6 +748,9 @@ export async function loadLatestWindow(
     soft_refresh: softRefresh,
     before_count: before?.messages.length ?? 0,
     after_count: win.messages.length,
+    applied_count: applied.length,
+    kept_unconfirmed_tail: keptUnconfirmedTail,
+    is_generating: rt?.isGenerating ?? false,
     has_more_after: win.hasMoreAfter,
     has_more_before: win.hasMoreBefore,
     replaced_while_background:
@@ -748,14 +758,14 @@ export async function loadLatestWindow(
       store.currentConversationId !== conversationId,
   });
   store.setMessageWindow(
-    win.messages,
+    applied,
     { hasMoreBefore: win.hasMoreBefore, hasMoreAfter: win.hasMoreAfter },
     conversationId,
   );
   clearLastEventId(conversationId);
   // Latest window owns the tail cards; replace them (older/around pages return none).
   store.setMemoryUpdates(win.memoryUpdates, conversationId);
-  // Trusted write only — reject paths above return without persisting.
+  // Persist the adopted server window; reject paths above return without writing.
   if (win.messages.length > 0) {
     void persistOpenedCache(conversationId, win.messages, win.memoryUpdates, {
       hasMoreBefore: win.hasMoreBefore,

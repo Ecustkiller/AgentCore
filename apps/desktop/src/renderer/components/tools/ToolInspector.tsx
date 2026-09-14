@@ -2,27 +2,7 @@ import { Badge, CatalogIconShell } from "@/components/ui";
 import { catalogCategoryColorVar } from "@/lib/catalogColors";
 import type { CapabilityTool } from "@/services/capabilities";
 import { Wrench } from "lucide-react";
-import {
-  APPROVAL_LABEL,
-  FACE_META,
-  RESIDENT_LABEL,
-  availabilityLabel,
-} from "./catalogMeta";
-
-export type ToolInspectorView = "guide" | "source";
-
-/** Tool face the model sees: name + description + JSON Schema. */
-export function toolFaceSource(tool: CapabilityTool): string {
-  return JSON.stringify(
-    {
-      name: tool.name,
-      description: tool.description || tool.summary || "",
-      parameters: tool.parameters ?? {},
-    },
-    null,
-    2,
-  );
-}
+import { FACE_META, RESIDENT_LABEL } from "./catalogMeta";
 
 type ToolParam = {
   name: string;
@@ -56,17 +36,15 @@ export function toolGuideParams(tool: CapabilityTool): ToolParam[] {
   });
 }
 
-/** Inspector for an out-of-the-box tool. First face is a human guide; JSON is 源码. */
+/** Inspector for an out-of-the-box tool. One human guide; no schema dump. */
 export function ToolInspector({
   tool,
   capabilityHint,
   hideChrome = false,
-  view = "guide",
 }: {
   tool: CapabilityTool;
   capabilityHint?: string;
   hideChrome?: boolean;
-  view?: ToolInspectorView;
 }) {
   const meta = FACE_META[tool.face];
   const Icon = meta?.icon ?? Wrench;
@@ -99,52 +77,39 @@ export function ToolInspector({
           {capabilityHint}
         </p>
       ) : null}
-      {view === "source" ? (
-        <pre
-          data-testid="tool-face-source"
-          className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words px-3 py-3 font-mono text-xs leading-relaxed text-foreground"
-        >
-          {toolFaceSource(tool)}
-        </pre>
-      ) : (
-        <div
-          data-testid="tool-face-guide"
-          className="min-h-0 flex-1 overflow-auto px-3 py-3"
-        >
-          {blurb ? (
-            <p className="text-sm leading-relaxed text-foreground">{blurb}</p>
-          ) : null}
-          <p className="mt-3 text-xs text-muted-foreground">
-            {availabilityLabel(tool.available_to)} ·{" "}
-            {APPROVAL_LABEL[tool.approval]}
-          </p>
-          {params.length === 0 ? (
-            <p className="mt-4 text-xs text-muted-foreground">没有要填的参数</p>
-          ) : (
-            <ul className="mt-4 flex flex-col gap-3">
-              {params.map((param) => (
-                <li key={param.name}>
-                  <div className="flex items-baseline gap-2">
-                    <span className="font-mono text-sm text-foreground">
-                      {param.name}
-                    </span>
-                    {param.required ? (
-                      <span className="text-xs text-muted-foreground">
-                        要填
-                      </span>
-                    ) : null}
-                  </div>
-                  {param.description ? (
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {param.description}
-                    </p>
+      <div
+        data-testid="tool-face-guide"
+        className="min-h-0 flex-1 overflow-auto px-3 py-3"
+      >
+        {blurb ? (
+          <p className="text-sm leading-relaxed text-foreground">{blurb}</p>
+        ) : null}
+        {params.length === 0 ? null : (
+          <ul
+            className={
+              blurb ? "mt-4 flex flex-col gap-3" : "flex flex-col gap-3"
+            }
+          >
+            {params.map((param) => (
+              <li key={param.name}>
+                <div className="flex items-baseline gap-2">
+                  <span className="font-mono text-sm text-foreground">
+                    {param.name}
+                  </span>
+                  {param.required ? (
+                    <span className="text-xs text-muted-foreground">要填</span>
                   ) : null}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
+                </div>
+                {param.description ? (
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {param.description}
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

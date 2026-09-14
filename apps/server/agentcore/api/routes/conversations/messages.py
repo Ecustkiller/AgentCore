@@ -64,7 +64,6 @@ from agentcore.conversation.service import (
     stream_chat,
     upsert_local_turn_stream_segments,
 )
-from agentcore.conversation.store import get_conversation_store
 from agentcore.conversation.store.overlay import (
     overlay_message_fields,
     overlay_runs_with_segments,
@@ -78,6 +77,7 @@ from agentcore.db.repositories import (
 )
 from agentcore.fulfill.origin import current_origin_device
 from agentcore.llm.resolve import resolve_user_llm_credentials
+from agentcore.runtime.conversation_store import get_conversation_store
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.journal import runs_from_entries_cached, slim_runs_payload
 from agentcore.runtime.journal.entries import _PROCESS_PREFIX
@@ -495,6 +495,7 @@ async def send_message(
             user_id=user.user_id,
             attachments=att_dicts,
             agent_mentions=mention_dicts,
+            table_selection=list(body.table_selection),
             requires_tools=needs_tools,
             x_client_platform=x_client_platform,
             origin_device_id=current_origin_device(),
@@ -517,6 +518,7 @@ async def send_message(
                     sink=sink,
                     attachments=att_dicts,
                     agent_mentions=mention_dicts,
+                    table_selection=list(body.table_selection),
                     llm_credentials=preflight.credentials,
                     llm_supports_tools=preflight.supports_tools,
                     x_client_platform=x_client_platform,
@@ -569,6 +571,7 @@ async def send_message(
             sink=sink,
             attachments=[a.model_dump() for a in body.attachments],
             agent_mentions=[m.model_dump() for m in body.agent_mentions],
+            table_selection=list(body.table_selection),
             llm_credentials=preflight.credentials,
             llm_supports_tools=preflight.supports_tools,
             x_client_platform=x_client_platform,

@@ -179,7 +179,7 @@ async def export_conversation_workspace_docx(
     await _require_conversation_write(conversation_id, user.user_id, session)
     try:
         backend = build_server_workspace(**await _workspace_coords(user.user_id, conv, session))
-        result = await export_markdown_path(backend, body.path)
+        result = await export_markdown_path(backend, body.path, layout=body.layout)
     except ExportMarkdownError as e:
         raise ValidationError(e.message) from e
     return ExportDocxResponse(

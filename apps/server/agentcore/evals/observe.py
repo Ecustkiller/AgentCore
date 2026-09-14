@@ -7,8 +7,8 @@
 - 单方向过→挂、挂→过为零 → 不像对称抖动；是否算退化仍须人看那几例
 - 没有逐例名单、或共享用例对不上 → **分不出**，报告里直说
 
-不改退出码、不引入合并门禁。CLI 把本段写进报告 JSON 的 ``ratchet`` 键（夜跑
-``jq 'del(.ratchet)'`` 仍能剥掉，避免基线文件嵌套昨夜对比）。
+不改退出码、不引入合并门禁。CLI 把本段写进报告 JSON 的 ``ratchet`` 键
+（``--update-baseline`` 写入前会剥掉，避免基线文件嵌套上次对比）。
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ SIG_GAIN = "directional_gain"
 
 _CAVEATS = (
     "真 LLM 多数用例 samples=1：单例翻转随时是一夜抖动，不是提示词/Skill 退化的证明。",
-    "夜跑对比最近一次成功快照，另存只升不降的历史峰值；从峰值回落可能是均值回归，单靠今夜翻转不能定罪。",
+    "对比的是你指定的上一份报告，不是发布门禁；从峰值回落可能是均值回归，单靠一次翻转不能定罪。",
     "本对比不改变退出码，也不是合并门禁。",
 )
 
@@ -600,7 +600,7 @@ def observe_report(
     *,
     baseline_path: str = "",
 ) -> dict[str, Any]:
-    """当前报告 vs 基线 → 观测 dict（可进报告 JSON / 夜跑摘要）。永不暗示硬门。"""
+    """当前报告 vs 基线 → 观测 dict（可进报告 JSON）。永不暗示硬门。"""
     src = current if isinstance(current, dict) else {}
     cur_summary = _as_dict(src.get("summary"))
     cur_n = int(cur_summary.get("total") or 0)

@@ -9,7 +9,7 @@ the thin ``resolve_user_llm_credentials`` path (no billing preflight / no
 import time
 
 from agentcore.conversation.background import spawn_background
-from agentcore.conversation.common import fallback_title, log_cost_recorded
+from agentcore.conversation.common import fallback_title
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
@@ -19,6 +19,7 @@ from agentcore.db.repositories import (
     MessageRepository,
 )
 from agentcore.llm.resolve import LLMCredentials, resolve_user_llm_credentials
+from agentcore.observability.cost_log import log_cost_recorded
 from agentcore.runtime.events import EventSink, error_event, handoff_job_started
 from agentcore.runtime.journal import persist_turn_journal
 from agentcore.runtime.pipeline import run_chat_pipeline

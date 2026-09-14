@@ -6,12 +6,13 @@ Externally stable symbols (``has_omission_marker``, ``is_severe_shrink``,
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import re
 from typing import Literal
 
 from agentcore.core.logging import get_logger
-from agentcore.runtime.facts import CrossTurnRetry
+from agentcore.tools.cross_turn_retry import CrossTurnRetry
 from agentcore.tools.protocol import ToolContext, ToolResult
 from agentcore.workspace.host_path import GrantMode
 
@@ -372,15 +373,10 @@ def _mark_landed_files(
     # Successful disk land → sibling verify cache is stale (typecheck/build).
     # Must run before kind early-returns — the file already changed.
     eid = (getattr(context, "execution_id", None) or "").strip()
-    if eid:
-        try:
-            from agentcore.runtime.coordination.session import active_coordination
-
-            session = active_coordination(eid)
-            if session is not None and session.active:
-                session.invalidate_verify_cache(reason="landed")
-        except Exception:  # noqa: BLE001
-            pass
+    landed = getattr(context, "on_file_landed", None)
+    if eid and landed is not None:
+        with contextlib.suppress(Exception):
+            landed(eid)
     author = (context.agent_id or "").strip()
     if author:
         context.landed_artifact_authors.setdefault(path_key, author)

@@ -30,7 +30,10 @@ vi.mock("../auth-client", () => ({
 
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { outboxDir } from "../outbox-writeback";
+import {
+  outboxDir,
+  resetOccupiedConversationIdsProviderForTests,
+} from "../outbox-writeback";
 import { resetLocalTurnProjectionForTests } from "../outbox/projection";
 import { SidecarManager } from "../sidecar/manager";
 import type { Transport } from "../sidecar/transport";
@@ -154,6 +157,7 @@ describe("SidecarManager local-turn occupy", () => {
   afterAll(() => rmSync(h.dir, { recursive: true, force: true }));
   afterEach(() => {
     resetLocalTurnProjectionForTests();
+    resetOccupiedConversationIdsProviderForTests();
     h.bearerPostJson.mockReset();
   });
 
@@ -177,6 +181,9 @@ describe("SidecarManager local-turn occupy", () => {
     const turnP = manager.startTurn(wc as never, START_REQ, "/tmp/ws-occupy");
     await vi.waitFor(() => expect(h.bearerPostJson).toHaveBeenCalled());
     expect(t.sent.some((m) => m.method === "startTurn")).toBe(false);
+    expect(manager.occupancy({ conversationId: "c-occupy" }).occupied).toBe(
+      true,
+    );
     expect(String(h.bearerPostJson.mock.calls[0]?.[0])).toBe(
       "/v1/conversations/c-occupy/local-turns/begin",
     );
@@ -297,8 +304,34 @@ describe("SidecarManager local-turn occupy", () => {
     const body = h.bearerPostJson.mock.calls.find((c) =>
       String(c[0]).endsWith("/local-turns"),
     )?.[1] as { finish_reason?: string; content?: string };
-    expect(body.finish_reason).toBe("cancelled");
+    expect(body.finish_reason).toBe("error");
     expect(body.content).toBe("partial reply");
+  });
+
+  it("busy slot aborts placeholder even if OPEN looks salvageable", async () => {
+    writeOpenOutbox(START_REQ.userMessageId);
+    const t = capturingTransport({
+      startTurnError: "turn already running: live-turn",
+    });
+    const manager = new SidecarManager(() => t.transport);
+    h.bearerPostJson.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: {},
+    });
+    await expect(
+      manager.startTurn(
+        { isDestroyed: () => false, send: vi.fn() } as never,
+        START_REQ,
+        "/tmp/ws-occupy",
+      ),
+    ).rejects.toMatchObject({
+      message: "turn already running: live-turn",
+    });
+    const paths = h.bearerPostJson.mock.calls.map((c) => String(c[0]));
+    expect(paths[0]).toBe("/v1/conversations/c-occupy/local-turns/begin");
+    expect(paths).toContain("/v1/conversations/c-occupy/local-turns/abort");
+    expect(paths.filter((p) => p.endsWith("/local-turns"))).toEqual([]);
   });
 
   it("sidecar close salvages salvageable OPEN without abort", async () => {
@@ -316,19 +349,93 @@ describe("SidecarManager local-turn occupy", () => {
       },
     });
     await manager.probe(START_REQ.rootId, "", "/tmp/ws-occupy");
+    (
+      manager as unknown as {
+        turns: Map<
+          string,
+          { conversationId: string; rootId: string; subpath: string }
+        >;
+      }
+    ).turns.set("t-dead", {
+      conversationId: START_REQ.conversationId,
+      rootId: START_REQ.rootId,
+      subpath: "",
+    });
     t.die(new Error("sidecar exited"));
-    await vi.waitFor(() =>
-      expect(h.bearerPostJson).toHaveBeenCalledWith(
-        "/v1/conversations/c-occupy/local-turns",
-        expect.objectContaining({
-          user_message_id: START_REQ.userMessageId,
-          finish_reason: "cancelled",
-          content: "partial reply",
-        }),
-      ),
+    await vi.waitFor(
+      () =>
+        expect(h.bearerPostJson).toHaveBeenCalledWith(
+          "/v1/conversations/c-occupy/local-turns",
+          expect.objectContaining({
+            user_message_id: START_REQ.userMessageId,
+            finish_reason: "interrupted",
+            content: "partial reply",
+          }),
+        ),
+      { timeout: 5_000 },
     );
     const paths = h.bearerPostJson.mock.calls.map((c) => String(c[0]));
     expect(paths).not.toContain("/v1/conversations/c-occupy/local-turns/abort");
+  });
+
+  it("sidecar close does not salvage OPEN of another conversation still writing", async () => {
+    writeOpenOutbox(START_REQ.userMessageId);
+    writeOpenOutbox("55555555-5555-4555-8555-555555555555", {
+      conversation_id: "c-live",
+      message_id: "m-live",
+      user_message: "other still writing",
+      content: "live partial",
+    });
+    const t = capturingTransport();
+    const manager = new SidecarManager(() => t.transport);
+    (
+      manager as unknown as {
+        turns: Map<
+          string,
+          { conversationId: string; rootId: string; subpath: string }
+        >;
+      }
+    ).turns.set("t-live", {
+      conversationId: "c-live",
+      rootId: "r-other",
+      subpath: "",
+    });
+    (
+      manager as unknown as {
+        turns: Map<
+          string,
+          { conversationId: string; rootId: string; subpath: string }
+        >;
+      }
+    ).turns.set("t-dead", {
+      conversationId: START_REQ.conversationId,
+      rootId: START_REQ.rootId,
+      subpath: "",
+    });
+    h.bearerPostJson.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: {
+        user_message_id: START_REQ.userMessageId,
+        assistant_message_id: null,
+        title: null,
+        noop: true,
+      },
+    });
+    await manager.probe(START_REQ.rootId, "", "/tmp/ws-occupy");
+    t.die(new Error("sidecar exited"));
+    await vi.waitFor(
+      () =>
+        expect(h.bearerPostJson).toHaveBeenCalledWith(
+          `/v1/conversations/${START_REQ.conversationId}/local-turns`,
+          expect.objectContaining({
+            user_message_id: START_REQ.userMessageId,
+          }),
+        ),
+      { timeout: 5_000 },
+    );
+    const convPaths = h.bearerPostJson.mock.calls.map((c) => String(c[0]));
+    expect(convPaths).not.toContain("/v1/conversations/c-live/local-turns");
   });
 
   it("queue/needStart occupies then startTurn with queueId", async () => {

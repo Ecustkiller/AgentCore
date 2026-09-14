@@ -1,9 +1,9 @@
-"""Creation-tool 文档 (folder-hung block body).
+"""Creation-tool 文档 (folder-hung markdown body).
 
 Distinct from ``documents`` (记忆 / 规则 Markdown 树). A Doc hangs on a cloud
-folder — collaboration-desk members see the same live draft. ``body`` is the
-canonical block list (schemaVersion + blocks[]); ``version`` is the CAS counter
-so two tabs cannot silently clobber (照 boards.scene).
+folder — collaboration-desk members see the same live draft. ``body`` is
+``{"markdown": str}``; ``version`` is the CAS counter so two tabs cannot
+silently clobber (照 boards.scene).
 """
 
 from datetime import datetime
@@ -31,7 +31,7 @@ class Doc(Base):
         JSONB,
         nullable=False,
         default=dict,
-        server_default=text("'{\"schemaVersion\": 1, \"blocks\": []}'::jsonb"),
+        server_default=text("'{\"markdown\": \"\"}'::jsonb"),
     )
     version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default=text("1")
@@ -46,10 +46,12 @@ class Doc(Base):
 
 
 class DocShare(Base):
-    """Public read-only 文档 share: frozen block-list snapshot (所见即所享).
+    """Public read-only 文档 page: last *published* markdown snapshot.
 
-    Distinct from ``conversation_shares``. The row id is the unguessable
-    ``/shared/<id>`` token. Public render reads ``snapshot``, never the live doc.
+    Distinct from ``conversation_shares`` (those stay freeze-on-mint). The row
+    id is the stable ``/shared/<id>`` token. Public render reads ``snapshot``,
+    never the live doc. Republish overwrites ``snapshot`` in place (same URL);
+    unpublished live edits do not leak.
     """
 
     __tablename__ = "doc_shares"
@@ -63,7 +65,7 @@ class DocShare(Base):
         JSONB,
         nullable=False,
         default=dict,
-        server_default=text("'{\"schemaVersion\": 1, \"blocks\": []}'::jsonb"),
+        server_default=text("'{\"markdown\": \"\"}'::jsonb"),
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")

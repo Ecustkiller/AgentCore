@@ -9,15 +9,15 @@ import {
 } from "../helpers/app";
 
 /**
- * Case 6 — AI 浏览器壳 CTA：
+ * Case 6 — 团队浏览器壳：
  * - 活动卡：简化脚本 `browser_activity_card`（conformance display.kind=browser）
- *   → 聊天出现卡 →「打开浏览器」→ 右坞浏览器 tab
+ *   → 聊天出现「浏览器 · N 步」；过程行不挂「打开浏览器」（入口是坞 tab / +）
  * - 登录 escalate：hot_gate `browser_login_escalate` →「需要你登录」→「打开浏览器」
  *
  * webapp e2e 无真 Electron browserApi——只钉壳 tab / CTA，不测 WebContents 导航。
  */
 test.describe("浏览器活动卡 / 登录 escalate CTA", () => {
-  test("浏览器活动卡：打开浏览器揭示右坞浏览器 tab", async ({ page }) => {
+  test("浏览器活动卡：过程行无打开浏览器胶囊", async ({ page }) => {
     await openWebapp(page);
     await ensureAuthed(page);
 
@@ -38,13 +38,9 @@ test.describe("浏览器活动卡 / 登录 escalate CTA", () => {
       page.getByRole("button", { name: /浏览器 · \d+ 步/ }),
     ).toBeVisible({ timeout: 10_000 });
 
-    const openBrowser = page.getByRole("button", { name: "打开浏览器" });
-    await expect(openBrowser).toBeVisible();
-    await openBrowser.click();
-
-    await expect(
-      page.locator("aside").getByRole("button", { name: "浏览器", exact: true }),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("button", { name: "打开浏览器" })).toHaveCount(
+      0,
+    );
   });
 
   test("登录 escalate：需要你登录 + 打开浏览器揭示右坞", async ({ page }) => {

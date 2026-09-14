@@ -347,6 +347,7 @@ class SearchConversationsTool:
         surface=ToolSurface.WORKER_ONLY,
         audience=AUDIENCE_BOTH,
         manual_wire=True,
+        catalog_summary="搜本账号对话",
     )
 
     # Host conversation's folder (None = bare chat). Used when scope=folder.
@@ -360,11 +361,8 @@ class SearchConversationsTool:
         return ToolSchema(
             name="search_conversations",
             description=(
-                "检索本账号历史对话目录（标题或对话正文子串；空 query 按最近更新列出）。"
-                "同文件夹续做、用户提到以前、或判断可能依赖旧场时用。"
-                "打开某一场用 read_conversation（可带同一 query 从命中处读）。"
-                "默认当前文件夹（裸聊无文件夹则按 all）。不含本场宿主。"
-                "偏好与巩固事实走记忆主题，不是本工具。"
+                "检索本账号历史对话（标题或正文）。打开某一场用 read_conversation。"
+                "偏好与巩固事实 ≠ 本工具。"
             ),
             parameters={
                 "type": "object",

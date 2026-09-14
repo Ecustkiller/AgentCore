@@ -4,7 +4,7 @@
  * Composer pills persist as U+FFFC-delimited tokens so body order is one sequence.
  * Indices address attachments[] / agentMentions[] in appearance order.
  * Token: U+FFFC + A|M + decimal index + U+FFFC. Must match
- * ``agentcore.conversation.inline_body``.
+ * ``agentcore.core.inline_body``.
  */
 
 export const INLINE_OBJECT = "\uFFFC";

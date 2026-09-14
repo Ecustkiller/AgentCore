@@ -175,6 +175,7 @@ async def deliver_in_flight(
     user_id: str,
     attachments: list[dict[str, Any]] | None = None,
     agent_mentions: list[dict[str, Any]] | None = None,
+    table_selection: list[str] | None = None,
     requires_tools: bool = False,
     x_client_platform: str | None = None,
     origin_device_id: str | None = None,
@@ -212,6 +213,7 @@ async def deliver_in_flight(
 
     raw_attachments = list(attachments or [])
     raw_agent_mentions = list(agent_mentions or [])
+    raw_table_selection = list(table_selection or [])
     coord = active_coordination_for_conversation(conversation_id)
     coord_active = coord is not None and coord.active
     try_interject = delivery == "steer" and coord_active
@@ -287,6 +289,7 @@ async def deliver_in_flight(
             user_id=user_id,
             attachments=raw_attachments,
             agent_mentions=raw_agent_mentions,
+            table_selection=raw_table_selection,
             requires_tools=requires_tools,
             x_client_platform=x_client_platform,
             origin_device_id=origin_device_id,
@@ -328,6 +331,7 @@ async def deliver_in_flight(
             user_id=user_id,
             attachments=raw_attachments,
             agent_mentions=raw_agent_mentions,
+            table_selection=raw_table_selection,
             requires_tools=requires_tools,
             x_client_platform=x_client_platform,
             origin_device_id=origin_device_id,

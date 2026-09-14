@@ -84,12 +84,12 @@ describe("clientToolIngress", () => {
     install();
 
     cloudCb?.({
-      type: "board_op_required",
+      type: "host_op_required",
       payload: { request_id: "r-2", conversation_id: "c-2" },
     });
 
     expect(dispatchClientToolRequired).toHaveBeenCalledWith(
-      "board_op_required",
+      "host_op_required",
       { request_id: "r-2", conversation_id: "c-2" },
       "cloud",
     );

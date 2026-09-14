@@ -1,10 +1,18 @@
 /**
+ * @vitest-environment jsdom
+ *
  * 对话级订阅（云对话多端同权 B2 · 验收 4）。
  *
  * 覆盖三条硬边界：空闲不转圈、另一端开跑能自动出现 + 跟播、与本端自有连接互斥
  * （同一回合绝不折两次；本端占用时静音不断连）。
  */
 import * as logMod from "@/lib/log";
+import {
+  clearActiveSidecarTurn,
+  getLastSidecarTarget,
+  resetSidecarRoutingForTests,
+  setActiveSidecarTurn,
+} from "@/services/sidecarRouting";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as dispatchMod from "../sse/dispatch";
@@ -127,7 +135,9 @@ beforeEach(() => {
 afterEach(() => {
   stopAllConversationFollows();
   resetStreamOwnershipForTests();
+  resetSidecarRoutingForTests();
   clearLastEventId(CID);
+  Reflect.deleteProperty(window, "sidecarApi");
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   useConversationStore.setState({ currentConversationId: null, byId: {} });
@@ -474,6 +484,85 @@ describe("syncConversationFollow (对话级订阅)", () => {
       "conversation.follow_closed",
       expect.objectContaining({ reason: "switched_away" }),
     );
+    close();
+  });
+
+  it("本机还在写时跟播关掉不灭灯", async () => {
+    useConversationStore.getState().setGenerating(true, CID);
+    setActiveSidecarTurn(CID, "root-1", "");
+    clearActiveSidecarTurn(CID);
+    Object.defineProperty(window, "sidecarApi", {
+      configurable: true,
+      writable: true,
+      value: { occupancy: vi.fn(async () => ({ occupied: true })) },
+    });
+
+    const { response, close } = sseStream();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(response)),
+    );
+
+    syncConversationFollow(CID);
+    await tick();
+    syncConversationFollow(null, "unsynced");
+    await tick();
+
+    expect(getRuntime(CID).isGenerating).toBe(true);
+    expect(getLastSidecarTarget(CID)).not.toBeNull();
+    close();
+  });
+
+  it("本机已闲时跟播关掉灭灯（lastSidecarTarget 仍在）", async () => {
+    useConversationStore.getState().setGenerating(true, CID);
+    setActiveSidecarTurn(CID, "root-1", "");
+    clearActiveSidecarTurn(CID);
+    Object.defineProperty(window, "sidecarApi", {
+      configurable: true,
+      writable: true,
+      value: { occupancy: vi.fn(async () => ({ occupied: false })) },
+    });
+
+    const { response, close } = sseStream();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(response)),
+    );
+
+    syncConversationFollow(CID);
+    await tick();
+    syncConversationFollow(null, "unsynced");
+    await vi.waitFor(() => expect(getRuntime(CID).isGenerating).toBe(false));
+    expect(getLastSidecarTarget(CID)).not.toBeNull();
+    close();
+  });
+
+  it("occupancy 问不清时跟播关掉不灭灯", async () => {
+    useConversationStore.getState().setGenerating(true, CID);
+    setActiveSidecarTurn(CID, "root-1", "");
+    clearActiveSidecarTurn(CID);
+    Object.defineProperty(window, "sidecarApi", {
+      configurable: true,
+      writable: true,
+      value: {
+        occupancy: vi.fn(async () => {
+          throw new Error("ipc down");
+        }),
+      },
+    });
+
+    const { response, close } = sseStream();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(response)),
+    );
+
+    syncConversationFollow(CID);
+    await tick();
+    syncConversationFollow(null, "unsynced");
+    await tick();
+
+    expect(getRuntime(CID).isGenerating).toBe(true);
     close();
   });
 

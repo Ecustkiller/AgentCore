@@ -59,6 +59,9 @@ async def test_capabilities_lists_system_skills_with_body(client):
     assert "lead_subteam" in skills
     assert skills["lead_subteam"]["summary"] == "子队拆法"
     assert skills["staffing"]["group"] == "编排"
+    assert skills["staffing"]["audience"] == ["ceo"]
+    assert skills["lead_subteam"]["audience"] == ["worker"]
+    assert set(skills["ask_kickoff"]["audience"]) == {"ceo", "worker"}
     assert "ask_kickoff" in skills
     assert "ask_midtask" in skills
     assert "page_ui" in skills
@@ -71,6 +74,8 @@ async def test_capabilities_lists_system_skills_with_body(client):
     for skill in skills.values():
         assert skill["summary"]
         assert skill["body"]  # the full guidance, not just the catalog one-liner
+        assert skill["blurb"]
+        assert skill["blurb"] != skill["summary"]
     # Skills are the system repertoire; domain SOPs are store SKUs, not this blueprint.
     from agentcore.runtime.legal_skills import LEGAL_SKILLS
 

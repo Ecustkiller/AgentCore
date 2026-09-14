@@ -9,12 +9,6 @@ vi.mock("@/services/boards", () => ({
   renameBoard: vi.fn(),
   saveBoardScene: vi.fn(),
 }));
-vi.mock("@/services/boardOps", () => ({
-  registerBoardApplier: () => () => {},
-}));
-vi.mock("@/services/boardRead", () => ({
-  registerBoardReader: () => () => {},
-}));
 vi.mock("@/lib/toast", () => ({
   notifyInfo: vi.fn(),
 }));

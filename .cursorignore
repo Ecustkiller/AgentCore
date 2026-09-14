@@ -18,8 +18,7 @@ apps/website/.env.deploy.local
 # Logs & runtime data
 logs/
 **/logs/
-data/
-**/data/
+/data/
 apps/server/data/
 .docker-data/
 

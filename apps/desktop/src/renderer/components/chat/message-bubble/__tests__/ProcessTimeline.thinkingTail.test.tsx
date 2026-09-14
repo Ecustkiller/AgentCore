@@ -153,6 +153,7 @@ describe("ProcessTimeline · thinking tail", () => {
       />,
     );
     expect(screen.getByText("Thinking…")).toBeTruthy();
+    expect(document.querySelector("[data-live-flow]")).not.toBeNull();
     rerender(
       <ProcessTimeline
         process={[graphAppend]}
@@ -165,6 +166,7 @@ describe("ProcessTimeline · thinking tail", () => {
       />,
     );
     expect(screen.getByText("Thinking…")).toBeTruthy();
+    expect(document.querySelector("[data-live-flow]")).not.toBeNull();
   });
 
   it("pins Thought body to the column so a long + chain cannot blow the pane", () => {

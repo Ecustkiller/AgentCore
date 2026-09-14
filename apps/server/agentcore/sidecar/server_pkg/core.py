@@ -27,6 +27,7 @@ from agentcore.sidecar.server_pkg.delivery import DeliveryMixin
 from agentcore.sidecar.server_pkg.handlers import HandlerMixin
 from agentcore.sidecar.server_pkg.turns import TurnExecutionMixin
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
+from agentcore.workspace.cloud_credentials import WorkspacesCredentials
 from agentcore.workspace.server import ServerWorkspace
 
 logger = get_logger(__name__)
@@ -80,6 +81,8 @@ class SidecarServer(HandlerMixin, DeliveryMixin, TurnExecutionMixin):
         self._folders_creds: FoldersCredentials | None = None
         # Account narrow-ticket creds for conversation-log tools; refreshed per turn.
         self._account_creds: AccountCredentials | None = None
+        # Workspaces narrow-ticket creds for unbound cloud-desk file HTTP; per turn.
+        self._workspaces_creds: WorkspacesCredentials | None = None
         self._approvals_enabled = True
         # Initialize-seeded default. Per-turn refresh writes ``_permission_axes_by_conv``
         # so harvest reads this conversation, not the process-level last write.

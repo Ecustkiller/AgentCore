@@ -31,8 +31,15 @@ from agentcore.workspace.limits import (
     is_liveness_timeout_detail,
     is_presence_disconnected_detail,
     is_workspace_reconnect_detail,
+    workspace_channel_failure_kind,
 )
-from agentcore.workspace.protocol import PathNotFound, WorkspaceIOError
+from agentcore.workspace.protocol import (
+    PathNotFound,
+    WorkspaceIOError,
+    WorkspaceLivenessTimeout,
+    WorkspacePresenceDisconnected,
+    WorkspaceReconnect,
+)
 from agentcore.workspace.server import ServerWorkspace
 
 
@@ -369,6 +376,72 @@ def test_workspace_reconnect_detail_is_not_presence_or_liveness():
     assert is_workspace_reconnect_detail(WORKSPACE_RECONNECT_DETAIL)
     assert not is_liveness_timeout_detail(WORKSPACE_RECONNECT_DETAIL)
     assert not is_presence_disconnected_detail(WORKSPACE_RECONNECT_DETAIL)
+
+
+def test_workspace_channel_failure_kind_prefers_type_over_sentence():
+    assert (
+        workspace_channel_failure_kind(WorkspacePresenceDisconnected("x"))
+        == "presence"
+    )
+    assert workspace_channel_failure_kind(WorkspaceLivenessTimeout("hang")) == "liveness"
+    assert workspace_channel_failure_kind(WorkspaceReconnect("retry")) == "reconnect"
+    assert (
+        workspace_channel_failure_kind(
+            WorkspaceIOError("local workspace op 'read' timed out（活性挂起）")
+        )
+        == "liveness"
+    )
+    assert workspace_channel_failure_kind(WorkspaceIOError(WORKSPACE_RECONNECT_DETAIL)) == (
+        "reconnect"
+    )
+    assert (
+        workspace_channel_failure_kind(
+            WorkspaceIOError("local workspace op 'read' failed: no fulfiller（无履约方）")
+        )
+        == "presence"
+    )
+    assert workspace_channel_failure_kind(WorkspaceIOError("disk full")) is None
+    assert workspace_channel_failure_kind(ValueError("timed out")) is None
+
+
+@pytest.mark.asyncio
+async def test_file_read_typed_channel_failures_do_not_need_sentence_markers(
+    tmp_path: Path,
+):
+    """Tools branch on type; copy can omit the old substring markers."""
+
+    class _Presence(ServerWorkspace):
+        async def read_lines(self, path, *, offset=1, limit=None):  # noqa: ARG002
+            raise WorkspacePresenceDisconnected("desk gone")
+
+    class _Hang(ServerWorkspace):
+        async def read_lines(self, path, *, offset=1, limit=None):  # noqa: ARG002
+            raise WorkspaceLivenessTimeout("hang")
+
+    class _Reconnect(ServerWorkspace):
+        async def read_lines(self, path, *, offset=1, limit=None):  # noqa: ARG002
+            raise WorkspaceReconnect("blip")
+
+    ctx = _ctx(_Presence(tmp_path, sandbox=SubprocessSandbox()))
+    dead = await FileReadTool().execute({"path": "a.txt"}, ctx)
+    assert dead.metadata.get("workspace_channel_dead") is True
+    assert dead.metadata.get("retire_tools")
+
+    hang = await FileReadTool().execute(
+        {"path": "a.txt"},
+        _ctx(_Hang(tmp_path, sandbox=SubprocessSandbox())),
+    )
+    assert hang.metadata.get("liveness_timeout") is True
+    assert not hang.metadata.get("retire_tools")
+
+    reconnect = await FileReadTool().execute(
+        {"path": "a.txt"},
+        _ctx(_Reconnect(tmp_path, sandbox=SubprocessSandbox())),
+    )
+    assert reconnect.error == "blip"
+    assert reconnect.metadata.get("liveness_timeout") is not True
+    assert reconnect.metadata.get("workspace_channel_dead") is not True
+    assert not reconnect.metadata.get("retire_tools")
 
 
 @pytest.mark.asyncio

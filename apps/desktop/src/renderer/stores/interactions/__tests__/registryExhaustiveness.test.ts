@@ -75,8 +75,8 @@ describe("kind bags derived from INTERACTION_KIND_WIRE flags", () => {
     );
   });
 
-  it("STAGE_INTERACTION_KINDS = reconnectAnswerable && !hot && !pausesTurn (current: stage_card)", () => {
-    expect(STAGE_INTERACTION_KINDS).toEqual(["stage_card"]);
+  it("STAGE_INTERACTION_KINDS = reconnectAnswerable && !hot && !pausesTurn (none: leftover stage_card is not answerable)", () => {
+    expect(STAGE_INTERACTION_KINDS).toEqual([]);
     for (const kind of REGISTERED) {
       const w = INTERACTION_KIND_WIRE[kind];
       expect(isStageInteractionKind(kind)).toBe(
@@ -96,7 +96,7 @@ describe("kind bags derived from INTERACTION_KIND_WIRE flags", () => {
       const path = submitPathOf(kind);
       if (w.hot) expect(path).toBe("hot");
       else if (w.pausesTurn) expect(path).toBe("cold");
-      else if (w.reconnectAnswerable) expect(path).toBe("stage");
+      else if (w.journalSurface) expect(path).toBe("stage");
       else throw new Error(`unexpected leftover submit path for ${kind}`);
     }
   });

@@ -25,8 +25,10 @@ from agentcore.runtime.delegate.target_desktop import (
 )
 from agentcore.security import (
     create_access_token,
+    create_account_token,
     create_folders_token,
     create_inference_token,
+    create_workspaces_token,
     decode_access_token,
     decode_folders_token,
     decode_inference_token,
@@ -88,10 +90,16 @@ def test_folders_token_roundtrip():
 def test_folders_token_rejects_access_and_inference():
     access = create_access_token("user-1", audience="product")
     inference = create_inference_token("user-1")
+    account = create_account_token("user-1")
+    workspaces = create_workspaces_token("user-1")
     with pytest.raises(AuthenticationError):
         decode_folders_token(access)
     with pytest.raises(AuthenticationError):
         decode_folders_token(inference)
+    with pytest.raises(AuthenticationError):
+        decode_folders_token(account)
+    with pytest.raises(AuthenticationError):
+        decode_folders_token(workspaces)
 
 
 def test_access_and_inference_reject_folders_token():

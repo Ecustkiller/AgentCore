@@ -53,6 +53,7 @@ class HandoffTool:
     registration = ToolRegistration(
         surface=ToolSurface.WORKER_ONLY,
         audience=AUDIENCE_WORKER_ONLY,
+        catalog_summary="队员交卷收尾",
     )
 
     @property

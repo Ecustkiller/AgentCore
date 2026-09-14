@@ -167,6 +167,28 @@ def test_approval_orphaned_is_settled_not_pending(projected):
     assert p["content"] == "我需要运行代码。"
 
 
+def test_approval_interrupted_orphans_without_explicit_fact(projected):
+    """终态热卡: `approval_required` + `message_end(interrupted)` and NO
+    `interaction_orphaned`. Fold must still mark the card orphaned — a pending
+    card after the turn ended is a clickable ghost (refresh 闪一下假卡)."""
+    p = projected["approval_interrupted_orphans"]
+    assert p["status"] == "cancelled"
+    assert p["finishReason"] == "interrupted"
+    assert _pending_gates(p) == []
+    assert p["interactions"] == [
+        {
+            "kind": "approval",
+            "id": "tc1",
+            "status": "orphaned",
+            "toolCallId": "tc1",
+            "toolName": "file_delete",
+            "arguments": {"permanent": True},
+        }
+    ]
+    assert [s["kind"] for s in p["process"]] == ["content", "approval"]
+    assert p["content"] == "我需要删一个文件。"
+
+
 def test_approval_sibling_sweep_settles_every_card(projected):
     """一键放行 sibling 清扫: `approve_always` on a1 sweeps its siblings, and each card
     must settle on its OWN record. A fold that settles only the clicked card leaves a2/a3

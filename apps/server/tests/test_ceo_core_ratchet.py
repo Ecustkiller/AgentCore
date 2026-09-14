@@ -201,7 +201,7 @@ _RESIDENT_CAP = 1220
 # run 的 HOW 在 skill body（consult(run) 命中 skill），不进 capability_how_suffix。
 _GATED_MANUALS: tuple[tuple[str, str], ...] = (
     ("run", "wait_for"),
-    ("host", "通识 FAQ"),
+    ("host", "通用知识问答"),
     ("host", "Get-WinEvent"),
     ("browser", "ask_user(browser_login=true)"),
     ("browser", "永不代填密码"),
@@ -313,7 +313,7 @@ def test_honesty_floors_stay_resident():
     assert "已落盘" not in base
     assert "已落盘" not in hint
     assert "结构自检" not in _DELIVERY
-    assert "外环已跑通" in _DELIVERY
+    assert "用户机器上已经跑通" in _DELIVERY
     assert "export_to_local" in _DELIVERY
     assert "不可产" in _DELIVERY and "等效替代" in _DELIVERY
     assert "已装配" in base and "通道在" in base

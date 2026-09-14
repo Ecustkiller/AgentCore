@@ -17,6 +17,7 @@ vi.mock("../log-service", () => ({
   logDesktop: vi.fn(),
 }));
 
+import { WORKSPACE_LIVENESS_TIMEOUT_KIND } from "@shared/ipc-contract";
 import {
   WORKSPACE_OP_MAIN_PHYSICAL_CAP,
   resetWorkspaceOpMainInflightForTests,
@@ -102,7 +103,7 @@ describe("runWorkspaceOpMain (主进程墙钟)", () => {
     const result = await settled;
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error.kind).toBe("WorkspaceIOError");
+      expect(result.error.kind).toBe(WORKSPACE_LIVENESS_TIMEOUT_KIND);
       expect(result.error.detail).toContain("活性");
     }
     expect(logDesktop).toHaveBeenCalledWith(

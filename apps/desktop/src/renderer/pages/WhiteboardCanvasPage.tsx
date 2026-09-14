@@ -1,25 +1,15 @@
 import { CanvasShell } from "@/components/layout/CanvasShell";
 import { Button } from "@/components/ui";
 import {
-  type BoardApplyResult,
-  registerBoardApplier,
-} from "@/services/boardOps";
-import {
-  type BoardRasterResult,
-  registerBoardReader,
-} from "@/services/boardRead";
-import {
   type BoardDetail,
   type BoardScene,
   getBoard,
   renameBoard,
   saveBoardScene,
 } from "@/services/boards";
-import type { BoardOp } from "@/types/events";
 import {
   type SceneElement,
   type Viewport,
-  type WhiteboardApi,
   WhiteboardCanvas,
   parseScene,
   serializeScene,
@@ -40,10 +30,7 @@ const STATUS_TEXT: Record<SaveStatus, string> = {
 /** One board's canvas. Loads the scene from the
  * backend into the self-built {@link WhiteboardCanvas}, autosaves it back (debounced) with
  * a CAS ``baseline`` so a stale tab/device never clobbers — on conflict autosave pauses and
- * offers a reload. The applier drives `applyOps` for `board_ops`.
- *
- * AI 入口（老板命令栏 / 选区 AI 动作）暂下线，画布不摆命令栏空壳；手动画布与
- * board_ops / board_read 注册仍保留。 */
+ * offers a reload. Hand-drawn only; there is no AI command bar on the canvas. */
 export function WhiteboardCanvasPage() {
   const { boardId = "" } = useParams();
   const navigate = useNavigate();
@@ -54,8 +41,6 @@ export function WhiteboardCanvasPage() {
   const [conflict, setConflict] = useState(false);
   const [title, setTitle] = useState("");
 
-  // Imperative engine handle — the AI applier reads the live scene + pushes ops through it.
-  const apiRef = useRef<WhiteboardApi | null>(null);
   // CAS version of the last load/save; sent as the next write's baseline.
   const versionRef = useRef(0);
   // Latest scene snapshot from the engine (the debounced flush reads this).
@@ -127,8 +112,7 @@ export function WhiteboardCanvasPage() {
     return parsed;
   }, [board]);
 
-  // CAS-write the scene. Shared by the debounced autosave (user edits) and the AI applier
-  // (which needs the resulting version for its 回执). Returns the new version, or null on
+  // CAS-write the scene (debounced autosave). Returns the new version, or null on
   // conflict/error. A no-op (elements unchanged) returns the current version.
   const persistScene = useCallback(
     async (
@@ -189,47 +173,6 @@ export function WhiteboardCanvasPage() {
     },
     [flush, boardId],
   );
-
-  // The AI's hands on this canvas (AI协作白板.md §六 M2): apply the op batch through the
-  // engine, then CAS-save so the 回执 carries the real version. Registered (keyed by board
-  // id) only while THIS canvas is open, so board_op_required for a board no one is viewing
-  // fails cleanly (the handler reports「画布未打开」). Capability kept; UI entry is offline.
-  const applyOps = useCallback(
-    async (ops: BoardOp[]): Promise<BoardApplyResult> => {
-      const api = apiRef.current;
-      if (!api) throw new Error("画布尚未就绪");
-      if (conflictRef.current) {
-        throw new Error("白板存在版本冲突，已暂停修改，请先重新加载");
-      }
-      const { created } = api.applyOps(ops);
-      const version = await persistScene(api.getScene(), api.getViewport());
-      if (version === null) throw new Error("白板保存失败（可能版本冲突）");
-      return { applied: ops.length, created, version };
-    },
-    [persistScene],
-  );
-
-  useEffect(() => {
-    if (!boardId) return;
-    return registerBoardApplier(boardId, applyOps);
-  }, [boardId, applyOps]);
-
-  // The AI's eyes on this canvas (AI协作白板.md §九 读图): rasterize a subset of elements to a
-  // PNG for the vision reader. Read-only (no CAS save). Registered (keyed by board id) only
-  // while THIS canvas is open, so board_read for a board no one is viewing fails cleanly.
-  const rasterize = useCallback(
-    async (ids: string[]): Promise<BoardRasterResult> => {
-      const api = apiRef.current;
-      if (!api) throw new Error("画布尚未就绪");
-      return api.rasterizeElements(ids);
-    },
-    [],
-  );
-
-  useEffect(() => {
-    if (!boardId) return;
-    return registerBoardReader(boardId, rasterize);
-  }, [boardId, rasterize]);
 
   const commitTitle = useCallback(async () => {
     const next = title.trim();
@@ -305,7 +248,6 @@ export function WhiteboardCanvasPage() {
       {board && initialData ? (
         <WhiteboardCanvas
           key={board.id}
-          ref={apiRef}
           initialElements={initialData.elements}
           initialViewport={initialData.viewport}
           onChange={handleChange}

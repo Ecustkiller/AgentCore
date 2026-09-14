@@ -3,7 +3,7 @@
 ``cost_calls`` is the billing authority for metered LLM calls; ``cost_events`` is
 the product / quota view. Cloud in-process metering already writes call details;
 this module drains the outbox, upserts per-run aggregates from those calls, then
-folds any ``cost_runs`` orphans (e.g. ``role=vision`` board_read rows that are
+folds any ``cost_runs`` orphans (e.g. ``role=vision`` 读图 rows that are
 priced only onto the turn sink — not via ``log_llm_call`` metering).
 
 Interrupt closers (``/stop`` / sweeper / process_kill) call the same reconcile with

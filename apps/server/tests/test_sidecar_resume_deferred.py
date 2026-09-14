@@ -9,7 +9,7 @@ from uuid import UUID
 
 import pytest
 
-from agentcore.conversation.store import reset_conversation_store_for_tests
+from agentcore.runtime.conversation_store import reset_conversation_store_for_tests
 from agentcore.runtime.events import EventType
 from agentcore.runtime.suspension import AskUserSuspension
 from agentcore.sidecar.paused_store import LocalPausedTurnStore

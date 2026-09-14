@@ -29,7 +29,7 @@
  * `message_end_slice_kept` / `release_drop`（仅显式 API）/ `warm_skip_reconcile`
  *（仅 generating）/ `warm_keep_anchor`（pendingFocus / ?msg=）/ `warm_snap_latest` /
  * `load_latest_window` / `open_decide` / `reject_not_resident` /
- * `reject_not_richer` / `reject_generating` / `reject_active_has_more_after` 等）。
+ * `reject_generating` / `reject_active_has_more_after` / `reject_empty_window` 等）。
  * 本地引擎互斥拒（横幅「turn already running」；不进云端 sync:logs）：
  * `sidecar.turn_already_running`（`op`=startTurn|resume，`turn_id` / `conversation_id` /
  * `saw_any_event`；与 sidecar 进程同名事件对偶，查 `userData/logs/desktop.jsonl`）。

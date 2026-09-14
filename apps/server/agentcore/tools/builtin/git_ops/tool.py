@@ -168,6 +168,7 @@ class GitTool:
         # 一次分支就能把 blocked 刷成 delivered。定案钉在 tests/test_file_products_ratchet.py。
         file_products=FileProductsContract.NO_PRODUCT,
         workspace_io=True,
+        catalog_summary="工作区 Git",
     )
 
     @property

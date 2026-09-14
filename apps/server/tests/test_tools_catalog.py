@@ -36,6 +36,8 @@ _EXPECTED_NAMES = {
     "grep",
     "code_search",
     "code_diagnostics",
+    "docs_read",
+    "docs_write",
     "git",
     "run",
 }
@@ -63,6 +65,8 @@ _CEO_DEFAULT_NAMES = {
     "grep",
     "code_search",
     "code_diagnostics",
+    "docs_read",
+    "docs_write",
     "git",
     "run",
 }

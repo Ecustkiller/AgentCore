@@ -539,8 +539,9 @@ def test_skill_teaches_catalog_ref_not_mvp_empty():
     body = build_system_skill_registry().get("debate_and_review").body
     assert "MVP 未启用" not in body
     assert "请留空" not in body
-    assert "元问题" in body
-    assert "消歧" in body
+    # 模型消歧 / 「禁止元问题」在 debate.models 回执，不进 skill 常驻。
+    assert "元问题" not in body
+    assert "消歧" not in body
     assert "cross_model" not in body
     assert "【多模型】" not in body
     assert "platform/xxx" not in body

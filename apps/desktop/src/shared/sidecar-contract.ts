@@ -43,6 +43,16 @@ export interface SidecarAccountAuth {
 }
 
 /**
+ * 一次回合的 workspaces 窄票凭据：sidecar 坐无本机绑定的云桌时问云文件 REST。
+ * 与 folders/account/inference 并列；形状 `{baseUrl, apiKey}`——`baseUrl` 为
+ * 工作区面根（`…/v1/workspaces`），`apiKey` 为 type=workspaces JWT；勿塞 access。
+ */
+export interface SidecarWorkspacesAuth {
+  baseUrl: string;
+  apiKey: string;
+}
+
+/**
  * DesktopBrowserBridge 本回合客户端句柄（与 inference 同构：长活 sidecar 随回合刷新）。
  * 主进程签发；勿经 renderer。缺省 / null → sidecar 本回合 browser=未装配（C4 明示，不静默 Sandbox）。
  */
@@ -150,6 +160,11 @@ export interface SidecarStartTurnRequest {
    */
   accountAuth?: SidecarAccountAuth;
   /**
+   * workspaces 窄票凭据（与 folders/account/inference 并列）。缺省 / 铸票失败 =
+   * 不传键或 undefined，工具侧无凭据则诚实失败——勿假装成功。
+   */
+  workspacesAuth?: SidecarWorkspacesAuth;
+  /**
    * DesktopBrowserBridge 本回合凭证（主进程注入）。与 inference 一样按回合重送，
    * 避免 spawn-env 过期 / 未注入导致 browser 永久未装配。
    */
@@ -180,6 +195,11 @@ export interface SidecarStartTurnRequest {
    */
   queueId?: string;
   attachments?: SidecarQueuedAttachment[];
+  /**
+   * This turn's selected table row ids (``<表格>``). Omitted / empty = no
+   * selection block. Not stored on the message row.
+   */
+  tableSelection?: string[];
 }
 
 /** sidecar → 桌面：FIFO 已出队，请按用户回合 ``startTurn``（先占位）。 */
@@ -330,6 +350,8 @@ export interface SidecarResumeRequest {
   foldersAuth?: SidecarFoldersAuth;
   /** account 窄票凭据（同 `startTurn.accountAuth`）。 */
   accountAuth?: SidecarAccountAuth;
+  /** workspaces 窄票凭据（同 `startTurn.workspacesAuth`）。 */
+  workspacesAuth?: SidecarWorkspacesAuth;
   /** DesktopBrowserBridge 本回合凭证（同 `startTurn.browserBridge`）。 */
   browserBridge?: SidecarBrowserBridge;
   /** 本会话当前权限轴（同 `startTurn.permissionAxes`）。 */
@@ -466,6 +488,7 @@ export function buildSidecarResumeRpcParams(
   browserBridge?: SidecarBrowserBridge | null,
   foldersAuth?: SidecarFoldersAuth,
   accountAuth?: SidecarAccountAuth,
+  workspacesAuth?: SidecarWorkspacesAuth,
 ): Record<string, unknown> {
   return {
     messageId: req.messageId,
@@ -484,6 +507,7 @@ export function buildSidecarResumeRpcParams(
     ...(inference ? { inference } : {}),
     ...(foldersAuth ? { foldersAuth } : {}),
     ...(accountAuth ? { accountAuth } : {}),
+    ...(workspacesAuth ? { workspacesAuth } : {}),
     // Explicit null clears sticky spawn-env leftovers on the Python side.
     ...(browserBridge !== undefined ? { browserBridge } : {}),
     ...(req.permissionAxes ? { permissionAxes: req.permissionAxes } : {}),
@@ -605,8 +629,7 @@ export interface SidecarEventPush {
 /**
  * 主进程 → renderer 的**本机履约帧**推送（与回合事件流分开的第二条链路）。
  *
- * 本机引擎的 CLIENT_TOOL（host / mcp / board / board_read /
- * external_mount / terminal）不再经回合 EventSink 下发：sidecar 在自己进程内的
+ * 本机引擎的 CLIENT_TOOL（host / mcp / external_mount / terminal）不再经回合 EventSink 下发：sidecar 在自己进程内的
  * 履约中枢注册一个会话，帧经 `fulfill/frame` JSON-RPC 通知过来，主进程按
  * `payload.conversation_id` 投给持有该活回合的窗口。形状与云端设备级履约流
  * （`GET /v1/fulfill`）的帧一致，故 renderer 用同一套 ingress 消费，只是结算
@@ -732,6 +755,8 @@ export interface SidecarDeliverMessageRequest {
   traceId: string;
   attachments?: SidecarQueuedAttachment[];
   agentMentions?: SidecarAgentMention[];
+  /** This turn's selected table row ids. Omitted / empty = no selection block. */
+  tableSelection?: string[];
 }
 
 /** 排队附件：与 REST ``MessageAttachment`` / 桌面 ``OutgoingAttachment`` 同形。 */
@@ -821,6 +846,17 @@ export interface SidecarUnsyncedTurnSummary {
   cache_miss_tokens: number;
 }
 
+/** 只问这通对话本机是否还在写。无 store 副作用、不 spawn、不读 outbox。 */
+export interface SidecarOccupancyRequest {
+  conversationId: string;
+}
+
+export interface SidecarOccupancyResponse {
+  occupied: boolean;
+  rootId?: string;
+  subpath?: string;
+}
+
 /** 查询某会话的本地恢复面（活回合 + 未同步 outbox 摘要 + 挂起帧）。 */
 export interface SidecarRecoveryRequest {
   conversationId: string;
@@ -882,6 +918,7 @@ export const SIDECAR_CHANNELS = {
   deliverMessage: "sidecar:deliverMessage",
   cancelQueuedTurn: "sidecar:cancelQueuedTurn",
   listQueuedTurns: "sidecar:listQueuedTurns",
+  occupancy: "sidecar:occupancy",
   resume: "sidecar:resume",
   probe: "sidecar:probe",
   warmCodeIndex: "sidecar:warmCodeIndex",
@@ -930,6 +967,10 @@ export interface SidecarApi {
   listQueuedTurns(
     req: SidecarListQueuedTurnsRequest,
   ): Promise<SidecarListQueuedTurnsResult>;
+  /**
+   * 本机这通是否还在写。只读活表；禁止经 ``loadRecovery``（会改灯和冷卡）。
+   */
+  occupancy(req: SidecarOccupancyRequest): Promise<SidecarOccupancyResponse>;
   /** 续跑一个持久挂起的本地回合；Promise 在续跑结束时 resolve（同 `startTurn` 携最终结果，
    * 过程事件经 `onEvent` 推来）。 */
   resume(req: SidecarResumeRequest): Promise<SidecarTurnResult>;

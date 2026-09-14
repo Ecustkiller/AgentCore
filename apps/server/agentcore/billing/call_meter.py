@@ -29,10 +29,10 @@ logger = get_logger(__name__)
 # ``cost_calls`` rows.
 PROXY_LLM_SCENARIO = "inference.proxy"
 
-# board_read vision: ``log_llm_call`` is observability-only; ``BoardReadTool``
-# prices a separate ``role=vision`` ``cost_runs`` row (different model tier).
-# Metering here would mis-attribute tokens onto the parent run_id and double-bill
-# when finalize also records the vision orphan.
+# Vision 读图: ``log_llm_call`` is observability-only; callers price a separate
+# ``role=vision`` ``cost_runs`` row (different model tier). Metering here would
+# mis-attribute tokens onto the parent run_id and double-bill when finalize also
+# records the vision orphan.
 _VISION_SCENARIO_PREFIX = "vision."
 
 
@@ -54,7 +54,7 @@ def maybe_enqueue_inprocess_call(
     Skips when: drain not running (sidecar / unit tests), no bound ``user_id``
     (evals / 测连 probes have no account to charge), zero usage, ``scenario`` is
     the inference proxy marker (proxy already records via ``proxy_spend``), or a
-    vision board_read (billed only via the turn ``cost_runs`` vision row).
+    vision read (billed only via the turn ``cost_runs`` vision row).
     """
     if scenario == PROXY_LLM_SCENARIO:
         return None

@@ -9,7 +9,7 @@ from pathlib import Path
 from agentcore.workspace._paths import is_ignored_relpath
 from agentcore.workspace.indexing.bm25 import BM25Index
 from agentcore.workspace.indexing.chunker import chunk_file, detect_language, snippet_preview
-from agentcore.workspace.limits import is_liveness_timeout_detail
+from agentcore.workspace.limits import workspace_channel_failure_kind
 from agentcore.workspace.protocol import (
     CodeChunk,
     CodeIndexStatus,
@@ -192,8 +192,7 @@ class IndexManager:
                     updated = True
                 continue
             except WorkspaceError as exc:
-                detail = str(exc)
-                if is_liveness_timeout_detail(detail):
+                if workspace_channel_failure_kind(exc) == "liveness":
                     consecutive_timeouts += 1
                     logger.info(
                         "workspace.index_read_timeout path=%s streak=%s",

@@ -58,21 +58,18 @@ describe("decodePreviewResponse — cloud image / text", () => {
       kind: "binary",
       mime: "image/png",
       size: 11 * 1024 * 1024,
-      reason: "图片过大（超过 10MB），请下载或用系统默认程序打开",
+      reason: "图片过大（超过 10MB）",
     });
   });
 
-  it("NUL text bytes without image MIME → binary with open/download reason", async () => {
+  it("NUL text bytes without image MIME → binary, no restated CTA reason", async () => {
     const result = await decodePreviewResponse(
       fakeResponse(new Uint8Array([0x00, 0x01, 0x02]), {
         contentType: "application/octet-stream",
       }),
       { path: "blob.bin" },
     );
-    expect(result).toEqual({
-      kind: "binary",
-      reason: "无法在面板内预览，请下载或用系统默认程序打开",
-    });
+    expect(result).toEqual({ kind: "binary" });
   });
 
   it("application/pdf → kind pdf data URL", async () => {
@@ -114,7 +111,7 @@ describe("decodePreviewResponse — cloud image / text", () => {
       kind: "binary",
       mime: "application/pdf",
       size: 16 * 1024 * 1024,
-      reason: "PDF 过大（超过 15MB），请下载或用系统默认程序打开",
+      reason: "PDF 过大（超过 15MB）",
     });
   });
 

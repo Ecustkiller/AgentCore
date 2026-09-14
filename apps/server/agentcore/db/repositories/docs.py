@@ -90,7 +90,7 @@ class DocRepository:
         body: dict,
         baseline: int | None,
     ) -> tuple[Doc, bool]:
-        """CAS-write the block list. ``(doc, True)`` = conflict, live row untouched."""
+        """CAS-write the markdown body. ``(doc, True)`` = conflict, live row untouched."""
         if baseline is not None and baseline != doc.version:
             return doc, True
         doc.body = sanitize_body(body)

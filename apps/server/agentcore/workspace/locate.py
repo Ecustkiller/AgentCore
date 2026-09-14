@@ -338,6 +338,32 @@ class LocalBinding:
     subpath: str = ""
 
 
+# Cross-end path form for 裸聊 scratch under the local container root
+# (``~/Documents/AgentCore/conversations/<id>/``; empty subpath resolves here).
+_BARE_CHAT_SUBPATH_PREFIX = "conversations"
+
+
+def bare_chat_local_subpath(conversation_id: str) -> str:
+    """Effective local subpath for a 裸聊 under the container root."""
+    return f"{_BARE_CHAT_SUBPATH_PREFIX}/{conversation_id}"
+
+
+def resolve_conversation_local_binding(
+    *,
+    local_root_id: str | None,
+    local_subpath: str | None = None,
+    label: str = "workspace",
+) -> LocalBinding | None:
+    """Build a local binding from root/subpath columns, or None when unbound (cloud)."""
+    if not local_root_id:
+        return None
+    return LocalBinding(
+        root_id=local_root_id,
+        root_label=label,
+        subpath=local_subpath or "",
+    )
+
+
 def build_local_workspace(
     *,
     binding: LocalBinding,
@@ -395,10 +421,13 @@ def build_workspace(
     """Pick a turn's backend: local when bound to a desktop root, else cloud.
 
     The single fork behind 双模式工作区 §七 ("模式跟着文件在哪自动走"): a resolved
-    ``local_binding`` yields a desktop-backed ``LocalWorkspace``; its absence falls
-    back to the server-hosted ``ServerWorkspace``. Both satisfy ``WorkspaceBackend``
-    (the P0 seam), so the file tools and the engine run unchanged on either — the
-    caller only has to decide *which* here, never *how* downstream.
+    ``local_binding`` yields a desktop-backed ``LocalWorkspace``. Its absence in
+    the cloud API process falls back to on-disk ``ServerWorkspace``. The desktop
+    sidecar on an unbound cloud desk must **not** write ``data_dir/workspaces``
+    (a second disk in production): it uses ``RemoteCloudWorkspace`` over the
+    workspaces file REST + ``type=workspaces`` ticket. Both still satisfy
+    ``WorkspaceBackend``. Sidecar birth-desk ``_make_backend`` stays on-disk
+    ``ServerWorkspace(location=local)``.
 
     ``sink`` remains on the cloud path for lock-wait / display signals; local
     CLIENT_TOOL delivery no longer uses it.
@@ -408,6 +437,16 @@ def build_workspace(
             binding=local_binding,
             user_id=user_id,
             conversation_id=conversation_id,
+        )
+    from agentcore.sidecar.server_pkg.core import is_sidecar_process
+
+    if is_sidecar_process():
+        from agentcore.workspace.remote import RemoteCloudWorkspace
+
+        return RemoteCloudWorkspace(
+            ws_id=format_workspace_id(
+                folder_id=folder_id, conversation_id=conversation_id
+            ),
         )
     return build_server_workspace(
         user_id=user_id,

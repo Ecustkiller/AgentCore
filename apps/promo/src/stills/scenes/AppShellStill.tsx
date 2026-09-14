@@ -1,10 +1,10 @@
 import { AbsoluteFill } from "remotion";
 import { PromoCanvas } from "../../core/chrome/PromoCanvas";
 import { PromoShell } from "../../core/chrome/PromoShell";
-import { DEMO_TASK } from "../../videos/brand-30s/data/demo";
-import { buildBrandGraphState } from "../../videos/brand-30s/data/graphSpec";
-import { DEMO_LAYOUT } from "../../videos/brand-30s/data/layout";
-import { BRAND_SHELL_RECENT } from "../../videos/brand-30s/shellRecent";
+import { DEMO_TASK } from "../../kit/hero/demo";
+import { buildHeroGraphState } from "../../kit/hero/graphSpec";
+import { DEMO_LAYOUT } from "../../kit/hero/layout";
+import { HERO_SHELL_RECENT } from "../../kit/hero/shellRecent";
 
 /*
  * 领衔 promo still: the full desktop shell (TitleBar + Sidebar) with the product's
@@ -25,10 +25,10 @@ const SPINE_FROZEN = 240;
 const FPS = 30;
 
 export function AppShellStill() {
-  const { nodes, edges, debate } = buildBrandGraphState(SPINE_FROZEN, FPS);
+  const { nodes, edges, debate } = buildHeroGraphState(SPINE_FROZEN, FPS);
   return (
     <AbsoluteFill className="bg-background">
-      <PromoShell recent={BRAND_SHELL_RECENT} theme="light">
+      <PromoShell recent={HERO_SHELL_RECENT} theme="light">
         <PromoCanvas
           taskTitle={DEMO_TASK}
           graphW={DEMO_LAYOUT.width}

@@ -71,7 +71,7 @@ async def export_markdown_path(
 ) -> ExportMarkdownResult:
     """Read ``md_path``, convert, write sibling ``.docx``. Raises ``ExportMarkdownError``.
 
-    ``layout`` 默认 ``standard``——桌面「导出 Word」HTTP 路径不传，行为保持现状。
+    ``layout`` 默认 ``standard``。HTTP / 右键菜单可显式传 ``official``；不传则技术报告档。
     """
     rel = _normalize_md_path(md_path)
     markdown = await _read_markdown(backend, rel)
@@ -117,7 +117,7 @@ async def export_markdown_to_pdf_path(
 ) -> ExportMarkdownResult:
     """Read ``md_path``, convert, write sibling ``.pdf``. Raises ``ExportMarkdownError``.
 
-    ``layout`` 默认 ``standard``——桌面「导出 PDF」HTTP 路径不传，行为保持现状。
+    ``layout`` 默认 ``standard``。HTTP 可显式传 ``official``。
     """
     rel = _normalize_md_path(md_path)
     markdown = await _read_markdown(backend, rel)

@@ -21,14 +21,16 @@ Flow (one op):
 
 State is in-process (single-worker posture, same as the approval gate); front
 with Redis to scale to multiple workers (see ``config.py``). A result the client
-never delivers fails as a ``WorkspaceIOError`` after the timeout — **that op
+never delivers fails as a ``WorkspaceLivenessTimeout`` after the timeout — **that op
 only**. Timeouts do not declare the desk disconnected; whether files are
 connected is fulfiller presence (``workspace.presence``), the same fact the
 turn-start gate asks. An op the desktop has already started is failed immediately
-when the fulfill transport drops (desktop POSTs 「桌面在重连，请再试这一下」);
+when the fulfill transport drops (desktop POSTs ``WorkspaceReconnect`` /
+「桌面在重连，请再试这一下」);
 ops not yet delivered still wait reconnect grace. Concurrent desktop round-trips are capped
 (``max_inflight``, default 16); extras queue before suspend, and queue wait
-rides the outer tool wall clock. No online fulfiller → typed failure without
+rides the outer tool wall clock. No online fulfiller → typed
+``WorkspacePresenceDisconnected`` without
 waiting out the deadline, named the way the turn-start presence gate would have
 named it: a desktop that is online but no longer declares this root reads as
 未声明持有本会话的本地目录, not 无履约方. The one delay is a desktop whose SSE
@@ -68,6 +70,9 @@ from agentcore.workspace.protocol import (
     PathNotFound,
     WorkspaceError,
     WorkspaceIOError,
+    WorkspaceLivenessTimeout,
+    WorkspacePresenceDisconnected,
+    WorkspaceReconnect,
 )
 
 logger = get_logger(__name__)
@@ -150,6 +155,9 @@ _ERROR_KINDS: dict[str, type[WorkspaceError]] = {
     "NotUTF8": NotUTF8,
     "NoMatch": NoMatch,
     "WorkspaceIOError": WorkspaceIOError,
+    "WorkspaceLivenessTimeout": WorkspaceLivenessTimeout,
+    "WorkspacePresenceDisconnected": WorkspacePresenceDisconnected,
+    "WorkspaceReconnect": WorkspaceReconnect,
 }
 
 
@@ -179,7 +187,7 @@ class WorkspaceChannel:
     bound to one desktop FS ``root_id``. ``request`` is the only entry point;
     ``LocalWorkspace`` builds the JSON-safe ``args`` and interprets the returned
     ``value`` per op. Delivery goes through the fulfill hub — no online fulfiller
-    fails with a typed ``WorkspaceIOError`` without burning the deadline (a
+    fails with a typed ``WorkspacePresenceDisconnected`` without burning the deadline (a
     just-dropped desktop first gets its reconnect grace, see ``fulfill/grace.py``).
 
     A settle timeout fails only that op. It does not cancel siblings, does not
@@ -217,9 +225,10 @@ class WorkspaceChannel:
         """Emit the op, await the desktop's result, and return it (or raise).
 
         Returns the op's ``value`` on success. Raises the typed ``WorkspaceError``
-        the desktop reported on failure, or ``WorkspaceIOError`` on timeout / a
-        malformed result envelope — never hangs and never leaks an untyped error,
-        so the tool layer's existing ``except WorkspaceError`` keeps working.
+        the desktop reported on failure, or ``WorkspaceLivenessTimeout`` on timeout /
+        ``WorkspaceIOError`` on a malformed result envelope — never hangs and never
+        leaks an untyped error, so the tool layer's existing ``except WorkspaceError``
+        keeps working.
 
         ``timeout`` overrides the channel-wide ``timeout_seconds`` for this one op.
         A long-running ``execute`` passes its own (code timeout + slack) so the
@@ -272,7 +281,7 @@ class WorkspaceChannel:
                     ),
                     registry=self.registry,
                     request_id=request_id,
-                    error_kind="WorkspaceIOError",
+                    error_kind="WorkspacePresenceDisconnected",
                     error_detail=(
                         f"local workspace op '{op_name}' failed: no fulfiller（无履约方）"
                     ),
@@ -324,7 +333,7 @@ class WorkspaceChannel:
                     if directory is not None:
                         timeout_fields["directory"] = directory
                     logger.info("workspace.op_timeout", **timeout_fields)
-                    raise WorkspaceIOError(
+                    raise WorkspaceLivenessTimeout(
                         f"local workspace op '{op_name}' timed out（活性挂起）"
                     ) from e
             finally:

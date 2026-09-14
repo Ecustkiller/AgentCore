@@ -26,6 +26,14 @@ def test_send_message_request_agent_mentions_default_empty():
     assert body.agent_mentions == []
 
 
+def test_table_selection_over_budget_truncates_not_422():
+    ids = [f"r{i}" for i in range(50)]
+    body = SendMessageRequest(content="hi", delivery="steer", table_selection=ids)
+    assert len(body.table_selection) == 40
+    assert body.table_selection[0] == "r0"
+    assert body.table_selection[-1] == "r39"
+
+
 def test_send_message_request_agent_mentions_max_length():
     ok = [
         AgentMention(agent_id=f"a{i}", role=f"role-{i}") for i in range(10)
@@ -154,7 +162,7 @@ def test_steer_enqueue_preserves_agent_mentions():
 
 
 def test_to_stored_agent_mentions_sanitizes_and_caps():
-    from agentcore.conversation.mentions import to_stored_agent_mentions
+    from agentcore.core.mentions import to_stored_agent_mentions
 
     assert to_stored_agent_mentions(None) == []
     assert to_stored_agent_mentions([]) == []
@@ -174,7 +182,7 @@ def test_to_stored_agent_mentions_sanitizes_and_caps():
 
 
 def test_resolve_interjection_mentions_payload_wins_over_stash():
-    from agentcore.conversation.mentions import resolve_interjection_mentions
+    from agentcore.core.mentions import resolve_interjection_mentions
 
     payload = {
         "interjection_id": "i1",
@@ -274,7 +282,7 @@ async def test_stream_chat_persists_agent_mentions(monkeypatch):
     monkeypatch.setattr(turns_mod, "async_session_factory", lambda: _FakeSessionCM())
     monkeypatch.setattr(turns_mod, "ConversationRepository", _ConvRepo)
     monkeypatch.setattr(turns_mod, "MessageRepository", _MsgRepo)
-    monkeypatch.setattr(turns_mod, "BoardRepository", _BoardRepo)
+    monkeypatch.setattr(turns_mod, "TableRepository", _BoardRepo)
     monkeypatch.setattr(
         "agentcore.conversation.midflight_persist.MessageRepository",
         _MsgRepo,
@@ -384,7 +392,7 @@ async def test_regenerate_forwards_stored_agent_mentions(monkeypatch):
     monkeypatch.setattr(turns_mod, "async_session_factory", lambda: _FakeSessionCM())
     monkeypatch.setattr(turns_mod, "ConversationRepository", _ConvRepo)
     monkeypatch.setattr(turns_mod, "MessageRepository", _MsgRepo)
-    monkeypatch.setattr(turns_mod, "BoardRepository", _BoardRepo)
+    monkeypatch.setattr(turns_mod, "TableRepository", _BoardRepo)
     monkeypatch.setattr(turns_mod, "resolve_local_binding", AsyncMock(return_value=None))
     monkeypatch.setattr(turns_mod, "resolve_profile_set", AsyncMock(return_value=None))
 
@@ -482,7 +490,7 @@ async def test_regenerate_replaces_agent_mentions_when_edit_sends_empty(monkeypa
     monkeypatch.setattr(turns_mod, "async_session_factory", lambda: _FakeSessionCM())
     monkeypatch.setattr(turns_mod, "ConversationRepository", _ConvRepo)
     monkeypatch.setattr(turns_mod, "MessageRepository", _MsgRepo)
-    monkeypatch.setattr(turns_mod, "BoardRepository", _BoardRepo)
+    monkeypatch.setattr(turns_mod, "TableRepository", _BoardRepo)
     monkeypatch.setattr(turns_mod, "resolve_local_binding", AsyncMock(return_value=None))
     monkeypatch.setattr(turns_mod, "resolve_profile_set", AsyncMock(return_value=None))
     monkeypatch.setattr(

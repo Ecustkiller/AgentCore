@@ -34,8 +34,8 @@ from agentcore.tools.builtin.file_ops import (
     prepared_write_relpath,
     write_scope_rejection,
 )
-from agentcore.tools.builtin.file_ops.errors import CROSS_TURN_RETRY_KEY, CrossTurnRetry
 from agentcore.tools.builtin.web.web_fetch import _safe_request
+from agentcore.tools.cross_turn_retry import CROSS_TURN_RETRY_KEY, CrossTurnRetry
 from agentcore.tools.file_products import file_product
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (

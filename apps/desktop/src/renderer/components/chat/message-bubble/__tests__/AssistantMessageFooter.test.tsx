@@ -25,12 +25,6 @@ vi.mock("@/lib/toast", () => ({
   notifyError: vi.fn(),
 }));
 
-vi.mock("@/stores/bookmarks", () => ({
-  useBookmarkStore: (
-    sel: (s: { ids: Set<string>; toggle: () => void }) => unknown,
-  ) => sel({ ids: new Set(), toggle: () => {} }),
-}));
-
 import { MessageMoreMenu } from "../AssistantMessageFooter";
 
 const message: Message = {

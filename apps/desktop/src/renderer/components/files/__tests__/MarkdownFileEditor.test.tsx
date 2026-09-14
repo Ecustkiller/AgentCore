@@ -103,7 +103,7 @@ function makeSource(over: Partial<FileSource> = {}): FileSource {
   } as FileSource;
 }
 
-function renderEditor(source: FileSource) {
+function renderEditor(source: FileSource, extra?: { hostedInTab?: boolean }) {
   return render(
     <TooltipProvider>
       <MarkdownFileEditor
@@ -111,6 +111,7 @@ function renderEditor(source: FileSource) {
         path="a.md"
         name="a.md"
         onClose={() => {}}
+        hostedInTab={extra?.hostedInTab}
       />
     </TooltipProvider>,
   );
@@ -166,6 +167,15 @@ describe("MarkdownFileEditor host", () => {
       fireEvent.click(screen.getByText("编辑"));
     });
     expect(screen.getByTestId("cm-stub")).toBeTruthy();
+  });
+
+  it("hostedInTab hides back and repeating filename", async () => {
+    const source = makeSource();
+    renderEditor(source, { hostedInTab: true });
+    await act(async () => {});
+    expect(screen.queryByRole("button", { name: "返回文件列表" })).toBeNull();
+    expect(screen.queryByText("a.md")).toBeNull();
+    expect(screen.getByText("预览")).toBeTruthy();
   });
 
   it("opens a GBK file read-only and never writes back", async () => {

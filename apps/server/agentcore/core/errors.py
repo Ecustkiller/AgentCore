@@ -905,63 +905,78 @@ class ClientTooOldError(AgentCoreError):
         super().__init__(message, min_version=min_version, **kwargs)
 
 
+# Turn-start local presence / prepare abort — product copy lives with the type.
+# Mid-turn tool IO stays ``WorkspaceIOError`` (do not inherit it). Full sentences
+# so ``core`` never imports ``fulfill`` to splice ``ORIGIN_DEVICE_OFFLINE``.
+LOCAL_DESKTOP_OFFLINE = (
+    "本机桌面未连接，无法访问本地工作区。"
+    "请打开桌面客户端并登录后再试。"
+)
+LOCAL_ROOT_NOT_HELD = (
+    "桌面已在线，但未声明持有本会话的本地目录"
+    "（授权可能已移除，或已换用其他电脑）。"
+    "请在这台电脑上重新授权该文件夹后再试。"
+)
+LOCAL_CHANNEL_DEAD = (
+    "本机工作区通道无响应（已挂起 / channel dead）。请检查桌面连接后重试。"
+)
+LOCAL_ORIGIN_DEVICE_OFFLINE = (
+    "发起本回合的设备不在线（该操作只能在这台设备上执行，不会转投其他设备）。"
+    "请在那台电脑上打开客户端并登录后重试。"
+    "（本地工作区操作不会转投其他电脑。）"
+)
+
+
+class LocalWorkspaceUnavailable:
+    """Marker: turn cannot start because the local workspace is not present.
+
+    Mix in with :class:`AgentCoreError`. Not an ``Exception`` itself — tools'
+    ``except WorkspaceError`` must not catch these.
+    """
+
+
+class LocalDesktopOfflineError(LocalWorkspaceUnavailable, AgentCoreError):
+    """No desktop fulfiller is online for this user's local workspace."""
+
+    code = ErrorCode.LOCAL_DESKTOP_OFFLINE
+    status_code = 503
+
+    def __init__(self, message: str = LOCAL_DESKTOP_OFFLINE, **kwargs):
+        super().__init__(message, **kwargs)
+
+
+class LocalRootNotHeldError(LocalWorkspaceUnavailable, AgentCoreError):
+    """A desktop is online but does not hold this conversation's bound root."""
+
+    code = ErrorCode.LOCAL_ROOT_NOT_HELD
+    status_code = 503
+
+    def __init__(self, message: str = LOCAL_ROOT_NOT_HELD, **kwargs):
+        super().__init__(message, **kwargs)
+
+
+class LocalOriginDeviceOfflineError(LocalWorkspaceUnavailable, AgentCoreError):
+    """The device that started this turn is offline; the op will not move."""
+
+    code = ErrorCode.LOCAL_ORIGIN_DEVICE_OFFLINE
+    status_code = 503
+
+    def __init__(self, message: str = LOCAL_ORIGIN_DEVICE_OFFLINE, **kwargs):
+        super().__init__(message, **kwargs)
+
+
+class LocalChannelDeadError(LocalWorkspaceUnavailable, AgentCoreError):
+    """Prepare-phase local channel hang / budget exhaustion (turn abort)."""
+
+    code = ErrorCode.LOCAL_CHANNEL_DEAD
+    status_code = 503
+
+    def __init__(self, message: str = LOCAL_CHANNEL_DEAD, **kwargs):
+        super().__init__(message, **kwargs)
+
+
 # Product-face fallback when an unclassified exception hits a user-facing boundary.
 # Same sentence as ``message_merge.DEFAULT_FAILED_ERROR_MESSAGE`` (settle / usage).
 # Must not say 「模型调用失败」: callers stamp ``PIPELINE_ERROR`` here, and the
 # crash may be pre-LLM (tool construction, prepare). LLM_ERROR keeps its own copy.
 UNCLASSIFIED_EXCEPTION_USER_MESSAGE = "管线执行失败，请稍后重试。"
-
-
-def error_fields_for(
-    exc: BaseException,
-    *,
-    fallback_code: str,
-    fallback_message: str,
-) -> tuple[str, str, dict | None]:
-    """Decide the ``(code, message, context)`` a product-facing error should carry.
-
-    Category gate (not string matching):
-    - :class:`AgentCoreError` — pass through coded product copy on the type.
-    - Sticky-dead :class:`~agentcore.workspace.protocol.WorkspaceIOError` — honest
-      channel-down zh already on the exception (product text by construction).
-    - Everything else (dev invariants, third-party, unclassified) — the caller's
-      curated ``fallback_message``, never ``str(exc)``. Callers own that copy and
-      must pass product text (an empty one degrades to
-      :data:`UNCLASSIFIED_EXCEPTION_USER_MESSAGE`); the exception's own text is
-      for logs.
-    """
-    if isinstance(exc, AgentCoreError):
-        from agentcore.llm.errors import error_context_from
-
-        return (
-            exc.code,
-            (exc.message or fallback_message),
-            error_context_from(exc),
-        )
-    # Local workspace sticky-dead / presence-gate during prepare / turn gate:
-    # dedicated codes so empty fails can roll back like other Class B empty
-    # fails — never STREAM_ERROR (that catch-all must not enter the bounce list).
-    from agentcore.runtime.pipeline.errors import (
-        LOCAL_CHANNEL_DEAD,
-        is_prepare_local_abort_message,
-        prepare_local_abort_error_code,
-    )
-    from agentcore.workspace.limits import is_channel_dead_detail
-    from agentcore.workspace.protocol import WorkspaceIOError
-
-    if isinstance(exc, WorkspaceIOError):
-        detail = str(exc).strip()
-        if is_prepare_local_abort_message(detail):
-            return (
-                prepare_local_abort_error_code(detail) or ErrorCode.LOCAL_CHANNEL_DEAD,
-                detail or LOCAL_CHANNEL_DEAD,
-                None,
-            )
-        if is_channel_dead_detail(detail):
-            return (
-                ErrorCode.LOCAL_CHANNEL_DEAD,
-                detail or LOCAL_CHANNEL_DEAD,
-                None,
-            )
-    product = (fallback_message or "").strip()
-    return fallback_code, product or UNCLASSIFIED_EXCEPTION_USER_MESSAGE, None

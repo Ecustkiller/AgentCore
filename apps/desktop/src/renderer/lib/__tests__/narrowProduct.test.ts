@@ -11,6 +11,7 @@ describe("isNarrowBlockedPath", () => {
     expect(isNarrowBlockedPath("/toolbox/manual/intro")).toBe(true);
     expect(isNarrowBlockedPath("/whiteboard/abc")).toBe(true);
     expect(isNarrowBlockedPath("/docs/abc")).toBe(true);
+    expect(isNarrowBlockedPath("/tables/abc")).toBe(true);
     expect(isNarrowBlockedPath("/conversations")).toBe(true);
     expect(isNarrowBlockedPath("/more/shortcuts")).toBe(true);
   });
@@ -23,6 +24,7 @@ describe("isNarrowBlockedPath", () => {
     expect(isNarrowBlockedPath("/more")).toBe(false);
     expect(isNarrowBlockedPath("/more/account")).toBe(false);
     expect(isNarrowBlockedPath("/more/about")).toBe(false);
+    expect(isNarrowBlockedPath("/more/sponsor")).toBe(false);
     // 旧书签 /more/feedback 走 router 重定向到关于，不能进 NarrowBlocked。
     expect(isNarrowBlockedPath("/more/feedback")).toBe(false);
   });

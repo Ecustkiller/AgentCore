@@ -3,7 +3,14 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from agentcore.docs_export.layout import (
+    LAYOUT_INVALID_MESSAGE,
+    LAYOUT_STANDARD,
+    DocLayout,
+    parse_layout,
+)
 
 # --- Workspace local-mode binding (双模式工作区 §七) ---
 
@@ -210,7 +217,24 @@ class UploadFileResponse(BaseModel):
     size_bytes: int
 
 
-class ExportDocxRequest(BaseModel):
+class WithDocLayout(BaseModel):
+    """Optional Markdown export layout. Unknown tokens 422; empty → standard."""
+
+    layout: DocLayout = Field(
+        default=LAYOUT_STANDARD,
+        description="排版档位：standard=技术报告；official=正式文书。默认 standard。",
+    )
+
+    @field_validator("layout", mode="before")
+    @classmethod
+    def _coerce_layout(cls, value: object) -> DocLayout:
+        parsed = parse_layout(value)
+        if parsed is None:
+            raise ValueError(LAYOUT_INVALID_MESSAGE)
+        return parsed
+
+
+class ExportDocxRequest(WithDocLayout):
     """Export a workspace Markdown file to a sibling ``.docx`` (确定性转换器)."""
 
     path: str = Field(..., min_length=1, max_length=1000)
@@ -225,7 +249,7 @@ class ExportDocxResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
-class ConvertMdToDocxRequest(BaseModel):
+class ConvertMdToDocxRequest(WithDocLayout):
     """Stateless Markdown → Word conversion (local desktop UI; images as base64)."""
 
     markdown: str
@@ -242,7 +266,7 @@ class ConvertMdToDocxResponse(BaseModel):
     suggested_filename: str
 
 
-class ExportPdfRequest(BaseModel):
+class ExportPdfRequest(WithDocLayout):
     """Export a workspace Markdown file to a sibling ``.pdf`` (确定性转换器)."""
 
     path: str = Field(..., min_length=1, max_length=1000)
@@ -257,7 +281,7 @@ class ExportPdfResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
-class ConvertMdToPdfRequest(BaseModel):
+class ConvertMdToPdfRequest(WithDocLayout):
     """Stateless Markdown → PDF conversion (local desktop UI)."""
 
     markdown: str

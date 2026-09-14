@@ -16,7 +16,6 @@ from agentcore.api.routes import (
     auth,
     autonomy,
     boards,
-    bookmarks,
     capabilities,
     conversations,
     demo_tape,
@@ -42,6 +41,7 @@ from agentcore.api.routes import (
     skill_catalog,
     skill_store,
     system,
+    tables,
     usage,
     users,
     workflow_store,
@@ -110,7 +110,7 @@ def _validate_single_process_assumptions() -> None:
 
     - **设备履约中枢** (``fulfill/hub.py``): a desktop's fulfill SSE lands on worker
       A while its turn runs on worker B, which then finds no fulfiller at all —
-      local workspace / Host / MCP / 白板 tools break, and local-workspace turns are
+      local workspace / Host / MCP tools break, and local-workspace turns are
       hard-refused by the presence gate as「本机桌面未连接」(not a soft degrade).
     - **对话事件流** (``runtime/turn/runs.py`` · ``runtime/events/conversation_hub.py``):
       attach / 跟播 landing on a worker that is not running the turn yields a bare
@@ -404,7 +404,7 @@ async def lifespan(app: FastAPI):
     # (not just salvage) unfinished workers.
     turn_lease_sweep_task: asyncio.Task | None = None
     if settings.turn_lease_enabled:
-        from agentcore.runtime.crash_delegate import production_crash_delegate_factory
+        from agentcore.conversation.crash_delegate import production_crash_delegate_factory
         from agentcore.runtime.leases import turn_lease_sweep_loop
         from agentcore.runtime.recover_hooks import set_crash_delegate_factory
 
@@ -616,12 +616,12 @@ async def agentcore_error_handler(request, exc: AgentCoreError):
 
 
 app.include_router(system.router)
+app.include_router(tables.router, prefix="/v1")
 app.include_router(admin.router, prefix="/v1")
 app.include_router(account.router, prefix="/v1")
 app.include_router(auth.router, prefix="/v1")
 app.include_router(autonomy.router, prefix="/v1")
 app.include_router(boards.router, prefix="/v1")
-app.include_router(bookmarks.router, prefix="/v1")
 app.include_router(capabilities.router, prefix="/v1")
 app.include_router(conversations.router, prefix="/v1")
 app.include_router(demo_tape.router, prefix="/v1")

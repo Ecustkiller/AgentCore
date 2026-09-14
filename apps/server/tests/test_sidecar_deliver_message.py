@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -85,6 +86,7 @@ def _clean_slots(monkeypatch):
     turn_queue.clear("c-sidecar-started")
     turn_queue.clear("c-sidecar-persist-fail")
     turn_queue.clear("c-sidecar-persist-rollback")
+    turn_queue.clear("c-sidecar-hist")
 
 
 async def test_deliver_message_steer_received_no_new_turn(tmp_path, monkeypatch):
@@ -552,4 +554,76 @@ async def test_register_current_turn_run_occupies_slot():
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+
+
+async def test_deliver_message_during_history_fetch(tmp_path, monkeypatch):
+    """startTurn occupies turn_runs before history returns; deliverMessage succeeds."""
+    from agentcore.runtime.turn import steer as turn_steer_mod
+
+    lines, write_line = _recorder()
+    server = SidecarServer(write_line)
+    await _init_sidecar(server, tmp_path)
+    cid = "c-sidecar-hist"
+    gate = asyncio.Event()
+
+    async def hang_history(*_a: Any, **_k: Any) -> list[Any]:
+        await gate.wait()
+        return []
+
+    monkeypatch.setattr(
+        "agentcore.sidecar.chat_history.resolve_sidecar_turn_history",
+        hang_history,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.coordination.session.active_coordination_for_conversation",
+        lambda _cid: None,
+    )
+    turn_steer_mod._reset_for_tests()
+    turn_steer_mod.begin_accepting(cid, execution_id="exec-hist")
+    try:
+        await server.handle_line(
+            _req(
+                2,
+                "startTurn",
+                {
+                    "userMessageId": "11111111-1111-4111-8111-111111111111",
+                    "messageId": "22222222-2222-4222-8222-222222222222",
+                    "traceId": "a" * 32,
+                    "folderId": None,
+                    "turnId": "t-hist",
+                    "conversationId": cid,
+                    "userMessage": "q",
+                },
+            )
+        )
+        for _ in range(200):
+            live = turn_runs.get(cid)
+            if live is not None and not live.task.done():
+                break
+            await asyncio.sleep(0)
+        else:
+            raise AssertionError("turn_runs not occupied during history fetch")
+        await server.handle_line(
+            _req(
+                3,
+                "deliverMessage",
+                {
+                    "conversationId": cid,
+                    "content": "加一句",
+                    "delivery": "steer",
+                },
+            )
+        )
+        resp = _reply(lines, 3)
+        assert "error" not in resp
+        assert resp["result"]["status"] == "received"
+    finally:
+        gate.set()
+        turn_steer_mod.end_accepting(cid)
+        turn_steer_mod._reset_for_tests()
+        for task in list(server._turns.values()):
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        turn_queue.clear(cid)
 

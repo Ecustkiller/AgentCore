@@ -129,7 +129,7 @@ class OutboxStore:
             if isinstance(val, str) and val.strip():
                 ctx[key] = val.strip()
         if agent_mentions:
-            from agentcore.conversation.mentions import to_stored_agent_mentions
+            from agentcore.core.mentions import to_stored_agent_mentions
 
             stored = to_stored_agent_mentions(agent_mentions)
             if stored:
@@ -709,7 +709,7 @@ class OutboxStore:
                     record[key] = val.strip()
             mentions = kwargs.get("agent_mentions")
             if mentions is not None:
-                from agentcore.conversation.mentions import to_stored_agent_mentions
+                from agentcore.core.mentions import to_stored_agent_mentions
 
                 stored = to_stored_agent_mentions(
                     mentions if isinstance(mentions, list) else None
@@ -741,8 +741,13 @@ class OutboxStore:
         execution_id: str | None = None,
         harvest_kind: str | None = None,
         interrupt_reason: str | None = None,
+        error: str | None = None,
     ) -> None:
-        """Seal an open umid-keyed record as cancelled+ready (stop / crash).
+        """Seal an open umid-keyed record as ready (stop / interrupt / engine error).
+
+        ``error`` is an observed engine exception → ``finish_reason=error``.
+        Otherwise ``interrupt_reason`` (default unknown) picks cancelled vs
+        interrupted via ``finish_reason_for``.
 
         Merges onto the existing ``user_message_id`` file only. Refuses to create
         a new ready dead letter keyed by the assistant ``message_id`` with an
@@ -799,25 +804,45 @@ class OutboxStore:
             record["user_message_id"] = user_message_id
             if bound_user_message:
                 record["user_message"] = bound_user_message
+            from agentcore.core.error_codes import ErrorCode
+            from agentcore.runtime.events import FinishReason
             from agentcore.runtime.turn.interrupt import (
                 compose_interrupt_body,
+                finish_reason_for,
                 normalize_interrupt_reason,
             )
 
             merged = pick_monotonic_content(record.get("content"), content)
-            record["content"] = compose_interrupt_body(
-                merged or "",
-                reason=normalize_interrupt_reason(interrupt_reason or ""),
-            )
+            if error is not None:
+                record["content"] = merged or ""
+                record["finish_reason"] = FinishReason.ERROR.value
+                raw_runs = record.get("runs")
+                runs: dict[str, Any] = raw_runs if isinstance(raw_runs, dict) else {}
+                if not isinstance(runs.get("error"), dict):
+                    msg = str(error).strip()[:2000]
+                    record["runs"] = {
+                        **runs,
+                        "finish_reason": FinishReason.ERROR.value,
+                        "error": {
+                            "code": ErrorCode.PIPELINE_ERROR.value,
+                            "message": msg or ErrorCode.PIPELINE_ERROR.value,
+                        },
+                    }
+            else:
+                resolved = normalize_interrupt_reason(interrupt_reason or "")
+                record["content"] = compose_interrupt_body(
+                    merged or "",
+                    reason=resolved,
+                )
+                record["finish_reason"] = finish_reason_for(resolved).value
             journal_map = record.setdefault("journal", {})
             for i, entry in enumerate(journal or []):
                 # Salvage journal may lack seq — use enumerate offset past existing keys.
                 key = str(entry.get("seq", i))
                 if key not in journal_map:
                     journal_map[key] = entry
-            # User stop / cancel = normal incomplete end: seal cancelled + READY so
-            # writeback can project the produced journal. No frameless retain-open.
-            record["finish_reason"] = "cancelled"
+            # Incomplete / error = normal terminal: seal READY so writeback can
+            # project the produced journal. No frameless retain-open.
             record["phase"] = PHASE_READY
             for key, val in (
                 ("origin", origin if origin is not None else ctx.get("origin")),
@@ -1163,7 +1188,7 @@ def to_record_turn_body(record: dict[str, Any]) -> dict[str, Any]:
         body["tool_failures"] = failures
     mentions = record.get("agent_mentions")
     if isinstance(mentions, list) and mentions:
-        from agentcore.conversation.mentions import to_stored_agent_mentions
+        from agentcore.core.mentions import to_stored_agent_mentions
 
         stored = to_stored_agent_mentions(mentions)
         if stored:

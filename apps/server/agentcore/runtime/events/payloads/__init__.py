@@ -270,9 +270,6 @@ TS_EXPORTS: tuple[TsExport, ...] = (
     TsInterface(shared.Citation),
     TsInterface(shared.CitationsPayload),
     TsInterface(workspace.WorkspaceOpRequiredPayload),
-    TsInterface(workspace.BoardOp),
-    TsInterface(workspace.BoardOpRequiredPayload),
-    TsInterface(workspace.BoardReadRequiredPayload),
     TsInterface(workspace.ExternalMountRequiredPayload),
     TsInterface(workspace.HostOpRequiredPayload),
     TsInterface(workspace.McpOpRequiredPayload),
@@ -354,8 +351,6 @@ EVENT_PAYLOAD_MODELS: dict[EventType, type[BaseModel]] = {
     EventType.CITATIONS: shared.CitationsPayload,
     EventType.EVIDENCE_LEDGER: shared.EvidenceLedgerPayload,
     EventType.WORKSPACE_OP_REQUIRED: workspace.WorkspaceOpRequiredPayload,
-    EventType.BOARD_OP_REQUIRED: workspace.BoardOpRequiredPayload,
-    EventType.BOARD_READ_REQUIRED: workspace.BoardReadRequiredPayload,
     EventType.EXTERNAL_MOUNT_REQUIRED: (
         workspace.ExternalMountRequiredPayload
     ),

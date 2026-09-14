@@ -8,7 +8,6 @@ The EventSink decouples execution from delivery (backpressure-safe).
 
 from __future__ import annotations
 
-from agentcore.runtime.events.board import board_op_required, board_read_required
 from agentcore.runtime.events.browser import browser_live_frame, browser_live_status
 from agentcore.runtime.events.chat import (
     citations_event,
@@ -138,8 +137,6 @@ __all__ = [
     "stage_card_required",
     "stage_card_resolved",
     "workspace_op_required",
-    "board_op_required",
-    "board_read_required",
     "browser_live_frame",
     "browser_live_status",
     "external_mount_required",

@@ -71,6 +71,10 @@ def test_every_catalog_tool_has_usable_metadata():
         assert isinstance(entry.summary, str)
         assert entry.available_to, f"{schema.name} must declare available_to"
         assert set(entry.available_to) <= {AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER}
+        summary = entry.summary.strip()
+        assert summary, f"{schema.name} needs catalog_summary for the toolbox shelf"
+        assert summary != schema.name, schema.name
+        assert len(summary) <= 80, (schema.name, summary)
 
 
 def test_catalog_has_no_duplicate_tools():
@@ -108,6 +112,7 @@ def test_read_only_builtins_are_shared_with_ceo():
         "code_search",
         "code_diagnostics",
         "git",
+        "docs_read",
     ):
         assert name in entries
         assert set(entries[name].available_to) == {AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER}
@@ -194,8 +199,10 @@ _CATALOG_FACE: dict[str, ToolFace] = {
     "remember": ToolFace.FOLDER,
     "update_folder_profile": ToolFace.FOLDER,
     "read_image": ToolFace.BOARD,
-    "board_ops": ToolFace.BOARD,
-    "board_read": ToolFace.BOARD,
+    "table_ops": ToolFace.TABLE,
+    "table_read": ToolFace.TABLE,
+    "docs_read": ToolFace.DOC,
+    "docs_write": ToolFace.DOC,
 }
 
 
@@ -206,9 +213,13 @@ def test_catalog_faces_are_not_an_orchestration_dumpster():
     orchestration = {n for n, f in by_name.items() if f is ToolFace.ORCHESTRATION}
     folder = {n for n, f in by_name.items() if f is ToolFace.FOLDER}
     board = {n for n, f in by_name.items() if f is ToolFace.BOARD}
+    table = {n for n, f in by_name.items() if f is ToolFace.TABLE}
+    doc = {n for n, f in by_name.items() if f is ToolFace.DOC}
     assert orchestration == {n for n, f in _CATALOG_FACE.items() if f is ToolFace.ORCHESTRATION}
     assert folder == {n for n, f in _CATALOG_FACE.items() if f is ToolFace.FOLDER}
     assert board == {n for n, f in _CATALOG_FACE.items() if f is ToolFace.BOARD}
+    assert table == {n for n, f in _CATALOG_FACE.items() if f is ToolFace.TABLE}
+    assert doc == {n for n, f in _CATALOG_FACE.items() if f is ToolFace.DOC}
 
 
 def test_on_demand_directory_splits_folder_and_board_off_orchestration():
@@ -221,10 +232,22 @@ def test_on_demand_directory_splits_folder_and_board_off_orchestration():
                 face=ToolFace.FOLDER.value,
             ),
             ConsultDirectoryEntry(
-                name="board_ops",
-                summary="白板上作画",
+                name="read_image",
+                summary="读工作区图",
                 section="tool",
                 face=ToolFace.BOARD.value,
+            ),
+            ConsultDirectoryEntry(
+                name="table_ops",
+                summary="改当前表格",
+                section="tool",
+                face=ToolFace.TABLE.value,
+            ),
+            ConsultDirectoryEntry(
+                name="docs_read",
+                summary="读创作文档",
+                section="tool",
+                face=ToolFace.DOC.value,
             ),
             ConsultDirectoryEntry(
                 name="delegate",
@@ -236,7 +259,11 @@ def test_on_demand_directory_splits_folder_and_board_off_orchestration():
     )
     assert "文件夹：" in out
     assert "白板：" in out
+    assert "表格：" in out
+    assert "文档：" in out
     assert "编排：" in out
     assert out.index("文件夹：") < out.index("- create_folder：新建云文件夹") < out.index("白板：")
-    assert out.index("白板：") < out.index("- board_ops：白板上作画") < out.index("编排：")
+    assert out.index("白板：") < out.index("- read_image：读工作区图") < out.index("表格：")
+    assert out.index("表格：") < out.index("- table_ops：改当前表格") < out.index("文档：")
+    assert out.index("文档：") < out.index("- docs_read：读创作文档") < out.index("编排：")
     assert out.index("编排：") < out.index("- delegate：派活")

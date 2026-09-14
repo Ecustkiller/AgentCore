@@ -26,7 +26,7 @@ async def team_preview_before_workers(
     still marks ``_auto_grant_pending`` for :func:`apply_delegation_grant`.
     Leftover hung cards are not recovered. light / seed /
     adjust no longer decide whether to emit a card — top-level
-    also runs. ``stage_card`` keep is marked when any top-level delegate starts.
+    also runs.
     """
     _ = (plan, complexity_hint, call_idx)
     if tool._depth != 0:
@@ -46,7 +46,4 @@ async def team_preview_before_workers(
         and axes.auto_executes
     ):
         tool._auto_grant_pending = True  # type: ignore[attr-defined]
-    from agentcore.runtime.kickoff.stage_card import mark_turn_keeps_stage_card
-
-    mark_turn_keeps_stage_card()
     return None

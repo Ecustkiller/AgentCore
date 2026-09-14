@@ -231,6 +231,26 @@ describe("arbitrateTurnOutcome", () => {
     expect(o.supportPackHost).toBe("composer");
     expect(o.message).toBe(TURN_INTERRUPTED_EMPTY_MESSAGE);
     expect(o.face?.message).toBe(TURN_INTERRUPTED_EMPTY_MESSAGE);
+    expect(o.hideEmptyBubble).toBe(false);
+  });
+
+  it("empty shell with no verdict hides the bubble instead of inventing interrupted", () => {
+    const o = arbitrateTurnOutcome({ content: "" });
+    expect(o.kind).toBe("ok");
+    expect(o.face).toBeNull();
+    expect(o.hideEmptyBubble).toBe(true);
+    expect(o.showComposerHint).toBe(false);
+    expect(o.recovery.kind).toBe("none");
+  });
+
+  it("empty conversationError still shows the session banner (not hidden as a blank shell)", () => {
+    const o = arbitrateTurnOutcome({
+      content: "",
+      conversationError: "对话加载失败",
+    });
+    expect(o.kind).toBe("error");
+    expect(o.hideEmptyBubble).toBe(false);
+    expect(o.showSessionBanner).toBe(true);
   });
 
   it("pending decision suppresses the interrupted composer hint", () => {

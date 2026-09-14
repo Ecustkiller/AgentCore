@@ -293,7 +293,7 @@ export function createLocalRootSource(
       const result = await api.openShellAtRoot(rootId, containerSub);
       if (!result.ok) throw new Error(result.reason);
     },
-    async exportMdToDocx(path) {
+    async exportMdToDocx(path, layout = "standard") {
       if (!isMarkdownPath(path)) {
         throw new Error("仅支持导出 Markdown（.md / .markdown）");
       }
@@ -353,6 +353,7 @@ export function createLocalRootSource(
         markdown: doc,
         images,
         sourceName: baseName(path),
+        layout,
       });
       const outName = converted.suggestedFilename;
       const outPath = parentDir(path)

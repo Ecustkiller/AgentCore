@@ -300,7 +300,6 @@ export const WhiteboardCanvas = forwardRef<
         if (!engine) throw new Error("画布尚未就绪");
         return engine.rasterizeElements(ids);
       },
-      applyOps: (ops) => engineRef.current?.applyOps(ops) ?? { created: [] },
       undo: () => engineRef.current?.undo(),
       redo: () => engineRef.current?.redo(),
       deleteSelected: () => engineRef.current?.deleteSelected(),

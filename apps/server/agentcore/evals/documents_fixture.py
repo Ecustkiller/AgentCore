@@ -34,7 +34,7 @@ harness **每例前后硬清**，避免用例间污染。
 ``layer=memory`` → ``DocumentMemoryStore.save``（``主题/*.md`` 等 store 相对路径）。
 ``content`` 与 ``file``（相对夹具根）二选一。
 
-本模块顶层只依赖 stdlib + ``EvalConfigError``，好让 ``seed_lint`` / ``--lint-only``
+本模块顶层只依赖 stdlib + ``EvalConfigError``，好让 ``seed_lint`` / ``evals lint``
 不拖 DB / memory 实现。
 """
 

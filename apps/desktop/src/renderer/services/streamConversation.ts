@@ -35,6 +35,7 @@ import {
 import { useExecutionStore } from "@/stores/execution";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import type { MessageStartPayload, SSEEvent } from "@/types/events";
+import { capTableSelection } from "@shared/tableSelection";
 import { unstable_batchedUpdates } from "react-dom";
 import { resetPartialTurnForReplay } from "./turns/replayReset";
 
@@ -606,6 +607,8 @@ export interface StreamConversationOptions {
   turnCommit?: TurnCommitReport;
   /** Cloud-path reason for ``X-AgentCore-Stream-Path-Reason`` (local-bound overbridge). */
   streamPathReason?: CloudStreamPathReason;
+  /** Table-session row-id snapshot (frozen at send). Omitted when empty. */
+  tableSelection?: readonly string[];
 }
 
 /** Send a user message and consume the SSE response stream (发送即有流).
@@ -621,11 +624,16 @@ export async function streamConversation({
   signal,
   turnCommit,
   streamPathReason,
+  tableSelection,
 }: StreamConversationOptions): Promise<void> {
   const payload: Record<string, unknown> = { content, delivery };
   if (attachments && attachments.length > 0) payload.attachments = attachments;
   if (agentMentions && agentMentions.length > 0) {
     payload.agent_mentions = agentMentions;
+  }
+  const selected = capTableSelection(tableSelection);
+  if (selected.length > 0) {
+    payload.table_selection = selected;
   }
   await runMessageStream(
     `/v1/conversations/${conversationId}/messages`,

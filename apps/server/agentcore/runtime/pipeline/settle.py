@@ -10,12 +10,12 @@ from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import (
     UNCLASSIFIED_EXCEPTION_USER_MESSAGE,
     AgentCoreError,
-    error_fields_for,
 )
 from agentcore.core.logging import get_logger
 from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.runtime.citations import merge_citations, reconcile_citations
 from agentcore.runtime.costing import aggregate_cost, captain_run_cost_from_state
+from agentcore.runtime.error_fields import error_fields_for
 from agentcore.runtime.events import (
     EventSink,
     FinishReason,
@@ -150,8 +150,8 @@ async def settle_successful_turn(
         # 辩论：主持人一行 + 每个辩手每轮一行（含 continue_run 续写），各自 parented
         # 到上级（辩手→主持人、主持人→captain），与 delegate 同形折账。
         *(asdict(r) for r in debate_tool.run_ledger),
-        # AI 协作白板 读图: each board_read 视觉子调用 is its own role=vision row,
-        # parented to the calling run (§九.4 Gap ②). Empty unless a read billed.
+        # Vision sub-calls (attachment eye→text / read_image) are their own
+        # role=vision rows, parented to the calling run. Empty unless a read billed.
         *(asdict(r) for r in vision_cost_sink),
     ]
     turn_cost = aggregate_cost(cost_runs)
@@ -309,7 +309,7 @@ async def salvage_failed_captain(
     # Salvage longest available text (segment / captain_state / sink) — P1 §3.4.
     with contextlib.suppress(Exception):
         await sink.flush_stream_state()
-    from agentcore.conversation.store.merge import pick_longest
+    from agentcore.core.message_merge import pick_longest
     from agentcore.runtime.events.stream_checkpointer import (
         CHANNEL_CAPTAIN_CONTENT,
         CHANNEL_CAPTAIN_REASONING,
@@ -341,8 +341,8 @@ async def salvage_failed_captain(
             if captain_state.usage
             else []
         ),
-        # A board_read 读图 sub-call may have billed before the captain died
-        # (§九.4 Gap ②): carry those vision rows so the spend isn't lost on error.
+        # A vision sub-call may have billed before the captain died:
+        # carry those vision rows so the spend isn't lost on error.
         *(asdict(r) for r in vision_cost_sink),
     ]
     await audit_recorder.flush()
@@ -395,7 +395,7 @@ async def salvage_pipeline_exception(
     # Salvage longest available text from segment / sink (captain_state may be absent).
     with contextlib.suppress(Exception):
         await sink.flush_stream_state()
-    from agentcore.conversation.store.merge import pick_longest
+    from agentcore.core.message_merge import pick_longest
     from agentcore.runtime.events.stream_checkpointer import (
         CHANNEL_CAPTAIN_CONTENT,
         CHANNEL_CAPTAIN_REASONING,

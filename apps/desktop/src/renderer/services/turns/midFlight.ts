@@ -27,7 +27,12 @@ import type {
   UserInterjectionPayload,
 } from "@/types/events";
 import {
+  capTableSelection,
+  tableSelectionPayload,
+} from "@shared/tableSelection";
+import {
   type ActiveSidecarTurn,
+  type SidecarTarget,
   getActiveSidecarTarget,
   getLastSidecarTarget,
 } from "../sidecarRouting";
@@ -99,9 +104,11 @@ async function deliverViaSidecar(
   attachments: OutgoingAttachment[] | undefined,
   delivery: MessageDelivery,
   agentMentions: OutgoingAgentMention[] | undefined,
+  reuseUserMessageId?: string,
+  tableSelection?: readonly string[],
 ): Promise<MidFlightSendResult> {
   try {
-    const userMessageId = crypto.randomUUID();
+    const userMessageId = reuseUserMessageId?.trim() || crypto.randomUUID();
     const messageId = crypto.randomUUID();
     const traceId = crypto.randomUUID().replace(/-/g, "");
     const ack = await window.sidecarApi.deliverMessage({
@@ -115,6 +122,7 @@ async function deliverViaSidecar(
       traceId,
       ...(attachments && attachments.length > 0 ? { attachments } : {}),
       ...(agentMentions && agentMentions.length > 0 ? { agentMentions } : {}),
+      ...tableSelectionPayload(tableSelection),
     });
     if (ack.status === "received") {
       paintMidFlightUserBubble(conversationId, {
@@ -189,8 +197,16 @@ export async function sendMidFlightMessage(
   attachments: OutgoingAttachment[] | undefined,
   delivery: MessageDelivery,
   agentMentions?: OutgoingAgentMention[],
+  opts?: {
+    /** 调用方已知本机目标（例如刚撞上忙槽的 startTurn）；勿再猜活 map。 */
+    sidecarTarget?: SidecarTarget;
+    /** 已入场的乐观用户泡 id，ack 绑同一条，不双泡。 */
+    userMessageId?: string;
+    tableSelection?: readonly string[];
+  },
 ): Promise<MidFlightSendResult> {
-  const sidecarTarget = resolveSidecarInFlightTarget(conversationId);
+  const sidecarTarget =
+    opts?.sidecarTarget ?? resolveSidecarInFlightTarget(conversationId);
   if (sidecarTarget) {
     return deliverViaSidecar(
       conversationId,
@@ -199,6 +215,8 @@ export async function sendMidFlightMessage(
       attachments,
       delivery,
       agentMentions,
+      opts?.userMessageId,
+      opts?.tableSelection,
     );
   }
 
@@ -206,6 +224,10 @@ export async function sendMidFlightMessage(
   if (attachments && attachments.length > 0) body.attachments = attachments;
   if (agentMentions && agentMentions.length > 0) {
     body.agent_mentions = agentMentions;
+  }
+  if (opts?.tableSelection && opts.tableSelection.length > 0) {
+    const selected = capTableSelection(opts.tableSelection);
+    if (selected.length > 0) body.table_selection = selected;
   }
 
   const ac = new AbortController();

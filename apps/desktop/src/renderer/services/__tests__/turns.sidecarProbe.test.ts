@@ -19,7 +19,11 @@ vi.mock("@/services/sidecarRouting", () => ({
   resolveSidecarRoot: vi.fn(),
   resolveConversationLocalTarget: vi.fn(() => Promise.resolve(null)),
   getActiveSidecarTarget: vi.fn(() => null),
+  setActiveSidecarTurn: vi.fn(),
   isSidecarEnabled: vi.fn(() => true),
+}));
+vi.mock("@/services/turns/midFlight", () => ({
+  sendMidFlightMessage: vi.fn(),
 }));
 vi.mock("@/services/sidecarHealth", () => ({
   probeSidecar: vi.fn(),
@@ -59,6 +63,7 @@ import {
   isSidecarEnabled,
   resolveConversationLocalTarget,
   resolveSidecarRoot,
+  setActiveSidecarTurn,
 } from "@/services/sidecarRouting";
 import {
   regenerateConversation,
@@ -69,6 +74,7 @@ import {
   resumeConversationViaSidecar,
   streamConversationViaSidecar,
 } from "@/services/streamConversationViaSidecar";
+import { sendMidFlightMessage } from "@/services/turns/midFlight";
 import { useConversationStore } from "@/stores/conversation";
 import { type PendingResume, usePausedTurnStore } from "@/stores/pausedTurns";
 import { runRegenerate, runResume, sendTurn } from "../turns";
@@ -84,6 +90,8 @@ const markSidecarUnhealthyMock = vi.mocked(markSidecarUnhealthy);
 const clearSidecarHealthMock = vi.mocked(clearSidecarHealth);
 const streamConversationMock = vi.mocked(streamConversation);
 const streamViaSidecarMock = vi.mocked(streamConversationViaSidecar);
+const sendMidFlightMock = vi.mocked(sendMidFlightMessage);
+const setActiveSidecarTurnMock = vi.mocked(setActiveSidecarTurn);
 const regenerateConversationMock = vi.mocked(regenerateConversation);
 const resumeConversationMock = vi.mocked(resumeConversation);
 const resumeViaSidecarMock = vi.mocked(resumeConversationViaSidecar);
@@ -121,6 +129,10 @@ beforeEach(() => {
   usePausedTurnStore.setState({ pending: [] });
   vi.clearAllMocks();
   streamConversationMock.mockResolvedValue(undefined);
+  sendMidFlightMock.mockResolvedValue({
+    kind: "received",
+    interjectionId: "ij-busy",
+  });
   regenerateConversationMock.mockResolvedValue(undefined);
   resolveLocalTargetMock.mockResolvedValue(null);
   getActiveSidecarTargetMock.mockReturnValue(null);
@@ -142,7 +154,11 @@ describe("sendTurn — 探活路由（引擎不可用报错）", () => {
       probed: true,
       detail: null,
     });
-    streamViaSidecarMock.mockResolvedValue(undefined as never);
+    streamViaSidecarMock.mockImplementation(async (opts) => {
+      if (opts.turnCommit) opts.turnCommit.committed = true;
+      useConversationStore.getState().appendToLastMessage("好", "c1");
+      return undefined as never;
+    });
 
     await sendTurn(spec());
 
@@ -169,11 +185,13 @@ describe("sendTurn — 探活路由（引擎不可用报错）", () => {
       detail: "本地引擎启动失败：spawn uv ENOENT",
     });
 
-    await sendTurn(spec());
+    const result = await sendTurn(spec());
 
+    expect(result.unstartedRefusal).toBe(true);
     expect(notifyInfoMock).not.toHaveBeenCalled();
     expect(streamConversationMock).not.toHaveBeenCalled();
     expect(streamViaSidecarMock).not.toHaveBeenCalled();
+    expect(useConversationStore.getState().byId.c1?.messages).toHaveLength(0);
     expect(useConversationStore.getState().byId.c1?.executionVia).not.toBe(
       "cloud_bridge",
     );
@@ -204,11 +222,13 @@ describe("sendTurn — 探活路由（引擎不可用报错）", () => {
       }),
     );
 
-    await sendTurn(spec());
+    const result = await sendTurn(spec());
 
+    expect(result.unstartedRefusal).toBe(true);
     expect(markSidecarUnhealthyMock).toHaveBeenCalledWith(TARGET, "拉不起");
     expect(streamConversationMock).not.toHaveBeenCalled();
     expect(notifyInfoMock).not.toHaveBeenCalled();
+    expect(useConversationStore.getState().byId.c1?.messages).toHaveLength(0);
     expect(useConversationStore.getState().byId.c1?.executionVia).not.toBe(
       "cloud_bridge",
     );
@@ -276,6 +296,43 @@ describe("sendTurn — 探活路由（引擎不可用报错）", () => {
     expect(streamConversationMock).not.toHaveBeenCalled();
   });
 
+  it("忙槽 → 改走本机插队，不画失败、不走云", async () => {
+    resolveSidecarRootMock.mockResolvedValue(TARGET);
+    probeSidecarMock.mockResolvedValue({
+      healthy: true,
+      probed: true,
+      detail: null,
+    });
+    streamViaSidecarMock.mockRejectedValue(
+      new StreamError("sidecar", undefined, {
+        code: "sidecar_turn_busy",
+        recoverable: false,
+        serverMessage: "当前还有回合在进行，请稍候或先停止后再继续",
+      }),
+    );
+
+    const result = await sendTurn(spec());
+
+    expect(result).toEqual({ unstartedRefusal: false });
+    expect(sendMidFlightMock).toHaveBeenCalledWith(
+      "c1",
+      "hi",
+      undefined,
+      "steer",
+      undefined,
+      { sidecarTarget: TARGET, userMessageId: "opt1" },
+    );
+    expect(streamConversationMock).not.toHaveBeenCalled();
+    expect(markSidecarUnhealthyMock).not.toHaveBeenCalled();
+    expect(setActiveSidecarTurnMock).toHaveBeenCalledWith("c1", "r1", "");
+    const rt = useConversationStore.getState().byId.c1;
+    expect(rt?.error).toBeFalsy();
+    expect(rt?.isGenerating).toBe(true);
+    expect(rt?.turnPhase).toBe("streaming");
+    expect(rt?.messages.some((m) => m.id === "opt1")).toBe(true);
+    expect(rt?.messages.some((m) => m.role === "assistant")).toBe(false);
+  });
+
   it("bad 缓存命中(!probed) → 横幅，不走云", async () => {
     resolveSidecarRootMock.mockResolvedValue(TARGET);
     // 该根本会话已探明坏：probeSidecar 命中缓存（probed:false）。
@@ -285,11 +342,13 @@ describe("sendTurn — 探活路由（引擎不可用报错）", () => {
       detail: "本地引擎启动失败：spawn uv ENOENT",
     });
 
-    await sendTurn(spec());
+    const result = await sendTurn(spec());
 
+    expect(result.unstartedRefusal).toBe(true);
     expect(streamConversationMock).not.toHaveBeenCalled();
     expect(streamViaSidecarMock).not.toHaveBeenCalled();
     expect(notifyInfoMock).not.toHaveBeenCalled();
+    expect(useConversationStore.getState().byId.c1?.messages).toHaveLength(0);
     expect(useConversationStore.getState().byId.c1?.executionVia).not.toBe(
       "cloud_bridge",
     );
@@ -314,10 +373,12 @@ describe("sendTurn — 探活路由（引擎不可用报错）", () => {
       detail: null,
     });
 
-    await sendTurn(spec());
+    const result = await sendTurn(spec());
 
+    expect(result.unstartedRefusal).toBe(true);
     expect(streamConversationMock).not.toHaveBeenCalled();
     expect(notifyInfoMock).not.toHaveBeenCalled();
+    expect(useConversationStore.getState().byId.c1?.messages).toHaveLength(0);
     expect(useConversationStore.getState().byId.c1?.executionVia).not.toBe(
       "cloud_bridge",
     );

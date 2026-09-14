@@ -10,8 +10,8 @@ fenced code. Images are rendered as alt-text placeholders with a warning
 (embedding is out of scope for this MVP).
 
 段落几何按 ``layout`` 档位走，与 ``md_to_docx`` 同口径（见 ``docs_export.layout``）：
-一级标题两档都居中；首行缩进两字只在 ``official`` 档开。PDF 不做公文页边距 /
-两端对齐 / 页码——行高 6mm ≈ 11pt × 1.5，与 Word 正文倍数对齐即可。
+一级标题两档都居中；首行缩进两字只在 ``official`` 档开。PDF 跟 Word 同一把尺子：
+小四 / 1.5 倍行高 / 档位页边距；official 另加页码「— n —」。
 """
 
 from __future__ import annotations
@@ -26,10 +26,16 @@ from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
 from agentcore.docs_export.layout import (
-    FIRST_LINE_INDENT_CHARS,
+    BODY_PT,
+    CODE_PT,
+    HEADING_PT,
     LAYOUT_OFFICIAL,
     LAYOUT_STANDARD,
+    PAGE_NUMBER_PT,
     DocLayout,
+    first_line_indent_mm,
+    line_height_mm,
+    margins_cm,
 )
 
 # CommonMark + GFM tables. html=False keeps raw HTML out of the tree.
@@ -37,11 +43,11 @@ _MD = MarkdownIt("commonmark", {"html": False, "linkify": False, "breaks": False
     "table"
 )
 
-_HEADING_PT = {1: 20, 2: 16, 3: 14, 4: 12}
-_BODY_PT = 11
-_CODE_PT = 9
-# 6mm ≈ 11pt × 1.5（与 Word LINE_SPACING_MULTIPLE 对齐），不要另做一套视觉。
-_LINE = 6.0
+_HEADING_PT = HEADING_PT
+_BODY_PT = BODY_PT
+_CODE_PT = CODE_PT
+# 与 Word LINE_SPACING_MULTIPLE 对齐（小四 × 1.5）。
+_LINE = line_height_mm(_BODY_PT)
 
 # fpdf2 is loaded on first convert (not at import) — same hygiene as python-docx.
 _FPDF: Any = None
@@ -49,9 +55,9 @@ _FPDF: Any = None
 # Preferred CJK faces (regular). Order = preference.
 _CJK_CANDIDATES: tuple[Path, ...] = (
     # Windows
-    Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts" / "msyh.ttc",
-    Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts" / "simhei.ttf",
     Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts" / "simsun.ttc",
+    Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts" / "simhei.ttf",
+    Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts" / "msyh.ttc",
     Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts" / "msyhbd.ttc",
     # Linux Noto / WenQuanYi
     Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
@@ -113,16 +119,26 @@ def convert_markdown_to_pdf(
     """Convert Markdown text to a .pdf (deterministic; no LLM / code_execute).
 
     ``layout`` 同 ``md_to_docx``：``standard``（默认）= 技术文档/报告；``official`` =
-    中文正式文书，正文首行缩进两字。
+    中文正式文书（首行缩进两字、公文页边距、页码）。
     """
     _ensure_fpdf()
     warnings: list[str] = []
     indent_body = layout == LAYOUT_OFFICIAL
     fonts = _resolve_fonts(warnings)
 
-    pdf = _FPDF(format="A4", unit="mm")
-    pdf.set_auto_page_break(auto=True, margin=18)
-    pdf.set_margins(18, 18, 18)
+    class _ExportPdf(_FPDF):
+        def footer(self) -> None:
+            if layout != LAYOUT_OFFICIAL:
+                return
+            self.set_y(-15)
+            _set_body_font(self, fonts, size=PAGE_NUMBER_PT)
+            self.set_text_color(0, 0, 0)
+            self.cell(0, 8, _safe_text(f"— {self.page_no()} —", fonts), align="C")
+
+    top, bottom, left, right = margins_cm(layout)
+    pdf = _ExportPdf(format="A4", unit="mm")
+    pdf.set_auto_page_break(auto=True, margin=bottom * 10)
+    pdf.set_margins(left * 10, top * 10, right * 10)
     _register_fonts_on_pdf(pdf, fonts, warnings)
     pdf.add_page()
 
@@ -307,7 +323,7 @@ def _write_indented_paragraph(pdf: Any, text: str) -> None:
     with pdf.text_columns() as columns:
         paragraph = columns.paragraph(
             line_height=line_height,
-            first_line_indent=FIRST_LINE_INDENT_CHARS * pdf.font_size,
+            first_line_indent=first_line_indent_mm(_BODY_PT),
         )
         paragraph.write(text)
         columns.end_paragraph()

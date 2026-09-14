@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "桌面/手机两端共享的 SSE 事件契约类型（EventType / payload / InteractionKind / ErrorCode 由后端经 pnpm gen:types 生成；REST 见 @agentcore/contract-rest-types）",
+  "description": "桌面 / admin 共享的 SSE 事件契约类型（EventType / payload / InteractionKind / ErrorCode 由后端经 pnpm gen:types 生成；REST 见 @agentcore/contract-rest-types）。手机经桌面树消费，不再单独 import。",
   "exports": {
     ".": "./src/index.ts",
     "./sidecar-ipc.json": "./src/sidecar-ipc.json"

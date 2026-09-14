@@ -425,9 +425,9 @@ class TurnRunRegistry:
             )
 
     async def _drive_resume_deferred(self, waiter: ResumeDeferredWaiter) -> None:
-        from agentcore.conversation.service import resume_chat
         from agentcore.runtime.events import turn_warning
         from agentcore.runtime.suspension.persistence import claim_paused_turn
+        from agentcore.runtime.turn.driver import get_turn_driver
 
         from .queue import turn_queue
 
@@ -477,7 +477,7 @@ class TurnRunRegistry:
 
         with origin_device(waiter.origin_device_id):
             task = asyncio.create_task(
-                resume_chat(
+                get_turn_driver().resume_turn(
                     suspension=suspension,
                     response=waiter.checkpoint_response,
                     sink=sink,
@@ -726,8 +726,8 @@ async def salvage_turns_on_shutdown(*, timeout: float | None = None) -> None:
     leftovers = await turn_runs.stop_all_and_drain(timeout=grace)
     if not leftovers:
         return
-    from agentcore.conversation.turn_persistence import close_user_stop_turn
     from agentcore.runtime.leases import orphan_turn_lease, release_turn_lease
+    from agentcore.runtime.turn.closer import close_user_stop_turn
 
     from .interrupt import (
         TurnInterruptReason,

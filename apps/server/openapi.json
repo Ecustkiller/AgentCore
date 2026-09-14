@@ -3674,34 +3674,9 @@
         "title": "BlockedUser",
         "type": "object"
       },
-      "BoardConversationResponse": {
-        "description": "The board's dedicated AI conversation id (existing or just-created).",
-        "properties": {
-          "conversation_id": {
-            "title": "Conversation Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "conversation_id"
-        ],
-        "title": "BoardConversationResponse",
-        "type": "object"
-      },
       "BoardDetail": {
         "description": "A board plus its full scene (the canvas load payload).",
         "properties": {
-          "conversation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Conversation Id"
-          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -3768,17 +3743,6 @@
       },
       "BoardSummary": {
         "properties": {
-          "conversation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Conversation Id"
-          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -3843,102 +3807,6 @@
           "version"
         ],
         "title": "BoardWriteResult",
-        "type": "object"
-      },
-      "BookmarkIdsResponse": {
-        "description": "The bookmarked message ids within one conversation (client star state).",
-        "properties": {
-          "message_ids": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Message Ids",
-            "type": "array"
-          }
-        },
-        "required": [
-          "message_ids"
-        ],
-        "title": "BookmarkIdsResponse",
-        "type": "object"
-      },
-      "BookmarkItem": {
-        "description": "One saved message in the「已收藏」view.\n\n``id`` = bookmark id; ``created_at`` = when it was bookmarked (the list sort\nkey). ``conversation_id`` / ``message_id`` are the jump target;\n``conversation_title`` + ``role`` + ``snippet`` give recognisable context.",
-        "properties": {
-          "conversation_id": {
-            "title": "Conversation Id",
-            "type": "string"
-          },
-          "conversation_title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Conversation Title"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "message_id": {
-            "title": "Message Id",
-            "type": "string"
-          },
-          "role": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Role"
-          },
-          "snippet": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Snippet"
-          }
-        },
-        "required": [
-          "id",
-          "conversation_id",
-          "message_id",
-          "created_at"
-        ],
-        "title": "BookmarkItem",
-        "type": "object"
-      },
-      "BookmarkListResponse": {
-        "properties": {
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/BookmarkItem"
-            },
-            "title": "Data",
-            "type": "array"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "title": "BookmarkListResponse",
         "type": "object"
       },
       "BrowserInputRequest": {
@@ -4237,8 +4105,20 @@
         "type": "object"
       },
       "CapabilitySkill": {
-        "description": "A system Skill in the catalog (渐进披露): its catalog ``summary`` (the always-on\none-line trigger) plus the full ``body`` guidance the CEO pulls via consult.\n``group`` is the Chinese 能力指引 subtitle (编排 / 工作区 / 交付 / 产品 / 工具).",
+        "description": "A system Skill in the catalog (渐进披露): its catalog ``summary`` (the always-on\none-line trigger) plus the full ``body`` guidance the CEO pulls via consult.\n``group`` is the Chinese 能力指引 subtitle (编排 / 工作区 / 交付 / 产品 / 工具).\n``blurb`` is the toolbox shelf description only — not the consult directory.\n``audience`` is who may see the entry (ceo / worker), same tokens as tool\n``available_to``.",
         "properties": {
+          "audience": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Audience",
+            "type": "array"
+          },
+          "blurb": {
+            "default": "",
+            "title": "Blurb",
+            "type": "string"
+          },
           "body": {
             "title": "Body",
             "type": "string"
@@ -5753,6 +5633,16 @@
             "title": "Images",
             "type": "object"
           },
+          "layout": {
+            "default": "standard",
+            "description": "排版档位：standard=技术报告；official=正式文书。默认 standard。",
+            "enum": [
+              "standard",
+              "official"
+            ],
+            "title": "Layout",
+            "type": "string"
+          },
           "markdown": {
             "title": "Markdown",
             "type": "string"
@@ -5799,6 +5689,16 @@
       "ConvertMdToPdfRequest": {
         "description": "Stateless Markdown → PDF conversion (local desktop UI).",
         "properties": {
+          "layout": {
+            "default": "standard",
+            "description": "排版档位：standard=技术报告；official=正式文书。默认 standard。",
+            "enum": [
+              "standard",
+              "official"
+            ],
+            "title": "Layout",
+            "type": "string"
+          },
           "markdown": {
             "title": "Markdown",
             "type": "string"
@@ -5901,24 +5801,6 @@
           }
         },
         "title": "CreateBoardRequest",
-        "type": "object"
-      },
-      "CreateBookmarkRequest": {
-        "properties": {
-          "conversation_id": {
-            "title": "Conversation Id",
-            "type": "string"
-          },
-          "message_id": {
-            "title": "Message Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "conversation_id",
-          "message_id"
-        ],
-        "title": "CreateBookmarkRequest",
         "type": "object"
       },
       "CreateConversationRequest": {
@@ -6463,6 +6345,23 @@
           }
         },
         "title": "CreateSnapshotRequest",
+        "type": "object"
+      },
+      "CreateTableRequest": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "CreateTableRequest",
         "type": "object"
       },
       "CreateWorkflowRequest": {
@@ -7346,7 +7245,7 @@
         "type": "object"
       },
       "DocDetail": {
-        "description": "A doc plus its full block body (editor load payload).",
+        "description": "A doc plus its markdown body (editor load payload).",
         "properties": {
           "body": {
             "additionalProperties": true,
@@ -8086,6 +7985,16 @@
       "ExportDocxRequest": {
         "description": "Export a workspace Markdown file to a sibling ``.docx`` (确定性转换器).",
         "properties": {
+          "layout": {
+            "default": "standard",
+            "description": "排版档位：standard=技术报告；official=正式文书。默认 standard。",
+            "enum": [
+              "standard",
+              "official"
+            ],
+            "title": "Layout",
+            "type": "string"
+          },
           "path": {
             "maxLength": 1000,
             "minLength": 1,
@@ -8133,6 +8042,16 @@
       "ExportPdfRequest": {
         "description": "Export a workspace Markdown file to a sibling ``.pdf`` (确定性转换器).",
         "properties": {
+          "layout": {
+            "default": "standard",
+            "description": "排版档位：standard=技术报告；official=正式文书。默认 standard。",
+            "enum": [
+              "standard",
+              "official"
+            ],
+            "title": "Layout",
+            "type": "string"
+          },
           "path": {
             "maxLength": 1000,
             "minLength": 1,
@@ -14262,6 +14181,13 @@
             "default": false,
             "title": "Requires Tools",
             "type": "boolean"
+          },
+          "table_selection": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Table Selection",
+            "type": "array"
           }
         },
         "required": [
@@ -15234,6 +15160,352 @@
         "title": "SuspensionKind",
         "type": "string"
       },
+      "TableColumn": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Options"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "type"
+        ],
+        "title": "TableColumn",
+        "type": "object"
+      },
+      "TableConversationResponse": {
+        "properties": {
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversation_id"
+        ],
+        "title": "TableConversationResponse",
+        "type": "object"
+      },
+      "TableDetail": {
+        "properties": {
+          "active_view_id": {
+            "title": "Active View Id",
+            "type": "string"
+          },
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/TableColumn"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/TableRowOut"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "views": {
+            "items": {
+              "$ref": "#/components/schemas/TableViewOut"
+            },
+            "title": "Views",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "schema_version",
+          "columns",
+          "rows",
+          "views",
+          "active_view_id"
+        ],
+        "title": "TableDetail",
+        "type": "object"
+      },
+      "TableOpsRequest": {
+        "properties": {
+          "confirm": {
+            "default": false,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "ops": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "minItems": 1,
+            "title": "Ops",
+            "type": "array"
+          },
+          "schema_baseline": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Baseline"
+          }
+        },
+        "required": [
+          "ops"
+        ],
+        "title": "TableOpsRequest",
+        "type": "object"
+      },
+      "TableOpsResult": {
+        "properties": {
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Id"
+          },
+          "conflict": {
+            "default": false,
+            "title": "Conflict",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "needs_confirmation": {
+            "default": false,
+            "title": "Needs Confirmation",
+            "type": "boolean"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "table": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TableDetail"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ok",
+          "level",
+          "summary"
+        ],
+        "title": "TableOpsResult",
+        "type": "object"
+      },
+      "TableRowOut": {
+        "properties": {
+          "cells": {
+            "additionalProperties": true,
+            "title": "Cells",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "cells",
+          "position"
+        ],
+        "title": "TableRowOut",
+        "type": "object"
+      },
+      "TableSummary": {
+        "properties": {
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "row_count": {
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "schema_version",
+          "row_count",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "TableSummary",
+        "type": "object"
+      },
+      "TableViewOut": {
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          },
+          "display_mode": {
+            "title": "Display Mode",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_default": {
+            "default": false,
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "display_mode",
+          "config"
+        ],
+        "title": "TableViewOut",
+        "type": "object"
+      },
       "TeamBatchInFlight": {
         "description": "本波 kickoff 编制已派出、尚未全部收工。``worker_count`` 不含 captain / 历史队员。",
         "properties": {
@@ -15411,6 +15683,8 @@
           "execution",
           "host_browser",
           "board",
+          "table",
+          "doc",
           "orchestration"
         ],
         "title": "ToolFace",
@@ -16599,6 +16873,23 @@
           }
         },
         "title": "UpdateProfileRequest",
+        "type": "object"
+      },
+      "UpdateTableRequest": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "UpdateTableRequest",
         "type": "object"
       },
       "UpdateWorkflowRequest": {
@@ -17976,13 +18267,32 @@
         ],
         "title": "WorkspaceWriteResult",
         "type": "object"
+      },
+      "WorkspacesTokenResponse": {
+        "description": "Freshly minted workspaces narrow token + lifetime (sidecar cloud-desk auth).\n\nDesktop: ``baseUrl`` for ``workspacesAuth`` is ``{apiOrigin}/v1/workspaces``;\n``apiKey`` is ``token``. Mint path: ``POST /v1/workspaces/token``.",
+        "properties": {
+          "expires_in_sec": {
+            "title": "Expires In Sec",
+            "type": "integer"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "expires_in_sec"
+        ],
+        "title": "WorkspacesTokenResponse",
+        "type": "object"
       }
     }
   },
   "info": {
     "description": "Multi-Agent AI Workspace API",
     "title": "AgentCore",
-    "version": "0.7.19"
+    "version": "0.7.20"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -24656,81 +24966,6 @@
         ]
       }
     },
-    "/v1/boards/{board_id}/conversation": {
-      "post": {
-        "description": "Get (or lazily mint) the board's dedicated AI conversation (AI协作白板.md §三 A / M2).\n\nIdempotent: returns the existing ``conversation_id`` if the board already has one;\notherwise creates a bare chat (titled like the board, no folder) and binds it.\nBoth repos share one session so the create + link commit together. The canvas calls\nthis before its first AI turn, then runs the turn on the returned conversation.",
-        "operationId": "ensure_board_conversation_v1_boards__board_id__conversation_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "board_id",
-            "required": true,
-            "schema": {
-              "title": "Board Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoardConversationResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Ensure Board Conversation",
-        "tags": [
-          "boards"
-        ]
-      }
-    },
     "/v1/boards/{board_id}/scene": {
       "put": {
         "description": "CAS-write the scene (autosave). A stale ``baseline`` returns ``conflict=True``\nwith the live board (never a blind overwrite); the client reconciles or forces the\nwrite with ``baseline=null``.",
@@ -24813,298 +25048,6 @@
         "summary": "Write Board Scene",
         "tags": [
           "boards"
-        ]
-      }
-    },
-    "/v1/bookmarks": {
-      "get": {
-        "description": "The user's「已收藏」list, newest-first (跨设备 — server-stored).\n\nBookmarks whose message/conversation was removed or whose conversation was\nsoft-deleted are filtered out by the repository join, so every item is\njump-able.",
-        "operationId": "list_bookmarks_v1_bookmarks_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BookmarkListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Bookmarks",
-        "tags": [
-          "bookmarks"
-        ]
-      },
-      "post": {
-        "description": "Bookmark a message (idempotent — re-adding returns the existing row).\n\n404 when the user doesn't own the conversation or the message isn't in it, so a\nbookmark can never point at another account's content.",
-        "operationId": "create_bookmark_v1_bookmarks_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateBookmarkRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BookmarkItem"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Bookmark",
-        "tags": [
-          "bookmarks"
-        ]
-      }
-    },
-    "/v1/bookmarks/ids": {
-      "get": {
-        "description": "The bookmarked message ids within one conversation (client star state).\n\nOwner-scopes the conversation first (404 for a non-owner) so ids never leak.",
-        "operationId": "list_bookmark_ids_v1_bookmarks_ids_get",
-        "parameters": [
-          {
-            "description": "限定某对话，返回其中已收藏的消息 id",
-            "in": "query",
-            "name": "conversation_id",
-            "required": true,
-            "schema": {
-              "description": "限定某对话，返回其中已收藏的消息 id",
-              "title": "Conversation Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BookmarkIdsResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Bookmark Ids",
-        "tags": [
-          "bookmarks"
-        ]
-      }
-    },
-    "/v1/bookmarks/{message_id}": {
-      "delete": {
-        "description": "Un-bookmark a message (idempotent — a no-match is still 200).",
-        "operationId": "remove_bookmark_v1_bookmarks__message_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "message_id",
-            "required": true,
-            "schema": {
-              "title": "Message Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Remove Bookmark",
-        "tags": [
-          "bookmarks"
         ]
       }
     },
@@ -33857,7 +33800,8 @@
         ]
       },
       "post": {
-        "operationId": "create_doc_share_v1_docs__doc_id__shares_post",
+        "description": "First publish mints a URL (201). Later POSTs update that snapshot (200).",
+        "operationId": "publish_doc_share_v1_docs__doc_id__shares_post",
         "parameters": [
           {
             "in": "path",
@@ -33919,7 +33863,7 @@
           }
         },
         "responses": {
-          "201": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
@@ -33940,7 +33884,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Create Doc Share",
+        "summary": "Publish Doc Share",
         "tags": [
           "docs"
         ]
@@ -40149,6 +40093,534 @@
         ]
       }
     },
+    "/v1/tables": {
+      "get": {
+        "operationId": "list_tables_v1_tables_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TableSummary"
+                  },
+                  "title": "Response List Tables V1 Tables Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Tables",
+        "tags": [
+          "tables"
+        ]
+      },
+      "post": {
+        "operationId": "create_table_v1_tables_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTableRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Table",
+        "tags": [
+          "tables"
+        ]
+      }
+    },
+    "/v1/tables/{table_id}": {
+      "delete": {
+        "operationId": "delete_table_v1_tables__table_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "table_id",
+            "required": true,
+            "schema": {
+              "title": "Table Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Table",
+        "tags": [
+          "tables"
+        ]
+      },
+      "get": {
+        "operationId": "get_table_v1_tables__table_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "table_id",
+            "required": true,
+            "schema": {
+              "title": "Table Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Table",
+        "tags": [
+          "tables"
+        ]
+      },
+      "patch": {
+        "operationId": "update_table_v1_tables__table_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "table_id",
+            "required": true,
+            "schema": {
+              "title": "Table Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTableRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Table",
+        "tags": [
+          "tables"
+        ]
+      }
+    },
+    "/v1/tables/{table_id}/conversation": {
+      "post": {
+        "operationId": "ensure_table_conversation_v1_tables__table_id__conversation_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "table_id",
+            "required": true,
+            "schema": {
+              "title": "Table Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableConversationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ensure Table Conversation",
+        "tags": [
+          "tables"
+        ]
+      }
+    },
+    "/v1/tables/{table_id}/ops": {
+      "post": {
+        "operationId": "apply_table_ops_v1_tables__table_id__ops_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "table_id",
+            "required": true,
+            "schema": {
+              "title": "Table Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TableOpsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableOpsResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Table Ops",
+        "tags": [
+          "tables"
+        ]
+      }
+    },
     "/v1/usage/summary": {
       "get": {
         "description": "Account dashboard: today's tokens/cost, the month's cost, the recent\ndaily-cost trend, and the quota.\n\nWindows are bounded at the current UTC day / month start (MVP — a per-user\ntimezone is a later refinement). ``recent_daily_cost`` is the last\n``_TREND_DAYS`` UTC days (zero-filled, oldest-first) for the sparkline.\nMoney is nano-CNY; ``CostBreakdown.cny_total`` is already yuan (no FX).\nPer-role split lives on the turn payroll\n(``GET /messages/{id}/cost``), not this monthly account view.\n\nThis is the account total, so it also carries spend that belongs to no\nconversation at all (AI 改写 / 文档 description — ``role=assist`` ledger rows).\n``requests`` counts assistant turns only, so those rows raise 花销 without\nraising 请求数.\n\n``quota`` mirrors what ``enforce_quota`` will actually apply to this user:\nper-user override columns first, else global ``quota_*`` — so the meters\nnever show a cap the gate wouldn't enforce.",
@@ -44527,6 +44999,72 @@
           }
         },
         "summary": "Convert Md To Pdf",
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/v1/workspaces/token": {
+      "post": {
+        "description": "Exchange the caller's cookie/Bearer access session for a workspaces narrow ticket.",
+        "operationId": "mint_workspaces_token_v1_workspaces_token_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacesTokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mint Workspaces Token",
         "tags": [
           "workspaces"
         ]

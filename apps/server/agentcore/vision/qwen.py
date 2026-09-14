@@ -1,9 +1,9 @@
 """QwenVLReader — a :class:`~agentcore.vision.protocol.VisionReader` over Qwen-VL.
 
-Reads a board PNG (手绘 / 截图) via Alibaba DashScope's **OpenAI-compatible**
-``/chat/completions`` endpoint (AI协作白板.md §九.4). The image rides as a standard
-multimodal user message: a ``text`` part (the brief prompt) + an ``image_url`` part whose
-URL is a ``data:image/png;base64,…`` data URL. Mirrors
+Reads a PNG via Alibaba DashScope's **OpenAI-compatible**
+``/chat/completions`` endpoint. The image rides as a standard multimodal user
+message: a ``text`` part (the brief prompt) + an ``image_url`` part whose URL is
+a ``data:image/png;base64,…`` data URL. Mirrors
 :class:`~agentcore.llm.openai_compatible.OpenAICompatibleProvider`'s HTTP shape (Bearer
 auth, ``base_url`` with version prefix, typed status mapping + bounded retry), but stays a
 self-contained one-shot reader — no streaming, no tool calls, no ``LLMRequest`` (which has
@@ -85,10 +85,10 @@ class QwenVLReader:
         """Return Qwen-VL's reading of ``png_base64`` guided by ``prompt``.
 
         The :class:`VisionReading` carries the text reading + the call's token usage / model,
-        so ``BoardReadTool`` can bill the sub-call into the turn's cost ledger (§九.4 Gap ②).
-        Raises a typed :mod:`agentcore.core.errors` LLM error on auth / balance / rate /
-        timeout / server failure or an empty reply — ``BoardReadTool`` catches it and maps
-        it to a clean tool error, so a bad key or down provider never hangs the turn.
+        so ``read_image`` / attachment eye→text can bill the sub-call into the turn's
+        cost ledger. Raises a typed :mod:`agentcore.core.errors` LLM error on auth /
+        balance / rate / timeout / server failure or an empty reply — callers map it
+        to a clean tool error, so a bad key or down provider never hangs the turn.
         """
         payload = {
             "model": self._model,
@@ -126,11 +126,11 @@ class QwenVLReader:
         text = _content_text(choice.get("message", {}).get("content"))
         usage = _usage_from(data.get("usage", {}))
         # Observability log only (the dev.jsonl LLM-call trace) — the cost ledger is billed
-        # separately by BoardReadTool off the returned VisionReading.usage (§九.4 Gap ②).
+        # separately off the returned VisionReading.usage (role=vision orphan).
         # ``content`` is the reading (safe to log); the request messages carry the base64
         # image, so they are deliberately NOT passed.
         log_llm_call(
-            scenario="vision.board_read",
+            scenario="vision.read",
             model=data.get("model", self._model),
             usage=usage,
             finish_reason=choice.get("finish_reason", "stop"),

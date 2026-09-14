@@ -147,11 +147,11 @@ async def persist_placeholder_abort(
 
     Presence-gate / prepare abort used to emit SSE error and leave the row
     ``running`` — a later open / follow then kept the composer spinning. Product
-    face via ``error_fields_for`` (dedicated local-workspace codes, not
+    face via ``error_fields_for`` (typed local-workspace ``AgentCoreError``, not
     STREAM_ERROR).
     """
     from agentcore.core.error_codes import ErrorCode
-    from agentcore.core.errors import error_fields_for
+    from agentcore.runtime.error_fields import error_fields_for
 
     code, message, err_ctx = error_fields_for(
         exc,
@@ -194,7 +194,10 @@ async def persist_incomplete_turn(
     trace_id: str,
     message_id: str | None,
 ) -> None:
-    """Persist a cancelled turn's already-streamed reply + finished work."""
+    """Persist a found-dead turn's already-streamed reply + finished work.
+
+    Not a user stop — the caller did not witness ``user_stop``.
+    """
     if not message_id:
         logger.warning(
             "chat.incomplete_persist_skipped",
@@ -206,7 +209,7 @@ async def persist_incomplete_turn(
         message_id=message_id,
         conversation_id=conversation_id,
         trace_id=trace_id,
-        reason=TurnInterruptReason.USER_STOP,
+        reason=TurnInterruptReason.UNKNOWN,
         content=content,
         journal=list(journal) if journal else [],
     )

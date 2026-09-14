@@ -13,6 +13,7 @@ export const NARROW_HIDDEN_SETTINGS_PATHS = new Set([
 const NARROW_BLOCKED_PREFIXES = [
   "/whiteboard",
   "/docs",
+  "/tables",
   "/toolbox",
   "/explore",
 ] as const;
@@ -29,6 +30,7 @@ export const NARROW_HIDDEN_PALETTE_IDS = new Set([
   "nav-conversations",
   "nav-whiteboard",
   "nav-docs",
+  "nav-tables",
   "nav-toolbox",
   "nav-guidelines",
   "nav-store",

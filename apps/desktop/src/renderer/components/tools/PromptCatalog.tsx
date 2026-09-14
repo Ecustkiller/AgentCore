@@ -72,6 +72,7 @@ import {
   skillFileName,
 } from "@/services/skillCatalog";
 import {
+  type SkillStoreListing,
   listInstalledSkills,
   listMySkillListings,
   publishSkill,
@@ -121,15 +122,6 @@ function readPromptDrag(event: DragEvent) {
   return parsePromptDragPayload(event.dataTransfer.getData(PROMPT_DRAG_MIME));
 }
 
-function connectorTileDescription(server: {
-  command: string;
-  args: string[];
-  runtimeError?: string | null;
-}): string {
-  if (server.runtimeError?.trim()) return server.runtimeError;
-  return `${server.command} ${server.args.join(" ")}`.trim();
-}
-
 function toScopeEntry(
   doc: Awaited<ReturnType<typeof listScopeEntries>>[number],
 ): AccountScopeEntry {
@@ -153,12 +145,10 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
   const updatesOpen = searchParams.get("updates") === "1";
   const [overlay, setOverlay] = useState<SkillCatalog>(EMPTY_SKILL_CATALOG);
   const [accountEntries, setAccountEntries] = useState<AccountScopeEntry[]>([]);
-  const [listings, setListings] = useState<
-    Awaited<ReturnType<typeof listMySkillListings>>
+  const [listings, setListings] = useState<SkillStoreListing[]>([]);
+  const [installedListings, setInstalledListings] = useState<
+    SkillStoreListing[]
   >([]);
-  const [installedCopyIds, setInstalledCopyIds] = useState<Set<string>>(
-    () => new Set(),
-  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [accountReady, setAccountReady] = useState(false);
@@ -274,18 +264,12 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
       .then(([mine, installed]) => {
         if (cancelled) return;
         setListings(mine);
-        setInstalledCopyIds(
-          new Set(
-            installed
-              .map((row) => row.installDocumentId)
-              .filter((id): id is string => Boolean(id)),
-          ),
-        );
+        setInstalledListings(installed);
       })
       .catch(() => {
         if (cancelled) return;
         setListings([]);
-        setInstalledCopyIds(new Set());
+        setInstalledListings([]);
       });
     return () => {
       cancelled = true;
@@ -576,7 +560,7 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
           connectors={connectorPicks.map((row) => ({
             id: row.id,
             label: row.label,
-            description: row.server ? connectorTileDescription(row.server) : "",
+            runtimeError: row.server?.runtimeError ?? null,
             accessory: row.server ? (
               <ConnectorStatusBadge server={row.server} />
             ) : undefined,
@@ -585,7 +569,8 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
           showConnectors={Boolean(mcp.api)}
           creatingFolder={creatingFolder}
           busy={busy}
-          installedCopyIds={installedCopyIds}
+          listings={listings}
+          installedListings={installedListings}
           onOpenItem={(id) => {
             setSelectedId(id);
             if (updatesOpen) setUpdatesOpen(false);
@@ -624,7 +609,7 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
         item={selectedItem}
         overlay={overlay}
         listings={listings}
-        installedCopyIds={installedCopyIds}
+        installedListings={installedListings}
         busy={busy}
         showToolsHint={showToolsHint}
         toolsHint={TOOLS_GATE_HINT}

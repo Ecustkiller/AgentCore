@@ -1,4 +1,4 @@
-"""Creation-tool 文档 request/response schemas (folder-hung block body)."""
+"""Creation-tool 文档 request/response schemas (folder-hung markdown body)."""
 
 from datetime import datetime
 from typing import Any
@@ -29,7 +29,7 @@ class DocSummary(BaseModel):
 
 
 class DocDetail(DocSummary):
-    """A doc plus its full block body (editor load payload)."""
+    """A doc plus its markdown body (editor load payload)."""
 
     body: dict[str, Any]
 

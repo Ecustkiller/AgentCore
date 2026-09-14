@@ -27,12 +27,11 @@ import {
 } from "@/services/turns";
 import { syncConversationFollow } from "@/services/turns/conversationFollow";
 import { hasLocalConversationStream } from "@/services/turns/streamOwnership";
-import { useBookmarkStore } from "@/stores/bookmarks";
 import {
   type MemoryUpdate,
   type Message,
   getRuntime,
-  isMessageWindowStrictlyRicher,
+  hasUnconfirmedLocalTail,
   useConversationStore,
 } from "@/stores/conversation";
 import {
@@ -78,10 +77,8 @@ function adoptMessageWindow(
   return true;
 }
 
-/** Cold SWR: overwrite empty/cache-backed slice from network (never a live stream).
- * Same richer-dominance as {@link loadLatestWindow}: a thinner GET (in-flight
- * journal not flushed / harvest without `run_plan`) must not wipe a cache that
- * already has the team marker + journal — that is the refresh flash-then-gone. */
+/** Cold SWR: adopt the persisted server list over cache (never a live stream).
+ * Empty GET must not wipe a revealed cache — that is not a server window. */
 function reconcileMessageWindow(
   id: string,
   messages: Message[],
@@ -92,16 +89,15 @@ function reconcileMessageWindow(
   if (s.currentConversationId !== id) return false;
   if (hasLocalConversationStream(id)) return false;
   const existing = getRuntime(id).messages;
-  if (
-    existing.length > 0 &&
-    !isMessageWindowStrictlyRicher(messages, existing)
-  ) {
-    logEvent("info", "conversation.slice_diag", {
-      action: "cold_reconcile_reject_not_richer",
-      conversation_id: id,
-      before_count: existing.length,
-      after_count: messages.length,
-    });
+  if (messages.length === 0) {
+    if (existing.length > 0) {
+      logEvent("info", "conversation.slice_diag", {
+        action: "cold_reconcile_reject_empty",
+        conversation_id: id,
+        before_count: existing.length,
+        after_count: 0,
+      });
+    }
     return false;
   }
   s.setMessageWindow(messages, flags, id);
@@ -276,6 +272,9 @@ export function ConversationPage() {
             const action = decideWarmOpenAction({
               hasLocalStream: hasLocalConversationStream(id),
               hasDestination: hasOpenDestination(id),
+              hasUnconfirmedTail: hasUnconfirmedLocalTail(rt.messages, {
+                isGenerating: rt.isGenerating,
+              }),
             });
             if (action === "snap_latest") {
               // Explicit snap (composer「跳到最新」同权) — crosses richer/hasMoreAfter.
@@ -371,14 +370,6 @@ export function ConversationPage() {
       syncConversationFollow(null);
     };
   }, [id, hydrateRetry]);
-
-  // 消息收藏 star state (方向 4): load which of this conversation's messages are
-  // bookmarked so their bubbles render a filled star. Best-effort + independent of
-  // the history load (a failed fetch just leaves stars empty).
-  useEffect(() => {
-    if (!id) return;
-    void useBookmarkStore.getState().hydrateForConversation(id);
-  }, [id]);
 
   // Page-scoped shortcuts for the single side panel: Ctrl/Cmd+I shows / hides it
   // (keeping the active tab), Ctrl/Cmd+J reveals it straight on the 工作区 home

@@ -1,10 +1,10 @@
 /**
- * Class B 零产出回滚：本发已提交一条回合、助手空失败、能力/限流码 → 撤用户泡+空助手。
- * 与 Class A（`isUnstartedSendRefusal` · SSE 未开 / 用户句未落库）分立，禁止并进。
+ * 本发未开始回复 → 撤用户泡+空助手。思考正文 / 回答 / 工具 / 派工 算已开始。
+ * 开跑前拒绝与已提交空失败同一条判定；错误码名单不是闸。
  *
  * 「本发是否已提交」由传输显式报告（云端 = 见过 `turn_saved`；sidecar = outbox
- * flush 成功），不嗅消息 id。桌面在 store 上判定（SSE error 后 `streamConversation`
- * 常 resolve），不扫 SSE 列表。
+ * flush 成功）。未提交时仅当乐观用户 id 仍在（服务器尚未换 id）才滚，避免
+ * 半落库状态误删。`runRegenerate` 不得调用。
  */
 import {
   type SupportDiagnosticIds,
@@ -15,7 +15,6 @@ import {
   assistantProjectionId,
   getRuntime,
 } from "@/stores/conversation";
-import { isZeroOutputSendRefusalCode } from "@agentcore/contract-types";
 
 export type ZeroOutputSendRollback = {
   userId: string;
@@ -31,6 +30,15 @@ function assistantHasBody(assistant: Message): boolean {
   return Boolean(assistant.content.trim());
 }
 
+function assistantHasReasoning(assistant: Message): boolean {
+  if (assistant.reasoning?.trim()) return true;
+  return Boolean(
+    assistant.process?.some(
+      (s) => s.kind === "reasoning" && Boolean(s.text?.trim()),
+    ),
+  );
+}
+
 function assistantHasTools(assistant: Message): boolean {
   if (assistant.composingTool) return true;
   if (assistant.process?.some((s) => s.kind === "tool")) return true;
@@ -39,14 +47,22 @@ function assistantHasTools(assistant: Message): boolean {
   );
 }
 
-function assistantHasTokens(assistant: Message): boolean {
-  const usage = assistant.usage;
-  if (!usage) return false;
-  return (
-    (usage.input ?? 0) > 0 ||
-    (usage.output ?? 0) > 0 ||
-    (usage.reasoning ?? 0) > 0
+function assistantHasTeamWork(assistant: Message): boolean {
+  if (assistant.process?.some((s) => s.kind === "team")) return true;
+  return Boolean(
+    assistant.runs?.events?.some((e) => {
+      if (e.type !== "run_started") return false;
+      const kind = (e.payload as { kind?: string } | undefined)?.kind;
+      return Boolean(kind && kind !== "captain");
+    }),
   );
+}
+
+function isKeepAlivePause(assistant: Message): boolean {
+  if (assistant.outcome === "paused") return true;
+  if (assistant.finishReason === "paused") return true;
+  if (assistant.runs?.finishReason === "paused") return true;
+  return false;
 }
 
 function collectSupportPack(
@@ -66,17 +82,22 @@ function collectSupportPack(
   };
 }
 
+export type InspectUnstartedSendRollbackOpts = {
+  /** When the transport never reported this send committed, only roll back
+   * while the optimistic user id is still the last user (not swapped). */
+  optimisticUserId?: string;
+  /** catch 路径上 SSE 可能还没把 error 贴到助手泡。 */
+  thrownCode?: string;
+};
+
 /**
- * 只根据本发 store 态 + 传输提交报告判定是否 Class B。`runRegenerate` 不得调用。
- * `thrownCode`：catch 路径上 SSE 可能还没把 error 贴到助手泡。
+ * 只根据本发 store 态 + 传输提交报告判定。`runRegenerate` 不得调用。
  */
 export function inspectZeroOutputSendRollback(
   conversationId: string,
   turnCommitted: boolean,
-  thrownCode?: string,
+  opts?: InspectUnstartedSendRollbackOpts,
 ): ZeroOutputSendRollback | null {
-  if (!turnCommitted) return null;
-
   const messages = getRuntime(conversationId).messages;
 
   let assistantIdx = -1;
@@ -91,13 +112,20 @@ export function inspectZeroOutputSendRollback(
   const user = messages[assistantIdx - 1];
   if (!user || user.role !== "user") return null;
 
+  if (!turnCommitted) {
+    if (!opts?.optimisticUserId || user.id !== opts.optimisticUserId) {
+      return null;
+    }
+  }
+
+  if (isKeepAlivePause(assistant)) return null;
   if (assistantHasBody(assistant)) return null;
+  if (assistantHasReasoning(assistant)) return null;
   if (assistantHasTools(assistant)) return null;
-  if (assistantHasTokens(assistant)) return null;
+  if (assistantHasTeamWork(assistant)) return null;
 
   const attached = assistant.error ?? assistant.usage?.error ?? null;
-  const code = attached?.code ?? thrownCode;
-  if (!code || !isZeroOutputSendRefusalCode(code)) return null;
+  const code = attached?.code ?? opts?.thrownCode ?? "";
 
   return {
     userId: user.id,

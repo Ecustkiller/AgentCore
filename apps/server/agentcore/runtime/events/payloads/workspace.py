@@ -1,5 +1,5 @@
-"""Workspace / whiteboard / desktop client-tool SSE payload wire models
-(factories: ``runtime/events/workspace.py`` / ``board.py`` / ``desktop.py``)."""
+"""Workspace / desktop client-tool SSE payload wire models
+(factories: ``runtime/events/workspace.py`` / ``desktop.py``)."""
 
 from __future__ import annotations
 
@@ -24,50 +24,6 @@ class WorkspaceOpRequiredPayload(WirePayload):
     op: str
     args: dict[str, Any]
     timeout_ms: int | None = absent()
-
-
-class BoardOp(WirePayload):
-    """One structured whiteboard op (AI协作白板 M2). The closed verb set is shared with
-    the server tool + the desktop applier; fields beyond `op` are op-specific."""
-
-    op: Literal["add_node", "connect", "move", "set_text", "delete", "group"]
-    ref: str | None = absent()
-    id: str | None = absent()
-    kind: Literal["sticky", "rectangle", "ellipse", "diamond", "text"] | None = absent()
-    text: str | None = absent()
-    x: float | None = absent()
-    y: float | None = absent()
-    width: float | None = absent()
-    height: float | None = absent()
-    color: str | None = absent()
-    from_: str | None = Field(
-        default=None, alias="from", json_schema_extra={"ts": "absent"}
-    )
-    to: str | None = absent()
-    label: str | None = absent()
-    members: list[str] | None = absent()
-
-
-class BoardOpRequiredPayload(WirePayload):
-    """Transport-only client-tool request: apply a batch of board ops to the open
-    whiteboard canvas (`board_id`). The board counterpart of `workspace_op_required`;
-    NOT journaled."""
-
-    request_id: str
-    conversation_id: str
-    board_id: str
-    ops: list[BoardOp]
-    summary: str
-
-
-class BoardReadRequiredPayload(WirePayload):
-    """Transport-only client-tool request: rasterize board elements (`ids`) to a PNG and
-    POST it back so the vision reader can read it. NOT journaled."""
-
-    request_id: str
-    conversation_id: str
-    board_id: str
-    ids: list[str]
 
 
 class ExternalMountRequiredPayload(WirePayload):

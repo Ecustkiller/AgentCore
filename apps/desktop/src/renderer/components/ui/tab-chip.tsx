@@ -25,6 +25,8 @@ export interface TabChipProps extends HTMLAttributes<HTMLDivElement> {
   onClose?: () => void;
   /** Omit on narrow / native — callers decide; this primitive does not hide it. */
   onPopOut?: () => void;
+  /** Unsaved edits — dot before the title (VS Code). Does not replace ×. */
+  dirty?: boolean;
 }
 
 const overlayHiddenClass = "opacity-0 pointer-events-none";
@@ -52,6 +54,7 @@ export const TabChip = forwardRef<HTMLDivElement, TabChipProps>(
       onSelect,
       onClose,
       onPopOut,
+      dirty = false,
       className,
       onPointerDown,
       onKeyDown,
@@ -61,6 +64,7 @@ export const TabChip = forwardRef<HTMLDivElement, TabChipProps>(
   ) {
     const closeLabel = `关闭 ${label}`;
     const popOutLabel = `弹出 ${label}`;
+    const tabName = dirty ? `${label}，未保存` : undefined;
     const pill = variant === "pill";
     const closeRight = "right-1";
     const popOutRight = onClose ? "right-6" : "right-1";
@@ -102,6 +106,7 @@ export const TabChip = forwardRef<HTMLDivElement, TabChipProps>(
         {...rest}
         ref={ref}
         title={title}
+        aria-label={tabName}
         {...(!pill
           ? {
               role: "tab" as const,
@@ -139,13 +144,26 @@ export const TabChip = forwardRef<HTMLDivElement, TabChipProps>(
             onClick={onSelect}
             icon={icon}
             title={title}
+            aria-label={tabName}
             className="h-auto min-w-0 max-w-[140px] gap-1.5 overflow-hidden rounded-none px-2.5 py-1 text-sm font-normal"
           >
+            {dirty ? (
+              <span
+                className="size-1.5 shrink-0 rounded-full bg-primary"
+                aria-hidden
+              />
+            ) : null}
             <span className="min-w-0 truncate">{label}</span>
           </Button>
         ) : (
           <>
             {icon}
+            {dirty ? (
+              <span
+                className="size-1.5 shrink-0 rounded-full bg-primary"
+                aria-hidden
+              />
+            ) : null}
             <span className="min-w-0 truncate">{label}</span>
           </>
         )}

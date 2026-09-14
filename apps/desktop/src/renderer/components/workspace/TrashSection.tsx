@@ -137,7 +137,7 @@ function TrashPanel({
 
 const CLOUD_EMPTY_TITLE = "软删区为空";
 const cloudEmptyHint = (retentionDays: number) =>
-  `云端可逆删除会进入此处；可用「还原」放回原路径。约 ${retentionDays} 天后自动清除。`;
+  `约 ${retentionDays} 天后自动清除。`;
 
 /**
  * Cloud AgentCore/trash for a conversation's workspace (chat side dock).

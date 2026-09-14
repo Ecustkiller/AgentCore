@@ -32,8 +32,10 @@ TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
 # Trigger + when-to-use polarity. XOR → playbook 参数一句；探路/编制 HOW → consult.
 DELEGATE_DESCRIPTION = (
     f"拆任务给临时团队（默认手写顶层 tasks：role+task，≤{MAX_DELEGATION_TASKS}；非终结）。"
-    "默认用本工具（成篇落盘、可运行应用、成规模查证、要并行、实质讨论尤然）；"
-    "闲聊、窗口里已有证据的一问一答、一眼写完的短文或小落盘、纯启服不必派。"
+    "默认用本工具：能切开才并行或交叉验证，或过程不该进你这扇会话窗"
+    "（成篇落盘、可运行应用、成规模查证、要并行尤然）；"
+    "切不出去的现场、窗里已有的证据、一眼能收口不必派"
+    "（闲聊、一问一答、短文或小落盘、纯启服）。"
     "有写权 ≠ 自己做完。不知读哪 ≠ 自己连搜。"
     "HOW→consult(staffing)。"
 )
@@ -43,7 +45,7 @@ NESTED_DELEGATE_DESCRIPTION = (
     f"把当前任务拆给由你指挥的子团队（手写 tasks：role+task，≤{MAX_DELEGATION_TASKS}；"
     "调用后等到子队收工）。"
     "成果级目标·约束·验收、尚未钉成单切片时优先用本工具再整合；"
-    "单文件 / 已钉薄壳 / 强耦合同 run 切片 / 小修·机械单步自己干。"
+    "单文件 / 已钉薄壳 / 切不出去的现场 / 小修·机械单步自己干。"
     "有写权 ≠ 自己做完。"
     "HOW→consult(lead_subteam)。"
 )

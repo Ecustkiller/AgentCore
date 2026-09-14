@@ -72,7 +72,8 @@ async def run_and_persist(
     llm_credentials: LLMCredentials | None,
     profile_set: ProfileSet | None = None,
     permission_axes=None,
-    board_id: str | None = None,
+    table_id: str | None = None,
+    table_selection: list[str] | None = None,
     llm_supports_tools: bool | None = None,
     x_client_platform: str | None = None,
     agent_mentions: list[dict] | None = None,
@@ -293,7 +294,8 @@ async def run_and_persist(
                             user_id=user_id,
                             backend=backend,
                             folder_id=folder_id,
-                            board_id=board_id,
+                            table_id=table_id,
+                            table_selection=table_selection,
                             attachments=attachments,
                             llm_credentials=llm_credentials,
                             permission_axes=permission_axes,
@@ -432,7 +434,7 @@ async def run_mechanism_direct_and_persist(
     workflow_version: int,
     profile_set: ProfileSet | None = None,
     permission_axes=None,
-    board_id: str | None = None,
+    table_id: str | None = None,
     x_client_platform: str | None = None,
 ) -> dict | None:
     """Mechanism-direct turn envelope (workflow / standing-bound-workflow).
@@ -440,8 +442,7 @@ async def run_mechanism_direct_and_persist(
     Same outer contract as :func:`run_and_persist` (placeholder · lease ·
     ``log_context`` · ``persist_turn_result``), but the inner pipeline is
     :func:`~agentcore.runtime.pipeline.workflow_run.run_workflow_pipeline`
-    (no CEO ``react_loop``). Aligns with ``stage_card_resolve`` posture for
-    debate; callers share this entry so「跑一次」and「绑工作流」do not drift.
+    (no CEO ``react_loop``). Callers share this entry so「跑一次」and「绑工作流」do not drift.
     """
     from agentcore.runtime.pipeline.workflow_run import run_workflow_pipeline
 
@@ -571,7 +572,7 @@ async def run_mechanism_direct_and_persist(
                             backend=backend,
                             history=history,
                             folder_id=folder_id,
-                            board_id=board_id,
+                            table_id=table_id,
                             permission_axes=permission_axes,
                             profile_set=profile_set,
                             llm_credentials=llm_credentials,

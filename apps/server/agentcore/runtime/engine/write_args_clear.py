@@ -22,7 +22,7 @@ args; resume rebuilds then re-applies.
 摘要因此挪到那里。
 
 遗留形态（stub / ``_landed_summary`` / landed-status / 仿调 ``_write_landed``）的结构化
-硬拒**保留为安全网**，见 ``cleared_write_stub_rejection`` / ``landed_status_name_rejection``；
+硬拒**保留为安全网**，见 ``tools.cleared_write_stub``；
 待线上连续数窗零命中再退休。
 """
 
@@ -32,15 +32,15 @@ import json
 import re
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
 
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
+from agentcore.tools.cleared_write_stub import (
+    LANDED_STATUS_TOOL,
+    LANDED_SUMMARY_KEY,
+    LEGACY_CLEARED_KEY,
+)
 
 WRITE_ARG_TOOLS = frozenset({"file_write", "str_replace"})
-
-# Legacy synthetic name formerly used as projected ``function.name``. Kept only so
-# residual imitation can be early-rejected; new projection never emits this name.
-LANDED_STATUS_TOOL = "_write_landed"
 
 # Argument keys that hold the bulky body for each write tool.
 _BODY_KEYS = ("content", "new_str", "new_string", "replacement")
@@ -48,16 +48,6 @@ _BODY_KEYS = ("content", "new_str", "new_string", "replacement")
 # Cap digest size (~几百 token): keep contract signal, not a second full body.
 _STRUCTURE_MAX_CHARS = 1200
 _STRUCTURE_MAX_ITEMS = 80
-
-# Legacy projection / stub markers (rejection兜底 only; new projection does not emit these).
-_LANDED_SUMMARY_KEY = "_landed_summary"
-_LEGACY_CLEARED_KEY = "_cleared"
-_STUB_BODY_MARKERS = frozenset({"[已清理]", "[已清理·须重填]"})
-
-# Tail shared by every rejection this module emits. The loop controller keys its
-# one-strike path-stop off this marker rather than per-branch wording, so rephrasing
-# a branch cannot silently orphan the early stop.
-_REJECTION_MARKER = "不能写入磁盘"
 
 _HTML_ID_RE = re.compile(r"""\bid\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
 _HTML_CLASS_RE = re.compile(r"""\bclass\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
@@ -204,8 +194,8 @@ def _is_projected_write_args(arguments: str) -> bool:
     under a write name, or renamed the call to ``LANDED_STATUS_TOOL``.
     """
     if (
-        f'"{_LANDED_SUMMARY_KEY}"' in arguments
-        or f'"{_LEGACY_CLEARED_KEY}"' in arguments
+        f'"{LANDED_SUMMARY_KEY}"' in arguments
+        or f'"{LEGACY_CLEARED_KEY}"' in arguments
     ):
         return True
     try:
@@ -258,107 +248,6 @@ def landed_result_note(arguments: str, original_len: int) -> str | None:
     structure = structural_write_summary(path, body)
     tail = f" · {structure}" if structure else ""
     return f"（已落盘 {original_len} 字符{tail}）"
-
-
-def is_cleared_write_stub_args(arguments: dict[str, Any]) -> bool:
-    """Same surface as ``cleared_write_stub_rejection`` — True for stub / landed summary.
-
-    Narrow surface: projection keys (``_landed_summary`` / ``_cleared``), landed-status
-    shape (``status == "landed"``), or body fields whose **entire** value equals a known
-    placeholder (``[已清理]`` / ``[已清理·须重填]``). Does **not** scan free prose for
-    the substring「已清理」.
-    """
-    if not isinstance(arguments, dict):
-        return False
-    if _LANDED_SUMMARY_KEY in arguments or _LEGACY_CLEARED_KEY in arguments:
-        return True
-    if arguments.get("status") == "landed":
-        return True
-    for key in (
-        "content",
-        "new_string",
-        "new_str",
-        "replacement",
-        "old_string",
-        "old_str",
-    ):
-        val = arguments.get(key)
-        if isinstance(val, str) and val.strip() in _STUB_BODY_MARKERS:
-            return True
-    return False
-
-
-def cleared_write_stub_rejection(arguments: dict[str, Any]) -> str | None:
-    """Structured hard-reject when mutate args are a cleared stub / landed summary.
-
-    Narrow surface: see ``is_cleared_write_stub_args``. Does **not** scan free prose
-    for the substring「已清理」— normal short text must still write.
-    """
-    if not is_cleared_write_stub_args(arguments):
-        return None
-    path = arguments.get("path") or arguments.get("file_path")
-    path_s = path.strip().replace("\\", "/") if isinstance(path, str) else ""
-    path_bit = f"`{path_s}`" if path_s else "该文件"
-    read_hint = (
-        f'file_read(path="{path_s}")' if path_s else "file_read(该 path)"
-    )
-    if _LANDED_SUMMARY_KEY in arguments or _LEGACY_CLEARED_KEY in arguments:
-        return (
-            f"拒绝：参数是上下文窗口里的只读「已落盘摘要」/清理占位，{_REJECTION_MARKER}。"
-            f"下一步（针对 {path_bit}）：① {read_hint} 取盘上真文；"
-            "② 再 str_replace（优先）或 file_write，按真文填完整 "
-            "content / old_string / new_string。"
-            "禁止把 `_landed_summary`、清理条或摘要原样当写盘参数重发。"
-        )
-    if arguments.get("status") == "landed":
-        return (
-            "拒绝：参数是请求窗里的只读「已落盘」压缩状态，不是可提交写参，"
-            f"{_REJECTION_MARKER}。"
-            f"下一步（针对 {path_bit}）：① {read_hint} 取盘上真文；"
-            "② 再 str_replace（优先）或 file_write，按真文填完整 "
-            "content / old_string / new_string。"
-            "禁止把 landed 状态原样当写盘参数重发。"
-        )
-    for key in (
-        "content",
-        "new_string",
-        "new_str",
-        "replacement",
-        "old_string",
-        "old_str",
-    ):
-        val = arguments.get(key)
-        if isinstance(val, str) and val.strip() in _STUB_BODY_MARKERS:
-            return (
-                "拒绝：正文参数仍是清理占位"
-                f"（{val.strip()}），{_REJECTION_MARKER}。"
-                f"下一步（针对 {path_bit}）：① {read_hint} 取盘上真文；"
-                "② 再 str_replace（优先）或按真文重填后再写。禁止原样重发 stub。"
-            )
-    return None
-
-
-def is_landed_echo_rejection(error_summary: str | None) -> bool:
-    """True when ``error_summary`` is a rejection from ``cleared_write_stub_rejection``.
-
-    Lives beside the rejection texts so the two cannot drift apart: the loop
-    controller uses this to grant landed-echo attempts a one-strike path stop.
-    """
-    return _REJECTION_MARKER in (error_summary or "")
-
-
-def landed_status_name_rejection(tool_name: str) -> str | None:
-    """Early-reject when the model imitates legacy projected name ``_write_landed``.
-
-    That name is a landed-status marker, not a registered tool. Must not fall through
-    to generic allowlist_deny / not_found.
-    """
-    if (tool_name or "").strip() != LANDED_STATUS_TOOL:
-        return None
-    return (
-        "拒绝：`_write_landed` 是请求窗里的「已落盘」压缩状态，不是可调用工具。"
-        "勿仿调该名称。改稿：先 file_read 取盘上真文，再 str_replace（优先）或 file_write。"
-    )
 
 
 def _body_len(arguments: str) -> int:

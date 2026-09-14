@@ -106,6 +106,7 @@ describe("文件页的软删区", () => {
 
     expect(await screen.findByText("软删区为空")).toBeTruthy();
     expect(screen.getByText(/约 30 天后自动清除/)).toBeTruthy();
+    expect(screen.queryByText(/还原/)).toBeNull();
   });
 
   it("tab 从隐藏切回可见时静默重拉，隐藏期间不拉", async () => {

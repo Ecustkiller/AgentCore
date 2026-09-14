@@ -116,6 +116,7 @@ class RunTool:
         needs_location=True,
         file_products=FileProductsContract.SELF_REPORT,
         produces_formats=(".xlsx", ".pptx"),
+        catalog_summary="跑命令 / 启服",
     )
 
     def __init__(self, *, location: Literal["server", "local"] | None = None) -> None:

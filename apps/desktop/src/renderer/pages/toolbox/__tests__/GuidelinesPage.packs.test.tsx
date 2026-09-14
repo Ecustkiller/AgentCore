@@ -142,6 +142,7 @@ const base: Capabilities = {
       summary: "派单进阶",
       body: "body",
       group: "编排",
+      blurb: "",
     },
   ],
   tools: [],

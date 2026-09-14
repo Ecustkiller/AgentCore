@@ -236,6 +236,12 @@ def _disarm_demo_tape_recorder():
     uninstall_recorder()
 
 
+def _cloud_conversation_store():
+    from agentcore.conversation.store.cloud import get_cloud_store
+
+    return get_cloud_store()
+
+
 @pytest.fixture(autouse=True)
 def _reset_conversation_store():
     """Restore CloudStore after sidecar tests swap in a local OutboxStore.
@@ -244,10 +250,14 @@ def _reset_conversation_store():
     under a no-op pacing wait (flush never settles). Demo-tape tests must patch
     ``demo_tape.player.pacing_sleep``, not process-wide ``asyncio.sleep``.
     """
-    yield
-    from agentcore.conversation.store import reset_conversation_store_for_tests
+    from agentcore.runtime.conversation_store import (
+        reset_conversation_store_for_tests,
+        set_conversation_store_factory,
+    )
     from agentcore.sidecar.server_pkg.core import reset_active_sidecar_for_tests
 
+    set_conversation_store_factory(_cloud_conversation_store)
+    yield
     reset_conversation_store_for_tests()
     reset_active_sidecar_for_tests()
 

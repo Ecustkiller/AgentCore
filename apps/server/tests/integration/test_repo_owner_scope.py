@@ -36,8 +36,8 @@ _CONTRACT: dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
     ),
     "boards.py": (
         "BoardRepository",
-        ("get_by_id", "get_by_conversation_id", "update_meta", "save_scene",
-         "attach_conversation", "soft_delete"),
+        ("get_by_id", "update_meta", "save_scene",
+         "soft_delete"),
         (),
     ),
     "folders.py": (

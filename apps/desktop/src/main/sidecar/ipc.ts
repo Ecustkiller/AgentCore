@@ -11,6 +11,8 @@ import {
   type SidecarListBrowserSessionsResult,
   type SidecarListQueuedTurnsRequest,
   type SidecarListQueuedTurnsResult,
+  type SidecarOccupancyRequest,
+  type SidecarOccupancyResponse,
   type SidecarProbeRequest,
   type SidecarRecoveryRequest,
   type SidecarRecoveryResponse,
@@ -209,6 +211,14 @@ export function registerSidecarIpc(): void {
         ["subpath"],
       );
       return manager.listQueuedTurns(req);
+    },
+  );
+
+  ipcMain.handle(
+    SIDECAR_CHANNELS.occupancy,
+    (_e, req: SidecarOccupancyRequest): SidecarOccupancyResponse => {
+      assertSidecarShape(SIDECAR_CHANNELS.occupancy, req, ["conversationId"]);
+      return manager.occupancy(req);
     },
   );
 

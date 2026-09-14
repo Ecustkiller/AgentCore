@@ -35,10 +35,10 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 /** Human-readable line for each updater phase (发布与门禁.md §7.6). */
-function updateStatusText(status: UpdaterStatus): string {
+function updateStatusText(status: UpdaterStatus): string | undefined {
   switch (status.phase) {
     case "idle":
-      return "点击下方按钮检查是否有新版本。";
+      return undefined;
     case "unsupported":
       return "开发模式下不检查更新；自动更新仅在安装版中生效。";
     case "checking":
@@ -67,7 +67,13 @@ function AndroidUpdateSection() {
   return (
     <SettingsSection
       title="软件更新"
-      description={status.message ?? "检查 Android 安装包是否有新版本。"}
+      description={
+        status.phase === "idle"
+          ? undefined
+          : status.phase === "checking"
+            ? "正在检查更新…"
+            : (status.message ?? undefined)
+      }
       divider
     >
       <div className="flex flex-wrap items-center gap-2">
@@ -315,7 +321,7 @@ function VersionSection() {
  *
  * 「允许本机执行」原本挂在本页（挨着构建溯源），用户找不到，
  * 已搬到「通用」（/more/general）的「进阶」区。手册入口从工具箱顶栏迁来：
- * 查阅不占工作面；窄屏不上手册页，故本行也不挂。
+ * 查阅不占工作面；窄屏不上手册页，故本行也不挂。收款码在「赞助」子页。
  */
 export function AboutSettings() {
   const navigate = useNavigate();

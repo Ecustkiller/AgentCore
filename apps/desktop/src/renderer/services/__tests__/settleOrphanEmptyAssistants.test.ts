@@ -1,5 +1,5 @@
 /**
- * B5 orphan empty-bubble settle (1a69f9dc · 方案 A).
+ * Orphan empty-bubble settle: stop the spinner, do not invent interrupted.
  */
 import { useConversationStore } from "@/stores/conversation";
 import {
@@ -38,7 +38,7 @@ beforeEach(() => {
 });
 
 describe("settleOrphanEmptyAssistants", () => {
-  it("rewrites streaming empty assistant to interrupted", () => {
+  it("stops streaming on empty assistant without inventing interrupted", () => {
     const store = useConversationStore.getState();
     store.switchConversation(CID);
     store.addMessage(
@@ -72,7 +72,32 @@ describe("settleOrphanEmptyAssistants", () => {
       .byId[CID].messages.find((m) => m.id === "a1");
     expect(a?.isStreaming).toBe(false);
     expect(a?.status).toBe("incomplete");
-    expect(a?.finishReason).toBe("interrupted");
+    expect(a?.finishReason).toBeUndefined();
+  });
+
+  it("does not stamp interrupted on already-settled incomplete empty", () => {
+    const store = useConversationStore.getState();
+    store.switchConversation(CID);
+    store.addMessage(
+      {
+        id: "a-incomplete",
+        role: "assistant",
+        content: "",
+        createdAt: "2026-01-01T00:00:01Z",
+        executionId: null,
+        isStreaming: false,
+        status: "incomplete",
+      },
+      CID,
+    );
+
+    settleOrphanEmptyAssistants(CID);
+
+    const a = useConversationStore
+      .getState()
+      .byId[CID].messages.find((m) => m.id === "a-incomplete");
+    expect(a?.status).toBe("incomplete");
+    expect(a?.finishReason).toBeUndefined();
   });
 
   it("leaves cancelled empty alone (synthetic cancelled face)", () => {
@@ -177,5 +202,49 @@ describe("settleOrphanEmptyAssistants", () => {
     expect(a?.status).toBe("running");
     expect(a?.finishReason).toBe("paused");
     expect(a?.isStreaming).toBe(false);
+  });
+
+  it("leaves keepMessageId streaming (composer placeholder for this send)", () => {
+    const store = useConversationStore.getState();
+    store.switchConversation(CID);
+    store.addMessage(
+      {
+        id: "u1",
+        role: "user",
+        content: "q",
+        createdAt: "2026-01-01T00:00:00Z",
+        executionId: null,
+        isStreaming: false,
+      },
+      CID,
+    );
+    store.addMessage(
+      {
+        id: "a-keep",
+        role: "assistant",
+        content: "",
+        createdAt: "2026-01-01T00:00:00Z",
+        executionId: null,
+        isStreaming: true,
+      },
+      CID,
+    );
+    store.addMessage(
+      {
+        id: "a-old",
+        role: "assistant",
+        content: "",
+        createdAt: "2026-01-01T00:00:00Z",
+        executionId: null,
+        isStreaming: true,
+      },
+      CID,
+    );
+
+    settleOrphanEmptyAssistants(CID, { keepMessageId: "a-keep" });
+
+    const msgs = useConversationStore.getState().byId[CID].messages;
+    expect(msgs.find((m) => m.id === "a-keep")?.isStreaming).toBe(true);
+    expect(msgs.find((m) => m.id === "a-old")?.isStreaming).toBe(false);
   });
 });

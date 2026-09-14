@@ -27,7 +27,13 @@ const base: Capabilities = {
     ceo: "full",
   },
   skills: [
-    { name: "thin_skill", summary: "薄技能", body: "thin-body", group: "" },
+    {
+      name: "thin_skill",
+      summary: "薄技能",
+      body: "thin-body",
+      group: "",
+      blurb: "",
+    },
   ],
   tools: [],
 };
@@ -56,15 +62,34 @@ describe("buildPromptCatalog", () => {
     const groups = buildPromptCatalog({
       ...base,
       skills: [
-        { name: "run", summary: "跑命令 / 启服", body: "r", group: "工具" },
-        { name: "staffing", summary: "团队拆法", body: "s", group: "编排" },
+        {
+          name: "run",
+          summary: "跑命令 / 启服",
+          body: "r",
+          group: "工具",
+          blurb: "",
+        },
+        {
+          name: "staffing",
+          summary: "团队拆法",
+          body: "s",
+          group: "编排",
+          blurb: "",
+        },
         {
           name: "local_desk",
           summary: "本机目录进工作区",
           body: "d",
           group: "工作区",
+          blurb: "",
         },
-        { name: "ask_kickoff", summary: "开场提问", body: "a", group: "编排" },
+        {
+          name: "ask_kickoff",
+          summary: "开场提问",
+          body: "a",
+          group: "编排",
+          blurb: "",
+        },
       ],
     });
     const skills = flattenPromptCatalog(groups).filter(
@@ -274,6 +299,7 @@ describe("buildPromptRail", () => {
             summary: "团队拆法",
             body: "s",
             group: "编排",
+            blurb: "",
           },
         ],
       },
@@ -311,6 +337,7 @@ describe("buildPromptRail", () => {
             summary: "团队拆法",
             body: "s",
             group: "编排",
+            blurb: "",
           },
         ],
       },

@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   finalizeGeneratingIfNeeded,
   finalizeHonestStopAbort,
+  isInterruptAbort,
 } from "../turns/helpers";
 
 const CID = "conv-honest-stop-abort";
@@ -69,6 +70,52 @@ describe("finalizeHonestStopAbort", () => {
 
     finalizeHonestStopAbort(CID);
 
+    expect(
+      getRuntime(CID).messages.find((m) => m.id === mid)?.finishReason,
+    ).toBe("interrupted");
+  });
+
+  it("Interrupted Abort 即使 stopping 也不盖 cancelled；无 finishReason 则盖 interrupted", () => {
+    beginTurnPreflight(CID);
+    enterTurnStreaming(CID);
+    const mid = useConversationStore.getState().createAssistantMessage(CID);
+    useConversationStore.getState().setTurnPhase("stopping", CID);
+
+    const err = new DOMException("Interrupted", "AbortError");
+    expect(isInterruptAbort(err)).toBe(true);
+    finalizeHonestStopAbort(CID, err);
+
+    expect(getTurnPhase(CID)).toBe("stopped");
+    const tail = getRuntime(CID).messages.find((m) => m.id === mid);
+    expect(tail?.finishReason).toBe("interrupted");
+    expect(tail?.finishReason).not.toBe("cancelled");
+  });
+
+  it("Interrupted Abort 不覆盖已有 finishReason", () => {
+    beginTurnPreflight(CID);
+    enterTurnStreaming(CID);
+    const mid = useConversationStore.getState().createAssistantMessage(CID);
+    if (!mid) throw new Error("expected assistant");
+    useConversationStore.getState().updateMessage(mid, {
+      finishReason: "end_turn",
+      isStreaming: false,
+    });
+
+    finalizeHonestStopAbort(CID, new DOMException("Interrupted", "AbortError"));
+
+    expect(
+      getRuntime(CID).messages.find((m) => m.id === mid)?.finishReason,
+    ).toBe("end_turn");
+  });
+
+  it("Interrupted Abort 在非 stopping 也给缺席尾巴盖 interrupted", () => {
+    beginTurnPreflight(CID);
+    enterTurnStreaming(CID);
+    const mid = useConversationStore.getState().createAssistantMessage(CID);
+
+    finalizeHonestStopAbort(CID, new DOMException("Interrupted", "AbortError"));
+
+    expect(getTurnPhase(CID)).toBe("streaming");
     expect(
       getRuntime(CID).messages.find((m) => m.id === mid)?.finishReason,
     ).toBe("interrupted");

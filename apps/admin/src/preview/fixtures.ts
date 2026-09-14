@@ -14,7 +14,7 @@ interface RawFixture {
   projected: ProjectedTurn;
 }
 
-// Same committed vectors as mobile `#/preview`. ChatView reads `projected` only.
+// Same committed vectors as desktop `#/preview`. ChatView reads `projected` only.
 const modules = import.meta.glob(
   "../../../../packages/protocol-conformance/fixtures/*.json",
   { eager: true },

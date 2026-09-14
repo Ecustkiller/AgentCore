@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from agentcore.runtime.facts import (
+from agentcore.tools.cross_turn_retry import (
     CROSS_TURN_RETRY_KEY,
     CrossTurnRetry,
     normalize_cross_turn_retry,
@@ -19,10 +19,8 @@ from agentcore.workspace.limits import (
     channel_dead_error_message,
     channel_dead_retire_metadata,
     is_file_too_large_detail,
-    is_liveness_timeout_detail,
-    is_presence_disconnected_detail,
-    is_workspace_reconnect_detail,
     op_liveness_timeout_metadata,
+    workspace_channel_failure_kind,
 )
 from agentcore.workspace.protocol import WorkspaceError
 
@@ -168,12 +166,13 @@ def _workspace_reconnect_error(detail: str, start: float) -> ToolResult:
 
 def _maybe_channel_dead_error(exc: WorkspaceError, start: float) -> ToolResult | None:
     """Map presence-disconnect vs settle timeout vs fulfill-reconnect fail-fast."""
+    kind = workspace_channel_failure_kind(exc)
     detail = str(exc)
-    if is_presence_disconnected_detail(detail):
+    if kind == "presence":
         return _liveness_workspace_error(detail, start)
-    if is_liveness_timeout_detail(detail):
+    if kind == "liveness":
         return _op_liveness_timeout_error(detail, start)
-    if is_workspace_reconnect_detail(detail):
+    if kind == "reconnect":
         return _workspace_reconnect_error(detail, start)
     return None
 

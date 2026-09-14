@@ -11,7 +11,6 @@ from agentcore.memory.store import FileMemoryStore, topic_path
 from agentcore.runtime.context.consult_sources import MemoryConsultSource, MergedConsultSource
 from agentcore.runtime.delegate.ceo_review import deterministic_ceo_review, run_ceo_review
 from agentcore.runtime.engine.write_args_clear import (
-    cleared_write_stub_rejection,
     landed_result_note,
     project_cleared_write_args,
     write_args_identity,
@@ -26,6 +25,7 @@ from agentcore.runtime.memory_consult_cache import (
 )
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 from agentcore.tools.builtin.consult import ConsultTool
+from agentcore.tools.cleared_write_stub import cleared_write_stub_rejection
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
@@ -123,7 +123,7 @@ def test_plan_review_required_omits_ceo_review_when_absent():
 
 def test_projected_write_args_carry_nothing_worth_echoing():
     """参数槽只剩 path：不是可提交载荷，也就没有可照抄的东西。"""
-    from agentcore.runtime.engine.write_args_clear import LANDED_STATUS_TOOL
+    from agentcore.tools.cleared_write_stub import LANDED_STATUS_TOOL
 
     args = json.dumps({"path": "docs/spec.md", "content": "X" * 2000}, ensure_ascii=False)
     projected = write_args_identity(args)
@@ -191,7 +191,7 @@ def test_landed_result_note_keeps_html_structure():
 
 
 def test_project_cleared_write_args_collapses_completed_writes():
-    from agentcore.runtime.engine.write_args_clear import LANDED_STATUS_TOOL
+    from agentcore.tools.cleared_write_stub import LANDED_STATUS_TOOL
 
     big = "正文" * 400
     call_id = "w1"
@@ -240,7 +240,7 @@ def test_project_cleared_write_args_collapses_completed_writes():
 
 def test_project_cleared_write_args_str_replace_readonly_summary():
     """完成后投影为原名 + 只剩 path，不再保留可提交的 old/new 形状。"""
-    from agentcore.runtime.engine.write_args_clear import LANDED_STATUS_TOOL
+    from agentcore.tools.cleared_write_stub import LANDED_STATUS_TOOL
 
     anchor = "END_MARK\n---\n"
     big = "章节正文" * 200
@@ -280,7 +280,7 @@ def test_project_cleared_write_args_str_replace_readonly_summary():
 
 def test_project_cleared_write_args_migrates_legacy_write_landed_name():
     """旧窗里的 `_write_landed` function.name 迁回 via，去掉仿调诱饵。"""
-    from agentcore.runtime.engine.write_args_clear import LANDED_STATUS_TOOL
+    from agentcore.tools.cleared_write_stub import LANDED_STATUS_TOOL
 
     call_id = "legacy1"
     status = json.dumps(
@@ -504,7 +504,7 @@ def test_cleared_write_stub_rejection_exact_markers_only():
 
 def test_landed_status_name_rejection_is_explicit():
     """仿调 `_write_landed` → 早拒文案点名「落盘状态不是工具」，非神秘 not_found。"""
-    from agentcore.runtime.engine.write_args_clear import (
+    from agentcore.tools.cleared_write_stub import (
         LANDED_STATUS_TOOL,
         landed_status_name_rejection,
     )
@@ -615,12 +615,12 @@ def test_landed_summary_echo_fingerprint_collapses_per_path():
 
 def test_landed_summary_echo_validation_stop_names_file_read():
     """摘要回灌：首次拒写即 path-stop（点名 file_read→str_replace/真文）；写工具保持可用。"""
-    from agentcore.runtime.engine.write_args_clear import cleared_write_stub_rejection
     from agentcore.runtime.loop_controller import (
         LoopController,
         ToolAttempt,
         fingerprint_tool_call,
     )
+    from agentcore.tools.cleared_write_stub import cleared_write_stub_rejection
 
     args = {
         "path": "docs/a.md",
@@ -664,7 +664,7 @@ def test_landed_summary_echo_validation_stop_names_file_read():
 
 def test_every_landed_rejection_is_recognized_by_early_stop():
     """安全网：三种遗留形态的拒绝文案都得被早停判定认出，改措辞不得静默丢掉一拍。"""
-    from agentcore.runtime.engine.write_args_clear import (
+    from agentcore.tools.cleared_write_stub import (
         cleared_write_stub_rejection,
         is_landed_echo_rejection,
     )
@@ -683,12 +683,12 @@ def test_every_landed_rejection_is_recognized_by_early_stop():
 
 def test_landed_status_echo_gets_one_strike_stop():
     """遗留 landed 形态若仍被回灌 → 首拍即 path-stop，与旧摘要形态同待遇。"""
-    from agentcore.runtime.engine.write_args_clear import cleared_write_stub_rejection
     from agentcore.runtime.loop_controller import (
         LoopController,
         ToolAttempt,
         fingerprint_tool_call,
     )
+    from agentcore.tools.cleared_write_stub import cleared_write_stub_rejection
 
     args = {"path": "site/main.js", "status": "landed", "chars": 800}
     err = cleared_write_stub_rejection(args)

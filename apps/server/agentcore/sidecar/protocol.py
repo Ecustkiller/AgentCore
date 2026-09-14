@@ -52,6 +52,9 @@ NO_LIVE_TURN = -32005
 PENDING_INTERACTIONS = -32006
 # ``cancelQueuedTurn``: unknown or already started.
 QUEUED_TURN_NOT_FOUND = -32007
+# CancelledError salvage that is not a witnessed user stop (``user_stop`` /
+# tombstone stay ``TURN_CANCELLED``). Finish maps to interrupted / unknown.
+TURN_INTERRUPTED = -32008
 
 
 class ProtocolError(ValueError):

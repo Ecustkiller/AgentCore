@@ -34,6 +34,7 @@ import type {
 } from "@shared/sidecar-contract";
 import { unstable_batchedUpdates } from "react-dom";
 import { loadRecovery } from "../resume";
+import { clearGeneratingWhenSidecarIdle } from "./occupancy";
 import { projectUnsyncedTurns } from "./projectUnsynced";
 import { markGhostInterrupted } from "./recovery";
 import { resetAssistantsAfterUserInPlace } from "./replayReset";
@@ -242,7 +243,7 @@ async function attachSidecarTurnExclusive(
   try {
     if (ac.signal.aborted) {
       fireReplayReady(conversationId);
-      teardownAttachedTurn(
+      await teardownAttachedTurn(
         conversationId,
         activeTurnId,
         anchorUserMessageId,
@@ -260,7 +261,7 @@ async function attachSidecarTurnExclusive(
     });
     if (!claim.isOwner()) {
       fireReplayReady(conversationId);
-      teardownAttachedTurn(
+      await teardownAttachedTurn(
         conversationId,
         activeTurnId,
         anchorUserMessageId,
@@ -275,7 +276,7 @@ async function attachSidecarTurnExclusive(
     if (!res.attached || !res.turnId || !res.rootId) {
       // Race: turn settled between recovery and attach — re-query, never hang.
       fireReplayReady(conversationId);
-      teardownAttachedTurn(
+      await teardownAttachedTurn(
         conversationId,
         activeTurnId,
         anchorUserMessageId,
@@ -390,7 +391,7 @@ async function attachSidecarTurnExclusive(
       await done;
     }
 
-    teardownAttachedTurn(
+    await teardownAttachedTurn(
       conversationId,
       activeTurnId,
       anchorUserMessageId,
@@ -403,7 +404,7 @@ async function attachSidecarTurnExclusive(
     return true;
   } catch (err) {
     fireReplayReady(conversationId);
-    teardownAttachedTurn(
+    await teardownAttachedTurn(
       conversationId,
       activeTurnId,
       anchorUserMessageId,
@@ -417,7 +418,7 @@ async function attachSidecarTurnExclusive(
   }
 }
 
-function teardownAttachedTurn(
+async function teardownAttachedTurn(
   conversationId: string,
   turnId: string | undefined,
   userMessageId: string | undefined,
@@ -426,7 +427,7 @@ function teardownAttachedTurn(
   onAbort: () => void,
   externalSignal: AbortSignal | undefined,
   onExternalAbort: () => void,
-): void {
+): Promise<void> {
   clearActiveSidecarTurn(conversationId, turnId);
   claim?.release();
   clearReplayReady(conversationId);
@@ -434,10 +435,10 @@ function teardownAttachedTurn(
   externalSignal?.removeEventListener("abort", onExternalAbort);
   const store = useConversationStore.getState();
   store.setAbort(null, conversationId);
-  // Explicit viewer-signal abort only: clear generating so a later reopen can
-  // re-attach (engine may still be live — recovery.sidecarLive drives next
-  // attach). Natural end already folded message_end; only mark outbox when we
-  // were not yanked away. 切会话不走此分支。
+  // Explicit viewer-signal abort: clear generating so reopen can re-attach
+  // (engine may still be live — recovery.sidecarLive drives next attach).
+  // Natural end: message_end 常顺路关灯；没到则问 occupancy（失败不当闲）。
+  // 切会话不走 abort 分支。lastSidecarTarget 只寻址，这里不删。
   if (ac.signal.aborted) {
     if (getRuntime(conversationId).isGenerating) {
       store.setGenerating(false, conversationId);
@@ -447,4 +448,5 @@ function teardownAttachedTurn(
   if (userMessageId) {
     store.setTurnSyncStatus(userMessageId, "synced_pending", conversationId);
   }
+  await clearGeneratingWhenSidecarIdle(conversationId);
 }

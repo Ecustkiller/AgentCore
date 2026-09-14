@@ -8,5 +8,5 @@
     { "name": "FinishReason" },
     { "name": "Delegated" }
   ],
-  "rubric": "可运行应用（单页番茄钟）：默认委派 worker 落盘，而非 CEO 自己写整份或把代码粘进回复正文。"
+  "rubric": "可运行应用：过程与源码不该进 CEO 窗。应派，不把整份粘进回复。"
 }

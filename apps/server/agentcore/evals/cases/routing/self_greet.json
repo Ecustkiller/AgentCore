@@ -9,5 +9,5 @@
     { "name": "NotDelegated" },
     { "name": "MaxRounds", "args": { "budget": 3 } }
   ],
-  "rubric": "闲聊寒暄：CEO 直接回一句即可，零编排、不委派。"
+  "rubric": "闲聊：编码≈做完，直答，不派。"
 }

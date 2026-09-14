@@ -461,6 +461,7 @@ class WebFetchTool:
     registration = ToolRegistration(
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_BOTH,
+        catalog_summary="把网址读成正文",
     )
 
     @staticmethod

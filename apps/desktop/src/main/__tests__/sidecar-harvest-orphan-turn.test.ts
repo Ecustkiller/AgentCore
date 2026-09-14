@@ -35,6 +35,7 @@ vi.mock("../outbox/projection", () => ({
 }));
 
 import { rmSync } from "node:fs";
+import { abortLocalTurnPlaceholder } from "../outbox/projection";
 import { SidecarManager } from "../sidecar/manager";
 import type { Transport } from "../sidecar/transport";
 
@@ -551,7 +552,8 @@ describe("SidecarManager harvest orphan turn/event", () => {
     const harvestErr = sentEvents(wc).find((p) => p.turnId === "turn-harvest");
     expect(harvestErr?.event?.type).toBe("error");
     expect(harvestErr?.event?.payload).toMatchObject({
-      code: "sidecar_turn_ended",
+      code: "PIPELINE_ERROR",
+      message: "sidecar 进程已退出",
     });
     expect(eventTypes(wc)).not.toContain("message_end");
   });
@@ -748,8 +750,80 @@ describe("SidecarManager harvest orphan turn/event", () => {
 
     expect(eventTypes(wc)).toEqual(["error"]);
     expect(sentEvents(wc)[0]?.event?.payload).toMatchObject({
-      code: "sidecar_turn_ended",
+      code: "PIPELINE_ERROR",
       message: "engine boom",
     });
+  });
+
+  it("synthesizes interrupted message_end on TURN_INTERRUPTED, not cancelled or error", async () => {
+    const t = hangingTransport();
+    const manager = new SidecarManager(() => t.transport);
+    const wc = mockWc();
+    const turnP = manager.startTurn(
+      wc as never,
+      {
+        conversationId: "c-rpc-interrupt",
+        rootId: "r1",
+        turnId: "turn-interrupt",
+        traceId: "p".repeat(32),
+        userMessageId: "u16",
+        messageId: "m-asst",
+        userMessage: "q",
+      },
+      "/tmp/ws",
+    );
+    await waitLive(manager, "c-rpc-interrupt");
+    (wc.send as ReturnType<typeof vi.fn>).mockClear();
+
+    t.rejectTurn({ code: -32008, message: "turn interrupted" });
+    await expect(turnP).rejects.toMatchObject({
+      code: -32008,
+      message: "turn interrupted",
+    });
+
+    const ends = sentEvents(wc).filter((p) => p.event?.type === "message_end");
+    expect(ends).toHaveLength(1);
+    expect(ends[0]?.event?.payload).toEqual({ finish_reason: "interrupted" });
+    expect(eventTypes(wc)).not.toContain("error");
+  });
+
+  it("busy slot does not synthesize error", async () => {
+    vi.mocked(abortLocalTurnPlaceholder).mockClear();
+    const t = hangingTransport();
+    const manager = new SidecarManager(() => t.transport);
+    const wc = mockWc();
+    const turnP = manager.startTurn(
+      wc as never,
+      {
+        conversationId: "c-busy",
+        rootId: "r1",
+        turnId: "turn-busy",
+        traceId: "o".repeat(32),
+        userMessageId: "u15",
+        messageId: "m-asst",
+        userMessage: "q",
+      },
+      "/tmp/ws",
+    );
+    await waitLive(manager, "c-busy");
+    (wc.send as ReturnType<typeof vi.fn>).mockClear();
+
+    t.rejectTurn({
+      code: -32602,
+      message: "turn already running: turn-live",
+    });
+    await expect(turnP).rejects.toMatchObject({
+      message: "turn already running: turn-live",
+    });
+
+    expect(eventTypes(wc)).not.toContain("error");
+    expect(sentEvents(wc).some((p) => p.event?.type === "error")).toBe(false);
+    expect(abortLocalTurnPlaceholder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId: "c-busy",
+        userMessageId: "u15",
+        messageId: "m-asst",
+      }),
+    );
   });
 });

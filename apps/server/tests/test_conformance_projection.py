@@ -1373,7 +1373,7 @@ def test_multi_agent_same_turn_mlr_debate_single_execution(projected):
 # Vectors with no hand-verified assertion in any sentinel module. Ratchet: only down.
 # Raising it means a new vector shipped judged solely by "both folds agree with the
 # golden the oracle wrote" — legal, but it has to be an explicit line in the diff.
-_SENTINEL_UNCOVERED_BASELINE = 66
+_SENTINEL_UNCOVERED_BASELINE = 64
 
 
 def _sentinel_sources() -> str:

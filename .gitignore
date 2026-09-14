@@ -46,13 +46,20 @@ apps/desktop/dist-web/
 # 临时截图评审产物（配色 / 卡片 / 房间视觉自检）——同 shoot-out，不入仓 / 不打包。
 apps/desktop/color-review/
 apps/desktop/shoot-fix/
+apps/desktop/shoot-review/
 apps/desktop/shoot-room/
 apps/desktop/e2e-shots/
 apps/desktop/verdict-shots/
 apps/desktop/.lint-out.txt
+# demo-tape 保真报告误拷到未忽略目录（权威写出仍是 demo-tape-out/）
+apps/desktop/demo-tape-fidelity/
+# 后端一次性重定向 / pytest 进度点
+apps/server/tc-out.txt
+apps/server/.pytest-*-out.txt
 # website 预览自检截图（.shots + shoot 矩阵产物，不入仓）
 apps/website/.shots/
 apps/website/shoot-out*/
+apps/website/_*.png
 # 内置 Python 运行时（sidecar 打包产物，由 apps/desktop/scripts/bundle-sidecar.mjs 生成）
 apps/desktop/resources/sidecar/
 # 内嵌 ripgrep（产品 AI grep；fetch_ripgrep.py / pnpm fetch:rg）
@@ -181,7 +188,8 @@ apps/server/--trace/
 
 # Server local data (MVP long-term memory files, see apps/server/agentcore/memory/store.py)
 apps/server/data/
-data/
+# 仅仓根本地运行时。禁止写成无前缀 `data/`——会误伤 apps/promo 源数据。
+/data/
 
 # Retired AI Town: Unity Library cache may remain on old checkouts
 /apps/town/
@@ -195,6 +203,15 @@ evals/code-capability/reports/llm_smoke_*
 evals/code-capability/reports/*_baseline_2*.json
 evals/code-capability/reports/_ab_retest_stdout.txt
 evals/code-capability/reports/w5_cards45_run.log
+
+# 上游夹具目录名恰好叫 data/；禁止 git add。是否打进 vendor pin 另议。
+evals/code-capability/**/tests/legacy_tests/data/
+
+# 赞助收款码不进公开仓（维护者本机可自放）
+apps/desktop/src/renderer/assets/support/*.png
+apps/desktop/src/renderer/assets/support/*.jpg
+apps/desktop/src/renderer/assets/support/*.jpeg
+apps/desktop/src/renderer/assets/support/*.webp
 
 # Accidental nested clone / probe drop of this repo at the workspace root
 # (may contain code_search.db ~90MB+). Leading slash = repo root only; do not

@@ -9,5 +9,5 @@
     { "name": "FinishReason" },
     { "name": "Delegated" }
   ],
-  "rubric": "单文件就地修改：交付形态是改仓库文件，应委派 worker 落盘改写。"
+  "rubric": "README 不在 CEO 窗：就地改仓库会把正文读进会话窗，根侧派。对照窗里已有证据的小落盘自己写。"
 }

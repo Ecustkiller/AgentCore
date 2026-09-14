@@ -26,7 +26,7 @@ def segment_store():
     store = MagicMock()
     store.upsert_stream_segments = AsyncMock()
     with patch(
-        "agentcore.conversation.store.get_conversation_store",
+        "agentcore.runtime.conversation_store.get_conversation_store",
         return_value=store,
     ):
         yield store

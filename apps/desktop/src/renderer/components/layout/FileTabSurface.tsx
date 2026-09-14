@@ -1,12 +1,12 @@
-import { FileDetail } from "@/components/files/FileDetail";
+import { FileDetail, type FileDirtyState } from "@/components/files/FileDetail";
 import { EmptyHint } from "@/components/files/parts";
 import { useFileTabSourceState } from "@/hooks/useConversationFileSource";
 import { createDocumentSource } from "@/services/sources/documentSource";
 import { createMemorySource } from "@/services/sources/memorySource";
 import { useConversationStore } from "@/stores/conversation";
-import type { FileTabChannel } from "@/stores/sidePanel";
+import { type FileTabChannel, useSidePanelStore } from "@/stores/sidePanel";
 import { FileText } from "lucide-react";
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 
 /**
  * File content-tab body for the docked SidePanel and float hosts.
@@ -14,12 +14,14 @@ import { useMemo } from "react";
  * document) use the same FileSource + FileDetail pair as the files page.
  */
 export function FileTabSurface({
+  tabId,
   path,
   name,
   workspaceId,
   channel,
   onClose,
 }: {
+  tabId: string;
   path: string;
   name: string;
   workspaceId?: string;
@@ -28,6 +30,13 @@ export function FileTabSurface({
 }) {
   const currentConversationId = useConversationStore(
     (s) => s.currentConversationId,
+  );
+  const setFileTabChrome = useSidePanelStore((s) => s.setFileTabChrome);
+  const onDirtyChange = useCallback(
+    (state: FileDirtyState) => {
+      setFileTabChrome(tabId, state);
+    },
+    [setFileTabChrome, tabId],
   );
   // Entry tabs don't need the conversation desk; skip so opening 设定 doesn't
   // wait on / 404 a workspace path that isn't theirs.
@@ -72,6 +81,7 @@ export function FileTabSurface({
       path={path}
       name={name}
       onClose={onClose}
+      onDirtyChange={onDirtyChange}
     />
   );
 }

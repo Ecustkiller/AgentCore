@@ -5,9 +5,10 @@ fenced code, relative-path images (embedded), links. Missing images produce
 explicit warnings (never silent). Default styles target a clean Chinese
 公文-like look (黑体 headings / 宋体 body with Latin fallbacks).
 
-段落几何按 ``layout`` 档位走（见 ``docs_export.layout``）：两档都是 A4、正文/列表
-1.5 倍行距、一级标题居中；首行缩进两字、两端对齐、公文页边距、页码只在
-``official`` 档开——档位来自调用方入参，绝不看正文内容猜。
+段落几何按 ``layout`` 档位走（见 ``docs_export.layout``）：两档都是 A4、小四、
+标题黑色、正文/列表/表格 1.5 倍行距、一级标题居中；首行缩进两字、两端对齐、
+公文页边距、页码「— n —」只在 ``official`` 档开——档位来自调用方入参，绝不看
+正文内容猜。
 """
 
 from __future__ import annotations
@@ -26,14 +27,22 @@ from markdown_it.token import Token
 from agentcore.docs_export.layout import (
     A4_HEIGHT_CM,
     A4_WIDTH_CM,
+    BODY_PT,
     BODY_SPACE_AFTER_PT,
+    CODE_PT,
     FIRST_LINE_INDENT_CHARS,
+    HEADING_COLOR_RGB,
+    HEADING_PT,
+    LANG_EAST_ASIA,
+    LANG_LATIN,
     LAYOUT_OFFICIAL,
     LAYOUT_STANDARD,
     LINE_SPACING_MULTIPLE,
-    OFFICIAL_MARGINS_CM,
-    STANDARD_MARGINS_CM,
+    OFFICIAL_FOOTER_DISTANCE_CM,
+    PAGE_NUMBER_PT,
     DocLayout,
+    image_width_cm,
+    margins_cm,
 )
 
 if TYPE_CHECKING:
@@ -52,10 +61,9 @@ _FONT_BODY_CJK = "宋体"
 _FONT_HEADING_CJK = "黑体"
 _FONT_CODE = "Consolas"
 
-_HEADING_PT = {1: 22, 2: 18, 3: 16, 4: 14}
-_BODY_PT = 12
-_CODE_PT = 10
-_MAX_IMAGE_WIDTH_IN = 5.8
+_HEADING_PT = HEADING_PT
+_BODY_PT = BODY_PT
+_CODE_PT = CODE_PT
 
 # python-docx is loaded on first convert (not at import). Sidecar / cloud both ship
 # the Office stack; lazy load keeps tool registration from hard-crashing chat if a
@@ -69,13 +77,12 @@ _Cm: Any = None
 _Inches: Any = None
 _Pt: Any = None
 _RGBColor: Any = None
-_MAX_IMAGE_WIDTH: Any = None
 
 
 def _ensure_docx() -> None:
     """Bind python-docx symbols used by the converter (idempotent)."""
     global _DocumentFactory, _WD_ALIGN_PARAGRAPH, _RT, _qn, _OxmlElement
-    global _Cm, _Inches, _Pt, _RGBColor, _MAX_IMAGE_WIDTH
+    global _Cm, _Inches, _Pt, _RGBColor
     if _DocumentFactory is not None:
         return
     from docx import Document as DocumentFactory
@@ -94,7 +101,17 @@ def _ensure_docx() -> None:
     _Inches = Inches
     _Pt = Pt
     _RGBColor = RGBColor
-    _MAX_IMAGE_WIDTH = Inches(_MAX_IMAGE_WIDTH_IN)
+
+
+@dataclass
+class _ExportCtx:
+    """Per-convert render state so block helpers don't grow a 6-arg tail."""
+
+    images: dict[str, bytes | None]
+    warnings: list[str]
+    layout: DocLayout
+    indent_body: bool
+    image_width: Any
 
 
 @dataclass(frozen=True)
@@ -171,12 +188,19 @@ def convert_markdown_to_docx(
     warned and rendered as alt text (+ URL when present).
 
     ``layout`` 选排版档位：``standard``（默认）= 技术文档/报告；``official`` =
-    中文正式文书（首行缩进、两端对齐、公文页边距、页码）。
+    中文正式文书（首行缩进、两端对齐、公文页边距、页码「— n —」）。
     """
     _ensure_docx()
     image_map = dict(images or {})
     warnings: list[str] = []
     indent_body = layout == LAYOUT_OFFICIAL
+    ctx = _ExportCtx(
+        images=image_map,
+        warnings=warnings,
+        layout=layout,
+        indent_body=indent_body,
+        image_width=_Cm(image_width_cm(layout)),
+    )
     doc = _DocumentFactory()
     _apply_document_defaults(doc, layout)
 
@@ -193,7 +217,7 @@ def convert_markdown_to_docx(
             p = doc.add_heading("", level=level)
             _style_heading_paragraph(p, level)
             if inline is not None and inline.type == "inline":
-                _render_inline(p, inline, images=image_map, warnings=warnings, in_heading=True)
+                _render_inline(p, inline, ctx, in_heading=True)
             i += 3  # open, inline, close
             continue
 
@@ -207,25 +231,23 @@ def convert_markdown_to_docx(
                 and len(inline.children) == 1
                 and inline.children[0].type == "image"
             ):
-                _render_image_block(
-                    doc, inline.children[0], images=image_map, warnings=warnings
-                )
+                _render_image_block(doc, inline.children[0], ctx)
             else:
                 p = doc.add_paragraph()
                 _style_body_paragraph(
                     p, first_line_indent=indent_body, justify=indent_body
                 )
                 if inline is not None and inline.type == "inline":
-                    _render_inline(p, inline, images=image_map, warnings=warnings)
+                    _render_inline(p, inline, ctx)
             i += 3
             continue
 
         if t == "bullet_list_open":
-            i = _render_list(doc, tokens, i, ordered=False, images=image_map, warnings=warnings)
+            i = _render_list(doc, tokens, i, ordered=False, ctx=ctx)
             continue
 
         if t == "ordered_list_open":
-            i = _render_list(doc, tokens, i, ordered=True, images=image_map, warnings=warnings)
+            i = _render_list(doc, tokens, i, ordered=True, ctx=ctx)
             continue
 
         if t == "fence":
@@ -239,16 +261,16 @@ def convert_markdown_to_docx(
             continue
 
         if t == "table_open":
-            i = _render_table(doc, tokens, i, images=image_map, warnings=warnings)
+            i = _render_table(doc, tokens, i, ctx)
             continue
 
         if t == "hr":
-            doc.add_paragraph("─" * 24)
+            _render_horizontal_rule(doc)
             i += 1
             continue
 
         if t == "blockquote_open":
-            i = _render_blockquote(doc, tokens, i, images=image_map, warnings=warnings)
+            i = _render_blockquote(doc, tokens, i, ctx)
             continue
 
         # Skip structural closers / unknown opens we don't specially handle.
@@ -275,34 +297,50 @@ def _apply_document_defaults(doc: Document, layout: DocLayout) -> None:
     section = doc.sections[0]
     section.page_width = _Cm(A4_WIDTH_CM)
     section.page_height = _Cm(A4_HEIGHT_CM)
-    top, bottom, left, right = (
-        OFFICIAL_MARGINS_CM if layout == LAYOUT_OFFICIAL else STANDARD_MARGINS_CM
-    )
+    top, bottom, left, right = margins_cm(layout)
     section.top_margin = _Cm(top)
     section.bottom_margin = _Cm(bottom)
     section.left_margin = _Cm(left)
     section.right_margin = _Cm(right)
+    _set_doc_grid_off(section)
     if layout == LAYOUT_OFFICIAL:
+        section.footer_distance = _Cm(OFFICIAL_FOOTER_DISTANCE_CM)
         _add_page_number_footer(section)
+
+    _apply_east_asian_settings(doc)
 
     normal = doc.styles["Normal"]
     normal.font.name = _FONT_LATIN
     normal.font.size = _Pt(_BODY_PT)
-    if normal._element.rPr is not None and normal._element.rPr.rFonts is not None:
-        normal._element.rPr.rFonts.set(_qn("w:eastAsia"), _FONT_BODY_CJK)
+    normal.paragraph_format.line_spacing = LINE_SPACING_MULTIPLE
+    normal.paragraph_format.space_after = _Pt(BODY_SPACE_AFTER_PT)
+    r_pr = normal._element.get_or_add_rPr()
+    r_fonts = r_pr.get_or_add_rFonts()
+    r_fonts.set(_qn("w:eastAsia"), _FONT_BODY_CJK)
+    r_fonts.set(_qn("w:ascii"), _FONT_LATIN)
+    r_fonts.set(_qn("w:hAnsi"), _FONT_LATIN)
+    _set_lang(r_pr)
 
+    heading_rgb = _RGBColor(*HEADING_COLOR_RGB)
     for level in range(1, 5):
         style = doc.styles[f"Heading {level}"]
         style.font.name = _FONT_LATIN
         style.font.size = _Pt(_HEADING_PT[level])
         style.font.bold = True
-        style.font.color.rgb = _RGBColor(0x1F, 0x23, 0x28)
-        if style._element.rPr is not None:
-            r_fonts = style._element.rPr.rFonts
-            if r_fonts is None:
-                r_fonts = _OxmlElement("w:rFonts")
-                style._element.rPr.append(r_fonts)
-            r_fonts.set(_qn("w:eastAsia"), _FONT_HEADING_CJK)
+        style.font.color.rgb = heading_rgb
+        r_pr = style._element.get_or_add_rPr()
+        r_fonts = r_pr.get_or_add_rFonts()
+        r_fonts.set(_qn("w:eastAsia"), _FONT_HEADING_CJK)
+        r_fonts.set(_qn("w:ascii"), _FONT_LATIN)
+        r_fonts.set(_qn("w:hAnsi"), _FONT_LATIN)
+        sz_half_points = str(_HEADING_PT[level] * 2)
+        for tag in ("w:sz", "w:szCs"):
+            el = r_pr.find(_qn(tag))
+            if el is None:
+                el = _OxmlElement(tag)
+                r_pr.append(el)
+            el.set(_qn("w:val"), sz_half_points)
+        _set_lang(r_pr)
 
 
 def _set_run_font(
@@ -321,6 +359,43 @@ def _set_run_font(
     r_fonts.set(_qn("w:hAnsi"), latin)
     if size_pt is not None:
         run.font.size = _Pt(size_pt)
+    _set_lang(r_pr)
+
+
+def _set_lang(r_pr: Any) -> None:
+    lang = r_pr.find(_qn("w:lang"))
+    if lang is None:
+        lang = _OxmlElement("w:lang")
+        r_pr.append(lang)
+    lang.set(_qn("w:val"), LANG_LATIN)
+    lang.set(_qn("w:eastAsia"), LANG_EAST_ASIA)
+
+
+def _set_doc_grid_off(section: Any) -> None:
+    """Don't snap 1.5× paragraph spacing to the template's 18pt line grid."""
+    sect_pr = section._sectPr
+    grid = sect_pr.find(_qn("w:docGrid"))
+    if grid is None:
+        grid = _OxmlElement("w:docGrid")
+        sect_pr.append(grid)
+    grid.set(_qn("w:type"), "default")
+    grid.set(_qn("w:linePitch"), "360")
+
+
+def _apply_east_asian_settings(doc: Document) -> None:
+    """Chinese punctuation compression + theme language so Word treats this as 中文稿."""
+    settings = doc.settings.element
+    csc = settings.find(_qn("w:characterSpacingControl"))
+    if csc is None:
+        csc = _OxmlElement("w:characterSpacingControl")
+        settings.append(csc)
+    csc.set(_qn("w:val"), "compressPunctuation")
+    theme_lang = settings.find(_qn("w:themeFontLang"))
+    if theme_lang is None:
+        theme_lang = _OxmlElement("w:themeFontLang")
+        settings.append(theme_lang)
+    theme_lang.set(_qn("w:val"), LANG_LATIN)
+    theme_lang.set(_qn("w:eastAsia"), LANG_EAST_ASIA)
 
 
 def _style_body_paragraph(
@@ -340,13 +415,15 @@ def _style_list_paragraph(p: Any) -> None:
 
 
 def _add_page_number_footer(section: Any) -> None:
-    """official 档：页码底端居中（PAGE 域）。standard 不建页脚。"""
+    """official 档：页码底端居中，形如「— 1 —」（PAGE 域）。standard 不建页脚。"""
     footer = section.footer
     footer.is_linked_to_previous = False
     p = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
     p.alignment = _WD_ALIGN_PARAGRAPH.CENTER
+    prefix = p.add_run("— ")
+    _set_run_font(prefix, cjk=_FONT_BODY_CJK, size_pt=PAGE_NUMBER_PT)
     run = p.add_run()
-    _set_run_font(run, cjk=_FONT_BODY_CJK, size_pt=9)
+    _set_run_font(run, cjk=_FONT_BODY_CJK, size_pt=PAGE_NUMBER_PT)
     r = run._r
     begin = _OxmlElement("w:fldChar")
     begin.set(_qn("w:fldCharType"), "begin")
@@ -364,6 +441,8 @@ def _add_page_number_footer(section: Any) -> None:
     r.append(sep)
     r.append(cached)
     r.append(end)
+    suffix = p.add_run(" —")
+    _set_run_font(suffix, cjk=_FONT_BODY_CJK, size_pt=PAGE_NUMBER_PT)
 
 
 def _apply_first_line_indent(p: Any) -> None:
@@ -383,6 +462,22 @@ def _style_heading_paragraph(p: Any, level: int) -> None:
     if level == 1:
         # 文档大标题居中是 Word 通例（公文与技术报告都成立），故两档默认都开。
         p.alignment = _WD_ALIGN_PARAGRAPH.CENTER
+
+
+def _render_horizontal_rule(doc: Document) -> None:
+    """A real paragraph bottom border — not a row of box-drawing dashes."""
+    p = doc.add_paragraph()
+    p.paragraph_format.space_before = _Pt(6)
+    p.paragraph_format.space_after = _Pt(6)
+    p_pr = p._element.get_or_add_pPr()
+    p_bdr = _OxmlElement("w:pBdr")
+    bottom = _OxmlElement("w:bottom")
+    bottom.set(_qn("w:val"), "single")
+    bottom.set(_qn("w:sz"), "6")
+    bottom.set(_qn("w:space"), "1")
+    bottom.set(_qn("w:color"), "000000")
+    p_bdr.append(bottom)
+    p_pr.append(p_bdr)
 
 
 # ---------------------------------------------------------------------------
@@ -419,8 +514,7 @@ def _render_list(
     start: int,
     *,
     ordered: bool,
-    images: dict[str, bytes | None],
-    warnings: list[str],
+    ctx: _ExportCtx,
     level: int = 0,
 ) -> int:
     i = start + 1
@@ -441,7 +535,7 @@ def _render_list(
                     if level:
                         p.paragraph_format.left_indent = _Cm(0.75 * level)
                     if inline is not None and inline.type == "inline":
-                        _render_inline(p, inline, images=images, warnings=warnings)
+                        _render_inline(p, inline, ctx)
                     i += 3
                     continue
                 if tokens[i].type in ("bullet_list_open", "ordered_list_open"):
@@ -451,8 +545,7 @@ def _render_list(
                         tokens,
                         i,
                         ordered=nested_ordered,
-                        images=images,
-                        warnings=warnings,
+                        ctx=ctx,
                         level=level + 1,
                     )
                     continue
@@ -468,9 +561,7 @@ def _render_table(
     doc: Document,
     tokens: list[Token],
     start: int,
-    *,
-    images: dict[str, bytes | None],
-    warnings: list[str],
+    ctx: _ExportCtx,
 ) -> int:
     # Collect rows of cell inlines.
     rows: list[list[Token | None]] = []
@@ -510,21 +601,33 @@ def _render_table(
             p = cell.paragraphs[0]
             inline = row[c_idx] if c_idx < len(row) else None
             if inline is not None:
-                _render_inline(p, inline, images=images, warnings=warnings)
+                _render_inline(p, inline, ctx)
+            _style_table_cell_paragraph(p)
             if r_idx == 0:
                 for run in p.runs:
                     run.bold = True
-    doc.add_paragraph()
+    spacer = doc.add_paragraph()
+    spacer.paragraph_format.space_after = _Pt(BODY_SPACE_AFTER_PT)
     return i
+
+
+def _style_table_cell_paragraph(p: Any) -> None:
+    p.paragraph_format.line_spacing = LINE_SPACING_MULTIPLE
+    p.paragraph_format.space_after = _Pt(0)
+    p.paragraph_format.space_before = _Pt(0)
+    if p.runs:
+        for run in p.runs:
+            _set_run_font(run, cjk=_FONT_BODY_CJK, size_pt=_BODY_PT)
+    else:
+        run = p.add_run("")
+        _set_run_font(run, cjk=_FONT_BODY_CJK, size_pt=_BODY_PT)
 
 
 def _render_blockquote(
     doc: Document,
     tokens: list[Token],
     start: int,
-    *,
-    images: dict[str, bytes | None],
-    warnings: list[str],
+    ctx: _ExportCtx,
 ) -> int:
     i = start + 1
     while i < len(tokens):
@@ -540,7 +643,7 @@ def _render_blockquote(
             _set_run_font(run_prefix, cjk=_FONT_BODY_CJK, size_pt=_BODY_PT)
             run_prefix.font.color.rgb = _RGBColor(0x9C, 0xA3, 0xAF)
             if inline is not None and inline.type == "inline":
-                _render_inline(p, inline, images=images, warnings=warnings)
+                _render_inline(p, inline, ctx)
             i += 3
             continue
         i += 1
@@ -550,42 +653,40 @@ def _render_blockquote(
 def _render_image_block(
     doc: Document,
     image_token: Token,
-    *,
-    images: dict[str, bytes | None],
-    warnings: list[str],
+    ctx: _ExportCtx,
 ) -> None:
     src = str(image_token.attrGet("src") or "").strip()
     alt = (image_token.content or "").strip() or str(image_token.attrGet("alt") or "").strip()
-    data = images.get(src) if src in images else None
-    if src in images and data is None:
+    data = ctx.images.get(src) if src in ctx.images else None
+    if src in ctx.images and data is None:
         msg = f"缺图：{src}"
-        if msg not in warnings:
-            warnings.append(msg)
+        if msg not in ctx.warnings:
+            ctx.warnings.append(msg)
         p = doc.add_paragraph()
         run = p.add_run(f"[缺图：{alt or src}]")
         _set_run_font(run, cjk=_FONT_BODY_CJK, size_pt=_BODY_PT)
         run.font.color.rgb = _RGBColor(0xB9, 0x1C, 0x1C)
         return
     if not is_embeddable_relative_src(src) or data is None:
-        if is_embeddable_relative_src(src) and src not in images:
+        if is_embeddable_relative_src(src) and src not in ctx.images:
             msg = f"缺图：{src}"
-            if msg not in warnings:
-                warnings.append(msg)
+            if msg not in ctx.warnings:
+                ctx.warnings.append(msg)
         elif not is_embeddable_relative_src(src):
             msg = f"跳过非相对路径图片：{src}"
-            if msg not in warnings:
-                warnings.append(msg)
+            if msg not in ctx.warnings:
+                ctx.warnings.append(msg)
         p = doc.add_paragraph()
         label = alt or src
         run = p.add_run(f"[图片：{label}]")
         _set_run_font(run, cjk=_FONT_BODY_CJK, size_pt=_BODY_PT)
         return
     try:
-        doc.add_picture(io.BytesIO(data), width=_MAX_IMAGE_WIDTH)
+        doc.add_picture(io.BytesIO(data), width=ctx.image_width)
     except Exception as exc:  # noqa: BLE001 — bad image bytes should warn, not abort
         msg = f"图片无法嵌入（{src}）：{exc}"
-        if msg not in warnings:
-            warnings.append(msg)
+        if msg not in ctx.warnings:
+            ctx.warnings.append(msg)
         p = doc.add_paragraph()
         run = p.add_run(f"[图片损坏：{alt or src}]")
         _set_run_font(run, cjk=_FONT_BODY_CJK, size_pt=_BODY_PT)
@@ -607,9 +708,8 @@ def _render_image_block(
 def _render_inline(
     paragraph: Any,
     inline: Token,
+    ctx: _ExportCtx,
     *,
-    images: dict[str, bytes | None],
-    warnings: list[str],
     in_heading: bool = False,
 ) -> None:
     children = inline.children or []
@@ -625,6 +725,7 @@ def _render_inline(
             _add_styled_run(
                 paragraph,
                 child.content or "",
+                ctx,
                 bold=bold > 0,
                 italic=italic > 0,
                 code=code > 0,
@@ -635,6 +736,7 @@ def _render_inline(
             _add_styled_run(
                 paragraph,
                 child.content or "",
+                ctx,
                 bold=False,
                 italic=False,
                 code=True,
@@ -642,7 +744,7 @@ def _render_inline(
                 heading=in_heading,
             )
         elif ct == "softbreak":
-            _add_styled_run(paragraph, "\n", heading=in_heading)
+            _add_styled_run(paragraph, "\n", ctx, heading=in_heading)
         elif ct == "hardbreak":
             paragraph.add_run().add_break()
         elif ct == "strong_open":
@@ -663,31 +765,33 @@ def _render_inline(
             # Inline image inside mixed paragraph — embed if possible, else alt.
             src = str(child.attrGet("src") or "").strip()
             alt = (child.content or "").strip() or str(child.attrGet("alt") or "").strip()
-            data = images.get(src) if src in images else None
-            if src in images and data is None:
+            data = ctx.images.get(src) if src in ctx.images else None
+            if src in ctx.images and data is None:
                 msg = f"缺图：{src}"
-                if msg not in warnings:
-                    warnings.append(msg)
-                _add_styled_run(paragraph, f"[缺图：{alt or src}]", heading=in_heading)
+                if msg not in ctx.warnings:
+                    ctx.warnings.append(msg)
+                _add_styled_run(paragraph, f"[缺图：{alt or src}]", ctx, heading=in_heading)
             elif data:
                 try:
                     run = paragraph.add_run()
                     run.add_picture(io.BytesIO(data), width=_Inches(3.2))
                 except Exception as exc:  # noqa: BLE001
                     msg = f"图片无法嵌入（{src}）：{exc}"
-                    if msg not in warnings:
-                        warnings.append(msg)
-                    _add_styled_run(paragraph, f"[图片损坏：{alt or src}]", heading=in_heading)
+                    if msg not in ctx.warnings:
+                        ctx.warnings.append(msg)
+                    _add_styled_run(
+                        paragraph, f"[图片损坏：{alt or src}]", ctx, heading=in_heading
+                    )
             else:
                 if is_embeddable_relative_src(src):
                     msg = f"缺图：{src}"
-                    if msg not in warnings:
-                        warnings.append(msg)
+                    if msg not in ctx.warnings:
+                        ctx.warnings.append(msg)
                 else:
                     msg = f"跳过非相对路径图片：{src}"
-                    if msg not in warnings:
-                        warnings.append(msg)
-                _add_styled_run(paragraph, f"[图片：{alt or src}]", heading=in_heading)
+                    if msg not in ctx.warnings:
+                        ctx.warnings.append(msg)
+                _add_styled_run(paragraph, f"[图片：{alt or src}]", ctx, heading=in_heading)
         elif ct == "html_inline":
             # html=False should not emit these; ignore defensively.
             pass
@@ -697,6 +801,7 @@ def _render_inline(
 def _add_styled_run(
     paragraph: Any,
     text: str,
+    ctx: _ExportCtx,
     *,
     bold: bool = False,
     italic: bool = False,
@@ -706,8 +811,9 @@ def _add_styled_run(
 ) -> None:
     if not text and not link_url:
         return
-    if link_url and _is_safe_http_url(link_url):
-        run = _add_hyperlink(paragraph, text or link_url, link_url)
+    safe_link = bool(link_url and _is_safe_http_url(link_url))
+    if safe_link:
+        run = _add_hyperlink(paragraph, text or link_url or "", link_url or "")
     else:
         run = paragraph.add_run(text)
     run.bold = bold or heading
@@ -717,11 +823,16 @@ def _add_styled_run(
         run.font.color.rgb = _RGBColor(0x37, 0x40, 0x51)
     elif heading:
         _set_run_font(run, cjk=_FONT_HEADING_CJK, size_pt=None)
+        run.font.color.rgb = _RGBColor(*HEADING_COLOR_RGB)
     else:
         _set_run_font(run, cjk=_FONT_BODY_CJK, size_pt=_BODY_PT)
-    if link_url and _is_safe_http_url(link_url):
-        run.font.color.rgb = _RGBColor(0x05, 0x63, 0xC1)
-        run.underline = True
+    if safe_link:
+        if ctx.layout == LAYOUT_OFFICIAL:
+            run.font.color.rgb = _RGBColor(*HEADING_COLOR_RGB)
+            run.underline = False
+        else:
+            run.font.color.rgb = _RGBColor(0x05, 0x63, 0xC1)
+            run.underline = True
 
 
 def _is_safe_http_url(url: str) -> bool:

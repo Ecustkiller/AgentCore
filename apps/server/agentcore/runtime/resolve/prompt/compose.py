@@ -305,6 +305,7 @@ def compose_ceo_chat_prompt(
     on_demand_entries: Sequence[ConsultDirectoryEntry] = (),
     workspace_context: str | None = None,
     workspace_file_index: str | None = None,
+    table_context: str | None = None,
     cold_start_explore: bool | str | None = False,
     folder_nav_stale: bool = False,
     attachment_material: bool = False,
@@ -385,6 +386,7 @@ def compose_ceo_chat_prompt(
             or None,
             SectionOrder.WORKSPACE_FACTS,
         )
+        .add("table_context", table_context, SectionOrder.TABLE_FACTS)
         # D4: 见 assemble_system_prompt —— ``SectionOrder.FOLDER_CATALOG`` 槽位保留、
         # 生产不装配该段（名册改 list_folders）。workspace_facts 在核之后、紧邻易变尾
         # （见 SectionOrder Exception 2026-08-19）。CEO 文件索引附在同一 ``<工作区>``

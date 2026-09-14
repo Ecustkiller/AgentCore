@@ -23,7 +23,6 @@ import { notifyError, notifySuccess } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { setMessageFeedback } from "@/services/messages";
 import type { UsageBreakdown } from "@/services/usage";
-import { useBookmarkStore } from "@/stores/bookmarks";
 import type { Message } from "@/stores/conversation";
 import {
   assistantProjectionId,
@@ -36,7 +35,6 @@ import {
   cacheUsageDisplay,
 } from "@agentcore/protocol-fold-kit";
 import {
-  Bookmark,
   Check,
   Copy,
   Fingerprint,
@@ -318,32 +316,6 @@ function FeedbackButtons({ message }: { message: Message }) {
   );
 }
 
-/** 消息收藏 (方向 4): star an assistant reply → 侧栏「已收藏」. Cross-device (server-
- * stored); optimistic via the bookmark store, filled when saved. */
-function BookmarkButton({ message }: { message: Message }) {
-  const conversationId = useConversationStore((s) => s.currentConversationId);
-  const bookmarked = useBookmarkStore((s) => s.ids.has(message.id));
-  const toggle = useBookmarkStore((s) => s.toggle);
-  return (
-    <SimpleTooltip label={bookmarked ? "取消收藏" : "收藏"}>
-      <IconButton
-        size="sm"
-        aria-label={bookmarked ? "取消收藏" : "收藏"}
-        aria-pressed={bookmarked}
-        className={bookmarked ? "text-primary" : undefined}
-        onClick={() => {
-          if (conversationId) void toggle(conversationId, message.id);
-        }}
-      >
-        <Bookmark
-          size={14}
-          className={bookmarked ? "fill-current" : undefined}
-        />
-      </IconButton>
-    </SimpleTooltip>
-  );
-}
-
 /** Assistant bubble footer — actions left, usage summary + time right, low-freq in「更多」. */
 export function AssistantMessageFooter({
   message,
@@ -432,7 +404,6 @@ export function AssistantMessageFooter({
             </SimpleTooltip>
           )}
           <FeedbackButtons message={message} />
-          <BookmarkButton message={message} />
           <RegenerateMessageAction onRegenerate={onRegenerate} />
           {!pinSupportPack ? more : null}
         </div>

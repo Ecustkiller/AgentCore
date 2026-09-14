@@ -85,14 +85,14 @@ async def test_find_prefers_origin_device_over_most_recent():
 
 
 async def test_find_falls_back_to_most_recent_when_origin_is_gone():
-    """Preference only — an offline origin must not blank out an unpinned pick."""
+    """Preference only — an offline origin must not blank out find() without require_origin."""
     hub = FulfillerHub()
-    hub.register("u1", "d1", caps=["board"], roots=[])
+    hub.register("u1", "d1", caps=["host"], roots=[])
     await asyncio.sleep(0.01)
-    newer = hub.register("u1", "d2", caps=["board"], roots=[])
+    newer = hub.register("u1", "d2", caps=["host"], roots=[])
 
     assert (
-        hub.find("u1", root_id=None, channel="board", origin_device_id="gone")
+        hub.find("u1", root_id=None, channel="host", origin_device_id="gone")
         is newer
     )
 
@@ -140,8 +140,8 @@ def test_origin_pin_covers_machine_acting_channels_only():
         assert origin_pinned(channel, root_id=None) is True
         # A root already names one install — that location logic is untouched.
         assert origin_pinned(channel, root_id="r1") is False
-    for channel in ("board", "board_read"):
-        assert origin_pinned(channel, root_id=None) is False
+    assert "board" not in FULFILL_CHANNELS
+    assert "board_read" not in FULFILL_CHANNELS
     assert "notify" not in FULFILL_CHANNELS
 
 
@@ -160,10 +160,10 @@ async def test_find_requires_cap_and_root():
 
 async def test_find_root_none_matches_any_capable_unless_pinned():
     hub = FulfillerHub()
-    hub.register("u1", "d1", caps=["board", "host"], roots=[])
-    assert hub.find("u1", root_id=None, channel="board") is not None
-    assert hub.has_fulfiller("u1", root_id=None, channel="board") is True
-    assert hub.has_fulfiller("u1", root_id="r1", channel="board") is False
+    hub.register("u1", "d1", caps=["host"], roots=[])
+    assert hub.find("u1", root_id=None, channel="host") is not None
+    assert hub.has_fulfiller("u1", root_id=None, channel="host") is True
+    assert hub.has_fulfiller("u1", root_id="r1", channel="host") is False
     # Same rootless lookup, but a pinned channel from another device: absent.
     assert (
         hub.has_fulfiller(
@@ -236,7 +236,7 @@ async def test_deliver_root_not_held_when_the_desktop_holds_another_root():
 async def test_deliver_no_fulfiller_when_the_online_device_lacks_the_channel():
     """A device without the workspace cap is no desktop at all for this op."""
     hub = FulfillerHub()
-    hub.register("u1", "d1", caps=["board"], roots=["r1"])
+    hub.register("u1", "d1", caps=["host"], roots=["r1"])
 
     result = deliver_client_tool(
         "u1",
@@ -410,27 +410,6 @@ async def test_two_devices_pinned_op_errors_when_origin_left():
     )
     assert result is DeliverResult.ORIGIN_OFFLINE
     assert other._queue.qsize() == 0
-
-
-async def test_two_devices_reminder_still_reaches_the_remaining_one():
-    """Display channels keep the old any-capable-device behavior."""
-    hub = FulfillerHub()
-    origin = hub.register("u1", "A", caps=["board"], roots=[])
-    other = hub.register("u1", "B", caps=["board"], roots=[])
-    hub.unregister(origin)
-
-    result = deliver_client_tool(
-        "u1",
-        "c1",
-        "board",
-        None,
-        {"type": "board_op_required", "payload": {"board_id": "b1", "ops": [], "summary": "x"}},
-        origin_device_id="A",
-        hub=hub,
-    )
-    assert result is DeliverResult.DELIVERED
-    got = await other.get()
-    assert got["type"] == "board_op_required"
 
 
 async def test_single_device_pinned_op_keeps_the_no_fulfiller_answer():

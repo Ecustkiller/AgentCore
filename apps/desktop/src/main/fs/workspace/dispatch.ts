@@ -1,4 +1,8 @@
-import type { WorkspaceOpName, WorkspaceOpResult } from "@shared/ipc-contract";
+import {
+  WORKSPACE_LIVENESS_TIMEOUT_KIND,
+  type WorkspaceOpName,
+  type WorkspaceOpResult,
+} from "@shared/ipc-contract";
 import { logDesktop } from "../../log-service";
 import {
   WINDOWS_RESERVED_DEVICE_REASON,
@@ -508,7 +512,7 @@ export async function runWorkspaceOpMain(
             });
             resolve(
               opErr(
-                "WorkspaceIOError",
+                WORKSPACE_LIVENESS_TIMEOUT_KIND,
                 "本地工作区 op 活性挂起（主进程 timeout）",
               ),
             );

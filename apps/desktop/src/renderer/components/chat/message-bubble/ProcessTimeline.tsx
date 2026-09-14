@@ -30,7 +30,8 @@ import type {
 } from "@/types/events";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Fragment, memo } from "react";
-import { ThinkingDots, ThinkingHeader } from "./Thinking";
+import { LiveWaitLabel } from "./LiveFlow";
+import { ThinkingHeader } from "./Thinking";
 
 /** Thought 折叠覆盖面：推理/工具/非末段正文 + 弱式决策痕迹（批准/委派授权/推进卡）
  * + 已答复 ask / 已结算开工复核。末段正文、待拍板、协作图、插话仍外置可见。 */
@@ -338,12 +339,7 @@ export function ProcessEndChrome({
       {isStreaming && composingTool && (
         <ComposingToolLine tool={composingTool} />
       )}
-      {showThinkingTail && (
-        <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
-          <ThinkingDots />
-          Thinking…
-        </span>
-      )}
+      {showThinkingTail && <LiveWaitLabel>Thinking…</LiveWaitLabel>}
     </>
   );
 }

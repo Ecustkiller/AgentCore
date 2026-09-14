@@ -286,7 +286,7 @@ async function attemptRejoinOnce(
     return applySettledWindowBanner(conversationId);
   } catch (err) {
     if (isAbort(err)) {
-      if (!opts.silentAbort) finalizeHonestStopAbort(conversationId);
+      if (!opts.silentAbort) finalizeHonestStopAbort(conversationId, err);
       return "abort";
     }
     const s = useConversationStore.getState();
@@ -460,55 +460,40 @@ export function markGhostInterrupted(conversationId: string): void {
 }
 
 /**
- * Orphan empty-assistant settle (1a69f9dc · 方案 A).
+ * Stop spinning on empty assistants that never got an engine/server verdict.
+ * Do not invent ``interrupted`` — that finish only comes from the engine,
+ * crash salvage, or a dead-lease ghost ({@link markGhostInterrupted}).
  *
- * When a new turn starts (or hydrate finishes), any prior empty assistant that
- * never completed (streaming / running / abandoned incomplete) must not stay as
- * a blank product face. Rewrite to ``interrupted`` so
- * {@link syntheticErrorForEmptyFailure} paints「已中断」; do not hard-block input.
+ * Skips assistants with body, a real error payload, or a successful pause.
+ * Existing ``cancelled`` / ``error`` / ``unproductive`` / ``interrupted``
+ * finishes are kept; only the spinner stops.
  *
- * Leaves ``cancelled`` / ``error`` / ``unproductive`` alone (those already have
- * product faces). Skips assistants with body or a real error payload.
- * Skips ``paused`` entirely — even ``status===running`` (cold-load latch).
+ * `sendTurn` passes ``keepMessageId`` for the composer-painted placeholder so
+ * this does not stop Thinking on the bubble the stream is about to use.
  */
-export function settleOrphanEmptyAssistants(conversationId: string): void {
+export function settleOrphanEmptyAssistants(
+  conversationId: string,
+  opts?: { keepMessageId?: string },
+): void {
   const store = useConversationStore.getState();
   const msgs = getRuntime(conversationId).messages;
+  const keepId = opts?.keepMessageId;
   for (const m of msgs) {
+    if (keepId && m.id === keepId) continue;
     if (m.role !== "assistant") continue;
     if ((m.content ?? "").trim()) continue;
     if (m.error?.message?.trim()) continue;
     if (m.runs?.error?.message?.trim()) continue;
-    // Successful pause must not become interrupted, even while still ``running``.
     if (isPausedFinish(m)) continue;
-    const fr = m.finishReason ?? m.runs?.finishReason;
-    // Already has a synthesizable terminal finish — keep it.
-    if (
-      fr === "cancelled" ||
-      fr === "error" ||
-      fr === "unproductive" ||
-      fr === "interrupted"
-    ) {
-      if (!m.isStreaming && m.status !== "running") continue;
-    }
-    const needsSettle =
-      m.isStreaming ||
-      m.status === "running" ||
-      m.status === "incomplete" ||
-      // Settled blank with no finish (abandoned placeholder before message_end).
-      (!fr && m.status !== "complete" && m.status !== "failed");
-    if (!needsSettle) continue;
+    if (!m.isStreaming && m.status !== "running") continue;
     store.updateMessage(
       m.id,
       {
         isStreaming: false,
-        status: "incomplete",
-        finishReason: "interrupted",
-        runs: m.runs ? { ...m.runs, finishReason: "interrupted" } : m.runs,
+        ...(m.status === "running" ? { status: "incomplete" as const } : {}),
       },
       conversationId,
     );
-    // Freeze any live graph; do not wipe the projection (graph stays on screen).
     finalizeRunningExecutionSlots(m.id, m.serverMessageId);
   }
 }
@@ -599,7 +584,7 @@ export async function attachOnOpen(conversationId: string): Promise<void> {
     await attachConversation(conversationId, ac.signal);
   } catch (err) {
     if (isAbort(err)) {
-      finalizeHonestStopAbort(conversationId);
+      finalizeHonestStopAbort(conversationId, err);
       return;
     }
     const s = useConversationStore.getState();

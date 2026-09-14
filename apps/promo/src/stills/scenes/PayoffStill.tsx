@@ -1,8 +1,8 @@
 import type { Edge, Node } from "@xyflow/react";
 import { GraphStage } from "../../core/graph/GraphStage";
-import { CAPTAIN_ID } from "../../videos/brand-30s/data/demo";
-import { buildBrandGraphState } from "../../videos/brand-30s/data/graphSpec";
-import { DEMO_LAYOUT } from "../../videos/brand-30s/data/layout";
+import { CAPTAIN_ID } from "../../kit/hero/demo";
+import { buildHeroGraphState } from "../../kit/hero/graphSpec";
+import { DEMO_LAYOUT } from "../../kit/hero/layout";
 import { AmbientGlow, AmbientVignette, stillFrameSize, STILL_FRAME_PAD } from "./StillScene";
 
 /*
@@ -21,7 +21,7 @@ const FROZEN = 404; // just past spec done(390): all workers complete, CEO assem
 const FPS = 30;
 
 export function PayoffStill() {
-  const { nodes, edges } = buildBrandGraphState(FROZEN, FPS, {
+  const { nodes, edges } = buildHeroGraphState(FROZEN, FPS, {
     captain: {
       status: "running",
       preview: "正在汇总三方产出，裁决并形成最终方案……",

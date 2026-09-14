@@ -405,7 +405,6 @@ export function ChatThread({ chatId }: Props) {
                   <EmptyHint
                     inline
                     title={isOfficial ? "暂无公告" : "还没有消息"}
-                    hint={isOfficial ? undefined : "发送第一条消息吧"}
                   />
                 )}
               </div>

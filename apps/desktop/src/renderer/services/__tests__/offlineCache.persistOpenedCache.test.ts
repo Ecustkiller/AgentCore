@@ -210,7 +210,7 @@ describe("persistOpenedCache preview", () => {
   });
 });
 
-describe("persistOpenedCache richer-only", () => {
+describe("persistOpenedCache server-window writes", () => {
   const putOpenedConversation = vi.fn().mockResolvedValue(undefined);
   const getConversation = vi.fn();
 
@@ -225,16 +225,15 @@ describe("persistOpenedCache richer-only", () => {
     });
   });
 
-  it("does not replace a thicker opened snapshot with a thinner window", async () => {
-    const thick = [
-      msg("u1", "user", "first"),
-      msg("a1", "assistant", "reply1"),
-      msg("u2", "user", "second"),
-      msg("a2", "assistant", "live tail"),
-    ];
+  it("writes the server window even when a thicker opened snapshot exists", async () => {
     getConversation.mockResolvedValue({
       conversation: listed("c1", "live tail"),
-      messages: thick,
+      messages: [
+        msg("u1", "user", "first"),
+        msg("a1", "assistant", "reply1"),
+        msg("u2", "user", "second"),
+        msg("a2", "assistant", "live tail"),
+      ],
       memoryUpdates: [],
       hasMoreBefore: false,
       hasMoreAfter: false,
@@ -247,10 +246,10 @@ describe("persistOpenedCache richer-only", () => {
       { hasMoreBefore: false, hasMoreAfter: false },
     );
 
-    expect(putOpenedConversation).not.toHaveBeenCalled();
+    expect(putOpenedConversation).toHaveBeenCalledTimes(1);
   });
 
-  it("writes when the incoming window is strictly richer", async () => {
+  it("writes when the incoming window has more turns", async () => {
     getConversation.mockResolvedValue({
       conversation: listed("c1", "reply1"),
       messages: [msg("u1", "user", "first"), msg("a1", "assistant", "reply1")],

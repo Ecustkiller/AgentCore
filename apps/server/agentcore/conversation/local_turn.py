@@ -6,8 +6,10 @@ from typing import Any
 from sqlalchemy.exc import IntegrityError
 
 from agentcore.config import settings
-from agentcore.conversation.mentions import to_stored_agent_mentions
+from agentcore.conversation.history import _HARVEST_USER_PREFIX
 from agentcore.conversation.store import MESSAGE_STATUS_RUNNING, get_cloud_store
+from agentcore.conversation.store import cloud as cloud_store
+from agentcore.conversation.store.cloud import LOCAL_TURN_RECOVERY_PLACEHOLDER
 from agentcore.conversation.zero_output_rollback import (
     delete_assistant_and_paired_user,
     error_code_from_turn_result,
@@ -17,6 +19,7 @@ from agentcore.conversation.zero_output_rollback import (
 from agentcore.core.errors import ValidationError
 from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
+from agentcore.core.mentions import to_stored_agent_mentions
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import MessageRepository
 from agentcore.llm.resolve import LLMCredentials
@@ -53,6 +56,37 @@ async def _release_local_turn_lease(message_id: str | None) -> None:
     if not message_id or not settings.turn_lease_enabled:
         return
     await release_turn_lease(message_id, owner_id=local_turn_lease_owner_id(message_id))
+
+
+def _sidecar_writeback_is_this_send(
+    *,
+    user_message: str,
+    origin: str | None,
+    harvest_kind: str | None,
+) -> bool:
+    """Ordinary startTurn create — not harvest / recovery / synthetic user rows."""
+    if (origin or "").strip() or (harvest_kind or "").strip():
+        return False
+    text = (user_message or "").strip()
+    if not text or text == LOCAL_TURN_RECOVERY_PLACEHOLDER:
+        return False
+    return not text.startswith(_HARVEST_USER_PREFIX)
+
+
+async def _assistant_row_already_exists(
+    *, conversation_id: str, message_id: str | None
+) -> bool:
+    """True when this write-back settles a live/paused assistant snapshot (BUG-4)."""
+    if not message_id:
+        return False
+    try:
+        async with cloud_store.async_session_factory() as session:
+            row = await cloud_store.MessageRepository(session).get_by_id(
+                message_id, conversation_id=conversation_id
+            )
+    except Exception:  # noqa: BLE001 — lookup miss must not block this-send rollback
+        return False
+    return row is not None
 
 
 async def heartbeat_local_turn(*, conversation_id: str, message_id: str) -> bool:
@@ -190,11 +224,17 @@ async def _persist_local_turn(
                 tools=tools,
                 messages=messages,
             )
-        # Harvest / origin write-backs are not this-send creates (cloud continue
-        # / workflow pass False). Ordinary startTurn write-back is this-send.
-        user_created_this_send = not (
-            (origin or "").strip() or (harvest_kind or "").strip()
+        # Harvest / recovery / existing snapshot settles are not this-send creates.
+        # Ordinary startTurn write-back is this-send (「发送当没发生」 may skip persist).
+        user_created_this_send = _sidecar_writeback_is_this_send(
+            user_message=user_message,
+            origin=origin,
+            harvest_kind=harvest_kind,
         )
+        if user_created_this_send and await _assistant_row_already_exists(
+            conversation_id=conversation_id, message_id=message_id
+        ):
+            user_created_this_send = False
         result_like = result_from_local_turn_writeback(
             message_id=message_id,
             content=assistant_content,
@@ -205,6 +245,7 @@ async def _persist_local_turn(
             cache_miss_tokens=cache_miss_tokens,
             journal=journal,
             runs=runs,
+            assistant_reasoning=assistant_reasoning,
         )
         if should_delete_zero_output_send_result(
             result_like, user_created_this_send=user_created_this_send

@@ -237,10 +237,8 @@ const IMAGE_MIME_BY_EXT: Record<string, string> = {
 
 const PDF_MIME = "application/pdf";
 
-const OVERSIZE_IMAGE_REASON =
-  "图片过大（超过 10MB），请下载或用系统默认程序打开";
-const OVERSIZE_PDF_REASON = "PDF 过大（超过 15MB），请下载或用系统默认程序打开";
-const BINARY_PREVIEW_REASON = "无法在面板内预览，请下载或用系统默认程序打开";
+const OVERSIZE_IMAGE_REASON = "图片过大（超过 10MB）";
+const OVERSIZE_PDF_REASON = "PDF 过大（超过 15MB）";
 
 /**
  * The outcome of a preview read: decodable text (possibly truncated), an inline
@@ -369,7 +367,7 @@ export async function decodePreviewResponse(
   const probe = Math.min(slice.length, 8192);
   for (let i = 0; i < probe; i++) {
     if (slice[i] === 0) {
-      return { kind: "binary", reason: BINARY_PREVIEW_REASON };
+      return { kind: "binary" };
     }
   }
 
@@ -380,7 +378,7 @@ export async function decodePreviewResponse(
     if (text.charCodeAt(i) === 0xfffd) replacements++;
   }
   if (scan > 0 && replacements / scan > 0.1) {
-    return { kind: "binary", reason: BINARY_PREVIEW_REASON };
+    return { kind: "binary" };
   }
 
   return { kind: "text", text, truncated };

@@ -8,13 +8,14 @@ from typing import Any
 
 from agentcore.config import settings
 from agentcore.core.error_codes import ErrorCode
-from agentcore.core.errors import AgentCoreError, LLMUpstreamError, error_fields_for
+from agentcore.core.errors import AgentCoreError, LLMUpstreamError
 from agentcore.core.logging import get_logger
 from agentcore.llm.model_selection import SelectedCall, build_selected_request
 from agentcore.llm.profiles import ProfileParams
 from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
 from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
 from agentcore.llm.tools_gate import TOOLS_UNAVAILABLE_RUNTIME_MESSAGE
+from agentcore.runtime.error_fields import error_fields_for
 from agentcore.runtime.events import FinishReason
 from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.facts import LlmCallFact, NoteFact, RoundBoundaryFact, record_turn_fact

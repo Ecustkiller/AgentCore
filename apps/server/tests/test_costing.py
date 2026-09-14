@@ -187,7 +187,7 @@ def test_captain_cost_values_are_integers():
 
 
 def test_vision_run_cost_prices_subcall_under_vision_role():
-    # AI 协作白板 读图入账 (§九.4 Gap ②): a board_read sub-call to a SEPARATE vision model
+    # 读图入账: a vision sub-call to a SEPARATE vision model
     # gets its own priced ledger row under role=vision — priced once here via the one
     # calculate_cost (a stub state would misprice it at the run's DeepSeek tier), parented
     # to the calling run so it nests under that captain in the turn's run tree.

@@ -1,3 +1,7 @@
+import {
+  INTERACTION_KIND_WIRE,
+  type UserInteractionKind,
+} from "@agentcore/contract-types";
 /**
  * ProjectedTurn.interactions[] fold (提问确认统一重构 P3).
  * Mirrors apps/server/.../pending_interactions.fold_interactions + project_interaction_leaf.
@@ -45,6 +49,20 @@ function upsert(
     map.set(k, { leaf, order: order.n++ });
   } else {
     prev.leaf = leaf;
+  }
+}
+
+function isHotUserKind(kind: string): boolean {
+  if (!(kind in INTERACTION_KIND_WIRE)) return false;
+  return INTERACTION_KIND_WIRE[kind as UserInteractionKind].hot;
+}
+
+function orphanHotOnTerminal(map: Map<string, Open>, finish: string): void {
+  if (finish === "paused") return;
+  for (const open of map.values()) {
+    if (open.leaf.status !== "pending") continue;
+    if (!isHotUserKind(open.leaf.kind)) continue;
+    open.leaf = { ...open.leaf, status: "orphaned" };
   }
 }
 
@@ -191,6 +209,11 @@ export function foldInteractions(
         const id = str(p.interaction_id);
         const kind = str(p.kind) as ProjectedInteraction["kind"];
         if (id && kind) settle(map, kind, id, "orphaned");
+        break;
+      }
+      case "turn_end":
+      case "message_end": {
+        orphanHotOnTerminal(map, str(p.finish_reason));
         break;
       }
       default:

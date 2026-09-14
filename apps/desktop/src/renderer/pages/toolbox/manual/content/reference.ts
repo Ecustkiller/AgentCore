@@ -25,16 +25,20 @@ export const referenceChapter: ManualChapterContent = {
               desc: "平台自带，所有 Agent 开箱即用——读文件、搜索、执行等。",
             },
             {
-              title: "白板（画布可用）",
-              desc: "工具箱里可自由摆元素；AI 指挥尚未开放。",
+              title: "白板",
+              desc: "工具箱里可自由摆元素的无限画布。",
             },
             {
               title: "文档",
               desc: "工具箱里可反复打开的长文，挂在云文件夹上。",
             },
             {
+              title: "多维表格",
+              desc: "工具箱里带类型列的表，可筛选、看板和日历。",
+            },
+            {
               title: "其他创作工具（尚未开放）",
-              desc: "思维导图 / 表格 / 幻灯片——尚未开放。",
+              desc: "思维导图 / 幻灯片——尚未开放。",
             },
             {
               title: "MCP（本机连接器）",
@@ -186,6 +190,11 @@ export const referenceChapter: ManualChapterContent = {
               desc: "版本、产品手册与法律信息",
               to: APP_PATHS.more.about,
             },
+            {
+              label: "赞助",
+              desc: "自愿打赏（收款码不随公开仓）",
+              to: APP_PATHS.more.sponsor,
+            },
           ],
         },
       ],
@@ -307,7 +316,7 @@ export const referenceChapter: ManualChapterContent = {
               a: [
                 {
                   type: "text",
-                  text: "画布是对话里的跨回合空间视图——把多轮协作图画在一张可平移的空间上；白板是工具箱里的独立创作工具，画布可自由摆元素，AI 指挥尚未开放。",
+                  text: "画布是对话里的跨回合空间视图——把多轮协作图画在一张可平移的空间上；白板是工具箱里的独立创作工具，画布可自由摆元素。",
                 },
               ],
             },
@@ -626,7 +635,7 @@ export const referenceChapter: ManualChapterContent = {
               a: [
                 {
                   type: "text",
-                  text: "工具箱里的独立创作工具——画布可用，自由摆元素；AI 指挥尚未开放。≠ 画布。",
+                  text: "工具箱里的独立创作工具——无限画布，自由摆元素。≠ 画布。",
                 },
               ],
             },

@@ -145,7 +145,7 @@ def test_fold_empty_user_without_attachments_still_dropped():
 
 
 def test_fold_user_inline_markers_become_labels_not_bodies():
-    from agentcore.conversation.inline_body import token
+    from agentcore.core.inline_body import token
 
     raw = f"按这个{token('A', 0)}请{token('M', 0)}看"
     out = _fold_history_messages(

@@ -80,8 +80,6 @@ interface UIState {
   searchOpen: boolean;
   /** Prefill for the next palette open; consumed on open. */
   searchInitialQuery: string;
-  /** Open directly in the bookmarks facet (命令面板「已收藏」); consumed on open. */
-  searchInitialBookmarks: boolean;
   theme: Theme;
   /** 本机执行偏好折成的展示布尔（= `resolveSidecarEnabled`；unset→`SIDECAR_DEFAULT_ENABLED`）。
    * **不是**新开回合路由挡板——路由看 {@link sidecarPreference} 是否显式 `off`（强制关）。
@@ -92,7 +90,7 @@ interface UIState {
    * 大众 Appearance 无此开关；强制关仅通用·进阶。 */
   sidecarPreference: SidecarPreference;
 
-  openSearch: (initialQuery?: string, opts?: { bookmarks?: boolean }) => void;
+  openSearch: (initialQuery?: string) => void;
   closeSearch: () => void;
   toggleSearch: () => void;
   setTheme: (theme: UIState["theme"]) => void;
@@ -123,7 +121,6 @@ export function turnDetailPath(
 export const useUIStore = create<UIState>((set) => ({
   searchOpen: false,
   searchInitialQuery: "",
-  searchInitialBookmarks: false,
   theme: loadTheme(),
   sidecarPreference: loadSidecarPreference(),
   sidecarEnabled: loadSidecarEnabled(),
@@ -131,17 +128,15 @@ export const useUIStore = create<UIState>((set) => ({
   // Default "" is required: Sidebar SearchTrigger calls openSearch() with no args.
   // Without it, searchInitialQuery becomes undefined and CommandPalette crashes
   // on query.trim() (regressed in 1ee81cee when the default was dropped).
-  openSearch: (initialQuery, opts) =>
+  openSearch: (initialQuery) =>
     set({
       searchOpen: true,
       searchInitialQuery: initialQuery ?? "",
-      searchInitialBookmarks: opts?.bookmarks ?? false,
     }),
   closeSearch: () =>
     set({
       searchOpen: false,
       searchInitialQuery: "",
-      searchInitialBookmarks: false,
     }),
   toggleSearch: () => set((s) => ({ searchOpen: !s.searchOpen })),
   setTheme: (theme) => {

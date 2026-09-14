@@ -40,6 +40,7 @@ from typing import Any
 
 from agentcore.runtime.events.chat import message_start
 from agentcore.runtime.events.disposition import DURABLE_EVENT_TYPES
+from agentcore.runtime.events.interaction import interaction_orphaned
 from agentcore.runtime.events.stream_checkpointer import (
     CHANNEL_CAPTAIN_CONTENT,
     CHANNEL_CAPTAIN_REASONING,
@@ -613,6 +614,23 @@ def replay_close_event(
     return SSEEvent(type=EventType.MESSAGE_END, payload=payload)
 
 
+def _hot_orphan_replay_events(rows: list[dict[str, Any]]) -> list[SSEEvent]:
+    """Synthesize ``interaction_orphaned`` for hot cards a finished turn never settled.
+
+    Catch-up replays DURABLE ``*_required`` frames; ``turn_end`` itself is not on the
+    wire. Without these facts the client would paint a clickable card for a turn
+    that already ended. Same fold rule as :func:`fold_interactions` (journal has
+    ``turn_end`` → leftover hot pending is ``orphaned``). Skip ids the journal
+    already recorded so explicit orphan facts are not doubled.
+    """
+    from agentcore.runtime.journal.pending_interactions import unrecorded_hot_orphans
+
+    return [
+        interaction_orphaned(interaction_id=iid, kind=kind)
+        for iid, kind in unrecorded_hot_orphans(rows)
+    ]
+
+
 def _turn_end_close_event(rows: list[dict[str, Any]]) -> SSEEvent | None:
     """Synthesize the stream-close ``message_end`` the attach replay otherwise lacks.
 
@@ -671,10 +689,10 @@ async def build_cursor_replay(
     :func:`_incremental_verdict` can vouch for the cursor — which starts with the cursor
     naming this very turn.
     """
-    from agentcore.conversation.store import get_conversation_store
     from agentcore.core.logging import get_logger
     from agentcore.db.base import telemetry_session_factory
     from agentcore.db.repositories.runs import TurnJournalRepository
+    from agentcore.runtime.conversation_store import get_conversation_store
 
     async with telemetry_session_factory() as db:
         # Full turn from seq 0 (``seq > -1``) — the判定 needs every row.
@@ -746,6 +764,9 @@ async def build_cursor_replay(
             skip_captain_reasoning=skip_cap_reasoning,
         )
     )
+    # Finished turn: settle leftover hot cards before the synthetic close, so
+    # one-shot catch-up fold ends orphaned (not a flash-then-clear pending card).
+    events.extend(_hot_orphan_replay_events(rows))
     # Close a finished detached turn so a client attaching in the persist window
     # finalizes normally instead of via the reconnect-banner salvage (收口事实回放).
     close = _turn_end_close_event(rows)

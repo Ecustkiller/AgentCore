@@ -39,7 +39,7 @@ class InteractionKind(StrEnum):
     User-facing decision-card kinds (approval / ask / checkpoint / …) also appear in
     :data:`INTERACTION_KIND_SPECS` — that table is the wire-contract single source
     dumped by ``scripts/dump_interaction_kinds.py`` (``pnpm gen:types``).
-    ``CLIENT_TOOL`` is bridge-only (workspace / board ops) and is intentionally
+    ``CLIENT_TOOL`` is bridge-only (workspace / host / mcp / mount) and is intentionally
     absent from the user-facing wire table.
     """
 
@@ -54,10 +54,11 @@ class InteractionKind(StrEnum):
     # ``resolve_escalation`` (awaiting=ceo, not user-answerable) →
     # result: ``{answer | use_assumption}``.
     # Unlike the halting gates above, this does NOT pause the turn — siblings keep running
-    # and a timeout degrades to the worker's stated assumption (设计: 06-规划/阻塞式求决策设计).
+    # and a timeout degrades to the worker's stated assumption
+    # (设计: 编排器 · 失败与否决 / 协作模式 · escalate)。
     ESCALATION = "escalation"
     # leftover 阶段推进卡：kind 仍在 journal / 时间线；热路 resolve 一律 410。
-    # 开辩须用户在对话里点名。不挂起幕 1，不占 bridge Future。
+    # 开辩须用户在对话里点名。不挂起幕 1，不占 bridge Future，不进 recovery pending。
     STAGE_CARD = "stage_card"
 
 
@@ -139,7 +140,7 @@ INTERACTION_KIND_SPECS: Mapping[InteractionKind, InteractionKindSpec] = {
         "stage_card_id",
         hot=False,
         pauses_turn=False,
-        reconnect_answerable=True,
+        reconnect_answerable=False,
         journal_surface=True,
         attention=False,
     ),

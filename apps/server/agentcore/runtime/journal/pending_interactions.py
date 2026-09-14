@@ -10,6 +10,10 @@ ask_user / plan_review / stage_card。
 ``awaiting=ceo`` 的 escalation 不进用户可答清单（由活着的 CEO 仲裁）。
 冷路（ask_user / plan_review）的 frame 恢复仍走 ``paused_turns``；
 本 fold 只负责交互卡生命周期投影。
+
+``turn_end`` / 非 ``paused`` 的 ``message_end`` = 回合终了：未结算的热卡
+（approval / 用户侧 escalation）标 ``orphaned``，与显式 ``interaction_orphaned`` 同效。
+活着的热等待没有 ``turn_end``，保持 pending。
 """
 
 from __future__ import annotations
@@ -21,10 +25,22 @@ from agentcore.runtime.events.types import RETIRED_EVENT_TYPE_VALUES
 from agentcore.runtime.interaction import (
     INTERACTION_KIND_SPECS,
     RECOVERY_PENDING_KINDS,
+    is_hot_user_pending_kind,
     is_user_answerable,
 )
 
 InteractionStatus = Literal["pending", "resolved", "orphaned"]
+
+_PAUSED_FINISH = "paused"
+_TERMINAL_CLOSE_KINDS = frozenset({"turn_end", "message_end"})
+
+
+def _is_hot_terminal_close(event_kind: str, payload: dict[str, Any]) -> bool:
+    """True when this fact closes the turn (not a cold ``paused`` latch)."""
+    if event_kind not in _TERMINAL_CLOSE_KINDS:
+        return False
+    finish = str(payload.get("finish_reason") or "")
+    return finish != _PAUSED_FINISH
 
 # kind → required event / resolved event / payload 自有 id 字段
 # Single source: ``INTERACTION_KIND_SPECS`` (also dumped by ``pnpm gen:types``).
@@ -83,9 +99,10 @@ class _Open:
 def fold_interactions(entries: list[dict[str, Any]]) -> list[InteractionRecord]:
     """Fold journal/SSE entries → full interaction list (insertion order of required).
 
-    ``entries`` are ``{kind|type, payload}`` dicts.     Terminal status is pending until a
-    matching resolved/orphaned settles it. ``awaiting=ceo`` escalations are
-    omitted entirely.
+    ``entries`` are ``{kind|type, payload}`` dicts. Terminal status is pending until a
+    matching resolved/orphaned settles it, or the turn itself ends (``turn_end`` /
+    non-paused ``message_end``) — leftover hot cards become ``orphaned``.
+    ``awaiting=ceo`` escalations are omitted entirely.
     """
     by_key: dict[tuple[str, str], _Open] = {}
     order_counter = 0
@@ -150,6 +167,15 @@ def fold_interactions(entries: list[dict[str, Any]]) -> list[InteractionRecord]:
             elif existing.status == "pending":
                 existing.status = "resolved"
                 existing.resolution = payload
+            continue
+
+        if _is_hot_terminal_close(event_kind, payload):
+            for existing in by_key.values():
+                if existing.status != "pending":
+                    continue
+                if not is_hot_user_pending_kind(existing.kind, existing.payload):
+                    continue
+                existing.status = "orphaned"
 
     return [
         InteractionRecord(
@@ -168,7 +194,7 @@ def fold_pending_interactions(
     *,
     message_id: str = "",
 ) -> list[PendingInteraction]:
-    """Pending subset for ``GET …/recovery`` (hot-path + durable stage_card)."""
+    """Pending subset for ``GET …/recovery`` (reconnect-answerable kinds)."""
     return [
         PendingInteraction(
             kind=rec.kind,
@@ -179,6 +205,63 @@ def fold_pending_interactions(
         for rec in fold_interactions(entries)
         if rec.status == "pending" and rec.kind in RECOVERY_PENDING_KINDS
     ]
+
+
+def unrecorded_hot_orphans(entries: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    """``(id, kind)`` for hot cards fold already marks orphaned, without a journal fact.
+
+    ``turn_end`` is not a client-foldable event. After a terminal close, leftover
+    hot cards are ``orphaned`` in fold (so recovery pending is empty) even when
+    the writer never emitted ``interaction_orphaned``. Attach replay and the
+    post-persist orphan writer inject that fact so GET messages / catch-up match.
+    """
+    has_terminal = False
+    already: set[str] = set()
+    for entry in entries:
+        event_kind = str(entry.get("kind") or entry.get("type") or "")
+        payload = dict(entry.get("payload") or {})
+        if _is_hot_terminal_close(event_kind, payload):
+            has_terminal = True
+        if event_kind == "interaction_orphaned":
+            iid = str(payload.get("interaction_id") or "")
+            if iid:
+                already.add(iid)
+    if not has_terminal:
+        return []
+    out: list[tuple[str, str]] = []
+    for rec in fold_interactions(entries):
+        if rec.status != "orphaned" or rec.id in already:
+            continue
+        out.append((rec.id, rec.kind))
+    return out
+
+
+def append_unrecorded_hot_orphan_facts(
+    entries: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Append ``interaction_orphaned`` for leftover hot cards after a terminal close.
+
+    Interrupt salvage often only stamps ``turn_end``. Fold already treats leftover
+    hot cards as orphaned, but list GET / catch-up need the explicit fact
+    (``turn_end`` is slimmed off list replay). Idempotent when the fact exists.
+    """
+    out = list(entries or [])
+    leftovers = unrecorded_hot_orphans(out)
+    if not leftovers:
+        return out
+    seqs = [int(e["seq"]) for e in out if isinstance(e.get("seq"), int)]
+    next_seq = (max(seqs) + 1) if seqs else len(out)
+    for iid, kind in leftovers:
+        out.append(
+            {
+                "kind": "interaction_orphaned",
+                "payload": {"interaction_id": iid, "kind": kind},
+                "ts": None,
+                "seq": next_seq,
+            }
+        )
+        next_seq += 1
+    return out
 
 
 def project_interaction_leaf(rec: InteractionRecord) -> dict[str, Any]:

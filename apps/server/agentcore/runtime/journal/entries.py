@@ -54,17 +54,17 @@ def last_turn_end_finish(entries: list[dict[str, Any]] | None) -> str | None:
     return None
 
 
-def ensure_cancelled_turn_end(
+def ensure_turn_end(
     entries: list[dict[str, Any]] | None,
+    finish_reason: str,
 ) -> list[dict[str, Any]]:
-    """User-stop close: durable journal must carry ``turn_end(cancelled)``.
+    """Stamp or append ``turn_end`` with *finish_reason*.
 
-    Progressive / pause-snapshot journals often omit ``turn_end`` or close with
-    ``turn_end(paused)``. Missing → append; any other close → stamp cancelled.
-    Callers invoke this only on cancelled write-back — it does not decide whether
-    the turn was a user stop, and must not be used to invent ``turn_end`` on
+    Callers choose the reason (user-stop cancelled, found-dead interrupted, …).
+    Missing → append; any other close → stamp this reason. Do not use on
     successful rounds.
     """
+    reason = (finish_reason or "").strip() or _CANCELLED_FINISH
     base: list[dict[str, Any]] = [dict(e) for e in entries] if entries else []
     turn_end_idx: int | None = None
     for i in range(len(base) - 1, -1, -1):
@@ -75,18 +75,25 @@ def ensure_cancelled_turn_end(
         base.append(
             {
                 "kind": KIND_TURN_END,
-                "payload": {"finish_reason": _CANCELLED_FINISH},
+                "payload": {"finish_reason": reason},
                 "ts": None,
             }
         )
         return base
     entry = dict(base[turn_end_idx])
     payload = dict(entry.get("payload") or {})
-    if payload.get("finish_reason") != _CANCELLED_FINISH:
-        payload["finish_reason"] = _CANCELLED_FINISH
+    if payload.get("finish_reason") != reason:
+        payload["finish_reason"] = reason
         entry["payload"] = payload
         base[turn_end_idx] = entry
     return base
+
+
+def ensure_cancelled_turn_end(
+    entries: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """User-stop close: durable journal must carry ``turn_end(cancelled)``."""
+    return ensure_turn_end(entries, _CANCELLED_FINISH)
 
 
 def entries_from_runs(runs: dict[str, Any] | None) -> list[dict[str, Any]]:

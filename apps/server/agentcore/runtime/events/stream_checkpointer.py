@@ -180,7 +180,7 @@ class StreamCheckpointer:
         if not dirty:
             return
         try:
-            from agentcore.conversation.store import get_conversation_store
+            from agentcore.runtime.conversation_store import get_conversation_store
 
             await get_conversation_store().upsert_stream_segments(
                 turn_id=self.turn_id,

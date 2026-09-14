@@ -53,6 +53,15 @@ describe("CatalogTile", () => {
     ).toBeTruthy();
   });
 
+  it("reserves two description lines even when copy is missing", () => {
+    const { container } = render(
+      <CatalogTile icon={<span>icon</span>} colorVar="--tools" title="商店" />,
+    );
+    const slot = container.querySelector("[data-slot=description]");
+    expect(slot).toBeTruthy();
+    expect(slot?.className).toContain("min-h-[2lh]");
+  });
+
   it("invokes onClick from the tile button", () => {
     const onClick = vi.fn();
     render(

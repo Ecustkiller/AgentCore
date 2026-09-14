@@ -207,6 +207,8 @@ describe("runHydrateAttachSettle (warm reopen / cold adopt)", () => {
     expect(projectPausedRuns).not.toHaveBeenCalled();
     expect(attachOnOpen).not.toHaveBeenCalled();
     expect(settleCloudRunningAssistant).not.toHaveBeenCalled();
+    expect(getRuntime(CID).isGenerating).toBe(true);
+    expect(getRuntime(CID).turnPhase).toBe("streaming");
   });
 
   it("local paused skips attach but projects pause-frame runs", async () => {
@@ -419,6 +421,25 @@ describe("runHydrateAttachSettle (warm reopen / cold adopt)", () => {
       CID,
       expect.objectContaining({ onReplayReady: expect.any(Function) }),
     );
+  });
+
+  it("sidecarLive 且界面曾失败：直接拨回生成中，不走 enterTurnStreaming", async () => {
+    seedMessages({ role: "assistant", status: "running" });
+    useConversationStore.getState().setGenerating(false, CID);
+    useConversationStore.getState().setTurnPhase("failed", CID);
+
+    const branch = await runHydrateAttachSettle(CID, {
+      sidecarLive: true,
+      cloudLive: false,
+      cloudKnown: true,
+      pausedCount: 0,
+      unsynced: [],
+    });
+
+    expect(branch).toBe("local");
+    expect(getRuntime(CID).isGenerating).toBe(true);
+    expect(getRuntime(CID).turnPhase).toBe("streaming");
+    expect(attachSidecarTurn).toHaveBeenCalledTimes(1);
   });
 
   it("打开对话不清 ai_attention 灯", async () => {

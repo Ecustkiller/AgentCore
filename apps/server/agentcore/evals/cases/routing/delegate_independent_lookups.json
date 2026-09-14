@@ -1,0 +1,12 @@
+{
+  "id": "routing_delegate_independent_lookups",
+  "category": "routing",
+  "user_message": "分别用一句话说明这三家的定位，不用写成文、不用落盘：Notion、Obsidian、Logseq。",
+  "path": "team",
+  "mode": "economy",
+  "checks": [
+    { "name": "FinishReason" },
+    { "name": "Delegated" }
+  ],
+  "rubric": "三件互不依赖的短查证：能切开并行，过程不该进 CEO 窗。不是一问一答、不是『短所以自己扛』。"
+}

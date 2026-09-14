@@ -27,11 +27,12 @@ from agentcore.runtime.skills.staffing import _STAFFING
 
 # --- The system skills (single source of truth) -----------------------------
 # Catalog summaries: name-like (what this is), not a 19-way scene classifier.
-# Python len ≤80; HOW lives in the body.
+# Python len ≤80; HOW lives in the body. ``blurb`` is toolbox-card only.
 _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="staffing",
         summary="团队拆法",
+        blurb="把任务拆成角色和并行，决定谁干什么",
         body=_STAFFING,
         # 根 CEO 编制 / 协调。嵌套 lead 的拆法不在此本 → ``lead_subteam``。
         audience=AUDIENCE_CEO_ONLY,
@@ -40,6 +41,7 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="lead_subteam",
         summary="子队拆法",
+        blurb="队员队长怎么把接到的任务再往下拆",
         body=_LEAD_SUBTEAM,
         # 持 delegate 的队员队长才进目录；叶子与 CEO 都不广告。
         audience=AUDIENCE_WORKER_ONLY,
@@ -49,6 +51,7 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="ask_kickoff",
         summary="开场提问",
+        blurb="开工前把目标、约束和缺口问清楚",
         body=_ASK_KICKOFF,
         requires_tools=("ask_user",),
         group=GROUP_ORCHESTRATION,
@@ -56,6 +59,7 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="ask_midtask",
         summary="途中提问",
+        blurb="做到一半、缺事实或缺拍板时再问人",
         body=_ASK_MIDTASK,
         requires_tools=("ask_user",),
         group=GROUP_ORCHESTRATION,
@@ -63,6 +67,7 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="debate_and_review",
         summary="正反辩论",
+        blurb="正反两边对碰，再收到一个可拍板的结论",
         body=_DEBATE_AND_REVIEW,
         requires_tools=("debate",),
         group=GROUP_ORCHESTRATION,
@@ -70,6 +75,7 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="local_desk",
         summary="本机目录进工作区",
+        blurb="把这台电脑上的文件夹接到当前工作区",
         body=_LOCAL_DESK,
         audience=AUDIENCE_CEO_ONLY,
         group=GROUP_WORKSPACE,
@@ -77,6 +83,7 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="delivery",
         summary="交付环境",
+        blurb="东西交到哪里、以什么形态交给人",
         body=_DELIVERY,
         audience=AUDIENCE_CEO_ONLY,
         group=GROUP_DELIVERY,
@@ -84,6 +91,7 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="data_file_landing",
         summary="表格落盘",
+        blurb="表怎么落到工作区里的文件",
         body=_DATA_FILE_LANDING,
         # Consult is CEO+worker. Body is the worker loop; CEO still consults to brief.
         # Do not gate on ``run``: this turn may have no execution assembled; the
@@ -93,6 +101,7 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="page_ui",
         summary="页面观感",
+        blurb="页面长什么样、交互怎么铺",
         body=_PAGE_UI,
         # CEO+worker：主管把方向写进 task，工人铺像素。无工具门。
         group=GROUP_DELIVERY,
@@ -100,6 +109,7 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="product_help",
         summary="本产品用法",
+        blurb="这个产品能做什么、入口在哪",
         body=_PRODUCT_HELP,
         audience=AUDIENCE_CEO_ONLY,
         group=GROUP_PRODUCT,
@@ -107,6 +117,7 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="run",
         summary="跑命令 / 启服",
+        blurb="在终端跑命令、起本地服务",
         body=_RUN,
         requires_tools=("run",),
         group=GROUP_TOOLS,

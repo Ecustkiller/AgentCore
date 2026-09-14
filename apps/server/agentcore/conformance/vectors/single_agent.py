@@ -757,8 +757,7 @@ def _empty_face_paused() -> list[SSEEvent]:
 
 
 def _empty_face_channel_dead() -> list[SSEEvent]:
-    # 生产真值：prepare 阶段 WorkspaceIOError(CHANNEL_DEAD_PREPARE_ABORT)
-    # 经 error_fields_for 映射为 LOCAL_CHANNEL_DEAD + 原文（见 core/errors.py）。
+    # 生产真值：prepare 阶段 LocalChannelDeadError（文案 CHANNEL_DEAD_PREPARE_ABORT）。
     # 引常量而非抄字面量，避免文案改动后向量再次失真。
     return _empty_face_shell(
         code=ErrorCode.LOCAL_CHANNEL_DEAD,

@@ -90,6 +90,7 @@ class DebateTool:
         surface=ToolSurface.CEO_ORCHESTRATION,
         audience=AUDIENCE_CEO_ONLY,
         ceo_wire=CeoWire.ALWAYS,
+        catalog_summary="开一场正反辩论",
     )
 
     def __init__(
@@ -163,12 +164,6 @@ class DebateTool:
         self._debate_graph_parent_run_id: str | None = None
         # 批 B：幕授权来源 stage_card / auto / preview；缺省新路径补 auto（preview 仅存量 leftover）。
         self._debate_authorized_by: str | None = None
-        # 推进卡消费 / 点卡直起时携带的卡 payload（宿主三元组优先）。
-        self._debate_stage_card: dict[str, Any] | None = None
-        # debate.started 后立刻 finalize 的上下文；启动失败保持 None。
-        self._stage_card_finalize: dict[str, Any] | None = None
-        # 已在开跑边界落 resolved（中途失败不回 pending）。
-        self._stage_card_finalized_at_start: bool = False
         # 主持人节点终帧只发一次（``settle_moderator_node`` 的幂等闸）。
         self._moderator_settled: bool = False
 
@@ -216,9 +211,6 @@ class DebateTool:
             turn_auth_dead_reject_message,
         )
         from agentcore.runtime.costing import usage_metadata
-        from agentcore.runtime.kickoff.stage_card import (
-            clear_turn_keeps_stage_card,
-        )
         from agentcore.runtime.turn.token_budget import (
             current_turn_tokens,
             is_turn_token_ceiling_hit,
@@ -242,38 +234,13 @@ class DebateTool:
             logger.info("debate.turn_auth_dead_rejected")
             return err(turn_auth_dead_reject_message(payer))
 
-        # 开辩是独立重活：不消费推进卡。遗留 pending 卡由回合收尾 orphan。
+        # 开辩是独立重活：不消费推进卡。
         motion = str(arguments.get("motion") or "").strip()
         if not motion:
             return err("debate 需要 motion（辩论命题 / 要解决的问题）。")
 
-        consume_host_turn_id = ""
-        consume_card_id = ""
-        consume_override: str | None = None
-        consume_note = ""
-        self._stage_card_finalize = None
-        self._stage_card_finalized_at_start = False
-
-        # 按钮 / 机制直起：卡上已带 host 回合 id（成功边界同为 debate.started）。
-        if (
-            not consume_card_id
-            and self._debate_authorized_by == "stage_card"
-            and isinstance(self._debate_stage_card, dict)
-        ):
-            sc = self._debate_stage_card
-            consume_host_turn_id = str(sc.get("_host_turn_id") or "")
-            consume_card_id = str(
-                sc.get("stage_card_id") or sc.get("_card_id") or ""
-            )
-            raw_override = sc.get("_motion_override")
-            if consume_override is None and raw_override is not None:
-                consume_override = str(raw_override) if raw_override else None
-            if not consume_note:
-                consume_note = str(sc.get("_resolve_note") or "")
-
         sides, side_err = parse_sides(arguments.get("sides"))
         if side_err:
-            clear_turn_keeps_stage_card()
             return err(side_err)
         form = parse_form(arguments.get("form"))
         thorough = arguments.get("thorough", True)
@@ -294,7 +261,6 @@ class DebateTool:
             arguments.get("moderator_provider_id"),
         )
         if mod_err:
-            clear_turn_keeps_stage_card()
             return err(mod_err)
         config = DebateConfig(
             motion=motion,
@@ -355,7 +321,6 @@ class DebateTool:
                 user_message=self._user_message or "",
             )
         if model_err:
-            clear_turn_keeps_stage_card()
             candidates = list(getattr(config, "model_candidates", None) or [])
             if candidates:
                 from agentcore.tools.protocol import ToolResult
@@ -385,30 +350,13 @@ class DebateTool:
         if not skip_kickoff:
             early = await self._kickoff_before_moderator(config, arguments)
             if early is not None:
-                # STOP / research_first / pause — 未真正开跑则清 keep。
-                if not self._pending_pause:
-                    clear_turn_keeps_stage_card()
                 return early
         elif self._debate_authorized_by is None:
             # skip_kickoff 未显式授权：新路径缺省 = auto。
             self._debate_authorized_by = "auto"
 
-        # 成功边界 = debate.started：开跑即 finalize（见 _run_moderator）。
-        if (
-            consume_card_id
-            and consume_host_turn_id
-            and self._debate_authorized_by == "stage_card"
-        ):
-            self._stage_card_finalize = {
-                "host_turn_id": consume_host_turn_id,
-                "stage_card_id": consume_card_id,
-                "note": consume_note,
-                "motion_override": consume_override,
-            }
-
         result = await self._run_moderator(config, usage_metadata)
         if not result.success:
-            clear_turn_keeps_stage_card()
             return result
         return result
 
@@ -546,35 +494,6 @@ class DebateTool:
                 "prev_execution_id": self._debate_prev_execution_id,
             }
             logger.info("debate.started", **started_fields)
-
-            # 推进卡成功边界 = debate.started（主持人/计划落地、真正开跑）。
-            # 口头消费与按钮直起同构；中途失败不回 pending。
-            finalize_ctx = self._stage_card_finalize
-            if (
-                finalize_ctx
-                and self._debate_authorized_by == "stage_card"
-                and not self._stage_card_finalized_at_start
-            ):
-                try:
-                    from agentcore.conversation.stage_card_resolve import (
-                        finalize_stage_card_start_debate,
-                    )
-
-                    await finalize_stage_card_start_debate(
-                        conversation_id=self._conversation_id or "",
-                        host_turn_id=str(finalize_ctx.get("host_turn_id") or ""),
-                        stage_card_id=str(finalize_ctx.get("stage_card_id") or ""),
-                        note=str(finalize_ctx.get("note") or ""),
-                        motion_override=finalize_ctx.get("motion_override"),
-                        sink=self._sink,
-                    )
-                    self._stage_card_finalized_at_start = True
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning(
-                        "stage_card.finalize_at_started_failed",
-                        stage_card_id=str(finalize_ctx.get("stage_card_id") or ""),
-                        error=str(exc),
-                    )
 
             moderator = Moderator(
                 provider=self._llm,

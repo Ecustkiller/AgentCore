@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { useChatScroll } from "@/lib/useChatScroll";
+import { nextTranscriptResetKey, useChatScroll } from "@/lib/useChatScroll";
 import type { Message } from "@/stores/conversation";
 import { act, render } from "@testing-library/react";
 import { useEffect } from "react";
@@ -369,5 +369,58 @@ describe("useChatScroll layout follow", () => {
 
     expect(ready.scrollEl.scrollTop).toBe(topBefore);
     expect(box.api?.atBottom).toBe(false);
+  });
+});
+
+describe("nextTranscriptResetKey", () => {
+  it("mints firstMessageId on the draft first send and keeps it through promote", () => {
+    const afterSend = nextTranscriptResetKey({
+      prevConversationId: null,
+      conversationId: null,
+      prevResetKey: null,
+      firstMessageId: "u-opt",
+    });
+    expect(afterSend).toBe("u-opt");
+    expect(
+      nextTranscriptResetKey({
+        prevConversationId: null,
+        conversationId: "conv-new",
+        prevResetKey: afterSend,
+        firstMessageId: "u-opt",
+      }),
+    ).toBe("u-opt");
+  });
+
+  it("does not treat opening a persisted conversation from an empty draft as promote", () => {
+    expect(
+      nextTranscriptResetKey({
+        prevConversationId: null,
+        conversationId: "conv-b",
+        prevResetKey: null,
+        firstMessageId: "m-b1",
+      }),
+    ).toBe("m-b1");
+  });
+
+  it("mints a new key when switching conversations", () => {
+    expect(
+      nextTranscriptResetKey({
+        prevConversationId: "conv-a",
+        conversationId: "conv-b",
+        prevResetKey: "m-a1",
+        firstMessageId: "m-b1",
+      }),
+    ).toBe("m-b1");
+  });
+
+  it("keeps the key when loading older prepends a new firstMessageId", () => {
+    expect(
+      nextTranscriptResetKey({
+        prevConversationId: "conv-a",
+        conversationId: "conv-a",
+        prevResetKey: "m-a10",
+        firstMessageId: "m-a1",
+      }),
+    ).toBe("m-a10");
   });
 });

@@ -1,15 +1,13 @@
-"""Boards are account-scoped: create ignores folder_id; AI chat is always bare."""
+"""Boards are account-scoped: create ignores folder_id."""
 
 from sqlalchemy import update
 
-from agentcore.db.models import Board, Conversation
+from agentcore.db.models import Board
 from agentcore.db.repositories import FolderRepository
 from tests.integration.conftest import register_and_login
 
 
-async def test_create_board_ignores_folder_and_conversation_is_bare(
-    client, session_factory
-):
+async def test_create_board_ignores_folder_id(client, session_factory):
     uid = await register_and_login(client, "boardnf")
     async with session_factory() as s:
         desk = await FolderRepository(s).create(user_id=uid, name="Desk")
@@ -21,6 +19,7 @@ async def test_create_board_ignores_folder_and_conversation_is_bare(
     assert created.status_code == 201, created.text
     body = created.json()
     assert "folder_id" not in body
+    assert "conversation_id" not in body
     board_id = body["id"]
 
     async with session_factory() as s:
@@ -32,11 +31,8 @@ async def test_create_board_ignores_folder_and_conversation_is_bare(
         )
         await s.commit()
 
-    bound = await client.post(f"/v1/boards/{board_id}/conversation")
-    assert bound.status_code == 200, bound.text
-    conv_id = bound.json()["conversation_id"]
-
-    async with session_factory() as s:
-        conv = await s.get(Conversation, conv_id)
-        assert conv is not None
-        assert conv.folder_id is None
+    listed = await client.get("/v1/boards")
+    assert listed.status_code == 200, listed.text
+    row = next(b for b in listed.json() if b["id"] == board_id)
+    assert "folder_id" not in row
+    assert "conversation_id" not in row

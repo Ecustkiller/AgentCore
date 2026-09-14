@@ -4,10 +4,7 @@ import { PromptWorkbench } from "@/components/prompt/PromptWorkbench";
 import { MemoryRecentWrites } from "@/components/tools/MemoryRecentWrites";
 import { PublishSkillDialog } from "@/components/tools/PublishSkillDialog";
 import { RoleIdentityBlock } from "@/components/tools/RoleIdentityBlock";
-import {
-  ToolInspector,
-  type ToolInspectorView,
-} from "@/components/tools/ToolInspector";
+import { ToolInspector } from "@/components/tools/ToolInspector";
 import { Badge, Button, SegmentedControl } from "@/components/ui";
 import {
   Dialog,
@@ -18,6 +15,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { PromptCatalogItem } from "@/lib/promptCatalog";
+import {
+  promptItemShelfCopy,
+  promptMineShelfOpts,
+  promptShelfHeaderChips,
+} from "@/lib/promptShelfTile";
 import {
   ConnectorInspector,
   ConnectorStatusBadge,
@@ -48,7 +50,7 @@ export function PromptReadDialog({
   item,
   overlay,
   listings,
-  installedCopyIds,
+  installedListings,
   busy,
   showToolsHint,
   toolsHint,
@@ -70,7 +72,7 @@ export function PromptReadDialog({
   item: PromptReadLeaf | null;
   overlay: SkillCatalog;
   listings: SkillStoreListing[];
-  installedCopyIds: Set<string>;
+  installedListings: SkillStoreListing[];
   busy: boolean;
   showToolsHint: boolean;
   toolsHint: string;
@@ -101,13 +103,11 @@ export function PromptReadDialog({
   onUnpublishMine: (item: Extract<PromptCatalogItem, { kind: "mine" }>) => void;
 }) {
   const [mineView, setMineView] = useState<MineView>("source");
-  const [toolView, setToolView] = useState<ToolInspectorView>("guide");
   const [publishOpen, setPublishOpen] = useState(false);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: item id is an intentional re-run key
   useEffect(() => {
     setMineView("source");
-    setToolView("guide");
     setPublishOpen(false);
   }, [item && "id" in item ? item.id : null]);
 
@@ -117,7 +117,10 @@ export function PromptReadDialog({
       ? (item as Extract<PromptCatalogItem, { kind: "mine" }>)
       : null;
   const fromMarket = Boolean(
-    mineItem?.mineId && installedCopyIds.has(mineItem.mineId),
+    mineItem?.mineId &&
+      installedListings.some(
+        (row) => row.installDocumentId === mineItem.mineId,
+      ),
   );
   const listing = mineItem
     ? (listings.find((row) => row.documentId === mineItem.mineId) ?? null)
@@ -126,8 +129,8 @@ export function PromptReadDialog({
     updatesOpen,
     showItem,
     item,
-    installedCopyIds,
-    listing,
+    listings,
+    installedListings,
   });
   const canPublish =
     Boolean(mineItem) &&
@@ -141,7 +144,6 @@ export function PromptReadDialog({
     !fromMarket &&
     listing?.status === "published";
   const showPublish = Boolean(mineItem) && showItem && !mineItem?.memoryKind;
-  const toolItem = item?.kind === "tool" ? item : null;
 
   return (
     <Dialog
@@ -170,12 +172,11 @@ export function PromptReadDialog({
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <DialogTitle>{header.title}</DialogTitle>
-                {header.badge ? (
-                  <Badge tone="muted">{header.badge}</Badge>
-                ) : null}
-                {header.extraBadge ? (
-                  <Badge tone="muted">{header.extraBadge}</Badge>
-                ) : null}
+                {header.chips.map((chip) => (
+                  <Badge key={chip.label} tone={chip.tone ?? "muted"} pill>
+                    {chip.label}
+                  </Badge>
+                ))}
                 {item?.kind === "connector" && item.server ? (
                   <ConnectorStatusBadge server={item.server} />
                 ) : null}
@@ -214,20 +215,6 @@ export function PromptReadDialog({
                   ) : null}
                 </div>
               ) : null}
-              {toolItem && showItem ? (
-                <div className="mt-2">
-                  <SegmentedControl
-                    aria-label="阅读方式"
-                    value={toolView}
-                    onChange={setToolView}
-                    items={[
-                      { value: "guide", label: "说明" },
-                      { value: "source", label: "源码" },
-                    ]}
-                    className="w-auto"
-                  />
-                </div>
-              ) : null}
             </div>
           </div>
           <DialogDescription className="sr-only">
@@ -243,7 +230,6 @@ export function PromptReadDialog({
             <ReadBody
               item={item}
               mineView={mineView}
-              toolView={toolView}
               overlay={overlay}
               showToolsHint={showToolsHint}
               toolsHint={toolsHint}
@@ -279,25 +265,23 @@ function readHeader({
   updatesOpen,
   showItem,
   item,
-  installedCopyIds,
-  listing,
+  listings,
+  installedListings,
 }: {
   updatesOpen: boolean;
   showItem: boolean;
   item: PromptReadLeaf | null;
-  installedCopyIds: Set<string>;
-  listing: SkillStoreListing | null;
+  listings: SkillStoreListing[];
+  installedListings: SkillStoreListing[];
 }): {
   title: string;
-  badge: string | null;
-  extraBadge: string | null;
+  chips: ReturnType<typeof promptShelfHeaderChips>;
   description: string;
 } {
   if (updatesOpen) {
     return {
       title: "最近学到",
-      badge: null,
-      extraBadge: null,
+      chips: [],
       description: "跨对话流水账",
     };
   }
@@ -305,57 +289,24 @@ function readHeader({
     if (item.kind === "connector") {
       return {
         title: item.id === NEW_CONNECTOR_ID ? "新建连接器" : "编辑连接器",
-        badge: null,
-        extraBadge: null,
+        chips: [],
         description: item.label,
       };
     }
-    if (item.kind === "tool") {
-      return {
-        title: item.label,
-        badge: item.tool.resident ? "开场即用" : "查阅后启用",
-        extraBadge: null,
-        description: item.tool.summary,
-      };
-    }
-    if (item.kind === "mine") {
-      const fromMarket = Boolean(
-        item.mineId && installedCopyIds.has(item.mineId),
-      );
-      const extra =
-        listing?.status === "published"
-          ? "已上架"
-          : listing?.status === "taken_down"
-            ? "平台已下架"
-            : item.aiMaintained
-              ? "AI 可能改"
-              : null;
-      return {
-        title: item.label,
-        badge: fromMarket ? "市场" : "我的",
-        extraBadge: extra,
-        description: item.description || item.label,
-      };
-    }
-    if (item.kind === "identity") {
-      return {
-        title: item.label,
-        badge: "官方",
-        extraBadge: "三选一",
-        description: "角色身份",
-      };
-    }
+    const mineOpts =
+      item.kind === "mine"
+        ? promptMineShelfOpts(item, listings, installedListings)
+        : {};
+    const copy = promptItemShelfCopy(item, mineOpts);
     return {
-      title: item.label,
-      badge: "官方",
-      extraBadge: null,
-      description: item.label,
+      title: copy.title,
+      chips: promptShelfHeaderChips(copy),
+      description: copy.description || copy.title,
     };
   }
   return {
     title: "提示词",
-    badge: null,
-    extraBadge: null,
+    chips: [],
     description: "提示词",
   };
 }
@@ -363,7 +314,6 @@ function readHeader({
 function ReadBody({
   item,
   mineView,
-  toolView,
   overlay,
   showToolsHint,
   toolsHint,
@@ -378,7 +328,6 @@ function ReadBody({
 }: {
   item: PromptReadLeaf;
   mineView: MineView;
-  toolView: ToolInspectorView;
   overlay: SkillCatalog;
   showToolsHint: boolean;
   toolsHint: string;
@@ -419,7 +368,6 @@ function ReadBody({
         key={item.id}
         tool={item.tool}
         hideChrome
-        view={toolView}
         capabilityHint={
           showToolsHint && toolCallingNames.has(item.tool.name)
             ? toolsHint
@@ -623,6 +571,9 @@ function AccountEntryEditor({
     }
     return (
       <>
+        {item.aiMaintained ? (
+          <p className="mb-2 text-xs text-muted-foreground">AI 可能改</p>
+        ) : null}
         <PromptDocument
           text={body}
           compact={false}
@@ -638,6 +589,9 @@ function AccountEntryEditor({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {item.aiMaintained ? (
+        <p className="mb-2 text-xs text-muted-foreground">AI 可能改</p>
+      ) : null}
       <PromptWorkbench
         key={loading ? `${item.id}-loading` : item.id}
         testId="account-entry-editor"

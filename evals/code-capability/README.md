@@ -88,10 +88,10 @@
 | R3 Collab | [`suites/r3/`](suites/r3/)（V01·V07 · 4 卡；复用 R1a Fix seed；题面强制 `delegate`）· [`manifest.json`](suites/r3/manifest.json)；硬=测绿；软=`collab_diagnostics`（`run_plan` / `worker_files`，不进 hard_accept） |
 | 无 LLM 对照 | [`r0_control.py`](r0_control.py) · [`r1_control.py`](r1_control.py) `--suite all --mode matrix` · [`r2_control.py`](r2_control.py) `--mode matrix` · [`r3_control.py`](r3_control.py) `--mode matrix` |
 | 基线报告 | Find/Fix：[`reports/r1_baseline_latest.json`](reports/r1_baseline_latest.json)；**Extend**：[`reports/r2_baseline_latest.json`](reports/r2_baseline_latest.json)；**Collab**：[`reports/r3_baseline_latest.json`](reports/r3_baseline_latest.json) |
-| LLM 烟感（D·sidecar） | 脚本 [`r_llm_smoke.py`](r_llm_smoke.py)（复用 [`probe_sidecar_turn.py`](probe_sidecar_turn.py)）；报告本地写出 `reports/llm_smoke_latest.json`（**不入仓**）；**首波结果见下「LLM 烟感」节**（不进 PR / nightly 强制） |
+| LLM 烟感（D·sidecar） | 脚本 [`r_llm_smoke.py`](r_llm_smoke.py)（复用 [`probe_sidecar_turn.py`](probe_sidecar_turn.py)）；报告本地写出 `reports/llm_smoke_latest.json`（**不入仓**）；**首波结果见下「LLM 烟感」节**（不进 PR） |
 | R4 冻结基线 | [`reports/baselines/`](reports/baselines/)（`r1.json`·`r2.json`·`r3.json` + [`manifest.json`](reports/baselines/manifest.json)）；棘轮脚本 [`r4_regress.py`](r4_regress.py) |
 | Vendor 复现 | [`vendor/README.md`](vendor/README.md) · `_fetch_r0b.py`（维护者本地；禁 CI 现拉 main） |
-| 门禁 | **不进** PR 硬门禁；R4 为本地/可选 nightly 挂载点（默认不烧 LLM）；勿与 S1–S7 Pass 口径混谈 |
+| 门禁 | **不进** PR 硬门禁；R4 为本地对照（默认不烧 LLM）；勿与 S1–S7 Pass 口径混谈 |
 
 ### R0b 满编 vendor 状态表
 
@@ -136,7 +136,7 @@ python evals/code-capability/r3_control.py --mode matrix
 # R4 回归（冻结基线 · 回退 >10pp → Fail；默认不烧 LLM）
 python evals/code-capability/r4_regress.py --compare-latest          # latest=冻结 → 应绿
 python evals/code-capability/r4_regress.py --self-test-regression    # 合成回退 11pp → Fail 演示
-python evals/code-capability/r4_regress.py --lint-only               # 全相位 seed_lint（nightly 轻挂）
+python evals/code-capability/r4_regress.py --lint-only               # 全相位 seed_lint
 python evals/code-capability/r4_regress.py --run --phases r0,r3      # 可选：跑矩阵后再比（可慢）
 # bump（须一句话理由；见 reports/baselines/README.md）
 python evals/code-capability/r4_regress.py --update-baseline --phase r1 \
@@ -148,7 +148,7 @@ python evals/code-capability/r4_regress.py --update-baseline --phase r1 \
 - 冻结副本在 [`reports/baselines/`](reports/baselines/)；对比口径 = `summary.pass / summary.matrix_cells`。
 - **相对基线回退 >10pp → 非零退出**；持平/更好 → 绿。
 - 允许 `--update-baseline` 仅当：有意改题面/pin/硬 Check、修 harness 假红假绿、或人确认换观察线——**必须** `--reason`；禁止为变绿静默压基线。
-- **Nightly 挂载点**（可选、默认可跳过、不进 PR）：见 [`.github/workflows/evals-nightly.yml`](../../.github/workflows/evals-nightly.yml) 文末注释；本地优先 `--lint-only` 或 `--compare-latest`，全矩阵 `--run` 维护者手工。
+- **门禁**：不进 PR 硬门禁；R4 为本地对照（默认不烧 LLM）；勿与 S1–S7 Pass 口径混谈。无定时夜跑。
 
 ### LLM 烟感（D·sidecar · 真跑）
 
@@ -171,7 +171,7 @@ uv run python ../../evals/code-capability/r_llm_smoke.py --no-prefix --max-resum
 | 流程 | copytree vendor → seed → sidecar `startTurn`（prompt=可选 prefix + 卡内 `user_message`）→ 硬 Check |
 | 副本 | `workspaces/llm-smoke/<task_id>/`（禁直绑 `vendor/`） |
 | fail_class | 环境 / 模型弱 / 接缝 / 题面 / 需决策·交互（`ask_user` 默认不 resume） |
-| 门禁 | **不进** PR；**不**改 nightly 强制 job；**不** `--update-baseline` R1–R3 冻结棘轮 |
+| 门禁 | **不进** PR；不进定时作业；**不** `--update-baseline` R1–R3 冻结棘轮 |
 | PYTHONPATH | 产品 `code_execute`（local/server）与硬闸 `TestExitCode` **同源**：相对 cwd 解析；产品自动注入 `.`+现存 `src`/`lib`；卡可声明 `checks[].args.pythonpath`。夹具：`tests/test_pythonpath_code_execute.py` |
 | 开跑纪律 | **W0–W5 / E1–E3 / 甲·乙 / 甲乙后难仓复测已完成 · 本段收口**；**大烧冻结**——再烧须书面新归因（对照 V07 稳性 / 502 专项 / 新接缝 / 预算效率），勿无目标盲跑 |
 

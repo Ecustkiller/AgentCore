@@ -2,16 +2,16 @@
  * Diagnostic: switch-away while a turn finishes — terminal SSE no longer drops
  * the complete local window (step 2). Idle eviction is LRU-only on switch.
  * Step-1 residency gate still refuses soft materialize after LRU eviction
- * (`reject_not_resident`); while still resident, thin soft refresh is blocked
- * by the richer gate (`reject_not_richer`).
+ * (`reject_not_resident`); empty GET must not wipe a nonempty resident slice
+ * (`reject_empty_window`).
  *
  * Step 3 warm open: mid-history leave+return snaps to latest via intentional
  * `loadLatestWindow` (same weight as composer「跳到最新」); generating /
- * destination keep slice (`decideWarmOpenAction`).
+ * unconfirmed tail / destination keep slice (`decideWarmOpenAction`).
  *
  * Logs under `conversation.slice_diag`: message_end_slice_kept /
  * reject_not_resident / warm_skip_reconcile / warm_keep_anchor /
- * warm_snap_latest / load_latest_window. Richer-gate soft refresh while still
+ * warm_snap_latest / load_latest_window. Server-window adopt while still
  * resident is covered by messages.loadLatestWindow tests.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -231,5 +231,12 @@ describe("switch-conversation stale window (diag repro)", () => {
     expect(
       decideWarmOpenAction({ hasLocalStream: false, hasDestination: false }),
     ).toBe("snap_latest");
+    expect(
+      decideWarmOpenAction({
+        hasLocalStream: false,
+        hasDestination: false,
+        hasUnconfirmedTail: true,
+      }),
+    ).toBe("skip_generating");
   });
 });

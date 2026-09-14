@@ -175,8 +175,8 @@ export function fmtNanoCny(nano: number, estimated = false): string {
 /**
  * Ledger `cost_events.role` → 大众-facing zh label, mirroring the desktop/mobile
  * 工资单 so an operator reads「视觉读图」not raw「vision」. Unknown roles fall back
- * to the raw string. `vision` tags a board_read 读图 sub-call to a separate vision
- * model (AI协作白板.md §九.4); `title`/`memory` are off-turn background calls.
+ * to the raw string. `vision` tags a 读图 sub-call to a separate vision
+ * model; `title`/`memory` are off-turn background calls.
  */
 const ROLE_LABELS: Record<string, string> = {
   captain: "CEO",

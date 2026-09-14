@@ -51,8 +51,6 @@ FULFILL_CHANNELS: frozenset[str] = frozenset(
         "workspace",
         "host",
         "mcp",
-        "board",
-        "board_read",
         "external_mount",
     }
 )
@@ -62,9 +60,6 @@ FULFILL_CHANNELS: frozenset[str] = frozenset(
 # reading a directory off that disk (external_mount). Landing one of these on a
 # device the user is not sitting at is a wrong answer, not a degraded one — so
 # when the turn's origin device is known these pin to it.
-#
-# The rest are display surfaces: a board batch belongs to whichever
-# install has the canvas open.
 ORIGIN_PINNED_CHANNELS: frozenset[str] = frozenset(
     {
         "workspace",

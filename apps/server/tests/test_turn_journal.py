@@ -14,6 +14,7 @@ assert it ``==`` the live transcript.
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.journal import (
     ensure_cancelled_turn_end,
+    ensure_turn_end,
     entries_from_runs,
     journal_entries_from_display_runs,
     last_turn_end_finish,
@@ -283,6 +284,13 @@ def test_cancelled_salvage_with_exec_facts_still_round_trips():
         {"kind": "turn_end", "payload": {"finish_reason": "cancelled"}, "ts": None},
     ]
     assert runs_from_entries(entries) == {"events": [], "finish_reason": "cancelled"}
+
+
+def test_ensure_turn_end_stamps_interrupted():
+    facts = [{"kind": "run_started", "payload": {"id": "r1"}, "ts": "t0"}]
+    closed = ensure_turn_end(facts, "interrupted")
+    assert last_turn_end_finish(closed) == "interrupted"
+    assert runs_from_entries(closed)["finish_reason"] == "interrupted"
 
 
 def test_ensure_cancelled_turn_end_appends_when_absent():

@@ -21,8 +21,10 @@ Landed as Protocols here:
   ``db.repositories.TurnJournalRepository``; the ``runs``↔facts transform lives in
   ``runtime/journal.py``.
 - **ConversationStore** — turn-authority content persistence (message + journal +
-  completion status). Cloud impl = ``conversation.store.CloudStore``; local sidecar
-  will swap ``OutboxStore`` (as-built: 执行引擎 §8.6; 双模式工作区 §10.3).
+  completion status). Bind/get = ``runtime.conversation_store`` (``conversation.service``
+  installs the CloudStore factory; sidecar ``initialize`` binds ``OutboxStore``).
+  Cloud impl = ``conversation.store.CloudStore``. Interrupt still calls
+  ``get_cloud_store`` (sidecar active store is Outbox).
 
 The remaining §8.6 ports stay as their concrete implementations until 完全离线
 (⏳；详细提案不在公开仓) needs them swappable — Protocol-izing them now, with

@@ -373,6 +373,23 @@ describe("ApprovalCard delete_folder headline", () => {
 });
 
 describe("ApprovalCard CTA (工具审批 A+B)", () => {
+  it("eyebrow is 请求执行 and title is the tool label with the object", () => {
+    renderCard(
+      card({
+        toolName: "file_delete",
+        arguments: { path: "审批卡演示.txt" },
+      }),
+    );
+    expect(screen.getByText("请求执行")).toBeTruthy();
+    expect(screen.getByText("删除文件")).toBeTruthy();
+    expect(screen.getByText("审批卡演示.txt")).toBeTruthy();
+    expect(screen.queryByText("Agent 请求执行")).toBeNull();
+    expect(screen.queryByRole("button", { name: "看手册说明" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /查看参数|查看内容|查看代码/ }),
+    ).toBeNull();
+  });
+
   it("execution tools put 允许一次 first, 本轮内都允许 second", () => {
     renderCard(card());
     const buttons = screen.getAllByRole("button");
@@ -384,6 +401,9 @@ describe("ApprovalCard CTA (工具审批 A+B)", () => {
     expect(onceIdx).toBeLessThan(turnIdx);
     const denyIdx = labels.findIndex((t) => t.includes("拒绝"));
     expect(denyIdx).toBeGreaterThan(turnIdx);
+    expect(
+      screen.getByRole("button", { name: /本轮内都允许/ }).className,
+    ).toContain("border-border");
   });
 
   it("file tools keep 允许一次 before 本轮内都允许", () => {
@@ -400,38 +420,6 @@ describe("ApprovalCard CTA (工具审批 A+B)", () => {
     expect(onceIdx).toBeLessThan(turnIdx);
     const denyIdx = labels.findIndex((t) => t.includes("拒绝"));
     expect(denyIdx).toBeGreaterThan(turnIdx);
-  });
-
-  it("点之前先说清「本轮」有多大：同类、含队员、一个回合可能几十次", () => {
-    renderCard(card());
-    const notice = screen.getByTestId("turn-grant-scope-notice").textContent;
-    expect(notice).toContain("到这次回答结束前");
-    expect(notice).toContain("队员");
-    expect(notice).toContain("几十次");
-  });
-
-  it("文件类还要说出比按钮字面更宽的那部分（含 git 写入）", () => {
-    renderCard(
-      card({
-        toolName: "file_write",
-        arguments: { path: "a.txt", content: "x" },
-      }),
-    );
-    const notice = screen.getByTestId("turn-grant-scope-notice").textContent;
-    expect(notice).toContain("所有文件改动");
-    expect(notice).toContain("git 写入");
-  });
-
-  it("熔断一次性卡没有轮内授权 → 不出现「本轮」范围说明", () => {
-    renderCard(
-      card({
-        arguments: {
-          command: "rm -rf /",
-          force_one_shot: true,
-        },
-      }),
-    );
-    expect(screen.queryByTestId("turn-grant-scope-notice")).toBeNull();
   });
 
   it("switching to 全放行 patches cache and reloads permission change lines", async () => {
@@ -570,5 +558,87 @@ describe("ApprovalCard escalation tracks (熔断 vs 敏感读)", () => {
     expect(screen.getByText(/安全熔断升格审批/)).toBeTruthy();
     expect(screen.queryByText(/敏感路径读升格审批/)).toBeNull();
     expect(screen.queryByRole("button", { name: /本轮内都允许/ })).toBeNull();
+  });
+});
+
+describe("ApprovalCard extra payload (omit restatements of the headline)", () => {
+  it("does not dump JSON when the headline already is the only payload", () => {
+    renderCard(card());
+    expect(screen.queryByText(/subcommand/)).toBeNull();
+  });
+
+  it("shows file_write body under the path, not as JSON", () => {
+    renderCard(
+      card({
+        toolName: "file_write",
+        arguments: { path: "a.txt", content: "hello body" },
+      }),
+    );
+    expect(screen.getByText("a.txt")).toBeTruthy();
+    expect(screen.getByText("hello body")).toBeTruthy();
+    expect(screen.queryByText(/"content"/)).toBeNull();
+  });
+
+  it("shows code_execute source under the purpose", () => {
+    renderCard(
+      card({
+        toolName: "code_execute",
+        arguments: { purpose: "算一下", code: "print(1)" },
+      }),
+    );
+    expect(screen.getByText("算一下")).toBeTruthy();
+    expect(document.querySelector(".code-block")).toBeTruthy();
+  });
+
+  it("shows file_move as source → destination on the title line", () => {
+    renderCard(
+      card({
+        toolName: "file_move",
+        arguments: { source: "a.txt", destination: "b.txt" },
+      }),
+    );
+    expect(screen.getByText("a.txt → b.txt")).toBeTruthy();
+    expect(screen.queryByText(/"destination"/)).toBeNull();
+  });
+
+  it("shows permanent delete as a badge, not a JSON dump", () => {
+    renderCard(
+      card({
+        toolName: "file_delete",
+        arguments: { path: "gone.txt", permanent: true },
+      }),
+    );
+    expect(screen.getByText("永久删除")).toBeTruthy();
+    expect(screen.queryByText(/permanent/)).toBeNull();
+  });
+
+  it("shows str_replace old and new as labeled previews", () => {
+    renderCard(
+      card({
+        toolName: "str_replace",
+        arguments: {
+          path: "a.txt",
+          old_string: "alpha",
+          new_string: "beta",
+        },
+      }),
+    );
+    expect(screen.getByText("原文")).toBeTruthy();
+    expect(screen.getByText("alpha")).toBeTruthy();
+    expect(screen.getByText("替换为")).toBeTruthy();
+    expect(screen.getByText("beta")).toBeTruthy();
+    expect(screen.queryByText(/"old_string"/)).toBeNull();
+  });
+
+  it("renders leftover flags as labeled rows, not a JSON dump", () => {
+    renderCard(
+      card({
+        toolName: "file_write",
+        arguments: { path: "a.txt", content: "hello body", overwrite: true },
+      }),
+    );
+    expect(screen.getByText("覆盖")).toBeTruthy();
+    expect(screen.getByText("是")).toBeTruthy();
+    expect(screen.queryByText(/"overwrite"/)).toBeNull();
   });
 });

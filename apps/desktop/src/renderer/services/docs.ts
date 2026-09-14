@@ -14,7 +14,7 @@ export type DocSummary = {
   updated_at: string;
 };
 
-/** A doc plus its full block body (editor load payload). */
+/** A doc plus its markdown body (editor load payload). */
 export type DocDetail = DocSummary & { body: DocBody };
 
 export type DocWriteResult = {

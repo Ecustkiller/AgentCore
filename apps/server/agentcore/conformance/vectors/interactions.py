@@ -65,6 +65,31 @@ def _approval_orphaned() -> list[SSEEvent]:
     ]
 
 
+def _approval_interrupted_orphans() -> list[SSEEvent]:
+    """终态热卡：required + message_end(interrupted)、无 interaction_orphaned。
+
+    本机 sidecar 审批挂起后进程被回写成 interrupted 时 journal 常只有 turn_end，
+    没有 orphan 事实。fold 必须以终态把热卡标 orphaned，否则刷新会画出可点假卡。
+    """
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我需要删一个文件。"),
+        approval_required(
+            approval_id="tc1",
+            conversation_id=_CONV,
+            tool_call_id="tc1",
+            tool_name="file_delete",
+            arguments={"permanent": True},
+        ),
+        message_end(
+            FinishReason.INTERRUPTED,
+            input_tokens=400,
+            output_tokens=40,
+            cost=_COST,
+        ),
+    ]
+
+
 def _approval_sibling_sweep() -> list[SSEEvent]:
     """审批一键放行 sibling 清扫：多个 approval_required + 批量 resolved，fold 无假 pending。"""
     return [
@@ -108,6 +133,10 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "approval_orphaned": (
         "审批：required+orphaned → interactions[] 已失效态（P3 / 重启假卡）",
         _approval_orphaned,
+    ),
+    "approval_interrupted_orphans": (
+        "审批：required + message_end(interrupted) 无 orphan 事实 → fold 标 orphaned（终态热卡）",
+        _approval_interrupted_orphans,
     ),
     "approval_sibling_sweep": (
         "审批：多卡并发 + 批量 resolved，fold 无假 pending（P3 / sibling 清扫）",

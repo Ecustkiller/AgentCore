@@ -236,4 +236,80 @@ describe("isConversationExecutionLive", () => {
     expect(rt().executionDetached).not.toBeNull();
     expect(isConversationExecutionLive(rt())).toBe(true);
   });
+
+  it("failed 且未进后台 → 不是活体（即使帧上还有进行中）", () => {
+    store().startExecution(onePlan, MID);
+    store().recordFrame(started(), MID);
+    store().setStatus("failed", MID);
+    expect(rt().executionDetached).toBeNull();
+    expect(isConversationExecutionLive(rt())).toBe(false);
+  });
+
+  it("failed 且只盖过后台章、队员已齐 → 不是活体", () => {
+    store().startExecution(onePlan, MID);
+    store().recordFrame(started(), MID);
+    store().setExecutionDetached(
+      {
+        execution_id: "e1",
+        conversation_id: "c",
+        completed: 1,
+        total: 1,
+        host_turn_id: MID,
+      },
+      MID,
+    );
+    store().setStatus("failed", MID);
+    useExecutionStore.setState((s) => ({
+      byId: {
+        ...s.byId,
+        [MID]: {
+          ...s.byId[MID],
+          frames: [started(), completed()],
+        },
+      },
+    }));
+    expect(rt().status).toBe("failed");
+    expect(rt().executionDetached).not.toBeNull();
+    expect(hasUnsettledRuns(rt())).toBe(false);
+    expect(isConversationExecutionLive(rt())).toBe(false);
+  });
+
+  it("failed 并陈后最后一名队员收口 → 摘章，仍是 failed，不是活体", () => {
+    store().startExecution(onePlan, MID);
+    store().recordFrame(started(), MID);
+    store().setExecutionDetached(
+      {
+        execution_id: "e1",
+        conversation_id: "c",
+        completed: 0,
+        total: 1,
+        host_turn_id: MID,
+      },
+      MID,
+    );
+    store().setStatus("failed", MID);
+    expect(isConversationExecutionLive(rt())).toBe(true);
+
+    store().recordFrame(completed(), MID);
+    expect(rt().status).toBe("failed");
+    expect(rt().executionDetached).toBeNull();
+    expect(isConversationExecutionLive(rt())).toBe(false);
+  });
+
+  it("running 且已进后台、队员仍在跑 → 活体（不靠章）", () => {
+    store().startExecution(onePlan, MID);
+    store().recordFrame(started(), MID);
+    store().setExecutionDetached(
+      {
+        execution_id: "e1",
+        conversation_id: "c",
+        completed: 0,
+        total: 1,
+        host_turn_id: MID,
+      },
+      MID,
+    );
+    expect(rt().status).toBe("running");
+    expect(isConversationExecutionLive(rt())).toBe(true);
+  });
 });

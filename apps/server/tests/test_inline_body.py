@@ -1,6 +1,6 @@
 """Inline body markers in user content."""
 
-from agentcore.conversation.inline_body import (
+from agentcore.core.inline_body import (
     apply_inline_body,
     has_inline_markers,
     mention_inline_stub,

@@ -480,27 +480,12 @@ def _debate_tool_for_host_bind():
     )
 
 
-def _host_attach(*, same_turn: bool) -> DebateHostAttach:
-    return DebateHostAttach(
-        execution_id="exec_host",
-        host_message_id="m1",
-        anchor_run_id="synthesizer",
-        act_id="act-2",
-        same_turn=same_turn,
-    )
-
-
-async def _first_plan_after_attach(monkeypatch, *, same_turn: bool):
+async def _first_plan_after_attach(monkeypatch):
     from agentcore.llm.provider.protocol import TokenUsage
     from agentcore.runtime.costing import usage_metadata
     from agentcore.runtime.debate import DebateConfig, DebateForm, DebateSide, RoundPolicy
     from agentcore.runtime.events.types import EventType
     from agentcore.tools.builtin.debate import tool as debate_tool_mod
-
-    attach = _host_attach(same_turn=same_turn)
-
-    async def _from_card(*_a, **_k):
-        return attach
 
     class _FakeModerator:
         usage = TokenUsage()
@@ -518,10 +503,6 @@ async def _first_plan_after_attach(monkeypatch, *, same_turn: bool):
     async def _skip_pretrial(*_a, **_k):
         return None
 
-    monkeypatch.setattr(
-        "agentcore.runtime.kickoff.stage_card.resolve_host_attach_from_card",
-        _from_card,
-    )
     monkeypatch.setattr(debate_tool_mod, "Moderator", _FakeModerator)
     monkeypatch.setattr(
         "agentcore.runtime.debate.pretrial.run_pretrial_phase",
@@ -548,12 +529,11 @@ async def _first_plan_after_attach(monkeypatch, *, same_turn: bool):
 @pytest.mark.asyncio
 async def test_run_moderator_opens_independent_graph(monkeypatch):
     """开辩不链调研宿主，同回合 / 跨回合都是独立图。"""
-    for same_turn in (True, False):
-        tool, plan = await _first_plan_after_attach(monkeypatch, same_turn=same_turn)
-        assert plan.payload["execution_id"] == "e-context"
-        assert not plan.payload.get("prev_execution_id")
-        assert tool._debate_prev_execution_id is None
-        assert plan.payload["act"]["act_id"] == "act-1"
+    tool, plan = await _first_plan_after_attach(monkeypatch)
+    assert plan.payload["execution_id"] == "e-context"
+    assert not plan.payload.get("prev_execution_id")
+    assert tool._debate_prev_execution_id is None
+    assert plan.payload["act"]["act_id"] == "act-1"
 
 
 def test_debate_act_payload_defaults_to_act_1():

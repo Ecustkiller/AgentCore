@@ -47,16 +47,6 @@ class EventType(StrEnum):
     STAGE_CARD_RESOLVED = "stage_card_resolved"
     PLAN_REVISED = "plan_revised"
     WORKSPACE_OP_REQUIRED = "workspace_op_required"
-    # AI 协作白板 (AI协作白板.md §六 M2): a transport-only client-tool request — the
-    # server asks the bound desktop to apply structured board ops to the open whiteboard
-    # canvas and report back. Like WORKSPACE_OP_REQUIRED it is NOT journaled (it is a
-    # request/response exchange, not turn content), so it stays out of the journal sets.
-    BOARD_OP_REQUIRED = "board_op_required"
-    # AI 协作白板 (AI协作白板.md §九): transport-only client-tool request — the server asks the
-    # bound desktop to rasterize a subset of board elements (手绘 / 截图) to a PNG and report it
-    # back so the vision reader can read it. Like BOARD_OP_REQUIRED it is NOT journaled (a
-    # request/response exchange, not turn content), so it stays out of the journal sets.
-    BOARD_READ_REQUIRED = "board_read_required"
     # External directory mount: transport-only client-tool — desktop mints a
     # session root (readonly silent; organize / attach_rw confirms). NOT journaled.
     EXTERNAL_MOUNT_REQUIRED = "external_mount_required"
@@ -202,7 +192,7 @@ class FinishReason(StrEnum):
     UNPRODUCTIVE = "unproductive"
     ERROR = "error"
     CANCELLED = "cancelled"
-    # Crash / lease-sweeper salvage of a mid-flight turn with no unfinished DAG to redrive
+    # Crash / sweeper / found-dead salvage of a mid-flight turn
     # (流式回复持久化 §3.4): stream_state → incomplete + turn_end(interrupted).
     INTERRUPTED = "interrupted"
     # 挂起即收口 (②): the turn ended NOT because it finished, but because it hit a durable

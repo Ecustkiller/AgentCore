@@ -338,11 +338,13 @@ def test_cloud_scratch_facts():
     assert "host_info" not in out
     assert "host_ping" not in out
     assert "host_package_install" not in out
-    # 三分日志在 consult(host)，事实层不再逐 host 分支复述
+    # 日志分三处看在 consult(host)，事实层不再逐 host 分支复述
     assert "三分日志" not in out
+    assert "日志分三处看" not in out
     assert "【三分日志】" not in hint
     host_how = capability_how_suffix({"host"})
-    assert host_how.count("三分日志") == 1
+    assert host_how.count("日志分三处看") == 1
+    assert "三分日志" not in host_how
     assert "host(action=os_log)" in host_how
     assert "Get-WinEvent" in host_how
     assert "host_os_log_summary" not in hint
@@ -1110,7 +1112,7 @@ def test_workspace_omits_artifact_format_catalog():
     assert "run" in _gaps(out)
     delivery = _DELIVERY
     assert "md_to_docx" in delivery and "md_to_pdf" in delivery
-    assert "与执行正交" in delivery
+    assert "有没有 `run` 不影响" in delivery
 
 
 def test_artifact_formats_follow_real_assembly_not_constants(monkeypatch):

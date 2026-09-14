@@ -136,7 +136,8 @@ def _mobile_firehose_online(user_id: str) -> bool:
 
     That map counts ``mobile-web`` as web, and here that is the right answer even
     though the browser is on a phone: a push is delivered to FCM tokens, which
-    only the native build registers (``apps/mobile/src/api/push.ts`` no-ops on
+    only the native Capacitor build registers (via
+    ``apps/desktop/src/renderer/services/push.ts``; the same module no-ops on
     web). A live mobile-web tab therefore says nothing about whether the app that
     would receive this push is up.
     """

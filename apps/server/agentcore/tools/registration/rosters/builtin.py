@@ -13,6 +13,8 @@ def load_roster() -> tuple[type, ...]:
     from agentcore.tools.builtin.browser import BrowserTool
     from agentcore.tools.builtin.code_diagnostics import CodeDiagnosticsTool
     from agentcore.tools.builtin.code_search import CodeSearchTool
+    from agentcore.tools.builtin.docs_read import DocsReadTool
+    from agentcore.tools.builtin.docs_write import DocsWriteTool
     from agentcore.tools.builtin.file_ops import (
         FileBatchTool,
         FileCopyTool,
@@ -57,6 +59,8 @@ def load_roster() -> tuple[type, ...]:
         GrepTool,
         CodeSearchTool,
         CodeDiagnosticsTool,
+        DocsReadTool,
+        DocsWriteTool,
         GitTool,
         RunTool,
         # L3 团队浏览器：单一 ``browser``（GRANTABLE · action 政策表；CEO+worker）

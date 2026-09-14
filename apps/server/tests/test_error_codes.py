@@ -3,7 +3,7 @@
 Guards the single ``ErrorCode`` directory: every ``AgentCoreError`` uses a
 catalogued code, the wire value equals the member name (so the frontend mirror
 ``contract-types/errorCodes.ts`` and the logs match on the same string), and
-``error_fields_for`` preserves a coded error's code/message while only collapsing
+``runtime.error_fields.error_fields_for`` preserves a coded error's code/message while only collapsing
 an unrecognized crash to the fallback (避免 pipeline 把多种错误压成 PIPELINE_ERROR).
 """
 
@@ -19,8 +19,10 @@ from agentcore.core.errors import (
     AgentCoreError,
     LLMAuthError,
     LLMInsufficientBalanceError,
-    error_fields_for,
+    LocalDesktopOfflineError,
+    LocalWorkspaceUnavailable,
 )
+from agentcore.runtime.error_fields import error_fields_for
 
 
 def _all_error_classes() -> list[type[AgentCoreError]]:
@@ -121,6 +123,24 @@ def test_error_fields_for_preserves_agentcore_over_unclassified_fallback():
     assert message != UNCLASSIFIED_EXCEPTION_USER_MESSAGE
 
 
+def test_local_presence_errors_are_coded_agentcore_not_workspace_io():
+    """Turn-start local aborts are product errors — tools' WorkspaceIOError must miss them."""
+    from agentcore.workspace.protocol import WorkspaceIOError
+
+    err = LocalDesktopOfflineError()
+    assert isinstance(err, AgentCoreError)
+    assert isinstance(err, LocalWorkspaceUnavailable)
+    assert not isinstance(err, WorkspaceIOError)
+    code, message, _ctx = error_fields_for(
+        err,
+        fallback_code=ErrorCode.STREAM_ERROR,
+        fallback_message="服务出错了",
+    )
+    assert code == ErrorCode.LOCAL_DESKTOP_OFFLINE
+    assert message == err.message
+    assert "服务出错了" not in message
+
+
 def test_insufficient_balance_backend_flag_matches_frontend_policy():
     # The desktop now marks LLM_INSUFFICIENT_BALANCE non-retriable via the shared
     # catalog; assert the backend's own retryable flag agrees so the two can't drift.
@@ -140,3 +160,8 @@ def _contract_types_max_retry_after() -> float:
 
 def test_max_retry_after_matches_contract_types():
     assert _contract_types_max_retry_after() == MAX_RETRY_AFTER
+
+
+def test_error_fields_for_does_not_live_in_core_errors():
+    """Compositor sits in runtime so core.errors stays a leaf (no llm import / re-export)."""
+    assert not hasattr(errors_module, "error_fields_for")

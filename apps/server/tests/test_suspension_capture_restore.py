@@ -365,7 +365,7 @@ async def test_resume_chat_does_not_restore_after_settlement_on_error() -> None:
     with (
         patch.object(turns_mod, "async_session_factory") as factory,
         patch.object(turns_mod, "ConversationRepository") as conv_repo_cls,
-        patch.object(turns_mod, "BoardRepository") as board_repo_cls,
+        patch.object(turns_mod, "TableRepository") as table_repo_cls,
         patch.object(turns_mod, "resolve_local_binding", AsyncMock(return_value=None)),
         patch.object(turns_mod, "resolve_profile_set", AsyncMock(return_value=None)),
         patch.object(
@@ -396,7 +396,7 @@ async def test_resume_chat_does_not_restore_after_settlement_on_error() -> None:
         session = AsyncMock()
         factory.return_value.__aenter__.return_value = session
         conv_repo_cls.return_value.get_by_id_unscoped = AsyncMock(return_value=conv)
-        board_repo_cls.return_value.get_by_conversation_id = AsyncMock(return_value=None)
+        table_repo_cls.return_value.get_by_conversation_id = AsyncMock(return_value=None)
 
         await turns_mod.resume_chat(
             suspension=suspension,
@@ -421,7 +421,7 @@ async def test_resume_chat_does_not_restore_on_success() -> None:
     with (
         patch.object(turns_mod, "async_session_factory") as factory,
         patch.object(turns_mod, "ConversationRepository") as conv_repo_cls,
-        patch.object(turns_mod, "BoardRepository") as board_repo_cls,
+        patch.object(turns_mod, "TableRepository") as table_repo_cls,
         patch.object(turns_mod, "resolve_local_binding", AsyncMock(return_value=None)),
         patch.object(turns_mod, "resolve_profile_set", AsyncMock(return_value=None)),
         patch.object(
@@ -451,7 +451,7 @@ async def test_resume_chat_does_not_restore_on_success() -> None:
         session = AsyncMock()
         factory.return_value.__aenter__.return_value = session
         conv_repo_cls.return_value.get_by_id_unscoped = AsyncMock(return_value=conv)
-        board_repo_cls.return_value.get_by_conversation_id = AsyncMock(return_value=None)
+        table_repo_cls.return_value.get_by_conversation_id = AsyncMock(return_value=None)
 
         await turns_mod.resume_chat(
             suspension=suspension,
@@ -500,7 +500,7 @@ async def test_resume_chat_does_not_restore_after_settlement_on_cancel() -> None
     with (
         patch.object(turns_mod, "async_session_factory") as factory,
         patch.object(turns_mod, "ConversationRepository") as conv_repo_cls,
-        patch.object(turns_mod, "BoardRepository") as board_repo_cls,
+        patch.object(turns_mod, "TableRepository") as table_repo_cls,
         patch.object(turns_mod, "resolve_local_binding", AsyncMock(return_value=None)),
         patch.object(turns_mod, "resolve_profile_set", AsyncMock(return_value=None)),
         patch.object(
@@ -520,7 +520,7 @@ async def test_resume_chat_does_not_restore_after_settlement_on_cancel() -> None
         session = AsyncMock()
         factory.return_value.__aenter__.return_value = session
         conv_repo_cls.return_value.get_by_id_unscoped = AsyncMock(return_value=conv)
-        board_repo_cls.return_value.get_by_conversation_id = AsyncMock(return_value=None)
+        table_repo_cls.return_value.get_by_conversation_id = AsyncMock(return_value=None)
 
         try:
             with pytest.raises(asyncio.CancelledError):

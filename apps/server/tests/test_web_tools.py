@@ -2678,8 +2678,8 @@ def test_web_search_schema_documents_query_contract():
     assert "2–3" not in blob  # 拆分建议在超限回执
     assert "精简到核心词" not in blob
     assert "下一轮再搜" not in blob
-    assert "聚焦查询" in schema.description
-    assert "补搜" in schema.description
+    assert "聚焦查询" not in schema.description
+    assert "补搜" not in schema.description
     assert "不要一上来并行" not in schema.description
     assert "规范化" not in blob
     assert "截断" not in blob

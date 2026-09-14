@@ -6,7 +6,7 @@ import time
 from typing import Any
 
 from agentcore.desktop.channel import ExternalMountError
-from agentcore.runtime.facts import CrossTurnRetry
+from agentcore.tools.cross_turn_retry import CrossTurnRetry
 from agentcore.tools.protocol import ToolContext, ToolResult
 from agentcore.workspace.ensure_host_path import (
     HostPathDeniedError,

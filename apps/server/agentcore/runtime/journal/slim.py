@@ -18,6 +18,7 @@ def list_retained_event_types() -> frozenset[str]:
     retained = set(_JOURNAL_SURFACE_TYPES)
     retained.add(EventType.MESSAGE_END.value)
     retained.add(EventType.DELIVERY_STATUS.value)
+    retained.add(EventType.INTERACTION_ORPHANED.value)
     for spec in INTERACTION_KIND_SPECS.values():
         if spec.resolved_event:
             retained.add(spec.resolved_event)

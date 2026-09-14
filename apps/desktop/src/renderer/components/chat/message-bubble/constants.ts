@@ -34,7 +34,6 @@ import {
   Package,
   PenLine,
   Pencil,
-  Presentation,
   Scale,
   ScanText,
   ScrollText,
@@ -119,10 +118,10 @@ export const TOOL_META: Record<string, { Icon: LucideIcon; label: string }> = {
   browser_snapshot: { Icon: ScanText, label: "Snapshot" },
   browser_screenshot: { Icon: Camera, label: "Screenshot" },
   browser_console: { Icon: ScrollText, label: "Console" },
-  // Worker / board channels that also render on the process timeline.
+  // Worker channels that also render on the process timeline.
   handoff: { Icon: Forward, label: "Handoff" },
-  board_ops: { Icon: Presentation, label: "Edit board" },
-  board_read: { Icon: Presentation, label: "Read board" },
+  docs_read: { Icon: FileText, label: "Read doc" },
+  docs_write: { Icon: PenLine, label: "Write doc" },
   external_mount_readonly: { Icon: Folder, label: "Mount folder" },
   // 本机 Host（第三能力面 · 单工具 `host`，按 action 展示；同构 git + subcommand）
   host: { Icon: Monitor, label: "Host" },

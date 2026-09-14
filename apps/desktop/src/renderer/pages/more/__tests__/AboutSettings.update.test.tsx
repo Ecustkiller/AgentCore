@@ -47,6 +47,16 @@ afterEach(() => {
 });
 
 describe("AboutSettings software update", () => {
+  it("idle 不写「点下面按钮」，只留检查更新", async () => {
+    render(
+      <MemoryRouter>
+        <AboutSettings />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("button", { name: "检查更新" })).toBeTruthy();
+    expect(screen.queryByText("点击下方按钮检查是否有新版本。")).toBeNull();
+  });
+
   it("shows installer-download copy and 查看更新 when a version is available", async () => {
     useUpdatesStore.setState({
       status: {

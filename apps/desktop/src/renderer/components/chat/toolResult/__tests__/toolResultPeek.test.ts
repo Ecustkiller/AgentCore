@@ -635,6 +635,56 @@ describe("hasToolResultBody", () => {
       ),
     ).toBe(true);
   });
+
+  it("browser display is expandable when the title chip hid the url", () => {
+    expect(
+      hasToolResultBody(
+        data({
+          toolName: "browser",
+          display: {
+            kind: "browser",
+            action: "navigate",
+            url: "https://example.com",
+            title: "示例站",
+            detail: "打开 https://example.com",
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("browser display is not expandable when the title chip is already the url", () => {
+    expect(
+      hasToolResultBody(
+        data({
+          toolName: "browser",
+          display: {
+            kind: "browser",
+            action: "navigate",
+            url: "https://example.com",
+            detail: "打开 https://example.com",
+          },
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("browser display with a key-frame is expandable", () => {
+    expect(
+      hasToolResultBody(
+        data({
+          toolName: "browser",
+          display: {
+            kind: "browser",
+            action: "navigate",
+            url: "https://example.com",
+            title: "示例站",
+            frame: "browser/step-0001.jpg",
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("writeFamilyTitleStat", () => {

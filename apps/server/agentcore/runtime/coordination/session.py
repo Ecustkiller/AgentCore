@@ -266,6 +266,19 @@ def active_coordination(execution_id: str | None = None) -> CoordinationSession 
     return _sessions.get(eid)
 
 
+def invalidate_verify_cache_for_execution(
+    execution_id: str, *, reason: str = "landed"
+) -> None:
+    """Drop coordination verify cache after a successful workspace write.
+
+    Bound onto ``ToolContext.on_file_landed`` so ``file_ops.integrity`` does not
+    import this package. No-op when the execution has no live session.
+    """
+    session = active_coordination(execution_id)
+    if session is not None and session.active:
+        session.invalidate_verify_cache(reason=reason)
+
+
 def resolve_coordination_session(
     execution_id: str | None = None,
 ) -> CoordinationSession | None:

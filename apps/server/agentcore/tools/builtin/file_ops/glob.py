@@ -50,6 +50,7 @@ class GlobTool:
         audience=AUDIENCE_BOTH,
         file_products=FileProductsContract.READ_ONLY,
         workspace_io=True,
+        catalog_summary="按文件名模式找文件",
     )
 
     @property
@@ -66,9 +67,8 @@ class GlobTool:
                     "pattern": {
                         "type": "string",
                         "description": (
-                            "globstar。无斜杠=任意深度文件名（`*.py`、`*sidecar*`）；"
-                            "有斜杠=相对路径（`src/*.py` 一层，`pkg/*/name` 一层子目录，"
-                            "`src/**/*.py` 递归，`**/name/**` 任意深度该目录下）。"
+                            "globstar。无斜杠=任意深度文件名；"
+                            "有斜杠=相对路径（`*` 一层，`**` 递归）。"
                         ),
                     },
                     "path": {
@@ -80,10 +80,8 @@ class GlobTool:
                     },
                     "max_entries": {
                         "type": "integer",
-                        "description": (
-                            f"最多返回条数（默认 {GLOB_DEFAULT_MAX_ENTRIES}，"
-                            f"上限 {GLOB_MAX_ENTRIES_CAP}）。触顶页脚诚实。"
-                        ),
+                        "description": "最多返回条数。触顶页脚诚实。",
+                        "default": GLOB_DEFAULT_MAX_ENTRIES,
                         "minimum": 1,
                         "maximum": GLOB_MAX_ENTRIES_CAP,
                     },

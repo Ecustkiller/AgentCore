@@ -1,8 +1,13 @@
-import { Button, DecisionCard, DecisionCardIcon } from "@/components/ui";
+import {
+  Button,
+  DecisionCard,
+  DecisionCardFooter,
+  DecisionCardIcon,
+} from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { notifyError } from "@/lib/toast";
 import { useRunConfirmStore } from "@/stores/runConfirm";
-import { CheckCheck, Terminal } from "lucide-react";
+import { Terminal } from "lucide-react";
 import { useState } from "react";
 
 const PREVIEW_CAP = 2000;
@@ -56,39 +61,37 @@ export function RunConfirmPrompt() {
 
   return (
     <div className="mx-4 mb-2 space-y-2">
-      <DecisionCard tone="primary" animate className="mx-0">
-        <div className="flex items-start gap-2">
-          <DecisionCardIcon tone="primary">
-            <Terminal size={16} />
-          </DecisionCardIcon>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm text-foreground">
-              <span className="font-medium">在终端运行</span>
-            </p>
-            <SimpleTooltip label={pending.command}>
-              <pre className="mt-0.5 max-h-32 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">
-                {preview}
-              </pre>
-            </SimpleTooltip>
+      <DecisionCard tone="primary" animate className="mx-0 overflow-hidden p-0">
+        <div className="px-3 py-3">
+          <div className="flex items-start gap-2">
+            <DecisionCardIcon tone="primary">
+              <Terminal size={16} />
+            </DecisionCardIcon>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-medium text-primary">请求执行</p>
+              <p className="mt-0.5 text-sm font-semibold text-foreground">
+                在终端运行
+              </p>
+              <SimpleTooltip label={pending.command}>
+                <pre className="mt-0.5 max-h-32 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">
+                  {preview}
+                </pre>
+              </SimpleTooltip>
+            </div>
           </div>
         </div>
 
-        <div className="mt-2.5 flex flex-wrap items-center justify-end gap-1.5 pl-6">
+        <DecisionCardFooter tone="primary" className="mt-0">
           <Button variant="outline" disabled={busy} onClick={onCancel}>
             取消
           </Button>
           <Button variant="primary" disabled={busy} onClick={onRun}>
             运行
           </Button>
-          <Button
-            variant="neutral"
-            icon={<CheckCheck size={13} />}
-            disabled={busy}
-            onClick={onAllowSession}
-          >
+          <Button variant="outline" disabled={busy} onClick={onAllowSession}>
             本会话都允许
           </Button>
-        </div>
+        </DecisionCardFooter>
       </DecisionCard>
     </div>
   );

@@ -14,7 +14,6 @@ from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolFace
 from agentcore.memory.explore_profile import (
-    MAX_EXPLORE_TOPICS,
     compute_workspace_explore_fingerprint,
     filter_topics_by_scope_cap,
     parse_explore_topics,
@@ -51,6 +50,7 @@ class UpdateFolderProfileTool:
         surface=ToolSurface.CEO_ORCHESTRATION,
         audience=AUDIENCE_CEO_ONLY,
         ceo_wire=CeoWire.MEMORY,
+        catalog_summary="更新文件夹画像",
     )
 
     folder_id: str | None = None
@@ -66,25 +66,8 @@ class UpdateFolderProfileTool:
         return ToolSchema(
             name=UPDATE_FOLDER_PROFILE_TOOL_NAME,
             description=(
-                "把探索幕（或用户点名「先了解」）汇总的文件夹简报写入当前文件夹约定记忆 "
-                "「AgentCore/记忆/画像.md」（AI 维护），并可同写短入口「记忆/导航.md」。"
-                "仅在有文件夹的对话中可用；画像按固定小节合并更新——有证据的小节替换/增补，"
-                "无新证据的小节保留，禁止整篇无故清空。"
-                "导航为短入口（一句话定位 +「我要…→先读/先查」路由表）；厚内容放主题条目，"
-                "勿把长文塞进导航。"
-                "默认只写画像（+建议写导航）；仅当可独立复用的子系统/域≥2 且全塞进画像会臃肿时，"
-                f"才用可选 topics（单次软顶 {MAX_EXPLORE_TOPICS}，超额截断）拆到"
-                "「记忆/主题/<slug>.md」（整文件覆盖该主题；主题 on_demand，不进 always）。"
-                "厚背景资料/域知识一律走 topics 条目，**不要**写成工作区文件（`AgentCore/文档/` "
-                "只放 research/debate/reviews 阶段产物）。"
-                "用 Markdown「## 小节」+「- 要点」格式。只写这张桌上几乎每个任务都会用到的"
-                "事实（这桌是什么、技术栈/包管理、硬约束）；关键入口与怎么跑仅来自清单/README。"
-                "一次性排查经过不进画像。有证据才写风险与边界；工作区已有约定可摘录"
-                "（如 AGENTS.md 要点，不改源文件）。"
-                "禁止臆造；禁止把单次任务过程写入画像/主题；禁止用 remember 写文件夹简报；"
-                "禁止写用户仓根 AGENTS.md/docs。"
-                "写入成功后：若用户原请求含实质活 → **必须立刻继续**（直答或再 delegate），"
-                "禁止以「已建档/已了解，需要我继续吗」收尾；仅当用户本条只要求了解时可停。"
+                "探索幕（含用户点名「先了解」）收尾：把这张桌的简报写入当前文件夹约定记忆"
+                "「画像.md」，并可同写短入口「导航.md」。"
             ),
             parameters={
                 "type": "object",
@@ -92,36 +75,33 @@ class UpdateFolderProfileTool:
                     "content": {
                         "type": "string",
                         "description": (
-                            "文件夹画像全文或待合并小节（Markdown：## 小节 + - 要点）。"
-                            "空仓禁止编造假画像。"
+                            "文件夹画像（Markdown：## 小节 + - 要点）。"
+                            "只写这桌几乎每个任务都会用到的事实；有证据才写。没写的小节保留。"
                         ),
                     },
                     "navigation": {
                         "type": "string",
                         "description": (
-                            "可选。文件夹短入口「记忆/导航.md」全文（一句话定位 + 任务路由表）。"
-                            "省略则不改已有导航；有实质探索收尾时建议写入。"
+                            "可选。短入口「导航.md」全文（一句话定位 + 任务路由表）。"
+                            "省略则不改已有导航。"
                         ),
                     },
                     "topics": {
                         "type": "array",
                         "description": (
-                            "可选。按需拆出的文件夹主题笔记；默认省略。"
-                            f"每项 slug 为短英文/拼音 id（如 desktop）；"
-                            f"单次软顶 {MAX_EXPLORE_TOPICS}（超额截断+warning，不硬拒）。"
+                            "可选，默认省略。"
+                            "仅当可独立复用的子系统/域≥2 且全塞进画像会臃肿时拆出。"
                         ),
                         "items": {
                             "type": "object",
                             "properties": {
                                 "slug": {
                                     "type": "string",
-                                    "description": "主题文件名 slug（主题/<slug>.md）。",
+                                    "description": "短英文/拼音 id（主题/<slug>.md）。",
                                 },
                                 "content": {
                                     "type": "string",
-                                    "description": (
-                                        "该主题 Markdown 全文（可复用域事实，非任务过程）。"
-                                    ),
+                                    "description": "该主题 Markdown 全文（可复用域事实）。",
                                 },
                             },
                             "required": ["slug", "content"],
@@ -274,7 +254,7 @@ class UpdateFolderProfileTool:
             if self.workspace_key:
                 key = self.workspace_key
             else:
-                from agentcore.conversation.scratch import resolve_conversation_local_binding
+                from agentcore.workspace.locate import resolve_conversation_local_binding
 
                 injected = bool(getattr(context, "folder_binding_injected", False))
                 binding = None

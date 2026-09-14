@@ -216,7 +216,7 @@ class TurnJournalWriter:
         ``set_exception`` so the resolve endpoint can return 5xx without settling the
         interaction Future. On success the Future carries the durable journal seq.
         """
-        from agentcore.conversation.store import get_conversation_store
+        from agentcore.runtime.conversation_store import get_conversation_store
 
         store = get_conversation_store()
         while self._buffer:

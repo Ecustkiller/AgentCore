@@ -72,8 +72,6 @@ _EVENT_FACTORY_NAMES: frozenset[str] = frozenset(
         "stage_card_required",
         "stage_card_resolved",
         "workspace_op_required",
-        "board_op_required",
-        "board_read_required",
         "browser_live_frame",
         "browser_live_status",
         "external_mount_required",

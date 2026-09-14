@@ -397,6 +397,7 @@ class ListFoldersTool:
         surface=ToolSurface.CEO_ORCHESTRATION,
         audience=AUDIENCE_CEO_ONLY,
         ceo_wire=CeoWire.ALWAYS,
+        catalog_summary="列出云文件夹",
     )
 
     @property
@@ -473,6 +474,7 @@ class ResolveFolderTool:
         surface=ToolSurface.CEO_ORCHESTRATION,
         audience=AUDIENCE_CEO_ONLY,
         ceo_wire=CeoWire.ALWAYS,
+        catalog_summary="按路径找到云文件夹",
     )
 
     @property

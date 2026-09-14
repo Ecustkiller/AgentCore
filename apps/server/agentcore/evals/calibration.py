@@ -13,7 +13,8 @@
 裁判可信、才值得拿它的 pass_rate 去对照基线（对照本身仍是观测，不是合并门禁）。
 
 纯统计为独立纯函数（无 numpy/scipy 依赖），可零 LLM 单测；``calibrate`` 复用生产 ``Judge``
-路径（单测注入假裁判，真模型留给手动/夜跑校准）。本模块只 import ``types``（纯类型），不拖
+路径（单测注入假裁判，真模型留给维护者本地 ``calibrate``）。
+本模块只 import ``types``（纯类型），不拖
 runtime/LLM，故与 ``routing.py`` 同构、不进 ``__init__`` 静态面。
 """
 
@@ -312,7 +313,7 @@ async def calibrate(
 
     每条 gold 样本适配成 ``(EvalCase, TurnOutcome)`` 喂**真实裁判路径**（``judge.score``，零侵入
     复用生产 rubric/CoT/多采样）。判↔人 pass 用**同一** ``pass_threshold`` 推导以保证二分 kappa
-    可比（``human_pass`` 显式给出则尊重之）。单测注入假裁判，真模型留给手动/夜跑校准。
+    可比（``human_pass`` 显式给出则尊重之）。单测注入假裁判，真模型留给维护者本地 ``calibrate``。
     """
     if not labels:
         raise EvalConfigError("gold-set 为空，无法校准")

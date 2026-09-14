@@ -115,7 +115,7 @@ async def _assert_target_local_root_ready(backend: Any, *, folder_id: str) -> No
     if not callable(request):
         return
     from agentcore.workspace.channel import WorkspaceOp
-    from agentcore.workspace.limits import is_liveness_timeout_detail
+    from agentcore.workspace.limits import workspace_channel_failure_kind
     from agentcore.workspace.protocol import WorkspaceIOError
 
     try:
@@ -123,8 +123,7 @@ async def _assert_target_local_root_ready(backend: Any, *, folder_id: str) -> No
             WorkspaceOp.EXISTS, {"path": "."}, timeout=_TARGET_ROOT_PING_TIMEOUT_S
         )
     except WorkspaceIOError as exc:
-        detail = str(exc)
-        if is_liveness_timeout_detail(detail):
+        if workspace_channel_failure_kind(exc) == "liveness":
             raise TargetDesktopError(
                 f"目标文件夹 `{folder_id}` 本机通道无响应；请确认桌面在线后重派。"
             ) from exc

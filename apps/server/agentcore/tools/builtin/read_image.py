@@ -1,9 +1,8 @@
 """read_image — CEO on-demand deep-read of a workspace-resident image (P2).
 
-``board_read`` rasterizes whiteboard pixels; this tool reads a workspace-relative
-image file via ``backend.read_bytes`` → base64 → ``VisionReader.read(prompt)`` and
-returns text the CEO can reason over. Same clean-failure posture as ``board_read``:
-no reader →「读图能力未配置」; non-image / missing path / vision failure → failed
+Reads a workspace-relative image file via ``backend.read_bytes`` → base64 →
+``VisionReader.read(prompt)`` and returns text the CEO can reason over.
+No reader →「读图能力未配置」; non-image / missing path / vision failure → failed
 ``ToolResult``, never hang the turn.
 
 Billing matches attachment eye→text: ``vision_run_cost`` + ``reader.credential_source``.
@@ -65,8 +64,7 @@ class ReadImageTool:
             description=(
                 "按需深读【工作区】里的图片：传入工作区相对路径与关注点 prompt，"
                 "用视觉模型返回文字解读。用于对话贴图已注入后仍需带着具体问题再看、"
-                "或读工作区里未作为本回合附件的图。\n"
-                "与 board_read 分工：board_read=白板元素栅格化读图；本工具=工作区文件读图。"
+                "或读工作区里未作为本回合附件的图。"
                 "非图片路径或读图能力未配置时会干净失败。"
             ),
             parameters={

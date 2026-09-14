@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentcore.conversation.mentions import resolve_interjection_mentions
 from agentcore.core.logging import get_logger
+from agentcore.core.mentions import resolve_interjection_mentions
 from agentcore.runtime.events import user_interjection
 from agentcore.workspace.attachments import interjection_attachment_meta
 

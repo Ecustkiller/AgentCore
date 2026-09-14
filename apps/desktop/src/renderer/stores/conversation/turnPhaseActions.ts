@@ -19,6 +19,13 @@ export function enterTurnStreaming(conversationId: string): void {
   useConversationStore.getState().setTurnPhase("streaming", conversationId);
 }
 
+/** 本机还在写：灯和 phase 跟占槽，即使界面曾被标成结束。 */
+export function restoreWritingFromOccupancy(conversationId: string): void {
+  const store = useConversationStore.getState();
+  store.setGenerating(true, conversationId);
+  store.setTurnPhase("streaming", conversationId);
+}
+
 export function completeTurnPhase(
   conversationId: string,
   outcome: TurnTerminalOutcome,

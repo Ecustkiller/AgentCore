@@ -595,7 +595,7 @@ class LoopController(
                     self._validation_thrash_latched = True
                     self._pending_validation_hard_stop = True
                 else:
-                    from agentcore.runtime.engine.write_args_clear import (
+                    from agentcore.tools.cleared_write_stub import (
                         is_landed_echo_rejection,
                     )
 

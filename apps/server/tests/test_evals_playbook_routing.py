@@ -6,7 +6,7 @@ from dataclasses import replace
 
 import pytest
 
-from agentcore.evals.__main__ import main
+from agentcore.evals.cli import main
 from agentcore.evals.playbook_routing import (
     SCENARIOS,
     RoutingTurn,
@@ -20,6 +20,7 @@ from agentcore.evals.playbook_routing import (
     lint_codebase_fixture,
     lint_scenarios,
     named_playbook,
+    observe_task_howto,
     parse_delegate_rich,
     slim_baseline,
     think_act_divergences,
@@ -87,6 +88,7 @@ def test_audit_expects_handwritten_delegate():
         assert sc.expect_action == "DELEGATE"
         assert sc.category == "code_audit"
         assert sc.workspace == "codebase"
+        assert sc.expect_max_recon_rounds == 1
 
 
 def test_greenfield_expects_handwritten_delegate():
@@ -194,9 +196,9 @@ def test_lint_rejects_illegal_expect_action():
 
 
 def test_lint_requires_recon_round_cap_scenario():
-    trimmed = tuple(s for s in SCENARIOS if s.expect_max_recon_rounds is None)
+    cleared = tuple(replace(s, expect_max_recon_rounds=None) for s in SCENARIOS)
     with pytest.raises(EvalConfigError, match="expect_max_recon_rounds"):
-        lint_scenarios(trimmed)
+        lint_scenarios(cleared)
 
 
 def test_lint_rejects_min_workers_above_max():
@@ -237,6 +239,67 @@ def test_parse_delegate_reads_max_workers():
     assert "form" not in raw
     assert raw["max_workers"] == 1
     assert "form" not in raw["tasks_preview"][0]
+
+
+def test_observe_task_howto_flags_syllabus_not_contract():
+    contract = observe_task_howto(
+        action="DELEGATE",
+        playbook=None,
+        tasks_preview=[
+            {
+                "role": "调研",
+                "task": "盘点桌面端面向用户的文案。边界：renderer 用户可见字符串。"
+                "已确认约束：（无）。验收：分类 + 精炼结论。入口 apps/desktop/src/renderer",
+            }
+        ],
+    )
+    assert contract["flagged"] is False
+    assert contract["skipped"] is None
+    syllabus = observe_task_howto(
+        action="DELEGATE",
+        playbook=None,
+        tasks_preview=[
+            {
+                "role": "盘点员",
+                "task": "先读 docs/03-AI核心/上下文工程.md，再读术语表，按以下步骤打卡。",
+            }
+        ],
+    )
+    assert syllabus["flagged"] is True
+    assert "先读" in syllabus["hits"]
+    skipped_pb = observe_task_howto(
+        action="DELEGATE",
+        playbook="map_fanout",
+        tasks_preview=[{"role": "角", "task": "先读入口再交一页地图"}],
+    )
+    assert skipped_pb["skipped"] == "named_playbook"
+    assert skipped_pb["flagged"] is False
+    skipped_direct = observe_task_howto(
+        action="DIRECT", playbook=None, tasks_preview=[{"task": "先读 README"}]
+    )
+    assert skipped_direct["skipped"] == "not_delegate"
+
+
+def test_landing_fingerprint_omits_task_howto():
+    samples = [
+        {
+            "ok": True,
+            "action": "DELEGATE",
+            "playbook": None,
+            "intensity": None,
+            "delegated": True,
+            "card_issued": False,
+            "outcome": {"landing": "handwritten_tasks"},
+            "think_act_divergences": [],
+            "task_howto": {"flagged": True, "hits": ["先读"], "n_flagged": 1, "skipped": None},
+        }
+    ]
+    agg = aggregate_samples(samples)
+    assert agg["task_howto"] == "1/1"
+    assert agg["task_howto_n"] == 1
+    fp = landing_fingerprint(agg)
+    assert "task_howto" not in fp
+    assert "task_howto_n" not in fp
 
 
 def test_classify_landing_variants():
@@ -424,6 +487,7 @@ def test_aggregate_expresses_distribution():
     assert agg["card_issued"] == "1/5"
     assert agg["expected_playbook"] == "3/5"
     assert agg["think_act_divergence"] == "1/5"
+    assert agg["task_howto"] == "0/5"
     assert agg["playbook_counts"]["map_fanout"] == 3
 
 
@@ -486,7 +550,7 @@ def test_format_report_mentions_no_baseline():
 
 
 def test_cli_lint_only_exit_zero():
-    assert main(["--playbook-routing", "--lint-only"]) == 0
+    assert main(["lint", "--suite", "routing"]) == 0
 
 
 def test_cli_report_only_does_not_red_on_miss(monkeypatch, tmp_path):
@@ -522,11 +586,19 @@ def test_cli_report_only_does_not_red_on_miss(monkeypatch, tmp_path):
         }
 
     monkeypatch.setattr("agentcore.evals.playbook_routing_loop.run_playbook_routing", _fake_run)
+
+    async def _fake_suite(*_a, **_k):
+        from agentcore.evals.types import EvalReport
+
+        return EvalReport(cases=[])
+
+    monkeypatch.setattr("agentcore.evals.cli.run_suite", _fake_suite)
     out = tmp_path / "r.json"
     baseline = tmp_path / "b.json"
     code = main(
         [
-            "--playbook-routing",
+            "run",
+            "routing",
             "--out",
             str(out),
             "--baseline",

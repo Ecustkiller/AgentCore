@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 from uuid import uuid4
@@ -595,7 +596,7 @@ def test_compose_prompt_without_profile_tool_skips_write_hint():
 
 
 def test_compose_prompt_profile_write_how_lives_on_tool_schema():
-    """画像写入 HOW 在工具 schema；有工具也不挂冻结核。"""
+    """when-to-use 在按钮；核不挂写入手册；写完继续原请求只在回执。"""
     skills = build_system_skill_registry()
     text = compose_ceo_chat_prompt(
         "BASE",
@@ -604,9 +605,20 @@ def test_compose_prompt_profile_write_how_lives_on_tool_schema():
         cold_start_explore=False,
     )
     assert "【文件夹画像写入】" not in text
-    desc = UpdateFolderProfileTool().schema.description
-    assert "topics" in desc
-    assert "立刻继续" in desc
+    tool = UpdateFolderProfileTool()
+    desc = tool.schema.description
+    blob = desc + json.dumps(tool.schema.parameters, ensure_ascii=False)
+    assert "探索幕" in desc
+    assert "画像.md" in desc
+    assert "导航.md" in desc
+    assert "立刻继续" not in desc
+    assert "topics" not in desc
+    assert "topics" in tool.schema.parameters["properties"]
+    assert "立刻继续" not in blob
+    assert "remember" not in blob
+    assert "禁止臆造" not in blob
+    assert "AgentCore/文档" not in blob
+    assert "软顶" not in blob
 
 
 # --- P1：主题拆分 -----------------------------------------------------------------

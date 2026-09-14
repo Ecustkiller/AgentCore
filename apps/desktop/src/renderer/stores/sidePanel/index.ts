@@ -29,6 +29,7 @@ export {
   type TerminalDetailTab,
   type FileTabChannel,
   type FileDetailTab,
+  type FileTabChrome,
   type BrowserDetailTab,
   type DetailTab,
   type FloatableTabKind,
@@ -40,3 +41,4 @@ export {
 export { canRevealSidePanel } from "./chrome";
 export { isFloatableKind, canFloatTabId } from "./float";
 export { useSidePanelStore, dismissFocusedFloat } from "./store";
+export { confirmFileTabDiscard, UNSAVED_CLOSE_COPY } from "./fileTabDiscard";

@@ -614,7 +614,7 @@ def user_interjection(
     DURABLE——落 journal，刷新可回看。``attachments`` 为名字 + 路径 + 二进制标记。
     ``agent_mentions`` 为软点名芯片（``{agent_id, role}``）；空则不上 wire。
     """
-    from agentcore.conversation.mentions import wire_agent_mentions
+    from agentcore.core.mentions import wire_agent_mentions
 
     payload: dict[str, Any] = {
         "interjection_id": interjection_id,
@@ -670,7 +670,7 @@ def turn_queue_started(
     自描述时间线入场（正文在帧上）。``attachments`` / ``agent_mentions`` 空则不上 wire。
     EPHEMERAL——不落 journal；reload 靠 REST。
     """
-    from agentcore.conversation.mentions import wire_agent_mentions
+    from agentcore.core.mentions import wire_agent_mentions
 
     payload: dict[str, Any] = {
         "queue_id": queue_id,

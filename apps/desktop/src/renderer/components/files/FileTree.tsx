@@ -731,9 +731,9 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
         title="暂无文件"
         hint={
           canUpload
-            ? "拖拽文件到此处，或点「上传」「新建」开始。"
+            ? "拖拽文件到此处。"
             : canMutate
-              ? "点「新建」开始，或在此文件夹放入文件。"
+              ? undefined
               : "此工作区为只读。"
         }
       />

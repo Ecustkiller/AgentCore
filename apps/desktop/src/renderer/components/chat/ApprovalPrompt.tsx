@@ -1,4 +1,3 @@
-import { MANUAL_HELP, ManualHelpLink } from "@/components/ManualHelpLink";
 import { CodeBlock } from "@/components/chat/CodeBlock";
 import {
   codeExecuteLanguage,
@@ -7,7 +6,13 @@ import {
   isPreviewTruncated,
 } from "@/components/chat/codeExecuteApproval";
 import { toolLabelZh } from "@/components/chat/toolLabelsZh";
-import { Badge, Button, DecisionCard, DecisionCardIcon } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  DecisionCard,
+  DecisionCardFooter,
+  DecisionCardIcon,
+} from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import {
   getConversations,
@@ -35,16 +40,7 @@ import {
 } from "@/stores/interactions";
 import { usePermissionChangeStore } from "@/stores/permissionChanges";
 import type { ApprovalDecision } from "@/types/events";
-import {
-  Check,
-  CheckCheck,
-  ChevronDown,
-  ChevronRight,
-  FileCheck,
-  Loader2,
-  ShieldAlert,
-  X,
-} from "lucide-react";
+import { Loader2, ShieldAlert } from "lucide-react";
 import { type ComponentPropsWithoutRef, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
@@ -55,17 +51,6 @@ const HIGHLIGHT_PLUGINS: ComponentPropsWithoutRef<
 
 /** Consecutive same-tool approval prompts before nudging full_trust. */
 const FULL_TRUST_HINT_AFTER = 3;
-
-/**
- * 点「本轮内…」之前必须先知道批出去的是多大范围：一个回合能跑几十次工具、派出多名队员，
- * 而被覆盖的调用之后不会再弹卡（痕迹在过程线的 ApprovalTrace 上）。此刻用户在等放行，
- * 所以只给一句——不是一堵字墙，也不是二次确认。
- */
-const TURN_GRANT_SCOPE_NOTICE =
-  "「本轮内」= 到这次回答结束前同类操作都不再问你，队员发起的也算；一个回合可能有几十次调用。";
-/** 文件类授权比按钮字面更宽（对齐后端 file-class：含 git 写入）。 */
-const FILE_CLASS_SCOPE_NOTICE =
-  "「所有文件改动」含新建 / 改写 / 删除 / 移动与 git 写入。";
 
 /** Gate-injected meta on ``approval.arguments`` — not tool args; strip from card preview. */
 const APPROVAL_GATE_META_KEYS = new Set([
@@ -366,6 +351,20 @@ function primaryArg(
     const ops = args.operations;
     if (Array.isArray(ops)) return `本次共 ${ops.length} 项`;
   }
+  if (toolName === "file_move" || toolName === "file_copy") {
+    const source =
+      typeof args.source === "string" && args.source.trim()
+        ? args.source.trim()
+        : typeof args.path === "string" && args.path.trim()
+          ? args.path.trim()
+          : "";
+    const destination =
+      typeof args.destination === "string" && args.destination.trim()
+        ? args.destination.trim()
+        : "";
+    if (source && destination) return `${source} → ${destination}`;
+    return source || destination || null;
+  }
   if (toolName === "run" || toolName === "code_execute") {
     const purpose = args.purpose;
     if (typeof purpose === "string" && purpose.trim()) return purpose.trim();
@@ -390,6 +389,141 @@ function primaryArg(
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return null;
+}
+
+/** Verb / highlighter keys already implied by the card title or headline. */
+const FACE_STRUCTURAL_KEYS = new Set(["subcommand", "action", "language"]);
+
+/** Keys rendered as headline / badge / dedicated preview — not leftover rows. */
+function isFacePreviewKey(toolName: string, key: string): boolean {
+  if (toolName === "file_delete" && key === "permanent") return true;
+  if (
+    (toolName === "file_move" || toolName === "file_copy") &&
+    (key === "source" || key === "destination" || key === "path")
+  ) {
+    return true;
+  }
+  if (
+    (toolName === "file_write" || toolName === "file_append") &&
+    key === "content"
+  ) {
+    return true;
+  }
+  if (
+    toolName === "str_replace" &&
+    (key === "old_string" || key === "new_string")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+const LEFTOVER_ARG_LABELS: Record<string, string> = {
+  overwrite: "覆盖",
+  encoding: "编码",
+  recursive: "递归",
+  force: "强制",
+  create: "创建",
+  message: "说明",
+  body: "正文",
+  title: "标题",
+  destination: "目标",
+  source: "源",
+  content: "内容",
+  command: "命令",
+  url: "网址",
+  ref: "引用",
+};
+
+function formatLeftoverValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  if (value === true) return "是";
+  if (Array.isArray(value)) {
+    const parts = value.filter(
+      (item): item is string =>
+        typeof item === "string" && item.trim().length > 0,
+    );
+    if (parts.length === value.length && parts.length > 0) {
+      return parts.join(", ");
+    }
+  }
+  return JSON.stringify(value, null, 2);
+}
+
+function isEmptyApprovalArg(value: unknown): boolean {
+  if (value == null || value === false) return true;
+  if (typeof value === "string" && !value.trim()) return true;
+  if (Array.isArray(value) && value.length === 0) return true;
+  return false;
+}
+
+/** True when this value is already the visible headline (path / command / git remote…). */
+function scalarOnApprovalFace(value: unknown, headline: string): boolean {
+  if (typeof value === "number") {
+    return (
+      headline === String(value) ||
+      headline.endsWith(` ${value}px`) ||
+      headline.endsWith(` ${value}`)
+    );
+  }
+  if (Array.isArray(value)) {
+    const joined = value
+      .filter(
+        (item): item is string =>
+          typeof item === "string" && item.trim().length > 0,
+      )
+      .map((item) => item.trim())
+      .join(", ");
+    return joined.length > 0 && scalarOnApprovalFace(joined, headline);
+  }
+  if (typeof value !== "string") return false;
+  const text = value.trim();
+  if (!text) return false;
+  if (text === headline) return true;
+  const snippet = truncateSnippet(text);
+  if (snippet === headline) return true;
+  if (text.length < 2) return false;
+  return headline.endsWith(text) || headline.endsWith(snippet);
+}
+
+/**
+ * Arguments not already on the card (title / headline / batch list).
+ * Empty → nothing extra to dump.
+ */
+function leftoverApprovalArgs(
+  toolName: string,
+  args: Record<string, unknown>,
+  headline: string | null,
+): Record<string, unknown> {
+  const leftover: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(args)) {
+    if (isApprovalGateMetaKey(key) || FACE_STRUCTURAL_KEYS.has(key)) continue;
+    if (isFacePreviewKey(toolName, key)) continue;
+    if (toolName === "file_batch" && key === "operations") continue;
+    if (toolName === "code_execute" && (key === "purpose" || key === "code")) {
+      continue;
+    }
+    if (
+      toolName === "delete_folder" &&
+      (key === "folder_name" || key === "folder_id")
+    ) {
+      continue;
+    }
+    if (
+      toolName === "run" &&
+      key === "purpose" &&
+      headline &&
+      typeof value === "string" &&
+      value.trim() === headline
+    ) {
+      continue;
+    }
+    if (isEmptyApprovalArg(value)) continue;
+    if (headline && scalarOnApprovalFace(value, headline)) continue;
+    leftover[key] = value;
+  }
+  return leftover;
 }
 
 /** Count approval cards (any status except orphaned) for a tool this conversation. */
@@ -448,7 +582,6 @@ export function ApprovalCard({
   onDecide?: (decision: ApprovalDecision) => void;
   attached?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const [clicked, setClicked] = useState<ApprovalDecision | null>(null);
   const [trustBusy, setTrustBusy] = useState(false);
   const [axesOverride, setAxesOverride] = useState<PermissionAxes | null>(null);
@@ -469,13 +602,7 @@ export function ApprovalCard({
   } = approvalEscalationTrack(approval.arguments);
   /** True fuse: no turn-scope grants (approve_always / approve_always_files). */
   const showTurnGrantButtons = !forceOneShot;
-  /** 有「本轮内…」按钮才说范围；熔断一次性卡没有轮内授权，不该出现「本轮」字样。 */
-  const showScopeNotice =
-    showTurnGrantButtons && (supportsTurnGrant(approval.toolName) || isFileOp);
   const headline = primaryArg(approval.toolName, approval.arguments);
-  const argEntries = Object.entries(approval.arguments).filter(
-    ([key]) => !isApprovalGateMetaKey(key),
-  );
 
   const sameToolCount = useMemo(
     () => countToolApprovals(approval.conversationId, approval.toolName),
@@ -506,30 +633,39 @@ export function ApprovalCard({
     [codeText],
   );
   const codeTruncated = codeText != null && isPreviewTruncated(codeText);
-  const otherArgs = useMemo(() => {
-    if (!isCodeExecute) return approval.arguments;
-    return Object.fromEntries(
-      Object.entries(approval.arguments).filter(
-        ([key]) =>
-          key !== "code" && key !== "purpose" && !isApprovalGateMetaKey(key),
-      ),
-    );
-  }, [approval.arguments, isCodeExecute]);
-  const displayArgs = useMemo(() => {
-    if (isCodeExecute) return otherArgs;
-    if (isFileBatch) {
-      return Object.fromEntries(
-        Object.entries(approval.arguments).filter(
-          ([key]) => !isApprovalGateMetaKey(key) && key !== "operations",
-        ),
-      );
-    }
-    return Object.fromEntries(
-      Object.entries(approval.arguments).filter(
-        ([key]) => !isApprovalGateMetaKey(key),
-      ),
-    );
-  }, [approval.arguments, isCodeExecute, isFileBatch, otherArgs]);
+  const writeBody =
+    (approval.toolName === "file_write" ||
+      approval.toolName === "file_append") &&
+    typeof approval.arguments.content === "string" &&
+    approval.arguments.content
+      ? approval.arguments.content
+      : null;
+  const replaceOld =
+    approval.toolName === "str_replace" &&
+    typeof approval.arguments.old_string === "string" &&
+    approval.arguments.old_string
+      ? approval.arguments.old_string
+      : null;
+  const replaceNew =
+    approval.toolName === "str_replace" &&
+    typeof approval.arguments.new_string === "string" &&
+    approval.arguments.new_string
+      ? approval.arguments.new_string
+      : null;
+  const permanentDelete =
+    approval.toolName === "file_delete" &&
+    approval.arguments.permanent === true;
+  const headlineIsProse =
+    isCodeExecute &&
+    typeof approval.arguments.purpose === "string" &&
+    approval.arguments.purpose.trim() !== "" &&
+    headline === approval.arguments.purpose.trim();
+  const leftoverArgs = leftoverApprovalArgs(
+    approval.toolName,
+    approval.arguments,
+    headline,
+  );
+  const leftoverEntries = Object.entries(leftoverArgs);
 
   const onDecide = (decision: ApprovalDecision) => {
     setClicked(decision);
@@ -571,17 +707,15 @@ export function ApprovalCard({
       .finally(() => setTrustBusy(false));
   };
 
-  const spinnerOr = (decision: ApprovalDecision, icon: React.ReactNode) =>
+  const spinnerFor = (decision: ApprovalDecision) =>
     busy && clicked === decision ? (
       <Loader2 size={13} className="animate-spin" />
-    ) : (
-      icon
-    );
+    ) : undefined;
 
   const onceButton = (
     <Button
       variant="primary"
-      icon={spinnerOr("approve", <Check size={13} />)}
+      icon={spinnerFor("approve")}
       disabled={busy}
       onClick={() => onDecide("approve")}
     >
@@ -591,8 +725,8 @@ export function ApprovalCard({
   const turnGrantButton =
     showTurnGrantButtons && supportsTurnGrant(approval.toolName) ? (
       <Button
-        variant="neutral"
-        icon={spinnerOr("approve_always", <CheckCheck size={13} />)}
+        variant="outline"
+        icon={spinnerFor("approve_always")}
         disabled={busy}
         onClick={() => onDecide("approve_always")}
       >
@@ -605,148 +739,134 @@ export function ApprovalCard({
       tone="primary"
       animate={!attached}
       className={cn(
-        "mx-0",
+        "mx-0 overflow-hidden p-0",
         attached &&
           "mt-0 rounded-b-none rounded-t-xl border-b-0 shadow-none animate-none",
       )}
     >
-      <div className="flex items-start gap-2">
-        <DecisionCardIcon tone="primary">
-          <ShieldAlert size={16} />
-        </DecisionCardIcon>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1">
-            <p className="min-w-0 flex-1 text-sm text-foreground">
-              <span className="font-medium">Agent 请求执行</span>
-              <span className="text-muted-foreground"> · </span>
-              <span className="font-medium">
-                {toolLabelZh(approval.toolName)}
-              </span>
+      <div className="px-3 py-3">
+        <div className="flex items-start gap-2">
+          <DecisionCardIcon tone="primary">
+            <ShieldAlert size={16} />
+          </DecisionCardIcon>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium text-primary">请求执行</p>
+            <p className="mt-0.5 flex min-w-0 items-baseline text-sm font-semibold text-foreground">
+              <span className="shrink-0">{toolLabelZh(approval.toolName)}</span>
+              {headline ? (
+                <>
+                  <span className="shrink-0 font-normal text-muted-foreground">
+                    {" · "}
+                  </span>
+                  <SimpleTooltip label={headline}>
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 truncate font-normal",
+                        headlineIsProse ? "" : "font-mono",
+                      )}
+                    >
+                      {headline}
+                    </span>
+                  </SimpleTooltip>
+                </>
+              ) : null}
             </p>
-            <ManualHelpLink to={MANUAL_HELP.autonomy} />
-          </div>
-          {headline && (
-            <SimpleTooltip label={headline}>
-              <p
-                className={`mt-0.5 truncate text-xs text-muted-foreground ${
-                  isCodeExecute &&
-                  typeof approval.arguments.purpose === "string" &&
-                  approval.arguments.purpose.trim()
-                    ? ""
-                    : "font-mono"
-                }`}
-              >
-                {headline}
-              </p>
-            </SimpleTooltip>
-          )}
-          {isFileBatch && batchOps.length > 0 && (
-            <ol className="mt-1 max-h-40 list-decimal space-y-0.5 overflow-auto pl-4 font-mono text-xs text-muted-foreground">
-              {batchOps.map((item, idx) => (
-                <li key={`${idx}-${batchOpLine(item)}`} className="break-all">
-                  {batchOpLine(item)}
-                </li>
-              ))}
-            </ol>
-          )}
-          {isCodeExecute && riskTags.length > 0 && (
-            <div className="mt-1 flex flex-wrap gap-1">
-              {riskTags.map((tag) => (
-                <Badge key={tag} tone="muted" className="font-normal">
-                  {tag}
+            {permanentDelete && (
+              <div className="mt-1">
+                <Badge tone="destructive" className="font-normal">
+                  永久删除
                 </Badge>
-              ))}
-            </div>
-          )}
-          {forceOneShot && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              安全熔断升格审批（启发式兜底，并非完整拦截）
-              {escalationHint ? `：${escalationHint}` : ""}
-            </p>
-          )}
-          {sensitivePathReadAsk && (
-            <p className="mt-1 whitespace-pre-line text-xs text-muted-foreground">
-              敏感路径读升格审批
-              {escalationHint ? `：${escalationHint}` : ""}
-            </p>
-          )}
-          {showManagedHint && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              同类审批较频繁。可切换为
-              <button
-                type="button"
-                className="mx-0.5 text-primary underline-offset-2 hover:underline"
-                disabled={trustBusy}
-                onClick={switchManaged}
-              >
-                全放行
-              </button>
-              （下一回合生效；熔断仍在）。
-            </p>
-          )}
-          {argEntries.length > 0 && (
-            <Button
-              variant="ghost"
-              onClick={() => setExpanded((v) => !v)}
-              className="mt-1 h-auto gap-1 px-0 py-0 text-xs text-muted-foreground hover:text-foreground"
-              icon={
-                expanded ? (
-                  <ChevronDown size={13} />
-                ) : (
-                  <ChevronRight size={13} />
-                )
-              }
-            >
-              {expanded ? "收起参数" : "查看参数"}
-            </Button>
-          )}
-          {expanded && isCodeExecute && codeText != null && (
-            <div className="mt-1 space-y-1">
-              {codeTruncated && (
-                <p className="text-xs text-muted-foreground">代码预览已截断</p>
-              )}
-              <ApprovalHighlightedCode
-                code={codeText}
-                language={codeExecuteLanguage(approval.arguments)}
-              />
-            </div>
-          )}
-          {expanded && isCodeExecute && Object.keys(otherArgs).length > 0 && (
-            <pre className="mt-1 max-h-40 overflow-auto rounded-lg bg-card/70 p-2 font-mono text-xs text-foreground">
-              {JSON.stringify(otherArgs, null, 2)}
-            </pre>
-          )}
-          {expanded &&
-            !isCodeExecute &&
-            Object.keys(displayArgs).length > 0 && (
-              <pre className="mt-1 max-h-40 overflow-auto rounded-lg bg-card/70 p-2 font-mono text-xs text-foreground">
-                {JSON.stringify(displayArgs, null, 2)}
-              </pre>
+              </div>
             )}
+            {isFileBatch && batchOps.length > 0 && (
+              <ol className="mt-1 max-h-40 list-decimal space-y-0.5 overflow-auto pl-4 font-mono text-xs text-muted-foreground">
+                {batchOps.map((item, idx) => (
+                  <li key={`${idx}-${batchOpLine(item)}`} className="break-all">
+                    {batchOpLine(item)}
+                  </li>
+                ))}
+              </ol>
+            )}
+            {isCodeExecute && riskTags.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {riskTags.map((tag) => (
+                  <Badge key={tag} tone="muted" className="font-normal">
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+            )}
+            {forceOneShot && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                安全熔断升格审批（启发式兜底，并非完整拦截）
+                {escalationHint ? `：${escalationHint}` : ""}
+              </p>
+            )}
+            {sensitivePathReadAsk && (
+              <p className="mt-1 whitespace-pre-line text-xs text-muted-foreground">
+                敏感路径读升格审批
+                {escalationHint ? `：${escalationHint}` : ""}
+              </p>
+            )}
+            {showManagedHint && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                同类审批较频繁。可切换为
+                <button
+                  type="button"
+                  className="mx-0.5 text-primary underline-offset-2 hover:underline"
+                  disabled={trustBusy}
+                  onClick={switchManaged}
+                >
+                  全放行
+                </button>
+                （下一回合生效；熔断仍在）。
+              </p>
+            )}
+            {isCodeExecute && codeText != null && (
+              <div className="mt-1 space-y-1">
+                {codeTruncated && (
+                  <p className="text-xs text-muted-foreground">
+                    代码预览已截断
+                  </p>
+                )}
+                <ApprovalHighlightedCode
+                  code={codeText}
+                  language={codeExecuteLanguage(approval.arguments)}
+                />
+              </div>
+            )}
+            {writeBody != null && <ApprovalPlainPreview text={writeBody} />}
+            {replaceOld != null && (
+              <ApprovalPlainPreview label="原文" text={replaceOld} />
+            )}
+            {replaceNew != null && (
+              <ApprovalPlainPreview label="替换为" text={replaceNew} />
+            )}
+            {leftoverEntries.length > 0 && (
+              <dl className="mt-1 space-y-0.5">
+                {leftoverEntries.map(([key, value]) => (
+                  <div key={key} className="flex min-w-0 gap-2 text-xs">
+                    <dt className="shrink-0 text-muted-foreground">
+                      {LEFTOVER_ARG_LABELS[key] ?? key}
+                    </dt>
+                    <dd className="min-w-0 whitespace-pre-wrap break-all font-mono text-foreground">
+                      {formatLeftoverValue(value)}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+          </div>
         </div>
       </div>
 
-      {showScopeNotice && (
-        <p
-          className="mt-2.5 pl-6 text-xs text-muted-foreground"
-          data-testid="turn-grant-scope-notice"
-        >
-          {TURN_GRANT_SCOPE_NOTICE}
-          {isFileOp ? FILE_CLASS_SCOPE_NOTICE : ""}
-        </p>
-      )}
-      <div
-        className={cn(
-          "flex flex-wrap items-center justify-end gap-1.5 pl-6",
-          showScopeNotice ? "mt-1.5" : "mt-2.5",
-        )}
-      >
+      <DecisionCardFooter tone="primary" className="mt-0">
         {onceButton}
         {turnGrantButton}
         {isFileOp && showTurnGrantButtons && (
           <Button
-            variant="neutral"
-            icon={spinnerOr("approve_always_files", <FileCheck size={13} />)}
+            variant="outline"
+            icon={spinnerFor("approve_always_files")}
             disabled={busy}
             onClick={() => onDecide("approve_always_files")}
           >
@@ -755,14 +875,35 @@ export function ApprovalCard({
         )}
         <Button
           variant="danger"
-          icon={spinnerOr("deny", <X size={13} />)}
+          icon={spinnerFor("deny")}
           disabled={busy}
           onClick={() => onDecide("deny")}
         >
           拒绝
         </Button>
-      </div>
+      </DecisionCardFooter>
     </DecisionCard>
+  );
+}
+
+function ApprovalPlainPreview({
+  label,
+  text,
+}: {
+  label?: string;
+  text: string;
+}) {
+  const truncated = isPreviewTruncated(text);
+  return (
+    <div className="mt-1 space-y-1">
+      {label ? <p className="text-xs text-muted-foreground">{label}</p> : null}
+      {truncated ? (
+        <p className="text-xs text-muted-foreground">预览已截断</p>
+      ) : null}
+      <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">
+        {text}
+      </pre>
+    </div>
   );
 }
 

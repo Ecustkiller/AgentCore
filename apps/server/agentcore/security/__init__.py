@@ -32,6 +32,7 @@ if TYPE_CHECKING:
         create_inference_token,
         create_mfa_pending_token,
         create_preview_token,
+        create_workspaces_token,
         decode_access_token,
         decode_access_token_claims,
         decode_access_token_family,
@@ -41,6 +42,7 @@ if TYPE_CHECKING:
         decode_inference_token,
         decode_mfa_pending_token,
         decode_preview_token,
+        decode_workspaces_token,
     )
 
 __all__ = [
@@ -50,6 +52,7 @@ __all__ = [
     "create_account_token",
     "create_folders_token",
     "create_inference_token",
+    "create_workspaces_token",
     "create_mfa_pending_token",
     "create_preview_token",
     "csrf_reject_reason",
@@ -60,6 +63,7 @@ __all__ = [
     "decode_account_token",
     "decode_folders_token",
     "decode_inference_token",
+    "decode_workspaces_token",
     "decode_mfa_pending_token",
     "decode_preview_token",
     "generate_refresh_token",
@@ -86,6 +90,7 @@ _LAZY: dict[str, tuple[str, str]] = {
     "create_account_token": ("agentcore.security.tokens", "create_account_token"),
     "create_folders_token": ("agentcore.security.tokens", "create_folders_token"),
     "create_inference_token": ("agentcore.security.tokens", "create_inference_token"),
+    "create_workspaces_token": ("agentcore.security.tokens", "create_workspaces_token"),
     "create_mfa_pending_token": ("agentcore.security.tokens", "create_mfa_pending_token"),
     "create_preview_token": ("agentcore.security.tokens", "create_preview_token"),
     "decode_access_token": ("agentcore.security.tokens", "decode_access_token"),
@@ -98,6 +103,10 @@ _LAZY: dict[str, tuple[str, str]] = {
     "decode_account_token": ("agentcore.security.tokens", "decode_account_token"),
     "decode_folders_token": ("agentcore.security.tokens", "decode_folders_token"),
     "decode_inference_token": ("agentcore.security.tokens", "decode_inference_token"),
+    "decode_workspaces_token": (
+        "agentcore.security.tokens",
+        "decode_workspaces_token",
+    ),
     "decode_mfa_pending_token": ("agentcore.security.tokens", "decode_mfa_pending_token"),
     "decode_preview_token": ("agentcore.security.tokens", "decode_preview_token"),
 }

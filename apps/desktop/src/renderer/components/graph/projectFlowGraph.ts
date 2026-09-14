@@ -5,7 +5,7 @@
 import type { InjectGraphOverlay } from "@/lib/causalInject";
 import {
   estimateTokens,
-  formatCostCaption,
+  formatDisplayCost,
   headText,
   pickCostMoney,
   tailText,
@@ -40,7 +40,6 @@ import {
   deriveArtifacts,
   isDebateFoldedBeatRun,
   pickDebateCrossExamActivateId,
-  resolveHandoff,
   workerRunsOf,
 } from "./helpers";
 import type { GraphScene } from "./scene";
@@ -349,7 +348,7 @@ export function projectFlowNodes({
     const durationMs =
       foldedCx.length > 0 ? sumDurationMs(roundRuns) : run.durationMs;
     // 轮节点聚合口径与 durationMs 一致：成本 / token 计入折进的质询作答。
-    // BYOK：记账 total=0 时用 estimated_total（美元社区价目），节点上标「自带密钥·估算」。
+    // BYOK：记账 total=0 时用 estimated_total（美元社区价目）；peek / a11y 出 ≈$，face 不显钱。
     // 无 FX：折进的 run 同凭据来源 → 同币种，按首个记名。
     let costNano = 0;
     let costEstimated = false;
@@ -431,7 +430,7 @@ export function projectFlowNodes({
       realTokens,
       costText:
         costNano > 0
-          ? formatCostCaption(costNano, costEstimated, costCurrency)
+          ? formatDisplayCost(costNano, costEstimated, costCurrency)
           : undefined,
       handleDirection,
       isSubtask,
@@ -669,8 +668,6 @@ export function projectFlowEdges({
 
   return allEdges.map((e) => {
     const kind = e.kind ?? "dep";
-    const handoff =
-      kind === "dep" ? resolveHandoff(execution, e.source, e.target) : null;
     const port = ports.get(e.id);
     if (documentShell) {
       return {
@@ -680,7 +677,6 @@ export function projectFlowEdges({
         type: "step",
         data: {
           kind,
-          handoff,
           handleDirection,
           pathType: edgePathType,
           sourcePortIndex: port?.sourcePortIndex ?? 0,
@@ -708,7 +704,6 @@ export function projectFlowEdges({
       data: {
         animated,
         kind,
-        handoff,
         injectHighlight,
         injectDimmed,
         handleDirection,

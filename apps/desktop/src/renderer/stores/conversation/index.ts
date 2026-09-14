@@ -12,11 +12,16 @@ export { useConversationStore, type ConversationState } from "./store";
 export { CONVERSATION_SLICE_LRU_LIMIT } from "./sliceLru";
 export {
   isMessageWindowResident,
-  isMessageWindowStrictlyRicher,
   overlayIncomingWithRicherExisting,
+  adoptLatestWindowMessages,
+  hasUnconfirmedLocalTail,
+  unconfirmedLocalTail,
+  isReusableSendAssistantPlaceholder,
+  reusableSendAssistantId,
   messageIdentityKeys,
   messageRichnessScore,
   type MessageWindowWriteRejectReason,
+  type UnconfirmedTailOpts,
 } from "./messageWindowWrite";
 export {
   NO_ACTIVE_MESSAGES,
@@ -62,5 +67,6 @@ export {
   completeTurnPhase,
   enterTurnStreaming,
   getTurnPhase,
+  restoreWritingFromOccupancy,
   throwIfCannotOpenStream,
 } from "./turnPhaseActions";

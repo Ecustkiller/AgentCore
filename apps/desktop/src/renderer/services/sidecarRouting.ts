@@ -50,6 +50,7 @@ const activeSidecarTurns = new Map<string, ActiveSidecarTurn>();
 /**
  * 回合结束后仍记住最近 sidecar 目标（含 turnId），供 harvest 重新 setActive，
  * 以及渲染侧流已拆、引擎可能仍在跑时的活干预（run-stop / 整轮 cancel）。
+ * 只寻址，不问闲忙——生成中灯 / 发送门问 occupancy。
  */
 const lastSidecarTargetByCid = new Map<string, ActiveSidecarTurn>();
 

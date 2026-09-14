@@ -54,16 +54,16 @@ AI 运行时入口 → [`docs/03-AI核心/运行时总览.md`](docs/03-AI核心/
 |------|------|------|
 | [`apps/server`](apps/server/README.md) | 核心 | FastAPI 后端 · runtime 执行引擎 · LLM 网关 |
 | [`apps/desktop`](apps/desktop/README.md) | 核心 | Electron + React 桌面客户端（主产品面） |
-| [`apps/mobile`](apps/mobile/README.md) | 核心 | 手机 Web / Capacitor |
+| [`apps/mobile`](apps/mobile/README.md) | 核心 | Capacitor 壳（产品页挂桌面树） |
 | [`apps/admin`](apps/admin/README.md) | 核心 | 运营管理后台 |
 | `packages/` | 核心 | 跨端契约与工具包（非业务实现） |
-| `conformance/` | 核心 | SSE / fold 协议对账向量 |
+| [`packages/protocol-conformance`](packages/protocol-conformance) | 核心 | SSE / fold 协议对账向量 |
 | `deploy/` | 核心 | Docker Compose、部署脚本与环境模板 |
 | `docs/` | 核心 | 设计文档（What / Why，中文）；总入口见下 |
 | `demos/` | 可选 | 产品磁带录制与可控回放 |
 | `evals/` | 可选 | 能力评估与合成场景 |
 | [`apps/website`](apps/website/README.md) | 品牌 | 官网 |
-| [`apps/promo`](apps/promo/README.md) | 品牌 | 宣传片 / Remotion 素材 |
+| [`apps/promo`](apps/promo/README.md) | 品牌 | 宣传静帧 / Remotion 套件 |
 | `assets/` | 品牌 | 跨应用品牌素材 |
 
 更细的目录边界 → [`docs/02-架构/项目结构.md`](docs/02-架构/项目结构.md)

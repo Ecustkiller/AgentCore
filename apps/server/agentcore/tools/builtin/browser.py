@@ -632,9 +632,7 @@ BROWSER_TOOL_PARAMETERS: dict[str, Any] = {
         "action": {
             "type": "string",
             "enum": sorted(_ALLOWED_ACTIONS),
-            "description": (
-                "navigate / click / type / scroll / snapshot / console / screenshot。"
-            ),
+            "description": "页面动作。",
         },
         "url": {
             "type": "string",
@@ -657,7 +655,8 @@ BROWSER_TOOL_PARAMETERS: dict[str, Any] = {
         },
         "dy": {
             "type": "integer",
-            "description": "scroll：垂直滚动像素（默认 600，向下为正）",
+            "description": "scroll：垂直滚动像素（向下为正）",
+            "default": 600,
         },
         "purpose": _PURPOSE_PARAM,
         "session_id": _SESSION_ID_PARAM,

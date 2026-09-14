@@ -1,8 +1,7 @@
 """DesktopClientChannel — route desktop Client Tools to the bound Electron app.
 
-Counterpart of :class:`agentcore.board.channel.BoardChannel` for OS-level desktop
-affordances that only exist in the Electron shell (Host ops, MCP stdio, and
-external directory mounts).
+OS-level desktop affordances that only exist in the Electron shell (Host ops,
+MCP stdio, and external directory mounts).
 
 Wired whenever the desktop client is online (local workspace **or** cloud +
 ``desktop_online``) — never by pinging ``127.0.0.1`` from the cloud API process.

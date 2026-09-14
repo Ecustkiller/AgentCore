@@ -9,5 +9,5 @@
     { "name": "NotDelegated" },
     { "name": "MaxRounds", "args": { "budget": 3 } }
   ],
-  "rubric": "极短清单自答：无落盘、无调研广度，CEO 直接列三条。"
+  "rubric": "三条建议切不出去，编码≈做完。对照：三家定位互不依赖的短查证该派。"
 }

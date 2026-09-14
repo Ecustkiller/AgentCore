@@ -3,7 +3,6 @@ import { isBrowserTool } from "@/lib/browserActivity";
 import { fetchWorkspaceFileBlob } from "@/services/workspace";
 import { useBrowserSessionsStore } from "@/stores/browserSessions";
 import { useStreamAwareDisclosure } from "@/stores/disclosure";
-import { useSidePanelStore } from "@/stores/sidePanel";
 import type { BrowserDisplay, ProcessStep } from "@/types/events";
 import {
   ChevronDown,
@@ -12,12 +11,15 @@ import {
   ImageOff,
   type LucideIcon,
   Monitor,
-  Radio,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { ThinkingDots } from "./message-bubble/Thinking";
+import {
+  LiveFlow,
+  LiveFlowDots,
+  LiveFlowText,
+} from "./message-bubble/LiveFlow";
 import { toolMeta } from "./message-bubble/constants";
 import { toolGroupFaultLabel } from "./toolResult/toolFaultFace";
 
@@ -306,7 +308,10 @@ function BrowserStepRow({
   const alt = frameAlt(step);
   const subline = browserSubline(step.detail, step.url);
   return (
-    <div className="flex items-start gap-3 rounded-lg px-2 py-2">
+    <LiveFlow
+      active={step.status === "running"}
+      className="flex items-start gap-3 rounded-lg px-2 py-2"
+    >
       {step.frame ? (
         <BrowserThumb
           conversationId={conversationId}
@@ -323,8 +328,10 @@ function BrowserStepRow({
             {index + 1}
           </span>
           <Icon size={14} className="shrink-0 text-muted-foreground" />
-          <span className="font-medium text-foreground">{label}</span>
-          {step.status === "running" && <ThinkingDots />}
+          <span className="font-medium text-foreground">
+            <LiveFlowText>{label}</LiveFlowText>
+          </span>
+          {step.status === "running" && <LiveFlowDots active />}
           {step.status === "error" && (
             <X size={13} className="shrink-0 text-destructive" />
           )}
@@ -335,7 +342,7 @@ function BrowserStepRow({
           </p>
         ) : null}
       </div>
-    </div>
+    </LiveFlow>
   );
 }
 
@@ -371,7 +378,6 @@ export function BrowserActivityCard({
     (src: string, alt: string) => setLightbox({ src, alt }),
     [],
   );
-  const showBrowser = useSidePanelStore((s) => s.showBrowser);
 
   const steps = browserStepsFromTools(tools);
   const running = tools.some((t) => t.status === "running");
@@ -386,21 +392,22 @@ export function BrowserActivityCard({
     void useBrowserSessionsStore.getState().hydrateConversation(conversationId);
   }, [conversationId, hydrateKey]);
 
+  const headerLive = running && !expanded;
+
   return (
     <div>
-      <div className="mb-1.5 flex items-center gap-1.5">
+      <LiveFlow active={headerLive} className="mb-1.5 min-w-0 w-full">
         <button
           type="button"
           onClick={toggleExpanded}
           aria-expanded={expanded}
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+          className="flex min-w-0 w-full items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
         >
-          {running ? (
-            <ThinkingDots />
-          ) : (
-            <Monitor size={14} className="shrink-0" />
-          )}
-          <span className="min-w-0 truncate text-left">{title}</span>
+          <Monitor size={14} className="shrink-0" />
+          {headerLive && <LiveFlowDots active />}
+          <LiveFlowText className="min-w-0 truncate text-left">
+            {title}
+          </LiveFlowText>
           {groupFault && (
             <span
               data-testid="tool-group-fault"
@@ -415,18 +422,7 @@ export function BrowserActivityCard({
             <ChevronRight size={14} className="shrink-0" />
           )}
         </button>
-        {/* 揭示右坞「浏览器」tab。不按 running 收起：跑着时是直播、停下后仍可看最后一帧。文案随态切。 */}
-        {conversationId && (
-          <button
-            type="button"
-            onClick={showBrowser}
-            className="flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary hover:bg-primary/15"
-          >
-            <Radio size={12} className="shrink-0" />
-            {running ? "查看直播" : "打开浏览器"}
-          </button>
-        )}
-      </div>
+      </LiveFlow>
 
       {expanded && (
         <div className="flex max-h-[28rem] flex-col gap-0.5 overflow-y-auto pr-1">
@@ -454,9 +450,10 @@ export function BrowserActivityCard({
 }
 
 /**
- * Single browser step's rich result (the ToolResultView branch for one `browser_*` call):
- * an action + one subline header + the full key-frame (lazy-loaded, click → lightbox).
- * The aggregated form for ≥2 consecutive steps is {@link BrowserActivityCard}.
+ * Single browser step expanded body: leftover facts the title line did not
+ * carry (destination URL when the chip is the page title) plus the key-frame.
+ * No second Navigate header; 打开浏览器 stays on the dock tab / login card.
+ * ≥2 consecutive steps → {@link BrowserActivityCard}.
  */
 export function BrowserResult({
   display,
@@ -468,62 +465,30 @@ export function BrowserResult({
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(
     null,
   );
-  const showBrowser = useSidePanelStore((s) => s.showBrowser);
-  const { Icon, label } = browserActionMeta(display.action);
   const alt = frameAlt(display);
-  const subline = browserSubline(display.detail, display.url);
-
-  useEffect(() => {
-    if (!conversationId) return;
-    void useBrowserSessionsStore.getState().hydrateConversation(conversationId);
-  }, [conversationId]);
+  const extras = browserExpandExtras(display);
+  const frame = display.frame?.trim() ?? "";
+  if (!frame && !extras) return null;
 
   return (
-    <div className="mt-1 overflow-hidden rounded-lg border border-border">
-      <div className="flex items-start gap-2 border-border/60 border-b bg-muted/40 px-2.5 py-1.5">
-        <Icon size={14} className="mt-0.5 shrink-0 text-muted-foreground" />
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-1.5 text-xs">
-            <span className="font-medium text-foreground">{label}</span>
-            {display.title && (
-              <span className="min-w-0 truncate text-muted-foreground">
-                · {display.title}
-              </span>
-            )}
-          </div>
-          {subline ? (
-            <p className="mt-0.5 truncate text-xs text-muted-foreground">
-              {subline}
-            </p>
-          ) : null}
-        </div>
-        {/* 单步富卡也挂入口：≥2 步活动卡已有 CTA，单步此前无路开浏览器 tab。
-            无可靠 running 信号 → 固定「打开浏览器」（与活动卡 turn 结束后文案一致）。 */}
-        {conversationId && (
-          <button
-            type="button"
-            onClick={showBrowser}
-            className="mt-0.5 flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary hover:bg-primary/15"
-          >
-            <Radio size={12} className="shrink-0" />
-            打开浏览器
-          </button>
-        )}
-      </div>
-      <div className="bg-muted/30 p-2">
-        {display.frame ? (
+    <div className="mt-1">
+      {extras ? (
+        <p className="truncate text-xs text-muted-foreground">{extras}</p>
+      ) : null}
+      {frame ? (
+        <div
+          className={`overflow-hidden rounded-lg border border-border bg-muted/30 p-2 ${
+            extras ? "mt-1" : ""
+          }`}
+        >
           <BrowserResultFrame
             conversationId={conversationId}
-            frame={display.frame}
+            frame={frame}
             alt={alt}
             onOpen={(src, a) => setLightbox({ src, alt: a })}
           />
-        ) : (
-          <p className="px-1 py-2 text-xs text-muted-foreground/60">
-            （无关键帧）
-          </p>
-        )}
-      </div>
+        </div>
+      ) : null}
       {lightbox && (
         <BrowserFrameLightbox
           src={lightbox.src}
@@ -545,9 +510,39 @@ export function browserSubline(detail?: string, url?: string): string {
   return d || u;
 }
 
-/** Collapsed ToolLine chip for one browser step — human detail, else page title, else url. */
+/** Collapsed ToolLine chip for one browser step.
+ * Navigate: page title (the destination's identity), else url — not「打开 {url}」.
+ * Other actions: what happened (detail), else title, else url. */
 export function browserResultTail(display: BrowserDisplay): string {
-  return (display.detail || display.title || display.url).trim();
+  const title = display.title?.trim() ?? "";
+  const detail = display.detail?.trim() ?? "";
+  const url = display.url?.trim() ?? "";
+  if (display.action === "navigate") return title || url;
+  return detail || title || url;
+}
+
+/** True when `tail` already names `url` (trailing-slash variants count as the same). */
+function tailHasUrl(tail: string, url: string): boolean {
+  if (!url) return true;
+  if (tail.includes(url)) return true;
+  const stripped = url.replace(/\/+$/, "");
+  return stripped.length > 0 && tail.includes(stripped);
+}
+
+/** Expand-body facts the title chip did not already carry — typically the URL
+ * once Navigate shows the page title. Empty when the title is already the url
+ * and there is nothing else to disclose. */
+export function browserExpandExtras(display: BrowserDisplay): string {
+  const url = display.url?.trim() ?? "";
+  if (!url) return "";
+  if (tailHasUrl(browserResultTail(display), url)) return "";
+  return url;
+}
+
+export function browserHasExpandBody(display: BrowserDisplay): boolean {
+  return (
+    Boolean(display.frame?.trim()) || Boolean(browserExpandExtras(display))
+  );
 }
 
 /** A compact one-line label for a frame / leftover peek (title row uses {@link browserResultTail}). */

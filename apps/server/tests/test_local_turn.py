@@ -6,10 +6,10 @@ status + journal, no cost ledger. All DB collaborators are faked (镜像 ``test_
 Covered:
 
 * a full turn persists the user + assistant messages AND the turn journal;
-* an empty reply with no process state persists only the user row (noop);
-* an empty reply with journal/runs still settles the assistant (+ journal);
-* an empty ERROR still settles the assistant row (failed + error_code; content empty);
-* paused/running assistant + empty final settles (no ghost noop);
+* this-send empty (no thinking/tools/workers/pause, including empty error / cancel /
+  interrupt / process-less journal) skips persist — 「发送当没发生」;
+* paused/running assistant + empty final still settles (no ghost noop);
+* harvest / recovery placeholder / empty-um write-backs are not this-send;
 * **no cost ledger is ever written**;
 * the user row is pinned to the client-minted id;
 * a retried write-back is an idempotent D7 merge upsert (no early-return abandon);
@@ -95,6 +95,16 @@ async def test_local_metrics_status_from_settle_facts():
 
 _USER_MSG_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 _PINNED_USER_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+
+
+def _assert_zero_output_skipped(result: dict, events: list) -> None:
+    """This-send empty write-back must not create or settle rows."""
+    assert result["assistant_message_id"] is None
+    assert result["noop"] is True
+    assert result["title"] is None
+    assert not any(e[0] == "msg" for e in events)
+    assert not any(e[0] == "upsert" for e in events)
+    assert not any(e[0] == "journal" for e in events)
 
 
 def _pg_uuid_bind_error(message_id: str) -> DBAPIError:
@@ -273,6 +283,15 @@ def _patch_persistence(
         lambda cid: consolidation_calls.append(cid),
     )
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
+
+    async def _orphan_hot(**kw):
+        events.append(("orphan_hot", kw.get("turn_id"), kw.get("conversation_id")))
+        return []
+
+    monkeypatch.setattr(
+        "agentcore.runtime.interaction_orphan.orphan_hot_pending_after_terminal_persist",
+        _orphan_hot,
+    )
     # Local derived mint (title/followups) now goes through run_background_llm.
     async def _run_bg(user_id, *, purpose="title", runner):
         from agentcore.billing.gate import BackgroundLlmResult
@@ -306,10 +325,6 @@ def _patch_persistence(
     # Keep local_turn import path stable for any residual patches.
     monkeypatch.setattr(local_turn_mod, "get_cloud_store", cloud_mod.get_cloud_store)
     monkeypatch.setattr(local_turn_mod, "_release_local_turn_lease", AsyncMock())
-    monkeypatch.setattr(
-        "agentcore.runtime.kickoff.stage_card.emit_stage_card_for_motion",
-        AsyncMock(return_value=None),
-    )
     return consolidation_calls
 
 
@@ -349,6 +364,7 @@ async def test_record_local_turn_persists_messages_and_journal(monkeypatch):
     assert result["title"] == "本地回合标题"
     usage = next(e for e in events if e[0] == "usage")
     assert usage[2]["status"] == "complete"
+    assert ("orphan_hot", "assistant-id", "c1") in events
 
 
 async def test_record_local_turn_persists_agent_mentions(monkeypatch):
@@ -462,13 +478,8 @@ async def test_record_local_turn_empty_reply_skips_assistant_and_journal(monkeyp
         trace_id=_TRACE,
     )
 
-    assert ("msg", "user", "c1") in events
-    assert not any(e[0] == "upsert" for e in events)
-    assert not any(e[0] == "journal" for e in events)
-    assert not any(e[0] == "title" for e in events)  # no title mint
-    assert result["assistant_message_id"] is None
-    assert result["noop"] is True
-    assert result["title"] == "已有标题"  # echo existing title (D7 merge response)
+    _assert_zero_output_skipped(result, events)
+    assert result["user_message_id"] == _USER_MSG_ID
 
 
 async def test_record_local_turn_paused_then_empty_final_settles(monkeypatch):
@@ -534,8 +545,8 @@ async def test_record_local_turn_running_then_empty_final_settles(monkeypatch):
     assert result["noop"] is False
 
 
-async def test_record_local_turn_empty_with_journal_settles(monkeypatch):
-    """Empty bubble + journal process state must settle (align cloud live)."""
+async def test_record_local_turn_empty_with_journal_skips_this_send(monkeypatch):
+    """run_started journal is not a visible reply — this-send empty still rolls back."""
     events: list = []
     _patch_persistence(monkeypatch, events, existing_title="已有标题")
 
@@ -554,14 +565,11 @@ async def test_record_local_turn_empty_with_journal_settles(monkeypatch):
         finish_reason="end_turn",
     )
 
-    assert ("upsert", "assistant", "c1") in events
-    assert any(e[0] == "journal" for e in events)
-    assert result["assistant_message_id"] == "assistant-id"
-    assert result["noop"] is False
+    _assert_zero_output_skipped(result, events)
 
 
-async def test_record_local_turn_empty_with_runs_settles(monkeypatch):
-    """Empty bubble + runs display payload must settle assistant + journal."""
+async def test_record_local_turn_empty_with_runs_skips_this_send(monkeypatch):
+    """runs display payload without tools/thinking does not keep an empty this-send."""
     events: list = []
     _patch_persistence(monkeypatch, events, existing_title="已有标题")
 
@@ -581,13 +589,11 @@ async def test_record_local_turn_empty_with_runs_settles(monkeypatch):
         finish_reason="end_turn",
     )
 
-    assert ("upsert", "assistant", "c1") in events
-    assert result["assistant_message_id"] == "assistant-id"
-    assert result["noop"] is False
+    _assert_zero_output_skipped(result, events)
 
 
-async def test_record_local_turn_empty_error_settles_assistant(monkeypatch):
-    """Empty ERROR still upserts failed + error_code; content stays empty."""
+async def test_record_local_turn_empty_error_skips_this_send(monkeypatch):
+    """Empty ERROR is still screen-empty — this-send rolls back (error_code does not gate)."""
     from agentcore.core.error_codes import ErrorCode
 
     events: list = []
@@ -609,22 +615,7 @@ async def test_record_local_turn_empty_error_settles_assistant(monkeypatch):
         finish_reason="error",
     )
 
-    assert ("upsert", "assistant", "c1") in events
-    usage = next(e for e in events if e[0] == "usage")
-    assert usage[2]["status"] == "failed"
-    assert usage[2]["error_code"] == ErrorCode.LLM_TIMEOUT
-    assert usage[2]["error"] == {"code": ErrorCode.LLM_TIMEOUT, "message": "超时"}
-    content = next(e for e in events if e[0] == "content")
-    assert content[2] == ""
-    assert result["assistant_message_id"] == "assistant-id"
-    assert result["noop"] is False
-    metrics = next(e[1] for e in events if e[0] == "metrics")
-    assert metrics["status"] == "error"
-    assert metrics["finish_reason"] == "error"
-    assert metrics["error"] == "超时"
-    assert metrics["error_code"] == ErrorCode.LLM_TIMEOUT
-    assert metrics["input_tokens"] == 0
-    assert metrics["output_tokens"] == 0
+    _assert_zero_output_skipped(result, events)
 
 
 async def test_record_local_turn_metrics_codes_from_journal(monkeypatch):
@@ -795,6 +786,7 @@ async def test_record_local_turn_paused_skips_title_and_consolidation(monkeypatc
     assert not any(e[0] == "title" for e in events)
     assert consolidation == []
     assert result["title"] is None
+    assert not any(e[0] == "orphan_hot" for e in events)
 
 
 async def test_record_local_turn_paused_persists_in_flight_journal(monkeypatch):
@@ -1701,7 +1693,7 @@ async def test_record_local_turn_hardkill_harvest_empty_cancelled_gets_honesty(
     monkeypatch,
 ):
     """b94eb9ad shape: harvest user prefix, no origin, empty cancelled → honesty note."""
-    from agentcore.runtime.turn.interrupt import INTERRUPTED_EMPTY_USER_VISIBLE
+    from agentcore.runtime.turn.interrupt import HARVEST_YIELD_EMPTY_USER_VISIBLE
 
     events: list = []
     _patch_persistence(monkeypatch, events, existing_title="已有标题")
@@ -1720,7 +1712,7 @@ async def test_record_local_turn_hardkill_harvest_empty_cancelled_gets_honesty(
 
     assert result["assistant_message_id"] == "assistant-id"
     content = next(e for e in events if e[0] == "content")
-    assert content[2] == INTERRUPTED_EMPTY_USER_VISIBLE
+    assert content[2] == HARVEST_YIELD_EMPTY_USER_VISIBLE
     usage = next(e for e in events if e[0] == "usage")
     assert usage[2]["status"] == "incomplete"
     assert usage[2]["incomplete"] is True
@@ -1779,12 +1771,12 @@ async def test_record_local_turn_harvest_origin_keeps_salvage_sentence(monkeypat
     assert content[2] == INTERRUPTED_EMPTY_USER_VISIBLE
 
 
-async def test_record_local_turn_ordinary_empty_cancelled_stays_empty(monkeypatch):
-    """Ordinary startTurn empty cancelled stays empty (client synthesizes)."""
+async def test_record_local_turn_ordinary_empty_cancelled_skips_this_send(monkeypatch):
+    """Ordinary startTurn empty cancelled rolls back (client already还稿)."""
     events: list = []
     _patch_persistence(monkeypatch, events, existing_title="已有标题")
 
-    await record_local_turn(
+    result = await record_local_turn(
         conversation_id="c1",
         user_id="u1",
         user_message="hi",
@@ -1795,8 +1787,23 @@ async def test_record_local_turn_ordinary_empty_cancelled_stays_empty(monkeypatc
         finish_reason=FinishReason.CANCELLED.value,
     )
 
-    content = next(e for e in events if e[0] == "content")
-    assert content[2] == ""
-    usage = next(e for e in events if e[0] == "usage")
-    assert usage[2]["status"] == "incomplete"
-    assert usage[2]["finish_reason"] == "cancelled"
+    _assert_zero_output_skipped(result, events)
+
+
+async def test_record_local_turn_interrupted_empty_skips_this_send(monkeypatch):
+    """This-send empty interrupt rolls back; found-dead salvage is not this-send."""
+    events: list = []
+    _patch_persistence(monkeypatch, events, existing_title="已有标题")
+
+    result = await record_local_turn(
+        conversation_id="c-interrupted",
+        user_id="u1",
+        user_message="hi",
+        assistant_content="",
+        user_message_id=_USER_MSG_ID,
+        message_id="m-interrupted",
+        trace_id=_TRACE,
+        finish_reason=FinishReason.INTERRUPTED.value,
+    )
+
+    _assert_zero_output_skipped(result, events)

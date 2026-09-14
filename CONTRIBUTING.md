@@ -44,7 +44,7 @@ cd apps/server && uv sync
 
 1. 改动聚焦；小 PR + 说清要解决的问题。
 2. `apps/server` 行为变更请补或更新测试。
-3. 不要提交密钥、本地 `.env` / `.env.local`、`data/`，或临时 `tmp_*` / `_tmp_*` / `.tmp_*` / `reviews/` 等草稿。
+3. 不要提交密钥、本地 `.env` / `.env.local`、仓根 `/data/`，或临时 `tmp_*` / `_tmp_*` / `.tmp_*` / `reviews/` 等草稿。
 4. `docs/06-规划/`、`reviews/` 已在 `.gitignore`；勿强行 `git add -f`。规划草案与审查草稿仅维护者本地。
 5. 风格与现有代码一致；提交前跑下面的检查。
 

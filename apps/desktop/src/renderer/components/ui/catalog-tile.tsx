@@ -35,6 +35,7 @@ export interface CatalogTileProps {
 /**
  * Catalog shelf tile: identity row, two-line description, optional tags.
  * Toolbox hub, skill store, and tool cards share this shell.
+ * The description slot always occupies two lines, even when copy is empty.
  *
  * Slots: icon+title(+subtitle) | accessory → description → children → tags → footer.
  * Do not put classification chips in accessory, or status in tags.
@@ -94,16 +95,16 @@ export function CatalogTile({
           ) : null}
         </div>
       </div>
-      {description ? (
-        <p
-          className={cn(
-            "text-xs text-muted-foreground",
-            descriptionClamp && "line-clamp-2",
-          )}
-        >
-          {description}
-        </p>
-      ) : null}
+      <p
+        data-slot="description"
+        className={cn(
+          "min-h-[2lh] text-xs text-muted-foreground",
+          descriptionClamp && "line-clamp-2",
+        )}
+        aria-hidden={description ? undefined : true}
+      >
+        {description}
+      </p>
       {children ? (
         <div className="flex min-h-0 min-w-0 flex-col">{children}</div>
       ) : null}

@@ -65,6 +65,7 @@ class RememberTool:
         surface=ToolSurface.CEO_ORCHESTRATION,
         audience=AUDIENCE_CEO_ONLY,
         ceo_wire=CeoWire.MEMORY,
+        catalog_summary="记下用户的长期规矩",
     )
 
     # The conversation's folder (None for a bare chat). A ``scope='folder'`` directive routes

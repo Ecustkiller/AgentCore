@@ -1273,6 +1273,7 @@ async def test_sibling_verify_inflight_coalesce(monkeypatch: pytest.MonkeyPatch)
     from agentcore.runtime.coordination.session import (
         CoordinationSession,
         clear_active_coordination,
+        invalidate_verify_cache_for_execution,
         set_active_coordination,
     )
 
@@ -1379,6 +1380,7 @@ async def test_sibling_verify_inflight_coalesce(monkeypatch: pytest.MonkeyPatch)
                 agent_id="w1",
                 backend=backend,  # type: ignore[arg-type]
                 user_id="u",
+                on_file_landed=invalidate_verify_cache_for_execution,
             ),
             "src/app.ts",
             kind="skeleton",

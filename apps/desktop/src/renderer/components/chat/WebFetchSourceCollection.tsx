@@ -4,7 +4,11 @@ import { useStreamAwareDisclosure } from "@/stores/disclosure";
 import type { Citation, ProcessStep, WebFetchDisplay } from "@/types/events";
 import { ChevronDown, ChevronRight, Globe } from "lucide-react";
 import { Favicon } from "./Favicon";
-import { ThinkingDots } from "./message-bubble/Thinking";
+import {
+  LiveFlow,
+  LiveFlowDots,
+  LiveFlowText,
+} from "./message-bubble/LiveFlow";
 import { toolGroupFaultLabel } from "./toolResult/toolFaultFace";
 
 type ToolStep = Extract<ProcessStep, { kind: "tool" }>;
@@ -68,34 +72,35 @@ export function WebFetchSourceCollection({
 
   return (
     <div>
-      <Button
-        variant="ghost"
-        onClick={toggleExpanded}
-        aria-expanded={expanded}
-        className="mb-1.5 h-auto w-full justify-start gap-1.5 px-0 py-0 text-sm text-muted-foreground hover:bg-transparent hover:text-foreground"
-      >
-        <span className="flex items-center gap-1.5">
-          {running ? (
-            <ThinkingDots />
-          ) : (
+      <LiveFlow active={running} className="mb-1.5 w-full">
+        <Button
+          variant="ghost"
+          onClick={toggleExpanded}
+          aria-expanded={expanded}
+          className="h-auto w-full justify-start gap-1.5 px-0 py-0 text-sm text-muted-foreground hover:bg-transparent hover:text-foreground"
+        >
+          <span className="flex items-center gap-1.5">
             <Globe size={14} className="shrink-0" />
-          )}
-          <span className="min-w-0 truncate text-left">{title}</span>
-          {groupFault && (
-            <span
-              data-testid="tool-group-fault"
-              className="shrink-0 text-xs text-muted-foreground/70"
-            >
-              {groupFault}
-            </span>
-          )}
-          {expanded ? (
-            <ChevronDown size={14} className="shrink-0" />
-          ) : (
-            <ChevronRight size={14} className="shrink-0" />
-          )}
-        </span>
-      </Button>
+            {running && <LiveFlowDots active />}
+            <LiveFlowText className="min-w-0 truncate text-left">
+              {title}
+            </LiveFlowText>
+            {groupFault && (
+              <span
+                data-testid="tool-group-fault"
+                className="shrink-0 text-xs text-muted-foreground/70"
+              >
+                {groupFault}
+              </span>
+            )}
+            {expanded ? (
+              <ChevronDown size={14} className="shrink-0" />
+            ) : (
+              <ChevronRight size={14} className="shrink-0" />
+            )}
+          </span>
+        </Button>
+      </LiveFlow>
 
       {expanded && (
         <div className="flex max-h-96 flex-col gap-1.5 overflow-y-auto pr-1">

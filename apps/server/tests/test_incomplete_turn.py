@@ -8,7 +8,7 @@ work as one "incomplete" assistant message instead. These cover:
   defers to ``POST .../resume`` rather than double-handling the turn);
 - ``salvage_incomplete_turn`` — the spawn decision (gate / empty journal / durable
   pause deferral vs. fire);
-- ``persist_incomplete_turn`` — the persisted message shape (cancelled flag, journal,
+- ``persist_incomplete_turn`` — the persisted message shape (interrupted flag, journal,
   no ledger).
 """
 
@@ -227,7 +227,7 @@ async def test_persist_incomplete_writes_cancelled_message(monkeypatch):
     assert "runs" not in updated
     assert updated["metadata"]["status"] == turn_persistence.MESSAGE_STATUS_INCOMPLETE
     assert updated["metadata"]["incomplete"] is True
-    assert updated["metadata"]["finish_reason"] == FinishReason.CANCELLED.value
+    assert updated["metadata"]["finish_reason"] == FinishReason.INTERRUPTED.value
     assert updated["message_id"] == "m1"
     assert updated["trace_id"] == "trace"
     # The cancelled turn's finished team work is recorded to the journal.
@@ -235,7 +235,7 @@ async def test_persist_incomplete_writes_cancelled_message(monkeypatch):
     display_entries = [e for e in journaled["entries"] if e["kind"] != "turn_end"]
     assert [e["kind"] for e in display_entries] == ["run_plan", "run_completed"]
     turn_end = next(e for e in journaled["entries"] if e["kind"] == "turn_end")
-    assert turn_end["payload"]["finish_reason"] == FinishReason.CANCELLED.value
+    assert turn_end["payload"]["finish_reason"] == FinishReason.INTERRUPTED.value
 
 
 async def test_persist_incomplete_keeps_streamed_reply(monkeypatch):
@@ -295,7 +295,7 @@ async def test_persist_incomplete_keeps_streamed_reply(monkeypatch):
     assert "这是我已经写了一半的分析" in updated["content"]
     assert updated["metadata"]["status"] == turn_persistence.MESSAGE_STATUS_INCOMPLETE
     assert updated["metadata"]["incomplete"] is True
-    assert updated["metadata"]["finish_reason"] == FinishReason.CANCELLED.value
+    assert updated["metadata"]["finish_reason"] == FinishReason.INTERRUPTED.value
 
 
 async def test_persist_incomplete_swallows_db_errors(monkeypatch):

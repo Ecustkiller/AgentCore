@@ -1,6 +1,6 @@
 [project]
 name = "agentcore"
-version = "0.7.19"
+version = "0.7.20"
 description = "AgentCore - Multi-Agent AI Workspace Backend"
 requires-python = ">=3.12"
 dependencies = [
@@ -260,7 +260,6 @@ module = [
     "agentcore.core.net",
     "agentcore.db.repositories.agent_audit",
     "agentcore.db.repositories.billing",
-    "agentcore.db.repositories.bookmarks",
     "agentcore.db.repositories.conversation_shares",
     "agentcore.db.repositories.conversations",
     "agentcore.db.repositories.devices",
@@ -315,13 +314,11 @@ module = [
     "agentcore.runtime.engine.tool_clear",
     "agentcore.runtime.engine.tool_exec",
     "agentcore.runtime.events.attach_replay",
-    "agentcore.runtime.kickoff.stage_card",
     "agentcore.runtime.leases.repo",
     "agentcore.runtime.pipeline.assemble",
     "agentcore.runtime.pipeline.prepare",
     "agentcore.runtime.pipeline.resume.pipeline",
     "agentcore.runtime.pipeline.run",
-    "agentcore.runtime.pipeline.stage_card_debate",
     "agentcore.runtime.resolve.prepare",
     "agentcore.runtime.runs.executor.captain",
     "agentcore.runtime.runs.executor.node",

@@ -11,6 +11,27 @@ type Schemas = components["schemas"];
  */
 export const INTERACTION_RESOLVE_TIMEOUT_MS = 15_000;
 
+/** Sidecar origin but no in-process waiter — settle locally as orphaned, never cloud. */
+export const SIDECAR_SETTLE_UNAVAILABLE = "sidecar_settle_unavailable";
+
+export class SidecarSettleUnavailableError extends Error {
+  readonly code = SIDECAR_SETTLE_UNAVAILABLE;
+  constructor() {
+    super("本地交互已失效");
+    this.name = "SidecarSettleUnavailableError";
+  }
+}
+
+export function isSidecarSettleUnavailableError(
+  err: unknown,
+): err is SidecarSettleUnavailableError {
+  return (
+    err instanceof SidecarSettleUnavailableError ||
+    (err instanceof Error &&
+      (err as { code?: string }).code === SIDECAR_SETTLE_UNAVAILABLE)
+  );
+}
+
 /**
  * Where the paused interaction awaits settle.
  *
@@ -64,7 +85,7 @@ export async function resolveInteraction(
   if (origin === "sidecar") {
     const sidecarTarget = getActiveSidecarTarget(conversationId);
     if (!sidecarTarget) {
-      throw new Error("本地回合未激活，无法结算交互");
+      throw new SidecarSettleUnavailableError();
     }
     const reply = await window.sidecarApi.respond({
       rootId: sidecarTarget.rootId,

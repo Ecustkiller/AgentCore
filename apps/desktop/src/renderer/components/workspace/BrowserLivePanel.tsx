@@ -85,7 +85,6 @@ function placeholderFor(
       Icon: MonitorOff,
       tone: "muted",
       title: "直播已结束",
-      hint: "浏览器会话已关闭",
     };
   }
   if (connection === "reconnecting") {

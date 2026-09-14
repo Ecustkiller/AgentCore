@@ -25,10 +25,6 @@ class UpdateBoardRequest(BaseModel):
 class BoardSummary(BaseModel):
     id: str
     title: str
-    # The board's dedicated AI conversation, or None until first AI use (AI协作白板.md §三 A).
-    # The canvas reads it to know whether an AI thread already exists; it calls the bind
-    # endpoint to mint one on demand.
-    conversation_id: str | None = None
     version: int
     created_at: datetime
     updated_at: datetime
@@ -56,9 +52,3 @@ class BoardWriteResult(BaseModel):
     # The live board, populated only on conflict so the client can reconcile without a
     # second round trip (the scene it tried to clobber over).
     board: BoardDetail | None = None
-
-
-class BoardConversationResponse(BaseModel):
-    """The board's dedicated AI conversation id (existing or just-created)."""
-
-    conversation_id: str

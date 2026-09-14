@@ -5,6 +5,7 @@ out/
 # Generated at build time
 src/lib/download.generated.ts
 
-# 自检截图（scripts/shot-*.mjs 产物）
+# 自检截图（.shots + shoot 矩阵产物，不入仓）
 .shots/
 shoot-out/
+_*.png

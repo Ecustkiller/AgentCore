@@ -21,6 +21,7 @@ import {
   shouldHydrateLocalRecovery,
 } from "@/services/resume";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
+import { restoreWritingFromOccupancy } from "@/stores/conversation/turnPhaseActions";
 import { syncConversationFollow } from "./conversationFollow";
 import { projectPausedRuns } from "./projectPausedRuns";
 import { projectUnsyncedTurns } from "./projectUnsynced";
@@ -122,9 +123,10 @@ export async function runHydrateAttachSettle(
       if (recovery.pausedCount > 0) {
         projectPausedRuns(conversationId, recovery.pausedRuns ?? {});
       }
-      // After unsynced project: seal any blank open/ghost assistants as「已中断」.
+      // After unsynced project: stop spinning on blank open assistants.
       settleOrphanEmptyAssistants(conversationId);
       if (occupyUntilAttach) {
+        restoreWritingFromOccupancy(conversationId);
         // 切会话不卸观察泵 — 无页级 signal。
         let notifyReplayReady = (): void => {};
         const replayReady = new Promise<void>((resolve) => {

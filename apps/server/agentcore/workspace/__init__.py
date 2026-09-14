@@ -25,6 +25,9 @@ from agentcore.workspace.protocol import (
     WorkspaceBackend,
     WorkspaceError,
     WorkspaceIOError,
+    WorkspaceLivenessTimeout,
+    WorkspacePresenceDisconnected,
+    WorkspaceReconnect,
 )
 from agentcore.workspace.server import ServerWorkspace
 
@@ -43,6 +46,9 @@ __all__ = [
     "NoMatch",
     "AmbiguousMatch",
     "WorkspaceIOError",
+    "WorkspaceLivenessTimeout",
+    "WorkspacePresenceDisconnected",
+    "WorkspaceReconnect",
     "DirEntry",
     "GrepHit",
     "GrepQuery",

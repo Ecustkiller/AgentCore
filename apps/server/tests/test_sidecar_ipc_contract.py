@@ -56,6 +56,7 @@ def test_resume_rpc_contract_documents_python_consumer_keys():
         "inference",
         "foldersAuth",
         "accountAuth",
+        "workspacesAuth",
         "browserBridge",
         "permissionAxes",
         "userId",

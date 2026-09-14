@@ -7,7 +7,12 @@ import type { InteractionSettleOrigin } from "@/services/interaction";
 import { resolveConversationLocalTarget } from "@/services/sidecarRouting";
 import { useWorkspaceChannelStore } from "@/stores/workspaceChannel";
 import type { WorkspaceOpRequiredPayload } from "@/types/events";
-import type { WorkspaceOpName, WorkspaceOpResult } from "@shared/ipc-contract";
+import {
+  WORKSPACE_LIVENESS_TIMEOUT_KIND,
+  WORKSPACE_RECONNECT_KIND,
+  type WorkspaceOpName,
+  type WorkspaceOpResult,
+} from "@shared/ipc-contract";
 
 /** 后台进程 op：通道注入 conversation_id（公开工具 schema 不含此字段）。 */
 const PROCESS_OPS = new Set<string>([
@@ -299,7 +304,7 @@ async function runLocalOp(
         ? String(cancelSignal.reason ?? "")
         : "";
       if (abortReason === "reconnect") {
-        return ioError(WORKSPACE_RECONNECT_DETAIL);
+        return ioError(WORKSPACE_RECONNECT_DETAIL, WORKSPACE_RECONNECT_KIND);
       }
       if (abortReason === "cancel") {
         return ioError("已取消");
@@ -307,7 +312,10 @@ async function runLocalOp(
       if (!NON_FILE_CHANNEL_OPS.has(payload.op)) {
         useWorkspaceChannelStore.getState().markNotReady();
       }
-      return ioError("本地工作区 op 活性挂起（已按服务端 deadline abort）");
+      return ioError(
+        "本地工作区 op 活性挂起（已按服务端 deadline abort）",
+        WORKSPACE_LIVENESS_TIMEOUT_KIND,
+      );
     }
     logEvent("error", "workspace_op.ipc_end", {
       ...corr,
@@ -323,6 +331,6 @@ async function runLocalOp(
   }
 }
 
-function ioError(detail: string): WorkspaceOpResult {
-  return { ok: false, error: { kind: "WorkspaceIOError", detail } };
+function ioError(detail: string, kind = "WorkspaceIOError"): WorkspaceOpResult {
+  return { ok: false, error: { kind, detail } };
 }

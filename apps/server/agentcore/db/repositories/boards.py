@@ -43,23 +43,6 @@ class BoardRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_by_conversation_id(self, conversation_id: str, *, user_id: str) -> Board | None:
-        """The board bound to a conversation, if any (AI协作白板.md §三 A / M2 反查).
-
-        The run assembler calls this to decide whether a turn is a 白板会话 — if so it
-        wires ``board_ops`` + a :class:`BoardChannel` for that board. Owner-scoped (a
-        non-owner is treated as absent); ``user_id`` mandatory (SEC-002). Indexed on
-        ``conversation_id``.
-        """
-        result = await self._session.execute(
-            select(Board).where(
-                Board.conversation_id == conversation_id,
-                Board.deleted_at.is_(None),
-                Board.user_id == user_id,
-            )
-        )
-        return result.scalar_one_or_none()
-
     async def list_by_user(self, user_id: str) -> Sequence[Board]:
         """A user's live boards, most-recently-updated first (the「白板」list order)."""
         result = await self._session.execute(
@@ -114,23 +97,6 @@ class BoardRepository:
         await self._session.commit()
         await self._session.refresh(board)
         return board, False
-
-    async def attach_conversation(
-        self, board_id: str, *, user_id: str, conversation_id: str
-    ) -> Board | None:
-        """Bind a board to its dedicated AI conversation (AI协作白板.md §三 A / M2).
-
-        Called once, lazily, when the board first needs an AI thread. Idempotency is the
-        caller's job (it checks ``board.conversation_id`` first); this only writes the link.
-        Returns the refreshed board, or ``None`` if absent for this user.
-        """
-        board = await self.get_by_id(board_id, user_id=user_id)
-        if not board:
-            return None
-        board.conversation_id = conversation_id
-        await self._session.commit()
-        await self._session.refresh(board)
-        return board
 
     async def soft_delete(self, board_id: str, *, user_id: str) -> bool:
         board = await self.get_by_id(board_id, user_id=user_id)

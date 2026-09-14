@@ -52,14 +52,10 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# Schema layer (工具面瘦身): short trigger. HOW → staffing（晚绑定段）。
+# Schema layer: short trigger. 字段 HOW 在让出简报与参数，不指空 consult。
 _REPLAN_DESCRIPTION = (
     "在 delegate 让出『计划已让出』后续跑同一计划（非终结）。"
-    "binds=定稿让出简报里的待定稿步；手写未定下游用 add；steers=操舵未跑步；"
-    "add=追加新步；stop=true 收口。"
-    "协调中追加全新角色/任务队员请再调 delegate（自动并入当前图），勿等本工具；"
-    "本工具 add=… 留给波边界让出之后。"
-    "细节见 consult(staffing)。"
+    "协调中加新角色用 delegate，勿等本工具。"
 )
 
 _REPLAN_PARAMETERS = {
@@ -158,6 +154,7 @@ class ReplanTool:
         surface=ToolSurface.CEO_ORCHESTRATION,
         audience=AUDIENCE_CEO_ONLY,
         ceo_wire=CeoWire.COORDINATION,
+        catalog_summary="调整已派出的计划",
     )
 
     def __init__(self, *, delegate: DelegateTool) -> None:

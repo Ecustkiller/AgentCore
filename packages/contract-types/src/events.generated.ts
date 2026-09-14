@@ -1488,45 +1488,6 @@ export interface WorkspaceOpRequiredPayload {
   timeout_ms?: number;
 }
 
-/** One structured whiteboard op (AI协作白板 M2). The closed verb set is shared with
- * the server tool + the desktop applier; fields beyond `op` are op-specific. */
-export interface BoardOp {
-  op: "add_node" | "connect" | "move" | "set_text" | "delete" | "group";
-  ref?: string;
-  id?: string;
-  kind?: "sticky" | "rectangle" | "ellipse" | "diamond" | "text";
-  text?: string;
-  x?: number;
-  y?: number;
-  width?: number;
-  height?: number;
-  color?: string;
-  from?: string;
-  to?: string;
-  label?: string;
-  members?: string[];
-}
-
-/** Transport-only client-tool request: apply a batch of board ops to the open
- * whiteboard canvas (`board_id`). The board counterpart of `workspace_op_required`;
- * NOT journaled. */
-export interface BoardOpRequiredPayload {
-  request_id: string;
-  conversation_id: string;
-  board_id: string;
-  ops: BoardOp[];
-  summary: string;
-}
-
-/** Transport-only client-tool request: rasterize board elements (`ids`) to a PNG and
- * POST it back so the vision reader can read it. NOT journaled. */
-export interface BoardReadRequiredPayload {
-  request_id: string;
-  conversation_id: string;
-  board_id: string;
-  ids: string[];
-}
-
 /** Transport-only client-tool request: mount a local directory for file tools.
  * Path transport exception — may carry `path` / `well_known`+`target_name` for
  * desktop resolve; success result must not include abs. ``mode`` is omitted
@@ -1678,8 +1639,6 @@ export type SSEPayloadMap = {
   citations: CitationsPayload;
   evidence_ledger: EvidenceLedgerPayload;
   workspace_op_required: WorkspaceOpRequiredPayload;
-  board_op_required: BoardOpRequiredPayload;
-  board_read_required: BoardReadRequiredPayload;
   external_mount_required: ExternalMountRequiredPayload;
   host_op_required: HostOpRequiredPayload;
   mcp_op_required: McpOpRequiredPayload;

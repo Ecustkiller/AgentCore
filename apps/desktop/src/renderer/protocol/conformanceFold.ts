@@ -1,7 +1,6 @@
 // Desktop's fold → ProjectedTurn snapshot adapter for the cross-platform protocol
 // 巡检 (前端技术与架构 §十 SSE 与协议一致性; protocol-conformance.mdc). The conformance test asserts
-// this == the backend-exported golden, the SAME golden the mobile fold is pinned to —
-// so desktop and mobile can't diverge on the protocol without the gate going red.
+// this == the backend-exported golden. Production fold is desktop-only.
 //
 // AUTHENTICITY: the team-graph projection reuses desktop's REAL pure fold
 // (`projectExecution` + `planFromRunPlan` + `frameFromEvent` from stores/execution.ts)
@@ -459,8 +458,6 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       // enumerated so assertNever stays exhaustive against @agentcore/contract-types.
       case "turn_saved":
       case "title_generated":
-      case "board_op_required":
-      case "board_read_required":
       case "external_mount_required":
       case "host_op_required":
       case "mcp_op_required":

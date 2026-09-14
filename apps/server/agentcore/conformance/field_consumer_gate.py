@@ -16,7 +16,7 @@ Hits are token-level after string-aware comment stripping, so these reads count:
 * whole-payload store later read as ``p.x`` elsewhere in the scan surface
 * ``INTERACTION_KIND_WIRE.idField`` values (dynamic ``payload[wire.idField]``)
 
-Scan surface: desktop / mobile / admin ``src``,
+Scan surface: desktop / admin ``src``,
 ``protocol-fold-kit/src``. Tests and JSON fixtures are excluded.
 
 Stock unread names are grouped in ``field_consumer_baseline.py``. The gate only
@@ -41,7 +41,6 @@ _IDFIELD_REL: Final = "packages/contract-types/src/interactionKinds.generated.ts
 
 _SCAN_ROOTS: Final[tuple[str, ...]] = (
     "apps/desktop/src",
-    "apps/mobile/src",
     "apps/admin/src",
     "packages/protocol-fold-kit/src",
 )
@@ -71,7 +70,7 @@ _IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _QUOTED_RE = re.compile(r"""(?<!\\)(["'])(?:\\.|(?!\1).)*\1""")
 
 _WORKFLOW_HINT = (
-    "  Next: read this leaf in desktop/mobile/admin/fold-kit production code, "
+    "  Next: read this leaf in desktop/admin/fold-kit production code, "
     "or add a baseline group with a factual reason in "
     "agentcore/conformance/field_consumer_baseline.py. "
     "Do not delete the contract field without a human decision."

@@ -108,7 +108,7 @@ def _patch_stream_chat_deps(monkeypatch, *, backend, run_and_persist):
     monkeypatch.setattr(turns_mod, "async_session_factory", lambda: _FakeSessionCM())
     monkeypatch.setattr(turns_mod, "ConversationRepository", _ConvRepo)
     monkeypatch.setattr(turns_mod, "MessageRepository", _MsgRepo)
-    monkeypatch.setattr(turns_mod, "BoardRepository", _BoardRepo)
+    monkeypatch.setattr(turns_mod, "TableRepository", _BoardRepo)
     monkeypatch.setattr(
         "agentcore.conversation.midflight_persist.MessageRepository",
         _MsgRepo,

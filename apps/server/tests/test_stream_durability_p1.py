@@ -48,7 +48,7 @@ async def test_checkpointer_flushes_on_byte_threshold(monkeypatch):
             flushed.append(list(segments))
 
     monkeypatch.setattr(
-        "agentcore.conversation.store.get_conversation_store",
+        "agentcore.runtime.conversation_store.get_conversation_store",
         lambda: _Store(),
     )
     ck = StreamCheckpointer(turn_id="t1")
@@ -71,7 +71,7 @@ async def test_checkpointer_boundary_flush_on_tool_use_start(monkeypatch):
             flushed.append(list(segments))
 
     monkeypatch.setattr(
-        "agentcore.conversation.store.get_conversation_store",
+        "agentcore.runtime.conversation_store.get_conversation_store",
         lambda: _Store(),
     )
     ck = StreamCheckpointer(turn_id="t1")
@@ -90,7 +90,7 @@ async def test_checkpointer_generation_bump_on_content_reset(monkeypatch):
             flushed.append(list(segments))
 
     monkeypatch.setattr(
-        "agentcore.conversation.store.get_conversation_store",
+        "agentcore.runtime.conversation_store.get_conversation_store",
         lambda: _Store(),
     )
     ck = StreamCheckpointer(turn_id="t1")
@@ -109,7 +109,7 @@ async def test_checkpointer_worker_per_run_accumulators(monkeypatch):
             pass
 
     monkeypatch.setattr(
-        "agentcore.conversation.store.get_conversation_store",
+        "agentcore.runtime.conversation_store.get_conversation_store",
         lambda: _Store(),
     )
     ck = StreamCheckpointer(turn_id="t1")
@@ -382,7 +382,7 @@ async def test_event_sink_observes_deltas_into_checkpointer(monkeypatch):
             pass
 
     monkeypatch.setattr(
-        "agentcore.conversation.store.get_conversation_store",
+        "agentcore.runtime.conversation_store.get_conversation_store",
         lambda: _Store(),
     )
     sink = EventSink(conversation_id="c1", message_id="m1")

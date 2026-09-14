@@ -10,9 +10,9 @@
 
 从 ``apps/server``::
 
-    uv run python -m agentcore.evals --playbook-routing
-    uv run python -m agentcore.evals --playbook-routing --lint-only
-    uv run python -m agentcore.evals --playbook-routing --samples 5
+    uv run python -m agentcore.evals run routing
+    uv run python -m agentcore.evals lint --suite routing
+    uv run python -m agentcore.evals run routing --samples 5
         --keys audit_check_bugs_save_file
 
 花费量级（2026-08-20 手搓 9 场景 × 1 采样、economy / deepseek-v4-flash）：全套约
@@ -126,6 +126,8 @@ SCENARIOS: tuple[RoutingScenario, ...] = (
         expect_action="DELEGATE",
         user_message="请对当前工作区做一次代码审计，找出 bug，并把审计报告落盘。",
         workspace="codebase",
+        # 绑仓未点名入口：须派；禁老板连搜摸底。
+        expect_max_recon_rounds=1,
     ),
     RoutingScenario(
         key="greenfield_spa_build_app",
@@ -170,6 +172,7 @@ SCENARIOS: tuple[RoutingScenario, ...] = (
             "最后写一份检查报告存成文件给我。"
         ),
         workspace="codebase",
+        expect_max_recon_rounds=1,  # 绑仓未点名入口：须派；禁老板连搜摸底。
     ),
     RoutingScenario(
         key="audit_find_issues_workspace_doc",
@@ -182,6 +185,7 @@ SCENARIOS: tuple[RoutingScenario, ...] = (
             "整理成文档放到工作区里，我之后还要看。"
         ),
         workspace="codebase",
+        expect_max_recon_rounds=1,  # 绑仓未点名入口：须派；禁老板连搜摸底。
     ),
     RoutingScenario(
         key="app_todo_website_usable",
@@ -435,6 +439,52 @@ def parse_delegate_rich(args_json: str) -> dict[str, Any]:
     }
 
 
+# 手写 task 写成阅读顺序 / 改文件步骤的观察项（eval only，不卡门禁）。
+# 具名 playbook 展开文可能写「禁必读书单」，故只看手写 tasks。
+_TASK_HOWTO = re.compile(
+    r"先读|再读|按以下步骤|第\s*[0-9一二三四五六七八九十]+\s*步"
+)
+
+
+def observe_task_howto(
+    *,
+    action: str,
+    playbook: str | None,
+    tasks_preview: object,
+) -> dict[str, Any]:
+    """Handwritten ``task`` looks like a syllabus. Observation, not a gate."""
+    empty: dict[str, Any] = {
+        "flagged": False,
+        "hits": [],
+        "n_flagged": 0,
+        "skipped": None,
+    }
+    if action != "DELEGATE":
+        return {**empty, "skipped": "not_delegate"}
+    if playbook:
+        return {**empty, "skipped": "named_playbook"}
+    items = tasks_preview if isinstance(tasks_preview, list) else []
+    hits: list[str] = []
+    n_flagged = 0
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        found = _TASK_HOWTO.findall(str(item.get("task") or ""))
+        if not found:
+            continue
+        n_flagged += 1
+        for hit in found:
+            token = hit.strip()
+            if token and token not in hits:
+                hits.append(token)
+    return {
+        "flagged": n_flagged > 0,
+        "hits": hits,
+        "n_flagged": n_flagged,
+        "skipped": None,
+    }
+
+
 def json_loads_obj(text: str) -> Any:
     import json
 
@@ -613,7 +663,7 @@ def aggregate_samples(samples: Sequence[dict[str, Any]]) -> dict[str, Any]:
     playbooks: Counter[str] = Counter()
     intensities: Counter[str] = Counter()
     landings: Counter[str] = Counter()
-    delegated_n = card_n = expected_n = divergence_n = error_n = 0
+    delegated_n = card_n = expected_n = divergence_n = error_n = howto_n = 0
     for s in samples:
         if not s.get("ok"):
             error_n += 1
@@ -634,6 +684,8 @@ def aggregate_samples(samples: Sequence[dict[str, Any]]) -> dict[str, Any]:
             expected_n += 1
         if s.get("think_act_divergences"):
             divergence_n += 1
+        if (s.get("task_howto") or {}).get("flagged"):
+            howto_n += 1
     agg = {
         "n": n,
         "error_n": error_n,
@@ -641,10 +693,12 @@ def aggregate_samples(samples: Sequence[dict[str, Any]]) -> dict[str, Any]:
         "card_n": card_n,
         "expected_n": expected_n,
         "divergence_n": divergence_n,
+        "task_howto_n": howto_n,
         "delegated": f"{delegated_n}/{n}",
         "card_issued": f"{card_n}/{n}",
         "expected_playbook": f"{expected_n}/{n}",
         "think_act_divergence": f"{divergence_n}/{n}",
+        "task_howto": f"{howto_n}/{n}",
         "action_counts": dict(actions),
         "playbook_counts": dict(playbooks),
         "intensity_counts": dict(intensities),
@@ -805,6 +859,7 @@ def slim_baseline(report: dict[str, Any]) -> dict[str, Any]:
                         "card_issued",
                         "expected_playbook",
                         "think_act_divergence",
+                        "task_howto",
                         "action_counts",
                         "playbook_counts",
                         "intensity_counts",
@@ -848,6 +903,9 @@ def format_playbook_routing_report(report: dict[str, Any]) -> str:
         if acts:
             parts = [f"{k}={v}" for k, v in sorted(acts.items())]
             lines.append(f"      action: {', '.join(parts)}")
+        howto = agg.get("task_howto_n") or 0
+        if howto:
+            lines.append(f"      task_howto: {agg.get('task_howto')}（观察，不卡门禁）")
     diff = report.get("diff") or {}
     lines.append("-" * 64)
     if not diff.get("available"):

@@ -1,13 +1,16 @@
-"""Creation-tool 文档 CRUD + CAS body write + public share minting.
+"""Creation-tool 文档 CRUD + CAS body write + public publish.
 
 Docs hang on a cloud folder (协作桌成员看见同一份). Distinct from ``/v1/documents``
 (记忆 / 规则树). Outsiders 404; viewers read; owner/editor write. ``can_write``
-mints / lists / revokes frozen ``/shared/<id>`` snapshots (viewer 403).
+publishes / lists / revokes a stable ``/shared/<id>`` page (viewer 403). Republish
+overwrites the snapshot on the same URL; live draft does not auto-follow.
 """
 
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.api.dependencies import AuthUser, get_db, get_doc_repo, get_doc_share_repo
@@ -26,6 +29,7 @@ from agentcore.api.schemas import (
 from agentcore.core.errors import AuthorizationError, NotFoundError, ValidationError
 from agentcore.db.models import Doc, DocShare, Folder
 from agentcore.db.repositories import DocRepository, DocShareRepository
+from agentcore.doc.body import sanitize_body
 from agentcore.doc.share import freeze_share_snapshot
 from agentcore.folders.desk import DeskAccess, resolve_desk_access
 
@@ -54,7 +58,7 @@ def _summary(doc: Doc, folder_name: str, *, can_write: bool) -> DocSummary:
 def _detail(doc: Doc, folder_name: str, *, can_write: bool) -> DocDetail:
     return DocDetail(
         **_summary(doc, folder_name, can_write=can_write).model_dump(),
-        body=doc.body if isinstance(doc.body, dict) else {"schemaVersion": 1, "blocks": []},
+        body=sanitize_body(doc.body),
     )
 
 
@@ -200,25 +204,40 @@ async def delete_doc(
     return StatusResponse()
 
 
-@router.post("/{doc_id}/shares", response_model=ShareSummary, status_code=201)
-async def create_doc_share(
+@router.post("/{doc_id}/shares", response_model=ShareSummary)
+async def publish_doc_share(
     doc_id: str,
     user: AuthUser,
     body: CreateShareRequest | None = None,
     repo: DocRepository = Depends(get_doc_repo),
     share_repo: DocShareRepository = Depends(get_doc_share_repo),
 ):
+    """First publish mints a URL (201). Later POSTs update that snapshot (200)."""
     doc, access = await _load_visible(repo, doc_id=doc_id, user_id=user.user_id)
     if not access.can_write:
-        raise AuthorizationError("只读成员不能分享文档")
+        raise AuthorizationError("只读成员不能发布文档")
+    title = (doc.title or "").strip() or "未命名文档"
+    snapshot = freeze_share_snapshot(doc.body)
+    active = await share_repo.list_active_for_doc(doc.id)
+    if active:
+        share = await share_repo.republish(
+            active[0], title=title, snapshot=snapshot
+        )
+        return JSONResponse(
+            status_code=200,
+            content=jsonable_encoder(_share_summary(share)),
+        )
     share = await share_repo.create(
         doc_id=doc.id,
         user_id=user.user_id,
-        title=(doc.title or "").strip() or "未命名文档",
-        snapshot=freeze_share_snapshot(doc.body),
+        title=title,
+        snapshot=snapshot,
         expires_at=_expires_at_from_request(body),
     )
-    return _share_summary(share)
+    return JSONResponse(
+        status_code=201,
+        content=jsonable_encoder(_share_summary(share)),
+    )
 
 
 @router.get("/{doc_id}/shares", response_model=ShareListResponse)
@@ -230,7 +249,7 @@ async def list_doc_shares(
 ):
     doc, access = await _load_visible(repo, doc_id=doc_id, user_id=user.user_id)
     if not access.can_write:
-        raise AuthorizationError("只读成员不能管理分享")
+        raise AuthorizationError("只读成员不能管理发布")
     shares = await share_repo.list_active_for_doc(doc.id)
     data = [_share_summary(s) for s in shares]
     return ShareListResponse(data=data, total=len(data))
@@ -246,7 +265,7 @@ async def revoke_doc_share(
 ):
     _doc, access = await _load_visible(repo, doc_id=doc_id, user_id=user.user_id)
     if not access.can_write:
-        raise AuthorizationError("只读成员不能撤销分享")
+        raise AuthorizationError("只读成员不能撤销发布")
     revoked = await share_repo.revoke(share_id, doc_id=doc_id)
     if not revoked:
         raise NotFoundError("分享不存在")

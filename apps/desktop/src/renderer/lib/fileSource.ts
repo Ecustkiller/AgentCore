@@ -183,9 +183,12 @@ export interface FileSource {
 
   /**
    * 把工作区内 Markdown 导出为同目录同名 ``.docx``（调服务端确定性转换器）。
-   * 仅当源支持时存在（云端 REST / 本地经 convert + write_bytes）。失败抛异常。
+   * ``layout`` 默认 standard；official = 正式文书通例。仅当源支持时存在。失败抛异常。
    */
-  exportMdToDocx?(path: string): Promise<{ path: string; warnings: string[] }>;
+  exportMdToDocx?(
+    path: string,
+    layout?: "standard" | "official",
+  ): Promise<{ path: string; warnings: string[] }>;
 
   /**
    * 系统集成（桌面专属 → UI 据「方法是否存在」门控菜单，组件内不按源分支）。

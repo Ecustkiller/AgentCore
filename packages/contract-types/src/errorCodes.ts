@@ -80,10 +80,9 @@ export function isUnstartedSendRefusal(opts: {
 }
 
 /**
- * First-upstream capability / rate failures that may be treated as
- * 「发送当没发生」**only when** the assistant is empty, tokens are 0, and no
- * tools ran. Do **not** fold these into {@link UNSTARTED_SEND_REFUSAL_CODES} —
- * the same codes mid-turn (after content or tools) must stay a failed turn.
+ * Historical first-upstream empty-fail codes. Rollback is no longer gated on
+ * this list — any this-send that never started a visible reply rolls back.
+ * Kept so older docs / tests can name the original set.
  */
 export const ZERO_OUTPUT_SEND_REFUSAL_CODES: readonly ErrorCode[] = [
   "LLM_RATE_LIMIT",

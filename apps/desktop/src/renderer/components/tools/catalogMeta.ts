@@ -1,5 +1,6 @@
 import type { ToolApproval, ToolFace } from "@/services/capabilities";
 import {
+  FileText,
   FolderOpen,
   Folders,
   Globe,
@@ -8,6 +9,7 @@ import {
   Network,
   Presentation,
   Search,
+  Table2,
   Terminal,
 } from "lucide-react";
 
@@ -21,6 +23,8 @@ export const FACE_META: Record<ToolFace, { label: string; icon: LucideIcon }> =
     execution: { label: "执行", icon: Terminal },
     host_browser: { label: "本机 · 浏览器", icon: Monitor },
     board: { label: "白板", icon: Presentation },
+    table: { label: "表格", icon: Table2 },
+    doc: { label: "文档", icon: FileText },
     orchestration: { label: "编排", icon: Network },
   };
 
@@ -33,6 +37,8 @@ export const FACE_ORDER: ToolFace[] = [
   "execution",
   "host_browser",
   "board",
+  "table",
+  "doc",
   "orchestration",
 ];
 
@@ -54,4 +60,10 @@ export function availabilityLabel(availableTo: string[]): string {
   if (ceo && worker) return "全员";
   if (ceo) return "CEO";
   return "队员";
+}
+
+/** Shelf tags: skip the default 「全员」 so only exceptions show. */
+export function exceptionAudienceTags(availableTo: string[]): string[] {
+  const label = availabilityLabel(availableTo);
+  return label === "全员" ? [] : [label];
 }

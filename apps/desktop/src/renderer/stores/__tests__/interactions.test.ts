@@ -797,6 +797,97 @@ describe("hydrateInteractionsFromJournal (history replay)", () => {
       expect(messageCheckpoints("a", "m1")).toEqual([]);
     });
   });
+
+  describe("hot terminal close", () => {
+    it("orphans leftover approval when finish_reason is interrupted", () => {
+      hydrateInteractionsFromJournal(
+        "a",
+        "m1",
+        [
+          {
+            type: "approval_required",
+            payload: {
+              approval_id: "a1",
+              tool_call_id: "a1",
+              tool_name: "file_delete",
+              arguments: {},
+            },
+          },
+        ],
+        "interrupted",
+      );
+      expect(store().get("a1")?.status).toBe("orphaned");
+    });
+
+    it("orphans leftover approval from message_end in the journal", () => {
+      hydrateInteractionsFromJournal("a", "m1", [
+        {
+          type: "approval_required",
+          payload: {
+            approval_id: "a1",
+            tool_call_id: "a1",
+            tool_name: "file_delete",
+            arguments: {},
+          },
+        },
+        {
+          type: "message_end",
+          payload: { finish_reason: "interrupted" },
+        },
+      ]);
+      expect(store().get("a1")?.status).toBe("orphaned");
+    });
+
+    it("does not orphan a live approval when the turn has no finish", () => {
+      hydrateInteractionsFromJournal("a", "m1", [
+        {
+          type: "approval_required",
+          payload: {
+            approval_id: "a1",
+            tool_call_id: "a1",
+            tool_name: "file_delete",
+            arguments: {},
+          },
+        },
+      ]);
+      expect(store().get("a1")?.status).toBe("pending");
+    });
+
+    it("does not orphan ask_user on interrupted finish", () => {
+      hydrateInteractionsFromJournal(
+        "a",
+        "m1",
+        [
+          {
+            type: "checkpoint_required",
+            payload: { checkpoint_id: "cp1", question: "继续吗？" },
+          },
+        ],
+        "interrupted",
+      );
+      expect(store().get("cp1")?.status).toBe("pending");
+    });
+
+    it("does not orphan hot approval on paused finish", () => {
+      hydrateInteractionsFromJournal(
+        "a",
+        "m1",
+        [
+          {
+            type: "approval_required",
+            payload: {
+              approval_id: "a1",
+              tool_call_id: "a1",
+              tool_name: "file_delete",
+              arguments: {},
+            },
+          },
+        ],
+        "paused",
+      );
+      expect(store().get("a1")?.status).toBe("pending");
+    });
+  });
 });
 
 // silence unused vi in case of future mocks

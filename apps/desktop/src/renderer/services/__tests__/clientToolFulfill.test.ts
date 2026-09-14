@@ -12,6 +12,7 @@ vi.mock("@/services/streamConversation", () => ({
 }));
 
 import { ApiError, NetworkError } from "@/services/api";
+import { WORKSPACE_RECONNECT_KIND } from "@shared/ipc-contract";
 import {
   WORKSPACE_RECONNECT_DETAIL,
   abortClientToolRequest,
@@ -289,7 +290,10 @@ describe("fulfillClientToolOnce (request_id 在飞/成功去重)", () => {
       {
         kind: "client_tool",
         ok: false,
-        error: { kind: "WorkspaceIOError", detail: WORKSPACE_RECONNECT_DETAIL },
+        error: {
+          kind: WORKSPACE_RECONNECT_KIND,
+          detail: WORKSPACE_RECONNECT_DETAIL,
+        },
       },
       "cloud",
     );

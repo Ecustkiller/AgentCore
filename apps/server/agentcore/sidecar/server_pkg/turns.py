@@ -8,7 +8,10 @@ import re
 from typing import Any
 
 from agentcore.conversation.common import preview
-from agentcore.conversation.zero_output_rollback import maybe_discard_zero_output_outbox
+from agentcore.conversation.zero_output_rollback import (
+    maybe_discard_zero_output_outbox,
+    result_from_unstarted_close,
+)
 from agentcore.core.errors import ClientTooOldError, InferenceTokenExpiredError
 from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
@@ -21,7 +24,14 @@ from agentcore.runtime.journal import (
     attach_journal_error_type,
     runs_from_entries,
 )
+from agentcore.runtime.journal.pending_interactions import (
+    append_unrecorded_hot_orphan_facts,
+)
 from agentcore.runtime.suspension import TurnSuspension
+from agentcore.runtime.turn.interrupt import (
+    finish_reason_for,
+    normalize_interrupt_reason,
+)
 from agentcore.sidecar import protocol
 from agentcore.sidecar.server_pkg.result import trim_result
 
@@ -107,7 +117,7 @@ def normalize_local_subpath_param(raw: Any) -> str:
 
 def rpc_agent_mentions(params: dict[str, Any]) -> list[dict[str, Any]]:
     """startTurn ``agentMentions`` / ``agent_mentions`` → sanitized ``{agent_id, role}``."""
-    from agentcore.conversation.mentions import to_stored_agent_mentions
+    from agentcore.core.mentions import to_stored_agent_mentions
 
     raw = params.get("agentMentions")
     if raw is None:
@@ -121,6 +131,18 @@ def rpc_attachments(params: dict[str, Any]) -> list[dict[str, Any]]:
     if not isinstance(raw, list):
         return []
     return [dict(item) for item in raw if isinstance(item, dict)]
+
+
+def rpc_table_selection(params: dict[str, Any]) -> list[str]:
+    """startTurn / deliverMessage ``tableSelection`` → unique row ids (cap 40)."""
+    from agentcore.table.context import sanitize_table_selection
+
+    raw = params.get("tableSelection")
+    if raw is None:
+        raw = params.get("table_selection")
+    if not isinstance(raw, list):
+        return []
+    return sanitize_table_selection([str(item) for item in raw])
 
 
 def register_current_turn_run(
@@ -207,17 +229,42 @@ def _inference_search_creds(creds: Any):
 
 
 def _salvage_interrupt_reason() -> str:
-    """Map the sidecar cancel stamp onto interrupt-body silence vs honesty.
+    """Map the sidecar cancel stamp onto interrupt ownership.
 
-    Only an explicit ``user_stop`` stamp stays silent when nothing streamed.
-    Process / unspecified / abort cancels owe the user a sentence.
+    Only an explicit ``user_stop`` stamp is a user stop. Other cancels are
+    ``unknown`` — not ``lease_expired`` (the sweeper owns that name).
     """
     from agentcore.sidecar.server_pkg.cancel_mark import cancel_reason_from_task
 
-    raw = cancel_reason_from_task(asyncio.current_task())
+    try:
+        task = asyncio.current_task()
+    except RuntimeError:
+        task = None
+    raw = cancel_reason_from_task(task)
     if raw == "user_stop":
         return "user_stop"
-    return "lease_expired"
+    return "unknown"
+
+
+def _salvage_finish_reason() -> FinishReason:
+    return finish_reason_for(normalize_interrupt_reason(_salvage_interrupt_reason()))
+
+
+def _rpc_error_for_salvage_finish(
+    finish: FinishReason,
+) -> tuple[int, str, dict[str, Any] | None]:
+    """JSON-RPC receipt follows stop-reason ownership, not CancelledError itself.
+
+    Witnessed ``user_stop`` (finish cancelled) keeps ``TURN_CANCELLED``. Any other
+    salvage finish is ``TURN_INTERRUPTED`` — never guessed as ``process_kill``.
+    """
+    if finish is FinishReason.CANCELLED:
+        return protocol.TURN_CANCELLED, "turn cancelled", None
+    return (
+        protocol.TURN_INTERRUPTED,
+        "turn interrupted",
+        {"finish_reason": finish.value},
+    )
 
 
 def _emit_user_stop_message_end(sink: EventSink) -> None:
@@ -237,32 +284,74 @@ def _emit_cancel_end_if_cancelling(sink: EventSink) -> None:
     task = asyncio.current_task()
     if task is None or not task.cancelling():
         return
-    _emit_user_stop_message_end(sink)
+    if sink._closed:
+        return
+    with contextlib.suppress(Exception):
+        sink.emit(message_end(_salvage_finish_reason()))
+
+
+def _emit_hot_orphans_if_cancelling(sink: EventSink, conversation_id: str) -> None:
+    """Emit ``interaction_orphaned`` for leftover hot cards on cancel unwind.
+
+    Live UI also orphans via ``message_end`` → renderer ``clearInteractionPrompts``.
+    These facts still need to land in the sink journal so salvage write-back does
+    not leave a clickable ghost after reload. Registry Futures are not resolved
+    here — the cancelling task already interrupts the awaiter.
+    """
+    task = asyncio.current_task()
+    if task is None or not task.cancelling():
+        return
+    if sink._closed:
+        return
+    cid = (conversation_id or "").strip()
+    if not cid:
+        return
+    from agentcore.runtime.events import interaction_orphaned
+    from agentcore.runtime.interaction import (
+        default_interaction_registry,
+        is_hot_user_pending_kind,
+    )
+
+    registry = default_interaction_registry()
+    for req in list(registry.list_pending(cid)):
+        if not is_hot_user_pending_kind(req.kind.value, req.payload):
+            continue
+        with contextlib.suppress(Exception):
+            sink.emit(
+                interaction_orphaned(interaction_id=req.id, kind=req.kind.value)
+            )
 
 
 def _ensure_cancelled_turn_end(
     journal: list[dict[str, Any]] | None,
+    finish_reason: str | FinishReason | None = None,
 ) -> list[dict[str, Any]]:
-    """Sidecar salvage closer: append ``turn_end(cancelled)`` when the journal lacks one.
+    """Sidecar salvage closer: ``turn_end`` plus leftover hot-card orphan facts.
 
     Cloud persist already appends ``turn_end`` in the interrupt path; local outbox
     salvage does not go through ``CloudStore.finalize``, so resume/startTurn cancel
-    must close the journal here.
+    must close the journal here. Default cancelled keeps historical call sites.
+    Leftover hot cards get ``interaction_orphaned`` in the same salvage payload so
+    list GET / hydrate do not paint a clickable ghost.
     """
-    entries = list(journal or [])
-    if any((e.get("kind") or e.get("type") or "") == KIND_TURN_END for e in entries):
-        return entries
-    seqs = [e.get("seq") for e in entries if isinstance(e.get("seq"), int)]
-    next_seq = (max(seqs) + 1) if seqs else len(entries)
-    entries.append(
-        {
-            "kind": KIND_TURN_END,
-            "payload": {"finish_reason": FinishReason.CANCELLED.value},
-            "ts": None,
-            "seq": next_seq,
-        }
+    finish = (
+        finish_reason.value
+        if isinstance(finish_reason, FinishReason)
+        else (str(finish_reason).strip() if finish_reason else FinishReason.CANCELLED.value)
     )
-    return entries
+    entries = list(journal or [])
+    if not any((e.get("kind") or e.get("type") or "") == KIND_TURN_END for e in entries):
+        seqs = [e.get("seq") for e in entries if isinstance(e.get("seq"), int)]
+        next_seq = (max(seqs) + 1) if seqs else len(entries)
+        entries.append(
+            {
+                "kind": KIND_TURN_END,
+                "payload": {"finish_reason": finish},
+                "ts": None,
+                "seq": next_seq,
+            }
+        )
+    return append_unrecorded_hot_orphan_facts(entries)
 
 
 class TurnExecutionMixin:
@@ -328,6 +417,15 @@ class TurnExecutionMixin:
                 message_id=message_id,
                 trace_id=trace_id,
             )
+        agent_mentions = rpc_agent_mentions(params)
+        attachments = rpc_attachments(params)
+        table_selection = rpc_table_selection(params)
+        queue_id = str(params.get("queueId") or "").strip()
+        # Occupy turn_runs before history fetch so deliverMessage matches startTurn.
+        sink = EventSink()
+        register_current_turn_run(
+            conversation_id=conversation_id, sink=sink, user_id=self._user_id
+        )
         from agentcore.sidecar.chat_history import (
             ChatContextUnavailableError,
             resolve_sidecar_turn_history,
@@ -358,17 +456,9 @@ class TurnExecutionMixin:
                 self._unregister_turn(turn_id)
             return
         self.stamp_turn_history(conversation_id, history)
-        agent_mentions = rpc_agent_mentions(params)
-        attachments = rpc_attachments(params)
-        queue_id = str(params.get("queueId") or "").strip()
         # Desktop mints the triple; sidecar must not new_id() assistant / trace.
 
         turn_creds = self._creds_for(conversation_id, trace_id, message_id)
-
-        sink = EventSink()
-        register_current_turn_run(
-            conversation_id=conversation_id, sink=sink, user_id=self._user_id
-        )
         if queue_id:
             from agentcore.runtime.events import turn_queue_started
             from agentcore.runtime.turn.queue import turn_queue
@@ -513,6 +603,9 @@ class TurnExecutionMixin:
                     from agentcore.tools.builtin.web.cloud_fallback import (
                         inference_search_credentials_scope,
                     )
+                    from agentcore.workspace.cloud_credentials import (
+                        workspaces_credentials_scope,
+                    )
 
                     # Sidecar is spawned only by the desktop Electron host. Pass
                     # platform=desktop so prepare builds DesktopClientChannel and
@@ -523,12 +616,14 @@ class TurnExecutionMixin:
                     # SearXNG is unreachable (ContextVar; reset after turn).
                     # Bind folders narrow ticket for roster / desk-binding cloud HTTP.
                     # Bind account narrow ticket for conversation-log search/read.
+                    # Bind workspaces narrow ticket for unbound cloud-desk file HTTP.
                     with (
                         inference_search_credentials_scope(
                             _inference_search_creds(turn_creds)
                         ),
                         folders_credentials_scope(self._folders_creds),
                         account_credentials_scope(self._account_creds),
+                        workspaces_credentials_scope(self._workspaces_creds),
                     ):
                         result = await sidecar_server.run_chat_pipeline(
                             conversation_id=conversation_id,
@@ -552,6 +647,7 @@ class TurnExecutionMixin:
                             x_client_platform="desktop",
                             agent_mentions=agent_mentions or None,
                             attachments=attachments or None,
+                            table_selection=table_selection or None,
                         )
                         # Pillar D1: keep sink open while a detached background drive is
                         # still live so run_completed / execution_completed reach the UI
@@ -568,6 +664,7 @@ class TurnExecutionMixin:
                 # Cancel path: emit confirmation *before* close so the pump still
                 # delivers ``message_end(cancelled)`` (TURN_CANCELLED alone is not enough).
                 _emit_cancel_end_if_cancelling(sink)
+                _emit_hot_orphans_if_cancelling(sink, conversation_id)
                 # The pipeline no longer closes the sink (its owner does); the sidecar owns
                 # this one, so close it on EVERY path — success or crash — or the pump would
                 # await the None sentinel forever.
@@ -593,15 +690,24 @@ class TurnExecutionMixin:
                 trim_result(turn_id, result, model=resolve_turn_model(turn_creds)),
             )
         except asyncio.CancelledError:
-            journal = _ensure_cancelled_turn_end(list(sink.execution_journal() or []))
+            finish = _salvage_finish_reason()
+            journal = _ensure_cancelled_turn_end(
+                list(sink.execution_journal() or []),
+                finish,
+            )
             content = sink.streamed_content() or ""
+            discarded = False
             if outbox is not None:
-                await outbox.salvage(
+                discarded = await self._outbox_salvage_or_discard_this_send(
+                    outbox,
+                    conversation_id=conversation_id,
+                    user_message_id=user_message_id,
+                    message_id=message_id,
+                    trace_id=trace_id,
+                    sink=sink,
+                    finish_reason=finish,
                     journal=journal,
                     content=content,
-                    conversation_id=conversation_id,
-                    trace_id=trace_id,
-                    message_id=message_id,
                     interrupt_reason=_salvage_interrupt_reason(),
                 )
             self._log_turn_cancelled(
@@ -611,12 +717,11 @@ class TurnExecutionMixin:
                 trace_id=trace_id,
                 content_chars=len(content),
                 journal_entries=len(journal),
-                salvaged=outbox is not None,
+                salvaged=outbox is not None and not discarded,
             )
-            # Reply first: a hung event pump must not delay TURN_CANCELLED.
-            self._reply_error_soon(
-                request_id, protocol.TURN_CANCELLED, "turn cancelled"
-            )
+            # Reply first: a hung event pump must not delay the cancel RPC.
+            code, message, data = _rpc_error_for_salvage_finish(finish)
+            self._reply_error_soon(request_id, code, message, data=data)
             if pump is not None:
                 with contextlib.suppress(Exception):
                     await pump
@@ -626,13 +731,20 @@ class TurnExecutionMixin:
             raise
         except Exception as e:
             if outbox is not None:
-                await outbox.salvage(
-                    journal=list(sink.execution_journal() or []),
-                    content=sink.streamed_content() or "",
+                await self._outbox_salvage_or_discard_this_send(
+                    outbox,
                     conversation_id=conversation_id,
-                    trace_id=trace_id,
+                    user_message_id=user_message_id,
                     message_id=message_id,
-                    interrupt_reason="lease_expired",
+                    trace_id=trace_id,
+                    sink=sink,
+                    finish_reason=FinishReason.ERROR,
+                    journal=_ensure_cancelled_turn_end(
+                        list(sink.execution_journal() or []),
+                        FinishReason.ERROR,
+                    ),
+                    content=sink.streamed_content() or "",
+                    error=str(e),
                 )
             if pump is not None:
                 with contextlib.suppress(Exception):
@@ -653,6 +765,50 @@ class TurnExecutionMixin:
                 outbox.clear_turn(message_id)
             self._unregister_live_backend(conversation_id, backend)
             self._unregister_turn(turn_id)
+
+    async def _outbox_salvage_or_discard_this_send(
+        self,
+        outbox: Any,
+        *,
+        conversation_id: str,
+        user_message_id: str,
+        message_id: str,
+        trace_id: str,
+        sink: EventSink,
+        finish_reason: object,
+        journal: list[dict[str, Any]],
+        content: str,
+        interrupt_reason: str | None = None,
+        error: str | None = None,
+    ) -> bool:
+        """This-send startTurn only: empty fail drops the outbox; otherwise salvage.
+
+        Resume / continue keep calling ``outbox.salvage`` directly — those paths
+        must not discard (``user_created_this_send=False``).
+        """
+        discarded = await maybe_discard_zero_output_outbox(
+            outbox,
+            conversation_id=conversation_id,
+            user_message_id=user_message_id,
+            result=result_from_unstarted_close(
+                sink=sink,
+                message_id=message_id,
+                finish_reason=finish_reason,
+            ),
+            user_created_this_send=True,
+        )
+        if discarded:
+            return True
+        await outbox.salvage(
+            journal=journal,
+            content=content,
+            conversation_id=conversation_id,
+            trace_id=trace_id,
+            message_id=message_id,
+            interrupt_reason=interrupt_reason,
+            error=error,
+        )
+        return False
 
     async def _outbox_finalize(
         self,
@@ -912,6 +1068,9 @@ class TurnExecutionMixin:
                     from agentcore.tools.builtin.web.cloud_fallback import (
                         inference_search_credentials_scope,
                     )
+                    from agentcore.workspace.cloud_credentials import (
+                        workspaces_credentials_scope,
+                    )
 
                     with (
                         inference_search_credentials_scope(
@@ -919,6 +1078,7 @@ class TurnExecutionMixin:
                         ),
                         folders_credentials_scope(self._folders_creds),
                         account_credentials_scope(self._account_creds),
+                        workspaces_credentials_scope(self._workspaces_creds),
                     ):
                         result = await sidecar_server.resume_chat_pipeline(
                             suspension=suspension,
@@ -950,6 +1110,7 @@ class TurnExecutionMixin:
                         refresh_result_journal_from_host(result, sink=sink)
             finally:
                 _emit_cancel_end_if_cancelling(sink)
+                _emit_hot_orphans_if_cancelling(sink, conversation_id)
                 # The pipeline no longer closes the sink (its owner does); the sidecar owns
                 # this one, so close it on EVERY path — success or crash — or the pump would
                 # await the None sentinel forever.
@@ -987,11 +1148,13 @@ class TurnExecutionMixin:
                 compose_salvage_journal,
             )
 
+            finish = _salvage_finish_reason()
             journal = _ensure_cancelled_turn_end(
                 compose_salvage_journal(
                     sink.execution_journal() or [],
                     suspension.journal_entries,
-                )
+                ),
+                finish,
             )
             content = compose_salvage_content(
                 sink.streamed_content() or "",
@@ -1015,13 +1178,12 @@ class TurnExecutionMixin:
                 journal_entries=len(journal or []),
                 salvaged=outbox is not None,
             )
-            # Reply first: a hung event pump must not delay TURN_CANCELLED.
+            # Reply first: a hung event pump must not delay the cancel RPC.
+            code, message, data = _rpc_error_for_salvage_finish(finish)
             self._send_soon_to_request_ids(
                 reply_ids,
                 request_id,
-                lambda rid: protocol.make_error(
-                    rid, protocol.TURN_CANCELLED, "turn cancelled"
-                ),
+                lambda rid: protocol.make_error(rid, code, message, data=data),
             )
             with contextlib.suppress(Exception):
                 await pump
@@ -1036,9 +1198,12 @@ class TurnExecutionMixin:
                 )
 
                 await outbox.salvage(
-                    journal=compose_salvage_journal(
-                        sink.execution_journal() or [],
-                        suspension.journal_entries,
+                    journal=_ensure_cancelled_turn_end(
+                        compose_salvage_journal(
+                            sink.execution_journal() or [],
+                            suspension.journal_entries,
+                        ),
+                        FinishReason.ERROR,
                     ),
                     content=compose_salvage_content(
                         sink.streamed_content() or "",
@@ -1047,7 +1212,7 @@ class TurnExecutionMixin:
                     conversation_id=conversation_id,
                     trace_id=trace_id,
                     message_id=turn_id,
-                    interrupt_reason="lease_expired",
+                    error=str(e),
                 )
             with contextlib.suppress(Exception):
                 await pump

@@ -2,26 +2,9 @@ import { Markdown } from "@/components/chat/Markdown";
 import { Button } from "@/components/ui";
 import { useStreamAwareDisclosure } from "@/stores/disclosure";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import { LiveFlow, LiveFlowDots, LiveFlowText } from "./LiveFlow";
 
-/** Three pulsing dots — the shared「正在思考」liveliness cue (图2 的 ● ● ●). */
-export function ThinkingDots() {
-  return (
-    <span className="inline-flex gap-1" aria-hidden>
-      <span
-        className="size-1.5 animate-pulse rounded-full bg-muted-foreground/70"
-        style={{ animationDelay: "0ms" }}
-      />
-      <span
-        className="size-1.5 animate-pulse rounded-full bg-muted-foreground/70"
-        style={{ animationDelay: "150ms" }}
-      />
-      <span
-        className="size-1.5 animate-pulse rounded-full bg-muted-foreground/70"
-        style={{ animationDelay: "300ms" }}
-      />
-    </span>
-  );
-}
+export { ThinkingDots } from "./LiveFlow";
 
 /**
  * Borderless disclosure header shared by {@link ThinkingPanel} and
@@ -42,7 +25,7 @@ export function ThinkingHeader({
   doneLabel: string;
   onToggle: () => void;
 }) {
-  return (
+  const header = (
     <Button
       variant="ghost"
       onClick={onToggle}
@@ -50,8 +33,8 @@ export function ThinkingHeader({
     >
       {isStreaming ? (
         <>
-          <ThinkingDots />
-          <span>{streamingLabel}</span>
+          <LiveFlowDots active />
+          <LiveFlowText>{streamingLabel}</LiveFlowText>
         </>
       ) : (
         <>
@@ -64,6 +47,12 @@ export function ThinkingHeader({
         </>
       )}
     </Button>
+  );
+  if (!isStreaming) return header;
+  return (
+    <LiveFlow active className="inline-flex w-auto">
+      {header}
+    </LiveFlow>
   );
 }
 

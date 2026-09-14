@@ -18,7 +18,7 @@ import {
 } from "@/lib/errors";
 import {
   COST_UNPRICED_LABEL,
-  formatCostCaption,
+  formatDisplayCost,
   pickCostMoney,
 } from "@/lib/format";
 import { openWorkspaceDeliverable } from "@/lib/openWorkspaceDeliverable";
@@ -58,10 +58,11 @@ import {
   MessageMoreMenu,
 } from "./AssistantMessageFooter";
 import { CloudBridgeHint } from "./CloudBridgeHint";
+import { LiveWaitLabel } from "./LiveFlow";
 import { MessageTime } from "./MessageActions";
 import { ComposingToolLine, ProcessTimeline } from "./ProcessTimeline";
 import { SyncStatusHint } from "./SyncStatusHint";
-import { ThinkingDots, ThinkingPanel } from "./Thinking";
+import { ThinkingPanel } from "./Thinking";
 import { WholeFilePasteHint } from "./WholeFilePasteHint";
 import type { MessageBubbleProps } from "./types";
 
@@ -257,7 +258,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
         execution.runs.map((r) => r.cost),
       );
       if (money && money.nano > 0) {
-        costText = formatCostCaption(
+        costText = formatDisplayCost(
           money.nano,
           money.estimated,
           money.currency,
@@ -266,7 +267,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
         costText = COST_UNPRICED_LABEL;
       }
     } else if (fallbackMoney != null && fallbackMoney.nano > 0) {
-      costText = formatCostCaption(
+      costText = formatDisplayCost(
         fallbackMoney.nano,
         fallbackMoney.estimated,
         fallbackMoney.currency,
@@ -275,7 +276,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       costText = COST_UNPRICED_LABEL;
     }
   } else if (fallbackMoney != null && fallbackMoney.nano > 0) {
-    costText = formatCostCaption(
+    costText = formatDisplayCost(
       fallbackMoney.nano,
       fallbackMoney.estimated,
       fallbackMoney.currency,
@@ -361,15 +362,14 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
         (message.composingTool && message.executionId === null ? (
           <ComposingToolLine tool={message.composingTool} />
         ) : displayContent.length === 0 && !hasReasoning ? (
-          <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
-            <ThinkingDots />
+          <LiveWaitLabel>
             {/* 不得静默等锁：写锁短等用诚实等待态，禁空 Thinking… 冒充 */}
             {waitingForWorkspaceLock
               ? "等待工作区…"
               : waitingForDeskProvision
                 ? "正在准备云端环境"
                 : "Thinking…"}
-          </span>
+          </LiveWaitLabel>
         ) : (
           <span
             className="mt-1 inline-block h-4 w-1.5 rounded-full bg-foreground/60"

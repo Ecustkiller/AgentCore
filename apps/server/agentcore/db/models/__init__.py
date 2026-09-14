@@ -30,7 +30,6 @@ from .conversations import (
     FolderMember,
     MemoryUpdateRow,
     Message,
-    MessageBookmark,
 )
 from .devices import PushDeviceRow
 from .docs import Doc, DocShare
@@ -60,6 +59,7 @@ from .skill_store import (
     SkillStoreReport,
     SkillStoreVersion,
 )
+from .tables import Table, TableRow, TableView
 from .user_workflows import UserWorkflow
 from .users import (
     FriendRequest,
@@ -106,7 +106,6 @@ __all__ = [
     "MemoryScopeState",
     "MemoryUpdateRow",
     "Message",
-    "MessageBookmark",
     "PAUSED_TURN_EXPIRED",
     "PAUSED_TURN_SETTLED",
     "PausedTurnOutcomeRow",
@@ -118,6 +117,9 @@ __all__ = [
     "PushDeviceRow",
     "RefreshToken",
     "RunSessionRow",
+    "Table",
+    "TableRow",
+    "TableView",
     "SkillStoreInstall",
     "SkillStoreListing",
     "SkillStoreReport",

@@ -21,7 +21,8 @@ _FAMILIES: tuple[frozenset[str], ...] = (
     frozenset({"archive_extract", "archive_create"}),
     frozenset({"create_folder", "delete_folder"}),
     frozenset({"file_move", "file_copy", "file_batch"}),
-    frozenset({"board_ops", "board_read"}),
+    frozenset({"table_ops", "table_read"}),
+    frozenset({"docs_read", "docs_write"}),
 )
 
 _FAMILY_LABELS: dict[frozenset[str], str] = {
@@ -29,7 +30,8 @@ _FAMILY_LABELS: dict[frozenset[str], str] = {
     frozenset({"archive_extract", "archive_create"}): "压缩包",
     frozenset({"create_folder", "delete_folder"}): "文件夹增删",
     frozenset({"file_move", "file_copy", "file_batch"}): "搬移/批量",
-    frozenset({"board_ops", "board_read"}): "白板",
+    frozenset({"table_ops", "table_read"}): "表格",
+    frozenset({"docs_read", "docs_write"}): "创作文档",
 }
 
 _CONSULT_TOOL_NAMES = frozenset(

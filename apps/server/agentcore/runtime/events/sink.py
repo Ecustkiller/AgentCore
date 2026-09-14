@@ -8,7 +8,6 @@ stays this module (``EventSink``, ``SinkSubscription``, marker constants, tap).
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -41,7 +40,7 @@ from agentcore.runtime.events.sink_process import (
 from agentcore.runtime.events.sink_terminal import SinkTerminalMixin
 from agentcore.runtime.events.stream_checkpointer import StreamCheckpointer
 from agentcore.runtime.events.types import EventType, SSEEvent
-from agentcore.runtime.terminal import RUN_CLOSE_EVENT_TYPES
+from agentcore.runtime.terminal import RUN_CLOSE_EVENT_TYPES, is_live_settle_event
 
 logger = get_logger(__name__)
 
@@ -99,14 +98,65 @@ async def _backfill_seq(event: SSEEvent, barrier: asyncio.Future[int | None]) ->
 
 
 # One观察端's live queue is capped here; a端 too slow to drain sheds its OLDEST
-# undelivered frame instead of growing without bound or stalling ``emit``. Sized like
-# the IM firehose (``messaging/hub.py``) — only a genuinely stuck client sheds, and it
-# loses only its own smoothness: correctness is the journal's job (L2), not this queue's.
+# *process* frame instead of growing without bound or stalling ``emit``. Settle
+# frames (run close / message_end / error / execution_completed) stay unless the
+# queue is already all settle frames. Sized like the IM firehose
+# (``messaging/hub.py``) — a stuck client loses smoothness; close facts ride live.
 _SUBSCRIBER_QUEUE_MAXSIZE = 1000
 
 
+def _bounded_put[T](
+    queue: asyncio.Queue[T],
+    item: T,
+    *,
+    keep: Callable[[T], bool],
+) -> bool:
+    """Enqueue ``item``. If full, shed the oldest non-keep item.
+
+    Returns True if nothing was shed. False if a frame was discarded: oldest
+    fluency, incoming fluency refused (cannot evict a keep frame), or
+    pathological oldest keep when the queue is already all keepers.
+    """
+    try:
+        queue.put_nowait(item)
+        return True
+    except asyncio.QueueFull:
+        pass
+    drained: list[T] = []
+    while True:
+        try:
+            drained.append(queue.get_nowait())
+        except asyncio.QueueEmpty:
+            break
+    if not drained:
+        queue.put_nowait(item)
+        return True
+    victim = next((i for i, existing in enumerate(drained) if not keep(existing)), None)
+    if victim is not None:
+        drained.pop(victim)
+        drained.append(item)
+    elif keep(item):
+        drained.pop(0)
+        drained.append(item)
+    for existing in drained:
+        queue.put_nowait(existing)
+    return False
+
+
+def _keep_live_settle_frame(item: _Frame | None) -> bool:
+    if item is None:
+        return True
+    return is_live_settle_event(item.event.type)
+
+
+def _keep_live_settle_event(item: SSEEvent | None) -> bool:
+    if item is None:
+        return True
+    return is_live_settle_event(item.type)
+
+
 class SinkSubscription:
-    """One live consumer of an :class:`EventSink` — a bounded, drop-oldest queue.
+    """One live consumer of an :class:`EventSink` — a bounded, drop-oldest-fluency queue.
 
     Every观察端 (POST 发送流 / attach / 对话级订阅) holds its OWN subscription: they are
     peers, not「primary + 旁路」. Dropping one never touches the others (:meth:`EventSink.
@@ -149,27 +199,15 @@ class SinkSubscription:
         )
 
     def _offer(self, frame: _Frame) -> bool:
-        """Enqueue ``frame``; drop the oldest when full. False → something was shed."""
-        try:
-            self._queue.put_nowait(frame)
-            return True
-        except asyncio.QueueFull:
-            with contextlib.suppress(asyncio.QueueEmpty):
-                self._queue.get_nowait()
-            with contextlib.suppress(asyncio.QueueFull):
-                self._queue.put_nowait(frame)
+        """Enqueue ``frame``; shed oldest fluency when full. False → something was shed."""
+        kept = _bounded_put(self._queue, frame, keep=_keep_live_settle_frame)
+        if not kept:
             self.dropped += 1
-            return False
+        return kept
 
     def _close(self) -> None:
-        """End-of-stream sentinel for this consumer (keeps the pending backlog)."""
-        try:
-            self._queue.put_nowait(None)
-        except asyncio.QueueFull:
-            with contextlib.suppress(asyncio.QueueEmpty):
-                self._queue.get_nowait()
-            with contextlib.suppress(asyncio.QueueFull):
-                self._queue.put_nowait(None)
+        """End-of-stream sentinel for this consumer (keeps pending settle frames)."""
+        _bounded_put(self._queue, None, keep=_keep_live_settle_frame)
 
     async def get(self) -> SSEEvent | None:
         """Next event for this consumer, or ``None`` once the sink closed.
@@ -213,7 +251,9 @@ class EventSink(SinkJournalMixin, SinkProcessMixin, SinkTerminalMixin):
     path the sidecar pump uses).
 
     Durability is orthogonal: DURABLE facts land in the journal whether or not anybody
-    is listening, so catching up is a replay concern, never a queue concern.
+    is listening, so catching up is a replay concern, never a queue concern. Live
+    queues still keep settle frames so a connection that never reconnects can close
+    the graph.
     """
 
     def __init__(
@@ -226,7 +266,8 @@ class EventSink(SinkJournalMixin, SinkProcessMixin, SinkTerminalMixin):
         self._subscribers: list[SinkSubscription] = []
         # Spool for frames emitted with nobody subscribed: the handoff window (sink
         # created → the POST / drain / resume consumer subscribes) and the legacy
-        # single-consumer :meth:`get` path. Bounded + drop-oldest like a subscription.
+        # single-consumer :meth:`get` path. Bounded; fluency drops first, like a
+        # subscription.
         self._queue: asyncio.Queue[SSEEvent | None] = asyncio.Queue(
             maxsize=_SUBSCRIBER_QUEUE_MAXSIZE
         )
@@ -532,14 +573,8 @@ class EventSink(SinkJournalMixin, SinkProcessMixin, SinkTerminalMixin):
         return task
 
     def _spool(self, event: SSEEvent) -> None:
-        """Buffer a frame nobody is listening to yet (bounded, drop-oldest)."""
-        try:
-            self._queue.put_nowait(event)
-        except asyncio.QueueFull:
-            with contextlib.suppress(asyncio.QueueEmpty):
-                self._queue.get_nowait()
-            with contextlib.suppress(asyncio.QueueFull):
-                self._queue.put_nowait(event)
+        """Buffer a frame nobody is listening to yet (bounded; fluency drops first)."""
+        _bounded_put(self._queue, event, keep=_keep_live_settle_event)
 
     def emit(self, event: SSEEvent) -> bool:
         """Emit ``event`` to every live观察端. True iff at least one got it.
@@ -720,13 +755,7 @@ class EventSink(SinkJournalMixin, SinkProcessMixin, SinkTerminalMixin):
 
     def _spool_close(self) -> None:
         """End-of-stream sentinel on the spool (legacy single-consumer path)."""
-        try:
-            self._queue.put_nowait(None)
-        except asyncio.QueueFull:
-            with contextlib.suppress(asyncio.QueueEmpty):
-                self._queue.get_nowait()
-            with contextlib.suppress(asyncio.QueueFull):
-                self._queue.put_nowait(None)
+        _bounded_put(self._queue, None, keep=_keep_live_settle_event)
 
     async def get(self) -> SSEEvent | None:
         """Legacy single-consumer read off the spool (sidecar pump / tests).

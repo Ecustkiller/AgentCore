@@ -1,15 +1,15 @@
-"""Build the optional VisionReader (AI协作白板.md §九.4「插上即用」).
+"""Build the optional VisionReader (「插上即用」).
 
 Resolution order:
 
 1. Profile ``vision`` slot (when set) → credentials from that slot (BYOK provider or
    platform model creds), regardless of ``billing_mode``.
 2. Else empty slot + main that ``model_accepts_images`` → same build with main's
-   :class:`~agentcore.llm.resolve.ModelSelection` (whiteboard / ``read_image`` reuse
-   main credentials). Text-only main does **not** follow.
+   :class:`~agentcore.llm.resolve.ModelSelection` (``read_image`` / attachment
+   eye→text reuse main credentials). Text-only main does **not** follow.
 3. Else platform fallback: ``billing_mode=platform`` + non-empty ``VISION_API_KEY`` /
    ``VISION_BASE_URL`` → operator vision model.
-4. Else ``None`` (``board_read`` clean-fails「读图能力未配置」).
+4. Else ``None`` (``read_image`` clean-fails「读图能力未配置」).
 """
 
 from __future__ import annotations

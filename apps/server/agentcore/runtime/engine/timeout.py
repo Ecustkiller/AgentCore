@@ -63,11 +63,11 @@ def outer_liveness_timeout_meta(
     Cloud exec-env tools that hang share the dead-sandbox face, not a generic
     liveness string.
     """
-    from agentcore.runtime.facts import CrossTurnRetry, cross_turn_retry_meta
     from agentcore.runtime.loop_controller import (
         ERROR_CLASS_PERMANENT,
         EXEC_ENV_TIMEOUT_FAMILY,
     )
+    from agentcore.tools.cross_turn_retry import CrossTurnRetry, cross_turn_retry_meta
 
     failure_code = "liveness_timeout"
     attempt_extra: dict[str, Any] = {

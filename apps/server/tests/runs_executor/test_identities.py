@@ -230,6 +230,8 @@ async def test_captain_identity_carries_when_to_split_guidance():
     from agentcore.tools.builtin.replan import _REPLAN_DESCRIPTION
 
     assert "计划已让出" in _REPLAN_DESCRIPTION
+    assert "consult(staffing)" not in _REPLAN_DESCRIPTION
+    assert "binds=" not in _REPLAN_DESCRIPTION
     # Path-B encyclopedia 仍不进 identity。
     from agentcore.runtime.runs.executor.identities import build_worker_identity
 

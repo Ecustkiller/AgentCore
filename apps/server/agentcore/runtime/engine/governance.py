@@ -235,13 +235,9 @@ def create_loop_controller(
 
     Zero-write / prose_idle mid-loop warn→FINALIZE is **retired** (always off).
     Files-expected delivery_idle (nudge / narrow / report) is **retired**: factory
-    never arms it when ``files_expected=True`` (including ``report_delivery=True``),
-    and ignores leftover ``engine_delivery_idle_*`` settings so env cannot revive it.
-    Recon-idle nudge (催结论 / handoff) is **retired** the same way: factory always
-    passes ``delivery_idle_nudge_rounds=0`` and ignores ``engine_recon_idle_nudge_rounds``.
-    Absolute investigation-round finalize (``engine_convergence_finalize_rounds``)
-    is **retired**: factory always passes ``convergence_finalize_rounds=0`` and
-    ignores the setting even if env > 0. Same-target spin
+    never arms it. Recon-idle nudge is **retired** the same way. Absolute
+    investigation-round finalize is **retired**: factory always passes
+    ``convergence_finalize_rounds=0``. Same-target spin
     (``engine_convergence_spin_rounds``) stays. Explicit ``LoopController``
     construction may still pass ``finalize_rounds`` / idle bars.
     ``report_delivery`` stays for call-site compatibility and does not drive idle.
@@ -268,8 +264,7 @@ def create_loop_controller(
         unproductive_threshold = min(int(unproductive_threshold), 2)
 
     # Soft read-idle: factory never arms files-expected delivery_idle
-    # (nudge/narrow/report) or recon-idle conclude nudges, even if leftover
-    # settings are still >0.
+    # (nudge/narrow/report) or recon-idle conclude nudges.
     delivery_idle_nudge = 0
     delivery_idle_narrow = 0
     delivery_idle_recon = False
@@ -280,7 +275,6 @@ def create_loop_controller(
         tool_failure_warn=tool_failure_warn,
         tool_failure_disable=tool_failure_disable,
         unproductive_threshold=unproductive_threshold,
-        # Retired: ignore settings.engine_convergence_finalize_rounds even if env > 0.
         convergence_finalize_rounds=0,
         convergence_spin_rounds=settings.engine_convergence_spin_rounds,
         expects_landing=expects_landing,

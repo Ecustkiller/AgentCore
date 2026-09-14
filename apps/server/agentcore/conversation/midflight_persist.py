@@ -13,7 +13,7 @@ from typing import Any
 
 from sqlalchemy.exc import IntegrityError
 
-from agentcore.conversation.mentions import to_stored_agent_mentions
+from agentcore.core.mentions import to_stored_agent_mentions
 from agentcore.core.types import is_uuid_id, new_id
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import MessageRepository

@@ -78,6 +78,7 @@ const PAGES = [
   { id: "07-general", hash: "/more/general", heading: "通用" },
   { id: "08-shortcuts", hash: "/more/shortcuts", heading: "快捷键" },
   { id: "09-about", hash: "/more/about", heading: "关于 AgentCore" },
+  { id: "10-sponsor", hash: "/more/sponsor", heading: "赞助" },
 ];
 
 // ---------------------------------------------------------------------------

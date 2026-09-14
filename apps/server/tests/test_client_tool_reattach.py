@@ -12,8 +12,6 @@ from agentcore.api import sse
 from agentcore.fulfill.origin import origin_device
 from agentcore.runtime.events import EventSink, content_delta
 from agentcore.runtime.events.client_tool_reattach import (
-    CHANNEL_BOARD,
-    CHANNEL_BOARD_READ,
     CHANNEL_EXTERNAL_MOUNT,
     CHANNEL_HOST,
     CHANNEL_WORKSPACE,
@@ -75,20 +73,6 @@ async def test_channel_discrimination_builds_correct_event_types():
             EventType.HOST_OP_REQUIRED.value,
             {"op": "host_ping", "args": {}},
             EventType.HOST_OP_REQUIRED,
-        ),
-        (
-            "req-board",
-            CHANNEL_BOARD,
-            EventType.BOARD_OP_REQUIRED.value,
-            {"board_id": "b1", "ops": [{"op": "add_node"}], "summary": "x"},
-            EventType.BOARD_OP_REQUIRED,
-        ),
-        (
-            "req-bread",
-            CHANNEL_BOARD_READ,
-            EventType.BOARD_READ_REQUIRED.value,
-            {"board_id": "b1", "ids": ["e1"]},
-            EventType.BOARD_READ_REQUIRED,
         ),
     ]
     for rid, channel, et, params, expected_type in cases:

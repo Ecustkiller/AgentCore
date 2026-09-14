@@ -15,7 +15,6 @@ from uuid import uuid4
 import pytest
 
 from agentcore.config.paths import PROJECT_ROOT
-from agentcore.conversation import store as store_pkg
 from agentcore.conversation.store import cloud as cloud_mod
 from agentcore.db.repositories import (
     ConversationRepository,
@@ -26,6 +25,7 @@ from agentcore.db.repositories import (
 from agentcore.demo_tape.binding import TapeBinding
 from agentcore.demo_tape.player import continue_tape_turn, play_tape_events
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
+from agentcore.runtime.conversation_store import reset_conversation_store_for_tests
 from agentcore.runtime.events import EventSink, FinishReason
 from agentcore.runtime.journal.fold import runs_from_entries
 from agentcore.runtime.journal.writer import TurnJournalWriter
@@ -108,7 +108,7 @@ async def test_lv_molihua_tape_db_hydrate_has_ceo_after_team(
     monkeypatch.setattr(cloud_mod, "async_session_factory", session_factory)
     monkeypatch.setattr(cloud_mod, "telemetry_session_factory", session_factory)
     monkeypatch.setattr(persist_mod, "async_session_factory", session_factory)
-    store_pkg.reset_conversation_store_for_tests()
+    reset_conversation_store_for_tests()
 
     mid = str(uuid4())
     trace = "a" * 32

@@ -13,8 +13,6 @@ from agentcore.runtime.engine.tool_call_fact_code import tool_call_fact_cross_tu
 from agentcore.runtime.engine.tool_exec import execute_tools
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.facts import (
-    CROSS_TURN_RETRY_KEY,
-    CrossTurnRetry,
     FactKind,
     ToolCallFact,
     TurnFactLog,
@@ -27,6 +25,7 @@ from agentcore.runtime.loop_controller import (
     ToolAttempt,
 )
 from agentcore.tools.builtin.file_ops import FileWriteTool
+from agentcore.tools.cross_turn_retry import CROSS_TURN_RETRY_KEY, CrossTurnRetry
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -394,3 +393,12 @@ def test_tool_call_fact_unknown_values_never_serialized():
         .entry()["payload"]
     )
     assert CROSS_TURN_RETRY_KEY not in payload
+
+
+def test_facts_does_not_reexport_cross_turn_retry() -> None:
+    import agentcore.runtime.facts as facts
+
+    assert not hasattr(facts, "CrossTurnRetry")
+    assert not hasattr(facts, "CROSS_TURN_RETRY_KEY")
+    assert not hasattr(facts, "normalize_cross_turn_retry")
+    assert not hasattr(facts, "cross_turn_retry_meta")

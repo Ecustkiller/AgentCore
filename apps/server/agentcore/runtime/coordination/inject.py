@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agentcore.conversation.mentions import (
+from agentcore.core.mentions import (
     format_agent_mention_prompt,
     resolve_interjection_mentions,
 )

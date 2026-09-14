@@ -224,20 +224,16 @@ function currencySymbol(currency?: string | null): string {
 }
 
 /**
- * BYOK 估算金额的轻量说明（tooltip / title）——与平台记账视觉分离，
- * 明确「非上游账单」。
+ * BYOK 估算金额的轻量说明（详情 / tooltip）。费用位只出 ≈+币种，不另挂字。
  */
 export const COST_ESTIMATE_HINT = "按社区价目（美元列表价）估算，非上游账单";
-
-/** 费用位标注：自带密钥场景（credential_source=user / estimated_total）。 */
-export const COST_ESTIMATE_LABEL = "自带密钥·估算";
 
 /**
  * 费用位标注：BYOK 且两层价卡全落空（`pricing_source=unpriced`）。
  * 有真实花费但平台无价可算——显式标注，不得以「省略费用段」暗示免费
  * （拍板 2026-07-20：未计价运行显式标识，金额位仍显「—」绝不冒充数字）。
  */
-export const COST_UNPRICED_LABEL = "自带密钥·未计价";
+export const COST_UNPRICED_LABEL = "未计价";
 
 /** 未计价标注的轻量说明（tooltip / title）。 */
 export const COST_UNPRICED_HINT =
@@ -363,15 +359,4 @@ export function pickCostMoney(
     };
   }
   return { nano: 0, estimated: false, currency: billedCurrency };
-}
-
-/** 费用展示串：有金额时附带「自带密钥·估算」标注。 */
-export function formatCostCaption(
-  nano: number,
-  estimated = false,
-  currency?: string | null,
-): string {
-  const base = formatDisplayCost(nano, estimated, currency);
-  if (base === "—" || !estimated) return base;
-  return `${base} ${COST_ESTIMATE_LABEL}`;
 }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import re
 import zipfile
 from pathlib import Path
 
@@ -10,8 +11,10 @@ import pytest
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt
+from pydantic import ValidationError
 
 import agentcore.docs_export.md_to_docx as md_to_docx_mod
+from agentcore.api.schemas.workspaces import ExportDocxRequest
 from agentcore.docs_export.md_to_docx import (
     collect_image_srcs,
     convert_markdown_to_docx,
@@ -41,7 +44,6 @@ def test_python_docx_is_lazy_until_convert(monkeypatch: pytest.MonkeyPatch) -> N
         "_Inches",
         "_Pt",
         "_RGBColor",
-        "_MAX_IMAGE_WIDTH",
     ):
         monkeypatch.setattr(md_to_docx_mod, name, None)
     assert md_to_docx_mod._DocumentFactory is None
@@ -194,6 +196,7 @@ def test_official_layout_indents_body_first_line():
     assert xml.count('<w:jc w:val="both"/>') == 3
     footer = _footer_xml(result.docx_bytes)
     assert "PAGE" in footer
+    assert "—" in footer
     assert '<w:jc w:val="center"/>' in footer
 
     doc = Document(io.BytesIO(result.docx_bytes))
@@ -214,6 +217,40 @@ def test_official_layout_indents_body_first_line():
     item = next(p for p in doc.paragraphs if "证据一" in p.text)
     assert item.alignment is None or item.alignment == WD_ALIGN_PARAGRAPH.LEFT
     assert item.paragraph_format.first_line_indent in (None, Pt(0))
+    assert doc.styles["Normal"].paragraph_format.line_spacing == pytest.approx(1.5)
+    assert 'w:eastAsia="zh-CN"' in xml
+
+
+def test_export_docx_request_layout_defaults_and_rejects_unknown():
+    assert ExportDocxRequest(path="a.md").layout == "standard"
+    with pytest.raises(ValidationError, match="layout"):
+        ExportDocxRequest.model_validate({"path": "a.md", "layout": "公文"})
+
+
+def test_shared_chinese_document_conventions():
+    """两档都要像中文稿：标题黑、表格 1.5 倍、真横线、版心内嵌图、Normal 钉行距。"""
+    png = _tiny_png()
+    result = convert_markdown_to_docx(
+        "# 标题\n\n正文。\n\n| A | B |\n| --- | --- |\n| 一 | 2 |\n\n---\n\n![图](./chart.png)\n",
+        images={"./chart.png": png},
+    )
+    xml = _document_xml(result.docx_bytes)
+    assert "1F2328" not in xml
+    assert 'w:val="000000"' in xml
+    assert "─" * 12 not in xml
+    assert "<w:pBdr>" in xml
+    assert "<w:bottom" in xml
+
+    doc = Document(io.BytesIO(result.docx_bytes))
+    assert doc.styles["Normal"].paragraph_format.line_spacing == pytest.approx(1.5)
+    cell = doc.tables[0].cell(1, 0).paragraphs[0]
+    assert cell.paragraph_format.line_spacing == pytest.approx(1.5)
+    assert cell.runs[0].font.size == Pt(12)
+
+    match = re.search(r'cx="(\d+)"', xml)
+    assert match is not None
+    width_cm = int(match.group(1)) / 360000
+    assert width_cm == pytest.approx(14.56, abs=0.05)
 
 
 def test_layout_never_inferred_from_body_text():

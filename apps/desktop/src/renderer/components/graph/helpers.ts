@@ -1,4 +1,4 @@
-/** Pure graph derivation helpers (status, handoffs, artifacts, wave lanes). */
+/** Pure graph derivation helpers (status, artifacts, wave lanes). */
 
 import type { DebateBeat, Execution, RunStatus } from "@/stores/execution";
 import {
@@ -8,7 +8,6 @@ import {
   isDebateTaggedRun,
 } from "@/stores/execution";
 import type { GraphEdge } from "@/stores/graph";
-import type { EdgeHandoff } from "./StepEdge";
 import { subTeamGroupId } from "./ids";
 
 const PRODUCING_TOOLS = new Set(["file_write", "file_append", "str_replace"]);
@@ -107,25 +106,6 @@ export function captainSinkPreview(opts: {
   }
   if (answer) return answer;
   return wait ? "" : synth;
-}
-
-export function resolveHandoff(
-  execution: Execution,
-  source: string,
-  target: string,
-): EdgeHandoff | null {
-  const targetRun = execution.runs.find((r) => r.id === target);
-  if (!targetRun) return null;
-  const block = targetRun.receivedContext.find(
-    (b) => b.channel === "dependency" && b.source_run_id === source,
-  );
-  if (!block) return null;
-  return {
-    fidelity: block.fidelity,
-    truncated: block.truncated,
-    sourceRole: block.source_role,
-    chars: block.chars,
-  };
 }
 
 export function deriveArtifacts(

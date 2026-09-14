@@ -16,6 +16,11 @@ machine and are reached over desktop IPC, not here; its server-side dir is not t
 truth. So file/dir/move/copy/clone and snapshot create/restore reject local ids with
 409 — the hub routes those to the desktop. Read-only snapshot list/download stay
 open (snapshots are object-store backed, keyed by ws, even for local).
+
+File CRUD (list/index/upload/download/edit/delete/move/copy/dirs) accepts an
+access session **or** a ``type=workspaces`` narrow ticket so the desktop sidecar
+can reach the cloud volume. Snapshots / clone / subtree zip / trash restore /
+workspace enumeration stay access-session only. Mint: ``POST /token``.
 """
 
 from __future__ import annotations
@@ -26,9 +31,11 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from agentcore.api.dependencies import (
     AuthUser,
+    WorkspacesApiUser,
     get_conversation_repo,
     get_folder_repo,
 )
@@ -63,7 +70,6 @@ from agentcore.api.schemas import (
     WorkspaceWriteResult,
 )
 from agentcore.config import settings
-from agentcore.conversation.scratch import bare_chat_local_subpath
 from agentcore.core.errors import AuthorizationError, ConflictError, NotFoundError, ValidationError
 from agentcore.db.repositories import ConversationRepository, FolderRepository
 from agentcore.docs_export.md_to_docx import (
@@ -80,6 +86,7 @@ from agentcore.docs_export.workspace_export import (
     export_markdown_to_pdf_path,
 )
 from agentcore.folders.desk import resolve_desk_access
+from agentcore.security.tokens import create_workspaces_token
 from agentcore.storage import SnapshotNotFound
 from agentcore.storage._archive import ArchiveLimitError
 from agentcore.workspace.files import (
@@ -101,6 +108,7 @@ from agentcore.workspace.files import (
 from agentcore.workspace.git import CloneError, clone_repo
 from agentcore.workspace.locate import (
     WorkspaceCoords,
+    bare_chat_local_subpath,
     build_server_workspace,
     parse_workspace_id,
     workspace_has_entries,
@@ -320,13 +328,33 @@ async def list_workspaces(
     return WorkspaceListResponse(data=items, total=len(items))
 
 
+class WorkspacesTokenResponse(BaseModel):
+    """Freshly minted workspaces narrow token + lifetime (sidecar cloud-desk auth).
+
+    Desktop: ``baseUrl`` for ``workspacesAuth`` is ``{apiOrigin}/v1/workspaces``;
+    ``apiKey`` is ``token``. Mint path: ``POST /v1/workspaces/token``.
+    """
+
+    token: str
+    expires_in_sec: int
+
+
+@router.post("/token", response_model=WorkspacesTokenResponse)
+async def mint_workspaces_token(user: AuthUser) -> WorkspacesTokenResponse:
+    """Exchange the caller's cookie/Bearer access session for a workspaces narrow ticket."""
+    return WorkspacesTokenResponse(
+        token=create_workspaces_token(user.user_id),
+        expires_in_sec=settings.workspaces_token_expire_minutes * 60,
+    )
+
+
 # --- Workspace files (cloud workspaces; local ones are reached over IPC) ---
 
 
 @router.get("/{ws_id}/files", response_model=WorkspaceFileListResponse)
 async def list_workspace_files(
     ws_id: str,
-    user: AuthUser,
+    user: WorkspacesApiUser,
     recursive: bool = Query(False),
     path: str = Query(".", description="工作区相对目录（`.` = 根）"),
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
@@ -352,7 +380,7 @@ async def list_workspace_files(
 @router.get("/{ws_id}/file-index", response_model=WorkspaceFileIndexResponse)
 async def list_workspace_file_index(
     ws_id: str,
-    user: AuthUser,
+    user: WorkspacesApiUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     folder_repo: FolderRepository = Depends(get_folder_repo),
 ):
@@ -377,7 +405,7 @@ async def upload_workspace_file(
     ws_id: str,
     path: str,
     request: Request,
-    user: AuthUser,
+    user: WorkspacesApiUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     folder_repo: FolderRepository = Depends(get_folder_repo),
 ):
@@ -435,7 +463,7 @@ async def convert_md_to_docx(
         except Exception as e:
             raise ValidationError(f"图片 base64 无效：{src}") from e
 
-    result = convert_markdown_to_docx(body.markdown, images=images)
+    result = convert_markdown_to_docx(body.markdown, images=images, layout=body.layout)
     suggested = docx_path_for_markdown(body.source_name or "document.md")
     suggested = suggested.rsplit("/", 1)[-1] or "document.docx"
     return ConvertMdToDocxResponse(
@@ -462,7 +490,7 @@ async def export_workspace_docx(
 
     try:
         backend = build_server_workspace(**_workspace_coords(user.user_id, target))
-        result = await export_markdown_path(backend, body.path)
+        result = await export_markdown_path(backend, body.path, layout=body.layout)
     except ExportMarkdownError as e:
         raise ValidationError(e.message) from e
 
@@ -486,7 +514,7 @@ async def convert_md_to_pdf(
     del user  # auth gate only
     import base64
 
-    result = convert_markdown_to_pdf(body.markdown)
+    result = convert_markdown_to_pdf(body.markdown, layout=body.layout)
     suggested = pdf_path_for_markdown(body.source_name or "document.md")
     suggested = suggested.rsplit("/", 1)[-1] or "document.pdf"
     return ConvertMdToPdfResponse(
@@ -513,7 +541,7 @@ async def export_workspace_pdf(
 
     try:
         backend = build_server_workspace(**_workspace_coords(user.user_id, target))
-        result = await export_markdown_to_pdf_path(backend, body.path)
+        result = await export_markdown_to_pdf_path(backend, body.path, layout=body.layout)
     except ExportMarkdownError as e:
         raise ValidationError(e.message) from e
 
@@ -529,7 +557,7 @@ async def export_workspace_pdf(
 async def read_workspace_file_for_edit(
     ws_id: str,
     path: str,
-    user: AuthUser,
+    user: WorkspacesApiUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     folder_repo: FolderRepository = Depends(get_folder_repo),
 ):
@@ -561,7 +589,7 @@ async def write_workspace_file_text(
     ws_id: str,
     path: str,
     body: WorkspaceWriteRequest,
-    user: AuthUser,
+    user: WorkspacesApiUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     folder_repo: FolderRepository = Depends(get_folder_repo),
 ):
@@ -600,7 +628,7 @@ async def write_workspace_file_text(
 async def download_workspace_file(
     ws_id: str,
     path: str,
-    user: AuthUser,
+    user: WorkspacesApiUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     folder_repo: FolderRepository = Depends(get_folder_repo),
 ):
@@ -682,7 +710,7 @@ async def download_workspace_archive(
 async def delete_workspace_file(
     ws_id: str,
     path: str,
-    user: AuthUser,
+    user: WorkspacesApiUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     folder_repo: FolderRepository = Depends(get_folder_repo),
 ):
@@ -710,7 +738,7 @@ async def delete_workspace_file(
 async def move_workspace_file(
     ws_id: str,
     body: MoveFileRequest,
-    user: AuthUser,
+    user: WorkspacesApiUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     folder_repo: FolderRepository = Depends(get_folder_repo),
 ):
@@ -739,7 +767,7 @@ async def move_workspace_file(
 async def copy_workspace_file(
     ws_id: str,
     body: MoveFileRequest,
-    user: AuthUser,
+    user: WorkspacesApiUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     folder_repo: FolderRepository = Depends(get_folder_repo),
 ):
@@ -770,7 +798,7 @@ async def copy_workspace_file(
 async def create_workspace_dir(
     ws_id: str,
     body: CreateDirRequest,
-    user: AuthUser,
+    user: WorkspacesApiUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     folder_repo: FolderRepository = Depends(get_folder_repo),
 ):

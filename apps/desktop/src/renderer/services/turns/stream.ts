@@ -17,6 +17,7 @@ import {
   isSidecarEnabled,
   resolveConversationLocalTarget,
   resolveSidecarRoot,
+  setActiveSidecarTurn,
 } from "@/services/sidecarRouting";
 import {
   type OutgoingAgentMention,
@@ -31,7 +32,11 @@ import {
 } from "@/services/streamPathReason";
 import { traceTurnEnd, traceTurnMilestone } from "@/services/turnTrace";
 import { restoreComposerDraft } from "@/stores/composer";
-import { getRuntime, useConversationStore } from "@/stores/conversation";
+import {
+  getRuntime,
+  reusableSendAssistantId,
+  useConversationStore,
+} from "@/stores/conversation";
 import {
   beginTurnPreflight,
   enterTurnStreaming,
@@ -45,12 +50,14 @@ import {
   isAbort,
   isTransportDrop,
 } from "./helpers";
+import { sendMidFlightMessage } from "./midFlight";
 import {
   cancelRejoinLiveTurn,
   rejoinLiveTurn,
   settleOrphanEmptyAssistants,
 } from "./recovery";
 import { runRegenerate } from "./regenerate";
+import { ensureSendAssistantPlaceholder } from "./sendAssistantPlaceholder";
 import { claimPrimaryStream, releasePrimaryStream } from "./streamOwnership";
 import { inspectZeroOutputSendRollback } from "./zeroOutputSendRollback";
 
@@ -63,6 +70,8 @@ export interface SendTurnSpec {
   optimisticUserId: string;
   /** 必填分流；空闲开跑传 ``steer``。 */
   delivery?: "steer" | "queue";
+  /** This turn's selected table row ids. Cloud POST / sidecar startTurn. */
+  tableSelection?: readonly string[];
 }
 
 function setExecutionVia(
@@ -151,6 +160,7 @@ export async function sendTurn(spec: SendTurnSpec): Promise<SendTurnResult> {
     agentMentions = [],
     optimisticUserId,
     delivery = "steer",
+    tableSelection,
   } = spec;
   const store = useConversationStore.getState();
   // A new send takes the stream — stop GET-attach retries so we never race a
@@ -165,9 +175,16 @@ export async function sendTurn(spec: SendTurnSpec): Promise<SendTurnResult> {
   // (audit + session UI latch) without clearing the execution projection.
   dismissRecoverableHints(conversationId);
 
-  // Orphan empty placeholder (1a69f9dc): prior incomplete/streaming blank must
-  // become「已中断」before we append the new user→assistant pair.
-  settleOrphanEmptyAssistants(conversationId);
+  // Prior empty streaming placeholder: stop the spinner; do not invent「已中断」.
+  // Keep the composer-painted bubble — settling it then minting a new id is
+  // the Thinking flash (unmount + enter animation).
+  const keepAssistantId = reusableSendAssistantId(
+    getRuntime(conversationId).messages,
+    optimisticUserId,
+  );
+  settleOrphanEmptyAssistants(conversationId, {
+    keepMessageId: keepAssistantId,
+  });
 
   // Snapshot the pre-bump position so we can undo the optimistic bump if the
   // send fails before the server ever persisted the turn.
@@ -191,19 +208,14 @@ export async function sendTurn(spec: SendTurnSpec): Promise<SendTurnResult> {
     }
   }
 
-  // Fresh attempt: drop any partial assistant bubble left by a failed try
-  // (no-op on the first send, where the user bubble is already last).
-  store.truncateAfter(optimisticUserId, conversationId);
-
-  // Open the assistant bubble now (即时反馈), before the POST even resolves —
-  // mirrors runRegenerate. This flips `isGenerating` on immediately so the
-  // composer shows the stop button and the bubble shows a "Thinking…" indicator
-  // during prepare/TTFT before the first content frame. A′: kickoff no longer
-  // holds folder workspace_lock — 不得静默等锁. Residual write-lock short waits
-  // emit ``workspace_lock_wait`` so the bubble shows「等待工作区…」instead of
-  // faking Thinking…. Cloud desk boot emits ``desk_provision_wait`` →
-  // 「正在准备云端环境」. In-flight 同对话排队时 ``turn_queued`` 先到——仅 QueuedTurnsBar.
-  store.createAssistantMessage(conversationId);
+  // Composer already opened Thinking behind the user bubble. Reuse that id
+  // when it is still a clean placeholder; truncate only a failed-try leftover.
+  // A′: kickoff no longer holds folder workspace_lock — 不得静默等锁. Residual
+  // write-lock short waits emit ``workspace_lock_wait`` so the bubble shows
+  // 「等待工作区…」instead of faking Thinking…. Cloud desk boot emits
+  // ``desk_provision_wait`` → 「正在准备云端环境」. In-flight 同对话排队时
+  // ``turn_queued`` 先到——仅 QueuedTurnsBar.
+  ensureSendAssistantPlaceholder(conversationId, optimisticUserId);
 
   const ac = new AbortController();
   store.setAbort(ac, conversationId);
@@ -263,10 +275,38 @@ export async function sendTurn(spec: SendTurnSpec): Promise<SendTurnResult> {
           optimisticUserId,
           attachments,
           agentMentions,
+          tableSelection,
           signal: ac.signal,
           turnCommit,
         });
       } catch (sidecarErr) {
+        // 忙槽：上一轮还在跑。不当失败脸，改走插队/排队（与生成中再发同一条）。
+        if (
+          sidecarErr instanceof StreamError &&
+          sidecarErr.code === "sidecar_turn_busy"
+        ) {
+          store.truncateAfter(optimisticUserId, conversationId);
+          await sendMidFlightMessage(
+            conversationId,
+            content,
+            attachments.length > 0 ? attachments : undefined,
+            delivery,
+            agentMentions.length > 0 ? agentMentions : undefined,
+            {
+              sidecarTarget,
+              userMessageId: optimisticUserId,
+              tableSelection,
+            },
+          );
+          useConversationStore.getState().setGenerating(true, conversationId);
+          enterTurnStreaming(conversationId);
+          setActiveSidecarTurn(
+            conversationId,
+            sidecarTarget.rootId,
+            sidecarTarget.subpath,
+          );
+          return { unstartedRefusal: false };
+        }
         // 启动期 recoverable：引擎没起来 → 记坏 + 横幅（不降级云）。
         // 云端占位失败不是引擎坏了 → 改走云 POST，不记坏、不写过桥脚注。
         // 中途失败与用户停止不在此列。
@@ -281,8 +321,7 @@ export async function sendTurn(spec: SendTurnSpec): Promise<SendTurnResult> {
           sidecarErr.serverMessage?.trim() || "本地引擎未能启动";
         if (sidecarErr.code === SIDECAR_OCCUPY_FAILED_CODE) {
           setExecutionVia(conversationId, null);
-          store.truncateAfter(optimisticUserId, conversationId);
-          store.createAssistantMessage(conversationId);
+          ensureSendAssistantPlaceholder(conversationId, optimisticUserId);
           beginTurnPreflight(conversationId);
           throwIfCannotOpenStream(conversationId, ac.signal);
           logStreamPath(conversationId, "cloud", "occupy_failed", {
@@ -335,11 +374,13 @@ export async function sendTurn(spec: SendTurnSpec): Promise<SendTurnResult> {
         signal: ac.signal,
         turnCommit,
         streamPathReason: reason,
+        tableSelection,
       });
     }
     const zero = inspectZeroOutputSendRollback(
       conversationId,
       turnCommit.committed,
+      { optimisticUserId },
     );
     if (zero) {
       // SSE error 后 stream 常 resolve：本发已提交 + 空失败 + Class B 码也要回滚。
@@ -355,7 +396,17 @@ export async function sendTurn(spec: SendTurnSpec): Promise<SendTurnResult> {
     return { unstartedRefusal: false };
   } catch (err) {
     if (isAbort(err)) {
-      finalizeHonestStopAbort(conversationId);
+      const zero = inspectZeroOutputSendRollback(
+        conversationId,
+        turnCommit.committed,
+        { optimisticUserId },
+      );
+      if (zero) {
+        rollbackUnstartedOptimisticTurn(conversationId, zero.userId);
+        traceTurnEnd(conversationId, "abort");
+        return { unstartedRefusal: true };
+      }
+      finalizeHonestStopAbort(conversationId, err);
       traceTurnEnd(conversationId, "abort");
       return { unstartedRefusal: false };
     }
@@ -364,6 +415,17 @@ export async function sendTurn(spec: SendTurnSpec): Promise<SendTurnResult> {
     // Sidecar 失败（探活 / 启动期 / 中途）kind 是 "sidecar" 不是 "network"，不走 rejoin。
     if (isTransportDrop(err) && (await rejoinLiveTurn(conversationId))) {
       traceTurnEnd(conversationId, "ok");
+      return { unstartedRefusal: false };
+    }
+    if (isTransportDrop(err)) {
+      // 断线可能仍在跑：不要还字。重连失败只收口生成态。
+      if (!turnCommit.committed && origIndex >= 0 && origUpdatedAt !== null) {
+        restoreConversationCache(conversationId, origIndex, origUpdatedAt);
+      }
+      clearInteractionPrompts(conversationId);
+      finalizeGeneratingIfNeeded(conversationId);
+      surfaceTurnBanner(conversationId, err);
+      traceTurnEnd(conversationId, "error");
       return { unstartedRefusal: false };
     }
     // A failed turn never delivers `approval_resolved`; drop this conversation's
@@ -378,11 +440,10 @@ export async function sendTurn(spec: SendTurnSpec): Promise<SendTurnResult> {
       !turnCommit.committed && isUnstartedSendRefusal(err);
     const zero = unstartedRefusal
       ? null
-      : inspectZeroOutputSendRollback(
-          conversationId,
-          turnCommit.committed,
-          thrownErrorCode(err),
-        );
+      : inspectZeroOutputSendRollback(conversationId, turnCommit.committed, {
+          optimisticUserId,
+          thrownCode: thrownErrorCode(err),
+        });
     if (unstartedRefusal) {
       // 发送当没发生：撤乐观用户泡 + 空助手泡，phase 回 idle（failed 会挡下一发）。
       rollbackUnstartedOptimisticTurn(conversationId, optimisticUserId);

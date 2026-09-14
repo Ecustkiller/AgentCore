@@ -231,8 +231,8 @@ describe("我的提示词上架入口", () => {
       },
     ]);
     renderPage();
-    await openMineItem();
-    expect(await screen.findByText("已上架")).toBeTruthy();
+    const dialog = await openMineItem();
+    expect(within(dialog).getByText("已上架")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "下架" }));
     await waitFor(() => {
       expect(unpublishSkill).toHaveBeenCalledWith("listing-1");

@@ -762,7 +762,35 @@ describe("ToolLine · browser 单步折叠一行", () => {
     expect(collapsedSubline(container)).toBeNull();
   });
 
-  it("does not also chip navigate url when display.detail is present", () => {
+  it("inlines navigate page title, not 打开-url detail", () => {
+    const { container } = render(
+      <ToolLine
+        step={step({
+          tool_name: "browser_navigate",
+          arguments: { url: "https://example.com" },
+          result: "ok",
+          display: {
+            kind: "browser",
+            action: "navigate",
+            url: "https://example.com",
+            title: "示例首页",
+            detail: "打开 https://example.com",
+          },
+          status: "success",
+        })}
+        conversationId="c1"
+      />,
+    );
+    expect(screen.getByText("Navigate")).toBeTruthy();
+    expect(screen.getByText(/示例首页/)).toBeTruthy();
+    expect(screen.queryByText(/打开 https:\/\/example.com/)).toBeNull();
+    expect(screen.queryByText("打开浏览器")).toBeNull();
+    expect(collapsedSubline(container)).toBeNull();
+    fireEvent.click(screen.getByText("Navigate"));
+    expect(screen.getByText("https://example.com")).toBeTruthy();
+  });
+
+  it("falls back to url when navigate has no page title", () => {
     const { container } = render(
       <ToolLine
         step={step({
@@ -780,7 +808,8 @@ describe("ToolLine · browser 单步折叠一行", () => {
       />,
     );
     expect(screen.getByText("Navigate")).toBeTruthy();
-    expect(screen.getByText(/打开 https:\/\/example.com/)).toBeTruthy();
+    expect(screen.getByText(/https:\/\/example.com/)).toBeTruthy();
+    expect(screen.queryByText(/打开 https:\/\/example.com/)).toBeNull();
     expect(collapsedSubline(container)).toBeNull();
   });
 
@@ -824,7 +853,7 @@ describe("ToolLine · browser 单步折叠一行", () => {
       );
       expect(screen.getByText("6s")).toBeTruthy();
       expect(collapsedSubline(container)).toBeNull();
-      expect(container.querySelector(".animate-pulse.rounded-full")).toBeNull();
+      expect(container.querySelector("[data-live-flow]")).not.toBeNull();
       unmount();
     } finally {
       vi.useRealTimers();
@@ -895,6 +924,88 @@ describe("ToolLine · browser 单步折叠一行", () => {
     expect(screen.queryByText("未找到元素 e13。")).toBeNull();
     expect(screen.queryByText(/ElementNotFound/)).toBeNull();
     expect(collapsedSubline(container)).toBeNull();
+  });
+});
+
+describe("ToolLine · live-flow", () => {
+  it("sweeps a running file_read row", () => {
+    const { container } = render(
+      <ToolLine
+        step={step({
+          tool_name: "file_read",
+          arguments: { path: "src/foo.ts" },
+          status: "running",
+          result: null,
+        })}
+      />,
+    );
+    expect(container.querySelector("[data-live-flow]")).not.toBeNull();
+    expect(container.querySelector(".live-flow-text")).not.toBeNull();
+  });
+
+  it("keeps search-result silhouette while running, driven by live-flow not pulse", () => {
+    const { container } = render(
+      <ToolLine
+        step={step({
+          tool_name: "web_search",
+          arguments: { query: "深圳天气" },
+          status: "running",
+          result: null,
+        })}
+      />,
+    );
+    expect(container.querySelector("[data-live-flow]")).not.toBeNull();
+    expect(container.querySelector(".mt-1 .bg-muted")).not.toBeNull();
+    expect(container.querySelector(".mt-1 .animate-pulse")).toBeNull();
+  });
+
+  it("does not sweep a settled tool row", () => {
+    const { container } = render(
+      <ToolLine
+        step={step({
+          tool_name: "file_read",
+          arguments: { path: "src/foo.ts" },
+          status: "success",
+          result: "ok",
+        })}
+      />,
+    );
+    expect(container.querySelector("[data-live-flow]")).toBeNull();
+  });
+});
+
+describe("ToolLineGroup · live-flow", () => {
+  const groupTools = [
+    step({
+      id: "a",
+      tool_name: "file_read",
+      arguments: { path: "src/foo.ts" },
+      status: "success",
+      result: "ok",
+    }),
+    step({
+      id: "b",
+      tool_name: "file_read",
+      arguments: { path: "src/bar.ts" },
+      status: "running",
+      result: null,
+    }),
+  ];
+
+  it("sweeps the collapsed header while a child is running", () => {
+    const { container } = render(
+      <ToolLineGroup tools={groupTools} isStreaming={false} />,
+    );
+    expect(container.querySelectorAll("[data-live-flow]")).toHaveLength(1);
+    expect(screen.getByText(/foo\.ts · bar\.ts/)).toBeTruthy();
+  });
+
+  it("sweeps the running child instead of the header while expanded", () => {
+    const { container } = render(
+      <ToolLineGroup tools={groupTools} isStreaming />,
+    );
+    expect(screen.getByText("src/bar.ts")).toBeTruthy();
+    expect(container.querySelectorAll("[data-live-flow]")).toHaveLength(1);
   });
 });
 
@@ -1022,7 +1133,7 @@ describe("ToolLineGroup · web_search 平铺", () => {
   });
 });
 
-describe("ToolLineGroup · 混杂组浏览器 CTA", () => {
+describe("ToolLineGroup · 混杂组不挂浏览器胶囊", () => {
   function browserStep(id: string, over?: Partial<ToolStep>): ToolStep {
     return step({
       id,
@@ -1045,7 +1156,7 @@ describe("ToolLineGroup · 混杂组浏览器 CTA", () => {
     });
   }
 
-  it("shows a single group-header CTA for mixed unified-browser+other groups", () => {
+  it("does not hang 打开浏览器 on mixed unified-browser+other groups", () => {
     render(
       <ToolLineGroup
         tools={[
@@ -1062,13 +1173,11 @@ describe("ToolLineGroup · 混杂组浏览器 CTA", () => {
         conversationId="c1"
       />,
     );
-    const ctas = screen.getAllByText("打开浏览器");
-    expect(ctas).toHaveLength(1);
-    fireEvent.click(ctas[0]);
-    expect(showBrowser).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("打开浏览器")).toBeNull();
+    expect(screen.queryByText("查看直播")).toBeNull();
   });
 
-  it("shows a single group-header CTA for mixed browser+other groups", () => {
+  it("does not hang 打开浏览器 on mixed browser+other groups", () => {
     render(
       <ToolLineGroup
         tools={[
@@ -1085,13 +1194,11 @@ describe("ToolLineGroup · 混杂组浏览器 CTA", () => {
         conversationId="c1"
       />,
     );
-    const ctas = screen.getAllByText("打开浏览器");
-    expect(ctas).toHaveLength(1);
-    fireEvent.click(ctas[0]);
-    expect(showBrowser).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("打开浏览器")).toBeNull();
+    expect(screen.queryByText("查看直播")).toBeNull();
   });
 
-  it("labels the CTA 查看直播 when any step is running", () => {
+  it("does not hang 查看直播 when a mixed-group step is running", () => {
     render(
       <ToolLineGroup
         tools={[
@@ -1108,35 +1215,8 @@ describe("ToolLineGroup · 混杂组浏览器 CTA", () => {
         conversationId="c1"
       />,
     );
-    expect(screen.getByText("查看直播")).toBeTruthy();
-    expect(screen.queryByText("打开浏览器")).toBeNull();
-  });
-
-  it("does not show a browser CTA for pure non-browser groups", () => {
-    render(
-      <ToolLineGroup
-        tools={[
-          step({
-            id: "c1",
-            tool_name: "code_execute",
-            arguments: { code: "1+1" },
-            result: "2",
-            status: "success",
-          }),
-          step({
-            id: "f1",
-            tool_name: "file_read",
-            arguments: { path: "a.ts" },
-            result: "ok",
-            status: "success",
-          }),
-        ]}
-        isStreaming={false}
-        conversationId="c1"
-      />,
-    );
-    expect(screen.queryByText("打开浏览器")).toBeNull();
     expect(screen.queryByText("查看直播")).toBeNull();
+    expect(screen.queryByText("打开浏览器")).toBeNull();
   });
 });
 
@@ -1493,7 +1573,8 @@ describe("ToolLine · browser action 标签", () => {
       />,
     );
     expect(screen.getByText("Navigate")).toBeTruthy();
-    expect(screen.getByText(/打开 https:\/\/example.com/)).toBeTruthy();
+    expect(screen.getByText(/https:\/\/example.com/)).toBeTruthy();
+    expect(screen.queryByText(/打开 https:\/\/example.com/)).toBeNull();
   });
 
   it("running browser step uses args.action, not slice of browser", () => {
@@ -1740,10 +1821,11 @@ describe("toolGroupSummary · web_fetch", () => {
 
 describe("ComposingToolLine · 参数组装心跳", () => {
   it("shows tool label only for non-write tools — no 正在组装 / Composing / 字", () => {
-    renderWithTooltip(
+    const { container } = renderWithTooltip(
       <ComposingToolLine tool={{ toolName: "web_search", chars: 1280 }} />,
     );
     expect(screen.getByText("Search web")).toBeTruthy();
+    expect(container.querySelector("[data-live-flow]")).not.toBeNull();
     expect(screen.queryByText(/正在组装/)).toBeNull();
     expect(screen.queryByText(/Composing/i)).toBeNull();
     expect(screen.queryByText(/字/)).toBeNull();

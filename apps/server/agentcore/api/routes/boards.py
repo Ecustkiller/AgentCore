@@ -8,11 +8,9 @@ session as the rest of the app (no new gate).
 """
 
 from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from agentcore.api.dependencies import AuthUser, get_board_repo, get_db
+from agentcore.api.dependencies import AuthUser, get_board_repo
 from agentcore.api.schemas import (
-    BoardConversationResponse,
     BoardDetail,
     BoardSceneWriteRequest,
     BoardSummary,
@@ -22,7 +20,7 @@ from agentcore.api.schemas import (
     UpdateBoardRequest,
 )
 from agentcore.core.errors import NotFoundError
-from agentcore.db.repositories import BoardRepository, ConversationRepository
+from agentcore.db.repositories import BoardRepository
 
 router = APIRouter(prefix="/boards", tags=["boards"])
 
@@ -102,39 +100,6 @@ async def write_board_scene(
             board=BoardDetail.model_validate(board),
         )
     return BoardWriteResult(ok=True, version=board.version)
-
-
-@router.post("/{board_id}/conversation", response_model=BoardConversationResponse)
-async def ensure_board_conversation(
-    board_id: str,
-    user: AuthUser,
-    session: AsyncSession = Depends(get_db),
-):
-    """Get (or lazily mint) the board's dedicated AI conversation (AI协作白板.md §三 A / M2).
-
-    Idempotent: returns the existing ``conversation_id`` if the board already has one;
-    otherwise creates a bare chat (titled like the board, no folder) and binds it.
-    Both repos share one session so the create + link commit together. The canvas calls
-    this before its first AI turn, then runs the turn on the returned conversation.
-    """
-    boards = BoardRepository(session)
-    board = await boards.get_by_id(board_id, user_id=user.user_id)
-    if not board:
-        raise NotFoundError("白板不存在")
-    if board.conversation_id:
-        return BoardConversationResponse(conversation_id=board.conversation_id)
-    conversations = ConversationRepository(session)
-    # Board AI sits on a bare chat (scratch). Leftover ``Board.folder_id`` is unread;
-    # 「实现到工作区」picks a desk at that moment, not at board creation.
-    conv = await conversations.create(
-        user_id=user.user_id,
-        title=board.title or _DEFAULT_TITLE,
-        folder_id=None,
-    )
-    await boards.attach_conversation(
-        board_id, user_id=user.user_id, conversation_id=conv.id
-    )
-    return BoardConversationResponse(conversation_id=conv.id)
 
 
 @router.delete("/{board_id}", response_model=StatusResponse)

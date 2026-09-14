@@ -707,7 +707,7 @@ async def test_recover_expired_lease_redrive_facts_land_on_original_turn(monkeyp
             return None
 
     monkeypatch.setattr(
-        "agentcore.conversation.store.get_conversation_store", lambda: _FakeStore()
+        "agentcore.runtime.conversation_store.get_conversation_store", lambda: _FakeStore()
     )
 
     async def _fake_orphan(**kwargs):
@@ -1245,8 +1245,8 @@ async def test_recover_expired_lease_stalled_attempts_salvages(monkeypatch):
 
 async def test_production_crash_factory_returns_none_without_turn_started(monkeypatch):
     """Missing turn_started in journal → rebuild_failed warning + None (salvage upstream)."""
-    from agentcore.runtime import crash_delegate as crash_mod
-    from agentcore.runtime.crash_delegate import production_crash_delegate_factory
+    from agentcore.conversation import crash_delegate as crash_mod
+    from agentcore.conversation.crash_delegate import production_crash_delegate_factory
     from tests.conftest import LogSpy
 
     spy = LogSpy()
@@ -1268,8 +1268,8 @@ async def test_production_crash_factory_base_prompt_lists_system_skills(monkeypa
     """Crash rebuild ``<按需目录>`` comes from MergedConsultSource (includes system skills)."""
     from unittest.mock import AsyncMock
 
-    from agentcore.runtime import crash_delegate as crash_mod
-    from agentcore.runtime.crash_delegate import production_crash_delegate_factory
+    from agentcore.conversation import crash_delegate as crash_mod
+    from agentcore.conversation.crash_delegate import production_crash_delegate_factory
     from agentcore.runtime.facts import FactKind
     from agentcore.runtime.resolve.prompt import rebuild as rebuild_mod
 
@@ -1309,7 +1309,7 @@ async def test_production_crash_factory_base_prompt_lists_system_skills(monkeypa
     )
     monkeypatch.setattr(crash_mod, "async_session_factory", lambda: _FakeSession())
     monkeypatch.setattr(crash_mod, "ConversationRepository", _FakeConvRepo)
-    monkeypatch.setattr(crash_mod, "BoardRepository", _FakeBoardRepo)
+    monkeypatch.setattr(crash_mod, "TableRepository", _FakeBoardRepo)
     monkeypatch.setattr(
         crash_mod, "resolve_local_binding", AsyncMock(return_value=None)
     )

@@ -23,6 +23,7 @@ from agentcore.runtime.interaction import (
 from agentcore.runtime.journal.pending_interactions import (
     PendingInteraction,
     fold_pending_interactions,
+    unrecorded_hot_orphans,
 )
 from agentcore.runtime.settlement import prewrite_settlement, prewrite_settlement_direct
 
@@ -248,26 +249,38 @@ async def orphan_journal_pending(
     entries: list[dict[str, Any]],
     trace_id: str | None = None,
 ) -> list[str]:
-    """Orphan journal-fold pending for a turn (lease recover / resolve兜底)."""
+    """Orphan journal-fold pending for a turn (lease recover / resolve兜底).
+
+    After ``turn_end`` the fold pending set is empty (leftover hot cards are already
+    ``orphaned``). Still write ``interaction_orphaned`` for those unrecorded leftovers
+    so GET messages / catch-up carry the settlement fact, not only the fold rule.
+    """
     pending = fold_pending_interactions(entries, message_id=turn_id)
+    targets: list[tuple[str, str]] = [
+        (item.id, item.kind) for item in pending if _should_orphan_pending(item)
+    ]
+    seen = {iid for iid, _ in targets}
+    for iid, kind in unrecorded_hot_orphans(entries):
+        if iid not in seen:
+            targets.append((iid, kind))
+            seen.add(iid)
+
     orphaned: list[str] = []
-    for item in pending:
-        if not _should_orphan_pending(item):
-            continue
+    registry = default_interaction_registry()
+    for interaction_id, kind in targets:
         # Future 仍在 → 断连≠失效，跳过
-        registry = default_interaction_registry()
-        live = registry.get(item.id)
+        live = registry.get(interaction_id)
         if live is not None and not live.future.done():
             continue
         await emit_orphan_fact(
-            interaction_id=item.id,
-            kind=item.kind,
+            interaction_id=interaction_id,
+            kind=kind,
             turn_id=turn_id,
             conversation_id=conversation_id,
             trace_id=trace_id,
             prefer_direct=True,
         )
-        orphaned.append(item.id)
+        orphaned.append(interaction_id)
     if orphaned:
         logger.info(
             "interaction.orphaned_journal",
@@ -276,6 +289,34 @@ async def orphan_journal_pending(
             ids=orphaned,
         )
     return orphaned
+
+
+async def orphan_hot_pending_after_terminal_persist(
+    *,
+    turn_id: str,
+    conversation_id: str,
+    trace_id: str | None = None,
+) -> list[str]:
+    """After ``turn_end`` landed: write ``interaction_orphaned`` for leftover hot cards.
+
+    Registry Futures in *this* process still skip (断连 ≠ 失效). Sidecar write-back
+    and cloud interrupt close run in the API process where those Futures are gone.
+    Failures log and do not abort the terminal persist.
+    """
+    try:
+        return await orphan_turn_before_recover(
+            turn_id=turn_id,
+            conversation_id=conversation_id,
+            trace_id=trace_id,
+        )
+    except Exception as e:  # noqa: BLE001 — closer must not fail the persist
+        logger.warning(
+            "interaction.orphan_after_terminal_failed",
+            turn_id=turn_id,
+            conversation_id=conversation_id,
+            error=str(e),
+        )
+        return []
 
 
 async def orphan_turn_before_recover(

@@ -81,6 +81,7 @@ beforeEach(() => {
     changesFocusMessageId: null,
     dismissedContexts: new Set(),
     pendingBadge: 0,
+    fileTabChrome: {},
   });
   useExecutionStore.setState({ byId: {} });
   useConversationStore.setState({ currentConversationId: "conv-test" });
@@ -699,6 +700,20 @@ describe("showChanges / showFile / openTerminalTab（方案 B 顶栏 IA）", () 
     if (tab.kind === "file") {
       expect(tab.path).toBe("");
     }
+  });
+
+  it("setFileTabChrome survives openTab replace and clears on closeTab", () => {
+    panel().showFile("a.txt", "a.txt");
+    const id = panel().tabs.find((t) => t.kind === "file")?.id;
+    if (!id) throw new Error("expected file tab");
+    panel().setFileTabChrome(id, { dirty: true, confirmDiscard: true });
+    panel().showFile("a.txt", "a.txt");
+    expect(panel().fileTabChrome[id]).toEqual({
+      dirty: true,
+      confirmDiscard: true,
+    });
+    panel().closeTab(id);
+    expect(panel().fileTabChrome[id]).toBeUndefined();
   });
 
   it("openTerminalTab dedups to a single terminal hub tab", () => {

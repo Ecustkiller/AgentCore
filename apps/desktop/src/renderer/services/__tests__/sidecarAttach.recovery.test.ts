@@ -23,6 +23,7 @@ import { resetSidecarEventPumpForTests } from "../sidecarEventPump";
 import {
   clearActiveSidecarTurn,
   getActiveSidecarTarget,
+  getLastSidecarTarget,
   setActiveSidecarTurn,
 } from "../sidecarRouting";
 import { projectUnsyncedTurns } from "../turns/projectUnsynced";
@@ -61,6 +62,7 @@ function stubSidecarApi(over: {
   attach?: ReturnType<typeof vi.fn>;
   recovery?: ReturnType<typeof vi.fn>;
   cancel?: ReturnType<typeof vi.fn>;
+  occupancy?: ReturnType<typeof vi.fn>;
 }): void {
   vi.stubGlobal("window", {
     __WEB__: false,
@@ -74,6 +76,7 @@ function stubSidecarApi(over: {
           paused: [],
         })),
       cancel: over.cancel ?? vi.fn(),
+      occupancy: over.occupancy,
       onEvent: vi.fn((cb: (push: EventPush) => void) => {
         onEventCalls += 1;
         onEventCb = cb;
@@ -292,7 +295,7 @@ describe("projectUnsyncedTurns (D5)", () => {
     expect(msgs.some((m) => m.id === "a-server")).toBe(false);
   });
 
-  it("marks open ghost as interrupted incomplete", () => {
+  it("open unsynced assistant stops streaming without inventing interrupted", () => {
     useConversationStore.getState().switchConversation(CID);
     projectUnsyncedTurns(CID, [
       unsyncedReady({
@@ -309,7 +312,7 @@ describe("projectUnsyncedTurns (D5)", () => {
       .byId[CID].messages.find((m) => m.id === "a-open");
     expect(assistant?.status).toBe("incomplete");
     expect(assistant?.isStreaming).toBe(false);
-    expect(assistant?.finishReason).toBe("interrupted");
+    expect(assistant?.finishReason).toBeUndefined();
   });
 
   it("empty cancelled ready keeps cancelled finish (B5 空泡脸)", () => {
@@ -482,7 +485,7 @@ describe("attachSidecarTurn (D4)", () => {
   it("without external abort, attach keeps isGenerating until natural terminal", async () => {
     useConversationStore.getState().switchConversation(CID);
 
-    // Mirror fold: message_end clears generating (teardown only clears on viewer abort).
+    // Mirror fold: message_end clears generating (occupancy idle is the fallback).
     dispatchMock.mockImplementation((event) => {
       if (event.type === "message_end" || event.type === "error") {
         useConversationStore.getState().setGenerating(false, CID);
@@ -535,6 +538,148 @@ describe("attachSidecarTurn (D4)", () => {
     expect(cancelMock).not.toHaveBeenCalled();
     expect(getActiveSidecarTarget(CID)).toBeNull();
     expect(useConversationStore.getState().byId[CID]?.isGenerating).toBe(false);
+  });
+
+  it("natural end without message_end: occupancy idle drops generating, keeps last target", async () => {
+    useConversationStore.getState().switchConversation(CID);
+
+    let resolveAttach!: (v: ReturnType<typeof attachLiveResponse>) => void;
+    const attachGate = new Promise<ReturnType<typeof attachLiveResponse>>(
+      (resolve) => {
+        resolveAttach = resolve;
+      },
+    );
+    const occupancy = vi.fn(async () => ({ occupied: false }));
+    const attachMock = vi.fn(() => attachGate);
+    stubSidecarApi({
+      attach: attachMock,
+      occupancy,
+    });
+
+    const p = attachSidecarTurn(CID);
+    await vi.waitFor(() => expect(attachMock).toHaveBeenCalled());
+    resolveAttach(
+      attachLiveResponse({
+        events: [
+          {
+            type: "message_start",
+            timestamp: "t0",
+            payload: { message_id: "a-live" },
+          },
+        ],
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(getActiveSidecarTarget(CID)?.turnId).toBe("turn-live"),
+    );
+    expect(useConversationStore.getState().byId[CID]?.isGenerating).toBe(true);
+
+    onEventCb?.({
+      conversationId: CID,
+      turnId: "turn-live",
+      event: {
+        type: "error",
+        timestamp: "t-end",
+        payload: { message: "dropped terminal" },
+      },
+    });
+    await expect(p).resolves.toBe(true);
+    expect(occupancy).toHaveBeenCalledWith({ conversationId: CID });
+    expect(useConversationStore.getState().byId[CID]?.isGenerating).toBe(false);
+    expect(getLastSidecarTarget(CID)?.turnId).toBe("turn-live");
+  });
+
+  it("natural end without message_end: occupancy still occupied keeps generating", async () => {
+    useConversationStore.getState().switchConversation(CID);
+
+    let resolveAttach!: (v: ReturnType<typeof attachLiveResponse>) => void;
+    const attachGate = new Promise<ReturnType<typeof attachLiveResponse>>(
+      (resolve) => {
+        resolveAttach = resolve;
+      },
+    );
+    const attachMock = vi.fn(() => attachGate);
+    stubSidecarApi({
+      attach: attachMock,
+      occupancy: vi.fn(async () => ({ occupied: true })),
+    });
+
+    const p = attachSidecarTurn(CID);
+    await vi.waitFor(() => expect(attachMock).toHaveBeenCalled());
+    resolveAttach(
+      attachLiveResponse({
+        events: [
+          {
+            type: "message_start",
+            timestamp: "t0",
+            payload: { message_id: "a-live" },
+          },
+        ],
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(getActiveSidecarTarget(CID)?.turnId).toBe("turn-live"),
+    );
+
+    onEventCb?.({
+      conversationId: CID,
+      turnId: "turn-live",
+      event: {
+        type: "error",
+        timestamp: "t-end",
+        payload: { message: "dropped terminal" },
+      },
+    });
+    await expect(p).resolves.toBe(true);
+    expect(useConversationStore.getState().byId[CID]?.isGenerating).toBe(true);
+    expect(getLastSidecarTarget(CID)?.turnId).toBe("turn-live");
+  });
+
+  it("natural end without message_end: occupancy throw does not clear generating", async () => {
+    useConversationStore.getState().switchConversation(CID);
+
+    let resolveAttach!: (v: ReturnType<typeof attachLiveResponse>) => void;
+    const attachGate = new Promise<ReturnType<typeof attachLiveResponse>>(
+      (resolve) => {
+        resolveAttach = resolve;
+      },
+    );
+    const attachMock = vi.fn(() => attachGate);
+    stubSidecarApi({
+      attach: attachMock,
+      occupancy: vi.fn(async () => {
+        throw new Error("ipc down");
+      }),
+    });
+
+    const p = attachSidecarTurn(CID);
+    await vi.waitFor(() => expect(attachMock).toHaveBeenCalled());
+    resolveAttach(
+      attachLiveResponse({
+        events: [
+          {
+            type: "message_start",
+            timestamp: "t0",
+            payload: { message_id: "a-live" },
+          },
+        ],
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(getActiveSidecarTarget(CID)?.turnId).toBe("turn-live"),
+    );
+
+    onEventCb?.({
+      conversationId: CID,
+      turnId: "turn-live",
+      event: {
+        type: "error",
+        timestamp: "t-end",
+        payload: { message: "dropped terminal" },
+      },
+    });
+    await expect(p).resolves.toBe(true);
+    expect(useConversationStore.getState().byId[CID]?.isGenerating).toBe(true);
   });
 
   it("attached:false does not leave generating hung (fact-driven re-query)", async () => {

@@ -48,6 +48,7 @@ import {
   WORKSPACE_TAB_ID,
   browserDismissKey,
   canFloatTabId,
+  confirmFileTabDiscard,
   terminalDismissKey,
   useSidePanelStore,
 } from "@/stores/sidePanel";
@@ -118,6 +119,7 @@ export function SidePanel() {
   const closePanel = useSidePanelStore((s) => s.closePanel);
   const tabs = useSidePanelStore((s) => s.tabs);
   const floats = useSidePanelStore((s) => s.floats);
+  const fileTabChrome = useSidePanelStore((s) => s.fileTabChrome);
   const activeTabId = useSidePanelStore((s) => s.activeTabId);
   const setActiveTab = useSidePanelStore((s) => s.setActiveTab);
   const closeTab = useSidePanelStore((s) => s.closeTab);
@@ -379,6 +381,7 @@ export function SidePanel() {
 
   const onCloseContentTab = useCallback(
     (tabId: string) => {
+      if (!confirmFileTabDiscard(tabId)) return;
       if (tabId !== TEAM_TERMINAL_TAB_ID) {
         closeTab(tabId);
         return;
@@ -456,6 +459,8 @@ export function SidePanel() {
                 active={tab.id === activeTab?.id}
                 icon={detailTabIcon(tab)}
                 label={tab.title}
+                title={tab.kind === "file" ? tab.path : undefined}
+                dirty={Boolean(fileTabChrome[tab.id]?.dirty)}
                 onSelect={() => setActiveTab(tab.id)}
                 onClose={() => onCloseContentTab(tab.id)}
                 onPopOut={
@@ -534,6 +539,7 @@ export function SidePanel() {
               name={tab.name}
               workspaceId={tab.workspaceId}
               channel={tab.channel}
+              tabId={tab.id}
               onClose={() => closeTab(tab.id)}
             />
           </div>

@@ -18,11 +18,13 @@ from agentcore.security import (
     create_folders_token,
     create_inference_token,
     create_preview_token,
+    create_workspaces_token,
     decode_access_token,
     decode_account_token,
     decode_folders_token,
     decode_inference_token,
     decode_preview_token,
+    decode_workspaces_token,
 )
 
 _JWT_ALGORITHM = "HS256"
@@ -77,6 +79,7 @@ def test_preview_token_rejects_other_types():
         create_inference_token("user-1"),
         create_folders_token("user-1"),
         create_account_token("user-1"),
+        create_workspaces_token("user-1"),
     )
     for other in others:
         with pytest.raises(AuthenticationError):
@@ -93,6 +96,8 @@ def test_other_decoders_reject_preview_token():
         decode_folders_token(preview)
     with pytest.raises(AuthenticationError):
         decode_account_token(preview)
+    with pytest.raises(AuthenticationError):
+        decode_workspaces_token(preview)
 
 
 def test_preview_token_rejects_expired():

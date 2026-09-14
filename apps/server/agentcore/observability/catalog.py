@@ -210,12 +210,30 @@ EVENTS: list[EventSpec] = [
             'user_id': FieldType('str'),
         },
     ),
-    EventSpec(name='board.op_timeout'),
-    EventSpec(name='board.ops_apply'),
-    EventSpec(name='board.read'),
-    EventSpec(name='board.read_billing_failed'),
-    EventSpec(name='board.read_timeout'),
-    EventSpec(name='board.read_vision_failed'),
+    EventSpec(
+        name='board.op_timeout',
+        description='历史兼容：曾在白板 AI 操作超时发出；白板 AI 工具面已卸，不再发此事件',
+    ),
+    EventSpec(
+        name='board.ops_apply',
+        description='历史兼容：曾在白板 AI 应用操作时发出；白板 AI 工具面已卸，不再发此事件',
+    ),
+    EventSpec(
+        name='board.read',
+        description='历史兼容：曾在白板 AI 读盘时发出；白板 AI 工具面已卸，不再发此事件',
+    ),
+    EventSpec(
+        name='board.read_billing_failed',
+        description='历史兼容：曾在白板 AI 读盘计费失败时发出；白板 AI 工具面已卸，不再发此事件',
+    ),
+    EventSpec(
+        name='board.read_timeout',
+        description='历史兼容：曾在白板 AI 读盘超时发出；白板 AI 工具面已卸，不再发此事件',
+    ),
+    EventSpec(
+        name='board.read_vision_failed',
+        description='历史兼容：曾在白板 AI 视觉读失败时发出；白板 AI 工具面已卸，不再发此事件',
+    ),
     EventSpec(
         name='browser.cgroup_unwritable_ignore',
         description=(
@@ -474,8 +492,8 @@ EVENTS: list[EventSpec] = [
     EventSpec(
         name='chat.zero_output_send_deleted',
         description=(
-            '本发新建 user + 空失败助手（LLM_RATE_LIMIT / KEY_INVALID / 余额不足，无正文/工具/token'
-            '）已硬删，发送在库里当没发生；cost_events 留下'
+            '本发新建 user + 空失败助手（无思考/正文/工具/派工）已硬删，发送在库里当没发生；cost_ev'
+            'ents 留下。error_code 仅观测，不闸'
         ),
         fields={
             'conversation_id': FieldType('str'),
@@ -1448,7 +1466,6 @@ EVENTS: list[EventSpec] = [
     ),
     EventSpec(name='event_sink.seq_backfill_failed'),
     EventSpec(name='event_tap.failed'),
-    EventSpec(name='evidence.promote_landed_note_refs'),
     EventSpec(name='favicon.fetch_failed'),
     EventSpec(name='file_delete.collision'),
     EventSpec(name='file_move.collision'),
@@ -1634,6 +1651,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='inference.proxy_upstream_error'),
     EventSpec(name='inference.web_search'),
     EventSpec(name='inference.web_search_failed'),
+    EventSpec(name='interaction.orphan_after_terminal_failed'),
     EventSpec(name='interaction.orphan_write_failed'),
     EventSpec(name='interaction.orphaned_journal'),
     EventSpec(name='interaction.orphaned_registry'),
@@ -2209,7 +2227,6 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='redis.probe_failed'),
     EventSpec(name='replan.applied'),
     EventSpec(name='replan.rejected'),
-    EventSpec(name='research.ledger_anchor_inject_failed'),
     EventSpec(name='resume.already_settled'),
     EventSpec(name='resume.claim_unresolved'),
     EventSpec(name='resume.deferred'),
@@ -2637,16 +2654,46 @@ EVENTS: list[EventSpec] = [
             'user_id': FieldType('str'),
         },
     ),
-    EventSpec(name='stage_card.consume_prepared'),
-    EventSpec(name='stage_card.debate_pipeline_failed'),
-    EventSpec(name='stage_card.emitted'),
-    EventSpec(name='stage_card.finalize_at_started_failed'),
-    EventSpec(name='stage_card.host_attach_invalid'),
-    EventSpec(name='stage_card.host_triple_missing'),
-    EventSpec(name='stage_card.journal_write_failed'),
-    EventSpec(name='stage_card.orphaned'),
-    EventSpec(name='stage_card.start_debate_exception_kept_pending'),
-    EventSpec(name='stage_card.supersede_prior_failed'),
+    EventSpec(
+        name='stage_card.consume_prepared',
+        description='历史兼容：曾在点卡开辩前消费推进卡；入口已下线，不再发此事件',
+    ),
+    EventSpec(
+        name='stage_card.debate_pipeline_failed',
+        description='历史兼容：曾在推进卡直起辩论管道失败时发出；直起管道已删，不再发此事件',
+    ),
+    EventSpec(
+        name='stage_card.emitted',
+        description='历史兼容：曾在调研收尾登记推进卡时发出；新调研不再发卡，不再发此事件',
+    ),
+    EventSpec(
+        name='stage_card.finalize_at_started_failed',
+        description='历史兼容：曾在开辩当时结算推进卡失败时发出；入口已下线，不再发此事件',
+    ),
+    EventSpec(
+        name='stage_card.host_attach_invalid',
+        description='历史兼容：曾在推进卡宿主三元组失效时发出；直起链已删，不再发此事件',
+    ),
+    EventSpec(
+        name='stage_card.host_triple_missing',
+        description='历史兼容：曾在发卡时打不上宿主三元组时发出；不再发卡，不再发此事件',
+    ),
+    EventSpec(
+        name='stage_card.journal_write_failed',
+        description='历史兼容：曾在推进卡落盘失败时发出；不再发卡，不再发此事件',
+    ),
+    EventSpec(
+        name='stage_card.orphaned',
+        description='历史兼容：曾在后续回合给遗留推进卡写 orphan 墓碑；不再盖章，不再发此事件',
+    ),
+    EventSpec(
+        name='stage_card.start_debate_exception_kept_pending',
+        description='历史兼容：曾在点卡开辩异常时保持 pending；入口已下线，不再发此事件',
+    ),
+    EventSpec(
+        name='stage_card.supersede_prior_failed',
+        description='历史兼容：曾在新卡 supersede 旧 pending 失败时发出；不再发卡，不再发此事件',
+    ),
     EventSpec(name='str_replace.collision'),
     EventSpec(
         name='stream_state.retention_failed',
@@ -2682,6 +2729,8 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='suspension.retention_swept'),
     EventSpec(name='suspension.saver_failed'),
     EventSpec(name='suspension.turn_paused_capture_failed'),
+    EventSpec(name='table.ops_apply'),
+    EventSpec(name='table.read'),
     EventSpec(
         name='team_preview.list_pending_failed',
         description='历史兼容：曾在列出待处理开工卡失败时发出；开工卡产品位已拆，不再发此事件',
@@ -2991,5 +3040,6 @@ EVENTS: list[EventSpec] = [
             'error': FieldType('str'),
         },
     ),
+    EventSpec(name='workspaces.cloud_unreachable'),
 ]
 

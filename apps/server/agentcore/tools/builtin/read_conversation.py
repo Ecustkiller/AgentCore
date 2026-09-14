@@ -174,6 +174,7 @@ class ReadConversationTool:
         surface=ToolSurface.WORKER_ONLY,
         audience=AUDIENCE_BOTH,
         manual_wire=True,
+        catalog_summary="读一条对话全文",
     )
 
     folder_id: str | None = None

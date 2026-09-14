@@ -1,6 +1,6 @@
 """User-facing tool failure face (``tool_use_end.failure``) — category gate.
 
-Isomorphic to :func:`agentcore.core.errors.error_fields_for`:
+Isomorphic to :func:`agentcore.runtime.error_fields.error_fields_for`:
 
 - Authored product copy (engine deny paths / optional ``ToolResult.failure_message``)
   passes through with a stable ``code``.

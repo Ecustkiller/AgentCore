@@ -33,60 +33,22 @@ from contextvars import ContextVar, Token
 from typing import NoReturn
 
 from agentcore.config import settings
-from agentcore.core.error_codes import ErrorCode
+from agentcore.core.errors import (
+    LocalChannelDeadError,
+    LocalDesktopOfflineError,
+    LocalOriginDeviceOfflineError,
+    LocalRootNotHeldError,
+    LocalWorkspaceUnavailable,
+)
 from agentcore.core.logging import get_logger
-from agentcore.fulfill.origin import ORIGIN_DEVICE_OFFLINE, current_origin_device
+from agentcore.fulfill.origin import current_origin_device
 from agentcore.workspace.limits import (
-    CHANNEL_DEAD_PREPARE_ABORT,
-    LOCAL_ROOT_NOT_HELD,
-    is_channel_dead_detail,
-    is_liveness_timeout_detail,
+    workspace_channel_failure_kind,
 )
 from agentcore.workspace.presence import backend_needs_workspace_fulfiller
 from agentcore.workspace.protocol import WorkspaceIOError
 
 logger = get_logger(__name__)
-
-# Case 1 — no workspace fulfiller online for this user.
-LOCAL_DESKTOP_OFFLINE = (
-    "本机桌面未连接，无法访问本地工作区。"
-    "请打开桌面客户端并登录后再试。"
-)
-
-# Case 2 — ``LOCAL_ROOT_NOT_HELD``, imported from ``workspace/limits.py``: mid-turn
-# delivery says the same thing when roots change after this gate ran
-# (``fulfill/dispatch.py`` → ``DeliverResult.ROOT_NOT_HELD``).
-
-# Case 3 — re-export prepare-budget / IO-hang abort (not mid-turn presence).
-LOCAL_CHANNEL_DEAD = CHANNEL_DEAD_PREPARE_ABORT
-
-# Case 4 — some other install could serve this op, but it is not the machine the
-# user is working from, and local file ops must not silently change machine.
-LOCAL_ORIGIN_DEVICE_OFFLINE = (
-    f"{ORIGIN_DEVICE_OFFLINE}"
-    "（本地工作区操作不会转投其他电脑。）"
-)
-
-PREPARE_LOCAL_ABORT_MESSAGES: frozenset[str] = frozenset(
-    {
-        LOCAL_DESKTOP_OFFLINE,
-        LOCAL_ROOT_NOT_HELD,
-        LOCAL_CHANNEL_DEAD,
-        LOCAL_ORIGIN_DEVICE_OFFLINE,
-    }
-)
-
-PREPARE_LOCAL_ABORT_CODES: dict[str, str] = {
-    LOCAL_DESKTOP_OFFLINE: ErrorCode.LOCAL_DESKTOP_OFFLINE,
-    LOCAL_ROOT_NOT_HELD: ErrorCode.LOCAL_ROOT_NOT_HELD,
-    LOCAL_CHANNEL_DEAD: ErrorCode.LOCAL_CHANNEL_DEAD,
-    LOCAL_ORIGIN_DEVICE_OFFLINE: ErrorCode.LOCAL_ORIGIN_DEVICE_OFFLINE,
-}
-
-
-def prepare_local_abort_error_code(detail: str) -> str | None:
-    """Dedicated code for an exact prepare/presence abort sentence, or None."""
-    return PREPARE_LOCAL_ABORT_CODES.get((detail or "").strip())
 
 
 # Monotonic deadline shared by every prepare span of one turn (turn_runner's
@@ -103,11 +65,6 @@ _prepare_local_io_deadline: ContextVar[float | None] = ContextVar(
 )
 
 
-def is_prepare_local_abort_message(detail: str | None) -> bool:
-    """True when ``detail`` is one of the three honest prepare/presence aborts."""
-    return (detail or "").strip() in PREPARE_LOCAL_ABORT_MESSAGES
-
-
 def raise_if_local_workspace_fulfiller_absent(
     *,
     user_id: str,
@@ -116,8 +73,9 @@ def raise_if_local_workspace_fulfiller_absent(
     """Millisecond presence gate: local channel turns need a workspace fulfiller.
 
     Distinguishes desktop-offline vs root-not-held vs origin-device-gone. No-op
-    for cloud / sidecar Path-backed local backends. Raises ``WorkspaceIOError``
-    with an honest message.
+    for cloud / sidecar Path-backed local backends. Raises a coded
+    :class:`~agentcore.core.errors.LocalWorkspaceUnavailable` ``AgentCoreError``
+    (not ``WorkspaceIOError`` — tools must not catch this as file IO).
 
     Asks the hub the same question delivery will ask (origin device included),
     so the gate can never pass a turn whose first op reports having no machine
@@ -142,13 +100,13 @@ def raise_if_local_workspace_fulfiller_absent(
         return
     if pinned and hub.has_fulfiller(user_id, root_id=root_id, channel="workspace"):
         reason = "origin_device_offline"
-        message = LOCAL_ORIGIN_DEVICE_OFFLINE
+        err: Exception = LocalOriginDeviceOfflineError()
     elif hub.has_fulfiller(user_id, root_id=None, channel="workspace"):
         reason = "root_not_held"
-        message = LOCAL_ROOT_NOT_HELD
+        err = LocalRootNotHeldError()
     else:
         reason = "desktop_offline"
-        message = LOCAL_DESKTOP_OFFLINE
+        err = LocalDesktopOfflineError()
     logger.info(
         "chat.local_presence_gate",
         reason=reason,
@@ -156,7 +114,7 @@ def raise_if_local_workspace_fulfiller_absent(
         user=user_id,
         origin_device=origin_device_id,
     )
-    raise WorkspaceIOError(message)
+    raise err
 
 
 def backend_uses_local_channel(backend: object | None) -> bool:
@@ -241,14 +199,21 @@ def reset_prepare_local_io_deadline(token: Token) -> None:
     _prepare_local_io_turn_deadline.reset(token)
 
 
-def raise_prepare_local_channel_dead(*, reason: str, detail: str | None = None) -> NoReturn:
-    """Abort prepare with the case-3 channel-dead copy (never invents retryability)."""
+def raise_prepare_local_channel_dead(
+    *,
+    reason: str,
+    detail: str | None = None,
+    cause: BaseException | None = None,
+) -> NoReturn:
+    """Abort prepare with the case-3 channel-dead product error (never invents retryability)."""
     logger.info(
         "chat.prepare_local_io_abort",
         reason=reason,
         detail=(detail or "")[:200] or None,
     )
-    raise WorkspaceIOError(LOCAL_CHANNEL_DEAD)
+    if cause is not None:
+        raise LocalChannelDeadError() from cause
+    raise LocalChannelDeadError()
 
 
 def reraise_prepare_liveness_timeout(exc: BaseException) -> None:
@@ -256,21 +221,24 @@ def reraise_prepare_liveness_timeout(exc: BaseException) -> None:
 
     Used when prepare budget is active: the first liveness timeout
     (including ``probe_exec``) aborts immediately — do not wait for a second hang.
+    Already-typed turn-start aborts are re-raised so ``except Exception`` callers
+    (git probe / exec-language advertise) cannot swallow them into a soft miss.
     """
+    if isinstance(exc, LocalWorkspaceUnavailable):
+        raise exc
     if not isinstance(exc, WorkspaceIOError):
         return
-    detail = str(exc).strip()
-    if is_prepare_local_abort_message(detail):
-        raise exc
-    if is_channel_dead_detail(detail) or is_liveness_timeout_detail(detail):
-        raise_prepare_local_channel_dead(reason="liveness_timeout", detail=detail)
+    if workspace_channel_failure_kind(exc) == "liveness":
+        raise_prepare_local_channel_dead(
+            reason="liveness_timeout", detail=str(exc).strip(), cause=exc
+        )
 
 
 async def await_prepare_local_io[T](awaitable: Awaitable[T]) -> T:
     """Await ``awaitable``, capped by the prepare local IO budget when bound.
 
-    Budget exhaustion → case-3 abort. Propagates prepare presence / channel-dead
-    messages unchanged; converts other liveness ``WorkspaceIOError``s to case 3.
+    Budget exhaustion → case-3 abort. Typed presence / channel-dead errors
+    propagate; a prepare-phase ``WorkspaceLivenessTimeout`` converts to case 3.
     """
     remaining = remaining_prepare_local_io_budget()
     try:
@@ -281,8 +249,7 @@ async def await_prepare_local_io[T](awaitable: Awaitable[T]) -> T:
         return await asyncio.wait_for(awaitable, timeout=remaining)
     except TimeoutError as e:
         # asyncio.TimeoutError is an alias of TimeoutError on 3.11+.
-        logger.info("chat.prepare_local_io_abort", reason="budget_exhausted", detail=None)
-        raise WorkspaceIOError(LOCAL_CHANNEL_DEAD) from e
+        raise_prepare_local_channel_dead(reason="budget_exhausted", cause=e)
     except WorkspaceIOError as e:
         reraise_prepare_liveness_timeout(e)
         raise

@@ -37,7 +37,6 @@ export function ShortcutsSettings() {
         navigate,
         theme,
         sidebarCollapsed,
-        openBookmarksInPalette: () => {},
       }),
     [navigate, theme, sidebarCollapsed],
   );

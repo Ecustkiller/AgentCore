@@ -4,12 +4,11 @@
  *
  * Usage:
  *   node scripts/check-ui-tokens.mjs --src apps/desktop/src/renderer
- *   node scripts/check-ui-tokens.mjs --src apps/mobile/src
  *
  * Desktop also gates raw CSS font-size/border-radius px bypasses
  * (A-phase: StageCard-style second skins). Desktop L2 (`components/ui/`,
  * not `__tests__`) additionally blocks raw shadow-sm/md/lg and `focus:ring`
- * (use elevation aliases + focus-visible). Mobile keeps Tailwind-only rules.
+ * (use elevation aliases + focus-visible).
  */
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";

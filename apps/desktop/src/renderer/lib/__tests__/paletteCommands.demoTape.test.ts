@@ -54,7 +54,6 @@ const baseCtx = {
   navigate: vi.fn(),
   theme: "system" as const,
   sidebarCollapsed: false,
-  openBookmarksInPalette: vi.fn(),
 };
 
 describe("paletteCommands narrow restriction", () => {
@@ -129,6 +128,11 @@ describe("paletteCommands · 前往发现性", () => {
     docs?.run();
     expect(baseCtx.navigate).toHaveBeenCalledWith("/docs");
 
+    const tables = cmds.find((c) => c.id === "nav-tables");
+    expect(tables?.title).toBe("多维表格");
+    tables?.run();
+    expect(baseCtx.navigate).toHaveBeenCalledWith("/tables");
+
     expect(cmds.some((c) => c.id.includes("explore"))).toBe(false);
     expect(
       cmds.some(
@@ -194,6 +198,17 @@ describe("paletteCommands · 设置深链", () => {
     expect(commandMatches(general, "theme")).toBe(true);
 
     expect(cmds.some((c) => c.id === "nav-settings-appearance")).toBe(false);
+  });
+
+  it("opens 设置 · 赞助", () => {
+    const cmds = buildPaletteCommands(baseCtx);
+    const sponsor = cmds.find((c) => c.id === "nav-settings-sponsor");
+    expect(sponsor).toBeTruthy();
+    if (!sponsor) return;
+    expect(sponsor.title).toBe("设置 · 赞助");
+    expect(commandMatches(sponsor, "赞助")).toBe(true);
+    sponsor.run();
+    expect(baseCtx.navigate).toHaveBeenCalledWith("/more/sponsor");
   });
 });
 

@@ -91,7 +91,7 @@ async def continue_ceo_pipeline(
     sink: EventSink,
     backend: WorkspaceBackend,
     history: list[dict] | None = None,
-    board_id: str | None = None,
+    table_id: str | None = None,
     folder_id: str | None = None,
     llm_credentials: LLMCredentials | None = None,
     profile_set: ProfileSet | None = None,
@@ -208,7 +208,7 @@ async def continue_ceo_pipeline(
             llm=llm,
             sink=sink,
             backend=backend,
-            board_id=board_id,
+            table_id=table_id,
             conversation_id=conversation_id,
             message_id=message_id,
             captain_run_id=captain_run_id,
@@ -346,19 +346,12 @@ async def continue_ceo_pipeline(
         )
         return result
     finally:
-        from agentcore.conversation.stage_card_resolve import (
-            maybe_orphan_stage_cards_at_turn_end,
-        )
         from agentcore.runtime.interaction_orphan import orphan_registry_pending
         from agentcore.runtime.pipeline.teardown import teardown_step
 
         await teardown_step(
             orphan_registry_pending(conversation_id, turn_id=message_id),
             step="orphan_registry_pending",
-        )
-        await teardown_step(
-            maybe_orphan_stage_cards_at_turn_end(conversation_id, sink=sink),
-            step="orphan_stage_cards",
         )
         current_fact_log.reset(fact_log_token)
         await teardown_step(journal_writer.flush(), step="journal_flush")

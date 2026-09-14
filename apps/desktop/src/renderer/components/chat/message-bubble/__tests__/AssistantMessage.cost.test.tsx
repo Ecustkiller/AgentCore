@@ -70,12 +70,6 @@ vi.mock("@/stores/interactions", async (importOriginal) => {
   };
 });
 
-vi.mock("@/stores/bookmarks", () => ({
-  useBookmarkStore: (
-    sel: (s: { ids: Set<string>; toggle: () => void }) => unknown,
-  ) => sel({ ids: new Set(), toggle: () => {} }),
-}));
-
 vi.mock("@/services/messages", () => ({
   setMessageFeedback: vi.fn(),
 }));
@@ -188,6 +182,19 @@ describe("AssistantMessage turn cost at bubble end", () => {
     );
     expect(screen.getByText("¥5.00")).toBeTruthy();
     expect(screen.getByRole("button", { name: "复制" })).toBeTruthy();
+  });
+
+  it("BYOK 估算：费用位只出 ≈$", () => {
+    renderBubble(
+      settledMessage({
+        cost: nanoCost(0, {
+          estimated_total: 3_000_000_000,
+          estimated_currency: "USD",
+          currency: "USD",
+        }),
+      }),
+    );
+    expect(screen.getByText("≈$3.00")).toBeTruthy();
   });
 
   it("团队图：按本条 execution runs 之和展示总价", () => {

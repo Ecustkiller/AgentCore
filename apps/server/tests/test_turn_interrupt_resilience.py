@@ -22,7 +22,6 @@ from agentcore.runtime.coordination.session import (
 from agentcore.runtime.events import FinishReason
 from agentcore.runtime.turn.interrupt import (
     HARVEST_YIELD_EMPTY_USER_VISIBLE,
-    INTERRUPTED_EMPTY_USER_VISIBLE,
     MAX_ROUNDS_EMPTY_USER_VISIBLE,
     OVERLAP_EMPTY_USER_VISIBLE,
     TurnInterruptReason,
@@ -498,7 +497,7 @@ async def test_salvage_turns_on_shutdown_force_releases_timeout(monkeypatch):
         return [leftover]
 
     monkeypatch.setattr(
-        "agentcore.conversation.turn_persistence.close_user_stop_turn",
+        "agentcore.runtime.turn.closer.close_user_stop_turn",
         _fake_close,
     )
     monkeypatch.setattr(
@@ -558,7 +557,7 @@ async def test_salvage_turns_on_shutdown_close_failure_orphans(monkeypatch):
         return [leftover]
 
     monkeypatch.setattr(
-        "agentcore.conversation.turn_persistence.close_user_stop_turn",
+        "agentcore.runtime.turn.closer.close_user_stop_turn",
         _fake_close,
     )
     monkeypatch.setattr(
@@ -792,6 +791,10 @@ async def test_repeated_salvage_skips_body_upsert(monkeypatch):
         "agentcore.conversation.store.get_cloud_store",
         lambda: _Store(),
     )
+    monkeypatch.setattr(
+        "agentcore.runtime.interaction_orphan.orphan_hot_pending_after_terminal_persist",
+        AsyncMock(return_value=[]),
+    )
 
     ok = await close_turn_interrupted(
         message_id="m1",
@@ -862,6 +865,10 @@ async def test_close_turn_interrupted_load_stream_state_merges_body_content(monk
         interrupt_mod,
         "_reconcile_interrupted_turn_cost",
         AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.interaction_orphan.orphan_hot_pending_after_terminal_persist",
+        AsyncMock(return_value=[]),
     )
 
     ok = await close_turn_interrupted(
@@ -943,6 +950,10 @@ async def test_close_turn_interrupted_ensures_turn_end_when_merge_persist_drops_
         "agentcore.conversation.store.get_cloud_store",
         lambda: _Store(),
     )
+    monkeypatch.setattr(
+        "agentcore.runtime.interaction_orphan.orphan_hot_pending_after_terminal_persist",
+        AsyncMock(return_value=[]),
+    )
 
     ok = await close_turn_interrupted(
         message_id="m1",
@@ -957,6 +968,76 @@ async def test_close_turn_interrupted_ensures_turn_end_when_merge_persist_drops_
     assert appended[0]["seq"] is None
     assert appended[0]["entry"]["kind"] == "turn_end"
     assert appended[0]["entry"]["payload"]["finish_reason"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_close_turn_interrupted_orphans_hot_after_persist(monkeypatch):
+    """Terminal interrupt close must persist leftover hot-card orphan facts."""
+    from agentcore.runtime.turn import interrupt as interrupt_mod
+
+    orphan = AsyncMock(return_value=["a1"])
+
+    class _MsgRepo:
+        def __init__(self, _session):
+            pass
+
+        async def get_by_id(self, mid, conversation_id=None):
+            return SimpleNamespace(
+                content="partial",
+                reasoning_content=None,
+                trace_id="tr",
+                usage={"status": "running"},
+            )
+
+        async def upsert_assistant(self, **kwargs):
+            return None
+
+    class _JournalRepo:
+        def __init__(self, _session):
+            pass
+
+        async def load_owned(self, turn_id, conversation_id):
+            return []
+
+        async def append(self, **kwargs):
+            return 0
+
+    class _FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+    class _Store:
+        async def clear_stream_segments(self, *, turn_id):
+            pass
+
+    monkeypatch.setattr(interrupt_mod, "MessageRepository", _MsgRepo)
+    monkeypatch.setattr(interrupt_mod, "TurnJournalRepository", _JournalRepo)
+    monkeypatch.setattr(interrupt_mod, "async_session_factory", lambda: _FakeSession())
+    monkeypatch.setattr(
+        interrupt_mod, "_reconcile_interrupted_turn_cost", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        "agentcore.conversation.store.get_cloud_store",
+        lambda: _Store(),
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.interaction_orphan.orphan_hot_pending_after_terminal_persist",
+        orphan,
+    )
+
+    ok = await close_turn_interrupted(
+        message_id="m1",
+        conversation_id="c1",
+        reason=TurnInterruptReason.PROCESS_KILL,
+        content="partial",
+    )
+    assert ok is True
+    orphan.assert_awaited_once()
+    assert orphan.await_args.kwargs["turn_id"] == "m1"
+    assert orphan.await_args.kwargs["conversation_id"] == "c1"
 
 
 def test_inject_cancelled_all_completed_copy():
@@ -994,15 +1075,16 @@ def test_inject_drive_cancelled_copy():
 
 @pytest.mark.parametrize(
     "reason",
-    [TurnInterruptReason.LEASE_EXPIRED, TurnInterruptReason.PROCESS_KILL],
+    [
+        TurnInterruptReason.LEASE_EXPIRED,
+        TurnInterruptReason.PROCESS_KILL,
+        TurnInterruptReason.UNKNOWN,
+    ],
 )
-def test_crash_close_with_nothing_streamed_says_so(reason):
-    """案 519270db: a 19-minute team turn closed with 0 chars — the bubble said nothing.
-
-    StatusStrip chrome does not survive into history; an empty assistant message is
-    indistinguishable from「模型没回答」. Give it words.
-    """
-    assert compose_interrupt_body("", reason=reason) == INTERRUPTED_EMPTY_USER_VISIBLE
+def test_crash_close_with_nothing_streamed_leaves_body_empty(reason):
+    """Empty unexpected interrupt: composer owns the sentence, not a second bubble note."""
+    assert compose_interrupt_body("", reason=reason) == ""
+    assert empty_close_user_visible(reason) == ""
 
 
 def test_crash_close_with_streamed_text_is_left_alone():
@@ -1052,12 +1134,29 @@ def test_empty_close_paths_have_user_visible_copy():
 def test_sweeper_reasons_do_not_claim_a_kill_nobody_saw():
     """案 519270db 附带项：`process_kill` 曾是清扫兜底的默认值，两轮排查都被它带偏。
 
-    A lease that stopped beating is all the sweeper knows. The literal stays mapped
-    for historical rows and for callers that genuinely observed a termination.
+    A lease that stopped beating is all the sweeper knows — and only the sweeper
+    may write ``lease_expired``. Found-dead / junk collapse to ``unknown``.
     """
-    assert normalize_interrupt_reason("no_dag") is TurnInterruptReason.LEASE_EXPIRED
-    assert normalize_interrupt_reason("") is TurnInterruptReason.LEASE_EXPIRED
-    assert normalize_interrupt_reason("whatever") is TurnInterruptReason.LEASE_EXPIRED
+    assert normalize_interrupt_reason("no_dag") is TurnInterruptReason.UNKNOWN
+    assert normalize_interrupt_reason("") is TurnInterruptReason.UNKNOWN
+    assert normalize_interrupt_reason("whatever") is TurnInterruptReason.UNKNOWN
+    assert normalize_interrupt_reason("unknown") is TurnInterruptReason.UNKNOWN
+    assert normalize_interrupt_reason("lease_expired") is TurnInterruptReason.LEASE_EXPIRED
     assert normalize_interrupt_reason("process_kill") is TurnInterruptReason.PROCESS_KILL
-    # Both are non-user terminations, so both still land on `interrupted`.
     assert finish_reason_for(TurnInterruptReason.LEASE_EXPIRED) is FinishReason.INTERRUPTED
+    assert finish_reason_for(TurnInterruptReason.UNKNOWN) is FinishReason.INTERRUPTED
+
+
+def test_sidecar_cancel_salvage_reason_is_unknown_without_stamp():
+    from agentcore.sidecar.server_pkg.turns import _salvage_interrupt_reason
+
+    assert _salvage_interrupt_reason() == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_sidecar_cancel_salvage_reason_honors_user_stop_stamp():
+    from agentcore.core.task_cancel import stamp_cancel_reason
+    from agentcore.sidecar.server_pkg.turns import _salvage_interrupt_reason
+
+    stamp_cancel_reason(asyncio.current_task(), "user_stop")
+    assert _salvage_interrupt_reason() == "user_stop"

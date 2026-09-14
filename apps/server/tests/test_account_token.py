@@ -23,10 +23,12 @@ from agentcore.security import (
     create_account_token,
     create_folders_token,
     create_inference_token,
+    create_workspaces_token,
     decode_access_token,
     decode_account_token,
     decode_folders_token,
     decode_inference_token,
+    decode_workspaces_token,
 )
 from agentcore.tools.builtin.read_conversation import ReadConversationTool
 from agentcore.tools.builtin.search_conversations import SearchConversationsTool
@@ -60,7 +62,7 @@ def test_account_token_rejects_other_types():
     access = create_access_token("user-1", audience="product")
     inference = create_inference_token("user-1")
     folders = create_folders_token("user-1")
-    for other in (access, inference, folders):
+    for other in (access, inference, folders, create_workspaces_token("user-1")):
         with pytest.raises(AuthenticationError):
             decode_account_token(other)
 
@@ -73,6 +75,8 @@ def test_other_decoders_reject_account_token():
         decode_inference_token(account)
     with pytest.raises(AuthenticationError):
         decode_folders_token(account)
+    with pytest.raises(AuthenticationError):
+        decode_workspaces_token(account)
 
 
 def test_account_token_rejects_expired():
@@ -512,7 +516,11 @@ async def test_account_api_user_rejects_folders_and_inference():
         url=SimpleNamespace(path="/v1/account/conversations/search"),
         state=SimpleNamespace(),
     )
-    for token in (create_folders_token("u1"), create_inference_token("u1")):
+    for token in (
+        create_folders_token("u1"),
+        create_inference_token("u1"),
+        create_workspaces_token("u1"),
+    ):
         with pytest.raises(AuthenticationError):
             await deps.get_account_api_user(
                 request,  # type: ignore[arg-type]

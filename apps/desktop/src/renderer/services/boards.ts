@@ -9,8 +9,6 @@ export type BoardSummary = Schemas["BoardSummary"];
 export type BoardDetail = Schemas["BoardDetail"];
 /** CAS write outcome; `board` is the live state, populated only on conflict. */
 export type BoardWriteResult = Schemas["BoardWriteResult"];
-/** The board's dedicated AI conversation id (existing or just-minted). */
-export type BoardConversationResponse = Schemas["BoardConversationResponse"];
 /** The opaque spatial-JSON scene blob (self-built engine serialized scene). */
 export type BoardScene = BoardDetail["scene"];
 
@@ -40,18 +38,6 @@ export function renameBoard(id: string, title: string): Promise<BoardSummary> {
 
 export async function deleteBoard(id: string): Promise<void> {
   await api.delete(`/v1/boards/${encodeURIComponent(id)}`);
-}
-
-/** Get (or lazily mint) the board's dedicated AI conversation (AI协作白板 §三 A / M2).
- * Idempotent — call before the board's first AI turn, then run the turn on the
- * returned `conversation_id`. */
-export function ensureBoardConversation(
-  id: string,
-): Promise<BoardConversationResponse> {
-  return api.post<BoardConversationResponse>(
-    `/v1/boards/${encodeURIComponent(id)}/conversation`,
-    {},
-  );
 }
 
 /** CAS-write the scene (autosave). Pass the `baseline` version the edit was based on;

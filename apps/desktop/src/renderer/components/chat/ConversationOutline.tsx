@@ -88,9 +88,9 @@ export function ConversationOutline() {
                 <button
                   type="button"
                   onClick={() => jump(t.id)}
-                  className="flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-foreground hover:bg-accent"
+                  className="flex w-full items-start gap-1.5 rounded-lg px-2 py-1.5 text-left text-sm text-foreground hover:bg-accent"
                 >
-                  <span className="mt-0.5 w-5 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                  <span className="mt-0.5 shrink-0 text-xs tabular-nums text-muted-foreground">
                     {i + 1}
                   </span>
                   <span className="min-w-0 flex-1 truncate">

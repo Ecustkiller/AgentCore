@@ -545,6 +545,7 @@ class WebSearchTool:
     registration = ToolRegistration(
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_BOTH,
+        catalog_summary="联网检索",
     )
 
     @property
@@ -552,10 +553,7 @@ class WebSearchTool:
         return ToolSchema(
             name="web_search",
             description=(
-                "搜索互联网获取实时信息（新闻、事实、天气、公司信息、概念定义等）。"
-                "返回按相关性排序的标题、链接与内容摘要；默认摘要优先。"
-                "先一两个聚焦查询看摘要，再决定是否补搜。"
-                "核对原文用 web_fetch。"
+                "搜公网实时信息（摘要优先）。核对原文用 web_fetch。"
             ),
             parameters={
                 "type": "object",

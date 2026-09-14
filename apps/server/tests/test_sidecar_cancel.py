@@ -10,11 +10,11 @@ from typing import Any
 
 import pytest
 
-from agentcore.conversation.store import reset_conversation_store_for_tests
 from agentcore.memory.account_prepare_cache import (
     AccountPrepareSnapshot,
     clear_account_rules_memory_cache,
 )
+from agentcore.runtime.conversation_store import reset_conversation_store_for_tests
 from agentcore.runtime.coordination.session import (
     CoordinationSession,
     active_coordination,
@@ -25,7 +25,7 @@ from agentcore.runtime.coordination.session import (
 from agentcore.runtime.events import EventSink, EventType, FinishReason
 from agentcore.runtime.journal import KIND_TURN_END
 from agentcore.runtime.suspension import AskUserSuspension
-from agentcore.sidecar.protocol import TURN_CANCELLED
+from agentcore.sidecar.protocol import TURN_CANCELLED, TURN_INTERRUPTED
 from agentcore.sidecar.server import SidecarServer
 from agentcore.sidecar.server_pkg.cancel_tombstone import (
     cancel_tombstone_blocks,
@@ -33,9 +33,17 @@ from agentcore.sidecar.server_pkg.cancel_tombstone import (
 )
 from agentcore.sidecar.server_pkg.turns import (
     _emit_cancel_end_if_cancelling,
+    _emit_hot_orphans_if_cancelling,
     _emit_user_stop_message_end,
     _ensure_cancelled_turn_end,
 )
+
+_CLIENT_TURN_IDS = {
+    "userMessageId": "11111111-1111-4111-8111-111111111111",
+    "messageId": "22222222-2222-4222-8222-222222222222",
+    "traceId": "a" * 32,
+    "folderId": None,
+}
 
 
 def _recorder() -> tuple[list[dict[str, Any]], Any]:
@@ -451,9 +459,46 @@ async def test_emit_cancel_end_if_cancelling_only_when_task_cancelling():
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert sink._stream_finish_reason == FinishReason.CANCELLED.value
+    assert sink._stream_finish_reason == FinishReason.INTERRUPTED.value
     payload = await _drain_until_message_end(sink)
-    assert payload["finish_reason"] == FinishReason.CANCELLED
+    assert payload["finish_reason"] == FinishReason.INTERRUPTED
+
+
+async def test_emit_hot_orphans_if_cancelling_emits_leftover_approval(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from agentcore.runtime.interaction import InteractionKind, InteractionRegistry
+
+    reg = InteractionRegistry()
+    reg.create(
+        "a1",
+        "c-orphan",
+        kind=InteractionKind.APPROVAL,
+        payload={"tool_name": "file_delete"},
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.interaction.default_interaction_registry",
+        lambda: reg,
+    )
+    sink = EventSink()
+
+    async def _body() -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            _emit_hot_orphans_if_cancelling(sink, "c-orphan")
+
+    task = asyncio.create_task(_body())
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    ev = await asyncio.wait_for(sink.get(), timeout=1.0)
+    assert ev is not None
+    assert ev.type == EventType.INTERACTION_ORPHANED
+    assert ev.payload["interaction_id"] == "a1"
+    assert ev.payload["kind"] == "approval"
 
 
 async def test_close_user_stop_turn_emits_message_end_even_when_persist_skipped(monkeypatch):
@@ -614,6 +659,30 @@ def test_ensure_cancelled_turn_end_skips_when_present():
     assert out[0]["payload"]["finish_reason"] == "end_turn"
 
 
+def test_ensure_cancelled_turn_end_appends_orphan_for_leftover_approval():
+    """Interrupted salvage must carry interaction_orphaned, not only turn_end."""
+    out = _ensure_cancelled_turn_end(
+        [
+            {
+                "kind": "approval_required",
+                "payload": {
+                    "approval_id": "a1",
+                    "tool_call_id": "a1",
+                    "tool_name": "file_delete",
+                    "arguments": {"permanent": True},
+                },
+                "seq": 0,
+            }
+        ],
+        FinishReason.INTERRUPTED,
+    )
+    kinds = [e.get("kind") for e in out]
+    assert KIND_TURN_END in kinds
+    assert kinds[-1] == "interaction_orphaned"
+    assert out[-1]["payload"] == {"interaction_id": "a1", "kind": "approval"}
+    assert out[-2]["payload"]["finish_reason"] == FinishReason.INTERRUPTED.value
+
+
 def _message_end_events(sent: list[dict[str, Any]]) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     for msg in sent:
@@ -746,5 +815,108 @@ async def test_resume_cancel_rpc_does_not_wait_for_hanging_pump(
     finally:
         pump_release.set()
         if not turn_task.done():
+            with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
+                await asyncio.wait_for(turn_task, timeout=2.0)
+
+
+async def test_start_turn_cancelled_without_rpc_is_turn_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Unstamped task.cancel() is not user_stop: -32008, not TURN_CANCELLED."""
+    started = asyncio.Event()
+
+    async def fake_pipeline(**kwargs: Any) -> dict[str, Any]:
+        started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("pipeline must be cancelled")
+
+    monkeypatch.setattr("agentcore.sidecar.server.run_chat_pipeline", fake_pipeline)
+
+    lines, write_line = _recorder()
+    server = SidecarServer(write_line)
+    await _init_sidecar(server, tmp_path)
+
+    await server.handle_line(
+        _req(
+            2,
+            "startTurn",
+            {
+                **_CLIENT_TURN_IDS,
+                "turnId": "t-unstamped",
+                "conversationId": "c-unstamped",
+                "userMessage": "hi",
+            },
+        )
+    )
+    await asyncio.wait_for(started.wait(), timeout=2.0)
+    turn_task = server._turns["t-unstamped"]
+    turn_task.cancel()
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(turn_task, timeout=2.0)
+        await _await_pending_sends(server)
+        err = next(m for m in lines if m.get("id") == 2 and "error" in m)
+        assert err["error"]["code"] == TURN_INTERRUPTED
+        assert err["error"]["code"] != TURN_CANCELLED
+        assert err["error"]["message"] == "turn interrupted"
+        assert (err["error"].get("data") or {}).get("finish_reason") == (
+            FinishReason.INTERRUPTED.value
+        )
+    finally:
+        if not turn_task.done():
+            turn_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
+                await asyncio.wait_for(turn_task, timeout=2.0)
+
+
+async def test_resume_cancelled_without_rpc_is_turn_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Resume unstamped task.cancel() is symmetric: TURN_INTERRUPTED, not cancelled."""
+    started = asyncio.Event()
+
+    async def fake_resume(**kwargs: Any) -> dict[str, Any]:
+        started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("resume pipeline must be cancelled")
+
+    monkeypatch.setattr("agentcore.sidecar.server.resume_chat_pipeline", fake_resume)
+
+    lines, write_line = _recorder()
+    server = SidecarServer(write_line)
+    await _init_sidecar(server, tmp_path)
+    assert server._paused_store is not None
+    await server._paused_store.save(_pause_frame())
+
+    await server.handle_line(
+        _req(
+            7,
+            "resume",
+            {
+                "messageId": "m1",
+                "conversationId": "c1",
+                "decision": "continue",
+                "userMessageId": "u1",
+                "traceId": "a" * 32,
+            },
+        )
+    )
+    await asyncio.wait_for(started.wait(), timeout=2.0)
+    turn_task = server._turns["m1"]
+    turn_task.cancel()
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(turn_task, timeout=2.0)
+        await _await_pending_sends(server)
+        err = next(m for m in lines if m.get("id") == 7 and "error" in m)
+        assert err["error"]["code"] == TURN_INTERRUPTED
+        assert err["error"]["code"] != TURN_CANCELLED
+        assert err["error"]["message"] == "turn interrupted"
+        assert (err["error"].get("data") or {}).get("finish_reason") == (
+            FinishReason.INTERRUPTED.value
+        )
+    finally:
+        if not turn_task.done():
+            turn_task.cancel()
             with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
                 await asyncio.wait_for(turn_task, timeout=2.0)

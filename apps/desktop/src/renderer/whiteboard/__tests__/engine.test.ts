@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * Integration tests for {@link WhiteboardEngine} — the stateful canvas controller
- * (AI协作白板.md §六). Its pure sub-modules (ops / scene / clone / layout / snap /
+ * (AI协作白板.md §六). Its pure sub-modules (scene / clone / layout / snap /
  * selectionOps / transform) are unit-tested separately; this exercises the engine class
  * itself: scene loading, history (undo/redo), selection + reconciliation, the overlay
  * vs. persistent-append distinction, clipboard, and one pointer-drag
@@ -13,7 +13,6 @@
  * a pointer's clientX/Y equals its world coordinate.
  */
 
-import type { BoardOp } from "@/types/events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WhiteboardEngine } from "../engine";
 import type { SceneElement } from "../types";
@@ -106,26 +105,6 @@ describe("WhiteboardEngine — loadScene", () => {
     expect(engine.getSelectedIds()).toEqual([]);
     expect(cb.onSelectionChange).toHaveBeenCalledWith([]);
     expect(cb.onViewportChange).toHaveBeenCalledWith(2);
-  });
-});
-
-describe("WhiteboardEngine — applyOps + history", () => {
-  it("applies board ops, reports created ids, and is undoable", () => {
-    const { engine, cb } = makeEngine();
-    const ops: BoardOp[] = [
-      { op: "add_node", ref: "a", x: 10, y: 20, text: "hi" },
-    ];
-    const { created } = engine.applyOps(ops);
-
-    expect(created).toHaveLength(1);
-    expect(engine.getScene()).toHaveLength(1);
-    expect(engine.getScene()[0]).toMatchObject({ text: "hi" });
-    expect(cb.onChange).toHaveBeenCalled();
-
-    engine.undo();
-    expect(engine.getScene()).toHaveLength(0);
-    engine.redo();
-    expect(engine.getScene()).toHaveLength(1);
   });
 });
 

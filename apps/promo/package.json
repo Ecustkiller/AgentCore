@@ -2,17 +2,16 @@
   "name": "agentcore-promo",
   "version": "0.1.0",
   "private": true,
-  "description": "AgentCore promotional video (Remotion)",
+  "description": "AgentCore promo kit (Remotion stills + primitives)",
   "sideEffects": ["*.css"],
   "scripts": {
     "dev": "remotion studio",
-    "build": "remotion render Promo out/promo.mp4",
+    "build": "node scripts/render-stills.mjs",
     "render": "node scripts/render.mjs",
     "layout": "npx tsx scripts/precompute-layout.mts",
     "still": "remotion still PixelCheck out/pixel-check.png",
     "stills:layout": "npx tsx scripts/precompute-stills-layout.mts",
-    "stills": "node scripts/render-stills.mjs",
-    "deck": "python -m http.server 4173 --directory deck"
+    "stills": "node scripts/render-stills.mjs"
   },
   "dependencies": {
     "@agentcore/graph-layout": "file:../../packages/graph-layout",

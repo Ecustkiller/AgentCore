@@ -9,5 +9,5 @@
     { "name": "NotDelegated" },
     { "name": "ToolCalled", "tool": "file_write" }
   ],
-  "rubric": "边界用例：交付物极小（一行文件）。一眼写完的小落盘，CEO 自己 file_write，不派工、不把内容只粘进正文。"
+  "rubric": "全文已在窗里的一行新建：切不出去、编码≈做完，CEO 自己 file_write。不是『有落盘就派』。"
 }

@@ -43,6 +43,9 @@ from agentcore.workspace.protocol import (
     OutsideWorkspace,
     PathNotFound,
     WorkspaceIOError,
+    WorkspaceLivenessTimeout,
+    WorkspacePresenceDisconnected,
+    WorkspaceReconnect,
 )
 from tests.client_tool_fulfill_testutil import await_fulfill_event, install_test_hub
 
@@ -322,6 +325,9 @@ async def test_execute_forwards_registry_env():
         ("PathNotFound", PathNotFound),
         ("OutsideWorkspace", OutsideWorkspace),
         ("WorkspaceIOError", WorkspaceIOError),
+        ("WorkspaceLivenessTimeout", WorkspaceLivenessTimeout),
+        ("WorkspacePresenceDisconnected", WorkspacePresenceDisconnected),
+        ("WorkspaceReconnect", WorkspaceReconnect),
         ("SomethingUnknown", WorkspaceIOError),  # degrade unknown → generic IO
     ],
 )
@@ -351,8 +357,8 @@ async def test_malformed_envelope_raises_io_error():
 
 async def test_timeout_raises_io_error():
     local, _registry = _make(timeout=0.05)
-    # No desktop answers, so the op times out and surfaces as a WorkspaceIOError.
-    with pytest.raises(WorkspaceIOError, match="活性挂起"):
+    # No desktop answers, so the op times out and surfaces as a WorkspaceLivenessTimeout.
+    with pytest.raises(WorkspaceLivenessTimeout, match="活性挂起"):
         await local.read("never-answered.txt")
 
 
@@ -366,7 +372,7 @@ async def test_single_timeout_keeps_channel_alive_for_next_op():
         timeout_seconds=0.05,
         root_id=ROOT_ID,
     )
-    with pytest.raises(WorkspaceIOError, match=r"timed out（活性挂起）"):
+    with pytest.raises(WorkspaceLivenessTimeout, match=r"timed out（活性挂起）"):
         await channel.request(WorkspaceOp.READ, {"path": "never-answered.txt"})
 
     while _CAPTURE:
@@ -386,9 +392,9 @@ async def test_single_timeout_keeps_channel_alive_for_next_op():
 async def test_after_two_timeouts_third_request_still_delivers():
     """Settle timeouts fail those ops only — the next request still goes to the desktop."""
     local, registry = _make(timeout=0.05)
-    with pytest.raises(WorkspaceIOError, match=r"timed out（活性挂起）"):
+    with pytest.raises(WorkspaceLivenessTimeout, match=r"timed out（活性挂起）"):
         await local.read("never-answered-1.txt")
-    with pytest.raises(WorkspaceIOError, match=r"timed out（活性挂起）"):
+    with pytest.raises(WorkspaceLivenessTimeout, match=r"timed out（活性挂起）"):
         await local.read("never-answered-2.txt")
 
     while _CAPTURE:
@@ -415,7 +421,7 @@ async def test_probe_exec_timeout_does_not_sticky_dead_channel():
         timeout_seconds=0.05,
         root_id=ROOT_ID,
     )
-    with pytest.raises(WorkspaceIOError, match="probe_exec.*活性挂起"):
+    with pytest.raises(WorkspaceLivenessTimeout, match="probe_exec.*活性挂起"):
         await channel.request(WorkspaceOp.PROBE_EXEC, {})
 
     # Drain the unanswered probe SSE so the next await sees the file op.
@@ -450,7 +456,7 @@ async def test_op_timeout_log_includes_path(monkeypatch):
         root_id=ROOT_ID,
     )
     path = "logs/reviews/cases/CASE.md"
-    with pytest.raises(WorkspaceIOError, match="活性挂起"):
+    with pytest.raises(WorkspaceLivenessTimeout, match="活性挂起"):
         await channel.request(WorkspaceOp.READ, {"path": path})
 
     fields = spy.get("workspace.op_timeout")
@@ -470,7 +476,7 @@ async def test_op_timeout_log_includes_path(monkeypatch):
         timeout_seconds=0.05,
         root_id=ROOT_ID,
     )
-    with pytest.raises(WorkspaceIOError, match="活性挂起"):
+    with pytest.raises(WorkspaceLivenessTimeout, match="活性挂起"):
         await channel2.request(
             WorkspaceOp.GREP, {"pattern": "x", "directory": "src"}
         )
@@ -501,7 +507,7 @@ async def test_no_fulfiller_fail_fast_without_wall_clock_wait(monkeypatch):
         root_id=ROOT_ID,
     )
     t0 = asyncio.get_running_loop().time()
-    with pytest.raises(WorkspaceIOError, match="无履约方"):
+    with pytest.raises(WorkspacePresenceDisconnected, match="无履约方"):
         await channel.request(WorkspaceOp.READ, {"path": "after-close.txt"})
     elapsed = asyncio.get_running_loop().time() - t0
     # Must not burn the 5s channel deadline awaiting a desktop that never saw the op.
@@ -521,7 +527,7 @@ async def test_root_not_held_settles_with_the_authorization_copy(monkeypatch):
         root_id=ROOT_ID,
     )
     t0 = asyncio.get_running_loop().time()
-    with pytest.raises(WorkspaceIOError) as ei:
+    with pytest.raises(WorkspacePresenceDisconnected) as ei:
         await channel.request(WorkspaceOp.READ, {"path": "revoked.txt"})
     elapsed = asyncio.get_running_loop().time() - t0
     detail = str(ei.value)
@@ -617,7 +623,7 @@ async def test_desktop_that_left_long_ago_gets_no_grace(monkeypatch):
         root_id=ROOT_ID,
     )
     t0 = asyncio.get_running_loop().time()
-    with pytest.raises(WorkspaceIOError, match="无履约方"):
+    with pytest.raises(WorkspacePresenceDisconnected, match="无履约方"):
         await channel.request(WorkspaceOp.READ, {"path": "gone.txt"})
     assert asyncio.get_running_loop().time() - t0 < 0.5
 
@@ -645,7 +651,7 @@ async def test_grace_expiry_settles_with_the_same_answer_well_inside_the_deadlin
         root_id=ROOT_ID,
     )
     t0 = asyncio.get_running_loop().time()
-    with pytest.raises(WorkspaceIOError, match="无履约方"):
+    with pytest.raises(WorkspacePresenceDisconnected, match="无履约方"):
         await channel.request(WorkspaceOp.READ, {"path": "never-back.txt"})
     elapsed = asyncio.get_running_loop().time() - t0
     assert 0.15 <= elapsed < 1.0
@@ -704,7 +710,7 @@ async def test_index_io_timeout_does_not_block_next_file_op():
         timeout_seconds=0.05,
         root_id=ROOT_ID,
     )
-    with pytest.raises(WorkspaceIOError, match="read.*活性挂起"):
+    with pytest.raises(WorkspaceLivenessTimeout, match="read.*活性挂起"):
         await channel.request(
             WorkspaceOp.READ,
             {"path": "logs/reviews/cases/CASE.md"},
@@ -919,7 +925,7 @@ async def test_parallel_ops_one_timeout_does_not_fail_sibling():
     for _ in range(2):
         ev = await _await_request()
         events[ev.payload["args"]["path"]] = ev
-    with pytest.raises(WorkspaceIOError, match=r"timed out（活性挂起）"):
+    with pytest.raises(WorkspaceLivenessTimeout, match=r"timed out（活性挂起）"):
         await t_a
     assert registry.resolve(
         events["b.txt"].payload["request_id"],
@@ -939,7 +945,7 @@ async def test_parallel_ops_second_timeout_does_not_cancel_sibling():
         timeout_seconds=1.0,
         root_id=ROOT_ID,
     )
-    with pytest.raises(WorkspaceIOError, match=r"timed out（活性挂起）"):
+    with pytest.raises(WorkspaceLivenessTimeout, match=r"timed out（活性挂起）"):
         await channel.request(WorkspaceOp.READ, {"path": "seed.txt"})
     while _CAPTURE:
         _CAPTURE.pop(0)
@@ -953,7 +959,7 @@ async def test_parallel_ops_second_timeout_does_not_cancel_sibling():
         ev = await _await_request()
         events[ev.payload["args"]["path"]] = ev
 
-    with pytest.raises(WorkspaceIOError, match=r"timed out（活性挂起）"):
+    with pytest.raises(WorkspaceLivenessTimeout, match=r"timed out（活性挂起）"):
         await t_a
     assert registry.resolve(
         events["b.txt"].payload["request_id"],
@@ -1038,7 +1044,7 @@ async def test_queued_waiter_still_delivers_after_prior_timeout():
         await asyncio.sleep(0)
     assert not _CAPTURE
 
-    with pytest.raises(WorkspaceIOError, match=r"timed out（活性挂起）"):
+    with pytest.raises(WorkspaceLivenessTimeout, match=r"timed out（活性挂起）"):
         await t_hold
     event = await _await_request()
     assert event.payload["args"]["path"] == "queued.txt"

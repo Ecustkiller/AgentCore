@@ -402,7 +402,6 @@ export function FolderMembersDialog({
               inline
               icon={<Users size={22} className="text-muted-foreground/40" />}
               title="暂无成员"
-              hint="邀请同伴加入后，他们会出现在这里。"
             />
           ) : (
             <ul className="divide-y divide-border">

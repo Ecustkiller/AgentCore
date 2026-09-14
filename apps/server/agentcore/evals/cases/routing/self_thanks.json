@@ -9,5 +9,5 @@
     { "name": "NotDelegated" },
     { "name": "MaxRounds", "args": { "budget": 3 } }
   ],
-  "rubric": "致谢类闲聊：直接礼貌回应，不该组队。"
+  "rubric": "致谢闲聊：编码≈做完，直答。"
 }

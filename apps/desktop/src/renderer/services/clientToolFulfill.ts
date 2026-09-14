@@ -4,6 +4,7 @@ import {
   type InteractionSettleOrigin,
   resolveInteraction,
 } from "@/services/interaction";
+import { WORKSPACE_RECONNECT_KIND } from "@shared/ipc-contract";
 
 export type { InteractionSettleOrigin };
 
@@ -118,7 +119,10 @@ export function abortClientToolRequest(requestId: string): void {
 function reconnectEnvelope(): ClientToolResultEnvelope {
   return {
     ok: false,
-    error: { kind: "WorkspaceIOError", detail: WORKSPACE_RECONNECT_DETAIL },
+    error: {
+      kind: WORKSPACE_RECONNECT_KIND,
+      detail: WORKSPACE_RECONNECT_DETAIL,
+    },
   };
 }
 

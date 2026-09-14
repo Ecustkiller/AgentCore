@@ -16,7 +16,7 @@ alwaysApply: false
 ```
 apps/desktop/   唯一产品页树（对话 / 文件 / IM / 设置 / 登录）+ AppShell 宽/窄
 apps/mobile/    Capacitor 壳（webDir = desktop dist-web）；旧 SPA / fold 已清
-packages/       protocol-conformance + contract-types + design-tokens + protocol-fold-kit
+packages/       protocol-conformance + protocol-fold-kit + contract-types + contract-rest-types + design-tokens + graph-layout
 ```
 
 ## 硬规则

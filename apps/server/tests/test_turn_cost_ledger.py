@@ -14,9 +14,9 @@ from agentcore.billing.turn_ledger import (
     drain_cost_ledger_before_reconcile,
     reconcile_turn_cost_ledger,
 )
-from agentcore.conversation.common import log_cost_recorded
 from agentcore.core.log_context import log_context
 from agentcore.llm.provider.protocol import TokenUsage
+from agentcore.observability.cost_log import log_cost_recorded
 from agentcore.runtime.costing import ROLE_CAPTAIN, ROLE_MEMBER
 
 
@@ -76,14 +76,14 @@ async def test_maybe_enqueue_materializes_runs_and_stamps_member_role(running_le
 
 @pytest.mark.asyncio
 async def test_maybe_enqueue_skips_vision_scenario(running_ledger):
-    """Vision board_read is billed only via cost_runs orphan — never cost_calls."""
+    """Vision 读图 is billed only via cost_runs orphan — never cost_calls."""
     queue, _tmp_path = running_ledger
     with log_context(user_id="u1", conversation_id="c1", run_id="cap_1"):
         assert (
             maybe_enqueue_inprocess_call(
                 model="qwen-vl",
                 usage=_usage(),
-                scenario="vision.board_read",
+                scenario="vision.read",
             )
             is None
         )
@@ -334,7 +334,7 @@ async def test_reconcile_interrupted_turn_cost_emits_and_stamps(monkeypatch):
         reconcile,
     )
     monkeypatch.setattr(
-        "agentcore.conversation.common.log_cost_recorded",
+        "agentcore.observability.cost_log.log_cost_recorded",
         lambda cid, mid, rows: recorded.append((cid, mid, rows)),
     )
 
@@ -472,7 +472,7 @@ async def test_reconcile_interrupted_user_stop_stamps_usage_tokens_from_ledger(
         AsyncMock(return_value=ledger_rows),
     )
     monkeypatch.setattr(
-        "agentcore.conversation.common.log_cost_recorded",
+        "agentcore.observability.cost_log.log_cost_recorded",
         lambda *a, **k: None,
     )
 
@@ -539,7 +539,7 @@ async def test_reconcile_interrupted_turn_cost_skips_when_cost_stamped(monkeypat
         reconcile,
     )
     monkeypatch.setattr(
-        "agentcore.conversation.common.log_cost_recorded",
+        "agentcore.observability.cost_log.log_cost_recorded",
         lambda *a, **k: recorded.append(a),
     )
 
@@ -606,6 +606,10 @@ async def test_close_turn_interrupted_invokes_cost_reconcile(monkeypatch):
     monkeypatch.setattr(
         "agentcore.conversation.store.get_cloud_store",
         lambda: _Store(),
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.interaction_orphan.orphan_hot_pending_after_terminal_persist",
+        AsyncMock(return_value=[]),
     )
 
     ok = await close_turn_interrupted(

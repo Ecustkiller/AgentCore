@@ -18,6 +18,8 @@ import {
   type SidecarListBrowserSessionsResult,
   type SidecarListQueuedTurnsRequest,
   type SidecarListQueuedTurnsResult,
+  type SidecarOccupancyRequest,
+  type SidecarOccupancyResponse,
   type SidecarQueuedAttachment,
   type SidecarQueuedTurnItem,
   type SidecarRecoveryRequest,
@@ -38,6 +40,10 @@ import {
   type SidecarWorkspaceVersionResult,
   buildSidecarResumeRpcParams,
 } from "@shared/sidecar-contract";
+import {
+  capTableSelection,
+  tableSelectionPayload,
+} from "@shared/tableSelection";
 import { BrowserWindow, type WebContents } from "electron";
 import { getDesktopBrowserBridgeCredentials } from "../browser";
 import { listSessionRoots } from "../fs/roots";
@@ -47,9 +53,13 @@ import {
   handleOccupiedTurnSidecarFailure,
   listUnsyncedSummaries,
   recoverLocalPersistence,
+  setOccupiedConversationIdsProvider,
   sidecarDataDir,
 } from "../outbox-writeback";
-import { occupyLocalTurnBegin } from "../outbox/projection";
+import {
+  abortLocalTurnPlaceholder,
+  occupyLocalTurnBegin,
+} from "../outbox/projection";
 import { SidecarEventBuffer } from "../sidecar-event-buffer";
 import { SidecarClient, SidecarRpcError } from "./client";
 import { buildExternalMounts } from "./externalMounts";
@@ -232,14 +242,47 @@ function isTurnEventTerminal(type: string): boolean {
 
 /** Sidecar JSON-RPC `TURN_CANCELLED`（`protocol.TURN_CANCELLED` = -32001）。 */
 const SIDECAR_TURN_CANCELLED = -32001;
+/** Sidecar JSON-RPC `TURN_INTERRUPTED`（`protocol.TURN_INTERRUPTED` = -32008）。 */
+const SIDECAR_TURN_INTERRUPTED = -32008;
+
+function sidecarRejectText(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err ?? "");
+  return raw.toLowerCase();
+}
 
 function isSidecarTurnCancelled(err: unknown): boolean {
   if (err instanceof SidecarRpcError && err.code === SIDECAR_TURN_CANCELLED) {
     return true;
   }
-  const raw = err instanceof Error ? err.message : String(err ?? "");
-  const msg = raw.toLowerCase();
+  const msg = sidecarRejectText(err);
   return msg.includes("turn cancelled") || msg.includes("turn_cancelled");
+}
+
+function isSidecarTurnInterrupted(err: unknown): boolean {
+  if (err instanceof SidecarRpcError && err.code === SIDECAR_TURN_INTERRUPTED) {
+    return true;
+  }
+  const msg = sidecarRejectText(err);
+  return msg.includes("turn interrupted") || msg.includes("turn_interrupted");
+}
+
+/** User-stop / engine-interrupt: synthesize `message_end`, never a failure face. */
+function isSidecarQuietStop(err: unknown): boolean {
+  return isSidecarTurnCancelled(err) || isSidecarTurnInterrupted(err);
+}
+
+function occupiedSalvageFinishReason(
+  err: unknown,
+): "cancelled" | "interrupted" | "error" {
+  if (isSidecarTurnCancelled(err)) return "cancelled";
+  if (isSidecarTurnInterrupted(err)) return "interrupted";
+  return "error";
+}
+
+/** 槽被上一轮占着：并发态，不是引擎故障，禁止合成失败脸。 */
+function isSidecarTurnAlreadyRunning(err: unknown): boolean {
+  const raw = err instanceof Error ? err.message : String(err ?? "");
+  return /turn already running/i.test(raw);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -387,7 +430,9 @@ export class SidecarManager {
     private readonly spawnFn: (
       config: SpawnConfig,
     ) => Transport = spawnTransport,
-  ) {}
+  ) {
+    setOccupiedConversationIdsProvider(() => this.occupiedConversationIds());
+  }
 
   /**
    * 拉起（或复用）某 `root + subpath` 的 sidecar，并完成一次性 initialize。
@@ -434,7 +479,9 @@ export class SidecarManager {
       this.entries.delete(key);
       this.pushStatus({ rootId, phase: "exited", detail: err.message });
       this.finalizeEphemeralTurns(rootId, subpath, err);
-      void recoverLocalPersistence();
+      const mine = this.conversationIdsOnSidecar(rootId, subpath);
+      // 始终带范围：空名单 = 这台引擎没有可 salvage 的对话，禁止回落到全盘 OPEN。
+      void recoverLocalPersistence({ conversationIds: mine });
     });
 
     const ready = client
@@ -546,6 +593,21 @@ export class SidecarManager {
     this.dropEphemeralTurns(req.conversationId);
     const messageId = req.messageId.trim();
     let occupied = false;
+    // 活表与 startTurn IPC 同寿（含 occupy 窗口）；失败由 finally `turns.delete`。
+    this.turns.set(req.turnId, {
+      wc,
+      conversationId: req.conversationId,
+      rootId: req.rootId,
+      subpath: req.subpath ?? "",
+      kind: "start",
+      traceId: req.traceId,
+      userMessageId: req.userMessageId,
+      userMessage: req.userMessage,
+      messageId,
+      buffer: new SidecarEventBuffer(),
+      attaching: false,
+    });
+    this.rememberWindow(req.conversationId, wc, req.rootId, req.subpath ?? "");
     try {
       occupied = await occupyLocalTurnBegin({
         conversationId: req.conversationId,
@@ -564,25 +626,6 @@ export class SidecarManager {
         // engine-unhealthy（报到失败 ≠ 探活失败）.
         throw new Error("OCCUPY_FAILED: 云端占位失败，本地回合未启动");
       }
-      this.turns.set(req.turnId, {
-        wc,
-        conversationId: req.conversationId,
-        rootId: req.rootId,
-        subpath: req.subpath ?? "",
-        kind: "start",
-        traceId: req.traceId,
-        userMessageId: req.userMessageId,
-        userMessage: req.userMessage,
-        messageId,
-        buffer: new SidecarEventBuffer(),
-        attaching: false,
-      });
-      this.rememberWindow(
-        req.conversationId,
-        wc,
-        req.rootId,
-        req.subpath ?? "",
-      );
       const externalMounts = buildExternalMounts(
         listSessionRoots(req.conversationId),
       );
@@ -600,6 +643,7 @@ export class SidecarManager {
         ...(req.agentMentions && req.agentMentions.length > 0
           ? { agentMentions: req.agentMentions }
           : {}),
+        ...tableSelectionPayload(req.tableSelection),
         ...(req.queueId ? { queueId: req.queueId } : {}),
         ...(req.attachments && req.attachments.length > 0
           ? { attachments: req.attachments }
@@ -616,6 +660,8 @@ export class SidecarManager {
         ...(req.foldersAuth ? { foldersAuth: req.foldersAuth } : {}),
         // account 窄票（定案 R3a）：与 folders 并列按回合重送，供搜/读云对话日志。
         ...(req.accountAuth ? { accountAuth: req.accountAuth } : {}),
+        // workspaces 窄票：与 folders/account 并列按回合重送，供云桌文件 REST。
+        ...(req.workspacesAuth ? { workspacesAuth: req.workspacesAuth } : {}),
         // Same for DesktopBrowserBridge (B-Arch): refresh every turn; null = 未装配.
         browserBridge: currentBrowserBridge(),
         // 会话权限轴按回合随送：中途切换后下一回合即生效。
@@ -630,17 +676,35 @@ export class SidecarManager {
       this.emitSyntheticTerminalIfNeeded(req.turnId, "message_end");
       return result as SidecarTurnResult;
     } catch (err) {
+      const busy = isSidecarTurnAlreadyRunning(err);
       if (occupied) {
-        await handleOccupiedTurnSidecarFailure({
-          conversationId: req.conversationId,
-          userMessageId: req.userMessageId,
-          messageId,
-        });
+        if (busy) {
+          // 只撤这一次空占位；禁止 salvageOpen 扫到仍在跑的上一轮。
+          await abortLocalTurnPlaceholder({
+            conversationId: req.conversationId,
+            userMessageId: req.userMessageId,
+            messageId,
+          });
+        } else {
+          const finishReason = occupiedSalvageFinishReason(err);
+          await handleOccupiedTurnSidecarFailure({
+            conversationId: req.conversationId,
+            userMessageId: req.userMessageId,
+            messageId,
+            finishReason,
+            errorMessage:
+              finishReason === "error"
+                ? err instanceof Error
+                  ? err.message
+                  : String(err ?? "")
+                : undefined,
+          });
+        }
       }
-      if (this.turns.has(req.turnId)) {
+      if (this.turns.has(req.turnId) && !busy) {
         this.emitSyntheticTerminalIfNeeded(
           req.turnId,
-          isSidecarTurnCancelled(err) ? "message_end" : "error",
+          isSidecarQuietStop(err) ? "message_end" : "error",
           err,
         );
       }
@@ -1235,6 +1299,7 @@ export class SidecarManager {
           currentBrowserBridge(),
           req.foldersAuth,
           req.accountAuth,
+          req.workspacesAuth,
         ),
         ...(externalMounts.length > 0 ? { externalMounts } : {}),
       });
@@ -1243,7 +1308,7 @@ export class SidecarManager {
     } catch (err) {
       this.emitSyntheticTerminalIfNeeded(
         req.messageId,
-        isSidecarTurnCancelled(err) ? "message_end" : "error",
+        isSidecarQuietStop(err) ? "message_end" : "error",
         err,
       );
       throw err;
@@ -1461,6 +1526,20 @@ export class SidecarManager {
   }
 
   /**
+   * 本机是否还在写这一通。只读活表，不 hydrate、不 spawn。
+   * 与 deliverMessage 同寿：startTurn/resume IPC 未结束即 occupied。
+   */
+  occupancy(req: SidecarOccupancyRequest): SidecarOccupancyResponse {
+    const live = this.findLiveTurn(req.conversationId);
+    if (!live) return { occupied: false };
+    return {
+      occupied: true,
+      rootId: live.turn.rootId,
+      subpath: live.turn.subpath,
+    };
+  }
+
+  /**
    * 本机 live 插话 / 排队。无 sidecar 进程或 RPC 失败须上抛——不得收成 received/queued。
    */
   async deliverMessage(
@@ -1484,6 +1563,7 @@ export class SidecarManager {
         ...(req.agentMentions && req.agentMentions.length > 0
           ? { agentMentions: req.agentMentions }
           : {}),
+        ...tableSelectionPayload(req.tableSelection),
       });
       return parseDeliverMessageAck(reply);
     } catch (err) {
@@ -1592,6 +1672,9 @@ export class SidecarManager {
     const attachments = Array.isArray(params.attachments)
       ? (params.attachments as SidecarQueuedAttachment[])
       : undefined;
+    const tableSelection = Array.isArray(params.tableSelection)
+      ? capTableSelection(params.tableSelection as string[])
+      : undefined;
     try {
       await this.startTurn(
         resolved.wc,
@@ -1609,6 +1692,9 @@ export class SidecarManager {
             ? { agentMentions: mentions }
             : {}),
           ...(attachments && attachments.length > 0 ? { attachments } : {}),
+          ...(tableSelection && tableSelection.length > 0
+            ? { tableSelection }
+            : {}),
         },
         ".",
       );
@@ -1741,9 +1827,10 @@ export class SidecarManager {
    *
    * Live 用户回合：泵上已有 terminal 则跳过（禁双终态）。不得因从未
    * attach 而跳过——用户停止时 sidecar 可能只回 TURN_CANCELLED、泵从未打出
-   * message_end。取消合成 `message_end(finish_reason=cancelled)`；成功收口
-   * 缺帧则 `end_turn`（禁止把正常结束打成停止）。不要空 payload，也不要把
-   * 取消打成 error（失败脸）。
+   * message_end。取消合成 `message_end(finish_reason=cancelled)`；中断合成
+   * `interrupted`（禁止把 interrupted 当 cancelled）。成功收口缺帧则 `end_turn`
+   * （禁止把正常结束打成停止）。失败合成 `error(code=PIPELINE_ERROR)` + 真
+   * message。不要空 payload，也不要把取消/中断打成 error（失败脸）。
    *
    * ephemeral harvest：没有 attach 槽，无 terminal 也要合成（进程退出走 error）。
    */
@@ -1762,7 +1849,7 @@ export class SidecarManager {
       payload:
         kind === "error"
           ? {
-              code: "sidecar_turn_ended",
+              code: "PIPELINE_ERROR",
               message:
                 err instanceof Error
                   ? err.message
@@ -1773,7 +1860,9 @@ export class SidecarManager {
           : {
               finish_reason: isSidecarTurnCancelled(err)
                 ? "cancelled"
-                : "end_turn",
+                : isSidecarTurnInterrupted(err)
+                  ? "interrupted"
+                  : "end_turn",
             },
     };
     turn.buffer.record(event);
@@ -1794,6 +1883,31 @@ export class SidecarManager {
       }
     }
     return null;
+  }
+
+  /** Conversations this sidecar process is (or was) writing. */
+  private conversationIdsOnSidecar(rootId: string, subpath: string): string[] {
+    const ids = new Set<string>();
+    for (const turn of this.turns.values()) {
+      if (turn.rootId === rootId && turn.subpath === subpath) {
+        ids.add(turn.conversationId);
+      }
+    }
+    for (const [cid, remembered] of this.lastWindowByCid) {
+      if (remembered.rootId === rootId && remembered.subpath === subpath) {
+        ids.add(cid);
+      }
+    }
+    return [...ids];
+  }
+
+  private occupiedConversationIds(): string[] {
+    const ids: string[] = [];
+    for (const turn of this.turns.values()) {
+      if (turn.ephemeral) continue;
+      ids.push(turn.conversationId);
+    }
+    return ids;
   }
 
   /** 本会话对应的 sidecar 进程（不 spawn）：活回合 → 记住的窗 → 任意同 cid 登记。 */

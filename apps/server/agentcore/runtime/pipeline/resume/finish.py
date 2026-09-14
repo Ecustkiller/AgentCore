@@ -36,8 +36,8 @@ async def finish_resume_turn(
     stamp to :func:`settle_successful_turn` — same billing kernel as a fresh turn.
     The whole turn bills once here under the ORIGINAL ``message_id``.
 
-    ``vision_cost_runs`` are the resumed turn's board_read 读图 ledger rows (role=vision,
-    §九.4 Gap ②), collected off the shared ``ToolContext.cost_sink``.
+    ``vision_cost_runs`` are the resumed turn's 读图 ledger rows (role=vision),
+    collected off the shared ``ToolContext.cost_sink``.
 
     ``ask_settled`` is True when this resume answered an ask_user card: join then
     keeps only the post-resume body (do not splice leftover「请确认」prose).

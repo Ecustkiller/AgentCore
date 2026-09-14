@@ -4,8 +4,8 @@
  * Two concerns kept out of the pure-sync renderer: (1) {@link ImageCache} — an
  * async-decoding cache the renderer pulls decoded `<img>`s from; (2) {@link loadImageForImport}
  * — turns a pasted / dropped file into a size-bounded data URL the engine stores on an
- * `image` element. Images live in pixels → the AI reads them via vision (`board_read`),
- * never as text, which is why `image` joins `freedraw` in the「整理选区」visual set.
+ * `image` element. Images live in pixels (hand-drawn / screenshot), which is why
+ * `image` joins `freedraw` when exporting a selection as PNG.
  */
 
 /** Longest-side cap (px) for an imported image's stored data URL — bounds the scene blob

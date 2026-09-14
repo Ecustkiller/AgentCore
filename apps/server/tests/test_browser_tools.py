@@ -102,7 +102,6 @@ def test_screenshot_is_ceo_and_worker_action():
     assert reg.audience == AUDIENCE_BOTH
     assert "screenshot" in schema.parameters["properties"]["action"]["enum"]
     action_desc = schema.parameters["properties"]["action"]["description"]
-    assert "screenshot" in action_desc
     assert "仅 worker" not in action_desc
     assert "delegate" not in action_desc
     assert "CEO+worker" not in action_desc

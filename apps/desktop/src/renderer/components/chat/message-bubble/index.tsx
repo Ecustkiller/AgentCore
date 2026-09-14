@@ -1,5 +1,6 @@
 import { isExecutionHarvestMessage } from "@/lib/executionHarvest";
 import { turnOutcomeForAssistant } from "@/lib/turnOutcome";
+import { cn } from "@/lib/utils";
 import { useActiveMessageFocus } from "@/stores/conversation";
 import { memo, useEffect, useRef } from "react";
 import { AssistantMessage } from "./AssistantMessage";
@@ -19,6 +20,12 @@ export const MessageBubble = memo(function MessageBubble({
 }: MessageBubbleProps) {
   const focus = useActiveMessageFocus();
   const ref = useRef<HTMLDivElement>(null);
+  // Capture on first mount: a streaming placeholder must not replay enter
+  // when sendTurn reuses the bubble, and must not start fading in on the
+  // first token (adding the class later would play the animation then).
+  const skipEnterAnim = useRef(
+    message.role === "assistant" && message.isStreaming,
+  ).current;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: focus.nonce is an intentional re-run key
   useEffect(() => {
@@ -46,7 +53,10 @@ export const MessageBubble = memo(function MessageBubble({
   return (
     <div
       ref={ref}
-      className="scroll-mt-6 rounded-xl animate-message-enter motion-reduce:animate-none"
+      className={cn(
+        "scroll-mt-6 rounded-xl",
+        !skipEnterAnim && "animate-message-enter motion-reduce:animate-none",
+      )}
     >
       {isAssistant ? (
         <AssistantMessage message={message} />

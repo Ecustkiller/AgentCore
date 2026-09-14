@@ -103,6 +103,13 @@ describe("TabChip overlay chrome", () => {
     expect(popOut.tabIndex).not.toBe(-1);
   });
 
+  it("marks dirty with a dot and 未保存 in the accessible name", () => {
+    renderChip({ dirty: true, label: "shot.png", onPopOut: undefined });
+    expect(
+      screen.getByRole("button", { name: "shot.png，未保存" }),
+    ).toBeTruthy();
+  });
+
   it("strip keeps close as an overlay and middle-click closes", () => {
     const onClose = vi.fn();
     const onSelect = vi.fn();

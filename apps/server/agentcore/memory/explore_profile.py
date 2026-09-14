@@ -217,7 +217,6 @@ async def resolve_folder_workspace_key(
     if not _looks_like_folder_uuid(folder_id):
         return build_workspace_key(folder_id=folder_id, binding=None)
 
-    from agentcore.conversation.scratch import resolve_conversation_local_binding
     from agentcore.db.base import async_session_factory
     from agentcore.db.errors import DatabaseUnavailableError, is_db_connectivity_error
     from agentcore.db.repositories import FolderRepository
@@ -226,6 +225,7 @@ async def resolve_folder_workspace_key(
         cloud_get_folder,
         get_folders_credentials,
     )
+    from agentcore.workspace.locate import resolve_conversation_local_binding
 
     creds = get_folders_credentials()
     if creds is not None:

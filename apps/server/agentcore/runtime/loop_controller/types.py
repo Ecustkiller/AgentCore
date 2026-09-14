@@ -125,7 +125,7 @@ def _collapse_malformed_required_args(name: str, parsed: dict[str, object]) -> d
     summary texts still trip validation path-stop.
     """
     if name in {"file_write", "str_replace"}:
-        from agentcore.runtime.engine.write_args_clear import is_cleared_write_stub_args
+        from agentcore.tools.cleared_write_stub import is_cleared_write_stub_args
 
         if is_cleared_write_stub_args(parsed):
             path = parsed.get("path")

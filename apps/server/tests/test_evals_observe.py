@@ -201,4 +201,4 @@ def test_small_n_binomial_se_is_descriptive_not_a_gate():
     assert obs["gate"] is False
     text = format_observe(obs)
     assert "不是红线" in text
-    assert "只升不降" in text
+    assert "不是发布门禁" in text

@@ -29,7 +29,10 @@ from agentcore.tools.builtin import (
     delegation_grantable_tool_names,
     per_call_tool_names,
 )
-from agentcore.tools.registration import host_class_tool_names, register_board_ceo_tools
+from agentcore.tools.registration import (
+    host_class_tool_names,
+    register_table_ceo_tools,
+)
 from agentcore.tools.registry import ToolRegistry
 from agentcore.workspace.protocol import WorkspaceBackend
 
@@ -54,6 +57,7 @@ def build_chat_system_prompt(
     prior_delegate_retry: str,
     attachment_context: str,
     registered_sources: str,
+    table_context: str = "",
     soft_cap: int | None,
 ) -> str:
     """Render the turn's CEO system prompt from its sections — the ONE assembly point.
@@ -80,6 +84,7 @@ def build_chat_system_prompt(
         .add("ceo_prompt", ceo_prompt, SectionOrder.BASE)
         .add("prior_delegate_retry", prior_delegate_retry, SectionOrder.PRIOR_DELEGATE_RETRY)
         .add("attachment_context", attachment_context, SectionOrder.ATTACHMENT)
+        .add("table_context", table_context, SectionOrder.TABLE_FACTS)
         .add("registered_sources", registered_sources, SectionOrder.REGISTERED_SOURCES)
         .observe(scope="ceo_turn", soft_cap=soft_cap)
         .render()
@@ -220,13 +225,9 @@ async def assemble_ceo_turn(
     offer_tools_from_window(chat_tools, history)
     offer_tools_from_window(prepared.worker_tools, history)
 
-    # AI 协作白板: in a 白板会话, hand the CEO the board tools so it can draw on
-    # (``board_ops``, §六 M2) and read (``board_read``, §九) the user's open canvas.
-    # Registered AFTER the coordinator toolset is assembled and BEFORE ``ceo_tool_names``
-    # is read, so they join the LLM's function catalog this turn. Only here (board-bound
-    # runs) — every other chat never sees them.
-    if prepared.board_channel is not None:
-        register_board_ceo_tools(chat_tools)
+    if prepared.base_tool_context.table_id:
+        register_table_ceo_tools(chat_tools)
+        chat_tools.offer("table_ops")
 
     # The entry chat agent gets the SLIM CEO core + the unified ``<按需目录>``.
     # Advanced HOW detail is pulled via ``consult``.
@@ -349,6 +350,7 @@ async def assemble_ceo_turn(
         ceo_prompt=chat_system_prompt,
         prior_delegate_retry="",
         attachment_context=prepared.attachment_context,
+        table_context=prepared.table_context,
         registered_sources=format_registered_sources_prompt(evidence_ledger),
         soft_cap=settings.prompt_budget_char_soft_cap,
     )

@@ -466,10 +466,12 @@ def test_host_call_requires_approval_by_action():
 
 
 def test_host_action_description_is_ceo_and_worker():
-    desc = HostTool().schema.parameters["properties"]["action"]["description"]
+    action = HostTool().schema.parameters["properties"]["action"]
+    desc = action["description"]
+    enum = set(action["enum"])
     assert "仅 worker" not in desc
-    assert "status" in desc and "os_log" in desc and "shell" in desc
     assert "有界探测" not in desc
+    assert {"status", "os_log", "shell"} <= enum
 
 
 @pytest.mark.asyncio

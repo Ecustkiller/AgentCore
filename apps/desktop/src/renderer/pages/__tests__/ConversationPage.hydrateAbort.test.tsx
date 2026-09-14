@@ -93,13 +93,6 @@ vi.mock("@/services/turns/conversationFollow", () => ({
   ) => syncConversationFollow(...args),
   stopAllConversationFollows: vi.fn(),
 }));
-vi.mock("@/stores/bookmarks", () => ({
-  useBookmarkStore: Object.assign(
-    (sel: (s: { hydrateForConversation: () => void }) => unknown) =>
-      sel({ hydrateForConversation: () => {} }),
-    { getState: () => ({ hydrateForConversation: () => {} }) },
-  ),
-}));
 vi.mock("@/lib/log", () => ({ logEvent: vi.fn() }));
 vi.mock("@/lib/detachLocalBrowserHost", () => ({
   detachLocalBrowserHost: vi.fn().mockResolvedValue(undefined),
@@ -210,7 +203,7 @@ describe("ConversationPage cold reconcile", () => {
     });
   });
 
-  it("does not replace a cache that already has the team journal with a thinner GET", async () => {
+  it("adopts the server GET even when opened cache has a thicker team journal", async () => {
     const thick = [
       bubble("u1", "user", "做 G1-C1"),
       bubble("a1", "assistant", "等待核验员", {
@@ -226,9 +219,11 @@ describe("ConversationPage cold reconcile", () => {
         },
       }),
     ];
-    const thin = [
+    const fromServer = [
       bubble("u1", "user", "做 G1-C1"),
-      bubble("a1", "assistant", "等待核验员"),
+      bubble("a1", "assistant", "没派团队，36 篇是我直接写的。"),
+      bubble("u2", "user", "精简一点"),
+      bubble("a2", "assistant", "改完了"),
     ];
     loadCachedConversation.mockResolvedValue({
       conversation: {
@@ -246,8 +241,8 @@ describe("ConversationPage cold reconcile", () => {
       hasMoreAfter: false,
     });
     fetchMessageWindow.mockResolvedValue({
-      messages: thin,
-      total: 2,
+      messages: fromServer,
+      total: 4,
       hasMoreBefore: false,
       hasMoreAfter: false,
       memoryUpdates: [],
@@ -259,10 +254,11 @@ describe("ConversationPage cold reconcile", () => {
       expect(fetchMessageWindow).toHaveBeenCalled();
     });
     await waitFor(() => {
-      const runs = getRuntime("conv-graph").messages.find(
-        (m) => m.id === "a1",
-      )?.runs;
-      expect(runs?.events?.length).toBe(1);
+      const ids = getRuntime("conv-graph").messages.map((m) => m.id);
+      expect(ids).toEqual(["u1", "a1", "u2", "a2"]);
+      expect(
+        getRuntime("conv-graph").messages.find((m) => m.id === "a1")?.content,
+      ).toBe("没派团队，36 篇是我直接写的。");
     });
   });
 });

@@ -38,6 +38,8 @@ export {
   flushTurn,
   recoverLocalPersistence,
   handleOccupiedTurnSidecarFailure,
+  setOccupiedConversationIdsProvider,
+  resetOccupiedConversationIdsProviderForTests,
   startOutboxPolling,
   stopOutboxPolling,
   registerOutboxIpc,

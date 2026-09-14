@@ -44,6 +44,7 @@ export function DetailTabs({
                 icon={<FileText size={13} className="shrink-0 opacity-60" />}
                 label={t.name}
                 title={t.path}
+                dirty={Boolean(t.dirty)}
                 onSelect={() => onActivate(key)}
                 onClose={() => onClose(key)}
                 className="max-w-[180px]"

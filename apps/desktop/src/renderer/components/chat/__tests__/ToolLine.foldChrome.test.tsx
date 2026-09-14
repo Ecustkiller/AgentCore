@@ -176,18 +176,6 @@ const FOLD_FAMILY: {
     result: "图里是一块白板",
   },
   {
-    tool: "board_ops",
-    label: "Edit board",
-    args: {},
-    result: "已更新白板元素",
-  },
-  {
-    tool: "board_read",
-    label: "Read board",
-    args: {},
-    result: "白板上有三张便利贴",
-  },
-  {
     tool: "code_search",
     label: "Search code",
     args: { query: "ToolLine" },

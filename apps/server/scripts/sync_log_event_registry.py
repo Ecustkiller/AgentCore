@@ -982,6 +982,36 @@ HISTORICAL_COMPAT: dict[str, str] = {
     "team_preview.orphaned": (
         "历史兼容：曾在发新开工卡前结算旧 pending 时发出；开工卡产品位已拆，不再发此事件"
     ),
+    "stage_card.consume_prepared": (
+        "历史兼容：曾在点卡开辩前消费推进卡；入口已下线，不再发此事件"
+    ),
+    "stage_card.debate_pipeline_failed": (
+        "历史兼容：曾在推进卡直起辩论管道失败时发出；直起管道已删，不再发此事件"
+    ),
+    "stage_card.emitted": (
+        "历史兼容：曾在调研收尾登记推进卡时发出；新调研不再发卡，不再发此事件"
+    ),
+    "stage_card.finalize_at_started_failed": (
+        "历史兼容：曾在开辩当时结算推进卡失败时发出；入口已下线，不再发此事件"
+    ),
+    "stage_card.host_attach_invalid": (
+        "历史兼容：曾在推进卡宿主三元组失效时发出；直起链已删，不再发此事件"
+    ),
+    "stage_card.host_triple_missing": (
+        "历史兼容：曾在发卡时打不上宿主三元组时发出；不再发卡，不再发此事件"
+    ),
+    "stage_card.journal_write_failed": (
+        "历史兼容：曾在推进卡落盘失败时发出；不再发卡，不再发此事件"
+    ),
+    "stage_card.orphaned": (
+        "历史兼容：曾在后续回合给遗留推进卡写 orphan 墓碑；不再盖章，不再发此事件"
+    ),
+    "stage_card.start_debate_exception_kept_pending": (
+        "历史兼容：曾在点卡开辩异常时保持 pending；入口已下线，不再发此事件"
+    ),
+    "stage_card.supersede_prior_failed": (
+        "历史兼容：曾在新卡 supersede 旧 pending 失败时发出；不再发卡，不再发此事件"
+    ),
     "ask_user.option_label_rejected": (
         "历史兼容：曾拒选项名含「（推荐）」等倾向标记；现倾向写入名末，不再发此事件"
     ),
@@ -1036,6 +1066,24 @@ HISTORICAL_COMPAT: dict[str, str] = {
     "consult.skill_replacements_snapshot_failed": (
         "历史兼容：换用 overlay 已撤，不再 emit"
     ),
+    "board.op_timeout": (
+        "历史兼容：曾在白板 AI 操作超时发出；白板 AI 工具面已卸，不再发此事件"
+    ),
+    "board.ops_apply": (
+        "历史兼容：曾在白板 AI 应用操作时发出；白板 AI 工具面已卸，不再发此事件"
+    ),
+    "board.read": (
+        "历史兼容：曾在白板 AI 读盘时发出；白板 AI 工具面已卸，不再发此事件"
+    ),
+    "board.read_billing_failed": (
+        "历史兼容：曾在白板 AI 读盘计费失败时发出；白板 AI 工具面已卸，不再发此事件"
+    ),
+    "board.read_timeout": (
+        "历史兼容：曾在白板 AI 读盘超时发出；白板 AI 工具面已卸，不再发此事件"
+    ),
+    "board.read_vision_failed": (
+        "历史兼容：曾在白板 AI 视觉读失败时发出；白板 AI 工具面已卸，不再发此事件"
+    ),
 }
 
 KEY_DESC: dict[str, str] = {
@@ -1073,8 +1121,8 @@ KEY_DESC: dict[str, str] = {
         "平台池快照热更完成；成员签名（id/enabled/url/day/key hash）未变打 debug，变化才 info"
     ),
     "chat.zero_output_send_deleted": (
-        "本发新建 user + 空失败助手（LLM_RATE_LIMIT / KEY_INVALID / 余额不足，"
-        "无正文/工具/token）已硬删，发送在库里当没发生；cost_events 留下"
+        "本发新建 user + 空失败助手（无思考/正文/工具/派工）已硬删，发送在库里当没发生；"
+        "cost_events 留下。error_code 仅观测，不闸"
     ),
     "chat.zero_output_send_delete_failed": (
         "本发零产出回滚硬删失败（助手或 user 行未去掉）；客户端仍可能撤泡，重载以库为准"

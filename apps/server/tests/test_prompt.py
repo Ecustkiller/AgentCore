@@ -284,6 +284,9 @@ def test_core_states_coordinator_tool_boundary():
     assert "探路够了" not in DELEGATE_DESCRIPTION
     assert "小落盘" in DELEGATE_DESCRIPTION
     assert "不知读哪" in DELEGATE_DESCRIPTION
+    assert "切不出去" in DELEGATE_DESCRIPTION
+    assert "实质讨论" not in DELEGATE_DESCRIPTION
+    assert "装得下" not in DELEGATE_DESCRIPTION
     assert "定位入口" not in DELEGATE_DESCRIPTION
     assert "定位入口" in _STAFFING
     assert "默认交给团队" in hint
@@ -295,7 +298,8 @@ def test_core_states_coordinator_tool_boundary():
     host_how = capability_how_suffix({"host"})
     run_how = capability_how_suffix({"run"})
     run_skill = build_system_skill_registry().get("run").body
-    assert "三分日志" in host_how
+    assert "日志分三处看" in host_how
+    assert "三分日志" not in host_how
     assert "host(action=os_log)" in host_how
     assert "search_conversations" in host_how
     assert "Get-WinEvent" in host_how
@@ -304,8 +308,10 @@ def test_core_states_coordinator_tool_boundary():
     assert "wait_for" in run_skill
     assert "长驻" in run_skill and "host(action=shell)" in run_skill
     assert "验收与短命令由队员" not in run_how
-    assert "通识 FAQ" in host_how
-    assert "盲探" in host_how
+    assert "通用知识问答" in host_how
+    assert "通识 FAQ" not in host_how
+    assert "乱找路径" in host_how
+    assert "盲探" not in host_how
     assert "delegate" not in host_how
     assert "host_os_log_summary" not in hint
     assert "host_ping" not in hint
@@ -320,9 +326,11 @@ def test_capability_how_gated_on_ceo_tool_names():
     assert "wait_for" not in spine
     assert "ask_user(browser_login=true)" not in spine
     assert "通识 FAQ" not in spine
+    assert "通用知识问答" not in spine
     assert "永不代填密码" not in spine
     assert "假开页" not in spine
     assert "三分日志" not in spine
+    assert "日志分三处看" not in spine
     assert "把启服写进队员任务" not in spine
     assert "未装配能力" not in spine
 
@@ -333,6 +341,7 @@ def test_capability_how_gated_on_ceo_tool_names():
     assert "云桌" not in run_how
     assert "ask_user(browser_login=true)" not in run_how
     assert "通识 FAQ" not in run_how
+    assert "通用知识问答" not in run_how
     assert "验收与短命令由队员" not in run_how
     # 异步 HTTP 轮询短触发只在内部 exec schema，不进核 / 不进 consult(run) 启服手册
     assert "异步 HTTP" not in spine
@@ -340,10 +349,12 @@ def test_capability_how_gated_on_ceo_tool_names():
     assert "异步 HTTP" not in run_skill
 
     host = capability_how_suffix({"host"})
-    assert "通识 FAQ" in host
+    assert "通用知识问答" in host
+    assert "通识 FAQ" not in host
     assert "host(action=status)" in host
     assert "host(action=os_log)" in host
-    assert "三分日志" in host
+    assert "日志分三处看" in host
+    assert "三分日志" not in host
     assert "search_conversations" in host
     assert "open_settings" in host and "install_package" in host
     assert "set_audio" in host and "restart_service" in host
@@ -362,6 +373,8 @@ def test_capability_how_gated_on_ceo_tool_names():
     assert "永不代填密码" in browser
     assert "web_fetch" in browser and "已开页" in browser
     assert "同一出站" in browser
+    assert "同一个窗口" in browser
+    assert "同一壳" not in browser
     assert "请人贴" in browser
     assert "Google" not in browser and "google.com" not in browser
     assert "wait_for" not in browser
@@ -564,7 +577,7 @@ def test_core_teaches_split_criterion_over_count():
     assert "假两段" not in _STAFFING
     assert "薄旁路" not in _STAFFING
     assert "形态跟桌上结果" not in _STAFFING
-    assert "单 lead" in _STAFFING
+    assert "一个队长" in _STAFFING
     assert "能力行" not in _DEFAULT_SYSTEM_PROMPT
     assert "开场工具表" not in _DEFAULT_SYSTEM_PROMPT
     assert "本回合工具表" in _DEFAULT_SYSTEM_PROMPT
@@ -611,6 +624,8 @@ def test_core_teaches_split_criterion_over_count():
     assert "可运行应用" in DELEGATE_DESCRIPTION
     assert "有写权" in DELEGATE_DESCRIPTION
     assert "不知读哪" in DELEGATE_DESCRIPTION
+    assert "切不出去" in DELEGATE_DESCRIPTION
+    assert "实质讨论" not in DELEGATE_DESCRIPTION
     assert "何时用" not in skill
     assert "HOW→consult(staffing)" in DELEGATE_DESCRIPTION
     assert "教学示例形状" not in skill
@@ -789,7 +804,7 @@ def test_core_teaches_delegate_graph_and_coordinate_invariants():
     assert "二选一" in playbook
     assert "填了就不要传" not in playbook
     assert "二选一" in skill
-    assert "单 lead" in skill
+    assert "一个队长" in skill
 
 
 def test_core_teaches_dependency_judgment_before_delegating():
@@ -877,7 +892,7 @@ def test_core_teaches_delegating_parallel_research():
     assert "问面广度" not in hint
     assert "开局即派" not in hint
     assert "不派仅限" not in hint
-    assert "先摸清入口就停" in _STAFFING
+    assert "先定位入口就停" in _STAFFING
     assert "打开正文" in _STAFFING
     assert "不必先自己摸完" in _STAFFING
     assert "探路停手" not in _STAFFING
@@ -896,7 +911,7 @@ def test_prompt_investigation_discipline_follows_settings():
     assert "不派仅限" not in _CEO_CORE_HINT
     assert "0～1" not in _CEO_CORE_HINT
     assert "0～1" not in _COLD_START_EXPLORE_HINT_REFRESH
-    assert "先摸清入口就停" in _STAFFING
+    assert "先定位入口就停" in _STAFFING
     assert "打开正文" in _STAFFING
     assert "不必先自己摸完" in _STAFFING
     assert "探路停手" not in _STAFFING
@@ -942,8 +957,12 @@ def test_delegate_task_names_workspace_relative_paths():
     task_desc = DELEGATE_PARAMETERS["properties"]["tasks"]["items"]["properties"]["task"][
         "description"
     ]
-    assert "相对 POSIX" in _STAFFING
-    assert "相对 POSIX" in _LEAD_SUBTEAM
+    assert "相对路径" in _STAFFING and "正斜杠" in _STAFFING
+    assert "相对路径" in _LEAD_SUBTEAM and "正斜杠" in _LEAD_SUBTEAM
+    assert "必读顺序" in _STAFFING
+    assert "必读顺序" in _LEAD_SUBTEAM
+    assert "必读顺序" not in task_desc
+    assert "必读顺序" not in _CEO_CORE_HINT
     assert "相对 POSIX" not in task_desc
     assert "相对 POSIX" not in _CEO_CORE_HINT
     assert "C:\\" not in task_desc
@@ -1058,6 +1077,10 @@ def test_task_schema_contrasts_brief_vs_howto():
     assert "改法与现状" in _STAFFING
     assert "入口" in _LEAD_SUBTEAM
     assert "成品路径" in _LEAD_SUBTEAM
+    assert "必读顺序" in _STAFFING
+    assert "必读顺序" in _LEAD_SUBTEAM
+    assert "必读顺序" not in task_desc
+    assert "必读顺序" not in _CEO_CORE_HINT
     assert "逐步改法" not in _CEO_CORE_HINT
     assert "章节骨架" not in _CEO_CORE_HINT
     assert "逐步改法" not in _STAFFING
@@ -1176,7 +1199,9 @@ def test_core_teaches_outline_checkpoint_prefers_structured_path():
     mid = build_system_skill_registry().get("ask_midtask").body
     orch = _STAFFING
     assert "主拍板" in mid
-    assert "每任务恰好" in mid
+    assert "每个任务只问一次" in mid
+    assert "每任务恰好" not in mid
+    assert "拆波" not in mid
     assert "发散挑选" in mid
     assert "continue_from_run_id" in mid
     assert "多选 choice" in mid or "勾选要处理" in mid
@@ -1426,8 +1451,8 @@ def test_core_teaches_presentation_honesty():
     assert "先干再问" not in hint
     assert "点名载体" not in hint
     assert "不可产" in delivery and "等效替代" in delivery
-    assert "静默降成" in delivery
-    assert "确定性导出器" in delivery
+    assert "悄悄改成交" in delivery
+    assert "专用导出器" in delivery
     assert "说满" not in delivery
     assert "pptx" not in hint.lower() and "xlsx" not in hint.lower()
     assert "SmartArt" not in hint and "DrawingML" not in hint
@@ -1469,11 +1494,12 @@ def test_core_defers_format_capability_to_facts_not_prose():
     assert "产物格式" not in _DEFAULT_SYSTEM_PROMPT
     orch = _STAFFING
     delivery = _DELIVERY
-    assert "确定性导出器" in delivery
+    assert "专用导出器" in delivery
     assert "md_to_docx" in delivery and "md_to_pdf" in delivery
-    assert "与执行正交" in delivery
+    assert "有没有 `run` 不影响" in delivery
     assert "本回合工具表" in delivery
     assert "无条件装配" not in delivery
+    assert "与执行正交" not in delivery
     assert "与执行正交" not in orch
 
 
@@ -1611,7 +1637,7 @@ def test_core_teaches_cloud_web_install_verify_honesty():
     assert "export_to_local" not in hint
     delivery = _DELIVERY
     assert "结构自检" not in delivery
-    assert "外环已跑通" in delivery
+    assert "用户机器上已经跑通" in delivery
     assert "export_to_local" in delivery
     build = _STAFFING
     assert "外环验绿对账" not in build
@@ -2023,13 +2049,13 @@ def test_ceo_core_teaches_memory_must_not_override_routing():
 
 
 def test_ceo_core_teaches_memory_history_user_facing_framing():
-    """记忆/历史对外口径 HOW → product_help；核不写跨会话判决。"""
+    """记忆/历史对人怎么说 HOW → product_help；核不写跨会话判决。"""
     hint = _CEO_CORE_HINT
     assert "跨会话原文" not in hint
     assert "查阅员" not in hint
     assert "空口编" not in hint
     help_body = build_system_skill_registry().get("product_help").body
-    assert "记忆/历史·对外口径" in help_body
+    assert "记忆/历史·对人怎么说" in help_body
     assert "禁止报工具名" in help_body or "禁止报工具名与内部角色名" in help_body
     assert "画像细节" in help_body
     assert "能不能读历史对话" in help_body or "有没有记忆" in help_body
@@ -2039,22 +2065,22 @@ def test_ceo_core_teaches_memory_history_user_facing_framing():
 
 
 def test_ceo_core_teaches_user_rules_framing():
-    """用户规则：载体对照 / 对外口径 HOW → product_help；核不复述百科。"""
+    """用户规则：载体对照 / 对人怎么说 HOW → product_help；核不复述百科。"""
     hint = _CEO_CORE_HINT
     assert "【用户规则·载体对照】" not in hint
     assert "硬约束清单" not in hint
     assert "记忆偏好=软" not in hint
     help_body = build_system_skill_registry().get("product_help").body
-    assert "用户规则·对外口径" in help_body
+    assert "用户规则·对人怎么说" in help_body
     assert "用户规则·内部" in help_body
     assert "可增" in help_body and "可改" in help_body and "可删" in help_body
     assert "只追加却声称" in help_body
     assert "文件页规则本" in help_body
     assert "平权注入" in help_body
-    internal = help_body.split("【用户规则·内部】", 1)[1].split("【用户规则·对外口径】", 1)[0]
+    internal = help_body.split("【用户规则·内部】", 1)[1].split("【用户规则·对人怎么说】", 1)[0]
     assert "action=" in internal
     assert "replace" in internal and "forget" in internal
-    external = help_body.split("【用户规则·对外口径】", 1)[1].split("【", 1)[0]
+    external = help_body.split("【用户规则·对人怎么说】", 1)[1].split("【", 1)[0]
     assert "action=" not in external
     assert "replace" not in external and "forget" not in external
     assert "你能改规则吗" in help_body
@@ -2096,6 +2122,9 @@ def test_ceo_core_splits_routing_tree_from_acting_tree():
     assert "有写权" in DELEGATE_DESCRIPTION
     assert "不知读哪" in DELEGATE_DESCRIPTION
     assert "闲聊" in DELEGATE_DESCRIPTION and "不必派" in DELEGATE_DESCRIPTION
+    assert "切不出去" in DELEGATE_DESCRIPTION
+    assert "实质讨论" not in DELEGATE_DESCRIPTION
+    assert "装得下" not in DELEGATE_DESCRIPTION
     assert "可见打算" not in DELEGATE_DESCRIPTION
     assert "成规模查证" not in role
     assert "对得上这回合" in honesty

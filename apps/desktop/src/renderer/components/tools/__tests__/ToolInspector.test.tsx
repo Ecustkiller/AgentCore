@@ -2,7 +2,7 @@ import type { CapabilityTool } from "@/services/capabilities";
 // @vitest-environment jsdom
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { ToolInspector, toolFaceSource } from "../ToolInspector";
+import { ToolInspector } from "../ToolInspector";
 
 afterEach(cleanup);
 
@@ -26,37 +26,31 @@ const tool: CapabilityTool = {
 };
 
 describe("ToolInspector", () => {
-  it("第一面是说明书：干什么、谁能用、要不要批、要填什么", () => {
+  it("一页说明书：干什么、要填什么；审批与谁能用不上正文", () => {
     render(<ToolInspector tool={tool} />);
     expect(screen.getByRole("heading", { name: "web_search" })).toBeTruthy();
     expect(screen.getByText("开场即用")).toBeTruthy();
-    expect(screen.getByText(/全员/)).toBeTruthy();
-    expect(screen.getByText(/自动执行/)).toBeTruthy();
+    expect(screen.queryByText(/全员/)).toBeNull();
+    expect(screen.queryByText(/自动执行/)).toBeNull();
+    expect(screen.queryByText(/需审批/)).toBeNull();
     expect(screen.getByText("检索词")).toBeTruthy();
     expect(screen.getByText("query")).toBeTruthy();
     expect(screen.getByText("要填")).toBeTruthy();
     expect(screen.getByText("max_results")).toBeTruthy();
     expect(screen.queryByTestId("tool-face-source")).toBeNull();
+    expect(screen.queryByRole("tab", { name: "源码" })).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("源码面仍是模型看见的 schema", () => {
-    render(<ToolInspector tool={tool} view="source" />);
-    const source = screen.getByTestId("tool-face-source").textContent ?? "";
-    expect(source).toBe(toolFaceSource(tool));
-    expect(source).toContain('"name": "web_search"');
-    expect(source).toContain("检索词");
-    expect(screen.queryByTestId("tool-face-guide")).toBeNull();
-  });
-
-  it("空 properties 说明没有要填的参数", () => {
+  it("空 properties 不写空参提示", () => {
     render(
       <ToolInspector
         tool={{ ...tool, parameters: { type: "object", properties: {} } }}
       />,
     );
-    expect(screen.getByText("没有要填的参数")).toBeTruthy();
-    expect(screen.queryByTestId("tool-face-source")).toBeNull();
+    expect(screen.queryByText("没有要填的参数")).toBeNull();
+    expect(screen.queryByText("query")).toBeNull();
+    expect(screen.getByTestId("tool-face-guide")).toBeTruthy();
   });
 
   it("shows a capability hint", () => {

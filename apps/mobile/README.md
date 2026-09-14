@@ -1,6 +1,6 @@
 # AgentCore 手机端（apps/mobile）
 
-**Capacitor 8 原生壳**，产品页挂桌面 renderer 的 `dist-web`（对话 / 文件 / IM / 设置 / 登录同一棵树）。本目录留下推送 / 安全存储 / 语音 / Android 更新与 `android/` · `ios/`。**Android 侧载 APK 已落地**（见「Android 发版」）。壳内鉴权走 **Bearer + 安全存储**（WebView origin 不能靠同源 cookie）。
+**Capacitor 8 原生壳**，产品页挂桌面 renderer 的 `dist-web`（对话 / 文件 / IM / 设置 / 登录同一棵树）。本目录留下推送 / 安全存储 / 语音 / Android 更新与 `android/`（iOS 工程未落地，见路线图摘要）。**Android 侧载 APK 已落地**（见「Android 发版」）。壳内鉴权走 **Bearer + 安全存储**（WebView origin 不能靠同源 cookie）。
 
 ## 何时读这里
 

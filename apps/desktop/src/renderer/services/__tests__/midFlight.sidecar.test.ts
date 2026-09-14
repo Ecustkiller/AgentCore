@@ -163,6 +163,53 @@ describe("sendMidFlightMessage · sidecar live", () => {
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
 
+  it("显式 sidecarTarget 在活 map 已清时仍走 RPC，复用已有用户泡", async () => {
+    useConversationStore.getState().addMessage(
+      {
+        id: "opt-reuse",
+        role: "user",
+        content: "插一句",
+        createdAt: "",
+        executionId: null,
+        isStreaming: false,
+      },
+      CID,
+    );
+    const deliverMessage = vi.fn().mockResolvedValue({
+      status: "received",
+      interjectionId: "ij-reuse",
+    });
+    vi.stubGlobal("window", { sidecarApi: { deliverMessage } });
+
+    const result = await sendMidFlightMessage(
+      CID,
+      "插一句",
+      undefined,
+      "steer",
+      undefined,
+      {
+        sidecarTarget: { rootId: "root-1", subpath: "conversations/x" },
+        userMessageId: "opt-reuse",
+      },
+    );
+
+    expect(result).toEqual({ kind: "received", interjectionId: "ij-reuse" });
+    expect(deliverMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rootId: "root-1",
+        subpath: "conversations/x",
+        userMessageId: "opt-reuse",
+        delivery: "steer",
+      }),
+    );
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    expect(
+      useConversationStore
+        .getState()
+        .byId[CID]?.messages.filter((m) => m.role === "user"),
+    ).toHaveLength(1);
+  });
+
   it("无 sidecar live 不走 RPC，仍 POST 云 /messages", async () => {
     const deliverMessage = vi.fn();
     vi.stubGlobal("window", { sidecarApi: { deliverMessage } });

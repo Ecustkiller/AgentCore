@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agentcore.core.types import ToolApproval, ToolFace
 
@@ -29,12 +29,17 @@ class CapabilityTool(BaseModel):
 class CapabilitySkill(BaseModel):
     """A system Skill in the catalog (渐进披露): its catalog ``summary`` (the always-on
     one-line trigger) plus the full ``body`` guidance the CEO pulls via consult.
-    ``group`` is the Chinese 能力指引 subtitle (编排 / 工作区 / 交付 / 产品 / 工具)."""
+    ``group`` is the Chinese 能力指引 subtitle (编排 / 工作区 / 交付 / 产品 / 工具).
+    ``blurb`` is the toolbox shelf description only — not the consult directory.
+    ``audience`` is who may see the entry (ceo / worker), same tokens as tool
+    ``available_to``."""
 
     name: str
     summary: str
     body: str
     group: str = ""
+    blurb: str = ""
+    audience: list[str] = Field(default_factory=lambda: ["ceo", "worker"])
 
 
 class CapabilityGuidelines(BaseModel):

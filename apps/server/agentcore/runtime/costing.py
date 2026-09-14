@@ -274,8 +274,8 @@ def vision_run_cost(
     duration_ms: int = 0,
     credential_source: CredentialSource | None = None,
 ) -> RunCost:
-    """A ledger row for a ``board_read`` vision sub-call (AI协作白板.md §九.4 Gap ②).
-    A tool-layer sub-call to a SEPARATE vision model (qwen-vl ≠ the run's DeepSeek), so it
+    """A ledger row for a vision sub-call (attachment eye→text / ``read_image``).
+    A tool-layer sub-call to a SEPARATE vision model (qwen-vl ≠ the run's chat model), so it
     cannot fold into the run's usage — that would misprice it at the run's tier. Priced
     here exactly once via the one ``calculate_cost`` (不变量 #2) under the dedicated
     ``vision`` role, then routed into the turn's ``cost_runs`` via ``ToolContext.cost_sink``

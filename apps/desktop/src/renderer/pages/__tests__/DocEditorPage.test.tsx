@@ -34,6 +34,43 @@ vi.mock("@/lib/toast", () => ({
   notifySuccess: vi.fn(),
 }));
 
+vi.mock("@/components/markdown/sourceToolbar", () => ({
+  SourceToolbar: () => null,
+}));
+
+vi.mock("@/components/markdown/MarkdownSourceEditor", async () => {
+  const React = await import("react");
+  return {
+    MarkdownSourceEditor: React.forwardRef(function Stub(
+      props: {
+        initialDoc?: string;
+        editable?: boolean;
+        onChange?: (value: string) => void;
+        onSave?: () => void;
+      },
+      ref: React.Ref<unknown>,
+    ) {
+      const [value, setValue] = React.useState(props.initialDoc ?? "");
+      React.useImperativeHandle(ref, () => ({
+        getValue: () => value,
+        getView: () => null,
+        getSelectionContext: () => null,
+        startRewriteReview: () => false,
+        endRewriteReview: () => {},
+      }));
+      return React.createElement("textarea", {
+        "aria-label": "文档正文",
+        readOnly: props.editable === false,
+        value,
+        onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+          setValue(e.target.value);
+          props.onChange?.(e.target.value);
+        },
+      });
+    }),
+  };
+});
+
 import { DocEditorPage } from "../DocEditorPage";
 
 const get = vi.mocked(getDoc);
@@ -71,10 +108,7 @@ describe("DocEditorPage", () => {
       can_write: true,
       created_at: "2026-09-12T00:00:00Z",
       updated_at: "2026-09-12T00:00:00Z",
-      body: {
-        schemaVersion: 1,
-        blocks: [{ id: "p1", type: "paragraph", text: "初稿" }],
-      },
+      body: { markdown: "初稿" },
     });
     save.mockResolvedValue({ ok: true, version: 2, conflict: false });
     listShares.mockResolvedValue([]);
@@ -87,7 +121,7 @@ describe("DocEditorPage", () => {
     });
   });
 
-  it("loads title and paragraph, autosaves an edit", async () => {
+  it("loads title and markdown, autosaves an edit", async () => {
     renderEditor();
     expect(await screen.findByDisplayValue("Q3")).toBeTruthy();
     const area = await screen.findByDisplayValue("初稿");
@@ -101,7 +135,7 @@ describe("DocEditorPage", () => {
     expect(save).toHaveBeenCalled();
     const [, body, baseline] = save.mock.calls[0] ?? [];
     expect(baseline).toBe(1);
-    expect(body.blocks[0]).toMatchObject({ type: "paragraph", text: "改过" });
+    expect(body).toEqual({ markdown: "改过" });
   });
 
   it("hides editors and share for a read-only member", async () => {
@@ -114,129 +148,30 @@ describe("DocEditorPage", () => {
       can_write: false,
       created_at: "2026-09-12T00:00:00Z",
       updated_at: "2026-09-12T00:00:00Z",
-      body: {
-        schemaVersion: 1,
-        blocks: [{ id: "p1", type: "paragraph", text: "初稿" }],
-      },
+      body: { markdown: "初稿" },
     });
     renderEditor();
     expect(await screen.findByText("只读成员不能改这份文档。")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "段落" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "表" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "图" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "删除这块" })).toBeNull();
+    expect(await screen.findByDisplayValue("初稿")).toBeTruthy();
+    expect(
+      (screen.getByLabelText("文档正文") as HTMLTextAreaElement).readOnly,
+    ).toBe(true);
     expect(screen.queryByRole("button", { name: "分享" })).toBeNull();
   });
 
-  it("adds a default table block for writers", async () => {
-    renderEditor();
-    expect(await screen.findByDisplayValue("Q3")).toBeTruthy();
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  it("flushes unsaved markdown when leaving the page", async () => {
+    const { unmount } = renderEditor();
+    const area = await screen.findByDisplayValue("初稿");
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "表" }));
+      fireEvent.change(area, { target: { value: "改过" } });
     });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(900);
-    });
-    expect(save).toHaveBeenCalled();
+    unmount();
+    await waitFor(() => expect(save).toHaveBeenCalled());
     const [, body] = save.mock.calls[0] ?? [];
-    expect(body.blocks).toHaveLength(2);
-    expect(body.blocks[1]).toMatchObject({
-      type: "table",
-      columns: ["", ""],
-      rows: [
-        ["", ""],
-        ["", ""],
-        ["", ""],
-      ],
-    });
+    expect(body).toEqual({ markdown: "改过" });
   });
 
-  it("shows a table read-only without add-table control", async () => {
-    get.mockResolvedValue({
-      id: "d1",
-      title: "Q3",
-      folder_id: "f1",
-      folder_name: "方案",
-      version: 1,
-      can_write: false,
-      created_at: "2026-09-12T00:00:00Z",
-      updated_at: "2026-09-12T00:00:00Z",
-      body: {
-        schemaVersion: 1,
-        blocks: [
-          {
-            id: "t1",
-            type: "table",
-            columns: ["指标", "值"],
-            rows: [["收入", "100"]],
-          },
-        ],
-      },
-    });
-    renderEditor();
-    expect(await screen.findByDisplayValue("指标")).toBeTruthy();
-    expect(await screen.findByDisplayValue("收入")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "表" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "加列" })).toBeNull();
-  });
-
-  it("adds a default chart block for writers", async () => {
-    renderEditor();
-    expect(await screen.findByDisplayValue("Q3")).toBeTruthy();
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "图" }));
-    });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(900);
-    });
-    expect(save).toHaveBeenCalled();
-    const [, body] = save.mock.calls[0] ?? [];
-    expect(body.blocks).toHaveLength(2);
-    expect(body.blocks[1]).toMatchObject({
-      type: "chart",
-      kind: "bar",
-      title: "",
-      items: [
-        { label: "", value: 0 },
-        { label: "", value: 0 },
-        { label: "", value: 0 },
-      ],
-    });
-  });
-
-  it("shows a chart read-only without add-chart control", async () => {
-    get.mockResolvedValue({
-      id: "d1",
-      title: "Q3",
-      folder_id: "f1",
-      folder_name: "方案",
-      version: 1,
-      can_write: false,
-      created_at: "2026-09-12T00:00:00Z",
-      updated_at: "2026-09-12T00:00:00Z",
-      body: {
-        schemaVersion: 1,
-        blocks: [
-          {
-            id: "ch1",
-            type: "chart",
-            kind: "bar",
-            title: "季度",
-            items: [{ label: "Q1", value: 3 }],
-          },
-        ],
-      },
-    });
-    renderEditor();
-    expect(await screen.findByDisplayValue("季度")).toBeTruthy();
-    expect(await screen.findByDisplayValue("Q1")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "图" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "加点" })).toBeNull();
-  });
-
-  it("flushes unsaved blocks before minting a share", async () => {
+  it("flushes unsaved markdown before minting a share", async () => {
     renderEditor();
     const area = await screen.findByDisplayValue("初稿");
     await act(async () => {
@@ -245,15 +180,15 @@ describe("DocEditorPage", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "分享" }));
     });
-    expect(await screen.findByText("分享文档")).toBeTruthy();
-    const mint = await screen.findByRole("button", { name: "创建分享链接" });
+    expect(await screen.findByText("发布文档")).toBeTruthy();
+    const mint = await screen.findByRole("button", { name: "发布" });
     await act(async () => {
       fireEvent.click(mint);
     });
     await waitFor(() => expect(save).toHaveBeenCalled());
     await waitFor(() => expect(createShare).toHaveBeenCalled());
     const [, body] = save.mock.calls[0] ?? [];
-    expect(body.blocks[0]).toMatchObject({ type: "paragraph", text: "改过" });
+    expect(body).toEqual({ markdown: "改过" });
     expect(createShare.mock.calls[0]?.[0]).toBe("d1");
   });
 });

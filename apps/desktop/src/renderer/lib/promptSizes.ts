@@ -9,7 +9,6 @@ export const IDENTITY_LABEL = "角色身份";
 export interface AlwaysListRow {
   catalogId: string;
   label: string;
-  meta: string;
   chars: number;
   item: PromptCatalogItem;
 }
@@ -59,24 +58,6 @@ function alwaysItemChars(item: PromptCatalogItem): number {
   return 0;
 }
 
-function alwaysItemMeta(item: PromptCatalogItem): string {
-  if (item.kind === "shared") return "每回合都在的工作宪法";
-  if (item.kind === "identity") {
-    const snippet = item.ceoIdentity.trim();
-    if (snippet) return snippet;
-    return "三套互斥身份，点开看全文";
-  }
-  if (item.kind === "mine") {
-    if (item.disputed) return "已停用，不再注入";
-    const description = item.description.trim();
-    if (description && description !== item.label) return description;
-    if (item.memoryKind === "preferences") return "怎么回答";
-    if (item.memoryKind === "profile") return "关于用户";
-    return "";
-  }
-  return "";
-}
-
 /** Always-pool index: includes empty cores so they stay openable. */
 export function buildAlwaysRows(rail: PromptRail): AlwaysListRow[] {
   const rows: AlwaysListRow[] = [];
@@ -84,7 +65,6 @@ export function buildAlwaysRows(rail: PromptRail): AlwaysListRow[] {
     rows.push({
       catalogId: item.id,
       label: item.label,
-      meta: alwaysItemMeta(item),
       chars: alwaysItemChars(item),
       item,
     });
@@ -94,7 +74,6 @@ export function buildAlwaysRows(rail: PromptRail): AlwaysListRow[] {
     rows.push({
       catalogId: item.id,
       label: item.label,
-      meta: alwaysItemMeta(item),
       chars: alwaysItemChars(item),
       item,
     });
@@ -104,7 +83,6 @@ export function buildAlwaysRows(rail: PromptRail): AlwaysListRow[] {
     rows.push({
       catalogId: item.id,
       label: item.label,
-      meta: alwaysItemMeta(item),
       chars: alwaysItemChars(item),
       item,
     });

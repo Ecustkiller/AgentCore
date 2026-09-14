@@ -1,4 +1,4 @@
-"""Public read-only 文档 shares (frozen block-list snapshot)."""
+"""Public read-only 文档 shares (last published markdown snapshot)."""
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -7,6 +7,7 @@ from typing import Any, cast
 from sqlalchemy import or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from agentcore.core.types import new_id
 from agentcore.db.models import Doc, DocShare, Folder
@@ -35,6 +36,17 @@ class DocShareRepository:
             expires_at=expires_at,
         )
         self._session.add(share)
+        await self._session.commit()
+        await self._session.refresh(share)
+        return share
+
+    async def republish(
+        self, share: DocShare, *, title: str, snapshot: dict
+    ) -> DocShare:
+        """Overwrite the published snapshot in place. URL and expiry stay."""
+        share.title = title
+        share.snapshot = snapshot
+        flag_modified(share, "snapshot")
         await self._session.commit()
         await self._session.refresh(share)
         return share

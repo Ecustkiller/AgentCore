@@ -28,7 +28,6 @@ from agentcore.db.repositories import (
     AdminMfaRepository,
     AgentAuditEventRepository,
     BoardRepository,
-    BookmarkRepository,
     ChatRepository,
     ConversationRepository,
     ConversationShareRepository,
@@ -66,6 +65,7 @@ from agentcore.security.tokens import (
     decode_access_token_mfa_verified,
     decode_account_token,
     decode_folders_token,
+    decode_workspaces_token,
 )
 from agentcore.storage.assets import AssetStorage, build_asset_storage
 
@@ -164,10 +164,6 @@ def get_admin_audit_repo(session: AsyncSession = Depends(get_db)) -> AdminAuditR
 
 def get_conversation_repo(session: AsyncSession = Depends(get_db)) -> ConversationRepository:
     return ConversationRepository(session)
-
-
-def get_bookmark_repo(session: AsyncSession = Depends(get_db)) -> BookmarkRepository:
-    return BookmarkRepository(session)
 
 
 def get_conversation_share_repo(
@@ -472,9 +468,43 @@ async def get_account_api_user(
     )
 
 
+async def get_workspaces_api_user(
+    request: Request,
+    access_token: Annotated[str | None, Cookie(alias=ACCESS_TOKEN_COOKIE)] = None,
+    authorization: Annotated[str | None, Header()] = None,
+    user_repo: UserRepository = Depends(get_user_repo),
+) -> User:
+    """Resolve the user for cloud workspace file REST (sidecar remote desk).
+
+    Accepts either a normal product access session (cookie or Bearer access JWT)
+    **or** a workspaces narrow ticket (``Authorization: Bearer`` with
+    ``type=workspaces``). Folders / account / inference tokens are refused.
+    Sidecar must never receive an access token — it uses the workspaces ticket
+    only. Snapshots / clone / trash restore stay access-session only.
+    """
+    bearer = _bearer_token(authorization)
+    if bearer:
+        try:
+            user_id = decode_workspaces_token(bearer)
+        except AuthenticationError:
+            user_id = None
+        if user_id is not None:
+            user = await user_repo.get_by_id(user_id)
+            if user is None or user.status != "active":
+                raise AuthenticationError("User not found or inactive")
+            return user
+    return await get_current_user(
+        request,
+        access_token=access_token,
+        authorization=authorization,
+        user_repo=user_repo,
+    )
+
+
 AuthUser = Annotated[User, Depends(get_current_user)]
 FoldersApiUser = Annotated[User, Depends(get_folders_api_user)]
 AccountApiUser = Annotated[User, Depends(get_account_api_user)]
+WorkspacesApiUser = Annotated[User, Depends(get_workspaces_api_user)]
 OptionalUser = Annotated[User | None, Depends(get_optional_user)]
 
 

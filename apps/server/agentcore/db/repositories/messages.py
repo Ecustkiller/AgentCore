@@ -11,7 +11,6 @@ from agentcore.core.types import is_uuid_id, new_id
 from agentcore.db.models import (
     Conversation,
     Message,
-    MessageBookmark,
     PausedTurnOutcomeRow,
     PausedTurnRow,
     TurnLeaseRow,
@@ -859,14 +858,6 @@ class MessageRepository:
                 TurnLeaseRow.message_id.in_(dropped_ids),
             )
         )
-        # 消息收藏 pointers to any superseded message go with it (a regenerate drops
-        # the old branch — its bookmarks would otherwise dangle).
-        await self._session.execute(
-            delete(MessageBookmark).where(
-                MessageBookmark.conversation_id == conversation_id,
-                MessageBookmark.message_id.in_(dropped_ids),
-            )
-        )
         result = await self._session.execute(
             delete(Message).where(
                 Message.conversation_id == conversation_id,
@@ -915,13 +906,6 @@ class MessageRepository:
             delete(TurnLeaseRow).where(
                 TurnLeaseRow.message_id == message_id,
                 TurnLeaseRow.conversation_id == conversation_id,
-            )
-        )
-        # Drop any 消息收藏 pointer to this message (else it would dangle).
-        await self._session.execute(
-            delete(MessageBookmark).where(
-                MessageBookmark.message_id == message_id,
-                MessageBookmark.conversation_id == conversation_id,
             )
         )
         result = await self._session.execute(

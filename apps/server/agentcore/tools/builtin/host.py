@@ -151,54 +151,42 @@ HOST_TOOL_PARAMETERS: dict[str, Any] = {
         "action": {
             "type": "string",
             "enum": sorted(_ALLOWED_ACTIONS),
-            "description": (
-                "status / os_log / shell / open_settings / set_audio / "
-                "restart_service / install_package。"
-            ),
+            "description": "本机动作。",
         },
         "facets": {
             "type": "array",
             "items": {"type": "string", "enum": list(_STATUS_FACET_ORDER)},
-            "description": (
-                "status 可选投影（info/audio_devices/storage/power/network_summary/apps）；"
-                "默认全要。"
-            ),
+            "description": "status 可选投影；默认全要。",
         },
         "source": {
             "type": "string",
-            "description": (
-                "os_log 可选：来源/应用/Provider 子串过滤（如 Application、docker）；"
-                f"最长 {_OS_LOG_SOURCE_MAX}。"
-            ),
+            "description": "os_log 可选：来源/应用/Provider 子串（如 Application、docker）。",
+            "maxLength": _OS_LOG_SOURCE_MAX,
         },
         "level": {
             "type": "string",
             "enum": sorted(_OS_LOG_LEVELS),
-            "description": "os_log：最低关注级别 error / warning（默认，含 error）/ info / any。",
+            "default": "warning",
+            "description": "os_log：最低关注级别（warning 含 error）。",
         },
         "minutes": {
             "type": "integer",
-            "description": (
-                f"os_log 回看分钟（默认 {_OS_LOG_MINUTES_DEFAULT}，上限 {_OS_LOG_MINUTES_MAX}）。"
-            ),
+            "description": "os_log 回看分钟。",
+            "default": _OS_LOG_MINUTES_DEFAULT,
             "minimum": 1,
             "maximum": _OS_LOG_MINUTES_MAX,
         },
         "max_entries": {
             "type": "integer",
-            "description": (
-                f"os_log 最多返回条数（默认 {_OS_LOG_ENTRIES_DEFAULT}，"
-                f"硬上限 {_OS_LOG_ENTRIES_MAX}）。"
-            ),
+            "description": "os_log 返回条数。",
+            "default": _OS_LOG_ENTRIES_DEFAULT,
             "minimum": 1,
             "maximum": _OS_LOG_ENTRIES_MAX,
         },
         "max_bytes": {
             "type": "integer",
-            "description": (
-                f"os_log 摘要载荷字节硬上限（默认 {_OS_LOG_BYTES_DEFAULT}，"
-                f"硬上限 {_OS_LOG_BYTES_MAX}）。"
-            ),
+            "description": "os_log 摘要载荷字节上限。",
+            "default": _OS_LOG_BYTES_DEFAULT,
             "minimum": 1024,
             "maximum": _OS_LOG_BYTES_MAX,
         },
@@ -216,7 +204,7 @@ HOST_TOOL_PARAMETERS: dict[str, Any] = {
         "panel": {
             "type": "string",
             "enum": sorted(_OPEN_SETTINGS_PANELS),
-            "description": "open_settings：sound|display|network|apps|about。",
+            "description": "open_settings 面板。",
         },
         "device_id": {
             "type": "string",

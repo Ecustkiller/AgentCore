@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from agentcore.runtime.facts import CROSS_TURN_RETRY_KEY, normalize_cross_turn_retry
 from agentcore.runtime.loop_controller import ERROR_CLASS_VALIDATION, ToolAttempt
+from agentcore.tools.cross_turn_retry import CROSS_TURN_RETRY_KEY, normalize_cross_turn_retry
 
 
 def tool_call_fact_code(attempt: ToolAttempt) -> str:

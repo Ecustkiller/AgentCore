@@ -34,23 +34,23 @@ _CEO_CORE_HINT_TEMPLATE = _CEO_CORE_HINT
 # ``compose_ceo_chat_prompt`` must not hang these manuals (catalog/eval used
 # to, by falling back to the full registry when ``offered`` was omitted).
 _HOST_HOW = """
-三分日志：OS 事件 → `host(action=os_log)`（Win=Get-WinEvent / Linux=journalctl，勿用 shell 倾倒）；\
-沙箱/构建 stdout → `run`；对话 → `search_conversations`。\
-查/修这台电脑 → 本回合工具表有 `host` 则直调 `host(action=status)` / `host(action=os_log)` / `host(action=shell)`\
+日志分三处看：系统事件走 `host(action=os_log)`（Win=Get-WinEvent / Linux=journalctl，不要用 shell 整段倒出来）；\
+沙箱或构建的 stdout 走 `run`；对话走 `search_conversations`。\
+查或修这台电脑 → 本回合工具表有 `host` 则直接调 `host(action=status)` / `host(action=os_log)` / `host(action=shell)`\
  / `host(action=open_settings)` / `host(action=set_audio)` / `host(action=restart_service)`\
- / `host(action=install_package)`；通识 FAQ ≠ 已查本机。\
+ / `host(action=install_package)`；通用知识问答 ≠ 已经查过这台电脑。\
 装包 ≠ `shell` → `install_package`；长驻 ≠ `shell` → `run`。\
 `shell`：Windows 写 PowerShell（`$env:VAR`）；Unix 写 POSIX。勿 `%VAR%` / `||` / `&&`。\
-已知文件夹（桌面/下载）→ `file_read` / `file_list` 本机路径 ≠ `host(action=shell)` 盲探。
+已知文件夹（桌面/下载）→ `file_read` / `file_list` 本机路径 ≠ `host(action=shell)` 乱找路径。
 """
 
 _BROWSER_HOW = """
-右坞浏览器与完整预览同一壳。已装配且用户要开页 / 右坞打开 / 直播 / 页上短操作 → 自己 `browser`；\
+右坞浏览器与完整预览是同一个窗口。已装配且用户要开页 / 右坞打开 / 直播 / 页上短操作 → 自己 `browser`；\
 `web_fetch` / `web_search` ≠ 已开页（只要摘要且未点名浏览器才用 `web_fetch`）。\
 云端 `browser` 与 `web_fetch` 同一出站；一边被挡自动抓取，换另一边同一页也不会通——请人贴，或改在「执行：用户本机」的对话做。\
 「跑起来 / 打开看一下」≠ 本条（见 run）。\
 打开网页先 `navigate`（空白页也一样）。桌面 Local Bridge 可用工作区相对 HTML 作 url；\
-云端沙箱相对路径会失败。须凭回执与页面证据验收，勿仅凭未抛错；\
+云端沙箱相对路径会失败。须凭回执与页面证据验收，不要只看没报错；\
 click 看 clicked.was_disabled；type 看 typed.matched。缺 ref / 验收失败再 snapshot。\
 省略 session_id：本 run 已绑定 → 对话内唯一/激活 → 新建并绑定本 run。\
 登录 → `ask_user(browser_login=true)`；永不代填密码。

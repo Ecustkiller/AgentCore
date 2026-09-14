@@ -51,6 +51,7 @@ from agentcore.tools.builtin.git_ops.tool import GitTool
 from agentcore.tools.builtin.host import HostTool
 from agentcore.tools.builtin.replan import _REPLAN_DESCRIPTION, _REPLAN_PARAMETERS
 from agentcore.tools.builtin.run import RunTool
+from agentcore.tools.builtin.update_folder_profile import UpdateFolderProfileTool
 from agentcore.tools.protocol import ToolSchema
 
 # 桌面 CEO 回合会同时挂上的那一份（ask_user 取桌面态——它比 web 态更胖）。
@@ -112,17 +113,24 @@ from agentcore.tools.protocol import ToolSchema
 # 2026-09-10 双写尾巴：session_id / Audiosrv / git 政策 / run 例句 / 填卡 HOW
 # 出按钮。实测 browser 1036、host 2209、git 2189、run 929、ask_user 1380。
 # cap 1080→1040、2240→2210、2220→2190、1030→930、1410→1380。
+# 2026-09-14 瑞士军刀参数：enum / min / max / default 出 description。
+# 实测 browser 983、host 2045。cap 1040→990、2210→2050。
+# 2026-09-14 delegate：when-to-use 从场面表收成信息极性（切开 / 不该进会话窗）。
+# 实测 1968。cap 1940→1970（抬顶=when-to-use 换原语，非回潮抄写）。
+# 2026-09-15 update_folder_profile：探索落盘手册出按钮；when-to-use 一句，填参取值
+# 留在参数，写完继续原请求在回执。此前未入棘轮。实测 733。cap 740。
 _CAPS: dict[str, int] = {
-    "browser": 1040,
+    "browser": 990,
     "git": 2190,
-    "host": 2210,
+    "host": 2050,
     "run": 930,
-    "delegate": 1940,
+    "delegate": 1970,
     "debate": 1380,
     "ask_user": 1380,
     "list_folders": 210,
     "resolve_folder": 340,
     "create_folder": 480,
+    "update_folder_profile": 740,
 }
 _TOTAL_CAP = sum(_CAPS.values())
 
@@ -153,12 +161,15 @@ _ASK_USER_WEB_CAP = 1220
 # wait 271 / update_synthesis 286 / cancel_worker 337 / resolve_escalation 480 /
 # queue_user_message 339。
 # 2026-09-02 wait：开口闭集补插话，非回潮。实测 305。cap 280→310。
+# 2026-09-15 replan：字段 HOW 出按钮（让出简报/参数已有）；空 consult 指针删。
+# 实测 1954。cap 1960。
 _COORD_CAPS: dict[str, int] = {
     "wait": 310,
     "update_synthesis": 290,
     "cancel_worker": 340,
     "resolve_escalation": 480,
     "queue_user_message": 340,
+    "replan": 1960,
 }
 _WORKER_CAPS: dict[str, int] = {
     "escalate": 1390,
@@ -171,15 +182,19 @@ _WORKER_CAPS: dict[str, int] = {
 # 实测 file_read 854 / grep 980 / glob 729 / file_list 472。
 # 2026-09-10 开场去重：挂载 HOW 只留 consult(local_desk)；path 补集/判例出按钮。
 # 实测 file_read 727 / grep 894 / glob 597 / file_list 292 / code_search 550。
+# 2026-09-14 glob/file_read：教程与 PDF 翻页 HOW 出按钮（上限进 schema / 回执）。
+# 实测 glob 521 / file_read 689。cap 600→530、730→690。
+# 2026-09-15 grep：正则脚枪出按钮留回执；mkdir 例子与补集出按钮。
+# 实测 grep 801 / mkdir 238。cap 900→810、330→240。
 _FILE_CAPS: dict[str, int] = {
     "file_delete": 360,
-    "file_read": 730,
-    "grep": 900,
+    "file_read": 690,
+    "grep": 810,
     "file_move": 330,
     "file_copy": 440,
-    "glob": 600,
+    "glob": 530,
     "file_list": 300,
-    "mkdir": 330,
+    "mkdir": 240,
     "code_search": 550,
     "code_diagnostics": 420,
 }
@@ -188,8 +203,10 @@ _FILE_CAPS: dict[str, int] = {
 # 2026-09-10 读对话：输出宪法出按钮（基座已有）。实测 read 801。cap 830→810。
 # 2026-09-10 分页协议出按钮（truncated / next_cursor 只在回执与 cursor 参数）。
 # 实测 read 730。cap 810→730。
+# 2026-09-15 search_conversations：手册出按钮，when-to-use 一句 + 相邻 ≠。
+# 实测 757。cap 860→760。
 _LOG_CAPS: dict[str, int] = {
-    "search_conversations": 860,
+    "search_conversations": 760,
     "read_conversation": 730,
 }
 
@@ -211,6 +228,16 @@ def _debate_schema() -> ToolSchema:
         name="debate",
         description=DEBATE_DESCRIPTION,
         parameters=DEBATE_PARAMETERS,
+        face=ToolFace.ORCHESTRATION,
+        approval=ToolApproval.NEVER,
+    )
+
+
+def _replan_schema() -> ToolSchema:
+    return ToolSchema(
+        name="replan",
+        description=_REPLAN_DESCRIPTION,
+        parameters=_REPLAN_PARAMETERS,
         face=ToolFace.ORCHESTRATION,
         approval=ToolApproval.NEVER,
     )
@@ -239,6 +266,9 @@ def _measured() -> dict[str, int]:
     sizes["list_folders"] = measure_openai_tool_chars(ListFoldersTool().schema)
     sizes["resolve_folder"] = measure_openai_tool_chars(ResolveFolderTool().schema)
     sizes["create_folder"] = measure_openai_tool_chars(CreateFolderTool().schema)
+    sizes["update_folder_profile"] = measure_openai_tool_chars(
+        UpdateFolderProfileTool().schema
+    )
     return sizes
 
 
@@ -278,6 +308,7 @@ def _measured_coord() -> dict[str, int]:
         "queue_user_message": measure_openai_tool_chars(
             QueueUserMessageTool(sink=sink).schema
         ),
+        "replan": measure_openai_tool_chars(_replan_schema()),
     }
 
 
@@ -458,6 +489,8 @@ def test_on_demand_faces_point_how_to_consult():
     assert "team_orchestration_advanced" not in NESTED_DELEGATE_DESCRIPTION
     assert "lead_subteam" not in DELEGATE_DESCRIPTION
     assert "等到子队收工" in NESTED_DELEGATE_DESCRIPTION
+    assert "切不出去" in NESTED_DELEGATE_DESCRIPTION
+    assert "实质讨论" not in DELEGATE_DESCRIPTION
     assert "browser_open" not in BrowserTool().schema.description
     host_action = HostTool().schema.parameters["properties"]["action"]["description"]
     assert "Get-WinEvent" not in host_action
@@ -486,9 +519,15 @@ def test_on_demand_faces_point_how_to_consult():
     wait_desc = RunTool().schema.parameters["properties"]["wait_for"]["description"]
     assert "省略" in wait_desc
     assert "默认就绪" not in wait_desc
-    # description 不复述 action 表（取值语义留在 action 参数）。
+    # description 不复述 action 表（取值语义留在 action 参数；enum 不再抄进 description）。
     assert "navigate/click/type" not in BrowserTool().schema.description
     assert "status/os_log/shell：CEO" not in HostTool().schema.description
+    for schema in (HostTool().schema, BrowserTool().schema):
+        action = schema.parameters["properties"]["action"]
+        desc = action["description"]
+        names = sorted(action["enum"])
+        assert " / ".join(names) not in desc
+        assert "|".join(names) not in desc
 
 
 def test_worker_tool_schema_chars_within_cap():

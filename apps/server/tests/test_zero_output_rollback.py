@@ -1,4 +1,4 @@
-"""Class B empty-fail delete predicate (stream_chat this-send only)."""
+"""Unstarted-send delete predicate (this-send only; no error-code gate)."""
 
 from contextlib import asynccontextmanager
 
@@ -8,6 +8,7 @@ from agentcore.conversation import zero_output_rollback as zor
 from agentcore.conversation.zero_output_rollback import (
     ZERO_OUTPUT_SEND_REFUSAL_CODES,
     maybe_delete_zero_output_send,
+    result_from_unstarted_close,
     should_delete_zero_output_send,
     should_delete_zero_output_send_result,
 )
@@ -63,12 +64,17 @@ def test_has_delegated_workers_does_not_delete():
     assert _yes(has_delegated_workers=True) is False
 
 
-def test_has_tokens_does_not_delete():
-    assert _yes(tokens=1) is False
-    assert _yes(tokens=12) is False
+def test_has_tokens_still_deletes_when_empty():
+    assert _yes(tokens=1) is True
+    assert _yes(tokens=12) is True
 
 
-def test_wrong_code_does_not_delete():
+def test_reasoning_does_not_delete():
+    assert _yes(reasoning="先想一步") is False
+    assert _yes(has_reasoning=True) is False
+
+
+def test_empty_this_send_deletes_regardless_of_code():
     for code in (
         ErrorCode.LLM_KEY_REQUIRED,
         ErrorCode.QUOTA_EXCEEDED,
@@ -81,7 +87,11 @@ def test_wrong_code_does_not_delete():
         None,
         "",
     ):
-        assert _yes(error_code=code) is False
+        assert _yes(error_code=code) is True
+
+
+def test_open_pause_does_not_delete():
+    assert _yes(has_open_pause=True) is False
 
 
 def test_not_this_send_does_not_delete():
@@ -160,17 +170,41 @@ def test_result_body_or_tool_or_token_does_not_delete():
             _empty_fail_result(input_tokens=8),
             user_created_this_send=True,
         )
+        is True
+    )
+    assert (
+        should_delete_zero_output_send_result(
+            _empty_fail_result(reasoning_content="思考字"),
+            user_created_this_send=True,
+        )
         is False
     )
 
 
-def test_result_wrong_code_does_not_delete():
+def test_result_empty_cancel_deletes():
+    assert (
+        should_delete_zero_output_send_result(
+            _empty_fail_result(error_code=None, finish_reason="cancelled"),
+            user_created_this_send=True,
+        )
+        is True
+    )
+
+
+def test_result_wrong_code_still_deletes_when_empty():
     assert (
         should_delete_zero_output_send_result(
             _empty_fail_result(error_code=ErrorCode.LLM_KEY_REQUIRED),
             user_created_this_send=True,
         )
-        is False
+        is True
+    )
+    assert (
+        should_delete_zero_output_send_result(
+            _empty_fail_result(error_code=ErrorCode.LLM_TIMEOUT),
+            user_created_this_send=True,
+        )
+        is True
     )
 
 
@@ -219,6 +253,45 @@ def test_result_paused_llm_rate_limit_does_not_delete():
 def test_missing_result_does_not_delete():
     assert (
         should_delete_zero_output_send_result(None, user_created_this_send=True)
+        is False
+    )
+
+
+def test_result_from_unstarted_close_empty_sink_deletes():
+    from types import SimpleNamespace
+
+    sink = SimpleNamespace(
+        interrupt_salvage_content=lambda: "",
+        streamed_reasoning=lambda: "",
+        stream_memory_snapshot=lambda: {},
+        execution_journal=lambda: [],
+        message_id="a-stop",
+        last_turn_error=lambda: None,
+        _stream_finish_reason="cancelled",
+    )
+    mapped = result_from_unstarted_close(sink=sink)
+    assert mapped["message_id"] == "a-stop"
+    assert (
+        should_delete_zero_output_send_result(mapped, user_created_this_send=True)
+        is True
+    )
+
+
+def test_result_from_unstarted_close_reasoning_keeps_send():
+    from types import SimpleNamespace
+
+    sink = SimpleNamespace(
+        interrupt_salvage_content=lambda: "",
+        streamed_reasoning=lambda: "先想",
+        stream_memory_snapshot=lambda: {},
+        execution_journal=lambda: [],
+        message_id="a-think",
+        last_turn_error=lambda: None,
+        _stream_finish_reason="cancelled",
+    )
+    mapped = result_from_unstarted_close(sink=sink)
+    assert (
+        should_delete_zero_output_send_result(mapped, user_created_this_send=True)
         is False
     )
 
@@ -404,3 +477,100 @@ async def test_local_finalize_and_writeback_leave_no_zero_output_turn(
     assert recorded["noop"] is True
     assert recorded["assistant_message_id"] is None
     finalize.assert_not_called()
+
+
+class _SinkForSalvage:
+    def __init__(
+        self, *, content: str = "", journal: list | None = None, message_id: str = ""
+    ):
+        self._content = content
+        self._journal = journal or []
+        self.message_id = message_id
+
+    def interrupt_salvage_content(self):
+        return self._content
+
+    def streamed_content(self):
+        return self._content
+
+    def streamed_reasoning(self):
+        return ""
+
+    def stream_memory_snapshot(self):
+        return {}
+
+    def execution_journal(self):
+        return self._journal
+
+    def last_turn_error(self):
+        return None
+
+
+@pytest.mark.asyncio
+async def test_this_send_exception_empty_crash_discards_outbox(tmp_path):
+    """Sidecar startTurn crash with no visible reply must drop the outbox (Class B)."""
+    from agentcore.conversation.store.outbox import (
+        PHASE_READY,
+        OutboxStore,
+        list_outbox_records,
+    )
+    from agentcore.runtime.events import FinishReason
+    from agentcore.sidecar.server_pkg.turns import TurnExecutionMixin
+
+    outbox = OutboxStore(tmp_path / "outbox")
+    host = TurnExecutionMixin.__new__(TurnExecutionMixin)
+    trace = "b" * 32
+
+    umid_empty = "u-crash-empty"
+    mid_empty = "a-crash-empty"
+    outbox.bind_turn(
+        conversation_id="c1",
+        user_message_id=umid_empty,
+        user_message="hello",
+        message_id=mid_empty,
+        trace_id=trace,
+    )
+    await outbox.begin_turn(conversation_id="c1", message_id=mid_empty, trace_id=trace)
+    discarded = await host._outbox_salvage_or_discard_this_send(
+        outbox,
+        conversation_id="c1",
+        user_message_id=umid_empty,
+        message_id=mid_empty,
+        trace_id=trace,
+        sink=_SinkForSalvage(message_id=mid_empty),
+        finish_reason=FinishReason.ERROR,
+        journal=[],
+        content="",
+        error="boom",
+    )
+    assert discarded is True
+    assert list_outbox_records(tmp_path / "outbox") == []
+
+    umid_keep = "u-crash-keep"
+    mid_keep = "a-crash-keep"
+    outbox.bind_turn(
+        conversation_id="c1",
+        user_message_id=umid_keep,
+        user_message="hello",
+        message_id=mid_keep,
+        trace_id=trace,
+    )
+    await outbox.begin_turn(conversation_id="c1", message_id=mid_keep, trace_id=trace)
+    discarded = await host._outbox_salvage_or_discard_this_send(
+        outbox,
+        conversation_id="c1",
+        user_message_id=umid_keep,
+        message_id=mid_keep,
+        trace_id=trace,
+        sink=_SinkForSalvage(content="半句", message_id=mid_keep),
+        finish_reason=FinishReason.ERROR,
+        journal=[],
+        content="半句",
+        error="boom",
+    )
+    assert discarded is False
+    kept = list_outbox_records(tmp_path / "outbox")
+    assert len(kept) == 1
+    assert kept[0]["user_message_id"] == umid_keep
+    assert kept[0]["phase"] == PHASE_READY
+    assert "半句" in (kept[0].get("content") or "")

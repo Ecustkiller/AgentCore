@@ -8,7 +8,6 @@ from collections.abc import Awaitable
 from dataclasses import dataclass
 
 import agentcore.runtime.pipeline as pipeline_pkg
-from agentcore.board.channel import BoardChannel
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
@@ -45,7 +44,10 @@ from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 from agentcore.vision import resolve_vision_reader_for_conversation
 from agentcore.workspace.cloud_tree import normalize_rel_path
-from agentcore.workspace.locate import workspace_channel_for_tools
+from agentcore.workspace.locate import (
+    resolve_conversation_local_binding,
+    workspace_channel_for_tools,
+)
 from agentcore.workspace.protocol import WorkspaceBackend
 
 logger = get_logger(__name__)
@@ -136,7 +138,7 @@ class PreparedTurn:
     worker_base_prompt: str
     worker_tools: ToolRegistry
     skill_registry: object
-    board_channel: BoardChannel | None
+    table_context: str
     base_tool_context: ToolContext
     vision_cost_sink: list[RunCost]
     attachment_context: str
@@ -157,7 +159,8 @@ async def prepare_fresh_turn(
     backend: WorkspaceBackend,
     sink: EventSink,
     folder_id: str | None,
-    board_id: str | None,
+    table_id: str | None = None,
+    table_selection: list[str] | None = None,
     attachments: list[dict] | None,
     permission_axes,
     llm_credentials: LLMCredentials | None,
@@ -191,7 +194,6 @@ async def prepare_fresh_turn(
     explore_workspace_key: str | None = None
     omit_current_folder_ai_memory = False
     if folder_id:
-        from agentcore.conversation.scratch import resolve_conversation_local_binding
         from agentcore.memory.explore_profile import resolve_turn_explore_gate
 
         if folder_binding_injected:
@@ -321,7 +323,7 @@ async def prepare_fresh_turn(
     )
     # Resolve vision before attachment context so resident images can eye→text.
     # Turn-level ``role=vision`` sink is shared by REFERENCE with ToolContext
-    # (board_read + attachment reads; executor ``replace`` keeps the same list).
+    # (attachment reads / ``read_image``; executor ``replace`` keeps the same list).
     vision_cost_sink: list[RunCost] = []
     vision_reader = await _timed_phase(
         "vision",
@@ -363,7 +365,7 @@ async def prepare_fresh_turn(
     attachment_slim = merge_attachment_and_mention_context(
         attachment_prompt.slim_envelope, agent_mentions
     )
-    from agentcore.conversation.inline_body import apply_inline_body
+    from agentcore.core.inline_body import apply_inline_body
 
     user_message, attachment_context = apply_inline_body(
         user_message,
@@ -414,21 +416,27 @@ async def prepare_fresh_turn(
             llm_credentials, user_id=user_id, profiles=profiles
         ),
     )
-    # AI 协作白板 (§六 M2): a board-bound turn gets a BoardChannel so ``board_ops`` can
-    # reach the user's open canvas via the desktop. Bound to this board + conversation
-    # on the shared interaction bridge (same registry the resolve endpoint settles).
-    # ``None`` for an ordinary chat — then the tool below is never wired either.
-    board_channel = (
-        BoardChannel(
-            user_id=user_id,
-            conversation_id=conversation_id,
-            board_id=board_id,
-            registry=default_interaction_registry(),
-            timeout_seconds=settings.board_op_timeout_seconds,
-        )
-        if board_id
-        else None
-    )
+    if table_id is None:
+        from agentcore.table.context import lookup_table_id
+
+        try:
+            table_id = await lookup_table_id(
+                conversation_id=conversation_id, user_id=user_id
+            )
+        except Exception:
+            table_id = None
+    table_context = ""
+    if table_id:
+        from agentcore.table.context import render_table_context, sanitize_table_selection
+
+        try:
+            table_context = await render_table_context(
+                table_id=table_id,
+                user_id=user_id,
+                selected_ids=sanitize_table_selection(table_selection),
+            )
+        except Exception:
+            table_context = ""
     # desktop_channel created earlier (MCP discovery); reuse the same instance.
     workspace_channel = workspace_channel_for_tools(
         backend,
@@ -446,6 +454,10 @@ async def prepare_fresh_turn(
     # The workspace backend is resolved per conversation by the caller
     # (folder space vs. its own conversation space) and injected here. The
     # engine and tools never see a Path — they only touch ``context.backend``.
+    from agentcore.runtime.coordination.session import (
+        invalidate_verify_cache_for_execution,
+    )
+
     base_tool_context = ToolContext.create(
         execution_id=new_id(),
         run_id=new_id(),
@@ -458,7 +470,7 @@ async def prepare_fresh_turn(
         ),
         deep_research_auto=deep_research_auto,
         deep_research_auto_debate_count=deep_research_auto_debate_count,
-        board_channel=board_channel,
+        table_id=table_id,
         desktop_channel=desktop_channel,
         workspace_channel=workspace_channel,
         # Profile vision slot → reader; else platform VISION_* when billing_mode=platform.
@@ -466,11 +478,17 @@ async def prepare_fresh_turn(
         vision_reader=vision_reader,
         cost_sink=vision_cost_sink,
         shared_workspace=folder_id is not None,
+        ownership_desk_id=(
+            str(folder_id).strip()
+            if isinstance(folder_id, str) and folder_id.strip()
+            else None
+        ),
         material_paths=material_paths,
         attachment_context=attachment_context,
         folder_binding_injected=folder_binding_injected,
         folder_local_root_id=folder_local_root_id,
         folder_local_subpath=folder_local_subpath or None,
+        on_file_landed=invalidate_verify_cache_for_execution,
     )
     # Bare-chat landing desk: seed turn hint + bind CEO file tools (never birth folder_id).
     if folder_id is None:
@@ -523,7 +541,7 @@ async def prepare_fresh_turn(
         worker_base_prompt=worker_base_prompt,
         worker_tools=worker_tools,
         skill_registry=skill_registry,
-        board_channel=board_channel,
+        table_context=table_context,
         base_tool_context=base_tool_context,
         vision_cost_sink=vision_cost_sink,
         attachment_context=attachment_context,

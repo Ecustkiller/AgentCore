@@ -1,7 +1,7 @@
 """Mechanism-direct workflow turn — skip CEO react_loop, run fixed delegate DAG.
 
-Mirrors ``stage_card_debate``: prepare → assemble tools → ``delegate.execute`` with
-pre-expanded tasks + topology lock → bubble output → settle.
+prepare → assemble tools → ``delegate.execute`` with pre-expanded tasks +
+topology lock → bubble output → settle.
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ async def run_workflow_pipeline(
     backend: WorkspaceBackend,
     history: list[dict] | None = None,
     folder_id: str | None = None,
-    board_id: str | None = None,
+    table_id: str | None = None,
     permission_axes: PermissionAxes | None = None,
     profile_set: ProfileSet | None = None,
     llm_credentials: LLMCredentials | None = None,
@@ -122,7 +122,7 @@ async def run_workflow_pipeline(
             backend=backend,
             sink=sink,
             folder_id=folder_id,
-            board_id=board_id,
+            table_id=table_id,
             attachments=None,
             permission_axes=permission_axes,
             llm_credentials=llm_credentials,

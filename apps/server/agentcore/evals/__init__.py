@@ -6,14 +6,13 @@
 现状见 ``docs/02-架构/后端架构.md`` §五；真跑评测余项见路线图摘要（详细提案不在公开仓）。
 本包不被服务代码引用，纯离线工具。
 
-P0–P1（均已落地）：types + harness + 确定性 Check + seed_lint + runner + report + CLI +
+P0–P1（均已落地）：types + harness + 确定性 Check + seed_lint + runner + report + CLI
+（``lint`` / ``run routing|core|compare`` / ``prompt`` / ``calibrate`` / ``observe``）+
 LLMJudge（语义打分）+ milestone 覆盖裁判 + 成对裁判（团队 vs 单体）+ 相对基线观测
-（``observe.py``，翻转方向区分方差/单方向变差，不当硬门）+ kappa 校准回路 + MAST 标签聚合
-+ CI nightly（evals-nightly.yml）。
+（``observe.py``，翻转方向区分方差/单方向变差，不当硬门）+ kappa 校准回路 + MAST 字段聚合。
 裁判被评口径 = ``judged_text``（聊天 ``content`` + 终版 ``artifacts``，末次 file_write）；
 多评委可选 ``EnsemblePairwiseJudge``（``EVAL_JUDGE_ENSEMBLE``）。
-P2+（待落，皆非代码缺口）：L2/L3 真模型出数（需 EVAL_DEEPSEEK_API_KEY + 预算）+
-gold-set 人工核验（kappa 门，cases/gold/labels.json 现 100 条：30 human + 70 rubric_derived）。
+真跑为本地自愿、不挡 PR；gold-set 人工核验（kappa 门，``cases/gold/labels.json``）。
 
 本 ``__init__`` 只暴露**纯静态**部分（types + checks 注册表 + seed_lint）——故意不在此
 import ``harness`` / ``runner`` / ``report``，让 ``seed_lint`` 这类零 LLM 静态校验

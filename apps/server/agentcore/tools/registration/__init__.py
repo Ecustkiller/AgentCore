@@ -3,7 +3,7 @@
 Mirrors the LLM vendor chain (prefix table + settings ⇒ access): a new built-in
 tool is **implement class (with ``registration``) + append to the matching
 surface roster under ``registration.rosters`` + test**. Runtime registries, the
-capability catalog, and board / zero-arg ALWAYS wiring **collect** from
+capability catalog, and table / zero-arg ALWAYS wiring **collect** from
 declarations instead of maintaining parallel hand lists.
 
 CEO orchestration tools with heavy ``__init__`` deps (delegate / debate / ask_user
@@ -67,7 +67,7 @@ __all__ = [
     "instantiate_declared",
     "read_static_schema",
     "register_always_ceo_tools",
-    "register_board_ceo_tools",
+    "register_table_ceo_tools",
     "tool_registration",
     "worker_only_tool_names",
 ]
@@ -165,8 +165,8 @@ def register_always_ceo_tools(
         chat_tools.register(instantiate_declared(cls))
 
 
-def register_board_ceo_tools(chat_tools: ToolRegistry) -> None:
-    """Register CEO board tools (``ceo_wire=BOARD``) — shared by assemble + resume."""
+def register_table_ceo_tools(chat_tools: ToolRegistry) -> None:
+    """Register CEO table tools (``ceo_wire=TABLE``) — shared by assemble + resume."""
     for cls in declared_tools(surface=ToolSurface.CEO_ORCHESTRATION):
-        if tool_registration(cls).ceo_wire is CeoWire.BOARD:
+        if tool_registration(cls).ceo_wire is CeoWire.TABLE:
             chat_tools.register(instantiate_declared(cls))

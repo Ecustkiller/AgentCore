@@ -95,6 +95,8 @@ export function MarkdownFileEditor({
   name,
   onClose,
   embedded,
+  hostedInTab,
+  onDirtyChange,
 }: {
   source: FileSource;
   path: string;
@@ -104,6 +106,12 @@ export function MarkdownFileEditor({
    * control and tab chrome — so suppress this editor's own back button. Everything else
    * (脏标 / 保存 / AI 改写 / 编辑·预览) stays, since each pane edits its own file. */
   embedded?: boolean;
+  /** File tab host already names the file — action bar only; dirty goes to the tab. */
+  hostedInTab?: boolean;
+  onDirtyChange?: (state: {
+    dirty: boolean;
+    confirmDiscard: boolean;
+  }) => void;
 }) {
   const [content, setContent] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -123,6 +131,13 @@ export function MarkdownFileEditor({
   // 改写加载 + 评审期间暂停自动保存/冲刷（别把未定稿的 diff 写盘）；触发时捕获的选区上下文。
   const aiActiveRef = useRef(false);
   const aiTargetRef = useRef<SelectionContext | null>(null);
+
+  useEffect(() => {
+    onDirtyChange?.({ dirty, confirmDiscard: false });
+  }, [dirty, onDirtyChange]);
+  useEffect(() => {
+    return () => onDirtyChange?.({ dirty: false, confirmDiscard: false });
+  }, [onDirtyChange]);
 
   const baselineRef = useRef<Baseline>({
     version: {},
@@ -398,21 +413,33 @@ export function MarkdownFileEditor({
     }
   };
 
+  const showBack = !embedded && !hostedInTab;
+  const showIdentity = !hostedInTab;
+
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border pl-1 pr-1.5">
-        {!embedded && (
+      <div
+        className={cn(
+          "flex h-9 shrink-0 items-center gap-1.5 border-b border-border pr-1.5",
+          showIdentity ? "pl-1" : "justify-end pl-1.5",
+        )}
+      >
+        {showBack && (
           <SimpleTooltip label="返回文件列表">
             <IconButton onClick={onClose} aria-label="返回文件列表">
               <ChevronLeft size={16} />
             </IconButton>
           </SimpleTooltip>
         )}
-        <FileText size={13} className="shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
-          {dirty && <span className="text-primary">● </span>}
-          {name}
-        </span>
+        {showIdentity && (
+          <>
+            <FileText size={13} className="shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+              {dirty && <span className="text-primary">● </span>}
+              {name}
+            </span>
+          </>
+        )}
         {saveState === "saving" && (
           <span className="shrink-0 text-xs text-muted-foreground">
             保存中…

@@ -5,7 +5,7 @@ import { useComposerDockFlip } from "@/hooks/useComposerDockFlip";
 import { useConversations } from "@/hooks/useConversations";
 import { useNarrowLayoutState } from "@/lib/narrowLayout";
 import { shouldCenterDraftComposer } from "@/lib/onboarding";
-import { useChatScroll } from "@/lib/useChatScroll";
+import { useChatScroll, useTranscriptResetKey } from "@/lib/useChatScroll";
 import { cn } from "@/lib/utils";
 import {
   loadLatestWindow,
@@ -141,10 +141,14 @@ function ChatTranscriptPane({ isNarrow }: { isNarrow: boolean }) {
     if (!hasMessages && findOpen) setFindOpen(false);
   }, [hasMessages, findOpen]);
 
+  const transcriptResetKey = useTranscriptResetKey(
+    conversationId,
+    firstMessageId,
+  );
   const { scrollRef, contentRef, atBottom, jumpToBottom } = useChatScroll({
     firstMessageId,
     hasTranscript: hasMessages,
-    resetKey: conversationId,
+    resetKey: transcriptResetKey,
     hasMoreBefore,
     hasMoreAfter,
     loadingOlder,

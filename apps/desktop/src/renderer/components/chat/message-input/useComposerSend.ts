@@ -32,10 +32,14 @@ import {
   resolveDefaultPermissionAxes,
   setComposerDraftAxes,
 } from "@/services/permissionAxes";
-import { resolveSidecarRoot } from "@/services/sidecarRouting";
+import {
+  getLastSidecarTarget,
+  resolveSidecarRoot,
+} from "@/services/sidecarRouting";
 import type { OutgoingAgentMention } from "@/services/streamConversation";
 import { sendTurn } from "@/services/turns";
 import { sendMidFlightMessage } from "@/services/turns/midFlight";
+import { querySidecarOccupancy } from "@/services/turns/occupancy";
 import {
   draftKeyFor,
   restoreComposerDraft,
@@ -57,6 +61,7 @@ import {
   getRuntime,
   useConversationStore,
 } from "@/stores/conversation";
+import { restoreWritingFromOccupancy } from "@/stores/conversation/turnPhaseActions";
 import { useFoldersStore } from "@/stores/folders";
 import { type Dispatch, type SetStateAction, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
@@ -320,21 +325,33 @@ export function useComposerSend({
       }
 
       // 挂起弱提示：有待确认卡时先二次确认（同会话确认一次后不再弹）；正规续跑/
-      // 提交卡不受影响。生成中再发走 mid-flight，不套本确认。
-      if (!confirmSendDespitePendingIfNeeded(activeConvId, isGenerating)) {
+      // 提交卡不受影响。本机还在写 / 生成中再发走 mid-flight，不套本确认。
+      // 发送门问主进程 occupancy，不跟后台交接旗 `isLocal`（草稿无 conversationId
+      // 时那面一直是 false，生产 Composer 也写死 false）。无 IPC / 云对话 → 不当占着。
+      const occupancy = activeConvId
+        ? await querySidecarOccupancy(activeConvId)
+        : { occupied: false as const };
+      if (occupancy.unknown) {
+        notifyError("暂时问不到这轮是否还在写，请再试一次");
+        return;
+      }
+      const localOccupied = occupancy.occupied === true;
+      const inFlight = localOccupied || isGenerating;
+      if (!confirmSendDespitePendingIfNeeded(activeConvId, inFlight)) {
         return;
       }
 
       const delivery: MessageDelivery =
-        opts?.delivery ?? resolveDefaultDelivery(isGenerating, activeConvId);
+        opts?.delivery ?? resolveDefaultDelivery(inFlight, activeConvId);
 
       const outgoingMentions = toOutgoingMentions(agentMentions);
 
-      // Mid-flight：生成中发送走独立 POST SSE（steer 插话 / queue 排队）。
-      // ack 后清 composer；用户泡由 sendMidFlightMessage 入主时间线。
-      // queue 另 upsert QueuedTurnsBar；steer 过程 marker 有同内容用户泡则折锚点。
-      if (isGenerating && activeConvId) {
-        if (!acquireComposerSendLatch(draftKey, "sending")) return;
+      const sendInFlight = async (sidecarTarget?: {
+        rootId: string;
+        subpath: string;
+      }): Promise<boolean> => {
+        if (!activeConvId) return false;
+        if (!acquireComposerSendLatch(draftKey, "sending")) return true;
         clearComposerSendError(draftKey);
         try {
           const pending = attachments;
@@ -344,19 +361,17 @@ export function useComposerSend({
             "midflight",
           );
           if (!settled.ok) {
-            // 原始错误优先：后端 ApiError 带着 code / serverMessage，包成
-            // `new Error(reason)` 就只剩通用兜底文案了。
             notifyError(settled.cause ?? settled.reason, "附件驻留失败");
             dropStaleAttachments(settled.staleIds);
-            return;
+            return true;
           }
-
           const result = await sendMidFlightMessage(
             activeConvId,
             content,
             settled.outgoing.length > 0 ? settled.outgoing : undefined,
             delivery,
             outgoingMentions.length > 0 ? outgoingMentions : undefined,
+            sidecarTarget ? { sidecarTarget } : undefined,
           );
           if (result.kind === "received" || result.kind === "queued") {
             for (const a of pending) forgetAttachmentUpload(a.id);
@@ -365,10 +380,29 @@ export function useComposerSend({
         } finally {
           releaseComposerSendLatch(draftKey);
         }
+        return true;
+      };
+
+      if (localOccupied && activeConvId) {
+        restoreWritingFromOccupancy(activeConvId);
+        const target = occupancy.rootId
+          ? { rootId: occupancy.rootId, subpath: occupancy.subpath ?? "" }
+          : getLastSidecarTarget(activeConvId);
+        if (!target) {
+          notifyError("本机仍在写，但找不到工作目录，没法把这句话加进去。");
+          return;
+        }
+        await sendInFlight(target);
         return;
       }
 
-      if (isGenerating) return;
+      // 云端生成中：插话 / 排队。本机是否还在写只认 occupancy，灯亮但槽空则开新一份。
+      if (isGenerating && activeConvId && !isLocal) {
+        await sendInFlight();
+        return;
+      }
+
+      if (isGenerating && !isLocal) return;
 
       if (backgroundMode && isLocal && activeConvId) {
         clearComposerSendError(draftKey);
@@ -426,7 +460,7 @@ export function useComposerSend({
               : undefined,
           });
           // Thinking 与用户泡同帧：已有会话覆盖附件收尾；草稿首发覆盖建会话 POST。
-          // sendTurn 会 truncateAfter(乐观用户) 再 createAssistant，不会双泡。
+          // sendTurn 复用这条干净占位（不 truncate 换 id）。
           useConversationStore.getState().createAssistantMessage();
           clearComposer();
         };

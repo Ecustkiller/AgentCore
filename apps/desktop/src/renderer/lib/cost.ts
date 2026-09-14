@@ -51,7 +51,7 @@ export function resolveTurnCost(
 /**
  * True when the graph did real work that the platform simply cannot price —
  * some run consumed tokens under `pricing_source=unpriced` (BYOK, 两层价卡全落空).
- * Callers use this to show an explicit「自带密钥·未计价」badge instead of silently
+ * Callers use this to show an explicit「未计价」badge instead of silently
  * omitting the cost segment (which reads as "free"). Zero-usage runs don't count.
  */
 export function hasUnpricedUsage(

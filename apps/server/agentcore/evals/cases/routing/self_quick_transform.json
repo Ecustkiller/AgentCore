@@ -9,5 +9,5 @@
     { "name": "NotDelegated" },
     { "name": "MaxRounds", "args": { "budget": 3 } }
   ],
-  "rubric": "单点轻量任务：一句话翻译，CEO 直接给出即可，不该拆成团队。"
+  "rubric": "原文已在窗里的一句话翻译：切不出去，编码≈做完。"
 }

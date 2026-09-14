@@ -18,7 +18,6 @@ from agentcore.db.models import (
     Folder,
     MemoryUpdateRow,
     Message,
-    MessageBookmark,
     TurnLeaseRow,
     TurnMetricsRow,
     User,
@@ -1013,13 +1012,6 @@ class ConversationRepository:
         await delete_stream_state_for_conversation(self._session, conversation_id)
         await self._session.execute(
             delete(Message).where(Message.conversation_id == conversation_id)
-        )
-        # 消息收藏 pointers into this conversation (app-level cascade; no message left
-        # for them to reference after the bulk delete above).
-        await self._session.execute(
-            delete(MessageBookmark).where(
-                MessageBookmark.conversation_id == conversation_id
-            )
         )
         await self._session.execute(
             delete(CostEvent).where(CostEvent.conversation_id == conversation_id)

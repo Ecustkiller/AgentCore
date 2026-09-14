@@ -5,10 +5,12 @@ from __future__ import annotations
 from agentcore.runtime.events.types import EventType, FinishReason
 from agentcore.runtime.runs.types import TERMINAL_PHASES, RunPhase
 from agentcore.runtime.terminal import (
+    LIVE_SETTLE_EVENT_TYPES,
     RUN_CLOSE_EVENT_TYPES,
     RUN_PRODUCT_EVENT_TYPES,
     RUN_STREAM_FLUSH_EVENT_TYPES,
     is_gate_pause_finish,
+    is_live_settle_event,
     is_run_close_event,
     is_run_phase_terminal,
     is_run_product_event,
@@ -37,6 +39,22 @@ def test_close_sets_keep_intentional_lattice():
     }
     assert RUN_PRODUCT_EVENT_TYPES < RUN_STREAM_FLUSH_EVENT_TYPES
     assert RUN_STREAM_FLUSH_EVENT_TYPES < RUN_CLOSE_EVENT_TYPES
+
+
+def test_live_settle_is_close_plus_turn_and_execution():
+    """Transport keep-set, not a fourth occupancy face. Do not merge into the lattice."""
+    assert RUN_CLOSE_EVENT_TYPES < LIVE_SETTLE_EVENT_TYPES
+    assert {e.value for e in LIVE_SETTLE_EVENT_TYPES - RUN_CLOSE_EVENT_TYPES} == {
+        "message_end",
+        "error",
+        "execution_completed",
+    }
+    assert EventType.EXECUTION_DETACHED not in LIVE_SETTLE_EVENT_TYPES
+    assert EventType.RUN_STARTED not in LIVE_SETTLE_EVENT_TYPES
+    assert EventType.CONTENT_DELTA not in LIVE_SETTLE_EVENT_TYPES
+    assert is_live_settle_event("run_completed")
+    assert is_live_settle_event(EventType.MESSAGE_END)
+    assert not is_live_settle_event(EventType.EXECUTION_DETACHED)
 
 
 def test_strenum_membership_accepts_wire_strings():

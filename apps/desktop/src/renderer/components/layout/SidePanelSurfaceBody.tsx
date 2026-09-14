@@ -68,6 +68,7 @@ export function SidePanelSurfaceBody({
         name={tab.name}
         workspaceId={tab.workspaceId}
         channel={tab.channel}
+        tabId={tab.id}
         onClose={() => closeTab(tab.id)}
       />
     );

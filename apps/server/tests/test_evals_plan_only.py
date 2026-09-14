@@ -223,9 +223,9 @@ def test_plan_only_abort_propagates_as_named_exception():
 
 
 def test_cli_plan_only_lint_only_collab_shapes():
-    from agentcore.evals.__main__ import main
+    from agentcore.evals.cli import main
 
-    code = main(["--suite", "collab_shapes", "--plan-only", "--lint-only"])
+    code = main(["lint", "--suite", "collab_shapes"])
     assert code == 0
 
 

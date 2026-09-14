@@ -8,17 +8,23 @@ import time
 import pytest
 
 from agentcore.core.error_codes import ErrorCode
-from agentcore.core.errors import error_fields_for
-from agentcore.fulfill.hub import default_fulfiller_hub
-from agentcore.fulfill.origin import origin_device
-from agentcore.runtime.context import detect_workspace_git
-from agentcore.runtime.events import EventSink
-from agentcore.runtime.interaction import InteractionRegistry
-from agentcore.runtime.pipeline.errors import (
+from agentcore.core.errors import (
     LOCAL_CHANNEL_DEAD,
     LOCAL_DESKTOP_OFFLINE,
     LOCAL_ORIGIN_DEVICE_OFFLINE,
     LOCAL_ROOT_NOT_HELD,
+    LocalChannelDeadError,
+    LocalDesktopOfflineError,
+    LocalOriginDeviceOfflineError,
+    LocalRootNotHeldError,
+)
+from agentcore.fulfill.hub import default_fulfiller_hub
+from agentcore.fulfill.origin import origin_device
+from agentcore.runtime.context import detect_workspace_git
+from agentcore.runtime.error_fields import error_fields_for
+from agentcore.runtime.events import EventSink
+from agentcore.runtime.interaction import InteractionRegistry
+from agentcore.runtime.pipeline.errors import (
     await_prepare_local_io,
     bind_prepare_local_io_deadline,
     prepare_local_io_budget,
@@ -72,11 +78,13 @@ def _clear_fulfillers():
 
 def test_presence_gate_desktop_offline():
     backend = _local()
-    with pytest.raises(WorkspaceIOError) as ei:
+    with pytest.raises(LocalDesktopOfflineError) as ei:
         raise_if_local_workspace_fulfiller_absent(user_id=USER, backend=backend)
+    assert ei.value.code == ErrorCode.LOCAL_DESKTOP_OFFLINE
     assert str(ei.value) == LOCAL_DESKTOP_OFFLINE
     assert "打开桌面" in str(ei.value)
     assert "不要再次发送" not in str(ei.value)
+    assert not isinstance(ei.value, WorkspaceIOError)
 
 
 def test_presence_gate_root_not_held():
@@ -86,11 +94,13 @@ def test_presence_gate_root_not_held():
     )
     try:
         backend = _local(ROOT)
-        with pytest.raises(WorkspaceIOError) as ei:
+        with pytest.raises(LocalRootNotHeldError) as ei:
             raise_if_local_workspace_fulfiller_absent(user_id=USER, backend=backend)
+        assert ei.value.code == ErrorCode.LOCAL_ROOT_NOT_HELD
         assert str(ei.value) == LOCAL_ROOT_NOT_HELD
         assert "重新授权" in str(ei.value)
         assert "重新生成" not in str(ei.value)
+        assert not isinstance(ei.value, WorkspaceIOError)
     finally:
         hub.unregister(session)
 
@@ -143,13 +153,15 @@ def test_presence_gate_origin_device_offline():
     hub = default_fulfiller_hub()
     session = hub.register(USER, "dev-B", caps=["workspace"], roots=[])
     try:
-        with origin_device("dev-A"), pytest.raises(WorkspaceIOError) as ei:
+        with origin_device("dev-A"), pytest.raises(LocalOriginDeviceOfflineError) as ei:
             raise_if_local_workspace_fulfiller_absent(
                 user_id=USER, backend=_local("")
             )
+        assert ei.value.code == ErrorCode.LOCAL_ORIGIN_DEVICE_OFFLINE
         assert str(ei.value) == LOCAL_ORIGIN_DEVICE_OFFLINE
         assert "发起本回合的设备不在线" in str(ei.value)
         assert "重新生成" not in str(ei.value)
+        assert not isinstance(ei.value, WorkspaceIOError)
     finally:
         hub.unregister(session)
 
@@ -181,27 +193,77 @@ def test_presence_gate_ignores_origin_when_the_root_decides():
 
 def test_presence_gate_single_device_answer_is_unchanged():
     """No peer online → the honest answer stays '桌面未连接', not '换台电脑'."""
-    with origin_device("dev-A"), pytest.raises(WorkspaceIOError) as ei:
+    with origin_device("dev-A"), pytest.raises(LocalDesktopOfflineError) as ei:
         raise_if_local_workspace_fulfiller_absent(user_id=USER, backend=_local(""))
     assert str(ei.value) == LOCAL_DESKTOP_OFFLINE
 
 
-def test_error_fields_for_prepare_abort_messages():
-    expected = {
-        LOCAL_DESKTOP_OFFLINE: ErrorCode.LOCAL_DESKTOP_OFFLINE,
-        LOCAL_ROOT_NOT_HELD: ErrorCode.LOCAL_ROOT_NOT_HELD,
-        LOCAL_CHANNEL_DEAD: ErrorCode.LOCAL_CHANNEL_DEAD,
-        LOCAL_ORIGIN_DEVICE_OFFLINE: ErrorCode.LOCAL_ORIGIN_DEVICE_OFFLINE,
-    }
-    for message, want in expected.items():
+def test_error_fields_for_typed_presence_aborts():
+    """Gate-raised AgentCoreError types pass through without the WIO sentence map."""
+    from agentcore.core.errors import LocalChannelDeadError
+
+    cases = (
+        LocalDesktopOfflineError(),
+        LocalRootNotHeldError(),
+        LocalOriginDeviceOfflineError(),
+        LocalChannelDeadError(),
+    )
+    for exc in cases:
+        code, text, _ctx = error_fields_for(
+            exc,
+            fallback_code=ErrorCode.STREAM_ERROR,
+            fallback_message="服务出错了，请稍后重试。",
+        )
+        assert code == exc.code
+        assert text == str(exc)
+        assert "服务出错了" not in text
+
+
+def test_reraise_does_not_swallow_typed_presence_error():
+    """Git/exec-language ``except Exception`` must not turn a coded abort into a soft miss."""
+    from agentcore.runtime.pipeline.errors import reraise_prepare_liveness_timeout
+
+    with pytest.raises(LocalDesktopOfflineError):
+        reraise_prepare_liveness_timeout(LocalDesktopOfflineError())
+
+
+def test_reraise_upgrades_typed_liveness_without_sentence_markers():
+    from agentcore.runtime.pipeline.errors import reraise_prepare_liveness_timeout
+    from agentcore.workspace.protocol import WorkspaceLivenessTimeout
+
+    with pytest.raises(LocalChannelDeadError) as ei:
+        reraise_prepare_liveness_timeout(WorkspaceLivenessTimeout("hang"))
+    assert ei.value.code == ErrorCode.LOCAL_CHANNEL_DEAD
+    assert ei.value.__cause__.__class__.__name__ == "WorkspaceLivenessTimeout"
+
+
+def test_origin_abort_copy_extends_fulfill_fragment():
+    """Turn-abort sentence stays byte-equal to fulfill's mid-turn fragment + suffix."""
+    from agentcore.fulfill.origin import ORIGIN_DEVICE_OFFLINE
+
+    assert (
+        f"{ORIGIN_DEVICE_OFFLINE}（本地工作区操作不会转投其他电脑。）"
+    ) == LOCAL_ORIGIN_DEVICE_OFFLINE
+
+
+def test_error_fields_for_does_not_rescue_workspace_io_by_copy():
+    """Leftover WorkspaceIOError is unclassified — product codes ride on AgentCoreError."""
+    expected_copy = (
+        LOCAL_DESKTOP_OFFLINE,
+        LOCAL_ROOT_NOT_HELD,
+        LOCAL_CHANNEL_DEAD,
+        LOCAL_ORIGIN_DEVICE_OFFLINE,
+        "local workspace op 'read' failed: channel dead",
+    )
+    for message in expected_copy:
         code, text, _ctx = error_fields_for(
             WorkspaceIOError(message),
             fallback_code=ErrorCode.STREAM_ERROR,
             fallback_message="服务出错了，请稍后重试。",
         )
-        assert code == want
-        assert text == message
-        assert "服务出错了" not in text
+        assert code == ErrorCode.STREAM_ERROR
+        assert text == "服务出错了，请稍后重试。"
+        assert message not in text
 
 
 async def test_prepare_aborts_desktop_offline_skips_llm(monkeypatch):
@@ -229,14 +291,13 @@ async def test_prepare_aborts_desktop_offline_skips_llm(monkeypatch):
         "agentcore.runtime.pipeline.prepare.resolve_desk_folder_label", _no_desk_label
     )
 
-    with pytest.raises(WorkspaceIOError) as ei:
+    with pytest.raises(LocalDesktopOfflineError) as ei:
         await prepare_fresh_turn(
             conversation_id=CONV,
             user_id=USER,
             backend=backend,
             sink=EventSink(),
             folder_id=None,
-            board_id=None,
             attachments=None,
             permission_axes=None,
             llm_credentials=None,
@@ -278,14 +339,13 @@ async def test_prepare_aborts_root_not_held_skips_llm(monkeypatch):
             _no_desk_label,
         )
 
-        with pytest.raises(WorkspaceIOError) as ei:
+        with pytest.raises(LocalRootNotHeldError) as ei:
             await prepare_fresh_turn(
                 conversation_id=CONV,
                 user_id=USER,
                 backend=backend,
                 sink=EventSink(),
                 folder_id=None,
-                board_id=None,
                 attachments=None,
                 permission_axes=None,
                 llm_credentials=None,
@@ -305,10 +365,12 @@ async def test_prepare_budget_exhaustion_aborts_as_channel_dead():
         return "never"
 
     t0 = time.monotonic()
-    with prepare_local_io_budget(0.05), pytest.raises(WorkspaceIOError) as ei:
+    with prepare_local_io_budget(0.05), pytest.raises(LocalChannelDeadError) as ei:
         await await_prepare_local_io(_hang())
     elapsed = time.monotonic() - t0
+    assert ei.value.code == ErrorCode.LOCAL_CHANNEL_DEAD
     assert str(ei.value) == LOCAL_CHANNEL_DEAD
+    assert not isinstance(ei.value, WorkspaceIOError)
     assert elapsed < 1.0
 
 
@@ -330,9 +392,11 @@ async def test_prepare_first_liveness_timeout_aborts_including_probe_exec():
             def __init__(self) -> None:
                 self._channel = _HangChannel()
 
-        with prepare_local_io_budget(5.0), pytest.raises(WorkspaceIOError) as ei:
+        with prepare_local_io_budget(5.0), pytest.raises(LocalChannelDeadError) as ei:
             await resolve_exec_languages(_Local())
+        assert ei.value.code == ErrorCode.LOCAL_CHANNEL_DEAD
         assert str(ei.value) == LOCAL_CHANNEL_DEAD
+        assert not isinstance(ei.value, WorkspaceIOError)
     finally:
         hub.unregister(session)
 
@@ -400,9 +464,11 @@ async def test_prepare_span_adopts_turn_deadline_then_releases_the_gate():
             assert prepare_local_io_budget_active()
             remaining = remaining_prepare_local_io_budget()
             assert remaining is not None and 0.0 < remaining <= 5.0
-            with pytest.raises(WorkspaceIOError) as ei:
+            with pytest.raises(LocalChannelDeadError) as ei:
                 await resolve_exec_languages(_HangingDesk())
+            assert ei.value.code == ErrorCode.LOCAL_CHANNEL_DEAD
             assert str(ei.value) == LOCAL_CHANNEL_DEAD
+            assert not isinstance(ei.value, WorkspaceIOError)
         assert not prepare_local_io_budget_active()
         assert remaining_prepare_local_io_budget() is None
     finally:

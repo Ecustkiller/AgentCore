@@ -16,13 +16,17 @@ import asyncio
 
 import pytest
 
+import agentcore.runtime.events.sink as sink_mod
 from agentcore.api import sse
 from agentcore.runtime.events import (
     EventSink,
     EventType,
     FinishReason,
     content_delta,
+    error_event,
+    execution_completed,
     message_end,
+    run_completed,
 )
 from agentcore.runtime.events.conversation_hub import ConversationStreamHub
 from agentcore.runtime.events.sink import _SUBSCRIBER_QUEUE_MAXSIZE
@@ -111,11 +115,11 @@ async def test_close_ends_every_subscriber():
         assert await asyncio.wait_for(sub.get(), timeout=1.0) is None
 
 
-# --- 有界队列：满则丢最旧，且只惩罚自己 --------------------------------------
+# --- 有界队列：满则丢最旧过程帧，关帧保送，且只惩罚自己 ----------------------
 
 
 async def test_slow_subscriber_sheds_oldest_and_does_not_stall_peers():
-    """慢端积压到上限就丢最旧帧（ChatHub 范式），快端不受影响、emit 不阻塞。"""
+    """慢端积压到上限就丢最旧过程帧（ChatHub 范式），快端不受影响、emit 不阻塞。"""
     sink = EventSink()
     slow = sink.subscribe(label="slow")
     fast = sink.subscribe(label="fast")
@@ -130,6 +134,107 @@ async def test_slow_subscriber_sheds_oldest_and_does_not_stall_peers():
     assert slow._queue.qsize() == _SUBSCRIBER_QUEUE_MAXSIZE  # noqa: SLF001
     # 丢的是最旧的（0..4），队首是第 5 帧——最新的永远留着。
     assert (await asyncio.wait_for(slow.get(), timeout=1.0)).payload["delta"] == "5"
+
+
+async def test_slow_subscriber_keeps_run_completed_ahead_of_deltas(monkeypatch):
+    """关帧先入队后，过程洪峰挤掉的是更早的 delta，不是 run_completed。"""
+    monkeypatch.setattr(sink_mod, "_SUBSCRIBER_QUEUE_MAXSIZE", 8)
+    sink = EventSink()
+    slow = sink.subscribe(label="slow")
+    sink.emit(run_completed("w1", "worker", output_summary="done", duration_ms=1))
+    for i in range(8):
+        sink.emit(content_delta(str(i)))
+    first = await asyncio.wait_for(slow.get(), timeout=1.0)
+    assert first.type is EventType.RUN_COMPLETED
+    assert first.payload["run_id"] == "w1"
+    assert slow.dropped >= 1
+
+
+async def test_incoming_settle_evicts_oldest_delta(monkeypatch):
+    """队列已满过程帧时，后到的关帧挤掉最旧 delta，自己留下。"""
+    monkeypatch.setattr(sink_mod, "_SUBSCRIBER_QUEUE_MAXSIZE", 8)
+    sink = EventSink()
+    slow = sink.subscribe(label="slow")
+    for i in range(8):
+        sink.emit(content_delta(str(i)))
+    sink.emit(run_completed("w1", "worker", output_summary="done", duration_ms=1))
+    kinds = [
+        (await asyncio.wait_for(slow.get(), timeout=1.0)).type for _ in range(8)
+    ]
+    assert kinds[-1] is EventType.RUN_COMPLETED
+    assert kinds.count(EventType.RUN_COMPLETED) == 1
+    assert EventType.CONTENT_DELTA in kinds
+
+
+async def test_fluency_cannot_evict_a_full_settle_queue(monkeypatch):
+    """队列已全是关帧时，过程帧自己丢掉，不能把关帧挤走。"""
+    monkeypatch.setattr(sink_mod, "_SUBSCRIBER_QUEUE_MAXSIZE", 4)
+    sink = EventSink()
+    slow = sink.subscribe(label="slow")
+    for i in range(4):
+        sink.emit(run_completed(f"w{i}", "worker", output_summary="done", duration_ms=1))
+    sink.emit(content_delta("nope"))
+    assert slow.dropped == 1
+    for i in range(4):
+        event = await asyncio.wait_for(slow.get(), timeout=1.0)
+        assert event.type is EventType.RUN_COMPLETED
+        assert event.payload["run_id"] == f"w{i}"
+
+
+async def test_close_does_not_evict_run_completed_for_sentinel(monkeypatch):
+    """关流哨兵挤过程帧，不挤还在队列里的 run_completed。"""
+    monkeypatch.setattr(sink_mod, "_SUBSCRIBER_QUEUE_MAXSIZE", 4)
+    sink = EventSink()
+    slow = sink.subscribe(label="slow")
+    sink.emit(run_completed("w1", "worker", output_summary="done", duration_ms=1))
+    for i in range(3):
+        sink.emit(content_delta(str(i)))
+    sink.close()
+    first = await asyncio.wait_for(slow.get(), timeout=1.0)
+    assert first.type is EventType.RUN_COMPLETED
+    while True:
+        event = await asyncio.wait_for(slow.get(), timeout=1.0)
+        if event is None:
+            break
+
+
+async def test_spool_keeps_run_completed_for_backlog_subscribe(monkeypatch):
+    """无人订阅时的 spool 同样保送关帧，backlog 接入仍能收到。"""
+    monkeypatch.setattr(sink_mod, "_SUBSCRIBER_QUEUE_MAXSIZE", 4)
+    sink = EventSink()
+    sink.emit(run_completed("w1", "worker", output_summary="done", duration_ms=1))
+    for i in range(4):
+        sink.emit(content_delta(str(i)))
+    late = sink.subscribe(label="late", backlog=True)
+    first = await asyncio.wait_for(late.get(), timeout=1.0)
+    assert first.type is EventType.RUN_COMPLETED
+
+
+async def test_slow_subscriber_keeps_turn_and_execution_close(monkeypatch):
+    """整场收工与回合收口同样不能被过程挤掉。"""
+    monkeypatch.setattr(sink_mod, "_SUBSCRIBER_QUEUE_MAXSIZE", 8)
+    sink = EventSink()
+    slow = sink.subscribe(label="slow")
+    sink.emit(
+        execution_completed(
+            execution_id="e1",
+            conversation_id="c1",
+            completed=3,
+            total=3,
+        )
+    )
+    sink.emit(message_end(FinishReason.END_TURN))
+    sink.emit(error_event("boom", "turn failed"))
+    for i in range(8):
+        sink.emit(content_delta(str(i)))
+    kinds = [
+        (await asyncio.wait_for(slow.get(), timeout=1.0)).type for _ in range(3)
+    ]
+    assert kinds == [
+        EventType.EXECUTION_COMPLETED,
+        EventType.MESSAGE_END,
+        EventType.ERROR,
+    ]
 
 
 # --- emit 侧 seq 回填：多队列下不串号 -----------------------------------------

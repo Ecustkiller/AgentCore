@@ -121,12 +121,11 @@ describe("buildAlwaysRows", () => {
         }),
       ],
     });
-    expect(buildAlwaysRows(rail).map((row) => [row.label, row.meta])).toEqual([
-      ["停用", "已停用，不再注入"],
-    ]);
+    expect(buildAlwaysRows(rail).map((row) => row.label)).toEqual(["停用"]);
+    expect(buildAlwaysRows(rail)[0]?.item).toMatchObject({ disputed: true });
   });
 
-  it("偏好画像缺介绍时用职责句", () => {
+  it("偏好画像空核也进名单", () => {
     const rows = buildAlwaysRows(
       emptyRail({
         memory: [
@@ -145,19 +144,7 @@ describe("buildAlwaysRows", () => {
         ],
       }),
     );
-    expect(rows.map((row) => [row.label, row.meta])).toEqual([
-      ["偏好", "怎么回答"],
-      ["画像", "关于用户"],
-    ]);
-  });
-
-  it("角色身份简介用 CEO 身份正文", () => {
-    const rows = buildAlwaysRows(
-      emptyRail({
-        constitution: [identityItem("你是团队的 CEO")],
-      }),
-    );
-    expect(rows[0]?.meta).toBe("你是团队的 CEO");
+    expect(rows.map((row) => row.label)).toEqual(["偏好", "画像"]);
   });
 });
 

@@ -67,9 +67,9 @@ export function ReplayOutline({
                 <button
                   type="button"
                   onClick={() => jump(t.id)}
-                  className="flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left text-foreground text-sm outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                  className="flex w-full items-start gap-1.5 rounded-lg px-2 py-1.5 text-left text-foreground text-sm outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <span className="mt-0.5 w-5 shrink-0 text-right text-muted-foreground text-xs tabular-nums">
+                  <span className="mt-0.5 shrink-0 text-muted-foreground text-xs tabular-nums">
                     {i + 1}
                   </span>
                   <span className="min-w-0 flex-1 truncate">

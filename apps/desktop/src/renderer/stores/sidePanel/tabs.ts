@@ -10,6 +10,7 @@ import {
 import {
   CHANGES_TAB_ID,
   type DetailTab,
+  type FileTabChrome,
   type SidePanelGet,
   type SidePanelSet,
   type SidePanelState,
@@ -26,6 +27,19 @@ const CONVERSATION_SCOPED_KINDS = new Set<DetailTab["kind"]>([
   "file",
 ]);
 
+function omitFileTabChrome(
+  chrome: Record<string, FileTabChrome>,
+  ids: Iterable<string>,
+): Record<string, FileTabChrome> {
+  let next: Record<string, FileTabChrome> | null = null;
+  for (const id of ids) {
+    if (!(id in chrome)) continue;
+    if (!next) next = { ...chrome };
+    delete next[id];
+  }
+  return next ?? chrome;
+}
+
 function isConversationScopedKind(kind: DetailTab["kind"]): boolean {
   return CONVERSATION_SCOPED_KINDS.has(kind);
 }
@@ -38,6 +52,7 @@ type TabsActions = Pick<
   | "setActiveTab"
   | "closeContentTabs"
   | "closeConversationScopedTabs"
+  | "setFileTabChrome"
 >;
 
 /** Content-tab model: open / close / reorder / cap (floats protected). */
@@ -125,7 +140,13 @@ export function createTabsActions(
         if (focusSurface.type === "float" && focusSurface.tabId === id) {
           focusSurface = { type: "dock" };
         }
-        return { tabs, floats, activeTabId, focusSurface };
+        return {
+          tabs,
+          floats,
+          activeTabId,
+          focusSurface,
+          fileTabChrome: omitFileTabChrome(s.fileTabChrome, [id]),
+        };
       });
     },
 
@@ -223,7 +244,31 @@ export function createTabsActions(
         ) {
           focusSurface = { type: "dock" };
         }
-        return { tabs, floats, activeTabId, focusSurface };
+        return {
+          tabs,
+          floats,
+          activeTabId,
+          focusSurface,
+          fileTabChrome: omitFileTabChrome(s.fileTabChrome, droppedIds),
+        };
+      });
+    },
+
+    setFileTabChrome: (id, next) => {
+      set((s) => {
+        if (next == null) {
+          if (!(id in s.fileTabChrome)) return s;
+          return { fileTabChrome: omitFileTabChrome(s.fileTabChrome, [id]) };
+        }
+        const prev = s.fileTabChrome[id];
+        if (
+          prev &&
+          prev.dirty === next.dirty &&
+          prev.confirmDiscard === next.confirmDiscard
+        ) {
+          return s;
+        }
+        return { fileTabChrome: { ...s.fileTabChrome, [id]: next } };
       });
     },
   };

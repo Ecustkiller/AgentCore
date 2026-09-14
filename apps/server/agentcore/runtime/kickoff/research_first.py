@@ -1,8 +1,8 @@
-"""阶段推进卡 ``research_first`` 回灌文案，以及调研链证据探测。
+"""调研链证据探测，以及 ``research_first`` 决议的回灌文案。
 
 开赛前开工卡「先调研再辩」按键已退役（庭前取证内化为辩论固有阶段）。
 本模块不再提供 offer / recommend 闸。``research_first_tool_result`` 仍服务
-阶段推进卡「先补充调研」与旧 journal fold。
+旧 journal fold 与 conformance 回放。
 """
 
 from __future__ import annotations

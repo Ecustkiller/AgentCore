@@ -6,6 +6,7 @@ import {
   Cpu,
   Gauge,
   GitBranch,
+  Heart,
   Info,
   KeyRound,
   Keyboard,
@@ -27,8 +28,8 @@ interface NavGroup {
   items: NavItem[];
 }
 
-// Settings are grouped by intent, three groups over nine items: 账户（含 Git 凭据 /
-// 用量）、模型（组合 + Key 相邻）、偏好（含关于，避免单列组）。旧 /more/feedback
+// Settings are grouped by intent, three groups over ten items: 账户（含 Git 凭据 /
+// 用量）、模型（组合 + Key 相邻）、偏好（含关于与赞助，避免单列组）。旧 /more/feedback
 // 书签见 router 重定向。
 // 「外观」→「通用」（多收了原本藏在关于页的诊断类开关）；旧路径见 router 重定向。
 // Opening /more 宽屏落点见 MoreIndexRedirect；窄屏 /more 是设置列表，不重定向。
@@ -59,6 +60,7 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: Shield, label: "消息隐私", path: "/more/messages" },
       { icon: Keyboard, label: "快捷键", path: "/more/shortcuts" },
       { icon: Info, label: "关于", path: "/more/about" },
+      { icon: Heart, label: "赞助", path: "/more/sponsor" },
     ],
   },
 ];

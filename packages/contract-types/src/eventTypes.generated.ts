@@ -6,8 +6,6 @@ export type SSEEventType =
   | "approval_resolved"
   | "auto_folder_created"
   | "batch_metrics"
-  | "board_op_required"
-  | "board_read_required"
   | "browser_live_frame"
   | "browser_live_status"
   | "checkpoint_required"

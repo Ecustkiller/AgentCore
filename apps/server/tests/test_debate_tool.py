@@ -1093,19 +1093,16 @@ def test_debater_task_omits_system_readonly_toolbox():
     assert "tools" not in payload
 
 
-def test_both_debate_start_paths_omit_debater_tools_allowlist():
+def test_debate_start_omits_debater_tools_allowlist():
     """真纯丙·H4：debater_task 不再声明 tools；build_run_plan 节点 tools 仍为 None。
-    CEO debate 与 stage_card 仍经 DebateTool→rounds。"""
+    CEO debate 仍经 DebateTool→rounds。"""
     import inspect
 
-    from agentcore.runtime.pipeline.stage_card_debate import run_stage_card_debate_pipeline
     from agentcore.runtime.resolve.prepare import _assemble_ceo_toolset
     from agentcore.runtime.runs import build_run_plan
     from agentcore.tools.builtin import build_worker_registry
 
-    # 两条起辩入口都构造/消费 DebateTool（同 worker registry → 同 rounds 装配）。
     assert "DebateTool" in inspect.getsource(_assemble_ceo_toolset)
-    assert "debate_tool.execute" in inspect.getsource(run_stage_card_debate_pipeline)
 
     sides = [DebateSide("plaintiff", "正方", "支持"), DebateSide("defendant", "反方", "反对")]
     cfg = DebateConfig(motion="命题", form=DebateForm.DEBATE, sides=sides)

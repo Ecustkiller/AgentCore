@@ -104,6 +104,8 @@
   --catalog-execution: oklch(0.58 0.14 25);
   --catalog-host_browser: oklch(0.58 0.14 335);
   --catalog-board: oklch(0.58 0.14 15);
+  --catalog-table: oklch(0.58 0.14 140);
+  --catalog-doc: oklch(0.58 0.14 255);
   --catalog-orchestration: oklch(0.58 0.14 290);
 
   /* Layer shadows — pixel-equal to Tailwind 4.3 --shadow-sm / --shadow-lg.
@@ -117,10 +119,13 @@
 
   /* Motion — Linear / Material short craft. Two named durations so 0.15s / 150ms
    * / 200ms do not scatter. Desktop @theme maps duration-fast / duration-normal.
-   * Honor prefers-reduced-motion at the call site (motion-reduce:transition-none);
+   * `--motion-live-flow` is the continuous in-flight title sheen (not a
+   * transition). Honor prefers-reduced-motion at the call site
+   * (motion-reduce:transition-none / [data-live-flow] media query);
    * do not invent character-level streaming here. */
   --motion-duration-fast: 150ms;
   --motion-duration: 200ms;
+  --motion-live-flow: 1.8s;
   --motion-ease: ease-out;
 }
 
@@ -207,5 +212,7 @@
   --catalog-execution: oklch(0.72 0.14 25);
   --catalog-host_browser: oklch(0.72 0.14 335);
   --catalog-board: oklch(0.72 0.14 15);
+  --catalog-table: oklch(0.72 0.14 140);
+  --catalog-doc: oklch(0.72 0.14 255);
   --catalog-orchestration: oklch(0.72 0.14 290);
 }

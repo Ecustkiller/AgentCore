@@ -80,6 +80,9 @@ def test_api_routes_do_not_execute() -> None:
     ``runtime.engine``) belongs in the service/runtime layer — e.g. ``files.py``
     delegates rewriting to ``assist.rewrite`` instead of building a provider
     inline.
+
+    ``api/routes/inference/`` is a documented sidecar proxy exception (平台 LLM
+    接入): the route *is* the outbound adapter. Do not grow this skip.
     """
     forbidden = (
         "agentcore.llm.factory",
@@ -116,7 +119,8 @@ def test_db_does_not_import_runtime_or_conversation() -> None:
     """``db`` is a persistence leaf — no upward reach into runtime / conversation.
 
     Shared pure helpers that both db and conversation/runtime need live in leaf
-    packages (``core.message_merge``, ``core.assistant_content``, ``costing``).
+    packages (``core.message_merge``, ``core.mentions``, ``core.inline_body``,
+    ``core.assistant_content``, ``costing``).
     Lease CRUD stays under ``runtime.leases`` and is imported from there by
     callers, not re-exported through ``db.repositories``.
     """
@@ -139,7 +143,6 @@ def test_core_has_no_upward_business_deps() -> None:
         "agentcore.db",
         "agentcore.conversation",
         "agentcore.memory",
-        "agentcore.board",
         "agentcore.doc",
         "agentcore.evals",
         "agentcore.assist",
@@ -148,19 +151,106 @@ def test_core_has_no_upward_business_deps() -> None:
         "agentcore.conformance",
         "agentcore.workspace",
     )
-    exempt = {"errors.py"}  # lazy-imports llm.errors for SSE error context projection
-    files = [f for f in _py_files("core") if f.name not in exempt]
+    files = _py_files("core")
     assert _violations(files, forbidden) == {}
 
 
 def test_leaf_web_tools_do_not_import_runtime_or_llm() -> None:
     """Leaf tools are self-contained — no reach into runtime/llm.
 
-    (Orchestration primitives such as delegate/debate legitimately drive the
-    runtime, so only the leaf web tools are asserted here.)
+    Orchestration primitives (delegate/debate) legitimately drive the runtime.
     """
-    files = _py_files("tools/builtin/web")
+    files = _py_files(
+        "tools/builtin/web",
+        "tools/builtin/grep.py",
+        "tools/builtin/archive_create.py",
+        "tools/builtin/archive_extract.py",
+        "tools/builtin/file_ops",
+        "tools/cleared_write_stub.py",
+    )
     assert _violations(files, ("agentcore.runtime", "agentcore.llm")) == {}
+
+
+def test_file_write_does_not_import_debate_or_suspension() -> None:
+    """file_write is I/O; research ledger / dossier must not hide in the write tool."""
+    mutate = _PKG_ROOT / "tools" / "builtin" / "file_ops" / "mutate.py"
+    hits = {
+        imp
+        for imp in _module_imports(mutate)
+        if imp == "agentcore.runtime.debate"
+        or imp.startswith("agentcore.runtime.debate.")
+        or imp == "agentcore.runtime.suspension"
+        or imp.startswith("agentcore.runtime.suspension.")
+    }
+    assert hits == set()
+
+
+def test_turn_queue_and_runs_do_not_import_conversation_service() -> None:
+    """Start/resume this turn go through TurnDriver, not stream_chat / resume_chat."""
+    files = _py_files("runtime/turn/queue.py", "runtime/turn/runs.py")
+    assert _violations(
+        files,
+        (
+            "agentcore.conversation.service",
+            "agentcore.conversation.turns",
+            "agentcore.conversation.turn_persistence",
+        ),
+    ) == {}
+
+
+def test_runtime_does_not_import_retired_conversation_leaves() -> None:
+    """Point-name copy, pills, scratch, crash factory, and cost emit live outside runtime reverse."""
+    files = _py_files("runtime")
+    assert _violations(
+        files,
+        (
+            "agentcore.conversation.mentions",
+            "agentcore.conversation.scratch",
+            "agentcore.conversation.inline_body",
+            "agentcore.conversation.crash_delegate",
+            "agentcore.conversation.common",
+            "agentcore.conversation.stage_card_resolve",
+        ),
+    ) == {}
+    assert not (_PKG_ROOT / "conversation" / "mentions.py").exists()
+    assert not (_PKG_ROOT / "conversation" / "scratch.py").exists()
+    assert not (_PKG_ROOT / "conversation" / "inline_body.py").exists()
+    assert not (_PKG_ROOT / "conversation" / "stage_card_resolve.py").exists()
+    assert not (_PKG_ROOT / "runtime" / "kickoff" / "stage_card.py").exists()
+    assert not (_PKG_ROOT / "runtime" / "pipeline" / "stage_card_debate.py").exists()
+    assert not (_PKG_ROOT / "runtime" / "crash_delegate.py").exists()
+    common = _PKG_ROOT / "conversation" / "common.py"
+    common_defs = {
+        node.name
+        for node in ast.walk(ast.parse(common.read_text(encoding="utf-8"), filename=str(common)))
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert "log_cost_recorded" not in common_defs
+    assert (_PKG_ROOT / "observability" / "cost_log.py").is_file()
+
+
+def test_runtime_does_not_import_active_conversation_store() -> None:
+    """Active ConversationStore bind/get lives in runtime.conversation_store.
+
+    interrupt.py still imports get_cloud_store (sidecar active store is Outbox).
+    conversation.store must not re-export the process singleton.
+    """
+    interrupt = _PKG_ROOT / "runtime" / "turn" / "interrupt.py"
+    files = [f for f in _py_files("runtime") if f != interrupt]
+    assert _violations(files, ("agentcore.conversation.store",)) == {}
+    store_init = (_PKG_ROOT / "conversation" / "store" / "__init__.py").read_text(
+        encoding="utf-8"
+    )
+    assert "get_conversation_store" not in store_init
+    assert "bind_conversation_store" not in store_init
+    assert (_PKG_ROOT / "runtime" / "conversation_store.py").is_file()
+
+
+def test_runtime_does_not_import_turn_persistence() -> None:
+    """Shutdown salvage uses runtime.turn.closer; host impl stays in conversation."""
+    files = _py_files("runtime")
+    assert _violations(files, ("agentcore.conversation.turn_persistence",)) == {}
+    assert (_PKG_ROOT / "runtime" / "turn" / "closer.py").is_file()
 
 
 def test_runtime_drive_and_coordination_do_not_import_tools_delegate() -> None:
@@ -225,7 +315,6 @@ _RUNTIME_LINE_SOFT_MAX = 800
 _RUNTIME_OVERSIZE_EXEMPT: frozenset[str] = frozenset(
     {
         # Grandfathered at P3-A land (do not grow this set casually).
-        "browser/registry.py",
         "coordination/host.py",
         "coordination/session.py",
         "debate/models.py",
@@ -234,7 +323,6 @@ _RUNTIME_OVERSIZE_EXEMPT: frozenset[str] = frozenset(
         "debate/types.py",
         "delegate/completion.py",
         "delegate/delivery_status.py",
-        "engine/governance.py",
         "engine/loop.py",
         "runs/builder.py",
         "runs/contract.py",
@@ -269,6 +357,27 @@ def test_runtime_no_new_oversized_modules_without_exemption() -> None:
         "new runtime modules over "
         f"{_RUNTIME_LINE_SOFT_MAX} lines need a split or an explicit exemption:\n  "
         + "\n  ".join(sorted(offenders))
+    )
+
+
+def test_runtime_oversize_exemptions_are_still_over_the_ceiling() -> None:
+    """Drop an exemption once the file fits; do not keep stale names."""
+    root = _PKG_ROOT / "runtime"
+    missing: list[str] = []
+    stale: list[str] = []
+    for rel in sorted(_RUNTIME_OVERSIZE_EXEMPT):
+        path = root / rel
+        if not path.is_file():
+            missing.append(rel)
+            continue
+        lines = sum(1 for _ in path.open(encoding="utf-8"))
+        if lines <= _RUNTIME_LINE_SOFT_MAX:
+            stale.append(f"{rel} ({lines} lines)")
+    assert missing == [], "exemption names no longer exist:\n  " + "\n  ".join(missing)
+    assert stale == [], (
+        "runtime oversize exemptions that now fit under "
+        f"{_RUNTIME_LINE_SOFT_MAX} lines — remove them from the set:\n  "
+        + "\n  ".join(stale)
     )
 
 

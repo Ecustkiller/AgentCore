@@ -109,7 +109,7 @@ export async function readFile(
             kind: "binary",
             mime: imgMime,
             size: st.size,
-            reason: "图片过大（超过 10MB），请下载或用系统默认程序打开",
+            reason: "图片过大（超过 10MB）",
           },
         };
       }
@@ -130,7 +130,7 @@ export async function readFile(
             kind: "binary",
             mime: pdfMime,
             size: st.size,
-            reason: "PDF 过大（超过 15MB），请下载或用系统默认程序打开",
+            reason: "PDF 过大（超过 15MB）",
           },
         };
       }
@@ -155,7 +155,7 @@ export async function readFile(
             kind: "binary",
             mime: "application/octet-stream",
             size: st.size,
-            reason: "无法在面板内预览，请下载或用系统默认程序打开",
+            reason: "无法在面板内预览",
           },
         };
       }

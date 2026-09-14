@@ -210,6 +210,7 @@ describe("BrowserLivePanel · 状态文案", () => {
     render(<BrowserLivePanel conversationId="c1" />);
     emit((h) => h.onStatus("session_closed"));
     expect(screen.getByText("直播已结束")).toBeTruthy();
+    expect(screen.queryByText("浏览器会话已关闭")).toBeNull();
   });
 });
 

@@ -32,7 +32,7 @@ from agentcore.conversation.failure_visible import (
     is_failed_empty_assistant,
     usage_of,
 )
-from agentcore.conversation.inline_body import (
+from agentcore.core.inline_body import (
     has_inline_markers,
     render_inline_labels,
 )

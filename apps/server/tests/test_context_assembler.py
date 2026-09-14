@@ -185,6 +185,15 @@ def test_ceo_turn_renders_the_source_ledger_after_the_volatile_tail():
     assert out == "CEO\n<attachments/>\n<已登记来源/>"
 
 
+def test_ceo_turn_table_facts_sit_between_attachments_and_sources():
+    out = _ceo_turn(
+        attachment_context="<附件/>",
+        table_context="<表格/>",
+        registered_sources="<已登记来源/>",
+    )
+    assert out == "CEO\n<附件/>\n<表格/>\n<已登记来源/>"
+
+
 def test_ceo_turn_has_no_working_set_section():
     out = _ceo_turn()
     assert out == "CEO"

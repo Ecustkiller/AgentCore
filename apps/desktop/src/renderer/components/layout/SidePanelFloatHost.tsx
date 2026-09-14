@@ -8,7 +8,11 @@ import {
   sidePanelFloatTitle,
 } from "@/components/layout/SidePanelSurfaceBody";
 import { canUseOsFloatWindow } from "@/lib/floatWindowApi";
-import { WORKSPACE_TAB_ID, useSidePanelStore } from "@/stores/sidePanel";
+import {
+  WORKSPACE_TAB_ID,
+  confirmFileTabDiscard,
+  useSidePanelStore,
+} from "@/stores/sidePanel";
 import { useCallback, useMemo } from "react";
 
 /**
@@ -49,6 +53,7 @@ export function SidePanelFloatHost() {
   const onDock = useCallback((id: string) => dockTab(id), [dockTab]);
   const onClose = useCallback(
     (id: string) => {
+      if (!confirmFileTabDiscard(id)) return;
       // Closable kinds destroy; fixed homes only dock (destroyFloat rejects them).
       if (!destroyFloat(id)) dockTab(id);
     },

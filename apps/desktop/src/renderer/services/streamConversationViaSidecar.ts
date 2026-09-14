@@ -46,6 +46,11 @@ import {
   claimPrimaryStream,
   releasePrimaryStream,
 } from "@/services/turns/streamOwnership";
+import {
+  clearSidecarWorkspacesAuth,
+  looksLikeWorkspacesTokenFailure,
+  resolveSidecarWorkspacesAuth,
+} from "@/services/workspacesToken";
 import { useAuthStore } from "@/stores/auth";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import {
@@ -60,6 +65,7 @@ import type {
   SidecarQueuedAttachment,
   SidecarTurnResult,
 } from "@shared/sidecar-contract";
+import { tableSelectionPayload } from "@shared/tableSelection";
 
 /**
  * 本地引擎（sidecar）对话流 —— 与 `streamConversation`（云 SSE）对偶的另一条链路。
@@ -98,6 +104,8 @@ export interface StreamViaSidecarOptions {
   agentMentions?: OutgoingAgentMention[];
   /** Desktop-settled attachments (citation or attachments/ copy). Forwarded to startTurn. */
   attachments?: OutgoingAttachment[];
+  /** This turn's selected table row ids. Forwarded to startTurn. */
+  tableSelection?: readonly string[];
   /**
    * 编辑后重发 / 重新生成：占用截断后再开本机回合。此时禁止带截断前的 cookie 窗
    * （``history`` 必须缺省，让 sidecar 在 occupy 之后拉）。
@@ -246,11 +254,12 @@ function describeSidecarTurnError(err: unknown): string | null {
 /**
  * 诚实停止（`stopGeneration` 不 abort AbortSignal）下，sidecar `startTurn`/`resume`
  * 仍会以 `TURN_CANCELLED` / `"turn cancelled"` reject。须识别为用户停止并抛
- * `AbortError`，否则会误打「本地引擎出错」横幅。
+ * `AbortError`（message=`Aborted`），否则会误打「本地引擎出错」横幅。
  *
  * 判定：拒绝文案是引擎取消约定（IPC 后通常只剩 message，无 -32001 code）；
  * 或 turnPhase 仍为 `stopping`（message_end 尚未定格时的竞态）。
  * 不用 `stopped` 单独放行——避免 invoke 已成功后的 writeBack 失败被误吞。
+ * `"turn interrupted"` 不是用户停止，见 {@link isSidecarTurnInterrupted}。
  */
 function isSidecarUserCancel(conversationId: string, err: unknown): boolean {
   const msg = unwrapSidecarRejectMessage(err)?.toLowerCase() ?? "";
@@ -260,11 +269,18 @@ function isSidecarUserCancel(conversationId: string, err: unknown): boolean {
   return getTurnPhase(conversationId) === "stopping";
 }
 
+/** 引擎中断（`TURN_INTERRUPTED` / `"turn interrupted"`）：非用户停止、非引擎故障横幅。 */
+function isSidecarTurnInterrupted(err: unknown): boolean {
+  const msg = unwrapSidecarRejectMessage(err)?.toLowerCase() ?? "";
+  return msg.includes("turn interrupted") || msg.includes("turn_interrupted");
+}
+
 /**
  * 发送一条用户消息，经本地 sidecar 跑完整回合并消费其事件流。
  *
  * 失败语义对齐云链路：用户停止（诚实停止 → cancel → RPC reject，或 AbortSignal）
- * 抛 `AbortError`；其余（拉不起 sidecar / 引擎异常）包成带本地引擎诊断的
+ * 抛 `AbortError`（Aborted）；引擎中断（`TURN_INTERRUPTED`）抛 `AbortError`
+ * （Interrupted）；其余（拉不起 sidecar / 引擎异常）包成带本地引擎诊断的
  * `StreamError("sidecar")`（优先 onStatus 记下的生命周期诊断，见下），由
  * `services/turns.ts` 统一出**针对性**横幅 + 重试。
  */
@@ -281,33 +297,41 @@ export async function streamConversationViaSidecar({
   turnCommit,
   regenerate,
   replaceMaterials,
+  tableSelection,
 }: StreamViaSidecarOptions): Promise<SidecarTurnResult> {
   const turnId = newTurnId();
   // 本回合 trace_id：贯穿云代理推理调用 + 回写落库，使推理日志↔气泡同 trace（打通气泡↔日志）。
   const traceId = newTraceId();
   // 助手行 id：与 userMessageId 同级，桌面铸造；sidecar 不得再 new_id()。
   const messageId = crypto.randomUUID();
-  // 云推理 / folders / account 窄票：TTL+skew 内复用，临近过期才 mint；三张并行。
+  // 云推理 / folders / account / workspaces 窄票：TTL+skew 内复用，临近过期才 mint；四张并行。
   // 推理票：开跑前无票 → force remint 一次 → 仍无则 INFERENCE_TOKEN_EXPIRED、不发 RPC
-  // （引擎硬拒空凭据；无本机平台模型回退）。folders / account 缺票仍可下发，工具侧诚实失败。
+  // （引擎硬拒空凭据；无本机平台模型回退）。folders / account / workspaces 缺票仍可下发，工具侧诚实失败。
   // 开跑前鉴权失败（尚无事件）可对各票 force remint 一次，不对每回合 force。
   // 调用方已确认（含空窗）则不再拉；regenerate 必须等 occupy 截断后再由 sidecar 拉。
   const needCookieWindow = historyArg === undefined && !regenerate;
-  const [inferenceRaw, foldersAuthRaw, accountAuthRaw, cookieWindow] =
-    await Promise.all([
-      resolveSidecarInference({ conversationId }),
-      resolveSidecarFoldersAuth(),
-      resolveSidecarAccountAuth(),
-      needCookieWindow
-        ? fetchChatContext(conversationId).then(
-            (rows) => ({ ok: true as const, rows }),
-            () => ({ ok: false as const }),
-          )
-        : Promise.resolve({ ok: true as const, rows: historyArg }),
-    ]);
+  const [
+    inferenceRaw,
+    foldersAuthRaw,
+    accountAuthRaw,
+    workspacesAuthRaw,
+    cookieWindow,
+  ] = await Promise.all([
+    resolveSidecarInference({ conversationId }),
+    resolveSidecarFoldersAuth(),
+    resolveSidecarAccountAuth(),
+    resolveSidecarWorkspacesAuth(),
+    needCookieWindow
+      ? fetchChatContext(conversationId).then(
+          (rows) => ({ ok: true as const, rows }),
+          () => ({ ok: false as const }),
+        )
+      : Promise.resolve({ ok: true as const, rows: historyArg }),
+  ]);
   let inference = inferenceRaw ?? undefined;
   let foldersAuth = foldersAuthRaw ?? undefined;
   let accountAuth = accountAuthRaw ?? undefined;
+  let workspacesAuth = workspacesAuthRaw ?? undefined;
   // 拉失败且有票：省略 history，让 sidecar 拉。拉失败且无票：本回合明确失败。
   let history: SidecarHistoryEntry[] | undefined;
   if (cookieWindow.ok) {
@@ -358,9 +382,11 @@ export async function streamConversationViaSidecar({
           ? { agentMentions }
           : {}),
         ...(sidecarAttachments ? { attachments: sidecarAttachments } : {}),
+        ...tableSelectionPayload(tableSelection),
         inference,
         foldersAuth,
         accountAuth,
+        workspacesAuth,
         permissionAxes,
         folderId,
         localRootId,
@@ -396,6 +422,14 @@ export async function streamConversationViaSidecar({
         throw new Error("account 凭证续铸失败，请重新登录后再试");
       }
     },
+    remintWorkspaces: async () => {
+      clearSidecarWorkspacesAuth();
+      workspacesAuth =
+        (await resolveSidecarWorkspacesAuth({ force: true })) ?? undefined;
+      if (!workspacesAuth) {
+        throw new Error("workspaces 凭证续铸失败，请重新登录后再试");
+      }
+    },
     writeBack: async () => {
       const committed = await persistAndReconcile(
         conversationId,
@@ -428,16 +462,19 @@ export async function resumeConversationViaSidecar({
   console.warn(
     `[Resume] resumeConversationViaSidecar start conversationId=${conversationId} messageId=${messageId} decision=${decision} rootId=${rootId} subpath=${subpath}`,
   );
-  // 续跑同 startTurn：TTL+skew 内复用三张窄票，并行解析；开跑前鉴权失败可各票 force remint 一次。
+  // 续跑同 startTurn：TTL+skew 内复用四张窄票，并行解析；开跑前鉴权失败可各票 force remint 一次。
   // inference 铸票带本会话 id，使 model 与该会话组合一致；无票同样 force remint → 仍无则诚实失败。
-  const [inferenceRaw, foldersAuthRaw, accountAuthRaw] = await Promise.all([
-    resolveSidecarInference({ conversationId }),
-    resolveSidecarFoldersAuth(),
-    resolveSidecarAccountAuth(),
-  ]);
+  const [inferenceRaw, foldersAuthRaw, accountAuthRaw, workspacesAuthRaw] =
+    await Promise.all([
+      resolveSidecarInference({ conversationId }),
+      resolveSidecarFoldersAuth(),
+      resolveSidecarAccountAuth(),
+      resolveSidecarWorkspacesAuth(),
+    ]);
   let inference = inferenceRaw ?? undefined;
   let foldersAuth = foldersAuthRaw ?? undefined;
   let accountAuth = accountAuthRaw ?? undefined;
+  let workspacesAuth = workspacesAuthRaw ?? undefined;
   // 本会话权限轴（同 startTurn）：续跑期间的能力授权按会话当前轴。
   const permissionAxes =
     await resolveConversationPermissionAxes(conversationId);
@@ -472,6 +509,7 @@ export async function resumeConversationViaSidecar({
           inference,
           foldersAuth,
           accountAuth,
+          workspacesAuth,
           permissionAxes,
           folderId,
           localRootId,
@@ -505,6 +543,14 @@ export async function resumeConversationViaSidecar({
           (await resolveSidecarAccountAuth({ force: true })) ?? undefined;
         if (!accountAuth) {
           throw new Error("account 凭证续铸失败，请重新登录后再试");
+        }
+      },
+      remintWorkspaces: async () => {
+        clearSidecarWorkspacesAuth();
+        workspacesAuth =
+          (await resolveSidecarWorkspacesAuth({ force: true })) ?? undefined;
+        if (!workspacesAuth) {
+          throw new Error("workspaces 凭证续铸失败，请重新登录后再试");
         }
       },
       writeBack: async () => {
@@ -550,6 +596,8 @@ interface RunSidecarTurnOptions {
   remintFolders?: () => Promise<void>;
   /** 开跑前 account 窄票鉴权失败时：清缓存并换新票（与 remintInference 同形）。 */
   remintAccount?: () => Promise<void>;
+  /** 开跑前 workspaces 窄票鉴权失败时：清缓存并换新票（与 remintInference 同形）。 */
+  remintWorkspaces?: () => Promise<void>;
   /** 回合结束后冲刷 outbox 并对账（主进程回写；renderer 只反映同步态）。 */
   writeBack: (result: SidecarTurnResult) => Promise<void>;
 }
@@ -573,6 +621,7 @@ async function runSidecarTurn({
   remintInference,
   remintFolders,
   remintAccount,
+  remintWorkspaces,
   writeBack,
 }: RunSidecarTurnOptions): Promise<SidecarTurnResult> {
   // 回合从干净的审批门开始（与云链路一致）。
@@ -624,7 +673,7 @@ async function runSidecarTurn({
       result = await invoke();
     } catch (firstErr) {
       // 仅开跑前失败（尚无任何事件）才换票重试一次；中途鉴权失败不能整回合重开。
-      // 三张窄票对称：TTL 日常复用，遇对应鉴权失败 remint 一次（不对每回合 force）。
+      // 四张窄票对称：TTL 日常复用，遇对应鉴权失败 remint 一次（不对每回合 force）。
       if (sawAnyEvent) {
         throw firstErr;
       }
@@ -643,6 +692,14 @@ async function runSidecarTurn({
           "[sidecar] account token rejected before turn events; reminting and retrying once",
         );
         await remintAccount();
+      } else if (
+        remintWorkspaces &&
+        looksLikeWorkspacesTokenFailure(firstErr)
+      ) {
+        console.warn(
+          "[sidecar] workspaces token rejected before turn events; reminting and retrying once",
+        );
+        await remintWorkspaces();
       } else {
         throw firstErr;
       }
@@ -677,6 +734,10 @@ async function runSidecarTurn({
     }
     // 用户停止：与云链路一致地抛 AbortError（调用方据此不出错误横幅）。
     // 诚实停止不 abort signal，靠 phase / TURN_CANCELLED 文案识别（见 isSidecarUserCancel）。
+    // 引擎中断：抛 AbortError message=Interrupted——不当用户停止、也不套「本地引擎出错」。
+    if (isSidecarTurnInterrupted(err)) {
+      throw new DOMException("Interrupted", "AbortError");
+    }
     if (signal?.aborted || isSidecarUserCancel(conversationId, err)) {
       throw new DOMException("Aborted", "AbortError");
     }
@@ -728,6 +789,10 @@ async function runSidecarTurn({
     flushPendingContent(conversationId);
     flushPendingFrames(conversationId);
     clearActiveSidecarTurn(conversationId, turnId);
+    // Invoke returning (success, pause, or throw) means this renderer no longer
+    // holds a waiter. Leftover hot cards are ghosts — gray them even if
+    // message_end was skipped (process death / interrupt). Cold pause cards stay.
+    clearInteractionPrompts(conversationId);
     claim.release();
     releasePrimaryStream(conversationId, primaryToken);
     releaseLocalStream();

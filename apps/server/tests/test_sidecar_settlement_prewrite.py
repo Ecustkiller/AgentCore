@@ -218,6 +218,7 @@ async def test_resume_cancel_salvage_keeps_pre_pause_process(tmp_path) -> None:
         conversation_id="c1",
         trace_id="a" * 32,
         message_id="m1",
+        interrupt_reason="user_stop",
     )
     record = outbox.find_record_by_message_id("m1")
     assert record is not None

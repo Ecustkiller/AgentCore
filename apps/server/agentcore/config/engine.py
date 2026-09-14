@@ -12,24 +12,8 @@ class EngineSettings(BaseModel):
     engine_tool_failure_warn: int = 2
     engine_tool_failure_disable: int = 3
     engine_unproductive_threshold: int = 3
-    # 调查满 N 轮强制收工已退役：create_loop_controller 永远把
-    # convergence_finalize_rounds 设为 0，即便本项 >0 也忽略，防止
-    # 环境变量把误设计救活。读很多轮不同内容不是空转。
-    # 同一目标连读仍走 engine_convergence_spin_rounds → FINALIZE。
-    # 计数器与 LoopController 显式传入 finalize_rounds 仍可用；默认 0。
-    engine_convergence_finalize_rounds: int = 0
     # Consecutive investigation-only rounds re-reading the same targets before finalize.
     engine_convergence_spin_rounds: int = 3
-    # 交文件空转（久读无写催写 / 收检索）已退役：create_loop_controller 对
-    # files_expected 永不打开 nudge/narrow/report，即便本项 >0 也忽略，防止
-    # 环境变量把误设计救活。计数器与 LoopController 显式构造仍可用；默认 0。
-    # 与 token/timeout wind_down 无关（那是额度将尽，不是「没写过文件」）。
-    engine_delivery_idle_nudge_rounds: int = 0
-    engine_delivery_idle_narrow_rounds: int = 0
-    # 非交文件（调查/诊断）队员：久读无结论的 soft nudge **已退役**（与交文件空转同构：
-    # 行业不在循环里插「你读太多了」；收口靠 token / 同目标连读 spin / Stop）。
-    # factory 永远传 0，即便本项 >0 也忽略。LoopController 显式构造仍可用。
-    engine_recon_idle_nudge_rounds: int = 0
     engine_finish_guard_max_reworks: int = 2
     # C2 概览契约：本回合已发 delivery_status 时，CEO 终稿超过此字数 → finish_guard
     # 影子观测（hit=overview_length），不回炉。细节在终稿路径与 run 详情。

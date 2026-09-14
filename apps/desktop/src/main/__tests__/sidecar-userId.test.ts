@@ -394,6 +394,57 @@ describe("SidecarManager userId passthrough", () => {
     expect(start?.params).not.toHaveProperty("accountAuth");
   });
 
+  it("startTurn RPC includes workspacesAuth when provided", async () => {
+    const t = capturingTransport();
+    const manager = new SidecarManager(() => t.transport);
+
+    await manager.startTurn(
+      { isDestroyed: () => false, send: vi.fn() } as never,
+      {
+        conversationId: "c-workspaces",
+        rootId: "r-workspaces",
+        turnId: "turn-workspaces",
+        traceId: "c".repeat(32),
+        userMessageId: "u-workspaces",
+        messageId: "m-asst",
+        userMessage: "hello",
+        workspacesAuth: {
+          baseUrl: "https://api.test.example/v1/workspaces",
+          apiKey: "workspaces-jwt",
+        },
+      },
+      "/tmp/ws",
+    );
+
+    const start = t.sent.find((m) => m.method === "startTurn");
+    expect(start?.params?.workspacesAuth).toEqual({
+      baseUrl: "https://api.test.example/v1/workspaces",
+      apiKey: "workspaces-jwt",
+    });
+  });
+
+  it("startTurn RPC omits workspacesAuth when mint absent", async () => {
+    const t = capturingTransport();
+    const manager = new SidecarManager(() => t.transport);
+
+    await manager.startTurn(
+      { isDestroyed: () => false, send: vi.fn() } as never,
+      {
+        conversationId: "c-no-workspaces",
+        rootId: "r-no-workspaces",
+        turnId: "turn-no-workspaces",
+        traceId: "d".repeat(32),
+        userMessageId: "u-no-workspaces",
+        messageId: "m-asst",
+        userMessage: "hello",
+      },
+      "/tmp/ws",
+    );
+
+    const start = t.sent.find((m) => m.method === "startTurn");
+    expect(start?.params).not.toHaveProperty("workspacesAuth");
+  });
+
   it("resume RPC always includes folderId (project id or null bare chat)", async () => {
     const withFolder = capturingTransport();
     const managerA = new SidecarManager(() => withFolder.transport);

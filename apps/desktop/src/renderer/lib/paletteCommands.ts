@@ -21,7 +21,6 @@ import { useUIStore } from "@/stores/ui";
 import {
   BarChart3,
   BookOpen,
-  Bookmark,
   Clapperboard,
   CloudUpload,
   Cpu,
@@ -33,6 +32,7 @@ import {
   FolderPlus,
   GitBranch,
   HardDrive,
+  Heart,
   Info,
   KeyRound,
   Keyboard,
@@ -50,6 +50,7 @@ import {
   SlidersHorizontal,
   Store,
   Sun,
+  Table2,
   Terminal,
   Upload,
   UserCog,
@@ -78,7 +79,7 @@ export interface PaletteCommand {
   shortcut?: string;
   /** Right-aligned plain hint, e.g. the current value of a toggle. */
   hint?: string;
-  /** When true the palette stays open after run (e.g. switch to bookmarks facet). */
+  /** When true the palette stays open after run. */
   keepOpen?: boolean;
   /** Perform the action. The palette closes itself after this runs unless {@link keepOpen}. */
   run: () => void;
@@ -90,8 +91,6 @@ export interface CommandContext {
   navigate: NavigateFunction;
   theme: "light" | "dark" | "system";
   sidebarCollapsed: boolean;
-  /** Switch the open palette to the bookmarks facet (消息收藏列表). */
-  openBookmarksInPalette: () => void;
   /**
    * Dev-only demo tapes from ``GET /v1/demo-tape`` when the server switch is on.
    * Absent / empty → no palette entry (zero product surface when replay is off).
@@ -115,7 +114,6 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
     navigate,
     theme,
     sidebarCollapsed,
-    openBookmarksInPalette,
     demoTapes = [],
     restrictNarrow = false,
     forceLightTheme = false,
@@ -379,15 +377,6 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       run: go("/conversations"),
     },
     {
-      id: "nav-bookmarks",
-      title: "已收藏",
-      category: "前往",
-      icon: Bookmark,
-      keywords: ["bookmarks", "saved", "star", "shoucang", "yishoucang"],
-      keepOpen: true,
-      run: openBookmarksInPalette,
-    },
-    {
       id: "nav-files",
       title: "文件",
       category: "前往",
@@ -410,6 +399,14 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       icon: FileText,
       keywords: ["docs", "document", "wendang", "报告"],
       run: go("/docs"),
+    },
+    {
+      id: "nav-tables",
+      title: "多维表格",
+      category: "前往",
+      icon: Table2,
+      keywords: ["tables", "spreadsheet", "biaoge", "表格", "多维"],
+      run: go("/tables"),
     },
     {
       id: "nav-messages",
@@ -595,6 +592,14 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       icon: Info,
       keywords: ["settings", "about", "version", "guanyu"],
       run: go("/more/about"),
+    },
+    {
+      id: "nav-settings-sponsor",
+      title: "设置 · 赞助",
+      category: "前往",
+      icon: Heart,
+      keywords: ["settings", "sponsor", "donate", "zhanzu", "weixin", "alipay"],
+      run: go("/more/sponsor"),
     },
 
     // ---- 主题 (theme) ----

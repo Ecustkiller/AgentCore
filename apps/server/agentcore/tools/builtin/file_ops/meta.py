@@ -44,6 +44,7 @@ class FileDeleteTool:
         # 删除只会让台账里的 path 消失，不产生新产物。
         file_products=FileProductsContract.NO_PRODUCT,
         workspace_io=True,
+        catalog_summary="删工作区文件或目录",
     )
 
     @property
@@ -434,6 +435,7 @@ class MkdirTool:
         # 只建目录：台账记的是文件产物，空目录不是交付物。
         file_products=FileProductsContract.NO_PRODUCT,
         workspace_io=True,
+        catalog_summary="在工作区建目录",
     )
 
     @property
@@ -441,9 +443,7 @@ class MkdirTool:
         return ToolSchema(
             name="mkdir",
             description=(
-                "建工作区根下的结构目录（`src/`、`public/`、`AgentCore/文档/`；"
-                "缺上级一并建）。路径相对根；根已是当前工程（对照 `<工作区>`）。"
-                "写文件含上级，不必先 mkdir。已存在则失败。"
+                "建工作区根下的结构目录（缺上级一并建）。"
                 "套应用名/话题名当工程根 ≠ 本工具。"
             ),
             parameters={

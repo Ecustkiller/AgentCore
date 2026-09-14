@@ -28,6 +28,7 @@ from agentcore.evals.playbook_routing import (
     diff_fingerprints,
     extract_think_mentions,
     named_playbook,
+    observe_task_howto,
     select_scenarios,
     think_act_divergences,
 )
@@ -278,6 +279,12 @@ def _pack_sample(
     divergences = think_act_divergences(
         mentions, action=action, playbook=playbook, intensity=intensity
     )
+    tasks_preview = dsum.get("tasks_preview") if isinstance(dsum, dict) else None
+    task_howto = observe_task_howto(
+        action=action,
+        playbook=playbook,
+        tasks_preview=tasks_preview,
+    )
     return {
         "ok": True,
         "error": None,
@@ -301,6 +308,7 @@ def _pack_sample(
         "outcome": outcome,
         "think_mentions": mentions,
         "think_act_divergences": divergences,
+        "task_howto": task_howto,
         "detail": result.detail,
         "usage": result.usage,
         "reasoning": _truncate_reasoning(reasoning),
@@ -489,7 +497,9 @@ async def run_playbook_routing(
                     f"intensity={last.get('intensity')!r} "
                     f"card={last.get('card_issued')} "
                     f"landing={(last.get('outcome') or {}).get('landing')} "
-                    f"div={len(div)} reruns={last.get('reruns')}"
+                    f"div={len(div)} "
+                    f"howto={int(bool((last.get('task_howto') or {}).get('flagged')))} "
+                    f"reruns={last.get('reruns')}"
                 )
         agg = aggregate_samples(sample_payloads)
         scenario_rows.append(

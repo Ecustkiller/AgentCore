@@ -113,7 +113,8 @@ export interface ExecutionRuntime {
   coordinationWait: CoordinationWaitPayload | null;
   /** 执行转后台（`execution_detached`）：附着回合已收口、团队继续跑。EPHEMERAL——仅 live；
    * 驱动 StatusStrip「后台」徽标。n/m 与节点活体跟后续帧/相位，不冻在 stamp 快照。
-   * `execution_completed` / 终态清除。 */
+   * `execution_completed` / 完成·取消·挂起终态清除。失败暂留（并陈），队员齐了再摘。
+   * 不单独当作「图还在转」。 */
   executionDetached: ExecutionDetachedPayload | null;
   /** 交付状态（`delivery_status`，同 execution_id 保最新）：delegate 批次收尾的结构化交付
    * 对账（已交付/缺口/待用户操作）。DURABLE：重载由 hydrateFromJournal 取最后一条重建，
@@ -395,10 +396,27 @@ export function execRuntime(
  */
 export function hasUnsettledRuns(runtime: ExecutionRuntime): boolean {
   if (!runtime.plan) return false;
+  return workersUnsettledInProjection(runtime, runtime.status);
+}
+
+/**
+ * 按帧看队员是否未收口。``failed`` / ``cancelled`` 投影会把进行中冻成 cancelled，
+ * 活体不走那层冻，否则失败并陈会把还在跑的人看成已经散了。
+ */
+function workersUnsettledInFrames(runtime: ExecutionRuntime): boolean {
+  if (!runtime.plan) return false;
+  return workersUnsettledInProjection(runtime, "running");
+}
+
+function workersUnsettledInProjection(
+  runtime: ExecutionRuntime,
+  status: ExecutionRuntime["status"],
+): boolean {
+  if (!runtime.plan) return false;
   const exec = projectExecution(
     runtime.plan,
     runtime.frames,
-    runtime.status,
+    status,
     runtime.debate,
     runtime.debateRounds,
     runtime.crossExamEnabled,
@@ -413,15 +431,17 @@ export function hasUnsettledRuns(runtime: ExecutionRuntime): boolean {
 
 /**
  * 侧栏「执行中」与协作图是否还在转对齐：`status=running`，或挂起后队员仍在跑，
- * 或已 stamp `execution_detached`（后台条还在，含失败与后台并陈）。
+ * 或失败并陈且帧上队员未收口。`execution_detached` 只表示进过后台，不单独保活。
  */
 export function isConversationExecutionLive(
   runtime: ExecutionRuntime,
 ): boolean {
   if (!runtime.plan) return false;
   if (runtime.status === "running") return true;
-  if (runtime.executionDetached != null) return true;
   if (runtime.status === "paused") return hasUnsettledRuns(runtime);
+  if (runtime.status === "failed" && runtime.executionDetached != null) {
+    return workersUnsettledInFrames(runtime);
+  }
   return false;
 }
 
@@ -430,20 +450,26 @@ function maybeCompleteIfWorkersSettled(
   messageId: string,
 ): void {
   const rt = execRuntime(get(), messageId);
-  if (
-    rt.plan &&
-    rt.status === "running" &&
-    runsAllSettled(
-      rt.plan,
-      rt.frames,
-      rt.status,
-      rt.debate,
-      rt.debateRounds,
-      rt.crossExamEnabled,
-      rt.debateOpening,
-    )
-  ) {
-    get().setStatus("completed", messageId);
+  if (!rt.plan) return;
+  if (rt.status === "running") {
+    if (
+      runsAllSettled(
+        rt.plan,
+        rt.frames,
+        rt.status,
+        rt.debate,
+        rt.debateRounds,
+        rt.crossExamEnabled,
+        rt.debateOpening,
+      )
+    ) {
+      get().setStatus("completed", messageId);
+    }
+    return;
+  }
+  // 失败并陈：按帧看队员齐了才摘章，不能信 failed 投影的冻窗。
+  if (rt.executionDetached != null && !workersUnsettledInFrames(rt)) {
+    get().setExecutionDetached(null, messageId);
   }
 }
 
@@ -677,7 +703,9 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
     setStatus: (status, messageId) =>
       patchExec(messageId, (cur) => {
         // Terminal / paused turns clear live wait chrome.
-        // failed 保留 executionDetached：对话失败收口与「团队后台运行中」并陈。
+        // failed 保留 executionDetached：对话失败收口与「团队后台运行中」并陈
+        // （前提是队员还在跑）。活体问队员，不靠这枚章保活；齐了由
+        // maybeCompleteIfWorkersSettled 摘章。
         if (
           status === "completed" ||
           status === "cancelled" ||

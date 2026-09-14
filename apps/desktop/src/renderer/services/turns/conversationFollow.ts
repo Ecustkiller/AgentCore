@@ -17,7 +17,8 @@
  *   ``isGenerating``、不占 abort 槽，也不因掉线弹横幅（后台观察者，静默退避重连）。
  * - **切走立刻停**。对话级订阅只服务当前揭开的窗口：切到别的会话 / 草稿 / 离页立刻
  *   ``stop``，不 abort 本端 POST / sidecar 泵。follow-only 撑着的 ``isGenerating``
- *   随之落下（所有权只认 ``hasLocalConversationStream``）。
+ *   随之落下。本机还在写（本端闸或 occupancy 仍占着）不灭灯——切走 follow
+ *   不是「这份做完了」。最近 sidecar 目标只寻址，不问闲忙；问不清也不灭灯。
  *
  * 两个正交的决定，各有各的依据：
  *
@@ -32,6 +33,7 @@ import { logEvent } from "@/lib/log";
 import { bearerAuthHeader, sessionCredentials } from "@/lib/sessionAuth";
 import { BASE_URL, captureCsrf, tryRefresh } from "@/services/api";
 import { loadLatestWindow } from "@/services/messages";
+import { getLastSidecarTarget } from "@/services/sidecarRouting";
 import {
   ATTACH_CAUGHT_UP_COMMENT,
   dispatchFoldedSseEvent,
@@ -41,6 +43,7 @@ import {
 } from "@/services/streamConversation";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import type { MessageStartPayload, SSEEvent } from "@/types/events";
+import { clearGeneratingWhenSidecarIdle } from "./occupancy";
 import { reconnectBackoffMs } from "./reconnectBackoff";
 import {
   hasLocalConversationStream,
@@ -129,9 +132,15 @@ function waitUntilResumable(slot: FollowSlot): Promise<void> {
 
 function stopFollowOwnedGenerating(conversationId: string): void {
   if (hasLocalConversationStream(conversationId)) return;
-  if (getRuntime(conversationId).isGenerating) {
-    useConversationStore.getState().setGenerating(false, conversationId);
+  if (!getLastSidecarTarget(conversationId)) {
+    if (getRuntime(conversationId).isGenerating) {
+      useConversationStore.getState().setGenerating(false, conversationId);
+    }
+    return;
   }
+  void clearGeneratingWhenSidecarIdle(conversationId, {
+    skip: () => hasLocalConversationStream(conversationId),
+  });
 }
 
 function stopSlot(slot: FollowSlot, reason: string): void {

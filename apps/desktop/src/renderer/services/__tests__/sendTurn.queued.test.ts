@@ -104,7 +104,10 @@ afterEach(() => {
 
 describe("sendTurn — 发送即有流（无 202 / 无守望）", () => {
   it("streamConversation resolve → 正常收口，不 toast、不 rejoin", async () => {
-    streamMock.mockResolvedValue(undefined);
+    streamMock.mockImplementation(async (opts) => {
+      reportCommitted(opts);
+      useConversationStore.getState().appendToLastMessage("好", CID);
+    });
 
     await sendTurn(spec());
 
@@ -115,7 +118,10 @@ describe("sendTurn — 发送即有流（无 202 / 无守望）", () => {
   });
 
   it("流式路径打开助手占位（排队等待与空闲开跑共用）", async () => {
-    streamMock.mockResolvedValue(undefined);
+    streamMock.mockImplementation(async (opts) => {
+      reportCommitted(opts);
+      useConversationStore.getState().appendToLastMessage("好", CID);
+    });
 
     await sendTurn(spec());
 
@@ -123,6 +129,49 @@ describe("sendTurn — 发送即有流（无 202 / 无守望）", () => {
       (m) => m.role === "assistant",
     );
     expect(assistants.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("reuses composer-painted assistant id (does not remount Thinking)", async () => {
+    streamMock.mockImplementation(async (opts) => {
+      reportCommitted(opts);
+      useConversationStore.getState().appendToLastMessage("好", CID);
+    });
+    const painted = useConversationStore.getState().createAssistantMessage(CID);
+
+    await sendTurn(spec());
+
+    const assistants = getRuntime(CID).messages.filter(
+      (m) => m.role === "assistant",
+    );
+    expect(assistants).toHaveLength(1);
+    expect(assistants[0]?.id).toBe(painted);
+  });
+
+  it("truncates a leftover partial assistant then opens a fresh placeholder", async () => {
+    streamMock.mockImplementation(async (opts) => {
+      reportCommitted(opts);
+      useConversationStore.getState().appendToLastMessage("好", CID);
+    });
+    useConversationStore.getState().addMessage(
+      {
+        id: "stale-a",
+        role: "assistant",
+        content: "半截",
+        createdAt: "",
+        executionId: null,
+        isStreaming: false,
+      },
+      CID,
+    );
+
+    await sendTurn(spec());
+
+    const assistants = getRuntime(CID).messages.filter(
+      (m) => m.role === "assistant",
+    );
+    expect(assistants).toHaveLength(1);
+    expect(assistants[0]?.id).not.toBe("stale-a");
+    expect(assistants[0]?.content).toContain("好");
   });
 
   it("开跑前 402：撤乐观用户泡与空助手泡，phase 回 idle", async () => {
@@ -152,7 +201,7 @@ describe("sendTurn — 发送即有流（无 202 / 无守望）", () => {
     expect(getRuntime(CID).messages).toHaveLength(0);
   });
 
-  it("传输失败未落库：不回滚（不是 A 类）", async () => {
+  it("传输失败未落库：不回滚（可能仍在跑）", async () => {
     streamMock.mockRejectedValue(new StreamError("network"));
 
     const result = await sendTurn(spec());
@@ -163,12 +212,36 @@ describe("sendTurn — 发送即有流（无 202 / 无守望）", () => {
       true,
     );
   });
+
+  it("用户停止且还在转圈 → 回滚，不挂错误", async () => {
+    streamMock.mockRejectedValue(new DOMException("Aborted", "AbortError"));
+
+    const result = await sendTurn(spec());
+
+    expect(result.unstartedRefusal).toBe(true);
+    expect(getRuntime(CID).messages).toHaveLength(0);
+    expect(getRuntime(CID).isGenerating).toBe(false);
+    expect(getRuntime(CID).error).toBeNull();
+  });
+
+  it("空中断且还在转圈 → 同样回滚", async () => {
+    streamMock.mockRejectedValue(new DOMException("Interrupted", "AbortError"));
+
+    const result = await sendTurn(spec());
+
+    expect(result.unstartedRefusal).toBe(true);
+    expect(getRuntime(CID).messages).toHaveLength(0);
+    expect(getRuntime(CID).error).toBeNull();
+  });
 });
 
 function persistEmptyAssistantFailure(opts?: {
   content?: string;
   withTool?: boolean;
   code?: string;
+  reasoning?: string;
+  finishReason?: string;
+  outcome?: "ok" | "partial" | "paused" | "error";
   /** Cloud Class B: swap optimistic id (turn_saved). Sidecar keeps the client id. */
   reconcile?: boolean;
 }): void {
@@ -196,6 +269,18 @@ function persistEmptyAssistantFailure(opts?: {
     },
     CID,
   );
+  const tail = getRuntime(CID).messages.at(-1);
+  if (tail && (opts?.reasoning || opts?.finishReason || opts?.outcome)) {
+    store.updateMessage(
+      tail.id,
+      {
+        ...(opts.reasoning ? { reasoning: opts.reasoning } : {}),
+        ...(opts.finishReason ? { finishReason: opts.finishReason } : {}),
+        ...(opts.outcome ? { outcome: opts.outcome } : {}),
+      },
+      CID,
+    );
+  }
   store.finalizeLastMessage(CID);
   store.setTurnPhase("failed", CID);
 }
@@ -239,7 +324,7 @@ describe("sendTurn — Class B 零产出回滚（流 resolve）", () => {
     expect(getRuntime(CID).turnPhase).toBe("idle");
   });
 
-  it("流 resolve + 空助手 STREAM_ERROR → 不回滚", async () => {
+  it("流 resolve + 空助手 STREAM_ERROR → 回滚 idle", async () => {
     streamMock.mockImplementation(async (opts) => {
       reportCommitted(opts);
       persistEmptyAssistantFailure({ code: "STREAM_ERROR" });
@@ -247,9 +332,9 @@ describe("sendTurn — Class B 零产出回滚（流 resolve）", () => {
 
     const result = await sendTurn(spec());
 
-    expect(result.unstartedRefusal).toBe(false);
-    expect(getRuntime(CID).messages.some((m) => m.role === "user")).toBe(true);
-    expect(getRuntime(CID).turnPhase).toBe("failed");
+    expect(result.unstartedRefusal).toBe(true);
+    expect(getRuntime(CID).messages).toHaveLength(0);
+    expect(getRuntime(CID).turnPhase).toBe("idle");
   });
 
   it("已换 id 但传输未报告提交 → 不按 Class B 回滚", async () => {
@@ -291,6 +376,47 @@ describe("sendTurn — Class B 零产出回滚（流 resolve）", () => {
     expect(result.unstartedRefusal).toBe(false);
     expect(getRuntime(CID).messages.some((m) => m.role === "user")).toBe(true);
     expect(getRuntime(CID).turnPhase).toBe("failed");
+  });
+
+  it("有思考不滚", async () => {
+    streamMock.mockImplementation(async (opts) => {
+      reportCommitted(opts);
+      persistEmptyAssistantFailure({ reasoning: "先想一步" });
+    });
+
+    const result = await sendTurn(spec());
+
+    expect(result.unstartedRefusal).toBe(false);
+    expect(getRuntime(CID).messages.some((m) => m.role === "user")).toBe(true);
+  });
+
+  it("限流暂停不滚", async () => {
+    streamMock.mockImplementation(async (opts) => {
+      reportCommitted(opts);
+      persistEmptyAssistantFailure({
+        finishReason: "paused",
+        outcome: "paused",
+      });
+    });
+
+    const result = await sendTurn(spec());
+
+    expect(result.unstartedRefusal).toBe(false);
+    expect(getRuntime(CID).messages.some((m) => m.role === "user")).toBe(true);
+  });
+
+  it("用户停止但已有正文 → 不回滚", async () => {
+    streamMock.mockImplementation(async (opts) => {
+      reportCommitted(opts);
+      useConversationStore.getState().appendToLastMessage("半句", CID);
+      throw new DOMException("Aborted", "AbortError");
+    });
+
+    const result = await sendTurn(spec());
+
+    expect(result.unstartedRefusal).toBe(false);
+    expect(getRuntime(CID).messages.some((m) => m.id === "opt-u2")).toBe(true);
+    expect(getRuntime(CID).error).toBeNull();
   });
 
   it("catch 已 persist + 空助手 LLM_RATE_LIMIT → 同样回滚 idle", async () => {
@@ -363,7 +489,7 @@ describe("sendTurn — Class B 零产出回滚（sidecar）", () => {
     expect(getRuntime(CID).turnPhase).toBe("idle");
   });
 
-  it("flush 未成功：空助手限流也不滚（乐观 id 仍在列表）", async () => {
+  it("flush 未成功但乐观 id 仍在：空助手也回滚", async () => {
     sidecarStreamMock.mockImplementation(async () => {
       persistEmptyAssistantFailure({ reconcile: false });
       return undefined as never;
@@ -371,9 +497,9 @@ describe("sendTurn — Class B 零产出回滚（sidecar）", () => {
 
     const result = await sendTurn(spec());
 
-    expect(result.unstartedRefusal).toBe(false);
-    expect(getRuntime(CID).messages.some((m) => m.id === "opt-u2")).toBe(true);
-    expect(getRuntime(CID).turnPhase).toBe("failed");
+    expect(result.unstartedRefusal).toBe(true);
+    expect(getRuntime(CID).messages).toHaveLength(0);
+    expect(getRuntime(CID).turnPhase).toBe("idle");
   });
 
   it("有正文不滚", async () => {

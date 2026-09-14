@@ -2,12 +2,10 @@ import { Button } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import {
   COST_ESTIMATE_HINT,
-  COST_ESTIMATE_LABEL,
   COST_UNPRICED_HINT,
   COST_UNPRICED_LABEL,
   formatAlignedCostParts,
   formatCompact,
-  formatCostCaption,
   formatDisplayCost,
   pickCostMoney,
 } from "@/lib/format";
@@ -27,7 +25,7 @@ import { MetricRow } from "./shared";
 /**
  * Per-run resource ledger — the single place a run's full token + cost
  * breakdown lives. Defaults collapsed; header keeps the run ¥. All-zero cost
- * renders as「—」(§7.5), not「¥0.00」. BYOK with estimate shows ≈ + 估算标注.
+ * renders as「—」(§7.5), not「¥0.00」. BYOK with estimate shows ≈ + currency.
  * `cost.cached` is the billed cache-hit portion (already inside input), not
  * savings vs miss price.
  */
@@ -56,14 +54,15 @@ export function ResourceSection({
   // 未计价 ≠ 估算：三层价卡全落空时连估算值都没有，标注要如实（拍板 2026-07-20）。
   const unpriced =
     cost?.pricing_source === "unpriced" && (money == null || money.nano <= 0);
-  const byokLabel = unpriced ? COST_UNPRICED_LABEL : COST_ESTIMATE_LABEL;
   const byokTitle = unpriced ? COST_UNPRICED_HINT : COST_ESTIMATE_HINT;
   const costLabel =
     money != null && money.nano > 0
-      ? formatCostCaption(money.nano, money.estimated, money.currency)
-      : tokenTotal > 0 && byokHint
-        ? `${formatCompact(tokenTotal)} tok · ${byokLabel}`
-        : null;
+      ? formatDisplayCost(money.nano, money.estimated, money.currency)
+      : tokenTotal > 0 && unpriced
+        ? `${formatCompact(tokenTotal)} tok · ${COST_UNPRICED_LABEL}`
+        : tokenTotal > 0 && byokHint
+          ? `${formatCompact(tokenTotal)} tok`
+          : null;
   const cache = usage ? cacheUsageDisplay(usage) : null;
   const think = reasoningMeta(agent.thinking);
   const cacheLine =
@@ -160,9 +159,9 @@ export function ResourceSection({
             money.nano <= 0 &&
             usage != null &&
             tokenTotal > 0 &&
-            byokHint && (
+            unpriced && (
               <MetricRow
-                label={byokLabel}
+                label={COST_UNPRICED_LABEL}
                 value={`${formatCompact(usage.input)}↑ / ${formatCompact(usage.output)}↓`}
               />
             )}

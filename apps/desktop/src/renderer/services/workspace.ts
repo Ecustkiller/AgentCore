@@ -76,13 +76,17 @@ export async function uploadWorkspaceFile(
 export async function exportWorkspaceMdToDocx(
   conversationId: string,
   path: string,
+  layout: "standard" | "official" = "standard",
 ): Promise<{ path: string; warnings: string[] }> {
   const res = await api.post<{
     path: string;
     source_path: string;
     size_bytes: number;
     warnings: string[];
-  }>(`/v1/conversations/${conversationId}/workspace/export-docx`, { path });
+  }>(`/v1/conversations/${conversationId}/workspace/export-docx`, {
+    path,
+    layout,
+  });
   return { path: res.path, warnings: res.warnings ?? [] };
 }
 

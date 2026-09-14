@@ -141,7 +141,7 @@ async def test_durable_emit_stamps_sse_id_from_barrier(monkeypatch):
 
     store = Store()
     monkeypatch.setattr(
-        "agentcore.conversation.store.get_conversation_store", lambda: store
+        "agentcore.runtime.conversation_store.get_conversation_store", lambda: store
     )
 
     writer = TurnJournalWriter(turn_id="m1", conversation_id="c1", trace_id="t1")
@@ -356,7 +356,7 @@ def _patch_journal_repo(monkeypatch, rows: list[dict]) -> None:
     monkeypatch.setattr("agentcore.db.base.telemetry_session_factory", lambda: _Sess())
     monkeypatch.setattr("agentcore.db.repositories.runs.TurnJournalRepository", Repo)
     monkeypatch.setattr(
-        "agentcore.conversation.store.get_conversation_store", lambda: Store()
+        "agentcore.runtime.conversation_store.get_conversation_store", lambda: Store()
     )
 
 
@@ -395,6 +395,78 @@ async def test_build_cursor_replay_no_close_for_running_turn(monkeypatch):
     )
 
     assert all(e.type != EventType.MESSAGE_END for e in events)
+
+
+async def test_build_cursor_replay_synthesizes_orphan_before_message_end(
+    monkeypatch,
+):
+    """Finished turn with leftover hot card: catch-up must orphan before close.
+
+    ``turn_end`` is not on the wire; without a synthetic ``interaction_orphaned``
+    the one-shot attach fold paints a clickable card for a dead turn.
+    """
+    rows = [
+        {
+            "seq": 1,
+            "kind": "approval_required",
+            "payload": {
+                "approval_id": "a1",
+                "conversation_id": "c1",
+                "tool_call_id": "a1",
+                "tool_name": "file_delete",
+                "arguments": {},
+            },
+            "ts": "t0",
+        },
+        {"kind": "turn_end", "payload": {"finish_reason": "interrupted"}, "ts": None},
+    ]
+    _patch_journal_repo(monkeypatch, rows)
+
+    events = await build_cursor_replay(
+        turn_id="m1", conversation_id="c1", after_seq=-1, memory_channels={}, memory_agent_ids={}
+    )
+
+    types = [e.type for e in events]
+    assert EventType.APPROVAL_REQUIRED in types
+    assert EventType.INTERACTION_ORPHANED in types
+    assert types[-1] == EventType.MESSAGE_END
+    orphan_idx = types.index(EventType.INTERACTION_ORPHANED)
+    end_idx = types.index(EventType.MESSAGE_END)
+    assert orphan_idx < end_idx
+    orphan = next(e for e in events if e.type == EventType.INTERACTION_ORPHANED)
+    assert orphan.payload["interaction_id"] == "a1"
+    assert orphan.payload["kind"] == "approval"
+
+
+async def test_build_cursor_replay_does_not_double_explicit_orphan(monkeypatch):
+    rows = [
+        {
+            "seq": 1,
+            "kind": "approval_required",
+            "payload": {
+                "approval_id": "a1",
+                "conversation_id": "c1",
+                "tool_call_id": "a1",
+                "tool_name": "file_delete",
+                "arguments": {},
+            },
+            "ts": "t0",
+        },
+        {
+            "seq": 2,
+            "kind": "interaction_orphaned",
+            "payload": {"interaction_id": "a1", "kind": "approval"},
+            "ts": "t1",
+        },
+        {"kind": "turn_end", "payload": {"finish_reason": "interrupted"}, "ts": None},
+    ]
+    _patch_journal_repo(monkeypatch, rows)
+
+    events = await build_cursor_replay(
+        turn_id="m1", conversation_id="c1", after_seq=-1, memory_channels={}, memory_agent_ids={}
+    )
+    orphans = [e for e in events if e.type == EventType.INTERACTION_ORPHANED]
+    assert len(orphans) == 1
 
 
 # --- 开场事实回放：耐久卡必须落在盖过章的气泡上 -----------------------------------

@@ -35,6 +35,7 @@
       "inference",
       "foldersAuth",
       "accountAuth",
+      "workspacesAuth",
       "browserBridge",
       "permissionAxes",
       "folderId",
@@ -62,6 +63,7 @@
       "inference",
       "foldersAuth",
       "accountAuth",
+      "workspacesAuth",
       "browserBridge",
       "permissionAxes",
       "folderId",
@@ -85,6 +87,10 @@
     "required": ["baseUrl", "apiKey"]
   },
   "accountAuth": {
+    "keys": ["baseUrl", "apiKey"],
+    "required": ["baseUrl", "apiKey"]
+  },
+  "workspacesAuth": {
     "keys": ["baseUrl", "apiKey"],
     "required": ["baseUrl", "apiKey"]
   },

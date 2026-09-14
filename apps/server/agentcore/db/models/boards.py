@@ -34,9 +34,8 @@ class Board(Base):
     folder_id: Mapped[str | None] = mapped_column(
         PG_UUID(as_uuid=False), index=True, nullable=True
     )
-    # Dedicated AI conversation for this board (AI协作白板.md §三 A 绑定 / M2): the run
-    # the board's AI ops + 团队 work happen in, lazily created on first AI use. NULL =
-    # this board has no AI thread yet. App-level FK (no DB constraint, per repo convention).
+    # Leftover unread column (once dedicated AI conversation). Not written, not
+    # returned. Kept to avoid a migration; do not resume writing it.
     conversation_id: Mapped[str | None] = mapped_column(
         PG_UUID(as_uuid=False), index=True, nullable=True
     )

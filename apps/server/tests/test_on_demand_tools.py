@@ -110,9 +110,11 @@ def test_resident_tools_are_not_on_the_roster():
         "file_move",
         "file_copy",
         "file_batch",
-        "board_ops",
-        "board_read",
         "read_image",
+        "table_ops",
+        "table_read",
+        "docs_read",
+        "docs_write",
     ):
         assert is_on_demand_tool(name), name
         assert name in ON_DEMAND_TOOL_NAMES
@@ -289,7 +291,8 @@ async def test_host_consult_returns_how():
     assert body is not None
     assert "已启用工具 `host`" in body
     assert "本回合下一模型轮" in body
-    assert "通识 FAQ" in body
+    assert "通用知识问答" in body
+    assert "通识 FAQ" not in body
     assert "Get-WinEvent" in body
     assert "schema 免批" not in body  # schema reprint belongs on the next FC table
     assert _def_names(reg) == {"host"}
@@ -386,6 +389,10 @@ def test_family_of_covers_browser_and_solo_tools():
     assert browser == frozenset({"browser"})
     assert family_of("run") == frozenset({"run"})
     assert family_of("host") == frozenset({"host"})
+    assert family_of("table_ops") == frozenset({"table_ops", "table_read"})
+    assert family_of("table_read") == frozenset({"table_ops", "table_read"})
+    assert family_of("docs_read") == frozenset({"docs_read", "docs_write"})
+    assert family_of("docs_write") == frozenset({"docs_read", "docs_write"})
     assert "desktop_notify" not in ON_DEMAND_TOOL_NAMES
     # Without a live registry the Server siblings are unknown — name stands alone.
     assert family_of("mcp_playwright_browser_navigate") == frozenset(
@@ -465,16 +472,16 @@ def _stuffed_worker() -> ToolRegistry:
 
 
 def test_stuffed_worker_opening_table_omits_on_demand_tools():
-    """Locks the opening FC win: 26 registered; consult 另 wire，不在此表."""
+    """Locks the opening FC win: 28 registered; consult 另 wire，不在此表."""
     registry = _stuffed_worker()
-    assert registry.count == 26
+    assert registry.count == 28
     offered = _def_names(registry)
     assert offered == _STUFFED_WORKER_RESIDENT
     chars = sum(
         len(json.dumps(d, ensure_ascii=False)) for d in registry.get_openai_definitions()
     )
-    # 2026-09-10 开场去重后实测 11170；波 2 参数收口后 11032。锁回实测整十。
-    assert chars <= 11040, f"队员开场工具表变胖：{chars}"
+    # 2026-09-14 开场去重后实测 10448。锁回实测整十。
+    assert chars <= 10450, f"队员开场工具表变胖：{chars}"
     deferred = set(registry.deferred_names)
     assert deferred <= ON_DEMAND_TOOL_NAMES
     assert "browser" in deferred
@@ -508,12 +515,12 @@ async def test_stuffed_worker_opening_table_omits_mcp_tools():
     registry = _stuffed_worker()
     opening_before = _def_names(registry)
     count_before = registry.count
-    assert count_before == 26
+    assert count_before == 28
     assert opening_before == _STUFFED_WORKER_RESIDENT
 
     registered = register_mcp_tools(registry, _playwright_mcp_result(tool_count=24))
     assert registered == 24
-    assert registry.count == 50
+    assert registry.count == 52
     offered = _def_names(registry)
     assert offered == opening_before
     mcp_names = {n for n in registry.names if n.startswith("mcp_")}

@@ -194,6 +194,13 @@ export interface FileDetailTab {
   channel?: FileTabChannel;
 }
 
+/** Session chrome for a file tab — not part of the tab identity / persist. */
+export interface FileTabChrome {
+  dirty: boolean;
+  /** FilePreviewView explicit-save: × must confirm. Markdown autosave: false. */
+  confirmDiscard: boolean;
+}
+
 /**
  * Top-bar Browser content tab — 右坞 BrowserPanel 壳。
  * 能力上通常一会话一实例；壳内多页签由 browserSessions store 管理。
@@ -337,6 +344,13 @@ export interface SidePanelState {
    * as a badge on the panel toggle when the dock is closed.
    */
   pendingBadge: number;
+
+  /**
+   * File-tab unsaved chrome keyed by tab id. Not persist; cleared when the tab
+   * closes. `openTab` replace must not wipe it (lives off the tab snapshot).
+   */
+  fileTabChrome: Record<string, FileTabChrome>;
+  setFileTabChrome: (id: string, next: FileTabChrome | null) => void;
 
   /** Record that auto-surface should not reopen the panel for this context. */
   dismissAutoSurface: (contextId: string) => void;

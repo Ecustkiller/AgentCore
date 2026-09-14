@@ -27,8 +27,8 @@ export type InteractionKind = UserInteractionKind;
 /**
  * Desktop transport for resolving a card. Derived from wire flags:
  * hot → "hot"; pausesTurn && !hot → "cold";
- * reconnectAnswerable && !hot && !pausesTurn → "stage"; otherwise throw
- * (no leftover compose path).
+ * journalSurface leftover (not hot / not cold) → "stage" (no live submit);
+ * otherwise throw.
  */
 export type InteractionSubmitPath = "cold" | "hot" | "stage";
 
@@ -36,7 +36,7 @@ export function submitPathOf(kind: InteractionKind): InteractionSubmitPath {
   const w = INTERACTION_KIND_WIRE[kind];
   if (w.hot) return "hot";
   if (w.pausesTurn) return "cold";
-  if (w.reconnectAnswerable) return "stage";
+  if (w.journalSurface) return "stage";
   throw new Error(`no submit path for interaction kind ${kind}`);
 }
 

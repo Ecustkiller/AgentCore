@@ -55,8 +55,6 @@ export const FULFILL_CAPS = [
   "workspace",
   "host",
   "mcp",
-  "board",
-  "board_read",
   "external_mount",
 ] as const;
 

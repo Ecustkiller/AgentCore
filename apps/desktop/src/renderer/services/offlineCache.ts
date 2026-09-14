@@ -18,7 +18,6 @@ import {
   type MemoryUpdate,
   type Message,
   getRuntime,
-  isMessageWindowStrictlyRicher,
 } from "@/stores/conversation";
 import type {
   LocalStoreConversationMeta,
@@ -172,9 +171,8 @@ export async function cacheOpenedConversation(input: {
 
 /**
  * Persist a trusted latest window into the offline opened cache.
- * Call only after a gate-passed write (loadLatestWindow / cold reconcile /
- * live-tail snapshot). A thinner incoming window must not replace a thicker
- * opened snapshot — that is the refresh「最后一轮一会儿有一会儿没有」.
+ * Call after a successful server-window adopt (loadLatestWindow / cold
+ * reconcile / live-tail snapshot). Empty windows must not poison the snapshot.
  */
 export async function persistOpenedCache(
   id: string,
@@ -184,14 +182,6 @@ export async function persistOpenedCache(
 ): Promise<void> {
   // Empty GET / reconcile must not poison the opened snapshot.
   if (messages.length === 0) return;
-  const cached = await loadCachedConversation(id);
-  const cachedMessages = (cached?.messages ?? []) as Message[];
-  if (
-    cachedMessages.length > 0 &&
-    !isMessageWindowStrictlyRicher(messages, cachedMessages)
-  ) {
-    return;
-  }
   const listed = getConversations().find((c) => c.id === id);
   const lastMessagePreview = previewFromOpenedWindow(
     messages,
@@ -219,7 +209,7 @@ export async function persistOpenedCache(
   });
 }
 
-/** Persist the resident in-memory slice when it is strictly richer than cache. */
+/** Persist the resident in-memory slice (empty skipped). */
 export function persistResidentOpenedCache(conversationId: string): void {
   const rt = getRuntime(conversationId);
   if (rt.messages.length === 0) return;

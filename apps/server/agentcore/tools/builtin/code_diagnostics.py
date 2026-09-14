@@ -31,10 +31,8 @@ from agentcore.tools.registration import (
 from agentcore.workspace.limits import (
     channel_dead_error_message,
     channel_dead_retire_metadata,
-    is_liveness_timeout_detail,
-    is_presence_disconnected_detail,
-    is_workspace_reconnect_detail,
     op_liveness_timeout_metadata,
+    workspace_channel_failure_kind,
 )
 from agentcore.workspace.protocol import WorkspaceError
 
@@ -127,6 +125,7 @@ class CodeDiagnosticsTool:
         audience=AUDIENCE_BOTH,
         file_products=FileProductsContract.READ_ONLY,
         workspace_io=True,
+        catalog_summary="改码后的类型诊断",
     )
 
     @property
@@ -199,8 +198,9 @@ class CodeDiagnosticsTool:
         try:
             payload = await diag_fn(paths)
         except WorkspaceError as e:
+            kind = workspace_channel_failure_kind(e)
             detail = str(e)
-            if is_presence_disconnected_detail(detail):
+            if kind == "presence":
                 return ToolResult(
                     tool_call_id="",
                     success=False,
@@ -210,7 +210,7 @@ class CodeDiagnosticsTool:
                     metadata=channel_dead_retire_metadata(),
                     contract_failure=True,
                 )
-            if is_workspace_reconnect_detail(detail):
+            if kind == "reconnect":
                 return ToolResult(
                     tool_call_id="",
                     success=False,
@@ -218,7 +218,7 @@ class CodeDiagnosticsTool:
                     error=detail,
                     duration_ms=int((time.monotonic() - start) * 1000),
                 )
-            if is_liveness_timeout_detail(detail):
+            if kind == "liveness":
                 return ToolResult(
                     tool_call_id="",
                     success=False,

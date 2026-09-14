@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import { DEMO_LAYOUT } from "../videos/brand-30s/data/layout";
+import { DEMO_LAYOUT } from "../kit/hero/layout";
 import { STILL_DEFS } from "./data/stills";
 import { STILLS_LAYOUT } from "./data/stillsLayout";
 import {
