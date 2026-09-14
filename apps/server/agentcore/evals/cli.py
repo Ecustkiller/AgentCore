@@ -552,26 +552,26 @@ async def _run_prompt(args: argparse.Namespace) -> int:
         lint_speech_format_samples(SPEECH_FORMAT_SAMPLES)
         lint_notes_draft_samples(NOTES_DRAFT_SAMPLES)
         provider, model = _speech_format_provider_and_model(args.judge_mode)
-        result = await run_debate_speech_format(provider, model, SPEECH_FORMAT_SAMPLES)
-        print(format_debate_speech_format_report(result))
+        speech = await run_debate_speech_format(provider, model, SPEECH_FORMAT_SAMPLES)
+        print(format_debate_speech_format_report(speech))
         if args.out:
-            _write_json(Path(args.out), debate_speech_format_to_dict(result))
+            _write_json(Path(args.out), debate_speech_format_to_dict(speech))
         return 0
     if kind == "compaction":
         samples = select_compaction_fidelity_samples(COMPACTION_FIDELITY_SAMPLES, args.keys)
         lint_compaction_fidelity_samples(COMPACTION_FIDELITY_SAMPLES)
         provider, model = _compaction_fidelity_provider_and_model(args.judge_mode)
-        result = await run_compaction_fidelity(provider, model, samples)
-        print(format_compaction_fidelity_report(result))
+        compact = await run_compaction_fidelity(provider, model, samples)
+        print(format_compaction_fidelity_report(compact))
         if args.out:
-            _write_json(Path(args.out), compaction_fidelity_to_dict(result))
+            _write_json(Path(args.out), compaction_fidelity_to_dict(compact))
         return 0
     lint_scenarios(SCENARIOS)
     provider, model = _debate_provider_and_model(args.judge_mode)
-    result = await run_debate_converge(provider, model, SCENARIOS)
-    print(format_debate_converge_report(result))
+    converge = await run_debate_converge(provider, model, SCENARIOS)
+    print(format_debate_converge_report(converge))
     if args.out:
-        _write_json(Path(args.out), debate_converge_to_dict(result))
+        _write_json(Path(args.out), debate_converge_to_dict(converge))
     return 0
 
 
