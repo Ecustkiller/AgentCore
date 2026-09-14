@@ -30,7 +30,7 @@ export function SponsorSettings({
       <PageHeader title="赞助" />
       <SettingsStack>
         <p className="text-sm text-muted-foreground">
-          谢谢你愿意支持。自愿打赏，不换额度。
+          如果本产品对你有所帮助，欢迎您的慷慨赞助支持创作。
         </p>
         {shown.length > 0 ? (
           <SettingsSection
