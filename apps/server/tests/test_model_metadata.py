@@ -1,5 +1,7 @@
 """Unit tests for model display enrichment (exact / family / derived)."""
 
+from collections import Counter
+
 from agentcore.llm.model_metadata import (
     _METADATA,
     CAPABILITY_REASONING,
@@ -7,6 +9,7 @@ from agentcore.llm.model_metadata import (
     CAPABILITY_VISION,
     model_metadata_for,
 )
+from agentcore.llm.profiles import DEEPSEEK_V41_FLASH, OPENCODE_GO_V41_FLASH
 
 
 def test_kimi_k26_exact_display_not_family_k2():
@@ -87,6 +90,7 @@ def test_deepseek_v4_windows_follow_sku_not_family():
     assert model_metadata_for("deepseek-v4-flash-0731").context_length == 1_000_000
     assert model_metadata_for("deepseek-v4-flash-free-0731").context_length == 200_000
     assert model_metadata_for("deepseek-flash").context_length == 1_000_000
+    assert model_metadata_for("deepseek-v4.1-flash").context_length == 1_000_000
     assert model_metadata_for("deepseek-v4.1-flash-expires-on-0910").context_length == (
         1_000_000
     )
@@ -104,6 +108,19 @@ def test_deepseek_v41_flash_exact_display():
     assert meta.display_name != model_metadata_for("deepseek-v4-flash").display_name
 
 
+def test_opencode_go_v41_flash_exact_display_shares_official_brand():
+    """Go wire id is branded V4.1 Flash, not a humanized id or V4 Flash family."""
+    meta = model_metadata_for(OPENCODE_GO_V41_FLASH)
+    official = model_metadata_for(DEEPSEEK_V41_FLASH)
+    assert meta.display_name == official.display_name == "DeepSeek V4.1 Flash"
+    assert meta.badge is None
+    assert meta.vendor == "DeepSeek"
+    assert CAPABILITY_VISION not in meta.capabilities
+    assert CAPABILITY_TOOLS in meta.capabilities
+    assert CAPABILITY_REASONING in meta.capabilities
+    assert meta.display_name != model_metadata_for("deepseek-v4-flash").display_name
+
+
 def test_deepseek_v41_preview_exact_display_not_humanized_id():
     """Retired preview id keeps the branded label (not 'expires on 0910')."""
     meta = model_metadata_for("deepseek-v4.1-flash-expires-on-0910")
@@ -116,9 +133,16 @@ def test_deepseek_v41_preview_exact_display_not_humanized_id():
 
 
 def test_curated_display_name_badge_pairs_are_unique():
-    """Curated uniqueness is (display_name, badge), not display_name alone."""
+    """Curated uniqueness is (display_name, badge), not display_name alone.
+
+    Official ``deepseek-flash`` and Go ``deepseek-v4.1-flash`` share the
+    unbadged V4.1 Flash brand (different gates). Every other pair is unique.
+    """
     pairs = [(meta.display_name, meta.badge) for meta in _METADATA.values()]
-    assert len(pairs) == len(set(pairs))
+    counts = Counter(pairs)
+    shared_v41 = ("DeepSeek V4.1 Flash", None)
+    assert counts[shared_v41] == 2
+    assert all(n == 1 for pair, n in counts.items() if pair != shared_v41)
     # Same brand base name is allowed when badge distinguishes the free SKU.
     assert model_metadata_for("deepseek-v4-flash").display_name == (
         model_metadata_for("deepseek-v4-flash-free").display_name
@@ -171,6 +195,7 @@ def test_catalog_vision_follows_vendor_contract_not_keywords_or_family():
     assert CAPABILITY_VISION not in model_metadata_for(
         "deepseek-v4-flash-0731"
     ).capabilities
+    assert CAPABILITY_VISION not in model_metadata_for("deepseek-v4.1-flash").capabilities
     assert CAPABILITY_VISION in model_metadata_for("gpt-4o").capabilities
     assert CAPABILITY_VISION in model_metadata_for("gpt-4o-custom-build").capabilities
     assert CAPABILITY_VISION not in model_metadata_for("acme-vl-special").capabilities

@@ -46,7 +46,12 @@ from typing import Literal
 
 from agentcore.core.logging import get_logger
 from agentcore.llm.community_prices import community_currency, community_pricing_for
-from agentcore.llm.profiles import DEEPSEEK_V4_FLASH, DEEPSEEK_V4_FLASH_FREE, DEEPSEEK_V4_PRO
+from agentcore.llm.profiles import (
+    DEEPSEEK_V4_FLASH,
+    DEEPSEEK_V4_FLASH_FREE,
+    DEEPSEEK_V4_PRO,
+    OPENCODE_GO_V41_FLASH,
+)
 from agentcore.llm.provider.protocol import TokenUsage
 
 logger = get_logger(__name__)
@@ -102,6 +107,13 @@ _PRICING: dict[str, dict[str, Decimal]] = {
     # DeepSeek V4 — 中文定价页：百万 tokens 输入（缓存命中/未命中）/ 输出。
     # Flash: ¥0.02 / ¥1 / ¥2；Pro: ¥0.025 / ¥3 / ¥6（卡保留，allowlist 可暂不上架）。
     DEEPSEEK_V4_FLASH: {
+        "cache_hit": Decimal("0.02"),
+        "cache_miss": Decimal("1"),
+        "output": Decimal("2"),
+    },
+    # OpenCode Go V4.1 Flash: same product nominal as V4 Flash (quota still
+    # nano-CNY; upstream Go window is a different dollar cap).
+    OPENCODE_GO_V41_FLASH: {
         "cache_hit": Decimal("0.02"),
         "cache_miss": Decimal("1"),
         "output": Decimal("2"),

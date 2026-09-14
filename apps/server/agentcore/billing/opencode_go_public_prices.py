@@ -8,9 +8,11 @@ $12 / $30 / $60 windows.
 Never imported by ``calculate_cost`` / quota / user-facing money. Read-time
 only — tokens already sit on ``cost_calls``, no extra column.
 
-Prices: OpenCode public list for ``deepseek-v4-flash``, captured 2026-08-18,
-USD per 1M tokens. Cached Write is 「-」 for this model — no such tier.
-Update the numbers **and** ``PRICE_AS_OF`` together when upstream retags.
+Prices: OpenCode public list for Go Flash SKUs (V4 Flash and V4.1 Flash share
+the published token rates), captured 2026-08-18, USD per 1M tokens. Cached
+Write is 「-」 — no such tier. Update the numbers **and** ``PRICE_AS_OF``
+together when upstream retags. Unit rates are not the quota multiplier
+(V4.1 Flash vs V4 Flash monthly caps).
 """
 
 from __future__ import annotations
@@ -21,9 +23,13 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from agentcore.llm.pricing import reconcile_cache_miss_tokens
+from agentcore.llm.profiles import DEEPSEEK_V4_FLASH, OPENCODE_GO_V41_FLASH
 from agentcore.llm.provider.protocol import TokenUsage
 
-MODEL_ID = "deepseek-v4-flash"
+# Admin card ``estimate_model``: representative id. ``PRICED_MODEL_IDS`` is the
+# match set — both Go Flash SKUs use this public list.
+MODEL_ID = DEEPSEEK_V4_FLASH
+PRICED_MODEL_IDS = frozenset({DEEPSEEK_V4_FLASH, OPENCODE_GO_V41_FLASH})
 PRICE_AS_OF = date(2026, 8, 18)
 CURRENCY_USD = "USD"
 
@@ -66,9 +72,9 @@ def estimate_go_public_usd_nano(
 ) -> int:
     """Public-list USD estimate for one ``cost_calls`` row, as integer nano-USD.
 
-    ``model`` must be this table's id (``MODEL_ID``). Other catalog ids
-    (``glm-5.2``, ``deepseek-v4-flash-free``, …) return 0 — do not apply the
-    Flash card to a different model.
+    ``model`` must be one of ``PRICED_MODEL_IDS`` (Go V4 Flash / V4.1 Flash).
+    Other catalog ids (``glm-5.2``, ``deepseek-v4-flash-free``, …) return 0 —
+    do not apply the Flash card to a different model.
 
     Token-field semantics — verified against the write path, not the field names:
 
@@ -101,7 +107,7 @@ def estimate_go_public_usd_nano(
     DeepSeek cache-hit fields. If it does not, Go prices those tokens as Input
     while we price recorded hits as Cached Read — this estimate undershoots.
     """
-    if (model or "").strip() != MODEL_ID:
+    if (model or "").strip() not in PRICED_MODEL_IDS:
         return 0
     usage = _usage_from_ledger(tokens)
     card = go_public_card(at)

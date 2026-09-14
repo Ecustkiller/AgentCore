@@ -8,6 +8,7 @@ from agentcore.billing.opencode_go_public_prices import (
     estimate_go_public_usd_nano,
     is_opencode_go_peak,
 )
+from agentcore.llm.profiles import OPENCODE_GO_V41_FLASH
 
 # Off-Peak noon / Peak 02:00 — same calendar day, different cards.
 _OFF = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
@@ -102,3 +103,5 @@ def test_estimate_go_public_usd_nano_does_not_apply_flash_price_to_other_models(
     # Prefix of the priced id is still a different model.
     assert _est(tokens, _OFF, model="deepseek-v4-flash-pro") == 0
     assert _est(tokens, _OFF, model="") == 0
+    # Same public list as V4 Flash (quota caps differ; token rates do not).
+    assert _est(tokens, _OFF, model=OPENCODE_GO_V41_FLASH) == flash

@@ -38,7 +38,7 @@ skip_if:
 - **回合内鉴权死短路（甲+乙）**：同一用户回合、同一付款方（`credential_source`）首次确认真 API Key `LLMAuthError`（不含 `INFERENCE_TOKEN_EXPIRED`）或余额不足后，`llm/turn_auth_dead.py` 按来源闩死后续未启动的同源 LLM（主聊后续轮 / 未开跑 worker / 本回合 chrome）；另一付款方不受影响（平台 chrome 死亡不得短路同回合 BYOK chat，反之亦然）。已在飞可自然失败。**不做**跨回合 TTL 负缓存（丙暂缓）。用户文案 / CTA 按 `credential_source` 分流（BYOK→去设置；平台→改用自己的 Key / 联系管理员）。
 - **`platform_billing_selectable`**：仅 `billing_mode=platform` 时可选；BYOK 部署不开放平台代付。
 - **Worker 槽**：空 = 跟随主模型；跨 origin 时 `build_turn_router` 注入 extras。Sidecar `cost_role=member`：请求 body `model` 为目录路由键（`platform/{id}` / `{provider_id}/{id}`）且合法 → **按该身份重解析凭据/model**；裸 mint/chat id 或未带显式 → 仍跟本槽。非法路由键 **硬失败**（`VALIDATION_ERROR`），禁 silent 回退野模型。→ [编排器 · Per-worker](/docs/03-AI核心/编排器与CEO主Agent.md#per-worker-模型覆盖abc-同一功能)。
-- **统一目录** `GET /v1/users/me/models`：产品身份 = `ref`（`@platform/{id}` / `@byok/{provider_id}/{id}`）；行属性仍带 `(id, origin, provider_id)` 供分组。BYOK 行 = 按 `base_url` 匹配的厂商预设 seeds ∪ 上游 `GET /models` 发现（发现失败/空仍保留预设）；匹配到预设后按 `hideFromPicker` **精确 id** 对新选隐藏（退役官方别名；已钉组合仍能跑）。无预设（自定义端点）才并 `default_model`，以免发现失败下拉全空。**不是**用前端硬编码清单取代发现。组合槽对 BYOK = **始终可手填 combobox**（服务商 + model id，目录进 datalist 建议；火山 `ep-…`、私有中转等）；platform 仍只 allowlist。platform 行有补贴才列。
+- **统一目录** `GET /v1/users/me/models`：产品身份 = `ref`（`@platform/{id}` / `@byok/{provider_id}/{id}`）；行属性仍带 `(id, origin, provider_id)` 供分组。BYOK 行 = 按 `base_url` 匹配的厂商预设 seeds ∪ 上游 `GET /models` 发现（发现失败/空仍保留预设）；匹配到预设后按 `hideFromPicker` **精确 id** 对新选隐藏（退役官方别名，或该端点不得使用的官方 id；已钉组合仍能跑）。无预设（自定义端点）才并 `default_model`，以免发现失败下拉全空。**不是**用前端硬编码清单取代发现。组合槽对 BYOK = **始终可手填 combobox**（服务商 + model id，目录进 datalist 建议；火山 `ep-…`、私有中转等）；platform 仍只 allowlist。platform 行有补贴才列。
 
 ## 三、sidecar 推理代理
 
@@ -66,8 +66,8 @@ skip_if:
 
 | 项 | 约束 |
 |---|---|
-| 模型名 | 官方现行 `deepseek-flash`（V4.1 Flash）。旧名 `deepseek-v4-flash` / `deepseek-v4-flash-vision-exp` 暂时转到 4.1；`deepseek-v4-pro` 自 **2026-09-14 12:00 北京时间**同样转 4.1（直到 V4.1-Pro）。`deepseek-chat` / `deepseek-reasoner` 已停用。官方 BYOK picker **隐藏**这些退役兼容名（`hideFromPicker`；发现仍跑）。**平台 / OpenCode Go 现网仍钉** `deepseek-v4-flash`（Go 上 V4.1 Flash 月帽 $15，V4 Flash 月帽 $30） |
-| 识图 | 官方 `deepseek-flash` 收图。产品契约：`deepseek-v4-flash` / Pro 文本 id 不收（Go 仍把 Vision Exp 列成独立 SKU）；旧 `deepseek-v4-flash-vision-exp` 仍收 |
+| 模型名 | 官方现行 `deepseek-flash`（V4.1 Flash）。旧名 `deepseek-v4-flash` / `deepseek-v4-flash-vision-exp` 暂时转到 4.1；`deepseek-v4-pro` 自 **2026-09-14 12:00 北京时间**同样转 4.1（直到 V4.1-Pro）。`deepseek-chat` / `deepseek-reasoner` 已停用。官方 BYOK picker **隐藏**这些退役兼容名（`hideFromPicker`；发现仍跑）。**平台 / OpenCode Go 现网临时钉** `deepseek-v4.1-flash`（Go 促销月帽 $60 / 1×，**2026-09-20 结束**后常驻帽 $15 / 4×；V4 Flash 常驻 $30 / 2×）。9/20 若不续 $60 → 改回 `deepseek-v4-flash`。禁止把官方 id `deepseek-flash` 发到 Go（识图契约不同）；Go 预设 `hideFromPicker` 藏该 id（发现仍跑；已钉组合仍能跑） |
+| 识图 | 官方 `deepseek-flash` 收图。产品契约：`deepseek-v4-flash` / `deepseek-v4.1-flash` / Pro 文本 id 不收（Go 仍把 Vision Exp 列成独立 SKU）；旧 `deepseek-v4-flash-vision-exp` 仍收 |
 | 上下文 | 官方 **1M**（input+output 合计）；max output 384K。目录 `context_length` 与近顶压缩跟这条，不跟过期的 128K 记忆 |
 | base_url | `https://api.deepseek.com`（兼容 `/v1`） |
 | 思考开关 | `extra_body.thinking.type=enabled/disabled`。官方省略 = 默认 enabled；**AgentCore 聊天/CEO/worker 显式发 enabled**，DeepSeek V4 同时发官方默认档 `reasoning_effort=high`（不暴露强度 UI）。OpenCode Go 省略 `thinking` 时思考 token=0；只发 `thinking.enabled` 仍可能不回 CoT |
@@ -118,7 +118,7 @@ OpenCode 两条 OpenAI 兼容上游，**计费与目录不同，必须按精确 
 | 会话头 | Go/Zen 出站 `POST /chat/completions` 必带稳定 `x-opencode-session`（值=对话 id；无对话时 `probe:{trace}`）。User-Agent=`AgentCore/1.0`。不冒充 `opencode-cli`。`GET /models` 不带 session。缺头上游 400（2026-09-06 起硬拒） |
 | BYOK | 用户自备**对应端点**的 key；估算价卡按现有 BYOK 两层解析；**不**进平台配额。打错端点时付费 Flash 会在 Zen 路上 `CreditsError`（扣的是 Zen 余额，Go 订阅管不到） |
 | 平台代付 | ✅ `PLATFORM_*` 可指向 Zen **或** Go；**现网钉 Go + 付费 Flash**（见 §五·附）。换上游 / 改 `quota_*` 须改生产 `.env` 并重启 api |
-| 上下文 | 按 **SKU id**：付费 `deepseek-v4-flash` **1M**；仅 `deepseek-v4-flash-free` **200K**（Zen 网关 cap）。禁止按端点猜窗（Go 无 free 档也不把 Flash 当成 200K） |
+| 上下文 | 按 **SKU id**：付费 `deepseek-v4-flash` / `deepseek-v4.1-flash` **1M**；仅 `deepseek-v4-flash-free` **200K**（Zen 网关 cap）。禁止按端点猜窗（Go 无 free 档也不把 Flash 当成 200K） |
 | 错误分类 | 一张按上游嵌套 `error.type` 的表（信封 `{"type":"error","error":{"type":…}}`），禁止扫 `error.message`。**`GoUsageLimitError`（429）= Go 订阅配额用尽**（等窗口或控制台 `Use balance`），不是余额不足；**`CreditsError`（401）**收窄为无支付方式 / 订阅未激活 / 余额空；`MonthlyLimitError` / `UserLimitError` = 工作区月限或成员限；`ModelError` = 模型不支持 / 禁用 / trial 结束；`AuthError` 才是 Key 废；`RegionError`（403）= 中国区托管 opt-in。BYOK 可带用户自己的工作区链接；**platform 叶绝不回显工作区 URL / id**。上游透传的 `403 This model is not available in your region` **不是** `RegionError`；顶层 `Router.Unavailable` 不在本表。未知 type 走现有兜底 |
 | 思考 | DeepSeek 叶与官方同形：聊天/CEO/worker **显式**发 `thinking.type=enabled` + `reasoning_effort=high`。Go 省略 `thinking` 时不推 CoT；只开 `thinking.type` 仍可能空思考。入站兼容 `reasoning` / `reasoning_text` 别名。不按端点开特例方言。消费侧：同 chunk 先 reasoning 后 content；思考未停时正文不进时间线（防 Go 交错流把一句 CoT 拆成两段 Thought）。`thinking=False` 的后台 one-shot 不攒 |
 | 未做 | `zen/` / `opencode-go/` 前缀路由；为本网关开 Anthropic `/messages` / OpenAI `/responses` 协议分叉（触发条件：产品要上一个只说这两种协议的模型，而不是工具调用质量问题） |
@@ -142,22 +142,22 @@ OpenCode 两条 OpenAI 兼容上游，**计费与目录不同，必须按精确 
 
 > 运维定案：平台目录只上架 **一个**模型；BYOK 仍为高级选项（F7）。改生产 `.env` 的 `PLATFORM_*` / `QUOTA_*` 后**必须重启 api**（无热更）。**加 / 改 / 禁用池成员不须重启**（admin「供给 · 额度」· 平台额度账号）——但**每个新成员入池前必须单独完成下条硬前置**（opt-in 是逐工作区的，老号做过不代表新号做过；漏做的号上游回 403 `RegionError`）。真实 key 只在不入仓的部署凭据文件或加密库里。
 >
-> 官方已上架 `deepseek-flash`（V4.1 Flash）。**现网平台不切过去**：OpenCode Go 给 V4.1 Flash 的月帽是 $15，V4 Flash 是 $30。BYOK 直连官方 API 的种子是 `deepseek-flash`。
+> 官方已上架 `deepseek-flash`（V4.1 Flash）。**现网平台临时钉 Go 的** `deepseek-v4.1-flash`（不是官方 id）：OpenCode 表上 V4.1 Flash 月帽划掉 $15、现行 $60 / 1×，**2026-09-20 结束**；V4 Flash 常驻 $30 / 2×。9/20 前看是否续 $60，不续则 `PLATFORM_*` 改回 `deepseek-v4-flash` 并重启。BYOK 直连官方 API 的种子仍是 `deepseek-flash`。Go / Zen 预设种子仍是 `deepseek-v4-flash`（本刀不改 BYOK）。平台 **不**开原生贴图。
 >
 > **上游修订**：从 Zen 限时免费档切到 OpenCode **Go** 端点上的付费 `deepseek-v4-flash`。Zen 控制台同一把 key 两个端点通用（不必换 `PLATFORM_API_KEY`）。Go 目录**没有** `-free`。这不是免费档，也不是无限算力。
 >
-> **硬前置**：贴这套 `.env` / 上线前，必须先在 OpenCode 控制台为该工作区完成 DeepSeek 的中国区托管 opt-in，并用同一把 key 打 `POST https://opencode.ai/zen/go/v1/chat/completions` + `deepseek-v4-flash` 实测通过。未同意时上游回结构化 `RegionError`，平台代付一上线**全体用户**一起撞（不是个别账号）。已证事实仅限 **Go 端点的 DeepSeek**。
+> **硬前置**：贴这套 `.env` / 上线前，必须先在 OpenCode 控制台为该工作区完成 DeepSeek 的中国区托管 opt-in，并用同一把 key 打 `POST https://opencode.ai/zen/go/v1/chat/completions` + **现网 id**（现为 `deepseek-v4.1-flash`；回滚后为 `deepseek-v4-flash`）实测通过。未同意时上游回结构化 `RegionError`，平台代付一上线**全体用户**一起撞（不是个别账号）。已证事实仅限 **Go 端点的 DeepSeek**；换 id 须再打一枪，不能口头继承。
 
 | 项 | 值 |
 |---|---|
 | `BILLING_MODE` | `platform` |
 | `PLATFORM_BASE_URL` | `https://opencode.ai/zen/go/v1` |
-| `PLATFORM_MODEL` / `PLATFORM_MODELS` | `deepseek-v4-flash`（仅此；须有 CNY curated 价卡，否则启动后不上架 / allowlist 与默认冲突则 fail-fast） |
-| 后台档 | 同钉 `deepseek-v4-flash`（可显式 `PLATFORM_BACKGROUND_MODEL`，须 ∈ allowlist） |
+| `PLATFORM_MODEL` / `PLATFORM_MODELS` | `deepseek-v4.1-flash`（仅此；须有 CNY curated 价卡，否则启动后不上架 / allowlist 与默认冲突则 fail-fast）。**2026-09-20** 若不续 Go $60 月帽 → 改回 `deepseek-v4-flash` |
+| 后台档 | 同钉现网 id（可显式 `PLATFORM_BACKGROUND_MODEL`，须 ∈ allowlist） |
 | `PLATFORM_API_KEY` | 与 Zen 控制台同一把（不换） |
 | 额度 | 月 ¥10 · 日 ¥10 · 日请求 500（`quota_*`） |
 | 价卡 | curated 名义价 **同** 付费 Flash（¥0.02 / ¥1 / ¥2）——上游成本由 Go 订阅月费摊，产品仍按名义价扣额度 |
-| 上下文窗 | `deepseek-v4-flash` **1M**（SKU）。目录展示与近顶压缩（窗 × 80% ≈ 800K）跟 SKU，禁止按端点猜成 Zen free 的 200K |
+| 上下文窗 | 现网 Go Flash SKU **1M**（`deepseek-v4.1-flash` 与 `deepseek-v4-flash` 同）。目录展示与近顶压缩（窗 × 80% ≈ 800K）跟 SKU，禁止按端点猜成 Zen free 的 200K |
 | Vision | 本阶段不配 `VISION_*`（对话读图：BYOK 填 vision 槽，或槽空且 main 收图时复用 main） |
 | 公告 | 恢复时归档 `quota_unavailable`（以及仍在线的旧 `quota_jiurelay`）；发模板 **`quota_platform_restored`** → [产品公告文案模板 §4.2](/docs/05-平台与运维/产品公告文案模板.md) |
 
@@ -174,4 +174,4 @@ Admin「供给 · 成本」展示这三个窗口的**我方名义价累计**，�
 
 **中国区托管 opt-in**（另一维度，勿与上段 ZDR 混成一句）：Go 端点的 DeepSeek 需工作区在 OpenCode 控制台显式同意中国区托管后才放行。未同意时上游回结构化 `RegionError`。`GET /models` **仍会列出**被闸住的 id（目录有 ≠ 能跑）。此处只记 opt-in 事实，不据此推断数据驻留或训练条款。
 
-验收信号：无 Key 账号可开聊并扣额度；`GET /v1/users/me/models` 平台行仅 `deepseek-v4-flash`；输入区徽章 / `run_completed.model` / `cost_events.model` 同为该 id。
+验收信号：无 Key 账号可开聊并扣额度；`GET /v1/users/me/models` 平台行仅现网 id（现为 `deepseek-v4.1-flash`）；输入区徽章 / `run_completed.model` / `cost_events.model` 同为该 id。旧会话钉着已下架系统预置时 expand 回落到新默认。

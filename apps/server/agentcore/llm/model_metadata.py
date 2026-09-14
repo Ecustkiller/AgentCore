@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from agentcore.llm.image_accept import model_accepts_images
-from agentcore.llm.profiles import DEEPSEEK_V41_FLASH
+from agentcore.llm.profiles import DEEPSEEK_V41_FLASH, OPENCODE_GO_V41_FLASH
 
 # The three capability flags surfaced in the catalog (contract §1). Kept as a
 # module constant so the schema layer and tests share one source of truth.
@@ -54,6 +54,8 @@ class ModelMeta:
 # Exact rows still win for curated branding (e.g. hy3-preview).
 # Uniqueness is ``(display_name, badge)`` across curated rows — ``display_name``
 # alone may repeat when a badge distinguishes the SKU (e.g. Flash +「免费额度」).
+# Exception: official ``deepseek-flash`` and Go ``deepseek-v4.1-flash`` share
+# the unbadged V4.1 Flash brand (different gates; picker groups by origin).
 # Context length = the window this id actually gets (native vs gateway cap).
 _METADATA: dict[str, ModelMeta] = {
     "deepseek-v4-flash": ModelMeta(
@@ -81,6 +83,16 @@ _METADATA: dict[str, ModelMeta] = {
     ),
     # Official V4.1 Flash (BYOK). Vision bit comes from image_accept.
     DEEPSEEK_V41_FLASH: ModelMeta(
+        display_name="DeepSeek V4.1 Flash",
+        vendor="DeepSeek",
+        capabilities=frozenset({CAPABILITY_TOOLS, CAPABILITY_REASONING}),
+        context_length=1_000_000,
+    ),
+    # OpenCode Go wire id for the same brand. Exact row so the id does not
+    # humanize, and so it does not inherit V4 Flash's display via family prefix
+    # (``v4.1`` is not a ``-`` variant of ``v4-flash``). Shares (display_name,
+    # badge) with ``deepseek-flash``; origins already split the picker.
+    OPENCODE_GO_V41_FLASH: ModelMeta(
         display_name="DeepSeek V4.1 Flash",
         vendor="DeepSeek",
         capabilities=frozenset({CAPABILITY_TOOLS, CAPABILITY_REASONING}),

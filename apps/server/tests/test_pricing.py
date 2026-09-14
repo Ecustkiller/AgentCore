@@ -26,7 +26,12 @@ from agentcore.llm.pricing import (
     project_cache_miss_tokens,
     reconcile_cache_miss_tokens,
 )
-from agentcore.llm.profiles import DEEPSEEK_V4_FLASH, DEEPSEEK_V4_FLASH_FREE, DEEPSEEK_V4_PRO
+from agentcore.llm.profiles import (
+    DEEPSEEK_V4_FLASH,
+    DEEPSEEK_V4_FLASH_FREE,
+    DEEPSEEK_V4_PRO,
+    OPENCODE_GO_V41_FLASH,
+)
 from agentcore.llm.provider.protocol import TokenUsage
 
 
@@ -295,6 +300,9 @@ def test_deepseek_flash_official_cny_list_price():
     assert free.output == flash.output
     assert free.total == flash.total
     assert free.total > 0
+    go_v41 = calculate_cost(OPENCODE_GO_V41_FLASH, usage, credential_source="platform")
+    assert go_v41.pricing_source == "curated"
+    assert go_v41.total == flash.total
     # Pro 有卡但本部署可不进 allowlist；数值钉中文官价。
     pro = calculate_cost(DEEPSEEK_V4_PRO, usage, credential_source="platform")
     assert pro.input == 3_000_000_000  # ¥3

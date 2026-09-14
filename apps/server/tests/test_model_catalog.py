@@ -608,6 +608,7 @@ def test_has_curated_pricing_flags_uncurated():
 
     assert not has_curated_pricing("gpt-4o")
     assert has_curated_pricing("deepseek-v4-flash")
+    assert has_curated_pricing("deepseek-v4.1-flash")
     assert has_curated_pricing("deepseek-v4-pro")
     assert has_curated_pricing("glm-5.2")
     assert not has_curated_pricing("grok-4.5")
