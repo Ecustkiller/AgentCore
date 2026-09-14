@@ -44,7 +44,9 @@ services:
     # 与 Dockerfile CMD 对齐。sandbox overlay 不换 api entrypoint。
     command: ["python", "-m", "agentcore"]
     logging: *default-logging
-    mem_limit: 1024m
+    # 单进程 API。1Gi 会被峰值顶穿（cgroup OOM ≠ 宿主 OOM）。2g 给尖峰留余量；
+    # 与 sandboxd 4g 上限合计可超过宿主 RAM——sandboxd 按爆发计，同时打满则升配宿主。
+    mem_limit: 2g
     mem_reservation: 256m
     # 应用配置（JWT / DeepSeek Key / CORS / 配额…）从同一 env 文件注入。
     env_file:

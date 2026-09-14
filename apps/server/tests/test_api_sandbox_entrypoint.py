@@ -90,3 +90,4 @@ def test_app_compose_api_keeps_unprivileged_command():
     assert "cap_add:" not in body
     assert 'command: ["python", "-m", "agentcore"]' in text
     assert "privileged:" not in body
+    assert "mem_limit: 2g" in body
