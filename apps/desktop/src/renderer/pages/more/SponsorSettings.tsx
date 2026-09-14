@@ -1,19 +1,62 @@
-import { SettingsStack } from "@/components/settings";
-import { PageHeader } from "@/components/ui";
+import { SettingsSection, SettingsStack } from "@/components/settings";
+import { Card, PageHeader } from "@/components/ui";
+import {
+  SPONSOR_POSTERS,
+  type SponsorPosterKind,
+  type SponsorPosters,
+} from "@/lib/sponsorPosters";
+
+const POSTER_LABEL: Record<SponsorPosterKind, string> = {
+  wechat: "微信",
+  alipay: "支付宝",
+};
+
+const POSTER_ORDER: SponsorPosterKind[] = ["wechat", "alipay"];
 
 /**
  * 赞助（/more/sponsor）— 自愿打赏入口。
  *
- * 收款码不进公开仓。维护者本机若要展示，另配本地资源，不随 clone 分发。
+ * 收款码文件 gitignore，不进公开仓。本次 Vite 构建若目录里有
+ * `wechat.png` / `alipay.jpg`，会打进该次桌面 / web / Android 包。
  */
-export function SponsorSettings() {
+export function SponsorSettings({
+  posters = SPONSOR_POSTERS,
+}: {
+  posters?: SponsorPosters;
+} = {}) {
+  const shown = POSTER_ORDER.filter((id) => posters[id]);
   return (
     <div>
       <PageHeader title="赞助" />
       <SettingsStack>
         <p className="text-sm text-muted-foreground">
-          谢谢你愿意支持。收款码不随公开仓库分发。
+          谢谢你愿意支持。自愿打赏，不换额度。
         </p>
+        {shown.length > 0 ? (
+          <SettingsSection
+            title="收款码"
+            contentClassName="grid max-w-xl grid-cols-1 gap-4 sm:grid-cols-2"
+          >
+            {shown.map((id) => (
+              <Card key={id} className="overflow-hidden">
+                <figure>
+                  <img
+                    src={posters[id]}
+                    alt={`${POSTER_LABEL[id]}收款码`}
+                    className="w-full"
+                  />
+                  <figcaption className="px-3 py-2 text-sm text-muted-foreground">
+                    {POSTER_LABEL[id]}
+                  </figcaption>
+                </figure>
+              </Card>
+            ))}
+          </SettingsSection>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            这一版没有附上收款码。
+          </p>
+        )}
       </SettingsStack>
     </div>
   );

@@ -308,7 +308,7 @@ const DEFAULT_SETTINGS_ROWS: { label: string; desc: string; to: string }[] = [
   { label: "关于", desc: "版本、产品手册与法律信息", to: APP_PATHS.more.about },
   {
     label: "赞助",
-    desc: "自愿打赏（收款码不随公开仓）",
+    desc: "自愿打赏，不换额度",
     to: APP_PATHS.more.sponsor,
   },
 ];

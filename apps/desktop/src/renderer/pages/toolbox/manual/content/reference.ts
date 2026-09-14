@@ -192,7 +192,7 @@ export const referenceChapter: ManualChapterContent = {
             },
             {
               label: "赞助",
-              desc: "自愿打赏（收款码不随公开仓）",
+              desc: "自愿打赏，不换额度",
               to: APP_PATHS.more.sponsor,
             },
           ],
