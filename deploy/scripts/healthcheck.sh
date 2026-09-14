@@ -21,7 +21,7 @@
 #   HEALTH_URL         探测地址                  （默认 http://127.0.0.1:8000/readyz）
 #   HEALTH_TIMEOUT     单次探测超时(s)           （默认 10）
 #   FAIL_THRESHOLD     连续失败几次才首次告警    （默认 3，防抖）
-#   REALERT_EVERY      持续失败每隔几次再报一次  （默认 30，0=只报一次直到恢复）
+#   REALERT_EVERY      持续失败每隔几次再报一次  （默认 10＝约 10 分钟；0=只报一次直到恢复）
 #   STATE_FILE         连续失败计数文件          （默认 $AGENTCORE_HOME/.healthcheck.state）
 #   DISK_WARN_PCT      磁盘水位软告警阈值(%)     （默认 80，与 observability/disk.py 同口径）
 #   ALERT_WEBHOOK_URL  飞书群机器人 webhook      （未配则降级 journald）
@@ -38,7 +38,7 @@ fi
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8000/readyz}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-10}"
 FAIL_THRESHOLD="${FAIL_THRESHOLD:-3}"
-REALERT_EVERY="${REALERT_EVERY:-30}"
+REALERT_EVERY="${REALERT_EVERY:-10}"
 STATE_FILE="${STATE_FILE:-$AGENTCORE_HOME/.healthcheck.state}"
 # 软依赖告警边沿状态（0=正常/未知，1=已报过）；各自独立，与 HTTP 失败计数分离
 REDIS_STATE_FILE="${REDIS_STATE_FILE:-$AGENTCORE_HOME/.healthcheck.redis.state}"
@@ -167,7 +167,9 @@ if (( count == FAIL_THRESHOLD )); then
   send_alert "🔴 服务异常：$HEALTH_URL $reason（连续 ${count} 次，达告警阈值）"
 elif (( count > FAIL_THRESHOLD && REALERT_EVERY > 0 )) && (( (count - FAIL_THRESHOLD) % REALERT_EVERY == 0 )); then
   send_alert "🔴 服务仍异常：$HEALTH_URL $reason（已连续 ${count} 次）"
-else
+elif (( count < FAIL_THRESHOLD )); then
   warn "probe failed: $HEALTH_URL $reason（连续 ${count}/${FAIL_THRESHOLD} 次，未达告警阈值）"
+else
+  warn "probe failed: $HEALTH_URL $reason（已连续 ${count} 次，仍异常；每 ${REALERT_EVERY} 次重报）"
 fi
 exit 1
