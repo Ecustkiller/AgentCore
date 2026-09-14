@@ -5,15 +5,15 @@ handler picks its own renderer:
 
     输出目标        dev                         prod
     stdout         ConsoleRenderer(彩色可读)    JSONRenderer
-    LOG_FILE       JSONRenderer (JSONL)         JSONRenderer (JSONL)
+    LOG_FILE       JSONRenderer (JSONL)         不写（stdout-only）
 
-The file handler is ALWAYS JSON Lines (one JSON object per line, no ANSI),
-regardless of env — that is what lets tooling/agents parse ``logs/dev.jsonl``
-line-by-line (scripts/log_*.py, the conversation-logs rule). It uses a
-``ResilientRotatingFileHandler`` (20 MB × 5 backups) so a long-lived process
-cannot grow the file without bound. Foreign records (uvicorn / sqlalchemy / …)
-flow through the same ``foreign_pre_chain`` so every line — app or library —
-renders as a consistent event dict.
+The file handler is a **debug** convenience: JSON Lines (no ANSI) so
+``scripts/log_*.py`` can parse ``logs/dev.jsonl``. Production is Twelve-Factor
+stdout-only — the process must not own log inodes on a volume shared with
+uid-0 sandboxd. ``ResilientRotatingFileHandler`` (20 MB × 5) still bounds the
+dev file. Foreign records (uvicorn / sqlalchemy / …) flow through the same
+``foreign_pre_chain`` so every line — app or library — renders as a consistent
+event dict.
 
 Correlation ids (trace_id / conversation_id / attempt_id / …) are merged into
 every line from ``structlog.contextvars`` (bound via ``core/log_context.py``).
@@ -194,10 +194,27 @@ class ResilientRotatingFileHandler(RotatingFileHandler):
             self._alerting = False
 
 
-def setup_logging() -> None:
+def should_open_file_sink(*, file_sink: bool | None = None) -> bool:
+    """Whether ``setup_logging`` may open ``LOG_FILE``.
+
+    Production (``DEBUG=false``) is stdout-only even if ``LOG_FILE`` is leftover
+    in env. Pass ``file_sink=False`` for helpers that must never share the API
+    log inode (sandboxd runs uid 0 on the same ``appdata`` volume).
+    """
+    if file_sink is False:
+        return False
+    if not (settings.log_file or "").strip():
+        return False
+    if file_sink is True:
+        return True
+    return bool(settings.debug)
+
+
+def setup_logging(*, file_sink: bool | None = None) -> None:
     """Configure structlog + stdlib logging for the application.
 
     Reads ``settings.log_level`` / ``settings.log_file`` / ``settings.debug``.
+    File sink only when ``should_open_file_sink`` is true (dev JSONL).
     Idempotent: clears the root handlers first so a uvicorn ``--reload`` re-run
     does not stack duplicate handlers.
     """
@@ -275,13 +292,13 @@ def setup_logging() -> None:
     root_logger.setLevel(log_level)
     root_logger.addHandler(stream_handler)
 
-    # LOG_FILE is ALWAYS JSON Lines (no ANSI), regardless of env: this is what
-    # lets tooling/agents parse logs/dev.jsonl line-by-line.
+    # Dev JSONL only. Production leftover LOG_FILE must not fail-closed boot
+    # (PermissionError on a root-owned inode after sandboxd rotation).
     # ResilientRotatingFileHandler: 20 MB × 5 backups. On Windows, if another
     # process holds the file open, rename-based rollover fails — we fall back to
     # lock-serialized copy→truncate (never drop emits). Only unrecoverable
     # failure alerts + backoff. See ResilientRotatingFileHandler docstring.
-    if settings.log_file:
+    if should_open_file_sink(file_sink=file_sink):
         log_path = Path(settings.log_file)
         if not log_path.is_absolute():
             log_path = PROJECT_ROOT / log_path

@@ -81,7 +81,7 @@ deploy/.env.deploy.local (DEPLOY_SSH_*).
 
   (default)       Slim DB export: redacted turn_journal (no user/LLM bodies)
   --full          Include raw turn_journal (large; local deep dig, not for packs)
-  --events-only   Only sync LOG_FILE JSONL (+ rotation backups)
+  --events-only   Only sync API container stdout JSONL (docker logs)
   --export-only   Only run DB export inside the api container + pull
   --days N        DB export window (default 7)
 `);
@@ -122,95 +122,39 @@ function pullRemoteBundle(label) {
   }
 }
 
-/** Discover host directory that backs the container LOG_FILE (volume mount). */
-function discoverHostLogDir() {
-  console.log("→ discover remote LOG_FILE host path");
-  const { stdout } = sshCapture(`set -euo pipefail
+function replaceEventsJsonl(extractedName) {
+  const extracted = join(LOCAL_EXPORT_DIR, extractedName);
+  const eventsMain = join(LOCAL_EXPORT_DIR, "events.jsonl");
+  if (!existsSync(extracted)) {
+    console.error(`Missing ${extracted} after pull`);
+    process.exit(1);
+  }
+  if (existsSync(eventsMain)) unlinkSync(eventsMain);
+  renameSync(extracted, eventsMain);
+  // Drop leftover rotations from the old volume-file sync so discover_log_files
+  // does not merge stale prod.jsonl.* into the docker-stdout dump.
+  for (const name of readdirSync(LOCAL_EXPORT_DIR)) {
+    if (name.startsWith("events.jsonl.") || name.startsWith("prod.jsonl")) {
+      unlinkSync(join(LOCAL_EXPORT_DIR, name));
+    }
+  }
+}
+
+function syncEventLogs() {
+  console.log(`→ pack API stdout JSONL (docker logs --since ${days}d)`);
+  sshScript(`set -euo pipefail
 CONTAINER="${CONTAINER}"
 if ! docker inspect "$CONTAINER" >/dev/null 2>&1; then
   echo "container $CONTAINER not found" >&2
   exit 1
 fi
-LOG_FILE="$(docker exec "$CONTAINER" printenv LOG_FILE)"
-if [ -z "\${LOG_FILE}" ]; then
-  echo "LOG_FILE unset in $CONTAINER" >&2
-  exit 1
-fi
-case "$LOG_FILE" in
-  /*) ;;
-  *) LOG_FILE="$(docker exec "$CONTAINER" sh -c 'cd /app && pwd')/\$LOG_FILE" ;;
-esac
-LOG_DIR="$(dirname "$LOG_FILE")"
-HOST_DIR=""
-while IFS='|' read -r dest src; do
-  [ -n "\$dest" ] || continue
-  case "$LOG_DIR" in
-    "\$dest"|"\$dest"/*)
-      rel="\${LOG_DIR#"\$dest"}"
-      HOST_DIR="\${src}\${rel}"
-      break
-      ;;
-  esac
-done <<EOF
-$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{.Destination}}|{{.Source}}{{println}}{{end}}')
-EOF
-if [ -z "\$HOST_DIR" ]; then
-  echo "no mount covers LOG_FILE=$LOG_FILE" >&2
-  exit 1
-fi
-if [ ! -d "\$HOST_DIR" ]; then
-  echo "host log dir missing: \$HOST_DIR" >&2
-  exit 1
-fi
-BASE="$(basename "$LOG_FILE")"
-count="$(ls -1 "\$HOST_DIR"/\$BASE* 2>/dev/null | wc -l | tr -d ' ')"
-if [ "\$count" = "0" ]; then
-  echo "no files matching \$HOST_DIR/\$BASE*" >&2
-  exit 1
-fi
-printf '%s\\n%s\\n%s\\n' "\$HOST_DIR" "\$BASE" "\$count"
-`);
-  const lines = stdout.trim().split("\n").filter(Boolean);
-  if (lines.length < 3) {
-    console.error("discover failed:\n" + stdout);
-    process.exit(1);
-  }
-  const [hostDir, base, count] = lines;
-  console.log(`  LOG_FILE host dir: ${hostDir} (${base}* × ${count})`);
-  return { hostDir, base };
-}
-
-function renameProdToEvents(base) {
-  const prodMain = join(LOCAL_EXPORT_DIR, base);
-  const eventsMain = join(LOCAL_EXPORT_DIR, "events.jsonl");
-  if (!existsSync(prodMain)) {
-    console.error(`Missing ${prodMain} after pull`);
-    process.exit(1);
-  }
-  if (existsSync(eventsMain)) unlinkSync(eventsMain);
-  renameSync(prodMain, eventsMain);
-
-  for (const name of readdirSync(LOCAL_EXPORT_DIR)) {
-    if (!name.startsWith(`${base}.`)) continue;
-    const suffix = name.slice(base.length + 1);
-    if (!/^\d+$/.test(suffix)) continue;
-    const from = join(LOCAL_EXPORT_DIR, name);
-    const to = join(LOCAL_EXPORT_DIR, `events.jsonl.${suffix}`);
-    if (existsSync(to)) unlinkSync(to);
-    renameSync(from, to);
-  }
-}
-
-function syncEventLogs() {
-  const { hostDir, base } = discoverHostLogDir();
-  console.log("→ pack event logs on server");
-  sshScript(`set -euo pipefail
-cd "${hostDir}"
-tar czf ${REMOTE_BUNDLE} ${base}*
+# Container stdio only. Non-JSON banners (uvicorn startup-failed text) dropped.
+docker logs --since ${days}d "$CONTAINER" 2>/dev/null | grep -E '^\\{' > /tmp/agentcore-events.jsonl || true
+tar czf ${REMOTE_BUNDLE} -C /tmp agentcore-events.jsonl
 ls -lh ${REMOTE_BUNDLE}
 `);
   pullRemoteBundle("pull event logs");
-  renameProdToEvents(base);
+  replaceEventsJsonl("agentcore-events.jsonl");
 }
 
 function discoverHostDataExportDir() {

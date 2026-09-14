@@ -49,7 +49,11 @@ async def spend():
             print(' ', day.date().isoformat(), cid or '(null)', n)
 asyncio.run(spend())
 
-path = Path(os.environ.get('LOG_FILE') or '/data/logs/prod.jsonl')
+_raw = os.environ.get('LOG_FILE')
+if not _raw:
+    print('LOG_FILE unset (production stdout-only); skip file scan')
+    raise SystemExit(0)
+path = Path(_raw)
 files = [path] if path.exists() else []
 if path.parent.exists():
     files.extend(sorted(p for p in path.parent.glob(path.name + '.*') if p.is_file())[-6:])

@@ -233,7 +233,10 @@ def probe_redis() -> None:
 
 def probe_logs() -> None:
     print("=== log event counts (pool + 429) ===")
-    raw = os.environ.get("LOG_FILE") or "logs/prod.jsonl"
+    raw = os.environ.get("LOG_FILE")
+    if not raw:
+        print("LOG_FILE unset (production stdout-only); skip file scan — pnpm sync:logs")
+        return
     path = Path(raw)
     if not path.is_absolute():
         for root in (Path("/app"), Path("/data"), Path.cwd()):

@@ -237,3 +237,42 @@ def test_module_import_ok() -> None:
 
     assert hasattr(logging_mod, "ResilientRotatingFileHandler")
     assert hasattr(logging_mod, "setup_logging")
+    assert hasattr(logging_mod, "should_open_file_sink")
+
+
+def test_should_open_file_sink_prod_ignores_log_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentcore.config import settings
+    from agentcore.core.logging import should_open_file_sink
+
+    monkeypatch.setattr(settings, "debug", False)
+    monkeypatch.setattr(settings, "log_file", "/data/logs/prod.jsonl")
+    assert should_open_file_sink() is False
+    assert should_open_file_sink(file_sink=False) is False
+
+
+def test_should_open_file_sink_dev_uses_log_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentcore.config import settings
+    from agentcore.core.logging import should_open_file_sink
+
+    monkeypatch.setattr(settings, "debug", True)
+    monkeypatch.setattr(settings, "log_file", "logs/dev.jsonl")
+    assert should_open_file_sink() is True
+    assert should_open_file_sink(file_sink=False) is False
+
+
+def test_setup_logging_prod_does_not_create_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentcore.config import settings
+    from agentcore.core.logging import ResilientRotatingFileHandler, setup_logging
+
+    path = tmp_path / "prod.jsonl"
+    monkeypatch.setattr(settings, "debug", False)
+    monkeypatch.setattr(settings, "log_file", str(path))
+    try:
+        setup_logging()
+        root = logging.getLogger()
+        assert not any(isinstance(h, ResilientRotatingFileHandler) for h in root.handlers)
+        assert not path.exists()
+    finally:
+        setup_logging()

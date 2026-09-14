@@ -7,7 +7,10 @@ import os
 from collections import Counter
 from pathlib import Path
 
-path = Path(os.environ.get("LOG_FILE") or "/data/logs/prod.jsonl")
+_raw = os.environ.get("LOG_FILE")
+if not _raw:
+    raise SystemExit("LOG_FILE unset; production is stdout-only — use pnpm sync:logs")
+path = Path(_raw)
 files: list[Path] = []
 if path.exists():
     files.append(path)

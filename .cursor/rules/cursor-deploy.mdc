@@ -27,7 +27,7 @@ alwaysApply: false
 - 发布前本地一键门禁：`pnpm release:gate`（含 schema gate）。日常可用 `:lite`；**发布仍须全量**。
 - **预构建 / 切流前须等 `ci.yml` 全绿**（本地 gate 不含 integration、且 Win≠Linux）。
 - **后端切流顺序**：停旧 api → `alembic upgrade` → schema gate `--live` → 起新 api。禁止旧容器接流量时跑破坏性迁移。`finish-server.sh` 内核不另写一套。
-- **紧急续跑 finish**：镜像已在机上、finish 因 `/data/logs` 权限失败 → `node deploy/scripts/resume-finish.mjs <short-sha>`。不是主路径、不是 npm script。
+- **紧急续跑 finish**：镜像已在机上、finish 中途失败 → `node deploy/scripts/resume-finish.mjs <short-sha>`。不是主路径、不是 npm script。
 - **默认不发预告**。全端切流验收后发收口；预告仅破坏性迁移 / 无法空闲切。勿绑进 deploy 脚本自动发。
 
 ## 全端顺序（速查）

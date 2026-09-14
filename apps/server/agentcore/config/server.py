@@ -22,6 +22,8 @@ class ServerSettings(BaseModel):
     shutdown_teardown_seconds: float = 8.0
 
     log_level: str = "info"
+    # Dev JSONL path. Production (DEBUG=false) never opens this — stdout-only,
+    # even if LOG_FILE is leftover in env (sandboxd uid 0 shares appdata).
     log_file: str = ""
     log_llm_bodies: bool = False
 
@@ -45,7 +47,11 @@ class ServerSettings(BaseModel):
 
     @model_validator(mode="after")
     def _default_dev_log_file(self) -> Self:
-        """Dev writes queryable JSONL without requiring LOG_FILE in .env."""
+        """Dev writes queryable JSONL without requiring LOG_FILE in .env.
+
+        Production must stay stdout-only: do not auto-fill a file path when
+        DEBUG is false (the process must not own log inodes on a shared volume).
+        """
         if self.debug and not self.log_file:
             self.log_file = "logs/dev.jsonl"
         return self

@@ -13,7 +13,7 @@ alwaysApply: false
 
 | | 产品 AI 日志 | Cursor IDE Agent 会话 |
 |---|---|---|
-| **位置** | `logs/dev.jsonl` + Postgres | `agent-transcripts/`（UUID.jsonl） |
+| **位置** | 本地 `logs/dev.jsonl` + Postgres；线上 `pnpm sync:logs` 拉 API 容器 stdout → `logs/prod-export/events.jsonl` | `agent-transcripts/`（UUID.jsonl） |
 | **ID** | 32 位 hex 无连字符 = **trace_id**；带连字符 UUID = **conversation_id** | 文件名 = UUID 带连字符 |
 
 用户给 id → **`logs/dev.jsonl` + DB**。`agent-transcripts/` 与产品 AI **无关**。日志**不含消息正文**（在 Postgres）。
@@ -37,7 +37,7 @@ uv run python scripts/log_patrol.py --export-dir ../../logs/prod-export --since 
 
 **禁即兴**：禁止 Write 脚本、`python -c`、`jq`、Grep/rg jsonl、在仓库搜 ID、Glob 定位 CLI、派探子、整篇读分析指南。CLI 不够 → `--pack` / `--raw`；仍不够 → 停、问人。
 
-单条 ID（即便夹讨论根因）→ 主自跑上表，cwd=`apps/server`，不套分相。缺正文再 `--pack`（必要时 `--full`）。本地 0 事件且像线上 → `pnpm sync:logs` 后同一条加 `--export-dir ../../logs/prod-export`；仍空 → 停并报空，勿换工具。勿再用 `AGENTCORE_SSH` / `$AGENTCORE_HOME/logs`。
+单条 ID（即便夹讨论根因）→ 主自跑上表，cwd=`apps/server`，不套分相。缺正文再 `--pack`（必要时 `--full`）。本地 0 事件且像线上 → `pnpm sync:logs` 后同一条加 `--export-dir ../../logs/prod-export`（事件来自 API 容器 stdout，不是卷上的 jsonl）；仍空 → 停并报空，勿换工具。勿再用 `AGENTCORE_SSH` / `$AGENTCORE_HOME/logs`。
 
 巡检 / reviews（仅用户明说）→ [`logs/reviews/README.md`](/logs/reviews/README.md)：① `log_patrol.py`（禁复制扫描脚本）② 按密度拆只读桶。写成「建议改」前须码核 HEAD。
 

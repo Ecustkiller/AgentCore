@@ -19,7 +19,8 @@ from agentcore.tools.sandbox.sandboxd.server import SandboxdServer
 
 
 async def _amain() -> None:
-    setup_logging()
+    # Never share the API log inode: this process is uid 0 on the same appdata volume.
+    setup_logging(file_sink=False)
     logger = get_logger(__name__)
     server = SandboxdServer.from_settings()
     await server.start()
