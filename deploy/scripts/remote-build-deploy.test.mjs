@@ -4,6 +4,9 @@
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseRemoteDeployArgs } from "./remote-build-deploy.mjs";
 
 describe("parseRemoteDeployArgs", () => {
@@ -58,5 +61,22 @@ describe("parseRemoteDeployArgs", () => {
     assert.throws(() => parseRemoteDeployArgs(["--switch"]), /usage:/);
     assert.throws(() => parseRemoteDeployArgs(["--force", "695cec861"]), /unknown flag/);
     assert.throws(() => parseRemoteDeployArgs(["not-a-sha"]), /invalid SHA/);
+  });
+});
+
+describe("cutover script pins", () => {
+  const dir = dirname(fileURLToPath(import.meta.url));
+
+  it("finish-server records last-deployed-sha after readyz and ignores oneshot orphans", () => {
+    const text = readFileSync(join(dir, "finish-server.sh"), "utf8");
+    assert.match(text, /COMPOSE_IGNORE_ORPHANS=1/);
+    assert.match(text, /\.last-deployed-sha/);
+    assert.match(text, /printf '%s\\n' "\$TAG" >"\$SHA_FILE"/);
+  });
+
+  it("backup.sh defaults BACKUP_KEEP to 7", () => {
+    const text = readFileSync(join(dir, "backup.sh"), "utf8");
+    assert.match(text, /BACKUP_KEEP="\$\{BACKUP_KEEP:-7\}"/);
+    assert.doesNotMatch(text, /BACKUP_KEEP="\$\{BACKUP_KEEP:-14\}"/);
   });
 });

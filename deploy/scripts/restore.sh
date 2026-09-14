@@ -26,6 +26,7 @@ fi
 unset _ac_paths
 BACKUP_DIR="${BACKUP_DIR:-$AGENTCORE_HOME/backups}"
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-agentcore}"
+export COMPOSE_IGNORE_ORPHANS=1
 PG_USER="${PG_USER:-agentcore}"
 PG_DB="${PG_DB:-agentcore}"
 FORCE="${FORCE:-0}"

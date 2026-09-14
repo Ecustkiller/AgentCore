@@ -16,10 +16,13 @@
 # 一接流量，第一个打开云文件夹的用户就把迁移目标建成空目录；而搬迁「目标已存在就跳过、
 # 绝不合并」，事后补跑会被判 skipped，文件永久留在旧的平铺目录里。
 set -euo pipefail
+# oneshot 不叠 sandbox overlay；忽略长驻 sandboxd，避免 Docker 喊 orphan、误诱 compose down。
+export COMPOSE_IGNORE_ORPHANS=1
 
 DEPLOY="${AGENTCORE_DEPLOY_DIR:-/opt/agentcore/repo/deploy}"
 ENVF="$DEPLOY/config/production.env"
 ROOT_ENV="${AGENTCORE_HOME:-/opt/agentcore}/.env"
+SHA_FILE="${SHA_FILE:-${AGENTCORE_HOME:-/opt/agentcore}/.last-deployed-sha}"
 TAG="${1:?usage: finish-server.sh <short-sha|latest>}"
 
 if [[ ! "$TAG" =~ ^([0-9a-fA-F]{7,40}|latest)$ ]]; then
@@ -237,6 +240,14 @@ echo "READYZ OK"
 echo "--- /version ---"
 curl -s http://127.0.0.1:8000/version
 echo
+
+# 回滚 runbook 读这个文件。日常切流走本脚本，不走 deploy-server.sh。
+if [[ "$TAG" != "latest" ]]; then
+  printf '%s\n' "$TAG" >"$SHA_FILE"
+  echo "recorded $SHA_FILE=$TAG"
+else
+  echo "WARN: TAG=latest — skip .last-deployed-sha (not a pin)"
+fi
 
 # 健康后回收本机历史 api:<sha>（ACR 仍可回拉）。默认保留最近 5 个 tag + 容器在用镜像。
 KEEP_API_IMAGES="${KEEP_API_IMAGES:-5}"

@@ -92,7 +92,9 @@ if [[ "$_gvisor_off" -eq 0 ]]; then
 fi
 dc() { docker compose -p "$COMPOSE_PROJECT" "${COMPOSE_FILES[@]}" --env-file "$ENV_FILE" "$@"; }
 # One-shots must not include the sandbox overlay (long-running sandboxd + socket volume).
-dc_oneshot() { docker compose -p "$COMPOSE_PROJECT" "${COMPOSE_BASE_FILES[@]}" --env-file "$ENV_FILE" "$@"; }
+dc_oneshot() {
+  COMPOSE_IGNORE_ORPHANS=1 docker compose -p "$COMPOSE_PROJECT" "${COMPOSE_BASE_FILES[@]}" --env-file "$ENV_FILE" "$@"
+}
 
 [[ -f "$ENV_FILE" ]] || { err "env file not found: $ENV_FILE（从 production.env.example 复制并填值）"; exit 1; }
 

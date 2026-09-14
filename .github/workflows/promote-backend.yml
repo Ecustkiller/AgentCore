@@ -72,6 +72,7 @@ jobs:
           envs: DEPLOY_SHA
           script: |
             set -euo pipefail
-            HOME="${AGENTCORE_HOME:-/opt/agentcore}"
-            echo "${DEPLOY_SHA}" >"$HOME/.last-deployed-sha"
+            # Idempotent: finish-server.sh already writes this after /readyz 200.
+            HOME_DIR="${AGENTCORE_HOME:-/opt/agentcore}"
+            echo "${DEPLOY_SHA}" >"$HOME_DIR/.last-deployed-sha"
             echo "recorded .last-deployed-sha=${DEPLOY_SHA}"

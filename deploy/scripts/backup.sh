@@ -15,7 +15,7 @@
 # 配置（可经环境或 $AGENTCORE_HOME/.env 覆盖，部署与运维.md §8.2）：
 #   AGENTCORE_HOME   部署根目录          （默认 /opt/agentcore）
 #   BACKUP_DIR       备份落点            （默认 $AGENTCORE_HOME/backups）
-#   BACKUP_KEEP      保留最近几份        （默认 14，轮转删更旧的 backup-*）
+#   BACKUP_KEEP      保留最近几份        （默认 7；约 2C8G / 日备 ~2G 时 KEEP=14 会再穿 80% 水位）
 #   COMPOSE_PROJECT  compose 项目名      （默认 agentcore）
 #   AGENTCORE_DEPLOY_DIR / ENV_FILE / ENVF  见同目录 deploy-paths.sh
 #   PG_USER / PG_DB  库用户 / 库名       （默认 agentcore / agentcore）
@@ -31,8 +31,10 @@ fi
 . "$_ac_paths"
 unset _ac_paths
 BACKUP_DIR="${BACKUP_DIR:-$AGENTCORE_HOME/backups}"
-BACKUP_KEEP="${BACKUP_KEEP:-14}"
+BACKUP_KEEP="${BACKUP_KEEP:-7}"
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-agentcore}"
+# backup 不叠 sandbox overlay；忽略长驻 sandboxd，避免 Docker 喊 orphan。
+export COMPOSE_IGNORE_ORPHANS=1
 PG_USER="${PG_USER:-agentcore}"
 PG_DB="${PG_DB:-agentcore}"
 
