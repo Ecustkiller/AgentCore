@@ -112,7 +112,7 @@ def _must_not_hold_captain_return(
     outcome: RoundOutcome,
     finish_override_sink: list[FinishReason] | None,
 ) -> bool:
-    """Pause / error / cancel / LLM failure still close — do not listen-hold those."""
+    """Pause / error / cancel / interrupt / degraded still close — do not listen-hold those."""
     if outcome.llm_failed:
         return True
     if not finish_override_sink:
@@ -123,6 +123,7 @@ def _must_not_hold_captain_return(
         FinishReason.ERROR,
         FinishReason.CANCELLED,
         FinishReason.INTERRUPTED,
+        FinishReason.DEGRADED,
     }
 
 

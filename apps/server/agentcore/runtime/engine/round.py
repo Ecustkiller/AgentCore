@@ -426,7 +426,9 @@ def decide_no_tool_round(
     ``finish_reason=length`` with empty body skips the one-shot Continue.
 
     Captain + live coordinating team: ``Continue`` (listen), not ``Return`` — occupancy
-    stays this desk until the session closes. Workers are unaffected.
+    stays this desk until the session closes. Exception: ``finish_reason=length`` with
+    empty body still finalizes degraded (waiting will not grow the output). Workers
+    are unaffected.
 
     对话气泡不因 ``#rN`` / 悬空 ``[n]`` / 书目回炉；结构围栏与 CEO 交付结构闸仍可 Rework。
     """
@@ -435,7 +437,10 @@ def decide_no_tool_round(
         live_team_holds_captain_turn,
     )
 
-    if live_team_holds_captain_turn(role):
+    length_empty = (
+        not (outcome.content or "").strip() and outcome.finish_reason == "length"
+    )
+    if live_team_holds_captain_turn(role) and not length_empty:
         session = active_coordination()
         logger.info(
             "engine.coordination_hold_end",

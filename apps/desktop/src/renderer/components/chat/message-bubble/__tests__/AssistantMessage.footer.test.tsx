@@ -47,7 +47,33 @@ vi.mock("@/stores/conversation", async (importOriginal) => {
         currentConversationId: convSlice.currentConversationId,
         byId: convSlice.byId,
       }),
-    getActiveRuntime: () => ({ messages: [] }),
+    useLiveTailWriting: (messageId: string) => {
+      const id = convSlice.currentConversationId;
+      if (!id) return false;
+      const rt = convSlice.byId?.[id];
+      if (!rt) return false;
+      const writing =
+        rt.isGenerating ||
+        rt.turnPhase === "preflight" ||
+        rt.turnPhase === "streaming" ||
+        rt.turnPhase === "stopping";
+      if (!writing) return false;
+      for (let i = rt.messages.length - 1; i >= 0; i--) {
+        if (rt.messages[i].role === "assistant") {
+          return rt.messages[i].id === messageId;
+        }
+      }
+      return false;
+    },
+    getActiveRuntime: () => {
+      const id = convSlice.currentConversationId;
+      const slice = id ? convSlice.byId?.[id] : undefined;
+      return {
+        messages: slice?.messages ?? [],
+        isGenerating: slice?.isGenerating ?? false,
+        turnPhase: slice?.turnPhase ?? "idle",
+      };
+    },
     assistantProjectionId: (m: { id: string }) => m.id,
   };
 });

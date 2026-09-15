@@ -468,7 +468,7 @@ async def lifespan(app: FastAPI):
             with contextlib.suppress(asyncio.CancelledError):
                 await turn_lease_sweep_task
             turn_lease_sweep_task = None
-        from agentcore.runtime.turn.runs import salvage_turns_on_shutdown
+        from agentcore.runtime.turn.shutdown import salvage_turns_on_shutdown
 
         with contextlib.suppress(Exception):
             await salvage_turns_on_shutdown()

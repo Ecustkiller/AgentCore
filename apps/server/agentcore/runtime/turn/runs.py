@@ -16,7 +16,7 @@ Resulting lifecycle
 - **explicit stop** (``POST .../stop``) → :meth:`stop` cancels the run task, which
   unwinds through the turn's existing ``CancelledError`` salvage (finished team
   work is kept as an incomplete message).
-- **lifespan shutdown** → :func:`salvage_turns_on_shutdown` marks clean-cancel,
+- **lifespan shutdown** → :func:`agentcore.runtime.turn.shutdown.salvage_turns_on_shutdown` marks clean-cancel,
   cascade-stops every live run, awaits unwind (grace timeout), then force-releases
   leftover leases — never the sweeper orphan path.
 - **normal completion** → the task's done-callback drops it from the registry.
@@ -792,68 +792,3 @@ def _emit_activity_done(
 
 # Module-level singleton (single-worker posture, as approvals / interaction).
 turn_runs = TurnRunRegistry()
-
-
-async def salvage_turns_on_shutdown(*, timeout: float | None = None) -> None:
-    """Lifespan shutdown: interrupt live turns, await unwind, force-close leftovers.
-
-    Sets the process-wide shutdown flag first so any racing ``CancelledError``
-    (uvicorn teardown) takes the clean-close path instead of orphaning. Timed-out
-    runs are force-closed; lease is released only when close succeeds, otherwise
-    orphaned so the sweeper can retry (never leave a lease-less RUNNING).
-    """
-    from agentcore.config import settings
-
-    grace = float(timeout) if timeout is not None else float(settings.turn_shutdown_grace_seconds)
-    turn_runs.begin_shutdown_salvage()
-    leftovers = await turn_runs.stop_all_and_drain(timeout=grace)
-    if not leftovers:
-        return
-    from agentcore.runtime.leases import orphan_turn_lease, release_turn_lease
-    from agentcore.runtime.turn.closer import close_user_stop_turn
-
-    from .interrupt import (
-        TurnInterruptReason,
-        close_turn_interrupted,
-    )
-
-    for run in leftovers:
-        message_id = run.sink.message_id
-        if not message_id:
-            logger.warning(
-                "turn_run.shutdown_force_release",
-                conversation_id=run.conversation_id,
-                run_id=run.run_id,
-                released=False,
-                reason="missing_message_id",
-            )
-            continue
-        closed = False
-        with contextlib.suppress(Exception):
-            closed = await close_user_stop_turn(
-                sink=run.sink,
-                conversation_id=run.conversation_id,
-                trace_id="",
-                message_id=message_id,
-            )
-        if not closed:
-            with contextlib.suppress(Exception):
-                closed = await close_turn_interrupted(
-                    message_id=message_id,
-                    conversation_id=run.conversation_id,
-                    reason=TurnInterruptReason.USER_STOP,
-                    load_stream_state=True,
-                )
-        if closed:
-            await release_turn_lease(message_id)
-        else:
-            with contextlib.suppress(Exception):
-                await orphan_turn_lease(message_id)
-        logger.info(
-            "turn_run.shutdown_force_release",
-            conversation_id=run.conversation_id,
-            run_id=run.run_id,
-            message_id=message_id,
-            closed=closed,
-            released=bool(closed),
-        )

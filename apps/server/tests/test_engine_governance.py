@@ -1063,6 +1063,7 @@ async def test_length_empty_not_exempted_for_captain_coordination(monkeypatch):
             active=True,
             execution_id="e-len",
             has_unread_user_interjection=lambda: False,
+            user_stopped=False,
         ),
     )
     provider = _ModelRecordingProvider([[LLMChunk(finish_reason="length")]])

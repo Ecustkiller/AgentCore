@@ -463,7 +463,7 @@ async def test_shutdown_salvage_releases_lease_not_orphan(monkeypatch):
 @pytest.mark.asyncio
 async def test_salvage_turns_on_shutdown_force_releases_timeout(monkeypatch):
     """After grace timeout, leftovers are force-closed and lease-released (no orphan)."""
-    from agentcore.runtime.turn import runs as turn_runs_mod
+    from agentcore.runtime.turn.shutdown import salvage_turns_on_shutdown
 
     released: list[str] = []
     orphaned: list[str] = []
@@ -512,7 +512,7 @@ async def test_salvage_turns_on_shutdown_force_releases_timeout(monkeypatch):
 
     turn_runs.end_shutdown_salvage()
     try:
-        await turn_runs_mod.salvage_turns_on_shutdown(timeout=0.05)
+        await salvage_turns_on_shutdown(timeout=0.05)
         assert turn_runs.is_shutdown_salvage()
         assert closed == ["m-stuck"]
         assert released == ["m-stuck"]
@@ -527,7 +527,7 @@ async def test_salvage_turns_on_shutdown_force_releases_timeout(monkeypatch):
 @pytest.mark.asyncio
 async def test_salvage_turns_on_shutdown_close_failure_orphans(monkeypatch):
     """Shutdown force-close failure must orphan lease, not release."""
-    from agentcore.runtime.turn import runs as turn_runs_mod
+    from agentcore.runtime.turn.shutdown import salvage_turns_on_shutdown
 
     released: list[str] = []
     orphaned: list[str] = []
@@ -576,7 +576,7 @@ async def test_salvage_turns_on_shutdown_close_failure_orphans(monkeypatch):
 
     turn_runs.end_shutdown_salvage()
     try:
-        await turn_runs_mod.salvage_turns_on_shutdown(timeout=0.05)
+        await salvage_turns_on_shutdown(timeout=0.05)
         assert orphaned == ["m-fail-close"]
         assert not released
     finally:

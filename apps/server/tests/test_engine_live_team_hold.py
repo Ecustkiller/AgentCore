@@ -11,6 +11,7 @@ from agentcore.runtime.coordination.session import (
 from agentcore.runtime.engine.directive import Continue, Return
 from agentcore.runtime.engine.outcome import RoundOutcome
 from agentcore.runtime.engine.round import decide_no_tool_round
+from agentcore.runtime.events import FinishReason
 from agentcore.runtime.loop_controller import LoopController
 
 
@@ -63,6 +64,35 @@ def test_captain_empty_continues_while_team_live():
     try:
         directive = _decide("")
         assert isinstance(directive, Continue)
+    finally:
+        clear_active_coordination()
+
+
+def test_captain_length_empty_does_not_hold_while_team_live():
+    clear_active_coordination()
+    session = CoordinationSession(
+        execution_id="e-hold-length",
+        total_workers=1,
+        conversation_id="c-hold-length",
+    )
+    set_active_coordination(session)
+    try:
+        directive = decide_no_tool_round(
+            RoundOutcome(
+                content="",
+                reasoning="",
+                usage=TokenUsage(),
+                finish_reason="length",
+            ),
+            final_content="",
+            controller=_controller(),
+            annotate_citations=False,
+            citation_sink=None,
+            finish_guard_reworks=0,
+            role="captain",
+        )
+        assert isinstance(directive, Return)
+        assert directive.finish_reason is FinishReason.DEGRADED
     finally:
         clear_active_coordination()
 

@@ -11,10 +11,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from agentcore.conversation.common import preview
 from agentcore.conversation.turn_stats import turn_worker_stats
 from agentcore.core.log_context import get_log_value
 from agentcore.core.logging import get_logger
+from agentcore.core.text import clip_preview
 from agentcore.runtime.turn.latency import get_turn_latency
 
 logger = get_logger(__name__)
@@ -65,7 +65,7 @@ def log_chat_turn_complete(
         output_tokens=result.get("output_tokens", 0),
         reasoning_tokens=result.get("reasoning_tokens", 0),
         reply_chars=len(result.get("content") or ""),
-        reply_preview=preview(result.get("content") or ""),
+        reply_preview=clip_preview(result.get("content") or "", 200),
         delegated=delegated,
         workers=workers,
         boundary_yields=collab.get("boundary_yields", 0),
