@@ -99,10 +99,81 @@ describe("sanitizeDesktopLogRecord", () => {
   it("drops non-diagnostic events", () => {
     expect(
       sanitizeDesktopLogRecord({
-        event: "conversation.slice_diag",
+        event: "chat.message_send",
         fields: { action: "load_latest_window", conversation_id: "c1" },
       }),
     ).toBeNull();
+  });
+
+  it("keeps conversation.slice_diag open_decide warm flag", () => {
+    expect(
+      sanitizeDesktopLogRecord({
+        event: "conversation.slice_diag",
+        fields: {
+          action: "open_decide",
+          conversation_id: "c1",
+          warm: true,
+          message_count: 2,
+          is_generating: true,
+          has_more_after: false,
+          content: "用户提问不应出机",
+        },
+      }),
+    ).toEqual({
+      event: "conversation.slice_diag",
+      action: "open_decide",
+      conversation_id: "c1",
+      warm: true,
+      message_count: 2,
+      is_generating: true,
+      has_more_after: false,
+    });
+  });
+
+  it("keeps conversation.hydrate branch", () => {
+    expect(
+      sanitizeDesktopLogRecord({
+        event: "conversation.hydrate",
+        fields: {
+          conversation_id: "c1",
+          branch: "cloud",
+          sidecar_live: false,
+          cloud_live: false,
+          unsynced_count: 0,
+          paused_count: 0,
+          content: "用户提问不应出机",
+        },
+      }),
+    ).toEqual({
+      event: "conversation.hydrate",
+      conversation_id: "c1",
+      branch: "cloud",
+      sidecar_live: false,
+      cloud_live: false,
+      unsynced_count: 0,
+      paused_count: 0,
+    });
+  });
+
+  it("keeps send.assistant_placeholder reuse/mint ids", () => {
+    expect(
+      sanitizeDesktopLogRecord({
+        event: "send.assistant_placeholder",
+        fields: {
+          conversation_id: "c1",
+          optimistic_user_id: "u-opt",
+          assistant_id: "a-opt",
+          action: "reuse",
+          content: "用户提问不应出机",
+        },
+      }),
+    ).toEqual({
+      event: "send.assistant_placeholder",
+      conversation_id: "c1",
+      optimistic_user_id: "u-opt",
+      assistant_id: "a-opt",
+      action: "reuse",
+    });
   });
 
   it("keeps turn.stream_path overbridge reason fields", () => {

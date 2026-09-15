@@ -26,6 +26,8 @@ CHANNEL_REDIRECT_CODES: frozenset[str] = frozenset(
         "not_a_web_url",
         "url_not_workspace_path",
         "loopback_host",
+        "shell_fetch_redirect",
+        "shell_download_redirect",
     }
 )
 

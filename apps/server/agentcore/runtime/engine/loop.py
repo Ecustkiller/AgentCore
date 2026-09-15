@@ -108,6 +108,24 @@ def _ensure_assistant_so_far(messages: list[LLMMessage], content: str) -> None:
     messages.append(LLMMessage(role="assistant", content=content))
 
 
+def _must_not_hold_captain_return(
+    outcome: RoundOutcome,
+    finish_override_sink: list[FinishReason] | None,
+) -> bool:
+    """Pause / error / cancel / LLM failure still close — do not listen-hold those."""
+    if outcome.llm_failed:
+        return True
+    if not finish_override_sink:
+        return False
+    last = finish_override_sink[-1]
+    return last in {
+        FinishReason.PAUSED,
+        FinishReason.ERROR,
+        FinishReason.CANCELLED,
+        FinishReason.INTERRUPTED,
+    }
+
+
 def _should_hold_return_for_interjection(
     *,
     role: str,
@@ -115,10 +133,12 @@ def _should_hold_return_for_interjection(
     profile: ProfileParams,
     round_idx: int,
 ) -> bool:
-    """Captain no-tool RETURN with unread 插队 and a remaining round → hear this turn.
+    """Captain RETURN stays this turn: unread 插队, or live coordinating team.
 
     Does not abort the just-finished LLM stream. Workers never hold. No remaining
-    ``max_rounds`` slot → leftover 升队 at close (existing honesty path).
+    ``max_rounds`` slot → leftover 升队 at close (existing honesty path). Live team
+    hold is occupancy (session still active); ALL_COMPLETED closes the session
+    before the real ending is allowed to Return.
     """
     if role != "captain":
         return False
@@ -129,14 +149,9 @@ def _should_hold_return_for_interjection(
 
         if peek_count(steer_cid) > 0:
             return True
-    from agentcore.runtime.coordination.session import active_coordination
+    from agentcore.runtime.coordination.session import live_team_holds_captain_turn
 
-    session = active_coordination()
-    return bool(
-        session is not None
-        and session.active
-        and session.has_unread_user_interjection()
-    )
+    return live_team_holds_captain_turn(role)
 
 
 async def react_loop(
@@ -836,6 +851,7 @@ async def react_loop(
                         supports_tools=supports_tools,
                         turn_evidence_ledger=turn_evidence_ledger,
                         promotion_ledger=tool_context.promotion_ledger,
+                        role=role,
                     )
                     # Soft debate-commitment / audit-gate: captain wrap-up —
                     # discard the draft, inject nudge, continue (one-shot each).
@@ -947,18 +963,31 @@ async def react_loop(
                 expects_landing=expects_landing,
             )
             if applied.action == "return":
-                if _should_hold_return_for_interjection(
+                if not _must_not_hold_captain_return(
+                    outcome, finish_override_sink
+                ) and _should_hold_return_for_interjection(
                     role=role,
                     steer_cid=steer_cid,
                     profile=profile,
                     round_idx=round_idx,
                 ):
                     held = applied.content or final_content
-                    logger.info(
-                        "engine.steer_hold_return",
-                        round=round_idx,
-                        conversation_id=steer_cid,
+                    from agentcore.runtime.coordination.session import (
+                        live_team_holds_captain_turn,
                     )
+
+                    if live_team_holds_captain_turn(role):
+                        logger.info(
+                            "engine.coordination_hold_end",
+                            round=round_idx,
+                            via="return",
+                        )
+                    else:
+                        logger.info(
+                            "engine.steer_hold_return",
+                            round=round_idx,
+                            conversation_id=steer_cid,
+                        )
                     _ensure_assistant_so_far(messages, held)
                     final_content = held
                     if applied.reasoning:
@@ -979,6 +1008,15 @@ async def react_loop(
             finish_guard_reworks = applied.finish_guard_reworks
             if applied.tool_defs_changed:
                 tool_defs = applied.tool_defs
+            if (
+                applied.action == "continue"
+                and not outcome.has_tool_calls
+                and role == "captain"
+                and (outcome.content or "").strip()
+            ):
+                _ensure_assistant_so_far(
+                    messages, applied.final_content or final_content
+                )
             # Finalize-path govern may also latch delivery-idle narrow
             # (explicit construction only; factory 交文件空转已关).
             if (

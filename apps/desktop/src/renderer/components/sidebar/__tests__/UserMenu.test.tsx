@@ -61,6 +61,6 @@ describe("UserMenu · 折叠可达性", () => {
     useSidebarStore.setState({ collapsed: false });
     renderMenu();
     expect(screen.getByRole("button", { name: "登出" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "更多" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "设置" })).toBeTruthy();
   });
 });

@@ -1,5 +1,6 @@
 import {
   isCoordinationActive,
+  isLiveCoordinatingTurn,
   resolveDefaultDelivery,
 } from "@/lib/composerDelivery";
 import { useConversationStore } from "@/stores/conversation";
@@ -52,6 +53,26 @@ describe("composerDelivery", () => {
       },
     });
     expect(isCoordinationActive(CID)).toBe(true);
+    expect(isLiveCoordinatingTurn(CID)).toBe(true);
     expect(resolveDefaultDelivery(true, CID)).toBe("steer");
+  });
+
+  it("灯灭但协作图还在转 → 仍是这桌（非空闲）", () => {
+    useConversationStore.getState().createAssistantMessage(CID);
+    const messages = useConversationStore.getState().byId[CID]?.messages ?? [];
+    const aid = messages[0]?.id;
+    expect(aid).toBeTruthy();
+    useExecutionStore.getState().startExecution(
+      {
+        id: "e-live",
+        planType: "multi_agent",
+        taskSummary: "t",
+        agents: [{ id: "a1", role: "r" }],
+        runs: [{ id: "r1", agentId: "a1", task: "t", dependsOn: [] }],
+      },
+      aid as string,
+    );
+    expect(isLiveCoordinatingTurn(CID)).toBe(true);
+    expect(resolveDefaultDelivery(false, CID)).toBe("steer");
   });
 });

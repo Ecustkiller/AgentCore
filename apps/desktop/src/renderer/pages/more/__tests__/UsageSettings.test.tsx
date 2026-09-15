@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 /**
- * 用量「将尽」走 primary（需要你留意），刷新失败条保持灰。
+ * 用量主卡答「还剩」；将尽走 primary；日帽仅更紧时占据主卡。
  */
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { type UsageSummary, getUsageSummary } from "@/services/usage";
 import { useUsageStore } from "@/stores/usage";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/usage", async (importOriginal) => ({
@@ -17,8 +18,14 @@ import { UsageSettings } from "../UsageSettings";
 
 const mockGet = vi.mocked(getUsageSummary);
 
-function usageBd(input = 0, output = 0) {
-  return { input, output, reasoning: 0, cache_hit: 0, cache_miss: 0 };
+function usageBd(input = 0, output = 0, cacheHit = 0, cacheMiss = 0) {
+  return {
+    input,
+    output,
+    reasoning: 0,
+    cache_hit: cacheHit,
+    cache_miss: cacheMiss,
+  };
 }
 
 function costBd(total = 0) {
@@ -37,17 +44,25 @@ function makeSummary(
   over: {
     monthCost?: number;
     monthLimit?: number;
+    dayCost?: number;
+    dayCostLimit?: number;
     dayTokens?: number;
     dayTokenLimit?: number;
+    dayRequests?: number;
+    dayReqLimit?: number;
+    cacheHit?: number;
+    cacheMiss?: number;
+    billingMode?: UsageSummary["billing_mode"];
   } = {},
 ): UsageSummary {
   const monthCost = over.monthCost ?? 1_000_000_000;
   const monthLimit = over.monthLimit ?? 10_000_000_000;
+  const input = over.dayTokens ?? 100;
   return {
     today: {
-      usage: usageBd(over.dayTokens ?? 100, 0),
-      cost: costBd(0),
-      requests: 1,
+      usage: usageBd(input, 0, over.cacheHit ?? 0, over.cacheMiss ?? 0),
+      cost: costBd(over.dayCost ?? 0),
+      requests: over.dayRequests ?? 1,
     },
     month: {
       usage: usageBd(),
@@ -58,29 +73,21 @@ function makeSummary(
     quota: {
       daily_tokens: over.dayTokenLimit ?? 1_000_000,
       monthly_cost_nano: monthLimit,
-      daily_cost_nano: 0,
-      daily_requests: 200,
+      daily_cost_nano: over.dayCostLimit ?? 0,
+      daily_requests: over.dayReqLimit ?? 200,
     },
-    billing_mode: "platform",
+    billing_mode: over.billingMode ?? "platform",
   };
 }
 
 function renderPage() {
   return render(
-    <TooltipProvider>
-      <UsageSettings />
-    </TooltipProvider>,
+    <MemoryRouter>
+      <TooltipProvider>
+        <UsageSettings />
+      </TooltipProvider>
+    </MemoryRouter>,
   );
-}
-
-function monthMeterPct() {
-  const label = screen.getByText("本月额度");
-  return label.nextElementSibling;
-}
-
-function monthMeterFill() {
-  const label = screen.getByText("本月额度");
-  return label.parentElement?.nextElementSibling?.firstElementChild;
 }
 
 beforeEach(() => {
@@ -107,13 +114,15 @@ describe("UsageSettings 将尽 tone", () => {
     const hint = await screen.findByText(/接近本月额度/);
     expect(hint.className).toContain("text-primary");
     expect(hint.className).not.toContain("destructive");
+    expect(screen.getByText("¥2.00")).toBeTruthy();
 
-    const pct = monthMeterPct();
-    expect(pct?.textContent).toBe("80%");
-    expect(pct?.className).toContain("text-primary");
-    expect(pct?.className).not.toContain("destructive");
+    const pct = screen.getByText("80%");
+    expect(pct.className).toContain("text-primary");
+    expect(pct.className).not.toContain("destructive");
 
-    const fill = monthMeterFill();
+    const fill = screen.getByRole("meter", {
+      name: "本月额度还剩",
+    }).firstElementChild;
     expect(fill?.className).toContain("bg-primary");
     expect(fill?.className).not.toContain("destructive");
   });
@@ -124,14 +133,14 @@ describe("UsageSettings 将尽 tone", () => {
     );
     renderPage();
 
-    await waitFor(() => expect(screen.getByText("本月额度")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("本月额度还剩")).toBeTruthy());
     expect(screen.queryByText(/接近本月额度/)).toBeNull();
+    expect(screen.getByText("¥9.00")).toBeTruthy();
 
-    const pct = monthMeterPct();
-    expect(pct?.textContent).toBe("10%");
-    expect(pct?.className).toContain("text-muted-foreground");
-    expect(pct?.className).not.toContain("text-primary");
-    expect(pct?.className).not.toContain("destructive");
+    const pct = screen.getByText("10%");
+    expect(pct.className).toContain("text-muted-foreground");
+    expect(pct.className).not.toContain("text-primary");
+    expect(pct.className).not.toContain("destructive");
   });
 
   it("refresh failure banner stays muted, not destructive", async () => {
@@ -149,5 +158,74 @@ describe("UsageSettings 将尽 tone", () => {
     expect(msg.className).not.toContain("destructive");
     expect(msg.parentElement?.className).toContain("bg-muted/40");
     expect(msg.parentElement?.className).not.toContain("destructive");
+  });
+});
+
+describe("UsageSettings 主卡与分层", () => {
+  it("uses the daily cap as the hero when it is the tighter remainder", async () => {
+    mockGet.mockResolvedValue(
+      makeSummary({
+        monthCost: 40_000_000_000,
+        monthLimit: 50_000_000_000,
+        dayCost: 8_000_000_000,
+        dayCostLimit: 10_000_000_000,
+      }),
+    );
+    renderPage();
+
+    await screen.findByText("今日额度还剩");
+    expect(screen.getByText("¥2.00")).toBeTruthy();
+    expect(screen.getByText(/本月还剩 ¥10.00/)).toBeTruthy();
+    expect(screen.queryByText("本月额度还剩")).toBeNull();
+    expect(screen.getByText(/接近今日额度/)).toBeTruthy();
+  });
+
+  it("keeps the monthly hero when daily remaining is not tighter", async () => {
+    mockGet.mockResolvedValue(
+      makeSummary({
+        monthCost: 360_000_000,
+        monthLimit: 50_000_000_000,
+        dayCost: 10_000_000,
+        dayCostLimit: 50_000_000_000,
+      }),
+    );
+    renderPage();
+
+    await screen.findByText("本月额度还剩");
+    expect(screen.getByText("¥49.64")).toBeTruthy();
+    expect(screen.queryByText("今日额度还剩")).toBeNull();
+    expect(screen.queryByRole("meter", { name: "今日额度还剩" })).toBeNull();
+  });
+
+  it("does not draw an unlimited token meter or repeat cost rows", async () => {
+    mockGet.mockResolvedValue(
+      makeSummary({
+        dayTokenLimit: 0,
+        cacheHit: 0,
+        cacheMiss: 50,
+      }),
+    );
+    renderPage();
+
+    await screen.findByText("本月额度还剩");
+    expect(screen.queryByText("不限")).toBeNull();
+    expect(screen.queryByRole("meter", { name: "今日 tokens" })).toBeNull();
+    expect(screen.queryByText("今日成本")).toBeNull();
+    expect(screen.queryByText("本月成本")).toBeNull();
+    expect(screen.queryByText("请求数")).toBeNull();
+    expect(screen.queryByText(/命中率/)).toBeNull();
+    expect(screen.getByText("花费")).toBeTruthy();
+    expect(screen.getByText("tokens")).toBeTruthy();
+    expect(screen.getByText("输入 / 输出")).toBeTruthy();
+  });
+
+  it("shows cache hit rate only when there was a hit", async () => {
+    mockGet.mockResolvedValue(
+      makeSummary({ dayTokens: 100, cacheHit: 20, cacheMiss: 80 }),
+    );
+    renderPage();
+
+    await screen.findByText("今日缓存命中率");
+    expect(screen.getByText("20%")).toBeTruthy();
   });
 });

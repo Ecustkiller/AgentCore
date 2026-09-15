@@ -62,19 +62,29 @@ export function InlineInput({
   onSubmit,
   onCancel,
   ariaLabel,
+  commitOnBlur = false,
 }: {
   initial: string;
   onSubmit: (value: string) => void;
   onCancel: () => void;
   ariaLabel?: string;
+  /** Rename / create-then-rename: click away keeps the typed name. Ghost create rows leave this off. */
+  commitOnBlur?: boolean;
 }) {
   const [value, setValue] = useState(initial);
   const ref = useRef<HTMLInputElement>(null);
+  const done = useRef(false);
 
   useEffect(() => {
     ref.current?.focus();
     ref.current?.select();
   }, []);
+
+  const finish = (fn: () => void) => {
+    if (done.current) return;
+    done.current = true;
+    fn();
+  };
 
   return (
     <input
@@ -84,10 +94,15 @@ export function InlineInput({
       onChange={(e) => setValue(e.target.value)}
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
-        if (e.key === "Enter") onSubmit(value);
-        else if (e.key === "Escape") onCancel();
+        if (e.key === "Enter") finish(() => onSubmit(value));
+        else if (e.key === "Escape") finish(onCancel);
       }}
-      onBlur={onCancel}
+      onBlur={() =>
+        finish(() => {
+          if (commitOnBlur) onSubmit(value);
+          else onCancel();
+        })
+      }
       className="my-0.5 h-5 min-w-0 flex-1 rounded border border-primary/50 bg-background px-1 text-xs outline-none"
     />
   );

@@ -21,7 +21,8 @@ always include synthetic ``traffic=eval|test`` lines. Failed turns may already
 have ``logs/packs/<trace_id>/`` (journal-only); ``--trace`` prints **Auto pack**
 when that folder is present (``--json``: ``meta.failure_pack``). Message bodies live in
 Postgres; turn traces live in logs/dev.jsonl (+ rotation backups) or
-``--export-dir`` (``events.jsonl`` + joinable ``turn_metrics.jsonl`` /
+``--export-dir`` (``events.jsonl`` is the current API json-file ring, not a
+``--days`` archive, plus joinable ``turn_metrics.jsonl`` /
 ``cost_events.jsonl``; journal is redacted by default after ``pnpm sync:logs``).
 See .cursor/rules/conversation-logs.mdc.
 """
@@ -40,7 +41,12 @@ _BARE_HEX32_RE = re.compile(r"^[0-9a-fA-F]{32}$")
 _EMPTY_HIT_SYNC_HINT = (
     "本地无命中且像线上 → 先 `pnpm sync:logs`，再加 "
     "`--export-dir ../../logs/prod-export`。\n"
-    "ID 形态：无连字符 32-hex = trace_id；带连字符 UUID = conversation_id。"
+    "ID 形态：无连字符 32-hex = trace_id；带连字符 UUID = conversation_id。\n"
+    "events.jsonl 是 API 容器 json-file 环（10m×5），不是 --days 天档案。"
+)
+_EMPTY_HIT_EXPORT_HINT = (
+    "export 的 events.jsonl 无此 trace：那是当前 stdout 环（json-file 10m×5），"
+    "不是 --days 天档案。查同目录 journal / messages / cost；仍空 → 停并报空。"
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -169,9 +175,9 @@ def normalize_trace_id_arg(value: str) -> str:
 
 
 def format_empty_hit_hint(*, using_export_dir: bool) -> str:
-    """Guidance appended on empty hits when not already querying an export dir."""
+    """Guidance appended on empty log-event hits (local vs already-synced export)."""
     if using_export_dir:
-        return ""
+        return _EMPTY_HIT_EXPORT_HINT
     return _EMPTY_HIT_SYNC_HINT
 
 

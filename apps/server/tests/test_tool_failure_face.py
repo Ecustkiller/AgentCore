@@ -862,6 +862,8 @@ def test_pre_registered_codes_for_incoming_paths_have_copy():
         "loopback_host",
         "not_a_web_url",
         "url_not_workspace_path",
+        "shell_fetch_redirect",
+        "shell_download_redirect",
         "workspace_io_error",
     ):
         assert code in NO_USER_FACE_CODES

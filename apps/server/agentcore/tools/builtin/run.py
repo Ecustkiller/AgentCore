@@ -27,6 +27,13 @@ from agentcore.tools.builtin.run_process import (
     process_op_timeout_seconds,
 )
 from agentcore.tools.builtin.run_short import execute_short
+from agentcore.tools.builtin.shell_http import (
+    SHELL_DOWNLOAD_REDIRECT,
+    SHELL_FETCH_REDIRECT,
+    ShellHttpHit,
+    shell_http_match,
+    shell_http_redirect_message,
+)
 from agentcore.tools.builtin.run_verify import (
     _VERIFY_DISASTER_SECONDS,
     _is_allowed_verify_argv,
@@ -186,6 +193,10 @@ class RunTool:
 
         if action in _PROCESS_ACTIONS:
             return await self._dispatch_process(action, arguments, context)
+        if command:
+            http_hit = shell_http_match(command)
+            if http_hit is not None:
+                return _shell_http_redirect(http_hit)
         if _wants_background(arguments):
             if not command:
                 return _arg_error("background 启动需要 command")
@@ -300,6 +311,25 @@ class RunTool:
             context,
             location=self._location,
         )
+
+
+def _shell_http_redirect(hit: ShellHttpHit) -> ToolResult:
+    code = SHELL_FETCH_REDIRECT if hit.dest == "web_fetch" else SHELL_DOWNLOAD_REDIRECT
+    return ToolResult(
+        tool_call_id="",
+        success=False,
+        output="",
+        error=shell_http_redirect_message(hit),
+        duration_ms=0,
+        contract_failure=True,
+        failure_code=code,
+        metadata={
+            "code": code,
+            "matched": hit.matched,
+            "url": hit.url,
+            "dest": hit.dest,
+        },
+    )
 
 
 def _arg_error(error: str) -> ToolResult:

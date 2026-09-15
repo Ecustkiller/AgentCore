@@ -21,6 +21,8 @@ export const CHANNEL_REDIRECT_FACE: Record<
   not_a_web_url: { label: "改用读文件", toolName: "file_read" },
   url_not_workspace_path: { label: "改用读网页", toolName: "web_fetch" },
   loopback_host: { label: "改用本机查看", toolName: "browser" },
+  shell_fetch_redirect: { label: "改用读网页", toolName: "web_fetch" },
+  shell_download_redirect: { label: "改用下载", toolName: "download_url" },
 };
 
 export function isChannelRedirectCode(

@@ -86,6 +86,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='archive_extract.done'),
     EventSpec(name='ask_user.card_rejected'),
     EventSpec(name='ask_user.list_arg_rejected'),
+    EventSpec(name='ask_user.not_exclusive'),
     EventSpec(
         name='ask_user.option_label_rejected',
         description='历史兼容：曾拒选项名含「（推荐）」等倾向标记；现倾向写入名末，不再发此事件',
@@ -1269,6 +1270,7 @@ EVENTS: list[EventSpec] = [
     ),
     EventSpec(name='engine.convergence_finalize'),
     EventSpec(name='engine.coord_inject'),
+    EventSpec(name='engine.coordination_hold_end'),
     EventSpec(name='engine.coordination_listen'),
     EventSpec(
         name='engine.debate_gate_nudge',
@@ -2042,6 +2044,7 @@ EVENTS: list[EventSpec] = [
         },
     ),
     EventSpec(name='pipeline.resume_initial_seq_fallback'),
+    EventSpec(name='pipeline.resume_open_tool_calls'),
     EventSpec(name='pipeline.resume_re_suspended'),
     EventSpec(name='pipeline.resume_rehydrated'),
     EventSpec(name='pipeline.resume_settle_post_delegate'),

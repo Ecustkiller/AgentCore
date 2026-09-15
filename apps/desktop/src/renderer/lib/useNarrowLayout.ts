@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-/** AppShell 收成 4-tab + 抽屉 + sheet 的视口上限（含）。权威 → 前端技术 §五。 */
+/** AppShell 收成 overlay 侧栏 + sheet 的视口上限（含）。权威 → 前端技术 §五。 */
 export const NARROW_MAX_WIDTH = 767;
 
 const NARROW_QUERY = `(max-width: ${NARROW_MAX_WIDTH}px)`;
@@ -27,7 +27,7 @@ export function useNarrowLayout(): boolean {
   return narrow;
 }
 
-/** IM 线程 / 设置子页 / 全屏图 / 预览：藏窄屏底栏与顶栏。 */
+/** IM 线程 / 设置子页 / 全屏图 / 预览：藏窄屏顶栏。 */
 export function shouldHideNarrowChrome(pathname: string): boolean {
   if (pathname === "/preview" || pathname.startsWith("/preview/")) return true;
   if (pathname === "/float" || pathname.startsWith("/float")) return true;
@@ -38,9 +38,9 @@ export function shouldHideNarrowChrome(pathname: string): boolean {
   return false;
 }
 
-/** 草稿 `/`、会话 `/conversations/:id`、会话管理 `/conversations`。 */
+/** 草稿 `/`、会话 `/conversations/:id`。 */
 export function isNarrowChatRoute(pathname: string): boolean {
-  if (pathname === "/" || pathname === "/conversations") return true;
+  if (pathname === "/") return true;
   return (
     /^\/conversations\/[^/]+$/.test(pathname) && !pathname.includes("/turn/")
   );

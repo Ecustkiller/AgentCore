@@ -17,6 +17,7 @@ import {
   conversationStillWriting,
   getActiveRuntime,
   getRuntime,
+  liveTailWritingForMessage,
   useConversationStore,
 } from "../conversation";
 import { execRuntime, useExecutionStore } from "../execution";
@@ -337,6 +338,16 @@ describe("conversation store", () => {
 
       store().setTurnPhase("completed", "a");
       expect(conversationStillWriting(getRuntime("a"))).toBe(false);
+    });
+
+    it("liveTailWritingForMessage is the last assistant while still writing", () => {
+      store().switchConversation("a");
+      const aid = store().createAssistantMessage();
+      expect(liveTailWritingForMessage(getRuntime("a"), aid)).toBe(true);
+      expect(liveTailWritingForMessage(getRuntime("a"), "other")).toBe(false);
+      store().setGenerating(false, "a");
+      store().updateMessage(aid, { isStreaming: false }, "a");
+      expect(liveTailWritingForMessage(getRuntime("a"), aid)).toBe(false);
     });
   });
 

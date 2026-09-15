@@ -35,13 +35,10 @@ import { ShareConversationDialog } from "../conversation/ShareConversationDialog
 import { BorrowToCloudDialogHost } from "../files/BorrowToCloudDialog";
 import { ConnectGitDialogHost } from "../files/CloneRepoDialog";
 import { ImportToCloudDialogHost } from "../files/ImportToCloudDialog";
-import { CreateFolderMenuHost } from "../folders/CreateFolderMenu";
 import { Sidebar } from "../sidebar/Sidebar";
 import { MergeLandingReviewHost } from "../workspace/MergeLandingReview";
 import { CommandPalette } from "./CommandPalette";
 import { ForceUpdateGate } from "./ForceUpdateGate";
-import { NarrowConversationDrawer } from "./NarrowConversationDrawer";
-import { NarrowTabBar } from "./NarrowTabBar";
 import { NarrowTopBar } from "./NarrowTopBar";
 import { OutdatedAndroidBanner } from "./OutdatedAndroidBanner";
 import { ProductNoticeBanner } from "./ProductNoticeBanner";
@@ -60,7 +57,8 @@ export function AppShell() {
 }
 
 function AppShellFrame() {
-  const { isNarrow } = useNarrowLayoutState();
+  const { isNarrow, conversationDrawerOpen, setConversationDrawerOpen } =
+    useNarrowLayoutState();
   // 窄屏 / Capacitor：不上 OS/应用内浮窗（产品页单树；勿从 capabilities 引 isNativeRuntime）。
   const floatsDisabled = isNarrow || window.__NATIVE__ === true;
   // Apply the persisted theme to the DOM and keep it in sync with the OS while
@@ -72,6 +70,16 @@ function AppShellFrame() {
     if (!floatsDisabled) return;
     useSidePanelStore.getState().clearFloats();
   }, [floatsDisabled]);
+
+  useEffect(() => {
+    if (!isNarrow || !conversationDrawerOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setConversationDrawerOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isNarrow, conversationDrawerOpen, setConversationDrawerOpen]);
 
   // Warm the grouped query (folders + conversations) at the shell on mount so
   // the sidebar list is ready before it renders — even if the sidebar starts
@@ -186,7 +194,7 @@ function AppShellFrame() {
   }, []);
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden">
+    <div className="relative flex h-screen w-screen flex-col overflow-hidden">
       {!webClient && !isNarrow && <TitleBar />}
       <WorkspaceChannelBanner />
       <OutdatedAndroidBanner />
@@ -200,17 +208,25 @@ function AppShellFrame() {
           {/* 浮窗壳：宽屏桌面常挂（UX §十，⊥ SidePanel.open）；窄屏 / Capacitor 不挂。 */}
           {!floatsDisabled && <SidePanelFloatHost />}
         </main>
-        <NarrowConversationDrawer />
       </div>
 
-      <NarrowTabBar />
+      {isNarrow && conversationDrawerOpen && !hideSidebar && (
+        <div className="absolute inset-0 z-40">
+          <button
+            type="button"
+            className="absolute inset-0 bg-overlay"
+            aria-label="关闭侧栏"
+            onClick={() => setConversationDrawerOpen(false)}
+          />
+          <Sidebar overlay onDismiss={() => setConversationDrawerOpen(false)} />
+        </div>
+      )}
 
       <ProductNoticeModal />
       <UpdateAvailableDialog />
       <ForceUpdateGate />
       <CommandPalette />
       <ShareConversationDialog />
-      <CreateFolderMenuHost />
       <ConnectGitDialogHost />
       <ImportToCloudDialogHost />
       <BorrowToCloudDialogHost />

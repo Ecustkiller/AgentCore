@@ -135,6 +135,7 @@ export function FileTreeRow(props: FileTreeRowProps) {
           >
             <InlineInput
               initial={node.name}
+              commitOnBlur
               onSubmit={(v) => props.onSubmitRename(node.path, v)}
               onCancel={props.onCancelRename}
             />
@@ -199,6 +200,7 @@ export function FileTreeRow(props: FileTreeRowProps) {
         <InlineRow indent={indent} icon={null}>
           <InlineInput
             initial={node.name}
+            commitOnBlur
             onSubmit={(v) => props.onSubmitRename(node.path, v)}
             onCancel={props.onCancelRename}
           />

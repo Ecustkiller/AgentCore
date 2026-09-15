@@ -7,7 +7,6 @@ import {
   journalHydrateIdentityEqual,
 } from "@/components/graph/journalHydrate";
 import { executionGraphCapabilities } from "@/components/graph/planCapabilities";
-import { ContextualTip } from "@/components/onboarding/ContextualTip";
 import { ensureFullMessageRuns } from "@/services/messages";
 import { useConversationStore } from "@/stores/conversation";
 import { useStreamAwareDisclosure } from "@/stores/disclosure";
@@ -158,34 +157,32 @@ export function InlineTeamGraph({
 
   return (
     <ExecutionScopeContext.Provider value={messageId}>
-      <ContextualTip tipId="inline_team_graph" placement="top" active>
-        <div
-          ref={setHostNode}
-          className="animate-task-card-enter mb-3 overflow-hidden rounded-xl border border-border bg-card"
-        >
-          {/* 辩论全过程 / 版本对比等「过程产物」不再内联聊天——它们归全屏放大态（统一辩论室 /
-              统一「对比」视图），聊天正文状态条只留战绩 + 入口 CTA
-              （协作图与双视图UX.md §六 两个入口：聊天内嵌 ⇄ 全屏放大）。
-              prev_execution_id 协议链仍在，用户面不画回链铬条。 */}
-          <StatusStrip
-            execution={execution}
-            expanded={expanded}
-            onToggle={() => setExpanded(!expanded)}
-            onMaximize={openInCanvas}
-          />
-          {expanded && (
-            <div
-              className="w-full select-none border-t border-border"
-              style={{ height: graphHeight }}
-              aria-hidden={!mountHost}
-            >
-              {mountHost ? (
-                <GraphArea messageId={messageId} onMeasure={onMeasure} />
-              ) : null}
-            </div>
-          )}
-        </div>
-      </ContextualTip>
+      <div
+        ref={setHostNode}
+        className="animate-task-card-enter mb-3 overflow-hidden rounded-xl border border-border bg-card"
+      >
+        {/* 辩论全过程 / 版本对比等「过程产物」不再内联聊天——它们归全屏放大态（统一辩论室 /
+            统一「对比」视图），聊天正文状态条只留战绩 + 入口 CTA
+            （协作图与双视图UX.md §六 两个入口：聊天内嵌 ⇄ 全屏放大）。
+            prev_execution_id 协议链仍在，用户面不画回链铬条。 */}
+        <StatusStrip
+          execution={execution}
+          expanded={expanded}
+          onToggle={() => setExpanded(!expanded)}
+          onMaximize={openInCanvas}
+        />
+        {expanded && (
+          <div
+            className="w-full select-none border-t border-border"
+            style={{ height: graphHeight }}
+            aria-hidden={!mountHost}
+          >
+            {mountHost ? (
+              <GraphArea messageId={messageId} onMeasure={onMeasure} />
+            ) : null}
+          </div>
+        )}
+      </div>
     </ExecutionScopeContext.Provider>
   );
 }

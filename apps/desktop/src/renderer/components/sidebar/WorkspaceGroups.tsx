@@ -42,7 +42,11 @@ import { useFolderGroupReorder } from "./useFolderGroupReorder";
  * archive behavior. Group headers expose folder actions via
  * {@link WorkspaceGroupHeader} (header receives full folder members incl. pinned).
  */
-export function WorkspaceGroups() {
+export function WorkspaceGroups({
+  onActivate,
+}: {
+  onActivate?: () => void;
+} = {}) {
   const groups = useWorkspaceGroups();
   const sharedGroups = useSharedWithMeWorkspaceGroups();
   const conversations = useConversations();
@@ -117,15 +121,17 @@ export function WorkspaceGroups() {
                       conversation={c}
                       groupIsLocal={groupIsLocal}
                       className="px-2"
+                      onActivate={onActivate}
                     />
                   ))}
                   {overflow > 0 && (
                     <SurfaceRowButton
-                      onClick={() =>
+                      onClick={() => {
                         navigate("/conversations", {
                           state: { focusFolderId: folder.id },
-                        })
-                      }
+                        });
+                        onActivate?.();
+                      }}
                       className="h-8 px-2 text-xs text-sidebar-foreground/50 hover:text-sidebar-foreground"
                     >
                       <MoreHorizontal size={13} className="shrink-0" />
@@ -170,15 +176,17 @@ export function WorkspaceGroups() {
                           conversation={c}
                           groupIsLocal={groupIsLocal}
                           className="px-2"
+                          onActivate={onActivate}
                         />
                       ))}
                       {overflow > 0 && (
                         <SurfaceRowButton
-                          onClick={() =>
+                          onClick={() => {
                             navigate("/conversations", {
                               state: { focusFolderId: folder.id },
-                            })
-                          }
+                            });
+                            onActivate?.();
+                          }}
                           className="h-8 px-2 text-xs text-sidebar-foreground/50 hover:text-sidebar-foreground"
                         >
                           <MoreHorizontal size={13} className="shrink-0" />

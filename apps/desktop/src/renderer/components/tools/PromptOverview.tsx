@@ -58,16 +58,16 @@ export function PromptOverview({
   connectors,
   connectorError,
   showConnectors,
-  creatingFolder,
   busy,
   listings = [],
   installedListings = [],
+  renamingFolderId = null,
   onOpenItem,
   onOpenUpdates,
   onCreateMine,
-  onStartCreateFolder,
-  onSubmitCreateFolder,
-  onCancelCreateFolder,
+  onCreateFolder,
+  onSubmitRenameFolder,
+  onCancelRenameFolder,
   onAddConnector,
   onAcceptAlwaysDrag,
   onDropAlways,
@@ -83,16 +83,16 @@ export function PromptOverview({
   connectors: PromptOverviewConnector[];
   connectorError: string | null;
   showConnectors: boolean;
-  creatingFolder: boolean;
   busy: boolean;
   listings?: SkillStoreListing[];
   installedListings?: SkillStoreListing[];
+  renamingFolderId?: string | null;
   onOpenItem: (id: string) => void;
   onOpenUpdates: () => void;
   onCreateMine: () => void;
-  onStartCreateFolder: () => void;
-  onSubmitCreateFolder: (name: string) => void;
-  onCancelCreateFolder: () => void;
+  onCreateFolder: () => void;
+  onSubmitRenameFolder: (id: string, name: string) => void;
+  onCancelRenameFolder: () => void;
   onAddConnector: (() => void) | null;
   onAcceptAlwaysDrag: (event: DragEvent) => void;
   onDropAlways: (event: DragEvent) => void;
@@ -205,24 +205,13 @@ export function PromptOverview({
             description={PROMPT_SHELF_AFFORDANCE.createEntry.description}
             onClick={busy ? undefined : onCreateMine}
           />
-          {creatingFolder ? (
-            <div className="flex min-h-[7.5rem] items-center rounded-xl border border-border px-4">
-              <InlineInput
-                initial=""
-                ariaLabel="夹名称"
-                onSubmit={onSubmitCreateFolder}
-                onCancel={onCancelCreateFolder}
-              />
-            </div>
-          ) : (
-            <CatalogTile
-              icon={<FolderPlus size={18} />}
-              colorVar={artifactColorVar("guidelines")}
-              title={PROMPT_SHELF_AFFORDANCE.createFolder.title}
-              description={PROMPT_SHELF_AFFORDANCE.createFolder.description}
-              onClick={busy ? undefined : onStartCreateFolder}
-            />
-          )}
+          <CatalogTile
+            icon={<FolderPlus size={18} />}
+            colorVar={artifactColorVar("guidelines")}
+            title={PROMPT_SHELF_AFFORDANCE.createFolder.title}
+            description={PROMPT_SHELF_AFFORDANCE.createFolder.description}
+            onClick={busy ? undefined : onCreateFolder}
+          />
         </div>
 
         {rail.folders.length > 0 ? (
@@ -233,7 +222,23 @@ export function PromptOverview({
               return (
                 <ShelfBlock
                   key={folder.id}
-                  title={folder.name}
+                  title={
+                    renamingFolderId &&
+                    renamingFolderId === folder.documentId ? (
+                      <InlineInput
+                        initial={folder.name}
+                        ariaLabel="夹名称"
+                        commitOnBlur
+                        onSubmit={(value) => {
+                          if (!folder.documentId) return;
+                          onSubmitRenameFolder(folder.documentId, value);
+                        }}
+                        onCancel={onCancelRenameFolder}
+                      />
+                    ) : (
+                      folder.name
+                    )
+                  }
                   highlighted={highlighted}
                   onDragOver={(event) => onAcceptFolderDrag(event, folder)}
                   onDrop={(event) => onDropFolder(event, folder)}
@@ -443,7 +448,7 @@ function TileShelf({
   title,
   children,
 }: {
-  title: string;
+  title: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -463,7 +468,7 @@ function ShelfBlock({
   onDrop,
   children,
 }: {
-  title: string;
+  title: ReactNode;
   testId?: string;
   highlighted: boolean;
   className?: string;

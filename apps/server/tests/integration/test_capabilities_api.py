@@ -77,10 +77,10 @@ async def test_capabilities_lists_system_skills_with_body(client):
         assert skill["blurb"]
         assert skill["blurb"] != skill["summary"]
     # Skills are the system repertoire; domain SOPs are store SKUs, not this blueprint.
-    from agentcore.runtime.legal_skills import LEGAL_SKILLS
+    from agentcore.runtime.skills.platform_shelf import platform_templates
 
     capability_names = {s["name"] for s in body["skills"]}
-    assert {s.name for s in LEGAL_SKILLS}.isdisjoint(capability_names)
+    assert {s.name for s in platform_templates()}.isdisjoint(capability_names)
     assert "packs" not in body
 
 

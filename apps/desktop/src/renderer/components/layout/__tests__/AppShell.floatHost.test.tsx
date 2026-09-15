@@ -85,9 +85,6 @@ vi.mock("@/components/layout/WorkspaceChannelBanner", () => ({
 vi.mock("@/components/conversation/ShareConversationDialog", () => ({
   ShareConversationDialog: () => null,
 }));
-vi.mock("@/components/folders/CreateFolderMenu", () => ({
-  CreateFolderMenuHost: () => null,
-}));
 vi.mock("@/components/files/CloneRepoDialog", () => ({
   ConnectGitDialogHost: () => null,
   CloneRepoDialog: () => null,

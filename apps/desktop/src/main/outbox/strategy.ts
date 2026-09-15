@@ -316,6 +316,8 @@ const LOCAL_TURN_TOOL_FAILURE_CODES = new Set([
   "source_dump_redirect",
   "long_running_redirect",
   "loopback_host",
+  "shell_fetch_redirect",
+  "shell_download_redirect",
   "access_denied",
   "outside_workspace",
   "other",
@@ -337,6 +339,12 @@ function remapPathOrVerifyFailure(raw: string): string | null {
     raw.includes("请用 run 启动长驻进程")
   ) {
     return "long_running_redirect";
+  }
+  if (raw.includes("公网 http(s) 摘字请用 web_fetch")) {
+    return "shell_fetch_redirect";
+  }
+  if (raw.includes("公网 http(s) 落到工作区请用 download_url")) {
+    return "shell_download_redirect";
   }
   if (
     [

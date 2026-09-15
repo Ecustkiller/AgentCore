@@ -769,6 +769,16 @@ describe("drainOutbox", () => {
         "请用 run 启动长驻进程（检测到：npm run dev）。",
       ),
     ).toBe("long_running_redirect");
+    expect(
+      normalizeToolFailureCode(
+        "公网 http(s) 摘字请用 web_fetch（检测到：curl -sS https://example.com）。",
+      ),
+    ).toBe("shell_fetch_redirect");
+    expect(
+      normalizeToolFailureCode(
+        "公网 http(s) 落到工作区请用 download_url（检测到：wget https://example.com/a.bin）。",
+      ),
+    ).toBe("shell_download_redirect");
   });
 
   it("toolFailuresFromJournal prefers tool_call over tool_use_end", () => {

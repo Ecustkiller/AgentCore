@@ -635,6 +635,7 @@ def test_core_teaches_split_criterion_over_count():
     assert "独立多透镜诊断" not in skill
     assert "人数不是优化目标" in skill
     assert "活本身是一块" in skill
+    assert "一块看验收" in skill
     assert "必读锚点" not in skill
     assert "真两段" not in skill
     assert "假两段" not in skill
@@ -681,6 +682,10 @@ def test_ask_user_description_owns_when_to_ask():
     assert "猜错会做错" in desc
     assert "可逆低杠杆" in desc
     assert "标假设" in desc
+    assert "一次一张卡" in desc
+    assert "可先检索再问" in desc
+    assert "勿并行" not in desc
+    assert "一次一张卡" not in hint
     assert "unlocks" not in hint
     assert "【非阻塞问·压单】" not in hint
     assert "未答则拒" not in hint
@@ -1102,6 +1107,30 @@ def test_post_close_same_team_how_lives_in_staffing():
     assert "整表再交" not in _LEAD_SUBTEAM
     assert "整表再交" not in inspect.getsource(inject)
     assert "整表再交" not in inspect.getsource(ceo_format)
+
+
+def test_negative_finding_acceptance_how_lives_in_task_fill():
+    """事实取证「没有也算完成」只在填 task HOW；核 / 派人按钮 / 开场不抄。"""
+    from agentcore.runtime.skills import _LEAD_SUBTEAM
+    from agentcore.runtime.skills.staffing import TASK_FILL_HOW
+    from agentcore.tools.builtin.delegate.schema import (
+        DELEGATE_DESCRIPTION,
+        NESTED_DELEGATE_DESCRIPTION,
+    )
+
+    marker = "确认没有，用已有材料估计并标明不确定"
+    assert marker in TASK_FILL_HOW
+    assert marker in _STAFFING
+    assert marker in _LEAD_SUBTEAM
+    assert marker not in _CEO_CORE_HINT
+    assert marker not in DELEGATE_DESCRIPTION
+    assert marker not in NESTED_DELEGATE_DESCRIPTION
+    ceo = compose_ceo_chat_prompt(
+        assemble_system_prompt(),
+        skill_registry=build_system_skill_registry(),
+        ceo_tool_names={"delegate", "consult", "ask_user"},
+    )
+    assert marker not in ceo
 
 
 def test_core_teaches_delegate_point_dont_answer():
@@ -1569,6 +1598,35 @@ def test_windows_bat_how_lives_in_run_not_shared_base():
     assert ".bat" not in delivery
     assert "work_discipline" not in delivery
     assert "双击即用" not in delivery
+
+
+def test_run_skill_read_materials_not_install_senses():
+    """读桌上材料 / 装包为用户项目：HOW 只在 consult(run)；按钮短描述与核不抄。"""
+    from agentcore.runtime.skills.run import _RUN
+    from agentcore.tools.builtin.run import run_description
+
+    marker = "不是给本回合加读字能力"
+    assert marker in _RUN
+    assert "抽不出字就标未取到" in _RUN
+    assert marker not in _CEO_CORE_HINT
+    assert marker not in run_description("server")
+    assert marker not in run_description("local")
+    ceo = compose_ceo_chat_prompt(
+        assemble_system_prompt(),
+        skill_registry=build_system_skill_registry(),
+        ceo_tool_names={"delegate", "consult", "ask_user"},
+    )
+    assert marker not in ceo
+
+
+def test_run_skill_does_not_ban_curl():
+    """公网门是改道，不是禁止句。"""
+    from agentcore.runtime.skills.run import _RUN
+    from agentcore.tools.builtin.run import run_description
+
+    for hay in (_RUN, run_description("server"), run_description("local")):
+        assert "不要用 curl" not in hay
+        assert "禁止用 curl" not in hay
 
 
 def test_core_teaches_image_gen_egress_and_key_boundary():
@@ -2135,6 +2193,33 @@ def test_ceo_core_splits_routing_tree_from_acting_tree():
         assert mark not in hint
     assert "【执行 / 运行 / 打开】" not in role
     assert "【执行 / 运行 / 打开】" not in honesty
+
+
+def test_delegate_when_is_shared_window_bound():
+    """根 / 嵌套 delegate 共用 when-to-use 核；窗绑定与 HOW 分叉；不另立优先嵌套。"""
+    from agentcore.runtime.skills import _LEAD_SUBTEAM
+    from agentcore.tools.builtin.delegate.schema import (
+        DELEGATE_DESCRIPTION,
+        DELEGATE_WHEN,
+        NESTED_DELEGATE_DESCRIPTION,
+    )
+
+    assert DELEGATE_WHEN in DELEGATE_DESCRIPTION
+    assert DELEGATE_WHEN in NESTED_DELEGATE_DESCRIPTION
+    assert "你的窗跟会话走" in DELEGATE_DESCRIPTION
+    assert "你的窗跟会话走" not in NESTED_DELEGATE_DESCRIPTION
+    assert "这张任务卡" in NESTED_DELEGATE_DESCRIPTION
+    assert "这张任务卡" not in DELEGATE_DESCRIPTION
+    assert "成篇落盘" in DELEGATE_DESCRIPTION
+    assert "成篇落盘" not in NESTED_DELEGATE_DESCRIPTION
+    assert "优先" not in NESTED_DELEGATE_DESCRIPTION
+    assert "默认用本工具" not in NESTED_DELEGATE_DESCRIPTION
+    assert "一块看验收" in _STAFFING
+    assert "一块看验收" in _LEAD_SUBTEAM
+    assert "一块看验收" not in DELEGATE_DESCRIPTION
+    assert "一块看验收" not in NESTED_DELEGATE_DESCRIPTION
+    assert "优先先" not in _LEAD_SUBTEAM
+    assert "何时拆" not in _LEAD_SUBTEAM
 
 
 def test_ceo_core_whether_and_headcount_are_separate_owners():

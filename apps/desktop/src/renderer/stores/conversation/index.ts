@@ -39,6 +39,8 @@ export {
   useActiveMemoryUpdates,
   useActiveGenerating,
   conversationStillWriting,
+  liveTailWritingForMessage,
+  useLiveTailWriting,
   useActiveExecutionVia,
   useActiveTurnPhase,
   useConversationGenerating,

@@ -9,7 +9,7 @@ import {
   COMPOSER_EMPTY_INTERRUPTED_HINT,
   isContinuableAssistant,
 } from "@/lib/composerContinueHint";
-import { useCoordinationActive } from "@/lib/composerDelivery";
+import { useCoordinationActive, useLiveCoordinatingTurn } from "@/lib/composerDelivery";
 import {
   dropInlineIndex,
   insertInlineToken,
@@ -147,6 +147,8 @@ export function TurnComposer({
     : MIN_COMPOSER_HEIGHT_CARD;
   const isGenerating = useActiveGenerating();
   const coordinationActive = useCoordinationActive();
+  const teamLive = useLiveCoordinatingTurn();
+  const deskOccupied = isGenerating || teamLive;
   const liveDebate = useLiveDebateSteer();
   const turnPhase = useActiveTurnPhase();
   const isStopping = turnPhase === "stopping";
@@ -171,14 +173,15 @@ export function TurnComposer({
     );
   });
   const pendingApprovals = usePendingApprovals(conversationId);
-  const lastMessage = useConversationStore((s) => {
+  const lastMessageRaw = useConversationStore((s) => {
     const rt = activeRuntime(s);
     if (rt.isGenerating) return null;
     return rt.messages.at(-1) ?? null;
   });
+  const lastMessage = deskOccupied ? null : lastMessageRaw;
   const showPendingHint =
     !!conversationId &&
-    !isGenerating &&
+    !deskOccupied &&
     (hasVisibleColdResume || pendingApprovals.length > 0);
   const lastSlot = useExecutionStore((s) => {
     if (!lastMessage || lastMessage.role !== "assistant") return undefined;
@@ -194,7 +197,7 @@ export function TurnComposer({
         })
       : null;
   const showComposerHint =
-    !isGenerating && Boolean(lastOutcome?.showComposerHint);
+    !deskOccupied && Boolean(lastOutcome?.showComposerHint);
   const supportDiagnosticIds =
     lastMessage?.role === "assistant"
       ? {
@@ -225,11 +228,11 @@ export function TurnComposer({
   const serverUnhealthy = serverStatus === "offline";
   const resolvedPlaceholder = useMemo(() => {
     if (liveDebate) return COMPOSER_DEBATE_STEER_PLACEHOLDER;
-    if (!isGenerating && isContinuableAssistant(lastMessage)) {
+    if (!deskOccupied && isContinuableAssistant(lastMessage)) {
       return COMPOSER_CONTINUE_PLACEHOLDER;
     }
     return placeholder;
-  }, [liveDebate, isGenerating, lastMessage, placeholder]);
+  }, [liveDebate, deskOccupied, lastMessage, placeholder]);
   const draftKey = draftKeyFor(conversationId);
   const value = useComposerDraftStore((s) => s.drafts[draftKey]?.value ?? "");
   const attachments = useComposerDraftStore(
@@ -396,7 +399,7 @@ export function TurnComposer({
     setAttachments,
     agentMentions,
     setAgentMentions,
-    isGenerating,
+    isGenerating: deskOccupied,
     backgroundMode: false,
     isLocal: false,
     closeMenu: mention.closeMenu,
@@ -578,7 +581,7 @@ export function TurnComposer({
       if (sendBlocked) return;
       if (liveDebate) {
         void handleSend();
-      } else if (isGenerating) {
+      } else if (deskOccupied) {
         void handleSend({
           delivery: coordinationActive ? "queue" : "steer",
         });
@@ -606,8 +609,8 @@ export function TurnComposer({
     <>
       <ComposerWorkspaceChip conversationId={conversationId} />
       <ComposerGitStatusChip conversationId={conversationId} />
-      <ModelPicker disabled={isGenerating} />
-      <PermissionAxesBadge disabled={isGenerating} iconOnly={!isBar} />
+      <ModelPicker disabled={deskOccupied} />
+      <PermissionAxesBadge disabled={deskOccupied} iconOnly={!isBar} />
     </>
   );
 
@@ -727,7 +730,7 @@ export function TurnComposer({
       {hasDraft ? primarySendButton : null}
       {isGenerating ? stopButton : null}
     </div>
-  ) : isGenerating ? (
+  ) : deskOccupied ? (
     hasDraft ? (
       coordinationActive ? (
         coordinationMidFlightSend

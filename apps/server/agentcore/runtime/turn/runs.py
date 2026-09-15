@@ -42,6 +42,8 @@ import contextlib
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from agentcore.core.error_codes import ErrorCode
+from agentcore.core.errors import AgentCoreError
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
 from agentcore.fulfill.user_signal import (
@@ -55,6 +57,22 @@ from agentcore.runtime.events.types import FinishReason
 logger = get_logger(__name__)
 
 ResumeBusyReason = Literal["wrap_up", "live_turn"]
+
+
+class ResumeClaimUnresolvedError(AgentCoreError):
+    """Deferred wake: claim returned None but the paused frame is still on disk.
+
+    Idle ``POST …/resume`` answers 500 + ``resume_claim_failed`` in this case so the
+    client retries. The busy-slot wake must fail the waiting SSE the same way — not
+    cancel it as if the card were gone (D9 / 幂等续跑).
+    """
+
+    code = ErrorCode.PIPELINE_ERROR
+    retryable = True
+    status_code = 500
+
+    def __init__(self) -> None:
+        super().__init__("续跑暂时没接上，请再试一次。")
 
 
 @dataclass
@@ -139,6 +157,12 @@ class ResumeDeferredWaiter:
         for fut in self.waiting():
             if not fut.done():
                 fut.cancel()
+
+    def fail(self, exc: BaseException) -> None:
+        """Unblock every waiting SSE with an error (idle resume's 5xx twin)."""
+        for fut in self.waiting():
+            if not fut.done():
+                fut.set_exception(exc)
 
 
 # Set on an ``asyncio.Task`` when that specific run was cancelled by user stop —
@@ -394,7 +418,7 @@ class TurnRunRegistry:
         """Claim the paused frame and start resume_chat, settling the waiter either way.
 
         Detached from the request: nothing else can settle this waiter, so a claim
-        that raises must still cancel the SSE futures (else that「继续」spins forever)
+        that raises must still fail the SSE futures (else that「继续」spins forever)
         and hand the freed slot back to the FIFO queue.
         """
         try:
@@ -409,11 +433,23 @@ class TurnRunRegistry:
                 message_id=waiter.message_id,
                 error=str(e),
             )
-            self._abandon_resume_deferred(waiter)
+            self._abandon_resume_deferred(waiter, error=e)
 
-    def _abandon_resume_deferred(self, waiter: ResumeDeferredWaiter) -> None:
-        """Unwind the waiting SSE(s) and let FIFO take the slot this wake gave up."""
-        waiter.unwind()
+    def _abandon_resume_deferred(
+        self,
+        waiter: ResumeDeferredWaiter,
+        *,
+        error: BaseException | None = None,
+    ) -> None:
+        """Unblock the waiting SSE(s) and let FIFO take the slot this wake gave up.
+
+        ``error`` is the idle-route 5xx twin (claim/start raised). Shutdown cancel
+        still ``unwind``s — there is no client left to retry this Future.
+        """
+        if error is not None:
+            waiter.fail(error)
+        else:
+            waiter.unwind()
         try:
             from .queue import turn_queue
 
@@ -424,12 +460,66 @@ class TurnRunRegistry:
                 conversation_id=waiter.conversation_id,
             )
 
+    async def _finish_deferred_claim_miss(self, waiter: ResumeDeferredWaiter) -> None:
+        """Claim returned None: same fork as idle ``POST …/resume``.
+
+        Frame still on disk → 5xx so the client retries (not a silent cancel).
+        Frame gone + this message still running → join that sink (幂等).
+        Frame gone and no live run → unwind; a later POST gets ``resume_settled``.
+        """
+        from agentcore.runtime.suspension.persistence import paused_turn_exists
+
+        from .queue import turn_queue
+
+        try:
+            still_there = await paused_turn_exists(
+                waiter.message_id, conversation_id=waiter.conversation_id
+            )
+        except Exception as e:  # noqa: BLE001 — exists raises on DB fault; 5xx not「已处理」
+            logger.warning(
+                "resume.claim_unresolved",
+                conversation_id=waiter.conversation_id,
+                message_id=waiter.message_id,
+                phase="deferred_exists",
+                error=str(e),
+            )
+            waiter.fail(e)
+            turn_queue.schedule_drain(waiter.conversation_id)
+            return
+        if still_there:
+            logger.warning(
+                "resume.claim_unresolved",
+                conversation_id=waiter.conversation_id,
+                message_id=waiter.message_id,
+                phase="deferred",
+            )
+            waiter.fail(ResumeClaimUnresolvedError())
+            turn_queue.schedule_drain(waiter.conversation_id)
+            return
+        existing_run = self._runs.get(waiter.conversation_id)
+        live_sink = (
+            existing_run.sink
+            if existing_run is not None
+            and not existing_run.task.done()
+            and existing_run.sink.message_id == waiter.message_id
+            else None
+        )
+        if live_sink is not None:
+            waiter.settle(live_sink)
+            return
+        logger.warning(
+            "resume.deferred_started",
+            conversation_id=waiter.conversation_id,
+            message_id=waiter.message_id,
+            claimed=False,
+        )
+        waiter.unwind()
+        turn_queue.schedule_drain(waiter.conversation_id)
+
     async def _drive_resume_deferred(self, waiter: ResumeDeferredWaiter) -> None:
         from agentcore.runtime.events import turn_warning
         from agentcore.runtime.suspension.persistence import claim_paused_turn
         from agentcore.runtime.turn.driver import get_turn_driver
-
-        from .queue import turn_queue
 
         logger.info(
             "resume.deferred_started",
@@ -453,14 +543,7 @@ class TurnRunRegistry:
             settled_by=waiter.origin_device_id or "",
         )
         if suspension is None:
-            logger.warning(
-                "resume.deferred_started",
-                conversation_id=waiter.conversation_id,
-                message_id=waiter.message_id,
-                claimed=False,
-            )
-            waiter.unwind()
-            turn_queue.schedule_drain(waiter.conversation_id)
+            await self._finish_deferred_claim_miss(waiter)
             return
 
         # Bound up-front (the pipeline re-binds the same id later): the registry's

@@ -256,6 +256,20 @@ export function formatCost(nano: number, currency?: string | null): string {
 }
 
 /**
+ * 额度还剩（用量主卡）。0 显「¥0.00」（用尽），不足 1 分显「<¥0.01」。
+ * 与 {@link formatCost} 的「0 = 无花销 → —」不同，避免把用尽读成没花钱。
+ */
+export function formatQuotaRemaining(
+  nano: number,
+  currency?: string | null,
+): string {
+  if (!Number.isFinite(nano) || nano <= 0) {
+    return `${currencySymbol(currency)}0.00`;
+  }
+  return formatCost(nano, currency);
+}
+
+/**
  * 展示金额：平台记账走 {@link formatCost}；估算金额一律带「≈」前缀，
  * 不得与记账金额混淆。0 / 无值仍显「—」（`pricing_source=unpriced` 同此）。
  */

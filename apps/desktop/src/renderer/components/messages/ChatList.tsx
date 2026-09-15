@@ -1,5 +1,7 @@
+import { NarrowMenuButton } from "@/components/layout/NarrowMenuButton";
 import { EmptyHint, IconButton, SearchField } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { useNarrowLayoutState } from "@/lib/narrowLayout";
 import { cn } from "@/lib/utils";
 import {
   useChats,
@@ -31,6 +33,7 @@ export function ChatList({
   const loading = useMessagingStore((s) => s.loadingChats);
   const loaded = useMessagingStore((s) => s.chatsLoaded);
   const incomingCount = useIncomingFriendRequestCount();
+  const { isNarrow } = useNarrowLayoutState();
   const [query, setQuery] = useState("");
 
   // Hydrate the list once; the firehose keeps it fresh thereafter (stage D).
@@ -53,8 +56,17 @@ export function ChatList({
         className,
       )}
     >
-      <div className="flex items-center justify-between px-4 py-3">
-        <span className="text-base font-medium text-foreground">消息</span>
+      <div
+        className={cn(
+          "flex items-center justify-between px-4 py-3",
+          isNarrow &&
+            "h-12 border-b border-border bg-card px-2 pt-[env(safe-area-inset-top)]",
+        )}
+      >
+        {isNarrow && <NarrowMenuButton />}
+        <span className="min-w-0 flex-1 text-base font-medium text-foreground">
+          消息
+        </span>
         <div className="flex items-center gap-0.5">
           <SimpleTooltip label="通讯录">
             <IconButton

@@ -6,18 +6,18 @@ import {
 } from "../narrowProduct";
 
 describe("isNarrowBlockedPath", () => {
-  it("blocks toolbox / whiteboard / conversation admin", () => {
+  it("blocks toolbox / whiteboard / hidden settings", () => {
     expect(isNarrowBlockedPath("/toolbox")).toBe(true);
     expect(isNarrowBlockedPath("/toolbox/manual/intro")).toBe(true);
     expect(isNarrowBlockedPath("/whiteboard/abc")).toBe(true);
     expect(isNarrowBlockedPath("/docs/abc")).toBe(true);
     expect(isNarrowBlockedPath("/tables/abc")).toBe(true);
-    expect(isNarrowBlockedPath("/conversations")).toBe(true);
     expect(isNarrowBlockedPath("/more/shortcuts")).toBe(true);
   });
 
-  it("keeps chat / files / messages / allowed settings", () => {
+  it("keeps chat / files / messages / conversation admin / allowed settings", () => {
     expect(isNarrowBlockedPath("/")).toBe(false);
+    expect(isNarrowBlockedPath("/conversations")).toBe(false);
     expect(isNarrowBlockedPath("/conversations/abc")).toBe(false);
     expect(isNarrowBlockedPath("/files")).toBe(false);
     expect(isNarrowBlockedPath("/messages")).toBe(false);
@@ -64,6 +64,15 @@ describe("isNarrowHiddenPaletteId", () => {
       isNarrowHiddenPaletteId("nav-files", {
         restrictNarrow: true,
         forceLightTheme: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps 新建云文件夹 on narrow (write, not local-disk)", () => {
+    expect(
+      isNarrowHiddenPaletteId("new-folder", {
+        restrictNarrow: true,
+        forceLightTheme: false,
       }),
     ).toBe(false);
   });

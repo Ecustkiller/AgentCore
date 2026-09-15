@@ -25,11 +25,14 @@
  *（含 `durationMs` / `sinceCheckMs`，用于区分 policy / feed / 下载慢点；
  * `download_progress` 的 `bytesPerSecond`=近期窗口；`configure` 另记
  * `installerSource=github`——安装包走 GitHub，不经 electron-updater）。
- * 切对话消息窗诊断（临时）：`conversation.slice_diag`（`action`=
+ * 切对话消息窗诊断（排查包放行）：`conversation.slice_diag`（`action`=
  * `message_end_slice_kept` / `release_drop`（仅显式 API）/ `warm_skip_reconcile`
  *（仅 generating）/ `warm_keep_anchor`（pendingFocus / ?msg=）/ `warm_snap_latest` /
  * `load_latest_window` / `open_decide` / `reject_not_resident` /
  * `reject_generating` / `reject_active_has_more_after` / `reject_empty_window` 等）。
+ * 发送占位诊断（临时）：`send.assistant_placeholder`（`action`=`reuse`|`mint`，
+ * `assistant_id` / `optimistic_user_id` / `conversation_id`）——composer 已画的
+ * Thinking 泡是否被 `sendTurn` 换 id。
  * 本地引擎互斥拒（横幅「turn already running」；不进云端 sync:logs）：
  * `sidecar.turn_already_running`（`op`=startTurn|resume，`turn_id` / `conversation_id` /
  * `saw_any_event`；与 sidecar 进程同名事件对偶，查 `userData/logs/desktop.jsonl`）。

@@ -21,7 +21,7 @@ alwaysApply: false
 
 自有布局豁免：对话页、文件页、设置页、全屏页、消息页两栏壳不走 content/canvas 梯度。消息页右栏内走 IM 会话列。工具箱（含提示词）走 `PageContainer` `canvas` + `padding page`，与创作同一套画布留白。
 
-窄屏（`<768px`）：`AppShell` 收成底栏 4-tab + 对话 ☰ 抽屉 + 右坞全屏 sheet，**不要**把侧栏和 ≥280px 坞挤进主列。权威 → [前端技术 §五](/docs/04-前端/前端技术与架构.md)。字号仍 4 级：`sm` 14→16、`base` 16→17，`xs`/`xl` 不动（底栏、按钮、工具行保持密度）；`.markdown-body` 必须走 token。实现 → `globals.css`。
+窄屏（`<768px`）：`AppShell` 收成 ☰ overlay 侧栏 + 右坞全屏 sheet，**不要**把侧栏和 ≥280px 坞挤进主列。权威 → [前端技术 §五](/docs/04-前端/前端技术与架构.md)。字号仍 4 级：`sm` 14→16、`base` 16→17，`xs`/`xl` 不动（按钮、工具行保持密度）；`.markdown-body` 必须走 token。实现 → `globals.css`。
 
 ## 页头
 

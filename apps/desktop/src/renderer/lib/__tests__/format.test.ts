@@ -13,6 +13,7 @@ import {
   formatDurationSec,
   formatMessageTime,
   formatMessageTimeOfDay,
+  formatQuotaRemaining,
   pickCostMoney,
   stripDurationFaceSuffix,
   sumChunkChars,
@@ -71,6 +72,18 @@ describe("formatCost", () => {
 
   it("shows「<¥0.01」for a cost that rounds below one fen", () => {
     expect(formatCost(1000)).toBe("<¥0.01");
+  });
+});
+
+describe("formatQuotaRemaining", () => {
+  it("shows ¥0.00 when the allowance is exhausted (not —)", () => {
+    expect(formatQuotaRemaining(0)).toBe("¥0.00");
+    expect(formatQuotaRemaining(-1)).toBe("¥0.00");
+  });
+
+  it("reuses cost formatting for a positive remainder", () => {
+    expect(formatQuotaRemaining(YUAN)).toBe("¥1.00");
+    expect(formatQuotaRemaining(1000)).toBe("<¥0.01");
   });
 });
 

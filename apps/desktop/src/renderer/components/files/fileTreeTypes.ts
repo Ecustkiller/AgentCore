@@ -32,7 +32,7 @@ export interface BatchMenuActions {
 export type FileSortBy = "name" | "mtime";
 
 export interface FileTreeHandle {
-  /** 由外层（如多根工作区的根节点右键菜单）触发的「在源根处内联新建」。 */
+  /** 由外层（如多根工作区的根节点右键菜单）触发的「在源根处新建」。目录立即落地再改名。 */
   startCreate: (kind: "file" | "dir") => void;
   /** 刷新根 + 所有已展开目录。 */
   refresh: () => void;

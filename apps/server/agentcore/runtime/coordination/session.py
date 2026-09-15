@@ -252,6 +252,19 @@ class CoordinationSession(
     file_ownership: Any | None = field(default=None, repr=False)
 
 
+def live_team_holds_captain_turn(role: str | None = None) -> bool:
+    """True when the root captain must keep this chat turn (team still coordinating).
+
+    Session closes on ALL_COMPLETED before the captain writes the real ending, so a
+    later no-tool round is allowed to Return. Workers never hold the user-facing turn.
+    Explicit /stop does not hold (``user_stopped``).
+    """
+    if role is not None and role != "captain":
+        return False
+    session = active_coordination()
+    return bool(session is not None and session.active and not session.user_stopped)
+
+
 def active_coordination(execution_id: str | None = None) -> CoordinationSession | None:
     """Look up the coordination session for a turn.
 

@@ -1,7 +1,10 @@
 import { isExecutionHarvestMessage } from "@/lib/executionHarvest";
 import { turnOutcomeForAssistant } from "@/lib/turnOutcome";
 import { cn } from "@/lib/utils";
-import { useActiveMessageFocus } from "@/stores/conversation";
+import {
+  useActiveMessageFocus,
+  useLiveTailWriting,
+} from "@/stores/conversation";
 import { memo, useEffect, useRef } from "react";
 import { AssistantMessage } from "./AssistantMessage";
 import { UserMessage } from "./UserMessage";
@@ -19,6 +22,7 @@ export const MessageBubble = memo(function MessageBubble({
   message,
 }: MessageBubbleProps) {
   const focus = useActiveMessageFocus();
+  const liveTailWriting = useLiveTailWriting(message.id);
   const ref = useRef<HTMLDivElement>(null);
   // Capture on first mount: a streaming placeholder must not replay enter
   // when sendTurn reuses the bubble, and must not start fading in on the
@@ -42,9 +46,13 @@ export const MessageBubble = memo(function MessageBubble({
   }
   // 空停止整泡不渲染的唯一列表入口（仲裁器 hideEmptyBubble）。气泡内部不再叠
   // isUserStopped / 正文挡板；协作图 StatusStrip 仍可画「已停止」。
+  // 本轮还在写时按直播尾处理，不能只看 message.isStreaming（hydrate settle
+  // 可能先把占位转成空壳）。
   if (
     message.role === "assistant" &&
-    turnOutcomeForAssistant(message, null).hideEmptyBubble
+    turnOutcomeForAssistant(message, null, {
+      isStreaming: message.isStreaming || liveTailWriting,
+    }).hideEmptyBubble
   ) {
     return null;
   }

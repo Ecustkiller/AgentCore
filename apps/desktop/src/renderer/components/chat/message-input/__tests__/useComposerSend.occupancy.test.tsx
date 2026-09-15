@@ -64,6 +64,7 @@ import { sendMidFlightMessage } from "@/services/turns/midFlight";
 import { __resetComposerSendLatchesForTests } from "@/stores/composerSend";
 import { useConversationStore } from "@/stores/conversation";
 import { EMPTY_RUNTIME } from "@/stores/conversation/runtime";
+import { useExecutionStore } from "@/stores/execution";
 import type {
   PendingAgentMention,
   PendingAttachment,
@@ -127,6 +128,7 @@ beforeEach(() => {
     currentConversationId: null,
     byId: {},
   } as never);
+  useExecutionStore.setState({ byId: {} });
 });
 
 describe("useComposerSend 本机占槽", () => {
@@ -239,5 +241,50 @@ describe("useComposerSend 本机占槽", () => {
     );
     expect(turn).not.toHaveBeenCalled();
     expect(apiPost).not.toHaveBeenCalled();
+  });
+
+  it("云端灯灭但协作图还在转 → mid-flight，不 sendTurn", async () => {
+    const mid = "asst-live-team";
+    useConversationStore.setState({
+      currentConversationId: CONV,
+      byId: {
+        [CONV]: {
+          ...EMPTY_RUNTIME,
+          isGenerating: false,
+          turnPhase: "idle",
+          messages: [
+            {
+              id: mid,
+              role: "assistant",
+              content: "换打法",
+              createdAt: new Date().toISOString(),
+              executionId: "e-live",
+              isStreaming: false,
+            },
+          ],
+        },
+      },
+    });
+    useExecutionStore.getState().startExecution(
+      {
+        id: "e-live",
+        planType: "multi_agent",
+        taskSummary: "调研",
+        agents: [{ id: "a-w", role: "研究员" }],
+        runs: [{ id: "r-w", agentId: "a-w", task: "查", dependsOn: [] }],
+      },
+      mid,
+    );
+    occupancy.mockResolvedValue({ occupied: false });
+    const { result } = renderHook(() =>
+      useSendHarness({ isGenerating: false, isLocal: false }),
+    );
+
+    await act(async () => {
+      await result.current.handleSend();
+    });
+
+    expect(midFlight).toHaveBeenCalledTimes(1);
+    expect(turn).not.toHaveBeenCalled();
   });
 });

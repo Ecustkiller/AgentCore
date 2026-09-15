@@ -59,38 +59,24 @@ export function DeleteFolderDialog({
               {permanent ? (
                 <>
                   <p className="text-foreground">
-                    将永久删除全部对话、云端文件，以及这张桌子的 AI
-                    设定，不可恢复。
+                    将永久删除全部对话、云端文件与这张桌的设定，不可恢复。
                   </p>
                   {liveConvCount > 0 && (
                     <p>· 含当前可见的 {liveConvCount} 条对话及已归档成员</p>
                   )}
-                  {isLocal && (
-                    <p>· 本地磁盘上的文件不会被删除（文件在你电脑上）</p>
-                  )}
+                  {isLocal && <p>· 电脑上的文件不会被删除</p>}
                 </>
               ) : (
                 <>
                   <p className="text-foreground">
                     {retentionDays === null
-                      ? "删除后可在「最近删除」中恢复"
-                      : `${retentionDays} 天内可在「最近删除」中恢复`}
-                    ，逾期后云端文件由系统自动清理。
+                      ? "删除后可在「最近删除」中恢复。"
+                      : `${retentionDays} 天内可在「最近删除」中恢复。`}
                   </p>
                   {liveConvCount > 0 && (
                     <p>· 其下 {liveConvCount} 条对话一并归档，恢复时一起回来</p>
                   )}
-                  <p>
-                    · 这张桌子的 AI
-                    设定（画像、规则、主题）一并退出；恢复文件夹时一起回来
-                  </p>
-                  <p>
-                    ·
-                    恢复不含白板的文件夹归属（白板会留在顶层白板列表）与裸聊的自动云桌指针（下回合自动重建）
-                  </p>
-                  {isLocal && (
-                    <p>· 本机文件夹里的文件始终不动（删除与恢复都不碰它）</p>
-                  )}
+                  {isLocal && <p>· 电脑上的文件不会被删除</p>}
                 </>
               )}
             </div>
@@ -105,9 +91,7 @@ export function DeleteFolderDialog({
               checked={permanent}
               onChange={(e) => setPermanent(e.target.checked)}
             />
-            <span>
-              立即永久清除全部对话、云端文件与这张桌的设定（不可恢复）
-            </span>
+            <span>立即永久删除（不可恢复）</span>
           </label>
         </DialogBody>
 

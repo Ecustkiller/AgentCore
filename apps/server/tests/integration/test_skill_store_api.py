@@ -74,9 +74,9 @@ async def test_skill_store_publish_list_install_update_unpublish_report(client):
     assert shelf.json()["groups"]["writing"] >= 1
     assert shelf.json()["groups"]["legal"] >= 4
     names = {r["name"] for r in rows}
-    from agentcore.runtime.legal_skills import LEGAL_SKILLS
+    from agentcore.runtime.skills.platform_shelf import platform_templates
 
-    assert {s.title for s in LEGAL_SKILLS} <= names
+    assert {s.title for s in platform_templates()} <= names
 
     detail = await client.get(f"/v1/skill-store/{lid}")
     assert detail.status_code == 200, detail.text
@@ -269,22 +269,26 @@ async def test_skill_store_admin_sees_reports(client, make_admin):
 
 async def test_platform_legal_skus_list_install_and_refuse_author_ops(client):
     from agentcore.runtime.legal_skills import LEGAL_SKILLS
-    from agentcore.runtime.skills.platform_shelf import platform_listing_id
+    from agentcore.runtime.skills.platform_shelf import (
+        platform_listing_id,
+        platform_templates,
+    )
 
     await register_and_login(client, "sslegal")
-    shelf_ids = {s.name: platform_listing_id(s.name) for s in LEGAL_SKILLS}
+    templates = platform_templates()
+    shelf_ids = {s.name: platform_listing_id(s.name) for s in templates}
 
     shelf = await client.get("/v1/skill-store")
     assert shelf.status_code == 200, shelf.text
     by_id = {row["id"]: row for row in shelf.json()["data"]}
-    for skill in LEGAL_SKILLS:
+    for skill in templates:
         listing_id = shelf_ids[skill.name]
         assert listing_id in by_id
         assert by_id[listing_id]["author"] == "官方"
         assert by_id[listing_id]["name"] == skill.title
         assert by_id[listing_id]["description"] == skill.summary
         assert by_id[listing_id]["installed"] is False
-        assert by_id[listing_id]["group"] == "legal"
+        assert by_id[listing_id]["group"] == skill.group
 
     brief = next(s for s in LEGAL_SKILLS if s.name == "legal_answer_brief")
     brief_id = shelf_ids[brief.name]

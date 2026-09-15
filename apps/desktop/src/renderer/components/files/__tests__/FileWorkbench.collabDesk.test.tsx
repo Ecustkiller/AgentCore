@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { FileWorkbench } from "@/components/files/FileWorkbench";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import type { FolderMeta } from "@/services/folders";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -30,6 +31,7 @@ vi.mock("@/hooks/useConversations", () => ({
 vi.mock("@/hooks/useFolders", () => ({
   useFolders: () => folders,
   getFolders: () => folders,
+  useCreateFolder: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@/components/folders/PendingFolderInvites", () => ({
@@ -47,13 +49,15 @@ describe("FileWorkbench · 协作桌", () => {
 
   it("owned desks stay in 我的文件; member desks are 与我共享; no shared-space zone", () => {
     render(
-      <FileWorkbench
-        workspaces={[]}
-        isLoading={false}
-        isError={false}
-        onRetry={() => {}}
-        fsAvailable={false}
-      />,
+      <TooltipProvider>
+        <FileWorkbench
+          workspaces={[]}
+          isLoading={false}
+          isError={false}
+          onRetry={() => {}}
+          fsAvailable={false}
+        />
+      </TooltipProvider>,
     );
 
     expect(screen.getByText("我的文件")).toBeTruthy();

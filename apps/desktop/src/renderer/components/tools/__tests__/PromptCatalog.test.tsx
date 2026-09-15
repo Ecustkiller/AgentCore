@@ -959,50 +959,83 @@ describe("PromptCatalog 就地命名", () => {
     };
   }
 
-  it("点新建夹出现输入行，不调 createRuleFolder", async () => {
-    renderCatalog();
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "新建夹" })).toBeTruthy();
-    });
-    fireEvent.click(screen.getByRole("button", { name: "新建夹" }));
-    expect(screen.getByRole("textbox", { name: "夹名称" })).toBeTruthy();
-    expect(createRuleFolder).not.toHaveBeenCalled();
-  });
-
-  it("输入夹名回车后创建并出现在按需区", async () => {
-    const created = ruleFolder("f-law", "法律");
+  it("点新建夹立刻创建未命名夹并进入改名", async () => {
+    const created = ruleFolder("f-new", "未命名夹");
     vi.mocked(createRuleFolder).mockResolvedValue(created);
     renderCatalog();
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "新建夹" })).toBeTruthy();
     });
-    fireEvent.click(screen.getByRole("button", { name: "新建夹" }));
     vi.mocked(listAccountPromptTree).mockResolvedValue({
       rulesDirId: "rules",
       folders: [created],
+      documents: [],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新建夹" }));
+    await waitFor(() => {
+      expect(createRuleFolder).toHaveBeenCalledWith("未命名夹");
+    });
+    expect(screen.getByDisplayValue("未命名夹")).toBeTruthy();
+  });
+
+  it("输入夹名回车后改名并出现在按需区", async () => {
+    const created = ruleFolder("f-law", "未命名夹");
+    vi.mocked(createRuleFolder).mockResolvedValue(created);
+    vi.mocked(renameDocument).mockImplementation(async (_id, name) =>
+      ruleFolder("f-law", name),
+    );
+    renderCatalog();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "新建夹" })).toBeTruthy();
+    });
+    vi.mocked(listAccountPromptTree).mockResolvedValue({
+      rulesDirId: "rules",
+      folders: [created],
+      documents: [],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新建夹" }));
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "夹名称" })).toBeTruthy();
+    });
+    vi.mocked(listAccountPromptTree).mockResolvedValue({
+      rulesDirId: "rules",
+      folders: [ruleFolder("f-law", "法律")],
       documents: [],
     });
     const input = screen.getByRole("textbox", { name: "夹名称" });
     fireEvent.change(input, { target: { value: "法律" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => {
-      expect(createRuleFolder).toHaveBeenCalledWith("法律");
+      expect(renameDocument).toHaveBeenCalledWith("f-law", "法律");
     });
     await waitFor(() => {
       expect(within(onDemandRail()).getByText("法律")).toBeTruthy();
     });
   });
 
-  it("Esc 取消新建夹不调 API", async () => {
+  it("Esc 取消改名仍保留未命名夹", async () => {
+    const created = ruleFolder("f-new", "未命名夹");
+    vi.mocked(createRuleFolder).mockResolvedValue(created);
     renderCatalog();
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "新建夹" })).toBeTruthy();
     });
+    vi.mocked(listAccountPromptTree).mockResolvedValue({
+      rulesDirId: "rules",
+      folders: [created],
+      documents: [],
+    });
     fireEvent.click(screen.getByRole("button", { name: "新建夹" }));
-    const input = screen.getByRole("textbox", { name: "夹名称" });
-    fireEvent.keyDown(input, { key: "Escape" });
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "夹名称" })).toBeTruthy();
+    });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "夹名称" }), {
+      key: "Escape",
+    });
     expect(screen.queryByRole("textbox", { name: "夹名称" })).toBeNull();
-    expect(createRuleFolder).not.toHaveBeenCalled();
+    expect(createRuleFolder).toHaveBeenCalledTimes(1);
+    expect(renameDocument).not.toHaveBeenCalled();
+    expect(within(onDemandRail()).getByText("未命名夹")).toBeTruthy();
   });
 
   it("右键重命名就地改名", async () => {

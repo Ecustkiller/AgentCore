@@ -6,7 +6,7 @@
  *   pnpm sync:logs --full          # include raw turn_journal (local deep dig only)
  *   pnpm sync:logs --events-only
  *   pnpm sync:logs --export-only
- *   pnpm sync:logs --days 3        # DB export window (default 7)
+ *   pnpm sync:logs --days 3        # DB export window only (default 7; not events retention)
  *
  * Prerequisites:
  *   deploy/.env.deploy.local with DEPLOY_SSH_HOST / USER / KEY_PATH (/ PORT)
@@ -21,6 +21,7 @@ import {
   mkdirSync,
   readdirSync,
   renameSync,
+  statSync,
   unlinkSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -81,9 +82,11 @@ deploy/.env.deploy.local (DEPLOY_SSH_*).
 
   (default)       Slim DB export: redacted turn_journal (no user/LLM bodies)
   --full          Include raw turn_journal (large; local deep dig, not for packs)
-  --events-only   Only sync API container stdout JSONL (docker logs)
+  --events-only   Only dump the current API json-file stdout ring
   --export-only   Only run DB export inside the api container + pull
-  --days N        DB export window (default 7)
+  --days N        DB export window (default 7). Does not enlarge events.jsonl:
+                  that file is the current Docker json-file ring (10m×5), not
+                  a N-day archive. Empty events.jsonl exits 1.
 `);
       process.exit(0);
       break;
@@ -140,21 +143,44 @@ function replaceEventsJsonl(extractedName) {
   }
 }
 
+const EVENTS_EMPTY_MSG = `events.jsonl is empty (0 bytes).
+API stdout is the Docker json-file ring (10m×5), not a --days archive.
+查同目录 journal / messages / cost；不要把空 events 当成「线上没有这次回合」。`;
+
+let eventsEmpty = false;
+
+function eventsJsonlBytes() {
+  const eventsMain = join(LOCAL_EXPORT_DIR, "events.jsonl");
+  if (!existsSync(eventsMain)) return 0;
+  return statSync(eventsMain).size;
+}
+
 function syncEventLogs() {
-  console.log(`→ pack API stdout JSONL (docker logs --since ${days}d)`);
+  console.log(
+    "→ pack API stdout JSONL (current json-file ring 10m×5; --days does not apply)",
+  );
   sshScript(`set -euo pipefail
 CONTAINER="${CONTAINER}"
 if ! docker inspect "$CONTAINER" >/dev/null 2>&1; then
   echo "container $CONTAINER not found" >&2
   exit 1
 fi
-# Container stdio only. Non-JSON banners (uvicorn startup-failed text) dropped.
-docker logs --since ${days}d "$CONTAINER" 2>/dev/null | grep -E '^\\{' > /tmp/agentcore-events.jsonl || true
+# Full current ring (not --since Nd). Non-JSON banners dropped.
+# docker logs failure must not look like an empty ring; empty grep still can.
+docker logs "$CONTAINER" > /tmp/agentcore-docker-logs.raw
+grep -E '^\\{' /tmp/agentcore-docker-logs.raw > /tmp/agentcore-events.jsonl || true
+rm -f /tmp/agentcore-docker-logs.raw
 tar czf ${REMOTE_BUNDLE} -C /tmp agentcore-events.jsonl
 ls -lh ${REMOTE_BUNDLE}
 `);
   pullRemoteBundle("pull event logs");
   replaceEventsJsonl("agentcore-events.jsonl");
+  const bytes = eventsJsonlBytes();
+  console.log(`  events.jsonl ${bytes} bytes`);
+  if (bytes === 0) {
+    eventsEmpty = true;
+    console.error(EVENTS_EMPTY_MSG);
+  }
 }
 
 function discoverHostDataExportDir() {
@@ -222,6 +248,11 @@ ls -lh ${REMOTE_BUNDLE}
 
 if (syncEvents) syncEventLogs();
 if (syncExport) syncDbExport();
+
+if (eventsEmpty) {
+  console.error(`Stopped: events.jsonl empty. Export dir: ${LOCAL_EXPORT_DIR}`);
+  process.exit(1);
+}
 
 console.log(`
 Done → ${LOCAL_EXPORT_DIR}

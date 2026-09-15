@@ -21,7 +21,7 @@ export interface FolderRailHost {
   sortBy: FileSortBy;
   offline: boolean;
   /** 在此新建文件夹 — a real nested folder, not a bare `mkdir`. */
-  onCreateSubfolder: (parent: FolderMeta, anchorEl?: Element | null) => void;
+  onCreateSubfolder: (parent: FolderMeta) => void;
   /** Per-folder entries inside ``.agentcore``, when the host shows conventions. */
   renderWorkroomLead?: (folder: FolderMeta, indent: number) => ReactNode;
   /**
@@ -62,7 +62,7 @@ export function FolderRailRow({
       hideRootDirs={node ? childFolderNames(node) : undefined}
       onCreateSubfolder={
         folder.mode === "cloud" && isFolderOwner(folder)
-          ? (anchorEl) => host.onCreateSubfolder(folder, anchorEl)
+          ? () => host.onCreateSubfolder(folder)
           : undefined
       }
       source={host.sourceByWs.get(wsId) ?? null}

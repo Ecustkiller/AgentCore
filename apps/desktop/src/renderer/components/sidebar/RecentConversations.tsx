@@ -30,7 +30,11 @@ function byRecency(a: Conversation, b: Conversation): number {
  * No section title. A hairline separates this zone from whatever sits above
  * (置顶 and/or 文件夹). When every chat is foldered or pinned this zone renders nothing.
  */
-export function RecentConversations() {
+export function RecentConversations({
+  onActivate,
+}: {
+  onActivate?: () => void;
+} = {}) {
   const conversations = useConversations();
   const ownedGroups = useWorkspaceGroups();
   const sharedGroups = useSharedWithMeWorkspaceGroups();
@@ -72,7 +76,11 @@ export function RecentConversations() {
         className={`space-y-0.5 px-2 py-1 ${hasGroups || hasPinned ? "pt-2" : ""}`}
       >
         {recent.map((conv) => (
-          <ConversationItem key={conv.id} conversation={conv} />
+          <ConversationItem
+            key={conv.id}
+            conversation={conv}
+            onActivate={onActivate}
+          />
         ))}
       </div>
     </>
@@ -85,14 +93,21 @@ export function RecentConversations() {
  * it's the single overflow exit for everything (older 裸聊, extra folders, per-group
  * overflow). Hidden when there are no conversations at all.
  */
-export function ViewAllConversations() {
+export function ViewAllConversations({
+  onActivate,
+}: {
+  onActivate?: () => void;
+} = {}) {
   const count = useConversations().length;
   const navigate = useNavigate();
   if (count === 0) return null;
   return (
     <div className="px-2 pb-2">
       <SurfaceRowButton
-        onClick={() => navigate("/conversations")}
+        onClick={() => {
+          navigate("/conversations");
+          onActivate?.();
+        }}
         className="h-8 justify-between text-sidebar-foreground/55 hover:text-sidebar-foreground"
       >
         <span>查看全部对话</span>

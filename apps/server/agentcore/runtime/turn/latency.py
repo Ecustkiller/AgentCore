@@ -11,6 +11,10 @@ Four fields on ``chat.turn_complete``:
 
 Missing paths stay ``None`` (JSON null) — never a fake ``0``. Subsequent captain
 rounds and all worker streams do not overwrite the TTFT pair.
+
+Emitted on ``chat.turn_complete`` by whichever process ran the captain stream
+(cloud ``turn_runner`` or sidecar ``startTurn``). Cloud write-back of a sidecar
+turn does **not** copy these onto ``chat.local_turn_recorded``.
 """
 
 from __future__ import annotations

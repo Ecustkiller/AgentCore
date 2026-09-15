@@ -6,7 +6,12 @@ import {
   attachConversation,
   clearLastEventId,
 } from "@/services/streamConversation";
-import { getRuntime, useConversationStore } from "@/stores/conversation";
+import {
+  conversationStillWriting,
+  getRuntime,
+  unconfirmedLocalTail,
+  useConversationStore,
+} from "@/stores/conversation";
 import { beginTurnPreflight } from "@/stores/conversation/turnPhaseActions";
 import { useExecutionStore } from "@/stores/execution";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
@@ -470,16 +475,27 @@ export function markGhostInterrupted(conversationId: string): void {
  *
  * `sendTurn` passes ``keepMessageId`` for the composer-painted placeholder so
  * this does not stop Thinking on the bubble the stream is about to use.
+ * Hydrate has no send id — skip the same unconfirmed local tail while this
+ * conversation is still writing (optimistic Thinking is not an orphan).
  */
 export function settleOrphanEmptyAssistants(
   conversationId: string,
   opts?: { keepMessageId?: string },
 ): void {
   const store = useConversationStore.getState();
-  const msgs = getRuntime(conversationId).messages;
-  const keepId = opts?.keepMessageId;
+  const rt = getRuntime(conversationId);
+  const msgs = rt.messages;
+  const keepIds = new Set<string>();
+  if (opts?.keepMessageId) keepIds.add(opts.keepMessageId);
+  if (conversationStillWriting(rt)) {
+    for (const m of unconfirmedLocalTail(msgs, {
+      isGenerating: rt.isGenerating,
+    })) {
+      if (m.role === "assistant") keepIds.add(m.id);
+    }
+  }
   for (const m of msgs) {
-    if (keepId && m.id === keepId) continue;
+    if (keepIds.has(m.id)) continue;
     if (m.role !== "assistant") continue;
     if ((m.content ?? "").trim()) continue;
     if (m.error?.message?.trim()) continue;

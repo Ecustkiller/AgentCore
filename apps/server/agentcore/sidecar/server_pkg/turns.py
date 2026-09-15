@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import re
+import time
 from typing import Any
 
 from agentcore.conversation.common import preview
@@ -28,10 +29,12 @@ from agentcore.runtime.journal.pending_interactions import (
     append_unrecorded_hot_orphan_facts,
 )
 from agentcore.runtime.suspension import TurnSuspension
+from agentcore.runtime.turn.complete_log import log_chat_turn_complete
 from agentcore.runtime.turn.interrupt import (
     finish_reason_for,
     normalize_interrupt_reason,
 )
+from agentcore.runtime.turn.latency import bind_turn_latency, reset_turn_latency
 from agentcore.sidecar import protocol
 from agentcore.sidecar.server_pkg.result import trim_result
 
@@ -576,16 +579,22 @@ class TurnExecutionMixin:
             pump = asyncio.create_task(
                 self._pump(turn_id, sink, conversation_id=conversation_id)
             )
+            started = time.monotonic()
+            _, latency_token = bind_turn_latency(started)
             try:
                 # Bind the turn's trace_id here (the cloud binds it in stream_chat; the engine
                 # itself doesn't) so the engine's message_start carries it and the live bubble
                 # joins the same trace as the proxy logs + write-back (打通气泡↔日志, live ==
                 # reload). Task-local + auto-restored; copied into delegated worker tasks.
+                # cost_role=captain: stream.py only notes TTFT on the captain first stream.
                 with log_context(
                     trace_id=trace_id,
                     conversation_id=conversation_id,
                     user_id=self._user_id,
                     message_id=message_id,
+                    agent_id="CEO",
+                    cost_role="captain",
+                    persona="CEO",
                 ):
                     # Align with cloud turn_runner chat.turn_start; via ≠ location.
                     logger.info(
@@ -649,6 +658,13 @@ class TurnExecutionMixin:
                             attachments=attachments or None,
                             table_selection=table_selection or None,
                         )
+                        # Duration / Phase-0 close before the detached-drive hold —
+                        # same wall-clock as cloud turn_runner (harvest wait is not TTFT).
+                        log_chat_turn_complete(
+                            result,
+                            duration_ms=int((time.monotonic() - started) * 1000),
+                            llm_credentials=turn_creds,
+                        )
                         # Pillar D1: keep sink open while a detached background drive is
                         # still live so run_completed / execution_completed reach the UI
                         # and outbox READY is not sealed mid-DURABLE append. Cancel /
@@ -661,6 +677,7 @@ class TurnExecutionMixin:
                         await await_live_detached_drive(conversation_id)
                         refresh_result_journal_from_host(result, sink=sink)
             finally:
+                reset_turn_latency(latency_token)
                 # Cancel path: emit confirmation *before* close so the pump still
                 # delivers ``message_end(cancelled)`` (TURN_CANCELLED alone is not enough).
                 _emit_cancel_end_if_cancelling(sink)

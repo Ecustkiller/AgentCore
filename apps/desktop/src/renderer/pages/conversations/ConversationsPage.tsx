@@ -1,3 +1,4 @@
+import { NarrowMenuButton } from "@/components/layout/NarrowMenuButton";
 import {
   Badge,
   Button,
@@ -17,7 +18,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { folderAncestorNames } from "@/lib/folderTree";
+import { useNarrowLayoutState } from "@/lib/narrowLayout";
 import { startNewConversation } from "@/lib/newConversation";
+import { cn } from "@/lib/utils";
 import type { DeletedConversationMeta } from "@/services/conversations";
 import type { DeletedFolderMeta, FolderMeta } from "@/services/folders";
 import { UNGROUPED_KEY } from "@/stores/folders";
@@ -64,6 +67,7 @@ import {
  * dense list with view/project nav — sidebar only keeps recent chats.
  */
 export function ConversationsPage() {
+  const { isNarrow } = useNarrowLayoutState();
   const navigate = useNavigate();
   const { selected, setSelected, flashId, folderIds, folders } =
     useConversationRouting();
@@ -96,12 +100,37 @@ export function ConversationsPage() {
   };
 
   return (
-    <div className="h-full w-full overflow-hidden">
-      <div className="mx-auto flex h-full max-w-[1400px] flex-col px-6 py-6">
-        <PageHeader title="全部对话" className="shrink-0" />
+    <div className="flex h-full w-full flex-col overflow-hidden">
+      {isNarrow && (
+        <header className="flex h-12 shrink-0 items-center gap-1 border-b border-border bg-card px-2 pt-[env(safe-area-inset-top)]">
+          <NarrowMenuButton />
+          <h1 className="min-w-0 flex-1 truncate text-center text-sm font-medium">
+            全部对话
+          </h1>
+        </header>
+      )}
+      <div
+        className={cn(
+          "mx-auto flex min-h-0 w-full max-w-[1400px] flex-1 flex-col",
+          isNarrow ? "px-4 py-4" : "px-6 py-6",
+        )}
+      >
+        {!isNarrow && <PageHeader title="全部对话" className="shrink-0" />}
 
-        <div className="mt-5 flex min-h-0 flex-1 gap-5">
-          <aside className="flex w-56 shrink-0 flex-col">
+        <div
+          className={cn(
+            "flex min-h-0 flex-1",
+            isNarrow ? "mt-0 flex-col gap-3" : "mt-5 gap-5",
+          )}
+        >
+          <aside
+            className={cn(
+              "flex flex-col",
+              isNarrow
+                ? "max-h-40 w-full shrink-0 overflow-y-auto"
+                : "w-56 shrink-0",
+            )}
+          >
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
               <div>
                 <SectionLabel className="mb-1.5 px-2">视图</SectionLabel>

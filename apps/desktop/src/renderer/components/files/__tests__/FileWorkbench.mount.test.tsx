@@ -1,8 +1,10 @@
+// @vitest-environment jsdom
 import { FileWorkbench } from "@/components/files/FileWorkbench";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { queryClient } from "@/lib/queryClient";
 import { workspaceKeys } from "@/lib/queryKeys";
-// @vitest-environment jsdom
 import { cleanup, render, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -14,6 +16,7 @@ vi.mock("@/hooks/useConversations", () => ({
 vi.mock("@/hooks/useFolders", () => ({
   useFolders: () => [],
   getFolders: () => [],
+  useCreateFolder: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@/components/folders/PendingFolderInvites", () => ({
@@ -23,9 +26,13 @@ vi.mock("@/components/folders/PendingFolderInvites", () => ({
 describe("FileWorkbench mount", () => {
   afterEach(cleanup);
 
+  function hub(node: ReactElement) {
+    return render(<TooltipProvider>{node}</TooltipProvider>);
+  }
+
   it("does not invalidate workspace list on open", () => {
     const spy = vi.spyOn(queryClient, "invalidateQueries");
-    render(
+    hub(
       <FileWorkbench
         workspaces={[]}
         isLoading={false}
@@ -41,7 +48,7 @@ describe("FileWorkbench mount", () => {
   });
 
   it("does not list 快速对话 even when conv: scratch is in the workspace list", () => {
-    render(
+    hub(
       <FileWorkbench
         workspaces={[
           {
@@ -63,6 +70,10 @@ describe("FileWorkbench mount", () => {
     expect(screen.queryByText("快速对话产生文件后会出现在这里")).toBeNull();
     expect(screen.queryByText("一次快速对话")).toBeNull();
     expect(screen.getByText("还没有文件夹")).toBeTruthy();
+    expect(screen.getByText("我的文件")).toBeTruthy();
+    expect(
+      screen.getAllByRole("button", { name: "新建文件夹" }).length,
+    ).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("共享空间")).toBeNull();
     expect(screen.queryByText("挂载共享")).toBeNull();
     expect(screen.queryByText("还没有共享空间")).toBeNull();
@@ -70,7 +81,7 @@ describe("FileWorkbench mount", () => {
   });
 
   it("does not pin account prompts or 最近更新 on the files rail", () => {
-    render(
+    hub(
       <MemoryRouter>
         <FileWorkbench
           workspaces={[]}

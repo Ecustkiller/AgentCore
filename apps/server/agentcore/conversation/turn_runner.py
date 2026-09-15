@@ -29,6 +29,7 @@ from agentcore.runtime.leases import (
 from agentcore.runtime.pipeline import run_chat_pipeline
 from agentcore.runtime.session_persistence import load_run_session, save_run_session
 from agentcore.runtime.suspension.persistence import delete_paused_turn, save_paused_turn
+from agentcore.runtime.turn.complete_log import log_chat_turn_complete
 from agentcore.runtime.turn.latency import bind_turn_latency, reset_turn_latency
 from agentcore.runtime.turn.runs import turn_runs
 from agentcore.workspace.protocol import WorkspaceBackend
@@ -324,49 +325,11 @@ async def run_and_persist(
                         else:
                             release_lease_clean = False
                         raise
-                    finish = result.get("finish_reason")
                     duration_ms = int((time.monotonic() - started) * 1000)
-                    delegated, workers = turn_worker_stats(result)
-                    collab = result.get("collab") or {}
-                    turn_extra: dict = {}
-                    turn_model = (
-                        llm_credentials.default_model if llm_credentials is not None else ""
-                    )
-                    if turn_model:
-                        turn_extra["model"] = turn_model
-                    cred_src = get_log_value("credential_source")
-                    if cred_src:
-                        turn_extra["credential_source"] = cred_src
-                    provider_id = get_log_value("provider_id")
-                    if provider_id:
-                        turn_extra["provider_id"] = provider_id
-                    turn_outcome = result.get("outcome")
-                    logger.info(
-                        "chat.turn_complete",
-                        finish_reason=getattr(finish, "value", finish),
-                        **(
-                            {"outcome": turn_outcome}
-                            if turn_outcome in ("ok", "partial", "paused", "error")
-                            else {}
-                        ),
-                        rounds=result.get("rounds", 0),
-                        input_tokens=result.get("input_tokens", 0),
-                        output_tokens=result.get("output_tokens", 0),
-                        reasoning_tokens=result.get("reasoning_tokens", 0),
-                        reply_chars=len(result.get("content") or ""),
-                        reply_preview=preview(result.get("content") or ""),
-                        delegated=delegated,
-                        workers=workers,
-                        # 协作质量 (学·度量 §2.5): per-turn orchestration signals, also
-                        # persisted to turn_metrics (offline log_stats derives same from events).
-                        boundary_yields=collab.get("boundary_yields", 0),
-                        scope_signals=collab.get("scope_signals", 0),
-                        escalations=collab.get("escalations", 0),
-                        revises=collab.get("revises", 0),
+                    log_chat_turn_complete(
+                        result,
                         duration_ms=duration_ms,
-                        error=result.get("error"),
-                        **latency_probe.as_log_fields(),
-                        **turn_extra,
+                        llm_credentials=llm_credentials,
                     )
 
                     # Persist INSIDE the trace scope so the post-turn tail (cost.recorded,

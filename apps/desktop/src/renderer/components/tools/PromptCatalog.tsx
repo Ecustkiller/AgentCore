@@ -1,5 +1,9 @@
 import { InlineInput } from "@/components/files/FileTreeInline";
 import {
+  UNTITLED_PROMPT_FOLDER_NAME,
+  uniqueNumberedName,
+} from "@/components/files/dedupeName";
+import {
   type PromptDropDest,
   PromptOverview,
 } from "@/components/tools/PromptOverview";
@@ -158,7 +162,7 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
     { id: string; name: string }[]
   >([]);
   const [createFolderId, setCreateFolderId] = useState<string | null>(null);
-  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [renamingMineId, setRenamingMineId] = useState<string | null>(null);
   const [dropDest, setDropDest] = useState<PromptDropDest | null>(null);
   const [mcpBusyId, setMcpBusyId] = useState<string | null>(null);
@@ -224,6 +228,7 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
     setSelectedId(OVERVIEW_CATALOG_ID);
     setCreateFolderId(null);
     setRenamingMineId(null);
+    setRenamingFolderId(null);
     if (updatesOpen) setUpdatesOpen(false);
   }, [updatesOpen, setUpdatesOpen]);
 
@@ -341,7 +346,7 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
   }
 
   async function onCreateMine() {
-    setCreatingFolder(false);
+    setRenamingFolderId(null);
     setRenamingMineId(null);
     await persist(async () => {
       const parentId =
@@ -360,18 +365,30 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
     });
   }
 
-  function startCreateFolder() {
+  async function createUntitledPromptFolder() {
     setRenamingMineId(null);
-    setCreatingFolder(true);
+    let createdId: string | null = null;
+    const ok = await persist(async () => {
+      const name = uniqueNumberedName(
+        UNTITLED_PROMPT_FOLDER_NAME,
+        promptFolders.map((folder) => folder.name),
+      );
+      const created = await createRuleFolder(name);
+      createdId = created.id;
+      setCreateFolderId(created.id);
+      return undefined;
+    });
+    if (ok && createdId) setRenamingFolderId(createdId);
   }
 
-  async function submitCreateFolder(raw: string) {
-    setCreatingFolder(false);
+  async function submitRenameFolder(id: string, raw: string) {
+    setRenamingFolderId(null);
     const name = raw.trim().replace(/^\/+|\/+$/g, "");
     if (!name || name.includes("/")) return;
+    const current = promptFolders.find((folder) => folder.id === id);
+    if (current && current.name === name) return;
     await persist(async () => {
-      const created = await createRuleFolder(name);
-      setCreateFolderId(created.id);
+      await renameDocument(id, name);
       return undefined;
     });
   }
@@ -436,7 +453,7 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
 
   function startRenameMine(item: PromptCatalogItem) {
     if (item.kind !== "mine" || !item.mineId || item.aiMaintained) return;
-    setCreatingFolder(false);
+    setRenamingFolderId(null);
     setRenamingMineId(item.mineId);
   }
 
@@ -567,7 +584,7 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
           }))}
           connectorError={mcp.error}
           showConnectors={Boolean(mcp.api)}
-          creatingFolder={creatingFolder}
+          renamingFolderId={renamingFolderId}
           busy={busy}
           listings={listings}
           installedListings={installedListings}
@@ -580,9 +597,9 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
             setUpdatesOpen(true);
           }}
           onCreateMine={() => void onCreateMine()}
-          onStartCreateFolder={startCreateFolder}
-          onSubmitCreateFolder={(name) => void submitCreateFolder(name)}
-          onCancelCreateFolder={() => setCreatingFolder(false)}
+          onCreateFolder={() => void createUntitledPromptFolder()}
+          onSubmitRenameFolder={(id, name) => void submitRenameFolder(id, name)}
+          onCancelRenameFolder={() => setRenamingFolderId(null)}
           onAddConnector={
             mcp.api
               ? () => {

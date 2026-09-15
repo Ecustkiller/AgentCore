@@ -14,7 +14,7 @@ const POSTER_LABEL: Record<SponsorPosterKind, string> = {
 const POSTER_ORDER: SponsorPosterKind[] = ["wechat", "alipay"];
 
 /**
- * 赞助（/more/sponsor）— 自愿打赏入口。
+ * 赞助（/more/sponsor）— 收款码入口。
  *
  * 收款码文件 gitignore，不进公开仓。本次 Vite 构建若目录里有
  * `wechat.png` / `alipay.jpg`，会打进该次桌面 / web / Android 包。

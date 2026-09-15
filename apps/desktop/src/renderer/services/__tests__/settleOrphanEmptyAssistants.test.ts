@@ -247,4 +247,74 @@ describe("settleOrphanEmptyAssistants", () => {
     expect(msgs.find((m) => m.id === "a-keep")?.isStreaming).toBe(true);
     expect(msgs.find((m) => m.id === "a-old")?.isStreaming).toBe(false);
   });
+
+  it("does not settle the unconfirmed tail while the conversation is still writing", () => {
+    const store = useConversationStore.getState();
+    store.switchConversation(CID);
+    store.addMessage(
+      {
+        id: "u-opt",
+        role: "user",
+        content: "你好",
+        createdAt: "2026-01-01T00:00:00Z",
+        executionId: null,
+        isStreaming: false,
+      },
+      CID,
+    );
+    store.addMessage(
+      {
+        id: "a-opt",
+        role: "assistant",
+        content: "",
+        createdAt: "2026-01-01T00:00:01Z",
+        executionId: null,
+        isStreaming: true,
+      },
+      CID,
+    );
+    store.setGenerating(true, CID);
+
+    settleOrphanEmptyAssistants(CID);
+
+    const a = useConversationStore
+      .getState()
+      .byId[CID].messages.find((m) => m.id === "a-opt");
+    expect(a?.isStreaming).toBe(true);
+  });
+
+  it("still settles a leftover streaming empty after a persisted user when idle", () => {
+    const store = useConversationStore.getState();
+    store.switchConversation(CID);
+    store.addMessage(
+      {
+        id: "u1",
+        role: "user",
+        content: "q",
+        createdAt: "2026-01-01T00:00:00Z",
+        executionId: null,
+        isStreaming: false,
+        serverMessageId: "srv-u1",
+      },
+      CID,
+    );
+    store.addMessage(
+      {
+        id: "a-orphan",
+        role: "assistant",
+        content: "",
+        createdAt: "2026-01-01T00:00:01Z",
+        executionId: null,
+        isStreaming: true,
+      },
+      CID,
+    );
+
+    settleOrphanEmptyAssistants(CID);
+
+    const a = useConversationStore
+      .getState()
+      .byId[CID].messages.find((m) => m.id === "a-orphan");
+    expect(a?.isStreaming).toBe(false);
+  });
 });

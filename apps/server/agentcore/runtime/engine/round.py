@@ -415,6 +415,7 @@ def decide_no_tool_round(
     supports_tools: bool | None = None,
     turn_evidence_ledger: EvidenceLedgerCore | None = None,
     promotion_ledger: Any = None,
+    role: str = "captain",
 ) -> LoopDirective:
     """Pick the directive for a round with no tool calls.
 
@@ -424,8 +425,24 @@ def decide_no_tool_round(
     (``Return`` + DEGRADED) or retry on the same model (``Continue``). Upstream
     ``finish_reason=length`` with empty body skips the one-shot Continue.
 
+    Captain + live coordinating team: ``Continue`` (listen), not ``Return`` — occupancy
+    stays this desk until the session closes. Workers are unaffected.
+
     对话气泡不因 ``#rN`` / 悬空 ``[n]`` / 书目回炉；结构围栏与 CEO 交付结构闸仍可 Rework。
     """
+    from agentcore.runtime.coordination.session import (
+        active_coordination,
+        live_team_holds_captain_turn,
+    )
+
+    if live_team_holds_captain_turn(role):
+        session = active_coordination()
+        logger.info(
+            "engine.coordination_hold_end",
+            execution_id=session.execution_id if session is not None else "",
+            has_content=bool(outcome.content),
+        )
+        return Continue()
     if outcome.content:
         from agentcore.runtime.closing_posture import (
             downgrade_verdict_for_unresolved_write_ownership,

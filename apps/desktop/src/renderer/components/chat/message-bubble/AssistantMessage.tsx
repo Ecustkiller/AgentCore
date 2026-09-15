@@ -40,11 +40,9 @@ import { continuePausedTurn } from "@/services/turns/continuePaused";
 import {
   type CheckpointDisplay,
   assistantProjectionId,
-  conversationStillWriting,
   getActiveRuntime,
-  lastAssistantMessageId,
-  runtimeOf,
   useConversationStore,
+  useLiveTailWriting,
 } from "@/stores/conversation";
 import { useExecutionStore, useMessageExecution } from "@/stores/execution";
 import { useMessageInteractionCards } from "@/stores/interactions";
@@ -102,13 +100,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   const loadMessageCost = useUsageStore((s) => s.loadMessageCost);
   const cachedTurn = useUsageStore((s) => s.messageCosts[message.id] ?? null);
   const conversationId = useConversationStore((s) => s.currentConversationId);
-  const liveTailWriting = useConversationStore((s) => {
-    const id = s.currentConversationId;
-    if (!id || !s.byId) return false;
-    const rt = runtimeOf(s, id);
-    if (!conversationStillWriting(rt)) return false;
-    return lastAssistantMessageId(rt.messages) === message.id;
-  });
+  const liveTailWriting = useLiveTailWriting(message.id);
   const bubbleLive = message.isStreaming || liveTailWriting;
   const waitingForWorkspaceLock = useConversationStore((s) => {
     const id = s.currentConversationId;

@@ -9,6 +9,7 @@ import {
   githubTagForRail,
   inspectGithubReleaseForFeed,
   runDirectRailSync,
+  sameVersionFilename,
 } from "./sync-release-cdn.mjs";
 
 function jsonResponse(status, body) {
@@ -68,6 +69,19 @@ function trackDirectIo() {
     },
   };
 }
+
+describe("sameVersionFilename", () => {
+  it("keeps a filename only when it belongs to the feed version", () => {
+    assert.equal(
+      sameVersionFilename("AgentCore-0.9.27-mac-arm64.dmg", "0.9.27"),
+      "AgentCore-0.9.27-mac-arm64.dmg",
+    );
+    assert.equal(
+      sameVersionFilename("AgentCore-0.9.26-mac-arm64.dmg", "0.9.27"),
+      "",
+    );
+  });
+});
 
 describe("githubTagForRail", () => {
   it("uses v* for desktop and android-v* for android", () => {

@@ -9,6 +9,7 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import { isWebClient } from "@/lib/capabilities";
 import { startNewConversation } from "@/lib/newConversation";
 import { RailHotkeySlotsProvider } from "@/lib/railHotkeys";
+import { cn } from "@/lib/utils";
 import { useUnreadTotal } from "@/stores/messaging";
 import { SIDEBAR_COLLAPSED_WIDTH, useSidebarStore } from "@/stores/sidebar";
 import { useUIStore } from "@/stores/ui";
@@ -19,6 +20,7 @@ import {
   PanelLeft,
   PanelLeftClose,
   Wrench,
+  X,
 } from "lucide-react";
 import type { ReactNode, PointerEvent as ReactPointerEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -52,8 +54,15 @@ function CollapsedNavTip({
   );
 }
 
-export function Sidebar() {
-  const collapsed = useSidebarStore((s) => s.collapsed);
+export function Sidebar({
+  overlay = false,
+  onDismiss,
+}: {
+  overlay?: boolean;
+  onDismiss?: () => void;
+} = {}) {
+  const storeCollapsed = useSidebarStore((s) => s.collapsed);
+  const collapsed = overlay ? false : storeCollapsed;
   const width = useSidebarStore((s) => s.width);
   const resizing = useSidebarStore((s) => s.resizing);
   const setWidth = useSidebarStore((s) => s.setWidth);
@@ -68,6 +77,9 @@ export function Sidebar() {
   // 浏览器版没有桌面顶栏（AppShell 已隐藏），品牌 / 折叠按钮改由侧栏顶部承载。
   // 搜索假入口两端都在侧栏（桌面顶栏不再放）。桌面 & 离线预览仍用顶栏放品牌/折叠。
   const webClient = isWebClient();
+  const navItems = overlay
+    ? NAV_ITEMS.filter((item) => item.route !== "/toolbox")
+    : NAV_ITEMS;
 
   // 顶栏区段跟路由；对话行选中态也跟路由（`conversationLocationId`），避免非对话页
   // 与上场会话双高亮。`/` 兼「新建」与对话区段指示：仅空白草稿与「全部对话」页高亮，
@@ -77,11 +89,14 @@ export function Sidebar() {
       ? pathname === "/" || pathname === "/conversations"
       : pathname === route || pathname.startsWith(`${route}/`);
 
-  // 「对话」入口默认就是新建一个空白对话；回到旧对话走下方列表 /「全部对话」。
-  const handleNewConversation = () => startNewConversation(navigate);
+  const goNav = (route: string) => {
+    if (route === "/") startNewConversation(navigate);
+    else navigate(route);
+    onDismiss?.();
+  };
 
   const onResizeStart = (e: ReactPointerEvent) => {
-    if (collapsed) return;
+    if (collapsed || overlay) return;
     e.preventDefault();
     const startX = e.clientX;
     const startWidth = width;
@@ -99,13 +114,28 @@ export function Sidebar() {
 
   return (
     <aside
-      className={`relative flex flex-shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground ${resizing ? "" : "transition-[width] duration-200"}`}
-      style={{
-        width: collapsed ? SIDEBAR_COLLAPSED_WIDTH : width,
-        backgroundImage: "var(--sidebar-gradient)",
-      }}
+      className={cn(
+        "relative flex flex-shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground",
+        overlay
+          ? "absolute inset-y-0 left-0 z-40 w-[min(20rem,86vw)] shadow-md"
+          : resizing
+            ? ""
+            : "transition-[width] duration-200",
+        overlay &&
+          "pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]",
+      )}
+      style={
+        overlay
+          ? { backgroundImage: "var(--sidebar-gradient)" }
+          : {
+              width: collapsed ? SIDEBAR_COLLAPSED_WIDTH : width,
+              backgroundImage: "var(--sidebar-gradient)",
+            }
+      }
+      role={overlay ? "dialog" : undefined}
+      aria-label={overlay ? "侧栏" : undefined}
     >
-      {!collapsed && (
+      {!collapsed && !overlay && (
         <Button
           variant="ghost"
           aria-label="拖拽调整侧栏宽度（双击还原默认）"
@@ -115,8 +145,8 @@ export function Sidebar() {
         />
       )}
 
-      {/* 浏览器无顶栏：品牌 + 折叠钮放侧栏顶。桌面品牌/折叠仍在 TitleBar。 */}
-      {webClient && (
+      {/* overlay：无窗口顶栏，品牌 + 关闭。web 宽屏：品牌 + 折叠。Electron 宽屏品牌/折叠在 TitleBar。 */}
+      {(overlay || webClient) && (
         <div className="px-2 pt-2">
           <div
             className={`flex items-center gap-1 ${collapsed ? "justify-center" : "px-1"}`}
@@ -131,25 +161,41 @@ export function Sidebar() {
                 )}
               </span>
             )}
-            <IconButton
-              tone="sidebar"
-              onClick={toggleCollapsed}
-              aria-label={collapsed ? "展开侧栏" : "折叠侧栏"}
-            >
-              {collapsed ? (
-                <PanelLeft size={16} />
-              ) : (
-                <PanelLeftClose size={16} />
-              )}
-            </IconButton>
+            {overlay ? (
+              <IconButton
+                tone="sidebar"
+                onClick={() => onDismiss?.()}
+                aria-label="关闭侧栏"
+              >
+                <X size={16} />
+              </IconButton>
+            ) : (
+              <IconButton
+                tone="sidebar"
+                onClick={toggleCollapsed}
+                aria-label={collapsed ? "展开侧栏" : "折叠侧栏"}
+              >
+                {collapsed ? (
+                  <PanelLeft size={16} />
+                ) : (
+                  <PanelLeftClose size={16} />
+                )}
+              </IconButton>
+            )}
           </div>
         </div>
       )}
 
       {/* 搜索假入口与主导航同一栈（字段感靠浅底 + ⌘K，不是单独成块/分隔线）。 */}
       <nav className="space-y-0.5 px-2 pt-2 pb-2">
-        <SearchTrigger collapsed={collapsed} onClick={() => openSearch()} />
-        {NAV_ITEMS.map((item) => {
+        <SearchTrigger
+          collapsed={collapsed}
+          onClick={() => {
+            openSearch();
+            onDismiss?.();
+          }}
+        />
+        {navItems.map((item) => {
           const active = isNavActive(item.route);
           const showBadge = item.route === "/messages" && unread > 0;
           // 折叠仅图标：补 aria-label + SimpleTooltip，与用户区习惯一致。
@@ -159,11 +205,7 @@ export function Sidebar() {
                 <SurfaceRowButton
                   active={active}
                   aria-label={item.label}
-                  onClick={() =>
-                    item.route === "/"
-                      ? handleNewConversation()
-                      : navigate(item.route)
-                  }
+                  onClick={() => goNav(item.route)}
                   className="relative h-8 justify-center px-0 font-medium"
                 >
                   <item.icon size={16} className="shrink-0" />
@@ -181,11 +223,7 @@ export function Sidebar() {
             <SurfaceRowButton
               key={item.route}
               active={active}
-              onClick={() =>
-                item.route === "/"
-                  ? handleNewConversation()
-                  : navigate(item.route)
-              }
+              onClick={() => goNav(item.route)}
               // 与下方列表同高（h-8）——整条侧栏一个 34px 节奏；导航的层级由分隔线 +
               // font-medium + 图标承担，不再靠行高撑。
               className="relative h-8 font-medium"
@@ -210,10 +248,10 @@ export function Sidebar() {
       <div className="flex-1 overflow-y-auto">
         {!collapsed && (
           <RailHotkeySlotsProvider>
-            <PinnedConversations />
-            <WorkspaceGroups />
-            <RecentConversations />
-            <ViewAllConversations />
+            <PinnedConversations onActivate={onDismiss} />
+            <WorkspaceGroups onActivate={onDismiss} />
+            <RecentConversations onActivate={onDismiss} />
+            <ViewAllConversations onActivate={onDismiss} />
           </RailHotkeySlotsProvider>
         )}
       </div>

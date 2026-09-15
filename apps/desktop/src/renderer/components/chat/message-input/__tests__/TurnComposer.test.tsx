@@ -378,6 +378,30 @@ function seedCoordinationActive() {
   useExecutionStore.getState().startExecution(TEAM_PLAN, COORD_MID);
 }
 
+function seedCoordinationLampOff() {
+  useConversationStore.setState({
+    currentConversationId: OUTCOME_CID,
+    byId: {
+      [OUTCOME_CID]: {
+        ...EMPTY_RUNTIME,
+        isGenerating: false,
+        turnPhase: "idle",
+        messages: [
+          {
+            id: COORD_MID,
+            role: "assistant",
+            content: "换打法",
+            createdAt: new Date().toISOString(),
+            executionId: "exec-team",
+            isStreaming: false,
+          },
+        ],
+      },
+    },
+  });
+  useExecutionStore.getState().startExecution(TEAM_PLAN, COORD_MID);
+}
+
 function seedLiveDebate() {
   useConversationStore.setState({
     currentConversationId: OUTCOME_CID,
@@ -732,6 +756,20 @@ describe("TurnComposer variants", () => {
     handleSendMock.mockClear();
     fireEvent.keyDown(body, { key: "Enter", ctrlKey: true });
     expect(handleSendMock).toHaveBeenCalledWith({ delivery: "queue" });
+  });
+
+  it("灯灭但队还在：发送主按钮 + 排队，无插队", async () => {
+    genMock.value = false;
+    seedCoordinationLampOff();
+    const { useComposerDraftStore } = await import("@/stores/composer");
+    useComposerDraftStore.getState().setValue(OUTCOME_CID, "补一句");
+    renderComposer("bar");
+    expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
+    const queue = screen.getByRole("button", { name: "排队" });
+    expect(queue).toBeTruthy();
+    expect(queue.getAttribute("title")).toBe("等团队收工后再说");
+    expect(screen.queryByRole("button", { name: "插队" })).toBeNull();
+    expect(screen.getByRole("button", { name: "停止生成" })).toBeTruthy();
   });
 
   it("idle: Ctrl/Cmd+Enter matches Enter (no fake queue)", async () => {

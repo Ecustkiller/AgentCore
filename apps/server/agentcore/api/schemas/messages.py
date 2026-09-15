@@ -978,6 +978,8 @@ LOCAL_TURN_TOOL_FAILURE_CODES = frozenset(
         "source_dump_redirect",
         "long_running_redirect",
         "loopback_host",
+        "shell_fetch_redirect",
+        "shell_download_redirect",
         "access_denied",
         "outside_workspace",
         "other",
@@ -1002,6 +1004,10 @@ def _remap_path_or_verify_failure(message: str) -> str | None:
         return "source_dump_redirect"
     if "禁止用 code_execute 启动长驻进程" in raw or "请用 run 启动长驻进程" in raw:
         return "long_running_redirect"
+    if "公网 http(s) 摘字请用 web_fetch" in raw:
+        return "shell_fetch_redirect"
+    if "公网 http(s) 落到工作区请用 download_url" in raw:
+        return "shell_download_redirect"
     if any(
         needle in raw
         for needle in (

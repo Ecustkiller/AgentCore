@@ -1,8 +1,8 @@
 """Delegate tool schema and constants.
 
 Schema layer (工具面瘦身): short trigger + 拆任务合同 + playbook/tasks 互斥.
-何时用写在本 description；根 CEO 编制 HOW →
-``consult(staffing)``；嵌套 lead → ``consult(lead_subteam)``.
+何时用写在本 description（根 / 嵌套共用 ``DELEGATE_WHEN``，窗绑定分叉）；
+根 CEO 编制 HOW → ``consult(staffing)``；嵌套 lead → ``consult(lead_subteam)``.
 task 参数只留自包含对比边界；填约束/路径/凭据 HOW 在上述 consult。
 """
 
@@ -29,14 +29,21 @@ TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
     },
 }
 
-# Trigger + when-to-use polarity. XOR → playbook 参数一句；探路/编制 HOW → consult.
+# Shared when-to-use polarity (根 CEO / 嵌套 lead 同一条信息判据).
+# 窗绑定与机械尾巴分叉：根=会话窗+立刻返回；嵌套=这张任务卡+阻塞收工。
+# 编制 HOW 仍分 consult：根 staffing / 嵌套 lead_subteam。
+DELEGATE_WHEN = (
+    "能切开才并行或交叉验证，或过程不该进你这扇窗；"
+    "切不出去的现场、窗里已有证据、一眼能收口不必派。"
+    "有写权 ≠ 自己做完。不知读哪 ≠ 自己连搜。"
+)
+
 DELEGATE_DESCRIPTION = (
     f"拆任务给临时团队（默认手写顶层 tasks：role+task，≤{MAX_DELEGATION_TASKS}；非终结）。"
-    "默认用本工具：能切开才并行或交叉验证，或过程不该进你这扇会话窗"
-    "（成篇落盘、可运行应用、成规模查证、要并行尤然）；"
-    "切不出去的现场、窗里已有的证据、一眼能收口不必派"
-    "（闲聊、一问一答、短文或小落盘、纯启服）。"
-    "有写权 ≠ 自己做完。不知读哪 ≠ 自己连搜。"
+    f"默认用本工具：{DELEGATE_WHEN}"
+    "你的窗跟会话走"
+    "（成篇落盘、可运行应用、成规模查证、要并行；"
+    "闲聊、一问一答、短文或小落盘、纯启服）。"
     "HOW→consult(staffing)。"
 )
 
@@ -44,9 +51,8 @@ DELEGATE_DESCRIPTION = (
 NESTED_DELEGATE_DESCRIPTION = (
     f"把当前任务拆给由你指挥的子团队（手写 tasks：role+task，≤{MAX_DELEGATION_TASKS}；"
     "调用后等到子队收工）。"
-    "成果级目标·约束·验收、尚未钉成单切片时优先用本工具再整合；"
-    "单文件 / 已钉薄壳 / 切不出去的现场 / 小修·机械单步自己干。"
-    "有写权 ≠ 自己做完。"
+    f"{DELEGATE_WHEN}"
+    "你的窗跟这张任务卡走，卡上已是一件则留下。"
     "HOW→consult(lead_subteam)。"
 )
 

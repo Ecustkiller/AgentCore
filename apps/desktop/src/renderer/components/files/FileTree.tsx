@@ -31,7 +31,7 @@ import { InlineCreateRow } from "./FileTreeInline";
 import { FileTreeRow } from "./FileTreeRow";
 import { FileTreeSelectionBar } from "./FileTreeSelectionBar";
 import { UploadMenu } from "./UploadMenu";
-import { dedupeName } from "./dedupeName";
+import { dedupeName, uniqueUntitledFolder } from "./dedupeName";
 import { setFileClipboard, useFileClipboard } from "./fileClipboard";
 import {
   type BatchFailure,
@@ -65,9 +65,10 @@ export const FILE_TREE_SILENT_DEBOUNCE_MS = 200;
  * tree that backs both the Files page (a local OS root) and the conversation
  * workspace panel (the server workspace). Capabilities gate the chrome: upload
  * appears only when the source can transfer bytes; live updates only when it can
- * watch. Interaction model is converged on inline create/rename + a right-click
- * context menu + drag-to-move (within the source), with per-source persisted
- * fold state. The container owns where a clicked file opens (via `onOpenFile`).
+ * watch. New directories are created immediately as「未命名文件夹」then renamed
+ * (Finder); new files stay name-first. Right-click + drag-to-move stay on the
+ * tree, with per-source persisted fold state. The container owns where a clicked
+ * file opens (via `onOpenFile`).
  */
 interface FileTreeProps {
   source: FileSource;
@@ -357,20 +358,55 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       for (const dir of effectiveExpanded) data.reload(dir);
     }, [data, effectiveExpanded]);
 
-    const openCreate = useCallback(
-      (dir: string, kind: "file" | "dir") => {
-        if (dir !== "") {
-          setExpanded((prev) => {
-            if (prev.has(dir)) return prev;
-            const next = new Set(prev).add(dir);
-            data.ensureDir(dir);
-            saveExpanded(source.id, next);
-            return next;
-          });
-        }
-        setCreating({ dir, kind });
+    const expandDir = useCallback(
+      (dir: string) => {
+        if (dir === "") return;
+        setExpanded((prev) => {
+          if (prev.has(dir)) return prev;
+          const next = new Set(prev).add(dir);
+          data.ensureDir(dir);
+          saveExpanded(source.id, next);
+          return next;
+        });
       },
       [data, source.id],
+    );
+
+    const createUntitledDir = useCallback(
+      async (dir: string) => {
+        expandDir(dir);
+        const loaded = data.childrenOf(dir);
+        let names = loaded?.map((n) => n.name) ?? [];
+        if (loaded === undefined) {
+          try {
+            names = (await source.listDir(dir)).map((n) => n.name);
+          } catch {
+            names = [];
+          }
+        }
+        const name = uniqueUntitledFolder(names);
+        const path = joinPath(dir, name);
+        try {
+          await source.mkdir(path);
+          data.reload(dir);
+          setRenaming(path);
+        } catch {
+          notifyError("已存在同名文件或文件夹，或创建失败");
+        }
+      },
+      [data, expandDir, source],
+    );
+
+    const openCreate = useCallback(
+      (dir: string, kind: "file" | "dir") => {
+        if (kind === "dir") {
+          void createUntitledDir(dir);
+          return;
+        }
+        expandDir(dir);
+        setCreating({ dir, kind });
+      },
+      [createUntitledDir, expandDir],
     );
 
     const submitCreate = useCallback(

@@ -269,7 +269,7 @@ def test_shape_matches_check_is_diagnostic():
 
 def test_collab_shapes_suite_loads_and_lints():
     cases = load_cases(suite="collab_shapes")
-    assert len(cases) == 17
+    assert len(cases) == 18
     ids = {c.id for c in cases}
     assert ids == {
         "collab_p1_multi_object_compare",
@@ -283,6 +283,7 @@ def test_collab_shapes_suite_loads_and_lints():
         "collab_par_explore_all_angles",
         "collab_par_frontend_stack",
         "collab_par_km_tools",
+        "collab_solo_cite_doc",
         "collab_solo_config_line",
         "collab_solo_essay_file",
         "collab_xd_design_to_api",
@@ -292,6 +293,14 @@ def test_collab_shapes_suite_loads_and_lints():
     }
     by_id = {c.id: c for c in cases}
     assert by_id["collab_solo_config_line"].workspace_fixture == "probe_workspace"
+    cite = by_id["collab_solo_cite_doc"]
+    assert cite.expected_shape is not None
+    assert cite.expected_shape.get("max_workers") == 1
+    assert cite.expected_shape.get("has_nested") is False
+    essay = by_id["collab_solo_essay_file"]
+    assert essay.expected_shape is not None
+    assert essay.expected_shape.get("max_workers") == 1
+    assert essay.expected_shape.get("has_nested") is False
     ui = by_id["collab_xd_ui_direction_mvp"]
     assert ui.expected_shape is not None
     assert ui.expected_shape.get("max_workers") == 1

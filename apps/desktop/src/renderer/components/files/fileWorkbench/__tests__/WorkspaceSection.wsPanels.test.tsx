@@ -23,7 +23,8 @@ vi.mock("@/components/files/FileTree", () => ({
 }));
 
 vi.mock("@/components/folders/FolderMembersDialog", () => ({
-  FolderMembersDialog: () => null,
+  FolderMembersDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="members-dialog">成员弹层</div> : null,
 }));
 
 vi.mock("react-router-dom", () => ({
@@ -218,6 +219,24 @@ describe("云端文件夹的协作人图标", () => {
     renderSection({});
     expect(screen.getByText("协作 · 2 人")).toBeTruthy();
     expect(screen.queryByText("已共享")).toBeNull();
+  });
+
+  it("clicking the people mark opens members", () => {
+    getFoldersMock.mockReturnValue([
+      {
+        id: "f1",
+        name: "季度报告",
+        mode: "cloud",
+        localRootId: null,
+        localSubpath: null,
+        myRole: "owner",
+        collaboratorCount: 2,
+      },
+    ]);
+    renderSection({});
+    expect(screen.queryByTestId("members-dialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "协作 · 2 人" }));
+    expect(screen.getByTestId("members-dialog")).toBeTruthy();
   });
 
   it("member desk shows 可编辑, not the people mark", () => {

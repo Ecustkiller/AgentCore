@@ -1,5 +1,6 @@
 import { FileDetail, type FileDirtyState } from "@/components/files/FileDetail";
 import { MemoryProfileSplitEditor } from "@/components/files/MemoryProfileSplitEditor";
+import { UNTITLED_FOLDER_NAME } from "@/components/files/dedupeName";
 import type { FileSortBy } from "@/components/files/fileTreeTypes";
 import { DetailTabs } from "@/components/files/fileWorkbench/DetailTabs";
 import {
@@ -43,10 +44,11 @@ import {
 import { EmptyHint, InlineError } from "@/components/files/parts";
 import { PendingFolderInvites } from "@/components/folders/PendingFolderInvites";
 import { NarrowBackHeader } from "@/components/layout/NarrowBackHeader";
-import { SearchField } from "@/components/ui";
+import { NarrowMenuButton } from "@/components/layout/NarrowMenuButton";
+import { Button, SearchField } from "@/components/ui";
 import { WorkspaceTrashSection } from "@/components/workspace/TrashSection";
 import { useConversations } from "@/hooks/useConversations";
-import { getFolders, useFolders } from "@/hooks/useFolders";
+import { getFolders, useCreateFolder, useFolders } from "@/hooks/useFolders";
 import { hasLocalFiles } from "@/lib/capabilities";
 import { sortFoldersByRecentActivity } from "@/lib/draftWorkspaceFolders";
 import type { FileSource } from "@/lib/fileSource";
@@ -57,6 +59,7 @@ import {
 } from "@/lib/folderTree";
 import { useNarrowLayoutState } from "@/lib/narrowLayout";
 import { useReadOnlyOffline } from "@/lib/offlineMode";
+import { notifyError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
   canWriteFolder,
@@ -122,8 +125,8 @@ const RULES_WS = "__rules__";
  * — it's a search, not a preference). No content full-text search.
  *
  * The two container actions §5.4 leaves are the zone headers' own: 我的文件「+」
- * builds a cloud folder (nested via a row's「在此新建文件夹」), 本机文件夹「+」opens
- * one off the disk. Chats live on `/conversations`; the two cross-link — a root's
+ * (and the empty-state button) POSTs「未命名文件夹」then renames in place
+ * (nested via a row's「在此新建文件夹」); 本机文件夹「+」opens one off the disk. Chats live on `/conversations`; the two cross-link — a root's
  * 「查看对话」jumps here→there, and「浏览文件」jumps there→here (via `focusWsId`
  * = `folder:<id>`，which expands + highlights the target root).
  */
@@ -195,7 +198,16 @@ export function FileWorkbench({
 
   const conversations = useConversations();
   const folders = useFolders();
-  const openCreateFolder = useFoldersStore((s) => s.openCreateFolder);
+  const createFolder = useCreateFolder();
+  const requestUntitled = useFoldersStore((s) => s.requestUntitledCloudFolder);
+  const pendingUntitledCreate = useFoldersStore((s) => s.pendingUntitledCreate);
+  const clearUntitledCreateRequest = useFoldersStore(
+    (s) => s.clearUntitledCreateRequest,
+  );
+  const finishUntitledCreate = useFoldersStore((s) => s.finishUntitledCreate);
+  const untitledCreateBusy = useFoldersStore((s) => s.untitledCreateBusy);
+  const pendingRevealFolderId = useFoldersStore((s) => s.pendingRevealFolderId);
+  const clearPendingReveal = useFoldersStore((s) => s.clearPendingReveal);
 
   /** 本机文件夹段只在能读本机盘的宿主里出现（Web 版没有）。 */
   const localFsAvailable = fsAvailable && hasLocalFiles();
@@ -399,6 +411,53 @@ export function FileWorkbench({
     return () => clearTimeout(t);
   }, [focusWsId, focusKey, railWorkspaces, folders, expandWs]);
 
+  // 文件页 / 命令面板 / Composer 建成后：展开祖先（子行只在父展开时才挂载），闪一下新行。
+  // 标志在闪完再清——同一次 effect 里立刻 clear 会让 cleanup 掐掉闪光定时器。
+  useEffect(() => {
+    if (!pendingRevealFolderId) return;
+    if (!folders.some((f) => f.id === pendingRevealFolderId)) return;
+    const wsId = `folder:${pendingRevealFolderId}`;
+    const ancestors = ancestorFolderIds(folders, pendingRevealFolderId).map(
+      (id) => `folder:${id}`,
+    );
+    setFilter("");
+    expandWs(...ancestors, wsId);
+    setFlashWsId(wsId);
+    const t = window.setTimeout(() => {
+      setFlashWsId(null);
+      clearPendingReveal();
+    }, 1500);
+    return () => window.clearTimeout(t);
+  }, [pendingRevealFolderId, folders, expandWs, clearPendingReveal]);
+
+  // 区头 + / 空态 / 命令面板 / 行上「在此新建」：立刻落地「未命名文件夹」，行上改名。
+  useEffect(() => {
+    if (!pendingUntitledCreate) return;
+    const parentId = pendingUntitledCreate.parentId;
+    clearUntitledCreateRequest();
+    void (async () => {
+      try {
+        const { folder } = await createFolder.mutateAsync({
+          name: UNTITLED_FOLDER_NAME,
+          mode: "cloud",
+          parentId,
+        });
+        useFoldersStore.getState().revealCreatedFolder(folder.id, {
+          rename: true,
+        });
+      } catch (e) {
+        notifyError(e, "创建文件夹失败");
+      } finally {
+        finishUntitledCreate();
+      }
+    })();
+  }, [
+    pendingUntitledCreate,
+    createFolder,
+    clearUntitledCreateRequest,
+    finishUntitledCreate,
+  ]);
+
   // 对话页「记忆已更新」卡片深链跳来：打开目标记忆叶子的 tab（记忆更新对话内可见 §1.6）。每个
   // focusKey（导航键）只应用一次。记忆源与工作区列表无关，故无需等 workspaces 就绪即可打开；
   // 文件夹画像叶子的双栏编辑器会在列表到位后自行解析文件夹名。内联开 tab 逻辑（与 openFile
@@ -506,12 +565,6 @@ export function FileWorkbench({
   }, [folders, conversations, matchesFilter]);
 
   const treeFilterQuery = filter.trim();
-
-  const railEmpty =
-    folders.length === 0 &&
-    personalWorkspaces.length === 0 &&
-    localConvDesks.length === 0 &&
-    (localConvProbeDone || !localFsAvailable);
 
   const activeTab = useMemo(
     () => tabs.find((t) => tabKey(t.wsId, t.path) === activeKey) ?? null,
@@ -625,8 +678,7 @@ export function FileWorkbench({
     filterQuery: treeFilterQuery,
     sortBy,
     offline,
-    onCreateSubfolder: (parent, anchorEl) =>
-      openCreateFolder(anchorEl ?? null, { id: parent.id, name: parent.name }),
+    onCreateSubfolder: (parent) => requestUntitled(parent.id),
     renderWorkroomLead: showMemory
       ? (folder, indent) => (
           <EntriesSection
@@ -669,9 +721,15 @@ export function FileWorkbench({
           narrowDetail && "hidden",
         )}
       >
-        {/* Rail header: name + in-tree path filter（新建走各段标题的「+」；
+        {/* Rail header: name + in-tree path filter（新建走区头「+」与空态主按钮；
             段级 CRUD 在各 WorkspaceSection 右键菜单). */}
-        <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-2">
+        <div
+          className={cn(
+            "flex h-12 shrink-0 items-center gap-1 border-b border-border px-2",
+            isNarrow && "pt-[env(safe-area-inset-top)]",
+          )}
+        >
+          {isNarrow && <NarrowMenuButton />}
           <SearchField
             value={filter}
             onValueChange={setFilter}
@@ -706,11 +764,6 @@ export function FileWorkbench({
           </div>
         ) : isError ? (
           <InlineError onRetry={onRetry} />
-        ) : railEmpty ? (
-          <EmptyHint
-            icon={<FolderOpen size={24} className="text-muted-foreground/40" />}
-            title="还没有文件夹"
-          />
         ) : (
           <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 py-1">
             {filter.trim() &&
@@ -726,9 +779,25 @@ export function FileWorkbench({
                   <MyFilesRailHeader />
                 )}
                 {cloudFolderNodes.length === 0 && !filter.trim() ? (
-                  <p className="px-2 py-2 text-xs text-muted-foreground/70">
-                    还没有文件夹，用右上角「+」建一个
-                  </p>
+                  <EmptyHint
+                    className="flex-none py-8"
+                    icon={
+                      <FolderOpen
+                        size={24}
+                        className="text-muted-foreground/40"
+                      />
+                    }
+                    title="还没有文件夹"
+                    action={
+                      <Button
+                        variant="primary"
+                        disabled={untitledCreateBusy}
+                        onClick={() => requestUntitled()}
+                      >
+                        新建文件夹
+                      </Button>
+                    }
+                  />
                 ) : (
                   <FolderRailNodes nodes={cloudFolderNodes} host={railHost} />
                 )}

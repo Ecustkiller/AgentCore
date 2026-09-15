@@ -373,9 +373,6 @@ export function WorkspaceGroupHeader({
               <span className="flex min-w-0 flex-1 flex-col justify-center">
                 <span className="flex min-w-0 items-center gap-1">
                   <span className="truncate">{folder.name}</span>
-                  {folderHasCollaborators(folder) && (
-                    <FolderCollabMark count={folder.collaboratorCount ?? 0} />
-                  )}
                   {shareable && !owner && (
                     <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
                       {folderRoleLabel(myRole)}
@@ -389,6 +386,16 @@ export function WorkspaceGroupHeader({
                 )}
               </span>
             </div>
+            {folderHasCollaborators(folder) && (
+              <FolderCollabMark
+                count={folder.collaboratorCount ?? 0}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setMembersOpen(true);
+                }}
+              />
+            )}
             <span
               {...{ [NO_TAB_DRAG_ATTR]: "" }}
               className={cn(

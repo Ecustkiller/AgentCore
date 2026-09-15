@@ -1,7 +1,8 @@
+import { NarrowMenuButton } from "@/components/layout/NarrowMenuButton";
 import { IconButton } from "@/components/ui";
 import { ArrowLeft } from "lucide-react";
 
-/** 窄屏推进页顶栏：返回 + 标题。 */
+/** 窄屏推进页顶栏：返回 + 标题 + 侧栏。 */
 export function NarrowBackHeader({
   title,
   onBack,
@@ -15,6 +16,7 @@ export function NarrowBackHeader({
         <ArrowLeft size={18} />
       </IconButton>
       <h1 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h1>
+      <NarrowMenuButton />
     </header>
   );
 }

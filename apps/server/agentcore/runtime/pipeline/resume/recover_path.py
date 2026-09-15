@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from agentcore.core.error_codes import ErrorCode
+from agentcore.core.errors import AgentCoreError
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolEffect
 from agentcore.llm.provider.protocol import LLMMessage
@@ -12,16 +14,28 @@ from agentcore.runtime.checkpoints import CheckpointDecision
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.pipeline.resume.settle import (
     append_resumed_tool_results,
-    next_pending_ask_user_suspension,
     persist_resumed_tool_results,
     unclosed_tool_call_ids,
 )
 from agentcore.runtime.pipeline.resume.window import pre_pause_content, resumed_captain_window
-from agentcore.runtime.recover import SettledSuspension, recover_turn
+from agentcore.runtime.recover import recover_turn
 from agentcore.runtime.suspension import SuspensionSaver, TurnSuspension, captain_transcript
 from agentcore.runtime.turn.state import TurnState
 
 logger = get_logger(__name__)
+
+
+class ResumeOpenToolCallsError(AgentCoreError):
+    """Pause window still has unpaired tool calls after the answered card.
+
+    New pauses cannot reach here (at most one ask_user; other tools already
+    closed). Legacy parallel-ask journals must not re-freeze without a card.
+    """
+
+    code = ErrorCode.PIPELINE_ERROR
+
+    def __init__(self) -> None:
+        super().__init__("这一轮没法按你刚给的答复继续，请再发一条消息。")
 
 
 @dataclass
@@ -46,7 +60,7 @@ async def recover_and_rebuild_window(
     execution_id: str,
     captain_run_id: str,
     pre_pause_override: str | None = None,
-    suspension_saver: SuspensionSaver | None = None,
+    suspension_saver: SuspensionSaver | None = None,  # noqa: ARG001 — callers still pass it
 ) -> RecoveredResume:
     """Settle the paused frame and rebuild the CEO message window.
 
@@ -120,24 +134,14 @@ async def recover_and_rebuild_window(
         tool_name=getattr(suspension.kind, "value", "") or "",
     )
 
-    # Same-batch sibling cards: close only the answered call. Remaining open
-    # calls stay pending — matching sibling re-pauses on the next card (one
-    # frame per message). Unmatched unclosed ids also re-pause: feeding the CEO
-    # an incomplete tool pair is a 400. No skip placeholder either way.
-    if unclosed_tool_call_ids(messages):
-        from agentcore.runtime.facts import snapshot_fact_log
-
-        entries = snapshot_fact_log() or list(suspension.journal_entries)
-        sibling = next_pending_ask_user_suspension(suspension, messages, entries)
-        if sibling is not None:
-            sibling.journal_entries = entries
-            if suspension_saver is not None:
-                await suspension_saver(sibling)
-        return RecoveredResume(
-            messages=messages,
-            pre_pause=pre_pause,
-            settled=SettledSuspension(settled.output, None, ToolEffect.SUSPEND),
+    leftover = unclosed_tool_call_ids(messages)
+    if leftover:
+        logger.error(
+            "pipeline.resume_open_tool_calls",
+            message_id=suspension.message_id,
+            leftover=leftover,
         )
+        raise ResumeOpenToolCallsError()
 
     # 终稿多段衔接: when the pause kept deliverable prose, steer the resumed answer
     # round to continue it (join_segments alone can't invent transitions). Skip when

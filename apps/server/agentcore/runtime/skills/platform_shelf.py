@@ -30,7 +30,7 @@ def platform_templates() -> tuple[DomainSkillTemplate, ...]:
 
 
 def get_platform_template(listing_id: str) -> DomainSkillTemplate | None:
-    for skill in LEGAL_SKILLS:
+    for skill in platform_templates():
         if platform_listing_id(skill.name) == listing_id:
             return skill
     return None

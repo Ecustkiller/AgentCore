@@ -1,4 +1,5 @@
 import { NarrowBackHeader } from "@/components/layout/NarrowBackHeader";
+import { NarrowMenuButton } from "@/components/layout/NarrowMenuButton";
 import { SectionLabel, SurfaceNavLink } from "@/components/ui";
 import { useNarrowLayoutState } from "@/lib/narrowLayout";
 import { getLegalDoc } from "@/pages/legal/content";
@@ -123,6 +124,12 @@ export function MorePage() {
     if (isIndex) {
       return (
         <div className="flex h-full w-full flex-col">
+          <header className="flex h-12 shrink-0 items-center gap-1 border-b border-border bg-card px-2 pt-[env(safe-area-inset-top)]">
+            <NarrowMenuButton />
+            <h1 className="min-w-0 flex-1 truncate text-center text-sm font-medium">
+              设置
+            </h1>
+          </header>
           <MoreNav groups={groups} />
         </div>
       );

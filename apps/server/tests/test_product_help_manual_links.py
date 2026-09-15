@@ -369,23 +369,13 @@ def test_intentional_dead_manual_links_fail_gate():
     ), joined
 
 
-# Desktop product copy uses「设置 · {侧栏}」；narrow hub is 底栏「我的」+ MorePage 行。
+# Desktop product copy uses「设置 · {侧栏}」；narrow hub is ☰ → MorePage「设置」行。
 # Cheap fork gate: each desktop page name must share a sentence with 手机,
-# and every「我的 → X」must be a real narrow-visible MorePage label.
+# and every「再点「X」」must be a real narrow-visible MorePage label.
 _SURFACE_FORK_SKILL_NAMES = _PRODUCT_HELP_SKILL_NAMES
 _DESKTOP_SETTINGS_PAGES = ("设置 · 服务商", "设置 · 模型组合", "设置 · 用量")
 _DESKTOP_MORE_PAGE = (
     _REPO_ROOT / "apps" / "desktop" / "src" / "renderer" / "pages" / "MorePage.tsx"
-)
-_NARROW_TAB_BAR = (
-    _REPO_ROOT
-    / "apps"
-    / "desktop"
-    / "src"
-    / "renderer"
-    / "components"
-    / "layout"
-    / "NarrowTabBar.tsx"
 )
 _NARROW_PRODUCT = (
     _REPO_ROOT / "apps" / "desktop" / "src" / "renderer" / "lib" / "narrowProduct.ts"
@@ -393,9 +383,8 @@ _NARROW_PRODUCT = (
 _NAV_ITEM = re.compile(
     r'label:\s*"(?P<label>[^"]+)",\s*path:\s*"(?P<path>/more[^"]*)"'
 )
-_TAB_LABEL = re.compile(r'\{ label: "([^"]+)", route:')
 _HIDDEN_SETTINGS_PATH = re.compile(r'"(/more/[^"]+)"')
-_MOBILE_ARROW_PAGE = re.compile(r"我的 → ([^」/（]+)")
+_MOBILE_TAP_PAGE = re.compile(r"再点「(?P<label>[^」]+)」")
 
 
 def _sentence_units(body: str) -> list[str]:
@@ -419,9 +408,8 @@ def _narrow_hidden_settings_paths(src: str) -> frozenset[str]:
 
 
 def test_product_help_settings_page_names_fork_by_surface():
-    """Wide settings names must fork; narrow「我的 →」must be visible MorePage rows."""
+    """Wide settings names must fork; ☰「再点」must be visible MorePage rows."""
     more_src = _DESKTOP_MORE_PAGE.read_text(encoding="utf-8")
-    tab_src = _NARROW_TAB_BAR.read_text(encoding="utf-8")
     hidden = _narrow_hidden_settings_paths(_NARROW_PRODUCT.read_text(encoding="utf-8"))
     items = [
         (m.group("label"), m.group("path")) for m in _NAV_ITEM.finditer(more_src)
@@ -431,13 +419,11 @@ def test_product_help_settings_page_names_fork_by_surface():
     narrow_labels = frozenset(
         label for label, path in items if path not in hidden
     )
-    tab_labels = frozenset(_TAB_LABEL.findall(tab_src))
     more_routes = frozenset(path for _, path in items)
 
     _require("模型组合" in all_labels, f"expected 模型组合 row in {_DESKTOP_MORE_PAGE.name}")
     _require("服务商" in all_labels, f"expected 服务商 row in {_DESKTOP_MORE_PAGE.name}")
     _require("用量" in all_labels, f"expected 用量 row in {_DESKTOP_MORE_PAGE.name}")
-    _require("我的" in tab_labels, f"expected 我的 tab in {_NARROW_TAB_BAR.name}")
     _require("/more/model" in more_routes, "desktop /more/model route missing")
     _require("/more/providers" in more_routes, "desktop /more/providers route missing")
     _require("/more/usage" in more_routes, "desktop /more/usage route missing")
@@ -445,6 +431,8 @@ def test_product_help_settings_page_names_fork_by_surface():
     _require("反馈" not in narrow_labels, "narrow hides 反馈")
 
     body = _skill_bodies(_SURFACE_FORK_SKILL_NAMES)
+    _require("☰" in body, "narrow settings path must name ☰ (no 底栏 tab)")
+    _require("手机底栏" not in body, "retired 底栏「我的」must stay absent")
     units = _sentence_units(body)
     for name in _DESKTOP_SETTINGS_PAGES:
         hits = [u for u in units if name in u]
@@ -455,8 +443,8 @@ def test_product_help_settings_page_names_fork_by_surface():
             + "\n- ".join(unforked)
         )
 
-    claimed = [n.strip() for n in _MOBILE_ARROW_PAGE.findall(body)]
-    _require(claimed, "expected at least one「我的 → …」narrow path in product_help*")
+    claimed = [n.strip() for n in _MOBILE_TAP_PAGE.findall(body)]
+    _require(claimed, "expected at least one ☰「再点「…」」narrow path in product_help*")
     invented = [n for n in claimed if n not in narrow_labels]
     assert not invented, (
         "product_help* invented narrow page names not in visible MorePage labels: "

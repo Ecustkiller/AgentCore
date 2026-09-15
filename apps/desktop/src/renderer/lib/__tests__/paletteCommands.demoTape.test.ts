@@ -57,7 +57,7 @@ const baseCtx = {
 };
 
 describe("paletteCommands narrow restriction", () => {
-  it("hides toolbox and conversation admin when restrictNarrow", () => {
+  it("hides toolbox when restrictNarrow, keeps conversation admin", () => {
     const cmds = buildPaletteCommands({
       ...baseCtx,
       restrictNarrow: true,
@@ -65,7 +65,7 @@ describe("paletteCommands narrow restriction", () => {
     });
     expect(cmds.some((c) => c.id === "nav-toolbox")).toBe(false);
     expect(cmds.some((c) => c.id === "nav-whiteboard")).toBe(false);
-    expect(cmds.some((c) => c.id === "nav-conversations")).toBe(false);
+    expect(cmds.some((c) => c.id === "nav-conversations")).toBe(true);
     expect(cmds.some((c) => c.id === "theme-dark")).toBe(false);
     expect(cmds.some((c) => c.id === "nav-files")).toBe(true);
     expect(cmds.some((c) => c.id === "nav-settings")).toBe(true);

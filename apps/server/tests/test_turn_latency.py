@@ -9,12 +9,14 @@ import pytest
 from agentcore.core.log_context import log_context
 from agentcore.llm.provider.protocol import LLMChunk, LLMRequest, ToolCallDelta
 from agentcore.runtime.engine.stream import stream_llm_round
+from agentcore.runtime.turn import complete_log as complete_mod
 from agentcore.runtime.turn.latency import (
     TurnLatencyProbe,
     bind_turn_latency,
     get_turn_latency,
     reset_turn_latency,
 )
+from tests.conftest import LogSpy
 
 
 def test_probe_as_log_fields_always_has_four_keys_null_not_zero():
@@ -192,3 +194,27 @@ def test_bind_get_reset_contextvar():
     assert get_turn_latency() is probe
     reset_turn_latency(token)
     assert get_turn_latency() is None
+
+
+def test_log_chat_turn_complete_emits_phase0_keys(monkeypatch):
+    spy = LogSpy()
+    monkeypatch.setattr(complete_mod, "logger", spy)
+    probe, token = bind_turn_latency(time.monotonic() - 0.05)
+    try:
+        with log_context(cost_role="captain"):
+            probe.mark_prepare(12)
+            probe.begin_captain_stream()
+            probe.note_reasoning_chunk()
+            complete_mod.log_chat_turn_complete(
+                {"finish_reason": "end_turn", "content": "hi", "rounds": 1},
+                duration_ms=100,
+            )
+    finally:
+        reset_turn_latency(token)
+    kw = spy.get("chat.turn_complete")
+    assert kw["duration_ms"] == 100
+    assert kw["prepare_ms"] == 12
+    assert kw["assemble_ms"] is None
+    assert kw["ttft_reasoning_ms"] is not None
+    assert kw["ttft_content_ms"] is None
+    assert kw["reply_preview"]

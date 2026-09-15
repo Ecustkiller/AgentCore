@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -85,9 +85,6 @@ vi.mock("@/components/layout/WorkspaceChannelBanner", () => ({
 vi.mock("@/components/conversation/ShareConversationDialog", () => ({
   ShareConversationDialog: () => null,
 }));
-vi.mock("@/components/folders/CreateFolderMenu", () => ({
-  CreateFolderMenuHost: () => null,
-}));
 vi.mock("@/components/files/CloneRepoDialog", () => ({
   ConnectGitDialogHost: () => null,
 }));
@@ -131,7 +128,7 @@ describe("AppShell narrow chrome", () => {
     stubMatchMedia(true);
   });
 
-  it("shows 4-tab bar and hides the desktop sidebar on a conversation route", () => {
+  it("opens the desktop sidebar as an overlay and hides the tab bar", () => {
     render(
       <MemoryRouter initialEntries={["/"]}>
         <Routes>
@@ -141,16 +138,14 @@ describe("AppShell narrow chrome", () => {
         </Routes>
       </MemoryRouter>,
     );
-    expect(screen.getByLabelText("主导航")).toBeTruthy();
-    expect(screen.getByText("对话")).toBeTruthy();
-    expect(screen.getByText("消息")).toBeTruthy();
-    expect(screen.getByText("文件")).toBeTruthy();
-    expect(screen.getByText("我的")).toBeTruthy();
+    expect(screen.queryByLabelText("主导航")).toBeNull();
+    expect(screen.queryByText("我的")).toBeNull();
     expect(screen.queryByTestId("desktop-sidebar")).toBeNull();
-    expect(screen.getByLabelText("对话列表")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("打开侧栏"));
+    expect(screen.getByTestId("desktop-sidebar")).toBeTruthy();
   });
 
-  it("hides the tab bar on an IM thread", () => {
+  it("hides the chat top bar on an IM thread", () => {
     render(
       <MemoryRouter initialEntries={["/messages/c1"]}>
         <Routes>
@@ -160,6 +155,7 @@ describe("AppShell narrow chrome", () => {
         </Routes>
       </MemoryRouter>,
     );
-    expect(screen.queryByLabelText("主导航")).toBeNull();
+    expect(screen.queryByLabelText("打开侧栏")).toBeNull();
+    expect(screen.queryByLabelText("新对话")).toBeNull();
   });
 });

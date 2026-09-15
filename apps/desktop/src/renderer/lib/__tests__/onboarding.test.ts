@@ -1,38 +1,10 @@
 import {
   type DraftEmptyInput,
   STARTER_TASK_CHIPS,
-  hasSeenTip,
-  markTipSeen,
   resolveDraftEmptyKind,
   shouldCenterDraftComposer,
-  shouldShowTip,
 } from "@/lib/onboarding";
-import {
-  __clearMemoryUiStorageForTests,
-  __setUiStorageBackendForTests,
-} from "@/lib/uiStorage";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-
-const memory = new Map<string, string>();
-
-beforeEach(() => {
-  memory.clear();
-  __setUiStorageBackendForTests({
-    getItem: (k) => memory.get(k) ?? null,
-    setItem: (k, v) => {
-      memory.set(k, v);
-    },
-    removeItem: (k) => {
-      memory.delete(k);
-    },
-    keys: () => [...memory.keys()],
-  });
-});
-
-afterEach(() => {
-  __setUiStorageBackendForTests(null);
-  __clearMemoryUiStorageForTests();
-});
+import { describe, expect, it } from "vitest";
 
 describe("resolveDraftEmptyKind", () => {
   const base: DraftEmptyInput = { conversations: [] };
@@ -119,15 +91,5 @@ describe("starter chips", () => {
       expect(chip.length).toBeGreaterThan(10);
       expect(/[\u4e00-\u9fff]/.test(chip)).toBe(true);
     }
-  });
-});
-
-describe("contextual tip seen", () => {
-  it("shows each tip only once until marked", () => {
-    expect(shouldShowTip("inline_team_graph")).toBe(true);
-    expect(hasSeenTip("inline_team_graph")).toBe(false);
-    markTipSeen("inline_team_graph");
-    expect(shouldShowTip("inline_team_graph")).toBe(false);
-    expect(hasSeenTip("inline_team_graph")).toBe(true);
   });
 });

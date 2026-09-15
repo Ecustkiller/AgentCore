@@ -101,6 +101,17 @@ _TRACE = "0123456789abcdef0123456789abcdef"
             None,
             "long_running_redirect",
         ),
+        (
+            "公网 http(s) 摘字请用 web_fetch（检测到：curl -sS https://example.com）。",
+            None,
+            "shell_fetch_redirect",
+        ),
+        ("anything", "shell_fetch_redirect", "shell_fetch_redirect"),
+        (
+            "公网 http(s) 落到工作区请用 download_url（检测到：wget https://example.com/a.bin）。",
+            None,
+            "shell_download_redirect",
+        ),
         ("缺少参数", "schema", "schema"),
         ("这份文件太大", "too_large", "too_large"),
         ("[WinError 5] 拒绝访问", "other", "access_denied"),

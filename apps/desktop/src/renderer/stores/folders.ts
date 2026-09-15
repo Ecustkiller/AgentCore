@@ -26,16 +26,8 @@ export function defaultDraftWorkspaceIntent(): DraftWorkspaceIntent {
     : { kind: "quick_local" };
 }
 
-/** Viewport rect for anchoring the「新建文件夹」cascade near a trigger. */
-export type CreateFolderAnchorRect = {
-  top: number;
-  left: number;
-  width: number;
-  height: number;
-};
-
-/** Where a new folder should land — null / absent = 我的文件 top level. */
-export type CreateFolderParent = { id: string; name: string };
+/** Nest the new untitled cloud folder here; omit / null = 我的文件 top level. */
+export type UntitledFolderParentId = string | null;
 
 /** Prefill for {@link useFoldersStore}'s `openImportToCloud` / `openBorrowToCloud`. */
 export type ImportToCloudPrefill = {
@@ -57,18 +49,23 @@ export type ImportToCloudPrefill = {
  * folder-CRUD action and the component that should react to it.
  */
 interface FoldersUiState {
-  /** A just-created folder whose header should open in inline-rename mode. */
-  pendingRenameId: string | null;
+  /**
+   * A just-created cloud folder the files rail should expand + flash.
+   * Named creates (Composer) reveal only; untitled creates also rename in place.
+   */
+  pendingRevealFolderId: string | null;
+  /** Enter inline rename on this folder row once it is mounted. */
+  pendingRenameFolderId: string | null;
+  /**
+   * Files rail / command palette asked to POST「未命名文件夹」.
+   * FileWorkbench is the only consumer (needs the list + rename row).
+   */
+  pendingUntitledCreate: { parentId: UntitledFolderParentId } | null;
+  untitledCreateBusy: boolean;
   /** Where the current draft will land on first send. */
   draftWorkspaceIntent: DraftWorkspaceIntent;
   /** User-pinned folders shown at the top of workspace pickers. */
   pinnedFolderIds: string[];
-  /** Canonical「新建文件夹」cascade (command palette / chip / rail +). */
-  createFolderOpen: boolean;
-  /** Optional trigger rect; null → host centers the cascade. */
-  createFolderAnchor: CreateFolderAnchorRect | null;
-  /** Nest the new folder here (rail「在此新建文件夹」); null = top level. */
-  createFolderParent: CreateFolderParent | null;
   /** Composer / palette「连接 Git」→ G3 云 clone 对话框。 */
   connectGitOpen: boolean;
   /**
@@ -88,14 +85,14 @@ interface FoldersUiState {
   /** Optional prefill when the caller already picked the local folder. */
   borrowToCloudPrefill: ImportToCloudPrefill | null;
 
-  setPendingRename: (id: string | null) => void;
+  revealCreatedFolder: (id: string, opts?: { rename?: boolean }) => void;
+  clearPendingReveal: () => void;
+  clearPendingRename: () => void;
+  requestUntitledCloudFolder: (parentId?: UntitledFolderParentId) => void;
+  clearUntitledCreateRequest: () => void;
+  finishUntitledCreate: () => void;
   setDraftWorkspaceIntent: (intent: DraftWorkspaceIntent) => void;
   resetDraftWorkspaceIntent: () => void;
-  openCreateFolder: (
-    anchorEl?: Element | null,
-    parent?: CreateFolderParent | null,
-  ) => void;
-  closeCreateFolder: () => void;
   openConnectGit: (wsId?: string | null) => void;
   closeConnectGit: () => void;
   openImportToCloud: (prefill?: ImportToCloudPrefill | null) => void;
@@ -105,49 +102,43 @@ interface FoldersUiState {
   togglePinFolder: (id: string) => void;
 }
 
-function rectFromEl(
-  el: Element | null | undefined,
-): CreateFolderAnchorRect | null {
-  if (!el) return null;
-  const r = el.getBoundingClientRect();
-  return { top: r.top, left: r.left, width: r.width, height: r.height };
-}
-
 export const useFoldersStore = create<FoldersUiState>()(
   persist(
     (set) => ({
-      pendingRenameId: null,
+      pendingRevealFolderId: null,
+      pendingRenameFolderId: null,
+      pendingUntitledCreate: null,
+      untitledCreateBusy: false,
       draftWorkspaceIntent: defaultDraftWorkspaceIntent(),
       pinnedFolderIds: [],
-      createFolderOpen: false,
-      createFolderAnchor: null,
-      createFolderParent: null,
       connectGitOpen: false,
       connectGitWsId: null,
       importToCloudOpen: false,
       importToCloudPrefill: null,
       borrowToCloudOpen: false,
       borrowToCloudPrefill: null,
-      setPendingRename: (id) => set({ pendingRenameId: id }),
+      revealCreatedFolder: (id, opts) =>
+        set({
+          pendingRevealFolderId: id,
+          pendingRenameFolderId: opts?.rename ? id : null,
+        }),
+      clearPendingReveal: () => set({ pendingRevealFolderId: null }),
+      clearPendingRename: () => set({ pendingRenameFolderId: null }),
+      requestUntitledCloudFolder: (parentId) =>
+        set((s) =>
+          s.pendingUntitledCreate || s.untitledCreateBusy
+            ? s
+            : {
+                pendingUntitledCreate: { parentId: parentId ?? null },
+                untitledCreateBusy: true,
+              },
+        ),
+      clearUntitledCreateRequest: () => set({ pendingUntitledCreate: null }),
+      finishUntitledCreate: () => set({ untitledCreateBusy: false }),
       setDraftWorkspaceIntent: (intent) =>
         set({ draftWorkspaceIntent: intent }),
       resetDraftWorkspaceIntent: () =>
         set({ draftWorkspaceIntent: defaultDraftWorkspaceIntent() }),
-      openCreateFolder: (anchorEl, parent) => {
-        // Capture rect before the trigger menu unmounts / reflows.
-        const rect = rectFromEl(anchorEl);
-        set({
-          createFolderOpen: true,
-          createFolderAnchor: rect,
-          createFolderParent: parent ?? null,
-        });
-      },
-      closeCreateFolder: () =>
-        set({
-          createFolderOpen: false,
-          createFolderAnchor: null,
-          createFolderParent: null,
-        }),
       openConnectGit: (wsId) =>
         set({
           connectGitOpen: true,

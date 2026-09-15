@@ -96,7 +96,11 @@ def test_format_empty_hit_hint() -> None:
     assert "--export-dir ../../logs/prod-export" in hint
     assert "32-hex" in hint
     assert "conversation_id" in hint
-    assert format_empty_hit_hint(using_export_dir=True) == ""
+    assert "json-file" in hint
+    export_hint = format_empty_hit_hint(using_export_dir=True)
+    assert "journal" in export_hint
+    assert "json-file" in export_hint
+    assert "pnpm sync:logs" not in export_hint
 
 
 def test_format_trace_empty_hit_hint() -> None:
@@ -108,6 +112,8 @@ def test_format_trace_empty_hit_hint() -> None:
     out_export = format_trace("deadbeef" * 4, [], using_export_dir=True)
     assert "Log events: 0" in out_export
     assert "pnpm sync:logs" not in out_export
+    assert "journal" in out_export
+    assert "json-file" in out_export
 
 
 def test_format_conversation_context_incomplete_wording() -> None:

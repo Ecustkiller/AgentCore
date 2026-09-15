@@ -75,11 +75,7 @@ export const router = createHashRouter([
       },
       {
         path: "conversations",
-        element: (
-          <NarrowBlockedPage>
-            <ConversationsPage />
-          </NarrowBlockedPage>
-        ),
+        element: <ConversationsPage />,
       },
       { path: "files", element: <FilesPage /> },
       {

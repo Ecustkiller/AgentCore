@@ -28,6 +28,7 @@ vi.mock("@/hooks/useConversations", () => ({
 vi.mock("@/hooks/useFolders", () => ({
   useFolders: () => state.folders,
   getFolders: () => state.folders,
+  useCreateFolder: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@/components/folders/PendingFolderInvites", () => ({

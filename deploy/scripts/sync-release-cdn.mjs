@@ -5,6 +5,7 @@
  *   pnpm sync:release-cdn --desktop <dir> --version <ver> [--channel stable|beta]
  *   pnpm sync:release-cdn --android <apkPath> --version <ver>
  *   pnpm sync:release-cdn --from-github [--channel stable|beta]
+ *   pnpm sync:release-cdn --feed-only --version <ver> [--channel stable|beta]
  *   pnpm sync:release-cdn --from-github --desktop-only
  *   pnpm sync:release-cdn --from-github --android-only
  *   pnpm sync:release-cdn --install-nginx            # one-time nginx site on :8092
@@ -68,6 +69,7 @@ import {
   isAndroidArtifact,
   isDesktopArtifact,
   isSafeBasename,
+  filenamesFromUpdaterYml,
   keepHintsFromManifests,
   planPrune,
 } from "./prune-release-cdn.mjs";
@@ -86,6 +88,7 @@ function parseArgs(argv) {
     pruneDryRun: false,
     skipPrune: false,
     pruneOnly: false,
+    feedOnly: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -101,6 +104,7 @@ function parseArgs(argv) {
     else if (a === "--prune-dry-run") out.pruneDryRun = true;
     else if (a === "--skip-prune") out.skipPrune = true;
     else if (a === "--prune-only") out.pruneOnly = true;
+    else if (a === "--feed-only") out.feedOnly = true;
     else if (a === "--help" || a === "-h") out.help = true;
   }
   return out;
@@ -423,29 +427,64 @@ async function downloadTo(url, dest) {
  * @param {import("../../apps/website/functions/_lib/downloadsCdn.mjs").DesktopChannel} channel
  * @param {object} nextPartial
  */
+async function macFilenameFromCdnYml(channel, version) {
+  const url = `${cdnUrl(desktopChannelPrefix(channel))}/latest-mac.yml`;
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": "agentcore-sync-release-cdn" },
+    });
+    if (!res.ok) return "";
+    const parsed = filenamesFromUpdaterYml(await res.text());
+    if (version && parsed.version && parsed.version !== version) return "";
+    return parsed.filenames.find((n) => /-mac-arm64\.dmg$/i.test(n)) || "";
+  } catch {
+    return "";
+  }
+}
+
+export function sameVersionFilename(filename, version) {
+  const ver = String(version ?? "").trim();
+  const name = String(filename ?? "").trim();
+  if (!ver || !name) return "";
+  return name.includes(`-${ver}-`) ? name : "";
+}
+
 async function mergeDesktopLatestJson(channel, nextPartial) {
   const candidates = [desktopLatestJsonUrl(channel)];
   // Migration: first stable sync may only have flat desktop/latest.json.
   if (channel === "stable") {
     candidates.push(cdnUrl(`${DOWNLOADS_DESKTOP_PREFIX}/latest.json`));
   }
+  /** @type {Record<string, string> | null} */
+  let prev = null;
   for (const url of candidates) {
     try {
-      const prev = await fetchJson(url);
-      return buildDesktopLatestJson({
-        version: nextPartial.version || prev.version,
-        winFilename: nextPartial.winFilename || prev.winFilename,
-        macFilename:
-          nextPartial.macFilename !== undefined
-            ? nextPartial.macFilename
-            : prev.macFilename || "",
-        releaseNotesUrl: nextPartial.releaseNotesUrl || prev.releaseNotesUrl,
-      });
+      prev = await fetchJson(url);
+      break;
     } catch {
       // try next candidate
     }
   }
-  return buildDesktopLatestJson(nextPartial);
+  const version = nextPartial.version || prev?.version;
+  let macFilename =
+    nextPartial.macFilename !== undefined
+      ? nextPartial.macFilename
+      : sameVersionFilename(prev?.macFilename, version);
+  if (!macFilename) {
+    macFilename = await macFilenameFromCdnYml(channel, version);
+  }
+  const winFilename =
+    nextPartial.winFilename ||
+    sameVersionFilename(prev?.winFilename, version);
+  if (!winFilename) {
+    return buildDesktopLatestJson(nextPartial);
+  }
+  return buildDesktopLatestJson({
+    version,
+    winFilename,
+    macFilename,
+    releaseNotesUrl: nextPartial.releaseNotesUrl || prev?.releaseNotesUrl,
+  });
 }
 
 function collectDesktopNames(version, desktopDir) {
@@ -772,17 +811,23 @@ async function main() {
   pnpm sync:release-cdn --desktop <dir> --version <ver> [--channel stable|beta]
   pnpm sync:release-cdn --android <apk> --version <ver>
   pnpm sync:release-cdn --from-github [--channel stable|beta] [--desktop-only|--android-only]
+  pnpm sync:release-cdn --feed-only --version <ver> [--channel stable|beta]
   pnpm sync:release-cdn --prune-only [--channel stable|beta] [--version <ver>] [--prune-dry-run]
   pnpm sync:release-cdn --prune-only --android-only [--version <ver>] [--prune-dry-run]
 
+  --feed-only       write latest.json from already-synced artifacts (no re-upload)
   --prune-dry-run   list old artifacts that would be deleted (no rm)
   --skip-prune      sync without removing older version files
 `);
     process.exit(0);
   }
 
-  if (args.pruneOnly && (args.installNginx || args.fromGithub || args.desktopDir || args.androidPath)) {
-    console.error("--prune-only cannot be combined with sync / --install-nginx");
+  if (args.pruneOnly && (args.installNginx || args.fromGithub || args.desktopDir || args.androidPath || args.feedOnly)) {
+    console.error("--prune-only cannot be combined with sync / --install-nginx / --feed-only");
+    process.exit(1);
+  }
+  if (args.feedOnly && (args.fromGithub || args.desktopDir || args.androidPath || args.installNginx)) {
+    console.error("--feed-only cannot be combined with sync / --from-github / --install-nginx");
     process.exit(1);
   }
   if (args.skipPrune && (args.pruneDryRun || args.pruneOnly)) {
@@ -844,11 +889,40 @@ async function main() {
     return;
   }
 
+  if (args.feedOnly) {
+    const version = String(args.version || "").trim();
+    if (!version) {
+      console.error("--feed-only needs --version");
+      process.exit(1);
+    }
+    if (args.androidOnly) {
+      console.log(`→ feed-only android latest.json v${version}`);
+      await writeAndroidManifest(version, androidApkFilename(version));
+    } else {
+      console.log(
+        `→ feed-only desktop/${channel} latest.json v${version} (no re-upload)`,
+      );
+      await writeDesktopManifest(
+        version,
+        {
+          hasWin: true,
+          hasMac: false,
+          winName: winInstallerFilename(version),
+          macName: "",
+        },
+        channel,
+      );
+    }
+    console.log(`✓ feed-only complete → ${cdnUrl("")}`);
+    return;
+  }
+
   if (!args.desktopDir && !args.androidPath) {
     console.error(
       "usage: pnpm sync:release-cdn --desktop <dir> --version <ver> [--channel stable|beta]\n" +
         "       pnpm sync:release-cdn --android <apk> --version <ver>\n" +
         "       pnpm sync:release-cdn --from-github [--channel stable|beta]\n" +
+        "       pnpm sync:release-cdn --feed-only --version <ver> [--channel stable|beta]\n" +
         "       pnpm sync:release-cdn --prune-only [--channel stable|beta] [--prune-dry-run]\n" +
         "       pnpm sync:release-cdn --install-nginx",
     );

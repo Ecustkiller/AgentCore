@@ -1,3 +1,4 @@
+import { NarrowMenuButton } from "@/components/layout/NarrowMenuButton";
 import { IconButton } from "@/components/ui";
 import { useConversations } from "@/hooks/useConversations";
 import { useNarrowLayoutState } from "@/lib/narrowLayout";
@@ -5,12 +6,11 @@ import { startNewConversation } from "@/lib/newConversation";
 import { isNarrowChatRoute } from "@/lib/useNarrowLayout";
 import { useConversationStore } from "@/stores/conversation";
 import { useSidePanelStore } from "@/stores/sidePanel";
-import { Menu, PanelRight, SquarePen } from "lucide-react";
+import { PanelRight, SquarePen } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 export function NarrowTopBar() {
-  const { isNarrow, hideChrome, setConversationDrawerOpen } =
-    useNarrowLayoutState();
+  const { isNarrow, hideChrome } = useNarrowLayoutState();
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const conversationId = useConversationStore((s) => s.currentConversationId);
@@ -27,13 +27,7 @@ export function NarrowTopBar() {
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-1 border-b border-border bg-card px-2 pt-[env(safe-area-inset-top)]">
-      <IconButton
-        size="md"
-        aria-label="对话列表"
-        onClick={() => setConversationDrawerOpen(true)}
-      >
-        <Menu size={18} />
-      </IconButton>
+      <NarrowMenuButton />
       <h1 className="min-w-0 flex-1 truncate text-center text-sm font-medium">
         {title}
       </h1>

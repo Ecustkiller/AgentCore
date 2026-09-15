@@ -20,7 +20,10 @@ beforeEach(() => {
   vi.mocked(hasLocalFiles).mockReturnValue(false);
   getComposerChannelPreference.mockReturnValue("local_traditional");
   useFoldersStore.setState({
-    pendingRenameId: null,
+    pendingRevealFolderId: null,
+    pendingRenameFolderId: null,
+    pendingUntitledCreate: null,
+    untitledCreateBusy: false,
     draftWorkspaceIntent: defaultDraftWorkspaceIntent(),
     importToCloudOpen: false,
     importToCloudPrefill: null,
@@ -32,21 +35,46 @@ beforeEach(() => {
 });
 
 describe("pending markers", () => {
-  it("tracks pending rename independently of draft intent", () => {
-    store().setPendingRename("a");
+  it("tracks created-folder reveal independently of draft intent", () => {
+    store().revealCreatedFolder("a");
     store().setDraftWorkspaceIntent({ kind: "folder", folderId: "b" });
-    expect(store().pendingRenameId).toBe("a");
+    expect(store().pendingRevealFolderId).toBe("a");
     expect(store().draftWorkspaceIntent).toEqual({
       kind: "folder",
       folderId: "b",
     });
 
-    store().setPendingRename(null);
-    expect(store().pendingRenameId).toBeNull();
+    store().clearPendingReveal();
+    expect(store().pendingRevealFolderId).toBeNull();
     expect(store().draftWorkspaceIntent).toEqual({
       kind: "folder",
       folderId: "b",
     });
+  });
+
+  it("requestUntitledCloudFolder queues one create and ignores a second click", () => {
+    store().requestUntitledCloudFolder("p1");
+    expect(store().pendingUntitledCreate).toEqual({ parentId: "p1" });
+    expect(store().untitledCreateBusy).toBe(true);
+    store().requestUntitledCloudFolder(null);
+    expect(store().pendingUntitledCreate).toEqual({ parentId: "p1" });
+    store().clearUntitledCreateRequest();
+    expect(store().pendingUntitledCreate).toBeNull();
+    store().finishUntitledCreate();
+    expect(store().untitledCreateBusy).toBe(false);
+  });
+
+  it("untitled create reveals and renames; named create only reveals", () => {
+    store().revealCreatedFolder("a", { rename: true });
+    expect(store().pendingRevealFolderId).toBe("a");
+    expect(store().pendingRenameFolderId).toBe("a");
+    store().clearPendingRename();
+    expect(store().pendingRenameFolderId).toBeNull();
+    expect(store().pendingRevealFolderId).toBe("a");
+
+    store().revealCreatedFolder("b");
+    expect(store().pendingRevealFolderId).toBe("b");
+    expect(store().pendingRenameFolderId).toBeNull();
   });
 
   it("switches among quick cloud / project intents", () => {

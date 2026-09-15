@@ -35,7 +35,7 @@ describe("shouldHideNarrowChrome", () => {
 describe("isNarrowChatRoute", () => {
   it("matches draft, list, and a single conversation", () => {
     expect(isNarrowChatRoute("/")).toBe(true);
-    expect(isNarrowChatRoute("/conversations")).toBe(true);
+    expect(isNarrowChatRoute("/conversations")).toBe(false);
     expect(isNarrowChatRoute("/conversations/abc")).toBe(true);
   });
 

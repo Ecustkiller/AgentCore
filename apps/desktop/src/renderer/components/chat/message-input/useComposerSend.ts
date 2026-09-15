@@ -5,6 +5,7 @@ import {
 } from "@/hooks/useConversations";
 import {
   type MessageDelivery,
+  isLiveCoordinatingTurn,
   resolveDefaultDelivery,
 } from "@/lib/composerDelivery";
 import { confirmSendDespitePendingIfNeeded } from "@/lib/composerPendingHint";
@@ -336,7 +337,9 @@ export function useComposerSend({
         return;
       }
       const localOccupied = occupancy.occupied === true;
-      const inFlight = localOccupied || isGenerating;
+      const teamLive =
+        !isLocal && Boolean(activeConvId) && isLiveCoordinatingTurn(activeConvId);
+      const inFlight = localOccupied || isGenerating || teamLive;
       if (!confirmSendDespitePendingIfNeeded(activeConvId, inFlight)) {
         return;
       }
@@ -396,8 +399,8 @@ export function useComposerSend({
         return;
       }
 
-      // 云端生成中：插话 / 排队。本机是否还在写只认 occupancy，灯亮但槽空则开新一份。
-      if (isGenerating && activeConvId && !isLocal) {
+      // 云端生成中 / 队还在：插话 / 排队。本机是否还在写只认 occupancy，灯亮但槽空则开新一份。
+      if ((isGenerating || teamLive) && activeConvId && !isLocal) {
         await sendInFlight();
         return;
       }

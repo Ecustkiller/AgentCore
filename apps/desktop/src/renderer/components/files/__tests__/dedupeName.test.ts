@@ -1,4 +1,8 @@
-import { dedupeName } from "@/components/files/dedupeName";
+import {
+  dedupeName,
+  uniqueNumberedName,
+  uniqueUntitledFolder,
+} from "@/components/files/dedupeName";
 import { describe, expect, it } from "vitest";
 
 describe("dedupeName（复制-粘贴的去重命名）", () => {
@@ -26,5 +30,22 @@ describe("dedupeName（复制-粘贴的去重命名）", () => {
 
   it("多扩展名只在最后一个点前插入「 副本」", () => {
     expect(dedupeName("a.tar.gz", new Set(["a.tar.gz"]))).toBe("a.tar 副本.gz");
+  });
+});
+
+describe("uniqueUntitledFolder（新建目录的默认名）", () => {
+  it("空目录用「未命名文件夹」", () => {
+    expect(uniqueUntitledFolder([])).toBe("未命名文件夹");
+  });
+
+  it("已有未命名时从 (2) 递增（对齐服务端 unique_sibling_name）", () => {
+    expect(uniqueUntitledFolder(["未命名文件夹"])).toBe("未命名文件夹 (2)");
+    expect(uniqueUntitledFolder(["未命名文件夹", "未命名文件夹 (2)"])).toBe(
+      "未命名文件夹 (3)",
+    );
+  });
+
+  it("大小写视为同名", () => {
+    expect(uniqueNumberedName("Docs", ["docs"])).toBe("Docs (2)");
   });
 });

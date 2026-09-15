@@ -29,9 +29,10 @@ export function RailSectionHeader({
   );
 }
 
-/** 我的文件 — the cloud folder tree; 「+」creates a top-level folder. */
+/** 我的文件 — the cloud folder tree; 「+」creates a top-level untitled folder. */
 export function MyFilesRailHeader() {
-  const openCreateFolder = useFoldersStore((s) => s.openCreateFolder);
+  const requestUntitled = useFoldersStore((s) => s.requestUntitledCloudFolder);
+  const busy = useFoldersStore((s) => s.untitledCreateBusy);
 
   return (
     <RailSectionHeader
@@ -40,7 +41,8 @@ export function MyFilesRailHeader() {
         <SimpleTooltip label="新建文件夹">
           <IconButton
             aria-label="新建文件夹"
-            onClick={(e) => openCreateFolder(e.currentTarget)}
+            disabled={busy}
+            onClick={() => requestUntitled()}
           >
             <FolderPlus size={13} />
           </IconButton>

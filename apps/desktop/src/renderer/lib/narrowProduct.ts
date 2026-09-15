@@ -21,13 +21,11 @@ const NARROW_BLOCKED_PREFIXES = [
 export const NARROW_HIDDEN_PALETTE_IDS = new Set([
   "toggle-sidebar",
   "open-workspace-terminal",
-  "new-folder",
   "connect-git",
   "import-to-cloud",
   "borrow-to-cloud",
   "open-local-project",
   "grant-readonly-folder",
-  "nav-conversations",
   "nav-whiteboard",
   "nav-docs",
   "nav-tables",
@@ -45,7 +43,6 @@ export const NARROW_HIDDEN_PALETTE_IDS = new Set([
 const NARROW_HIDDEN_THEME_IDS = new Set(["theme-dark", "theme-system"]);
 
 export function isNarrowBlockedPath(pathname: string): boolean {
-  if (pathname === "/conversations") return true;
   if (NARROW_HIDDEN_SETTINGS_PATHS.has(pathname)) return true;
   return NARROW_BLOCKED_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),

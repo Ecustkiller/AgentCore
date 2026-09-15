@@ -46,6 +46,8 @@ NO_USER_FACE_CODES: frozenset[str] = frozenset(
         "not_a_web_url",
         "url_not_workspace_path",
         "loopback_host",
+        "shell_fetch_redirect",
+        "shell_download_redirect",
         "verify_contract",
         "run_contract",
         "http_status_error",
@@ -59,6 +61,7 @@ NO_USER_FACE_CODES: frozenset[str] = frozenset(
         "launcher_unavailable",
         "cloud_desk_required",
         "invalid_args",
+        "ask_user_not_exclusive",
     }
 )
 
@@ -191,7 +194,8 @@ _CURATED_BY_CODE: dict[str, str] = {
         "你正在自己操作浏览器，这期间我不去动它，这一步没有执行。你操作完成后我会接着做。"
     ),
     # --- 读网页：被安全策略拒绝 ---
-    # loopback_host / not_a_web_url / url_not_workspace_path: no user face (redirect title).
+    # loopback_host / not_a_web_url / url_not_workspace_path /
+    # shell_fetch_redirect / shell_download_redirect: no user face (redirect title).
     # Reserved intranet / cloud-metadata names (*.internal, *.local). Permanent refusal.
     "blocked_host": (
         "这个网址指向内部网络专用的名字，不是公开网站，出于安全没有去访问。"

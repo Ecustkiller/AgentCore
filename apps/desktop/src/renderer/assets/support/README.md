@@ -6,4 +6,4 @@
 
 Mac GHA：在源码仓配 secrets `SPONSOR_WECHAT_PNG_B64` / `SPONSOR_ALIPAY_JPG_B64`（对应文件的 base64），`release-desktop.yml` 打包前写出。未配则 Mac 包同样无码。
 
-自愿打赏，不换额度。
+如果本产品对你有所帮助，欢迎您的慷慨赞助支持创作。

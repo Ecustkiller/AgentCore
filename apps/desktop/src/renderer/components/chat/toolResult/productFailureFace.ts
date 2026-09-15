@@ -41,6 +41,8 @@ export const NO_USER_FACE_CODES = new Set([
   "not_a_web_url",
   "url_not_workspace_path",
   "loopback_host",
+  "shell_fetch_redirect",
+  "shell_download_redirect",
   "verify_contract",
   "run_contract",
   "http_status_error",

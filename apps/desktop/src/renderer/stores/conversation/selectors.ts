@@ -1,7 +1,12 @@
 import { type ErrorAction, visibleMessageText } from "@/lib/errors";
 import { precedingUserMessageId } from "@/lib/supportDiagnostics";
 import type { ProcessStep } from "@/types/events";
-import { activeRuntime, lastAssistantProjectionId, runtimeOf } from "./runtime";
+import {
+  activeRuntime,
+  lastAssistantMessageId,
+  lastAssistantProjectionId,
+  runtimeOf,
+} from "./runtime";
 import { useConversationStore } from "./store";
 import { isWritingTurnPhase } from "./turnPhase";
 import type { ConversationRuntime, MemoryUpdate, Message } from "./types";
@@ -131,6 +136,26 @@ export const useActiveTurnPhase = () =>
 export function conversationStillWriting(rt: ConversationRuntime): boolean {
   return rt.isGenerating || isWritingTurnPhase(rt.turnPhase);
 }
+
+/**
+ * Last assistant bubble while this conversation is still writing.
+ * Empty-shell hide must not unmount that placeholder (hydrate may clear
+ * ``isStreaming`` before the engine is on the wire).
+ */
+export function liveTailWritingForMessage(
+  rt: ConversationRuntime,
+  messageId: string,
+): boolean {
+  if (!conversationStillWriting(rt)) return false;
+  return lastAssistantMessageId(rt.messages) === messageId;
+}
+
+export const useLiveTailWriting = (messageId: string): boolean =>
+  useConversationStore((s) => {
+    const id = s.currentConversationId;
+    if (!id) return false;
+    return liveTailWritingForMessage(runtimeOf(s, id), messageId);
+  });
 
 export const useConversationGenerating = (conversationId: string): boolean =>
   useConversationStore((s) =>

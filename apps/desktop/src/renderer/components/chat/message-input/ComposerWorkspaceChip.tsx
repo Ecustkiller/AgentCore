@@ -1,4 +1,4 @@
-import { CreateFolderCascadePanel } from "@/components/folders/CreateFolderMenu";
+import { CreateFolderCascadePanel } from "@/components/folders/CreateFolderPanel";
 import { Button, ConfirmDialog, SearchField } from "@/components/ui";
 import {
   Popover,
@@ -26,7 +26,6 @@ import {
 import { visibleDraftFolders } from "@/lib/draftWorkspaceFolders";
 import { folderAncestorNames } from "@/lib/folderTree";
 import { startImportToCloudJob } from "@/lib/importToCloudJob";
-import { useNarrowLayoutState } from "@/lib/narrowLayout";
 import { openLocalFolderFromRoot } from "@/lib/openLocalFolder";
 import { formatWorkspaceChipTitle } from "@/lib/workspaceEffectiveMode";
 import {
@@ -231,7 +230,7 @@ function DraftChip() {
   const [guideOpen, setGuideOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [foldersExpanded, setFoldersExpanded] = useState(false);
-  /** Same popover handoff — avoid close→open race that swallows CreateFolderMenu. */
+  /** Same popover handoff — avoid close→open race that swallows the create dialog. */
   const [view, setView] = useState<DraftView>("pick");
   const [pickingLocal, setPickingLocal] = useState(false);
   const [localPicked, setLocalPicked] = useState<LocalPicked | null>(null);
@@ -243,7 +242,6 @@ function DraftChip() {
   const intent = useFoldersStore((s) => s.draftWorkspaceIntent);
   const setIntent = useFoldersStore((s) => s.setDraftWorkspaceIntent);
   const isDesktop = hasLocalFiles();
-  const { isNarrow } = useNarrowLayoutState();
   const lastWasLocal =
     storedComposerChannelPreference() === "local_traditional";
 
@@ -685,13 +683,13 @@ function DraftChip() {
             label="新建或加入…"
             onClick={() => setView("join")}
           />
-        ) : !isNarrow ? (
+        ) : (
           <DraftRow
             icon={<Plus size={14} />}
             label="新建文件夹"
             onClick={openCreateCloud}
           />
-        ) : null}
+        )}
         <button
           type="button"
           className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent/40 hover:text-foreground"

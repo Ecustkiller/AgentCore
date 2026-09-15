@@ -1,8 +1,8 @@
-"""Same-batch interaction cards: one SUSPEND must not skip sibling results.
+"""Pause-to-ask is exclusive: at most one ``ask_user`` per model round.
 
-cid 9cd54cf1-3cb1-416c-8af6-c08bc7417e02: two parallel ask_user cards; settling
-the first wrote the engine sibling-skipped placeholder onto the second, so the
-authorization card vanished and the model had to re-issue it.
+Other tools in that round may run first; two asks still fail closed. Resume
+continues after that one answer. Legacy parallel-ask journals must not
+re-freeze without a card (no skip placeholder, no sibling walker).
 """
 
 from __future__ import annotations
@@ -24,51 +24,52 @@ from agentcore.runtime.facts import (
     TurnStartedFact,
     current_fact_log,
 )
+from agentcore.runtime.pipeline.resume.recover_path import ResumeOpenToolCallsError
 from agentcore.runtime.pipeline.resume.settle import (
     append_resumed_tool_results,
-    next_pending_ask_user_suspension,
     persist_resumed_tool_results,
     unclosed_tool_call_ids,
 )
 from agentcore.runtime.suspension import AskUserSuspension, captain_transcript
 from agentcore.runtime.suspension.capture import persist_suspension_capture
 
-_SKIPPED = "（该并行工具调用在本回合暂停时未保留结果，已跳过。）"
 
-
-def _ask_calls() -> list[ToolCall]:
+def _one_ask() -> list[ToolCall]:
     return [
         ToolCall(
             id="ask_a",
             function=ToolCallFunction(
-                name="ask_user", arguments='{"question":"先确认范围？"}'
-            ),
-        ),
-        ToolCall(
-            id="ask_b",
-            function=ToolCallFunction(
-                name="ask_user", arguments='{"question":"区外目录写入授权"}'
+                name="ask_user", arguments='{"message":"先确认范围？"}'
             ),
         ),
     ]
 
 
-def _assistant_with_asks() -> LLMMessage:
-    return LLMMessage(role="assistant", content=None, tool_calls=_ask_calls())
+def _two_asks() -> list[ToolCall]:
+    return [
+        *_one_ask(),
+        ToolCall(
+            id="ask_b",
+            function=ToolCallFunction(
+                name="ask_user", arguments='{"message":"区外目录写入授权"}'
+            ),
+        ),
+    ]
 
 
-def _frame(*, checkpoint_id: str = "cp-a", tool_call_id: str = "ask_a") -> AskUserSuspension:
+def _frame(*, tool_calls: list[ToolCall] | None = None) -> AskUserSuspension:
+    calls = tool_calls if tool_calls is not None else _one_ask()
     return AskUserSuspension(
         message_id="msg-1",
         conversation_id="conv-1",
         user_id="user-1",
         captain_run_id="cap",
-        checkpoint_id=checkpoint_id,
-        tool_call_id=tool_call_id,
+        checkpoint_id="cp-a",
+        tool_call_id="ask_a",
         base_system_prompt="sys",
         user_message="hello",
         question="先确认范围？",
-        transcript=[_assistant_with_asks()],
+        transcript=[LLMMessage(role="assistant", content=None, tool_calls=calls)],
         journal_entries=[
             {
                 "kind": "checkpoint_required",
@@ -78,35 +79,25 @@ def _frame(*, checkpoint_id: str = "cp-a", tool_call_id: str = "ask_a") -> AskUs
                     "questions": [],
                 },
             },
-            {
-                "kind": "checkpoint_required",
-                "payload": {
-                    "checkpoint_id": "cp-b",
-                    "question": "区外目录写入授权",
-                    "questions": [],
-                },
-            },
         ],
     )
 
 
-def test_append_parallel_asks_does_not_skip_sibling():
-    messages = [_assistant_with_asks()]
+def test_append_closes_only_the_answered_call():
+    messages = [LLMMessage(role="assistant", content=None, tool_calls=_two_asks())]
     append_resumed_tool_results(messages, "ask_a", "用户确认了范围。")
     tool_msgs = [m for m in messages if m.role == "tool"]
     assert [m.tool_call_id for m in tool_msgs] == ["ask_a"]
-    assert tool_msgs[0].content == "用户确认了范围。"
-    assert _SKIPPED not in "\n".join(str(m.content) for m in tool_msgs)
     assert unclosed_tool_call_ids(messages) == ["ask_b"]
 
 
-def test_persist_parallel_asks_does_not_write_sibling_placeholder():
+def test_persist_writes_only_answered_call():
     fact_log = TurnFactLog()
     token = current_fact_log.set(fact_log)
     sink = EventSink()
     try:
         persist_resumed_tool_results(
-            [_assistant_with_asks()],
+            [LLMMessage(role="assistant", content=None, tool_calls=_one_ask())],
             tool_call_id="ask_a",
             output="用户确认了范围。",
             run_id="cap",
@@ -117,37 +108,14 @@ def test_persist_parallel_asks_does_not_write_sibling_placeholder():
     finally:
         current_fact_log.reset(token)
 
-    call_facts = [
-        e
-        for e in entries
-        if (e.get("kind") or "") == FactKind.TOOL_CALL.value
-    ]
+    call_facts = [e for e in entries if (e.get("kind") or "") == FactKind.TOOL_CALL.value]
     assert len(call_facts) == 1
-    payload = call_facts[0].get("payload") or {}
-    assert payload.get("tool_call_id") == "ask_a"
-    assert payload.get("result") == "用户确认了范围。"
-    assert _SKIPPED not in str(payload.get("result") or "")
-
+    assert (call_facts[0].get("payload") or {}).get("tool_call_id") == "ask_a"
     ends = [e for e in sink._history if e.type == EventType.TOOL_USE_END]  # noqa: SLF001
     assert len(ends) == 1
-    assert ends[0].payload.get("tool_call_id") == "ask_a"
-    assert _SKIPPED not in str(ends[0].payload.get("output") or "")
 
 
-def test_next_pending_ask_user_keeps_sibling_card():
-    suspension = _frame()
-    messages = [_assistant_with_asks()]
-    append_resumed_tool_results(messages, "ask_a", "用户确认了范围。")
-    sibling = next_pending_ask_user_suspension(
-        suspension, messages, list(suspension.journal_entries)
-    )
-    assert sibling is not None
-    assert sibling.checkpoint_id == "cp-b"
-    assert sibling.tool_call_id == "ask_b"
-    assert sibling.question == "区外目录写入授权"
-
-
-def _pause_journal() -> list[dict]:
+def _single_ask_journal() -> list[dict]:
     return [
         TurnStartedFact(system_prompt="sys", user_message="hello", model_profile="m")
         .to_fact()
@@ -160,15 +128,7 @@ def _pause_journal() -> list[dict]:
                 {
                     "id": "ask_a",
                     "type": "function",
-                    "function": {"name": "ask_user", "arguments": '{"question":"范围？"}'},
-                },
-                {
-                    "id": "ask_b",
-                    "type": "function",
-                    "function": {
-                        "name": "ask_user",
-                        "arguments": '{"question":"区外目录写入授权"}',
-                    },
+                    "function": {"name": "ask_user", "arguments": '{"message":"范围？"}'},
                 },
             ],
             finish_reason="tool_calls",
@@ -177,49 +137,30 @@ def _pause_journal() -> list[dict]:
         .entry(),
         {
             "kind": "checkpoint_required",
-            "payload": {
-                "checkpoint_id": "cp-a",
-                "question": "先确认范围？",
-                "questions": [],
-            },
-        },
-        {
-            "kind": "checkpoint_required",
-            "payload": {
-                "checkpoint_id": "cp-b",
-                "question": "区外目录写入授权",
-                "questions": [],
-            },
+            "payload": {"checkpoint_id": "cp-a", "question": "范围？", "questions": []},
         },
     ]
 
 
 @pytest.mark.asyncio
-async def test_recover_window_re_pauses_on_sibling_ask_user(monkeypatch):
+async def test_recover_single_ask_continues(monkeypatch):
     from agentcore.runtime.pipeline.resume import recover_path as rp
     from agentcore.runtime.recover import SettledSuspension
 
-    journal = _pause_journal()
+    journal = _single_ask_journal()
     suspension = _frame()
     suspension.journal_entries = journal
     window = [
         LLMMessage(role="system", content="sys"),
         LLMMessage(role="user", content="hello"),
-        _assistant_with_asks(),
+        LLMMessage(role="assistant", content="先确认。", tool_calls=_one_ask()),
     ]
     monkeypatch.setattr(rp, "resumed_captain_window", lambda _s, _h: list(window))
     monkeypatch.setattr(
         rp,
         "recover_turn",
-        AsyncMock(
-            return_value=SettledSuspension("用户确认了范围。", None, ToolEffect.CONTINUE)
-        ),
+        AsyncMock(return_value=SettledSuspension("用户确认了范围。", None, ToolEffect.CONTINUE)),
     )
-    saved: list[AskUserSuspension] = []
-
-    async def saver(frame: AskUserSuspension) -> None:
-        saved.append(frame)
-
     fact_log = TurnFactLog(inherited_entries=list(journal))
     token = current_fact_log.set(fact_log)
     try:
@@ -234,123 +175,51 @@ async def test_recover_window_re_pauses_on_sibling_ask_user(monkeypatch):
             debate_tool=None,
             execution_id="e1",
             captain_run_id="cap",
-            suspension_saver=saver,
         )
     finally:
         current_fact_log.reset(token)
 
-    assert recovered.settled.effect is ToolEffect.SUSPEND
-    assert unclosed_tool_call_ids(recovered.messages) == ["ask_b"]
-    assert _SKIPPED not in "\n".join(
-        str(m.content) for m in recovered.messages if m.role == "tool"
-    )
-    assert len(saved) == 1
-    assert saved[0].checkpoint_id == "cp-b"
-    assert saved[0].tool_call_id == "ask_b"
-    ask_a_facts = [
-        e
-        for e in fact_log.entries()
-        if (e.get("kind") or "") == FactKind.TOOL_CALL.value
-        and (e.get("payload") or {}).get("tool_call_id") == "ask_a"
-    ]
-    assert ask_a_facts
-    assert ask_a_facts[0]["payload"]["result"] == "用户确认了范围。"
-    sibling_facts = [
-        e
-        for e in fact_log.entries()
-        if (e.get("kind") or "") == FactKind.TOOL_CALL.value
-        and (e.get("payload") or {}).get("tool_call_id") == "ask_b"
-    ]
-    assert sibling_facts == []
+    assert recovered.settled.effect is ToolEffect.CONTINUE
+    assert unclosed_tool_call_ids(recovered.messages) == []
 
 
 @pytest.mark.asyncio
-async def test_recover_window_suspends_when_unclosed_without_sibling(monkeypatch):
+async def test_recover_legacy_parallel_asks_raises_not_re_pause(monkeypatch):
     from agentcore.runtime.pipeline.resume import recover_path as rp
     from agentcore.runtime.recover import SettledSuspension
 
-    journal = [
-        e
-        for e in _pause_journal()
-        if (e.get("payload") or {}).get("checkpoint_id") != "cp-b"
-    ]
-    suspension = _frame()
+    journal = _single_ask_journal()
+    suspension = _frame(tool_calls=_two_asks())
     suspension.journal_entries = journal
     window = [
         LLMMessage(role="system", content="sys"),
         LLMMessage(role="user", content="hello"),
-        LLMMessage(
-            role="assistant",
-            content="先确认两件事。",
-            tool_calls=_ask_calls(),
-        ),
+        LLMMessage(role="assistant", content="先确认两件事。", tool_calls=_two_asks()),
     ]
     monkeypatch.setattr(rp, "resumed_captain_window", lambda _s, _h: list(window))
     monkeypatch.setattr(
         rp,
         "recover_turn",
-        AsyncMock(
-            return_value=SettledSuspension("用户确认了范围。", None, ToolEffect.CONTINUE)
-        ),
+        AsyncMock(return_value=SettledSuspension("用户确认了范围。", None, ToolEffect.CONTINUE)),
     )
-    saved: list[AskUserSuspension] = []
-
-    async def saver(frame: AskUserSuspension) -> None:
-        saved.append(frame)
-
     fact_log = TurnFactLog(inherited_entries=list(journal))
     token = current_fact_log.set(fact_log)
     try:
-        recovered = await rp.recover_and_rebuild_window(
-            suspension=suspension,
-            decision=CheckpointDecision.CONTINUE,
-            note="",
-            selected=[],
-            history=None,
-            sink=EventSink(),
-            delegate_tool=AsyncMock(),
-            debate_tool=None,
-            execution_id="e1",
-            captain_run_id="cap",
-            suspension_saver=saver,
-        )
+        with pytest.raises(ResumeOpenToolCallsError):
+            await rp.recover_and_rebuild_window(
+                suspension=suspension,
+                decision=CheckpointDecision.CONTINUE,
+                note="",
+                selected=[],
+                history=None,
+                sink=EventSink(),
+                delegate_tool=AsyncMock(),
+                debate_tool=None,
+                execution_id="e1",
+                captain_run_id="cap",
+            )
     finally:
         current_fact_log.reset(token)
-
-    assert recovered.settled.effect is ToolEffect.SUSPEND
-    assert unclosed_tool_call_ids(recovered.messages) == ["ask_b"]
-    assert _SKIPPED not in "\n".join(
-        str(m.content) for m in recovered.messages if m.role == "tool"
-    )
-    assert saved == []
-    assert [m.content for m in recovered.messages if m.role == "user"] == ["hello"]
-
-
-def test_fold_after_one_settle_leaves_sibling_pending():
-    from agentcore.runtime.journal import window_from_journal
-
-    journal = _pause_journal()
-    fact_log = TurnFactLog(inherited_entries=list(journal))
-    token = current_fact_log.set(fact_log)
-    sink = EventSink()
-    try:
-        persist_resumed_tool_results(
-            [_assistant_with_asks()],
-            tool_call_id="ask_a",
-            output="用户确认了范围。",
-            run_id="cap",
-            sink=sink,
-            tool_name="ask_user",
-        )
-        folded = window_from_journal(fact_log.entries())
-    finally:
-        current_fact_log.reset(token)
-
-    assert folded is not None
-    assert unclosed_tool_call_ids(folded) == ["ask_b"]
-    tool_contents = [m.content for m in folded if m.role == "tool"]
-    assert "用户确认了范围。" in tool_contents
-    assert _SKIPPED not in "".join(str(c) for c in tool_contents)
 
 
 def _required(checkpoint_id: str, question: str) -> SimpleNamespace:
@@ -363,7 +232,7 @@ def _required(checkpoint_id: str, question: str) -> SimpleNamespace:
 
 @pytest.mark.asyncio
 async def test_parallel_capture_keeps_both_required_cards():
-    transcript = [_assistant_with_asks()]
+    transcript = [LLMMessage(role="assistant", content=None, tool_calls=_two_asks())]
     log = TurnFactLog()
     log.record_fact(
         TurnStartedFact(system_prompt="sys", user_message="hi", model_profile="m").to_fact()

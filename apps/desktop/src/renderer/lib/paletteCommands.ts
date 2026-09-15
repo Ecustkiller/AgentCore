@@ -146,7 +146,10 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
         "wodewenjian",
         "gongzuoqu",
       ],
-      run: () => useFoldersStore.getState().openCreateFolder(),
+      run: () => {
+        navigate("/files");
+        useFoldersStore.getState().requestUntitledCloudFolder();
+      },
     },
     // Dev-only 磁带回放：仅当服务端 DEMO_TAPE_REPLAY_ENABLED 且目录非空时注入。
     // 主入口 = 准备模式（空会话，用户亲自发消息开播）；立即开播为备选。

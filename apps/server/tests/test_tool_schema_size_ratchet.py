@@ -117,8 +117,11 @@ from agentcore.tools.protocol import ToolSchema
 # 实测 browser 983、host 2045。cap 1040→990、2210→2050。
 # 2026-09-14 delegate：when-to-use 从场面表收成信息极性（切开 / 不该进会话窗）。
 # 实测 1968。cap 1940→1970（抬顶=when-to-use 换原语，非回潮抄写）。
+# 2026-09-15 delegate：根/嵌套共用 DELEGATE_WHEN + 窗绑定分叉。换字未抬顶。
 # 2026-09-15 update_folder_profile：探索落盘手册出按钮；when-to-use 一句，填参取值
 # 留在参数，写完继续原请求在回执。此前未入棘轮。实测 733。cap 740。
+# 2026-09-15 ask_user：一次一张卡进 description（可先检索再问；两张卡仍拒）。
+# 实测桌面 1407、web 1239。cap 1420→1410、1250→1240。
 _CAPS: dict[str, int] = {
     "browser": 990,
     "git": 2190,
@@ -126,7 +129,7 @@ _CAPS: dict[str, int] = {
     "run": 930,
     "delegate": 1970,
     "debate": 1380,
-    "ask_user": 1380,
+    "ask_user": 1410,
     "list_folders": 210,
     "resolve_folder": 340,
     "create_folder": 480,
@@ -136,7 +139,7 @@ _TOTAL_CAP = sum(_CAPS.values())
 
 # 非桌面（web）态 ask_user：桌面独有的 action / well_known 等选项不装配。
 # 2026-09-10 填卡 HOW 出按钮。实测 1212。cap 1240→1220。
-_ASK_USER_WEB_CAP = 1220
+_ASK_USER_WEB_CAP = 1240
 
 # Worker-only：escalate / handoff / 写盘三件套曾把身份段或 consult HOW 再抄一遍到按钮上。
 # 2026-08-29 escalate blocking：已拒凭据→false 短触发（身份段不进按钮）。当次实测 1698。cap 1690→1700。
@@ -482,7 +485,10 @@ def test_on_demand_faces_point_how_to_consult():
     assert "HOW→consult(browser)" in BrowserTool().schema.description
     assert "HOW→consult(debate_and_review)" in DEBATE_DESCRIPTION
     assert "HOW→consult(staffing)" in DELEGATE_DESCRIPTION
-    from agentcore.tools.builtin.delegate.schema import NESTED_DELEGATE_DESCRIPTION
+    from agentcore.tools.builtin.delegate.schema import (
+        DELEGATE_WHEN,
+        NESTED_DELEGATE_DESCRIPTION,
+    )
 
     assert "HOW→consult(lead_subteam)" in NESTED_DELEGATE_DESCRIPTION
     assert "staffing" not in NESTED_DELEGATE_DESCRIPTION
@@ -491,6 +497,10 @@ def test_on_demand_faces_point_how_to_consult():
     assert "等到子队收工" in NESTED_DELEGATE_DESCRIPTION
     assert "切不出去" in NESTED_DELEGATE_DESCRIPTION
     assert "实质讨论" not in DELEGATE_DESCRIPTION
+    assert DELEGATE_WHEN in DELEGATE_DESCRIPTION
+    assert DELEGATE_WHEN in NESTED_DELEGATE_DESCRIPTION
+    assert "成篇落盘" not in NESTED_DELEGATE_DESCRIPTION
+    assert "优先" not in NESTED_DELEGATE_DESCRIPTION
     assert "browser_open" not in BrowserTool().schema.description
     host_action = HostTool().schema.parameters["properties"]["action"]["description"]
     assert "Get-WinEvent" not in host_action

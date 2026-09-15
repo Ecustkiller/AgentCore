@@ -1,21 +1,10 @@
 /**
- * 新用户首启体验 — 草稿空态与情境提示的纯客户端决策与本地持久化。
+ * 新用户首启体验 — 草稿空态的纯客户端决策。
  *
  * 平台代付、开箱即用：不存在「先接入模型才能对话」的门。首启入口 = 草稿空态
- *（starter chips / returning），判定不依赖服务端状态 / DB；情境提示 seen
- * 一律走 {@link uiStorage}。BYOK 降级为「设置·模型配置」里的可选升级。
+ *（starter chips / returning），判定不依赖服务端状态 / DB。BYOK 降级为
+ *「设置·模型配置」里的可选升级。
  */
-
-import { uiGet, uiSet } from "@/lib/uiStorage";
-
-/** 情境提示 id（总量 ≤3，各只出现一次）。 */
-export type ContextualTipId = "inline_team_graph";
-
-const TIP_KEY_PREFIX = "onboarding:tip:";
-
-export function tipStorageKey(id: ContextualTipId): string {
-  return `${TIP_KEY_PREFIX}${id}`;
-}
 
 /** 草稿页空态两态（平台代付后无「未接入」态）。 */
 export type DraftEmptyKind = "starter_chips" | "returning";
@@ -77,16 +66,3 @@ export const STARTER_TASK_CHIPS: readonly string[] = [
   "请拉一位写手起草产品介绍初稿，一位审校挑逻辑漏洞，一位整理成对外可用的发布说明。",
   "帮我规划一次周末短途旅行：一人查交通与住宿，一人排景点与用餐，最后合成一份可执行行程。",
 ] as const;
-
-export function hasSeenTip(id: ContextualTipId): boolean {
-  return uiGet<boolean>(tipStorageKey(id)) === true;
-}
-
-export function markTipSeen(id: ContextualTipId): void {
-  uiSet(tipStorageKey(id), true);
-}
-
-/** 是否应展示某条情境提示（未 seen 才展示）。 */
-export function shouldShowTip(id: ContextualTipId): boolean {
-  return !hasSeenTip(id);
-}

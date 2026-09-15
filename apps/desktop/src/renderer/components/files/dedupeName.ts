@@ -16,3 +16,32 @@ export function dedupeName(name: string, existing: Set<string>): string {
   }
   return candidate;
 }
+
+/** Finder-style default name for a newly created directory (not a copy). */
+export const UNTITLED_FOLDER_NAME = "未命名文件夹";
+
+/** Prompt-catalog grouping folder (工具箱「新建夹」). */
+export const UNTITLED_PROMPT_FOLDER_NAME = "未命名夹";
+
+/**
+ * Same numbering as server `unique_sibling_name`: `base`, then `base (2)`…
+ * Comparison is case-insensitive so `报告` and `报告` cannot both land.
+ */
+export function uniqueNumberedName(
+  base: string,
+  existing: Iterable<string>,
+): string {
+  const used = new Set(
+    [...(existing instanceof Set ? existing : new Set(existing))].map((s) =>
+      s.toLowerCase(),
+    ),
+  );
+  if (!used.has(base.toLowerCase())) return base;
+  let n = 2;
+  while (used.has(`${base} (${n})`.toLowerCase())) n++;
+  return `${base} (${n})`;
+}
+
+export function uniqueUntitledFolder(existing: Iterable<string>): string {
+  return uniqueNumberedName(UNTITLED_FOLDER_NAME, existing);
+}

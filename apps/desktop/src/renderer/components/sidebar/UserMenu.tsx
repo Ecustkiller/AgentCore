@@ -98,11 +98,11 @@ export function UserMenu() {
                 <LogOut size={14} />
               </IconButton>
             </SimpleTooltip>
-            <SimpleTooltip label="更多">
+            <SimpleTooltip label="设置">
               <IconButton
                 tone="sidebar"
                 onClick={goSettings}
-                aria-label="更多"
+                aria-label="设置"
                 className="text-sidebar-foreground/50 outline-none hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-accent"
               >
                 <MoreVertical size={14} />

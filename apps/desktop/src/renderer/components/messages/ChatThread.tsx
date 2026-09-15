@@ -1,3 +1,4 @@
+import { NarrowMenuButton } from "@/components/layout/NarrowMenuButton";
 import { Button, EmptyHint, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import {
@@ -294,6 +295,11 @@ export function ChatThread({ chatId }: Props) {
               <Info size={18} />
             </IconButton>
           </SimpleTooltip>
+        )}
+        {isNarrow && (
+          <span className={showInfo ? undefined : "ml-auto"}>
+            <NarrowMenuButton />
+          </span>
         )}
       </div>
 

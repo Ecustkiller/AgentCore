@@ -9,7 +9,12 @@ import pytest
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.events import EventSink, EventType, resume_deferred
 from agentcore.runtime.turn.queue import QueuedTurn, new_queued_turn, turn_queue
-from agentcore.runtime.turn.runs import ResumeDeferredWaiter, TurnRunRegistry, turn_runs
+from agentcore.runtime.turn.runs import (
+    ResumeClaimUnresolvedError,
+    ResumeDeferredWaiter,
+    TurnRunRegistry,
+    turn_runs,
+)
 
 
 async def _never() -> None:
@@ -113,11 +118,12 @@ async def test_busy_deferred_wakes_on_slot_empty(monkeypatch):
     turn_runs._resume_deferred.pop(cid, None)  # noqa: SLF001
 
 
-async def test_wake_failure_unwinds_waiter_and_schedules_drain(monkeypatch):
+async def test_wake_failure_fails_waiter_and_schedules_drain(monkeypatch):
     """The wake coroutine is detached: a claim that raises must settle it itself.
 
     Otherwise the user's「继续」SSE waits on ``started`` forever (no timeout on the
-    route side) and the conversation's queued messages never drain.
+    route side) and the conversation's queued messages never drain. Idle resume
+    answers 5xx here; cancel would look like the card was gone.
     """
     drained: list[str] = []
 
@@ -155,9 +161,122 @@ async def test_wake_failure_unwinds_waiter_and_schedules_drain(monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         await host
 
-    with pytest.raises(asyncio.CancelledError):
+    with pytest.raises(RuntimeError, match="claim exploded"):
         await asyncio.wait_for(started, timeout=2.0)
     assert drained == [cid]
+    turn_queue.clear(cid)
+    turn_runs._resume_deferred.pop(cid, None)  # noqa: SLF001
+
+
+async def test_deferred_claim_miss_frame_still_there_is_retryable(monkeypatch):
+    """Claim None + frame still on disk = idle 500 twin, not「已处理」cancel."""
+    drained: list[str] = []
+
+    async def miss_claim(_message_id: str, **_kwargs):
+        return None
+
+    async def still_there(_message_id: str, *, conversation_id: str):
+        return True
+
+    monkeypatch.setattr(
+        "agentcore.runtime.suspension.persistence.claim_paused_turn", miss_claim
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.suspension.persistence.paused_turn_exists", still_there
+    )
+    monkeypatch.setattr(
+        turn_queue, "schedule_drain", lambda cid: drained.append(cid)
+    )
+
+    cid = "c-deferred-claim-unresolved"
+    turn_queue.clear(cid)
+    turn_runs._resume_deferred.pop(cid, None)  # noqa: SLF001
+
+    host = asyncio.create_task(_never())
+    turn_runs.register(
+        conversation_id=cid, task=host, sink=EventSink(message_id="host")
+    )
+    started: asyncio.Future = asyncio.get_running_loop().create_future()
+    turn_runs.register_resume_deferred(
+        ResumeDeferredWaiter(
+            conversation_id=cid,
+            message_id="paused-unresolved",
+            busy_reason="live_turn",
+            checkpoint_response=_checkpoint(),
+            started=started,
+        )
+    )
+
+    host.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await host
+
+    with pytest.raises(ResumeClaimUnresolvedError):
+        await asyncio.wait_for(started, timeout=2.0)
+    assert drained == [cid]
+    turn_queue.clear(cid)
+    turn_runs._resume_deferred.pop(cid, None)  # noqa: SLF001
+
+
+async def test_deferred_claim_miss_joins_live_continuation(monkeypatch):
+    """Frame already consumed and this message is running → join that sink."""
+    drained: list[str] = []
+    continuation: asyncio.Task | None = None
+    live_sink = EventSink(message_id="paused-join")
+
+    async def miss_claim(_message_id: str, **_kwargs):
+        nonlocal continuation
+        continuation = asyncio.create_task(_never())
+        turn_runs.register(
+            conversation_id=cid,
+            task=continuation,
+            sink=live_sink,
+            user_id="u",
+        )
+        return None
+
+    async def gone(_message_id: str, *, conversation_id: str):
+        return False
+
+    monkeypatch.setattr(
+        "agentcore.runtime.suspension.persistence.claim_paused_turn", miss_claim
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.suspension.persistence.paused_turn_exists", gone
+    )
+    monkeypatch.setattr(
+        turn_queue, "schedule_drain", lambda cid: drained.append(cid)
+    )
+
+    cid = "c-deferred-claim-join"
+    turn_queue.clear(cid)
+    turn_runs._resume_deferred.pop(cid, None)  # noqa: SLF001
+
+    host = asyncio.create_task(_never())
+    turn_runs.register(
+        conversation_id=cid, task=host, sink=EventSink(message_id="host")
+    )
+    started: asyncio.Future = asyncio.get_running_loop().create_future()
+    turn_runs.register_resume_deferred(
+        ResumeDeferredWaiter(
+            conversation_id=cid,
+            message_id="paused-join",
+            busy_reason="live_turn",
+            checkpoint_response=_checkpoint(),
+            started=started,
+        )
+    )
+
+    host.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await host
+
+    assert await asyncio.wait_for(started, timeout=2.0) is live_sink
+    assert drained == []
+    assert continuation is not None
+    continuation.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await continuation
     turn_queue.clear(cid)
     turn_runs._resume_deferred.pop(cid, None)  # noqa: SLF001
 

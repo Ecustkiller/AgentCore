@@ -527,6 +527,49 @@ def test_local_turn_recorded_does_not_mask_cloud_turn_close() -> None:
     assert spine["tail"]["rounds"] == 2
 
 
+def test_sidecar_turn_complete_phase0_beats_local_recorded() -> None:
+    """Sidecar engine close carries Phase-0; cloud write-back recorded does not mask it."""
+    tid = "a" * 32
+    events = [
+        {
+            "type": "log",
+            "event": "chat.turn_start",
+            "timestamp": "2026-09-15T04:00:00Z",
+            "trace_id": tid,
+            "preview": "你好",
+            "via": "sidecar",
+            "location": "local",
+        },
+        {
+            "type": "log",
+            "event": "chat.local_turn_recorded",
+            "timestamp": "2026-09-15T04:00:05Z",
+            "trace_id": tid,
+            "chars": 12,
+            "rounds": 1,
+            "finish_reason": "end_turn",
+        },
+        {
+            "type": "log",
+            "event": "chat.turn_complete",
+            "timestamp": "2026-09-15T04:00:04Z",
+            "trace_id": tid,
+            "finish_reason": "end_turn",
+            "rounds": 1,
+            "duration_ms": 3800,
+            "prepare_ms": 400,
+            "ttft_reasoning_ms": 2900,
+        },
+    ]
+    spine = build_decision_spine(events, trace_id=tid)
+    assert spine["head"]["source"] == "chat.turn_start"
+    assert spine["head"]["via"] == "sidecar"
+    assert spine["tail"]["event"] == "chat.turn_complete"
+    assert spine["tail"]["ttft_reasoning_ms"] == 2900
+    assert spine["tail"]["prepare_ms"] == 400
+    assert spine["tail"]["duration_ms"] == 3800
+
+
 def test_execution_groups_tools_and_keeps_failures_on_decisions() -> None:
     tid = "g" * 32
     events = [

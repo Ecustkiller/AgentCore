@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { MessageBubble } from "@/components/chat/message-bubble";
-import type { Message } from "@/stores/conversation";
-import { cleanup, render } from "@testing-library/react";
+import { getRuntime, useConversationStore, type Message } from "@/stores/conversation";
+import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+
+const CID = "conv-bubble-enter";
 
 beforeAll(() => {
   Element.prototype.scrollIntoView ??= () => {};
@@ -68,5 +70,32 @@ describe("MessageBubble enter animation", () => {
     expect(bubbleWrap(settled.container)?.className).toMatch(
       /animate-message-enter/,
     );
+  });
+});
+
+describe("MessageBubble empty hide", () => {
+  beforeEach(() => {
+    useConversationStore.setState({ currentConversationId: null, byId: {} });
+  });
+
+  it("omits an idle empty assistant with no verdict", () => {
+    const store = useConversationStore.getState();
+    store.switchConversation(CID);
+    store.addMessage(assistant({ isStreaming: false }), CID);
+    const msg = getRuntime(CID).messages[0];
+    const { container } = renderBubble(msg);
+    expect(bubbleWrap(container)).toBeNull();
+  });
+
+  it("keeps an empty last assistant while the turn is still writing", () => {
+    const store = useConversationStore.getState();
+    store.switchConversation(CID);
+    store.addMessage(user(), CID);
+    store.addMessage(assistant({ isStreaming: false, content: "" }), CID);
+    store.setGenerating(true, CID);
+    const msg = getRuntime(CID).messages.at(-1);
+    if (!msg) throw new Error("expected assistant");
+    renderBubble(msg);
+    expect(screen.getByText("Thinking…")).toBeTruthy();
   });
 });

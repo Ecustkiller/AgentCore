@@ -29,8 +29,10 @@ from agentcore.llm.credentials import (
 from agentcore.llm.provider.protocol import LLMChunk, TokenUsage, ToolCallDelta
 from agentcore.runtime.approvals import ApprovalDecision
 from agentcore.runtime.interaction import InteractionKind, default_interaction_registry
+from agentcore.runtime.turn import complete_log as complete_mod
 from agentcore.sidecar import protocol
 from agentcore.sidecar.server import SidecarServer
+from tests.conftest import LogSpy
 
 
 class _ScriptedProvider:
@@ -523,6 +525,8 @@ def test_apply_rpc_folder_binding_overlays_folder_id():
 
 def test_sidecar_start_turn_local_binding_reaches_pipeline(tmp_path, monkeypatch):
     """Injected localRootId/localSubpath reach run_chat_pipeline (no Folder PG)."""
+    spy = LogSpy()
+    monkeypatch.setattr(complete_mod, "logger", spy)
     captured: dict[str, Any] = {}
 
     async def fake_pipeline(**kwargs: Any) -> dict[str, Any]:
@@ -587,6 +591,11 @@ def test_sidecar_start_turn_local_binding_reaches_pipeline(tmp_path, monkeypatch
     assert captured["folder_local_root_id"] == "root-xyz"
     assert captured["folder_local_subpath"] == "repos/app"
     assert "error" not in _response(sent, 2)
+    close = spy.get("chat.turn_complete")
+    assert close["duration_ms"] >= 0
+    assert "prepare_ms" in close
+    assert "ttft_reasoning_ms" in close
+    assert close["ttft_reasoning_ms"] is None
 
 
 def test_rpc_agent_mentions_accepts_camel_and_snake():

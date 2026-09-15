@@ -41,9 +41,12 @@ def test_legal_skills_absent_from_system_registry():
 
 
 def test_platform_shelf_exposes_all_templates():
-    names = {s.name for s in platform_templates()}
+    templates = platform_templates()
+    names = {s.name for s in templates}
     assert names == {s.name for s in LEGAL_SKILLS}
-    for skill in LEGAL_SKILLS:
+    assert "ledger_reconcile" not in names
+    assert len(names) == len(templates)
+    for skill in templates:
         listing_id = platform_listing_id(skill.name)
         assert get_platform_template(listing_id) is skill
         assert platform_version_id(skill.name, skill.body)

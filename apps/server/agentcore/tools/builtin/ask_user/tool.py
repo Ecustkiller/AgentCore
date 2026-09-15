@@ -105,6 +105,7 @@ class AskUserTool:
         tool_desc = (
             "向用户发问（唯一问用户原语）。暂停回合等人答复。"
             "挡路才问：交付形态未钉、猜错会做错 → 先问；仅可逆低杠杆才标假设。"
+            "一次一张卡，多题写 questions；可先检索再问。"
             "HOW→consult(ask_kickoff)、consult(ask_midtask)。"
         )
         allowed_actions = advertised_option_actions(

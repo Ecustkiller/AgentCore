@@ -18,6 +18,11 @@ const EVENT_ALLOW_EXACT = new Set([
   "sidecar.turn_already_running",
   // Local-bound turn took the cloud path — why (probe / switch / no target).
   "turn.stream_path",
+  // Composer Thinking bubble: reused vs truncated+minted (send-path remount).
+  "send.assistant_placeholder",
+  // Open / latest-window adopt — warm vs cold, unconfirmed-tail overlay.
+  "conversation.slice_diag",
+  "conversation.hydrate",
 ]);
 
 const FIELD_ALLOW = new Set([
@@ -55,6 +60,36 @@ const FIELD_ALLOW = new Set([
   "probe_detail",
   "detail",
   "regenerate",
+  "action",
+  "assistant_id",
+  "optimistic_user_id",
+  "warm",
+  "is_generating",
+  "has_more_after",
+  "has_more_before",
+  "active_id",
+  "soft_refresh",
+  "after_count",
+  "before_count",
+  "applied_count",
+  "kept_unconfirmed_tail",
+  "replaced_while_background",
+  "wrote",
+  "network_count",
+  "memory_count",
+  "memory_count_before",
+  "memory_has_more_after",
+  "memory_has_more_after_before",
+  "network_has_more_after",
+  "incoming_count",
+  "still_in_memory",
+  "finish_reason",
+  "branch",
+  "sidecar_live",
+  "cloud_live",
+  "unsynced_count",
+  "paused_count",
+  "message_count",
 ]);
 
 const SECRET_KEY =
@@ -176,7 +211,9 @@ function pickAllowedFields(
   const out: SanitizedDesktopLogRecord = {};
   for (const [key, value] of Object.entries(record)) {
     if (!FIELD_ALLOW.has(key)) continue;
-    if (SECRET_KEY.test(key) && key !== "reason") continue;
+    // ``message_count`` matches the secret regex; it is a window size, not a body.
+    if (SECRET_KEY.test(key) && key !== "reason" && key !== "message_count")
+      continue;
     if (!isAllowedPrimitive(value)) continue;
     out[key] = value;
   }

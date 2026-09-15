@@ -2,28 +2,32 @@ import {
   SettingRow,
   SettingsAsync,
   SettingsSection,
+  SettingsStack,
 } from "@/components/settings";
 import { Button, Card, IconButton, PageHeader } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import { formatCompact, formatCost, formatDisplayCost } from "@/lib/format";
+import {
+  formatCompact,
+  formatCost,
+  formatDisplayCost,
+  formatQuotaRemaining,
+} from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { useUsageStore } from "@/stores/usage";
 import {
   CACHE_BILLED_AS_MISS_LABEL,
   cacheUsageDisplay,
 } from "@agentcore/protocol-fold-kit";
 import { KeyRound, RefreshCw } from "lucide-react";
-import { useEffect } from "react";
+import { type ReactNode, useEffect } from "react";
+import { Link } from "react-router-dom";
 
 /**
- * Account usage dashboard (§7.3D) — the manager's view of the team's spend.
+ * Account usage dashboard — 大众面先答「还能用多久」。
  *
- * 大众面 leads with two semantic quota meters (本月额度 / 今日 tokens) so the user
- * reads「还剩多少」at a glance without big raw numbers. Token / cost breakdown
- * on this page is always on; run-detail「资源消耗」defaults collapsed. All numbers come from
- * `GET /usage/summary` via the usage store; money is integer nano（无汇率），符号取
- * 自各金额自带的 `currency`——平台记账 / 额度恒 ¥，BYOK 估算走社区美元价目显 $.
- * BYOK-with-key shows token meters + ≈ estimates when `estimated_cost` /
- * `cost_estimated_total` is present.
+ * 平台代付：主卡是额度还剩（日/月取更紧的一窗，不并排两条钱条）；今日花费 /
+ * tokens / 请求用数字卡；不限的维不画空槽；近 7 日趋势次之；明细只留构成。
+ * BYOK：说明卡 + token 面 + 有估算再出 ≈$。数字来自 `GET /usage/summary`。
  */
 export function UsageSettings() {
   const summary = useUsageStore((s) => s.summary);
@@ -31,14 +35,11 @@ export function UsageSettings() {
   const error = useUsageStore((s) => s.error);
   const fetchSummary = useUsageStore((s) => s.fetchSummary);
 
-  // Refresh on open: the bootstrap snapshot may be stale by the time the user
-  // lands here. Best-effort (the store keeps the last value + a soft error).
   useEffect(() => {
     void fetchSummary();
   }, [fetchSummary]);
 
   const refresh = () => void fetchSummary();
-  // BYOK: platform quota is dormant. Platform mode shows quota meters.
   const byok = summary?.billing_mode === "byok";
 
   return (
@@ -46,9 +47,6 @@ export function UsageSettings() {
       <PageHeader
         title="用量"
         action={
-          // Manual refresh once data exists — numbers go stale after running tasks
-          // elsewhere (mount-only fetch otherwise). First load / first-load failure
-          // are handled by the dedicated states below, so the button shows here.
           summary ? (
             <SimpleTooltip label="刷新">
               <IconButton
@@ -67,12 +65,16 @@ export function UsageSettings() {
         }
       />
 
-      {/* 三态分离：已有数据（含刷新失败的软告警）/ 首屏失败 / 首屏加载中。 */}
       {summary ? (
-        <>
-          {error && <RefreshErrorBanner message={error} onRetry={refresh} />}
-          <Dashboard summary={summary} byok={byok} />
-        </>
+        <Dashboard
+          summary={summary}
+          byok={byok}
+          banner={
+            error ? (
+              <RefreshErrorBanner message={error} onRetry={refresh} />
+            ) : null
+          }
+        />
       ) : (
         <SettingsAsync
           className="mt-6"
@@ -86,10 +88,6 @@ export function UsageSettings() {
   );
 }
 
-/**
- * Refresh failed but stale data exists: a muted banner above the dashboard
- * with an inline retry. 用量是附属呈现——刷新失败不清空已有数字 (P1)，只提示可能过期。
- */
 function RefreshErrorBanner({
   message,
   onRetry,
@@ -98,7 +96,7 @@ function RefreshErrorBanner({
   onRetry: () => void;
 }) {
   return (
-    <Card className="mt-6 flex items-center justify-between gap-3 border-border bg-muted/40 px-4 py-2.5">
+    <Card className="flex items-center justify-between gap-3 border-border bg-muted/40 px-4 py-2.5">
       <p className="text-xs text-muted-foreground">{message}</p>
       <Button variant="neutral" onClick={onRetry}>
         重试
@@ -107,12 +105,34 @@ function RefreshErrorBanner({
   );
 }
 
+type Summary = NonNullable<
+  ReturnType<typeof useUsageStore.getState>["summary"]
+>;
+
+const NEAR_RATIO = 0.8;
+
+function remainingNano(used: number, limit: number): number | null {
+  if (limit <= 0) return null;
+  return Math.max(0, limit - used);
+}
+
+function usedPct(used: number, limit: number): number {
+  if (limit <= 0) return 0;
+  return Math.min(Math.round((used / limit) * 100), 100);
+}
+
+function isNear(used: number, limit: number): boolean {
+  return limit > 0 && used / limit >= NEAR_RATIO;
+}
+
 function Dashboard({
   summary,
   byok,
+  banner,
 }: {
   summary: Summary;
   byok: boolean;
+  banner: ReactNode;
 }) {
   const { today, month, quota } = summary;
   const monthLimit = quota.monthly_cost_nano;
@@ -123,97 +143,287 @@ function Dashboard({
   const dayTokensUsed = today.usage.input + today.usage.output;
   const dayReqLimit = quota.daily_requests;
   const dayReqUsed = today.requests;
-  const monthNear = monthLimit > 0 && monthUsed / monthLimit >= 0.8;
-  const monthLabel = "本月额度";
+  const moneyCurrency = month.cost.currency ?? today.cost.currency;
 
-  // Reset captions derive from the backend's UTC window boundaries (usage.py /
-  // quota.py) rendered in local time — see resetTexts() for why.
+  const monthRemaining = remainingNano(monthUsed, monthLimit);
+  const dayRemaining = remainingNano(dayCostUsed, dayCostLimit);
+  const dayIsHero =
+    dayRemaining != null &&
+    (monthRemaining == null || dayRemaining < monthRemaining);
+
   const { dailyResetText, monthlyResetText } = resetTexts();
 
-  const moneyCaption =
-    monthLimit > 0
-      ? `已用 ${formatCost(monthUsed)} / ${formatCost(monthLimit)} · ${monthlyResetText}`
-      : `已用 ${formatCost(monthUsed)} · 不限`;
-  // 单日成本 backstop (F2) — only surfaced when a daily cost cap is configured
-  // (platform flip); byok / free-tier deployments leave it 0 and this meter hides.
-  const dayCostCaption = `已用 ${formatCost(dayCostUsed)} / ${formatCost(dayCostLimit)} · ${dailyResetText}`;
-  const tokenCaption =
-    dayTokenLimit > 0
-      ? `${formatCompact(dayTokensUsed)} / ${formatCompact(dayTokenLimit)} · ${dailyResetText}`
-      : `${formatCompact(dayTokensUsed)} · 不限`;
-  const reqCaption =
-    dayReqLimit > 0
-      ? `${dayReqUsed} / ${dayReqLimit} 次 · ${dailyResetText}`
-      : `${dayReqUsed} 次 · 不限`;
+  const todayStats: StatCell[] = byok
+    ? byokTodayStats(summary, {
+        dayTokensUsed,
+        dayTokenLimit,
+        dayReqUsed,
+        dayReqLimit,
+      })
+    : [
+        {
+          label: "花费",
+          value: formatCost(dayCostUsed, today.cost.currency),
+          near: isNear(dayCostUsed, dayCostLimit) && !dayIsHero,
+        },
+        {
+          label: "tokens",
+          value: formatCompact(dayTokensUsed),
+          caption:
+            dayTokenLimit > 0 ? `/ ${formatCompact(dayTokenLimit)}` : undefined,
+          near: isNear(dayTokensUsed, dayTokenLimit),
+        },
+        {
+          label: "请求",
+          value:
+            dayReqLimit > 0
+              ? `${dayReqUsed} / ${dayReqLimit}`
+              : String(dayReqUsed),
+          caption: `本月 ${month.requests}`,
+          near: isNear(dayReqUsed, dayReqLimit),
+        },
+      ];
 
   return (
-    <div className="mt-6 space-y-5">
+    <SettingsStack>
+      {banner}
       {byok ? (
-        <>
-          <ByokNote />
-          <QuotaMeter
-            label="今日 tokens"
-            used={dayTokensUsed}
-            limit={dayTokenLimit}
-            caption={tokenCaption}
-          />
-        </>
+        <ByokNote />
       ) : (
-        <>
-          <QuotaMeter
-            label={monthLabel}
-            used={monthUsed}
-            limit={monthLimit}
-            caption={moneyCaption}
-          />
-          {monthNear && (
-            <p className="-mt-3 text-xs text-primary">
-              接近本月额度，用完可联系管理员提额，或接入自己的 key 继续。
-            </p>
-          )}
-          {dayCostLimit > 0 && (
-            <QuotaMeter
-              label="今日额度"
-              used={dayCostUsed}
-              limit={dayCostLimit}
-              caption={dayCostCaption}
-            />
-          )}
-          <QuotaMeter
-            label="今日 tokens"
-            used={dayTokensUsed}
-            limit={dayTokenLimit}
-            caption={tokenCaption}
-          />
-          <QuotaMeter
-            label="今日请求"
-            used={dayReqUsed}
-            limit={dayReqLimit}
-            caption={reqCaption}
-          />
-        </>
+        <QuotaHero
+          dayIsHero={dayIsHero}
+          monthUsed={monthUsed}
+          monthLimit={monthLimit}
+          monthRemaining={monthRemaining}
+          dayCostUsed={dayCostUsed}
+          dayCostLimit={dayCostLimit}
+          dayRemaining={dayRemaining}
+          currency={moneyCurrency}
+          dailyResetText={dailyResetText}
+          monthlyResetText={monthlyResetText}
+        />
       )}
 
-      {/* 近 7 日成本趋势 (§7.3D) — ¥ over time, 大众-visible. Hidden when the whole
-          window had no spend (a flat zero trend tells the user nothing). */}
+      <SettingsSection title="今日">
+        <TodayStats items={todayStats} />
+        {!byok && isNear(dayTokensUsed, dayTokenLimit) && (
+          <div className="mt-3">
+            <QuotaMeter
+              label="今日 tokens"
+              used={dayTokensUsed}
+              limit={dayTokenLimit}
+              caption={`${formatCompact(dayTokensUsed)} / ${formatCompact(dayTokenLimit)} · ${dailyResetText}`}
+            />
+          </div>
+        )}
+        {!byok && isNear(dayReqUsed, dayReqLimit) && (
+          <div className="mt-3">
+            <QuotaMeter
+              label="今日请求"
+              used={dayReqUsed}
+              limit={dayReqLimit}
+              caption={`${dayReqUsed} / ${dayReqLimit} 次 · ${dailyResetText}`}
+            />
+          </div>
+        )}
+      </SettingsSection>
+
       {summary.recent_daily_cost.some((p) => p.cost_total > 0) && !byok && (
         <CostTrend points={summary.recent_daily_cost} />
       )}
 
       <UsageDetail summary={summary} byok={byok} />
+    </SettingsStack>
+  );
+}
+
+function byokTodayStats(
+  summary: Summary,
+  counts: {
+    dayTokensUsed: number;
+    dayTokenLimit: number;
+    dayReqUsed: number;
+    dayReqLimit: number;
+  },
+): StatCell[] {
+  const { today, month } = summary;
+  const todayEst = today.estimated_cost?.total ?? 0;
+  const items: StatCell[] = [
+    {
+      label: "tokens",
+      value: formatCompact(counts.dayTokensUsed),
+      caption:
+        counts.dayTokenLimit > 0
+          ? `/ ${formatCompact(counts.dayTokenLimit)}`
+          : undefined,
+    },
+    {
+      label: "请求",
+      value:
+        counts.dayReqLimit > 0
+          ? `${counts.dayReqUsed} / ${counts.dayReqLimit}`
+          : String(counts.dayReqUsed),
+      caption: `本月 ${month.requests}`,
+    },
+  ];
+  if (todayEst > 0) {
+    items.push({
+      label: "估算",
+      value: formatDisplayCost(todayEst, true, today.estimated_cost?.currency),
+    });
+  }
+  return items;
+}
+
+function QuotaHero({
+  dayIsHero,
+  monthUsed,
+  monthLimit,
+  monthRemaining,
+  dayCostUsed,
+  dayCostLimit,
+  dayRemaining,
+  currency,
+  dailyResetText,
+  monthlyResetText,
+}: {
+  dayIsHero: boolean;
+  monthUsed: number;
+  monthLimit: number;
+  monthRemaining: number | null;
+  dayCostUsed: number;
+  dayCostLimit: number;
+  dayRemaining: number | null;
+  currency?: string | null;
+  dailyResetText: string;
+  monthlyResetText: string;
+}) {
+  if (monthRemaining == null && dayRemaining == null) {
+    return (
+      <Card className="px-4 py-4">
+        <p className="text-sm text-foreground">本月已用</p>
+        <p className="mt-1 text-xl font-semibold tabular-nums">
+          {formatCost(monthUsed, currency)}
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">不限</p>
+      </Card>
+    );
+  }
+
+  const used = dayIsHero ? dayCostUsed : monthUsed;
+  const limit = dayIsHero ? dayCostLimit : monthLimit;
+  const remaining = dayIsHero ? dayRemaining : monthRemaining;
+  const label = dayIsHero ? "今日额度还剩" : "本月额度还剩";
+  const pct = usedPct(used, limit);
+  const near = isNear(used, limit);
+  const resetText = dayIsHero ? dailyResetText : monthlyResetText;
+
+  return (
+    <Card className="px-4 py-4">
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="text-sm text-foreground">{label}</p>
+        <p
+          className={
+            near ? "text-sm text-primary" : "text-sm text-muted-foreground"
+          }
+        >
+          {pct}%
+        </p>
+      </div>
+      <p className="mt-1 text-xl font-semibold tabular-nums">
+        {formatQuotaRemaining(remaining ?? 0, currency)}
+      </p>
+      <QuotaBar label={label} pct={pct} className="mt-3" />
+      <p className="mt-1 text-xs text-muted-foreground">
+        已用 {formatCost(used, currency)} / {formatCost(limit, currency)} ·{" "}
+        {resetText}
+      </p>
+      {dayIsHero && monthRemaining != null && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          本月还剩 {formatQuotaRemaining(monthRemaining, currency)} ·{" "}
+          {monthlyResetText}
+        </p>
+      )}
+      {near && <NearLimitHint daily={dayIsHero} />}
+    </Card>
+  );
+}
+
+function NearLimitHint({ daily }: { daily: boolean }) {
+  return (
+    <p className="mt-2 text-xs text-primary">
+      {daily ? "接近今日额度" : "接近本月额度"}
+      ，用完可联系管理员提额，或
+      <Link to="/more/providers" className="underline-offset-2 hover:underline">
+        接入自己的 Key
+      </Link>
+      继续。
+    </p>
+  );
+}
+
+function QuotaBar({
+  label,
+  pct,
+  className,
+}: {
+  label: string;
+  pct: number;
+  className?: string;
+}) {
+  return (
+    <div
+      role="meter"
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={pct}
+      className={cn(
+        "h-2 w-full overflow-hidden rounded-full bg-muted",
+        className,
+      )}
+    >
+      <div
+        className="h-full rounded-full bg-primary"
+        style={{ width: `${pct}%` }}
+      />
     </div>
   );
 }
 
-type Summary = NonNullable<
-  ReturnType<typeof useUsageStore.getState>["summary"]
->;
+type StatCell = {
+  label: string;
+  value: string;
+  caption?: string;
+  near?: boolean;
+};
 
-/**
- * BYOK reframe of the quota block: the platform额度 is dormant (the turn runs on
- * the user's own DeepSeek key), so instead of meters we explain that spend below
- * is the user's own estimated DeepSeek cost and there is no platform cap.
- */
+function TodayStats({ items }: { items: StatCell[] }) {
+  const cols = items.length >= 3 ? "grid-cols-3" : "grid-cols-2";
+  return (
+    <Card className={cn("grid divide-x divide-border overflow-hidden", cols)}>
+      {items.map((item) => (
+        <div key={item.label} className="min-w-0 px-4 py-3">
+          <p className="text-xs text-muted-foreground">{item.label}</p>
+          <p
+            className={cn(
+              "mt-1 text-base font-medium tabular-nums",
+              item.near ? "text-primary" : "text-foreground",
+            )}
+          >
+            {item.value}
+          </p>
+          {item.caption ? (
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {item.caption}
+            </p>
+          ) : null}
+        </div>
+      ))}
+    </Card>
+  );
+}
+
 function ByokNote() {
   return (
     <Card variant="muted" className="flex items-start gap-2.5 px-4 py-3">
@@ -227,17 +437,6 @@ function ByokNote() {
   );
 }
 
-/**
- * Reset captions for the quota meters, derived from the backend's UTC window
- * boundaries (usage.py / quota.py) and rendered in the user's LOCAL time.
- *
- * Daily windows reset at the next UTC midnight, the monthly window at the next UTC
- * month start — both the same instant-of-day in local time (the UTC offset). So the
- * daily caption is that recurring local time and the monthly caption is the local
- * date + that time. Building the date from the UTC boundary (not a local-midnight
- * `new Date(y, m+1, 1)`) is what fixes the prior reset label drifting by the offset
- * (per-user timezone windows are a later backend refinement).
- */
 function resetTexts(): { dailyResetText: string; monthlyResetText: string } {
   const now = new Date();
   const dailyReset = new Date(
@@ -254,7 +453,6 @@ function resetTexts(): { dailyResetText: string; monthlyResetText: string } {
   };
 }
 
-/** A semantic quota bar: % filled, primary past 80% (needs you, not danger), no bar when unlimited (§7.3D). */
 function QuotaMeter({
   label,
   used,
@@ -266,42 +464,28 @@ function QuotaMeter({
   limit: number;
   caption: string;
 }) {
-  const unlimited = limit <= 0;
-  const pct = unlimited ? 0 : Math.min(Math.round((used / limit) * 100), 100);
-  const near = !unlimited && pct >= 80;
+  const pct = usedPct(used, limit);
+  const near = isNear(used, limit);
 
   return (
     <div>
       <div className="flex items-center justify-between text-sm">
         <span className="text-foreground">{label}</span>
         <span className={near ? "text-primary" : "text-muted-foreground"}>
-          {unlimited ? "不限" : `${pct}%`}
+          {pct}%
         </span>
       </div>
-      <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
-        {!unlimited && (
-          <div
-            className="h-full rounded-full bg-primary"
-            style={{ width: `${pct}%` }}
-          />
-        )}
-      </div>
+      <QuotaBar label={label} pct={pct} className="mt-1.5" />
       <p className="mt-1 text-xs text-muted-foreground">{caption}</p>
     </div>
   );
 }
 
-/** Zh weekday for an ISO UTC date — read in UTC so the label matches the day key
- * (the backend buckets by UTC calendar day), tz-offset-proof. */
 function weekdayLabel(isoDate: string): string {
   const d = new Date(`${isoDate}T00:00:00Z`);
   return `周${["日", "一", "二", "三", "四", "五", "六"][d.getUTCDay()]}`;
 }
 
-/**
- * 近 7 日成本趋势 (§7.3D) — a compact daily-spend bar sparkline. Bars scale to the
- * window's max day; ¥ per day on hover. Money over time is 大众-visible (§7.1).
- */
 function CostTrend({
   points,
 }: {
@@ -318,13 +502,8 @@ function CostTrend({
         </span>
       }
     >
-      {/* 高度给在轨道自身而非整行：柱高是百分比，只有当父元素高度确定时才解析得出
-          ——挂在行上时列不被拉伸，柱子会塌成 0。轨道自带高度后周几标签也不再吃掉
-          柱子的可用高度。柱宽同样设上限，否则 `rounded-full` 的半径跟着列宽走，
-          柱子会摊成横躺的胶囊。 */}
       <div className="flex gap-1.5">
         {points.map((p) => {
-          // Min 2% so a zero / tiny day still shows a sliver baseline.
           const h = max > 0 ? Math.max((p.cost_total / max) * 100, 2) : 2;
           return (
             <SimpleTooltip
@@ -350,7 +529,6 @@ function CostTrend({
   );
 }
 
-/** Power breakdown: today's tokens / cache hit rate, plus month cost + requests. */
 function UsageDetail({
   summary,
   byok,
@@ -359,65 +537,42 @@ function UsageDetail({
   byok: boolean;
 }) {
   const { today, month } = summary;
-  const input = today.usage.input;
   const cache = cacheUsageDisplay(today.usage);
+  const monthEst = month.estimated_cost?.total ?? 0;
 
   const rows: { label: string; value: string }[] = [
     {
-      label: "今日 tokens",
-      value: `输入 ${formatCompact(input)} · 输出 ${formatCompact(today.usage.output)}`,
+      label: "输入 / 输出",
+      value: `输入 ${formatCompact(today.usage.input)} · 输出 ${formatCompact(today.usage.output)}`,
     },
-    cache.billedAsMiss
-      ? {
-          label: "今日缓存",
-          value: `${CACHE_BILLED_AS_MISS_LABEL} · ${formatCompact(cache.cacheMiss)}`,
-        }
-      : { label: "今日缓存命中率", value: `${cache.hitRatePercent ?? 0}%` },
   ];
-  if (!byok) {
-    rows.push(
-      {
-        label: "今日成本",
-        value: formatCost(today.cost.total, today.cost.currency),
-      },
-      {
-        label: "本月成本",
-        value: formatCost(month.cost.total, month.cost.currency),
-      },
-    );
-  } else {
+  if (cache.billedAsMiss) {
+    rows.push({
+      label: "今日缓存",
+      value: `${CACHE_BILLED_AS_MISS_LABEL} · ${formatCompact(cache.cacheMiss)}`,
+    });
+  } else if (cache.cacheHit > 0) {
+    rows.push({
+      label: "今日缓存命中率",
+      value: `${cache.hitRatePercent ?? 0}%`,
+    });
+  }
+  if (byok) {
     rows.push({
       label: "本月 tokens",
       value: `输入 ${formatCompact(month.usage.input)} · 输出 ${formatCompact(month.usage.output)}`,
     });
-    // 估算走社区价目（美元列表价），币种随金额下发——不与平台记账 ¥ 混用符号。
-    const todayEst = today.estimated_cost?.total ?? 0;
-    const monthEst = month.estimated_cost?.total ?? 0;
-    if (todayEst > 0 || monthEst > 0) {
-      rows.push(
-        {
-          label: "今日估算",
-          value: formatDisplayCost(
-            todayEst,
-            true,
-            today.estimated_cost?.currency,
-          ),
-        },
-        {
-          label: "本月估算",
-          value: formatDisplayCost(
-            monthEst,
-            true,
-            month.estimated_cost?.currency,
-          ),
-        },
-      );
+    if (monthEst > 0) {
+      rows.push({
+        label: "本月估算",
+        value: formatDisplayCost(
+          monthEst,
+          true,
+          month.estimated_cost?.currency,
+        ),
+      });
     }
   }
-  rows.push({
-    label: "请求数",
-    value: `今日 ${today.requests} · 本月 ${month.requests}`,
-  });
 
   return (
     <Card>

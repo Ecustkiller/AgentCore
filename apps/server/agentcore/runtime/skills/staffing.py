@@ -9,12 +9,18 @@ playbook summary。
 from __future__ import annotations
 
 # Shared with lead_subteam (same task field, different consult audience).
+CHUNK_BY_ACCEPTANCE = (
+    "一块看验收：同一份成稿的查证与起草是一块；"
+    "点名了多份来源仍是 1 人取证。"
+)
 TASK_FILL_HOW = (
     "写 task：已拍板约束同一行「已确认约束：①…」，没有则「（无）」；"
     "未拍板的标假设，改法与现状不进该行。"
     "要把密钥写进环境变量的，写在 task 里供填写。未装配能力 ≠ 写入。"
     "点名入口或成品路径用工作区相对路径（正斜杠）。"
     "点名到能写验收即可 ≠ 必读顺序。"
+    "验收写清了解到什么算够。要的事实公开渠道可能没有时："
+    "确认没有，用已有材料估计并标明不确定 = 完成。"
 )
 
 _STAFFING = f"""\
@@ -24,6 +30,7 @@ _STAFFING = f"""\
 能点名入口即可写目标·约束·验收，不必先自己摸完。
 
 按活的结构组队，人数不是优化目标。1 人只在活本身是一块。\
+{CHUNK_BY_ACCEPTANCE}\
 task = 目标·约束·验收。{TASK_FILL_HOW}\
 「先组队 / 你可以组队」≠ 已经拆好团队。\
 根上多节点并行，和交给一个队长再往下拆，是二选一：交了队长 ≠ 再平铺同名角色。\

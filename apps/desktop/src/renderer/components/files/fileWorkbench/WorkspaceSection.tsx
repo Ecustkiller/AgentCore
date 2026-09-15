@@ -52,6 +52,7 @@ import {
   useConversationGenerating,
   useConversationStore,
 } from "@/stores/conversation";
+import { useFoldersStore } from "@/stores/folders";
 import {
   ChevronDown,
   ChevronRight,
@@ -139,10 +140,9 @@ export function WorkspaceSection({
   /**
    * Replaces the tree's plain `mkdir` at this root with「在此新建文件夹」, so a
    * folder created at a folder's top level is a real folder (可分组 / 可记忆),
-   * not a bare directory the rail cannot address. Receives the trigger element so
-   * the cascade opens next to it.
+   * not a bare directory the rail cannot address.
    */
-  onCreateSubfolder?: (anchorEl?: Element | null) => void;
+  onCreateSubfolder?: () => void;
   /** Off inside 我的文件 / 本机文件夹 — the section header already says which. */
   showLocationBadge?: boolean;
   /** N4-A: cloud workspace while read-only offline — grey + hint, keep visible. */
@@ -169,6 +169,8 @@ export function WorkspaceSection({
   const [cloneOpen, setCloneOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [editing, setEditing] = useState(false);
+  const pendingRenameFolderId = useFoldersStore((s) => s.pendingRenameFolderId);
+  const clearPendingRename = useFoldersStore((s) => s.clearPendingRename);
   const [draft, setDraft] = useState(ws.name);
   const [membersOpen, setMembersOpen] = useState(false);
 
@@ -226,12 +228,19 @@ export function WorkspaceSection({
   }, [editing]);
 
   useEffect(() => {
+    if (!folderId || folderId !== pendingRenameFolderId) return;
+    setDraft(ws.name);
+    setEditing(true);
+    clearPendingRename();
+  }, [folderId, pendingRenameFolderId, ws.name, clearPendingRename]);
+
+  useEffect(() => {
     if (!editing) setDraft(ws.name);
   }, [ws.name, editing]);
 
-  const requestTreeAction = (action: TreeAction, anchorEl?: Element | null) => {
+  const requestTreeAction = (action: TreeAction) => {
     if (action === "dir" && onCreateSubfolder) {
-      onCreateSubfolder(anchorEl ?? rootRef.current);
+      onCreateSubfolder();
       return;
     }
     if (expanded) {
@@ -439,15 +448,22 @@ export function WorkspaceSection({
           <Folder size={14} className="shrink-0 text-muted-foreground" />
         )}
         <span className="min-w-0 flex-1 truncate font-medium">{ws.name}</span>
-        {folder && folderHasCollaborators(folder) && (
-          <FolderCollabMark count={folder.collaboratorCount ?? 0} />
-        )}
         {shareable && !folderOwner && (
           <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground">
             {folderRoleLabel(folderRole)}
           </span>
         )}
       </Button>
+      {folder && folderHasCollaborators(folder) && (
+        <FolderCollabMark
+          count={folder.collaboratorCount ?? 0}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setMembersOpen(true);
+          }}
+        />
+      )}
       {source?.caps.edit && (
         <div className="hidden shrink-0 items-center group-hover:flex">
           <IconButton
@@ -458,7 +474,7 @@ export function WorkspaceSection({
           </IconButton>
           <IconButton
             title={onCreateSubfolder ? "在此新建文件夹" : "新建文件夹"}
-            onClick={(e) => requestTreeAction("dir", e.currentTarget)}
+            onClick={() => requestTreeAction("dir")}
           >
             <FolderPlus size={14} />
           </IconButton>

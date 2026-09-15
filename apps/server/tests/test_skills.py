@@ -234,7 +234,9 @@ def test_lead_subteam_is_not_ceo_coordination():
     body = _LEAD_SUBTEAM
     assert "凡大活必嵌套" in body
     assert "阻塞" in body
-    assert "优先先" in body and "delegate" in body
+    assert "优先先" not in body
+    assert "delegate" in body
+    assert "一块看验收" in body
     assert "你这张任务卡" in body
     assert "交上来" in body
     assert "立即返回" not in body
@@ -372,9 +374,9 @@ def test_system_skill_summaries_are_short_when_triggers():
     """目录行只写这是什么；Python len ≤80（对照 run 一句名字）。"""
     for skill in build_system_skill_registry().list_all():
         assert len(skill.summary) <= 80, (skill.name, len(skill.summary), skill.summary)
-    from agentcore.runtime.legal_skills import LEGAL_SKILLS
+    from agentcore.runtime.skills.platform_shelf import platform_templates
 
-    for skill in LEGAL_SKILLS:
+    for skill in platform_templates():
         assert len(skill.summary) <= 80, (skill.name, len(skill.summary), skill.summary)
 
 
@@ -786,6 +788,7 @@ def test_team_orchestration_skill_teaches_opening_and_writing_without_lettered_t
     assert "打开正文" in body
     assert "不必先自己摸完" in body
     assert "了解到什么算够" in body
+    assert "确认没有，用已有材料估计并标明不确定" in body
     assert "必读顺序" in body
     assert "够用即停" not in body
     assert "一页地图" not in body
@@ -864,9 +867,12 @@ def test_product_help_skill_teaches_short_answers_and_manual_deeplinks():
     assert "#/toolbox/manual/" in help_body
     assert "手机" in help_body and "勿承诺" in help_body
     assert "页名也按端写" in help_body
-    assert "我的 → 服务商" in help_body
-    assert "我的 → 模型组合" in help_body
-    assert "我的 → 用量" in help_body
+    assert "☰" in help_body
+    assert "再点「服务商」" in help_body
+    assert "再点「模型组合」" in help_body
+    assert "再点「用量」" in help_body
+    assert "我的 → 服务商" not in help_body
+    assert "手机底栏" not in help_body
     assert "窄屏不上工具箱" in help_body
     assert "能力图鉴" not in help_body
     assert "工具箱 · 工作流" in help_body
@@ -894,7 +900,7 @@ def test_product_help_skill_teaches_short_answers_and_manual_deeplinks():
     assert "删文件夹会怎样？" in help_body
     assert "一并归档" in help_body and "已归档" in help_body
     assert f"约 {settings.workspace_retention_days} 天后由系统自动清理" in help_body
-    assert "立即永久清除" in help_body and "不可恢复" in help_body
+    assert "立即永久删除" in help_body and "不可恢复" in help_body
     assert "进「最近删除」后也可以彻底删除" in help_body
     assert "这张桌的 AI 设定不再带进对话" in help_body
     assert "这张桌的设定一起带回来" in help_body
@@ -1814,6 +1820,7 @@ def test_ask_user_skills_ordinary_choice_is_one_line():
     assert "权衡写进选项名" in ask or "权衡写进 `label`" in ask
     assert "勿填 `detail`" not in ask
     assert "问句写" in ask and "prompt" in ask
+    assert "一次只调一次" in ask
     assert "（推荐）" in ask
     assert "不预选" in ask
     assert "配一行 `detail`" not in ask
@@ -2135,6 +2142,13 @@ def test_data_file_landing_skill_teaches_script_transform_and_invariants():
     assert "冻结" in body and "筛选" in body
     assert "合计" in body
     assert "口径写进表里" in body or "口径写进表内" in body
+    assert "【多源对碰】" in body
+    assert "一个人做完" in body
+    assert "已匹配" in body and "仅左" in body
+    assert "源单号" in body
+    assert "未匹配只报未匹配" in body
+    assert "支付宝" not in body
+    assert "ledger_reconcile" not in body
 
 
 def test_data_file_landing_table_quality_baseline_is_generic():
@@ -2157,6 +2171,7 @@ def test_data_file_landing_table_quality_baseline_is_generic():
     assert "支付宝" not in baseline
     assert "账单" not in baseline
     assert "财务" not in baseline
+    assert "对账" not in baseline
     assert "专用模板" in baseline or "数据源" in baseline
 
 
