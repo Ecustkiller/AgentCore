@@ -175,11 +175,7 @@ describe("工作区轨删除", () => {
     fireEvent.click(await screen.findByText("删除文件夹…"));
 
     expect(await screen.findByText("删除文件夹「季度报告」？")).toBeTruthy();
-    expect(
-      screen.getByText(
-        "立即永久删除（不可恢复）",
-      ),
-    ).toBeTruthy();
+    expect(screen.getByText("立即永久删除（不可恢复）")).toBeTruthy();
     expect(mocks.deleteFolder).not.toHaveBeenCalled();
     expect(mocks.deleteConversation).not.toHaveBeenCalled();
   });

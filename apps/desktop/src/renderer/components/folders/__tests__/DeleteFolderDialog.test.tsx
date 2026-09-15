@@ -29,9 +29,7 @@ function renderDialog(
 describe("DeleteFolderDialog", () => {
   it("默认软删：只承诺可恢复，不讲设定与白板", () => {
     renderDialog({ liveConvCount: 0 });
-    expect(
-      screen.getByText("30 天内可在「最近删除」中恢复。"),
-    ).toBeTruthy();
+    expect(screen.getByText("30 天内可在「最近删除」中恢复。")).toBeTruthy();
     expect(screen.getByText("立即永久删除（不可恢复）")).toBeTruthy();
     expect(screen.queryByText(/设定/)).toBeNull();
     expect(screen.queryByText(/白板/)).toBeNull();

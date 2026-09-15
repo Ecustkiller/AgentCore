@@ -69,7 +69,8 @@ export function WorkspaceChannelGuideDialog({
                 </>
               ) : (
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                  你在电脑、手机、网页看到的是同一份。它不会自动同步到你电脑：想在自己电脑上拿到，手动导出到某个文件夹，或者导出 ZIP。
+                  你在电脑、手机、网页看到的是同一份。它不会自动同步到你电脑：想在自己电脑上拿到，手动导出到某个文件夹，或者导出
+                  ZIP。
                 </p>
               )}
             </section>

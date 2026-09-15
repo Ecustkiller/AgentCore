@@ -375,8 +375,6 @@ export function FolderMembersDialog({
                       }}
                       placeholder="搜索好友、用户名或 ID"
                       aria-label="搜索好友、用户名或 ID"
-                      aria-expanded={showSuggestPanel}
-                      aria-autocomplete="list"
                       onFocus={() => setSuggesting(true)}
                       onBlur={() => setSuggesting(false)}
                       onKeyDown={(e) => {
@@ -403,7 +401,6 @@ export function FolderMembersDialog({
                   </div>
                   {showSuggestPanel && (
                     <ul
-                      role="listbox"
                       onMouseDown={(e) => e.preventDefault()}
                       className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-border bg-popover py-1"
                     >
@@ -415,7 +412,7 @@ export function FolderMembersDialog({
                         suggestions.map((u) => {
                           const label = personLabel(u);
                           return (
-                            <li key={u.id} role="option">
+                            <li key={u.id}>
                               <Button
                                 variant="ghost"
                                 disabled={inviteBusy}

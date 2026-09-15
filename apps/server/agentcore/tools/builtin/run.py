@@ -27,18 +27,18 @@ from agentcore.tools.builtin.run_process import (
     process_op_timeout_seconds,
 )
 from agentcore.tools.builtin.run_short import execute_short
+from agentcore.tools.builtin.run_verify import (
+    _VERIFY_DISASTER_SECONDS,
+    _is_allowed_verify_argv,
+    _shell_command_runner,
+    execute_verify,
+)
 from agentcore.tools.builtin.shell_http import (
     SHELL_DOWNLOAD_REDIRECT,
     SHELL_FETCH_REDIRECT,
     ShellHttpHit,
     shell_http_match,
     shell_http_redirect_message,
-)
-from agentcore.tools.builtin.run_verify import (
-    _VERIFY_DISASTER_SECONDS,
-    _is_allowed_verify_argv,
-    _shell_command_runner,
-    execute_verify,
 )
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (

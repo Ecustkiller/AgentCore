@@ -9,7 +9,10 @@ import {
   COMPOSER_EMPTY_INTERRUPTED_HINT,
   isContinuableAssistant,
 } from "@/lib/composerContinueHint";
-import { useCoordinationActive, useLiveCoordinatingTurn } from "@/lib/composerDelivery";
+import {
+  useCoordinationActive,
+  useLiveCoordinatingTurn,
+} from "@/lib/composerDelivery";
 import {
   dropInlineIndex,
   insertInlineToken,

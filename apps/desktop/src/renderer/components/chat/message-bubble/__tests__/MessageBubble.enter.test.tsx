@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { MessageBubble } from "@/components/chat/message-bubble";
-import { getRuntime, useConversationStore, type Message } from "@/stores/conversation";
+import {
+  type Message,
+  getRuntime,
+  useConversationStore,
+} from "@/stores/conversation";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";

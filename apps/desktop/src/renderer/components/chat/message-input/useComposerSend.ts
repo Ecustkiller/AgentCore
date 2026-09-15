@@ -338,7 +338,9 @@ export function useComposerSend({
       }
       const localOccupied = occupancy.occupied === true;
       const teamLive =
-        !isLocal && Boolean(activeConvId) && isLiveCoordinatingTurn(activeConvId);
+        !isLocal &&
+        Boolean(activeConvId) &&
+        isLiveCoordinatingTurn(activeConvId);
       const inFlight = localOccupied || isGenerating || teamLive;
       if (!confirmSendDespitePendingIfNeeded(activeConvId, inFlight)) {
         return;

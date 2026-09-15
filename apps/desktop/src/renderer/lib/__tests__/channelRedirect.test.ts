@@ -32,12 +32,16 @@ describe("resolveToolEndStatus", () => {
 });
 
 describe("channelRedirectFace", () => {
-    it("titles a grep steer as 改用搜索", () => {
-      expect(channelRedirectFace("source_grep_redirect")?.label).toBe("改用搜索");
-    });
+  it("titles a grep steer as 改用搜索", () => {
+    expect(channelRedirectFace("source_grep_redirect")?.label).toBe("改用搜索");
+  });
 
-    it("titles a shell fetch steer as 改用读网页", () => {
-      expect(channelRedirectFace("shell_fetch_redirect")?.label).toBe("改用读网页");
-      expect(channelRedirectFace("shell_download_redirect")?.label).toBe("改用下载");
-    });
+  it("titles a shell fetch steer as 改用读网页", () => {
+    expect(channelRedirectFace("shell_fetch_redirect")?.label).toBe(
+      "改用读网页",
+    );
+    expect(channelRedirectFace("shell_download_redirect")?.label).toBe(
+      "改用下载",
+    );
+  });
 });
