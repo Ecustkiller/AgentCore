@@ -16,7 +16,8 @@ Resulting lifecycle
 - **explicit stop** (``POST .../stop``) → :meth:`stop` cancels the run task, which
   unwinds through the turn's existing ``CancelledError`` salvage (finished team
   work is kept as an incomplete message).
-- **lifespan shutdown** → :func:`agentcore.runtime.turn.shutdown.salvage_turns_on_shutdown` marks clean-cancel,
+- **lifespan shutdown** → :func:`~agentcore.runtime.turn.shutdown.salvage_turns_on_shutdown`
+  marks clean-cancel,
   cascade-stops every live run, awaits unwind (grace timeout), then force-releases
   leftover leases — never the sweeper orphan path.
 - **normal completion** → the task's done-callback drops it from the registry.
