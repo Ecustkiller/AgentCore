@@ -109,7 +109,7 @@ def map_fanout(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
 
 
 def cite_write_review(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
-    """B/重成文专线：N×并行调研 → 提纲 → 写作 → 学术审校（checkpoint 默认关）.
+    """B/重成文专线：N×并行调研 → 提纲 → 写作 → 学术审校。
 
     仅用户明示成文且需正式长文/可提交（或已确认要审校满编）时用；讨论/形态未定勿首派；
     普通构想勿默认学术审校。一起弄懂/多路摸清/仅提论文开源当资料默认 ``map_fanout``。
@@ -117,7 +117,7 @@ def cite_write_review(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[
     中间环（各路调研 + 提纲）与终稿同走约定文档契约：钉死
     ``AgentCore/文档/research/`` 下路径（角度名入文件名；提纲钉 ``提纲.md``）。
     成篇验收钉死单一主文件（``output_path`` / 默认 ``报告.md``）；
-    主交付 `.md`；用户要 PDF/Word/可分享时 brief 钉 ``md → md_to_pdf | md_to_docx → handoff``
+    主交付 `.md`；用户要 PDF/Word/可分享时 brief 钉 ``md → md_export → handoff``
     （禁 HTML 顶替、禁 reportlab / python-docx 主路径）。若 CEO 手写并行拆章，须另加 merge 步
     并把各章 brief 写死同一路径——见 ``PAPER_PARALLEL_MERGE_DISCIPLINE``。
     """
@@ -133,7 +133,6 @@ def cite_write_review(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[
         return [], ["cite_write_review 需要 slot『topic』（要调研并成文的主题）"]
     angles_raw = clean_str_list(args.get("angles"), cap=None)
     angle_slots, angle_fold_note = fold_fanout_slots(angles_raw, label="调研子方向")
-    checkpoint = bool(args.get("checkpoint", False))
     audience = clean_str(args.get("audience"))
     deliverable = clean_str(args.get("deliverable")) or f"一篇关于【{topic}】的完整报告"
     main_path = research_report_main_artifact(clean_str(args.get("output_path")) or None)
@@ -219,7 +218,6 @@ def cite_write_review(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[
                 "artifacts": [outline_path],
                 "citation_mode": "two_phase",
             },
-            "checkpoint_after": checkpoint,
         }
     )
     tasks.append(

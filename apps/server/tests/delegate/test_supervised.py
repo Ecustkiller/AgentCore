@@ -1,11 +1,11 @@
-"""Supervised wave loop: late-bind, replan, and scope escalation tests."""
+"""Supervised wave loop: replan and scope escalation tests."""
 
+from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.events.types import EventType, SSEEvent
 from agentcore.runtime.runs import BoundaryReason, RunPhase
 from agentcore.tools.builtin.replan import ReplanTool
 from tests.delegate.conftest import (
-    LATE_BIND_DAG,
     SCOPE_DAG,
     DepProvider,
     Provider,
@@ -34,77 +34,24 @@ def _plan_revised(sink: _CapturingSink) -> list[SSEEvent]:
     return [e for e in sink.emitted if e.type is EventType.PLAN_REVISED]
 
 
-async def test_late_bind_yields_brief_then_replan_resumes_to_terminal():
-    provider = Provider([_upstream_body("AOUT"), _upstream_body("BOUT")])
-    t = tool(provider)
-    first = await t.execute({"tasks": LATE_BIND_DAG, "coordinate": False}, ctx())
-
-    assert first.success is True
+async def test_replan_tool_forwards_scope_resume():
+    provider = ScopeProvider()
+    t = scope_tool(provider)
+    first = await t.execute({"tasks": SCOPE_DAG, "coordinate": False}, ctx())
     assert first.is_terminal is False
-    assert "计划已让出" in first.output
-    assert "AOUT" in first.output
-    assert "BOUT" not in first.output
-    # 合·验证 4b (docs/03-AI核心/编排器与CEO主Agent.md §收尾即验收 第一道): the bind brief tells the captain to
-    # reconcile the upstream pieces' seams (语义边界对账) before binding downstream — catch a
-    # conflict/gap BEFORE the tail builds on it (catch-early at 交下一棒之前).
-    assert "语义边界对账" in first.output
-    assert "拼图边" in first.output
-    assert provider.calls == 1
-    # 协作质量 tally (学·度量 §2.5): the bind boundary handed control back to the captain → the
-    # opening plan did not run untouched, so boundary_yields is counted (首计划存活 signal).
-    assert t.collab["boundary_yields"] == 1
-    sup = t._supervised
-    assert sup is not None
-    bind_id = sup.boundary_run_ids[0]
+    assert t._supervised is not None
 
-    replan_tool = ReplanTool(delegate=t)
-    result = await replan_tool.execute(
-        {"binds": [{"run_id": bind_id, "role": "写手", "task": "据调研写报告"}]}, ctx()
-    )
+    result = await ReplanTool(delegate=t).execute({}, ctx())
 
     assert result.success is True
-    assert result.is_terminal is False
     assert t._supervised is None
-    assert "AOUT" in result.output and "BOUT" in result.output
-    assert "写手" in result.output
-    assert provider.calls == 2
-
-
-async def test_replan_binds_and_steers_pending_downstream():
-    provider = Provider([_upstream_body("AOUT"), _upstream_body("BOUT"), _upstream_body("COUT")])
-    t = tool(provider)
-    tasks = [
-        {"id": "a", "role": "研究员", "task": "调研"},
-        {"id": "b", "role": "待定", "task": "占位", "depends_on": ["a"], "bind_after_deps": True},
-        {"id": "c", "role": "整合", "task": "整合下游", "depends_on": ["b"]},
-    ]
-    await t.execute({"tasks": tasks, "coordinate": False}, ctx())
-    sup = t._supervised
-    bind_id = sup.boundary_run_ids[0]
-    c_id = next(n.run_id for n in sup.plan.nodes if n.role == "整合")
-
-    result = await t.replan(
-        {
-            "binds": [{"run_id": bind_id, "role": "写手", "task": "写报告"}],
-            "steers": [{"run_id": c_id, "note": "强调风险"}],
-        }
-    )
-
-    assert result.success is True
-    assert "BOUT" in result.output and "COUT" in result.output
-    c_user = next(
-        m.content
-        for req in provider.requests
-        for m in req.messages
-        if m.role == "user" and "整合下游" in (m.content or "")
-    )
-    assert "强调风险" in c_user
+    assert "BOUT" in result.output
 
 
 async def test_replan_stop_wraps_up_partial_without_running_tail():
-    provider = Provider([_upstream_body("AOUT"), _upstream_body("BOUT")])
-    t = tool(provider)
-    await t.execute({"tasks": LATE_BIND_DAG, "coordinate": False}, ctx())
+    provider = ScopeProvider()
+    t = scope_tool(provider)
+    await t.execute({"tasks": SCOPE_DAG, "coordinate": False}, ctx())
 
     result = await t.replan({"stop": True})
 
@@ -112,31 +59,15 @@ async def test_replan_stop_wraps_up_partial_without_running_tail():
     assert result.is_terminal is False
     assert t._supervised is None
     assert "AOUT" in result.output
-    assert provider.calls == 1
+    assert "BOUT" not in result.output
+    assert provider.calls == 2  # escalate + A; B never ran
 
 
 async def test_replan_without_supervised_run_errors():
     t = tool(Provider([]))
-    result = await t.replan({"binds": [{"run_id": "x", "role": "r", "task": "t"}]})
+    result = await t.replan({"steers": [{"run_id": "x", "note": "n"}]})
     assert result.success is False
     assert "没有待续跑" in (result.error or "")
-
-
-async def test_replan_requires_binds_or_stop():
-    t = tool(Provider([_upstream_body("AOUT")]))
-    await t.execute({"tasks": LATE_BIND_DAG, "coordinate": False}, ctx())
-    result = await t.replan({})
-    assert result.success is False
-    assert t._supervised is not None
-
-
-async def test_replan_rejects_unknown_bind_and_keeps_run_open():
-    t = tool(Provider([_upstream_body("AOUT"), _upstream_body("BOUT")]))
-    await t.execute({"tasks": LATE_BIND_DAG, "coordinate": False}, ctx())
-    result = await t.replan({"binds": [{"run_id": "nope", "role": "写手", "task": "写报告"}]})
-    assert result.success is False
-    assert "不在当前计划" in (result.error or "")
-    assert t._supervised is not None
 
 
 async def test_plain_dag_runs_straight_through_without_yielding():
@@ -243,29 +174,20 @@ async def test_scope_replan_bare_resume_runs_tail_unchanged():
     assert "BOUT" in result.output
 
 
-async def test_replan_bind_and_steer_emits_plan_revised_trace():
-    # 「计划已调整」轻痕迹 (设计 §7.2): a replan that finalises a late-bound node (bind) AND
-    # re-steers a pending downstream (steer) emits ONE plan_revised naming both nodes + kinds,
-    # so every end paints a non-interrupting trace. Carries the turn's execution id.
+async def test_replan_steer_emits_plan_revised_trace():
+    # 「计划已调整」轻痕迹 (设计 §7.2): a replan that re-steers a pending downstream
+    # emits ONE plan_revised naming that node, so every end paints a non-interrupting
+    # trace. Carries the turn's execution id.
     sink = _CapturingSink()
-    provider = Provider([_upstream_body("AOUT"), _upstream_body("BOUT"), _upstream_body("COUT")])
-    t = tool(provider, sink=sink)
-    tasks = [
-        {"id": "a", "role": "研究员", "task": "调研"},
-        {"id": "b", "role": "待定", "task": "占位", "depends_on": ["a"], "bind_after_deps": True},
-        {"id": "c", "role": "整合", "task": "整合下游", "depends_on": ["b"]},
-    ]
-    await t.execute({"tasks": tasks, "coordinate": False}, ctx())
+    provider = ScopeProvider()
+    t = scope_tool(provider)
+    t._sink = sink
+    await t.execute({"tasks": SCOPE_DAG, "coordinate": False}, ctx())
     sup = t._supervised
-    bind_id = sup.boundary_run_ids[0]
-    c_id = next(n.run_id for n in sup.plan.nodes if n.role == "整合")
+    assert sup is not None
+    c_id = next(n.run_id for n in sup.plan.nodes if n.role == "写手")
 
-    result = await t.replan(
-        {
-            "binds": [{"run_id": bind_id, "role": "写手", "task": "写报告"}],
-            "steers": [{"run_id": c_id, "note": "强调风险"}],
-        }
-    )
+    result = await t.replan({"steers": [{"run_id": c_id, "note": "强调风险"}]})
     assert result.success is True
 
     revised = _plan_revised(sink)
@@ -273,29 +195,7 @@ async def test_replan_bind_and_steer_emits_plan_revised_trace():
     payload = revised[0].payload
     assert payload["execution_id"] == sup.execution_id
     kinds = {r["run_id"]: r["kind"] for r in payload["revisions"]}
-    assert kinds == {bind_id: "bind", c_id: "steer"}
-
-
-async def test_replan_node_both_bound_and_steered_reports_bind():
-    # Dedup rule (设计 §7.2): a node named in BOTH binds and steers reads as the bigger event
-    # (bind wins) — one entry, kind=bind, never a duplicate or a steer.
-    sink = _CapturingSink()
-    t = tool(Provider([_upstream_body("AOUT"), _upstream_body("BOUT")]), sink=sink)
-    await t.execute({"tasks": LATE_BIND_DAG, "coordinate": False}, ctx())
-    sup = t._supervised
-    bind_id = sup.boundary_run_ids[0]
-
-    result = await t.replan(
-        {
-            "binds": [{"run_id": bind_id, "role": "写手", "task": "写报告"}],
-            "steers": [{"run_id": bind_id, "note": "顺带强调风险"}],
-        }
-    )
-    assert result.success is True
-
-    revised = _plan_revised(sink)
-    assert len(revised) == 1
-    assert revised[0].payload["revisions"] == [{"run_id": bind_id, "kind": "bind"}]
+    assert kinds == {c_id: "steer"}
 
 
 async def test_scope_bare_resume_emits_no_plan_revised():
@@ -314,10 +214,11 @@ async def test_scope_bare_resume_emits_no_plan_revised():
 
 
 async def test_replan_stop_emits_no_plan_revised():
-    # stop=true收口 (no binds/steers) is not a plan adjustment — no「计划已调整」trace.
+    # stop=true收口 (no steers) is not a plan adjustment — no「计划已调整」trace.
     sink = _CapturingSink()
-    t = tool(Provider([_upstream_body("AOUT"), _upstream_body("BOUT")]), sink=sink)
-    await t.execute({"tasks": LATE_BIND_DAG, "coordinate": False}, ctx())
+    t = scope_tool(ScopeProvider())
+    t._sink = sink
+    await t.execute({"tasks": SCOPE_DAG, "coordinate": False}, ctx())
 
     result = await t.replan({"stop": True})
 
@@ -326,14 +227,12 @@ async def test_replan_stop_emits_no_plan_revised():
 
 
 async def test_dispose_open_supervised_folds_completed_work_then_releases():
-    # 受监督的波循环 P5「Edge」: the CEO yielded at a late-bind boundary but the turn ends
+    # 受监督的波循环 P5「Edge」: the CEO yielded at a SCOPE boundary but the turn ends
     # WITHOUT a replan. The yield path did NOT fold the已完成 upstream's spend; disposal must
     # (implicit stop) so it isn't stranded unbilled, then release the dangling plan.
-    from agentcore.llm.provider.protocol import TokenUsage
-
-    provider = Provider([_upstream_body("AOUT"), _upstream_body("BOUT")], usage=TokenUsage(input_tokens=100, output_tokens=20))
-    t = tool(provider)
-    first = await t.execute({"tasks": LATE_BIND_DAG, "coordinate": False}, ctx())
+    provider = ScopeProvider(usage=TokenUsage(input_tokens=100, output_tokens=20))
+    t = scope_tool(provider)
+    first = await t.execute({"tasks": SCOPE_DAG, "coordinate": False}, ctx())
     assert first.is_terminal is False
     assert t._supervised is not None
     assert t.usage.get("input", 0) == 0  # yield path left the upstream's tokens un-folded
@@ -344,7 +243,7 @@ async def test_dispose_open_supervised_folds_completed_work_then_releases():
     assert t._supervised is None  # dangling plan released
     assert t.usage.get("input") == 100  # upstream "a" folded in as an implicit stop
     assert "AOUT" in disposed.output  # completed work surfaced
-    assert provider.calls == 1  # the un-run late-bound tail never ran
+    assert provider.calls == 2  # escalate + A; the un-run tail never ran
     assert await t.dispose_open_supervised() is None  # idempotent
 
 

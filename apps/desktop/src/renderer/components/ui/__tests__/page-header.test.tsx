@@ -62,9 +62,9 @@ describe("PageHeader", () => {
     const { container } = render(
       <MemoryRouter>
         <PageHeader
-          title="工作流"
+          title="白板"
           back={{ to: "/toolbox", label: "工具箱" }}
-          action={<button type="button">新建工作流</button>}
+          action={<button type="button">新建白板</button>}
         />
       </MemoryRouter>,
     );
@@ -73,12 +73,10 @@ describe("PageHeader", () => {
     ).toBe("/toolbox");
     const header = container.querySelector("header");
     expect(
-      header?.contains(
-        screen.getByRole("heading", { level: 1, name: "工作流" }),
-      ),
+      header?.contains(screen.getByRole("heading", { level: 1, name: "白板" })),
     ).toBe(true);
     expect(
-      header?.contains(screen.getByRole("button", { name: "新建工作流" })),
+      header?.contains(screen.getByRole("button", { name: "新建白板" })),
     ).toBe(true);
     expect(header?.className).toContain("border-b");
   });
@@ -87,7 +85,7 @@ describe("PageHeader", () => {
     const { container } = render(
       <MemoryRouter>
         <PageHeader
-          title="自动化"
+          title="创作"
           back={{ to: "/toolbox", label: "工具箱" }}
           bordered={false}
         />

@@ -52,7 +52,10 @@ from .tool_exec_args import (
     with_tool_failed_marker,
 )
 from .tool_exec_coalesce import _clone_tool_result, _file_read_round_coalesce_key
-from .tool_exec_gates import _check_safety_and_approval_gates
+from .tool_exec_gates import (
+    _check_safety_and_approval_gates,
+    _maybe_capture_mutation_baseline,
+)
 from .tool_failure_face import tool_failure_fields, tool_failure_from_result
 from .tool_protocol_sanitize import (
     parse_tool_call_arguments,
@@ -340,6 +343,12 @@ async def run_one_tool(
     if denied is not None:
         return denied.message, None, denied.attempt, []
 
+    await _maybe_capture_mutation_baseline(
+        tool_name=name,
+        args=args,
+        context=context,
+    )
+
     # 检索预算 (提案 A1): reserve a per-run slot immediately before execute so
     # approval / breaker denials never consume budget. Orthogonal to
     # LoopController.investigation_calls.
@@ -608,6 +617,18 @@ async def run_one_tool(
     finally:
         reset_tool_deadline(deadline_token)
     result.tool_call_id = tc.id
+    if result.file_products:
+        from agentcore.table.land_csv import ingest_landed_csv_products
+
+        note = await ingest_landed_csv_products(
+            result,
+            context,
+            registry=registry if role == "captain" else None,
+            offer_tools=role == "captain",
+        )
+        if note:
+            prior = (result.output or "").rstrip()
+            result.output = f"{prior}\n{note}" if prior else note
 
     # 缓存命中 / A3 拒绝等不计预算：reserved slot refunded when not charged.
     if budget_reserved and budget_state is not None and not charges_retrieval_budget(result):

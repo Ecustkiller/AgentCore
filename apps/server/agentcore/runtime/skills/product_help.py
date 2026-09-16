@@ -1,167 +1,153 @@
 """Skill body: product_help.
 
-Product catalog summary is what this is; WHEN/HOW lives in this body after consult.
+Catalog summary is what this is; HOW + index live in the consult body.
+Section facts are the desktop manual corpus; fetch with consult("product_help:<id>").
 Identity one-liner lives in CEO ``<身份>``.
-上报入口与「看不到服务端日志」是产品事实，跟用法同一 WHEN，不另立排查 skill。
+上报入口与「看不到服务端日志」跟用法同一 WHEN，不另立排查 skill。
 """
 
 from __future__ import annotations
 
-_PRODUCT_HELP = """\
-<本产品用法>
-用户问本产品怎么用 / 是什么 / 入口 / 官网 / 下载 / FAQ / 工作流 / 自主度 / 市场 / 协作桌 / 文件怎么拿走 / 分享时，用下方对应节短答；勿整章粘贴、勿 RAG、禁内部名\
-（ask_user / SSE / playbook / run）；用产品面说法（对话、协作图、工作区、检查点、审批）。身份问（「这是什么项目 / 你是什么」）：可见正文**首句**用【这是什么】\
-（consult 不能代替作答）。宽问功能用【功能总览】。点名入口 /「××在哪」/「.md 怎么打开」才用【入口地图】。\
-点名官网 / 你的网站 / 下载才用【官网 / 下载】。记忆 / 规则用【记忆/历史·对人怎么说】【用户规则】。
+import json
+from functools import cache
+from pathlib import Path
+from typing import Any
 
-【功能总览】（宽问时用：定位与用法；不含官网链、不含入口表）
-AgentCore 是 Multi-Agent AI 工作台——只对接一位 CEO；简单直接答，复杂组团后把结果交给你。\
-「协作，是更高级的智能」。
-人这边：说目标、拍板、收结果；复杂任务看协作图、随时插手。产物落工作区。
+PRODUCT_HELP_NAME = "product_help"
+PRODUCT_HELP_SECTION_SEP = ":"
+
+_CORPUS_PATH = Path(__file__).with_name("product_help_corpus.json")
+_SURFACE_ZH = {"desktop": "桌面", "web": "网页", "mobile": "手机"}
+_ALL_SURFACES = ("desktop", "web", "mobile")
+
+_PRODUCT_HELP_HOW = """\
+<本产品用法>
+用户问本产品怎么用 / 是什么 / 入口 / 官网 / 下载 / FAQ / 自主度 / 市场 / 协作桌 / 文件怎么拿走 / 分享时，\
+身份与网址用本卡【这是什么】【官网】短答；点名功能再 consult("product_help:<节id>") 用该节短答。\
+勿整节粘贴、勿向量 RAG。禁内部名（ask_user / SSE / playbook / run）出口；用产品面说法（对话、协作图、工作区、检查点、审批）。\
+身份问（「这是什么项目 / 你是什么」）：可见正文**首句**用【这是什么】（consult 不能代替作答）。\
+点名官网 / 你的网站 / 下载才给【官网】三条。
 
 【这是什么】（intro·what）
 身份问时本段即用户可见首句，先答再谈别的。\
 AgentCore 是 Multi-Agent AI 工作台：你只对接一位 CEO；简单问题直接答，复杂任务组团协作后把结果交给你。\
-「协作，是更高级的智能」。手册链接：`#/toolbox/manual/intro?s=what`
+「协作，是更高级的智能」。例：`#/toolbox/manual/intro?s=what`
 
-【你怎么用】（intro·mindset）
-说目标别说步骤；小事秒答、大事才组团；全程透明、随时插手。没有固定角色——按任务临时上场。\
-手册链接：`#/toolbox/manual/intro?s=mindset`
-
-【5 分钟上手】（intro·quickstart）
-先：新建对话，大白话说目标——平台代付、开箱即用，不必先接模型。接着：简单秒回；复杂会出协作图。\
-然后：结果落工作区（绑本地就在电脑上，否则在云端「我的文件」）。\
-可选升级（别当第一步说）：想换自己的模型才去接服务商 / 自带 Key（BYOK）——\
-桌面「设置 · 服务商」，手机 ☰ 打开侧栏进「设置」再点「服务商」；\
-平台额度临时不可用时会有公告，也可到设置接入自己的 Key。\
-手册链接：`#/toolbox/manual/intro?s=quickstart`
-
-【记忆/历史·对人怎么说】用户问「能不能读历史对话 / 有没有记忆 / 记忆怎么工作」：白话三层——\
-当前这场对话；偏好与笔记（非聊天全文）；同文件夹旧场原文可自己查，成规模才组队。\
-禁止报工具名与内部角色名（`consult` / `delegate` / 查阅员 / 日志工具）；禁止在能力说明里举例画像细节。\
-结尾说明可以去查旧场、可问要不要现在找——勿停在「不能 / 不知道」。跨会话原文短查询自己做；成规模派工走 `delegate`。\
-【用户规则·内部】用户规则可增、可改、可删、可列；改/删须调 `remember`（action=replace/forget），禁止只追加却声称「已更新/已替换」。\
-【用户规则·对人怎么说】用户规则可增、可改、可删。对外说话跟工具返回一致；禁止报内部参数名堆砌，可用「已改成… / 已忘掉… / 当前规则是…」。\
-用户问「你能改规则吗」：能，说明可记/改/删；大段手改也可去文件页规则本。与记忆分工：用户规则用 `remember` 增改删，常驻条目（含偏好/画像）同在 `<设定>` 平权注入、按需用 `consult`；跨会话原文短查询自己查，成规模仍可派。
-
-【边界】本条管产品面怎么用，以及记忆·规则**对人怎么说**；机制/架构/能力边界仍按系统提示作答。\
-跨会话原文短查询自己做，成规模**派工**走 `delegate`，勿用本条替代。
-
-【入口地图】
-入口 / UI「在哪」的指路。仅当用户点名某入口 / UI 时用本节；宽问【功能总览】勿整表复述。
-
-桌面手册链接 / 手机：
-- 桌面可附手册链接（hash 路由）：`#/toolbox/manual/{章}?s={节}`——章=`intro|collaboration|mechanism|reference`；\
-节 ID 权威见桌面手册（例：`what` / `mindset` / `quickstart` / `faq` / `workspace` / `settings` / \
-`briefing` / `checkpoint` / `control` / `autonomy` / `workflow` / `tools` / `troubleshooting`）。
-- 手机无产品手册（窄屏不上工具箱）：只短答，勿承诺「点链接打开手册」或可点手册链接。
-- 页名也按端写（勿套桌面名）：桌面「设置 · 服务商」/「设置 · 模型组合」/「设置 · 用量」；\
-手机 ☰ 打开侧栏进「设置」再点「服务商」、再点「模型组合」、再点「用量」（两端同树，无底栏 tab）。\
-某入口手机没有对应页 → 写「手机无此入口」或真实替代路径，禁止编一个手机页名。
-
-【产品面地图·高频入口】（只指路，细节仍短答）
-- 对话：唯一对话入口——发任务 / 拍板 / 收结果
-- 协作图：看团队怎么跑
-- 文件夹（侧栏分组；一个文件夹 = 一个工作区，可嵌套）：新建 → 侧栏 / 文件页「我的文件」段的「+」\
-（在已有文件夹那行用「在此新建文件夹」建子文件夹）；右键文件夹名或悬停「⋯」→ 新建对话 / \
-查看全部对话 / 浏览文件 / 归档全部对话 / 删除文件夹…（文件页文件夹根右键同有「删除文件夹…」）；\
-删了会怎样见【FAQ】删文件夹条 → `#/toolbox/manual/reference?s=workspace`
-- 工作区 / 文件页（桌面左边「文件」面板）：产物；点 `.md` → 面板内阅读预览（不是语法教程）→ \
-`#/toolbox/manual/reference?s=workspace`
-- HTML「完整预览」（仅桌面）：点终稿里的 `.html` 路径或文件横幅的「完整预览」→ 右坞「浏览器」（跑 JS 的完整效果）；\
-与 `.md` 阅读预览不是一路。Web / 手机无此按钮，出口是文件面板下载
-- 右坞浏览器：打开页 / 直播 / 登录（桌面上与「完整预览」同壳）
-【收口指路】产物出口：对照 `<工作区>`「执行」——本机可给真实路径；云端文件不在用户电脑，禁止给本机磁盘路径、禁止称文件已在用户电脑上、禁止说「双击打开」。想拿到电脑见【FAQ】云上文件条。本客户端有没有 HTML「完整预览」见上条（仅桌面；Web / 手机是文件面板下载）。\
-对用户指路【禁止】说「工作区根 / 工作区根目录」——用面板上的文件夹名 / 文件名。
-- 设置 · 关于 → 产品手册：怎么用本产品；`#/toolbox/manual/intro`（总入口）。手机无产品手册。
-- 官网 / 下载：见【官网 / 下载】
-- 工具箱（仅桌面；手机 / 窄屏无此入口）：打开即「提示词」（规矩、官方说明、我的 / 市场装来的、出厂工具、连接器同一本）；顶栏右槽「市场」；种类还有「工作流」。→ `#/toolbox/manual/reference?s=tools`
-- 工作流（仅桌面）：工具箱 · 工作流。手机无此入口。→ `#/toolbox/manual/collaboration?s=workflow`
-- 自主度：对话输入区权限徽章（谨慎 / 全放行 / 托管）。→ `#/toolbox/manual/collaboration?s=autonomy`
-- 协作桌：云文件夹右键 / ⋯「成员」邀请；对方在「与我共享」看见。本机文件夹不分享。→ `#/toolbox/manual/reference?s=workspace`
-- 云上文件拿到电脑：桌面对话顶栏「合回到本机」或工作区导出 ZIP；Web / 手机走文件面板下载。打开本机文件夹则文件已在那台电脑上。→ `#/toolbox/manual/reference?s=workspace`
-- 分享对话：对话行右键 / ⋯「分享…」出只读公开链接。
-- 设置：模型与偏好等。桌面侧栏（账户设置 / Git 凭据 / 用量 / 模型组合 / 服务商 / 通用 / 消息隐私 / 快捷键 / 关于）→ `#/toolbox/manual/reference?s=settings`；\
-手机 ☰ 打开侧栏进「设置」（账户设置 / 用量 / 模型组合 / 服务商 / 消息隐私 / 关于）。\
-手机无 Git 凭据、通用、快捷键入口。
-- 检查点与审批、辩论室：关键拍板与正反交锋入口
-
-【FAQ】
-常见产品面 FAQ 的自含短答。用户问到对应题时用本节；勿整表粘贴给宽问「有什么功能」。\
-本条只给自助短答。是不是产品故障 → 见【FAQ】上报条；没读到服务端日志就别装作读过。
-
-- 是不是产品坏了 / 要上报？——看不到服务端日志，勿假装读了。社区走消息页内测群；\
-私密联系走官网公示渠道（https://fashitianxia.xyz）。勿改产品仓 / 开 PR。`?s=troubleshooting`
-- Cursor 规则 ↔ AgentCore 用户规则？——Cursor `.cursor/rules` / `.mdc` ≠ AgentCore 用户规则；\
-AgentCore 用户规则 = `AgentCore/规则/` + `remember`；`skills/*.json` = 技能/能力包，**不是**「平台规则」迁移目标。\
-用户说把 Cursor 规则改成 AgentCore 规则 → 用本条；\
-未钉死目标载体前禁止默认迁成 skill JSON；consult 后至多一次窄 list `.cursor/rules`，\
-仍不清 → `ask_user`；禁多轮 list / 通读 `.mdc` 再问。`?s=faq`
-- 为什么没组团？——一人答更快就直接干；复杂、可并行、或你明确要求多人才组团。`?s=faq`
-- 怎么强制多人？——把姿势说进任务：并行「分三路…」、串行「先 A 再 B」、辩论「开正反辩论」。\
-协作细则：`#/toolbox/manual/collaboration?s=briefing`
-- 检查点怎么答？——拍板卡：提交＝带选择继续，取消＝结束本回合；计划复核：继续 / 调整 / 取消；\
-写文件等审批另弹窗。`#/toolbox/manual/collaboration?s=checkpoint`
-- 跑偏了？——团队还在跑时直接发送马上给主 Agent；要等收工后再说点「排队」；\
-只改某一人走详情「立即改此人」；局部可唤回原队员改；全错就重新生成或说「推翻重来」；太慢点停止。\
-`#/toolbox/manual/collaboration?s=control`
-- 工作流怎么用 / 怎么定时跑？——仅桌面：工具箱 · 工作流，画「谁做什么、先后怎么排」；\
-「跑一次」选个文件夹当场开一轮，或「设为定时」（每天 / 每周 / 自定义周期或 Webhook，两者互斥；只能绑云端文件夹）。\
-电脑关着也会跑——任务在云端。市场官方模板「使用」＝复制为我的再改。\
-日常聊天不必先绑图。手机无工具箱，无此入口。\
-`#/toolbox/manual/collaboration?s=workflow`
-- 电脑关着，定时任务还会跑吗？——会，只要绑的是云端文件夹。手机无工作流入口。\
-`#/toolbox/manual/collaboration?s=workflow`
-- 为什么老弹审批 / 自主度怎么选？——对话输入区权限徽章三档：谨慎＝改文件逐次问；\
-全放行（推荐）＝授权根内改文件和跑命令免逐次确认；托管＝与全放行同一组权限，拍板检查点仍会出现。\
-配方减的是工具审批和组团卡，不管拍板卡与计划复核。桌面选完可点「设为新会话默认」（只影响之后新建的对话）。\
-`#/toolbox/manual/collaboration?s=autonomy`
-- 怎么装提示词 / 市场在哪？——仅桌面：工具箱顶栏右槽「市场」。提示词安装＝复制进提示词目录；\
-工作流安装＝复制为我的图再改。手机无工具箱。`#/toolbox/manual/reference?s=tools`
-- 连接器 / MCP 在哪？——仅桌面：工具箱 · 提示词目录「连接器」接本机插头；启用后团队可调用（一律先问你）。\
-Web / 手机无本地连接器。`#/toolbox/manual/reference?s=tools`
-- 协作桌怎么邀请？——自己的云文件夹右键 / ⋯「成员」→ 邀请；对方在文件页 / 侧栏「与我共享」看见这张桌，可开聊、看桌上对话。\
-本机文件夹不能邀请。这不是公开分享链接。`#/toolbox/manual/reference?s=workspace`
-- 云上做完的文件怎么拿到电脑？——桌面：对话顶栏「合回到本机」（首次选电脑上的落点，冲突默认留你电脑上的已有文件）；\
-或工作区工具条导出「导出 ZIP / 导出到本机文件夹 / 只合回产物」；文件页「我的文件」云端文件夹也可导出 ZIP。\
-Web / 手机无「合回到本机」，走文件面板下载或导出 ZIP。若打开的就是本机文件夹，文件已经在那台电脑上。\
-`#/toolbox/manual/reference?s=workspace`
-- 怎么分享这场对话？——对话行右键 / ⋯「分享…」（桌面也可用命令面板「分享当前对话」）创建只读公开链接：\
-分享当时的问答快照，之后新消息不会出现；有效期 7 天 / 30 天 / 永久，可随时撤销。\
-删对话后原链接不会自动回来，需重新分享。
-- 画布 vs 白板？——画布＝对话里跨回合空间视图；白板＝工具箱独立创作工具（可自由摆元素）。`?s=faq`
-- 费用？——桌面「设置 · 用量」/ 手机 ☰ 打开侧栏进「设置」再点「用量」看花费与额度；多队员 / 更强模型 / 深度思考更贵。`?s=faq`
-- 用什么模型？——平台代付、开箱即用；想换再自带 Key（BYOK）。\
-桌面：接入在「设置 · 服务商」、组合在「设置 · 模型组合」；\
-手机：☰ 打开侧栏进「设置」再点「服务商」接入、再点「模型组合」改组合。`?s=faq`
-- 数据存哪？——文件在你的文件夹（本机文件夹、「我的文件」，或别人邀请的「与我共享」）；\
-对话在后端用于续聊与记忆；文件页可看可导出。`?s=faq`
-- 删对话能找回吗？——能，约 30 天内：删完那条提示上点「撤销」，或到「全部对话」页左边\
-「最近删除」里恢复（连同全部消息回到原来的分组）。带不回来的只有删除时已撤销的公开分享链接（需重新分享），\
-本机裸聊的工作目录在系统回收站里另行还原。进「最近删除」后也可以彻底删除（再确认一次），不可恢复。\
-`#/toolbox/manual/reference?s=workspace`
-- 删文件夹会怎样？能找回吗？——右键侧栏文件夹（或文件页文件夹根）→「删除文件夹…」。默认删：\
-该文件夹从侧栏消失、其下对话一并归档（在「已归档」里仍能找到），这张桌的 AI 设定不再带进对话；\
-云端文件约 30 天后由系统自动清理；\
-**这段时间内可以找回**——删完那条提示上点「撤销」，或到「全部对话」页左边「最近删除」里恢复\
-（恢复会把文件夹、归档的对话和这张桌的设定一起带回来）。\
-在弹窗里勾「立即永久删除」＝对话、云端文件与这张桌的设定立刻清空、不可恢复。\
-进「最近删除」后也可以彻底删除（再确认一次），语义相同。\
-恢复有两样带不回来：白板会留在顶层白板列表、不回到该文件夹下；裸聊自动云桌指针下回合自动重建。\
-两种删法都不动你电脑上的文件（本机文件夹原样保留）。\
-`#/toolbox/manual/reference?s=workspace`
-- Agent 对 Git？——可读与看 diff/log；改文件、普通 push、开 PR（GitHub）、merge/rebase 等需审批；\
-force push / reset·clean / 在 main·master 直接提交或 push / GitLab 开 PR 不会做。`?s=faq`
-- 断网？——可浏览缓存对话与本机文件（只读）；不能发消息、改文件、跑 AI。`?s=faq`
-- Key 报错？——核对 Key / 地址 / 模型名（桌面「设置 · 服务商」，手机 ☰ 打开侧栏进「设置」再点「服务商」）；\
-可换一家服务商或自带 Key 再试。\
-`#/toolbox/manual/reference?s=troubleshooting`
-- 任务一直转？——点停止结束本回合，或发消息追问；长任务可中途打断后续跑。`?s=troubleshooting`
-- 产物找不到？——打开文件页看工作区；确认打开的是这台电脑上的那个文件夹。`?s=troubleshooting`
-
-【官网 / 下载】
+【官网】
 若要给官网 / 下载地址，只用下面三条。
 本产品官网：https://fashitianxia.xyz
 桌面安装包：https://fashitianxia.xyz/download
 网页版：https://app.fashitianxia.xyz
-</本产品用法>"""
+
+【怎么答】
+短答。桌面可附手册链接 `#/toolbox/manual/{章}?s={节}`——章=`intro|collaboration|mechanism|reference`。\
+手机无产品手册（窄屏不上工具箱）：只短答，勿承诺「点链接打开手册」或可点手册链接。\
+页名也按端写（勿套桌面名）：桌面「设置 · 服务商」/「设置 · 模型组合」/「设置 · 用量」；\
+手机 ☰ 打开侧栏进「设置」再点「服务商」、再点「模型组合」、再点「用量」（两端同树，无底栏 tab）。\
+某入口手机没有对应页 → 写「手机无此入口」或真实替代路径，禁止编一个手机页名。\
+节回执若写可用性缺当前端，先说无此入口再给替代。选读节（目录「选读」）仅当用户问协作图 / 机制时再拉。
+
+【收口】产物出口：对照 `<工作区>`「执行」——本机可给真实路径；云端文件不在用户电脑，禁止给本机磁盘路径、禁止称文件已在用户电脑上、禁止说「双击打开」。\
+细节 consult("product_help:workspace")。对用户指路【禁止】说「工作区根 / 工作区根目录」——用面板上的文件夹名 / 文件名。\
+HTML「完整预览」仅桌面；Web / 手机走文件面板下载。
+
+【记忆/历史·对人怎么说】用户问「能不能读历史对话 / 有没有记忆 / 记忆怎么工作」：白话三层见 consult("product_help:memory")——\
+当前这场对话；你写过的规矩；过往事情可查旧对话。\
+禁止报工具名与内部角色名（`consult` / `delegate` / 查阅员 / 日志工具）。\
+结尾说明可以去查旧场、可问要不要现在找——勿停在「不能 / 不知道」。跨会话原文短查询自己做；成规模派工走 `delegate`。\
+【用户规则·内部】用户规则可写、可读、可删、可列；改一篇须 `remember`（action=write 覆盖该文件名），删须 action=delete。\
+用户规则进 `<设定>` 平权注入。画像/主题不进设定、不靠 `consult`。\
+【用户规则·对人怎么说】用户规则可写、可改、可删。对外说话跟工具返回一致；禁止报内部参数名堆砌，可用「已写入… / 已删掉… / 当前规则是…」。\
+用户问「你能改规则吗」：能，说明可记/改/删；大段手改也可去文件页规则本。\
+Cursor `.cursor/rules` / `.mdc` ≠ AgentCore 用户规则；\
+AgentCore 用户规则 = `AgentCore/规则/` + `remember`；`skills/*.json` = 技能/能力包，**不是**「平台规则」迁移目标。\
+用户说把 Cursor 规则改成 AgentCore 规则 → 用本条；\
+未钉死目标载体前禁止默认迁成 skill JSON；consult 后至多一次窄 list `.cursor/rules`，\
+仍不清 → `ask_user`；禁多轮 list / 通读 `.mdc` 再问。
+
+【上报】看不到服务端日志，勿假装读了。对人短答走 consult("product_help:troubleshooting")（消息页内测群 / 官网公示 https://fashitianxia.xyz）。勿改产品仓 / 开 PR。
+"""
+
+
+@cache
+def load_product_help_corpus() -> dict[str, Any]:
+    return json.loads(_CORPUS_PATH.read_text(encoding="utf-8"))
+
+
+def _sections() -> list[dict[str, Any]]:
+    return list(load_product_help_corpus()["sections"])
+
+
+def _aliases() -> dict[str, str]:
+    raw = load_product_help_corpus().get("aliases") or {}
+    return {str(k): str(v) for k, v in raw.items()}
+
+
+def resolve_product_help_section_id(section_id: str) -> str:
+    key = section_id.strip()
+    return _aliases().get(key, key)
+
+
+def list_product_help_section_ids() -> list[str]:
+    return [str(s["id"]) for s in _sections()]
+
+
+def _toc_lines() -> str:
+    default_rows: list[str] = []
+    optional_rows: list[str] = []
+    for sec in _sections():
+        row = f"- {sec['id']} — {sec['title']}"
+        if sec.get("ai") == "optional":
+            optional_rows.append(row)
+        else:
+            default_rows.append(row)
+    parts = [
+        "【节目录】点名功能再 consult(\"product_help:<id>\")；勿把没点的节打进来。",
+        "默认：",
+        *default_rows,
+    ]
+    if optional_rows:
+        parts.extend(["选读（宽问「怎么用」不要拉）：", *optional_rows])
+    return "\n".join(parts)
+
+
+def build_product_help_body() -> str:
+    how = _PRODUCT_HELP_HOW.rstrip()
+    return f"{how}\n\n{_toc_lines()}\n</本产品用法>"
+
+
+def _availability_line(availability: list[str]) -> str:
+    present = [s for s in _ALL_SURFACES if s in availability]
+    missing = [s for s in _ALL_SURFACES if s not in availability]
+    if not missing:
+        return ""
+    yes = "、".join(_SURFACE_ZH[s] for s in present)
+    no = "、".join(_SURFACE_ZH[s] for s in missing)
+    return f"【可用性】{yes}；{no}无此入口。\n"
+
+
+def format_product_help_section(sec: dict[str, Any]) -> str:
+    avail = [str(x) for x in sec.get("availability") or list(_ALL_SURFACES)]
+    bits = [f"# {sec['title']}", ""]
+    line = _availability_line(avail)
+    if line:
+        bits.append(line)
+    bits.append(str(sec.get("text") or "").strip())
+    href = str(sec.get("href") or "").strip()
+    if href:
+        bits.extend(["", f"桌面手册：`{href}`"])
+    return "\n".join(bits).strip() + "\n"
+
+
+def fetch_product_help_section(section_id: str) -> str:
+    """Return section body or a soft-miss listing valid ids (never None)."""
+    raw = section_id.strip()
+    if not raw:
+        ids = "、".join(list_product_help_section_ids())
+        return f"缺少节 id。可查阅：{ids}。"
+    canonical = resolve_product_help_section_id(raw)
+    for sec in _sections():
+        if str(sec["id"]) == canonical:
+            return format_product_help_section(sec)
+    ids = "、".join(list_product_help_section_ids())
+    return f"没有名为 '{raw}' 的手册节。可查阅：{ids}。"

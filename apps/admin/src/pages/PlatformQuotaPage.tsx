@@ -140,8 +140,8 @@ export function PlatformQuotaPage() {
                   )}
                 </Row>
                 <p className="mt-3 text-muted-foreground text-xs">
-                  0 = 不限 · 每用户可在「用户」覆盖。成本上限恒按人民币（¥）配置；BYOK
-                  的估算金额自带币种、平台不做汇率换算，两者不可直接比较。
+                  0 = 不限 · 每用户可在「用户」覆盖。成本上限恒按人民币（¥）配置。BYOK
+                  有价卡时与平台同一把尺（不进额度）；展示层不做 live 汇率换算。
                   {ENV_RESTART_HINT}
                 </p>
               </StatusCard>

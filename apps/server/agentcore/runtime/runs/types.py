@@ -228,13 +228,6 @@ class RunSpec:
     # (autonomous jobs / tests), so a plan with no checkpoint marks runs byte-for-
     # byte as before. → 见设计: docs/03-AI核心/执行引擎架构设计.md §检查点决策语义
     checkpoint_after: bool = False
-    # 晚绑定标记（受监督的波循环）：为 True 的节点其 spec 关键
-    # 字段（task/role/tools…）可先占位，依赖完成后由 CEO 在波边界经 ``replan`` 定稿再
-    # dispatch——WaveScheduler 把「依赖已完成但本节点未定稿」当一个决策边界、YIELD 回 CEO
-    # 的 ReAct 主循环（区别于 checkpoint_after 的「让给用户 plan_review」）。Inert by
-    # default：未接 on_boundary 的调度（自治 / 测试）下完全无效，故一个无晚
-    # 绑定节点的 plan 行为逐字不变。→ 见设计: docs/03-AI核心/执行引擎架构设计.md §受监督的波循环
-    bind_after_deps: bool = False
     parent_run_id: str | None = None
     # Tree position — also the SOLE determinant of whether this worker may nest a
     # sub-team (阶段2 嵌套子任务). Any worker with ``depth < MAX_DELEGATION_DEPTH``
@@ -274,8 +267,8 @@ class RunSpec:
     # builder → ToolContext。
     search_policy: str = ""
     # Per-run verify posture (结构化信号，禁止靠 task 文案猜)。
-    # ``""`` = 默认可跑外环 test_run；``"inner"`` = 调查/审查姿态：禁全仓
-    # typecheck/build（改用 code_diagnostics / browser；验收员外环另派）。
+    # ``""`` = 默认可跑外环 run 验证；``"inner"`` = 调查/审查姿态：禁全仓
+    # typecheck/build（读已改文件 / browser；验收员外环另派）。
     # Builder 对审查类角色默认回填；CEO 可显式传 ``outer`` 覆盖。
     verify_policy: str = ""
     # Worker 累计 token 硬顶（统一 backstop）：``None`` = 未解析（手工 / 测试 → 执行器
@@ -499,7 +492,9 @@ class BatchMetrics:
     driven with no hook (autonomous jobs / tests) fires none. The escalation counts are raw so
     the host derives「scope 信号占比」= ``scope_escalations / escalations`` itself, mirroring how
     it derives avg concurrency from ``busy_ms / wall_ms`` (the snapshot stays presentation-free).
-    All zero for an ordinary plan (no late-binding, no escalation, no checkpoint).
+    All zero for an ordinary plan (no escalation, no checkpoint).
+    ``bind_boundaries`` is leftover wire (always 0; historical journals may still
+    fold a non-zero count).
     """
 
     nodes: int  # nodes THIS run dispatched (seed_completed nodes excluded)
@@ -515,7 +510,7 @@ class BatchMetrics:
     skipped: int
     cancelled: int = 0
     # ── 受监督波循环边界埋点 (boundaries fired this run, by reason; see docstring) ──
-    bind_boundaries: int = 0  # 晚绑定触发次数 (BIND yields)
+    bind_boundaries: int = 0  # leftover wire; live BIND is gone
     scope_boundaries: int = 0  # 计划漂移返工触发数 (SCOPE yields)
     checkpoint_boundaries: int = 0  # CHECKPOINT yields (user plan_review)
     # ── escalate 信号埋点 (raw → host derives scope 占比) ──

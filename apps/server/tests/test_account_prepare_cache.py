@@ -72,7 +72,7 @@ def cache_clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
 
 
 def _injectable_snapshot(*, degraded: bool = False) -> AccountPrepareSnapshot:
-    """A snapshot whose every part is visible in the assembled turn."""
+    """User rules inject; leftover AI notes stay on the snapshot but not in ``<设定>``."""
     return AccountPrepareSnapshot(
         rules_payload={
             "global_rules": [{"name": "用户规则.md", "content": "- 总是用中文回答"}],
@@ -95,13 +95,11 @@ async def _prepare_injection(user_id: str, folder_id: str | None):
         _EmptyMemoryStore(),  # type: ignore[arg-type]
         user_id,
         folder_id=folder_id,
-        enabled=True,
     )
     topics = await load_memory_topics(
         _EmptyMemoryStore(),  # type: ignore[arg-type]
         user_id,
         folder_id=folder_id,
-        enabled=True,
     )
     on_demand = await load_on_demand_user_rules(user_id, folder_id=folder_id)
     return rules_md, topics, on_demand
@@ -148,13 +146,11 @@ async def test_ticketed_miss_skips_cloud(monkeypatch: pytest.MonkeyPatch, accoun
             _EmptyMemoryStore(),  # type: ignore[arg-type]
             "u1",
             folder_id="F1",
-            enabled=True,
         )
         topics = await load_memory_topics(
             _EmptyMemoryStore(),  # type: ignore[arg-type]
             "u1",
             folder_id="F1",
-            enabled=True,
         )
         on_demand = await load_on_demand_user_rules("u1", folder_id="F1")
 
@@ -195,22 +191,20 @@ async def test_seed_then_hit(account_creds):
             _EmptyMemoryStore(),  # type: ignore[arg-type]
             "u1",
             folder_id="F1",
-            enabled=True,
         )
         topics = await load_memory_topics(
             _EmptyMemoryStore(),  # type: ignore[arg-type]
             "u1",
             folder_id="F1",
-            enabled=True,
         )
         on_demand = await load_on_demand_user_rules("u1", folder_id="F1")
 
     assert "全局规则" in rules_md
     assert "项目规则" in rules_md
-    assert "沟通偏好" in rules_md
-    assert "项目画像" in rules_md
-    assert "项目导航" in rules_md
-    assert topics == [MemoryTopic(name="api", summary="API 约定")]
+    assert "沟通偏好" not in rules_md
+    assert "项目画像" not in rules_md
+    assert "项目导航" not in rules_md
+    assert topics == []
     assert len(on_demand) == 1
     assert on_demand[0].name == "合规"
 
@@ -256,8 +250,8 @@ async def test_snapshot_lapses_after_ttl_and_prepare_injects_nothing(
     with account_credentials_scope(account_creds):
         rules_md, topics, on_demand = await _prepare_injection("u1", "F1")
     assert "总是用中文回答" in rules_md
-    assert "项目画像" in rules_md
-    assert topics == [MemoryTopic(name="api", summary="API 约定")]
+    assert "项目画像" not in rules_md
+    assert topics == []
     assert len(on_demand) == 1
 
     cache_clock.advance(299.0)
@@ -359,7 +353,7 @@ async def test_rewarm_after_lapse_restores_injection(
     with account_credentials_scope(account_creds):
         renewed_md, _, _ = await _prepare_injection("u1", "F1")
     assert "总是用中文回答" in renewed_md
-    assert "沟通偏好" in renewed_md
+    assert "沟通偏好" not in renewed_md
 
 
 async def test_keepalive_rewarm_keeps_harvest_cache_only_hit_past_ttl(
@@ -490,19 +484,17 @@ async def test_warm_rules_list_once_and_seeds(
             _EmptyMemoryStore(),  # type: ignore[arg-type]
             "u1",
             folder_id="F1",
-            enabled=True,
         )
         topics = await load_memory_topics(
             _EmptyMemoryStore(),  # type: ignore[arg-type]
             "u1",
             folder_id="F1",
-            enabled=True,
         )
         on_demand = await load_on_demand_user_rules("u1", folder_id="F1")
 
     assert " - r" in rules_md or "r" in rules_md
-    assert "偏好" in rules_md or "body" in rules_md
-    assert any(t.name == "foo" for t in topics)
+    assert "偏好" not in rules_md
+    assert topics == []
     assert len(on_demand) == 1
     assert rules_calls["n"] == 1  # prepare did not re-hit cloud
 
@@ -826,10 +818,10 @@ async def test_warm_pulls_the_ancestor_folders_the_cloud_resolved(
             _EmptyMemoryStore(),  # type: ignore[arg-type]
             "u1",
             folder_id="F1",
-            enabled=True,
         )
     assert "外层规则" in rules_md
-    assert rules_md.index("F_outer 画像") < rules_md.index("F1 画像")
+    assert "F_outer 画像" not in rules_md
+    assert "F1 画像" not in rules_md
 
 
 async def test_warm_empty_folder_chain_drops_the_dead_desk(
@@ -879,13 +871,11 @@ async def test_warm_empty_folder_chain_drops_the_dead_desk(
             _EmptyMemoryStore(),  # type: ignore[arg-type]
             "u1",
             folder_id="F1",
-            enabled=True,
         )
         topics = await load_memory_topics(
             _EmptyMemoryStore(),  # type: ignore[arg-type]
             "u1",
             folder_id="F1",
-            enabled=True,
         )
     assert "全局规则" in rules_md
     assert "当前规则" not in rules_md

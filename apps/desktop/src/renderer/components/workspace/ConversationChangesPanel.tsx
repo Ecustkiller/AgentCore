@@ -24,14 +24,13 @@ import {
 import { projectRuntime, useExecutionStore } from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import { Diff } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /**
- * 右坞「改动」tab 体 —— 只审本对话 AI 文件改动：回合 diff + 回合基线回滚，
- * 本机有仓时并排 Git SCM（U2/U3）。用户留存版本不在这里。
+ * 右坞「改动」tab —— 上：这次对话动过的文件；下：这个文件夹的 Git。
+ * Git 只认当前文件夹根下 `.git`。干净（无脏 / 冲突 / 领先落后）不占下面。
+ * 零文件差异的回合不列出、不挂恢复。
  * 只读 process / execution，不为「出现产物」invalidate 工作区列表或换 FileSource。
- *
- * tab 出现条件由外层决定；深链只决定聚焦哪个回合。
  */
 
 interface TurnEntry {
@@ -42,10 +41,6 @@ interface TurnEntry {
   at: string;
 }
 
-/**
- * 回合后自动备份失败的横幅 —— SSE 只翻 `useAutoSnapshotStore` 的位，这里是它唯一的
- * UI 出口（原挂在已下线的快照面板顶部）。回合本身是成功的，所以是提醒不是报错。
- */
 function AutoBackupFailedNotice({
   conversationId,
 }: { conversationId: string }) {
@@ -73,17 +68,33 @@ export function ConversationChangesPanel() {
   const convWs = useConversationWorkspace(conversationId);
   const canGit =
     hasLocalFiles() &&
+    !!convWs &&
     !!wsState?.effective.isLocal &&
     !!wsState.effective.rootId &&
     !wsState.effective.rootMissing;
   const rootId = canGit ? (wsState?.effective.rootId ?? null) : null;
-  // FileDetail / createLocalRootSource 期望 workspace 相对路径；git 仍在仓根跑。
   const workspaceSubpath = convWs?.subpath ?? "";
   const { status: gitStatus, refresh: refreshGit } = useGitRepoStatus(
     rootId,
     canGit,
+    workspaceSubpath,
   );
   const showGitTrack = gitTrackHasWork(gitStatus);
+
+  const [turnHasChanges, setTurnHasChanges] = useState<Record<string, boolean>>(
+    {},
+  );
+  const [turnProbeConvId, setTurnProbeConvId] = useState(conversationId);
+  if (conversationId !== turnProbeConvId) {
+    setTurnProbeConvId(conversationId);
+    setTurnHasChanges({});
+  }
+
+  const reportHasChanges = useCallback((id: string, has: boolean) => {
+    setTurnHasChanges((prev) =>
+      prev[id] === has ? prev : { ...prev, [id]: has },
+    );
+  }, []);
 
   const turns = useMemo((): TurnEntry[] => {
     const out: TurnEntry[] = [];
@@ -116,7 +127,6 @@ export function ConversationChangesPanel() {
         at: msg.createdAt,
       });
     }
-    // 聚焦回合尚未出现在 messages（极端时序）时仍给一个入口。
     if (focusMessageId && !out.some((t) => t.messageId === focusMessageId)) {
       out.push({
         id: focusMessageId,
@@ -129,10 +139,16 @@ export function ConversationChangesPanel() {
     return out;
   }, [messages, byId, focusMessageId, baselineMessageIds]);
 
-  // 倒序：最近回合在上（原先 zip 时间轴也是倒序，只是不再穿插版本）。
   const timeline = useMemo(() => [...turns].reverse(), [turns]);
 
-  const focusRef = useRef<HTMLElement | null>(null);
+  const probingEmptyTurns = timeline.some(
+    (t) => t.artifacts.length === 0 && turnHasChanges[t.id] === undefined,
+  );
+  const anyTurnShown = timeline.some(
+    (t) => t.artifacts.length > 0 || turnHasChanges[t.id] === true,
+  );
+
+  const focusRef = useRef<HTMLDivElement | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: timeline is an intentional re-run key after list lands
   useEffect(() => {
     if (!focusMessageId) return;
@@ -149,7 +165,7 @@ export function ConversationChangesPanel() {
     );
   }
 
-  if (timeline.length === 0 && !showGitTrack) {
+  if (!probingEmptyTurns && !anyTurnShown && !showGitTrack) {
     return (
       <div className="flex h-full flex-col">
         <AutoBackupFailedNotice conversationId={conversationId} />
@@ -165,6 +181,30 @@ export function ConversationChangesPanel() {
     <div className="flex h-full flex-col">
       <AutoBackupFailedNotice conversationId={conversationId} />
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
+        <div className="space-y-3" data-testid="changes-timeline">
+          {anyTurnShown && showGitTrack ? (
+            <p className="px-0.5 text-xs text-muted-foreground">这次对话</p>
+          ) : null}
+
+          {timeline.map((entry) => {
+            const focused = entry.messageId === focusMessageId;
+            return (
+              <TurnFileChangesReview
+                key={entry.id}
+                artifacts={entry.artifacts}
+                conversationId={conversationId}
+                messageId={entry.messageId}
+                variant="panel"
+                heading={entry.label}
+                headingTime={formatMessageTime(entry.at)}
+                focused={focused}
+                sectionRef={focused ? focusRef : undefined}
+                onHasChanges={(has) => reportHasChanges(entry.id, has)}
+              />
+            );
+          })}
+        </div>
+
         {showGitTrack && rootId && gitStatus ? (
           <GitChangesSection
             rootId={rootId}
@@ -173,39 +213,6 @@ export function ConversationChangesPanel() {
             subpath={workspaceSubpath}
           />
         ) : null}
-
-        <div className="space-y-3" data-testid="changes-timeline">
-          {showGitTrack ? (
-            <p className="px-0.5 text-xs text-muted-foreground">
-              本对话改动（与 Git 正交）
-            </p>
-          ) : null}
-
-          {timeline.map((entry) => {
-            const focused = entry.messageId === focusMessageId;
-            return (
-              <section
-                key={entry.id}
-                ref={focused ? focusRef : undefined}
-                data-testid="changes-timeline-entry"
-                data-entry-kind="turn"
-                data-entry-id={entry.id}
-                className={`rounded-xl border border-border bg-card ${
-                  focused ? "ring-1 ring-primary/40" : ""
-                }`}
-              >
-                <TurnFileChangesReview
-                  artifacts={entry.artifacts}
-                  conversationId={conversationId}
-                  messageId={entry.messageId}
-                  variant="panel"
-                  heading={entry.label}
-                  headingTime={formatMessageTime(entry.at)}
-                />
-              </section>
-            );
-          })}
-        </div>
       </div>
     </div>
   );

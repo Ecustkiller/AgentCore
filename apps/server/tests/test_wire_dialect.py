@@ -9,7 +9,7 @@ from agentcore.llm.provider.openai_compatible import (
     OpenAICompatibleProvider,
 )
 from agentcore.llm.provider.protocol import LLMMessage, LLMRequest
-from agentcore.llm.provider.wire_dialect import resolve_wire_dialect
+from agentcore.llm.provider.wire_dialect import reasoning_effort_spec, resolve_wire_dialect
 
 _MOONSHOT_URL = "https://api.moonshot.cn/v1"
 _MOONSHOT_AI_URL = "https://api.moonshot.ai/v1"
@@ -281,3 +281,62 @@ async def test_probe_tools_keeps_max_tokens_for_gpt_4o():
         await provider.close()
     assert captured["max_tokens"] == _PROBE_TOOLS_MAX_TOKENS
     assert "max_completion_tokens" not in captured
+
+
+def test_reasoning_effort_spec_official_deepseek_tokens():
+    for model in (
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-free",
+        "deepseek-flash",
+        "deepseek-v4.1-flash",
+        "platform/deepseek-v4-pro",
+    ):
+        spec = reasoning_effort_spec(model)
+        assert spec is not None, model
+        options, default = spec
+        assert options == ("low", "high", "max")
+        assert default == "high"
+        assert "medium" not in options
+        assert "xhigh" not in options
+
+
+def test_reasoning_effort_spec_absent_when_leaf_does_not_send():
+    assert reasoning_effort_spec("hy3") is None
+    assert reasoning_effort_spec("gpt-4o") is None
+    assert reasoning_effort_spec("glm-5.2") is None
+
+
+def test_effective_reasoning_effort_snaps_and_skips():
+    from agentcore.llm.provider.wire_dialect import effective_reasoning_effort
+
+    assert (
+        effective_reasoning_effort(
+            "deepseek-v4-flash", thinking=True, stored="low"
+        )
+        == "low"
+    )
+    assert (
+        effective_reasoning_effort(
+            "deepseek-v4-flash", thinking=True, stored=None
+        )
+        == "high"
+    )
+    assert (
+        effective_reasoning_effort(
+            "deepseek-v4-flash", thinking=True, stored="medium"
+        )
+        == "high"
+    )
+    assert (
+        effective_reasoning_effort(
+            "deepseek-v4-flash", thinking=False, stored="low"
+        )
+        is None
+    )
+    assert (
+        effective_reasoning_effort("gpt-4o", thinking=True, stored="low") is None
+    )
+    assert (
+        effective_reasoning_effort("hy3", thinking=True, stored=None) is None
+    )
+

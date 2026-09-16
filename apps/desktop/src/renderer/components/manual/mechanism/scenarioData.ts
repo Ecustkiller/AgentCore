@@ -191,7 +191,7 @@ export const SCENARIOS: Scenario[] = [
   {
     title: "执行中的样子",
     advanced: true,
-    desc: "有人正在写（蓝环 + 流式预览）、有人已交活、有人还在等；深度思考的队员会带「深度」徽章。",
+    desc: "有人正在写（蓝环 + 流式预览）、有人已交活、有人还在等。",
     nodes: [
       input("分析近 7 日成本趋势并产出一段摘要"),
       agent("r1", "调研员", "running", {

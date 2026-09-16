@@ -11,6 +11,7 @@ from agentcore.core.error_codes import ErrorCode
 from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.runtime.events import (
     EventSink,
+    EventType,
     FinishReason,
     delivery_status,
     error_event,
@@ -465,3 +466,60 @@ async def test_settle_refuses_ceo_audience_coordination_echo_on_degraded_rate_li
         and "系统已豁免" in str((e.payload or {}).get("delta") or "")
         for e in sink.history_snapshot()
     )
+
+
+@pytest.mark.asyncio
+async def test_settle_stamps_turn_wall_on_result_and_message_end():
+    """Whole-turn wall clock is a settle fact: message_end and persist share one number."""
+    from agentcore.runtime.turn.latency import bind_turn_latency, reset_turn_latency
+
+    sink = EventSink()
+    captain_state = SimpleNamespace(
+        content="已完成",
+        reasoning="",
+        rounds=1,
+        usage=TokenUsage().as_dict(),
+        cost={"total": 0, "currency": "USD"},
+        model="m",
+        duration_ms=0,
+        finish_override=FinishReason.END_TURN,
+    )
+    probe, token = bind_turn_latency()
+    try:
+        probe.anchor_mono -= 1.2
+        emitted: list = []
+        real_emit = sink.emit
+
+        def _emit(ev):
+            emitted.append(ev)
+            return real_emit(ev)
+
+        sink.emit = _emit  # type: ignore[method-assign]
+        result = await settle_successful_turn(
+            message_id="m-wall",
+            captain_run_id="cap",
+            captain_state=captain_state,
+            delegate_tool=SimpleNamespace(
+                usage={},
+                run_ledger=[],
+                citations=[],
+                collab={"boundary_yields": 0, "scope_signals": 0, "escalations": 0},
+                continuation_count=0,
+                user_continuation_count=0,
+                dispose_open_supervised=AsyncMock(),
+            ),
+            debate_tool=SimpleNamespace(usage={}, run_ledger=[], citations=[]),
+            profile=SimpleNamespace(max_rounds=20),
+            citations=[],
+            vision_cost_sink=[],
+            sink=sink,
+            fact_log=None,
+            audit_recorder=SimpleNamespace(drops=0, flush=AsyncMock()),
+            roster_writer=None,
+            journal_writer=SimpleNamespace(flush=AsyncMock()),
+        )
+        assert result["duration_ms"] >= 1200
+        end = next(e for e in emitted if e.type is EventType.MESSAGE_END)
+        assert end.payload["duration_ms"] == result["duration_ms"]
+    finally:
+        reset_turn_latency(token)

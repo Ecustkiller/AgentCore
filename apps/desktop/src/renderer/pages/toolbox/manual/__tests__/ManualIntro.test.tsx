@@ -17,10 +17,9 @@ describe("ManualIntro", () => {
     expect(screen.getByText("你怎么用")).toBeTruthy();
     expect(screen.getByText("5 分钟上手")).toBeTruthy();
     expect(screen.queryByText("快速上手")).toBeNull();
-    // 竞品对比已删
-    expect(screen.queryByText(/在 ChatGPT/)).toBeNull();
-    expect(screen.queryByText(/在 Cursor/)).toBeNull();
     expect(screen.getByText("协作，是更高级的智能")).toBeTruthy();
+    expect(screen.getByText(/fashitianxia\.xyz\/download/)).toBeTruthy();
+    expect(screen.getByText(/app\.fashitianxia\.xyz/)).toBeTruthy();
     // 开箱即用：第一步就是说目标，不再拿「先去接额度」当门槛。
     expect(screen.getByText("说目标")).toBeTruthy();
     expect(screen.queryByText("接入额度后开聊")).toBeNull();

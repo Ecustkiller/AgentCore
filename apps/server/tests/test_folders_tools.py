@@ -37,7 +37,7 @@ _FOLDER_HOW_CONSULT = "HOW→consult(desks)"
 # 换桌对照句在 delegate target_folder_id / 认桌工具 description。
 _SCHEMA_ENCYCLOPEDIA_FORBIDDEN = (
     "先建后派",
-    "导入到云",
+    "先在云上做",
     "开发双仓",
     "静默猜",
     "Composer",
@@ -239,8 +239,8 @@ def test_resolve_folder_schema_and_registration():
     assert "子串" not in desc
     path_desc = props["path"]["description"]
     assert "精确" in path_desc
-    assert "后缀" in path_desc
     assert "子串" in path_desc
+    assert "后缀" not in path_desc
     reg = tool_registration(ResolveFolderTool)
     assert reg.surface is ToolSurface.CEO_ORCHESTRATION
     assert AUDIENCE_CEO in reg.audience
@@ -436,7 +436,7 @@ async def test_list_folders_empty(monkeypatch: pytest.MonkeyPatch):
     assert "自动建云文件夹" in result.output
     assert "过写盘闸" in result.output or "勿" in result.output
     # Empty roster must not default-nudge open_local_project as the create path.
-    assert "勿默认催 open_local_project" in result.output or "导入到云" in result.output
+    assert "勿默认催 open_local_project" in result.output or "先在云上做" in result.output
     assert _FOLDER_HOW_CONSULT not in result.output
     assert "开发双仓" not in result.output
 
@@ -489,8 +489,8 @@ async def test_resolve_zero(monkeypatch: pytest.MonkeyPatch):
     assert "层级" in result.output
     # Must not default-urge open_local_project as the create path (§4.9 ③A).
     assert "新建本机项目才用 open_local_project" not in result.output
-    assert "open_local_project" in result.output or "导入到云" in result.output
-    assert "本机 scratch" in result.output or "导入到云" in result.output
+    assert "open_local_project" in result.output or "先在云上做" in result.output
+    assert "本机 scratch" in result.output or "先在云上做" in result.output
 
 
 async def test_resolve_ambiguous(monkeypatch: pytest.MonkeyPatch):

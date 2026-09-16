@@ -1,4 +1,4 @@
-"""ask_user：纯 message 短问可过（提案体硬闸已拆除）。"""
+"""ask_user：一道 question 即可挂起（提案体硬闸已拆除）。"""
 
 from __future__ import annotations
 
@@ -62,12 +62,15 @@ def _assistant_tool(name: str, args: dict, *, call_id: str) -> LLMMessage:
 
 
 @pytest.mark.asyncio
-async def test_message_only_ask_suspends():
-    """纯 message 短问可过（非专用 card）。"""
+async def test_single_prompt_question_suspends():
+    """只问一句话也出一道填空题。"""
     tool = _tool()
     token = captain_transcript.set([LLMMessage(role="user", content="写一份竞品调研报告")])
     try:
-        res = await tool.execute({"message": "你是想要简报还是完整报告？"}, _ctx())
+        res = await tool.execute(
+            {"questions": [{"prompt": "你是想要简报还是完整报告？"}]},
+            _ctx(),
+        )
     finally:
         captain_transcript.reset(token)
 
@@ -76,22 +79,39 @@ async def test_message_only_ask_suspends():
     assert any(e.type is EventType.CHECKPOINT_REQUIRED for e in tool.sink._history)
     cp = next(e for e in tool.sink._history if e.type is EventType.CHECKPOINT_REQUIRED)
     assert cp.payload["intent"] == "decision"
+    assert cp.payload["question"] == "你是想要简报还是完整报告？"
 
 
 @pytest.mark.asyncio
-async def test_empty_assumptions_and_questions_still_ok():
+async def test_empty_questions_rejected():
     tool = _tool()
     token = captain_transcript.set([LLMMessage(role="user", content="写调研报告")])
     try:
         res = await tool.execute(
-            {"message": "复述目标确认一下？", "questions": []},
+            {"questions": []},
             _ctx(),
         )
     finally:
         captain_transcript.reset(token)
 
-    assert res.success is True
-    assert res.effect is ToolEffect.SUSPEND
+    assert res.success is False
+    assert res.error and "至少一道" in res.error
+
+
+@pytest.mark.asyncio
+async def test_message_only_rejected():
+    tool = _tool()
+    token = captain_transcript.set([LLMMessage(role="user", content="写调研报告")])
+    try:
+        res = await tool.execute(
+            {"message": "复述目标确认一下？"},
+            _ctx(),
+        )
+    finally:
+        captain_transcript.reset(token)
+
+    assert res.success is False
+    assert res.error and "至少一道" in res.error
 
 
 @pytest.mark.asyncio
@@ -102,7 +122,7 @@ async def test_leftover_assumptions_arg_dropped_from_wire():
     try:
         res = await tool.execute(
             {
-                "message": "本轮范围怎么定？",
+                "questions": [{"prompt": "本轮范围怎么定？"}],
                 "assumptions": [{"label": "范围", "value": "国内三家"}],
             },
             _ctx(),
@@ -117,18 +137,21 @@ async def test_leftover_assumptions_arg_dropped_from_wire():
 
 
 @pytest.mark.asyncio
-async def test_after_delegate_message_only_is_decision():
-    """途中短问：仅 message 仍可挂起，intent=decision。"""
+async def test_after_delegate_single_question_is_decision():
+    """途中短问：一道 question 即可挂起，intent=decision。"""
     tool = _tool()
     transcript = [
         LLMMessage(role="user", content="写调研报告"),
         _assistant_tool("delegate", {"tasks": []}, call_id="d1"),
         LLMMessage(role="tool", content="ok", tool_call_id="d1"),
-        _assistant_tool("ask_user", {"message": "终稿交哪？"}, call_id="a1"),
+        _assistant_tool("ask_user", {"questions": [{"prompt": "终稿交哪？"}]}, call_id="a1"),
     ]
     token = captain_transcript.set(transcript)
     try:
-        res = await tool.execute({"message": "终稿交哪？"}, _ctx())
+        res = await tool.execute(
+            {"questions": [{"prompt": "终稿交哪？"}]},
+            _ctx(),
+        )
     finally:
         captain_transcript.reset(token)
 
@@ -176,7 +199,10 @@ async def test_team_preview_resolved_does_not_block_ask():
     )
     token = captain_transcript.set([LLMMessage(role="user", content="继续")])
     try:
-        res = await tool.execute({"message": "交付形态再确认一下？"}, _ctx())
+        res = await tool.execute(
+            {"questions": [{"prompt": "交付形态再确认一下？"}]},
+            _ctx(),
+        )
     finally:
         captain_transcript.reset(token)
     assert res.success is True

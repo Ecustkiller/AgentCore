@@ -30,32 +30,9 @@ vi.mock("@/services/skillStore", async (importOriginal) => {
   };
 });
 
-vi.mock("@/services/workflows", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/workflows")>();
-  return {
-    ...actual,
-    listWorkflowTemplates: vi.fn(async () => []),
-  };
-});
-
-vi.mock("@/services/workflowStore", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/services/workflowStore")>();
-  return {
-    ...actual,
-    listWorkflowStore: vi.fn(),
-    getWorkflowStoreListing: vi.fn(),
-    installWorkflow: vi.fn(),
-    reportWorkflow: vi.fn(),
-  };
-});
-
 const { listSkillStore, getSkillStoreListing, installSkill } = await import(
   "@/services/skillStore"
 );
-const { listWorkflowTemplates } = await import("@/services/workflows");
-const { listWorkflowStore, getWorkflowStoreListing, installWorkflow } =
-  await import("@/services/workflowStore");
 
 const ROW: SkillStoreListing = {
   id: "listing-1",
@@ -89,17 +66,6 @@ beforeEach(() => {
   vi.mocked(listSkillStore).mockReset();
   vi.mocked(getSkillStoreListing).mockReset();
   vi.mocked(installSkill).mockReset();
-  vi.mocked(listWorkflowTemplates).mockReset();
-  vi.mocked(listWorkflowTemplates).mockResolvedValue([]);
-  vi.mocked(listWorkflowStore).mockReset();
-  vi.mocked(getWorkflowStoreListing).mockReset();
-  vi.mocked(installWorkflow).mockReset();
-  vi.mocked(listWorkflowStore).mockResolvedValue({
-    items: [],
-    page: 1,
-    pageSize: 24,
-    total: 0,
-  });
   vi.mocked(listSkillStore).mockResolvedValue(shelf([ROW]));
   vi.mocked(getSkillStoreListing).mockResolvedValue({
     ...ROW,
@@ -115,20 +81,26 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("市场页", () => {
-  it("货架种类是 chip，不是顶栏种类 tab", async () => {
+  it("货架只有提示词分组 chip，没有工作流种类", async () => {
     renderPage();
     await screen.findByRole("button", { name: "合同审查" });
-    const chips = screen.getByRole("group", { name: "货架种类" });
-    expect(within(chips).getByRole("button", { name: "提示词" })).toBeTruthy();
-    expect(within(chips).getByRole("button", { name: "工作流" })).toBeTruthy();
-    expect(within(chips).queryByRole("button", { name: "工具" })).toBeNull();
-    expect(within(chips).queryByRole("button", { name: "MCP" })).toBeNull();
-    expect(within(chips).queryByRole("button", { name: "创作" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "货架种类" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "工作流" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "工具" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "MCP" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "创作" })).toBeNull();
+    expect(
+      within(screen.getByRole("group", { name: "提示词分组" })).getByRole(
+        "button",
+        { name: "写作成稿" },
+      ),
+    ).toBeTruthy();
     expect(screen.queryByRole("navigation", { name: "工具箱种类" })).toBeNull();
     expect(
       screen.queryByRole("heading", { level: 1, name: "商店" }),
     ).toBeNull();
     expect(screen.queryByLabelText(/模型组合：/)).toBeNull();
+    expect(screen.getByLabelText("搜索提示词")).toBeTruthy();
   });
 
   it("点卡片出对话框，安装只调 install", async () => {
@@ -139,11 +111,27 @@ describe("市场页", () => {
       "审合同时用",
     );
     expect(await screen.findByText("HOW 正文")).toBeTruthy();
+    expect(screen.queryByTestId("skill-store-offers")).toBeNull();
     expect(screen.queryByRole("button", { name: "展开正文" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "安装" }));
     await waitFor(() => {
       expect(installSkill).toHaveBeenCalledWith("listing-1");
     });
+  });
+
+  it("快照带绑定时安装前披露手脚", async () => {
+    vi.mocked(getSkillStoreListing).mockResolvedValue({
+      ...ROW,
+      content:
+        "---\napply: on_demand\ndescription: 审合同时用\noffers_tools: host\n---\n怎么审",
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "合同审查" }));
+    expect(await screen.findByTestId("skill-store-offers")).toBeTruthy();
+    expect(screen.getByTestId("skill-store-offers").textContent).toContain(
+      "host",
+    );
+    expect(screen.getByText("怎么审")).toBeTruthy();
   });
 
   it("首页官方精选不在本组条再铺一遍", async () => {
@@ -236,77 +224,5 @@ describe("市场页", () => {
     expect(await screen.findByText("还没有可安装的内容")).toBeTruthy();
     expect(screen.queryByText(/上架/)).toBeNull();
     expect(screen.queryByText(/一键安装/)).toBeNull();
-  });
-
-  it("工作流 chip：官方模板走使用，用户 listing 走安装", async () => {
-    vi.mocked(listSkillStore).mockResolvedValue(shelf([]));
-    vi.mocked(listWorkflowTemplates).mockResolvedValue([
-      {
-        id: "map_fanout",
-        title: "多角度调研",
-        summary: "分路调研再汇总",
-        slots: [],
-      },
-    ]);
-    vi.mocked(listWorkflowStore).mockResolvedValue({
-      items: [
-        {
-          id: "wf-listing-1",
-          name: "周报流水线",
-          description: "每周写周报",
-          author: "wfauthor",
-          version: "1",
-          installed: false,
-          hasUpdate: false,
-          workflowId: "wf-1",
-          installWorkflowId: null,
-          status: "published",
-        },
-      ],
-      page: 1,
-      pageSize: 24,
-      total: 1,
-    });
-    vi.mocked(getWorkflowStoreListing).mockResolvedValue({
-      id: "wf-listing-1",
-      name: "周报流水线",
-      description: "每周写周报",
-      author: "wfauthor",
-      version: "1",
-      installed: false,
-      hasUpdate: false,
-      workflowId: "wf-1",
-      installWorkflowId: null,
-      status: "published",
-      definition: { nodes: [], edges: [] },
-    });
-    vi.mocked(installWorkflow).mockResolvedValue({
-      id: "wf-listing-1",
-      name: "周报流水线",
-      description: "每周写周报",
-      author: "wfauthor",
-      version: "1",
-      installed: true,
-      hasUpdate: false,
-      workflowId: "wf-1",
-      installWorkflowId: "copy-1",
-      status: "published",
-    });
-
-    renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: "工作流" }));
-
-    fireEvent.click(await screen.findByRole("button", { name: "多角度调研" }));
-    expect(await screen.findByText(/使用 · 多角度调研/)).toBeTruthy();
-    expect(screen.queryByTestId("workflow-store-dialog")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "取消" }));
-
-    fireEvent.click(await screen.findByRole("button", { name: "周报流水线" }));
-    expect(await screen.findByTestId("workflow-store-dialog")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "安装" }));
-    await waitFor(() => {
-      expect(installWorkflow).toHaveBeenCalledWith("wf-listing-1");
-    });
-    expect(installSkill).not.toHaveBeenCalled();
   });
 });

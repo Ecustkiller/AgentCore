@@ -104,9 +104,6 @@ def format_coordination_events(
         lines.append("")
         lines.append("【建图提示·疑似缺依赖】（供参考，无需单独回应）：")
         lines.extend(f"- {adv}" for adv in session.dep_advisories)
-    if session.draft.strip():
-        lines.append("")
-        lines.append(f"当前合成草稿：\n{session.draft.strip()}")
     lines.append("")
     from agentcore.runtime.interaction_orphan import (
         format_hot_pending_hold_line,
@@ -196,8 +193,7 @@ def _format_one(
         return (
             f"- escalation【{role}】{esc_kind}（via {src}）：{question}"
             f"{ownership_bit}"
-            " ——可 update_synthesis 记分歧、cancel_worker、"
-            "ask_user 请用户裁决。"
+            " ——可 cancel_worker、ask_user 请用户裁决。"
         )
     if ev.kind is CoordinationEventKind.TIMEOUT:
         rid = p.get("run_id") or "?"

@@ -325,7 +325,7 @@ def write_scope_rejection(context: ToolContext, path: str) -> str | None:
             f"冷启动探索写范围仅允许落在 `{AGENTCORE_ROOT}/` 下"
             f"（约定记忆与探索笔记）；拒绝路径 `{path}`。"
             f"请改写到 `{AGENTCORE_ROOT}/文档/research/` 等探索笔记路径，"
-            "或待画像写入完成后再写用户工程文件。"
+            "或待主管解除写范围限制后再写用户工程文件。"
         )
     return None
 

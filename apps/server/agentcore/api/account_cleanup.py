@@ -18,7 +18,6 @@ from agentcore.db.repositories import (
     SkillStoreRepository,
     TableRepository,
     UserLlmProviderRepository,
-    WorkflowStoreRepository,
 )
 from agentcore.folders.service import FolderDeskService
 from agentcore.storage.assets import AssetStorage
@@ -44,9 +43,8 @@ async def cleanup_account_resources(
     removes the avatar object, cascades collaboration-desk membership
     (owner folders stay for retention; member → drop membership rows + pending invites),
     hides creation-tool docs on folders this user owns, revokes public 文档
-    shares on those desks plus any 文档 links this user minted, and drops skill-store and
-    workflow-store listings/installs/reports.
-    Installed skill document copies and installed workflow copies stay.
+    shares on those desks plus any 文档 links this user minted, and drops skill-store
+    listings/installs/reports. Installed skill document copies stay.
     ``avatar_key`` must be captured by the caller *before* the user row is anonymized
     (soft-delete nulls it). Each step is independently idempotent, so re-running on
     an already-注销 account is harmless. The append-only cost ledger (不变量①) is
@@ -74,4 +72,3 @@ async def cleanup_account_resources(
         await folder_desk.cleanup_for_deleted_user(user_id)
     await conversations.delete_preferences_for_user(user_id)
     await SkillStoreRepository(conversations._session).delete_all_for_user(user_id)
-    await WorkflowStoreRepository(conversations._session).delete_all_for_user(user_id)

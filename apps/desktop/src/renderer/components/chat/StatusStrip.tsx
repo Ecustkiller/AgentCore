@@ -11,8 +11,8 @@ import {
 } from "@/components/graph/helpers";
 import { Badge, Button, IconButton as UiIconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import { formatDuration, formatDurationSec } from "@/lib/format";
-import { runningElapsedSec } from "@/lib/runningElapsed";
+import { useRunningElapsed } from "@/hooks/useRunningElapsed";
+import { formatDuration, formatLiveElapsed } from "@/lib/format";
 import {
   PARTIAL_STATUS_LABEL,
   arbitrateTurnOutcome,
@@ -45,7 +45,6 @@ import {
   Pause,
   Square,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
 
 /** Props every lifecycle strip shares: projection + strip controls. */
 export interface StatusStripProps {
@@ -74,8 +73,9 @@ function canPaintTeamCompleted(execution: Execution): boolean {
 /**
  * Thin toolbar above the collaboration graph (前端UX设计.md §三 / 协作图 UX §三).
  * Lifecycle icon + n/m + duration + fold / canvas.
- * Running duration ticks from frames[0].t (ToolLine useRunningElapsed shape);
- * completed still uses elapsedMs(frames) span. No talking titles; Stop lives
+ * Running duration ticks from frames[0].t via shared useRunningElapsed
+ * (`freezeWhenStopped` on 停止中). Completed still uses elapsedMs(frames) span.
+ * No talking titles; Stop lives
  * on the composer, not here.
  *
  * Terminal faces follow the turn arbitrator (`showStripFailure` /
@@ -273,35 +273,6 @@ function StripIconButton({
   );
 }
 
-/** Live wall-clock seconds since the first run frame (`frames[0].t`, epoch ms).
- * Same shape as ToolLine: 1s ticker only forces a re-render; the value is
- * recomputed from Date.now() each render so fold/remount does not reset.
- * Do not use elapsedMs(frames) here — that span freezes while a long tool
- * emits no frames (`: ping` is not a RunFrame).
- * `running=false` freezes the last wall-clock value (stopping) instead of
- * dropping the suffix or jumping to elapsedMs(frames). */
-function useRunningElapsed(
-  running: boolean,
-  startedAt: number | null | undefined,
-): number {
-  const [, force] = useState(0);
-  const frozenSec = useRef<number | null>(null);
-  useEffect(() => {
-    if (!running) return;
-    frozenSec.current = null;
-    const id = setInterval(() => force((n) => n + 1), 1000);
-    return () => clearInterval(id);
-  }, [running]);
-  if (startedAt == null) return 0;
-  if (!running) {
-    if (frozenSec.current == null) {
-      frozenSec.current = runningElapsedSec(startedAt);
-    }
-    return frozenSec.current;
-  }
-  return runningElapsedSec(startedAt);
-}
-
 function StripControls({
   execution,
   expanded,
@@ -359,8 +330,10 @@ function RunningStrip({
       ? `${workers.completed}/${workers.total}`
       : `${completed}/${total}`;
   const frames = useActiveExecField((rt) => rt.frames);
-  const elapsedSec = useRunningElapsed(!stopping, frames[0]?.t);
-  const duration = elapsedSec > 0 ? formatDurationSec(elapsedSec) : "";
+  const elapsedSec = useRunningElapsed(!stopping, frames[0]?.t, {
+    freezeWhenStopped: true,
+  });
+  const duration = formatLiveElapsed(elapsedSec) ?? "";
   const testId = stopping
     ? "status-strip-stopping"
     : backgroundBadge

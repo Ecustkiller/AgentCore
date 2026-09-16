@@ -21,6 +21,7 @@ function runWithUsage(
     usage,
     cost: extra.cost ?? null,
     model: extra.model ?? "gpt-5.6-sol",
+    reasoningEffort: extra.reasoningEffort ?? null,
     ...extra,
   } as RunNode;
 }
@@ -129,7 +130,7 @@ describe("ResourceSection ledger layout", () => {
     expect(screen.getByText(/输入 \$0.14 · 输出 \$0.02/)).toBeTruthy();
   });
 
-  it("keeps 思考 as a chip next to the model, not a tautological row", () => {
+  it("keeps 思考 as a chip next to the model when effort is unstamped", () => {
     render(
       <ResourceSection
         run={billedRun}
@@ -142,7 +143,29 @@ describe("ResourceSection ledger layout", () => {
     expect(screen.getAllByText("思考")).toHaveLength(1);
   });
 
-  it("hides 推理 0", () => {
+  it("shows the vendor effort token instead of 思考 when stamped", () => {
+    render(
+      <ResourceSection
+        run={runWithUsage(
+          {
+            input: 800,
+            output: 40,
+            reasoning: 0,
+            cache_hit: 0,
+            cache_miss: 800,
+          },
+          { model: "deepseek-v4-flash", reasoningEffort: "high" },
+        )}
+        agent={{ thinking: true } as AgentState}
+        defaultExpanded
+        keyBase="t"
+      />,
+    );
+    expect(screen.getByText("high")).toBeTruthy();
+    expect(screen.queryByText("思考")).toBeNull();
+  });
+
+  it("hides 思考 0", () => {
     render(
       <ResourceSection
         run={billedRun}
@@ -151,10 +174,10 @@ describe("ResourceSection ledger layout", () => {
         keyBase="t"
       />,
     );
-    expect(screen.queryByText(/推理 0/)).toBeNull();
+    expect(screen.queryByText(/思考 0/)).toBeNull();
   });
 
-  it("shows 推理 only when reasoning tokens > 0", () => {
+  it("shows 思考 only when reasoning tokens > 0", () => {
     render(
       <ResourceSection
         run={runWithUsage({
@@ -169,6 +192,6 @@ describe("ResourceSection ledger layout", () => {
         keyBase="t"
       />,
     );
-    expect(screen.getByText(/推理 1.2k/)).toBeTruthy();
+    expect(screen.getByText(/思考 1.2k/)).toBeTruthy();
   });
 });

@@ -337,9 +337,9 @@ class DeliveryAction(WirePayload):
     """One user action that would close a delivery gap. ``kind`` is a widened string
     on the wire (like ``ToolPhase``) so the backend can add kinds without a client
     bump — known: ``bind_local_folder`` (wire kind；产品文案按会话分流：
-    工程尚在本机 → 云协作「导入到云」优先；远程仓进当前云桌走 git clone /
+    工程尚在本机 → 云协作「先在云上做」优先；远程仓进当前云桌走 git clone /
     Composer「从 Git 克隆」；**已是云端会话但沙箱未装配** →
-    禁止再导「导入到云」，改稍后重试 / export_to_local / 本机传统；
+    禁止再导「先在云上做」，改稍后重试 / export_to_local / 本机传统；
     桌面默认同通道（本地对话 / 打开本机文件夹），≠离线；云端对话并列可选)；
     ``export_to_local`` (云端已有 delivered_files → 导出到本机文件夹后即可 npm install / 本地运行；
     与 bind_local_folder 可并存但语义不同);
@@ -372,7 +372,7 @@ class DeliveryArtifact(WirePayload):
     (``tools/file_products.py``), carried verbatim from the run-level ledger:
     ``kind`` is the normalized product type (``md`` / ``docx`` / ``pdf`` / ``code``
     / ``image`` / ``file`` …); ``derived_from`` names the source this product was
-    EXPORTED from (``md_to_docx``: docx ← 源 md), so a client can demote that source
+    EXPORTED from (``md_export``: docx ← 源 md), so a client can demote that source
     to 中间稿 the same way ``fold_exported_sources`` does server-side. Absent when the
     producer did not self-report — clients must NOT guess lineage from extensions or
     tool names, and must keep every accepted path reachable (fold ≠ drop).
@@ -593,6 +593,10 @@ class RunCompletedPayload(WirePayload):
     model: str
     usage: UsageBreakdown
     cost: CostBreakdown
+    reasoning_effort: str | None = absent(
+        "Vendor thinking-effort token actually sent (e.g. low/high/max). "
+        "Absent on old journals, thinking-off runs, and leaves that do not send the field."
+    )
     debrief: RunDebrief | None = absent()
     output_files: list[str] | None = absent()
     # Soft-accept / cutoff gaps on a COMPLETED node (additive). Same shape as

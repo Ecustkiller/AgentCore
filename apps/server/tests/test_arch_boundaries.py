@@ -120,7 +120,7 @@ def test_db_does_not_import_runtime_or_conversation() -> None:
 
     Shared pure helpers that both db and conversation/runtime need live in leaf
     packages (``core.message_merge``, ``core.mentions``, ``core.inline_body``,
-    ``core.assistant_content``, ``costing``).
+    ``core.assistant_content``, ``core.search_query``, ``costing``).
     Lease CRUD stays under ``runtime.leases`` and is imported from there by
     callers, not re-exported through ``db.repositories``.
     """
@@ -198,34 +198,7 @@ def test_turn_queue_and_runs_do_not_import_conversation_service() -> None:
     ) == {}
 
 
-def test_runtime_does_not_import_retired_conversation_leaves() -> None:
-    """Point-name copy, pills, scratch, crash factory, and cost emit live outside runtime reverse."""
-    files = _py_files("runtime")
-    assert _violations(
-        files,
-        (
-            "agentcore.conversation.mentions",
-            "agentcore.conversation.scratch",
-            "agentcore.conversation.inline_body",
-            "agentcore.conversation.crash_delegate",
-            "agentcore.conversation.common",
-            "agentcore.conversation.stage_card_resolve",
-        ),
-    ) == {}
-    assert not (_PKG_ROOT / "conversation" / "mentions.py").exists()
-    assert not (_PKG_ROOT / "conversation" / "scratch.py").exists()
-    assert not (_PKG_ROOT / "conversation" / "inline_body.py").exists()
-    assert not (_PKG_ROOT / "conversation" / "stage_card_resolve.py").exists()
-    assert not (_PKG_ROOT / "runtime" / "kickoff" / "stage_card.py").exists()
-    assert not (_PKG_ROOT / "runtime" / "pipeline" / "stage_card_debate.py").exists()
-    assert not (_PKG_ROOT / "runtime" / "crash_delegate.py").exists()
-    common = _PKG_ROOT / "conversation" / "common.py"
-    common_defs = {
-        node.name
-        for node in ast.walk(ast.parse(common.read_text(encoding="utf-8"), filename=str(common)))
-        if isinstance(node, ast.FunctionDef)
-    }
-    assert "log_cost_recorded" not in common_defs
+def test_cost_emit_lives_in_observability() -> None:
     assert (_PKG_ROOT / "observability" / "cost_log.py").is_file()
 
 
@@ -238,11 +211,6 @@ def test_runtime_does_not_import_active_conversation_store() -> None:
     interrupt = _PKG_ROOT / "runtime" / "turn" / "interrupt.py"
     files = [f for f in _py_files("runtime") if f != interrupt]
     assert _violations(files, ("agentcore.conversation.store",)) == {}
-    store_init = (_PKG_ROOT / "conversation" / "store" / "__init__.py").read_text(
-        encoding="utf-8"
-    )
-    assert "get_conversation_store" not in store_init
-    assert "bind_conversation_store" not in store_init
     assert (_PKG_ROOT / "runtime" / "conversation_store.py").is_file()
 
 

@@ -473,9 +473,8 @@ class CostEventRepository:
                 "e_output"
             ),
             _sum_int(CostEvent.cost_estimated_nano).label("c_estimated"),
-            # Each bucket's currency, read off the rows instead of assumed: billed
-            # is CNY (curated cards) while BYOK estimates are USD (community
-            # table), and the product does no FX so the two never merge.
+            # Each bucket's currency, read off the rows. Both columns are CNY
+            # (same curated card); they stay unmerged so quota SUM only sees billed.
             func.max(case((billed, CostEvent.currency))).label("c_currency"),
             func.max(case((estimated, CostEvent.currency))).label("e_currency"),
             _sum_int(CostEvent.rounds).label("rounds"),

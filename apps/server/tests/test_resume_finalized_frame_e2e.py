@@ -197,8 +197,7 @@ async def _finalize_ask_user() -> tuple[AskUserSuspension, list[dict]]:
                             id="call_ask",
                             function_name="ask_user",
                             arguments_delta=(
-                                f'{{"message": "{user_message}", '
-                                f'"assumptions": [{{"label": "默认", "value": "A"}}]}}'
+                                f'{{"questions": [{{"prompt": "{user_message}"}}]}}'
                             ),
                         )
                     ]

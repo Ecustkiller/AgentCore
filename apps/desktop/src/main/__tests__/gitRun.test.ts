@@ -161,5 +161,10 @@ describe("executeWorkspaceOp git_run", () => {
 
     const bad = await resolveGitRunCwd(root, "../outside");
     expect(bad.ok).toBe(false);
+
+    const missing = await resolveGitRunCwd(root, "no-such-desk", {
+      create: false,
+    });
+    expect(missing.ok).toBe(false);
   });
 });

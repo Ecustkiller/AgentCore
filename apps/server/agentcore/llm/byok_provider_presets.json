@@ -88,14 +88,16 @@
       "baseUrl": "https://opencode.ai/zen/v1",
       "defaultModel": "deepseek-v4-flash",
       "models": ["deepseek-v4-flash", "kimi-k2.6", "glm-5.2"],
+      "hideFromPicker": ["deepseek-flash"],
       "keyHelpUrl": "https://opencode.ai/auth"
     },
     {
       "id": "opencode_go",
       "label": "OpenCode Go",
       "baseUrl": "https://opencode.ai/zen/go/v1",
-      "defaultModel": "deepseek-v4-flash",
-      "models": ["deepseek-v4-flash", "deepseek-v4-pro", "glm-5.2"],
+      "defaultModel": "deepseek-v4.1-flash",
+      "models": ["deepseek-v4.1-flash", "deepseek-v4-pro", "glm-5.2"],
+      "hideFromPicker": ["deepseek-flash"],
       "keyHelpUrl": "https://opencode.ai/auth"
     }
   ]

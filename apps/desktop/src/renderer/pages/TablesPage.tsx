@@ -102,6 +102,7 @@ export function TablesPage() {
     title: string;
     rowLabel: string;
     updatedAt: string;
+    sourcePath: string | null;
   };
 
   const items: ListItem[] | null = preview
@@ -110,12 +111,14 @@ export function TablesPage() {
         title: t.title,
         rowLabel: `${t.rows.length} 行`,
         updatedAt: t.updatedAt,
+        sourcePath: t.sourcePath ?? null,
       }))
     : (remote?.map((t) => ({
         id: t.id,
         title: t.title,
         rowLabel: `${t.rowCount} 行`,
         updatedAt: t.updatedAt,
+        sourcePath: t.sourcePath,
       })) ?? null);
 
   return (
@@ -163,6 +166,14 @@ export function TablesPage() {
                 <p className="mt-1 text-xs text-muted-foreground">
                   {table.rowLabel} · 更新于 {formatUpdated(table.updatedAt)}
                 </p>
+                {table.sourcePath ? (
+                  <p
+                    className="mt-0.5 truncate text-xs text-muted-foreground"
+                    title={table.sourcePath}
+                  >
+                    {table.sourcePath}
+                  </p>
+                ) : null}
               </div>
               {confirmingId === table.id ? (
                 <button

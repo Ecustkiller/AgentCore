@@ -7,7 +7,7 @@ editors can last-write-win different cells without a whole-table CAS.
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, text
+from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -42,6 +42,9 @@ class Table(Base):
     active_view_id: Mapped[str | None] = mapped_column(PG_UUID(as_uuid=False), nullable=True)
     # Last reversible batch: {id, inverses, row_stamps}. NULL = nothing to undo.
     undo_batch: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # csv 灌数 upsert key（账号级表仍不挂 folder_id）。NULL = 人点新建。
+    source_workspace_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    source_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )
@@ -49,6 +52,17 @@ class Table(Base):
         DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index(
+            "ix_tables_source_live",
+            "user_id",
+            "source_workspace_key",
+            "source_path",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL AND source_path IS NOT NULL"),
+        ),
+    )
 
 
 class TableRow(Base):
@@ -75,7 +89,7 @@ class TableView(Base):
     display_mode: Mapped[str] = mapped_column(
         String(32), nullable=False, server_default=text("'table'")
     )
-    # filters, sort, group_by, hidden_column_ids, density, mode_config
+    # filters, sort, group_by, hidden_column_ids, column_widths, density, mode_config
     config: Mapped[dict] = mapped_column(
         JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )

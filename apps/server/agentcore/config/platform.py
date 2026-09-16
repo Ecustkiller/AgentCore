@@ -61,6 +61,10 @@ class PlatformSettings(BaseModel):
 
     # --- 计费模式 ---
     billing_mode: str = "byok"
+    # Flash CNY meter: Go public USD × frozen 7.2. This scales that card (default 1).
+    # OpenCode's published 4× on V4.1 Flash is an *allowance* multiplier ($15 → promo
+    # $60), not this knob.
+    go_cost_multiplier: str = "1"
 
     # OpenCode Go monthly window anniversary (UTC day-of-month, 1–31). Short
     # months clamp to the last day. Used as the empty-pool / env-fallback

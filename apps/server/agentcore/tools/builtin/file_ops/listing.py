@@ -20,6 +20,7 @@ from agentcore.workspace.declared_dirs import (
 from agentcore.workspace.external_mounts import EXTERNAL_PREFIX, parse_external_path
 from agentcore.workspace.protocol import (
     DirEntry,
+    GlobFilesQuery,
     NotADirectory,
     OutsideWorkspace,
     PathNotFound,
@@ -183,12 +184,14 @@ def glob_leftover_error(arguments: dict[str, Any], start: float) -> ToolResult |
 
 @dataclass(frozen=True, slots=True)
 class GlobPlan:
-    """One ``list_tree`` shape compiled from a globstar pattern.
+    """One ``rg --files`` shape compiled from a globstar pattern.
 
-    ``locate_dir``: find directories with this basename anywhere under the search
-    root, then apply ``name_filter`` under each (``**/name/**`` / ``**/name/*.py``).
-    ``star_dirs``: list immediate child directories of ``directory``, then apply
-    ``name_filter`` under each (``pkg/*/name`` — ``*`` is one path segment).
+    ``locate_dir``: files under directories with this basename
+    (``**/name/**`` / ``**/name/*.py``).
+    ``star_dirs``: one path-segment directory wildcard (``pkg/*/name``).
+    ``max_depth == 1`` is one child layer (maps to rg ``--max-depth 1`` under
+    ``directory`` — rg's 0 does not list files in the cwd); ``GLOB_DEPTH``
+    means unbounded (stop at the entry cap).
     """
 
     locate_dir: str | None
@@ -236,7 +239,7 @@ def _compile_star_dir_plan(raw: str) -> GlobPlan | None:
 
 
 def compile_glob_pattern(pattern: str) -> GlobPlan | None:
-    """Compile one globstar pattern onto ``list_tree`` (None if empty)."""
+    """Compile one globstar pattern onto ``rg --files`` (None if empty)."""
     raw = (pattern or "").strip().replace("\\", "/").strip("/")
     if not raw:
         return None
@@ -306,6 +309,61 @@ def compile_glob_patterns(pattern: str) -> list[GlobPlan] | None:
             seen.add(key)
             plans.append(plan)
     return plans or None
+
+
+def glob_plan_to_files_query(
+    search_root: str,
+    plan: GlobPlan,
+    *,
+    max_entries: int,
+    reveal_archives: bool,
+) -> GlobFilesQuery:
+    """Map a GlobPlan onto one path-aware ``rg --files`` query.
+
+    One-layer plans (``src/*.py``) use ``--max-depth 1`` so slash-less
+    ``*.py`` cannot leak into nested dirs (rg depth 0 lists nothing in a
+    directory). Recursive filename plans omit depth and stop at
+    ``max_entries``.
+    """
+    root = search_root or "."
+    if plan.locate_dir:
+        loc = plan.locate_dir
+        nf = plan.name_filter
+        if nf in _STAR_CLASS_PATTERNS:
+            globs: tuple[str, ...] = (f"**/{loc}/**",)
+        elif plan.max_depth == 1:
+            globs = (f"**/{loc}/{nf}",)
+        else:
+            globs = (f"**/{loc}/{nf}", f"**/{loc}/**/{nf}")
+        return GlobFilesQuery(
+            directory=root,
+            globs=globs,
+            max_depth=None,
+            max_entries=max_entries,
+            reveal_archives=reveal_archives,
+        )
+    if plan.star_dirs:
+        parent = join_glob_directory(root, plan.directory)
+        nf = plan.name_filter
+        glob = f"*/{nf}" if nf not in _STAR_CLASS_PATTERNS else "*/*"
+        return GlobFilesQuery(
+            directory=parent,
+            globs=(glob,),
+            max_depth=None,
+            max_entries=max_entries,
+            reveal_archives=reveal_archives,
+        )
+    cwd = join_glob_directory(root, plan.directory)
+    nf = plan.name_filter
+    include: tuple[str, ...] = () if nf in _STAR_CLASS_PATTERNS else (nf,)
+    rg_depth = 1 if plan.max_depth == 1 else None
+    return GlobFilesQuery(
+        directory=cwd,
+        globs=include,
+        max_depth=rg_depth,
+        max_entries=max_entries,
+        reveal_archives=reveal_archives,
+    )
 
 
 def glob_pattern_reject(pattern: str, start: float) -> ToolResult:

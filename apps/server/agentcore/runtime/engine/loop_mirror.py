@@ -20,7 +20,7 @@ class CaptainLoopMirror:
     Published only while ``react_loop(..., role="captain")`` is running. Holds a
     reference to the run's :class:`LoopController` plus the two content
     accumulators a suspending face needs (ask_user folded → ``content_before_round``;
-    ask_user with its own ``message`` / delegate / team_preview / plan_review →
+    ask_user with its own prompt / delegate / team_preview / plan_review →
     ``final_content``). ``ask_user_content_folded`` is set by the tool-round
     prepare so pause capture matches the absorb decision.
     """

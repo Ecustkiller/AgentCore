@@ -1270,6 +1270,26 @@ def test_build_payload_sends_thinking_enabled_on_v4_chat_across_gateways(
     assert omitted_payload["reasoning_effort"] == "high"
 
 
+@pytest.mark.parametrize("model", (DEEPSEEK_V4_FLASH, DEEPSEEK_V41_FLASH))
+def test_build_payload_sends_listed_reasoning_effort(model: str):
+    provider = OpenAICompatibleProvider(name="test", api_key="k", base_url="http://x/v1")
+    low = LLMRequest(
+        messages=[LLMMessage(role="user", content="hi")],
+        model=model,
+        thinking=True,
+        reasoning_effort="low",
+    )
+    assert provider._build_payload(low, stream=False)["reasoning_effort"] == "low"
+    alias = LLMRequest(
+        messages=[LLMMessage(role="user", content="hi")],
+        model=model,
+        thinking=True,
+        reasoning_effort="medium",
+    )
+    assert provider._build_payload(alias, stream=False)["reasoning_effort"] == "high"
+
+
+
 def test_reasoning_text_reads_openai_aliases():
     assert _reasoning_text({"reasoning_content": "官方"}) == "官方"
     assert _reasoning_text({"reasoning": "别名"}) == "别名"

@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 /**
- * 完成态状态条不再画「同时开工省下」。这组并行帧以前会算出 1m19s 省时，
- * 条上仍只留 n/m · 用时（花费本用例无价），不得出现该文案。
+ * 完成态并行回合：条上只留 n/m · 用时（花费本用例无价）。
  */
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { conversationKeys } from "@/lib/queryKeys";
@@ -108,12 +107,11 @@ beforeEach(() => {
   useExecutionStore.setState({ byId: {} });
 });
 
-describe("StatusStrip · 完成态不再画并行省时", () => {
-  it("并行回合：条上仍有 n/m · 用时，不得出现「同时开工省下」", () => {
+describe("StatusStrip · 完成态并行回合战绩", () => {
+  it("并行回合：条上仍有 n/m · 用时", () => {
     renderStrip(PARALLEL);
     expect(screen.getByText(/3\/3/)).toBeTruthy();
     expect(screen.getByText(/用时 42s/)).toBeTruthy();
-    expect(screen.queryByText(/同时开工省下/)).toBeNull();
     expect(screen.queryByTestId("status-strip-parallel-saving")).toBeNull();
   });
 });

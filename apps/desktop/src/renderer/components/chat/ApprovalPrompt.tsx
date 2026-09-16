@@ -273,17 +273,11 @@ function hostPrimaryArg(args: Record<string, unknown>): string | null {
     const name =
       typeof args.device_name === "string" && args.device_name.trim()
         ? args.device_name.trim()
-        : typeof args.device_id === "string" && args.device_id.trim()
-          ? args.device_id.trim()
-          : "";
+        : "";
     return name ? `set_audio ${truncateSnippet(name)}` : "set_audio";
   }
   if (action === "restart_service") {
-    const service =
-      typeof args.service === "string" && args.service.trim()
-        ? args.service.trim()
-        : "";
-    return service ? `restart_service ${service}` : "restart_service";
+    return "restart_service Audiosrv";
   }
   if (action === "os_log") {
     const source =
@@ -366,8 +360,6 @@ function primaryArg(
     return source || destination || null;
   }
   if (toolName === "run" || toolName === "code_execute") {
-    const purpose = args.purpose;
-    if (typeof purpose === "string" && purpose.trim()) return purpose.trim();
     const cmd = args.command;
     if (typeof cmd === "string" && cmd.trim()) return cmd.trim();
   }
@@ -501,21 +493,10 @@ function leftoverApprovalArgs(
     if (isApprovalGateMetaKey(key) || FACE_STRUCTURAL_KEYS.has(key)) continue;
     if (isFacePreviewKey(toolName, key)) continue;
     if (toolName === "file_batch" && key === "operations") continue;
-    if (toolName === "code_execute" && (key === "purpose" || key === "code")) {
-      continue;
-    }
+    if (toolName === "code_execute" && key === "code") continue;
     if (
       toolName === "delete_folder" &&
       (key === "folder_name" || key === "folder_id")
-    ) {
-      continue;
-    }
-    if (
-      toolName === "run" &&
-      key === "purpose" &&
-      headline &&
-      typeof value === "string" &&
-      value.trim() === headline
     ) {
       continue;
     }
@@ -655,11 +636,6 @@ export function ApprovalCard({
   const permanentDelete =
     approval.toolName === "file_delete" &&
     approval.arguments.permanent === true;
-  const headlineIsProse =
-    isCodeExecute &&
-    typeof approval.arguments.purpose === "string" &&
-    approval.arguments.purpose.trim() !== "" &&
-    headline === approval.arguments.purpose.trim();
   const leftoverArgs = leftoverApprovalArgs(
     approval.toolName,
     approval.arguments,
@@ -759,12 +735,7 @@ export function ApprovalCard({
                     {" · "}
                   </span>
                   <SimpleTooltip label={headline}>
-                    <span
-                      className={cn(
-                        "min-w-0 flex-1 truncate font-normal",
-                        headlineIsProse ? "" : "font-mono",
-                      )}
-                    >
+                    <span className="min-w-0 flex-1 truncate font-mono font-normal">
                       {headline}
                     </span>
                   </SimpleTooltip>

@@ -11,11 +11,6 @@
 
 import { GENERIC_TOOL_FAILURE_MESSAGE } from "@/components/chat/toolResult/productFailureFace";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import {
-  DRAFT_KEY,
-  runtimeOf,
-  useConversationStore,
-} from "@/stores/conversation";
 import type { ProcessStep } from "@/types/events";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
@@ -63,6 +58,11 @@ function renderWithTooltip(ui: ReactElement) {
 /** Collapsed result subline (`text-xs` under the title). Null when the row is one line. */
 function collapsedSubline(container: HTMLElement): HTMLElement | null {
   return container.querySelector("span.block.truncate.text-xs");
+}
+
+/** Former web_search running silhouette (three fake result cards). Must stay gone. */
+function searchResultSilhouette(container: HTMLElement): HTMLElement | null {
+  return container.querySelector('[aria-hidden][class*="mt-1"]');
 }
 
 type ToolStep = Extract<ProcessStep, { kind: "tool" }>;
@@ -152,8 +152,8 @@ describe("ToolLine · 过程工具默认折叠", () => {
     expect(screen.getAllByText("python")).toHaveLength(1);
   });
 
-  it("keeps web_search results collapsed on completion", () => {
-    const { rerender } = render(
+  it("keeps a running web_search to one title line (no result skeleton)", () => {
+    const { container } = render(
       <ToolLine
         step={step({
           tool_name: "web_search",
@@ -162,7 +162,22 @@ describe("ToolLine · 过程工具默认折叠", () => {
         })}
       />,
     );
-    // The hit title is expanded-only (while running only the query detail shows).
+    expect(screen.getByText("Search web")).toBeTruthy();
+    expect(screen.getByText("深圳天气")).toBeTruthy();
+    expect(searchResultSilhouette(container)).toBeNull();
+    expect(collapsedSubline(container)).toBeNull();
+  });
+
+  it("keeps web_search results collapsed on completion", () => {
+    const { rerender, container } = render(
+      <ToolLine
+        step={step({
+          tool_name: "web_search",
+          arguments: { query: "深圳天气" },
+          status: "running",
+        })}
+      />,
+    );
     expect(screen.queryByText("深圳天气预报")).toBeNull();
 
     rerender(
@@ -186,24 +201,15 @@ describe("ToolLine · 过程工具默认折叠", () => {
         })}
       />,
     );
-    // Collapsed: hit title hidden; click reveals the result card.
     expect(screen.queryByText("深圳天气预报")).toBeNull();
+    expect(collapsedSubline(container)).toBeNull();
     fireEvent.click(screen.getByText("Search web"));
     expect(screen.getByText("深圳天气预报")).toBeTruthy();
     expect(screen.queryByText(/搜索：/)).toBeNull();
   });
 
   it("inlines web_search result count into the title row when collapsed", () => {
-    const { rerender } = render(
-      <ToolLine
-        step={step({
-          tool_name: "web_search",
-          arguments: { query: "深圳天气" },
-          status: "running",
-        })}
-      />,
-    );
-    rerender(
+    const { container } = render(
       <ToolLine
         step={step({
           tool_name: "web_search",
@@ -224,10 +230,36 @@ describe("ToolLine · 过程工具默认折叠", () => {
         })}
       />,
     );
-    // Already collapsed by default — 计数并入标题行（对齐 web_fetch 组的「N sources」），
-    // 不再另起一行 peek；结果卡标题隐藏。
     expect(screen.getByText(/1 result/)).toBeTruthy();
+    expect(screen.getByText(/1 result/).className).toMatch(/max-w-\[40%\]/);
     expect(screen.queryByText("深圳天气预报")).toBeNull();
+    expect(collapsedSubline(container)).toBeNull();
+  });
+
+  it("inlines web_search count on nested rows too", () => {
+    const { container } = render(
+      <ToolLine
+        nested
+        step={step({
+          tool_name: "web_search",
+          arguments: { query: "深圳天气" },
+          result: "5 results",
+          display: {
+            query: "深圳天气",
+            results: Array.from({ length: 5 }, (_, i) => ({
+              title: `hit ${i + 1}`,
+              url: `https://w.example.com/${i}`,
+              site: "w.example.com",
+              snippet: "snippet",
+            })),
+          },
+          status: "success",
+        })}
+      />,
+    );
+    expect(screen.getByText(/5 results/)).toBeTruthy();
+    expect(screen.queryByText("hit 1")).toBeNull();
+    expect(collapsedSubline(container)).toBeNull();
   });
 
   it("inlines str_replace +/- into the title and keeps the diff collapsed", () => {
@@ -512,7 +544,7 @@ describe("ToolLine · 过程工具默认折叠", () => {
       <ToolLine
         step={step({
           tool_name: "read_conversation",
-          arguments: { conversation_id: "conv_abc", query: "适配" },
+          arguments: { conversation_id: "conv_abc", query: "上周方案" },
           result: "### User\n很长的 transcript 正文",
           display: {
             title: "法庭迷局游戏设计",
@@ -524,8 +556,6 @@ describe("ToolLine · 过程工具默认折叠", () => {
       />,
     );
     expect(container.textContent).toContain("法庭迷局游戏设计 · 截断");
-    expect(container.textContent).not.toContain("还有后续");
-    expect(container.textContent).not.toContain("适配");
     expect(collapsedSubline(container)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "打开" }));
     expect(navigate).toHaveBeenCalledWith("/conversations/conv_abc");
@@ -829,82 +859,22 @@ describe("ToolLine · browser 单步折叠一行", () => {
     expect(collapsedSubline(container)).toBeNull();
   });
 
-  it("puts live elapsed seconds at the trailing-dot slot, still one line", () => {
-    vi.useFakeTimers();
-    const key =
-      useConversationStore.getState().currentConversationId ?? DRAFT_KEY;
-    const prev = runtimeOf(useConversationStore.getState(), key);
-    useConversationStore.setState({
-      byId: {
-        ...useConversationStore.getState().byId,
-        [key]: { ...prev, toolStartedMs: { call_1: Date.now() - 6_000 } },
-      },
-    });
-    try {
-      const { container, unmount } = render(
-        <ToolLine
-          step={step({
-            tool_name: "grep",
-            arguments: { pattern: "WaveScheduler" },
-            status: "running",
-            result: null,
-          })}
-        />,
-      );
-      expect(screen.getByText("6s")).toBeTruthy();
-      expect(collapsedSubline(container)).toBeNull();
-      expect(container.querySelector("[data-live-flow]")).not.toBeNull();
-      unmount();
-    } finally {
-      vi.useRealTimers();
-      useConversationStore.setState({
-        byId: {
-          ...useConversationStore.getState().byId,
-          [key]: {
-            ...runtimeOf(useConversationStore.getState(), key),
-            toolStartedMs: {},
-          },
-        },
-      });
-    }
-  });
-
-  it("formats live tool elapsed past a minute like the status strip", () => {
-    vi.useFakeTimers();
-    const key =
-      useConversationStore.getState().currentConversationId ?? DRAFT_KEY;
-    const prev = runtimeOf(useConversationStore.getState(), key);
-    useConversationStore.setState({
-      byId: {
-        ...useConversationStore.getState().byId,
-        [key]: { ...prev, toolStartedMs: { call_1: Date.now() - 90_000 } },
-      },
-    });
-    try {
-      const { unmount } = render(
-        <ToolLine
-          step={step({
-            tool_name: "grep",
-            arguments: { pattern: "WaveScheduler" },
-            status: "running",
-            result: null,
-          })}
-        />,
-      );
-      expect(screen.getByText("1m 30s")).toBeTruthy();
-      unmount();
-    } finally {
-      vi.useRealTimers();
-      useConversationStore.setState({
-        byId: {
-          ...useConversationStore.getState().byId,
-          [key]: {
-            ...runtimeOf(useConversationStore.getState(), key),
-            toolStartedMs: {},
-          },
-        },
-      });
-    }
+  it("does not show live elapsed on a running tool", () => {
+    const { container } = render(
+      <ToolLine
+        step={step({
+          tool_name: "grep",
+          arguments: { pattern: "WaveScheduler" },
+          status: "running",
+          result: null,
+        })}
+      />,
+    );
+    expect(screen.getByText("WaveScheduler")).toBeTruthy();
+    expect(screen.queryByText("6s")).toBeNull();
+    expect(screen.queryByText("1m 30s")).toBeNull();
+    expect(collapsedSubline(container)).toBeNull();
+    expect(container.querySelector("[data-live-flow]")).not.toBeNull();
   });
 
   it("keeps the collapsed error row to one line (no failure.message subline)", () => {
@@ -943,7 +913,7 @@ describe("ToolLine · live-flow", () => {
     expect(container.querySelector(".live-flow-text")).not.toBeNull();
   });
 
-  it("keeps search-result silhouette while running, driven by live-flow not pulse", () => {
+  it("sweeps a running web_search title without a result silhouette", () => {
     const { container } = render(
       <ToolLine
         step={step({
@@ -955,8 +925,8 @@ describe("ToolLine · live-flow", () => {
       />,
     );
     expect(container.querySelector("[data-live-flow]")).not.toBeNull();
-    expect(container.querySelector(".mt-1 .bg-muted")).not.toBeNull();
-    expect(container.querySelector(".mt-1 .animate-pulse")).toBeNull();
+    expect(searchResultSilhouette(container)).toBeNull();
+    expect(container.querySelector(".mt-1 .bg-muted")).toBeNull();
   });
 
   it("does not sweep a settled tool row", () => {
@@ -998,6 +968,12 @@ describe("ToolLineGroup · live-flow", () => {
     );
     expect(container.querySelectorAll("[data-live-flow]")).toHaveLength(1);
     expect(screen.getByText(/foo\.ts · bar\.ts/)).toBeTruthy();
+  });
+
+  it("does not show live elapsed on the collapsed header", () => {
+    render(<ToolLineGroup tools={groupTools} isStreaming={false} />);
+    expect(screen.queryByText("6s")).toBeNull();
+    expect(screen.queryByText("1m 30s")).toBeNull();
   });
 
   it("sweeps the running child instead of the header while expanded", () => {
@@ -1114,7 +1090,7 @@ describe("ToolLineGroup · web_search 平铺", () => {
   });
 
   it("keeps a mixed search+other group on the default chevron path", () => {
-    render(
+    const { container } = render(
       <ToolLineGroup
         tools={[
           searchStep("s1", "天气", 3),
@@ -1130,6 +1106,11 @@ describe("ToolLineGroup · web_search 平铺", () => {
       />,
     );
     expect(screen.getByText(/Search web 1 · Run code 1/)).toBeTruthy();
+    fireEvent.click(screen.getByText(/Search web 1 · Run code 1/));
+    expect(screen.getByText("天气")).toBeTruthy();
+    expect(screen.getByText(/3 results/)).toBeTruthy();
+    expect(screen.queryByText("天气 hit 1")).toBeNull();
+    expect(collapsedSubline(container)).toBeNull();
   });
 });
 

@@ -19,19 +19,13 @@ export const APP_PATHS = {
     /** Canonical aliases — 旧名仍可用，指向现行壳。 */
     tools: "/toolbox/mine/tools",
     guidelines: "/toolbox/mine/skills",
-    /** Prompt catalog right pane = cross-conversation「最近学到」feed. */
-    guidelinesUpdates: "/toolbox/mine/skills?updates=1",
     store: "/toolbox/market",
     /** 提示词目录（出厂工具 / 官方 HOW / 连接器都在这本）。旧 `#/toolbox/connectors` / `mine/mcp` / `mine/tools` 收向这里。 */
     connectors: "/toolbox/mine/skills?connectors=1",
-    /** 旧书签，路由收向工作流列表。 */
+    /** 旧书签，路由收向提示词。 */
     automations: {
       root: "/toolbox/mine/automations",
       inbox: "/toolbox/mine/automations?inbox=1",
-    },
-    workflows: {
-      root: "/toolbox/mine/workflows",
-      edit: (id: string) => `/toolbox/workflows/${id}`,
     },
     manual: {
       root: "/toolbox/manual",
@@ -62,11 +56,6 @@ export const APP_PATHS = {
 export const TOOLBOX_PAGE_BACK = {
   to: APP_PATHS.toolbox.mine.skills,
   label: "工具箱",
-} as const;
-
-export const TOOLBOX_WORKFLOWS_BACK = {
-  to: APP_PATHS.toolbox.workflows.root,
-  label: "工作流",
 } as const;
 
 export type ManualChapterId =

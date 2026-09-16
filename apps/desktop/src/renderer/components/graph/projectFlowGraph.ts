@@ -54,8 +54,6 @@ export interface FlowGraphProjectionInput {
   captainRun: { id: string } | null;
   captainStatus: RunStatus | null;
   finalAnswer: { id: string; content: string } | null;
-  /** CEO 汇总空窗：无终稿气泡时挂 `team_synthesis_preview` 片段（非 content_delta）。 */
-  captainSynthesisPreview?: string;
   /** CEO 协调等待副标题（覆盖 derived status 文案）。 */
   captainStatusCaption?: string | null;
   taskMessage: { id: string } | null;
@@ -191,7 +189,6 @@ export function projectFlowNodes({
   captainRun,
   captainStatus,
   finalAnswer,
-  captainSynthesisPreview,
   captainStatusCaption,
   taskMessage,
   activateNode,
@@ -348,7 +345,7 @@ export function projectFlowNodes({
     const durationMs =
       foldedCx.length > 0 ? sumDurationMs(roundRuns) : run.durationMs;
     // 轮节点聚合口径与 durationMs 一致：成本 / token 计入折进的质询作答。
-    // BYOK：记账 total=0 时用 estimated_total（美元社区价目）；peek / a11y 出 ≈$，face 不显钱。
+    // BYOK：total 已是产品名义 ¥；遗留 USD 估算仍走 pickCostMoney 的 ≈$。face 不显钱。
     // 无 FX：折进的 run 同凭据来源 → 同币种，按首个记名。
     let costNano = 0;
     let costEstimated = false;
@@ -526,8 +523,6 @@ export function projectFlowNodes({
         const preview = captainSinkPreview({
           captainStatus: captainStatus ?? "pending",
           answerPreview: finalAnswer ? headText(finalAnswer.content) : "",
-          synthesisPreview: captainSynthesisPreview,
-          waitCaption,
         });
         nodes.push({
           id: captainRun.id,

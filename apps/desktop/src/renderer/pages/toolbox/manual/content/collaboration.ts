@@ -164,15 +164,11 @@ export const collaborationChapter: ManualChapterContent = {
               title: "工具授权",
               desc: "敏感操作先征得你同意再执行——弹窗频率由权限配方决定。",
             },
-            {
-              title: "计划复核",
-              desc: "流水线波间闸门：上游做完、下游待跑时，可先确认再放行。",
-            },
           ],
         },
         {
           type: "paragraph",
-          text: "拍板卡怎么点（两类按键不同）",
+          text: "拍板卡怎么点",
           emphasis: true,
         },
         {
@@ -180,11 +176,7 @@ export const collaborationChapter: ManualChapterContent = {
           items: [
             {
               title: "拍板卡",
-              desc: "两键：提交（带上选择与说明继续）+ 取消（结束本回合）。多题时右上编号切换，提交仍一次带走全部选择。没有单独的「继续 / 调整」。",
-            },
-            {
-              title: "计划复核",
-              desc: "三键：继续 / 调整（备注注入未跑下游）/ 取消。",
+              desc: "两键：提交（带上选择与说明继续）+ 取消（结束本回合）。多题时右上编号切换，提交仍一次带走全部选择。",
             },
           ],
         },
@@ -200,7 +192,7 @@ export const collaborationChapter: ManualChapterContent = {
                 to: MANUAL_SECTION_IDS.collaboration.autonomy,
               },
             },
-            " 联动：配方越托管，同类能力越少逐次弹窗。拍板卡与计划复核不受配方改写。",
+            " 联动：配方越托管，同类能力越少逐次弹窗。拍板卡不受配方改写。",
           ],
         },
         {
@@ -217,7 +209,7 @@ export const collaborationChapter: ManualChapterContent = {
       blocks: [
         {
           type: "lead",
-          text: "权限配方管「改文件 / 执行命令 / 组团卡」弹多少次。拍板卡与计划复核仍会按需出现。",
+          text: "权限配方管「改文件 / 执行命令 / 组团卡」弹多少次。拍板卡仍会按需出现。",
         },
         {
           type: "paragraph",
@@ -259,7 +251,7 @@ export const collaborationChapter: ManualChapterContent = {
                 to: MANUAL_SECTION_IDS.collaboration.checkpoint,
               },
             },
-            " 的关系：配方减的是工具审批与组团卡疲劳；拍板与计划复核仍走检查点。非法组合「免审执行 + 改文件逐次问」选不出。",
+            " 的关系：配方减的是工具审批与组团卡疲劳；拍板仍走检查点。非法组合「免审执行 + 改文件逐次问」选不出。",
           ],
         },
       ],
@@ -366,16 +358,16 @@ export const collaborationChapter: ManualChapterContent = {
     },
     {
       id: MANUAL_SECTION_IDS.collaboration.memory,
-      title: "记忆与偏好",
+      title: "规矩与旧对话",
       icon: "Brain",
       blocks: [
         {
           type: "lead",
-          text: "不用每次重新交代背景——偏好与工作习惯会跨对话延续。",
+          text: "三层：当前这场对话；你写过的规矩（含你说「记住」记下的）；过往事情可查旧对话。系统不会自己总结一份关于你的简介。",
         },
         {
           type: "paragraph",
-          text: "怎么让它记住",
+          text: "怎么留下规矩",
           emphasis: true,
         },
         {
@@ -386,8 +378,8 @@ export const collaborationChapter: ManualChapterContent = {
               desc: "「以后回答都用中文」「代码用 TypeScript」「别改公开 API」——说一次就够。",
             },
             {
-              title: "越用越懂",
-              desc: "常用口味与工作习惯会沉淀下来；换个对话也不用重新介绍自己和手头的事。",
+              title: "查旧对话",
+              desc: "「上次那个方案」可以搜以前的对话，或 @ 那场。工作区里的文件仍当场打开。",
             },
           ],
         },
@@ -405,7 +397,29 @@ export const collaborationChapter: ManualChapterContent = {
             },
             {
               title: "工具箱 · 提示词",
-              desc: "打开工具箱的提示词页，可查看或调整所有对话共用的提示词；「最近学到」也在这一页。",
+              desc: "打开工具箱的提示词页，可查看或调整所有对话共用的提示词。",
+            },
+          ],
+        },
+        {
+          type: "paragraph",
+          text: "可复用的编制",
+          emphasis: true,
+        },
+        {
+          type: "bullets",
+          items: [
+            {
+              title: "常驻",
+              desc: "每回合都带着。适合全对话通用的规矩、口吻、禁区。",
+            },
+            {
+              title: "按需",
+              desc: "平时只挂一行，用到才翻。适合某类任务的拆法、检查单、写作模板。",
+            },
+            {
+              title: "@ 点名",
+              desc: "输入框 @ 某条按需提示词，这一句当场带上，不必改成常驻。",
             },
           ],
         },
@@ -418,12 +432,7 @@ export const collaborationChapter: ManualChapterContent = {
               text: "工具箱",
               link: { kind: "go", to: APP_PATHS.toolbox.guidelines },
             },
-            " · 提示词 · ",
-            {
-              text: "最近学到",
-              link: { kind: "go", to: APP_PATHS.toolbox.guidelinesUpdates },
-            },
-            "。记忆来自你的对话偏好；与数据留存、导出等关系见 ",
+            " · 提示词（仅桌面；手机 / 窄屏无工具箱，口头改规矩即可）。规矩来自你说的「记住」和提示词页；过往事情查旧对话。与数据留存、导出等关系见 ",
             {
               text: "数据与隐私",
               link: {
@@ -435,111 +444,6 @@ export const collaborationChapter: ManualChapterContent = {
               },
             },
             "。",
-          ],
-        },
-      ],
-    },
-    {
-      id: MANUAL_SECTION_IDS.collaboration.workflow,
-      title: "工作流",
-      icon: "Workflow",
-      blocks: [
-        {
-          type: "lead",
-          text: "把「谁做什么、先后怎么排」画成一张可复用的图——下次同类的活直接照这张图跑，不用再从头交代一遍。",
-        },
-        {
-          type: "paragraph",
-          text: "主路径：去工具箱设计",
-          emphasis: true,
-        },
-        {
-          type: "steps",
-          items: [
-            {
-              title: "打开工具箱 · 工作流",
-              desc: [
-                "到 ",
-                {
-                  text: "工具箱 · 工作流",
-                  link: { kind: "go", to: APP_PATHS.toolbox.workflows.root },
-                },
-                "。需要固定拆法时在这里新建或套官方模板，再在画布上设计。",
-              ],
-            },
-            {
-              title: "新建空白图",
-              desc: "点「新建工作流」从空白画布起步，自己排队员、关卡和先后。",
-            },
-            {
-              title: "在画布上设计，再跑一次或设为定时",
-              desc: "画好后点「跑一次」选个文件夹就能直起；也可以点「设为定时」配周期或 Webhook，到点按这张图跑。",
-            },
-          ],
-        },
-        {
-          type: "paragraph",
-          text: "画布上能摆什么",
-          emphasis: true,
-        },
-        {
-          type: "bullets",
-          items: [
-            {
-              title: "队员步骤",
-              desc: "一个队员干一件事：写清角色、任务说明和要交什么。",
-            },
-            {
-              title: "等人关卡",
-              desc: "跑到这儿停下来等你看一眼，你放行后下游才继续。",
-            },
-            {
-              title: "连线定先后",
-              desc: "没有连线的步骤同一批并行；有连线的等上游交活再解锁。",
-            },
-            {
-              title: "开跑按图执行",
-              desc: "跑的时候结构锁定，不临场加人改序，也不再由 CEO 即兴组队；要改结构就回画布改一版。权限仍按你选的自主度，不因为有图就自动放宽。",
-            },
-          ],
-        },
-        {
-          type: "paragraph",
-          text: "也可以从官方模板起步",
-          emphasis: true,
-        },
-        {
-          type: "paragraph",
-          text: "市场里套官方模板。「使用」会复制一份成你自己的工作流，再改名字和步骤；原模板只读，改坏了随时重新复制一份。",
-        },
-        {
-          type: "paragraph",
-          text: "定时或 Webhook",
-          emphasis: true,
-        },
-        {
-          type: "bullets",
-          items: [
-            {
-              title: "设为定时",
-              desc: "在工作流行上打开本页对话框：定时与 Webhook 互斥，只绑云端文件夹，可随时启用或清除。",
-            },
-            {
-              title: "跑一次仍是手点",
-              desc: "「跑一次」当场开一轮；定时 / Webhook 是到点或收到外部 POST 再按图跑，没有另开的「立即跑」。",
-            },
-          ],
-        },
-        {
-          type: "callout",
-          variant: "info",
-          text: [
-            "电脑关着也会跑——任务在云端，所以只能绑云端文件夹。入口：",
-            {
-              text: "工具箱 · 工作流",
-              link: { kind: "go", to: APP_PATHS.toolbox.workflows.root },
-            },
-            "。日常聊天不需要它——没绑工作流时，CEO 照常即兴组队。",
           ],
         },
       ],

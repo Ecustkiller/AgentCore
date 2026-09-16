@@ -15,8 +15,6 @@ import {
   gitStage,
   gitUnstage,
 } from "@/lib/gitScm";
-import { repoPathToWorkspaceRel } from "@/lib/repoPathToWorkspaceRel";
-import { notifyInfo } from "@/lib/toast";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import type { GitChangeEntry } from "@shared/ipc-contract";
 import {
@@ -267,35 +265,32 @@ function ChangeRow({
     setOpen(true);
     if (diff != null) return;
     setLoadingDiff(true);
-    const text = await gitDiffText(rootId, entry.path, staged);
+    const text = await gitDiffText(rootId, entry.path, staged, subpath);
     setDiff(text ?? "");
     setLoadingDiff(false);
-  }, [open, diff, rootId, entry.path, staged]);
+  }, [open, diff, rootId, entry.path, staged, subpath]);
 
   const onToggleStage = useCallback(async () => {
     setBusy(true);
     const ok = staged
-      ? await gitUnstage(rootId, [entry.path])
-      : await gitStage(rootId, [entry.path]);
+      ? await gitUnstage(rootId, [entry.path], subpath)
+      : await gitStage(rootId, [entry.path], subpath);
     setBusy(false);
     if (ok) onMutated();
-  }, [staged, rootId, entry.path, onMutated]);
+  }, [staged, rootId, entry.path, subpath, onMutated]);
 
   const onDiscard = useCallback(async () => {
     setBusy(true);
-    const ok = await gitDiscard(rootId, entry.path);
+    const ok = await gitDiscard(rootId, entry.path, { cwd: subpath });
     setBusy(false);
     if (ok) onMutated();
-  }, [rootId, entry.path, onMutated]);
+  }, [rootId, entry.path, subpath, onMutated]);
 
   const onDeleteUntracked = useCallback(async () => {
-    const wsRel = repoPathToWorkspaceRel(entry.path, subpath);
-    if (wsRel == null || wsRel === "") {
-      notifyInfo("该文件不在当前工作区内", { description: entry.path });
-      return;
-    }
     setBusy(true);
-    const ok = await deleteUntrackedFiles(rootId, [wsRel]);
+    const ok = await deleteUntrackedFiles(rootId, [entry.path], {
+      containerSubpath: subpath,
+    });
     setBusy(false);
     if (ok) onMutated();
   }, [rootId, entry.path, subpath, onMutated]);
@@ -487,8 +482,8 @@ function ChangeGroupList({
                     onClick={() =>
                       void (
                         staged
-                          ? gitUnstage(rootId, paths)
-                          : gitStage(rootId, paths)
+                          ? gitUnstage(rootId, paths, subpath)
+                          : gitStage(rootId, paths, subpath)
                       ).then((ok) => ok && onMutated())
                     }
                     aria-label={staged ? "取消暂存本组" : "暂存本组"}
@@ -506,6 +501,9 @@ function ChangeGroupList({
                         void gitDiscard(
                           rootId,
                           discardable.map((e) => e.path),
+                          {
+                            cwd: subpath,
+                          },
                         ).then((ok) => ok && onMutated())
                       }
                       aria-label="丢弃本组改动"
@@ -521,12 +519,11 @@ function ChangeGroupList({
                       size="sm"
                       className="h-5 shrink-0 px-1"
                       onClick={() => {
-                        const rels = untracked
-                          .map((e) => repoPathToWorkspaceRel(e.path, subpath))
-                          .filter((p): p is string => p != null && p !== "");
-                        void deleteUntrackedFiles(rootId, rels).then(
-                          (ok) => ok && onMutated(),
-                        );
+                        void deleteUntrackedFiles(
+                          rootId,
+                          untracked.map((e) => e.path),
+                          { containerSubpath: subpath },
+                        ).then((ok) => ok && onMutated());
                       }}
                       aria-label="删除本组未跟踪文件"
                       title="本组未跟踪文件移入回收站"
@@ -567,7 +564,7 @@ export function GitChangesSection({
   rootId: string;
   status: PresentGitRepoStatus;
   onRefresh: () => void;
-  /** Workspace subpath under the container root; git paths stay repo-root relative. */
+  /** 当前文件夹相对授权根；git 在该文件夹跑，路径已是 workspace 相对。trashPath 再前缀。 */
   subpath?: string;
 }) {
   const [message, setMessage] = useState("");
@@ -584,14 +581,9 @@ export function GitChangesSection({
 
   const openRepoFile = useCallback(
     (repoPath: string) => {
-      const wsRel = repoPathToWorkspaceRel(repoPath, subpath);
-      if (wsRel == null) {
-        notifyInfo("该文件不在当前工作区内", { description: repoPath });
-        return;
-      }
-      openFileTab(wsRel, basename(wsRel) || basename(repoPath));
+      openFileTab(repoPath, basename(repoPath));
     },
-    [subpath, openFileTab],
+    [openFileTab],
   );
 
   const hasStaged = status.staged.length > 0;
@@ -617,7 +609,7 @@ export function GitChangesSection({
     const msg = message.trim();
     if (!msg || !hasStaged) return;
     setBusy("commit");
-    const ok = await gitCommit(rootId, msg);
+    const ok = await gitCommit(rootId, msg, subpath);
     setBusy(null);
     if (ok) {
       setMessage("");
@@ -628,21 +620,21 @@ export function GitChangesSection({
 
   const onPush = async () => {
     setBusy("push");
-    const ok = await gitPush(rootId);
+    const ok = await gitPush(rootId, { cwd: subpath });
     setBusy(null);
     if (ok) onRefresh();
   };
 
   const onPull = async () => {
     setBusy("pull");
-    const ok = await gitPull(rootId);
+    const ok = await gitPull(rootId, { cwd: subpath });
     setBusy(null);
     if (ok) onRefresh();
   };
 
   const onFetch = async () => {
     setBusy("fetch");
-    const ok = await gitFetch(rootId);
+    const ok = await gitFetch(rootId, { cwd: subpath });
     setBusy(null);
     if (ok) onRefresh();
   };
@@ -838,7 +830,9 @@ export function GitChangesSection({
               size="sm"
               className="h-6 shrink-0 px-1.5 text-xs"
               onClick={() =>
-                void gitUnstage(rootId).then((ok) => ok && onRefresh())
+                void gitUnstage(rootId, undefined, subpath).then(
+                  (ok) => ok && onRefresh(),
+                )
               }
             >
               全部取消
@@ -893,6 +887,7 @@ export function GitChangesSection({
                   void gitDiscard(
                     rootId,
                     discardableUnstaged.map((e) => e.path),
+                    { cwd: subpath },
                   ).then((ok) => ok && onRefresh())
                 }
                 aria-label="全部丢弃"
@@ -907,7 +902,9 @@ export function GitChangesSection({
               size="sm"
               className="h-6 shrink-0 px-1.5 text-xs"
               onClick={() =>
-                void gitStage(rootId).then((ok) => ok && onRefresh())
+                void gitStage(rootId, undefined, subpath).then(
+                  (ok) => ok && onRefresh(),
+                )
               }
             >
               全部暂存

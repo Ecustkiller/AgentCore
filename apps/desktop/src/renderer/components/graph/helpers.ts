@@ -88,24 +88,17 @@ export function deriveCaptainStatus(
  * CEO 汇聚点下面那两行摘录。
  *
  * 待汇总（工人未齐）：派单正文不是成果，不摘「人已派出 / 还在等」。
- * 有中间草稿才显示草稿；等待条走 statusCaption（face 正文最多两行），
- * preview 留空以免两行打架。
+ * 等待条走 statusCaption；preview 不挂过程稿。
  * 人齐之后仍用派单泡开头（图挂在派单泡上；后台散了不再另开收口泡）。
  */
 export function captainSinkPreview(opts: {
   captainStatus: RunStatus;
   answerPreview?: string | null;
-  synthesisPreview?: string | null;
-  waitCaption?: string | null;
 }): string {
-  const wait = (opts.waitCaption ?? "").trim();
-  const synth = (opts.synthesisPreview ?? "").trim();
-  const answer = (opts.answerPreview ?? "").trim();
   if (opts.captainStatus === "pending") {
-    return wait ? "" : synth;
+    return "";
   }
-  if (answer) return answer;
-  return wait ? "" : synth;
+  return (opts.answerPreview ?? "").trim();
 }
 
 export function deriveArtifacts(

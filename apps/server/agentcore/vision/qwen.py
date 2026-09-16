@@ -6,9 +6,10 @@ message: a ``text`` part (the brief prompt) + an ``image_url`` part whose URL is
 a ``data:image/png;base64,…`` data URL. Mirrors
 :class:`~agentcore.llm.openai_compatible.OpenAICompatibleProvider`'s HTTP shape (Bearer
 auth, ``base_url`` with version prefix, typed status mapping + bounded retry), but stays a
-self-contained one-shot reader — no streaming, no tool calls, no ``LLMRequest`` (which has
-no image content). A fresh ``httpx.AsyncClient`` is opened per call (vision reads are rare),
-so there is no client lifecycle for the pipeline to manage.
+self-contained one-shot reader — no streaming, no tool calls. A fresh
+``httpx.AsyncClient`` is opened per call (vision reads are rare), so there is no
+client lifecycle for the pipeline to manage. Ticketed sidecar points this at the
+cloud inference proxy (``proxy_role=vision``) instead of a vendor key.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from agentcore.core.errors import (
 from agentcore.core.logging import get_logger
 from agentcore.core.net import outbound_async_client
 from agentcore.core.task_cancel import raise_if_task_cancelled
+from agentcore.llm.call_fence import observe_emit
 from agentcore.llm.observability import log_llm_call
 from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.vision.protocol import VisionReading
@@ -70,6 +72,8 @@ class QwenVLReader:
         name: str = "qwen-vl",
         transport: httpx.AsyncBaseTransport | None = None,
         credential_source: str | None = None,
+        extra_headers: dict[str, str] | None = None,
+        proxy_role: str | None = None,
     ) -> None:
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
@@ -80,6 +84,10 @@ class QwenVLReader:
         self._transport = transport
         # Pricing origin for vision_run_cost: BYOK slot → "user", platform → "platform".
         self.credential_source = credential_source
+        self._extra_headers = extra_headers
+        # Sidecar → inference proxy: stamp ``X-AgentCore-Role`` so the cloud expands
+        # the vision slot, not the ambient captain/main model.
+        self._proxy_role = proxy_role
 
     async def read(self, png_base64: str, prompt: str) -> VisionReading:
         """Return Qwen-VL's reading of ``png_base64`` guided by ``prompt``.
@@ -112,6 +120,14 @@ class QwenVLReader:
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
+        if self._extra_headers:
+            headers.update(self._extra_headers)
+        if self._proxy_role:
+            from agentcore.billing.attribution import attribution_headers_from_context
+            from agentcore.llm.credentials import INFERENCE_ROLE_HEADER
+
+            headers.update(attribution_headers_from_context())
+            headers[INFERENCE_ROLE_HEADER] = self._proxy_role
         start = time.monotonic()
         async with outbound_async_client(
             base_url=self._base_url,
@@ -125,11 +141,12 @@ class QwenVLReader:
         choice = (data.get("choices") or [{}])[0]
         text = _content_text(choice.get("message", {}).get("content"))
         usage = _usage_from(data.get("usage", {}))
-        # Observability log only (the dev.jsonl LLM-call trace) — the cost ledger is billed
-        # separately off the returned VisionReading.usage (role=vision orphan).
-        # ``content`` is the reading (safe to log); the request messages carry the base64
-        # image, so they are deliberately NOT passed.
-        log_llm_call(
+        # Observability only (dev.jsonl LLM-call trace). Ledger is billed off
+        # VisionReading.usage (role=vision orphan). Request messages carry the
+        # base64 image, so they are deliberately NOT passed. Same isolation as
+        # the chat fence: a failed emit must not fail a successful read.
+        observe_emit(
+            log_llm_call,
             scenario="vision.read",
             model=data.get("model", self._model),
             usage=usage,
@@ -152,6 +169,8 @@ class QwenVLReader:
             raise LLMInsufficientBalanceError()
         if status_code >= 500:
             raise LLMError(f"{self._name} 服务端错误（{status_code}），请稍后再试")
+        if 400 <= status_code < 500:
+            raise LLMError(f"{self._name} 拒绝读图（{status_code}）")
 
     async def _post_with_retry(self, client: httpx.AsyncClient, payload: dict) -> dict:
         last_error: Exception | None = None

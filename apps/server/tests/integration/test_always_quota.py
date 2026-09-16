@@ -13,6 +13,7 @@ from agentcore.memory.always_quota import (
     memory_write_conversation_id,
 )
 from agentcore.memory.document_store import DocumentMemoryStore
+from agentcore.memory.rules_injection import mutate_user_rule
 from tests.integration.conftest import register_and_login
 
 
@@ -104,8 +105,18 @@ async def test_ai_over_limit_write_rejected(client, session_factory, tiny_always
         user = await UserRepository(session).get_by_username("aq_ai")
         assert user is not None
         store = DocumentMemoryStore(session)
+        # AI cores do not occupy the user-rule pool.
+        await store.save(user.user_id, "画像.md", "---\napply: always\n---\n" + ("a" * 50))
+        repo = DocumentRepository(session)
         with pytest.raises(AlwaysQuotaExceededError):
-            await store.save(user.user_id, "画像.md", "---\napply: always\n---\n" + ("a" * 50))
+            await mutate_user_rule(
+                repo,
+                user.user_id,
+                folder_id=None,
+                action="write",
+                name="新规则.md",
+                content="x" * 20,
+            )
 
 
 async def test_quota_card_same_pending_state_only_once(
@@ -141,13 +152,27 @@ async def test_quota_card_same_pending_state_only_once(
         user = await UserRepository(session).get_by_username("aq_card")
         assert user is not None
         uid = user.user_id
-        store = DocumentMemoryStore(session)
+        repo = DocumentRepository(session)
         token = memory_write_conversation_id.set(conv)
         try:
             with pytest.raises(AlwaysQuotaExceededError):
-                await store.save(uid, "画像.md", "---\napply: always\n---\n" + ("a" * 40))
+                await mutate_user_rule(
+                    repo,
+                    uid,
+                    folder_id=None,
+                    action="write",
+                    name="新规则.md",
+                    content="a" * 40,
+                )
             with pytest.raises(AlwaysQuotaExceededError):
-                await store.save(uid, "画像.md", "---\napply: always\n---\n" + ("b" * 40))
+                await mutate_user_rule(
+                    repo,
+                    uid,
+                    folder_id=None,
+                    action="write",
+                    name="新规则.md",
+                    content="b" * 40,
+                )
         finally:
             memory_write_conversation_id.reset(token)
 
@@ -242,3 +267,44 @@ async def test_always_quota_project_split_sums_to_used(client, tiny_always_cap):
     assert proj_body["project_chars"] == len("PRO")
     assert proj_body["used_chars"] == proj_body["global_chars"] + proj_body["project_chars"]
     assert proj_body["used_chars"] == len("GLO") + len("PRO")
+
+
+async def test_always_quota_ignores_ai_maintained_cores(
+    client, session_factory, tiny_always_cap
+):
+    """AI cores do not occupy the pool and do not expose always_chars."""
+    await register_and_login(client, "aq_ai_core")
+    created = (
+        await client.post(
+            "/v1/documents",
+            json={
+                "name": "一.md",
+                "role": "rule",
+                "apply_mode": "always",
+                "content": "hello",
+            },
+        )
+    ).json()
+    used = (await client.get("/v1/documents/always-quota")).json()["used_chars"]
+    assert used == len("hello")
+    assert created["always_chars"] == len("hello")
+
+    note_id = ""
+    async with session_factory() as session:
+        user = await UserRepository(session).get_by_username("aq_ai_core")
+        assert user is not None
+        store = DocumentMemoryStore(session)
+        await store.save(
+            user.user_id, "画像.md", "---\napply: always\n---\n" + ("a" * 200)
+        )
+        note = await DocumentRepository(session).get_memory_note(
+            user.user_id, "画像.md", None
+        )
+        assert note is not None
+        assert note.ai_maintained is True
+        note_id = note.id
+
+    fetched = (await client.get(f"/v1/documents/{note_id}")).json()
+    assert fetched["always_chars"] is None
+    body = (await client.get("/v1/documents/always-quota")).json()
+    assert body["used_chars"] == used

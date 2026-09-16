@@ -24,7 +24,12 @@ def test_deepseek_preset_is_v41_flash_only():
     assert "deepseek-v4-flash" in preset.hide_from_picker
     assert "deepseek-v4-pro" in preset.hide_from_picker
     assert "deepseek-v4-flash" in hide_from_picker_ids("https://api.deepseek.com")
-    assert hide_from_picker_ids("https://opencode.ai/zen/go/v1") == frozenset()
+    assert hide_from_picker_ids("https://opencode.ai/zen/go/v1") == frozenset(
+        {"deepseek-flash"}
+    )
+    assert hide_from_picker_ids("https://opencode.ai/zen/v1") == frozenset(
+        {"deepseek-flash"}
+    )
     assert hide_from_picker_ids("https://my-proxy.example/v1") == frozenset()
 
 
@@ -89,8 +94,8 @@ def test_opencode_go_preset_defaults_and_seed():
     assert preset is not None
     assert preset.id == "opencode_go"
     assert preset.label == "OpenCode Go"
-    assert preset.default_model == "deepseek-v4-flash"
-    assert preset.models == ("deepseek-v4-flash", "deepseek-v4-pro", "glm-5.2")
+    assert preset.default_model == "deepseek-v4.1-flash"
+    assert preset.models == ("deepseek-v4.1-flash", "deepseek-v4-pro", "glm-5.2")
     # /responses and /messages catalog ids stay off the chat/completions seed.
     assert "grok-4.5" not in preset.models
     assert "gpt-5.6-luna" not in preset.models
@@ -104,7 +109,7 @@ def test_opencode_go_trailing_slash_matches():
     assert preset is not None
     assert preset.id == "opencode_go"
     assert preset_models_for_base_url("https://opencode.ai/zen/go/v1/") == (
-        "deepseek-v4-flash",
+        "deepseek-v4.1-flash",
         "deepseek-v4-pro",
         "glm-5.2",
     )

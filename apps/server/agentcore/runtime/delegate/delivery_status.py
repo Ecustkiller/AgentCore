@@ -1231,7 +1231,7 @@ builder does not I/O. ``delivered_files`` = accepted only;
     blocking = [g for g in gaps if _is_blocking(g)]
     warnings = [g for g in gaps if not _is_blocking(g)]
 
-    # 待用户操作：① 无执行环境 → 按会话 location 诚实分流（已在云≠再导入到云；
+    # 待用户操作：① 无执行环境 → 按会话 location 诚实分流（已在云≠再「先在云上做」；
     #    wire kind 仍可 bind_local_folder；桌面默认同通道，云是选项）；
     # ② 额度 SKIPPED 未跑节点 → 续跑入口。
     # 整页 QA 预算 defer 不再挂一键续派（旧磁带 kind=website_verify 仅兼容）。

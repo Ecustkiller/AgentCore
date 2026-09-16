@@ -20,7 +20,14 @@ import {
   Loader2,
   RotateCcw,
 } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import {
+  type ReactNode,
+  type Ref,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 /**
  * A1 / A1+ 只读「查看改动」——右坞「改动」tab。
@@ -537,6 +544,9 @@ export function TurnFileChangesReview({
   variant = "card",
   heading,
   headingTime,
+  focused = false,
+  sectionRef,
+  onHasChanges,
 }: {
   artifacts: FileArtifact[];
   conversationId?: string | null;
@@ -546,6 +556,10 @@ export function TurnFileChangesReview({
   variant?: "card" | "panel";
   heading?: string;
   headingTime?: string;
+  focused?: boolean;
+  sectionRef?: Ref<HTMLDivElement>;
+  /** 真 diff / 降级产物是否有可展示改动（零差异不进改动时间线）。 */
+  onHasChanges?: (has: boolean) => void;
 }) {
   const ws = useConversationWorkspace(conversationId);
   const isLocal = ws?.location === "local" && !!ws.rootId;
@@ -639,17 +653,36 @@ export function TurnFileChangesReview({
   };
 
   const isPanel = variant === "panel";
+  const emptyTrueDiff =
+    phase === "true" && trueChanges != null && trueChanges.length === 0;
+  const hasVisibleChanges =
+    (phase === "true" && (trueChanges?.length ?? 0) > 0) ||
+    (phase === "fallback" && artifacts.length > 0);
+  const onHasChangesRef = useRef(onHasChanges);
+  onHasChangesRef.current = onHasChanges;
+  useEffect(() => {
+    if (phase === "loading") return;
+    onHasChangesRef.current?.(hasVisibleChanges);
+  }, [phase, hasVisibleChanges]);
+
   const emptyFallback =
     artifacts.length === 0 && phase !== "true" && phase !== "loading";
-  if (emptyFallback && !isPanel) {
+  if (emptyTrueDiff) {
+    return null;
+  }
+  if (isPanel && artifacts.length === 0 && phase === "loading") {
+    return null;
+  }
+  if (emptyFallback) {
     return null;
   }
 
   const showRestore =
-    phase === "true" && !!baselineSnapshotId && !!conversationId;
+    phase === "true" &&
+    !!baselineSnapshotId &&
+    !!conversationId &&
+    (trueChanges?.length ?? 0) > 0;
   const showCounts = phase === "true" && counts != null;
-  const emptyTrueDiff =
-    phase === "true" && trueChanges != null && trueChanges.length === 0;
   const fileRows =
     phase === "true" && trueChanges && trueChanges.length > 0 ? (
       trueChanges.map((c) => (
@@ -665,21 +698,20 @@ export function TurnFileChangesReview({
     ) : phase === "fallback" && artifacts.length > 0 ? (
       <ToolArgFallback artifacts={artifacts} />
     ) : null;
-  const body =
-    fileRows ??
-    (emptyTrueDiff ? (
-      <p className="text-xs text-muted-foreground">相对基线无文件差异</p>
-    ) : isPanel && emptyFallback ? (
-      <p className="text-xs text-muted-foreground">暂无改动</p>
-    ) : null);
+  const body = fileRows;
   const showChrome =
     isPanel || phase === "loading" || showCounts || showRestore;
 
   return (
     <div
+      ref={isPanel ? sectionRef : undefined}
+      data-testid={isPanel ? "changes-timeline-entry" : undefined}
+      data-entry-kind={isPanel ? "turn" : undefined}
       className={
         isPanel
-          ? undefined
+          ? `rounded-xl border border-border bg-card ${
+              focused ? "ring-1 ring-primary/40" : ""
+            }`
           : "space-y-3 border-t border-border bg-muted/20 px-3 py-2.5"
       }
     >

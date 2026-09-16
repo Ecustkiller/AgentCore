@@ -613,6 +613,15 @@ def test_debate_stance_schema_has_max_length():
     assert stance_schema.get("maxLength") == STANCE_MAX_CHARS
 
 
+def test_debate_schema_omits_form_and_is_subject():
+    from agentcore.tools.builtin.debate.schema import DEBATE_PARAMETERS
+
+    props = DEBATE_PARAMETERS["properties"]
+    assert "form" not in props
+    assert "form" not in DEBATE_PARAMETERS["required"]
+    assert "is_subject" not in props["sides"]["items"]["properties"]
+
+
 def test_parse_sides_accepts_thin_stance():
     """薄立场合规：一句结论倾向、未超硬上限 → 通过。"""
     from agentcore.tools.builtin.debate.schema import STANCE_MAX_CHARS, parse_sides
@@ -760,21 +769,38 @@ async def test_rejects_thick_stance_at_tool_boundary():
     assert "请改写" in (result.error or "")
 
 
-async def test_red_team_form_injects_subject_and_attacker_roles():
+def test_parse_sides_ignores_is_subject():
+    from agentcore.tools.builtin.debate.schema import parse_sides
+
+    sides, err = parse_sides(
+        [
+            {"key": "pro", "name": "正方", "stance": "支持一审判决正确", "is_subject": True},
+            {"key": "con", "name": "反方", "stance": "认为判赔过重"},
+        ]
+    )
+    assert err == ""
+    assert len(sides) == 2
+    assert all(s.is_subject is False for s in sides)
+
+
+async def test_debate_ignores_unadvertised_form_and_is_subject():
+    sink = EventSink()
     llm = _DebateLLM(converge_at=1)
-    tool = _tool(llm)
+    tool = _tool(llm, sink=sink)
     sides = [
-        {"key": "plan", "name": "方案方", "stance": "方案 A 可行", "is_subject": True},
-        {"key": "red", "name": "红队", "stance": "找出方案漏洞"},
+        {"key": "plan", "name": "甲方", "stance": "方案 A 可行", "is_subject": True},
+        {"key": "red", "name": "乙方", "stance": "找出方案漏洞"},
     ]
     result = await tool.execute(
-        {"motion": "压力测试方案 A", "form": "red_team", "sides": sides, "thorough": False}, _ctx()
+        {"motion": "压力测试方案 A", "form": "red_team", "sides": sides, "thorough": False},
+        _ctx(),
     )
     assert result.success is True
-    # 红队形态的差异化角色指引注入了辩手 prompt（system_prompt_supplement + task）
     joined = "\n".join(m.content for req in llm.stream_requests for m in req.messages)
-    assert "红队" in joined
-    assert "被审" in joined or "方案方" in joined
+    assert "被审" not in joined
+    sink.close()
+    events = [e async for e in sink if e.type == EventType.DEBATE_RESULT]
+    assert events[0].payload["form"] == "debate"
 
 
 def test_round_feedback_demands_new_args_and_no_self_restate():

@@ -1,11 +1,12 @@
 import { Button, EmptyHint, Select } from "@/components/ui";
 import { notifyError } from "@/lib/toast";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { CalendarBoard } from "./CalendarBoard";
 import { GalleryBoard } from "./GalleryBoard";
 import { KanbanBoard } from "./KanbanBoard";
 import { TableGrid } from "./TableGrid";
 import { TableToolbar } from "./TableToolbar";
+import { downloadCsv } from "./csv";
 import { DISPLAY_MODE_LABELS } from "./fieldMeta";
 import {
   candidateColumnsForMode,
@@ -18,13 +19,7 @@ import {
 import { activeViewOf, useTablesStore } from "./store";
 import type { ColumnDef, DisplayMode, TableDoc, TableRow } from "./types";
 
-export function TableEditor({
-  table,
-  onSelectionChange,
-}: {
-  table: TableDoc;
-  onSelectionChange?: (rowIds: string[]) => void;
-}) {
+export function TableEditor({ table }: { table: TableDoc }) {
   const addRow = useTablesStore((s) => s.addRow);
   const addColumn = useTablesStore((s) => s.addColumn);
   const updateColumn = useTablesStore((s) => s.updateColumn);
@@ -41,10 +36,6 @@ export function TableEditor({
   const view = activeViewOf(table);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    onSelectionChange?.([...selected]);
-  }, [onSelectionChange, selected]);
 
   const queried = useMemo(() => {
     const rows = queryRows(table.rows, table.columns, view.config);
@@ -85,6 +76,7 @@ export function TableEditor({
       rows={rows}
       density={view.config.density}
       selectedIds={selected}
+      columnWidths={view.config.columnWidths}
       onToggleRow={toggleRow}
       onToggleAll={() => {
         setSelected((prev) =>
@@ -111,6 +103,16 @@ export function TableEditor({
       onRemoveColumn={(columnId) => removeColumn(table.id, columnId)}
       onSort={(columnId, dir) =>
         patchView(table.id, view.id, { sort: { columnId, dir } })
+      }
+      onColumnWidth={(columnId, width) =>
+        patchView(table.id, view.id, {
+          columnWidths: { ...view.config.columnWidths, [columnId]: width },
+        })
+      }
+      onAddColumn={
+        opts?.showAddRow === false
+          ? undefined
+          : () => addColumn(table.id, "未命名", "text")
       }
       fill={opts?.fill ?? true}
       showAddRow={opts?.showAddRow ?? true}
@@ -239,6 +241,13 @@ export function TableEditor({
         }}
         onBatchFill={(columnId, value) => {
           for (const id of selected) updateCell(table.id, id, columnId, value);
+        }}
+        onExport={() => {
+          try {
+            downloadCsv(table);
+          } catch (err) {
+            notifyError(err, "导出失败");
+          }
         }}
       />
       <div className="relative min-h-0 flex-1">{body}</div>

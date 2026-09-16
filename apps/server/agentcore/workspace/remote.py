@@ -12,7 +12,6 @@ This backend speaks the existing ``/v1/workspaces/{ws_id}/files`` family with a
 
 from __future__ import annotations
 
-import builtins
 import contextlib
 import fnmatch
 import os
@@ -41,6 +40,8 @@ from agentcore.workspace.protocol import (
     CodeSearchResult,
     DirEntry,
     DirListing,
+    GlobFilesQuery,
+    GlobFilesResult,
     GrepHit,
     GrepQuery,
     GrepResult,
@@ -360,6 +361,24 @@ class RemoteCloudWorkspace:
                 break
         return TreeResult(entries=out, truncated=truncated, elided_count=0)
 
+    async def glob_files(self, query: GlobFilesQuery) -> GlobFilesResult:
+        name = "*"
+        if query.globs:
+            name = query.globs[0].replace("\\", "/").rsplit("/", 1)[-1] or "*"
+        depth = 8 if query.max_depth is None else max(query.max_depth, 0) + 1
+        tree = await self.list_tree(
+            query.directory,
+            pattern=name,
+            max_depth=max(1, depth),
+            max_entries=query.max_entries,
+        )
+        paths = [e.path for e in tree.entries if not e.is_dir]
+        return GlobFilesResult(
+            paths=paths,
+            truncated=tree.truncated,
+            warnings=list(tree.warnings),
+        )
+
     async def index_files(
         self, cap: int | None = None, *, order: str = "path"
     ) -> IndexFilesResult:
@@ -483,10 +502,6 @@ class RemoteCloudWorkspace:
 
     def start_code_index_maintenance(self) -> None:
         return None
-
-    async def diagnostics(self, paths: builtins.list[str]) -> dict[str, Any]:
-        del paths
-        return {"status": "unavailable", "reason": "cloud_desk", "diagnostics": []}
 
     async def execute(self, req: ExecutionRequest) -> ExecutionResult:
         del req

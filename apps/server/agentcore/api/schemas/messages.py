@@ -1150,9 +1150,10 @@ class RecordTurnRequest(BaseModel):
     citations / replay ``runs`` / the pipeline ``message_id`` so streamed and stored
     ids agree). The FULL token snapshot rides on ``Message.usage`` (input / output /
     reasoning / cache hit / cache miss + rounds) so a reloaded sidecar turn's meta row
-    matches a cloud turn's. Spend is NOT sent: a sidecar turn's LLM calls are metered
-    authoritatively at the cloud inference proxy (``/v1/inference``, Slice 4a), so this
-    write-back persists content only.
+    matches a cloud turn's. ``duration_ms`` is the whole-turn product-AI wall clock
+    (same number as live ``message_end``); older clients omit it. Spend is NOT sent: a
+    sidecar turn's LLM calls are metered authoritatively at the cloud inference proxy
+    (``/v1/inference``, Slice 4a), so this write-back persists content only.
 
     ``user_message`` may be empty for process-only salvage (journal/runs): the server
     must not insert a visible user row when there is no real user intent.
@@ -1191,6 +1192,9 @@ class RecordTurnRequest(BaseModel):
     cache_hit_tokens: int = Field(0, ge=0)
     cache_miss_tokens: int = Field(0, ge=0)
     rounds: int = Field(0, ge=0)
+    # Whole-turn product-AI wall clock (ms). Same number as live ``message_end``.
+    # Optional so older desktops still write back; omitted → usage has no duration.
+    duration_ms: int | None = Field(None, ge=0)
     # The local turn's trace_id (32-hex), stamped by the desktop on every cloud
     # inference-proxy LLM call this turn made. Reusing it for the persisted reply joins
     # the reasoning logs + the bubble under ONE trace (打通气泡↔日志).
@@ -1205,6 +1209,9 @@ class RecordTurnRequest(BaseModel):
     harvest_kind: str | None = Field(None, max_length=32)
     # Soft @Agent chips on the local user bubble (optional; old clients omit).
     agent_mentions: list[AgentMention] = Field(default_factory=list, max_length=10)
+    # Display chips when finalize inserts a missing local user row (optional;
+    # old clients omit). Existing occupy-written rows are not updated.
+    attachments: list[StoredAttachment] = Field(default_factory=list, max_length=20)
 
 
 class RecordTurnResponse(BaseModel):

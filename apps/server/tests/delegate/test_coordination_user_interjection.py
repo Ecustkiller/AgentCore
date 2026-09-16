@@ -436,69 +436,6 @@ async def test_note_interjections_injected_emits_injected_status():
     assert last.payload["status"] == "injected"
 
 
-@pytest.mark.asyncio
-async def test_update_synthesis_addresses_awaiting_interjection():
-    from agentcore.runtime.coordination.interjections import (
-        address_interjections_after_ceo_tools,
-        note_interjections_injected,
-    )
-    from agentcore.runtime.coordination.tools import UpdateSynthesisTool
-    from agentcore.runtime.loop_controller.types import ToolAttempt
-
-    session = CoordinationSession(
-        execution_id="exec-inj",
-        total_workers=2,
-        conversation_id="conv-inj",
-    )
-    set_active_coordination(session)
-    session.stash_interjection(
-        "inj-rel",
-        {
-            "content": "请点明成本",
-            "user_id": "u1",
-            "conversation_id": "conv-inj",
-            "attachments": [],
-            "requires_tools": False,
-        },
-    )
-    await note_interjections_injected(
-        session,
-        [
-            CoordinationEvent(
-                kind=CoordinationEventKind.USER_INTERJECTION,
-                payload={"interjection_id": "inj-rel", "content": "请点明成本"},
-            )
-        ],
-    )
-    sink = EventSink()
-    tool = UpdateSynthesisTool(sink=sink)
-    ctx = ToolContext.create(
-        execution_id="exec-inj",
-        run_id="ceo",
-        agent_id="ceo",
-        backend=MagicMock(),
-        user_id="u1",
-        conversation_id="conv-inj",
-    )
-    result = await tool.execute({"draft": "已收到：成品会点明成本。"}, ctx)
-    # 标记在编排汇合点（execute_tools）统一做；单测直接调工具后补汇合点。
-    address_interjections_after_ceo_tools(
-        role="captain",
-        attempts=[
-            ToolAttempt(
-                fingerprint="us",
-                tool_name="update_synthesis",
-                success=True,
-            )
-        ],
-        sink=sink,
-    )
-    assert result.success is True
-    assert session.get_interjection("inj-rel") is None
-    last = next(e for e in reversed(list(sink._history)) if e.type.value == "user_interjection")
-    assert last.payload["status"] == "addressed"
-
-
 async def _awaiting_session(iid: str, content: str) -> tuple[CoordinationSession, EventSink]:
     from agentcore.runtime.coordination.interjections import note_interjections_injected
 

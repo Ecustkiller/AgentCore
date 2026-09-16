@@ -13,7 +13,7 @@ from agentcore.runtime.delegate.task_models import TASK_MODEL_SCHEMA_PROPS
 from agentcore.runtime.runs.constants import MAX_DELEGATION_TASKS, MAX_GAP_FILL_ADDS
 from agentcore.runtime.runs.playbooks import PLAYBOOKS, playbook_args_schema_description
 
-# Shared task-level deliverable shape (delegate tasks + replan binds/add).
+# Shared task-level deliverable shape (delegate tasks + replan add).
 # CEO / replan fill-in: optional artifact paths only. Write-vs-chat is task
 # acceptance + the model; the engine only recognizes pinned paths.
 # Playbook-internal knobs still parse in builder; they are not on this schema.
@@ -41,9 +41,7 @@ DELEGATE_WHEN = (
 DELEGATE_DESCRIPTION = (
     f"拆任务给临时团队（默认手写顶层 tasks：role+task，≤{MAX_DELEGATION_TASKS}；非终结）。"
     f"默认用本工具：{DELEGATE_WHEN}"
-    "你的窗跟会话走"
-    "（成篇落盘、可运行应用、成规模查证、要并行；"
-    "闲聊、一问一答、短文或小落盘、纯启服）。"
+    "你的窗跟会话走。"
     "HOW→consult(staffing)。"
 )
 

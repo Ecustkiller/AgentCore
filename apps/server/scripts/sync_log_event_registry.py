@@ -512,6 +512,10 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "stream": "bool",
         "cost_nano": "int",
         "platform_credential_id": "str",
+        "prefix_breach": "str",
+        "prefix_breach_section": "str",
+        "tools_changed": "bool",
+        "tools_count": "int",
     },
     "llm.request": {"scenario": "str", "model": "str"},
     "llm.response": {"scenario": "str", "model": "str"},
@@ -522,6 +526,11 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "credential_source": "str",
         "provider_id": "str",
         "platform_credential_id": "str",
+    },
+    "llm.observation_failed": {
+        "hook": "str",
+        "error_type": "str",
+        "error": "str",
     },
     "llm.stream_stalled": {
         "model": "str",
@@ -568,6 +577,8 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "prompt_chars": "int",
         "stable_prefix_chars": "int",
         "chain_calls": "int",
+        "tools_changed": "bool",
+        "tools_count": "int",
     },
     "cost.ledger_write_failed": {"error": "str"},
     "cost.ledger_drain_before_reconcile_failed": {},
@@ -976,6 +987,12 @@ HISTORICAL_COMPAT: dict[str, str] = {
     "coordination.idle_yield_to_captain": (
         "历史兼容：曾在有在飞工作时 idle-yield 回 CEO；现改为 held_inflight"
     ),
+    "coordination.synthesis_updated": (
+        "历史兼容：曾在 CEO 写队长节点过程稿时发出；两支写笔已收，不再发此事件"
+    ),
+    "delegate.team_synthesis_preview_failed": (
+        "历史兼容：曾在引擎旁路拼团队进展预览失败时发出；预览通道已收，不再发此事件"
+    ),
     "team_preview.list_pending_failed": (
         "历史兼容：曾在列出待处理开工卡失败时发出；开工卡产品位已拆，不再发此事件"
     ),
@@ -1202,8 +1219,9 @@ KEY_DESC: dict[str, str] = {
         "has_delivered_files / gap_reasons（不记正文；不回炉不 reset）"
     ),
     "engine.llm_round_exception": (
-        "ReAct 一轮 stream 在引擎侧抛了异常（叶子 fence 的 llm.call_failed 可能缺席："
-        "流已成功计量后消费者再崩）。error_type=异常类名；classified=false 表示未纳入 "
+        "ReAct 一轮 stream 在引擎侧抛了异常。叶子 fence 观测失败不得改写 inner 成败"
+        "（见 llm.observation_failed）；若仍缺 llm.call_failed，是引擎在收齐 chunk "
+        "之后崩了，不是观测通道。error_type=异常类名；classified=false 表示未纳入 "
         "AgentCoreError、用户面走兜底「出了点问题」；origin=stream_round；"
         "error 为截断异常字面（无正文）。未分类带 traceback（exc_info）"
     ),
@@ -1212,11 +1230,17 @@ KEY_DESC: dict[str, str] = {
         "origin=stream_round（round 异常）/ stream_aborted（流中断 salvage）；"
         "error_type / classified / error 与 engine.llm_round_exception 对齐（中断无 type）"
     ),
-    "llm.call": "单次 LLM 调用（latency/tokens/cost_nano；平台代付可带 platform_credential_id）",
+    "llm.call": (
+        "单次 LLM 调用（latency/tokens/cost；prefix_breach 为前缀缓存归因，白付不进本行）"
+    ),
     "llm.request": "LLM prompt 截断脱敏（需 LOG_LLM_BODIES）",
     "llm.response": "LLM 回复截断脱敏（需 LOG_LLM_BODIES）",
     "llm.call_failed": (
         "LLM 调用失败（model/credential_source；可取则带 provider_id / platform_credential_id）"
+    ),
+    "llm.observation_failed": (
+        "叶子旁路观测抛错（log_llm_call / log_llm_call_failed；chat fence 与 "
+        "vision.read 同一 observe_emit）；已吞掉，不改写 inner 成败。hook=被调函数名"
     ),
     "llm.stream_stalled": (
         "LLM 流式空闲超时（model/credential_source；可取则带 provider_id / "
@@ -1234,8 +1258,8 @@ KEY_DESC: dict[str, str] = {
     ),
     "cost.prefix_cache": (
         "前缀缓存实测（hit_ratio 命中率 + breach/breach_section 击穿归因 + "
-        "reusable/forfeited；cache_reported=false 表示上游没报缓存，不等于 0% 命中）"
-        "；debug 级：默认 LOG_LEVEL=info 查不到，要留行须 LOG_LEVEL=DEBUG"
+        "reusable/forfeited + tools_changed；cache_reported=false 表示上游没报缓存，"
+        "不等于 0% 命中）；debug 级：默认 info 查不到，生产看 llm.call 的 prefix_breach"
     ),
     "pipeline.error": "回合管线未捕获异常",
     "http.unhandled_error": "HTTP 层未捕获异常",

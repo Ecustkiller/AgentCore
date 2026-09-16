@@ -27,12 +27,6 @@ import {
   listSkillStoreReports,
   takedownSkillStoreListing,
 } from "@/services/adminSkillStore";
-import {
-  getWorkflowStoreListing,
-  listWorkflowStoreListings,
-  listWorkflowStoreReports,
-  takedownWorkflowStoreListing,
-} from "@/services/adminWorkflowStore";
 import { Eye, Flag, RefreshCw, Store, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -63,10 +57,6 @@ const STATUS_FILTERS: SelectOption[] = STATUS_FILTER_VALUES.map((value) => ({
 
 const LISTING_FILTERS = { status: oneOf(STATUS_FILTER_VALUES, "all") };
 
-const KIND_VALUES = ["skills", "workflows"] as const satisfies readonly string[];
-type StoreKind = (typeof KIND_VALUES)[number];
-const KIND_FILTERS = { kind: oneOf(KIND_VALUES, "skills") };
-
 function asStatus(raw: string): SkillStoreListingStatus {
   if (raw === "published" || raw === "unpublished" || raw === "taken_down") {
     return raw;
@@ -89,9 +79,7 @@ export function SkillStorePage() {
   const [listingsTotal, setListingsTotal] = useState(0);
   const [page, setPage] = useAdminListPage();
   const { values, set, reset } = useUrlFilters(LISTING_FILTERS);
-  const { values: kindValues, set: setKind } = useUrlFilters(KIND_FILTERS);
   const statusFilter = values.status;
-  const kind = kindValues.kind;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -114,36 +102,17 @@ export function SkillStorePage() {
     setLoading(true);
     setError(null);
     try {
-      const [reportsRes, listingsRes] =
-        kind === "workflows"
-          ? await Promise.all([
-              listWorkflowStoreReports(
-                { page, pageSize: PAGE_SIZE },
-                ac.signal,
-              ),
-              listWorkflowStoreListings(
-                {
-                  status: statusFilter === "all" ? undefined : statusFilter,
-                  page: 1,
-                  pageSize: PAGE_SIZE,
-                },
-                ac.signal,
-              ),
-            ])
-          : await Promise.all([
-              listSkillStoreReports(
-                { page, pageSize: PAGE_SIZE },
-                ac.signal,
-              ),
-              listSkillStoreListings(
-                {
-                  status: statusFilter === "all" ? undefined : statusFilter,
-                  page: 1,
-                  pageSize: PAGE_SIZE,
-                },
-                ac.signal,
-              ),
-            ]);
+      const [reportsRes, listingsRes] = await Promise.all([
+        listSkillStoreReports({ page, pageSize: PAGE_SIZE }, ac.signal),
+        listSkillStoreListings(
+          {
+            status: statusFilter === "all" ? undefined : statusFilter,
+            page: 1,
+            pageSize: PAGE_SIZE,
+          },
+          ac.signal,
+        ),
+      ]);
       if (ac.signal.aborted || gen !== loadGenRef.current) return;
       setReports(reportsRes.data);
       setReportsTotal(reportsRes.total);
@@ -157,7 +126,7 @@ export function SkillStorePage() {
         setLoading(false);
       }
     }
-  }, [page, statusFilter, kind]);
+  }, [page, statusFilter]);
 
   useEffect(() => {
     void load();
@@ -187,10 +156,7 @@ export function SkillStorePage() {
     if (busyId) return;
     setBusyId(listing.id);
     try {
-      const updated =
-        kind === "workflows"
-          ? await takedownWorkflowStoreListing(listing.id)
-          : await takedownSkillStoreListing(listing.id);
+      const updated = await takedownSkillStoreListing(listing.id);
       applyTakenDown(updated);
       toast.success("已从货架下架");
       if (statusFilter === "published") void load();
@@ -206,21 +172,12 @@ export function SkillStorePage() {
     if (busyId || previewBusy) return;
     setPreviewBusy(true);
     try {
-      if (kind === "workflows") {
-        const row = await getWorkflowStoreListing(listingId);
-        setPreview({
-          name: row.name,
-          description: row.description,
-          body: JSON.stringify(row.definition, null, 2),
-        });
-      } else {
-        const row = await getSkillStoreListing(listingId);
-        setPreview({
-          name: row.name,
-          description: row.description,
-          body: row.content,
-        });
-      }
+      const row = await getSkillStoreListing(listingId);
+      setPreview({
+        name: row.name,
+        description: row.description,
+        body: row.content,
+      });
     } catch (err) {
       toast.error(errorMessage(err));
     } finally {
@@ -257,7 +214,6 @@ export function SkillStorePage() {
         actions={
           <>
             <OpsTabs />
-            <KindToggle value={kind} onChange={(next) => setKind({ kind: next })} />
             <Button
               variant="outline"
               size="sm"
@@ -364,7 +320,7 @@ export function SkillStorePage() {
                               onClick={() => void openPreview(listing.id)}
                             >
                               {previewBusy ? <Spinner /> : <Eye size={14} />}
-                              {kind === "workflows" ? "看定义" : "看正文"}
+                              看正文
                             </Button>
                             {status !== "taken_down" && (
                               <Button
@@ -471,7 +427,7 @@ export function SkillStorePage() {
                               onClick={() => void openPreview(row.id)}
                             >
                               {previewBusy ? <Spinner /> : <Eye size={14} />}
-                              {kind === "workflows" ? "看定义" : "看正文"}
+                              看正文
                             </Button>
                             {status !== "taken_down" && (
                               <Button
@@ -509,43 +465,6 @@ export function SkillStorePage() {
         <BodyDialog listing={preview} onClose={() => setPreview(null)} />
       )}
     </Page>
-  );
-}
-
-function KindToggle({
-  value,
-  onChange,
-}: {
-  value: StoreKind;
-  onChange: (s: StoreKind) => void;
-}) {
-  const items: { id: StoreKind; label: string }[] = [
-    { id: "skills", label: "提示词" },
-    { id: "workflows", label: "工作流" },
-  ];
-  return (
-    <div
-      className="inline-flex items-center rounded-lg border border-border p-0.5"
-      role="group"
-      aria-label="货架种类"
-    >
-      {items.map((it) => (
-        <button
-          key={it.id}
-          type="button"
-          aria-pressed={value === it.id}
-          onClick={() => onChange(it.id)}
-          className={cn(
-            "h-7 rounded-lg px-3 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-            value === it.id
-              ? "bg-accent text-accent-foreground"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {it.label}
-        </button>
-      ))}
-    </div>
   );
 }
 

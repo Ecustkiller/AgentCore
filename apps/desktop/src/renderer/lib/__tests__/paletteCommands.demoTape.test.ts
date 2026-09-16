@@ -170,14 +170,11 @@ describe("paletteCommands · 前往发现性", () => {
     expect(commandMatches(guidelines, "官方")).toBe(true);
   });
 
-  it("不再有自动化 / 收件箱命令", () => {
+  it("不再有自动化 / 收件箱 / 工作流命令", () => {
     const cmds = buildPaletteCommands(baseCtx);
     expect(cmds.find((c) => c.id === "nav-automations")).toBeUndefined();
     expect(cmds.find((c) => c.id === "nav-automations-inbox")).toBeUndefined();
-    const workflows = cmds.find((c) => c.id === "nav-workflows");
-    expect(workflows).toBeTruthy();
-    workflows?.run();
-    expect(baseCtx.navigate).toHaveBeenCalledWith("/toolbox/mine/workflows");
+    expect(cmds.find((c) => c.id === "nav-workflows")).toBeUndefined();
   });
 });
 
@@ -218,7 +215,6 @@ describe("paletteCommands · 区外只读授权", () => {
     vi.mocked(hasLocalFiles).mockReturnValue(false);
     const cmds = buildPaletteCommands(baseCtx);
     expect(cmds.some((c) => c.id === "grant-readonly-folder")).toBe(false);
-    expect(cmds.some((c) => c.id === "import-to-cloud")).toBe(false);
     expect(cmds.some((c) => c.id === "borrow-to-cloud")).toBe(false);
     expect(cmds.some((c) => c.id === "connect-git")).toBe(false);
     expect(cmds.some((c) => c.id === "open-local-project")).toBe(false);
@@ -242,7 +238,7 @@ describe("paletteCommands · 区外只读授权", () => {
     );
   });
 
-  it("injects connect-git, import-to-cloud, and 打开本机文件夹 on desktop FS", async () => {
+  it("injects connect-git, borrow-to-cloud, and 打开本机文件夹 on desktop FS", async () => {
     const { hasLocalFiles } = await import("../capabilities");
     const { useFoldersStore } = await import("@/stores/folders");
     const { pickAndOpenLocalFolder } = await import("@/lib/openLocalFolder");
@@ -252,10 +248,6 @@ describe("paletteCommands · 区外只读授权", () => {
     const openConnectGit = vi.spyOn(
       useFoldersStore.getState(),
       "openConnectGit",
-    );
-    const openImportToCloud = vi.spyOn(
-      useFoldersStore.getState(),
-      "openImportToCloud",
     );
     const openBorrowToCloud = vi.spyOn(
       useFoldersStore.getState(),
@@ -274,14 +266,6 @@ describe("paletteCommands · 区外只读授权", () => {
     connectCmd.run();
     expect(openConnectGit).toHaveBeenCalled();
     expect(setComposerChannelPreference).toHaveBeenCalledWith("cloud");
-
-    const importCmd = cmds.find((c) => c.id === "import-to-cloud");
-    expect(importCmd?.title).toBe("导入本机文件夹到「我的文件」");
-    expect(importCmd?.hint).toContain("推荐");
-    if (!importCmd) return;
-    expect(commandMatches(importCmd, "daoru")).toBe(true);
-    importCmd.run();
-    expect(openImportToCloud).toHaveBeenCalled();
 
     const borrowCmd = cmds.find((c) => c.id === "borrow-to-cloud");
     expect(borrowCmd?.title).toBe("云上做完再写入");

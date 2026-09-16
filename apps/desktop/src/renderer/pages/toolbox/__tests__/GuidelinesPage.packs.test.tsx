@@ -369,18 +369,11 @@ describe("GuidelinesPage 提示词阅读器", () => {
     expect(screen.getByTestId("prompt-rail-official")).toBeTruthy();
     expect(within(dialog).getByText("官方")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "关闭" }));
-    expect(screen.getByText("偏好")).toBeTruthy();
-    expect(screen.getByText("画像")).toBeTruthy();
+    expect(screen.queryByText("偏好")).toBeNull();
+    expect(screen.queryByText("画像")).toBeNull();
+    expect(screen.queryByText("AI 可能改")).toBeNull();
+    expect(screen.queryByTestId("account-entry-editor")).toBeNull();
     expect(screen.getByText("派单进阶", { exact: false })).toBeTruthy();
-
-    fireEvent.click(screen.getByText("偏好"));
-    const mine = await screen.findByRole("dialog");
-    expect(within(mine).getByText("我的")).toBeTruthy();
-    expect(await screen.findByTestId("account-entry-editor")).toBeTruthy();
-    expect(screen.getByText("AI 可能改")).toBeTruthy();
-    expect(
-      within(screen.getByTestId("account-entry-editor")).queryByText("常驻"),
-    ).toBeNull();
     expect(screen.queryByRole("tablist", { name: "加载方式" })).toBeNull();
     expect(screen.queryByRole("button", { name: "上架" })).toBeNull();
   });

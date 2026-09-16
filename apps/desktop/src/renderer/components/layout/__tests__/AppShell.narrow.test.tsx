@@ -88,9 +88,6 @@ vi.mock("@/components/conversation/ShareConversationDialog", () => ({
 vi.mock("@/components/files/CloneRepoDialog", () => ({
   ConnectGitDialogHost: () => null,
 }));
-vi.mock("@/components/files/ImportToCloudDialog", () => ({
-  ImportToCloudDialogHost: () => null,
-}));
 vi.mock("@/components/files/BorrowToCloudDialog", () => ({
   BorrowToCloudDialogHost: () => null,
 }));

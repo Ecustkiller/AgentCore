@@ -1205,7 +1205,7 @@ async def test_verify_policy_inner_refuses_typecheck(monkeypatch: pytest.MonkeyP
     assert result.success is False
     assert result.contract_failure is True
     assert (result.metadata or {}).get("code") == "verify_policy_inner"
-    assert "code_diagnostics" in (result.error or "")
+    assert "browser" in (result.error or "")
     assert "执行 run" in (result.error or "")
     assert "test_run" not in (result.error or "")
     assert backend.requests == []
@@ -1224,12 +1224,6 @@ def test_apply_verify_policies_does_not_guess_from_role_names():
     assert review.verify_policy == ""
     assert accept.verify_policy == ""
     assert explicit.verify_policy == "outer"
-
-
-def test_verify_inner_discipline_prompt_is_gone():
-    import agentcore.runtime.runs.worker_budget as wb
-
-    assert not hasattr(wb, "VERIFY_INNER_DISCIPLINE")
 
 
 async def test_build_whitelist_unaffected_by_install_rules(

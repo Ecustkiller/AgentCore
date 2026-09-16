@@ -52,7 +52,7 @@ def test_opening_turn_without_execution_is_decision():
         LLMMessage(role="user", content="做个网站"),
         _assistant_tool("consult", {"name": "ask_kickoff"}, call_id="cs"),
         LLMMessage(role="tool", content="skill body", tool_call_id="cs"),
-        _assistant_tool("ask_user", {"message": "短澄清"}, call_id="ask"),
+        _assistant_tool("ask_user", {"questions": [{"prompt": "短澄清"}]}, call_id="ask"),
     ]
     assert resolve_ask_checkpoint_intent(transcript) == "decision"
 
@@ -62,7 +62,7 @@ def test_midtask_skill_consult_is_decision():
         LLMMessage(role="user", content="继续"),
         _assistant_tool("consult", {"name": "ask_kickoff"}, call_id="cs"),
         LLMMessage(role="tool", content="skill body", tool_call_id="cs"),
-        _assistant_tool("ask_user", {"message": "选 A 还是 B"}, call_id="ask"),
+        _assistant_tool("ask_user", {"questions": [{"prompt": "选 A 还是 B"}]}, call_id="ask"),
     ]
     assert resolve_ask_checkpoint_intent(transcript) == "decision"
 
@@ -72,7 +72,7 @@ def test_prior_delegate_makes_decision_even_without_skill():
         LLMMessage(role="user", content="写报告"),
         _assistant_tool("delegate", {"plan": {}}, call_id="del"),
         LLMMessage(role="tool", content="done", tool_call_id="del"),
-        _assistant_tool("ask_user", {"message": "终稿提交？"}, call_id="ask"),
+        _assistant_tool("ask_user", {"questions": [{"prompt": "终稿提交？"}]}, call_id="ask"),
     ]
     assert resolve_ask_checkpoint_intent(transcript) == "decision"
 
@@ -80,8 +80,8 @@ def test_prior_delegate_makes_decision_even_without_skill():
 def test_second_ask_in_turn_is_decision():
     transcript = [
         LLMMessage(role="user", content="做个 App"),
-        _assistant_tool("ask_user", {"message": "短问1"}, call_id="ask1"),
+        _assistant_tool("ask_user", {"questions": [{"prompt": "短问1"}]}, call_id="ask1"),
         LLMMessage(role="tool", content="continue", tool_call_id="ask1"),
-        _assistant_tool("ask_user", {"message": "途中岔路"}, call_id="ask2"),
+        _assistant_tool("ask_user", {"questions": [{"prompt": "途中岔路"}]}, call_id="ask2"),
     ]
     assert resolve_ask_checkpoint_intent(transcript) == "decision"

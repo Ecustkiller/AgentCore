@@ -10,7 +10,7 @@ the live path would persist:
 3. Soft-stop / process restart would clear the in-process session
 4. Cold claim re-hydrates ``journal_entries`` the way ``claim_paused_turn`` does
 5. ``settle_resumed_suspension`` CONTINUE rebuilds ``CoordinationSession`` (draft / completed / budget)
-6. Restored session accepts further coordination (``update_synthesis`` + event consume)
+6. Restored session accepts further coordination (``wait`` + event consume)
 7. STOP settle must not attach ``active_coordination`` or ``run_started`` unfinished workers
 
 By-design boundary (not asserted here): ``resume_plan`` (plan_review wave-boundary
@@ -38,7 +38,7 @@ from agentcore.runtime.coordination.session import (
     active_coordination,
     clear_active_coordination,
 )
-from agentcore.runtime.coordination.tools import UpdateSynthesisTool
+from agentcore.runtime.coordination.tools import WaitTool
 from agentcore.runtime.coordination.wait import await_coordination_injection
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.facts import FactKind, LlmCallFact, RoundBoundaryFact, TurnStartedFact
@@ -301,11 +301,11 @@ async def test_ask_user_soft_stop_rebuilds_coordination_on_resume(monkeypatch):
     assert session.budget_remaining == snap.budget_remaining
     assert set(snap.completed_run_ids).issubset(session.completed_run_ids)
 
-    # Behaviour: restored session still accepts progressive synthesis + team events.
-    syn = UpdateSynthesisTool(sink=resume_sink)
-    syn_result = await syn.execute({"draft": DRAFT_TEXT + "（续跑修订）"}, resume_ctx)
-    assert syn_result.success is True
-    assert session.draft == DRAFT_TEXT + "（续跑修订）"
+    # Behaviour: restored session still accepts wait + team events.
+    wait = WaitTool()
+    wait_result = await wait.execute({"reason": "续跑听团"}, resume_ctx)
+    assert wait_result.success is True
+    assert session.draft == DRAFT_TEXT
 
     session.post(
         CoordinationEvent(

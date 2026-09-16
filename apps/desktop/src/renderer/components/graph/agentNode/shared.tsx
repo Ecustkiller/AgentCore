@@ -1,5 +1,5 @@
 import { statusPillSoft } from "@/components/ui/tone-presets";
-import { formatDuration, formatDurationSec } from "@/lib/format";
+import { formatDuration, formatLiveElapsed } from "@/lib/format";
 import type {
   DebateBeat,
   PlanRevisionKind,
@@ -227,9 +227,8 @@ export function failureDetailSentence(
 }
 
 function liveElapsedSuffix(elapsedSec?: number): string {
-  return elapsedSec !== undefined && elapsedSec >= 1
-    ? ` · ${formatDurationSec(elapsedSec)}`
-    : "";
+  const text = formatLiveElapsed(elapsedSec);
+  return text ? ` · ${text}` : "";
 }
 
 /** Face status line for parallel wave visibility (排队 / 执行 / 完成用时 / 失败). */

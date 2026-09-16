@@ -78,7 +78,7 @@ def test_normalize_options_drops_unknown_folder_actions_and_hints():
     assert out[3] == {"label": "绑定本机", "action": "bind_local_folder"}
 
 
-def test_normalize_options_drops_detail_by_default():
+def test_normalize_options_drops_detail():
     out = normalize_options(
         [
             {"label": "方案 A：先出契约", "detail": "慢但稳"},
@@ -89,12 +89,35 @@ def test_normalize_options_drops_detail_by_default():
     assert all("detail" not in o for o in out)
 
 
-def test_normalize_options_keeps_detail_when_flagged():
+def test_normalize_options_drops_detail_on_organize_ops():
     out = normalize_options(
-        [{"label": "方案甲", "detail": "一行取舍"}],
-        keep_detail=True,
+        [
+            {
+                "label": "移走草稿",
+                "detail": "进回收站",
+                "op": "delete",
+                "path": "draft.md",
+            }
+        ]
     )
-    assert out[0]["detail"] == "一行取舍"
+    assert out[0]["op"] == "delete"
+    assert out[0]["path"] == "draft.md"
+    assert "detail" not in out[0]
+
+
+def test_normalize_options_drops_review_kind_fields():
+    out = normalize_options(
+        [
+            {
+                "label": "记下偏好",
+                "review_kind": "preference",
+                "body": "以后默认中文",
+                "slug": "zh",
+                "section": "prefs",
+            }
+        ]
+    )
+    assert out == [{"label": "记下偏好"}]
 
 
 def test_normalize_questions_passthrough_to_checkpoint_shape():
@@ -308,12 +331,12 @@ def test_normalize_questions_absorbs_question_level_label_as_sole_option():
     assert "detail" not in qs[0]["options"][0]
 
 
-def test_normalize_questions_keeps_absorbed_detail_on_dedicated_cards():
+def test_normalize_questions_drops_absorbed_detail():
     qs = normalize_questions(
         [{"prompt": "执行哪些？", "kind": "choice", "label": "移走草稿", "detail": "进回收站"}],
-        keep_detail=True,
     )
-    assert qs[0]["options"][0]["detail"] == "进回收站"
+    assert qs[0]["options"][0]["label"] == "移走草稿"
+    assert "detail" not in qs[0]["options"][0]
 
 
 def test_normalize_questions_empty_choice_lowers_to_text():
@@ -379,7 +402,7 @@ async def test_ask_user_rejects_unparseable_questions_string():
         conversation_id="c1",
     )
     res = await tool.execute(
-        {"message": "对齐一下方向", "questions": "[{broken"},
+        {"questions": "[{broken"},
         ctx,
     )
     assert res.success is False
@@ -438,7 +461,6 @@ async def test_ask_user_accepts_recommendation_in_label():
     )
     res = await tool.execute(
         {
-            "message": "选一下方向",
             "questions": [
                 {
                     "prompt": "采用哪个方案？",
@@ -476,11 +498,10 @@ def test_ask_user_schema_points_at_recommendation_in_label():
     assert "放第一" in kickoff
     assert "不预选" in kickoff
     assert "禁止" not in props["label"]["description"]
-    assert "organize_plan" in props["detail"]["description"]
-    assert "daily_review" not in props["detail"]["description"]
-    assert "普通" in props["detail"]["description"]
+    assert "detail" not in props
     blob = json.dumps(tool.schema.parameters, ensure_ascii=False)
     assert "password_blocked" not in blob
+    assert "message" not in tool.schema.parameters["properties"]
     card_desc = tool.schema.parameters["properties"]["card"]["description"]
     assert "多问题用普通" not in card_desc
 

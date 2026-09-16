@@ -22,20 +22,6 @@ const PROCESS_OPS = new Set<string>([
   "process_list",
 ]);
 
-/** Sidecar 空 root_id：按会话绑定补根，并把工作区相对路径加上 scratch 前缀。 */
-function prefixWorkspaceRelPaths(paths: unknown, subpath: string): string[] {
-  const base = subpath.replace(/^\/+|\/+$/g, "");
-  if (!base || !Array.isArray(paths)) return [];
-  const out: string[] = [];
-  for (const raw of paths) {
-    if (typeof raw !== "string") continue;
-    const rel = raw.replace(/\\/g, "/").replace(/^\/+/, "").trim();
-    if (!rel || rel === ".") out.push(base);
-    else out.push(`${base}/${rel}`);
-  }
-  return out;
-}
-
 /** Language advertise / U1 git chip — hang must not raise the file-channel banner (A1/A2). */
 const NON_FILE_CHANNEL_OPS = new Set<string>([
   "probe_exec",
@@ -185,21 +171,6 @@ async function runLocalOp(
         args.cwd =
           cwd && cwd !== "." ? `${target.subpath}/${cwd}` : target.subpath;
       }
-    }
-  }
-  // Sidecar diagnostics：通道 root_id 恒空，按会话绑定补根。过桥已带 root_id
-  // 且 LocalWorkspace._in 已加 subpath，不得再前缀。
-  if (payload.op === "diagnostics" && !rootId) {
-    const target = await resolveConversationLocalTarget(conversationId);
-    if (!target) {
-      return ioError("会话未绑定本地工作区，无法执行类型诊断");
-    }
-    rootId = target.rootId;
-    if (target.subpath) {
-      args = {
-        ...args,
-        paths: prefixWorkspaceRelPaths(args.paths, target.subpath),
-      };
     }
   }
   const timeoutMs =

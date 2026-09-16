@@ -208,7 +208,7 @@ def delivery_idle_narrow_prompt(
         return None
     return (
         f"[系统提示] 交文件空转收窄（已连续 {rounds} 轮仅调查、零落盘）："
-        "大范围调查类工具已收回；仅保留写盘 / 内环诊断 / handoff / 必要 file_read。"
+        "大范围调查类工具已收回；仅保留写盘 / handoff / 必要 file_read。"
         "请立即改文件或交接，勿再展开新调研。"
     )
 

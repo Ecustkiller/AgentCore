@@ -181,7 +181,7 @@ export function formatMessageTime(iso: string): string {
 
 /**
  * 毫秒时长 → 紧凑用时："45s" / "2m 34s" / "1h 2m"。
- * 对话里任务/节点/工具/状态条的秒表都走这里；单位间留空格（GitHub Actions / Linear / Vercel 同形）。
+ * 节点 face / 状态条 / 气泡脚的用时都走这里；单位间留空格（GitHub Actions / Linear / Vercel 同形）。
  * 过小时不再带秒——长跑密度优先。倒计时、中文时限、录音 `m:ss` 不走本函数。
  */
 export function formatDuration(ms: number): string {
@@ -200,6 +200,14 @@ export function formatDurationSec(totalSec: number): string {
   return formatDuration(totalSec * 1000);
 }
 
+/** 进行中秒表文案；满 1 秒才出（避免闪 `0s`）。 */
+export function formatLiveElapsed(
+  elapsedSec: number | null | undefined,
+): string | null {
+  if (elapsedSec == null || elapsedSec < 1) return null;
+  return formatDurationSec(elapsedSec);
+}
+
 /** 从状态行去掉末尾用时。a11y 完成态改由 `durationText` 报；进行中不把每秒跳动读进 aria。 */
 export function stripDurationFaceSuffix(text: string): string {
   return text.replace(/ · \d+(?:h \d+m|m \d+s|s)$/, "");
@@ -209,8 +217,8 @@ export function stripDurationFaceSuffix(text: string): string {
 const NANO_PER_UNIT = 1_000_000_000;
 
 /**
- * 币种符号表。后端每个金额都自带 `currency`（平台记账 CNY / BYOK 社区估算 USD），
- * **全系统无汇率换算**——这里只挑符号，绝不折算。
+ * 币种符号表。后端每个金额都自带 `currency`（产品名义价 CNY；遗留行偶发 USD），
+ * **展示层无 live 汇率**——这里只挑符号，绝不折算。
  */
 const CURRENCY_SYMBOLS: Record<string, string> = { CNY: "¥", USD: "$" };
 
@@ -224,27 +232,16 @@ function currencySymbol(currency?: string | null): string {
 }
 
 /**
- * BYOK 估算金额的轻量说明（详情 / tooltip）。费用位只出 ≈+币种，不另挂字。
+ * BYOK 费用位说明（详情 / tooltip）：产品名义价，不扣平台额度。
  */
-export const COST_ESTIMATE_HINT = "按社区价目（美元列表价）估算，非上游账单";
-
-/**
- * 费用位标注：BYOK 且两层价卡全落空（`pricing_source=unpriced`）。
- * 有真实花费但平台无价可算——显式标注，不得以「省略费用段」暗示免费
- * （拍板 2026-07-20：未计价运行显式标识，金额位仍显「—」绝不冒充数字）。
- */
-export const COST_UNPRICED_LABEL = "未计价";
-
-/** 未计价标注的轻量说明（tooltip / title）。 */
-export const COST_UNPRICED_HINT =
-  "平台无此模型价目（社区价目缺），实际费用以上游供应商账单为准";
+export const COST_ESTIMATE_HINT = "按产品价目，不扣额度";
 
 /**
  * 把整数 nano 成本格式化为带币种符号的展示串（大众面，§7.2）。
  *
  * 钱一律以整数 nano 流转（1 单位 = 1e9），绝不用 float；前端直接 `nano/1e9`，
- * **不做汇率换算**——符号取自后端随金额下发的 `currency`（平台记账 CNY、BYOK
- * 社区估算 USD）。约定（§7.5）：0 / 无花销显「—」（不显「¥0.00」）；有花销但
+ * **不做汇率换算**——符号取自后端随金额下发的 `currency`（产品名义价 CNY）。
+ * 约定（§7.5）：0 / 无花销显「—」（不显「¥0.00」）；有花销但
  * 不足 1 分/1 美分显「<¥0.01」/「<$0.01」。
  */
 export function formatCost(nano: number, currency?: string | null): string {
@@ -270,8 +267,8 @@ export function formatQuotaRemaining(
 }
 
 /**
- * 展示金额：平台记账走 {@link formatCost}；估算金额一律带「≈」前缀，
- * 不得与记账金额混淆。0 / 无值仍显「—」（`pricing_source=unpriced` 同此）。
+ * 展示金额：产品名义价走 {@link formatCost}；仅遗留美元估算带「≈」。
+ * 0 / 无值仍显「—」。
  */
 export function formatDisplayCost(
   nano: number,
@@ -340,12 +337,10 @@ export function formatAlignedCostParts(
 }
 
 /**
- * SSE / fold `CostBreakdown` 叶子上挑「记账 total vs 估算 estimated_total」，
- * **连同该笔金额自己的币种**一起返回。
+ * SSE / fold `CostBreakdown` 叶子上挑展示金额，**连同该笔金额自己的币种**一起返回。
  *
- * 记账 total 用 `currency`；BYOK 估算用 `estimated_currency`（一个回合可能记账
- * 人民币、估算美元），缺省回落 `currency` 兼容旧 wire。调用方必须把 currency
- * 一路带到格式化，禁止按 `pricing_source` 猜币种。
+ * `total` 是产品名义价（CNY）。无 total 时回落 `estimated_total`：CNY = 账单，
+ * 遗留 USD = ≈$。调用方必须把 currency 一路带到格式化。
  */
 export function pickCostMoney(
   cost:
@@ -366,10 +361,11 @@ export function pickCostMoney(
   }
   const est = cost.estimated_total;
   if (est != null && est > 0) {
+    const estCurrency = cost.estimated_currency || billedCurrency;
     return {
       nano: est,
-      estimated: true,
-      currency: cost.estimated_currency || billedCurrency,
+      estimated: estCurrency.toUpperCase() === "USD",
+      currency: estCurrency,
     };
   }
   return { nano: 0, estimated: false, currency: billedCurrency };

@@ -332,7 +332,6 @@ async def test_apply_replan_rejects_files_add_when_channel_dead():
             _tools = _FakeTools()
             _captain_run_id = "cap"
             _depth = 0
-            _topology_lock = False
             _folder_id = "test_birth"
             _conversation_id = "conv-cd"
             _user_message = None
@@ -352,7 +351,6 @@ async def test_apply_replan_rejects_files_add_when_channel_dead():
             _FakeDelegate(),
             plan,
             completed,
-            binds=[],
             steers=[],
             adds=[
                 {

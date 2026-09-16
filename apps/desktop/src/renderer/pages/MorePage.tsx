@@ -34,7 +34,6 @@ interface NavGroup {
 // 书签见 router 重定向。
 // 「外观」→「通用」（多收了原本藏在关于页的诊断类开关）；旧路径见 router 重定向。
 // Opening /more 宽屏落点见 MoreIndexRedirect；窄屏 /more 是设置列表，不重定向。
-// 「自动化」已收进工具箱工作流行上的「设为定时」；旧书签见 router 重定向。
 // 设定（画像 / 偏好 / 规则）在「文件」页，不设设置子页。
 // 新会话默认权限配方：对话内权限徽章「设为新会话默认」（无设置子页）。
 // 产品公告 inbox 已迁 IM 官方号（消息页）；顶栏 Banner 仍走 notices/active。

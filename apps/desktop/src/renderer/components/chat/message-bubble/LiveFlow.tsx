@@ -62,7 +62,8 @@ export function LiveFlowDots({ active }: { active: boolean }) {
   return <ThinkingDots className="hidden motion-reduce:inline-flex" />;
 }
 
-/** Empty thinking / workspace-wait row — always the live surface while mounted. */
+/** Empty thinking / workspace-wait row — always the live surface while mounted.
+ * 思考/正文一旦在长则不要走这里。过程行不出秒表。 */
 export function LiveWaitLabel({ children }: { children: ReactNode }) {
   return (
     <LiveFlow

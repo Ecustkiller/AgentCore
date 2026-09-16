@@ -72,6 +72,7 @@ from agentcore.llm.byok_provider_presets import (
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.model_metadata import model_metadata_for
 from agentcore.llm.pricing import (
+    CURRENCY_CNY,
     CredentialSource,
     has_curated_pricing,
     pricing_for_model,
@@ -116,6 +117,14 @@ class ModelUnavailableReason:
 
 
 @dataclass(frozen=True)
+class CatalogReasoningEffort:
+    """Official vendor thinking-effort control tokens for one catalog row."""
+
+    options: tuple[str, ...]
+    default: str
+
+
+@dataclass(frozen=True)
 class ModelCatalogEntry:
     """One selectable (or grey-out) model row for the catalog UI."""
 
@@ -134,6 +143,8 @@ class ModelCatalogEntry:
     provider_label: str | None = None
     # Set when listed but not selectable (e.g. gateway lacks the upstream protocol).
     unavailable_reason: ModelUnavailableReason | None = None
+    # Official vendor effort tokens when this id sends ``reasoning_effort``.
+    reasoning_effort: CatalogReasoningEffort | None = None
 
     @property
     def ref(self) -> str:
@@ -157,7 +168,7 @@ def _price_card(
     card = pricing_for_model(model_id, credential_source=credential_source)
     if card is None:
         return None
-    return {key: str(value) for key, value in card.items()}
+    return {**{key: str(value) for key, value in card.items()}, "currency": CURRENCY_CNY}
 
 
 def _entry(
@@ -171,6 +182,9 @@ def _entry(
     unavailable_reason: ModelUnavailableReason | None = None,
 ) -> ModelCatalogEntry:
     meta = model_metadata_for(model_id)
+    from agentcore.llm.provider.wire_dialect import reasoning_effort_spec
+
+    spec = reasoning_effort_spec(model_id)
     return ModelCatalogEntry(
         id=model_id,
         origin=origin,
@@ -184,6 +198,9 @@ def _entry(
         provider_id=provider_id,
         provider_label=provider_label,
         unavailable_reason=unavailable_reason,
+        reasoning_effort=(
+            CatalogReasoningEffort(options=spec[0], default=spec[1]) if spec else None
+        ),
     )
 
 

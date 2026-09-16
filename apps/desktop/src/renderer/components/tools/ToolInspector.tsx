@@ -36,7 +36,7 @@ export function toolGuideParams(tool: CapabilityTool): ToolParam[] {
   });
 }
 
-/** Inspector for an out-of-the-box tool. One human guide; no schema dump. */
+/** Inspector for an out-of-the-box tool. Lead = schema description; params; no schema dump. */
 export function ToolInspector({
   tool,
   capabilityHint,

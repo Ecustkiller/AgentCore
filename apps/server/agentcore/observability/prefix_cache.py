@@ -18,16 +18,20 @@ leaves it was rendered from — matched by digest, exactly, never by name — gi
 render order. Diffing consecutive turns of a conversation names the first leaf that moved.
 
 **Call side** — :func:`observe_prefix_cache` (called from the single ``llm.call`` emit point)
-compares this request's message chain with the previous call on the same chain, and pairs the
-structural verdict with the provider's own numbers (``TokenUsage.cache_hit_tokens`` — parsed
-upstream by ``TokenUsage.from_openai_wire``, both dialects; this module never re-parses wire
-JSON). One ``cost.prefix_cache`` line per call answers:
+compares this request with the previous call on the same chain in provider render order
+(``tools`` → ``system`` → ``messages``), and pairs the structural verdict with the
+provider's own numbers (``TokenUsage.cache_hit_tokens`` — parsed upstream by
+``TokenUsage.from_openai_wire``, both dialects; this module never re-parses wire JSON).
+The full probe stays on a debug ``cost.prefix_cache`` line (sidecar jsonl window). A
+compact copy (``prefix_breach`` / ``prefix_breach_section`` / ``tools_changed`` /
+``tools_count``) rides the info ``llm.call`` so production can bucket without DEBUG.
 
 - **命中率** — ``hit_ratio`` = cache_hit_tokens / input_tokens, with ``cache_reported`` saying
   whether the provider spoke about caching at all (a silent provider is NOT a 0% hit).
-- **被什么击穿** — ``breach`` classifies the first divergence against the previous request
-  (system prompt / mid-history rewrite / pure append), and ``breach_section`` names the leaf
-  when the system prompt is the culprit (e.g. ``workspace_facts`` = 文件索引变动,
+- **被什么击穿** — ``breach`` classifies the first divergence (tools table / system prompt /
+  mid-history rewrite / pure append). Tools sit ahead of messages: a consult promotion that
+  only appends history is still ``tools``, not ``history_growth``. ``breach_section`` names
+  the leaf when the system prompt is the culprit (e.g. ``workspace_facts`` = 文件索引变动,
   ``attachment_context`` = 变尾段本身). ``folder_catalog`` slot is kept;
   production no longer assembles that section.
 - **随对话长度的差异** — ``prompt_messages`` / ``prompt_chars`` / ``input_tokens`` /
@@ -47,6 +51,7 @@ allocation-cheap (digests only, never a copy of the prompt).
 from __future__ import annotations
 
 import hashlib
+import json
 from collections import OrderedDict
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -71,6 +76,7 @@ _MAX_CHANGED_REPORTED = 8
 BREACH_COLD_CHAIN = "cold_chain"  # nothing seen before on this chain (first call / evicted)
 BREACH_IDENTICAL = "identical"  # same messages as last call (retry / re-ask)
 BREACH_HISTORY_GROWTH = "history_growth"  # pure append — the best case, prefix fully reusable
+BREACH_TOOLS = "tools"  # opening tools[] changed (renders before system + messages)
 BREACH_SYSTEM_PROMPT = "system_prompt"  # message 0 changed → the whole request is a miss
 BREACH_HEAD_REWRITE = "head_rewrite"  # first message changed but it is not a system message
 BREACH_HISTORY_REWRITE = "history_rewrite"  # a mid-history message changed (compaction / edit)
@@ -84,6 +90,19 @@ BASIS_NONE = "none"  # no comparable predecessor
 def digest_text(text: str) -> str:
     """Truncated sha256 of ``text`` — the change-detection unit used throughout."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:_DIGEST_CHARS]
+
+
+def tools_fingerprint(tools: Sequence[object] | None) -> tuple[str, int]:
+    """Digest + count of the opening ``tools[]`` table (not which tools the model invoked).
+
+    List order is part of the billed prefix, so the array is not sorted — only object
+    keys are, so equivalent dicts with shuffled keys still match. ``None`` and ``[]``
+    are the same empty table. Digests only; the schema body is never kept.
+    """
+    if not tools:
+        return "", 0
+    blob = json.dumps(tools, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return digest_text(blob), len(tools)
 
 
 # --------------------------------------------------------------------------------------
@@ -280,6 +299,8 @@ class ChainState:
     digests: tuple[str, ...]
     input_tokens: int
     calls: int
+    tools_digest: str = ""
+    tools_count: int = 0
 
 
 _chains: OrderedDict[str, ChainState] = OrderedDict()
@@ -333,6 +354,8 @@ class PrefixCacheProbe:
     prompt_chars: int
     stable_prefix_chars: int
     chain_calls: int
+    tools_changed: bool = False
+    tools_count: int = 0
 
     def as_log_fields(self) -> dict[str, object]:
         return {
@@ -351,7 +374,20 @@ class PrefixCacheProbe:
             "prompt_chars": self.prompt_chars,
             "stable_prefix_chars": self.stable_prefix_chars,
             "chain_calls": self.chain_calls,
+            "tools_changed": self.tools_changed,
+            "tools_count": self.tools_count,
         }
+
+    def as_llm_call_fields(self) -> dict[str, object]:
+        """Compact info-line copy. No forfeited / char counts — those are inferred."""
+        fields: dict[str, object] = {
+            "prefix_breach": self.breach,
+            "tools_changed": self.tools_changed,
+            "tools_count": self.tools_count,
+        }
+        if self.breach_section:
+            fields["prefix_breach_section"] = self.breach_section
+        return fields
 
 
 def message_fingerprints(messages: Sequence[object]) -> tuple[tuple[str, ...], tuple[int, ...]]:
@@ -415,6 +451,8 @@ def compute_probe(
     cache_miss_tokens: int,
     previous: ChainState | None,
     section_delta: SectionDelta = _EMPTY_DELTA,
+    tools_digest: str = "",
+    tools_count: int = 0,
 ) -> PrefixCacheProbe:
     """Pure metric computation — the unit under test (no globals, no logging).
 
@@ -425,18 +463,23 @@ def compute_probe(
     by the stable share of chars — flagged ``estimated`` because chars-per-token differs
     between CJK prose and tool JSON. ``forfeited_tokens`` is the shortfall: full prompt price
     paid for tokens the provider had already seen.
+
+    A tools-table change is not a prefix of the previous request (tools render first), so
+    reusable/forfeited stay none/0 — the billed ``hit_ratio`` on those rows is the signal.
     """
     prompt_chars = sum(sizes)
     prompt_messages = len(digests)
+    cache_reported = bool(cache_hit_tokens or cache_miss_tokens)
+    hit_ratio = round(cache_hit_tokens / input_tokens, 4) if input_tokens else 0.0
     if previous is None:
         return PrefixCacheProbe(
             breach=BREACH_COLD_CHAIN,
             breach_section="",
             changed_sections=(),
-            cache_reported=bool(cache_hit_tokens or cache_miss_tokens),
+            cache_reported=cache_reported,
             input_tokens=input_tokens,
             cache_hit_tokens=cache_hit_tokens,
-            hit_ratio=round(cache_hit_tokens / input_tokens, 4) if input_tokens else 0.0,
+            hit_ratio=hit_ratio,
             reusable_tokens=0,
             reusable_basis=BASIS_NONE,
             forfeited_tokens=0,
@@ -445,8 +488,11 @@ def compute_probe(
             prompt_chars=prompt_chars,
             stable_prefix_chars=0,
             chain_calls=1,
+            tools_changed=False,
+            tools_count=tools_count,
         )
 
+    tools_changed = tools_digest != previous.tools_digest
     divergence = _first_divergence(digests, previous.digests)
     breach = _classify(
         divergence=divergence,
@@ -454,20 +500,30 @@ def compute_probe(
         previous_len=len(previous.digests),
         first_role=first_role,
     )
-    stable_chars = sum(sizes[:divergence])
-    if breach in (BREACH_HISTORY_GROWTH, BREACH_IDENTICAL):
-        reusable_tokens = previous.input_tokens
-        reusable_basis = BASIS_MEASURED
-    elif divergence and prompt_chars:
-        reusable_tokens = round(input_tokens * stable_chars / prompt_chars)
-        reusable_basis = BASIS_ESTIMATED
-    else:
+    if tools_changed:
+        # Hierarchy: tools → system → messages. Promotion that only appends history
+        # is still a tools breach, not history_growth.
+        breach = BREACH_TOOLS
         reusable_tokens = 0
         reusable_basis = BASIS_NONE
-    # A provider that never mentions caching would otherwise read as "reused nothing".
-    cache_reported = bool(cache_hit_tokens or cache_miss_tokens)
-    forfeited = max(reusable_tokens - cache_hit_tokens, 0) if cache_reported else 0
-    attributable = breach == BREACH_SYSTEM_PROMPT and section_delta.comparable
+        forfeited = 0
+        stable_chars = 0
+        stable_prefix_messages = 0
+        attributable = False
+    else:
+        stable_chars = sum(sizes[:divergence])
+        stable_prefix_messages = divergence
+        if breach in (BREACH_HISTORY_GROWTH, BREACH_IDENTICAL):
+            reusable_tokens = previous.input_tokens
+            reusable_basis = BASIS_MEASURED
+        elif divergence and prompt_chars:
+            reusable_tokens = round(input_tokens * stable_chars / prompt_chars)
+            reusable_basis = BASIS_ESTIMATED
+        else:
+            reusable_tokens = 0
+            reusable_basis = BASIS_NONE
+        forfeited = max(reusable_tokens - cache_hit_tokens, 0) if cache_reported else 0
+        attributable = breach == BREACH_SYSTEM_PROMPT and section_delta.comparable
     return PrefixCacheProbe(
         breach=breach,
         breach_section=section_delta.first_changed if attributable else "",
@@ -475,15 +531,17 @@ def compute_probe(
         cache_reported=cache_reported,
         input_tokens=input_tokens,
         cache_hit_tokens=cache_hit_tokens,
-        hit_ratio=round(cache_hit_tokens / input_tokens, 4) if input_tokens else 0.0,
+        hit_ratio=hit_ratio,
         reusable_tokens=reusable_tokens,
         reusable_basis=reusable_basis,
         forfeited_tokens=forfeited,
         prompt_messages=prompt_messages,
-        stable_prefix_messages=divergence,
+        stable_prefix_messages=stable_prefix_messages,
         prompt_chars=prompt_chars,
         stable_prefix_chars=stable_chars,
         chain_calls=previous.calls + 1,
+        tools_changed=tools_changed,
+        tools_count=tools_count,
     )
 
 
@@ -495,6 +553,7 @@ def observe_prefix_cache(
     input_tokens: int,
     cache_hit_tokens: int,
     cache_miss_tokens: int,
+    tools: Sequence[object] | None = None,
 ) -> PrefixCacheProbe | None:
     """Probe this call against the previous one on the same chain and emit ``cost.prefix_cache``.
 
@@ -503,6 +562,9 @@ def observe_prefix_cache(
     call is, and ``scenario`` joins the key on both — a title / compaction / memory call
     rides the same conversation but is a different prompt shape and comparing it against the
     chat transcript would report a breach on every line.
+
+    ``tools`` is the opening function-calling table on this request (``LLMRequest.tools``),
+    not ``llm.call.tool_names`` (those are invocations). Missing/empty is an empty table.
 
     Calls with no conversation identity (catalog probes, evals) have no chain to compare
     against and are skipped rather than logged as permanent misses.
@@ -516,6 +578,7 @@ def observe_prefix_cache(
         return None
     chain_key = "|".join((conversation_id, scenario, _chain_scope()))
     digests, sizes = message_fingerprints(messages)
+    tools_digest, tools_count = tools_fingerprint(tools)
     probe = compute_probe(
         digests=digests,
         sizes=sizes,
@@ -525,11 +588,19 @@ def observe_prefix_cache(
         cache_miss_tokens=cache_miss_tokens,
         previous=_chains.get(chain_key),
         section_delta=prompt_section_delta(conversation_id),
+        tools_digest=tools_digest,
+        tools_count=tools_count,
     )
     _lru_put(
         _chains,
         chain_key,
-        ChainState(digests=digests, input_tokens=input_tokens, calls=probe.chain_calls),
+        ChainState(
+            digests=digests,
+            input_tokens=input_tokens,
+            calls=probe.chain_calls,
+            tools_digest=tools_digest,
+            tools_count=tools_count,
+        ),
         _MAX_CHAINS,
     )
     # Per-call probe: debug so a long sidecar session does not rotate llm.call

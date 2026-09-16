@@ -35,7 +35,7 @@ from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 
 from .ceiling import ceiling_finalize
-from .directive import LoopDirective
+from .directive import Continue, LoopDirective
 from .directive_apply import apply_loop_directive
 from .governance import (
     apply_exec_env_dead_retire,
@@ -540,6 +540,109 @@ async def react_loop(
             begin_accepting(steer_cid, execution_id=tool_context.execution_id)
 
     try:
+        from agentcore.runtime.runs.redrive_sites import unmatched_trailing_tool_calls
+        from agentcore.tools.write_replay import begin_write_replay, end_write_replay
+
+        pending = unmatched_trailing_tool_calls(messages)
+        if pending:
+            last_asst = next(
+                m
+                for m in reversed(messages)
+                if m.role == "assistant" and m.tool_calls
+            )
+            replay_token = begin_write_replay()
+            try:
+                tool_round = await handle_tool_calls_round(
+                    outcome=RoundOutcome(
+                        content=last_asst.content or "",
+                        reasoning=last_asst.reasoning_content or "",
+                        usage=None,
+                        tool_calls=pending,
+                    ),
+                    messages=messages,
+                    tools=tools,
+                    tool_context=tool_context,
+                    sink=sink,
+                    approval_gate=approval_gate,
+                    citation_sink=citation_sink,
+                    annotate_citations=annotate_citations,
+                    turn_evidence_ledger=turn_evidence_ledger,
+                    ledger_registrant=ledger_registrant,
+                    run_id=run_id,
+                    role=role,
+                    gate_escalation_sink=gate_escalation_sink,
+                    deliverable_only=deliverable_only,
+                    on_reset=on_reset,
+                    emit_reset=emit_reset,
+                    content_before_round="",
+                    final_content=final_content,
+                    round_result_content=last_asst.content or "",
+                    total_usage=total_usage,
+                    controller=controller,
+                    allowed_tool_names=_effective_allowed(),
+                    disabled_tools=disabled_tools,
+                    round_idx=0,
+                    skip_assistant_append=True,
+                )
+            finally:
+                end_write_replay(replay_token)
+            outcome = tool_round.outcome
+            directive = tool_round.directive
+            final_content = tool_round.final_content
+            total_usage = tool_round.total_usage
+            if tool_round.tool_defs_changed:
+                tool_defs = tool_round.tool_defs
+            if not isinstance(directive, Continue):
+                applied = await apply_loop_directive(
+                    directive=directive,
+                    outcome=outcome,
+                    messages=messages,
+                    llm=llm,
+                    tools=tools,
+                    tool_context=tool_context,
+                    sink=sink,
+                    profile=profile,
+                    active_model=active_model,
+                    base_model=base_model,
+                    allowed_tool_names=_effective_allowed(),
+                    disabled_tools=disabled_tools,
+                    emit_content=emit_content,
+                    emit_reasoning=emit_reasoning,
+                    emit_reset=emit_reset,
+                    final_content=final_content,
+                    final_reasoning=final_reasoning,
+                    total_usage=total_usage,
+                    round_idx=0,
+                    run_id=run_id,
+                    role=role,
+                    finish_override_sink=finish_override_sink,
+                    approval_gate=approval_gate,
+                    citation_sink=citation_sink,
+                    annotate_citations=annotate_citations,
+                    turn_evidence_ledger=turn_evidence_ledger,
+                    ledger_registrant=ledger_registrant,
+                    gate_escalation_sink=gate_escalation_sink,
+                    controller=controller,
+                    content_before_round="",
+                    finish_guard_reworks=finish_guard_reworks,
+                    files_expected=files_expected,
+                    expects_landing=expects_landing,
+                )
+                if applied.action == "return":
+                    return _exit(
+                        applied.content,
+                        applied.reasoning,
+                        applied.usage or total_usage,
+                        applied.rounds,
+                    )
+                final_content = applied.final_content
+                final_reasoning = applied.final_reasoning
+                if applied.total_usage is not None:
+                    total_usage = applied.total_usage
+                finish_guard_reworks = applied.finish_guard_reworks
+                if applied.tool_defs_changed:
+                    tool_defs = applied.tool_defs
+
         # ``max_rounds <= 0`` = no product round fuse. Increment-at-start so
         # ``continue`` and early ``return`` keep the same 0-based index as the
         # old ``for range`` loop.

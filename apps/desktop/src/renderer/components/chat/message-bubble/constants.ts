@@ -79,6 +79,7 @@ export const TOOL_META: Record<string, { Icon: LucideIcon; label: string }> = {
   file_batch: { Icon: FileText, label: "Batch files" },
   md_to_docx: { Icon: FileText, label: "Export Word" },
   md_to_pdf: { Icon: FileText, label: "Export PDF" },
+  md_export: { Icon: FileText, label: "Export document" },
   archive_extract: { Icon: Package, label: "Extract archive" },
   archive_create: { Icon: Package, label: "Create archive" },
   download_url: { Icon: Globe, label: "Download file" },
@@ -218,6 +219,19 @@ export const toolMeta = (
       );
     }
     return TOOL_META.browser ?? { Icon: Globe, label: "Browser" };
+  }
+  if (name === "md_export") {
+    const format =
+      args && typeof args.format === "string"
+        ? args.format.trim().toLowerCase()
+        : "";
+    if (format === "pdf") {
+      return { Icon: FileText, label: "Export PDF" };
+    }
+    if (format === "docx") {
+      return { Icon: FileText, label: "Export Word" };
+    }
+    return TOOL_META.md_export ?? { Icon: FileText, label: "Export document" };
   }
   if (name === "host") {
     const action = hostActionOf(args);
@@ -395,9 +409,7 @@ export function hostToolDetail(args: Record<string, unknown>): string {
     const name =
       typeof args.device_name === "string" && args.device_name.trim()
         ? args.device_name.trim()
-        : typeof args.device_id === "string"
-          ? args.device_id.trim()
-          : "";
+        : "";
     return asTitleDetail(name || action);
   }
   if (action === "restart_service") {

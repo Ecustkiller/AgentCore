@@ -1,11 +1,16 @@
 import { api } from "@/services/api";
+import {
+  type ModelCatalogItem,
+  resolvedProfileEffort,
+} from "@/services/models";
 import type { components } from "@/types/api.generated";
 
 /**
  * 账号「模型组合」CRUD（设置·模型配置 / 输入框组合选择器）。
  *
- * 组合 = `{ main, worker?, background?, vision? }`；
+ * 组合 = `{ main, worker?, background?, vision?, reasoning_effort? }`；
  * Worker / 后台空 = 跟随主模型；vision 空 = 组合未配专用识图槽（解析时 main 收图可复用 main，否则 platform VISION_* 或无 reader）。
+ * `reasoning_effort` 空 = 主模型厂商默认；仅官方 token。
  * 账号默认写在 `PUT …/default`；会话引用走 `conversations.model_profile_id`。
  */
 
@@ -104,8 +109,9 @@ export function slotDisplayName(
 }
 
 /**
- * 组合次要摘要：「主 · Worker」，有覆盖时再附「后台 / 识图」。
+ * 组合次要摘要：「主 · Worker」，有覆盖时再附「后台 / 识图」与思考强度官方 token。
  * Worker 空 =「跟随主模型」；后台 / 识图仅在已配置时追加（列表行勿撑宽）。
+ * 主模型方言发 reasoning_effort 时附厂商档（空存储 = 目录默认）。
  */
 export function profileSlotSummary(
   profile: LlmModelProfileView,
@@ -114,6 +120,7 @@ export function profileSlotSummary(
     origin: string;
     display_name: string;
     provider_id?: string | null;
+    reasoning_effort?: ModelCatalogItem["reasoning_effort"];
   }[],
 ): string {
   const main =
@@ -133,5 +140,10 @@ export function profileSlotSummary(
       slotDisplayName(profile.vision, catalogModels) || profile.vision.model;
     parts.push(`识图 ${vision}`);
   }
+  const effort = resolvedProfileEffort(
+    profile,
+    catalogModels as ModelCatalogItem[],
+  );
+  if (effort) parts.push(effort);
   return parts.join(" · ");
 }

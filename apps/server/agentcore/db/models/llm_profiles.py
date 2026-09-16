@@ -80,6 +80,9 @@ class LlmModelProfile(Base):
     )
     vision_model: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
+    # Vendor thinking-effort token (e.g. low/high/max). NULL = that model's default.
+    reasoning_effort: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )

@@ -172,6 +172,7 @@ describe("getByokProviderPreset", () => {
       "kimi-k2.6",
       "glm-5.2",
     ]);
+    expect(preset.hideFromPicker).toEqual(["deepseek-flash"]);
     expect(preset.keyHelpUrl).toBe("https://opencode.ai/auth");
   });
 
@@ -180,12 +181,13 @@ describe("getByokProviderPreset", () => {
     expect(preset.id).toBe("opencode_go");
     expect(preset.label).toBe("OpenCode Go");
     expect(preset.baseUrl).toBe("https://opencode.ai/zen/go/v1");
-    expect(preset.defaultModel).toBe("deepseek-v4-flash");
+    expect(preset.defaultModel).toBe("deepseek-v4.1-flash");
     expect(preset.models).toEqual([
-      "deepseek-v4-flash",
+      "deepseek-v4.1-flash",
       "deepseek-v4-pro",
       "glm-5.2",
     ]);
+    expect(preset.hideFromPicker).toEqual(["deepseek-flash"]);
     expect(preset.keyHelpUrl).toBe("https://opencode.ai/auth");
     expect(preset.models.join(" ")).not.toMatch(/-free|grok|gpt|minimax|qwen/i);
     const labels = listByokProviderOptions().map((opt) => opt.label);

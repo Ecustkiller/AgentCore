@@ -139,8 +139,7 @@ export async function createWorkspaceDir(
  *
  * The file API is JSON-less (raw bytes), so this fetches directly (reusing the
  * shared cookie auth + refresh-once) and triggers a save through an object-URL
- * anchor. Backs both the resident-attachment chip (附件驻留) and the workspace
- * panel's per-file download.
+ * anchor. Backs the workspace panel's per-file download.
  */
 export async function downloadWorkspaceFile(
   conversationId: string,

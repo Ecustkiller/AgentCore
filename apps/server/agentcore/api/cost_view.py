@@ -36,8 +36,8 @@ def estimated_cost_breakdown(
 ) -> CostBreakdown | None:
     """BYOK estimate breakdown, or ``None`` when there is nothing to show.
 
-    These numbers come off the community snapshot, i.e. **USD** — the rollup that
-    built ``cost`` stamps the currency, and it is carried through untouched.
+    These numbers are the BYOK copy of the curated CNY nominal — quota does not
+    SUM them. Currency is stamped on the rollup (CNY for new rows).
     """
     body = cost or {}
     total = int(estimated_nano or body.get("total", 0) or 0)

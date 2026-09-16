@@ -96,7 +96,7 @@ def _rewrite(path: Any, table: dict[str, str]) -> Any:
 def _rewrite_rows(rows: Sequence[Any], table: dict[str, str]) -> list[Any]:
     """Rewrite acceptance rows (``path`` / ``derived_from``) — 导出件与源都不留悬空。
 
-    ``derived_from`` 是导出件指回源的血缘（``md_to_docx``：docx ← 源 md），消费方据此把
+    ``derived_from`` 是导出件指回源的血缘（``md_export``：docx ← 源 md），消费方据此把
     源折成中间稿。源被归位后它若还指旧位置，导出件就认不出自己的源：中间稿折叠断链、
     ``报告.md`` 与 ``报告.docx`` 并列出现。故与 ``path`` 同表改写。
     """

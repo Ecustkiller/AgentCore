@@ -11,7 +11,7 @@ quota defence: :mod:`agentcore.billing.call_quota` re-checks before every upstre
 call, which is what stops concurrent turns and worker fan-out from overselling one
 stale reading (成本配额与计费 §一).
 
-Background product chrome (title / memory / workflow.slots) resolves
+Background product chrome (title / memory) resolves
 platform-first via ``resolve_and_gate_background``: platform spend always passes
 ``enforce_quota`` (no BYOK freeload); quota exhaustion yields no credentials so
 best-effort callers degrade instead of 429-ing the user turn. ``run_background_llm``
@@ -242,14 +242,13 @@ async def preflight_resolved_llm_credentials(
     byok_missing_message: str,
     selection: ModelSelection,
 ) -> LLMCredentials | None:
-    """Gate + resolve credentials for workflows (same shape as compaction).
+    """Gate + resolve credentials for a selected model (same shape as compaction).
 
     Runs :func:`preflight_llm_credentials` by ``selection.origin``, then for
     platform origin replaces the gate's ``None`` with
     ``platform_llm_credentials(model=selection.model)``.
 
-    **Callers**: ``workflows.runner`` and
-    ``resolve_and_gate_compaction``. Handoff must keep its thin
+    **Callers**: ``resolve_and_gate_compaction``. Handoff must keep its thin
     ``resolve_user_llm_credentials`` path — do **not** route handoff through
     this helper (would thicken dispatch into preflight).
     """

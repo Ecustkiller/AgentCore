@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { repoPathToWorkspaceRel } from "../repoPathToWorkspaceRel";
+import {
+  repoPathToWorkspaceRel,
+  workspaceRelToContainerRel,
+} from "../repoPathToWorkspaceRel";
 
 describe("repoPathToWorkspaceRel", () => {
   it("empty subpath returns repo path unchanged", () => {
@@ -42,5 +45,17 @@ describe("repoPathToWorkspaceRel", () => {
     expect(
       repoPathToWorkspaceRel("other\\a.ts", "conversations/c1"),
     ).toBeNull();
+  });
+});
+
+describe("workspaceRelToContainerRel", () => {
+  it("prefixes subpath for trashPath / container IPC", () => {
+    expect(workspaceRelToContainerRel("a.ts", "conversations/c1")).toBe(
+      "conversations/c1/a.ts",
+    );
+    expect(workspaceRelToContainerRel("a.ts", "")).toBe("a.ts");
+    expect(workspaceRelToContainerRel("", "conversations/c1")).toBe(
+      "conversations/c1",
+    );
   });
 });

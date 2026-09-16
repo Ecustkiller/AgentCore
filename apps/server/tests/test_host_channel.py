@@ -184,7 +184,8 @@ async def test_host_audio_set_default_requires_device():
         _ctx(as_worker=True, channel=MagicMock()),
     )
     assert not result.success
-    assert "device_id" in (result.error or "")
+    assert "device_name" in (result.error or "")
+    assert "device_id" not in (result.error or "")
 
 
 @pytest.mark.asyncio
@@ -204,24 +205,59 @@ async def test_host_audio_set_default_forwards():
 
 
 @pytest.mark.asyncio
-async def test_host_service_restart_rejects_unknown():
-    result = await HostTool().execute(
-        {"action": "restart_service", "service": "Spooler"},
-        _ctx(as_worker=True, channel=MagicMock()),
+async def test_host_audio_set_default_ignores_device_id():
+    channel = MagicMock()
+    channel.request_host = AsyncMock(
+        return_value={"set": True, "device_id": "{0.0.0.00000000}.{abc}", "name": "Speakers"}
     )
-    assert not result.success
-    assert "Audiosrv" in (result.error or "")
-    assert "Spooler" in (result.error or "")
+    result = await HostTool().execute(
+        {
+            "action": "set_audio",
+            "device_id": "{0.0.0.00000000}.{abc}",
+            "device_name": "Speakers",
+        },
+        _ctx(as_worker=True, channel=channel),
+    )
+    assert result.success
+    channel.request_host.assert_awaited_once_with(
+        HostOp.AUDIO_SET_DEFAULT, {"device_name": "Speakers"}, timeout=45.0
+    )
 
 
 @pytest.mark.asyncio
-async def test_host_service_restart_accepts_audiosrv():
+async def test_host_audio_set_default_rejects_device_id_only():
+    result = await HostTool().execute(
+        {"action": "set_audio", "device_id": "{0.0.0.00000000}.{abc}"},
+        _ctx(as_worker=True, channel=MagicMock()),
+    )
+    assert not result.success
+    assert "device_name" in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_host_service_restart_ignores_extra_service():
     channel = MagicMock()
     channel.request_host = AsyncMock(
         return_value={"restarted": True, "service": "Audiosrv", "status": "Running"}
     )
     result = await HostTool().execute(
-        {"action": "restart_service", "service": "audiosrv"},
+        {"action": "restart_service", "service": "Spooler"},
+        _ctx(as_worker=True, channel=channel),
+    )
+    assert result.success
+    channel.request_host.assert_awaited_once_with(
+        HostOp.SERVICE_RESTART, {"service": "Audiosrv"}, timeout=60.0
+    )
+
+
+@pytest.mark.asyncio
+async def test_host_service_restart_without_service_field():
+    channel = MagicMock()
+    channel.request_host = AsyncMock(
+        return_value={"restarted": True, "service": "Audiosrv", "status": "Running"}
+    )
+    result = await HostTool().execute(
+        {"action": "restart_service"},
         _ctx(as_worker=True, channel=channel),
     )
     assert result.success
@@ -252,18 +288,45 @@ async def test_host_os_log_via_channel():
         _ctx(channel=channel),
     )
     assert result.success
-    assert "bounded" in result.output
+    payload = json.loads(result.output)
+    assert payload["bounded"] is True
+    assert "max_entries" not in payload
+    assert "max_bytes" not in payload
     channel.request_host.assert_awaited_once_with(
         HostOp.OS_LOG_SUMMARY,
         {
             "source": "App",
             "level": "error",
             "minutes": 30,
-            "max_entries": 5,
+            "max_entries": 40,
             "max_bytes": 24_000,
         },
         timeout=45.0,
     )
+
+
+@pytest.mark.asyncio
+async def test_host_os_log_truncated_note_teaches_narrowing():
+    channel = MagicMock()
+    channel.request_host = AsyncMock(
+        return_value={
+            "platform": "win32",
+            "bounded": True,
+            "truncated": True,
+            "entries": [{"time": "t", "level": "Error", "source": "App", "message": "x"}],
+            "max_entries": 40,
+            "max_bytes": 24_000,
+            "note": "os_event_log_bounded_summary",
+        }
+    )
+    result = await HostTool().execute({"action": "os_log"}, _ctx(channel=channel))
+    assert result.success
+    payload = json.loads(result.output)
+    assert payload["truncated"] is True
+    assert "max_entries" not in payload
+    assert "max_bytes" not in payload
+    assert "os_event_log_bounded_summary" not in payload["note"]
+    assert "收窄来源、级别或时间窗" in payload["note"]
 
 
 def test_normalize_os_log_args_clamps():
@@ -271,8 +334,8 @@ def test_normalize_os_log_args_clamps():
         {"minutes": 99999, "max_entries": 999, "max_bytes": 9_999_999, "level": "nope"}
     )
     assert out["minutes"] == 1440
-    assert out["max_entries"] == 80
-    assert out["max_bytes"] == 48_000
+    assert out["max_entries"] == 40
+    assert out["max_bytes"] == 24_000
     assert out["level"] == "warning"
 
 
@@ -437,6 +500,10 @@ async def test_host_shell_cloud_does_not_forward_model_cwd():
 def test_host_dynamic_timeout_aligns_today_tiers():
     schema = HostTool().schema
     assert schema.timeout_seconds is None
+    assert "service" not in schema.parameters["properties"]
+    assert "device_id" not in schema.parameters["properties"]
+    assert "max_entries" not in schema.parameters["properties"]
+    assert "max_bytes" not in schema.parameters["properties"]
     assert host_tool_timeout_seconds({"action": "status"}) == 45.0
     assert host_tool_timeout_seconds({"action": "status", "facets": ["info"]}) == 20.0
     assert host_tool_timeout_seconds({"action": "os_log"}) == 45.0

@@ -11,7 +11,6 @@ import {
   debateFacePrimaryFromContext,
 } from "@/components/chat/debate/debateFaceCopy";
 import {
-  captainSynthesisPreviewText,
   coordinationWaitCaptainCaption,
   waitingWorkerRoles,
 } from "@/components/chat/teamSynthesisPhase";
@@ -587,19 +586,12 @@ export function useCaptainEndpointLive(runId: string): EndpointLive {
       actions.turnTerminal,
       detached,
     );
-    const preview = rt.teamSynthesisPreview;
-    const previewSig = preview
-      ? `${preview.headline.length}:${preview.text.length}:${preview.workers.length}`
-      : "";
     const w = rt.coordinationWait;
     const waitSig = w ? `${w.completed}/${w.total}` : "";
-    return `${base}|${previewSig}|${waitSig}`;
+    return `${base}|${waitSig}`;
   });
   const wait = useActiveExecField((rt) => rt.coordinationWait);
   const detached = Boolean(useActiveExecField((rt) => rt.executionDetached));
-  const teamSynthesisPreview = useActiveExecField(
-    (rt) => rt.teamSynthesisPreview,
-  );
   const getExecution = useLiveExecutionGetter();
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: liveSig is intentional invalidation key (getExecution reads fresh)
@@ -620,8 +612,6 @@ export function useCaptainEndpointLive(runId: string): EndpointLive {
     const preview = captainSinkPreview({
       captainStatus,
       answerPreview: answerContent ? headText(answerContent) : "",
-      synthesisPreview: captainSynthesisPreviewText(teamSynthesisPreview),
-      waitCaption,
     });
     return {
       status: sinkStatus,
@@ -635,16 +625,7 @@ export function useCaptainEndpointLive(runId: string): EndpointLive {
         ? () => actions.activateNode(runId)
         : undefined,
     };
-  }, [
-    liveSig,
-    runId,
-    actions,
-    answerContent,
-    wait,
-    detached,
-    teamSynthesisPreview,
-    getExecution,
-  ]);
+  }, [liveSig, runId, actions, answerContent, wait, detached, getExecution]);
 }
 
 export type ActSummaryLive = Pick<

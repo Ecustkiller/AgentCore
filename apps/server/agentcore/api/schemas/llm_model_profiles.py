@@ -41,6 +41,13 @@ class LlmModelProfileView(BaseModel):
     worker: ModelProfileSlot | None = None
     background: ModelProfileSlot | None = None
     vision: ModelProfileSlot | None = None
+    reasoning_effort: str | None = Field(
+        default=None,
+        description=(
+            "Vendor thinking-effort token for this combination (e.g. low/high/max). "
+            "Null = that model's vendor default. Official control values only."
+        ),
+    )
     is_default: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -63,18 +70,35 @@ class CreateLlmModelProfileRequest(BaseModel):
     worker: ModelProfileSlot | None = None
     background: ModelProfileSlot | None = None
     vision: ModelProfileSlot | None = None
+    reasoning_effort: str | None = Field(
+        default=None,
+        max_length=32,
+        description=(
+            "Vendor thinking-effort token. Null = vendor default for the main model. "
+            "Must be an official control value of the main model."
+        ),
+    )
     set_as_default: bool = False
 
 
 class UpdateLlmModelProfileRequest(BaseModel):
     """Partial update. Omitted fields unchanged; explicit null on worker/background/vision
-    clears the slot (worker/background → follow_main; vision → no dedicated slot)."""
+    clears the slot (worker/background → follow_main; vision → no dedicated slot).
+    Explicit null on reasoning_effort clears to the vendor default."""
 
     name: str | None = Field(default=None, max_length=200)
     main: ModelProfileSlot | None = None
     worker: ModelProfileSlot | None = None
     background: ModelProfileSlot | None = None
     vision: ModelProfileSlot | None = None
+    reasoning_effort: str | None = Field(
+        default=None,
+        max_length=32,
+        description=(
+            "Vendor thinking-effort token. Explicit null clears to the vendor default. "
+            "Must be an official control value of the (new) main model."
+        ),
+    )
 
 
 class SetDefaultModelProfileRequest(BaseModel):

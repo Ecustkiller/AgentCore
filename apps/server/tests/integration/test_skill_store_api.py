@@ -447,3 +447,26 @@ async def test_skill_store_publish_requires_group_and_filters_shelf(client):
             await client.get("/v1/skill-store", params={"group": "legal"})
         ).json()["data"]
     )
+
+
+async def test_skill_store_install_keeps_offers_tools(client):
+    await register_and_login(client, "ssbind")
+    doc = await _create_on_demand(
+        client,
+        "绑手脚.md",
+        "---\napply: on_demand\ndescription: 审\noffers_tools: host\n---\n怎么审\n",
+    )
+    published = await client.post("/v1/skill-store", json=_publish_body(doc["id"]))
+    assert published.status_code == 200, published.text
+    lid = published.json()["id"]
+    assert "offers_tools: host" in published.json()["content"]
+
+    await register_and_login(client, "ssbindbuyer")
+    installed = await client.post(f"/v1/skill-store/{lid}/install")
+    assert installed.status_code == 200, installed.text
+    catalog = await client.get("/v1/skill-catalog")
+    copy = next(
+        m for m in catalog.json()["mine"] if m["id"] == installed.json()["document_id"]
+    )
+    assert copy["offers_tools"] == ["host"]
+    assert "offers_tools: host" in copy["content"]

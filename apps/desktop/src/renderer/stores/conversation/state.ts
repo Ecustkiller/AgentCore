@@ -112,6 +112,7 @@ export interface ConversationState {
   addProcessTool: (
     payload: ToolUseStartPayload,
     conversationId?: string | null,
+    startedAtMs?: number,
   ) => void;
   endProcessTool: (
     payload: ToolUseEndPayload,

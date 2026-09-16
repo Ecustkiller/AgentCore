@@ -82,9 +82,7 @@ async def test_document_tree_crud_roundtrip(client):
 
 async def test_documents_are_owner_scoped(client, new_client):
     await register_and_login(client, "docu2a")
-    r = await client.post(
-        "/v1/documents", json={"name": "私密.md", "role": "rule", "content": "x"}
-    )
+    r = await client.post("/v1/documents", json={"name": "私密.md", "role": "rule", "content": "x"})
     doc_id = r.json()["id"]
     async with new_client() as other:
         await register_and_login(other, "docu2b")
@@ -122,17 +120,15 @@ async def test_on_demand_user_rule_excluded_from_injected_rules(session_factory)
             apply_mode="on_demand",
             content="- on_demand 规则",
         )
-        rules_md = await assemble_injected_rules(
-            store, repo, uid, folder_id=None, enabled=True
-        )
+        rules_md = await assemble_injected_rules(store, repo, uid, folder_id=None)
         on_demand = await repo.list_on_demand_user_rules(uid, None)
     assert "always 规则" in rules_md
     assert "on_demand 规则" not in rules_md
     assert {d.name for d in on_demand} == {"按需.md"}
 
 
-async def test_user_rule_follows_memory_slots_in_the_same_layer(session_factory):
-    """Global layer: 偏好 → 画像 → 用户常驻规则（稳定顺序，不是作者权威）。"""
+async def test_user_rule_injects_without_ai_notes(session_factory):
+    """User always-rules enter ``<设定>``; AI-maintained 偏好 / 画像 stay on disk."""
     uid = str(uuid.uuid4())
     async with session_factory() as session:
         repo = DocumentRepository(session)
@@ -147,17 +143,16 @@ async def test_user_rule_follows_memory_slots_in_the_same_layer(session_factory)
         )
         await store.save(uid, PREFERENCES_MEMORY_FILE, "## 沟通偏好\n- 倾向简洁", scope=None)
         await store.save(uid, CORE_MEMORY_FILE, "## 技术栈与工具\n- 用 Python", scope=None)
-        rules_md = await assemble_injected_rules(
-            store, repo, uid, folder_id=None, enabled=True
-        )
+        rules_md = await assemble_injected_rules(store, repo, uid, folder_id=None)
     assert "必须始终用中文" in rules_md
-    assert "用 Python" in rules_md and "倾向简洁" in rules_md
-    assert rules_md.index("倾向简洁") < rules_md.index("用 Python")
-    assert rules_md.index("用 Python") < rules_md.index("必须始终用中文")
+    assert "用 Python" not in rules_md
+    assert "倾向简洁" not in rules_md
+    assert "倾向简洁" in await store.load(uid, PREFERENCES_MEMORY_FILE)
+    assert "用 Python" in await store.load(uid, CORE_MEMORY_FILE)
 
 
-async def test_user_rule_survives_when_memory_disabled(session_factory):
-    # Turning off「AI 记忆」silences AI memory, but the user's OWN rule still injects.
+async def test_user_rule_survives_when_ai_notes_exist(session_factory):
+    # AI notes on disk must not enter ``<设定>``; the user's OWN rule still injects.
     uid = str(uuid.uuid4())
     async with session_factory() as session:
         repo = DocumentRepository(session)
@@ -166,9 +161,7 @@ async def test_user_rule_survives_when_memory_disabled(session_factory):
             uid, name="用户规则.md", role="rule", apply_mode="always", content="- 必须用中文"
         )
         await store.save(uid, CORE_MEMORY_FILE, "## 技术栈与工具\n- 用 Python", scope=None)
-        rules_md = await assemble_injected_rules(
-            store, repo, uid, folder_id=None, enabled=False
-        )
+        rules_md = await assemble_injected_rules(store, repo, uid, folder_id=None)
     assert "必须用中文" in rules_md
     assert "用 Python" not in rules_md
 
@@ -191,9 +184,7 @@ async def test_injection_admits_global_and_project_rules(session_factory):
             apply_mode="always",
             content="项目规则",
         )
-        rules_md = await assemble_injected_rules(
-            store, repo, uid, folder_id=proj, enabled=True
-        )
+        rules_md = await assemble_injected_rules(store, repo, uid, folder_id=proj)
     assert "全局规则" in rules_md
     assert "项目规则" in rules_md
 
@@ -219,11 +210,25 @@ async def test_remember_writes_user_rule_and_dedupes(session_factory, monkeypatc
     uid = str(uuid.uuid4())
     tool = RememberTool(folder_id=None)
 
-    res = await tool.execute({"content": "以后都用中文"}, _ctx(uid))
+    res = await tool.execute(
+        {
+            "name": "回复语言.md",
+            "content": "以后都用中文",
+            "description": "回复语言",
+        },
+        _ctx(uid),
+    )
     assert res.success and res.display["remembered"] is True and res.display["kind"] == "user_rule"
 
-    # Re-remembering the same directive is a no-op (normalized dedup).
-    res2 = await tool.execute({"content": "以后都用中文"}, _ctx(uid))
+    # Re-writing the same file with the same body is a no-op.
+    res2 = await tool.execute(
+        {
+            "name": "回复语言.md",
+            "content": "以后都用中文",
+            "description": "回复语言",
+        },
+        _ctx(uid),
+    )
     assert res2.success and res2.display["remembered"] is False
 
     # It landed as an injectable ai_maintained=false rule doc.
@@ -237,9 +242,7 @@ async def test_remember_writes_user_rule_and_dedupes(session_factory, monkeypatc
 # --- one-time file→document migration --------------------------------------------------------
 
 
-async def test_file_to_document_migration_idempotent_and_non_clobbering(
-    session_factory, tmp_path
-):
+async def test_file_to_document_migration_idempotent_and_non_clobbering(session_factory, tmp_path):
     uid = str(uuid.uuid4())
     proj = str(uuid.uuid4())
     fs = FileMemoryStore(tmp_path)
@@ -344,7 +347,6 @@ async def test_new_writes_land_under_agentcore(session_factory):
         AGENTCORE_ROOT_NAME,
         MEMORY_ROOT_NAME,
         RULES_DIR_NAME,
-        USER_RULES_DOC_NAME,
     )
 
     uid = str(uuid.uuid4())
@@ -352,7 +354,7 @@ async def test_new_writes_land_under_agentcore(session_factory):
         store = DocumentMemoryStore(session=session)
         await store.save(uid, CORE_MEMORY_FILE, "## 技术栈与工具\n- Python", scope=None)
         repo = DocumentRepository(session)
-        await repo.upsert_user_rules_doc(uid, None, "- 必须用中文")
+        await repo.upsert_user_rule_doc(uid, None, "必须用中文.md", "- 必须用中文")
 
         mem_root = await repo.get_memory_root(uid, None)
         assert mem_root is not None
@@ -362,9 +364,9 @@ async def test_new_writes_land_under_agentcore(session_factory):
         rules_dir = await repo.get_rules_dir(uid, None)
         assert rules_dir is not None and rules_dir.name == RULES_DIR_NAME
         assert rules_dir.parent_id == ac.id
-        rule = await repo.get_user_rules_doc(uid, None)
+        rule = await repo.get_user_rule_doc(uid, None, "必须用中文.md")
         assert rule is not None and rule.parent_id == rules_dir.id
-        assert rule.name == USER_RULES_DOC_NAME
+        assert rule.name == "必须用中文.md"
 
         note = await repo.get_memory_note(uid, CORE_MEMORY_FILE, None)
         assert note is not None and note.parent_id == mem_root.id
@@ -449,12 +451,11 @@ async def test_agentcore_layout_migration_default_factory(session_factory, monke
 
 async def test_injectable_rules_skip_stray_outside_convention(session_factory):
     """With AgentCore/规则/ present, a top-level stray always-rule is not injectable."""
-    from agentcore.db.repositories.documents import USER_RULES_DOC_NAME
 
     uid = str(uuid.uuid4())
     async with session_factory() as session:
         repo = DocumentRepository(session)
-        await repo.upsert_user_rules_doc(uid, None, "- 必须用中文")
+        await repo.upsert_user_rule_doc(uid, None, "必须用中文.md", "- 必须用中文")
         stray = await repo.create(
             uid,
             name="漏网规则.md",
@@ -470,7 +471,7 @@ async def test_injectable_rules_skip_stray_outside_convention(session_factory):
         docs = await repo.list_injectable_rules(uid, None, ai_maintained=False)
         ids = {d.id for d in docs}
         assert stray_id not in ids
-        assert any(d.name == USER_RULES_DOC_NAME for d in docs)
+        assert any(d.name == "必须用中文.md" for d in docs)
         assert all(d.parent_id == rules_dir.id for d in docs)
 
 
@@ -610,15 +611,11 @@ async def test_user_rule_apply_mode_always_on_demand_and_reject_conditional(
     )
     assert r.status_code == 422
 
-    r = await client.patch(
-        f"/v1/documents/{always['id']}", json={"apply_mode": "on_demand"}
-    )
+    r = await client.patch(f"/v1/documents/{always['id']}", json={"apply_mode": "on_demand"})
     assert r.status_code == 200, r.text
     assert r.json()["apply_mode"] == "on_demand"
 
-    r = await client.patch(
-        f"/v1/documents/{on_demand['id']}", json={"apply_mode": "always"}
-    )
+    r = await client.patch(f"/v1/documents/{on_demand['id']}", json={"apply_mode": "always"})
     assert r.status_code == 200
     assert r.json()["apply_mode"] == "always"
 
@@ -658,9 +655,7 @@ async def test_apply_description_if_empty_column_only_preserves_content(session_
         assert filled.content == content_before
         assert "description:" not in filled.content
 
-        again = await repo.apply_description_if_empty(
-            doc.id, user_id=uid, description="不该覆盖"
-        )
+        again = await repo.apply_description_if_empty(doc.id, user_id=uid, description="不该覆盖")
         assert again is not None
         assert again.description == "部署与回滚"
         assert again.content == content_before
@@ -736,6 +731,7 @@ async def test_apply_description_if_empty_skips_stale_content(session_factory):
         assert (fresh.description or "") == ""
         assert "v2" in fresh.content
 
+
 # --- AI memory write guards (API) ------------------------------------------------------------
 
 
@@ -747,12 +743,8 @@ async def test_delete_ai_core_memory_leaf_rejected(client, session_factory):
         store = DocumentMemoryStore(session=session)
         await store.save(uid, CORE_MEMORY_FILE, "## 技术栈与工具\n- Python", scope=None)
         await store.save(uid, topic_path("部署"), "## 要点\n- 先构建", scope=None)
-        core = await DocumentRepository(session).get_memory_note(
-            uid, CORE_MEMORY_FILE, None
-        )
-        topic = await DocumentRepository(session).get_memory_note(
-            uid, topic_path("部署"), None
-        )
+        core = await DocumentRepository(session).get_memory_note(uid, CORE_MEMORY_FILE, None)
+        topic = await DocumentRepository(session).get_memory_note(uid, topic_path("部署"), None)
         assert core is not None and topic is not None
         core_id, topic_id = core.id, topic.id
 
@@ -779,19 +771,12 @@ async def test_patch_apply_mode_ai_maintained_rejected(client, session_factory):
         store = DocumentMemoryStore(session=session)
         await store.save(uid, CORE_MEMORY_FILE, "## 技术栈与工具\n- Python", scope=None)
         await store.save(uid, topic_path("部署"), "## 要点\n- 先构建", scope=None)
-        core = await DocumentRepository(session).get_memory_note(
-            uid, CORE_MEMORY_FILE, None
-        )
-        topic = await DocumentRepository(session).get_memory_note(
-            uid, topic_path("部署"), None
-        )
+        core = await DocumentRepository(session).get_memory_note(uid, CORE_MEMORY_FILE, None)
+        topic = await DocumentRepository(session).get_memory_note(uid, topic_path("部署"), None)
         assert core is not None and topic is not None
         core_id, topic_id = core.id, topic.id
 
     for doc_id in (core_id, topic_id):
-        r = await client.patch(
-            f"/v1/documents/{doc_id}", json={"apply_mode": "on_demand"}
-        )
+        r = await client.patch(f"/v1/documents/{doc_id}", json={"apply_mode": "on_demand"})
         assert r.status_code == 400, r.text
         assert "AI-maintained" in r.json()["detail"]
-

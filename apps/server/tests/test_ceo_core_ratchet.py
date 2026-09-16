@@ -2,17 +2,15 @@
 
 ## 为什么有这道棘轮
 
-工具 schema 早就有下行棘轮（``test_tool_schema_size_ratchet.py``），常驻核一直没有，而
-``test_prompt.py`` 里七十多条断言几乎全是「某条禁令的字面必须出现在 ``_CEO_CORE_HINT`` 里」，
-半数带着事故编号。于是激励是单向的：**加一条禁令零成本还有奖励**（测试证明事故修了），
-**删掉或通用化一条要付红灯**、在 review 里看起来像退步。核就是这么长到两万字符的。
+工具 schema 早就有下行棘轮（``test_tool_schema_size_ratchet.py``），常驻核靠本文件盯总长。
+``test_prompt.py`` 守原则 / 分层，不守禁语字面、不写废名坟碑——否则激励是单向的：加判例零成本，
+删掉或收成原则要付红灯。体积回潮用棘轮咬合，不预埋词表。
 
 比体积更要紧的是**权威归属**：同一件事只能有一处权威。
 
 - 环境能不能做某事 = **算出来的事实**，住 ``<工作区>``（执行 / 桌 / 缺口 /
   Git …）。核里复述一份就会漂——案 0a71 就是核里
-  散文断言「``md_to_docx`` / ``md_to_pdf`` 无条件装配」，而 CEO 并不持这两把工具、在自己的
-  工具列表里看不见它们，模型于是花了整段思考链猜「队员到底有没有」，最后把用户的三个选项
+  散文断言「``md_export`` 无条件装配」，而装配态只能由开场表表达，模型于是花了整段思考链猜「队员到底有没有」，最后把用户的三个选项
   连同提问一起丢了。**下面那条 assembly-claim 测试就是这个 bug 的回归守卫。**
 - 可履约的操作手册 = **consult 正文**（``capability_how_suffix`` 只给 consult 拼，不挂冻结核）。
   通道不在的回合，手册是一份证明履行不了的说明书。
@@ -231,9 +229,8 @@ def test_core_states_no_tool_assembly_claims():
     """案 0a71 回归守卫：装配态只能由 `<工作区>` 算，核里不许用散文断言。"""
     hint = _CEO_CORE_HINT
     assert "无条件装配" not in hint
-    # 专用导出器的名字出现在核里，几乎总是为了断言「它一定在」——装没装配看开场表。
-    for exporter in ("md_to_docx", "md_to_pdf"):
-        assert exporter not in hint, f"{exporter} 的装配态归开场表，核不点名"
+    # 现行导出器名字出现在核里，几乎总是为了断言「它一定在」——装没装配看开场表。
+    assert "md_export" not in hint
     # 后缀枚举同理：能产什么由开场表 + 缺口表达，核只教对照结构面。
     for suffix in ("pptx", "xlsx", "docx"):
         assert suffix not in hint.lower(), f"核不枚举 .{suffix}；对照开场表"
@@ -284,21 +281,6 @@ def test_gated_manuals_do_not_ride_the_resident_core(gate_tool: str, signature: 
     assert signature not in offered, (
         f"{signature} 不应在工具已进表时再挂进冻结核（{gate_tool}）"
     )
-
-
-def test_capability_how_has_no_ceo_must_delegate_leftovers():
-    """Tool-lock leftovers left consult HOW; do not reintroduce as 禁止自己跑/截图."""
-    how = capability_how_suffix({"run", "host", "browser"})
-    for token in (
-        "验收与短命令由队员",
-        "打开系统面板 / 切默认音频 / 重启白名单服务 / 装本机软件 → `delegate`",
-        "验收 / 截图 → `delegate`",
-        "队员 `screenshot`",
-        "禁止自己跑",
-        "禁止自己截图",
-    ):
-        assert token not in how
-        assert token not in _CEO_CORE_HINT
 
 
 def test_honesty_floors_stay_resident():

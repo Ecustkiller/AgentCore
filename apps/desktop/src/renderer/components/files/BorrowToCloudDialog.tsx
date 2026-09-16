@@ -20,7 +20,7 @@ import { FolderOpen } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
- * AppShell host for「云上做完再写入」——与 {@link ImportToCloudDialogHost} 同构：
+ * AppShell host for「云上做完再写入」——与 {@link ConnectGitDialogHost} 同构：
  * store 开关 + Dialog。不改导入对话框文案。
  */
 export function BorrowToCloudDialogHost() {
@@ -43,7 +43,7 @@ type OwnedRoot = { root: FsRoot; owns: boolean };
 
 /**
  * 选本机夹 → 可改云上文件夹名 → 关窗后后台复制。授权根留下，不 removeRoot。
- * 命令面板 / 文件中枢直达用此框；Composer 三选已直接开传。ownsRoot 的才在取消时 removeRoot。
+ * 命令面板 / 文件中枢直达用此框；Composer 两选已直接开传。ownsRoot 的才在取消时 removeRoot。
  */
 export function BorrowToCloudDialog({
   open,

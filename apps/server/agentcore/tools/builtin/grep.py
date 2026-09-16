@@ -41,7 +41,6 @@ from agentcore.workspace.protocol import (
 )
 
 _DEFAULT_MAX_RESULTS = 50
-_MAX_RESULTS_CAP = 200
 # grep output is line-oriented and denser than the 4000-char default; lift it so
 # a full (already capped) result set is never truncated into a partial last line.
 _OUTPUT_LIMIT = 16000
@@ -80,10 +79,7 @@ class GrepTool:
                     },
                     "glob": {
                         "type": "string",
-                        "description": (
-                            "可选：按【文件名】过滤，如 '*.py' 或 '*.ts'。开头的 "
-                            "'**/' 或目录前缀会被忽略，只匹配文件名。"
-                        ),
+                        "description": "可选：按文件名过滤，如 '*.py'。",
                     },
                     "case_insensitive": {
                         "type": "boolean",
@@ -96,12 +92,6 @@ class GrepTool:
                             "只返回匹配到的文件列表及每个文件的匹配数，而非匹配行（默认 false）。"
                         ),
                         "default": False,
-                    },
-                    "max_results": {
-                        "type": "integer",
-                        "description": (
-                            "返回的最大匹配行数（files_only 模式下为文件数）。默认 50，最多 200。"
-                        ),
                     },
                 },
                 "required": ["pattern"],
@@ -120,11 +110,7 @@ class GrepTool:
         # Regex validity is authoritative in ripgrep (Rust regex), not Python re.
         rel_dir = arguments.get("path") or "."
         files_only = bool(arguments.get("files_only", False))
-        try:
-            raw = int(arguments.get("max_results", _DEFAULT_MAX_RESULTS))
-            max_results = max(1, min(raw, _MAX_RESULTS_CAP))
-        except (TypeError, ValueError):
-            max_results = _DEFAULT_MAX_RESULTS
+        max_results = _DEFAULT_MAX_RESULTS
 
         from agentcore.tools.builtin.file_ops.prepare_path import prepare_tool_path
 
@@ -292,7 +278,7 @@ def _render(
     files_only: bool,
 ) -> str:
     if files_only:
-        lines = [f"{rel}: {count}" for rel, count in result.file_counts]
+        lines = [rel for rel, _count in result.file_counts]
         summary = f"{len(result.file_counts)} 个文件匹配 /{pattern}/"
     else:
         lines = [f"{h.path}:{h.line_no}: {h.text}" for h in result.hits]

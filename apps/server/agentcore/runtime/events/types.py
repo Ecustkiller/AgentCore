@@ -100,9 +100,7 @@ class EventType(StrEnum):
     RUN_ESCALATION_GATE = "run_escalation_gate"
     ESCALATION_REQUIRED = "escalation_required"
     ESCALATION_RESOLVED = "escalation_resolved"
-    # CEO 协调模式 Phase 1：多 worker 委派期间的确定性团队进展摘要（模板拼接，不调 LLM）。
-    # DURABLE（P2）——落 journal；前端 fold 同 key 保最新，刷新后重建 StatusStrip 预览条。
-    # → 见 docs/03-AI核心/编排器与CEO主Agent.md §协调模式（合成通道）
+    # Leftover ``team_synthesis_preview``：历史 journal 仍 fold；活人面不再 emit / 画队长节点。
     TEAM_SYNTHESIS_PREVIEW = "team_synthesis_preview"
     # CEO 协调等待：captain 在 await_coordination_injection 空等团队事件期间推前端 UX。
     # EPHEMERAL——传输态心跳（进入 waiting=true / 退出 waiting=false；长等 ≤15s 刷新计数）；

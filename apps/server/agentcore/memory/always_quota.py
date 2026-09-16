@@ -1,10 +1,11 @@
 """Write-side always-entry quota (闸在写侧，读侧全量).
 
-Meters injectable always-on rule bodies by character count. User edits of an
-existing always entry may exceed the cap (allow + warning); AI create/merge that
-would grow past the cap is refused and may push one ``memory_updates`` card per
-pending fingerprint (same state + same refused entries → one card; user fix /
-content change resets).
+Meters injectable always-on **user-rule** bodies (``ai_maintained=false``) by
+character count. AI-maintained cores (偏好 / 画像 / 导航) do not occupy the pool.
+User edits of an existing always entry may exceed the cap (allow + warning); AI
+create/merge of a user rule that would grow past the cap is refused and may push
+one ``memory_updates`` card per pending fingerprint (same state + same refused
+entries → one card; user fix / content change resets).
 
 A full pool must never read as「AI 从此记不住东西」(审计 CTX-A2): the card names
 every entry this pass could not write AND the biggest entries currently holding the
@@ -186,13 +187,13 @@ def _fingerprint(docs: list[Document], *, used: int, max_chars: int) -> str:
 async def _always_docs_for_scope(
     repo: DocumentRepository, user_id: str, scope: str | None
 ) -> list[Document]:
-    """Always-on rule docs of one scope (user + AI-maintained).
+    """Always-on user-rule docs of one scope (``ai_maintained=false``).
 
-    One ``list_injectable_rules`` call per scope (``ai_maintained=None`` merges both
-    authorships). Callers that need global vs project meters still invoke this once
-    per scope — that split cannot be collapsed into a single query.
+    Matches ``<设定>`` injection: AI-maintained cores (偏好 / 画像 / 导航) stay
+    off the pool. Callers that need global vs project meters still invoke this
+    once per scope — that split cannot be collapsed into a single query.
     """
-    return await repo.list_injectable_rules(user_id, scope, ai_maintained=None)
+    return await repo.list_injectable_rules(user_id, scope, ai_maintained=False)
 
 
 async def list_always_quota_docs(

@@ -16,13 +16,11 @@ opening 引导 at negligible cost, so the runtime — not the model — owns「�
 docs/03-AI核心/Agent协作模式.md（向用户发问）.
 
 The card's content is one adaptive shape (rich when opening, compact mid-task).
-``message`` is still required (wire ``question`` / absorb / no-question fallback).
-On ordinary cards it is **not** shown as a title — the user-visible question goes in
-``questions[].prompt``; ``message`` may hold a batch reason the user may not see.
-With no ``questions``, ``message`` remains the only stem. Dedicated cards still use
-``message`` as the card title. Optional ``questions``
-(each pre-fillable with a ``default`` so a 想省事 user one-clicks through).
-A mid-task A/B is one ``questions`` item plus required ``message``.
+Every card has at least one ``questions[]`` item; the user-visible stem is
+``questions[].prompt`` (a one-sentence ask is a single fill-in question).
+Dedicated ``organize_plan`` cards use that prompt as the batch title.
+Each question may pre-fill a ``default`` so a 想省事 user one-clicks through.
+A mid-task A/B is one ``questions`` item.
 
 A submit answer is ``ToolEffect.CONTINUE`` (the CEO resumes with the user's picks); a
 stop is also ``CONTINUE`` with a拒答 breadcrumb + soft guidance (wire ``decision=stop``,

@@ -13,7 +13,6 @@ from agentcore.conversation.turn_persistence import (
     persist_turn_result,
     salvage_incomplete_turn,
 )
-from agentcore.conversation.turn_stats import turn_worker_stats
 from agentcore.core.log_context import get_log_value, log_context, new_trace_id
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
@@ -149,11 +148,9 @@ async def run_and_persist(
             # Presence gate: local desktop-channel turns need a workspace fulfiller
             # before any channel IO (baseline / prepare). Millisecond honest abort.
             from agentcore.runtime.pipeline.errors import (
-                await_prepare_local_io,
                 backend_uses_local_channel,
                 bind_prepare_local_io_deadline,
                 prepare_local_io_deadline_bound,
-                prepare_local_io_span,
                 raise_if_local_workspace_fulfiller_absent,
                 reset_prepare_local_io_deadline,
             )
@@ -179,27 +176,15 @@ async def run_and_persist(
                     message_id=message_id,
                     duration_ms=int((time.monotonic() - started) * 1000),
                 )
-            # One prepare-phase local IO wall clock shared by the baseline below and
-            # prepare's channel probes. Only the spans that opt in are capped — the
-            # pipeline's execution phase (tools, cross-desk delegate re-probes on a
-            # TARGET desk) runs unbudgeted, per 双模式工作区.md §7.7.
+            # One prepare-phase local IO wall clock for prepare's channel probes.
+            # First file-mutating tool captures the turn baseline unbudgeted in
+            # execute (not here — greetings must not zip). Pipeline execution
+            # (tools, cross-desk delegate re-probes) stays unbudgeted, per
+            # 双模式工作区.md §7.7.
             budget_token = None
             if not prepare_local_io_deadline_bound() and backend_uses_local_channel(backend):
                 budget_token = bind_prepare_local_io_deadline()
             try:
-                # A1+：云端回合写盘前 best-effort 基线快照（失败不阻断；预算内取消则诚实收口）。
-                from agentcore.workspace.turn_baseline import maybe_capture_turn_baseline
-
-                with prepare_local_io_span(backend):
-                    await await_prepare_local_io(
-                        maybe_capture_turn_baseline(
-                            user_id=user_id,
-                            folder_id=folder_id,
-                            conversation_id=conversation_id,
-                            message_id=message_id,
-                            backend=backend,
-                        )
-                    )
                 # Dev-only demo tape: divert before the real pipeline when this conversation
                 # is bound under DEMO_TAPE_REPLAY_ENABLED. Optional — ImportError must not
                 # block live turns (e.g. partial deploy missing tape_frame_meta).
@@ -379,245 +364,4 @@ async def run_and_persist(
                     reset_prepare_local_io_deadline(budget_token)
     finally:
         reset_turn_latency(latency_token)
-    return outcome
-
-
-async def run_mechanism_direct_and_persist(
-    *,
-    conversation_id: str,
-    user_message: str,
-    user_id: str,
-    folder_id: str | None,
-    sink: EventSink,
-    history: list[dict],
-    backend: WorkspaceBackend,
-    llm_credentials: LLMCredentials | None,
-    tasks: list[dict],
-    workflow_id: str,
-    workflow_version: int,
-    profile_set: ProfileSet | None = None,
-    permission_axes=None,
-    table_id: str | None = None,
-    x_client_platform: str | None = None,
-) -> dict | None:
-    """Mechanism-direct turn envelope (workflow / standing-bound-workflow).
-
-    Same outer contract as :func:`run_and_persist` (placeholder · lease ·
-    ``log_context`` · ``persist_turn_result``), but the inner pipeline is
-    :func:`~agentcore.runtime.pipeline.workflow_run.run_workflow_pipeline`
-    (no CEO ``react_loop``). Callers share this entry so「跑一次」and「绑工作流」do not drift.
-    """
-    from agentcore.runtime.pipeline.workflow_run import run_workflow_pipeline
-
-    session_saver, session_loader = session_callbacks(conversation_id)
-    suspension_saver, suspension_deleter = suspension_callbacks()
-
-    message_id = new_id()
-    attempt_id = new_id()
-    trace_id = new_trace_id()
-    started = time.monotonic()
-    latency_probe, latency_token = bind_turn_latency(started)
-    lease_stop: asyncio.Event | None = None
-    heartbeat_task: asyncio.Task | None = None
-    outcome: dict | None = None
-    try:
-        with log_context(
-            trace_id=trace_id,
-            conversation_id=conversation_id,
-            user_id=user_id,
-            attempt_id=attempt_id,
-            message_id=message_id,
-            agent_id="CEO",
-            cost_role="captain",
-            persona="CEO",
-            workflow_id=workflow_id,
-        ):
-            logger.info(
-                "mechanism_direct.turn_start",
-                chars=len(user_message or ""),
-                preview=preview(user_message),
-                history=len(history),
-                location=backend.location,
-                via="mechanism_direct",
-                message_id=message_id,
-                workflow_id=workflow_id,
-                workflow_version=workflow_version,
-                tasks=len(tasks),
-            )
-            await create_assistant_placeholder(
-                conversation_id=conversation_id,
-                message_id=message_id,
-                trace_id=trace_id,
-            )
-            sink.bind_content_checkpoint(
-                conversation_id=conversation_id,
-                message_id=message_id,
-            )
-            from agentcore.runtime.pipeline.errors import (
-                await_prepare_local_io,
-                backend_uses_local_channel,
-                bind_prepare_local_io_deadline,
-                prepare_local_io_deadline_bound,
-                prepare_local_io_span,
-                raise_if_local_workspace_fulfiller_absent,
-                reset_prepare_local_io_deadline,
-            )
-
-            try:
-                raise_if_local_workspace_fulfiller_absent(
-                    user_id=user_id, backend=backend
-                )
-            except Exception as e:
-                return await persist_placeholder_abort(
-                    exc=e,
-                    conversation_id=conversation_id,
-                    user_id=user_id,
-                    folder_id=folder_id,
-                    backend=backend,
-                    sink=sink,
-                    user_message=user_message,
-                    llm_credentials=llm_credentials,
-                    trace_id=trace_id,
-                    turn_id=attempt_id,
-                    message_id=message_id,
-                    duration_ms=int((time.monotonic() - started) * 1000),
-                )
-            # Same posture as the chat turn: one prepare clock, in force only inside
-            # the baseline span below and in prepare — never over workflow execution.
-            budget_token = None
-            if not prepare_local_io_deadline_bound() and backend_uses_local_channel(backend):
-                budget_token = bind_prepare_local_io_deadline()
-            try:
-                from agentcore.workspace.turn_baseline import maybe_capture_turn_baseline
-
-                with prepare_local_io_span(backend):
-                    await await_prepare_local_io(
-                        maybe_capture_turn_baseline(
-                            user_id=user_id,
-                            folder_id=folder_id,
-                            conversation_id=conversation_id,
-                            message_id=message_id,
-                            backend=backend,
-                        )
-                    )
-                if settings.turn_lease_enabled:
-                    owner_id = await acquire_turn_lease(
-                        message_id=message_id,
-                        conversation_id=conversation_id,
-                        user_id=user_id,
-                        phase="running",
-                        meta={
-                            "trace_id": trace_id,
-                            "folder_id": folder_id,
-                            "workflow_id": workflow_id,
-                        },
-                    )
-                    lease_stop = asyncio.Event()
-                    heartbeat_task = asyncio.create_task(
-                        lease_heartbeat_loop(
-                            message_id,
-                            owner_id=owner_id,
-                            interval_seconds=settings.turn_lease_heartbeat_seconds,
-                            stop=lease_stop,
-                        )
-                    )
-                release_lease_clean = True
-                try:
-                    try:
-                        result = await run_workflow_pipeline(
-                            conversation_id=conversation_id,
-                            user_id=user_id,
-                            user_message=user_message,
-                            tasks=tasks,
-                            workflow_id=workflow_id,
-                            workflow_version=workflow_version,
-                            sink=sink,
-                            backend=backend,
-                            history=history,
-                            folder_id=folder_id,
-                            table_id=table_id,
-                            permission_axes=permission_axes,
-                            profile_set=profile_set,
-                            llm_credentials=llm_credentials,
-                            session_saver=session_saver,
-                            session_loader=session_loader,
-                            suspension_saver=suspension_saver,
-                            suspension_deleter=suspension_deleter,
-                            message_id=message_id,
-                            x_client_platform=x_client_platform,
-                        )
-                    except asyncio.CancelledError:
-                        if turn_runs.is_clean_cancel(conversation_id):
-                            closed = await close_user_stop_turn(
-                                sink=sink,
-                                conversation_id=conversation_id,
-                                trace_id=trace_id,
-                                message_id=message_id,
-                            )
-                            release_lease_clean = bool(closed)
-                        else:
-                            release_lease_clean = False
-                        raise
-                    finish = result.get("finish_reason")
-                    duration_ms = int((time.monotonic() - started) * 1000)
-                    delegated, workers = turn_worker_stats(result)
-                    logger.info(
-                        "mechanism_direct.turn_complete",
-                        finish_reason=getattr(finish, "value", finish),
-                        rounds=result.get("rounds", 0),
-                        reply_chars=len(result.get("content") or ""),
-                        reply_preview=preview(result.get("content") or ""),
-                        delegated=delegated,
-                        workers=workers,
-                        duration_ms=duration_ms,
-                        error=result.get("error"),
-                        workflow_id=workflow_id,
-                        workflow_version=workflow_version,
-                        **latency_probe.as_log_fields(),
-                    )
-                    # persist-then-D1-await, same as continue_chat. Callers close the
-                    # sink on return, so the await sits after lease release below.
-                    await persist_turn_result(
-                        result=result,
-                        conversation_id=conversation_id,
-                        user_id=user_id,
-                        folder_id=folder_id,
-                        backend=backend,
-                        sink=sink,
-                        user_message=user_message,
-                        llm_credentials=llm_credentials,
-                        trace_id=trace_id,
-                        turn_id=attempt_id,
-                        duration_ms=duration_ms,
-                        kind="turn",
-                    )
-                    if isinstance(result, dict):
-                        result["message_id"] = message_id
-                        outcome = result
-                    else:
-                        outcome = {"message_id": message_id}
-                finally:
-                    if lease_stop is not None:
-                        lease_stop.set()
-                    if heartbeat_task is not None:
-                        heartbeat_task.cancel()
-                        with contextlib.suppress(asyncio.CancelledError):
-                            await heartbeat_task
-                    if settings.turn_lease_enabled:
-                        if release_lease_clean:
-                            await release_turn_lease(message_id)
-                        else:
-                            with contextlib.suppress(asyncio.TimeoutError, Exception):
-                                await asyncio.wait_for(
-                                    asyncio.shield(orphan_turn_lease(message_id)),
-                                    timeout=2.0,
-                                )
-            finally:
-                if budget_token is not None:
-                    reset_prepare_local_io_deadline(budget_token)
-    finally:
-        reset_turn_latency(latency_token)
-    from agentcore.runtime.coordination import await_live_detached_drive
-
-    await await_live_detached_drive(conversation_id)
     return outcome

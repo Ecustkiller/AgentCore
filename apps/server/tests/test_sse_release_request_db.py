@@ -103,6 +103,9 @@ async def test_inference_stream_releases_db_before_first_upstream_token(monkeypa
 
     monkeypatch.setattr(inference_proxy, "_resolve_inference_credentials", _resolve)
     monkeypatch.setattr(
+        inference_proxy, "_resolve_profile_reasoning_effort", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
         inference_proxy, "enforce_inference_proxy_rate_limit", AsyncMock()
     )
 

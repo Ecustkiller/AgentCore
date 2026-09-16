@@ -16,8 +16,7 @@ import { scheduleAccountRulesMemoryRefresh } from "@/services/refreshAccountRule
  * past the cap is 409 `ALWAYS_QUOTA_EXCEEDED`. {@link getAlwaysQuota} is the
  * internal usage endpoint, not a product dashboard.
  *
- * 纠错通道: {@link setDocumentDisputed} marks an entry「这条不对」so the AI stops using
- * it while the entry itself stays readable (`disputedAt`).
+ * 纠错通道 API 仍可标 ``disputed``（停注入、留盘）；产品面不提供停用 / 恢复，不要了就删。
  */
 
 /** Cloud-documents convention root name (§5.0). ≠ local disk `~/Documents/AgentCore`. */
@@ -429,12 +428,11 @@ export function updateDocumentApplyMode(
 }
 
 /**
- * Mark an entry as wrong / undo that mark (纠错通道「这条不对」).
+ * Mark / unmark an entry as disputed (API leftover; 产品面不提供停用入口).
  *
- * Explicit user action only — nothing here is inferred from what was said in a
- * conversation. A disputed entry stops being injected and stops appearing in the AI's
- * on-demand catalog, but is neither deleted nor rewritten, so the user can read what was
- * wrong and undo the mark.
+ * Explicit caller only — nothing here is inferred from conversation text.
+ * A disputed entry stops being injected and drops off the AI on-demand catalog.
+ * The row stays readable until the user deletes it.
  */
 export function setDocumentDisputed(
   id: string,

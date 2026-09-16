@@ -3,36 +3,27 @@
 Every place that needs a cost calls :func:`calculate_cost` — there is no other
 price table and no per-site arithmetic.
 
-**There is no FX anywhere in this product.** A price card is denominated in the
-currency its source publishes, and the resulting money keeps that currency all
-the way to the pixel:
+**There is no live FX.** User-facing money is curated **CNY**. Flash SKUs use
+OpenCode Go's public USD list × a frozen ``GO_USD_TO_CNY`` (peak/off-peak by
+call time). Other models stay 国内官价直写. ``credential_source`` only routes
+the same number: platform/vendor → ``cost_total_nano`` (quota); user →
+``cost_estimated_nano`` (display copy, never quota).
 
-- **curated** ``_PRICING`` — 国内官价, **CNY**. Billed money (``cost_total_nano``),
-  quota, and admin totals are this and only this.
-- **community** snapshot — public vendor list prices, **USD**
-  (:func:`~agentcore.llm.community_prices.community_currency`). BYOK estimates
-  ride this table, so they are dollars and must render as ``$``.
-- **OpenCode Go public list** (ops-only, not this module) —
-  ``billing/opencode_go_public_prices.py``. Admin window-card USD estimate.
-  Must never feed ``calculate_cost`` / quota / user-facing money.
+- **curated** ``_PRICING`` — 国内官价, **CNY** (glm / 豆包 / Pro / kimi vision).
+- **Flash** — Go public list × frozen 7.2, peak/off-peak (official / Go / Zen-free
+  share the meter). Admin still sums raw USD for window cards.
 
 Money is never a float. Costs are computed in :class:`~decimal.Decimal` and
 returned as integer **nano-units of** ``Cost.currency`` (``1 unit = 1e9 nano``).
 ``NANO_PER_CNY`` names that scale for the CNY ledger / quota; the scale itself is
 currency-independent, and display divides by it via :func:`nano_to_major`.
 
-Pricing layers (call-level ``credential_source``):
+Card resolve does **not** depend on who pays:
 
-- User (BYOK): community estimate table (**USD**) → ``unpriced`` (never Flash/glm
-  fallback)
-- Platform/vendor: curated ``_PRICING`` (**CNY**; exact, then date-stem of a dated
-  sibling) → community → glm-5.2 fallback + warning
+- Curated hit → ``pricing_source=curated`` (BYOK included).
+- User + no card → ``unpriced`` (0; never glm fallback).
+- Platform/vendor + no card → glm-5.2 fallback + ``cost.pricing_fallback``.
 
-User path never falls back to the default tier — unknown → ``unpriced`` (0).
-Platform/vendor keep default-tier fallback + warning (quota must not go blank);
-the community rung between them can only be reached by a 漏配 platform model
-(F4 requires a curated CNY card to ship), and it now reports its true USD
-currency instead of passing dollars off as yuan.
 Dated curated revisions log ``cost.pricing_prefix_match`` (match_kind=date_stem);
 wire ``pricing_source`` stays ``curated``.
 """
@@ -41,15 +32,16 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal
 
 from agentcore.core.logging import get_logger
-from agentcore.llm.community_prices import community_currency, community_pricing_for
 from agentcore.llm.profiles import (
     DEEPSEEK_V4_FLASH,
     DEEPSEEK_V4_FLASH_FREE,
     DEEPSEEK_V4_PRO,
+    DEEPSEEK_V41_FLASH,
     OPENCODE_GO_V41_FLASH,
 )
 from agentcore.llm.provider.protocol import TokenUsage
@@ -85,8 +77,7 @@ NANO_PER_CNY = 1_000_000_000
 DOUBAO_SEED_TURBO = "doubao/doubao-seed-2-1-turbo-260628"
 
 # Qwen-VL-Max (通义千问视觉) — model id constant for vision reader config.
-# No curated CNY card this step (USD list withdrawn); platform path → community /
-# glm fallback. Constant kept for imports elsewhere.
+# No curated CNY card; platform path → glm-5.2 fallback, user path → unpriced.
 QWEN_VL_MAX = "qwen-vl-max"
 
 # Platform upstream reference model id (OpenAI-compatible). Constant kept for
@@ -100,31 +91,19 @@ PLATFORM_RELAY_GROK_45 = "grok-4.5"  # id 常量保留；本步无 curated CNY �
 # fall back to glm-5.2. Keep OFF PLATFORM_MODELS — not a user-selectable chat model.
 PLATFORM_RELAY_KIMI_K25 = "kimi-k2.5"
 
-# CNY per 1M tokens (F4 curated). 国内官价直写 ¥。
-# DeepSeek：api-docs.deepseek.com/zh-cn/quick_start/pricing（人民币表）。
+# CNY per 1M tokens (F4). glm / 豆包 / Pro / kimi vision = 国内官价直写.
 # gpt-4o / grok-4.5 / qwen-vl-max — 仍无 curated（不上架）。
+# Flash：Go 公开单价 × 冻结 7.2，峰谷随调用时间；不进本表。
+_FLASH_GO_METER_IDS = frozenset(
+    {
+        DEEPSEEK_V4_FLASH,
+        OPENCODE_GO_V41_FLASH,
+        DEEPSEEK_V41_FLASH,
+        DEEPSEEK_V4_FLASH_FREE,
+        "deepseek-v4.1-flash-expires-on-0910",
+    }
+)
 _PRICING: dict[str, dict[str, Decimal]] = {
-    # DeepSeek V4 — 中文定价页：百万 tokens 输入（缓存命中/未命中）/ 输出。
-    # Flash: ¥0.02 / ¥1 / ¥2；Pro: ¥0.025 / ¥3 / ¥6（卡保留，allowlist 可暂不上架）。
-    DEEPSEEK_V4_FLASH: {
-        "cache_hit": Decimal("0.02"),
-        "cache_miss": Decimal("1"),
-        "output": Decimal("2"),
-    },
-    # OpenCode Go V4.1 Flash: same product nominal as V4 Flash (quota still
-    # nano-CNY; upstream Go window is a different dollar cap).
-    OPENCODE_GO_V41_FLASH: {
-        "cache_hit": Decimal("0.02"),
-        "cache_miss": Decimal("1"),
-        "output": Decimal("2"),
-    },
-    # Zen ``deepseek-v4-flash-free``：上游免计费，但产品仍按 Flash 名义价扣
-    # ``quota_*``（防白嫖）；curated 卡与 Flash 同档，否则无法上架平台目录。
-    DEEPSEEK_V4_FLASH_FREE: {
-        "cache_hit": Decimal("0.02"),
-        "cache_miss": Decimal("1"),
-        "output": Decimal("2"),
-    },
     DEEPSEEK_V4_PRO: {
         "cache_hit": Decimal("0.025"),
         "cache_miss": Decimal("3"),
@@ -159,7 +138,7 @@ _PRICING: dict[str, dict[str, Decimal]] = {
 
 # Unknown / unset platform model falls back to glm-5.2 (has CNY curated card)
 # rather than failing: a missing price must never crash a turn.
-# Platform/vendor only — user path stays unpriced instead.
+# Platform/vendor only — user path stays unpriced (0) instead.
 _DEFAULT_MODEL = PLATFORM_RELAY_GLM_52
 
 # tokens × (CNY / 1M tokens) → nano-CNY  ==  tokens × cny_per_million × 1000.
@@ -214,13 +193,39 @@ def _build_date_stem_index(
 _DATE_STEM_INDEX = _build_date_stem_index(_PRICING)
 
 
+def _now_utc() -> datetime:
+    return datetime.now(UTC)
+
+
+def _go_cost_multiplier() -> Decimal:
+    try:
+        from agentcore.config import settings
+
+        raw = str(getattr(settings, "go_cost_multiplier", "1") or "1").strip()
+        m = Decimal(raw)
+        return m if m > 0 else Decimal(1)
+    except Exception:  # noqa: BLE001 — pricing must not depend on settings plumbing
+        return Decimal(1)
+
+
+def _flash_go_meter_id(model: str) -> str | None:
+    key = (model or "").strip()
+    return key if key in _FLASH_GO_METER_IDS else None
+
+
+def _flash_go_cny_card(at: datetime) -> dict[str, Decimal]:
+    from agentcore.billing.opencode_go_public_prices import go_flash_cny_per_million
+
+    return go_flash_cny_per_million(at, multiplier=_go_cost_multiplier())
+
+
 def curated_pricing_for(
     model: str,
 ) -> tuple[dict[str, Decimal] | None, CuratedMatchKind | None, str | None]:
     """Curated card lookup: exact id, then date-stem of a dated curated sibling.
 
     Returns ``(card, match_kind, matched_key)``. No longest-family prefix — wrong
-    prices are worse than falling through to community / default tier.
+    prices are worse than unpriced (user) or default-tier fallback (platform).
     """
     key = (model or "").strip()
     if not key:
@@ -247,9 +252,8 @@ class Cost:
     ``output`` already includes reasoning tokens (reasoning is a billed subset of
     completion, not a separate line). ``total == input + output``.
 
-    ``currency`` is the price card's own currency — curated ``CNY``, community
-    ``USD``, never converted. Every consumer that shows one of these numbers must
-    show this alongside it; guessing from ``pricing_source`` is what broke before.
+    ``currency`` is the price card's own currency — curated ``CNY``. Every
+    consumer that shows one of these numbers must show this alongside it.
 
     ``pricing_source`` records which price layer produced the numbers.
     ``credential_source`` rides along for ledger routing (user → estimated column).
@@ -333,22 +337,22 @@ def resolve_price_card(
     model: str,
     *,
     credential_source: CredentialSource,
+    at: datetime | None = None,
 ) -> ResolvedCard:
     """Resolve the price card + its currency for one call.
 
-    User: community (USD) → unpriced (never default-tier fallback).
-    Platform/vendor: curated (CNY; exact, then date-stem) → community (USD)
-    → glm-5.2 fallback (CNY).
+    Card lookup is the same for every payer. Flash uses the Go public list
+    (CNY via frozen FX, peak/off-peak from ``at``). Other ids use curated CNY
+    (exact, then date-stem). ``credential_source`` only decides the miss path —
+    user stays ``unpriced`` (never default-tier); platform/vendor fall back to
+    glm-5.2.
 
-    An ``unpriced`` result still names a currency so callers never have to invent
-    one for a zero.
+    An ``unpriced`` result still names CNY so callers never have to invent a
+    currency for a zero.
     """
-    if credential_source == "user":
-        community = community_pricing_for(model)
-        if community is not None:
-            return ResolvedCard(community, "estimated", community_currency())
-        return ResolvedCard(None, "unpriced", community_currency())
-
+    if _flash_go_meter_id(model):
+        when = at if at is not None else _now_utc()
+        return ResolvedCard(_flash_go_cny_card(when), "curated", CURRENCY_CNY)
     curated, match_kind, matched_key = curated_pricing_for(model)
     if curated is not None:
         if match_kind == "date_stem":
@@ -360,12 +364,8 @@ def resolve_price_card(
                 match_kind=match_kind,
             )
         return ResolvedCard(curated, "curated", CURRENCY_CNY)
-    community = community_pricing_for(model)
-    if community is not None:
-        # 漏配 platform model (F4 requires a curated CNY card to ship). Report the
-        # community table's real USD rather than letting dollars enter the CNY
-        # ledger unlabelled; the catalog builder flags the missing card upstream.
-        return ResolvedCard(community, "estimated", community_currency())
+    if credential_source == "user":
+        return ResolvedCard(None, "unpriced", CURRENCY_CNY)
     return ResolvedCard(_PRICING[_DEFAULT_MODEL], "curated", CURRENCY_CNY, used_fallback=True)
 
 
@@ -377,7 +377,7 @@ def pricing_for(model: str) -> dict[str, Decimal]:
 
 
 def has_curated_pricing(model: str) -> bool:
-    """Whether ``model`` has an authoritative curated price card (不落社区/回落).
+    """Whether ``model`` has an authoritative curated price card (不落 glm 回落).
 
     Platform catalog models MUST have one (成本配额与计费 §〇·六 F4): a default-tier
     ``cost.pricing_fallback`` on a platform-billed catalog row is a 漏配缺陷, not a
@@ -386,6 +386,8 @@ def has_curated_pricing(model: str) -> bool:
     Dated revisions that share a curated sibling's date-stem count as curated
     (same card) so an id bump like ``…-260715`` is not flagged as 漏配.
     """
+    if _flash_go_meter_id(model):
+        return True
     card, _kind, _matched = curated_pricing_for(model)
     return card is not None
 
@@ -444,16 +446,17 @@ def calculate_cost(
     credential_source: CredentialSource | None = None,
     billing_mode: str | None = None,
     provider_name: str | None = None,
+    at: datetime | None = None,
 ) -> Cost:
     """Convert a run's token usage into money — the only place this happens.
 
     Input is split by cache hit/miss (DeepSeek pre-splits the counts); output is
     priced whole (reasoning already included). Returns integer nano-units of
-    ``Cost.currency`` — CNY off a curated card, USD off the community snapshot.
-    Nothing is converted between the two.
+    ``Cost.currency`` — always CNY. Flash is Go public USD × frozen FX (peak
+    from ``at``, default now). Other curated cards are 国内官价.
 
-    Pricing follows **call-level credential source** and the two-layer card
-    resolve, not deployment ``settings.billing_mode``.
+    The card does not depend on who pays. Call-level ``credential_source`` only
+    routes the same nano into billed vs estimated ledger columns.
 
     Two guards keep the bill honest when upstream usage is imperfect:
 
@@ -476,7 +479,7 @@ def calculate_cost(
         provider_name=provider_name,
         model=model,
     )
-    resolved = resolve_price_card(model, credential_source=source)
+    resolved = resolve_price_card(model, credential_source=source, at=at)
     card, used_fallback = resolved.card, resolved.used_fallback
     if card is None:
         return Cost(

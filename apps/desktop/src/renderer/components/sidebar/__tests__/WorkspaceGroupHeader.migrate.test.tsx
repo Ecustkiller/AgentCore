@@ -2,10 +2,9 @@
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LOCAL_TRADITIONAL_LABEL } from "@/lib/conversationWorkspaceMode";
 import type { FolderMeta } from "@/services/folders";
-import { useFoldersStore } from "@/stores/folders";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceGroupHeader } from "../WorkspaceGroupHeader";
 
 vi.mock("@/components/folders/FolderMembersDialog", () => ({
@@ -73,13 +72,6 @@ function renderHeader(
   );
 }
 
-beforeEach(() => {
-  useFoldersStore.setState({
-    importToCloudOpen: false,
-    importToCloudPrefill: null,
-  });
-});
-
 afterEach(() => {
   cleanup();
 });
@@ -93,7 +85,7 @@ describe("WorkspaceGroupHeader · local traditional (no migrate debt badge)", ()
     expect(screen.getByLabelText("在此本机文件夹中新开对话")).toBeTruthy();
   });
 
-  it("cloud group has no import menu entry", async () => {
+  it("cloud group ⋯ menu has 新建对话", async () => {
     renderHeader("cloud");
     expect(screen.getByText("DemoProj")).toBeTruthy();
     expect(screen.queryByText("请迁移")).toBeNull();
@@ -104,22 +96,6 @@ describe("WorkspaceGroupHeader · local traditional (no migrate debt badge)", ()
     fireEvent.pointerDown(trigger);
     fireEvent.click(trigger);
     expect(await screen.findByText("新建对话")).toBeTruthy();
-    expect(screen.queryByText("导入到「我的文件」")).toBeNull();
-  });
-
-  it("⋯ menu 导入到「我的文件」 opens import with prefill", async () => {
-    renderHeader("local");
-    const trigger = screen.getByLabelText("文件夹操作");
-    fireEvent.pointerDown(trigger);
-    fireEvent.click(trigger);
-    const item = await screen.findByText("导入到「我的文件」");
-    fireEvent.click(item);
-    const state = useFoldersStore.getState();
-    expect(state.importToCloudOpen).toBe(true);
-    expect(state.importToCloudPrefill).toEqual({
-      rootId: "root-1",
-      folderName: "DemoProj",
-    });
   });
 
   it("a nested folder shows its ancestor path so same-named siblings differ", () => {
@@ -138,7 +114,7 @@ describe("WorkspaceGroupHeader · local traditional (no migrate debt badge)", ()
     renderHeader("local");
     fireEvent.pointerDown(screen.getByLabelText("文件夹操作"));
     fireEvent.click(screen.getByLabelText("文件夹操作"));
-    expect(await screen.findByText("导入到「我的文件」")).toBeTruthy();
+    expect(await screen.findByText("新建对话")).toBeTruthy();
     expect(screen.queryByText("成员")).toBeNull();
   });
 

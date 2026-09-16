@@ -233,7 +233,7 @@ async def execute_tools(
             ).to_fact()
         )
 
-    # CEO 图内处置插话：本步成功用过 update_synthesis / delegate / cancel_worker
+    # CEO 图内处置插话：本步成功用过 delegate / cancel_worker
     # → 统一清 pending 并标 addressed（不在各工具实现里逐个补）。
     if role == "captain" and attempts:
         from agentcore.runtime.coordination.interjections import (

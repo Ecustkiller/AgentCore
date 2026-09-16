@@ -619,7 +619,12 @@ export class SidecarManager {
         agentMentions: req.replaceMaterials
           ? (req.agentMentions ?? [])
           : req.agentMentions,
-        attachments: req.replaceMaterials ? (req.attachments ?? []) : undefined,
+        // First send creates the user row — attachments must ride occupy or
+        // refresh hydrates text-only. ``replaceMaterials`` still means
+        // regenerate overwrite (including empty).
+        attachments: req.replaceMaterials
+          ? (req.attachments ?? [])
+          : req.attachments,
       });
       if (!occupied) {
         // Token survives Electron IPC unwrap. Renderer must not treat this as

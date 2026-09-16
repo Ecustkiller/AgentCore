@@ -150,13 +150,7 @@ function mineShelfCopy(
   return {
     title: item.label,
     subtitle: opts.subtitle,
-    description:
-      description ||
-      (item.memoryKind === "preferences"
-        ? "怎么回答"
-        : item.memoryKind === "profile"
-          ? "关于用户"
-          : ""),
+    description: description || "",
     tags,
     accessory: mineAccessory(item, opts),
   };
@@ -166,7 +160,6 @@ function mineAccessory(
   item: Extract<PromptCatalogItem, { kind: "mine" }>,
   opts: PromptMineShelfOpts,
 ): PromptShelfChip[] {
-  if (item.disputed) return [chip("已停用")];
   if (opts.fromMarket) {
     const chips = [chip("市场")];
     if (opts.hasUpdate) chips.push(chip("有更新", "primary"));
@@ -174,7 +167,7 @@ function mineAccessory(
   }
   const published = opts.listingStatus === "published";
   const takenDown = opts.listingStatus === "taken_down";
-  const inAlways = item.applyMode === "always" || item.memoryKind != null;
+  const inAlways = item.applyMode === "always";
   const chips: PromptShelfChip[] = [];
   if (inAlways || published || takenDown) chips.push(chip("我的"));
   if (published) chips.push(chip("已上架"));

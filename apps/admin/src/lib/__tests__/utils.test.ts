@@ -41,6 +41,7 @@ describe("fmtMoney", () => {
     expect(fmtNanoMoney(1_234_567_890_000_000)).toBe("¥1,234,567.89");
     expect(fmtNanoMoney(0)).toBe("—");
     expect(fmtEstimatedMoney(1234567.89, "USD")).toBe("≈$1,234,567.89");
+    expect(fmtEstimatedMoney(1.5, "CNY")).toBe("¥1.50");
     expect(fmtEstimatedMoney(0)).toBe("—");
   });
 });

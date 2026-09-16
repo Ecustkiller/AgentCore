@@ -194,18 +194,13 @@ def test_ceo_turn_table_facts_sit_between_attachments_and_sources():
     assert out == "CEO\n<附件/>\n<表格/>\n<已登记来源/>"
 
 
-def test_ceo_turn_has_no_working_set_section():
-    out = _ceo_turn()
-    assert out == "CEO"
-    assert "工作集" not in out
-    assert "近期团队图" not in out
-    assert "上轮交付缺口" not in out
+def test_ceo_turn_empty_sections_render_prefix_only():
+    assert _ceo_turn() == "CEO"
 
 
-def test_ceo_turn_prompt_omits_retired_futile_retry_section():
+def test_ceo_turn_renders_prior_delegate_retry():
     out = _ceo_turn(prior_delegate_retry="<上轮重派/>")
     assert out == "CEO\n<上轮重派/>"
-    assert "上轮徒劳重试" not in out
 
 
 def test_ceo_turn_observation_covers_the_source_ledger(monkeypatch):

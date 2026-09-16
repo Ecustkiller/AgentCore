@@ -23,8 +23,13 @@ from agentcore.memory.rules_injection import (
     lookup_on_demand_rule_body_from_cloud,
     rule_consult_name,
 )
-from agentcore.memory.store import TOPIC_DIR, MemoryStore, topic_path
+from agentcore.memory.store import MemoryStore
 from agentcore.runtime.context.consultable import ConsultDirectoryEntry
+from agentcore.runtime.skills.product_help import (
+    PRODUCT_HELP_NAME,
+    PRODUCT_HELP_SECTION_SEP,
+    fetch_product_help_section,
+)
 from agentcore.runtime.skills.registry import SkillRegistry
 
 logger = get_logger(__name__)
@@ -83,6 +88,14 @@ class SkillConsultSource:
         if not key:
             return None
         names = set(self.tool_names)
+        prefix = PRODUCT_HELP_NAME + PRODUCT_HELP_SECTION_SEP
+        if key.startswith(prefix):
+            skill = self.registry.get(PRODUCT_HELP_NAME)
+            if skill is None:
+                return None
+            if skill not in self.registry.available(names, audience=self.audience):
+                return None
+            return fetch_product_help_section(key[len(prefix) :])
         for skill in self.registry.available(names, audience=self.audience):
             if skill.name == key:
                 return skill.body
@@ -170,41 +183,18 @@ class ToolConsultSource:
 
 @dataclass
 class MemoryConsultSource:
-    """On-demand TOPIC notes (``主题/<slug>.md``); nearest-folder-then-global resolve."""
+    """AI topic notes are not consultable. Store is unused on the read path."""
 
     store: MemoryStore
     folder_id: str | None = None
-    enabled: bool = True
 
     async def list_directory(self, user_id: str) -> Sequence[ConsultDirectoryEntry]:
-        if not self.enabled:
-            return ()
-        from agentcore.memory.injection import load_memory_topics
-
-        topics = await load_memory_topics(
-            self.store, user_id, folder_id=self.folder_id, enabled=True
-        )
-        return [
-            ConsultDirectoryEntry(name=t.name, summary=t.summary, section="memory")
-            for t in topics
-        ]
+        del user_id
+        return ()
 
     async def fetch_by_name(self, user_id: str, name: str) -> str | None:
-        """Current folder → ancestors innermost-first → global (§5.4 近的覆盖远的)."""
-        if not self.enabled:
-            return None
-        slug = _memory_slug(name)
-        if not slug:
-            return None
-        from agentcore.memory.scope_chain import resolve_scope_chain
-
-        chain = await resolve_scope_chain(user_id, self.folder_id)
-        for scope in reversed(chain):
-            body = await self.store.load(user_id, topic_path(slug), scope=scope)
-            if body.strip():
-                return body
-        body = await self.store.load(user_id, topic_path(slug))
-        return body if body.strip() else None
+        del user_id, name
+        return None
 
 
 @dataclass
@@ -267,10 +257,24 @@ class RuleConsultSource:
     async def _load_named(
         repo: DocumentRepository, user_id: str, folder_id: str | None, key: str
     ) -> str | None:
+        from agentcore.documents.frontmatter import offers_tools_from_content
+        from agentcore.memory.rules_injection import _skip_always_consult
+
         for doc in await repo.list_on_demand_user_rules(user_id, folder_id):
             if rule_consult_name(doc.name) == key:
                 body = doc.content or ""
                 return body if body.strip() else None
+        for doc in await repo.list_injectable_rules(
+            user_id, folder_id, ai_maintained=False
+        ):
+            if _skip_always_consult(doc.name):
+                continue
+            if rule_consult_name(doc.name) != key:
+                continue
+            body = doc.content or ""
+            if not offers_tools_from_content(body):
+                continue
+            return body if body.strip() else None
         return None
 
 
@@ -339,6 +343,10 @@ class MergedConsultSource:
             if body is not None:
                 origin = _ORIGIN_BY_KIND[kind]
                 logger.info("consult.hit", name=raw, kind=kind, origin=origin)
+                if self.tool is not None:
+                    body = _apply_consult_tool_offers(
+                        body, kind=kind, name=raw, registry=self.tool.registry
+                    )
                 return ConsultHit(body=body, origin=origin)
         return None
 
@@ -431,5 +439,38 @@ async def build_merged_consult_source_for_user(
     )
 
 
-def _memory_slug(raw: str) -> str:
-    return raw.removeprefix(f"{TOPIC_DIR}/").removesuffix(".md").strip()
+def _apply_consult_tool_offers(
+    body: str, *, kind: str, name: str, registry: object
+) -> str:
+    """Promote bound on-demand tools. Never runs at always-inject time — consult only."""
+    from agentcore.documents.frontmatter import (
+        FrontmatterError,
+        offers_tools_from_content,
+        parse_entry_frontmatter,
+        strip_entry_frontmatter,
+    )
+    from agentcore.tools.on_demand import (
+        format_enabled_tools_note,
+        offer_bound_tools,
+        offer_skill_promoted_tools,
+    )
+
+    enabled: list[str] = []
+    if kind == "skill":
+        enabled.extend(offer_skill_promoted_tools(registry, name))
+    elif kind == "rule":
+        enabled.extend(offer_bound_tools(registry, offers_tools_from_content(body)))
+        parsed = parse_entry_frontmatter(body)
+        stripped = strip_entry_frontmatter(body)
+        if stripped is not None:
+            if (
+                not isinstance(parsed, FrontmatterError)
+                and parsed.apply == "always"
+                and parsed.offers_tools
+            ):
+                body = "已在常驻设定中。"
+            else:
+                body = stripped
+    if enabled:
+        body = body.rstrip() + format_enabled_tools_note(enabled)
+    return body

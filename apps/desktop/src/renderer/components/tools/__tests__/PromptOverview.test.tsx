@@ -185,7 +185,6 @@ function renderOverview(
       renamingFolderId={null}
       busy={false}
       onOpenItem={vi.fn()}
-      onOpenUpdates={vi.fn()}
       onCreateMine={vi.fn()}
       onCreateFolder={vi.fn()}
       onSubmitRenameFolder={vi.fn()}
@@ -238,10 +237,9 @@ describe("PromptOverview", () => {
     expect(screen.queryByTestId("prompt-rail-tools")).toBeNull();
   });
 
-  it("按需叶子铺在概览上，夹只当区标题，最近学到走开弹窗入口", () => {
+  it("按需叶子铺在概览上，夹只当区标题", () => {
     const onOpenItem = vi.fn();
-    const onOpenUpdates = vi.fn();
-    renderOverview({ onOpenItem, onOpenUpdates });
+    renderOverview({ onOpenItem });
     expect(screen.getByRole("heading", { name: "其他" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "合同审查" })).toBeTruthy();
     expect(
@@ -257,18 +255,11 @@ describe("PromptOverview", () => {
         name: "host",
       }),
     );
-    fireEvent.click(
-      within(screen.getByTestId("prompt-overview-updates")).getByRole(
-        "button",
-        { name: "最近学到" },
-      ),
-    );
     expect(onOpenItem.mock.calls.map((call) => call[0])).toEqual([
       mineCatalogId("d1"),
       skillCatalogId("thin_skill"),
       toolCatalogId("host"),
     ]);
-    expect(onOpenUpdates).toHaveBeenCalled();
     expect(screen.queryByTestId("memory-updates-view")).toBeNull();
     expect(screen.getByTestId("prompt-overview").textContent).not.toMatch(/%/);
   });
@@ -317,9 +308,7 @@ describe("PromptOverview", () => {
     expect(official.querySelector(".overflow-x-auto")).toBeNull();
     expect(tools.querySelector(".grid")).toBeTruthy();
     expect(official.querySelector(".grid")).toBeTruthy();
-    expect(
-      onDemand.contains(screen.getByTestId("prompt-overview-updates")),
-    ).toBe(false);
+    expect(screen.queryByTestId("prompt-overview-updates")).toBeNull();
     expect(screen.getByRole("heading", { name: "常驻" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "按需" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "工具" })).toBeTruthy();

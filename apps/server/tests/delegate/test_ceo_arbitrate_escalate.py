@@ -440,8 +440,8 @@ async def test_resolve_escalation_stashes_when_no_live_pending():
 async def test_resolve_escalation_soft_success_when_session_inactive():
     """会话已收口（团队全部完成）：resolve_escalation 幂等软化为 success 提示，不硬 error。
 
-    对齐 UpdateSynthesisTool：``session is None``（从未开团）才硬 error；``not active``
-    （已收口）给软成功，避免烧掉 CEO 一轮重试。
+    ``session is None``（从未开团）才硬 error；``not active``（已收口）给软成功，
+    避免烧掉 CEO 一轮重试。
     """
     clear_active_coordination()
     session = CoordinationSession(execution_id="e-d1", total_workers=2)

@@ -466,10 +466,7 @@ class FileReadTool:
                     },
                     "offset": {
                         "type": "integer",
-                        "description": (
-                            "起始行号（1-based，含）。省略则从第 1 行。"
-                            "仅页脚已达安全顶或已有行号时再开窗。"
-                        ),
+                        "description": "起始行号（1-based，含）。省略则从第 1 行。",
                         "minimum": 1,
                     },
                     "limit": {

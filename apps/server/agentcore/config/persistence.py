@@ -52,8 +52,9 @@ class PersistenceSettings(BaseModel):
     # Max on-demand topic notes (主题/<slug>.md) per user; new ones beyond this are
     # dropped by the consolidation pass (anti-bloat backstop, 记忆文件夹化 §七).
     memory_max_topic_files: int = 24
-    # R1 fingerprint-dirty explore refresh (旁路): per-folder debounce; never blocks the turn.
-    memory_explore_refresh_enabled: bool = True
+    # Retired: ``schedule_explore_refresh`` is an unconditional no-op.
+    # Kept so existing env/config keys do not fail to parse.
+    memory_explore_refresh_enabled: bool = False
     memory_explore_refresh_idle_seconds: float = 45.0
     # Write-side always-entry quota (闸在写侧，读侧全量). Caps the sum of frontmatter-stripped
     # always rule bodies in an injection context (global + optional project). Anchored to the
@@ -95,16 +96,6 @@ class PersistenceSettings(BaseModel):
     # Lifespan flush of in-flight folds. Fold is best-effort; do not hold the
     # Docker stop window for a wedged LLM call.
     compaction_shutdown_seconds: float = 2.0
-
-    # Workflow clock / webhook: in-process DB poll of trigger_next_run_at + lease.
-    workflow_trigger_scheduler_enabled: bool = True
-    workflow_trigger_poll_interval_seconds: int = 30
-    workflow_trigger_poll_batch_limit: int = 10
-    workflow_trigger_lease_seconds: int = 30 * 60
-    # Webhook: per-workflow sliding window + optional idempotency key TTL.
-    workflow_trigger_webhook_rate_limit_max: int = 30
-    workflow_trigger_webhook_rate_limit_window_seconds: int = 60
-    workflow_trigger_webhook_idempotency_ttl_seconds: int = 3600
 
     # Assembled system-prompt budget (项目审计-成本性能专项 COST-004). Observe-only today:
     # ``cost.prompt_assembled`` logs per-section chars, ``assembly_hash``, and whether the

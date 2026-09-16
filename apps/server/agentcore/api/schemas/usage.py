@@ -1,9 +1,10 @@
 """Cost & usage (团队工资单 + 账户仪表盘) schemas.
 
 Money is integer nano (1 unit = 1e9) everywhere — never a float — denominated in
-each breakdown's own ``currency``. Billed spend is CNY off curated cards; BYOK
-estimates are USD off the community table. **Nothing is converted** (无 FX), so a
-client picks its symbol from ``currency``, never from the field name.
+each breakdown's own ``currency``. Billed spend and BYOK display copy share the
+curated CNY card; ``estimated_cost`` is the BYOK slice (not quota). **Nothing is
+converted** (无 FX), so a client picks its symbol from ``currency``, never from
+the field name.
 Token fields use the ledger short keys (matching cost_events.tokens /
 RunState.usage), distinct from message_end's legacy ``*_tokens`` SSE shape.
 """
@@ -14,9 +15,9 @@ from pydantic import BaseModel
 class CostBreakdown(BaseModel):
     """A run's / turn's / window's cost in integer nano-money (canonical).
 
-    Billed (``cost``) and BYOK-estimated (``estimated_cost``) spend are always two
-    separate breakdowns, each carrying its own ``currency`` — that is how a mixed
-    turn stays representable without FX.
+    Billed (``cost``) and BYOK (``estimated_cost``) stay two breakdowns so quota
+    SUM never sees the display copy. Same CNY card; mixed turns add on the
+    turn-total ``cost.total`` (bubble), not in the account window.
     """
 
     input: int

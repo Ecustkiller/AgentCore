@@ -17,8 +17,8 @@ const GO_CAPS_USD = {
 } as const;
 
 /**
- * OpenCode Go 5h / week / month — nominal CNY plus a public-list USD estimate.
- * Neither number is an upstream bill or balance.
+ * OpenCode Go 5h / week / month — product CNY (Go list × frozen 7.2) plus a
+ * public-list USD estimate (no FX). Neither number is an upstream bill.
  */
 export function GoWindowsCard({
   data,
@@ -41,7 +41,7 @@ export function GoWindowsCard({
           <span>
             {data
               ? honestyCopy(data.estimate_model, data.estimate_price_as_of)
-              : honestyCopy("deepseek-v4-flash", "2026-08-18")}
+              : honestyCopy("deepseek-v4-flash", "2026-09-10")}
           </span>
         </div>
 
@@ -126,10 +126,10 @@ function hasGoTraffic(data: AdminGoWindows): boolean {
 
 function honestyCopy(model: string, priceAsOf: string): string {
   return (
-    `名义价是我方 curated 扣额度用的 CNY，不是上游美元用量。` +
-    `美元是按 OpenCode 公开单价（${model}，截至 ${priceAsOf}）对每次调用按时段（Peak / Off-Peak）估算的，` +
+    `名义价是同一把 Go 公开尺写成的人民币（冻结 7.2），用来扣额度，不是上游美元用量。` +
+    `美元列按公开单价（${model}，截至 ${priceAsOf}）对每次调用按时段（Peak / Off-Peak）估算，不乘 7.2，` +
     `用来看离 $12 / $30 / $60 还有多远——不是上游账单或余额。` +
-    `未证死：① Go 计入窗口前可能乘未公开的 costMultiplier（默认 1），实际若大于 1 则估算偏低；` +
+    `未证死：① Go 计入窗口前可能乘未公开的 costMultiplier；产品侧 GO_COST_MULTIPLIER 默认 1，实际若大于 1 则美元列偏低；` +
     `② 上游网关是否识别 DeepSeek 的 cache 命中字段未经实包验证，若不识别则我们按 Cached Read 计价会低估。`
   );
 }

@@ -9,18 +9,15 @@ import { isFeatureUnavailable } from "@/lib/errors";
 import { notifyError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
-  type DocumentApplyMode,
   type DocumentNode,
   deleteDocument,
   listScopeEntries,
   renameDocument,
-  setDocumentDisputed,
 } from "@/services/documents";
 import { type MemoryKind, writeMemoryFile } from "@/services/memory";
 import {
   GLOBAL_PREFERENCES_PATH,
   GLOBAL_PROFILE_PATH,
-  MEMORY_UPDATES_PATH,
   isMemoryTopicPath,
   memoryProjectNavigationPath,
   memoryProjectProfilePath,
@@ -36,12 +33,9 @@ import {
   FileText,
   Folder,
   FolderOpen,
-  History,
   Loader2,
   Pencil,
-  ThumbsDown,
   Trash2,
-  Undo2,
 } from "lucide-react";
 import {
   type HTMLAttributes,
@@ -50,7 +44,6 @@ import {
   useEffect,
   useState,
 } from "react";
-import { DisputeEntryDialog } from "./DisputeEntryDialog";
 import { loadMemoryTopicsExpanded, saveMemoryTopicsExpanded } from "./storage";
 
 /** Which layer a section renders: GLOBAL entries, or one project's. */
@@ -122,63 +115,10 @@ function ensureMdName(name: string): string {
   return /\.(md|markdown)$/i.test(name) ? name : `${name}.md`;
 }
 
-/** Cold-start placeholders so core leaves stay visible before any document row exists. */
-type CorePlaceholder = {
-  name: string;
-  path: string;
-  applyMode: DocumentApplyMode;
-};
-
-function corePlaceholders(scope: EntryScope): CorePlaceholder[] {
-  if (scope.kind === "global") {
-    return [
-      {
-        name: "偏好.md",
-        path: GLOBAL_PREFERENCES_PATH,
-        applyMode: "always",
-      },
-      {
-        name: "画像.md",
-        path: GLOBAL_PROFILE_PATH,
-        applyMode: "always",
-      },
-    ];
-  }
-  return [
-    {
-      name: "画像.md",
-      path: memoryProjectProfilePath(scope.folderId),
-      applyMode: "always",
-    },
-    {
-      name: "导航.md",
-      path: memoryProjectNavigationPath(scope.folderId),
-      applyMode: "always",
-    },
-  ];
-}
-
-type DisplayRow =
-  | { kind: "doc"; doc: DocumentNode }
-  | { kind: "placeholder"; leaf: CorePlaceholder };
-
-function mergeDisplayRows(
-  scope: EntryScope,
-  docs: DocumentNode[],
-): DisplayRow[] {
-  const mainDocs = docs.filter((d) => !isTopicEntryName(d.name));
-  const present = new Set(mainDocs.map((d) => d.name));
-  const rows: DisplayRow[] = [
-    ...mainDocs.map((doc): DisplayRow => ({ kind: "doc", doc })),
-    ...corePlaceholders(scope)
-      .filter((leaf) => !present.has(leaf.name))
-      .map((leaf): DisplayRow => ({ kind: "placeholder", leaf })),
-  ];
-  return rows.sort((a, b) => {
-    const an = a.kind === "doc" ? a.doc.name : a.leaf.name;
-    const bn = b.kind === "doc" ? b.doc.name : b.leaf.name;
-    return an.localeCompare(bn, "zh");
-  });
+function listedMainDocs(docs: DocumentNode[]): DocumentNode[] {
+  return docs
+    .filter((d) => !isTopicEntryName(d.name))
+    .sort((a, b) => a.name.localeCompare(b.name, "zh"));
 }
 
 function topicEntryRows(docs: DocumentNode[]): DocumentNode[] {
@@ -194,8 +134,8 @@ function topicEntryRows(docs: DocumentNode[]): DocumentNode[] {
 
 /**
  * Where to open an entry in the detail pane.
- * AI-maintained notes keep memory synthetic paths (editor + 双栏画像); user-owned
- * entries open via the documents source (path = document id).
+ * AI-maintained leftover cores keep memory synthetic paths (ordinary md editor);
+ * user-owned entries open via the documents source (path = document id).
  */
 export type EntryOpenTarget =
   | { channel: "memory"; path: string; name: string }
@@ -261,7 +201,6 @@ export function EntriesSection({
   onOpen,
   onDeleted,
   onRenamed,
-  onOpenUpdates,
   indent = 0,
 }: {
   scope: EntryScope;
@@ -270,14 +209,10 @@ export function EntriesSection({
   onOpen: (target: EntryOpenTarget) => void;
   onDeleted: (target: EntryOpenTarget) => void;
   onRenamed: (target: EntryOpenTarget, name: string) => void;
-  /** GLOBAL-only「最近更新」feed opener. */
-  onOpenUpdates?: () => void;
   indent?: number;
 }) {
   const queryClient = useQueryClient();
   const folderId = scope.kind === "folder" ? scope.folderId : null;
-  const [disputing, setDisputing] = useState<DocumentNode | null>(null);
-  const [disputeBusy, setDisputeBusy] = useState(false);
   const [clearing, setClearing] = useState<DocumentNode | null>(null);
   const [clearBusy, setClearBusy] = useState(false);
   const foldKey = topicFolderKey(scope);
@@ -294,7 +229,7 @@ export function EntriesSection({
   });
 
   const rows = entries.data ?? [];
-  const displayRows = mergeDisplayRows(scope, rows);
+  const displayRows = listedMainDocs(rows);
   const topicRows = topicEntryRows(rows);
   const topicActive = topicPathBelongsToScope(memoryActivePath, scope);
   const leafPad = indent + 8;
@@ -364,33 +299,6 @@ export function EntriesSection({
     }
   };
 
-  // 纠错通道: only the user can say「这条不对」, and saying it stops the entry from being
-  // used without deleting it — the text stays here to read, re-check and undo.
-  const setDisputed = async (doc: DocumentNode, disputed: boolean) => {
-    try {
-      await setDocumentDisputed(doc.id, disputed);
-      await refresh();
-      return true;
-    } catch (e) {
-      notifyError(e, disputed ? "标记失败" : "撤销标记失败");
-      return false;
-    }
-  };
-
-  // Marking goes through {@link DisputeEntryDialog} first: the mark is entry-level while
-  // the user usually means one sentence, so the other lines it silences get named before
-  // the click lands. Undo needs no such warning — it only gives usage back.
-  const confirmDispute = async () => {
-    const doc = disputing;
-    if (!doc || disputeBusy) return;
-    setDisputeBusy(true);
-    try {
-      if (await setDisputed(doc, true)) setDisputing(null);
-    } finally {
-      setDisputeBusy(false);
-    }
-  };
-
   const isActive = (target: EntryOpenTarget) =>
     target.channel === "memory"
       ? memoryActivePath === target.path
@@ -400,7 +308,6 @@ export function EntriesSection({
     doc: DocumentNode,
     opts?: { paddingLeft?: number; label?: string },
   ) => {
-    const disputed = doc.disputedAt != null;
     const target = entryOpenTarget(doc);
     return (
       <ContextMenu key={doc.id}>
@@ -413,30 +320,12 @@ export function EntriesSection({
             label={opts?.label ?? doc.name}
             description={doc.description}
             frontmatterError={doc.frontmatterError}
-            disputed={disputed}
             active={isActive(target)}
             onOpen={() => onOpen(target)}
             alwaysChars={doc.alwaysChars}
           />
         </ContextMenuTrigger>
         <ContextMenuContent className="min-w-36">
-          {disputed ? (
-            <ContextMenuItem
-              title="恢复后 AI 会重新使用这条"
-              onSelect={() => void setDisputed(doc, false)}
-            >
-              <Undo2 size={14} className="shrink-0" />
-              <span className="flex-1 truncate">恢复使用</span>
-            </ContextMenuItem>
-          ) : doc.aiMaintained ? (
-            <ContextMenuItem
-              title="停用整个条目：AI 不再使用，内容保留，可随时恢复"
-              onSelect={() => setDisputing(doc)}
-            >
-              <ThumbsDown size={14} className="shrink-0" />
-              <span className="flex-1 truncate">这条不对…</span>
-            </ContextMenuItem>
-          ) : null}
           <ContextMenuItem
             disabled={doc.aiMaintained}
             onSelect={() => void renameEntry(doc)}
@@ -463,44 +352,8 @@ export function EntriesSection({
     );
   };
 
-  const renderPlaceholderRow = (leaf: CorePlaceholder) => {
-    const target: EntryOpenTarget = {
-      channel: "memory",
-      path: leaf.path,
-      name: leaf.name,
-    };
-    return (
-      <EntryLeafRow
-        key={`placeholder:${leaf.path}`}
-        paddingLeft={leafPad}
-        icon={<FileText size={14} className="shrink-0 text-muted-foreground" />}
-        label={leaf.name}
-        description=""
-        frontmatterError={null}
-        disputed={false}
-        active={isActive(target)}
-        onOpen={() => onOpen(target)}
-      />
-    );
-  };
-
   return (
     <div>
-      {scope.kind === "global" && onOpenUpdates && (
-        <EntryLeafRow
-          paddingLeft={leafPad}
-          icon={
-            <History size={14} className="shrink-0 text-muted-foreground" />
-          }
-          label="最近更新"
-          description=""
-          frontmatterError={null}
-          disputed={false}
-          active={memoryActivePath === MEMORY_UPDATES_PATH}
-          onOpen={onOpenUpdates}
-        />
-      )}
-
       {entries.isLoading ? (
         <div
           className="flex h-7 items-center gap-1.5 text-xs text-muted-foreground"
@@ -528,7 +381,7 @@ export function EntriesSection({
             加载失败，点此重试
           </button>
         )
-      ) : displayRows.length === 0 ? (
+      ) : displayRows.length === 0 && topicRows.length === 0 ? (
         <div
           className="flex flex-col gap-1 py-1"
           style={{ paddingLeft: leafPad }}
@@ -539,11 +392,7 @@ export function EntriesSection({
         </div>
       ) : (
         <>
-          {displayRows.map((row) =>
-            row.kind === "doc"
-              ? renderDocRow(row.doc)
-              : renderPlaceholderRow(row.leaf),
-          )}
+          {displayRows.map((doc) => renderDocRow(doc))}
           {topicRows.length > 0 ? (
             <div>
               <button
@@ -602,21 +451,13 @@ export function EntriesSection({
         </>
       )}
 
-      <DisputeEntryDialog
-        doc={disputing}
-        busy={disputeBusy}
-        onOpenChange={(open) => {
-          if (!open) setDisputing(null);
-        }}
-        onConfirm={() => void confirmDispute()}
-      />
       <ConfirmDialog
         open={clearing != null}
         onOpenChange={(open) => {
           if (!open) setClearing(null);
         }}
-        title={clearing ? `清空「${clearing.name}」？` : "清空这篇设定？"}
-        description="下一句对话 AI 不再使用这篇。列表里还会留下这个名字，方便以后再写。项目文件不会被删。"
+        title={clearing ? `清空「${clearing.name}」？` : "清空这篇？"}
+        description="列表里还会留下这个名字。项目文件不会被删。"
         confirmLabel="清空"
         tone="danger"
         busy={clearBusy}
@@ -634,8 +475,6 @@ const EntryLeafRow = forwardRef<
     label: string;
     description: string;
     frontmatterError: string | null;
-    /** User marked this entry wrong: AI stops using it, the text stays (纠错通道). */
-    disputed?: boolean;
     active: boolean;
     onOpen: () => void;
     /** Always-pool chars for this row; only shown when non-null and above floor. */
@@ -649,7 +488,6 @@ const EntryLeafRow = forwardRef<
     label,
     description,
     frontmatterError,
-    disputed = false,
     active,
     onOpen,
     alwaysChars,
@@ -661,11 +499,7 @@ const EntryLeafRow = forwardRef<
   ref,
 ) {
   const hasMeta = Boolean(description || frontmatterError);
-  // A disputed entry no longer rides the prompt, so its always size is not being spent.
-  // Empty rows stay silent too, which is also what keeps a cold-start placeholder and a
-  // written-but-empty entry looking the same.
   const showAlwaysChars =
-    !disputed &&
     typeof alwaysChars === "number" &&
     Number.isFinite(alwaysChars) &&
     alwaysChars >= ROW_CHARS_FLOOR;
@@ -692,23 +526,7 @@ const EntryLeafRow = forwardRef<
         <span className={cn("shrink-0", hasMeta ? "mt-0.5" : "")}>{icon}</span>
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-1">
-            <span
-              className={cn(
-                "min-w-0 truncate",
-                disputed && "text-muted-foreground line-through",
-              )}
-            >
-              {label}
-            </span>
-            {disputed ? (
-              <span
-                title="你标了「这条不对」：AI 不再使用，内容仍保留（右键可恢复）"
-                className="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground"
-              >
-                <ThumbsDown size={12} aria-hidden />
-                <span className="text-xs">已停用</span>
-              </span>
-            ) : null}
+            <span className="min-w-0 truncate">{label}</span>
             {frontmatterError ? (
               <span
                 title={`frontmatter 无效，该条不生效：${frontmatterError}`}

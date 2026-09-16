@@ -51,7 +51,6 @@ import {
   connectorCatalogId,
   useMcpConnectors,
 } from "@/pages/toolbox/ConnectorsPage";
-import { APP_PATHS } from "@/pages/toolbox/manual/paths";
 import { ApiError } from "@/services/api";
 import type { Capabilities } from "@/services/capabilities";
 import {
@@ -62,14 +61,13 @@ import {
   listScopeEntries,
   renameDocument,
   reparentDocument,
-  setDocumentDisputed,
   writeDocument,
 } from "@/services/documents";
 import { defaultChatSupportsTools } from "@/services/llmProviders";
-import { writeMemoryFile } from "@/services/memory";
 import {
   EMPTY_SKILL_CATALOG,
   type SkillCatalog,
+  bindableToolOptions,
   composeOnDemandSkillContent,
   composeSkillContent,
   getSkillCatalog,
@@ -83,11 +81,7 @@ import {
   publishSkillVersion,
   unpublishSkill,
 } from "@/services/skillStore";
-import {
-  filesMemoryLeafNavState,
-  isAccountMemoryTarget,
-} from "@/services/sources/memorySource";
-import { Pencil, Trash2, Undo2 } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 import {
   type DragEvent,
   type ReactNode,
@@ -145,8 +139,7 @@ function toScopeEntry(
 export function PromptCatalog({ data }: { data: Capabilities }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const updatesOpen = searchParams.get("updates") === "1";
+  const [searchParams] = useSearchParams();
   const [overlay, setOverlay] = useState<SkillCatalog>(EMPTY_SKILL_CATALOG);
   const [accountEntries, setAccountEntries] = useState<AccountScopeEntry[]>([]);
   const [listings, setListings] = useState<SkillStoreListing[]>([]);
@@ -173,16 +166,6 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
     defaultChatSupportsTools(llmProviders, modelCatalog?.current?.provider_id),
   );
 
-  const setUpdatesOpen = useCallback(
-    (open: boolean) => {
-      const params = new URLSearchParams(searchParams);
-      if (open) params.set("updates", "1");
-      else params.delete("updates");
-      setSearchParams(params, { replace: true });
-    },
-    [searchParams, setSearchParams],
-  );
-
   const mineRows = useMemo(
     () => buildMineCatalogRows(overlay.mine, accountEntries),
     [overlay.mine, accountEntries],
@@ -203,6 +186,10 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
       })),
     [mcp.servers],
   );
+  const bindableTools = useMemo(
+    () => bindableToolOptions(data.tools, mcp.servers),
+    [data.tools, mcp.servers],
+  );
 
   const [selectedId, setSelectedId] = useState<string>(() => {
     const tool = searchParams.get("tool");
@@ -222,15 +209,14 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
       : (connectorPicks.find((row) => row.id === selectedId) ?? null);
   const selectedItem =
     items.find((item) => item.id === selectedId) ?? selectedConnector ?? null;
-  const dialogOpen = updatesOpen || selectedItem != null;
+  const dialogOpen = selectedItem != null;
 
   const closeDialog = useCallback(() => {
     setSelectedId(OVERVIEW_CATALOG_ID);
     setCreateFolderId(null);
     setRenamingMineId(null);
     setRenamingFolderId(null);
-    if (updatesOpen) setUpdatesOpen(false);
-  }, [updatesOpen, setUpdatesOpen]);
+  }, []);
 
   const loadAccountLayer = useCallback(async (): Promise<SkillCatalog> => {
     const [catalog, entries, tree] = await Promise.all([
@@ -299,8 +285,7 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
       setSelectedId(id);
     }
     setPendingLeaf(null);
-    if (updatesOpen) setUpdatesOpen(false);
-  }, [pendingLeaf, accountReady, items, updatesOpen, setUpdatesOpen]);
+  }, [pendingLeaf, accountReady, items]);
 
   async function persist(
     action: () => Promise<SkillCatalog | undefined>,
@@ -360,7 +345,6 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
       );
       const catalog = await loadAccountLayer();
       setSelectedId(mineCatalogId(created.id));
-      setUpdatesOpen(false);
       return catalog;
     });
   }
@@ -397,7 +381,7 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
     item: PromptCatalogItem,
     dest: PromptRailFolder | "root",
   ) {
-    if (item.kind !== "mine" || !item.mineId || item.memoryKind) return;
+    if (item.kind !== "mine" || !item.mineId) return;
     if (dest === "root") {
       if (item.applyMode === "always") return;
     } else if (dest.documentId && item.parentId === dest.documentId) {
@@ -468,16 +452,8 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
     });
   }
 
-  async function restoreMineItem(item: PromptCatalogItem) {
-    if (item.kind !== "mine" || !item.mineId) return;
-    await persist(async () => {
-      await setDocumentDisputed(item.mineId, false);
-      return undefined;
-    });
-  }
-
   async function deleteMineItem(item: PromptCatalogItem) {
-    if (item.kind !== "mine" || !item.mineId || item.memoryKind) return;
+    if (item.kind !== "mine" || !item.mineId) return;
     if (!window.confirm(`确定删除「${item.label}」？此操作不可撤销。`)) return;
     await persist(async () => {
       await deleteDocument(item.mineId);
@@ -493,7 +469,7 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
     item: PromptCatalogItem;
     children: ReactNode;
   }) {
-    if (item.kind !== "mine" || !item.mineId || item.memoryKind) {
+    if (item.kind !== "mine" || !item.mineId) {
       return children;
     }
     if (item.mineId === renamingMineId) {
@@ -508,7 +484,6 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
         </div>
       );
     }
-    const disputed = item.disputed;
     const inner = (
       <div
         className="h-full min-w-0"
@@ -529,12 +504,6 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
       <ContextMenu>
         <ContextMenuTrigger asChild>{inner}</ContextMenuTrigger>
         <ContextMenuContent className="min-w-36">
-          {disputed ? (
-            <ContextMenuItem onSelect={() => void restoreMineItem(item)}>
-              <Undo2 size={14} className="shrink-0" />
-              恢复使用
-            </ContextMenuItem>
-          ) : null}
           <ContextMenuItem onSelect={() => startRenameMine(item)}>
             <Pencil size={14} className="shrink-0" />
             重命名
@@ -590,11 +559,6 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
           installedListings={installedListings}
           onOpenItem={(id) => {
             setSelectedId(id);
-            if (updatesOpen) setUpdatesOpen(false);
-          }}
-          onOpenUpdates={() => {
-            setSelectedId(OVERVIEW_CATALOG_ID);
-            setUpdatesOpen(true);
           }}
           onCreateMine={() => void onCreateMine()}
           onCreateFolder={() => void createUntitledPromptFolder()}
@@ -604,7 +568,6 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
             mcp.api
               ? () => {
                   setSelectedId(NEW_CONNECTOR_ID);
-                  if (updatesOpen) setUpdatesOpen(false);
                 }
               : null
           }
@@ -622,7 +585,6 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
       </div>
       <PromptReadDialog
         open={dialogOpen}
-        updatesOpen={updatesOpen}
         item={selectedItem}
         overlay={overlay}
         listings={listings}
@@ -633,18 +595,9 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
         toolCallingNames={TOOL_CALLING_TOOL_NAMES}
         mcpApi={mcp.api}
         mcpBusyId={mcpBusyId}
+        bindableTools={bindableTools}
         onOpenChange={(open) => {
           if (!open) closeDialog();
-        }}
-        onOpenUpdatesLeaf={(path, _name, projectId) => {
-          if (isAccountMemoryTarget(path, projectId)) {
-            setPendingLeaf(path);
-            setUpdatesOpen(false);
-            return;
-          }
-          navigate(APP_PATHS.files, {
-            state: filesMemoryLeafNavState(path, projectId),
-          });
         }}
         onMcpBusy={setMcpBusyId}
         onMcpSaved={mcp.reload}
@@ -664,44 +617,8 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
                   item.applyMode,
                   draft.description,
                   draft.body,
+                  draft.offeredTools,
                 ),
-                item.version,
-              );
-              if (written.conflict) {
-                throw new Error("刚有更新，刷新后再保存");
-              }
-              if (!written.ok) {
-                throw new Error("没保存成功");
-              }
-              return undefined;
-            },
-            { lock: false },
-          )
-        }
-        onSaveAccount={(item, draft) =>
-          persist(
-            async () => {
-              if (item.memoryKind) {
-                const written = await writeMemoryFile(
-                  item.memoryKind,
-                  draft.body,
-                  draft.version,
-                );
-                if (written.conflict) {
-                  throw new Error("刚有更新，刷新后再保存");
-                }
-                if (!written.ok) {
-                  throw new Error("没保存成功");
-                }
-                return undefined;
-              }
-              const fileName = skillFileName(draft.name);
-              if (item.mineId && fileName !== skillFileName(item.label)) {
-                await renameDocument(item.mineId, fileName);
-              }
-              const written = await writeDocument(
-                item.mineId,
-                draft.body,
                 item.version,
               );
               if (written.conflict) {

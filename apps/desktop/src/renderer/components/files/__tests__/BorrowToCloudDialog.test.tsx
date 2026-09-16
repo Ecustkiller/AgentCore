@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 
 import { BorrowToCloudDialog } from "@/components/files/BorrowToCloudDialog";
-import { ImportToCloudDialog } from "@/components/files/ImportToCloudDialog";
 import { pickLocalFolderRoot } from "@/lib/bindLocalFolder";
 import { startBorrowToCloudJob } from "@/lib/borrowToCloudJob";
 import {
@@ -19,10 +18,6 @@ vi.mock("@/lib/bindLocalFolder", () => ({
 vi.mock("@/lib/borrowToCloudJob", () => ({
   isBorrowToCloudJobRunning: () => false,
   startBorrowToCloudJob: vi.fn(),
-}));
-vi.mock("@/lib/importToCloudJob", () => ({
-  isImportToCloudJobRunning: () => false,
-  startImportToCloudJob: vi.fn(),
 }));
 vi.mock("@/lib/toast", () => ({
   notifyInfo: vi.fn(),
@@ -105,17 +100,5 @@ describe("BorrowToCloudDialog", () => {
     );
     expect(await screen.findByText("MyApp")).toBeTruthy();
     expect(screen.getByDisplayValue("CloudCopy")).toBeTruthy();
-  });
-});
-
-describe("ImportToCloudDialog copy stays the import wording", () => {
-  it("keeps the original import description", () => {
-    render(<ImportToCloudDialog open onOpenChange={() => {}} />);
-    expect(
-      screen.getByText(
-        "把选中的本机文件夹复制一份到「我的文件」。之后改的是云上这份副本，本机原文件夹不会跟着变，两边也不会自动同步。",
-      ),
-    ).toBeTruthy();
-    expect(screen.getByText("导入到「我的文件」")).toBeTruthy();
   });
 });

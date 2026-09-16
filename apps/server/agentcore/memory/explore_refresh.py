@@ -1,19 +1,7 @@
-"""R1 fingerprint-dirty / rebind explore refresh — consolidation-style background bypass.
+"""Explore-refresh library. Production ``schedule_*`` entry points are no-ops.
 
-When the top-tree + key-manifest fingerprint drifts, assemble marks dirty and
-schedules a **silent** per-folder refresh: workspace snapshot → memory-tier LLM →
-merge-write 导航/画像 (optional topics) → update fingerprint + clear dirty.
-
-Workspace rebind uses the same scheduler with ``blank_current_notes``: the LLM
-does not see old-bind 画像/导航, and the write **replaces** (not section-merge)
-so stale notes do not survive.
-
-Never blocks the user turn. Never runs CEO+delegate+team_preview.
-Thick folder dossiers are on-demand ``主题/`` entries; this bypass only
-merge-writes the short entry, so it never grows one.
-
-Empty folder 画像 is not "go fill it": skip the LLM and do not write. Named
-「先了解」 still hard-explores in the user turn.
+The runner still merge-writes 画像/导航/主题 for unit tests of the CAS helpers.
+Live assemble / resume never arm the scheduler.
 """
 
 from __future__ import annotations
@@ -456,28 +444,9 @@ def schedule_explore_refresh(
     live_fingerprint: str | None = None,
     blank_current_notes: bool = False,
 ) -> None:
-    """Arm per-folder debounce for a dirty fingerprint (no-op when disabled)."""
-    if not settings.memory_explore_refresh_enabled:
-        return
-    if not folder_id or not user_id:
-        return
-    if not (snapshot or "").strip():
-        return
-    get_explore_refresh_scheduler().schedule(
-        _PendingRefresh(
-            user_id=user_id,
-            folder_id=folder_id,
-            workspace_key=workspace_key or "",
-            snapshot=snapshot,
-            live_fingerprint=live_fingerprint,
-            blank_current_notes=blank_current_notes,
-        )
-    )
-    logger.info(
-        "memory.explore_refresh_scheduled",
-        user_id=user_id,
-        folder_id=folder_id,
-    )
+    """Production no-op: the system no longer writes AI-maintained folder notes."""
+    del user_id, folder_id, workspace_key, snapshot, live_fingerprint, blank_current_notes
+    return
 
 
 async def schedule_explore_refresh_for_backend(
@@ -488,19 +457,9 @@ async def schedule_explore_refresh_for_backend(
     backend: Any,
     blank_current_notes: bool = False,
 ) -> None:
-    """Snapshot + fingerprint + schedule (fingerprint drift / rebind)."""
-    from agentcore.memory.explore_profile import compute_workspace_explore_fingerprint
-
-    live_fp = await compute_workspace_explore_fingerprint(backend)
-    snapshot = await build_workspace_explore_snapshot(backend)
-    schedule_explore_refresh(
-        user_id=user_id,
-        folder_id=folder_id,
-        workspace_key=workspace_key,
-        snapshot=snapshot,
-        live_fingerprint=live_fp,
-        blank_current_notes=blank_current_notes,
-    )
+    """Production no-op: never snapshot or arm the explore-refresh scheduler."""
+    del user_id, folder_id, workspace_key, backend, blank_current_notes
+    return
 
 
 async def shutdown_explore_refresh_scheduler() -> None:

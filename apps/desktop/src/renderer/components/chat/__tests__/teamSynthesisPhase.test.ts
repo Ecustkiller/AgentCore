@@ -1,5 +1,4 @@
 import {
-  captainSynthesisPreviewText,
   coordinationWaitCaptainCaption,
   isTeamSynthesizing,
   teamSynthesisPhaseLabel,
@@ -20,6 +19,7 @@ function run(
     kind: "agent",
     role: null,
     model: null,
+    reasoningEffort: null,
     usage: null,
     cost: null,
     error: null,
@@ -174,20 +174,6 @@ describe("teamSynthesisPhase", () => {
       ],
     });
     expect(isTeamSynthesizing(e)).toBe(true);
-  });
-
-  it("captainSynthesisPreviewText prefers draft body over headline", () => {
-    expect(
-      captainSynthesisPreviewText({
-        execution_id: "e",
-        completed: 2,
-        total: 2,
-        headline: "合成草稿更新 · 已完成 2/2",
-        text: "两边方向一致：优先方案 A。",
-        workers: [],
-        in_progress: true,
-      }),
-    ).toBe("两边方向一致：优先方案 A。");
   });
 
   it("coordinationWaitCaptainCaption stays short without elapsed", () => {

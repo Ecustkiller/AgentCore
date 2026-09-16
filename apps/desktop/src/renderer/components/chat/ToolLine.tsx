@@ -26,11 +26,8 @@ import {
   channelRedirectFace,
   resolveToolWireStatus,
 } from "@/lib/channelRedirect";
-import { formatDurationSec } from "@/lib/format";
-import { runningElapsedSec } from "@/lib/runningElapsed";
 import { notifyActionError } from "@/lib/toast";
 import { openCloudPreview } from "@/services/openCloudPreview";
-import { runtimeOf, useConversationStore } from "@/stores/conversation";
 import {
   usePersistentDisclosure,
   useStreamAwareDisclosure,
@@ -43,7 +40,6 @@ import {
   ChevronRight,
   ExternalLink,
 } from "lucide-react";
-import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   BrowserActivityCard,
@@ -73,8 +69,7 @@ import {
 
 /** Tools whose collapsed title already names the target (path / topic / skill / action)
  * and whose peek would only repeat an ack line or leak result body. Skip the peek —
- * collapsed rows stay a clean single line (mirrors how web_search folds its count into
- * the title instead of a peek). */
+ * collapsed rows stay a clean single line. */
 const PEEK_SUPPRESSED = new Set([
   "consult_skill",
   "consult_memory",
@@ -82,7 +77,8 @@ const PEEK_SUPPRESSED = new Set([
   "consult",
   // 跨会话对话日志：标题已自解释；search 场数 / read 对话标题走 inlineMeta。
   "search_conversations",
-  // web_fetch / read_conversation：peek 并进标题 inlineMeta，折叠无第二行。
+  // web_search / web_fetch / read_conversation：计数或标题并进 inlineMeta，折叠无第二行。
+  "web_search",
   "web_fetch",
   "read_conversation",
   // 执行类：成功 stdout 不进折叠行；失败/未完成 inlineMeta 并进标题。
@@ -104,6 +100,7 @@ const PEEK_SUPPRESSED = new Set([
   "file_batch",
   "md_to_docx",
   "md_to_pdf",
+  "md_export",
   "archive_extract",
   "archive_create",
   "download_url",
@@ -188,28 +185,6 @@ export function ComposingToolLine({
   );
 }
 
-/** Live elapsed seconds since a tool's REAL start (`startedAt`, epoch ms stamped by
- * `addProcessTool` at `tool_use_start` — see {@link ConversationRuntime.toolStartedMs}),
- * NOT since component mount. A liveliness cue for a BLOCKING tool (web_search) whose
- * execution streams no incremental progress. Deriving from `startedAt` keeps the counter
- * stable across row remount (过程折叠/展开 · 聊天列表虚拟化), which the old mount-time anchor
- * reset to 0. The 1s ticker only forces a re-render; the value is recomputed from the wall
- * clock each render (clamped ≥0). Returns 0 when not running or the start is unknown (e.g. a
- * reloaded turn — where the tool is already done anyway, so no live timer is wanted). */
-function useRunningElapsed(
-  running: boolean,
-  startedAt: number | null | undefined,
-): number {
-  const [, force] = useState(0);
-  useEffect(() => {
-    if (!running) return;
-    const id = setInterval(() => force((n) => n + 1), 1000);
-    return () => clearInterval(id);
-  }, [running]);
-  if (!running || startedAt == null) return 0;
-  return runningElapsedSec(startedAt);
-}
-
 /**
  * 「撤回队员」/「裁决求助」的标题落谁头上——协作图上那个角色名。
  *
@@ -235,24 +210,6 @@ function useRunTargetRole(
     if (role?.trim()) return role.trim();
   }
   return looksLikeInternalId(raw) ? "" : raw;
-}
-
-/** Result-card shape shown while web_search is running. Liveness is the title
- * sheen on the parent `LiveFlow` — this is only the silhouette until real hits land. */
-function WebSearchSkeleton() {
-  return (
-    <div className="mt-1 space-y-1.5" aria-hidden>
-      {[0, 1, 2].map((i) => (
-        <div key={i} className="flex items-start gap-2 px-2 py-1">
-          <div className="mt-0.5 size-4 shrink-0 rounded bg-muted" />
-          <div className="min-w-0 flex-1 space-y-1">
-            <div className="h-3 w-1/2 rounded bg-muted" />
-            <div className="h-3 w-4/5 rounded bg-muted/70" />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
 }
 
 /** str_replace +/- (omit zeros), file_write「N 行」, or a file_read window
@@ -283,7 +240,7 @@ function ToolLineStat({ stat }: { stat: ToolLineTitleStat }) {
   );
 }
 
-/** 行尾指示：进行中用已运行秒数；没做成挂灰色短词；验证未完成走 warning 三角；
+/** 行尾指示：进行中不跟秒（流光即心跳）；没做成挂灰色短词；验证未完成走 warning 三角；
  *  顶层可展开行补 chevron。成功不挂标记。 */
 function ToolRowTail({
   status,
@@ -291,7 +248,6 @@ function ToolRowTail({
   hasBody,
   open,
   verifyBudgetExceeded = false,
-  elapsedSec = 0,
   faultLabel = null,
 }: {
   status: "running" | "success" | "error" | "redirect";
@@ -300,18 +256,11 @@ function ToolRowTail({
   open: boolean;
   /** Verify budget exceeded — warning affordance, not a fault word. */
   verifyBudgetExceeded?: boolean;
-  /** Live seconds while `status === "running"`; shown from 1s so the first tick isn't `0s`. */
-  elapsedSec?: number;
   /** 未通过 / 未找到 / 未完成 — uncolored, replaces the fault X. */
   faultLabel?: string | null;
 }) {
   if (status === "running") {
-    if (elapsedSec < 1) return null;
-    return (
-      <span className="ml-1.5 shrink-0 tabular-nums text-xs text-muted-foreground/70">
-        {formatDurationSec(elapsedSec)}
-      </span>
-    );
+    return null;
   }
   const faultMeta =
     !verifyBudgetExceeded && faultLabel ? (
@@ -494,7 +443,6 @@ export function ToolLine({
   const verifyBudgetExceeded =
     step.status === "error" && isVerifyBudgetExceeded(step.display);
   const faultLabel = toolRowFaultLabel(step);
-  const isWebSearch = step.tool_name === "web_search";
   // Collapsed error rows stay one line (title + 未通过/未找到 / warning 三角).
   // 验证未完成（idle/灾难顶）与其它失败态 inlineMeta 并进标题。
   const suppressesPeek =
@@ -503,12 +451,6 @@ export function ToolLine({
     PEEK_SUPPRESSED.has(step.tool_name) ||
     isBrowserTool(step.tool_name) ||
     (step.tool_name === "terminal" && detail);
-  // Real backend-ish start anchor (stamped at tool_use_start) keyed by tool_call_id (= step.id),
-  // so the running timer survives this row remounting. Undefined on a reloaded turn (tool done).
-  const startedAt = useConversationStore(
-    (s) => runtimeOf(s, conversationId).toolStartedMs[step.id],
-  );
-  const elapsed = useRunningElapsed(running, startedAt);
   const phaseText = running ? toolPhaseText(step.phase) : null;
   // 完成态元信息并进标题行、不另起 peek：web_search「N results」、grep 匹配计数、
   // list_folders「N folders」、search_conversations「N 场对话」、str_replace +/-、
@@ -522,8 +464,7 @@ export function ToolLine({
   const inlineMeta = (() => {
     if (status === "success") {
       if (browserTail) return browserTail;
-      if (!nested && step.tool_name === "web_search" && hasBody)
-        return peek || null;
+      if (step.tool_name === "web_search") return peek || null;
       if (step.tool_name === "grep") return peek || null;
       if (step.tool_name === "list_folders") return peek || null;
       if (step.tool_name === "search_conversations") return peek || null;
@@ -627,7 +568,6 @@ export function ToolLine({
               hasBody={hasBody}
               open={open}
               verifyBudgetExceeded={verifyBudgetExceeded}
-              elapsedSec={elapsed}
               faultLabel={faultLabel}
             />
           </span>
@@ -640,18 +580,12 @@ export function ToolLine({
       </span>
     </Button>
   );
-  const liveChrome = (
-    <>
-      {titleBtn}
-      {running && isWebSearch && <WebSearchSkeleton />}
-    </>
-  );
   return (
     <div className="min-w-0 max-w-full">
       {preview || openConversationId ? (
         <div className="flex min-w-0 items-center gap-1.5">
           <LiveFlow active={running} className="min-w-0 flex-1 overflow-hidden">
-            {liveChrome}
+            {titleBtn}
           </LiveFlow>
           {preview ? (
             <CloudPreviewButtons
@@ -666,7 +600,7 @@ export function ToolLine({
         </div>
       ) : (
         <LiveFlow active={running} className="min-w-0 w-full">
-          {liveChrome}
+          {titleBtn}
         </LiveFlow>
       )}
       {open && hasBody && <ToolResultView data={data} />}
@@ -734,7 +668,12 @@ export function ToolLineGroup({
     return (
       <div className="space-y-2">
         {tools.map((t) => (
-          <ToolLine key={t.id} step={t} turnKey={turnKey} />
+          <ToolLine
+            key={t.id}
+            step={t}
+            turnKey={turnKey}
+            conversationId={conversationId}
+          />
         ))}
       </div>
     );

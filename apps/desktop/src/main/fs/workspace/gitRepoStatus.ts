@@ -1,6 +1,7 @@
 /**
- * U1/U2：工作区根 Git 摘要（分支 + dirty + staged/unstaged/冲突列表）。
- * 仅识别根下 `.git`（不上溯）；无仓 / git 不可用 → ``{ present: false }``（勿假成功）。
+ * U1/U2：当前文件夹 Git 摘要（分支 + dirty + staged/unstaged/冲突列表）。
+ * ``args.cwd`` = 工作区相对子路径（与 file_* / git_run 同基准）；仅识别该文件夹下
+ * `.git`（不上溯、不落到授权容器根）；无仓 / git 不可用 → ``{ present: false }``。
  */
 import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
@@ -12,6 +13,7 @@ import type {
   WorkspaceOpResult,
 } from "@shared/ipc-contract";
 import type { StoredRoot } from "../roots";
+import { resolveGitRunCwd } from "./gitRun";
 import { opOk } from "./result";
 
 const execFileAsync = promisify(execFile);
@@ -193,8 +195,14 @@ export function parseGitStatusSb(stdout: string): {
 
 export async function opGitRepoStatus(
   root: StoredRoot,
+  args: Record<string, unknown> = {},
 ): Promise<WorkspaceOpResult> {
-  const gitMeta = join(root.absPath, ".git");
+  const resolved = await resolveGitRunCwd(root, args.cwd, { create: false });
+  if (!resolved.ok) {
+    return opOk({ present: false } satisfies GitRepoStatusValue);
+  }
+  const cwd = resolved.cwd;
+  const gitMeta = join(cwd, ".git");
   try {
     await fs.access(gitMeta);
   } catch {
@@ -207,11 +215,17 @@ export async function opGitRepoStatus(
       "git",
       ["-c", "core.quotepath=false", "status", "-sb"],
       {
-        cwd: root.absPath,
+        cwd,
         timeout: GIT_TIMEOUT_MS,
         windowsHide: true,
         maxBuffer: 1024 * 1024,
         encoding: "utf8",
+        env: {
+          ...process.env,
+          GIT_TERMINAL_PROMPT: "0",
+          GIT_OPTIONAL_LOCKS: "0",
+          GIT_CEILING_DIRECTORIES: cwd,
+        },
       },
     );
     const parsed = parseGitStatusSb(String(stdout ?? ""));

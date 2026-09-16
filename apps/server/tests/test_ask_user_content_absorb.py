@@ -36,10 +36,10 @@ _TRACE_TRAILING_BRACE_ARGS = (
 )
 
 
-def _ask_user_call(*, message: str = "") -> ToolCall:
+def _ask_user_call(*, prompt: str | None = None) -> ToolCall:
     args: dict = {}
-    if message:
-        args["message"] = message
+    if prompt:
+        args["questions"] = [{"prompt": prompt}]
     return ToolCall(
         id="call_ask",
         function=ToolCallFunction(name="ask_user", arguments=json.dumps(args)),
@@ -79,13 +79,13 @@ class _AskUserStub:
         )
 
 
-def test_prepare_injects_round_content_when_message_empty():
+def test_prepare_injects_round_content_when_prompt_empty():
     calls, folded = prepare_blocking_ask_user_tool_calls(
         [_ask_user_call()],
         "帮你分析一下选项：",
     )
     args = json.loads(calls[0].function.arguments)
-    assert args["message"] == "帮你分析一下选项："
+    assert args["questions"] == [{"prompt": "帮你分析一下选项："}]
     assert folded is True
 
 
@@ -97,7 +97,7 @@ def test_prepare_keeps_dispatch_started_framing_verbatim():
         kickoff,
     )
     args = json.loads(calls[0].function.arguments)
-    assert args["message"] == kickoff
+    assert args["questions"] == [{"prompt": kickoff}]
     assert folded is True
 
 
@@ -108,27 +108,27 @@ def test_prepare_keeps_install_ready_framing_verbatim():
         ready,
     )
     args = json.loads(calls[0].function.arguments)
-    assert args["message"] == ready
+    assert args["questions"] == [{"prompt": ready}]
     assert folded is True
 
 
-def test_prepare_leaves_explicit_dispatch_message():
+def test_prepare_leaves_explicit_dispatch_prompt():
     calls, folded = prepare_blocking_ask_user_tool_calls(
-        [_ask_user_call(message="已派出团队开工")],
+        [_ask_user_call(prompt="已派出团队开工")],
         "正文铺垫",
     )
     args = json.loads(calls[0].function.arguments)
-    assert args["message"] == "已派出团队开工"
+    assert args["questions"] == [{"prompt": "已派出团队开工"}]
     assert folded is False
 
 
-def test_prepare_leaves_explicit_message():
+def test_prepare_leaves_explicit_prompt():
     calls, folded = prepare_blocking_ask_user_tool_calls(
-        [_ask_user_call(message="卡片文案")],
+        [_ask_user_call(prompt="卡片文案")],
         "正文铺垫",
     )
     args = json.loads(calls[0].function.arguments)
-    assert args["message"] == "卡片文案"
+    assert args["questions"] == [{"prompt": "卡片文案"}]
     assert folded is False
 
 
@@ -183,11 +183,11 @@ async def test_unparseable_ask_user_does_not_overwrite_or_suspend():
     assert any(entry.get("event") == "tool.args_parse_failed" for entry in logs)
 
 
-def test_absorb_only_when_engine_folded_message():
-    """Model-owned message keeps the bubble; empty message folds prose and clears it."""
+def test_absorb_only_when_engine_folded_prompt():
+    """Model-owned prompt keeps the bubble; empty prompt folds prose and clears it."""
     guide = "先看这三件事再选："
     calls, folded = prepare_blocking_ask_user_tool_calls(
-        [_ask_user_call(message="卡片文案")],
+        [_ask_user_call(prompt="卡片文案")],
         guide,
     )
     assert folded is False
@@ -257,7 +257,7 @@ def test_absorb_clears_assistant_content_and_journal_on_suspend():
                 {
                     "id": "call_ask",
                     "type": "function",
-                    "function": {"name": "ask_user", "arguments": '{"message": "正文铺垫"}'},
+                    "function": {"name": "ask_user", "arguments": '{"questions": [{"prompt": "正文铺垫"}]}'},
                 }
             ],
         ).to_fact()
@@ -267,7 +267,7 @@ def test_absorb_clears_assistant_content_and_journal_on_suspend():
         LLMMessage(
             role="assistant",
             content="正文铺垫",
-            tool_calls=[_ask_user_call(message="正文铺垫")],
+            tool_calls=[_ask_user_call(prompt="正文铺垫")],
         ),
     ]
     resets: list[str] = []
@@ -276,7 +276,7 @@ def test_absorb_clears_assistant_content_and_journal_on_suspend():
     try:
         absorbed = absorb_blocking_ask_user_content(
             messages=messages,
-            tool_calls=[_ask_user_call(message="正文铺垫")],
+            tool_calls=[_ask_user_call(prompt="正文铺垫")],
             attempts=[ToolAttempt("fp", "ask_user", True)],
             terminal_effect=ToolEffect.SUSPEND,
             emit_reset=resets.append,

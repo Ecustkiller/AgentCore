@@ -23,10 +23,8 @@ class UsageBreakdown(WirePayload):
 class CostBreakdown(WirePayload):
     """A run's / turn's cost in integer nano-money (1 unit = 1e9).
 
-    ``currency`` labels ``input``/``cached``/``output``/``total`` — curated CNY or
-    community-estimated USD, never converted (this product has no FX). Clients
-    must read it to pick a symbol; inferring ¥ from ``pricing_source`` is how BYOK
-    dollars once rendered as yuan at ~1/7 of the real amount.
+    ``currency`` labels ``input``/``cached``/``output``/``total`` — curated CNY
+    nominal. Clients must read it to pick a symbol.
     """
 
     input: int
@@ -36,11 +34,10 @@ class CostBreakdown(WirePayload):
     currency: str
     # Additive: missing on legacy vectors → default curated (compat).
     pricing_source: str = "curated"
-    # BYOK estimate total when billed total is 0; absent on platform-only rows.
+    # BYOK product-nominal slice when billed total is also stamped on ``total``.
     estimated_total: int | None = absent()
-    # Currency of ``estimated_total`` — the estimate rides the USD community table
-    # while ``total`` stays CNY, so on a turn aggregate the two amounts can differ
-    # in unit. Absent (legacy / run rows) → read ``currency``.
+    # Currency of ``estimated_total``. New rows are CNY (same card as ``total``).
+    # Legacy community-USD estimates still carry USD here.
     estimated_currency: str | None = absent()
 
 

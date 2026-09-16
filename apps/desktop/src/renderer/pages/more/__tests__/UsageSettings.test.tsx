@@ -5,7 +5,13 @@
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { type UsageSummary, getUsageSummary } from "@/services/usage";
 import { useUsageStore } from "@/stores/usage";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -227,5 +233,60 @@ describe("UsageSettings 主卡与分层", () => {
 
     await screen.findByText("今日缓存命中率");
     expect(screen.getByText("20%")).toBeTruthy();
+  });
+});
+
+const TREND_WEEK: UsageSummary["recent_daily_cost"] = [
+  { date: "2026-09-10", cost_total: 0 },
+  { date: "2026-09-11", cost_total: 1_000_000_000 },
+  { date: "2026-09-12", cost_total: 2_000_000_000 },
+  { date: "2026-09-13", cost_total: 0 },
+  { date: "2026-09-14", cost_total: 500_000_000 },
+  { date: "2026-09-15", cost_total: 1_500_000_000 },
+  { date: "2026-09-16", cost_total: 800_000_000 },
+];
+
+describe("UsageSettings 近 7 日趋势", () => {
+  it("draws a line, restates every day including zeros, and skips a bar stub", async () => {
+    mockGet.mockResolvedValue({
+      ...makeSummary(),
+      recent_daily_cost: TREND_WEEK,
+    });
+    renderPage();
+
+    await screen.findByText("近 7 日成本");
+    expect(screen.getByText("合计 ¥5.80")).toBeTruthy();
+    expect(screen.getByTestId("cost-trend-line")).toBeTruthy();
+    expect(screen.getAllByTestId("cost-trend-dot")).toHaveLength(7);
+    expect(screen.queryByTestId("cost-bar")).toBeNull();
+
+    const table = screen.getByRole("table", { name: "近 7 日每日成本" });
+    expect(within(table).getByText("2026-09-10")).toBeTruthy();
+    expect(within(table).getByText("2026-09-12")).toBeTruthy();
+    expect(within(table).getByText("¥2.00")).toBeTruthy();
+    expect(within(table).getAllByText("—")).toHaveLength(2);
+  });
+
+  it("hides the trend when every day is zero", async () => {
+    mockGet.mockResolvedValue({
+      ...makeSummary(),
+      recent_daily_cost: TREND_WEEK.map((p) => ({ ...p, cost_total: 0 })),
+    });
+    renderPage();
+
+    await screen.findByText("本月额度还剩");
+    expect(screen.queryByText("近 7 日成本")).toBeNull();
+    expect(screen.queryByTestId("cost-trend-line")).toBeNull();
+  });
+
+  it("hides the billed trend in BYOK even if daily points are non-zero", async () => {
+    mockGet.mockResolvedValue({
+      ...makeSummary({ billingMode: "byok" }),
+      recent_daily_cost: TREND_WEEK,
+    });
+    renderPage();
+
+    await screen.findByText(/当前为「自带 Key」模式/);
+    expect(screen.queryByText("近 7 日成本")).toBeNull();
   });
 });

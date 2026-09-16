@@ -21,6 +21,10 @@ from datetime import datetime
 from typing import Any
 
 from agentcore.conversation.failure_visible import export_visible_text
+from agentcore.core.search_query import (
+    earliest_term_in_text,
+    parse_conversation_search_terms,
+)
 from agentcore.db.models import Conversation, Message
 from agentcore.runtime.journal import KIND_TURN_END
 
@@ -402,13 +406,13 @@ def _message_body(msg: Message) -> str:
 
 
 def find_query_start(messages: Sequence[Message], query: str) -> int | None:
-    """Oldest visible message whose body contains ``query``, or ``None``."""
-    q = (query or "").strip().lower()
-    if not q:
+    """Oldest visible message whose body contains any search term, or ``None``."""
+    terms = parse_conversation_search_terms(query)
+    if not terms:
         return None
     for i, msg in enumerate(_visible_messages(messages)):
         body = _message_body(msg)
-        if body and q in body.lower():
+        if body and earliest_term_in_text(body, terms):
             return i
     return None
 
@@ -517,18 +521,19 @@ def search_hit_from_messages(
     Oldest-first matches ``read_conversation(query=)`` seek so the search row's
     「第 N 条」 is where a subsequent read starts.
     """
-    q = (query or "").strip()
+    terms = parse_conversation_search_terms(query)
     visible = _visible_messages(messages)
 
     def _body(msg: Message) -> str:
         return _message_body(msg)
 
-    if q:
+    if terms:
         for i, msg in enumerate(visible):
             body = _body(msg)
-            if body and q.lower() in body.lower():
+            hit_term = earliest_term_in_text(body, terms) if body else None
+            if hit_term:
                 return SearchHit(
-                    snippet=_match_centered_snippet(body, q),
+                    snippet=_match_centered_snippet(body, hit_term),
                     message_index=i,
                     message_id=getattr(msg, "id", None),
                     role=msg.role,
@@ -538,7 +543,7 @@ def search_hit_from_messages(
         if msg.role == "user" and (msg.content or "").strip():
             return SearchHit(
                 snippet=_clip(msg.content or "", SEARCH_SNIPPET_CHARS),
-                message_index=None if q else i,
+                message_index=None if terms else i,
                 message_id=getattr(msg, "id", None),
                 role="user",
             )
@@ -548,7 +553,7 @@ def search_hit_from_messages(
         if body:
             return SearchHit(
                 snippet=_clip(body, SEARCH_SNIPPET_CHARS),
-                message_index=None if q else i,
+                message_index=None if terms else i,
                 message_id=getattr(msg, "id", None),
                 role=msg.role,
             )

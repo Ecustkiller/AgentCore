@@ -33,6 +33,7 @@ from agentcore.runtime.turn.ceo_continue import (
     is_ceo_rate_limit_pause,
     mark_host_turn_paused,
 )
+from agentcore.runtime.turn.latency import stamp_turn_wall, turn_wall_ms
 from agentcore.runtime.turn.outcome import (
     last_delegate_tool_output_from_events,
     resolve_turn_outcome,
@@ -94,7 +95,7 @@ async def settle_successful_turn(
     journal_writer: Any,
 ) -> dict:
     """Fold usage/cost/citations and emit message_end for a successful captain run."""
-    # 受监督的波循环 P5「Edge」: if the CEO yielded at a delegate boundary (晚绑定 / scope)
+    # 受监督的波循环 P5「Edge」: if the CEO yielded at a delegate boundary (scope)
     # but ended the turn without a ``replan``, fold the已完成 workers' usage / ledger /
     # citations in and release the dangling supervised plan (implicit stop) — else that
     # work would be unbilled and its sources unshown. No-op when nothing is paused, so a
@@ -215,6 +216,7 @@ async def settle_successful_turn(
         "revises_by_user": delegate_tool.user_continuation_count,
         "audit_drops": audit_recorder.drops,
     }
+    duration_ms = turn_wall_ms()
     sink.emit(
         message_end(
             finish,
@@ -227,6 +229,7 @@ async def settle_successful_turn(
             cost=turn_cost,
             collab=collab,
             outcome=outcome,
+            duration_ms=duration_ms,
         )
     )
 
@@ -278,6 +281,7 @@ async def settle_successful_turn(
     if turn_error is not None:
         result["error"] = turn_error.get("message") or ""
         result["error_code"] = turn_error.get("code") or ErrorCode.LLM_ERROR
+    stamp_turn_wall(result, duration_ms=duration_ms)
     return result
 
 
@@ -329,7 +333,10 @@ async def salvage_failed_captain(
     salvaged_content, outcome = _salvage_reply_and_outcome(
         sink=sink, content=salvaged_content, finish=FinishReason.ERROR
     )
-    sink.emit(message_end(FinishReason.ERROR, outcome=outcome))
+    duration_ms = turn_wall_ms()
+    sink.emit(
+        message_end(FinishReason.ERROR, outcome=outcome, duration_ms=duration_ms)
+    )
     # A captain that died mid-loop still burned tokens (B-deep 失败计费): the
     # executor priced them onto captain_state, so carry the captain ledger row
     # back even on error — _persist_turn_result writes cost_runs independently
@@ -348,7 +355,7 @@ async def salvage_failed_captain(
     await audit_recorder.flush()
     if roster_writer is not None:
         await roster_writer.flush()
-    return {
+    result = {
         "message_id": message_id,
         "content": salvaged_content,
         "reasoning_content": salvaged_reasoning or None,
@@ -362,6 +369,8 @@ async def salvage_failed_captain(
         "audit_drops": audit_recorder.drops,
         "outcome": outcome,
     }
+    stamp_turn_wall(result, duration_ms=duration_ms)
+    return result
 
 
 async def salvage_pipeline_exception(
@@ -413,7 +422,10 @@ async def salvage_pipeline_exception(
     salvaged_content, outcome = _salvage_reply_and_outcome(
         sink=sink, content=salvaged_content, finish=FinishReason.ERROR
     )
-    sink.emit(message_end(FinishReason.ERROR, outcome=outcome))
+    duration_ms = turn_wall_ms()
+    sink.emit(
+        message_end(FinishReason.ERROR, outcome=outcome, duration_ms=duration_ms)
+    )
     # 异常也落库: a crash mid-turn must NOT discard already-finished work (a
     # completed debate / delegated workers). Carry the journal so persist_turn_result
     # writes it under the abnormal message even with empty reply content — otherwise a
@@ -430,7 +442,7 @@ async def salvage_pipeline_exception(
     await audit_recorder.flush()
     if roster_writer is not None:
         await roster_writer.flush()
-    return {
+    result = {
         "message_id": message_id,
         "content": salvaged_content,
         "reasoning_content": salvaged_reasoning or None,
@@ -442,6 +454,8 @@ async def salvage_pipeline_exception(
         "audit_drops": audit_recorder.drops,
         "outcome": outcome,
     }
+    stamp_turn_wall(result, duration_ms=duration_ms)
+    return result
 
 
 def captain_failed(captain_state: Any) -> bool:

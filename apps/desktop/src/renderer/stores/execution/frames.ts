@@ -128,6 +128,7 @@ export type RunFrame =
       // still projects — the run simply carries no priced cost.
       role?: string;
       model?: string;
+      reasoningEffort?: string | null;
       usage?: import("@/types/events").UsageBreakdown;
       cost?: import("@/types/events").CostBreakdown;
     }
@@ -269,8 +270,8 @@ export type RunFrame =
 
 /** Wall-clock time of a wire event (ms), used to label timeline frames. The
  * journal stores the same ISO timestamp the live stream carried, so replay and
- * live label frames identically. */
-function frameTimeOf(event: SSEEvent): number {
+ * live label frames identically. Live tool 秒表也走这里，attach 回放不从「此刻」重计。 */
+export function frameTimeOf(event: Pick<SSEEvent, "timestamp">): number {
   const parsed = Date.parse(event.timestamp);
   return Number.isNaN(parsed) ? Date.now() : parsed;
 }
@@ -382,6 +383,7 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         durationMs: p.duration_ms,
         role: p.role,
         model: p.model,
+        reasoningEffort: p.reasoning_effort ?? null,
         usage: p.usage,
         cost: p.cost,
       };

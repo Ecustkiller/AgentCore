@@ -164,14 +164,14 @@ export type FsWriteResult =
  * ``archive`` 不对应任何 backend 方法——它是本地→云交接（P2e / e1）专用 op：把整个绑定
  * 根打包成单个归档（套用忽略规则）交服务端暂存并快照，由 handoff 编排直接下发。
  * ``ensure_turn_baseline`` 同样不是 backend 方法——桌面通道 Local 回合 zip 基线
- *（``AgentCore/baselines/{message_id}.zip``）：探测非空 zip，缺则落盘；服务端无用户盘
- * Path.root，破坏形闸问 ready 而非 backend 有无 Path。
+ *（``AgentCore/baselines/{message_id}.zip``）：探测非空 zip，缺则落盘；首次改文件
+ * / 写性 git / 破坏性删时才打，问候不留底。服务端无用户盘 Path.root，破坏形闸问
+ * ready 而非 backend 有无 Path。
  * ``probe_exec`` 同样不是 backend 方法——回合准备时探测本机 code_execute 可用解释器，
  * 供服务端裁剪工具 schema（坏 WSL bash 等不进 enum）。
- * ``diagnostics`` 是 backend 方法：桌面 TypeScript LanguageService（写码验证内环）。
- * 本机引擎与过桥经通道到达；云桌无 LS 时诚实 ``status=unavailable``，不把通道打挂。
  * ``git_repo_status`` / ``git_scm`` 同样不是 backend 方法——桌面 U1–U3 用户 SCM
  *（只读摘要 + stage/commit/push/pull）；渲染层经 ``workspaceOp`` 直调，服务端/Agent 不发此 op。
+ * cwd = 当前文件夹相对授权根的 subpath（与 file_* / git_run 同基准）；仅该文件夹下 `.git`。
  * ``git_run`` 同样不是 backend 方法——Agent 结构化 ``git`` 在 LocalWorkspace 上经通道
  * 本机执行 allowlisted argv（``cwd`` = 项目 subpath 时落子目录，与 file_* 同基准；
  * 无 subpath 则绑定根即项目）；与 UI SCM 分立。
@@ -194,6 +194,7 @@ export type WorkspaceOpName =
   | "move"
   | "replace"
   | "grep"
+  | "glob_files"
   | "execute"
   | "probe_exec"
   | "archive"
@@ -202,7 +203,6 @@ export type WorkspaceOpName =
   | "process_read"
   | "process_stop"
   | "process_list"
-  | "diagnostics"
   | "git_repo_status"
   | "git_scm"
   | "git_run";

@@ -52,9 +52,9 @@ def _sum_rows(rows: list[CostEvent]) -> tuple[dict, dict, dict, int]:
     """Roll up a turn's payroll rows into (usage, cost, estimated_cost, rounds).
 
     Summed in Python from the rows already fetched for the payroll (no second
-    query). Billed and estimated stay on their scalar columns (never re-priced)
-    and each keeps its own ``currency`` — billed is CNY off curated cards, the
-    BYOK estimate is USD off the community table, and the two are never added.
+    query). Display ``cost.total`` is billed + BYOK nominal (same CNY card).
+    ``estimated_cost`` stays the BYOK slice（不扣额度）. This helper does not
+    feed ``enforce_quota``.
     """
     usage = {"input": 0, "output": 0, "reasoning": 0, "cache_hit": 0, "cache_miss": 0}
     cost = {"input": 0, "cached": 0, "output": 0, "total": 0, "pricing_source": "curated"}
@@ -73,11 +73,14 @@ def _sum_rows(rows: list[CostEvent]) -> tuple[dict, dict, dict, int]:
         billed_nano = int(row.cost_total_nano or 0)
         estimated_nano = int(getattr(row, "cost_estimated_nano", 0) or 0)
         row_currency = str(row.currency or row_cost.get("currency") or CURRENCY_CNY)
-        if billed_nano:
+        display = billed_nano + estimated_nano
+        if display:
             for key in ("input", "cached", "output"):
                 cost[key] += int(row_cost.get(key, 0))
-            cost["total"] += billed_nano
+            cost["total"] += display
             cost.setdefault("currency", row_currency)
+            if row_cost.get("pricing_source"):
+                cost["pricing_source"] = str(row_cost["pricing_source"])
         if estimated_nano:
             for key in ("input", "cached", "output"):
                 estimated[key] += int(row_cost.get(key, 0))
@@ -109,7 +112,7 @@ async def get_message_cost(
         estimated_nano = int(getattr(row, "cost_estimated_nano", 0) or 0)
         # Currency lives on the ledger's scalar column, not in the JSONB body
         # (``split_cost`` keeps the body to money keys + sources), so stamp it on
-        # both breakdowns here — a BYOK row is USD and must not read as ¥.
+        # both breakdowns here. BYOK uses the same CNY card as billed.
         row_currency = str(row.currency or row_cost.get("currency") or CURRENCY_CNY)
         agents.append(
             AgentCostLine(

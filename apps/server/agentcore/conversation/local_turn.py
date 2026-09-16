@@ -29,6 +29,7 @@ from agentcore.runtime.leases import (
     local_turn_lease_owner_id,
     release_turn_lease,
 )
+from agentcore.workspace.attachments import to_stored_metadata
 
 logger = get_logger(__name__)
 
@@ -121,6 +122,7 @@ async def record_local_turn(
     cache_hit_tokens: int = 0,
     cache_miss_tokens: int = 0,
     rounds: int = 0,
+    duration_ms: int | None = None,
     trace_id: str,
     finish_reason: str | None = None,
     llm_credentials: LLMCredentials | None = None,
@@ -128,6 +130,7 @@ async def record_local_turn(
     execution_id: str | None = None,
     harvest_kind: str | None = None,
     agent_mentions: list[dict] | None = None,
+    attachments: list[dict] | None = None,
 ) -> dict:
     """Persist a turn that ran on the user's machine via the sidecar.
 
@@ -153,6 +156,7 @@ async def record_local_turn(
             cache_hit_tokens=cache_hit_tokens,
             cache_miss_tokens=cache_miss_tokens,
             rounds=rounds,
+            duration_ms=duration_ms,
             trace_id=trace_id,
             finish_reason=finish_reason,
             llm_credentials=llm_credentials,
@@ -160,6 +164,7 @@ async def record_local_turn(
             execution_id=execution_id,
             harvest_kind=harvest_kind,
             agent_mentions=agent_mentions,
+            attachments=attachments,
         )
     finally:
         await _release_local_turn_lease(message_id)
@@ -185,6 +190,7 @@ async def _persist_local_turn(
     cache_hit_tokens: int = 0,
     cache_miss_tokens: int = 0,
     rounds: int = 0,
+    duration_ms: int | None = None,
     trace_id: str,
     finish_reason: str | None = None,
     llm_credentials: LLMCredentials | None = None,
@@ -192,6 +198,7 @@ async def _persist_local_turn(
     execution_id: str | None = None,
     harvest_kind: str | None = None,
     agent_mentions: list[dict] | None = None,
+    attachments: list[dict] | None = None,
 ) -> dict:
     """Persist a turn that ran on the user's machine via the sidecar.
 
@@ -283,6 +290,7 @@ async def _persist_local_turn(
             cache_hit_tokens=cache_hit_tokens,
             cache_miss_tokens=cache_miss_tokens,
             rounds=rounds,
+            duration_ms=duration_ms,
             trace_id=trace_id,
             finish_reason=finish_reason,
             llm_credentials=llm_credentials,
@@ -290,6 +298,7 @@ async def _persist_local_turn(
             execution_id=execution_id,
             harvest_kind=harvest_kind,
             agent_mentions=agent_mentions,
+            attachments=attachments,
         )
         assert result is not None
         return result
@@ -301,9 +310,16 @@ async def _insert_user_idempotent(
     user_message: str,
     user_message_id: str,
     agent_mentions: list[dict] | None,
+    attachments: list[dict] | None = None,
 ) -> None:
-    """Pin a user row to ``user_message_id``; same conversation + id is success."""
+    """Pin a user row to ``user_message_id``; same conversation + id is success.
+
+    Attachments use the same stored-metadata projection as mid-flight persist so
+    a refresh can replay chips / download paths. A retry on the same user id
+    returns without overlaying materials already written.
+    """
     stored_mentions = to_stored_agent_mentions(agent_mentions)
+    stored_atts = to_stored_metadata(attachments) if attachments else None
     try:
         async with async_session_factory() as session:
             await MessageRepository(session).create(
@@ -311,6 +327,7 @@ async def _insert_user_idempotent(
                 role="user",
                 content=user_message,
                 message_id=user_message_id,
+                attachments=stored_atts,
                 agent_mentions=stored_mentions or None,
             )
     except IntegrityError:
@@ -392,6 +409,7 @@ async def begin_local_turn(
                 user_message=user_message,
                 user_message_id=user_message_id,
                 agent_mentions=agent_mentions,
+                attachments=attachments,
             )
         await get_cloud_store().begin_turn(
             conversation_id=conversation_id,

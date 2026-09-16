@@ -167,11 +167,14 @@ export function registerLogIpc(): void {
   ipcMain.on(LOG_CHANNELS.write, (_event, entry: LogEntry) =>
     logDesktop(entry),
   );
-  ipcMain.handle(LOG_CHANNELS.readTail, async () => {
-    try {
-      return await readDesktopLogTail();
-    } catch {
-      return [];
-    }
-  });
+  ipcMain.handle(
+    LOG_CHANNELS.readTail,
+    async (_event, conversationId?: string | null) => {
+      try {
+        return await readDesktopLogTail(conversationId);
+      } catch {
+        return [];
+      }
+    },
+  );
 }

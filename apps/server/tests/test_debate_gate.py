@@ -108,7 +108,6 @@ def _context() -> ToolContext:
 def _kickoff_ask_user_args(*, default: str = "辩论（正反攻防）") -> str:
     return json.dumps(
         {
-            "message": "开工提案",
             "questions": [
                 {
                     "prompt": "辩论环节采用哪种形式？",
@@ -209,7 +208,6 @@ def test_user_confirm_honors_ask_user_default():
 def test_user_confirm_honors_recommendation_mark_without_default():
     args = json.dumps(
         {
-            "message": "开工提案",
             "questions": [
                 {
                     "prompt": "辩论环节采用哪种形式？",

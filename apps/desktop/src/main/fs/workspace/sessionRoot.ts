@@ -34,7 +34,7 @@ export const READONLY_ALLOWED_OPS = new Set<WorkspaceOpName>([
   "list_tree",
   "index_files",
   "grep",
-  "diagnostics",
+  "glob_files",
   "probe_exec",
   "process_read",
   "process_list",

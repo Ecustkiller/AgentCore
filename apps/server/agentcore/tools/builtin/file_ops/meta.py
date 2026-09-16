@@ -14,6 +14,7 @@ from agentcore.tools.registration import (
     ToolRegistration,
     ToolSurface,
 )
+from agentcore.tools.write_replay import is_write_replay
 from agentcore.workspace.protocol import (
     AlreadyExists,
     OutsideWorkspace,
@@ -123,6 +124,14 @@ class FileDeleteTool:
         except PathNotFound:
             if coordinator is not None and release_on_fail:
                 coordinator.release(rel_path, context.run_id)
+            if is_write_replay():
+                return ToolResult(
+                    tool_call_id="",
+                    success=True,
+                    output=f"已删除 {rel_path}（重驱时路径已不在，未再改写）",
+                    duration_ms=int((time.monotonic() - start) * 1000),
+                    metadata={"already_applied": True},
+                )
             return _path_missing_error(
                 f"路径不存在：{rel_path}", start, path=rel_path
             )

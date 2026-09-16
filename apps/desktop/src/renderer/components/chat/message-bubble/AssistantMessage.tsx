@@ -11,17 +11,14 @@ import {
 } from "@/components/ui/tone-presets";
 import { buildCitationDisplayMap } from "@/lib/citationDisplayMap";
 import { copyText } from "@/lib/clipboard";
-import { hasUnpricedUsage, resolveTurnDisplayMoney } from "@/lib/cost";
+import { resolveTurnDisplayMoney } from "@/lib/cost";
 import {
   connectivityEscalationSuffix,
   formatAssistantErrorMessage,
 } from "@/lib/errors";
-import {
-  COST_UNPRICED_LABEL,
-  formatDisplayCost,
-  pickCostMoney,
-} from "@/lib/format";
+import { formatDisplayCost, pickCostMoney } from "@/lib/format";
 import { openWorkspaceDeliverable } from "@/lib/openWorkspaceDeliverable";
+import { completedAtIso } from "@/lib/runningElapsed";
 import {
   buildSupportDiagnosticPack,
   formatSupportDiagnosticText,
@@ -82,18 +79,30 @@ function RecoveredChip() {
   );
 }
 
+function askDuplicateStems(
+  checkpoint: Pick<CheckpointDisplay, "question" | "questions">,
+): string[] {
+  const stems = (checkpoint.questions ?? [])
+    .map((q) => q.prompt.trim())
+    .filter(Boolean);
+  const wire = checkpoint.question.trim();
+  if (wire) stems.push(wire);
+  return stems;
+}
+
 /** 问句已在结算存根里；正文只有「就是那句问句」时才藏，续聊必须露出。 */
 function shouldHideAskDuplicateQuestion(
-  checkpoints: readonly Pick<CheckpointDisplay, "status" | "question">[],
+  checkpoints: readonly Pick<
+    CheckpointDisplay,
+    "status" | "question" | "questions"
+  >[],
   content: string,
 ): boolean {
   const resolved = checkpoints.filter((c) => c.status === "resolved");
   if (resolved.length === 0) return false;
   const trimmed = content.trim();
   if (!trimmed) return true;
-  return resolved.some(
-    (c) => c.question.trim() !== "" && trimmed === c.question.trim(),
-  );
+  return resolved.some((c) => askDuplicateStems(c).includes(trimmed));
 }
 
 export function AssistantMessage({ message }: MessageBubbleProps) {
@@ -255,8 +264,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           money.estimated,
           money.currency,
         );
-      } else if (hasUnpricedUsage(execution.runs)) {
-        costText = COST_UNPRICED_LABEL;
       }
     } else if (fallbackMoney != null && fallbackMoney.nano > 0) {
       costText = formatDisplayCost(
@@ -264,8 +271,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
         fallbackMoney.estimated,
         fallbackMoney.currency,
       );
-    } else if (message.cost?.pricing_source === "unpriced") {
-      costText = COST_UNPRICED_LABEL;
     }
   } else if (fallbackMoney != null && fallbackMoney.nano > 0) {
     costText = formatDisplayCost(
@@ -273,13 +278,10 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       fallbackMoney.estimated,
       fallbackMoney.currency,
     );
-  } else if (message.cost?.pricing_source === "unpriced") {
-    costText = COST_UNPRICED_LABEL;
   }
   const showCostMeta =
     !bubbleLive &&
     (costText != null ||
-      (message.rounds != null && message.rounds > 1) ||
       (message.durationMs != null && message.durationMs > 0));
 
   const onPeekCost = () => {
@@ -490,11 +492,12 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           {showCostMeta ? (
             <div className="flex shrink-0 items-center gap-1.5">
               <AssistantMessageMetaSummary
-                rounds={message.rounds}
                 costText={costText}
                 durationMs={message.durationMs}
               />
-              <MessageTime iso={message.createdAt} />
+              <MessageTime
+                iso={completedAtIso(message.createdAt, message.durationMs)}
+              />
             </div>
           ) : null}
         </div>

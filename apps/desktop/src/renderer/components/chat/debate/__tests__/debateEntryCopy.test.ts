@@ -17,6 +17,7 @@ function run(
     kind: "agent",
     role: null,
     model: "m",
+    reasoningEffort: null,
     usage: null,
     cost: null,
     error: null,

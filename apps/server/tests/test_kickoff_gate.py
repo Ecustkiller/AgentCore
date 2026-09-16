@@ -59,7 +59,7 @@ async def test_ask_user_allows_after_verbal_affirm():
         history=history,
     )
     result = await tool.execute(
-        {"message": "交付形态再确认一下？", "assumptions": ["按四路并行开干"]},
+        {"questions": [{"prompt": "交付形态再确认一下？"}], "assumptions": ["按四路并行开干"]},
         ToolContext.create(
             execution_id="e",
             run_id="s",
@@ -96,7 +96,7 @@ async def test_ask_user_allows_after_team_preview_resolved():
     )
 
     result = await tool.execute(
-        {"message": "交付形态再确认一下？"},
+        {"questions": [{"prompt": "交付形态再确认一下？"}]},
         ToolContext.create(
             execution_id="e",
             run_id="s",

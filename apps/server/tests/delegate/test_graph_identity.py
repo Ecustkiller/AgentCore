@@ -125,18 +125,6 @@ async def test_live_host_without_plan_snapshot_rejects(monkeypatch):
     assert out.contract_failure is True
 
 
-async def test_topology_locked_host_rejects_append(monkeypatch):
-    plan = _plan()
-    plan.topology_lock = True
-    _bind_sessions(
-        monkeypatch,
-        {"e-host": _session("e-host", live_plan=plan, host_turn_id="m-now")},
-    )
-    out = await rejected({"append_to_execution_id": "e-host"})
-    assert "工作流拓扑锁" in (out.error or "")
-    assert out.contract_failure is True
-
-
 # ── 跨回合已收口图 → prev 链 ──────────────────────────────────────────────────
 
 

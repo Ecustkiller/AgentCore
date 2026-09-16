@@ -45,8 +45,8 @@ describe("parseSearchHits · grep", () => {
     expect(segs).toEqual([{ type: "plain", text }]);
   });
 
-  it("does not treat files_only `path: count` as hits", () => {
-    const segs = parseSearchHits("src/a.ts: 3\nsrc/b.ts: 1", "grep");
+  it("does not treat files_only path-only lines as hits", () => {
+    const segs = parseSearchHits("src/a.ts\nsrc/b.ts", "grep");
     expect(hasSearchHits(segs)).toBe(false);
   });
 });

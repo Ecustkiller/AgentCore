@@ -46,12 +46,12 @@ def test_soft_warning_office_without_execution():
     assert "Office" in warn or "docx" in warn or "pptx" in warn
     assert "禁止" in warn or "不要" in warn
     # Already on cloud: must not prescribe re-import as the fix.
-    assert "推荐**引导 Composer「导入到云" not in warn
-    assert "**推荐**引导 Composer「导入到云" not in warn
+    assert "推荐**引导 Composer「先在云上做" not in warn
+    assert "**推荐**引导 Composer「先在云上做" not in warn
 
 
 def test_exec_office_predicate_splits_by_deterministic_exporter():
-    """粒度按真实能力：docx/pdf 有 md_to_docx / md_to_pdf，不算「需执行」Office。"""
+    """粒度按真实能力：docx/pdf 有 md_export，不算「需执行」Office。"""
     assert plan_suggests_exec_office_deliverable(_plan("产出 课件.pptx")) is True
     assert plan_suggests_exec_office_deliverable(_plan("产出 台账.xlsx")) is True
     assert (
@@ -91,7 +91,8 @@ def test_office_warning_does_not_claim_word_pdf_impossible():
         _plan("产出 课件.pptx 与 讲义.docx"), _CloudBackend()
     )
     assert warn is not None
-    assert "md_to_docx" in warn and "md_to_pdf" in warn
+    assert "md_export" in warn
+    assert "md_to_docx" not in warn and "md_to_pdf" not in warn
 
 
 def test_soft_warning_silent_when_no_run_smell():

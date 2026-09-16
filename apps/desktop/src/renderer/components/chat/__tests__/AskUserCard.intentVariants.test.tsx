@@ -2,7 +2,6 @@
 /**
  * ask_user list-confirm chrome: organize_plan keeps the checklist
  * body (second line, seed-all, side-effect CTA). Caption is sr-only 需要你拍板.
- * daily_review chrome is absent.
  */
 
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -20,7 +19,7 @@ vi.mock("@/lib/toast", () => ({
 afterEach(cleanup);
 
 const organizeContent: AskUserContent = {
-  question: "确认要执行的整理项？",
+  question: "旧批次总述不要画",
   questions: [
     {
       id: "q0",
@@ -70,7 +69,9 @@ describe("AskUserCard intent variants", () => {
     expect(screen.getByText("需要你拍板").classList.contains("sr-only")).toBe(
       true,
     );
-    expect(screen.getByText("确认要执行的整理项？")).toBeTruthy();
+    expect(screen.getByText("勾选要执行的项")).toBeTruthy();
+    expect(screen.getAllByText("勾选要执行的项")).toHaveLength(1);
+    expect(screen.queryByText("旧批次总述不要画")).toBeNull();
     expect(screen.queryByText(/整理方案/)).toBeNull();
     expect(
       screen.getByText(
@@ -97,17 +98,6 @@ describe("AskUserCard intent variants", () => {
     expect(screen.queryByText("停止")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(onSubmit).toHaveBeenCalledWith("stop", "", []);
-  });
-
-  it("daily_review chrome is absent — wire falls back to decision", () => {
-    renderCard("daily_review" as AskUiIntent, organizeContent);
-
-    expect(
-      document.querySelector('[data-ask-intent="daily_review"]'),
-    ).toBeNull();
-    expect(document.querySelector('[data-ask-card="daily_review"]')).toBeNull();
-    expect(document.querySelector('[data-ask-intent="decision"]')).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /确认落盘/ })).toBeNull();
   });
 
   it("collectAskSelected 扁平化多题 picks", () => {

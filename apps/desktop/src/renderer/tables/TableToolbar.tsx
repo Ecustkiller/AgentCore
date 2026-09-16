@@ -1,12 +1,4 @@
-import {
-  Button,
-  IconButton,
-  Input,
-  SearchField,
-  SegmentedControl,
-  Select,
-} from "@/components/ui";
-import { Switch } from "@/components/ui/Switch";
+import { Button, IconButton, Input, SearchField } from "@/components/ui";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,24 +6,32 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { SimpleTooltip } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { Columns3, Filter, MoreHorizontal, Plus, Rows3 } from "lucide-react";
-import { useState } from "react";
-import {
-  DISPLAY_MODE_LABELS,
-  FIELD_TYPE_LABELS,
-  isSortable,
-  operatorsFor,
-} from "./fieldMeta";
-import { newId } from "./ids";
+  Calendar,
+  Download,
+  LayoutGrid,
+  MoreHorizontal,
+  Plus,
+  Search,
+  SquareKanban,
+  Table2,
+  X,
+} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { DISPLAY_MODE_LABELS } from "./fieldMeta";
 import { canUseMode } from "./query";
+import {
+  BatchFillMenu,
+  FieldMenu,
+  FilterMenu,
+  GroupMenu,
+  SortMenu,
+  filterChipLabel,
+} from "./tableToolbarMenus";
 import type {
   CellValue,
-  ColumnDef,
   Density,
   DisplayMode,
   FieldType,
@@ -39,13 +39,23 @@ import type {
   TableDoc,
   TableView,
 } from "./types";
-import { FIELD_TYPES } from "./types";
 
 const DENSITY_LABEL: Record<Density, string> = {
   compact: "紧凑",
   comfortable: "适中",
   loose: "宽松",
 };
+
+const MODE_ICON: Record<DisplayMode, typeof Table2> = {
+  table: Table2,
+  kanban: SquareKanban,
+  calendar: Calendar,
+  gallery: LayoutGrid,
+};
+
+function ToolbarDivider() {
+  return <span aria-hidden className="mx-0.5 h-4 w-px shrink-0 bg-border" />;
+}
 
 export function TableToolbar({
   table,
@@ -67,6 +77,7 @@ export function TableToolbar({
   onDeleteView,
   onBatchDelete,
   onBatchFill,
+  onExport,
 }: {
   table: TableDoc;
   view: TableView;
@@ -87,18 +98,164 @@ export function TableToolbar({
   onDeleteView: (viewId: string) => void;
   onBatchDelete: () => void;
   onBatchFill: (columnId: string, value: CellValue) => void;
+  onExport: () => void;
 }) {
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [renameDraft, setRenameDraft] = useState("");
   const hidden = new Set(view.config.hiddenColumnIds);
   const modes = (["table", "kanban", "calendar", "gallery"] as const).filter(
     (m) => m === view.displayMode || canUseMode(m, table.columns),
   );
+  const sortCol = view.config.sort
+    ? table.columns.find((c) => c.id === view.config.sort?.columnId)
+    : undefined;
+  const groupCol = view.config.groupBy
+    ? table.columns.find((c) => c.id === view.config.groupBy)
+    : undefined;
+  const hasChips =
+    view.config.filters.length > 0 ||
+    Boolean(view.config.sort) ||
+    Boolean(view.config.groupBy);
 
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border px-3 py-1.5">
-      <div className="flex flex-wrap items-center gap-1">
-        {table.views.map((v) =>
+    <div className="shrink-0 border-b border-border">
+      <div className="flex items-center gap-1.5 overflow-x-auto px-3 py-1.5">
+        <Button
+          variant="primary"
+          size="sm"
+          icon={<Plus size={14} />}
+          aria-label="新建记录"
+          onClick={onAddRow}
+        >
+          新建
+        </Button>
+        <ToolbarDivider />
+        <ViewTabs
+          views={table.views}
+          activeId={view.id}
+          onSwitch={onSwitchView}
+          onAdd={onAddView}
+          onRename={onRenameView}
+          onDelete={onDeleteView}
+        />
+        <ToolbarDivider />
+        {selectedCount > 0 ? (
+          <div className="flex shrink-0 items-center gap-1.5">
+            <span className="px-1 text-xs text-muted-foreground">
+              已选 {selectedCount}
+            </span>
+            <BatchFillMenu
+              columns={table.columns}
+              count={selectedCount}
+              onApply={onBatchFill}
+            />
+            <Button variant="danger" size="sm" onClick={onBatchDelete}>
+              删除 {selectedCount} 行
+            </Button>
+          </div>
+        ) : (
+          <>
+            <FilterMenu
+              columns={table.columns}
+              filters={view.config.filters}
+              onChange={onPatchFilters}
+            />
+            <SortMenu
+              columns={table.columns}
+              sort={view.config.sort}
+              onChange={onSort}
+            />
+            <GroupMenu
+              columns={table.columns}
+              groupBy={view.config.groupBy}
+              onChange={onGroup}
+            />
+            <SearchToggle value={search} onChange={onSearch} />
+          </>
+        )}
+        <div className="min-w-2 flex-1" />
+        <ModeStrip mode={view.displayMode} modes={modes} onChange={onMode} />
+        <FieldMenu
+          columns={table.columns}
+          hidden={hidden}
+          onAdd={onAddColumn}
+          onToggle={onToggleColumn}
+        />
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <IconButton size="sm" aria-label="更多">
+              <MoreHorizontal size={14} />
+            </IconButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {(Object.keys(DENSITY_LABEL) as Density[]).map((d) => (
+              <DropdownMenuItem key={d} onSelect={() => onDensity(d)}>
+                {view.config.density === d ? "✓ " : ""}
+                {DENSITY_LABEL[d]}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={onExport}>
+              <Download size={14} />
+              导出 CSV
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      {hasChips ? (
+        <div className="flex items-center gap-1 overflow-x-auto px-3 pb-1.5">
+          {view.config.filters.map((clause) => {
+            const label = filterChipLabel(clause, table.columns);
+            return (
+              <QueryChip
+                key={clause.id}
+                label={label}
+                onRemove={() =>
+                  onPatchFilters(
+                    view.config.filters.filter((f) => f.id !== clause.id),
+                  )
+                }
+              />
+            );
+          })}
+          {sortCol && view.config.sort ? (
+            <QueryChip
+              label={`排序 · ${sortCol.label}${view.config.sort.dir === "desc" ? "↓" : "↑"}`}
+              onRemove={() => onSort(null, "asc")}
+            />
+          ) : null}
+          {groupCol ? (
+            <QueryChip
+              label={`分组 · ${groupCol.label}`}
+              onRemove={() => onGroup(null)}
+            />
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ViewTabs({
+  views,
+  activeId,
+  onSwitch,
+  onAdd,
+  onRename,
+  onDelete,
+}: {
+  views: TableView[];
+  activeId: string;
+  onSwitch: (id: string) => void;
+  onAdd: () => void;
+  onRename: (id: string, name: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+
+  return (
+    <div className="flex shrink-0 items-center gap-0.5">
+      <div className="flex items-center gap-0.5 rounded-lg bg-muted p-0.5">
+        {views.map((v) =>
           renamingId === v.id ? (
             <Input
               key={v.id}
@@ -109,7 +266,7 @@ export function TableToolbar({
               onChange={(e) => setRenameDraft(e.target.value)}
               onBlur={() => {
                 const next = renameDraft.trim();
-                if (next && next !== v.name) onRenameView(v.id, next);
+                if (next && next !== v.name) onRename(v.id, next);
                 setRenamingId(null);
               }}
               onKeyDown={(e) => {
@@ -121,606 +278,171 @@ export function TableToolbar({
             <div key={v.id} className="flex items-center">
               <Button
                 size="sm"
-                variant={v.id === view.id ? "outline" : "neutral"}
+                variant="ghost"
                 aria-label={`视图 ${v.name}`}
-                onClick={() => onSwitchView(v.id)}
+                aria-pressed={v.id === activeId}
+                onClick={() => onSwitch(v.id)}
                 onDoubleClick={(e) => {
                   e.preventDefault();
                   setRenamingId(v.id);
                   setRenameDraft(v.name);
                 }}
+                className={cn(
+                  "h-7 px-2.5",
+                  v.id === activeId
+                    ? "bg-accent text-accent-foreground hover:bg-accent hover:text-accent-foreground"
+                    : "text-muted-foreground",
+                )}
               >
                 {v.name}
               </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <IconButton
-                    size="sm"
-                    aria-label={`视图 ${v.name} 操作`}
-                    className="size-7"
-                  >
-                    <MoreHorizontal size={14} />
-                  </IconButton>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
-                  <DropdownMenuItem
-                    onSelect={() => {
-                      setRenamingId(v.id);
-                      setRenameDraft(v.name);
-                    }}
-                  >
-                    重命名
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    variant="danger"
-                    disabled={table.views.length <= 1}
-                    onSelect={() => {
-                      if (table.views.length > 1) onDeleteView(v.id);
-                    }}
-                  >
-                    删除视图
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              {v.id === activeId ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <IconButton
+                      size="sm"
+                      aria-label={`视图 ${v.name} 操作`}
+                      className="size-7"
+                    >
+                      <MoreHorizontal size={14} />
+                    </IconButton>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        setRenamingId(v.id);
+                        setRenameDraft(v.name);
+                      }}
+                    >
+                      重命名
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      variant="danger"
+                      disabled={views.length <= 1}
+                      onSelect={() => {
+                        if (views.length > 1) onDelete(v.id);
+                      }}
+                    >
+                      删除视图
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : null}
             </div>
           ),
         )}
-        <Button
-          size="sm"
-          variant="neutral"
-          icon={<Plus size={14} />}
-          onClick={onAddView}
-        >
-          视图
-        </Button>
       </div>
-
-      <SegmentedControl
-        aria-label="显示模式"
-        className="w-auto [&_button]:flex-none"
-        value={view.displayMode}
-        onChange={onMode}
-        items={modes.map((m) => ({ value: m, label: DISPLAY_MODE_LABELS[m] }))}
-      />
-
-      <Button
-        variant="neutral"
-        size="sm"
-        icon={<Plus size={14} />}
-        onClick={onAddRow}
-      >
-        新建
-      </Button>
-
-      <FieldMenu
-        columns={table.columns}
-        hidden={hidden}
-        onAdd={onAddColumn}
-        onToggle={onToggleColumn}
-      />
-      <FilterMenu
-        columns={table.columns}
-        filters={view.config.filters}
-        onChange={onPatchFilters}
-      />
-      <SortMenu
-        columns={table.columns}
-        sort={view.config.sort}
-        onChange={onSort}
-      />
-      <GroupMenu
-        columns={table.columns}
-        groupBy={view.config.groupBy}
-        onChange={onGroup}
-      />
-
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="neutral" size="sm" icon={<Rows3 size={14} />}>
-            {DENSITY_LABEL[view.config.density]}
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          {(Object.keys(DENSITY_LABEL) as Density[]).map((d) => (
-            <DropdownMenuItem key={d} onSelect={() => onDensity(d)}>
-              {DENSITY_LABEL[d]}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      <div className="ml-auto flex items-center gap-2">
-        {selectedCount > 0 ? (
-          <>
-            <BatchFillMenu
-              columns={table.columns}
-              count={selectedCount}
-              onApply={onBatchFill}
-            />
-            <Button variant="danger" size="sm" onClick={onBatchDelete}>
-              删除 {selectedCount} 行
-            </Button>
-          </>
-        ) : null}
-        <SearchField
-          size="sm"
-          placeholder="搜索"
-          value={search}
-          onValueChange={onSearch}
-          aria-label="搜索表格"
-          className="w-40"
-        />
-      </div>
+      <SimpleTooltip label="添加视图">
+        <IconButton size="sm" aria-label="添加视图" onClick={onAdd}>
+          <Plus size={14} />
+        </IconButton>
+      </SimpleTooltip>
     </div>
   );
 }
 
-function FieldMenu({
-  columns,
-  hidden,
-  onAdd,
-  onToggle,
-}: {
-  columns: ColumnDef[];
-  hidden: Set<string>;
-  onAdd: (label: string, type: FieldType) => void;
-  onToggle: (columnId: string, hidden: boolean) => void;
-}) {
-  const [label, setLabel] = useState("");
-  const [type, setType] = useState<FieldType>("text");
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="neutral" size="sm" icon={<Columns3 size={14} />}>
-          字段
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-72 p-3">
-        <p className="mb-2 text-xs font-medium text-muted-foreground">显示列</p>
-        <div className="flex flex-col gap-1.5">
-          {columns.map((c) => (
-            <div
-              key={c.id}
-              className="flex items-center justify-between gap-2 text-sm"
-            >
-              <span className="truncate">{c.label}</span>
-              <Switch
-                label={`显示${c.label}`}
-                checked={!hidden.has(c.id)}
-                onCheckedChange={(on) => onToggle(c.id, !on)}
-              />
-            </div>
-          ))}
-        </div>
-        <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
-          <Input
-            placeholder="新列名称"
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-          />
-          <Select
-            value={type}
-            onChange={(e) => setType(e.target.value as FieldType)}
-          >
-            {FIELD_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {FIELD_TYPE_LABELS[t]}
-              </option>
-            ))}
-          </Select>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => {
-              onAdd(label, type);
-              setLabel("");
-            }}
-          >
-            添加列
-          </Button>
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-function FilterMenu({
-  columns,
-  filters,
+function ModeStrip({
+  mode,
+  modes,
   onChange,
 }: {
-  columns: ColumnDef[];
-  filters: FilterClause[];
-  onChange: (filters: FilterClause[]) => void;
+  mode: DisplayMode;
+  modes: DisplayMode[];
+  onChange: (mode: DisplayMode) => void;
 }) {
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="neutral" size="sm" icon={<Filter size={14} />}>
-          筛选{filters.length ? ` ${filters.length}` : ""}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-80 p-3">
-        <div className="flex flex-col gap-2">
-          {filters.length === 0 ? (
-            <p className="text-xs text-muted-foreground">还没有条件</p>
-          ) : null}
-          {filters.map((clause) => {
-            const col =
-              columns.find((c) => c.id === clause.columnId) ?? columns[0];
-            const ops = operatorsFor(col.type);
-            const needsValue =
-              clause.op !== "empty" && clause.op !== "not_empty";
-            return (
-              <div key={clause.id} className="flex items-start gap-1">
-                <div className="flex min-w-0 flex-1 flex-col gap-1">
-                  <div className="flex gap-1">
-                    <Select
-                      className="flex-1"
-                      value={clause.columnId}
-                      onChange={(e) =>
-                        onChange(
-                          filters.map((f) =>
-                            f.id === clause.id
-                              ? {
-                                  ...f,
-                                  columnId: e.target.value,
-                                  op: "eq",
-                                  value: null,
-                                }
-                              : f,
-                          ),
-                        )
-                      }
-                    >
-                      {columns.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.label}
-                        </option>
-                      ))}
-                    </Select>
-                    <Select
-                      className="w-24"
-                      value={clause.op}
-                      onChange={(e) =>
-                        onChange(
-                          filters.map((f) =>
-                            f.id === clause.id
-                              ? {
-                                  ...f,
-                                  op: e.target.value as FilterClause["op"],
-                                }
-                              : f,
-                          ),
-                        )
-                      }
-                    >
-                      {ops.map((o) => (
-                        <option key={o.op} value={o.op}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-                  {needsValue ? (
-                    <FilterValueField
-                      column={col}
-                      value={clause.value}
-                      onChange={(value) =>
-                        onChange(
-                          filters.map((f) =>
-                            f.id === clause.id ? { ...f, value } : f,
-                          ),
-                        )
-                      }
-                    />
-                  ) : null}
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  aria-label="移除条件"
-                  onClick={() =>
-                    onChange(filters.filter((f) => f.id !== clause.id))
-                  }
-                >
-                  移除
-                </Button>
-              </div>
-            );
-          })}
-          <Button
-            variant="neutral"
-            size="sm"
-            icon={<Plus size={14} />}
-            onClick={() =>
-              onChange([
-                ...filters,
-                {
-                  id: newId(),
-                  columnId: columns[0]?.id ?? "",
-                  op: "contains",
-                  value: "",
-                },
-              ])
-            }
-          >
-            添加条件
-          </Button>
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-function FilterValueField({
-  column,
-  value,
-  onChange,
-}: {
-  column: ColumnDef;
-  value: CellValue;
-  onChange: (value: CellValue) => void;
-}) {
-  if (column.type === "singleSelect" || column.type === "multiSelect") {
-    return (
-      <Select
-        value={typeof value === "string" ? value : ""}
-        onChange={(e) => onChange(e.target.value || null)}
-      >
-        <option value="">选择</option>
-        {(column.options ?? []).map((o) => (
-          <option key={o.id} value={o.id}>
-            {o.label}
-          </option>
-        ))}
-      </Select>
-    );
-  }
-  return (
-    <Input
-      value={value == null || Array.isArray(value) ? "" : String(value)}
-      onChange={(e) =>
-        onChange(
-          column.type === "number"
-            ? e.target.value === ""
-              ? null
-              : Number(e.target.value)
-            : e.target.value,
-        )
-      }
-    />
-  );
-}
-
-function SortMenu({
-  columns,
-  sort,
-  onChange,
-}: {
-  columns: ColumnDef[];
-  sort: TableView["config"]["sort"];
-  onChange: (columnId: string | null, dir: "asc" | "desc") => void;
-}) {
-  const sortable = columns.filter((c) => isSortable(c.type));
-  const current = sort
-    ? sortable.find((c) => c.id === sort.columnId)
-    : undefined;
-  const label = current
-    ? `排序 · ${current.label}${sort?.dir === "desc" ? "↓" : "↑"}`
-    : "排序";
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="neutral" size="sm">
-          {label}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start">
-        <DropdownMenuItem onSelect={() => onChange(null, "asc")}>
-          手动顺序
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        {sortable.map((c) => {
-          const active = sort?.columnId === c.id;
-          const dir = active && sort?.dir === "desc" ? "desc" : "asc";
-          return (
-            <DropdownMenuItem
-              key={c.id}
-              onSelect={() =>
-                onChange(c.id, active && sort?.dir === "asc" ? "desc" : "asc")
+    <div
+      role="tablist"
+      aria-label="显示模式"
+      className="flex shrink-0 items-center gap-0.5 rounded-lg bg-muted p-0.5"
+    >
+      {modes.map((m) => {
+        const Icon = MODE_ICON[m];
+        const selected = m === mode;
+        return (
+          <SimpleTooltip key={m} label={DISPLAY_MODE_LABELS[m]}>
+            <IconButton
+              size="sm"
+              role="tab"
+              aria-label={DISPLAY_MODE_LABELS[m]}
+              aria-selected={selected}
+              onClick={() => onChange(m)}
+              className={
+                selected
+                  ? "bg-accent text-accent-foreground hover:bg-accent hover:text-accent-foreground"
+                  : undefined
               }
             >
-              {c.label}
-              {active ? (dir === "desc" ? " ↓" : " ↑") : ""}
-            </DropdownMenuItem>
-          );
-        })}
-      </DropdownMenuContent>
-    </DropdownMenu>
+              <Icon size={14} />
+            </IconButton>
+          </SimpleTooltip>
+        );
+      })}
+    </div>
   );
 }
 
-function batchDraft(column: ColumnDef | undefined): CellValue {
-  if (!column) return null;
-  if (column.type === "checkbox") return false;
-  if (column.type === "multiSelect") return [];
-  return null;
-}
-
-function BatchFillMenu({
-  columns,
-  count,
-  onApply,
-}: {
-  columns: ColumnDef[];
-  count: number;
-  onApply: (columnId: string, value: CellValue) => void;
-}) {
-  const [columnId, setColumnId] = useState(columns[0]?.id ?? "");
-  const col = columns.find((c) => c.id === columnId) ?? columns[0];
-  const [value, setValue] = useState<CellValue>(() => batchDraft(col));
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="neutral" size="sm">
-          改 {count} 行
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-64 p-3">
-        <div className="flex flex-col gap-2">
-          <Select
-            aria-label="批量改列"
-            value={col?.id ?? ""}
-            onChange={(e) => {
-              const next = columns.find((c) => c.id === e.target.value);
-              setColumnId(e.target.value);
-              setValue(batchDraft(next));
-            }}
-          >
-            {columns.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.label}
-              </option>
-            ))}
-          </Select>
-          {col ? (
-            <BatchValueField column={col} value={value} onChange={setValue} />
-          ) : null}
-          <Button
-            variant="primary"
-            size="sm"
-            disabled={!col}
-            onClick={() => {
-              if (col) onApply(col.id, value);
-            }}
-          >
-            应用到 {count} 行
-          </Button>
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-function BatchValueField({
-  column,
+function SearchToggle({
   value,
   onChange,
 }: {
-  column: ColumnDef;
-  value: CellValue;
-  onChange: (value: CellValue) => void;
+  value: string;
+  onChange: (q: string) => void;
 }) {
-  if (column.type === "checkbox") {
+  const [open, setOpen] = useState(Boolean(value));
+  const expanded = open || Boolean(value);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (expanded) inputRef.current?.focus();
+  }, [expanded]);
+
+  if (!expanded) {
     return (
-      <Select
-        aria-label="批量填写"
-        value={value ? "1" : "0"}
-        onChange={(e) => onChange(e.target.value === "1")}
+      <Button
+        variant="neutral"
+        size="sm"
+        icon={<Search size={14} />}
+        onClick={() => setOpen(true)}
       >
-        <option value="0">未勾选</option>
-        <option value="1">已勾选</option>
-      </Select>
-    );
-  }
-  if (column.type === "singleSelect") {
-    return (
-      <Select
-        aria-label="批量填写"
-        value={typeof value === "string" ? value : ""}
-        onChange={(e) => onChange(e.target.value || null)}
-      >
-        <option value="">未填写</option>
-        {(column.options ?? []).map((o) => (
-          <option key={o.id} value={o.id}>
-            {o.label}
-          </option>
-        ))}
-      </Select>
-    );
-  }
-  if (column.type === "multiSelect") {
-    const current = Array.isArray(value) ? (value[0] ?? "") : "";
-    return (
-      <Select
-        aria-label="批量填写"
-        value={current}
-        onChange={(e) => onChange(e.target.value ? [e.target.value] : [])}
-      >
-        <option value="">未填写</option>
-        {(column.options ?? []).map((o) => (
-          <option key={o.id} value={o.id}>
-            {o.label}
-          </option>
-        ))}
-      </Select>
-    );
-  }
-  if (column.type === "date" || column.type === "datetime") {
-    return (
-      <Input
-        aria-label="批量填写"
-        type={column.type === "datetime" ? "datetime-local" : "date"}
-        value={typeof value === "string" ? value : ""}
-        onChange={(e) => onChange(e.target.value || null)}
-      />
-    );
-  }
-  if (column.type === "number") {
-    return (
-      <Input
-        aria-label="批量填写"
-        type="number"
-        value={typeof value === "number" ? String(value) : ""}
-        onChange={(e) =>
-          onChange(e.target.value === "" ? null : Number(e.target.value))
-        }
-      />
+        查找
+      </Button>
     );
   }
   return (
-    <Input
-      aria-label="批量填写"
-      value={typeof value === "string" ? value : ""}
-      onChange={(e) => onChange(e.target.value)}
+    <SearchField
+      ref={inputRef}
+      size="sm"
+      placeholder="查找"
+      value={value}
+      onValueChange={onChange}
+      aria-label="查找表格"
+      className="w-40 shrink-0"
+      onBlur={() => {
+        if (!value) setOpen(false);
+      }}
     />
   );
 }
 
-function GroupMenu({
-  columns,
-  groupBy,
-  onChange,
+function QueryChip({
+  label,
+  onRemove,
 }: {
-  columns: ColumnDef[];
-  groupBy: string | null;
-  onChange: (columnId: string | null) => void;
+  label: string;
+  onRemove: () => void;
 }) {
-  const groupable = columns.filter(
-    (c) =>
-      c.type === "singleSelect" ||
-      c.type === "multiSelect" ||
-      c.type === "checkbox" ||
-      c.type === "date",
-  );
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="neutral" size="sm">
-          分组{groupBy ? " · 开" : ""}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start">
-        <DropdownMenuItem onSelect={() => onChange(null)}>
-          不分组
-        </DropdownMenuItem>
-        {groupable.map((c) => (
-          <DropdownMenuItem key={c.id} onSelect={() => onChange(c.id)}>
-            {c.label}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <span className="inline-flex shrink-0 items-center gap-0.5 rounded-lg border border-border bg-muted px-1.5 py-0.5 text-xs text-foreground">
+      {label}
+      <IconButton
+        size="sm"
+        aria-label={`移除 ${label}`}
+        className="size-5"
+        onClick={onRemove}
+      >
+        <X size={12} />
+      </IconButton>
+    </span>
   );
 }

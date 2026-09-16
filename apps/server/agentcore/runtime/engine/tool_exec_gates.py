@@ -34,7 +34,8 @@ async def _apply_local_destructive_baseline_gate(
     """P0a/b: Local destructive delete without zip baseline → FORCE_APPROVAL.
 
     Regular :func:`~agentcore.workspace.turn_baseline.maybe_capture_turn_baseline`
-    remains non-blocking. This gate only upgrades the breaker hit when the call
+    remains non-blocking and now runs on first file mutation (not turn start).
+    This gate only upgrades the breaker hit when the call
     matches a destructive_fs heuristic, the backend is Local, and no usable zip
     can be ensured. Cloud desk guests bind the workspace (``location != local``
     skips this Local-only gate). Packaging allowlist rw-bind deletes are out of
@@ -119,6 +120,46 @@ async def _apply_local_destructive_baseline_gate(
     if existing is not None and existing.verdict is BreakerVerdict.FORCE_APPROVAL:
         return existing
     return no_turn_baseline_hit()
+
+
+async def _maybe_capture_mutation_baseline(
+    *,
+    tool_name: str,
+    args: Any,
+    context: ToolContext,
+) -> None:
+    """Best-effort snapshot immediately before a file-mutating tool. Never raises."""
+    from agentcore.workspace.turn_baseline import (
+        maybe_capture_turn_baseline,
+        tool_warrants_turn_baseline,
+    )
+
+    if not tool_warrants_turn_baseline(
+        tool_name, args if isinstance(args, dict) else None
+    ):
+        return
+    from agentcore.runtime.journal.writer import current_journal_writer
+
+    writer = current_journal_writer.get()
+    message_id = (writer.turn_id if writer is not None else "") or ""
+    if not message_id:
+        return
+    try:
+        await maybe_capture_turn_baseline(
+            user_id=context.user_id or "",
+            folder_id=context.ownership_desk_id,
+            conversation_id=context.conversation_id or "",
+            message_id=message_id,
+            backend=context.backend,
+        )
+    except Exception:
+        logger.warning(
+            "turn.local_baseline_failed",
+            conversation_id=context.conversation_id,
+            message_id=message_id,
+            phase="mutation_maybe_capture",
+            exc_info=True,
+        )
 
 
 @dataclass(frozen=True)

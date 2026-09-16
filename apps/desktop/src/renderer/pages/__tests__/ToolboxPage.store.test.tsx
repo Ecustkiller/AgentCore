@@ -21,8 +21,6 @@ function renderShell(entry: string) {
         <Route path="/toolbox" element={<ToolboxShell />}>
           <Route path="mine/skills" element={<div>技能内容</div>} />
           <Route path="mine/creation" element={<div>创作内容</div>} />
-          <Route path="mine/mcp" element={<div>MCP内容</div>} />
-          <Route path="mine/workflows" element={<div>工作流内容</div>} />
           <Route
             path="market"
             element={<div data-testid="market">市场内容</div>}
@@ -45,12 +43,8 @@ describe("工具箱壳", () => {
     expect(screen.queryByRole("tablist", { name: "工具箱" })).toBeNull();
     expect(screen.queryByRole("tab", { name: "我的" })).toBeNull();
     const kinds = screen.getByRole("navigation", { name: "工具箱种类" });
-    const kindLinks = within(kinds).getAllByRole("link").slice(0, 3);
-    expect(kindLinks.map((el) => el.textContent)).toEqual([
-      "提示词",
-      "创作",
-      "工作流",
-    ]);
+    const kindLinks = within(kinds).getAllByRole("link").slice(0, 2);
+    expect(kindLinks.map((el) => el.textContent)).toEqual(["提示词", "创作"]);
     expect(kindLinks.every((el) => el.querySelector("svg"))).toBe(true);
     expect(
       screen.getByRole("link", { name: "市场" }).getAttribute("href"),
@@ -65,6 +59,7 @@ describe("工具箱壳", () => {
     renderShell(APP_PATHS.toolbox.mine.skills);
     const kinds = screen.getByRole("navigation", { name: "工具箱种类" });
     expect(within(kinds).queryByRole("link", { name: "工具" })).toBeNull();
+    expect(within(kinds).queryByRole("link", { name: "工作流" })).toBeNull();
     expect(screen.queryByRole("link", { name: "连接器" })).toBeNull();
     expect(screen.getByRole("link", { name: "市场" })).toBeTruthy();
   });
@@ -87,7 +82,7 @@ describe("工具箱壳", () => {
     expect(screen.getByTestId("market")).toBeTruthy();
     const kinds = screen.getByRole("navigation", { name: "工具箱种类" });
     expect(kinds).toBeTruthy();
-    for (const label of ["提示词", "创作", "工作流"]) {
+    for (const label of ["提示词", "创作"]) {
       expect(
         within(kinds)
           .getByRole("link", { name: label })

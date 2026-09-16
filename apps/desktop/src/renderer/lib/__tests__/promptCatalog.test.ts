@@ -138,16 +138,13 @@ describe("buildPromptCatalog", () => {
 });
 
 describe("buildPromptRail", () => {
-  it("准则身份在常驻，核在记忆带，官方 HOW 在按需轨", () => {
+  it("准则身份在常驻，核不进货架，官方 HOW 在按需轨", () => {
     const rail = buildPromptRail(base, buildMineCatalogRows([], []), [], null);
     expect(rail.constitution.map((row) => row.id)).toEqual([
       "shared",
       "identity",
     ]);
-    expect(rail.memory.map((row) => row.id)).toEqual([
-      placeholderCatalogId("preferences"),
-      placeholderCatalogId("profile"),
-    ]);
+    expect(rail.memory).toEqual([]);
     expect(rail.alwaysMine).toEqual([]);
     expect(rail.folders).toEqual([]);
     expect(rail.official.map((row) => row.id)).toEqual([
@@ -206,7 +203,7 @@ describe("buildPromptRail", () => {
     ).toEqual([toolCatalogId("file_read"), toolCatalogId("host")]);
   });
 
-  it("偏好画像进根，按需自建进其他", () => {
+  it("偏好画像不进货架，按需自建进其他", () => {
     const rail = buildPromptRail(
       base,
       buildMineCatalogRows(
@@ -228,10 +225,7 @@ describe("buildPromptRail", () => {
       "shared",
       "identity",
     ]);
-    expect(rail.memory.map((row) => row.id)).toEqual([
-      placeholderCatalogId("preferences"),
-      placeholderCatalogId("profile"),
-    ]);
+    expect(rail.memory).toEqual([]);
     const other = rail.folders.find((folder) => folder.source === "other");
     expect(other?.items.map((row) => row.id)).toEqual([mineCatalogId("d1")]);
     expect(rail.official.map((row) => row.id)).toEqual([
@@ -353,7 +347,7 @@ describe("buildPromptRail", () => {
 });
 
 describe("buildMineCatalogRows", () => {
-  it("常驻账号核出现在我的列表，不能当商店货", () => {
+  it("账号核不出现在我的列表", () => {
     const rows = buildMineCatalogRows(
       [],
       [
@@ -369,24 +363,10 @@ describe("buildMineCatalogRows", () => {
         },
       ],
     );
-    expect(rows.map((row) => row.name)).toEqual(["偏好", "画像"]);
-    const pref = rows.find((row) => row.name === "偏好");
-    expect(pref).toEqual(
-      expect.objectContaining({
-        id: "pref",
-        applyMode: "always",
-        aiMaintained: true,
-        memoryKind: "preferences",
-        listable: false,
-      }),
-    );
-    const profile = rows.find((row) => row.name === "画像");
-    expect(profile?.id).toBe("");
-    expect(profile?.memoryKind).toBe("profile");
-    expect(profile?.listable).toBe(false);
+    expect(rows).toEqual([]);
   });
 
-  it("缺核时用占位，按需用户条目可上架", () => {
+  it("按需用户条目可上架，不补空核", () => {
     const rows = buildMineCatalogRows(
       [
         {
@@ -399,36 +379,30 @@ describe("buildMineCatalogRows", () => {
       ],
       [],
     );
-    expect(rows[0]?.memoryKind).toBe("preferences");
-    expect(rows[1]?.memoryKind).toBe("profile");
-    expect(rows[2]).toEqual(
+    expect(rows).toEqual([
       expect.objectContaining({
         id: "d1",
         name: "合同审查",
         listable: true,
         applyMode: "on_demand",
       }),
-    );
+    ]);
   });
 
   it("占位目录 id 稳定", () => {
     expect(placeholderCatalogId("preferences")).toBe("placeholder:preferences");
   });
 
-  it("global 偏好/画像 对上我的目录行，文件夹叶子不对", () => {
+  it("global 偏好/画像 不再对上目录行", () => {
     const items = flattenPromptRail(
       buildPromptRail(base, buildMineCatalogRows([], []), [], null),
     );
-    expect(catalogIdForMemoryTarget("global/preferences", items)).toBe(
-      placeholderCatalogId("preferences"),
-    );
-    expect(catalogIdForMemoryTarget("global/profile", items)).toBe(
-      placeholderCatalogId("profile"),
-    );
+    expect(catalogIdForMemoryTarget("global/preferences", items)).toBeNull();
+    expect(catalogIdForMemoryTarget("global/profile", items)).toBeNull();
     expect(catalogIdForMemoryTarget("project/F1/profile", items)).toBeNull();
   });
 
-  it("有真实账号核时对上 mine id", () => {
+  it("存量账号核也不进目录", () => {
     const items = flattenPromptRail(
       buildPromptRail(
         base,
@@ -451,8 +425,6 @@ describe("buildMineCatalogRows", () => {
         null,
       ),
     );
-    expect(catalogIdForMemoryTarget("global/preferences", items)).toBe(
-      mineCatalogId("pref"),
-    );
+    expect(catalogIdForMemoryTarget("global/preferences", items)).toBeNull();
   });
 });

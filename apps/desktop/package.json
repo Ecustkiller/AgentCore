@@ -1,6 +1,6 @@
 {
   "name": "agentcore-desktop",
-  "version": "0.9.28",
+  "version": "0.9.29",
   "description": "AgentCore Desktop - Multi-Agent AI Workspace",
   "author": "AgentCore",
   "main": "./out/main/index.js",
@@ -48,6 +48,7 @@
     "test": "vitest",
     "conformance": "vitest run --config vitest.conformance.config.ts",
     "typecheck": "tsc --noEmit",
+    "export:manual-corpus": "tsx scripts/export-manual-corpus.ts",
     "rebuild:native": "node ./scripts/rebuild-native.mjs",
     "postinstall": "node ./scripts/install-electron.mjs && node ./scripts/rebuild-native.mjs"
   },

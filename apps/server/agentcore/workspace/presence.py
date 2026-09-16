@@ -2,8 +2,7 @@
 
 A LocalWorkspace talks to the user's disk through a desktop fulfiller. Whether
 those files are *connected* is the same question the turn-start presence gate
-asks the fulfill hub. A settle timeout only means that one request did not
-finish; language-service diagnostics are a separate capability.
+asks the fulfill hub. A settle timeout only means that one request did not finish.
 
 Mid-turn retire / write-desk dispatch use this module. Reconnect grace
 (:meth:`FulfillerHub.seen_recently`) counts as still reachable so a brief SSE
@@ -12,11 +11,8 @@ drop does not strip the file family and then put it back.
 
 from __future__ import annotations
 
-from typing import Any
-
 from agentcore.fulfill.hub import default_fulfiller_hub, origin_pinned
 from agentcore.fulfill.origin import current_origin_device
-from agentcore.workspace.channel import WorkspaceChannel
 
 
 def backend_needs_workspace_fulfiller(backend: object | None) -> bool:
@@ -69,17 +65,3 @@ def local_workspace_files_reachable(
     elif hub.seen_recently(uid):
         return True
     return False
-
-
-def diagnostics_rides_fulfill_channel(backend: Any | None) -> bool:
-    """True when inner-loop diagnostics would take the desktop fulfill hop.
-
-    Write receipts must not wait on that hop. Explicit ``code_diagnostics`` still
-    may; a timeout there fails only that call.
-    """
-    if backend is None:
-        return False
-    if isinstance(getattr(backend, "_channel", None), WorkspaceChannel):
-        return True
-    desktop = getattr(backend, "_desktop_channel", None)
-    return isinstance(desktop, WorkspaceChannel)

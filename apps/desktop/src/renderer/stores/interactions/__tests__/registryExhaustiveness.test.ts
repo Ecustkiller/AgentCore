@@ -34,7 +34,6 @@ describe("INTERACTION_REGISTRY live kinds", () => {
         "stage_card",
       ].sort(),
     );
-    expect(REGISTERED).not.toContain("team_preview");
     for (const kind of REGISTERED) {
       expect(INTERACTION_KIND_WIRE[kind]).toBeDefined();
     }

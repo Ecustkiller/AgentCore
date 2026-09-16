@@ -1,17 +1,17 @@
 """Cross-surface DebateForm member-set ratchet.
 
-两集分开钉，禁止把广告子集与回放全员捆成一次相等：
+两集分开钉，禁止把入口形态与回放全员捆成一次相等：
 
 - 回放 / wire 全员：``DebateForm`` = ``DEBATE_FORM_VALUES`` = ``FORM_LABELS`` 键 =
   wire ``form``（``DebateForm`` 注解，不是手抄 ``Literal[...]``）
-- schema 广告子集：工具 ``form`` enum = ``DEBATE_SCHEMA_FORM_VALUES`` == {debate}；
-  须是全员的真子集（产品入口只认正反）
+- 产品入口：工具 schema **无** ``form`` 字段（写死正反）；``DEBATE_SCHEMA_FORM_VALUES``
+  == {debate} 只记录若加回字段时广告哪些值，须是全员的真子集
 
 Optional: desktop ``FORM_LABEL`` Record keys (same member set as ``DebateForm``)
 when a map is present. Handoff motion_card withdrawn — a file without the map
 is skipped, not a failure.
 Adding a replay form without updating wire/labels fails this test; advertising a
-new form to the model is a separate schema-subset change.
+new form to the model is a separate schema change (add ``form`` back).
 """
 
 from __future__ import annotations
@@ -78,7 +78,6 @@ def _assert_wire_uses_debate_form(model: type, field: str = "form") -> None:
 
 def test_debate_form_member_set_aligned_across_surfaces():
     enum_vals = frozenset(m.value for m in DebateForm)
-    schema_vals = frozenset(DEBATE_PARAMETERS["properties"]["form"]["enum"])
     advertised = frozenset(DEBATE_SCHEMA_FORM_VALUES)
     label_keys = frozenset(f.value for f in FORM_LABELS)
     derived = frozenset(DEBATE_FORM_VALUES)
@@ -91,8 +90,11 @@ def test_debate_form_member_set_aligned_across_surfaces():
     assert list(DEBATE_FORM_VALUES) == [m.value for m in DebateForm]
     assert len(enum_vals) >= 3  # ratchet: replay set never silently empty
 
-    assert schema_vals == advertised == frozenset({"debate"})
-    assert advertised < enum_vals  # 广告真子集，不是全员拷贝
+    assert "form" not in DEBATE_PARAMETERS["properties"]
+    assert "form" not in DEBATE_PARAMETERS["required"]
+    assert "is_subject" not in DEBATE_PARAMETERS["properties"]["sides"]["items"]["properties"]
+    assert advertised == frozenset({"debate"})
+    assert advertised < enum_vals  # 入口真子集，不是全员拷贝
     assert list(DEBATE_SCHEMA_FORM_VALUES) == ["debate"]
 
     _assert_wire_uses_debate_form(DebateResultPayload)

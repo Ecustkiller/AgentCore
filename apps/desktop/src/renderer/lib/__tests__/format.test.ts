@@ -11,6 +11,7 @@ import {
   formatDownloadProgress,
   formatDuration,
   formatDurationSec,
+  formatLiveElapsed,
   formatMessageTime,
   formatMessageTimeOfDay,
   formatQuotaRemaining,
@@ -102,7 +103,7 @@ describe("formatDisplayCost / pickCostMoney (BYOK ≈)", () => {
     });
     expect(pickCostMoney({ total: 0, estimated_total: 999 })).toEqual({
       nano: 999,
-      estimated: true,
+      estimated: false,
       currency: "CNY",
     });
     expect(pickCostMoney({ total: 0 })).toEqual({
@@ -120,8 +121,7 @@ describe("formatDisplayCost / pickCostMoney (BYOK ≈)", () => {
     });
   });
 
-  // 一个回合可以记账人民币、估算美元：估算走 estimated_currency，缺省才回落记账币种。
-  // 不做汇率换算，所以币种必须随金额一起交给调用方，否则会拿 ¥ 的符号去印 $ 的数。
+  // 遗留 USD 估算走 estimated_currency；缺省才回落记账币种。币种必须随金额交给调用方。
   it("carries the estimate's own currency, falling back to the billed one", () => {
     expect(
       pickCostMoney({
@@ -213,6 +213,13 @@ describe("formatDuration / formatDurationSec", () => {
   it("drops seconds once past an hour", () => {
     expect(formatDuration(3_723_000)).toBe("1h 2m");
     expect(formatDurationSec(3_723)).toBe("1h 2m");
+  });
+
+  it("omits live elapsed below one second", () => {
+    expect(formatLiveElapsed(0)).toBeNull();
+    expect(formatLiveElapsed(0.4)).toBeNull();
+    expect(formatLiveElapsed(1)).toBe("1s");
+    expect(formatLiveElapsed(90)).toBe("1m 30s");
   });
 
   it("strips the face suffix for every compact shape", () => {

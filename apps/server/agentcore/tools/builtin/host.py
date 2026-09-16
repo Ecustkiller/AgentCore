@@ -50,22 +50,20 @@ _ALLOWED_ACTIONS = frozenset(
 _NEVER_APPROVE_ACTIONS = frozenset({_ACTION_STATUS, _ACTION_OS_LOG})
 _APPROVAL_ACTIONS = _ALLOWED_ACTIONS - _NEVER_APPROVE_ACTIONS
 
-# L1 host_os_log_summary hard caps (desktop clamps again; keep in lockstep).
+# L1 os_log: model path freezes entry/byte budgets to defaults. Desktop still
+# clamps incoming HostOp args (pathology valve; model cannot raise them).
 _OS_LOG_MINUTES_DEFAULT = 60
 _OS_LOG_MINUTES_MAX = 1440
 _OS_LOG_ENTRIES_DEFAULT = 40
-_OS_LOG_ENTRIES_MAX = 80
 _OS_LOG_BYTES_DEFAULT = 24_000
-_OS_LOG_BYTES_MAX = 48_000
 _OS_LOG_LEVELS = frozenset({"error", "warning", "info", "any"})
 _OS_LOG_SOURCE_MAX = 120
+_OS_LOG_TRUNCATED_NOTE = (
+    "摘要已截断；请收窄来源、级别或时间窗后再查，勿据此断言已覆盖全部事件。"
+)
 
 # L2 panel whitelist — closed set (安全权限与治理 / Host 定案 P1).
 _OPEN_SETTINGS_PANELS = frozenset({"sound", "display", "network", "apps", "about"})
-
-# L3 service-name whitelist — closed set (Host 定案 P2；禁任意 sc).
-# Canonical SCM name only; do not expand without architecture sign-off.
-_SERVICE_RESTART_ALLOWLIST = frozenset({"audiosrv"})
 
 # L3 package managers — closed set (桶4 · 点名包；否决任意 exe 静默装).
 _PACKAGE_MANAGERS = frozenset({"winget", "brew", "apt"})
@@ -176,20 +174,6 @@ HOST_TOOL_PARAMETERS: dict[str, Any] = {
             "minimum": 1,
             "maximum": _OS_LOG_MINUTES_MAX,
         },
-        "max_entries": {
-            "type": "integer",
-            "description": "os_log 返回条数。",
-            "default": _OS_LOG_ENTRIES_DEFAULT,
-            "minimum": 1,
-            "maximum": _OS_LOG_ENTRIES_MAX,
-        },
-        "max_bytes": {
-            "type": "integer",
-            "description": "os_log 摘要载荷字节上限。",
-            "default": _OS_LOG_BYTES_DEFAULT,
-            "minimum": 1024,
-            "maximum": _OS_LOG_BYTES_MAX,
-        },
         "command": {
             "type": "string",
             "description": "shell：本机短时命令（非空）。",
@@ -206,20 +190,9 @@ HOST_TOOL_PARAMETERS: dict[str, Any] = {
             "enum": sorted(_OPEN_SETTINGS_PANELS),
             "description": "open_settings 面板。",
         },
-        "device_id": {
-            "type": "string",
-            "description": (
-                "set_audio：设备 id（与 status 音频设备返回的 id 一致）。"
-            ),
-        },
         "device_name": {
             "type": "string",
             "description": "set_audio：设备友好名（与 status 音频设备返回的 name 一致）。",
-        },
-        "service": {
-            "type": "string",
-            "description": "restart_service：服务名。",
-            "enum": ["Audiosrv"],
         },
         "manager": {
             "type": "string",
@@ -353,7 +326,7 @@ def _clamp_os_log_int(raw: Any, *, default: int, lo: int, hi: int) -> int:
 
 
 def normalize_os_log_args(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Clamp / default os_log args (server-side; desktop reclamps)."""
+    """Clamp minutes / level / source; entry and byte budgets are frozen defaults."""
     source = str(arguments.get("source") or "").strip()[:_OS_LOG_SOURCE_MAX]
     raw_level = str(arguments.get("level") or "warning").strip().lower()
     level = raw_level if raw_level in _OS_LOG_LEVELS else "warning"
@@ -366,18 +339,8 @@ def normalize_os_log_args(arguments: dict[str, Any]) -> dict[str, Any]:
             lo=1,
             hi=_OS_LOG_MINUTES_MAX,
         ),
-        "max_entries": _clamp_os_log_int(
-            arguments.get("max_entries"),
-            default=_OS_LOG_ENTRIES_DEFAULT,
-            lo=1,
-            hi=_OS_LOG_ENTRIES_MAX,
-        ),
-        "max_bytes": _clamp_os_log_int(
-            arguments.get("max_bytes"),
-            default=_OS_LOG_BYTES_DEFAULT,
-            lo=1024,
-            hi=_OS_LOG_BYTES_MAX,
-        ),
+        "max_entries": _OS_LOG_ENTRIES_DEFAULT,
+        "max_bytes": _OS_LOG_BYTES_DEFAULT,
     }
 
 
@@ -432,6 +395,16 @@ def _as_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
     return {"value": value}
+
+
+def _os_log_model_payload(value: Any) -> dict[str, Any]:
+    """Model-facing os_log JSON: frozen budgets stay off the receipt."""
+    payload = dict(_as_dict(value))
+    payload.pop("max_entries", None)
+    payload.pop("max_bytes", None)
+    if payload.get("truncated"):
+        payload["note"] = _OS_LOG_TRUNCATED_NOTE
+    return payload
 
 
 def _model_json(payload: dict[str, Any]) -> str:
@@ -595,13 +568,20 @@ async def _execute_os_log(
 ) -> ToolResult:
     args = normalize_os_log_args(arguments)
     payload = {k: v for k, v in args.items() if not (k == "source" and v == "")}
-    return await _host_call(
+    result = await _host_call(
         context,
         op=HostOp.OS_LOG_SUMMARY,
         action=_ACTION_OS_LOG,
         args=payload,
         timeout=_ACTION_TIMEOUTS[_ACTION_OS_LOG],
     )
+    if not result.success:
+        return result
+    try:
+        raw = json.loads(result.output) if result.output else {}
+    except json.JSONDecodeError:
+        return result
+    return _host_result(_os_log_model_payload(raw), action=_ACTION_OS_LOG)
 
 
 def _host_shell_transport_args(
@@ -696,24 +676,18 @@ async def _execute_open_settings(
 async def _execute_set_audio(
     arguments: dict[str, Any], context: ToolContext
 ) -> ToolResult:
-    device_id = str(arguments.get("device_id") or "").strip()
     device_name = str(arguments.get("device_name") or "").strip()
-    if not device_id and not device_name:
+    if not device_name:
         return _fail(
-            "host(action=set_audio) 需要 device_id 和/或 device_name；"
+            "host(action=set_audio) 需要 device_name；"
             "请先 host(action=status) 观测音频设备后再指定。",
             contract_failure=True,
         )
-    args: dict[str, Any] = {}
-    if device_id:
-        args["device_id"] = device_id
-    if device_name:
-        args["device_name"] = device_name
     return await _host_call(
         context,
         op=HostOp.AUDIO_SET_DEFAULT,
         action=_ACTION_SET_AUDIO,
-        args=args,
+        args={"device_name": device_name},
         timeout=_ACTION_TIMEOUTS[_ACTION_SET_AUDIO],
     )
 
@@ -721,13 +695,8 @@ async def _execute_set_audio(
 async def _execute_restart_service(
     arguments: dict[str, Any], context: ToolContext
 ) -> ToolResult:
-    service = str(arguments.get("service") or "").strip()
-    if service.lower() not in _SERVICE_RESTART_ALLOWLIST:
-        return _fail(
-            f"host(action=restart_service) 拒绝服务名 {service!r}；"
-            "仅允许极短白名单：Audiosrv。",
-            contract_failure=True,
-        )
+    # Model face has no service field; desktop channel still allowlists Audiosrv.
+    del arguments
     return await _host_call(
         context,
         op=HostOp.SERVICE_RESTART,

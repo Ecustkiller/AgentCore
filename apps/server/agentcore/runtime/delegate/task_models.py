@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from agentcore.llm.catalog import ModelCatalog
     from agentcore.llm.provider.protocol import LLMProvider
 
-# Shared JSON-schema fragment (delegate tasks + replan binds/add).
+# Shared JSON-schema fragment (delegate tasks + replan add).
 TASK_MODEL_SCHEMA_PROPS: dict[str, dict[str, object]] = {
     "model": {
         "type": "string",
@@ -42,7 +42,7 @@ TASK_MODEL_SCHEMA_PROPS: dict[str, dict[str, object]] = {
 
 
 def identity_from_task_item(item: Mapping[str, Any]) -> ModelIdentity:
-    """从 task/bind/add 字典读目录身份（空 model = 未指定）。"""
+    """从 task/add 字典读目录身份（空 model = 未指定）。"""
     raw_model = str(item.get("model") or "").strip()
     parsed = parse_model_input(raw_model)
     if parsed.kind == "ref":

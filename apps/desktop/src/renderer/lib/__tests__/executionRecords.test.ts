@@ -12,14 +12,23 @@ import {
 import { shouldShowTerminalTab } from "../processOutput";
 
 describe("executionRecordSummary", () => {
-  it("prefers purpose for code_execute", () => {
+  it("summarizes code_execute from language and first line", () => {
     expect(
       executionRecordSummary("code_execute", {
-        purpose: "算斐波那契",
         language: "python",
         code: "print(1)",
       }),
-    ).toBe("算斐波那契");
+    ).toBe("python · print(1)");
+  });
+
+  it("ignores unknown extra argument keys on code_execute", () => {
+    expect(
+      executionRecordSummary("code_execute", {
+        note: "算斐波那契",
+        language: "python",
+        code: "print(1)",
+      }),
+    ).toBe("python · print(1)");
   });
 
   it("falls back to language · first code line", () => {

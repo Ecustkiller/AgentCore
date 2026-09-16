@@ -355,6 +355,7 @@ async def test_list_marks_user_default_when_system_pin_dormant(monkeypatch):
         vision_origin=None,
         vision_model=None,
         vision_provider_id=None,
+        reasoning_effort=None,
     )
     svc = LlmModelProfileService(MagicMock())
     svc._default_id = AsyncMock(return_value=_glm_preset_id())  # type: ignore[method-assign]
@@ -451,6 +452,7 @@ async def test_expand_user_profile_includes_vision_slot(monkeypatch):
         vision_origin="byok",
         vision_model="qwen-vl-max",
         vision_provider_id="p-vision",
+        reasoning_effort=None,
     )
     svc = LlmModelProfileService(MagicMock())
     svc._default_id = AsyncMock(return_value=None)  # type: ignore[method-assign]
@@ -528,6 +530,7 @@ def _profile_db_row(**kwargs):
         "vision_origin": None,
         "vision_provider_id": None,
         "vision_model": None,
+        "reasoning_effort": None,
     }
     defaults.update(kwargs)
     return SimpleNamespace(**defaults)
@@ -675,3 +678,83 @@ async def test_create_profile_list_fetch_failure_saves_without_warning():
     assert view.id == "prof-1"
     assert view.warnings == ()
     assert fake.probe_models == []
+
+
+@pytest.mark.asyncio
+async def test_create_profile_rejects_alias_and_unsupported_effort():
+    from agentcore.core.errors import ValidationError
+    from agentcore.llm.model_profiles import ProfileSlot
+
+    svc = LlmModelProfileService(MagicMock())
+    svc._validate_slot = AsyncMock()  # type: ignore[method-assign]
+    svc._repo = MagicMock()
+    svc._repo.create = AsyncMock()
+
+    with pytest.raises(ValidationError, match="厂商档位"):
+        await svc.create_profile(
+            "u1",
+            name="combo",
+            main=ProfileSlot(
+                origin="byok", model="deepseek-v4-flash", provider_id="prov-1"
+            ),
+            reasoning_effort="medium",
+        )
+    with pytest.raises(ValidationError, match="不支持思考强度"):
+        await svc.create_profile(
+            "u1",
+            name="combo",
+            main=ProfileSlot(origin="byok", model="gpt-4o", provider_id="prov-1"),
+            reasoning_effort="low",
+        )
+    svc._repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_profile_persists_official_effort():
+    from agentcore.llm.model_profiles import ProfileSlot
+
+    svc = LlmModelProfileService(MagicMock())
+    svc._validate_slot = AsyncMock()  # type: ignore[method-assign]
+    svc._byok_reachability_warnings = AsyncMock(return_value=())  # type: ignore[method-assign]
+    created = _profile_db_row(
+        main_model="deepseek-v4-flash", reasoning_effort="low"
+    )
+    svc._repo = MagicMock()
+    svc._repo.create = AsyncMock(return_value=created)
+
+    view = await svc.create_profile(
+        "u1",
+        name="combo",
+        main=ProfileSlot(
+            origin="byok", model="deepseek-v4-flash", provider_id="prov-1"
+        ),
+        reasoning_effort="low",
+    )
+    assert svc._repo.create.await_args.kwargs["reasoning_effort"] == "low"
+    assert view.reasoning_effort == "low"
+
+
+@pytest.mark.asyncio
+async def test_update_profile_snaps_effort_when_main_loses_spec():
+    from agentcore.llm.model_profiles import ProfileSlot
+
+    svc = LlmModelProfileService(MagicMock())
+    svc._validate_slot = AsyncMock()  # type: ignore[method-assign]
+    svc._default_id = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    svc._byok_reachability_warnings = AsyncMock(return_value=())  # type: ignore[method-assign]
+    row = _profile_db_row(
+        main_model="deepseek-v4-flash", reasoning_effort="low"
+    )
+    updated = _profile_db_row(main_model="gpt-4o", reasoning_effort=None)
+    svc._repo = MagicMock()
+    svc._repo.get = AsyncMock(return_value=row)
+    svc._repo.update = AsyncMock(return_value=updated)
+
+    view = await svc.update_profile(
+        "u1",
+        "prof-1",
+        main=ProfileSlot(origin="byok", model="gpt-4o", provider_id="prov-1"),
+        fields_set={"main"},
+    )
+    assert svc._repo.update.await_args.kwargs["reasoning_effort"] is None
+    assert view.reasoning_effort is None

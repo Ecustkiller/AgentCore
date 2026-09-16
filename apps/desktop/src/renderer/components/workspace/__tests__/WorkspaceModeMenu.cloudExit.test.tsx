@@ -54,7 +54,6 @@ vi.mock("@/services/cloudDeskExit", () => ({
 vi.mock("@/stores/folders", () => ({
   useFoldersStore: {
     getState: () => ({
-      openImportToCloud: vi.fn(),
       openConnectGit: vi.fn(),
     }),
   },
@@ -112,7 +111,7 @@ afterEach(() => {
 });
 
 describe("WorkspaceModeMenu · cloud desk §7.6 exits", () => {
-  it("chip only keeps 合回到本机; export / import / git / artifacts stay off this menu", () => {
+  it("chip only keeps 合回到本机; zip / git / artifacts stay off this menu", () => {
     render(<WorkspaceModeMenu state={cloudState()} conversationId="c-cloud" />);
 
     expect(screen.getByText("合回到本机")).toBeTruthy();
@@ -122,7 +121,6 @@ describe("WorkspaceModeMenu · cloud desk §7.6 exits", () => {
     expect(screen.queryByText("登记合回落点")).toBeNull();
     expect(screen.queryByText("更换合回落点")).toBeNull();
     expect(screen.queryByText("只合回产物")).toBeNull();
-    expect(screen.queryByText("导入到「我的文件」")).toBeNull();
     expect(screen.queryByText("从 Git 克隆")).toBeNull();
     expect(screen.queryByText("遗留：先改云拷贝再合回")).toBeNull();
   });

@@ -3,10 +3,11 @@
  * 主回复末尾费用：团队图与单聊同口径；具名恢复关 footer 时费用行仍可见。
  */
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { COST_UNPRICED_LABEL } from "@/lib/format";
+import { formatMessageTime } from "@/lib/format";
+import { completedAtIso } from "@/lib/runningElapsed";
 import type { Message } from "@/stores/conversation";
 import type { Execution, RunNode } from "@/stores/execution";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -128,6 +129,7 @@ function runNode(
     kind: "agent",
     role: null,
     model: null,
+    reasoningEffort: null,
     usage: null,
     cost: null,
     stance: null,
@@ -174,17 +176,52 @@ afterEach(() => {
 });
 
 describe("AssistantMessage turn cost at bubble end", () => {
-  it("单聊：message.cost 展示在 footer 末尾", () => {
+  it("单聊：message.cost 与整轮用时展示在 footer 末尾", () => {
     renderBubble(
       settledMessage({
         cost: nanoCost(5_000_000_000),
+        durationMs: 12_000,
       }),
     );
     expect(screen.getByText("¥5.00")).toBeTruthy();
+    expect(screen.getByText("用时 12s")).toBeTruthy();
     expect(screen.getByRole("button", { name: "复制" })).toBeTruthy();
   });
 
-  it("BYOK 估算：费用位只出 ≈$", () => {
+  it("气泡脚时刻是完成时间，不是开跑 createdAt", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-05T12:00:00Z"));
+    const createdAt = "2026-08-05T00:00:00Z";
+    const durationMs = 90_000;
+    renderBubble(
+      settledMessage({
+        createdAt,
+        durationMs,
+        cost: nanoCost(5_000_000_000),
+      }),
+    );
+    expect(
+      screen.getByText(
+        formatMessageTime(completedAtIso(createdAt, durationMs)),
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(formatMessageTime(createdAt))).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("BYOK 产品价目：费用位出 ¥", () => {
+    renderBubble(
+      settledMessage({
+        cost: nanoCost(3_000_000_000, {
+          estimated_total: 3_000_000_000,
+          currency: "CNY",
+        }),
+      }),
+    );
+    expect(screen.getByText("¥3.00")).toBeTruthy();
+  });
+
+  it("遗留美元估算：费用位出 ≈$", () => {
     renderBubble(
       settledMessage({
         cost: nanoCost(0, {
@@ -241,7 +278,7 @@ describe("AssistantMessage turn cost at bubble end", () => {
     expect(screen.getByText("¥8.00")).toBeTruthy();
   });
 
-  it("团队图未计价：展示未计价标注", () => {
+  it("团队图无价目：不展示未计价，气泡脚仍出整轮用时", () => {
     execById.value = {
       "asst-1": { deliveryStatus: null, plan: { agents: [] } },
     };
@@ -251,7 +288,7 @@ describe("AssistantMessage turn cost at bubble end", () => {
         agentId: "a1",
         task: "调研",
         status: "completed",
-        cost: nanoCost(0, { pricing_source: "unpriced", currency: "USD" }),
+        cost: nanoCost(0, { pricing_source: "unpriced", currency: "CNY" }),
         usage: {
           input: 120,
           output: 60,
@@ -265,9 +302,11 @@ describe("AssistantMessage turn cost at bubble end", () => {
       settledMessage({
         executionId: "exec-1",
         content: "BYOK 团队回合",
+        durationMs: 57_000,
       }),
     );
-    expect(screen.getByText(COST_UNPRICED_LABEL)).toBeTruthy();
+    expect(screen.queryByText("未计价")).toBeNull();
+    expect(screen.getByText("用时 57s")).toBeTruthy();
   });
 
   it("具名恢复关 footer 时费用行仍在主回复末尾", () => {
@@ -306,5 +345,26 @@ describe("AssistantMessage turn cost at bubble end", () => {
     expect(screen.getByText("¥4.00")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "重新生成" })).toBeNull();
     expect(screen.queryByRole("button", { name: "复制" })).toBeNull();
+  });
+
+  it("轮次不在气泡脚，只在更多用量详情", async () => {
+    renderBubble(
+      settledMessage({
+        rounds: 3,
+        cost: nanoCost(5_000_000_000),
+        usage: {
+          input: 100,
+          output: 50,
+          reasoning: 0,
+          cache_hit: 0,
+          cache_miss: 0,
+        },
+      }),
+    );
+    expect(screen.getByText("¥5.00")).toBeTruthy();
+    expect(screen.queryByText("3 轮")).toBeNull();
+    fireEvent.pointerDown(screen.getByRole("button", { name: "更多" }));
+    expect(await screen.findByText("ReAct 轮次")).toBeTruthy();
+    expect(screen.getByText("3 轮")).toBeTruthy();
   });
 });

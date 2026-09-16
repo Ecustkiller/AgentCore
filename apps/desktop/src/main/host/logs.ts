@@ -2,8 +2,9 @@
  * Bounded OS event-log summary (Host L1).
  *
  * Win: Get-WinEvent; Linux: journalctl; other OS: honest stub.
- * Hard caps on entry count + payload bytes; secret-shaped tokens redacted
- * (paths kept). Never a full-disk / arbitrary *\\logs dump.
+ * Secret-shaped tokens redacted (paths kept). Never a full-disk / arbitrary
+ * *\\logs dump. Server always sends default entry/byte budgets; extra range
+ * here is a pathology valve if a channel payload arrives oversized.
  */
 
 import { execFile } from "node:child_process";

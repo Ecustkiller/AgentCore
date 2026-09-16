@@ -56,11 +56,8 @@ async function flush(): Promise<void> {
   await Promise.resolve();
 }
 
-const IMPORT_CONTINUE = "请在新文件夹里继续";
-const IMPORT_STAY_LOCAL = "当前对话用的还是本机原文件夹";
-
 describe("formatBorrowToCloudToast", () => {
-  it("says copied to cloud and original unchanged; not the import continue hint", () => {
+  it("says copied to cloud and original unchanged", () => {
     const t = formatBorrowToCloudToast({
       folderId: "f1",
       folderName: "Demo",
@@ -72,8 +69,6 @@ describe("formatBorrowToCloudToast", () => {
     });
     expect(t.message).toBe("已复制到云上「Demo」");
     expect(t.description).toContain("电脑上的原件还没改");
-    expect(t.description).not.toContain(IMPORT_CONTINUE);
-    expect(t.description).not.toContain(IMPORT_STAY_LOCAL);
     expect(`${t.message}${t.description}`).not.toMatch(
       /合回|过桥|遗留|云协作|本机传统|sidecar|通道/,
     );
@@ -108,7 +103,7 @@ describe("startBorrowToCloudJob", () => {
     __clearMemoryUiStorageForTests();
   });
 
-  it("shares the job store: refuses when import is already running", async () => {
+  it("shares the job store: refuses when a copy is already running", async () => {
     const held = new AbortController();
     expect(useImportToCloudJobStore.getState().begin(held)).toBe(true);
     expect(
@@ -168,11 +163,6 @@ describe("startBorrowToCloudJob", () => {
         description: expect.stringContaining("电脑上的原件还没改"),
       }),
     );
-    const successCall = vi.mocked(toast.success).mock.calls[0];
-    const desc =
-      (successCall?.[1] as { description?: string })?.description ?? "";
-    expect(desc).not.toContain(IMPORT_CONTINUE);
-    expect(desc).not.toContain(IMPORT_STAY_LOCAL);
   });
 
   it("does not write borrow mark or open draft when cancelled before a folder exists", async () => {

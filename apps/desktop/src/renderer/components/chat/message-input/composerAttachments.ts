@@ -179,7 +179,7 @@ export function pickRecentConversations(
   }));
 }
 
-/** 按需设定（已停用 / 解析失败 / 常驻条目不进菜单）。 */
+/** 按需设定（disputed / 解析失败 / 常驻条目不进菜单）。 */
 export function pickOnDemandSettings(
   list: ReadonlyArray<{
     id: string;

@@ -54,6 +54,15 @@ _EXTRA_SOURCE_NEEDLES: tuple[str, ...] = (
     "SkillSlotHome",
     "SkillSlotReplacement",
     "SkillSlotRepository",
+    # User canvas workflows + store retired (tables ``user_workflows`` /
+    # ``workflow_store_*``). Class names catch reintro after the DROP.
+    "UserWorkflow",
+    "UserWorkflowRepository",
+    "WorkflowStoreInstall",
+    "WorkflowStoreListing",
+    "WorkflowStoreReport",
+    "WorkflowStoreVersion",
+    "WorkflowStoreRepository",
 )
 
 # Dropped table names that collide with unrelated identifiers (e.g. shared-space

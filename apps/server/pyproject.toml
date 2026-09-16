@@ -1,6 +1,6 @@
 [project]
 name = "agentcore"
-version = "0.7.21"
+version = "0.7.22"
 description = "AgentCore - Multi-Agent AI Workspace Backend"
 requires-python = ">=3.12"
 dependencies = [
@@ -179,6 +179,8 @@ markers = [
     # trips need it); a test asserting the unpatched outcome would otherwise wait out the
     # channel timeout instead of getting NO_FULFILLER.
     "real_fulfill_dispatch: run against the unpatched agentcore.fulfill.dispatch",
+    # Opt-in: hits a real upstream. Default skip; set AGENTCORE_LIVE_PREFIX_CACHE=1.
+    "live_llm: real LLM call (skipped unless AGENTCORE_LIVE_PREFIX_CACHE=1)",
 ]
 
 # Coverage baseline (P4-3): report-only — no fail-under ratchet yet.

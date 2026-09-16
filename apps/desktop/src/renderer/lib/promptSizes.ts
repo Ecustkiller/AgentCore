@@ -58,7 +58,7 @@ function alwaysItemChars(item: PromptCatalogItem): number {
   return 0;
 }
 
-/** Always-pool index: includes empty cores so they stay openable. */
+/** Always-pool index: constitution + user-written always rows. */
 export function buildAlwaysRows(rail: PromptRail): AlwaysListRow[] {
   const rows: AlwaysListRow[] = [];
   for (const item of rail.constitution) {

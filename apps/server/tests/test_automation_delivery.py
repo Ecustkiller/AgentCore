@@ -209,7 +209,7 @@ def _ask_tool(*, conversation_id: str = "c-auto") -> AskUserTool:
 
 @pytest.mark.asyncio
 async def test_ask_user_whiteboard_continue_with_agentcore_context_ok():
-    """白板继续开发 + message 含 AgentCore：不因正文像自动化而拒 ask_user。"""
+    """白板继续开发 + prompt 含 AgentCore：不因正文像自动化而拒 ask_user。"""
     tool = _ask_tool(conversation_id="c-auto-wb")
     token = captain_transcript.set(
         [LLMMessage(role="user", content="继续完成白板的开发")]
@@ -217,9 +217,13 @@ async def test_ask_user_whiteboard_continue_with_agentcore_context_ok():
     try:
         res = await tool.execute(
             {
-                "message": (
-                    "继续完成白板的开发\n工作区：AgentCore 桌面端协作白板模块"
-                ),
+                "questions": [
+                    {
+                        "prompt": (
+                            "继续完成白板的开发\n工作区：AgentCore 桌面端协作白板模块"
+                        ),
+                    }
+                ],
                 "assumptions": [{"label": "范围", "value": "沿用现有栈"}],
             },
             _ask_ctx(),
@@ -239,7 +243,6 @@ async def test_ask_user_automation_without_format_options_still_succeeds():
     try:
         res = await tool.execute(
             {
-                "message": "开工：做短视频自动化 Agent",
                 "questions": [
                     {
                         "prompt": "平台",
@@ -264,7 +267,6 @@ async def test_ask_user_automation_with_format_options_succeeds():
     try:
         res = await tool.execute(
             {
-                "message": "开工：做短视频自动化 Agent",
                 "format_options": [
                     {"label": "可运行自动化 — 真实可调度"},
                     {"label": "控制台原型 — 工具台 UI"},
@@ -294,7 +296,7 @@ async def test_ask_user_research_no_forced_format_gate():
     try:
         res = await tool.execute(
             {
-                "message": "用团队做竞品调研",
+                "questions": [{"prompt": "用团队做竞品调研"}],
                 "assumptions": [{"label": "范围", "value": "三家主流"}],
             },
             _ask_ctx(),

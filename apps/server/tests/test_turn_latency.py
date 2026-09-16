@@ -15,6 +15,8 @@ from agentcore.runtime.turn.latency import (
     bind_turn_latency,
     get_turn_latency,
     reset_turn_latency,
+    stamp_turn_wall,
+    turn_wall_ms,
 )
 from tests.conftest import LogSpy
 
@@ -194,6 +196,31 @@ def test_bind_get_reset_contextvar():
     assert get_turn_latency() is probe
     reset_turn_latency(token)
     assert get_turn_latency() is None
+
+
+def test_turn_wall_ms_none_without_probe():
+    assert turn_wall_ms() is None
+
+
+def test_turn_wall_ms_from_bound_probe():
+    probe, token = bind_turn_latency()
+    try:
+        probe.anchor_mono -= 1.0
+        assert turn_wall_ms() >= 1000
+    finally:
+        reset_turn_latency(token)
+
+
+def test_stamp_turn_wall_keeps_existing_positive():
+    target = {"duration_ms": 12_345}
+    assert stamp_turn_wall(target, duration_ms=99) == 12_345
+    assert target["duration_ms"] == 12_345
+
+
+def test_stamp_turn_wall_writes_explicit():
+    target: dict = {}
+    assert stamp_turn_wall(target, duration_ms=57_000) == 57_000
+    assert target["duration_ms"] == 57_000
 
 
 def test_log_chat_turn_complete_emits_phase0_keys(monkeypatch):

@@ -114,6 +114,8 @@ describe("manual route / anchor gates", () => {
     expect(resolveCanonicalSectionId("collab-overview")).toBe("briefing");
     expect(resolveCanonicalSectionId("roles")).toBe("mindset");
     expect(resolveCanonicalSectionId("chat")).toBe("faq");
+    expect(resolveCanonicalSectionId("workflow")).toBe("memory");
+    expect(resolveCanonicalSectionId("automation")).toBe("memory");
     expect(isRegisteredSectionId("continuation")).toBe(true);
     expect(isRegisteredSectionId("control")).toBe(true);
   });

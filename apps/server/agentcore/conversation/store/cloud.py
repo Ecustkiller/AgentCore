@@ -382,17 +382,32 @@ def _metrics_error_codes(
     return code, error_type
 
 
-def _local_metrics_duration_ms(runs: dict | None) -> int:
-    """Wall-clock if the write-back already carried it; otherwise 0 (no invented clock)."""
-    if not isinstance(runs, dict):
-        return 0
-    raw = runs.get("duration_ms")
-    if raw is None:
-        return 0
-    try:
-        return int(raw)
-    except (TypeError, ValueError):
-        return 0
+def _positive_duration_ms(*candidates: object) -> int | None:
+    """First positive int among candidates; None if none (never invent 0)."""
+    for raw in candidates:
+        if raw is None:
+            continue
+        try:
+            n = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if n > 0:
+            return n
+    return None
+
+
+def _local_metrics_duration_ms(
+    runs: dict | None,
+    duration_ms: int | None = None,
+) -> int:
+    """Wall-clock for turn_metrics: first-class field, then runs; else 0."""
+    return (
+        _positive_duration_ms(
+            duration_ms,
+            runs.get("duration_ms") if isinstance(runs, dict) else None,
+        )
+        or 0
+    )
 
 
 async def _record_local_turn_metrics(
@@ -1163,6 +1178,7 @@ class CloudStore:
         cache_hit_tokens: int = 0,
         cache_miss_tokens: int = 0,
         rounds: int = 0,
+        duration_ms: int | None = None,
         trace_id: str,
         finish_reason: str | None = None,
         llm_credentials: LLMCredentials | None = None,
@@ -1170,14 +1186,17 @@ class CloudStore:
         execution_id: str | None = None,
         harvest_kind: str | None = None,
         agent_mentions: list[dict] | None = None,
+        attachments: list[dict] | None = None,
     ) -> dict[str, Any]:
         """Local write-back via finalize(mode=local): content + status + journal."""
         origin = (origin or "").strip() or None
         execution_id = (execution_id or "").strip() or None
         harvest_kind = (harvest_kind or "").strip() or None
         from agentcore.core.mentions import to_stored_agent_mentions
+        from agentcore.workspace.attachments import to_stored_metadata
 
         stored_mentions = to_stored_agent_mentions(agent_mentions)
+        stored_atts = to_stored_metadata(attachments) if attachments else None
         finish_value = finish_reason
         is_paused = finish_value == FinishReason.PAUSED.value
         is_incomplete = finish_value in _INCOMPLETE_FINISH
@@ -1257,6 +1276,7 @@ class CloudStore:
                                 else None
                             ),
                             metadata=user_usage or None,
+                            attachments=stored_atts,
                             agent_mentions=stored_mentions or None,
                         )
                         user_msg_id = user_msg.id
@@ -1369,6 +1389,12 @@ class CloudStore:
             "cache_miss_tokens": cache_miss_tokens,
             "rounds": rounds,
         }
+        wall_ms = _positive_duration_ms(
+            duration_ms,
+            runs.get("duration_ms") if isinstance(runs, dict) else None,
+        )
+        if wall_ms is not None:
+            usage_metadata["duration_ms"] = wall_ms
         local_outcome = (
             coerce_produced_outcome(runs.get("outcome"))
             if isinstance(runs, dict)
@@ -1545,7 +1571,8 @@ class CloudStore:
                     error=_local_metrics_error(run_error),
                     rounds=rounds,
                     duration_ms=_local_metrics_duration_ms(
-                        runs if isinstance(runs, dict) else None
+                        runs if isinstance(runs, dict) else None,
+                        duration_ms,
                     ),
                     durable=durable,
                     input_tokens=input_tokens,

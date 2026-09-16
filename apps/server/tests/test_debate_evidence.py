@@ -148,15 +148,6 @@ def test_side_system_carries_search_query_rule():
     assert "2–3" not in blob  # 拆分建议在超限回执；schema 只钉机械上限
 
 
-def test_red_team_brief_omits_retired_risk_severities_name():
-    """红队简报提示不再点名已退役的按方 risk_severities。"""
-    from agentcore.runtime.debate.moderator_brief import _brief_form_hint
-
-    hint = _brief_form_hint(DebateForm.RED_TEAM)
-    assert "risk_severities" not in hint
-    assert "conditional_pass" in hint
-
-
 def test_witness_answer_keeps_unknown_without_fabrication_ban():
     """证人留不知就说不知；编造禁令归基座，答问纪律不再抄。"""
     from agentcore.runtime.debate.witness import witness_answer_feedback

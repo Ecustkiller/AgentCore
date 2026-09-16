@@ -4,13 +4,13 @@ Value objects / ``run_cost_from_calls`` live in the leaf ``agentcore.costing``
 (so ``db`` never imports this module). This file keeps RunState reshape builders
 and re-exports the leaf symbols for the historical ``runtime.costing`` import path.
 
-Money stays integer nano throughout, in the currency each row's price card was
-written in (curated CNY / community USD — no FX); pricing happens exactly once via
+Money stays integer nano throughout (curated CNY). Pricing happens exactly once via
 :func:`agentcore.llm.pricing.calculate_cost`. This module only *reshapes*
 priced states / usages into ledger rows — it never re-prices and never converts.
 Ledger routing by ``credential_source`` (on the priced ``Cost`` / cost dict):
 platform/vendor → ``cost_total_nano`` (quota / admin); user → ``cost_estimated_nano``
-(``cost_total_nano`` stays 0 so BYOK estimates never pollute ``enforce_quota``).
+(``cost_total_nano`` stays 0 so BYOK never pollutes ``enforce_quota``). Both
+columns carry the same curated nominal.
 """
 
 from __future__ import annotations
@@ -318,21 +318,10 @@ def aggregate_cost(cost_runs: Sequence[dict]) -> dict[str, int | str]:
     returns ``{input, cached, output, total, currency, estimated_total,
     estimated_currency, pricing_source}``. Never re-prices combined usage.
 
-    Two money buckets, each self-consistent — mirroring the SQL rollup in
-    ``db.repositories.billing._aggregate`` so the live turn and the replayed
-    ledger agree:
-
-    - **billed**: ``input``/``cached``/``output`` come only from rows that
-      actually billed, so ``input + output == total`` holds. Folding every row's
-      components in (as this used to) made a pure-BYOK turn report non-zero
-      components against ``total == 0``, and — once BYOK estimates became USD —
-      would have added dollars to yuan.
-    - **estimated**: ``estimated_total`` is the BYOK SUM, labelled by
-      ``estimated_currency``. A consumer picking this number must read that
-      currency, not ``currency`` (which labels the billed side).
-
-    Per-agent components stay available in full on ``GET /messages/{id}/cost``,
-    which reads the ledger rows themselves.
+    Display ``total`` is the product nominal (platform billed + BYOK copy). Both
+    are CNY off the same curated card, so they add. Quota still reads
+    ``cost_total_nano`` per row (0 on user). ``estimated_total`` is the BYOK
+    slice so the usage page can say「不扣额度」without a second price book.
     """
     agg: dict[str, int | str] = {
         "input": 0,
@@ -345,30 +334,31 @@ def aggregate_cost(cost_runs: Sequence[dict]) -> dict[str, int | str]:
         "pricing_source": "curated",
     }
     sources: set[str] = set()
-    billed_currencies: list[str] = []
+    display_currencies: list[str] = []
     estimated_currencies: list[str] = []
     for row in cost_runs:
         cost = row.get("cost") or {}
         billed = int(row.get("cost_total_nano", 0) or 0)
         estimated = int(row.get("cost_estimated_nano", 0) or 0)
         currency = _row_currency(row)
-        if billed:
+        display = billed + estimated
+        if display:
             agg["input"] = int(agg["input"]) + int(cost.get("input", 0))
             agg["cached"] = int(agg["cached"]) + int(cost.get("cached", 0))
             agg["output"] = int(agg["output"]) + int(cost.get("output", 0))
-            agg["total"] = int(agg["total"]) + billed
-            billed_currencies.append(currency)
+            agg["total"] = int(agg["total"]) + display
+            display_currencies.append(currency)
         if estimated:
             agg["estimated_total"] = int(agg["estimated_total"]) + estimated
             estimated_currencies.append(currency)
         if cost.get("pricing_source"):
             sources.add(str(cost["pricing_source"]))
-    agg["currency"] = _bucket_currency(billed_currencies, bucket="billed")
+    agg["currency"] = _bucket_currency(display_currencies, bucket="billed")
     agg["estimated_currency"] = _bucket_currency(estimated_currencies, bucket="estimated")
     if len(sources) == 1:
         agg["pricing_source"] = next(iter(sources))
     elif sources:
-        agg["pricing_source"] = "estimated"
+        agg["pricing_source"] = "curated"
     return agg
 
 
@@ -377,8 +367,7 @@ def _bucket_currency(currencies: Sequence[str], *, bucket: str) -> str:
 
     Empty bucket → ``CNY`` (a zero needs a unit, and the billed ledger is CNY).
     Two currencies in one bucket cannot be summed without FX, which this product
-    does not do — that only happens when a platform model ships without its
-    curated CNY card (F4 漏配), so log it loudly and keep the first.
+    does not do — log it loudly and keep the first.
     """
     if not currencies:
         return CURRENCY_CNY

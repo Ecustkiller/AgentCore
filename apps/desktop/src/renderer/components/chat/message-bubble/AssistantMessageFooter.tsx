@@ -13,6 +13,7 @@ import { copyText } from "@/lib/clipboard";
 import { formatCompact, formatDuration } from "@/lib/format";
 import { MESSAGE_ACTION_REVEAL_CLASS } from "@/lib/messageActionReveal";
 import { formatMessageExport } from "@/lib/messageExport";
+import { completedAtIso } from "@/lib/runningElapsed";
 import {
   buildSupportDiagnosticPack,
   formatSupportDiagnosticText,
@@ -48,20 +49,17 @@ import { type ReactNode, useState } from "react";
 import { MessageTime, RegenerateMessageAction } from "./MessageActions";
 import { useCopyAction } from "./useCopyAction";
 
-/** Signal-only summary (cost / rounds / duration) — token detail lives in「更多」. */
+/** Signal-only summary (cost / duration) — token + ReAct rounds live in「更多」. */
 export function AssistantMessageMetaSummary({
-  rounds,
   costText,
   durationMs,
 }: {
-  rounds: number | undefined;
   costText: string | null;
   durationMs?: number;
 }) {
   const durationText =
     durationMs != null && durationMs > 0 ? formatDuration(durationMs) : null;
-  if ((rounds == null || rounds <= 1) && !costText && !durationText)
-    return null;
+  if (!costText && !durationText) return null;
 
   const parts: ReactNode[] = [];
   const pushSep = () => {
@@ -76,10 +74,6 @@ export function AssistantMessageMetaSummary({
   if (costText) {
     pushSep();
     parts.push(<span key="cost">{costText}</span>);
-  }
-  if (rounds != null && rounds > 1) {
-    pushSep();
-    parts.push(<span key="rounds">{rounds} 轮</span>);
   }
   if (durationText) {
     pushSep();
@@ -411,11 +405,12 @@ export function AssistantMessageFooter({
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
         <AssistantMessageMetaSummary
-          rounds={message.rounds}
           costText={costText}
           durationMs={message.durationMs}
         />
-        <MessageTime iso={message.createdAt} />
+        <MessageTime
+          iso={completedAtIso(message.createdAt, message.durationMs)}
+        />
       </div>
     </div>
   );

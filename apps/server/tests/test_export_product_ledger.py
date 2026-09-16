@@ -22,8 +22,7 @@ from agentcore.runtime.runs.serialize import (
 )
 from agentcore.runtime.runs.types import RunPhase
 from agentcore.tools.builtin.file_ops import FileWriteTool
-from agentcore.tools.builtin.md_to_docx import MdToDocxTool
-from agentcore.tools.builtin.md_to_pdf import MdToPdfTool
+from agentcore.tools.builtin.md_export import MdExportTool
 from agentcore.tools.file_products import with_file_products_marker
 from agentcore.tools.protocol import ToolContext, ToolResult
 from agentcore.tools.sandbox import SubprocessSandbox
@@ -62,13 +61,17 @@ async def test_export_tools_self_report_product_with_source_lineage(tmp_path: Pa
     """导出工具必须自报它真正落的盘 + 源文件（``file_write`` 那套自报契约）。"""
     (tmp_path / "报告.md").write_text("# 标题\n\n正文\n", encoding="utf-8")
 
-    docx = await MdToDocxTool().execute({"path": "报告.md"}, _ctx(tmp_path))
+    docx = await MdExportTool().execute(
+        {"path": "报告.md", "format": "docx"}, _ctx(tmp_path)
+    )
     assert docx.success is True
     assert [(p.path, p.kind, p.derived_from) for p in docx.file_products] == [
         ("报告.docx", "docx", "报告.md")
     ]
 
-    pdf = await MdToPdfTool().execute({"path": "报告.md"}, _ctx(tmp_path))
+    pdf = await MdExportTool().execute(
+        {"path": "报告.md", "format": "pdf"}, _ctx(tmp_path)
+    )
     assert pdf.success is True
     assert [(p.path, p.kind, p.derived_from) for p in pdf.file_products] == [
         ("报告.pdf", "pdf", "报告.md")
@@ -77,7 +80,9 @@ async def test_export_tools_self_report_product_with_source_lineage(tmp_path: Pa
 
 async def test_failed_export_reports_no_product(tmp_path: Path):
     """没导出成功就没有产物可自报（失败调用天然不入账）。"""
-    result = await MdToDocxTool().execute({"path": "缺失.md"}, _ctx(tmp_path))
+    result = await MdExportTool().execute(
+        {"path": "缺失.md", "format": "docx"}, _ctx(tmp_path)
+    )
     assert result.success is False
     assert result.file_products == []
 
@@ -90,7 +95,7 @@ async def test_word_request_user_facing_location_points_at_docx(tmp_path: Path):
         {"path": md, "content": "# 民事起诉状\n\n正文\n"}, ctx
     )
     assert written.success is True
-    exported = await MdToDocxTool().execute({"path": md}, ctx)
+    exported = await MdExportTool().execute({"path": md, "format": "docx"}, ctx)
     assert exported.success is True
 
     transcript = [_stamped("c1", written), _stamped("c2", exported)]

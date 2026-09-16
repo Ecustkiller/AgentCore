@@ -312,6 +312,10 @@ def _remove_column(state: TableState, op: dict[str, Any]) -> dict[str, Any]:
             cfg["sort"] = None
         hidden = cfg.get("hidden_column_ids") or []
         cfg["hidden_column_ids"] = [h for h in hidden if h != cid]
+        widths = cfg.get("column_widths") or {}
+        if isinstance(widths, dict):
+            widths.pop(cid, None)
+            cfg["column_widths"] = widths
         cfg["filters"] = [f for f in (cfg.get("filters") or []) if f.get("column_id") != cid]
         mode = cfg.get("mode_config") or {}
         for key in ("group_field", "date_field", "title_field"):
@@ -561,6 +565,8 @@ def _patch_view(view: dict[str, Any], op: dict[str, Any], columns: list[dict[str
         merged["group_by"] = op.get("group_by", op.get("groupBy"))
     if "hidden_column_ids" in op or "hiddenColumnIds" in op:
         merged["hidden_column_ids"] = op.get("hidden_column_ids", op.get("hiddenColumnIds"))
+    if "column_widths" in op or "columnWidths" in op:
+        merged["column_widths"] = op.get("column_widths", op.get("columnWidths"))
     if "density" in op:
         merged["density"] = op["density"]
     if "mode_config" in op or "modeConfig" in op:
@@ -575,6 +581,7 @@ def _view_snapshot(view: dict[str, Any]) -> dict[str, Any]:
         "sort": (view.get("config") or {}).get("sort"),
         "group_by": (view.get("config") or {}).get("group_by"),
         "hidden_column_ids": (view.get("config") or {}).get("hidden_column_ids"),
+        "column_widths": (view.get("config") or {}).get("column_widths"),
         "density": (view.get("config") or {}).get("density"),
         "mode_config": (view.get("config") or {}).get("mode_config"),
     }

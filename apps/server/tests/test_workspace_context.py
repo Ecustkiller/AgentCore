@@ -1,13 +1,10 @@
 """Tests for ``<工作区>`` environment-facts injection.
 
-去重定案（一条纪律只留一个权威位置）：本块**只陈述开场表看不出来的短坐标**——
-执行、桌、系统、Git、客户端、缺口（只报未装配）、非空挂载、非空约定文档出口。
-空状态不写。沙箱探测失败另起一行。禁止按能力复写成「装包事实 / 执行事实」散文。
-「该怎么做 / 禁止什么 / 怎么装上」的 HOW：
-按需面归 consult；本机进桌 / 通道归 ``local_desk``；空桌 when-to-use 归
-``mkdir`` description；产物出口 UI 归 ``product_help``；
-跨文件夹对照句归 ``delegate`` ``target_folder_id`` / 认桌工具 description；git 无仓政策归 git 工具描述；其余归共享基座。
-因此这里的用例成对写：事实留在 ``out``，HOW 断言指向 consult / skill / 基座/核。
+本文件只测事实坐标与「HOW 不进本块」：开场表看不出来的短坐标
+（执行、桌、系统、Git、客户端、缺口、非空挂载、非空约定文档出口），
+以及工具名 / 字段名 / 围栏 / ``consult(`` 不进事实层。
+不成对复述 skill / product_help / schema 教学句——那些各有测试所有者。
+空状态不写。沙箱探测失败另起一行。禁止按能力复写成散文。
 """
 
 from pathlib import Path
@@ -18,18 +15,9 @@ from agentcore.runtime.context.workspace_context import (
     resolve_channel_profile,
 )
 from agentcore.runtime.resolve.prompt import (
-    _ATTACHMENT_MATERIAL_HINT,
-    _CEO_CORE_HINT,
-    _DEFAULT_SYSTEM_PROMPT,
     assemble_system_prompt,
-    capability_how_suffix,
     compose_ceo_chat_prompt,
     compose_worker_base_prompt,
-)
-from agentcore.runtime.skills import (
-    _DELIVERY,
-    _LOCAL_DESK,
-    build_system_skill_registry,
 )
 from agentcore.tools.builtin import build_ceo_tool_registry
 
@@ -49,14 +37,26 @@ def _assert_no_capability_restatements(ctx: str) -> None:
         "本机 Host 事实：",
         "本机 MCP 事实：",
         "浏览器事实：",
+        "浏览器宿主：",
     ):
         assert prefix not in ctx, prefix
 
 
-def _desk_how() -> str:
-    skill = build_system_skill_registry().get("local_desk")
-    assert skill is not None
-    return skill.body
+def _assert_how_identifiers_not_in_facts(ctx: str) -> None:
+    for token in (
+        "file_list",
+        "target_folder_id",
+        "file_copy",
+        "bind_local_folder",
+        "open_local_project",
+        "register_local_project",
+        "host(action=",
+        "consult(",
+        "ask_user(browser_login=true)",
+        "create_folder",
+        "mkdir",
+    ):
+        assert token not in ctx, token
 
 
 class _FakeBackend:
@@ -170,10 +170,7 @@ def test_birth_desk_facts_include_folder_id_without_tool_how():
     assert "本会话出生桌=`白板`" not in out
     assert "folder_id=`fid-board`" not in out
     assert "桌：白板（云端文件夹）" in out
-    assert "file_list" not in out
-    assert "list_folders" not in out
-    assert "resolve_folder" not in out
-    assert "target_folder_id" not in out
+    _assert_how_identifiers_not_in_facts(out)
 
     worker = build_workspace_context(
         _FakeBackend("server", root_label="图标"),
@@ -186,6 +183,7 @@ def test_birth_desk_facts_include_folder_id_without_tool_how():
     assert "桌：设计/图标（云端文件夹）" in worker
     assert "folder_id=`fid-icon`" not in worker
     assert "本会话出生桌=" not in worker
+    _assert_how_identifiers_not_in_facts(worker)
 
 
 def test_cloud_scratch_facts():
@@ -198,191 +196,17 @@ def test_cloud_scratch_facts():
     assert "执行：云端" in out
     assert "执行：云端 · 出站：产品网络" in out
     assert "执行：云端沙箱" not in out
-    assert "同一出站" not in out
-    assert "请人贴" not in out
     assert "桌：本会话草稿（云端）" in out
-    assert "本文件夹根即工作区根" not in out
-    assert "工程壳" not in out
-    assert "非本机目录" not in out
-    assert "不是用户本机已打开的仓库" not in out
-    assert "空树" not in out
-    assert "本机空工程" not in out
-    assert "触达不了用户的电脑" not in out
     assert "host" not in _gaps(out)  # desktop_online
-    assert "run" in _gaps(out)
-    assert "host=已装配" not in out
-    assert "run=未装配" not in out
-    # Host 面细则归 consult(host)；事实层不列短命令百科。
-    assert "短命令" not in out
-    assert "音响/系统信息" not in out
-    # 本机进桌 / 本机传统 HOW 在 team_local_desk，事实层不写意图分流
-    assert "bind_local_folder" not in out
-    assert "open_local_project" not in out
-    assert "register_local_project" not in out
-    mid = _desk_how()
-    assert "bind_local_folder" in mid
-    assert "open_local_project" in mid
-    assert "register_local_project" in mid
-    assert "导入到云" in mid
-    assert "从 Git 克隆" in mid
-    assert "连接 Git" not in mid
-    assert "合法非默认" not in mid
-    assert "桌面默认本地对话" in mid
-    assert "勿把云沙箱当桌面默认新建" in mid
-    assert "本机传统" not in mid
-    assert "改导" not in out  # skill/context 不得写 Ask 改导导入
-    # 跨文件夹：事实层只留「默认坐哪张桌」；对照 HOW 在 delegate / 认桌工具（核不常驻钩）
-    assert "出生桌" not in out
-    assert "跨文件夹指挥" not in out
-    assert "target_folder_id" not in out
-    assert "list_folders" not in out and "resolve_folder" not in out
-    assert "file_list" not in out
-    assert "可能降级" not in out
-    hint = _CEO_CORE_HINT
-    assert "【跨文件夹】" not in hint
-    assert "team_cross_folder" not in hint
-    assert "list_folder_dir" not in hint
-    assert "禁猜最近" not in hint
-    delivery = _DELIVERY
-    assert "【空桌落盘】" not in hint
-    assert "【空桌勿套工程壳】" not in delivery
-    assert "工程壳" not in delivery
-    assert "create_folder" not in delivery
-    assert "create_folder" in _LOCAL_DESK and "工程根" in _LOCAL_DESK
-    assert "桌内工程根" not in _LOCAL_DESK
-    assert "要不要再套一层" not in delivery
-    from agentcore.tools.builtin.delegate.schema import DELEGATE_PARAMETERS
-    from agentcore.tools.builtin.folder_fs import ListFolderDirTool, ReadFolderFileTool
-
-    target = DELEGATE_PARAMETERS["properties"]["tasks"]["items"]["properties"][
-        "target_folder_id"
-    ]["description"]
-    peek = ListFolderDirTool().schema.description + ReadFolderFileTool().schema.description
-    assert "target_folder_id" in target or "已解析文件夹 id" in target
-    assert "认桌" in peek and "摸底" in peek
-    assert "consult(local_desk)" not in target
-    assert "consult(team_local_desk)" not in target
-    assert "拒后禁塌缩" not in target
-    assert "文件：空" not in target
-    assert "先建后派" not in target
-    assert "list_folder_dir" not in target
-    assert "云端草稿" in target and "读不到" in target
-    # 区外授权：事实层只报可授权；工具名与姿势归 consult / team_local_desk
-    assert "external_mount_readonly" not in out
-    assert "grant_organize_folder" not in out
-    assert "grant_attach_folder" not in out
-    assert "与工作区绑定正交" not in out
-    assert "先写工作区" not in out
-    assert "file_copy" not in out
-    assert "区外目录授权需先处在本地工作区" not in out
-    assert "云端无法直接授权本机区外路径" not in out
-    assert "选择器兜底" not in out
-    assert "口头同意闭环" not in out
-    assert "失败分型" not in out
-    # 口头同意 / 授权后先写工作区：归 team_local_desk；事实块自己不抄。
-    granted = capability_how_suffix({"external_mount_readonly"})
-    assert granted == ""
-    assert "口头同意" in mid
-    assert "先写工作区" in mid and "file_copy" in mid
-    assert "grant_readonly_folder" not in granted
-    assert "well_known" not in out
-    assert "在哪工作" not in out
-    assert "仅新建会话" not in out
-    assert "在哪工作" in mid
-    assert "仅新建会话" in mid
-    assert "grant_organize_folder" not in mid
-    assert "file_copy" in mid
-    assert "与工作区绑定正交" not in out
-    assert "勿引导用户去设置改模式" not in out
-    assert "勿引导用户去设置改模式" in mid
-    # 定案 A：优化项目 ≠ 默认催开项目；附件收窄范围时先干活（后半句场面门，不进事实层）。
-    assert "≠默认开文件夹卡" not in out
-    assert "≠默认开文件夹卡" in mid
-    assert "开工前置" not in out
-    gated = _ATTACHMENT_MATERIAL_HINT
-    assert "【本轮材料收窄】" in gated
-    assert "开工前置" in mid
-    assert "【本轮材料收窄】" not in hint
-    assert "不可改绑" not in out
-    assert "严禁引导" not in out
-    assert "本机草稿" not in out
-    assert "勿把云沙箱当桌面默认新建" in mid
-    assert "勿推销本机草稿" not in mid
-    assert "本会话发绑定卡" not in out  # 旧口径：已改为意图分流
     assert "run" in _gaps(out)
     assert "package_install" in _gaps(out)
     assert "browser" in _gaps(out)
     assert "local_open" in _gaps(out)
+    assert "host=已装配" not in out
+    assert "run=未装配" not in out
+    assert "folder_id=" not in out
     _assert_no_capability_restatements(out)
-    assert "导入到云" not in out
-    assert "连接 Git" not in out
-    assert "不会让沙箱" not in out
-    assert "装配启用" not in out
-    assert "host" not in _gaps(out)
-    # 产物出口 UI / 完整预览：唯一所有者 product_help，事实层不抄。
-    assert "产物出口" not in out
-    assert "完整预览" not in out
-    assert "右坞" not in out
-    # 「禁给本机路径 / 禁说双击打开」是收口 HOW，归 product_help
-    assert "双击打开" not in out
-    help_map = build_system_skill_registry().get("product_help").body
-    assert "双击打开" in help_map
-    assert "禁止给本机磁盘路径" in help_map
-    assert "产物出口" in help_map
-    assert "【交付指引】" not in hint
-    assert "浏览器宿主：" not in out
-    assert "browser" in _gaps(out)
-    assert "host" not in _gaps(out)
-    assert "host(action=status/os_log/shell)" not in out
-    assert "install_package" not in out
-    assert "host_info" not in out
-    assert "host_ping" not in out
-    assert "host_package_install" not in out
-    # 日志分三处看在 consult(host)，事实层不再逐 host 分支复述
-    assert "三分日志" not in out
-    assert "日志分三处看" not in out
-    assert "【三分日志】" not in hint
-    host_how = capability_how_suffix({"host"})
-    assert host_how.count("日志分三处看") == 1
-    assert "三分日志" not in host_how
-    assert "host(action=os_log)" in host_how
-    assert "Get-WinEvent" in host_how
-    assert "host_os_log_summary" not in hint
-    # 案 20260803-image-gen-byok-egress-boundary A：出站百科 / 禁令不进事实行。
-    # 出站坐标（产品网络 / 这台电脑）在执行行；HOW 在 consult(browser)。
-    assert "出站：产品网络" in out
-    assert "出站网络" not in out
-    assert "包装源" not in out
-    assert "allowlist" not in out
-    assert "无任意 HTTPS" not in out
-    assert "无原生生图工具" not in out
-    # 出图对照事实行；Key 不落明文归共享基座
-    assert "代调" not in out
-    assert "API Key" not in out and "明文" not in out
-    assert "出站网络" not in hint
-    # 旧「云端临时空间」短标签已换成诚实草稿口径
-    assert "工作区身份：云端临时空间" not in out
-    # 约定文档布局 HOW 在 team_delivery_env；空抽屉不写进事实层
-    assert "约定文档出口" not in out
-    assert "约定文档边界" not in out
-    assert "讨论/调研/审查类交付写此树" not in out
-    assert "用户工程源码仍写业务路径" not in out
-    assert "用户工程源码仍写业务路径" in _DELIVERY
-    assert "约定文档出口" in _DELIVERY
-    # 「报路径须完整前缀、禁缩短成裸 reviews/」是 HOW，编排 skill【产物路径】持有
-    assert "完整前缀" not in out
-    assert "**完整**路径" in _DELIVERY
-    assert "裸 `reviews/…`" in _DELIVERY
-    # FakeBackend has no root → probe unknown；建仓 / 无仓政策在 git 回执，不进事实行。
-    assert "init_baseline" not in out
-    assert "不挡派工" not in out
-    assert "no_repo" not in out
-    assert "通常无 Git" not in out
-    from agentcore.tools.builtin.git_ops.tool import GitTool
-
-    assert "no_repo" not in GitTool().schema.description
-    assert "init_baseline" not in GitTool().schema.description
-    assert "请确认" in GitTool().schema.description
+    _assert_how_identifiers_not_in_facts(out)
 
 
 def test_empty_desk_adds_operational_root_fact():
@@ -398,9 +222,13 @@ def test_empty_desk_adds_operational_root_fact():
     assert "工程入口写在根上" not in empty
     assert "`package.json`" not in empty
     assert "mkdir" not in empty
+    assert "create_folder" not in empty
     assert "工程壳" not in empty
     assert "禁止" not in empty
     assert "本文件夹尚无用户文件" not in empty
+    assert "【空桌落盘】" not in empty
+    assert "【空桌勿套工程壳】" not in empty
+    _assert_how_identifiers_not_in_facts(empty)
 
     full = build_workspace_context(
         _FakeBackend("server"),
@@ -437,14 +265,10 @@ def test_cloud_folder_desk_identity_is_not_scratch():
     assert "云端草稿/临时文件空间" not in out
     assert "桌：本会话草稿" not in out
     assert "工程壳" not in out
-    hint = _CEO_CORE_HINT
-    delivery = _DELIVERY
-    assert "【空桌落盘】" not in hint
-    assert "【空桌勿套工程壳】" not in delivery
-    assert "工程壳" not in delivery
-    assert "create_folder" not in delivery
-    assert "create_folder" in _LOCAL_DESK and "工程根" in _LOCAL_DESK
-    assert "桌内工程根" not in _LOCAL_DESK
+    assert "create_folder" not in out
+    assert "【空桌落盘】" not in out
+    assert "【空桌勿套工程壳】" not in out
+    _assert_how_identifiers_not_in_facts(out)
 
 
 def test_cloud_conv_root_stays_scratch_identity():
@@ -479,7 +303,7 @@ def test_cloud_host_off_capability():
 
 
 def test_cloud_web_has_no_in_app_preview_essay():
-    """Web / 非桌面：产物出口 HOW 在 product_help，事实层不写完整预览说明书。"""
+    """Web / 非桌面：事实层不写完整预览说明书。"""
     out = build_workspace_context(
         _FakeBackend("server"),
         desktop_online=False,
@@ -487,9 +311,7 @@ def test_cloud_web_has_no_in_app_preview_essay():
     )
     assert "产物出口" not in out
     assert "完整预览" not in out
-    help_map = build_system_skill_registry().get("product_help").body
-    assert "完整预览" in help_map
-    assert "文件面板下载" in help_map or "下载" in help_map
+    _assert_how_identifiers_not_in_facts(out)
 
 
 def test_no_desktop_host_unassembled():
@@ -523,15 +345,11 @@ def test_local_remote_channel_facts():
     assert "browser" in _gaps(out)
     assert "local_open" not in _gaps(out)
     assert "产物出口" not in out
-    # 本机传统工程：通道在线是事实；跑当前 / 勿再弹 open 归 team_local_desk
     assert "客户端：桌面已连接" in out
     assert "open_local_project" not in out
     assert "跑**当前**" not in out
-    mid = _desk_how()
-    assert "open_local_project" in mid
-    assert "当前" in mid and "跑" in mid
-    # 桌面分流可教三件套，但不得写成 action= 履约广告句
     assert "action=bind_local_folder" not in out
+    _assert_how_identifiers_not_in_facts(out)
 
 
 def test_local_desk_line_is_folder_name_not_os_path():
@@ -578,35 +396,19 @@ def test_browser_capability_override():
     )
     assert "browser" not in _gaps(out)
     assert "local_open" in _gaps(out)
-    # 事实层：装没装配。相对路径取值约束在 browser url；桌面 vs 云端失败在 consult。
     assert "CEO 可直持" not in out
     assert "仅 worker" not in out
     assert "浏览器宿主：" not in out
     assert "完整预览" not in out
-    from agentcore.tools.builtin.browser import BrowserTool
-
-    url_desc = BrowserTool().schema.parameters["properties"]["url"]["description"]
-    assert "相对" in url_desc or "site/index.html" in url_desc
-    assert "完整预览" in url_desc or "http(s)" in url_desc
-    # HOW 归 consult（登录接管 / 禁编造工具名 / 禁 web_fetch 冒充 / 意图梯度），事实层不复述
     assert "ask_user(browser_login=true)" not in out
     assert "browser_open" not in out
-    hint = _CEO_CORE_HINT
-    assert "consult(browser)" not in hint
-    assert "验收" not in hint
-    how = capability_how_suffix({"browser"})
-    assert "ask_user(browser_login=true)" in how
-    assert "escalate(browser_login=true)" not in how
-    assert "自己" in how
-    assert "web_fetch" in how and "已开页" in how
-    assert "同一出站" in how
     assert "同一出站" not in out
     assert "请人贴" not in out
-    assert "跑起来" in how
+    _assert_how_identifiers_not_in_facts(out)
 
 
 def test_local_browser_guide_mentions_workspace_relative_path():
-    """甲：本机 + browser 已装配 → 指引相对路径与完整预览同源。"""
+    """本机 + browser 已装配：事实层只报装配，不写相对路径说明书。"""
     out = build_workspace_context(
         _FakeBackend("local"),
         desktop_online=True,
@@ -615,16 +417,9 @@ def test_local_browser_guide_mentions_workspace_relative_path():
     )
     assert "browser" not in _gaps(out)
     assert "浏览器宿主：" not in out
-    from agentcore.tools.builtin.browser import BrowserTool
-
-    url_desc = BrowserTool().schema.parameters["properties"]["url"]["description"]
-    assert "site/index.html" in url_desc or "相对" in url_desc
-    assert "完整预览" in url_desc
-    assert "file://" in url_desc
     _assert_no_capability_restatements(out)
-    # 「页异常先 console」已出 consult 场面剧本；事实层不列 action
     assert "console" not in out
-    assert "ask_user(browser_login=true)" in capability_how_suffix({"browser"})
+    _assert_how_identifiers_not_in_facts(out)
 
 
 def test_bridge_session_sandbox_browser_guide_no_relative_html(monkeypatch):
@@ -661,38 +456,15 @@ def test_browser_unassembled_guide_mentions_bind_or_gvisor():
     assert "browser" in _gaps(out)
     _assert_no_capability_restatements(out)
     assert "浏览器宿主：" not in out
-    # 本机传统 HOW 在 team_local_desk；事实层不写装配步骤 / 通道推销
     assert "本机传统" not in out
     assert "装配启用" not in out
-    assert "bind_local_folder" not in out
     assert "open_local_project" not in out
     assert "open/bind" not in out
-    mid = _desk_how()
-    assert "bind_local_folder" in mid or "open_local_project" in mid
-    # 禁误导：未装配时勿暗示「本机未装就可随手启用云端沙箱」旧句
     assert "或启用云端沙箱浏览器" not in out
-    # 缺能力怎么办只写一遍：共享基座 <诚实> 管所有能力，事实层不逐条复述
     assert "同轮可开工" not in out
-    hint = _CEO_CORE_HINT
-    base = _DEFAULT_SYSTEM_PROMPT
-    assert base.count("<诚实>") == 1
-    assert "【能力未装配·统一姿势】" not in hint
-    assert "假开页" not in hint
-    assert "consult(browser)" not in hint
-    assert "ask_user(browser_login=true)" not in hint  # 登录接管随 browser 装配注入
-    how = capability_how_suffix({"browser"})
-    assert "ask_user(browser_login=true)" in how
-    assert "escalate(browser_login=true)" not in how
-    assert "永不代填密码" in how
-    from agentcore.tools.builtin.browser import BrowserTool
-
-    assert "非右坞" in BrowserTool().schema.description
-    assert "非右坞" not in base
-    assert "同轮可开工" not in base
-    assert "手脑" not in base
-    assert "多轮复读" not in base
-    assert "补救，但不是" not in hint
-    assert "不是接管流程" not in hint
+    assert "【能力未装配·统一姿势】" not in out
+    assert "ask_user(browser_login=true)" not in out
+    _assert_how_identifiers_not_in_facts(out)
 
 
 def test_local_browser_unassembled_guide_splits_reason_no_sandbox_teaser():
@@ -708,13 +480,12 @@ def test_local_browser_unassembled_guide_splits_reason_no_sandbox_teaser():
     assert "浏览器宿主：" not in out
     assert "或启用云端沙箱浏览器" not in out
     assert "装配启用" not in out
-    # 原因留在事实行；「怎么装上」不在这里
     assert "Local Chromium Bridge 健康" not in out
     assert "同轮可开工" not in out
 
 
 def test_host_mcp_unassembled_states_facts_and_defers_posture_to_core():
-    """host/mcp 未装配：事实层只写装没装配与为什么；同轮可开工姿势归共享基座。"""
+    """host/mcp 未装配：事实层只写装没装配与为什么；同轮可开工姿势不进本块。"""
     out = build_workspace_context(
         _FakeBackend("server"),
         desktop_online=False,
@@ -726,12 +497,7 @@ def test_host_mcp_unassembled_states_facts_and_defers_posture_to_core():
     assert "客户端：未连接" in out
     _assert_no_capability_restatements(out)
     assert "同轮可开工" not in out
-    hint = _CEO_CORE_HINT
-    base = _DEFAULT_SYSTEM_PROMPT
-    assert "<诚实>" in base
-    assert "不得声称" in base
-    assert "已装配" in base and "通道在" in base
-    assert "未装配能力" not in hint
+    assert "【能力未装配·统一姿势】" not in out
 
 
 def test_mcp_assembled_states_channel_not_who_holds():
@@ -760,9 +526,7 @@ def test_sidecar_local_without_channel():
     assert "出站：这台电脑" in out
     assert "sidecar" not in out
     assert "当前目录已可写" not in out
-    assert "grant_attach_folder" not in out
-    mid = _desk_how()
-    assert "可写授权" in mid
+    _assert_how_identifiers_not_in_facts(out)
 
 
 def test_mobile_session_omits_bind_nudge():
@@ -779,36 +543,25 @@ def test_mobile_session_omits_bind_nudge():
     assert "授权仅桌面端可用" not in out
     assert "官方桌面客户端" not in out
     assert "https://fashitianxia.xyz/download" not in out
-    assert "勿发 grant_* / bind_local_folder / open_local_project" not in out
-    # 禁止语里可点名 action；不得写成可履约的 action= 分流广告
     assert "action=bind_local_folder" not in out
-    assert "action=grant_readonly_folder" not in out
     assert "action=open_local_project" not in out
     assert "立即发卡" not in out
     assert "与工作区绑定正交" not in out
     assert "本对话尚无会话级区外目录授权" not in out
-    assert "本对话已授权区外目录：" not in out  # 无挂载不得声称已授权状态行
-    # 案 20260803-cloud-local-root-auth-where A：自称桌面须复检通道；禁「就好办了」/臆造路径
-    # ——HOW 在 team_local_desk，事实层只报通道未接
+    assert "本对话已授权区外目录：" not in out
     assert "通道复检铁律" not in out
     assert "口述覆盖" not in out
     assert "就好办了" not in out
-    mid = _desk_how()
-    assert "客户端行" in mid and "缺口" in mid
-    assert "口述覆盖" in mid
-    assert "就好办了" not in mid
     assert "打开【本对话】" not in out and "打开本对话" not in out
-    assert "打开【本对话】" in mid
     assert "装配启用" not in out
     assert "状态栏" not in out
     assert "Folders" not in out
     assert "臆造" not in out
-    assert "Folders" not in mid
-    assert "设置" in mid and "改模式" in mid
+    _assert_how_identifiers_not_in_facts(out)
 
 
 def test_channel_offline_self_claim_desktop_recheck_honesty():
-    """案 A：通道未接时 workspace_context 只报通道事实；复检 HOW 在 team_local_desk。"""
+    """案 A：通道未接时 workspace_context 只报通道事实；复检 HOW 不进本块。"""
     out = build_workspace_context(
         _FakeBackend("server"),
         desktop_online=False,
@@ -827,18 +580,13 @@ def test_channel_offline_self_claim_desktop_recheck_honesty():
     assert "设置→Folders" not in out
     assert "复述固定步骤" not in out
     assert "只指真源入口名" not in out
-    mid = _desk_how()
-    assert "客户端行" in mid
-    assert "正在用客户端" in mid or "已装桌面" in mid
-    assert "就好办了" not in mid
-    assert "Folders" not in mid
-    # 不得在离线分支广告可履约发卡
     assert "立即发卡" not in out
     assert "action=open_local_project" not in out
+    _assert_how_identifiers_not_in_facts(out)
 
 
 def test_no_mounts_forbids_claiming_grant_confirmed():
-    """未见 external 挂载行时，事实层不写空状态；「仅当区外：才可声称已授权」在 team_local_desk。"""
+    """未见 external 挂载行时，事实层不写空状态。"""
     out = build_workspace_context(
         _FakeBackend("server"),
         desktop_online=False,
@@ -847,8 +595,6 @@ def test_no_mounts_forbids_claiming_grant_confirmed():
     assert "本对话尚无会话级区外目录授权" not in out
     assert "本对话已授权区外目录：" not in out
     assert "禁止声称授权已确认" not in out
-    mid = _desk_how()
-    assert "区外：" in mid and "授权已确认" in mid
     assert out.count("授权已确认") == 0
     assert "【对人说】" not in out
     assert "先答这句" not in out
@@ -860,7 +606,7 @@ class _FakeMount:
 
 
 def test_mount_mode_labels_are_capability_facts_not_how():
-    """区外坐标只报授权档；对人开口 / 拷贝配方在 local_desk。"""
+    """区外坐标只报授权档；对人开口 / 拷贝配方不进本块。"""
     backend = _FakeBackend("server")
     backend._mounts = {  # noqa: SLF001
         "desk": _FakeMount("readonly"),
@@ -876,14 +622,7 @@ def test_mount_mode_labels_are_capability_facts_not_how():
     assert "（可读写）" not in out
     assert "先写工作区" not in out
     assert "【对人说】" not in out
-    mid = _desk_how()
-    assert "【对人说】" in mid
-    assert "执行：用户本机" in mid
-    assert "执行：云端" in mid
-    assert "同一出站" not in mid
-    assert "请人贴" not in mid
-    assert "只能看" in mid
-    assert "可改原件" in mid
+    _assert_how_identifiers_not_in_facts(out)
 
 
 def test_cloud_desktop_online_allows_external_grant_without_bind():
@@ -895,19 +634,11 @@ def test_cloud_desktop_online_allows_external_grant_without_bind():
     )
     assert "执行：云端" in out
     assert "执行：云端沙箱" not in out
-    assert "external_mount_readonly" not in out
     assert "与工作区绑定正交" not in out
     assert "本机某目录" not in out
     assert "区外目录授权需先处在本地工作区" not in out
     assert "选择器兜底" not in out
-    # 怎么定位目录归 team_local_desk；事实块自己不抄。
-    granted = capability_how_suffix({"external_mount_readonly"})
-    assert granted == ""
-    mid = _desk_how()
-    assert "探家目录" in mid
-    assert "host(action=shell)" in mid
-    assert "grant_readonly_folder" not in granted
-    assert "grant_readonly_folder" not in out
+    _assert_how_identifiers_not_in_facts(out)
 
 
 def test_assemble_system_prompt_omits_workspace_facts():
@@ -950,6 +681,7 @@ def test_workspace_facts_follow_resident_core_for_ceo_and_worker():
     assert ceo.count("<工作区>\n") == 1
     assert "<工作区文件>" not in ceo
     assert "文件：空" not in worker
+    _assert_how_identifiers_not_in_facts(facts)
 
 
 def test_git_fact_present_line_no_soft_init_tip(tmp_path):
@@ -974,7 +706,6 @@ def test_git_fact_present_line_no_soft_init_tip(tmp_path):
         git_fact=fact,
     )
     assert "Git：main" in out
-    assert "init_baseline" not in out
     assert "不扫嵌套" not in out
     assert "不上溯" not in out
 
@@ -989,14 +720,7 @@ def test_git_absent_soft_tip_visible_with_explicit_fact():
         git_fact=WorkspaceGitFact(present=False),
     )
     assert "Git：无" in out
-    assert "init_baseline" not in out
-    assert "no_repo" not in out
     assert "不挡派工" not in out
-    from agentcore.tools.builtin.git_ops.tool import GitTool
-
-    assert "init_baseline" not in GitTool().schema.description
-    assert "no_repo" not in GitTool().schema.description
-    assert "请确认" in GitTool().schema.description
 
 
 def test_git_unassembled_states_channel_without_enable_steps():
@@ -1013,8 +737,6 @@ def test_git_unassembled_states_channel_without_enable_steps():
     assert "Git：" not in out
     assert "装配启用" not in out
     assert "打开本对话" not in out
-    assert "init_baseline" not in out
-    assert "no_repo" not in out
     assert "main" not in out
 
 
@@ -1078,7 +800,7 @@ def test_local_package_install_follows_execution_class():
 
 
 def test_no_execution_omits_table_structure_facts():
-    """无 run：表格 HOW 在 data_file_landing；事实层只报缺口。"""
+    """无 run：表格 HOW 不进事实层；只报缺口。"""
     off = build_workspace_context(
         _FakeBackend("server"),
         desktop_online=True,
@@ -1100,7 +822,7 @@ def test_no_execution_omits_table_structure_facts():
 
 
 def test_workspace_omits_artifact_format_catalog():
-    """产物格式不进 ``<工作区>``：Word/PDF HOW 在 team_delivery_env，装配看开场表。"""
+    """产物格式不进 ``<工作区>``。"""
     out = build_workspace_context(
         _FakeBackend("server"),
         desktop_online=True,
@@ -1108,11 +830,8 @@ def test_workspace_omits_artifact_format_catalog():
     )
     assert "产物格式：" not in out
     assert ".xlsx=" not in out
-    assert "md_to_docx" not in out
+    assert "md_export" not in out
     assert "run" in _gaps(out)
-    delivery = _DELIVERY
-    assert "md_to_docx" in delivery and "md_to_pdf" in delivery
-    assert "有没有 `run` 不影响" in delivery
 
 
 def test_artifact_formats_follow_real_assembly_not_constants(monkeypatch):
@@ -1120,29 +839,27 @@ def test_artifact_formats_follow_real_assembly_not_constants(monkeypatch):
     from dataclasses import replace
 
     from agentcore.runtime.context.artifact_formats import build_artifact_format_line
-    from agentcore.tools.builtin.md_to_docx import MdToDocxTool
+    from agentcore.tools.builtin.md_export import MdExportTool
 
-    exporters_only = build_artifact_format_line({"md_to_docx", "md_to_pdf"})
-    with_exec = build_artifact_format_line({"md_to_docx", "md_to_pdf", "run"})
+    exporters_only = build_artifact_format_line({"md_export"})
+    with_exec = build_artifact_format_line({"md_export", "run"})
     assert ".xlsx=不可产" in exporters_only
     assert ".xlsx=可产" in with_exec
     assert exporters_only != with_exec
 
     monkeypatch.setattr(
-        MdToDocxTool,
+        MdExportTool,
         "registration",
-        replace(MdToDocxTool.registration, produces_formats=(".docx", ".odt")),
+        replace(MdExportTool.registration, produces_formats=(".docx", ".odt")),
     )
-    mutated = build_artifact_format_line({"md_to_docx", "md_to_pdf"})
+    mutated = build_artifact_format_line({"md_export"})
     assert ".odt=可产" in mutated
-    assert "md_to_docx" in mutated
+    assert "md_export" in mutated
     assert ".odt=" not in exporters_only
 
 
 def test_env_examples_gvisor_timeout_does_not_clamp_outer_verify():
     """样例 GVISOR_TIMEOUT_MAX_SECONDS 勿钉 60（会夹死外环灾难顶 1200s）。"""
-    from pathlib import Path
-
     roots = [
         Path(__file__).resolve().parents[3] / "deploy" / "config" / "production.env.example",
         Path(__file__).resolve().parents[1] / ".env.example",
@@ -1155,7 +872,7 @@ def test_env_examples_gvisor_timeout_does_not_clamp_outer_verify():
 
 
 def test_no_exec_opaque_source_stays_out_of_facts():
-    """无执行 + 源数据：事实层不写源数据行；下一步 HOW 在编排 skill。"""
+    """无执行 + 源数据：事实层不写源数据行。"""
     out = build_workspace_context(
         _FakeBackend("server"),
         desktop_online=True,
@@ -1165,14 +882,10 @@ def test_no_exec_opaque_source_stays_out_of_facts():
     assert "表格解析" not in out
     assert "源数据文件下一步" not in out
     assert "稍后重试" not in out
-    data = build_system_skill_registry().get("data_file_landing").body
-    assert "稍后再试" in data or "稍后重试" in _LOCAL_DESK
-    assert "源数据文件下一步" not in _DELIVERY
-    assert "export_to_local" in _DELIVERY
 
 
 def test_no_exec_engineering_keeps_local_remediation():
-    """工程类无执行（无源数据文件）：事实行不写补救菜单；export_to_local 在核 / 编排 skill。"""
+    """工程类无执行：事实行不写补救菜单。"""
     out = build_workspace_context(
         _FakeBackend("server"),
         desktop_online=True,
@@ -1184,12 +897,10 @@ def test_no_exec_engineering_keeps_local_remediation():
     assert "export_to_local" not in fact
     assert "本机传统" not in fact
     assert "bind_local" not in out
-    assert "export_to_local" not in _CEO_CORE_HINT
-    assert "export_to_local" in _DELIVERY
 
 
 def test_opaque_source_does_not_read_backend_materials_into_facts():
-    """附件材料不进 ``<工作区>``；无执行表交付走 data_file_landing。"""
+    """附件材料不进 ``<工作区>``。"""
     backend = _FakeBackend("server")
     backend.ai_list_materials = frozenset({"attachments/synthetic_bill.csv"})
     out = build_workspace_context(

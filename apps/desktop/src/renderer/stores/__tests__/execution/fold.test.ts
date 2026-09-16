@@ -124,6 +124,40 @@ describe("projectExecution (fold)", () => {
     expect(cleared?.phaseTool).toBeNull();
   });
 
+  it("frameFromEvent maps run_completed.reasoning_effort onto the frame", () => {
+    const frame = frameFromEvent({
+      type: "run_completed",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      payload: {
+        run_id: "run-1",
+        agent_id: "agent-1",
+        output_summary: "ok",
+        duration_ms: 10,
+        role: "member",
+        model: "deepseek-v4-flash",
+        usage: {
+          input: 1,
+          output: 1,
+          reasoning: 0,
+          cache_hit: 0,
+          cache_miss: 1,
+        },
+        cost: {
+          input: 0,
+          cached: 0,
+          output: 0,
+          total: 0,
+          currency: "CNY",
+        },
+        reasoning_effort: "max",
+      },
+    } as SSEEvent);
+    expect(frame).toMatchObject({
+      kind: "run_completed",
+      reasoningEffort: "max",
+    });
+  });
+
   it("frameFromEvent maps run_phase payload", () => {
     const ev = {
       type: "run_phase",
@@ -244,9 +278,31 @@ describe("projectExecution (fold)", () => {
     expect(run?.status).toBe("completed");
     expect(run?.outputSummary).toBe("React 优势分析完成");
     expect(run?.durationMs).toBe(1500);
+    expect(run?.reasoningEffort).toBeNull();
     expect(exec.agents.find((a) => a.id === "agent-1")?.status).toBe(
       "completed",
     );
+  });
+
+  it("stamps reasoningEffort from run_completed", () => {
+    const frames: RunFrame[] = [
+      started("agent-1", "run-1"),
+      {
+        t: 2,
+        kind: "run_completed",
+        runId: "run-1",
+        agentId: "agent-1",
+        outputSummary: "ok",
+        durationMs: 10,
+        model: "deepseek-v4-flash",
+        reasoningEffort: "low",
+      },
+    ];
+    const run = projectExecution(plan, frames, "running").runs.find(
+      (s) => s.id === "run-1",
+    );
+    expect(run?.model).toBe("deepseek-v4-flash");
+    expect(run?.reasoningEffort).toBe("low");
   });
 
   it("captures the failure reason on run_failed", () => {

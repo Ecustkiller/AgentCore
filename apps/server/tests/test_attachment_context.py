@@ -596,7 +596,7 @@ class _StubBackend:
 
 @pytest.mark.asyncio
 async def test_image_with_vision_reader_injects_text_and_bills():
-    reader = _StubVisionReader(credential_source="user")
+    reader = _StubVisionReader(model="kimi-k2.5", credential_source="user")
     backend = _StubBackend({"attachments/pic.png": b"\x89PNG\r\nfake"})
     sink: list = []
 
@@ -622,11 +622,11 @@ async def test_image_with_vision_reader_injects_text_and_bills():
     assert len(reader.calls) == 1
     assert len(sink) == 1
     assert sink[0].role == "vision"
-    assert sink[0].model == "qwen-vl-max"
-    # BYOK slot → user pricing (estimated ledger), not hard-coded platform bill.
+    assert sink[0].model == "kimi-k2.5"
+    # BYOK slot → same curated nominal, estimated column only (not quota).
     assert sink[0].cost_estimated_nano > 0
     assert sink[0].cost_total_nano == 0
-    assert sink[0].cost.get("pricing_source") in ("estimated", "official", "community")
+    assert sink[0].cost.get("pricing_source") == "curated"
 
 
 @pytest.mark.asyncio

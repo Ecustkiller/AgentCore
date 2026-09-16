@@ -1,5 +1,6 @@
 import { useWorkspaceModeState } from "@/components/workspace/WorkspaceModeControl";
 import { useGitRepoStatus } from "@/hooks/useGitRepoStatus";
+import { useConversationWorkspace } from "@/hooks/useWorkspaces";
 import { hasLocalFiles } from "@/lib/capabilities";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import { GitBranch } from "lucide-react";
@@ -7,7 +8,8 @@ import { useComposerPlusClose, useComposerPlusHost } from "./ComposerPlusMenu";
 
 /**
  * U1 会话条只读 Git chip：分支名 + dirty 点 + ahead/behind。
- * 点击打开「改动」tab（U3 stage/commit/push 入口）。
+ * 点击打开「改动」。仅当前文件夹根有 `.git` 时出现（干净仓也显示分支）。
+ * 「改动」下面的 Git 列表另有货才出。
  */
 export function ComposerGitStatusChip({
   conversationId,
@@ -15,11 +17,13 @@ export function ComposerGitStatusChip({
   conversationId: string | null;
 }) {
   const state = useWorkspaceModeState(conversationId);
+  const convWs = useConversationWorkspace(conversationId);
   const showChanges = useSidePanelStore((s) => s.showChanges);
   const plusHost = useComposerPlusHost();
   const closePlus = useComposerPlusClose();
   const canProbe =
     hasLocalFiles() &&
+    !!convWs &&
     !!state?.effective.isLocal &&
     !!state.effective.rootId &&
     !state.effective.rootMissing;
@@ -27,6 +31,7 @@ export function ComposerGitStatusChip({
   const { status } = useGitRepoStatus(
     canProbe ? state?.effective.rootId : null,
     canProbe,
+    convWs?.subpath ?? "",
   );
 
   if (plusHost && plusHost.panel !== "list") return null;
@@ -38,7 +43,7 @@ export function ComposerGitStatusChip({
   const syncLabel = syncBits.join(" ");
 
   const titleParts = [status.branch];
-  if (status.dirty) titleParts.push("工作区有未提交改动");
+  if (status.dirty) titleParts.push("这个文件夹有未提交改动");
   if (syncLabel) titleParts.push(syncLabel);
   titleParts.push("打开改动");
   const title = titleParts.join(" · ");

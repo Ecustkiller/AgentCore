@@ -26,7 +26,7 @@ export interface ExecutionRecord {
   /** = tool_call_id（跨对话唯一足够用于选中）。 */
   id: string;
   toolName: string;
-  /** 行摘要：命令 / 语言 / purpose。 */
+  /** 行摘要：命令 / 语言。 */
   summary: string;
   /** Agent 角色（单聊为「助手」）。 */
   agentRole: string;
@@ -57,9 +57,6 @@ export function executionRecordSummary(
   args: Record<string, unknown>,
   display?: ToolDisplay | null,
 ): string {
-  const purpose = asStr(args.purpose).trim();
-  if (purpose) return purpose;
-
   if (toolName === "test_run") {
     const cmd =
       asStr(display?.command).trim() ||

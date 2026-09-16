@@ -279,20 +279,26 @@ async def cloud_list_user_rules(
 async def cloud_remember_rule(
     creds: AccountCredentials,
     *,
+    action: str = "write",
+    name: str | None = None,
     content: str | None = None,
     folder_id: str | None,
-    action: str = "add",
-    replaces: str | None = None,
+    apply: str | None = None,
+    description: str | None = None,
 ) -> dict[str, Any]:
-    """POST ``…/account/rules/remember`` → structured mutate result (changed/action/message/…)."""
+    """POST ``…/account/rules/remember`` → structured mutate result."""
     payload: dict[str, Any] = {
         "folder_id": folder_id,
-        "action": action or "add",
+        "action": action or "write",
     }
+    if name is not None:
+        payload["name"] = name
     if content is not None:
         payload["content"] = content
-    if replaces is not None:
-        payload["replaces"] = replaces
+    if apply is not None:
+        payload["apply"] = apply
+    if description is not None:
+        payload["description"] = description
     data = await _post_json(
         creds,
         path="/rules/remember",
@@ -301,13 +307,28 @@ async def cloud_remember_rule(
     )
     if not isinstance(data, dict):
         raise AccountCloudError("account remember response is not an object")
+    catalog: list[dict[str, str]] = []
+    raw_catalog = data.get("catalog")
+    if isinstance(raw_catalog, list):
+        for item in raw_catalog:
+            if isinstance(item, dict):
+                catalog.append(
+                    {
+                        "name": str(item.get("name") or ""),
+                        "apply": str(item.get("apply") or ""),
+                        "description": str(item.get("description") or ""),
+                    }
+                )
+    ok_raw = data.get("ok")
     return {
         "changed": bool(data.get("changed")),
-        "action": str(data.get("action") or action or "add"),
+        "action": str(data.get("action") or action or "write"),
         "message": str(data.get("message") or ""),
-        "rules_markdown": data.get("rules_markdown")
-        if isinstance(data.get("rules_markdown"), str) or data.get("rules_markdown") is None
-        else str(data.get("rules_markdown")),
+        "name": str(data.get("name") or name or ""),
+        "apply": str(data.get("apply") or apply or ""),
+        "body": str(data.get("body") or ""),
+        "catalog": catalog,
+        "ok": True if ok_raw is None else bool(ok_raw),
     }
 
 

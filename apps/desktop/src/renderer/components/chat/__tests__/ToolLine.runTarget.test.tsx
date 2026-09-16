@@ -163,7 +163,7 @@ describe("工具行标题 · CEO 处置动作指的是谁", () => {
     renderLine(
       step({
         tool_name: "read_conversation",
-        arguments: { conversation_id: "c-8f31ab02-77de", query: "适配" },
+        arguments: { conversation_id: "c-8f31ab02-77de", query: "上周方案" },
         display: {
           conversation_id: "c-8f31ab02-77de",
           title: "上次那场定价讨论",
@@ -172,7 +172,7 @@ describe("工具行标题 · CEO 处置动作指的是谁", () => {
       }),
     );
     expect(screen.getByText(/上次那场定价讨论/)).toBeTruthy();
-    expect(screen.queryByText("适配")).toBeNull();
+    expect(screen.queryByText("上周方案")).toBeNull();
     expect(screen.getByRole("button", { name: "打开" })).toBeTruthy();
   });
 });

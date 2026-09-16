@@ -4,6 +4,10 @@
  * The write path already forbids tokens / passwords / message bodies in
  * ``fields``, but a support pack leaves the user's machine — allowlist events
  * and primitive fields so a leaked content/token key cannot ride along.
+ *
+ * The clipboard pack is for Cursor / support, not a dump of the local file:
+ * ``debug`` never copies, and routine open/hydrate/follow info collapses to one
+ * ``routine:`` census line. warn / error and path-class info stay JSON.
  */
 
 /** Events that explain disconnect / rejoin / why a local-bound turn went cloud. */
@@ -282,6 +286,141 @@ function isFoldableRecord(record: SanitizedDesktopLogRecord): boolean {
   return record.level !== "warn" && record.level !== "error";
 }
 
+function isDebugRecord(record: SanitizedDesktopLogRecord): boolean {
+  return record.level === "debug";
+}
+
+/**
+ * Happy-path window / follow chatter. Unique ``action`` / ``branch`` fingerprints
+ * never fold, so a two-minute send+tab-switch used to paste ~18 JSON rows.
+ * Cursor needs the census (did they reopen? which hydrate branch?) not the
+ * per-row window sizes. warn / error of the same event names stay JSON.
+ */
+const ROUTINE_INFO_EVENTS = new Set([
+  "conversation.slice_diag",
+  "conversation.hydrate",
+  "conversation.follow_open",
+  "conversation.follow_closed",
+  "conversation.follow_unmuted",
+]);
+
+export type DesktopLogRoutineGroup = {
+  label: string;
+  tokens: string[];
+};
+
+export function isRoutinePackInfoRecord(
+  record: SanitizedDesktopLogRecord,
+): boolean {
+  if (record.level === "warn" || record.level === "error") return false;
+  const event = record.event;
+  return typeof event === "string" && ROUTINE_INFO_EVENTS.has(event);
+}
+
+function routineFamily(event: string): string {
+  if (event === "conversation.slice_diag") return "slice_diag";
+  if (event === "conversation.hydrate") return "hydrate";
+  if (event.startsWith("conversation.follow_")) return "follow";
+  return event;
+}
+
+function routineToken(record: SanitizedDesktopLogRecord): string {
+  const event = typeof record.event === "string" ? record.event : "event";
+  if (event === "conversation.slice_diag") {
+    const action =
+      typeof record.action === "string" && record.action
+        ? record.action
+        : "slice_diag";
+    return typeof record.finish_reason === "string" && record.finish_reason
+      ? `${action}(${record.finish_reason})`
+      : action;
+  }
+  if (event === "conversation.hydrate") {
+    return typeof record.branch === "string" && record.branch
+      ? record.branch
+      : "hydrate";
+  }
+  if (event.startsWith("conversation.follow_")) {
+    const kind = event.slice("conversation.follow_".length);
+    return typeof record.reason === "string" && record.reason
+      ? `${kind}(${record.reason})`
+      : kind;
+  }
+  return event;
+}
+
+function formatRoutineToken(token: string, count: number): string {
+  return count > 1 ? `${token}×${count}` : token;
+}
+
+/**
+ * Split routine info into a census (first-seen family / token order) and keep
+ * path-class rows as JSON. ``debug`` is dropped — first probe misses are not a
+ * disconnect.
+ */
+export function compactDesktopLogRecordsForPack(
+  records: readonly SanitizedDesktopLogRecord[],
+): {
+  routine: DesktopLogRoutineGroup[];
+  records: SanitizedDesktopLogRecord[];
+} {
+  const kept: SanitizedDesktopLogRecord[] = [];
+  const familyOrder: string[] = [];
+  const familyTokens = new Map<
+    string,
+    { order: string[]; counts: Map<string, number> }
+  >();
+
+  for (const rec of records) {
+    if (isDebugRecord(rec)) continue;
+    if (!isRoutinePackInfoRecord(rec)) {
+      kept.push(rec);
+      continue;
+    }
+    const event = rec.event;
+    if (typeof event !== "string") continue;
+    const family = routineFamily(event);
+    let bucket = familyTokens.get(family);
+    if (!bucket) {
+      bucket = { order: [], counts: new Map() };
+      familyTokens.set(family, bucket);
+      familyOrder.push(family);
+    }
+    const token = routineToken(rec);
+    if (!bucket.counts.has(token)) bucket.order.push(token);
+    bucket.counts.set(
+      token,
+      (bucket.counts.get(token) ?? 0) + occurrenceCount(rec),
+    );
+  }
+
+  return {
+    routine: familyOrder.map((label) => {
+      const bucket = familyTokens.get(label);
+      if (!bucket) return { label, tokens: [] };
+      return {
+        label,
+        tokens: bucket.order.map((token) =>
+          formatRoutineToken(token, bucket.counts.get(token) ?? 1),
+        ),
+      };
+    }),
+    records: kept,
+  };
+}
+
+export function formatDesktopLogRoutineLine(
+  groups: readonly DesktopLogRoutineGroup[],
+): string | null {
+  if (groups.length === 0) return null;
+  const parts = groups.map((group) =>
+    group.tokens.length === 0
+      ? group.label
+      : `${group.label} ${group.tokens.join(", ")}`,
+  );
+  return `routine: ${parts.join("; ")}`;
+}
+
 /**
  * Roll rows that share an event and every field except timestamp up into their
  * first occurrence, carrying ``count`` / ``first`` / ``last``.
@@ -425,6 +564,7 @@ export function sanitizeDesktopLogLines(
     }
     const sanitized = sanitizeDesktopLogRecord(parsed);
     if (!sanitized) continue;
+    if (isDebugRecord(sanitized)) continue;
     if (!isRelevantDesktopLogRecord(sanitized, conversationId)) continue;
     kept.push(sanitized);
   }

@@ -59,10 +59,11 @@ if set(FORM_LABELS) != set(DebateForm):
         f"FORM_LABELS must cover DebateForm exactly; missing={missing!r} extra={extra!r}"
     )
 
-# 回放 / wire 全员（= DebateForm 声明序）。产品入口广告子集见 DEBATE_SCHEMA_FORM_VALUES。
+# 回放 / wire 全员（= DebateForm 声明序）。
 DEBATE_FORM_VALUES: tuple[str, ...] = tuple(m.value for m in DebateForm)
 
-# 发给模型的 schema 广告子集。产品入口只认正反；扩 DebateForm 不自动扩本集。
+# 产品入口只认正反。工具 schema 默认不暴露 form；若加回该字段，enum 须从此集派生。
+# 扩 DebateForm 不自动扩本集、也不自动加回模型面字段。
 DEBATE_SCHEMA_FORM_VALUES: tuple[str, ...] = (DebateForm.DEBATE.value,)
 if not set(DEBATE_SCHEMA_FORM_VALUES).issubset(set(DEBATE_FORM_VALUES)):
     schema_extra = set(DEBATE_SCHEMA_FORM_VALUES) - set(DEBATE_FORM_VALUES)

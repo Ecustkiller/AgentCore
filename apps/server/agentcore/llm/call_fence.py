@@ -4,6 +4,13 @@ Observes every logical ``complete`` / ``stream`` invocation (success → ``llm.c
 failure → ``llm.call_failed``). Does **not** retry, swap models, or alter chunk
 contracts (``stream_reset`` / ``aborted`` pass through unchanged).
 
+Success for the caller is the inner provider's success. Observation
+(``log_llm_call`` / ``log_llm_call_failed``, including body capture) is a side
+channel via :func:`observe_emit`: it must not raise into ``complete``'s return
+or the ``stream`` iterator. The vision reader uses the same helper so a failed
+``vision.read`` emit cannot fail a successful HTTP read. A failed emit is
+``llm.observation_failed`` only.
+
 Two admission checks run before each upstream call, in the same place and for the
 same reason — this call should not be made:
 
@@ -32,10 +39,11 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from agentcore.core.errors import AgentCoreError
+from agentcore.core.logging import get_logger
 from agentcore.llm.observability import log_llm_call, log_llm_call_failed
 from agentcore.llm.provider.protocol import (
     TURN_SCALE_SCENARIOS,
@@ -46,12 +54,35 @@ from agentcore.llm.provider.protocol import (
     TokenUsage,
 )
 
+logger = get_logger(__name__)
+
+
+def observe_emit(emit: Callable[..., None], **kwargs: Any) -> None:
+    """Run a leaf observation hook; never raise into the caller's success path.
+
+    Shared by :class:`ObservingLLMProvider` (chat ``complete`` / ``stream``) and
+    the vision reader (``vision.read``). A failed emit is ``llm.observation_failed``
+    only — it must not rewrite inner HTTP / provider success.
+    """
+    try:
+        emit(**kwargs)
+    except Exception as e:  # noqa: BLE001 — observation must not rewrite inner success
+        logger.warning(
+            "llm.observation_failed",
+            hook=getattr(emit, "__name__", type(emit).__name__),
+            error_type=type(e).__name__,
+            error=str(e),
+            exc_info=True,
+        )
+
 
 class ObservingLLMProvider:
     """Observing decorator around a leaf :class:`LLMProvider`.
 
     Observation-only for anything the upstream returns; the only thing it decides
     is whether a call may start at all (auth-dead latch + platform quota).
+    Emit failures stay on ``llm.observation_failed`` and never rewrite inner
+    success or the original leaf exception.
     """
 
     def __init__(self, inner: LLMProvider) -> None:
@@ -190,7 +221,8 @@ class ObservingLLMProvider:
         except Exception as e:
             if request.scenario in TURN_SCALE_SCENARIOS:
                 mark_turn_auth_dead(e)
-            log_llm_call_failed(
+            observe_emit(
+                log_llm_call_failed,
                 scenario=request.scenario,
                 model=request.model,
                 latency_ms=int((time.monotonic() - start) * 1000),
@@ -201,7 +233,8 @@ class ObservingLLMProvider:
                 **self._upstream_log_fields(e),
             )
             raise
-        log_llm_call(
+        observe_emit(
+            log_llm_call,
             scenario=request.scenario,
             model=response.model or request.model,
             usage=response.usage,
@@ -216,6 +249,7 @@ class ObservingLLMProvider:
             tool_names=[tc.function.name for tc in response.tool_calls]
             if response.tool_calls
             else None,
+            tools=request.tools,
             provider_name=self._provider_name(),
             attempt=1,
         )
@@ -275,7 +309,8 @@ class ObservingLLMProvider:
             outcome = "failed"
             if request.scenario in TURN_SCALE_SCENARIOS:
                 mark_turn_auth_dead(e)
-            log_llm_call_failed(
+            observe_emit(
+                log_llm_call_failed,
                 scenario=request.scenario,
                 model=request.model,
                 latency_ms=int((time.monotonic() - start) * 1000),
@@ -292,7 +327,8 @@ class ObservingLLMProvider:
             # tokens when none arrived. Complete streams stay on the ``ok`` path.
             latency_ms = int((time.monotonic() - start) * 1000)
             if outcome == "ok":
-                log_llm_call(
+                observe_emit(
+                    log_llm_call,
                     scenario=request.scenario,
                     model=request.model,
                     usage=usage,
@@ -304,12 +340,14 @@ class ObservingLLMProvider:
                     content="".join(content_parts) or None,
                     reasoning="".join(reasoning_parts) or None,
                     tool_names=tool_names or None,
+                    tools=request.tools,
                     provider_name=self._provider_name(),
                     attempt=1,
                 )
             elif outcome == "closed":
                 if self._billable_usage(usage):
-                    log_llm_call(
+                    observe_emit(
+                        log_llm_call,
                         scenario=request.scenario,
                         model=request.model,
                         usage=usage,
@@ -320,11 +358,13 @@ class ObservingLLMProvider:
                         content="".join(content_parts) or None,
                         reasoning="".join(reasoning_parts) or None,
                         tool_names=tool_names or None,
+                        tools=request.tools,
                         provider_name=self._provider_name(),
                         attempt=1,
                     )
                 else:
-                    log_llm_call_failed(
+                    observe_emit(
+                        log_llm_call_failed,
                         scenario=request.scenario,
                         model=request.model,
                         latency_ms=latency_ms,
@@ -335,7 +375,8 @@ class ObservingLLMProvider:
                     )
             elif outcome == "failed" and self._billable_usage(usage):
                 # ``log_llm_call_failed`` already ran in ``except``; salvage spend only.
-                log_llm_call(
+                observe_emit(
+                    log_llm_call,
                     scenario=request.scenario,
                     model=request.model,
                     usage=usage,
@@ -346,6 +387,7 @@ class ObservingLLMProvider:
                     content="".join(content_parts) or None,
                     reasoning="".join(reasoning_parts) or None,
                     tool_names=tool_names or None,
+                    tools=request.tools,
                     provider_name=self._provider_name(),
                     attempt=1,
                 )

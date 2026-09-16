@@ -275,8 +275,8 @@ class MessageRepository:
     ) -> None:
         """Stamp the A1+ turn-baseline snapshot id onto an assistant row (best-effort path).
 
-        Scoped by conversation_id; a no-match id is a no-op. Called right after a labeled
-        workspace snapshot succeeds at turn start — never blocks the pipeline.
+        # Called right after a labeled workspace snapshot succeeds before the
+        # first mutation this turn — never blocks the pipeline.
         """
         await self._session.execute(
             update(Message)

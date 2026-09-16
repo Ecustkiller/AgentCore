@@ -1,4 +1,4 @@
-"""受监督的波循环：晚绑定 / scope 偏离 / replan 续跑。"""
+"""受监督的波循环：scope 偏离 / replan 续跑。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
 from agentcore.runtime.delegate.boundary import review_summary_text
-from agentcore.runtime.runs.builder import _parse_deliverable
 from agentcore.runtime.runs.constants import DELEGATE_OUTPUT_LIMIT
 from agentcore.tools.protocol import ToolResult
 
@@ -27,10 +26,10 @@ class SupervisedRun:
     的波循环).     Holds exactly what :meth:`DelegateTool.replan` needs to finalise / re-steer
     and resume the SAME DAG from where it yielded: the (mutable) plan, the completed-so-far
     seeds, the turn's execution id, the ``reason`` it
-    yielded for (``BIND`` = late-bind a placeholder, ``SCOPE`` = the reactive arm: re-steer the
-    tail after a 队员 deviation OR replan(add) a producer for a worker卡在缺输入·依赖缺口, §2.4
-    — gates ``replan``'s required-field check), and the run_ids that triggered the yield (the
-    late-bound node for BIND, the deviating / dep-blocked node for SCOPE).
+    yielded for (``SCOPE`` = the reactive arm: re-steer the
+    tail after a 队员 deviation OR replan(add) a producer for a worker卡在缺输入·依赖缺口, §2.4),
+    and the run_ids that triggered the yield (the
+    deviating / dep-blocked node for SCOPE).
     """
 
     plan: RunPlan
@@ -101,11 +100,10 @@ async def apply_replan(
     tool: DelegateTool,
     plan: RunPlan,
     completed: dict[str, RunState],
-    binds: list,
     steers: list,
     adds: list | None = None,
 ) -> list[str]:
-    """Validate then apply a replan's binds + steers + adds to the paused plan in place.
+    """Validate then apply a replan's steers + adds to the paused plan in place.
 
     All-or-nothing: every op is validated first and a non-empty error list returns
     BEFORE any mutation, so a rejected replan leaves the paused plan untouched. ``adds``
@@ -120,14 +118,6 @@ async def apply_replan(
     """
     from agentcore.runtime.runs import RunOrigin, build_added_nodes
     from agentcore.runtime.runs.builder import _apply_sibling_summaries
-
-    locked = bool(getattr(plan, "topology_lock", False)) or bool(
-        getattr(tool, "_topology_lock", False)
-    )
-    if locked and adds:
-        return [
-            "当前为工作流拓扑锁：禁止新增步骤；可用 steers 改未跑步骤说明，或 stop=true 收口"
-        ]
 
     adds_list = list(adds or [])
     gap_errors = _gap_fill_add_errors(adds_list, completed)
@@ -213,16 +203,6 @@ async def apply_replan(
             return add_model_errors
         model_idents.extend(add_idents)
 
-    if binds:
-        bind_model_errors, bind_idents = await prepare_task_model_fields(
-            binds,
-            user_id=user_id,
-            where_prefix="binds",
-        )
-        if bind_model_errors:
-            return bind_model_errors
-        model_idents.extend(bind_idents)
-
     if model_idents:
         await ensure_delegate_route_extras(
             tool._llm,
@@ -247,44 +227,6 @@ async def apply_replan(
 
         for spec in new_specs:
             await rewrite_deliverable_shell(getattr(spec, "deliverable", None), ctx)
-    bind_ops: list[tuple[RunSpec, dict[str, Any]]] = []
-    for i, b in enumerate(binds):
-        if not isinstance(b, dict):
-            errors.append(f"binds[{i}] 必须是对象")
-            continue
-        rid = str(b.get("run_id") or "").strip()
-        node = plan.by_id(rid) if rid else None
-        if node is None:
-            errors.append(f"binds[{i}]: run_id `{rid}` 不在当前计划")
-            continue
-        if not node.bind_after_deps:
-            errors.append(f"binds[{i}]: `{rid}` 不是待定稿（晚绑定）步骤")
-            continue
-        if rid in completed:
-            errors.append(f"binds[{i}]: `{rid}` 已完成")
-            continue
-        role = b.get("role")
-        task = b.get("task")
-        final_role = role.strip() if isinstance(role, str) and role.strip() else node.role
-        final_task = task.strip() if isinstance(task, str) and task.strip() else node.task
-        if not final_role:
-            errors.append(f"binds[{i}]: `{rid}` 定稿需要 role")
-            continue
-        if not final_task:
-            errors.append(f"binds[{i}]: `{rid}` 定稿需要 task")
-            continue
-        fields: dict[str, Any] = {"role": final_role, "task": final_task}
-        raw_deliverable = b.get("deliverable")
-        if isinstance(raw_deliverable, dict):
-            parsed = _parse_deliverable({"deliverable": raw_deliverable})
-            if parsed is not None:
-                fields["deliverable"] = parsed
-        # Per-worker 模型：prepare 已把合法目录身份编成路由键写入 b["model"]。
-        model_raw = b.get("model")
-        if isinstance(model_raw, str) and model_raw.strip():
-            fields["model"] = model_raw.strip()
-        bind_ops.append((node, fields))
-
     steer_ops: list[tuple[RunSpec, str]] = []
     for i, s in enumerate(steers):
         if not isinstance(s, dict):
@@ -304,14 +246,6 @@ async def apply_replan(
             continue
         steer_ops.append((node, note))
 
-    if ctx is not None:
-        from agentcore.workspace.project_shell import rewrite_deliverable_shell
-
-        for _node, fields in bind_ops:
-            deliverable = fields.get("deliverable")
-            if deliverable is not None:
-                await rewrite_deliverable_shell(deliverable, ctx)
-
     # Active coordination: replan.adds share append's seat/artifact admit before mutate.
     if new_specs and not errors:
         seat_reject = _admit_replan_adds_against_coordination(tool, plan, new_specs)
@@ -320,10 +254,6 @@ async def apply_replan(
 
     if errors:
         return errors
-    for node, fields in bind_ops:
-        for key, value in fields.items():
-            setattr(node, key, value)
-        node.bind_after_deps = False
     for node, note in steer_ops:
         node.steer = f"{node.steer}\n- {note}" if node.steer else f"- {note}"
     if new_specs:
@@ -526,9 +456,7 @@ def format_boundary_for_ceo(
 
     if reason is BoundaryReason.SCOPE:
         return format_scope_boundary(plan, results, nodes)
-    if reason is BoundaryReason.CHECKPOINT:
-        return format_checkpoint_boundary(plan, results, nodes)
-    return format_bind_boundary(plan, results, nodes)
+    return format_checkpoint_boundary(plan, results, nodes)
 
 
 def format_checkpoint_boundary(plan: RunPlan, results: dict, nodes: list[RunSpec]) -> str:
@@ -552,44 +480,6 @@ def format_checkpoint_boundary(plan: RunPlan, results: dict, nodes: list[RunSpec
     done = sum(1 for s in results.values() if s and s.phase is RunPhase.COMPLETED)
     lines.append(
         "\n---\n"
-        f"当前已完成 {done} 步；待跑：{('、'.join(f'`{p}`' for p in pending)) or '（无）'}。"
-    )
-    return "\n".join(lines)
-
-
-def format_bind_boundary(plan: RunPlan, results: dict, nodes: list[RunSpec]) -> str:
-    """BIND-arm brief (晚绑定)."""
-    from agentcore.runtime.runs import RunPhase
-
-    lines = [
-        "## 计划已让出（请定稿待绑定步骤后续跑）",
-        "下列步骤声明了「依赖完成后再定稿」(bind_after_deps)：其上游已就位，现在由你"
-        "依据上游产出把它们的职责 / 任务定稿，然后用 `replan` 续跑同一计划。",
-    ]
-    for node in nodes:
-        dep_lines: list[str] = []
-        for dep_id in node.depends_on:
-            state = results.get(dep_id)
-            summary = review_summary_text(state)
-            dep = plan.by_id(dep_id)
-            dep_role = (dep.role if dep else dep_id) or dep_id
-            dep_lines.append(f"  - 上游 `{dep_id}`（{dep_role}）：{summary or '（无产出）'}")
-        lines.append(
-            f"\n### 待定稿 · run_id: `{node.run_id}`"
-            f"（占位角色：{node.role or '未填'}）\n"
-            f"占位任务：{node.task or '（未填）'}\n"
-            "依赖产出：\n" + ("\n".join(dep_lines) or "  - （无上游）")
-        )
-    pending = [n.run_id for n in plan.nodes if n.run_id not in results]
-    done = sum(1 for s in results.values() if s and s.phase is RunPhase.COMPLETED)
-    lines.append(
-        "\n---\n请调用 `replan` 定稿上述步骤："
-        "`binds=[{run_id, role, task, …}]`（定稿后该步即可运行）；可选 "
-        "`steers=[{run_id, note}]` 操舵其它未跑步骤；确无需继续则 `replan(stop=true)`。\n"
-        "定稿前先对一下上游这几块的【拼图边】（语义边界对账）：彼此对同一共享点"
-        "（接口 / 字段 / 数据格式）的假设是否一致、有没有缺口或重复——据此把待定稿步骤定准；"
-        "若某已完成步骤与上游对不上，用 `delegate` 设 `continue_from_run_id` "
-        "带现场续派对齐，别让下游接着错下去。\n"
         f"当前已完成 {done} 步；待跑：{('、'.join(f'`{p}`' for p in pending)) or '（无）'}。"
     )
     return "\n".join(lines)
@@ -645,7 +535,7 @@ def format_scope_boundary(plan: RunPlan, results: dict, nodes: list[RunSpec]) ->
     lines.append(
         "\n---\n请调用 `replan` 校准未跑步骤：`steers=[{run_id, note}]` 操舵尚未运行的下游"
         "（运行前注入指令）；有队员【卡在缺输入】时用 `add=[{role, task, depends_on}]` 追加一个"
-        "产出它的步骤 / 接一条依赖边；若某步是『待定稿』可一并 `binds=[…]` 定稿；确认无需改动可"
+        "产出它的步骤 / 接一条依赖边；确认无需改动可"
         "直接 `replan()` 续跑；确无需继续则 `replan(stop=true)`。\n"
         "校准前主动对一遍【拼图边】（语义边界对账）：这次信号很可能波及兄弟步骤——别只盯举手这块，"
         "查其它已完成步骤与它在共享点（接口 / 字段 / 数据格式）上是否还对得上，有冲突 / 缺口 / 重复"

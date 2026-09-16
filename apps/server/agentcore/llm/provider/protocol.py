@@ -132,6 +132,9 @@ class LLMRequest:
     # None / True → thinking.type=enabled on thinking_type_switch models.
     # False → disabled. Do not omit: some gateways treat omit as off.
     thinking: bool | None = None
+    # Vendor ``reasoning_effort`` token (e.g. low/high/max). None = dialect default
+    # when the leaf sends the field; ignored when thinking is disabled.
+    reasoning_effort: str | None = None
     # Seconds of this call's wall clock that may be spent *asleep* waiting out a 429
     # (``llm.provider.call_budget.complete_within_budget`` derives it from the
     # caller's deadline and whether a turn is blocked on the call, then stamps it).

@@ -27,7 +27,6 @@ def load_roster() -> tuple[type, ...]:
     from agentcore.tools.builtin.replan import ReplanTool
     from agentcore.tools.builtin.table_ops import TableOpsTool
     from agentcore.tools.builtin.table_read import TableReadTool
-    from agentcore.tools.builtin.update_folder_profile import UpdateFolderProfileTool
 
     return (
         DelegateTool,
@@ -41,7 +40,6 @@ def load_roster() -> tuple[type, ...]:
         ListFolderDirTool,
         ReadFolderFileTool,
         RememberTool,
-        UpdateFolderProfileTool,
         AskUserTool,
         ReadImageTool,
         TableOpsTool,

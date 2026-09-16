@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * 运行态状态条「用时」走墙钟自增（ToolLine useRunningElapsed 同形），
+ * 运行态状态条「用时」走墙钟自增（节点 face 同形），
  * 不读 elapsedMs(frames) 跨度——长工具无新帧时跨度会冻住。
  */
 import { TooltipProvider } from "@/components/ui/tooltip";

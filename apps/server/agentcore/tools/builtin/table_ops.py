@@ -11,7 +11,7 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolFace
-from agentcore.table.constants import OP_KINDS, STRUCT_OPS
+from agentcore.table.constants import OP_KINDS, STRUCT_OPS, TABLE_UNBOUND
 from agentcore.table.ops import apply_ops
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
@@ -24,7 +24,7 @@ from agentcore.tools.registration import (
 logger = get_logger(__name__)
 
 TABLE_OPS_TOOL_NAME = "table_ops"
-_NO_TABLE = "table_ops 仅在表格会话中可用：当前会话没有绑定表格。"
+_NO_TABLE = f"table_ops：{TABLE_UNBOUND}"
 
 
 class TableOpsTool:

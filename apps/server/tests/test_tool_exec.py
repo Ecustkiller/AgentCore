@@ -681,7 +681,7 @@ async def test_illegal_json_args_return_explicit_error_not_empty_dict():
 
 
 async def test_remember_parse_failure_truncated_vs_escape_copy():
-    """remember：truncated → 完整一句/分次；escape → 修转义；截断禁原样重发全部。"""
+    """remember：truncated → 整篇一次 write；escape → 修转义；截断禁原样重发全部。"""
     tracked = _OkTool("remember", output="ok")
     reg = ToolRegistry()
     reg.register(tracked)
@@ -703,8 +703,10 @@ async def test_remember_parse_failure_truncated_vs_escape_copy():
     assert attempts[0].parse_failure is True
     content = messages[0].content or ""
     assert "不是合法 JSON" in content
-    assert "完整一句" in content
-    assert "省略号" in content or "分多" in content
+    assert "一篇完整" in content or "完整一篇" in content
+    assert "一次 write" in content
+    assert "分多次 remember" not in content
+    assert "省略号" in content
     assert "禁止原样重发" in content or "不要原样重发" in content
     # Escape-default imperative (教原样重发) must not appear on truncated.
     assert "后，原样重发全部参数" not in content
@@ -725,7 +727,8 @@ async def test_remember_parse_failure_truncated_vs_escape_copy():
     esc = messages2[0].content or ""
     assert "不是合法 JSON" in esc
     assert "转义" in esc
-    assert "完整一句" not in esc
+    assert "一篇完整" not in esc
+    assert "完整一篇" not in esc
     esc_logs = [e for e in logs2 if e.get("event") == "tool.args_parse_failed"]
     assert esc_logs and esc_logs[0].get("parse_class") == "escape"
 

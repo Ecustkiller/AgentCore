@@ -6,69 +6,40 @@ import {
 } from "@/components/memory/MemoryUpdateItemRow";
 import { Card } from "@/components/ui";
 import { countPillMuted, statusCardChrome } from "@/components/ui/tone-presets";
-import { getConversations } from "@/hooks/useConversations";
-import { queryClient } from "@/lib/queryClient";
 import { APP_PATHS } from "@/pages/toolbox/manual/paths";
-import {
-  MEMORY_DISPUTED_LINES_KEY,
-  MEMORY_UPDATES_KEY,
-} from "@/services/memory";
-import {
-  filesMemoryLeafNavState,
-  isAccountMemoryTarget,
-} from "@/services/sources/memorySource";
-import { type MemoryUpdate, useConversationStore } from "@/stores/conversation";
+import { filesMemoryLeafNavState } from "@/services/sources/memorySource";
+import type { MemoryUpdate } from "@/stores/conversation";
 import { usePersistentDisclosure } from "@/stores/disclosure";
 import { Brain, ChevronDown, ChevronRight } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { memoryAnchorTime } from "./messageTimeline";
 
 /**
- * Memory-write notice on the conversation timeline.
+ * Read-only leftover notice on the conversation timeline.
  *
- * Bordered muted Card shell (记忆 only) — other timeline metadata stays ghost.
- * Expand / navigate behavior unchanged.
+ * Expand to see what was written; click a filename to open that leaf on the
+ * files page. No row-level 纠错 / 搬层.
  *
- * - ``semantic``: expandable diff — what changed in 偏好 / 画像 / 主题.
+ * - ``semantic``: expandable diff of leftover 偏好 / 画像 / 主题 files.
  * - ``quota``: the always pool is full — the summary says so and the rows name every
- *   entry that could not be written plus the ones holding the pool (审计 CTX-A2).
+ *   entry that could not be written plus the ones holding the pool.
  */
 export function MemoryUpdateCard({ update }: { update: MemoryUpdate }) {
   const navigate = useNavigate();
   const chrome = statusCardChrome("muted");
   const [open, setOpen] = usePersistentDisclosure(`memory:${update.id}`, false);
-  const conversationId = useConversationStore((s) => s.currentConversationId);
-  const conversationFolderId =
-    getConversations().find((c) => c.id === conversationId)?.folderId ?? null;
-  // 与卡片在时间线上的落点同一个时刻，否则卡片会显示得比它下方的消息还晚。
   const timeLabel = formatMemoryTime(memoryAnchorTime(update));
 
   const items = visibleMemoryUpdateItems(update.items);
   if (items.length === 0 && !(update.summary ?? "").trim()) return null;
 
   const openLeaf = (target: string, projectId?: string | null) => {
-    if (isAccountMemoryTarget(target, projectId)) {
-      navigate(APP_PATHS.toolbox.guidelines, {
-        state: { openMineLeaf: target },
-      });
-      return;
-    }
     navigate(APP_PATHS.files, {
       state: filesMemoryLeafNavState(target, projectId),
     });
   };
 
-  // This card is the main way in to「这条不对」, but what shows the result — 最近学到 and its
-  // 已移走的记忆 list — lives in another route with its own cache. Without this the user
-  // rejects a line here, goes looking for it there, and finds nothing.
-  const memoryChanged = () => {
-    void queryClient.invalidateQueries({ queryKey: MEMORY_UPDATES_KEY });
-    void queryClient.invalidateQueries({ queryKey: MEMORY_DISPUTED_LINES_KEY });
-  };
-
   const scopeOverview = memoryScopeOverview(items);
-  // A quota card is not a change log: its summary IS the message (什么没写进来、为什么),
-  // and the rows below it name the entries.
   const isQuota = update.kind === "quota";
   const title = isQuota
     ? (update.summary ?? "常驻条目已满")
@@ -77,11 +48,6 @@ export function MemoryUpdateCard({ update }: { update: MemoryUpdate }) {
         ? `记忆已更新 · ${scopeOverview}`
         : "记忆已更新"
       : (update.summary ?? "记忆已整理");
-
-  // Prefer conversation project; else any project id already on the items (for
-  // 「移到全局」 / naming when the card was produced in a project chat).
-  const projectFolderId =
-    conversationFolderId || items.find((it) => it.projectId)?.projectId || null;
 
   return (
     <Card
@@ -124,20 +90,9 @@ export function MemoryUpdateCard({ update }: { update: MemoryUpdate }) {
                 key={`${item.action}:${item.file}:${item.section}:${i}`}
                 item={item}
                 onOpenLeaf={openLeaf}
-                projectFolderId={projectFolderId}
-                onMemoryChanged={memoryChanged}
               />
             ))}
           </ul>
-          <div className="mt-2 flex justify-end">
-            <Link
-              to={APP_PATHS.toolbox.guidelinesUpdates}
-              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-            >
-              去看最近学到
-              <ChevronRight size={13} />
-            </Link>
-          </div>
         </div>
       )}
     </Card>

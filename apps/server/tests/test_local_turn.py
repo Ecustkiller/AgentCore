@@ -177,6 +177,7 @@ def _patch_persistence(
             events.append(("trace", role, kw.get("trace_id")))
             events.append(("user_usage", role, kw.get("metadata")))
             events.append(("mentions", role, kw.get("agent_mentions")))
+            events.append(("attachments", role, kw.get("attachments")))
             return SimpleNamespace(id=f"{role}-id")
 
         async def upsert_assistant(self, **kw):
@@ -367,6 +368,33 @@ async def test_record_local_turn_persists_messages_and_journal(monkeypatch):
     assert ("orphan_hot", "assistant-id", "c1") in events
 
 
+async def test_record_local_turn_writes_duration_into_usage(monkeypatch):
+    """First-class duration_ms lands on messages.usage and turn_metrics."""
+    events: list = []
+    _patch_persistence(monkeypatch, events, existing_title="已有标题")
+
+    await record_local_turn(
+        conversation_id="c1",
+        user_id="u1",
+        user_message="hi",
+        assistant_content="done",
+        runs={"events": [], "finish_reason": "end_turn"},
+        user_message_id=_USER_MSG_ID,
+        message_id="m-duration",
+        input_tokens=1,
+        output_tokens=1,
+        rounds=1,
+        duration_ms=57_000,
+        trace_id=_TRACE,
+        finish_reason=FinishReason.END_TURN.value,
+    )
+
+    usage = next(e for e in events if e[0] == "usage")
+    assert usage[2]["duration_ms"] == 57_000
+    metrics = next(e[1] for e in events if e[0] == "metrics")
+    assert metrics["duration_ms"] == 57_000
+
+
 async def test_record_local_turn_persists_agent_mentions(monkeypatch):
     events: list = []
     _patch_persistence(monkeypatch, events, existing_title="已有标题")
@@ -385,6 +413,71 @@ async def test_record_local_turn_persists_agent_mentions(monkeypatch):
 
     created = next(e for e in events if e[0] == "mentions" and e[1] == "user")
     assert created[2] == mentions
+
+
+async def test_record_local_turn_persists_attachments_on_insert(monkeypatch):
+    events: list = []
+    _patch_persistence(monkeypatch, events, existing_title="已有标题")
+    atts = [
+        {
+            "name": "shot.png",
+            "path": "shot.png",
+            "workspace_path": "attachments/shot.png",
+            "binary": True,
+            "text": "must-not-persist",
+        }
+    ]
+
+    await record_local_turn(
+        conversation_id="c1",
+        user_id="u1",
+        user_message="看图",
+        assistant_content="ok",
+        user_message_id=_USER_MSG_ID,
+        message_id="m-atts",
+        trace_id=_TRACE,
+        attachments=atts,
+    )
+
+    created = next(e for e in events if e[0] == "attachments" and e[1] == "user")
+    stored = created[2]
+    assert stored[0]["name"] == "shot.png"
+    assert stored[0]["workspace_path"] == "attachments/shot.png"
+    assert stored[0]["binary"] is True
+    assert "text" not in stored[0]
+
+
+async def test_record_local_turn_does_not_overlay_existing_user_attachments(
+    monkeypatch,
+):
+    events: list = []
+    _patch_persistence(
+        monkeypatch,
+        events,
+        existing_ids={_USER_MSG_ID},
+        existing_title="已有标题",
+    )
+
+    await record_local_turn(
+        conversation_id="c1",
+        user_id="u1",
+        user_message="看图",
+        assistant_content="ok",
+        user_message_id=_USER_MSG_ID,
+        message_id="m-overlay",
+        trace_id=_TRACE,
+        attachments=[
+            {
+                "name": "shot.png",
+                "path": "shot.png",
+                "workspace_path": "attachments/shot.png",
+                "binary": True,
+            }
+        ],
+    )
+
+    assert not any(e[0] == "msg" and e[1] == "user" for e in events)
+    assert not any(e[0] == "attachments" and e[1] == "user" for e in events)
 
 
 async def test_record_local_turn_skips_title_when_inflight(monkeypatch):

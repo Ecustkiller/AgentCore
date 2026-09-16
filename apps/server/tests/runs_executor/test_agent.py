@@ -49,7 +49,7 @@ async def test_parallel_workers_complete_with_usage():
 
 async def test_worker_usage_split_and_cost_priced():
     # Worker strong tier → DeepSeek V4 Flash (pinned via profile_set; platform default may differ).
-    # Flash has curated CNY card (中文官价 ¥0.02 / ¥1 / ¥2) → nano-CNY ledger.
+    # Flash Go 尺（谷 7.2×公开价）→ nano-CNY ledger.
     plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
     res = await WaveScheduler().run(
         plan,
@@ -60,10 +60,10 @@ async def test_worker_usage_split_and_cost_priced():
     # The cache split survives into RunState.usage (not collapsed to one input).
     assert state.usage["cache_hit"] == 1_000_000
     assert state.usage["cache_miss"] == 1_000_000
-    # Cost is computed once, in nano-CNY, on the state (1M tokens × ¥/1M × 1000).
-    assert state.cost["cached"] == 20_000_000  # ¥0.02
-    assert state.cost["output"] == 2_000_000_000  # ¥2
-    assert state.cost["total"] == 20_000_000 + 1_000_000_000 + 2_000_000_000
+    # Cost is computed once, in nano-CNY, on the state (Go USD × 7.2).
+    assert state.cost["cached"] == 21_600_000
+    assert state.cost["output"] == 4_320_000_000
+    assert state.cost["total"] == 21_600_000 + 1_080_000_000 + 4_320_000_000
     assert state.cost["currency"] == "CNY"
     assert state.cost["pricing_source"] == "curated"
 
@@ -489,9 +489,14 @@ async def test_worker_hard_failure_bills_completed_rounds():
 
 
 async def test_executor_infra_retry_consumes_seeded_transcript():
-    """A transient FAILED+transcript in completed[self] → executor 热续, not cold open."""
+    """An INFRA ResumeHint → executor 热续, not cold open; not a fake FAILED seed."""
     from agentcore.llm.provider.protocol import LLMMessage
-    from agentcore.runtime.runs.types import RunState
+    from agentcore.runtime.runs.redrive_sites import (
+        ResumeHint,
+        ResumeKind,
+        bind_resume_hints,
+        reset_resume_hints,
+    )
 
     plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
     prior = [
@@ -511,16 +516,13 @@ async def test_executor_infra_retry_consumes_seeded_transcript():
         execution_id="e",
         approval_gate=None,
     )
-    seeded = {
-        "t_1": RunState(
-            phase=RunPhase.FAILED,
-            error="upstream disconnect",
-            transcript=prior,
-            content="半成品草稿",
-            error_retryable=True,
-        )
-    }
-    state = await executor(plan.nodes[0], seeded)
+    token = bind_resume_hints(
+        {"t_1": ResumeHint(kind=ResumeKind.INFRA, transcript=tuple(prior))}
+    )
+    try:
+        state = await executor(plan.nodes[0], {})
+    finally:
+        reset_resume_hints(token)
     assert state.phase is RunPhase.COMPLETED
     assert state.content == "续写完成"
     assert provider.calls == 1

@@ -1,11 +1,6 @@
 import { InlineInput } from "@/components/files/FileTreeInline";
 import { FACE_META, FACE_ORDER } from "@/components/tools/catalogMeta";
-import {
-  Badge,
-  Button,
-  CATALOG_GRID_CLASS,
-  CatalogTile,
-} from "@/components/ui";
+import { Badge, CATALOG_GRID_CLASS, CatalogTile } from "@/components/ui";
 import { artifactColorVar, catalogCategoryColorVar } from "@/lib/catalogColors";
 import type {
   PromptCatalogItem,
@@ -28,9 +23,7 @@ import {
   FolderPlus,
   Plus,
   ScrollText,
-  SlidersHorizontal,
   Unplug,
-  User,
   UserRound,
   Wrench,
 } from "lucide-react";
@@ -63,7 +56,6 @@ export function PromptOverview({
   installedListings = [],
   renamingFolderId = null,
   onOpenItem,
-  onOpenUpdates,
   onCreateMine,
   onCreateFolder,
   onSubmitRenameFolder,
@@ -88,7 +80,6 @@ export function PromptOverview({
   installedListings?: SkillStoreListing[];
   renamingFolderId?: string | null;
   onOpenItem: (id: string) => void;
-  onOpenUpdates: () => void;
   onCreateMine: () => void;
   onCreateFolder: () => void;
   onSubmitRenameFolder: (id: string, name: string) => void;
@@ -108,12 +99,7 @@ export function PromptOverview({
   const constitutionRows = alwaysRows.filter(
     (row) => row.item.kind === "shared" || row.item.kind === "identity",
   );
-  const memoryRows = alwaysRows.filter(
-    (row) => row.item.kind === "mine" && row.item.memoryKind,
-  );
-  const alwaysMineRows = alwaysRows.filter(
-    (row) => row.item.kind === "mine" && !row.item.memoryKind,
-  );
+  const alwaysMineRows = alwaysRows.filter((row) => row.item.kind === "mine");
   const toolGroups = useMemo(() => groupToolsByFace(rail.tools), [rail.tools]);
   const showTools = showConnectors || rail.tools.length > 0;
 
@@ -129,22 +115,7 @@ export function PromptOverview({
         onDragOver={onAcceptAlwaysDrag}
         onDrop={onDropAlways}
       >
-        <RailHeading
-          description="每回合都带着"
-          actions={
-            <div data-testid="prompt-overview-updates">
-              <Button
-                variant="ghost"
-                onClick={onOpenUpdates}
-                aria-label="最近学到"
-              >
-                最近学到
-              </Button>
-            </div>
-          }
-        >
-          常驻
-        </RailHeading>
+        <RailHeading description="每回合都带着">常驻</RailHeading>
         <div className={CATALOG_GRID_CLASS}>
           {constitutionRows.map((row) => (
             <ItemTile
@@ -158,22 +129,6 @@ export function PromptOverview({
               renderMineTile={renderMineTile}
             />
           ))}
-          {memoryRows.length > 0 ? (
-            <div data-testid="prompt-rail-memory" className="contents">
-              {memoryRows.map((row) => (
-                <ItemTile
-                  key={row.catalogId}
-                  item={row.item}
-                  alwaysChars={row.chars}
-                  selected={selectedId === row.catalogId}
-                  listings={listings}
-                  installedListings={installedListings}
-                  onOpen={() => onOpenItem(row.catalogId)}
-                  renderMineTile={renderMineTile}
-                />
-              ))}
-            </div>
-          ) : null}
           {alwaysMineRows.map((row) => (
             <ItemTile
               key={row.catalogId}
@@ -538,10 +493,7 @@ function ItemTile({
     <div
       data-testid={`prompt-tile-${item.id}`}
       data-prompt-tile={item.id}
-      className={cn(
-        "h-full min-w-0",
-        item.kind === "mine" && item.disputed && "[&_h3]:line-through",
-      )}
+      className="h-full min-w-0"
     >
       {wrapped}
     </div>
@@ -579,14 +531,8 @@ function tileVisual(item: PromptCatalogItem): {
     };
   }
   if (item.kind === "mine") {
-    const Icon =
-      item.memoryKind === "preferences"
-        ? SlidersHorizontal
-        : item.memoryKind === "profile"
-          ? User
-          : FileText;
     return {
-      icon: <Icon size={18} />,
+      icon: <FileText size={18} />,
       colorVar: artifactColorVar("guidelines"),
     };
   }

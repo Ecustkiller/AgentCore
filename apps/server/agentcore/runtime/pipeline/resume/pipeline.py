@@ -231,6 +231,7 @@ async def resume_chat_pipeline(
             suspension_saver=suspension_saver,
             suspension_deleter=suspension_deleter,
             x_client_platform=x_client_platform,
+            llm_credentials=llm_credentials,
         )
         bound_execution_id = wired.bound_execution_id
         execution_id_token = wired.execution_id_token

@@ -284,10 +284,9 @@ export interface ConversationRuntime {
    */
   pendingTraceId: string | null;
   /** 桌面本地 · live-only：每个 CEO 工具调用的真实开始时刻（epoch ms，键 = tool_call_id）。
-   * ToolLine 的「运行 · Ns」计时锚定于此而非组件挂载时刻，故过程折叠/展开、聊天列表虚拟化
-   * 重挂后仍准。`addProcessTool` 盖章、`endProcessTool` 清理；不落 journal（重载后工具已完成，
-   * 无需再计时），也不进 conformance ProjectedTurn——同 {@link ProcessStep} tool 步的 `phase`
-   * 一样是仅生产流盖的短命态。 */
+   * 优先盖 SSE `timestamp`（与 run 帧墙钟同锚）。过程行不再跟秒，此戳目前无用户面读取。
+   * `addProcessTool` 盖章、`endProcessTool` 清理；不落 journal（重载后工具已完成），
+   * 也不进 conformance ProjectedTurn——同 {@link ProcessStep} tool 步的 `phase` 一样是仅生产流盖的短命态。 */
   toolStartedMs: Record<string, number>;
   /**
    * 桌面：本会话最近一回合的执行路径（绑本机工作区时有意义）。

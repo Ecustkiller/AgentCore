@@ -1,19 +1,19 @@
-"""Tests for unified ``consult`` + ``<按需目录>`` (步 1 · 按需三合一).
+"""Tests for unified ``consult`` + ``<按需目录>``.
 
-Covers memory-topic slice of the merged source (forgiving names, soft miss,
-directory↔tool gate). Skills / rules covered in ``test_skills`` / ``test_consult_rule``.
+AI topic notes stay on disk and are not consultable. Directory / compose coverage
+uses generic entries; rules covered in ``test_consult_rule``.
 """
 
 from pathlib import Path
 
 from agentcore.core.types import ToolFace
-from agentcore.memory import MemoryTopic
 from agentcore.memory.store import CORE_MEMORY_FILE, FileMemoryStore, topic_path
 from agentcore.runtime.context.consult_sources import (
     MemoryConsultSource,
     MergedConsultSource,
     build_merged_consult_source,
 )
+from agentcore.runtime.context.consultable import ConsultDirectoryEntry
 from agentcore.runtime.resolve.prompt import (
     assemble_system_prompt,
     compose_ceo_chat_prompt,
@@ -40,9 +40,7 @@ def _ctx(user_id: str = "u") -> ToolContext:
 
 
 def _memory_tool(store: FileMemoryStore, folder_id: str | None = None) -> ConsultTool:
-    source = MergedConsultSource(
-        memory=MemoryConsultSource(store=store, folder_id=folder_id, enabled=True)
-    )
+    source = MergedConsultSource(memory=MemoryConsultSource(store=store, folder_id=folder_id))
     return ConsultTool(source=source)
 
 
@@ -54,28 +52,24 @@ def test_consult_schema_is_orchestration_primitive(tmp_path):
     assert "name" in schema.parameters["properties"]
 
 
-async def test_consult_memory_returns_body_on_hit(tmp_path):
+async def test_consult_memory_topics_are_not_fetchable(tmp_path):
     store = FileMemoryStore(tmp_path)
     body = "## 笔记\n- 用 pnpm dev 起前端\n- 服务端用 uv run\n"
     await store.save("u", topic_path("部署流程"), body)
     result = await _memory_tool(store).execute({"name": "部署流程"}, _ctx())
     assert result.success
-    assert result.output == body
-    assert result.display["name"] == "部署流程"
-    assert result.display["origin"] == "user"
-    # 细 kind 只进日志；display 只带两桶 origin。
-    assert "kind" not in result.display
+    assert "没有名为" in result.output
+    assert (await store.load("u", topic_path("部署流程"))).strip() == body.strip()
 
 
-async def test_consult_memory_name_spelling_is_forgiving(tmp_path):
+async def test_consult_memory_name_spellings_still_miss(tmp_path):
     store = FileMemoryStore(tmp_path)
-    body = "## 笔记\n- x\n"
-    await store.save("u", topic_path("部署流程"), body)
+    await store.save("u", topic_path("部署流程"), "## 笔记\n- x\n")
     tool = _memory_tool(store)
     for name in ("部署流程", "主题/部署流程", "部署流程.md", "主题/部署流程.md"):
         result = await tool.execute({"name": name}, _ctx())
         assert result.success, name
-        assert result.output == body
+        assert "没有名为" in result.output
 
 
 async def test_consult_memory_soft_miss_on_unknown(tmp_path):
@@ -85,7 +79,6 @@ async def test_consult_memory_soft_miss_on_unknown(tmp_path):
     assert result.success
     assert result.error is None
     assert "没有名为" in result.output
-    assert "部署流程" in result.output
     assert result.display is None or "origin" not in result.display
 
 
@@ -104,12 +97,8 @@ async def test_consult_memory_skips_core_file(tmp_path):
     assert "没有名为" in result.output
 
 
-async def test_render_on_demand_directory_lists_topics():
-    entries = [
-        __import__(
-            "agentcore.runtime.context.consultable", fromlist=["ConsultDirectoryEntry"]
-        ).ConsultDirectoryEntry(name="部署流程", summary="怎么起前后端")
-    ]
+def test_render_on_demand_directory_lists_entries():
+    entries = [ConsultDirectoryEntry(name="部署流程", summary="怎么起前后端")]
     out = render_on_demand_directory(entries)
     assert "<按需目录>" in out and "</按需目录>" in out
     assert "consult(name)" in out or "`consult(name)`" in out
@@ -117,14 +106,14 @@ async def test_render_on_demand_directory_lists_topics():
 
 
 def test_compose_ceo_renders_directory_when_consult_wired():
-    topics = [MemoryTopic(name="部署流程", summary="怎么起")]
+    entries = [ConsultDirectoryEntry(name="部署流程", summary="怎么起", section="rule")]
     base = assemble_system_prompt()
     reg = build_system_skill_registry()
     with_tool = compose_ceo_chat_prompt(
         base,
         skill_registry=reg,
         ceo_tool_names={"delegate", "consult"},
-        memory_topics=topics,
+        on_demand_entries=entries,
     )
     assert "<按需目录>" in with_tool
     assert "部署流程" in with_tool
@@ -132,15 +121,15 @@ def test_compose_ceo_renders_directory_when_consult_wired():
         base,
         skill_registry=reg,
         ceo_tool_names={"delegate"},
-        memory_topics=topics,
+        on_demand_entries=entries,
     )
     assert "<按需目录>" not in without
 
 
 def test_compose_worker_directory_includes_summaries():
-    topics = [MemoryTopic(name="部署流程", summary="怎么起")]
+    entries = [ConsultDirectoryEntry(name="部署流程", summary="怎么起", section="rule")]
     base = assemble_system_prompt()
-    out = compose_worker_base_prompt(base, memory_topics=topics)
+    out = compose_worker_base_prompt(base, on_demand_entries=entries)
     assert "<按需目录>" in out
     assert "部署流程：怎么起" in out
     assert "name＋一行摘要" in out
@@ -154,8 +143,8 @@ def test_compose_worker_base_observe_sections(monkeypatch):
             captured.append({"event": event, **kwargs})
 
     monkeypatch.setattr("agentcore.runtime.context.assembler.logger", _Spy())
-    topics = [MemoryTopic(name="部署流程", summary="怎么起")]
-    compose_worker_base_prompt(assemble_system_prompt(), memory_topics=topics)
+    entries = [ConsultDirectoryEntry(name="部署流程", summary="怎么起", section="rule")]
+    compose_worker_base_prompt(assemble_system_prompt(), on_demand_entries=entries)
     rows = [r for r in captured if r.get("event") == "cost.prompt_assembled"]
     assert len(rows) == 1
     row = rows[0]
@@ -165,12 +154,10 @@ def test_compose_worker_base_observe_sections(monkeypatch):
     assert row["sections"]["on_demand_directory"] > 0
 
 
-async def test_wire_worker_consult_when_topics_exist(tmp_path, monkeypatch):
+async def test_wire_worker_consult_omits_topic_notes(tmp_path, monkeypatch):
     store = FileMemoryStore(tmp_path)
     await store.save("u", topic_path("部署流程"), "## x\n")
-    monkeypatch.setattr(
-        "agentcore.runtime.resolve.prepare.default_memory_store", lambda: store
-    )
+    monkeypatch.setattr("agentcore.runtime.resolve.prepare.default_memory_store", lambda: store)
     monkeypatch.setattr(
         "agentcore.tools.ceo_toolset.default_memory_store", lambda: store, raising=False
     )
@@ -189,14 +176,14 @@ async def test_wire_worker_consult_when_topics_exist(tmp_path, monkeypatch):
     consult = registry.get("consult")
     assert consult is not None
     names = {e.name for e in await consult.source.list_directory("u")}
-    assert "部署流程" in names
+    assert "部署流程" not in names
     assert "staffing" not in names
     assert "team_orchestration_advanced" not in names
     assert "product_help" not in names
     assert "long_form_landing" not in names
 
 
-async def test_merged_source_directory_and_fetch_agree(tmp_path):
+async def test_merged_source_does_not_list_or_fetch_topics(tmp_path):
     store = FileMemoryStore(tmp_path)
     await store.save("u", topic_path("部署流程"), "## body\n")
     source = build_merged_consult_source(
@@ -208,6 +195,6 @@ async def test_merged_source_directory_and_fetch_agree(tmp_path):
     )
     entries = await source.list_directory("u")
     names = {e.name for e in entries}
-    assert "部署流程" in names
-    body = await source.fetch_by_name("u", "部署流程")
-    assert body and "body" in body
+    assert "部署流程" not in names
+    assert await source.fetch_by_name("u", "部署流程") is None
+    assert (await store.load("u", topic_path("部署流程"))).strip() != ""

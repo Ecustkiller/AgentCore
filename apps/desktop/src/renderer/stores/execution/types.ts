@@ -105,6 +105,7 @@ export const TOOL_LABELS: Record<string, string> = {
   file_batch: "Batch files",
   md_to_docx: "Export Word",
   md_to_pdf: "Export PDF",
+  md_export: "Export document",
   archive_extract: "Extract archive",
   archive_create: "Create archive",
   download_url: "Download file",
@@ -167,10 +168,12 @@ export function toolLabel(name: string): string {
   return TOOL_LABELS[name] ?? name;
 }
 
-/** Display label for the effective reasoning (thinking on/off) state — the single
- * source the run-detail panel shares. Provider-level `thinking` only; there is no
- * per-worker effort tier. */
-export function reasoningMeta(thinking: boolean): {
+/** Display label for this run's thinking: vendor effort token when stamped,
+ * otherwise thinking on/off. Provider `thinking` plus optional `run_completed.reasoning_effort`. */
+export function reasoningMeta(
+  thinking: boolean,
+  effort?: string | null,
+): {
   short: string;
   label: string;
   description: string;
@@ -179,12 +182,19 @@ export function reasoningMeta(thinking: boolean): {
     return {
       short: "非思考",
       label: "非思考",
-      description: "不走思考链，最快最省，面向简单/机械子任务。",
+      description: "不走思考链。",
+    };
+  const token = effort?.trim() ?? "";
+  if (token)
+    return {
+      short: token,
+      label: token,
+      description: `思考强度 ${token}（厂商档）。`,
     };
   return {
     short: "思考",
     label: "思考",
-    description: "走思考链推理。",
+    description: "走思考链。",
   };
 }
 
@@ -353,6 +363,9 @@ export interface RunNode {
   /** Model id the run billed on (e.g. deepseek-v4-flash); null until completed.
    * Workers may differ in tier, so this is per-run (payroll power detail). */
   model: string | null;
+  /** Vendor thinking-effort token actually sent (`run_completed.reasoning_effort`);
+   * null until completed, on old journals, or when the leaf does not send the field. */
+  reasoningEffort: string | null;
   /** This run's token usage (payroll power detail); null until completed. */
   usage: UsageBreakdown | null;
   /** This run's priced cost in nano-CNY (lights up one payroll row, §7.3B);
@@ -433,7 +446,7 @@ export interface NodeTiming {
 /** 调度埋点量化 (深层诊断指标, 前端UX设计.md §十): one WaveScheduler segment's observability
  * snapshot, folded from a `batch_metrics` frame. `busyMs / wallMs ≈` 平均并发; `slotStarved > 0`
  * ⇒ the `width` 并发上限 throttled ready nodes. The boundary tallies count 受监督波循环 yields
- * fired this segment (bind 晚绑定 / scope 漂移返工 / checkpoint 用户复核); the escalate tallies
+ * fired this segment (leftover `bindBoundaries` from historical journals / scope 漂移返工 / checkpoint 用户复核); the escalate tallies
  * are raw (`scopeEscalations ⊆ escalations`). `timeline` carries each dispatched node's occupancy
  * window. A delegate turn accrues one per scheduler segment (a checkpoint / scope yield + resume
  * appends another). 采集仍在、产品不展示. */

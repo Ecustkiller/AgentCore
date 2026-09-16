@@ -817,9 +817,6 @@ def _inline_spec(
         # 在该节点完成后、其下游运行前挂起请用户 plan_review。已由 delegate schema 暴露为
         # 可设 task 字段、并由 on_boundary 消费；未接 on_boundary 的调度（自治/测试）下仍 inert。
         checkpoint_after=bool(item.get("checkpoint_after")),
-        # 晚绑定标记（受监督的波循环）：宽松读取（非真值即 False），同 checkpoint_after 已激活。
-        # 由 schema 暴露、replan 在波边界定稿消费；无 on_boundary hook 时 inert。
-        bind_after_deps=bool(item.get("bind_after_deps")),
         parent_run_id=parent_run_id,
         depth=depth,
         replaces_run_id=_parse_replaces_run_id(item.get("replaces_run_id")),

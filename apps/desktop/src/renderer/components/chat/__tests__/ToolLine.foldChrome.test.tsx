@@ -152,6 +152,18 @@ const FOLD_FAMILY: {
     result: "已导出 PDF：报告.pdf",
   },
   {
+    tool: "md_export",
+    label: "Export Word",
+    args: { path: "报告.md", format: "docx" },
+    result: "已导出 Word：报告.docx",
+  },
+  {
+    tool: "md_export",
+    label: "Export PDF",
+    args: { path: "报告.md", format: "pdf" },
+    result: "已导出 PDF：报告.pdf",
+  },
+  {
     tool: "archive_extract",
     label: "Extract archive",
     args: { archive: "pkg.zip", dest: "out" },

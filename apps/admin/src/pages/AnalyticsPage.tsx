@@ -186,9 +186,7 @@ function CostPanel({
   }
 
   const byok = data.billing_mode === "byok";
-  // 行级金额（趋势 / 按模型 / 按用户）不带 currency——同一账本窗口内币种唯一（记账走
-  // curated 人民币价卡，BYOK 估算走社区价目快照的美元），且后端明确无汇率换算，所以
-  // 符号统一取自窗口 breakdown，绝不按 billing_mode 猜。
+  // 行级金额不带 currency——同一账本窗口内币种唯一（产品名义 CNY），无汇率换算。
   const billedCurrency = data.month.cost.currency;
   const estimatedCurrency =
     data.month.estimated_cost?.currency ??
@@ -206,9 +204,8 @@ function CostPanel({
             <Info size={16} className="mt-0.5 shrink-0 text-primary" />
             <span>
               当前为 <strong className="text-foreground">BYOK（自带 Key）</strong>
-              模式：记账成本恒为 0；下方「估算」按社区价目计价
-              {estimatedCurrency ? `（${estimatedCurrency}）` : ""}
-              ，非上游账单，且平台不做汇率换算。
+              模式：记账成本恒为 0；下方花费按产品价目（不扣额度）
+              {estimatedCurrency ? `（${estimatedCurrency}）` : ""}。
             </span>
           </div>
         )}

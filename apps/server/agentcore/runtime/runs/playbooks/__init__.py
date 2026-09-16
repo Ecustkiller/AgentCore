@@ -59,7 +59,6 @@ PLAYBOOKS: dict[str, Playbook] = {
             "angles(可选,调研子方向数组,各派一名调研员;"
             "走本套餐后再扇出；宜少；"
             "超过扇出上限时末尾自动折叠到最后一节点并标注、不丢弃) / "
-            "checkpoint(可选,成纲后写作前暂停过目,默认 false；仅用户明文要看提纲时开) / "
             "audience(可选,读者) / "
             "deliverable(可选,产出形态) / "
             "output_path(可选,成篇主文件路径,默认 AgentCore/文档/research/报告.md；验收只认此路径)"

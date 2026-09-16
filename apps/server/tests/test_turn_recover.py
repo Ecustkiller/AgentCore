@@ -9,10 +9,14 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
+from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.checkpoints import CheckpointDecision
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.recover import recover_turn
 from agentcore.runtime.runs import RunPlan, RunSpec
+from agentcore.runtime.runs.redrive_sites import ResumeKind, current_resume_hints
 from agentcore.runtime.runs.serialize import plan_snapshot_fact, plan_to_json, run_final_fact
 from agentcore.runtime.runs.types import RunPhase, RunState
 from agentcore.runtime.turn.state import TurnState
@@ -97,6 +101,105 @@ async def test_recover_turn_crash_redrives_with_seed_completed():
     assert seen["coordinate"] is True
 
 
+class _WindowTurn:
+    def __init__(
+        self,
+        *,
+        plan: RunPlan,
+        completed: dict[str, RunState],
+        execution_id: str,
+        windows: dict[str, list[LLMMessage]],
+    ) -> None:
+        self.plan = plan
+        self.completed = completed
+        self.execution_id = execution_id
+        self._windows = windows
+
+    @property
+    def unfinished_run_ids(self) -> list[str]:
+        return [n.run_id for n in self.plan.nodes if n.run_id not in self.completed]
+
+    def window(self, *, run_id: str | None = None, history=None):
+        return self._windows.get(run_id)
+
+
+async def test_recover_turn_binds_inflight_window_as_crash_redrive_site():
+    window = [
+        LLMMessage(role="system", content="WSYS"),
+        LLMMessage(role="user", content="写文件"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="fw",
+                    function=ToolCallFunction(name="file_write", arguments="{}"),
+                )
+            ],
+        ),
+    ]
+    state = _WindowTurn(
+        plan=_plan_two_nodes(),
+        completed={"w1": RunState(phase=RunPhase.COMPLETED, content="ok")},
+        execution_id="exec-crash-1",
+        windows={"w2": window},
+    )
+    seen: dict = {}
+
+    async def _resume_plan(plan, seed_completed, **kwargs):
+        hints = kwargs.get("resume_hints") or {}
+        seen["seed"] = set(seed_completed)
+        seen["site_ids"] = set(hints)
+        hint = hints["w2"]
+        seen["hint_kind"] = hint.kind
+        seen["attached_ids"] = [
+            tc.id for tc in (hint.transcript[-1].tool_calls or ())
+        ]
+        return ToolResult(tool_call_id="t1", success=True, output="redriven")
+
+    delegate = MagicMock()
+    delegate.resume_plan = _resume_plan
+    settled = await recover_turn(
+        state=state,  # type: ignore[arg-type]
+        sink=EventSink(),
+        delegate_tool=delegate,
+        execution_id="fresh-should-not-win",
+    )
+    assert settled.output == "redriven"
+    assert seen["seed"] == {"w1"}
+    assert seen["site_ids"] == {"w2"}
+    assert seen["hint_kind"] is ResumeKind.CRASH
+    assert seen["attached_ids"] == ["fw"]
+    assert current_resume_hints.get() is None
+
+
+async def test_recover_turn_resets_sites_when_resume_plan_raises():
+    window = [LLMMessage(role="assistant", content="partial")]
+    state = _WindowTurn(
+        plan=_plan_two_nodes(),
+        completed={},
+        execution_id="exec-crash-1",
+        windows={"w1": window, "w2": window},
+    )
+    seen: dict = {}
+
+    async def _resume_plan(plan, seed_completed, **kwargs):
+        seen["hints"] = kwargs.get("resume_hints") or {}
+        raise RuntimeError("redrive boom")
+
+    delegate = MagicMock()
+    delegate.resume_plan = _resume_plan
+    with pytest.raises(RuntimeError, match="redrive boom"):
+        await recover_turn(
+            state=state,  # type: ignore[arg-type]
+            sink=EventSink(),
+            delegate_tool=delegate,
+            execution_id="exec-crash-1",
+        )
+    assert set(seen["hints"]) == {"w1", "w2"}
+    assert current_resume_hints.get() is None
+
+
 async def test_recover_turn_resume_plan_review_routes_through_same_primitive():
     from agentcore.runtime.suspension import PlanReviewSuspension
 
@@ -108,6 +211,7 @@ async def test_recover_turn_resume_plan_review_routes_through_same_primitive():
         seen["seed"] = set(seed_completed)
         seen["decision"] = kwargs.get("decision")
         seen["ceo_review"] = kwargs.get("ceo_review")
+        seen["resume_hints"] = kwargs.get("resume_hints")
         return ToolResult(tool_call_id="t1", success=True, output="resumed")
 
     delegate = MagicMock()
@@ -149,6 +253,7 @@ async def test_recover_turn_resume_plan_review_routes_through_same_primitive():
     assert seen["seed"] == {"w1"}
     assert seen["decision"] is CheckpointDecision.CONTINUE
     assert seen["ceo_review"] == review
+    assert seen["resume_hints"] in (None, {})
 
 
 async def test_recover_turn_plan_review_forwards_team_brief():

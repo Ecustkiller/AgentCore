@@ -20,6 +20,7 @@ function execution(overrides: Partial<Execution> = {}): Execution {
         kind: "agent",
         role: null,
         model: "m",
+        reasoningEffort: null,
         usage: null,
         cost: null,
         error: null,

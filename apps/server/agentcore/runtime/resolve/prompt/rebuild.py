@@ -41,7 +41,6 @@ async def rebuild_fresh_worker_base_prompt(
         memory_store,
         user_id,
         folder_id=folder_id,
-        enabled=True,
     )
     exec_languages = await resolve_exec_languages(backend)
     workspace_facts = build_workspace_context(

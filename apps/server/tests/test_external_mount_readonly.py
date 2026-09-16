@@ -367,16 +367,11 @@ def test_event_carries_root_id():
     assert ev.payload["mode"] == "organize"
     assert "path" not in ev.payload
     from agentcore.runtime.events.payloads.workspace import ExternalMountRequiredPayload
-
-    ExternalMountRequiredPayload.model_validate(ev.payload)
-
-
-def test_old_sse_event_name_absent():
     from agentcore.runtime.events.types import EventType
 
-    names = {e.value for e in EventType}
-    assert "external_mount_required" in names
-    assert "external_mount_readonly_required" not in names
+    ExternalMountRequiredPayload.model_validate(ev.payload)
+    assert ev.type is EventType.EXTERNAL_MOUNT_REQUIRED
+    assert EventType.EXTERNAL_MOUNT_REQUIRED in EventType
 
 
 @pytest.mark.asyncio

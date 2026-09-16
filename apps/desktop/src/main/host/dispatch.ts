@@ -52,9 +52,8 @@ export async function runHostOp(input: HostOpInput): Promise<HostOpResult> {
       return openSettings(panel);
     }
     case "host_audio_set_default": {
-      const deviceId = String(args.device_id ?? "").trim();
       const deviceName = String(args.device_name ?? "").trim();
-      return setDefaultAudio(deviceId, deviceName);
+      return setDefaultAudio(deviceName);
     }
     case "host_service_restart": {
       const service = String(args.service ?? "").trim();

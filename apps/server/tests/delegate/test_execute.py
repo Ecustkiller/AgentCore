@@ -7,9 +7,8 @@ import agentcore.tools.builtin.delegate.tool as delegate_tool_mod
 from agentcore.core.types import ToolEffect
 from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.runtime.events import EventSink, EventType
-from agentcore.runtime.runs import BoundaryReason
 from tests.conftest import LogSpy
-from tests.delegate.conftest import LATE_BIND_DAG, Provider, _upstream_body, ctx, tool
+from tests.delegate.conftest import Provider, _upstream_body, ctx, tool
 
 
 async def test_parallel_delegate_returns_products_non_terminal():
@@ -172,7 +171,8 @@ def test_should_auto_light_delegate():
     assert not delegate_prelude_mod._should_auto_light_delegate(
         [{"role": "A", "task": "a", "checkpoint_after": True}]
     )
-    assert not delegate_prelude_mod._should_auto_light_delegate(
+    # leftover bind_after_deps is dropped, not a wave-boundary feature
+    assert delegate_prelude_mod._should_auto_light_delegate(
         [{"role": "A", "task": "a", "bind_after_deps": True}]
     )
     # 深度交付与编排结构正交：单 worker 无波边界也不 auto-light
@@ -341,14 +341,17 @@ async def test_single_worker_with_checkpoint_keeps_standard_complexity_hint(monk
 
 
 async def test_explicit_light_with_dag_features_ignored(monkeypatch):
-    """显式 light + depends_on/bind_after_deps 时忽略 light，保留波边界让出。"""
+    """显式 light + depends_on 时忽略 light；无 BIND 让出，DAG 直跑。"""
     spy = LogSpy()
     monkeypatch.setattr(delegate_tool_mod, "logger", spy)
     provider = Provider([_upstream_body("AOUT"), _upstream_body("BOUT")])
     t = tool(provider)
     first = await t.execute(
         {
-            "tasks": LATE_BIND_DAG,
+            "tasks": [
+                {"id": "a", "role": "研究员", "task": "调研"},
+                {"id": "b", "role": "写手", "task": "撰写", "depends_on": ["a"]},
+            ],
             "complexity_hint": "light",
             "coordinate": False,
         },
@@ -356,11 +359,8 @@ async def test_explicit_light_with_dag_features_ignored(monkeypatch):
     )
     assert spy.get("delegate.started")["complexity_hint"] == "standard"
     assert first.success is True
-    assert "计划已让出" in first.output
-    assert "AOUT" in first.output
-    assert "BOUT" not in first.output
-    assert t._supervised is not None
-    assert t._supervised.reason is BoundaryReason.BIND
+    assert t._supervised is None
+    assert "AOUT" in first.output and "BOUT" in first.output
 
 
 async def test_multi_worker_does_not_emit_note_events(monkeypatch):
@@ -779,17 +779,14 @@ def test_schema_cues_xor_and_top_level_completion_criteria():
     assert "completion_criteria" not in t.schema.description
 
 
-def test_ceo_deliverable_schema_omits_internal_qa_knobs():
-    """CEO 只见 artifacts；strict 等内部闸不进填参面。"""
+def test_ceo_deliverable_schema_is_artifacts_only():
+    """CEO 填参面只见 artifacts。"""
     t = tool(Provider([]))
     deliverable_props = t.schema.parameters["properties"]["tasks"]["items"]["properties"][
         "deliverable"
     ]
     props = deliverable_props["properties"]
-    assert "artifacts" in props
-    assert "form" not in props
-    for banned in ("strict", "required_sections", "output_format", "citation_mode"):
-        assert banned not in props
+    assert set(props) == {"artifacts"}
     assert (
         "用户点名" in deliverable_props["description"]
         or "流水线" in deliverable_props["description"]

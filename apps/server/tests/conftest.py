@@ -41,6 +41,20 @@ def _mark_test_traffic():
 
 
 @pytest.fixture(autouse=True)
+def _flash_go_meter_off_peak(monkeypatch):
+    """Flash Go-meter peak/off-peak is hour-based; pin tests to Off-Peak noon UTC."""
+    from datetime import UTC, datetime
+
+    from agentcore.llm import pricing as pricing_mod
+
+    monkeypatch.setattr(
+        pricing_mod,
+        "_now_utc",
+        lambda: datetime(2026, 8, 18, 12, 0, tzinfo=UTC),
+    )
+
+
+@pytest.fixture(autouse=True)
 def _isolate_prompt_profile():
     """No leaked eval prompt variant may rewrite base / CEO core for a later test."""
     from agentcore.runtime.resolve.profile import use_profile

@@ -223,6 +223,7 @@ async def continue_ceo_pipeline(
             session_loader=session_loader,
             suspension_saver=suspension_saver,
             suspension_deleter=suspension_deleter,
+            llm_credentials=llm_credentials,
         )
         bound_execution_id = wired.bound_execution_id
         execution_id_token = cast(Token[str | None], wired.execution_id_token)

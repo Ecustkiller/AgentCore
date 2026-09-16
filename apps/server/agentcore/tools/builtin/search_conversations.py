@@ -1,4 +1,4 @@
-"""search_conversations — directory / search over the owner's past chats.
+"""search_conversations — search the owner's past chats (Cursor-shaped query).
 
 ``AUDIENCE_BOTH`` + ``ToolSurface.WORKER_ONLY`` + ``manual_wire``. Wired after
 ``build_*_registry`` by ``_wire_conversation_log_tools`` (CEO and worker).
@@ -11,11 +11,15 @@ the local ConversationRepository (大众桌面无本机 PG).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from agentcore.conversation.log_export import search_hit_from_messages
 from agentcore.core.logging import get_logger
+from agentcore.core.search_query import (
+    SEARCH_DEFAULT_LIMIT,
+    SEARCH_HARD_CAP,
+    parse_conversation_search_terms,
+)
 from agentcore.core.types import ToolApproval, ToolFace
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import ConversationRepository, MessageRepository
@@ -28,9 +32,9 @@ from agentcore.tools.registration import (
 
 logger = get_logger(__name__)
 
-_SEARCH_HARD_CAP = 30
-_DEFAULT_LIMIT = 10
-_MAX_LOOKBACK_HOURS = 168
+_EMPTY_QUERY = (
+    "请提供关键词。一次 1–2 个词；词多易空、可另开短查询。引号包精确短语。"
+)
 _SOFT_MISS = (
     "未找到可查阅的历史对话（可能不存在、已删除，或不在可访问范围内）。"
 )
@@ -107,11 +111,8 @@ async def _search_via_cloud(
     *,
     query: str,
     folder_id: str | None,
-    include_archived: bool,
-    global_chats_only: bool,
     exclude_conversation_id: str | None,
     limit: int,
-    updated_within_hours: int | None,
     check_folder_owned: bool,
 ) -> tuple[list[dict[str, Any]], bool]:
     from agentcore.account.credentials import (
@@ -125,11 +126,10 @@ async def _search_via_cloud(
     payload: dict[str, Any] = {
         "query": query,
         "folder_id": folder_id,
-        "include_archived": include_archived,
-        "global_chats_only": global_chats_only,
+        "include_archived": True,
+        "global_chats_only": False,
         "exclude_conversation_id": exclude_conversation_id,
         "limit": limit,
-        "updated_within_hours": updated_within_hours,
         "check_folder_owned": check_folder_owned,
     }
     try:
@@ -151,11 +151,8 @@ async def _search_via_db(
     user_id: str,
     query: str,
     folder_id: str | None,
-    include_archived: bool,
-    global_chats_only: bool,
     exclude_conversation_id: str | None,
     limit: int,
-    updated_after: datetime | None,
     explicit_folder: str | None,
 ) -> tuple[list[dict[str, Any]], bool]:
     async with async_session_factory() as session:
@@ -172,10 +169,9 @@ async def _search_via_db(
             query,
             limit=limit,
             folder_id=folder_id,
-            include_archived=include_archived,
-            global_chats_only=global_chats_only,
+            include_archived=True,
+            global_chats_only=False,
             exclude_conversation_id=exclude_conversation_id,
-            updated_after=updated_after,
         )
         msg_repo = MessageRepository(session)
         for row in rows:
@@ -209,7 +205,7 @@ async def run_conversation_search(
     """Shared search used by ``search_conversations`` and ``read_conversation`` locators."""
     query = str(arguments.get("query") or "").strip()
     scope = str(arguments.get("scope") or "folder").strip() or "folder"
-    if scope not in {"all", "folder", "global_chats"}:
+    if scope not in {"all", "folder"}:
         return ConversationSearchRun(
             rows=[],
             folder_miss=False,
@@ -218,57 +214,39 @@ async def run_conversation_search(
             error=ToolResult(
                 tool_call_id="",
                 success=False,
-                output="scope 须为 all / folder / global_chats。",
+                output="scope 须为 all / folder。",
                 error="invalid scope",
             ),
         )
-    raw_archived = arguments.get("include_archived")
-    include_archived = True if raw_archived is None else bool(raw_archived)
+    if not parse_conversation_search_terms(query):
+        return ConversationSearchRun(
+            rows=[],
+            folder_miss=False,
+            soft_note=None,
+            scope=scope,
+            error=ToolResult(
+                tool_call_id="",
+                success=True,
+                output=_EMPTY_QUERY,
+                display={"result_count": 0, "scope": scope},
+            ),
+        )
     try:
-        limit = int(arguments.get("limit") or _DEFAULT_LIMIT)
+        limit = int(arguments.get("limit") or SEARCH_DEFAULT_LIMIT)
     except (TypeError, ValueError):
-        limit = _DEFAULT_LIMIT
-    limit = max(1, min(limit, _SEARCH_HARD_CAP))
-
-    updated_after: datetime | None = None
-    updated_within_hours: int | None = None
-    raw_hours = arguments.get("updated_within_hours")
-    if raw_hours is not None and raw_hours != "":
-        try:
-            hours = int(raw_hours)
-        except (TypeError, ValueError):
-            return ConversationSearchRun(
-                rows=[],
-                folder_miss=False,
-                soft_note=None,
-                scope=scope,
-                error=ToolResult(
-                    tool_call_id="",
-                    success=False,
-                    output="updated_within_hours 须为正整数。",
-                    error="invalid updated_within_hours",
-                ),
-            )
-        hours = max(1, min(hours, _MAX_LOOKBACK_HOURS))
-        updated_within_hours = hours
-        updated_after = datetime.now(UTC) - timedelta(hours=hours)
+        limit = SEARCH_DEFAULT_LIMIT
+    limit = max(1, min(limit, SEARCH_HARD_CAP))
 
     explicit_folder = str(arguments.get("folder_id") or "").strip() or None
     resolved_folder: str | None = None
-    global_chats_only = False
     soft_note: str | None = None
     if explicit_folder:
         resolved_folder = explicit_folder
     elif scope == "folder":
         if not folder_id:
-            soft_note = (
-                "当前是裸聊（无文件夹）；已按 all 范围检索。"
-                "请改用 scope=all 或 global_chats。"
-            )
+            soft_note = "当前是裸聊（无文件夹）；已按 all 范围检索。"
         else:
             resolved_folder = folder_id
-    elif scope == "global_chats":
-        global_chats_only = True
 
     host_id = context.conversation_id
 
@@ -279,11 +257,8 @@ async def run_conversation_search(
             rows, folder_miss = await _search_via_cloud(
                 query=query,
                 folder_id=resolved_folder,
-                include_archived=include_archived,
-                global_chats_only=global_chats_only,
                 exclude_conversation_id=host_id or None,
                 limit=limit,
-                updated_within_hours=updated_within_hours,
                 check_folder_owned=bool(explicit_folder),
             )
         else:
@@ -291,11 +266,8 @@ async def run_conversation_search(
                 user_id=context.user_id,
                 query=query,
                 folder_id=resolved_folder,
-                include_archived=include_archived,
-                global_chats_only=global_chats_only,
                 exclude_conversation_id=host_id or None,
                 limit=limit,
-                updated_after=updated_after,
                 explicit_folder=explicit_folder,
             )
     except Exception as e:  # noqa: BLE001 — tool failure must not crash the turn
@@ -341,7 +313,7 @@ async def run_conversation_search(
 
 
 class SearchConversationsTool:
-    """List / search the owner's conversations for on-demand log recall."""
+    """Search the owner's conversations for on-demand log recall."""
 
     registration = ToolRegistration(
         surface=ToolSurface.WORKER_ONLY,
@@ -361,48 +333,39 @@ class SearchConversationsTool:
         return ToolSchema(
             name="search_conversations",
             description=(
-                "检索本账号历史对话（标题或正文）。打开某一场用 read_conversation。"
-                "偏好与巩固事实 ≠ 本工具。"
+                "检索本账号历史对话（过往事实）。"
+                "打开用 read_conversation。"
+                "用户规则 ≠ 本工具。"
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "可选；标题或正文关键词。空 = 按更新时间列最近对话。",
+                        "description": (
+                            "标题与可见用户/助手正文。未加引号的词须同场都出现；"
+                            "一次 1–2 词，词多易空可另开短查询。引号包精确短语。"
+                        ),
                     },
                     "scope": {
                         "type": "string",
-                        "enum": ["all", "folder", "global_chats"],
+                        "enum": ["all", "folder"],
                         "default": "folder",
-                        "description": (
-                            "folder=宿主所在文件夹（默认）；all=全账号；"
-                            "global_chats=仅裸聊。"
-                        ),
+                        "description": "本文件夹或全账号。",
                     },
                     "folder_id": {
                         "type": "string",
-                        "description": "可选；指定其它文件夹 id（须属同一用户）。",
-                    },
-                    "include_archived": {
-                        "type": "boolean",
-                        "description": "默认含已归档。只要未归档时 false。",
+                        "description": "其它文件夹 id（须属同一用户）。",
                     },
                     "limit": {
                         "type": "integer",
-                        "description": (
-                            f"返回条数，默认 {_DEFAULT_LIMIT}，硬顶 {_SEARCH_HARD_CAP}。"
-                        ),
-                    },
-                    "updated_within_hours": {
-                        "type": "integer",
-                        "description": (
-                            "可选；只返回近 N 小时内有更新的对话"
-                            f"（1–{_MAX_LOOKBACK_HOURS}）。只查近况时设置。"
-                        ),
+                        "description": "返回条数。",
+                        "default": SEARCH_DEFAULT_LIMIT,
+                        "minimum": 1,
+                        "maximum": SEARCH_HARD_CAP,
                     },
                 },
-                "required": [],
+                "required": ["query"],
             },
             face=ToolFace.SEARCH,
             approval=ToolApproval.NEVER,

@@ -169,17 +169,6 @@ class RunTool:
                         "type": "string",
                         "description": "read / stop 的进程 id（background 启动时返回）。",
                     },
-                    "name": {
-                        "type": "string",
-                        "description": "background 可选显示名。",
-                    },
-                    "purpose": {
-                        "type": "string",
-                        "description": (
-                            "一句话中文说明为何跑这条命令；会展示给用户作为审批说明，"
-                            "执行时忽略"
-                        ),
-                    },
                 },
             },
             face=ToolFace.EXECUTION,
@@ -245,8 +234,6 @@ class RunTool:
             "cwd": arguments.get("cwd"),
             "wait_for": arguments.get("wait_for"),
             "wait_timeout_seconds": arguments.get("wait_timeout_seconds"),
-            "name": arguments.get("name"),
-            "purpose": arguments.get("purpose"),
         }
         return await process_manage(
             {k: v for k, v in mapped.items() if v is not None},
@@ -263,7 +250,6 @@ class RunTool:
         payload: dict[str, Any] = {
             "check": "command",
             "command": command,
-            "purpose": arguments.get("purpose"),
         }
         if cwd:
             payload["working_directory"] = cwd
@@ -302,7 +288,6 @@ class RunTool:
             "code": _shell_command_runner(command, chdir=cwd),
             "language": "python",
             "timeout_seconds": _VERIFY_DISASTER_SECONDS,
-            "purpose": arguments.get("purpose"),
         }
         if install_payloads:
             short_args["env"] = registry_pin_env()

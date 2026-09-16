@@ -1,4 +1,4 @@
-"""Pricing layers: community → curated / unpriced + ledger split."""
+"""Pricing layers: one curated CNY card; credential only splits quota vs display."""
 
 from __future__ import annotations
 
@@ -25,22 +25,25 @@ def test_user_unknown_model_is_unpriced_not_default_fallback():
     assert platform.pricing_source == "curated"
 
 
-def test_user_community_estimate_when_known_model():
+def test_user_known_model_uses_curated_nominal():
     usage = _usage(input_tokens=1_000_000, cache_miss_tokens=1_000_000, output_tokens=1_000_000)
     cost = calculate_cost(DEEPSEEK_V4_FLASH, usage, credential_source="user")
-    assert cost.pricing_source == "estimated"
+    platform = calculate_cost(DEEPSEEK_V4_FLASH, usage, credential_source="platform")
+    assert cost.pricing_source == "curated"
+    assert cost.currency == "CNY"
+    assert cost.total == platform.total
     assert cost.total > 0
 
 
-def test_user_estimate_does_not_enter_billed_nano():
+def test_user_nominal_does_not_enter_billed_nano():
     usage = _usage(input_tokens=10_000, cache_miss_tokens=10_000, output_tokens=100)
     call = priced_call_cost(
         model=DEEPSEEK_V4_FLASH, usage=usage, role="captain", credential_source="user"
     )
     assert call.cost_total_nano == 0
     assert call.cost_estimated_nano > 0
-    assert call.cost["pricing_source"] == "estimated"
-    # Platform glm curated → billed nano; Flash (no curated) → community estimated still billed.
+    assert call.cost["pricing_source"] == "curated"
+    assert call.cost["total"] == call.cost_estimated_nano
     platform = priced_call_cost(
         model=PLATFORM_RELAY_GLM_52, usage=usage, role="captain", credential_source="platform"
     )

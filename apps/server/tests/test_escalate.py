@@ -30,8 +30,8 @@ def test_escalate_schema_has_no_recommended_field():
         ]
     )
     assert "recommended" not in props
-    assert "（推荐）" in props["label"]["description"]
-    assert "放第一" in props["label"]["description"]
+    assert "（推荐）" not in props["label"]["description"]
+    assert "放第一" not in props["label"]["description"]
 
 
 def _ctx() -> ToolContext:
@@ -208,7 +208,7 @@ def test_escalate_schema_stays_off_engine_internals():
 
 
 def test_escalate_schema_options_are_one_line():
-    """escalate 无专用 card：schema 不再提供/鼓励选项第二句。"""
+    """填卡 HOW 在 ask_kickoff；escalate 按钮不抄权衡/推荐。"""
     props = (
         EscalateTool()
         .schema.parameters["properties"]["questions"]["items"]["properties"]["options"]["items"][
@@ -217,7 +217,9 @@ def test_escalate_schema_options_are_one_line():
     )
     assert "detail" not in props
     blob = json.dumps(EscalateTool().schema.parameters, ensure_ascii=False)
-    assert "第二句" in blob or "权衡写进" in blob
+    assert "第二句" not in blob
+    assert "权衡写进" not in blob
+    assert "（推荐）" not in blob
 
 
 @pytest.mark.asyncio

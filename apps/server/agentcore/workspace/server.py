@@ -33,7 +33,6 @@ from agentcore.workspace._paths import (
     is_ignored_file_name,
     is_system_ignored_file_name,
     normalize_glob,
-    normalize_workspace_path,
     path_has_non_internal_entries,
     resolve_safe_path,
 )
@@ -63,7 +62,7 @@ from agentcore.workspace.limits import (
     effective_read_bytes_cap,
     effective_read_head_cap,
 )
-from agentcore.workspace.local import LocalWorkspace, request_diagnostics_via_channel
+from agentcore.workspace.local import LocalWorkspace
 from agentcore.workspace.locks import workspace_lock
 from agentcore.workspace.protocol import (
     AlreadyExists,
@@ -71,6 +70,8 @@ from agentcore.workspace.protocol import (
     CodeSearchResult,
     DirEntry,
     DirListing,
+    GlobFilesQuery,
+    GlobFilesResult,
     GrepQuery,
     GrepResult,
     IndexFileEntry,
@@ -88,7 +89,7 @@ from agentcore.workspace.protocol import (
     TreeResult,
     WorkspaceIOError,
 )
-from agentcore.workspace.rg_grep import run_grep_rg
+from agentcore.workspace.rg_grep import run_files_rg, run_grep_rg
 from agentcore.workspace.sparse_listing import is_ai_list_hidden_file
 from agentcore.workspace.stage_dirs import INDEX_ZONE_NAME, internal_zone_path
 from agentcore.workspace.text_replace import (
@@ -325,37 +326,6 @@ def _delete_target_sync(
             original_rel=trash_rel,
             internal_root=zone_root,
         )
-
-
-def _merge_diagnostics_payloads(parts: list[dict]) -> dict:
-    """Combine primary-root + external-bridge diagnostics envelopes."""
-    if not parts:
-        return {"status": "ok", "diagnostics": []}
-    if len(parts) == 1:
-        return parts[0]
-    merged: list[dict] = []
-    any_ok = False
-    unavailable_reason: str | None = None
-    for payload in parts:
-        status = str(payload.get("status") or "")
-        if status == "ok":
-            any_ok = True
-        elif status == "unavailable":
-            reason = payload.get("reason")
-            if isinstance(reason, str) and reason.strip():
-                unavailable_reason = reason.strip()
-            else:
-                unavailable_reason = unavailable_reason or "diagnostics unavailable"
-        for item in payload.get("diagnostics") or []:
-            if isinstance(item, dict):
-                merged.append(item)
-    if any_ok:
-        return {"status": "ok", "diagnostics": merged}
-    return {
-        "status": "unavailable",
-        "reason": unavailable_reason or "diagnostics unavailable",
-        "diagnostics": merged,
-    }
 
 
 class ServerWorkspace:
@@ -1366,6 +1336,25 @@ class ServerWorkspace:
             model_path=lambda p: self._model_path(p, logical=logical),
         )
 
+    async def glob_files(self, query: GlobFilesQuery) -> GlobFilesResult:
+        if self._external_needs_channel(query.directory):
+            return await self._require_external_bridge().glob_files(query)
+        base = self._safe(query.directory)
+        if not base.exists():
+            raise PathNotFound(query.directory)
+        if not base.is_dir():
+            raise NotADirectory(query.directory)
+        logical = query.directory
+        paths, truncated, warnings = await run_files_rg(
+            search_root=base,
+            model_path=lambda p: self._model_path(p, logical=logical),
+            name_globs=list(query.globs),
+            max_depth=query.max_depth,
+            max_entries=query.max_entries,
+            reveal_archives=query.reveal_archives or self.ai_list_reveal_archives,
+        )
+        return GlobFilesResult(paths=paths, truncated=truncated, warnings=warnings)
+
     async def code_search(
         self,
         query: str,
@@ -1385,67 +1374,6 @@ class ServerWorkspace:
     async def ensure_code_index(self, *, force: bool = False) -> bool:
         manager = self._get_index_manager()
         return await manager.ensure_index(self, force=force)
-
-    async def diagnostics(self, paths: list[str]) -> dict:
-        """Language-service inner loop: desktop LS when this desk is local-disk.
-
-        Cloud desks have no Node LanguageService — honest unavailable (no fake
-        ``tsc``). Sidecar ``location=local`` issues ``WorkspaceOp.DIAGNOSTICS``
-        on the attached desktop channel (same transport as ``process_*``).
-        """
-        cleaned = [str(p or "").strip() for p in paths if str(p or "").strip()]
-        if not cleaned:
-            return {"status": "ok", "diagnostics": []}
-
-        if self.location != "local":
-            return {
-                "status": "unavailable",
-                "reason": "这张云桌没有语言服务通道，验收请用 run",
-                "diagnostics": [],
-            }
-
-        channel = self._desktop_channel
-        if channel is None:
-            return {
-                "status": "unavailable",
-                "reason": "本机工作区未接通语言服务通道，验收请用 run",
-                "diagnostics": [],
-            }
-
-        groups: dict[tuple[str | None, str | None], list[str]] = {}
-        bridge_paths: list[str] = []
-        for path in cleaned:
-            if is_external_namespace(path):
-                if self._external_needs_channel(path):
-                    bridge_paths.append(path)
-                    continue
-                routed = route_external(path, self._mounts)
-                if routed is None:
-                    raise PathNotFound(path)
-                rid = (routed.mount.root_id or "").strip() or None
-                rel = routed.rel if routed.rel not in ("", ".") else "."
-                groups.setdefault((rid, routed.mount.alias), []).append(rel)
-                continue
-            norm = normalize_workspace_path(path, root_label=self.root_label)
-            groups.setdefault((None, None), []).append(norm)
-
-        parts: list[dict] = []
-        if groups:
-            parts.append(
-                await request_diagnostics_via_channel(
-                    channel,
-                    groups,
-                    remap_path=self._diagnostics_out_path,
-                )
-            )
-        if bridge_paths:
-            parts.append(await self._require_external_bridge().diagnostics(bridge_paths))
-        return _merge_diagnostics_payloads(parts)
-
-    def _diagnostics_out_path(self, path: str, alias: str | None) -> str:
-        if alias is None:
-            return path
-        return external_ns(alias, path)
 
     async def execute(self, req: ExecutionRequest) -> ExecutionResult:
         # Cloud desk must already be up (prepare / resume). Guest create is not

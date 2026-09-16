@@ -51,7 +51,6 @@ from agentcore.tools.registration import (
 logger = get_logger(__name__)
 
 _DEFAULT_MAX_CHARS = 8000
-_MAX_CHARS_CAP = 30000
 _MAX_REDIRECTS = 5
 _SNIPPET_MAX = 200  # citation preview length — a sentence or two, not the whole lead
 # Slack over ``max_chars`` for the JSON envelope itself (url + title + keys/quotes).
@@ -523,10 +522,6 @@ class WebFetchTool:
                         "type": "string",
                         "description": "http:// 或 https:// 公网地址。",
                     },
-                    "max_chars": {
-                        "type": "integer",
-                        "description": "返回最大字符数，默认 8000；超则截断。",
-                    },
                 },
                 "required": ["url"],
             },
@@ -580,11 +575,7 @@ class WebFetchTool:
                 code=_BLOCK_CODES.get(block, ErrorCode.TOOL_ERROR),
             )
 
-        try:
-            raw_max = int(arguments.get("max_chars", _DEFAULT_MAX_CHARS))
-            max_chars = max(1, min(raw_max, _MAX_CHARS_CAP))
-        except (TypeError, ValueError):
-            max_chars = _DEFAULT_MAX_CHARS
+        max_chars = _DEFAULT_MAX_CHARS
 
         # Conversation-scoped fetch cache: a repeat read of the same page within the
         # conversation is served from memory (within a freshness TTL) instead of

@@ -390,3 +390,21 @@ async def test_local_workspace_reuses_channel_for_tools():
         user_id="u-test", conversation_id=CONV
     )
     assert resolved is channel
+
+
+def test_workspace_channel_for_tools_attaches_sidecar_process_channel(tmp_path):
+    """Sidecar Path-backed local still gets a desktop channel for process ops."""
+    from agentcore.tools.sandbox.protocol import ExecutionRequest, ExecutionResult
+    from agentcore.workspace.locate import workspace_channel_for_tools
+    from agentcore.workspace.server import ServerWorkspace
+
+    class _Sand:
+        async def execute(self, req: ExecutionRequest) -> ExecutionResult:
+            raise AssertionError("should not execute")
+
+    ws = ServerWorkspace(tmp_path, _Sand(), location="local")  # type: ignore[arg-type]
+    channel = workspace_channel_for_tools(
+        ws, user_id="u1", conversation_id=CONV
+    )
+    assert channel is not None
+    assert ws._desktop_channel is channel

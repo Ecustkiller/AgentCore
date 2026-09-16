@@ -38,11 +38,6 @@ CKPT_FORK_DAG = [
     {"id": "u2", "role": "出纳", "task": "付款", "depends_on": ["u1"]},
 ]
 
-LATE_BIND_DAG = [
-    {"id": "a", "role": "研究员", "task": "调研"},
-    {"id": "b", "role": "待定", "task": "占位", "depends_on": ["a"], "bind_after_deps": True},
-]
-
 SCOPE_DAG = [
     {"id": "a", "role": "研究员", "task": "调研真实需求"},
     {"id": "b", "role": "写手", "task": "撰写最终报告", "depends_on": ["a"]},
@@ -125,9 +120,10 @@ class NestingProvider:
 class ScopeProvider:
     """Fake LLM where upstream escalates scope deviation then produces output."""
 
-    def __init__(self) -> None:
+    def __init__(self, usage: TokenUsage | None = None) -> None:
         self.calls = 0
         self.requests: list = []
+        self._usage = usage
 
     async def stream(self, request):
         self.requests.append(request)
@@ -148,6 +144,8 @@ class ScopeProvider:
             )
             return
         yield LLMChunk(delta_content=_upstream_body("BOUT" if is_b else "AOUT"))
+        if self._usage is not None:
+            yield LLMChunk(usage=self._usage)
 
 
 class DepProvider:

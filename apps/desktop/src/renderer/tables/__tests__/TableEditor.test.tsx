@@ -104,6 +104,7 @@ describe("TableEditor", () => {
 
   it("deletes a view from its menu", async () => {
     render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "视图 日历" }));
     fireEvent.pointerDown(
       screen.getByRole("button", { name: "视图 日历 操作" }),
       {
@@ -151,5 +152,65 @@ describe("TableEditor", () => {
     render(<Harness />);
     expect(screen.getByLabelText("分组列")).toBeTruthy();
     expect(screen.queryByText("进行中")).toBeNull();
+  });
+
+  it("keeps search collapsed until 查找", () => {
+    render(<Harness />);
+    expect(screen.queryByLabelText("查找表格")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "查找" }));
+    expect(screen.getByLabelText("查找表格")).toBeTruthy();
+  });
+
+  it("shows filter chips and removes them", () => {
+    const table = createDemoTable();
+    table.views[0] = {
+      ...table.views[0],
+      config: {
+        ...table.views[0].config,
+        filters: [
+          { id: "f1", columnId: "c-status", op: "eq", value: "s-done" },
+        ],
+      },
+    };
+    resetTablesStore([table]);
+    render(<Harness />);
+    expect(screen.getByText("状态 是 完成")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "移除 状态 是 完成" }));
+    expect(useTablesStore.getState().tables[0].views[0].config.filters).toEqual(
+      [],
+    );
+  });
+
+  it("exports csv from the overflow menu", async () => {
+    render(<Harness />);
+    fireEvent.pointerDown(screen.getByRole("button", { name: "更多" }), {
+      button: 0,
+    });
+    expect(
+      await screen.findByRole("menuitem", { name: "导出 CSV" }),
+    ).toBeTruthy();
+  });
+
+  it("adds a column from the grid edge", () => {
+    render(<Harness />);
+    const before = useTablesStore.getState().tables[0].columns.length;
+    fireEvent.click(screen.getByRole("button", { name: "添加列" }));
+    expect(useTablesStore.getState().tables[0].columns.length).toBe(before + 1);
+  });
+
+  it("resizes a column from the header handle", () => {
+    render(<Harness />);
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "调整标题列宽" }),
+      {
+        clientX: 100,
+      },
+    );
+    fireEvent.pointerUp(window, { clientX: 180 });
+    expect(
+      useTablesStore.getState().tables[0].views[0].config.columnWidths[
+        "c-title"
+      ],
+    ).toBe(240);
   });
 });

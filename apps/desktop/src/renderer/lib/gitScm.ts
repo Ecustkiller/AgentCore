@@ -29,6 +29,17 @@ export interface GitScmResult {
   text?: string;
 }
 
+function withDeskCwd(
+  args: Record<string, unknown>,
+  cwd?: string,
+): Record<string, unknown> {
+  const sub = (cwd ?? "")
+    .replace(/\\/g, "/")
+    .replace(/^\/+|\/+$/g, "")
+    .trim();
+  return sub ? { ...args, cwd: sub } : args;
+}
+
 function errDetail(res: {
   ok: false;
   error: { kind: string; detail: string };
@@ -69,10 +80,18 @@ export async function runGitScm(
 export async function gitStage(
   rootId: string,
   paths?: string[],
+  cwd?: string,
 ): Promise<boolean> {
-  const r = await runGitScm(rootId, "stage", {
-    paths: paths && paths.length > 0 ? paths : undefined,
-  });
+  const r = await runGitScm(
+    rootId,
+    "stage",
+    withDeskCwd(
+      {
+        paths: paths && paths.length > 0 ? paths : undefined,
+      },
+      cwd,
+    ),
+  );
   if (!r.ok) {
     notifyActionError("暂存失败", r.detail);
     return false;
@@ -83,10 +102,18 @@ export async function gitStage(
 export async function gitUnstage(
   rootId: string,
   paths?: string[],
+  cwd?: string,
 ): Promise<boolean> {
-  const r = await runGitScm(rootId, "unstage", {
-    paths: paths && paths.length > 0 ? paths : undefined,
-  });
+  const r = await runGitScm(
+    rootId,
+    "unstage",
+    withDeskCwd(
+      {
+        paths: paths && paths.length > 0 ? paths : undefined,
+      },
+      cwd,
+    ),
+  );
   if (!r.ok) {
     notifyActionError("取消暂存失败", r.detail);
     return false;
@@ -97,8 +124,9 @@ export async function gitUnstage(
 export async function gitCommit(
   rootId: string,
   message: string,
+  cwd?: string,
 ): Promise<boolean> {
-  const r = await runGitScm(rootId, "commit", { message });
+  const r = await runGitScm(rootId, "commit", withDeskCwd({ message }, cwd));
   if (!r.ok) {
     notifyActionError("提交失败", r.detail);
     return false;
@@ -109,15 +137,22 @@ export async function gitCommit(
 /** push：恒确认；取消返回 false。 */
 export async function gitPush(
   rootId: string,
-  opts?: { remote?: string; setUpstream?: boolean },
+  opts?: { remote?: string; setUpstream?: boolean; cwd?: string },
 ): Promise<boolean> {
   if (typeof window !== "undefined" && !window.confirm(GIT_PUSH_CONFIRM)) {
     return false;
   }
-  const r = await runGitScm(rootId, "push", {
-    remote: opts?.remote,
-    set_upstream: opts?.setUpstream ?? true,
-  });
+  const r = await runGitScm(
+    rootId,
+    "push",
+    withDeskCwd(
+      {
+        remote: opts?.remote,
+        set_upstream: opts?.setUpstream ?? true,
+      },
+      opts?.cwd,
+    ),
+  );
   if (!r.ok) {
     notifyActionError("推送失败", r.detail);
     return false;
@@ -128,12 +163,16 @@ export async function gitPush(
 /** pull：恒确认；ff-only。 */
 export async function gitPull(
   rootId: string,
-  opts?: { remote?: string },
+  opts?: { remote?: string; cwd?: string },
 ): Promise<boolean> {
   if (typeof window !== "undefined" && !window.confirm(GIT_PULL_CONFIRM)) {
     return false;
   }
-  const r = await runGitScm(rootId, "pull", { remote: opts?.remote });
+  const r = await runGitScm(
+    rootId,
+    "pull",
+    withDeskCwd({ remote: opts?.remote }, opts?.cwd),
+  );
   if (!r.ok) {
     notifyActionError("拉取失败", r.detail);
     return false;
@@ -144,9 +183,13 @@ export async function gitPull(
 /** fetch：免确认；仅更新远端跟踪引用。 */
 export async function gitFetch(
   rootId: string,
-  opts?: { remote?: string },
+  opts?: { remote?: string; cwd?: string },
 ): Promise<boolean> {
-  const r = await runGitScm(rootId, "fetch", { remote: opts?.remote });
+  const r = await runGitScm(
+    rootId,
+    "fetch",
+    withDeskCwd({ remote: opts?.remote }, opts?.cwd),
+  );
   if (!r.ok) {
     notifyActionError("获取失败", r.detail);
     return false;
@@ -158,8 +201,9 @@ export async function gitDiffText(
   rootId: string,
   path: string,
   staged: boolean,
+  cwd?: string,
 ): Promise<string | null> {
-  const r = await runGitScm(rootId, "diff", { path, staged });
+  const r = await runGitScm(rootId, "diff", withDeskCwd({ path, staged }, cwd));
   if (!r.ok) {
     notifyActionError("查看差异失败", r.detail);
     return null;
@@ -178,7 +222,7 @@ export function gitDiscardConfirmMessage(count: number): string {
 export async function gitDiscard(
   rootId: string,
   paths: string | string[],
-  opts?: { skipConfirm?: boolean },
+  opts?: { skipConfirm?: boolean; cwd?: string },
 ): Promise<boolean> {
   const list = (Array.isArray(paths) ? paths : [paths])
     .map((p) => p.replace(/\\/g, "/").trim())
@@ -191,7 +235,11 @@ export async function gitDiscard(
   ) {
     return false;
   }
-  const r = await runGitScm(rootId, "discard", { paths: list });
+  const r = await runGitScm(
+    rootId,
+    "discard",
+    withDeskCwd({ paths: list }, opts?.cwd),
+  );
   if (!r.ok) {
     notifyActionError("丢弃改动失败", r.detail);
     return false;
@@ -211,11 +259,16 @@ export function gitDeleteUntrackedConfirmMessage(count: number): string {
 export async function deleteUntrackedFiles(
   rootId: string,
   workspaceRelPaths: string[],
-  opts?: { skipConfirm?: boolean },
+  opts?: { skipConfirm?: boolean; containerSubpath?: string },
 ): Promise<boolean> {
+  const prefix = (opts?.containerSubpath ?? "")
+    .replace(/\\/g, "/")
+    .replace(/^\/+|\/+$/g, "")
+    .trim();
   const safe = workspaceRelPaths
     .map((p) => p.replace(/\\/g, "/").replace(/^\/+/, "").trim())
-    .filter((p) => p.length > 0);
+    .filter((p) => p.length > 0)
+    .map((p) => (prefix ? `${prefix}/${p}` : p));
   if (safe.length === 0) {
     notifyActionError("删除失败", "无效路径");
     return false;

@@ -1,8 +1,8 @@
 """Content absorption for blocking ``ask_user``.
 
-When the model streams prose and calls blocking ``ask_user`` without its own
-``message``, the engine folds that prose into the card. When the model already
-wrote ``message``, the same-round guidance stays in the bubble (CheckpointCard
+When the model streams prose and calls blocking ``ask_user`` without a question
+prompt, the engine folds that prose into ``questions[0].prompt``. When the model
+already wrote a prompt, the same-round guidance stays in the bubble (CheckpointCard
 pending renders nothing so that body remains the visible face).
 
 Parse failure never rewrites arguments — the unique parse
@@ -57,17 +57,30 @@ def _with_repaired_args(tc: ToolCall, repaired: str) -> ToolCall:
     return replace(tc, function=replace(tc.function, arguments=repaired))
 
 
+def _question_prompts_present(args: dict[str, Any]) -> bool:
+    raw = args.get("questions")
+    if not isinstance(raw, list):
+        return False
+    for item in raw:
+        if isinstance(item, dict) and str(
+            item.get("prompt") or item.get("question") or ""
+        ).strip():
+            return True
+    return False
+
+
 def prepare_blocking_ask_user_tool_calls(
     tool_calls: list[ToolCall],
     round_content: str,
 ) -> tuple[list[ToolCall], bool]:
-    """Inject ``round_content`` into a blocking ``ask_user`` when ``message`` is empty.
+    """Inject ``round_content`` into a blocking ``ask_user`` when no prompt is set.
 
     Returns ``(patched_calls, content_folded)``. ``content_folded`` is True only
-    when the engine actually wrote ``message`` from this round's prose.
+    when the engine actually wrote a question prompt from this round's prose.
 
     Parse failure leaves the raw arguments untouched. Does not rewrite card copy
-    when the model already set ``message``.
+    when the model already set a prompt. Does not clobber a non-list ``questions``
+    value (let execute fail the parse).
     """
     content = (round_content or "").strip()
     patched: list[ToolCall] = []
@@ -83,10 +96,13 @@ def prepare_blocking_ask_user_tool_calls(
         args, repaired = parsed
         if repaired is not None:
             tc = _with_repaired_args(tc, repaired)
-        if str(args.get("message") or "").strip() or not content:
+        if _question_prompts_present(args) or not content:
             patched.append(tc)
             continue
-        args["message"] = content
+        if args.get("questions") is not None and not isinstance(args.get("questions"), list):
+            patched.append(tc)
+            continue
+        args["questions"] = [{"prompt": content}]
         patched.append(_patch_tool_call_args(tc, args))
         content_folded = True
     return patched, content_folded
@@ -135,7 +151,7 @@ def absorb_blocking_ask_user_content(
 ) -> bool:
     """Clear absorbed assistant prose after a successful blocking ``ask_user`` pause.
 
-    Only when the engine folded this round's prose into ``message``. Returns
+    Only when the engine folded this round's prose into a question prompt. Returns
     ``True`` when content was absorbed (caller should roll back ``final_content``).
     """
     if not content_folded:

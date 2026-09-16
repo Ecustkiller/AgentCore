@@ -11,7 +11,6 @@ from agentcore.runtime.runs.playbooks import (
     PLAYBOOKS,
     available_playbooks,
     expand_playbook,
-    playbook_args_schema_description,
 )
 from agentcore.runtime.runs.playbooks._common import Playbook
 
@@ -24,20 +23,13 @@ def _by_id(tasks: list[dict]) -> dict[str, dict]:
     return {t["id"]: t for t in tasks}
 
 
-# ── retired: code_audit ─────────────────────────────────────────────────────
+# ── unknown name ────────────────────────────────────────────────────────────
 
 
 def test_code_audit_playbook_is_unknown():
     tasks, errors = expand_playbook("code_audit", {"scope": "apps/server"})
     assert tasks == []
     assert errors and "未知 playbook" in errors[0]
-    assert "code_audit" not in PLAYBOOKS
-    listing = available_playbooks()
-    assert "code_audit" not in listing
-    desc = playbook_args_schema_description()
-    assert "code_audit" not in desc
-    assert "diagnose_fix_verify" not in desc
-    assert "lens_crosscheck" not in desc
 
 
 # ── map_fanout ────────────────────────────────────────────────────────────
@@ -135,7 +127,7 @@ def test_available_playbooks_lists_map_fanout_before_cite_write_review_semantics
 def test_cite_write_review_fans_out_one_researcher_per_angle_then_outline_then_write():
     tasks, errors = expand_playbook(
         "cite_write_review",
-        {"topic": "向量数据库", "angles": ["原理", "选型", "成本"], "checkpoint": True},
+        {"topic": "向量数据库", "angles": ["原理", "选型", "成本"]},
     )
     assert errors == []
     by_id = _by_id(tasks)
@@ -156,8 +148,8 @@ def test_cite_write_review_fans_out_one_researcher_per_angle_then_outline_then_w
     assert "复核落盘" in by_id["review"]["task"]
     # 审校节点显式墙钟 300s（CEO 显式 timeout_ms）。
     assert by_id["review"]["timeout_ms"] == 300_000
-    # checkpoint flag rides the 提纲 step (成纲后写作前过目); the write step requires file landing.
-    assert by_id["outline"]["checkpoint_after"] is True
+    # 日常成文不写波间关；明文看提纲走 ask_user。画布 human_gate 才写 checkpoint_after。
+    assert by_id["outline"].get("checkpoint_after") is not True
     assert "requires_files" not in by_id["write"]["deliverable"]
     assert "name" not in by_id["write"]["deliverable"]
     assert "form" not in by_id["write"]["deliverable"]
@@ -165,9 +157,10 @@ def test_cite_write_review_fans_out_one_researcher_per_angle_then_outline_then_w
     assert "单主文件" in by_id["write"]["task"]
     assert "AgentCore/文档/research/报告.md" in by_id["write"]["task"]
     assert "AgentCore/文档/research/报告.md" in by_id["review"]["task"]
-    # MD 为主；要 PDF → md_to_pdf；禁 HTML 顶替 / reportlab 主路径
+    # MD 为主；要 PDF → md_export；禁 HTML 顶替 / reportlab 主路径
     write_task = by_id["write"]["task"]
-    assert "md_to_pdf" in write_task
+    assert "md_export" in write_task
+    assert "md_to_pdf" not in write_task
     assert "HTML" in write_task
     assert "reportlab" in write_task
     assert "MD 为主" in write_task or "`.md`" in write_task or ".md" in write_task
@@ -242,7 +235,7 @@ def test_cite_write_review_without_angles_uses_single_researcher():
     assert errors == []
     by_id = _by_id(tasks)
     assert by_id["outline"]["depends_on"] == ["research_0"]
-    assert by_id["outline"]["checkpoint_after"] is False  # default: 明文要看才停
+    assert by_id["outline"].get("checkpoint_after") is not True
     assert by_id["review"]["depends_on"] == ["write"]
     assert "#rN" not in by_id["research_0"]["task"]
     assert "待核实" not in by_id["research_0"]["task"]
@@ -267,10 +260,15 @@ def test_cite_write_review_output_path_overrides_main_artifact():
     assert "paper/main.md" in by_id["review"]["task"]
 
 
-def test_cite_write_review_checkpoint_can_be_disabled():
-    tasks, errors = expand_playbook("cite_write_review", {"topic": "X", "checkpoint": False})
+def test_cite_write_review_drops_checkpoint_slot():
+    """未知 checkpoint 键丢弃、不翻译成 checkpoint_after。"""
+    tasks, errors = expand_playbook("cite_write_review", {"topic": "X", "checkpoint": True})
     assert errors == []
-    assert _by_id(tasks)["outline"]["checkpoint_after"] is False
+    assert _by_id(tasks)["outline"].get("checkpoint_after") is not True
+    slots = PLAYBOOKS["cite_write_review"].slots
+    assert "topic" in slots
+    assert "angles" in slots
+    assert "output_path" in slots
 
 
 def test_cite_write_review_review_explicit_wall_clock_survives_build():
@@ -322,47 +320,32 @@ def test_cite_write_review_folds_angle_fanout_with_note():
 
 
 def test_build_app_playbook_is_unknown():
-    """具名工厂图纸已撤：expand 未知；登记表与 schema 不再出现该槽。"""
-    listing = available_playbooks()
-    desc = playbook_args_schema_description()
+    """expand 未知；无别名 / 静默改写。"""
     tasks, errors = expand_playbook("build_app", {"app": "面向运营的 Vue3 数据看板"})
     assert tasks == []
     assert errors and "未知" in errors[0]
     assert "build_app" in errors[0]
-    assert "build_app" not in PLAYBOOKS
-    assert "build_app" not in listing
-    assert "build_app→app" not in desc
 
 
 # ── 已撤登记：建站不再是具名 DAG ──────────────────────────────────────────────
 
 
 def test_build_website_playbooks_are_unknown():
-    """build_website / verify 必须未知；登记表与 schema 不再出现建站槽。"""
-    listing = available_playbooks()
-    desc = playbook_args_schema_description()
+    """build_website / verify 必须未知；无别名。"""
     for name in ("build_website", "build_website_verify"):
         tasks, errors = expand_playbook(name, {"topic": "Landing"})
         assert tasks == []
         assert errors and "未知" in errors[0]
         assert name in errors[0]
-        assert name not in PLAYBOOKS
-        assert name not in listing
-        assert name not in desc
 
 
 def test_compare_options_and_build_feature_are_unknown():
-    """已删具名本必须未知；登记表与 schema 不再出现废名。"""
-    listing = available_playbooks()
-    desc = playbook_args_schema_description()
+    """已删具名本必须未知；无别名。"""
     for name in ("compare_options", "build_feature"):
         tasks, errors = expand_playbook(name, {"topic": "X"})
         assert tasks == []
         assert errors and "未知" in errors[0]
         assert name in errors[0]
-        assert name not in PLAYBOOKS
-        assert name not in listing
-        assert name not in desc
 
 
 def test_build_toolshed_playbook_removed():
@@ -375,8 +358,6 @@ def test_build_toolshed_playbook_removed():
 
 def test_renamed_playbook_ids_are_unknown():
     """旧具名 id 与拼写错误同等未知；无别名。"""
-    listing = available_playbooks()
-    desc = playbook_args_schema_description()
     for name in (
         "parallel_brief",
         "research_report",
@@ -390,9 +371,6 @@ def test_renamed_playbook_ids_are_unknown():
         assert tasks == []
         assert errors and "未知" in errors[0]
         assert name in errors[0]
-        assert name not in PLAYBOOKS
-        assert name not in listing
-        assert name not in desc
 
 
 # ── registry reject paths ─────────────────────────────────────────────────────
@@ -444,8 +422,6 @@ def test_available_playbooks_lists_all_registered():
     }
     for name in PLAYBOOKS:
         assert name in listing
-    assert "lens_crosscheck" not in listing
-    assert "diagnose_fix_verify" not in listing
 
 
 # ── every expansion is a runnable plan (the real builder, not a mock) ──────────

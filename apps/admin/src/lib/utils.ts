@@ -7,8 +7,8 @@ export function cn(...inputs: ClassValue[]): string {
 }
 
 /**
- * 币种符号表。后端每笔金额都自带 `currency`（平台记账走 curated 人民币价卡 = CNY，
- * BYOK 估算走社区价目快照 = USD），**全系统无汇率换算**——这里只挑符号，绝不折算。
+ * 币种符号表。后端每笔金额都自带 `currency`（产品名义价 = CNY）。
+ * **展示层无 live 汇率**——这里只挑符号，绝不折算。
  * 与桌面 `renderer/lib/format.ts::formatCost` 同口径。
  */
 const CURRENCY_SYMBOLS: Record<string, string> = { CNY: "¥", USD: "$" };
@@ -47,23 +47,25 @@ export function fmtMoney(major: number, currency?: string | null): string {
 
 /**
  * 仅用于口径上恒为人民币的金额（如后台配置的配额上限）。凡是随接口下发
- * `currency` 的金额一律用 {@link fmtMoney}，否则 BYOK 的美元估算会被标成 ¥。
+ * `currency` 的金额一律用 {@link fmtMoney}，否则会把非人民币金额标成 ¥。
  */
 export function fmtCny(yuan: number): string {
   return fmtMoney(yuan, DEFAULT_CURRENCY);
 }
 
-/** BYOK estimate caption — always ≈-prefixed; 0 →「—」. */
-export const COST_ESTIMATE_HINT =
-  "按社区价目估算，非上游账单";
+export const COST_ESTIMATE_HINT = "按产品价目，不扣额度";
 
-/** 估算金额（≈ 前缀 + 自带币种）；0 →「—」，不显「≈¥0.00」。 */
+/** 金额：CNY 出 ¥；仅遗留美元估算带 ≈。0 →「—」。 */
 export function fmtEstimatedMoney(
   major: number,
   currency?: string | null,
 ): string {
   if (major <= 0) return "—";
-  return `≈${fmtMoney(major, currency)}`;
+  const formatted = fmtMoney(major, currency);
+  if ((currency || "CNY").toUpperCase() === "USD") {
+    return `≈${formatted}`;
+  }
+  return formatted;
 }
 
 export function fmtEstimatedCny(yuan: number): string {

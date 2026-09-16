@@ -1,24 +1,32 @@
 import { DirTypeIcon, FileTypeIcon } from "@/components/files/FileTypeIcon";
 import { Button } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import { downloadWorkspaceFile } from "@/services/workspace";
 import type { MessageAttachmentMeta } from "@/stores/conversation";
-import { Bookmark, Download, MessageSquare } from "lucide-react";
-import { useState } from "react";
+import { useSidePanelStore } from "@/stores/sidePanel";
+import { Bookmark, MessageSquare } from "lucide-react";
+
+const chipClass =
+  "inline-flex max-w-[220px] items-center gap-1.5 rounded-lg bg-accent px-2 py-1 text-xs text-accent-foreground";
+
+function canOpenPreview(att: MessageAttachmentMeta): boolean {
+  return (
+    Boolean(att.workspacePath) &&
+    att.kind !== "dir" &&
+    att.kind !== "conversation" &&
+    att.kind !== "document"
+  );
+}
 
 export function AttachmentChip({
   att,
-  conversationId,
+  interactive = false,
 }: {
   att: MessageAttachmentMeta;
-  conversationId: string | null;
+  /** History / interjection only — composer and edit draft stay labels. */
+  interactive?: boolean;
 }) {
-  const [state, setState] = useState<"idle" | "loading" | "error">("idle");
-  const downloadable =
-    att.kind === "file" && !!att.workspacePath && !!conversationId;
-
-  const base =
-    "inline-flex max-w-[220px] items-center gap-1.5 rounded-lg bg-accent px-2 py-1 text-xs text-accent-foreground";
+  const showFile = useSidePanelStore((s) => s.showFile);
+  const openable = interactive && canOpenPreview(att);
   const icon =
     att.kind === "dir" ? (
       <DirTypeIcon name={att.name} path={att.path} size={12} />
@@ -29,8 +37,15 @@ export function AttachmentChip({
     ) : (
       <FileTypeIcon name={att.name} path={att.path} size={12} />
     );
-  const label = (
+  const tooltip =
+    att.kind === "conversation"
+      ? "引用对话"
+      : att.kind === "document"
+        ? "本句点名提示词"
+        : att.path;
+  const face = (
     <>
+      {icon}
       <span className="truncate">
         {att.name}
         {att.kind === "dir" ? "/" : ""}
@@ -47,58 +62,23 @@ export function AttachmentChip({
     </>
   );
 
-  if (!downloadable) {
+  if (!openable) {
     return (
-      <SimpleTooltip
-        label={
-          att.kind === "conversation"
-            ? "引用对话"
-            : att.kind === "document"
-              ? "本句点名提示词"
-              : att.path
-        }
-      >
-        <span className={base}>
-          {icon}
-          {label}
-        </span>
+      <SimpleTooltip label={tooltip}>
+        <span className={chipClass}>{face}</span>
       </SimpleTooltip>
     );
   }
 
-  const onDownload = async () => {
-    if (state === "loading") return;
-    setState("loading");
-    try {
-      await downloadWorkspaceFile(
-        conversationId as string,
-        att.workspacePath as string,
-        att.name,
-      );
-      setState("idle");
-    } catch {
-      setState("error");
-      setTimeout(() => setState("idle"), 2000);
-    }
-  };
-
   return (
-    <SimpleTooltip
-      label={state === "error" ? "下载失败，点击重试" : `下载 ${att.name}`}
-    >
+    <SimpleTooltip label={tooltip}>
       <Button
         variant="ghost"
-        onClick={onDownload}
-        className={`${base} h-auto transition-colors hover:bg-accent/70 ${
-          state === "error" ? "text-muted-foreground" : ""
-        }`}
+        aria-label={`打开 ${att.name}`}
+        onClick={() => showFile(att.workspacePath as string, att.name)}
+        className={`${chipClass} h-auto font-normal transition-colors hover:bg-accent/70`}
       >
-        {icon}
-        {label}
-        <Download
-          size={12}
-          className={`shrink-0 ${state === "loading" ? "animate-pulse" : "opacity-60"}`}
-        />
+        {face}
       </Button>
     </SimpleTooltip>
   );

@@ -314,6 +314,32 @@ describe("BrowserActivityCard · 卡渲染", () => {
     expect(screen.queryByText("查看直播")).toBeNull();
   });
 
+  it("does not show live elapsed on the collapsed header while a step is running", () => {
+    const live = [
+      browserStep("b1", {
+        action: "navigate",
+        url: "https://example.com",
+        detail: "打开示例站",
+      }),
+      browserStep("b2", {
+        action: "screenshot",
+        url: "https://example.com",
+        withDisplay: false,
+        status: "running",
+      }),
+    ];
+    render(
+      <BrowserActivityCard
+        tools={live}
+        isStreaming={false}
+        conversationId="conv-1"
+      />,
+    );
+    expect(screen.getByText("浏览器 · 2 步")).toBeTruthy();
+    expect(screen.queryByText("6s")).toBeNull();
+    expect(screen.queryByText("1m 30s")).toBeNull();
+  });
+
   it("expands into a step list with action + one subline", () => {
     render(
       <BrowserActivityCard

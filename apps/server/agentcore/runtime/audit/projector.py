@@ -448,7 +448,6 @@ def project_replan(
     recorder: AuditRecorder,
     *,
     execution_id: str,
-    binds: list[Any],
     steers: list[Any],
     adds: int,
     stop: bool,
@@ -461,7 +460,6 @@ def project_replan(
         execution_id=execution_id,
         run_id=recorder.captain_run_id,
         detail={
-            "binds": binds,
             "steers": steers,
             "adds": adds,
             "stop": stop,

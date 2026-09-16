@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 from sqlalchemy import Select, and_, delete, func, or_, select, update
 from sqlalchemy.engine import CursorResult
@@ -43,6 +43,7 @@ from agentcore.core.types import new_id
 from agentcore.db.models import DisputedLine, Document
 from agentcore.db.models.documents import MAX_DISPUTED_LINES
 from agentcore.documents.frontmatter import (
+    ApplyMode,
     FrontmatterEditError,
     FrontmatterError,
     ensure_apply_key,
@@ -62,12 +63,6 @@ RULES_DIR_NAME = "规则"
 # AI-memory notes folder under the convention root (§5.0 ``AgentCore/记忆/``). Reserved: a
 # user's own folder is ``ai_maintained=false``, so it never collides with this node.
 MEMORY_ROOT_NAME = "记忆"
-
-# The canonical user-rule document ``remember`` appends to when the user gives an explicit
-# directive (§5.7 用户规则入口①). Additional user-rule docs may be created via the tree API;
-# injection gathers them all, this is only the well-known target for the tool path.
-USER_RULES_DOC_NAME = "用户规则.md"
-
 
 def _scope_clause(folder_id: str | None) -> ColumnElement[bool]:
     """WHERE fragment for a scope: NULL = the global layer, else that project's ``folder_id``."""
@@ -331,17 +326,10 @@ class DocumentRepository:
         (see ``_memory_note_body_for_write``). Derived columns always come from the body.
 
         ``writer`` is ``"ai"`` (default — consolidation / tools) or ``"user"`` (memory
-        editor). Always-pool quota: AI growth past the cap raises
-        :class:`~agentcore.memory.always_quota.AlwaysQuotaExceededError`; user edits of an
-        existing always entry are allowed (warning is the caller's job on the documents
-        API — this path does not surface warnings).
+        editor). AI-maintained notes do not occupy the always pool (user rules only);
+        this path has no quota gate.
         """
-        from agentcore.memory.always_quota import (
-            AlwaysQuotaExceededError,
-            always_entry_chars,
-            check_always_write,
-        )
-
+        _ = writer
         root = await self._ensure_memory_root(user_id, folder_id)
         note = await self.get_memory_note(user_id, name, folder_id)
         body = _memory_note_body_for_write(
@@ -349,32 +337,6 @@ class DocumentRepository:
             existing=note.content if note is not None else None,
             apply_mode=apply_mode,
         )
-        derived_apply, _ = _derive_indexes(body)
-        if role == "rule" and derived_apply == "always":
-            existing_always = (
-                note is not None and note.role == "rule" and note.apply_mode == "always"
-            )
-            who: Literal["user", "ai"] = "user" if writer == "user" else "ai"
-            decision = await check_always_write(
-                self,
-                user_id,
-                folder_id=folder_id,
-                writer=who,
-                editing_existing_always=existing_always,
-                exclude_id=note.id if note is not None else None,
-                new_content=body,
-                new_is_always=True,
-            )
-            if not decision.allowed:
-                usage = decision.usage
-                assert usage is not None
-                raise AlwaysQuotaExceededError(
-                    usage,
-                    decision.message,
-                    file=name,
-                    scope=folder_id,
-                    attempted_chars=always_entry_chars(body),
-                )
         if note is None:
             note = Document(
                 id=new_id(),
@@ -563,53 +525,42 @@ class DocumentRepository:
         )
         return list(result.scalars().all())
 
-    # --- user rules (ai_maintained=false, role=rule) ---
+    # --- user rules (ai_maintained=false, role=rule; one named md per topic) ---
 
-    async def get_user_rules_doc(
-        self, user_id: str, folder_id: str | None
+    async def get_user_rule_doc(
+        self, user_id: str, folder_id: str | None, name: str
     ) -> Document | None:
-        """The canonical user-rule document for a scope (``remember`` target), or None.
-
-        Prefers a doc under ``AgentCore/规则/``; falls back to any same-name live rule in
-        the scope (pre-migration top-level) so append/dedupe keeps working across layout.
-        """
+        """One live user-rule document under ``AgentCore/规则/``, or None."""
         rules_dir = await self.get_rules_dir(user_id, folder_id)
-        if rules_dir is not None:
-            result = await self._session.execute(
-                select(Document).where(
-                    Document.user_id == user_id,
-                    Document.parent_id == rules_dir.id,
-                    Document.role == "rule",
-                    Document.ai_maintained.is_(False),
-                    Document.name == USER_RULES_DOC_NAME,
-                    Document.deleted_at.is_(None),
-                )
-            )
-            under = result.scalars().first()
-            if under is not None:
-                return under
+        if rules_dir is None or not name:
+            return None
         result = await self._session.execute(
             select(Document).where(
                 Document.user_id == user_id,
-                _scope_clause(folder_id),
+                Document.parent_id == rules_dir.id,
                 Document.role == "rule",
                 Document.ai_maintained.is_(False),
-                Document.name == USER_RULES_DOC_NAME,
+                Document.name == name,
                 Document.deleted_at.is_(None),
             )
         )
         return result.scalars().first()
 
-    async def upsert_user_rules_doc(
-        self, user_id: str, folder_id: str | None, content: str
+    async def upsert_user_rule_doc(
+        self,
+        user_id: str,
+        folder_id: str | None,
+        name: str,
+        content: str,
+        *,
+        apply: str = "always",
+        description: str | None = None,
     ) -> Document:
-        """Create-or-update the canonical user-rule document under ``AgentCore/规则/``.
-
-        ``remember`` keeps the canonical doc on ``apply: always`` (forced into frontmatter).
-        """
-        doc = await self.get_user_rules_doc(user_id, folder_id)
+        """Create-or-replace one named user-rule markdown under ``AgentCore/规则/``."""
         rules_dir = await self.ensure_rules_dir(user_id, folder_id)
-        body = set_entry_frontmatter(content, apply="always")
+        doc = await self.get_user_rule_doc(user_id, folder_id, name)
+        mode: ApplyMode = "on_demand" if apply == "on_demand" else "always"
+        body = set_entry_frontmatter(content, apply=mode, description=description)
         if doc is None:
             doc = Document(
                 id=new_id(),
@@ -619,7 +570,7 @@ class DocumentRepository:
                 kind="document",
                 role="rule",
                 ai_maintained=False,
-                name=USER_RULES_DOC_NAME,
+                name=name,
                 content="",
             )
             self._session.add(doc)
@@ -631,6 +582,24 @@ class DocumentRepository:
         await self._session.commit()
         await self._session.refresh(doc)
         return doc
+
+    async def list_user_rule_docs(
+        self, user_id: str, folder_id: str | None
+    ) -> list[Document]:
+        """Live user-rule docs in the scope (always + on_demand), name-sorted."""
+        always = await self.list_injectable_rules(user_id, folder_id, ai_maintained=False)
+        on_demand = await self.list_on_demand_user_rules(user_id, folder_id)
+        by_id = {doc.id: doc for doc in (*always, *on_demand)}
+        return sorted(by_id.values(), key=lambda doc: doc.name)
+
+    async def delete_user_rule_doc(
+        self, user_id: str, folder_id: str | None, name: str
+    ) -> bool:
+        """Soft-delete one named user-rule document. False when missing."""
+        doc = await self.get_user_rule_doc(user_id, folder_id, name)
+        if doc is None:
+            return False
+        return await self.soft_delete(doc.id, user_id=user_id)
 
     async def list_top_level_user_rules(
         self, user_id: str, folder_id: str | None

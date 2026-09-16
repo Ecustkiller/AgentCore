@@ -99,7 +99,6 @@ describe("composeAnswer with bind_local_folder pick", () => {
     );
     expect(text).toContain("绑定本机执行环境（AgentCore-desktop）");
     expect(text).toMatch(/^工作区：/);
-    expect(text).not.toContain("我的答复：");
     expect(text).not.toMatch(/^· /);
   });
 

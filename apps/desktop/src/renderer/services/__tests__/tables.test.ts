@@ -5,6 +5,7 @@ import {
   fromApiTable,
   fromApiViewConfig,
   isTableConflict,
+  lookupTableBySource,
   opsForMutation,
 } from "@/services/tables";
 import { createDemoTable } from "@/tables/seed";
@@ -79,6 +80,7 @@ describe("tables mapper", () => {
     expect(doc.id).toBe("tbl-1");
     expect(doc.conversationId).toBe("conv-1");
     expect(doc.schemaVersion).toBe(4);
+    expect(doc.sourcePath).toBeNull();
     expect(doc.activeViewId).toBe("v-table");
     expect(doc.columns[1]?.options?.[0]?.id).toBe("s-todo");
     const view = doc.views[0];
@@ -163,6 +165,12 @@ describe("fromApiViewConfig", () => {
   it("falls back to empty config", () => {
     expect(fromApiViewConfig(null)).toEqual(emptyViewConfig());
   });
+
+  it("reads column_widths", () => {
+    expect(
+      fromApiViewConfig({ column_widths: { "c-title": 240 } }).columnWidths,
+    ).toEqual({ "c-title": 240 });
+  });
 });
 
 describe("applyTableOps", () => {
@@ -209,5 +217,42 @@ describe("applyTableOps", () => {
     ).rejects.toSatisfy(
       (err) => isTableConflict(err) && err instanceof ApiError,
     );
+  });
+
+  it("looks up a seeded csv and treats 404 as miss", async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJson({
+        id: "tbl-1",
+        title: "客户",
+        schema_version: 1,
+        row_count: 1,
+        source_path: "客户.csv",
+        created_at: "2026-09-01T00:00:00Z",
+        updated_at: "2026-09-13T00:00:00Z",
+      }),
+    );
+    const hit = await lookupTableBySource({
+      path: "客户.csv",
+      folderId: "f1",
+    });
+    expect(hit?.id).toBe("tbl-1");
+    expect(hit?.sourcePath).toBe("客户.csv");
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      "/v1/tables/by-source?",
+    );
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      "path=%E5%AE%A2%E6%88%B7.csv",
+    );
+    expect(String(fetchMock.mock.calls[0][0])).toContain("folder_id=f1");
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ error: { code: "NOT_FOUND", message: "表格不存在" } }),
+        { status: 404, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    await expect(
+      lookupTableBySource({ path: "no.csv", conversationId: "c1" }),
+    ).resolves.toBeNull();
   });
 });

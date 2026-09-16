@@ -32,10 +32,7 @@ import {
  * underneath surfaces as a conflict, never a silent clobber.
  */
 
-/** Synthetic tab path for the cross-conversation feed (流水账). Files page no
- * longer opens this; toolbox `/toolbox/mine/skills?updates=1` is the surface.
- * Kept distinct from the `global/…` · `project/…` leaf scheme so it never parses
- * as a leaf. */
+/** Synthetic tab path kept so leftover deep links never parse as a leaf. */
 export const MEMORY_UPDATES_PATH = "__memory_updates__";
 
 /** The synthetic leaf path for the GLOBAL 偏好 (沟通/工作习惯). */
@@ -86,16 +83,6 @@ function parseLeaf(path: string): MemoryLeaf {
 }
 
 /**
- * If `path` addresses a *project's* 画像 leaf, return its folderId, else null. Lets the
- * detail pane swap that one leaf for the two-pane 全局+本项目 editor while every other
- * memory leaf opens in the plain single-file editor.
- */
-export function parseProjectProfilePath(path: string): string | null {
-  const m = PROJECT_PROFILE_RE.exec(path);
-  return m ? m[1] : null;
-}
-
-/**
  * folderId encoded in a project-scoped synthetic memory path (`project/<id>/profile`,
  * `project/<id>/navigation`, or `project/<id>/topics/<slug>`), else null. Used by 最近更新 /
  * 对话卡深链 to expand that project and its ``.agentcore`` node in the file rail.
@@ -142,8 +129,7 @@ export function isMemoryTopicPath(path: string): boolean {
 /**
  * The display name (tab label) for a synthetic memory-leaf path — mirrors the rail's
  * naming so a deep-linked tab matches what the AgentCore entry rail would open: 偏好.md /
- * 画像.md / 导航.md / <slug>.md. A project 画像 opens the 双栏 editor which resolves the
- * project name from the live workspaces, so the bare「画像.md」is enough here.
+ * 画像.md / 导航.md / <slug>.md.
  */
 export function memoryLeafTabName(path: string): string {
   const leaf = parseLeaf(path);

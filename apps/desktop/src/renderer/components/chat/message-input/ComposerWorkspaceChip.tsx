@@ -25,7 +25,6 @@ import {
 } from "@/lib/composerChannelPreference";
 import { visibleDraftFolders } from "@/lib/draftWorkspaceFolders";
 import { folderAncestorNames } from "@/lib/folderTree";
-import { startImportToCloudJob } from "@/lib/importToCloudJob";
 import { openLocalFolderFromRoot } from "@/lib/openLocalFolder";
 import { formatWorkspaceChipTitle } from "@/lib/workspaceEffectiveMode";
 import {
@@ -48,7 +47,6 @@ import {
   HardDrive,
   Loader2,
   Plus,
-  Upload,
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -58,7 +56,7 @@ import { WorkspaceChannelGuideDialog } from "./WorkspaceChannelGuideDialog";
 /**
  * Always-on「在哪工作」chip for the TurnComposer 底栏左簇（工作区首位）。
  * Draft first screen = pick a place (本地对话 + 云端对话 + folders);
- * join / local-use nest 新建·Git·本机三选. Bound conversation: read-only status.
+ * join / local-use nest 新建·Git·本机两选. Bound conversation: read-only status.
  */
 export function ComposerWorkspaceChip({
   conversationId,
@@ -204,19 +202,12 @@ type LocalPicked = {
   existingFolderId?: string;
   backView: "pick" | "join";
 };
-type CloudCopyKind = "import" | "borrow";
-type CloudCopyConfirm = { kind: CloudCopyKind; picked: LocalPicked };
+type CloudCopyConfirm = { picked: LocalPicked };
 
-function localToCloudConfirmCopy(
-  kind: CloudCopyKind,
-  folderName: string,
-): { title: string; description: string } {
-  if (kind === "import") {
-    return {
-      title: "复制到云上当新家",
-      description: `把「${folderName}」复制到「我的文件」。之后改云上这份，电脑上的原件不再跟着变。`,
-    };
-  }
+function localToCloudConfirmCopy(folderName: string): {
+  title: string;
+  description: string;
+} {
   return {
     title: "先在云上做，原件先不动",
     description: `把「${folderName}」复制到云上做这一单。电脑上的原件先不动，做完再决定写不写回。`,
@@ -412,12 +403,12 @@ function DraftChip() {
     void window.fsApi?.removeRoot?.(picked.root.id);
   };
 
-  const askCloudCopy = (kind: CloudCopyKind) => {
+  const askCloudCopy = () => {
     const picked = handoffLocalPicked();
     if (!picked) return;
     closePick();
     cloudCopyStartedRef.current = false;
-    setCloudCopyConfirm({ kind, picked });
+    setCloudCopyConfirm({ picked });
   };
 
   const dismissCloudCopy = () => {
@@ -435,23 +426,15 @@ function DraftChip() {
     cloudCopyStartedRef.current = true;
     setCloudCopyConfirm(null);
     setComposerChannelPreference("cloud");
-    const { kind, picked } = pending;
-    const started =
-      kind === "import"
-        ? startImportToCloudJob({
-            root: picked.root,
-            ownsRoot: picked.owns,
-            folderName: picked.root.name,
-          })
-        : startBorrowToCloudJob({
-            root: picked.root,
-            folderName: picked.root.name,
-          });
+    const { picked } = pending;
+    const started = startBorrowToCloudJob({
+      root: picked.root,
+      folderName: picked.root.name,
+    });
     if (!started) dropRootIfOwned(picked);
   };
 
-  const useLocalImport = () => askCloudCopy("import");
-  const useLocalBorrow = () => askCloudCopy("borrow");
+  const useLocalBorrow = () => askCloudCopy();
 
   const openCreateCloud = () => {
     setComposerChannelPreference("cloud");
@@ -546,10 +529,7 @@ function DraftChip() {
     />
   );
   const cloudCopyCopy = cloudCopyConfirm
-    ? localToCloudConfirmCopy(
-        cloudCopyConfirm.kind,
-        cloudCopyConfirm.picked.root.name,
-      )
+    ? localToCloudConfirmCopy(cloudCopyConfirm.picked.root.name)
     : null;
   const hosts = (
     <>
@@ -644,12 +624,6 @@ function DraftChip() {
             hint="立刻改电脑上的原件"
             badge={lastWasLocal ? "上次" : undefined}
             onClick={useLocalDirect}
-          />
-          <DraftRow
-            icon={<Upload size={14} />}
-            label="复制到云上当新家"
-            hint="之后改云上这份，原件不再跟着变"
-            onClick={useLocalImport}
           />
           <DraftRow
             icon={<CloudUpload size={14} />}

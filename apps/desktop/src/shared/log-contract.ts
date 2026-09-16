@@ -17,7 +17,7 @@
  * 恢复；`since_offline_ms`）。心跳探活成功不打。软失败（未达阈值、UI 未翻红）：
  * `server_health.probe_failed`（第 1 次 `debug`、之后 `warn`；`consecutive_failures`/
  * `failure_threshold`/`reason`/`kind`/`duration_ms`/`http_status?`/`status`）→
- * 自愈未翻红则 `server_health.probe_recovered`。会话中 API 5xx/断传输
+ * 自愈未翻红则 `server_health.probe_recovered`。``debug`` 探活不进复制排查包。会话中 API 5xx/断传输
  * 但 `/readyz` 仍健康：`server_health.api_outage_ignored`（不标 offline）。
  * 自动更新可观测（主进程直写）：`updater.configure` / `updater.schedule_start` /
  * `updater.policy` / `updater.check_begin|end` / `updater.phase` /
@@ -25,7 +25,7 @@
  *（含 `durationMs` / `sinceCheckMs`，用于区分 policy / feed / 下载慢点；
  * `download_progress` 的 `bytesPerSecond`=近期窗口；`configure` 另记
  * `installerSource=github`——安装包走 GitHub，不经 electron-updater）。
- * 切对话消息窗诊断（排查包放行）：`conversation.slice_diag`（`action`=
+ * 切对话消息窗诊断（落 desktop.jsonl；复制排查包收成 ``routine:`` 普查，warn 仍逐条）：`conversation.slice_diag`（`action`=
  * `message_end_slice_kept` / `release_drop`（仅显式 API）/ `warm_skip_reconcile`
  *（仅 generating）/ `warm_keep_anchor`（pendingFocus / ?msg=）/ `warm_snap_latest` /
  * `load_latest_window` / `open_decide` / `reject_not_resident` /
@@ -102,8 +102,9 @@ export interface LogApi {
   /** 记一条结构化日志到产品日志文件（fire-and-forget；失败静默吞掉）。 */
   write(entry: LogEntry): void;
   /**
-   * 排查包用：本机 ``desktop.jsonl`` 尾部的脱敏行。纯浏览器 / 单测可缺失。
+   * 排查包用：本机 ``desktop.jsonl`` 尾部的脱敏行。传入当前会话 id 时先按会话
+   * 过滤（无 id 的 ambient 连通性仍保留）。纯浏览器 / 单测可缺失。
    * 失败时返回空数组，绝不抛到 UI。
    */
-  readTail(): Promise<string[]>;
+  readTail(conversationId?: string | null): Promise<string[]>;
 }

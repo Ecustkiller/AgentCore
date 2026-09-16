@@ -2,10 +2,11 @@
 
 Injection aligns with the coordination tools' execution gate
 (``active_coordination``): idle chat omits replan / coordination suite;
-``delegate`` + ``ask_user`` + ``debate`` stay always-on. Mid-turn promotion
-(coordination starts or supervised wave yield) registers the gated tools in
-place; harvest / session close demotes them so a dead ``replan`` is not still
-on the menu. One-time prefix-cache miss on promote is acceptable.
+``delegate`` + ``ask_user`` stay always-on. ``debate`` stays registered
+(on-demand opening table). Mid-turn promotion (coordination starts or
+supervised wave yield) registers the gated tools in place; harvest / session
+close demotes them so a dead ``replan`` is not still on the menu. One-time
+prefix-cache miss on promote is acceptable.
 
 Also owns COST-004 tools-surface observation (exact JSON chars + a token band)
 for ``ceo_turn`` and ``worker_run``. The coordination-period hint is owned by
@@ -30,7 +31,6 @@ COORDINATION_GATED_TOOLS: frozenset[str] = frozenset(
     {
         "replan",
         "wait",
-        "update_synthesis",
         "cancel_worker",
         "resolve_escalation",
         "queue_user_message",
@@ -40,7 +40,6 @@ COORDINATION_GATED_TOOLS: frozenset[str] = frozenset(
 # wait 套件只跟活协调会话；replan 另跟受监督让出（部分失败 stash / 波边界）。
 _WAIT_SUITE: tuple[str, ...] = (
     "wait",
-    "update_synthesis",
     "cancel_worker",
     "resolve_escalation",
     "queue_user_message",
@@ -162,6 +161,15 @@ def _unregister_named(chat_tools: ToolRegistry, names: tuple[str, ...]) -> list[
     return removed
 
 
+EXPLORE_PROFILE_TOOL = "update_folder_profile"
+
+
+def apply_explore_profile_surface(chat_tools: ToolRegistry, *, pending: bool) -> None:
+    """``update_folder_profile`` is never on the live CEO table."""
+    del pending
+    _unregister_named(chat_tools, (EXPLORE_PROFILE_TOOL,))
+
+
 def register_coordination_surface(
     chat_tools: ToolRegistry,
     *,
@@ -177,7 +185,6 @@ def register_coordination_surface(
         CancelWorkerTool,
         QueueUserMessageTool,
         ResolveEscalationTool,
-        UpdateSynthesisTool,
         WaitTool,
     )
     from agentcore.tools.builtin.replan import ReplanTool
@@ -186,8 +193,6 @@ def register_coordination_surface(
         chat_tools.register(ReplanTool(delegate=delegate_tool))
     if chat_tools.get_optional("wait") is None:
         chat_tools.register(WaitTool())
-    if chat_tools.get_optional("update_synthesis") is None:
-        chat_tools.register(UpdateSynthesisTool(sink=sink))
     if chat_tools.get_optional("cancel_worker") is None:
         chat_tools.register(CancelWorkerTool())
     if chat_tools.get_optional("resolve_escalation") is None:
@@ -231,7 +236,6 @@ def promote_coordination_surface_if_needed(chat_tools: ToolRegistry) -> bool:
         CancelWorkerTool,
         QueueUserMessageTool,
         ResolveEscalationTool,
-        UpdateSynthesisTool,
         WaitTool,
     )
     from agentcore.tools.builtin.replan import ReplanTool
@@ -250,9 +254,6 @@ def promote_coordination_surface_if_needed(chat_tools: ToolRegistry) -> bool:
         if chat_tools.get_optional("wait") is None:
             chat_tools.register(WaitTool())
             added.append("wait")
-        if chat_tools.get_optional("update_synthesis") is None:
-            chat_tools.register(UpdateSynthesisTool(sink=sink))
-            added.append("update_synthesis")
         if chat_tools.get_optional("cancel_worker") is None:
             chat_tools.register(CancelWorkerTool())
             added.append("cancel_worker")

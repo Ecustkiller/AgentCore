@@ -1,8 +1,5 @@
 import type { Execution, RunStatus } from "@/stores/execution";
-import type {
-  CoordinationWaitPayload,
-  TeamSynthesisPreviewPayload,
-} from "@/types/events";
+import type { CoordinationWaitPayload } from "@/types/events";
 
 /**
  * Same membership as {@link deriveCaptainStatus}'s WORKER_TERMINAL.
@@ -115,22 +112,4 @@ export function isTeamSynthesizing(
 export function teamSynthesisPhaseLabel(execution: Execution): string {
   const { completed, total } = workerProgress(execution);
   return `${completed}/${total} 已完成，正在收尾`;
-}
-
-/**
- * Short preview for the CEO graph node while final answer is not yet streaming
- * into the bubble (synthesis uses `team_synthesis_preview`, not content_delta).
- */
-export function captainSynthesisPreviewText(
-  preview: TeamSynthesisPreviewPayload | null | undefined,
-): string {
-  if (!preview) return "";
-  const text = preview.text.trim();
-  const headline = preview.headline.trim();
-  if (text && text !== headline) return text;
-  if (headline) return headline;
-  const blurbs = preview.workers
-    .filter((w) => w.status !== "pending" && w.summary)
-    .map((w) => `${w.role}：${w.summary}`);
-  return blurbs.join(" · ");
 }

@@ -71,8 +71,14 @@ async def handle_tool_calls_round(
     allowed_tool_names: list[str] | None,
     disabled_tools: set[str],
     round_idx: int,
+    skip_assistant_append: bool = False,
 ) -> ToolRoundResult:
-    """Execute tools for a round that produced tool calls; return next directive."""
+    """Execute tools for a round that produced tool calls; return next directive.
+
+    ``skip_assistant_append``: crash replay — the trailing assistant with
+    ``tool_calls`` is already on ``messages``. Still run absorb / narration
+    reset / ``controller.record`` (same post-pass as a live tool round).
+    """
     tool_calls, content_folded = prepare_blocking_ask_user_tool_calls(
         outcome.tool_calls,
         outcome.content or "",
@@ -80,14 +86,21 @@ async def handle_tool_calls_round(
     from agentcore.runtime.engine.loop import sync_captain_loop_mirror
 
     sync_captain_loop_mirror(ask_user_content_folded=content_folded)
-    messages.append(
-        LLMMessage(
-            role="assistant",
-            content=outcome.content or None,
-            tool_calls=tool_calls,
-            reasoning_content=outcome.reasoning or None,
+    if skip_assistant_append:
+        for i in range(len(messages) - 1, -1, -1):
+            msg = messages[i]
+            if msg.role == "assistant" and msg.tool_calls:
+                messages[i] = replace(msg, tool_calls=tool_calls)
+                break
+    else:
+        messages.append(
+            LLMMessage(
+                role="assistant",
+                content=outcome.content or None,
+                tool_calls=tool_calls,
+                reasoning_content=outcome.reasoning or None,
+            )
         )
-    )
     # Stamp same-round prose length so handoff can log deliverable body_chars
     # (distinct from summary ``chars``).
     tool_context = replace(
@@ -179,7 +192,7 @@ async def handle_tool_calls_round(
     # Exception: CEO attached_inject closing round. After wait ate
     # ALL_COMPLETED the same-turn prose is the deliverable (终稿), not a
     # lead-in — even if a still-offered non-terminal tool (closed
-    # ``update_synthesis`` returns success so as not to burn a retry)
+    # ``resolve_escalation`` returns success so as not to burn a retry)
     # runs in that round. Workers / debaters / mid-turn CEO narration
     # still roll back: skip only when the live bubble already holds
     # post-inject visible close (same predicate as harvest skip).

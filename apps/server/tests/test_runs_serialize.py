@@ -92,7 +92,7 @@ def test_file_products_from_transcript_keeps_kind_and_derived_from():
     transcript = [
         _assistant_call("c1", "file_write", '{"path": "报告.md", "content": "# 标题"}'),
         _landed("c1", "已写入", "报告.md"),
-        _assistant_call("c2", "md_to_docx", '{"path": "报告.md"}'),
+        _assistant_call("c2", "md_export", '{"path": "报告.md", "format": "docx"}'),
         _tool_result(
             "c2",
             with_file_products_marker(
@@ -535,31 +535,26 @@ def test_spec_retired_deliverable_keys_are_ignored():
     assert not hasattr(restored.deliverable, "name")
 
 
-def test_plan_json_round_trips_late_bound_placeholder_node():
-    # 受监督的波循环 P5 (partial spec 往返): a bind_after_deps node carries a PLACEHOLDER spec
-    # (its real role/task land at the BIND boundary via replan). The plan must serialize +
-    # rebuild that partial node faithfully — bind_after_deps preserved, placeholders intact,
-    # deps wired — so a paused supervised plan rebuilt from its plan_snapshot still knows the
-    # node is待定稿 and never dispatches it unbound.
+def test_plan_json_drops_legacy_bind_after_deps():
+    """旧快照若含 bind_after_deps：反序列化丢弃，不翻译成空位让出。"""
     plan = RunPlan(
         nodes=[
             RunSpec(run_id="a", task="调研", role="研究员"),
-            RunSpec(
-                run_id="b",
-                task="占位",
-                role="待定",
-                depends_on=["a"],
-                bind_after_deps=True,
-            ),
+            RunSpec(run_id="b", task="撰写", role="写手", depends_on=["a"]),
         ]
     )
-    restored = plan_from_json(plan_to_json(plan))
+    raw = plan_to_json(plan)
+    assert "bind_after_deps" not in raw
+    nodes = list(raw["nodes"])
+    nodes[1] = {**nodes[1], "bind_after_deps": True}
+    restored = plan_from_json({**raw, "nodes": nodes})
     a, b = restored.nodes
-    assert (a.run_id, a.bind_after_deps) == ("a", False)
+    assert a.run_id == "a"
     assert b.run_id == "b"
-    assert b.bind_after_deps is True  # the late-bind marker survives → still待定稿
-    assert (b.role, b.task) == ("待定", "占位")  # placeholders intact
+    assert not hasattr(b, "bind_after_deps")
+    assert (b.role, b.task) == ("写手", "撰写")
     assert b.depends_on == ["a"]
+    assert all("bind_after_deps" not in n for n in plan_to_json(restored)["nodes"])
 
 
 def test_plan_json_ignores_legacy_finalize_key():

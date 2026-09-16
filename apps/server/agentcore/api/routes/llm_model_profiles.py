@@ -52,6 +52,7 @@ def _to_response(view: ModelProfileView) -> LlmModelProfileView:
         worker=_slot_to_api(view.worker),
         background=_slot_to_api(view.background),
         vision=_slot_to_api(view.vision),
+        reasoning_effort=view.reasoning_effort,
         is_default=view.is_default,
         warnings=list(view.warnings),
     )
@@ -91,6 +92,7 @@ async def create_model_profile(
         worker=_to_service_slot(body.worker) if body.worker else None,
         background=_to_service_slot(body.background) if body.background else None,
         vision=_to_service_slot(body.vision) if body.vision else None,
+        reasoning_effort=body.reasoning_effort,
         set_as_default=body.set_as_default,
     )
     logger.info(
@@ -141,6 +143,9 @@ async def update_model_profile(
     vision: ProfileSlot | None | object = _UNSET
     if "vision" in fields:
         vision = _to_service_slot(body.vision) if body.vision is not None else None
+    reasoning_effort: str | None | object = _UNSET
+    if "reasoning_effort" in fields:
+        reasoning_effort = body.reasoning_effort
     return _to_response(
         await service.update_profile(
             user.user_id,
@@ -150,6 +155,7 @@ async def update_model_profile(
             worker=worker,
             background=background,
             vision=vision,
+            reasoning_effort=reasoning_effort,
             fields_set=set(fields),
         )
     )

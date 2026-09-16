@@ -47,6 +47,15 @@ def test_docx_export_lists_sibling_not_source_md():
             label="已转 Word",
         )
     ]
+    assert edits_from_tool_call(
+        name="md_export",
+        arguments='{"path":"AgentCore/文档/工作稿/民事上诉状.md","format":"docx"}',
+    ) == [
+        ConversationEdit(
+            path="AgentCore/文档/工作稿/民事上诉状.docx",
+            label="已转 Word",
+        )
+    ]
 
 
 def test_docx_prefers_file_products_marker_over_sibling():
@@ -58,11 +67,19 @@ def test_docx_prefers_file_products_marker_over_sibling():
         arguments='{"path":"src.md"}',
         result=f"已导出\n{marker}",
     ) == [ConversationEdit(path="out/final.docx", label="已转 Word")]
+    assert edits_from_tool_call(
+        name="md_export",
+        arguments='{"path":"src.md","format":"docx"}',
+        result=f"已导出\n{marker}",
+    ) == [ConversationEdit(path="out/final.docx", label="已转 Word")]
 
 
 def test_pdf_and_copy_move():
     assert edits_from_tool_call(
         name="md_to_pdf", arguments='{"path":"a.md"}'
+    ) == [ConversationEdit(path="a.pdf", label="已转 PDF")]
+    assert edits_from_tool_call(
+        name="md_export", arguments='{"path":"a.md","format":"pdf"}'
     ) == [ConversationEdit(path="a.pdf", label="已转 PDF")]
     assert edits_from_tool_call(
         name="file_copy",

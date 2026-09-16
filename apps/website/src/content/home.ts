@@ -487,7 +487,7 @@ export const CAPABILITIES = {
     { zh: "动态角色分配", en: "Dynamic role assignment" },
     { zh: "工具调用", en: "Tool calling" },
     { zh: "进度可视化", en: "Progress visualisation" },
-    { zh: "跨会话记忆", en: "Cross-session memory" },
+    { zh: "规矩与旧场", en: "Rules and past chats" },
     { zh: "成本可见", en: "Cost visibility" },
   ] satisfies T[],
 };
@@ -609,8 +609,8 @@ export const ECOSYSTEM = {
     en: "Not one agent —\na whole stack you can [[keep]]",
   },
   lead: {
-    zh: "把你打磨好的工作流和团队，沉淀成五类可复用的资产——自己用，或分享给别人。",
-    en: "Turn the workflows and teams you have tuned into five kinds of reusable assets — for yourself, or to share.",
+    zh: "把你打磨好的做法沉淀成可复用的技能——自己用，或分享给别人。",
+    en: "Turn the ways of working you have tuned into reusable skills — for yourself, or to share.",
   },
   assets: [
     {
@@ -644,8 +644,8 @@ export const ECOSYSTEM = {
       code: "Memory",
       name: { zh: "记忆", en: "Memory" },
       body: {
-        zh: "跨会话沉淀的偏好、画像与项目上下文",
-        en: "Preferences, profiles and project context that carry across sessions.",
+        zh: "你写的规矩跨对话生效；过往事情去查旧对话",
+        en: "Your rules carry across chats; past facts come from old conversations.",
       },
       accent: "brand-2" as const,
     },

@@ -31,8 +31,7 @@ from agentcore.tools.builtin.browser import BrowserTool
 from agentcore.tools.builtin.consult import ConsultTool
 from agentcore.tools.builtin.file_ops.read import FileReadTool
 from agentcore.tools.builtin.host import HostTool
-from agentcore.tools.builtin.md_to_docx import MdToDocxTool
-from agentcore.tools.builtin.md_to_pdf import MdToPdfTool
+from agentcore.tools.builtin.md_export import MdExportTool
 from agentcore.tools.mcp.dynamic import McpDynamicTool
 from agentcore.tools.mcp.wire import McpDiscoverResult, McpToolSpec, register_mcp_tools
 from agentcore.tools.on_demand import (
@@ -90,7 +89,6 @@ def test_resident_tools_are_not_on_the_roster():
     for name in (
         "consult",
         "delegate",
-        "debate",
         "ask_user",
         "git",
         "file_read",
@@ -115,6 +113,11 @@ def test_resident_tools_are_not_on_the_roster():
         "table_read",
         "docs_read",
         "docs_write",
+        "debate",
+        "list_folder_dir",
+        "read_folder_file",
+        "code_search",
+        "md_export",
     ):
         assert is_on_demand_tool(name), name
         assert name in ON_DEMAND_TOOL_NAMES
@@ -128,18 +131,21 @@ def test_resident_tools_are_not_on_the_roster():
 def test_openai_defs_omit_deferred_until_offer():
     reg = ToolRegistry()
     reg.register(FileReadTool())
-    reg.register(MdToDocxTool())
-    reg.register(MdToPdfTool())
-    assert "md_to_docx" in reg.names
+    reg.register(MdExportTool())
+    assert "md_export" in reg.names
     assert "file_read" in reg.names
-    assert set(reg.deferred_names) == {"md_to_docx", "md_to_pdf"}
+    assert set(reg.deferred_names) == {"md_export"}
     assert _def_names(reg) == {"file_read"}
 
-    assert reg.offer("md_to_docx") is True
-    # Family promote: both assembled export siblings land together.
-    assert _def_names(reg) == {"file_read", "md_to_docx", "md_to_pdf"}
+    assert reg.offer("md_export") is True
+    assert _def_names(reg) == {"file_read", "md_export"}
     assert not reg.deferred_names
-    assert reg.offer("md_to_docx") is False  # idempotent
+    assert reg.offer("md_export") is False  # idempotent
+    # Retired names promote the current tool (consult / window recall), never execute.
+    reg2 = ToolRegistry()
+    reg2.register(MdExportTool())
+    assert reg2.offer("md_to_pdf") is True
+    assert _def_names(reg2) == {"md_export"}
 
 
 def test_execute_path_works_while_deferred():
@@ -166,30 +172,30 @@ async def test_directory_lists_only_assembled_on_demand_tools():
 
 def test_directory_groups_sections_and_compacts_tool_families():
     host = ConsultDirectoryEntry(name="host", summary="本机排查", section="tool")
-    docx = ConsultDirectoryEntry(
-        name="md_to_docx",
-        summary="导出 docx",
+    extract = ConsultDirectoryEntry(
+        name="archive_extract",
+        summary="解压 zip",
         section="tool",
-        family="md_to_docx+md_to_pdf",
-        family_label="导出 Word/PDF",
+        family="archive_create+archive_extract",
+        family_label="压缩包",
     )
-    pdf = ConsultDirectoryEntry(
-        name="md_to_pdf",
-        summary="导出 pdf",
+    create = ConsultDirectoryEntry(
+        name="archive_create",
+        summary="打成 zip",
         section="tool",
-        family="md_to_docx+md_to_pdf",
-        family_label="导出 Word/PDF",
+        family="archive_create+archive_extract",
+        family_label="压缩包",
     )
     skill = ConsultDirectoryEntry(
         name="data_file_landing", summary="表格落盘", section="skill", group="交付"
     )
-    out = render_on_demand_directory([host, docx, pdf, skill])
+    out = render_on_demand_directory([host, extract, create, skill])
     assert "能力指引：" in out
     assert "交付：" in out
     assert "低频工具：" in out
     assert "- host：本机排查" in out
-    assert "导出 Word/PDF（查阅任一即整组启用）：md_to_docx、md_to_pdf" in out
-    assert "- md_to_docx：导出 docx" not in out
+    assert "压缩包（查阅任一即整组启用）：archive_extract、archive_create" in out
+    assert "- archive_extract：解压 zip" not in out
     assert "- data_file_landing：表格落盘" in out
 
 
@@ -252,16 +258,243 @@ def test_offer_tools_from_window_promotes_consulted_and_called():
     assert offer_tools_from_window(reg, msgs) == 0
 
 
-async def test_consult_offers_family_and_returns_schema():
+def _named_stub(name: str):
+    from agentcore.core.types import ToolApproval, ToolFace
+    from agentcore.tools.protocol import ToolSchema
+
+    class _Stub:
+        @property
+        def schema(self) -> ToolSchema:
+            return ToolSchema(
+                name=name,
+                description="stub",
+                parameters={"type": "object", "properties": {}},
+                face=ToolFace.ORCHESTRATION,
+                approval=ToolApproval.NEVER,
+            )
+
+    return _Stub()
+
+
+def test_offer_tools_from_window_promotes_skill_mapped_debate():
     reg = ToolRegistry()
-    reg.register(MdToDocxTool())
-    reg.register(MdToPdfTool())
+    reg.register(_named_stub("debate"))
+    assert "debate" in reg.deferred_names
+    msgs = [
+        LLMMessage(
+            role="assistant",
+            content="",
+            tool_calls=[
+                ToolCall(
+                    id="c1",
+                    function=ToolCallFunction(
+                        name="consult", arguments='{"name": "debate_and_review"}'
+                    ),
+                )
+            ],
+        )
+    ]
+    assert offer_tools_from_window(reg, msgs) == 1
+    assert _def_names(reg) == {"debate"}
+
+
+async def test_consult_user_skill_offers_bound_on_demand_tools():
+    reg = ToolRegistry()
+    reg.register(HostTool())
+    assert "host" in reg.deferred_names
+    body = "---\napply: on_demand\noffers_tools: host\n---\n怎么审\n"
+
+    class _FakeRule:
+        async def list_directory(self, user_id: str):
+            del user_id
+            return [
+                ConsultDirectoryEntry(
+                    name="合同审查", summary="审", section="rule"
+                )
+            ]
+
+        async def fetch_by_name(self, user_id: str, name: str):
+            del user_id
+            return body if name == "合同审查" else None
+
+    merged = MergedConsultSource(
+        tool=ToolConsultSource(registry=reg),
+        rule=_FakeRule(),  # type: ignore[arg-type]
+    )
+    hit = await merged.fetch_hit("u", "合同审查")
+    assert hit is not None
+    assert "怎么审" in hit.body
+    assert "offers_tools" not in hit.body
+    assert "已启用工具 `host`" in hit.body
+    assert _def_names(reg) == {"host"}
+
+
+async def test_consult_always_skill_does_not_repeat_body():
+    reg = ToolRegistry()
+    reg.register(HostTool())
+    body = "---\napply: always\noffers_tools: host\n---\n每回合都带着的教法\n"
+
+    class _FakeRule:
+        async def list_directory(self, user_id: str):
+            del user_id
+            return [
+                ConsultDirectoryEntry(
+                    name="合同审查", summary="审", section="rule"
+                )
+            ]
+
+        async def fetch_by_name(self, user_id: str, name: str):
+            del user_id
+            return body if name == "合同审查" else None
+
+    merged = MergedConsultSource(
+        tool=ToolConsultSource(registry=reg),
+        rule=_FakeRule(),  # type: ignore[arg-type]
+    )
+    hit = await merged.fetch_hit("u", "合同审查")
+    assert hit is not None
+    assert "每回合都带着的教法" not in hit.body
+    assert "已在常驻设定中" in hit.body
+    assert "已启用工具 `host`" in hit.body
+    assert _def_names(reg) == {"host"}
+
+
+def test_offer_tools_from_window_reads_consult_enable_ack():
+    from agentcore.tools.on_demand import format_enabled_tools_note
+
+    reg = ToolRegistry()
+    reg.register(HostTool())
+    assert "host" in reg.deferred_names
+    msgs = [
+        LLMMessage(
+            role="assistant",
+            content="",
+            tool_calls=[
+                ToolCall(
+                    id="c1",
+                    function=ToolCallFunction(
+                        name="consult", arguments='{"name": "合同审查"}'
+                    ),
+                )
+            ],
+        ),
+        LLMMessage(
+            role="tool",
+            content="怎么审" + format_enabled_tools_note(["host"]),
+            tool_call_id="c1",
+        ),
+    ]
+    assert offer_tools_from_window(reg, msgs) == 1
+    assert _def_names(reg) == {"host"}
+
+
+def test_offer_bound_tools_skips_resident_names():
+    from agentcore.tools.on_demand import offer_bound_tools
+
+    reg = ToolRegistry()
+    reg.register(FileReadTool())
+    reg.register(HostTool())
+    assert offer_bound_tools(reg, ["file_read", "host"]) == ["host"]
+    assert "host" in _def_names(reg)
+    assert "file_read" in _def_names(reg)  # already resident
+
+
+async def test_consult_cache_still_offers_user_bound_tools():
+    from agentcore.tools.on_demand import format_enabled_tools_note
+
+    token = consulted_memory_cache.set({})
+    try:
+        remember_consult(
+            "合同审查", "怎么审" + format_enabled_tools_note(["host"])
+        )
+        reg = ToolRegistry()
+        reg.register(HostTool())
+        tool = ConsultTool(
+            source=MergedConsultSource(tool=ToolConsultSource(registry=reg))
+        )
+        result = await tool.execute({"name": "合同审查"}, _ctx())
+        assert result.success
+        assert _def_names(reg) == {"host"}
+    finally:
+        consulted_memory_cache.reset(token)
+
+
+async def test_consult_debate_and_review_offers_debate():
+    reg = ToolRegistry()
+    reg.register(_named_stub("debate"))
+    skill_reg = build_system_skill_registry()
+    merged = MergedConsultSource(
+        skill=SkillConsultSource(
+            registry=skill_reg,
+            tool_names={"delegate", "ask_user", "debate", "run"},
+            audience="ceo",
+        ),
+        tool=ToolConsultSource(registry=reg),
+    )
+    hit = await merged.fetch_hit("u", "debate_and_review")
+    assert hit is not None
+    assert "已启用工具 `debate`" in hit.body
+    assert "本回合下一模型轮" in hit.body
+    assert _def_names(reg) == {"debate"}
+
+
+async def test_consult_cache_still_offers_skill_mapped_debate():
+    token = consulted_memory_cache.set({})
+    try:
+        remember_consult("debate_and_review", "STALE — must still offer debate")
+        reg = ToolRegistry()
+        reg.register(_named_stub("debate"))
+        tool = ConsultTool(
+            source=build_merged_consult_source(
+                skill_registry=build_system_skill_registry(),
+                tool_names={"delegate", "ask_user", "debate", "run"},
+                memory_store=None,
+                folder_id=None,
+                include_rules=False,
+                tool_registry=reg,
+                skill_audience="ceo",
+            )
+        )
+        result = await tool.execute({"name": "debate_and_review"}, _ctx())
+        assert result.success
+        assert result.output == "STALE — must still offer debate"
+        assert "debate" in _def_names(reg)
+    finally:
+        consulted_memory_cache.reset(token)
+
+
+def test_explore_profile_unregisters_even_when_pending():
+    from agentcore.runtime.resolve.ceo_surface import apply_explore_profile_surface
+    from agentcore.tools.builtin.update_folder_profile import UpdateFolderProfileTool
+
+    reg = ToolRegistry()
+    reg.register(FileReadTool())
+    reg.register(UpdateFolderProfileTool())
+    apply_explore_profile_surface(reg, pending=True)
+    assert "update_folder_profile" not in reg.names
+    apply_explore_profile_surface(reg, pending=False)
+    assert "update_folder_profile" not in reg.names
+    assert "file_read" in _def_names(reg)
+
+
+async def test_consult_offers_export_and_resolves_retired_names():
+    reg = ToolRegistry()
+    reg.register(MdExportTool())
     src = ToolConsultSource(registry=reg, audience="ceo")
-    body = await src.fetch_by_name("u", "md_to_docx")
+    body = await src.fetch_by_name("u", "md_export")
     assert body is not None
-    assert "已启用工具 `md_to_docx`" in body
-    assert "md_to_pdf" in body
-    assert _def_names(reg) == {"md_to_docx", "md_to_pdf"}
+    assert "已启用工具 `md_export`" in body
+    assert "md_to_pdf" not in body
+    assert _def_names(reg) == {"md_export"}
+
+    reg2 = ToolRegistry()
+    reg2.register(MdExportTool())
+    retired = await ToolConsultSource(registry=reg2, audience="ceo").fetch_by_name(
+        "u", "md_to_docx"
+    )
+    assert retired is not None
+    assert "已启用工具 `md_export`" in retired
+    assert _def_names(reg2) == {"md_export"}
 
 
 async def test_consult_archive_extract_offers_create_sibling():
@@ -393,6 +626,17 @@ def test_family_of_covers_browser_and_solo_tools():
     assert family_of("table_read") == frozenset({"table_ops", "table_read"})
     assert family_of("docs_read") == frozenset({"docs_read", "docs_write"})
     assert family_of("docs_write") == frozenset({"docs_read", "docs_write"})
+    assert family_of("list_folder_dir") == frozenset(
+        {"list_folder_dir", "read_folder_file"}
+    )
+    assert family_of("read_folder_file") == frozenset(
+        {"list_folder_dir", "read_folder_file"}
+    )
+    assert family_of("code_search") == frozenset({"code_search"})
+    assert family_of("debate") == frozenset({"debate"})
+    assert family_of("md_export") == frozenset({"md_export"})
+    assert "md_to_docx" not in ON_DEMAND_TOOL_NAMES
+    assert "md_to_pdf" not in ON_DEMAND_TOOL_NAMES
     assert "desktop_notify" not in ON_DEMAND_TOOL_NAMES
     # Without a live registry the Server siblings are unknown — name stands alone.
     assert family_of("mcp_playwright_browser_navigate") == frozenset(
@@ -443,8 +687,6 @@ _STUFFED_WORKER_RESIDENT = frozenset(
         "file_delete",
         "mkdir",
         "grep",
-        "code_search",
-        "code_diagnostics",
         "git",
         "run",
         "escalate",
@@ -472,22 +714,23 @@ def _stuffed_worker() -> ToolRegistry:
 
 
 def test_stuffed_worker_opening_table_omits_on_demand_tools():
-    """Locks the opening FC win: 28 registered; consult 另 wire，不在此表."""
+    """Locks the opening FC win: 26 registered; consult 另 wire，不在此表."""
     registry = _stuffed_worker()
-    assert registry.count == 28
+    assert registry.count == 26
     offered = _def_names(registry)
     assert offered == _STUFFED_WORKER_RESIDENT
     chars = sum(
         len(json.dumps(d, ensure_ascii=False)) for d in registry.get_openai_definitions()
     )
-    # 2026-09-14 开场去重后实测 10448。锁回实测整十。
-    assert chars <= 10450, f"队员开场工具表变胖：{chars}"
+    # 2026-09-16 代码索引出开场表后实测 9060。锁回实测整十。
+    assert chars <= 9070, f"队员开场工具表变胖：{chars}"
     deferred = set(registry.deferred_names)
     assert deferred <= ON_DEMAND_TOOL_NAMES
     assert "browser" in deferred
     assert "run" not in deferred
     assert "host" in deferred
-    assert "md_to_docx" in deferred
+    assert "md_export" in deferred
+    assert "code_search" in deferred
 
 
 def _playwright_mcp_result(*, tool_count: int = 24) -> McpDiscoverResult:
@@ -515,12 +758,12 @@ async def test_stuffed_worker_opening_table_omits_mcp_tools():
     registry = _stuffed_worker()
     opening_before = _def_names(registry)
     count_before = registry.count
-    assert count_before == 28
+    assert count_before == 26
     assert opening_before == _STUFFED_WORKER_RESIDENT
 
     registered = register_mcp_tools(registry, _playwright_mcp_result(tool_count=24))
     assert registered == 24
-    assert registry.count == 52
+    assert registry.count == 50
     offered = _def_names(registry)
     assert offered == opening_before
     mcp_names = {n for n in registry.names if n.startswith("mcp_")}
@@ -595,6 +838,10 @@ def test_ceo_chat_tools_after_assemble_wire_hold_deferred_work_tools():
     offered = _def_names(chat_tools)
     assert deferred.isdisjoint(offered)
     assert {"search_conversations", "read_conversation"} <= offered
+    assert {"debate", "list_folder_dir", "read_folder_file"} <= set(
+        chat_tools.deferred_names
+    )
+    assert {"debate", "list_folder_dir", "read_folder_file"}.isdisjoint(offered)
 
 
 async def test_mcp_directory_lists_assembled_tools_and_consult_promotes_server_family():

@@ -97,9 +97,7 @@ async def test_cloud_tree_nest_rename_move_and_restore(client, _fs_data_dir):
     user_id = await register_and_login(client, "foldertree")
 
     def tree(rel: str) -> Path:
-        return workspace_root_path(
-            user_id=user_id, folder_rel_path=rel, conversation_id=""
-        )
+        return workspace_root_path(user_id=user_id, folder_rel_path=rel, conversation_id="")
 
     parent = await _create_cloud_folder(client, "研究")
     r = await client.post(
@@ -139,9 +137,7 @@ async def test_cloud_tree_nest_rename_move_and_restore(client, _fs_data_dir):
     # Soft-delete frees the visible name at once (directory → tombstone area).
     assert (await client.delete(f"/v1/folders/{child['id']}")).status_code == 200
     assert not tree("2026_Q1").exists()
-    again = await client.post(
-        "/v1/folders", json={"name": "2026_Q1", "mode": "cloud"}
-    )
+    again = await client.post("/v1/folders", json={"name": "2026_Q1", "mode": "cloud"})
     assert again.json()["rel_path"] == "2026_Q1"
 
     # Restore lands beside the squatter rather than on top of it, files intact.
@@ -239,9 +235,7 @@ async def test_create_local_folder_different_subpath_is_distinct(client):
     assert {f["id"] for f in listed} == {r_a.json()["id"], r_b.json()["id"]}
 
 
-async def test_create_local_folder_empty_subpath_normalizes_for_reuse(
-    client
-):
+async def test_create_local_folder_empty_subpath_normalizes_for_reuse(client):
     """Empty-string local_subpath normalizes to NULL and reuses root binding."""
     await register_and_login(client, "folderemptysub")
 
@@ -293,9 +287,7 @@ async def test_patch_conversation_folder_gone(client):
     folder_id = await _create_cloud_folder(client, "Proj")
     conv = await _new_conversation(client, "started")
 
-    r = await client.patch(
-        f"/v1/conversations/{conv}/folder", json={"folder_id": folder_id}
-    )
+    r = await client.patch(f"/v1/conversations/{conv}/folder", json={"folder_id": folder_id})
     assert r.status_code == 404, r.text
 
 
@@ -303,9 +295,7 @@ async def test_create_in_folder_files_at_creation(client):
     await register_and_login(client, "folderuser9")
     folder_id = await _create_cloud_folder(client, "Born")
 
-    r = await client.post(
-        "/v1/conversations", json={"title": "in folder", "folder_id": folder_id}
-    )
+    r = await client.post("/v1/conversations", json={"title": "in folder", "folder_id": folder_id})
     assert r.status_code == 201, r.text
     conv_id = r.json()["id"]
     assert r.json()["folder_id"] == folder_id
@@ -355,9 +345,7 @@ async def test_update_folder_renames_only(client):
 
     # Relocate fields are rejected (extra forbid on create; update ignores unknown —
     # binding stays immutable).
-    r = await client.patch(
-        f"/v1/folders/{folder_id}", json={"local_root_id": "other-root"}
-    )
+    r = await client.patch(f"/v1/folders/{folder_id}", json={"local_root_id": "other-root"})
     # Pydantic UpdateFolderRequest has no local_root_id → ignored or 422 depending
     # on extra; either way binding must not change.
     refreshed = (await client.get("/v1/folders")).json()
@@ -368,9 +356,7 @@ async def test_update_folder_renames_only(client):
 async def test_delete_folder_archives_conversations(client):
     await register_and_login(client, "folderuser5")
     folder_id = await _create_cloud_folder(client, "Temp")
-    r = await client.post(
-        "/v1/conversations", json={"title": "keep me", "folder_id": folder_id}
-    )
+    r = await client.post("/v1/conversations", json={"title": "keep me", "folder_id": folder_id})
     assert r.status_code == 201, r.text
     conv = r.json()["id"]
 
@@ -396,9 +382,7 @@ async def test_soft_delete_keeps_member_updated_at(client, session_factory):
     await register_and_login(client, "folderkeepstamp")
     folder_id = await _create_cloud_folder(client, "Stamped")
     conv = (
-        await client.post(
-            "/v1/conversations", json={"title": "old news", "folder_id": folder_id}
-        )
+        await client.post("/v1/conversations", json={"title": "old news", "folder_id": folder_id})
     ).json()["id"]
 
     async with session_factory() as s:
@@ -425,9 +409,7 @@ async def test_restore_project_unarchives_only_what_the_delete_archived(client):
     await register_and_login(client, "folderrestore")
     folder_id = await _create_cloud_folder(client, "Comeback")
     kept = (
-        await client.post(
-            "/v1/conversations", json={"title": "live one", "folder_id": folder_id}
-        )
+        await client.post("/v1/conversations", json={"title": "live one", "folder_id": folder_id})
     ).json()["id"]
     self_archived = (
         await client.post(
@@ -435,9 +417,7 @@ async def test_restore_project_unarchives_only_what_the_delete_archived(client):
         )
     ).json()["id"]
     assert (
-        await client.patch(
-            f"/v1/conversations/{self_archived}", json={"archived": True}
-        )
+        await client.patch(f"/v1/conversations/{self_archived}", json={"archived": True})
     ).status_code == 200
 
     assert (await client.delete(f"/v1/folders/{folder_id}")).status_code == 200
@@ -467,9 +447,7 @@ async def test_restore_project_unarchives_only_what_the_delete_archived(client):
     assert [c["id"] for c in archived["data"]] == [self_archived]
 
 
-async def test_restore_past_retention_is_refused_not_silently_ok(
-    client, session_factory
-):
+async def test_restore_past_retention_is_refused_not_silently_ok(client, session_factory):
     await register_and_login(client, "folderexpired")
     folder_id = await _create_cloud_folder(client, "TooLate")
     assert (await client.delete(f"/v1/folders/{folder_id}")).status_code == 200
@@ -509,9 +487,7 @@ async def test_trash_excludes_machine_reclaimed_auto_desks(client, session_facto
     assert (await client.post(f"/v1/folders/trash/{desk.id}/restore")).status_code == 404
 
 
-async def test_trash_ignores_projects_soft_deleted_before_the_feature(
-    client, session_factory
-):
+async def test_trash_ignores_projects_soft_deleted_before_the_feature(client, session_factory):
     """历史软删行没有 delete_origin，宁可少列也不冒充「用户删的」。"""
     user_id = await register_and_login(client, "folderlegacy")
     async with session_factory() as s:
@@ -525,9 +501,7 @@ async def test_trash_ignores_projects_soft_deleted_before_the_feature(
         await s.commit()
 
     assert (await client.get("/v1/folders/trash")).json()["data"] == []
-    assert (
-        await client.post(f"/v1/folders/trash/{legacy.id}/restore")
-    ).status_code == 404
+    assert (await client.post(f"/v1/folders/trash/{legacy.id}/restore")).status_code == 404
 
 
 async def test_trash_is_access_session_only(client, new_client):
@@ -544,14 +518,10 @@ async def test_trash_is_access_session_only(client, new_client):
         # ……但看不到回收站，也恢复不了、彻底删不了。
         assert (await sidecar.get("/v1/folders/trash", headers=headers)).status_code == 401
         assert (
-            await sidecar.post(
-                f"/v1/folders/trash/{folder_id}/restore", headers=headers
-            )
+            await sidecar.post(f"/v1/folders/trash/{folder_id}/restore", headers=headers)
         ).status_code == 401
         assert (
-            await sidecar.delete(
-                f"/v1/folders/trash/{folder_id}", headers=headers
-            )
+            await sidecar.delete(f"/v1/folders/trash/{folder_id}", headers=headers)
         ).status_code == 401
 
 
@@ -563,19 +533,13 @@ async def test_trash_is_isolated_between_users(client, new_client):
     async with new_client() as other:
         await register_and_login(other, "trashintruder")
         assert (await other.get("/v1/folders/trash")).json()["data"] == []
-        assert (
-            await other.post(f"/v1/folders/trash/{folder_id}/restore")
-        ).status_code == 404
-        assert (
-            await other.delete(f"/v1/folders/trash/{folder_id}")
-        ).status_code == 404
+        assert (await other.post(f"/v1/folders/trash/{folder_id}/restore")).status_code == 404
+        assert (await other.delete(f"/v1/folders/trash/{folder_id}")).status_code == 404
 
     assert (await client.post(f"/v1/folders/trash/{folder_id}/restore")).status_code == 200
 
 
-async def test_soft_delete_folder_hides_workspace_from_hub(
-    client, _fs_data_dir
-):
+async def test_soft_delete_folder_hides_workspace_from_hub(client, _fs_data_dir):
     """Soft-deleted ``folder:<id>`` must not appear in list or resolve via locate."""
     await register_and_login(client, "foldersoftws")
     folder_id = await _create_cloud_folder(client, "SoftGone")
@@ -596,9 +560,7 @@ async def test_permanent_delete_folder_wipes_conversations_and_cloud_space(
     monkeypatch.setattr(permanent_delete_mod, "async_session_factory", session_factory)
     user_id = await register_and_login(client, "folderuser7p")
     folder_id = await _create_cloud_folder(client, "Gone")
-    r = await client.post(
-        "/v1/conversations", json={"title": "wipe me", "folder_id": folder_id}
-    )
+    r = await client.post("/v1/conversations", json={"title": "wipe me", "folder_id": folder_id})
     conv = r.json()["id"]
     await _seed_message(session_factory, conv)
 
@@ -690,13 +652,9 @@ async def test_permanent_delete_folder_wipes_nested_subtree(
     assert r.status_code == 201, r.text
     child = r.json()["id"]
 
-    r = await client.post(
-        "/v1/conversations", json={"title": "in parent", "folder_id": parent}
-    )
+    r = await client.post("/v1/conversations", json={"title": "in parent", "folder_id": parent})
     parent_conv = r.json()["id"]
-    r = await client.post(
-        "/v1/conversations", json={"title": "in child", "folder_id": child}
-    )
+    r = await client.post("/v1/conversations", json={"title": "in child", "folder_id": child})
     child_conv = r.json()["id"]
     await _seed_message(session_factory, child_conv)
     assert (
@@ -738,14 +696,10 @@ async def test_permanent_delete_local_folder_keeps_os_sentinel(
     )
     assert r.status_code == 201, r.text
     folder_id = r.json()["id"]
-    r = await client.post(
-        "/v1/conversations", json={"title": "local wipe", "folder_id": folder_id}
-    )
+    r = await client.post("/v1/conversations", json={"title": "local wipe", "folder_id": folder_id})
     conv = r.json()["id"]
 
-    assert (
-        await client.delete(f"/v1/folders/{folder_id}/permanent")
-    ).status_code == 200
+    assert (await client.delete(f"/v1/folders/{folder_id}/permanent")).status_code == 200
 
     assert (await client.get(f"/v1/conversations/{conv}")).status_code == 404
     assert (await client.get("/v1/folders")).json() == []
@@ -761,9 +715,7 @@ async def test_trash_purge_folder_wipes_members_and_spares_live_slot(
     user_id = await register_and_login(client, "foldertrashp")
     folder_id = await _create_cloud_folder(client, "Gone")
     conv = (
-        await client.post(
-            "/v1/conversations", json={"title": "wipe me", "folder_id": folder_id}
-        )
+        await client.post("/v1/conversations", json={"title": "wipe me", "folder_id": folder_id})
     ).json()["id"]
     await _seed_message(session_factory, conv)
     ws = f"folder:{folder_id}"
@@ -774,9 +726,7 @@ async def test_trash_purge_folder_wipes_members_and_spares_live_slot(
     assert (await client.delete(f"/v1/folders/{folder_id}")).status_code == 200
     sibling = await _create_cloud_folder(client, "Gone")
     assert (
-        await client.put(
-            f"/v1/workspaces/folder:{sibling}/files/keep.txt", content=b"keep"
-        )
+        await client.put(f"/v1/workspaces/folder:{sibling}/files/keep.txt", content=b"keep")
     ).status_code == 200
 
     r = await client.delete(f"/v1/folders/trash/{folder_id}")
@@ -786,16 +736,12 @@ async def test_trash_purge_folder_wipes_members_and_spares_live_slot(
     assert (await client.get(f"/v1/conversations/{conv}")).status_code == 404
     got = await client.get(f"/v1/workspaces/folder:{sibling}/files/keep.txt")
     assert got.status_code == 200 and got.content == b"keep"
-    assert workspace_root_path(
-        user_id=user_id, folder_rel_path="Gone", conversation_id=""
-    ).exists()
+    assert workspace_root_path(user_id=user_id, folder_rel_path="Gone", conversation_id="").exists()
 
 
 async def test_trash_purge_conversation_removes_the_row(client):
     await register_and_login(client, "convtrashp")
-    conv = (await client.post("/v1/conversations", json={"title": "gone"})).json()[
-        "id"
-    ]
+    conv = (await client.post("/v1/conversations", json={"title": "gone"})).json()["id"]
     assert (await client.delete(f"/v1/conversations/{conv}")).status_code == 200
     assert (await client.get("/v1/conversations/trash")).json()["total"] == 1
 
@@ -828,9 +774,7 @@ async def test_folder_isolation_between_users(client, new_client):
         ).status_code == 404
 
 
-async def test_soft_delete_hibernates_folder_settings_until_restore(
-    client, session_factory
-):
+async def test_soft_delete_hibernates_folder_settings_until_restore(client, session_factory):
     """软删：这张桌的设定退出注入、行还在；恢复后回来。全局层不陪葬。"""
     from agentcore.memory.document_store import DocumentMemoryStore
     from agentcore.memory.rules_injection import assemble_injected_rules
@@ -851,9 +795,9 @@ async def test_soft_delete_hibernates_folder_settings_until_restore(
         )
     ).status_code == 200
     async with session_factory() as session:
-        await DocumentRepository(session).upsert_user_rules_doc(
-            uid, folder_id, "- 本桌必须用中文"
-        )
+        repo = DocumentRepository(session)
+        await repo.upsert_user_rule_doc(uid, None, "全局语言.md", "- 全局必须用中文")
+        await repo.upsert_user_rule_doc(uid, folder_id, "本桌语言.md", "- 本桌必须用中文")
 
     async def _inject() -> str:
         async with session_factory() as session:
@@ -862,18 +806,18 @@ async def test_soft_delete_hibernates_folder_settings_until_restore(
                 DocumentRepository(session),
                 uid,
                 folder_id=folder_id,
-                enabled=True,
                 scope_chain=await db_scope_chain(uid, folder_id, session=session),
             )
 
     live = await _inject()
-    assert "全局偏好别用 emoji" in live
-    assert "本仓用 Rust" in live
+    assert "全局必须用中文" in live
     assert "本桌必须用中文" in live
+    assert "全局偏好别用 emoji" not in live
+    assert "本仓用 Rust" not in live
 
     assert (await client.delete(f"/v1/folders/{folder_id}")).status_code == 200
     hibernating = await _inject()
-    assert "全局偏好别用 emoji" in hibernating
+    assert "全局必须用中文" in hibernating
     assert "本仓用 Rust" not in hibernating
     assert "本桌必须用中文" not in hibernating
     async with session_factory() as session:
@@ -892,5 +836,6 @@ async def test_soft_delete_hibernates_folder_settings_until_restore(
     restored = await client.post(f"/v1/folders/trash/{folder_id}/restore")
     assert restored.status_code == 200, restored.text
     back = await _inject()
-    assert "本仓用 Rust" in back
+    assert "全局必须用中文" in back
     assert "本桌必须用中文" in back
+    assert "本仓用 Rust" not in back

@@ -20,7 +20,6 @@ import { StatusStrip } from "../StatusStrip";
 
 const MID = "msg-failed-error-strip";
 const INTERRUPT_COPY = "模型响应中断，已保留已生成内容，可继续。";
-const GATE_ERROR = "缺少必备章节：结论";
 
 let sessionError: string | null = null;
 
@@ -193,16 +192,14 @@ describe("StatusStrip · FailureStrip scoreboard", () => {
         kind: "run_failed",
         runId: "r-ceo",
         agentId: "ceo",
-        error: GATE_ERROR,
+        error: "format check failed",
         failureKind: "format",
       },
     ];
     const exec = projectExecution(plan, frames, "failed");
-    const { container } = renderStrip(exec);
+    renderStrip(exec);
 
     expect(screen.getByTestId("status-strip-failed")).toBeTruthy();
-    expect(container.textContent).not.toContain("缺少必备章节");
-    expect(container.textContent).not.toContain(".audit.json");
     expect(
       screen.queryByText(failureDetailSentence("format", null)),
     ).toBeNull();
@@ -268,7 +265,7 @@ describe("StatusStrip · FailureStrip scoreboard", () => {
         kind: "run_failed",
         runId: "r-audit",
         agentId: "w1",
-        error: GATE_ERROR,
+        error: "format check failed",
       },
     ];
     const exec = projectExecution(longPlan, frames, "failed");

@@ -69,7 +69,6 @@ vi.mock("@/services/documents", async (importOriginal) => {
     getDocument: vi.fn(),
     renameDocument: vi.fn(),
     writeDocument: vi.fn(),
-    setDocumentDisputed: vi.fn(),
     updateDocumentApplyMode: vi.fn(),
   };
 });
@@ -121,15 +120,14 @@ vi.mock("@/hooks/useModels", () => ({
 
 const { getSkillCatalog } = await import("@/services/skillCatalog");
 const { listInstalledSkills } = await import("@/services/skillStore");
-const { listMemoryUpdates } = await import("@/services/memory");
 const {
   createRuleFolder,
   listAccountPromptTree,
   listScopeEntries,
   renameDocument,
   reparentDocument,
-  setDocumentDisputed,
   updateDocumentApplyMode,
+  writeDocument,
 } = await import("@/services/documents");
 
 const base: Capabilities = {
@@ -201,14 +199,12 @@ beforeEach(() => {
   });
   vi.mocked(listInstalledSkills).mockReset();
   vi.mocked(listInstalledSkills).mockResolvedValue([]);
-  vi.mocked(listMemoryUpdates).mockReset();
-  vi.mocked(listMemoryUpdates).mockResolvedValue([]);
   vi.mocked(listScopeEntries).mockReset();
   vi.mocked(listScopeEntries).mockResolvedValue([]);
-  vi.mocked(setDocumentDisputed).mockReset();
   vi.mocked(createRuleFolder).mockReset();
   vi.mocked(reparentDocument).mockReset();
   vi.mocked(renameDocument).mockReset();
+  vi.mocked(writeDocument).mockReset();
   vi.mocked(listAccountPromptTree).mockReset();
   vi.mocked(listAccountPromptTree).mockResolvedValue({
     rulesDirId: "rules",
@@ -251,7 +247,7 @@ afterEach(() => {
   cleanup();
 });
 
-describe("PromptCatalog 最近学到", () => {
+describe("PromptCatalog 概览", () => {
   it("整页概览，不套整页卡片，没有左栏目录", async () => {
     renderCatalog();
     await waitFor(() => {
@@ -279,15 +275,12 @@ describe("PromptCatalog 最近学到", () => {
     ).toBeTruthy();
     expect(previewText(onDemandRail(), "薄技能")).toBeTruthy();
     expect(within(alwaysRail()).queryByText("薄技能")).toBeNull();
-    expect(
-      within(screen.getByTestId("prompt-rail-memory")).getByText("偏好"),
-    ).toBeTruthy();
-    expect(screen.getByText("画像")).toBeTruthy();
+    expect(screen.queryByText("偏好")).toBeNull();
+    expect(screen.queryByText("画像")).toBeNull();
     expect(screen.queryByRole("button", { name: "概览" })).toBeNull();
     expect(screen.getByRole("button", { name: "新建条目" })).toBeTruthy();
-    expect(screen.getByTestId("prompt-overview-updates").textContent).toMatch(
-      /最近学到/,
-    );
+    expect(screen.queryByTestId("prompt-overview-updates")).toBeNull();
+    expect(screen.queryByRole("button", { name: "最近学到" })).toBeNull();
     const dialog = await openReadDialog(alwaysRail(), "角色身份");
     expect(
       within(dialog).getByRole("heading", { name: "角色身份" }),
@@ -386,94 +379,6 @@ describe("PromptCatalog 最近学到", () => {
       expect(screen.getByTestId("prompt-overview")).toBeTruthy();
     });
     expect(within(onDemandRail()).queryByText("官方")).toBeNull();
-  });
-
-  it("?updates=1 时弹窗是流水账，底下概览还在", async () => {
-    renderCatalog("/toolbox/mine/skills?updates=1");
-    expect(await screen.findByTestId("memory-updates-view")).toBeTruthy();
-    await waitFor(() => {
-      expect(screen.getByText("还没有学到的内容")).toBeTruthy();
-    });
-    expect(screen.queryByRole("heading", { name: "角色身份" })).toBeNull();
-    expect(screen.getAllByText("最近学到").length).toBeGreaterThan(0);
-    expect(screen.getByTestId("prompt-overview")).toBeTruthy();
-    expect(screen.getByTestId("prompt-rail-always")).toBeTruthy();
-    expect(screen.getByTestId("prompt-rail-on-demand")).toBeTruthy();
-    expect(
-      within(screen.getByTestId("prompt-overview")).getByText("常驻"),
-    ).toBeTruthy();
-    expect(
-      within(screen.getByTestId("prompt-overview")).getByText("按需"),
-    ).toBeTruthy();
-  });
-
-  it("点最近学到开弹窗，关掉回到概览", async () => {
-    renderCatalog();
-    await waitFor(() => {
-      expect(screen.getByTestId("prompt-overview")).toBeTruthy();
-    });
-    fireEvent.click(
-      within(screen.getByTestId("prompt-overview-updates")).getByRole(
-        "button",
-        { name: "最近学到" },
-      ),
-    );
-    expect(await screen.findByTestId("memory-updates-view")).toBeTruthy();
-    expect(screen.getByTestId("prompt-overview")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
-    expect(screen.queryByTestId("memory-updates-view")).toBeNull();
-    expect(screen.getByTestId("prompt-overview")).toBeTruthy();
-  });
-
-  it("点账里账号画像停在本页我的条目；文件夹的去文件页", async () => {
-    vi.mocked(listMemoryUpdates).mockResolvedValue([
-      {
-        id: "u1",
-        conversationId: "c1",
-        createdAt: "2026-09-01T12:00:00Z",
-        kind: "semantic",
-        summary: null,
-        items: [
-          {
-            action: "add",
-            file: "画像",
-            section: "关于用户的事实",
-            scope: "global",
-            content: "倾向使用 bun",
-            target: "global/profile",
-          },
-          {
-            action: "add",
-            file: "画像",
-            section: "技术栈与工具",
-            scope: "project",
-            content: "本项目用 Vite",
-            target: "project/F99/profile",
-            projectId: "F99",
-          },
-        ],
-      },
-    ]);
-    renderCatalog("/toolbox/mine/skills?updates=1");
-    const rows = await screen.findAllByTitle("在设定中打开画像");
-    fireEvent.click(rows[0] as HTMLElement);
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByRole("heading", { name: "画像" })).toBeTruthy();
-    expect(await screen.findByTestId("account-entry-editor")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "停用" })).toBeNull();
-    expect(screen.queryByTestId("memory-updates-view")).toBeNull();
-    expect(screen.queryByTestId("files-page")).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
-    fireEvent.click(
-      within(await screen.findByTestId("prompt-overview-updates")).getByRole(
-        "button",
-        { name: "最近学到" },
-      ),
-    );
-    const again = await screen.findAllByTitle("在设定中打开画像");
-    fireEvent.click(again[1] as HTMLElement);
-    expect(await screen.findByTestId("files-page")).toBeTruthy();
   });
 
   it("自建条目夹里不标我的", async () => {
@@ -616,7 +521,7 @@ describe("PromptCatalog 拖拽搬家", () => {
     expect(screen.queryByText("恢复使用")).toBeNull();
   });
 
-  it("已 disputed 的手写条目仍划掉，右键恢复使用", async () => {
+  it("已 disputed 的手写条目不划掉，没有恢复使用", async () => {
     vi.mocked(listScopeEntries).mockResolvedValue([
       {
         id: "d1",
@@ -635,13 +540,12 @@ describe("PromptCatalog 拖拽搬家", () => {
     ]);
     await renderMineCatalog();
     const tile = screen.getByTestId("prompt-tile-mine:d1");
-    expect(tile.className).toContain("line-through");
+    expect(tile.className).not.toContain("line-through");
+    expect(screen.queryByText("已停用")).toBeNull();
     fireEvent.contextMenu(within(tile).getByText("合同审查"));
     expect(screen.queryByText("这条不对…")).toBeNull();
-    fireEvent.click(await screen.findByText("恢复使用"));
-    await waitFor(() => {
-      expect(setDocumentDisputed).toHaveBeenCalledWith("d1", false);
-    });
+    expect(screen.queryByText("恢复使用")).toBeNull();
+    expect(screen.getByText("删除")).toBeTruthy();
   });
 
   it("手写条目可拖", async () => {
@@ -726,9 +630,10 @@ describe("PromptCatalog 拖拽搬家", () => {
     expect(reparentDocument).not.toHaveBeenCalled();
   });
 
-  it("偏好仍拖不动", async () => {
+  it("偏好画像不出现在常驻", async () => {
     await renderMineCatalog();
-    expect(startDrag("偏好").setData).not.toHaveBeenCalled();
+    expect(screen.queryByText("偏好")).toBeNull();
+    expect(screen.queryByText("画像")).toBeNull();
   });
 });
 
@@ -765,6 +670,47 @@ function toolsRail() {
 }
 
 describe("PromptCatalog 工具与连接器", () => {
+  it("我的条目可勾选查阅后启用的手脚", async () => {
+    vi.mocked(writeDocument).mockResolvedValue({
+      ok: true,
+      conflict: false,
+      version: "v2",
+      frontmatterError: null,
+      quotaWarning: null,
+    });
+    vi.mocked(getSkillCatalog).mockResolvedValue({
+      slots: [],
+      mine: [
+        {
+          id: "d1",
+          name: "合同审查",
+          description: "审合同时用",
+          content:
+            "---\napply: on_demand\ndescription: 审合同时用\n---\n怎么审",
+          version: "v1",
+        },
+      ],
+      folderId: null,
+      writable: true,
+    });
+    renderCatalog("/toolbox/mine/skills", {
+      ...base,
+      tools: [hostTool],
+    });
+    await waitFor(() => {
+      expect(previewText(onDemandRail(), "合同审查")).toBeTruthy();
+    });
+    await openReadDialog(onDemandRail(), "合同审查");
+    expect(await screen.findByTestId("offered-tools")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "本机" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => {
+      expect(writeDocument).toHaveBeenCalled();
+    });
+    const content = vi.mocked(writeDocument).mock.calls[0]?.[1] as string;
+    expect(content).toContain("offers_tools: host");
+  });
+
   it("出厂工具合成一份货架，按能力面分组；点开弹窗即说明书", async () => {
     renderCatalog("/toolbox/mine/skills", {
       ...base,

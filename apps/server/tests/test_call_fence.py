@@ -504,3 +504,103 @@ def test_log_llm_call_includes_attempt():
         )
     call = next(c for c in caps if c.get("event") == "llm.call")
     assert call["attempt"] == 2
+
+
+def _observation_boom(**kwargs):
+    raise TypeError("expected string or bytes-like object, got 'list'")
+
+
+@pytest.mark.asyncio
+async def test_fence_complete_observation_cannot_rewrite_success(monkeypatch):
+    monkeypatch.setattr("agentcore.llm.call_fence.log_llm_call", _observation_boom)
+    provider = observe_provider(_FakeLeaf())
+    with capture_logs() as caps:
+        resp = await provider.complete(_req(scenario="title"))
+    assert resp.content == "ok"
+    failed = next(c for c in caps if c.get("event") == "llm.observation_failed")
+    assert failed["error_type"] == "TypeError"
+    assert "list" in failed["error"]
+    assert not any(c.get("event") == "llm.call_failed" for c in caps)
+
+
+@pytest.mark.asyncio
+async def test_fence_stream_observation_cannot_rewrite_success(monkeypatch):
+    monkeypatch.setattr("agentcore.llm.call_fence.log_llm_call", _observation_boom)
+    provider = observe_provider(_FakeLeaf())
+    with capture_logs() as caps:
+        chunks = [c async for c in provider.stream(_req())]
+    assert any(c.delta_content == "hi" for c in chunks)
+    assert any(c.finish_reason == "stop" for c in chunks)
+    failed = next(c for c in caps if c.get("event") == "llm.observation_failed")
+    assert failed["error_type"] == "TypeError"
+    assert "list" in failed["error"]
+    assert not any(c.get("event") == "llm.call_failed" for c in caps)
+
+
+@pytest.mark.asyncio
+async def test_fence_stream_inner_failure_survives_observation_crash(monkeypatch):
+    monkeypatch.setattr("agentcore.llm.call_fence.log_llm_call_failed", _observation_boom)
+
+    class _BoomLeaf(_FakeLeaf):
+        async def stream(self, request: LLMRequest) -> AsyncIterator[LLMChunk]:
+            yield LLMChunk(delta_content="x")
+            raise LLMUpstreamError("stream-down", upstream_status=503, retry_attempts=0)
+
+    provider = observe_provider(_BoomLeaf())
+    with capture_logs() as caps, pytest.raises(LLMUpstreamError, match="stream-down"):
+        async for _ in provider.stream(_req()):
+            pass
+    failed = next(c for c in caps if c.get("event") == "llm.observation_failed")
+    assert failed["error_type"] == "TypeError"
+    assert not any(c.get("event") == "llm.call" for c in caps)
+
+
+@pytest.mark.asyncio
+async def test_fence_stream_multimodal_body_log_does_not_fail_turn(monkeypatch):
+    from agentcore.llm.observability import settings as obs_settings
+    from agentcore.llm.provider.protocol import build_multimodal_user_content
+
+    monkeypatch.setattr(obs_settings, "log_llm_bodies", True)
+    parts = build_multimodal_user_content(
+        "视图",
+        [{"type": "image_url", "image_url": {"url": "data:image/png;base64,aa"}}],
+    )
+    req = LLMRequest(
+        messages=[LLMMessage(role="user", content=parts)],
+        model=DEEPSEEK_V4_FLASH,
+        scenario="chat",
+    )
+    provider = observe_provider(_FakeLeaf())
+    with capture_logs() as caps:
+        chunks = [c async for c in provider.stream(req)]
+    assert any(c.finish_reason == "stop" for c in chunks)
+    assert not any(c.get("event") == "llm.observation_failed" for c in caps)
+    call = next(c for c in caps if c.get("event") == "llm.call")
+    assert call["stream"] is True
+    prompt = next(c for c in caps if c.get("event") == "llm.request")["prompt"]
+    assert "视图" in prompt
+
+
+def test_log_llm_call_bodies_format_multimodal_list(monkeypatch):
+    from agentcore.llm.observability import log_llm_call
+    from agentcore.llm.observability import settings as obs_settings
+    from agentcore.llm.provider.protocol import build_multimodal_user_content
+
+    monkeypatch.setattr(obs_settings, "log_llm_bodies", True)
+    parts = build_multimodal_user_content(
+        "视图",
+        [{"type": "image_url", "image_url": {"url": "data:image/png;base64,aa"}}],
+    )
+    with capture_logs() as caps:
+        log_llm_call(
+            scenario="chat",
+            model=DEEPSEEK_V4_FLASH,
+            usage=TokenUsage(input_tokens=1, output_tokens=1),
+            finish_reason="stop",
+            latency_ms=5,
+            stream=True,
+            messages=[LLMMessage(role="user", content=parts)],
+        )
+    prompt = next(c for c in caps if c.get("event") == "llm.request")["prompt"]
+    assert "视图" in prompt
+    assert "data:image" not in prompt

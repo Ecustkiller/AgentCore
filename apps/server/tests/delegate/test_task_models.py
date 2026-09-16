@@ -52,11 +52,10 @@ def test_schema_exposes_single_model_field_on_tasks_and_replan():
     assert "origin" not in task_props and "provider_id" not in task_props
     assert "@platform" in str(task_props["model"].get("description", ""))
     assert "勿写未加" not in str(task_props["model"].get("description", ""))
-    bind_props = _REPLAN_PARAMETERS["properties"]["binds"]["items"]["properties"]
     add_props = _REPLAN_PARAMETERS["properties"]["add"]["items"]["properties"]
-    for props in (bind_props, add_props):
-        assert set(TASK_MODEL_SCHEMA_PROPS).issubset(props)
-        assert "origin" not in props
+    assert "binds" not in _REPLAN_PARAMETERS["properties"]
+    assert set(TASK_MODEL_SCHEMA_PROPS).issubset(add_props)
+    assert "origin" not in add_props
 
 
 @pytest.mark.asyncio

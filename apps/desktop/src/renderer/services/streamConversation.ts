@@ -735,38 +735,6 @@ export async function continueConversation({
   );
 }
 
-export interface ResolveStageCardOptions {
-  conversationId: string;
-  stageCardId: string;
-  decision: "start_debate" | "research_first";
-  note?: string;
-  motionOverride?: string | null;
-  signal?: AbortSignal;
-}
-
-/** 批 B：推进卡 resolve → SSE 新回合（机制直起辩论或回灌调研）。 */
-export async function resolveStageCardConversation({
-  conversationId,
-  stageCardId,
-  decision,
-  note = "",
-  motionOverride = null,
-  signal,
-}: ResolveStageCardOptions): Promise<void> {
-  const body = JSON.stringify({
-    kind: "stage_card",
-    decision,
-    note,
-    motion_override: motionOverride,
-  });
-  await runMessageStream(
-    `/v1/conversations/${conversationId}/interactions/${stageCardId}`,
-    body,
-    conversationId,
-    signal,
-  );
-}
-
 // Re-export SSE dispatch surface (shared by cloud + sidecar paths).
 export {
   dispatchSSEEvent,

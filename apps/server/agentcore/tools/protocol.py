@@ -85,6 +85,17 @@ class TurnExploreGate:
     turn_created_folder_ids: set[str] = field(default_factory=set)
 
 
+@dataclass
+class TableBindSlot:
+    """Bound table id shared across ``dataclasses.replace`` copies.
+
+    Mid-turn csv ingest must be visible on the next ReAct round: engine
+    ``replace(on_phase=…)`` copies str fields by value.
+    """
+
+    table_id: str | None = None
+
+
 def fork_explore_write_scope(
     context: ToolContext,
     write_scope: str,
@@ -397,24 +408,26 @@ class ToolContext:
     # the assumption fallback); this channel owns the mechanism (cap / suspend / events /
     # RunState recording) so the tool stays off the event vocabulary (引擎纯化).
     escalation: EscalationChannel | None = None
-    # Creation-tool 多维表格: conversation bound to a table. ``None`` everywhere else —
-    # ``table_ops`` / ``table_read`` then fail cleanly. Tools talk to DB, not a client channel.
-    table_id: str | None = None
+    # Creation-tool 多维表格: this-turn bound table (``@`` csv or dedicated session).
+    # Lives on a shared slot so mid-turn ingest survives ``replace``. Tools talk to DB.
+    _table_bind: TableBindSlot = field(
+        default_factory=TableBindSlot, repr=False, compare=False
+    )
     # Desktop Client Tools: per-run channel for Host + MCP + external mount.
     # Set when the desktop client is online (local workspace **or** cloud +
     # ``desktop_online``) so tools can backfill via ClientTool SSE; ``None`` when
     # no desktop is attached. MCP stdio is fulfilled only on the desktop process.
     desktop_channel: DesktopClientChannel | None = None
-    # Desktop-held workspace ops (terminal + language-service diagnostics): the
-    # same ``workspace_op_required`` channel LocalWorkspace already uses for
+    # Desktop-held workspace ops (terminal / process): the same
+    # ``workspace_op_required`` channel LocalWorkspace already uses for
     # file/execute. Reused from LocalWorkspace when present; for sidecar
-    # (ServerWorkspace location=local) a channel is built so process ops and
-    # ``diagnostics`` still leave the short-lived sidecar and land in the
-    # desktop main process. ``None`` on cloud-only runs.
+    # (ServerWorkspace location=local) a channel is built so process ops
+    # still leave the short-lived sidecar and land in the desktop main
+    # process. ``None`` on cloud-only runs.
     workspace_channel: WorkspaceChannel | None = None
-    # 对话读图: optional vision port (attachment eye→text / ``read_image``). Wired by
-    # ``resolve_vision_reader_for_conversation``: vision slot, else image-accepting main
-    # credentials, else platform ``VISION_*``; ``None`` ⇒ clean「读图能力未配置」.
+    # 对话读图: optional vision port (attachment eye→text / ``read_image``).
+    # Cloud expands the conversation profile; ticketed sidecar uses the inference
+    # proxy (``X-AgentCore-Role: vision``). ``None`` ⇒ clean「读图能力未配置」.
     # CEO context only (not workers).
     vision_reader: VisionReader | None = None
     # Turn-level sink for priced ``role=vision`` ledger rows (conversation image
@@ -462,7 +475,7 @@ class ToolContext:
     # Wired from ``RunSpec.search_policy`` by the worker executor.
     search_policy: str = ""
     # ``""`` = outer verify allowed; ``"inner"`` = diagnose/review posture — refuse
-    # full typecheck/build on ``test_run`` (use code_diagnostics / browser). Wired
+    # full typecheck/build on ``run`` verify (read landed files / browser). Wired
     # from ``RunSpec.verify_policy``.
     verify_policy: str = ""
     # Same-round streamed prose length (chars) before tool calls. Set by tool_round so
@@ -528,6 +541,12 @@ class ToolContext:
         """Build a context owning a fresh :class:`WorkspaceSlot`."""
         write_scope = fields.pop("write_scope", None)
         pending = fields.pop("cold_start_explore_pending", None)
+        table_id = fields.pop("table_id", None)
+        if "_table_bind" not in fields:
+            bind = TableBindSlot()
+            if isinstance(table_id, str) and table_id.strip():
+                bind.table_id = table_id.strip()
+            fields["_table_bind"] = bind
         if "_explore_gate" not in fields:
             gate = TurnExploreGate()
             if pending is not None:
@@ -546,6 +565,15 @@ class ToolContext:
             ),
             **fields,
         )
+
+    @property
+    def table_id(self) -> str | None:
+        return self._table_bind.table_id
+
+    @table_id.setter
+    def table_id(self, value: str | None) -> None:
+        tid = value.strip() if isinstance(value, str) else ""
+        self._table_bind.table_id = tid or None
 
     @property
     def backend(self) -> WorkspaceBackend:

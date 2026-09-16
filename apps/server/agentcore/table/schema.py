@@ -7,6 +7,8 @@ from uuid import uuid4
 
 from agentcore.table.constants import (
     CELL_TEXT_MAX,
+    COLUMN_WIDTH_MAX,
+    COLUMN_WIDTH_MIN,
     DENSITIES,
     DISPLAY_MODES,
     FIELD_TYPES,
@@ -28,6 +30,7 @@ def empty_view_config() -> dict[str, Any]:
         "sort": None,
         "group_by": None,
         "hidden_column_ids": [],
+        "column_widths": {},
         "density": "comfortable",
         "mode_config": {},
     }
@@ -170,6 +173,19 @@ def sanitize_view_config(raw: Any, columns: list[dict[str, Any]]) -> dict[str, A
     hidden = raw.get("hidden_column_ids") or raw.get("hiddenColumnIds") or []
     if isinstance(hidden, list):
         base["hidden_column_ids"] = [str(i) for i in hidden if str(i) in col_ids]
+    widths = raw.get("column_widths") or raw.get("columnWidths") or {}
+    if isinstance(widths, dict):
+        cleaned_widths: dict[str, int] = {}
+        for key, val in widths.items():
+            kid = str(key)
+            if kid not in col_ids:
+                continue
+            try:
+                n = int(val)
+            except (TypeError, ValueError):
+                continue
+            cleaned_widths[kid] = max(COLUMN_WIDTH_MIN, min(COLUMN_WIDTH_MAX, n))
+        base["column_widths"] = cleaned_widths
     density = raw.get("density")
     if density in DENSITIES:
         base["density"] = density

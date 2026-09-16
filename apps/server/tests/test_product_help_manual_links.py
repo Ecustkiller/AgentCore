@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agentcore.runtime.skills import build_system_skill_registry
+from agentcore.runtime.skills.product_help import load_product_help_corpus
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _SECTION_IDS_TS = (
@@ -318,8 +319,13 @@ def _skill_bodies(names: tuple[str, ...]) -> str:
 
 
 def product_help_bodies() -> str:
-    """Concatenate all product_help* bodies that may carry manual deep-links."""
-    return _skill_bodies(_PRODUCT_HELP_SKILL_NAMES)
+    """HOW + corpus hrefs/texts that may carry manual deep-links."""
+    how = _skill_bodies(_PRODUCT_HELP_SKILL_NAMES)
+    extra: list[str] = []
+    for sec in load_product_help_corpus()["sections"]:
+        extra.append(str(sec.get("href") or ""))
+        extra.append(str(sec.get("text") or ""))
+    return how + "\n" + "\n".join(extra)
 
 
 # --- tests -------------------------------------------------------------------
@@ -341,9 +347,19 @@ def test_product_help_manual_deeplinks_match_section_registry():
     body = product_help_bodies()
     hits = extract_manual_links(body)
     assert any(h.kind == "full" for h in hits), "expected at least one full manual deep-link"
-    assert any(h.kind == "bare" for h in hits), "expected at least one bare ?s= fragment"
     errors = collect_manual_link_errors(body, reg)
     assert not errors, "product_help* manual deep-link drift:\n- " + "\n- ".join(errors)
+
+
+def test_product_help_corpus_covers_registered_sections():
+    reg = load_manual_registry()
+    data = load_product_help_corpus()
+    corpus_ids = {str(s["id"]) for s in data["sections"]}
+    registered: set[str] = set()
+    for ids in reg.sections_by_chapter.values():
+        registered |= set(ids)
+    assert corpus_ids == registered
+    assert frozenset(data["aliases"]) == reg.aliases
 
 
 def test_intentional_dead_manual_links_fail_gate():
@@ -432,7 +448,6 @@ def test_product_help_settings_page_names_fork_by_surface():
 
     body = _skill_bodies(_SURFACE_FORK_SKILL_NAMES)
     _require("☰" in body, "narrow settings path must name ☰ (no 底栏 tab)")
-    _require("手机底栏" not in body, "retired 底栏「我的」must stay absent")
     units = _sentence_units(body)
     for name in _DESKTOP_SETTINGS_PAGES:
         hits = [u for u in units if name in u]

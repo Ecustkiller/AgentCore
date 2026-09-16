@@ -446,7 +446,7 @@ def network_unavailable_message() -> str:
         "可选降级：① 将命令执行轴设为 auto 后重试 run（command 写成装包命令） "
         "→ 再验；② 走结构自检（graph_consistent / import 图）；"
         "③ export_to_local 或本机传统打开本地文件夹后 npm/pnpm/yarn / uv/pip/poetry "
-        "install（已是云端会话时【勿】再引导「导入到云」当修复）。"
+        "install（已是云端会话时【勿】再引导「先在云上做」当修复）。"
     )
 
 

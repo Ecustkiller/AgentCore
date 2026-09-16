@@ -108,4 +108,20 @@ describe("profileSlotSummary", () => {
     expect(summary).not.toContain("后台");
     expect(summary).not.toContain("识图");
   });
+
+  it("appends vendor effort token when the main model sends reasoning_effort", () => {
+    const catalog = [
+      {
+        ...CATALOG[0],
+        reasoning_effort: { options: ["low", "high", "max"], default: "high" },
+      },
+      ...CATALOG.slice(1),
+    ];
+    expect(profileSlotSummary(profile(), catalog)).toBe(
+      "DeepSeek V4 Pro · 跟随主模型 · high",
+    );
+    expect(
+      profileSlotSummary(profile({ reasoning_effort: "low" }), catalog),
+    ).toBe("DeepSeek V4 Pro · 跟随主模型 · low");
+  });
 });

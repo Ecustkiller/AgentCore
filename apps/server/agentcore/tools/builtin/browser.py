@@ -113,11 +113,6 @@ _EGRESS_RETIRE_STEER = (
     "勿再尝试 browser。"
 )
 
-_PURPOSE_PARAM = {
-    "type": "string",
-    "description": "一句话中文说明本次操作意图；作审批说明展示给用户，执行时忽略",
-}
-
 _SESSION_ID_PARAM = {
     "type": "string",
     "description": "可选：目标浏览器 Session id。",
@@ -658,7 +653,6 @@ BROWSER_TOOL_PARAMETERS: dict[str, Any] = {
             "description": "scroll：垂直滚动像素（向下为正）",
             "default": 600,
         },
-        "purpose": _PURPOSE_PARAM,
         "session_id": _SESSION_ID_PARAM,
     },
     "required": ["action"],

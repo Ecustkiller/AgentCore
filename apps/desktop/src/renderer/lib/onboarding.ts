@@ -29,7 +29,7 @@ const ENGAGED_MESSAGE_COUNT = 2;
  * 草稿空态（无消息）两态选择。
  *
  * 判定的是「这个人跑成过一次吗」，不是「这个账号建过对话吗」。曾经按后者判定：只要库里
- * 有一条记录——失败的、中途放弃的、误触建的——示例任务与手册入口就一起永久消失，
+ * 有一条记录——失败的、中途放弃的、误触建的——示例任务就一起永久消失，
  * 第一次没成功的人第二次回来反而更没抓手。
  */
 export function resolveDraftEmptyKind(input: DraftEmptyInput): DraftEmptyKind {

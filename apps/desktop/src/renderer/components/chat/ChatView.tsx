@@ -29,7 +29,6 @@ import { ConversationOutline } from "./ConversationOutline";
 import { FindBar } from "./FindBar";
 import { MessageInput } from "./MessageInput";
 import { MessageList } from "./MessageList";
-import { StageCardDock } from "./StageCardDock";
 
 export function ChatView() {
   const { isNarrow } = useNarrowLayoutState();
@@ -82,12 +81,7 @@ export function ChatView() {
               <DraftEmptyState />
             </div>
           )}
-          {hasMessages && (
-            <>
-              <ConversationDecisionPrompts />
-              <StageCardDock />
-            </>
-          )}
+          {hasMessages && <ConversationDecisionPrompts />}
           <div ref={composerFlipRef}>
             <MessageInput
               className={centerComposer ? "px-4 pb-2" : undefined}

@@ -32,6 +32,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { useLlmModelProfiles } from "@/hooks/useLlmModelProfiles";
 import { useLlmProviders } from "@/hooks/useLlmProviders";
 import { useModels } from "@/hooks/useModels";
+import { PLATFORM_POINTER_ID } from "@/lib/llmDefaults";
 import { ApiError } from "@/services/api";
 import type { LlmModelProfileListResponse } from "@/services/llmModelProfiles";
 import {
@@ -138,6 +139,10 @@ function defaultCatalog() {
         provider_label: "DeepSeek",
         capabilities: [] as string[],
         available: true,
+        reasoning_effort: {
+          options: ["low", "high", "max"],
+          default: "high",
+        },
       },
       {
         id: "gpt-4o",
@@ -174,6 +179,12 @@ function openModelPicker(slotId: string) {
   return screen.getByRole("listbox");
 }
 
+function clickChannelChip(providerId: string) {
+  const chip = document.querySelector(`[data-channel-id="${providerId}"]`);
+  if (!chip) return;
+  fireEvent.click(chip);
+}
+
 /** Click「自定义 model id…」under a provider group (data-provider-group). */
 function enterCustomModelId(
   slotId: string,
@@ -182,6 +193,7 @@ function enterCustomModelId(
 ) {
   const list = openModelPicker(slotId);
   if (providerId) {
+    clickChannelChip(providerId);
     const section = list.querySelector(`[data-provider-group="${providerId}"]`);
     expect(section).toBeTruthy();
     fireEvent.click(
@@ -959,7 +971,10 @@ describe("ModelSettings (profiles)", () => {
     expect(
       within(deepseek as HTMLElement).queryByText("deepseek-v4-flash-free"),
     ).toBeNull();
+    expect(within(list).queryByText("Flash Free")).toBeNull();
+    clickChannelChip(PLATFORM_POINTER_ID);
     expect(within(list).getByText("Flash Free")).toBeTruthy();
+    expect(within(list).queryByText("DeepSeek V4 Flash")).toBeNull();
   });
 
   it("picking a row from another channel updates both channel and model", async () => {
@@ -975,10 +990,11 @@ describe("ModelSettings (profiles)", () => {
     mockProviders(providersResponse());
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "编辑" }));
-    // 办公 starts on p2 / gpt-4o — pick DeepSeek row in the unified list
+    // 办公 starts on p2 / gpt-4o — switch to DeepSeek chip then pick Pro
     const trigger = document.getElementById("profile-main");
     expect(trigger?.textContent).toMatch(/GPT-4o/);
     const list = openModelPicker("profile-main");
+    clickChannelChip("p1");
     fireEvent.click(
       within(list).getByRole("option", { name: /DeepSeek V4 Pro/ }),
     );
@@ -1029,7 +1045,10 @@ describe("ModelSettings (profiles)", () => {
     expect(screen.getByText(/已移除的服务商/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "从目录选择" }));
     const list = screen.getByRole("listbox");
-    expect(within(list).getByText(/已移除的服务商（需改选）/)).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /已移除的服务商（需改选）/ }),
+    ).toBeTruthy();
+    clickChannelChip("p2");
     fireEvent.click(within(list).getByRole("option", { name: /GPT-4o/ }));
     expect(screen.queryByText(/原服务商已移除/)).toBeNull();
   });
@@ -1186,6 +1205,8 @@ describe("ModelSettings (profiles)", () => {
     fireEvent.click(screen.getByRole("button", { name: /高级 · 其他模型/ }));
     const list = openModelPicker("profile-vision");
     expect(within(list).getByText("DeepSeek V4 Pro")).toBeTruthy();
+    expect(within(list).queryByText("GPT-4o")).toBeNull();
+    clickChannelChip("p2");
     expect(within(list).getByText("GPT-4o")).toBeTruthy();
   });
 
@@ -1222,6 +1243,133 @@ describe("ModelSettings (profiles)", () => {
         expect.objectContaining({
           name: "办公 副本",
           vision: { origin: "byok", provider_id: "p2", model: "gpt-4o" },
+        }),
+      ),
+    );
+  });
+
+  it("lists vendor effort tokens for DeepSeek main and hides them for gpt-4o", async () => {
+    vi.mocked(createLlmModelProfile).mockResolvedValue({
+      id: "user-new",
+      name: "未命名组合",
+      kind: "user",
+      is_default: false,
+      main: { origin: "byok", provider_id: "p1", model: "deepseek-v4-pro" },
+      reasoning_effort: "low",
+    });
+    mockProviders(providersResponse());
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "新建" }));
+    expect(screen.getByRole("tablist", { name: "思考强度" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "low" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "high" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "max" })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "medium" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "xhigh" })).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "low" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(createLlmModelProfile).toHaveBeenCalledWith(
+        expect.objectContaining({ reasoning_effort: "low" }),
+      ),
+    );
+
+    cleanup();
+    mockProviders(providersResponse());
+    mockProfiles(profilesResponse());
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    expect(screen.queryByRole("tablist", { name: "思考强度" })).toBeNull();
+  });
+
+  it("resets effort when the new main model has no vendor tokens", async () => {
+    vi.mocked(updateLlmModelProfile).mockResolvedValue({
+      id: "user-mine",
+      name: "办公",
+      kind: "user",
+      is_default: false,
+      main: { origin: "byok", provider_id: "p2", model: "gpt-4o" },
+      reasoning_effort: null,
+    });
+    mockProviders(providersResponse());
+    mockProfiles(
+      profilesResponse({
+        data: [
+          {
+            id: "user-mine",
+            name: "办公",
+            kind: "user",
+            is_default: false,
+            main: {
+              origin: "byok",
+              provider_id: "p1",
+              model: "deepseek-v4-pro",
+            },
+            worker: null,
+            background: null,
+            reasoning_effort: "low",
+          },
+        ],
+      }),
+    );
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    expect(
+      screen.getByRole("tab", { name: "low" }).getAttribute("aria-selected"),
+    ).toBe("true");
+    const list = openModelPicker("profile-main");
+    clickChannelChip("p2");
+    fireEvent.click(within(list).getByRole("option", { name: /GPT-4o/ }));
+    expect(screen.queryByRole("tablist", { name: "思考强度" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(updateLlmModelProfile).toHaveBeenCalledWith(
+        "user-mine",
+        expect.objectContaining({
+          main: { origin: "byok", provider_id: "p2", model: "gpt-4o" },
+          reasoning_effort: null,
+        }),
+      ),
+    );
+  });
+
+  it("copies reasoning_effort with the combination", async () => {
+    vi.mocked(createLlmModelProfile).mockResolvedValue({
+      id: "user-copy",
+      name: "办公 副本",
+      kind: "user",
+      is_default: false,
+      main: { origin: "byok", provider_id: "p1", model: "deepseek-v4-pro" },
+      reasoning_effort: "max",
+    });
+    mockProviders(providersResponse());
+    mockProfiles(
+      profilesResponse({
+        data: [
+          {
+            id: "user-mine",
+            name: "办公",
+            kind: "user",
+            is_default: false,
+            main: {
+              origin: "byok",
+              provider_id: "p1",
+              model: "deepseek-v4-pro",
+            },
+            worker: null,
+            background: null,
+            reasoning_effort: "max",
+          },
+        ],
+      }),
+    );
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "复制" }));
+    await waitFor(() =>
+      expect(createLlmModelProfile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "办公 副本",
+          reasoning_effort: "max",
         }),
       ),
     );

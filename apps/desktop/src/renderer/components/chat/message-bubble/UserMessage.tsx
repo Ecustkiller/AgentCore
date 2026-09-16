@@ -4,7 +4,10 @@ import {
 } from "@/components/chat/debate/CollapsibleSpeech";
 import { Button } from "@/components/ui";
 import { hasInlineMarkers, renderInlineLabels } from "@/lib/inlineBody";
-import { MESSAGE_ACTION_REVEAL_CLASS } from "@/lib/messageActionReveal";
+import {
+  MESSAGE_ACTION_REVEAL_CLASS,
+  USER_MESSAGE_CHROME_OVERLAY_CLASS,
+} from "@/lib/messageActionReveal";
 import { cn } from "@/lib/utils";
 import { runRegenerate } from "@/services/turns";
 import {
@@ -117,7 +120,6 @@ export function UserMessage({ message }: MessageBubbleProps) {
               value={draft}
               attachments={attachments}
               mentions={agentMentions}
-              conversationId={conversationId}
               onChange={setDraft}
               onKeyDown={onEditKeyDown}
             />
@@ -163,11 +165,7 @@ export function UserMessage({ message }: MessageBubbleProps) {
       data-copy-plain=""
     >
       {!hasInlineMarkers(message.content) && (
-        <UserChipTray
-          attachments={attachments}
-          mentions={agentMentions}
-          conversationId={conversationId}
-        />
+        <UserChipTray attachments={attachments} mentions={agentMentions} />
       )}
       {queuedHere && (
         <p
@@ -177,50 +175,53 @@ export function UserMessage({ message }: MessageBubbleProps) {
           排队中
         </p>
       )}
-      <div className="max-w-[80%] rounded-xl rounded-br-none bg-muted px-4 py-3 text-sm text-foreground">
-        <CollapsibleSpeech
-          contentKey={message.content}
-          fadeToClass="from-muted"
-          collapsedMaxH={USER_BUBBLE_COLLAPSED_MAX_H}
-          sceneKey={`user:${message.id}`}
-        >
-          {hasInlineMarkers(message.content) ? (
-            <UserInlineBody
-              content={message.content}
-              attachments={attachments}
-              mentions={agentMentions}
-              conversationId={conversationId}
+      <div className="relative flex max-w-[80%] flex-col items-end gap-1.5">
+        <div className="rounded-xl rounded-br-none bg-muted px-4 py-3 text-sm text-foreground">
+          <CollapsibleSpeech
+            contentKey={message.content}
+            fadeToClass="from-muted"
+            collapsedMaxH={USER_BUBBLE_COLLAPSED_MAX_H}
+            sceneKey={`user:${message.id}`}
+          >
+            {hasInlineMarkers(message.content) ? (
+              <UserInlineBody
+                content={message.content}
+                attachments={attachments}
+                mentions={agentMentions}
+              />
+            ) : (
+              <p className="whitespace-pre-wrap">{message.content}</p>
+            )}
+          </CollapsibleSpeech>
+        </div>
+        {message.syncStatus && (
+          <div className="flex justify-end">
+            <SyncStatusHint syncStatus={message.syncStatus} align="end" />
+          </div>
+        )}
+        {!isGenerating && (
+          <div
+            className={cn(
+              "flex items-center justify-end gap-0.5",
+              MESSAGE_ACTION_REVEAL_CLASS,
+              USER_MESSAGE_CHROME_OVERLAY_CLASS,
+            )}
+            data-testid="user-message-chrome"
+          >
+            <MessageAction
+              icon={copied ? <Check size={13} /> : <Copy size={13} />}
+              label={copied ? "已复制" : "复制"}
+              onClick={onCopy}
             />
-          ) : (
-            <p className="whitespace-pre-wrap">{message.content}</p>
-          )}
-        </CollapsibleSpeech>
+            <MessageAction
+              icon={<Pencil size={13} />}
+              label="编辑"
+              onClick={startEdit}
+            />
+            <MessageTime iso={message.createdAt} />
+          </div>
+        )}
       </div>
-      {message.syncStatus && (
-        <div className="flex justify-end">
-          <SyncStatusHint syncStatus={message.syncStatus} align="end" />
-        </div>
-      )}
-      {!isGenerating && (
-        <div
-          className={cn(
-            "flex items-center gap-0.5",
-            MESSAGE_ACTION_REVEAL_CLASS,
-          )}
-        >
-          <MessageAction
-            icon={copied ? <Check size={13} /> : <Copy size={13} />}
-            label={copied ? "已复制" : "复制"}
-            onClick={onCopy}
-          />
-          <MessageAction
-            icon={<Pencil size={13} />}
-            label="编辑"
-            onClick={startEdit}
-          />
-          <MessageTime iso={message.createdAt} />
-        </div>
-      )}
     </div>
   );
 }

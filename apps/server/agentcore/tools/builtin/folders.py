@@ -97,12 +97,12 @@ _NOT_FOUND_HINT = (
     "嵌套账号注意先确认层级（`设计/图标` ≠ 顶层 `图标`）。"
     "【勿】为过写盘闸而 create_folder / ask_user 建夹——"
     "裸聊写盘：云会话由运行时自动建云文件夹；"
-    "桌面本地对话已在本机 scratch（本次对话），勿再导入到云当默认。"
+    "桌面本地对话已在本机 scratch（本次对话），勿再「先在云上做」当默认。"
     "仅当用户明确要求新建云文件夹（可带名）或显式多线先建时，"
     "才用 create_folder"
     "（同指挥面登记，不改本会话归属、不新开会话）；"
     "用户点名本机目录：Composer「直接改这个文件夹」或 open_local_project / "
-    "register_local_project / bind_local_folder（≠离线）；换设备才「导入到云」。"
+    "register_local_project / bind_local_folder（≠离线）；换设备才「先在云上做」。"
     "禁止静默猜「最近」。"
 )
 _EMPTY_LIST_HINT = (
@@ -112,7 +112,7 @@ _EMPTY_LIST_HINT = (
     "仅当用户明确要求新建云文件夹（可带名）或显式多线先建时，"
     "才用 create_folder"
     "（同指挥面）；"
-    "用户点名本机目录走 Composer「直接改这个文件夹」；换设备才「导入到云」。"
+    "用户点名本机目录走 Composer「直接改这个文件夹」；换设备才「先在云上做」。"
     "勿默认催 open_local_project / register_local_project（≠离线）。"
 )
 _RESOLVED_TIP = (
@@ -492,9 +492,6 @@ class ResolveFolderTool:
                         "description": (
                             "文件夹路径（POSIX、相对云盘树根，如 `设计/图标`）"
                             "或用户口述的单个名字（精确或可唯一子串）。"
-                            "匹配顺序：完整路径精确命中 → 路径后缀"
-                            "（`图标` 命中 `设计/图标`）→ 单段名子串。"
-                            "已知层级时传完整路径，歧义最少。"
                         ),
                     },
                 },

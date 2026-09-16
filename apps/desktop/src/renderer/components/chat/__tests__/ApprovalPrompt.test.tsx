@@ -339,6 +339,16 @@ describe("ApprovalCard host headline", () => {
     );
     expect(screen.getByText("status")).toBeTruthy();
   });
+
+  it("shows restart_service Audiosrv without a service field", () => {
+    renderCard(
+      card({
+        toolName: "host",
+        arguments: { action: "restart_service" },
+      }),
+    );
+    expect(screen.getByText("restart_service Audiosrv")).toBeTruthy();
+  });
 });
 
 describe("ApprovalCard delete_folder headline", () => {
@@ -579,15 +589,25 @@ describe("ApprovalCard extra payload (omit restatements of the headline)", () =>
     expect(screen.queryByText(/"content"/)).toBeNull();
   });
 
-  it("shows code_execute source under the purpose", () => {
+  it("shows code_execute source as a code preview", () => {
     renderCard(
       card({
         toolName: "code_execute",
-        arguments: { purpose: "算一下", code: "print(1)" },
+        arguments: { code: "print(1)" },
       }),
     );
-    expect(screen.getByText("算一下")).toBeTruthy();
+    expect(screen.getByText("print(1)")).toBeTruthy();
     expect(document.querySelector(".code-block")).toBeTruthy();
+  });
+
+  it("uses run command as headline", () => {
+    renderCard(
+      card({
+        toolName: "run",
+        arguments: { command: "pytest tests" },
+      }),
+    );
+    expect(screen.getByText("pytest tests")).toBeTruthy();
   });
 
   it("shows file_move as source → destination on the title line", () => {

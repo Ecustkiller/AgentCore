@@ -1,14 +1,12 @@
-"""End-to-end: a durable resume re-wires consult to the SAME scope the turn
-paused in, so the resumed CEO loop actually reaches the PROJECT topic (project 主题 first).
+"""End-to-end: a durable resume re-wires consult so the resumed CEO loop can
+still pull an on-demand handbook. Topic notes on disk must not ride back.
 
 Where the unit tests pin the pieces in isolation —
-- ``consult`` resolves project-then-global (``test_consult``),
+- ``consult`` resolves skills / on-demand rules,
 - the durable frame carries ``folder_id`` (``test_durable`` / ``test_sidecar_paused``),
 - ``_assemble_ceo_toolset`` maps ``folder_id`` → ``consult.folder_id`` —
 this drives the REAL :func:`resume_chat_pipeline` (the same entry the cloud
-``POST .../resume`` route and the Sidecar both call) end to end, folding the whole chain
-``frame → assemble → CEO loop → consult → project store`` so a regression ANYWHERE
-along it surfaces here, not just in an isolated seam.
+``POST .../resume`` route and the Sidecar both call) end to end.
 
 The consult wiring is kind-AGNOSTIC: ``resume_chat_pipeline`` assembles the CEO
 toolset ONCE (with the frame's ``folder_id``) BEFORE the kind-specific
@@ -38,6 +36,8 @@ from tests.llm_helpers import make_turn_profiles
 USER_ID = "u1"
 FOLDER_ID = "F1"
 TOPIC = "部署流程"
+SKILL = "staffing"
+SKILL_MARKER = "先定位入口就停"
 PROJECT_BODY = "## 本项目部署\n- 用 pnpm deploy:backend\n- 生产机构建镜像\n"
 GLOBAL_BODY = "## 全局部署\n- 通用 CI 流程\n"
 
@@ -69,7 +69,9 @@ class _ScriptedProvider:
     async def stream(self, request):  # noqa: ANN001 - duck-typed for the engine loop
         self.requests.append(request)
         # Past the script, answer tool-free so the loop always finalizes (never hangs).
-        chunks = self._rounds[self.calls] if self.calls < len(self._rounds) else [_content_chunk("收尾")]
+        chunks = (
+            self._rounds[self.calls] if self.calls < len(self._rounds) else [_content_chunk("收尾")]
+        )
         self.calls += 1
         for chunk in chunks:
             yield chunk
@@ -92,9 +94,7 @@ def _patch_seams(monkeypatch, provider: _ScriptedProvider, store: FileMemoryStor
         return provider
 
     monkeypatch.setattr(pipeline, "build_turn_router", _fake_build_turn_router)
-    monkeypatch.setattr(
-        "agentcore.runtime.resolve.prepare.default_memory_store", lambda: store
-    )
+    monkeypatch.setattr("agentcore.runtime.resolve.prepare.default_memory_store", lambda: store)
     # No live client on a resume test → keep the loop free of the approval gate.
     monkeypatch.setattr(settings, "approval_gate_enabled", False)
 
@@ -160,16 +160,15 @@ def _tool_messages(request) -> list[str]:
     return [m.content or "" for m in request.messages if m.role == "tool"]
 
 
-async def test_resume_consult_hits_project_topic(monkeypatch, tmp_path):
-    # Resume a project turn (memory ON): the CEO loop calls consult(部署流程) and the
-    # REAL re-wired tool resolves it in PROJECT scope first → the project note's body is what
-    # rides back into the loop, NOT the same-named global note.
+async def test_resume_consult_hits_skill_not_topic_notes(monkeypatch, tmp_path):
+    # Resume a project turn: leftover topic notes on disk must not leak into consult;
+    # the CEO loop pulls a live system skill instead.
     store = FileMemoryStore(tmp_path / "memory")
     await _seed_topics(store)
     provider = _ScriptedProvider(
         [
-            [_tool_chunk("consult", f'{{"name": "{TOPIC}"}}', call_id="cm1")],
-            [_content_chunk("已读取本项目部署流程，开始执行。")],
+            [_tool_chunk("consult", f'{{"name": "{SKILL}"}}', call_id="cm1")],
+            [_content_chunk("已读取编排手册，开始执行。")],
         ]
     )
     _patch_seams(monkeypatch, provider, store)
@@ -184,11 +183,10 @@ async def test_resume_consult_hits_project_topic(monkeypatch, tmp_path):
     )
 
     assert result["finish_reason"] == FinishReason.END_TURN
-    assert "本项目部署流程" in result["content"]
-    # The consult result rides the 2nd round as a tool message: it MUST be the
-    # project body (more specific), and the global body of the same name must NOT leak.
+    assert "编排手册" in result["content"]
     fed_back = _tool_messages(provider.requests[1])
-    assert PROJECT_BODY in fed_back
+    assert any(SKILL_MARKER in msg for msg in fed_back)
+    assert all(PROJECT_BODY not in msg for msg in fed_back)
     assert all(GLOBAL_BODY not in msg for msg in fed_back)
 
 
@@ -198,8 +196,8 @@ async def test_resume_ignores_legacy_memory_off_frame(monkeypatch, tmp_path):
     await _seed_topics(store)
     provider = _ScriptedProvider(
         [
-            [_tool_chunk("consult", f'{{"name": "{TOPIC}"}}', call_id="cm1")],
-            [_content_chunk("已读取本项目部署流程，开始执行。")],
+            [_tool_chunk("consult", f'{{"name": "{SKILL}"}}', call_id="cm1")],
+            [_content_chunk("已读取编排手册，开始执行。")],
         ]
     )
     _patch_seams(monkeypatch, provider, store)
@@ -221,4 +219,5 @@ async def test_resume_ignores_legacy_memory_off_frame(monkeypatch, tmp_path):
 
     assert result["finish_reason"] == FinishReason.END_TURN
     fed_back = _tool_messages(provider.requests[1])
-    assert PROJECT_BODY in fed_back
+    assert any(SKILL_MARKER in msg for msg in fed_back)
+    assert all(PROJECT_BODY not in msg for msg in fed_back)

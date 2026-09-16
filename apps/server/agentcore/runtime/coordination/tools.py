@@ -1,4 +1,4 @@
-"""CEO coordination tools: wait + update_synthesis + cancel_worker
+"""CEO coordination tools: wait + cancel_worker
 + resolve_escalation + queue_user_message.
 """
 
@@ -10,7 +10,6 @@ from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolFace
 from agentcore.runtime.coordination.session import resolve_coordination_session
 from agentcore.runtime.coordination.vacate import vacate_never_started_seat
-from agentcore.runtime.events import team_synthesis_preview
 from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.runtime.resolve.ceo_surface import COORDINATION_PERIOD_HINT
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
@@ -19,7 +18,7 @@ logger = get_logger(__name__)
 
 
 def _session_for_control(context: ToolContext):
-    """Wait / cancel / synthesis look up the observation graph.
+    """Wait / cancel look up the observation graph.
 
     Cross-turn adopt leaves ``context.execution_id`` as this turn's mint (dispatch)
     while ``current_execution_id`` stays on the previous live graph. Fall back so
@@ -45,7 +44,7 @@ class WaitTool:
             description=(
                 "协调中无需处置时调用：确认继续等团队事件。"
                 f"{COORDINATION_PERIOD_HINT}"
-                "勿用 delegate / update_synthesis 占位等待。"
+                "勿用 delegate 占位等待。"
             ),
             parameters={
                 "type": "object",
@@ -109,102 +108,8 @@ class WaitTool:
             success=True,
             output=(
                 "已确认等待团队事件（无需处置）。继续静默听团；"
-                "勿再为等待而调用 delegate / update_synthesis。"
+                "勿再为等待而调用 delegate。"
             ),
-        )
-
-
-class UpdateSynthesisTool:
-    """Update the progressive CEO synthesis draft and push ``team_synthesis_preview``."""
-
-    def __init__(self, *, sink: Any) -> None:
-        self._sink = sink
-
-    @property
-    def schema(self) -> ToolSchema:
-        return ToolSchema(
-            name="update_synthesis",
-            description=(
-                "协调中更新合成草稿（用户可见预览，非终稿）。"
-                "只在里程碑：新结论、冲突、方向修正、阶段收束。"
-                "例行完成不要调；终稿用正文。"
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "draft": {
-                        "type": "string",
-                        "description": "合成草稿全文（覆盖上一版）。须含新结论或方向变化。",
-                    },
-                },
-                "required": ["draft"],
-            },
-            face=ToolFace.ORCHESTRATION,
-            approval=ToolApproval.NEVER,
-        )
-
-    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
-        session = _session_for_control(context)
-        if session is None:
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error="当前不在协调模式——仅在协调模式启动团队后可用（≥1 worker 默认；"
-                "显式 coordinate=false 为阻塞路径）。",
-            )
-        if not session.active:
-            # Team finished and session closed — soft tip, not error (avoids burning a
-            # CEO retry round). Distinct from「从未开团」(session is None above).
-            return ToolResult(
-                tool_call_id="",
-                success=True,
-                output=(
-                    "团队已全部完成，协调会话已收口。请直接用正文写出最终合成"
-                    "（content_delta），不必再调 update_synthesis。"
-                ),
-            )
-        draft = str(arguments.get("draft") or "").strip()
-        if not draft:
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error="update_synthesis 需要非空的 draft。",
-            )
-        # 合成预览跟对话成稿同一口径：已登记号（含 search-only）保留；不剥正文。
-        session.update_draft(draft)
-        done = len(session.completed_run_ids)
-        total = session.total_workers
-        headline = f"合成草稿更新 · 已完成 {done}/{total}"
-        self._sink.emit(
-            team_synthesis_preview(
-                execution_id=session.execution_id,
-                completed=done,
-                total=total,
-                headline=headline,
-                text=draft,
-                workers=[],
-                in_progress=True,
-            )
-        )
-        # Persist coordination state into the turn journal for ask_user / resume.
-        from agentcore.runtime.coordination.journal import record_coordination_snapshot
-
-        record_coordination_snapshot(session)
-        logger.info(
-            "coordination.synthesis_updated",
-            execution_id=session.execution_id,
-            draft_chars=len(draft),
-            completed=done,
-            total=total,
-        )
-        # 插话 addressed 由编排循环在 CEO 工具步汇合点统一标记
-        # （update_synthesis / delegate / cancel_worker），勿在各工具里逐个补。
-        return ToolResult(
-            tool_call_id="",
-            success=True,
-            output=f"已更新合成草稿（{len(draft)} 字），用户可见「进展中」预览。",
         )
 
 
@@ -441,7 +346,7 @@ class ResolveEscalationTool:
         if not session.active:
             # Team finished and session closed — soft tip, not error (avoids burning a
             # CEO retry round on a now-idempotent late arbitration). Distinct from
-            # 「从未开团」(session is None above); mirrors UpdateSynthesisTool's stance.
+            # 「从未开团」(session is None above).
             return ToolResult(
                 tool_call_id="",
                 success=True,

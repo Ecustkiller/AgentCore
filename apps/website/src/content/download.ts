@@ -36,8 +36,8 @@ export const PLATFORM_COPY: Record<
     label: "macOS",
     subtitle: { zh: "macOS 13 Ventura 及以上", en: "macOS 13 Ventura and later" },
     meta: {
-      zh: "仅 Apple Silicon（M 系列）。内测包未签名，首次打开须右键 →「打开」。",
-      en: "Apple Silicon (M-series) only. The beta build is unsigned — right-click → Open the first time.",
+      zh: "仅 Apple Silicon（M 系列）。内测未签名；系统若报「已损坏」，按下方安装步骤用终端解除隔离。",
+      en: "Apple Silicon (M-series) only. Unsigned beta — if macOS says it's damaged, follow the install steps to clear quarantine.",
     },
   },
   android: {
@@ -105,8 +105,8 @@ export const REQUIREMENTS = {
 export const AUTO_UPDATE = {
   eyebrow: { zh: "检查更新", en: "Check for updates" },
   body: {
-    zh: "已安装用户可在设置 → 关于检查更新。有新版本时应用会把安装包下载到本机「下载」文件夹，打开后按向导覆盖安装。macOS 内测包未签名，打开 dmg / 替换后再启动须右键 →「打开」。",
-    en: "Installed users can check for updates in Settings → About. New versions download the installer to your Downloads folder; open it and follow the wizard. Unsigned macOS builds still need right-click → Open after replacing the app.",
+    zh: "已安装用户可在设置 → 关于检查更新。有新版本时应用会把安装包下载到本机「下载」文件夹，打开后按向导覆盖安装。macOS 内测包未签名；替换后若提示「已损坏」，在终端执行 xattr -cr /Applications/AgentCore.app 再打开。",
+    en: "Installed users can check for updates in Settings → About. New versions download the installer to your Downloads folder; open it and follow the wizard. Unsigned macOS builds: if the app is reported damaged after replacing, run xattr -cr /Applications/AgentCore.app in Terminal, then open it.",
   },
 };
 
@@ -135,8 +135,8 @@ export const INSTALL_STEPS: Partial<Record<PlatformId, T[]>> = {
       en: "Download the DMG and drag AgentCore into Applications.",
     },
     {
-      zh: "首次打开：右键 AgentCore →「打开」→ 确认（内测包未签名，勿直接双击）。",
-      en: "First launch: right-click AgentCore → Open → confirm. The beta build is unsigned, so don't double-click.",
+      zh: "内测包未签名。若提示「已损坏」或无法验证开发者：打开「终端」，执行 xattr -cr /Applications/AgentCore.app，再启动。这是系统拦截，不是安装包坏了。",
+      en: "The beta build is unsigned. If macOS says the app is damaged or the developer cannot be verified, open Terminal, run xattr -cr /Applications/AgentCore.app, then launch it. That's the system blocking an unsigned app, not a broken download.",
     },
     {
       zh: "注册账号并登录；设置 → 关于 可检查更新。",

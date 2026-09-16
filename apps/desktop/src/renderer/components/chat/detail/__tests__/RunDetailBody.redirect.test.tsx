@@ -115,6 +115,7 @@ const runningRun: RunNode = {
   kind: "agent",
   role: "member",
   model: null,
+  reasoningEffort: null,
   usage: null,
   cost: null,
   stance: null,

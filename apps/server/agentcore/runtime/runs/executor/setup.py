@@ -45,10 +45,10 @@ from agentcore.runtime.runs.executor.shared import (
     _registry_with,
     _registry_without,
 )
+from agentcore.runtime.runs.redrive_sites import ResumeKind, get_resume_hint
 from agentcore.runtime.runs.retrieval_budget import RETRIEVAL_TOOL_NAMES
 from agentcore.runtime.runs.types import (
     ContextBlock,
-    RunPhase,
     RunSpec,
     RunState,
     deliverable_expects_landing,
@@ -366,24 +366,23 @@ async def _prepare_agent_node(
     # received_blocks captures the SAME ContextBlocks the opening was rendered
     # from (单一源), so the run_context event ships exactly what the LLM was fed.
     #
-    # Wave infra-retry 热续: when the scheduler seeds ``completed[self]`` with the
-    # prior FAILED+transcript attempt, resume that site (continue semantics) instead
-    # of cold ``_build_messages`` — same run_id, consume the hung transcript.
+    # ResumeHint (crash / infra): Wave still dispatches unfinished ids; the
+    # continue window is bound separately so ``completed`` stays a skip table.
     received_blocks: list[ContextBlock] = []
-    prior_attempt = completed.get(spec.run_id)
-    # Cold-open vs infra-retry continuation: hung FAILED+transcript resumes in place.
-    cold_open = not (
-        prior_attempt is not None
-        and prior_attempt.phase is RunPhase.FAILED
-        and prior_attempt.transcript
-    )
-    if not cold_open:
+    hint = get_resume_hint(spec.run_id)
+    if hint is not None and hint.kind is ResumeKind.CRASH:
+        # Same-turn assistant+tool_calls must keep reasoning_content so thinking
+        # dialects can echo it on the next provider call (stripping is for a
+        # later beat after 续干). Do not append a 续干 user line — that would
+        # sit after pending assistant tool_calls (invalid).
+        messages[:] = list(hint.transcript)
+    elif hint is not None:
         from agentcore.runtime.runs.executor.continuation import (
             _record_continuation_run_head,
             _strip_historical_reasoning,
         )
 
-        messages[:] = _strip_historical_reasoning(list(prior_attempt.transcript))
+        messages[:] = _strip_historical_reasoning(list(hint.transcript))
         messages.append(
             _continuation_message(
                 "上一跳因临时上游失败中断。请在已有现场与产出上继续完成原任务。"

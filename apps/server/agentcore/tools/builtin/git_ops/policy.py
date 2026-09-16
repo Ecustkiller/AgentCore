@@ -272,7 +272,7 @@ GIT_TOOL_PARAMETERS: dict[str, Any] = {
         },
         "staged": {
             "type": "boolean",
-            "description": "diff --cached。",
+            "description": "diff 暂存区。",
             "default": False,
         },
         "include_untracked": {
@@ -282,12 +282,14 @@ GIT_TOOL_PARAMETERS: dict[str, Any] = {
         },
         "max_count": {
             "type": "integer",
-            "description": "log 条数（默认 20，上限 100）。",
+            "description": "log 条数。",
             "default": 20,
+            "minimum": 1,
+            "maximum": 100,
         },
         "oneline": {
             "type": "boolean",
-            "description": "log --oneline。",
+            "description": "log 单行。",
             "default": True,
         },
         "message": {
@@ -300,28 +302,28 @@ GIT_TOOL_PARAMETERS: dict[str, Any] = {
         },
         "create": {
             "type": "boolean",
-            "description": "checkout -b。",
+            "description": "checkout 新建分支。",
             "default": False,
         },
         "remote": {
             "type": "string",
-            "description": "fetch/pull/push 远程名（默认 origin）。",
+            "description": "fetch/pull/push 远程名。",
             "default": "origin",
         },
         "set_upstream": {
             "type": "boolean",
-            "description": "push --set-upstream。",
+            "description": "push 设上游。",
             "default": False,
         },
         "object": {
             "type": "string",
-            "description": "show 对象（默认 HEAD）。",
+            "description": "show 对象。",
             "default": "HEAD",
         },
         "action": {
             "type": "string",
             "enum": ["list", "push", "pop", "create", "add"],
-            "description": "stash：list|push|pop；tag：list|create；remote：list|add。默认 list。",
+            "description": "stash / tag / remote 的动作。",
             "default": "list",
         },
         "ref": {

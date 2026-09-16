@@ -9,6 +9,7 @@ import { useConversationStore } from "@/stores/conversation";
 import {
   execRuntime,
   frameFromEvent,
+  frameTimeOf,
   planFromRunPlan,
   useExecutionStore,
   userInterjectionFromPayload,
@@ -339,7 +340,7 @@ export function handleExecutionEvent(
       }
       useConversationStore
         .getState()
-        .addProcessTool(startPayload, conversationId);
+        .addProcessTool(startPayload, conversationId, frameTimeOf(event));
       return true;
     }
     case "tool_use_end": {

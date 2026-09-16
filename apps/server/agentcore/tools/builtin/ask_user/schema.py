@@ -10,7 +10,6 @@ from typing import Any
 # card always lets the user steer beyond these.
 _MAX_QUESTIONS = 5  # 开场重点问题最多 5 个（对齐 Cursor 2.1 的 3–5）
 _MAX_OPTIONS = 6  # 每个 choice 问题的选项上限
-_MAX_OPTION_DETAIL = 120  # 单个选项的权衡说明上限（一行内）
 _LOCAL_PROJECT_ACTIONS: tuple[str, ...] = (
     "open_local_project",
     "register_local_project",
@@ -116,10 +115,11 @@ def coerce_list_arg(
 def option_label(opt: Any) -> str:
     """The canonical label of a choice option, tolerant of both shapes.
 
-    Options normalize to ``{label, detail?}`` dicts (``detail`` only for dedicated
-    cards), but a durable frame persisted before that change (or a hand-built
-    test) may still carry a bare string — both the live tool and a resume read labels
-    through here so an old paused turn still settles. The label is the answer value
+    Options normalize to ``{label}`` dicts (plus optional ``action`` /
+    organize_plan ``op`` fields), but a durable frame persisted before that
+    change (or a hand-built test) may still carry a bare string — both the live
+    tool and a resume read labels through here so an old paused turn still
+    settles. The label is the answer value
     (答复模型 α): no separate wire value exists. Tendency lives in the name
     (``（推荐）`` / ``(recommended)``), not a separate flag.
     """
@@ -137,7 +137,6 @@ def normalize_options(
     raw: Any,
     *,
     max_options: int = _MAX_OPTIONS,
-    keep_detail: bool = False,
 ) -> list[dict[str, Any]]:
     """Cap choice options, accepting either bare strings or rich objects.
 
@@ -146,10 +145,8 @@ def normalize_options(
     ``{"label": "Postgres"}``; an object may add ``action`` (a desktop client action
     such as ``open_local_project`` / ``register_local_project`` / ``bind_local_folder``
     — unknown values drop so a hallucinated action never reaches the wire).
-    ``detail`` (the one-line trade-off under the label) is kept only when
-    ``keep_detail`` is true — dedicated card ``organize_plan``.
-    Ordinary short asks and escalate drop it even if the model filled it; put the
-    trade-off in ``label``. Empty-label entries drop. Names may carry
+    ``detail`` is dropped even if the model filled it; put the trade-off in
+    ``label``. Empty-label entries drop. Names may carry
     ``（推荐）`` / ``(recommended)``.
     """
     cap = max(1, int(max_options))
@@ -161,10 +158,6 @@ def normalize_options(
             continue
         opt: dict[str, Any] = {"label": label}
         if isinstance(it, dict):
-            if keep_detail:
-                detail = str(it.get("detail") or "").strip()
-                if detail:
-                    opt["detail"] = detail[:_MAX_OPTION_DETAIL]
             action = str(it.get("action") or "").strip()
             if action in _ALLOWED_OPTION_ACTIONS:
                 opt["action"] = action
@@ -183,22 +176,6 @@ def normalize_options(
                     p = str(it.get("path") or "").strip()
                     if p:
                         opt["path"] = p
-            # Historical option fields (retired daily_review); still passed through.
-            review_kind = str(it.get("review_kind") or "").strip()
-            if review_kind in ("preference", "profile", "topic", "rule", "doc"):
-                opt["review_kind"] = review_kind
-                body = str(it.get("body") or "").strip()
-                if body:
-                    opt["body"] = body[:4000]
-                slug = str(it.get("slug") or "").strip()
-                if slug:
-                    opt["slug"] = slug[:64]
-                section = str(it.get("section") or "").strip()
-                if section:
-                    opt["section"] = section[:64]
-                rpath = str(it.get("path") or "").strip()
-                if rpath and review_kind == "doc":
-                    opt["path"] = rpath[:240]
         out.append(opt)
         if len(out) >= cap:
             break
@@ -224,9 +201,6 @@ def _flattened_option_raw(it: dict[str, Any]) -> list[dict[str, Any]]:
     if not label:
         return []
     raw: dict[str, Any] = {"label": label}
-    detail = str(it.get("detail") or "").strip()
-    if detail:
-        raw["detail"] = detail
     return [raw]
 
 
@@ -234,15 +208,13 @@ def normalize_questions(
     raw: Any,
     *,
     max_options: int = _MAX_OPTIONS,
-    keep_detail: bool = False,
 ) -> list[dict[str, Any]]:
     """Cap (≤5) + id the questions, normalizing kind/options/multiple/default.
 
     ``default`` is optional here (unlike the old kickoff): an opening question should
     pre-fill one, but a mid-task fork usually wants the user to actively choose, so it
-    is left empty when the CEO omits it.     ``max_options`` / ``keep_detail`` forward to
-    :func:`normalize_options` (cap raised for ``organize_plan``;
-    ``keep_detail`` only for that dedicated card).
+    is left empty when the CEO omits it.     ``max_options`` forwards to
+    :func:`normalize_options` (cap raised for ``organize_plan``).
 
     Choice with no options after absorb is lowered to ``text`` so the card is
     fill-in, never a zero-button choice. A question-level ``label`` with absent
@@ -265,7 +237,7 @@ def normalize_questions(
                 if absorbed:
                     raw_options = absorbed
             options = normalize_options(
-                raw_options, max_options=max_options, keep_detail=keep_detail
+                raw_options, max_options=max_options
             )
             multiple = bool(it.get("multiple") or False)
             default = str(it.get("default") or "").strip()
@@ -305,3 +277,10 @@ def normalize_questions(
             }
         )
     return out
+
+
+def card_stem(questions: list[dict[str, Any]]) -> str:
+    """Wire ``question`` headline: the first question prompt."""
+    if not questions:
+        return ""
+    return str(questions[0].get("prompt") or "").strip()

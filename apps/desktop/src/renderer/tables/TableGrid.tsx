@@ -1,9 +1,10 @@
-import { Button } from "@/components/ui";
+import { IconButton } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { Plus } from "lucide-react";
 import {
   type ClipboardEvent,
   type KeyboardEvent,
+  type PointerEvent,
   useCallback,
   useRef,
   useState,
@@ -12,12 +13,15 @@ import { ColumnHeader } from "./ColumnHeader";
 import { CellDisplay, CellEditor } from "./cells";
 import { formatCell, parsePasted } from "./fieldMeta";
 import type { CellValue, ColumnDef, Density, TableRow } from "./types";
+import { COLUMN_WIDTH_DEFAULT, clampColumnWidth } from "./types";
 
 const ROW_H: Record<Density, string> = {
   compact: "h-7",
   comfortable: "h-9",
   loose: "h-12",
 };
+
+const SELECT_COL_W = 40;
 
 type CellRef = { rowId: string; columnId: string };
 
@@ -26,14 +30,17 @@ export function TableGrid({
   rows,
   density,
   selectedIds,
+  columnWidths = {},
   onToggleRow,
   onToggleAll,
   onUpdateCell,
   onAddRow,
+  onAddColumn,
   onUpdateColumn,
   onHideColumn,
   onRemoveColumn,
   onSort,
+  onColumnWidth,
   fill = true,
   showAddRow = true,
 }: {
@@ -41,23 +48,38 @@ export function TableGrid({
   rows: TableRow[];
   density: Density;
   selectedIds: Set<string>;
+  columnWidths?: Record<string, number>;
   onToggleRow: (id: string) => void;
   onToggleAll: () => void;
   onUpdateCell: (rowId: string, columnId: string, value: CellValue) => void;
   onAddRow: () => void;
+  onAddColumn?: () => void;
   onUpdateColumn: (columnId: string, patch: Partial<ColumnDef>) => void;
   onHideColumn: (columnId: string) => void;
   onRemoveColumn: (columnId: string) => void;
   onSort: (columnId: string, dir: "asc" | "desc") => void;
+  onColumnWidth?: (columnId: string, width: number) => void;
   fill?: boolean;
   showAddRow?: boolean;
 }) {
   const [editing, setEditing] = useState<CellRef | null>(null);
   const [selected, setSelected] = useState<CellRef | null>(null);
   const [draft, setDraft] = useState<CellValue>(null);
+  const [drag, setDrag] = useState<{ id: string; width: number } | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const rowH = ROW_H[density];
   const allOn = rows.length > 0 && rows.every((r) => selectedIds.has(r.id));
+
+  const widthOf = useCallback(
+    (id: string) =>
+      drag?.id === id ? drag.width : (columnWidths[id] ?? COLUMN_WIDTH_DEFAULT),
+    [columnWidths, drag],
+  );
+
+  const tableWidth =
+    SELECT_COL_W +
+    columns.reduce((sum, col) => sum + widthOf(col.id), 0) +
+    (onAddColumn ? SELECT_COL_W : 0);
 
   const selectCell = useCallback((next: CellRef) => {
     setSelected(next);
@@ -186,6 +208,38 @@ export function TableGrid({
     );
   };
 
+  const startResize = (
+    columnId: string,
+    e: PointerEvent<HTMLButtonElement>,
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startW = widthOf(columnId);
+    const onMove = (ev: globalThis.PointerEvent) => {
+      setDrag({
+        id: columnId,
+        width: clampColumnWidth(startW + ev.clientX - startX),
+      });
+    };
+    const onUp = (ev: globalThis.PointerEvent) => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      const next = clampColumnWidth(startW + ev.clientX - startX);
+      setDrag(null);
+      onColumnWidth?.(columnId, next);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
+  const stickyBg = (rowId?: string) =>
+    cn(
+      "bg-background",
+      rowId && selectedIds.has(rowId) && "bg-primary/5",
+      rowId && "group-hover:bg-accent/60",
+    );
+
   return (
     <div
       ref={gridRef}
@@ -202,10 +256,23 @@ export function TableGrid({
       onCopy={onCopy}
       onPaste={onPaste}
     >
-      <table className="min-w-full border-collapse text-sm">
-        <thead className="sticky top-0 z-10 bg-background">
+      <table
+        className="border-collapse text-sm"
+        style={{ tableLayout: "fixed", width: tableWidth }}
+      >
+        <colgroup>
+          <col style={{ width: SELECT_COL_W }} />
+          {columns.map((col) => (
+            <col key={col.id} style={{ width: widthOf(col.id) }} />
+          ))}
+          {onAddColumn ? <col style={{ width: SELECT_COL_W }} /> : null}
+        </colgroup>
+        <thead className="sticky top-0 z-10">
           <tr className="border-b border-border">
-            <th className="w-10 px-2">
+            <th
+              className="sticky left-0 z-20 bg-background px-2"
+              style={{ width: SELECT_COL_W }}
+            >
               <input
                 type="checkbox"
                 aria-label="全选"
@@ -214,8 +281,19 @@ export function TableGrid({
                 onChange={onToggleAll}
               />
             </th>
-            {columns.map((col) => (
-              <th key={col.id} className="min-w-[10rem] px-2 py-2 text-left">
+            {columns.map((col, index) => (
+              <th
+                key={col.id}
+                className={cn(
+                  "relative bg-background px-2 py-2 text-left",
+                  index === 0 && "sticky z-20",
+                )}
+                style={
+                  index === 0
+                    ? { left: SELECT_COL_W, width: widthOf(col.id) }
+                    : { width: widthOf(col.id) }
+                }
+              >
                 <ColumnHeader
                   column={col}
                   canDelete={columns.length > 1}
@@ -224,8 +302,23 @@ export function TableGrid({
                   onRemove={() => onRemoveColumn(col.id)}
                   onSort={(dir) => onSort(col.id, dir)}
                 />
+                {onColumnWidth ? (
+                  <button
+                    type="button"
+                    aria-label={`调整${col.label}列宽`}
+                    className="absolute top-0 right-0 z-30 h-full w-1.5 cursor-col-resize hover:bg-primary/40"
+                    onPointerDown={(e) => startResize(col.id, e)}
+                  />
+                ) : null}
               </th>
             ))}
+            {onAddColumn ? (
+              <th className="bg-background px-1">
+                <IconButton size="sm" aria-label="添加列" onClick={onAddColumn}>
+                  <Plus size={14} />
+                </IconButton>
+              </th>
+            ) : null}
           </tr>
         </thead>
         <tbody>
@@ -233,11 +326,18 @@ export function TableGrid({
             <tr
               key={row.id}
               className={cn(
-                "border-b border-border/70 hover:bg-accent/60",
+                "group border-b border-border/70 hover:bg-accent/60",
                 selectedIds.has(row.id) && "bg-primary/5",
               )}
             >
-              <td className={cn("px-2", rowH)}>
+              <td
+                className={cn(
+                  "sticky left-0 z-[1] px-2",
+                  rowH,
+                  stickyBg(row.id),
+                )}
+                style={{ width: SELECT_COL_W }}
+              >
                 <input
                   type="checkbox"
                   aria-label="选择行"
@@ -246,7 +346,7 @@ export function TableGrid({
                   onChange={() => onToggleRow(row.id)}
                 />
               </td>
-              {columns.map((col) => {
+              {columns.map((col, index) => {
                 const isEdit =
                   editing?.rowId === row.id && editing.columnId === col.id;
                 const isSel =
@@ -259,12 +359,19 @@ export function TableGrid({
                     aria-selected={isSel}
                     tabIndex={isSel ? 0 : -1}
                     className={cn(
-                      "max-w-[16rem] cursor-cell px-2 select-none",
+                      "cursor-cell overflow-hidden px-2 select-none",
                       rowH,
+                      index === 0 && "sticky z-[1]",
+                      index === 0 && stickyBg(row.id),
                       isSel &&
                         !isEdit &&
                         "bg-primary/10 ring-1 ring-inset ring-ring",
                     )}
+                    style={
+                      index === 0
+                        ? { left: SELECT_COL_W, width: widthOf(col.id) }
+                        : { width: widthOf(col.id) }
+                    }
                     onClick={() => {
                       if (isEdit) return;
                       selectCell({ rowId: row.id, columnId: col.id });
@@ -291,7 +398,7 @@ export function TableGrid({
                         }}
                       />
                     ) : (
-                      <div className="flex h-full items-center">
+                      <div className="flex h-full items-center overflow-hidden">
                         <CellDisplay
                           column={col}
                           value={row.cells[col.id] ?? null}
@@ -301,21 +408,20 @@ export function TableGrid({
                   </td>
                 );
               })}
+              {onAddColumn ? <td className={rowH} /> : null}
             </tr>
           ))}
         </tbody>
       </table>
       {showAddRow ? (
-        <div className="p-2">
-          <Button
-            variant="neutral"
-            size="sm"
-            icon={<Plus size={14} />}
-            onClick={onAddRow}
-          >
-            新建行
-          </Button>
-        </div>
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+          onClick={onAddRow}
+        >
+          <Plus size={14} />
+          新建行
+        </button>
       ) : null}
     </div>
   );

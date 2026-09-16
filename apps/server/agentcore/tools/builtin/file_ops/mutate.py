@@ -9,7 +9,6 @@ from typing import Any, Literal
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolFace
-from agentcore.tools.builtin.write_diagnostics import attach_write_diagnostics
 from agentcore.tools.cleared_write_stub import cleared_write_stub_rejection
 from agentcore.tools.file_products import file_product
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
@@ -27,6 +26,11 @@ from agentcore.workspace.protocol import (
     OutsideWorkspace,
     PathNotFound,
     WorkspaceError,
+)
+from agentcore.workspace.text_replace import (
+    TextReplaceNoMatch,
+    TextReplaceOk,
+    apply_text_replace,
 )
 
 from .errors import (
@@ -342,6 +346,65 @@ async def _assemble_str_replace_fail_receipt(
     return head + ("\n\n" + joined if joined else "") + guidance
 
 
+def _is_str_replace_post_state(
+    current: str, old_string: str, new_string: str, *, all_: bool
+) -> bool:
+    """True when ``current`` is already the result of applying old→new once.
+
+    Inverse unique/replace_all (new→old then old→new) covers the case where
+    ``new_string`` still contains ``old_string`` (``foo`` → ``foo bar``). Empty
+    ``new_string`` (span delete) is already applied when old no longer matches.
+    Uses the same EOL fallback as ``backend.replace``.
+    """
+    if not new_string:
+        outcome = apply_text_replace(current, old_string, "", all_=all_)
+        return isinstance(outcome, TextReplaceNoMatch)
+    undone = apply_text_replace(current, new_string, old_string, all_=all_)
+    if not isinstance(undone, TextReplaceOk):
+        return False
+    redone = apply_text_replace(undone.content, old_string, new_string, all_=all_)
+    return isinstance(redone, TextReplaceOk) and redone.content == current
+
+
+async def _already_applied_str_replace(
+    context: ToolContext,
+    rel_path: str,
+    *,
+    old_string: str,
+    new_string: str,
+    start: float,
+    rename_note: str,
+    replace_all: bool = False,
+) -> ToolResult | None:
+    """Succeed without rewriting when this replace already landed on disk.
+
+    Same as ``file_write`` identical-body skip: live retries and crash replay
+    both no-op when the unique/replace_all post-state already holds. Genuine
+    NoMatch (old never matched and inverse cannot reconstruct) stays an error.
+    """
+    try:
+        current = await context.backend.read(rel_path)
+    except (PathNotFound, NotAFile, NotUTF8, WorkspaceError, OSError):
+        return None
+    if not _is_str_replace_post_state(
+        current, old_string, new_string, all_=replace_all
+    ):
+        return None
+    _mark_landed_files(context, rel_path)
+    rename_suffix = f"。{rename_note}" if rename_note else ""
+    return ToolResult(
+        tool_call_id="",
+        success=True,
+        output=(
+            f"已在 {rel_path} 替换（盘上已是替换后的文本，未再改写）"
+            f"{rename_suffix}"
+        ),
+        duration_ms=int((time.monotonic() - start) * 1000),
+        metadata={"replacements": 0, "already_applied": True},
+        file_products=[file_product(rel_path)],
+    )
+
+
 class FileWriteTool:
     """Write content to a file within the workspace."""
 
@@ -364,10 +427,7 @@ class FileWriteTool:
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": (
-                            "工作区内的相对文件路径；约定文档区写盘扁平"
-                            "（前缀后嵌套 `/` → `_` 单文件名）"
-                        ),
+                        "description": "工作区内的相对文件路径。",
                     },
                     "content": {
                         "type": "string",
@@ -444,6 +504,28 @@ class FileWriteTool:
                 )
             return _error(f"读取既有文件失败：{e}", start, user_face=False)
 
+        if old_content is not None and old_content == content:
+            kind = classify_write_kind(content)
+            path_key = _norm_rel_path(rel_path)
+            output = format_artifact_manifest(
+                path=rel_path,
+                content=content,
+                chars_written=len(content),
+                kind=kind,
+                action="write",
+            )
+            if rename_note:
+                output = f"{output}\n{rename_note}"
+            _mark_landed_files(context, path_key, kind=kind)
+            return ToolResult(
+                tool_call_id="",
+                success=True,
+                output=output,
+                duration_ms=int((time.monotonic() - start) * 1000),
+                file_products=[file_product(rel_path)],
+                metadata={"already_applied": True},
+            )
+
         if old_content is not None:
             try:
                 latest = await context.backend.read(rel_path)
@@ -507,7 +589,7 @@ class FileWriteTool:
             duration_ms=int((time.monotonic() - start) * 1000),
             file_products=[file_product(rel_path)],
         )
-        return await attach_write_diagnostics(result, context=context, path=rel_path)
+        return result
 
 
 class StrReplaceTool:
@@ -610,6 +692,18 @@ class StrReplaceTool:
             return denied
         coordinator = context.write_coordinator
 
+        applied = await _already_applied_str_replace(
+            context,
+            rel_path,
+            old_string=old_string,
+            new_string=new_string,
+            start=start,
+            rename_note=rename_note,
+            replace_all=replace_all,
+        )
+        if applied is not None:
+            return applied
+
         try:
             outcome = await context.backend.replace(
                 rel_path, old_string, new_string, all_=replace_all
@@ -637,6 +731,17 @@ class StrReplaceTool:
         except NoMatch:
             if coordinator is not None and release_on_fail:
                 coordinator.release(rel_path, context.run_id)
+            applied = await _already_applied_str_replace(
+                context,
+                rel_path,
+                old_string=old_string,
+                new_string=new_string,
+                start=start,
+                rename_note=rename_note,
+                replace_all=replace_all,
+            )
+            if applied is not None:
+                return applied
             # 失败回执自带有界盘片段，模型可凭回执改 old_string。
             receipt = await _assemble_str_replace_fail_receipt(
                 context, rel_path, old_string, kind="no_match"
@@ -698,4 +803,4 @@ class StrReplaceTool:
             metadata={"replacements": outcome.count},
             file_products=[file_product(rel_path)],
         )
-        return await attach_write_diagnostics(result, context=context, path=rel_path)
+        return result

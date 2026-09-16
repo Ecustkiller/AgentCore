@@ -25,7 +25,10 @@ vi.mock("@/lib/toast", () => ({
   notifyError: vi.fn(),
 }));
 
-import { MessageMoreMenu } from "../AssistantMessageFooter";
+import {
+  AssistantMessageMetaSummary,
+  MessageMoreMenu,
+} from "../AssistantMessageFooter";
 
 const message: Message = {
   id: "asst-1",
@@ -53,5 +56,40 @@ describe("MessageMoreMenu 复制排查包", () => {
     expect(
       await screen.findByRole("menuitem", { name: "复制排查包" }),
     ).toBeTruthy();
+  });
+});
+
+describe("气泡脚不挂轮次", () => {
+  it("meta summary 只有费用和用时，没有 N 轮", () => {
+    render(
+      <AssistantMessageMetaSummary costText="¥1.00" durationMs={12_000} />,
+    );
+    expect(screen.getByText("¥1.00")).toBeTruthy();
+    expect(screen.getByText("用时 12s")).toBeTruthy();
+    expect(screen.queryByText(/轮/)).toBeNull();
+  });
+
+  it("更多 · 用量详情仍展示 ReAct 轮次", async () => {
+    render(
+      <TooltipProvider>
+        <MessageMoreMenu
+          message={{
+            ...message,
+            rounds: 3,
+            usage: {
+              input: 100,
+              output: 50,
+              reasoning: 0,
+              cache_hit: 0,
+              cache_miss: 0,
+            },
+          }}
+          captainContext={[]}
+        />
+      </TooltipProvider>,
+    );
+    fireEvent.pointerDown(screen.getByRole("button", { name: "更多" }));
+    expect(await screen.findByText("ReAct 轮次")).toBeTruthy();
+    expect(screen.getByText("3 轮")).toBeTruthy();
   });
 });

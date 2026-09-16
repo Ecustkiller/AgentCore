@@ -6,7 +6,7 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolFace
-from agentcore.table.constants import READ_ROW_CAP
+from agentcore.table.constants import READ_ROW_CAP, TABLE_UNBOUND
 from agentcore.table.read import format_cell, query_rows, row_summary
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
@@ -19,7 +19,7 @@ from agentcore.tools.registration import (
 logger = get_logger(__name__)
 
 TABLE_READ_TOOL_NAME = "table_read"
-_NO_TABLE = "table_read 仅在表格会话中可用：当前会话没有绑定表格。"
+_NO_TABLE = f"table_read：{TABLE_UNBOUND}"
 
 
 class TableReadTool:

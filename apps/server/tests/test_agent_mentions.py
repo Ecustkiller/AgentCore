@@ -11,6 +11,7 @@ from agentcore.api.schemas.messages import (
     QueuedTurnItem,
     RecordTurnRequest,
     SendMessageRequest,
+    StoredAttachment,
 )
 from agentcore.runtime.pipeline import (
     _build_agent_mention_context,
@@ -143,6 +144,29 @@ def test_record_turn_request_agent_mentions_optional():
         agent_mentions=[AgentMention(agent_id="w1", role="写手")],
     )
     assert body.agent_mentions == [AgentMention(agent_id="w1", role="写手")]
+
+
+def test_record_turn_request_attachments_optional():
+    empty = RecordTurnRequest(
+        user_message="hi",
+        user_message_id="u1",
+        trace_id="0123456789abcdef0123456789abcdef",
+    )
+    assert empty.attachments == []
+    body = RecordTurnRequest(
+        user_message="hi",
+        user_message_id="u1",
+        trace_id="0123456789abcdef0123456789abcdef",
+        attachments=[
+            StoredAttachment(
+                name="shot.png",
+                path="shot.png",
+                workspace_path="attachments/shot.png",
+                binary=True,
+            )
+        ],
+    )
+    assert body.attachments[0].workspace_path == "attachments/shot.png"
 
 
 def test_steer_enqueue_preserves_agent_mentions():

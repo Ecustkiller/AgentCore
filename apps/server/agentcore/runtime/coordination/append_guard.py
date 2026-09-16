@@ -111,9 +111,6 @@ def same_batch_plan(
         nodes=[n for n in plan.nodes if (n.run_id or "") not in skip],
         origin=plan.origin,
         advisories=list(plan.advisories),
-        topology_lock=plan.topology_lock,
-        workflow_id=plan.workflow_id,
-        workflow_version=plan.workflow_version,
     )
 
 

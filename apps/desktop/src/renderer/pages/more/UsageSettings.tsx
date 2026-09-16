@@ -27,7 +27,7 @@ import { Link } from "react-router-dom";
  *
  * 平台代付：主卡是额度还剩（日/月取更紧的一窗，不并排两条钱条）；今日花费 /
  * tokens / 请求用数字卡；不限的维不画空槽；近 7 日趋势次之；明细只留构成。
- * BYOK：说明卡 + token 面 + 有估算再出 ≈$。数字来自 `GET /usage/summary`。
+ * BYOK：说明卡 + token 面 + 有产品价目再出 ¥。数字来自 `GET /usage/summary`。
  */
 export function UsageSettings() {
   const summary = useUsageStore((s) => s.summary);
@@ -229,7 +229,10 @@ function Dashboard({
       </SettingsSection>
 
       {summary.recent_daily_cost.some((p) => p.cost_total > 0) && !byok && (
-        <CostTrend points={summary.recent_daily_cost} />
+        <CostTrend
+          points={summary.recent_daily_cost}
+          currency={moneyCurrency}
+        />
       )}
 
       <UsageDetail summary={summary} byok={byok} />
@@ -267,9 +270,14 @@ function byokTodayStats(
     },
   ];
   if (todayEst > 0) {
+    const currency = today.estimated_cost?.currency;
     items.push({
-      label: "估算",
-      value: formatDisplayCost(todayEst, true, today.estimated_cost?.currency),
+      label: "花费",
+      value: formatDisplayCost(
+        todayEst,
+        (currency || "CNY").toUpperCase() === "USD",
+        currency,
+      ),
     });
   }
   return items;
@@ -430,8 +438,7 @@ function ByokNote() {
       <KeyRound size={16} className="mt-0.5 shrink-0 text-muted-foreground" />
       <p className="text-xs text-muted-foreground">
         当前为「自带 Key」模式：对话走你配置的模型与端点，平台不设上限。下方以
-        token 为主；有估算价时显示
-        ≈$（按社区美元价目估算，非上游账单，不折算汇率）。
+        token 为主；有产品价目的模型按同一张人民币账单展示，不扣额度。
       </p>
     </Card>
   );
@@ -486,44 +493,126 @@ function weekdayLabel(isoDate: string): string {
   return `周${["日", "一", "二", "三", "四", "五", "六"][d.getUTCDay()]}`;
 }
 
+/** Headroom so the max-day dot isn't clipped at the plot top. */
+const TREND_TOP_PAD = 8;
+
+function trendY(cost: number, max: number): number {
+  if (max <= 0) return 100;
+  return TREND_TOP_PAD + (1 - cost / max) * (100 - TREND_TOP_PAD);
+}
+
+function trendCoords(
+  points: Summary["recent_daily_cost"],
+  max: number,
+): { x: number; y: number }[] {
+  const n = points.length;
+  if (n === 0) return [];
+  return points.map((p, i) => ({
+    x: ((i + 0.5) / n) * 100,
+    y: trendY(p.cost_total, max),
+  }));
+}
+
+function trendLineD(coords: { x: number; y: number }[]): string {
+  return coords
+    .map((c, i) => `${i === 0 ? "M" : "L"}${c.x.toFixed(2)} ${c.y.toFixed(2)}`)
+    .join(" ");
+}
+
+function trendAreaD(coords: { x: number; y: number }[]): string {
+  const first = coords[0];
+  const last = coords[coords.length - 1];
+  if (!first || !last) return "";
+  const ridge = coords
+    .map((c) => `L${c.x.toFixed(2)} ${c.y.toFixed(2)}`)
+    .join(" ");
+  return `M${first.x.toFixed(2)} 100 ${ridge} L${last.x.toFixed(2)} 100 Z`;
+}
+
 function CostTrend({
   points,
+  currency,
 }: {
   points: Summary["recent_daily_cost"];
+  currency?: string | null;
 }) {
+  // 折线 + 锚点画趋势；零日落基线（不画地板柱）。图是装饰，数字在 sr-only 表。
   const max = points.reduce((m, p) => Math.max(m, p.cost_total), 0);
   const total = points.reduce((s, p) => s + p.cost_total, 0);
+  const coords = trendCoords(points, max);
+  const lineD = trendLineD(coords);
+  const areaD = trendAreaD(coords);
+
   return (
     <SettingsSection
       title="近 7 日成本"
       action={
         <span className="text-xs text-muted-foreground">
-          合计 {formatCost(total)}
+          合计 {formatCost(total, currency)}
         </span>
       }
     >
-      <div className="flex gap-1.5">
-        {points.map((p) => {
-          const h = max > 0 ? Math.max((p.cost_total / max) * 100, 2) : 2;
-          return (
+      <table className="sr-only">
+        <caption>近 7 日每日成本</caption>
+        <thead>
+          <tr>
+            <th scope="col">日期</th>
+            <th scope="col">成本</th>
+          </tr>
+        </thead>
+        <tbody>
+          {points.map((p) => (
+            <tr key={p.date}>
+              <th scope="row">{p.date}</th>
+              <td>{formatCost(p.cost_total, currency)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="relative">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-28 border-b border-border">
+          <svg
+            aria-hidden
+            className="size-full overflow-visible"
+            preserveAspectRatio="none"
+            viewBox="0 0 100 100"
+          >
+            <title>近 7 日成本趋势</title>
+            {areaD ? <path className="fill-primary/15" d={areaD} /> : null}
+            {lineD ? (
+              <path
+                className="fill-none stroke-primary"
+                d={lineD}
+                data-testid="cost-trend-line"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                vectorEffect="non-scaling-stroke"
+              />
+            ) : null}
+          </svg>
+        </div>
+        <div className="relative flex" aria-hidden>
+          {points.map((p, i) => (
             <SimpleTooltip
               key={p.date}
-              label={`${weekdayLabel(p.date)} · ${formatCost(p.cost_total)}`}
+              label={`${weekdayLabel(p.date)} · ${formatCost(p.cost_total, currency)}`}
             >
-              <div className="flex flex-1 flex-col items-center gap-1.5">
-                <div className="flex h-16 w-full items-end justify-center">
+              <div className="flex min-w-0 flex-1 flex-col">
+                <div className="relative h-28 w-full">
                   <div
-                    className="w-full max-w-6 rounded-full bg-primary"
-                    style={{ height: `${h}%` }}
+                    className="absolute left-1/2 size-2 -translate-x-1/2 translate-y-1/2 rounded-full bg-primary ring-2 ring-background"
+                    data-testid="cost-trend-dot"
+                    style={{ bottom: `${100 - (coords[i]?.y ?? 100)}%` }}
                   />
                 </div>
-                <span className="text-xs text-muted-foreground">
+                <span className="mt-2 text-center text-xs text-muted-foreground">
                   {weekdayLabel(p.date)}
                 </span>
               </div>
             </SimpleTooltip>
-          );
-        })}
+          ))}
+        </div>
       </div>
     </SettingsSection>
   );
@@ -563,12 +652,13 @@ function UsageDetail({
       value: `输入 ${formatCompact(month.usage.input)} · 输出 ${formatCompact(month.usage.output)}`,
     });
     if (monthEst > 0) {
+      const currency = month.estimated_cost?.currency;
       rows.push({
-        label: "本月估算",
+        label: "本月花费",
         value: formatDisplayCost(
           monthEst,
-          true,
-          month.estimated_cost?.currency,
+          (currency || "CNY").toUpperCase() === "USD",
+          currency,
         ),
       });
     }

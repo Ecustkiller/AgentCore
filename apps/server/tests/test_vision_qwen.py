@@ -14,8 +14,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from structlog.testing import capture_logs
 
 from agentcore.core.errors import LLMAuthError, LLMError
+from agentcore.llm.credentials import INFERENCE_CONVERSATION_HEADER, LLMCredentials
 from agentcore.llm.resolve import ModelSelection
 from agentcore.vision import (
     QwenVLReader,
@@ -23,6 +25,7 @@ from agentcore.vision import (
     resolve_vision_reader,
     resolve_vision_reader_for_conversation,
 )
+from agentcore.vision.factory import pick_vision_selection
 
 pytestmark = pytest.mark.anyio
 
@@ -114,12 +117,74 @@ async def test_read_coerces_list_content_to_text():
     assert (await _reader(handler).read(_PNG, "读一下")).text == "两个便签 + 一条连线"
 
 
+async def test_read_observation_cannot_rewrite_success(monkeypatch):
+    """Same isolation as the chat fence: log_llm_call must not fail a successful read."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "model": "qwen-vl-max",
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            },
+        )
+
+    def _observation_boom(**_kwargs):
+        raise TypeError("pricing boom")
+
+    monkeypatch.setattr("agentcore.vision.qwen.log_llm_call", _observation_boom)
+    with capture_logs() as caps:
+        reading = await _reader(handler).read(_PNG, "读一下")
+    assert reading.text == "ok"
+    failed = next(c for c in caps if c.get("event") == "llm.observation_failed")
+    assert failed["error_type"] == "TypeError"
+    assert "pricing boom" in failed["error"]
+
+
 async def test_read_maps_401_to_auth_error():
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, json={"error": "bad key"})
 
     with pytest.raises(LLMAuthError):
         await _reader(handler).read(_PNG, "读一下")
+
+
+async def test_read_maps_4xx_to_llm_error():
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(422, json={"error": "unprocessable"})
+
+    with pytest.raises(LLMError, match="422"):
+        await _reader(handler).read(_PNG, "读一下")
+
+
+async def test_read_proxy_role_stamps_vision_over_ambient_captain():
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["role"] = request.headers.get("x-agentcore-role")
+        captured["conversation"] = request.headers.get("x-agentcore-conversation")
+        return httpx.Response(
+            200,
+            json={
+                "model": "qwen-vl-max",
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            },
+        )
+
+    reader = _reader(
+        handler,
+        extra_headers={
+            INFERENCE_CONVERSATION_HEADER: "c1",
+            "X-AgentCore-Role": "captain",
+        },
+        proxy_role="vision",
+    )
+    reading = await reader.read(_PNG, "读一下")
+    assert reading.text == "ok"
+    assert captured["role"] == "vision"
+    assert captured["conversation"] == "c1"
 
 
 async def test_read_empty_content_raises():
@@ -393,6 +458,90 @@ async def test_resolve_vision_reader_for_conversation_lookup_failure_byok_none(
     assert (
         await resolve_vision_reader_for_conversation(
             user_id="u1", conversation_id="c1", settings=cfg
+        )
+        is None
+    )
+
+
+def test_pick_vision_selection_prefers_slot_over_image_main(monkeypatch):
+    _patch_accepts(monkeypatch, lambda _mid: True)
+    vision = ModelSelection(model="qwen-vl-max", origin="byok", provider_id="prov-v")
+    main = ModelSelection(model="gpt-4o", origin="byok", provider_id="prov-main")
+    assert pick_vision_selection(vision=vision, main=main) is vision
+
+
+def test_pick_vision_selection_follows_image_main(monkeypatch):
+    _patch_accepts(monkeypatch, lambda mid: mid == "gpt-4o")
+    main = ModelSelection(model="gpt-4o", origin="platform", provider_id=None)
+    assert pick_vision_selection(vision=None, main=main) is main
+
+
+def test_pick_vision_selection_skips_text_main(monkeypatch):
+    _patch_accepts(monkeypatch, lambda _mid: False)
+    main = ModelSelection(model="deepseek-flash", origin="byok", provider_id="prov-main")
+    assert pick_vision_selection(vision=None, main=main) is None
+
+
+async def test_ticketed_sidecar_uses_inference_jwt_without_opening_db(monkeypatch):
+    """岔路 B: ticketed sidecar points at the proxy; never opens local Postgres."""
+    monkeypatch.setattr(
+        "agentcore.db.sidecar_tickets.sidecar_narrow_tickets_bound",
+        lambda: True,
+    )
+
+    def _session_must_not_open():
+        raise AssertionError("ticketed sidecar must not open local Postgres")
+
+    monkeypatch.setattr(
+        "agentcore.db.base.async_session_factory",
+        _session_must_not_open,
+    )
+    creds = LLMCredentials(
+        api_key="inf-jwt",
+        base_url="https://cloud.example/v1/inference/v1",
+        default_model="deepseek-flash",
+        extra_headers={INFERENCE_CONVERSATION_HEADER: "c1"},
+        source="user",
+    )
+    cfg = SimpleNamespace(
+        billing_mode="byok",
+        vision_api_key="sk-must-not-use",
+        vision_base_url="https://vendor.example/v1",
+        vision_model="kimi-k2.5",
+        vision_timeout_seconds=60.0,
+    )
+    reader = await resolve_vision_reader_for_conversation(
+        user_id="u1",
+        conversation_id="c1",
+        settings=cfg,
+        llm_credentials=creds,
+    )
+    assert isinstance(reader, QwenVLReader)
+    assert reader._api_key == "inf-jwt"
+    assert reader._base_url == "https://cloud.example/v1/inference/v1"
+    assert reader._proxy_role == "vision"
+    assert reader._extra_headers[INFERENCE_CONVERSATION_HEADER] == "c1"
+    assert reader.credential_source == "user"
+
+
+async def test_ticketed_sidecar_without_jwt_does_not_use_local_vision_env(monkeypatch):
+    monkeypatch.setattr(
+        "agentcore.db.sidecar_tickets.sidecar_narrow_tickets_bound",
+        lambda: True,
+    )
+    cfg = SimpleNamespace(
+        billing_mode="platform",
+        vision_api_key="sk-local",
+        vision_base_url="https://relay.example/v1",
+        vision_model="kimi-k2.5",
+        vision_timeout_seconds=60.0,
+    )
+    assert (
+        await resolve_vision_reader_for_conversation(
+            user_id="u1",
+            conversation_id="c1",
+            settings=cfg,
+            llm_credentials=None,
         )
         is None
     )

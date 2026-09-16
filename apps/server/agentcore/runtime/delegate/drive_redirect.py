@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
-from agentcore.runtime.delegate.team_synthesis import maybe_emit_team_synthesis_preview
 from agentcore.runtime.events import run_progress
 from agentcore.runtime.runs.redirect_queue import RunRedirectRequest, take_redirects
 from agentcore.runtime.runs.stop_queue import take_stops
@@ -249,9 +248,6 @@ class RedirectController:
             1 for s in self.hot_revision_states.values() if s.phase is RunPhase.COMPLETED
         )
         self.tool._sink.emit(run_progress(done, self.total))
-        maybe_emit_team_synthesis_preview(
-            self.tool._sink, self.plan, completed, execution_id=self.execution_id
-        )
         return done
 
     async def apply_pending_redirects(self, completed: dict[str, RunState]) -> None:

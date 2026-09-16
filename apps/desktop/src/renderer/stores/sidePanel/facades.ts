@@ -1,3 +1,7 @@
+import {
+  isSeededCsvCandidate,
+  tryNavigateSeededCsv,
+} from "@/lib/openSeededCsvTable";
 import { useBrowserSessionsStore } from "../browserSessions";
 import { useConversationStore } from "../conversation";
 import {
@@ -177,7 +181,17 @@ export function createFacadeActions(
     },
 
     showFile: (path, name, workspaceId) => {
-      get().openFileTab(path, name, workspaceId);
+      if (!isSeededCsvCandidate(path)) {
+        get().openFileTab(path, name, workspaceId);
+        return;
+      }
+      void tryNavigateSeededCsv({
+        path,
+        workspaceId,
+        conversationId: useConversationStore.getState().currentConversationId,
+      }).then((opened) => {
+        if (!opened) get().openFileTab(path, name, workspaceId);
+      });
     },
 
     openFileTab: (path, name, workspaceId) => {

@@ -83,45 +83,22 @@ function isPlaybackEndpointId(mmId: string): boolean {
 
 function matchAudioDevice(
   devices: AudioDeviceRow[],
-  deviceId: string,
   deviceName: string,
 ): AudioDeviceRow | null {
-  const idNeedle = deviceId.trim().toLowerCase();
   const nameNeedle = deviceName.trim().toLowerCase();
+  if (!nameNeedle) return null;
   for (const d of devices) {
-    const id = String(d.id ?? "").trim();
     const name = String(d.name ?? "").trim();
-    if (idNeedle && id.toLowerCase() === idNeedle) return d;
-    if (idNeedle && toMmDeviceId(id)?.toLowerCase() === idNeedle) return d;
-    if (nameNeedle && name.toLowerCase() === nameNeedle) return d;
-  }
-  // Partial id: accept full GUID suffix after the last "." only (not loose includes).
-  if (idNeedle) {
-    for (const d of devices) {
-      const id = String(d.id ?? "").trim();
-      const mm = toMmDeviceId(id);
-      const guid = (mm ?? id).split(".").pop()?.toLowerCase() ?? "";
-      if (
-        guid &&
-        (guid === idNeedle ||
-          `{${idNeedle}}` === guid ||
-          idNeedle === guid.replace(/^\{|\}$/g, ""))
-      ) {
-        return d;
-      }
-    }
+    if (name.toLowerCase() === nameNeedle) return d;
   }
   return null;
 }
 
-async function setDefaultAudioWin(
-  deviceId: string,
-  deviceName: string,
-): Promise<HostOpResult> {
+async function setDefaultAudioWin(deviceName: string): Promise<HostOpResult> {
   const listed = await listAudioDevicesWin();
   if (!listed.ok) return listed;
   const devices = asDeviceRows(listed.value);
-  const matched = matchAudioDevice(devices, deviceId, deviceName);
+  const matched = matchAudioDevice(devices, deviceName);
   if (!matched) {
     return err(
       "device not found in host_audio_devices observation; refuse unknown device",
@@ -211,14 +188,13 @@ if ($hr -ne 0) { throw "SetDefaultEndpoint failed HRESULT=$hr" }
 }
 
 export async function setDefaultAudio(
-  deviceId: string,
   deviceName: string,
 ): Promise<HostOpResult> {
-  if (!deviceId.trim() && !deviceName.trim()) {
-    return err("device_id or device_name is required");
+  if (!deviceName.trim()) {
+    return err("device_name is required");
   }
   if (process.platform === "win32") {
-    return setDefaultAudioWin(deviceId, deviceName);
+    return setDefaultAudioWin(deviceName);
   }
   return err(
     `host_audio_set_default not implemented on ${process.platform}`,

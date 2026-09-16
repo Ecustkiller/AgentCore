@@ -39,7 +39,7 @@ def _one_ask() -> list[ToolCall]:
         ToolCall(
             id="ask_a",
             function=ToolCallFunction(
-                name="ask_user", arguments='{"message":"先确认范围？"}'
+                name="ask_user", arguments='{"questions":[{"prompt":"先确认范围？"}]}'
             ),
         ),
     ]
@@ -51,7 +51,7 @@ def _two_asks() -> list[ToolCall]:
         ToolCall(
             id="ask_b",
             function=ToolCallFunction(
-                name="ask_user", arguments='{"message":"区外目录写入授权"}'
+                name="ask_user", arguments='{"questions":[{"prompt":"区外目录写入授权"}]}'
             ),
         ),
     ]
@@ -128,7 +128,7 @@ def _single_ask_journal() -> list[dict]:
                 {
                     "id": "ask_a",
                     "type": "function",
-                    "function": {"name": "ask_user", "arguments": '{"message":"范围？"}'},
+                    "function": {"name": "ask_user", "arguments": '{"questions":[{"prompt":"范围？"}]}'},
                 },
             ],
             finish_reason="tool_calls",

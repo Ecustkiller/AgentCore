@@ -286,9 +286,9 @@ describe("ModelKeyForm", () => {
     expect((screen.getByLabelText("Base URL") as HTMLInputElement).value).toBe(
       "https://opencode.ai/zen/go/v1",
     );
-    expect(modelInput.value).toBe("deepseek-v4-flash");
+    expect(modelInput.value).toBe("deepseek-v4.1-flash");
     expect(defaultModelDatalistOptions(modelInput)).toEqual([
-      "deepseek-v4-flash",
+      "deepseek-v4.1-flash",
       "deepseek-v4-pro",
       "glm-5.2",
     ]);
@@ -308,7 +308,7 @@ describe("ModelKeyForm", () => {
         expect.objectContaining({
           label: "OpenCode Go",
           base_url: "https://opencode.ai/zen/go/v1",
-          default_model: "deepseek-v4-flash",
+          default_model: "deepseek-v4.1-flash",
           api_key: "sk-go",
         }),
       ),

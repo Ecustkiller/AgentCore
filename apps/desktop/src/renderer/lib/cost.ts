@@ -4,11 +4,11 @@
  * the components only render the result. (Per-Agent money now shows directly on
  * each graph node from `run.cost`, §7.3B — no payroll split needed.)
  *
- * Money is integer nano throughout (1 unit = 1e9), in whatever currency the
- * backend stamped on it — platform ledger CNY, BYOK community estimate USD.
+ * Money is integer nano throughout (1 unit = 1e9). User-facing amounts are the
+ * curated CNY nominal — platform billed and BYOK display copy of the same card.
+ * Legacy community-USD estimates still carry `estimated_currency=USD` (≈$).
  * This never re-prices and **never converts**; it only sums already-priced run
- * totals (§7.2：合计以各 run 已定价之和为准) within a single currency.
- * BYOK: billed `total` stays 0; `estimated_total` may carry a community estimate.
+ * totals within a single currency.
  */
 
 export type CostLeaf = {
@@ -21,7 +21,7 @@ export type CostLeaf = {
 
 export type DisplayMoney = {
   nano: number;
-  /** True when showing BYOK estimate (≈), not platform ledger money. */
+  /** True only for leftover USD community estimates (≈$). CNY is a real bill. */
   estimated: boolean;
   /** ISO code of {@link nano}. Renderers pick the symbol from this, never guess. */
   currency: string;
@@ -29,6 +29,10 @@ export type DisplayMoney = {
 
 /** 无 FX：跨币种金额不可相加，所以合计只在同一币种内累加。 */
 const DEFAULT_CURRENCY = "CNY";
+
+function isUsdEstimate(currency: string): boolean {
+  return currency.toUpperCase() === "USD";
+}
 
 /**
  * The turn cost to display (§7.3A): prefer the authoritative `turnTotal` from
@@ -48,38 +52,17 @@ export function resolveTurnCost(
   return turnTotal ?? (runTotal > 0 ? runTotal : null);
 }
 
-/**
- * True when the graph did real work that the platform simply cannot price —
- * some run consumed tokens under `pricing_source=unpriced` (BYOK, 两层价卡全落空).
- * Callers use this to show an explicit「未计价」badge instead of silently
- * omitting the cost segment (which reads as "free"). Zero-usage runs don't count.
- */
-export function hasUnpricedUsage(
-  runs: Array<
-    | {
-        cost?: CostLeaf | null;
-        usage?: { input: number; output: number } | null;
-      }
-    | null
-    | undefined
-  >,
-): boolean {
-  return runs.some((r) => {
-    if (!r?.cost || r.cost.pricing_source !== "unpriced") return false;
-    const u = r.usage;
-    return u != null && u.input + u.output > 0;
-  });
+function displayFromEstimate(nano: number, currency: string): DisplayMoney {
+  return {
+    nano,
+    estimated: isUsdEstimate(currency),
+    currency,
+  };
 }
 
 /**
- * Turn display money with BYOK estimate awareness: billed total wins; else
- * `estimated_total`; else sum finished runs the same way. Null = nothing to show.
- *
- * The chosen amount carries its own currency out — billed reads `currency`, the
- * BYOK estimate reads `estimated_currency` — so the caller never has to infer a
- * symbol. In the run-sum fallback each bucket keeps the first contributing run's
- * currency; runs in a turn share a credential source, so they share a price card
- * table and cannot mix.
+ * Turn display money: `total` (product nominal, CNY) wins; else `estimated_total`
+ * (BYOK slice, or legacy USD). Null = nothing to show.
  */
 export function resolveTurnDisplayMoney(
   turnCost: CostLeaf | null | undefined,
@@ -96,13 +79,11 @@ export function resolveTurnDisplayMoney(
     }
     const est = turnCost.estimated_total;
     if (est != null && est > 0) {
-      return {
-        nano: est,
-        estimated: true,
-        currency: turnCost.estimated_currency || billedCurrency,
-      };
+      return displayFromEstimate(
+        est,
+        turnCost.estimated_currency || billedCurrency,
+      );
     }
-    // Known zero (platform free / unpriced) — caller gates on nano > 0.
     return { nano: 0, estimated: false, currency: billedCurrency };
   }
   let billed = 0;
@@ -130,11 +111,10 @@ export function resolveTurnDisplayMoney(
     };
   }
   if (estimated > 0) {
-    return {
-      nano: estimated,
-      estimated: true,
-      currency: estimatedCurrency ?? DEFAULT_CURRENCY,
-    };
+    return displayFromEstimate(
+      estimated,
+      estimatedCurrency ?? DEFAULT_CURRENCY,
+    );
   }
   return null;
 }

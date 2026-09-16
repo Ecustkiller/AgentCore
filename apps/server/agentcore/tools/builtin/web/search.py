@@ -55,7 +55,6 @@ from agentcore.tools.registration import (
 logger = get_logger(__name__)
 
 _DEFAULT_MAX_RESULTS = 8
-_MAX_RESULTS_CAP = 12
 # Structured JSON results stay readable up to ~12 hits; lift the default 4000
 # model-facing budget so a full result set is never truncated into invalid JSON.
 _OUTPUT_LIMIT = 8000
@@ -567,10 +566,6 @@ class WebSearchTool:
                             "长专名/法规名用书名号或引号包住。"
                         ),
                     },
-                    "max_results": {
-                        "type": "integer",
-                        "description": "返回结果数量上限，默认 8，最多 12",
-                    },
                 },
                 "required": ["query"],
             },
@@ -624,11 +619,7 @@ class WebSearchTool:
                 adjusted_query=query,
             )
 
-        try:
-            raw = int(arguments.get("max_results", _DEFAULT_MAX_RESULTS))
-            max_results = max(1, min(raw, _MAX_RESULTS_CAP))
-        except (TypeError, ValueError):
-            max_results = _DEFAULT_MAX_RESULTS
+        max_results = _DEFAULT_MAX_RESULTS
 
         # Conversation-scoped result cache (案例1 #5 检索去重 / 共享检索缓存): a repeat of
         # the same query within the conversation — including across delegated workers,

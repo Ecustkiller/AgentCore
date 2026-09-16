@@ -20,6 +20,7 @@ from agentcore.llm.profiles import default_turn_profiles as default_profile_set
 from agentcore.llm.provider.protocol import LLMProvider
 from agentcore.runtime.debate import (
     DebateConfig,
+    DebateForm,
     Moderator,
     RoundBoundary,
     RoundDecision,
@@ -52,7 +53,6 @@ from agentcore.tools.builtin.debate.schema import (
     DEBATE_PARAMETERS,
     err,
     parse_background,
-    parse_form,
     parse_moderator_fields,
     parse_sides,
 )
@@ -90,6 +90,7 @@ class DebateTool:
         surface=ToolSurface.CEO_ORCHESTRATION,
         audience=AUDIENCE_CEO_ONLY,
         ceo_wire=CeoWire.ALWAYS,
+        resident=False,
         catalog_summary="开一场正反辩论",
     )
 
@@ -242,7 +243,7 @@ class DebateTool:
         sides, side_err = parse_sides(arguments.get("sides"))
         if side_err:
             return err(side_err)
-        form = parse_form(arguments.get("form"))
+        form = DebateForm.DEBATE
         thorough = arguments.get("thorough", True)
         if not isinstance(thorough, bool):
             thorough = True

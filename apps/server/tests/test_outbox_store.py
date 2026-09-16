@@ -66,6 +66,7 @@ def test_progressive_begin_journal_finalize(tmp_path):
             finish_reason="stop",
             input_tokens=3,
             output_tokens=2,
+            duration_ms=12_000,
             runs={"events": []},
         )
         # Second finalize is a no-op seal.
@@ -93,6 +94,7 @@ def test_progressive_begin_journal_finalize(tmp_path):
     assert body["user_message_id"] == "u1"
     assert body["content"] == "Hello world"
     assert body["input_tokens"] == 3
+    assert body["duration_ms"] == 12_000
 
 
 def test_finalize_complete_overrides_longer_partial(tmp_path):
@@ -1119,6 +1121,84 @@ def test_salvage_copies_harvest_origin_from_bind(tmp_path):
     assert record["origin"] == "execution_harvest"
     assert record["execution_id"] == "exec-1"
     assert record["harvest_kind"] == "success"
+
+
+def test_bind_turn_attachments_reach_record_turn_body(tmp_path):
+    store = OutboxStore(tmp_path / "outbox")
+    store.bind_turn(
+        conversation_id="c1",
+        user_message_id="u1",
+        user_message="看图",
+        message_id="m1",
+        trace_id="a" * 32,
+        attachments=[
+            {
+                "name": "shot.png",
+                "path": "shot.png",
+                "workspace_path": "attachments/shot.png",
+                "binary": True,
+                "text": "must-not-persist",
+            }
+        ],
+    )
+
+    async def run() -> dict:
+        await store.begin_turn(
+            conversation_id="c1", message_id="m1", trace_id="a" * 32
+        )
+        return json.loads((tmp_path / "outbox" / "u1.json").read_text(encoding="utf-8"))
+
+    record = _drive(run())
+    stored = record["attachments"][0]
+    assert stored["name"] == "shot.png"
+    assert stored["workspace_path"] == "attachments/shot.png"
+    assert stored["binary"] is True
+    assert "text" not in stored
+    body = to_record_turn_body(record)
+    assert body["attachments"][0]["workspace_path"] == "attachments/shot.png"
+    omitted = to_record_turn_body(
+        {
+            "user_message_id": "u2",
+            "user_message": "hi",
+            "trace_id": "a" * 32,
+        }
+    )
+    assert "attachments" not in omitted
+
+
+def test_salvage_copies_bound_attachments_when_begin_missing(tmp_path):
+    store = OutboxStore(tmp_path / "outbox")
+    store.bind_turn(
+        conversation_id="c1",
+        user_message_id="u1",
+        user_message="看图",
+        message_id="m1",
+        trace_id="s" * 32,
+        attachments=[
+            {
+                "name": "shot.png",
+                "path": "shot.png",
+                "workspace_path": "attachments/shot.png",
+                "binary": True,
+            }
+        ],
+    )
+
+    async def run() -> dict:
+        await store.salvage(
+            journal=[],
+            content="",
+            conversation_id="c1",
+            trace_id="s" * 32,
+            message_id="m1",
+            interrupt_reason="user_stop",
+        )
+        return json.loads((tmp_path / "outbox" / "u1.json").read_text(encoding="utf-8"))
+
+    record = _drive(run())
+    assert record["attachments"][0]["workspace_path"] == "attachments/shot.png"
+    body = to_record_turn_body(record)
+    assert body["attachments"][0]["name"] == "shot.png"
 
 
 def test_ready_outbox_still_appends_run_terminal(tmp_path):

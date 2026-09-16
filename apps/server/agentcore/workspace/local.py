@@ -30,7 +30,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import re
-from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -58,6 +57,8 @@ from agentcore.workspace.protocol import (
     CodeSearchResult,
     DirEntry,
     DirListing,
+    GlobFilesQuery,
+    GlobFilesResult,
     GrepHit,
     GrepQuery,
     GrepResult,
@@ -87,63 +88,6 @@ _SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9._-]+")
 _DEFAULT_EXECUTE_TIMEOUT_SLACK = 30.0
 # Align with turn_baseline.LOCAL_BASELINE_TIMEOUT_S / desktop ARCHIVE gate (60s).
 _LOCAL_BASELINE_CHANNEL_TIMEOUT_S = 60.0
-# Inner-loop LS probe — short wall clock; not an outer verify budget.
-_DIAGNOSTICS_CHANNEL_TIMEOUT_S = 20.0
-
-
-async def request_diagnostics_via_channel(
-    channel: WorkspaceChannel,
-    groups: dict[tuple[str | None, str | None], list[str]],
-    *,
-    remap_path: Callable[[str, str | None], str],
-    timeout: float = _DIAGNOSTICS_CHANNEL_TIMEOUT_S,
-) -> dict[str, Any]:
-    """Issue ``DIAGNOSTICS`` per mount root and merge desktop envelopes.
-
-    Shared by ``LocalWorkspace`` and sidecar ``ServerWorkspace(location=local)``.
-    ``groups`` keys are ``(override_root_id, alias)``; ``remap_path`` turns
-    desktop-relative hits back into workspace-relative (or ``external/<alias>/``).
-    """
-    if not groups:
-        return {"status": "ok", "diagnostics": []}
-
-    merged: list[dict[str, Any]] = []
-    any_ok = False
-    unavailable_reason: str | None = None
-    for (root_id, alias), rels in groups.items():
-        value = await channel.request(
-            WorkspaceOp.DIAGNOSTICS,
-            {"paths": rels},
-            timeout=timeout,
-            root_id=root_id,
-        )
-        if not isinstance(value, dict):
-            unavailable_reason = unavailable_reason or "malformed diagnostics result"
-            continue
-        status = str(value.get("status") or "")
-        if status == "ok":
-            any_ok = True
-        elif status == "unavailable":
-            reason = value.get("reason")
-            if isinstance(reason, str) and reason.strip():
-                unavailable_reason = reason.strip()
-            else:
-                unavailable_reason = unavailable_reason or "diagnostics unavailable"
-        for item in value.get("diagnostics") or []:
-            if not isinstance(item, dict):
-                continue
-            path = str(item.get("path", "") or "")
-            entry = dict(item)
-            entry["path"] = remap_path(path, alias) if path else path
-            merged.append(entry)
-
-    if any_ok:
-        return {"status": "ok", "diagnostics": merged}
-    return {
-        "status": "unavailable",
-        "reason": unavailable_reason or "diagnostics unavailable",
-        "diagnostics": merged,
-    }
 
 
 class LocalWorkspace:
@@ -531,6 +475,27 @@ class LocalWorkspace:
             warnings=[str(w) for w in value.get("warnings", [])],
         )
 
+    async def glob_files(self, query: GlobFilesQuery) -> GlobFilesResult:
+        root_id, rel, alias = self._route(query.directory)
+        payload: dict[str, Any] = {
+            "directory": rel,
+            "globs": list(query.globs),
+            "max_depth": query.max_depth,
+            "max_entries": query.max_entries,
+            "reveal_archives": query.reveal_archives or self.ai_list_reveal_archives,
+        }
+        value = await self._channel.request(
+            WorkspaceOp.GLOB_FILES,
+            payload,
+            root_id=root_id,
+        )
+        value = value or {}
+        return GlobFilesResult(
+            paths=[self._out_routed(str(p), alias) for p in value.get("paths", [])],
+            truncated=bool(value.get("truncated", False)),
+            warnings=[str(w) for w in value.get("warnings", [])],
+        )
+
     async def index_files(
         self, cap: int | None = None, *, order: str = "path"
     ) -> IndexFilesResult:
@@ -693,33 +658,6 @@ class LocalWorkspace:
             total_matches=int(value.get("total_matches", 0)),
             truncated=bool(value.get("truncated", False)),
             warnings=[str(w) for w in value.get("warnings", [])],
-        )
-
-    async def diagnostics(self, paths: list[str]) -> dict[str, Any]:
-        """Route TS/JS language-service diagnostics to the desktop (~20s).
-
-        Groups paths by mount root so primary + ``external/<alias>`` grants can
-        each get one channel round-trip; merges diagnostics and remaps paths
-        back to workspace-relative form.
-        """
-        if not paths:
-            return {"status": "ok", "diagnostics": []}
-
-        groups: dict[tuple[str | None, str | None], list[str]] = {}
-        for raw in paths:
-            path = str(raw or "").strip()
-            if not path:
-                continue
-            root_id, rel, alias = self._route(path)
-            groups.setdefault((root_id, alias), []).append(rel)
-
-        if not groups:
-            return {"status": "ok", "diagnostics": []}
-
-        return await request_diagnostics_via_channel(
-            self._channel,
-            groups,
-            remap_path=self._out_routed,
         )
 
     async def execute(self, req: ExecutionRequest) -> ExecutionResult:

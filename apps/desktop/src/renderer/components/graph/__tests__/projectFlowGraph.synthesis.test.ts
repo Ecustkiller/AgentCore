@@ -28,6 +28,7 @@ function minimalExec(): Execution {
         kind: "captain",
         role: null,
         model: null,
+        reasoningEffort: null,
         usage: null,
         cost: null,
         stance: null,
@@ -59,6 +60,7 @@ function minimalExec(): Execution {
         kind: "agent",
         role: "member",
         model: null,
+        reasoningEffort: null,
         usage: null,
         cost: null,
         stance: null,
@@ -87,7 +89,7 @@ function minimalExec(): Execution {
 }
 
 describe("projectFlowNodes · captain synthesis preview", () => {
-  it("挂 team_synthesis_preview 片段到 running CEO 节点（无终稿时）", () => {
+  it("无终稿时 CEO 节点不挂过程稿", () => {
     const execution = minimalExec();
     const nodes = projectFlowNodes({
       execution,
@@ -103,7 +105,6 @@ describe("projectFlowNodes · captain synthesis preview", () => {
       captainRun: { id: "captain" },
       captainStatus: "running",
       finalAnswer: null,
-      captainSynthesisPreview: "两边方向一致：优先方案 A。",
       taskMessage: null,
       activateNode: () => {},
       groups: [],
@@ -114,11 +115,11 @@ describe("projectFlowNodes · captain synthesis preview", () => {
     expect(captain?.data).toMatchObject({
       variant: "captain",
       status: "running",
-      preview: "两边方向一致：优先方案 A。",
+      preview: "",
     });
   });
 
-  it("终稿优先于 synthesis preview", () => {
+  it("终稿挂在 CEO 节点", () => {
     const execution = minimalExec();
     const nodes = projectFlowNodes({
       execution,
@@ -134,7 +135,6 @@ describe("projectFlowNodes · captain synthesis preview", () => {
       captainRun: { id: "captain" },
       captainStatus: "running",
       finalAnswer: { id: "ans", content: "最终方案全文在此。" },
-      captainSynthesisPreview: "草稿不应出现",
       taskMessage: null,
       activateNode: () => {},
       groups: [],
@@ -143,7 +143,6 @@ describe("projectFlowNodes · captain synthesis preview", () => {
 
     const captain = nodes.find((n) => n.id === "captain");
     expect(captain?.data.preview).toContain("最终方案");
-    expect(String(captain?.data.preview)).not.toContain("草稿不应出现");
   });
 
   it("coordination wait: pending captain gets running chrome + caption", () => {
@@ -165,6 +164,7 @@ describe("projectFlowNodes · captain synthesis preview", () => {
       kind: "agent",
       role: "member",
       model: null,
+      reasoningEffort: null,
       usage: null,
       cost: null,
       stance: null,
@@ -195,7 +195,6 @@ describe("projectFlowNodes · captain synthesis preview", () => {
       captainRun: { id: "captain" },
       captainStatus: "pending",
       finalAnswer: null,
-      captainSynthesisPreview: "草稿不应盖过等待文案",
       captainStatusCaption: "等待「撰写员」(1/2)",
       taskMessage: null,
       activateNode: () => {},
@@ -233,6 +232,7 @@ describe("projectFlowNodes · captain synthesis preview", () => {
       kind: "agent",
       role: "member",
       model: null,
+      reasoningEffort: null,
       usage: null,
       cost: null,
       stance: null,
@@ -266,7 +266,6 @@ describe("projectFlowNodes · captain synthesis preview", () => {
         id: "ans",
         content: "人已派出，验证员还在复核，你先忙别的。",
       },
-      captainSynthesisPreview: "",
       taskMessage: null,
       activateNode: () => {},
       groups: [],

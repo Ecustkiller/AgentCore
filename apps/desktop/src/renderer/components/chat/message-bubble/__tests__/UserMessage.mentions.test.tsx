@@ -14,12 +14,15 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UserMessage } from "../UserMessage";
 
-const { updateMessage } = vi.hoisted(() => ({
+const { updateMessage, showFile, genMock } = vi.hoisted(() => ({
   updateMessage: vi.fn(),
+  showFile: vi.fn(),
+  genMock: { value: false },
 }));
 
 vi.mock("@/lib/clipboard", () => ({
@@ -28,6 +31,11 @@ vi.mock("@/lib/clipboard", () => ({
 
 vi.mock("@/services/turns", () => ({
   runRegenerate: vi.fn(),
+}));
+
+vi.mock("@/stores/sidePanel", () => ({
+  useSidePanelStore: (sel: (s: { showFile: typeof showFile }) => unknown) =>
+    sel({ showFile }),
 }));
 
 vi.mock("@/stores/conversation", async (importOriginal) => {
@@ -42,14 +50,16 @@ vi.mock("@/stores/conversation", async (importOriginal) => {
   );
   return {
     ...actual,
-    useActiveGenerating: () => false,
+    useActiveGenerating: () => genMock.value,
     useConversationStore,
   };
 });
 
 afterEach(() => {
   cleanup();
+  genMock.value = false;
   updateMessage.mockReset();
+  showFile.mockReset();
   vi.mocked(copyText).mockClear();
   vi.mocked(runRegenerate).mockClear();
 });
@@ -100,6 +110,7 @@ describe("UserMessage agent mention chips", () => {
             path: "brief.md",
             truncated: false,
             kind: "file",
+            workspacePath: "attachments/brief.md",
           },
         ],
         agentMentions: [{ agentId: "w1", role: "研究员" }],
@@ -107,6 +118,12 @@ describe("UserMessage agent mention chips", () => {
     );
     expect(screen.getByTestId("user-inline-body")).toBeTruthy();
     expect(screen.queryByTestId("user-chip-tray")).toBeNull();
+    fireEvent.click(
+      within(screen.getByTestId("user-inline-body")).getByRole("button", {
+        name: "打开 brief.md",
+      }),
+    );
+    expect(showFile).toHaveBeenCalledWith("attachments/brief.md", "brief.md");
     expect(screen.getAllByText("研究员")).toHaveLength(1);
     expect(screen.getAllByText("brief.md")).toHaveLength(1);
     expect(screen.getByTestId("user-inline-body").textContent).toContain(
@@ -115,6 +132,53 @@ describe("UserMessage agent mention chips", () => {
     expect(screen.getByTestId("user-inline-body").textContent).not.toContain(
       "\uFFFC",
     );
+  });
+
+  it("history file chip in the tray opens the workspace File tab", () => {
+    renderUser(
+      userMsg({
+        attachments: [
+          {
+            id: "att-1",
+            name: "shot.png",
+            path: "attachments/shot.png",
+            truncated: false,
+            kind: "file",
+            workspacePath: "attachments/shot.png",
+          },
+        ],
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "打开 shot.png" }));
+    expect(showFile).toHaveBeenCalledWith("attachments/shot.png", "shot.png");
+  });
+
+  it("edit draft file chip is not a preview control", () => {
+    const content = `看${inlineToken("A", 0)}`;
+    renderUser(
+      userMsg({
+        content,
+        attachments: [
+          {
+            id: "att-1",
+            name: "brief.md",
+            path: "brief.md",
+            truncated: false,
+            kind: "file",
+            workspacePath: "attachments/brief.md",
+          },
+        ],
+      }),
+    );
+    fireEvent.click(screen.getByText("编辑"));
+    const draft = screen.getByTestId("user-inline-draft");
+    expect(
+      within(draft).queryByRole("button", { name: "打开 brief.md" }),
+    ).toBeNull();
+    expect(
+      within(draft).getByRole("button", { name: "移除附件" }),
+    ).toBeTruthy();
+    expect(showFile).not.toHaveBeenCalled();
   });
 
   it("marks the bubble as a plain-copy island", () => {
@@ -175,5 +239,24 @@ describe("UserMessage agent mention chips", () => {
       dropInlineIndex(content, "mention", 0),
       { attachments: [], agentMentions: [] },
     );
+  });
+});
+
+describe("UserMessage send chrome", () => {
+  it("overlays send chrome from md up so idle actions do not pad the following reply", () => {
+    renderUser(userMsg());
+    const chrome = screen.getByTestId("user-message-chrome");
+    expect(chrome.className).toContain("md:absolute");
+    expect(chrome.className).toContain("md:top-full");
+    expect(chrome.className).toContain("md:inset-x-0");
+    expect(chrome.textContent).toContain("复制");
+    expect(chrome.textContent).toContain("编辑");
+  });
+
+  it("hides send chrome while a turn is generating", () => {
+    genMock.value = true;
+    renderUser(userMsg({ createdAt: "2026-01-01T00:00:00Z" }));
+    expect(screen.queryByTestId("user-message-chrome")).toBeNull();
+    expect(screen.queryByRole("button", { name: "编辑" })).toBeNull();
   });
 });

@@ -276,6 +276,18 @@ def test_query_seeks_to_first_matching_message():
     assert "开场闲聊" not in chunk.transcript
 
 
+def test_query_and_seeks_to_earliest_term():
+    conv = _conv()
+    messages = [
+        _msg(id="m1", content="先聊 oauth"),
+        _msg(id="m2", content="再谈登录流程"),
+    ]
+    chunk = page_conversation(conv, messages, query="oauth 登录")
+    assert chunk.query_hit is True
+    assert chunk.message_offset == 0
+    assert "oauth" in chunk.transcript
+
+
 def test_legacy_char_cursor_restarts_at_zero():
     conv = _conv()
     messages = [_msg(id="m1", content="hello"), _msg(id="m2", content="later")]
@@ -822,7 +834,7 @@ async def test_search_tool_excludes_host(monkeypatch):
         lambda: _AsyncCm(),
     )
 
-    result = await tool.execute({"query": ""}, _ctx())
+    result = await tool.execute({"query": "别场"}, _ctx())
     assert result.success is True
     assert "other" in result.output
     assert result.display and result.display.get("result_count") == 1
@@ -831,18 +843,56 @@ async def test_search_tool_excludes_host(monkeypatch):
 def test_search_schema_is_folder_default_and_body_when():
     schema = SearchConversationsTool().schema
     desc = schema.description
-    assert "正文" in desc
     assert "read_conversation" in desc
-    assert "偏好" in desc
+    assert "过往事实" in desc
+    assert "用户规则" in desc
+    assert "偏好" not in desc
+    assert "巩固" not in desc
     assert "续做" not in desc
     assert "不含本场" not in desc
     assert "记忆主题" not in desc
-    scope = schema.parameters["properties"]["scope"]
+    props = schema.parameters["properties"]
+    query = props["query"]
+    assert "标题与可见用户/助手正文" in query["description"]
+    assert "同场都出现" in query["description"]
+    assert "空则" not in query["description"]
+    assert schema.parameters.get("required") == ["query"]
+    scope = props["scope"]
     assert scope.get("default") == "folder"
-    archived = schema.parameters["properties"]["include_archived"]
-    assert "已归档" in archived["description"]
-    assert "false" in archived["description"].lower()
-    assert "标题或正文" in schema.parameters["properties"]["query"]["description"]
+    assert scope.get("enum") == ["all", "folder"]
+    assert "global_chats" not in props
+    assert "include_archived" not in props
+    assert "updated_within_hours" not in props
+    limit = props["limit"]
+    assert limit.get("default") == 20
+    assert limit.get("maximum") == 100
+    assert "硬顶" not in limit["description"]
+    assert "默认" not in limit["description"]
+
+
+@pytest.mark.asyncio
+async def test_search_empty_query_does_not_hit_repo(monkeypatch):
+    def _boom(*a, **kw):
+        raise AssertionError("empty query must not search")
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.search_conversations.ConversationRepository",
+        _boom,
+    )
+    result = await SearchConversationsTool().execute({"query": ""}, _ctx())
+    assert result.success is True
+    assert "关键词" in (result.output or "")
+    assert result.display and result.display.get("result_count") == 0
+
+
+def test_read_schema_caps_live_in_schema_not_description():
+    schema = ReadConversationTool().schema
+    assert schema.description == "读取一场历史对话。"
+    assert "focus=dialogue" not in schema.description
+    focus = schema.parameters["properties"]["focus"]
+    assert focus.get("default") == "dialogue"
+    assert "默认" not in focus["description"]
+    assert "max_chars" not in schema.parameters["properties"]
 
 
 @pytest.mark.asyncio
@@ -884,7 +934,7 @@ async def test_search_default_scope_uses_host_folder(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_search_explicit_exclude_archived(monkeypatch):
+async def test_search_ignores_include_archived_argument(monkeypatch):
     captured: dict = {}
 
     class FakeConvRepo:
@@ -915,9 +965,18 @@ async def test_search_explicit_exclude_archived(monkeypatch):
         lambda: _AsyncCm(),
     )
     tool = SearchConversationsTool(folder_id="F1")
-    result = await tool.execute({"query": "oauth", "include_archived": False}, _ctx())
+    result = await tool.execute(
+        {
+            "query": "oauth",
+            "include_archived": False,
+            "updated_within_hours": 3,
+        },
+        _ctx(),
+    )
     assert result.success is True
-    assert captured.get("include_archived") is False
+    assert captured.get("include_archived") is True
+    assert captured.get("updated_after") is None
+    assert captured.get("global_chats_only") is False
 
 
 @pytest.mark.asyncio

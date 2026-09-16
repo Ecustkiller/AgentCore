@@ -55,10 +55,6 @@ type ViewMode = "edit" | "preview";
 
 const AUTOSAVE_DEBOUNCE_MS = 1500; // 停止输入后多久自动落盘
 
-/** 记忆源空预览的固定说明——只出现在编辑器空状态，不写入 md。 */
-const MEMORY_PREVIEW_EMPTY_HINT =
-  "AI 会把记得的内容写在这里，你也可以直接改或删除。";
-
 /** 退役的人面 H1；导航等其它标题禁止按此剥。 */
 const RETIRED_MEMORY_H1 = /^#\s+用户记忆\s*$/;
 
@@ -94,7 +90,6 @@ export function MarkdownFileEditor({
   path,
   name,
   onClose,
-  embedded,
   hostedInTab,
   onDirtyChange,
 }: {
@@ -102,10 +97,6 @@ export function MarkdownFileEditor({
   path: string;
   name: string;
   onClose: () => void;
-  /** Hosted inside a larger shell (e.g. the 全局+本项目 split) that owns the single 返回
-   * control and tab chrome — so suppress this editor's own back button. Everything else
-   * (脏标 / 保存 / AI 改写 / 编辑·预览) stays, since each pane edits its own file. */
-  embedded?: boolean;
   /** File tab host already names the file — action bar only; dirty goes to the tab. */
   hostedInTab?: boolean;
   onDirtyChange?: (state: {
@@ -392,12 +383,6 @@ export function MarkdownFileEditor({
   // 系统集成（reveal 仅本地源有；外部打开两源都有但云端过白名单谓词 → 按能力显隐，不按源分支）。
   const canOpenExternal = canOpenPathWithOsDefaultApp(source, path);
   const isMemorySource = source.id === "memory";
-  const previewBody =
-    content == null || !isMemorySource
-      ? content
-      : stripRetiredUserMemoryChrome(content);
-  const memoryPreviewEmpty =
-    isMemorySource && previewBody !== null && previewBody.trim() === "";
   const onReveal = async () => {
     try {
       await source.revealInOsFileManager?.(path);
@@ -413,7 +398,7 @@ export function MarkdownFileEditor({
     }
   };
 
-  const showBack = !embedded && !hostedInTab;
+  const showBack = !hostedInTab;
   const showIdentity = !hostedInTab;
 
   return (
@@ -676,12 +661,6 @@ export function MarkdownFileEditor({
                 className="h-full w-full"
               />
             </div>
-          </div>
-        ) : memoryPreviewEmpty ? (
-          <div className="flex h-full items-center justify-center px-6">
-            <p className="max-w-sm text-center text-sm text-muted-foreground">
-              {MEMORY_PREVIEW_EMPTY_HINT}
-            </p>
           </div>
         ) : (
           <div className="h-full overflow-auto">

@@ -88,4 +88,27 @@ describe("AssistantMessage · workspace_lock_wait", () => {
     expect(screen.getByText("正在准备云端环境")).toBeTruthy();
     expect(screen.queryByText("Thinking…")).toBeNull();
   });
+
+  it("does not show elapsed on empty Thinking", () => {
+    const createdAt = new Date(Date.now() - 6_000).toISOString();
+    useConversationStore.setState({
+      byId: {
+        ...useConversationStore.getState().byId,
+        [CID]: {
+          ...useConversationStore.getState().byId[CID],
+          messages: [{ ...emptyStreamingAssistant(), createdAt }],
+        },
+      },
+    });
+    const { unmount } = render(
+      <MemoryRouter>
+        <AssistantMessage
+          message={{ ...emptyStreamingAssistant(), createdAt }}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("Thinking…")).toBeTruthy();
+    expect(screen.queryByText("6s")).toBeNull();
+    unmount();
+  });
 });

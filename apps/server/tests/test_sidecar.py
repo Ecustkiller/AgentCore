@@ -537,14 +537,7 @@ def test_sidecar_start_turn_local_binding_reaches_pipeline(tmp_path, monkeypatch
         kwargs["sink"].close()
         return {"finish_reason": "end_turn", "content": "ok", "rounds": 1}
 
-    async def fake_baseline(**kwargs: Any) -> None:
-        return None
-
     monkeypatch.setattr("agentcore.sidecar.server.run_chat_pipeline", fake_pipeline)
-    monkeypatch.setattr(
-        "agentcore.workspace.turn_baseline.maybe_capture_turn_baseline",
-        fake_baseline,
-    )
 
     sent, write_line = _recorder()
     server = SidecarServer(write_line)
@@ -617,14 +610,7 @@ def test_sidecar_start_turn_forwards_agent_mentions(tmp_path, monkeypatch):
         kwargs["sink"].close()
         return {"finish_reason": "end_turn", "content": "ok", "rounds": 1}
 
-    async def fake_baseline(**kwargs: Any) -> None:
-        return None
-
     monkeypatch.setattr("agentcore.sidecar.server.run_chat_pipeline", fake_pipeline)
-    monkeypatch.setattr(
-        "agentcore.workspace.turn_baseline.maybe_capture_turn_baseline",
-        fake_baseline,
-    )
 
     sent, write_line = _recorder()
     server = SidecarServer(write_line)
@@ -678,14 +664,7 @@ def test_sidecar_start_turn_folder_id_param_skips_db(tmp_path, monkeypatch):
         kwargs["sink"].close()
         return {"finish_reason": "end_turn", "content": "ok", "rounds": 1}
 
-    async def fake_baseline(**kwargs: Any) -> None:
-        captured["baseline_folder_id"] = kwargs.get("folder_id")
-
     monkeypatch.setattr("agentcore.sidecar.server.run_chat_pipeline", fake_pipeline)
-    monkeypatch.setattr(
-        "agentcore.workspace.turn_baseline.maybe_capture_turn_baseline",
-        fake_baseline,
-    )
 
     sent, write_line = _recorder()
     server = SidecarServer(write_line)
@@ -726,8 +705,8 @@ def test_sidecar_start_turn_folder_id_param_skips_db(tmp_path, monkeypatch):
 
     asyncio.run(drive())
     assert captured["folder_id"] == "folder-from-rpc"
-    assert captured["baseline_folder_id"] == "folder-from-rpc"
     assert "error" not in _response(sent, 2)
+    assert not list(tmp_path.glob("**/AgentCore/baselines/*.zip"))
 
 
 def test_sidecar_start_turn_explicit_null_folder_id_skips_db(tmp_path, monkeypatch):

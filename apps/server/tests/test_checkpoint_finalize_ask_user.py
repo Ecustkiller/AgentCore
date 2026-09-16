@@ -143,7 +143,7 @@ async def test_finalize_returns_suspend_and_skips_the_wait():
     try:
         res = await tool.execute(
             {
-                "message": "A 还是 B?",
+                "questions": [{"prompt": "A 还是 B?"}],
                 "assumptions": [{"label": "默认", "value": "A"}],
             },
             _ctx(),
@@ -175,7 +175,7 @@ async def test_ask_user_browser_login_wire_flag():
     try:
         res = await tool.execute(
             {
-                "message": "请在右坞浏览器完成登录后继续",
+                "questions": [{"prompt": "请在右坞浏览器完成登录后继续"}],
                 "browser_login": True,
             },
             _ctx(),
@@ -206,7 +206,7 @@ async def test_finalize_fails_explicitly_when_frame_not_saved():
     tool = _ask_tool(saver, deleter, EventSink())
     res = await tool.execute(
         {
-            "message": "A 还是 B?",
+            "questions": [{"prompt": "A 还是 B?"}],
             "assumptions": [{"label": "默认", "value": "A"}],
         },
         _ctx(),
@@ -261,8 +261,7 @@ async def test_loop_finalizes_ask_user_to_paused():
                             id="call_ask",
                             function_name="ask_user",
                             arguments_delta=(
-                                f'{{"message": "{user_message}", '
-                                f'"assumptions": [{{"label": "默认", "value": "A"}}]}}'
+                                f'{{"questions": [{{"prompt": "{user_message}"}}]}}'
                             ),
                         )
                     ]
@@ -433,10 +432,7 @@ async def test_loop_absorbs_content_into_blocking_ask_user():
                             index=0,
                             id="call_ask",
                             function_name="ask_user",
-                            arguments_delta=(
-                                '{"message": "", '
-                                '"assumptions": [{"label": "篇幅", "value": "约3k字"}]}'
-                            ),
+                            arguments_delta='{"questions": []}',
                         )
                     ]
                 ),
@@ -481,7 +477,7 @@ async def test_loop_absorbs_content_into_blocking_ask_user():
     assert content == ""
     assert messages[-1].content is None
     args = json.loads(messages[-1].tool_calls[0].function.arguments)
-    assert args["message"] == preamble
+    assert args["questions"] == [{"prompt": preamble}]
     events = _drain(sink)
     assert any(e.type is EventType.CONTENT_RESET for e in events)
     llm_facts = [f for f in log.entries() if f["kind"] == FactKind.LLM_CALL.value]
@@ -531,8 +527,7 @@ async def test_unproductive_then_finalize_ask_user_stamps_paused_last():
                             id="call_ask",
                             function_name="ask_user",
                             arguments_delta=(
-                                '{"message": "DeepSeek 不可用，怎么处理？", '
-                                '"assumptions": [{"label": "换模型", "value": "auto"}]}'
+                                '{"questions": [{"prompt": "DeepSeek 不可用，怎么处理？"}]}'
                             ),
                         )
                     ]

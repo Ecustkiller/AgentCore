@@ -77,10 +77,18 @@ FIELD_CONSUMER_BASELINE: tuple[FieldConsumerBaselineGroup, ...] = (
         leaves=frozenset({"host_execution_id", "synthesizer_run_id"}),
     ),
     FieldConsumerBaselineGroup(
-        id="team_synthesis_preview.in_progress",
+        id="stage_card.motion_override",
         reason=(
-            "team_synthesis_preview 整包入库，UI 用 completed/headline/text，"
-            "不读 in_progress。"
+            "活人面已撤推进卡；stage_card_resolved.motion_override 仍在契约，"
+            "桌面不读。"
+        ),
+        leaves=frozenset({"motion_override"}),
+    ),
+    FieldConsumerBaselineGroup(
+        id="team_synthesis_preview.leftover",
+        reason=(
+            "活人面已撤：队长节点不再画草稿。fold 整包入库（历史 journal）；"
+            "UI 不读 in_progress。"
         ),
         leaves=frozenset({"in_progress"}),
     ),

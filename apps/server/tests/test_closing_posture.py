@@ -1,7 +1,5 @@
 """收口诚实性（closing_posture）：档位真源 + 薄 A 闭集 + resume 拼接。"""
 
-import pytest
-
 from agentcore.runtime.closing_posture import (
     claims_full_delivery,
     claims_needs_confirm,
@@ -794,18 +792,6 @@ def test_b1_zero_write_landing_hard_rework_withdrawn():
     meta = "时序诚实：没落盘成功之前，不宣称「已改好」。"
     assert closing_honesty_rework(meta) is None
     clear_b1_closing_latches()
-
-
-def test_hollow_claim_detectors_absent():
-    """空心措辞扫描已删：不观测、不清气泡。"""
-    import importlib
-
-    import agentcore.runtime.closing_posture as cp
-
-    assert not hasattr(cp, "claims_hollow_in_progress")
-    assert not hasattr(cp, "claims_hollow_teach_invite")
-    with pytest.raises(ModuleNotFoundError):
-        importlib.import_module("agentcore.runtime.closing_posture.hollow")
 
 
 def test_b1_over_seat_latch_does_not_rework():

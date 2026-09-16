@@ -9,7 +9,6 @@ export type ArtifactKind =
   | "canvas"
   | "slides"
   | "connectors"
-  | "workflow"
   | "tools"
   | "guidelines"
   | "manual";

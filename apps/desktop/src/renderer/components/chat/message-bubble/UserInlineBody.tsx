@@ -49,11 +49,9 @@ function withEditGaps(spans: InlineSpan[]): InlineSpan[] {
 export function UserChipTray({
   attachments,
   mentions,
-  conversationId,
 }: {
   attachments: readonly MessageAttachmentMeta[];
   mentions: readonly AgentMentionMeta[];
-  conversationId: string | null;
 }) {
   if (attachments.length === 0 && mentions.length === 0) return null;
   return (
@@ -65,7 +63,7 @@ export function UserChipTray({
         <AgentMentionChip key={a.agentId} role={a.role} />
       ))}
       {attachments.map((a) => (
-        <AttachmentChip key={a.id} att={a} conversationId={conversationId} />
+        <AttachmentChip key={a.id} att={a} interactive />
       ))}
     </div>
   );
@@ -76,12 +74,10 @@ export function UserInlineBody({
   content,
   attachments,
   mentions,
-  conversationId,
 }: {
   content: string;
   attachments: readonly MessageAttachmentMeta[];
   mentions: readonly AgentMentionMeta[];
-  conversationId: string | null;
 }) {
   return (
     <div
@@ -98,7 +94,7 @@ export function UserInlineBody({
           if (!att) return null;
           return (
             <span key={key} className="mx-0.5 inline-flex align-middle">
-              <AttachmentChip att={att} conversationId={conversationId} />
+              <AttachmentChip att={att} interactive />
             </span>
           );
         }
@@ -134,12 +130,11 @@ export const UserInlineDraft = forwardRef<
     value: string;
     attachments: readonly MessageAttachmentMeta[];
     mentions: readonly AgentMentionMeta[];
-    conversationId: string | null;
     onChange: (next: string) => void;
     onKeyDown: (e: ReactKeyboardEvent<HTMLDivElement>) => void;
   }
 >(function UserInlineDraft(
-  { value, attachments, mentions, conversationId, onChange, onKeyDown },
+  { value, attachments, mentions, onChange, onKeyDown },
   ref,
 ) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -235,7 +230,7 @@ export const UserInlineDraft = forwardRef<
               className="mx-0.5 inline-flex align-middle items-center"
               contentEditable={false}
             >
-              <AttachmentChip att={att} conversationId={conversationId} />
+              <AttachmentChip att={att} />
               <IconButton
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => drop("attachment", span.index)}

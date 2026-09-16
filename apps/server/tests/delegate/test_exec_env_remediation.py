@@ -42,14 +42,14 @@ def test_cloud_delivery_action_forbids_reimport():
     assert action["kind"] == "bind_local_folder"
     desc = action["description"]
     assert "不要" in desc or "勿" in desc
-    assert "导入到云" in desc
+    assert "先在云上做" in desc
     assert "not_linux" in desc
-    assert "**推荐**" not in desc or "推荐**引导 Composer「导入到云" not in desc
+    assert "**推荐**" not in desc or "推荐**引导 Composer「先在云上做" not in desc
 
 
 def test_local_delivery_action_may_suggest_import():
     desc = exec_env_remediation_zh(backend=LocalBackend(), kind="delivery_action")
-    assert "导入到云" in desc
+    assert "先在云上做" in desc
 
 
 def test_cloud_capability_warning_forbids_reimport():
@@ -57,15 +57,16 @@ def test_cloud_capability_warning_forbids_reimport():
     warn = execution_capability_warning(_plan("运行脚本生成 course.pptx"), _CloudBackend())
     assert warn is not None
     assert "禁止" in warn or "不要" in warn
-    assert "导入到云" in warn
+    assert "先在云上做" in warn
     assert "runsc_failed" in warn
 
 
 def test_capability_office_copy_carves_out_deterministic_word_pdf():
-    """两个分支都须点名 md_to_docx / md_to_pdf，且缺口只落在 pptx/xlsx。"""
+    """两个分支都须点名 md_export，且缺口只落在 pptx/xlsx。"""
     for backend in (LocalBackend(), _CloudBackend()):
         copy = exec_env_remediation_zh(backend=backend, kind="capability_office")
-        assert "md_to_docx" in copy and "md_to_pdf" in copy
+        assert "md_export" in copy
+        assert "md_to_docx" not in copy and "md_to_pdf" not in copy
         assert ".pptx/.xlsx" in copy
         assert ".docx/.pptx/.xlsx" not in copy
 
@@ -94,7 +95,7 @@ def test_sidecar_cloud_desk_delivery_does_not_wait_for_gvisor(
     )
     desc = exec_env_remediation_zh(backend=_CloudBackend(), kind="delivery_action")
     assert "不要" in desc or "勿" in desc
-    assert "导入到云" in desc
+    assert "先在云上做" in desc
     assert "gVisor" not in desc
     assert "假装起云沙箱" in desc
     run = exec_env_remediation_zh(backend=_CloudBackend(), kind="capability_run")

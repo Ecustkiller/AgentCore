@@ -102,12 +102,8 @@ class WorkspaceOp(StrEnum):
     MOVE = "move"
     REPLACE = "replace"
     GREP = "grep"
+    GLOB_FILES = "glob_files"
     EXECUTE = "execute"
-    # Language-service diagnostics (inner verify loop). LocalWorkspace and
-    # sidecar ServerWorkspace(location=local) issue this op; cloud desks return
-    # unavailable without delivery. Desktop runs TS/JS diagnostics for
-    # ``args.paths`` and returns ``{status, reason?, diagnostics[]}``.
-    DIAGNOSTICS = "diagnostics"
     # Probe which code_execute languages have a usable launcher on the user's
     # machine (PATH / Git Bash). Not a WorkspaceBackend method — issued at turn
     # prepare so the tool schema can drop unavailable languages (e.g. broken WSL

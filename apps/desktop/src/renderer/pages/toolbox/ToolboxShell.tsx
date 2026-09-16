@@ -19,7 +19,7 @@ function toolboxShellHeading(pathname: string): string {
 /**
  * 工具箱壳：种类 tab 即顶栏；右槽「市场」。手册入口在设置 · 关于。侧栏已点名，不重复可见 h1。
  * 市场是顶栏入口，不是与种类对等的模式开关。出厂工具与本机插头在提示词目录里。
- * 提示词与创作 / 工作流同一套画布留白；市场货架自己填满剩余高度。
+ * 提示词与创作同一套画布留白；市场货架自己填满剩余高度。
  */
 export function ToolboxShell() {
   const location = useLocation();

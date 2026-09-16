@@ -20,7 +20,7 @@ from agentcore.runtime.coordination.session import (
     set_active_coordination,
     should_enter_coordination,
 )
-from agentcore.runtime.coordination.tools import CancelWorkerTool, UpdateSynthesisTool
+from agentcore.runtime.coordination.tools import CancelWorkerTool
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.interaction import InteractionRegistry
 from tests.delegate.conftest import Provider, ctx, tool
@@ -426,27 +426,6 @@ async def test_coord_drive_session_saver_does_not_shadow_coordination_session():
     )
     assert saved, "trigger path requires register_sessions → session_saver"
     clear_active_coordination("e")
-
-
-async def test_update_synthesis_emits_preview():
-    clear_active_coordination()
-    sink = EventSink()
-    session = CoordinationSession(execution_id="e", total_workers=2)
-    from agentcore.runtime.coordination.session import set_active_coordination
-
-    set_active_coordination(session)
-    syn = UpdateSynthesisTool(sink=sink)
-    result = await syn.execute({"draft": "进展中的合成草稿"}, ctx())
-    assert result.success is True
-    assert session.draft == "进展中的合成草稿"
-    sink.close()
-    previews = [
-        e async for e in sink if e.type == EventType.TEAM_SYNTHESIS_PREVIEW
-    ]
-    assert len(previews) == 1
-    assert previews[0].payload["text"] == "进展中的合成草稿"
-    assert previews[0].payload["in_progress"] is True
-    clear_active_coordination()
 
 
 async def test_wait_tool_is_clean_noop_during_coordination():
@@ -874,29 +853,9 @@ def test_inject_timeout_shows_full_run_id():
 
 async def test_coord_tools_reject_outside_session():
     clear_active_coordination()
-    syn = UpdateSynthesisTool(sink=EventSink())
-    bad = await syn.execute({"draft": "x"}, ctx())
-    assert bad.success is False
     cancel = CancelWorkerTool()
     bad2 = await cancel.execute({"run_id": "w1"}, ctx())
     assert bad2.success is False
-
-
-async def test_update_synthesis_soft_tip_when_session_closed():
-    """Team finished (session still registered, active=False) → soft success tip."""
-    clear_active_coordination()
-    session = CoordinationSession(execution_id="e", total_workers=2)
-    from agentcore.runtime.coordination.session import set_active_coordination
-
-    set_active_coordination(session)
-    session.close()
-    assert session.active is False
-    syn = UpdateSynthesisTool(sink=EventSink())
-    result = await syn.execute({"draft": "终稿草稿"}, ctx())
-    assert result.success is True
-    assert "全部完成" in (result.output or "")
-    assert "content_delta" in (result.output or "")
-    clear_active_coordination()
 
 
 async def test_terminal_not_skipped_when_both_pools_exhausted():
@@ -1128,6 +1087,7 @@ async def test_coordinate_react_loop_e2e(monkeypatch):
     import agentcore.runtime.coordination.wait as coord_wait
     from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
     from agentcore.runtime.coordination.session import current_execution_id
+    from agentcore.runtime.coordination.tools import WaitTool
     from agentcore.runtime.engine import react_loop
     from agentcore.tools.builtin.delegate import DelegateTool
     from agentcore.tools.protocol import ToolContext
@@ -1140,7 +1100,6 @@ async def test_coordinate_react_loop_e2e(monkeypatch):
     monkeypatch.setattr(coord_wait, "_COORD_WAIT_TIMEOUT_S", 2.0)
     clear_active_coordination()
     sink = EventSink()
-    draft_text = "进展中的合成草稿：两边方向一致，优先方案 A。"
 
     class _SlowSecondWorker:
         """First worker instant; second delayed past coalesce so CEO sees mid-wave."""
@@ -1161,7 +1120,7 @@ async def test_coordinate_react_loop_e2e(monkeypatch):
     class _CoordCeoProvider:
         def __init__(self) -> None:
             self.delegate_calls = 0
-            self.synth_calls = 0
+            self.wait_calls = 0
             self.final_calls = 0
 
         async def stream(self, request):  # noqa: ANN001
@@ -1204,18 +1163,18 @@ async def test_coordinate_react_loop_e2e(monkeypatch):
                         )
                     ]
                 )
-            elif "已更新合成草稿" in last_tool or all_done:
+            elif "已确认等待" in last_tool or all_done:
                 self.final_calls += 1
                 yield LLMChunk(delta_content="最终合成：A 与 B 已对齐，按方案 A 定稿。")
-            elif coord_injected and self.synth_calls == 0 and not all_done:
-                self.synth_calls += 1
-                args = json.dumps({"draft": draft_text})
+            elif coord_injected and self.wait_calls == 0 and not all_done:
+                self.wait_calls += 1
+                args = json.dumps({"reason": "听团"})
                 yield LLMChunk(
                     delta_tool_calls=[
                         ToolCallDelta(
                             index=0,
-                            id="ceo-syn1",
-                            function_name="update_synthesis",
+                            id="ceo-wait1",
+                            function_name="wait",
                             arguments_delta=args,
                         )
                     ]
@@ -1246,7 +1205,7 @@ async def test_coordinate_react_loop_e2e(monkeypatch):
     )
     reg = ToolRegistry()
     reg.register(delegate)
-    reg.register(UpdateSynthesisTool(sink=sink))
+    reg.register(WaitTool())
     reg.register(CancelWorkerTool())
 
     messages: list[LLMMessage] = [
@@ -1271,7 +1230,7 @@ async def test_coordinate_react_loop_e2e(monkeypatch):
         current_execution_id.reset(exec_token)
 
     assert ceo_llm.delegate_calls == 1
-    # 中途 synth 只在空转 yield 捎带已完成摘要时才发生；终稿必须有。
+    # 中途 wait 只在空转 yield 捎带已完成摘要时才发生；终稿必须有。
     assert "最终合成" in content
     assert rounds >= 2
     assert any("团队协调事件" in (m.content or "") for m in messages if m.role == "user")

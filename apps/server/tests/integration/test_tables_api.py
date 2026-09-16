@@ -196,3 +196,91 @@ async def test_persist_touched_rows_do_not_clobber_siblings(client, session_fact
     by_id = {r["id"]: r for r in got.json()["rows"]}
     assert by_id[r0]["cells"][col_id] == "A"
     assert by_id[r1]["cells"][col_id] == "B"
+
+
+async def test_csv_snapshot_upsert_same_path_keeps_id_and_column_ids(
+    client, new_client, session_factory
+):
+    from agentcore.db.repositories.tables import TableRepository
+    from agentcore.table.csv_import import parse_csv_snapshot, remap_snapshot_columns
+    from agentcore.table.workspace_key import table_workspace_key
+
+    user_id = await register_and_login(client, "tbl_csv")
+    snap = parse_csv_snapshot("name,age\nAda,1\n", title="客户")
+    assert snap is not None
+    conv = "11111111-1111-1111-1111-111111111111"
+    key = table_workspace_key(folder_id=None, conversation_id=conv)
+    async with session_factory() as session:
+        repo = TableRepository(session)
+        state = await repo.create_from_csv(
+            user_id=user_id,
+            title=snap.title,
+            columns=snap.columns,
+            rows=snap.rows,
+            workspace_key=key,
+            path="客户.csv",
+        )
+        assert state.conversation_id is None
+        assert len(state.rows) == 1
+        found = await repo.get_by_source(
+            user_id=user_id, workspace_key=key, path="客户.csv"
+        )
+        assert found is not None and found.id == state.id
+        name_id = next(c["id"] for c in state.columns if c["label"] == "name")
+        prior_version = state.schema_version
+        again = parse_csv_snapshot("name,city\nAda,NY\n", title="ignored")
+        assert again is not None
+        mapped = remap_snapshot_columns(again, state.columns)
+        overwritten = await repo.replace_csv_snapshot(
+            state, title=state.title, columns=mapped.columns, rows=mapped.rows
+        )
+        assert overwritten.id == state.id
+        assert overwritten.schema_version == prior_version + 1
+        assert next(c["id"] for c in overwritten.columns if c["label"] == "name") == name_id
+        assert [c["label"] for c in overwritten.columns] == ["name", "city"]
+        assert len(overwritten.rows) == 1
+
+    listed = await client.get("/v1/tables")
+    assert listed.status_code == 200, listed.text
+    rows = listed.json()
+    assert rows[0]["id"] == state.id
+    assert rows[0]["source_path"] == "客户.csv"
+
+    detail = await client.get(f"/v1/tables/{state.id}")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["source_path"] == "客户.csv"
+
+    hit = await client.get(
+        "/v1/tables/by-source",
+        params={"path": "客户.csv", "conversation_id": conv},
+    )
+    assert hit.status_code == 200, hit.text
+    assert hit.json()["id"] == state.id
+    assert hit.json()["source_path"] == "客户.csv"
+
+    missing = await client.get(
+        "/v1/tables/by-source",
+        params={"path": "no.csv", "conversation_id": conv},
+    )
+    assert missing.status_code == 404
+
+    att = await client.get(
+        "/v1/tables/by-source",
+        params={"path": "attachments/x.csv", "conversation_id": conv},
+    )
+    assert att.status_code == 404
+
+    need_desk = await client.get(
+        "/v1/tables/by-source",
+        params={"path": "客户.csv"},
+    )
+    assert need_desk.status_code == 422
+
+    async with new_client() as other:
+        await register_and_login(other, "tbl_csv_intruder")
+        denied = await other.get(
+            "/v1/tables/by-source",
+            params={"path": "客户.csv", "conversation_id": conv},
+        )
+        assert denied.status_code == 404
+

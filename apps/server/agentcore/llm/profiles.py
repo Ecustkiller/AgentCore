@@ -20,13 +20,14 @@ PLATFORM_MODEL_FLASH = "deepseek-v4-flash"
 PLATFORM_MODEL_PRO = "deepseek-v4-pro"
 DEEPSEEK_V4_FLASH = PLATFORM_MODEL_FLASH
 DEEPSEEK_V4_PRO = PLATFORM_MODEL_PRO
-# OpenCode Zen free SKU (upstream ¥0); product still meters at Flash nominal via pricing.
+# OpenCode Zen free SKU (upstream ¥0); product still meters at Flash Go-list CNY.
 DEEPSEEK_V4_FLASH_FREE = "deepseek-v4-flash-free"
 # Official V4.1 Flash (BYOK DeepSeek API). Distinct from the OpenCode Go wire id.
 DEEPSEEK_V41_FLASH = "deepseek-flash"
 # OpenCode Go V4.1 Flash. Platform allowlist may pin this through 2026-09-20
-# (Go $60 / 1× promo); rollback id is ``deepseek-v4-flash``. Not the official
-# ``deepseek-flash`` id — sending that on Go is a different SKU / vision contract.
+# (Go promo monthly cap $60 / allowance 4×); rollback id is ``deepseek-v4-flash``.
+# Not the official ``deepseek-flash`` id — Go/Zen hideFromPicker omits it
+# (vision contract differs).
 OPENCODE_GO_V41_FLASH = "deepseek-v4.1-flash"
 
 # Router / ``agent_provider_id`` sentinel when a worker override runs on platform credentials
@@ -52,6 +53,8 @@ class ProfileParams:
     # opinion; the wire still sends enabled for thinking_type_switch models
     # (do not rely on omit=on — OpenCode Go treats omit as off).
     thinking: bool | None = None
+    # Combination-level vendor effort token overlaid by TurnProfiles.get().
+    reasoning_effort: str | None = None
 
 
 PROFILES: dict[str, ProfileParams] = {
@@ -63,10 +66,6 @@ PROFILES: dict[str, ProfileParams] = {
     "compaction": ProfileParams(temperature=0.3, max_rounds=1, thinking=False),
     "file.rewrite": ProfileParams(temperature=0.4, max_rounds=1, thinking=False),
     "title": ProfileParams(temperature=0.3, max_tokens=1024, max_rounds=1, thinking=False),
-    # 固化工作流时抽槽位：结构化 JSON 一次性抽取，低温 + 不思考（同 title / memory）。
-    "workflow.slots": ProfileParams(
-        temperature=0.2, max_tokens=1024, max_rounds=1, thinking=False
-    ),
 }
 
 _DEFAULT_PROFILE = "chat"
@@ -101,6 +100,7 @@ def build_request(
         stream=stream,
         scenario=profile.name or _DEFAULT_PROFILE,
         thinking=profile.thinking,
+        reasoning_effort=profile.reasoning_effort,
     )
 
 
@@ -115,6 +115,8 @@ class TurnProfiles:
     # register on the turn ProviderRouter so ``route_model_for("agent")`` can dispatch
     # with a ``provider_id/model`` (or ``platform/model``) prefix.
     agent_provider_id: str | None = None
+    # Combination-level vendor thinking-effort token. None = that model's default.
+    reasoning_effort: str | None = None
 
     def model_for(self, profile_name: str) -> str:
         return self.model_overrides.get(profile_name, self.model)
@@ -133,10 +135,13 @@ class TurnProfiles:
         return model
 
     def get(self, name: str) -> ProfileParams:
-        return get_profile(name)
+        resolved = get_profile(name)
+        if resolved.thinking is False or self.reasoning_effort is None:
+            return resolved
+        return replace(resolved, reasoning_effort=self.reasoning_effort)
 
     def agent(self) -> ProfileParams:
-        return agent_profile()
+        return self.get("agent")
 
 
 def default_turn_profiles(*, model: str | None = None) -> TurnProfiles:

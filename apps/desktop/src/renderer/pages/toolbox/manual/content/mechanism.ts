@@ -18,6 +18,7 @@ export const mechanismChapter: ManualChapterContent = {
       id: MANUAL_SECTION_IDS.mechanism.live,
       title: "看团队跑一遍",
       icon: "PlayCircle",
+      ai: "optional",
       blocks: [
         {
           type: "callout",
@@ -48,6 +49,7 @@ export const mechanismChapter: ManualChapterContent = {
       id: MANUAL_SECTION_IDS.mechanism.legend,
       title: "看懂协作图",
       icon: "BookOpen",
+      ai: "optional",
       blocks: [
         {
           type: "lead",
@@ -60,6 +62,7 @@ export const mechanismChapter: ManualChapterContent = {
       id: MANUAL_SECTION_IDS.mechanism.panorama,
       title: "从发消息到收答案",
       icon: "Layers",
+      ai: "optional",
       blocks: [
         {
           type: "lead",
@@ -129,6 +132,7 @@ export const mechanismChapter: ManualChapterContent = {
       id: MANUAL_SECTION_IDS.mechanism.scenarios,
       title: "机制场景",
       icon: "LayoutGrid",
+      ai: "optional",
       blocks: [
         {
           type: "lead",

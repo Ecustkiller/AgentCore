@@ -466,10 +466,10 @@ def workspace_channel_for_tools(
 ) -> WorkspaceChannel | None:
     """The ``workspace_op_required`` channel for desktop-held ops.
 
-    LocalWorkspace already owns a channel (file / execute / diagnostics) — reuse
-    it so process ops and the language service share root_id + registry. Sidecar
+    LocalWorkspace already owns a channel (file / execute) — reuse
+    it so process ops share root_id + registry. Sidecar
     uses ServerWorkspace(location=local) with direct Path I/O and no owned
-    channel; build one so ``terminal`` and ``diagnostics`` still leave the
+    channel; build one so ``terminal`` still leaves the
     short-lived sidecar for the desktop main process (双模式工作区 §四).
     Cloud server backends return ``None`` (those ops are not registered there).
     """

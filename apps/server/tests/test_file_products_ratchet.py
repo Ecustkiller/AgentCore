@@ -65,8 +65,7 @@ from agentcore.tools.builtin.file_ops import (
     StrReplaceTool,
 )
 from agentcore.tools.builtin.git_ops import GitTool
-from agentcore.tools.builtin.md_to_docx import MdToDocxTool
-from agentcore.tools.builtin.md_to_pdf import MdToPdfTool
+from agentcore.tools.builtin.md_export import MdExportTool
 from agentcore.tools.builtin.run import RunTool
 from agentcore.tools.builtin.web import download_url as download_mod
 from agentcore.tools.builtin.web.download_url import DownloadUrlTool
@@ -203,12 +202,10 @@ def _seed_note_md(root: Path) -> None:
     (root / "note.md").write_text("# Hi\n\n你好世界\n", encoding="utf-8")
 
 
-async def _run_md_to_docx(root: Path, _mp: pytest.MonkeyPatch) -> ToolResult:
-    return await MdToDocxTool().execute({"path": "note.md"}, _ctx(root))
-
-
-async def _run_md_to_pdf(root: Path, _mp: pytest.MonkeyPatch) -> ToolResult:
-    return await MdToPdfTool().execute({"path": "note.md"}, _ctx(root))
+async def _run_md_export(root: Path, _mp: pytest.MonkeyPatch) -> ToolResult:
+    return await MdExportTool().execute(
+        {"path": "note.md", "format": "docx"}, _ctx(root)
+    )
 
 
 def _seed_zip(root: Path) -> None:
@@ -313,8 +310,7 @@ _CASES: tuple[_Case, ...] = (
         _seed_batch_sources,
     ),
     # 导出件：产物是 .docx / .pdf，入参那份 md 是它的源（``derived_from``），不是产物。
-    _Case("md_to_docx", _run_md_to_docx, (("note.docx", "docx", "note.md"),), _seed_note_md),
-    _Case("md_to_pdf", _run_md_to_pdf, (("note.pdf", "pdf", "note.md"),), _seed_note_md),
+    _Case("md_export", _run_md_export, (("note.docx", "docx", "note.md"),), _seed_note_md),
     _Case(
         "archive_extract",
         _run_archive_extract,

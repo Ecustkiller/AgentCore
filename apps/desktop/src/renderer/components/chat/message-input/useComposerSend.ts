@@ -601,7 +601,7 @@ export function useComposerSend({
         }
 
         if (pending.length > 0) {
-          // 驻留落地后才知道真实 ``attachments/…`` 路径：补正乐观气泡（下载链接靠它）。
+          // 驻留落地后才知道真实 ``attachments/…`` 路径：补正乐观气泡。
           useConversationStore.getState().updateMessage(
             userMsgId,
             {

@@ -74,12 +74,14 @@ describe("TablesPage", () => {
         conversationId: null,
         schemaVersion: 1,
         rowCount: 5,
+        sourcePath: "客户.csv",
         createdAt: "2026-09-01T00:00:00Z",
         updatedAt: "2026-09-13T00:00:00Z",
       },
     ]);
     renderPage();
     expect(await screen.findByText("阅读清单")).toBeTruthy();
+    expect(screen.getByText("客户.csv")).toBeTruthy();
     fireEvent.click(screen.getByText("阅读清单"));
     expect(screen.getByText("编辑器")).toBeTruthy();
   });

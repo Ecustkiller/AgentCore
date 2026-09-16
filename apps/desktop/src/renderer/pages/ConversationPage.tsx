@@ -290,7 +290,7 @@ export function ConversationPage() {
                 memory_has_more_after_before: rt.hasMoreAfter,
               });
             } else {
-              logEvent("warn", "conversation.slice_diag", {
+              logEvent("info", "conversation.slice_diag", {
                 action:
                   action === "skip_generating"
                     ? "warm_skip_reconcile"

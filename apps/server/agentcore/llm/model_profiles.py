@@ -1,6 +1,7 @@
 """Model combination profiles (模型组合) — CRUD + expand as a **derived query layer**.
 
-A profile is ``{main, worker?, background?, vision?}``. Empty worker / background =
+A profile is ``{main, worker?, background?, vision?}`` plus optional vendor
+``reasoning_effort``. Empty worker / background =
 follow_main. Empty vision does **not** persist follow_main into the slot columns.
 VisionReader resolve may reuse main credentials when that id accepts images
 (``llm.image_accept``); else platform ``VISION_*`` only when ``billing_mode=platform``.
@@ -24,7 +25,7 @@ Distinct from scenario ``ProfileParams`` (temperature / rounds) in ``llm/profile
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -70,6 +71,7 @@ class ExpandedProfile:
     worker: ModelSelection | None = None
     background: ModelSelection | None = None
     vision: ModelSelection | None = None
+    reasoning_effort: str | None = None
 
 
 @dataclass(frozen=True)
@@ -81,6 +83,7 @@ class ModelProfileView:
     worker: ProfileSlot | None = None
     background: ProfileSlot | None = None
     vision: ProfileSlot | None = None
+    reasoning_effort: str | None = None
     is_default: bool = False
     warnings: tuple[str, ...] = ()
 
@@ -145,6 +148,35 @@ def resolve_system_preset_main(profile_id: str) -> ModelSelection:
     """Fixed platform model for a system preset (no keyword ranking)."""
     model_id = system_presets()[profile_id]
     return ModelSelection(model=model_id, origin="platform", provider_id=None)
+
+
+def _normalize_reasoning_effort(main_model: str, value: str | None) -> str | None:
+    """Persist official vendor tokens only. Blank → None (vendor default)."""
+    from agentcore.llm.provider.wire_dialect import reasoning_effort_spec
+
+    raw = (value or "").strip() or None
+    spec = reasoning_effort_spec(main_model)
+    if raw is None:
+        return None
+    if spec is None:
+        raise ValidationError("当前主模型不支持思考强度")
+    options, _default = spec
+    if raw not in options:
+        raise ValidationError(f"思考强度须为该模型厂商档位之一：{', '.join(options)}")
+    return raw
+
+
+def _snap_reasoning_effort(main_model: str, stored: str | None) -> str | None:
+    """Keep a stored token only if the (new) main model still lists it."""
+    from agentcore.llm.provider.wire_dialect import reasoning_effort_spec
+
+    raw = (stored or "").strip() or None
+    if raw is None:
+        return None
+    spec = reasoning_effort_spec(main_model)
+    if spec is None or raw not in spec[0]:
+        return None
+    return raw
 
 
 def _slot_from_row(
@@ -231,6 +263,7 @@ class LlmModelProfileService:
             worker=None,
             background=None,
             vision=None,
+            reasoning_effort=None,
             is_default=is_default,
         )
 
@@ -251,6 +284,7 @@ class LlmModelProfileService:
             vision=_slot_from_row(
                 row.vision_origin, row.vision_model, row.vision_provider_id
             ),
+            reasoning_effort=getattr(row, "reasoning_effort", None),
             is_default=is_default,
         )
 
@@ -273,17 +307,7 @@ class LlmModelProfileService:
             if effective is None:
                 effective = next((v.id for v in views), None)
         return [
-            ModelProfileView(
-                id=v.id,
-                name=v.name,
-                kind=v.kind,
-                main=v.main,
-                worker=v.worker,
-                background=v.background,
-                vision=v.vision,
-                is_default=(v.id == effective),
-                warnings=v.warnings,
-            )
+            replace(v, is_default=(v.id == effective))
             for v in views
         ]
 
@@ -411,6 +435,7 @@ class LlmModelProfileService:
         worker: ProfileSlot | None = None,
         background: ProfileSlot | None = None,
         vision: ProfileSlot | None = None,
+        reasoning_effort: str | None = None,
         kind: str = "user",
         set_as_default: bool = False,
     ) -> ModelProfileView:
@@ -424,6 +449,7 @@ class LlmModelProfileService:
             await self._validate_slot(user_id, background, label="background")
         if vision is not None:
             await self._validate_slot(user_id, vision, label="vision")
+        effort = _normalize_reasoning_effort(main.model, reasoning_effort)
 
         row = await self._repo.create(
             user_id=user_id,
@@ -449,6 +475,7 @@ class LlmModelProfileService:
                 vision.provider_id if vision and vision.origin == "byok" else None
             ),
             vision_model=vision.model.strip() if vision else None,
+            reasoning_effort=effort,
         )
         if set_as_default:
             await self._users.set_default_model_profile(user_id, row.id)
@@ -463,17 +490,7 @@ class LlmModelProfileService:
         view = self._view_row(row, is_default=set_as_default)
         if not warnings:
             return view
-        return ModelProfileView(
-            id=view.id,
-            name=view.name,
-            kind=view.kind,
-            main=view.main,
-            worker=view.worker,
-            background=view.background,
-            vision=view.vision,
-            is_default=view.is_default,
-            warnings=warnings,
-        )
+        return replace(view, warnings=warnings)
 
     async def update_profile(
         self,
@@ -485,6 +502,7 @@ class LlmModelProfileService:
         worker: ProfileSlot | None | object = _UNSET,
         background: ProfileSlot | None | object = _UNSET,
         vision: ProfileSlot | None | object = _UNSET,
+        reasoning_effort: str | None | object = _UNSET,
         fields_set: set[str],
     ) -> ModelProfileView:
         if is_system_profile_id(profile_id):
@@ -550,6 +568,17 @@ class LlmModelProfileService:
                 )
                 kwargs["vision_model"] = vision.model.strip()
 
+        main_model_for_effort = kwargs.get("main_model") or row.main_model
+        if "reasoning_effort" in fields_set:
+            raw = None if reasoning_effort is None else str(reasoning_effort)
+            kwargs["reasoning_effort"] = _normalize_reasoning_effort(
+                main_model_for_effort, raw
+            )
+        elif "main" in fields_set:
+            snapped = _snap_reasoning_effort(main_model_for_effort, row.reasoning_effort)
+            if snapped != (row.reasoning_effort or None):
+                kwargs["reasoning_effort"] = snapped
+
         updated = await self._repo.update(profile_id, user_id=user_id, **kwargs)
         assert updated is not None
         default_id = await self._default_id(user_id)
@@ -568,17 +597,7 @@ class LlmModelProfileService:
         warnings = await self._byok_reachability_warnings(user_id, warn_slots)
         if not warnings:
             return view
-        return ModelProfileView(
-            id=view.id,
-            name=view.name,
-            kind=view.kind,
-            main=view.main,
-            worker=view.worker,
-            background=view.background,
-            vision=view.vision,
-            is_default=view.is_default,
-            warnings=warnings,
-        )
+        return replace(view, warnings=warnings)
 
     async def delete_profile(self, user_id: str, profile_id: str) -> None:
         if is_system_profile_id(profile_id):
@@ -721,6 +740,9 @@ class LlmModelProfileService:
             worker=worker,
             background=background,
             vision=vision,
+            reasoning_effort=_snap_reasoning_effort(
+                main.model, getattr(row, "reasoning_effort", None)
+            ),
         )
 
     async def expand_for_conversation(

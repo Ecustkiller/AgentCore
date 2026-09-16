@@ -282,26 +282,39 @@ export function createStreamProjectionActions(
       return foundId;
     },
 
-    addProcessTool: (payload, conversationId) =>
+    addProcessTool: (payload, conversationId, startedAtMs) =>
       patchConversation(conversationId, (rt) => {
-        const messages = [...rt.messages];
-        const last = messages[messages.length - 1];
+        const last = rt.messages[rt.messages.length - 1];
         if (!last || last.role !== "assistant") return null;
         const lane = foldToolUseStart(messageLaneFromMessage(last), payload);
-        if (lane.process === last.process) return null;
-        messages[messages.length - 1] = {
-          ...last,
-          process: lane.process,
-          composingTool: null,
-        };
-        // 盖章该工具真实开始时刻（桌面本地 · live-only）：ToolLine 据此计「运行 · Ns」，锚定
-        // 真实开始而非组件挂载，故行重挂（过程折叠展开 / 聊天列表虚拟化）后仍准。幂等——已存在
-        // 不覆盖，重复 tool_use_start 不重置。仅到此处（process 已变=CEO 自身工具新入行）才盖。
-        const toolStartedMs =
-          rt.toolStartedMs[payload.tool_call_id] !== undefined
-            ? rt.toolStartedMs
-            : { ...rt.toolStartedMs, [payload.tool_call_id]: Date.now() };
-        return { messages, toolStartedMs };
+        const processChanged = lane.process !== last.process;
+        // 盖章真实开始（桌面本地 · live-only）：优先 SSE `timestamp`（与 run 帧 `t`
+        // 同墙钟，attach 回放不从「此刻」重计），缺省才 Date.now()。幂等——已有不覆盖。
+        // fold 已是 no-op（hydrate / catch-up 工具已在 process 里）仍要补章，否则秒表没锚。
+        const stamp =
+          startedAtMs != null && Number.isFinite(startedAtMs)
+            ? startedAtMs
+            : Date.now();
+        const alreadyStamped =
+          rt.toolStartedMs[payload.tool_call_id] !== undefined;
+        if (!processChanged && alreadyStamped) return null;
+        const patch: Partial<ConversationRuntime> = {};
+        if (processChanged) {
+          const messages = [...rt.messages];
+          messages[messages.length - 1] = {
+            ...last,
+            process: lane.process,
+            composingTool: null,
+          };
+          patch.messages = messages;
+        }
+        if (!alreadyStamped) {
+          patch.toolStartedMs = {
+            ...rt.toolStartedMs,
+            [payload.tool_call_id]: stamp,
+          };
+        }
+        return patch;
       }),
 
     endProcessTool: (payload, conversationId) =>

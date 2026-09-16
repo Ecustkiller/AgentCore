@@ -1,6 +1,6 @@
 /**
- * 导入到云后台任务（Dialog 关窗后仍跑）—— 防重入 + AbortController。
- * Toast 进度 / 终态在 {@link startImportToCloudJob}（lib）。
+ * 本机快照进云后台任务（Dialog 关窗后仍跑）—— 防重入 + AbortController。
+ * Toast 进度 / 终态在 {@link startBorrowToCloudJob}（lib）。
  */
 import { create } from "zustand";
 

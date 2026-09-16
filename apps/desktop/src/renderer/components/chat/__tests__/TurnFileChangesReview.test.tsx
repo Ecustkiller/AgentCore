@@ -319,7 +319,7 @@ describe("TurnFileChangesReview A2′ rollback", () => {
     expect(screen.getByText("删除")).toBeTruthy();
   });
 
-  it("true diff with zero files still explains the empty body", async () => {
+  it("true diff with zero files hides the turn (no restore, no empty copy)", async () => {
     getTurnFilesDiff.mockResolvedValue({
       messageId: "m1",
       baselineSnapshotId: "snap-1",
@@ -331,7 +331,7 @@ describe("TurnFileChangesReview A2′ rollback", () => {
       deleted: 0,
     });
 
-    render(
+    const { container } = render(
       <TooltipProvider>
         <TurnFileChangesReview
           variant="panel"
@@ -344,10 +344,12 @@ describe("TurnFileChangesReview A2′ rollback", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("相对基线无文件差异")).toBeTruthy();
+      expect(getTurnFilesDiff).toHaveBeenCalled();
     });
-    expect(screen.getByLabelText("恢复到本回合开始")).toBeTruthy();
-    expect(screen.queryByText("暂无改动")).toBeNull();
+    expect(container.textContent).toBe("");
+    expect(screen.queryByLabelText("恢复到本回合开始")).toBeNull();
+    expect(screen.queryByText("相对基线无文件差异")).toBeNull();
+    expect(screen.queryByText("回合 1")).toBeNull();
   });
 
   it("uses sidecar local diff/restore when workspace location is local", async () => {
@@ -363,10 +365,21 @@ describe("TurnFileChangesReview A2′ rollback", () => {
       messageId: "m1",
       baselineSnapshotId: "m1",
       available: true,
-      changes: [],
-      total: 0,
+      changes: [
+        {
+          path: "a.ts",
+          changeType: "modified",
+          baseSha: "b",
+          resultSha: "r",
+          isBinary: false,
+          content: "b",
+          sizeBytes: 1,
+          baseContent: "a",
+        },
+      ],
+      total: 1,
       added: 0,
-      modified: 0,
+      modified: 1,
       deleted: 0,
     });
     restoreLocalTurnBaseline.mockResolvedValue(undefined);
@@ -466,7 +479,6 @@ describe("TurnFileChangesReview A2′ rollback", () => {
     expect(screen.getByText("01:12")).toBeTruthy();
     expect(screen.queryByText(/个文件/)).toBeNull();
     expect(restore.textContent).toContain("恢复");
-    expect(restore.textContent).not.toContain("到本回合开始");
     expect(screen.queryByText("正在读取改动…")).toBeNull();
   });
 

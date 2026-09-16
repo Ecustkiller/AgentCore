@@ -140,7 +140,7 @@ def coordination_boundary_hook(
     """Wrap the supervised boundary hook: SCOPE → event queue + PROCEED (no YIELD).
 
     CHECKPOINT under coordination is handled inside ``boundary_hook`` (active session →
-    ``_pending_boundary`` + YIELD, no durable plan_review). BIND still delegates to base.
+    ``_pending_boundary`` + YIELD, no durable plan_review).
     """
 
     async def on_boundary(

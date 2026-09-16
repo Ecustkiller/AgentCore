@@ -268,7 +268,7 @@ def fold_exported_sources(
     """Split accepted paths into ``(主推件, 被折叠的中间稿)``.
 
     An accepted product whose ``derived_from`` names another accepted path says
-    「我是那份源文件的导出件」（``md_to_docx``：docx ← 源 md）。用户要的是导出件，源文件
+    「我是那份源文件的导出件」（``md_export``：docx ← 源 md）。用户要的是导出件，源文件
     只是中间稿——同列两份会让答复把 ``.md`` 说成「Word 文档」的位置（真实事故）。折叠只认
     自报的 ``derived_from``：不看扩展名、不看工具名，没自报就一份都不降级。
 

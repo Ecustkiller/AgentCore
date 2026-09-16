@@ -111,9 +111,9 @@ interface MemoryUpdatedEvent {
 
 type MemoryUpdateKind = components["schemas"]["MemoryUpdateView"]["kind"];
 
-/** Cross-conversation heads-up for `memory_updated`. `null` = no toast: the inline
- * card (if this conversation is open) and the 记忆动态 feed already cover it.
- * Toast only when the user is away from the source conversation. */
+/** Cross-conversation heads-up for `memory_updated`. `null` = no toast.
+ * Quota still nudges when the user is away from the source conversation;
+ * semantic leftover writes stay quiet (the inline card covers the source chat). */
 export function memoryUpdatedToastCopy(
   kind: MemoryUpdateKind,
   cardShown: boolean,
@@ -123,7 +123,7 @@ export function memoryUpdatedToastCopy(
     // Never claim a write that was refused (审计 CTX-A2).
     return "常驻条目已满，有内容没能记下";
   }
-  return "AI 刚刚更新了你的记忆";
+  return null;
 }
 
 /** Re-sync state that may have changed while disconnected. */
@@ -168,9 +168,6 @@ function handleFrame(frame: string): void {
           e.conversation_id,
         );
       }
-      // 记忆动态 feed live-refresh: mark the cross-conversation「最近更新」query stale so an
-      // OPEN MemoryUpdatesView refetches at once (a closed one just refetches on next open —
-      // free).
       void queryClient.invalidateQueries({ queryKey: ["memory-updates"] });
       const cardShown =
         !!(e.update && e.conversation_id) &&

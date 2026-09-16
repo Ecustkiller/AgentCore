@@ -454,12 +454,11 @@ async def test_gate_run_command_preview_allows_20k():
     gate = _gate(sink, reg)
 
     command = "c" * (_PREVIEW_CODE_EXECUTE_CODE_MAX + 500)
-    purpose = "p" * 800
     resolver = asyncio.create_task(_resolve_when_ready(reg, "id1", ApprovalDecision.DENY, "conv-1"))
     await gate.authorize(
         tool_name="run",
         tool_call_id="id1",
-        arguments={"command": command, "purpose": purpose},
+        arguments={"command": command},
     )
     await resolver
 
@@ -467,8 +466,6 @@ async def test_gate_run_command_preview_allows_20k():
     args = required.payload["arguments"]
     assert args["command"].endswith(_TRUNCATION_SUFFIX)
     assert len(args["command"]) == _PREVIEW_CODE_EXECUTE_CODE_MAX + len(_TRUNCATION_SUFFIX)
-    assert args["purpose"].endswith(_TRUNCATION_SUFFIX)
-    assert len(args["purpose"]) < len(purpose)
 
 
 async def test_gate_run_env_values_are_redacted():
@@ -484,7 +481,6 @@ async def test_gate_run_env_values_are_redacted():
         tool_call_id="id1",
         arguments={
             "command": "print(1)",
-            "purpose": "call api",
             "env": {"AGNES_API_KEY": "opaque-secret-value-here"},
         },
     )

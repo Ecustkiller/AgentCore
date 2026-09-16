@@ -150,8 +150,8 @@ async def test_ask_user_capture_assembles_turn_paused_with_checkpoint_marker() -
 
 
 @pytest.mark.asyncio
-async def test_ask_user_explicit_message_keeps_round_prose_in_bubble() -> None:
-    """Model-owned ``message`` does not fold: capture keeps same-round guidance."""
+async def test_ask_user_explicit_prompt_keeps_round_prose_in_bubble() -> None:
+    """Model-owned prompt does not fold: capture keeps same-round guidance."""
     fl_token = _bind_fact_log()
     sink = EventSink()
     controller = LoopController()

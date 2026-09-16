@@ -1,6 +1,12 @@
-"""Turn-level Phase-0 latency probe (observation only — no product behavior change).
+"""Turn-level latency probe.
 
-Four fields on ``chat.turn_complete``:
+``elapsed_ms`` / ``turn_wall_ms`` is a **product settle fact**: the whole-turn
+wall clock stamped onto ``message_end.duration_ms`` and persisted
+(``messages.usage.duration_ms``). That number is the bubble-footer 「用时」.
+The collaboration-graph strip uses a different clock (fact-stream span after
+``run_plan``) — two surfaces, two clocks; do not merge them here.
+
+Four Phase-0 fields remain observation-only on ``chat.turn_complete``:
 
 - ``prepare_ms`` / ``assemble_ms`` — wall-clock duration of the existing
   ``prepare_fresh_turn`` / ``assemble_ceo_turn`` calls (not LLM latency).
@@ -107,6 +113,40 @@ def bind_turn_latency(anchor_mono: float | None = None) -> tuple[TurnLatencyProb
 
 def get_turn_latency() -> TurnLatencyProbe | None:
     return current_turn_latency.get()
+
+
+def turn_wall_ms() -> int | None:
+    """Whole-turn product-AI wall clock (ms). None when no probe is bound.
+
+    Vectors / un-bound paths stay ``None`` — never invent ``0``.
+    """
+    probe = get_turn_latency()
+    if probe is None:
+        return None
+    return probe.elapsed_ms()
+
+
+def stamp_turn_wall(
+    target: dict, *, duration_ms: int | None = None
+) -> int | None:
+    """Write ``duration_ms`` onto a settle / persist dict once.
+
+    Existing positive values win so later sidecar harvest wait cannot stretch
+    the number already shown on ``message_end``.
+    """
+    existing = target.get("duration_ms")
+    if existing is not None:
+        try:
+            n = int(existing)
+        except (TypeError, ValueError):
+            pass
+        else:
+            if n > 0:
+                return n
+    ms = duration_ms if duration_ms is not None else turn_wall_ms()
+    if ms is not None:
+        target["duration_ms"] = ms
+    return ms
 
 
 def reset_turn_latency(token: Token) -> None:

@@ -33,7 +33,7 @@ Multi-Agent First：组合优于堆叠；单 Agent = 无成员的 Team（统一�
 
 ### `escalate`
 
-worker 唯一向上通道。`blocking=false`（默认）= 已有合理默认、报后按假设续跑、主管收尾纠偏；`blocking=true` = 猜错作废 / 用户要不确定就问 / 只有上级能定 → 挂起求决（须写 assumption；默认无限期等 +「按假设继续」按钮）。经典路径直挂**用户**（否决挂 CEO——会死锁）；协调模式例外：CEO 波内存活 → 等 `resolve_escalation`（单 worker 同样进协调，一并适用）。等 CEO 时该队员不算短调用 in-flight，wait 不得空等该队员。仅嵌套 lead / 成篇套餐提纲把关 / 画布人工把关等阻塞路径永不走 resolve——那时 CEO 卡在 `delegate` 内，挂 CEO 必死锁。快跑还是停下由 **worker 按题自选** `blocking`（省着用、该停别装非阻塞），不设用户总开关。
+worker 唯一向上通道。`blocking=false`（默认）= 已有合理默认、报后按假设续跑、主管收尾纠偏；`blocking=true` = 猜错作废 / 用户要不确定就问 / 只有上级能定 → 挂起求决（须写 assumption；默认无限期等 +「按假设继续」按钮）。经典路径直挂**用户**（否决挂 CEO——会死锁）；协调模式例外：CEO 波内存活 → 等 `resolve_escalation`（单 worker 同样进协调，一并适用）。等 CEO 时该队员不算短调用 in-flight，wait 不得空等该队员。仅嵌套 lead / 画布人工把关等阻塞路径永不走 resolve——那时 CEO 卡在 `delegate` 内，挂 CEO 必死锁。快跑还是停下由 **worker 按题自选** `blocking`（省着用、该停别装非阻塞），不设用户总开关。
 
 前端分卡：真·非阻塞 escalate →「边干边上报」+「暂定假设」；引擎早停 / 硬顶打转（wire `source=validation_thrash|ceiling_backstop`）→「卡住早停」，**不**冒充边干边上报或「已按假设继续」。真挂起 →「请你拍板」。
 
@@ -120,7 +120,7 @@ Agent 没有「文件开在编辑器里」。写盘占用只包住**这一次** 
 | 项 | 状态 |
 |---|---|
 | 完整 Preflight Audit | ⏳；薄预览不等于编制确认；编制到即开跑 |
-| 一等 Team 实体 / A2A | **否决**可保存 Team / 上架 Agent（现行组队是 `delegate`；可保存拆法是工作流；A2A 不另立可发现实体）→ [工具与能力 · 能力商店](/docs/03-AI核心/工具与能力系统.md#能力商店) |
+| 一等 Team 实体 / A2A | **否决**可保存 Team / 上架 Agent（现行组队是 `delegate`；可保存拆法写用户技能；A2A 不另立可发现实体）→ [工具与能力 · 能力商店](/docs/03-AI核心/工具与能力系统.md#能力商店) |
 | 独立 Arena | **否决** |
 | 树级共享 Semaphore | **否决**（父子互等死锁） |
 | 便签墙 / worker 侧向广播 | **否决**（第四套实体；不留波内推送。旧 journal `team_note_posted` 跳过、不展示） |

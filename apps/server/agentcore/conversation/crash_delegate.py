@@ -145,6 +145,7 @@ async def production_crash_delegate_factory(
             session_loader=session_loader,
             suspension_saver=suspension_saver,
             suspension_deleter=suspension_deleter,
+            llm_credentials=llm_credentials,
         )
         logger.info(
             "recover.crash_delegate_ready",

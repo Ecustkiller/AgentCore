@@ -1,12 +1,16 @@
 """A1+ turn baseline snapshot — best-effort freeze before writes.
 
-Cloud (``run_and_persist``): labeled OSS/FS snapshot, id → ``messages.baseline_snapshot_id``.
-Local (sidecar ``_run_turn``): zip beside the workspace at
-``AgentCore/baselines/{message_id}.zip`` (id = message_id; no DB required).
-Local (desktop channel ``LocalWorkspace``): same zip path on the user disk via
+Capture is **lazy**: first file-mutating tool / git write this turn, or Local
+destructive shell (via :func:`ensure_local_baseline_for_destructive`). Greeting
+and read-only turns leave no zip / cloud snapshot.
+
+Cloud: labeled OSS/FS snapshot, id → ``messages.baseline_snapshot_id``.
+Local (sidecar): zip at ``AgentCore/baselines/{message_id}.zip`` (id = message_id).
+Local (desktop channel ``LocalWorkspace``): same path via
 ``WorkspaceOp.ENSURE_TURN_BASELINE`` — server never pretends to own a Path.root.
 
 失败 / 超限 / 超时只打日志，绝不阻断回合；桌面降级 A1 工具参数预览。
+同一 ``message_id`` 只打一次（已有 zip / snapshot 则复用，并行写单飞）。
 
 保留：本地基线区在每次捕获后顺带清理（:func:`prune_local_baselines`，数量上限 ∧ TTL，
 对齐云端 D+C），清理失败同样只打日志。用户命名版本区 ``AgentCore/versions`` 永不自动
@@ -39,6 +43,9 @@ logger = get_logger(__name__)
 LOCAL_BASELINE_MAX_FILES = 20_000
 LOCAL_BASELINE_MAX_BYTES = 100 * 1024 * 1024  # 100 MiB raw
 LOCAL_BASELINE_TIMEOUT_S = 60.0
+
+# In-flight captures keyed by message_id (parallel file tools, one zip).
+_capture_waiters: dict[str, asyncio.Future[str | None]] = {}
 
 
 def local_baselines_root(workspace_root: Path) -> Path:
@@ -139,6 +146,27 @@ class _LocalBackendMarker:
     location = "local"
 
 
+def tool_warrants_turn_baseline(
+    tool_name: str,
+    arguments: dict[str, Any] | None = None,
+) -> bool:
+    """True when this call is about to change workspace files (not a greeting).
+
+    File-mutation tools and mutating ``git`` subcommands. Destructive ``run`` /
+    ``host(action=shell)`` stay on :func:`ensure_local_baseline_for_destructive`.
+    """
+    name = (tool_name or "").strip()
+    from agentcore.tools.builtin import file_mutation_tool_names
+
+    if name in file_mutation_tool_names():
+        return True
+    if name == "git":
+        from agentcore.tools.builtin.git_ops import git_call_is_write
+
+        return git_call_is_write(arguments)
+    return False
+
+
 def _path_root(backend: Any, workspace_root: Path | None) -> Path | None:
     """Sidecar ``ServerWorkspace(location=local).root`` or explicit override."""
     if workspace_root is not None:
@@ -158,14 +186,75 @@ async def maybe_capture_turn_baseline(
 ) -> str | None:
     """Snapshot the workspace before the turn mutates it. Returns snapshot id or None.
 
+    Call immediately before the first file-mutating tool (or via the destructive
+    ensure path). Idempotent per ``message_id``. Never raises.
+
     ``backend.location == "server"`` → cloud labeled snapshot (+ DB id stamp).
     ``backend.location == "local"`` + Path root → local zip under ``workspace_root``
     (sidecar).
     ``backend.location == "local"`` + channel ``LocalWorkspace`` → desktop
     ``ensure_turn_baseline`` op (no server Path).
-
-    Never raises to block the turn — failures log and return ``None``.
     """
+    mid = (message_id or "").strip()
+    if not mid:
+        return None
+    if backend.location == "local":
+        root = _path_root(backend, workspace_root)
+        if root is not None and local_baseline_ready(root, mid):
+            return mid
+
+    existing = _capture_waiters.get(mid)
+    if existing is not None and not existing.done():
+        try:
+            return await existing
+        except Exception:
+            return None
+
+    loop = asyncio.get_running_loop()
+    fut: asyncio.Future[str | None] = loop.create_future()
+    winner = _capture_waiters.setdefault(mid, fut)
+    if winner is not fut:
+        try:
+            return await winner
+        except Exception:
+            return None
+    try:
+        sid = await _capture_turn_baseline_body(
+            user_id=user_id,
+            folder_id=folder_id,
+            conversation_id=conversation_id,
+            message_id=mid,
+            backend=backend,
+            workspace_root=workspace_root,
+        )
+        if not fut.done():
+            fut.set_result(sid)
+        return sid
+    except Exception:
+        logger.warning(
+            "turn.local_baseline_failed",
+            conversation_id=conversation_id,
+            message_id=mid,
+            phase="maybe_capture",
+            exc_info=True,
+        )
+        if not fut.done():
+            fut.set_result(None)
+        return None
+    finally:
+        if _capture_waiters.get(mid) is fut:
+            _capture_waiters.pop(mid, None)
+
+
+async def _capture_turn_baseline_body(
+    *,
+    user_id: str,
+    folder_id: str | None,
+    conversation_id: str,
+    message_id: str,
+    backend: WorkspaceBackend,
+    workspace_root: Path | None,
+) -> str | None:
     if backend.location == "local":
         root = _path_root(backend, workspace_root)
         if root is not None:
@@ -256,6 +345,28 @@ async def ensure_local_baseline_for_destructive(
     return False
 
 
+async def _existing_cloud_baseline_id(
+    *, conversation_id: str, message_id: str
+) -> str | None:
+    """Reuse a snapshot already stamped on this assistant row."""
+    if not conversation_id or not message_id:
+        return None
+    try:
+        from agentcore.db.base import async_session_factory
+        from agentcore.db.repositories.messages import MessageRepository
+
+        async with async_session_factory() as session:
+            msg = await MessageRepository(session).get_by_id(
+                message_id, conversation_id=conversation_id
+            )
+    except Exception:
+        return None
+    sid = getattr(msg, "baseline_snapshot_id", None) if msg is not None else None
+    if isinstance(sid, str) and sid.strip():
+        return sid.strip()
+    return None
+
+
 async def _capture_cloud_baseline(
     *,
     user_id: str,
@@ -265,6 +376,12 @@ async def _capture_cloud_baseline(
 ) -> str | None:
     if not settings.workspace_snapshot_enabled:
         return None
+    existing = await _existing_cloud_baseline_id(
+        conversation_id=conversation_id,
+        message_id=message_id,
+    )
+    if existing:
+        return existing
     label = f"turn-baseline:{message_id}"
     try:
         placement = await resolve_folder_placement(folder_id)
@@ -336,6 +453,8 @@ async def _capture_local_baseline(
     message_id: str,
 ) -> str | None:
     """Best-effort local zip; snapshot id == message_id (path convention, no DB)."""
+    if local_baseline_ready(workspace_root, message_id):
+        return message_id
     dest = local_baseline_path(workspace_root, message_id)
     try:
         size = await asyncio.wait_for(

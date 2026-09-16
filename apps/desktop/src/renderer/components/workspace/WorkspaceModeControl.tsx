@@ -39,7 +39,6 @@ import {
   HardDrive,
   Loader2,
   MapPin,
-  Upload,
 } from "lucide-react";
 import {
   type ReactNode,
@@ -293,19 +292,6 @@ export function WorkspaceModeMenu({
     onActionDone?.();
   };
 
-  const importToCloud = () => {
-    onActionDone?.();
-    const prefillRootId = effective.rootId;
-    useFoldersStore.getState().openImportToCloud(
-      prefillRootId
-        ? {
-            rootId: prefillRootId,
-            folderName: folderName ?? rootName,
-          }
-        : null,
-    );
-  };
-
   /** 云会话 → 当前 desk；遗留本机 → 新建云文件夹再 clone（不改绑本会话）。 */
   const connectGit = () => {
     let wsId: string | null = null;
@@ -320,6 +306,10 @@ export function WorkspaceModeMenu({
   };
 
   const anyBusy = exitBusy;
+  const showActions =
+    (isLocal && rootMissing) ||
+    (!isLocal && Boolean(desktop && conversationId)) ||
+    exitBusy;
 
   return (
     <>
@@ -343,75 +333,60 @@ export function WorkspaceModeMenu({
         </div>
       </div>
 
-      <div className="p-1.5">
-        {isLocal && !rootMissing ? (
-          <>
-            <ModeAction
-              icon={<Upload size={14} />}
-              label="导入到「我的文件」"
-              hint="可选：新建云文件夹并导入"
-              onClick={importToCloud}
-              disabled={anyBusy}
-            />
-          </>
-        ) : isLocal && rootMissing ? (
-          <>
-            <p className="px-2.5 py-1.5 text-xs text-muted-foreground">
-              目录在本机不可用。请导入到「我的文件」或重新绑定本机路径后再继续。
-            </p>
-            <ModeAction
-              icon={<Upload size={14} />}
-              label="导入到「我的文件」"
-              hint="本机文件夹快照 → 新建云文件夹"
-              onClick={importToCloud}
-              disabled={anyBusy}
-            />
-            <ModeAction
-              icon={<GitBranch size={14} />}
-              label="从 Git 克隆"
-              hint="新建云文件夹并浅克隆"
-              onClick={connectGit}
-              disabled={anyBusy}
-            />
-          </>
-        ) : desktop && conversationId ? (
-          <>
-            {/* §7.6 云桌→本机：芯片只留 Diff 合回；首次询问落点，已登记可更换。 */}
-            <ModeAction
-              icon={<FolderInput size={14} />}
-              label={borrowActive ? "写入原文件夹" : "合回到本机"}
-              hint={mergeHint}
-              onClick={onMergeBack}
-              disabled={anyBusy}
-            />
-            {borrowActive ? (
+      {showActions ? (
+        <div className="p-1.5">
+          {isLocal && rootMissing ? (
+            <>
+              <p className="px-2.5 py-1.5 text-xs text-muted-foreground">
+                目录在本机不可用。请重新绑定本机路径后再继续。
+              </p>
               <ModeAction
-                icon={<Cloud size={14} />}
-                label="留在云上接着用"
-                hint="不再提示原件尚未改动"
-                onClick={onStayOnCloud}
+                icon={<GitBranch size={14} />}
+                label="从 Git 克隆"
+                hint="新建云文件夹并浅克隆"
+                onClick={connectGit}
                 disabled={anyBusy}
               />
-            ) : null}
-            {!borrowActive && landing && !landing.missing ? (
+            </>
+          ) : !isLocal && desktop && conversationId ? (
+            <>
+              {/* §7.6 云桌→本机：芯片只留 Diff 合回；首次询问落点，已登记可更换。 */}
               <ModeAction
-                icon={<MapPin size={14} />}
-                label="更换合回落点"
-                hint={`当前 · ${landing.rootName ?? "已登记目录"}`}
-                onClick={onRegisterLanding}
+                icon={<FolderInput size={14} />}
+                label={borrowActive ? "写入原文件夹" : "合回到本机"}
+                hint={mergeHint}
+                onClick={onMergeBack}
                 disabled={anyBusy}
               />
-            ) : null}
-          </>
-        ) : null}
+              {borrowActive ? (
+                <ModeAction
+                  icon={<Cloud size={14} />}
+                  label="留在云上接着用"
+                  hint="不再提示原件尚未改动"
+                  onClick={onStayOnCloud}
+                  disabled={anyBusy}
+                />
+              ) : null}
+              {!borrowActive && landing && !landing.missing ? (
+                <ModeAction
+                  icon={<MapPin size={14} />}
+                  label="更换合回落点"
+                  hint={`当前 · ${landing.rootName ?? "已登记目录"}`}
+                  onClick={onRegisterLanding}
+                  disabled={anyBusy}
+                />
+              ) : null}
+            </>
+          ) : null}
 
-        {exitBusy ? (
-          <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-muted-foreground">
-            <Loader2 size={14} className="animate-spin" />
-            处理中…
-          </div>
-        ) : null}
-      </div>
+          {exitBusy ? (
+            <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-muted-foreground">
+              <Loader2 size={14} className="animate-spin" />
+              处理中…
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </>
   );
 }

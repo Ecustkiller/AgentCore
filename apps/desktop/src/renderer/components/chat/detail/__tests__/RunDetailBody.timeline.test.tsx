@@ -107,6 +107,7 @@ const run: RunNode = {
   kind: "agent",
   role: "member",
   model: "deepseek-v4-flash",
+  reasoningEffort: null,
   usage: null,
   cost: null,
   stance: null,

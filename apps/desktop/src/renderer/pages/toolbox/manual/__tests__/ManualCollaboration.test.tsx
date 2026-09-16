@@ -20,7 +20,6 @@ const SECTION_IDS = [
   "debate",
   "control",
   "memory",
-  "workflow",
 ] as const;
 
 describe("ManualCollaboration", () => {
@@ -57,7 +56,13 @@ describe("ManualCollaboration", () => {
     expect(screen.getByText("全放行（推荐）")).toBeTruthy();
     expect(screen.getByText(/设为新会话默认/)).toBeTruthy();
     expect(screen.getByText("中途插手")).toBeTruthy();
-    expect(screen.getByText("记忆与偏好")).toBeTruthy();
+    expect(screen.getByText("规矩与旧对话")).toBeTruthy();
+    expect(sectionText("memory")).toMatch(/可复用的编制/);
+    expect(sectionText("memory")).toMatch(/常驻/);
+    expect(sectionText("memory")).toMatch(/按需/);
+    expect(sectionText("memory")).toMatch(/@ 点名/);
+    expect(sectionText("checkpoint")).not.toMatch(/工作流等人关卡/);
+    expect(screen.queryByText("设为定时")).toBeNull();
     expect(sectionText("progress")).toMatch(/唯一的常驻视图/);
     expect(sectionText("progress")).toMatch(/拍板就在聊天里/);
     expect(screen.queryByText("设置 · 权限配方")).toBeNull();
@@ -66,46 +71,17 @@ describe("ManualCollaboration", () => {
     expect(screen.queryByText(/run_redirect/)).toBeNull();
   });
 
-  it("renders workflow section: toolbox design main path, canvas primitives, official templates", () => {
+  it("does not keep a workflow or automations section", () => {
     render(
       <MemoryRouter initialEntries={["/toolbox/manual/collaboration"]}>
         <ManualCollaboration />
       </MemoryRouter>,
     );
 
-    const text = sectionText("workflow");
-    expect(text).toMatch(/主路径：去工具箱设计/);
-    expect(text).toMatch(/新建工作流/);
-    expect(text).toMatch(/画布上能摆什么/);
-    expect(text).toMatch(/队员步骤/);
-    expect(text).toMatch(/等人关卡/);
-    expect(text).toMatch(/结构锁定/);
-    expect(text).toMatch(/不再由 CEO 即兴组队/);
-    expect(text).toMatch(/复制一份成你自己的工作流/);
-    // 「模板」只用于官方工作流模板，不用于自动化预制任务
-    expect(text).toMatch(/官方模板/);
-    expect(text).not.toMatch(/系统模板/);
-    expect(text).not.toMatch(/存为工作流/);
-    expect(text).not.toMatch(/从满意的那一轮存起/);
-    expect(text).not.toMatch(/回合状态条/);
-    expect(text).toMatch(/设为定时/);
-    expect(text).toMatch(/Webhook/);
-    expect(text).not.toMatch(/系统任务/);
-    expect(text).not.toMatch(/收件箱/);
-  });
-
-  it("does not keep a separate automations section", () => {
-    render(
-      <MemoryRouter initialEntries={["/toolbox/manual/collaboration"]}>
-        <ManualCollaboration />
-      </MemoryRouter>,
-    );
-
+    expect(document.getElementById("workflow")).toBeNull();
     expect(document.getElementById("automation")).toBeNull();
-    expect(sectionText("workflow")).toMatch(/设为定时/);
-    expect(sectionText("workflow")).not.toMatch(
-      /工作流管「活儿怎么拆」.*管「什么时候跑」/,
-    );
+    expect(screen.queryByText("设为定时")).toBeNull();
+    expect(screen.queryByText(/Webhook/)).toBeNull();
   });
 
   it("preserves section order and stays text-only (embeds belong to mechanism)", () => {

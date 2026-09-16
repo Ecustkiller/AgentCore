@@ -106,6 +106,7 @@ describe("PromptWorkbench", () => {
         title: "团队拆法",
         trigger: "团队拆法",
         body: "v2",
+        offeredTools: [],
       });
 
       editorValue = "v3";
@@ -117,6 +118,7 @@ describe("PromptWorkbench", () => {
         title: "团队拆法",
         trigger: "团队拆法",
         body: "v3",
+        offeredTools: [],
       });
 
       await act(async () => {
@@ -218,5 +220,33 @@ describe("PromptWorkbench", () => {
     expect(screen.queryByLabelText("名称")).toBeNull();
     expect(screen.queryByLabelText("一句话介绍")).toBeNull();
     expect(lastEditorProps.initialDoc).toContain("<途中提问>");
+  });
+
+  it("勾选查阅后启用写入 draft", async () => {
+    const onSave = vi.fn(async () => true);
+    editorValue = "怎么审";
+    render(
+      <PromptWorkbench
+        title="合同审查"
+        titleEditable
+        initialBody="怎么审"
+        initialTrigger="审合同时用"
+        bindableTools={[{ id: "host", label: "本机" }]}
+        onSave={onSave}
+      />,
+    );
+    expect(screen.getByTestId("offered-tools")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "本机" }));
+    expect(
+      screen.getByRole("button", { name: "本机" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await act(async () => {});
+    expect(onSave).toHaveBeenCalledWith({
+      title: "合同审查",
+      trigger: "审合同时用",
+      body: "怎么审",
+      offeredTools: ["host"],
+    });
   });
 });

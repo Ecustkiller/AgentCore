@@ -442,22 +442,22 @@ function makeMemorySource(text: string): FileSource {
   });
 }
 
-describe("MarkdownFileEditor memory 预览空状态", () => {
-  it("空正文预览出空状态，且不写盘", async () => {
+describe("MarkdownFileEditor memory 预览", () => {
+  it("空正文走普通预览，且不写盘", async () => {
     const source = makeMemorySource("");
     await renderLoaded(source);
 
-    expect(screen.getByText(MEMORY_EMPTY_HINT)).toBeTruthy();
-    expect(screen.queryByTestId("md-preview")).toBeNull();
+    expect(screen.queryByText(MEMORY_EMPTY_HINT)).toBeNull();
+    expect(screen.getByTestId("md-preview").textContent).toBe("");
     expect(source.writeText).not.toHaveBeenCalled();
   });
 
-  it("chrome-only 预览出空状态，且不写盘", async () => {
+  it("chrome-only 剥壳后走普通预览，且不写盘", async () => {
     const source = makeMemorySource(RETIRED_CHROME);
     await renderLoaded(source);
 
-    expect(screen.getByText(MEMORY_EMPTY_HINT)).toBeTruthy();
-    expect(screen.queryByTestId("md-preview")).toBeNull();
+    expect(screen.queryByText(MEMORY_EMPTY_HINT)).toBeNull();
+    expect(screen.getByTestId("md-preview").textContent).toBe("");
     expect(source.writeText).not.toHaveBeenCalled();
   });
 
@@ -484,7 +484,7 @@ describe("MarkdownFileEditor memory 预览空状态", () => {
     expect(screen.getByTestId("md-preview").textContent).toBe(nav);
   });
 
-  it("编辑态仍是原文（含退役壳），预览空状态卸掉", async () => {
+  it("编辑态仍是原文（含退役壳），不出推销空状态", async () => {
     const source = makeMemorySource(RETIRED_CHROME);
     await renderEditing(source);
 

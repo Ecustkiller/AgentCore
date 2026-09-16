@@ -104,12 +104,10 @@ async def note_interjections_injected(session: Any, events: list[Any]) -> None:
 # 提示词已定义的图内处置工具（inject.py）；编排循环统一标 addressed，勿在各工具里逐个补。
 # 同一步多工具时 note 按此优先级取一条。
 IN_GRAPH_DISPOSITION_TOOLS: tuple[str, ...] = (
-    "update_synthesis",
     "cancel_worker",
     "delegate",
 )
 IN_GRAPH_DISPOSITION_NOTES: dict[str, str] = {
-    "update_synthesis": "已在合成草稿中承接",
     "cancel_worker": "已在本回合停掉对应成员",
     "delegate": "已在本回合据此调整团队",
 }

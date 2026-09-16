@@ -75,6 +75,9 @@ async def recover_turn(
       Leftover ``team_preview`` frames never reach here (from_json / peek 410).
     - Without suspension (crash): ``decision`` defaults to CONTINUE; redrives unfinished
       plan nodes with ``seed_completed=state.completed`` (completed nodes skipped).
+      Unfinished workers that already have a journal window travel as crash
+      ``resume_hints`` so the executor continues that transcript instead of
+      cold-opening. ``seed_completed`` stays terminal-only.
     """
     if suspension is not None:
         if decision is None:
@@ -97,12 +100,16 @@ async def recover_turn(
         raise ValueError("recover_turn crash redrive requires a plan projection")
     eid = state.execution_id or execution_id
     seed = dict(state.completed)
+    from agentcore.runtime.runs.redrive_sites import hints_from_journal
+
+    resume_hints = hints_from_journal(state)
     # Crash mid-flight teams redrive with coordinate=True (resume_plan default is False).
     logger.info(
         "recover.crash_redrive",
         execution_id=eid,
         completed=len(seed),
         unfinished=len(state.unfinished_run_ids),
+        resume_hints=len(resume_hints),
         decision=decision.value,
         coordinate=True,
     )
@@ -114,6 +121,7 @@ async def recover_turn(
         checkpoint_run_ids=set(),
         execution_id=eid,
         coordinate=True,
+        resume_hints=resume_hints or None,
     )
     bind_recovered_turn(eid, sink)
     return SettledSuspension(delegate_result.output, None, delegate_result.effect)

@@ -107,6 +107,7 @@ class OutboxStore:
         execution_id: str | None = None,
         harvest_kind: str | None = None,
         agent_mentions: list[dict] | None = None,
+        attachments: list[dict] | None = None,
     ) -> None:
         """Pin one turn's idempotency keys before begin_turn / pipeline.
 
@@ -134,6 +135,12 @@ class OutboxStore:
             stored = to_stored_agent_mentions(agent_mentions)
             if stored:
                 ctx["agent_mentions"] = stored
+        if attachments:
+            from agentcore.workspace.attachments import to_stored_metadata
+
+            stored_atts = to_stored_metadata(attachments)
+            if stored_atts:
+                ctx["attachments"] = stored_atts
         self._contexts[message_id] = ctx
 
     def clear_turn(self, message_id: str | None = None) -> None:
@@ -358,6 +365,9 @@ class OutboxStore:
             mentions = ctx.get("agent_mentions")
             if isinstance(mentions, list) and mentions:
                 record["agent_mentions"] = mentions
+            atts = ctx.get("attachments")
+            if isinstance(atts, list) and atts:
+                record["attachments"] = atts
             record["phase"] = PHASE_OPEN
             record.setdefault("ops", []).append("begin_turn")
 
@@ -698,6 +708,7 @@ class OutboxStore:
                 "cache_hit_tokens",
                 "cache_miss_tokens",
                 "rounds",
+                "duration_ms",
             ):
                 if key in kwargs and kwargs[key] is not None:
                     record[key] = int(kwargs[key] or 0)
@@ -857,6 +868,9 @@ class OutboxStore:
             ):
                 if isinstance(val, str) and val.strip():
                     record[key] = val.strip()
+            atts = ctx.get("attachments")
+            if isinstance(atts, list) and atts and not record.get("attachments"):
+                record["attachments"] = atts
             ops = record.setdefault("ops", [])
             if "salvage" not in ops:
                 ops.append("salvage")
@@ -1167,6 +1181,14 @@ def to_record_turn_body(record: dict[str, Any]) -> dict[str, Any]:
         "trace_id": record.get("trace_id") or "",
         "finish_reason": record.get("finish_reason"),
     }
+    raw_duration = record.get("duration_ms")
+    if raw_duration is not None:
+        try:
+            duration_ms = int(raw_duration)
+        except (TypeError, ValueError):
+            duration_ms = 0
+        if duration_ms > 0:
+            body["duration_ms"] = duration_ms
     for key in ("origin", "execution_id", "harvest_kind"):
         val = record.get(key)
         if isinstance(val, str) and val.strip():
@@ -1193,4 +1215,11 @@ def to_record_turn_body(record: dict[str, Any]) -> dict[str, Any]:
         stored = to_stored_agent_mentions(mentions)
         if stored:
             body["agent_mentions"] = stored
+    atts = record.get("attachments")
+    if isinstance(atts, list) and atts:
+        from agentcore.workspace.attachments import to_stored_metadata
+
+        stored_atts = to_stored_metadata(atts)
+        if stored_atts:
+            body["attachments"] = stored_atts
     return body

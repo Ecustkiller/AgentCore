@@ -185,7 +185,7 @@ export type CheckpointDecision =
  * `action` marks an option that the desktop client fulfils with a
  * native client action instead of a plain text answer (unknown/absent → plain option):
  * `open_local_project` / `register_local_project` / `bind_local_folder` are
- * **本机传统** wire enums（桌面默认同通道；云协作是选项：「导入到云」/「从 Git 克隆」；≠离线；
+ * **本机传统** wire enums（桌面默认同通道；云协作是选项：「先在云上做」/「从 Git 克隆」；≠离线；
  * 网页/手机无本机盘；``create_folder`` 仍只建云）。
  * Structured ``op`` / ``source`` / ``destination`` / ``path`` fields carry
  * organize_plan items for plan-bound ``file_batch``. ``review_kind`` / ``body`` /
@@ -630,9 +630,9 @@ export interface DeliveryGap {
 /** One user action that would close a delivery gap. ``kind`` is a widened string
  * on the wire (like ``ToolPhase``) so the backend can add kinds without a client
  * bump — known: ``bind_local_folder`` (wire kind；产品文案按会话分流：
- * 工程尚在本机 → 云协作「导入到云」优先；远程仓进当前云桌走 git clone /
+ * 工程尚在本机 → 云协作「先在云上做」优先；远程仓进当前云桌走 git clone /
  * Composer「从 Git 克隆」；**已是云端会话但沙箱未装配** →
- * 禁止再导「导入到云」，改稍后重试 / export_to_local / 本机传统；
+ * 禁止再导「先在云上做」，改稍后重试 / export_to_local / 本机传统；
  * 桌面默认同通道（本地对话 / 打开本机文件夹），≠离线；云端对话并列可选)；
  * ``export_to_local`` (云端已有 delivered_files → 导出到本机文件夹后即可 npm install / 本地运行；
  * 与 bind_local_folder 可并存但语义不同);
@@ -664,7 +664,7 @@ export interface DeliveryAction {
  * (``tools/file_products.py``), carried verbatim from the run-level ledger:
  * ``kind`` is the normalized product type (``md`` / ``docx`` / ``pdf`` / ``code``
  * / ``image`` / ``file`` …); ``derived_from`` names the source this product was
- * EXPORTED from (``md_to_docx``: docx ← 源 md), so a client can demote that source
+ * EXPORTED from (``md_export``: docx ← 源 md), so a client can demote that source
  * to 中间稿 the same way ``fold_exported_sources`` does server-side. Absent when the
  * producer did not self-report — clients must NOT guess lineage from extensions or
  * tool names, and must keep every accepted path reachable (fold ≠ drop). */
@@ -865,10 +865,8 @@ export interface UsageBreakdown {
 
 /** A run's / turn's cost in integer nano-money (1 unit = 1e9).
  * 
- * ``currency`` labels ``input``/``cached``/``output``/``total`` — curated CNY or
- * community-estimated USD, never converted (this product has no FX). Clients
- * must read it to pick a symbol; inferring ¥ from ``pricing_source`` is how BYOK
- * dollars once rendered as yuan at ~1/7 of the real amount. */
+ * ``currency`` labels ``input``/``cached``/``output``/``total`` — curated CNY
+ * nominal. Clients must read it to pick a symbol. */
 export interface CostBreakdown {
   input: number;
   cached: number;
@@ -917,6 +915,8 @@ export interface RunCompletedPayload {
   model: string;
   usage: UsageBreakdown;
   cost: CostBreakdown;
+  /** Vendor thinking-effort token actually sent (e.g. low/high/max). Absent on old journals, thinking-off runs, and leaves that do not send the field. */
+  reasoning_effort?: string;
   debrief?: RunDebrief;
   output_files?: string[];
   gaps?: DeliveryGap[];

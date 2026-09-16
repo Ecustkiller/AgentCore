@@ -56,6 +56,8 @@ class ModelMeta:
 # alone may repeat when a badge distinguishes the SKU (e.g. Flash +「免费额度」).
 # Exception: official ``deepseek-flash`` and Go ``deepseek-v4.1-flash`` share
 # the unbadged V4.1 Flash brand (different gates; picker groups by origin).
+# Go/Zen ``hideFromPicker`` drops the official id so the two do not collide
+# inside one OpenCode channel.
 # Context length = the window this id actually gets (native vs gateway cap).
 _METADATA: dict[str, ModelMeta] = {
     "deepseek-v4-flash": ModelMeta(

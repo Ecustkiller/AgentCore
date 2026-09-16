@@ -168,7 +168,7 @@ def file_products_from_transcript(transcript: list[LLMMessage]) -> list[FileProd
     （生产方 ``tools.file_products.with_file_products_marker``，round-trip 单测钉死格式）。
     这里只读尾注——不认工具名、不解析入参、不读散文回执：
 
-    - 入参不等于产物（``md_to_docx`` 入参是源 md，产物是推导出的 docx；批量工具一次产上千个）；
+    - 入参不等于产物（``md_export`` 入参是源 md，产物是推导出的 docx；批量工具一次产上千个）；
     - 落盘通道不止工具调用（沙箱写回、换树），凡自报者一律记账，无需在任何名单里登记；
     - 失败 / 被拒的调用不自报，天然不入账（引擎只在 ``success`` 时盖章）。
 
@@ -513,12 +513,6 @@ def plan_to_json(plan: RunPlan) -> dict[str, Any]:
         "nodes": [spec_to_json(n) for n in plan.nodes],
         "origin": plan.origin.value,
     }
-    if plan.topology_lock:
-        payload["topology_lock"] = True
-    if plan.workflow_id:
-        payload["workflow_id"] = plan.workflow_id
-    if plan.workflow_version is not None:
-        payload["workflow_version"] = int(plan.workflow_version)
     return payload
 
 
@@ -529,14 +523,6 @@ def plan_from_json(data: dict[str, Any]) -> RunPlan:
     plan = RunPlan(nodes=[spec_from_json(n) for n in (data.get("nodes") or [])])
     if isinstance(origin, str):
         plan.origin = RunOrigin(origin)
-    plan.topology_lock = bool(data.get("topology_lock"))
-    wid = data.get("workflow_id")
-    plan.workflow_id = str(wid).strip() if isinstance(wid, str) and wid.strip() else None
-    wv = data.get("workflow_version")
-    if isinstance(wv, int):
-        plan.workflow_version = wv
-    elif isinstance(wv, str) and wv.strip().isdigit():
-        plan.workflow_version = int(wv.strip())
     # 旧快照若含 ``finalize`` 键：忽略，不当直出。
     return plan
 

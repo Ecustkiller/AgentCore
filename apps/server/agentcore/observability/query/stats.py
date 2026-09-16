@@ -255,15 +255,50 @@ def _hit_block(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _normalize_prefix_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Accept ``cost.prefix_cache`` or compact ``llm.call`` prefix_* fields."""
+    hit = int(row.get("cache_hit_tokens") or 0)
+    miss = int(row.get("cache_miss_tokens") or 0)
+    reported = row.get("cache_reported")
+    if reported is None:
+        reported = bool(hit or miss)
+    return {
+        **row,
+        "breach": row.get("prefix_breach") or row.get("breach") or "?",
+        "breach_section": row.get("prefix_breach_section") or row.get("breach_section") or "",
+        "cache_reported": bool(reported),
+        "cache_hit_tokens": hit,
+        "input_tokens": int(row.get("input_tokens") or 0),
+        "forfeited_tokens": int(row.get("forfeited_tokens") or 0),
+        "tools_changed": bool(row.get("tools_changed")),
+        "cost_role": str(row.get("cost_role") or ""),
+    }
+
+
+def prefix_rows_for_stats(
+    llm_calls: list[dict[str, Any]],
+    prefix_cache_rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], str]:
+    """Prefer production ``llm.call`` compact fields; fall back to debug probe rows."""
+    compact = [c for c in llm_calls if c.get("prefix_breach")]
+    if compact:
+        return compact, "llm.call"
+    return prefix_cache_rows, "cost.prefix_cache"
+
+
 def prefix_cache_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Aggregate ``cost.prefix_cache`` rows into the three questions D4 asked.
+    """Aggregate prefix-cache rows into the questions D4 asked.
 
     Rows where the provider said nothing about caching are counted but EXCLUDED from every
     ratio: a silent upstream is not a 0% hit, and folding it in would manufacture a finding.
-    ``by_breach`` says what a miss cost (forfeited tokens per cause), ``by_section`` names
-    the prompt sections that broke the prefix, ``by_length`` shows how the ratio moves with
-    conversation size.
+    Accepts debug ``cost.prefix_cache`` rows or compact ``llm.call`` fields
+    (``prefix_breach`` / ``tools_changed``). ``by_breach`` says what a miss cost
+    (forfeited tokens per cause; 0 on compact rows — that is ``BASIS_NONE``, not zero
+    waste). ``by_section`` names the prompt sections that broke the prefix, ``by_length``
+    shows how the ratio moves with conversation size, ``by_tools`` splits table-changed
+    vs unchanged, ``by_role`` splits captain vs worker when ``cost_role`` is present.
     """
+    rows = [_normalize_prefix_row(r) for r in rows]
     reported = [r for r in rows if r.get("cache_reported")]
     by_breach: dict[str, dict[str, Any]] = {}
     for breach in sorted({str(r.get("breach") or "?") for r in reported}):
@@ -278,6 +313,16 @@ def prefix_cache_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         bucket = [r for r in reported if _bucket_of(int(r.get("input_tokens") or 0)) == label]
         if bucket:
             by_length[label] = _hit_block(bucket)
+    by_tools: dict[str, dict[str, Any]] = {}
+    changed = [r for r in reported if r.get("tools_changed")]
+    unchanged = [r for r in reported if not r.get("tools_changed")]
+    if changed:
+        by_tools["changed"] = _hit_block(changed)
+    if unchanged:
+        by_tools["unchanged"] = _hit_block(unchanged)
+    by_role: dict[str, dict[str, Any]] = {}
+    for role in sorted({str(r.get("cost_role") or "") for r in reported if r.get("cost_role")}):
+        by_role[role] = _hit_block([r for r in reported if r.get("cost_role") == role])
     overall = _hit_block(reported)
     return {
         "calls": len(rows),
@@ -287,9 +332,12 @@ def prefix_cache_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "cache_hit_tokens": overall["cache_hit_tokens"],
         "hit_ratio": overall["hit_ratio"],
         "forfeited_tokens": overall["forfeited_tokens"],
+        "has_forfeited": overall["forfeited_tokens"] > 0,
         "by_breach": by_breach,
         "by_section": dict(by_section.most_common()),
         "by_length": by_length,
+        "by_tools": by_tools,
+        "by_role": by_role,
     }
 
 
@@ -543,8 +591,12 @@ def compute_stats(
             "total_usd": total_nano / 1e9,
             "by_role_nano": dict(by_role),
         }
-    if prefix_cache_rows:
-        summaries["prefix_cache"] = prefix_cache_summary(prefix_cache_rows)
+    prefix_rows, prefix_source = prefix_rows_for_stats(llm_calls, prefix_cache_rows)
+    if prefix_rows:
+        summaries["prefix_cache"] = {
+            **prefix_cache_summary(prefix_rows),
+            "source": prefix_source,
+        }
     if stream_timing_rows:
         summaries["stream_health"] = stream_health_summary(stream_timing_rows)
     if readyz_failed:

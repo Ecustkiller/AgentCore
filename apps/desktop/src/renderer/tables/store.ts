@@ -18,7 +18,7 @@ import type {
   TableView,
   ViewConfig,
 } from "./types";
-import { ROW_LIMIT } from "./types";
+import { ROW_LIMIT, emptyViewConfig } from "./types";
 
 const STORAGE_LEAF = "tables.v1";
 
@@ -60,10 +60,27 @@ function nextPosition(rows: TableDoc["rows"]): number {
   return rows.reduce((m, r) => Math.max(m, r.position), 0) + 1000;
 }
 
+function normalizeTable(table: TableDoc): TableDoc {
+  return {
+    ...table,
+    views: table.views.map((v) => ({
+      ...v,
+      config: {
+        ...emptyViewConfig(),
+        ...v.config,
+        filters: v.config.filters ?? [],
+        hiddenColumnIds: v.config.hiddenColumnIds ?? [],
+        columnWidths: v.config.columnWidths ?? {},
+        modeConfig: v.config.modeConfig ?? {},
+      },
+    })),
+  };
+}
+
 function loadTables(): TableDoc[] {
   const parsed = uiGet<{ tables?: TableDoc[] }>(STORAGE_LEAF);
   if (!parsed || !Array.isArray(parsed.tables)) return [createDemoTable()];
-  return parsed.tables;
+  return parsed.tables.map(normalizeTable);
 }
 
 function saveTables(tables: TableDoc[]): void {
@@ -205,6 +222,11 @@ export const useTablesStore = create<TablesState>((set, get) => ({
           hiddenColumnIds: v.config.hiddenColumnIds.filter(
             (id) => id !== columnId,
           ),
+          columnWidths: Object.fromEntries(
+            Object.entries(v.config.columnWidths ?? {}).filter(
+              ([id]) => id !== columnId,
+            ),
+          ),
           filters: v.config.filters.filter((f) => f.columnId !== columnId),
           modeConfig: {
             ...v.config.modeConfig,
@@ -329,6 +351,7 @@ export const useTablesStore = create<TablesState>((set, get) => ({
           ...current.config,
           filters: [...current.config.filters],
           hiddenColumnIds: [...current.config.hiddenColumnIds],
+          columnWidths: { ...current.config.columnWidths },
           modeConfig: { ...current.config.modeConfig },
         },
       };

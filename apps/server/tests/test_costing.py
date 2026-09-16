@@ -8,6 +8,7 @@ state into a ledger row. Money is integer nano-CNY throughout.
 """
 
 from dataclasses import asdict
+from datetime import UTC, datetime
 
 from agentcore.llm.pricing import QWEN_VL_MAX, calculate_cost
 from agentcore.llm.profiles import DEEPSEEK_V4_FLASH, DEEPSEEK_V4_PRO
@@ -21,6 +22,7 @@ from agentcore.runtime.costing import (
     aggregate_usage_tokens,
     captain_run_cost_from_state,
     member_run_cost,
+    priced_call_cost,
     vision_run_cost,
 )
 from agentcore.runtime.runs.types import RunSpec, RunState
@@ -131,7 +133,11 @@ def test_captain_run_cost_from_state_reads_priced_state():
         cache_hit_tokens=1_000_000,
         cache_miss_tokens=1_000_000,
     )
-    priced = calculate_cost(DEEPSEEK_V4_FLASH, usage)
+    priced = calculate_cost(
+        DEEPSEEK_V4_FLASH,
+        usage,
+        at=datetime(2026, 8, 18, 12, 0, tzinfo=UTC),
+    )
     state = RunState(
         model=DEEPSEEK_V4_FLASH,
         rounds=3,
@@ -153,13 +159,13 @@ def test_captain_run_cost_from_state_reads_priced_state():
     assert row.cost["cached"] == priced.cached
     assert row.cost["output"] == priced.output
     assert row.cost["total"] == priced.total
-    # Flash CNY curated（中文定价页 ¥0.02 / ¥1 / ¥2）。
+    # Flash = Go 公开价 × 7.2（谷：命中 ¥0.0216 / 未命中 ¥1.08 / 输出 ¥4.32）。
     assert row.cost["pricing_source"] == "curated"
     assert row.cost_total_nano == priced.total
-    assert row.cost["cached"] == 20_000_000  # ¥0.02
-    assert row.cost["input"] == 20_000_000 + 1_000_000_000  # hit + miss ¥1
-    assert row.cost["output"] == 2_000_000_000  # ¥2
-    assert row.cost["total"] == 3_020_000_000
+    assert row.cost["cached"] == 21_600_000
+    assert row.cost["input"] == 21_600_000 + 1_080_000_000
+    assert row.cost["output"] == 4_320_000_000
+    assert row.cost["total"] == 5_421_600_000
     assert row.rounds == 3
     assert row.duration_ms == 4321
     assert row.currency == "CNY"
@@ -192,9 +198,15 @@ def test_vision_run_cost_prices_subcall_under_vision_role():
     # calculate_cost (a stub state would misprice it at the run's DeepSeek tier), parented
     # to the calling run so it nests under that captain in the turn's run tree.
     usage = TokenUsage(input_tokens=1200, output_tokens=40)
-    priced = calculate_cost(QWEN_VL_MAX, usage)
+    priced = calculate_cost(QWEN_VL_MAX, usage, credential_source="platform")
 
-    row = vision_run_cost(QWEN_VL_MAX, usage, parent_run_id="cap-1", duration_ms=210)
+    row = vision_run_cost(
+        QWEN_VL_MAX,
+        usage,
+        parent_run_id="cap-1",
+        duration_ms=210,
+        credential_source="platform",
+    )
 
     assert row.role == ROLE_VISION
     assert row.run_id.startswith("vis_")  # unique id keeps the upsert-by-run_id honest
@@ -209,14 +221,13 @@ def test_vision_run_cost_prices_subcall_under_vision_role():
     assert row.cost["output"] == priced.output
     assert row.cost["total"] == priced.total
     assert row.cost_total_nano == priced.total
-    # qwen-vl-max: no curated CNY card → community snapshot (same numeric rates);
-    # input billed as a miss (no cache split) 1200×0.80/1M = 960_000 nano;
-    # output 40×3.20/1M = 128_000.
-    assert row.cost["input"] == 960_000
+    # qwen-vl-max: no curated card → platform glm-5.2 fallback (CNY).
+    # 1200 miss @ ¥8/1M = 9_600_000; 40 out @ ¥28/1M = 1_120_000.
+    assert row.cost["input"] == 9_600_000
     assert row.cost["cached"] == 0
-    assert row.cost["output"] == 128_000
-    assert row.cost["total"] == 1_088_000
-    assert row.cost["pricing_source"] == "estimated"
+    assert row.cost["output"] == 1_120_000
+    assert row.cost["total"] == 10_720_000
+    assert row.cost["pricing_source"] == "curated"
     assert all(
         isinstance(v, int)
         for k, v in row.cost.items()
@@ -279,6 +290,21 @@ def test_aggregate_cost_empty_is_zero():
         "estimated_currency": "CNY",
         "pricing_source": "curated",
     }
+
+
+def test_aggregate_cost_byok_nominal_lands_on_display_total():
+    usage = TokenUsage(cache_miss_tokens=1_000, output_tokens=100)
+    priced = calculate_cost(DEEPSEEK_V4_FLASH, usage, credential_source="user")
+    call = priced_call_cost(
+        model=DEEPSEEK_V4_FLASH, usage=usage, role=ROLE_CAPTAIN, credential_source="user"
+    )
+    row = asdict(call)
+    agg = aggregate_cost([row])
+    assert call.cost_total_nano == 0
+    assert agg["total"] == priced.total
+    assert agg["estimated_total"] == priced.total
+    assert agg["currency"] == "CNY"
+    assert agg["pricing_source"] == "curated"
 
 
 def test_aggregate_usage_tokens_sums_ledger_rows():

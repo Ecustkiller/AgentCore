@@ -15,7 +15,7 @@ from agentcore.runtime.facts import TurnPausedFact, pre_pause_from_journal
 
 logger = get_logger(__name__)
 
-# ask_user: folded prose → pre-round bubble; model-owned message → keep final_content.
+# ask_user: folded prose → pre-round bubble; model-owned prompt → keep final_content.
 _ASK_USER_KIND = "ask_user"
 
 

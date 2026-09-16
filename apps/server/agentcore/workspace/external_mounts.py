@@ -49,7 +49,7 @@ READONLY_ALLOWED_OPS: frozenset[str] = frozenset(
         "list_tree",
         "index_files",
         "grep",
-        "diagnostics",  # 内环语言服务只读诊断
+        "glob_files",
         "probe_exec",  # 解释器探测，与绑定根内容无关
         "process_read",
         "process_list",

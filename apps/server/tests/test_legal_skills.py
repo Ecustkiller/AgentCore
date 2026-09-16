@@ -97,7 +97,9 @@ def test_case_analysis_body_teaches_three_perspective_orchestration():
     body = _case_body()
     assert "原告" in body and "被告" in body and "法官" in body
     assert "delegate" in body
-    assert "debate" in body and 'form="debate"' in body
+    assert "debate" in body
+    assert 'form="debate"' not in body
+    assert "form=debate" not in body
     assert "plaintiff" in body and "defendant" in body
     assert "法官研判" in body and "举证责任" in body
 
@@ -147,7 +149,9 @@ def test_contract_review_body_teaches_three_perspective_orchestration():
     body = _contract_body()
     assert "我方" in body and "对方" in body and "风险官" in body
     assert "delegate" in body
-    assert "debate" in body and 'form="debate"' in body
+    assert "debate" in body
+    assert 'form="debate"' not in body
+    assert "form=debate" not in body
     assert "our_side" in body and "counterparty" in body
 
 

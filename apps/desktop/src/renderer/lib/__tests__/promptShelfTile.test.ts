@@ -173,7 +173,7 @@ describe("promptItemShelfCopy", () => {
     expect(copy.tags).toEqual([]);
   });
 
-  it("我的空介绍不编兜底句；偏好画像空核用职责句", () => {
+  it("我的空介绍不编兜底句", () => {
     expect(
       promptItemShelfCopy(mineItem({ label: "合同审查" })).description,
     ).toBe("");
@@ -181,11 +181,7 @@ describe("promptItemShelfCopy", () => {
       promptItemShelfCopy(
         mineItem({ label: "偏好", memoryKind: "preferences" }),
       ).description,
-    ).toBe("怎么回答");
-    expect(
-      promptItemShelfCopy(mineItem({ label: "画像", memoryKind: "profile" }))
-        .description,
-    ).toBe("关于用户");
+    ).toBe("");
   });
 
   it("夹里未上架不打我的；常驻才打", () => {
@@ -200,7 +196,7 @@ describe("promptItemShelfCopy", () => {
       promptItemShelfCopy(
         mineItem({ label: "偏好", memoryKind: "preferences" }),
       ).accessory,
-    ).toEqual([{ label: "我的" }]);
+    ).toEqual([]);
   });
 
   it("已上架带场景组；市场装来带回场景组，有更新走右上", () => {
@@ -225,7 +221,7 @@ describe("promptItemShelfCopy", () => {
     expect(market.tags).toEqual(["法律合规"]);
   });
 
-  it("停用只标在右上，简介仍用一句话介绍", () => {
+  it("货架不标已停用，简介仍用一句话介绍", () => {
     const copy = promptItemShelfCopy(
       mineItem({
         label: "旧规矩",
@@ -234,7 +230,16 @@ describe("promptItemShelfCopy", () => {
       }),
     );
     expect(copy.description).toBe("审合同时用");
-    expect(copy.accessory).toEqual([{ label: "已停用" }]);
+    expect(copy.accessory).toEqual([]);
+    expect(
+      promptItemShelfCopy(
+        mineItem({
+          label: "常驻规矩",
+          disputed: true,
+          applyMode: "always",
+        }),
+      ).accessory,
+    ).toEqual([{ label: "我的" }]);
   });
 
   it("出厂工具简介用 summary，能力面不进底栏，例外才打标签", () => {

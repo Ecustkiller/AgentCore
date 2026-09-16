@@ -17,6 +17,7 @@ class TableState:
     active_view_id: str
     schema_version: int
     conversation_id: str | None = None
+    source_path: str | None = None
     undo_batch: dict[str, Any] | None = None
     created_at: str | None = None
     updated_at: str | None = None

@@ -6,6 +6,7 @@ external imports remain stable. Phase helpers live in sibling ``drive_*`` module
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from agentcore.runtime.delegate.drive_finalize import finalize_drive
@@ -20,6 +21,7 @@ from agentcore.runtime.delegate.drive_setup import (
 from agentcore.runtime.delegate.drive_terminal import post_session_all_completed
 from agentcore.runtime.events import run_skipped
 from agentcore.runtime.runs.drive_reach import register_drive, unregister_drive
+from agentcore.runtime.runs.redrive_sites import ResumeHint
 from agentcore.runtime.runs.types import RunPhase, RunState
 from agentcore.tools.protocol import ToolResult
 
@@ -99,6 +101,7 @@ async def drive(
     *,
     execution_id: str,
     seed_completed: dict[str, RunState] | None,
+    resume_hints: Mapping[str, ResumeHint] | None = None,
     complexity_hint: str = "standard",
     call_idx: int | None = None,
     coordinate: bool = True,
@@ -224,6 +227,7 @@ async def drive(
             plan,
             execution_id=execution_id,
             seed_completed=seed_completed,
+            resume_hints=resume_hints,
             complexity_hint=complexity_hint,
             call_idx=call_idx,
             coordinate=coordinate,
@@ -249,6 +253,7 @@ async def _drive_body(
     *,
     execution_id: str,
     seed_completed: dict[str, RunState] | None,
+    resume_hints: Mapping[str, ResumeHint] | None = None,
     complexity_hint: str,
     call_idx: int,
     coordinate: bool,
@@ -276,33 +281,6 @@ async def _drive_body(
             and existing_coord.active
             and tool._depth == 0
         )
-        if (
-            merging_into_active
-            and existing_coord is not None
-            and (
-                getattr(existing_coord.live_plan, "topology_lock", False)
-                or getattr(tool, "_topology_lock", False)
-            )
-        ):
-            from agentcore.core.types import ToolEffect
-            from agentcore.runtime.delegate.batch_shape import annotate_batch_meta
-            from agentcore.tools.protocol import ToolResult
-
-            return annotate_batch_meta(
-                ToolResult(
-                    tool_call_id="",
-                    success=False,
-                    output="",
-                    error=(
-                        "当前为工作流拓扑锁：禁止再委派追加队员；"
-                        "可用 replan(steers=…) 改未跑步骤说明。"
-                    ),
-                    effect=ToolEffect.CONTINUE,
-                    contract_failure=True,
-                ),
-                node_count=0,
-                has_deps=False,
-            )
 
     # 收口后冷开整团重派硬闸（与同图 replan 补跑闸分轨；共用 MAX_GAP_FILL_ADDS）。
     # 须在 team_preview 之前拒，避免开工卡先弹出。append / 并入活跃图不走本闸。
@@ -493,6 +471,7 @@ async def _drive_body(
             plan,
             execution_id=execution_id,
             seed_completed=seed_completed,
+            resume_hints=resume_hints,
             complexity_hint=complexity_hint,
             call_idx=call_idx,
             coordinate=coordinate,
@@ -572,6 +551,7 @@ async def _drive_body(
             plan,
             executor,
             seed_completed=seed_completed,
+            resume_hints=resume_hints,
             cancel_run_ids=redirects.cancel_run_ids,
             stop_run_ids=redirects.stop_run_ids,
             timeout_run_ids=redirects.timeout_run_ids,
@@ -626,6 +606,7 @@ async def drive_coordinated(
     *,
     execution_id: str,
     seed_completed: dict[str, RunState] | None,
+    resume_hints: Mapping[str, ResumeHint] | None = None,
     complexity_hint: str = "standard",
     call_idx: int | None = None,
     session: Any,
@@ -636,6 +617,7 @@ async def drive_coordinated(
         plan,
         execution_id=execution_id,
         seed_completed=seed_completed,
+        resume_hints=resume_hints,
         complexity_hint=complexity_hint,
         call_idx=call_idx,
         coordinate=False,

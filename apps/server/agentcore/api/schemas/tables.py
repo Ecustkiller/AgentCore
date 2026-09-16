@@ -20,6 +20,7 @@ class TableSummary(BaseModel):
     conversation_id: str | None = None
     schema_version: int
     row_count: int
+    source_path: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -54,6 +55,7 @@ class TableDetail(BaseModel):
     rows: list[TableRowOut]
     views: list[TableViewOut]
     active_view_id: str
+    source_path: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

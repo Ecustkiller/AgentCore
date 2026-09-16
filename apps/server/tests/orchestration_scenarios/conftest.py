@@ -81,7 +81,10 @@ class RoleScriptedProvider:
                 if self.mode == "ask":
                     yield _tool_chunk(
                         "ask_user",
-                        json.dumps({"message": ASK_MESSAGE}, ensure_ascii=False),
+                        json.dumps(
+                            {"questions": [{"prompt": ASK_MESSAGE}]},
+                            ensure_ascii=False,
+                        ),
                     )
                     return
                 yield _tool_chunk(

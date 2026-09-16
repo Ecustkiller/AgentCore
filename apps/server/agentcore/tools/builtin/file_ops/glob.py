@@ -14,16 +14,16 @@ from agentcore.tools.registration import (
     ToolSurface,
 )
 from agentcore.workspace.protocol import (
+    GlobFilesQuery,
+    GlobFilesResult,
     NotADirectory,
     PathNotFound,
     TreeEntry,
-    TreeResult,
     WorkspaceError,
 )
 
 from .listing import (
     GLOB_DEFAULT_MAX_ENTRIES,
-    GLOB_DEPTH,
     GLOB_MAX_ENTRIES_CAP,
     GlobPlan,
     bare_external_error,
@@ -33,9 +33,9 @@ from .listing import (
     glob_leftover_error,
     glob_no_match_hint,
     glob_pattern_reject,
+    glob_plan_to_files_query,
     glob_truncated_footer,
     is_bare_external_directory,
-    join_glob_directory,
     map_listing_failure,
     pattern_targets_archives,
     visible_list_entries,
@@ -57,10 +57,7 @@ class GlobTool:
     def schema(self) -> ToolSchema:
         return ToolSchema(
             name="glob",
-            description=(
-                "按 globstar 递归查找。省略 path=整仓。一层列举用 file_list。"
-                "例：`pkg/*/name`。"
-            ),
+            description="按 globstar 递归查找。省略 path=整仓。一层列举用 file_list。",
             parameters={
                 "type": "object",
                 "properties": {
@@ -73,10 +70,7 @@ class GlobTool:
                     },
                     "path": {
                         "type": "string",
-                        "description": (
-                            "搜索根（默认 `.`=整仓）。`directory` 与 path 同义。"
-                            "不存在时从根按目录名/同一 pattern 续找。"
-                        ),
+                        "description": "搜索根（默认 `.`=整仓）。",
                     },
                     "max_entries": {
                         "type": "integer",
@@ -144,6 +138,7 @@ class GlobTool:
                     search_root=directory,
                     plan=plan,
                     max_entries=max_entries,
+                    reveal_archives=reveal_archives,
                 )
                 if note:
                     notes.append(note)
@@ -235,78 +230,18 @@ async def _run_plan(
     search_root: str,
     plan: GlobPlan,
     max_entries: int,
+    reveal_archives: bool,
 ) -> tuple[list[TreeEntry], bool, int, list[str], str | None]:
-    if plan.locate_dir:
-        located, note = await _list_tree_maybe_fallback(
-            backend,
-            search_root,
-            name_filter=plan.locate_dir,
-            max_depth=GLOB_DEPTH,
-            max_entries=max_entries,
-        )
-        dirs = [entry.path for entry in located.entries if entry.is_dir]
-        files = [entry for entry in located.entries if not entry.is_dir]
-        if not dirs:
-            return (
-                files,
-                located.truncated,
-                located.elided_count,
-                list(located.warnings),
-                note,
-            )
-        return await _fanout_named(
-            backend,
-            dirs=dirs,
-            name_filter=plan.name_filter,
-            max_depth=plan.max_depth,
-            max_entries=max_entries,
-            seed_files=files,
-            truncated=located.truncated,
-            elided=located.elided_count,
-            warnings=list(located.warnings),
-            note=note,
-        )
-
-    if plan.star_dirs:
-        parent = join_glob_directory(search_root, plan.directory)
-        located, note = await _list_tree_maybe_fallback(
-            backend,
-            parent,
-            name_filter="*",
-            max_depth=1,
-            max_entries=max_entries,
-        )
-        dirs = [entry.path for entry in located.entries if entry.is_dir]
-        if not dirs:
-            return (
-                [],
-                located.truncated,
-                located.elided_count,
-                list(located.warnings),
-                note,
-            )
-        return await _fanout_named(
-            backend,
-            dirs=dirs,
-            name_filter=plan.name_filter,
-            max_depth=plan.max_depth,
-            max_entries=max_entries,
-            seed_files=[],
-            truncated=located.truncated,
-            elided=located.elided_count,
-            warnings=list(located.warnings),
-            note=note,
-        )
-
-    target = join_glob_directory(search_root, plan.directory)
-    tree, note = await _list_tree_maybe_fallback(
-        backend,
-        target,
-        name_filter=plan.name_filter,
-        max_depth=plan.max_depth,
+    query = glob_plan_to_files_query(
+        search_root,
+        plan,
         max_entries=max_entries,
+        reveal_archives=reveal_archives
+        or bool(getattr(backend, "ai_list_reveal_archives", False)),
     )
-    return list(tree.entries), tree.truncated, tree.elided_count, list(tree.warnings), note
+    result, note = await _glob_files_maybe_fallback(backend, query)
+    entries = [TreeEntry(path=p, is_dir=False, depth=0) for p in result.paths]
+    return entries, result.truncated, 0, list(result.warnings), note
 
 
 def _listing_error_directory(exc: BaseException, fallback: str) -> str:
@@ -318,98 +253,67 @@ def _listing_error_directory(exc: BaseException, fallback: str) -> str:
     return fallback
 
 
-async def _fanout_named(
-    backend: Any,
-    *,
-    dirs: list[str],
-    name_filter: str,
-    max_depth: int,
-    max_entries: int,
-    seed_files: list[TreeEntry],
-    truncated: bool,
-    elided: int,
-    warnings: list[str],
-    note: str | None,
-) -> tuple[list[TreeEntry], bool, int, list[str], str | None]:
-    merged: dict[str, TreeEntry] = {entry.path: entry for entry in seed_files}
-    for root in dirs:
-        tree, sub_note = await _list_tree_maybe_fallback(
-            backend,
-            root,
-            name_filter=name_filter,
-            max_depth=max_depth,
-            max_entries=max_entries,
-        )
-        note = note or sub_note
-        for entry in tree.entries:
-            merged[entry.path] = entry
-        truncated = truncated or tree.truncated
-        elided += tree.elided_count
-        warnings.extend(tree.warnings)
-    return list(merged.values()), truncated, elided, warnings, note
+def _fallback_globs(query: GlobFilesQuery, needle: str) -> tuple[str, ...]:
+    """Rebuild include globs so a missing cwd is searched by basename from the repo root."""
+    if not query.globs:
+        return (f"**/{needle}/**",)
+    rebuilt: list[str] = []
+    for raw in query.globs:
+        g = raw.replace("\\", "/").lstrip("/")
+        if g.startswith("**/"):
+            rebuilt.append(g)
+        else:
+            rebuilt.append(f"**/{needle}/{g}")
+    if query.max_depth is None:
+        for raw in query.globs:
+            name = raw.replace("\\", "/").lstrip("/")
+            if "/" in name:
+                continue
+            rebuilt.append(f"**/{needle}/**/{name}")
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in rebuilt:
+        if item not in seen:
+            seen.add(item)
+            out.append(item)
+    return tuple(out)
 
 
-async def _list_tree_maybe_fallback(
+async def _glob_files_maybe_fallback(
     backend: Any,
-    directory: str,
-    *,
-    name_filter: str,
-    max_depth: int,
-    max_entries: int,
-) -> tuple[TreeResult, str | None]:
+    query: GlobFilesQuery,
+) -> tuple[GlobFilesResult, str | None]:
     try:
-        tree = await backend.list_tree(
-            directory,
-            pattern=name_filter,
-            max_depth=max_depth,
-            max_entries=max_entries,
-        )
-        return tree, None
+        return await backend.glob_files(query), None
     except (PathNotFound, NotADirectory):
+        directory = query.directory
         if directory in (".", ""):
             raise
         needle = directory.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
         if not needle or needle in {"*", "**", "**/*"}:
             raise
-        located = await backend.list_tree(
-            ".",
-            pattern=needle,
-            max_depth=GLOB_DEPTH,
-            max_entries=max_entries,
+        located = await backend.glob_files(
+            GlobFilesQuery(
+                directory=".",
+                globs=_fallback_globs(query, needle),
+                max_depth=None,
+                max_entries=query.max_entries,
+                reveal_archives=query.reveal_archives,
+            )
         )
-        dirs = [entry.path for entry in located.entries if entry.is_dir]
-        files = [entry for entry in located.entries if not entry.is_dir]
-        if dirs:
-            merged: dict[str, TreeEntry] = {entry.path: entry for entry in files}
-            truncated = located.truncated
-            elided = located.elided_count
-            warnings = list(located.warnings)
-            for root in dirs:
-                sub = await backend.list_tree(
-                    root,
-                    pattern=name_filter,
-                    max_depth=max_depth,
-                    max_entries=max_entries,
-                )
-                for entry in sub.entries:
-                    merged[entry.path] = entry
-                truncated = truncated or sub.truncated
-                elided += sub.elided_count
-                warnings.extend(sub.warnings)
+        if located.paths:
             return (
-                TreeResult(
-                    entries=list(merged.values()),
-                    truncated=truncated,
-                    elided_count=elided,
-                    warnings=warnings,
-                ),
+                located,
                 f"（path={directory!r} 不存在，已按目录名 {needle!r} 从工作区根查找。）",
             )
-        tree = await backend.list_tree(
-            ".",
-            pattern=name_filter,
-            max_depth=max_depth,
-            max_entries=max_entries,
+        tree = await backend.glob_files(
+            GlobFilesQuery(
+                directory=".",
+                globs=query.globs,
+                max_depth=query.max_depth,
+                max_entries=query.max_entries,
+                reveal_archives=query.reveal_archives,
+            )
         )
         return (
             tree,

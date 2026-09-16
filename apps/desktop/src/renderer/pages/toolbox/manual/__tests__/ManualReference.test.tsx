@@ -28,7 +28,7 @@ describe("ManualReference", () => {
     expect(screen.getAllByText(/文件夹即工作区/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/项目即工作区/)).toBeNull();
     expect(screen.getByText(/右坞终端/)).toBeTruthy();
-    expect(screen.getByText(/右坞浏览器/)).toBeTruthy();
+    expect(screen.getAllByText(/右坞浏览器/).length).toBeGreaterThan(0);
     expect(screen.getByText(/统一浏览器/)).toBeTruthy();
     expect(screen.queryByText(/右坞团队浏览器/)).toBeNull();
     expect(screen.queryByText(/本地工作区不会出现/)).toBeNull();
@@ -62,8 +62,8 @@ describe("ManualReference", () => {
   it("points product feedback to the beta group and official site", () => {
     renderReference();
     expect(screen.getByText("怎么给产品提意见？")).toBeTruthy();
-    expect(screen.getByText(/消息页内测群/)).toBeTruthy();
-    expect(screen.getByText(/fashitianxia\.xyz/)).toBeTruthy();
+    expect(screen.getAllByText(/消息页内测群/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/fashitianxia\.xyz/).length).toBeGreaterThan(0);
     expect(screen.queryByText("设置 · 反馈")).toBeNull();
     expect(screen.queryByText("反馈附带的上下文")).toBeNull();
   });
@@ -109,13 +109,12 @@ describe("ManualReference", () => {
     expect(screen.queryByText("设置 · 自主度")).toBeNull();
   });
 
-  it("answers how to schedule a workflow", () => {
+  it("does not teach scheduling workflows", () => {
     renderReference();
-    expect(screen.getByText("工作流怎么定时跑？")).toBeTruthy();
-    expect(screen.getByText("电脑关着，定时任务还会跑吗？")).toBeTruthy();
-    expect(screen.queryByText(/去工具箱新建或套官方模板/)).toBeNull();
-    expect(screen.queryByText(/自动化 · 收件箱/)).toBeNull();
+    expect(screen.queryByText("工作流怎么定时跑？")).toBeNull();
+    expect(screen.queryByText("电脑关着，定时任务还会跑吗？")).toBeNull();
     expect(screen.queryByText("工作流和自动化有什么区别？")).toBeNull();
+    expect(screen.queryByText(/设为定时/)).toBeNull();
   });
 
   it("renders glossary terms aligned with product glossary", () => {
@@ -131,7 +130,7 @@ describe("ManualReference", () => {
     expect(screen.getAllByText("白板").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("文档").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("自主度").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("工作流").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("工作流")).toBeNull();
     expect(screen.queryByText("系统任务")).toBeNull();
     expect(screen.queryByText("收件箱")).toBeNull();
   });

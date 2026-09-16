@@ -307,7 +307,7 @@ async def process_manage(arguments: dict[str, Any], context: ToolContext) -> Too
     if channel is None:
         return _error(
             "当前没有本机桌面进程通道，无法在用户电脑上托管后台进程。"
-            "需本机终端时：**推荐**引导 Composer「导入到云」"
+            "需本机终端时：**推荐**引导 Composer「先在云上做」"
             "或诚实说明本回合无法托管；本机 open/bind（≠离线）。",
             start,
             code=_LOCAL_WORKSPACE_REQUIRED,

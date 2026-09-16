@@ -4,8 +4,10 @@ import {
 } from "@agentcore/protocol-fold-kit";
 import {
   type SanitizedDesktopLogRecord,
+  compactDesktopLogRecordsForPack,
   foldDesktopLogRecords,
   formatDesktopLogExcerptHeader,
+  formatDesktopLogRoutineLine,
   hoistDesktopLogEnvelope,
   isRelevantDesktopLogRecord,
 } from "@shared/desktop-log-sanitize";
@@ -52,9 +54,9 @@ function parseSanitizedDesktopLogLines(
  * Append a sanitized ``desktop.jsonl`` excerpt so connectivity events can leave
  * the user's machine with the 排查包. Missing preload / empty tail → base pack.
  *
- * Duplicate events are rolled up into a counted row, and envelope fields that
- * repeat on every row (``build`` / ``version`` / ``conversation_id`` /
- * ``level: info``) are stated once under the section marker.
+ * Duplicate events fold first; envelope fields hoist to the section head.
+ * Routine open/hydrate/follow info then collapses to one ``routine:`` census
+ * line so Cursor sees the window story without a JSON wall.
  */
 export function appendSanitizedDesktopLogExcerpt(
   pack: string,
@@ -63,11 +65,26 @@ export function appendSanitizedDesktopLogExcerpt(
   if (!pack || lines.length === 0) return pack;
   const records = parseSanitizedDesktopLogLines(lines);
   if (records.length === 0) return pack;
-  const folded = foldDesktopLogRecords(records);
+  const folded = foldDesktopLogRecords(records).filter(
+    (record) => record.level !== "debug",
+  );
+  if (folded.length === 0) return pack;
   const { header, records: body } = hoistDesktopLogEnvelope(folded);
+  const { routine, records: kept } = compactDesktopLogRecordsForPack(body);
   const headerLines = formatDesktopLogExcerptHeader(header);
-  const jsonl = body.map((record) => JSON.stringify(record));
-  return [pack, "", DESKTOP_LOG_SECTION, ...headerLines, ...jsonl].join("\n");
+  const routineLine = formatDesktopLogRoutineLine(routine);
+  if (headerLines.length === 0 && !routineLine && kept.length === 0) {
+    return pack;
+  }
+  const jsonl = kept.map((record) => JSON.stringify(record));
+  return [
+    pack,
+    "",
+    DESKTOP_LOG_SECTION,
+    ...headerLines,
+    ...(routineLine ? [routineLine] : []),
+    ...jsonl,
+  ].join("\n");
 }
 
 /**
@@ -81,7 +98,7 @@ export async function buildSupportDiagnosticPack(
   if (!base) return "";
   try {
     const api = typeof window !== "undefined" ? window.logApi : undefined;
-    const lines = api?.readTail ? await api.readTail() : [];
+    const lines = api?.readTail ? await api.readTail(ids.conversationId) : [];
     if (lines.length === 0) return base;
     const conversationId = ids.conversationId?.trim() || "";
     const filtered = lines.filter((line) => {

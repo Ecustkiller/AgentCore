@@ -487,6 +487,151 @@ async def test_resolve_member_illegal_explicit_hard_fails(monkeypatch):
     worker_mock.assert_not_awaited()
 
 
+async def test_resolve_vision_uses_dedicated_slot(monkeypatch):
+    """cost_role=vision → profile vision slot, not captain/main."""
+    seen: dict = {}
+
+    async def _fake_preflight(**kw):
+        seen["origin"] = kw["model_origin"]
+        seen["provider_id"] = kw["provider_id"]
+        return LLMCredentials(
+            api_key="sk-vision",
+            base_url="https://vision.example/v1",
+            default_model="qwen-vl-max",
+        )
+
+    monkeypatch.setattr(inference.proxy, "preflight_llm_credentials", _fake_preflight)
+    monkeypatch.setattr(
+        "agentcore.llm.resolve.resolve_account_default_model",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                model="deepseek-flash", origin="byok", provider_id="prov-main"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        inference.proxy,
+        "_resolve_vision_slot_selection",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                model="qwen-vl-max", origin="byok", provider_id="prov-v"
+            )
+        ),
+    )
+    cfg = await inference._resolve_inference_credentials(
+        None, None, SimpleNamespace(user_id="u1"), cost_role="vision"
+    )
+    assert cfg.model == "qwen-vl-max"
+    assert cfg.api_key == "sk-vision"
+    assert seen == {"origin": "byok", "provider_id": "prov-v"}
+
+
+async def test_resolve_vision_ignores_catalog_route_key_in_body(monkeypatch):
+    """Sidecar vision sends the mint/chat model id; cloud still expands the slot."""
+    validate = AsyncMock(return_value=True)
+    monkeypatch.setattr("agentcore.llm.catalog.validate_model_choice", validate)
+    monkeypatch.setattr(
+        "agentcore.llm.resolve.resolve_account_default_model",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                model="deepseek-flash", origin="platform", provider_id=None
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        inference.proxy,
+        "_resolve_vision_slot_selection",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                model="qwen-vl-max", origin="byok", provider_id="prov-v"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        inference.proxy,
+        "preflight_llm_credentials",
+        AsyncMock(
+            return_value=LLMCredentials(
+                api_key="sk-vision",
+                base_url="https://vision.example/v1",
+                default_model="qwen-vl-max",
+            )
+        ),
+    )
+    cfg = await inference._resolve_inference_credentials(
+        None,
+        None,
+        SimpleNamespace(user_id="u1"),
+        cost_role="vision",
+        requested_model="platform/glm-5.2",
+    )
+    assert cfg.model == "qwen-vl-max"
+    validate.assert_not_awaited()
+
+
+async def test_resolve_vision_platform_env_when_slot_empty(monkeypatch):
+    from agentcore.llm.resolve import ModelConfig
+
+    monkeypatch.setattr(
+        "agentcore.llm.resolve.resolve_account_default_model",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                model="deepseek-flash", origin="platform", provider_id=None
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        inference.proxy,
+        "_resolve_vision_slot_selection",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        inference.proxy,
+        "_platform_vision_fallback_config",
+        lambda: ModelConfig(
+            model="kimi-k2.5",
+            base_url="https://relay.example/v1",
+            api_key="sk-vision-env",
+            source="platform",
+            purpose="chat",
+        ),
+    )
+    preflight = AsyncMock(side_effect=AssertionError("VISION_* returns before preflight"))
+    monkeypatch.setattr(inference.proxy, "preflight_llm_credentials", preflight)
+    cfg = await inference._resolve_inference_credentials(
+        None, None, SimpleNamespace(user_id="u1"), cost_role="vision"
+    )
+    assert cfg.api_key == "sk-vision-env"
+    assert cfg.model == "kimi-k2.5"
+    assert cfg.source == "platform"
+    preflight.assert_not_awaited()
+
+
+async def test_resolve_vision_unconfigured_validates(monkeypatch):
+    monkeypatch.setattr(
+        "agentcore.llm.resolve.resolve_account_default_model",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                model="deepseek-flash", origin="byok", provider_id="prov-main"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        inference.proxy,
+        "_resolve_vision_slot_selection",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        inference.proxy,
+        "_platform_vision_fallback_config",
+        lambda: None,
+    )
+    with pytest.raises(ValidationError, match="读图能力未配置"):
+        await inference._resolve_inference_credentials(
+            None, None, SimpleNamespace(user_id="u1"), cost_role="vision"
+        )
+
+
 # --- authoritative metering --------------------------------------------------
 
 
@@ -588,6 +733,22 @@ async def test_record_proxy_spend_carries_attribution(monkeypatch, tmp_path):
     assert row["role"] == "member"
     assert row["persona"] == "调研员"
     assert row["call_id"] == "call_stable_1"
+
+
+async def test_record_proxy_spend_skips_vision_role(monkeypatch, tmp_path):
+    """Vision is billed via cost_runs orphans, not proxy cost_calls (call_meter 同闸)."""
+    calls, queue = _capture_record_runs(monkeypatch, tmp_path)
+    await inference._record_proxy_spend(
+        user_id="u1",
+        conversation_id="c1",
+        model="qwen-vl-max",
+        usage=inference.usage_from_deepseek({"prompt_tokens": 900, "completion_tokens": 40}),
+        message_id="msg-1",
+        run_id="vis_should_not_land",
+        role="vision",
+    )
+    assert await queue.drain_once() == 0
+    assert calls == []
 
 
 async def test_record_proxy_spend_bills_without_conversation(monkeypatch, tmp_path):
@@ -1150,6 +1311,25 @@ def test_llm_request_from_payload_is_build_payload_inverse():
     wire2 = provider._build_payload(parsed, stream=False)
 
     assert wire1["messages"] == wire2["messages"]
+
+
+def test_llm_request_from_payload_profile_effort_wins():
+    payload = {
+        "model": "gpt-4o",
+        "messages": [{"role": "user", "content": "hi"}],
+        "reasoning_effort": "max",
+        "thinking": {"type": "enabled"},
+    }
+    req = inference.proxy._llm_request_from_payload(
+        payload, _cfg(), reasoning_effort="low"
+    )
+    assert req.reasoning_effort == "low"
+    cleared = inference.proxy._llm_request_from_payload(
+        payload, _cfg(), reasoning_effort=None
+    )
+    assert cleared.reasoning_effort is None
+    copied = inference.proxy._llm_request_from_payload(payload, _cfg())
+    assert copied.reasoning_effort == "max"
 
 
 async def test_forward_unary_round2_delivers_full_tool_shape_upstream(monkeypatch):

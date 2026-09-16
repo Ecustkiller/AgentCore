@@ -6,11 +6,15 @@ from pydantic import BaseModel, Field
 
 
 class ModelPriceCard(BaseModel):
-    """Reused price card — USD per 1M tokens as decimal strings (money is never float)."""
+    """Curated unit prices per 1M tokens as decimal strings (money is never float)."""
 
     cache_hit: str | None = None
     cache_miss: str | None = None
     output: str | None = None
+    currency: Literal["CNY"] = Field(
+        default="CNY",
+        description="ISO-4217. Catalog cards are curated CNY, not live USD.",
+    )
 
 
 class ModelCatalogCurrent(BaseModel):
@@ -40,6 +44,17 @@ class ModelUnavailableReason(BaseModel):
             "Upstream protocol this model needs that this gateway does not speak "
             "(chat/completions only)."
         ),
+    )
+
+
+class ModelReasoningEffort(BaseModel):
+    """Vendor Chat Completions ``reasoning_effort`` control surface."""
+
+    options: list[str] = Field(
+        description="Official control tokens in vendor order. Aliases are not listed."
+    )
+    default: str = Field(
+        description="Vendor default when a combination leaves reasoning_effort unset."
     )
 
 
@@ -98,6 +113,13 @@ class ModelCatalogItem(BaseModel):
             "Present when available=false for a known structured reason. Clients render "
             "copy from code + required_protocol. Null when unspecified or the row is "
             "selectable. Optional for backward compatibility."
+        ),
+    )
+    reasoning_effort: ModelReasoningEffort | None = Field(
+        default=None,
+        description=(
+            "Official vendor thinking-effort tokens for this model id "
+            "(e.g. low/high/max). Null when the leaf does not send reasoning_effort."
         ),
     )
 

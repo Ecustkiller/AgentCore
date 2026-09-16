@@ -27,6 +27,11 @@ export const introChapter: ManualChapterContent = {
           variant: "tip",
           text: [{ text: "协作，是更高级的智能", strong: true }],
         },
+        {
+          type: "callout",
+          variant: "info",
+          text: "官网 https://fashitianxia.xyz · 桌面安装包 https://fashitianxia.xyz/download · 网页版 https://app.fashitianxia.xyz",
+        },
       ],
     },
     {
@@ -88,12 +93,12 @@ export const introChapter: ManualChapterContent = {
           type: "callout",
           variant: "info",
           text: [
-            "可选升级（不做也不影响用）：想换成自己的模型，到 ",
+            "可选升级（不做也不影响用）：想换成自己的模型，桌面到 ",
             {
               text: "设置 · 服务商",
               link: { kind: "go", to: APP_PATHS.more.providers },
             },
-            " 接入服务商或自带 API Key（BYOK，自担费用）。平台额度临时不可用时会有公告。",
+            " 接入服务商或自带 API Key（BYOK，自担费用）；手机 ☰ 打开侧栏进「设置」再点「服务商」。平台额度临时不可用时会有公告。",
           ],
         },
       ],

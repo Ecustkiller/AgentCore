@@ -339,6 +339,7 @@ async def test_catalog_platform_allowlist_drives_rows(monkeypatch):
     platform_ids = [m.id for m in cat.models if m.origin == "platform"]
     assert platform_ids == ["glm-5.2", "doubao/doubao-seed-2-1-turbo-260628"]
     assert all(m.available and m.price is not None for m in cat.models if m.origin == "platform")
+    assert all(m.price.get("currency") == "CNY" for m in cat.models if m.origin == "platform")
 
 
 async def test_catalog_platform_allowlist_marks_off_protocol_unselectable(monkeypatch):
@@ -475,6 +476,42 @@ async def test_opencode_go_catalog_marks_off_protocol_unselectable(monkeypatch):
     assert (
         await validate_model_choice(None, "u1", "deepseek-v4-flash", "byok", "prov-go")
         is True
+    )
+
+
+async def test_opencode_go_hides_official_deepseek_flash_from_picker(monkeypatch):
+    """Go discovery lists official ``deepseek-flash``; new picker rows omit it."""
+    reset_discovery_cache_for_tests()
+    row = _prov(
+        "prov-go",
+        default_model="deepseek-v4-flash",
+        label="OpenCode Go",
+        base_url="https://opencode.ai/zen/go/v1",
+    )
+    monkeypatch.setattr(catalog.settings, "platform_api_key", "")
+    monkeypatch.setattr(catalog.settings, "billing_mode", "byok")
+    _mock_catalog(
+        monkeypatch,
+        providers=[row],
+        selection=ModelSelection(
+            model="deepseek-v4-flash", origin="byok", provider_id="prov-go"
+        ),
+        discovered={
+            "prov-go": [
+                "deepseek-flash",
+                "deepseek-v4.1-flash",
+                "deepseek-v4-flash",
+            ]
+        },
+    )
+    cat = await resolve_model_catalog(None, "u1")
+    byok_ids = {m.id for m in cat.models if m.origin == "byok" and m.provider_id == "prov-go"}
+    assert "deepseek-flash" not in byok_ids
+    assert "deepseek-v4.1-flash" in byok_ids
+    assert "deepseek-v4-flash" in byok_ids
+    assert (
+        await validate_model_choice(None, "u1", "deepseek-flash", "byok", "prov-go")
+        is False
     )
 
 
@@ -1104,3 +1141,35 @@ def test_platform_model_label_folds_badge_into_one_string():
     assert catalog.platform_model_label("deepseek-v4-flash-free") != (
         catalog.platform_model_label("deepseek-v4-flash")
     )
+
+
+def test_catalog_entry_stamps_vendor_reasoning_effort():
+    flash = catalog._entry(
+        "deepseek-v4-flash",
+        origin="platform",
+        available=True,
+        credential_source="platform",
+    )
+    assert flash.reasoning_effort is not None
+    assert flash.reasoning_effort.options == ("low", "high", "max")
+    assert flash.reasoning_effort.default == "high"
+
+    gpt = catalog._entry(
+        "gpt-4o",
+        origin="byok",
+        available=True,
+        credential_source="user",
+        provider_id="p1",
+        provider_label="OpenAI",
+    )
+    assert gpt.reasoning_effort is None
+
+    hy3 = catalog._entry(
+        "hy3",
+        origin="byok",
+        available=True,
+        credential_source="user",
+        provider_id="p1",
+        provider_label="Hy",
+    )
+    assert hy3.reasoning_effort is None

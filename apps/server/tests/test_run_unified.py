@@ -34,6 +34,7 @@ def test_schema_is_one_command_face():
     assert "command" in props
     assert "background" in props
     assert "action" in props
+    assert "name" not in props
     assert "code" not in props
     assert "check" not in props
     assert "subcommand" not in props

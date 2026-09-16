@@ -18,7 +18,7 @@ class LeadSubteam:
       opening registry registers ``delegate`` only. ``replan`` is offered after a
       nested sub-plan exists (``_supervised``), via ``promote_coordination_surface_if_needed``.
       Wiring ``replan`` for a lead (not just the root CEO) is the 去特例 fix: a lead
-      supervises its own sub-plan's 波边界 (bind_after_deps / 子队员 escalate scope)
+      supervises its own sub-plan's 波边界 (子队员 escalate scope)
       exactly like the CEO — without it a yielding sub-plan would be a dead-end.
     - ``tool_names`` — re-grant those names on a least-privilege allow-list (mirrors
       how ``escalate`` is kept callable for a restricted worker).

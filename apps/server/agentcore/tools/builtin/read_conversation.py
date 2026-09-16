@@ -186,11 +186,7 @@ class ReadConversationTool:
     def schema(self) -> ToolSchema:
         return ToolSchema(
             name="read_conversation",
-            description=(
-                "读取一场历史对话。conversation_id 来自 search_conversations；"
-                "也可只传 query：唯一命中则打开，多场列出。"
-                "默认 focus=dialogue（用户/助手原文）；过程稿 focus=process。"
-            ),
+            description="读取一场历史对话。",
             parameters={
                 "type": "object",
                 "properties": {
@@ -208,21 +204,14 @@ class ReadConversationTool:
                     },
                     "cursor": {
                         "type": "string",
-                        "description": "续读游标（m:消息下标）；首轮省略。",
+                        "description": "续读游标（m:消息下标）。",
                     },
                     "focus": {
                         "type": "string",
                         "enum": ["dialogue", "process"],
                         "default": "dialogue",
                         "description": (
-                            "dialogue=用户/助手原文（默认）；"
-                            "process=含工具、辩论、思考。"
-                        ),
-                    },
-                    "max_chars": {
-                        "type": "integer",
-                        "description": (
-                            f"本页最大字符数（可选）；服务端硬顶 {MAX_CHUNK_CHARS}。"
+                            "dialogue=用户/助手原文；process=含工具、辩论、思考。"
                         ),
                     },
                 },
@@ -263,12 +252,6 @@ class ReadConversationTool:
                 output="focus 须为 dialogue / process。",
                 error="invalid focus",
             )
-        max_chars: int | None = None
-        if arguments.get("max_chars") is not None:
-            try:
-                max_chars = int(arguments["max_chars"])
-            except (TypeError, ValueError):
-                max_chars = None
 
         if is_uuid_id(cid):
             return await self._read_identified(
@@ -276,7 +259,6 @@ class ReadConversationTool:
                 query_s=query_s,
                 cursor_s=cursor_s,
                 focus_n=focus_n,
-                max_chars=max_chars,
                 context=context,
             )
 
@@ -296,7 +278,6 @@ class ReadConversationTool:
             query_s=query_s,
             cursor_s=cursor_s,
             focus_n=focus_n,
-            max_chars=max_chars,
             context=context,
         )
 
@@ -358,7 +339,6 @@ class ReadConversationTool:
         query_s: str | None,
         cursor_s: str | None,
         focus_n: str,
-        max_chars: int | None,
         context: ToolContext,
     ) -> ToolResult:
         if context.conversation_id and cid == context.conversation_id:
@@ -387,7 +367,7 @@ class ReadConversationTool:
                 data = await _read_via_cloud(
                     conversation_id=cid,
                     cursor=cursor_s,
-                    max_chars=max_chars,
+                    max_chars=None,
                     focus=focus_n,
                     query=query_s,
                 )
@@ -484,7 +464,6 @@ class ReadConversationTool:
                     focus=focus_n,
                     cursor=cursor_s,
                     query=query_s,
-                    max_chars=max_chars,
                 )
 
             return _ok_result_from_chunk(

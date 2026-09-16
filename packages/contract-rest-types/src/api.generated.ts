@@ -170,7 +170,7 @@ export interface paths {
         put?: never;
         /**
          * Search Account Conversations
-         * @description Owner-scoped conversation directory search (account ticket or access).
+         * @description Owner-scoped conversation search (account ticket or access).
          */
         post: operations["search_account_conversations_v1_account_conversations_search_post"];
         delete?: never;
@@ -419,7 +419,7 @@ export interface paths {
         put?: never;
         /**
          * Remember Account User Rule
-         * @description Mutate the scope's user-rule doc (``add`` / ``replace`` / ``forget`` / ``list``).
+         * @description Write / read / delete / list a named user-rule markdown under AgentCore/规则/.
          */
         post: operations["remember_account_user_rule_v1_account_rules_remember_post"];
         delete?: never;
@@ -1143,74 +1143,6 @@ export interface paths {
          *     next login. 404 for an unknown account.
          */
         post: operations["set_user_password_v1_admin_users__user_id__set_password_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/workflow-store/listings": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Admin List Listings */
-        get: operations["admin_list_listings_v1_admin_workflow_store_listings_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/workflow-store/listings/{listing_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Admin Get Listing */
-        get: operations["admin_get_listing_v1_admin_workflow_store_listings__listing_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/workflow-store/listings/{listing_id}/takedown": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Admin Takedown Listing */
-        post: operations["admin_takedown_listing_v1_admin_workflow_store_listings__listing_id__takedown_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/workflow-store/reports": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Admin List Reports */
-        get: operations["admin_list_reports_v1_admin_workflow_store_reports_get"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4338,26 +4270,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/hooks/workflows/{webhook_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Fire Workflow Webhook
-         * @description Public webhook fire — no user JWT; auth via shared secret header.
-         */
-        post: operations["fire_workflow_webhook_v1_hooks_workflows__webhook_id__post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/inference/token": {
         parameters: {
             query?: never;
@@ -5260,6 +5172,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/tables/by-source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Table By Source */
+        get: operations["get_table_by_source_v1_tables_by_source_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/tables/{table_id}": {
         parameters: {
             query?: never;
@@ -5854,284 +5783,6 @@ export interface paths {
         get: operations["get_user_avatar_v1_users__user_id__avatar_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/workflow-playbook-templates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Workflow Playbook Templates
-         * @description Official playbooks as read-only workflow templates (使用 = 复制为我的).
-         */
-        get: operations["list_workflow_playbook_templates_v1_workflow_playbook_templates_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/workflow-store": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Workflow Store */
-        get: operations["list_workflow_store_v1_workflow_store_get"];
-        put?: never;
-        /** Publish Workflow */
-        post: operations["publish_workflow_v1_workflow_store_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/workflow-store/installed": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Installed */
-        get: operations["list_installed_v1_workflow_store_installed_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/workflow-store/mine": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Mine Listings */
-        get: operations["list_mine_listings_v1_workflow_store_mine_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/workflow-store/{listing_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Listing */
-        get: operations["get_listing_v1_workflow_store__listing_id__get"];
-        put?: never;
-        post?: never;
-        /** Unpublish Listing */
-        delete: operations["unpublish_listing_v1_workflow_store__listing_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/workflow-store/{listing_id}/install": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Install Listing */
-        post: operations["install_listing_v1_workflow_store__listing_id__install_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/workflow-store/{listing_id}/reports": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Report Listing */
-        post: operations["report_listing_v1_workflow_store__listing_id__reports_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/workflow-store/{listing_id}/versions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Publish New Version */
-        post: operations["publish_new_version_v1_workflow_store__listing_id__versions_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/workflows": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Workflows */
-        get: operations["list_workflows_v1_workflows_get"];
-        put?: never;
-        /** Create Workflow */
-        post: operations["create_workflow_v1_workflows_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/workflows/from-playbook": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Create Workflow From Playbook
-         * @description Expand an official playbook once and save as a user workflow (not into PLAYBOOKS).
-         */
-        post: operations["create_workflow_from_playbook_v1_workflows_from_playbook_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/workflows/{workflow_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Workflow */
-        get: operations["get_workflow_v1_workflows__workflow_id__get"];
-        put?: never;
-        post?: never;
-        /** Delete Workflow */
-        delete: operations["delete_workflow_v1_workflows__workflow_id__delete"];
-        options?: never;
-        head?: never;
-        /** Update Workflow */
-        patch: operations["update_workflow_v1_workflows__workflow_id__patch"];
-        trace?: never;
-    };
-    "/v1/workflows/{workflow_id}/run": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Run Workflow */
-        post: operations["run_workflow_v1_workflows__workflow_id__run_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/workflows/{workflow_id}/suggest-slots": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Suggest Workflow Slots
-         * @description 抽出「上一次的具体输入」并写回 definition（前端第一次点「跑一次」时调）。
-         *
-         *     从一轮协作固化出来的工作流，任务描述里写死的是那一次的主题——用户第二次要用它才会撞上
-         *     这件事，所以这一次背景模型调用挂在这里而不是保存路径上。抽到了就连占位符带 ``slots``
-         *     一起落库，以后再跑不用重抽。
-         *
-         *     三种「不抽」都返回**与调用前逐字一致**的 definition（不是报错）：已经有槽位（幂等）、
-         *     不是固化来源（官方模板自带槽位、手画的归用户管）、抽槽本身失败或没认出可验证的片段。
-         *     前端拿到没有 ``slots`` 的 definition 就照常直接跑。
-         */
-        post: operations["suggest_workflow_slots_v1_workflows__workflow_id__suggest_slots_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/workflows/{workflow_id}/trigger": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Put Workflow Trigger */
-        put: operations["put_workflow_trigger_v1_workflows__workflow_id__trigger_put"];
-        post?: never;
-        /** Delete Workflow Trigger */
-        delete: operations["delete_workflow_trigger_v1_workflows__workflow_id__trigger_delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/workflows/{workflow_id}/trigger/rotate-secret": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Rotate Workflow Trigger Secret */
-        post: operations["rotate_workflow_trigger_secret_v1_workflows__workflow_id__trigger_rotate_secret_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6806,31 +6457,70 @@ export interface components {
             /** Scope */
             scope?: string | null;
         };
+        /** AccountRememberCatalogItem */
+        AccountRememberCatalogItem: {
+            /**
+             * Apply
+             * @default
+             */
+            apply: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Name */
+            name: string;
+        };
         /** AccountRememberRequest */
         AccountRememberRequest: {
             /**
              * Action
-             * @default add
+             * @default write
              * @enum {string}
              */
-            action: "add" | "replace" | "forget" | "list";
+            action: "write" | "read" | "delete" | "list";
+            /** Apply */
+            apply?: ("always" | "on_demand") | null;
             /** Content */
             content?: string | null;
+            /** Description */
+            description?: string | null;
             /** Folder Id */
             folder_id?: string | null;
-            /** Replaces */
-            replaces?: string | null;
+            /** Name */
+            name?: string | null;
         };
         /** AccountRememberResponse */
         AccountRememberResponse: {
             /** Action */
             action: string;
+            /**
+             * Apply
+             * @default
+             */
+            apply: string;
+            /**
+             * Body
+             * @default
+             */
+            body: string;
+            /** Catalog */
+            catalog?: components["schemas"]["AccountRememberCatalogItem"][];
             /** Changed */
             changed: boolean;
             /** Message */
             message: string;
-            /** Rules Markdown */
-            rules_markdown?: string | null;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
         };
         /** AccountRuleDoc */
         AccountRuleDoc: {
@@ -7766,98 +7456,6 @@ export interface components {
             status: "active" | "disabled";
             /** Username */
             username: string;
-        };
-        /** AdminWorkflowStoreListingDetail */
-        AdminWorkflowStoreListingDetail: {
-            /** Author */
-            author: string;
-            /** Author User Id */
-            author_user_id: string;
-            /** Definition */
-            definition: {
-                [key: string]: unknown;
-            };
-            /** Description */
-            description: string;
-            /** Id */
-            id: string;
-            /** Name */
-            name: string;
-            /** Status */
-            status: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            /** Version N */
-            version_n: number;
-        };
-        /** AdminWorkflowStoreListingList */
-        AdminWorkflowStoreListingList: {
-            /** Data */
-            data: components["schemas"]["AdminWorkflowStoreListingRow"][];
-            /** Page */
-            page: number;
-            /** Page Size */
-            page_size: number;
-            /** Total */
-            total: number;
-        };
-        /** AdminWorkflowStoreListingRow */
-        AdminWorkflowStoreListingRow: {
-            /** Author */
-            author: string;
-            /** Author User Id */
-            author_user_id: string;
-            /** Description */
-            description: string;
-            /** Id */
-            id: string;
-            /** Name */
-            name: string;
-            /** Status */
-            status: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            /** Version N */
-            version_n: number;
-        };
-        /** AdminWorkflowStoreReportList */
-        AdminWorkflowStoreReportList: {
-            /** Data */
-            data: components["schemas"]["AdminWorkflowStoreReportRow"][];
-            /** Page */
-            page: number;
-            /** Page Size */
-            page_size: number;
-            /** Total */
-            total: number;
-        };
-        /** AdminWorkflowStoreReportRow */
-        AdminWorkflowStoreReportRow: {
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Id */
-            id: string;
-            /** Listing Id */
-            listing_id: string;
-            /** Listing Name */
-            listing_name: string;
-            /** Listing Status */
-            listing_status: string;
-            /** Reason */
-            reason: string;
-            /** Reporter */
-            reporter: string;
-            /** User Id */
-            user_id: string;
         };
         /** AgentAuditEventLine */
         AgentAuditEventLine: {
@@ -8903,7 +8501,9 @@ export interface components {
         };
         /**
          * ConversationSearchRequest
-         * @description Aligned with Worker ``search_conversations`` (resolved folder filters).
+         * @description Sidecar / account-ticket search.
+         *
+         *     Log tool always sends archived, never hours / global-only.
          */
         ConversationSearchRequest: {
             /**
@@ -8927,7 +8527,7 @@ export interface components {
             include_archived: boolean;
             /**
              * Limit
-             * @default 10
+             * @default 20
              */
             limit: number;
             /**
@@ -9104,9 +8704,9 @@ export interface components {
          * CostBreakdown
          * @description A run's / turn's / window's cost in integer nano-money (canonical).
          *
-         *     Billed (``cost``) and BYOK-estimated (``estimated_cost``) spend are always two
-         *     separate breakdowns, each carrying its own ``currency`` — that is how a mixed
-         *     turn stays representable without FX.
+         *     Billed (``cost``) and BYOK (``estimated_cost``) stay two breakdowns so quota
+         *     SUM never sees the display copy. Same CNY card; mixed turns add on the
+         *     turn-total ``cost.total`` (bubble), not in the account window.
          */
         CostBreakdown: {
             /** Cached */
@@ -9196,6 +8796,11 @@ export interface components {
             main: components["schemas"]["ModelProfileSlot"];
             /** Name */
             name: string;
+            /**
+             * Reasoning Effort
+             * @description Vendor thinking-effort token. Null = vendor default for the main model. Must be an official control value of the main model.
+             */
+            reasoning_effort?: string | null;
             /**
              * Set As Default
              * @default false
@@ -9330,14 +8935,6 @@ export interface components {
         CreateTableRequest: {
             /** Title */
             title?: string | null;
-        };
-        /** CreateWorkflowRequest */
-        CreateWorkflowRequest: {
-            definition: components["schemas"]["WorkflowDefinitionModel"];
-            /** Description */
-            description?: string | null;
-            /** Name */
-            name: string;
         };
         /**
          * DailyCost
@@ -10165,11 +9762,6 @@ export interface components {
          * @enum {string}
          */
         FileWriteAxis: "ask" | "session";
-        /** FireWorkflowWebhookResponse */
-        FireWorkflowWebhookResponse: {
-            /** Conversation Id */
-            conversation_id: string;
-        };
         /**
          * FolderGroup
          * @description A project plus the conversations it holds (grouped sidebar payload).
@@ -10347,20 +9939,6 @@ export interface components {
             online: boolean;
             /** Username */
             username: string;
-        };
-        /**
-         * FromPlaybookRequest
-         * @description Copy an official playbook into a user workflow (use = 复制为我的).
-         */
-        FromPlaybookRequest: {
-            /** Name */
-            name?: string | null;
-            /** Playbook */
-            playbook: string;
-            /** Slots */
-            slots?: {
-                [key: string]: unknown;
-            };
         };
         /**
          * GitCredentialView
@@ -10661,6 +10239,11 @@ export interface components {
             main: components["schemas"]["ModelProfileSlot"];
             /** Name */
             name: string;
+            /**
+             * Reasoning Effort
+             * @description Vendor thinking-effort token for this combination (e.g. low/high/max). Null = that model's vendor default. Official control values only.
+             */
+            reasoning_effort?: string | null;
             /** Updated At */
             updated_at?: string | null;
             vision?: components["schemas"]["ModelProfileSlot"] | null;
@@ -11470,6 +11053,11 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+            /**
+             * Offers Tools
+             * @default []
+             */
+            offers_tools: string[];
             /** Version */
             version: string;
         };
@@ -11548,6 +11136,8 @@ export interface components {
              * @description Display name of the provider (byok rows only).
              */
             provider_label?: string | null;
+            /** @description Official vendor thinking-effort tokens for this model id (e.g. low/high/max). Null when the leaf does not send reasoning_effort. */
+            reasoning_effort?: components["schemas"]["ModelReasoningEffort"] | null;
             /**
              * Ref
              * @description Catalog identity: @platform/{id} or @byok/{provider_id}/{id}. Copy this into tool `model` fields; do not send origin/provider_id.
@@ -11598,13 +11188,20 @@ export interface components {
         };
         /**
          * ModelPriceCard
-         * @description Reused price card — USD per 1M tokens as decimal strings (money is never float).
+         * @description Curated unit prices per 1M tokens as decimal strings (money is never float).
          */
         ModelPriceCard: {
             /** Cache Hit */
             cache_hit?: string | null;
             /** Cache Miss */
             cache_miss?: string | null;
+            /**
+             * Currency
+             * @description ISO-4217. Catalog cards are curated CNY, not live USD.
+             * @default CNY
+             * @constant
+             */
+            currency: "CNY";
             /** Output */
             output?: string | null;
         };
@@ -11626,6 +11223,22 @@ export interface components {
              * @description BYOK provider id when origin=byok; must be null for platform
              */
             provider_id?: string | null;
+        };
+        /**
+         * ModelReasoningEffort
+         * @description Vendor Chat Completions ``reasoning_effort`` control surface.
+         */
+        ModelReasoningEffort: {
+            /**
+             * Default
+             * @description Vendor default when a combination leaves reasoning_effort unset.
+             */
+            default: string;
+            /**
+             * Options
+             * @description Official control tokens in vendor order. Aliases are not listed.
+             */
+            options: string[];
         };
         /**
          * ModelUnavailableReason
@@ -11925,48 +11538,6 @@ export interface components {
             updated_at?: string | null;
         };
         /**
-         * PlaybookSlotChoice
-         * @description One allowed value of an enumerated slot (render a picker, not a textbox).
-         */
-        PlaybookSlotChoice: {
-            /** Label */
-            label: string;
-            /** Value */
-            value: string;
-        };
-        /**
-         * PlaybookTemplateSlotModel
-         * @description Machine-readable primary slot — clients build the copy form from this.
-         */
-        PlaybookTemplateSlotModel: {
-            /** Choices */
-            choices?: components["schemas"]["PlaybookSlotChoice"][];
-            /** Hint */
-            hint?: string | null;
-            /** Key */
-            key: string;
-            /** Label */
-            label: string;
-            /** Required */
-            required: boolean;
-        };
-        /**
-         * PlaybookTemplateSummary
-         * @description Official playbook listed as a read-only workflow template.
-         */
-        PlaybookTemplateSummary: {
-            /** Id */
-            id: string;
-            /** Primary Slots */
-            primary_slots: string;
-            /** Slots */
-            slots?: components["schemas"]["PlaybookTemplateSlotModel"][];
-            /** Summary */
-            summary: string;
-            /** Title */
-            title: string;
-        };
-        /**
          * PreviewTokenRequest
          * @description Mint body: which conversation process, and which listen port when several.
          */
@@ -12009,33 +11580,6 @@ export interface components {
         PublishVersionRequest: {
             /** Group */
             group?: ("legal" | "writing" | "research" | "product" | "engineering" | "decision") | null;
-        };
-        /** PublishWorkflowRequest */
-        PublishWorkflowRequest: {
-            /** Workflow Id */
-            workflow_id: string;
-        };
-        /**
-         * PutWorkflowTriggerRequest
-         * @description Full replace of the workflow clock.
-         */
-        PutWorkflowTriggerRequest: {
-            /** Cron */
-            cron?: string | null;
-            /**
-             * Enabled
-             * @default true
-             */
-            enabled: boolean;
-            /** Folder Id */
-            folder_id: string;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "schedule" | "webhook";
-            /** Schedule Preset */
-            schedule_preset?: string | null;
         };
         /**
          * QueuedTurnItem
@@ -12094,9 +11638,10 @@ export interface components {
          *     citations / replay ``runs`` / the pipeline ``message_id`` so streamed and stored
          *     ids agree). The FULL token snapshot rides on ``Message.usage`` (input / output /
          *     reasoning / cache hit / cache miss + rounds) so a reloaded sidecar turn's meta row
-         *     matches a cloud turn's. Spend is NOT sent: a sidecar turn's LLM calls are metered
-         *     authoritatively at the cloud inference proxy (``/v1/inference``, Slice 4a), so this
-         *     write-back persists content only.
+         *     matches a cloud turn's. ``duration_ms`` is the whole-turn product-AI wall clock
+         *     (same number as live ``message_end``); older clients omit it. Spend is NOT sent: a
+         *     sidecar turn's LLM calls are metered authoritatively at the cloud inference proxy
+         *     (``/v1/inference``, Slice 4a), so this write-back persists content only.
          *
          *     ``user_message`` may be empty for process-only salvage (journal/runs): the server
          *     must not insert a visible user row when there is no real user intent.
@@ -12104,6 +11649,8 @@ export interface components {
         RecordTurnRequest: {
             /** Agent Mentions */
             agent_mentions?: components["schemas"]["AgentMention"][];
+            /** Attachments */
+            attachments?: components["schemas"]["StoredAttachment"][];
             /**
              * Cache Hit Tokens
              * @default 0
@@ -12121,6 +11668,8 @@ export interface components {
              * @default
              */
             content: string;
+            /** Duration Ms */
+            duration_ms?: number | null;
             /** Evidence Ledger */
             evidence_ledger?: components["schemas"]["EvidenceLedgerEntryRest"][];
             /** Execution Id */
@@ -12469,11 +12018,6 @@ export interface components {
             /** Reason */
             reason: string;
         };
-        /** ReportWorkflowRequest */
-        ReportWorkflowRequest: {
-            /** Reason */
-            reason: string;
-        };
         /**
          * ResolveApprovalInteraction
          * @description Settle a paused GRANTABLE tool call (``approval`` interaction).
@@ -12630,15 +12174,6 @@ export interface components {
             /** Rewritten */
             rewritten: string;
         };
-        /** RotateWorkflowTriggerResponse */
-        RotateWorkflowTriggerResponse: {
-            /** Webhook Id */
-            webhook_id: string;
-            /** Webhook Secret */
-            webhook_secret: string;
-            /** Webhook Url */
-            webhook_url: string;
-        };
         /**
          * RunError
          * @description A turn's terminal error (报错回合), projected from the journal's ``turn_end``
@@ -12669,28 +12204,6 @@ export interface components {
             messages?: components["schemas"]["LlmWindowMessageLine"][];
             /** Run Id */
             run_id: string;
-        };
-        /** RunWorkflowRequest */
-        RunWorkflowRequest: {
-            /** Conversation Id */
-            conversation_id?: string | null;
-            /** Folder Id */
-            folder_id: string;
-            /** Note */
-            note?: string | null;
-            /** Slots */
-            slots?: {
-                [key: string]: string;
-            };
-        };
-        /** RunWorkflowResponse */
-        RunWorkflowResponse: {
-            /** Conversation Id */
-            conversation_id: string;
-            /** Workflow Id */
-            workflow_id: string;
-            /** Workflow Version */
-            workflow_version: number;
         };
         /**
          * RunsPayload
@@ -13356,6 +12869,8 @@ export interface components {
             rows: components["schemas"]["TableRowOut"][];
             /** Schema Version */
             schema_version: number;
+            /** Source Path */
+            source_path?: string | null;
             /** Title */
             title: string;
             /** Updated At */
@@ -13427,6 +12942,8 @@ export interface components {
             row_count: number;
             /** Schema Version */
             schema_version: number;
+            /** Source Path */
+            source_path?: string | null;
             /** Title */
             title: string;
             /**
@@ -13917,12 +13434,18 @@ export interface components {
          * UpdateLlmModelProfileRequest
          * @description Partial update. Omitted fields unchanged; explicit null on worker/background/vision
          *     clears the slot (worker/background → follow_main; vision → no dedicated slot).
+         *     Explicit null on reasoning_effort clears to the vendor default.
          */
         UpdateLlmModelProfileRequest: {
             background?: components["schemas"]["ModelProfileSlot"] | null;
             main?: components["schemas"]["ModelProfileSlot"] | null;
             /** Name */
             name?: string | null;
+            /**
+             * Reasoning Effort
+             * @description Vendor thinking-effort token. Explicit null clears to the vendor default. Must be an official control value of the (new) main model.
+             */
+            reasoning_effort?: string | null;
             vision?: components["schemas"]["ModelProfileSlot"] | null;
             worker?: components["schemas"]["ModelProfileSlot"] | null;
         };
@@ -14017,19 +13540,6 @@ export interface components {
         UpdateTableRequest: {
             /** Title */
             title?: string | null;
-        };
-        /** UpdateWorkflowRequest */
-        UpdateWorkflowRequest: {
-            /**
-             * Clear Description
-             * @default false
-             */
-            clear_description: boolean;
-            definition?: components["schemas"]["WorkflowDefinitionModel"] | null;
-            /** Description */
-            description?: string | null;
-            /** Name */
-            name?: string | null;
         };
         /**
          * UpdatesPolicyResponse
@@ -14212,226 +13722,6 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
-        };
-        /**
-         * WorkflowDefinitionModel
-         * @description Canvas JSON: nodes + edges (agent_step | human_gate) + optional slots.
-         *
-         *     **校验用它，落库用** :meth:`payload` —— 不要用 ``model_dump()``。这几个字段声明的是
-         *     「服务端认识什么」，不是「客户端能存什么」：definition 归用户所有，未知字段必须原样
-         *     透传（``extra="allow"`` 在这里和 :class:`WorkflowSlotModel` 上都是为了这件事）。按已知
-         *     字段重建这份 JSON，是 ``deliverable`` / ``slots`` / ``source`` 先后被抹掉的同一个根因
-         *     —— 见 :mod:`agentcore.workflows.definition` 的所有权约定。
-         */
-        WorkflowDefinitionModel: {
-            /** Edges */
-            edges?: {
-                [key: string]: unknown;
-            }[];
-            /** Nodes */
-            nodes?: {
-                [key: string]: unknown;
-            }[];
-            /** Slots */
-            slots?: components["schemas"]["WorkflowSlotModel"][];
-        } & {
-            [key: string]: unknown;
-        };
-        /**
-         * WorkflowSlotModel
-         * @description One canvas slot: ``{{key}}`` in task text, ``default`` = 原轮的原值。
-         *
-         *     Optional — a definition without slots behaves exactly as before.
-         */
-        WorkflowSlotModel: {
-            /**
-             * Default
-             * @default
-             */
-            default: string;
-            /** Key */
-            key: string;
-            /** Label */
-            label: string;
-        } & {
-            [key: string]: unknown;
-        };
-        /**
-         * WorkflowSourceModel
-         * @description 这条工作流是从哪儿来的——服务端权威，客户端只读。
-         *
-         *     ``kind`` 今天只有 ``"turn"``（历史行：曾经从一轮协作固化，不是现行写入），带原对话 /
-         *     消息定位。手画的、官方模板复制的没有来源（``null``）。为什么它不在 ``definition`` 里 →
-         *     :mod:`agentcore.workflows.source`。
-         */
-        WorkflowSourceModel: {
-            /** Conversation Id */
-            conversation_id?: string | null;
-            /** Kind */
-            kind: string;
-            /** Message Id */
-            message_id?: string | null;
-        } & {
-            [key: string]: unknown;
-        };
-        /** WorkflowStoreInstalledItem */
-        WorkflowStoreInstalledItem: {
-            /** Author */
-            author: string;
-            /** Description */
-            description: string;
-            /** Has Update */
-            has_update: boolean;
-            /** Id */
-            id: string;
-            /** Installed */
-            installed: boolean;
-            /** Name */
-            name: string;
-            /** Source Workflow Id */
-            source_workflow_id: string;
-            /** Status */
-            status: string;
-            /** Version N */
-            version_n: number;
-            /** Workflow Id */
-            workflow_id: string;
-        };
-        /** WorkflowStoreInstalledResponse */
-        WorkflowStoreInstalledResponse: {
-            /** Data */
-            data: components["schemas"]["WorkflowStoreInstalledItem"][];
-        };
-        /** WorkflowStoreListResponse */
-        WorkflowStoreListResponse: {
-            /** Data */
-            data: components["schemas"]["WorkflowStoreListingRow"][];
-            /** Page */
-            page: number;
-            /** Page Size */
-            page_size: number;
-            /** Total */
-            total: number;
-        };
-        /** WorkflowStoreListingDetail */
-        WorkflowStoreListingDetail: {
-            /** Author */
-            author: string;
-            /** Definition */
-            definition: {
-                [key: string]: unknown;
-            };
-            /** Description */
-            description: string;
-            /** Has Update */
-            has_update: boolean;
-            /** Id */
-            id: string;
-            /** Installed */
-            installed: boolean;
-            /** Name */
-            name: string;
-            /** Source Workflow Id */
-            source_workflow_id: string;
-            /** Status */
-            status: string;
-            /** Version N */
-            version_n: number;
-            /** Workflow Id */
-            workflow_id?: string | null;
-        };
-        /** WorkflowStoreListingRow */
-        WorkflowStoreListingRow: {
-            /** Author */
-            author: string;
-            /** Description */
-            description: string;
-            /** Has Update */
-            has_update: boolean;
-            /** Id */
-            id: string;
-            /** Installed */
-            installed: boolean;
-            /** Name */
-            name: string;
-            /** Source Workflow Id */
-            source_workflow_id: string;
-            /** Status */
-            status: string;
-            /** Version N */
-            version_n: number;
-        };
-        /** WorkflowStoreMineResponse */
-        WorkflowStoreMineResponse: {
-            /** Data */
-            data: components["schemas"]["WorkflowStoreListingRow"][];
-        };
-        /** WorkflowStoreReportView */
-        WorkflowStoreReportView: {
-            /** Id */
-            id: string;
-            /** Listing Id */
-            listing_id: string;
-            /** Reason */
-            reason: string;
-        };
-        /** WorkflowSummary */
-        WorkflowSummary: {
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Definition */
-            definition: {
-                [key: string]: unknown;
-            };
-            /** Description */
-            description?: string | null;
-            /** Id */
-            id: string;
-            /** Name */
-            name: string;
-            source?: components["schemas"]["WorkflowSourceModel"] | null;
-            trigger?: components["schemas"]["WorkflowTriggerModel"] | null;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            /** Version */
-            version: number;
-        };
-        /**
-         * WorkflowTriggerModel
-         * @description One clock on a workflow: schedule XOR webhook.
-         */
-        WorkflowTriggerModel: {
-            /** Cron */
-            cron?: string | null;
-            /** Enabled */
-            enabled: boolean;
-            /** Folder Id */
-            folder_id: string;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "schedule" | "webhook";
-            /** Last Error */
-            last_error?: string | null;
-            /** Last Run At */
-            last_run_at?: string | null;
-            /** Next Run At */
-            next_run_at?: string | null;
-            /** Schedule Preset */
-            schedule_preset?: string | null;
-            /** Webhook Id */
-            webhook_id?: string | null;
-            /** Webhook Secret */
-            webhook_secret?: string | null;
-            /** Webhook Url */
-            webhook_url?: string | null;
         };
         /**
          * WorkspaceBindingResponse
@@ -16593,150 +15883,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StatusResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    admin_list_listings_v1_admin_workflow_store_listings_get: {
-        parameters: {
-            query?: {
-                q?: string | null;
-                status?: string | null;
-                page?: number;
-                page_size?: number;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AdminWorkflowStoreListingList"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    admin_get_listing_v1_admin_workflow_store_listings__listing_id__get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                listing_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AdminWorkflowStoreListingDetail"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    admin_takedown_listing_v1_admin_workflow_store_listings__listing_id__takedown_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                listing_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AdminWorkflowStoreListingRow"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    admin_list_reports_v1_admin_workflow_store_reports_get: {
-        parameters: {
-            query?: {
-                page?: number;
-                page_size?: number;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AdminWorkflowStoreReportList"];
                 };
             };
             /** @description Validation Error */
@@ -22798,41 +21944,6 @@ export interface operations {
             };
         };
     };
-    fire_workflow_webhook_v1_hooks_workflows__webhook_id__post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-AgentCore-Webhook-Secret"?: string | null;
-                "X-Idempotency-Key"?: string | null;
-            };
-            path: {
-                webhook_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FireWorkflowWebhookResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     mint_inference_token_v1_inference_token_post: {
         parameters: {
             query?: never;
@@ -24628,6 +23739,43 @@ export interface operations {
             };
         };
     };
+    get_table_by_source_v1_tables_by_source_get: {
+        parameters: {
+            query: {
+                path: string;
+                folder_id?: string | null;
+                conversation_id?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TableSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_table_v1_tables__table_id__get: {
         parameters: {
             query?: never;
@@ -26037,757 +25185,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_workflow_playbook_templates_v1_workflow_playbook_templates_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PlaybookTemplateSummary"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_workflow_store_v1_workflow_store_get: {
-        parameters: {
-            query?: {
-                q?: string | null;
-                page?: number;
-                page_size?: number;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkflowStoreListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    publish_workflow_v1_workflow_store_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PublishWorkflowRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkflowStoreListingDetail"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_installed_v1_workflow_store_installed_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkflowStoreInstalledResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_mine_listings_v1_workflow_store_mine_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkflowStoreMineResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_listing_v1_workflow_store__listing_id__get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                listing_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkflowStoreListingDetail"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    unpublish_listing_v1_workflow_store__listing_id__delete: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                listing_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkflowStoreListingRow"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    install_listing_v1_workflow_store__listing_id__install_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                listing_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkflowStoreInstalledItem"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    report_listing_v1_workflow_store__listing_id__reports_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                listing_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReportWorkflowRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkflowStoreReportView"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    publish_new_version_v1_workflow_store__listing_id__versions_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                listing_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkflowStoreListingDetail"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_workflows_v1_workflows_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkflowSummary"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_workflow_v1_workflows_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateWorkflowRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkflowSummary"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_workflow_from_playbook_v1_workflows_from_playbook_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["FromPlaybookRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkflowSummary"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_workflow_v1_workflows__workflow_id__get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                workflow_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkflowSummary"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_workflow_v1_workflows__workflow_id__delete: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                workflow_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StatusResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_workflow_v1_workflows__workflow_id__patch: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                workflow_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateWorkflowRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkflowSummary"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    run_workflow_v1_workflows__workflow_id__run_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                workflow_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RunWorkflowRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RunWorkflowResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    suggest_workflow_slots_v1_workflows__workflow_id__suggest_slots_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                workflow_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkflowSummary"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    put_workflow_trigger_v1_workflows__workflow_id__trigger_put: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                workflow_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PutWorkflowTriggerRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkflowSummary"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_workflow_trigger_v1_workflows__workflow_id__trigger_delete: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                workflow_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkflowSummary"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    rotate_workflow_trigger_secret_v1_workflows__workflow_id__trigger_rotate_secret_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                workflow_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RotateWorkflowTriggerResponse"];
                 };
             };
             /** @description Validation Error */

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * 协作图状态条只留战绩。有接续 run、非零 collab、resolved 开工卡时，
- * 条上不得再出现「接续 N 次」「互相把关」「预计 N 人开工」「同时开工省下」、
+ * 条上不得再出现「接续 N 次」「互相把关」「预计 N 人开工」、
  * 「回放协作过程」。
  * 数据字段 / formatCollabSummary / teamPreviewLead 仍保留，只是不画在这条上。
  */
@@ -114,7 +114,7 @@ beforeEach(() => {
 });
 
 describe("StatusStrip · 去掉多余 chrome", () => {
-  it("有接续 run + 非零 collab + resolved preview 时，条上不出现接续 / 互相把关 / 预计 / 同时开工省下", () => {
+  it("有接续 run + 非零 collab + resolved preview 时，条上不出现接续 / 互相把关 / 预计", () => {
     const collabLine = formatCollabSummary({
       boundary_yields: 0,
       scope_signals: 1,
@@ -133,7 +133,6 @@ describe("StatusStrip · 去掉多余 chrome", () => {
     expect(screen.queryByText(/接续/)).toBeNull();
     expect(screen.queryByText(/互相把关/)).toBeNull();
     expect(screen.queryByText(/预计/)).toBeNull();
-    expect(screen.queryByText(/同时开工省下/)).toBeNull();
     expect(screen.queryByTestId("graph-team-preview")).toBeNull();
   });
 });

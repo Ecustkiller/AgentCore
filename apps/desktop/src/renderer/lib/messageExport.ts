@@ -59,6 +59,7 @@ const TOOL_LABEL: Record<string, string> = {
   file_batch: "Batch files",
   md_to_docx: "Export Word",
   md_to_pdf: "Export PDF",
+  md_export: "Export document",
   archive_extract: "Extract archive",
   archive_create: "Create archive",
   download_url: "Download file",
@@ -242,6 +243,14 @@ function hostExportLabel(args: Record<string, unknown>): string {
   return action ? `Host ${action}` : "Host";
 }
 
+function mdExportLabel(args: Record<string, unknown>): string {
+  const format =
+    typeof args.format === "string" ? args.format.trim().toLowerCase() : "";
+  if (format === "pdf") return "Export PDF";
+  if (format === "docx") return "Export Word";
+  return "Export document";
+}
+
 function formatToolLine(step: Extract<ProcessStep, { kind: "tool" }>): string {
   const wire = resolveToolWireStatus(step.status, step.failure);
   const redirect = channelRedirectFace(step.failure?.code);
@@ -252,7 +261,9 @@ function formatToolLine(step: Extract<ProcessStep, { kind: "tool" }>): string {
         ? browserExportLabel(step.arguments ?? {})
         : step.tool_name === "host"
           ? hostExportLabel(step.arguments ?? {})
-          : (TOOL_LABEL[step.tool_name] ?? step.tool_name);
+          : step.tool_name === "md_export"
+            ? mdExportLabel(step.arguments ?? {})
+            : (TOOL_LABEL[step.tool_name] ?? step.tool_name);
   const detail =
     wire === "redirect" ? "" : toolDetail(step.arguments ?? {}, step.tool_name);
   const status =

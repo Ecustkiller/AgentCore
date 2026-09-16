@@ -393,7 +393,7 @@ def _mock_background_account(monkeypatch, *, background):
     monkeypatch.setattr("agentcore.llm.resolve._decrypt_provider", lambda _r, _u: user_creds)
 
 
-@pytest.mark.parametrize("purpose", ["title", "memory", "compaction", "workflow.slots"])
+@pytest.mark.parametrize("purpose", ["title", "memory", "compaction"])
 async def test_resolve_model_config_background_explicit_byok_slot_beats_platform(
     monkeypatch, purpose
 ):

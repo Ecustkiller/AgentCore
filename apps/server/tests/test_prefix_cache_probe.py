@@ -21,6 +21,7 @@ from agentcore.observability.prefix_cache import (
     BREACH_HISTORY_REWRITE,
     BREACH_IDENTICAL,
     BREACH_SYSTEM_PROMPT,
+    BREACH_TOOLS,
     ChainState,
     SectionDelta,
     compute_probe,
@@ -31,6 +32,7 @@ from agentcore.observability.prefix_cache import (
     prompt_section_delta,
     record_prompt_sections,
     reset_prefix_cache_state,
+    tools_fingerprint,
 )
 from agentcore.runtime.context import ContextAssembler, SectionOrder
 
@@ -68,14 +70,33 @@ def _m(role: str, content: str) -> LLMMessage:
     return LLMMessage(role=role, content=content)
 
 
-def _chain(*messages: LLMMessage, input_tokens: int, calls: int = 1) -> ChainState:
+def _chain(
+    *messages: LLMMessage, input_tokens: int, calls: int = 1, tools: list | None = None
+) -> ChainState:
     """The state a previous call on the same chain would have left behind."""
     digests, _ = message_fingerprints(messages)
-    return ChainState(digests=digests, input_tokens=input_tokens, calls=calls)
+    tools_digest, tools_count = tools_fingerprint(tools)
+    return ChainState(
+        digests=digests,
+        input_tokens=input_tokens,
+        calls=calls,
+        tools_digest=tools_digest,
+        tools_count=tools_count,
+    )
 
 
-def _probe(messages, previous, *, hit=0, miss=0, input_tokens=1000, delta=None):
+def _probe(
+    messages,
+    previous,
+    *,
+    hit=0,
+    miss=0,
+    input_tokens=1000,
+    delta=None,
+    tools=None,
+):
     digests, sizes = message_fingerprints(messages)
+    tools_digest, tools_count = tools_fingerprint(tools)
     return compute_probe(
         digests=digests,
         sizes=sizes,
@@ -84,6 +105,8 @@ def _probe(messages, previous, *, hit=0, miss=0, input_tokens=1000, delta=None):
         cache_hit_tokens=hit,
         cache_miss_tokens=miss,
         previous=previous,
+        tools_digest=tools_digest,
+        tools_count=tools_count,
         **({"section_delta": delta} if delta is not None else {}),
     )
 
@@ -120,6 +143,86 @@ def test_pure_append_is_history_growth_and_reuses_the_measured_prompt():
     assert probe.forfeited_tokens == 4  # block-granularity shortfall, not a breach
     assert probe.hit_ratio == 0.896
     assert probe.chain_calls == 2
+
+
+_TOOL_A = [{"type": "function", "function": {"name": "file_read", "parameters": {}}}]
+_TOOL_B = [
+    {"type": "function", "function": {"name": "file_read", "parameters": {}}},
+    {"type": "function", "function": {"name": "consult", "parameters": {}}},
+]
+
+
+def test_tools_table_change_is_tools_breach_not_history_growth():
+    previous = _chain(
+        _m("system", "SYS"),
+        _m("user", "q1"),
+        _m("assistant", "a1"),
+        input_tokens=900,
+        tools=_TOOL_A,
+    )
+    messages = [
+        _m("system", "SYS"),
+        _m("user", "q1"),
+        _m("assistant", "a1"),
+        _m("user", "q2"),
+    ]
+    probe = _probe(messages, previous, hit=0, miss=1100, input_tokens=1100, tools=_TOOL_B)
+    assert probe.breach == BREACH_TOOLS
+    assert probe.tools_changed is True
+    assert probe.tools_count == 2
+    assert probe.reusable_tokens == 0
+    assert probe.reusable_basis == BASIS_NONE
+    assert probe.forfeited_tokens == 0
+    assert probe.breach_section == ""
+    assert probe.hit_ratio == 0.0
+
+
+def test_same_tools_plus_append_stays_history_growth():
+    previous = _chain(
+        _m("system", "SYS"),
+        _m("user", "q1"),
+        _m("assistant", "a1"),
+        input_tokens=900,
+        tools=_TOOL_A,
+    )
+    messages = [
+        _m("system", "SYS"),
+        _m("user", "q1"),
+        _m("assistant", "a1"),
+        _m("user", "q2"),
+    ]
+    probe = _probe(messages, previous, hit=896, miss=104, input_tokens=1000, tools=_TOOL_A)
+    assert probe.breach == BREACH_HISTORY_GROWTH
+    assert probe.tools_changed is False
+    assert probe.tools_count == 1
+    assert probe.reusable_tokens == 900
+
+
+def test_tools_change_beats_system_prompt_in_hierarchy():
+    previous = _chain(
+        _m("system", "SYS-v1"), _m("user", "q1"), input_tokens=500, tools=_TOOL_A
+    )
+    messages = [_m("system", "SYS-v2"), _m("user", "q1")]
+    probe = _probe(messages, previous, hit=0, miss=500, input_tokens=500, tools=_TOOL_B)
+    assert probe.breach == BREACH_TOOLS
+    assert probe.tools_changed is True
+    assert probe.breach_section == ""
+
+
+def test_tools_fingerprint_ignores_key_order_not_list_order():
+    a = [{"type": "function", "function": {"name": "a", "z": 1, "m": 2}}]
+    b = [{"type": "function", "function": {"m": 2, "name": "a", "z": 1}}]
+    assert tools_fingerprint(a) == tools_fingerprint(b)
+    swapped = [
+        {"type": "function", "function": {"name": "b"}},
+        {"type": "function", "function": {"name": "a"}},
+    ]
+    ordered = [
+        {"type": "function", "function": {"name": "a"}},
+        {"type": "function", "function": {"name": "b"}},
+    ]
+    assert tools_fingerprint(swapped) != tools_fingerprint(ordered)
+    assert tools_fingerprint(None) == tools_fingerprint([]) == ("", 0)
 
 
 def test_resent_identical_request_is_not_growth():
@@ -411,6 +514,42 @@ def test_observe_emits_one_line_and_advances_the_chain(monkeypatch):
     assert captured[1]["reusable_tokens"] == 800
     assert captured[1]["forfeited_tokens"] == 32
     assert probe is not None and probe.chain_calls == 2
+
+
+def test_observe_tools_promotion_is_tools_not_history_growth(monkeypatch):
+    monkeypatch.setattr(
+        "agentcore.observability.prefix_cache.logger",
+        type("_Spy", (), {"debug": lambda self, event, **kw: None, "info": lambda self, event, **kw: None})(),
+    )
+    bind_log_context(conversation_id="conv-tools", trace_id="t1", agent_id="ceo")
+    first = [LLMMessage(role="system", content="SYS"), LLMMessage(role="user", content="q1")]
+    observe_prefix_cache(
+        scenario="chat",
+        model="m",
+        messages=first,
+        input_tokens=800,
+        cache_hit_tokens=0,
+        cache_miss_tokens=800,
+        tools=_TOOL_A,
+    )
+    second = [
+        *first,
+        LLMMessage(role="assistant", content="a1"),
+        LLMMessage(role="user", content="q2"),
+    ]
+    probe = observe_prefix_cache(
+        scenario="chat",
+        model="m",
+        messages=second,
+        input_tokens=1000,
+        cache_hit_tokens=0,
+        cache_miss_tokens=1000,
+        tools=_TOOL_B,
+    )
+    assert probe is not None
+    assert probe.breach == BREACH_TOOLS
+    assert probe.tools_changed is True
+    assert probe.tools_count == 2
 
 
 def test_observe_skips_calls_with_no_chain_identity_or_no_tokens(monkeypatch):
@@ -715,6 +854,100 @@ def test_summary_buckets_by_prompt_size():
     assert summary["by_length"]["<4k"]["hit_ratio"] == 0.0
     assert summary["by_length"]["16k-64k"]["hit_ratio"] == 0.8
     assert summary["by_length"]["≥64k"]["hit_ratio"] == 0.9
+
+
+def test_summary_buckets_tools_changed():
+    from agentcore.observability.query.stats import prefix_cache_summary
+
+    summary = prefix_cache_summary(
+        [
+            _row(tools_changed=False, cache_hit_tokens=900),
+            _row(
+                breach=BREACH_TOOLS,
+                tools_changed=True,
+                cache_hit_tokens=0,
+                input_tokens=2000,
+            ),
+        ]
+    )
+    assert summary["by_tools"]["unchanged"]["hit_ratio"] == 0.9
+    assert summary["by_tools"]["changed"]["hit_ratio"] == 0.0
+    assert summary["by_tools"]["changed"]["calls"] == 1
+    assert summary["by_breach"][BREACH_TOOLS]["calls"] == 1
+
+
+def test_summary_reads_llm_call_compact_fields():
+    from agentcore.observability.query.stats import (
+        prefix_cache_summary,
+        prefix_rows_for_stats,
+    )
+
+    compact = {
+        "prefix_breach": BREACH_HISTORY_GROWTH,
+        "tools_changed": False,
+        "tools_count": 3,
+        "input_tokens": 1000,
+        "cache_hit_tokens": 800,
+        "cache_miss_tokens": 200,
+        "cost_role": "captain",
+    }
+    summary = prefix_cache_summary([compact])
+    assert summary["hit_ratio"] == 0.8
+    assert summary["by_breach"][BREACH_HISTORY_GROWTH]["calls"] == 1
+    assert summary["by_role"]["captain"]["hit_ratio"] == 0.8
+    assert summary["has_forfeited"] is False
+    rows, source = prefix_rows_for_stats([compact], [])
+    assert source == "llm.call"
+    assert rows == [compact]
+
+
+def test_log_llm_call_attaches_compact_prefix_fields():
+    from structlog.testing import capture_logs
+
+    from agentcore.llm.observability import log_llm_call
+    from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
+
+    bind_log_context(conversation_id="conv-compact", trace_id="t1", cost_role="captain")
+    first = [_m("system", "SYS"), _m("user", "q1")]
+    usage0 = TokenUsage(input_tokens=800, cache_hit_tokens=0, cache_miss_tokens=800)
+    usage1 = TokenUsage(input_tokens=1000, cache_hit_tokens=0, cache_miss_tokens=1000)
+    with capture_logs() as caps:
+        log_llm_call(
+            scenario="chat",
+            model=DEEPSEEK_V4_FLASH,
+            usage=usage0,
+            finish_reason="stop",
+            latency_ms=10,
+            stream=False,
+            messages=first,
+            tools=_TOOL_A,
+            credential_source="platform",
+        )
+        log_llm_call(
+            scenario="chat",
+            model=DEEPSEEK_V4_FLASH,
+            usage=usage1,
+            finish_reason="stop",
+            latency_ms=12,
+            stream=False,
+            messages=[
+                *first,
+                _m("assistant", "a1"),
+                _m("user", "q2"),
+            ],
+            tools=_TOOL_B,
+            credential_source="platform",
+        )
+    calls = [c for c in caps if c.get("event") == "llm.call"]
+    assert len(calls) == 2
+    assert calls[0]["prefix_breach"] == BREACH_COLD_CHAIN
+    assert calls[0]["tools_changed"] is False
+    assert calls[0]["tools_count"] == 1
+    assert calls[1]["prefix_breach"] == BREACH_TOOLS
+    assert calls[1]["tools_changed"] is True
+    assert calls[1]["tools_count"] == 2
+    assert "forfeited_tokens" not in calls[1]
+    assert "reusable_tokens" not in calls[1]
 
 
 # --- 装配行为一行未改 ---------------------------------------------------------------------

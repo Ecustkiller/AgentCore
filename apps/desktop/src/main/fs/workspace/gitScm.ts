@@ -11,6 +11,7 @@ import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import type { WorkspaceOpResult } from "@shared/ipc-contract";
 import type { StoredRoot } from "../roots";
+import { resolveGitRunCwd } from "./gitRun";
 import { opErr, opOk } from "./result";
 
 const execFileAsync = promisify(execFile);
@@ -61,6 +62,7 @@ async function runGit(
         ...process.env,
         GIT_TERMINAL_PROMPT: "0",
         GIT_OPTIONAL_LOCKS: "0",
+        GIT_CEILING_DIRECTORIES: cwd,
       },
     });
     return {
@@ -227,10 +229,11 @@ export async function opGitScm(
   root: StoredRoot,
   args: Record<string, unknown>,
 ): Promise<WorkspaceOpResult> {
-  if (!(await hasLocalGit(root.absPath))) {
+  const resolved = await resolveGitRunCwd(root, args.cwd, { create: false });
+  if (!resolved.ok || !(await hasLocalGit(resolved.cwd))) {
     return opErr(
       "WorkspaceIOError",
-      "当前工作区内没有 Git 仓库（仅识别工作区根下的 .git）",
+      "当前文件夹没有 Git 仓库（仅识别该文件夹下的 .git）",
     );
   }
 
@@ -242,7 +245,7 @@ export async function opGitScm(
     );
   }
 
-  const cwd = root.absPath;
+  const cwd = resolved.cwd;
 
   try {
     switch (action) {

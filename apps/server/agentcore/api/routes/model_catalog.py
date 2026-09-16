@@ -14,6 +14,7 @@ from agentcore.api.schemas import (
     ModelCatalogItem,
     ModelCatalogResponse,
     ModelPriceCard,
+    ModelReasoningEffort,
     ModelUnavailableReason,
 )
 from agentcore.llm.catalog import ModelCatalog, ModelCatalogEntry, resolve_model_catalog
@@ -50,11 +51,27 @@ def _to_response(catalog: ModelCatalog) -> ModelCatalogResponse:
                 capabilities=item.capabilities,
                 context_length=item.context_length,
                 badge=item.badge,
-                price=ModelPriceCard(**item.price) if item.price else None,
+                price=(
+                    ModelPriceCard(
+                        cache_hit=item.price.get("cache_hit"),
+                        cache_miss=item.price.get("cache_miss"),
+                        output=item.price.get("output"),
+                    )
+                    if item.price
+                    else None
+                ),
                 available=item.available,
                 provider_id=item.provider_id,
                 provider_label=item.provider_label,
                 unavailable_reason=_unavailable_reason(item),
+                reasoning_effort=(
+                    ModelReasoningEffort(
+                        options=list(item.reasoning_effort.options),
+                        default=item.reasoning_effort.default,
+                    )
+                    if item.reasoning_effort
+                    else None
+                ),
             )
             for item in catalog.models
         ],

@@ -33,6 +33,7 @@ function toExecution(name: string): Execution {
     kind: r.kind ?? "agent",
     role: r.role ?? null,
     model: r.model ?? "",
+    reasoningEffort: null,
     usage: r.usage ?? null,
     cost: r.cost ?? null,
     error: r.error,

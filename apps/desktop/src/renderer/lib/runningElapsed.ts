@@ -14,3 +14,26 @@ export function runningElapsedSec(
   const sec = Math.max(0, Math.floor((nowMs - startedAtMs) / 1000));
   return sec > MAX_SANE_RUNNING_ELAPSED_SEC ? 0 : sec;
 }
+
+/** ISO / 任意 Date.parse 可吃的字符串 → epoch ms；坏值省略秒表。 */
+export function startedAtFromIso(
+  iso: string | null | undefined,
+): number | null {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? t : null;
+}
+
+/**
+ * 助手气泡脚完成时刻：开跑 `createdAt` + 整轮墙钟 `durationMs`。
+ * 缺用时 / 非法起点的老行回落开始时刻，不编造完成点。
+ */
+export function completedAtIso(
+  startedAt: string,
+  durationMs?: number | null,
+): string {
+  if (durationMs == null || durationMs <= 0) return startedAt;
+  const t = startedAtFromIso(startedAt);
+  if (t == null) return startedAt;
+  return new Date(t + durationMs).toISOString();
+}

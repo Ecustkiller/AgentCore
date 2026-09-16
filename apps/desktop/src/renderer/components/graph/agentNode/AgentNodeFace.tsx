@@ -7,7 +7,7 @@ import {
   graphBadgeMuted,
   graphBadgePrimary,
 } from "@/components/ui/tone-presets";
-import { runningElapsedSec } from "@/lib/runningElapsed";
+import { useRunningElapsed } from "@/hooks/useRunningElapsed";
 import { useActiveTurnPhase } from "@/stores/conversation";
 import {
   projectRuntime,
@@ -17,7 +17,7 @@ import {
 } from "@/stores/execution";
 import { useRunStopPendingStore } from "@/stores/runStopPending";
 import { ArrowUp, FileText, Pause, PencilLine } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { isStoppableRunStatus } from "../runStopActions";
 import {
   type AgentNodeData,
@@ -279,29 +279,6 @@ function AgentNodeMeta({
       )}
     </div>
   );
-}
-
-/**
- * Live elapsed seconds since the run's REAL backend start (`startedAt`, epoch ms from
- * the `run_started` frame's wall-clock `t`) — NOT since component mount. Deriving from
- * `startedAt` makes the「执行中 · 用时」counter survive node remount (视口虚拟化 / 幕 LOD
- * 切换 / 重新布局), late viewing (晚开协作图), and reload — all of which used to reset it
- * to 0. The 1s ticker only forces a re-render; the value is recomputed from the wall
- * clock each render. Clamped to ≥0 (guards client/server clock skew); on completion the
- * authoritative `durationMs` takes over. Returns 0 when not ticking or start is unknown.
- */
-function useRunningElapsed(
-  ticking: boolean,
-  startedAt: number | null | undefined,
-): number {
-  const [, force] = useState(0);
-  useEffect(() => {
-    if (!ticking) return;
-    const id = setInterval(() => force((n) => n + 1), 1000);
-    return () => clearInterval(id);
-  }, [ticking]);
-  if (!ticking || startedAt == null) return 0;
-  return runningElapsedSec(startedAt);
 }
 
 /** 质询标记：可点直达该轮质询 run。suffix「含质询」走链接色、replace「质询作答失败」走告警色。 */

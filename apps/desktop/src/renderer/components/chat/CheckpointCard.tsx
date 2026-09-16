@@ -169,6 +169,16 @@ function resolvedCollapsedSummary(checkpoint: CheckpointDisplay): string {
   });
 }
 
+/** Settled heading: question prompts; old no-question frames keep wire `question`. */
+function settledAskStem(checkpoint: CheckpointDisplay): string {
+  const prompts = checkpoint.questions
+    .map((q) => q.prompt.trim())
+    .filter(Boolean);
+  if (prompts.length === 1) return prompts[0];
+  if (prompts.length > 1) return prompts.join("\n");
+  return checkpoint.question;
+}
+
 /** The settled record of an ask_user card: how it was decided, plus the user's
  * answer note. Process-row stub — not a success toast or DecisionCard.
  * 取消 / 确认 / 超时都占时间线存根；缺 decision 不猜超时。 */
@@ -188,7 +198,7 @@ function ResolvedCheckpoint({ checkpoint }: { checkpoint: CheckpointDisplay }) {
     >
       <div className="mt-1.5 space-y-1.5">
         <p className="whitespace-pre-wrap text-sm text-foreground">
-          {checkpoint.question}
+          {settledAskStem(checkpoint)}
         </p>
         {checkpoint.selected.length > 0 && (
           <div className="flex flex-wrap gap-1">

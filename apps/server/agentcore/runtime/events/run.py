@@ -33,6 +33,9 @@ def _wire_cost(cost: dict[str, Any] | None) -> dict[str, Any]:
     if cost.get("estimated_total") is not None:
         out["estimated_total"] = int(cost["estimated_total"])
         out["estimated_currency"] = str(cost.get("estimated_currency") or out["currency"])
+    elif str(cost.get("credential_source") or "") == "user" and out["total"] > 0:
+        out["estimated_total"] = out["total"]
+        out["estimated_currency"] = out["currency"]
     return out
 
 
@@ -321,6 +324,7 @@ def run_completed(
     model: str = "",
     usage: dict[str, int] | None = None,
     cost: dict[str, Any] | None = None,
+    reasoning_effort: str | None = None,
     debrief: dict[str, Any] | None = None,
     output_files: list[str] | None = None,
     gaps: list[dict[str, Any]] | None = None,
@@ -338,6 +342,10 @@ def run_completed(
         else {"input": 0, "output": 0, "reasoning": 0, "cache_hit": 0, "cache_miss": 0},
         "cost": _wire_cost(cost),
     }
+    # Combination-level vendor token actually sent. Absent keeps old fixtures
+    # byte-identical; clients fall back to the thinking on/off chip.
+    if reasoning_effort:
+        payload["reasoning_effort"] = reasoning_effort
     # 完工交接简报 (surfacing): the worker's authored 交接简报 — {summary(结论) / key_points /
     # assumptions / next_steps}, each present only when non-empty — carried VERBATIM so the
     # run-detail 摘要 becomes the author's own wrap-up, not a machine truncation of raw prose.
@@ -530,15 +538,11 @@ def team_synthesis_preview(
     workers: list[dict[str, Any]],
     in_progress: bool = True,
 ) -> SSEEvent:
-    """CEO 协调模式 Phase 1：多 worker 委派期间的确定性团队进展摘要。
+    """Leftover ``team_synthesis_preview`` (historical journal).
 
-    Emitted from ``drive._progress`` after each worker finishes when the plan has ≥2
-    nodes. Template-only (no LLM) — verifies progressive visibility without changing
-    ReAct / delegate blocking. DURABLE (P2)：落 journal；前端 fold 同 key 保最新，
-    刷新后 StatusStrip / ProjectedTurn.teamSynthesisPreview 可重建。Must NOT reuse
-    ``content_delta`` (would pollute the final CEO bubble).
-
-    → 见 docs/03-AI核心/编排器与CEO主Agent.md §协调模式（合成通道）
+    Live paths no longer emit this. Fold still stores the latest payload per key
+    so old journals rebuild. Captain node does not paint it.
+    Must NOT reuse ``content_delta``.
     """
     return SSEEvent(
         type=EventType.TEAM_SYNTHESIS_PREVIEW,

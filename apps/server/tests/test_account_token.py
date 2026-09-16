@@ -283,6 +283,8 @@ async def test_search_uses_cloud_when_creds_bound(
         assert creds.api_key == "account-jwt"
         assert payload["exclude_conversation_id"] == "host-1"
         assert payload["include_archived"] is True
+        assert payload["global_chats_only"] is False
+        assert "updated_within_hours" not in payload
         return {
             "rows": [
                 {
@@ -304,7 +306,7 @@ async def test_search_uses_cloud_when_creds_bound(
     )
 
     with account_credentials_scope(account_creds):
-        result = await SearchConversationsTool().execute({}, _ctx())
+        result = await SearchConversationsTool().execute({"query": "Via"}, _ctx())
     assert result.success
     assert "cloud-c" in result.output
     assert db_called["n"] == 0
@@ -322,7 +324,7 @@ async def test_search_cloud_failure_is_hard_fail(
         _boom,
     )
     with account_credentials_scope(account_creds):
-        result = await SearchConversationsTool().execute({}, _ctx())
+        result = await SearchConversationsTool().execute({"query": "Via"}, _ctx())
     assert result.success is False
     assert result.error == "account_cloud_unreachable"
     assert "失败" in result.output
@@ -345,6 +347,7 @@ async def test_read_uses_cloud_when_creds_bound(
     async def _fake_read(creds: AccountCredentials, *, payload: dict[str, Any]):
         assert payload["conversation_id"] == _PAST_UUID
         assert payload["focus"] == "dialogue"
+        assert "max_chars" not in payload
         assert "query" not in payload or payload["query"] == ""
         return {
             "status": "ok",

@@ -63,40 +63,12 @@ _KEY_MANIFEST_CANDIDATES = (
     "CLAUDE.md",
 )
 
-# Named-refresh hard gate — allow-list substrings only (非意图分类器).
-# Synonyms already listed in CEO prompt / 记忆 docs; bare「探索」omitted (too broad).
-# 这两张表匹配的是**用户原话**，不是产品术语：容器已统一叫文件夹（双模式工作区 §5.4），
-# 但「项目」仍是用户嘴里的常用词，删掉即等于让这批人的点名静默失效——故两种说法并存，
-# 不是旧名 alias。
-_NAMED_EXPLORE_REFRESH_PHRASES = (
-    "先了解",
-    "重新了解",
-    "刷新文件夹记忆",
-    "刷新项目记忆",
-)
-
-def user_named_explore_refresh(user_message: str | None) -> bool:
-    """True when user text hits an allow-listed refresh phrase (点名硬闸)."""
-    text = (user_message or "").strip()
-    if not text:
-        return False
-    return any(phrase in text for phrase in _NAMED_EXPLORE_REFRESH_PHRASES)
-
-
 def resolve_hard_explore_reason(
     explore_reason: str | None,
     user_message: str | None,
 ) -> str | None:
-    """Only named 先了解 / 重新了解 / 刷新… opens the explore act.
-
-    Empty profile and workspace rebind no longer pending. Assemble / resume
-    must stay identical. Callers still read raw empty/rebind from
-    :func:`folder_profile_explore_reason` (omit stale notes, silent refresh).
-    """
-    if user_named_explore_refresh(user_message):
-        return "refresh"
-    if explore_reason == "refresh":
-        return "refresh"
+    """Named 先了解 no longer opens a write-explore act."""
+    del explore_reason, user_message
     return None
 
 
@@ -289,8 +261,9 @@ async def resolve_turn_explore_gate(
 ) -> tuple[str | None, str | None]:
     """Raw explore reason + workspace key for one turn (prepare / assemble / resume).
 
-    Reason is ``empty`` | ``rebind`` | ``None``. Named refresh is layered later
-    by :func:`resolve_hard_explore_reason`.
+    Reason is ``empty`` | ``rebind`` | ``None``. Named refresh never opens
+    a write-explore act (:func:`resolve_hard_explore_reason` always returns
+    ``None``).
     """
     if not folder_id:
         return None, None
@@ -477,9 +450,9 @@ async def folder_profile_explore_reason(
 
     Does **not** judge chitchat vs substance (prompt/routing). Bare chat never
     explores. Missing stored key on a non-empty profile → no rebind (legacy).
-    Named refresh (``\"refresh\"``) is layered via
-    :func:`resolve_hard_explore_reason` — not returned here. Empty / rebind
-    no longer pending; callers omit stale folder notes on rebind.
+    Named refresh is not returned here; :func:`resolve_hard_explore_reason`
+    never opens a write-explore act. Empty / rebind no longer pending; callers
+    omit stale folder notes on rebind.
     """
     if not folder_id:
         return None

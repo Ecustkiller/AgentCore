@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   DESKTOP_LOG_EXCERPT_MAX_EVENTS,
   type SanitizedDesktopLogRecord,
+  compactDesktopLogRecordsForPack,
   foldDesktopLogRecords,
+  formatDesktopLogRoutineLine,
   hoistDesktopLogEnvelope,
   isRelevantDesktopLogRecord,
   sanitizeDesktopLogLines,
@@ -315,6 +317,31 @@ describe("sanitizeDesktopLogLines", () => {
     expect(JSON.parse(out[0] ?? "{}").attempt).toBe(5);
   });
 
+  it("drops debug probe_failed from the clipboard excerpt", () => {
+    const out = sanitizeDesktopLogLines(
+      [
+        JSON.stringify({
+          level: "debug",
+          event: "server_health.probe_failed",
+          fields: { consecutive_failures: 1, status: "online" },
+        }),
+        JSON.stringify({
+          level: "warn",
+          event: "server_health.probe_failed",
+          fields: { consecutive_failures: 3, status: "online" },
+        }),
+      ].join("\n"),
+    );
+    expect(out.map((line) => JSON.parse(line))).toEqual([
+      {
+        level: "warn",
+        event: "server_health.probe_failed",
+        consecutive_failures: 3,
+        status: "online",
+      },
+    ]);
+  });
+
   it("folds a follow_open storm into one line and still keeps server_health", () => {
     const storm = DESKTOP_LOG_EXCERPT_MAX_EVENTS + 20;
     const first = new Date(Date.UTC(2026, 7, 20, 0, 0, 0, 0)).toISOString();
@@ -565,5 +592,74 @@ describe("hoistDesktopLogEnvelope", () => {
         reason: "turn_phase_gate",
       },
     ]);
+  });
+});
+
+describe("compactDesktopLogRecordsForPack", () => {
+  it("collapses unique-fingerprint slice/hydrate/follow info into a census", () => {
+    const { routine, records } = compactDesktopLogRecordsForPack([
+      { event: "conversation.slice_diag", action: "open_decide" },
+      { event: "conversation.slice_diag", action: "open_decide" },
+      {
+        event: "conversation.slice_diag",
+        action: "message_end_slice_kept",
+        finish_reason: "cancelled",
+      },
+      { event: "conversation.hydrate", branch: "cloud" },
+      { event: "conversation.hydrate", branch: "local" },
+      { event: "conversation.follow_open", count: 4, first: "t0", last: "t1" },
+      {
+        event: "conversation.follow_closed",
+        reason: "switched_away",
+      },
+      {
+        event: "conversation.follow_muted",
+        reason: "local_stream_handoff",
+      },
+      {
+        timestamp: "t2",
+        level: "warn",
+        event: "sse.event_dropped",
+        reason: "turn_phase_gate",
+      },
+      {
+        event: "turn.stream_path",
+        via: "sidecar",
+        reason: "probe_ok",
+      },
+    ]);
+    expect(formatDesktopLogRoutineLine(routine)).toBe(
+      "routine: slice_diag open_decide×2, message_end_slice_kept(cancelled); hydrate cloud, local; follow open×4, closed(switched_away)",
+    );
+    expect(records).toEqual([
+      {
+        event: "conversation.follow_muted",
+        reason: "local_stream_handoff",
+      },
+      {
+        timestamp: "t2",
+        level: "warn",
+        event: "sse.event_dropped",
+        reason: "turn_phase_gate",
+      },
+      {
+        event: "turn.stream_path",
+        via: "sidecar",
+        reason: "probe_ok",
+      },
+    ]);
+  });
+
+  it("keeps slice_diag warn rows as JSON", () => {
+    const { routine, records } = compactDesktopLogRecordsForPack([
+      {
+        level: "warn",
+        event: "conversation.slice_diag",
+        action: "release_drop",
+      },
+    ]);
+    expect(routine).toEqual([]);
+    expect(records).toHaveLength(1);
+    expect(records[0]?.action).toBe("release_drop");
   });
 });

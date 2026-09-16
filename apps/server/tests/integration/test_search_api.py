@@ -204,3 +204,28 @@ async def test_log_search_matches_message_body(client, session_factory):
             row.user_id, "uniquebodytokenxyz", limit=10
         )
         assert [c.id for c in title_only] == []
+
+
+async def test_log_search_and_requires_all_terms(client, session_factory):
+    """未加引号的词须同场都出现；只命中一词的对话不进结果。"""
+    from agentcore.db.repositories import ConversationRepository
+
+    await register_and_login(client, "logsearch_and")
+    both = await _new_conversation(client, "oauth notes")
+    await _seed_message(session_factory, both, "登录流程")
+    only = await _new_conversation(client, "oauth only")
+    await _seed_message(session_factory, only, "unrelated")
+
+    async with session_factory() as session:
+        row = await ConversationRepository(session).get_by_id_unscoped(both)
+        assert row is not None
+        hits = await ConversationRepository(session).search_with_projections(
+            row.user_id, "oauth 登录", limit=10
+        )
+        ids = {h["conversation_id"] for h in hits}
+        assert both in ids
+        assert only not in ids
+        empty = await ConversationRepository(session).search_with_projections(
+            row.user_id, "", limit=10
+        )
+        assert empty == []

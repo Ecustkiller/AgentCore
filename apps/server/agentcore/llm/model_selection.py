@@ -40,9 +40,7 @@ from agentcore.llm.resolve import ModelConfig, ModelOrigin
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-_BACKGROUND_PURPOSES = frozenset(
-    {"title", "memory", "compaction", "workflow.slots"}
-)
+_BACKGROUND_PURPOSES = frozenset({"title", "memory", "compaction"})
 
 __all__ = [
     "SelectedCall",
@@ -163,18 +161,18 @@ async def select_turn_profiles(
     main + optional worker override. Empty worker slot → workers follow main.
     Cross-origin / cross-provider worker credentials land in ``agent_provider_id``.
     """
-    from agentcore.llm.resolve import (
-        resolve_account_worker_selection,
-        resolve_conversation_model_selection,
-        resolve_credentials,
-    )
+    from agentcore.llm.model_profiles import LlmModelProfileService
+    from agentcore.llm.resolve import resolve_credentials
 
     if credentials is None:
         credentials = await resolve_credentials(session, user_id, "user_facing")
-    selection = await resolve_conversation_model_selection(session, conv, user_id)
+    expanded = await LlmModelProfileService(session).expand_for_conversation(
+        user_id, conv
+    )
+    selection = expanded.main
     overrides: dict[str, str] = {}
     agent_provider_id: str | None = None
-    worker = await resolve_account_worker_selection(session, user_id, conv=conv)
+    worker = expanded.worker
     if worker is not None and (
         worker.model != selection.model
         or worker.origin != selection.origin
@@ -191,6 +189,7 @@ async def select_turn_profiles(
         model=selection.model,
         model_overrides=overrides,
         agent_provider_id=agent_provider_id,
+        reasoning_effort=expanded.reasoning_effort,
     )
 
 
@@ -224,7 +223,7 @@ async def select_model_config(
     (``preflight_llm_credentials`` / ``resolve_and_gate_background`` /
     ``run_background_llm``) is the authorization choke point.
 
-Background purposes (title/memory/workflow.slots) are **platform-first**
+Background purposes (title/memory) are **platform-first**
     product chrome when :func:`platform_catalog_visible` — *unless* the user pointed
     the combo's background slot at their own key, which outranks the platform default:
     「平台优先」 exists to stop BYOK accounts freeloading platform quota, and an account

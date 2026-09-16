@@ -51,6 +51,11 @@ from agentcore.runtime.runs.concurrency import (
     set_budget,
 )
 from agentcore.runtime.runs.plan import RunPlan, RunPlanError
+from agentcore.runtime.runs.redrive_sites import (
+    ResumeHint,
+    bind_resume_hints,
+    reset_resume_hints,
+)
 from agentcore.runtime.runs.scheduler import (
     BoundaryOutcome,
     BoundaryReason,
@@ -108,6 +113,7 @@ class WaveScheduler:
         # wide fan-out.
         resolved = max_parallel if max_parallel is not None else resolve_max_parallel()
         self._max_parallel = max(1, resolved)
+        self._resume_hints: Mapping[str, ResumeHint] | None = None
 
     async def run(
         self,
@@ -115,6 +121,7 @@ class WaveScheduler:
         executor: RunExecutor,
         *,
         seed_completed: Mapping[str, RunState] | None = None,
+        resume_hints: Mapping[str, ResumeHint] | None = None,
         should_stop: Callable[[], bool] | None = None,
         cancel_run_ids: Callable[[], frozenset[str]] | None = None,
         stop_run_ids: Callable[[], frozenset[str]] | None = None,
@@ -139,8 +146,12 @@ class WaveScheduler:
         a cycle or dangling ``depends_on`` raises :class:`RunPlanError` instead of
         silently dropping unreachable nodes from the result map.
 
-        - ``seed_completed`` pre-seeds finished nodes (a resume): they are treated as
-          done, so only the unfinished tail re-runs.
+        - ``seed_completed`` is the skip table: terminal nodes only. They are treated
+          as done, so only the unfinished tail re-runs. Do not put a resume window
+          here as fake FAILED — pass ``resume_hints`` instead.
+        - ``resume_hints`` (crash / infra) is the continue window for unfinished
+          ids Wave still dispatches. Bound for each node task so the executor
+          hot-continues without looking at ``completed[self]``.
         - ``should_stop`` is checked before each dispatch decision; once True no new
           node is launched, in-flight nodes are drained, and the partial map is
           returned (a soft pause — the un-run tail is left out so a resume re-runs
@@ -185,16 +196,12 @@ class WaveScheduler:
           • ``CHECKPOINT`` (结构化挂起 2a) — a ``checkpoint_after`` node COMPLETED while
             downstream remains (the user plan_review). A *failed* checkpoint node does
             not pause — its ``on_failure`` governs the cascade.
-          • ``BIND`` (晚绑定) — a ``bind_after_deps`` node's deps are all resolved but it
-            is not yet finalised; it is never dispatched unbound, so it resolves only
-            here (the CEO ``replan`` hand-back).
           • ``SCOPE`` (偏离信号 / 自底向上反应臂) — a COMPLETED node flagged a 职责/范围
             deviation (``escalate kind=scope``) while not-yet-run downstream remains; the
             CEO re-steers the un-run tail. Fires once per signal (surfacing marks it
-            consumed), no live user needed (the reactive twin of ``BIND``).
-          No hook ⇒ all markers inert (a ``bind_after_deps`` node then dispatches
-          normally; a scope escalation just rides to synthesis); no marked node / no
-          pending ⇒ untouched.
+            consumed), no live user needed.
+          No hook ⇒ all markers inert (a scope escalation just rides to synthesis);
+          no marked node / no pending ⇒ untouched.
         - ``on_skipped`` fires once per newly materialised SKIPPED node at wave close
           (cascade-skip set + graceful-abort tail), with ``reason`` ``cascade`` or
           ``abort``. Drive wires it to ``run_skipped`` SSE so the graph shows「未执行」
@@ -214,6 +221,7 @@ class WaveScheduler:
         Never-dispatched plan nodes emit ``on_skipped(abort)`` on terminal cancel
         (see above) so the graph closes as「未执行」instead of ghost pending.
         """
+        self._resume_hints = dict(resume_hints) if resume_hints else None
         completed: dict[str, RunState] = dict(seed_completed or {})
         skipped: set[str] = set()
         # Every run_id that has been launched (running, finished, or pre-seeded) so a
@@ -261,11 +269,6 @@ class WaveScheduler:
             logger.warning("wave.bad_topology", error=str(exc), nodes=len(plan.nodes))
             raise
 
-        # 晚绑定 (受监督的波循环): defer ``bind_after_deps`` nodes to the bind boundary
-        # ONLY when a host hook can resolve them; with no hook the marker is inert and
-        # such a node dispatches normally (parity with ``checkpoint_after``-without-hook).
-        defer_bind = on_boundary is not None
-
         # Concurrency width + per-child budget. Recalculated each dispatch cycle so
         # live-plan growth (coordinate merge) and ready-set changes (continuous
         # dispatch / fan-out after a serial root) both refresh the slot cap and the
@@ -287,8 +290,6 @@ class WaveScheduler:
                     n_ready += 1
                     continue
                 if n.run_id in dispatched:
-                    continue
-                if defer_bind and n.bind_after_deps:
                     continue
                 n_ready += 1
             budget_w = min(self._max_parallel, current_budget(), max(1, n_ready))
@@ -316,8 +317,9 @@ class WaveScheduler:
         # discarded) so the host can render real temporal parallelism. Dispatched nodes only.
         timeline: list[NodeTiming] = []
         # 受监督波循环埋点 (BatchMetrics §7.2): decision-boundary YIELDs fired this run, by
-        # reason —晚绑定触发数 / 计划漂移返工触发数 / checkpoint. Counts fires (on_boundary
+        # reason — 计划漂移返工触发数 / checkpoint. Counts fires (on_boundary
         # invocations), so a marked plan driven without a hook tallies zero.
+        # bind_boundaries is leftover wire (always 0).
         bind_boundaries = 0
         scope_boundaries = 0
         checkpoint_boundaries = 0
@@ -333,39 +335,6 @@ class WaveScheduler:
                 if not holding and should_stop is not None and should_stop():
                     stopped = True  # soft pause: stop launching, drain in-flight
                     holding = True
-                # 晚绑定边界 (受监督的波循环): a ``bind_after_deps`` node whose deps are all
-                # resolved is NOT dispatchable — its spec must first be finalised by the
-                # host (CEO ``replan``). Once in-flight work is quiescent, yield the
-                # boundary: PROCEED (host bound it in place → next ready-scan dispatches
-                # it; if PROCEED left ``bind_after_deps`` set, treat as no-progress —
-                # warn once and SKIP those nodes so the boundary cannot busy-wait),
-                # YIELD (soft pause → CEO takes over, a resume re-runs the tail),
-                # or ABORT. Inert unless a hook is wired AND such a node exists (none in an
-                # ordinary plan), so a plan without late-binding is byte-for-byte untouched.
-                if not holding and defer_bind and not running:
-                    bind_ready = self._bind_pending(plan, completed, skipped, dispatched)
-                    if bind_ready:
-                        bind_boundaries += 1
-                        outcome = await on_boundary(BoundaryReason.BIND, bind_ready, completed)
-                        if outcome is BoundaryOutcome.ABORT:
-                            aborted = True
-                            holding = True
-                        elif outcome is BoundaryOutcome.YIELD:
-                            stopped = True
-                            holding = True
-                        elif outcome is BoundaryOutcome.PROCEED:
-                            # Defense: host returned PROCEED but left bind_after_deps set
-                            # → no progress. Do not re-fire (would busy-wait / livelock).
-                            stuck = [n for n in bind_ready if n.bind_after_deps]
-                            if stuck:
-                                stuck_ids = [n.run_id for n in stuck]
-                                logger.warning(
-                                    "wave.bind_proceed_no_progress",
-                                    run_ids=stuck_ids,
-                                )
-                                for n in stuck:
-                                    skipped.add(n.run_id)
-                                    dispatched.add(n.run_id)
                 if not holding:
                     # Refresh slot width + child budget every cycle (ready-set /
                     # plan growth). Log only when the live plan grew.
@@ -414,9 +383,7 @@ class WaveScheduler:
                     # revive cascade-skipped dependents so they wait on the replacement.
                     self._revive_cascade_skips(plan, completed, skipped, dispatched)
                     ready_batch = list(
-                        self._select_ready(
-                            plan, completed, skipped, dispatched, defer_bind=defer_bind
-                        )
+                        self._select_ready(plan, completed, skipped, dispatched)
                     )
                     dispatched_this_cycle = 0
                     for spec in ready_batch:
@@ -726,6 +693,8 @@ class WaveScheduler:
         re-raises so the run-level cleanup can cancel siblings.
         """
         set_budget(budget)
+        hints = self._resume_hints
+        hints_token = bind_resume_hints(hints) if hints else None
         try:
             state = await executor(spec, completed)
             if state.phase is RunPhase.FAILED and not state.error_retryable:
@@ -740,6 +709,9 @@ class WaveScheduler:
             raise
         except BaseException as exc:  # noqa: BLE001 — an executor crash becomes FAILED
             return RunState(phase=RunPhase.FAILED, error=str(exc))
+        finally:
+            if hints_token is not None:
+                reset_resume_hints(hints_token)
 
     def _select_ready(
         self,
@@ -747,46 +719,14 @@ class WaveScheduler:
         completed: Mapping[str, RunState],
         skipped: set[str],
         dispatched: set[str],
-        *,
-        defer_bind: bool = False,
     ) -> list[RunSpec]:
         """Not-yet-dispatched nodes whose deps are all resolved.
 
         ``_deps_satisfied`` may add to ``skipped`` (the skip cascade). Order follows
-        plan/declaration order (deterministic). When ``defer_bind`` (a boundary hook is
-        wired), ``bind_after_deps`` nodes are excluded — they are never dispatched
-        unbound and resolve only via the bind boundary (:meth:`_bind_pending`); with no
-        hook the marker is inert and such a node dispatches like any other.
+        plan/declaration order (deterministic).
         """
         ready: list[RunSpec] = []
         for node in plan.nodes:
-            if node.run_id in dispatched or node.run_id in skipped:
-                continue
-            if defer_bind and node.bind_after_deps:
-                continue
-            if self._deps_satisfied(plan, node, completed, skipped):
-                ready.append(node)
-        return ready
-
-    def _bind_pending(
-        self,
-        plan: RunPlan,
-        completed: Mapping[str, RunState],
-        skipped: set[str],
-        dispatched: set[str],
-    ) -> list[RunSpec]:
-        """Late-bound (``bind_after_deps``) nodes whose deps are all resolved but which
-        are not yet finalised — the host must bind / yield / abort before they run.
-
-        Mirrors :meth:`_select_ready`'s gate for the un-dispatchable late-bound nodes it
-        deliberately excludes, and shares :meth:`_deps_satisfied` (so the skip cascade
-        still reaches a late-bound node whose upstream skip-failed). Empty for any plan
-        with no ``bind_after_deps`` node, so the bind boundary stays inert there.
-        """
-        ready: list[RunSpec] = []
-        for node in plan.nodes:
-            if not node.bind_after_deps:
-                continue
             if node.run_id in dispatched or node.run_id in skipped:
                 continue
             if self._deps_satisfied(plan, node, completed, skipped):
@@ -1012,10 +952,6 @@ class WaveScheduler:
                     continue
                 node = plan.by_id(rid)
                 if node is None:
-                    continue
-                # Bind no-progress force-skip leaves ``bind_after_deps`` set — not a
-                # cascade-from-failure; do not revive (would re-fire the bind boundary).
-                if node.bind_after_deps:
                     continue
                 if self._still_cascade_blocked(plan, node, completed, skipped):
                     continue

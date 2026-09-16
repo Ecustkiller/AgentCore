@@ -58,6 +58,7 @@ class LlmModelProfileRepository:
         vision_origin: str | None = None,
         vision_provider_id: str | None = None,
         vision_model: str | None = None,
+        reasoning_effort: str | None = None,
     ) -> LlmModelProfile:
         row = LlmModelProfile(
             user_id=user_id,
@@ -75,6 +76,7 @@ class LlmModelProfileRepository:
             vision_origin=vision_origin,
             vision_provider_id=vision_provider_id,
             vision_model=vision_model,
+            reasoning_effort=reasoning_effort,
         )
         self._session.add(row)
         await self._session.commit()
@@ -99,6 +101,7 @@ class LlmModelProfileRepository:
         vision_origin: str | None | object = _UNSET,
         vision_provider_id: str | None | object = _UNSET,
         vision_model: str | None | object = _UNSET,
+        reasoning_effort: str | None | object = _UNSET,
     ) -> LlmModelProfile | None:
         row = await self.get(profile_id, user_id=user_id)
         if row is None:
@@ -129,6 +132,8 @@ class LlmModelProfileRepository:
             row.vision_provider_id = vision_provider_id  # type: ignore[assignment]
         if vision_model is not _UNSET:
             row.vision_model = vision_model  # type: ignore[assignment]
+        if reasoning_effort is not _UNSET:
+            row.reasoning_effort = reasoning_effort  # type: ignore[assignment]
         await self._session.commit()
         await self._session.refresh(row)
         return row

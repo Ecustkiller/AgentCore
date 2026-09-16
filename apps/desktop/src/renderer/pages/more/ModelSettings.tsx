@@ -12,6 +12,7 @@ import {
   IconButton,
   Input,
   PageHeader,
+  SegmentedControl,
 } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useLlmModelProfiles } from "@/hooks/useLlmModelProfiles";
@@ -41,7 +42,11 @@ import {
   updateLlmModelProfile,
 } from "@/services/llmModelProfiles";
 import type { LlmProviderView } from "@/services/llmProviders";
-import { type ModelCatalogItem, slotHasCatalogVision } from "@/services/models";
+import {
+  type ModelCatalogItem,
+  catalogReasoningEffort,
+  slotHasCatalogVision,
+} from "@/services/models";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -373,6 +378,7 @@ function ModelProfilesSection({
         worker: profile.worker ?? null,
         background: profile.background ?? null,
         vision: profile.vision ?? null,
+        reasoning_effort: profile.reasoning_effort ?? null,
         set_as_default: false,
       });
       rememberSaveWarnings(created.id, created.warnings);
@@ -408,6 +414,7 @@ function ModelProfilesSection({
         worker: draft.worker,
         background: draft.background,
         vision: draft.vision,
+        reasoning_effort: draft.reasoning_effort,
         set_as_default: false,
       } satisfies CreateLlmModelProfileInput);
       rememberSaveWarnings(created.id, created.warnings);
@@ -435,6 +442,7 @@ function ModelProfilesSection({
         worker: draft.worker,
         background: draft.background,
         vision: draft.vision,
+        reasoning_effort: draft.reasoning_effort,
       });
       rememberSaveWarnings(updated.id, updated.warnings);
       setEditingId(null);
@@ -484,6 +492,7 @@ function ModelProfilesSection({
                 worker: null,
                 background: null,
                 vision: null,
+                reasoning_effort: null,
               }}
               pending={pending}
               onCancel={() => setCreating(false)}
@@ -506,6 +515,7 @@ function ModelProfilesSection({
                   worker: profile.worker ?? null,
                   background: profile.background ?? null,
                   vision: profile.vision ?? null,
+                  reasoning_effort: profile.reasoning_effort ?? null,
                 }}
                 saveWarnings={saveWarningsById[profile.id]}
                 pending={pending}
@@ -573,6 +583,7 @@ type ProfileDraft = {
   worker: ModelProfileSlot | null;
   background: ModelProfileSlot | null;
   vision: ModelProfileSlot | null;
+  reasoning_effort: string | null;
 };
 
 function hasAdvancedSlotOverrides(
@@ -789,6 +800,9 @@ function ProfileEditor({
   const [worker, setWorker] = useState(initial.worker);
   const [background, setBackground] = useState(initial.background);
   const [vision, setVision] = useState(initial.vision);
+  const [reasoningEffort, setReasoningEffort] = useState(
+    initial.reasoning_effort,
+  );
   const [advancedOpen, setAdvancedOpen] = useState(() =>
     hasAdvancedSlotOverrides(initial),
   );
@@ -817,13 +831,35 @@ function ProfileEditor({
   const canChooseVision = canChooseFromGroups(visionGroups);
   const showEmptyGuide = !canChoose;
   const mainVisionCapable = mainHasCatalogVision(main, catalogModels);
+  const effortSpec = catalogReasoningEffort(main, catalogModels);
   const busy = pending || saving;
+
+  const applyMain = (next: ModelProfileSlot | null) => {
+    setMain(next);
+    const spec = catalogReasoningEffort(next, catalogModels);
+    setReasoningEffort((cur) =>
+      spec && cur && spec.options.includes(cur) ? cur : null,
+    );
+  };
 
   const handleSave = async () => {
     setSaveError(null);
     setSaving(true);
     try {
-      await onSave({ name, main, worker, background, vision });
+      const selectedEffort =
+        effortSpec &&
+        reasoningEffort &&
+        effortSpec.options.includes(reasoningEffort)
+          ? reasoningEffort
+          : null;
+      await onSave({
+        name,
+        main,
+        worker,
+        background,
+        vision,
+        reasoning_effort: effortSpec ? selectedEffort : null,
+      });
     } catch (e) {
       setSaveError(modelConfigApiErrorMessage(e, "保存失败，请重试"));
     } finally {
@@ -857,7 +893,7 @@ function ProfileEditor({
             groups={groups}
             value={pointerValue(main)}
             disabled={busy}
-            onChange={(value) => setMain(decodePointer(value))}
+            onChange={(value) => applyMain(decodePointer(value))}
           />
           {showEmptyGuide && (
             <NoAvailableModelsGuide
@@ -866,6 +902,28 @@ function ProfileEditor({
             />
           )}
         </SettingField>
+        {effortSpec ? (
+          <SettingField
+            label="思考强度"
+            htmlFor="profile-reasoning-effort"
+            hint="厂商档位，对本组合聊天与组队队员生效"
+            hintPlacement="label"
+          >
+            <SegmentedControl
+              aria-label="思考强度"
+              value={
+                reasoningEffort && effortSpec.options.includes(reasoningEffort)
+                  ? reasoningEffort
+                  : effortSpec.default
+              }
+              onChange={(token) => setReasoningEffort(token)}
+              items={effortSpec.options.map((token) => ({
+                value: token,
+                label: token,
+              }))}
+            />
+          </SettingField>
+        ) : null}
       </div>
 
       <div className="border-t border-border pt-3">

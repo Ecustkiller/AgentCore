@@ -12,13 +12,12 @@ import {
 import type { StoredRoot } from "../roots";
 import { ensureReady, getRoot } from "../roots";
 import { opArchive } from "./archive";
-import { opDiagnostics } from "./diagnostics";
 import { opExecute } from "./exec";
 import { probeAvailableLanguages } from "./execCodec";
 import { opGitRepoStatus } from "./gitRepoStatus";
 import { opGitRun } from "./gitRun";
 import { opGitScm } from "./gitScm";
-import { opGrep } from "./grep";
+import { opGlobFiles, opGrep } from "./grep";
 import {
   opProcessList,
   opProcessRead,
@@ -122,6 +121,7 @@ function pathArgsForReservedCheck(
       break;
     case "list":
     case "list_tree":
+    case "glob_files":
       push(args.directory);
       break;
     case "index_files":
@@ -142,9 +142,6 @@ function pathArgsForReservedCheck(
       break;
     case "archive":
       push(args.directory);
-      push(args.path);
-      break;
-    case "diagnostics":
       push(args.path);
       break;
     case "ensure_turn_baseline":
@@ -677,6 +674,8 @@ export async function executeWorkspaceOp(
         );
       case "grep":
         return await opGrep(root, args);
+      case "glob_files":
+        return await opGlobFiles(root, args);
       case "execute":
         return await opExecute(root, args);
       case "probe_exec":
@@ -694,10 +693,8 @@ export async function executeWorkspaceOp(
         return await opProcessStop(root, args);
       case "process_list":
         return await opProcessList(root, args);
-      case "diagnostics":
-        return await opDiagnostics(root, args);
       case "git_repo_status":
-        return await opGitRepoStatus(root);
+        return await opGitRepoStatus(root, args);
       case "git_scm":
         return await opGitScm(root, args);
       case "git_run":

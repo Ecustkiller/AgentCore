@@ -448,18 +448,26 @@ def test_token_wind_down_threshold_and_tool_narrowing():
     assert should_enter_token_wind_down(1, 30_000, 30_000) is False  # reserve >= ceiling
     assert should_enter_token_wind_down(1, 20_000, 30_000) is False  # reserve > ceiling
 
-    # 收尾窗口本意「落盘 + 内环诊断 + handoff」；写盘白名单不可漏 file_write / str_replace。
-    assert "file_write" in WIND_DOWN_ALLOWED_TOOLS
-    assert "str_replace" in WIND_DOWN_ALLOWED_TOOLS
-    assert "file_append" not in WIND_DOWN_ALLOWED_TOOLS
-    assert "code_diagnostics" in WIND_DOWN_ALLOWED_TOOLS
+    # 收尾窗口本意「落盘 + handoff」；写盘白名单不可漏 file_write / str_replace。
+    assert frozenset(
+        {
+            "handoff",
+            "file_write",
+            "str_replace",
+            "file_move",
+            "file_copy",
+            "mkdir",
+            "file_batch",
+            "file_list",
+            "md_export",
+        }
+    ) == WIND_DOWN_ALLOWED_TOOLS
     available = {
         "web_search",
         "handoff",
         "file_write",
         "str_replace",
         "file_list",
-        "code_diagnostics",
         "code_execute",
     }
     narrowed = narrow_tools_for_wind_down(
@@ -470,49 +478,39 @@ def test_token_wind_down_threshold_and_tool_narrowing():
             "file_write",
             "str_replace",
             "file_list",
-            "code_diagnostics",
         ],
     )
-    assert "handoff" in narrowed
-    assert "file_write" in narrowed
-    assert "str_replace" in narrowed
-    assert "file_append" not in narrowed
-    assert "code_diagnostics" in narrowed  # 收窄后仍可内环自检
+    assert set(narrowed) == {"handoff", "file_write", "str_replace", "file_list"}
     assert "web_search" not in narrowed
-    assert "code_execute" not in narrowed
     assert set(narrowed) <= (WIND_DOWN_ALLOWED_TOOLS | {"handoff"})
 
 
 def test_wind_down_allows_deterministic_md_export():
-    """收尾窗口放行 md_to_pdf / md_to_docx：导出已成篇 .md 是收口末步，不是新战线。
+    """收尾窗口放行 md_export：导出已成篇 .md 是收口末步，不是新战线。
 
     长文写手最容易撞收尾窗；把钦定交付主路径判成越界会触发 nudge + handoff-only，
     交付卡在最后一步。
     """
     from agentcore.runtime.runs.cutoff import wind_down_breach_tool_names
 
-    assert "md_to_pdf" in WIND_DOWN_ALLOWED_TOOLS
-    assert "md_to_docx" in WIND_DOWN_ALLOWED_TOOLS
+    assert "md_export" in WIND_DOWN_ALLOWED_TOOLS
 
     available = {
         "web_search",
         "handoff",
         "file_read",
         "file_write",
-        "md_to_pdf",
-        "md_to_docx",
+        "md_export",
         "code_execute",
     }
     narrowed = narrow_tools_for_wind_down(available, allowed=sorted(available))
-    assert "md_to_pdf" in narrowed
-    assert "md_to_docx" in narrowed
+    assert "md_export" in narrowed
     assert "web_search" not in narrowed  # 检索类仍不放回
-    assert "code_execute" not in narrowed  # 脚本导出仍非主路径
 
     # 导出既有 .md 不得判越界；调查/执行类仍照判。
     assert (
         wind_down_breach_tool_names(
-            ["md_to_pdf", "md_to_docx", "handoff"], keep_file_read=True
+            ["md_export", "handoff"], keep_file_read=True
         )
         == []
     )
@@ -573,8 +571,8 @@ def test_wind_down_keeps_file_read_for_files_deliverable():
     assert "web_search" not in prose_narrowed
 
 
-def test_wind_down_does_not_keep_note_tools():
-    """便签墙已删：收尾窗口不含 post_note/read_notes/amend_note，文案不提可贴/读/改。"""
+def test_wind_down_allowed_tools_are_persist_and_handoff():
+    """收尾窗口只留落盘/handoff 白名单；文案不催继续调查。"""
     from agentcore.runtime.runs.cutoff import (
         narrow_tools_for_wind_down,
         narrow_tools_for_wind_down_breach,
@@ -593,19 +591,13 @@ def test_wind_down_does_not_keep_note_tools():
     }
     allowed = ["web_search", "grep", "file_write", "str_replace", "handoff"]
     narrowed = narrow_tools_for_wind_down(available, allowed=allowed)
-    assert "file_write" in narrowed
-    assert "handoff" in narrowed
-    assert "web_search" not in narrowed
-    assert "grep" not in narrowed
-    assert "code_execute" not in narrowed
-    for name in ("post_note", "read_notes", "amend_note"):
-        assert name not in narrowed
-        assert name not in wind_down_allowed_tools()
+    assert set(narrowed) == {"file_write", "str_replace", "handoff"}
+    assert wind_down_allowed_tools() == WIND_DOWN_ALLOWED_TOOLS
 
     landing = narrow_tools_for_wind_down_breach(
         available, keep_landing=True, allowed=allowed
     )
-    assert "file_write" in landing
+    assert set(landing) >= {"file_write", "handoff"}
     assert "web_search" not in landing
     assert narrow_tools_for_wind_down_breach(available, keep_landing=False) == ["handoff"]
 
@@ -613,13 +605,7 @@ def test_wind_down_does_not_keep_note_tools():
         wind_down_instruction_token(),
         wind_down_instruction_timeout(),
     ):
-        assert "post_note" not in text
-        assert "可贴/读/改" not in text
-        assert "请立即" not in text
-        assert "禁止继续" not in text
-    from agentcore.runtime.runs import cutoff as cutoff_mod
-
-    assert not hasattr(cutoff_mod, "wind_down_breach_nudge")
+        assert "调查与外网工具已停用" in text
 
 
 def test_wind_down_breach_detection_and_local_force():

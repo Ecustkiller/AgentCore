@@ -48,32 +48,47 @@ if (!existsSync(distPath)) {
 const env = cfEnv();
 console.log(`→ wrangler pages deploy → ${project} (${distPath})`);
 
-// Prefer workspace wrangler (pnpm exec). `npx wrangler@4` can fail on Windows
-// with opaque `npm error Invalid Version:` when the npx cache/metadata is bad.
-const result = spawnSync(
-  "pnpm",
-  [
-    "exec",
-    "wrangler",
-    "pages",
-    "deploy",
-    distPath,
-    "--project-name",
-    project,
-    "--branch",
-    branch,
-  ],
-  {
-    // Pages Functions live in `<project>/functions` next to the build output
-    // (e.g. apps/website/functions beside apps/website/out). Wrangler only
-    // picks them up when that folder exists in the process cwd — deploying
-    // from the monorepo root silently drops Functions → /api/* 404.
-    cwd: dirname(distPath),
-    stdio: "inherit",
-    env,
-    shell: process.platform === "win32",
-  },
-);
+const wranglerArgs = [
+  "pages",
+  "deploy",
+  distPath,
+  "--project-name",
+  project,
+  "--branch",
+  branch,
+];
+const spawnOpts = {
+  // Pages Functions live in `<project>/functions` next to the build output
+  // (e.g. apps/website/functions beside apps/website/out). Wrangler only
+  // picks them up when that folder exists in the process cwd — deploying
+  // from the monorepo root silently drops Functions → /api/* 404.
+  cwd: dirname(distPath),
+  stdio: "inherit",
+  env,
+  shell: process.platform === "win32",
+};
+
+// Prefer workspace wrangler (pnpm exec). Website lockfile does not pin wrangler;
+// fall back to dlx only when exec cannot even print a version. Avoid `npx wrangler@4`
+// — Windows npx cache can throw Invalid Version. Deploy failures must not retry.
+function wranglerViaPnpmExec() {
+  const probe = spawnSync("pnpm", ["exec", "wrangler", "--version"], {
+    cwd: spawnOpts.cwd,
+    env: spawnOpts.env,
+    shell: spawnOpts.shell,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  return probe.status === 0;
+}
+
+let result;
+if (wranglerViaPnpmExec()) {
+  result = spawnSync("pnpm", ["exec", "wrangler", ...wranglerArgs], spawnOpts);
+} else {
+  console.log("→ pnpm exec wrangler unavailable; falling back to pnpm dlx wrangler@4");
+  result = spawnSync("pnpm", ["dlx", "wrangler@4", ...wranglerArgs], spawnOpts);
+}
 
 if (result.status !== 0) {
   process.exit(result.status ?? 1);

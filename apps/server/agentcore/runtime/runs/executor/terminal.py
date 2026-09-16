@@ -80,6 +80,7 @@ def build_terminal_run_state(
     received_blocks: list[ContextBlock],
     tool_ctx: Any,
     runtime_file_products: list[FileProduct] | None = None,
+    reasoning_effort: str | None = None,
 ) -> RunState:
     """Build COMPLETED terminal RunState (contract misses stay warnings) + emit."""
     _ = (write_pass_used, product_landing_artifacts)
@@ -220,6 +221,7 @@ def build_terminal_run_state(
             model=priced_model,
             usage=usage,
             cost=cost,
+            reasoning_effort=reasoning_effort,
             debrief=debrief,
             output_files=touched or None,
             gaps=delivery_gaps or None,

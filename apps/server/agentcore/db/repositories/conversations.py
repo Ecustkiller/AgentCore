@@ -9,6 +9,10 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agentcore.core.search_query import (
+    SEARCH_VISIBLE_ROLES,
+    parse_conversation_search_terms,
+)
 from agentcore.core.types import is_uuid_id, new_id
 from agentcore.db.models import (
     Conversation,
@@ -36,6 +40,21 @@ from ._base import (
 )
 from ._journal_cascade import delete_journal_for_conversation
 from ._stream_state_cascade import delete_stream_state_for_conversation
+
+
+def _title_or_visible_body_hit(term: str):
+    """Conversation matches ``term`` in title or visible user/assistant body."""
+    return or_(
+        Conversation.title.ilike(_ilike_pattern(term)),
+        exists(
+            select(Message.id).where(
+                Message.conversation_id == Conversation.id,
+                Message.role.in_(SEARCH_VISIBLE_ROLES),
+                Message.content.is_not(None),
+                Message.content.ilike(_ilike_pattern(term)),
+            )
+        ),
+    )
 
 
 class ConversationRepository:
@@ -545,14 +564,15 @@ class ConversationRepository:
     ) -> Sequence[Conversation]:
         """Owner-scoped conversation search (全局搜索 Tier 1 / 跨会话日志工具).
 
-        Default: ILIKE over ``title``. With ``match_message_body``, also hit when any
-        message ``content`` matches (same substring as ``MessageRepository.search`` /
-        GET /v1/search 的消息面，但收成对话行). Newest-activity first, capped at
+        Default: ILIKE over ``title`` (整串，GET /v1/search conversation 段).
+        With ``match_message_body`` (日志工具), each parsed term must hit title or
+        visible user/assistant ``content``. Newest-activity first, capped at
         ``limit``. Excludes soft-deleted and hidden handoff/standing hosts — the same
         visibility as the sidebar, so a hit is always something the user can open.
 
-        GET /v1/search 的 conversation 段保持默认（只搜标题）；跨会话日志工具走
-        ``search_with_projections``（有 query 时开正文）。
+        GET /v1/search 的 conversation 段保持默认（只搜标题整串）；跨会话日志工具走
+        ``search_with_projections``（Cursor 形：未加引号词 AND，引号内短语；标题或
+        可见 user/assistant 正文）。
 
         The optional facets (搜索结果过滤) narrow the same result set server-side so
         the cap is spent on matching rows rather than filtered-away ones:
@@ -561,10 +581,11 @@ class ConversationRepository:
 
         Cross-session log tool extras (跨会话对话日志访问定案):
         ``include_archived`` (this method / GET ``/v1/search`` default False;
-        ``search_conversations`` defaults True), ``global_chats_only``
-        (``folder_id IS NULL``), ``exclude_conversation_id`` (host turn's own
-        chat). Empty ``query`` lists by ``updated_at`` without a title or body
-        filter.
+        ``search_conversations`` always True), ``global_chats_only``
+        (``folder_id IS NULL``; account / sidebar filters, not the log tool),
+        ``exclude_conversation_id`` (host turn's own
+        chat). Empty ``query`` with ``match_message_body`` returns no rows;
+        title-only empty ``query`` lists by ``updated_at``.
         """
         stmt = select(Conversation).where(
             conversation_visible_clause(user_id),
@@ -572,19 +593,14 @@ class ConversationRepository:
             Conversation.mode.notin_(("handoff", "standing")),
         )
         q = (query or "").strip()
-        if q:
-            title_hit = Conversation.title.ilike(_ilike_pattern(q))
-            if match_message_body:
-                body_hit = exists(
-                    select(Message.id).where(
-                        Message.conversation_id == Conversation.id,
-                        Message.content.is_not(None),
-                        Message.content.ilike(_ilike_pattern(q)),
-                    )
-                )
-                stmt = stmt.where(or_(title_hit, body_hit))
-            else:
-                stmt = stmt.where(title_hit)
+        if match_message_body:
+            terms = parse_conversation_search_terms(q)
+            if not terms:
+                return []
+            for term in terms:
+                stmt = stmt.where(_title_or_visible_body_hit(term))
+        elif q:
+            stmt = stmt.where(Conversation.title.ilike(_ilike_pattern(q)))
         if not include_archived:
             personally_archived = select(ConversationPreference.conversation_id).where(
                 ConversationPreference.user_id == user_id,
@@ -622,10 +638,12 @@ class ConversationRepository:
         """Like :meth:`search` but projects ``folder_name`` + ``message_count``.
 
         Returns plain dicts for the conversation-log tools (no ORM leakage into
-        tool JSON). Non-empty ``query`` matches title **or** message body.
-        Message counts come from one grouped query (same as sidebar
-        ``counts_for_conversations``).
+        tool JSON). Terms must all match (title or visible user/assistant body).
+        Empty / quotes-only query → no rows. Message counts come from one grouped
+        query (same as sidebar ``counts_for_conversations``).
         """
+        if not parse_conversation_search_terms(query):
+            return []
         convs = list(
             await self.search(
                 user_id,
@@ -636,7 +654,7 @@ class ConversationRepository:
                 global_chats_only=global_chats_only,
                 exclude_conversation_id=exclude_conversation_id,
                 updated_after=updated_after,
-                match_message_body=bool((query or "").strip()),
+                match_message_body=True,
             )
         )
         if not convs:

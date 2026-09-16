@@ -10,7 +10,7 @@ from agentcore.runtime.skills.delivery import _DELIVERY
 from agentcore.runtime.skills.lead_subteam import _LEAD_SUBTEAM
 from agentcore.runtime.skills.local_desk import _LOCAL_DESK
 from agentcore.runtime.skills.page_ui import _PAGE_UI
-from agentcore.runtime.skills.product_help import _PRODUCT_HELP
+from agentcore.runtime.skills.product_help import build_product_help_body
 from agentcore.runtime.skills.registry import (
     AUDIENCE_CEO_ONLY,
     AUDIENCE_WORKER_ONLY,
@@ -110,7 +110,7 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
         name="product_help",
         summary="本产品用法",
         blurb="这个产品能做什么、入口在哪",
-        body=_PRODUCT_HELP,
+        body=build_product_help_body(),
         audience=AUDIENCE_CEO_ONLY,
         group=GROUP_PRODUCT,
     ),

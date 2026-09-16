@@ -351,15 +351,17 @@ function toMineCatalogItem(
   };
 }
 
-/** Account-layer「我的」rows: overlay listable skills + every global entry, cores first. */
+/** Account-layer「我的」rows: overlay listable skills + user-written global entries. */
 export function buildMineCatalogRows(
   overlayMine: OverlayMineRow[],
   scopeEntries: AccountScopeEntry[],
 ): MineCatalogRow[] {
   const overlayById = new Map(overlayMine.map((row) => [row.id, row]));
   const byId = new Map<string, MineCatalogRow>();
+  const coreNames = new Set(CORE_LEAVES.map((leaf) => leaf.name));
 
   for (const doc of scopeEntries) {
+    if (doc.aiMaintained && coreNames.has(doc.name)) continue;
     const overlay = overlayById.get(doc.id);
     const disputed = doc.disputedAt != null;
     const applyMode = doc.applyMode;
@@ -398,46 +400,10 @@ export function buildMineCatalogRows(
     });
   }
 
-  const presentNames = new Set(scopeEntries.map((entry) => entry.name));
-  const presentKinds = new Set(
-    [...byId.values()]
-      .map((row) => row.memoryKind)
-      .filter((kind): kind is "preferences" | "profile" => kind != null),
+  const others = [...byId.values()].sort((a, b) =>
+    a.name.localeCompare(b.name, "zh"),
   );
-  const placeholders: MineCatalogRow[] = CORE_LEAVES.filter(
-    (leaf) =>
-      !presentNames.has(leaf.name) && !presentKinds.has(leaf.memoryKind),
-  ).map((leaf) => ({
-    id: "",
-    name: displayName(leaf.name),
-    description: "",
-    content: "",
-    version: "",
-    applyMode: "always" as const,
-    aiMaintained: true,
-    memoryKind: leaf.memoryKind,
-    listable: false,
-    disputed: false,
-    alwaysChars: null,
-    parentId: null,
-  }));
-
-  const rest = [...byId.values()];
-  const coreOrder = ["preferences", "profile"] as const;
-  const cores = [...placeholders, ...rest.filter((row) => row.memoryKind)].sort(
-    (a, b) => {
-      const ka = a.memoryKind ?? "";
-      const kb = b.memoryKind ?? "";
-      return (
-        (coreOrder as readonly string[]).indexOf(ka) -
-        (coreOrder as readonly string[]).indexOf(kb)
-      );
-    },
-  );
-  const others = rest
-    .filter((row) => !row.memoryKind)
-    .sort((a, b) => a.name.localeCompare(b.name, "zh"));
-  return [...cores, ...others];
+  return others;
 }
 
 export type PromptRailFolderSource = "system" | "user" | "other";
@@ -453,7 +419,7 @@ export interface PromptRailFolder {
 export interface PromptRail {
   /** 全员准则 / 角色身份 — product constitution, read-only. */
   constitution: PromptCatalogItem[];
-  /** 偏好 / 画像 — memory cores locked in 常驻, not a third region. */
+  /** Retired AI memory cores; always empty. User rules live in alwaysMine. */
   memory: PromptCatalogItem[];
   /** User-written always files; dragging to 按需 turns them on-demand. */
   alwaysMine: PromptCatalogItem[];
@@ -497,7 +463,7 @@ function bucketItems(map: Map<string, PromptCatalogItem[]>, key: string) {
   return next;
 }
 
-/** 常驻 = constitution + memory cores + user always; 用户夹 / 官方 HOW = 按需; 出厂工具另成一份图鉴. 概览行名由 UI 写，不拆字段. */
+/** 常驻 = constitution + user always; 用户夹 / 官方 HOW = 按需; 出厂工具另成一份图鉴. 概览行名由 UI 写，不拆字段. */
 export function buildPromptRail(
   data: Capabilities,
   mine: MineCatalogRow[],
@@ -509,13 +475,10 @@ export function buildPromptRail(
   const skills = groups.find((group) => group.id === "on_demand")?.items ?? [];
   const tools = sortTools(data.tools).map(toToolCatalogItem);
   const visible = mine;
-  const cores = visible.filter((row) => row.memoryKind).map(toMineCatalogItem);
   const alwaysMine = visible
-    .filter((row) => !row.memoryKind && row.applyMode === "always")
+    .filter((row) => row.applyMode === "always")
     .map(toMineCatalogItem);
-  const onDemandMine = visible.filter(
-    (row) => !row.memoryKind && row.applyMode !== "always",
-  );
+  const onDemandMine = visible.filter((row) => row.applyMode !== "always");
 
   const official: PromptCatalogItem[] = skills
     .filter(
@@ -572,7 +535,7 @@ export function buildPromptRail(
 
   return {
     constitution: standing,
-    memory: cores,
+    memory: [],
     alwaysMine,
     folders: result,
     official,

@@ -175,8 +175,8 @@ def _multi_agent_redelegate_continuation() -> list[SSEEvent]:
 
 
 def _multi_agent_plan_revised() -> list[SSEEvent]:
-    """多 Agent：自主再绑定「计划已调整」轻痕迹 (受监督的波循环, 设计 §7.2)。计划含一个待定稿的
-    下游节点（r2 撰写，``bind_after_deps``）+ 一个未跑下游（r3 复核）。r1 调研跑完触到波边界 → CEO
+    """多 Agent：历史 leftover「计划已调整」轻痕迹（live replan 不再发 kind=bind，仅 fold）。
+    旧向量含待定稿下游（r2 撰写）+ 未跑下游（r3 复核）。r1 调研跑完触到波边界 → CEO
     据上游产出调 ``replan``：定稿 r2 的职责（``bind``）并操舵 r3 的复核重点（``steer``），发一条
     ``plan_revised`` → 三端把 ``revised`` 折到对应节点（r2=bind / r3=steer，r1 恒 None）；定稿/操舵
     后同一 DAG 续跑 r2、r3。验「自我纠偏看得见不打断」：节点带轻痕迹，回合照常 end_turn。
@@ -469,9 +469,9 @@ def _multi_agent_multi_batch_disjoint() -> list[SSEEvent]:
     ]
 
 def _multi_agent_lead_subplan_bind_replan() -> list[SSEEvent]:
-    """多 Agent·嵌套 lead 在自己子计划上晚定稿续跑 (受监督子计划 B, docs/03-AI核心/编排器与CEO主Agent.md
-    §2.4)。CEO 把「整块后端」交给一个 lead（L1，顶层 worker）；L1 上手后自己扇出一支子队
-    （sa 子调研 + sb 待定稿 bind_after_deps），子队 run_plan 与 L1 **同一 execution_id** → 三端按
+    """多 Agent·嵌套 lead 历史 leftover 晚定稿续跑（live 不再走 bind_after_deps；仅 fold）。
+    CEO 把「整块后端」交给一个 lead（L1，顶层 worker）；L1 上手后自己扇出一支子队
+    （sa 子调研 + sb 待定稿），子队 run_plan 与 L1 **同一 execution_id** → 三端按
     ``parent_run_id`` 合并进同一张团队图（不 reset，子节点挂在 L1 下）。sa 跑完触到 L1 子计划的波
     边界 → L1【自己】调 replan 定稿 sb（``plan_revised`` kind=bind，execution_id 仍是这同一 id）→ 三端
     把 ``revised=bind`` 折到子节点 sb（其余节点恒 None）；定稿后续跑 sb。这是 B 的去特例闭环在 UI 折叠

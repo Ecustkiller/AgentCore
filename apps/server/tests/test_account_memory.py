@@ -107,15 +107,18 @@ async def test_cloud_remember_ok(monkeypatch: pytest.MonkeyPatch, account_creds)
 
         payload = json.loads(request.content.decode())
         assert payload["content"] == "以后都用中文"
+        assert payload["name"] == "回复语言.md"
         assert payload["folder_id"] is None
-        assert payload["action"] == "add"
+        assert payload["action"] == "write"
         return httpx.Response(
             200,
             json={
                 "changed": True,
-                "action": "add",
-                "message": "已追加规则：以后都用中文",
-                "rules_markdown": None,
+                "action": "write",
+                "message": "已写入规则「回复语言.md」（常驻）。",
+                "name": "回复语言.md",
+                "apply": "always",
+                "ok": True,
             },
         )
 
@@ -124,11 +127,15 @@ async def test_cloud_remember_ok(monkeypatch: pytest.MonkeyPatch, account_creds)
         lambda **kwargs: httpx.AsyncClient(transport=_FakeTransport(_handler), **kwargs),
     )
     result = await cloud_remember_rule(
-        account_creds, content="以后都用中文", folder_id=None
+        account_creds,
+        name="回复语言.md",
+        content="以后都用中文",
+        folder_id=None,
     )
     assert result["changed"] is True
-    assert result["action"] == "add"
-    assert "已追加" in result["message"]
+    assert result["action"] == "write"
+    assert "已写入" in result["message"]
+    assert result["name"] == "回复语言.md"
 
 
 async def test_cloud_remember_quota_exceeded(
@@ -152,26 +159,32 @@ async def test_cloud_remember_quota_exceeded(
     )
     with pytest.raises(AccountCloudError) as ei:
         await cloud_remember_rule(
-            account_creds, content="以后都用中文", folder_id=None
+            account_creds,
+            name="回复语言.md",
+            content="以后都用中文",
+            folder_id=None,
         )
     assert ei.value.code == "ALWAYS_QUOTA_EXCEEDED"
     assert "配额" in ei.value.message
 
 
-async def test_cloud_remember_replace_payload(monkeypatch: pytest.MonkeyPatch, account_creds):
+async def test_cloud_remember_write_payload(monkeypatch: pytest.MonkeyPatch, account_creds):
     async def _handler(request: httpx.Request) -> httpx.Response:
         import json
 
         payload = json.loads(request.content.decode())
-        assert payload["action"] == "replace"
+        assert payload["action"] == "write"
+        assert payload["name"] == "回复语言.md"
         assert payload["content"] == "用中文"
-        assert payload["replaces"] == "用英文"
+        assert payload["apply"] == "always"
         return httpx.Response(
             200,
             json={
                 "changed": True,
-                "action": "replace",
-                "message": "已替换规则：去掉「用英文」，写入「用中文」",
+                "action": "write",
+                "message": "已写入规则「回复语言.md」（常驻）。",
+                "name": "回复语言.md",
+                "apply": "always",
             },
         )
 
@@ -181,13 +194,14 @@ async def test_cloud_remember_replace_payload(monkeypatch: pytest.MonkeyPatch, a
     )
     result = await cloud_remember_rule(
         account_creds,
+        name="回复语言.md",
         content="用中文",
         folder_id=None,
-        action="replace",
-        replaces="用英文",
+        action="write",
+        apply="always",
     )
     assert result["changed"] is True
-    assert result["action"] == "replace"
+    assert result["action"] == "write"
 
 
 
@@ -247,7 +261,6 @@ async def test_assemble_turn_rules_ticketed_miss_skips_cloud(
             _EmptyMemoryStore(),  # type: ignore[arg-type]
             "u1",
             folder_id=None,
-            enabled=True,
         )
     assert rules_md == ""
     assert called["n"] == 0
@@ -291,10 +304,9 @@ async def test_assemble_turn_rules_ticketed_hit_after_seed(
             _EmptyMemoryStore(),  # type: ignore[arg-type]
             "u1",
             folder_id=None,
-            enabled=True,
         )
     assert "永远用中文" in rules_md
-    assert "偏好偏好" in rules_md
+    assert "偏好偏好" not in rules_md
 
 
 async def test_assemble_turn_rules_cloud_failure_soft_empty(
@@ -315,7 +327,6 @@ async def test_assemble_turn_rules_cloud_failure_soft_empty(
             _EmptyMemoryStore(),  # type: ignore[arg-type]
             "u1",
             folder_id=None,
-            enabled=True,
         )
     assert rules_md == ""
 
@@ -323,17 +334,19 @@ async def test_assemble_turn_rules_cloud_failure_soft_empty(
 async def test_remember_tool_cloud_success(
     monkeypatch: pytest.MonkeyPatch, account_creds
 ):
-    async def _fake_remember(creds, *, content, folder_id, action="add", replaces=None):
-        assert content == "以后都用中文"
-        assert folder_id is None
-        assert action == "add"
-        assert replaces is None
+    async def _fake_remember(creds, **kwargs):
+        assert kwargs.get("content") == "以后都用中文"
+        assert kwargs.get("name") == "回复语言.md"
+        assert kwargs.get("folder_id") is None
+        assert kwargs.get("action") == "write"
         assert creds is account_creds
         return {
             "changed": True,
-            "action": "add",
-            "message": "已追加规则：以后都用中文",
-            "rules_markdown": None,
+            "action": "write",
+            "message": "已写入规则「回复语言.md」（常驻）。",
+            "name": "回复语言.md",
+            "apply": "always",
+            "ok": True,
         }
 
     monkeypatch.setattr(
@@ -356,23 +369,27 @@ async def test_remember_tool_cloud_success(
 
     tool = RememberTool(folder_id=None)
     with account_credentials_scope(account_creds):
-        result = await tool.execute({"content": "以后都用中文"}, _ctx())
+        result = await tool.execute(
+            {"name": "回复语言.md", "content": "以后都用中文"},
+            _ctx(),
+        )
     assert result.success is True
-    assert "已追加" in (result.output or "")
+    assert "已写入" in (result.output or "")
     assert warmed["n"] == 1
 
 
-async def test_remember_tool_cloud_forget(
+async def test_remember_tool_cloud_delete(
     monkeypatch: pytest.MonkeyPatch, account_creds
 ):
-    async def _fake_remember(creds, *, content, folder_id, action="add", replaces=None):
-        assert action == "forget"
-        assert content == "用英文"
+    async def _fake_remember(creds, **kwargs):
+        assert kwargs.get("action") == "delete"
+        assert kwargs.get("name") == "回复语言.md"
         return {
             "changed": True,
-            "action": "forget",
-            "message": "已删除规则：用英文",
-            "rules_markdown": None,
+            "action": "delete",
+            "message": "已删除规则「回复语言.md」。",
+            "name": "回复语言.md",
+            "ok": True,
         }
 
     monkeypatch.setattr(
@@ -389,11 +406,11 @@ async def test_remember_tool_cloud_forget(
     tool = RememberTool(folder_id=None)
     with account_credentials_scope(account_creds):
         result = await tool.execute(
-            {"action": "forget", "content": "用英文"}, _ctx()
+            {"action": "delete", "name": "回复语言.md"}, _ctx()
         )
     assert result.success is True
     assert "已删除" in (result.output or "")
-    assert result.display["action"] == "forget"
+    assert result.display["action"] == "delete"
 
 
 async def test_remember_tool_cloud_failure_explicit(
@@ -406,7 +423,9 @@ async def test_remember_tool_cloud_failure_explicit(
 
     tool = RememberTool(folder_id=None)
     with account_credentials_scope(account_creds):
-        result = await tool.execute({"content": "x"}, _ctx())
+        result = await tool.execute(
+            {"name": "回复语言.md", "content": "x"}, _ctx()
+        )
     assert result.success is False
     assert "记住失败" in (result.output or "")
 
@@ -729,7 +748,6 @@ async def test_assemble_without_ticket_uses_db_path(
         _EmptyMemoryStore(),  # type: ignore[arg-type]
         "u1",
         folder_id=None,
-        enabled=True,
     )
     assert opened["n"] == 1
     assert rules_md == ""

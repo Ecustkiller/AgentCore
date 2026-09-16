@@ -89,7 +89,10 @@ from agentcore.llm.provider.protocol import (
     ToolCallFunction,
     connect_retry_policy,
 )
-from agentcore.llm.provider.wire_dialect import resolve_wire_dialect, wire_model_leaf
+from agentcore.llm.provider.wire_dialect import (
+    effective_reasoning_effort,
+    resolve_wire_dialect,
+)
 from agentcore.llm.sub2api_probe import probe_sub2api_diagnosis_result
 from agentcore.llm.tool_arguments import coerce_openai_tool_arguments
 
@@ -1305,9 +1308,14 @@ class OpenAICompatibleProvider:
                 # Official V4 default effort is high. Some relays honor
                 # reasoning_effort but ignore thinking.type — without it the
                 # stream has no CoT (OpenCode Go dogfood 2026-08-19).
-                leaf = wire_model_leaf(request.model)
-                if leaf.startswith("deepseek-v4") or leaf.startswith("deepseek-flash"):
-                    payload["reasoning_effort"] = "high"
+                effort = effective_reasoning_effort(
+                    request.model,
+                    thinking=request.thinking,
+                    stored=request.reasoning_effort,
+                    base_url=self._base_url,
+                )
+                if effort:
+                    payload["reasoning_effort"] = effort
         return payload
 
     async def _log_sub2api_diagnosis(self, err: LLMUpstreamError) -> LLMUpstreamError:

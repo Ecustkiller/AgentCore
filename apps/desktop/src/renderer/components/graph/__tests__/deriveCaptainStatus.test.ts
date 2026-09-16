@@ -13,6 +13,7 @@ function run(
     kind: "agent",
     role: null,
     model: null,
+    reasoningEffort: null,
     usage: null,
     cost: null,
     error: null,
@@ -223,28 +224,15 @@ describe("captainSinkPreview", () => {
       captainSinkPreview({
         captainStatus: "pending",
         answerPreview: "人已派出，验证员还在复核，你先忙别的。",
-        synthesisPreview: "",
       }),
     ).toBe("");
   });
 
-  it("待汇总且无等待条时显示中间草稿", () => {
-    expect(
-      captainSinkPreview({
-        captainStatus: "pending",
-        answerPreview: "人已派出",
-        synthesisPreview: "两边方向一致：优先方案 A。",
-      }),
-    ).toBe("两边方向一致：优先方案 A。");
-  });
-
-  it("待汇总有等待条时预览留空（不重复、不摘派单句）", () => {
+  it("待汇总预览留空", () => {
     expect(
       captainSinkPreview({
         captainStatus: "pending",
         answerPreview: "人已派出，还在等。",
-        synthesisPreview: "草稿不应盖过等待文案",
-        waitCaption: "等待「撰写员」(1/2)",
       }),
     ).toBe("");
   });
@@ -254,7 +242,6 @@ describe("captainSinkPreview", () => {
       captainSinkPreview({
         captainStatus: "completed",
         answerPreview: "人已派出",
-        synthesisPreview: "草稿不应出现",
       }),
     ).toBe("人已派出");
   });

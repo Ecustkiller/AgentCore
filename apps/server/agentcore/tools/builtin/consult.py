@@ -1,4 +1,4 @@
-"""consult — unified on-demand pull for skills / rules / memory / deferred tools.
+"""consult — unified on-demand pull for skills / rules / deferred tools.
 
 One tool + one ``<按需目录>`` for CEO and workers. Backed by a single
 :class:`~agentcore.runtime.context.consult_sources.MergedConsultSource` so the
@@ -22,7 +22,12 @@ from agentcore.runtime.memory_consult_cache import (
     lookup_consult_origin,
     remember_consult,
 )
-from agentcore.tools.on_demand import is_on_demand_tool
+from agentcore.tools.on_demand import (
+    enabled_tool_names_from_text,
+    is_on_demand_tool,
+    offer_bound_tools,
+    offer_skill_promoted_tools,
+)
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_BOTH,
@@ -68,7 +73,7 @@ class ConsultTool:
             name="consult",
             description=(
                 "按 name 从按需目录拉全文"
-                "（系统能力指引、按需用户规则、记忆主题笔记、低频工具）。"
+                "（系统能力指引、按需用户规则、低频工具）。"
                 "相关再拉。低频工具查阅后本回合下一模型轮进表；"
                 "常驻设定与常驻工具无需查阅。"
             ),
@@ -109,6 +114,8 @@ class ConsultTool:
             cached = lookup_consult(raw)
             if cached is not None:
                 logger.info("consult.reuse", name=raw)
+                self._offer_skill_promoted(raw)
+                self._offer_from_consult_output(cached)
                 return ToolResult(
                     tool_call_id="",
                     success=True,
@@ -146,3 +153,16 @@ class ConsultTool:
             output_limit=_CONSULT_OUTPUT_LIMIT,
             display=_consult_display(raw, origin=origin),
         )
+
+    def _offer_skill_promoted(self, name: str) -> None:
+        """Cache hits skip fetch; still enable tools a skill consult unlocks."""
+        tool_src = getattr(self.source, "tool", None)
+        registry = getattr(tool_src, "registry", None) if tool_src is not None else None
+        if registry is not None:
+            offer_skill_promoted_tools(registry, name)
+
+    def _offer_from_consult_output(self, output: str) -> None:
+        tool_src = getattr(self.source, "tool", None)
+        registry = getattr(tool_src, "registry", None) if tool_src is not None else None
+        if registry is not None:
+            offer_bound_tools(registry, enabled_tool_names_from_text(output))

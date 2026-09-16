@@ -103,9 +103,9 @@ export interface ExecutionRuntime {
    * (open thinking is not journaled; a stale seed would erase it every frame).
    */
   runProcesses: Record<string, ProcessStep[]> | null;
-  /** CEO 协调模式 Phase 1：`team_synthesis_preview` 最新快照（同 key 保最新）。P2 起
-   * DURABLE：重载由 hydrateFromJournal 取 journal 中最后一条重建。状态条已收成工具栏，
-   * 不再挂合成草稿行。 */
+  /** Leftover ``team_synthesis_preview`` snapshot（同 key 保最新）。P2 DURABLE：
+   * 重载由 hydrateFromJournal 取 journal 中最后一条重建。活人面不画：状态条与队长节点
+   * 都不挂过程稿。 */
   teamSynthesisPreview: TeamSynthesisPreviewPayload | null;
   /** CEO 协调等待（`coordination_wait`）：captain 空等团队事件。EPHEMERAL——仅 live
    * stream；waiting=false / 回合结束 / `execution_detached` 清除。状态条只报 n/m；

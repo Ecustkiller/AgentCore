@@ -29,11 +29,12 @@ _DELETE = "file_delete"
 _MOVE = "file_move"
 _COPY = "file_copy"
 _BATCH = "file_batch"
-_DOCX = "md_to_docx"
-_PDF = "md_to_pdf"
+_EXPORT = "md_export"
+_DOCX = "md_to_docx"  # historical journal
+_PDF = "md_to_pdf"  # historical journal
 
 MUTATION_TOOLS = frozenset(
-    {_WRITE, _REPLACE, _DELETE, _MOVE, _COPY, _BATCH, _DOCX, _PDF}
+    {_WRITE, _REPLACE, _DELETE, _MOVE, _COPY, _BATCH, _EXPORT, _DOCX, _PDF}
 )
 
 _LABEL_WRITE = "写过"
@@ -165,12 +166,16 @@ def edits_from_tool_call(
     if products:
         return products
     data = _parse_arguments(arguments)
-    if tool == _DOCX:
-        path = _sibling_export(str(data.get("path") or ""), ".docx")
-        return [ConversationEdit(path=path, label=_LABEL_DOCX)] if path else []
-    if tool == _PDF:
-        path = _sibling_export(str(data.get("path") or ""), ".pdf")
-        return [ConversationEdit(path=path, label=_LABEL_PDF)] if path else []
+    if tool in {_EXPORT, _DOCX, _PDF}:
+        fmt = str(data.get("format") or "").strip().lower()
+        if tool == _PDF or fmt == "pdf":
+            ext, label = ".pdf", _LABEL_PDF
+        elif tool == _DOCX or fmt == "docx":
+            ext, label = ".docx", _LABEL_DOCX
+        else:
+            return []
+        path = _sibling_export(str(data.get("path") or ""), ext)
+        return [ConversationEdit(path=path, label=label)] if path else []
     if tool == _BATCH:
         return _from_batch_operations(data)
     if tool in {_MOVE, _COPY}:

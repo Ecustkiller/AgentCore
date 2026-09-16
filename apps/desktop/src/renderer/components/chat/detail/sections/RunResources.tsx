@@ -2,8 +2,6 @@ import { Button } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import {
   COST_ESTIMATE_HINT,
-  COST_UNPRICED_HINT,
-  COST_UNPRICED_LABEL,
   formatAlignedCostParts,
   formatCompact,
   formatDisplayCost,
@@ -25,7 +23,7 @@ import { MetricRow } from "./shared";
 /**
  * Per-run resource ledger — the single place a run's full token + cost
  * breakdown lives. Defaults collapsed; header keeps the run ¥. All-zero cost
- * renders as「—」(§7.5), not「¥0.00」. BYOK with estimate shows ≈ + currency.
+ * renders as「—」(§7.5), not「¥0.00」. BYOK 有产品价目时出 ¥，tooltip 说明不扣额度。
  * `cost.cached` is the billed cache-hit portion (already inside input), not
  * savings vs miss price.
  */
@@ -48,23 +46,15 @@ export function ResourceSection({
   const money = pickCostMoney(cost);
   const tokenTotal = usage ? usage.input + usage.output : 0;
   const byokHint =
-    money?.estimated === true ||
-    (cost?.estimated_total ?? 0) > 0 ||
-    cost?.pricing_source === "unpriced";
-  // 未计价 ≠ 估算：三层价卡全落空时连估算值都没有，标注要如实（拍板 2026-07-20）。
-  const unpriced =
-    cost?.pricing_source === "unpriced" && (money == null || money.nano <= 0);
-  const byokTitle = unpriced ? COST_UNPRICED_HINT : COST_ESTIMATE_HINT;
+    (cost?.estimated_total ?? 0) > 0 || money?.estimated === true;
   const costLabel =
     money != null && money.nano > 0
       ? formatDisplayCost(money.nano, money.estimated, money.currency)
-      : tokenTotal > 0 && unpriced
-        ? `${formatCompact(tokenTotal)} tok · ${COST_UNPRICED_LABEL}`
-        : tokenTotal > 0 && byokHint
-          ? `${formatCompact(tokenTotal)} tok`
-          : null;
+      : tokenTotal > 0
+        ? `${formatCompact(tokenTotal)} tok`
+        : null;
   const cache = usage ? cacheUsageDisplay(usage) : null;
-  const think = reasoningMeta(agent.thinking);
+  const think = reasoningMeta(agent.thinking, run.reasoningEffort);
   const cacheLine =
     cache == null
       ? null
@@ -107,7 +97,7 @@ export function ResourceSection({
           {costLabel && (
             <span
               className="text-xs tabular-nums text-muted-foreground"
-              title={byokHint ? byokTitle : undefined}
+              title={byokHint ? COST_ESTIMATE_HINT : undefined}
             >
               {costLabel}
             </span>
@@ -148,23 +138,13 @@ export function ResourceSection({
               )}
             </div>
           )}
-          {money != null && money.nano > 0 && money.estimated && (
+          {byokHint && money != null && money.nano > 0 && (
             <SimpleTooltip label={COST_ESTIMATE_HINT}>
               <p className="cursor-default text-xs text-muted-foreground">
                 {COST_ESTIMATE_HINT}
               </p>
             </SimpleTooltip>
           )}
-          {money != null &&
-            money.nano <= 0 &&
-            usage != null &&
-            tokenTotal > 0 &&
-            unpriced && (
-              <MetricRow
-                label={COST_UNPRICED_LABEL}
-                value={`${formatCompact(usage.input)}↑ / ${formatCompact(usage.output)}↓`}
-              />
-            )}
 
           {usage && (
             <>
@@ -186,7 +166,7 @@ export function ResourceSection({
                 />
                 {usage.reasoning > 0 && (
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    推理 {formatCompact(usage.reasoning)}
+                    思考 {formatCompact(usage.reasoning)}
                   </p>
                 )}
               </div>

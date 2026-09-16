@@ -147,7 +147,7 @@ export interface BackendMessage {
   /** 曾中断恢复（``usage.recovered``）：本回合崩过、由租约清扫重驱原地跑完. */
   recovered?: boolean | null;
   /** 回合轮次 (Tier 2 重载持久化): ReAct rounds the turn ran, projected from the same column.
-   * Replayed onto `message.rounds`; the bubble surfaces「N 轮」only when > 1. null for
+   * Replayed onto `message.rounds`; 「更多」用量详情在 > 1 时展示。null for
    * user / pre-feature rows. */
   rounds?: number | null;
   /** 回合墙钟用时 (ms)：与 message_end.duration_ms 同锚；重载自 usage JSON 投影。 */
@@ -343,10 +343,10 @@ export function toMessage(m: BackendMessage): Message {
     // Prefer runs.error (journal); fall back to usage.error when journal is sparse
     // (空泡族根因重设计 — REST 已投影 usage.error).
     error: m.runs?.error ?? m.usage?.error ?? undefined,
-    // 回合 token 用量 + 轮次 (Tier 2 重载): replay the bubble's meta row from the persisted
-    // turn snapshot, mirroring the live `attachTurnMetaToLastMessage` stamp — usage is
-    // already the ledger short-key shape (normalized server-side), rounds drives the
-    // 「N 轮」caption. Both undefined for user / no-spend turns → no meta row (live parity).
+    // 回合 token 用量 + 轮次 (Tier 2 重载): replay the persisted turn snapshot,
+    // mirroring the live `attachTurnMetaToLastMessage` stamp — usage is already
+    // the ledger short-key shape (normalized server-side); rounds > 1 只进「更多」。
+    // Both undefined for user / no-spend turns → no meta row (live parity).
     usage: m.usage ?? undefined,
     rounds: m.rounds ?? undefined,
     durationMs: m.duration_ms ?? undefined,

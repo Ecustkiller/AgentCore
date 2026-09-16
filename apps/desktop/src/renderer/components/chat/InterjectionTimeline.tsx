@@ -139,7 +139,6 @@ function InterjectionUserBubble({
   item: UserInterjection;
   turnTerminal: boolean;
 }) {
-  const conversationId = useConversationStore((s) => s.currentConversationId);
   const tone = interjectionStatusTone(item.status);
   const showChrome = showInterjectionStatusChrome(item.status);
   const attachments = interjectionAtts(item);
@@ -151,11 +150,7 @@ function InterjectionUserBubble({
       data-testid={`interjection-bubble-${item.interjectionId}`}
     >
       {!marked && (
-        <UserChipTray
-          attachments={attachments}
-          mentions={mentions}
-          conversationId={conversationId}
-        />
+        <UserChipTray attachments={attachments} mentions={mentions} />
       )}
       <div className="max-w-[80%] rounded-xl rounded-br-none bg-muted px-4 py-3 text-sm text-foreground">
         <CollapsibleSpeech
@@ -169,7 +164,6 @@ function InterjectionUserBubble({
               content={item.content}
               attachments={attachments}
               mentions={mentions}
-              conversationId={conversationId}
             />
           ) : (
             <p className="whitespace-pre-wrap break-words">{item.content}</p>

@@ -41,27 +41,13 @@ describe("WorkspaceChannelGuideDialog", () => {
       "本地对话",
       "云端对话",
       "直接改这个文件夹",
-      "复制到云上当新家",
       "先在云上做，原件先不动",
     ]) {
       expect(screen.getByText(label)).toBeTruthy();
     }
   });
 
-  it("导入说清之后只改云上这份、原件不再跟着变，不必搬", () => {
-    render(
-      <WorkspaceChannelGuideDialog
-        open
-        onOpenChange={() => {}}
-        showLocalTraditional
-      />,
-    );
-    expect(screen.getByText(/之后只改云上这份/)).toBeTruthy();
-    expect(screen.getByText(/原件不再跟着变/)).toBeTruthy();
-    expect(screen.getByText(/不必/)).toBeTruthy();
-  });
-
-  it("先在云上做与复制到云上互斥，无盘不出现", () => {
+  it("先在云上做说清这一单在云上、原件先不动", () => {
     render(
       <WorkspaceChannelGuideDialog
         open
@@ -73,21 +59,7 @@ describe("WorkspaceChannelGuideDialog", () => {
     const borrowDd = borrow.closest("div")?.querySelector("dd");
     expect(borrowDd?.textContent).toMatch(/这一单在云上做/);
     expect(borrowDd?.textContent).toMatch(/写不写回/);
-    expect(borrowDd?.textContent).toMatch(/不是复制上来当新家/);
-    expect(borrowDd?.textContent).not.toMatch(/原件不再跟着变/);
-    expect(dialogText()).not.toContain("上面四个");
-    expect(dialogText()).not.toContain("上面五个");
-
-    cleanup();
-    render(
-      <WorkspaceChannelGuideDialog
-        open
-        onOpenChange={() => {}}
-        showLocalTraditional={false}
-      />,
-    );
-    expect(screen.queryByText("先在云上做，原件先不动")).toBeNull();
-    expect(screen.queryByText("从本机加入")).toBeNull();
+    expect(borrowDd?.textContent).toMatch(/留在云上接着用/);
   });
 
   it("本地对话明说不是离线", () => {
@@ -102,7 +74,6 @@ describe("WorkspaceChannelGuideDialog", () => {
     const localDd = local.closest("div")?.querySelector("dd");
     expect(localDd?.textContent).toMatch(/对话仍在云上/);
     expect(localDd?.textContent).toMatch(/不是离线/);
-    expect(dialogText()).not.toContain("不是离线模式");
   });
 
   it("桌面只有本地对话被标「推荐」", () => {
@@ -147,9 +118,6 @@ describe("WorkspaceChannelGuideDialog", () => {
     expect(screen.queryByRole("heading", { name: "怎么选" })).toBeNull();
     expect(screen.queryByText("新建或加入…")).toBeNull();
     expect(screen.queryByText("从本机加入")).toBeNull();
-    expect(dialogText()).not.toContain("不用先选地方");
-    expect(dialogText()).not.toContain("这次选的会记住");
-    expect(dialogText()).not.toContain("日常在这台电脑写、跑");
   });
 
   // 防回潮：这份文案曾直接抄自内部设计文档，把实现词和防回潮对照写法漏给了用户。

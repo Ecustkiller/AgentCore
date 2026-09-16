@@ -6,12 +6,12 @@ export const FILES_PREVIEW_SCENES = [
   {
     id: "files-empty",
     title: "空态",
-    description: "新账号 · 画像/偏好占位 · 还没有自建条目",
+    description: "新账号 · 还没有自建条目",
   },
   {
     id: "files-entries",
     title: "有条目",
-    description: "行尾字数 · 不生效/已停用",
+    description: "行尾字数 · 不生效",
   },
 ] as const;
 
@@ -22,7 +22,7 @@ export const FILES_PREVIEW_PROJECT_FOLDER_ID = "folder-demo";
 /**
  * 文件夹自己的盘上文件——预览里跟条目同屏：左栏只有文件夹树；
  * 文件夹条目经 ``renderWorkroomLead`` 进 ``.agentcore``（盘上 ``AgentCore/``），钉在同级最前。
- * 账号提示词与流水账在工具箱 `/toolbox/mine/skills?updates=1`。
+ * 账号提示词在工具箱；文件页只挂文件夹 ``.agentcore``。
  */
 const PREVIEW_WORKSPACE_TREE: FileNode[] = [
   { path: "合同", name: "合同", isDir: true },
@@ -71,7 +71,7 @@ export function buildGlobalEntriesMock(): DocumentNode[] {
       name: "偏好.md",
       frontmatterError: null,
       disputedAt: null,
-      alwaysChars: 1200,
+      alwaysChars: null,
     },
     {
       id: "g-profile",
@@ -85,7 +85,7 @@ export function buildGlobalEntriesMock(): DocumentNode[] {
       name: "画像.md",
       frontmatterError: null,
       disputedAt: null,
-      alwaysChars: 800,
+      alwaysChars: null,
     },
     {
       id: "g-rule",
@@ -130,21 +130,6 @@ export function buildGlobalEntriesMock(): DocumentNode[] {
       alwaysChars: null,
     },
     {
-      // 纠错通道: user said「这条不对」— row stays, AI stopped using it, no char cost.
-      id: "g-disputed",
-      parentId: null,
-      folderId: null,
-      kind: "document",
-      role: "rule",
-      aiMaintained: true,
-      applyMode: "always",
-      description: "过时的偏好，已被用户标错",
-      name: "旧偏好.md",
-      frontmatterError: null,
-      disputedAt: "2026-08-01T09:00:00Z",
-      alwaysChars: 900,
-    },
-    {
       id: "g-topic",
       parentId: null,
       folderId: null,
@@ -163,36 +148,7 @@ export function buildGlobalEntriesMock(): DocumentNode[] {
 
 /** New-account / empty cores — real rows with 0 always chars. */
 export function buildEmptyGlobalEntriesMock(): DocumentNode[] {
-  return [
-    {
-      id: "g-pref-empty",
-      parentId: null,
-      folderId: null,
-      kind: "document",
-      role: "rule",
-      aiMaintained: true,
-      applyMode: "always",
-      description: "",
-      name: "偏好.md",
-      frontmatterError: null,
-      disputedAt: null,
-      alwaysChars: 0,
-    },
-    {
-      id: "g-profile-empty",
-      parentId: null,
-      folderId: null,
-      kind: "document",
-      role: "rule",
-      aiMaintained: true,
-      applyMode: "always",
-      description: "",
-      name: "画像.md",
-      frontmatterError: null,
-      disputedAt: null,
-      alwaysChars: 0,
-    },
-  ];
+  return [];
 }
 
 export function buildProjectEntriesMock(folderId: string): DocumentNode[] {
@@ -209,7 +165,7 @@ export function buildProjectEntriesMock(folderId: string): DocumentNode[] {
       name: "画像.md",
       frontmatterError: null,
       disputedAt: null,
-      alwaysChars: 3200,
+      alwaysChars: null,
     },
     {
       id: "p-nav",
@@ -223,7 +179,7 @@ export function buildProjectEntriesMock(folderId: string): DocumentNode[] {
       name: "导航.md",
       frontmatterError: null,
       disputedAt: null,
-      alwaysChars: 2400,
+      alwaysChars: null,
     },
     {
       id: "p-topic",
@@ -242,37 +198,10 @@ export function buildProjectEntriesMock(folderId: string): DocumentNode[] {
   ];
 }
 
-export function buildEmptyProjectEntriesMock(folderId: string): DocumentNode[] {
-  return [
-    {
-      id: "p-profile-empty",
-      parentId: null,
-      folderId,
-      kind: "document",
-      role: "rule",
-      aiMaintained: true,
-      applyMode: "always",
-      description: "",
-      name: "画像.md",
-      frontmatterError: null,
-      disputedAt: null,
-      alwaysChars: 0,
-    },
-    {
-      id: "p-nav-empty",
-      parentId: null,
-      folderId,
-      kind: "document",
-      role: "rule",
-      aiMaintained: true,
-      applyMode: "always",
-      description: "",
-      name: "导航.md",
-      frontmatterError: null,
-      disputedAt: null,
-      alwaysChars: 0,
-    },
-  ];
+export function buildEmptyProjectEntriesMock(
+  _folderId: string,
+): DocumentNode[] {
+  return [];
 }
 
 export function entriesForScene(sceneId: FilesPreviewSceneId): {

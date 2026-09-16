@@ -110,6 +110,33 @@ describe("formatProcessExport", () => {
     expect(git).not.toContain("feat: fold process tools");
     expect(git).not.toContain("list_folders");
   });
+
+  it("labels md_export by format", () => {
+    expect(
+      formatProcessExport([
+        {
+          kind: "tool",
+          id: "e1",
+          tool_name: "md_export",
+          arguments: { path: "报告.md", format: "docx" },
+          result: "ok",
+          status: "success",
+        },
+      ]),
+    ).toBe("· Export Word：报告.md");
+    expect(
+      formatProcessExport([
+        {
+          kind: "tool",
+          id: "e2",
+          tool_name: "md_export",
+          arguments: { path: "报告.md", format: "pdf" },
+          result: "ok",
+          status: "success",
+        },
+      ]),
+    ).toBe("· Export PDF：报告.md");
+  });
 });
 
 describe("formatMessageExport", () => {

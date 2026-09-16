@@ -50,6 +50,24 @@ describe("fetchGitRepoStatus", () => {
       unstaged: [],
       conflicted: [],
     });
+    const workspaceOp = (
+      window as unknown as { fsApi: { workspaceOp: ReturnType<typeof vi.fn> } }
+    ).fsApi.workspaceOp;
+    expect(workspaceOp).toHaveBeenCalledWith("r1", "git_repo_status", {
+      cwd: "",
+    });
+  });
+
+  it("forwards desk cwd so git does not run at the container root", async () => {
+    const workspaceOp = vi.fn(async () => ({
+      ok: true as const,
+      value: { present: false },
+    }));
+    vi.stubGlobal("window", { fsApi: { workspaceOp } });
+    expect(await fetchGitRepoStatus("r1", "conversations/c1")).toBeNull();
+    expect(workspaceOp).toHaveBeenCalledWith("r1", "git_repo_status", {
+      cwd: "conversations/c1",
+    });
   });
 
   it("returns null when present:false (no repo)", async () => {

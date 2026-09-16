@@ -68,6 +68,7 @@ class CodeSearchTool:
         audience=AUDIENCE_BOTH,
         file_products=FileProductsContract.READ_ONLY,
         workspace_io=True,
+        resident=False,
         catalog_summary="按意图搜代码",
     )
 

@@ -85,14 +85,17 @@ function resolveTimeoutMs(args: Record<string, unknown>): number {
 /**
  * Resolve git process cwd under the bound root.
  *
- * Empty / ``"."`` → root itself (open-folder). Non-empty → project subpath;
- * create if missing so ``init_baseline`` lands here. Never fall back to the
- * container root when a subpath is set (G1+G2).
+ * Empty / ``"."`` → root itself (open-folder). Non-empty → project subpath.
+ * ``create`` (default true) mkdir so ``init_baseline`` can land; UI SCM passes
+ * ``create: false`` and treats a missing desk as no repo. Never fall back to
+ * the container root when a subpath is set (G1+G2).
  */
 export async function resolveGitRunCwd(
   root: StoredRoot,
   cwdArg: unknown,
+  opts?: { create?: boolean },
 ): Promise<{ ok: true; cwd: string } | { ok: false; detail: string }> {
+  const create = opts?.create !== false;
   const raw = cwdArg == null ? "" : String(cwdArg);
   const sub =
     raw === "." ? "" : raw.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
@@ -115,7 +118,7 @@ export async function resolveGitRunCwd(
   if (existing.ok) {
     return { ok: true, cwd: existing.path };
   }
-  if (existing.code !== "not_found") {
+  if (existing.code !== "not_found" || !create) {
     return { ok: false, detail: existing.reason };
   }
   try {

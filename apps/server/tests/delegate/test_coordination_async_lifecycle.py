@@ -399,7 +399,6 @@ async def test_coordination_start_echo_counts_and_seeds_completed():
     assert "图共 2 名" in out
     assert "其中 1 名已完成" in out
     assert "wait" not in out
-    assert "update_synthesis" not in out
     assert "coordinate=false" not in out
     assert "人已派出" not in out
     assert "可见正文" not in out
@@ -434,7 +433,6 @@ async def test_fresh_coordination_echo_includes_total_and_zero_completed():
     assert "其中 0 名已完成" in result.output
     out = result.output or ""
     assert "wait" not in out
-    assert "update_synthesis" not in out
     assert "coordinate=false" not in out
     assert "人已派出" not in out
     assert "可见正文" not in out

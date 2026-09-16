@@ -17,6 +17,18 @@ type DelegateTool = Any
 logger = get_logger(__name__)
 
 
+def uses_session_continuation(spec: RunSpec) -> bool:
+    """True when this node should 续派 from a saved session.
+
+    False when crash redrive already bound this ``run_id``'s journal window.
+    """
+    if not (spec.continue_from_run_id or "").strip():
+        return False
+    from agentcore.runtime.runs.redrive_sites import is_resume_site
+
+    return not is_resume_site(spec.run_id)
+
+
 def resolve_worker_gate(tool: DelegateTool) -> Any:
     """Hand workers whatever gate this turn has — never predict away the card.
 
@@ -72,8 +84,13 @@ def build_drive_executor(
     )
 
     async def continuation_aware_executor(spec: RunSpec, completed: dict) -> RunState:
-        """带 continue_from_run_id 的节点走续写；其余冷开局。"""
-        if spec.continue_from_run_id:
+        """带 continue_from_run_id 的节点走续写；其余冷开局。
+
+        Crash redrive of an in-flight 续派 node has a journal window on this
+        ``run_id`` — continue that window (cold_executor + ResumeHint) instead of
+        restarting 续派 from the old completed session.
+        """
+        if uses_session_continuation(spec):
             from agentcore.runtime.delegate.continuation import run_continuation
 
             return await run_continuation(
@@ -102,11 +119,11 @@ def resolve_on_boundary(
     complexity_hint: str,
     session: Any,
 ) -> Any:
-    """Wave boundary hook (checkpoint / bind / coordination SCOPE)."""
-    # light 与 depends_on / bind_after_deps / checkpoint_after 并存时忽略 light：
-    # 不得据 light 关掉波边界（否则晚绑定节点会带占位 role/task 直接跑）。
+    """Wave boundary hook (checkpoint / coordination SCOPE)."""
+    # light 与 depends_on / checkpoint_after 并存时忽略 light：
+    # 不得据 light 关掉波边界（否则 checkpoint / SCOPE 无法让出）。
     has_dag_boundary = any(
-        n.bind_after_deps or n.depends_on or n.checkpoint_after for n in plan.nodes
+        n.depends_on or n.checkpoint_after for n in plan.nodes
     )
     if complexity_hint == "light" and not has_dag_boundary:
         on_boundary = None
@@ -115,14 +132,13 @@ def resolve_on_boundary(
             boundary_hook(tool, plan)
             if (
                 checkpoint_active(tool)
-                or any(n.bind_after_deps for n in plan.nodes)
                 or any(n.depends_on for n in plan.nodes)
             )
             else None
         )
     # Phase 3: under coordination, SCOPE/dep escalations → CEO event queue (PROCEED),
     # not wave-boundary YIELD. CHECKPOINT skips durable plan_review (boundary_hook →
-    # ``_pending_boundary`` only); BIND still uses the base hook when present.
+    # ``_pending_boundary`` only).
     if session is not None:
         from agentcore.runtime.coordination.bridge import coordination_boundary_hook
 

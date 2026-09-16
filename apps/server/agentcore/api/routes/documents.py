@@ -63,7 +63,7 @@ class DocumentNodeView(BaseModel):
     description: str
     name: str
     frontmatter_error: str | None = None
-    # Chars counting toward the always pool (same meter as write-side gate); null if not always.
+    # Chars counting toward the user-rule always pool; null if not a user always-rule.
     always_chars: int | None = None
     # When the user marked this entry wrong (纠错通道). Set ⇒ the entry is kept and still
     # readable / editable here, but never injected and never offered to ``consult``.
@@ -134,8 +134,12 @@ def _fm_error(doc: Document) -> str | None:
 
 
 def _always_chars(doc: Document) -> int | None:
-    """Pool chars for always-injected rule docs; null for everything else."""
+    """Pool chars for always-injected user rules; null for AI cores, disputed, and the rest."""
     if doc.kind != "document" or doc.role != "rule" or doc.apply_mode != "always":
+        return None
+    if doc.ai_maintained:
+        return None
+    if getattr(doc, "disputed_at", None) is not None:
         return None
     return always_entry_chars(doc.content)
 
@@ -343,7 +347,7 @@ async def update_document_content(
         )
 
     quota_warning: str | None = None
-    if doc.kind == "document" and doc.role == "rule":
+    if doc.kind == "document" and doc.role == "rule" and not doc.ai_maintained:
         parsed = parse_entry_frontmatter(body.content)
         if isinstance(parsed, FrontmatterError):
             new_is_always = False

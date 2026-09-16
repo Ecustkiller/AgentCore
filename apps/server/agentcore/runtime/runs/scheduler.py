@@ -40,19 +40,15 @@ class BoundaryReason(Enum):
 
     - ``CHECKPOINT``: a ``checkpoint_after`` node COMPLETED and downstream work
       remains — the existing user ``plan_review`` (continue / adjust / stop).
-    - ``BIND``: a ``bind_after_deps`` node's deps are all resolved but its spec is
-      not yet finalised — the CEO must late-bind it (``replan``) before it can run.
     - ``SCOPE`` (偏离信号 / 自底向上反应臂): a COMPLETED node flagged a 职责/范围 deviation
       (``escalate kind=scope``) while not-yet-run downstream remains — the CEO reads the
-      deviation + the node's output and re-steers the un-run tail (``replan``). The
-      reactive twin of ``BIND`` (the CEO's *proactive* late-binding): both hand control
-      back to the CEO at a wave boundary, neither needs a live user (≠ ``CHECKPOINT``).
+      deviation + the node's output and re-steers the un-run tail (``replan``).
+      No live user (≠ ``CHECKPOINT``).
 
     → 见设计: docs/03-AI核心/执行引擎架构设计.md §受监督的波循环
     """
 
     CHECKPOINT = "checkpoint"
-    BIND = "bind"
     SCOPE = "scope"
 
 
@@ -63,8 +59,7 @@ class BoundaryOutcome(Enum):
     verdict so the same seam serves both arms:
 
     - ``PROCEED``: resolve and keep scheduling — a CHECKPOINT continues to the gated
-      downstream; a BIND means the host finalised the node(s) in place
-      (``bind_after_deps`` cleared), so the next ready-scan dispatches them.
+      downstream.
     - ``YIELD``: soft-pause like ``should_stop`` — drain in-flight, return the partial
       map with the un-run tail LEFT OUT, so a resume re-runs exactly it (the CEO-arm
       hand-back: the CEO acts on the boundary then resumes the same DAG).
@@ -81,7 +76,7 @@ class BoundaryOutcome(Enum):
 # boundary with the reason, the triggering node(s), and the completed-so-far map;
 # returns the :class:`BoundaryOutcome`. Like :data:`RunExecutor` it stays a
 # host-injected callable, so the scheduler owns no interaction / LLM concern — the
-# host decides how to resolve each boundary (user plan_review or CEO late-binding).
+# host decides how to resolve each boundary (user plan_review or CEO replan).
 OnBoundary = Callable[
     [BoundaryReason, Sequence[RunSpec], Mapping[str, RunState]],
     Awaitable[BoundaryOutcome],

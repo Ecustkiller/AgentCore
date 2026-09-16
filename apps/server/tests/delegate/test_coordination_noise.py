@@ -1,10 +1,9 @@
-"""CEO 协调层唤醒降噪（失败才叫醒 / 空转退避 / 里程碑 synthesis / 缺依赖搭车）。
+"""CEO 协调层唤醒降噪（失败才叫醒 / 空转退避 / 缺依赖搭车）。
 
 对应五项降噪措施中的协调层部分（前端团队进展卡片见桌面端 vitest）：
 1. 例行成功完成不叫醒；失败立刻叫醒并收口级联 skip；终局 / 升级不拖延。
 2. 空转唤醒降频：idle 巡查按 ``2**idle_streak`` 退避；忙等（有 in-flight）不叫醒 CEO；
    无人 in-flight 的卡死仍发 patrol nudge；真实事件重置。
-3. synthesis 里程碑化：工具描述强调里程碑，例行完成不写；注入不再复述 HOW。
 5. suspect_missing_dep 搭车既有注入通道呈现给 CEO（不新增独立唤醒）。
 """
 
@@ -24,7 +23,6 @@ from agentcore.runtime.coordination.session import (
     current_execution_id,
     set_active_coordination,
 )
-from agentcore.runtime.coordination.tools import UpdateSynthesisTool
 from agentcore.runtime.coordination.wait import await_coordination_injection
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.runs.builder import build_run_plan
@@ -354,20 +352,7 @@ async def test_idle_timeout_bumps_backoff_and_real_event_resets(monkeypatch):
         clear_active_coordination()
 
 
-# --- synthesis 里程碑化（Task 3）-----------------------------------------------
-
-
-def test_update_synthesis_tool_is_milestone_only():
-    tool = UpdateSynthesisTool(sink=EventSink())
-    desc = tool.schema.description
-    assert "里程碑" in desc
-    assert "例行完成" in desc
-    assert "新结论" in desc or "方向修正" in desc
-    assert "谁还在跑" not in desc
-    assert "content_delta" not in desc
-    draft_desc = tool.schema.parameters["properties"]["draft"]["description"]
-    assert "新结论" in draft_desc
-    assert "纯进度播报" not in draft_desc
+# --- 协调套件 when-to-use（注入不复述 HOW）--------------------------------------
 
 
 def test_coordination_tool_schemas_are_short_triggers():
@@ -404,7 +389,7 @@ def test_coordination_tool_schemas_are_short_triggers():
     queue_desc = QueueUserMessageTool(sink=EventSink()).schema.description
     assert "无关" in queue_desc
     assert "FIFO" not in queue_desc
-    assert "update_synthesis / delegate / cancel_worker" not in queue_desc
+    assert "delegate / cancel_worker" not in queue_desc
 
 
 def test_inject_footer_does_not_repeat_tool_how():
@@ -437,7 +422,6 @@ def test_inject_interjection_keeps_text_and_queue_entry():
     assert "queue_user_message(interjection_id=inj-1)" in text
     assert "旧进度旁白" not in text
     assert "收到，仍按原计划" not in text
-    assert "update_synthesis / delegate" not in text
     assert "勿假装已办" not in text
 
 

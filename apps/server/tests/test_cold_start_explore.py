@@ -11,7 +11,6 @@ import pytest
 
 from agentcore.memory.explore_profile import (
     build_workspace_key,
-    compute_workspace_explore_fingerprint,
     evaluate_explore_fingerprint_drift,
     filter_topics_by_scope_cap,
     folder_profile_explore_reason,
@@ -26,7 +25,6 @@ from agentcore.memory.explore_profile import (
     record_explore_closeout,
     record_explore_workspace_key,
     resolve_hard_explore_reason,
-    user_named_explore_refresh,
     write_folder_navigation,
     write_folder_profile_cas,
     write_folder_topics_replace,
@@ -426,10 +424,11 @@ async def test_update_folder_profile_refuses_bare_chat(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_update_folder_profile_writes_and_hot_refreshes(tmp_path, ep_store):
+async def test_update_folder_profile_does_not_write_or_hot_refresh(tmp_path, ep_store):
     store = FileMemoryStore(tmp_path)
     uid = str(uuid4())
     folder = str(uuid4())
+    await store.save(uid, CORE_MEMORY_FILE, "## 技术栈与工具\n- Existing\n", scope=folder)
     holder = _PromptHolder(_system_prompt="worker base\n<设定>\nold\n</设定>")
     tool = UpdateFolderProfileTool(
         folder_id=folder,
@@ -442,13 +441,14 @@ async def test_update_folder_profile_writes_and_hot_refreshes(tmp_path, ep_store
         _ctx(user_id=uid),
     )
     assert res.success
+    assert res.display["written"] is False
     assert res.display["kind"] == "folder_profile"
-    assert "TypeScript" in res.output
-    assert "<文件夹画像已更新>" in holder._system_prompt
-    assert "TypeScript" in holder._system_prompt
+    assert "TypeScript" not in res.output
+    assert "<文件夹画像已更新>" not in holder._system_prompt
     loaded = await store.load(uid, CORE_MEMORY_FILE, scope=folder)
-    assert "TypeScript" in loaded
-    assert await load_explore_workspace_key(ep_store, uid, folder) == f"folder:{folder}"
+    assert "Existing" in loaded
+    assert "TypeScript" not in loaded
+    assert await load_explore_workspace_key(ep_store, uid, folder) is None
 
 
 @pytest.mark.asyncio
@@ -470,15 +470,19 @@ async def test_remember_does_not_touch_folder_profile(tmp_path, monkeypatch):
     def _fake_factory():
         return _FakeSession()
 
-    async def _fake_mutate(repo, user_id, *, folder_id, action="add", content=None, replaces=None):  # noqa: ANN001
+    async def _fake_mutate(repo, user_id, **kwargs):  # noqa: ANN001
         from agentcore.memory.rules_injection import UserRuleMutationResult
 
+        action = str(kwargs.get("action") or "write")
+        name = str(kwargs.get("name") or "回复语言.md")
+        content = kwargs.get("content")
         return UserRuleMutationResult(
             action=action,
             changed=True,
-            message=f"已追加规则：{content}",
-            markdown=f"- {content}\n",
-            content=content,
+            message=f"已写入规则「{name}」（常驻）。",
+            name=name,
+            apply="always",
+            content=content if isinstance(content, str) else None,
         )
 
     monkeypatch.setattr(remember_mod, "async_session_factory", _fake_factory)
@@ -486,12 +490,15 @@ async def test_remember_does_not_touch_folder_profile(tmp_path, monkeypatch):
     monkeypatch.setattr(remember_mod, "DocumentRepository", lambda session: object())
 
     tool = RememberTool(folder_id=folder)
-    res = await tool.execute({"content": "以后都用中文回复"}, _ctx(user_id=uid))
+    res = await tool.execute(
+        {"name": "回复语言.md", "content": "以后都用中文回复"},
+        _ctx(user_id=uid),
+    )
     assert res.success
     assert res.display["kind"] == "user_rule"
     assert await store.load(uid, CORE_MEMORY_FILE, scope=folder) == ""
     assert "画像" in tool.schema.description
-    assert "update_folder_profile" in tool.schema.description
+    assert "update_folder_profile" not in tool.schema.description
 
 
 # --- 提示词闸：画像空注入 / 闲聊纪律文案 -----------------------------------------
@@ -523,10 +530,6 @@ def test_compose_prompt_cold_start_block_only_when_flagged():
     assert "闲聊不开幕" not in block
     assert "remember" in block
     assert "写盘不得出 AgentCore/" in block
-    assert "假画像" not in block
-    assert "摸完整仓" not in block
-    assert "与巩固侧" not in block
-    assert "team_preview" not in block
 
 
 def test_compose_prompt_empty_and_rebind_no_longer_open_the_act():
@@ -559,29 +562,17 @@ def test_compose_prompt_refresh_gate():
     assert "【冷启动探索幕 · 绑定已变】" not in text
     assert "写盘不得出 AgentCore/" in text
     assert "create_folder 新建的云文件夹除外" in text
-    assert "文档/项目" not in text
-    assert "勿让 worker 以 form=files" not in text
 
 
-def test_user_named_explore_refresh_allow_list():
-    """产品口径改「文件夹」，但用户仍会说「项目」——两种说法都得认。"""
-    assert user_named_explore_refresh("请重新了解项目") is True
-    assert user_named_explore_refresh("先了解一下这个仓库") is True
-    assert user_named_explore_refresh("刷新项目记忆") is True
-    assert user_named_explore_refresh("刷新文件夹记忆") is True
-    assert user_named_explore_refresh("帮我改一下 README") is False
-    assert user_named_explore_refresh("探索一下这个 API") is False
-    assert user_named_explore_refresh("") is False
-
-
-def test_resolve_hard_explore_reason_only_named_refresh():
-    """Empty / 工程短语 / rebind 都不 pending；只有点名 refresh。"""
+def test_resolve_hard_explore_reason_never_opens_write_act():
+    """Empty / 工程短语 / rebind / 点名「先了解」都不 pending。"""
     assert resolve_hard_explore_reason("empty", "进度条卡 0% 请修一下") is None
     assert resolve_hard_explore_reason("empty", "请继续开发这个功能") is None
-    assert resolve_hard_explore_reason("empty", "请先了解一下这个仓库") == "refresh"
-    assert resolve_hard_explore_reason(None, "请重新了解项目") == "refresh"
+    assert resolve_hard_explore_reason("empty", "请先了解一下这个仓库") is None
+    assert resolve_hard_explore_reason(None, "请重新了解项目") is None
     assert resolve_hard_explore_reason("rebind", "随便说说") is None
-    assert resolve_hard_explore_reason("rebind", "请先了解一下这个仓库") == "refresh"
+    assert resolve_hard_explore_reason("rebind", "请先了解一下这个仓库") is None
+    assert resolve_hard_explore_reason("refresh", "刷新文件夹记忆") is None
 
 
 def test_compose_prompt_without_profile_tool_skips_write_hint():
@@ -596,7 +587,7 @@ def test_compose_prompt_without_profile_tool_skips_write_hint():
 
 
 def test_compose_prompt_profile_write_how_lives_on_tool_schema():
-    """when-to-use 在按钮；核不挂写入手册；写完继续原请求只在回执。"""
+    """Retired writer: schema matches execute (no-write close-out)."""
     skills = build_system_skill_registry()
     text = compose_ceo_chat_prompt(
         "BASE",
@@ -608,9 +599,8 @@ def test_compose_prompt_profile_write_how_lives_on_tool_schema():
     tool = UpdateFolderProfileTool()
     desc = tool.schema.description
     blob = desc + json.dumps(tool.schema.parameters, ensure_ascii=False)
-    assert "探索幕" in desc
-    assert "画像.md" in desc
-    assert "导航.md" in desc
+    assert "不再写入" in desc
+    assert "画像" in desc
     assert "立刻继续" not in desc
     assert "topics" not in desc
     assert "topics" in tool.schema.parameters["properties"]
@@ -643,7 +633,7 @@ def test_normalize_and_parse_explore_topics():
 
 
 @pytest.mark.asyncio
-async def test_update_folder_profile_writes_topics(tmp_path):
+async def test_update_folder_profile_does_not_write_topics(tmp_path):
     store = FileMemoryStore(tmp_path)
     uid = str(uuid4())
     folder = str(uuid4())
@@ -661,17 +651,17 @@ async def test_update_folder_profile_writes_topics(tmp_path):
         _ctx(user_id=uid),
     )
     assert res.success
-    assert res.display["topics"] == ["主题/runtime.md", "主题/desktop.md"]
-    assert "立刻继续" in res.output
-    assert "需要我继续吗" in res.output
-    assert "Monorepo" in await store.load(uid, CORE_MEMORY_FILE, scope=folder)
-    assert "apps/server" in await store.load(uid, "主题/runtime.md", scope=folder)
-    assert "apps/desktop" in await store.load(uid, "主题/desktop.md", scope=folder)
+    assert res.display["written"] is False
+    assert res.display["topics"] == []
+    assert "立刻继续" not in res.output
+    assert await store.load(uid, CORE_MEMORY_FILE, scope=folder) == ""
+    assert await store.load(uid, "主题/runtime.md", scope=folder) == ""
+    assert await store.load(uid, "主题/desktop.md", scope=folder) == ""
 
 
 @pytest.mark.asyncio
-async def test_update_folder_profile_soft_top_five_topics(tmp_path):
-    """T2: >5 topics truncate with warning; do not hard-reject the call."""
+async def test_update_folder_profile_ignores_topic_payload(tmp_path):
+    """Topics in the call are ignored; nothing is written even past the old soft top."""
     store = FileMemoryStore(tmp_path)
     uid = str(uuid4())
     folder = str(uuid4())
@@ -684,14 +674,15 @@ async def test_update_folder_profile_soft_top_five_topics(tmp_path):
         _ctx(user_id=uid),
     )
     assert res.success
-    assert len(res.display["topics"]) == 5
-    assert "超过" in res.output
+    assert res.display["topics"] == []
     assert await store.load(uid, "主题/t5.md", scope=folder) == ""
-    assert "body 4" in await store.load(uid, "主题/t4.md", scope=folder)
+    assert await store.load(uid, "主题/t4.md", scope=folder) == ""
 
 
 @pytest.mark.asyncio
-async def test_update_folder_profile_writes_navigation_and_fingerprint(tmp_path, ep_store):
+async def test_update_folder_profile_does_not_write_navigation_or_fingerprint(
+    tmp_path, ep_store
+):
     store = FileMemoryStore(tmp_path)
     uid = str(uuid4())
     folder = str(uuid4())
@@ -713,14 +704,12 @@ async def test_update_folder_profile_writes_navigation_and_fingerprint(tmp_path,
         ctx,
     )
     assert res.success
-    assert res.display["navigation"] == NAVIGATION_MEMORY_FILE
+    assert res.display["written"] is False
+    assert res.display["navigation"] is None
     nav = await store.load(uid, NAVIGATION_MEMORY_FILE, scope=folder)
-    assert "示例仓" in nav
-    assert await load_explore_workspace_key(ep_store, uid, folder) == f"folder:{folder}"
-    fp = await load_explore_fingerprint(ep_store, uid, folder)
-    assert fp
-    live = await compute_workspace_explore_fingerprint(backend)
-    assert fp == live
+    assert nav == ""
+    assert await load_explore_workspace_key(ep_store, uid, folder) is None
+    assert await load_explore_fingerprint(ep_store, uid, folder) is None
 
 
 @pytest.mark.asyncio
@@ -779,7 +768,6 @@ def test_compose_prompt_folder_nav_stale_soft_hint():
     assert "用户点名刷新" in blocked
     assert "【文件夹结构提示】" not in blocked
     assert "写盘不得出 AgentCore/" in blocked
-    assert "勿让 worker 以 form=files" not in blocked
     # Empty / rebind no longer open the act — stale hint still shows.
     empty = compose_ceo_chat_prompt(
         "BASE",
@@ -807,7 +795,7 @@ def test_compose_prompt_folder_profile_empty_soft_hint_absent():
 
 @pytest.mark.asyncio
 async def test_update_folder_profile_clears_explore_pending(tmp_path):
-    """画像写入成功须翻转 ToolContext.cold_start_explore_pending，避免误伤同回合交付批。"""
+    """调用须翻转 leftover ``cold_start_explore_pending``，即使并未写盘。"""
     store = FileMemoryStore(tmp_path)
     uid = str(uuid4())
     folder = str(uuid4())
@@ -828,7 +816,7 @@ async def test_update_folder_profile_clears_explore_pending(tmp_path):
 
 @pytest.mark.asyncio
 async def test_update_folder_profile_clears_pending_across_replace_copy(tmp_path):
-    """引擎 replace(on_phase=…) 后写画像，pipeline base 上的 delegate 必须立刻看见。"""
+    """引擎 replace(on_phase=…) 后调用，pipeline base 上的 leftover pending 必须立刻看见。"""
     store = FileMemoryStore(tmp_path)
     uid = str(uuid4())
     folder = str(uuid4())

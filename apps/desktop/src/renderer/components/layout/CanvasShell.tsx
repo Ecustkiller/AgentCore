@@ -21,7 +21,7 @@ export interface CanvasShellProps {
 }
 
 /**
- * Deep-page chrome for 白板 / 工作流画布 inside AppShell main.
+ * Deep-page chrome for 白板画布 inside AppShell main.
  * Does not own the engine or any in-canvas toolbar.
  */
 export function CanvasShell({

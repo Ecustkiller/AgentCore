@@ -25,6 +25,13 @@ from agentcore.llm.byok_provider_presets import match_byok_provider_preset
 MatchKind = Literal["exact", "prefix", "contains"]
 
 
+# Official Chat Completions control tokens for DeepSeek V4 / Flash (aliases
+# like medium/xhigh are accepted upstream but map onto this set — product UI
+# only lists these).
+DEEPSEEK_REASONING_EFFORT_OPTIONS: tuple[str, ...] = ("low", "high", "max")
+DEEPSEEK_REASONING_EFFORT_DEFAULT = "high"
+
+
 @dataclass(frozen=True)
 class WireDialect:
     """Wire-shape behaviour for one resolved model id (defaults = clean OpenAI)."""
@@ -33,6 +40,9 @@ class WireDialect:
     echo_reasoning_content: bool = False
     # Honors ``thinking: {type: enabled|disabled}`` on the request body.
     thinking_type_switch: bool = False
+    # Official vendor ``reasoning_effort`` control tokens. Empty = do not send.
+    reasoning_effort_options: tuple[str, ...] = ()
+    reasoning_effort_default: str | None = None
     # Upstream rejects wire ``temperature`` — omit rather than send a default.
     omit_temperature: bool = False
     # ``probe_tools``: HTTP 400 under ``tool_choice=required`` → retry without it.
@@ -60,6 +70,8 @@ class _DialectOverlay:
     pattern: str
     echo_reasoning_content: bool | None = None
     thinking_type_switch: bool | None = None
+    reasoning_effort_options: tuple[str, ...] | None = None
+    reasoning_effort_default: str | None = None
     omit_temperature: bool | None = None
     retry_forced_tool_choice_on_400: bool | None = None
     use_max_completion_tokens: bool | None = None
@@ -82,9 +94,22 @@ def wire_model_leaf(model: str) -> str:
 _DIALECT_OVERLAYS: tuple[_DialectOverlay, ...] = (
     # DeepSeek family: tool-loop must echo reasoning_content.
     _DialectOverlay("prefix", "deepseek", echo_reasoning_content=True),
-    # DeepSeek V4 / V4.1 Flash (+ Hy3 below): thinking.type enabled/disabled.
-    _DialectOverlay("prefix", "deepseek-v4", thinking_type_switch=True),
-    _DialectOverlay("prefix", "deepseek-flash", thinking_type_switch=True),
+    # DeepSeek V4 / V4.1 Flash: thinking.type + official effort tokens.
+    # Hy3 below stays switch-only (do not inherit this effort table).
+    _DialectOverlay(
+        "prefix",
+        "deepseek-v4",
+        thinking_type_switch=True,
+        reasoning_effort_options=DEEPSEEK_REASONING_EFFORT_OPTIONS,
+        reasoning_effort_default=DEEPSEEK_REASONING_EFFORT_DEFAULT,
+    ),
+    _DialectOverlay(
+        "prefix",
+        "deepseek-flash",
+        thinking_type_switch=True,
+        reasoning_effort_options=DEEPSEEK_REASONING_EFFORT_OPTIONS,
+        reasoning_effort_default=DEEPSEEK_REASONING_EFFORT_DEFAULT,
+    ),
     # Hy3 / Hy3 Preview only — other TokenHub ``hy-*`` stay clean OpenAI.
     _DialectOverlay(
         "exact",
@@ -152,6 +177,8 @@ def resolve_wire_dialect(model: str, *, base_url: str | None = None) -> WireDial
     leaf = wire_model_leaf(model)
     echo = False
     thinking = False
+    effort_options: tuple[str, ...] = ()
+    effort_default: str | None = None
     omit_temp = False
     # Universal default: keep forced-tool_choice 400 retry (historical behaviour).
     retry_required = True
@@ -163,6 +190,10 @@ def resolve_wire_dialect(model: str, *, base_url: str | None = None) -> WireDial
             echo = echo or rule.echo_reasoning_content
         if rule.thinking_type_switch is not None:
             thinking = thinking or rule.thinking_type_switch
+        if rule.reasoning_effort_options is not None:
+            effort_options = rule.reasoning_effort_options
+        if rule.reasoning_effort_default is not None:
+            effort_default = rule.reasoning_effort_default
         if rule.omit_temperature is not None:
             omit_temp = omit_temp or rule.omit_temperature
         if rule.retry_forced_tool_choice_on_400 is not None:
@@ -178,7 +209,42 @@ def resolve_wire_dialect(model: str, *, base_url: str | None = None) -> WireDial
     return WireDialect(
         echo_reasoning_content=echo,
         thinking_type_switch=thinking,
+        reasoning_effort_options=effort_options,
+        reasoning_effort_default=effort_default,
         omit_temperature=omit_temp,
         retry_forced_tool_choice_on_400=retry_required,
         use_max_completion_tokens=use_max_completion,
     )
+
+
+def reasoning_effort_spec(model: str) -> tuple[tuple[str, ...], str] | None:
+    """Official vendor effort tokens + default, or None when the leaf does not send it."""
+    dialect = resolve_wire_dialect(model)
+    if not dialect.reasoning_effort_options:
+        return None
+    default = dialect.reasoning_effort_default or dialect.reasoning_effort_options[0]
+    return dialect.reasoning_effort_options, default
+
+
+def effective_reasoning_effort(
+    model: str,
+    *,
+    thinking: bool | None,
+    stored: str | None,
+    base_url: str | None = None,
+) -> str | None:
+    """Token that Chat Completions would send, or None when the leaf omits the field.
+
+    Matches ``OpenAICompatibleProvider._build_payload``: thinking-off and
+    non-switch leaves skip it; invalid / empty stored values snap to the
+    vendor default.
+    """
+    dialect = resolve_wire_dialect(model, base_url=base_url)
+    if not dialect.thinking_type_switch or thinking is False:
+        return None
+    options = dialect.reasoning_effort_options
+    if not options:
+        return None
+    if stored in options:
+        return stored
+    return dialect.reasoning_effort_default or options[0]

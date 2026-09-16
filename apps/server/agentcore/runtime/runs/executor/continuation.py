@@ -43,6 +43,7 @@ from agentcore.runtime.runs.executor.shared import (
     _continuation_message,
     _priced_failure,
     _react_and_capture,
+    run_wire_reasoning_effort,
 )
 from agentcore.runtime.runs.executor.started_run_close import (
     emit_run_cancelled_if_unterminated,
@@ -500,6 +501,7 @@ async def _continue_run_scoped(
                 model=priced_model,
                 usage=usage,
                 cost=cost,
+                reasoning_effort=run_wire_reasoning_effort(request_model, profile),
                 debrief=debrief,
                 output_files=touched or None,
             )

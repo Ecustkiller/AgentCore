@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.model_selection import (
     SelectedCall,
@@ -9,6 +11,7 @@ from agentcore.llm.model_selection import (
     select_call,
     select_for_scenario,
     select_turn_model,
+    select_turn_profiles,
     turn_profiles_for_turn,
 )
 from agentcore.llm.profiles import PLATFORM_PROVIDER_SENTINEL, TurnProfiles, get_profile
@@ -32,6 +35,26 @@ def test_chat_and_agent_profiles_enable_thinking():
     )
     assert req.thinking is True
     assert req.scenario == "chat"
+    assert req.reasoning_effort is None
+
+
+def test_turn_profiles_overlays_effort_on_thinking_scenarios():
+    turn = TurnProfiles(model="deepseek-v4-flash", reasoning_effort="low")
+    assert turn.get("chat").reasoning_effort == "low"
+    assert turn.get("agent").reasoning_effort == "low"
+    assert turn.get("title").reasoning_effort is None
+    req = build_selected_request(
+        select_for_scenario(turn, "chat"),
+        [LLMMessage(role="user", content="hi")],
+    )
+    assert req.reasoning_effort == "low"
+    title = build_selected_request(
+        select_for_scenario(turn, "title"),
+        [LLMMessage(role="user", content="hi")],
+        stream=False,
+    )
+    assert title.reasoning_effort is None
+    assert title.thinking is False
 
 
 def test_select_for_scenario_uses_worker_route_prefix():
@@ -88,3 +111,34 @@ def test_turn_profiles_for_turn_uses_credentials_model():
     )
     profiles = turn_profiles_for_turn(None, creds)
     assert profiles.model == "user-model"
+
+
+@pytest.mark.anyio
+async def test_select_turn_profiles_overlays_combo_effort(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from agentcore.llm.model_profiles import ExpandedProfile
+    from agentcore.llm.resolve import ModelSelection
+
+    expanded = ExpandedProfile(
+        profile_id="p1",
+        name="combo",
+        kind="user",
+        main=ModelSelection(model="deepseek-v4-flash", origin="platform"),
+        worker=None,
+        reasoning_effort="low",
+    )
+    monkeypatch.setattr(
+        "agentcore.llm.model_profiles.LlmModelProfileService.expand_for_conversation",
+        AsyncMock(return_value=expanded),
+    )
+    monkeypatch.setattr(
+        "agentcore.llm.resolve.resolve_credentials",
+        AsyncMock(return_value=None),
+    )
+    turn = await select_turn_profiles(MagicMock(), SimpleNamespace(), "u1")
+    assert turn.model == "deepseek-v4-flash"
+    assert turn.reasoning_effort == "low"
+    assert turn.get("chat").reasoning_effort == "low"
+    assert turn.get("title").reasoning_effort is None

@@ -716,7 +716,10 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='coordination.settled_via_replaced'),
     EventSpec(name='coordination.sibling_role_rejected'),
     EventSpec(name='coordination.skipped'),
-    EventSpec(name='coordination.synthesis_updated'),
+    EventSpec(
+        name='coordination.synthesis_updated',
+        description='历史兼容：曾在 CEO 写队长节点过程稿时发出；两支写笔已收，不再发此事件',
+    ),
     EventSpec(name='coordination.team_done_shortcircuit'),
     EventSpec(name='coordination.terminal_posted'),
     EventSpec(name='coordination.terminal_unsettled'),
@@ -790,9 +793,9 @@ EVENTS: list[EventSpec] = [
     EventSpec(
         name='cost.prefix_cache',
         description=(
-            '前缀缓存实测（hit_ratio 命中率 + breach/breach_section 击穿归因 + reusable/forfeited；'
-            'cache_reported=false 表示上游没报缓存，不等于 0% 命中）；debug 级：默认 LOG_LEVEL=info'
-            ' 查不到，要留行须 LOG_LEVEL=DEBUG'
+            '前缀缓存实测（hit_ratio 命中率 + breach/breach_section 击穿归因 + reusable/forfeited +'
+            ' tools_changed；cache_reported=false 表示上游没报缓存，不等于 0% 命中）；debug 级：默'
+            '认 info 查不到，生产看 llm.call 的 prefix_breach'
         ),
         fields={
             'breach': FieldType('str'),
@@ -812,6 +815,8 @@ EVENTS: list[EventSpec] = [
             'scenario': FieldType('str'),
             'stable_prefix_chars': FieldType('int'),
             'stable_prefix_messages': FieldType('int'),
+            'tools_changed': FieldType('bool'),
+            'tools_count': FieldType('int'),
         },
     ),
     EventSpec(name='cost.pricing_fallback'),
@@ -1088,7 +1093,10 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='delegate.target_desktop_applied'),
     EventSpec(name='delegate.target_folder_cloud_failed'),
     EventSpec(name='delegate.target_folder_db_unreachable'),
-    EventSpec(name='delegate.team_synthesis_preview_failed'),
+    EventSpec(
+        name='delegate.team_synthesis_preview_failed',
+        description='历史兼容：曾在引擎旁路拼团队进展预览失败时发出；预览通道已收，不再发此事件',
+    ),
     EventSpec(name='delegate.thrash_note_failed'),
     EventSpec(name='delegate.thrash_rebrand_rejected'),
     EventSpec(name='delegate.turn_auth_dead_rejected'),
@@ -1322,10 +1330,11 @@ EVENTS: list[EventSpec] = [
     EventSpec(
         name='engine.llm_round_exception',
         description=(
-            'ReAct 一轮 stream 在引擎侧抛了异常（叶子 fence 的 llm.call_failed 可能缺席：流已成功计'
-            '量后消费者再崩）。error_type=异常类名；classified=false 表示未纳入 AgentCoreError、用'
-            '户面走兜底「出了点问题」；origin=stream_round；error 为截断异常字面（无正文）。未分类'
-            '带 traceback（exc_info）'
+            'ReAct 一轮 stream 在引擎侧抛了异常。叶子 fence 观测失败不得改写 inner 成败（见 llm.obs'
+            'ervation_failed）；若仍缺 llm.call_failed，是引擎在收齐 chunk 之后崩了，不是观测通道。'
+            'error_type=异常类名；classified=false 表示未纳入 AgentCoreError、用户面走兜底「出了点'
+            '问题」；origin=stream_round；error 为截断异常字面（无正文）。未分类带 traceback（exc_i'
+            'nfo）'
         ),
         fields={
             'classified': FieldType('bool'),
@@ -1759,7 +1768,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(
         name='llm.call',
         description=(
-            '单次 LLM 调用（latency/tokens/cost_nano；平台代付可带 platform_credential_id）'
+            '单次 LLM 调用（latency/tokens/cost；prefix_breach 为前缀缓存归因，白付不进本行）'
         ),
         fields={
             'cost_nano': FieldType('int'),
@@ -1769,9 +1778,13 @@ EVENTS: list[EventSpec] = [
             'model': FieldType('str'),
             'output_tokens': FieldType('int'),
             'platform_credential_id': FieldType('str'),
+            'prefix_breach': FieldType('str'),
+            'prefix_breach_section': FieldType('str'),
             'reasoning_tokens': FieldType('int'),
             'scenario': FieldType('str'),
             'stream': FieldType('bool'),
+            'tools_changed': FieldType('bool'),
+            'tools_count': FieldType('int'),
         },
     ),
     EventSpec(
@@ -1793,6 +1806,18 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='llm.empty_response'),
     EventSpec(name='llm.inference_envelope_relay'),
     EventSpec(name='llm.inference_unary_bypass'),
+    EventSpec(
+        name='llm.observation_failed',
+        description=(
+            '叶子旁路观测抛错（log_llm_call / log_llm_call_failed；chat fence 与 vision.read 同一 o'
+            'bserve_emit）；已吞掉，不改写 inner 成败。hook=被调函数名'
+        ),
+        fields={
+            'error': FieldType('str'),
+            'error_type': FieldType('str'),
+            'hook': FieldType('str'),
+        },
+    ),
     EventSpec(
         name='llm.rate_limit_no_retry',
         description=(
@@ -1895,10 +1920,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='llm_provider.test.start'),
     EventSpec(name='llm_provider.test.unhandled'),
     EventSpec(name='llm_provider.tested'),
-    EventSpec(name='md_to_docx.exported'),
-    EventSpec(name='md_to_pdf.exported'),
-    EventSpec(name='mechanism_direct.turn_complete'),
-    EventSpec(name='mechanism_direct.turn_start'),
+    EventSpec(name='md_export.exported'),
     EventSpec(name='memory.always_quota_card'),
     EventSpec(name='memory.always_quota_card_failed'),
     EventSpec(name='memory.always_quota_card_suppressed'),
@@ -1951,25 +1973,20 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='memory.explicit_save_quota_denied'),
     EventSpec(name='memory.explore_closeout_meta_written'),
     EventSpec(name='memory.explore_fingerprint_dirty'),
-    EventSpec(name='memory.explore_navigation_failed'),
     EventSpec(name='memory.explore_navigation_written'),
-    EventSpec(name='memory.explore_profile_failed'),
     EventSpec(name='memory.explore_profile_written'),
     EventSpec(name='memory.explore_refresh_done'),
     EventSpec(name='memory.explore_refresh_llm_failed'),
     EventSpec(name='memory.explore_refresh_parse_failed'),
     EventSpec(name='memory.explore_refresh_profile_conflict'),
     EventSpec(name='memory.explore_refresh_run_failed'),
-    EventSpec(name='memory.explore_refresh_scheduled'),
     EventSpec(name='memory.explore_refresh_skip_empty_profile'),
     EventSpec(name='memory.explore_refresh_skipped_no_credentials'),
     EventSpec(name='memory.explore_refresh_timeout'),
     EventSpec(name='memory.explore_refresh_topic_warning'),
-    EventSpec(name='memory.explore_topic_failed'),
     EventSpec(name='memory.explore_topic_written'),
     EventSpec(name='memory.explore_workspace_key_cloud_failed'),
     EventSpec(name='memory.explore_workspace_key_db_unavailable'),
-    EventSpec(name='memory.explore_workspace_key_failed'),
     EventSpec(name='memory.extract_result'),
     EventSpec(name='memory.extract_timeout'),
     EventSpec(name='memory.injection_candidate_dropped'),
@@ -2732,6 +2749,10 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='suspension.retention_swept'),
     EventSpec(name='suspension.saver_failed'),
     EventSpec(name='suspension.turn_paused_capture_failed'),
+    EventSpec(name='table.csv_ingest_failed'),
+    EventSpec(name='table.csv_ingest_read_failed'),
+    EventSpec(name='table.csv_ingest_skipped'),
+    EventSpec(name='table.csv_ingested'),
     EventSpec(name='table.ops_apply'),
     EventSpec(name='table.read'),
     EventSpec(
@@ -2902,7 +2923,6 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='vision.retry'),
     EventSpec(name='vision.timeout_retry'),
     EventSpec(name='wave.bad_topology'),
-    EventSpec(name='wave.bind_proceed_no_progress'),
     EventSpec(name='wave.cancel_cascade_skip'),
     EventSpec(name='wave.hold_inflight_hot_pending'),
     EventSpec(name='wave.width_recomputed'),
@@ -2945,20 +2965,6 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='worker.timeout_grace_end'),
     EventSpec(name='worker.timeout_hard'),
     EventSpec(name='worker.timeout_warn'),
-    EventSpec(name='workflow.pipeline_failed'),
-    EventSpec(name='workflow.run_conversation_missing'),
-    EventSpec(name='workflow.run_failed'),
-    EventSpec(name='workflow.run_finished'),
-    EventSpec(name='workflow.slot_extract_failed'),
-    EventSpec(name='workflow.slot_extract_timeout'),
-    EventSpec(name='workflow.slot_roundtrip_mismatch'),
-    EventSpec(name='workflow.slots_extracted'),
-    EventSpec(name='workflow.trigger.dispatch_failed'),
-    EventSpec(name='workflow.trigger.fire_skipped_busy'),
-    EventSpec(name='workflow.trigger.lease_clear_failed'),
-    EventSpec(name='workflow.trigger.poll_failed'),
-    EventSpec(name='workflow.trigger.poll_spawned'),
-    EventSpec(name='workflow.trigger.schedule_advance_failed'),
     EventSpec(name='working_set.load_failed'),
     EventSpec(name='workspace.artifact_read_failed'),
     EventSpec(

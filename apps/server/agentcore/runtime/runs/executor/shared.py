@@ -36,6 +36,17 @@ FINISH_INTERRUPT_WARNING = (
 )
 
 
+def run_wire_reasoning_effort(model: str, profile: ProfileParams) -> str | None:
+    """Vendor token this run would send, or None when the leaf omits the field."""
+    from agentcore.llm.provider.wire_dialect import effective_reasoning_effort
+
+    return effective_reasoning_effort(
+        model,
+        thinking=profile.thinking,
+        stored=profile.reasoning_effort,
+    )
+
+
 def resolve_finish_override(sink: list[FinishReason]) -> FinishReason | None:
     """Terminal finish stamp = last append on the chronological override sink.
 

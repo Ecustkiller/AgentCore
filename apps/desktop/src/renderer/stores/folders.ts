@@ -29,7 +29,7 @@ export function defaultDraftWorkspaceIntent(): DraftWorkspaceIntent {
 /** Nest the new untitled cloud folder here; omit / null = 我的文件 top level. */
 export type UntitledFolderParentId = string | null;
 
-/** Prefill for {@link useFoldersStore}'s `openImportToCloud` / `openBorrowToCloud`. */
+/** Prefill for {@link useFoldersStore}'s `openBorrowToCloud`. */
 export type ImportToCloudPrefill = {
   /** Existing desktop `FsRoot.id` (e.g. Folder.localRootId). */
   rootId?: string | null;
@@ -73,14 +73,7 @@ interface FoldersUiState {
    *（入口「连接 Git = 云 clone remote」）。
    */
   connectGitWsId: string | null;
-  /** 命令面板 / 文件中枢「导入到云」→ 本机夹快照上传对话框。Composer 三选不走此框。 */
-  importToCloudOpen: boolean;
-  /**
-   * Optional prefill for legacy local migrate：已有 `Folder.localRootId` /
-   * 有效根 id，少一次选夹；找不到仍走 picker。
-   */
-  importToCloudPrefill: ImportToCloudPrefill | null;
-  /** 命令面板 / 文件中枢「云上做完再写入」→ 借用云拷贝对话框。Composer 三选不走此框。 */
+  /** 命令面板 / 文件中枢「云上做完再写入」→ 借用云拷贝对话框。Composer 两选不走此框。 */
   borrowToCloudOpen: boolean;
   /** Optional prefill when the caller already picked the local folder. */
   borrowToCloudPrefill: ImportToCloudPrefill | null;
@@ -95,8 +88,6 @@ interface FoldersUiState {
   resetDraftWorkspaceIntent: () => void;
   openConnectGit: (wsId?: string | null) => void;
   closeConnectGit: () => void;
-  openImportToCloud: (prefill?: ImportToCloudPrefill | null) => void;
-  closeImportToCloud: () => void;
   openBorrowToCloud: (prefill?: ImportToCloudPrefill | null) => void;
   closeBorrowToCloud: () => void;
   togglePinFolder: (id: string) => void;
@@ -113,8 +104,6 @@ export const useFoldersStore = create<FoldersUiState>()(
       pinnedFolderIds: [],
       connectGitOpen: false,
       connectGitWsId: null,
-      importToCloudOpen: false,
-      importToCloudPrefill: null,
       borrowToCloudOpen: false,
       borrowToCloudPrefill: null,
       revealCreatedFolder: (id, opts) =>
@@ -146,13 +135,6 @@ export const useFoldersStore = create<FoldersUiState>()(
         }),
       closeConnectGit: () =>
         set({ connectGitOpen: false, connectGitWsId: null }),
-      openImportToCloud: (prefill) =>
-        set({
-          importToCloudOpen: true,
-          importToCloudPrefill: prefill ?? null,
-        }),
-      closeImportToCloud: () =>
-        set({ importToCloudOpen: false, importToCloudPrefill: null }),
       openBorrowToCloud: (prefill) =>
         set({
           borrowToCloudOpen: true,

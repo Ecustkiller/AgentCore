@@ -17,7 +17,7 @@ const tool: CapabilityTool = {
     type: "object",
     properties: {
       query: { type: "string", description: "检索词" },
-      max_results: { type: "integer", description: "结果数量上限" },
+      language: { type: "string", description: "可选语言" },
     },
     required: ["query"],
   },
@@ -36,10 +36,17 @@ describe("ToolInspector", () => {
     expect(screen.getByText("检索词")).toBeTruthy();
     expect(screen.getByText("query")).toBeTruthy();
     expect(screen.getByText("要填")).toBeTruthy();
-    expect(screen.getByText("max_results")).toBeTruthy();
+    expect(screen.getByText("language")).toBeTruthy();
     expect(screen.queryByTestId("tool-face-source")).toBeNull();
     expect(screen.queryByRole("tab", { name: "源码" })).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("说明书导语是 schema description，不是卡上 summary", () => {
+    render(<ToolInspector tool={tool} hideChrome />);
+    const guide = screen.getByTestId("tool-face-guide");
+    expect(guide.textContent).toContain("一次只搜");
+    expect(guide.textContent).toContain("带出处");
   });
 
   it("空 properties 不写空参提示", () => {

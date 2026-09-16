@@ -44,7 +44,6 @@ import {
 } from "@/services/folders";
 import type { Conversation } from "@/stores/conversation";
 import { useConversationStore } from "@/stores/conversation";
-import { useFoldersStore } from "@/stores/folders";
 import {
   Archive,
   ChevronRight,
@@ -53,7 +52,6 @@ import {
   MoreHorizontal,
   Plus,
   Trash2,
-  Upload,
   Users,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -66,7 +64,7 @@ interface Props {
   convs: Conversation[];
   expanded: boolean;
   onToggleExpanded: () => void;
-  /** Narrow drawer: no 查看全部 / 删夹 / 导入；＋始终可见。权威 → 前端技术 §五. */
+  /** Narrow drawer: no 查看全部 / 删夹；＋始终可见。权威 → 前端技术 §五. */
   surface?: "wide" | "narrow";
   /** Vertical reorder handle; omit when the row is not in a sortable list. */
   sortable?: SortableTabItemProps;
@@ -129,15 +127,6 @@ export function WorkspaceGroupHeader({
   const newChatInFolder = () => {
     setMoreOpen(false);
     startNewConversation(navigate, folder.id);
-  };
-
-  /** Quiet optional convert — same as Composer「导入本机文件夹到云」（非催债）. */
-  const openImportToCloud = () => {
-    setMoreOpen(false);
-    useFoldersStore.getState().openImportToCloud({
-      rootId: folder.localRootId ?? undefined,
-      folderName: folder.name,
-    });
   };
 
   const handleArchiveAll = async () => {
@@ -207,30 +196,8 @@ export function WorkspaceGroupHeader({
     setMembersOpen(true);
   };
 
-  const showImport = groupIsLocal && !narrow;
-  const importMenuItem = showImport ? (
-    <>
-      <ContextMenuItem onSelect={openImportToCloud}>
-        <Upload size={14} className="shrink-0" />
-        <span className="flex-1 truncate">导入到「我的文件」</span>
-      </ContextMenuItem>
-      <ContextMenuSeparator />
-    </>
-  ) : null;
-
-  const importDropdownItem = showImport ? (
-    <>
-      <DropdownMenuItem onSelect={openImportToCloud}>
-        <Upload size={14} className="shrink-0" />
-        <span className="flex-1 truncate">导入到「我的文件」</span>
-      </DropdownMenuItem>
-      <DropdownMenuSeparator />
-    </>
-  ) : null;
-
   const menuItems = (
     <>
-      {importMenuItem}
       {!isViewer && (
         <ContextMenuItem onSelect={newChatInFolder}>
           <Plus size={14} className="shrink-0" />
@@ -280,7 +247,6 @@ export function WorkspaceGroupHeader({
 
   const dropdownItems = (
     <>
-      {importDropdownItem}
       {!isViewer && (
         <DropdownMenuItem onSelect={newChatInFolder}>
           <Plus size={14} className="shrink-0" />

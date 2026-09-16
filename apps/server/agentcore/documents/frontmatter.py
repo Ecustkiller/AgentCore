@@ -1,4 +1,4 @@
-"""Strict md-entry frontmatter: ``apply`` + ``description`` only (no YAML lib).
+"""Strict md-entry frontmatter: ``apply`` + ``description`` + optional ``offers_tools``.
 
 Known keys are parsed as ``key: value`` lines. Unknown keys / comment lines / blank
 lines stay opaque text. Write-back is **text-level minimal edit** — never
@@ -10,6 +10,7 @@ See docs/03-AI核心/Agent记忆与知识系统.md「frontmatter 是唯一可写
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -18,9 +19,11 @@ ApplyMode = Literal["always", "on_demand"]
 _VALID_APPLY: frozenset[str] = frozenset({"always", "on_demand"})
 _FENCE = "---"
 _KNOWN_LINE = re.compile(
-    r"^(\s*)(apply|description)(\s*:\s*)(.*)$",
+    r"^(\s*)(apply|description|offers_tools)(\s*:\s*)(.*)$",
     re.IGNORECASE,
 )
+_OFFER_SPLIT = re.compile(r"[,，、]")
+_OFFER_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
 
 
 @dataclass(frozen=True)
@@ -33,6 +36,8 @@ class ParsedFrontmatter:
     has_frontmatter: bool
     apply_present: bool
     description_present: bool
+    offers_tools: tuple[str, ...] = ()
+    offers_tools_present: bool = False
 
 
 @dataclass(frozen=True)
@@ -102,8 +107,10 @@ def parse_entry_frontmatter(content: str) -> ParsedFrontmatter | FrontmatterErro
 
     apply: ApplyMode = "on_demand"
     description = ""
+    offers_tools: tuple[str, ...] = ()
     apply_present = False
     description_present = False
+    offers_tools_present = False
     for line in split.fm_lines:
         raw = line.rstrip("\r\n")
         m = _KNOWN_LINE.match(raw)
@@ -120,6 +127,9 @@ def parse_entry_frontmatter(content: str) -> ParsedFrontmatter | FrontmatterErro
         elif key == "description":
             description_present = True
             description = value
+        elif key == "offers_tools":
+            offers_tools_present = True
+            offers_tools = parse_offers_tools_tokens(value)
 
     return ParsedFrontmatter(
         apply=apply,
@@ -128,6 +138,8 @@ def parse_entry_frontmatter(content: str) -> ParsedFrontmatter | FrontmatterErro
         has_frontmatter=True,
         apply_present=apply_present,
         description_present=description_present,
+        offers_tools=offers_tools,
+        offers_tools_present=offers_tools_present,
     )
 
 
@@ -136,25 +148,38 @@ def set_entry_frontmatter(
     *,
     apply: ApplyMode | None = None,
     description: str | None = None,
+    offers_tools: Sequence[str] | None = None,
 ) -> str:
     """Text-level minimal edit of known keys. ``None`` = leave that key untouched.
 
     Preserves unknown keys, ``#`` comment lines, blank lines, and existing key order.
     New keys are appended just before the closing fence (or in a new block when absent).
-    Raises :class:`FrontmatterEditError` on unclosed frontmatter (no auto-repair).
+    ``offers_tools=()`` removes the key. Raises :class:`FrontmatterEditError` on
+    unclosed frontmatter (no auto-repair).
     """
-    if apply is None and description is None:
+    if apply is None and description is None and offers_tools is None:
         return content
 
     split = _split_frontmatter(content)
     if isinstance(split, _SplitUnclosed):
         raise FrontmatterEditError("unclosed frontmatter")
     if isinstance(split, _SplitAbsent):
-        return split.bom + _render_new_block(apply=apply, description=description) + split.text
+        return (
+            split.bom
+            + _render_new_block(
+                apply=apply, description=description, offers_tools=offers_tools
+            )
+            + split.text
+        )
 
+    offers_value = (
+        None if offers_tools is None else _format_offers_tools(offers_tools)
+    )
     updated = list(split.fm_lines)
     seen_apply = False
     seen_description = False
+    seen_offers = False
+    drop: set[int] = set()
     for i, line in enumerate(updated):
         raw = line.rstrip("\r\n")
         ending = line[len(raw) :]
@@ -173,6 +198,16 @@ def set_entry_frontmatter(
             seen_description = True
             key_token = m.group(2)
             updated[i] = f"{indent}{key_token}{colon}{description}{comment}{ending}"
+        elif key == "offers_tools" and offers_tools is not None:
+            seen_offers = True
+            if offers_value is None:
+                drop.add(i)
+            else:
+                key_token = m.group(2)
+                updated[i] = f"{indent}{key_token}{colon}{offers_value}{comment}{ending}"
+
+    if drop:
+        updated = [line for i, line in enumerate(updated) if i not in drop]
 
     to_append: list[str] = []
     nl = split.newline
@@ -180,6 +215,8 @@ def set_entry_frontmatter(
         to_append.append(f"apply: {apply}{nl}")
     if description is not None and not seen_description:
         to_append.append(f"description: {description}{nl}")
+    if offers_value is not None and not seen_offers:
+        to_append.append(f"offers_tools: {offers_value}{nl}")
 
     return (
         split.bom
@@ -244,7 +281,10 @@ def set_entry_frontmatter_total(content: str, *, apply: ApplyMode) -> tuple[str,
         if text.startswith("\ufeff"):
             bom = "\ufeff"
             text = text[1:]
-        return bom + _render_new_block(apply=apply, description=None) + text, True
+        return (
+            bom + _render_new_block(apply=apply, description=None, offers_tools=None) + text,
+            True,
+        )
 
 
 def _split_frontmatter(
@@ -304,15 +344,47 @@ def _split_inline_comment(value_raw: str) -> tuple[str, str]:
     return value_raw[:idx].strip(), value_raw[idx:]
 
 
+def parse_offers_tools_tokens(raw: str) -> tuple[str, ...]:
+    """Split a one-line ``offers_tools`` value. Invalid tokens are dropped, not errors."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for part in _OFFER_SPLIT.split(raw or ""):
+        token = part.strip().strip("'\"")
+        if not token or token in seen or _OFFER_TOKEN.fullmatch(token) is None:
+            continue
+        seen.add(token)
+        out.append(token)
+    return tuple(out)
+
+
+def offers_tools_from_content(content: str) -> tuple[str, ...]:
+    """Bound on-demand tool / connector names; empty when parse fails or the key is absent."""
+    parsed = parse_entry_frontmatter(content)
+    if isinstance(parsed, FrontmatterError):
+        return ()
+    return parsed.offers_tools
+
+
+def _format_offers_tools(names: Sequence[str]) -> str | None:
+    tokens = parse_offers_tools_tokens(",".join(names))
+    if not tokens:
+        return None
+    return ", ".join(tokens)
+
+
 def _render_new_block(
     *,
     apply: ApplyMode | None,
     description: str | None,
+    offers_tools: Sequence[str] | None = None,
 ) -> str:
     lines = [_FENCE]
     if apply is not None:
         lines.append(f"apply: {apply}")
     if description is not None:
         lines.append(f"description: {description}")
+    formatted = None if offers_tools is None else _format_offers_tools(offers_tools)
+    if formatted is not None:
+        lines.append(f"offers_tools: {formatted}")
     lines.append(_FENCE)
     return "\n".join(lines) + "\n"

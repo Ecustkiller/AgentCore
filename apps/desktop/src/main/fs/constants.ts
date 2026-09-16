@@ -22,7 +22,6 @@ export const WORKSPACE_EXTRACT_SOURCE_MAX = 25 * 1024 * 1024; // 25 MiB
 // 命中即在 op 结果里回 `truncated: true`——上限可以有，静默不行。
 export const WORKSPACE_LIST_MAX = 100;
 export const GREP_MAX_LINE = 300; // 截断超长命中行（如压缩产物），与服务端对齐
-export const GREP_MAX_FILES = 5000; // 单次 grep 最多打开文件数
 export const GREP_MAX_RESULTS_CAP = 200; // 结果硬上限
 /** grep 单文件大小帽（与服务端 rg_grep.GREP_MAX_FILE_BYTES 对齐，2 MiB） */
 export const GREP_MAX_FILE_BYTES = 2 * 1024 * 1024;

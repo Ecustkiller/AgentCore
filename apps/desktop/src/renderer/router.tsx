@@ -46,7 +46,6 @@ import {
 } from "@/pages/toolbox/manual";
 import { APP_PATHS } from "@/pages/toolbox/manual/paths";
 import { MarketPage } from "@/pages/toolbox/market/MarketPage";
-import { WorkflowEditorPage, WorkflowsPage } from "@/pages/toolbox/workflows";
 import { Navigate, createHashRouter } from "react-router-dom";
 
 export const router = createHashRouter([
@@ -154,9 +153,12 @@ export const router = createHashRouter([
           },
           {
             path: "mine/automations",
-            element: <Navigate to={APP_PATHS.toolbox.workflows.root} replace />,
+            element: <Navigate to={APP_PATHS.toolbox.mine.skills} replace />,
           },
-          { path: "mine/workflows", element: <WorkflowsPage /> },
+          {
+            path: "mine/workflows",
+            element: <Navigate to={APP_PATHS.toolbox.mine.skills} replace />,
+          },
           { path: "market", element: <MarketPage /> },
         ],
       },
@@ -178,23 +180,19 @@ export const router = createHashRouter([
       },
       {
         path: "toolbox/automations",
-        element: <Navigate to={APP_PATHS.toolbox.workflows.root} replace />,
+        element: <Navigate to={APP_PATHS.toolbox.mine.skills} replace />,
       },
       {
         path: "toolbox/automations/inbox",
-        element: <Navigate to={APP_PATHS.toolbox.workflows.root} replace />,
+        element: <Navigate to={APP_PATHS.toolbox.mine.skills} replace />,
       },
       {
         path: "toolbox/workflows",
-        element: <Navigate to={APP_PATHS.toolbox.workflows.root} replace />,
+        element: <Navigate to={APP_PATHS.toolbox.mine.skills} replace />,
       },
       {
         path: "toolbox/workflows/:workflowId",
-        element: (
-          <NarrowBlockedPage>
-            <WorkflowEditorPage />
-          </NarrowBlockedPage>
-        ),
+        element: <Navigate to={APP_PATHS.toolbox.mine.skills} replace />,
       },
       {
         path: "toolbox/manual",
@@ -216,14 +214,14 @@ export const router = createHashRouter([
         path: "explore",
         element: <Navigate to={APP_PATHS.toolbox.mine.skills} replace />,
       },
-      // 旧自动化 / 收件箱书签全部收向工作流列表。
+      // 旧工作流 / 自动化书签进提示词。
       {
         path: "more/automations",
-        element: <Navigate to={APP_PATHS.toolbox.workflows.root} replace />,
+        element: <Navigate to={APP_PATHS.toolbox.mine.skills} replace />,
       },
       {
         path: "more/inbox",
-        element: <Navigate to={APP_PATHS.toolbox.workflows.root} replace />,
+        element: <Navigate to={APP_PATHS.toolbox.mine.skills} replace />,
       },
       // 产品公告 inbox 已迁 IM 官方号；旧书签 / 手册路径收向消息页。
       { path: "more/notices", element: <RedirectToOfficialChat /> },

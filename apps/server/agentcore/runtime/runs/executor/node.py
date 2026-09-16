@@ -39,6 +39,7 @@ from agentcore.runtime.runs.executor.retry import (
     should_skip_full_contract_retry_for_round_ceiling,
 )
 from agentcore.runtime.runs.executor.setup import prepare_agent_node
+from agentcore.runtime.runs.executor.shared import run_wire_reasoning_effort
 from agentcore.runtime.runs.executor.started_run_close import (
     emit_run_cancelled_if_unterminated,
 )
@@ -48,7 +49,7 @@ from agentcore.runtime.runs.executor.terminal import (
     handle_agent_node_cancel,
     handle_agent_node_exception,
 )
-from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
+from agentcore.runtime.runs.types import RunSpec, RunState
 
 # Re-exports for existing test imports (do not grow new external ``_`` callers).
 __all__ = [
@@ -67,17 +68,11 @@ __all__ = [
 ]
 
 
-def _is_infra_hot_continue(
-    completed: Mapping[str, RunState], spec: RunSpec
-) -> bool:
-    """True when a prior hop seeded this run_id with a transient FAILED transcript."""
-    prior = completed.get(spec.run_id)
-    return (
-        prior is not None
-        and prior.phase is RunPhase.FAILED
-        and bool(prior.transcript)
-        and prior.error_retryable
-    )
+def _has_resume_window(spec: RunSpec) -> bool:
+    """True when Wave bound a crash/infra window for this unfinished run_id."""
+    from agentcore.runtime.runs.redrive_sites import is_resume_site
+
+    return is_resume_site(spec.run_id)
 
 
 async def execute_agent_node(
@@ -86,9 +81,9 @@ async def execute_agent_node(
     completed: Mapping[str, RunState],
     agent_id: str,
 ) -> RunState:
-    # Same run_id already started: a Wave seed-continue must not emit a second
+    # Same run_id already started: a resume window must not emit a second
     # run_started (fold last-write-wins would hide the live extra frame).
-    if not _is_infra_hot_continue(completed, spec):
+    if not _has_resume_window(spec):
         env.sink.emit(
             run_started(
                 spec.run_id,
@@ -191,6 +186,9 @@ async def execute_agent_node(
             received_blocks=prepared.received_blocks,
             tool_ctx=loop_result.tool_ctx,
             runtime_file_products=loop_result.runtime_file_products,
+            reasoning_effort=run_wire_reasoning_effort(
+                prepared.request_model, prepared.profile
+            ),
         )
     except asyncio.CancelledError as e:
         salvaged = handle_agent_node_cancel(

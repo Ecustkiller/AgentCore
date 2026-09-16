@@ -102,6 +102,53 @@ export function slotHasCatalogVision(
   return (item?.capabilities ?? []).includes("vision");
 }
 
+/** Official vendor thinking-effort tokens for this slot's catalog row, or null. */
+export function catalogReasoningEffort(
+  slot:
+    | {
+        model: string;
+        origin?: ModelCatalogItem["origin"];
+        provider_id?: string | null;
+      }
+    | null
+    | undefined,
+  catalogModels: ModelCatalogItem[],
+): NonNullable<ModelCatalogItem["reasoning_effort"]> | null {
+  if (!slot) return null;
+  const model = slot.model.trim();
+  if (!model) return null;
+  const item =
+    slot.origin != null
+      ? findCatalogItem(catalogModels, {
+          id: model,
+          origin: slot.origin,
+          providerId: slot.provider_id,
+        })
+      : catalogModels.find((m) => m.id === model);
+  const spec = item?.reasoning_effort;
+  if (!spec?.options.length || !spec.default) return null;
+  return spec;
+}
+
+/** Effective vendor effort token for a combination (stored if listed, else catalog default). */
+export function resolvedProfileEffort(
+  profile: {
+    main: {
+      model: string;
+      origin?: ModelCatalogItem["origin"];
+      provider_id?: string | null;
+    };
+    reasoning_effort?: string | null;
+  },
+  catalogModels: ModelCatalogItem[],
+): string | null {
+  const spec = catalogReasoningEffort(profile.main, catalogModels);
+  if (!spec) return null;
+  const stored = profile.reasoning_effort?.trim() ?? "";
+  if (stored && spec.options.includes(stored)) return stored;
+  return spec.default;
+}
+
 /** List the models this user may pick + the account's currently-resolved model. */
 export function getModels(): Promise<ModelCatalog> {
   return api.get<ModelCatalog>("/v1/users/me/models");

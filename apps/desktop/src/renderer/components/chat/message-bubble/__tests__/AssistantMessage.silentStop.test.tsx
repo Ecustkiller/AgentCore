@@ -156,4 +156,27 @@ describe("AssistantMessage ask settled", () => {
     expect(screen.queryByText("已按你的决定继续")).toBeNull();
     expect(document.querySelector("[data-ask-status='resolved']")).toBeTruthy();
   });
+
+  it("正文等于 question prompt 时也藏", () => {
+    cardsMock.checkpoints = [
+      {
+        ...baseCheckpoint,
+        question: "旧总述",
+        questions: [
+          {
+            id: "q0",
+            prompt: "关于论文有几个方向想先跟你对齐",
+            kind: "text",
+            options: [],
+            multiple: false,
+            default: "",
+          },
+        ],
+        decision: "continue",
+        note: "",
+      },
+    ];
+    renderBubble(settledMessage({ content: "关于论文有几个方向想先跟你对齐" }));
+    expect(screen.queryByTestId("assistant-body")).toBeNull();
+  });
 });

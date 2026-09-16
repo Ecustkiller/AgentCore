@@ -62,12 +62,20 @@ export type FaqAnswerPart =
       rows: { can: string; approve: string; wont: string }[];
     };
 
+export type ManualSurface = "desktop" | "web" | "mobile";
+
+export type ManualAiPlacement = "default" | "optional";
+
 export interface ManualSection {
   id: string;
   title: string;
   /** lucide-react 导出名，如 "Compass" */
   icon: string;
   blocks: ManualBlock[];
+  /** 缺省 = 三端都有。缺席的端：CEO 先说无此入口。 */
+  availability?: ManualSurface[];
+  /** 缺省 = default（宽问可拉）。机制章 = optional。 */
+  ai?: ManualAiPlacement;
 }
 
 export interface ManualChapterContent {

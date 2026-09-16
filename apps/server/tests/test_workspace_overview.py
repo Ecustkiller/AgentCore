@@ -227,6 +227,7 @@ async def test_project_mode_names_conversation_edits_and_reduces_remaining():
     assert "<工作集>" not in out
     assert "file_list" not in out
     assert "md_to_docx" not in out
+    assert "md_export" not in out
 
 
 async def test_bare_chat_does_not_add_conversation_edits():

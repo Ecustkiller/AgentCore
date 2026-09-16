@@ -389,6 +389,7 @@ async function runParallel(jobs) {
 
 async function runDesktopSection({ lite = false } = {}) {
   section("desktop");
+  run("manual corpus check", "pnpm", ["sync:manual-corpus:check"]);
   // Lint first so biome output is not interleaved; it is ~1s. On non-Windows,
   // tsc / vitest / conformance overlap; Win serializes to avoid tinypool IPC death.
   run("desktop lint", "pnpm", ["--filter", "agentcore-desktop", "lint"]);

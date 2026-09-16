@@ -7,7 +7,7 @@ sandbox and no real repo files are read.
 
 from pathlib import Path
 
-from agentcore.tools.builtin.grep import GrepTool
+from agentcore.tools.builtin.grep import _DEFAULT_MAX_RESULTS, GrepTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace._paths import (
@@ -177,6 +177,8 @@ def test_grep_regex_footguns_live_in_receipt_not_schema():
 
 def test_grep_schema_teaches_omit_path_when_unsure():
     schema = GrepTool().schema
+    assert "max_results" not in schema.parameters["properties"]
+    assert "max_results" not in schema.description
     assert "省略 path" not in schema.description
     assert "禁止猜测" not in schema.description
     assert "code_search" in schema.description
@@ -295,27 +297,21 @@ async def test_grep_soft_skips_rg_access_denied(monkeypatch, tmp_path: Path):
 
     (tmp_path / "ok.py").write_text("TODO here\n", encoding="utf-8")
 
-    async def fake_run_rg(rg, args, *, cwd):
-        del rg
-        # ``--files`` listing: pretend one path is denied but still emit ok.py
-        if "--files" in args:
-            return (
-                2,
-                "ok.py\n",
-                "rg: ./poison: Access is denied. (os error 5)\n",
-            )
-        # content search
-        if any(a == "ok.py" or a.endswith("ok.py") for a in args):
-            return (0, "ok.py:1:TODO here\n", "")
-        return (1, "", "")
+    async def fake_run_rg_capped(rg, args, *, cwd, max_lines):
+        del rg, args, cwd, max_lines
+        return (
+            2,
+            ["ok.py:1:TODO here"],
+            "rg: ./poison: Access is denied. (os error 5)\n",
+            False,
+        )
 
-    monkeypatch.setattr(rg_mod, "_run_rg", fake_run_rg)
+    monkeypatch.setattr(rg_mod, "_run_rg_capped", fake_run_rg_capped)
     monkeypatch.setattr(
         rg_mod,
         "resolve_rg_binary",
         lambda: tmp_path / "fake-rg",
     )
-    # require_rg_binary uses resolve; also stub file check via require path
     monkeypatch.setattr(rg_mod, "require_rg_binary", lambda: tmp_path / "fake-rg")
 
     result = await GrepTool().execute({"pattern": "TODO"}, _ctx(tmp_path))
@@ -375,12 +371,13 @@ async def test_grep_single_file_path_ignores_glob(tmp_path: Path):
     assert "app.py:2" in result.output
 
 
-async def test_grep_files_only_lists_files_with_counts(tmp_path: Path):
+async def test_grep_files_only_lists_paths(tmp_path: Path):
     _seed(tmp_path)
     result = await GrepTool().execute({"pattern": "TODO", "files_only": True}, _ctx(tmp_path))
     assert result.success is True
     assert "个文件匹配" in result.output
-    assert "app.py: 1" in result.output
+    assert "app.py" in result.output
+    assert "app.py: 1" not in result.output
     # files_only must not emit individual line bodies
     assert "return a + b" not in result.output
 
@@ -405,27 +402,38 @@ async def test_grep_skips_binary_files(tmp_path: Path):
     assert "blob.bin" not in result.output
 
 
-async def test_grep_truncates_at_max_results(tmp_path: Path):
-    (tmp_path / "many.txt").write_text("hit\n" * 10, encoding="utf-8")
-    result = await GrepTool().execute({"pattern": "hit", "max_results": 3}, _ctx(tmp_path))
+async def test_grep_truncates_at_default_max_results(tmp_path: Path):
+    extra = 10
+    (tmp_path / "many.txt").write_text(
+        "hit\n" * (_DEFAULT_MAX_RESULTS + extra), encoding="utf-8"
+    )
+    result = await GrepTool().execute(
+        {"pattern": "hit", "max_results": 3}, _ctx(tmp_path)
+    )
     assert "[结果已截断" in result.output
-    # 3 matching lines + summary header + truncation note
     body_lines = [ln for ln in result.output.splitlines() if ln.startswith("many.txt:")]
-    assert len(body_lines) == 3
+    assert len(body_lines) == _DEFAULT_MAX_RESULTS
 
 
-async def test_grep_truncation_order_is_stable(tmp_path: Path):
-    """Hits are sorted by (path, line) before the result cap — same order both ends."""
-    (tmp_path / "b.txt").write_text("hit\n", encoding="utf-8")
-    (tmp_path / "a.txt").write_text("hit\nhit\n", encoding="utf-8")
-    (tmp_path / "c.txt").write_text("hit\n", encoding="utf-8")
-    result = await GrepTool().execute({"pattern": "hit", "max_results": 2}, _ctx(tmp_path))
+async def test_grep_truncation_sorts_this_batch_only(tmp_path: Path):
+    """Cap is this-batch size; returned hits are sorted for display."""
+    for name in ("z.txt", "a.txt", "m.txt"):
+        (tmp_path / name).write_text("hit\n" * 40, encoding="utf-8")
+    result = await GrepTool().execute({"pattern": "hit"}, _ctx(tmp_path))
     assert result.success is True
     assert "[结果已截断" in result.output
-    body = [ln for ln in result.output.splitlines() if ":hit" in ln or ln.endswith(": hit")]
-    # path-sorted: a.txt lines first
-    assert body[0].startswith("a.txt:1:")
-    assert body[1].startswith("a.txt:2:")
+    body = [
+        ln
+        for ln in result.output.splitlines()
+        if ln.startswith(("a.txt:", "m.txt:", "z.txt:"))
+    ]
+    assert len(body) == _DEFAULT_MAX_RESULTS
+    keys: list[tuple[str, int]] = []
+    for ln in body:
+        path, rest = ln.split(":", 1)
+        line_no = int(rest.split(":", 1)[0])
+        keys.append((path, line_no))
+    assert keys == sorted(keys)
 
 
 async def test_grep_missing_rg_binary_fails_explicitly(tmp_path: Path, monkeypatch):

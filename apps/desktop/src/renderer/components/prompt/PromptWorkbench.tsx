@@ -8,7 +8,7 @@ import {
   type MarkdownSourceEditorHandle,
 } from "@/components/markdown/MarkdownSourceEditor";
 import { SourceToolbar } from "@/components/markdown/sourceToolbar";
-import { Button, Input, SegmentedControl } from "@/components/ui";
+import { Badge, Button, Input, SegmentedControl } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { Loader2, Save } from "lucide-react";
 import {
@@ -31,6 +31,7 @@ const APPLY_MODE_ITEMS = [
 const TITLE_LABEL = "名称";
 const CATALOG_LINE_LABEL = "一句话介绍";
 const CATALOG_LINE_PLACEHOLDER = "用一句话说这是什么";
+const OFFERED_TOOLS_LABEL = "查阅后启用";
 const AUTOSAVE_DEBOUNCE_MS = 1500;
 
 const TITLE_FIELD_CLASS =
@@ -42,6 +43,12 @@ export interface PromptWorkbenchDraft {
   title: string;
   trigger: string;
   body: string;
+  offeredTools: string[];
+}
+
+export interface BindableToolOption {
+  id: string;
+  label: string;
 }
 
 export function PromptWorkbench({
@@ -52,6 +59,8 @@ export function PromptWorkbench({
   onApplyModeChange,
   initialTrigger,
   triggerEnabled = false,
+  initialOfferedTools,
+  bindableTools,
   initialBody,
   bodyLoading = false,
   readOnly = false,
@@ -68,6 +77,8 @@ export function PromptWorkbench({
   initialTrigger?: string;
   /** Show the catalog line (even when the seed is empty). */
   triggerEnabled?: boolean;
+  initialOfferedTools?: string[];
+  bindableTools?: BindableToolOption[];
   initialBody: string;
   bodyLoading?: boolean;
   readOnly?: boolean;
@@ -79,6 +90,9 @@ export function PromptWorkbench({
   const catalogLineId = useId();
   const [titleValue, setTitleValue] = useState(title);
   const [trigger, setTrigger] = useState(initialTrigger ?? "");
+  const [offeredTools, setOfferedTools] = useState<string[]>(
+    initialOfferedTools ?? [],
+  );
   const [body, setBody] = useState(initialBody);
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState<PromptSaveState>("idle");
@@ -87,6 +101,7 @@ export function PromptWorkbench({
     title,
     trigger: initialTrigger ?? "",
     body: initialBody,
+    offeredTools: initialOfferedTools ?? [],
   });
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
@@ -96,6 +111,7 @@ export function PromptWorkbench({
   latestRef.current = {
     title: titleValue,
     trigger,
+    offeredTools,
     body,
   };
   dirtyRef.current = dirty;
@@ -182,7 +198,9 @@ export function PromptWorkbench({
       ? false
       : triggerEnabled || initialTrigger !== undefined;
   const showTitleRow = titleEditable || applyMode !== undefined;
-  const showCover = showTitleRow || showCatalogLine;
+  const offerOptions = offeredToolOptions(bindableTools ?? [], offeredTools);
+  const showOfferedTools = offerOptions.length > 0;
+  const showCover = showTitleRow || showCatalogLine || showOfferedTools;
   const triggerText = trigger.trim();
 
   const cover = showCover ? (
@@ -263,6 +281,48 @@ export function PromptWorkbench({
           </label>
         )
       ) : null}
+      {showOfferedTools ? (
+        <fieldset
+          className={cn(
+            "min-w-0 border-0 p-0",
+            (showTitleRow || showCatalogLine) && "mt-3",
+          )}
+          data-testid="offered-tools"
+        >
+          <legend className="px-0 text-muted-foreground text-xs">
+            {OFFERED_TOOLS_LABEL}
+          </legend>
+          <p className="mt-0.5 text-muted-foreground text-xs">
+            模型查阅这条才进工具表，常驻开场不带上。
+          </p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {offerOptions.map((tool) => {
+              const selected = offeredTools.includes(tool.id);
+              return (
+                <Badge
+                  key={tool.id}
+                  as="button"
+                  type="button"
+                  pill
+                  tone={selected ? "primary" : "muted"}
+                  aria-pressed={selected}
+                  disabled={readOnly}
+                  onClick={() => {
+                    if (readOnly) return;
+                    const next = selected
+                      ? offeredTools.filter((id) => id !== tool.id)
+                      : [...offeredTools, tool.id];
+                    setOfferedTools(next);
+                    markDirty({ offeredTools: next });
+                  }}
+                >
+                  {tool.label}
+                </Badge>
+              );
+            })}
+          </div>
+        </fieldset>
+      ) : null}
     </div>
   ) : null;
 
@@ -336,4 +396,16 @@ export function PromptWorkbench({
       </div>
     </div>
   );
+}
+
+function offeredToolOptions(
+  bindable: BindableToolOption[],
+  selected: string[],
+): BindableToolOption[] {
+  if (bindable.length === 0 && selected.length === 0) return [];
+  const known = new Set(bindable.map((tool) => tool.id));
+  const extra = selected
+    .filter((id) => !known.has(id))
+    .map((id) => ({ id, label: id }));
+  return extra.length ? [...bindable, ...extra] : bindable;
 }

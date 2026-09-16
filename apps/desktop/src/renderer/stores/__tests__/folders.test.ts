@@ -25,8 +25,6 @@ beforeEach(() => {
     pendingUntitledCreate: null,
     untitledCreateBusy: false,
     draftWorkspaceIntent: defaultDraftWorkspaceIntent(),
-    importToCloudOpen: false,
-    importToCloudPrefill: null,
     borrowToCloudOpen: false,
     borrowToCloudPrefill: null,
     connectGitOpen: false,
@@ -109,13 +107,13 @@ describe("defaultDraftWorkspaceIntent", () => {
   });
 });
 
-describe("import / connect git dialog flags", () => {
-  it("openImportToCloud toggles independently of connectGit", () => {
-    store().openImportToCloud();
-    expect(store().importToCloudOpen).toBe(true);
+describe("borrow / connect git dialog flags", () => {
+  it("openBorrowToCloud toggles independently of connectGit", () => {
+    store().openBorrowToCloud();
+    expect(store().borrowToCloudOpen).toBe(true);
     expect(store().connectGitOpen).toBe(false);
-    store().closeImportToCloud();
-    expect(store().importToCloudOpen).toBe(false);
+    store().closeBorrowToCloud();
+    expect(store().borrowToCloudOpen).toBe(false);
 
     store().openConnectGit("folder:x");
     expect(store().connectGitOpen).toBe(true);
@@ -123,31 +121,6 @@ describe("import / connect git dialog flags", () => {
     store().closeConnectGit();
     expect(store().connectGitOpen).toBe(false);
     expect(store().connectGitWsId).toBeNull();
-  });
-
-  it("openImportToCloud accepts legacy localRootId prefill and clears on close", () => {
-    store().openImportToCloud({
-      rootId: "root-legacy",
-      folderName: "旧文件夹",
-    });
-    expect(store().importToCloudOpen).toBe(true);
-    expect(store().importToCloudPrefill).toEqual({
-      rootId: "root-legacy",
-      folderName: "旧文件夹",
-    });
-    store().closeImportToCloud();
-    expect(store().importToCloudOpen).toBe(false);
-    expect(store().importToCloudPrefill).toBeNull();
-  });
-
-  it("openBorrowToCloud toggles independently of import", () => {
-    store().openImportToCloud();
-    store().openBorrowToCloud();
-    expect(store().borrowToCloudOpen).toBe(true);
-    expect(store().importToCloudOpen).toBe(true);
-    store().closeBorrowToCloud();
-    expect(store().borrowToCloudOpen).toBe(false);
-    expect(store().importToCloudOpen).toBe(true);
   });
 
   it("openBorrowToCloud accepts path prefill and clears on close", () => {

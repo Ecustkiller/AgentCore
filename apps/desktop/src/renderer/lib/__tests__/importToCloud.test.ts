@@ -2,9 +2,7 @@ import {
   IMPORT_PUT_MAX_BYTES,
   ImportToCloudCancelledError,
   type ImportToCloudProgress,
-  formatImportToCloudCancelledToast,
   formatImportToCloudProgress,
-  formatImportToCloudToast,
   parseArchivePayload,
   runImportToCloud,
 } from "@/lib/importToCloud";
@@ -42,43 +40,6 @@ describe("parseArchivePayload", () => {
   it("rejects non-objects", () => {
     expect(parseArchivePayload(null)).toBeNull();
     expect(parseArchivePayload("x")).toBeNull();
-  });
-});
-
-describe("formatImportToCloudToast", () => {
-  it("full success reminds continue in the new folder; session stays local", () => {
-    const t = formatImportToCloudToast({
-      folderId: "f1",
-      folderName: "Demo",
-      wsId: "folder:f1",
-      uploaded: 3,
-      skippedOversized: [],
-      archiveTruncated: false,
-      partial: false,
-    });
-    expect(t.message).toBe("已在「我的文件」建好「Demo」");
-    expect(t.description).toContain("已上传 3 个文件");
-    expect(t.description).toContain("请在新文件夹里继续");
-    expect(t.description).toContain("当前对话用的还是本机原文件夹");
-    // Size caps belong to the partial branch only, not the happy path.
-    expect(t.description).not.toContain("MiB");
-  });
-
-  it("honest partial when truncated or oversized skipped", () => {
-    const t = formatImportToCloudToast({
-      folderId: "f1",
-      folderName: "Big",
-      wsId: "folder:f1",
-      uploaded: 1,
-      skippedOversized: ["huge.bin"],
-      archiveTruncated: true,
-      partial: true,
-    });
-    expect(t.message).toBe("已在「我的文件」建好「Big」（部分导入）");
-    expect(t.description).toContain("100MiB");
-    expect(t.description).toContain("50MiB");
-    expect(t.description).toContain("已上传 1 个文件");
-    expect(t.description).toContain("请在新文件夹里继续");
   });
 });
 
@@ -408,9 +369,6 @@ describe("runImportToCloud", () => {
     expect(uploadFile.mock.calls.length).toBeGreaterThanOrEqual(1);
     expect(uploadFile.mock.calls.length).toBeLessThan(3);
     expect(removeRoot).toHaveBeenCalledWith("temp-root");
-    const toast = formatImportToCloudCancelledToast(err);
-    expect(toast.message).toContain("已保留");
-    expect(toast.message).toContain("App");
   });
 
   it("aborts before create without folder metadata", async () => {
@@ -440,7 +398,6 @@ describe("runImportToCloud", () => {
 
     expect(err).toBeInstanceOf(ImportToCloudCancelledError);
     expect(err.folderId).toBeUndefined();
-    expect(formatImportToCloudCancelledToast(err).message).toBe("已取消导入");
   });
 
   it("does not removeRoot when ownsRoot is false", async () => {

@@ -134,18 +134,13 @@ class EscalateTool:
                                 },
                                 "options": {
                                     "type": "array",
-                                    "description": (
-                                        "kind=choice 候选项（最多 6）。权衡写进 label。"
-                                    ),
+                                    "description": "kind=choice 候选项（最多 6）。",
                                     "items": {
                                         "type": "object",
                                         "properties": {
                                             "label": {
                                                 "type": "string",
-                                                "description": (
-                                                    "选项文字（回传答案）。"
-                                                    "有倾向时该项放第一、名末加「（推荐）」。"
-                                                ),
+                                                "description": "选项文字（回传答案）。",
                                             },
                                         },
                                         "required": ["label"],

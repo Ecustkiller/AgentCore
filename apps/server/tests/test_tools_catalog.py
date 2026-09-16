@@ -29,13 +29,11 @@ _EXPECTED_NAMES = {
     "file_copy",
     "mkdir",
     "file_batch",
-    "md_to_docx",
-    "md_to_pdf",
+    "md_export",
     "archive_extract",
     "archive_create",
     "grep",
     "code_search",
-    "code_diagnostics",
     "docs_read",
     "docs_write",
     "git",
@@ -57,14 +55,12 @@ _CEO_DEFAULT_NAMES = {
     "file_copy",
     "mkdir",
     "file_batch",
-    "md_to_docx",
-    "md_to_pdf",
+    "md_export",
     "archive_extract",
     "archive_create",
     "download_url",
     "grep",
     "code_search",
-    "code_diagnostics",
     "docs_read",
     "docs_write",
     "git",
@@ -78,8 +74,7 @@ _MUTATION_NAMES = {
     "file_copy",
     "mkdir",
     "file_batch",
-    "md_to_docx",
-    "md_to_pdf",
+    "md_export",
     "archive_extract",
     "archive_create",
     "download_url",
@@ -127,8 +122,7 @@ def test_write_and_exec_tools_are_grantable():
     assert approvals["file_copy"] is ToolApproval.GRANTABLE
     assert approvals["mkdir"] is ToolApproval.GRANTABLE
     assert approvals["file_batch"] is ToolApproval.GRANTABLE
-    assert approvals["md_to_docx"] is ToolApproval.GRANTABLE
-    assert approvals["md_to_pdf"] is ToolApproval.GRANTABLE
+    assert approvals["md_export"] is ToolApproval.GRANTABLE
     assert approvals["archive_extract"] is ToolApproval.GRANTABLE
     assert approvals["archive_create"] is ToolApproval.GRANTABLE
     # Read-only tools auto-run (no approval prompt).
@@ -151,8 +145,7 @@ def test_file_mutation_class_is_grantable_filesystem_without_code_execute():
         "file_copy",
         "mkdir",
         "file_batch",
-        "md_to_docx",
-        "md_to_pdf",
+        "md_export",
         "archive_extract",
         "archive_create",
         "download_url",
@@ -213,6 +206,7 @@ def test_run_description_routes_long_running_to_background():
     assert "dev" in bg_desc.lower() or "watch" in bg_desc
     assert "终端" in schema.parameters["properties"]["command"]["description"]
     assert "pnpm" not in schema.parameters["properties"]["command"]["description"]
+    assert "purpose" not in schema.parameters["properties"]
     assert "pnpm" in build_system_skill_registry().get("run").body
     assert "仅本地" not in RunTool(location="server").schema.description
 
@@ -245,16 +239,17 @@ def test_run_description_server_omits_local_machine_wording():
 
 
 def test_web_fetch_description_does_not_overclaim_completeness():
-    # 截断是 max_chars 取值语义，不进工具 description 冒充「完整正文」。
+    # 截断是执行回执事实，不进按钮冒充「完整正文」，也不再广告可调配额。
     schemas = {s.name: s for s in build_builtin_registry().list_all()}
     desc = schemas["web_fetch"].description
-    max_chars = schemas["web_fetch"].parameters["properties"]["max_chars"]["description"]
-    assert "截断" in max_chars
+    props = schemas["web_fetch"].parameters["properties"]
+    assert "max_chars" not in props
     assert "完整正文" not in desc
     assert "#rN" not in desc
     assert "深读" in desc
     assert "search" in desc
     assert "max_chars" not in desc
+    assert "截断" not in desc
 
 
 def test_ceo_registry_holds_full_builtin_surface():
@@ -280,16 +275,7 @@ def test_ceo_registry_host_when_desktop_online():
     schemas = {
         s.name: s for s in build_ceo_tool_registry(desktop_online=True).list_all()
     }
-    assert "host" in schemas
-    assert schemas["host"].approval is ToolApproval.NEVER
-    # Retired 13 names stay off the CEO roster.
-    for retired in (
-        "host_ping",
-        "host_shell",
-        "host_open_settings",
-        "host_package_install",
-    ):
-        assert retired not in schemas
+    assert set(schemas) == _CEO_DEFAULT_NAMES | {"host"}
     assert schemas["host"].approval is ToolApproval.NEVER
 
 
@@ -297,9 +283,8 @@ def test_ceo_registry_browser_interactive_grantable_when_include_browser():
     schemas = {
         s.name: s for s in build_ceo_tool_registry(include_browser=True).list_all()
     }
-    assert "browser" in schemas
+    assert set(schemas) == _CEO_DEFAULT_NAMES | {"browser"}
     assert schemas["browser"].approval is ToolApproval.GRANTABLE
-    assert "browser_screenshot" not in schemas
     assert schemas["file_write"].approval is ToolApproval.GRANTABLE
 
 

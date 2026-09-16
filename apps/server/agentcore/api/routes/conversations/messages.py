@@ -827,6 +827,7 @@ async def record_local_turn_endpoint(
         cache_hit_tokens=body.cache_hit_tokens,
         cache_miss_tokens=body.cache_miss_tokens,
         rounds=body.rounds,
+        duration_ms=body.duration_ms,
         trace_id=body.trace_id,
         finish_reason=body.finish_reason,
         llm_credentials=credentials,
@@ -834,6 +835,7 @@ async def record_local_turn_endpoint(
         execution_id=body.execution_id,
         harvest_kind=body.harvest_kind,
         agent_mentions=[m.model_dump() for m in body.agent_mentions] or None,
+        attachments=[a.model_dump() for a in body.attachments] or None,
     )
     return RecordTurnResponse(**result)
 

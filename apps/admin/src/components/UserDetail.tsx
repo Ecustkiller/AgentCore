@@ -82,9 +82,8 @@ export function UserDetail({
 
   const user = data?.user;
   const byok = data?.billing_mode === "byok";
-  // 行级金额（趋势 / 按模型）不带 currency——同一账本窗口内币种唯一（记账走 curated
-  // 人民币价卡，BYOK 估算走社区价目快照的美元），且后端无汇率换算，故符号统一取自
-  // 窗口 breakdown，绝不按 billing_mode 猜。与 AnalyticsPage 同口径。
+  // 行级金额（趋势 / 按模型）不带 currency——同一账本窗口内币种唯一（产品名义 CNY），
+  // 后端无汇率换算，故符号统一取自窗口 breakdown。
   const billedCurrency = data?.month.cost.currency;
   const estimatedCurrency =
     data?.month.estimated_cost?.currency ??
@@ -190,9 +189,7 @@ export function UserDetail({
 
           {byok && (
             <div className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-muted-foreground text-xs">
-              BYOK 模式：记账成本恒为 0；「估算」列按社区价目计价
-              {estimatedCurrency ? `（${estimatedCurrency}）` : ""}
-              ，非上游账单，且平台不做汇率换算。
+              BYOK 模式：记账成本恒为 0；花费列按产品价目（不扣额度）
             </div>
           )}
 

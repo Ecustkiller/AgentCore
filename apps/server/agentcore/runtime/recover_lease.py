@@ -11,8 +11,6 @@ User-driven resume (plan_review / team_preview / ask_user) lives in
 :mod:`agentcore.runtime.recover`.
 
 Backlog (not this iteration):
-- Write-tool idempotency keys — crash redrive may re-run in-flight workers
-  (``file_write`` overwrite semantics are accepted for now).
 - Cross-process Redis lease backend (Postgres this iteration).
 """
 

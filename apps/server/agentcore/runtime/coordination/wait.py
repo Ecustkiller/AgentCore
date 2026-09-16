@@ -147,7 +147,7 @@ def _idle_patrol_nudge(session: CoordinationSession) -> CoordinationEvent:
     reason = (
         f"等待团队事件超时（已完成 {len(session.completed_run_ids)}/"
         f"{session.total_workers}）。可继续静默等待、cancel_worker（队员"
-        "疑似卡死时）、或 ask_user；期间无新语义增量勿调 update_synthesis。"
+        "疑似卡死时）、或 ask_user。"
         f"\n{progress}"
     )
     return CoordinationEvent(

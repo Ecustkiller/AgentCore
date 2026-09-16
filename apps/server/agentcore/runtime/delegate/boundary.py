@@ -1,4 +1,4 @@
-"""WaveScheduler decision-boundary hook (CHECKPOINT / BIND / SCOPE)."""
+"""WaveScheduler decision-boundary hook (CHECKPOINT / SCOPE)."""
 
 from __future__ import annotations
 
@@ -107,12 +107,12 @@ def boundary_hook(tool: DelegateTool, plan: RunPlan):
     from agentcore.runtime.runs import BoundaryOutcome, BoundaryReason
 
     async def on_boundary(reason, nodes, completed) -> BoundaryOutcome:
-        if reason is BoundaryReason.BIND or reason is BoundaryReason.SCOPE:
+        if reason is BoundaryReason.SCOPE:
             tool._pending_boundary = (reason, list(nodes))
             return BoundaryOutcome.YIELD
         # CHECKPOINT 结构挂起须尊重 checkpoint 闸（``checkpoint_gate_enabled ∧ approvals`` →
         # ``tool._checkpoint_enabled``，经 ``checkpoint_active``）。闸关时跳过。
-        # BIND/SCOPE（上面）不受此闸约束。
+        # SCOPE（上面）不受此闸约束。
         if not checkpoint_active(tool):
             return BoundaryOutcome.PROCEED
         # 挂起即收口 (②, Phase 3): plan_review 是「顶层 (depth 0) 用户监督点」。嵌套子团队

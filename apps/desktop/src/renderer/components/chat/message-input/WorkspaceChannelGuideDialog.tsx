@@ -23,7 +23,7 @@ export function WorkspaceChannelGuideDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** 有本机盘（桌面端）才讲本机目录三选；Web 只讲云。 */
+  /** 有本机盘（桌面端）才讲本机目录两选；Web 只讲云。 */
   showLocalTraditional: boolean;
 }) {
   return (
@@ -91,18 +91,10 @@ export function WorkspaceChannelGuideDialog({
                   </div>
                   <div className="space-y-0.5">
                     <dt className="text-xs font-medium text-foreground">
-                      复制到云上当新家
-                    </dt>
-                    <dd className="text-xs leading-relaxed text-muted-foreground">
-                      之后只改云上这份，电脑里的原件不再跟着变。要换设备接着用再搬，不必。
-                    </dd>
-                  </div>
-                  <div className="space-y-0.5">
-                    <dt className="text-xs font-medium text-foreground">
                       先在云上做，原件先不动
                     </dt>
                     <dd className="text-xs leading-relaxed text-muted-foreground">
-                      这一单在云上做；做完再决定写不写回。不是复制上来当新家。
+                      这一单在云上做；做完再决定写不写回，或在芯片上「留在云上接着用」。
                     </dd>
                   </div>
                 </dl>

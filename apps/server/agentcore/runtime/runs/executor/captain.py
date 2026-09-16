@@ -28,7 +28,11 @@ from agentcore.runtime.runs.executor.context import (
     _build_captain_context_blocks,
     _context_block_payloads,
 )
-from agentcore.runtime.runs.executor.shared import _priced_failure, resolve_finish_override
+from agentcore.runtime.runs.executor.shared import (
+    _priced_failure,
+    resolve_finish_override,
+    run_wire_reasoning_effort,
+)
 from agentcore.runtime.runs.executor.started_run_close import (
     emit_run_cancelled_if_unterminated,
 )
@@ -291,6 +295,7 @@ async def _drive_captain_loop(
                 model=turn_model,
                 usage=usage_dict,
                 cost=cost,
+                reasoning_effort=run_wire_reasoning_effort(turn_model, profile),
             )
         )
         return RunState(

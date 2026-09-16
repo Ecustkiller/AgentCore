@@ -199,6 +199,39 @@ describe("SidecarManager local-turn occupy", () => {
     );
   });
 
+  it("idle occupy POSTs attachments on first send", async () => {
+    const t = capturingTransport();
+    const manager = new SidecarManager(() => t.transport);
+    h.bearerPostJson.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: {},
+    });
+    const shot = {
+      name: "shot.png",
+      path: "shot.png",
+      workspace_path: "attachments/shot.png",
+      binary: true,
+    };
+    await manager.startTurn(
+      { isDestroyed: () => false, send: vi.fn() } as never,
+      {
+        ...START_REQ,
+        attachments: [shot],
+      },
+      "/tmp/ws-occupy",
+    );
+    expect(h.bearerPostJson.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        user_message: "hello",
+        attachments: [shot],
+      }),
+    );
+    expect(h.bearerPostJson.mock.calls[0]?.[1]).toEqual(
+      expect.not.objectContaining({ regenerate: true }),
+    );
+  });
+
   it("regenerate occupy POSTs truncate flag and empty materials", async () => {
     const t = capturingTransport();
     const manager = new SidecarManager(() => t.transport);

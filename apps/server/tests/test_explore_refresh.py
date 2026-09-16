@@ -71,11 +71,14 @@ async def test_explore_refresh_scheduler_debounces_per_folder():
 
 
 @pytest.mark.asyncio
-async def test_schedule_explore_refresh_noop_when_disabled(monkeypatch):
+async def test_schedule_explore_refresh_is_unconditional_noop(monkeypatch):
     from agentcore.memory import explore_refresh as mod
 
-    monkeypatch.setattr(mod.settings, "memory_explore_refresh_enabled", False)
-    # Must not raise even without a running scheduler payload.
+    def _boom() -> None:
+        raise AssertionError("must not arm the explore-refresh scheduler")
+
+    monkeypatch.setattr(mod, "get_explore_refresh_scheduler", _boom)
+    monkeypatch.setattr(mod.settings, "memory_explore_refresh_enabled", True)
     schedule_explore_refresh(
         user_id="u",
         folder_id="f",

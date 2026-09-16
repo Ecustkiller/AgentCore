@@ -1,5 +1,4 @@
 import { FileDetail, type FileDirtyState } from "@/components/files/FileDetail";
-import { MemoryProfileSplitEditor } from "@/components/files/MemoryProfileSplitEditor";
 import { UNTITLED_FOLDER_NAME } from "@/components/files/dedupeName";
 import type { FileSortBy } from "@/components/files/fileTreeTypes";
 import { DetailTabs } from "@/components/files/fileWorkbench/DetailTabs";
@@ -48,7 +47,7 @@ import { NarrowMenuButton } from "@/components/layout/NarrowMenuButton";
 import { Button, SearchField } from "@/components/ui";
 import { WorkspaceTrashSection } from "@/components/workspace/TrashSection";
 import { useConversations } from "@/hooks/useConversations";
-import { getFolders, useCreateFolder, useFolders } from "@/hooks/useFolders";
+import { useCreateFolder, useFolders } from "@/hooks/useFolders";
 import { hasLocalFiles } from "@/lib/capabilities";
 import { sortFoldersByRecentActivity } from "@/lib/draftWorkspaceFolders";
 import type { FileSource } from "@/lib/fileSource";
@@ -59,6 +58,10 @@ import {
 } from "@/lib/folderTree";
 import { useNarrowLayoutState } from "@/lib/narrowLayout";
 import { useReadOnlyOffline } from "@/lib/offlineMode";
+import {
+  isSeededCsvCandidate,
+  tryNavigateSeededCsv,
+} from "@/lib/openSeededCsvTable";
 import { notifyError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
@@ -71,7 +74,6 @@ import {
   MEMORY_UPDATES_PATH,
   createMemorySource,
   parseProjectMemoryFolderId,
-  parseProjectProfilePath,
 } from "@/services/sources/memorySource";
 import { asReadOnlyFileSource } from "@/services/sources/readOnlyFileSource";
 import {
@@ -458,11 +460,9 @@ export function FileWorkbench({
     finishUntitledCreate,
   ]);
 
-  // 对话页「记忆已更新」卡片深链跳来：打开目标记忆叶子的 tab（记忆更新对话内可见 §1.6）。每个
-  // focusKey（导航键）只应用一次。记忆源与工作区列表无关，故无需等 workspaces 就绪即可打开；
-  // 文件夹画像叶子的双栏编辑器会在列表到位后自行解析文件夹名。内联开 tab 逻辑（与 openFile
+  // 对话页「记忆已更新」卡片深链跳来：打开目标记忆叶子的 tab。每个
+  // focusKey（导航键）只应用一次。记忆源与工作区列表无关，故无需等 workspaces 就绪即可打开。
   // 文件夹叶子额外展开对应文件夹 + ``.agentcore`` 节点；主题叶再展「主题」。
-  // 账号层流水账不在本页打开（工具箱 `/toolbox/mine/skills?updates=1`）。
   useEffect(() => {
     if (!openMemoryLeaf || !focusKey) return;
     if (appliedMemoryLeafRef.current === focusKey) return;
@@ -571,15 +571,28 @@ export function FileWorkbench({
     [tabs, activeKey],
   );
 
-  // 打开文件：已开则激活其标签，未开则新增并激活（标签持久，直到手动关闭）。
+  // 打开文件：已灌数 csv 进活表；其余已开则激活其标签，未开则新增并激活。
   const openFile = (wsId: string, path: string, name: string) => {
-    const key = tabKey(wsId, path);
-    setTabs((prev) =>
-      prev.some((t) => tabKey(t.wsId, t.path) === key)
-        ? prev
-        : [...prev, { wsId, path, name }],
-    );
-    setActiveKey(key);
+    const openTab = () => {
+      const key = tabKey(wsId, path);
+      setTabs((prev) =>
+        prev.some((t) => tabKey(t.wsId, t.path) === key)
+          ? prev
+          : [...prev, { wsId, path, name }],
+      );
+      setActiveKey(key);
+    };
+    if (
+      wsId === MEMORY_WS ||
+      wsId === RULES_WS ||
+      !isSeededCsvCandidate(path)
+    ) {
+      openTab();
+      return;
+    }
+    void tryNavigateSeededCsv({ path, workspaceId: wsId }).then((opened) => {
+      if (!opened) openTab();
+    });
   };
 
   const reportDirty = useCallback((key: string, state: FileDirtyState) => {
@@ -933,17 +946,6 @@ export function FileWorkbench({
                       : t.wsId === RULES_WS
                         ? documentSource
                         : (sourceByWs.get(t.wsId) ?? null);
-                  // A folder's 画像 leaf opens the two-pane 全局+本文件夹 editor instead of
-                  // a lone file; resolve its live folder name for the 归属 label (fall back
-                  // to stripping the tab name if the folder is gone).
-                  const projFolderId =
-                    t.wsId === MEMORY_WS
-                      ? parseProjectProfilePath(t.path)
-                      : null;
-                  const projName = projFolderId
-                    ? (getFolders().find((f) => f.id === projFolderId)?.name ??
-                      t.name.replace(/·画像\.md$/, ""))
-                    : null;
                   return (
                     <div
                       key={key}
@@ -963,24 +965,13 @@ export function FileWorkbench({
                           active={key === activeKey}
                         />
                       ) : src ? (
-                        projFolderId ? (
-                          <MemoryProfileSplitEditor
-                            source={src}
-                            folderId={projFolderId}
-                            folderName={
-                              projName ?? t.name.replace(/·画像\.md$/, "")
-                            }
-                            onClose={() => closeTab(key)}
-                          />
-                        ) : (
-                          <FileDetail
-                            source={src}
-                            path={t.path}
-                            name={t.name}
-                            onClose={() => closeTab(key)}
-                            onDirtyChange={(state) => reportDirty(key, state)}
-                          />
-                        )
+                        <FileDetail
+                          source={src}
+                          path={t.path}
+                          name={t.name}
+                          onClose={() => closeTab(key)}
+                          onDirtyChange={(state) => reportDirty(key, state)}
+                        />
                       ) : (
                         <EmptyHint
                           inline

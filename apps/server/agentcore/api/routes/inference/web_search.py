@@ -34,7 +34,7 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 
-# Align with the built-in web_search tool cap (search.py ``_MAX_RESULTS_CAP``).
+# Sidecar HTTP contract ceiling (the built-in tool always requests 8).
 _MAX_RESULTS_CAP = 12
 
 

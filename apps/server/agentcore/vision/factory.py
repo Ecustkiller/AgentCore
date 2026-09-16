@@ -10,6 +10,10 @@ Resolution order:
 3. Else platform fallback: ``billing_mode=platform`` + non-empty ``VISION_API_KEY`` /
    ``VISION_BASE_URL`` → operator vision model.
 4. Else ``None`` (``read_image`` clean-fails「读图能力未配置」).
+
+Ticketed sidecar never opens local Postgres for this expand. It sends the turn's
+inference JWT to ``POST /v1/inference/v1/chat/completions`` with
+``X-AgentCore-Role: vision``; the cloud proxy applies the same order.
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from agentcore.config.settings import Settings
+    from agentcore.llm.credentials import LLMCredentials
     from agentcore.llm.resolve import ModelSelection
 
 logger = get_logger(__name__)
@@ -92,6 +97,60 @@ def build_vision_reader(
     )
 
 
+def pick_vision_selection(
+    *,
+    vision: ModelSelection | None,
+    main: ModelSelection | None,
+) -> ModelSelection | None:
+    """Slot to build a reader from: dedicated vision, else image-accepting main.
+
+    ``None`` means the caller should try platform ``VISION_*`` or leave the
+    reader unset (honest「读图能力未配置」).
+    """
+    if vision is not None:
+        return vision
+    if main is not None and _model_accepts_images(main.model):
+        return main
+    return None
+
+
+def build_proxy_vision_reader(
+    credentials: LLMCredentials | None,
+    settings: Settings | None = None,
+) -> VisionReader | None:
+    """Sidecar reader: same inference JWT / base URL as chat; cloud expands the slot.
+
+    Does not open local Postgres. ``proxy_role=vision`` makes the proxy pick the
+    vision slot (or image-accepting main / ``VISION_*``), not captain/main.
+    """
+    from agentcore.costing import ROLE_VISION
+
+    if credentials is None:
+        return None
+    key = (credentials.api_key or "").strip()
+    url = (credentials.base_url or "").strip()
+    if not key or not url:
+        return None
+    s = settings if settings is not None else _default_settings
+    timeout = float(getattr(s, "vision_timeout_seconds", 60.0) or 60.0)
+    extra = dict(credentials.extra_headers or {})
+    logger.info(
+        "vision.reader_built",
+        model=credentials.default_model,
+        source="inference_proxy",
+        credential_source=credentials.source,
+    )
+    return QwenVLReader(
+        api_key=key,
+        base_url=url,
+        model=credentials.default_model,
+        timeout_seconds=timeout,
+        extra_headers=extra or None,
+        proxy_role=ROLE_VISION,
+        credential_source=credentials.source,
+    )
+
+
 async def _reader_from_selection(
     session: AsyncSession,
     user_id: str,
@@ -139,12 +198,9 @@ async def resolve_vision_reader(
     main: ModelSelection | None = None,
 ) -> VisionReader | None:
     """Build from vision slot, else image-accepting main, else platform ``VISION_*``."""
-    if vision is not None:
-        return await _reader_from_selection(session, user_id, vision, settings)
-    if main is not None and _model_accepts_images(main.model):
-        followed = await _reader_from_selection(session, user_id, main, settings)
-        if followed is not None:
-            return followed
+    selection = pick_vision_selection(vision=vision, main=main)
+    if selection is not None:
+        return await _reader_from_selection(session, user_id, selection, settings)
     return build_vision_reader(settings)
 
 
@@ -153,13 +209,19 @@ async def resolve_vision_reader_for_conversation(
     user_id: str,
     conversation_id: str,
     settings: Settings | None = None,
+    llm_credentials: LLMCredentials | None = None,
 ) -> VisionReader | None:
-    """Expand the conversation's model profile and resolve its vision reader.
+    """Resolve the turn's vision reader on the venue that owns credentials.
 
-    Vision is optional: profile lookup / expand failures log a warning and fall
-    back to platform ``VISION_*`` via :func:`build_vision_reader` (same posture as
-    memory load failures) so a bad conversation id never blows up the turn.
+    Ticketed sidecar must not open local Postgres (岔路 B): point at the cloud
+    inference proxy with the turn's JWT. The proxy expands the profile.
+    Cloud API process still expands here via a session.
     """
+    from agentcore.db.sidecar_tickets import sidecar_narrow_tickets_bound
+
+    if sidecar_narrow_tickets_bound():
+        return build_proxy_vision_reader(llm_credentials, settings)
+
     from agentcore.db.base import async_session_factory
     from agentcore.db.repositories import ConversationRepository
     from agentcore.llm.model_profiles import LlmModelProfileService

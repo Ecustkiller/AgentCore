@@ -44,6 +44,24 @@ def test_message_end_exposes_cache_split_and_cost():
     assert ev.payload["rounds"] == 3
 
 
+def test_message_end_stamps_byok_nominal_as_estimated_slice():
+    cost = {
+        "input": 1000,
+        "cached": 0,
+        "output": 200,
+        "total": 1200,
+        "currency": "CNY",
+        "pricing_source": "curated",
+        "credential_source": "user",
+    }
+    ev = message_end(FinishReason.END_TURN, cost=cost)
+    wired = ev.payload["cost"]
+    assert wired["total"] == 1200
+    assert wired["estimated_total"] == 1200
+    assert wired["estimated_currency"] == "CNY"
+    assert "credential_source" not in wired
+
+
 def test_message_end_cost_defaults_to_none_on_error_path():
     # The error / not-found paths emit message_end with no cost (no turn ran).
     ev = message_end(FinishReason.ERROR)
@@ -112,6 +130,31 @@ def test_run_completed_carries_role_model_usage_cost():
     assert ev.payload["cost"] == {**cost, "pricing_source": "curated"}
 
 
+def test_run_completed_stamps_byok_nominal_as_estimated_slice():
+    cost = {
+        "input": 1000,
+        "cached": 0,
+        "output": 200,
+        "total": 1200,
+        "currency": "CNY",
+        "pricing_source": "curated",
+        "credential_source": "user",
+    }
+    ev = run_completed(
+        "run-1",
+        "agent-1",
+        output_summary="done",
+        duration_ms=1,
+        cost=cost,
+    )
+    wired = ev.payload["cost"]
+    assert wired["total"] == 1200
+    assert wired["estimated_total"] == 1200
+    assert wired["estimated_currency"] == "CNY"
+    assert wired["pricing_source"] == "curated"
+    assert "credential_source" not in wired
+
+
 def test_run_completed_defaults_to_full_zeroed_shapes():
     # A synthetic / un-metered run still yields a complete, typed object (zeros),
     # never a bare {} — the client renders zeros as「—」(§七5) without guarding.
@@ -146,5 +189,19 @@ def test_run_completed_carries_output_files_when_present():
     )
     assert ev.payload["output_files"] == ["draft.md", "out/report.md"]
     assert "output_files" not in run_completed(
+        "r", "a", output_summary="", duration_ms=1
+    ).payload
+
+
+def test_run_completed_carries_reasoning_effort_when_present():
+    ev = run_completed(
+        "run-1",
+        "agent-1",
+        output_summary="ok",
+        duration_ms=10,
+        reasoning_effort="low",
+    )
+    assert ev.payload["reasoning_effort"] == "low"
+    assert "reasoning_effort" not in run_completed(
         "r", "a", output_summary="", duration_ms=1
     ).payload

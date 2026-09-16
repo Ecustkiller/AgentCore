@@ -283,20 +283,6 @@ async def resolve_graph_identity(
             # 同回合内存 / 本回合热图：合入同一 eid（不写 prev、不 divert）。
             if host_plan_for_append is None and active is not None:
                 host_plan_for_append = getattr(active, "live_plan", None)
-            if host_plan_for_append is not None and getattr(
-                host_plan_for_append, "topology_lock", False
-            ):
-                msg = (
-                    "当前协作图处于工作流拓扑锁：禁止追加步骤。"
-                    "可用 replan(steers=…) 改未跑步骤说明，或 stop 收口。"
-                )
-                return ToolResult(
-                    tool_call_id="",
-                    success=False,
-                    output="",
-                    error=msg,
-                    contract_failure=True,
-                )
             if host_plan_for_append is None:
                 msg = (
                     f"既有协作图 `{append_to}` 缺少可合并的计划快照（plan_snapshot），"

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from agentcore.tools.sandbox.protocol import ExecutionRequest, ExecutionResult
 
@@ -266,13 +266,38 @@ class GrepQuery:
 
 @dataclass
 class GrepResult:
-    """Bounded result of a ``grep``: line hits, per-file counts, totals, cap."""
+    """Bounded result of a ``grep``: line hits, per-file counts, totals, cap.
+
+    ``truncated`` means this batch hit the result cap — not that the alphabetically
+    first N matches of a full-corpus scan were chosen. Returned hits are sorted
+    for display.
+    """
 
     hits: list[GrepHit] = field(default_factory=list)
     file_counts: list[tuple[str, int]] = field(default_factory=list)
     total_matches: int = 0
     truncated: bool = False
     # Soft skips (e.g. rg IO / access denied on one subtree) — search still succeeds.
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class GlobFilesQuery:
+    """``rg --files`` listing for the glob tool (serializable for the channel)."""
+
+    directory: str = "."
+    globs: tuple[str, ...] = ()
+    max_depth: int | None = None
+    max_entries: int = 50
+    reveal_archives: bool = False
+
+
+@dataclass
+class GlobFilesResult:
+    """Bounded file paths from ``glob_files`` (files only; sorted for display)."""
+
+    paths: list[str] = field(default_factory=list)
+    truncated: bool = False
     warnings: list[str] = field(default_factory=list)
 
 
@@ -528,7 +553,17 @@ class WorkspaceBackend(Protocol):
         ``query.directory`` may be a directory (recursed, ``glob``-filtered) or a
         single file (scanned alone, ``glob`` ignored — rg PATTERN FILE). Raises
         ``OutsideWorkspace`` / ``PathNotFound``. The regex is assumed already
-        validated by the caller.
+        validated by the caller. One ripgrep process; stop at ``max_results``.
+        """
+        ...
+
+    async def glob_files(self, query: GlobFilesQuery) -> GlobFilesResult:
+        """List files under ``query.directory`` via ``rg --files`` (bounded).
+
+        Product list-ignore (images visible; archives follow ``reveal_archives``).
+        ``query.globs`` are extra include globs (path-aware, not filename-only).
+        ``max_depth`` is rg's ``--max-depth`` (1 = cwd files only; rg 0 is empty). Raises
+        ``OutsideWorkspace`` / ``PathNotFound`` / ``NotADirectory``.
         """
         ...
 
@@ -564,20 +599,6 @@ class WorkspaceBackend(Protocol):
 
         Scheduled from open-project / warm, write mutations, and non-ready
         ``code_search`` — not from turn entry (prepare / assemble / ``_make_backend``).
-        """
-        ...
-
-    async def diagnostics(self, paths: list[str]) -> dict[str, Any]:
-        """Language-service diagnostics for TS/JS paths (inner verify loop).
-
-        Returns ``{status: "ok"|"unavailable", reason?: str, diagnostics: [...]}``
-        where each diagnostic is
-        ``{path, line, column, severity, message, code?}``.
-
-        Local-disk backends (过桥 ``LocalWorkspace`` and sidecar
-        ``ServerWorkspace(location=local)``) route to the desktop language
-        service; cloud desks return ``unavailable`` honestly (never fakes a full
-        ``tsc``). Read-only — never sets ``dirty``.
         """
         ...
 

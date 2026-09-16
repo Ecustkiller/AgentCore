@@ -1,8 +1,7 @@
-"""update_folder_profile — CEO explore-act close-out writes folder memory.
+"""update_folder_profile — retired writer; the live CEO table never wires it.
 
-Product exception to §1.5: mid-turn write of ``ai_maintained=true`` folder profile,
-optional ``导航.md``, and optional folder ``主题/<slug>.md``. ``remember`` stays
-user-rules-only.
+Execute does not write ``画像.md`` / ``导航.md`` / ``主题/``. ``remember`` stays
+user-rules-only. File-page edits still go through documents / memory PUT.
 """
 
 from __future__ import annotations
@@ -10,20 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from agentcore.config import settings
-from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolFace
-from agentcore.memory.explore_profile import (
-    compute_workspace_explore_fingerprint,
-    filter_topics_by_scope_cap,
-    parse_explore_topics,
-    record_explore_closeout,
-    resolve_folder_workspace_key,
-    write_folder_navigation,
-    write_folder_profile_cas,
-    write_folder_topics_replace,
-)
-from agentcore.memory.store import MemoryStore, default_memory_store
+from agentcore.memory.store import MemoryStore
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_CEO_ONLY,
@@ -32,33 +19,24 @@ from agentcore.tools.registration import (
     ToolSurface,
 )
 
-logger = get_logger(__name__)
-
 UPDATE_FOLDER_PROFILE_TOOL_NAME = "update_folder_profile"
-
-_OUTPUT_LIMIT = 12000
-
-_PROFILE_UPDATED_OPEN = "<文件夹画像已更新>"
-_PROFILE_UPDATED_CLOSE = "</文件夹画像已更新>"
 
 
 @dataclass
 class UpdateFolderProfileTool:
-    """CEO-only: merge-write folder ``画像.md`` (+ optional 导航 / topic notes)."""
+    """CEO-only: previously merge-wrote folder 画像; now a no-write close-out."""
 
     registration = ToolRegistration(
         surface=ToolSurface.CEO_ORCHESTRATION,
         audience=AUDIENCE_CEO_ONLY,
         ceo_wire=CeoWire.MEMORY,
-        catalog_summary="更新文件夹画像",
+        catalog_summary="文件夹画像（已停写）",
     )
 
     folder_id: str | None = None
     store: MemoryStore | None = None
-    # Precomputed workspace identity for 过期再探 meta; resolved on write if None.
+    # Kept so callers that precompute workspace identity still construct cleanly.
     workspace_key: str | None = None
-    # Live prompt holders (delegate / debate) whose ``_system_prompt`` is hot-patched
-    # so the next worker LLM round sees the new folder profile this turn.
     prompt_holders: list[Any] = field(default_factory=list)
 
     @property
@@ -66,8 +44,8 @@ class UpdateFolderProfileTool:
         return ToolSchema(
             name=UPDATE_FOLDER_PROFILE_TOOL_NAME,
             description=(
-                "探索幕（含用户点名「先了解」）收尾：把这张桌的简报写入当前文件夹约定记忆"
-                "「画像.md」，并可同写短入口「导航.md」。"
+                "已停写：系统不再写入文件夹画像、导航或主题。已有文件保留。"
+                "了解这张桌请直接读工作区文件。"
             ),
             parameters={
                 "type": "object",
@@ -115,7 +93,7 @@ class UpdateFolderProfileTool:
         )
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
-        content = str(arguments.get("content") or "").strip()
+        del arguments
         if not self.folder_id:
             return ToolResult(
                 tool_call_id="",
@@ -123,240 +101,23 @@ class UpdateFolderProfileTool:
                 output="当前是裸聊（没有文件夹），不能写文件夹画像。",
                 error="no_folder",
             )
-        if not content:
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="缺少 content。",
-                error="缺少 content。",
-            )
-
-        topics, topic_warnings = parse_explore_topics(arguments.get("topics"))
-        store = self.store if self.store is not None else default_memory_store()
-        if topics:
-            topics, cap_warnings = await filter_topics_by_scope_cap(
-                store,
-                context.user_id,
-                self.folder_id,
-                topics,
-                max_topic_files=settings.memory_max_topic_files,
-            )
-            topic_warnings.extend(cap_warnings)
-        try:
-            ok, resulting, conflict = await write_folder_profile_cas(
-                store=store,
-                user_id=context.user_id,
-                folder_id=self.folder_id,
-                new_markdown=content,
-            )
-        except Exception as e:  # noqa: BLE001 - tool failure must not crash the turn
-            logger.warning(
-                "memory.explore_profile_failed",
-                user_id=context.user_id,
-                error=str(e),
-            )
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="写入文件夹画像失败，请稍后再试。",
-                error=str(e),
-            )
-
-        if conflict:
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="写入冲突（画像刚被别处更新），请基于最新内容重试。",
-                error="conflict",
-                display={"written": False, "conflict": True, "kind": "folder_profile"},
-            )
-        if not ok or not resulting.strip():
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="内容无效或为空，未写入（禁止空仓刷假画像）。",
-                error="empty_or_invalid",
-                display={"written": False, "kind": "folder_profile"},
-            )
-
-        # Profile landed → clear explore-pending so same-turn delivery delegates
-        # regain pinned-path landing → files_written inference + full write_scope.
+        # Leftover explore-pending must not strand same-turn delivery writes.
         context.cold_start_explore_pending = False
         context.write_scope = "project"
-
-        nav_path: str | None = None
-        navigation = str(arguments.get("navigation") or "").strip()
-        if navigation:
-            try:
-                nav_path = await write_folder_navigation(
-                    store=store,
-                    user_id=context.user_id,
-                    folder_id=self.folder_id,
-                    markdown=navigation,
-                )
-            except Exception as e:  # noqa: BLE001
-                logger.warning(
-                    "memory.explore_navigation_failed",
-                    user_id=context.user_id,
-                    error=str(e),
-                )
-                return ToolResult(
-                    tool_call_id="",
-                    success=False,
-                    output=(
-                        "文件夹画像已写入，但导航写入失败："
-                        f"{e}。可稍后重试 navigation，或先继续用户原请求。"
-                    ),
-                    error=str(e),
-                    display={
-                        "written": True,
-                        "navigation_written": False,
-                        "kind": "folder_profile",
-                        "chars": len(resulting),
-                    },
-                )
-
-        topic_paths: list[str] = []
-        if topics:
-            try:
-                topic_paths = await write_folder_topics_replace(
-                    store=store,
-                    user_id=context.user_id,
-                    folder_id=self.folder_id,
-                    topics=topics,
-                )
-            except Exception as e:  # noqa: BLE001
-                logger.warning(
-                    "memory.explore_topic_failed",
-                    user_id=context.user_id,
-                    error=str(e),
-                )
-                return ToolResult(
-                    tool_call_id="",
-                    success=False,
-                    output=(
-                        "文件夹画像已写入，但主题写入失败："
-                        f"{e}。可稍后重试 topics，或先继续用户原请求。"
-                    ),
-                    error=str(e),
-                    display={
-                        "written": True,
-                        "topics_written": False,
-                        "kind": "folder_profile",
-                        "chars": len(resulting),
-                    },
-                )
-
-        self._hot_refresh_prompts(resulting, topic_paths, nav_path)
-        # Persist workspace identity + fingerprint; clear R2 dirty.
-        try:
-            key: str | None
-            if self.workspace_key:
-                key = self.workspace_key
-            else:
-                from agentcore.workspace.locate import resolve_conversation_local_binding
-
-                injected = bool(getattr(context, "folder_binding_injected", False))
-                binding = None
-                if injected:
-                    binding = resolve_conversation_local_binding(
-                        local_root_id=getattr(context, "folder_local_root_id", None),
-                        local_subpath=getattr(context, "folder_local_subpath", None),
-                    )
-                key = await resolve_folder_workspace_key(
-                    self.folder_id,
-                    binding=binding,
-                    binding_injected=injected,
-                )
-            if key:
-                fingerprint = await compute_workspace_explore_fingerprint(context.backend)
-                await record_explore_closeout(
-                    store,
-                    context.user_id,
-                    self.folder_id,
-                    workspace_key=key,
-                    fingerprint=fingerprint,
-                )
-        except Exception as e:  # noqa: BLE001 - meta write must not fail the tool
-            logger.warning(
-                "memory.explore_workspace_key_failed",
-                user_id=context.user_id,
-                error=str(e),
-            )
-        clipped = (
-            resulting
-            if len(resulting) <= _OUTPUT_LIMIT
-            else resulting[:_OUTPUT_LIMIT] + "\n…"
-        )
-        extra_lines: list[str] = []
-        if nav_path:
-            extra_lines.append(f"已写入导航（always）：{nav_path}。")
-        if topic_paths:
-            names = "、".join(topic_paths)
-            extra_lines.append(f"已写入主题（on_demand，按需 consult）：{names}。")
-        topic_line = ("\n" + "\n".join(extra_lines)) if extra_lines else ""
-        warn_line = ""
-        if topic_warnings:
-            warn_line = "\n注意：" + "；".join(topic_warnings)
         return ToolResult(
             tool_call_id="",
             success=True,
             output=(
-                "已更新文件夹画像（约定树 AgentCore/记忆/画像.md）。"
-                f"{topic_line}{warn_line}\n"
-                "若用户原请求含实质活 → **立刻继续**处理（直答或再 delegate）；"
-                "禁止以「已建档/已了解，需要我继续吗」收尾。"
-                "仅当用户本条只要求了解这个文件夹时可停在简短建档说明。\n\n"
-                f"{clipped}"
+                "系统不再写入文件夹画像、导航或主题。已有文件保留。"
+                "了解这张桌请直接读工作区文件。"
             ),
             display={
-                "written": True,
-                "conflict": False,
+                "written": False,
                 "kind": "folder_profile",
-                "chars": len(resulting),
-                "topics": [p for p in topic_paths],
-                "navigation": nav_path,
+                "topics": [],
+                "navigation": None,
             },
         )
-
-    def _hot_refresh_prompts(
-        self,
-        profile_markdown: str,
-        topic_paths: list[str] | None = None,
-        nav_path: str | None = None,
-    ) -> None:
-        """Append / replace a same-turn visibility block on live worker system prompts."""
-        notes: list[str] = []
-        if nav_path:
-            notes.append(f"另已写入文件夹导航 {nav_path}（下回合 always 注入）")
-        if topic_paths:
-            notes.append(
-                "另已写入文件夹主题 "
-                + "、".join(topic_paths)
-                + "，worker 一般不必读；CEO 可 consult"
-            )
-        topic_note = ("\n（" + "；".join(notes) + "）\n") if notes else ""
-        block = (
-            f"\n\n{_PROFILE_UPDATED_OPEN}\n"
-            "（当前文件夹画像刚由探索幕写入，本回合内以此为准）\n"
-            f"{topic_note}"
-            f"{profile_markdown.strip()}\n"
-            f"{_PROFILE_UPDATED_CLOSE}"
-        )
-        for holder in self.prompt_holders:
-            current = getattr(holder, "_system_prompt", None)
-            if not isinstance(current, str) or not current:
-                continue
-            # Replace a prior mid-turn patch if the CEO writes twice.
-            start = current.find(_PROFILE_UPDATED_OPEN)
-            if start != -1:
-                end = current.find(_PROFILE_UPDATED_CLOSE, start)
-                if end != -1:
-                    current = (
-                        current[:start].rstrip()
-                        + current[end + len(_PROFILE_UPDATED_CLOSE) :]
-                    )
-            holder._system_prompt = current.rstrip() + block
 
 
 def build_update_folder_profile_tool(

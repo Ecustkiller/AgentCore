@@ -226,9 +226,12 @@ def _wire_cost(cost: dict[str, Any] | None) -> dict[str, Any] | None:
     }
     if cost.get("estimated_total") is not None:
         out["estimated_total"] = int(cost["estimated_total"])
-        # The estimate is USD off the community table while ``total`` stays CNY —
-        # ship its own currency so the client never labels one with the other's.
         out["estimated_currency"] = str(cost.get("estimated_currency") or out["currency"])
+    elif str(cost.get("credential_source") or "") == "user" and out["total"] > 0:
+        # BYOK: ``total`` is the curated CNY nominal; stamp the slice so details
+        # can say「不扣额度」without a second price book.
+        out["estimated_total"] = out["total"]
+        out["estimated_currency"] = out["currency"]
     return out
 
 

@@ -1,4 +1,4 @@
-"""ask_user card=organize_plan validation + retired-name reject."""
+"""ask_user card=organize_plan validation + unknown-card reject."""
 
 from __future__ import annotations
 
@@ -53,11 +53,9 @@ def test_ask_user_schema_does_not_expose_blocking():
         timeout_seconds=30.0,
     )
     props = tool.schema.parameters["properties"]
-    assert "blocking" not in props
-    assert "context" not in props
-    blob = tool.schema.description + json.dumps(tool.schema.parameters, ensure_ascii=False)
-    assert "blocking" not in blob
-    assert '"context"' not in json.dumps(tool.schema.parameters, ensure_ascii=False)
+    assert set(props) == {"questions", "browser_login", "card"}
+    assert props["questions"]["minItems"] == 1
+    assert tool.schema.parameters["required"] == ["questions"]
     card_enum = props["card"]["enum"]
     assert card_enum == ["organize_plan"]
     assert frozenset(card_enum) == CARD_KINDS
@@ -73,7 +71,11 @@ async def test_ask_user_drops_extra_context_key():
     token = captain_transcript.set([LLMMessage(role="user", content="选")])
     try:
         res = await tool.execute(
-            {"message": "只问这一句", "context": "旧槽不该并进"},
+            {
+                "questions": [{"prompt": "只问这一句"}],
+                "message": "不该当题干",
+                "context": "旧槽不该并进",
+            },
             _ctx(),
         )
     finally:
@@ -90,19 +92,14 @@ async def test_ask_user_drops_extra_context_key():
 def test_parse_card_unknown():
     err = parse_card("foo")
     assert isinstance(err, str) and "organize_plan" in err
-    assert "daily_review" not in err
-    absent = parse_card("daily_review")
-    assert isinstance(absent, str) and "未知 card" in absent
 
 
-@pytest.mark.parametrize("card", ["proposal_pick", "risk_ack", "kickoff", "daily_review"])
-async def test_schema_rejects_retired_card_names(card):
-    """Write path rejects retired names; does not rewrite to decision."""
+async def test_schema_rejects_unknown_card_name():
+    """Write path rejects an unknown card; does not rewrite to decision."""
     tool = _tool()
     res = await tool.execute(
         {
-            "message": "挑方案",
-            "card": card,
+            "card": "not_a_real_card",
             "questions": [
                 {
                     "prompt": "选哪条？",
@@ -154,7 +151,12 @@ async def test_organize_plan_overrides_transcript_intent():
                     id="ask",
                     function=ToolCallFunction(
                         name="ask_user",
-                        arguments=json.dumps({"message": "保留哪些", "card": "organize_plan"}),
+                        arguments=json.dumps(
+                            {
+                                "questions": [{"prompt": "保留哪些操作？"}],
+                                "card": "organize_plan",
+                            }
+                        ),
                     ),
                 )
             ],
@@ -164,7 +166,6 @@ async def test_organize_plan_overrides_transcript_intent():
     try:
         res = await tool.execute(
             {
-                "message": "保留哪些",
                 "card": "organize_plan",
                 "questions": [
                     {
@@ -192,6 +193,7 @@ async def test_organize_plan_overrides_transcript_intent():
     assert saved[0].intent == "organize_plan"
     required = next(e for e in tool.sink._history if e.type is EventType.CHECKPOINT_REQUIRED)
     assert required.payload["intent"] == "organize_plan"
+    assert required.payload["question"] == "保留哪些操作？"
     assert required.payload["questions"][0]["multiple"] is True
 
 
@@ -206,7 +208,6 @@ async def test_ordinary_choice_ask_is_decision():
     try:
         res = await tool.execute(
             {
-                "message": "挑一条推进",
                 "questions": [
                     {
                         "prompt": "选哪条方案？",
@@ -223,6 +224,7 @@ async def test_ordinary_choice_ask_is_decision():
 
     assert res.success is True
     assert saved[0].intent == "decision"
+    assert saved[0].question == "选哪条方案？"
     required = next(e for e in tool.sink._history if e.type is EventType.CHECKPOINT_REQUIRED)
     assert required.payload["intent"] == "decision"
     assert required.payload["questions"][0]["multiple"] is False
@@ -239,7 +241,6 @@ async def test_ordinary_ask_caps_choice_options_at_six():
     try:
         res = await tool.execute(
             {
-                "message": "勾选要处理的风险",
                 "questions": [
                     {
                         "prompt": "勾选要处理的风险",
@@ -269,8 +270,8 @@ def _detailed_choice(*, n: int, multiple: bool, detail: str = "一行取舍"):
     ]
 
 
-def _with_ask_transcript(*, message: str, card: str | None = None):
-    args: dict = {"message": message}
+def _with_ask_transcript(*, prompt: str, card: str | None = None):
+    args: dict = {"questions": [{"prompt": prompt}]}
     if card is not None:
         args["card"] = card
     return captain_transcript.set(
@@ -300,11 +301,10 @@ async def test_ordinary_ask_drops_option_detail_even_if_model_filled():
         saved.append(frame)
 
     tool = _tool(saver=_save)
-    token = _with_ask_transcript(message="选方向")
+    token = _with_ask_transcript(prompt="选方向")
     try:
         res = await tool.execute(
             {
-                "message": "选方向",
                 "questions": _detailed_choice(n=2, multiple=False, detail="不该出现"),
             },
             _ctx(),
@@ -325,14 +325,14 @@ async def test_ordinary_ask_drops_option_detail_even_if_model_filled():
         ("organize_plan", 1, True),
     ],
 )
-async def test_dedicated_card_keeps_option_detail(card, n, multiple):
+async def test_dedicated_card_drops_option_detail(card, n, multiple):
     saved: list = []
 
     async def _save(frame):
         saved.append(frame)
 
     tool = _tool(saver=_save)
-    token = _with_ask_transcript(message="专用卡", card=card)
+    token = _with_ask_transcript(prompt="专用卡", card=card)
     try:
         questions = _detailed_choice(n=n, multiple=multiple)
         for i, opt in enumerate(questions[0]["options"]):
@@ -340,7 +340,6 @@ async def test_dedicated_card_keeps_option_detail(card, n, multiple):
             opt["path"] = f"p{i}"
         res = await tool.execute(
             {
-                "message": "专用卡",
                 "card": card,
                 "questions": questions,
             },
@@ -352,6 +351,6 @@ async def test_dedicated_card_keeps_option_detail(card, n, multiple):
     assert saved
     required = next(e for e in tool.sink._history if e.type is EventType.CHECKPOINT_REQUIRED)
     opts = required.payload["questions"][0]["options"]
-    assert all(o.get("detail") == "一行取舍" for o in opts)
+    assert all("detail" not in o for o in opts)
     assert [o.get("path") for o in opts] == [f"p{i}" for i in range(n)]
     assert saved[0].intent == card

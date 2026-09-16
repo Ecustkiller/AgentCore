@@ -173,9 +173,7 @@ async def prepare_fresh_turn(
     user_message: str = "",
 ) -> PreparedTurn:
     """Build the stable base prompt, worker tools, channels, and tool context."""
-    # 记忆作用域 (§5.2): the always-injected core spans global 偏好.md + 画像.md and — when
-    # the conversation is in a project — that project's 画像.md, concatenated global-first
-    # (stable prefix) into one <设定> body. Long-term memory is product-always-on.
+    # User always-rules inject into ``<设定>``. AI-maintained notes are not injected.
     # Look up via ``pipeline.run`` so governance tests can monkeypatch the seam
     # (``test_pipeline_governance._patch_pipeline``).
     from agentcore.runtime.pipeline import run as run_mod
@@ -184,15 +182,10 @@ async def prepare_fresh_turn(
     desk_owner_id = await resolve_folder_owner_user_id(folder_id)
     folder_rules_user_id = desk_owner_id or user_id
     member_turn = await caller_is_desk_member(user_id=user_id, folder_id=folder_id)
-    # Read-side full injection (Agent记忆与知识系统 · 目标形态): every always-on entry in
-    # display order; write-side quota owns「常驻满了」. AI memory rides the (patchable) store
-    # seam; user rules degrade to none on failure so this can never break a turn.
-    # Member turns still inject the owner's folder-layer 规则/记忆; account-level stays private.
-    # Workspace rebind: omit current-folder 画像/导航 so old-bind notes do not ride this turn.
+    # Member turns still inject the owner's folder-layer 规则; account-level stays private.
     injected_binding = None
     folder_explore_reason: str | None = None
     explore_workspace_key: str | None = None
-    omit_current_folder_ai_memory = False
     if folder_id:
         from agentcore.memory.explore_profile import resolve_turn_explore_gate
 
@@ -211,16 +204,13 @@ async def prepare_fresh_turn(
                 binding_injected=folder_binding_injected,
             ),
         )
-        omit_current_folder_ai_memory = folder_explore_reason == "rebind"
     rules_markdown = await _timed_phase(
         "rules",
         assemble_turn_rules(
             memory_store,
             user_id,
             folder_id=folder_id,
-            enabled=True,
             folder_user_id=folder_rules_user_id,
-            omit_current_folder_ai_memory=omit_current_folder_ai_memory,
         ),
     )
     desk_folder_label = await _timed_phase(
@@ -328,7 +318,9 @@ async def prepare_fresh_turn(
     vision_reader = await _timed_phase(
         "vision",
         resolve_vision_reader_for_conversation(
-            user_id=user_id, conversation_id=conversation_id
+            user_id=user_id,
+            conversation_id=conversation_id,
+            llm_credentials=llm_credentials,
         ),
     )
     from agentcore.llm.image_accept import model_accepts_images
@@ -417,11 +409,14 @@ async def prepare_fresh_turn(
         ),
     )
     if table_id is None:
-        from agentcore.table.context import lookup_table_id
+        from agentcore.table.bind import lookup_table_id_for_turn
 
         try:
-            table_id = await lookup_table_id(
-                conversation_id=conversation_id, user_id=user_id
+            table_id = await lookup_table_id_for_turn(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                folder_id=folder_id,
+                attachments=attachments,
             )
         except Exception:
             table_id = None

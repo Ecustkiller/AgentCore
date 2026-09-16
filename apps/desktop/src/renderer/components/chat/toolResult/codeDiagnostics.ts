@@ -1,8 +1,7 @@
 /**
- * Inner-loop ``code_diagnostics`` display (类型诊断): rides ``tool_use_end.display``
+ * Historical ``code_diagnostics`` display (类型诊断): old ``tool_use_end.display``
  * as an opaque Record — either as the whole display (``kind: "code_diagnostics"``)
- * or nested under write-tool display. Distinct from outer-loop ``test_run``
- * ``budget_exceeded`` (验证未完成).
+ * or nested under write-tool display. Kept for replay; the tool is gone.
  */
 
 export type CodeDiagnosticSeverity = "error" | "warning" | "info";

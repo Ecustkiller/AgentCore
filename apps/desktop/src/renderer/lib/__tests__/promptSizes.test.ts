@@ -2,7 +2,6 @@ import {
   type PromptCatalogItem,
   type PromptRail,
   mineCatalogId,
-  placeholderCatalogId,
 } from "@/lib/promptCatalog";
 import {
   buildAlwaysRows,
@@ -94,19 +93,10 @@ describe("buildAlwaysRows", () => {
   it("空核也进名单", () => {
     const rail = emptyRail({
       constitution: [sharedItem(""), identityItem("")],
-      memory: [
-        mineItem({
-          id: placeholderCatalogId("preferences"),
-          label: "偏好",
-          content: "",
-          memoryKind: "preferences",
-        }),
-      ],
     });
     expect(buildAlwaysRows(rail).map((row) => row.label)).toEqual([
       "全员共享准则",
       "角色身份",
-      "偏好",
     ]);
   });
 
@@ -123,28 +113,6 @@ describe("buildAlwaysRows", () => {
     });
     expect(buildAlwaysRows(rail).map((row) => row.label)).toEqual(["停用"]);
     expect(buildAlwaysRows(rail)[0]?.item).toMatchObject({ disputed: true });
-  });
-
-  it("偏好画像空核也进名单", () => {
-    const rows = buildAlwaysRows(
-      emptyRail({
-        memory: [
-          mineItem({
-            id: "pref",
-            label: "偏好",
-            memoryKind: "preferences",
-            content: "x",
-          }),
-          mineItem({
-            id: "prof",
-            label: "画像",
-            memoryKind: "profile",
-            content: "y",
-          }),
-        ],
-      }),
-    );
-    expect(rows.map((row) => row.label)).toEqual(["偏好", "画像"]);
   });
 });
 

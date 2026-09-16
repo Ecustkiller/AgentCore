@@ -23,7 +23,6 @@ from . import (
     system,
     usage,
     users,
-    workflow_store,
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -42,6 +41,5 @@ router.include_router(observability.router)
 router.include_router(notices.router)
 router.include_router(beta_group.router)
 router.include_router(skill_store.router)
-router.include_router(workflow_store.router)
 
 __all__ = ["router"]

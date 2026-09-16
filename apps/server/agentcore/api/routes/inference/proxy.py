@@ -58,6 +58,7 @@ _CONVERSATION_HEADER = INFERENCE_CONVERSATION_HEADER
 _TRACE_HEADER = INFERENCE_TRACE_HEADER
 _MESSAGE_HEADER = INFERENCE_MESSAGE_HEADER
 _UPSTREAM_RETRIED_HEADER = {"X-Upstream-Retried": str(3)}
+_EFFORT_UNSET: object = object()
 
 
 def _usage_to_openai_wire(usage: TokenUsage) -> dict:
@@ -112,6 +113,43 @@ def _explicit_selection_from_requested(requested: str | None) -> ModelSelection 
     return ModelSelection(model=rest, origin="byok", provider_id=prefix)
 
 
+async def _resolve_vision_slot_selection(
+    session: AsyncSession,
+    user_id: str,
+    conv,
+) -> ModelSelection | None:
+    """Dedicated vision slot, else image-accepting main; else ``None`` (try VISION_*)."""
+    from agentcore.llm.model_profiles import LlmModelProfileService
+    from agentcore.vision.factory import pick_vision_selection
+
+    svc = LlmModelProfileService(session)
+    if conv is not None:
+        expanded = await svc.expand_for_conversation(user_id, conv)
+    else:
+        expanded = await svc.expand(user_id, None)
+    return pick_vision_selection(vision=expanded.vision, main=expanded.main)
+
+
+def _platform_vision_fallback_config() -> ModelConfig | None:
+    """Operator ``VISION_*`` — same predicate as :func:`build_vision_reader`."""
+    from agentcore.config import settings as app_settings
+
+    if getattr(app_settings, "billing_mode", "byok") != "platform":
+        return None
+    key = (getattr(app_settings, "vision_api_key", None) or "").strip()
+    url = (getattr(app_settings, "vision_base_url", None) or "").strip()
+    if not key or not url:
+        return None
+    model = (getattr(app_settings, "vision_model", None) or "kimi-k2.5").strip()
+    return ModelConfig(
+        model=model,
+        base_url=url,
+        api_key=key,
+        source="platform",
+        purpose="chat",
+    )
+
+
 async def _resolve_inference_credentials(
     session: AsyncSession,
     cost_repo: CostEventRepository,
@@ -127,7 +165,7 @@ async def _resolve_inference_credentials(
         resolve_account_default_model,
         resolve_account_worker_selection,
     )
-    from agentcore.runtime.costing import ROLE_MEMBER
+    from agentcore.runtime.costing import ROLE_MEMBER, ROLE_VISION
 
     conv = None
     if conversation_id:
@@ -139,41 +177,50 @@ async def _resolve_inference_credentials(
     else:
         selection = await resolve_account_default_model(session, user.user_id)
 
-    # Per-worker / debate node override: body ``model`` as a catalog route key wins
-    # over role-slot defaults. Illegal identities hard-fail (no silent wild fallback).
-    explicit = _explicit_selection_from_requested(requested_model)
-    if explicit is not None:
-        ok = await validate_model_choice(
-            session,
-            user.user_id,
-            explicit.model,
-            explicit.origin,
-            explicit.provider_id,
-        )
-        if not ok:
-            raise ValidationError(
-                "节点模型不可用或未在目录中："
-                f"model={explicit.model} · origin={explicit.origin}"
-                + (
-                    f" · provider_id={explicit.provider_id}"
-                    if explicit.provider_id
-                    else ""
-                )
-                + "。请改选可用模型，禁止 silent 回退。"
+    # Vision expands the profile slot (or VISION_*), not the mint/chat body model.
+    # Per-worker node override (catalog route key) is member-only.
+    if cost_role == ROLE_VISION:
+        vision_sel = await _resolve_vision_slot_selection(session, user.user_id, conv)
+        if vision_sel is None:
+            fallback = _platform_vision_fallback_config()
+            if fallback is None:
+                raise ValidationError("读图能力未配置")
+            return fallback
+        selection = vision_sel
+    else:
+        explicit = _explicit_selection_from_requested(requested_model)
+        if explicit is not None:
+            ok = await validate_model_choice(
+                session,
+                user.user_id,
+                explicit.model,
+                explicit.origin,
+                explicit.provider_id,
             )
-        selection = explicit
-    elif cost_role == ROLE_MEMBER:
-        # Delegated workers without a node identity: profile Worker slot (else main).
-        # Captain / arena / product-chrome roles keep the conversation main model.
-        worker = await resolve_account_worker_selection(
-            session, user.user_id, conv=conv
-        )
-        if worker is not None and (
-            worker.model != selection.model
-            or worker.origin != selection.origin
-            or worker.provider_id != selection.provider_id
-        ):
-            selection = worker
+            if not ok:
+                raise ValidationError(
+                    "节点模型不可用或未在目录中："
+                    f"model={explicit.model} · origin={explicit.origin}"
+                    + (
+                        f" · provider_id={explicit.provider_id}"
+                        if explicit.provider_id
+                        else ""
+                    )
+                    + "。请改选可用模型，禁止 silent 回退。"
+                )
+            selection = explicit
+        elif cost_role == ROLE_MEMBER:
+            # Delegated workers without a node identity: profile Worker slot (else main).
+            # Captain / arena / product-chrome roles keep the conversation main model.
+            worker = await resolve_account_worker_selection(
+                session, user.user_id, conv=conv
+            )
+            if worker is not None and (
+                worker.model != selection.model
+                or worker.origin != selection.origin
+                or worker.provider_id != selection.provider_id
+            ):
+                selection = worker
 
     credentials = await preflight_llm_credentials(
         session=session,
@@ -233,8 +280,16 @@ async def _record_proxy_spend(
     Request path only persists to the process-local durable queue (as-built: 成本配额 §三).
     Drain writes ``cost_calls`` then upserts ``cost_events`` on the telemetry pool;
     ``call_id`` UNIQUE dedupes at-least-once retries. See ``billing.proxy_spend_queue``.
+
+    ``role=vision`` is the same fence as in-process ``call_meter`` (``vision.*``):
+    读图 is priced onto the turn ``cost_runs`` sink (``vision_run_cost``) and
+    folded at finalize. Metering the proxied HTTP call would double-bill.
     """
     from agentcore.billing.proxy_spend_queue import get_proxy_spend_queue
+    from agentcore.runtime.costing import ROLE_VISION
+
+    if role == ROLE_VISION:
+        return
 
     # Role / credential / token / money fields are assembled inside
     # ``assemble_ledger_call`` (shared with in-process metering).
@@ -291,7 +346,34 @@ def _tool_calls_from_payload(raw: list[dict] | None) -> list[ToolCall] | None:
     ]
 
 
-def _llm_request_from_payload(payload: dict, cfg: ModelConfig) -> LLMRequest:
+async def _resolve_profile_reasoning_effort(
+    session: AsyncSession,
+    user_id: str,
+    conversation_id: str | None,
+) -> str | None:
+    """Combination-level vendor token. Sidecar has no combo DB — proxy stamps it."""
+    from agentcore.db.repositories import ConversationRepository
+    from agentcore.llm.model_profiles import LlmModelProfileService
+
+    conv = None
+    if conversation_id:
+        conv = await ConversationRepository(session).get_by_id(
+            conversation_id, user_id=user_id
+        )
+    svc = LlmModelProfileService(session)
+    if conv is not None:
+        expanded = await svc.expand_for_conversation(user_id, conv)
+    else:
+        expanded = await svc.expand(user_id, None)
+    return expanded.reasoning_effort
+
+
+def _llm_request_from_payload(
+    payload: dict,
+    cfg: ModelConfig,
+    *,
+    reasoning_effort: str | None | object = _EFFORT_UNSET,
+) -> LLMRequest:
     # Faithful dict→LLMMessage: keep the FULL assistant/tool field set the sidecar
     # sent (tool_calls / tool_call_id / reasoning_content), not just role+content.
     # reasoning_content is preserved verbatim (including "") — the provider's
@@ -314,6 +396,15 @@ def _llm_request_from_payload(payload: dict, cfg: ModelConfig) -> LLMRequest:
             thinking = False
         elif kind == "enabled":
             thinking = True
+    raw_effort = payload.get("reasoning_effort")
+    payload_effort = (
+        (raw_effort.strip() or None) if isinstance(raw_effort, str) else None
+    )
+    # Expanded combination token wins, including None (vendor default).
+    if reasoning_effort is not _EFFORT_UNSET:
+        effort = reasoning_effort if isinstance(reasoning_effort, str) else None
+    else:
+        effort = payload_effort
     return LLMRequest(
         messages=messages,
         # Server-resolved model is authoritative: the sidecar may still send
@@ -325,6 +416,7 @@ def _llm_request_from_payload(payload: dict, cfg: ModelConfig) -> LLMRequest:
         tool_choice=payload.get("tool_choice", "auto"),
         stream=bool(payload.get("stream")),
         thinking=thinking,
+        reasoning_effort=effort,
         # Marks proxy-forwarded calls so in-process metering skips (proxy_spend
         # is the sole ledger source); llm.call logging still uses this scenario.
         scenario=PROXY_LLM_SCENARIO,
@@ -399,7 +491,12 @@ async def inference_chat_completions(
 
         bind_credential_pricing_context(creds)
         provider = build_provider(creds)
-        llm_request = _llm_request_from_payload(payload, cfg)
+        profile_effort = await _resolve_profile_reasoning_effort(
+            session, user.user_id, conversation_id
+        )
+        llm_request = _llm_request_from_payload(
+            payload, cfg, reasoning_effort=profile_effort
+        )
 
         # Credentials + gate are done and spend recording goes through the proxy
         # queue, so nothing below needs this session. Release it before waiting on

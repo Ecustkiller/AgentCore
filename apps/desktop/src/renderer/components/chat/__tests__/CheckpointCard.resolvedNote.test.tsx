@@ -66,7 +66,7 @@ describe("ResolvedCheckpoint 单行折叠", () => {
     const withSelected: CheckpointDisplay = {
       ...resolvedDecision,
       id: "cp-2",
-      question: "选哪条方案推进？",
+      question: "这一题的问句",
       selected: ["方案 C：外包试点"],
       note: "",
     };
@@ -74,7 +74,7 @@ describe("ResolvedCheckpoint 单行折叠", () => {
 
     expect(screen.queryByText("已选定方案")).toBeNull();
     expect(document.body.textContent).toContain("方案 C：外包试点");
-    expect(document.body.textContent).not.toContain("选哪条方案推进？");
+    expect(document.body.textContent).not.toContain("这一题的问句");
 
     cleanup();
 
@@ -86,14 +86,14 @@ describe("ResolvedCheckpoint 单行折叠", () => {
     };
     render(<CheckpointCard checkpoint={labelOnly} />);
     expect(screen.getByLabelText("拍板记录")).toBeTruthy();
-    expect(document.body.textContent).not.toContain("选哪条方案推进？");
+    expect(document.body.textContent).not.toContain("这一题的问句");
   });
 
   it("选项 chips 收起时随卡隐藏、展开后显示", () => {
     const resolvedPicks: CheckpointDisplay = {
       ...resolvedDecision,
       id: "cp-2",
-      question: "选哪条方案推进？",
+      question: "这一题的问句",
       selected: ["方案 C：外包试点"],
       note: "",
     };
@@ -105,7 +105,7 @@ describe("ResolvedCheckpoint 单行折叠", () => {
 
     fireEvent.click(screen.getByText("方案 C：外包试点"));
     expect(screen.getByText("方案 C：外包试点")).toBeTruthy();
-    expect(document.body.textContent).toContain("选哪条方案推进？");
+    expect(document.body.textContent).toContain("这一题的问句");
   });
 
   it("stop / research_first resolved 占「已取消本回合」存根；收起不见问句", () => {
@@ -135,6 +135,33 @@ describe("ResolvedCheckpoint 单行折叠", () => {
       expect(document.body.textContent).toContain(resolvedDecision.question);
       cleanup();
     }
+  });
+
+  it("展开存根用 question prompt，不用 question 总述", () => {
+    render(
+      <CheckpointCard
+        checkpoint={{
+          ...resolvedDecision,
+          id: "cp-prompts",
+          question: "批次总述",
+          questions: [
+            {
+              id: "q0",
+              prompt: "这一题的问句",
+              kind: "choice",
+              options: [{ label: "方案 C：外包试点" }],
+              multiple: false,
+              default: "",
+            },
+          ],
+        }}
+      />,
+    );
+    expect(document.body.textContent).not.toContain("这一题的问句");
+    expect(document.body.textContent).not.toContain("批次总述");
+    fireEvent.click(screen.getByText("综述型 · 公开发表 · 精简干货"));
+    expect(document.body.textContent).toContain("这一题的问句");
+    expect(document.body.textContent).not.toContain("批次总述");
   });
 
   it("缺 decision 不猜成超时", () => {

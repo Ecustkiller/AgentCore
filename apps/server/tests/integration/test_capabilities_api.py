@@ -37,6 +37,8 @@ async def test_capabilities_returns_full_catalog(client):
         assert retired not in tools
     assert "escalate" in tools
     assert tools["escalate"]["available_to"] == ["worker"]
+    assert "update_folder_profile" not in tools
+    assert "remember" in tools
     # Shared read/retrieval built-ins.
     for name in ("web_search",):
         assert name in tools

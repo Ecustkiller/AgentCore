@@ -1,17 +1,18 @@
 """LLM-call observability: the single emit point for ``llm.call`` /
 ``llm.call_failed`` and optional ``llm.request`` / ``llm.response`` body capture.
 
-Why a shared helper: production leaves are wrapped by
-:func:`agentcore.llm.call_fence.observe_provider` (from ``build_provider``), which
-calls :func:`log_llm_call` / :func:`log_llm_call_failed` so every path — turn
-router leaf, background unary, sidecar ``inference/proxy`` — lands one uniform
-line, attributed by ``scenario`` / ``model`` / ``attempt`` and (via
+Why a shared helper: production chat leaves are wrapped by
+:func:`agentcore.llm.call_fence.observe_provider` (from ``build_provider``);
+the vision reader calls the same :func:`~agentcore.llm.call_fence.observe_emit`
+around :func:`log_llm_call`. Both so every path lands one uniform line,
+attributed by ``scenario`` / ``model`` / ``attempt`` and (via
 ``contextvars``) by ``trace_id`` / ``conversation_id`` / worker identity. This is
 the per-call layer the round/turn aggregates (``react.round_end`` /
 ``chat.turn_complete``) cannot give: per-model latency, finish_reason, and the
 chat-vs-worker-vs-title-vs-memory split. Being that single point is also why the
-prompt-prefix-cache probe hangs here (``cost.prefix_cache``, 审计议题 D4): it needs
-the same per-call pairing of request messages with the provider's own usage split.
+prompt-prefix-cache probe hangs here (``cost.prefix_cache`` debug + compact
+``prefix_breach`` on this info line, 审计议题 D4): it needs the same per-call
+pairing of request messages and opening ``tools[]`` with the provider's usage split.
 
 Bodies (the actual prompt + completion) are the lever for prompt tuning but are
 large and sensitive, so they are OFF by default and only captured when
@@ -29,7 +30,7 @@ from typing import Any
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.core.secrets import redact_secrets
-from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
+from agentcore.llm.provider.protocol import LLMMessage, TokenUsage, llm_content_text
 
 logger = get_logger("agentcore.llm.call")
 
@@ -59,10 +60,14 @@ def _redact(text: str) -> str:
 
 
 def _format_prompt(messages: list[LLMMessage]) -> str:
-    """Compact, per-message-clipped, redacted view of the request messages."""
+    """Compact, per-message-clipped, redacted view of the request messages.
+
+    ``LLMMessage.content`` is ``str | list[dict] | None`` (multimodal parts).
+    Collapse to text the same way other prompt-adjacent sites do.
+    """
     parts: list[str] = []
     for m in messages:
-        body = m.content or ""
+        body = llm_content_text(m.content)
         if m.tool_calls:
             body += " " + " ".join(f"→{tc.function.name}()" for tc in m.tool_calls)
         if m.tool_call_id and not body:
@@ -83,6 +88,7 @@ def log_llm_call(
     content: str | None = None,
     reasoning: str | None = None,
     tool_names: list[str] | None = None,
+    tools: list[dict[str, Any]] | None = None,
     credential_source: str | None = None,
     provider_name: str | None = None,
     attempt: int = 1,
@@ -114,6 +120,24 @@ def log_llm_call(
     if tool_names:
         extra["tool_names"] = tool_names
     extra.update(_platform_credential_log_fields(source=source))
+    # Probe BEFORE the info line so compact breach fields can ride ``llm.call``.
+    # Full ``cost.prefix_cache`` stays debug (sidecar jsonl window). Never break the call.
+    try:
+        from agentcore.observability.prefix_cache import observe_prefix_cache
+
+        prefix_probe = observe_prefix_cache(
+            scenario=scenario,
+            model=model,
+            messages=messages,
+            input_tokens=u.input_tokens,
+            cache_hit_tokens=u.cache_hit_tokens,
+            cache_miss_tokens=u.cache_miss_tokens,
+            tools=tools,
+        )
+        if prefix_probe is not None:
+            extra.update(prefix_probe.as_llm_call_fields())
+    except Exception:  # noqa: BLE001 — observability must never break the LLM path
+        pass
     logger.info(
         "llm.call",
         scenario=scenario,
@@ -132,25 +156,6 @@ def log_llm_call(
         pricing_source=priced.pricing_source,
         **extra,
     )
-
-    # 审计议题 D4: pair the billed cache split above with WHY it came out that way — the
-    # provider matches ``system + history + user`` as one token prefix, so ``cache_hit_tokens``
-    # alone cannot tell a tail edit from plain history growth. Same seam on purpose: every
-    # path that lands one ``llm.call`` lands one ``cost.prefix_cache`` beside it. Observation
-    # only, and never allowed to break a call (same rule as metering below).
-    try:
-        from agentcore.observability.prefix_cache import observe_prefix_cache
-
-        observe_prefix_cache(
-            scenario=scenario,
-            model=model,
-            messages=messages,
-            input_tokens=u.input_tokens,
-            cache_hit_tokens=u.cache_hit_tokens,
-            cache_miss_tokens=u.cache_miss_tokens,
-        )
-    except Exception:  # noqa: BLE001 — observability must never break the LLM path
-        pass
 
     # Cloud in-process metering: enqueue a cost_calls detail when the ledger
     # drainer is running (API server lifespan). Sidecar never starts the drain —

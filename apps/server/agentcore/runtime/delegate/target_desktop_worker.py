@@ -73,7 +73,6 @@ async def rebuild_worker_prompt_for_target(
         memory_store,
         user_id,
         folder_id=folder_id,
-        enabled=True,
     )
     from agentcore.tools.sandbox.exec_languages import resolve_exec_languages
 

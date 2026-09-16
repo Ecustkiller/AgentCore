@@ -449,4 +449,49 @@ describe("executeWorkspaceOp git_repo_status + git_scm", () => {
     if (push.ok) return;
     expect(push.error.detail).toMatch(/main\/master/);
   });
+
+  it("git_repo_status uses desk cwd .git, not the container root", async () => {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const { mkdir } = await import("node:fs/promises");
+    const execFileAsync = promisify(execFile);
+    try {
+      await execFileAsync("git", ["--version"], { windowsHide: true });
+    } catch {
+      return;
+    }
+    await execFileAsync("git", ["init"], { cwd: dir, windowsHide: true });
+    const desk = join(dir, "conversations", "c1");
+    await mkdir(desk, { recursive: true });
+
+    const { executeWorkspaceOp } = await import("../fs-service");
+    const root = { id: "r", name: "r", absPath: dir };
+    const atContainer = await executeWorkspaceOp(root, "git_repo_status", {});
+    expect(atContainer).toMatchObject({
+      ok: true,
+      value: { present: true },
+    });
+    const atDesk = await executeWorkspaceOp(root, "git_repo_status", {
+      cwd: "conversations/c1",
+    });
+    expect(atDesk).toEqual({ ok: true, value: { present: false } });
+
+    const scmAtDesk = await executeWorkspaceOp(root, "git_scm", {
+      action: "stage",
+      cwd: "conversations/c1",
+    });
+    expect(scmAtDesk.ok).toBe(false);
+    if (!scmAtDesk.ok) {
+      expect(scmAtDesk.error.detail).toMatch(/仅识别该文件夹下的 \.git/);
+    }
+
+    await execFileAsync("git", ["init"], { cwd: desk, windowsHide: true });
+    const deskRepo = await executeWorkspaceOp(root, "git_repo_status", {
+      cwd: "conversations/c1",
+    });
+    expect(deskRepo).toMatchObject({
+      ok: true,
+      value: { present: true },
+    });
+  });
 });

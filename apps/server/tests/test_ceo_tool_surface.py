@@ -1,7 +1,7 @@
 """CEO tool-surface gating: idle vs coordination (工具面瘦身).
 
-拍板分态：闲聊态 = delegate + ask_user + debate 常驻（debate 与 delegate 同级，
-闲聊可开辩）；replan + 协调四件套仅协调态 / 受监督让出时注入（与执行闸对齐）。
+拍板分态：闲聊态 = delegate + ask_user 常驻；debate 仍注册（开场按需）。
+闲聊可查阅后开辩；replan + 协调四件套仅协调态 / 受监督让出时注入（与执行闸对齐）。
 """
 
 from __future__ import annotations
@@ -136,7 +136,7 @@ def test_promote_on_supervised_yield_adds_replan_only():
     assert "replan" in names
     assert "delegate" in names
     # No live coordination → coord suite stays out
-    assert "update_synthesis" not in names
+    assert "wait" not in names
 
 
 def test_promote_on_coordination_adds_full_surface():
@@ -421,7 +421,7 @@ def test_assembled_coordination_live_offers_wait_on_tool_defs():
 
 
 def test_always_on_tools_not_in_gated_set():
-    """delegate / ask_user / debate 常驻——不得进协调闸集合。"""
+    """delegate / ask_user / debate 不进协调闸；debate 开场按需。"""
     for name in ("delegate", "ask_user", "debate", "consult"):
         assert name not in COORDINATION_GATED_TOOLS
 
@@ -440,7 +440,6 @@ def test_coordination_period_hint_posture_not_tool_manual():
     assert "max_rounds" not in COORDINATION_PERIOD_HINT
     assert "同质 wait" not in COORDINATION_PERIOD_HINT
     assert "cancel_worker" not in COORDINATION_PERIOD_HINT
-    assert "update_synthesis" not in COORDINATION_PERIOD_HINT
     assert "force" not in COORDINATION_PERIOD_HINT
     assert "移除" not in COORDINATION_PERIOD_HINT
     assert "不可用" not in COORDINATION_PERIOD_HINT
@@ -481,6 +480,7 @@ def _assemble(
     checkpoint_enabled: bool = True,
     vision_reader=None,
     model: str | None = None,
+    folder_id: str | None = None,
 ) -> ToolRegistry:
     from agentcore.llm.profiles import default_turn_profiles
     from agentcore.runtime.events import EventSink
@@ -508,18 +508,27 @@ def _assemble(
         suspension_deleter=None,
         backend_location="cloud",
         skill_registry=build_system_skill_registry(),
+        folder_id=folder_id,
     )
     return chat_tools
 
 
 def test_assembled_idle_surface_split():
-    """闲聊态：delegate / ask_user / debate 在；replan + 协调四件套不在。
+    """闲聊态：delegate / ask_user / debate 仍注册；replan + 协调四件套不在。
 
     ``consult`` is has_entries-gated via async ``wire_ceo_consult`` (not in sync assemble).
+    debate 开场按需，不进 OpenAI 表。
     """
-    names = set(_assemble().names)
+    reg = _assemble()
+    names = set(reg.names)
     assert {"delegate", "ask_user", "debate"} <= names
     assert names.isdisjoint(COORDINATION_GATED_TOOLS)
+    offered = {
+        (d.get("function") or {}).get("name") or d.get("name")
+        for d in reg.get_openai_definitions()
+    }
+    assert "debate" not in offered
+    assert "debate" in set(reg.deferred_names)
 
 
 def test_assembled_ceo_omits_escalate_and_handoff():
@@ -540,6 +549,12 @@ def test_assembled_offers_create_folder():
         "list_folder_dir",
         "read_folder_file",
     } <= names
+
+
+def test_assembled_ceo_omits_retired_folder_profile():
+    names = set(_assemble(folder_id="fold-1").names)
+    assert "update_folder_profile" not in names
+    assert "remember" in names
 
 
 def test_register_always_ceo_tools_declare_loop():
@@ -595,7 +610,7 @@ def test_assembled_coordination_surface_split():
 
 
 def test_debate_and_review_listed_in_idle_directory():
-    """debate 常驻 ⇒ debate_and_review（requires_tools=debate）闲聊态回到按需目录。"""
+    """debate 仍注册 ⇒ debate_and_review（requires_tools=debate）闲聊态回到按需目录。"""
     from agentcore.runtime.skills import build_system_skill_registry, render_skill_directory
 
     idle_names = set(_assemble().names)

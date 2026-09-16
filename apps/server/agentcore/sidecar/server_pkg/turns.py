@@ -34,7 +34,7 @@ from agentcore.runtime.turn.interrupt import (
     finish_reason_for,
     normalize_interrupt_reason,
 )
-from agentcore.runtime.turn.latency import bind_turn_latency, reset_turn_latency
+from agentcore.runtime.turn.latency import bind_turn_latency, reset_turn_latency, stamp_turn_wall
 from agentcore.sidecar import protocol
 from agentcore.sidecar.server_pkg.result import trim_result
 
@@ -489,6 +489,7 @@ class TurnExecutionMixin:
                 message_id=message_id,
                 trace_id=trace_id,
                 agent_mentions=agent_mentions or None,
+                attachments=attachments or None,
             )
             await outbox.begin_turn(
                 conversation_id=conversation_id,
@@ -565,17 +566,6 @@ class TurnExecutionMixin:
                 local_subpath=folder_local_subpath or "",
             )
 
-            # A1+ local：message_id mint + begin_turn 后、pipeline 前打本机基线（resume 不重打）。
-            from agentcore.workspace.turn_baseline import maybe_capture_turn_baseline
-
-            await maybe_capture_turn_baseline(
-                user_id=self._user_id,
-                folder_id=folder_id,
-                conversation_id=conversation_id,
-                message_id=message_id,
-                backend=backend,
-                workspace_root=self._root,
-            )
             pump = asyncio.create_task(
                 self._pump(turn_id, sink, conversation_id=conversation_id)
             )
@@ -658,6 +648,7 @@ class TurnExecutionMixin:
                             attachments=attachments or None,
                             table_selection=table_selection or None,
                         )
+                        stamp_turn_wall(result)
                         # Duration / Phase-0 close before the detached-drive hold —
                         # same wall-clock as cloud turn_runner (harvest wait is not TTFT).
                         log_chat_turn_complete(
@@ -677,11 +668,11 @@ class TurnExecutionMixin:
                         await await_live_detached_drive(conversation_id)
                         refresh_result_journal_from_host(result, sink=sink)
             finally:
-                reset_turn_latency(latency_token)
-                # Cancel path: emit confirmation *before* close so the pump still
-                # delivers ``message_end(cancelled)`` (TURN_CANCELLED alone is not enough).
+                # Cancel confirmation while the probe is still bound so live
+                # message_end carries the same whole-turn clock as persist.
                 _emit_cancel_end_if_cancelling(sink)
                 _emit_hot_orphans_if_cancelling(sink, conversation_id)
+                reset_turn_latency(latency_token)
                 # The pipeline no longer closes the sink (its owner does); the sidecar owns
                 # this one, so close it on EVERY path — success or crash — or the pump would
                 # await the None sentinel forever.
@@ -886,6 +877,7 @@ class TurnExecutionMixin:
             cache_hit_tokens=int(result.get("cache_hit_tokens", 0) or 0),
             cache_miss_tokens=int(result.get("cache_miss_tokens", 0) or 0),
             rounds=int(result.get("rounds", 0) or 0),
+            duration_ms=result.get("duration_ms"),
             trace_id=trace_id,
             finish_reason=finish,
             origin=origin,
@@ -1070,6 +1062,8 @@ class TurnExecutionMixin:
             self._pump(turn_id, sink, conversation_id=conversation_id)
         )
         result: dict[str, Any] | None = None
+        started = time.monotonic()
+        _, latency_token = bind_turn_latency(started)
         try:
             try:
                 # Bind this continuation's trace_id (same rationale as _run_turn) so the
@@ -1117,6 +1111,7 @@ class TurnExecutionMixin:
                             # Same desktop channel as fresh turns — omit ⇒ resume drops MCP/Host.
                             x_client_platform="desktop",
                         )
+                        stamp_turn_wall(result)
                         # Same D1 hold as _run_turn: delay close while detached drive lives.
                         from agentcore.runtime.coordination import await_live_detached_drive
                         from agentcore.runtime.pipeline.finalize import (
@@ -1128,6 +1123,7 @@ class TurnExecutionMixin:
             finally:
                 _emit_cancel_end_if_cancelling(sink)
                 _emit_hot_orphans_if_cancelling(sink, conversation_id)
+                reset_turn_latency(latency_token)
                 # The pipeline no longer closes the sink (its owner does); the sidecar owns
                 # this one, so close it on EVERY path — success or crash — or the pump would
                 # await the None sentinel forever.

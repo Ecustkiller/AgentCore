@@ -39,7 +39,7 @@ class AskOption(WirePayload):
     `action` marks an option that the desktop client fulfils with a
     native client action instead of a plain text answer (unknown/absent → plain option):
     `open_local_project` / `register_local_project` / `bind_local_folder` are
-    **本机传统** wire enums（桌面默认同通道；云协作是选项：「导入到云」/「从 Git 克隆」；≠离线；
+    **本机传统** wire enums（桌面默认同通道；云协作是选项：「先在云上做」/「从 Git 克隆」；≠离线；
     网页/手机无本机盘；``create_folder`` 仍只建云）。
     Structured ``op`` / ``source`` / ``destination`` / ``path`` fields carry
     organize_plan items for plan-bound ``file_batch``. ``review_kind`` / ``body`` /

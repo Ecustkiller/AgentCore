@@ -35,6 +35,7 @@ from agentcore.conversation.log_export import (
     search_hit_from_messages,
 )
 from agentcore.core.errors import NotFoundError
+from agentcore.core.search_query import SEARCH_DEFAULT_LIMIT, SEARCH_HARD_CAP
 from agentcore.core.types import is_uuid_id
 from agentcore.db.models import Document
 from agentcore.db.repositories import (
@@ -51,8 +52,6 @@ from agentcore.security.tokens import create_account_token
 
 router = APIRouter(prefix="/account", tags=["account"])
 
-_SEARCH_HARD_CAP = 30
-_DEFAULT_LIMIT = 10
 _MAX_LOOKBACK_HOURS = 168
 
 
@@ -77,14 +76,17 @@ async def mint_account_token(user: AuthUser) -> AccountTokenResponse:
 
 
 class ConversationSearchRequest(BaseModel):
-    """Aligned with Worker ``search_conversations`` (resolved folder filters)."""
+    """Sidecar / account-ticket search.
+
+    Log tool always sends archived, never hours / global-only.
+    """
 
     query: str = ""
     folder_id: str | None = None
     include_archived: bool = True
     global_chats_only: bool = False
     exclude_conversation_id: str | None = None
-    limit: int = Field(default=_DEFAULT_LIMIT, ge=1, le=_SEARCH_HARD_CAP)
+    limit: int = Field(default=SEARCH_DEFAULT_LIMIT, ge=1, le=SEARCH_HARD_CAP)
     updated_within_hours: int | None = Field(default=None, ge=1, le=_MAX_LOOKBACK_HOURS)
     # When true, treat ``folder_id`` as an explicit owner-check target (tool's
     # explicit folder_id arg). Missing/unowned → ``folder_miss`` soft empty.
@@ -114,7 +116,7 @@ async def search_account_conversations(
     user: AccountApiUser,
     session: AsyncSession = Depends(get_db),
 ) -> ConversationSearchResponse:
-    """Owner-scoped conversation directory search (account ticket or access)."""
+    """Owner-scoped conversation search (account ticket or access)."""
     if body.check_folder_owned and body.folder_id:
         folder = await FolderRepository(session).get_by_id(
             body.folder_id, user_id=user.user_id
@@ -434,17 +436,29 @@ async def list_account_user_rules(
 
 
 class AccountRememberRequest(BaseModel):
+    action: Literal["write", "read", "delete", "list"] = "write"
+    name: str | None = None
     content: str | None = None
     folder_id: str | None = None
-    action: Literal["add", "replace", "forget", "list"] = "add"
-    replaces: str | None = None
+    apply: Literal["always", "on_demand"] | None = None
+    description: str | None = None
+
+
+class AccountRememberCatalogItem(BaseModel):
+    name: str
+    apply: str = ""
+    description: str = ""
 
 
 class AccountRememberResponse(BaseModel):
     changed: bool
     action: str
     message: str
-    rules_markdown: str | None = None
+    name: str = ""
+    apply: str = ""
+    body: str = ""
+    catalog: list[AccountRememberCatalogItem] = Field(default_factory=list)
+    ok: bool = True
 
 
 @router.post("/rules/remember", response_model=AccountRememberResponse)
@@ -453,15 +467,17 @@ async def remember_account_user_rule(
     user: AccountApiUser,
     session: AsyncSession = Depends(get_db),
 ) -> AccountRememberResponse:
-    """Mutate the scope's user-rule doc (``add`` / ``replace`` / ``forget`` / ``list``)."""
+    """Write / read / delete / list a named user-rule markdown under AgentCore/规则/."""
     try:
         result = await mutate_user_rule(
             DocumentRepository(session),
             user.user_id,
             folder_id=body.folder_id,
             action=body.action,
+            name=body.name,
             content=body.content,
-            replaces=body.replaces,
+            apply=body.apply,
+            description=body.description,
         )
     except AlwaysQuotaExceededError as exc:
         raise HTTPException(
@@ -475,7 +491,14 @@ async def remember_account_user_rule(
         changed=result.changed,
         action=result.action,
         message=result.message,
-        rules_markdown=result.rules_markdown,
+        name=result.name,
+        apply=result.apply,
+        body=result.body,
+        catalog=[
+            AccountRememberCatalogItem(name=n, apply=a, description=d)
+            for n, a, d in result.catalog
+        ],
+        ok=result.ok,
     )
 
 

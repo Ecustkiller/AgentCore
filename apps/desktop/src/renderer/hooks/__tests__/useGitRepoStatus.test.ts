@@ -62,12 +62,12 @@ describe("useGitRepoStatus", () => {
     );
 
     await waitFor(() =>
-      expect(fetchGitRepoStatus).toHaveBeenCalledWith("root-a"),
+      expect(fetchGitRepoStatus).toHaveBeenCalledWith("root-a", ""),
     );
 
     rerender({ rootId: "root-b", enabled: true });
     await waitFor(() =>
-      expect(fetchGitRepoStatus).toHaveBeenCalledWith("root-b"),
+      expect(fetchGitRepoStatus).toHaveBeenCalledWith("root-b", ""),
     );
 
     await act(async () => {
@@ -96,7 +96,7 @@ describe("useGitRepoStatus", () => {
     const { unmount } = renderHook(() => useGitRepoStatus("root-1", true));
 
     await waitFor(() =>
-      expect(fetchGitRepoStatus).toHaveBeenCalledWith("root-1"),
+      expect(fetchGitRepoStatus).toHaveBeenCalledWith("root-1", ""),
     );
     expect(watch).not.toHaveBeenCalled();
     expect(onChanged).not.toHaveBeenCalled();
@@ -106,7 +106,7 @@ describe("useGitRepoStatus", () => {
       window.dispatchEvent(new Event("focus"));
     });
     await waitFor(() =>
-      expect(fetchGitRepoStatus).toHaveBeenCalledWith("root-1"),
+      expect(fetchGitRepoStatus).toHaveBeenCalledWith("root-1", ""),
     );
 
     unmount();
@@ -124,9 +124,22 @@ describe("useGitRepoStatus", () => {
 
     window.fsApi = {} as unknown as typeof window.fsApi;
     rerender({ rootId: "r2", enabled: true });
-    await waitFor(() => expect(fetchGitRepoStatus).toHaveBeenCalledWith("r2"));
+    await waitFor(() =>
+      expect(fetchGitRepoStatus).toHaveBeenCalledWith("r2", ""),
+    );
 
     unmount();
+  });
+
+  it("forwards desk cwd so status is not fetched at the container root", async () => {
+    fetchGitRepoStatus.mockResolvedValue(null);
+    renderHook(() => useGitRepoStatus("root-1", true, "conversations/c1"));
+    await waitFor(() =>
+      expect(fetchGitRepoStatus).toHaveBeenCalledWith(
+        "root-1",
+        "conversations/c1",
+      ),
+    );
   });
 
   it("clears status when disabled or rootId is absent", async () => {

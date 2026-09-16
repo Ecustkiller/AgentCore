@@ -17,11 +17,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/documents", () => ({
   listScopeEntries: vi.fn(),
-  getDocument: vi.fn(),
   createRuleDocument: vi.fn(),
   deleteDocument: vi.fn(),
   renameDocument: vi.fn(),
-  setDocumentDisputed: vi.fn(),
   updateDocumentApplyMode: vi.fn(),
 }));
 vi.mock("@/services/memory", () => ({
@@ -33,12 +31,9 @@ vi.mock("@/lib/toast", () => ({
 }));
 
 import {
-  type DocumentDetail,
   type DocumentNode,
   deleteDocument,
-  getDocument,
   listScopeEntries,
-  setDocumentDisputed,
 } from "@/services/documents";
 import { writeMemoryFile } from "@/services/memory";
 import {
@@ -67,14 +62,6 @@ const entry = (over: Partial<DocumentNode> = {}): DocumentNode => ({
   ...over,
 });
 
-const entryDetail = (over: Partial<DocumentDetail> = {}): DocumentDetail => ({
-  ...entry(over),
-  content: over.content ?? "",
-  version: over.version ?? "v",
-  quotaWarning: over.quotaWarning ?? null,
-  ...over,
-});
-
 function renderScope(
   scope: "global" | "folder" = "global",
   extra?: { memoryActivePath?: string | null },
@@ -85,7 +72,6 @@ function renderScope(
   const onOpen = vi.fn();
   const onDeleted = vi.fn();
   const onRenamed = vi.fn();
-  const onOpenUpdates = vi.fn();
   render(
     <QueryClientProvider client={client}>
       <TooltipProvider>
@@ -100,37 +86,16 @@ function renderScope(
           onOpen={onOpen}
           onDeleted={onDeleted}
           onRenamed={onRenamed}
-          onOpenUpdates={scope === "global" ? onOpenUpdates : undefined}
         />
       </TooltipProvider>
     </QueryClientProvider>,
   );
-  return { onOpen, onDeleted, onRenamed, onOpenUpdates };
+  return { onOpen, onDeleted, onRenamed };
 }
 
-/** A 偏好.md body: three remembered lines, only one of which the user disputes. */
-const PREFERENCES_BODY = `---
-apply: always
-description: 沟通与工作习惯
----
-# 用户记忆
-> 本文件由 AI 自动维护，你可随时编辑或删除任何条目。
-
-## 沟通偏好
-- 你喜欢简洁的回答 <!-- ts:2026-07-19 -->
-- 中文优先，术语保留英文原词
-
-## 工作习惯
-- 先给结论再给理由 <!-- ts:2026-08-01 -->
-`;
-
 beforeEach(() => {
-  // Call history must not leak: the dispute tests assert that nothing was marked.
   vi.clearAllMocks();
   vi.mocked(listScopeEntries).mockResolvedValue([]);
-  vi.mocked(getDocument).mockResolvedValue(
-    entryDetail({ id: "g1", name: "偏好.md", content: PREFERENCES_BODY }),
-  );
   vi.mocked(writeMemoryFile).mockResolvedValue({
     ok: true,
     conflict: false,
@@ -270,8 +235,7 @@ describe("EntriesSection (global)", () => {
     expect(screen.getByText("回复语气")).toBeTruthy();
     expect(screen.getByText("用户画像")).toBeTruthy();
     expect(screen.getByText("偶发.md")).toBeTruthy();
-    // Missing core 偏好.md still appears as a cold-start placeholder.
-    expect(screen.getByText("偏好.md")).toBeTruthy();
+    expect(screen.queryByText("偏好.md")).toBeNull();
     expect(screen.queryByText("常驻")).toBeNull();
     expect(screen.queryByText("按需")).toBeNull();
     expect(screen.queryByText("记忆")).toBeNull();
@@ -285,7 +249,7 @@ describe("EntriesSection (global)", () => {
     expect(screen.queryByText(/已满，超出/)).toBeNull();
     expect(screen.queryByText(/用量加载失败/)).toBeNull();
     expect(screen.queryByLabelText("新建条目")).toBeNull();
-    expect(screen.getByText("最近更新")).toBeTruthy();
+    expect(screen.queryByText("最近更新")).toBeNull();
   });
 
   it("prints a row size only for entries that actually hold the pool", async () => {
@@ -302,16 +266,14 @@ describe("EntriesSection (global)", () => {
     renderScope("global");
 
     expect(await screen.findByText("约 4 千字")).toBeTruthy();
-    // Sub-千字 and empty rows say nothing — deleting them would free nothing, and
-    // the silence is what makes 画像.md's cold-start placeholder look the same as
-    // the written-but-empty entry it becomes.
+    // Sub-千字 and empty rows say nothing — deleting them would free nothing.
     expect(screen.queryByText("不足千字")).toBeNull();
     expect(screen.queryByText("0 字")).toBeNull();
   });
 
   it("does not fetch always-quota and does not render a usage meter", async () => {
     renderScope("global");
-    expect(await screen.findByText("偏好.md")).toBeTruthy();
+    expect(await screen.findByText("还没有全局条目")).toBeTruthy();
     expect(screen.queryByText(/还剩约/)).toBeNull();
     expect(screen.queryByText(/快满了/)).toBeNull();
     expect(screen.queryByText(/已满，超出/)).toBeNull();
@@ -319,18 +281,13 @@ describe("EntriesSection (global)", () => {
     expect(screen.queryByLabelText("新建条目")).toBeNull();
   });
 
-  it("shows core placeholders when the scope has no documents yet", async () => {
+  it("shows an empty hint when the scope has no documents yet", async () => {
     vi.mocked(listScopeEntries).mockResolvedValue([]);
     const { onOpen } = renderScope("global");
-    expect(await screen.findByText("偏好.md")).toBeTruthy();
-    expect(screen.getByText("画像.md")).toBeTruthy();
-    expect(screen.queryByText(/还没有全局条目/)).toBeNull();
-    fireEvent.click(screen.getByText("偏好.md"));
-    expect(onOpen).toHaveBeenCalledWith({
-      channel: "memory",
-      path: "global/preferences",
-      name: "偏好.md",
-    });
+    expect(await screen.findByText("还没有全局条目")).toBeTruthy();
+    expect(screen.queryByText("偏好.md")).toBeNull();
+    expect(screen.queryByText("画像.md")).toBeNull();
+    expect(onOpen).not.toHaveBeenCalled();
   });
 
   it("does not expose apply_mode on AI-maintained rows", async () => {
@@ -363,56 +320,25 @@ describe("EntriesSection (global)", () => {
     expect(screen.getByText("unclosed frontmatter")).toBeTruthy();
   });
 
-  it("marks a disputed entry as 已停用 and stops counting its always chars", async () => {
+  it("does not mark a disputed leftover as 已停用", async () => {
     vi.mocked(listScopeEntries).mockResolvedValue([
       entry({
         id: "g1",
         name: "过时偏好.md",
         applyMode: "always",
-        alwaysChars: 1200,
+        alwaysChars: null,
         disputedAt: "2026-07-19T12:00:00Z",
       }),
     ]);
     renderScope("global");
 
     const label = await screen.findByText("过时偏好.md");
-    // Kept and readable — dispute is not a delete.
-    expect(label.className).toContain("line-through");
-    expect(screen.getByText("已停用")).toBeTruthy();
-    // Its size is no longer spent, so the row must not advertise a cost.
+    expect(label.className).not.toContain("line-through");
+    expect(screen.queryByText("已停用")).toBeNull();
     expect(screen.queryByText("约 1 千字")).toBeNull();
   });
 
-  it("lets the user mark an entry wrong and undo it from the row menu", async () => {
-    vi.mocked(listScopeEntries).mockResolvedValue([
-      entry({
-        id: "g1",
-        name: "偏好.md",
-        aiMaintained: true,
-        applyMode: "always",
-      }),
-    ]);
-    vi.mocked(setDocumentDisputed).mockResolvedValue(
-      entry({
-        id: "g1",
-        name: "偏好.md",
-        aiMaintained: true,
-        disputedAt: "2026-07-19T12:00:00Z",
-      }),
-    );
-    renderScope("global");
-
-    fireEvent.contextMenu(await screen.findByText("偏好.md"));
-    fireEvent.click(await screen.findByText("这条不对…"));
-    fireEvent.click(
-      await screen.findByRole("button", { name: "停用整个条目" }),
-    );
-    await waitFor(() =>
-      expect(setDocumentDisputed).toHaveBeenCalledWith("g1", true),
-    );
-
-    cleanup();
-    vi.mocked(setDocumentDisputed).mockClear();
+  it("does not offer 这条不对 / 恢复使用 / 已停用 on AI-maintained cores", async () => {
     vi.mocked(listScopeEntries).mockResolvedValue([
       entry({
         id: "g1",
@@ -426,11 +352,9 @@ describe("EntriesSection (global)", () => {
 
     fireEvent.contextMenu(await screen.findByText("偏好.md"));
     expect(screen.queryByText("这条不对…")).toBeNull();
-    // Undo only gives usage back, so it needs no warning about collateral.
-    fireEvent.click(await screen.findByText("恢复使用"));
-    await waitFor(() =>
-      expect(setDocumentDisputed).toHaveBeenCalledWith("g1", false),
-    );
+    expect(screen.queryByText("恢复使用")).toBeNull();
+    expect(screen.queryByText("已停用")).toBeNull();
+    expect(screen.getByText("清空")).toBeTruthy();
   });
 
   it("does not offer 这条不对 on handwritten entries; delete remains", async () => {
@@ -445,7 +369,7 @@ describe("EntriesSection (global)", () => {
     expect(screen.getByText("删除")).toBeTruthy();
   });
 
-  it("keeps 已停用 and 恢复使用 on a disputed handwritten leftover", async () => {
+  it("does not offer 已停用 or 恢复使用 on a disputed leftover; delete remains", async () => {
     vi.mocked(listScopeEntries).mockResolvedValue([
       entry({
         id: "g1",
@@ -453,101 +377,16 @@ describe("EntriesSection (global)", () => {
         disputedAt: "2026-07-19T12:00:00Z",
       }),
     ]);
-    vi.mocked(setDocumentDisputed).mockResolvedValue(
-      entry({ id: "g1", name: "语气.md" }),
-    );
     renderScope("global");
 
     const label = await screen.findByText("语气.md");
-    expect(label.className).toContain("line-through");
-    expect(screen.getByText("已停用")).toBeTruthy();
+    expect(label.className).not.toContain("line-through");
+    expect(screen.queryByText("已停用")).toBeNull();
 
     fireEvent.contextMenu(label);
     expect(screen.queryByText("这条不对…")).toBeNull();
-    fireEvent.click(screen.getByText("恢复使用"));
-    await waitFor(() =>
-      expect(setDocumentDisputed).toHaveBeenCalledWith("g1", false),
-    );
-  });
-
-  // The user comes here from a memory card that showed ONE sentence; the mark is
-  // entry-level. Naming the entry and counting the lines that go with it is the whole
-  // point of the confirm step — without it the click is a blind 误伤.
-  it("names the entry and counts the lines the mark will take down with it", async () => {
-    vi.mocked(listScopeEntries).mockResolvedValue([
-      entry({ id: "g1", name: "偏好.md", aiMaintained: true }),
-    ]);
-    renderScope("global");
-
-    fireEvent.contextMenu(await screen.findByText("偏好.md"));
-    fireEvent.click(await screen.findByText("这条不对…"));
-
-    expect(await screen.findByText("停用整个「偏好.md」？")).toBeTruthy();
-    expect(await screen.findByText("里面这 3 条会一起停用：")).toBeTruthy();
-    expect(screen.getByText("你喜欢简洁的回答")).toBeTruthy();
-    expect(screen.getByText("中文优先，术语保留英文原词")).toBeTruthy();
-    expect(screen.getByText("先给结论再给理由")).toBeTruthy();
-    expect(getDocument).toHaveBeenCalledWith("g1");
-    // 停用 ≠ 删除: the always cost stops, the text stays, the mark is undoable.
-    expect(screen.getByText(/不再占用常驻额度/)).toBeTruthy();
-    expect(screen.getByText(/内容保留在这里/)).toBeTruthy();
-    // Nothing happens until the user confirms.
-    expect(setDocumentDisputed).not.toHaveBeenCalled();
-  });
-
-  it("does not cry collateral for an entry that holds a single line", async () => {
-    vi.mocked(listScopeEntries).mockResolvedValue([
-      entry({ id: "g1", name: "偏好.md", aiMaintained: true }),
-    ]);
-    vi.mocked(getDocument).mockResolvedValue(
-      entryDetail({
-        id: "g1",
-        name: "偏好.md",
-        aiMaintained: true,
-        content: "## 沟通偏好\n- 你喜欢简洁的回答\n",
-      }),
-    );
-    renderScope("global");
-
-    fireEvent.contextMenu(await screen.findByText("偏好.md"));
-    fireEvent.click(await screen.findByText("这条不对…"));
-
-    expect(
-      await screen.findByText("里面只有这 1 条，停用它就是停用整个条目："),
-    ).toBeTruthy();
-  });
-
-  it("backs out without marking anything when the user cancels", async () => {
-    vi.mocked(listScopeEntries).mockResolvedValue([
-      entry({ id: "g1", name: "偏好.md", aiMaintained: true }),
-    ]);
-    renderScope("global");
-
-    fireEvent.contextMenu(await screen.findByText("偏好.md"));
-    fireEvent.click(await screen.findByText("这条不对…"));
-    expect(await screen.findByText("里面这 3 条会一起停用：")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "取消" }));
-
-    await waitFor(() =>
-      expect(screen.queryByText("里面这 3 条会一起停用：")).toBeNull(),
-    );
-    expect(setDocumentDisputed).not.toHaveBeenCalled();
-  });
-
-  it("still says the mark is entry-level when the body cannot be read", async () => {
-    vi.mocked(listScopeEntries).mockResolvedValue([
-      entry({ id: "g1", name: "偏好.md", aiMaintained: true }),
-    ]);
-    vi.mocked(getDocument).mockRejectedValue(new ApiError(404, "missing"));
-    renderScope("global");
-
-    fireEvent.contextMenu(await screen.findByText("偏好.md"));
-    fireEvent.click(await screen.findByText("这条不对…"));
-
-    expect(await screen.findByText(/读不到条目内容/)).toBeTruthy();
-    // No invented count, and the entry-level consequence is still stated.
-    expect(screen.queryByText(/里面这 \d+ 条/)).toBeNull();
-    expect(screen.getByText(/停用仍然落在整个条目上/)).toBeTruthy();
+    expect(screen.queryByText("恢复使用")).toBeNull();
+    expect(screen.getByText("删除")).toBeTruthy();
   });
 
   it("shows calm unavailable when documents API is missing", async () => {
@@ -579,6 +418,7 @@ describe("EntriesSection (global)", () => {
     expect(screen.queryByText("删除")).toBeNull();
     fireEvent.click(screen.getByText("清空"));
     expect(await screen.findByText("清空「偏好.md」？")).toBeTruthy();
+    expect(screen.queryByText(/下一句对话/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(writeMemoryFile).not.toHaveBeenCalled();
 
@@ -598,7 +438,7 @@ describe("EntriesSection (global)", () => {
 });
 
 describe("EntriesSection (project)", () => {
-  it("loads the project scope and hides 最近更新", async () => {
+  it("loads the project scope without empty 画像/导航 slots", async () => {
     vi.mocked(listScopeEntries).mockResolvedValue([
       entry({
         id: "p1",
@@ -609,13 +449,11 @@ describe("EntriesSection (project)", () => {
         alwaysChars: 2400,
       }),
     ]);
-    const { onOpenUpdates } = renderScope("folder");
+    renderScope("folder");
     expect(await screen.findByText("导航.md")).toBeTruthy();
     expect(screen.getByText("项目路由")).toBeTruthy();
-    // Missing project 画像.md still listed as a placeholder.
-    expect(screen.getByText("画像.md")).toBeTruthy();
+    expect(screen.queryByText("画像.md")).toBeNull();
     expect(screen.queryByText("最近更新")).toBeNull();
-    expect(onOpenUpdates).not.toHaveBeenCalled();
     expect(listScopeEntries).toHaveBeenCalledWith("F1");
     expect(screen.getByText("约 2 千字")).toBeTruthy();
     expect(screen.queryByText(/还剩约/)).toBeNull();
@@ -640,6 +478,7 @@ describe("EntriesSection (project)", () => {
     expect(screen.queryByText("删除")).toBeNull();
     fireEvent.click(screen.getByText("清空"));
     expect(await screen.findByText("清空「画像.md」？")).toBeTruthy();
+    expect(screen.queryByText(/下一句对话/)).toBeNull();
     expect(writeMemoryFile).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "清空" }));
     await waitFor(() =>

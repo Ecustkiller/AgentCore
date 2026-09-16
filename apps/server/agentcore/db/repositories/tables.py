@@ -10,7 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.db.models.tables import Table, TableRow, TableView
 from agentcore.db.repositories._base import commit_or_flush
-from agentcore.table.schema import blank_seed, sanitize_cells, sanitize_columns
+from agentcore.table.schema import (
+    blank_seed,
+    empty_view_config,
+    new_id,
+    sanitize_cells,
+    sanitize_columns,
+    sanitize_view,
+)
 from agentcore.table.state import TableState
 
 
@@ -56,6 +63,98 @@ class TableRepository:
         await self._session.refresh(table)
         return await self.get_state(table.id, user_id=user_id)  # type: ignore[return-value]
 
+    async def create_from_csv(
+        self,
+        *,
+        user_id: str,
+        title: str,
+        columns: list[dict[str, Any]],
+        rows: list[dict[str, Any]],
+        workspace_key: str,
+        path: str,
+        commit: bool = True,
+    ) -> TableState:
+        columns = sanitize_columns(columns)
+        view_id = new_id()
+        table = Table(
+            user_id=user_id,
+            title=title,
+            columns_schema={"columns": columns},
+            schema_version=1,
+            active_view_id=view_id,
+            source_workspace_key=workspace_key,
+            source_path=path,
+        )
+        self._session.add(table)
+        await self._session.flush()
+        for raw in rows:
+            self._session.add(
+                TableRow(
+                    id=raw["id"],
+                    table_id=table.id,
+                    cells=sanitize_cells(raw.get("cells"), columns),
+                    position=float(raw.get("position") or 1000),
+                )
+            )
+        self._session.add(
+            TableView(
+                id=view_id,
+                table_id=table.id,
+                name="表格",
+                display_mode="table",
+                config=empty_view_config(),
+                is_default=True,
+            )
+        )
+        await commit_or_flush(self._session, commit=commit)
+        await self._session.refresh(table)
+        return await self.get_state(table.id, user_id=user_id)  # type: ignore[return-value]
+
+    async def replace_csv_snapshot(
+        self,
+        state: TableState,
+        *,
+        title: str,
+        columns: list[dict[str, Any]],
+        rows: list[dict[str, Any]],
+        commit: bool = True,
+    ) -> TableState:
+        columns = sanitize_columns(columns)
+        state.title = title
+        state.columns = columns
+        state.rows = [
+            {
+                "id": raw["id"],
+                "cells": sanitize_cells(raw.get("cells"), columns),
+                "position": float(raw.get("position") or 1000),
+            }
+            for raw in rows
+        ]
+        state.schema_version = int(state.schema_version) + 1
+        state.undo_batch = None
+        cleaned: list[dict[str, Any]] = []
+        for view in state.views:
+            item = sanitize_view(view, columns)
+            if item is not None:
+                cleaned.append(item)
+        if not cleaned:
+            vid = new_id()
+            cleaned = [
+                {
+                    "id": vid,
+                    "name": "表格",
+                    "display_mode": "table",
+                    "config": empty_view_config(),
+                    "is_default": True,
+                }
+            ]
+            state.active_view_id = vid
+        elif state.active_view_id not in {v["id"] for v in cleaned}:
+            state.active_view_id = cleaned[0]["id"]
+        state.views = cleaned
+        await self.persist_state(state, commit=commit)
+        return await self.get_state(state.id, user_id=state.user_id)  # type: ignore[return-value]
+
     async def get_by_id(self, table_id: str, *, user_id: str) -> Table | None:
         result = await self._session.execute(
             select(Table).where(
@@ -73,6 +172,19 @@ class TableRepository:
             select(Table).where(
                 Table.conversation_id == conversation_id,
                 Table.user_id == user_id,
+                Table.deleted_at.is_(None),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_source(
+        self, *, user_id: str, workspace_key: str, path: str
+    ) -> Table | None:
+        result = await self._session.execute(
+            select(Table).where(
+                Table.user_id == user_id,
+                Table.source_workspace_key == workspace_key,
+                Table.source_path == path,
                 Table.deleted_at.is_(None),
             )
         )
@@ -122,6 +234,7 @@ class TableRepository:
             active_view_id=table.active_view_id or (views[0].id if views else ""),
             schema_version=table.schema_version,
             conversation_id=table.conversation_id,
+            source_path=table.source_path,
             undo_batch=dict(table.undo_batch) if table.undo_batch else None,
             created_at=_iso(table.created_at),
             updated_at=_iso(table.updated_at),
@@ -149,11 +262,30 @@ class TableRepository:
                     "conversation_id": table.conversation_id,
                     "schema_version": table.schema_version,
                     "row_count": int(n or 0),
+                    "source_path": table.source_path,
                     "created_at": table.created_at,
                     "updated_at": table.updated_at,
                 }
             )
         return out
+
+    async def summary_of(self, table: Table) -> dict[str, Any]:
+        n = await self._session.scalar(
+            select(func.count(TableRow.id)).where(
+                TableRow.table_id == table.id,
+                TableRow.deleted_at.is_(None),
+            )
+        )
+        return {
+            "id": table.id,
+            "title": table.title,
+            "conversation_id": table.conversation_id,
+            "schema_version": table.schema_version,
+            "row_count": int(n or 0),
+            "source_path": table.source_path,
+            "created_at": table.created_at,
+            "updated_at": table.updated_at,
+        }
 
     async def persist_state(
         self,

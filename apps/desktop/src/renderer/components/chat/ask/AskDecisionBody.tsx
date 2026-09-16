@@ -1,7 +1,7 @@
 /**
  * 生产通用澄清卡 —— AskCardShell + 行式选项（{@link AskRowGroup}）。
  * 无开场仪式主 CTA。打开不预选 `default`；AI 倾向写在选项 label 原文。`default` 走行右灰字「默认」。
- * 当前题干画在卡头（无题则 `message`）；可见面不画「需要你拍板」和图标。
+ * 当前题干画在卡头（旧帧无题则 `question`）；可见面不画「需要你拍板」和图标。
  * `questions.length ≥ 2`：体内一次一题，头右侧 {@link AskQuestionPager} 可点切换各题
  * （没写补充也能切）；非末题主 CTA「下一题」（只推进），末题才「提交」才 resume。
  * 单选首次勾选约 200ms 后自动切下一题；回看改选停在本题；末题不自动交。

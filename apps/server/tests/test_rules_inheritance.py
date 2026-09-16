@@ -26,8 +26,6 @@ from agentcore.memory.injection import (
     _FOLDER_SETTINGS_LABEL,
 )
 from agentcore.memory.rules_injection import (
-    _memory_fragments,
-    _memory_fragments_from_snapshot,
     _user_rule_fragments,
     _user_rule_fragments_from_cloud,
     assemble_injected_rules,
@@ -199,28 +197,7 @@ async def test_ancestor_layers_carry_the_nearer_wins_wording():
     assert md.index(_ANCESTOR_SETTINGS_LABEL) < md.index("外层规则")
 
 
-async def test_profile_memory_inherits_but_navigation_stays_local():
-    """导航是工作区根相对路径的路由表，外层的路由从里层根解析不到 → 不继承。"""
-    store = _FakeMemoryStore(
-        {
-            (None, "偏好.md"): "- 沟通偏好",
-            (OUTER, "画像.md"): "- 外层画像",
-            (OUTER, "导航.md"): "- 外层导航",
-            (CURRENT, "画像.md"): "- 当前画像",
-            (CURRENT, "导航.md"): "- 当前导航",
-        }
-    )
-    md = compose_injected_rules(
-        await _memory_fragments(store, "u1", scope_chain=(OUTER, CURRENT))  # type: ignore[arg-type]
-    )
-    assert "外层画像" in md
-    assert "外层导航" not in md
-    assert "当前导航" in md
-    assert md.index(_ANCESTOR_SETTINGS_LABEL) < md.index(_FOLDER_SETTINGS_LABEL)
-
-
-async def test_omit_current_folder_ai_memory_keeps_rules_and_ancestors():
-    """换绑：当前文件夹画像/导航不注入；用户规则与上层画像仍在。"""
+async def test_ai_notes_do_not_inject_with_user_rules():
     repo = _FakeRuleRepo(
         always={CURRENT: [_Doc("用户规则.md", "- 当前规则")]}
     )
@@ -236,12 +213,10 @@ async def test_omit_current_folder_ai_memory_keeps_rules_and_ancestors():
         repo,  # type: ignore[arg-type]
         "u1",
         folder_id=CURRENT,
-        enabled=True,
         scope_chain=(OUTER, CURRENT),
-        omit_current_folder_ai_memory=True,
     )
-    assert "外层画像" in md
     assert "当前规则" in md
+    assert "外层画像" not in md
     assert "当前画像" not in md
     assert "当前导航" not in md
 
@@ -249,28 +224,22 @@ async def test_omit_current_folder_ai_memory_keeps_rules_and_ancestors():
 async def test_nearer_layer_is_injected_later_than_farther_one():
     """「近覆盖远」在提示词里就是这个顺序事实——外层在前，当前层贴着任务。"""
     repo = _FakeRuleRepo(
-        always={OUTER: [_Doc("用户规则.md", "- 一律用英文写提交信息")]}
-    )
-    store = _FakeMemoryStore(
-        {
-            (OUTER, "画像.md"): "- 本组用 Java",
-            (CURRENT, "画像.md"): "- 本仓用 Rust",
+        always={
+            OUTER: [_Doc("用户规则.md", "- 一律用英文写提交信息")],
+            CURRENT: [_Doc("用户规则.md", "- 本仓提交用中文")],
         }
     )
     md = await assemble_injected_rules(
-        store,  # type: ignore[arg-type]
+        _FakeMemoryStore({}),  # type: ignore[arg-type]
         repo,  # type: ignore[arg-type]
         "u1",
         folder_id=CURRENT,
-        enabled=True,
         scope_chain=(OUTER, CURRENT),
     )
-    assert md.index("本组用 Java") < md.index("一律用英文写提交信息")
-    assert md.index("一律用英文写提交信息") < md.index("本仓用 Rust")
+    assert md.index("一律用英文写提交信息") < md.index("本仓提交用中文")
 
 
-async def test_assemble_interleaves_by_scope_not_author():
-    """同一层里槽位先于用户常驻；不是先倒完全部规则再倒画像。"""
+async def test_assemble_layers_user_rules_by_scope():
     repo = _FakeRuleRepo(
         always={
             None: [_Doc("用户规则.md", "- 全局规则")],
@@ -278,29 +247,14 @@ async def test_assemble_interleaves_by_scope_not_author():
             CURRENT: [_Doc("用户规则.md", "- 当前规则")],
         }
     )
-    store = _FakeMemoryStore(
-        {
-            (None, "偏好.md"): "- 沟通偏好",
-            (OUTER, "画像.md"): "- 外层画像",
-            (CURRENT, "画像.md"): "- 当前画像",
-        }
-    )
     md = await assemble_injected_rules(
-        store,  # type: ignore[arg-type]
+        _FakeMemoryStore({}),  # type: ignore[arg-type]
         repo,  # type: ignore[arg-type]
         "u1",
         folder_id=CURRENT,
-        enabled=True,
         scope_chain=(OUTER, CURRENT),
     )
-    order = (
-        "沟通偏好",
-        "全局规则",
-        "外层画像",
-        "外层规则",
-        "当前画像",
-        "当前规则",
-    )
+    order = ("全局规则", "外层规则", "当前规则")
     positions = [md.index(t) for t in order]
     assert positions == sorted(positions)
     assert "专属规则" not in md
@@ -313,13 +267,11 @@ async def test_no_chain_means_current_layer_only():
     repo = _FakeRuleRepo(
         always={OUTER: [_Doc("用户规则.md", "- 外层规则")], CURRENT: []}
     )
-    store = _FakeMemoryStore({(OUTER, "画像.md"): "- 外层画像"})
     md = await assemble_injected_rules(
-        store,  # type: ignore[arg-type]
+        _FakeMemoryStore({}),  # type: ignore[arg-type]
         repo,  # type: ignore[arg-type]
         "u1",
         folder_id=CURRENT,
-        enabled=True,
     )
     assert md == ""
 
@@ -412,23 +364,6 @@ def test_cloud_ancestor_rules_without_chain_dump_as_one_layer():
     assert _ANCESTOR_SETTINGS_LABEL in md
 
 
-def test_snapshot_memory_walks_the_folder_chain():
-    snapshot = AccountPrepareSnapshot(
-        memory_bodies={
-            ("", "偏好.md"): "- 沟通偏好",
-            (OUTER, "画像.md"): "- 外层画像",
-            (OUTER, "导航.md"): "- 外层导航",
-            (CURRENT, "画像.md"): "- 当前画像",
-        },
-        folder_chain=(OUTER, CURRENT),
-    )
-    md = compose_injected_rules(
-        _memory_fragments_from_snapshot(snapshot, folder_id=CURRENT)
-    )
-    assert md.index("外层画像") < md.index("当前画像")
-    assert "外层导航" not in md
-
-
 def test_a_chain_that_does_not_contain_this_folder_is_refused():
     """快照不是给这个文件夹 warm 的：按它的祖先注入 = 把别人的约定塞进来。"""
     snapshot = AccountPrepareSnapshot(
@@ -436,10 +371,6 @@ def test_a_chain_that_does_not_contain_this_folder_is_refused():
         folder_chain=(OUTER, "f_someone_else"),
     )
     assert snapshot_scope_chain(snapshot, CURRENT) == (CURRENT,)
-    md = compose_injected_rules(
-        _memory_fragments_from_snapshot(snapshot, folder_id=CURRENT)
-    )
-    assert "外层画像" not in md
 
 
 def test_cloud_empty_folder_chain_means_the_desk_is_gone():
@@ -478,11 +409,6 @@ def test_snapshot_empty_folder_chain_skips_the_dead_desk():
         },
         folder_chain=(),
     )
-    md = compose_injected_rules(
-        _memory_fragments_from_snapshot(snapshot, folder_id=CURRENT)
-    )
-    assert "沟通偏好" in md
-    assert "当前画像" not in md
     assert snapshot_scope_chain(snapshot, CURRENT) == ()
 
 
@@ -535,11 +461,10 @@ async def test_ticketed_turn_injects_the_inherited_layers(account_creds):
             _FakeMemoryStore({}),  # type: ignore[arg-type]
             "u1",
             folder_id=CURRENT,
-            enabled=True,
         )
     assert "外层规则" in md
-    assert md.index("外层画像") < md.index("外层规则")
-    assert md.index("外层规则") < md.index("当前画像")
+    assert "外层画像" not in md
+    assert "当前画像" not in md
 
 
 async def test_ticketed_turn_skips_dead_desk_settings(account_creds):
@@ -565,10 +490,9 @@ async def test_ticketed_turn_skips_dead_desk_settings(account_creds):
             _FakeMemoryStore({}),  # type: ignore[arg-type]
             "u1",
             folder_id=CURRENT,
-            enabled=True,
         )
     assert "全局规则" in md
-    assert "沟通偏好" in md
+    assert "沟通偏好" not in md
     assert "当前规则" not in md
     assert "当前画像" not in md
 

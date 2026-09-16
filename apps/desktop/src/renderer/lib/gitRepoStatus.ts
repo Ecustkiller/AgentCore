@@ -41,14 +41,17 @@ function normalizePresent(
   };
 }
 
-/** 拉取工作区根 Git 摘要；不可用时返回 null（UI 不显示）。 */
+/** 拉取当前文件夹 Git 摘要；``cwd`` 为 desk 相对授权根的子路径。不可用时返回 null。 */
 export async function fetchGitRepoStatus(
   rootId: string,
+  cwd = "",
 ): Promise<PresentGitRepoStatus | null> {
   const fsApi = typeof window !== "undefined" ? window.fsApi : undefined;
   if (!fsApi?.workspaceOp) return null;
   try {
-    const res = await fsApi.workspaceOp(rootId, "git_repo_status", {});
+    const res = await fsApi.workspaceOp(rootId, "git_repo_status", {
+      cwd,
+    });
     if (!res.ok || !isGitRepoStatusValue(res.value)) return null;
     if (!res.value.present) return null;
     return normalizePresent(res.value);

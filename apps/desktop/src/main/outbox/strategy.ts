@@ -90,6 +90,8 @@ export interface OutboxRecord {
   cache_hit_tokens?: number;
   cache_miss_tokens?: number;
   rounds?: number;
+  /** Whole-turn product-AI wall clock (ms); same number as live message_end. */
+  duration_ms?: number;
   finish_reason?: string | null;
   phase?: string;
   updated_at?: number;
@@ -109,6 +111,17 @@ export interface OutboxRecord {
   harvest_kind?: string | null;
   /** Soft @Agent chips on the local user bubble (optional; old records omit). */
   agent_mentions?: Array<{ agent_id: string; role: string }>;
+  /** Display chips for salvage insert of the user row (optional; old records omit). */
+  attachments?: Array<{
+    name: string;
+    path: string;
+    truncated?: boolean;
+    kind?: string;
+    workspace_path?: string | null;
+    conversation_id?: string | null;
+    document_id?: string | null;
+    binary?: boolean;
+  }>;
   /**
    * Pause-turn journal watermark stamped on ``reopen_for_resume``.
    * Write-back keeps the full journal on the wire and only filters
@@ -701,6 +714,13 @@ export function toRecordTurnBody(
     trace_id: record.trace_id || "",
     finish_reason: record.finish_reason ?? null,
   };
+  if (
+    typeof record.duration_ms === "number" &&
+    Number.isFinite(record.duration_ms) &&
+    record.duration_ms > 0
+  ) {
+    body.duration_ms = Math.floor(record.duration_ms);
+  }
   const journal = journalEntriesFromMap(record.journal);
   if (journal) body.journal = journal;
   const watermark = record.resume_after_seq;
@@ -729,6 +749,16 @@ export function toRecordTurnBody(
       )
     : [];
   if (mentions.length > 0) body.agent_mentions = mentions;
+  const attachments = Array.isArray(record.attachments)
+    ? record.attachments.filter(
+        (a) =>
+          a &&
+          typeof a.name === "string" &&
+          a.name.trim() &&
+          typeof a.path === "string",
+      )
+    : [];
+  if (attachments.length > 0) body.attachments = attachments;
   return body;
 }
 

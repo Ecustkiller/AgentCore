@@ -129,7 +129,7 @@ export const surfaceMutedPanelLight =
 
 /**
  * Graph node badges. 极简配色（协作图）：蓝色 (primary) 只留给「运行中 / 待你拍板」这类
- * 需要你的信号；纯分类信息（立场 / 修订 / 子任务 / 深度）一律走中性灰，避免蓝色
+ * 需要你的信号；纯分类信息（立场 / 修订 / 子任务）一律走中性灰，避免蓝色
  * 「该看这里」的语义被稀释。`graphBadgePrimary` 仅剩「待你拍板」一个消费点。
  */
 export const graphBadgePrimary = `flex shrink-0 items-center gap-1 ${statusPillInline.primary}`;

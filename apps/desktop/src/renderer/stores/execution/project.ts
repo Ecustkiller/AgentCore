@@ -87,6 +87,7 @@ function runFromPlan(plan: ExecutionPlan, id: string): RunNode | null {
     kind: spec.kind ?? "agent",
     role: null,
     model: null,
+    reasoningEffort: null,
     usage: null,
     cost: null,
     stance: spec.stance ?? null,
@@ -219,6 +220,7 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
             kind: f.runKind,
             role: null,
             model: null,
+            reasoningEffort: null,
             usage: null,
             cost: null,
             // 乙 wire 携 round/stance/side_key (单一轮次投影): debate 续写从 frame wire 读取。
@@ -391,6 +393,7 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
         // Light up this run's payroll row (§7.3B); absent on cost-less frames.
         run.role = f.role ?? null;
         run.model = f.model ?? null;
+        run.reasoningEffort = f.reasoningEffort ?? null;
         run.usage = f.usage ?? null;
         run.cost = f.cost ?? null;
         run.phase = null;

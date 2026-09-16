@@ -123,8 +123,9 @@ describe("MemoryUpdateCard", () => {
     ).toBeTruthy();
     expect(screen.getByText("2 项")).toBeTruthy();
     expect(screen.getByText("本文件夹 · 白板")).toBeTruthy();
-    expect(screen.getByText("移到本文件夹")).toBeTruthy();
-    expect(screen.getByText("移到全局")).toBeTruthy();
+    expect(screen.queryByText("移到本文件夹")).toBeNull();
+    expect(screen.queryByText("移到全局")).toBeNull();
+    expect(screen.queryByText("这条不对")).toBeNull();
   });
 
   it("quota card names denied entries and holders, hiding the fingerprint row", () => {
@@ -244,7 +245,7 @@ describe("MemoryUpdateCard", () => {
     });
   });
 
-  it("sends viewers to the recent-updates feed in toolbox prompts", () => {
+  it("does not send viewers to a retired 最近学到 feed", () => {
     render(
       <MemoryRouter>
         <MemoryUpdateCard
@@ -266,12 +267,11 @@ describe("MemoryUpdateCard", () => {
         />
       </MemoryRouter>,
     );
-    const link = screen.getByRole("link", { name: /去看最近学到/ });
-    expect(link.getAttribute("href")).toBe("/toolbox/mine/skills?updates=1");
+    expect(screen.queryByRole("link", { name: /最近学到/ })).toBeNull();
     expect(screen.queryByText("全局设定")).toBeNull();
   });
 
-  it("opens account-layer rows in toolbox 我的, folder rows on the files page", () => {
+  it("opens account-layer and folder rows on the files page", () => {
     render(
       <MemoryRouter>
         <MemoryUpdateCard
@@ -304,8 +304,13 @@ describe("MemoryUpdateCard", () => {
     );
     const rows = screen.getAllByTitle("在设定中打开画像");
     fireEvent.click(rows[0] as HTMLElement);
-    expect(navigate).toHaveBeenCalledWith("/toolbox/mine/skills", {
-      state: { openMineLeaf: "global/profile" },
+    expect(navigate).toHaveBeenCalledWith("/files", {
+      state: {
+        openMemoryLeaf: {
+          path: "global/profile",
+          name: "画像.md",
+        },
+      },
     });
     fireEvent.click(rows[1] as HTMLElement);
     expect(navigate).toHaveBeenCalledWith("/files", {

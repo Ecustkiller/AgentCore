@@ -416,7 +416,6 @@ export const GraphView = memo(function GraphView({
       captainRun: captainRunNow,
       captainStatus: null,
       finalAnswer: null,
-      captainSynthesisPreview: "",
       captainStatusCaption: null,
       taskMessage: null,
       activateNode: () => undefined,

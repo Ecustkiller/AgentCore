@@ -199,8 +199,7 @@ def test_backend_write_tools_retire_with_the_file_family():
         is True
     )
     for name in (
-        "md_to_docx",
-        "md_to_pdf",
+        "md_export",
         "archive_extract",
         "archive_create",
         "download_url",

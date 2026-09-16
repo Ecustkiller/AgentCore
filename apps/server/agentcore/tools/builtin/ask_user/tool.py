@@ -23,6 +23,7 @@ from agentcore.tools.builtin.ask_user.intent import resolve_ask_checkpoint_inten
 from agentcore.tools.builtin.ask_user.schema import (
     ListArgError,
     advertised_option_actions,
+    card_stem,
     normalize_questions,
 )
 from agentcore.tools.builtin.ask_user.suspend import persist_suspension
@@ -95,17 +96,12 @@ class AskUserTool:
                 "type": "string",
                 "description": "选项名（即用户选它时回传的答案）。",
             },
-            "detail": {
-                "type": "string",
-                "description": "仅 organize_plan 填一行说明。普通提问勿填。",
-            },
         }
         # Schema: short trigger. HOW → ask_kickoff / ask_midtask skills.
-        questions_desc = "问句写 prompt（最多 5）。"
+        questions_desc = "问句写 prompt（1–5 道）。"
         tool_desc = (
-            "向用户发问（唯一问用户原语）。暂停回合等人答复。"
-            "挡路才问：交付形态未钉、猜错会做错 → 先问；仅可逆低杠杆才标假设。"
-            "一次一张卡，多题写 questions；可先检索再问。"
+            "向用户发问（唯一问用户原语）。挡路才问：猜错会做错 → 先问；"
+            "仅可逆低杠杆才标假设。暂停回合等人答复。"
             "HOW→consult(ask_kickoff)、consult(ask_midtask)。"
         )
         allowed_actions = advertised_option_actions(
@@ -127,12 +123,9 @@ class AskUserTool:
             parameters={
                 "type": "object",
                 "properties": {
-                    "message": {
-                        "type": "string",
-                        "description": "必填。无题时当唯一题干。",
-                    },
                     "questions": {
                         "type": "array",
+                        "minItems": 1,
                         "description": questions_desc,
                         "items": {
                             "type": "object",
@@ -177,21 +170,13 @@ class AskUserTool:
                         "description": "可选。整理清单 organize_plan（恰好 1 题多选）。",
                     },
                 },
-                "required": ["message"],
+                "required": ["questions"],
             },
             face=ToolFace.ORCHESTRATION,
             approval=ToolApproval.NEVER,
         )
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
-        message = str(arguments.get("message") or "").strip()
-        if not message:
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error="ask_user 需要非空的 message 参数（向用户说明你在问什么）。",
-            )
         card_parsed = parse_card(arguments.get("card"))
         # Success returns a known card literal (also a str); errors return a Chinese
         # guidance string not in CARD_KINDS.
@@ -217,7 +202,6 @@ class AskUserTool:
             questions = normalize_questions(
                 arguments.get("questions"),
                 max_options=card_max_options(card),
-                keep_detail=card is not None,
             )
         except ListArgError as exc:
             logger.info(
@@ -234,6 +218,18 @@ class AskUserTool:
                     f"{CARD_RETRY_HINT}"
                 ),
             )
+        if not questions:
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output="",
+                error=(
+                    "ask_user 需要至少一道 question（问句写 prompt）。"
+                    f"只问一句话也出一道题。{CARD_RETRY_HINT}"
+                ),
+            )
+        stem = card_stem(questions)
+
         allowed = set(
             advertised_option_actions(
                 desktop=self.advertise_bind_local_folder,
@@ -281,7 +277,7 @@ class AskUserTool:
         required = checkpoint_required(
             checkpoint_id=checkpoint_id,
             conversation_id=self.conversation_id,
-            question=message,
+            question=stem,
             questions=questions,
             intent=intent,
             browser_login=True if browser_login else None,
@@ -313,7 +309,7 @@ class AskUserTool:
                 self,
                 checkpoint_id=checkpoint_id,
                 context=context,
-                message=message,
+                message=stem,
                 questions=questions,
                 required_event=required,
                 intent=intent,

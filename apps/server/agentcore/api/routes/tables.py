@@ -1,6 +1,6 @@
 """Creation-tool 多维表格 CRUD + ops (account-scoped; 外人 404)."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.api.dependencies import AuthUser, get_db
@@ -19,6 +19,7 @@ from agentcore.db.repositories import ConversationRepository
 from agentcore.db.repositories.tables import TableRepository
 from agentcore.table.constants import STRUCT_OPS, TITLE_MAX
 from agentcore.table.ops import apply_ops
+from agentcore.table.source_lookup import lookup_table_by_csv_source
 from agentcore.table.state import TableState
 
 router = APIRouter(prefix="/tables", tags=["tables"])
@@ -36,6 +37,7 @@ def _detail(state: TableState) -> TableDetail:
         rows=state.rows,  # type: ignore[arg-type]
         views=state.views,  # type: ignore[arg-type]
         active_view_id=state.active_view_id,
+        source_path=state.source_path,
         created_at=state.created_at,  # type: ignore[arg-type]
         updated_at=state.updated_at,  # type: ignore[arg-type]
     )
@@ -61,6 +63,31 @@ async def list_tables(
     repo = TableRepository(session)
     rows = await repo.list_by_user(user.user_id)
     return [TableSummary.model_validate(r) for r in rows]
+
+
+@router.get("/by-source", response_model=TableSummary)
+async def get_table_by_source(
+    user: AuthUser,
+    path: str = Query(..., min_length=1),
+    folder_id: str | None = Query(default=None),
+    conversation_id: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_db),
+):
+    fid = (folder_id or "").strip() or None
+    cid = (conversation_id or "").strip() or None
+    if not fid and not cid:
+        raise ValidationError("需要 folder_id 或 conversation_id")
+    table = await lookup_table_by_csv_source(
+        session,
+        user_id=user.user_id,
+        path=path,
+        folder_id=fid,
+        conversation_id=cid,
+    )
+    if not table:
+        raise NotFoundError("表格不存在")
+    repo = TableRepository(session)
+    return TableSummary.model_validate(await repo.summary_of(table))
 
 
 @router.get("/{table_id}", response_model=TableDetail)

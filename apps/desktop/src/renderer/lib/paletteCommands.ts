@@ -52,7 +52,6 @@ import {
   Sun,
   Table2,
   Terminal,
-  Upload,
   UserCog,
   Workflow,
 } from "lucide-react";
@@ -279,27 +278,6 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
             },
           },
           {
-            id: "import-to-cloud",
-            title: "导入本机文件夹到「我的文件」",
-            category: "操作" as const,
-            icon: Upload,
-            keywords: [
-              "import",
-              "cloud",
-              "local",
-              "folder",
-              "daoru",
-              "bendi",
-              "benji",
-              "wenjianjia",
-            ],
-            hint: "推荐 · 本机快照到云",
-            run: () => {
-              setComposerChannelPreference("cloud");
-              useFoldersStore.getState().openImportToCloud();
-            },
-          },
-          {
             id: "borrow-to-cloud",
             title: "云上做完再写入",
             category: "操作" as const,
@@ -491,25 +469,6 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       icon: Settings,
       keywords: ["settings", "shezhi", "more"],
       run: go("/more"),
-    },
-    {
-      id: "nav-workflows",
-      title: "工具箱 · 工作流",
-      category: "前往",
-      icon: Workflow,
-      keywords: [
-        "toolbox",
-        "workflows",
-        "canvas",
-        "gongzuoliu",
-        "工作流",
-        "画布",
-        "拆法",
-        "定时",
-        "cron",
-        "webhook",
-      ],
-      run: go(APP_PATHS.toolbox.workflows.root),
     },
     {
       id: "nav-settings-model",

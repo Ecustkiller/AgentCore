@@ -1,21 +1,37 @@
+function posixRel(raw: string): string {
+  return raw
+    .replace(/\\/g, "/")
+    .replace(/^\/+|\/+$/g, "")
+    .trim();
+}
+
 /**
- * 仓根相对路径（git status / git_scm）→ workspace 相对路径（FileDetail / inPath）。
+ * 仓根相对路径 → workspace 相对路径。
  *
- * git 在容器根跑，返回路径相对仓根；文件源在 subpath 非空时会再经 inPath 前缀。
- * 打开前须 strip `subpath/`，否则双重前缀。路径不在 subpath 下时返回 null（诚实不打开）。
+ * 用户 SCM 在当前文件夹（desk）跑时路径已是 workspace 相对，调用方传空 `subpath`。
+ * 若仍拿到容器根相对路径，strip `subpath/`；不在 subpath 下时返回 null。
  */
 export function repoPathToWorkspaceRel(
   repoRelPath: string,
   subpath: string,
 ): string | null {
-  const path = repoRelPath.replace(/\\/g, "/").replace(/^\/+/, "");
-  const base = subpath
-    .replace(/\\/g, "/")
-    .replace(/^\/+|\/+$/g, "")
-    .trim();
+  const path = posixRel(repoRelPath);
+  const base = posixRel(subpath);
   if (!base) return path;
   if (path === base) return "";
   const prefix = `${base}/`;
   if (path.startsWith(prefix)) return path.slice(prefix.length);
   return null;
+}
+
+/** workspace 相对路径 → 授权根相对（trashPath / 容器 IPC）。 */
+export function workspaceRelToContainerRel(
+  workspaceRelPath: string,
+  subpath: string,
+): string {
+  const path = posixRel(workspaceRelPath);
+  const base = posixRel(subpath);
+  if (!base) return path;
+  if (!path) return base;
+  return `${base}/${path}`;
 }

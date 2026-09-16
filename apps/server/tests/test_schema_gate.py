@@ -23,6 +23,15 @@ def test_net_tombstones_include_dropped_skill_slot_overlay():
     assert "skill_slot_homes" in tables
 
 
+def test_net_tombstones_include_dropped_user_workflows():
+    tables, _columns = sg.net_tombstones()
+    assert "user_workflows" in tables
+    assert "workflow_store_listings" in tables
+    assert "workflow_store_versions" in tables
+    assert "workflow_store_installs" in tables
+    assert "workflow_store_reports" in tables
+
+
 def test_simulate_stale_orm_fails():
     result = sg.run_offline_checks(simulate_stale_orm=True)
     assert not result.ok

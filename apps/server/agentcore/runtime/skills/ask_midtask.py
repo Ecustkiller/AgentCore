@@ -19,5 +19,5 @@ _ASK_MIDTASK = """\
 挑中后 `continue_from_run_id` 唤回、勾选修订。\
 每个任务只问一次主拍板；明文提纲分批做时同样只问一次。
 
-整理方案用 `card="organize_plan"` → 确认后 `file_batch(organize_plan_id=…)`。
+整理方案用 `card="organize_plan"`（问句当批次标题）→ 确认后 `file_batch(organize_plan_id=…)`。
 </途中提问>"""

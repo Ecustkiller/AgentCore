@@ -171,6 +171,25 @@ async def test_write_allows_tiny_overwrite(tmp_path: Path):
     assert (tmp_path / "stub.txt").read_text(encoding="utf-8") == "still small"
 
 
+async def test_write_identical_content_skips_disk(tmp_path: Path, monkeypatch):
+    body = "same-body\n"
+    (tmp_path / "note.md").write_text(body, encoding="utf-8")
+    ctx = _ctx(tmp_path)
+    real_write = ctx.backend.write
+    writes = {"n": 0}
+
+    async def _count(path: str, content: str) -> int:
+        writes["n"] += 1
+        return await real_write(path, content)
+
+    monkeypatch.setattr(ctx.backend, "write", _count)
+    result = await FileWriteTool().execute({"path": "note.md", "content": body}, ctx)
+    assert result.success is True
+    assert (result.metadata or {}).get("already_applied") is True
+    assert writes["n"] == 0
+    assert (tmp_path / "note.md").read_text(encoding="utf-8") == body
+
+
 async def test_write_allows_non_empty_code_overwrite(tmp_path: Path):
     """非空代码整盖允许（优先局部劝导；不再硬拒）。"""
     body = "export function TopBar() {\n  return <header>App</header>;\n}\n"
@@ -282,7 +301,7 @@ async def test_outside_workspace_error_is_actionable(tmp_path: Path):
     assert "AgentCore/文档/research/report.md" in result.error
     assert "bind_local_folder" in result.error or "open_local_project" in result.error
     assert "open_local_project" in result.error or "本机传统" in result.error
-    assert "导入到云" in result.error
+    assert "先在云上做" in result.error
     assert "≠离线" in result.error
 
 
@@ -386,7 +405,6 @@ async def test_file_read_xlsx_does_not_extract(tmp_path: Path):
     assert result.success is True
     out = result.output or ""
     assert "用 run" in out
-    assert "code_execute" not in out
     assert "[观察信封]" in out
     assert "kind: table" in out
     assert not (tmp_path / "report.xlsx.md").exists()
@@ -405,9 +423,7 @@ async def test_file_read_table_without_code_execute_omits_tool_name(tmp_path: Pa
         csv = await FileReadTool().execute({"path": "upload.csv"}, _ctx(tmp_path))
     assert xlsx.success is True
     assert csv.success is True
-    assert "code_execute" not in (xlsx.output or "")
     assert "请用 run" not in (xlsx.output or "")
-    assert "code_execute" not in (csv.output or "")
     assert "手抄" in (xlsx.output or "")
     assert "结构报告" in (xlsx.output or "")
     assert "列名" in (xlsx.output or "")
@@ -433,7 +449,6 @@ async def test_file_read_landed_csv_is_readable(tmp_path: Path):
     (tmp_path / "foreign.csv").write_text("x,y\n9,8\n", encoding="utf-8")
     blocked = await FileReadTool().execute({"path": "foreign.csv"}, ctx)
     assert blocked.success is True
-    assert "code_execute" not in (blocked.output or "")
     assert "kind: table" in (blocked.output or "")
 
 
@@ -549,8 +564,6 @@ async def test_file_read_office_extract_failure_soft(tmp_path: Path):
     assert "抽文本失败" in out
     assert "convert:" not in out
     assert "markitdown" not in out.lower()
-    assert "请用 code_execute" not in out
-    assert "code_execute" not in out
     assert "read_image" in out
     assert "请用户" not in out
 
@@ -831,21 +844,14 @@ def test_file_read_schema_teaches_default_full_read():
     desc = schema.description
     assert "grep" in desc or "code_search" in desc
     assert "glob" in desc
-    assert "dump" not in desc
     assert "web_fetch" in desc
     assert "file_list" in desc
     assert "consult(local_desk)" in desc
-    assert "Desktop" not in desc
     path_desc = schema.parameters["properties"]["path"]["description"]
     assert "web_fetch" not in path_desc
     assert "默认不抽文本" in path_desc
-    assert "Desktop" not in path_desc
     offset = schema.parameters["properties"]["offset"]
-    assert "开窗" in offset["description"]
-    assert "code_execute" not in desc
-    assert "请用 code_execute。" not in desc
-    assert "artifact manifest" not in desc
-    assert "start_page" not in desc
+    assert "起始行号" in offset["description"]
 
 
 @pytest.mark.parametrize("path", [".", "pkg"])
@@ -930,6 +936,85 @@ async def test_str_replace_failure_does_not_change_disk(tmp_path: Path):
     still = await FileReadTool().execute({"path": "edit.md"}, ctx)
     assert still.success is True
     assert "hello world" in (still.output or "")
+
+
+async def test_str_replace_skips_when_post_state_already_holds(
+    tmp_path: Path, monkeypatch
+):
+    (tmp_path / "edit.md").write_text("hello AgentCore\n", encoding="utf-8")
+    ctx = _ctx(tmp_path)
+    real_replace = ctx.backend.replace
+    writes = {"n": 0}
+
+    async def _count(path: str, old: str, new: str, *, all_: bool = False):
+        writes["n"] += 1
+        return await real_replace(path, old, new, all_=all_)
+
+    monkeypatch.setattr(ctx.backend, "replace", _count)
+    result = await StrReplaceTool().execute(
+        {
+            "path": "edit.md",
+            "old_string": "hello world",
+            "new_string": "hello AgentCore",
+        },
+        ctx,
+    )
+    assert result.success is True
+    assert (result.metadata or {}).get("already_applied") is True
+    assert writes["n"] == 0
+    assert (tmp_path / "edit.md").read_text(encoding="utf-8") == "hello AgentCore\n"
+
+
+async def test_str_replace_skips_when_new_contains_old(tmp_path: Path, monkeypatch):
+    (tmp_path / "edit.md").write_text("aaa foo bar bbb\n", encoding="utf-8")
+    ctx = _ctx(tmp_path)
+    real_replace = ctx.backend.replace
+    writes = {"n": 0}
+
+    async def _count(path: str, old: str, new: str, *, all_: bool = False):
+        writes["n"] += 1
+        return await real_replace(path, old, new, all_=all_)
+
+    monkeypatch.setattr(ctx.backend, "replace", _count)
+    result = await StrReplaceTool().execute(
+        {"path": "edit.md", "old_string": "foo", "new_string": "foo bar"},
+        ctx,
+    )
+    assert result.success is True
+    assert (result.metadata or {}).get("already_applied") is True
+    assert writes["n"] == 0
+    assert (tmp_path / "edit.md").read_text(encoding="utf-8") == "aaa foo bar bbb\n"
+
+
+async def test_str_replace_empty_new_string_skips_when_span_gone(tmp_path: Path):
+    (tmp_path / "edit.md").write_text("keep\n", encoding="utf-8")
+    result = await StrReplaceTool().execute(
+        {"path": "edit.md", "old_string": "gone", "new_string": ""},
+        _ctx(tmp_path),
+    )
+    assert result.success is True
+    assert (result.metadata or {}).get("already_applied") is True
+    assert (tmp_path / "edit.md").read_text(encoding="utf-8") == "keep\n"
+
+
+async def test_str_replace_empty_new_string_deletes_when_span_present(tmp_path: Path):
+    (tmp_path / "edit.md").write_text("keep gone end\n", encoding="utf-8")
+    result = await StrReplaceTool().execute(
+        {"path": "edit.md", "old_string": "gone", "new_string": ""},
+        _ctx(tmp_path),
+    )
+    assert result.success is True
+    assert (result.metadata or {}).get("already_applied") is not True
+    assert (tmp_path / "edit.md").read_text(encoding="utf-8") == "keep  end\n"
+
+
+def test_str_replace_post_state_inverse_and_delete():
+    from agentcore.tools.builtin.file_ops.mutate import _is_str_replace_post_state
+
+    assert _is_str_replace_post_state("aaa foo bar bbb", "foo", "foo bar", all_=False)
+    assert not _is_str_replace_post_state("aaa foo bbb", "foo", "foo bar", all_=False)
+    assert _is_str_replace_post_state("keep\n", "gone", "", all_=False)
+    assert not _is_str_replace_post_state("keep gone\n", "gone", "", all_=False)
 
 
 async def test_file_read_missing_does_not_trip_circuit_breaker(tmp_path: Path):
@@ -1050,7 +1135,6 @@ async def test_write_overwrite_severe_shrink_lands(tmp_path: Path):
     assert result.success is True
     assert (tmp_path / "报告.md").read_text(encoding="utf-8") == short
     assert "产物疑似不完整" not in (result.output or "")
-    assert "allow_shrink" not in FileWriteTool().schema.parameters["properties"]
 
 
 async def test_write_no_nudge_on_new_file(tmp_path: Path):
@@ -1147,45 +1231,16 @@ async def test_write_allows_short_skeleton_with_section_markers(tmp_path: Path):
 
 def test_write_schema_does_not_teach_completeness_gates():
     """按钮只留这是什么；完整性硬拒不进 schema。"""
-    write_desc = FileWriteTool().schema.description
+    write_schema = FileWriteTool().schema
+    write_desc = write_schema.description
     assert "写入文件" in write_desc
-    assert "HOW→consult(long_form_landing)" not in write_desc
-    assert "主路径" not in write_desc
-    assert "省略标记" not in write_desc
-    assert "50%" not in write_desc
-    assert "800" not in write_desc
-    assert "括号" not in write_desc
-    assert "硬拒" not in write_desc
-    assert "清参后改稿" not in write_desc
-    assert "file_append" not in write_desc
-    from agentcore.runtime.skills import build_system_skill_registry
-
-    assert build_system_skill_registry().get("long_form_landing") is None
-    assert "HOW→consult(long_form_landing)" not in StrReplaceTool().schema.description
-    content_desc = FileWriteTool().schema.parameters["properties"]["content"]["description"]
+    assert set(write_schema.parameters["properties"]) == {"path", "content"}
+    content_desc = write_schema.parameters["properties"]["content"]["description"]
     assert "完整正文" in content_desc
-    assert "硬拒" not in content_desc
-    write_path = FileWriteTool().schema.parameters["properties"]["path"]["description"]
-    replace_path = StrReplaceTool().schema.parameters["properties"]["path"]["description"]
-    assert "扁平" in write_path
-    assert "扁平" not in replace_path
-
     replace_desc = StrReplaceTool().schema.description
     assert "完全匹配" in replace_desc or "精确替换" in replace_desc
-    assert "清参后改稿" not in replace_desc
-    assert "_landed_summary" not in replace_desc
-    assert "Artifact-first" not in replace_desc
     new_desc = StrReplaceTool().schema.parameters["properties"]["new_string"]["description"]
     assert "不硬拒" in new_desc
-    assert "_landed_summary" not in new_desc
-    assert "已落盘短状态" not in new_desc
-    assert "清理占位" not in new_desc
-
-
-def test_file_append_tool_is_absent():
-    import agentcore.tools.builtin.file_ops as file_ops
-
-    assert not hasattr(file_ops, "FileAppendTool")
 
 
 def test_classify_write_kind_helpers():
@@ -1271,6 +1326,19 @@ async def test_delete_not_found(tmp_path: Path):
     assert result.success is False
     assert "路径不存在" in result.error
     assert result.contract_failure is True
+
+
+async def test_delete_not_found_succeeds_on_write_replay(tmp_path: Path):
+    from agentcore.tools.write_replay import begin_write_replay, end_write_replay
+
+    token = begin_write_replay()
+    try:
+        result = await FileDeleteTool().execute({"path": "nope.txt"}, _ctx(tmp_path))
+    finally:
+        end_write_replay(token)
+    assert result.success is True
+    assert (result.metadata or {}).get("already_applied") is True
+    assert "路径已不在" in (result.output or "")
 
 
 async def test_delete_rejects_path_outside_workspace(tmp_path: Path):
@@ -1467,13 +1535,8 @@ async def test_copy_refuses_overwrite(tmp_path: Path):
 def test_mkdir_schema_teaches_structure_not_app_shell():
     desc = MkdirTool().schema.description
     assert "结构目录" in desc
-    assert "src/" not in desc
-    assert "不必先 mkdir" not in desc
     assert "套应用名/话题名当工程根" in desc
     assert "≠" in desc
-    assert "whiteboard" not in desc
-    assert "court-game" not in desc
-    assert "禁止" not in desc
 
 
 async def test_mkdir_creates_and_refuses_existing(tmp_path: Path):
@@ -1553,29 +1616,17 @@ def test_compile_glob_pattern_globstar():
 def test_file_list_schema_is_one_layer_ls():
     schema = FileListTool().schema
     props = schema.parameters["properties"]
-    assert "directory" in props
-    assert "pattern" not in props
-    assert "recursive" not in props
-    assert "max_depth" not in props
+    assert set(props) == {"directory"}
     assert "glob" in schema.description
-    assert "Desktop" not in schema.description
-    assert "Desktop" not in props["directory"]["description"]
 
 
 def test_glob_schema_requires_pattern():
     schema = GlobTool().schema
     assert schema.parameters["required"] == ["pattern"]
     props = schema.parameters["properties"]
-    assert "pattern" in props
-    assert "path" in props
-    assert "directory" not in props
-    assert "recursive" not in props
+    assert set(props) == {"pattern", "path", "max_entries"}
     assert "无斜杠" in props["pattern"]["description"]
     assert "`**`" in props["pattern"]["description"]
-    assert "pkg/*/name" in schema.description
-    path_desc = props["path"]["description"]
-    assert "Desktop" not in path_desc
-    assert "external" not in path_desc
 
 
 async def test_glob_finds_nested_files_from_root(tmp_path: Path):
@@ -1659,15 +1710,15 @@ async def test_glob_star_dir_segment_matches_one_level_children(tmp_path: Path):
 
 
 async def test_glob_listing_error_names_failed_path_not_search_root(tmp_path: Path):
-    """list_tree 失败应报后端拒绝的路径，而不是 glob 搜索根 ``.``。"""
+    """glob_files 失败应报后端拒绝的路径，而不是 glob 搜索根 ``.``。"""
     from agentcore.workspace.protocol import NotADirectory
 
     ctx = _ctx(tmp_path)
 
-    async def boom(directory: str, **_kwargs: object):
+    async def boom(query):  # noqa: ANN001
         raise NotADirectory("packages/*")
 
-    ctx.backend.list_tree = boom  # type: ignore[method-assign]
+    ctx.backend.glob_files = boom  # type: ignore[method-assign]
     result = await GlobTool().execute({"pattern": "*.py"}, ctx)
     assert result.success is False
     assert result.error is not None

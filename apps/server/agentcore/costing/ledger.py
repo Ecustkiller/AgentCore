@@ -92,7 +92,7 @@ def split_cost(cost: dict) -> tuple[dict[str, int | str], int, int, str]:
     ``cost_estimated_nano`` with ``cost_total_nano == 0``; platform/vendor keep
     billed ``cost_total_nano``.
 
-    ``currency`` comes off the priced ``Cost`` (curated CNY / community USD) and
+    ``currency`` comes off the priced ``Cost`` (curated CNY) and
     rides the row's scalar column — read it from there, not from the body.
     """
     body: dict[str, int | str] = {key: int(cost.get(key, 0)) for key in COST_KEYS}

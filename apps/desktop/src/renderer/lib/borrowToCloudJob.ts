@@ -1,7 +1,6 @@
 /**
- * 「云上做完再写入」后台任务：复用 {@link runImportToCloud}，与导入共用
- * {@link useImportToCloudJobStore}（两路不能同时跑）。本机授权根始终
- * `ownsRoot: false`，留给之后写回。
+ * 「云上做完再写入」后台任务：复用 {@link runImportToCloud} 传输骨架。
+ * 本机授权根始终 `ownsRoot: false`，留给之后写回。
  */
 import { set as setBorrowPreference } from "@/lib/borrowOriginalPreference";
 import {
@@ -147,7 +146,7 @@ function notifyBusy(): void {
 
 /**
  * Start background copy-to-cloud. Returns false (and tips) when a job
- * — import or this path — is already running. Always keeps the authorized root.
+ * is already running. Always keeps the authorized root.
  */
 export function startBorrowToCloudJob(
   opts: StartBorrowToCloudJobOpts,

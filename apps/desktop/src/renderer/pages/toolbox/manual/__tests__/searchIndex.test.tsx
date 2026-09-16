@@ -108,21 +108,23 @@ describe("searchIndex", () => {
     expect(matchSnippet(body, "填 key")).toMatch(/填 Key/);
   });
 
-  it("indexes workflow / automation sections so search can reach them", () => {
+  it("indexes reusable prompt compilation instead of workflows", () => {
     const entries = buildContentSearchEntries();
 
-    const workflow = entries.find((e) => e.id === "collaboration-workflow");
-    expect(workflow?.label).toBe("工作流");
-    expect(workflow?.to).toBe("/toolbox/manual/collaboration?s=workflow");
-    expect(workflow?.haystack).toContain("官方模板");
-    expect(workflow?.haystack).toContain("等人关卡");
-    expect(workflow?.haystack).toMatch(/Webhook/i);
-    expect(workflow?.haystack).not.toContain("系统任务");
-    expect(workflow?.haystack).not.toContain("收件箱");
-
+    expect(
+      entries.find((e) => e.id === "collaboration-workflow"),
+    ).toBeUndefined();
     expect(
       entries.find((e) => e.id === "collaboration-automation"),
     ).toBeUndefined();
+
+    const memory = entries.find((e) => e.id === "collaboration-memory");
+    expect(memory?.label).toBe("规矩与旧对话");
+    expect(memory?.haystack).toContain("常驻");
+    expect(memory?.haystack).toContain("按需");
+    expect(memory?.haystack).toMatch(/@ 点名/);
+    expect(memory?.haystack).not.toMatch(/Webhook/i);
+    expect(memory?.haystack).not.toContain("设为定时");
   });
 
   it("content search entries cover all four chapters", () => {

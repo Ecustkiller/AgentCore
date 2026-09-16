@@ -49,7 +49,6 @@ def on_delegate_plan(*, execution_id: str, plan, captain_run_id: str | None) -> 
 def on_replan(
     *,
     execution_id: str,
-    binds: list[Any],
     steers: list[Any],
     adds: int,
     stop: bool,
@@ -62,7 +61,6 @@ def on_replan(
         project_replan(
             recorder,
             execution_id=execution_id,
-            binds=binds,
             steers=steers,
             adds=adds,
             stop=stop,

@@ -153,7 +153,7 @@ const OP_POLICY: Record<WorkspaceOpName, "readonly" | "mutation" | "denied"> = {
   list_tree: "readonly",
   index_files: "readonly",
   grep: "readonly",
-  diagnostics: "readonly",
+  glob_files: "readonly",
   probe_exec: "readonly",
   process_read: "readonly",
   process_list: "readonly",

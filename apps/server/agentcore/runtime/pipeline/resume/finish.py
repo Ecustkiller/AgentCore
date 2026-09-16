@@ -8,6 +8,7 @@ from agentcore.runtime.events import EventSink, FinishReason, message_end
 from agentcore.runtime.facts import current_fact_log
 from agentcore.runtime.pipeline.finalize import _journal_entries_for_turn
 from agentcore.runtime.pipeline.settle import settle_successful_turn
+from agentcore.runtime.turn.latency import stamp_turn_wall, turn_wall_ms
 
 
 async def finish_resume_turn(
@@ -99,9 +100,10 @@ def finish_terminal_resume(
     join — G3 terminal path).
     """
     finish = FinishReason.END_TURN
-    sink.emit(message_end(finish, rounds=0))
+    duration_ms = turn_wall_ms()
+    sink.emit(message_end(finish, rounds=0, duration_ms=duration_ms))
     journal_entries = _journal_entries_for_turn(current_fact_log.get(), sink=sink, finish=finish)
-    return {
+    result = {
         "message_id": message_id,
         "content": reconcile_resume_closing(
             pre_pause_content, closing, ask_settled=ask_settled
@@ -118,6 +120,8 @@ def finish_terminal_resume(
         "cost_runs": [],
         "journal_entries": journal_entries,
     }
+    stamp_turn_wall(result, duration_ms=duration_ms)
+    return result
 
 
 def finish_paused_resume(
@@ -136,9 +140,10 @@ def finish_paused_resume(
     a live soft-pause yield.
     """
     finish = FinishReason.PAUSED
-    sink.emit(message_end(finish, rounds=0))
+    duration_ms = turn_wall_ms()
+    sink.emit(message_end(finish, rounds=0, duration_ms=duration_ms))
     journal_entries = _journal_entries_for_turn(current_fact_log.get(), sink=sink, finish=finish)
-    return {
+    result = {
         "message_id": message_id,
         "content": pre_pause_content,
         "reasoning_content": pre_pause_reasoning or None,
@@ -153,3 +158,5 @@ def finish_paused_resume(
         "cost_runs": [],
         "journal_entries": journal_entries,
     }
+    stamp_turn_wall(result, duration_ms=duration_ms)
+    return result

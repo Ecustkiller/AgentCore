@@ -1471,6 +1471,20 @@ describe("toRecordTurnBody", () => {
     expect(body).not.toHaveProperty("execution_id");
     expect(body).not.toHaveProperty("harvest_kind");
     expect(body).not.toHaveProperty("agent_mentions");
+    expect(body).not.toHaveProperty("attachments");
+    expect(body).not.toHaveProperty("duration_ms");
+  });
+
+  it("forwards duration_ms when present", () => {
+    const body = toRecordTurnBody({
+      user_message_id: "u1",
+      conversation_id: "c1",
+      user_message: "hello",
+      content: "world",
+      trace_id: "a".repeat(32),
+      duration_ms: 57_000,
+    });
+    expect(body.duration_ms).toBe(57_000);
   });
 
   it("forwards agent_mentions when present", () => {
@@ -1484,6 +1498,26 @@ describe("toRecordTurnBody", () => {
       agent_mentions: mentions,
     });
     expect(body.agent_mentions).toEqual(mentions);
+  });
+
+  it("forwards attachments when present", () => {
+    const attachments = [
+      {
+        name: "shot.png",
+        path: "shot.png",
+        workspace_path: "attachments/shot.png",
+        binary: true,
+      },
+    ];
+    const body = toRecordTurnBody({
+      user_message_id: "u-a",
+      conversation_id: "c1",
+      user_message: "看图",
+      content: "ok",
+      trace_id: "a".repeat(32),
+      attachments,
+    });
+    expect(body.attachments).toEqual(attachments);
   });
 
   it("resume_after_seq filters tool_failures but keeps the full journal", () => {

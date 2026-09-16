@@ -7,8 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
-from agentcore.memory.store import FileMemoryStore, topic_path
-from agentcore.runtime.context.consult_sources import MemoryConsultSource, MergedConsultSource
+from agentcore.runtime.context.consult_sources import MergedConsultSource, SkillConsultSource
 from agentcore.runtime.delegate.ceo_review import deterministic_ceo_review, run_ceo_review
 from agentcore.runtime.engine.write_args_clear import (
     landed_result_note,
@@ -24,6 +23,7 @@ from agentcore.runtime.memory_consult_cache import (
     seed_consult_cache_from_window,
 )
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
+from agentcore.runtime.skills import build_system_skill_registry
 from agentcore.tools.builtin.consult import ConsultTool
 from agentcore.tools.cleared_write_stub import cleared_write_stub_rejection
 from agentcore.tools.protocol import ToolContext
@@ -431,18 +431,14 @@ def test_project_cleared_write_args_keeps_parallel_writes_in_same_round():
                     id="p0",
                     function=ToolCallFunction(
                         name="str_replace",
-                        arguments=json.dumps(
-                            {"path": "a.ts", "old_string": "x", "new_string": a}
-                        ),
+                        arguments=json.dumps({"path": "a.ts", "old_string": "x", "new_string": a}),
                     ),
                 ),
                 ToolCall(
                     id="p1",
                     function=ToolCallFunction(
                         name="str_replace",
-                        arguments=json.dumps(
-                            {"path": "b.ts", "old_string": "y", "new_string": b}
-                        ),
+                        arguments=json.dumps({"path": "b.ts", "old_string": "y", "new_string": b}),
                     ),
                 ),
             ],
@@ -474,9 +470,7 @@ def test_cleared_write_stub_rejection_exact_markers_only():
         is not None
     )
     assert (
-        cleared_write_stub_rejection(
-            {"path": "a.md", "content": "hi", "_cleared": "legacy"}
-        )
+        cleared_write_stub_rejection({"path": "a.md", "content": "hi", "_cleared": "legacy"})
         is not None
     )
     # Compact landed-status echo under a write tool name.
@@ -489,16 +483,11 @@ def test_cleared_write_stub_rejection_exact_markers_only():
     # Normal short / prose must pass.
     assert cleared_write_stub_rejection({"path": "a.md", "content": "短文"}) is None
     assert (
-        cleared_write_stub_rejection(
-            {"path": "a.md", "content": "本节已清理历史遗留问题。"}
-        )
+        cleared_write_stub_rejection({"path": "a.md", "content": "本节已清理历史遗留问题。"})
         is None
     )
     assert (
-        cleared_write_stub_rejection(
-            {"path": "a.md", "old_string": "a", "new_string": "b"}
-        )
-        is None
+        cleared_write_stub_rejection({"path": "a.md", "old_string": "a", "new_string": "b"}) is None
     )
 
 
@@ -716,38 +705,45 @@ def test_landed_status_echo_gets_one_strike_stop():
 # ── 3. 记忆复用 ──────────────────────────────────────────────────────────────
 
 
-async def test_consult_reuses_turn_cache(tmp_path):
-    store = FileMemoryStore(tmp_path)
-    body = "## 审美\n- 简约商务\n"
-    await store.save("u", topic_path("设计审美"), body)
-    tool = ConsultTool(source=MergedConsultSource(memory=MemoryConsultSource(store=store)))
+def _staffing_consult() -> ConsultTool:
+    return ConsultTool(
+        source=MergedConsultSource(
+            skill=SkillConsultSource(
+                registry=build_system_skill_registry(),
+                tool_names={"delegate"},
+                audience="ceo",
+            )
+        )
+    )
+
+
+async def test_consult_reuses_turn_cache():
+    tool = _staffing_consult()
     token = consulted_memory_cache.set({})
     try:
-        first = await tool.execute({"name": "设计审美"}, _ctx())
-        assert first.success and first.output == body
-        assert first.display["origin"] == "user"
+        first = await tool.execute({"name": "staffing"}, _ctx())
+        assert first.success
+        assert "先定位入口就停" in first.output
+        assert first.display["origin"] == "system"
         assert "kind" not in first.display
-        assert "设计审美" in get_consult_cache()
-        second = await tool.execute({"name": "设计审美"}, _ctx())
-        assert second.success and second.output == body
+        assert "staffing" in get_consult_cache()
+        second = await tool.execute({"name": "staffing"}, _ctx())
+        assert second.success
+        assert "先定位入口就停" in second.output
         assert (second.display or {}).get("reused") is True
-        assert (second.display or {}).get("origin") == "user"
+        assert (second.display or {}).get("origin") == "system"
         assert "kind" not in (second.display or {})
-        # Pause 帧仍是 slug→正文；origin 不进 consulted_memory。
-        assert dict(get_consult_cache()) == {"设计审美": body}
     finally:
         consulted_memory_cache.reset(token)
 
 
-async def test_consult_reuse_from_frame_omits_origin(tmp_path):
+async def test_consult_reuse_from_frame_omits_origin():
     """Resume-from-frame only restores bodies; display must not invent origin."""
-    store = FileMemoryStore(tmp_path)
-    body = "## 审美\n- 简约商务\n"
-    await store.save("u", topic_path("设计审美"), body)
-    tool = ConsultTool(source=MergedConsultSource(memory=MemoryConsultSource(store=store)))
-    token = consulted_memory_cache.set({"设计审美": body})
+    body = "cached staffing body"
+    tool = _staffing_consult()
+    token = consulted_memory_cache.set({"staffing": body})
     try:
-        result = await tool.execute({"name": "设计审美"}, _ctx())
+        result = await tool.execute({"name": "staffing"}, _ctx())
         assert result.success and result.output == body
         assert (result.display or {}).get("reused") is True
         assert "origin" not in (result.display or {})

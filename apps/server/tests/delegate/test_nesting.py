@@ -14,9 +14,10 @@ from agentcore.tools.builtin.escalate import EscalateTool
 from agentcore.tools.builtin.replan import ReplanTool
 from agentcore.tools.registry import ToolRegistry
 from tests.delegate.conftest import (
-    LATE_BIND_DAG,
+    SCOPE_DAG,
     NestingProvider,
     Provider,
+    ScopeProvider,
     _upstream_body,
     ctx,
     nesting_tool,
@@ -165,17 +166,18 @@ def test_make_lead_subteam_wires_delegate_plus_replan_bound_to_child():
 
 async def test_lead_subteam_dispose_folds_yielded_subplan_before_parent_absorbs():
     # 堵漏账 (docs/03-AI核心/编排器与CEO主Agent.md §2.4 B 清单 ②): a lead opened a sub-plan that
-    # YIELDed at a late-bind boundary but its react loop ended without a replan. The bundle's
+    # YIELDed at a SCOPE boundary but its react loop ended without a replan. The bundle's
     # dispose runs the implicit-stop fold on the CHILD (the same path the CEO's host uses at turn
     # end), so the completed sub-team's spend lands on the child's ledger — which the parent's
     # absorb_children then merges. Timing matters: dispose MUST precede absorb, else the spend is
     # stranded unbilled. The executor's finally enforces exactly this ordering in production.
-    parent = tool(Provider(["AOUT", "BOUT"], usage=TokenUsage(input_tokens=100, output_tokens=20)))
+    parent = tool(ScopeProvider(usage=TokenUsage(input_tokens=100, output_tokens=20)))
+    parent._tools.register(EscalateTool())
     subteam = make_lead_subteam(parent, "cap1", 1)
     child = subteam.tools[0]
 
-    first = await child.execute({"tasks": LATE_BIND_DAG}, ctx())
-    assert first.is_terminal is False  # the bind boundary yielded a「计划已让出」brief
+    first = await child.execute({"tasks": SCOPE_DAG, "coordinate": False}, ctx())
+    assert first.is_terminal is False  # the SCOPE boundary yielded a「计划已让出」brief
     assert child._supervised is not None
     assert child.usage.get("input", 0) == 0  # yield path left the upstream's spend un-folded
 
@@ -185,100 +187,6 @@ async def test_lead_subteam_dispose_folds_yielded_subplan_before_parent_absorbs(
     assert child.usage.get("input") == 100  # folded onto the child as an implicit stop
     absorb_children(parent)
     assert parent.usage.get("input") == 100  # …and the parent picks it up — nothing stranded
-
-
-class _LeadBindReplanProvider:
-    """Drives a LEAD (not the root CEO) through the full 受监督 loop on its OWN sub-plan: it
-    fans out a sub-team with a late-bound downstream, the sub-plan YIELDs a「计划已让出」brief
-    at the bind boundary, and the lead CATCHES it in its own react loop and calls `replan` to
-    finalise + resume the SAME sub-plan to completion. Before B the lead had no `replan` → this
-    was a dead-end. Distinguishes lead vs leaf by the captain identity marker in the system
-    prompt; tracks rounds via the presence of tool results."""
-
-    CAPTAIN_MARK = "再向下委派一层子团队"
-
-    def __init__(self, usage: TokenUsage | None = None) -> None:
-        self._usage = usage
-        self.lead_delegate_calls = 0
-        self.lead_replan_calls = 0
-        self.sub_calls = 0
-
-    async def stream(self, request):
-        system = next((m.content or "" for m in request.messages if m.role == "system"), "")
-        # Under MAX=3, depth-1 and depth-2 both carry CAPTAIN_MARK; only depth-1
-        # honesty says children may still nest — treat that as the lead under test.
-        is_lead = "你的子成员仍可再向下委派一层" in system
-        tool_msgs = [m for m in request.messages if m.role == "tool"]
-        last_tool = (tool_msgs[-1].content or "") if tool_msgs else ""
-        if is_lead and not tool_msgs:
-            # round 1: fan out a sub-plan whose downstream is late-bound (yields at a boundary)
-            self.lead_delegate_calls += 1
-            args = json.dumps(
-                {
-                    "tasks": [
-                        {"id": "sa", "role": "子研究员", "task": "子调研"},
-                        {
-                            "id": "sb",
-                            "role": "待定",
-                            "task": "占位",
-                            "depends_on": ["sa"],
-                            "bind_after_deps": True,
-                        },
-                    ]
-                }
-            )
-            yield LLMChunk(
-                delta_tool_calls=[
-                    ToolCallDelta(index=0, id="ld1", function_name="delegate", arguments_delta=args)
-                ]
-            )
-        elif is_lead and "计划已让出" in last_tool and self.lead_replan_calls == 0:
-            # round 2: the lead caught the boundary brief → finalise the late-bound node by its
-            # run_id (parsed from the brief) and resume the SAME sub-plan via the lead's OWN replan
-            self.lead_replan_calls += 1
-            bind_id = re.search(r"run_id: `([^`]+)`", last_tool).group(1)
-            args = json.dumps(
-                {"binds": [{"run_id": bind_id, "role": "子写手", "task": "据子调研写结论"}]}
-            )
-            yield LLMChunk(
-                delta_tool_calls=[
-                    ToolCallDelta(index=0, id="ld2", function_name="replan", arguments_delta=args)
-                ]
-            )
-        elif is_lead:
-            # round 3: the sub-team resumed and finished → integrate
-            yield LLMChunk(delta_content="LEAD_FINAL")
-        else:
-            self.sub_calls += 1
-            yield LLMChunk(delta_content=_upstream_body("SUB_OUT"))
-        if self._usage is not None:
-            yield LLMChunk(usage=self._usage)
-
-
-async def test_lead_drives_subplan_to_bind_boundary_then_replans_end_to_end():
-    # 受监督子计划 B「断头路被堵」端到端 (docs/03-AI核心/编排器与CEO主Agent.md §2.4 B 清单 ①+②): a LEAD
-    # fans out its own sub-plan with a late-bound downstream; the sub-plan YIELDs a「计划已让出」
-    # brief at the bind boundary; the lead CATCHES it in its own react loop and `replan`s to
-    # finalise + resume the SAME sub-plan to completion. Before B the lead had no replan → the
-    # yield was a dead-end. Also pins 账目不漏: the post-replan sub-node's spend folds up to root.
-    usage = TokenUsage(input_tokens=10, output_tokens=5)
-    provider = _LeadBindReplanProvider(usage=usage)
-    t = nesting_tool(provider, EventSink())
-
-    result = await t.execute(
-        {"tasks": [{"role": "队长", "task": "主任务"}], "coordinate": False}, ctx()
-    )
-
-    assert result.success is True
-    assert "LEAD_FINAL" in result.output
-    # the lead caught the boundary brief and resumed its OWN sub-plan (断头路被堵)
-    assert provider.lead_delegate_calls == 1
-    assert provider.lead_replan_calls == 1
-    assert provider.sub_calls == 2  # sa ran, then the late-bound sb ran AFTER the lead's replan
-    # 账目不漏: lead (3 rounds) + sa + sb = 5 LLM calls × 10, all folded to the root tool
-    assert t.usage["input"] == 50
-    # ledger carries the lead + both sub-workers (the replan'd sb included)
-    assert len(t.run_ledger) == 3
 
 
 class _LeadScopeSteerProvider:

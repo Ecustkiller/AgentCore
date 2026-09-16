@@ -346,7 +346,8 @@ const updaterApi: UpdaterApi = {
 
 const logApi: LogApi = {
   write: (entry) => ipcRenderer.send(LOG_CHANNELS.write, entry),
-  readTail: () => ipcRenderer.invoke(LOG_CHANNELS.readTail),
+  readTail: (conversationId) =>
+    ipcRenderer.invoke(LOG_CHANNELS.readTail, conversationId),
 };
 
 const terminalApi: TerminalApi = {

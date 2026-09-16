@@ -1,6 +1,6 @@
 /**
  * organize_plan — 清单确认体：行式多选、默认全选（seedAllMultiple）。
- * 取消勾选即剔除。原路径→新路径进 detail。卡头是批次标题，不画套话铬条。
+ * 取消勾选即剔除。第二行从 op / 路径派生。卡头是批次标题，不画套话铬条。
  */
 import { ASK_INTENT_META } from "@/components/chat/decision";
 import type { CheckpointUserDecision } from "@/services/checkpoint";
@@ -60,13 +60,14 @@ export function OrganizePlanBody({
   const q = content.questions[0];
   const picked = q ? (answer.answers[q.id] ?? []) : [];
   const overview = q ? summarizeOps(q.options) : "";
+  const title = (q?.prompt || content.question).trim();
 
   const subtitle = overview ? `总览：${overview}` : undefined;
 
   return (
     <AskCardShell
       variant="organize_plan"
-      title={content.question}
+      title={title}
       subtitle={subtitle}
       footer={
         <AskCardFooter
@@ -90,16 +91,11 @@ export function OrganizePlanBody({
 
         {q && (
           <div>
-            {q.prompt && (
-              <p className="px-2 text-xs font-medium leading-snug text-foreground">
-                {q.prompt}
-                <span className="ml-1.5 text-xs font-normal text-muted-foreground">
-                  取消勾选即剔除
-                </span>
-              </p>
-            )}
+            <p className="px-2 text-xs font-normal leading-snug text-muted-foreground">
+              取消勾选即剔除
+            </p>
             <AskRowGroup
-              className={q.prompt ? "mt-1" : undefined}
+              className="mt-1"
               multiple
               rows={q.options.map((opt) => ({
                 key: opt.label,

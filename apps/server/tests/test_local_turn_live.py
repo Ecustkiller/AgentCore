@@ -107,6 +107,82 @@ async def test_begin_pins_user_and_running_placeholder(monkeypatch):
     store.finalize.assert_not_called()
 
 
+async def test_begin_pins_user_attachments(monkeypatch):
+    creates: list[dict] = []
+    _patch_user_insert(monkeypatch, creates=creates)
+    store = SimpleNamespace(
+        begin_turn=AsyncMock(),
+        finalize=AsyncMock(side_effect=AssertionError("begin must not finalize")),
+    )
+    monkeypatch.setattr(local_turn_mod, "get_cloud_store", lambda: store)
+
+    await begin_local_turn(
+        conversation_id="c1",
+        user_id="u1",
+        user_message="看图",
+        user_message_id=_UMID,
+        message_id=_MID,
+        trace_id=_TRACE,
+        attachments=[
+            {
+                "name": "shot.png",
+                "path": "shot.png",
+                "workspace_path": "attachments/shot.png",
+                "binary": True,
+                "text": "must-not-persist",
+            }
+        ],
+    )
+    stored = creates[0]["attachments"]
+    assert stored[0]["name"] == "shot.png"
+    assert stored[0]["workspace_path"] == "attachments/shot.png"
+    assert stored[0]["binary"] is True
+    assert "text" not in stored[0]
+
+
+async def test_begin_retry_does_not_patch_existing_user_attachments(monkeypatch):
+    updates: list[dict] = []
+
+    class Repo:
+        def __init__(self, _s):
+            pass
+
+        async def create(self, **_kw):
+            raise IntegrityError("INSERT", {}, Exception("messages_pkey"))
+
+        async def get_by_id(self, *_a, **_k):
+            return _user_ns()
+
+        async def update_content(self, message_id, content=None, **kw):
+            updates.append({"message_id": message_id, "content": content, **kw})
+
+    monkeypatch.setattr(local_turn_mod, "async_session_factory", lambda: _FakeSessionCM())
+    monkeypatch.setattr(local_turn_mod, "MessageRepository", Repo)
+    monkeypatch.setattr(
+        local_turn_mod,
+        "get_cloud_store",
+        lambda: SimpleNamespace(begin_turn=AsyncMock()),
+    )
+
+    await begin_local_turn(
+        conversation_id="c1",
+        user_id="u1",
+        user_message="看图",
+        user_message_id=_UMID,
+        message_id=_MID,
+        trace_id=_TRACE,
+        attachments=[
+            {
+                "name": "shot.png",
+                "path": "shot.png",
+                "workspace_path": "attachments/shot.png",
+                "binary": True,
+            }
+        ],
+    )
+    assert updates == []
+
+
 async def test_begin_retry_is_idempotent(monkeypatch):
     creates: list[dict] = []
     begin_calls: list[dict] = []

@@ -479,14 +479,6 @@ class DelegateTool:
         from agentcore.workspace.project_shell import rewrite_plan_project_shell
 
         await rewrite_plan_project_shell(plan, self._base_tool_context)
-        if getattr(self, "_topology_lock", False):
-            plan.topology_lock = True
-            wid = getattr(self, "_workflow_id", None)
-            if isinstance(wid, str) and wid.strip():
-                plan.workflow_id = wid.strip()
-            wv = getattr(self, "_workflow_version", None)
-            if isinstance(wv, int):
-                plan.workflow_version = wv
         from agentcore.runtime.delegate.continuation import apply_continuation_tool_merges
         from agentcore.runtime.runs.research_quality import (
             batch_declares_review_files,
@@ -822,6 +814,7 @@ class DelegateTool:
         apply_kickoff_grant: bool = False,
         team_brief: str | None = None,
         ceo_review: dict | None = None,
+        resume_hints: dict | None = None,
     ) -> ToolResult:
         if team_brief:
             self._team_brief = team_brief
@@ -906,6 +899,7 @@ class DelegateTool:
             plan,
             execution_id=execution_id,
             seed_completed=seed_completed,
+            resume_hints=resume_hints,
             coordinate=coordinate,
         )
         return annotate_batch_meta(
@@ -915,8 +909,6 @@ class DelegateTool:
         )
 
     async def replan(self, arguments: dict[str, Any]) -> ToolResult:
-        from agentcore.runtime.runs import BoundaryReason
-
         sup = self._supervised
         if sup is None:
             msg = (
@@ -928,37 +920,17 @@ class DelegateTool:
             )
             return ToolResult(tool_call_id="", success=False, output="", error=msg)
 
-        binds = arguments.get("binds") or []
         steers = arguments.get("steers") or []
         adds = arguments.get("add") or []
         stop = bool(arguments.get("stop"))
-        if (
-            not isinstance(binds, list)
-            or not isinstance(steers, list)
-            or not isinstance(adds, list)
-        ):
-            msg = "replan 的 binds / steers / add 必须是数组。"
-            return ToolResult(tool_call_id="", success=False, output="", error=msg)
-        locked = bool(getattr(sup.plan, "topology_lock", False)) or bool(
-            getattr(self, "_topology_lock", False)
-        )
-        if locked and adds:
-            msg = (
-                "当前为工作流拓扑锁：禁止 replan(add=…) 新增步骤；"
-                "可用 steers 改未跑步骤说明，或 stop=true 收口。"
-            )
-            return ToolResult(tool_call_id="", success=False, output="", error=msg)
-        if sup.reason is BoundaryReason.BIND and not stop and not binds:
-            msg = (
-                "replan 需要 binds 定稿至少一个『待定稿』步骤，或设 stop=true 收口"
-                "（仅 steers / add 不能让待定稿步骤运行起来）。"
-            )
+        if not isinstance(steers, list) or not isinstance(adds, list):
+            msg = "replan 的 steers / add 必须是数组。"
             return ToolResult(tool_call_id="", success=False, output="", error=msg)
 
         # Snapshot the pre-add node ids so we can tell which nodes apply_replan appended
         # (it mutates the plan in place) — those drive the re-emitted run_plan below.
         ids_before = {n.run_id for n in sup.plan.nodes}
-        errors = await apply_replan(self, sup.plan, sup.completed, binds, steers, adds)
+        errors = await apply_replan(self, sup.plan, sup.completed, steers, adds)
         if errors:
             # Seat/artifact rejects share append's message family — surface verbatim.
             if len(errors) == 1 and str(errors[0]).startswith("【队员追加已拒绝"):
@@ -986,19 +958,15 @@ class DelegateTool:
         # without this their run_started/run_completed would target unknown ids and be dropped.
         if added_nodes:
             self._sink.emit(plan_event(self, sup.execution_id, sup.plan))
-        # 「计划已调整」轻痕迹 (设计 §7.2): surface the autonomous re-bind / re-steer onto the
-        # affected graph nodes (bind=据上游证据定稿待绑定步骤; steer=偏离后操舵未跑步骤). A node
-        # both bound AND steered reads as the bigger event (bind). Emitted only when something
+        # 「计划已调整」轻痕迹 (设计 §7.2): surface the autonomous re-steer onto the
+        # affected graph nodes. Emitted only when something
         # changed — a no-op SCOPE resume (replan() 续跑) sends nothing. Appended nodes are NEW
         # (not revised), so they ride the run_plan merge above, not this trace.
+        # Historical journals may still fold plan_revised kind=bind; live replan no longer emits it.
         revised: dict[str, str] = {}
-        for b in binds:
-            rid = str(b.get("run_id") or "").strip() if isinstance(b, dict) else ""
-            if rid:
-                revised[rid] = "bind"
         for s in steers:
             rid = str(s.get("run_id") or "").strip() if isinstance(s, dict) else ""
-            if rid and rid not in revised:
+            if rid:
                 revised[rid] = "steer"
         if revised:
             self._sink.emit(
@@ -1009,7 +977,6 @@ class DelegateTool:
             )
         logger.info(
             "replan.applied",
-            binds=len(binds),
             steers=len(steers),
             adds=len(added_nodes),
             stop=stop,
@@ -1018,7 +985,6 @@ class DelegateTool:
 
         on_replan(
             execution_id=sup.execution_id,
-            binds=binds,
             steers=steers,
             adds=len(added_nodes),
             stop=stop,

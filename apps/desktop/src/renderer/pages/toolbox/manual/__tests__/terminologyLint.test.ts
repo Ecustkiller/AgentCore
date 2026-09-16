@@ -26,6 +26,13 @@ describe("manual terminology lint", () => {
     expect(hits.filter((h) => h.term === "成员")).toEqual([]);
   });
 
+  it("协作桌菜单「成员」豁免（名册 UI，不是 worker）", () => {
+    const hits = findRetiredTermHits(
+      "自己的云文件夹右键 / ⋯「成员」→ 邀请；对方在「与我共享」看见这张桌。",
+    );
+    expect(hits.filter((h) => h.term === "成员")).toEqual([]);
+  });
+
   it("定义性提及（口语也叫「热修」）豁免生效", () => {
     const hits = findRetiredTermHits(
       "CEO 唤回原队员接着改（口语有时叫「热修」），不是从零重来。",
@@ -36,5 +43,10 @@ describe("manual terminology lint", () => {
   it("裸用退役词仍命中", () => {
     const hits = findRetiredTermHits("点中止按钮结束回合");
     expect(hits.some((h) => h.term === "中止")).toBe(true);
+  });
+
+  it("裸「成员」指 worker 仍命中", () => {
+    const hits = findRetiredTermHits("派一个成员去改代码");
+    expect(hits.some((h) => h.term === "成员")).toBe(true);
   });
 });

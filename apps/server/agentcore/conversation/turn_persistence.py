@@ -160,7 +160,9 @@ async def persist_placeholder_abort(
     )
     if not sink._closed:
         sink.emit(error_event(code, message, context=err_ctx))
-        sink.emit(message_end(FinishReason.ERROR, outcome="error"))
+        sink.emit(
+            message_end(FinishReason.ERROR, outcome="error", duration_ms=duration_ms)
+        )
     result = {
         "message_id": message_id,
         "content": "",
@@ -168,6 +170,7 @@ async def persist_placeholder_abort(
         "error_code": code,
         "finish_reason": FinishReason.ERROR,
         "outcome": "error",
+        "duration_ms": duration_ms,
     }
     await persist_turn_result(
         result=result,

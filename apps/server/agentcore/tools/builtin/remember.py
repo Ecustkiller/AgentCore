@@ -1,20 +1,10 @@
-"""remember — the user gives an explicit directive, so the CEO records it as a USER RULE.
+"""remember — write a named user-rule markdown under AgentCore/规则/.
 
-The memory system splits how durable knowledge is written (Agent记忆与知识系统 §5.7 用户规则
-入口① / §1.5 显式记住例外):
+One topic, one file. The user owns these documents (``role='rule', ai_maintained=false``).
+Idle digest never rewrites them. Next turn's ``<设定>`` (always) or ``consult`` (on_demand)
+picks them up.
 
-- **explicit user directive → user rule** (this tool): when the user clearly says「记住…」「以后
-  都要…」「别再…」「改为…」「忘掉…」, the CEO records / mutates a ``role='rule',
-  ai_maintained=false`` document — the user OWNS it, so idle digest never rewrites
-  it. Same ``<设定>`` block as AI memory, ordered by folder not author. Effect is immediate:
-  next turn's ``<设定>``.
-- **inferred preference → not this tool**: preferences merely observed in conversation are
-  not written by idle digest. The user must say so, or use explore / the
-  file page. The tool description steers the model to that split.
-
-Same master-switch neutrality as user rules generally: a user rule is the user's own instruction,
-not AI memory, so it is recorded whenever the user asks — turning off「AI 记忆」silences AI-grown
-memory, not the user's explicit rules.
+Workspace ``file_write`` is a different pen — it does not inject as user rules.
 """
 
 from __future__ import annotations
@@ -40,16 +30,14 @@ from agentcore.tools.registration import (
 
 logger = get_logger(__name__)
 
-# Trailing ellipsis suffixes (check longer first). Distinct from mid-body
-# ``has_omission_marker`` — bare ``...`` / ``…`` / ``……`` at end only.
 _TRAILING_ELLIPSIS_SUFFIXES = ("……", "...", "…")
 _INCOMPLETE_CONTENT_MSG = (
-    "拒绝写入：规则正文不完整。请写完整一句陈述句，勿用省略号收口或中间省略标记。"
+    "拒绝写入：正文不完整。请写完整一篇，勿用省略号收口或中间省略标记。"
 )
 
 
 def _is_incomplete_rule_content(content: str) -> bool:
-    """True when add/replace content looks truncated (mid markers or trailing ellipsis)."""
+    """True when write content looks truncated (mid markers or trailing ellipsis)."""
     if not content:
         return False
     if has_omission_marker(content):
@@ -59,17 +47,15 @@ def _is_incomplete_rule_content(content: str) -> bool:
 
 @dataclass
 class RememberTool:
-    """CEO-only: record / mutate an explicit user directive as a user rule (immediate effect)."""
+    """CEO-only: write / read / delete / list named user-rule markdown files."""
 
     registration = ToolRegistration(
         surface=ToolSurface.CEO_ORCHESTRATION,
         audience=AUDIENCE_CEO_ONLY,
         ceo_wire=CeoWire.MEMORY,
-        catalog_summary="记下用户的长期规矩",
+        catalog_summary="把用户规矩写成一篇规则文件",
     )
 
-    # The conversation's folder (None for a bare chat). A ``scope='folder'`` directive routes
-    # the rule to this folder's layer; without a folder it stays global.
     folder_id: str | None = None
 
     @property
@@ -77,32 +63,43 @@ class RememberTool:
         return ToolSchema(
             name="remember",
             description=(
-                "把用户明确下达的「记住 / 以后都要 / 忘掉」记为用户规则（长期注入）。"
-                "调研简报 / 画像 ≠ 本工具（update_folder_profile）。"
+                "把用户要长期遵守的规矩写成 AgentCore/规则/ 下一篇 markdown"
+                "（一个主题一篇）。给人看先写在对话里，确认后再 write。"
+                "工作区 file_write ≠ 本工具。调研简报 / 画像 ≠ 本工具。"
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["add", "replace", "forget", "list"],
+                        "enum": ["write", "read", "delete", "list"],
                         "description": (
-                            "add=追加（默认）；replace=按 replaces 匹配删旧再写新"
-                            "（旧条不存在则只追加）；forget=删除；list=列出（不写盘）。"
+                            "write=整篇覆盖（默认）；read=读一篇；"
+                            "delete=删一篇；list=列出文件名（不写盘）。"
+                        ),
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": (
+                            "文件名，短标题，如「回复语言.md」。"
+                            "write/read/delete 必填；list 不需要。"
                         ),
                     },
                     "content": {
                         "type": "string",
+                        "description": "write 时的完整正文（markdown，可含章节）。",
+                    },
+                    "apply": {
+                        "type": "string",
+                        "enum": ["always", "on_demand"],
                         "description": (
-                            "规则正文（一句陈述句，用用户的语言）。"
-                            "add/replace 为新规则；forget 为要删的旧规则；list 不需要。"
+                            "write 时：always=每场都带上（新建默认）；"
+                            "on_demand=用到再查。"
                         ),
                     },
-                    "replaces": {
+                    "description": {
                         "type": "string",
-                        "description": (
-                            "replace 时要去掉的旧规则原文（归一化匹配；可删掉所有同 key 条）。"
-                        ),
+                        "description": "一行摘要，按需目录用；可空。",
                     },
                     "scope": {
                         "type": "string",
@@ -119,38 +116,42 @@ class RememberTool:
         )
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
-        action = str(arguments.get("action") or "add").strip().lower() or "add"
+        action = str(arguments.get("action") or "write").strip().lower() or "write"
+        name_raw = arguments.get("name")
+        name = str(name_raw).strip() if name_raw is not None else ""
         content_raw = arguments.get("content")
         content = str(content_raw).strip() if content_raw is not None else ""
-        replaces_raw = arguments.get("replaces")
-        replaces = str(replaces_raw).strip() if replaces_raw is not None else None
-        scope_token = str(arguments.get("scope") or "global").strip().lower()
-        # folder scope only when the conversation is actually in a folder; else global.
-        folder_id = self.folder_id if scope_token == "folder" and self.folder_id else None
-
-        if action != "list" and not content:
+        apply_raw = arguments.get("apply")
+        apply = str(apply_raw).strip().lower() if apply_raw is not None else None
+        if apply == "":
+            apply = None
+        if apply is not None and apply not in ("always", "on_demand"):
             return ToolResult(
                 tool_call_id="",
                 success=False,
-                output="缺少 content。",
-                error="缺少 content。",
+                output="apply 只能是 always 或 on_demand。",
+                error="apply 只能是 always 或 on_demand。",
             )
-        # Content integrity (add/replace only): reject half-finished rules.
-        # list/forget are unaffected (forget has no "new rule body" semantics).
-        if action in ("add", "replace") and _is_incomplete_rule_content(content):
+        desc_raw = arguments.get("description")
+        description = str(desc_raw).strip() if desc_raw is not None else None
+        if description == "":
+            description = None
+        scope_token = str(arguments.get("scope") or "global").strip().lower()
+        folder_id = self.folder_id if scope_token == "folder" and self.folder_id else None
+
+        if action == "write" and _is_incomplete_rule_content(content):
             return ToolResult(
                 tool_call_id="",
                 success=False,
                 output=_INCOMPLETE_CONTENT_MSG,
                 error=_INCOMPLETE_CONTENT_MSG,
             )
-        if action == "replace" and not (replaces or "").strip():
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="replace 需要 replaces（要替换掉的旧规则）。",
-                error="replace 需要 replaces。",
-            )
+        if action in ("write", "read", "delete") and not name:
+            msg = "缺少 name。一个主题一篇文件，例如 回复语言.md。"
+            return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
+        if action == "write" and not content:
+            msg = "缺少 content。"
+            return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
 
         creds = None
         try:
@@ -163,28 +164,16 @@ class RememberTool:
             if creds is not None:
                 payload = await cloud_remember_rule(
                     creds,
+                    action=action,
+                    name=name or None,
                     content=content or None,
                     folder_id=folder_id,
-                    action=action,
-                    replaces=replaces,
+                    apply=apply,
+                    description=description,
                 )
-                result = UserRuleMutationResult(
-                    action=str(payload.get("action") or action),
-                    changed=bool(payload.get("changed")),
-                    message=str(payload.get("message") or ""),
-                    markdown=str(payload.get("rules_markdown") or "")
-                    if action == "list"
-                    else "",
-                    content=content or None,
+                result = _result_from_cloud(
+                    payload, action=action, name=name, apply=apply, content=content
                 )
-                if not result.message:
-                    result = UserRuleMutationResult(
-                        action=result.action,
-                        changed=result.changed,
-                        message=_fallback_cloud_message(result),
-                        markdown=result.markdown,
-                        content=result.content,
-                    )
             else:
                 async with async_session_factory() as session:
                     result = await mutate_user_rule(
@@ -192,8 +181,10 @@ class RememberTool:
                         context.user_id,
                         folder_id=folder_id,
                         action=action,
+                        name=name or None,
                         content=content or None,
-                        replaces=replaces,
+                        apply=apply,
+                        description=description,
                     )
         except AlwaysQuotaExceededError as e:
             return ToolResult(
@@ -226,9 +217,7 @@ class RememberTool:
                 error=str(e),
             )
 
-        if result.message.startswith("不支持的 action") or result.message.startswith(
-            "缺少 content"
-        ) or result.message.startswith("replace 需要"):
+        if not result.ok:
             return ToolResult(
                 tool_call_id="",
                 success=False,
@@ -242,9 +231,8 @@ class RememberTool:
                 user_id=context.user_id,
                 scope="folder" if folder_id else "global",
                 action=result.action,
+                name=result.name or None,
             )
-            # Ticketed turns inject from the prepare snapshot; re-seed the
-            # conversation folder's key so the next turn sees this write.
             if creds is not None:
                 await _rewarm_account_rules_memory(
                     creds,
@@ -253,16 +241,20 @@ class RememberTool:
                 )
 
         display: dict[str, Any] = {
-            "remembered": result.changed and result.action == "add",
+            "remembered": result.changed and result.action == "write",
             "changed": result.changed,
             "action": result.action,
+            "name": result.name or None,
+            "apply": result.apply or None,
             "content": content or None,
             "kind": "user_rule",
         }
-        if result.removed:
-            display["removed"] = list(result.removed)
-        if result.action == "list":
-            display["rules_markdown"] = result.markdown
+        if result.action == "list" and result.catalog:
+            display["catalog"] = [
+                {"name": n, "apply": a, "description": d} for n, a, d in result.catalog
+            ]
+        if result.action == "read" and result.body:
+            display["body"] = result.body
 
         return ToolResult(
             tool_call_id="",
@@ -272,10 +264,55 @@ class RememberTool:
         )
 
 
+def _result_from_cloud(
+    payload: dict[str, Any],
+    *,
+    action: str,
+    name: str,
+    apply: str | None,
+    content: str,
+) -> UserRuleMutationResult:
+    catalog_raw = payload.get("catalog") or []
+    catalog: tuple[tuple[str, str, str], ...] = ()
+    if isinstance(catalog_raw, list):
+        catalog = tuple(
+            (
+                str(item.get("name") or ""),
+                str(item.get("apply") or ""),
+                str(item.get("description") or ""),
+            )
+            for item in catalog_raw
+            if isinstance(item, dict)
+        )
+    result = UserRuleMutationResult(
+        action=str(payload.get("action") or action),
+        changed=bool(payload.get("changed")),
+        message=str(payload.get("message") or ""),
+        name=str(payload.get("name") or name),
+        apply=str(payload.get("apply") or apply or ""),
+        body=str(payload.get("body") or ""),
+        catalog=catalog,
+        content=content or None,
+        ok=payload.get("ok") is not False,
+    )
+    if not result.message:
+        result = UserRuleMutationResult(
+            action=result.action,
+            changed=result.changed,
+            message=_fallback_cloud_message(result),
+            name=result.name,
+            apply=result.apply,
+            body=result.body,
+            catalog=result.catalog,
+            content=result.content,
+            ok=result.ok,
+        )
+    return result
+
+
 def _fallback_cloud_message(result: UserRuleMutationResult) -> str:
     if result.action == "list":
-        body = (result.markdown or "").strip()
-        return f"当前用户规则：\n{body}" if body else "当前暂无用户规则。"
+        return result.message or "当前没有用户规则。"
     if result.changed:
         return f"已更新用户规则（action={result.action}）。"
     return "用户规则未变更。"

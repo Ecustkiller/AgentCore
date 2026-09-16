@@ -1,8 +1,4 @@
-import {
-  hasUnpricedUsage,
-  resolveTurnCost,
-  resolveTurnDisplayMoney,
-} from "@/lib/cost";
+import { resolveTurnCost, resolveTurnDisplayMoney } from "@/lib/cost";
 import { describe, expect, it } from "vitest";
 
 describe("resolveTurnCost", () => {
@@ -31,7 +27,7 @@ describe("resolveTurnDisplayMoney", () => {
     ).toEqual({ nano: 28, estimated: false, currency: "CNY" });
     expect(
       resolveTurnDisplayMoney({ total: 0, estimated_total: 99 }, []),
-    ).toEqual({ nano: 99, estimated: true, currency: "CNY" });
+    ).toEqual({ nano: 99, estimated: false, currency: "CNY" });
   });
 
   it("falls back to run estimated sum when turn cost is absent", () => {
@@ -40,7 +36,7 @@ describe("resolveTurnDisplayMoney", () => {
         { total: 0, estimated_total: 10 },
         { total: 0, estimated_total: 5 },
       ]),
-    ).toEqual({ nano: 15, estimated: true, currency: "CNY" });
+    ).toEqual({ nano: 15, estimated: false, currency: "CNY" });
   });
 
   it("sums run billed totals when turn cost is absent", () => {
@@ -52,7 +48,7 @@ describe("resolveTurnDisplayMoney", () => {
     ).toEqual({ nano: 15, estimated: false, currency: "CNY" });
   });
 
-  it("carries the BYOK estimate's own currency out (社区价卡 USD，不折人民币)", () => {
+  it("legacy USD estimates still carry ≈$ (estimated: true)", () => {
     expect(
       resolveTurnDisplayMoney(
         { total: 0, estimated_total: 99, estimated_currency: "USD" },
@@ -72,30 +68,5 @@ describe("resolveTurnDisplayMoney", () => {
     expect(
       resolveTurnDisplayMoney(null, [{ total: 0 }, { total: 0 }]),
     ).toBeNull();
-  });
-});
-
-describe("hasUnpricedUsage", () => {
-  const spent = { input: 1000, output: 200 };
-  const idle = { input: 0, output: 0 };
-
-  it("flags a run that burned tokens under pricing_source=unpriced", () => {
-    expect(
-      hasUnpricedUsage([
-        { cost: { total: 0, pricing_source: "unpriced" }, usage: spent },
-      ]),
-    ).toBe(true);
-  });
-
-  it("ignores priced/estimated runs and zero-usage unpriced runs", () => {
-    expect(
-      hasUnpricedUsage([
-        { cost: { total: 10, pricing_source: "curated" }, usage: spent },
-        { cost: { total: 0, estimated_total: 5 }, usage: spent },
-        { cost: { total: 0, pricing_source: "unpriced" }, usage: idle },
-        { cost: { total: 0, pricing_source: "unpriced" }, usage: null },
-        null,
-      ]),
-    ).toBe(false);
   });
 });

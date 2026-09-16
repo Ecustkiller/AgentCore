@@ -233,7 +233,6 @@ async def test_ask_user_presentation_without_format_options_still_succeeds():
     try:
         res = await tool.execute(
             {
-                "message": "开工：做一份产品发布 PPT 演示文稿",
                 "questions": [
                     {
                         "prompt": "时长",
@@ -258,7 +257,6 @@ async def test_ask_user_presentation_with_format_options_succeeds():
     try:
         res = await tool.execute(
             {
-                "message": "开工：做一份产品发布 PPT 演示文稿",
                 "format_options": [
                     {"label": "PowerPoint（.pptx）— 有 code_execute 时推荐"},
                     {"label": "Marp Markdown 幻灯片 — 无代码执行时推荐"},

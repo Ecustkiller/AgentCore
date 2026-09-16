@@ -155,6 +155,9 @@ jobs:
       - name: Typecheck
         run: pnpm --filter agentcore-desktop typecheck
 
+      - name: Check manual corpus (content/*.ts ↔ product_help_corpus.json)
+        run: pnpm sync:manual-corpus:check
+
       - name: Conformance
         run: pnpm --filter agentcore-desktop conformance
 

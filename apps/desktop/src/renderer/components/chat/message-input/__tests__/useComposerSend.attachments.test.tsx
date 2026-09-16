@@ -177,7 +177,7 @@ describe("useComposerSend 附件收尾", () => {
     expect(turn.mock.calls[0][0].attachments).toEqual([
       expect.objectContaining({ workspace_path: "attachments/shot.png" }),
     ]);
-    // 落地后补正气泡里的路径，附件下载链接才指得对。
+    // 落地后补正气泡里的路径。
     expect(messages()[0].attachments?.[0]).toMatchObject({
       path: "attachments/shot.png",
       workspacePath: "attachments/shot.png",

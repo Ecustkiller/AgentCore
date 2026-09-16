@@ -22,7 +22,7 @@ _CASES = Path(docs_fx_mod.__file__).resolve().parent / "cases"
 
 def test_shipped_rules_memory_suite_lints_clean():
     cases = load_cases(_CASES, suite="rules_memory")
-    assert len(cases) >= 5
+    assert len(cases) >= 3
     assert all(c.documents_fixture for c in cases)
     assert all(c.path == "team" for c in cases)
 

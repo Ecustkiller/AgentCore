@@ -6,12 +6,11 @@ import re
 from typing import Any
 
 from agentcore.llm.model_ref import parse_model_input
-from agentcore.runtime.debate import DebateForm, DebateSide
+from agentcore.runtime.debate import DebateSide
 from agentcore.runtime.debate.constants import (
     CLOSING_LENGTH_HINT,
     CX_LENGTH_HINT,
     DEBATE_OUTPUT_LIMIT,
-    DEBATE_SCHEMA_FORM_VALUES,
     FORM_LABELS,
     LENGTH_HINT,
     QUICK_DEBATER_HINT,
@@ -29,7 +28,6 @@ __all__ = [
     "DEBATE_PARAMETERS",
     "STANCE_MAX_CHARS",
     "err",
-    "parse_form",
     "parse_background",
     "parse_sides",
     "parse_moderator_fields",
@@ -80,11 +78,6 @@ DEBATE_PARAMETERS = {
             "type": "string",
             "description": "辩论命题（用户原话或提炼的争议命题）。",
         },
-        "form": {
-            "type": "string",
-            "enum": list(DEBATE_SCHEMA_FORM_VALUES),
-            "description": "取值：正反。",
-        },
         "sides": {
             "type": "array",
             "description": "参与方（≥2）：正反=2。",
@@ -105,10 +98,6 @@ DEBATE_PARAMETERS = {
                         "description": (
                             f"一句话立场（≤{STANCE_MAX_CHARS} 字）；只写主张结论，事实归 background。"
                         ),
-                    },
-                    "is_subject": {
-                        "type": "boolean",
-                        "description": "可选。",
                     },
                     "model": {
                         "type": "string",
@@ -148,26 +137,12 @@ DEBATE_PARAMETERS = {
             ),
         },
     },
-    "required": ["motion", "form", "sides"],
+    "required": ["motion", "sides"],
 }
 
 
 def err(msg: str) -> ToolResult:
     return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
-
-
-def parse_form(raw: Any) -> DebateForm:
-    """接受 DebateForm 全员（含历史 red_team / roundtable）；缺省或非法回落 debate。
-
-    schema 广告子集是 :data:`~agentcore.runtime.debate.constants.DEBATE_SCHEMA_FORM_VALUES`，
-    不在此硬拒旧 form。
-    """
-    if isinstance(raw, str):
-        try:
-            return DebateForm(raw.strip())
-        except ValueError:
-            pass
-    return DebateForm.DEBATE
 
 
 def parse_background(raw: Any) -> str:
@@ -250,7 +225,6 @@ def parse_sides(raw: Any) -> tuple[list[DebateSide], str]:
                 key=key,
                 name=name,
                 stance=stance,
-                is_subject=bool(item.get("is_subject")),
                 model=model,
                 origin=origin if origin in ("platform", "byok") else "",
                 provider_id=provider_id if origin == "byok" else "",

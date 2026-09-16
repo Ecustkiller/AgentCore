@@ -8,9 +8,7 @@ describe("memoryUpdatedToastCopy", () => {
   });
 
   it("heads-up semantic writes when away", () => {
-    expect(memoryUpdatedToastCopy("semantic", false)).toBe(
-      "AI 刚刚更新了你的记忆",
-    );
+    expect(memoryUpdatedToastCopy("semantic", false)).toBeNull();
   });
 
   it("heads-up quota refusals when away", () => {

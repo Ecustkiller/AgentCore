@@ -41,13 +41,11 @@ from agentcore.tools.registration import (
 )
 from agentcore.tools.registry import ToolRegistry
 from agentcore.vision import resolve_vision_reader_for_conversation
-from agentcore.workspace.locate import (
-    resolve_conversation_local_binding,
-    workspace_channel_for_tools,
-)
+from agentcore.workspace.locate import workspace_channel_for_tools
 from agentcore.workspace.protocol import WorkspaceBackend
 
 if TYPE_CHECKING:
+    from agentcore.llm.credentials import LLMCredentials
     from agentcore.runtime.approvals import ApprovalGate
 
 # ApprovalGate / _assemble_ceo_toolset are resolved via ``resume.pipeline`` so
@@ -123,6 +121,7 @@ async def _wire_continuation_toolset(
     folder_binding_injected: bool = False,
     folder_local_root_id: str | None = None,
     folder_local_subpath: str | None = None,
+    llm_credentials: LLMCredentials | None = None,
 ) -> ResumedWiring:
     """Shared CEO/worker toolset rebuild for resume and crash redrive (no parallel path)."""
     from agentcore.runtime.pipeline.errors import raise_if_local_workspace_fulfiller_absent
@@ -186,11 +185,14 @@ async def _wire_continuation_toolset(
     # The CEO prompt itself is replayed from the stored transcript
     # (already slim + 按需目录), so no directory re-render.
     if table_id is None:
-        from agentcore.table.context import lookup_table_id
+        from agentcore.table.bind import lookup_table_id_for_turn
 
         try:
-            table_id = await lookup_table_id(
-                conversation_id=conversation_id, user_id=user_id
+            table_id = await lookup_table_id_for_turn(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                folder_id=folder_id,
+                attachments=None,
             )
         except Exception:
             table_id = None
@@ -236,9 +238,11 @@ async def _wire_continuation_toolset(
         table_id=table_id,
         desktop_channel=desktop_channel,
         workspace_channel=workspace_channel,
-        # Profile vision slot → reader; else platform VISION_* when billing_mode=platform.
+        # Cloud expands the profile slot; ticketed sidecar reuses the inference JWT.
         vision_reader=await resolve_vision_reader_for_conversation(
-            user_id=user_id, conversation_id=conversation_id
+            user_id=user_id,
+            conversation_id=conversation_id,
+            llm_credentials=llm_credentials,
         ),
         cost_sink=vision_cost_sink,
         shared_workspace=folder_id is not None,
@@ -367,51 +371,9 @@ async def _wire_continuation_toolset(
         register_table_ceo_tools(chat_tools)
         chat_tools.offer("table_ops")
 
-    # Same explore-pending sink as fresh assemble (resume mid-explore: suppress
-    # structured files_written inference + worker write_scope=explore_memory until
-    # update_folder_profile clears the flag).
-    # Named-refresh via resolve_hard_explore_reason（与 assemble 同源）.
-    if folder_id:
-        from agentcore.memory.explore_profile import (
-            resolve_hard_explore_reason,
-            resolve_turn_explore_gate,
-        )
-        from agentcore.memory.store import default_memory_store
+    from agentcore.runtime.resolve.ceo_surface import apply_explore_profile_surface
 
-        injected_binding = None
-        if folder_binding_injected:
-            injected_binding = resolve_conversation_local_binding(
-                local_root_id=folder_local_root_id,
-                local_subpath=folder_local_subpath,
-            )
-        raw_reason, current_key = await resolve_turn_explore_gate(
-            default_memory_store(),
-            user_id,
-            folder_id,
-            binding=injected_binding,
-            binding_injected=folder_binding_injected,
-        )
-        explore_reason = resolve_hard_explore_reason(raw_reason, user_message)
-        if explore_reason:
-            base_tool_context.cold_start_explore_pending = True
-            base_tool_context.write_scope = "explore_memory"
-        elif raw_reason == "rebind" and current_key:
-            from agentcore.memory.explore_refresh import (
-                schedule_explore_refresh_for_backend,
-            )
-
-            await schedule_explore_refresh_for_backend(
-                user_id=user_id,
-                folder_id=folder_id,
-                workspace_key=current_key,
-                backend=backend,
-                blank_current_notes=True,
-            )
-        if current_key:
-            upd = chat_tools.get_optional("update_folder_profile")
-            if upd is not None and getattr(upd, "workspace_key", None) is None:
-                cast_upd: Any = upd
-                cast_upd.workspace_key = current_key
+    apply_explore_profile_surface(chat_tools, pending=False)
 
     return ResumedWiring(
         base_tool_context=base_tool_context,
@@ -442,6 +404,7 @@ async def wire_resume_turn(
     suspension_saver: SuspensionSaver | None,
     suspension_deleter: SuspensionDeleter | None,
     x_client_platform: str | None,
+    llm_credentials: LLMCredentials | None = None,
 ) -> ResumedWiring:
     """Rebuild worker tools, channels, approval gate, and CEO toolset for resume."""
     return await _wire_continuation_toolset(
@@ -468,6 +431,7 @@ async def wire_resume_turn(
         folder_binding_injected=bool(suspension.folder_binding_injected),
         folder_local_root_id=suspension.folder_local_root_id,
         folder_local_subpath=suspension.folder_local_subpath,
+        llm_credentials=llm_credentials,
     )
 
 
@@ -491,6 +455,7 @@ async def wire_crash_turn(
     session_loader: SessionLoader | None,
     suspension_saver: SuspensionSaver | None,
     suspension_deleter: SuspensionDeleter | None,
+    llm_credentials: LLMCredentials | None = None,
 ) -> ResumedWiring:
     """Crash-lease sibling of :func:`wire_resume_turn` — same assembly, no suspension.
 
@@ -519,4 +484,5 @@ async def wire_crash_turn(
         suspension_saver=suspension_saver,
         suspension_deleter=suspension_deleter,
         x_client_platform=None,
+        llm_credentials=llm_credentials,
     )

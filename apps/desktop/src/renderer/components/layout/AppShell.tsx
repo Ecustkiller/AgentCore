@@ -4,6 +4,7 @@ import {
   useSharedWithMeFolders,
 } from "@/hooks/useFolderSharing";
 import { startAndroidUpdates } from "@/lib/androidUpdates";
+import { bindAppNavigate } from "@/lib/appNavigate";
 import { isWebClient } from "@/lib/capabilities";
 import { NarrowLayoutProvider, useNarrowLayoutState } from "@/lib/narrowLayout";
 import { isRailHotkeyHintModifier } from "@/lib/railHotkeys";
@@ -34,7 +35,6 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { ShareConversationDialog } from "../conversation/ShareConversationDialog";
 import { BorrowToCloudDialogHost } from "../files/BorrowToCloudDialog";
 import { ConnectGitDialogHost } from "../files/CloneRepoDialog";
-import { ImportToCloudDialogHost } from "../files/ImportToCloudDialog";
 import { Sidebar } from "../sidebar/Sidebar";
 import { MergeLandingReviewHost } from "../workspace/MergeLandingReview";
 import { CommandPalette } from "./CommandPalette";
@@ -159,6 +159,10 @@ function AppShellFrame() {
   const navigate = useNavigate();
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
+  useEffect(() => {
+    bindAppNavigate(navigate);
+    return () => bindAppNavigate(null);
+  }, [navigate]);
 
   // The offline preview (#/preview) is a full-window dev surface with its own
   // scenario navigator, so the app's conversation sidebar is pure chrome there.
@@ -228,7 +232,6 @@ function AppShellFrame() {
       <CommandPalette />
       <ShareConversationDialog />
       <ConnectGitDialogHost />
-      <ImportToCloudDialogHost />
       <BorrowToCloudDialogHost />
       <MergeLandingReviewHost />
     </div>

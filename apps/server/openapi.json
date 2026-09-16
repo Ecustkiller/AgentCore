@@ -454,18 +454,56 @@
         "title": "AccountMemoryScopeRequest",
         "type": "object"
       },
+      "AccountRememberCatalogItem": {
+        "properties": {
+          "apply": {
+            "default": "",
+            "title": "Apply",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "AccountRememberCatalogItem",
+        "type": "object"
+      },
       "AccountRememberRequest": {
         "properties": {
           "action": {
-            "default": "add",
+            "default": "write",
             "enum": [
-              "add",
-              "replace",
-              "forget",
+              "write",
+              "read",
+              "delete",
               "list"
             ],
             "title": "Action",
             "type": "string"
+          },
+          "apply": {
+            "anyOf": [
+              {
+                "enum": [
+                  "always",
+                  "on_demand"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apply"
           },
           "content": {
             "anyOf": [
@@ -478,6 +516,17 @@
             ],
             "title": "Content"
           },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
           "folder_id": {
             "anyOf": [
               {
@@ -489,7 +538,7 @@
             ],
             "title": "Folder Id"
           },
-          "replaces": {
+          "name": {
             "anyOf": [
               {
                 "type": "string"
@@ -498,7 +547,7 @@
                 "type": "null"
               }
             ],
-            "title": "Replaces"
+            "title": "Name"
           }
         },
         "title": "AccountRememberRequest",
@@ -510,6 +559,23 @@
             "title": "Action",
             "type": "string"
           },
+          "apply": {
+            "default": "",
+            "title": "Apply",
+            "type": "string"
+          },
+          "body": {
+            "default": "",
+            "title": "Body",
+            "type": "string"
+          },
+          "catalog": {
+            "items": {
+              "$ref": "#/components/schemas/AccountRememberCatalogItem"
+            },
+            "title": "Catalog",
+            "type": "array"
+          },
           "changed": {
             "title": "Changed",
             "type": "boolean"
@@ -518,16 +584,15 @@
             "title": "Message",
             "type": "string"
           },
-          "rules_markdown": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rules Markdown"
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
           }
         },
         "required": [
@@ -2741,221 +2806,6 @@
           "deleted_at"
         ],
         "title": "AdminUserResponse",
-        "type": "object"
-      },
-      "AdminWorkflowStoreListingDetail": {
-        "properties": {
-          "author": {
-            "title": "Author",
-            "type": "string"
-          },
-          "author_user_id": {
-            "title": "Author User Id",
-            "type": "string"
-          },
-          "definition": {
-            "additionalProperties": true,
-            "title": "Definition",
-            "type": "object"
-          },
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          },
-          "updated_at": {
-            "format": "date-time",
-            "title": "Updated At",
-            "type": "string"
-          },
-          "version_n": {
-            "title": "Version N",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "description",
-          "author",
-          "author_user_id",
-          "version_n",
-          "status",
-          "updated_at",
-          "definition"
-        ],
-        "title": "AdminWorkflowStoreListingDetail",
-        "type": "object"
-      },
-      "AdminWorkflowStoreListingList": {
-        "properties": {
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/AdminWorkflowStoreListingRow"
-            },
-            "title": "Data",
-            "type": "array"
-          },
-          "page": {
-            "title": "Page",
-            "type": "integer"
-          },
-          "page_size": {
-            "title": "Page Size",
-            "type": "integer"
-          },
-          "total": {
-            "title": "Total",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "data",
-          "total",
-          "page",
-          "page_size"
-        ],
-        "title": "AdminWorkflowStoreListingList",
-        "type": "object"
-      },
-      "AdminWorkflowStoreListingRow": {
-        "properties": {
-          "author": {
-            "title": "Author",
-            "type": "string"
-          },
-          "author_user_id": {
-            "title": "Author User Id",
-            "type": "string"
-          },
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          },
-          "updated_at": {
-            "format": "date-time",
-            "title": "Updated At",
-            "type": "string"
-          },
-          "version_n": {
-            "title": "Version N",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "description",
-          "author",
-          "author_user_id",
-          "version_n",
-          "status",
-          "updated_at"
-        ],
-        "title": "AdminWorkflowStoreListingRow",
-        "type": "object"
-      },
-      "AdminWorkflowStoreReportList": {
-        "properties": {
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/AdminWorkflowStoreReportRow"
-            },
-            "title": "Data",
-            "type": "array"
-          },
-          "page": {
-            "title": "Page",
-            "type": "integer"
-          },
-          "page_size": {
-            "title": "Page Size",
-            "type": "integer"
-          },
-          "total": {
-            "title": "Total",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "data",
-          "total",
-          "page",
-          "page_size"
-        ],
-        "title": "AdminWorkflowStoreReportList",
-        "type": "object"
-      },
-      "AdminWorkflowStoreReportRow": {
-        "properties": {
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "listing_id": {
-            "title": "Listing Id",
-            "type": "string"
-          },
-          "listing_name": {
-            "title": "Listing Name",
-            "type": "string"
-          },
-          "listing_status": {
-            "title": "Listing Status",
-            "type": "string"
-          },
-          "reason": {
-            "title": "Reason",
-            "type": "string"
-          },
-          "reporter": {
-            "title": "Reporter",
-            "type": "string"
-          },
-          "user_id": {
-            "title": "User Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "listing_id",
-          "listing_name",
-          "listing_status",
-          "user_id",
-          "reporter",
-          "reason",
-          "created_at"
-        ],
-        "title": "AdminWorkflowStoreReportRow",
         "type": "object"
       },
       "AgentAuditEventLine": {
@@ -5312,7 +5162,7 @@
         "type": "object"
       },
       "ConversationSearchRequest": {
-        "description": "Aligned with Worker ``search_conversations`` (resolved folder filters).",
+        "description": "Sidecar / account-ticket search.\n\nLog tool always sends archived, never hours / global-only.",
         "properties": {
           "check_folder_owned": {
             "default": false,
@@ -5352,8 +5202,8 @@
             "type": "boolean"
           },
           "limit": {
-            "default": 10,
-            "maximum": 30.0,
+            "default": 20,
+            "maximum": 100.0,
             "minimum": 1.0,
             "title": "Limit",
             "type": "integer"
@@ -5743,7 +5593,7 @@
         "type": "object"
       },
       "CostBreakdown": {
-        "description": "A run's / turn's / window's cost in integer nano-money (canonical).\n\nBilled (``cost``) and BYOK-estimated (``estimated_cost``) spend are always two\nseparate breakdowns, each carrying its own ``currency`` — that is how a mixed\nturn stays representable without FX.",
+        "description": "A run's / turn's / window's cost in integer nano-money (canonical).\n\nBilled (``cost``) and BYOK (``estimated_cost``) stay two breakdowns so quota\nSUM never sees the display copy. Same CNY card; mixed turns add on the\nturn-total ``cost.total`` (bubble), not in the account window.",
         "properties": {
           "cached": {
             "title": "Cached",
@@ -6022,6 +5872,19 @@
             "maxLength": 200,
             "title": "Name",
             "type": "string"
+          },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Vendor thinking-effort token. Null = vendor default for the main model. Must be an official control value of the main model.",
+            "title": "Reasoning Effort"
           },
           "set_as_default": {
             "default": false,
@@ -6362,37 +6225,6 @@
           }
         },
         "title": "CreateTableRequest",
-        "type": "object"
-      },
-      "CreateWorkflowRequest": {
-        "properties": {
-          "definition": {
-            "$ref": "#/components/schemas/WorkflowDefinitionModel"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "maxLength": 4000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "name": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "definition"
-        ],
-        "title": "CreateWorkflowRequest",
         "type": "object"
       },
       "DailyCost": {
@@ -8171,19 +8003,6 @@
         "title": "FileWriteAxis",
         "type": "string"
       },
-      "FireWorkflowWebhookResponse": {
-        "properties": {
-          "conversation_id": {
-            "title": "Conversation Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "conversation_id"
-        ],
-        "title": "FireWorkflowWebhookResponse",
-        "type": "object"
-      },
       "FolderGroup": {
         "description": "A project plus the conversations it holds (grouped sidebar payload).",
         "properties": {
@@ -8649,40 +8468,6 @@
           "display_name"
         ],
         "title": "FriendSummary",
-        "type": "object"
-      },
-      "FromPlaybookRequest": {
-        "description": "Copy an official playbook into a user workflow (use = 复制为我的).",
-        "properties": {
-          "name": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          },
-          "playbook": {
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Playbook",
-            "type": "string"
-          },
-          "slots": {
-            "additionalProperties": true,
-            "title": "Slots",
-            "type": "object"
-          }
-        },
-        "required": [
-          "playbook"
-        ],
-        "title": "FromPlaybookRequest",
         "type": "object"
       },
       "GitCredentialView": {
@@ -9364,6 +9149,18 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Vendor thinking-effort token for this combination (e.g. low/high/max). Null = that model's vendor default. Official control values only.",
+            "title": "Reasoning Effort"
           },
           "updated_at": {
             "anyOf": [
@@ -11153,6 +10950,14 @@
             "title": "Name",
             "type": "string"
           },
+          "offers_tools": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Offers Tools",
+            "type": "array"
+          },
           "version": {
             "title": "Version",
             "type": "string"
@@ -11302,6 +11107,17 @@
             "description": "Display name of the provider (byok rows only).",
             "title": "Provider Label"
           },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelReasoningEffort"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Official vendor thinking-effort tokens for this model id (e.g. low/high/max). Null when the leaf does not send reasoning_effort."
+          },
           "ref": {
             "description": "Catalog identity: @platform/{id} or @byok/{provider_id}/{id}. Copy this into tool `model` fields; do not send origin/provider_id.",
             "title": "Ref",
@@ -11395,7 +11211,7 @@
         "type": "object"
       },
       "ModelPriceCard": {
-        "description": "Reused price card — USD per 1M tokens as decimal strings (money is never float).",
+        "description": "Curated unit prices per 1M tokens as decimal strings (money is never float).",
         "properties": {
           "cache_hit": {
             "anyOf": [
@@ -11418,6 +11234,13 @@
               }
             ],
             "title": "Cache Miss"
+          },
+          "currency": {
+            "const": "CNY",
+            "default": "CNY",
+            "description": "ISO-4217. Catalog cards are curated CNY, not live USD.",
+            "title": "Currency",
+            "type": "string"
           },
           "output": {
             "anyOf": [
@@ -11469,6 +11292,30 @@
           "model"
         ],
         "title": "ModelProfileSlot",
+        "type": "object"
+      },
+      "ModelReasoningEffort": {
+        "description": "Vendor Chat Completions ``reasoning_effort`` control surface.",
+        "properties": {
+          "default": {
+            "description": "Vendor default when a combination leaves reasoning_effort unset.",
+            "title": "Default",
+            "type": "string"
+          },
+          "options": {
+            "description": "Official control tokens in vendor order. Aliases are not listed.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Options",
+            "type": "array"
+          }
+        },
+        "required": [
+          "options",
+          "default"
+        ],
+        "title": "ModelReasoningEffort",
         "type": "object"
       },
       "ModelUnavailableReason": {
@@ -12136,103 +11983,6 @@
         "title": "PlatformCredentialView",
         "type": "object"
       },
-      "PlaybookSlotChoice": {
-        "description": "One allowed value of an enumerated slot (render a picker, not a textbox).",
-        "properties": {
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "value": {
-            "title": "Value",
-            "type": "string"
-          }
-        },
-        "required": [
-          "value",
-          "label"
-        ],
-        "title": "PlaybookSlotChoice",
-        "type": "object"
-      },
-      "PlaybookTemplateSlotModel": {
-        "description": "Machine-readable primary slot — clients build the copy form from this.",
-        "properties": {
-          "choices": {
-            "items": {
-              "$ref": "#/components/schemas/PlaybookSlotChoice"
-            },
-            "title": "Choices",
-            "type": "array"
-          },
-          "hint": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Hint"
-          },
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "required": {
-            "title": "Required",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "key",
-          "label",
-          "required"
-        ],
-        "title": "PlaybookTemplateSlotModel",
-        "type": "object"
-      },
-      "PlaybookTemplateSummary": {
-        "description": "Official playbook listed as a read-only workflow template.",
-        "properties": {
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "primary_slots": {
-            "title": "Primary Slots",
-            "type": "string"
-          },
-          "slots": {
-            "items": {
-              "$ref": "#/components/schemas/PlaybookTemplateSlotModel"
-            },
-            "title": "Slots",
-            "type": "array"
-          },
-          "summary": {
-            "title": "Summary",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "title",
-          "summary",
-          "primary_slots"
-        ],
-        "title": "PlaybookTemplateSummary",
-        "type": "object"
-      },
       "PreviewTokenRequest": {
         "description": "Mint body: which conversation process, and which listen port when several.",
         "properties": {
@@ -12348,70 +12098,6 @@
         "title": "PublishVersionRequest",
         "type": "object"
       },
-      "PublishWorkflowRequest": {
-        "properties": {
-          "workflow_id": {
-            "minLength": 1,
-            "title": "Workflow Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "workflow_id"
-        ],
-        "title": "PublishWorkflowRequest",
-        "type": "object"
-      },
-      "PutWorkflowTriggerRequest": {
-        "description": "Full replace of the workflow clock.",
-        "properties": {
-          "cron": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cron"
-          },
-          "enabled": {
-            "default": true,
-            "title": "Enabled",
-            "type": "boolean"
-          },
-          "folder_id": {
-            "title": "Folder Id",
-            "type": "string"
-          },
-          "kind": {
-            "enum": [
-              "schedule",
-              "webhook"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "schedule_preset": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Schedule Preset"
-          }
-        },
-        "required": [
-          "kind",
-          "folder_id"
-        ],
-        "title": "PutWorkflowTriggerRequest",
-        "type": "object"
-      },
       "QueuedTurnItem": {
         "description": "One process-local FIFO queued turn (排队条权威内容源；GET / 快照).\n\n``turn_queued`` / ``turn_queue_cancelled`` remain change signals only.\n``turn_queue_started`` is the timeline user-bubble entrance (content on the\nframe), not a change-only ping.\n``interjection_id`` is set when the entry was promoted from a user interjection\n(协调升队 / 经典 steer leftover); omitted / null for plain ``delivery=queue``.\n``position`` is 1-based FIFO index.\n``attachments`` / ``agent_mentions`` are the same fields drain forwards to\n``stream_chat`` (optional additive — old clients ignore).",
         "properties": {
@@ -12507,7 +12193,7 @@
         "type": "object"
       },
       "RecordTurnRequest": {
-        "description": "A finished local (sidecar) turn to persist: the user message + assistant reply.\n\nCarries the assistant outcome the local pipeline returned (content / reasoning /\ncitations / replay ``runs`` / the pipeline ``message_id`` so streamed and stored\nids agree). The FULL token snapshot rides on ``Message.usage`` (input / output /\nreasoning / cache hit / cache miss + rounds) so a reloaded sidecar turn's meta row\nmatches a cloud turn's. Spend is NOT sent: a sidecar turn's LLM calls are metered\nauthoritatively at the cloud inference proxy (``/v1/inference``, Slice 4a), so this\nwrite-back persists content only.\n\n``user_message`` may be empty for process-only salvage (journal/runs): the server\nmust not insert a visible user row when there is no real user intent.",
+        "description": "A finished local (sidecar) turn to persist: the user message + assistant reply.\n\nCarries the assistant outcome the local pipeline returned (content / reasoning /\ncitations / replay ``runs`` / the pipeline ``message_id`` so streamed and stored\nids agree). The FULL token snapshot rides on ``Message.usage`` (input / output /\nreasoning / cache hit / cache miss + rounds) so a reloaded sidecar turn's meta row\nmatches a cloud turn's. ``duration_ms`` is the whole-turn product-AI wall clock\n(same number as live ``message_end``); older clients omit it. Spend is NOT sent: a\nsidecar turn's LLM calls are metered authoritatively at the cloud inference proxy\n(``/v1/inference``, Slice 4a), so this write-back persists content only.\n\n``user_message`` may be empty for process-only salvage (journal/runs): the server\nmust not insert a visible user row when there is no real user intent.",
         "properties": {
           "agent_mentions": {
             "items": {
@@ -12515,6 +12201,14 @@
             },
             "maxItems": 10,
             "title": "Agent Mentions",
+            "type": "array"
+          },
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/StoredAttachment"
+            },
+            "maxItems": 20,
+            "title": "Attachments",
             "type": "array"
           },
           "cache_hit_tokens": {
@@ -12542,6 +12236,18 @@
             "maxLength": 500000,
             "title": "Content",
             "type": "string"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
           },
           "evidence_ledger": {
             "items": {
@@ -13456,20 +13162,6 @@
         "title": "ReportSkillRequest",
         "type": "object"
       },
-      "ReportWorkflowRequest": {
-        "properties": {
-          "reason": {
-            "minLength": 1,
-            "title": "Reason",
-            "type": "string"
-          }
-        },
-        "required": [
-          "reason"
-        ],
-        "title": "ReportWorkflowRequest",
-        "type": "object"
-      },
       "ResolveApprovalInteraction": {
         "description": "Settle a paused GRANTABLE tool call (``approval`` interaction).\n\n``decision`` is one of ``approve`` (allow this one call), ``approve_always``\n(allow this tool for the rest of the turn), or ``deny`` (refuse).",
         "properties": {
@@ -13677,29 +13369,6 @@
         "title": "RewriteResponse",
         "type": "object"
       },
-      "RotateWorkflowTriggerResponse": {
-        "properties": {
-          "webhook_id": {
-            "title": "Webhook Id",
-            "type": "string"
-          },
-          "webhook_secret": {
-            "title": "Webhook Secret",
-            "type": "string"
-          },
-          "webhook_url": {
-            "title": "Webhook Url",
-            "type": "string"
-          }
-        },
-        "required": [
-          "webhook_id",
-          "webhook_url",
-          "webhook_secret"
-        ],
-        "title": "RotateWorkflowTriggerResponse",
-        "type": "object"
-      },
       "RunError": {
         "description": "A turn's terminal error (报错回合), projected from the journal's ``turn_end``\noutcome fact so the inline error card replays on reload (Tier 2 a).\n\nLive, the error rides a transport-only ``error`` SSE event (never journaled), so\npersisting ``code`` + ``message`` on the outcome fact is its only durable home.\n``code`` drives the bubble's retry affordance; ``message`` is the user-facing text\nthe card shows — the same pair the live ``error`` event carried.",
         "properties": {
@@ -13744,72 +13413,6 @@
           "available"
         ],
         "title": "RunLlmWindowResponse",
-        "type": "object"
-      },
-      "RunWorkflowRequest": {
-        "properties": {
-          "conversation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Conversation Id"
-          },
-          "folder_id": {
-            "title": "Folder Id",
-            "type": "string"
-          },
-          "note": {
-            "anyOf": [
-              {
-                "maxLength": 16000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Note"
-          },
-          "slots": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Slots",
-            "type": "object"
-          }
-        },
-        "required": [
-          "folder_id"
-        ],
-        "title": "RunWorkflowRequest",
-        "type": "object"
-      },
-      "RunWorkflowResponse": {
-        "properties": {
-          "conversation_id": {
-            "title": "Conversation Id",
-            "type": "string"
-          },
-          "workflow_id": {
-            "title": "Workflow Id",
-            "type": "string"
-          },
-          "workflow_version": {
-            "title": "Workflow Version",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "conversation_id",
-          "workflow_id",
-          "workflow_version"
-        ],
-        "title": "RunWorkflowResponse",
         "type": "object"
       },
       "RunsPayload": {
@@ -15262,6 +14865,17 @@
             "title": "Schema Version",
             "type": "integer"
           },
+          "source_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Path"
+          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -15450,6 +15064,17 @@
           "schema_version": {
             "title": "Schema Version",
             "type": "integer"
+          },
+          "source_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Path"
           },
           "title": {
             "title": "Title",
@@ -16443,7 +16068,7 @@
         "type": "object"
       },
       "UpdateLlmModelProfileRequest": {
-        "description": "Partial update. Omitted fields unchanged; explicit null on worker/background/vision\nclears the slot (worker/background → follow_main; vision → no dedicated slot).",
+        "description": "Partial update. Omitted fields unchanged; explicit null on worker/background/vision\nclears the slot (worker/background → follow_main; vision → no dedicated slot).\nExplicit null on reasoning_effort clears to the vendor default.",
         "properties": {
           "background": {
             "anyOf": [
@@ -16476,6 +16101,19 @@
               }
             ],
             "title": "Name"
+          },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Vendor thinking-effort token. Explicit null clears to the vendor default. Must be an official control value of the (new) main model.",
+            "title": "Reasoning Effort"
           },
           "vision": {
             "anyOf": [
@@ -16890,52 +16528,6 @@
           }
         },
         "title": "UpdateTableRequest",
-        "type": "object"
-      },
-      "UpdateWorkflowRequest": {
-        "properties": {
-          "clear_description": {
-            "default": false,
-            "title": "Clear Description",
-            "type": "boolean"
-          },
-          "definition": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/WorkflowDefinitionModel"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "description": {
-            "anyOf": [
-              {
-                "maxLength": 4000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          }
-        },
-        "title": "UpdateWorkflowRequest",
         "type": "object"
       },
       "UpdatesPolicyResponse": {
@@ -17363,562 +16955,6 @@
         "title": "ValidationError",
         "type": "object"
       },
-      "WorkflowDefinitionModel": {
-        "additionalProperties": true,
-        "description": "Canvas JSON: nodes + edges (agent_step | human_gate) + optional slots.\n\n**校验用它，落库用** :meth:`payload` —— 不要用 ``model_dump()``。这几个字段声明的是\n「服务端认识什么」，不是「客户端能存什么」：definition 归用户所有，未知字段必须原样\n透传（``extra=\"allow\"`` 在这里和 :class:`WorkflowSlotModel` 上都是为了这件事）。按已知\n字段重建这份 JSON，是 ``deliverable`` / ``slots`` / ``source`` 先后被抹掉的同一个根因\n—— 见 :mod:`agentcore.workflows.definition` 的所有权约定。",
-        "properties": {
-          "edges": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Edges",
-            "type": "array"
-          },
-          "nodes": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Nodes",
-            "type": "array"
-          },
-          "slots": {
-            "items": {
-              "$ref": "#/components/schemas/WorkflowSlotModel"
-            },
-            "maxItems": 6,
-            "title": "Slots",
-            "type": "array"
-          }
-        },
-        "title": "WorkflowDefinitionModel",
-        "type": "object"
-      },
-      "WorkflowSlotModel": {
-        "additionalProperties": true,
-        "description": "One canvas slot: ``{{key}}`` in task text, ``default`` = 原轮的原值。\n\nOptional — a definition without slots behaves exactly as before.",
-        "properties": {
-          "default": {
-            "default": "",
-            "maxLength": 400,
-            "title": "Default",
-            "type": "string"
-          },
-          "key": {
-            "maxLength": 24,
-            "minLength": 1,
-            "title": "Key",
-            "type": "string"
-          },
-          "label": {
-            "maxLength": 24,
-            "minLength": 1,
-            "title": "Label",
-            "type": "string"
-          }
-        },
-        "required": [
-          "key",
-          "label"
-        ],
-        "title": "WorkflowSlotModel",
-        "type": "object"
-      },
-      "WorkflowSourceModel": {
-        "additionalProperties": true,
-        "description": "这条工作流是从哪儿来的——服务端权威，客户端只读。\n\n``kind`` 今天只有 ``\"turn\"``（历史行：曾经从一轮协作固化，不是现行写入），带原对话 /\n消息定位。手画的、官方模板复制的没有来源（``null``）。为什么它不在 ``definition`` 里 →\n:mod:`agentcore.workflows.source`。",
-        "properties": {
-          "conversation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Conversation Id"
-          },
-          "kind": {
-            "title": "Kind",
-            "type": "string"
-          },
-          "message_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Message Id"
-          }
-        },
-        "required": [
-          "kind"
-        ],
-        "title": "WorkflowSourceModel",
-        "type": "object"
-      },
-      "WorkflowStoreInstalledItem": {
-        "properties": {
-          "author": {
-            "title": "Author",
-            "type": "string"
-          },
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
-          "has_update": {
-            "title": "Has Update",
-            "type": "boolean"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "installed": {
-            "title": "Installed",
-            "type": "boolean"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "source_workflow_id": {
-            "title": "Source Workflow Id",
-            "type": "string"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          },
-          "version_n": {
-            "title": "Version N",
-            "type": "integer"
-          },
-          "workflow_id": {
-            "title": "Workflow Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "description",
-          "author",
-          "version_n",
-          "installed",
-          "has_update",
-          "status",
-          "source_workflow_id",
-          "workflow_id"
-        ],
-        "title": "WorkflowStoreInstalledItem",
-        "type": "object"
-      },
-      "WorkflowStoreInstalledResponse": {
-        "properties": {
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/WorkflowStoreInstalledItem"
-            },
-            "title": "Data",
-            "type": "array"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "title": "WorkflowStoreInstalledResponse",
-        "type": "object"
-      },
-      "WorkflowStoreListResponse": {
-        "properties": {
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/WorkflowStoreListingRow"
-            },
-            "title": "Data",
-            "type": "array"
-          },
-          "page": {
-            "title": "Page",
-            "type": "integer"
-          },
-          "page_size": {
-            "title": "Page Size",
-            "type": "integer"
-          },
-          "total": {
-            "title": "Total",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "data",
-          "total",
-          "page",
-          "page_size"
-        ],
-        "title": "WorkflowStoreListResponse",
-        "type": "object"
-      },
-      "WorkflowStoreListingDetail": {
-        "properties": {
-          "author": {
-            "title": "Author",
-            "type": "string"
-          },
-          "definition": {
-            "additionalProperties": true,
-            "title": "Definition",
-            "type": "object"
-          },
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
-          "has_update": {
-            "title": "Has Update",
-            "type": "boolean"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "installed": {
-            "title": "Installed",
-            "type": "boolean"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "source_workflow_id": {
-            "title": "Source Workflow Id",
-            "type": "string"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          },
-          "version_n": {
-            "title": "Version N",
-            "type": "integer"
-          },
-          "workflow_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Workflow Id"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "description",
-          "author",
-          "version_n",
-          "installed",
-          "has_update",
-          "status",
-          "source_workflow_id",
-          "definition"
-        ],
-        "title": "WorkflowStoreListingDetail",
-        "type": "object"
-      },
-      "WorkflowStoreListingRow": {
-        "properties": {
-          "author": {
-            "title": "Author",
-            "type": "string"
-          },
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
-          "has_update": {
-            "title": "Has Update",
-            "type": "boolean"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "installed": {
-            "title": "Installed",
-            "type": "boolean"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "source_workflow_id": {
-            "title": "Source Workflow Id",
-            "type": "string"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          },
-          "version_n": {
-            "title": "Version N",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "description",
-          "author",
-          "version_n",
-          "installed",
-          "has_update",
-          "status",
-          "source_workflow_id"
-        ],
-        "title": "WorkflowStoreListingRow",
-        "type": "object"
-      },
-      "WorkflowStoreMineResponse": {
-        "properties": {
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/WorkflowStoreListingRow"
-            },
-            "title": "Data",
-            "type": "array"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "title": "WorkflowStoreMineResponse",
-        "type": "object"
-      },
-      "WorkflowStoreReportView": {
-        "properties": {
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "listing_id": {
-            "title": "Listing Id",
-            "type": "string"
-          },
-          "reason": {
-            "title": "Reason",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "listing_id",
-          "reason"
-        ],
-        "title": "WorkflowStoreReportView",
-        "type": "object"
-      },
-      "WorkflowSummary": {
-        "properties": {
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "definition": {
-            "additionalProperties": true,
-            "title": "Definition",
-            "type": "object"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "source": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/WorkflowSourceModel"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "trigger": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/WorkflowTriggerModel"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "updated_at": {
-            "format": "date-time",
-            "title": "Updated At",
-            "type": "string"
-          },
-          "version": {
-            "title": "Version",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "definition",
-          "version",
-          "created_at",
-          "updated_at"
-        ],
-        "title": "WorkflowSummary",
-        "type": "object"
-      },
-      "WorkflowTriggerModel": {
-        "description": "One clock on a workflow: schedule XOR webhook.",
-        "properties": {
-          "cron": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cron"
-          },
-          "enabled": {
-            "title": "Enabled",
-            "type": "boolean"
-          },
-          "folder_id": {
-            "title": "Folder Id",
-            "type": "string"
-          },
-          "kind": {
-            "enum": [
-              "schedule",
-              "webhook"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "last_error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Error"
-          },
-          "last_run_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Run At"
-          },
-          "next_run_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Run At"
-          },
-          "schedule_preset": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Schedule Preset"
-          },
-          "webhook_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Webhook Id"
-          },
-          "webhook_secret": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Webhook Secret"
-          },
-          "webhook_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Webhook Url"
-          }
-        },
-        "required": [
-          "kind",
-          "enabled",
-          "folder_id"
-        ],
-        "title": "WorkflowTriggerModel",
-        "type": "object"
-      },
       "WorkspaceBindingResponse": {
         "description": "A conversation's resolved workspace mode + where its binding lives.\n\n``mode`` / ``root_id`` follow the turn-routing口径 (``resolve_local_binding``):\nan explicit ``local_root_id`` OR the desktop's ``local_container_root_id`` default\nboth count as local. ``source`` distinguishes how the effective bind was chosen\nso the client can present「显式绑定」vs「容器默认」without guessing.",
         "properties": {
@@ -18292,7 +17328,7 @@
   "info": {
     "description": "Multi-Agent AI Workspace API",
     "title": "AgentCore",
-    "version": "0.7.21"
+    "version": "0.7.22"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -18565,7 +17601,7 @@
     },
     "/v1/account/conversations/search": {
       "post": {
-        "description": "Owner-scoped conversation directory search (account ticket or access).",
+        "description": "Owner-scoped conversation search (account ticket or access).",
         "operationId": "search_account_conversations_v1_account_conversations_search_post",
         "parameters": [
           {
@@ -19538,7 +18574,7 @@
     },
     "/v1/account/rules/remember": {
       "post": {
-        "description": "Mutate the scope's user-rule doc (``add`` / ``replace`` / ``forget`` / ``list``).",
+        "description": "Write / read / delete / list a named user-rule markdown under AgentCore/规则/.",
         "operationId": "remember_account_user_rule_v1_account_rules_remember_post",
         "parameters": [
           {
@@ -22800,362 +21836,6 @@
         "summary": "Set User Password",
         "tags": [
           "admin",
-          "admin"
-        ]
-      }
-    },
-    "/v1/admin/workflow-store/listings": {
-      "get": {
-        "operationId": "admin_list_listings_v1_admin_workflow_store_listings_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Q"
-            }
-          },
-          {
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Status"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "default": 1,
-              "minimum": 1,
-              "title": "Page",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "default": 20,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Page Size",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdminWorkflowStoreListingList"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Admin List Listings",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
-    "/v1/admin/workflow-store/listings/{listing_id}": {
-      "get": {
-        "operationId": "admin_get_listing_v1_admin_workflow_store_listings__listing_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "listing_id",
-            "required": true,
-            "schema": {
-              "title": "Listing Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdminWorkflowStoreListingDetail"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Admin Get Listing",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
-    "/v1/admin/workflow-store/listings/{listing_id}/takedown": {
-      "post": {
-        "operationId": "admin_takedown_listing_v1_admin_workflow_store_listings__listing_id__takedown_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "listing_id",
-            "required": true,
-            "schema": {
-              "title": "Listing Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdminWorkflowStoreListingRow"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Admin Takedown Listing",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
-    "/v1/admin/workflow-store/reports": {
-      "get": {
-        "operationId": "admin_list_reports_v1_admin_workflow_store_reports_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "default": 1,
-              "minimum": 1,
-              "title": "Page",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "default": 20,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Page Size",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdminWorkflowStoreReportList"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Admin List Reports",
-        "tags": [
           "admin"
         ]
       }
@@ -36206,97 +34886,6 @@
         ]
       }
     },
-    "/v1/hooks/workflows/{webhook_id}": {
-      "post": {
-        "description": "Public webhook fire — no user JWT; auth via shared secret header.",
-        "operationId": "fire_workflow_webhook_v1_hooks_workflows__webhook_id__post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "webhook_id",
-            "required": true,
-            "schema": {
-              "title": "Webhook Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-AgentCore-Webhook-Secret",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Agentcore-Webhook-Secret"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Idempotency-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Idempotency-Key"
-            }
-          }
-        ],
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FireWorkflowWebhookResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Fire Workflow Webhook",
-        "tags": [
-          "workflow-hooks"
-        ]
-      }
-    },
     "/v1/inference/token": {
       "post": {
         "description": "Exchange the caller's cookie session for a scoped inference token.",
@@ -40235,6 +38824,113 @@
         ]
       }
     },
+    "/v1/tables/by-source": {
+      "get": {
+        "operationId": "get_table_by_source_v1_tables_by_source_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "folder_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Folder Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "conversation_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Conversation Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Table By Source",
+        "tags": [
+          "tables"
+        ]
+      }
+    },
     "/v1/tables/{table_id}": {
       "delete": {
         "operationId": "delete_table_v1_tables__table_id__delete",
@@ -43193,1596 +41889,6 @@
         "summary": "Get User Avatar",
         "tags": [
           "users"
-        ]
-      }
-    },
-    "/v1/workflow-playbook-templates": {
-      "get": {
-        "description": "Official playbooks as read-only workflow templates (使用 = 复制为我的).",
-        "operationId": "list_workflow_playbook_templates_v1_workflow_playbook_templates_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/PlaybookTemplateSummary"
-                  },
-                  "title": "Response List Workflow Playbook Templates V1 Workflow Playbook Templates Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Workflow Playbook Templates",
-        "tags": [
-          "workflows"
-        ]
-      }
-    },
-    "/v1/workflow-store": {
-      "get": {
-        "operationId": "list_workflow_store_v1_workflow_store_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Q"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "default": 1,
-              "minimum": 1,
-              "title": "Page",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "default": 20,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Page Size",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkflowStoreListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Workflow Store",
-        "tags": [
-          "workflow-store"
-        ]
-      },
-      "post": {
-        "operationId": "publish_workflow_v1_workflow_store_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PublishWorkflowRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkflowStoreListingDetail"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Publish Workflow",
-        "tags": [
-          "workflow-store"
-        ]
-      }
-    },
-    "/v1/workflow-store/installed": {
-      "get": {
-        "operationId": "list_installed_v1_workflow_store_installed_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkflowStoreInstalledResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Installed",
-        "tags": [
-          "workflow-store"
-        ]
-      }
-    },
-    "/v1/workflow-store/mine": {
-      "get": {
-        "operationId": "list_mine_listings_v1_workflow_store_mine_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkflowStoreMineResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Mine Listings",
-        "tags": [
-          "workflow-store"
-        ]
-      }
-    },
-    "/v1/workflow-store/{listing_id}": {
-      "delete": {
-        "operationId": "unpublish_listing_v1_workflow_store__listing_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "listing_id",
-            "required": true,
-            "schema": {
-              "title": "Listing Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkflowStoreListingRow"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Unpublish Listing",
-        "tags": [
-          "workflow-store"
-        ]
-      },
-      "get": {
-        "operationId": "get_listing_v1_workflow_store__listing_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "listing_id",
-            "required": true,
-            "schema": {
-              "title": "Listing Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkflowStoreListingDetail"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Listing",
-        "tags": [
-          "workflow-store"
-        ]
-      }
-    },
-    "/v1/workflow-store/{listing_id}/install": {
-      "post": {
-        "operationId": "install_listing_v1_workflow_store__listing_id__install_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "listing_id",
-            "required": true,
-            "schema": {
-              "title": "Listing Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkflowStoreInstalledItem"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Install Listing",
-        "tags": [
-          "workflow-store"
-        ]
-      }
-    },
-    "/v1/workflow-store/{listing_id}/reports": {
-      "post": {
-        "operationId": "report_listing_v1_workflow_store__listing_id__reports_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "listing_id",
-            "required": true,
-            "schema": {
-              "title": "Listing Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReportWorkflowRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkflowStoreReportView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Report Listing",
-        "tags": [
-          "workflow-store"
-        ]
-      }
-    },
-    "/v1/workflow-store/{listing_id}/versions": {
-      "post": {
-        "operationId": "publish_new_version_v1_workflow_store__listing_id__versions_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "listing_id",
-            "required": true,
-            "schema": {
-              "title": "Listing Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkflowStoreListingDetail"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Publish New Version",
-        "tags": [
-          "workflow-store"
-        ]
-      }
-    },
-    "/v1/workflows": {
-      "get": {
-        "operationId": "list_workflows_v1_workflows_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/WorkflowSummary"
-                  },
-                  "title": "Response List Workflows V1 Workflows Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Workflows",
-        "tags": [
-          "workflows"
-        ]
-      },
-      "post": {
-        "operationId": "create_workflow_v1_workflows_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateWorkflowRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkflowSummary"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Workflow",
-        "tags": [
-          "workflows"
-        ]
-      }
-    },
-    "/v1/workflows/from-playbook": {
-      "post": {
-        "description": "Expand an official playbook once and save as a user workflow (not into PLAYBOOKS).",
-        "operationId": "create_workflow_from_playbook_v1_workflows_from_playbook_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FromPlaybookRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkflowSummary"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Workflow From Playbook",
-        "tags": [
-          "workflows"
-        ]
-      }
-    },
-    "/v1/workflows/{workflow_id}": {
-      "delete": {
-        "operationId": "delete_workflow_v1_workflows__workflow_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "workflow_id",
-            "required": true,
-            "schema": {
-              "title": "Workflow Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Delete Workflow",
-        "tags": [
-          "workflows"
-        ]
-      },
-      "get": {
-        "operationId": "get_workflow_v1_workflows__workflow_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "workflow_id",
-            "required": true,
-            "schema": {
-              "title": "Workflow Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkflowSummary"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Workflow",
-        "tags": [
-          "workflows"
-        ]
-      },
-      "patch": {
-        "operationId": "update_workflow_v1_workflows__workflow_id__patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "workflow_id",
-            "required": true,
-            "schema": {
-              "title": "Workflow Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateWorkflowRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkflowSummary"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Update Workflow",
-        "tags": [
-          "workflows"
-        ]
-      }
-    },
-    "/v1/workflows/{workflow_id}/run": {
-      "post": {
-        "operationId": "run_workflow_v1_workflows__workflow_id__run_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "workflow_id",
-            "required": true,
-            "schema": {
-              "title": "Workflow Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RunWorkflowRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RunWorkflowResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Run Workflow",
-        "tags": [
-          "workflows"
-        ]
-      }
-    },
-    "/v1/workflows/{workflow_id}/suggest-slots": {
-      "post": {
-        "description": "抽出「上一次的具体输入」并写回 definition（前端第一次点「跑一次」时调）。\n\n从一轮协作固化出来的工作流，任务描述里写死的是那一次的主题——用户第二次要用它才会撞上\n这件事，所以这一次背景模型调用挂在这里而不是保存路径上。抽到了就连占位符带 ``slots``\n一起落库，以后再跑不用重抽。\n\n三种「不抽」都返回**与调用前逐字一致**的 definition（不是报错）：已经有槽位（幂等）、\n不是固化来源（官方模板自带槽位、手画的归用户管）、抽槽本身失败或没认出可验证的片段。\n前端拿到没有 ``slots`` 的 definition 就照常直接跑。",
-        "operationId": "suggest_workflow_slots_v1_workflows__workflow_id__suggest_slots_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "workflow_id",
-            "required": true,
-            "schema": {
-              "title": "Workflow Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkflowSummary"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Suggest Workflow Slots",
-        "tags": [
-          "workflows"
-        ]
-      }
-    },
-    "/v1/workflows/{workflow_id}/trigger": {
-      "delete": {
-        "operationId": "delete_workflow_trigger_v1_workflows__workflow_id__trigger_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "workflow_id",
-            "required": true,
-            "schema": {
-              "title": "Workflow Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkflowSummary"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Delete Workflow Trigger",
-        "tags": [
-          "workflows"
-        ]
-      },
-      "put": {
-        "operationId": "put_workflow_trigger_v1_workflows__workflow_id__trigger_put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "workflow_id",
-            "required": true,
-            "schema": {
-              "title": "Workflow Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PutWorkflowTriggerRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkflowSummary"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Put Workflow Trigger",
-        "tags": [
-          "workflows"
-        ]
-      }
-    },
-    "/v1/workflows/{workflow_id}/trigger/rotate-secret": {
-      "post": {
-        "operationId": "rotate_workflow_trigger_secret_v1_workflows__workflow_id__trigger_rotate_secret_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "workflow_id",
-            "required": true,
-            "schema": {
-              "title": "Workflow Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RotateWorkflowTriggerResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Rotate Workflow Trigger Secret",
-        "tags": [
-          "workflows"
         ]
       }
     },

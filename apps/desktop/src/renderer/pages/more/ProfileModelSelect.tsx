@@ -17,13 +17,12 @@ import { Check, ChevronDown, PencilLine } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 /**
- * 模型组合槽位选择器 — 按渠道分组的单一富弹层。
+ * 模型组合槽位选择器 — 渠道芯片 + 当前渠模型列表。
  *
- * - 弹层默认列出全部渠道分组；选中一行即同时定下 (渠道, 模型)
- * - 触发器副行前置渠道名（与 vendor 相同时不重复）
- * - BYOK 分组末尾「自定义 model id…」；平台档无自定义入口
- * - 可选槽空态由触发器展示 followLabel；清除动作由调用方渲染在标签行
- * - 已删服务商孤儿组仍可见，可改选
+ * 对齐货架筛选芯片（先锁一类再看叶子），不是两个并列字段：点一行仍只钉
+ * `@platform/{id}` / `@byok/{provider_id}/{id}`。多家渠道时芯片互斥；只一家则
+ * 不画芯片。筛选默认只打当前渠；当前渠无命中才把其他渠结果补在「当前渠道无匹配」下。
+ * BYOK 渠末尾「自定义 model id…」；平台档无自定义入口。触发器副行前置渠道名。
  */
 
 function formatContextLength(n: number | null | undefined): string | null {
@@ -34,14 +33,22 @@ function formatContextLength(n: number | null | undefined): string | null {
   return String(n);
 }
 
+function unitPriceSymbol(currency: string | null | undefined): string {
+  const code = (currency || "CNY").toUpperCase();
+  if (code === "CNY") return "¥";
+  if (code === "USD") return "$";
+  return `${code} `;
+}
+
 function formatPrice(price: ModelPriceCard | null | undefined): string | null {
   if (!price) return null;
   const inn = price.cache_miss?.trim() || null;
   const out = price.output?.trim() || null;
   if (!inn && !out) return null;
-  if (inn && out) return `$${inn} / $${out}`;
-  if (inn) return `$${inn} in`;
-  return `$${out} out`;
+  const sym = unitPriceSymbol(price.currency);
+  if (inn && out) return `${sym}${inn} / ${sym}${out}`;
+  if (inn) return `${sym}${inn} in`;
+  return `${sym}${out} out`;
 }
 
 function capabilityBits(caps: string[] | undefined): string | null {
@@ -114,6 +121,88 @@ function groupHeading(g: DefaultProviderGroup): string {
   return g.orphan ? `${g.providerLabel}（需改选）` : g.providerLabel;
 }
 
+function optionMatchesQuery(opt: DefaultModelOption, q: string): boolean {
+  const reason = unavailableReasonCopy(opt.unavailableReason) ?? "";
+  return (
+    opt.label.toLowerCase().includes(q) ||
+    opt.model.toLowerCase().includes(q) ||
+    (opt.vendor ?? "").toLowerCase().includes(q) ||
+    (opt.badge ?? "").toLowerCase().includes(q) ||
+    reason.toLowerCase().includes(q)
+  );
+}
+
+export type ChannelPickerSection = {
+  group: DefaultProviderGroup;
+  models: DefaultModelOption[];
+  showCustom: boolean;
+  /** 当前渠筛选无命中时，其他渠的补列。 */
+  fallback: boolean;
+};
+
+/** 打开弹层时默认看哪条渠：跟现值；孤儿现值则落到第一家还能选的活渠。 */
+export function defaultBrowseProviderId(
+  groups: DefaultProviderGroup[],
+  value: string,
+): string {
+  const fromValue = providerIdFromPointer(value);
+  const current = fromValue
+    ? groups.find((g) => g.providerId === fromValue)
+    : undefined;
+  if (current && !current.orphan) return current.providerId;
+  const withSelectable = groups.find(
+    (g) =>
+      !g.orphan && g.models.some((m) => m.available !== false && !m.custom),
+  );
+  if (withSelectable) return withSelectable.providerId;
+  const live = groups.find((g) => !g.orphan);
+  return live?.providerId || groups[0]?.providerId || "";
+}
+
+export function buildChannelPickerSections(
+  groups: DefaultProviderGroup[],
+  browseProviderId: string,
+  query: string,
+): ChannelPickerSection[] {
+  const scoped =
+    groups.find((g) => g.providerId === browseProviderId) ?? groups[0];
+  if (!scoped) return [];
+  const q = query.trim().toLowerCase();
+  const scopedModels = q
+    ? scoped.models.filter((m) => optionMatchesQuery(m, q))
+    : scoped.models;
+  const labelHit = Boolean(q) && scoped.providerLabel.toLowerCase().includes(q);
+  const scopedHit = scopedModels.length > 0 || labelHit;
+  const showCustom =
+    !isPlatformGroupId(scoped.providerId) &&
+    !scoped.orphan &&
+    (!q || scopedModels.length === 0);
+
+  const sections: ChannelPickerSection[] = [
+    {
+      group: scoped,
+      models: scopedModels,
+      showCustom,
+      fallback: false,
+    },
+  ];
+
+  if (q && !scopedHit) {
+    for (const g of groups) {
+      if (g.providerId === scoped.providerId) continue;
+      const models = g.models.filter((m) => optionMatchesQuery(m, q));
+      if (models.length === 0) continue;
+      sections.push({
+        group: g,
+        models,
+        showCustom: false,
+        fallback: true,
+      });
+    }
+  }
+  return sections;
+}
+
 export function ProfileModelSelect({
   id,
   groups,
@@ -151,6 +240,9 @@ export function ProfileModelSelect({
   const [customText, setCustomText] = useState(() => decoded?.model ?? "");
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [browseProviderId, setBrowseProviderId] = useState(() =>
+    defaultBrowseProviderId(groups, value),
+  );
   const rootRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const listId = useId();
@@ -227,28 +319,20 @@ export function ProfileModelSelect({
     if (!sameChannel || !decoded?.model) setCustomText("");
   };
 
-  const q = query.trim().toLowerCase();
-  // 默认列出全部渠道；搜索时按 label / model / vendor / badge 过滤。
-  const filteredGroups = useMemo(() => {
-    if (!q) return groups;
-    return groups
-      .map((g) => ({
-        ...g,
-        models: g.models.filter((m) => {
-          const reason = unavailableReasonCopy(m.unavailableReason) ?? "";
-          return (
-            m.label.toLowerCase().includes(q) ||
-            m.model.toLowerCase().includes(q) ||
-            (m.vendor ?? "").toLowerCase().includes(q) ||
-            (m.badge ?? "").toLowerCase().includes(q) ||
-            reason.toLowerCase().includes(q)
-          );
-        }),
-      }))
-      .filter(
-        (g) => g.models.length > 0 || g.providerLabel.toLowerCase().includes(q),
-      );
-  }, [groups, q]);
+  const openPicker = () => {
+    setQuery("");
+    setBrowseProviderId(defaultBrowseProviderId(groups, value));
+    setOpen(true);
+  };
+
+  const sections = useMemo(
+    () => buildChannelPickerSections(groups, browseProviderId, query),
+    [groups, browseProviderId, query],
+  );
+  const showChannelChips = groups.length > 1;
+  const hasPickerRows = sections.some(
+    (s) => s.models.length > 0 || s.showCustom,
+  );
 
   const triggerLabel = (): {
     title: string;
@@ -334,7 +418,7 @@ export function ProfileModelSelect({
             className="mt-1.5 text-xs text-primary underline-offset-2 hover:underline disabled:opacity-60"
             onClick={() => {
               setCustomMode(false);
-              setOpen(true);
+              openPicker();
             }}
           >
             从目录选择
@@ -354,8 +438,8 @@ export function ProfileModelSelect({
           aria-describedby={describedBy}
           onClick={() => {
             if (disabled) return;
-            setOpen((o) => !o);
-            setQuery("");
+            if (open) setOpen(false);
+            else openPicker();
           }}
           className={cn(
             "mt-1.5 flex w-full items-center gap-2 rounded-lg border border-input bg-background px-2.5 text-left text-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60",
@@ -388,19 +472,7 @@ export function ProfileModelSelect({
       )}
 
       {open && !customMode && (
-        <div
-          id={listId}
-          // biome-ignore lint/a11y/useSemanticElements: custom searchable catalog; native <select> cannot host SearchField + grouped options.
-          role="listbox"
-          tabIndex={-1}
-          className="absolute z-50 mt-1 max-h-72 w-full overflow-hidden rounded-lg border border-border bg-popover shadow-md"
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              e.stopPropagation();
-              setOpen(false);
-            }
-          }}
-        >
+        <div className="absolute z-50 mt-1 flex max-h-96 w-full flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-md">
           <div className="border-b border-border p-1.5">
             <SearchField
               ref={searchRef}
@@ -408,71 +480,98 @@ export function ProfileModelSelect({
               variant="plain"
               value={query}
               onValueChange={setQuery}
-              placeholder="搜索模型"
-              aria-label="搜索模型"
+              placeholder="筛选模型"
+              aria-label="筛选模型"
             />
           </div>
-          <div className="max-h-60 overflow-y-auto py-1">
-            {filteredGroups.length === 0 ? (
+          {showChannelChips ? (
+            <fieldset className="m-0 flex flex-wrap gap-1.5 border-0 border-b border-border p-0 px-2.5 py-1.5">
+              <legend className="sr-only">渠道</legend>
+              {groups.map((g) => {
+                const pressed = browseProviderId === g.providerId;
+                return (
+                  <Badge
+                    key={g.providerId}
+                    as="button"
+                    pill
+                    data-channel-id={g.providerId}
+                    aria-pressed={pressed}
+                    tone={pressed ? "primary" : "muted"}
+                    onClick={() => setBrowseProviderId(g.providerId)}
+                  >
+                    {groupHeading(g)}
+                  </Badge>
+                );
+              })}
+            </fieldset>
+          ) : null}
+          <div
+            id={listId}
+            // biome-ignore lint/a11y/useSemanticElements: custom searchable catalog; native <select> cannot host grouped options.
+            role="listbox"
+            tabIndex={-1}
+            className="max-h-56 overflow-y-auto py-1"
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.stopPropagation();
+                setOpen(false);
+              }
+            }}
+          >
+            {!hasPickerRows ? (
               <p className="px-2.5 py-2 text-xs text-muted-foreground">
                 无匹配模型
               </p>
             ) : (
-              filteredGroups.map((g) => (
-                <div key={g.providerId} data-provider-group={g.providerId}>
-                  <div className="px-2.5 pt-1.5 pb-0.5 text-xs font-medium text-muted-foreground">
-                    {groupHeading(g)}
-                  </div>
-                  {g.models.map((m) => {
-                    const selected =
-                      providerId === g.providerId &&
-                      decoded?.model === m.model &&
-                      !customMode;
-                    return (
-                      <ModelOptionRow
-                        key={`${g.providerId}:${m.model}`}
-                        option={m}
-                        selected={selected}
-                        onPick={() => pickCatalog(g.providerId, m)}
-                      />
-                    );
-                  })}
-                  {!isPlatformGroupId(g.providerId) &&
-                  (!q || g.models.length === 0) ? (
-                    <button
-                      type="button"
-                      // biome-ignore lint/a11y/useSemanticElements: listbox option must stay a button for Enter/click; native <option> is not focusable in this popup.
-                      role="option"
-                      aria-selected={false}
-                      className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm text-muted-foreground hover:bg-accent/50"
-                      onClick={() => enterCustom(g.providerId)}
-                    >
-                      <PencilLine size={14} className="shrink-0" />
-                      自定义 model id…
-                    </button>
-                  ) : null}
-                </div>
-              ))
-            )}
-            {/* 搜索无命中时仍露出各 BYOK 自定义入口 */}
-            {q &&
-              filteredGroups.length === 0 &&
-              groups
-                .filter((g) => !isPlatformGroupId(g.providerId) && !g.orphan)
-                .map((g) => (
-                  <button
-                    key={`custom-fallback:${g.providerId}`}
-                    type="button"
-                    // biome-ignore lint/a11y/useSemanticElements: listbox option must stay a button for Enter/click; native <option> is not focusable in this popup.
-                    role="option"
-                    aria-selected={false}
-                    className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm text-muted-foreground hover:bg-accent/50"
-                    onClick={() => enterCustom(g.providerId)}
+              sections.map((s) => {
+                const firstFallback =
+                  s.fallback && s === sections.find((x) => x.fallback);
+                return (
+                  <div
+                    key={`${s.fallback ? "fb:" : ""}${s.group.providerId}`}
+                    data-provider-group={s.group.providerId}
                   >
-                    <PencilLine size={14} className="shrink-0" />
-                    {g.providerLabel} · 自定义 model id…
-                  </button>
-                ))}
+                    {firstFallback ? (
+                      <div className="px-2.5 pt-1.5 pb-0.5 text-xs font-medium text-muted-foreground">
+                        当前渠道无匹配
+                      </div>
+                    ) : null}
+                    {s.fallback ? (
+                      <div className="px-2.5 pt-1.5 pb-0.5 text-xs font-medium text-muted-foreground">
+                        {groupHeading(s.group)}
+                      </div>
+                    ) : null}
+                    {s.models.map((m) => {
+                      const selected =
+                        providerId === s.group.providerId &&
+                        decoded?.model === m.model &&
+                        !customMode;
+                      return (
+                        <ModelOptionRow
+                          key={`${s.group.providerId}:${m.model}`}
+                          option={m}
+                          selected={selected}
+                          onPick={() => pickCatalog(s.group.providerId, m)}
+                        />
+                      );
+                    })}
+                    {s.showCustom ? (
+                      <button
+                        type="button"
+                        // biome-ignore lint/a11y/useSemanticElements: listbox option must stay a button for Enter/click; native <option> is not focusable in this popup.
+                        role="option"
+                        aria-selected={false}
+                        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm text-muted-foreground hover:bg-accent/50"
+                        onClick={() => enterCustom(s.group.providerId)}
+                      >
+                        <PencilLine size={14} className="shrink-0" />
+                        自定义 model id…
+                      </button>
+                    ) : null}
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
       )}

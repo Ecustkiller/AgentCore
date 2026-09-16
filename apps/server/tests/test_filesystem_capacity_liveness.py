@@ -500,7 +500,7 @@ async def test_file_read_channel_dead_stamps_family_retire(tmp_path: Path):
     ("tool", "args", "method"),
     [
         (FileListTool(), {"directory": "."}, "list"),
-        (GlobTool(), {"pattern": "*.py"}, "list_tree"),
+        (GlobTool(), {"pattern": "*.py"}, "glob_files"),
         (FileWriteTool(), {"path": "a.txt", "content": "x"}, "write"),
         (MkdirTool(), {"path": "nested/d"}, "mkdir"),
         (GrepTool(), {"pattern": "x"}, "grep"),
@@ -527,6 +527,9 @@ async def test_filesystem_tools_single_timeout_no_family_retire(
         async def grep(self, *a, **k):  # noqa: ANN002, ANN003
             raise WorkspaceIOError(f"local workspace op '{method}' timed out（活性挂起）")
 
+        async def glob_files(self, *a, **k):  # noqa: ANN002, ANN003
+            raise WorkspaceIOError(f"local workspace op '{method}' timed out（活性挂起）")
+
     result = await tool.execute(
         args, _ctx(_HangBackend(tmp_path, sandbox=SubprocessSandbox()))
     )
@@ -543,7 +546,7 @@ async def test_filesystem_tools_single_timeout_no_family_retire(
     ("tool", "args", "method"),
     [
         (FileListTool(), {"directory": "."}, "list"),
-        (GlobTool(), {"pattern": "*.py"}, "list_tree"),
+        (GlobTool(), {"pattern": "*.py"}, "glob_files"),
         (FileWriteTool(), {"path": "a.txt", "content": "x"}, "write"),
         (MkdirTool(), {"path": "nested/d"}, "mkdir"),
         (GrepTool(), {"pattern": "x"}, "grep"),
@@ -576,6 +579,11 @@ async def test_filesystem_tools_channel_dead_stamps_retire(
             )
 
         async def grep(self, *a, **k):  # noqa: ANN002, ANN003
+            raise WorkspaceIOError(
+                f"local workspace op '{method}' failed: no fulfiller（无履约方）"
+            )
+
+        async def glob_files(self, *a, **k):  # noqa: ANN002, ANN003
             raise WorkspaceIOError(
                 f"local workspace op '{method}' failed: no fulfiller（无履约方）"
             )

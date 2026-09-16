@@ -43,8 +43,7 @@ _CEO_AND_WORKER_MUTATION = {
     "file_copy",
     "mkdir",
     "file_batch",
-    "md_to_docx",
-    "md_to_pdf",
+    "md_export",
     "archive_extract",
     "archive_create",
     "download_url",
@@ -110,7 +109,6 @@ def test_read_only_builtins_are_shared_with_ceo():
         "glob",
         "grep",
         "code_search",
-        "code_diagnostics",
         "git",
         "docs_read",
     ):
@@ -197,13 +195,20 @@ _CATALOG_FACE: dict[str, ToolFace] = {
     "list_folder_dir": ToolFace.FOLDER,
     "read_folder_file": ToolFace.FOLDER,
     "remember": ToolFace.FOLDER,
-    "update_folder_profile": ToolFace.FOLDER,
     "read_image": ToolFace.BOARD,
     "table_ops": ToolFace.TABLE,
     "table_read": ToolFace.TABLE,
     "docs_read": ToolFace.DOC,
     "docs_write": ToolFace.DOC,
 }
+
+
+def test_capability_catalog_omits_retired_update_folder_profile():
+    catalog = build_capability_catalog()
+    names = {e.schema.name for e in catalog}
+    assert "update_folder_profile" not in names
+    assert "remember" in names
+    assert all(e.summary != "更新文件夹画像" for e in catalog)
 
 
 def test_catalog_faces_are_not_an_orchestration_dumpster():

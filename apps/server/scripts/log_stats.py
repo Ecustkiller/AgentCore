@@ -42,6 +42,7 @@ from agentcore.observability.query.stats import (  # noqa: E402
     error_signature,
     new_trace,
     prefix_cache_summary,
+    prefix_rows_for_stats,
     stream_health_summary,
 )
 from agentcore.observability.query.timeutil import parse_since, parse_timestamp  # noqa: E402
@@ -115,17 +116,18 @@ def _print_by_worker(tool_calls: list[dict]) -> None:
         )
 
 
-def _print_prefix_cache(rows: list[dict]) -> None:
-    """前缀缓存实测 (审计议题 D4): 命中率 / 击穿归因 / 随对话长度的变化.
+def _print_prefix_cache(rows: list[dict], *, source: str) -> None:
+    """前缀缓存实测: 命中率 / 击穿归因 / 工具表 / 随对话长度的变化.
 
     Everything here is measured — provider-reported cache tokens paired with the structural
     reason this request could not reuse the last one. Calls where the upstream said nothing
-    about caching are shown as excluded, never averaged in as zeros.
+    about caching are shown as excluded, never averaged in as zeros. Compact ``llm.call``
+    rows have no forfeited estimate (that number is inferred, not billed).
     """
     if not rows:
         return
     s = prefix_cache_summary(rows)
-    print(f"\n── Prefix Cache (cost.prefix_cache: {s['calls']}) ──")
+    print(f"\n── Prefix Cache ({source}: {s['calls']}) ──")
     if not s["cache_reported_calls"]:
         print(f"  上游未报缓存字段（{s['calls']} calls）——无法判定命中率，不等于 0%")
         return
@@ -134,13 +136,30 @@ def _print_prefix_cache(rows: list[dict]) -> None:
         f"({s['cache_hit_tokens']:,}/{s['input_tokens']:,} prompt tokens; "
         f"{s['cache_reported_calls']} calls report cache, {s['cache_silent_calls']} silent)"
     )
-    print(f"  白付前缀   {s['forfeited_tokens']:,} tokens 本可命中却按未命中计价（forfeited）")
+    if s["has_forfeited"]:
+        print(f"  白付前缀   {s['forfeited_tokens']:,} tokens 本可命中却按未命中计价（forfeited）")
     if s["by_breach"]:
         print("  击穿原因（这次为何不能全量复用上一次的前缀）:")
-        for breach, b in sorted(s["by_breach"].items(), key=lambda kv: -kv[1]["forfeited_tokens"]):
+        for breach, b in sorted(
+            s["by_breach"].items(),
+            key=lambda kv: (-kv[1]["forfeited_tokens"], -kv[1]["calls"]),
+        ):
+            extra = f"  forfeited {b['forfeited_tokens']:,}" if s["has_forfeited"] else ""
             print(
                 f"    {breach:<16} {b['calls']:>4} calls  hit {b['hit_ratio'] * 100:5.1f}%"
-                f"  forfeited {b['forfeited_tokens']:,}"
+                f"{extra}"
+            )
+    if s["by_tools"]:
+        print("  工具表（开场 tools[] 相对上一跳）:")
+        for label, b in s["by_tools"].items():
+            print(
+                f"    {label:<16} {b['calls']:>4} calls  hit {b['hit_ratio'] * 100:5.1f}%"
+            )
+    if s["by_role"]:
+        print("  角色（账单命中；cold_chain 不是 0%）:")
+        for role, b in s["by_role"].items():
+            print(
+                f"    {role:<16} {b['calls']:>4} calls  hit {b['hit_ratio'] * 100:5.1f}%"
             )
     if s["by_section"]:
         sections = "  ".join(f"{k}×{v}" for k, v in s["by_section"].items())
@@ -148,9 +167,10 @@ def _print_prefix_cache(rows: list[dict]) -> None:
     if s["by_length"]:
         print("  按 prompt 规模:")
         for label, b in s["by_length"].items():
+            extra = f"  forfeited {b['forfeited_tokens']:,}" if s["has_forfeited"] else ""
             print(
                 f"    {label:<16} {b['calls']:>4} calls  hit {b['hit_ratio'] * 100:5.1f}%"
-                f"  forfeited {b['forfeited_tokens']:,}"
+                f"{extra}"
             )
 
 
@@ -477,10 +497,24 @@ def _print_human(
             f"  Tokens     in avg={_avg(in_tok):.0f}  out avg={_avg(out_tok):.0f}"
             f"  reasoning avg={_avg(rea_tok):.0f}"
         )
-        if in_sum:
-            # Raw ratio over every call, including providers that never report caching —
-            # the honest, breach-attributed read is the Prefix Cache section below.
-            print(f"  Cache      {hit_sum / in_sum * 100:.1f}% of input tokens hit cache (raw)")
+        reported = [
+            c
+            for c in llm_calls
+            if c.get("cache_hit_tokens") or c.get("cache_miss_tokens")
+        ]
+        silent = len(llm_calls) - len(reported)
+        if reported:
+            r_in = sum(c.get("input_tokens", 0) for c in reported)
+            r_hit = sum(c.get("cache_hit_tokens", 0) for c in reported)
+            if r_in:
+                print(
+                    f"  Cache      {r_hit / r_in * 100:.1f}% of reported input tokens"
+                    f" ({silent} silent excluded, not 0%)"
+                )
+        elif in_sum:
+            print(
+                f"  Cache      {hit_sum / in_sum * 100:.1f}% of input tokens hit cache (raw)"
+            )
         fr = Counter(c.get("finish_reason", "?") for c in llm_calls)
         print(f"  Finish     {'  '.join(f'{k}×{v}' for k, v in fr.most_common())}")
         if stubbed:
@@ -521,7 +555,8 @@ def _print_human(
                     f"  ({nano:,} nano)"
                 )
 
-    _print_prefix_cache(prefix_cache_rows)
+    prefix_rows, prefix_source = prefix_rows_for_stats(llm_calls, prefix_cache_rows)
+    _print_prefix_cache(prefix_rows, source=prefix_source)
 
     if stream_timing_rows:
         health = stream_health_summary(stream_timing_rows)

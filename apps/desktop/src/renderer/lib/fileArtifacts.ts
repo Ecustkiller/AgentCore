@@ -67,7 +67,7 @@ export interface FileArtifact {
   promotedFrom?: string;
   /** 产出工具自报的产物类型（`md` / `docx` / `pdf` / `code` / …）；未自报时缺省。 */
   kind?: string;
-  /** 自报的派生源：本产物是那份文件的导出件（`md_to_docx`：docx ← 源 md）。 */
+  /** 自报的派生源：本产物是那份文件的导出件（`md_export`：docx ← 源 md）。 */
   derivedFrom?: string;
   /**
    * 落地 desk（`folder:…` / `conv:…`）。来自 delivery `workspace_id`；
@@ -249,7 +249,7 @@ export function fileArtifactsFromDeliveryStatus(
  * 拆出「主推件 / 被折叠的中间稿」——口径与后端 `fold_exported_sources` 一致。
  *
  * 一件**已验收**产物的 `derivedFrom` 指向另一件**已验收**产物时，后者是它的源：用户要的是
- * 导出件（`md_to_docx`：docx ← 源 md），并列两份会让人把 .md 当成「那份 Word」。只认工具
+ * 导出件（`md_export`：docx ← 源 md），并列两份会让人把 .md 当成「那份 Word」。只认工具
  * 自报的派生关系——不看扩展名、不看工具名，没自报就一份都不降级。
  *
  * 折叠 ≠ 删除：中间稿仍在返回值里，调用方须留可展开的入口。导出件本身永不被藏——源未验收

@@ -287,27 +287,15 @@ describe("appendSanitizedDesktopLogExcerpt", () => {
     const pack = appendSanitizedDesktopLogExcerpt("pack", lines);
     const section = pack.split("--- desktop.jsonl ---\n")[1] ?? "";
     const sectionLines = section.split("\n");
-    expect(sectionLines.slice(0, 4)).toEqual([
+    expect(sectionLines.slice(0, 5)).toEqual([
       "build: dev",
       "version: 0.9.6",
       "conversation_id: conv-1",
       "level: info",
+      "routine: follow open×18, closed(window_closed)×4",
     ]);
-    const jsonl = sectionLines.slice(4).map((line) => JSON.parse(line));
+    const jsonl = sectionLines.slice(5).map((line) => JSON.parse(line));
     expect(jsonl).toEqual([
-      {
-        event: "conversation.follow_open",
-        count: 18,
-        first: "2026-08-20T00:00:00.000Z",
-        last: "2026-08-20T00:00:00.017Z",
-      },
-      {
-        event: "conversation.follow_closed",
-        reason: "window_closed",
-        count: 4,
-        first: "2026-08-20T00:00:01.000Z",
-        last: "2026-08-20T00:00:01.003Z",
-      },
       {
         timestamp: "2026-08-20T00:00:02.000Z",
         level: "warn",
@@ -317,6 +305,19 @@ describe("appendSanitizedDesktopLogExcerpt", () => {
         reason: "turn_phase_gate",
       },
     ]);
+  });
+
+  it("omits the desktop.jsonl section when the tail is only debug probes", () => {
+    expect(
+      appendSanitizedDesktopLogExcerpt("pack", [
+        JSON.stringify({
+          level: "debug",
+          event: "server_health.probe_failed",
+          consecutive_failures: 1,
+          status: "online",
+        }),
+      ]),
+    ).toBe("pack");
   });
 });
 
@@ -338,29 +339,31 @@ describe("buildSupportDiagnosticPack", () => {
   });
 
   it("keeps server_health.offline with no conversation_id in a conversation pack", async () => {
+    const readTail = vi.fn(async () => [
+      JSON.stringify({
+        event: "server_health.offline",
+        source: "heartbeat",
+      }),
+      JSON.stringify({
+        event: "sse.idle_stall",
+        conversation_id: "other-chat",
+      }),
+      JSON.stringify({
+        event: "sse.idle_stall",
+        conversation_id: "conv-1",
+      }),
+    ]);
     vi.stubGlobal("window", {
       logApi: {
         write: () => {},
-        readTail: async () => [
-          JSON.stringify({
-            event: "server_health.offline",
-            source: "heartbeat",
-          }),
-          JSON.stringify({
-            event: "sse.idle_stall",
-            conversation_id: "other-chat",
-          }),
-          JSON.stringify({
-            event: "sse.idle_stall",
-            conversation_id: "conv-1",
-          }),
-        ],
+        readTail,
       },
     });
     const pack = await buildSupportDiagnosticPack({
       conversationId: "conv-1",
       messageId: "m1",
     });
+    expect(readTail).toHaveBeenCalledWith("conv-1");
     expect(pack).toContain("server_health.offline");
     expect(pack).toContain("sse.idle_stall");
     expect(pack).toContain("conversation_id: conv-1");

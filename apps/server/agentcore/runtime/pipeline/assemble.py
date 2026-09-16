@@ -230,7 +230,13 @@ async def assemble_ceo_turn(
         chat_tools.offer("table_ops")
 
     # The entry chat agent gets the SLIM CEO core + the unified ``<按需目录>``.
-    # Advanced HOW detail is pulled via ``consult``.
+    # Advanced HOW detail is pulled via ``consult``. Never open a write-explore
+    # act; ``update_folder_profile`` stays off the live table.
+    explore_reason: str | None = None
+    folder_nav_stale = False
+    from agentcore.runtime.resolve.ceo_surface import apply_explore_profile_surface
+
+    apply_explore_profile_surface(chat_tools, pending=False)
     ceo_tool_names = {schema.name for schema in chat_tools.list_all()}
     ceo_offered_names = set(chat_tools.offered_names)
     on_demand_entries: list = []
@@ -239,75 +245,6 @@ async def assemble_ceo_turn(
         on_demand_entries = list(
             await consult_tool.source.list_directory(prepared.base_tool_context.user_id)
         )
-    explore_reason: str | None = None
-    folder_nav_stale = False
-    if folder_id:
-
-        async def _run_explore_gates() -> tuple[str | None, bool]:
-            from agentcore.memory.explore_profile import (
-                compute_workspace_explore_fingerprint,
-                evaluate_explore_fingerprint_drift,
-                resolve_hard_explore_reason,
-            )
-
-            raw = prepared.folder_explore_reason
-            current_key = prepared.explore_workspace_key
-            hard = resolve_hard_explore_reason(raw, user_message)
-            nav_stale = False
-            # Empty 画像: do not pending, do not silent-fill.
-            # Rebind: do not pending; omit already happened in prepare; silent refresh
-            # with blank current notes so old-bind 画像 is not merged forward.
-            # Named 先了解 already took the hard path above.
-            if not hard and raw != "empty":
-                if raw == "rebind" and current_key:
-                    from agentcore.memory.explore_refresh import (
-                        schedule_explore_refresh_for_backend,
-                    )
-
-                    await schedule_explore_refresh_for_backend(
-                        user_id=prepared.base_tool_context.user_id,
-                        folder_id=folder_id,
-                        workspace_key=current_key,
-                        backend=backend,
-                        blank_current_notes=True,
-                    )
-                else:
-                    live_fp = await compute_workspace_explore_fingerprint(backend)
-                    nav_stale = await evaluate_explore_fingerprint_drift(
-                        run_mod.default_memory_store(),
-                        prepared.base_tool_context.user_id,
-                        folder_id,
-                        live_fingerprint=live_fp,
-                        current_workspace_key=current_key,
-                    )
-                    if nav_stale and current_key:
-                        from agentcore.memory.explore_refresh import (
-                            schedule_explore_refresh_for_backend,
-                        )
-
-                        await schedule_explore_refresh_for_backend(
-                            user_id=prepared.base_tool_context.user_id,
-                            folder_id=folder_id,
-                            workspace_key=current_key,
-                            backend=backend,
-                        )
-            # Precompute close-out key so update_folder_profile does not re-hit PG.
-            if current_key:
-                upd = chat_tools.get_optional("update_folder_profile")
-                if upd is not None and getattr(upd, "workspace_key", None) is None:
-                    upd.workspace_key = current_key
-            return hard, nav_stale
-
-        explore_reason, folder_nav_stale = await _timed_phase(
-            "explore", _run_explore_gates()
-        )
-    # Sink explore-pending into ToolContext so delegate can suppress structured
-    # files_written inference / require ≥2 explore workers（prompt 块 delegate 读不到）。
-    # Worker write_scope=explore_memory：写工具层拦出 AgentCore/ 之外的写盘。
-    # Cleared in-place by update_folder_profile on successful write.
-    if explore_reason:
-        prepared.base_tool_context.cold_start_explore_pending = True
-        prepared.base_tool_context.write_scope = "explore_memory"
     # CEO file index: untagged body spliced into ``<工作区>`` (not a second XML tag).
     # Workers never receive this listing. Generated fresh each turn; "" omits the 文件节.
     workspace_overview = await _timed_phase(

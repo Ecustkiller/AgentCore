@@ -1,6 +1,8 @@
 import {
+  bindableToolOptions,
   composeOnDemandSkillContent,
   composeSkillContent,
+  parseOffersTools,
   skillBodyFromContent,
   skillFileName,
 } from "@/services/skillCatalog";
@@ -25,6 +27,34 @@ describe("skillCatalog helpers", () => {
     expect(skillBodyFromContent(composeOnDemandSkillContent("", "正文"))).toBe(
       "正文",
     );
+  });
+
+  it("offers_tools 写进 frontmatter，解析对得上", () => {
+    const content = composeSkillContent("on_demand", "审", "怎么审", [
+      "host",
+      "debate",
+    ]);
+    expect(content).toContain("offers_tools: host, debate");
+    expect(parseOffersTools(content)).toEqual(["host", "debate"]);
+    expect(skillBodyFromContent(content)).toBe("怎么审");
+    expect(
+      parseOffersTools(composeOnDemandSkillContent("审", "怎么审")),
+    ).toEqual([]);
+  });
+
+  it("bindableToolOptions 只收查阅后启用的工具和连接器", () => {
+    expect(
+      bindableToolOptions(
+        [
+          { name: "web_search", resident: true, summary: "联网" },
+          { name: "host", resident: false, summary: "本机" },
+        ],
+        [{ id: "fs", name: "Filesystem" }],
+      ),
+    ).toEqual([
+      { id: "host", label: "本机" },
+      { id: "fs", label: "Filesystem" },
+    ]);
   });
 
   it("文件名缺 .md 就补", () => {

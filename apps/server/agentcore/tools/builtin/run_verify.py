@@ -1071,7 +1071,7 @@ async def execute_verify(arguments: dict[str, Any], context: ToolContext) -> Too
             msg = (
                 "当前队员为调查/审查姿态（verify_policy=inner）："
                 "禁止全仓 typecheck / build / 同形慢命令。"
-                "修码自检请用 code_diagnostics；运行时问题优先 browser / 读入口；"
+                "修码请读已改文件；运行时问题优先 browser / 读入口；"
                 "外环验绿请 escalate 或交验收员（verify_policy=outer）执行 run。"
             )
             return ToolResult(

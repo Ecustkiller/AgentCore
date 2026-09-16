@@ -77,8 +77,17 @@ export interface ViewConfig {
   sort: SortClause | null;
   groupBy: string | null;
   hiddenColumnIds: string[];
+  columnWidths: Record<string, number>;
   density: Density;
   modeConfig: ModeConfig;
+}
+
+export const COLUMN_WIDTH_DEFAULT = 160;
+export const COLUMN_WIDTH_MIN = 80;
+export const COLUMN_WIDTH_MAX = 480;
+
+export function clampColumnWidth(n: number): number {
+  return Math.min(COLUMN_WIDTH_MAX, Math.max(COLUMN_WIDTH_MIN, Math.round(n)));
 }
 
 export interface TableView {
@@ -98,6 +107,7 @@ export interface TableDoc {
   activeViewId: string;
   schemaVersion: number;
   conversationId?: string | null;
+  sourcePath?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -110,6 +120,7 @@ export function emptyViewConfig(): ViewConfig {
     sort: null,
     groupBy: null,
     hiddenColumnIds: [],
+    columnWidths: {},
     density: "comfortable",
     modeConfig: {},
   };

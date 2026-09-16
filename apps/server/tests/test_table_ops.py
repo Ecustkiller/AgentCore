@@ -187,13 +187,13 @@ async def test_table_ops_without_table_id_fails_cleanly():
         _ctx(table_id=None),
     )
     assert result.success is False
-    assert result.error == "table_ops 仅在表格会话中可用：当前会话没有绑定表格。"
+    assert result.error == "table_ops：当前没有绑定表格。请 @ 已导入的 csv。"
 
 
 async def test_table_read_without_table_id_fails_cleanly():
     result = await TableReadTool().execute({}, _ctx(table_id=None))
     assert result.success is False
-    assert result.error == "table_read 仅在表格会话中可用：当前会话没有绑定表格。"
+    assert result.error == "table_read：当前没有绑定表格。请 @ 已导入的 csv。"
 
 
 def test_table_session_can_assemble_and_offer_tools():
@@ -313,6 +313,19 @@ def test_update_column_can_change_type():
     assert undone.state is not None
     restored = next(c for c in undone.state.columns if c["id"] == cid)
     assert restored["type"] == "text"
+
+
+def test_set_view_persists_column_widths():
+    state = _blank()
+    cid = state.columns[0]["id"]
+    result = apply_ops(
+        state,
+        [{"op": "set_view", "column_widths": {cid: 240}}],
+        confirm=True,
+    )
+    assert result.ok
+    assert result.state is not None
+    assert result.state.views[0]["config"]["column_widths"][cid] == 240
 
 
 def test_catalog_summaries_are_what_not_when():

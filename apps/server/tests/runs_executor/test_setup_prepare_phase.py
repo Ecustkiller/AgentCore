@@ -1,11 +1,17 @@
 """worker.prepare_phase: cold-open segments emit phase + ms at info."""
 
 from agentcore.llm.profiles import default_turn_profiles
-from agentcore.llm.provider.protocol import LLMMessage
+from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.delegate.target_desktop import AppliedTargetDesktop
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.runs.executor.env import AgentExecutorEnv
 from agentcore.runtime.runs.executor.setup import prepare_agent_node
+from agentcore.runtime.runs.redrive_sites import (
+    ResumeHint,
+    ResumeKind,
+    bind_resume_hints,
+    reset_resume_hints,
+)
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 from agentcore.tools.registry import ToolRegistry
 from agentcore.workspace.write_claims import WriteCoordinator
@@ -125,14 +131,95 @@ async def test_continuation_skips_build_messages_phase(monkeypatch):
             LLMMessage(role="assistant", content="partial"),
         ],
     )
-    await prepare_agent_node(
-        _env(plan),
-        plan.by_id("w1"),
-        {"w1": prior},
-        "w1",
-        messages=[],
-        resolutions={},
+    token = bind_resume_hints(
+        {
+            "w1": ResumeHint(
+                kind=ResumeKind.INFRA,
+                transcript=tuple(prior.transcript),
+            )
+        }
     )
+    try:
+        await prepare_agent_node(
+            _env(plan),
+            plan.by_id("w1"),
+            {},
+            "w1",
+            messages=[],
+            resolutions={},
+        )
+    finally:
+        reset_resume_hints(token)
     phases = [row["phase"] for row in _phase_rows(spy)]
     assert "build_messages" not in phases
     assert set(phases) >= {"tool_trim", "total"}
+
+
+def _pending_write_transcript() -> list[LLMMessage]:
+    return [
+        LLMMessage(role="system", content="SYS"),
+        LLMMessage(role="user", content="task"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            reasoning_content="think-here",
+            tool_calls=[
+                ToolCall(
+                    id="fw",
+                    function=ToolCallFunction(
+                        name="file_write",
+                        arguments='{"path":"a.md","content":"hi"}',
+                    ),
+                )
+            ],
+        ),
+    ]
+
+
+async def test_infra_retry_appends_continue_user_after_transcript():
+    plan = _plan(RunSpec(run_id="w1", agent_id="w1", role="写手", task="写一段"))
+    messages: list[LLMMessage] = []
+    transcript = _pending_write_transcript()
+    token = bind_resume_hints(
+        {"w1": ResumeHint(kind=ResumeKind.INFRA, transcript=tuple(transcript))}
+    )
+    try:
+        await prepare_agent_node(
+            _env(plan),
+            plan.by_id("w1"),
+            {},
+            "w1",
+            messages=messages,
+            resolutions={},
+        )
+    finally:
+        reset_resume_hints(token)
+    assert [m.role for m in messages[:3]] == ["system", "user", "assistant"]
+    assert messages[-1].role == "user"
+    assert "续干指令" in (messages[-1].content or "")
+    assert messages[2].tool_calls[0].id == "fw"
+    assert messages[2].reasoning_content is None
+
+
+async def test_crash_redrive_restores_transcript_without_continue_user():
+    plan = _plan(RunSpec(run_id="w1", agent_id="w1", role="写手", task="写一段"))
+    messages: list[LLMMessage] = []
+    transcript = _pending_write_transcript()
+    token = bind_resume_hints(
+        {"w1": ResumeHint(kind=ResumeKind.CRASH, transcript=tuple(transcript))}
+    )
+    try:
+        await prepare_agent_node(
+            _env(plan),
+            plan.by_id("w1"),
+            {},
+            "w1",
+            messages=messages,
+            resolutions={},
+        )
+    finally:
+        reset_resume_hints(token)
+    assert [m.role for m in messages] == ["system", "user", "assistant"]
+    assert not any("续干指令" in (m.content or "") for m in messages if m.role == "user")
+    assert messages[-1].tool_calls[0].id == "fw"
+    assert messages[-1].reasoning_content == "think-here"

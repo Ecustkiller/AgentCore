@@ -11,7 +11,13 @@ from pathlib import Path
 from typing import Any
 
 from agentcore.core.types import ToolEffect, ToolFace
-from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
+from agentcore.llm.provider.protocol import (
+    LLMChunk,
+    LLMMessage,
+    ToolCall,
+    ToolCallDelta,
+    ToolCallFunction,
+)
 from agentcore.runtime.engine import ReactLoopOut, react_loop
 from agentcore.runtime.engine.tool_exec import execute_tools
 from agentcore.runtime.events import EventSink, EventType, FinishReason
@@ -122,9 +128,12 @@ async def _run_loop(
     *,
     finish_override_sink: list[FinishReason] | None = None,
     role: str = "",
+    messages: list[LLMMessage] | None = None,
+    deliverable_only: bool = False,
+    on_reset=None,
 ):
     return await react_loop(
-        messages=[LLMMessage(role="user", content="go")],
+        messages=messages or [LLMMessage(role="user", content="go")],
         llm=provider,
         tools=tools,
         sink=EventSink(),
@@ -139,6 +148,8 @@ async def _run_loop(
         role=role,
         run_id="run-1",
         approval_gate=None,
+        deliverable_only=deliverable_only,
+        on_reset=on_reset,
     )
 
 
@@ -179,6 +190,113 @@ async def test_react_loop_tool_then_answer():
     assert tool.calls == 1
     assert content == "基于工具结果的答复"
     assert rounds == 2
+
+
+async def test_react_loop_replays_unmatched_trailing_tools_before_llm():
+    from agentcore.tools.write_replay import is_write_replay
+
+    class _ReplayAware(_StubTool):
+        def __init__(self) -> None:
+            super().__init__(name="search", output="replayed")
+            self.replay_flags: list[bool] = []
+
+        async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+            self.replay_flags.append(is_write_replay())
+            return await super().execute(arguments, context)
+
+    tool = _ReplayAware()
+    provider = _ScriptedProvider([[_content_chunk("基于补跑结果的答复")]])
+    messages = [
+        LLMMessage(role="user", content="go"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="c1",
+                    function=ToolCallFunction(name="search", arguments="{}"),
+                )
+            ],
+        ),
+    ]
+    content, _r, _u, rounds = await _run_loop(provider, _registry(tool), messages=messages)
+
+    assert tool.calls == 1
+    assert tool.replay_flags == [True]
+    assert is_write_replay() is False
+    assert provider.calls == 1
+    assert content == "基于补跑结果的答复"
+    assert rounds == 1
+    assert any(m.role == "tool" and m.tool_call_id == "c1" for m in messages)
+    asst_tools = [m for m in messages if m.role == "assistant" and m.tool_calls]
+    assert len(asst_tools) == 1
+
+
+async def test_react_loop_does_not_replay_when_continue_user_follows_tools():
+    tool = _StubTool(name="search", output="should-not-run")
+    provider = _ScriptedProvider([[_content_chunk("续干后的答复")]])
+    messages = [
+        LLMMessage(role="user", content="go"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="c1",
+                    function=ToolCallFunction(name="search", arguments="{}"),
+                )
+            ],
+        ),
+        LLMMessage(role="user", content="## 续干指令\n继续"),
+    ]
+    content, _r, _u, rounds = await _run_loop(provider, _registry(tool), messages=messages)
+    assert tool.calls == 0
+    assert content == "续干后的答复"
+    assert rounds == 1
+
+
+async def test_react_loop_replay_resets_worker_narration():
+    from agentcore.tools.write_replay import is_write_replay
+
+    class _ReplayAware(_StubTool):
+        def __init__(self) -> None:
+            super().__init__(name="search", output="replayed")
+            self.replay_flags: list[bool] = []
+
+        async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+            self.replay_flags.append(is_write_replay())
+            return await super().execute(arguments, context)
+
+    resets: list[str] = []
+    tool = _ReplayAware()
+    provider = _ScriptedProvider([[_content_chunk("成稿")]])
+    messages = [
+        LLMMessage(role="user", content="go"),
+        LLMMessage(
+            role="assistant",
+            content="我先查一下资料。",
+            tool_calls=[
+                ToolCall(
+                    id="c1",
+                    function=ToolCallFunction(name="search", arguments="{}"),
+                )
+            ],
+        ),
+    ]
+    content, _r, _u, rounds = await _run_loop(
+        provider,
+        _registry(tool),
+        messages=messages,
+        role="worker",
+        deliverable_only=True,
+        on_reset=resets.append,
+    )
+    assert tool.calls == 1
+    assert tool.replay_flags == [True]
+    assert content == "成稿"
+    assert rounds == 1
+    assert resets == ["narration"]
+    assert "我先查一下" not in content
 
 
 async def test_react_loop_unknown_tool_recovers_with_final_answer():
@@ -260,6 +378,31 @@ async def test_execute_tools_unknown_tool_suggests_alias():
     assert write_tool.calls == 0
 
 
+async def test_execute_tools_retired_md_export_names_suggest_no_exec():
+    """废名 md_to_docx / md_to_pdf 只 did-you-mean，永不自动改写执行。"""
+    from agentcore.llm.provider.protocol import ToolCall, ToolCallFunction
+
+    export_tool = _StubTool("md_export")
+    reg = ToolRegistry()
+    reg.register(export_tool)
+    for retired in ("md_to_docx", "md_to_pdf"):
+        sink = EventSink()
+        messages, terminal, attempts = await execute_tools(
+            [ToolCall(id="c1", function=ToolCallFunction(name=retired, arguments="{}"))],
+            reg,
+            _context(),
+            sink,
+            approval_gate=None,
+            run_id="r1",
+        )
+        assert terminal is None
+        assert attempts[0].success is False
+        content = messages[0].content or ""
+        assert "not found" in content
+        assert "你是否想用：md_export" in content
+    assert export_tool.calls == 0
+
+
 async def test_execute_tools_unknown_file_append_suggests_str_replace_no_exec():
     """废名 file_append 只 did-you-mean，永不自动改写执行。"""
     from agentcore.llm.provider.protocol import ToolCall, ToolCallFunction
@@ -325,11 +468,15 @@ def test_registry_suggest_names_alias_and_close_match():
     reg.register(_StubTool("file_list"))
     reg.register(_StubTool("glob"))
 
+    reg.register(_StubTool("md_export"))
+
     assert reg.suggest_names("fetch") == ["download_url"]
     assert reg.suggest_names("wget") == ["download_url"]
     assert reg.suggest_names("curl") == ["download_url"]
     assert reg.suggest_names("write") == ["file_write"]
     assert reg.suggest_names("file_append") == ["str_replace"]
+    assert reg.suggest_names("md_to_docx") == ["md_export"]
+    assert reg.suggest_names("md_to_pdf") == ["md_export"]
     assert reg.suggest_names("ls") == ["file_list"]
     assert reg.suggest_names("list_dir") == ["file_list"]
     assert reg.suggest_names("find") == ["glob"]

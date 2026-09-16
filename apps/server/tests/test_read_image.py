@@ -82,8 +82,9 @@ async def test_read_image_success_and_bills_with_credential_source():
     assert row.cost.get("credential_source") == "user"
     assert row.tokens["input"] == 900
     assert row.tokens["output"] == 30
-    # BYOK slot → user pricing (estimated ledger).
-    assert row.cost_estimated_nano > 0
+    # qwen-vl-max has no curated card → user path records tokens, no money.
+    assert row.cost.get("pricing_source") == "unpriced"
+    assert row.cost_estimated_nano == 0
     assert row.cost_total_nano == 0
 
 

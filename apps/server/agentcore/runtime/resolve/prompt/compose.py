@@ -37,9 +37,9 @@ def assemble_system_prompt(
 ) -> str:
     """Build the shared system-prompt base for a conversation.
 
-    ``rules_markdown`` is the always-on equal-authority join of user rules + AI memory
-    core (Agent记忆与知识系统 · 取消权威档). When non-empty it becomes ONE ``<设定>``
-    block — no user-hard / AI-soft subsections. This base prompt is shared by the CEO
+    ``rules_markdown`` is the always-on equal-authority join of user rules.
+    When non-empty it becomes ONE ``<设定>``
+    block. This base prompt is shared by the CEO
     chat agent and the delegated workers (runs/executor/), so both reach every agent.
 
     Per-turn ``<工作区>`` environment facts are NOT in this base — they

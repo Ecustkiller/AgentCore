@@ -33,7 +33,6 @@ from agentcore.tools.builtin.ask_user import AskUserTool
 from agentcore.tools.builtin.consult import ConsultTool
 from agentcore.tools.builtin.delegate import DelegateTool
 from agentcore.tools.builtin.remember import RememberTool
-from agentcore.tools.builtin.update_folder_profile import UpdateFolderProfileTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registration import register_always_ceo_tools
 from agentcore.tools.registry import ToolRegistry
@@ -191,18 +190,7 @@ def _assemble_ceo_toolset(
         skill_registry=skill_registry,
         include_vision=include_vision,
     )
-    from agentcore.runtime.resolve.prepare import default_memory_store
-
-    mem_store = default_memory_store()
     chat_tools.register(RememberTool(folder_id=folder_id))
-    if folder_id:
-        chat_tools.register(
-            UpdateFolderProfileTool(
-                folder_id=folder_id,
-                store=mem_store,
-                prompt_holders=[delegate_tool, debate_tool],
-            )
-        )
     if checkpoint_enabled:
         chat_tools.register(
             AskUserTool(

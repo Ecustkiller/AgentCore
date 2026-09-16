@@ -199,7 +199,6 @@ async def test_same_graph_replan_gap_fill_unchanged():
         _tools = _FakeTools()
         _captain_run_id = "cap"
         _depth = 0
-        _topology_lock = False
         _folder_id = "test_birth"
 
         def effective_default_target_folder_id(self) -> str | None:
@@ -220,7 +219,7 @@ async def test_same_graph_replan_gap_fill_unchanged():
         for i in range(1, 5)
     ]
     err = await apply_replan(
-        _FakeDelegate(), plan, completed, binds=[], steers=[], adds=too_many
+        _FakeDelegate(), plan, completed, steers=[], adds=too_many
     )
     assert err
     assert any("补跑一次最多" in e for e in err)

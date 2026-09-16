@@ -17,7 +17,7 @@ export const PROMPT_TAG_LABELS: Record<string, string> = {
   role: "角色",
   how_you_work: "工作方式",
   platform_knowledge: "平台知识边界",
-  rules: "长期记忆",
+  rules: "规则",
   能力目录: "能力目录",
   记忆主题目录: "记忆主题目录",
   workspace_file_index: "工作区文件索引",

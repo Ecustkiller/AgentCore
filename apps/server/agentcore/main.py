@@ -44,8 +44,6 @@ from agentcore.api.routes import (
     tables,
     usage,
     users,
-    workflow_store,
-    workflows,
     workspaces,
 )
 from agentcore.auth.retention import refresh_token_retention_loop
@@ -72,7 +70,6 @@ from agentcore.tools.builtin.web.search_backend import (
     aclose_search_backend,
     probe_search_at_startup,
 )
-from agentcore.workflows.scheduler import workflow_trigger_scheduler_loop
 from agentcore.workspace.retention import retention_loop
 
 logger = logging.getLogger(__name__)
@@ -391,13 +388,6 @@ async def lifespan(app: FastAPI):
     # path; this only catches the disconnected remainder. days<=0 disables.
     stream_state_retention_task = asyncio.create_task(stream_state_retention_loop())
 
-    # Workflow clock / webhook: poll trigger_next_run_at + lease, spawn cloud runs.
-    workflow_trigger_scheduler_task: asyncio.Task | None = None
-    if settings.workflow_trigger_scheduler_enabled:
-        workflow_trigger_scheduler_task = asyncio.create_task(
-            workflow_trigger_scheduler_loop()
-        )
-
     # Durable RUNNING lease sweeper (crash recover): claim heartbeat-expired leases and
     # redrive unfinished DAG via recover_turn. Boot pass runs inside the loop.
     # Install the DelegateTool factory BEFORE the sweeper so a boot reclaim can redrive
@@ -508,10 +498,6 @@ async def lifespan(app: FastAPI):
             pool_refresh_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await pool_refresh_task
-            if workflow_trigger_scheduler_task is not None:
-                workflow_trigger_scheduler_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await workflow_trigger_scheduler_task
             event_loop_lag_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await event_loop_lag_task
@@ -645,13 +631,10 @@ app.include_router(realtime.router, prefix="/v1")
 app.include_router(search.router, prefix="/v1")
 app.include_router(skill_catalog.router, prefix="/v1")
 app.include_router(skill_store.router, prefix="/v1")
-app.include_router(workflow_store.router, prefix="/v1")
 # Public shares: conversation manage under /v1, plus /shared/{token} (no auth)
 # which also serves frozen 文档 snapshots minted at /v1/docs/{id}/shares.
 app.include_router(sharing.router, prefix="/v1")
 app.include_router(sharing.public_router)
-app.include_router(workflows.router, prefix="/v1")
-app.include_router(workflows.hooks_router, prefix="/v1")
 app.include_router(usage.router, prefix="/v1")
 app.include_router(users.router, prefix="/v1")
 app.include_router(workspaces.router, prefix="/v1")

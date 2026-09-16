@@ -18,7 +18,7 @@ export function isAbort(err: unknown): boolean {
 
 /**
  * Clear composer lock when a turn path dies while still marked generating.
- * Shared by runSend / regenerate / stage-card resolve — same catch/abort 收口.
+ * Shared by runSend / regenerate — same catch/abort 收口.
  */
 export function finalizeGeneratingIfNeeded(conversationId: string): void {
   if (getRuntime(conversationId).isGenerating) {
@@ -31,7 +31,7 @@ export function finalizeGeneratingIfNeeded(conversationId: string): void {
  * ``stopping`` → ``stopped``，清 ``isGenerating``。用户停止盖 ``cancelled``；
  * ``AbortError`` message 为 ``Interrupted`` 时不得盖成 cancelled，尾巴若还没
  * ``finishReason`` 则盖 ``interrupted``。
- * Shared by sendTurn / resume / regenerate / rejoin / stage-card（midFlight 除外：
+ * Shared by sendTurn / resume / regenerate / rejoin（midFlight 除外：
  * Stop ≠ 取消排队）。
  */
 export function finalizeHonestStopAbort(

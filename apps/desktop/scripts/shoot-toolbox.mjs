@@ -1,4 +1,4 @@
-// Screenshot harness for 工具箱三 tab 壳 (#/toolbox → 提示词).
+// Screenshot harness for 工具箱种类壳 (#/toolbox → 提示词).
 //
 // Usage:
 //   node scripts/shoot-toolbox.mjs
@@ -9,8 +9,7 @@
 // Mechanism — same as scripts/shoot-settings.mjs, nothing new:
 //   • webapp 壳 (vite.webapp.config.ts → index.webapp.html) with the REAL AuthGate,
 //     satisfied by a stubbed `/v1/auth/me`. The offline preview entry (index.web.html)
-//     sets `__WEB_PREVIEW__`, which makes AppShell skip its pollers — 自动化磁贴 /
-//     收件箱的未读角标就出不来。
+//     sets `__WEB_PREVIEW__`, which makes AppShell skip its pollers.
 //   • Playwright `page.route` REST stubs with per-endpoint fixtures, so every page
 //     renders POPULATED rather than empty/loading. No product code is touched.
 //   • `VITE_API_URL` pinned to "" ⇒ same-origin API, no CORS on `route.fulfill`.
@@ -56,7 +55,7 @@ const MAX_HEIGHT = Number(process.env.SHOOT_MAX_HEIGHT ?? 4000);
 const filter = (process.argv[2] ?? "").toLowerCase();
 
 /**
- * 三 tab 壳：可见顶栏是种类 tab（右槽市场）；sr-only h1 是当前种类或「市场」。
+ * 种类壳：可见顶栏是种类 tab（右槽市场）；sr-only h1 是当前种类或「市场」。
  * `ready` waits until populated fixtures landed.
  */
 const PAGES = [
@@ -104,13 +103,6 @@ const PAGES = [
     expectKindNav: true,
   },
   {
-    id: "07-workflows",
-    hash: "/toolbox/mine/workflows",
-    heading: "工作流",
-    ready: "竞品调研五步",
-    expectKindNav: true,
-  },
-  {
     id: "08-connectors",
     hash: "/toolbox/mine/skills?connectors=1",
     heading: "提示词",
@@ -118,33 +110,22 @@ const PAGES = [
     expectKindNav: true,
   },
   {
-    id: "09-workflows-empty",
-    hash: "/toolbox/mine/workflows",
-    heading: "工作流",
-    ready: "还没有工作流",
-    emptyPaths: ["/v1/workflows"],
-    expectKindNav: true,
-  },
-  {
     id: "11-market-empty",
     hash: "/toolbox/market",
     heading: "市场",
     ready: "还没有可安装的内容",
-    emptyPaths: ["/v1/skill-store", "/v1/workflow-playbook-templates"],
+    emptyPaths: ["/v1/skill-store"],
     expectKindNav: true,
   },
 ];
 
 // ---------------------------------------------------------------------------
 // REST fixtures — shapes follow the OpenAPI DTOs in packages/contract-rest-types
-// (CapabilitiesResponse / FolderSummary / UserResponse …) and the hand-written wire types the workflow
-// client declares (services/workflows.ts). Values are synthetic demo data,
+// (CapabilitiesResponse / FolderSummary / UserResponse …). Values are synthetic demo data,
 // deliberately non-empty so every page shows its populated state.
 // ---------------------------------------------------------------------------
 
 const ISO = "2026-08-01T09:00:00.000Z";
-const minutesAgo = (m) => new Date(Date.now() - m * 60_000).toISOString();
-const minutesAhead = (m) => new Date(Date.now() + m * 60_000).toISOString();
 
 const MOCK_USER = {
   id: "user_shoot",
@@ -192,7 +173,6 @@ const CAPABILITY_TOOLS = [
     obj(
       {
         query: { type: "string", description: "检索词，建议 2–3 个核心词。" },
-        max_results: { type: "integer", description: "结果数量上限，默认 8，最多 12。" },
       },
       ["query"],
     ),
@@ -204,7 +184,6 @@ const CAPABILITY_TOOLS = [
     obj(
       {
         url: { type: "string", description: "要读取的网页 URL。" },
-        max_chars: { type: "integer", description: "返回的最大字符数，默认 8000。" },
       },
       ["url"],
     ),
@@ -254,7 +233,6 @@ const CAPABILITY_TOOLS = [
       {
         pattern: { type: "string", description: "正则表达式。" },
         path: { type: "string", description: "限定搜索目录。" },
-        max_results: { type: "integer", description: "最大匹配行数，默认 50，最多 200。" },
       },
       ["pattern"],
     ),
@@ -461,119 +439,6 @@ const FOLDERS = [
   },
 ];
 
-const step = (id, role, task) => ({ id, kind: "agent_step", role, task });
-const gate = (id, label) => ({ id, kind: "human_gate", label });
-const edge = (from, to) => ({ from, to });
-
-const USER_WORKFLOWS = [
-  {
-    id: "wf_research",
-    name: "竞品调研五步",
-    description: "从检索到成稿的固定拆法，产出一份可落盘的对比报告。",
-    definition: {
-      nodes: [
-        step("s1", "检索员", "围绕 {{topic}} 检索近三个月公开资料，按来源可信度排序。"),
-        step("s2", "分析师", "把检索结果整理成功能 / 定价 / 目标客群三张对比表。"),
-        gate("g1", "确认对比维度"),
-        step("s3", "撰稿人", "按确认后的维度成稿，结论先行，逐条附出处。"),
-      ],
-      edges: [edge("s1", "s2"), edge("s2", "g1"), edge("g1", "s3")],
-      slots: [
-        { key: "topic", label: "调研主题", default: "国内 AI 笔记类产品" },
-        { key: "region", label: "地区范围", default: "中国大陆" },
-      ],
-    },
-    source: null,
-    version: 4,
-    created_at: ISO,
-    updated_at: minutesAgo(60 * 30),
-  },
-  {
-    id: "wf_release",
-    name: "发版前检查",
-    description: null,
-    definition: {
-      nodes: [
-        step("s1", "测试员", "跑一遍回归用例，把失败项按影响面分级。"),
-        step("s2", "文档员", "核对变更说明与实际改动是否一致。"),
-        gate("g1", "人工确认可发"),
-      ],
-      edges: [edge("s1", "g1"), edge("s2", "g1")],
-    },
-    source: null,
-    version: 2,
-    created_at: ISO,
-    updated_at: minutesAgo(60 * 5),
-  },
-  {
-    id: "wf_weekly",
-    name: "周会材料准备",
-    description: "把散落在各处的进度汇成一页，会前十分钟就能过完。",
-    definition: {
-      nodes: [
-        step("s1", "收集员", "拉取本周各条线的进展与阻塞。"),
-        step("s2", "编辑", "压缩成一页：做完了什么、卡在哪、下周做什么。"),
-      ],
-      edges: [edge("s1", "s2")],
-      slots: [{ key: "week", label: "周次", default: "本周" }],
-    },
-    source: null,
-    version: 7,
-    trigger: {
-      kind: "schedule",
-      enabled: true,
-      folder_id: "folder_research",
-      cron: "0 9 * * 1",
-      schedule_preset: "weekly_mon",
-      next_run_at: minutesAhead(60 * 26),
-      last_run_at: minutesAgo(60 * 142),
-      last_error: null,
-    },
-    created_at: ISO,
-    updated_at: minutesAgo(60 * 74),
-  },
-];
-
-const WORKFLOW_TEMPLATES = [
-  {
-    id: "map_fanout",
-    title: "并行摸底",
-    summary: "几名队员同时从不同角度摸一遍议题，快速拿到全貌。",
-    primary_slots: "topic",
-    slots: [
-      { key: "topic", label: "议题", required: true, hint: "想弄懂的那件事" },
-    ],
-  },
-  {
-    id: "cite_write_review",
-    title: "深度研究报告",
-    summary: "检索 → 交叉验证 → 成稿，产出一份带出处的长文报告。",
-    primary_slots: "topic",
-    slots: [
-      { key: "topic", label: "研究主题", required: true, hint: null },
-      { key: "audience", label: "读者", required: false, hint: "写给谁看" },
-    ],
-  },
-  {
-    id: "ops_weekly",
-    title: "运营周复盘",
-    summary: "把数据、客诉、动作收成一页给下周用。",
-    primary_slots: "topic",
-    slots: [
-      { key: "topic", label: "本周焦点", required: true, hint: null },
-    ],
-  },
-  {
-    id: "launch_checklist",
-    title: "上线检查",
-    summary: "发布前把风险、回滚、通知过一遍。",
-    primary_slots: "feature",
-    slots: [
-      { key: "feature", label: "要上线的能力", required: true, hint: null },
-    ],
-  },
-];
-
 /** `McpServerListItem[]` — installed into `window.mcpApi` (see addInitScript). */
 const MCP_SERVERS = [
   {
@@ -670,10 +535,6 @@ const FIXTURES = new Map([
       ],
     },
   ],
-
-  // 工作流.
-  ["/v1/workflows", USER_WORKFLOWS],
-  ["/v1/workflow-playbook-templates", WORKFLOW_TEMPLATES],
 
   // 能力商店（列表无正文；详情另见 pathname /v1/skill-store/:id）.
   [
@@ -881,10 +742,7 @@ const LOAD_TIMEOUT_MS = 15_000;
  * out: a locator matching no element already counts as detached, so that wait
  * returns instantly both before the spinner mounts and between two spinners on a
  * page that loads in stages. Poll for a stable absence instead, after the page's
- * own `ready` content marker.
- *
- * 自动化 · 任务/收件箱 spin a bare `Loader2` with no text at all, which is exactly
- * why every page here carries a `ready` marker that only exists once data landed.
+ * own `ready` content marker that only exists once data landed.
  */
 async function waitForLoaded(page, spec) {
   let sawReady = true;
@@ -971,7 +829,7 @@ async function auditPage(page) {
   });
 }
 
-const EXPECTED_KIND_TABS = ["提示词", "创作", "工作流"];
+const EXPECTED_KIND_TABS = ["提示词", "创作"];
 
 /** Turn the audit into human-readable complaints; empty array = clean. */
 function auditProblems(audit, spec) {
@@ -1022,8 +880,8 @@ function auditProblems(audit, spec) {
   } else if (audit.hasKindNav) {
     out.push("此页不该有种类 tab");
   }
-  if (spec.hash === "/toolbox/market" && !audit.hasMarketChips) {
-    out.push("市场页应有货架种类 chip");
+  if (spec.hash === "/toolbox/market" && audit.hasMarketChips) {
+    out.push("市场页不应再有货架种类 chip");
   }
   if (spec.hash === "/toolbox" && audit.homeAutomationsBadge) {
     out.push("种类 tab 不应再有待处理徽章");
@@ -1259,15 +1117,6 @@ async function main() {
           .first()
           .waitFor({ state: "attached", timeout: 20_000 });
       }
-      if (spec.hash === "/toolbox") {
-        // The badge rides a shell-level poller, not the page's own query.
-        await page
-          .locator("main [aria-label$='条待处理']")
-          .first()
-          .waitFor({ state: "visible", timeout: 10_000 })
-          .catch(() => notes.push("徽章未出现"));
-      }
-
       const loaded = await waitForLoaded(page, spec);
       if (!loaded.sawReady) notes.push(`没等到内容标记「${spec.ready}」`);
       if (!loaded.quiet) notes.push("仍有「加载中…」，图里可能是加载态");

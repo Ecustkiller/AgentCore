@@ -12,6 +12,7 @@ import {
   type TableRow,
   type TableView,
   type ViewConfig,
+  clampColumnWidth,
   emptyViewConfig,
 } from "@/tables/types";
 
@@ -46,6 +47,7 @@ export type ApiTableDetail = {
   rows: ApiTableRow[];
   views: ApiTableView[];
   active_view_id: string;
+  source_path?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -56,6 +58,7 @@ export type ApiTableSummary = {
   conversation_id?: string | null;
   schema_version: number;
   row_count: number;
+  source_path?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -77,6 +80,7 @@ export type TableSummary = {
   conversationId: string | null;
   schemaVersion: number;
   rowCount: number;
+  sourcePath: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -222,12 +226,22 @@ export function fromApiViewConfig(raw: unknown): ViewConfig {
   }
   const groupByRaw = o.group_by ?? o.groupBy;
   const hiddenRaw = o.hidden_column_ids ?? o.hiddenColumnIds;
+  const widthsRaw = o.column_widths ?? o.columnWidths;
   const density =
     o.density === "compact" ||
     o.density === "comfortable" ||
     o.density === "loose"
       ? o.density
       : base.density;
+  const columnWidths: Record<string, number> = {};
+  if (widthsRaw && typeof widthsRaw === "object" && !Array.isArray(widthsRaw)) {
+    for (const [key, val] of Object.entries(
+      widthsRaw as Record<string, unknown>,
+    )) {
+      const n = Number(val);
+      if (Number.isFinite(n)) columnWidths[key] = clampColumnWidth(n);
+    }
+  }
   return {
     filters,
     sort,
@@ -235,6 +249,7 @@ export function fromApiViewConfig(raw: unknown): ViewConfig {
     hiddenColumnIds: Array.isArray(hiddenRaw)
       ? hiddenRaw.map((x) => String(x))
       : [],
+    columnWidths,
     density,
     modeConfig: fromApiModeConfig(o.mode_config ?? o.modeConfig),
   };
@@ -276,6 +291,7 @@ export function fromApiTable(raw: ApiTableDetail): TableDoc {
     rows: (raw.rows ?? []).map(fromApiRow),
     views,
     activeViewId: raw.active_view_id || views[0]?.id || "",
+    sourcePath: raw.source_path ?? null,
     createdAt: iso(raw.created_at),
     updatedAt: iso(raw.updated_at),
   };
@@ -288,6 +304,7 @@ export function fromApiSummary(raw: ApiTableSummary): TableSummary {
     conversationId: raw.conversation_id ?? null,
     schemaVersion: raw.schema_version,
     rowCount: raw.row_count,
+    sourcePath: raw.source_path ?? null,
     createdAt: raw.created_at,
     updatedAt: raw.updated_at,
   };
@@ -318,6 +335,7 @@ function toApiViewFields(view: TableView): Record<string, unknown> {
     sort,
     group_by: view.config.groupBy,
     hidden_column_ids: view.config.hiddenColumnIds,
+    column_widths: view.config.columnWidths,
     density: view.config.density,
     mode_config: toApiModeConfig(view.config.modeConfig),
   };
@@ -398,6 +416,26 @@ export function listTables(): Promise<TableSummary[]> {
   return api
     .get<ApiTableSummary[]>("/v1/tables")
     .then((rows) => rows.map(fromApiSummary));
+}
+
+export async function lookupTableBySource(input: {
+  path: string;
+  folderId?: string | null;
+  conversationId?: string | null;
+}): Promise<TableSummary | null> {
+  const params = new URLSearchParams({ path: input.path });
+  if (input.folderId) params.set("folder_id", input.folderId);
+  if (input.conversationId) params.set("conversation_id", input.conversationId);
+  try {
+    return fromApiSummary(
+      await api.get<ApiTableSummary>(
+        `/v1/tables/by-source?${params.toString()}`,
+      ),
+    );
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
 }
 
 export function createTable(input?: { title?: string }): Promise<TableDoc> {

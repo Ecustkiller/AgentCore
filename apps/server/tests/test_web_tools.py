@@ -637,7 +637,6 @@ async def test_web_fetch_loopback_reroutes_instead_of_closing(url: str):
     assert result.metadata.get("policy_failure") is True
     # 那条为公网空转设计的收口话术不能出现在本机地址上。
     assert "不要再空转外网深读" not in err
-    assert "基于已有材料收口写作" not in err
     # 改道指引必须点名两个真跑在用户机器上的工具。
     assert "browser" in err
     assert "terminal" in err and "curl" in err
@@ -688,7 +687,6 @@ async def test_web_fetch_not_a_web_url_reroutes_to_file_read(url: str):
     assert result.metadata.get("code") == "not_a_web_url"
     assert result.metadata.get("policy_failure") is True
     assert "不要再空转外网深读" not in err
-    assert "基于已有材料收口写作" not in err
     assert "file_read" in err
     assert "不要给本参数补 https://" in err
     assert "请补 https" not in err
@@ -721,8 +719,6 @@ def test_web_fetch_schema_routes_workspace_paths_to_file_read():
     assert "file_read" in schema.description
     assert "download_url" in schema.description
     assert "不要补 https://" not in schema.description
-    assert "百度百科" not in schema.description
-    assert "知乎" not in schema.description
     url_desc = schema.parameters["properties"]["url"]["description"]
     assert "http://" in url_desc and "https://" in url_desc
     assert "file_read" not in url_desc
@@ -2503,27 +2499,24 @@ async def test_web_search_empty_long_query_suggests_trim_to_core_words(monkeypat
     assert "2–3 个核心词" in note
 
 
-async def test_web_search_cache_refetches_when_more_results_needed(monkeypatch):
+async def test_web_search_ignores_max_results_argument(monkeypatch):
     monkeypatch.setattr(search_cache_mod, "_registry", SearchCacheRegistry())
-    calls = {"n": 0}
+    seen: list[int] = []
 
     class _Backend:
         async def search(self, query, max_results=5, on_phase=None, *, language=None):
-            calls["n"] += 1
-            # always return exactly max_results (capped) → "more may exist"
+            seen.append(max_results)
             return [SearchResult(f"t{i}", f"https://a.com/{i}", "s") for i in range(max_results)]
 
     monkeypatch.setattr(search_mod, "get_search_backend", lambda: _Backend())
     ctx = _ctx(conversation_id="conv-more")
     tool = WebSearchTool()
-    await tool.execute({"query": "q", "max_results": 3}, ctx)
-    assert calls["n"] == 1
-    # wants MORE than the capped cached set → re-search with the bigger budget
-    await tool.execute({"query": "q", "max_results": 8}, ctx)
-    assert calls["n"] == 2
-    # now 8 are cached → a <=8 request hits without re-searching
-    await tool.execute({"query": "q", "max_results": 5}, ctx)
-    assert calls["n"] == 2
+    await tool.execute({"query": "q"}, ctx)
+    hit = await tool.execute({"query": "q", "max_results": 3}, ctx)
+    again = await tool.execute({"query": "q", "max_results": 12}, ctx)
+    assert seen == [search_mod._DEFAULT_MAX_RESULTS]
+    assert hit.metadata.get("cached") is True
+    assert again.metadata.get("cached") is True
 
 
 # --- A3: query contract at the tool boundary ---
@@ -2666,7 +2659,9 @@ async def test_web_search_rejects_oversized_latin_query_without_backend(monkeypa
 def test_web_search_schema_documents_query_contract():
     """契约进 schema：≤12 拉丁词 / ≤48 字 / 书名号·引号豁免。拆分策略在超限回执，不进按钮。"""
     schema = WebSearchTool().schema
+    assert "max_results" not in schema.parameters["properties"]
     blob = schema.description + schema.parameters["properties"]["query"]["description"]
+    assert "max_results" not in blob
     assert str(_QUERY_LATIN_WORD_LIMIT) in blob  # 拉丁词上限 12
     assert str(_QUERY_CJK_CHAR_LIMIT) in blob  # 字数上限 48
     assert "加权" not in blob and "折" not in blob  # 折算权重是执行层
@@ -2675,9 +2670,6 @@ def test_web_search_schema_documents_query_contract():
     assert "摘要优先" in blob  # 默认摘要优先基调
     assert "搜到 ≠ 可挂来源号" not in blob
     assert "web_fetch" in blob  # 核对原文
-    assert "2–3" not in blob  # 拆分建议在超限回执
-    assert "精简到核心词" not in blob
-    assert "下一轮再搜" not in blob
     assert "聚焦查询" not in schema.description
     assert "补搜" not in schema.description
     assert "不要一上来并行" not in schema.description
@@ -3078,8 +3070,8 @@ def _newline_dense_html(blocks: int) -> str:
 
 async def test_web_fetch_escape_heavy_page_stays_valid_json_and_declares_cut(monkeypatch):
     """转义膨胀超预算：仍是合法 JSON + 截断事实在带内可见（不许伪装成完整正文）。"""
-    max_chars = 3000
-    html = _newline_dense_html(2000)
+    max_chars = web_fetch_mod._DEFAULT_MAX_CHARS
+    html = _newline_dense_html(6000)
 
     async def _allow(_url: str):
         return None
@@ -3091,7 +3083,7 @@ async def test_web_fetch_escape_heavy_page_stays_valid_json_and_declares_cut(mon
     monkeypatch.setattr(web_fetch_mod, "_safe_request", _fake_request)
 
     result = await WebFetchTool().execute(
-        {"url": "https://dense.example.com/table", "max_chars": max_chars}, _ctx()
+        {"url": "https://dense.example.com/table", "max_chars": 3000}, _ctx()
     )
 
     assert result.success is True
@@ -3137,8 +3129,8 @@ async def test_web_fetch_plain_page_not_flagged_truncated(monkeypatch):
 
 async def test_web_fetch_cache_hit_shares_the_output_budget(monkeypatch):
     """缓存命中走同一预算收口：命中结果同样是合法 JSON + 带内截断声明。"""
-    max_chars = 3000
-    html = _newline_dense_html(2000)
+    max_chars = web_fetch_mod._DEFAULT_MAX_CHARS
+    html = _newline_dense_html(6000)
     calls = {"n": 0}
 
     async def _allow(_url: str):
@@ -3153,7 +3145,7 @@ async def test_web_fetch_cache_hit_shares_the_output_budget(monkeypatch):
 
     ctx = _ctx(conversation_id="conv-dense-budget")
     tool = WebFetchTool()
-    args = {"url": "https://dense.example.com/cached", "max_chars": max_chars}
+    args = {"url": "https://dense.example.com/cached", "max_chars": 3000}
     await tool.execute(args, ctx)
     hit = await tool.execute(args, ctx)
 
@@ -3394,7 +3386,7 @@ async def test_web_fetch_skips_cache_without_conversation(monkeypatch):
     assert calls["n"] == 2  # unscoped (conversation_id == "") → no caching, fetched twice
 
 
-async def test_web_fetch_cache_refetches_when_more_chars_needed(monkeypatch):
+async def test_web_fetch_ignores_max_chars_argument(monkeypatch):
     body = "<html><body><p>" + ("z" * 500) + "</p></body></html>"
     calls = {"n": 0}
 
@@ -3410,16 +3402,13 @@ async def test_web_fetch_cache_refetches_when_more_chars_needed(monkeypatch):
 
     ctx = _ctx(conversation_id="conv-cache-chars")
     tool = WebFetchTool()
-    # first read captures only 100 chars (truncated); a later read needing 400 must
-    # re-fetch with the bigger budget rather than serve the short cached copy.
-    await tool.execute({"url": "https://big.example.com/p", "max_chars": 100}, ctx)
+    await tool.execute({"url": "https://big.example.com/p"}, ctx)
     assert calls["n"] == 1
-    r2 = await tool.execute({"url": "https://big.example.com/p", "max_chars": 400}, ctx)
-    assert calls["n"] == 2
-    assert r2.metadata.get("cached") is not True
-    # now 400 chars are cached → a <=400 request hits without re-fetching
-    r3 = await tool.execute({"url": "https://big.example.com/p", "max_chars": 300}, ctx)
-    assert calls["n"] == 2
+    r2 = await tool.execute({"url": "https://big.example.com/p", "max_chars": 100}, ctx)
+    assert calls["n"] == 1
+    assert r2.metadata.get("cached") is True
+    r3 = await tool.execute({"url": "https://big.example.com/p", "max_chars": 30000}, ctx)
+    assert calls["n"] == 1
     assert r3.metadata.get("cached") is True
 
 
@@ -3541,7 +3530,6 @@ def test_web_fetch_retire_steer_closes_web_search_thrash():
     assert "收束继续 web_search" in WEB_FETCH_RETIRE_STEER
     assert "请立即" not in WEB_FETCH_RETIRE_STEER
     assert "不要把继续检索" not in WEB_FETCH_RETIRE_STEER
-    assert "基于已有材料" not in WEB_FETCH_RETIRE_STEER
 
 
 def test_search_notes_skip_web_fetch_nudge_when_retired():

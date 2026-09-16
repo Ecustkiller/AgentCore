@@ -31,5 +31,6 @@ describe("LiveWaitLabel", () => {
     expect(container.querySelector("[data-live-flow]")).not.toBeNull();
     expect(container.querySelector(".live-flow-text")).not.toBeNull();
     expect(container.textContent).toContain("Thinking…");
+    expect(container.textContent).not.toMatch(/\d+s/);
   });
 });

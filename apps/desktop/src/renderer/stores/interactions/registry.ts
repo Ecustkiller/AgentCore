@@ -83,7 +83,7 @@ export interface InteractionKindDef {
   sseResolved?: InteractionSseResolvedEffects;
 }
 
-/** The registry — one row per live user-facing interaction kind. */
+/** The registry — one row per user-facing interaction kind (含 leftover journal 痕迹). */
 export const INTERACTION_REGISTRY: readonly InteractionKindDef[] = [
   {
     kind: "approval",
@@ -127,7 +127,7 @@ export const INTERACTION_REGISTRY: readonly InteractionKindDef[] = [
   },
   {
     kind: "stage_card",
-    // 跨回合耐久卡：resolve 起新回合 SSE（非 cold resume / 非 hot Future）。
+    // leftover journal 痕迹：活人面无提交；resolve 410。时间线只画已结 / 已失效。
     timeline: {
       processKind: "stage_card",
       stepIdField: "stage_card_id",

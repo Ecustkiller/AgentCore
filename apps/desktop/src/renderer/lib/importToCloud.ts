@@ -131,55 +131,7 @@ export function parseArchivePayload(value: unknown): ArchivePayload | null {
 }
 
 /**
- * Honest toast after import. Always remind: new folder in 我的文件 + continue
- * there; current session stays on the old local folder (no rebind).
- */
-export function formatImportToCloudToast(result: ImportToCloudResult): {
-  message: string;
-  description?: string;
-} {
-  const continueHint = "后续请在新文件夹里继续；当前对话用的还是本机原文件夹";
-  if (!result.partial) {
-    const uploadBit =
-      result.uploaded > 0
-        ? `已上传 ${result.uploaded} 个文件。`
-        : "文件夹已创建（无文件可传）。";
-    return {
-      message: `已在「我的文件」建好「${result.folderName}」`,
-      description: `${uploadBit}${continueHint}`,
-    };
-  }
-  const bits: string[] = [];
-  if (result.archiveTruncated) {
-    bits.push("内容超过 100MiB 或 2 万个文件，只导入了一部分");
-  }
-  if (result.skippedOversized.length > 0) {
-    bits.push(
-      `跳过 ${result.skippedOversized.length} 个超过 ${IMPORT_PUT_MAX_BYTES / (1024 * 1024)}MiB 的文件`,
-    );
-  }
-  return {
-    message: `已在「我的文件」建好「${result.folderName}」（部分导入）`,
-    description: `${bits.join("；")}。已上传 ${result.uploaded} 个文件。${continueHint}。`,
-  };
-}
-
-/** Cancel toast — keep the folder when already created (may be incomplete). */
-export function formatImportToCloudCancelledToast(
-  err: ImportToCloudCancelledError,
-): { message: string; description?: string } {
-  if (err.folderId && err.folderName) {
-    return {
-      message: `已取消导入；文件夹「${err.folderName}」已保留`,
-      description:
-        "上传未完成，文件夹里的内容可能不全。可以稍后重新导入，或自行删除。",
-    };
-  }
-  return { message: "已取消导入" };
-}
-
-/**
- * §五 导入到「我的文件」：本机选夹（临时 root）→ ignore archive → 新建云文件夹 →
+ * 「云上做完再写入」传输骨架：本机选夹（临时 root）→ ignore archive → 新建云文件夹 →
  * 逐文件 PUT → draft intent 落到该云桌。禁 mode=local。
  *
  * `signal` 贯穿上传循环；取消后保留已建文件夹（不完整）。`ownsRoot` 为 true

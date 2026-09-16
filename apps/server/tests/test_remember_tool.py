@@ -1,8 +1,7 @@
-"""CEO remember tool — records an explicit user directive as a USER RULE (§5.7 分流).
+"""CEO remember tool — named user-rule markdown under AgentCore/规则/.
 
-DB-free here: the schema contract + the pure mutate helpers. The end-to-end write (directive →
-``role='rule', ai_maintained=false`` document, immediate injection) is exercised against a real
-schema in ``tests/integration/test_documents.py``.
+DB-free here: schema contract + mutate helpers. End-to-end write is in
+``tests/integration/test_documents.py``.
 """
 
 from __future__ import annotations
@@ -13,8 +12,8 @@ import pytest
 
 from agentcore.memory.rules_injection import (
     UserRuleMutationResult,
-    append_user_rule_bullet,
-    mutate_user_rule_markdown,
+    mutate_user_rule,
+    normalize_rule_filename,
 )
 from agentcore.tools.builtin.remember import (
     RememberTool,
@@ -38,21 +37,21 @@ def _ctx() -> ToolContext:
 def test_remember_schema_is_static():
     tool = RememberTool(folder_id=None)
     assert tool.schema.name == "remember"
-    # Explicit directive here; inferred prefs are not auto-saved (idle digest
-    # does not write always-files).
-    assert "明确" in tool.schema.description
+    assert "一篇" in tool.schema.description
+    assert "file_write" in tool.schema.description
     assert "离线巩固" not in tool.schema.description
     assert "没下指令就不记" not in tool.schema.description
-    assert "update_folder_profile" in tool.schema.description
+    assert "update_folder_profile" not in tool.schema.description
     assert tool.schema.parameters["required"] == []
     assert tool.schema.parameters["properties"]["scope"]["enum"] == ["global", "folder"]
     assert tool.schema.parameters["properties"]["action"]["enum"] == [
-        "add",
-        "replace",
-        "forget",
+        "write",
+        "read",
+        "delete",
         "list",
     ]
-    assert "replaces" in tool.schema.parameters["properties"]
+    assert "name" in tool.schema.parameters["properties"]
+    assert "replaces" not in tool.schema.parameters["properties"]
 
 
 def test_build_remember_tool_defaults():
@@ -61,113 +60,178 @@ def test_build_remember_tool_defaults():
     assert tool.folder_id == "fold-1"
 
 
-def test_append_user_rule_bullet_adds_and_dedupes():
-    md, changed = append_user_rule_bullet("", "以后都用中文回复")
-    assert changed is True
-    assert md == "- 以后都用中文回复\n"
-
-    # A normalized duplicate (whitespace-only difference) is a no-op — re-remembering never grows.
-    md2, changed2 = append_user_rule_bullet(md, "以后都用中文回复  ")
-    assert changed2 is False
-    assert md2 == md
-
-    # A genuinely new rule appends as another bullet.
-    md3, changed3 = append_user_rule_bullet(md, "别用表格")
-    assert changed3 is True
-    assert md3 == "- 以后都用中文回复\n- 别用表格\n"
+def test_normalize_rule_filename():
+    assert normalize_rule_filename("回复语言") == "回复语言.md"
+    assert normalize_rule_filename("回复语言.md") == "回复语言.md"
+    assert normalize_rule_filename("  回复语言.md  ") == "回复语言.md"
+    assert normalize_rule_filename("") is None
+    assert normalize_rule_filename("../x.md") is None
+    assert normalize_rule_filename("dir/x.md") is None
+    assert normalize_rule_filename("偏好.md") is None
+    assert normalize_rule_filename("画像.md") is None
+    assert normalize_rule_filename("导航.md") is None
+    assert normalize_rule_filename("x" * 80) is None
 
 
-def test_append_user_rule_bullet_ignores_blank():
-    assert append_user_rule_bullet("- x\n", "   ") == ("- x\n", False)
+class _FakeDoc:
+    def __init__(
+        self,
+        name: str,
+        content: str,
+        apply_mode: str = "always",
+        description: str = "",
+    ) -> None:
+        self.id = f"id-{name}"
+        self.name = name
+        self.content = content
+        self.apply_mode = apply_mode
+        self.description = description
+        self.kind = "document"
 
 
-def test_mutate_add_default_and_dedupe():
-    added = mutate_user_rule_markdown("", action="add", content="用中文")
-    assert added.changed is True
-    assert "已追加" in added.message
-    assert added.markdown == "- 用中文\n"
+class _FakeRepo:
+    def __init__(self) -> None:
+        self.docs: dict[str, _FakeDoc] = {}
+        self.upserted = False
 
-    # Missing action defaults to add.
-    again = mutate_user_rule_markdown(added.markdown, content="用中文")
-    assert again.action == "add"
-    assert again.changed is False
-    assert "已经记过了" in again.message
+    async def list_user_rule_docs(self, user_id, folder_id):  # noqa: ARG002
+        return list(self.docs.values())
+
+    async def get_user_rule_doc(self, user_id, folder_id, name):  # noqa: ARG002
+        return self.docs.get(name)
+
+    async def upsert_user_rule_doc(
+        self,
+        user_id,
+        folder_id,
+        name,
+        content,
+        *,
+        apply="always",
+        description=None,
+    ):  # noqa: ARG002
+        from agentcore.documents.frontmatter import set_entry_frontmatter
+
+        body = set_entry_frontmatter(content, apply=apply, description=description)
+        doc = _FakeDoc(name, body, apply, description or "")
+        self.docs[name] = doc
+        self.upserted = True
+        return doc
+
+    async def delete_user_rule_doc(self, user_id, folder_id, name):  # noqa: ARG002
+        return self.docs.pop(name, None) is not None
 
 
-def test_mutate_replace_removes_old_then_writes():
-    base = "- 用英文\n- 别用表格\n"
-    result = mutate_user_rule_markdown(
-        base, action="replace", content="用中文", replaces="用英文"
+@pytest.mark.anyio
+async def test_mutate_write_read_delete_list(monkeypatch: pytest.MonkeyPatch):
+    from agentcore.memory.always_quota import AlwaysQuotaDecision, AlwaysUsage
+
+    async def _allow(*args, **kwargs):  # noqa: ARG001
+        return AlwaysQuotaDecision(
+            allowed=True,
+            usage=AlwaysUsage(used_chars=0, max_chars=1000),
+            message="",
+        )
+
+    monkeypatch.setattr("agentcore.memory.always_quota.check_always_write", _allow)
+    monkeypatch.setattr(
+        "agentcore.memory.rules_injection.maybe_schedule_description_fill",
+        lambda **kwargs: None,
     )
-    assert result.changed is True
-    assert "已替换" in result.message
-    assert "用英文" in result.message
-    assert result.markdown == "- 别用表格\n- 用中文\n"
-    assert result.removed == ("用英文",)
-
-
-def test_mutate_replace_missing_old_appends_honestly():
-    base = "- 别用表格\n"
-    result = mutate_user_rule_markdown(
-        base, action="replace", content="用中文", replaces="用英文"
+    repo = _FakeRepo()
+    written = await mutate_user_rule(
+        repo,  # type: ignore[arg-type]
+        "u1",
+        folder_id=None,
+        action="write",
+        name="回复语言.md",
+        content="用中文回复。",
+        description="回复语言",
     )
-    assert result.changed is True
-    assert "未找到旧条" in result.message
-    assert "已追加" in result.message
-    assert "已替换" not in result.message
-    assert result.markdown == "- 别用表格\n- 用中文\n"
+    assert written.ok and written.changed
+    assert written.name == "回复语言.md"
+    assert "已写入" in written.message
+    assert "用中文回复" in (repo.docs["回复语言.md"].content)
 
-
-def test_mutate_replace_missing_old_and_new_exists():
-    base = "- 用中文\n"
-    result = mutate_user_rule_markdown(
-        base, action="replace", content="用中文", replaces="用英文"
+    again = await mutate_user_rule(
+        repo,  # type: ignore[arg-type]
+        "u1",
+        folder_id=None,
+        action="write",
+        name="回复语言.md",
+        content="用中文回复。",
+        description="回复语言",
     )
-    assert result.changed is False
-    assert "未找到旧条" in result.message
-    assert "已存在" in result.message
+    assert again.ok and again.changed is False
+    assert "没有变化" in again.message
 
-
-def test_mutate_forget_deletes_all_same_key():
-    # Same normalized key via leading/trailing whitespace on the bullet text.
-    base = "- 用中文\n- 别用表格\n-   用中文   \n"
-    result = mutate_user_rule_markdown(base, action="forget", content="用中文")
-    assert result.changed is True
-    assert "已删除" in result.message
-    assert result.markdown == "- 别用表格\n"
-    assert len(result.removed) == 2
-
-
-def test_mutate_forget_casefold_latin():
-    base = "- Prefer English replies\n- 别用表格\n- prefer   english replies\n"
-    result = mutate_user_rule_markdown(
-        base, action="forget", content="PREFER ENGLISH REPLIES"
+    listed = await mutate_user_rule(
+        repo,  # type: ignore[arg-type]
+        "u1",
+        folder_id=None,
+        action="list",
     )
-    assert result.changed is True
-    assert result.markdown == "- 别用表格\n"
-    assert len(result.removed) == 2
+    assert listed.ok and listed.changed is False
+    assert listed.catalog[0][0] == "回复语言.md"
+    assert "回复语言.md" in listed.message
+
+    read = await mutate_user_rule(
+        repo,  # type: ignore[arg-type]
+        "u1",
+        folder_id=None,
+        action="read",
+        name="回复语言",
+    )
+    assert read.ok and "用中文回复" in read.body
+
+    missing = await mutate_user_rule(
+        repo,  # type: ignore[arg-type]
+        "u1",
+        folder_id=None,
+        action="delete",
+        name="不存在.md",
+    )
+    assert missing.ok is False
+
+    deleted = await mutate_user_rule(
+        repo,  # type: ignore[arg-type]
+        "u1",
+        folder_id=None,
+        action="delete",
+        name="回复语言.md",
+    )
+    assert deleted.ok and deleted.changed
+    assert "已删除" in deleted.message
+    assert "回复语言.md" not in repo.docs
 
 
-def test_mutate_forget_not_found():
-    result = mutate_user_rule_markdown("- x\n", action="forget", content="不存在的规则")
-    assert result.changed is False
-    assert "未找到" in result.message
-    assert result.markdown == "- x\n"
+@pytest.mark.anyio
+async def test_mutate_rejects_missing_and_reserved_names():
+    repo = _FakeRepo()
+    missing = await mutate_user_rule(
+        repo,  # type: ignore[arg-type]
+        "u1",
+        folder_id=None,
+        action="write",
+        content="用中文",
+    )
+    assert missing.ok is False
+    assert "缺少 name" in missing.message
+
+    reserved = await mutate_user_rule(
+        repo,  # type: ignore[arg-type]
+        "u1",
+        folder_id=None,
+        action="write",
+        name="画像.md",
+        content="不该写到记忆叶",
+    )
+    assert reserved.ok is False
+    assert "name 不可用" in reserved.message
+    assert repo.upserted is False
 
 
-def test_mutate_list_returns_body_without_claiming_write():
-    empty = mutate_user_rule_markdown("", action="list")
-    assert empty.changed is False
-    assert "暂无" in empty.message
-    assert empty.rules_markdown == ""
-
-    listed = mutate_user_rule_markdown("- 用中文\n", action="list")
-    assert listed.changed is False
-    assert "用中文" in listed.message
-    assert listed.rules_markdown == "- 用中文\n"
-
-
-# --- content integrity gate (add/replace) -------------------------------------
+# --- content integrity gate (write) -------------------------------------------
 
 
 def test_incomplete_rule_content_trailing_ellipsis():
@@ -179,7 +243,6 @@ def test_incomplete_rule_content_trailing_ellipsis():
 
 
 def test_incomplete_rule_content_mid_omission_marker():
-    # Reuses file_ops.has_omission_marker (remember / evals; not a file_write gate).
     assert _is_incomplete_rule_content("以后都用中文（略）回复")
     assert _is_incomplete_rule_content("see ... omitted details")
     assert _is_incomplete_rule_content("中间省略，已保留首尾")
@@ -189,35 +252,38 @@ def test_incomplete_rule_content_mid_omission_marker():
 async def test_remember_rejects_trailing_ellipsis():
     tool = RememberTool(folder_id=None)
     for suffix in ("...", "…", "……"):
-        result = await tool.execute({"content": f"用中文{suffix}"}, _ctx())
+        result = await tool.execute(
+            {"name": "回复语言.md", "content": f"用中文{suffix}"},
+            _ctx(),
+        )
         assert result.success is False
-        assert "完整一句" in (result.output or "")
+        assert "完整一篇" in (result.output or "")
         assert "省略号" in (result.output or "")
 
 
 @pytest.mark.anyio
 async def test_remember_rejects_mid_omission_marker():
     tool = RememberTool(folder_id=None)
-    result = await tool.execute({"content": "用中文（略）别用表格"}, _ctx())
-    assert result.success is False
-    assert "完整一句" in (result.output or "")
-
-
-@pytest.mark.anyio
-async def test_remember_rejects_replace_incomplete_content():
-    tool = RememberTool(folder_id=None)
     result = await tool.execute(
-        {"action": "replace", "content": "用中文...", "replaces": "用英文"},
+        {"name": "回复语言.md", "content": "用中文（略）别用表格"},
         _ctx(),
     )
     assert result.success is False
-    assert "完整一句" in (result.output or "")
+    assert "完整一篇" in (result.output or "")
 
 
 @pytest.mark.anyio
-async def test_remember_empty_content_unchanged():
+async def test_remember_write_requires_name():
     tool = RememberTool(folder_id=None)
-    result = await tool.execute({"content": "   "}, _ctx())
+    result = await tool.execute({"content": "以后都用中文回复"}, _ctx())
+    assert result.success is False
+    assert "缺少 name" in (result.output or "")
+
+
+@pytest.mark.anyio
+async def test_remember_empty_content_with_name():
+    tool = RememberTool(folder_id=None)
+    result = await tool.execute({"name": "回复语言.md", "content": "   "}, _ctx())
     assert result.success is False
     assert result.error == "缺少 content。"
 
@@ -226,46 +292,15 @@ async def test_remember_empty_content_unchanged():
 async def test_remember_complete_content_still_writes(monkeypatch: pytest.MonkeyPatch):
     captured: dict[str, object] = {}
 
-    async def _fake_mutate(_repo, _uid, *, folder_id, action, content, replaces):
-        captured["content"] = content
-        captured["action"] = action
+    async def _fake_mutate(_repo, _uid, **kwargs):
+        captured.update(kwargs)
         return UserRuleMutationResult(
-            action=action,
+            action="write",
             changed=True,
-            message="已追加规则：以后都用中文回复",
-            content=content,
-        )
-
-    monkeypatch.setattr(
-        "agentcore.tools.builtin.remember.mutate_user_rule", _fake_mutate
-    )
-    monkeypatch.setattr(
-        "agentcore.tools.builtin.remember.async_session_factory",
-        lambda: _FakeSession(),
-    )
-
-    tool = RememberTool(folder_id=None)
-    result = await tool.execute({"content": "以后都用中文回复"}, _ctx())
-    assert result.success is True
-    assert captured["content"] == "以后都用中文回复"
-    assert "已追加" in (result.output or "")
-
-
-@pytest.mark.anyio
-async def test_remember_forget_trailing_ellipsis_not_gated(monkeypatch: pytest.MonkeyPatch):
-    """forget has no new-body semantics — trailing ellipsis must not block delete."""
-    called = {"ok": False}
-
-    async def _fake_mutate(_repo, _uid, *, folder_id, action, content, replaces):
-        called["ok"] = True
-        assert action == "forget"
-        assert content == "用中文..."
-        return UserRuleMutationResult(
-            action="forget",
-            changed=True,
-            message="已删除规则：用中文...",
-            content=content,
-            removed=("用中文...",),
+            message="已写入规则「回复语言.md」（常驻）。",
+            name="回复语言.md",
+            apply="always",
+            content=str(kwargs.get("content") or ""),
         )
 
     monkeypatch.setattr(
@@ -278,7 +313,45 @@ async def test_remember_forget_trailing_ellipsis_not_gated(monkeypatch: pytest.M
 
     tool = RememberTool(folder_id=None)
     result = await tool.execute(
-        {"action": "forget", "content": "用中文..."}, _ctx()
+        {"name": "回复语言.md", "content": "以后都用中文回复"},
+        _ctx(),
+    )
+    assert result.success is True
+    assert captured["content"] == "以后都用中文回复"
+    assert captured["name"] == "回复语言.md"
+    assert captured["action"] == "write"
+    assert "已写入" in (result.output or "")
+
+
+@pytest.mark.anyio
+async def test_remember_delete_trailing_ellipsis_not_gated(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    called = {"ok": False}
+
+    async def _fake_mutate(_repo, _uid, **kwargs):
+        called["ok"] = True
+        assert kwargs["action"] == "delete"
+        assert kwargs["name"] == "回复语言.md"
+        return UserRuleMutationResult(
+            action="delete",
+            changed=True,
+            message="已删除规则「回复语言.md」。",
+            name="回复语言.md",
+        )
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.remember.mutate_user_rule", _fake_mutate
+    )
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.remember.async_session_factory",
+        lambda: _FakeSession(),
+    )
+
+    tool = RememberTool(folder_id=None)
+    result = await tool.execute(
+        {"action": "delete", "name": "回复语言.md", "content": "用中文..."},
+        _ctx(),
     )
     assert result.success is True
     assert called["ok"] is True
@@ -286,13 +359,13 @@ async def test_remember_forget_trailing_ellipsis_not_gated(monkeypatch: pytest.M
 
 @pytest.mark.anyio
 async def test_remember_list_unaffected_by_ellipsis_gate(monkeypatch: pytest.MonkeyPatch):
-    async def _fake_mutate(_repo, _uid, *, folder_id, action, content, replaces):
-        assert action == "list"
+    async def _fake_mutate(_repo, _uid, **kwargs):
+        assert kwargs["action"] == "list"
         return UserRuleMutationResult(
             action="list",
             changed=False,
-            message="当前用户规则：\n- 用中文\n",
-            markdown="- 用中文\n",
+            message="当前用户规则：\n- 回复语言.md  常驻",
+            catalog=(("回复语言.md", "always", ""),),
         )
 
     monkeypatch.setattr(
@@ -306,25 +379,7 @@ async def test_remember_list_unaffected_by_ellipsis_gate(monkeypatch: pytest.Mon
     tool = RememberTool(folder_id=None)
     result = await tool.execute({"action": "list"}, _ctx())
     assert result.success is True
-    assert "用中文" in (result.output or "")
-
-
-class _QuotaDoc:
-    id = "d1"
-    content = "- 已有规则\n"
-    apply_mode = "always"
-    role = "rule"
-
-
-class _QuotaRepo:
-    def __init__(self) -> None:
-        self.upserted = False
-
-    async def get_user_rules_doc(self, user_id, folder_id):  # noqa: ARG002
-        return _QuotaDoc()
-
-    async def upsert_user_rules_doc(self, user_id, folder_id, content):  # noqa: ARG002
-        self.upserted = True
+    assert "回复语言.md" in (result.output or "")
 
 
 @pytest.mark.anyio
@@ -334,7 +389,6 @@ async def test_mutate_user_rule_ai_growth_denied(monkeypatch: pytest.MonkeyPatch
         AlwaysQuotaExceededError,
         AlwaysUsage,
     )
-    from agentcore.memory.rules_injection import mutate_user_rule
 
     async def _deny(*args, **kwargs):  # noqa: ARG001
         return AlwaysQuotaDecision(
@@ -350,16 +404,18 @@ async def test_mutate_user_rule_ai_growth_denied(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(
         "agentcore.memory.always_quota.notify_always_quota_exceeded", _no_notify
     )
-    repo = _QuotaRepo()
+    repo = _FakeRepo()
     with pytest.raises(AlwaysQuotaExceededError) as ei:
         await mutate_user_rule(
             repo,  # type: ignore[arg-type]
             "u1",
             folder_id=None,
-            action="add",
+            action="write",
+            name="回复语言.md",
             content="以后都用中文回复",
         )
     assert "配额" in ei.value.message
+    assert ei.value.file == "回复语言.md"
     assert repo.upserted is False
 
 
@@ -371,7 +427,7 @@ async def test_remember_quota_denied_message(monkeypatch: pytest.MonkeyPatch):
         raise AlwaysQuotaExceededError(
             AlwaysUsage(used_chars=100, max_chars=50),
             "常驻条目配额已满",
-            file="用户规则.md",
+            file="回复语言.md",
         )
 
     monkeypatch.setattr("agentcore.tools.builtin.remember.mutate_user_rule", _boom)
@@ -384,7 +440,10 @@ async def test_remember_quota_denied_message(monkeypatch: pytest.MonkeyPatch):
         lambda: None,
     )
     tool = RememberTool(folder_id=None)
-    result = await tool.execute({"content": "以后都用中文回复"}, _ctx())
+    result = await tool.execute(
+        {"name": "回复语言.md", "content": "以后都用中文回复"},
+        _ctx(),
+    )
     assert result.success is False
     assert "配额" in (result.output or "")
     assert "请稍后再试" not in (result.output or "")

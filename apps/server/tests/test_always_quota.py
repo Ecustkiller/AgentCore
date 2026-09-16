@@ -27,11 +27,20 @@ def test_always_entry_chars_unclosed_is_zero():
 
 def test_always_chars_null_for_non_always_rows():
     class _Row:
-        def __init__(self, *, kind: str, role: str, apply_mode: str, content: str) -> None:
+        def __init__(
+            self,
+            *,
+            kind: str,
+            role: str,
+            apply_mode: str,
+            content: str,
+            ai_maintained: bool = False,
+        ) -> None:
             self.kind = kind
             self.role = role
             self.apply_mode = apply_mode
             self.content = content
+            self.ai_maintained = ai_maintained
 
     always = _Row(
         kind="document",
@@ -52,6 +61,30 @@ def test_always_chars_null_for_non_always_rows():
         )
         is None
     )
+    assert (
+        _always_chars(
+            _Row(  # type: ignore[arg-type]
+                kind="document",
+                role="rule",
+                apply_mode="always",
+                content="---\napply: always\n---\nhello",
+                ai_maintained=True,
+            )
+        )
+        is None
+    )
+
+
+def test_always_chars_null_when_disputed():
+    class _Row:
+        kind = "document"
+        role = "rule"
+        apply_mode = "always"
+        content = "---\napply: always\n---\nhello"
+        ai_maintained = False
+        disputed_at = "2026-07-19T12:00:00Z"
+
+    assert _always_chars(_Row()) is None  # type: ignore[arg-type]
 
 
 def test_user_edit_existing_always_over_limit_allows_with_warning():
@@ -194,7 +227,7 @@ async def test_measure_usage_entry_sum_equals_used_and_split():
 
     class FakeRepo:
         async def list_injectable_rules(self, user_id, folder_id, *, ai_maintained):
-            # Merged authorship (ai_maintained=None); bool filters kept for other callers.
+            # User-rule pool (ai_maintained=False); bool filters kept for other callers.
             if folder_id is None:
                 docs = [g]
             elif folder_id == "F1":
@@ -220,29 +253,27 @@ async def test_measure_usage_entry_sum_equals_used_and_split():
     assert usage_proj.used_chars == usage_proj.global_chars + usage_proj.project_chars
 
 
-async def test_measure_usage_merges_ai_maintained_keeps_scope_split():
-    """One list_injectable_rules per scope (ai_maintained=None); global/project split intact."""
+async def test_measure_usage_counts_only_user_rules():
+    """Quota pool is user rules (ai_maintained=False); AI cores do not occupy it."""
     global_user = _Doc("gu", "---\napply: always\n---\ngu")
-    global_ai = _Doc("ga", "---\napply: always\n---\nga")
     project_user = _Doc("pu", "---\napply: always\n---\npu")
-    project_ai = _Doc("pa", "---\napply: always\n---\npa")
     calls: list[tuple[str | None, bool | None]] = []
 
     class FakeRepo:
         async def list_injectable_rules(self, user_id, folder_id, *, ai_maintained):
             calls.append((folder_id, ai_maintained))
-            if ai_maintained is not None:
-                raise AssertionError("quota path must merge authorship into one call")
+            if ai_maintained is not False:
+                raise AssertionError("quota path must count user rules only")
             if folder_id is None:
-                return [global_user, global_ai]
+                return [global_user]
             if folder_id == "F1":
-                return [project_user, project_ai]
+                return [project_user]
             return []
 
     usage = await measure_always_usage(FakeRepo(), "u", folder_id="F1")  # type: ignore[arg-type]
-    assert calls == [(None, None), ("F1", None)]
-    g_chars = always_entry_chars(global_user.content) + always_entry_chars(global_ai.content)
-    p_chars = always_entry_chars(project_user.content) + always_entry_chars(project_ai.content)
+    assert calls == [(None, False), ("F1", False)]
+    g_chars = always_entry_chars(global_user.content)
+    p_chars = always_entry_chars(project_user.content)
     assert usage.global_chars == g_chars
     assert usage.project_chars == p_chars
     assert usage.used_chars == g_chars + p_chars

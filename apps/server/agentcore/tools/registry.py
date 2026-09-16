@@ -21,6 +21,8 @@ _KNOWN_TOOL_ALIASES: dict[str, str] = {
     "curl": "download_url",
     "write": "file_write",
     "file_append": "str_replace",
+    "md_to_docx": "md_export",
+    "md_to_pdf": "md_export",
     "read": "file_read",
     "search": "web_search",
     "websearch": "web_search",
@@ -71,10 +73,11 @@ class ToolRegistry:
 
         Returns True when the deferred set changed.
         """
-        from agentcore.tools.on_demand import family_of
+        from agentcore.tools.on_demand import family_of, resolve_on_demand_name
 
+        resolved = resolve_on_demand_name(self, name) or name
         changed = False
-        for sibling in family_of(name, registry=self):
+        for sibling in family_of(resolved, registry=self):
             if sibling in self._deferred:
                 self._deferred.discard(sibling)
                 changed = True

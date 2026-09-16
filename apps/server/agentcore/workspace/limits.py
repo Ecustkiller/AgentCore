@@ -117,8 +117,7 @@ WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS: tuple[str, ...] = (
     # (read the .md or .zip, write the sibling artifact / members / downloaded
     # bytes), so leaving them on the surface only buys guaranteed-failed rounds.
     # download_url even burns its network fetch first, then fails on write.
-    "md_to_docx",
-    "md_to_pdf",
+    "md_export",
     "archive_extract",
     "archive_create",
     "download_url",
