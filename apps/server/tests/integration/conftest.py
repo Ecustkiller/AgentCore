@@ -213,7 +213,12 @@ async def session_factory() -> AsyncIterator[async_sessionmaker]:
     # from seeing dev tables in `public` and skipping table creation.
     engine = create_async_engine(
         _test_db_url(),
-        connect_args={"server_settings": {"search_path": _TEST_SCHEMA}},
+        connect_args={
+            "server_settings": {
+                "search_path": _TEST_SCHEMA,
+                "application_name": _TEST_SCHEMA,
+            }
+        },
         poolclass=NullPool,
     )
     try:
@@ -249,6 +254,22 @@ async def session_factory() -> AsyncIterator[async_sessionmaker]:
     finally:
         app.dependency_overrides.pop(get_db, None)
         async with engine.begin() as conn:
+            # A test that keeps using a session after `async with factory()`
+            # can leave a checkout; DROP SCHEMA waits on it until pytest-timeout
+            # kills the whole CI job. Terminate leftover backends for this
+            # schema first (application_name is unique per pytest process).
+            await conn.execute(
+                text(
+                    """
+                    SELECT pg_terminate_backend(pid)
+                    FROM pg_stat_activity
+                    WHERE pid <> pg_backend_pid()
+                      AND datname = current_database()
+                      AND application_name = :app
+                    """
+                ),
+                {"app": _TEST_SCHEMA},
+            )
             await conn.execute(text(f"DROP SCHEMA IF EXISTS {_TEST_SCHEMA} CASCADE"))
         await engine.dispose()
 

@@ -144,11 +144,15 @@ async def test_user_rule_injects_without_ai_notes(session_factory):
         await store.save(uid, PREFERENCES_MEMORY_FILE, "## 沟通偏好\n- 倾向简洁", scope=None)
         await store.save(uid, CORE_MEMORY_FILE, "## 技术栈与工具\n- 用 Python", scope=None)
         rules_md = await assemble_injected_rules(store, repo, uid, folder_id=None)
+        # Keep loads on the live session: using the bound store after this
+        # block returns leaves a checkout that blocks DROP SCHEMA in teardown.
+        prefs = await store.load(uid, PREFERENCES_MEMORY_FILE)
+        core = await store.load(uid, CORE_MEMORY_FILE)
     assert "必须始终用中文" in rules_md
     assert "用 Python" not in rules_md
     assert "倾向简洁" not in rules_md
-    assert "倾向简洁" in await store.load(uid, PREFERENCES_MEMORY_FILE)
-    assert "用 Python" in await store.load(uid, CORE_MEMORY_FILE)
+    assert "倾向简洁" in prefs
+    assert "用 Python" in core
 
 
 async def test_user_rule_survives_when_ai_notes_exist(session_factory):
