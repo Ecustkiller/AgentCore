@@ -1,0 +1,87 @@
+[
+  {
+    "id": "style_greet",
+    "category": "qa",
+    "_note": "助手腔开场/收尾高发：寒暄。消融协议见同目录 README。",
+    "user_message": "你好呀，今天怎么样？",
+    "path": "single",
+    "mode": "economy",
+    "toolset": "ceo",
+    "samples": 3,
+    "checks": [
+      { "name": "FinishReason" },
+      { "name": "NonEmpty", "args": { "min_len": 2 } },
+      { "name": "MaxRounds", "args": { "budget": 3 } }
+    ]
+  },
+  {
+    "id": "style_thanks",
+    "category": "qa",
+    "user_message": "谢谢你刚才帮我理清思路，辛苦了。",
+    "path": "single",
+    "mode": "economy",
+    "toolset": "ceo",
+    "samples": 3,
+    "checks": [
+      { "name": "FinishReason" },
+      { "name": "NonEmpty", "args": { "min_len": 2 } },
+      { "name": "MaxRounds", "args": { "budget": 3 } }
+    ]
+  },
+  {
+    "id": "style_explain",
+    "category": "qa",
+    "user_message": "用一句话解释什么是幂等性（idempotency）。",
+    "path": "single",
+    "mode": "economy",
+    "toolset": "ceo",
+    "samples": 3,
+    "checks": [
+      { "name": "FinishReason" },
+      { "name": "NonEmpty", "args": { "min_len": 2 } },
+      { "name": "MaxRounds", "args": { "budget": 3 } }
+    ]
+  },
+  {
+    "id": "style_list",
+    "category": "qa",
+    "user_message": "列出三条写好 commit message 的实用建议，每条一句话。",
+    "path": "single",
+    "mode": "economy",
+    "toolset": "ceo",
+    "samples": 3,
+    "checks": [
+      { "name": "FinishReason" },
+      { "name": "NonEmpty", "args": { "min_len": 2 } },
+      { "name": "MaxRounds", "args": { "budget": 3 } }
+    ]
+  },
+  {
+    "id": "style_invite",
+    "category": "qa",
+    "user_message": "帮我看看这个想法靠不靠谱：把所有配置都塞进一个 JSON。请一句话表态。",
+    "path": "single",
+    "mode": "economy",
+    "toolset": "ceo",
+    "samples": 3,
+    "checks": [
+      { "name": "FinishReason" },
+      { "name": "NonEmpty", "args": { "min_len": 2 } },
+      { "name": "MaxRounds", "args": { "budget": 3 } }
+    ]
+  },
+  {
+    "id": "style_en_mutex",
+    "category": "qa",
+    "user_message": "Can you help me understand what a mutex is in one sentence?",
+    "path": "single",
+    "mode": "economy",
+    "toolset": "ceo",
+    "samples": 3,
+    "checks": [
+      { "name": "FinishReason" },
+      { "name": "NonEmpty", "args": { "min_len": 2 } },
+      { "name": "MaxRounds", "args": { "budget": 3 } }
+    ]
+  }
+]
