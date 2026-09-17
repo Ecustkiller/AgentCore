@@ -7,7 +7,7 @@ export type DebateArenaLayout = "split" | "stack";
 
 const STORAGE_KEY = "debate-arena-layout";
 
-/** 赛事页外层容器宽度（记分牌 + 剧本主列共用）。 */
+/** 赛事页外层容器宽度（顶栏 + 剧本主列共用）。 */
 export const DEBATE_ARENA_PAGE_MAX = "max-w-7xl";
 
 /**

@@ -38,7 +38,9 @@ async def test_capabilities_returns_full_catalog(client):
     assert "escalate" in tools
     assert tools["escalate"]["available_to"] == ["worker"]
     assert "update_folder_profile" not in tools
-    assert "remember" in tools
+    assert "remember" not in tools
+    assert "code_search" not in tools
+    assert "project_shell" not in tools
     # Shared read/retrieval built-ins.
     for name in ("web_search",):
         assert name in tools
@@ -57,12 +59,7 @@ async def test_capabilities_lists_system_skills_with_body(client):
 
     body = (await client.get("/v1/capabilities")).json()
     skills = {s["name"]: s for s in body["skills"]}
-    assert "staffing" in skills
-    assert "lead_subteam" in skills
-    assert skills["lead_subteam"]["summary"] == "子队拆法"
-    assert skills["staffing"]["group"] == "编排"
-    assert skills["staffing"]["audience"] == ["ceo"]
-    assert skills["lead_subteam"]["audience"] == ["worker"]
+    assert "ask_kickoff" in skills
     assert set(skills["ask_kickoff"]["audience"]) == {"ceo", "worker"}
     assert "ask_kickoff" in skills
     assert "ask_midtask" in skills

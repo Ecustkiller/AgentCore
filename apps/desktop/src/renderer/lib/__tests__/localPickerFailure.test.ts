@@ -137,7 +137,6 @@ describe("pickAndOpenLocalFolder mode=local", () => {
       listDir: vi.fn(),
     } as unknown as typeof window.fsApi;
     window.sidecarApi = {
-      warmCodeIndex: vi.fn().mockResolvedValue(undefined),
       warmMcpDiscover: vi.fn().mockResolvedValue(undefined),
       warmAccountRulesMemory: vi.fn().mockResolvedValue(undefined),
     } as unknown as typeof window.sidecarApi;
@@ -175,10 +174,6 @@ describe("pickAndOpenLocalFolder mode=local", () => {
     });
     expect(addFolderCache).toHaveBeenCalledWith(folder);
     expect(startNewConversation).toHaveBeenCalledWith(navigate, "folder-1");
-    expect(window.sidecarApi.warmCodeIndex).toHaveBeenCalledWith({
-      rootId: "root-1",
-      subpath: "",
-    });
     expect(window.sidecarApi.warmMcpDiscover).toHaveBeenCalledWith({
       rootId: "root-1",
       subpath: "",
@@ -240,7 +235,6 @@ describe("pickAndRegisterLocalFolder mode=local", () => {
       listDir: vi.fn(),
     } as unknown as typeof window.fsApi;
     window.sidecarApi = {
-      warmCodeIndex: vi.fn().mockResolvedValue(undefined),
       warmMcpDiscover: vi.fn().mockResolvedValue(undefined),
       warmAccountRulesMemory: vi.fn().mockResolvedValue(undefined),
     } as unknown as typeof window.sidecarApi;
@@ -277,10 +271,6 @@ describe("pickAndRegisterLocalFolder mode=local", () => {
     });
     expect(addFolderCache).toHaveBeenCalledWith(folder);
     expect(startNewConversation).not.toHaveBeenCalled();
-    expect(window.sidecarApi.warmCodeIndex).toHaveBeenCalledWith({
-      rootId: "root-2",
-      subpath: "",
-    });
     expect(window.sidecarApi.warmMcpDiscover).toHaveBeenCalledWith({
       rootId: "root-2",
       subpath: "",

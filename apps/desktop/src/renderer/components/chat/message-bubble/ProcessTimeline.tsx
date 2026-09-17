@@ -102,7 +102,6 @@ const ProcessRow = memo(function ProcessRow({
   step,
   streaming,
   citations,
-  citationToDisplay,
   knownLedgerIds,
   evidenceLedger,
   turnKey,
@@ -113,7 +112,6 @@ const ProcessRow = memo(function ProcessRow({
   step: ProcessStep;
   streaming: boolean;
   citations: Citation[];
-  citationToDisplay?: ReadonlyMap<number, number>;
   knownLedgerIds?: ReadonlySet<string> | null;
   evidenceLedger?: readonly TurnEvidenceLedgerEntry[] | null;
   /** 回合作用域（= messageId）：给了才持久化本行的折叠态；缺省走会话态。 */
@@ -141,7 +139,6 @@ const ProcessRow = memo(function ProcessRow({
           content={step.text}
           conversationId={conversationId}
           citations={citations}
-          citationToDisplay={citationToDisplay}
           knownLedgerIds={knownLedgerIds}
           evidenceLedger={evidenceLedger}
           isStreaming={streaming}
@@ -164,7 +161,6 @@ export function TimelineNodeView({
   nodeKey,
   live,
   citations,
-  citationToDisplay,
   knownLedgerIds = null,
   evidenceLedger = null,
   messageId,
@@ -179,7 +175,6 @@ export function TimelineNodeView({
   nodeKey: string;
   live: boolean;
   citations: Citation[];
-  citationToDisplay?: ReadonlyMap<number, number>;
   knownLedgerIds?: ReadonlySet<string> | null;
   evidenceLedger?: readonly TurnEvidenceLedgerEntry[] | null;
   messageId?: string;
@@ -251,7 +246,6 @@ export function TimelineNodeView({
       step={step}
       streaming={live}
       citations={citations}
-      citationToDisplay={citationToDisplay}
       knownLedgerIds={knownLedgerIds}
       evidenceLedger={evidenceLedger}
       turnKey={messageId}
@@ -348,7 +342,6 @@ export function ProcessTimeline({
   process,
   isStreaming,
   citations,
-  citationToDisplay,
   knownLedgerIds = null,
   evidenceLedger = null,
   composingTool,
@@ -367,7 +360,6 @@ export function ProcessTimeline({
   process: ProcessStep[];
   isStreaming: boolean;
   citations: Citation[];
-  citationToDisplay?: ReadonlyMap<number, number>;
   knownLedgerIds?: ReadonlySet<string> | null;
   evidenceLedger?: readonly TurnEvidenceLedgerEntry[] | null;
   composingTool: { toolName: string; chars: number } | null;
@@ -431,7 +423,6 @@ export function ProcessTimeline({
         content={fallbackContent}
         conversationId={conversationId}
         citations={citations}
-        citationToDisplay={citationToDisplay}
         knownLedgerIds={knownLedgerIds}
         evidenceLedger={evidenceLedger}
         isStreaming={isStreaming}
@@ -446,7 +437,6 @@ export function ProcessTimeline({
       nodeKey={nodeKeys[i] ?? String(i)}
       live={isStreaming && i === nodes.length - 1}
       citations={citations}
-      citationToDisplay={citationToDisplay}
       knownLedgerIds={knownLedgerIds}
       evidenceLedger={evidenceLedger}
       messageId={messageId}

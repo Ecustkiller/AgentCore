@@ -454,7 +454,7 @@
         "title": "AccountMemoryScopeRequest",
         "type": "object"
       },
-      "AccountRememberCatalogItem": {
+      "AccountRuleCatalogItem": {
         "properties": {
           "apply": {
             "default": "",
@@ -474,133 +474,7 @@
         "required": [
           "name"
         ],
-        "title": "AccountRememberCatalogItem",
-        "type": "object"
-      },
-      "AccountRememberRequest": {
-        "properties": {
-          "action": {
-            "default": "write",
-            "enum": [
-              "write",
-              "read",
-              "delete",
-              "list"
-            ],
-            "title": "Action",
-            "type": "string"
-          },
-          "apply": {
-            "anyOf": [
-              {
-                "enum": [
-                  "always",
-                  "on_demand"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Apply"
-          },
-          "content": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Content"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "folder_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Folder Id"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          }
-        },
-        "title": "AccountRememberRequest",
-        "type": "object"
-      },
-      "AccountRememberResponse": {
-        "properties": {
-          "action": {
-            "title": "Action",
-            "type": "string"
-          },
-          "apply": {
-            "default": "",
-            "title": "Apply",
-            "type": "string"
-          },
-          "body": {
-            "default": "",
-            "title": "Body",
-            "type": "string"
-          },
-          "catalog": {
-            "items": {
-              "$ref": "#/components/schemas/AccountRememberCatalogItem"
-            },
-            "title": "Catalog",
-            "type": "array"
-          },
-          "changed": {
-            "title": "Changed",
-            "type": "boolean"
-          },
-          "message": {
-            "title": "Message",
-            "type": "string"
-          },
-          "name": {
-            "default": "",
-            "title": "Name",
-            "type": "string"
-          },
-          "ok": {
-            "default": true,
-            "title": "Ok",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "changed",
-          "action",
-          "message"
-        ],
-        "title": "AccountRememberResponse",
+        "title": "AccountRuleCatalogItem",
         "type": "object"
       },
       "AccountRuleDoc": {
@@ -635,6 +509,135 @@
           "content"
         ],
         "title": "AccountRuleDoc",
+        "type": "object"
+      },
+      "AccountRuleMutationResponse": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "apply": {
+            "default": "",
+            "title": "Apply",
+            "type": "string"
+          },
+          "body": {
+            "default": "",
+            "title": "Body",
+            "type": "string"
+          },
+          "catalog": {
+            "items": {
+              "$ref": "#/components/schemas/AccountRuleCatalogItem"
+            },
+            "title": "Catalog",
+            "type": "array"
+          },
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "changed",
+          "action",
+          "message"
+        ],
+        "title": "AccountRuleMutationResponse",
+        "type": "object"
+      },
+      "AccountRuleNameRequest": {
+        "properties": {
+          "folder_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folder Id"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "AccountRuleNameRequest",
+        "type": "object"
+      },
+      "AccountRuleWriteRequest": {
+        "properties": {
+          "apply": {
+            "anyOf": [
+              {
+                "enum": [
+                  "always",
+                  "on_demand"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apply"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "folder_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folder Id"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "content"
+        ],
+        "title": "AccountRuleWriteRequest",
         "type": "object"
       },
       "AccountRulesListRequest": {
@@ -11328,7 +11331,7 @@
             "type": "string"
           },
           "required_protocol": {
-            "description": "Upstream protocol this model needs that this gateway does not speak (chat/completions only).",
+            "description": "Protocol this catalog row needs that is unavailable on this origin. Platform greys both; BYOK OpenCode already speaks anthropic_messages.",
             "enum": [
               "openai_responses",
               "anthropic_messages"
@@ -17328,7 +17331,7 @@
   "info": {
     "description": "Multi-Agent AI Workspace API",
     "title": "AgentCore",
-    "version": "0.7.22"
+    "version": "0.7.23"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -18496,6 +18499,82 @@
         ]
       }
     },
+    "/v1/account/rules/delete": {
+      "post": {
+        "description": "Delete one named user-rule markdown under .agentcore/规则/.",
+        "operationId": "delete_account_user_rule_v1_account_rules_delete_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountRuleNameRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountRuleMutationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Account User Rule",
+        "tags": [
+          "account"
+        ]
+      }
+    },
     "/v1/account/rules/list": {
       "post": {
         "description": "User rules for turn assembly: always → ``<设定>``; on_demand → catalog + consult.",
@@ -18572,10 +18651,10 @@
         ]
       }
     },
-    "/v1/account/rules/remember": {
+    "/v1/account/rules/read": {
       "post": {
-        "description": "Write / read / delete / list a named user-rule markdown under AgentCore/规则/.",
-        "operationId": "remember_account_user_rule_v1_account_rules_remember_post",
+        "description": "Read one named user-rule markdown under .agentcore/规则/.",
+        "operationId": "read_account_user_rule_v1_account_rules_read_post",
         "parameters": [
           {
             "in": "header",
@@ -18614,7 +18693,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AccountRememberRequest"
+                "$ref": "#/components/schemas/AccountRuleNameRequest"
               }
             }
           },
@@ -18625,7 +18704,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AccountRememberResponse"
+                  "$ref": "#/components/schemas/AccountRuleMutationResponse"
                 }
               }
             },
@@ -18642,7 +18721,83 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Remember Account User Rule",
+        "summary": "Read Account User Rule",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/v1/account/rules/write": {
+      "post": {
+        "description": "Write a named user-rule markdown under .agentcore/规则/.",
+        "operationId": "write_account_user_rule_v1_account_rules_write_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountRuleWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountRuleMutationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Write Account User Rule",
         "tags": [
           "account"
         ]

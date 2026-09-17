@@ -355,11 +355,10 @@ class ContentMatchesCheck:
 class DeliverableIntegrityCheck:
     """成品完整性（确定性）：禁省略标记 + 同 path 连续 ``file_write`` 字数骤降。
 
-    复用 ``file_ops.has_omission_marker`` / ``is_severe_shrink``（eval / remember
-    用；``file_write`` 路径不再做完整性硬拒或成功回执 nudge）。扫 ``outcome.content``
-    与全部 ``file_write`` 入参正文；任一含省略标记即
-    不过。字数骤降仅在同一 path **有旧稿**（≥2 次 write）时比末次 vs 前次；无旧稿跳过该维，
-    避免首写误报。默认 gating（不进 ``DIAGNOSTIC_CHECKS``）。
+    复用 ``file_ops.has_omission_marker`` / ``is_severe_shrink``（仅 eval；
+    写路径不做完整性硬拒）。扫 ``outcome.content`` 与全部 ``file_write`` 入参正文；
+    任一含省略标记即不过。字数骤降仅在同一 path **有旧稿**（≥2 次 write）时比末次 vs
+    前次；无旧稿跳过该维，避免首写误报。默认 gating（不进 ``DIAGNOSTIC_CHECKS``）。
     """
 
     name: str = "DeliverableIntegrity"

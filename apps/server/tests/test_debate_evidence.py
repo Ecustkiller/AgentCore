@@ -65,7 +65,6 @@ def _two_sides() -> list[DebateSide]:
 
 def _config(
     *,
-    thorough: bool = True,
     background: str = "",
     research_dossier_index: str = "",
 ) -> DebateConfig:
@@ -73,7 +72,7 @@ def _config(
         motion="该不该做 X",
         form=DebateForm.DEBATE,
         sides=_two_sides(),
-        policy=RoundPolicy(thorough=thorough, max_rounds=5),
+        policy=RoundPolicy(max_rounds=5),
         background=background,
         research_dossier_index=research_dossier_index,
     )
@@ -305,7 +304,7 @@ def test_judge_prompt_still_penalizes_unsupported_when_passed_off_as_fact():
     assert "无据硬拗" in user or "硬拗" in user
 
 
-# --- 决定性事实要一手来源（A）+ 结论继承置信标注（B）----------------------------
+# --- 决定性事实要一手来源（A）+ 结论继承证据状态（B）----------------------------
 # 方案 A+B（辩论编排设计.md §4-2.2/§4-2.3·grounding）验收面同样是【prompt 契约】：记分对来源分级
 # （一手/权威 vs 单一二手）、简报把【待核实/二手】证据状态继承进结论、CEO 收尾不得抹平保留语。
 # 命中率本身留真模型/eval，这里只断言约束是否注入（可无 LLM）。
@@ -325,7 +324,7 @@ def _brief_user_prompt(*, background: str = "", research_dossier_index: str = ""
 
 
 def test_judge_prompt_grades_evidence_by_source_tier():
-    """裁判 evidence 记分按来源等级挂钩：司法文书/官方原文 > 权威媒体 > 转述/百科。"""
+    """裁判无据判断按来源等级挂钩：司法文书/官方原文 > 权威媒体 > 转述/百科。"""
     llm = _CaptureLLM()
     mod = Moderator(provider=llm, model="m")
     asyncio.run(mod._judge_and_summarize(_config(), "成本是否可控", _turns(), []))
@@ -334,8 +333,7 @@ def test_judge_prompt_grades_evidence_by_source_tier():
     assert "司法文书" in user and "官方原文" in user
     assert "权威媒体" in user
     assert "转述" in user and "百科" in user
-    assert "封顶打低" in user
-    assert "未深读" in user and ("note" in user or "penalties" in user)
+    assert "未深读" in user
     assert "优先读条目 tier" in user or "本轮引用证据台账" in user
     assert "unknown" in user and "未分级" in user
     assert "弱源" not in user
@@ -463,7 +461,7 @@ def test_ceo_output_preserves_weak_tier_status():
         rounds=[_last_round()],
         brief=DebateBrief(
             crux="成本可控性",
-            strongest_points={"pro": "多家媒体称成本可控【二手来源·未深读】"},
+            leaning="多家媒体称成本可控【二手来源·未深读】",
         ),
     )
     out = result.to_ceo_output()
@@ -473,16 +471,16 @@ def test_ceo_output_preserves_weak_tier_status():
 
 
 def test_brief_prompt_inherits_evidence_status_into_conclusion():
-    """简报 prompt：decisive/leaning 依赖的【待核实/仅二手】事实不得当既定，须降置信或移进分歧。"""
+    """简报 prompt：decisive/leaning 依赖的【待核实/仅二手】事实不得当既定，须降把握或移进分歧。"""
     user = _brief_user_prompt()
     assert "继承到结论" in user
     assert "需一手核实" in user
     assert "二手来源" in user  # 单一二手来源不当既定事实
     assert "未深读" in user
     assert "弱源" not in user
-    # 要么显式降级、要么移进交接清单（factual_disputes / open_questions；别在收尾抹平）。
+    # 要么显式降级、要么移进未决清单（factual_disputes / open_questions；别在收尾抹平）。
     assert "factual_disputes" in user and "open_questions" in user
-    assert "交接清单" in user or "value_disputes" in user
+    assert "未决清单" in user or "value_disputes" in user
 
 
 def test_brief_prompt_includes_background_and_handoff_reconcile():
@@ -516,28 +514,24 @@ def test_brief_prompt_keeps_reversal_condition_after_grounding_insert():
 
 
 def test_brief_prompt_handoffs_questionify_value_and_length_discipline():
-    """交接清单：value 只出问句；三键去水压成单句（对齐 strongest_points）。"""
+    """交接：value 只出问句；三栏去水压成单句。"""
     user = _brief_user_prompt()
     assert "问句" in user
     assert "你的选择如何影响结论" not in user
     assert "你选 A→" not in user
     assert "去水压成单句" in user and "只留命门" in user
     assert "禁复合长句堆叠" in user
-    assert "按解决路径互斥归类" in user
     assert "内联在条目文本" in user or "证据状态语" in user
 
 
 def test_brief_prompt_field_mutex_and_length_discipline():
-    """正反简报：倾向/胜负手/置信档各写一件事；反转在 leaning；禁抄记分。"""
+    """正反简报：倾向/胜负手/把握档各写一件事；反转在 leaning。"""
     user = _brief_user_prompt()
     assert "正反简报" in user and "各司其职" in user
     assert "单句≤50字" in user
-    assert "≤60字" in user and "禁分号堆叠" in user
-    assert "禁复述记分数字" in user
     assert "high" in user and "medium" in user and "low" in user
     assert "不写散文" in user
     assert "反转条件" in user and "leaning" in user
-    assert "方向" in user
     assert '"crux"' in user and "正反留空" in user
 
 
@@ -620,7 +614,7 @@ def test_ceo_output_preserves_unverified_reservations():
 
 
 def test_ceo_output_requires_verbatim_verdict_conveyance():
-    """简报倾向 / 置信度仍渲染；短尾不贴「原样传达裁决」铁律全文。"""
+    """简报倾向 / 把握仍渲染；短尾不贴「原样传达裁决」铁律全文。"""
     result = DebateResult(
         config=_config(),
         rounds=[_last_round()],
@@ -628,7 +622,7 @@ def test_ceo_output_requires_verbatim_verdict_conveyance():
     )
     out = result.to_ceo_output()
     assert "略偏反方" in out
-    assert "置信度" in out
+    assert "把握" in out
     _assert_ceo_short_tail(out)
     assert "原样传达裁决" not in out
     assert "一边倒" not in out
@@ -701,9 +695,9 @@ def test_ceo_output_renders_handoffs_by_kind():
         ),
     )
     out = result.to_ceo_output()
-    assert "需你定夺" in out and "速度优先？" in out
-    assert "事实分歧" in out and "真实成本【待核实】" in out
-    assert "待解问题" in out and "明年监管会不会收紧？" in out
+    assert "要你拍" in out and "速度优先？" in out
+    assert "还没核实" in out and "真实成本【待核实】" in out
+    assert "只能等" in out and "明年监管会不会收紧？" in out
     assert "仅剩需你拍板的点" not in out
 
 

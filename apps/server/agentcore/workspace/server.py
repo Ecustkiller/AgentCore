@@ -33,7 +33,6 @@ from agentcore.workspace._paths import (
     is_ignored_file_name,
     is_system_ignored_file_name,
     normalize_glob,
-    path_has_non_internal_entries,
     resolve_safe_path,
 )
 from agentcore.workspace.channel import WorkspaceChannel
@@ -49,13 +48,6 @@ from agentcore.workspace.external_mounts import (
     parse_external_path,
     route_external,
 )
-from agentcore.workspace.indexing.maintainer import IndexMaintainer
-from agentcore.workspace.indexing.manager import IndexManager
-from agentcore.workspace.indexing.registry import (
-    drop_index_registry,
-    shared_index_maintainer_for_dir,
-    shared_index_manager_for_dir,
-)
 from agentcore.workspace.limits import (
     FILE_TOO_LARGE_DETAIL,
     OFFICE_EXTRACT_DISK_MAX_BYTES,
@@ -67,7 +59,6 @@ from agentcore.workspace.locks import workspace_lock
 from agentcore.workspace.protocol import (
     AlreadyExists,
     AmbiguousMatch,
-    CodeSearchResult,
     DirEntry,
     DirListing,
     GlobFilesQuery,
@@ -91,7 +82,6 @@ from agentcore.workspace.protocol import (
 )
 from agentcore.workspace.rg_grep import run_files_rg, run_grep_rg
 from agentcore.workspace.sparse_listing import is_ai_list_hidden_file
-from agentcore.workspace.stage_dirs import INDEX_ZONE_NAME, internal_zone_path
 from agentcore.workspace.text_replace import (
     TextReplaceAmbiguous,
     TextReplaceNoMatch,
@@ -363,7 +353,7 @@ class ServerWorkspace:
         # user's own directory). Cloud
         # conversation workspaces pass an out-of-tree, id-keyed path: cloud folders
         # nest for real, so an ancestor folder must not see a child's deleted
-        # files / baseline zips / index DB as ordinary content, and the zones must
+        # files / baseline zips as ordinary content, and the zones must
         # survive the child being renamed (双模式工作区 §5.4).
         self._internal_root = internal_root
         self.root_label = root_label
@@ -376,8 +366,6 @@ class ServerWorkspace:
         # Flips True on the first mutating op so the service snapshots only
         # workspaces a turn actually changed (see WorkspaceBackend.dirty).
         self._dirty = False
-        self._index_manager: IndexManager | None = None
-        self._index_maintainer: IndexMaintainer | None = None
         # W3 session mounts (``external/<alias>/…``). Sidecar sets ``abs_path``;
         # cloud grants carry ``root_id`` only and need ``_external_bridge``.
         self._mounts: dict[str, ExternalMount] = {}
@@ -405,42 +393,7 @@ class ServerWorkspace:
         return self._dirty
 
     def _mark_mutated(self) -> None:
-        """Snapshot dirty + invalidate code index (schedule background refresh).
-
-        Always routes through :meth:`start_code_index_maintenance` so the first
-        write on a previously empty workspace still starts indexing (empty /
-        internal-only trees are a no-op until non-internal content exists).
-        """
         self._dirty = True
-        if self._index_manager is not None:
-            self._index_manager.mark_content_dirty()
-        self.start_code_index_maintenance()
-
-    def start_code_index_maintenance(self) -> None:
-        """Kick coalesced background ensure (write / ``code_search`` / warm).
-
-        Uses the process-wide maintainer for this **index dir** so sidecar turn
-        backends and ``warmCodeIndex`` coalesce. Keying on the index dir rather
-        than the root also means a folder rename keeps one SQLite handle instead
-        of opening a second one under the new path. Lazy B1: only when the
-        workspace has non-internal content — empty chats must not materialize an
-        index dir (which would leak into hub has_files while in-tree).
-        """
-        if not path_has_non_internal_entries(self._root):
-            return
-        self._get_index_manager()
-        self._index_maintainer = shared_index_maintainer_for_dir(self.index_dir, self)
-        self._index_maintainer.schedule()
-
-    async def _release_code_index_for_tree_delete(self) -> None:
-        """Abort maintenance + drop SQLite handles before removing the index dir.
-
-        Windows cannot ``rmtree`` a SQLite file held open by a background ensure
-        (WinError 32).
-        """
-        await drop_index_registry(self.index_dir)
-        self._index_manager = None
-        self._index_maintainer = None
 
     def attach_external_mounts(self, mounts: dict[str, ExternalMount]) -> None:
         """Attach session-scoped external mounts for this turn (W3 / organize)."""
@@ -493,13 +446,6 @@ class ServerWorkspace:
     def root(self) -> Path:
         """The server-side workspace directory (used by the snapshot path)."""
         return self._root
-
-    @property
-    def index_dir(self) -> Path:
-        """Where this workspace's BM25 code index lives (may be outside the tree)."""
-        return internal_zone_path(
-            INDEX_ZONE_NAME, root=self._root, internal_root=self._internal_root
-        )
 
     def _internal_root_for(self, mount_root: Path) -> Path | None:
         """Zone container for whichever root an op resolved against.
@@ -600,11 +546,6 @@ class ServerWorkspace:
                 continue
         return _posix(os.path.relpath(resolved, self._root.resolve()))
 
-    def _get_index_manager(self) -> IndexManager:
-        if self._index_manager is None:
-            self._index_manager = shared_index_manager_for_dir(self.index_dir)
-        return self._index_manager
-
     def _reject_oversized_file(
         self,
         target: Path,
@@ -631,8 +572,7 @@ class ServerWorkspace:
             raise WorkspaceIOError(f"{FILE_TOO_LARGE_DETAIL}（{size}字节）")
 
     async def read(self, path: str) -> str:
-        # Reads stay inline, unlike the write path: the background index maintainer
-        # reads workspace files through here, and a read handle held across an await
+        # Keep the read handle off the write path: a handle held across an await
         # makes a concurrent atomic write's ``os.replace`` fail with WinError 5 on
         # Windows (sidecar). ``WORKSPACE_READ_MAX_BYTES`` caps the loop stall.
         if self._external_needs_channel(path):
@@ -1071,9 +1011,7 @@ class ServerWorkspace:
         and the worker manifest behave the same whether a workspace is cloud or local.
         ``order="path"`` (default) = alphabetical (the @ view); ``order="recent"`` =
         newest-first by mtime for the manifest's relevance budget.
-        Each entry carries local-stat ``mtime_ms`` / ``size_bytes`` so
-        ``ensure_index`` can skip unchanged-file reads (same fingerprint contract
-        as desktop ``index_files``).
+        Each entry may carry local-stat ``mtime_ms`` / ``size_bytes``.
         Noise dirs (``.git`` / ``node_modules`` / …) plus path-aware
         ``AgentCore/{index,trash,baselines}``, and AI-tier
         suffixes (``*.db`` / media / binaries) are pruned — same rule set as
@@ -1139,19 +1077,7 @@ class ServerWorkspace:
             # When target is an ancestor of trash (e.g. bare AgentCore/), expand
             # by children instead of moving the whole tree into itself.
             hard = permanent or is_internal_zone_path(path)
-            # Expanding AgentCore/ (or hard-clearing index/) must release the
-            # process-wide BM25 handle first — otherwise Windows shares-locks
-            # ``code_search.db`` and the delete returns 422 mid-flight ensure.
-            will_clear_index = hard and is_internal_zone_path(path) and (
-                path.replace("\\", "/").rstrip("/") == "AgentCore/index"
-                or path.replace("\\", "/").startswith("AgentCore/index/")
-            )
             zone_root = self._internal_root_for(mount_root)
-            will_expand_agentcore = (not hard) and trash_dest_under_target(
-                root=mount_root, target=target, internal_root=zone_root
-            )
-            if will_clear_index or will_expand_agentcore:
-                await self._release_code_index_for_tree_delete()
             trash_rel = (
                 routed.rel if routed is not None else path.replace("\\", "/")
             ) or path.replace("\\", "/")
@@ -1354,26 +1280,6 @@ class ServerWorkspace:
             reveal_archives=query.reveal_archives or self.ai_list_reveal_archives,
         )
         return GlobFilesResult(paths=paths, truncated=truncated, warnings=warnings)
-
-    async def code_search(
-        self,
-        query: str,
-        *,
-        language: str | None = None,
-        path_prefix: str = ".",
-        max_results: int = 10,
-    ) -> CodeSearchResult:
-        manager = self._get_index_manager()
-        return await manager.search(
-            query,
-            language=language,
-            path_prefix=path_prefix,
-            max_results=max_results,
-        )
-
-    async def ensure_code_index(self, *, force: bool = False) -> bool:
-        manager = self._get_index_manager()
-        return await manager.ensure_index(self, force=force)
 
     async def execute(self, req: ExecutionRequest) -> ExecutionResult:
         # Cloud desk must already be up (prepare / resume). Guest create is not

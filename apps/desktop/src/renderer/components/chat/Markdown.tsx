@@ -1,3 +1,8 @@
+import {
+  cleanSourceTitle,
+  inlineSourceLabel,
+  urlsPointSameSource,
+} from "@/lib/citations";
 import type { FileSource } from "@/lib/fileSource";
 import { remarkCitations } from "@/lib/remarkCitations";
 import { remarkEvidence } from "@/lib/remarkEvidence";
@@ -27,10 +32,6 @@ import { SourceTooltip } from "./SourcePreview";
 import { CompareFence } from "./compare/CompareFence";
 import { rehypeCodeMeta } from "./rehypeCodeMeta";
 import { splitMarkdownBlocks } from "./streamingMarkdown";
-
-/** Inline cite marker: muted pill with favicon (letter fallback) + number. */
-const CITE_CHIP_CLASS =
-  "mx-0.5 inline-flex h-4 items-center gap-0.5 rounded-full bg-muted px-1 align-middle text-xs font-medium tabular-nums leading-none text-muted-foreground no-underline hover:bg-accent hover:text-foreground";
 
 function ledgerEntryAsCitation(
   entry: TurnEvidenceLedgerEntry,
@@ -106,7 +107,7 @@ const MarkdownChunk = memo(function MarkdownChunk({
 });
 
 /**
- * Resolve a `#rN` chip target: prefer ``citations[].id`` (P2 引用集), else fall
+ * Resolve a `#rN` link target: prefer ``citations[].id`` (P2 引用集), else fall
  * back to the turn evidence ledger entry (same URL / meta). Mid-turn ledger can
  * arrive before ``citations_event``; without this fallback the remark rewrite
  * leaves raw ``#rN`` visible.
@@ -115,85 +116,125 @@ function resolveLedgerCitation(
   ledgerId: string,
   citations: Citation[],
   evidenceLedger: readonly TurnEvidenceLedgerEntry[] | null | undefined,
-): { citation: Citation; poolIndex: number; displayFallback: number } | null {
-  const byId = citations.findIndex((c) => c.id === ledgerId);
-  if (byId >= 0) {
-    const citation = citations[byId];
-    if (citation?.url) {
-      return { citation, poolIndex: byId, displayFallback: byId + 1 };
-    }
-  }
+): Citation | null {
+  const byId = citations.find((c) => c.id === ledgerId);
+  if (byId?.url) return withLedgerRead(byId, evidenceLedger);
   const entry = evidenceLedger?.find((e) => e.id === ledgerId);
   if (!entry) return null;
   const asCite = ledgerEntryAsCitation(entry);
   if (!asCite) return null;
-  // Prefer a pool row with the same URL so display numbers stay aligned with SourceCards.
-  const byUrl = citations.findIndex((c) => c.url === asCite.url);
-  const matchedByUrl = byUrl >= 0 ? citations[byUrl] : undefined;
-  if (matchedByUrl) {
-    return {
-      citation: matchedByUrl,
-      poolIndex: byUrl,
-      displayFallback: byUrl + 1,
-    };
+  const matchedByUrl = citations.find((c) =>
+    urlsPointSameSource(c.url, asCite.url),
+  );
+  return withLedgerRead(matchedByUrl ?? asCite, evidenceLedger);
+}
+
+function withLedgerRead(
+  citation: Citation,
+  evidenceLedger: readonly TurnEvidenceLedgerEntry[] | null | undefined,
+): Citation {
+  if (citation.deep_read) return citation;
+  const id = citation.id;
+  if (!id) return citation;
+  const entry = evidenceLedger?.find((e) => e.id === id);
+  if (!entry?.deep_read) return citation;
+  return { ...citation, deep_read: true };
+}
+
+function sourceLinkAria(citation: Citation, ledgerId?: string): string {
+  const full =
+    cleanSourceTitle(citation.title) || citation.site || citation.url || "来源";
+  if (ledgerId) {
+    return citation.deep_read
+      ? `${full}（${ledgerId}，已读）`
+      : `${full}（${ledgerId}）`;
   }
-  const n = Number(/^#r(\d+)$/.exec(ledgerId)?.[1]);
-  return {
-    citation: asCite,
-    poolIndex: -1,
-    displayFallback: Number.isFinite(n) && n > 0 ? n : 1,
-  };
+  return citation.deep_read ? `${full}（已读）` : full;
+}
+
+function citationForHref(
+  href: string,
+  citations: Citation[],
+  evidenceLedger: readonly TurnEvidenceLedgerEntry[] | null | undefined,
+): Citation | null {
+  const hit = citations.find((c) => urlsPointSameSource(c.url, href));
+  if (hit) return withLedgerRead(hit, evidenceLedger);
+  const entry = evidenceLedger?.find((e) => urlsPointSameSource(e.url, href));
+  if (!entry) return null;
+  const asCite = ledgerEntryAsCitation(entry);
+  return asCite ? withLedgerRead(asCite, evidenceLedger) : null;
 }
 
 /**
- * Inline citation marker: muted favicon+number pill, linked to the real source
- * URL (system browser via target=_blank). Hover reuses SourceTooltip.
- * Props arrive from remark's `citemark` via `data.hProperties` (`data-n`).
+ * Sentence-level source: site name stays in the paragraph's inline formatting
+ * context (Primer octicon / Font Awesome). Do not wrap the label in
+ * `inline-flex` — a flex box whose first item is an icon synthesizes its
+ * baseline from the icon's bottom edge and drops the whole mark below CJK.
  */
-function CitationChip({
+function SourceAnchor({
+  citation,
+  href,
+  ariaLabel,
+  children,
+}: {
+  citation: Citation;
+  href: string;
+  ariaLabel?: string;
+  children: ReactNode;
+}) {
+  return (
+    <SourceTooltip citation={citation}>
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        {...(ariaLabel ? { "aria-label": ariaLabel } : {})}
+        className="mx-[0.15em] text-primary no-underline"
+      >
+        <Favicon
+          site={citation.site}
+          title={citation.title}
+          size="1em"
+          className="mr-[0.25em] bg-background"
+        />
+        <span>{children}</span>
+      </a>
+    </SourceTooltip>
+  );
+}
+
+/**
+ * `#rN` / `[n]`: favicon + site name in the sentence. Unregistered ids stay
+ * plain text. Model-authored GFM `[短名](url)` is decorated in the markdown `a`
+ * renderer.
+ */
+function CitationMark({
   "data-n": dataN,
   "data-ledger-id": dataLedgerId,
   citations,
   evidenceLedger,
-  toDisplay,
 }: {
   "data-n"?: string;
   "data-ledger-id"?: string;
   children?: ReactNode;
   citations: Citation[];
   evidenceLedger?: readonly TurnEvidenceLedgerEntry[] | null;
-  toDisplay: ReadonlyMap<number, number>;
 }) {
-  // `#rN` 台账角标：citations.id → 台账条目；都未命中则原样文本（不炸）。
   if (dataLedgerId) {
-    const hit = resolveLedgerCitation(dataLedgerId, citations, evidenceLedger);
-    if (!hit) return <>{dataLedgerId}</>;
-    const { citation, poolIndex, displayFallback } = hit;
-    const display =
-      poolIndex >= 0
-        ? (toDisplay.get(poolIndex + 1) ?? displayFallback)
-        : displayFallback;
-    const chip = (
-      <a
-        href={citation.url}
-        target="_blank"
-        rel="noreferrer"
-        aria-label={`来源 ${display}（${dataLedgerId}）`}
-        className={CITE_CHIP_CLASS}
-      >
-        <Favicon
-          site={citation.site}
-          title={citation.title}
-          size={12}
-          className="bg-background"
-        />
-        {display}
-      </a>
+    const citation = resolveLedgerCitation(
+      dataLedgerId,
+      citations,
+      evidenceLedger,
     );
+    if (!citation?.url) return <>{dataLedgerId}</>;
     return (
-      <SourceTooltip citation={citation} index={display}>
-        {chip}
-      </SourceTooltip>
+      <SourceAnchor
+        citation={citation}
+        href={citation.url}
+        ariaLabel={sourceLinkAria(citation, dataLedgerId)}
+      >
+        {inlineSourceLabel(citation)}
+      </SourceAnchor>
     );
   }
 
@@ -201,32 +242,19 @@ function CitationChip({
   if (!Number.isFinite(canonical) || canonical < 1) {
     return <>{dataN != null ? `[${dataN}]` : null}</>;
   }
-  const citation = citations[canonical - 1];
-  const display = toDisplay.get(canonical);
-  if (!citation?.url || display == null) {
+  const pooled = citations[canonical - 1];
+  if (!pooled?.url) {
     return <>{`[${canonical}]`}</>;
   }
-  const chip = (
-    <a
-      href={citation.url}
-      target="_blank"
-      rel="noreferrer"
-      aria-label={`来源 ${display}`}
-      className={CITE_CHIP_CLASS}
-    >
-      <Favicon
-        site={citation.site}
-        title={citation.title}
-        size={12}
-        className="bg-background"
-      />
-      {display}
-    </a>
-  );
+  const citation = withLedgerRead(pooled, evidenceLedger);
   return (
-    <SourceTooltip citation={citation} index={display}>
-      {chip}
-    </SourceTooltip>
+    <SourceAnchor
+      citation={citation}
+      href={citation.url}
+      ariaLabel={sourceLinkAria(citation)}
+    >
+      {inlineSourceLabel(citation)}
+    </SourceAnchor>
   );
 }
 
@@ -245,7 +273,7 @@ function WorkspaceFileMark({
       onClick={() => onOpen(path)}
       aria-label={`打开 ${path}`}
       title={`打开 ${path}`}
-      className="inline p-0 text-left font-medium text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
+      className="inline p-0 text-left font-medium text-primary"
     >
       {children ?? path}
     </button>
@@ -258,14 +286,10 @@ interface Props {
   conversationId?: string | null;
   /** 显式工作区源；与 conversationId 并存，显式源优先传给 compare 围栏。 */
   fileSource?: FileSource | null;
-  /** Web sources for this message; enables `[n]` (1..count) citation chips with
-   * a hover preview of each source. */
+  /** Web sources for this message; `#rN` / `[n]` become favicon+site marks in
+   * the sentence. Model `[短名](url)` matching the ledger keeps the short name
+   * and gets the same favicon. */
   citations?: Citation[];
-  /**
-   * Canonical (1-based) → display number map shared with SourceCards.
-   * When omitted, chips fall back to the canonical pool index.
-   */
-  citationToDisplay?: ReadonlyMap<number, number>;
   /** While true, defer rendering ```mermaid/```markmap blocks (a half-written
    * diagram is a syntax error) — they show source until the turn finishes.
    * Non-muted live answer also paints a tail caret (`data-stream-caret`).
@@ -294,7 +318,8 @@ interface Props {
  * Assistant-message Markdown: GFM (tables/strikethrough/task lists), syntax
  * highlighting with a per-block copy button, KaTeX math ($…$ / $$…$$),
  * ```mermaid / ```markmap diagrams (rendered via Diagram.tsx), and — when the
- * message has sources — clickable `[n]` citation chips. Assistant replies may
+ * message has sources — `[n]` / `#rN` rewritten as favicon + site links; GFM
+ * `[短名](url)` matching the ledger keeps the model text. Assistant replies may
  * also pass {@link Props.onOpenWorkspacePath} so workspace-relative file paths
  * in the body open the File tab (产物清单卡已撤).
  */
@@ -303,7 +328,6 @@ export const Markdown = memo(function Markdown({
   conversationId = null,
   fileSource = null,
   citations,
-  citationToDisplay,
   isStreaming = false,
   muted = false,
   evidence = false,
@@ -324,13 +348,6 @@ export const Markdown = memo(function Markdown({
     return ids.size > 0 ? ids : null;
   }, [knownLedgerIds, evidenceLedger, citations]);
   const ledgerIdCount = resolvedLedgerIds?.size ?? 0;
-  const toDisplay = useMemo(() => {
-    if (citationToDisplay) return citationToDisplay;
-    // Fallback: identity map so chips still render without a parent map.
-    const m = new Map<number, number>();
-    for (let i = 1; i <= citationCount; i++) m.set(i, i);
-    return m;
-  }, [citationToDisplay, citationCount]);
 
   // Only enrich once sources / ledger ids exist (they arrive at end-of-turn), so streaming
   // deltas keep using the stable module-level remark plugins. `evidence` (debate
@@ -412,7 +429,7 @@ export const Markdown = memo(function Markdown({
           href={href}
           target="_blank"
           rel="noreferrer"
-          className="text-primary underline underline-offset-2"
+          className="text-primary no-underline"
         >
           {label}
         </a>
@@ -420,7 +437,7 @@ export const Markdown = memo(function Markdown({
     };
 
     const a =
-      citationCount > 0 || onOpenWorkspacePath
+      citationCount > 0 || ledgerIdCount > 0 || onOpenWorkspacePath
         ? ({
             href,
             children,
@@ -438,8 +455,24 @@ export const Markdown = memo(function Markdown({
                 </WorkspaceFileMark>
               );
             }
+            const cited = url
+              ? citationForHref(url, citations ?? [], evidenceLedger)
+              : null;
+            if (cited) {
+              return (
+                <SourceAnchor citation={cited} href={cited.url || url}>
+                  {children}
+                </SourceAnchor>
+              );
+            }
             return (
-              <a href={href} target="_blank" rel="noreferrer" {...props}>
+              <a
+                href={href}
+                target="_blank"
+                rel="noreferrer"
+                {...props}
+                className="text-primary no-underline"
+              >
                 {children}
               </a>
             );
@@ -447,9 +480,9 @@ export const Markdown = memo(function Markdown({
         : undefined;
 
     const base: Components = a ? { pre, img, a } : { pre, img };
-    // Citation chips: remarkCitations emits `citemark` via data.hProperties (not a
+    // Citation marks: remarkCitations emits `citemark` via data.hProperties (not a
     // cite: link url — urlTransform would strip that). Same seam as evidencemark.
-    // Register whenever pool or ledger ids exist — chips may resolve URL from ledger alone.
+    // Register whenever pool or ledger ids exist — marks may resolve URL from ledger alone.
     if (citationCount > 0 || ledgerIdCount > 0) {
       const pool = citations ?? [];
       const CiteMark = (props: {
@@ -457,15 +490,14 @@ export const Markdown = memo(function Markdown({
         "data-ledger-id"?: string;
         children?: ReactNode;
       }) => (
-        <CitationChip
+        <CitationMark
           data-n={props["data-n"]}
           data-ledger-id={props["data-ledger-id"]}
           citations={pool}
           evidenceLedger={evidenceLedger}
-          toDisplay={toDisplay}
         >
           {props.children}
-        </CitationChip>
+        </CitationMark>
       );
       (base as Record<string, unknown>).citemark = CiteMark;
     }
@@ -495,7 +527,6 @@ export const Markdown = memo(function Markdown({
     ledgerIdCount,
     citations,
     evidenceLedger,
-    toDisplay,
     isStreaming,
     evidence,
     conversationId,

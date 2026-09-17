@@ -128,7 +128,7 @@ def _snapshot(root: Path) -> frozenset[str]:
     """工作区里现有文件的相对路径集合（系统噪音不算产物）。
 
     两类噪音排除在外：``.git/`` 是 git 自己的账本；``AgentCore/{index,trash,baselines}``
-    是工作区内部区——任一次写盘都会顺带调度后台代码索引（落 ``index/code_search.db``），
+    是工作区内部区（软删、回合基线、遗留内部区），
     可逆删除会把文件挪进 ``trash/``。它们是可再生的派生态，``list_dir`` 本就按同一套规则
     剪掉、桌面镜像也不显示，永远不该被要求「自报」。
     """
@@ -399,9 +399,6 @@ async def test_tool_self_reports_what_it_landed(
     case: _Case, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """真跑一次成功调用：自报必须逐字对上，且本次新落盘的文件一件都不许漏。"""
-    keep = tmp_path / "README.md"
-    if not keep.exists():
-        keep.write_text("desk\n", encoding="utf-8")
     if case.setup is not None:
         case.setup(tmp_path)
     before = _snapshot(tmp_path)
@@ -469,7 +466,7 @@ async def _run_git_checkout(root: Path) -> ToolResult:
 async def test_git_swaps_the_worktree_but_lands_no_products(tmp_path: Path):
     """``git`` 换工作树 ≠ 产交付物：文件真换了，台账里一件都没有（定案，非待接）。
 
-    台账语义是「本 run 产出的交付物」而不是「盘上多了什么」：checkout / pull / merge 落下的
+    台账语义是「本 run 产出的交付物」而不是「盘上多了什么」：checkout / pull 落下的
     是别人或过去已提交的版本，一次切分支能带上千个 worker 根本没碰过的文件。更硬的理由在
     ``runtime/runs/executor/terminal.py``：对账用 ``files_touched`` 判有没有落盘产物
     （blocked vs partial）。若换工作树算落盘，一个毫无产出的 worker 只要切一次分支就能把

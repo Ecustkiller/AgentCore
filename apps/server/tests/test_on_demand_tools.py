@@ -30,6 +30,7 @@ from agentcore.tools.builtin.archive_extract import ArchiveExtractTool
 from agentcore.tools.builtin.browser import BrowserTool
 from agentcore.tools.builtin.consult import ConsultTool
 from agentcore.tools.builtin.file_ops.read import FileReadTool
+from agentcore.tools.builtin.git_ops.tool import GitTool
 from agentcore.tools.builtin.host import HostTool
 from agentcore.tools.builtin.md_export import MdExportTool
 from agentcore.tools.mcp.dynamic import McpDynamicTool
@@ -85,18 +86,24 @@ def test_browser_catalog_summary_is_what_not_when():
     assert "直播" not in summary
 
 
+def test_git_catalog_summary_is_what_not_when():
+    """目录行只写这是什么；无 git 手册，禁止 HOW→consult(git)。"""
+    summary = ON_DEMAND_SUMMARIES["git"]
+    assert summary == "工作区 Git"
+    assert "commit" not in summary
+    assert "consult" not in summary
+
+
 def test_resident_tools_are_not_on_the_roster():
     for name in (
         "consult",
         "delegate",
         "ask_user",
-        "git",
         "file_read",
         "web_search",
         "escalate",
         "handoff",
         "list_folders",
-        "remember",
         "run",
         "search_conversations",
         "read_conversation",
@@ -116,8 +123,8 @@ def test_resident_tools_are_not_on_the_roster():
         "debate",
         "list_folder_dir",
         "read_folder_file",
-        "code_search",
         "md_export",
+        "git",
     ):
         assert is_on_demand_tool(name), name
         assert name in ON_DEMAND_TOOL_NAMES
@@ -187,7 +194,7 @@ def test_directory_groups_sections_and_compacts_tool_families():
         family_label="压缩包",
     )
     skill = ConsultDirectoryEntry(
-        name="data_file_landing", summary="表格落盘", section="skill", group="交付"
+        name="data_file_landing", summary="整理表", section="skill", group="交付"
     )
     out = render_on_demand_directory([host, extract, create, skill])
     assert "能力指引：" in out
@@ -196,7 +203,7 @@ def test_directory_groups_sections_and_compacts_tool_families():
     assert "- host：本机排查" in out
     assert "压缩包（查阅任一即整组启用）：archive_extract、archive_create" in out
     assert "- archive_extract：解压 zip" not in out
-    assert "- data_file_landing：表格落盘" in out
+    assert "- data_file_landing：整理表" in out
 
 
 async def test_merged_consult_copies_group_and_face():
@@ -216,9 +223,9 @@ async def test_merged_consult_copies_group_and_face():
     )
     entries = await merged.list_directory("u")
     by_name = {e.name: e for e in entries}
-    staffing = by_name["staffing"]
-    assert staffing.group == "编排"
-    assert staffing.section == "skill"
+    debate = by_name["debate_and_review"]
+    assert debate.group == "编排"
+    assert debate.section == "skill"
     host = by_name["host"]
     assert host.face
     assert host.section == "tool"
@@ -545,6 +552,20 @@ async def test_host_consult_worker_gets_enable_ack_not_ceo_how():
     assert "Get-WinEvent" not in body
 
 
+async def test_git_consult_enables_without_handbook():
+    """No git skill: consult only offers the tool; body is enable-ack."""
+    reg = ToolRegistry()
+    reg.register(GitTool())
+    src = ToolConsultSource(registry=reg, audience="ceo")
+    assert "git" not in _def_names(reg)
+    body = await src.fetch_by_name("u", "git")
+    assert body is not None
+    assert "已启用工具 `git`" in body
+    assert "本回合下一模型轮" in body
+    assert "HOW→consult(git)" not in body
+    assert _def_names(reg) == {"git"}
+
+
 async def test_consult_unknown_or_unassembled_is_miss():
     reg = ToolRegistry()
     src = ToolConsultSource(registry=reg)
@@ -632,7 +653,6 @@ def test_family_of_covers_browser_and_solo_tools():
     assert family_of("read_folder_file") == frozenset(
         {"list_folder_dir", "read_folder_file"}
     )
-    assert family_of("code_search") == frozenset({"code_search"})
     assert family_of("debate") == frozenset({"debate"})
     assert family_of("md_export") == frozenset({"md_export"})
     assert "md_to_docx" not in ON_DEMAND_TOOL_NAMES
@@ -687,7 +707,6 @@ _STUFFED_WORKER_RESIDENT = frozenset(
         "file_delete",
         "mkdir",
         "grep",
-        "git",
         "run",
         "escalate",
         "handoff",
@@ -714,23 +733,25 @@ def _stuffed_worker() -> ToolRegistry:
 
 
 def test_stuffed_worker_opening_table_omits_on_demand_tools():
-    """Locks the opening FC win: 26 registered; consult 另 wire，不在此表."""
+    """Locks the opening FC win: 25 registered; consult 另 wire，不在此表."""
     registry = _stuffed_worker()
-    assert registry.count == 26
+    assert registry.count == 25
     offered = _def_names(registry)
     assert offered == _STUFFED_WORKER_RESIDENT
     chars = sum(
         len(json.dumps(d, ensure_ascii=False)) for d in registry.get_openai_definitions()
     )
-    # 2026-09-16 代码索引出开场表后实测 9060。锁回实测整十。
-    assert chars <= 9070, f"队员开场工具表变胖：{chars}"
+    # 2026-09-18 git 出开场表（按需）。实测 6463。锁回实测整十。
+    # 2026-09-18 file_write 用户规则 when-to-use。实测 6486。锁回实测整十。
+    # 2026-09-18 用户规则条目 `.agentcore/规则` 进 file_list / file_delete。实测 6533。锁回实测整十。
+    assert chars <= 6540, f"队员开场工具表变胖：{chars}"
     deferred = set(registry.deferred_names)
     assert deferred <= ON_DEMAND_TOOL_NAMES
     assert "browser" in deferred
+    assert "git" in deferred
     assert "run" not in deferred
     assert "host" in deferred
     assert "md_export" in deferred
-    assert "code_search" in deferred
 
 
 def _playwright_mcp_result(*, tool_count: int = 24) -> McpDiscoverResult:
@@ -758,12 +779,12 @@ async def test_stuffed_worker_opening_table_omits_mcp_tools():
     registry = _stuffed_worker()
     opening_before = _def_names(registry)
     count_before = registry.count
-    assert count_before == 26
+    assert count_before == 25
     assert opening_before == _STUFFED_WORKER_RESIDENT
 
     registered = register_mcp_tools(registry, _playwright_mcp_result(tool_count=24))
     assert registered == 24
-    assert registry.count == 50
+    assert registry.count == 49
     offered = _def_names(registry)
     assert offered == opening_before
     mcp_names = {n for n in registry.names if n.startswith("mcp_")}

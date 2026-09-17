@@ -54,7 +54,7 @@ describe("workspace listing hide system files", () => {
     await writeFile(join(dir, "notes.md"), "hi");
     await writeFile(join(dir, "hero.png"), "png");
     await mkdir(join(dir, "AgentCore", "index"), { recursive: true });
-    await writeFile(join(dir, "AgentCore", "index", "code_search.db"), "x");
+    await writeFile(join(dir, "AgentCore", "index", "cache.db"), "x");
     await mkdir(join(dir, "AgentCore", "规则"), { recursive: true });
     await writeFile(join(dir, "AgentCore", "规则", "r.md"), "r");
     await mkdir(join(dir, "index"), { recursive: true });

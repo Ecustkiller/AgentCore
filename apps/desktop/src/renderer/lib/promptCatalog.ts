@@ -425,7 +425,7 @@ export interface PromptRail {
   alwaysMine: PromptCatalogItem[];
   folders: PromptRailFolder[];
   official: PromptCatalogItem[];
-  /** Factory tools — one inventory, not split across 常驻 / 按需. */
+  /** Factory tools; the overview splits this list by `tool.resident` into 常驻 / 按需. */
   tools: Extract<PromptCatalogItem, { kind: "tool" }>[];
 }
 
@@ -463,7 +463,7 @@ function bucketItems(map: Map<string, PromptCatalogItem[]>, key: string) {
   return next;
 }
 
-/** 常驻 = constitution + user always; 用户夹 / 官方 HOW = 按需; 出厂工具另成一份图鉴. 概览行名由 UI 写，不拆字段. */
+/** 常驻 = constitution + user always + resident tools; 用户夹 / 官方 HOW / 查阅后启用工具 = 按需. 产品件用卡右上「官方」，不另起出厂项壳. */
 export function buildPromptRail(
   data: Capabilities,
   mine: MineCatalogRow[],

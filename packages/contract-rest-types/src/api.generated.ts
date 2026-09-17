@@ -388,6 +388,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/account/rules/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete Account User Rule
+         * @description Delete one named user-rule markdown under .agentcore/规则/.
+         */
+        post: operations["delete_account_user_rule_v1_account_rules_delete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/account/rules/list": {
         parameters: {
             query?: never;
@@ -408,7 +428,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/account/rules/remember": {
+    "/v1/account/rules/read": {
         parameters: {
             query?: never;
             header?: never;
@@ -418,10 +438,30 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Remember Account User Rule
-         * @description Write / read / delete / list a named user-rule markdown under AgentCore/规则/.
+         * Read Account User Rule
+         * @description Read one named user-rule markdown under .agentcore/规则/.
          */
-        post: operations["remember_account_user_rule_v1_account_rules_remember_post"];
+        post: operations["read_account_user_rule_v1_account_rules_read_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/rules/write": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write Account User Rule
+         * @description Write a named user-rule markdown under .agentcore/规则/.
+         */
+        post: operations["write_account_user_rule_v1_account_rules_write_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6457,8 +6497,8 @@ export interface components {
             /** Scope */
             scope?: string | null;
         };
-        /** AccountRememberCatalogItem */
-        AccountRememberCatalogItem: {
+        /** AccountRuleCatalogItem */
+        AccountRuleCatalogItem: {
             /**
              * Apply
              * @default
@@ -6472,27 +6512,22 @@ export interface components {
             /** Name */
             name: string;
         };
-        /** AccountRememberRequest */
-        AccountRememberRequest: {
-            /**
-             * Action
-             * @default write
-             * @enum {string}
-             */
-            action: "write" | "read" | "delete" | "list";
-            /** Apply */
-            apply?: ("always" | "on_demand") | null;
+        /** AccountRuleDoc */
+        AccountRuleDoc: {
             /** Content */
-            content?: string | null;
-            /** Description */
-            description?: string | null;
+            content: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
             /** Folder Id */
             folder_id?: string | null;
             /** Name */
-            name?: string | null;
+            name: string;
         };
-        /** AccountRememberResponse */
-        AccountRememberResponse: {
+        /** AccountRuleMutationResponse */
+        AccountRuleMutationResponse: {
             /** Action */
             action: string;
             /**
@@ -6506,7 +6541,7 @@ export interface components {
              */
             body: string;
             /** Catalog */
-            catalog?: components["schemas"]["AccountRememberCatalogItem"][];
+            catalog?: components["schemas"]["AccountRuleCatalogItem"][];
             /** Changed */
             changed: boolean;
             /** Message */
@@ -6522,15 +6557,21 @@ export interface components {
              */
             ok: boolean;
         };
-        /** AccountRuleDoc */
-        AccountRuleDoc: {
+        /** AccountRuleNameRequest */
+        AccountRuleNameRequest: {
+            /** Folder Id */
+            folder_id?: string | null;
+            /** Name */
+            name: string;
+        };
+        /** AccountRuleWriteRequest */
+        AccountRuleWriteRequest: {
+            /** Apply */
+            apply?: ("always" | "on_demand") | null;
             /** Content */
             content: string;
-            /**
-             * Description
-             * @default
-             */
-            description: string;
+            /** Description */
+            description?: string | null;
             /** Folder Id */
             folder_id?: string | null;
             /** Name */
@@ -11253,7 +11294,7 @@ export interface components {
             code: "upstream_protocol_unsupported";
             /**
              * Required Protocol
-             * @description Upstream protocol this model needs that this gateway does not speak (chat/completions only).
+             * @description Protocol this catalog row needs that is unavailable on this origin. Platform greys both; BYOK OpenCode already speaks anthropic_messages.
              * @enum {string}
              */
             required_protocol: "openai_responses" | "anthropic_messages";
@@ -14556,6 +14597,43 @@ export interface operations {
             };
         };
     };
+    delete_account_user_rule_v1_account_rules_delete_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountRuleNameRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountRuleMutationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_account_user_rules_v1_account_rules_list_post: {
         parameters: {
             query?: never;
@@ -14593,7 +14671,7 @@ export interface operations {
             };
         };
     };
-    remember_account_user_rule_v1_account_rules_remember_post: {
+    read_account_user_rule_v1_account_rules_read_post: {
         parameters: {
             query?: never;
             header?: {
@@ -14606,7 +14684,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AccountRememberRequest"];
+                "application/json": components["schemas"]["AccountRuleNameRequest"];
             };
         };
         responses: {
@@ -14616,7 +14694,44 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AccountRememberResponse"];
+                    "application/json": components["schemas"]["AccountRuleMutationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    write_account_user_rule_v1_account_rules_write_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountRuleWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountRuleMutationResponse"];
                 };
             };
             /** @description Validation Error */

@@ -13,7 +13,6 @@ from agentcore.runtime.debate.constants import (
     DEBATE_OUTPUT_LIMIT,
     FORM_LABELS,
     LENGTH_HINT,
-    QUICK_DEBATER_HINT,
 )
 from agentcore.tools.protocol import ToolResult
 
@@ -22,7 +21,6 @@ __all__ = [
     "LENGTH_HINT",
     "CLOSING_LENGTH_HINT",
     "CX_LENGTH_HINT",
-    "QUICK_DEBATER_HINT",
     "FORM_LABELS",
     "DEBATE_DESCRIPTION",
     "DEBATE_PARAMETERS",
@@ -117,10 +115,6 @@ DEBATE_PARAMETERS = {
                 "仅说「跨模型」未点名时置 true 且各方 model 留空→默认对阵；"
                 "无本旗标=同模型场。"
             ),
-        },
-        "thorough": {
-            "type": "boolean",
-            "description": "默认 true=辩透；false=快速单轮对碰。",
         },
         "background": {
             "type": "string",

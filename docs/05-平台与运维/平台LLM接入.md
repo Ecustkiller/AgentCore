@@ -114,14 +114,14 @@ OpenCode 两条 OpenAI 兼容上游，**计费与目录不同，必须按精确 
 
 | 项 | 约束 |
 |---|---|
-| 协议 | 只跑 OpenAI `chat/completions` 子集。已知只走 `/responses`（`grok-4.5`、`gpt-5.6-luna`）或 `/messages`（`minimax-m2.7`、`qwen3.7-max`）的 id **不进种子**（与目录过滤同一份清单）。目录合并层仍列出这些 id（不静默隐藏），但标为不可选并带结构化原因「本网关未实现该模型所需的上游协议」。过滤不在 HTTP discovery：`GET /models` 原样返回。被区域闸住的 id 仍可能出现在发现结果里——目录有 ≠ 一定能跑 |
-| 会话头 | Go/Zen 出站 `POST /chat/completions` 必带稳定 `x-opencode-session`（值=对话 id；无对话时 `probe:{trace}`）。User-Agent=`AgentCore/1.0`。不冒充 `opencode-cli`。`GET /models` 不带 session。缺头上游 400（2026-09-06 起硬拒） |
+| 协议 | 默认仍跑 OpenAI `chat/completions`。同一份精确 id 表（`offProtocolModels`）把只走 `/responses`（GPT / Grok / Muse）或 `/messages`（Claude 家族、`union-alpha`、Qwen 3.5–3.7 plus/max）的 id **挡出种子**。目录合并层仍列出这些 id（不静默隐藏）。OpenCode Zen/Go BYOK：`/messages` 可选（云端 `POST /messages`）；`/responses` 仍标不可选。平台 allowlist 两种都灰（Claude 走用户自己的 Zen Key，不吃平台额度）。`minimax-m2.7` 现已走 `chat/completions`，不在该表。sidecar 推理代理仍只收 OpenAI 形 `chat/completions`；云端按模型分叉。`/responses` 仍未做。过滤不在 HTTP discovery：`GET /models` 原样返回。被区域闸住的 id 仍可能出现在发现结果里——目录有 ≠ 一定能跑 |
+| 会话头 | Go/Zen 出站 `POST /chat/completions` 与 `POST /messages` 必带稳定 `x-opencode-session`（值=对话 id；无对话时 `probe:{trace}`）。User-Agent=`AgentCore/1.0`。不冒充 `opencode-cli`。`GET /models` 不带 session。缺头上游 400（2026-09-06 起硬拒） |
 | BYOK | 用户自备**对应端点**的 key；价卡与平台同一张 curated CNY（`credential_source` 只分流列，不进平台配额）。打错端点时付费 Flash 会在 Zen 路上 `CreditsError`（扣的是 Zen 余额，Go 订阅管不到） |
 | 平台代付 | ✅ `PLATFORM_*` 可指向 Zen **或** Go；**现网钉 Go + 付费 Flash**（见 §五·附）。换上游 / 改 `quota_*` 须改生产 `.env` 并重启 api |
 | 上下文 | 按 **SKU id**：付费 `deepseek-v4-flash` / `deepseek-v4.1-flash` **1M**；仅 `deepseek-v4-flash-free` **200K**（Zen 网关 cap）。禁止按端点猜窗（Go 无 free 档也不把 Flash 当成 200K） |
 | 错误分类 | 一张按上游嵌套 `error.type` 的表（信封 `{"type":"error","error":{"type":…}}`），禁止扫 `error.message`。**`GoUsageLimitError`（429）= Go 订阅配额用尽**（等窗口或控制台 `Use balance`），不是余额不足；**`CreditsError`（401）**收窄为无支付方式 / 订阅未激活 / 余额空；`MonthlyLimitError` / `UserLimitError` = 工作区月限或成员限；`ModelError` = 模型不支持 / 禁用 / trial 结束；`AuthError` 才是 Key 废；`RegionError`（403）= 中国区托管 opt-in。BYOK 可带用户自己的工作区链接；**platform 叶绝不回显工作区 URL / id**。上游透传的 `403 This model is not available in your region` **不是** `RegionError`；顶层 `Router.Unavailable` 不在本表。未知 type 走现有兜底 |
-| 思考 | DeepSeek 叶与官方同形：聊天/CEO/worker **显式**发 `thinking.type=enabled` + 组合 `reasoning_effort`（未设则 `high`）。Go 省略 `thinking` 时不推 CoT；只开 `thinking.type` 仍可能空思考。入站兼容 `reasoning` / `reasoning_text` 别名。不按端点开特例方言。消费侧：同 chunk 先 reasoning 后 content；思考未停时正文不进时间线（防 Go 交错流把一句 CoT 拆成两段 Thought）。`thinking=False` 的后台 one-shot 不攒。实际发出的档位落在 `run_completed.reasoning_effort`（可缺省），用量详情据此显示，不回读当前组合 |
-| 未做 | `zen/` / `opencode-go/` 前缀路由；为本网关开 Anthropic `/messages` / OpenAI `/responses` 协议分叉（触发条件：产品要上一个只说这两种协议的模型，而不是工具调用质量问题） |
+| 思考 | DeepSeek 叶与官方同形：聊天/CEO/worker **显式**发 `thinking.type=enabled` + 组合 `reasoning_effort`（未设则 `high`）。Go 省略 `thinking` 时不推 CoT；只开 `thinking.type` 仍可能空思考。入站兼容 `reasoning` / `reasoning_text` 别名。不按端点开特例方言。消费侧：同 chunk 先 reasoning 后 content；思考未停时正文不进时间线（防 Go 交错流把一句 CoT 拆成两段 Thought）。`thinking=False` 的后台 one-shot 不攒。实际发出的档位落在 `run_completed.reasoning_effort`（可缺省），用量详情据此显示，不回读当前组合。Claude / Union Alpha 走 `/messages`：聊天/CEO/worker 发 Anthropic `thinking.enabled`（带 `budget_tokens`）；工具环回传带 signature 的 thinking block（`LLMMessage.thinking_blocks`，sidecar 经推理代理原样透传）。Qwen `/messages` 不发该字段。Anthropic 省略 = 关（与 DeepSeek 省略=开相反） |
+| 未做 | `zen/` / `opencode-go/` 前缀路由；OpenAI `/responses`（GPT / Grok / Muse）；官方 Anthropic 预设（非 Zen 中转）；平台代付不上 Claude / Union Alpha |
 | 隐私 | Zen **BYOK** free 档限时且可能用于改进模型。**现网 platform 走 Go**：DeepSeek ZDR 写到 **2026-08-31 且按月续约**（见 §五·附），不得写成永久承诺，也不得沿用免费档措辞。中国区托管 opt-in 是另一维度，勿与 ZDR 混成一句 |
 
 ## 五、platform 模式与故障排查

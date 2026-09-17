@@ -229,13 +229,9 @@ def soft_delete_expanding_trash_ancestor(
             elif child.exists():
                 child.unlink()
         except OSError as e:
-            # Windows sharing violation on ``AgentCore/index/code_search.db``. Root cause
-            # is NOT in-flight maintenance (``drop_index_registry`` settles it first):
-            # ``BM25Index`` opens a connection per op via ``with sqlite3.connect(...)``,
-            # and that context manager commits WITHOUT closing — handle release is left to
-            # refcounting and lags on Windows. Fixing it means owning connection lifetime
-            # in ``bm25.py``; until then, skip: internal zones are regenerable derived
-            # state, and failing the user's delete over a stale cache file is worse.
+            # Windows sharing violation on leftover internal-zone files. Skip:
+            # these zones are regenerable derived state, and failing the user's
+            # delete over a stale cache file is worse.
             if is_access_denied_oserror(e) and is_internal_zone_relpath(child_rel):
                 logger.warning(
                     "workspace.internal_zone_clear_skipped",

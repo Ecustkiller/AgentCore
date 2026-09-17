@@ -2,7 +2,7 @@ import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import react from "@vitejs/plugin-react";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
-import { searchForWorkspaceRoot } from "vite";
+import { loadEnv, searchForWorkspaceRoot } from "vite";
 import { viteClientBuildDefine } from "../../scripts/client-build-info.mjs";
 import {
   parseReleaseChannel,
@@ -29,6 +29,15 @@ const channelBuildDefine = {
 const packageDir = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig(({ mode, command }) => {
+  // 主进程非 VITE_ 变量 Vite 默认不注入。把本机引擎热更新开关从 .env.local 喂进
+  // Electron（打包态代码仍以 `app.isPackaged` 为硬闸，不会看这个值就弹进程）。
+  const fileEnv = loadEnv(mode, packageDir, "");
+  if (
+    fileEnv.AGENTCORE_SIDECAR_RELOAD !== undefined &&
+    process.env.AGENTCORE_SIDECAR_RELOAD === undefined
+  ) {
+    process.env.AGENTCORE_SIDECAR_RELOAD = fileEnv.AGENTCORE_SIDECAR_RELOAD;
+  }
   // 把渲染层构建期烘焙的后端地址（VITE_API_URL，见 .env.production）也喂给主进程，让主进程的 CSP
   // img-src / connect-src 能精确收窄到「自己 + 后端源」——既堵任意第三方远程图（渲染期信标 V2/V3：mermaid/markmap
   // 吐 <img src=evil> 在渲染期零点击取图），又放行后端头像 / favicon，并放行渲染层对生产 API 的 fetch。

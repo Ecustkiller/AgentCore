@@ -139,7 +139,7 @@ async def run_red_team_round(
     interjections: Sequence[UserInterjection],
     prior_findings: Sequence[Finding] = (),
 ) -> tuple[list[SideTurn], list[Finding]]:
-    """一轮红队：攻 → 合并 → 应 →（thorough）复攻。返回 (turns beat 化, findings)。"""
+    """一轮红队：攻 → 合并 → 应 → 复攻。返回 (turns beat 化, findings)。"""
     subject = config.subject_side
     if subject is None:
         # 无方案方：退化为全体并行（不应在合法配置出现）

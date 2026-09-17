@@ -173,6 +173,9 @@ export async function cacheOpenedConversation(input: {
  * Persist a trusted latest window into the offline opened cache.
  * Call after a successful server-window adopt (loadLatestWindow / cold
  * reconcile / live-tail snapshot). Empty windows must not poison the snapshot.
+ * Callers overlay complete journals onto slim list rows before writing.
+ * Slim (`eventsComplete=false`) windows must not be written — wait for
+ * `ensureFullMessageRuns` so offline reopen can still fold the graph.
  */
 export async function persistOpenedCache(
   id: string,

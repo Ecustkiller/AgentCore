@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import asyncio
 
-from agentcore.runtime.debate import DebateConfig, DebateForm, DebateSide, RoundPolicy
+from agentcore.runtime.debate import (
+    DebateConfig,
+    DebateForm,
+    DebateSide,
+    JudgeVerdict,
+    RoundPolicy,
+    RoundResult,
+)
 from agentcore.runtime.debate.moderator_agenda import _FRAME_SYSTEM, _OPENING_SPEC, frame_round
 from agentcore.runtime.debate.research_dossier import (
     SYNTHESIZER_FILE,
@@ -31,10 +38,8 @@ def test_opening_spec_is_formal_moderator_register():
     assert "宣题" in _OPENING_SPEC
     assert "亮场" in _OPENING_SPEC
     assert "定焦" in _OPENING_SPEC
-    # 形态适配亮场措辞
+    # 产品热路只教正反亮场
     assert "正方主张" in _OPENING_SPEC
-    assert "红队将审查" in _OPENING_SPEC
-    assert "视角展开" in _OPENING_SPEC
     assert "不剧透结论" in _OPENING_SPEC
     assert "不站队" in _OPENING_SPEC
     assert "禁网络梗" in _OPENING_SPEC
@@ -71,7 +76,7 @@ def test_frame_round_injects_research_dossier_agenda_hint():
         motion="该不该做 X",
         form=DebateForm.DEBATE,
         sides=sides,
-        policy=RoundPolicy(thorough=True, max_rounds=3),
+        policy=RoundPolicy(max_rounds=3),
         research_dossier_index=idx,
     )
     cap = _CaptureJson()
@@ -92,8 +97,36 @@ def test_frame_round_omits_dossier_when_empty():
         motion="该不该做 X",
         form=DebateForm.DEBATE,
         sides=sides,
-        policy=RoundPolicy(thorough=True, max_rounds=3),
+        policy=RoundPolicy(max_rounds=3),
     )
     cap = _CaptureJson()
     asyncio.run(frame_round(cap, cfg, []))
     assert "工作区约定文档索引" not in cap.user
+
+
+def test_later_round_frame_omits_roundtable_exception():
+    """后续轮定焦不再教圆桌例外；形态 hint 已在 _frame_form_hint。"""
+    sides = [
+        DebateSide(key="pro", name="正方", stance="支持"),
+        DebateSide(key="con", name="反方", stance="反对"),
+    ]
+    cfg = DebateConfig(
+        motion="该不该做 X",
+        form=DebateForm.DEBATE,
+        sides=sides,
+        policy=RoundPolicy(max_rounds=3),
+    )
+    history = [
+        RoundResult(
+            round_no=1,
+            focus="成本净影响",
+            turns=[],
+            verdict=JudgeVerdict(
+                real_clash=True, new_arguments=True, converged=False, next_focus="更深的点"
+            ),
+            summary="本轮小结",
+        )
+    ]
+    cap = _CaptureJson()
+    asyncio.run(frame_round(cap, cfg, history))
+    assert "多方圆桌例外" not in cap.user

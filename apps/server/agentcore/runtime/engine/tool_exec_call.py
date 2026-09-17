@@ -698,9 +698,7 @@ async def run_one_tool(
                 **end_kwargs,
             )
         )
-    # 检索观测：web_search 把 query / hosts 放进 metadata；code_search 把
-    # index_status 放进 metadata——一并转发到 execute_end，便于从统一工具结束
-    # 事件还原「搜了什么 / 命中哪些域 / 索引快照新鲜度」。
+    # 检索观测：web_search 把 query / hosts 放进 metadata——转发到 execute_end。
     wire_fail_code: str | None = result.failure_code
     if not isinstance(wire_fail_code, str) or not wire_fail_code.strip():
         meta_code = (result.metadata or {}).get("code") if result.metadata else None
@@ -727,8 +725,6 @@ async def run_one_tool(
         end_fields["subcommand"] = meta["subcommand"]
     if isinstance(meta.get("timeout_layer"), str) and meta["timeout_layer"]:
         end_fields["timeout_layer"] = meta["timeout_layer"]
-    if isinstance(meta.get("index_status"), str) and meta["index_status"]:
-        end_fields["index_status"] = meta["index_status"]
     end_fields.update(_shell_observe_log_fields(name, args))
     logger.info("tool.execute_end", **end_fields)
 

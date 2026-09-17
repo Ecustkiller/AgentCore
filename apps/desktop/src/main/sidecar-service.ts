@@ -7,9 +7,12 @@
 
 export type { Transport } from "./sidecar";
 export {
+  resolveSidecarServerDir,
   resolveSpawnConfig,
   formatSidecarExitError,
   scrubSocksProxyEnv,
+  sidecarDevReloadEnabled,
+  startSidecarDevReload,
   SidecarClient,
   SidecarRpcError,
   SidecarManager,

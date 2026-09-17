@@ -1,5 +1,5 @@
 import { InlineInput } from "@/components/files/FileTreeInline";
-import { FACE_META, FACE_ORDER } from "@/components/tools/catalogMeta";
+import { FACE_META } from "@/components/tools/catalogMeta";
 import { Badge, CATALOG_GRID_CLASS, CatalogTile } from "@/components/ui";
 import { artifactColorVar, catalogCategoryColorVar } from "@/lib/catalogColors";
 import type {
@@ -100,8 +100,14 @@ export function PromptOverview({
     (row) => row.item.kind === "shared" || row.item.kind === "identity",
   );
   const alwaysMineRows = alwaysRows.filter((row) => row.item.kind === "mine");
-  const toolGroups = useMemo(() => groupToolsByFace(rail.tools), [rail.tools]);
-  const showTools = showConnectors || rail.tools.length > 0;
+  const residentTools = useMemo(
+    () => rail.tools.filter((item) => item.tool.resident),
+    [rail.tools],
+  );
+  const onDemandTools = useMemo(
+    () => rail.tools.filter((item) => !item.tool.resident),
+    [rail.tools],
+  );
 
   return (
     <div className="flex w-full flex-col gap-8" data-testid="prompt-overview">
@@ -139,6 +145,16 @@ export function PromptOverview({
               installedListings={installedListings}
               onOpen={() => onOpenItem(row.catalogId)}
               renderMineTile={renderMineTile}
+            />
+          ))}
+          {residentTools.map((item) => (
+            <ItemTile
+              key={item.id}
+              item={item}
+              selected={selectedId === item.id}
+              listings={listings}
+              installedListings={installedListings}
+              onOpen={() => onOpenItem(item.id)}
             />
           ))}
         </div>
@@ -228,7 +244,6 @@ export function PromptOverview({
         {rail.official.length > 0 ? (
           <ShelfBlock
             testId="prompt-rail-official"
-            title="官方"
             highlighted={false}
             onDragOver={onRejectDrag}
             onDrop={onRejectDrag}
@@ -245,126 +260,107 @@ export function PromptOverview({
             ))}
           </ShelfBlock>
         ) : null}
-      </section>
 
-      {showTools ? (
-        <section
-          data-testid="prompt-rail-tools"
-          className={RAIL_SHELL}
+        <FactoryToolShelf
+          testId="prompt-rail-on-demand-tools"
+          tools={onDemandTools}
+          selectedId={selectedId}
+          listings={listings}
+          installedListings={installedListings}
+          onOpenItem={onOpenItem}
           onDragOver={onRejectDrag}
           onDrop={onRejectDrag}
-        >
-          <RailHeading description="开场即用或查阅后启用，拖不动">
-            工具
-          </RailHeading>
-          {showConnectors ? (
-            <ShelfBlock
-              testId="prompt-rail-connectors"
-              title="连接器"
-              highlighted={false}
-              className="mt-0"
-              onDragOver={onRejectDrag}
-              onDrop={onRejectDrag}
-            >
-              {connectors.map((row) => {
-                const copy = promptConnectorShelfCopy(row);
-                return (
-                  <CatalogTile
-                    key={row.id}
-                    icon={<Unplug size={18} />}
-                    colorVar={artifactColorVar("connectors")}
-                    title={copy.title}
-                    description={copy.description}
-                    accessory={row.accessory}
-                    tags={shelfTags(copy.tags)}
-                    className={
-                      selectedId === row.id
-                        ? "ring-1 ring-inset ring-primary"
-                        : undefined
-                    }
-                    onClick={() => onOpenItem(row.id)}
-                  />
-                );
-              })}
-              {onAddConnector ? (
+        />
+
+        {showConnectors ? (
+          <ShelfBlock
+            testId="prompt-rail-connectors"
+            title="连接器"
+            highlighted={false}
+          >
+            {connectors.map((row) => {
+              const copy = promptConnectorShelfCopy(row);
+              return (
                 <CatalogTile
-                  icon={<Plus size={18} />}
+                  key={row.id}
+                  icon={<Unplug size={18} />}
                   colorVar={artifactColorVar("connectors")}
-                  title={PROMPT_SHELF_AFFORDANCE.addConnector.title}
-                  description={PROMPT_SHELF_AFFORDANCE.addConnector.description}
-                  onClick={onAddConnector}
+                  title={copy.title}
+                  description={copy.description}
+                  accessory={row.accessory}
+                  tags={shelfTags(copy.tags)}
+                  className={
+                    selectedId === row.id
+                      ? "ring-1 ring-inset ring-primary"
+                      : undefined
+                  }
+                  onClick={() => onOpenItem(row.id)}
                 />
-              ) : null}
-              {connectorError ? (
-                <p
-                  className="col-span-full text-xs text-muted-foreground"
-                  role="alert"
-                >
-                  {connectorError}
-                </p>
-              ) : null}
-            </ShelfBlock>
-          ) : null}
-          {toolGroups.map((group, index) => (
-            <ShelfBlock
-              key={group.face}
-              testId={`prompt-rail-tools-${group.face}`}
-              title={group.title}
-              highlighted={false}
-              className={index === 0 && !showConnectors ? "mt-0" : undefined}
-              onDragOver={onRejectDrag}
-              onDrop={onRejectDrag}
-            >
-              {group.items.map((item) => (
-                <ItemTile
-                  key={item.id}
-                  item={item}
-                  selected={selectedId === item.id}
-                  listings={listings}
-                  installedListings={installedListings}
-                  onOpen={() => onOpenItem(item.id)}
-                />
-              ))}
-            </ShelfBlock>
-          ))}
-        </section>
-      ) : null}
+              );
+            })}
+            {onAddConnector ? (
+              <CatalogTile
+                icon={<Plus size={18} />}
+                colorVar={artifactColorVar("connectors")}
+                title={PROMPT_SHELF_AFFORDANCE.addConnector.title}
+                description={PROMPT_SHELF_AFFORDANCE.addConnector.description}
+                onClick={onAddConnector}
+              />
+            ) : null}
+            {connectorError ? (
+              <p
+                className="col-span-full text-xs text-muted-foreground"
+                role="alert"
+              >
+                {connectorError}
+              </p>
+            ) : null}
+          </ShelfBlock>
+        ) : null}
+      </section>
     </div>
   );
 }
 
-function groupToolsByFace(
-  tools: Extract<PromptCatalogItem, { kind: "tool" }>[],
-): {
-  face: string;
-  title: string;
-  items: Extract<PromptCatalogItem, { kind: "tool" }>[];
-}[] {
-  const buckets = new Map<
-    string,
-    Extract<PromptCatalogItem, { kind: "tool" }>[]
-  >();
-  for (const item of tools) {
-    const key = item.tool.face;
-    const list = buckets.get(key);
-    if (list) list.push(item);
-    else buckets.set(key, [item]);
-  }
-  const groups: {
-    face: string;
-    title: string;
-    items: Extract<PromptCatalogItem, { kind: "tool" }>[];
-  }[] = [];
-  for (const face of FACE_ORDER) {
-    const items = buckets.get(face);
-    if (!items?.length) continue;
-    groups.push({ face, title: FACE_META[face].label, items });
-    buckets.delete(face);
-  }
-  for (const [face, items] of buckets) {
-    groups.push({ face, title: face, items });
-  }
-  return groups;
+function FactoryToolShelf({
+  testId,
+  tools,
+  selectedId,
+  listings,
+  installedListings,
+  onOpenItem,
+  onDragOver,
+  onDrop,
+}: {
+  testId: string;
+  tools: Extract<PromptCatalogItem, { kind: "tool" }>[];
+  selectedId: string | null;
+  listings: SkillStoreListing[];
+  installedListings: SkillStoreListing[];
+  onOpenItem: (id: string) => void;
+  onDragOver: (event: DragEvent<HTMLDivElement>) => void;
+  onDrop: (event: DragEvent<HTMLDivElement>) => void;
+}) {
+  if (tools.length === 0) return null;
+  return (
+    <ShelfBlock
+      testId={testId}
+      highlighted={false}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
+      {tools.map((item) => (
+        <ItemTile
+          key={item.id}
+          item={item}
+          selected={selectedId === item.id}
+          listings={listings}
+          installedListings={installedListings}
+          onOpen={() => onOpenItem(item.id)}
+        />
+      ))}
+    </ShelfBlock>
+  );
 }
 
 function RailHeading({
@@ -403,12 +399,12 @@ function TileShelf({
   title,
   children,
 }: {
-  title: ReactNode;
+  title?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <>
-      <ShelfHeading>{title}</ShelfHeading>
+      {title ? <ShelfHeading>{title}</ShelfHeading> : null}
       <div className={CATALOG_GRID_CLASS}>{children}</div>
     </>
   );
@@ -423,12 +419,12 @@ function ShelfBlock({
   onDrop,
   children,
 }: {
-  title: ReactNode;
+  title?: ReactNode;
   testId?: string;
   highlighted: boolean;
   className?: string;
-  onDragOver: (event: DragEvent<HTMLDivElement>) => void;
-  onDrop: (event: DragEvent<HTMLDivElement>) => void;
+  onDragOver?: (event: DragEvent<HTMLDivElement>) => void;
+  onDrop?: (event: DragEvent<HTMLDivElement>) => void;
   children: ReactNode;
 }) {
   return (

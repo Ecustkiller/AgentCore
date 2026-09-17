@@ -78,7 +78,6 @@ const tpPayload = (
   form: "",
   sides: [] as string[],
   max_rounds: 0,
-  thorough: true,
   ...over,
 });
 

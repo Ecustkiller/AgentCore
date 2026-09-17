@@ -1,7 +1,7 @@
 """主持人辩论循环自测（辩论编排设计.md §二/§四/§五 · per-PR 零 LLM 硬门禁）。
 
 用**假 provider（脚本化 JSON）+ 假 RoundRunner** 零成本验证主持人循环本身：收敛终止、防过早
-收敛最小轮门槛、快速对碰单轮、不收敛跑到安全上限、双产物（决策简报 + 三层叙事线）齐全、辩手
+收敛、不收敛跑到安全上限、双产物（决策简报 + 三层叙事线）齐全、辩手
 跨轮记忆的 history 输入、裁判坏 JSON 保守容错、全员失败提前终止、收场归因传递、CEO 折算文本与
 按形态自适应的呈现顺序。真模型留给 nightly。
 """
@@ -249,18 +249,11 @@ def _run(llm, runner, config):
 # --- 收敛 / 轮次治理 ---------------------------------------------------------
 
 
-def test_for_form_thorough_false_is_single_round_for_all_forms():
-    """thorough=False 对所有形态（含圆桌）都降为快速单轮（max=1）——「测试/简单看看」不被强制多轮。
-
-    回归：旧实现圆桌恒多轮、忽略 thorough，trivial 命题也跑满多轮、产出冗余「修订 v2」。
-    thorough=True 时形态默认仅【安全上限】各异（圆桌 4、正反/红队 5）；轮数由主持人逐轮自判收敛。
-    """
-    for form in (DebateForm.DEBATE, DebateForm.RED_TEAM, DebateForm.ROUNDTABLE):
-        quick = RoundPolicy.for_form(form, thorough=False)
-        assert (quick.thorough, quick.max_rounds) == (False, 1), form
+def test_for_form_max_rounds_by_shape():
+    """形态默认仅【安全上限】各异（圆桌 4、正反/红队 5）；轮数由主持人逐轮自判收敛。"""
     assert RoundPolicy.for_form(DebateForm.ROUNDTABLE).max_rounds == 4
     assert RoundPolicy.for_form(DebateForm.DEBATE).max_rounds == 5
-    assert RoundPolicy.for_form(DebateForm.DEBATE).thorough is True
+    assert RoundPolicy.for_form(DebateForm.RED_TEAM).max_rounds == 5
 
 
 def test_node_summary_is_rounds_and_stop_label():
@@ -316,8 +309,8 @@ def test_frame_followup_injects_covered_focuses_and_drills_crux():
     assert "焦点甲" in prompt and "焦点乙" in prompt
 
 
-def test_judge_gate_hint_round1_continue_and_quick_converge():
-    """「别过早收敛」内化进裁判标准：多轮模式第 1 轮默认继续（除非命题空泛）；快速单轮则一次即收。"""
+def test_judge_gate_hint_round1_continue():
+    """「别过早收敛」内化进裁判标准：第 1 轮默认继续（除非命题空泛）。"""
     captured: list = []
 
     class _CaptureLLM:
@@ -330,20 +323,17 @@ def test_judge_gate_hint_round1_continue_and_quick_converge():
         SideTurn("pro", "正方", "r1_pro", "正方开场"),
         SideTurn("con", "反方", "r1_con", "反方开场"),
     ]
-    # 多轮模式第 1 轮：默认继续、仅命题空泛才收（楼层智慧搬进了 prompt）。
+    # 第 1 轮：默认继续、仅命题空泛才收（楼层智慧搬进了 prompt）。
     asyncio.run(mod._judge_and_summarize(_config(policy=RoundPolicy(max_rounds=5)), "焦点", turns, []))
     multi = captured[-1].messages[-1].content
     assert "第 1 轮" in multi and "默认" in multi and "继续" in multi and "空泛" in multi
-    # 快速单轮（max=1）：一次对碰即判收敛（避免错误兜底成 达轮数上限）。
-    asyncio.run(mod._judge_and_summarize(_config(policy=RoundPolicy.quick()), "焦点", turns, []))
-    assert "快速单轮" in captured[-1].messages[-1].content
 
 
-def test_judge_thorough_gate_treats_value_dispute_as_stop_signal():
-    """回归（收敛北极星）：thorough 档裁判标准把「价值之争见底」当收场信号，不再「有未决交锋就别收」。
+def test_judge_gate_treats_value_dispute_as_stop_signal():
+    """回归（收敛北极星）：裁判标准把「价值之争见底」当收场信号，不再「有未决交锋就别收」。
 
     旧 gate（『仍有未决的关键交锋时不要轻易收敛』）与终止条件 2『分歧归结为价值之争即收』自相矛盾，
-    价值承重的题每场撞满上限。钉死新口径：thorough 提示出现「价值之争见底」+「不是继续信号」。
+    价值承重的题每场撞满上限。钉死新口径：提示出现「价值之争见底」+「不是继续信号」。
     """
     captured: list = []
 
@@ -358,7 +348,7 @@ def test_judge_thorough_gate_treats_value_dispute_as_stop_signal():
         SideTurn("con", "反方", "r2_con", "反方续论"),
     ]
     history = [RoundResult(1, "焦点", turns, JudgeVerdict(True, True, False), summary="一轮小结")]
-    # 第 2 轮 thorough：gate 把「价值之争见底」列为收场信号（旧口径把它当继续信号 → 每场撞满上限）。
+    # 第 2 轮：gate 把「价值之争见底」列为收场信号（旧口径把它当继续信号 → 每场撞满上限）。
     asyncio.run(
         mod._judge_and_summarize(_config(policy=RoundPolicy(max_rounds=5)), "焦点", turns, history)
     )
@@ -378,16 +368,6 @@ def test_judge_converged_stops_immediately_no_floor():
 
     assert len(result.rounds) == 1
     assert len(runner.calls) == 1
-    assert result.stop_reason == STOP_CONVERGED
-
-
-def test_quick_single_round():
-    """快速对碰（max=1）：第 1 轮收敛即收场。"""
-    llm = _ScriptedLLM(judge_results=[_CONVERGE])
-    runner = _RecordingRunner()
-    result = _run(llm, runner, _config(policy=RoundPolicy.quick()))
-
-    assert len(result.rounds) == 1
     assert result.stop_reason == STOP_CONVERGED
 
 
@@ -597,7 +577,7 @@ class _PartialAbsentRunner:
 
 
 def test_dual_products_present():
-    """收场交付双产物：结论（决策简报字段齐全）+ 过程（每轮含小结 L1 与各方发言 L2/L3）。"""
+    """收场交付双产物：结论（决策简报字段齐全）+ 过程（每轮含小结与各方发言）。"""
     llm = _ScriptedLLM(judge_results=[_CONVERGE])
     runner = _RecordingRunner()
     result = _run(llm, runner, _config(policy=RoundPolicy(max_rounds=5)))
@@ -610,8 +590,8 @@ def test_dual_products_present():
     assert result.brief.handoffs
     assert result.brief.recommendation == ""
     # 过程产物（叙事线）
-    assert all(r.summary for r in result.rounds)  # L1
-    assert all(len(r.turns) == 2 for r in result.rounds)  # L2/L3
+    assert all(r.summary for r in result.rounds)
+    assert all(len(r.turns) == 2 for r in result.rounds)
     assert all(t.content for r in result.rounds for t in r.turns)
 
 
@@ -624,8 +604,8 @@ def test_to_ceo_output_has_brief_and_narrative():
 
     assert "决策简报" in out
     assert "交锋叙事线" in out
-    assert "争议焦点" in out
-    assert "正方最强论点" in out
+    assert "倾向" in out
+    assert "要你拍" in out
 
 
 def test_roundtable_narrative_first():
@@ -1103,8 +1083,8 @@ def _red_team_sides():
     ]
 
 
-def test_cross_exam_enabled_only_for_thorough_debate():
-    """质询回合仅在【认真辩透 + 正反 DEBATE】开启（O1：红队三拍取代通用质询）。"""
+def test_cross_exam_enabled_only_for_debate_form():
+    """质询回合仅正反 DEBATE 开启（O1：红队三拍取代通用质询）。"""
     assert Moderator._cross_exam_enabled(_config(policy=RoundPolicy(max_rounds=5))) is True
     assert (
         Moderator._cross_exam_enabled(
@@ -1112,9 +1092,6 @@ def test_cross_exam_enabled_only_for_thorough_debate():
         )
         is False
     )
-    # 快速对碰（thorough=False）→ 关
-    assert Moderator._cross_exam_enabled(_config(policy=RoundPolicy.quick())) is False
-    # 多方圆桌（即便 thorough）→ 关
     rt = [DebateSide(key=k, name=k, stance=k) for k in ("a", "b", "c")]
     assert (
         Moderator._cross_exam_enabled(
@@ -1197,7 +1174,7 @@ def test_cross_exam_side_dropped_warns_when_present_side_omitted(monkeypatch):
 
 
 def test_cross_exam_beat_populates_round_and_feeds_judge():
-    """质询 beat（thorough+正反）：主持人生成质询 → runner 作答 → 问答落进 RoundResult.cross_exam
+    """质询 beat（正反）：主持人生成质询 → runner 作答 → 问答落进 RoundResult.cross_exam
     并喂进裁判 prompt（裁判据此记 engagement）。"""
     llm = _ScriptedLLM(judge_results=[_CONVERGE], questions={"pro": ["逼问正方"], "con": ["逼问反方"]})
     runner = _RecordingRunner()
@@ -1212,21 +1189,13 @@ def test_cross_exam_beat_populates_round_and_feeds_judge():
     got = result.rounds[0].cross_exam
     assert [e.target for e in got] == ["pro", "con"]
     assert all(ex.answer for e in got for ex in e.exchanges)
-    # 裁判 prompt（「请一次性完成三件事」）看到质询问答块。
-    assess = [u for (s, u) in llm.seen if "请一次性完成三件事" in u]
+    # 裁判 prompt 看到质询问答块。
+    assess = [u for (s, u) in llm.seen if "请一次性完成两件事" in u]
     assert assess and "本轮【质询环节】问答" in assess[0]
 
 
-def test_cross_exam_skipped_for_quick_and_roundtable():
-    """闸关（快速对碰 / 圆桌）时质询 runner 从不被调用（零额外开销、行为回退）。"""
-    cx_quick = _RecordingCrossExam()
-    asyncio.run(
-        Moderator(provider=_ScriptedLLM(judge_results=[_CONVERGE]), model="m").run(
-            _config(policy=RoundPolicy.quick()), run_round=_RecordingRunner(), run_cross_exam=cx_quick
-        )
-    )
-    assert cx_quick.calls == []
-
+def test_cross_exam_skipped_for_roundtable():
+    """圆桌闸关时质询 runner 从不被调用。"""
     cx_rt = _RecordingCrossExam()
     rt = [DebateSide(key=k, name=k, stance=k) for k in ("a", "b", "c")]
     asyncio.run(
@@ -1251,7 +1220,7 @@ def test_run_without_cross_exam_runner_is_unchanged():
 
 
 def test_closing_enabled_skipped_for_new_debates():
-    """新场不跑结辩：认真正反 / 红队 / 快速 / 圆桌闸均关。"""
+    """新场不跑结辩：正反 / 红队 / 圆桌闸均关。"""
     assert Moderator._closing_enabled(_config(policy=RoundPolicy(max_rounds=5))) is False
     assert (
         Moderator._closing_enabled(
@@ -1259,7 +1228,6 @@ def test_closing_enabled_skipped_for_new_debates():
         )
         is False
     )
-    assert Moderator._closing_enabled(_config(policy=RoundPolicy.quick())) is False
     rt = [DebateSide(key=k, name=k, stance=k) for k in ("a", "b", "c")]
     assert (
         Moderator._closing_enabled(
@@ -1269,8 +1237,8 @@ def test_closing_enabled_skipped_for_new_debates():
     )
 
 
-def test_closing_skipped_for_thorough_debate():
-    """认真正反：结辩 runner 不被调用，closings 空；简报仍落地。"""
+def test_closing_skipped_for_debate():
+    """正反：结辩 runner 不被调用，closings 空；简报仍落地。"""
     llm = _ScriptedLLM(judge_results=[_CONVERGE])
     closing = _RecordingClosing()
     result = asyncio.run(
@@ -1286,16 +1254,8 @@ def test_closing_skipped_for_thorough_debate():
     assert llm.brief_calls == 1
 
 
-def test_closing_skipped_for_quick_and_roundtable():
-    """闸关（快速对碰 / 圆桌）时结辩 runner 从不被调用（零额外开销、行为回退）。"""
-    quick = _RecordingClosing()
-    asyncio.run(
-        Moderator(provider=_ScriptedLLM(judge_results=[_CONVERGE]), model="m").run(
-            _config(policy=RoundPolicy.quick()), run_round=_RecordingRunner(), run_closing=quick
-        )
-    )
-    assert quick.calls == []
-
+def test_closing_skipped_for_roundtable():
+    """圆桌闸关时结辩 runner 从不被调用。"""
     rt_closing = _RecordingClosing()
     rt = [DebateSide(key=k, name=k, stance=k) for k in ("a", "b", "c")]
     asyncio.run(
@@ -1380,7 +1340,7 @@ def test_judge_without_scores_is_backward_compatible():
 
 
 def test_tally_scores_accumulates_across_rounds():
-    """累计记分：三维逐轮相加、penalties 全场并起（driving 收场倾向）。"""
+    """累计记分：三维逐轮相加、penalties 全场并起（协议兼容；不驱动倾向）。"""
     v1 = JudgeVerdict(True, True, False, scores={"pro": RoundScore(3, 3, 3, ["p1"]), "con": RoundScore(2, 2, 2, [])})
     v2 = JudgeVerdict(True, False, True, scores={"pro": RoundScore(4, 4, 4, ["p2", "p3"]), "con": RoundScore(1, 1, 1, [])})
     tally = tally_scores([RoundResult(1, "f1", [], v1), RoundResult(2, "f2", [], v2)])
@@ -1391,8 +1351,8 @@ def test_tally_scores_accumulates_across_rounds():
     assert tally_scores([RoundResult(1, "f", [], JudgeVerdict(True, True, True))]) == {}  # 无记分→空
 
 
-def test_brief_carries_cumulative_scores_and_parses_decisive():
-    """收场简报：累计记分喂进 prompt（decisive/leaning 据此），decisive 解析进 brief / CEO 文本 / payload。"""
+def test_brief_parses_decisive_without_score_block():
+    """收场简报：不再喂累计记分；decisive / leaning 仍解析进 brief / CEO 文本 / payload。"""
     judge = {
         **_CONVERGE,
         "scores": {
@@ -1404,17 +1364,14 @@ def test_brief_carries_cumulative_scores_and_parses_decisive():
     llm = _ScriptedLLM(judge_results=[judge], brief={**_DEFAULT_BRIEF, "decisive": decisive})
     result = _run(llm, _RecordingRunner(), _config(policy=RoundPolicy(max_rounds=1)))
     brief_prompts = [u for (s, u) in llm.seen if "请据此产出简报" in u]
-    assert brief_prompts and "累计记分" in brief_prompts[0] and "净分" in brief_prompts[0]
-    assert "须与它一致" in brief_prompts[0]
-    assert "方向" in brief_prompts[0]  # 「一致」= 倾向方向，禁抄记分数字进正文
-    assert "单句≤50字" in brief_prompts[0]
+    assert brief_prompts
     assert result.brief.decisive == decisive
     assert "胜负手" in result.to_ceo_output() and decisive in result.to_ceo_output()
     assert result.to_event_payload()["brief"]["decisive"] == decisive
 
 
-def test_roundtable_brief_scores_are_momentum_only():
-    """圆桌：累计记分仍喂进简报（momentum），但不要求 decisive/leaning 对齐、不裁胜负。"""
+def test_roundtable_brief_does_not_cut_winner():
+    """圆桌：简报不裁胜负（不喂记分、不要求 leaning 对齐净分）。"""
     sides = [
         DebateSide(key="a", name="视角A", stance="A"),
         DebateSide(key="b", name="视角B", stance="B"),
@@ -1435,10 +1392,9 @@ def test_roundtable_brief_scores_are_momentum_only():
         _config(form=DebateForm.ROUNDTABLE, sides=sides, policy=RoundPolicy(max_rounds=1)),
     )
     brief_prompts = [u for (s, u) in llm.seen if "请据此产出简报" in u]
-    assert brief_prompts and "累计记分" in brief_prompts[0]
-    assert "momentum" in brief_prompts[0]
-    assert "须与它一致" not in brief_prompts[0]
-    assert "不】驱动 leaning" in brief_prompts[0] or "不驱动 leaning" in brief_prompts[0]
+    assert brief_prompts
+    assert "不裁谁对谁错" in brief_prompts[0]
+    assert "观点光谱" in brief_prompts[0]
 
 
 def test_round_payload_has_cross_exam_and_scores_without_polluting_verdict():

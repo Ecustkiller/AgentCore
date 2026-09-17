@@ -195,7 +195,7 @@ def test_factory_closes_files_and_recon_delivery_idle():
 
 
 def test_directed_search_role_guessing_is_absent():
-    """按职称灌检索纪律 / 补工具面已撤；搜法只在 grep / code_search / file_read。"""
+    """按职称灌检索纪律 / 补工具面已撤；搜法只在 grep / file_read。"""
     import agentcore.runtime.runs.worker_budget as wb
 
     assert not hasattr(wb, "is_directed_search_role")
@@ -220,7 +220,7 @@ def test_build_plan_ignores_reviewer_least_privilege_tools():
                 },
             }
         ],
-        valid_tools={"file_list", "file_read", "grep", "code_search", "handoff"},
+        valid_tools={"file_list", "file_read", "grep", "handoff"},
     )
     assert errors == []
     assert plan.nodes[0].tools is None

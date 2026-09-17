@@ -23,7 +23,7 @@ from agentcore.runtime.resolve.prompt.compose import (
 from agentcore.runtime.skills import build_system_skill_registry
 from agentcore.tools.builtin import build_worker_registry
 from agentcore.tools.sandbox.exec_languages import resolve_exec_languages
-from agentcore.workspace.project_shell import desk_is_visibly_empty
+from agentcore.workspace.desk_empty import desk_is_visibly_empty
 from agentcore.workspace.protocol import WorkspaceBackend
 
 

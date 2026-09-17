@@ -38,10 +38,10 @@ def _catalog_with_off_protocol() -> ModelCatalog:
                 ),
             ),
             ModelCatalogEntry(
-                id="minimax-m2.7",
+                id="claude-haiku-4-5",
                 origin="byok",
-                display_name="MiniMax M2.7",
-                vendor="MiniMax",
+                display_name="Claude Haiku 4.5",
+                vendor="Anthropic",
                 available=False,
                 provider_id="p1",
                 provider_label="OpenCode Go",
@@ -73,8 +73,8 @@ def test_to_response_includes_unavailable_reason() -> None:
         "code": "upstream_protocol_unsupported",
         "required_protocol": "openai_responses",
     }
-    minimax = next(m for m in dumped["models"] if m["id"] == "minimax-m2.7")
-    assert minimax["unavailable_reason"] == {
+    haiku = next(m for m in dumped["models"] if m["id"] == "claude-haiku-4-5")
+    assert haiku["unavailable_reason"] == {
         "code": "upstream_protocol_unsupported",
         "required_protocol": "anthropic_messages",
     }
@@ -117,8 +117,8 @@ async def test_list_user_models_includes_unavailable_reason(monkeypatch) -> None
             "code": "upstream_protocol_unsupported",
             "required_protocol": "openai_responses",
         }
-        minimax = next(m for m in body["models"] if m["id"] == "minimax-m2.7")
-        assert minimax["unavailable_reason"]["required_protocol"] == (
+        haiku = next(m for m in body["models"] if m["id"] == "claude-haiku-4-5")
+        assert haiku["unavailable_reason"]["required_protocol"] == (
             "anthropic_messages"
         )
         kimi = next(m for m in body["models"] if m["id"] == "kimi-k2.5")

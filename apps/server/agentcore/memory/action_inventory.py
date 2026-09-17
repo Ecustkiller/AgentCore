@@ -19,11 +19,10 @@ from agentcore.core.secrets import redact_secrets
 _READ_TOOLS = frozenset({"file_read"})
 _WRITE_TOOLS = frozenset({"file_write", "str_replace"})
 _COMMAND_TOOLS = frozenset({"run", "host", "terminal", "test_run"})
-_SEARCH_TOOLS = frozenset({"grep", "code_search"})
+_SEARCH_TOOLS = frozenset({"grep"})
 
-# Grep / code_search hit line → leading path.
+# Grep hit line → leading path.
 _GREP_HIT_RE = re.compile(r"^([^:\n]+):\d+")
-_CODE_SEARCH_HIT_RE = re.compile(r"^([^:\n]+):\d+-\d+")
 
 _MAX_PATHS = 40
 _MAX_COMMANDS = 24
@@ -302,23 +301,18 @@ def _extract_command(tool_name: str, arguments: dict[str, Any]) -> str:
 def _extract_search_query(tool_name: str, arguments: dict[str, Any]) -> str:
     if tool_name == "grep":
         return str(arguments.get("pattern") or "").strip()
-    if tool_name == "code_search":
-        return str(arguments.get("query") or "").strip()
     return ""
 
 
 def _extract_search_hits(tool_name: str, result: str) -> list[str]:
+    del tool_name
     text = result[:_MAX_RESULT_SCAN_CHARS]
     hits: list[str] = []
     for line in text.splitlines():
         line = line.strip()
         if not line:
             continue
-        m = (
-            _CODE_SEARCH_HIT_RE.match(line)
-            if tool_name == "code_search"
-            else _GREP_HIT_RE.match(line)
-        )
+        m = _GREP_HIT_RE.match(line)
         if not m:
             continue
         path = _norm_path(m.group(1))

@@ -88,6 +88,7 @@ from agentcore.llm.provider.protocol import (
     ToolCallDelta,
     ToolCallFunction,
     connect_retry_policy,
+    normalize_thinking_blocks,
 )
 from agentcore.llm.provider.wire_dialect import (
     effective_reasoning_effort,
@@ -870,6 +871,7 @@ class OpenAICompatibleProvider:
             latency_ms=latency_ms,
             empty_diagnosis=empty_diagnosis,
             empty_raw_preview=raw_body_preview if empty_diagnosis else None,
+            thinking_blocks=normalize_thinking_blocks(message.get("thinking_blocks")),
         )
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[LLMChunk]:
@@ -919,6 +921,7 @@ class OpenAICompatibleProvider:
                 usage=resp.usage,
                 empty_diagnosis=resp.empty_diagnosis,
                 empty_raw_preview=resp.empty_raw_preview,
+                thinking_blocks=resp.thinking_blocks,
             )
             return
 
@@ -1058,6 +1061,9 @@ class OpenAICompatibleProvider:
                             delta_tool_calls=tc_deltas,
                             finish_reason=choice.get("finish_reason"),
                             usage=usage,
+                            thinking_blocks=normalize_thinking_blocks(
+                                data.get("thinking_blocks")
+                            ),
                         )
 
                 if not has_content and not has_tool_calls:
@@ -1278,6 +1284,15 @@ class OpenAICompatibleProvider:
                     # Thinking mode: assistant tool-call turns must echo
                     # reasoning_content (empty string when the model omitted it).
                     m["reasoning_content"] = ""
+            if self._is_inference_hop:
+                # Sidecar → cloud proxy: forward Anthropic echo fields the vendor
+                # dialect would otherwise drop (Claude ids are not echo_reasoning).
+                if msg.reasoning_content is not None:
+                    m["reasoning_content"] = msg.reasoning_content
+                if msg.thinking_blocks:
+                    blocks = normalize_thinking_blocks(msg.thinking_blocks)
+                    if blocks:
+                        m["thinking_blocks"] = blocks
             messages.append(m)
 
         payload: dict = {

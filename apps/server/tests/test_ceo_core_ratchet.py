@@ -193,7 +193,9 @@ from agentcore.runtime.resolve.prompt import (
 # 当次实测 1221。cap 降到 1230。
 # 2026-09-09 基座换词：结构面/开场表/权威稿 → 产品面中文（不扩写）。当次实测 1218。
 # cap 降到 1220。
-_RESIDENT_CAP = 1220
+# 2026-09-18 身份删「短答和单点」路由尺（WHEN 归 delegate description）。核 −14。
+# cap 1220→1210。
+_RESIDENT_CAP = 1210
 
 # (门工具, 该手册的签名字面) —— 手册只在门开的回合出现，不许常驻。
 # run 的 HOW 在 skill body（consult(run) 命中 skill），不进 capability_how_suffix。
@@ -298,6 +300,6 @@ def test_honesty_floors_stay_resident():
     assert "用户机器上已经跑通" in _DELIVERY
     assert "export_to_local" in _DELIVERY
     assert "不可产" in _DELIVERY and "等效替代" in _DELIVERY
-    assert "已装配" in base and "通道在" in base
+    assert "已装配" in base
     assert "邻格" not in base
     assert "用别的路继续" in base

@@ -69,14 +69,7 @@ export async function openLocalFolderFromRoot(
     }
 
     startNewConversation(navigate, folder.id);
-    // Silent Cursor-style index + MCP + rules/memory warm: ensure sidecar (fire-and-forget).
-    if (window.sidecarApi?.warmCodeIndex) {
-      void window.sidecarApi
-        .warmCodeIndex({ rootId: root.id, subpath: "" })
-        .catch(() => {
-          /* best-effort; no toast */
-        });
-    }
+    // Silent MCP + rules/memory warm: ensure sidecar (fire-and-forget).
     if (window.sidecarApi?.warmMcpDiscover) {
       void window.sidecarApi
         .warmMcpDiscover({

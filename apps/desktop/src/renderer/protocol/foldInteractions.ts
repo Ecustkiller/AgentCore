@@ -194,7 +194,6 @@ export function foldInteractions(
           form: str(p.form) || "debate",
           rationale: str(p.rationale),
           factPointers: ptrs,
-          thorough: p.thorough !== false,
           maxRounds: Number(p.max_rounds ?? 5) || 5,
           note: typeof p.note === "string" ? p.note : null,
         });

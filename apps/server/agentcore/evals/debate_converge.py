@@ -9,7 +9,7 @@
 做法与 `calibration.py`（校准 eval LLMJudge ↔ 人工分）同构，但校准的是**辩论裁判自身的收敛判定**：
 
 1. **合成场景**（:data:`SCENARIOS`）：一组人工编写、带**金标 `expect_converge`** 的单轮辩论态——
-   覆盖「该收敛」（论点见顶重复 / 归结为价值之争 / 红队风险挖尽 / 快速单轮）与「该继续」
+   覆盖「该收敛」（论点见顶重复 / 归结为价值之争 / 红队风险挖尽）与「该继续」
    （开场首轮 / 冒出实质新论点 / 圆桌新视角 / 红队新风险）两侧。
 2. **过真实裁判**（:func:`run_debate_converge`）：对每个场景构 `DebateConfig` + 当前轮发言 + 历史
    长度（定 `round_no`），调**生产合并裁判 `_judge_and_summarize`** 取 `converged`（只读其裁判判定
@@ -23,7 +23,7 @@
 focus/summary/clashes 压成紧凑账本喂进裁判，让 `new_arguments` 能判「本轮相比前几轮是否还有跨轮
 新论点」）。故本场景集覆盖两类信号：
 - **in-round**（`prior_rounds` 留空）：收敛信号落在当前轮发言里（辩手自报「无新论点」/ 分歧已成
-  价值僵局 / 快速单轮）——量裁判对当前轮信号的敏感度（≈ H1 过保守假设）。
+  价值僵局）——量裁判对当前轮信号的敏感度（≈ H1 过保守假设）。
 - **cross-round**（`prior_rounds` 给足账本）：当前轮把账本里的老论点**换措辞重述、且不自报重复**，
   须靠跨轮账本才判得出「无跨轮新论点 → 收敛」——量裁判是否补上了「跨轮重复不可见」这一结构盲区
   （H2，正是真实 trace 5 轮撞满 max_rounds 的形态）。
@@ -81,8 +81,8 @@ class ConvergeScenario:
 
     ``turns`` 是【当前轮】各方发言；``prior_rounds`` 是喂裁判的【前几轮论点账本】（收敛校准 §三
     H2：裁判据此判跨轮新论点，见 ``moderator._prior_ledger``）——留空则退化为「只看当前轮」
-    （in-round 敏感度）。``round_no`` / ``max_rounds`` / ``thorough`` 决定裁判的 gate_hint 语境
-    （首轮默认继续、快速单轮即收、thorough 调松紧）。``expect_converge`` 是金标：本轮据【账本 +
+    （in-round 敏感度）。``round_no`` / ``max_rounds`` 决定裁判的 gate_hint 语境
+    （首轮默认继续、其后盯决定性分歧）。``expect_converge`` 是金标：本轮据【账本 +
     当前发言】是否应当收敛；``expect_stop`` 是可选金标收敛归因（仅 ``expect_converge`` 为真时有
     意义）。``why`` 记金标理由，便于读分歧时对照裁判为何与金标不一致。
     """
@@ -94,7 +94,6 @@ class ConvergeScenario:
     focus: str
     round_no: int
     max_rounds: int
-    thorough: bool
     turns: tuple[SideTurn, ...]
     expect_converge: bool
     why: str
@@ -102,12 +101,12 @@ class ConvergeScenario:
     prior_rounds: tuple[PriorRound, ...] = ()
 
     def config(self) -> DebateConfig:
-        """据场景构造生产 `DebateConfig`（policy 用 thorough + max_rounds，喂裁判 gate_hint）。"""
+        """据场景构造生产 `DebateConfig`（policy 用 max_rounds，喂裁判 gate_hint）。"""
         return DebateConfig(
             motion=self.motion,
             form=self.form,
             sides=list(self.sides),
-            policy=RoundPolicy(thorough=self.thorough, max_rounds=self.max_rounds),
+            policy=RoundPolicy(max_rounds=self.max_rounds),
         )
 
     def history(self) -> list[RoundResult]:
@@ -163,7 +162,6 @@ SCENARIOS: tuple[ConvergeScenario, ...] = (
         focus="远程办公对协作效率的净影响",
         round_no=3,
         max_rounds=5,
-        thorough=True,
         turns=(
             _turn(
                 "pro",
@@ -193,7 +191,6 @@ SCENARIOS: tuple[ConvergeScenario, ...] = (
         focus="有限工期下先做哪个",
         round_no=2,
         max_rounds=5,
-        thorough=True,
         turns=(
             _turn(
                 "dark",
@@ -224,7 +221,6 @@ SCENARIOS: tuple[ConvergeScenario, ...] = (
         focus="剩余未覆盖的失败场景",
         round_no=3,
         max_rounds=5,
-        thorough=True,
         turns=(
             _turn(
                 "plan",
@@ -244,27 +240,6 @@ SCENARIOS: tuple[ConvergeScenario, ...] = (
         why="红队明说挖不到新风险、方案方已修补此前所有风险（无新风险可挖）——红队形态收敛信号。",
     ),
     ConvergeScenario(
-        id="quick_single",
-        form=_S_DEBATE,
-        motion="午饭吃火锅还是烤肉",
-        sides=(
-            _side("hotpot", "火锅党", "主张吃火锅"),
-            _side("bbq", "烤肉党", "主张吃烤肉"),
-        ),
-        focus="今天中午吃哪个更合适",
-        round_no=1,
-        max_rounds=1,
-        thorough=False,
-        turns=(
-            _turn("hotpot", "火锅党", "火锅：食材灵活、锅底可选、一群人围着热闹，冬天尤其合适。"),
-            _turn("bbq", "烤肉党", "烤肉：不用等煮、上桌快、有专人烤、蛋白质管够。"),
-        ),
-        expect_converge=True,
-        expect_stop=STOP_CONVERGED,
-        why="快速单轮（max=1）：用户只想一次对碰即收，核心立场已亮出即应收敛"
-        "（否则错误兜底 max_rounds）。",
-    ),
-    ConvergeScenario(
         id="plateau_reword",
         form=_S_DEBATE,
         motion="该不该给核心服务引入缓存层",
@@ -275,7 +250,6 @@ SCENARIOS: tuple[ConvergeScenario, ...] = (
         focus="缓存一致性风险 vs 性能收益",
         round_no=4,
         max_rounds=5,
-        thorough=True,
         turns=(
             _turn(
                 "pro",
@@ -306,7 +280,6 @@ SCENARIOS: tuple[ConvergeScenario, ...] = (
         focus="四天工作制对整体产出的影响",
         round_no=1,
         max_rounds=5,
-        thorough=True,
         turns=(
             _turn(
                 "pro",
@@ -335,7 +308,6 @@ SCENARIOS: tuple[ConvergeScenario, ...] = (
         focus="成本与可控性的长期权衡",
         round_no=2,
         max_rounds=5,
-        thorough=True,
         turns=(
             _turn(
                 "cloud",
@@ -366,7 +338,6 @@ SCENARIOS: tuple[ConvergeScenario, ...] = (
         focus="AI 生成内容影响的核心维度",
         round_no=2,
         max_rounds=4,
-        thorough=True,
         turns=(
             _turn("tool", "工具论视角", "AI 是放大器，降低创作门槛、让更多人能表达。"),
             _turn(
@@ -395,7 +366,6 @@ SCENARIOS: tuple[ConvergeScenario, ...] = (
         focus="尚未覆盖的攻击面",
         round_no=2,
         max_rounds=5,
-        thorough=True,
         turns=(
             _turn(
                 "plan",
@@ -425,7 +395,6 @@ SCENARIOS: tuple[ConvergeScenario, ...] = (
         focus="远程办公的净影响",
         round_no=3,
         max_rounds=5,
-        thorough=True,
         prior_rounds=(
             PriorRound(
                 focus="远程办公对个人产出的影响",
@@ -472,7 +441,6 @@ SCENARIOS: tuple[ConvergeScenario, ...] = (
         focus="成本与可控性的长期权衡",
         round_no=2,
         max_rounds=5,
-        thorough=True,
         prior_rounds=(
             PriorRound(
                 focus="早期成本与运维负担",
@@ -504,7 +472,6 @@ SCENARIOS: tuple[ConvergeScenario, ...] = (
         focus="剩余未覆盖的失败场景",
         round_no=3,
         max_rounds=5,
-        thorough=True,
         prior_rounds=(
             PriorRound(
                 focus="突发流量下的失效",

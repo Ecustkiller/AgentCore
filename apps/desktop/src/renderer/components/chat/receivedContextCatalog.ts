@@ -1,4 +1,6 @@
-import type { ContextBlockWire } from "@/types/events";
+import type { PromptSection } from "@/lib/parsePromptDocument";
+import { parsePromptDocument } from "@/lib/parsePromptDocument";
+import type { ContextBlockWire, ProcessStep } from "@/types/events";
 
 /** Context channel → 中文 label + one-line hint. Shared by the briefing-reader TOC. */
 export const CONTEXT_CHANNEL_META: Record<
@@ -45,12 +47,17 @@ export type CatalogGroupId =
   | "material"
   | "environment"
   | "standing"
+  | "later"
   | "other";
 
 export interface CatalogItem {
   id: string;
   group: CatalogGroupId;
   channel: string;
+  /** Prompt tag when this row is a slice of `channel=system`; otherwise null. */
+  tag: string | null;
+  /** Honest empty row: this turn's system text has no `<设定>`. */
+  absent: boolean;
   label: string;
   body: string;
   chars: number;
@@ -68,13 +75,24 @@ export interface CatalogGroup {
 }
 
 const GROUP_META: { id: CatalogGroupId; label: string }[] = [
-  { id: "standing", label: "常驻指令" },
+  { id: "standing", label: "系统" },
   { id: "turn", label: "本回合" },
+  { id: "later", label: "后来查阅" },
   { id: "history", label: "此前对话" },
   { id: "material", label: "材料" },
   { id: "environment", label: "环境" },
   { id: "other", label: "其他" },
 ];
+
+/** Human-facing layers lifted out of the system blob; factory remainder stays one row. */
+const PINNED_SYSTEM_TAGS = ["设定", "按需目录", "工作区"] as const;
+
+const CONSULT_TOOLS = new Set([
+  "consult",
+  "consult_skill",
+  "consult_memory",
+  "consult_rule",
+]);
 
 const TURN_CHANNELS = new Set([
   "tools",
@@ -111,6 +129,7 @@ function groupForChannel(channel: string): CatalogGroupId {
   if (MATERIAL_CHANNELS.has(channel)) return "material";
   if (ENVIRONMENT_CHANNELS.has(channel)) return "environment";
   if (channel === "system") return "standing";
+  if (channel === "consult_receipt") return "later";
   return "other";
 }
 
@@ -138,6 +157,8 @@ function fromBlock(
     id,
     group: groupForChannel(block.channel),
     channel: block.channel,
+    tag: null,
+    absent: false,
     label: itemLabel(block),
     body: block.body,
     chars: block.chars,
@@ -150,13 +171,167 @@ function fromBlock(
   };
 }
 
+function isPinnedTag(
+  tag: string | null,
+): tag is (typeof PINNED_SYSTEM_TAGS)[number] {
+  return tag != null && (PINNED_SYSTEM_TAGS as readonly string[]).includes(tag);
+}
+
+function taggedText(section: PromptSection): string {
+  if (section.tag) {
+    return `<${section.tag}>\n${section.body}\n</${section.tag}>`;
+  }
+  return section.body;
+}
+
+function joinSections(sections: readonly PromptSection[]): string {
+  return sections.map(taggedText).filter(Boolean).join("\n\n");
+}
+
+function absentSettingItem(
+  block: ContextBlockWire,
+  blockIndex: number,
+): CatalogItem {
+  return fromBlock(block, `b${blockIndex}:设定:absent`, {
+    group: "standing",
+    tag: "设定",
+    absent: true,
+    label: "设定",
+    body: "本回合未注入常驻规则。",
+    chars: 0,
+    truncated: false,
+    files: [],
+  });
+}
+
+function pinnedSlice(
+  block: ContextBlockWire,
+  blockIndex: number,
+  section: PromptSection,
+  sectionIndex: number,
+): CatalogItem {
+  const tag = section.tag ?? "untagged";
+  return fromBlock(block, `b${blockIndex}:${tag}:${sectionIndex}`, {
+    group: "standing",
+    tag: section.tag,
+    label: section.title || tag,
+    body: section.body,
+    chars: section.body.length,
+    truncated: false,
+    files: [],
+  });
+}
+
+function factoryItem(
+  block: ContextBlockWire,
+  blockIndex: number,
+  rest: readonly PromptSection[],
+): CatalogItem {
+  const body = joinSections(rest);
+  return fromBlock(block, `b${blockIndex}:factory`, {
+    group: "standing",
+    tag: null,
+    label: "出厂指令",
+    body,
+    chars: body.length,
+    truncated: false,
+    files: [],
+  });
+}
+
 /**
- * Project `run_context` blocks into TOC groups. Does not invent channels or
- * reorder the wire list inside a group — empty groups are omitted.
+ * Same `channel=system` body the model ate, indexed by existing tags.
+ * Pinned layers become their own TOC rows; remaining constitution stays one
+ * factory row. Missing `<设定>` is an honest empty row, not a file-page backfill.
+ */
+function splitSystemBlock(
+  block: ContextBlockWire,
+  blockIndex: number,
+): CatalogItem[] {
+  const sections = parsePromptDocument(block.body);
+  const items: CatalogItem[] = [];
+  if (!sections.some((section) => section.tag === "设定")) {
+    items.push(absentSettingItem(block, blockIndex));
+  }
+
+  const pinned: Record<(typeof PINNED_SYSTEM_TAGS)[number], PromptSection[]> = {
+    设定: [],
+    按需目录: [],
+    工作区: [],
+  };
+  const rest: PromptSection[] = [];
+  for (const section of sections) {
+    if (isPinnedTag(section.tag)) pinned[section.tag].push(section);
+    else rest.push(section);
+  }
+
+  PINNED_SYSTEM_TAGS.forEach((tag, tagIndex) => {
+    pinned[tag].forEach((section, sliceIndex) => {
+      items.push(
+        pinnedSlice(block, blockIndex, section, tagIndex * 100 + sliceIndex),
+      );
+    });
+  });
+  if (rest.length > 0) items.push(factoryItem(block, blockIndex, rest));
+  return items;
+}
+
+function displayField(display: unknown, key: string): string | null {
+  if (!display || typeof display !== "object") return null;
+  const value = (display as Record<string, unknown>)[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function consultName(step: Extract<ProcessStep, { kind: "tool" }>): string {
+  const display = step.display;
+  return (
+    displayField(display, "name") ??
+    displayField(display, "skill_name") ??
+    displayField(display, "topic") ??
+    displayField(display, "rule") ??
+    (typeof step.arguments.name === "string" && step.arguments.name.trim()
+      ? step.arguments.name.trim()
+      : step.tool_name)
+  );
+}
+
+function laterConsultItems(process: readonly ProcessStep[]): CatalogItem[] {
+  const items: CatalogItem[] = [];
+  for (const step of process) {
+    if (step.kind !== "tool") continue;
+    if (!CONSULT_TOOLS.has(step.tool_name)) continue;
+    if (step.status === "running") continue;
+    const body = (step.result ?? "").trim();
+    if (!body) continue;
+    const name = consultName(step);
+    items.push({
+      id: `later:consult:${step.id}`,
+      group: "later",
+      channel: "consult_receipt",
+      tag: null,
+      absent: false,
+      label: `查阅 · ${name}`,
+      body,
+      chars: body.length,
+      truncated: false,
+      source_role: "",
+      source_run_id: "",
+      fidelity: "",
+      files: [],
+    });
+  }
+  return items;
+}
+
+/**
+ * Project `run_context` blocks into TOC groups. System stays one wire
+ * channel — slices are a reader index, not a second assembly. Consult
+ * receipts are indexed from the same process steps the timeline already
+ * shows. Empty groups are omitted.
  */
 export function buildReceivedContextCatalog(
   blocks: readonly ContextBlockWire[],
-  opts: { includeSystem: boolean },
+  opts: { includeSystem: boolean; process?: readonly ProcessStep[] },
 ): CatalogGroup[] {
   const buckets: Record<CatalogGroupId, CatalogItem[]> = {
     turn: [],
@@ -164,21 +339,28 @@ export function buildReceivedContextCatalog(
     material: [],
     environment: [],
     standing: [],
+    later: [],
     other: [],
   };
 
   blocks.forEach((block, index) => {
     if (block.channel === "system") {
       if (!opts.includeSystem) return;
-      buckets.standing.push(
-        fromBlock(block, `b${index}`, { label: "常驻指令" }),
-      );
+      for (const item of splitSystemBlock(block, index)) {
+        buckets.standing.push(item);
+      }
       return;
     }
 
     const item = fromBlock(block, `b${index}`);
     buckets[item.group].push(item);
   });
+
+  if (opts.process) {
+    for (const item of laterConsultItems(opts.process)) {
+      buckets.later.push(item);
+    }
+  }
 
   return GROUP_META.filter((g) => buckets[g.id].length > 0).map((g) => ({
     id: g.id,
@@ -191,7 +373,7 @@ export function flattenCatalog(groups: readonly CatalogGroup[]): CatalogItem[] {
   return groups.flatMap((g) => g.items);
 }
 
-/** CEO: 常驻指令 → 本回合工具 → 原始请求. Worker dock: first 材料 row wins. */
+/** CEO: injected 设定 → 原始请求 → 本回合工具. Worker dock: first 材料 row wins. */
 export function defaultCatalogItemId(
   groups: readonly CatalogGroup[],
   opts?: { preferMaterial?: boolean },
@@ -202,9 +384,9 @@ export function defaultCatalogItemId(
     if (material) return material.id;
   }
   return (
-    items.find((i) => i.channel === "system")?.id ??
-    items.find((i) => i.channel === "tools")?.id ??
+    items.find((i) => i.tag === "设定" && !i.absent)?.id ??
     items.find((i) => i.channel === "request")?.id ??
+    items.find((i) => i.channel === "tools")?.id ??
     items[0]?.id ??
     null
   );

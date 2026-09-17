@@ -561,20 +561,8 @@ def test_debate_team_preview_resolved_adjust(projected):
     assert "先改命题" in (ended.payload.get("result") or "")
 
 
-def test_debate_pretrial_fast_projection(projected):
-    """庭前 fast：skipped + skipReason=fast，无取证员舰队。"""
-    p = projected["multi_agent_debate_pretrial_fast"]
-    pt = p.get("debatePretrial")
-    assert pt is not None
-    assert pt["status"] == "skipped"
-    assert pt["skipReason"] == "fast"
-    assert pt["completeness"] == "empty"
-    assert pt["incomplete"] is False
-    assert not any("_inv_" in r["id"] for r in p["runs"])
-
-
 def test_debate_pretrial_no_pack_projection(projected):
-    """thorough 无 pack：skipped + no_pack，无舰队，进入立论。"""
+    """无 pack：skipped + no_pack，无舰队，进入立论。"""
     p = projected["multi_agent_debate_pretrial_no_pack"]
     pt = p.get("debatePretrial")
     assert pt is not None

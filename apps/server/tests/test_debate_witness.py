@@ -151,7 +151,7 @@ async def test_witness_exam_questions_parses_factual_keys():
             DebateSide(key="pro", name="正", stance="解约"),
             DebateSide(key="con", name="反", stance="观望"),
         ],
-        policy=RoundPolicy(thorough=True, max_rounds=3),
+        policy=RoundPolicy(max_rounds=3),
     )
     turns = [
         SideTurn(
@@ -191,7 +191,7 @@ async def test_witness_exam_questions_drops_unknown_keys():
         motion="m",
         form=DebateForm.DEBATE,
         sides=[DebateSide(key="pro", name="正", stance="a")],
-        policy=RoundPolicy.quick(),
+        policy=RoundPolicy(),
     )
     turns = [
         SideTurn(side_key="pro", side_name="正", run_id="r", content="x", ok=True)
@@ -291,7 +291,7 @@ async def test_moderator_skips_witness_when_roster_empty():
             DebateSide(key="pro", name="正", stance="a"),
             DebateSide(key="con", name="反", stance="b"),
         ],
-        policy=RoundPolicy(thorough=True, max_rounds=2),
+        policy=RoundPolicy(max_rounds=2),
     )
     result = await mod.run(
         config,
@@ -306,95 +306,7 @@ async def test_moderator_skips_witness_when_roster_empty():
 
 
 @pytest.mark.asyncio
-async def test_moderator_skips_witness_on_quick_policy():
-    """快速对碰关闭质询 → 即便有花名册与 runner 也不点名。"""
-    import json
-
-    from agentcore.llm.provider.protocol import LLMResponse
-    from agentcore.runtime.debate import Moderator
-
-    class _Scripted:
-        async def complete(self, request):  # noqa: ANN001
-            step = request.scenario.rsplit(".", 1)[-1]
-            if step == "frame":
-                return LLMResponse(
-                    content=json.dumps({"focus": "焦点", "opening": "开场"})
-                )
-            if step == "assess":
-                return LLMResponse(
-                    content=json.dumps(
-                        {
-                            "real_clash": True,
-                            "new_arguments": False,
-                            "converged": True,
-                            "stop_reason": "converged",
-                            "rationale": "够了",
-                            "summary": "小结",
-                            "scores": {},
-                        }
-                    )
-                )
-            if step == "brief":
-                return LLMResponse(
-                    content=json.dumps(
-                        {
-                            "crux": "c",
-                            "strongest_points": {},
-                            "leaning": "l",
-                            "confidence": "中",
-                            "recommendation": "r",
-                        }
-                    )
-                )
-            return LLMResponse(content="{}")
-
-    wit_called = {"n": 0}
-
-    async def run_round(**_kw):  # noqa: ANN003
-        return [
-            SideTurn(
-                side_key="pro", side_name="正", run_id="p", content="论点", ok=True
-            ),
-            SideTurn(
-                side_key="con", side_name="反", run_id="c", content="反点", ok=True
-            ),
-        ]
-
-    async def run_witness_exam(**_kw):  # noqa: ANN003
-        wit_called["n"] += 1
-        return []
-
-    mod = Moderator(provider=_Scripted(), model="m", run_id="mod")
-    config = DebateConfig(
-        motion="命题",
-        form=DebateForm.DEBATE,
-        sides=[
-            DebateSide(key="pro", name="正", stance="a"),
-            DebateSide(key="con", name="反", stance="b"),
-        ],
-        policy=RoundPolicy.quick(),
-    )
-    result = await mod.run(
-        config,
-        run_round=run_round,
-        run_witness_exam=run_witness_exam,
-        witness_roster=[
-            WitnessSeatInfo(
-                key="lens_0",
-                name="证人·法律",
-                lens_run_id="lens_0",
-                seat_run_id="mod_wit_lens_0",
-            )
-        ],
-    )
-    assert wit_called["n"] == 0
-    assert result.rounds[0].witness_exam == []
-    # 花名册仍进结果（开赛探测到了），但未发生答问。
-    assert len(result.witnesses) == 1
-
-
-@pytest.mark.asyncio
-async def test_moderator_calls_witness_on_thorough_debate():
+async def test_moderator_calls_witness_on_debate():
     import json
 
     from agentcore.llm.provider.protocol import LLMResponse
@@ -514,7 +426,7 @@ async def test_moderator_calls_witness_on_thorough_debate():
             DebateSide(key="pro", name="正", stance="解约"),
             DebateSide(key="con", name="反", stance="观望"),
         ],
-        policy=RoundPolicy(thorough=True, max_rounds=2),
+        policy=RoundPolicy(max_rounds=2),
     )
     result = await mod.run(
         config,

@@ -217,17 +217,11 @@ def test_empty_desk_adds_operational_root_fact():
         run_enabled=False,
         desk_visibly_empty=True,
     )
-    assert "本文件夹根即工作区根" not in empty
     assert "顶层空" in empty
-    assert "工程入口写在根上" not in empty
     assert "`package.json`" not in empty
     assert "mkdir" not in empty
     assert "create_folder" not in empty
-    assert "工程壳" not in empty
     assert "禁止" not in empty
-    assert "本文件夹尚无用户文件" not in empty
-    assert "【空桌落盘】" not in empty
-    assert "【空桌勿套工程壳】" not in empty
     _assert_how_identifiers_not_in_facts(empty)
 
     full = build_workspace_context(
@@ -236,7 +230,6 @@ def test_empty_desk_adds_operational_root_fact():
         run_enabled=False,
         desk_visibly_empty=False,
     )
-    assert "本文件夹根即工作区根" not in full
     assert "顶层空" not in full
     assert "package.json" not in full
 
@@ -259,15 +252,10 @@ def test_cloud_folder_desk_identity_is_not_scratch():
         run_enabled=False,
     )
     assert "桌：我的白板（云端文件夹）" in out
-    assert "本文件夹根即工作区根" not in out
     assert "非本机目录" not in out
-    assert "本文件夹尚无用户文件" not in out
     assert "云端草稿/临时文件空间" not in out
     assert "桌：本会话草稿" not in out
-    assert "工程壳" not in out
     assert "create_folder" not in out
-    assert "【空桌落盘】" not in out
-    assert "【空桌勿套工程壳】" not in out
     _assert_how_identifiers_not_in_facts(out)
 
 
@@ -283,7 +271,6 @@ def test_cloud_conv_root_stays_scratch_identity():
     )
     assert "桌：本会话草稿（云端）" in out
     assert "桌：workspace（云端文件夹）" not in out
-    assert "本文件夹根即工作区根" not in out
 
 
 def test_cloud_host_off_capability():
@@ -338,8 +325,6 @@ def test_local_remote_channel_facts():
     assert "同一出站" not in out
     assert "请人贴" not in out
     assert "桌：MyProject" in out
-    assert "本文件夹根即工作区根" not in out
-    assert "工程壳" not in out
     assert "run" not in _gaps(out)
     assert "package_install" not in _gaps(out)
     assert "browser" in _gaps(out)

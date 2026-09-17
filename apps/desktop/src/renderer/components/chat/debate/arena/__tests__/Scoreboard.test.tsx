@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * 辩论室记分牌页头挂手册「?」入口（深链 collaboration?s=debate）。
+ * 辩论室顶栏挂手册「?」入口（深链 collaboration?s=debate）。
  */
 
 import { MANUAL_HELP } from "@/components/ManualHelpLink";
@@ -51,7 +51,7 @@ describe("Scoreboard manual help", () => {
     expect(btn.getAttribute("data-manual-help")).toBe(MANUAL_HELP.debate);
   });
 
-  it("正反行双方身份 + 居中主持人，不展示比分、站队、掌舵、动量图", () => {
+  it("正反顶栏双方名，不居中主持人、不挂掌舵/站队/比分", () => {
     render(
       <MemoryRouter>
         <TooltipProvider>
@@ -65,7 +65,7 @@ describe("Scoreboard manual help", () => {
     );
     expect(screen.getAllByText("加速派").length).toBeGreaterThan(0);
     expect(screen.getAllByText("审慎派").length).toBeGreaterThan(0);
-    expect(screen.getByText("主持人")).toBeTruthy();
+    expect(screen.queryByText("主持人")).toBeNull();
     expect(screen.queryByRole("button", { name: "掌舵" })).toBeNull();
     expect(screen.queryByText("你站")).toBeNull();
     expect(screen.queryByLabelText("动量图例")).toBeNull();

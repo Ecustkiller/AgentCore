@@ -25,6 +25,7 @@ from agentcore.tools.builtin.ask_user.schema import (
     advertised_option_actions,
     card_stem,
     normalize_questions,
+    questions_array_schema,
 )
 from agentcore.tools.builtin.ask_user.suspend import persist_suspension
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
@@ -91,14 +92,8 @@ class AskUserTool:
 
     @property
     def schema(self) -> ToolSchema:
-        option_properties: dict[str, Any] = {
-            "label": {
-                "type": "string",
-                "description": "选项名（即用户选它时回传的答案）。",
-            },
-        }
         # Schema: short trigger. HOW → ask_kickoff / ask_midtask skills.
-        questions_desc = "问句写 prompt（1–5 道）。"
+        # questions[] 卡形与 escalate 共用；本机 action / 空 continue 仍是本工具覆盖。
         tool_desc = (
             "向用户发问（唯一问用户原语）。挡路才问：猜错会做错 → 先问；"
             "仅可逆低杠杆才标假设。暂停回合等人答复。"
@@ -108,11 +103,12 @@ class AskUserTool:
             desktop=self.advertise_bind_local_folder,
             workspace_location=self.workspace_location,
         )
+        option_extras: dict[str, Any] = {}
         if allowed_actions:
             bits: list[str] = []
             if "open_local_project" in allowed_actions:
                 bits.append("open/register/bind_local_*")
-            option_properties["action"] = {
+            option_extras["action"] = {
                 "type": "string",
                 "enum": list(allowed_actions),
                 "description": "可选。整题接到工作区才填：" + "；".join(bits) + "。",
@@ -123,43 +119,13 @@ class AskUserTool:
             parameters={
                 "type": "object",
                 "properties": {
-                    "questions": {
-                        "type": "array",
-                        "minItems": 1,
-                        "description": questions_desc,
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "prompt": {
-                                    "type": "string",
-                                    "description": "用户看见的问句。",
-                                },
-                                "kind": {
-                                    "type": "string",
-                                    "enum": ["choice", "text"],
-                                    "description": "choice 或 text，默认 choice。",
-                                },
-                                "options": {
-                                    "type": "array",
-                                    "description": "kind=choice 候选项（最多 6）。",
-                                    "items": {
-                                        "type": "object",
-                                        "properties": option_properties,
-                                        "required": ["label"],
-                                    },
-                                },
-                                "multiple": {
-                                    "type": "boolean",
-                                    "description": "可选：允许多选，默认 false。",
-                                },
-                                "default": {
-                                    "type": "string",
-                                    "description": "可选；空 continue=确认。",
-                                },
-                            },
-                            "required": ["prompt"],
-                        },
-                    },
+                    "questions": questions_array_schema(
+                        description="问句写 prompt（1–5 道）。",
+                        min_items=1,
+                        option_properties=option_extras or None,
+                        default_description="可选；空 continue=确认。",
+                        prompt_description="用户看见的问句。",
+                    ),
                     "browser_login": {
                         "type": "boolean",
                         "description": "true=请用户在右坞登录（AI 不经手密码）。",

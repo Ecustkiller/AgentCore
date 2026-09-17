@@ -66,7 +66,7 @@ def debate_round(
 
 
 def debate_pretrial_started(**payload: Any) -> SSEEvent:
-    """庭前取证开场（fast 档亦可带 skip_reason 秒过）。"""
+    """庭前取证开场（可带 skip_reason 秒过）。"""
     return SSEEvent(type=EventType.DEBATE_PRETRIAL_STARTED, payload=dict(payload))
 
 

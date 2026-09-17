@@ -97,7 +97,7 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
     ),
     EventType.DEBATE_PRETRIAL_STARTED: (
         Disposition.DURABLE,
-        "庭前取证开场——赛事页庭前区块进行态；fast/约定文档充分可带 skip_reason",
+        "庭前取证开场——赛事页庭前区块进行态；可带 skip_reason",
     ),
     EventType.DEBATE_PRETRIAL_ORDERS: (
         Disposition.DURABLE,

@@ -12,7 +12,6 @@ from typing import Any
 from .types import (
     CIRCUIT_TALLY_KEEP_AVAILABLE,
     LANDING_TOOLS,
-    MEMORY_TOOLS,
     ORCHESTRATION_TOOLS,
     CircuitBreak,
 )
@@ -59,9 +58,8 @@ class ToolCircuitBreakerMixin:
         when the local desk fulfiller is gone (``_workspace_channel_dead``):
         then pens are disabled with the rest of the workspace IO family. Otherwise
         hitting the disable threshold yields ``force_segmented`` instead (keep the
-        pen). Orchestration tools (``ORCHESTRATION_TOOLS``)
-        and memory tools (``MEMORY_TOOLS``) are never disabled on **parse-only**
-        failures either (keep the dispatcher / remember; typed JSON-format steer).
+        pen). Orchestration tools (``ORCHESTRATION_TOOLS``) are never disabled on
+        **parse-only** failures either (keep the dispatcher; typed JSON-format steer).
         ``CIRCUIT_TALLY_KEEP_AVAILABLE`` (``run`` / 打开网页族) 不因累计失败
         警告或卸工具。``run`` 族亦不因探测失败 / 干等 / 环境死卸工具；网页等
         显式 ``_tool_force_retire``（``retire_tools``）仍卸。
@@ -99,13 +97,6 @@ class ToolCircuitBreakerMixin:
                     continue
                 if name in ORCHESTRATION_TOOLS and parse_only_tool:
                     # Keep delegate/ask_user available; one-shot format steer via warn path.
-                    self._tool_parse_kept.add(name)
-                    if name not in self._tool_warned:
-                        self._tool_warned.add(name)
-                        newly_warned.append(name)
-                    continue
-                if name in MEMORY_TOOLS and parse_only_tool:
-                    # Keep remember available; memory-facing format steer via warn path.
                     self._tool_parse_kept.add(name)
                     if name not in self._tool_warned:
                         self._tool_warned.add(name)

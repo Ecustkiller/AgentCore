@@ -1,6 +1,6 @@
 [project]
 name = "agentcore"
-version = "0.7.22"
+version = "0.7.23"
 description = "AgentCore - Multi-Agent AI Workspace Backend"
 requires-python = ">=3.12"
 dependencies = [
@@ -24,9 +24,6 @@ dependencies = [
     "pyotp>=2.9",
     "pillow>=12.3.0",
     "markdown-it-py>=3.0",
-    "tree-sitter>=0.23",
-    "tree-sitter-python>=0.23",
-    "tree-sitter-typescript>=0.23",
     "markitdown[docx,pdf,pptx]>=0.1.6",
     "python-docx>=1.2.0",
     "fpdf2>=2.8.0",
@@ -348,7 +345,6 @@ module = [
     "agentcore.tools.sandbox.browser.driver",
     "agentcore.tools.sandbox.browser.proxy",
     "agentcore.tools.sandbox.subprocess",
-    "agentcore.workspace.indexing.manager",
     "agentcore.workspace.local",
     "agentcore.workspace.locate",
     "agentcore.workspace.protocol",

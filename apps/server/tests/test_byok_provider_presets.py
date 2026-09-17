@@ -12,6 +12,7 @@ from agentcore.llm.byok_provider_presets import (
     normalize_byok_base_url,
     off_protocol_kind,
     preset_models_for_base_url,
+    uses_anthropic_messages_wire,
 )
 
 
@@ -99,8 +100,8 @@ def test_opencode_go_preset_defaults_and_seed():
     # /responses and /messages catalog ids stay off the chat/completions seed.
     assert "grok-4.5" not in preset.models
     assert "gpt-5.6-luna" not in preset.models
-    assert "minimax-m2.7" not in preset.models
     assert "qwen3.7-max" not in preset.models
+    assert "union-alpha" not in preset.models
     assert "deepseek-v4-flash-free" not in preset.models
 
 
@@ -146,18 +147,37 @@ def test_off_protocol_ids_are_exact_known_catalog_ids():
 
     # Catalog (BYOK + platform) must read this mapping, not a twin list.
     assert catalog_fn is off_protocol_kind
-    assert dict(BYOK_OFF_PROTOCOL_MODELS) == {
-        "grok-4.5": "openai_responses",
-        "gpt-5.6-luna": "openai_responses",
-        "minimax-m2.7": "anthropic_messages",
-        "qwen3.7-max": "anthropic_messages",
-    }
+    assert BYOK_OFF_PROTOCOL_MODELS["grok-4.5"] == "openai_responses"
+    assert BYOK_OFF_PROTOCOL_MODELS["gpt-5.6-luna"] == "openai_responses"
+    assert BYOK_OFF_PROTOCOL_MODELS["grok-4.6"] == "openai_responses"
+    assert BYOK_OFF_PROTOCOL_MODELS["union-alpha"] == "anthropic_messages"
+    assert BYOK_OFF_PROTOCOL_MODELS["claude-haiku-4-5"] == "anthropic_messages"
+    assert BYOK_OFF_PROTOCOL_MODELS["qwen3.7-max"] == "anthropic_messages"
+    # Zen now serves MiniMax M2.7 on chat/completions.
+    assert "minimax-m2.7" not in BYOK_OFF_PROTOCOL_MODELS
     assert off_protocol_kind("grok-4.5") == "openai_responses"
-    assert off_protocol_kind("minimax-m2.7") == "anthropic_messages"
+    assert off_protocol_kind("union-alpha") == "anthropic_messages"
     # No substring / regex guessing.
     assert off_protocol_kind("grok-4.5-fast") is None
     assert off_protocol_kind("x-ai/grok-4.5") is None
+    assert off_protocol_kind("anthropic/claude-sonnet-4") is None
     assert off_protocol_kind("qwen-max") is None
+    assert set(BYOK_OFF_PROTOCOL_MODELS.values()) <= {"openai_responses", "anthropic_messages"}
+
+
+def test_uses_anthropic_messages_wire_only_on_opencode_endpoints():
+    zen = "https://opencode.ai/zen/v1"
+    go = "https://opencode.ai/zen/go/v1/"
+    relay = "https://openrouter.ai/api/v1"
+    assert uses_anthropic_messages_wire("claude-haiku-4-5", zen) is True
+    assert uses_anthropic_messages_wire("union-alpha", go) is True
+    assert uses_anthropic_messages_wire("qwen3.7-max", zen) is True
+    # Same id on a non-OpenCode relay stays chat/completions (OpenRouter slugs differ).
+    assert uses_anthropic_messages_wire("claude-haiku-4-5", relay) is False
+    assert uses_anthropic_messages_wire("anthropic/claude-sonnet-4", zen) is False
+    # /responses ids never take the /messages leaf.
+    assert uses_anthropic_messages_wire("grok-4.5", zen) is False
+    assert uses_anthropic_messages_wire("deepseek-v4-flash", zen) is False
 
 
 def test_chat_completions_seed_is_the_opencode_exclusion_source():

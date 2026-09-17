@@ -78,7 +78,7 @@ async def rebuild_worker_prompt_for_target(
 
     exec_languages = await resolve_exec_languages(backend)
     git_fact = await detect_workspace_git(backend)
-    from agentcore.workspace.project_shell import desk_is_visibly_empty
+    from agentcore.workspace.desk_empty import desk_is_visibly_empty
 
     workspace_facts = build_workspace_context(
         backend,

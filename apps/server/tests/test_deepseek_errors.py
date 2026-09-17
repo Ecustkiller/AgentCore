@@ -985,15 +985,19 @@ async def test_byok_timeout_uses_display_name_not_log_source(monkeypatch):
         )
     )
     leaf = unwrap_provider(provider)
+    http_leaf = leaf._openai
     assert leaf.name == "user"
     assert leaf.display_name == "我的网关"
 
     async def boom(*_a, **_k):
         raise httpx.ConnectTimeout("timed out")
 
-    monkeypatch.setattr(leaf, "_can_retry_attempt", lambda *_a, **_k: False)
-    leaf._client = httpx.AsyncClient(base_url="http://example.invalid/v1")
-    monkeypatch.setattr(leaf._client, "post", boom)
+    monkeypatch.setattr(http_leaf, "_can_retry_attempt", lambda *_a, **_k: False)
+    http_leaf._client = httpx.AsyncClient(
+        base_url="http://example.invalid/v1",
+        trust_env=False,
+    )
+    monkeypatch.setattr(http_leaf._client, "post", boom)
     try:
         with pytest.raises(LLMTimeoutError) as ei:
             await leaf.complete(_req())

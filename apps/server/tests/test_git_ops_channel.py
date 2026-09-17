@@ -200,23 +200,3 @@ async def test_channel_git_run_omits_cwd_when_unscoped():
     for _op, args in channel.calls:
         assert "cwd" not in args
 
-
-async def test_channel_init_baseline_passes_subpath_cwd():
-    """G2: init_baseline issues git init via channel with the same project cwd."""
-    ctx, channel = _channel_ctx(
-        has_git=False,
-        base_subpath="projB",
-        replies=[
-            {"stdout": "", "stderr": "", "exit_code": 0},  # init
-            {"stdout": "", "stderr": "", "exit_code": 0},  # add -A
-            {"stdout": "", "stderr": "", "exit_code": 0},  # commit
-            {"stdout": "abc1234\n", "stderr": "", "exit_code": 0},  # rev-parse
-            {"stdout": "main\n", "stderr": "", "exit_code": 0},  # branch
-        ],
-    )
-    result = await GitTool().execute({"subcommand": "init_baseline"}, ctx)
-    assert result.success is True
-    assert channel.calls
-    assert channel.calls[0][1]["argv"] == ["init"]
-    for _op, args in channel.calls:
-        assert args.get("cwd") == "projB"

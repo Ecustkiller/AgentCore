@@ -204,7 +204,8 @@
   color: var(--muted-foreground);
 }
 .markdown-body a {
-  text-decoration: underline;
+  color: var(--primary);
+  text-decoration: none;
 }
 .markdown-body hr {
   margin: 1rem 0;

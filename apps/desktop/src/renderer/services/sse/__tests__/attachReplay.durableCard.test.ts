@@ -172,7 +172,6 @@ describe("attach 游标回放 · 耐久卡绑定", () => {
         form: "",
         sides: [],
         max_rounds: 0,
-        thorough: true,
       }),
       ev("message_end", { finish_reason: "paused" }),
       ev("team_preview_resolved" as string, {

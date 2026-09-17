@@ -44,7 +44,7 @@
   },
   {
     "id": "manual-mechanism-scenarios",
-    "description": "看懂协作 · 机制场景（记分牌 + 终审 + 场景画廊）",
+    "description": "看懂协作 · 机制场景（顶栏 + 终审 + 场景画廊）",
     "path": "/toolbox/manual/mechanism",
     "section": "scenarios",
     "previewManual": "manual-mechanism",

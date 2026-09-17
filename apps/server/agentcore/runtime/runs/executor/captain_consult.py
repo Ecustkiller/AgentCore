@@ -1,9 +1,9 @@
-"""Refresh a nested captain's consult source so ``lead_subteam`` is listable and fetchable.
+"""Refresh a nested captain's consult source for skills gated on newly held tools.
 
-Prepare-time worker consult is frozen without ``delegate`` in the skill filter
-(leaves must not see 子队拆法). After the executor forks a captain registry that
-holds ``delegate``, listing and fetch must include that name — and the baked
-``<按需目录>`` in the worker base must match (directory ≡ fetch).
+Prepare-time worker consult is frozen to the leaf tool set. After the executor
+forks a captain registry that holds extra tools (``delegate`` …), listing and
+fetch must include skills those tools unlock — and the baked ``<按需目录>`` in
+the worker base must match (directory ≡ fetch).
 """
 
 from __future__ import annotations

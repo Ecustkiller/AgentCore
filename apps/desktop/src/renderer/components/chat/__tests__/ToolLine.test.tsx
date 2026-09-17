@@ -205,6 +205,8 @@ describe("ToolLine · 过程工具默认折叠", () => {
     expect(collapsedSubline(container)).toBeNull();
     fireEvent.click(screen.getByText("Search web"));
     expect(screen.getByText("深圳天气预报")).toBeTruthy();
+    expect(screen.getByText(/· w\.example\.com/)).toBeTruthy();
+    expect(screen.getByText("多云转晴")).toBeTruthy();
     expect(screen.queryByText(/搜索：/)).toBeNull();
   });
 
@@ -1011,14 +1013,15 @@ describe("ToolLineGroup · web_fetch 来源集合", () => {
     expect(screen.queryByText(/正文不应出现在合并态/)).toBeNull();
   });
 
-  it("expands to a SourceCards-style list without body content", () => {
+  it("expands to search-style title · domain rows with snippet, without body", () => {
     renderWithTooltip(<ToolLineGroup tools={sources} isStreaming={false} />);
     fireEvent.click(screen.getByText("Read page · 2 sources"));
     expect(screen.getByText("相对论入门")).toBeTruthy();
     expect(screen.getByText("相对论")).toBeTruthy(); // cleanSourceTitle strips _百度百科
+    expect(screen.getByText(/· zhuanlan\.zhihu\.com/)).toBeTruthy();
+    expect(screen.getByText(/· baike\.baidu\.com/)).toBeTruthy();
     expect(screen.getByText("时空弯曲简介")).toBeTruthy();
-    // 来源域名在展开态才出现（折叠态已无 pills）。
-    expect(screen.getByText("zhuanlan.zhihu.com")).toBeTruthy();
+    expect(screen.getByText("物理学理论")).toBeTruthy();
     expect(screen.queryByText(/正文不应出现在合并态/)).toBeNull();
   });
 

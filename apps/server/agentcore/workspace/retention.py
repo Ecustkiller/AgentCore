@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import shutil
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 from sqlalchemy import update
 
@@ -35,7 +34,6 @@ from agentcore.db.repositories import (
 )
 from agentcore.folders.unbind import clear_folder_session_pointers
 from agentcore.workspace.handoff_reclaim import soft_delete_job_host
-from agentcore.workspace.indexing.registry import drop_index_registry
 from agentcore.workspace.locate import (
     folder_tombstone_path,
     workspace_internal_root,
@@ -44,7 +42,6 @@ from agentcore.workspace.locate import (
 )
 from agentcore.workspace.locks import workspace_lock
 from agentcore.workspace.snapshots import purge_snapshots
-from agentcore.workspace.stage_dirs import INDEX_ZONE_NAME, internal_zone_path
 
 logger = get_logger(__name__)
 
@@ -69,15 +66,6 @@ async def purge_folder_space_unlocked(
     ``workspace_lock_nowait`` on the same key. Nesting ``workspace_lock`` here
     would deadlock (the lock is not reentrant).
     """
-    index_dir = internal_zone_path(
-        INDEX_ZONE_NAME,
-        root=Path(),
-        internal_root=workspace_internal_root(
-            user_id=user_id, folder_id=folder_id, conversation_id=""
-        ),
-    )
-    # Release the BM25 handle first — Windows refuses to rmtree an open SQLite file.
-    await drop_index_registry(index_dir)
     targets = [
         folder_tombstone_path(user_id=user_id, folder_id=folder_id),
         workspace_internal_root(
@@ -126,9 +114,6 @@ async def _purge_conversation_space(
         user_id=user_id, folder_id=None, conversation_id=conversation_id
     )
     async with workspace_lock(key):
-        await drop_index_registry(
-            internal_zone_path(INDEX_ZONE_NAME, root=Path(), internal_root=internal_root)
-        )
         shutil.rmtree(
             workspace_root_path(
                 user_id=user_id, folder_rel_path=None, conversation_id=conversation_id

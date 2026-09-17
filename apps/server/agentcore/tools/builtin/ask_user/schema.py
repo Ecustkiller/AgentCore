@@ -33,6 +33,75 @@ def advertised_option_actions(
     return _LOCAL_PROJECT_ACTIONS
 
 
+# Shared questions[] card shape (ask_user + escalate). Per-tool overlays:
+# array description / minItems / option.action / default 短触发.
+_PROMPT_DESC = "问句。"
+_KIND_DESC = "choice 或 text，默认 choice。"
+_OPTIONS_DESC = f"kind=choice 候选项（最多 {_MAX_OPTIONS}）。"
+_LABEL_DESC = "选项名（回传答案）。"
+_MULTIPLE_DESC = "可选：允许多选，默认 false。"
+_DEFAULT_DESC = "可选。"
+
+
+def questions_array_schema(
+    *,
+    description: str,
+    min_items: int | None = None,
+    option_properties: dict[str, Any] | None = None,
+    default_description: str | None = None,
+    prompt_description: str | None = None,
+) -> dict[str, Any]:
+    """JSON Schema for ``questions`` — one card shape, two callers.
+
+    ``option_properties`` merge onto ``{label}`` (CEO desktop may add ``action``).
+    Escalate omits ``action`` and ``minItems``; array description stays per-tool.
+    """
+    option_props: dict[str, Any] = {
+        "label": {"type": "string", "description": _LABEL_DESC},
+    }
+    if option_properties:
+        option_props.update(option_properties)
+    schema: dict[str, Any] = {
+        "type": "array",
+        "description": description,
+        "items": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": prompt_description or _PROMPT_DESC,
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": ["choice", "text"],
+                    "description": _KIND_DESC,
+                },
+                "options": {
+                    "type": "array",
+                    "description": _OPTIONS_DESC,
+                    "items": {
+                        "type": "object",
+                        "properties": option_props,
+                        "required": ["label"],
+                    },
+                },
+                "multiple": {
+                    "type": "boolean",
+                    "description": _MULTIPLE_DESC,
+                },
+                "default": {
+                    "type": "string",
+                    "description": default_description or _DEFAULT_DESC,
+                },
+            },
+            "required": ["prompt"],
+        },
+    }
+    if min_items is not None:
+        schema["minItems"] = min_items
+    return schema
+
+
 # Claude Code-style tendency: the advised option is first, name ends with
 # 「（推荐）」or (recommended). Bare「推荐」in a product name stays unmarked.
 _LABEL_RECOMMENDATION_MARK = re.compile(

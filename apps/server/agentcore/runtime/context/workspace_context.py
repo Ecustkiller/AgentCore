@@ -124,8 +124,8 @@ def format_workspace_git_line(
     """Single git coordinate for ``<工作区>`` (never a kickoff gate).
 
     Unassembled git is a 缺口, not a Git line — do not name the branch
-    when the model does not hold the tool. Repo-policy (``no_repo`` /
-    ``init_baseline``) lives in git tool receipts, not the schema.
+    when the model does not hold the tool. Repo-policy (``no_repo``)
+    lives in git tool receipts, not the schema.
     """
     if not tool_enabled or fact.present is None:
         return ""
@@ -335,7 +335,7 @@ def build_workspace_context(
     ``解释器：`` line; the full set is omitted.
 
     ``git_fact`` is the root-``.git`` probe. Unassembled git is a gap, not a
-    Git line. Repo-policy lives on the git tool description.
+    Git line. Repo-policy lives in git tool receipts.
 
     ``outlet_inventory`` lists the four 约定文档出口 dirs. Empty / ``None`` omit
     (layout HOW → ``delivery``).

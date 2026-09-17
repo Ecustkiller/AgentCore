@@ -115,15 +115,13 @@ def test_own_argument_titles_and_brief_injection():
     fb = round_feedback(
         config, con, 2, "更深", history[0], match_ledger=ledger, history=history
     )
-    assert "【对局台账】" in fb
-    assert "撤回旧数字" in fb
-    # 检索 feedback 不注入己方标题一览
+    assert "撤回旧数字" not in fb
     assert "你历轮已立论点" not in fb
 
     brief = round_draft_brief(
         config, pro, 2, "更深", history[0], match_ledger=ledger, history=history
     )
-    assert "【对局台账】" in brief
+    assert "撤回旧数字" not in brief
     assert "你历轮已立论点" in brief
     assert "跨类须证混淆" in brief
 

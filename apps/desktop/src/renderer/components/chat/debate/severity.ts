@@ -3,10 +3,10 @@ import type { DebateBriefInfo, DebateSideInfo } from "@/types/events";
 
 /**
  * 红队风险严重度三档 → 展示元数据（与后端 `risk_severities` 的 high/medium/low 同口径）——**单一源**：
- * 流末终审「风险清单」（{@link import("./arena/brief").BriefCard} 内 RiskBoard）与记分牌紧凑「风险
+ * 流末终审「风险清单」（{@link import("./arena/brief/replay").ReplayBriefCard} 内 RiskBoard）与记分牌紧凑「风险
  * 盘口」（{@link import("./arena/Scoreboard").Scoreboard} 红队行）共用这一套档位语义 / 配色 / 排序，
  * 避免两处各写一套危度色而漂移。注意语义与 `confidencePill` 相反：风险 high=最坏=destructive(红)、
- * low=最轻=muted(灰)，故另起一套而非复用置信色。`rank` 决定看板 / 盘口内由危到轻的排序。
+ * low=最轻=muted(灰)，故另起一套而非复用把握档色。`rank` 决定看板 / 盘口内由危到轻的排序。
  */
 export const RISK_SEVERITY = {
   high: {

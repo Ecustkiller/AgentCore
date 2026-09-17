@@ -117,7 +117,7 @@ export function promptItemShelfCopy(
       title: item.label,
       description: distinctLine(item.skill.blurb, item.label),
       tags: exceptionAudienceTags(skillAudience(item.skill)),
-      accessory: [],
+      accessory: [chip("官方")],
     };
   }
   if (item.kind === "tool") {
@@ -129,13 +129,7 @@ export function promptItemShelfCopy(
       title: item.label,
       description: distinctLine(item.tool.summary, item.label),
       tags,
-      accessory: [
-        chip(
-          item.tool.resident
-            ? RESIDENT_LABEL.resident
-            : RESIDENT_LABEL.deferred,
-        ),
-      ],
+      accessory: [chip("官方")],
     };
   }
   return mineShelfCopy(item, { ...opts, subtitle });
@@ -191,4 +185,19 @@ export function promptShelfHeaderChips(
   copy: PromptShelfCopy,
 ): PromptShelfChip[] {
   return [...copy.accessory, ...copy.tags.map((label) => chip(label))];
+}
+
+/** Dialog title chips: same as the card, plus 开场轴 for tools (the section is gone once the dialog is open). */
+export function promptReadHeaderChips(
+  copy: PromptShelfCopy,
+  item: PromptCatalogItem,
+): PromptShelfChip[] {
+  if (item.kind !== "tool") return promptShelfHeaderChips(copy);
+  return [
+    ...copy.accessory,
+    chip(
+      item.tool.resident ? RESIDENT_LABEL.resident : RESIDENT_LABEL.deferred,
+    ),
+    ...copy.tags.map((label) => chip(label)),
+  ];
 }

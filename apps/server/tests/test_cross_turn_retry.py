@@ -39,10 +39,6 @@ def _call(tool_id: str, name: str, args: str = "{}") -> ToolCall:
 
 def _ctx(workspace: Path | None = None, **fields: Any) -> ToolContext:
     root = workspace or Path(".")
-    if workspace is not None:
-        keep = workspace / "README.md"
-        if not keep.exists():
-            keep.write_text("desk\n", encoding="utf-8")
     return ToolContext.create(
         execution_id="e",
         run_id="s",

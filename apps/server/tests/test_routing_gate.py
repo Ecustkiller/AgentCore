@@ -65,7 +65,6 @@ def test_corpus_and_coordination_tools_stay_silent():
     for name in (
         "file_read",
         "grep",
-        "code_search",
         "web_search",
         "web_fetch",
         "escalate",

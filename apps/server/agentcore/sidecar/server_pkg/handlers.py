@@ -93,9 +93,6 @@ class HandlerMixin:
             outbox=self._outbox_store is not None,
             durable_roster=self._run_session_store is not None,
         )
-        # Silent background index warm (Cursor-style): schedule once after root is
-        # bound; coalesce with later warmCodeIndex / write kicks. Never awaits ensure.
-        self._schedule_code_index_warm()
         self._install_local_queue_starter()
         await self._reply(
             request_id,
@@ -111,7 +108,6 @@ class HandlerMixin:
                     "durablePause": self._paused_store is not None,
                     "outbox": self._outbox_store is not None,
                     "durableRoster": self._run_session_store is not None,
-                    "warmCodeIndex": True,
                     # List+seed must run in Electron main (mcp-service); this flag
                     # only advertises the RPC. Desktop warmMcpDiscover does the work.
                     "warmMcpDiscover": True,
@@ -123,27 +119,6 @@ class HandlerMixin:
                 },
             },
         )
-
-    def _schedule_code_index_warm(self) -> None:
-        """Fire-and-forget code-index ensure for the initialized workspace root."""
-        if self._root is None:
-            return
-        backend = self._make_backend()
-        backend.start_code_index_maintenance()
-        logger.info("sidecar.warm_code_index", root_label=self._root.name)
-
-    async def _on_warm_code_index(self, request_id: Any, params: dict[str, Any]) -> None:
-        """Non-turn RPC: schedule background index ensure; return immediately."""
-        del params  # no params today; reserved for future force flags
-        if not self._initialized or self._root is None:
-            await self._send(
-                protocol.make_error(
-                    request_id, protocol.NOT_INITIALIZED, "initialize must be called first"
-                )
-            )
-            return
-        self._schedule_code_index_warm()
-        await self._reply(request_id, {"ok": True})
 
     async def _on_warm_mcp_discover(self, request_id: Any, params: dict[str, Any]) -> None:
         """Non-turn RPC: seed MCP discover cache from desktop ``list_tools`` payload."""
@@ -191,7 +166,7 @@ class HandlerMixin:
     ) -> None:
         """Fire-and-forget the cloud fetch; reply when seeded (stdin stays free).
 
-        Same posture as ``warmCodeIndex``: the read loop must not await HTTP.
+        Same posture as other non-turn warm RPCs: the read loop must not await HTTP.
         Unlike the index warm, this RPC's ``ttlSeconds`` *is* the renewal
         handshake, so the reply is sent from the scheduled task after seed —
         not an empty ``{ok: true}`` that would make desktop treat the cache as
@@ -261,7 +236,7 @@ class HandlerMixin:
         caller must re-warm within it. Prepare reads this cache only, so a lapsed
         entry means empty rules / memory injection, not a cloud re-fetch.
 
-        Schedules the fetch (``warmCodeIndex`` pattern) so a later ``cancel``
+        Schedules the fetch (non-turn warm pattern) so a later ``cancel``
         line is not stuck behind this HTTP in the stdin reader.
         """
         if not self._initialized:

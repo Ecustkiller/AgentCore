@@ -307,13 +307,21 @@ class FileBatchTool:
         搬家 / 复制不是派生（源不是中间稿），一律不填 ``derived_from``。
         mkdir 建的是目录、delete 是删除，都没有产物；skip / fail 更没有。
         """
+        from .user_rules import batch_op_rule_block, classify_rule_path
+
+        blocked = batch_op_rule_block(op, item)
+        if blocked is not None:
+            return "fail", blocked, []
+        if op == "mkdir":
+            kind, _name = classify_rule_path(str(item.get("path") or ""))
+            if kind in ("agentcore_root", "rules_dir"):
+                return "ok", f"mkdir {item.get('path')}（用户规则目录已就绪）", []
+
         if op == "mkdir":
             requested = str(item.get("path", "")).strip()
             if not requested:
                 return "fail", "mkdir · path 不能为空", []
-            prepared = await prepared_write_relpath(
-                requested, context, register_bare=True
-            )
+            prepared = await prepared_write_relpath(requested, context)
             if isinstance(prepared, ToolResult):
                 return "fail", prepared.error or "mkdir · 路径失败", []
             path, rename_note = prepared
@@ -354,9 +362,7 @@ class FileBatchTool:
             requested = str(item.get("path", "")).strip()
             if not requested:
                 return "fail", "delete · path 不能为空", []
-            prepared = await prepared_write_relpath(
-                requested, context, register=False
-            )
+            prepared = await prepared_write_relpath(requested, context)
             if isinstance(prepared, ToolResult):
                 return "fail", prepared.error or "delete · 路径失败", []
             path, rename_note = prepared
@@ -396,8 +402,6 @@ class FileBatchTool:
         requested_dest = str(item.get("destination", "")).strip()
         if not source or not requested_dest:
             return "fail", f"{op} · source 与 destination 均为必填", []
-        from agentcore.workspace.project_shell import rewrite_project_shell_relpath
-
         prepared_dest = await prepared_write_relpath(requested_dest, context)
         if isinstance(prepared_dest, ToolResult):
             return "fail", prepared_dest.error or f"{op} · 目标路径失败", []
@@ -407,9 +411,6 @@ class FileBatchTool:
         if isinstance(prepared_src, ToolResult):
             return "fail", prepared_src.error or f"{op} · 源路径失败", []
         source = prepared_src
-        source, _src_note = await rewrite_project_shell_relpath(
-            source, context, register=False
-        )
         if not destination:
             return "fail", f"{op} · source 与 destination 均为必填", []
         if source == destination:

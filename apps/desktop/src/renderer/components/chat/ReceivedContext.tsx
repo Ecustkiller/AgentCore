@@ -17,9 +17,11 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import { formatCompact } from "@/lib/format";
 import { useNarrowLayoutState } from "@/lib/narrowLayout";
 import { cn } from "@/lib/utils";
-import type { ContextBlockWire } from "@/types/events";
+import type { ContextBlockWire, ProcessStep } from "@/types/events";
 import { CornerDownRight } from "lucide-react";
 import { useMemo, useState } from "react";
+
+const EMPTY_PROCESS: ProcessStep[] = [];
 
 /**
  * 收到的上下文 — CEO 弹窗与队员右坞共用的简报阅读器壳。
@@ -27,19 +29,25 @@ import { useMemo, useState } from "react";
  */
 function ReceivedContextReader({
   blocks,
+  process,
   layout,
   preferMaterial = false,
   initialSelectedId,
 }: {
   blocks: ContextBlockWire[];
+  process: readonly ProcessStep[];
   layout: "split" | "stack";
   preferMaterial?: boolean;
   initialSelectedId?: string | null;
 }) {
   const { isNarrow } = useNarrowLayoutState();
   const groups = useMemo(
-    () => buildReceivedContextCatalog(blocks, { includeSystem: !isNarrow }),
-    [blocks, isNarrow],
+    () =>
+      buildReceivedContextCatalog(blocks, {
+        includeSystem: !isNarrow,
+        process,
+      }),
+    [blocks, isNarrow, process],
   );
   const items = useMemo(() => flattenCatalog(groups), [groups]);
   const fallbackId = useMemo(
@@ -115,12 +123,20 @@ function ReceivedContextReader({
 function ReaderBody({ item }: { item: CatalogItem }) {
   // pointer 是落盘策略不是预算截断；旧 journal 仍可能 stamp truncated。
   const showTruncated = item.truncated && item.fidelity !== "pointer";
+  const factoryPrompt = item.channel === "system" && item.tag == null;
 
   return (
     <div className="space-y-2">
       {showTruncated ? <Badge tone="muted">已截断</Badge> : null}
       <div data-testid="received-context-body">
-        {item.channel === "system" ? (
+        {item.absent ? (
+          <p
+            data-testid="received-context-absent"
+            className="text-sm text-muted-foreground"
+          >
+            {item.body}
+          </p>
+        ) : factoryPrompt ? (
           <PromptDocument
             text={item.body}
             maxHeightClass="max-h-none"
@@ -153,16 +169,22 @@ function ReaderBody({ item }: { item: CatalogItem }) {
  */
 export function ReceivedContextSection({
   blocks,
+  process,
 }: {
   blocks: ContextBlockWire[];
+  process?: readonly ProcessStep[];
 }) {
   const { isNarrow } = useNarrowLayoutState();
+  const steps = process ?? EMPTY_PROCESS;
   const itemCount = useMemo(
     () =>
       flattenCatalog(
-        buildReceivedContextCatalog(blocks, { includeSystem: !isNarrow }),
+        buildReceivedContextCatalog(blocks, {
+          includeSystem: !isNarrow,
+          process: steps,
+        }),
       ).length,
-    [blocks, isNarrow],
+    [blocks, isNarrow, steps],
   );
   const [open, setOpen] = useState(false);
   if (itemCount === 0) return null;
@@ -181,6 +203,7 @@ export function ReceivedContextSection({
       </SimpleTooltip>
       <ReceivedContextDialog
         blocks={blocks}
+        process={steps}
         open={open}
         onOpenChange={setOpen}
         preferMaterial
@@ -191,23 +214,26 @@ export function ReceivedContextSection({
 
 /**
  * CEO 气泡 / 队员坞共用弹窗。宽屏双栏、固定框（size 2xl × min(32rem,70vh)）；
- * 窄屏改单列且不展示常驻指令。
+ * 窄屏改单列且不展示系统切片。
  */
 export function ReceivedContextDialog({
   blocks,
+  process,
   open,
   onOpenChange,
   initialSelectedId,
   preferMaterial = false,
 }: {
   blocks: ContextBlockWire[];
+  process?: readonly ProcessStep[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initialSelectedId?: string | null;
   preferMaterial?: boolean;
 }) {
   const { isNarrow } = useNarrowLayoutState();
-  if (blocks.length === 0) return null;
+  const steps = process ?? EMPTY_PROCESS;
+  if (blocks.length === 0 && steps.length === 0) return null;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -221,6 +247,7 @@ export function ReceivedContextDialog({
         <ReceivedContextReader
           key={initialSelectedId ?? "default"}
           blocks={blocks}
+          process={steps}
           layout={isNarrow ? "stack" : "split"}
           initialSelectedId={initialSelectedId}
           preferMaterial={preferMaterial}

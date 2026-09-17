@@ -333,20 +333,6 @@ def _strategy_for_args_parse(tool_name: str, parse_class: ArgsParseClass) -> str
             "<parameter>/<object> 等协议标签；按工具 schema 重发精简参数，"
             "勿把整篇正文塞进参数字段。"
         )
-    if tool_name == "remember":
-        if parse_class == "truncated":
-            return (
-                "【信号】输出长度截断导致参数 JSON 未闭合——"
-                "请用一篇完整规则重发（name + 完整 content，勿省略号收口）；"
-                "一个主题一次 write，禁止拆成多条 remember；"
-                "禁止原样重发全部半截参数。"
-            )
-        if parse_class == "escape":
-            return "【策略】请修复转义（尤其是 content 字符串内的引号）后重发合法 JSON 参数。"
-        return (
-            "【策略】请按工具 schema 重发精简合法 JSON；一篇完整规则、勿省略号收口；"
-            "一个主题一次 write；禁止原样重发全部参数。"
-        )
     if parse_class == "truncated":
         return (
             "【信号】输出长度截断导致参数 JSON 未闭合——"

@@ -221,12 +221,6 @@ async def apply_replan(
         default_target_folder_id=tool.effective_default_target_folder_id(),
     )
     errors.extend(add_errors)
-    ctx = getattr(tool, "_base_tool_context", None)
-    if ctx is not None and new_specs:
-        from agentcore.workspace.project_shell import rewrite_deliverable_shell
-
-        for spec in new_specs:
-            await rewrite_deliverable_shell(getattr(spec, "deliverable", None), ctx)
     steer_ops: list[tuple[RunSpec, str]] = []
     for i, s in enumerate(steers):
         if not isinstance(s, dict):

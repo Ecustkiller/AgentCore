@@ -1,15 +1,12 @@
 import type { Execution } from "@/stores/execution";
-import { useCallback, useState } from "react";
+import { Suspense, useCallback, useState } from "react";
 import { type DebateClashView, type DebateModel, isFlatRound } from "../model";
 import { CrossExamSection } from "./CrossExamSection";
-import { FindingThreads } from "./FindingThreads";
 import { JudgeNote } from "./JudgeNote";
 import { OpeningNote } from "./OpeningNote";
 import { SectionHeader } from "./SectionHeader";
 import { SpeakerBlock, speechStageLabel } from "./SpeakerBlock";
-import { ThreadTurns } from "./ThreadTurns";
 import { UserInterjection } from "./UserInterjection";
-import { WitnessExamSection } from "./WitnessExamSection";
 import { roundAnchorId, speakerAnchorId } from "./anchors";
 import {
   DEBATE_SPLIT_GRID,
@@ -17,6 +14,7 @@ import {
   partitionSides,
 } from "./debateLayoutPreference";
 import { openingText } from "./openingText";
+import { FindingThreads, ThreadTurns, WitnessExamSection } from "./replayLazy";
 
 export function Transcript({
   model,
@@ -149,18 +147,22 @@ export function Transcript({
             ))}
 
             {useFindingHero ? (
-              <FindingThreads
-                findings={round.findings}
-                execution={execution}
-                messageId={messageId}
-              />
+              <Suspense fallback={null}>
+                <FindingThreads
+                  findings={round.findings}
+                  execution={execution}
+                  messageId={messageId}
+                />
+              </Suspense>
             ) : useThreadHero ? (
-              <ThreadTurns
-                turns={round.threadTurns}
-                execution={execution}
-                messageId={messageId}
-                subtopic={focusText || round.focus}
-              />
+              <Suspense fallback={null}>
+                <ThreadTurns
+                  turns={round.threadTurns}
+                  execution={execution}
+                  messageId={messageId}
+                  subtopic={focusText || round.focus}
+                />
+              </Suspense>
             ) : useSplit ? (
               <div className={DEBATE_SPLIT_GRID}>
                 {(() => {
@@ -195,11 +197,13 @@ export function Transcript({
             )}
 
             {round.witnessExam.length > 0 && (
-              <WitnessExamSection
-                exchanges={round.witnessExam}
-                messageId={messageId}
-                sceneKey={`${messageId}:wit:r${round.roundNo}`}
-              />
+              <Suspense fallback={null}>
+                <WitnessExamSection
+                  exchanges={round.witnessExam}
+                  messageId={messageId}
+                  sceneKey={`${messageId}:wit:r${round.roundNo}`}
+                />
+              </Suspense>
             )}
 
             {round.summary && !round.inFlight ? (

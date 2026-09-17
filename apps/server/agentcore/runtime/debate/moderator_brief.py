@@ -26,20 +26,17 @@ from agentcore.runtime.debate.types import (
     DebateHandoff,
     HandoffKind,
     RoundResult,
-    RoundScore,
     normalize_handoff_kind,
-    tally_scores,
 )
 
 logger = get_logger(__name__)
 
 _BRIEF_SYSTEM = (
-    "你是一场结构化辩论的主持人。辩论收场时你产出【决策简报】，为用户的决策负责到底：去水提炼"
-    "各方最强论点、按【解决路径】分流交接清单（证据能闭合的事实分歧 / 只有用户价值观能闭合的需你"
-    "定夺 / 两者都闭合不了的待解问题）、给出带置信度与成立条件的倾向判断。【决定性事实若只有二手"
-    "来源 / 未深读 / 仍待核实，须在结论里保留证据状态人话（【待核实】/【二手来源】）、不抹成既定"
-    "事实】——宁可诚实降置信度，不可拿未核实的事实当定论；未分级不单独当缺陷，但单一来源撑"
-    "决定性事实同样不得写成既定。务实、诚实，不回避不确定性。严格只输出要求的 JSON。"
+    "你是这场辩论的主持人。收场时产出决策简报：一句倾向（可带「若…则翻」）、一个胜负手、"
+    "把握档 high|medium|low、未决三栏（要你拍 / 还没核实 / 只能等）。"
+    "【决定性事实若只有二手来源 / 未深读 / 仍待核实，须在结论里保留证据状态人话（【待核实】/"
+    "【二手来源】）、不抹成既定事实】——宁可诚实降把握，不可拿未核实的事实当定论；未分级不单独"
+    "当缺陷，但单一来源撑决定性事实同样不得写成既定。务实、诚实，不回避不确定性。只输出 JSON。"
 )
 
 
@@ -60,8 +57,8 @@ def _brief_form_hint(form: DebateForm) -> str:
             "（标注 crux：事实/价值/假设），而非强行裁谁对谁错；末尾点出开放问题。"
         )
     return (
-        "这是【正反辩论】：一句倾向（可带「若…则翻」）、一个胜负手、置信档 high|medium|low、"
-        "按路径分流的交接。不要并排甩观点，不要另写建议复述倾向。"
+        "这是【正反辩论】：一句倾向（可带「若…则翻」）、一个胜负手、把握档 high|medium|low、"
+        "未决三栏。不要并排甩观点，不要另写建议复述倾向。"
     )
 
 
@@ -78,42 +75,9 @@ def _interjections_block(rounds: Sequence[RoundResult]) -> str:
         return ""
     body = "\n".join(items)
     return (
-        "辩论过程中用户提出的【追问】（你的简报须交代是否已被回应；仍未答清的【必须收编进交接"
-        "清单】——按解决路径归入 value_disputes / factual_disputes / open_questions 之一，别让"
-        f"用户的问题石沉大海）：\n{body}\n\n"
-    )
-
-
-def _scores_block(config: DebateConfig, tally: dict[str, RoundScore]) -> str:
-    """把全场累计记分渲染进简报 prompt（记分裁判 P2）。
-
-    对抗形态：收场 decisive / leaning 须与累计记分对齐。圆桌：仅作 momentum 展示，
-    不驱动 leaning、不裁胜负（与质询/结辩同属形态门控口径）。无记分返回空串。
-    """
-    if not tally:
-        return ""
-    lines: list[str] = []
-    for s in config.sides:
-        sc = tally.get(s.key)
-        if sc is None:
-            continue
-        pen = f"，罚 {len(sc.penalties)}（{'；'.join(sc.penalties)}）" if sc.penalties else ""
-        lines.append(
-            f"- {s.name}[{s.key}]：论点 {sc.argument} + 回应 {sc.engagement} + 证据 {sc.evidence}"
-            f"{pen} = 净分 {sc.total}"
-        )
-    if not lines:
-        return ""
-    body = "\n".join(lines)
-    if config.form is DebateForm.ROUNDTABLE:
-        return (
-            "各方【累计记分】（裁判逐轮打分之和；仅作【momentum 展示】——"
-            "圆桌不裁胜负，勿用记分驱动 leaning / decisive、勿据此点名赢家）：\n"
-            f"{body}\n\n"
-        )
-    return (
-        "各方【累计记分】（裁判逐轮打分之和；你的 decisive / leaning 须与它一致——净分更高 / 罚分"
-        f"更少的一方更站得住，相悖须说明为何）：\n{body}\n\n"
+        "辩论过程中用户提出的【追问】（你的简报须交代是否已被回应；仍未答清的收进未决三栏"
+        "——要你拍 / 还没核实 / 只能等，别让用户的问题石沉大海）：\n"
+        f"{body}\n\n"
     )
 
 
@@ -234,7 +198,7 @@ def degraded_brief(
         recommendation=(
             f"【收场简报缺失】收场时简报生成调用失败（{_clip(reason, 120)}）。"
             f"已完成的 {len(rounds)} 轮交锋、各方发言与逐轮小结【完整保留】（见交锋叙事线），"
-            "但【争议焦点提炼 / 各方最强论点 / 胜负手 / 倾向判断与置信度 / 交接清单】"
+            "但【胜负手 / 倾向 / 把握 / 未决清单】"
             "本场均未产出——请据逐轮小结自行判断，或重开一场以取回决策简报。"
             "转述时不得把逐轮小结当成终审结论。"
         ),
@@ -254,12 +218,7 @@ async def build_brief(
     timeline = "\n".join(
         f"第 {rr.round_no} 轮（{rr.focus}）：{_clip(rr.summary, _SUMMARY_CLIP)}" for rr in rounds
     )
-    # 用户追问（交互式逐轮）：把全场用户注入的问题喂进简报，让结论【交代是否已回应】——未应答的
-    # 追问必须收编进交接清单（按解决路径归类），别让用户的问题石沉大海。无追问则省略。
     followups_block = _interjections_block(rounds)
-    # 记分裁判（P2）：全场累计记分喂进简报。对抗形态让 decisive / leaning 与交锋对齐；
-    # 圆桌仅作 momentum（见 _scores_block）。无记分则空块，简报零变化。
-    scores_block = _scores_block(config, tally_scores(rounds))
     background_block = _background_block_for_brief(config)
     dossier_block = _research_dossier_block_for_brief(config)
     # M2：场级台账 tier 注入简报抽查（无台账 → 空块，零回归）。
@@ -271,15 +230,14 @@ async def build_brief(
     is_roundtable = config.form is DebateForm.ROUNDTABLE
     is_debate = config.form is DebateForm.DEBATE
     if is_roundtable:
-        score_align_note = (
-            "若上方给了【累计记分】，仅作 momentum 参考、【不】驱动 leaning / decisive、"
-            "【不】裁谁对谁错；decisive 可留空或写「无胜负手（圆桌）」；leaning 写观点光谱"
+        align_note = (
+            "圆桌不裁谁对谁错；decisive 可留空或写「无胜负手（圆桌）」；leaning 写观点光谱"
             "小结而非点名赢家。"
         )
         decisive_field = '  "decisive": "圆桌无胜负手：可留空或写「无胜负手（圆桌）」",\n'
         leaning_field = '  "leaning": "观点光谱小结（各视角成立前提与张力，非裁出赢家；可稍长）",\n'
         confidence_field = (
-            '  "confidence": "置信度及其成立条件（说明在什么前提下倾向会反转）",\n'
+            '  "confidence": "把握档及其成立条件（说明在什么前提下倾向会反转）",\n'
         )
         recommendation_field = (
             '  "recommendation": "给用户的下一步动作单句，不复述判断理由",\n'
@@ -287,46 +245,44 @@ async def build_brief(
         field_mutex = (
             "【字段互斥·各司其职、互不复述】："
             "crux = 争议焦点；strongest_points = 各方命门单句；"
-            "leaning = 观点光谱小结（不裁赢家）；confidence = 置信与前提；"
+            "leaning = 观点光谱小结（不裁赢家）；confidence = 把握与前提；"
             "recommendation = 下一步动作单句。"
         )
-    elif is_debate:
-        score_align_note = (
-            "若上方给了【累计记分】，decisive / leaning 须与它【方向】一致"
-            "（净分更高 / 罚分更少的一方更站得住）；禁把记分数字 / 罚分明细抄进正文；"
-            "相悖在 leaning 里说明为何。"
+        strongest_field = (
+            f'  "strongest_points": {{"<side_key∈[{sides_keys}]>": '
+            '"该方命门单句≤60字，禁分号堆叠"}},\n'
         )
+    elif is_debate:
+        align_note = "倾向须与本轮交锋方向同向。"
         decisive_field = (
             '  "decisive": "定局的那一个交锋点（单句≤50字：谁的哪点被证伪 / 无据 / 回避；'
-            '诚实认输不算回避）；不重讲倾向、禁抄记分",\n'
+            '诚实认输不算回避）；不重讲倾向",\n'
         )
         leaning_field = (
-            '  "leaning": "倾向方向（正方/反方）+ 命题一句；反转用「若…则翻」紧跟句号或分号后；'
-            '禁复述记分数字",\n'
+            '  "leaning": "倾向方向（正方/反方）+ 命题一句；反转用「若…则翻」紧跟句号或分号后",\n'
         )
         confidence_field = '  "confidence": "high 或 medium 或 low，只填档、不写散文",\n'
         recommendation_field = (
-            '  "recommendation": "仅当交接三键都空时写一句下一步，否则空串",\n'
+            '  "recommendation": "仅当未决三栏都空时写一句下一步，否则空串",\n'
         )
         field_mutex = (
             "【正反简报·各司其职】："
             "leaning = 倾向方向 + 命题一句，反转用「若…则翻」紧跟句号或分号后；"
             "decisive = 一个交锋点，不重讲倾向；"
             "confidence = 只填 high|medium|low；"
-            "交接三键 = 该你拍 / 去查证 / 只能等；"
-            "recommendation = 仅三键都空时写一句，否则空；"
-            "crux 正反留空；strongest_points 可写各方命门单句供存档。"
+            "未决三栏 = 要你拍 / 还没核实 / 只能等；"
+            "recommendation = 仅三栏都空时写一句，否则空；"
+            "crux 正反留空；strongest_points 给 {}。"
         )
+        strongest_field = '  "strongest_points": {},\n'
     else:
-        score_align_note = (
-            "若上方给了【累计记分】，decisive / leaning 须与它【方向】一致；禁抄记分数字。"
-        )
+        align_note = ""
         decisive_field = (
             '  "decisive": "定门决的那一个 finding / 交锋点（单句≤50字）",\n'
         )
         leaning_field = '  "leaning": "门决倾向一句话",\n'
         confidence_field = (
-            '  "confidence": "置信度及其成立条件（说明在什么前提下倾向会反转）",\n'
+            '  "confidence": "把握档及其成立条件（说明在什么前提下倾向会反转）",\n'
         )
         recommendation_field = (
             '  "recommendation": "加固建议单句，不复述判断理由",\n'
@@ -334,29 +290,29 @@ async def build_brief(
         field_mutex = (
             "【字段互斥】：leaning / decisive / recommendation 各写一件事，互不复述。"
         )
-    # 交接清单三键：键名即分类指令（解析层规整为 handoffs）。判别铁律单一来源，消除旧
-    # open_questions「仅剩需用户拍板」与 value_disputes 的重叠。条目写法：value 问句化；
-    # 三键均对齐 strongest_points「去水压成单句、只留命门」。
+        strongest_field = (
+            f'  "strongest_points": {{"<side_key∈[{sides_keys}]>": '
+            '"该方命门单句≤60字，禁分号堆叠"}},\n'
+        )
     handoff_taxonomy = (
-        "【交接清单三键·按解决路径互斥归类，勿重叠】："
-        "value_disputes = 只有用户的价值观/偏好能闭合（需你定夺）——每条须是用户可直接回答的"
-        "【一个问句】；"
-        "factual_disputes = 证据能闭合的事实分歧（可查证；关键事实的【待核实】/【二手来源】"
-        "状态语【内联在条目文本里】、不得抹平）；"
-        "open_questions = 两者都闭合不了——等外部事件 / 预测验证 / 后续观察（待解问题）。"
-        "三键每条均【去水压成单句、只留命门】（与 strongest_points 同口径），禁复合长句堆叠。"
-        "用户追问未答清的必须收编进上述三键之一，不得石沉大海。"
+        "【未决三栏·互斥归类，勿重叠】："
+        "value_disputes = 要你拍——只有你的选择能闭合，每条须是你可直接回答的一个问句；"
+        "factual_disputes = 还没核实——证据能闭合的待查事实（【待核实】/【二手来源】"
+        "状态语内联在条目文本里、不得抹平）；"
+        "open_questions = 只能等——等外部事件 / 预测验证 / 后续观察。"
+        "每条去水压成单句、只留命门，禁复合长句堆叠。"
+        "用户追问未答清的必须收进上述三栏之一，不得石沉大海。"
         "【底料对账】若上方给了【赛前底料】，factual_disputes / open_questions 中凡声称"
         "「底料未涉及 / 未交代 / 未覆盖」的条目，必须先对照底料原文——底料已写明的【禁止】再声称未涉及。"
     )
     user = (
         f"辩论命题：{config.motion}\n参与方：\n{_sides_block(config)}\n\n"
         f"{background_block}{dossier_block}{evidence_block}"
-        f"各轮推进：\n{timeline}\n\n{scores_block}{followups_block}最后一轮各方发言：\n{last_turns}\n\n"
+        f"各轮推进：\n{timeline}\n\n{followups_block}最后一轮各方发言：\n{last_turns}\n\n"
         f"{_brief_form_hint(config.form)}\n"
         "请据此产出简报，为用户负责到底（不要只把各方观点并排甩给他）："
         f"{field_mutex}"
-        f"{score_align_note}"
+        f"{align_note}"
         + (
             "【反转条件】写在 leaning（「若…则翻」），不要写进 confidence。"
             if is_debate
@@ -366,9 +322,9 @@ async def build_brief(
         "关键事实在辩论里是【待核实】、仅【单一二手来源】、或未深读摘要，不得把它当既定事实"
         "来定倾向——"
         + (
-            "要么在 leaning 的「若…则翻」里标【需一手核实】，要么移进交接清单"
+            "要么在 leaning 的「若…则翻」里标【需一手核实】，要么移进未决三栏"
             if is_debate
-            else "要么在 confidence 里显式降级并标【需一手核实】，要么把它移进交接清单"
+            else "要么在 confidence 里显式降级并标【需一手核实】，要么把它移进未决三栏"
         )
         + "（factual_disputes 或 open_questions，证据状态语人话内联在条目文本）；"
         "结论文字里引用这类事实时【保留证据状态词】（如「若 X 属实——目前仅二手报道、"
@@ -380,9 +336,8 @@ async def build_brief(
             if is_debate
             else '  "crux": "双方真正的争议焦点在哪",\n'
         )
-        + f'  "strongest_points": {{"<side_key∈[{sides_keys}]>": '
-        '"该方命门单句≤60字，禁分号堆叠"}},\n'
-        '  "value_disputes": ["用户可直接回答的一个问句？"],\n'
+        + strongest_field
+        + '  "value_disputes": ["用户可直接回答的一个问句？"],\n'
         '  "factual_disputes": ["可查证的事实分歧单句（【待核实】/【二手来源】内联）"],\n'
         f"{decisive_field}"
         f"{leaning_field}"

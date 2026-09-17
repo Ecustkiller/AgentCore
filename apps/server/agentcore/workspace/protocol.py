@@ -25,29 +25,12 @@ Design constraints (pinned now so the contract never breaks under us):
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
 from typing import TYPE_CHECKING, Literal, Protocol
 
 from agentcore.tools.sandbox.protocol import ExecutionRequest, ExecutionResult
 
 if TYPE_CHECKING:
     from agentcore.workspace.attachment_parse import ExtractResult
-
-
-class CodeIndexStatus(StrEnum):
-    """Readiness of the BM25 code index relative to the workspace.
-
-    Two axes: committed queryable snapshot vs freshness. ``BUILDING`` only when
-    no snapshot exists yet and maintenance is in flight; a refresh of an existing
-    snapshot is ``READY`` / ``STALE``, never ``BUILDING``. ``code_search`` is
-    query-only; the maintainer owns build/refresh. Callers must not treat
-    ``BUILDING`` / ``STALE`` as tool failure — prefer ``grep`` when the index is
-    not ``READY`` and exactness matters.
-    """
-
-    READY = "ready"
-    BUILDING = "building"
-    STALE = "stale"
 
 
 class WorkspaceError(Exception):
@@ -200,9 +183,7 @@ class TreeResult:
 class IndexFileEntry:
     """One file from ``index_files`` — path plus optional local-stat fingerprint.
 
-    ``mtime_ms`` / ``size_bytes`` both present → fingerprint usable to skip a
-    full-content ``read`` during ``ensure_index``. Either missing → treat as
-    unknown (must read). ``mtime_ms`` matches edit CAS: ``st_mtime_ns // 1_000_000``.
+    ``mtime_ms`` matches edit CAS: ``st_mtime_ns // 1_000_000``.
     """
 
     path: str
@@ -214,8 +195,7 @@ class IndexFileEntry:
 class IndexFilesResult:
     """Flat file index from ``index_files`` (paths + optional fingerprints).
 
-    Unpacks as ``(paths, truncated)`` so existing call sites stay valid. Prefer
-    ``entries`` / ``fingerprints()`` when the caller needs mtime/size skip hints.
+    Unpacks as ``(paths, truncated)`` so existing call sites stay valid.
     """
 
     paths: list[str]
@@ -299,30 +279,6 @@ class GlobFilesResult:
     paths: list[str] = field(default_factory=list)
     truncated: bool = False
     warnings: list[str] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class CodeChunk:
-    """One searchable code block returned by ``code_search``."""
-
-    path: str
-    symbol: str | None
-    symbol_type: str | None
-    start_line: int
-    end_line: int
-    language: str
-    snippet: str
-
-
-@dataclass
-class CodeSearchResult:
-    """Bounded semantic-ish search over symbol-level code chunks."""
-
-    chunks: list[CodeChunk] = field(default_factory=list)
-    scores: list[float] = field(default_factory=list)
-    index_status: CodeIndexStatus = CodeIndexStatus.STALE
-    # True when status is not READY (kept for older call sites / renderers).
-    index_stale: bool = False
 
 
 class WorkspaceBackend(Protocol):
@@ -488,8 +444,7 @@ class WorkspaceBackend(Protocol):
         ``"recent"`` is newest-first by mtime so a worker manifest spends
         its budget on the most-likely-relevant files in a big tree, not whatever sorts
         first. Channel / local backends may fill ``entries`` with ``mtime_ms`` +
-        ``size_bytes`` fingerprints so ``ensure_index`` can skip unchanged-file
-        reads. The shared file-discovery primitive behind @ mentions (文件中枢统一 F4) and
+        ``size_bytes``. The shared file-discovery primitive behind @ mentions (文件中枢统一 F4) and
         the worker workspace manifest — so both see the same flat view whether the
         workspace is cloud (``ServerWorkspace``) or local (``LocalWorkspace``, indexed on
         the desktop). Read-only (never sets ``dirty``); an empty / not-yet-promoted
@@ -564,41 +519,6 @@ class WorkspaceBackend(Protocol):
         ``query.globs`` are extra include globs (path-aware, not filename-only).
         ``max_depth`` is rg's ``--max-depth`` (1 = cwd files only; rg 0 is empty). Raises
         ``OutsideWorkspace`` / ``PathNotFound`` / ``NotADirectory``.
-        """
-        ...
-
-    async def code_search(
-        self,
-        query: str,
-        *,
-        language: str | None = None,
-        path_prefix: str = ".",
-        max_results: int = 10,
-    ) -> CodeSearchResult:
-        """BM25 search over the current index snapshot (query-only).
-
-        Read-only (never sets snapshot ``dirty``). Does **not** build or refresh
-        the index — that is ``IndexMaintainer`` / ``ensure_code_index``. Returns
-        ``index_status`` (``ready`` / ``building`` / ``stale``); when not
-        ``ready``, prefer ``grep`` for exact matches.
-        """
-        ...
-
-    async def ensure_code_index(self, *, force: bool = False) -> bool:
-        """Synchronously build or refresh the code-search index (incremental).
-
-        Prefer ``start_code_index_maintenance`` on hot paths (write / ``code_search``)
-        — this method is for tests and explicit admin refresh. May be slow on
-        first call for large workspaces (capped file count). Read-only (never
-        sets snapshot ``dirty``). Not used on turn-prepare / TTFT paths.
-        """
-        ...
-
-    def start_code_index_maintenance(self) -> None:
-        """Kick background index build/refresh (coalesced, non-blocking).
-
-        Scheduled from open-project / warm, write mutations, and non-ready
-        ``code_search`` — not from turn entry (prepare / assemble / ``_make_backend``).
         """
         ...
 

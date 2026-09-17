@@ -9,7 +9,7 @@ RoundRunner】——首轮 ``build_agent_executor`` + ``WaveScheduler`` 派并�
 质询回合（P1）：``questions`` 非空时 ``complete(cross_exam)`` 产出定向质询，``stream`` 对质询
 feedback 回结构化 JSON，驱动真实 ``make_cross_exam_runner``（continue_run → 解析 → 落
 ``RoundResult.cross_exam`` / 失败兜底）。默认 ``questions=None`` → cross_exam 步回 ``{}``，
-与既有 thorough 用例「跳过质询 beat」行为一致。
+与既有空 questions 用例「跳过质询 beat」行为一致。
 """
 
 import json
@@ -57,7 +57,7 @@ _BRIEF = {
     "open_questions": ["灰度窗口外的政策会不会变"],
 }
 
-# 质询集成默认题集（与断言文案对齐；thorough + 正反才会开质询 beat）。
+# 质询集成默认题集（与断言文案对齐；正反才会开质询 beat）。
 _CX_QUESTIONS = {
     "pro": ["收益是否计入尾部风险？", "熔断成本由谁承担？"],
     "con": ["你反对的替代方案是什么？"],
@@ -110,7 +110,7 @@ class _DebateLLM:
             return LLMResponse(content=json.dumps({"focus": "本轮焦点"}), usage=_USAGE)
         if step == "cross_exam":
             self.cross_exam_calls += 1
-            # 未配置 questions → {}，主持人跳过质询 beat（既有 thorough 用例零行为变化）。
+            # 未配置 questions → {}，主持人跳过质询 beat。
             payload = {"questions": self.questions} if self.questions else {}
             return LLMResponse(content=json.dumps(payload), usage=_USAGE)
         if step == "assess":
@@ -219,7 +219,7 @@ async def test_quick_debate_returns_dual_products_non_terminal(tmp_path: Path):
     ctx = _ctx(backend)
     tool = _tool(llm, ctx=ctx)
     result = await tool.execute(
-        {"motion": "该不该做 X", "form": "debate", "sides": _sides(), "thorough": False}, ctx
+        {"motion": "该不该做 X", "form": "debate", "sides": _sides()}, ctx
     )
     assert result.success is True
     assert result.is_terminal is False  # 非终结：产物回 CEO 循环
@@ -230,10 +230,8 @@ async def test_quick_debate_returns_dual_products_non_terminal(tmp_path: Path):
     # 收口机制性落盘 + CEO 尾部路径可引用
     assert "【工作区落盘】" in result.output
     debate_files = list((tmp_path / "AgentCore" / "文档" / "debate").glob("*.md"))
-    assert len(debate_files) == 2
-    names = {p.name for p in debate_files}
-    assert any(n.startswith("决策简报") for n in names)
-    assert any(n.startswith("交锋叙事线") for n in names)
+    assert len(debate_files) == 1
+    assert debate_files[0].name.startswith("辩论·")
     # quick = 单轮：2 辩手 = 2 次 stream
     assert llm.stream_calls == 2
     # token 折算回 metadata（与 delegate 同形）
@@ -252,7 +250,7 @@ async def test_emits_debate_result_event_for_frontend_view():
     llm = _DebateLLM(converge_at=1)
     tool = _tool(llm, sink=sink)
     await tool.execute(
-        {"motion": "该不该做 X", "form": "debate", "sides": _sides(), "thorough": False}, _ctx()
+        {"motion": "该不该做 X", "form": "debate", "sides": _sides()}, _ctx()
     )
     sink.close()
     events = [e async for e in sink if e.type == EventType.DEBATE_RESULT]
@@ -280,7 +278,7 @@ async def test_moderator_run_emits_process_deltas():
     llm = _DebateLLM(converge_at=1)
     tool = _tool(llm, sink=sink)
     await tool.execute(
-        {"motion": "该不该做 X", "form": "debate", "sides": _sides(), "thorough": False},
+        {"motion": "该不该做 X", "form": "debate", "sides": _sides()},
         _ctx(),
     )
     sink.close()
@@ -308,7 +306,7 @@ async def test_emits_batch_metrics_for_diagnostics():
     llm = _DebateLLM(converge_at=1)
     tool = _tool(llm, sink=sink)
     await tool.execute(
-        {"motion": "该不该做 X", "form": "debate", "sides": _sides(), "thorough": False}, _ctx()
+        {"motion": "该不该做 X", "form": "debate", "sides": _sides()}, _ctx()
     )
     sink.close()
     events = [e async for e in sink if e.type == EventType.BATCH_METRICS]
@@ -322,7 +320,7 @@ async def test_ledger_three_tier_parenting():
     llm = _DebateLLM(converge_at=1)
     tool = _tool(llm)
     await tool.execute(
-        {"motion": "该不该做 X", "form": "debate", "sides": _sides(), "thorough": False}, _ctx()
+        {"motion": "该不该做 X", "form": "debate", "sides": _sides()}, _ctx()
     )
     ledger = tool.run_ledger
     # ledger 行的 role 统一为 member（与 delegate 同；节点的「主持人 / 辩手」角色由 plan 事件
@@ -416,7 +414,7 @@ async def test_later_round_beat_run_ids_stay_per_round():
 
 async def test_multi_round_cross_round_memory():
     # 无最小轮门槛了：轮数由裁判逐轮自判。converge_at=3 → 裁判前两轮判未收敛、第 3 轮收敛 →
-    # 跑满 3 轮（thorough 默认 max=5，收敛早于上限发生），借此验证后续轮 continue_run 续写。
+    # 跑满 3 轮（默认 max=5，收敛早于上限发生），借此验证后续轮 continue_run 续写。
     llm = _DebateLLM(converge_at=3)
     tool = _tool(llm)
     result = await tool.execute(
@@ -792,7 +790,7 @@ async def test_debate_ignores_unadvertised_form_and_is_subject():
         {"key": "red", "name": "乙方", "stance": "找出方案漏洞"},
     ]
     result = await tool.execute(
-        {"motion": "压力测试方案 A", "form": "red_team", "sides": sides, "thorough": False},
+        {"motion": "压力测试方案 A", "form": "red_team", "sides": sides},
         _ctx(),
     )
     assert result.success is True
@@ -1015,34 +1013,6 @@ def test_debater_task_empty_side_uses_turn_main_not_worker():
     assert all(node.model == turn_main for node in plan.nodes)
 
 
-def test_quick_mode_injects_concise_hint_thorough_does_not():
-    """快速对碰（thorough=False）给首轮辩手注入「少检索、收窄到 1 个论点」的轻量约束；认真辩透
-    （thorough=True）不注入，保留深挖取证。根治观测到的「为 trivial 命题刷十余次 web_search、
-    跑近十轮」——辩手自停在轮数上限内，故有效杠杆是提示词而非轮数上限。"""
-    from agentcore.runtime.debate import RoundPolicy
-    from agentcore.tools.builtin.debate.schema import QUICK_DEBATER_HINT
-
-    sides, _ = parse_sides(
-        [
-            {"key": "pro", "name": "正方", "stance": "甜"},
-            {"key": "con", "name": "反方", "stance": "咸"},
-        ]
-    )
-    quick_cfg = DebateConfig(
-        motion="甜豆腐脑 vs 咸豆腐脑",
-        form=DebateForm.DEBATE,
-        sides=sides,
-        policy=RoundPolicy.quick(),
-    )
-    thorough_cfg = DebateConfig(  # default policy → thorough
-        motion="甜豆腐脑 vs 咸豆腐脑", form=DebateForm.DEBATE, sides=sides
-    )
-    quick_task = debater_task(quick_cfg, sides[0], 0, round_no=1, focus="正统")["task"]
-    thorough_task = debater_task(thorough_cfg, sides[0], 0, round_no=1, focus="正统")["task"]
-    assert QUICK_DEBATER_HINT in quick_task
-    assert QUICK_DEBATER_HINT not in thorough_task
-
-
 def test_parse_background_strips_and_rejects_non_str():
     """可选 background：字符串 strip；缺省 / 非字符串 → 空串（零行为变化路径）。"""
     assert parse_background(None) == ""
@@ -1230,7 +1200,6 @@ async def test_tool_passes_background_into_first_round_tasks():
             "motion": "该不该扩产",
             "form": "debate",
             "sides": _sides(),
-            "thorough": False,
             "background": facts,
         },
         _ctx(),
@@ -1256,7 +1225,7 @@ async def test_workers_gated_in_local_mode(monkeypatch):
     gate = _gate()
     tool = _tool(_DebateLLM(converge_at=1), ctx=_ctx(backend=_LocalBackend()), approval_gate=gate)
     await tool.execute(
-        {"motion": "X", "form": "debate", "sides": _sides(), "thorough": False},
+        {"motion": "X", "form": "debate", "sides": _sides()},
         _ctx(backend=_LocalBackend()),
     )
     # 本地：辩手团队继承 CEO 的同一 gate（碰盘前需用户同意）。

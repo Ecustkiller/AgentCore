@@ -517,7 +517,7 @@ async def _first_plan_after_attach(monkeypatch):
             DebateSide(key="pro", name="正方", stance="a"),
             DebateSide(key="con", name="反方", stance="b"),
         ],
-        policy=RoundPolicy.for_form(DebateForm.DEBATE, thorough=False),
+        policy=RoundPolicy.for_form(DebateForm.DEBATE),
         moderator_run_id="debate_mod_test",
     )
     await tool._run_moderator(config, usage_metadata(tool._acc.usage))

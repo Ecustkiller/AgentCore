@@ -4,13 +4,17 @@ import {
 } from "@/lib/executionHarvest";
 import { ensureTimelineMarkersFromJournal } from "@/lib/foldMessageLane";
 import { logEvent } from "@/lib/log";
+import { isReadOnlyOffline } from "@/lib/offlineMode";
 import { promoteScalarContentIntoProcess } from "@/lib/processTimeline";
 import {
   attestedKindFromEvents,
   parseTurnOutcomeKind,
 } from "@/lib/turnOutcome";
 import { api } from "@/services/api";
-import { persistOpenedCache } from "@/services/offlineCache";
+import {
+  persistOpenedCache,
+  persistResidentOpenedCache,
+} from "@/services/offlineCache";
 import { clearLastEventId } from "@/services/streamConversation";
 import { finalizeGeneratingForPausedConversation } from "@/services/turns/helpers";
 import { hasLocalConversationStream } from "@/services/turns/streamOwnership";
@@ -20,8 +24,10 @@ import {
   adoptLatestWindowMessages,
   hasUnconfirmedLocalTail,
   isMessageWindowResident,
+  overlayCompleteRunsOnServerWindow,
   overlayIncomingWithRicherExisting,
   useConversationStore,
+  windowHasSlimJournal,
 } from "@/stores/conversation";
 import { useExecutionStore } from "@/stores/execution";
 import { hydrateInteractionsFromJournal } from "@/stores/interactions";
@@ -541,6 +547,10 @@ export async function ensureFullMessageRuns(
       if (full.runs && full.runs.eventsComplete !== false) {
         useExecutionStore.getState().hydrateFromJournal(messageId, full.runs);
       }
+      const rt = useConversationStore.getState().byId[conversationId];
+      if (rt && rt.messages.length > 0 && !rt.hasMoreAfter) {
+        persistResidentOpenedCache(conversationId);
+      }
       return full;
     } catch {
       _fullRunsFailed.add(key);
@@ -551,6 +561,21 @@ export async function ensureFullMessageRuns(
   })();
   _fullRunsInflight.set(key, task);
   return task;
+}
+
+/**
+ * Fill slim journals in the resident window so opened cache can fold graphs
+ * without waiting for the inline graph to mount. No-op offline / when complete.
+ */
+export function scheduleEnsureFullRunsForWindow(conversationId: string): void {
+  if (isReadOnlyOffline()) return;
+  const msgs =
+    useConversationStore.getState().byId[conversationId]?.messages ?? [];
+  const pending = msgs.filter((m) => m.runs?.eventsComplete === false);
+  if (pending.length === 0) return;
+  for (const m of pending) {
+    void ensureFullMessageRuns(conversationId, m.serverMessageId ?? m.id);
+  }
 }
 
 /** ISO `createdAt` of a conversation slice's oldest / newest loaded message, or
@@ -584,6 +609,7 @@ export async function loadOlderMessages(conversationId: string): Promise<void> {
     useConversationStore
       .getState()
       .prependMessages(win.messages, win.hasMoreBefore, conversationId);
+    scheduleEnsureFullRunsForWindow(conversationId);
   } catch {
     /* best-effort: a failed page just leaves the older button to retry on scroll */
   } finally {
@@ -608,6 +634,7 @@ export async function loadNewerMessages(conversationId: string): Promise<void> {
     useConversationStore
       .getState()
       .appendNewerMessages(win.messages, win.hasMoreAfter, conversationId);
+    scheduleEnsureFullRunsForWindow(conversationId);
   } catch {
     /* best-effort */
   } finally {
@@ -765,13 +792,27 @@ export async function loadLatestWindow(
   clearLastEventId(conversationId);
   // Latest window owns the tail cards; replace them (older/around pages return none).
   store.setMemoryUpdates(win.memoryUpdates, conversationId);
-  // Persist the adopted server window; reject paths above return without writing.
+  // Persist the adopted server window (not the unconfirmed local tail) with
+  // complete journals kept. Slim rows wait for ensureFull — writing them would
+  // leave opened cache as body-without-graph if the GET is cut off.
   if (win.messages.length > 0) {
-    void persistOpenedCache(conversationId, win.messages, win.memoryUpdates, {
-      hasMoreBefore: win.hasMoreBefore,
-      hasMoreAfter: win.hasMoreAfter,
-    });
+    const persistWindow = overlayCompleteRunsOnServerWindow(
+      win.messages,
+      applied,
+    );
+    if (!windowHasSlimJournal(persistWindow)) {
+      void persistOpenedCache(
+        conversationId,
+        persistWindow,
+        win.memoryUpdates,
+        {
+          hasMoreBefore: win.hasMoreBefore,
+          hasMoreAfter: win.hasMoreAfter,
+        },
+      );
+    }
   }
+  scheduleEnsureFullRunsForWindow(conversationId);
   return true;
 }
 
@@ -811,7 +852,10 @@ export async function jumpToMessage(
     if ((after.currentConversationId ?? "") !== conversationId) return;
     if (win.messages.length === 0) return;
     const existing = after.byId[conversationId]?.messages ?? [];
-    const merged = overlayIncomingWithRicherExisting(win.messages, existing);
+    const merged = overlayCompleteRunsOnServerWindow(
+      overlayIncomingWithRicherExisting(win.messages, existing),
+      existing,
+    );
     const hitInMerged = merged.find(
       (m) => m.id === messageId || m.serverMessageId === messageId,
     );
@@ -826,6 +870,7 @@ export async function jumpToMessage(
     // clears any cards left from the latest view (they'd otherwise float after the
     // historical window). They return on the next latest-window load.
     after.setMemoryUpdates(win.memoryUpdates, conversationId);
+    scheduleEnsureFullRunsForWindow(conversationId);
     // Focus on the next frame so the bubbles have rendered before we scroll.
     requestAnimationFrame(() => {
       const msgs =

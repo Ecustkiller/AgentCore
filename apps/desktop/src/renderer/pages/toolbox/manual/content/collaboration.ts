@@ -274,7 +274,7 @@ export const collaborationChapter: ManualChapterContent = {
           type: "bullets",
           items: [
             {
-              title: "记分牌",
+              title: "顶栏",
               desc: "辩题、双方身份与轮次。",
             },
             {

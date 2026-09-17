@@ -115,14 +115,6 @@ class GlobTool:
             return prepared
         directory = prepared
 
-        from agentcore.workspace.project_shell import rewrite_project_shell_relpath
-
-        directory, _shell_note = await rewrite_project_shell_relpath(
-            directory, context, register=False
-        )
-        if not directory:
-            directory = "."
-
         prev_reveal = getattr(context.backend, "ai_list_reveal_archives", False)
         if reveal_archives:
             context.backend.ai_list_reveal_archives = True

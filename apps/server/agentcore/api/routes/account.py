@@ -7,7 +7,7 @@ Desktop convention (parallel desktop inject):
   ``baseUrl`` = ``{apiOrigin}/v1/account`` and ``apiKey`` = minted token.
 - Cloud calls (account ticket **or** access):
   ``POST {baseUrl}/conversations/search|read|chat-context``,
-  ``POST {baseUrl}/rules/list|remember`` (list = always + on_demand bodies for
+  ``POST {baseUrl}/rules/list|write|read|delete`` (list = always + on_demand bodies for
   规则目录 / ``consult``),
   ``POST {baseUrl}/memory/{list,load,save,delete,project-scopes}``.
 - Does **not** open UI conversation / documents / memory-editor CRUD to the
@@ -435,49 +435,76 @@ async def list_account_user_rules(
     )
 
 
-class AccountRememberRequest(BaseModel):
-    action: Literal["write", "read", "delete", "list"] = "write"
-    name: str | None = None
-    content: str | None = None
+class AccountRuleWriteRequest(BaseModel):
+    name: str
+    content: str
     folder_id: str | None = None
     apply: Literal["always", "on_demand"] | None = None
     description: str | None = None
 
 
-class AccountRememberCatalogItem(BaseModel):
+class AccountRuleNameRequest(BaseModel):
+    name: str
+    folder_id: str | None = None
+
+
+class AccountRuleCatalogItem(BaseModel):
     name: str
     apply: str = ""
     description: str = ""
 
 
-class AccountRememberResponse(BaseModel):
+class AccountRuleMutationResponse(BaseModel):
     changed: bool
     action: str
     message: str
     name: str = ""
     apply: str = ""
     body: str = ""
-    catalog: list[AccountRememberCatalogItem] = Field(default_factory=list)
+    catalog: list[AccountRuleCatalogItem] = Field(default_factory=list)
     ok: bool = True
 
 
-@router.post("/rules/remember", response_model=AccountRememberResponse)
-async def remember_account_user_rule(
-    body: AccountRememberRequest,
+def _rule_mutation_response(result: object) -> AccountRuleMutationResponse:
+    from agentcore.memory.rules_injection import UserRuleMutationResult
+
+    assert isinstance(result, UserRuleMutationResult)
+    return AccountRuleMutationResponse(
+        changed=result.changed,
+        action=result.action,
+        message=result.message,
+        name=result.name,
+        apply=result.apply,
+        body=result.body,
+        catalog=[
+            AccountRuleCatalogItem(name=n, apply=a, description=d)
+            for n, a, d in result.catalog
+        ],
+        ok=result.ok,
+    )
+
+
+async def _mutate_account_rule(
+    *,
     user: AccountApiUser,
-    session: AsyncSession = Depends(get_db),
-) -> AccountRememberResponse:
-    """Write / read / delete / list a named user-rule markdown under AgentCore/规则/."""
+    session: AsyncSession,
+    action: str,
+    name: str | None,
+    content: str | None = None,
+    folder_id: str | None = None,
+    apply: str | None = None,
+    description: str | None = None,
+) -> AccountRuleMutationResponse:
     try:
         result = await mutate_user_rule(
             DocumentRepository(session),
             user.user_id,
-            folder_id=body.folder_id,
-            action=body.action,
-            name=body.name,
-            content=body.content,
-            apply=body.apply,
-            description=body.description,
+            folder_id=folder_id,
+            action=action,
+            name=name,
+            content=content,
+            apply=apply,
+            description=description,
         )
     except AlwaysQuotaExceededError as exc:
         raise HTTPException(
@@ -487,18 +514,57 @@ async def remember_account_user_rule(
                 "message": exc.message,
             },
         ) from exc
-    return AccountRememberResponse(
-        changed=result.changed,
-        action=result.action,
-        message=result.message,
-        name=result.name,
-        apply=result.apply,
-        body=result.body,
-        catalog=[
-            AccountRememberCatalogItem(name=n, apply=a, description=d)
-            for n, a, d in result.catalog
-        ],
-        ok=result.ok,
+    return _rule_mutation_response(result)
+
+
+@router.post("/rules/write", response_model=AccountRuleMutationResponse)
+async def write_account_user_rule(
+    body: AccountRuleWriteRequest,
+    user: AccountApiUser,
+    session: AsyncSession = Depends(get_db),
+) -> AccountRuleMutationResponse:
+    """Write a named user-rule markdown under .agentcore/规则/."""
+    return await _mutate_account_rule(
+        user=user,
+        session=session,
+        action="write",
+        name=body.name,
+        content=body.content,
+        folder_id=body.folder_id,
+        apply=body.apply,
+        description=body.description,
+    )
+
+
+@router.post("/rules/read", response_model=AccountRuleMutationResponse)
+async def read_account_user_rule(
+    body: AccountRuleNameRequest,
+    user: AccountApiUser,
+    session: AsyncSession = Depends(get_db),
+) -> AccountRuleMutationResponse:
+    """Read one named user-rule markdown under .agentcore/规则/."""
+    return await _mutate_account_rule(
+        user=user,
+        session=session,
+        action="read",
+        name=body.name,
+        folder_id=body.folder_id,
+    )
+
+
+@router.post("/rules/delete", response_model=AccountRuleMutationResponse)
+async def delete_account_user_rule(
+    body: AccountRuleNameRequest,
+    user: AccountApiUser,
+    session: AsyncSession = Depends(get_db),
+) -> AccountRuleMutationResponse:
+    """Delete one named user-rule markdown under .agentcore/规则/."""
+    return await _mutate_account_rule(
+        user=user,
+        session=session,
+        action="delete",
+        name=body.name,
+        folder_id=body.folder_id,
     )
 
 

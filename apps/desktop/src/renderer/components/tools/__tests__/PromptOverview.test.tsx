@@ -213,7 +213,27 @@ describe("PromptOverview", () => {
       mineCatalogId("rule"),
     ]);
     expect(
-      within(screen.getByTestId("prompt-rail-always")).queryByText("file_read"),
+      within(screen.getByTestId("prompt-rail-always")).getByRole("button", {
+        name: "file_read",
+      }),
+    ).toBeTruthy();
+    expect(
+      within(screen.getByTestId("prompt-rail-on-demand")).queryByRole(
+        "button",
+        {
+          name: "file_read",
+        },
+      ),
+    ).toBeNull();
+    expect(
+      within(screen.getByTestId("prompt-tile-tool:file_read")).getByText(
+        "官方",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(screen.getByTestId("prompt-tile-tool:file_read")).queryByText(
+        "开场即用",
+      ),
     ).toBeNull();
     expect(screen.queryByTestId("prompt-resident-bar")).toBeNull();
     expect(screen.getByTestId("prompt-overview").textContent).not.toMatch(/%/);
@@ -235,6 +255,9 @@ describe("PromptOverview", () => {
     ]);
     expect(screen.queryByTestId("prompt-rail-official")).toBeNull();
     expect(screen.queryByTestId("prompt-rail-tools")).toBeNull();
+    expect(screen.queryByTestId("prompt-rail-factory")).toBeNull();
+    expect(screen.queryByTestId("prompt-rail-always-tools")).toBeNull();
+    expect(screen.queryByTestId("prompt-rail-on-demand-tools")).toBeNull();
   });
 
   it("按需叶子铺在概览上，夹只当区标题", () => {
@@ -243,15 +266,16 @@ describe("PromptOverview", () => {
     expect(screen.getByRole("heading", { name: "其他" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "合同审查" })).toBeTruthy();
     expect(
-      within(screen.getByTestId("prompt-rail-on-demand")).getByRole("heading", {
-        name: "官方",
-      }),
-    ).toBeTruthy();
+      within(screen.getByTestId("prompt-rail-on-demand")).queryByRole(
+        "heading",
+        { name: "官方" },
+      ),
+    ).toBeNull();
     expect(screen.getByRole("button", { name: "薄技能" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "合同审查" }));
     fireEvent.click(screen.getByRole("button", { name: "薄技能" }));
     fireEvent.click(
-      within(screen.getByTestId("prompt-rail-tools")).getByRole("button", {
+      within(screen.getByTestId("prompt-rail-on-demand")).getByRole("button", {
         name: "host",
       }),
     );
@@ -264,7 +288,7 @@ describe("PromptOverview", () => {
     expect(screen.getByTestId("prompt-overview").textContent).not.toMatch(/%/);
   });
 
-  it("按需先铺我的夹再官方；工具与连接器跟在两轨后面", () => {
+  it("按需先铺我的夹再官方 HOW；连接器与查阅后启用留在按需，开场即用进常驻", () => {
     renderOverview({
       showConnectors: true,
       connectors: [{ id: "connector:fs", label: "Filesystem" }],
@@ -275,16 +299,24 @@ describe("PromptOverview", () => {
     const create = screen.getByTestId("prompt-rail-create");
     const folders = screen.getByTestId("my-skills");
     const official = screen.getByTestId("prompt-rail-official");
-    const tools = screen.getByTestId("prompt-rail-tools");
     const connectors = screen.getByTestId("prompt-rail-connectors");
+    const onDemandTools = screen.getByTestId("prompt-rail-on-demand-tools");
+    expect(screen.queryByTestId("prompt-rail-tools")).toBeNull();
+    expect(screen.queryByTestId("prompt-rail-factory")).toBeNull();
+    expect(screen.queryByTestId("prompt-rail-factory-resident")).toBeNull();
+    expect(screen.queryByTestId("prompt-rail-factory-deferred")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "工具" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "文件" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "出厂项" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "官方" })).toBeNull();
     expect(
       always.compareDocumentPosition(onDemand) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    expect(
-      onDemand.compareDocumentPosition(tools) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(always.contains(onDemandTools)).toBe(false);
+    expect(onDemand.contains(connectors)).toBe(true);
+    expect(onDemand.contains(onDemandTools)).toBe(true);
+    expect(onDemand.contains(official)).toBe(true);
     expect(
       create.compareDocumentPosition(folders) &
         Node.DOCUMENT_POSITION_FOLLOWING,
@@ -293,27 +325,32 @@ describe("PromptOverview", () => {
       folders.compareDocumentPosition(official) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    expect(onDemand.contains(connectors)).toBe(false);
-    expect(tools.contains(connectors)).toBe(true);
     expect(
-      connectors.compareDocumentPosition(
-        screen.getByTestId("prompt-rail-tools-file"),
-      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+      official.compareDocumentPosition(onDemandTools) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      onDemandTools.compareDocumentPosition(connectors) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
       within(create).getByRole("button", { name: "新建条目" }),
     ).toBeTruthy();
     expect(within(create).getByRole("button", { name: "新建夹" })).toBeTruthy();
-    expect(tools.querySelector(".overflow-x-auto")).toBeNull();
+    expect(onDemandTools.querySelector(".overflow-x-auto")).toBeNull();
     expect(official.querySelector(".overflow-x-auto")).toBeNull();
-    expect(tools.querySelector(".grid")).toBeTruthy();
+    expect(onDemandTools.querySelector(".grid")).toBeTruthy();
     expect(official.querySelector(".grid")).toBeTruthy();
     expect(screen.queryByTestId("prompt-overview-updates")).toBeNull();
     expect(screen.getByRole("heading", { name: "常驻" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "按需" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "工具" })).toBeTruthy();
     expect(screen.getByText("每回合都带着")).toBeTruthy();
     expect(screen.getByText("用到才翻")).toBeTruthy();
+    expect(screen.queryByText("只读说明书")).toBeNull();
+    expect(within(always).getByText("file_read")).toBeTruthy();
+    expect(within(onDemandTools).getByText("host")).toBeTruthy();
+    expect(within(always).queryByText("host")).toBeNull();
+    expect(within(onDemand).queryByText("file_read")).toBeNull();
   });
 
   it("空夹是拖放空卡，不是通栏虚线", () => {
@@ -348,8 +385,8 @@ describe("PromptOverview", () => {
     expect(
       within(
         screen.getByTestId(`prompt-tile-${skillCatalogId("thin_skill")}`),
-      ).queryByText("官方"),
-    ).toBeNull();
+      ).getByText("官方"),
+    ).toBeTruthy();
     expect(
       within(screen.getByTestId("prompt-rail-connectors")).queryByText("本机"),
     ).toBeNull();
@@ -364,9 +401,22 @@ describe("PromptOverview", () => {
       ),
     ).toBeTruthy();
     expect(
+      within(screen.getByTestId("prompt-tile-tool:file_read")).getByText(
+        "官方",
+      ),
+    ).toBeTruthy();
+    expect(
       within(screen.getByTestId("prompt-tile-tool:host")).getByText(
         "本机排查 / 修理 / 查看这台电脑",
       ),
+    ).toBeTruthy();
+    expect(
+      within(screen.getByTestId("prompt-tile-tool:host")).queryByText(
+        "查阅后启用",
+      ),
+    ).toBeNull();
+    expect(
+      within(screen.getByTestId("prompt-tile-tool:host")).getByText("官方"),
     ).toBeTruthy();
   });
 });

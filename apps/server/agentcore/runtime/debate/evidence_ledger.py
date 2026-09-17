@@ -1,6 +1,6 @@
 """场级证据台账（evidence_ledger）——辩论薄封装，核心委托平台共享核。
 
-与 :mod:`match_ledger`（对局状态事件）分工不同：本模块登记的是「本场被真正消费的来源」
+与 :mod:`match_ledger`（旧场对局事件）分工不同：本模块登记的是「本场被真正消费的来源」
 （``web_fetch`` 深读页 + 笔记实际引用的 search 命中 + 底料预登记），成稿
 ``【已核实·#eN】`` 的机械闸基准是**本方笔记引用集**（结辩 = 本方历轮已引用并集）。
 
@@ -269,9 +269,9 @@ def format_evidence_ledger_for_judge(
     *,
     cross_exam: Sequence[Any] = (),
 ) -> str:
-    """本轮发言 / 质询作答里实际引用的 ``#eN`` → 带 tier / 深读的结构化块（M2 记分锚定）。
+    """本轮发言 / 质询作答里实际引用的 ``#eN`` → 带 tier / 深读的结构化块。
 
-    无台账或无引用 → 空串（裁判退化为旧软约束）。未分级不单独惩罚——教法写进块尾。
+    无台账或无引用 → 空串。未分级不单独惩罚——教法写进块尾。
     """
     if ledger is None:
         return ""
@@ -292,9 +292,9 @@ def format_evidence_ledger_for_judge(
         return ""
     body = "\n".join(_format_ledger_entry_line(e) for e in entries)
     return (
-        "【本轮引用证据台账·evidence 记分须按下列 tier / 深读锚定，勿臆造等级】\n"
+        "【本轮引用证据台账·判断无据须按下列 tier / 深读锚定，勿臆造等级】\n"
         f"{body}\n"
-        "【教法】按下方 scores 口径锚定；决定性事实仅靠单一来源或未深读 → evidence 封顶打低。\n\n"
+        "【教法】决定性事实仅靠单一来源或未深读 → 不得当已核实。\n\n"
     )
 
 
@@ -331,8 +331,8 @@ def format_evidence_ledger_for_brief(
     return (
         "【本场证据台账·结论引用须保留待核实 / 二手 / 深读状态，不得抹平】\n"
         f"{body}\n"
-        "decisive / leaning 若依赖【待核实】、单一二手或未深读：须降置信并标"
-        "【需一手核实】，或移进交接清单；未分级不单独当缺陷，但单一来源撑决定性"
+        "decisive / leaning 若依赖【待核实】、单一二手或未深读：须降把握并标"
+        "【需一手核实】，或移进未决清单；未分级不单独当缺陷，但单一来源撑决定性"
         "事实不得写成既定。\n\n"
     )
 

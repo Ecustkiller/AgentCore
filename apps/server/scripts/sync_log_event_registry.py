@@ -424,7 +424,6 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "status": "str",
         "duration_ms": "int",
         "reason": "str",
-        "index_status": "str",
         "subcommand": "str",
         "command_preview": "str",
         "cwd_preview": "str",
@@ -594,25 +593,7 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
     "workspace.snapshot_created": {},
     "workspace.snapshot_failed": {"error": "str"},
     "workspace.system_snapshot_prune_failed": {"error": "str"},
-    "workspace.index_build_start": {
-        "force": "bool",
-    },
-    "workspace.index_build_complete": {
-        "force": "bool",
-        "updated": "bool",
-        "duration_ms": "int",
-        "generation": "int",
-        "truncated": "bool",
-        "files": "int",
-    },
-    "workspace.index_skip_channel_busy": {
-        "force": "bool",
-        "wait_ms": "int",
-        "inflight": "int",
-    },
     "workspace.index_failed": {
-        "force": "bool",
-        "duration_ms": "int",
         "error": "str",
     },
     "pipeline.error": {"error": "str"},
@@ -1397,15 +1378,7 @@ KEY_DESC: dict[str, str] = {
     "workspace.atomic_write_inplace_fallback": (
         "工作区原子写 replace 重试耗尽后降级原地 write_bytes（与 file_write 同档）"
     ),
-    "workspace.index_build_start": "后台代码索引 ensure 开始（IndexMaintainer）",
-    "workspace.index_build_complete": (
-        "后台代码索引 ensure 完成（duration_ms；可取则带 generation/truncated/files）"
-    ),
-    "workspace.index_skip_channel_busy": (
-        "Local channel 仍忙，跳过本轮索引并 coalesce 重试"
-    ),
-    "workspace.index_failed": "后台代码索引 ensure 失败（带 error/duration_ms）",
-    "sidecar.warm_code_index": "静默暖代码索引（initialize / warmCodeIndex RPC schedule）",
+    "workspace.index_failed": "工作区文件清单 listing 失败（best-effort，不挡回合）",
     "sidecar.warm_mcp_discover": "静默暖 MCP 列表进进程缓存（warmMcpDiscover RPC seed）",
     "sidecar.warm_account_rules_memory": (
         "静默暖账户 rules/memory 进 prepare 快照缓存（warmAccountRulesMemory）"

@@ -431,10 +431,10 @@ export const referenceChapter: ManualChapterContent = {
                   type: "boundaryTable",
                   rows: [
                     {
-                      can: "读文件；git status / diff / log / fetch / show / blame；stash/tag/remote list",
+                      can: "读文件；git status / diff / log / fetch",
                       approve:
-                        "改文件；git add / commit / push / pull / 建分支 / 切分支；merge / rebase / cherry-pick；stash push/pop；tag create；remote add；开 PR（GitHub）；跑代码",
-                      wont: "force push；reset / clean；stash drop/clear；删 tag；remote remove；在 main / master 上直接提交、push 或 merge/rebase；GitLab 开 PR",
+                        "改文件；git add / commit / push / pull / 建分支 / 切分支；开 PR（GitHub）；跑代码",
+                      wont: "force push；reset / clean；在 main / master 上直接提交或 push；GitLab 开 PR",
                     },
                   ],
                 },
@@ -742,7 +742,7 @@ export const referenceChapter: ManualChapterContent = {
               a: [
                 {
                   type: "text",
-                  text: "辩论回合的赛事页呈现——记分牌 + 剧本主列 + 终审舞台；入口为状态条「打开辩论室」或全屏「辩论室」tab。",
+                  text: "辩论回合的赛事页呈现——顶栏 + 剧本主列 + 终审舞台；入口为状态条「打开辩论室」或全屏「辩论室」tab。",
                 },
               ],
             },

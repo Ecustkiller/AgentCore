@@ -41,9 +41,7 @@ describe("ManualReference", () => {
     expect(screen.getByText("需你放行")).toBeTruthy();
     expect(screen.getByText("不会做")).toBeTruthy();
     expect(
-      screen.getByText(
-        /读文件；git status \/ diff \/ log \/ fetch \/ show \/ blame/,
-      ),
+      screen.getByText(/读文件；git status \/ diff \/ log \/ fetch/),
     ).toBeTruthy();
     expect(
       screen.getByText(/git add \/ commit \/ push \/ pull \/ 建分支 \/ 切分支/),
@@ -51,6 +49,8 @@ describe("ManualReference", () => {
     expect(screen.getByText(/开 PR（GitHub）/)).toBeTruthy();
     expect(screen.getByText(/force push/)).toBeTruthy();
     expect(screen.getByText(/reset \/ clean/)).toBeTruthy();
+    expect(screen.queryByText(/show \/ blame/)).toBeNull();
+    expect(screen.queryByText(/stash push/)).toBeNull();
     expect(
       screen.getByText(
         /普通 push \/ 开 PR 会先弹确认；force \/ 推保护分支仍禁止/,

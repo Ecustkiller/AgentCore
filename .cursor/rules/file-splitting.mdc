@@ -1,6 +1,5 @@
 ---
 description: 写/改源码遇到大文件时阅读——判断是否拆分：按职责而非行数，多 Agent 并行下的软阈值与拆分准则
-globs: **/*.py,**/*.ts,**/*.tsx
 alwaysApply: false
 ---
 

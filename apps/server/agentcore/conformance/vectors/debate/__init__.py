@@ -14,7 +14,6 @@ from .debate_multibeat import _multi_agent_debate_multibeat
 from .debate_pretrial import (
     _multi_agent_debate_pretrial_evidence_pack_full,
     _multi_agent_debate_pretrial_evidence_pack_partial,
-    _multi_agent_debate_pretrial_fast,
     _multi_agent_debate_pretrial_no_pack,
 )
 from .debate_single import _multi_agent_debate
@@ -28,12 +27,8 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         "多 Agent：多轮对抗辩论 + 每轮质询 + 结辩（协作图 beat 列 / channel 角标契约）",
         _multi_agent_debate_multibeat,
     ),
-    "multi_agent_debate_pretrial_fast": (
-        "庭前取证：thorough=False 不带庭前重流程秒过（skip_reason=fast）",
-        _multi_agent_debate_pretrial_fast,
-    ),
     "multi_agent_debate_pretrial_no_pack": (
-        "庭前取证：thorough 无 pack → skip_reason=no_pack（无舰队，进入立论）",
+        "庭前取证：无 pack → skip_reason=no_pack（无舰队，进入立论）",
         _multi_agent_debate_pretrial_no_pack,
     ),
     "multi_agent_debate_pretrial_evidence_pack_full": (

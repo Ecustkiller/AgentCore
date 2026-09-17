@@ -96,7 +96,6 @@ def _mk(
         focus="f",
         round_no=round_no,
         max_rounds=max_rounds,
-        thorough=True,
         turns=turns,
         expect_converge=expect_converge,
         why="金标理由",

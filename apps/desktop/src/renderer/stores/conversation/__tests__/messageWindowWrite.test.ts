@@ -5,6 +5,7 @@ import {
   hasUnconfirmedLocalTail,
   reusableSendAssistantId,
   unconfirmedLocalTail,
+  windowHasSlimJournal,
 } from "../messageWindowWrite";
 
 function msg(
@@ -179,5 +180,96 @@ describe("adoptLatestWindowMessages", () => {
       "u-srv",
     );
     expect(applied.at(-1)?.isStreaming).toBe(true);
+  });
+
+  it("keeps complete runs when the server window slimmed the same id", () => {
+    const complete = {
+      events: [{ type: "run_plan" } as never, { type: "run_started" } as never],
+      finishReason: "stop" as const,
+      eventsComplete: true as const,
+    };
+    const existing = [
+      msg("m1", "user", "hi"),
+      msg("m2", "assistant", "old", {
+        executionId: "e1",
+        runs: complete,
+        process: [{ kind: "team", execution_id: "e1" } as never],
+      }),
+    ];
+    const incoming = [
+      msg("m1", "user", "hi"),
+      msg("m2", "assistant", "new body", {
+        executionId: "e1",
+        runs: {
+          events: [{ type: "run_plan" } as never],
+          finishReason: "stop",
+          eventsComplete: false,
+        },
+      }),
+      msg("m3", "user", "next"),
+    ];
+    const applied = adoptLatestWindowMessages(incoming, existing);
+    expect(applied.map((m) => m.id)).toEqual(["m1", "m2", "m3"]);
+    expect(applied[1]?.content).toBe("new body");
+    expect(applied[1]?.runs?.events).toHaveLength(2);
+    expect(applied[1]?.runs?.eventsComplete).not.toBe(false);
+    expect(applied[1]?.process).toHaveLength(1);
+  });
+
+  it("lets a complete server journal replace a complete local one", () => {
+    const existing = [
+      msg("m2", "assistant", "old", {
+        executionId: "e1",
+        runs: {
+          events: [{ type: "run_plan" } as never],
+          finishReason: "stop",
+          eventsComplete: true,
+        },
+      }),
+    ];
+    const incoming = [
+      msg("m2", "assistant", "old", {
+        executionId: "e1",
+        runs: {
+          events: [
+            { type: "run_plan" } as never,
+            { type: "run_completed" } as never,
+          ],
+          finishReason: "stop",
+          eventsComplete: true,
+        },
+      }),
+    ];
+    expect(
+      adoptLatestWindowMessages(incoming, existing)[0]?.runs?.events,
+    ).toHaveLength(2);
+  });
+});
+
+describe("windowHasSlimJournal", () => {
+  it("is true only when a row still flags eventsComplete false", () => {
+    expect(windowHasSlimJournal([])).toBe(false);
+    expect(
+      windowHasSlimJournal([
+        msg("m2", "assistant", "body", {
+          runs: {
+            events: [{ type: "run_plan" } as never],
+            finishReason: "stop",
+            eventsComplete: false,
+          },
+        }),
+      ]),
+    ).toBe(true);
+    expect(
+      windowHasSlimJournal([
+        msg("m2", "assistant", "body", {
+          runs: {
+            events: [{ type: "run_plan" } as never],
+            finishReason: "stop",
+            eventsComplete: true,
+          },
+        }),
+      ]),
+    ).toBe(false);
   });
 });

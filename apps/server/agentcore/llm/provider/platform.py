@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from dataclasses import replace
 
 from agentcore.core.errors import LLMError
-from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
+from agentcore.llm.provider.dispatch import ProtocolDispatchProvider, build_credential_leaf
 from agentcore.llm.provider.protocol import LLMChunk, LLMRequest, LLMResponse
 
 _LeafKey = tuple[str, str]  # (api_key, base_url)
@@ -27,7 +27,7 @@ class PlatformProvider:
     """Router leaf for ``PLATFORM_PROVIDER_SENTINEL`` — credentials follow the model."""
 
     def __init__(self) -> None:
-        self._leaves: dict[_LeafKey, OpenAICompatibleProvider] = {}
+        self._leaves: dict[_LeafKey, ProtocolDispatchProvider] = {}
 
     @property
     def name(self) -> str:
@@ -53,7 +53,7 @@ class PlatformProvider:
             await leaf.close()
         self._leaves.clear()
 
-    def _leaf_for(self, model: str) -> OpenAICompatibleProvider:
+    def _leaf_for(self, model: str) -> ProtocolDispatchProvider:
         # Lazy import: provider package init must not pull resolve → credentials → profiles.
         from agentcore.llm.resolve import platform_llm_credentials
 
@@ -79,7 +79,7 @@ class PlatformProvider:
             or leaf._api_key != creds.api_key
             or leaf._base_url.rstrip("/") != creds.base_url.rstrip("/")
         ):
-            leaf = OpenAICompatibleProvider(
+            leaf = build_credential_leaf(
                 name="platform",
                 api_key=creds.api_key,
                 base_url=creds.base_url,

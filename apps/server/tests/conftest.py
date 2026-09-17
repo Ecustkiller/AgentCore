@@ -41,6 +41,23 @@ def _mark_test_traffic():
 
 
 @pytest.fixture(autouse=True)
+def _httpx_no_proxy_without_ipv6(monkeypatch):
+    """httpx 0.28 URLPattern cannot parse IPv6 literals in NO_PROXY.
+
+    ``::1`` is parsed as port ``':1'`` and raises ``InvalidURL``. Clash-style
+    NO_PROXY lists include ``::1`` / ``::1/128``. Product egress already uses
+    ``trust_env=False``; tests that construct a default ``AsyncClient`` still
+    read env. Strip IPv6 entries so client construction matches CI.
+    """
+    for key in ("NO_PROXY", "no_proxy"):
+        raw = os.environ.get(key)
+        if not raw or "::" not in raw:
+            continue
+        cleaned = ",".join(part for part in raw.split(",") if "::" not in part)
+        monkeypatch.setenv(key, cleaned)
+
+
+@pytest.fixture(autouse=True)
 def _flash_go_meter_off_peak(monkeypatch):
     """Flash Go-meter peak/off-peak is hour-based; pin tests to Off-Peak noon UTC."""
     from datetime import UTC, datetime
@@ -80,23 +97,6 @@ def _isolate_coordination_registry():
     clear_active_coordination()
     yield
     clear_active_coordination()
-
-
-@pytest_asyncio.fixture(autouse=True)
-async def _isolate_index_registry() -> AsyncIterator[None]:
-    """Abort leftover ``code-index-maintain`` tasks before the test loop closes.
-
-    ``ServerWorkspace`` mutations fire-and-forget ``IndexMaintainer.schedule``.
-    Under xdist load that task is often still inside ``asyncio.to_thread`` when
-    pytest-asyncio shuts the function-scoped loop's default executor —
-    ``RuntimeError: Executor shutdown has been called`` on
-    ``BM25Index.list_indexed_paths``. Drain while the loop is still alive.
-    """
-    from agentcore.workspace.indexing.registry import drain_index_registry
-
-    await drain_index_registry()
-    yield
-    await drain_index_registry()
 
 
 @pytest.fixture(autouse=True)

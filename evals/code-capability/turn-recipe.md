@@ -127,7 +127,7 @@ pnpm conformance
 
 # 后端代码工具相关单测（矩阵 A2；文件名以仓库现状为准）
 cd apps/server
-uv run pytest tests/test_file_ops_tools.py tests/test_code_search.py -q
+uv run pytest tests/test_file_ops_tools.py tests/test_grep_tool.py -q
 ```
 
 preview 回放：见 `.cursor/rules/frontend-preview.mdc`（`pnpm dev:web` + `#/preview`）。

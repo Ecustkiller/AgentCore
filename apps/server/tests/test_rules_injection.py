@@ -16,6 +16,7 @@ from agentcore.memory.injection import (
 )
 from agentcore.memory.rules_injection import (
     RuleFragment,
+    _labeled_rule_body,
     compose_injected_rules,
     strip_entry_frontmatter,
 )
@@ -84,6 +85,11 @@ def test_ancestor_rule_bodies_untagged_bag_on_outermost_when_counts_differ():
         body_of=_body,
     )
     assert buckets == [["甲", "乙", "丙"], []]
+
+
+def test_labeled_rule_body_prefixes_filename():
+    out = _labeled_rule_body("回复语言.md", "---\napply: always\n---\n用中文回复")
+    assert out == "### .agentcore/规则/回复语言.md\n用中文回复"
 
 
 def test_compose_joins_all_fragments_in_order():

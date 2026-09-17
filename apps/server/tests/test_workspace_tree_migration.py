@@ -50,7 +50,7 @@ def test_relocation_moves_folders_under_tree_and_lifts_hidden_zones(tmp_path: Pa
     user = "u1"
     root = _flat_folder(base, user, "f1")
     (root / "AgentCore" / "index").mkdir(parents=True)
-    (root / "AgentCore" / "index" / "code_search.db").write_bytes(b"db")
+    (root / "AgentCore" / "index" / "cache.db").write_bytes(b"db")
     (root / "AgentCore" / "trash").mkdir(parents=True)
     (root / "AgentCore" / "文档").mkdir(parents=True)
     (root / "AgentCore" / "文档" / "out.md").write_text("ai\n", encoding="utf-8")
@@ -66,7 +66,7 @@ def test_relocation_moves_folders_under_tree_and_lifts_hidden_zones(tmp_path: Pa
     assert (dest / "AgentCore" / "文档" / "out.md").is_file()
     assert not (dest / "AgentCore" / "index").exists()
     internal = base / user / "internal" / "folder" / "f1"
-    assert (internal / "index" / "code_search.db").read_bytes() == b"db"
+    assert (internal / "index" / "cache.db").read_bytes() == b"db"
     assert (internal / "trash").is_dir()
     assert not (base / user / "f1").exists()
 

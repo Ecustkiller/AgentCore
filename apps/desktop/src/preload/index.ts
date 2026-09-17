@@ -267,8 +267,6 @@ const sidecarApi: SidecarApi = {
   occupancy: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.occupancy, req),
   resume: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.resume, req),
   probe: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.probe, req),
-  warmCodeIndex: (req) =>
-    ipcRenderer.invoke(SIDECAR_CHANNELS.warmCodeIndex, req),
   warmMcpDiscover: (req) =>
     ipcRenderer.invoke(SIDECAR_CHANNELS.warmMcpDiscover, req),
   warmAccountRulesMemory: (req) =>

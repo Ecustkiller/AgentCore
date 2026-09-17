@@ -77,6 +77,7 @@ vi.mock("@/services/offlineCache", () => ({
     >
   ) => loadCachedConversation(...args),
   persistOpenedCache: vi.fn(async () => {}),
+  persistResidentOpenedCache: vi.fn(),
 }));
 vi.mock("@/services/turns", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/turns")>();

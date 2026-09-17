@@ -1,4 +1,4 @@
-"""DebateTool — CEO 发起结构化辩论 / 交叉审查的编排原语。"""
+"""DebateTool — CEO 发起结构化正反辩论的编排原语。"""
 
 from __future__ import annotations
 
@@ -29,7 +29,6 @@ from agentcore.runtime.debate import (
 )
 from agentcore.runtime.debate.events import moderator_plan_event, settle_moderator_node
 from agentcore.runtime.debate.rounds import (
-    make_closing_runner,
     make_cross_exam_runner,
     make_round_runner,
 )
@@ -141,14 +140,12 @@ class DebateTool:
         self._folder_id = folder_id
         self._permission_axes = permission_axes or DEFAULT_PERMISSION_AXES
         self._registry = registry
-        # 批 D1：会话级留人 roster（探测幕1 透镜 session）；缺省 = 无证人。
+        # 构造签名保留（ceo_toolset 仍传入）；热路不探测证人席位。
         self._session_store = session_store
         self._session_loader = session_loader
         self._pending_pause = False
         # 每个 side 的可续写 session（跨轮带记忆）：首轮执行后留人，后续轮 continue_run 取用。
         self._debater_sessions: dict[str, RunSession] = {}
-        # 批 D1：本场证人席位（key=lens run_id）。
-        self._witness_seats: dict[str, Any] = {}
         from agentcore.runtime.costing import WorkerResultAccumulator
         from agentcore.runtime.debate.evidence_ledger import EvidenceLedger
 
@@ -244,14 +241,11 @@ class DebateTool:
         if side_err:
             return err(side_err)
         form = DebateForm.DEBATE
-        thorough = arguments.get("thorough", True)
-        if not isinstance(thorough, bool):
-            thorough = True
-        policy = RoundPolicy.for_form(form, thorough=thorough)
+        policy = RoundPolicy.for_form(form)
         try:
             max_rounds_arg = int(arguments["max_rounds"])  # type: ignore[index]
             if max_rounds_arg >= 1:
-                policy = RoundPolicy(thorough=thorough, max_rounds=max_rounds_arg)
+                policy = RoundPolicy(max_rounds=max_rounds_arg)
         except (KeyError, TypeError, ValueError):
             pass
         # `_kickoff_ask` 为 resume 注入的内部键（非 schema / 非 wire），开赛嘱咐进首轮插话管道。
@@ -511,14 +505,7 @@ class DebateTool:
             cross_exam_runner = make_cross_exam_runner(
                 self, execution_id, moderator_run_id, config
             )
-            closing_runner = make_closing_runner(
-                self, execution_id, moderator_run_id, config
-            )
-
-            # 开辩不把调研员拉进场当证人；证人机制仍在，本路径不探测。
-            self._witness_seats = {}
-            witness_runner = None
-            witness_roster = ()
+            # 新场不接线结辩 / 证人：runner 与席位探测留旧场回放与单测。
 
             from agentcore.runtime.debate.moderator_agenda import cross_exam_enabled
 
@@ -612,9 +599,6 @@ class DebateTool:
                     config,
                     run_round=runner,
                     run_cross_exam=cross_exam_runner,
-                    run_witness_exam=witness_runner,
-                    witness_roster=witness_roster,
-                    run_closing=closing_runner,
                     on_round_start=_emit_round_start,
                     on_round=_emit_round,
                     on_round_boundary=_round_boundary if self._ambient_armed else None,
@@ -662,7 +646,7 @@ class DebateTool:
                     payload=result_payload,
                 )
             )
-            # 双产物机制性落盘（约定文档 ``AgentCore/文档/debate/``）；失败不阻断收口，路径附 CEO 输出尾部。
+            # 双产物机制性落盘（约定文档 ``AgentCore/文档/debate/`` 一场一份）；失败不阻断收口，路径附 CEO 输出尾部。
             from agentcore.runtime.debate.persist import (
                 artifact_stamp,
                 format_artifact_footer,

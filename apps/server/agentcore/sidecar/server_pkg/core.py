@@ -462,8 +462,6 @@ class SidecarServer(HandlerMixin, DeliveryMixin, TurnExecutionMixin):
             await self._on_create_workspace_version(request_id, params)
         elif method == "restoreWorkspaceVersion":
             await self._on_restore_workspace_version(request_id, params)
-        elif method == "warmCodeIndex":
-            await self._on_warm_code_index(request_id, params)
         elif method == "warmMcpDiscover":
             await self._on_warm_mcp_discover(request_id, params)
         elif method == "warmAccountRulesMemory":
@@ -554,7 +552,6 @@ class SidecarServer(HandlerMixin, DeliveryMixin, TurnExecutionMixin):
         mounts = self._parse_external_mounts(external_mounts)
         if mounts:
             backend.attach_external_mounts(mounts)
-        # Index maintenance: write paths / code_search only — not at turn entry.
         return backend
 
     def _parse_external_mounts(self, raw: Any) -> dict[str, Any]:

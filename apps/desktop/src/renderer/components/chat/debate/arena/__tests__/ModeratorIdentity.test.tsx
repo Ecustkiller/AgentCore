@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * 主持人身份壳：法槌 + 「主持人」；模型徽章只挂记分牌。
+ * 主持人身份壳：法槌 + 「主持人」；直播顶栏不挂厂商徽章。
  */
 
 import type { RunNode } from "@/stores/execution";

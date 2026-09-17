@@ -4,8 +4,9 @@ alwaysApply: false
 globs:
   - "apps/server/agentcore/core/logging.py"
   - "apps/server/agentcore/core/log_context.py"
-  - "apps/server/agentcore/**/service.py"
-  - "apps/server/agentcore/runtime/**/*.py"
+  - "apps/server/agentcore/observability/catalog.py"
+  - "apps/server/agentcore/observability/events.py"
+  - "apps/server/scripts/sync_log_event_registry.py"
 ---
 
 # 日志规范

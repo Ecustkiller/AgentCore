@@ -1486,11 +1486,8 @@ async def test_production_crash_factory_base_prompt_lists_system_skills(monkeypa
     assert tool is not None
     prompt = captured["base_system_prompt"]
     assert "<按需目录>" in prompt
-    # Worker catalog: 队员干活手册留下；派单/协调主管手册与 product_help 都不列。
-    assert "- staffing" not in prompt
-    assert "- team_orchestration_advanced" not in prompt
-    assert "- work_discipline" not in prompt
-    assert "- long_form_landing" not in prompt
+    # Worker catalog: 队员干活手册留下；主管手册与 product_help 都不列。
+    assert "- page_ui：" in prompt
     assert "- product_help" not in prompt
 
 

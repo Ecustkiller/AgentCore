@@ -472,35 +472,6 @@ def test_evaluate_git_forbidden_denies():
     assert clean.rule_id == "git.forbidden_subcommand"
 
 
-def test_evaluate_git_g2_collab_passes_breaker():
-    """G2 verbs are allowlisted — breaker must not DENY (approval / execute guards)."""
-    for args in (
-        {"subcommand": "merge", "ref": "feature/x"},
-        {"subcommand": "rebase", "ref": "feature/x"},
-        {"subcommand": "cherry-pick", "ref": "abc"},
-        {"subcommand": "stash", "action": "push"},
-        {"subcommand": "tag", "action": "create", "name": "v1"},
-        {"subcommand": "remote", "action": "add", "name": "o", "url": "https://x"},
-    ):
-        assert evaluate_tool_call("git", args) is None
-
-
-@pytest.mark.parametrize(
-    "args,rule_id",
-    [
-        ({"subcommand": "stash", "action": "drop"}, "git.forbidden_stash_destructive"),
-        ({"subcommand": "stash", "action": "clear"}, "git.forbidden_stash_destructive"),
-        ({"subcommand": "tag", "action": "delete"}, "git.forbidden_tag_delete"),
-        ({"subcommand": "remote", "action": "remove"}, "git.forbidden_remote_remove"),
-    ],
-)
-def test_evaluate_git_g2_destructive_actions_deny(args: dict[str, Any], rule_id: str):
-    hit = evaluate_tool_call("git", args)
-    assert hit is not None
-    assert hit.verdict is BreakerVerdict.DENY
-    assert hit.rule_id == rule_id
-
-
 def test_evaluate_git_ordinary_push_passes():
     """Ordinary push is allowlisted — breaker must not DENY (approval path)."""
     assert evaluate_tool_call("git", {"subcommand": "push"}) is None

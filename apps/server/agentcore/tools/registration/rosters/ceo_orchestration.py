@@ -23,7 +23,6 @@ def load_roster() -> tuple[type, ...]:
         ResolveFolderTool,
     )
     from agentcore.tools.builtin.read_image import ReadImageTool
-    from agentcore.tools.builtin.remember import RememberTool
     from agentcore.tools.builtin.replan import ReplanTool
     from agentcore.tools.builtin.table_ops import TableOpsTool
     from agentcore.tools.builtin.table_read import TableReadTool
@@ -39,7 +38,6 @@ def load_roster() -> tuple[type, ...]:
         DeleteFolderTool,
         ListFolderDirTool,
         ReadFolderFileTool,
-        RememberTool,
         AskUserTool,
         ReadImageTool,
         TableOpsTool,

@@ -17,21 +17,21 @@
 | ID | 场景 | 层 | 路径 | 工作区 | 能力焦点（勾选须真打通） | 验收（可检查产物） | 本轮 |
 |----|------|----|------|--------|--------------------------|-------------------|------|
 | S1 | P1 从零搭 hello-cli | C | D | P1（近空副本） | `file_*` 写盘 · `code_execute`/`terminal` 跑命令 · 工作区画像 · （可选）`git` | 见 P1 `GOLDEN.md`：`--help`+子命令退出 0；约定文件存在；记下 `conversation_id`/`trace_id` | **Pass**（RPC） |
-| S2 | P3 已知 Bug 最小修复 | B | D | P3 副本 | `file_list`/`file_read`/`grep`/`code_search` · 最小 `str_replace`/`file_write` · 跑测 | 见 P3 `GOLDEN.md`：三坑修好；`python -m pytest` 绿；禁止大重构；记 id | **Pass**（RPC） |
+| S2 | P3 已知 Bug 最小修复 | B | D | P3 副本 | `file_list`/`file_read`/`grep` · 最小 `str_replace`/`file_write` · 跑测 | 见 P3 `GOLDEN.md`：三坑修好；`python -m pytest` 绿；禁止大重构；记 id | **Pass**（RPC） |
 | S3 | 中断 / Resume | B+U | D+U | P1 或 P3（**独立会话副本**） | 挂起帧 · `resume` · AskUser/plan_review 结算 | **U 层**：人为挂起 → **刷新/重进仍见卡** → 决策后继续且**不丢**已有写盘；journal/UI 一致；记 id。`listPaused`/`resume` RPC **不**等于「仍见卡」（无 S4 `turnFilesDiff` 式等价）。人手：[runbooks/s3-resume-ui.md](runbooks/s3-resume-ui.md) | **待人手 / CDP** |
 | S4 | Checkpoint + turn files diff | B | D（U 可选） | P3 独立会话 | 回合基线 · `turnFilesDiff` / 云 `files/diff` · （U）产物卡「查看改动」 | 回合改 ≥1 文件后：diff 路径与磁盘一致；有基线时可「回退到本回合开始」（可选破坏性，用副本）；记 message_id。**D 验收以 RPC/API 等价为准**；产物卡按钮属 U | **Pass**（RPC） |
 | S5 | Delegate / 多 Agent 协作写码 | B/C | D | P1 独立近空副本 | `delegate` · worker `file_*`/`code_execute` · 交付契约 `files` / deliverable（勿再填已删 `completion_criteria`） | 出现 `run_plan`；≥1 worker 落盘；CEO 收口；黄金命令可跑；记 id；**不**与 S1 同盘互踩 | **Pass**（R2）；R1 探测 Fail **已修**（见 README） |
 | S6 | Server API 对照抽检 | B | S | P3 播种到**云**工作区 | 同 S2 的 prompt 子集 · 云 `file_*`/`code_execute` | 与 S2 对照：runtime 通/不通 vs 仅桌面接缝；SSE `message_end`；产物可用 workspace files GET 核对；记 id | **Pass**（探测时 diff 500 **已修**，见 README） |
 | S7 | P2 从零搭 todo-api | C | D | P2（近空副本 `todo-api-s7/`） | `file_*` 写盘 · `code_execute`/`terminal` 跑测/启服 · 工作区画像 | 见 P2 `GOLDEN.md`：`GET`/`POST /todos`；内存存储；`pytest` ≥2 且全绿；启服+探测命令可跑；记 id | **Pass**（RPC + 外部 `pytest` 7 passed） |
-| A1 | 协议 fold 门禁 | A | O | — | conformance 向量 fold | 根目录 `pnpm conformance` 绿（桌面+手机） | 另报 |
-| A2 | 代码工具单测门禁 | A | O | — | `file_ops` / `code_search` / `git` 等既有单测 | `apps/server`：`uv run pytest tests/test_file_ops_tools.py tests/test_code_search.py -q` | 另报 |
+| A1 | 协议 fold 门禁 | A | O | — | conformance 向量 fold | 根目录 `pnpm conformance` 绿（只跑桌面） | 另报 |
+| A2 | 代码工具单测门禁 | A | O | — | `file_ops` / `grep` / `git` 等既有单测 | `apps/server`：`uv run pytest tests/test_file_ops_tools.py tests/test_grep_tool.py -q` | 另报 |
 | A3 | preview 代码相关向量抽检 | A | O | — | `#/preview` 回放含工具/协作的既有向量 | 按 `frontend-preview.mdc`：相关 fixture 可打开、无白屏 | 另报 |
 
 ## 能力覆盖清单（跨场景）
 
 | 能力 | 主覆盖场景 | 备注 |
 |------|------------|------|
-| 读仓定位（list/read/grep/code_search） | S2 | P3 故意埋可搜符号 |
+| 读仓定位（list/read/grep） | S2 | P3 故意埋可搜符号 |
 | 写盘与最小 diff | S1 S2 S4 S7 | S4：D=`turnFilesDiff`；U=产物卡按钮（可选） |
 | 跑命令 / 测 | S1 S2 S5 S7 | sidecar 本地盘；S6 云沙箱语义可能不同——对照记差异；S7 含启服+HTTP 探测 |
 | git 子命令 | S1 可选 | 非硬门槛；普通 push 可审批确认，force / 保护分支仍拒 |

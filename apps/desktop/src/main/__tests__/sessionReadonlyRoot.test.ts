@@ -333,7 +333,7 @@ describe("session grant delete stays reversible", () => {
   it("keeps hard-delete of internal zones on the product's own workspace root", async () => {
     const zone = join(dir, "AgentCore", "index");
     await mkdir(zone, { recursive: true });
-    await writeFile(join(zone, "code_search.db"), "x");
+    await writeFile(join(zone, "cache.db"), "x");
     const workspaceRoot: StoredRoot = {
       id: "p-del",
       name: "proj",

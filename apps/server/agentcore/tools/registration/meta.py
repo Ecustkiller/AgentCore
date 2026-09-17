@@ -48,13 +48,13 @@ class FileProductsContract(StrEnum):
     # 迁移中：会落盘、自报还没接。待接清单**只减不增**（棘轮用真跑用例证明它确实还没自报），
     # 现已清空——再用这一档要先推翻棘轮里那条「下界是空」的断言。
     SELF_REPORT_PENDING = "self_report_pending"
-    # 不往工作区写任何字节（file_read / file_list / glob / grep / code_search）。
+    # 不往工作区写任何字节（file_read / file_list / glob / grep）。
     # 与审批面互锁：``workspace_io`` 里只有 ``ToolApproval.NEVER`` 才配声明只读——要写盘授权
     # 又自称只读的组合会被棘轮拦下。
     READ_ONLY = "read_only"
     # 会动工作区，但落的不是台账要记的产物：只建目录 / 只删文件 / 浏览器关键帧 /
     # 在沙箱或用户机器上跑进程留下的副产物（枚举不出、也不是本回合交付物）/ ``git`` 换工作树
-    # （checkout / pull / merge 落下的是别人或过去已提交的版本，不是本 run 的产出）。
+    # （checkout / pull 落下的是别人或过去已提交的版本，不是本 run 的产出）。
     NO_PRODUCT = "no_product"
 
 

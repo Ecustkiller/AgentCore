@@ -77,6 +77,33 @@ def split_host_parent(abs_path: str) -> tuple[str, str]:
     return str(posix.parent), posix.name
 
 
+def split_host_entry_for_mount(
+    *,
+    path: str | None,
+    well_known: str | None,
+    target_name: str | None,
+    remainder: str,
+) -> tuple[str | None, str | None, str | None, str]:
+    """Split a file / new name from the folder the desktop should mount.
+
+    Listing a directory does not call this. The mount API only locates an
+    existing folder; write/copy dest and file reads send the parent, with the
+    last segment kept as remainder. A drive-root parent cannot be mounted —
+    those paths stay as given.
+    """
+    if path:
+        parent, name = split_host_parent(path)
+        if not name or parent == path:
+            return path, well_known, target_name, remainder
+        if is_forbidden_host_root(parent):
+            return path, well_known, target_name, remainder
+        extra = "/".join(p for p in (name, remainder) if p)
+        return parent, None, None, extra
+    if well_known and target_name and not remainder:
+        return None, well_known, None, target_name
+    return path, well_known, target_name, remainder
+
+
 def _split_target_remainder(rest: str) -> tuple[str | None, str]:
     parts = [p for p in rest.replace("\\", "/").split("/") if p and p != "."]
     if not parts:

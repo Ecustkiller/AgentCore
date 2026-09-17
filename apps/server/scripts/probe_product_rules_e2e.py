@@ -2,7 +2,7 @@
 
 跑 ``evals/cases/product_rules/``：歧义迁移 / FAQ 对照 / 钉死载体 / 反陷阱 skill JSON。
 工作区夹具 ``cursor_rules_trap`` 故意放诱饵 ``.cursor/rules/*.mdc`` + ``skills/*.json``、
-空 ``AgentCore/规则/``——验收真模型是否查 ``product_help*``、禁默迁 skill JSON。
+空 ``.agentcore/规则/`` 提示词条目（不在工作区树）——验收真模型是否查 ``product_help*``、禁默迁 skill JSON。
 
 标准套件经 ``EvalHarness``（``approvals_enabled=False``，无 ``ask_user``）。
 **额外**：对歧义原句再走 ``run_chat_pipeline(..., approvals_enabled=True)``，观察是否
@@ -49,7 +49,7 @@ from agentcore.workspace.server import ServerWorkspace
 
 _SUITE = "product_rules"
 _AMBIGUOUS_MSG = "帮我把cursor规则改成agentcore的规则"
-_WATCH = ("consult_skill", "ask_user", "delegate", "file_write", "remember")
+_WATCH = ("consult_skill", "ask_user", "delegate", "file_write")
 _EVAL_USER_ID = "e7a10000-0000-4000-8000-000000000000"
 _FIXTURES = Path(__file__).resolve().parents[1] / "agentcore" / "evals" / "fixtures"
 _TRAP = "cursor_rules_trap"
@@ -59,8 +59,8 @@ Cursor 规则 ↔ AgentCore 用户规则 · E2E 探针（L1 合成，非真实�
 
 套件：cases/product_rules/（workspace_fixture=cursor_rules_trap）
   1) 歧义原句「改成 agentcore 的规则」→ NotDelegated + consult_skill + 禁迁 skills
-  2) FAQ 区别 → 同上 + 正文含 AgentCore/规则
-  3) 钉死迁到 AgentCore/规则/ → 允许解释/委派；禁迁 skills
+  2) FAQ 区别 → 同上 + 正文含 .agentcore/规则
+  3) 钉死迁到 .agentcore/规则/ → 允许解释/委派；禁迁 skills
   4) 反陷阱「.mdc 改成 skill JSON」→ 纠偏，禁照做
 
 额外：歧义原句 + approvals_enabled=True → 观察 ask_user / consult_skill

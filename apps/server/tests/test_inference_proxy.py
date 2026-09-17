@@ -1267,6 +1267,30 @@ def test_llm_request_from_payload_preserves_tool_call_messages():
     assert tool_msg.content == "top hits ..."
 
 
+def test_llm_request_from_payload_preserves_thinking_blocks():
+    payload = {
+        "model": "claude-haiku-4-5",
+        "messages": [
+            {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": "plan",
+                "thinking_blocks": [
+                    {
+                        "type": "thinking",
+                        "thinking": "plan",
+                        "signature": "sig_keep",
+                    }
+                ],
+            }
+        ],
+    }
+    req = inference.proxy._llm_request_from_payload(payload, _cfg())
+    assert req.messages[0].thinking_blocks == [
+        {"type": "thinking", "thinking": "plan", "signature": "sig_keep"}
+    ]
+
+
 def test_llm_request_from_payload_is_build_payload_inverse():
     """Ratchet: the proxy's request parse is the faithful INVERSE of the provider's
     _build_payload. Round-tripping a tool-loop window through build∘parse∘build must be

@@ -12,7 +12,7 @@
     python -m agentcore.evals observe current.json baseline.json
 
 主入口是 ``run routing`` / ``run core`` / ``run compare``。``mast`` / ``probe`` /
-``collab_shapes`` / ``product_rules`` / ``rules_memory`` 仍可 ``run``，但是按需，
+``style`` / ``collab_shapes`` / ``product_rules`` / ``rules_memory`` 仍可 ``run``，但是按需，
 不是默认该盯的三科。
 
 真跑会调真实模型（``EVAL_DEEPSEEK_*`` 或本地账号 Key）。``lint`` / ``observe`` 零 LLM。
@@ -109,6 +109,7 @@ JSON_SUITES: tuple[str, ...] = (
     "routing",
     "mast",
     "probe",
+    "style",
     "collab_shapes",
     "product_rules",
     "rules_memory",
@@ -116,13 +117,14 @@ JSON_SUITES: tuple[str, ...] = (
 ON_DEMAND_SUITES: tuple[str, ...] = (
     "mast",
     "probe",
+    "style",
     "collab_shapes",
     "product_rules",
     "rules_memory",
 )
 PROMPT_KINDS: tuple[str, ...] = ("speech-format", "compaction", "converge")
 LINT_TARGETS: tuple[str, ...] = JSON_SUITES + ("compare", "prompt", "gold")
-_CHECKS_DEFAULT: frozenset[str] = frozenset({"probe", "routing"})
+_CHECKS_DEFAULT: frozenset[str] = frozenset({"probe", "routing", "style"})
 
 
 def _write_json(path: Path, payload: dict[str, Any], *, label: str = "report") -> None:
@@ -237,7 +239,10 @@ def _build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="真跑一套评测（routing / core / compare 为主）")
     run.add_argument(
         "suite",
-        help="routing | core | compare，或按需 mast/probe/collab_shapes/product_rules/rules_memory",
+        help=(
+            "routing | core | compare，或按需 "
+            "mast/probe/style/collab_shapes/product_rules/rules_memory"
+        ),
     )
     _add_shared_run_flags(run)
 

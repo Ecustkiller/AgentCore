@@ -72,7 +72,7 @@ const PAGES = [
     heading: "提示词",
     ready: "全员共享准则",
     click: "web_search",
-    clickWithin: "prompt-rail-tools",
+    clickWithin: "prompt-rail-on-demand-tools",
     afterClick: "要填",
     expectKindNav: true,
   },
@@ -82,7 +82,7 @@ const PAGES = [
     heading: "提示词",
     ready: "全员共享准则",
     overlayReady: "提问卡",
-    click: "辩论与交叉审查",
+    click: "正反辩论",
     afterClick: "对话目录",
     expectKindNav: true,
   },
@@ -312,7 +312,7 @@ const CAPABILITY_TOOLS = [
   tool(
     "debate",
     "orchestration",
-    "就一个有分歧的议题开一轮辩论：多名队员各持立场，交叉审查后给结论。",
+    "用户点名才开：主持人驱动结构化正反辩论，交回决策简报与交锋叙事。",
     obj(
       {
         topic: { type: "string", description: "议题一句话。" },
@@ -388,8 +388,8 @@ const THIN_SKILLS = [
   },
   {
     name: "debate_and_review",
-    summary: "辩论与交叉审查：什么议题值得开辩、怎么设阵营、怎么收口。",
-    body: "## 辩论与交叉审查\n\n- 只有存在真实取舍时才开辩；事实问题直接查。\n- 收口必须给出「选了什么 + 放弃了什么 + 为什么」。\n",
+    summary: "正反辩论",
+    body: "## 正反辩论\n\n- 只有存在真实取舍时才开辩；事实问题直接查。\n- 收口必须给出「选了什么 + 放弃了什么 + 为什么」。\n",
   },
   {
     name: "ask_user_card",
@@ -409,7 +409,7 @@ const CAPABILITIES = {
     worker_captain:
       "<身份>\n你是 AgentCore 的队员，只负责划定好的这一件任务（所需上下文已给你）。够不到用户。你可以再向下委派一层子团队（只能再嵌套这一层，你的子成员不能再向下委派），看到产出后由你整合。\n</身份>\n\n【落盘文件】（form=files）成品写入工作区；正文只报路径、怎么用、关键取舍。\n\n【纯文字】（form=prose）成品就是正文。不要落盘。\n\n【改工程】（form=workspace）就地改用户工程，不要写入 `AgentCore/文档/`。正文只报路径、怎么跑、关键取舍。\n",
     ceo_addon:
-      "<身份>\n你是 AgentCore 的 CEO：用户是老板，只跟你说话；你带队执行，对整段对话负责到底。默认交给团队，自己做只限短答和单点。\n</身份>\n\n<按需目录>\n- staffing：团队拆法\n- lead_subteam：子队拆法\n</按需目录>\n",
+      "<身份>\n你是 AgentCore 的 CEO：用户是老板，只跟你说话；你带队执行，对整段对话负责到底。默认交给团队，你负责协调和收口。\n</身份>\n\n<按需目录>\n- staffing：团队拆法\n- lead_subteam：子队拆法\n</按需目录>\n",
     ceo: "# CEO 完整提示词\n\n（全员共享准则 + 主 Agent 身份，由同一套 compose 逻辑拼装，与线上回合逐字一致。）\n",
   },
 };

@@ -15,7 +15,7 @@ function confidenceLevel(raw: string): ConfidenceLevel {
   return "medium";
 }
 
-/** StatusStrip 辩论分支预告片文案（§3.4）。收场优先 brief 倾向·置信。 */
+/** StatusStrip 辩论分支预告片文案（§3.4）。收场优先 brief 倾向·把握。 */
 export function debatePreviewSubtitle(execution: Execution): string {
   const model = toDebateModel(execution);
   if (!model) return "辩论";
@@ -31,13 +31,13 @@ export function debatePreviewSubtitle(execution: Execution): string {
   const brief = model.brief;
   if (brief?.leaning?.trim()) {
     const level = confidenceLevel(brief.confidence ?? "medium");
-    return `${brief.leaning.trim()} · 置信${confidenceLabel[level]}`;
+    return `${brief.leaning.trim()} · 把握${confidenceLabel[level]}`;
   }
 
   return "辩完了";
 }
 
-/** 收场结论钩子：倾向 + 置信等级（供状态条次行 CTA；无 brief 返回 null）。 */
+/** 收场结论钩子：倾向 + 把握档（供状态条次行 CTA；无 brief 返回 null）。 */
 export function debateConclusionHook(execution: Execution): {
   leaning: string;
   confidenceLevel: ConfidenceLevel;

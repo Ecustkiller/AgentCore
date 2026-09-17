@@ -16,11 +16,11 @@ from agentcore.account.credentials import (
     cloud_list_user_rules,
     cloud_memory_load,
     cloud_memory_save,
-    cloud_remember_rule,
+    cloud_write_user_rule,
 )
 from agentcore.memory.document_store import DocumentMemoryStore
 from agentcore.memory.rules_injection import assemble_turn_rules
-from agentcore.tools.builtin.remember import RememberTool
+from agentcore.tools.builtin.file_ops import FileDeleteTool, FileWriteTool
 from agentcore.tools.protocol import ToolContext
 
 pytestmark = pytest.mark.anyio
@@ -98,18 +98,16 @@ async def test_cloud_list_user_rules_ok(monkeypatch: pytest.MonkeyPatch, account
     assert data["global_rules"][0]["content"] == "- 用中文"
 
 
-async def test_cloud_remember_ok(monkeypatch: pytest.MonkeyPatch, account_creds):
+async def test_cloud_write_user_rule_ok(monkeypatch: pytest.MonkeyPatch, account_creds):
     async def _handler(request: httpx.Request) -> httpx.Response:
-        assert str(request.url).endswith("/rules/remember")
-        body = httpx.Request("POST", str(request.url), content=request.content)
-        del body
+        assert str(request.url).endswith("/rules/write")
         import json
 
         payload = json.loads(request.content.decode())
         assert payload["content"] == "以后都用中文"
         assert payload["name"] == "回复语言.md"
         assert payload["folder_id"] is None
-        assert payload["action"] == "write"
+        assert "action" not in payload
         return httpx.Response(
             200,
             json={
@@ -126,7 +124,7 @@ async def test_cloud_remember_ok(monkeypatch: pytest.MonkeyPatch, account_creds)
         "agentcore.account.credentials.outbound_async_client",
         lambda **kwargs: httpx.AsyncClient(transport=_FakeTransport(_handler), **kwargs),
     )
-    result = await cloud_remember_rule(
+    result = await cloud_write_user_rule(
         account_creds,
         name="回复语言.md",
         content="以后都用中文",
@@ -138,7 +136,7 @@ async def test_cloud_remember_ok(monkeypatch: pytest.MonkeyPatch, account_creds)
     assert result["name"] == "回复语言.md"
 
 
-async def test_cloud_remember_quota_exceeded(
+async def test_cloud_write_user_rule_quota_exceeded(
     monkeypatch: pytest.MonkeyPatch, account_creds
 ):
     async def _handler(request: httpx.Request) -> httpx.Response:
@@ -158,7 +156,7 @@ async def test_cloud_remember_quota_exceeded(
         lambda **kwargs: httpx.AsyncClient(transport=_FakeTransport(_handler), **kwargs),
     )
     with pytest.raises(AccountCloudError) as ei:
-        await cloud_remember_rule(
+        await cloud_write_user_rule(
             account_creds,
             name="回复语言.md",
             content="以后都用中文",
@@ -168,12 +166,11 @@ async def test_cloud_remember_quota_exceeded(
     assert "配额" in ei.value.message
 
 
-async def test_cloud_remember_write_payload(monkeypatch: pytest.MonkeyPatch, account_creds):
+async def test_cloud_write_user_rule_payload(monkeypatch: pytest.MonkeyPatch, account_creds):
     async def _handler(request: httpx.Request) -> httpx.Response:
         import json
 
         payload = json.loads(request.content.decode())
-        assert payload["action"] == "write"
         assert payload["name"] == "回复语言.md"
         assert payload["content"] == "用中文"
         assert payload["apply"] == "always"
@@ -192,12 +189,11 @@ async def test_cloud_remember_write_payload(monkeypatch: pytest.MonkeyPatch, acc
         "agentcore.account.credentials.outbound_async_client",
         lambda **kwargs: httpx.AsyncClient(transport=_FakeTransport(_handler), **kwargs),
     )
-    result = await cloud_remember_rule(
+    result = await cloud_write_user_rule(
         account_creds,
         name="回复语言.md",
         content="用中文",
         folder_id=None,
-        action="write",
         apply="always",
     )
     assert result["changed"] is True
@@ -236,7 +232,7 @@ async def test_cloud_memory_load_ok(monkeypatch: pytest.MonkeyPatch, account_cre
     assert "rust" in body
 
 
-# --- assemble / remember / store with ContextVar ------------------------------
+# --- assemble / file overlay / store with ContextVar ------------------------------
 
 
 async def test_assemble_turn_rules_ticketed_miss_skips_cloud(
@@ -331,14 +327,13 @@ async def test_assemble_turn_rules_cloud_failure_soft_empty(
     assert rules_md == ""
 
 
-async def test_remember_tool_cloud_success(
+async def test_file_write_rule_cloud_success(
     monkeypatch: pytest.MonkeyPatch, account_creds
 ):
-    async def _fake_remember(creds, **kwargs):
+    async def _fake_write(creds, **kwargs):
         assert kwargs.get("content") == "以后都用中文"
         assert kwargs.get("name") == "回复语言.md"
         assert kwargs.get("folder_id") is None
-        assert kwargs.get("action") == "write"
         assert creds is account_creds
         return {
             "changed": True,
@@ -350,10 +345,10 @@ async def test_remember_tool_cloud_success(
         }
 
     monkeypatch.setattr(
-        "agentcore.account.credentials.cloud_remember_rule", _fake_remember
+        "agentcore.account.credentials.cloud_write_user_rule", _fake_write
     )
     monkeypatch.setattr(
-        "agentcore.tools.builtin.remember.async_session_factory",
+        "agentcore.tools.builtin.file_ops.user_rules.async_session_factory",
         lambda: (_ for _ in ()).throw(AssertionError("must not open local DB")),
     )
     warmed = {"n": 0}
@@ -364,13 +359,13 @@ async def test_remember_tool_cloud_success(
         assert folder_id is None
 
     monkeypatch.setattr(
-        "agentcore.tools.builtin.remember._rewarm_account_rules_memory", _fake_warm
+        "agentcore.tools.builtin.file_ops.user_rules._rewarm_account_rules_memory",
+        _fake_warm,
     )
 
-    tool = RememberTool(folder_id=None)
     with account_credentials_scope(account_creds):
-        result = await tool.execute(
-            {"name": "回复语言.md", "content": "以后都用中文"},
+        result = await FileWriteTool().execute(
+            {"path": ".agentcore/规则/回复语言.md", "content": "以后都用中文"},
             _ctx(),
         )
     assert result.success is True
@@ -378,11 +373,11 @@ async def test_remember_tool_cloud_success(
     assert warmed["n"] == 1
 
 
-async def test_remember_tool_cloud_delete(
+async def test_file_delete_rule_cloud(
     monkeypatch: pytest.MonkeyPatch, account_creds
 ):
-    async def _fake_remember(creds, **kwargs):
-        assert kwargs.get("action") == "delete"
+    async def _fake_delete(creds, **kwargs):
+        del creds
         assert kwargs.get("name") == "回复语言.md"
         return {
             "changed": True,
@@ -393,41 +388,39 @@ async def test_remember_tool_cloud_delete(
         }
 
     monkeypatch.setattr(
-        "agentcore.account.credentials.cloud_remember_rule", _fake_remember
+        "agentcore.account.credentials.cloud_delete_user_rule", _fake_delete
     )
 
     async def _noop_rewarm(*_a, **_k):
         return None
 
     monkeypatch.setattr(
-        "agentcore.tools.builtin.remember._rewarm_account_rules_memory",
+        "agentcore.tools.builtin.file_ops.user_rules._rewarm_account_rules_memory",
         _noop_rewarm,
     )
-    tool = RememberTool(folder_id=None)
     with account_credentials_scope(account_creds):
-        result = await tool.execute(
-            {"action": "delete", "name": "回复语言.md"}, _ctx()
+        result = await FileDeleteTool().execute(
+            {"path": ".agentcore/规则/回复语言.md"}, _ctx()
         )
     assert result.success is True
     assert "已删除" in (result.output or "")
-    assert result.display["action"] == "delete"
 
 
-async def test_remember_tool_cloud_failure_explicit(
+async def test_file_write_rule_cloud_failure_explicit(
     monkeypatch: pytest.MonkeyPatch, account_creds
 ):
     async def _boom(*_a, **_k):
         raise AccountCloudError("unreachable", code="account_cloud_unreachable")
 
-    monkeypatch.setattr("agentcore.account.credentials.cloud_remember_rule", _boom)
+    monkeypatch.setattr("agentcore.account.credentials.cloud_write_user_rule", _boom)
 
-    tool = RememberTool(folder_id=None)
     with account_credentials_scope(account_creds):
-        result = await tool.execute(
-            {"name": "回复语言.md", "content": "x"}, _ctx()
+        result = await FileWriteTool().execute(
+            {"path": ".agentcore/规则/回复语言.md", "content": "完整一篇规则正文"},
+            _ctx(),
         )
     assert result.success is False
-    assert "记住失败" in (result.output or "")
+    assert "请稍后再试" in (result.error or result.output or "")
 
 
 async def test_document_store_cloud_load_and_soft_fail(

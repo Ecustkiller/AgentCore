@@ -33,7 +33,7 @@ from tests.test_debate_moderator import (
 )
 
 
-def test_form_profile_red_team_thorough_has_rebuttal_no_closing():
+def test_form_profile_red_team_has_rebuttal_no_closing():
     cfg = _config(
         form=DebateForm.RED_TEAM,
         sides=_red_team_sides(),
@@ -45,17 +45,6 @@ def test_form_profile_red_team_thorough_has_rebuttal_no_closing():
     assert p.closing is False
     assert p.has_rebuttal is True
     assert "rebuttal" in p.phases
-
-
-def test_form_profile_red_team_quick_two_beats():
-    cfg = _config(
-        form=DebateForm.RED_TEAM,
-        sides=_red_team_sides(),
-        policy=RoundPolicy.quick(),
-    )
-    p = form_profile(cfg)
-    assert p.has_rebuttal is False
-    assert p.phases == ("attack", "merge", "defense")
 
 
 def test_form_profile_debate_no_closing():
@@ -123,7 +112,7 @@ def test_red_team_round_emits_findings_and_empty_closings():
     assert result.rounds[0].findings
     assert result.brief.gate
     assert result.brief.risk_severities == {}
-    # 攻击 → 回应 → 复攻（thorough）
+    # 攻击 → 回应 → 复攻
     beats = [c["beat"] for c in runner.calls]
     assert "attack" in beats
     assert "defense" in beats

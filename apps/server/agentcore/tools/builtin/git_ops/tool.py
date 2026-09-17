@@ -14,7 +14,7 @@ from agentcore.tools.registration import (
     ToolSurface,
 )
 
-from . import cmds_collab, cmds_local, cmds_read, cmds_remote
+from . import cmds_local, cmds_read, cmds_remote
 from .phases import PHASE_LOCAL, phase_scope, report_phase
 from .policy import (
     _ALLOWED_SUBCOMMANDS,
@@ -42,8 +42,6 @@ async def _dispatch(
     # IPC round trip on the channel path) to the primary command is local git work, so
     # say so now rather than leaving a finished「排队中」on screen.
     report_phase(PHASE_LOCAL)
-    if subcommand == "init_baseline":
-        return await cmds_local.cmd_init_baseline(cwd, start, meta=base_meta)
     if subcommand == "clone":
         # No existing repo to probe — dest is a new tree under the tool cwd.
         return await cmds_remote.cmd_clone(
@@ -88,21 +86,11 @@ async def _dispatch(
         return await cmds_read.cmd_fetch(
             cwd, arguments, start=start, meta=base_meta, context=context
         )
-    if subcommand == "show":
-        object_ref = str(arguments.get("object") or "HEAD").strip() or "HEAD"
-        return await cmds_read.cmd_show(
-            cwd, object_ref, paths, start=start, meta=base_meta
-        )
-    if subcommand == "blame":
-        return await cmds_read.cmd_blame(cwd, paths, start=start, meta=base_meta)
     if subcommand == "add":
         return await cmds_local.cmd_add(cwd, paths, start, meta=base_meta)
     if subcommand == "commit":
         message = str(arguments.get("message", "")).strip()
         return await cmds_local.cmd_commit(cwd, message, start, meta=base_meta)
-    if subcommand == "branch":
-        branch = str(arguments.get("branch", "")).strip()
-        return await cmds_local.cmd_branch(cwd, branch, start, meta=base_meta)
     if subcommand == "checkout":
         branch = str(arguments.get("branch", "")).strip()
         create = bool(arguments.get("create", False))
@@ -125,20 +113,6 @@ async def _dispatch(
             meta=base_meta,
             context=context,
         )
-    if subcommand == "stash":
-        return await cmds_collab.cmd_stash(cwd, arguments, start=start, meta=base_meta)
-    if subcommand == "merge":
-        return await cmds_collab.cmd_merge(cwd, arguments, start=start, meta=base_meta)
-    if subcommand == "rebase":
-        return await cmds_collab.cmd_rebase(cwd, arguments, start=start, meta=base_meta)
-    if subcommand == "cherry-pick":
-        return await cmds_collab.cmd_cherry_pick(
-            cwd, arguments, start=start, meta=base_meta
-        )
-    if subcommand == "tag":
-        return await cmds_collab.cmd_tag(cwd, arguments, start=start, meta=base_meta)
-    if subcommand == "remote":
-        return await cmds_collab.cmd_remote(cwd, arguments, start=start, meta=base_meta)
     if subcommand == "create_pr":
         return await cmds_remote.cmd_create_pr(
             cwd,
@@ -161,7 +135,8 @@ class GitTool:
         # subprocess under ``backend.root``, or a channel-backed local workspace with
         # the desktop online (``git_execution_enabled_for``).
         git_class=True,
-        # 会动工作树，但落的不是**本 run 产出的交付物**：checkout / pull / merge 换上来的是
+        resident=False,
+        # 会动工作树，但落的不是**本 run 产出的交付物**：checkout / pull 换上来的是
         # 别人或过去已提交的版本，一次切分支能带上千个 worker 根本没碰过的文件。台账还被
         # ``runs/executor/terminal.py`` 当「有没有落盘产物」用（硬失败判据 / 硬缺口拦收口 /
         # degraded_handoff 软化），若换工作树算落盘，一个毫无产出、交接残缺的 worker 只要切

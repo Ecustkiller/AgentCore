@@ -4,11 +4,12 @@ Table source: ``byok_provider_presets.json`` next to this module (desktop form
 loads the same file). Catalog merge matches providers by normalized ``base_url``;
 unknown endpoints get no preset rows.
 
-Off-protocol model ids (need ``/responses`` or ``/messages``; this gateway only
-speaks ``chat/completions``) live in :data:`BYOK_OFF_PROTOCOL_MODELS` — the single
-exact-id map for OpenCode seed exclusion, BYOK catalog unavailability, **and**
-platform-allowlist catalog unavailability. Name kept (historical); both origins
-call :func:`off_protocol_kind`.
+Off-protocol model ids live in :data:`BYOK_OFF_PROTOCOL_MODELS` — the single
+exact-id map for OpenCode seed exclusion, BYOK ``/responses`` catalog
+unavailability, **and** platform-allowlist catalog unavailability.
+``/messages`` ids stay in the map (dispatch) but the OpenCode BYOK picker
+lists them as selectable. Name kept (historical); both origins call
+:func:`off_protocol_kind`.
 """
 
 from __future__ import annotations
@@ -59,8 +60,10 @@ _RAW = _load_raw()
 
 # Exact ids only — never substring / regex. Shared by BYOK (OpenCode Go/Zen
 # discovery) and platform (operator allowlist). OpenCode ``GET /models`` still
-# returns these; they stay out of chat/completions seeds and are listed-but-
-# unselectable in the catalog merge (not dropped at discovery / allowlist).
+# returns these; they stay out of chat/completions seeds. ``/responses`` ids
+# are listed-but-unselectable on OpenCode BYOK; ``/messages`` ids are
+# selectable there. Platform greys both kinds. Not dropped at discovery /
+# allowlist.
 BYOK_OFF_PROTOCOL_MODELS: Mapping[str, OffProtocolKind] = MappingProxyType(
     _off_protocol_from_raw(_RAW)
 )
@@ -72,6 +75,19 @@ def off_protocol_kind(model_id: str) -> OffProtocolKind | None:
     Origin-agnostic lookup (BYOK OpenCode rows and platform allowlist rows).
     """
     return BYOK_OFF_PROTOCOL_MODELS.get((model_id or "").strip())
+
+
+def uses_anthropic_messages_wire(model_id: str, base_url: str) -> bool:
+    """True when this OpenCode leaf must POST ``/messages`` for ``model_id``.
+
+    OpenCode BYOK catalog lists the same ids as selectable. Dispatch uses this
+    so a Zen/Go key can serve Flash via ``/chat/completions`` and Claude via
+    ``/messages``. Non-OpenCode relays with a coinciding id stay on chat
+    completions (OpenRouter Claude uses ``anthropic/…`` slugs, not these ids).
+    """
+    if off_protocol_kind(model_id) != "anthropic_messages":
+        return False
+    return is_opencode_byok_endpoint(base_url)
 
 
 def chat_completions_seed(*model_ids: str) -> tuple[str, ...]:

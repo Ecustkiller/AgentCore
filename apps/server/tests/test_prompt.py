@@ -30,7 +30,6 @@ from agentcore.runtime.resolve.prompt.memory_rules import _RULES_ROUTING_FENCE
 from agentcore.runtime.skills import (
     _DELIVERY,
     _LOCAL_DESK,
-    _STAFFING,
     build_system_skill_registry,
     render_skill_directory,
 )
@@ -39,8 +38,12 @@ from agentcore.runtime.skills.run import _RUN
 from agentcore.tools.builtin.delegate.schema import (
     DELEGATE_DESCRIPTION,
     DELEGATE_PARAMETERS,
+    DELEGATE_STAFF_HOW,
     DELEGATE_WHEN,
     NESTED_DELEGATE_DESCRIPTION,
+    NESTED_STAFF_HOW,
+    TASK_FILL_HOW,
+    TASK_WINDOW_HOW,
 )
 from agentcore.tools.builtin.run import run_description
 
@@ -222,8 +225,6 @@ def test_consult_hook_lives_only_in_the_core():
     assert "consult(name)" in preamble
     assert "<按需目录>" in preamble and "</按需目录>" not in preamble
     assert ceo.count("<按需目录>") == 1 and ceo.count("</按需目录>") == 1
-    assert "staffing" in directory
-    assert "lead_subteam" not in ceo
     assert "debate_and_review" in directory
     assert "debate_and_review" in ceo
     assert "HOW→consult" not in hint
@@ -243,7 +244,7 @@ def test_delegate_schema_keys_one_layer():
         "playbook",
     ):
         assert key not in hint
-        assert key not in _STAFFING
+        assert key not in DELEGATE_DESCRIPTION
 
 
 def test_how_identifiers_not_in_resident_core():
@@ -270,7 +271,6 @@ def test_how_identifiers_not_in_resident_core():
         "【执行 / 运行 / 打开】",
         "【产物路径】",
         "【落盘前对齐】",
-        "【成品文件只装成品】",
         "【对人说】",
     ):
         assert fence not in hint
@@ -283,13 +283,24 @@ def test_how_identifiers_not_in_resident_core():
 
 
 def test_delegate_when_is_shared_window_bound():
-    """根 / 嵌套 delegate 共用 when-to-use 核；HOW→consult 分叉到各自手册。"""
+    """根 / 嵌套 delegate 共用 when-to-use 核与编制合同；嵌套另加拆层。"""
     assert DELEGATE_WHEN in DELEGATE_DESCRIPTION
     assert DELEGATE_WHEN in NESTED_DELEGATE_DESCRIPTION
-    assert "HOW→consult(staffing)" in DELEGATE_DESCRIPTION
-    assert "HOW→consult(staffing)" not in NESTED_DELEGATE_DESCRIPTION
-    assert "HOW→consult(lead_subteam)" in NESTED_DELEGATE_DESCRIPTION
-    assert "HOW→consult(lead_subteam)" not in DELEGATE_DESCRIPTION
+    assert DELEGATE_STAFF_HOW in DELEGATE_DESCRIPTION
+    task_desc = _TASK_PROPS["task"]["description"]
+    assert TASK_WINDOW_HOW in task_desc
+    assert TASK_FILL_HOW in task_desc
+    assert TASK_WINDOW_HOW not in DELEGATE_DESCRIPTION
+    assert TASK_FILL_HOW not in DELEGATE_DESCRIPTION
+    assert TASK_WINDOW_HOW not in NESTED_DELEGATE_DESCRIPTION
+    assert TASK_FILL_HOW not in NESTED_DELEGATE_DESCRIPTION
+    assert TASK_WINDOW_HOW not in _CEO_CORE_HINT
+    assert TASK_FILL_HOW not in _CEO_CORE_HINT
+    assert DELEGATE_STAFF_HOW in NESTED_DELEGATE_DESCRIPTION
+    assert NESTED_STAFF_HOW in NESTED_DELEGATE_DESCRIPTION
+    assert NESTED_STAFF_HOW not in DELEGATE_DESCRIPTION
+    assert "HOW→consult" not in DELEGATE_DESCRIPTION
+    assert "HOW→consult" not in NESTED_DELEGATE_DESCRIPTION
 
 
 def test_work_authority_does_not_host_tool_when_to_use():
@@ -307,17 +318,16 @@ def test_work_authority_does_not_host_tool_when_to_use():
 
 
 def test_worker_opening_drops_ceo_orchestration_context():
-    """叶子开场不含主管编制手册；嵌套 lead 仅多 ``lead_subteam``（持 delegate 才进目录）。"""
+    """叶子与嵌套 lead 开场都不含编制手册（HOW 在 nested delegate 按钮）。"""
     base = assemble_system_prompt()
     worker_bare = compose_worker_base_prompt(base)
-    assert "staffing" not in worker_bare
-    assert "lead_subteam" not in worker_bare
+    assert "<按需目录>" not in worker_bare
 
     reg = build_system_skill_registry()
     leaf_names = {s.name for s in reg.available(set(), audience=AUDIENCE_WORKER)}
     lead_names = {s.name for s in reg.available({"delegate"}, audience=AUDIENCE_WORKER)}
     assert leaf_names == {"data_file_landing", "page_ui"}
-    assert lead_names == {"data_file_landing", "lead_subteam", "page_ui"}
+    assert lead_names == leaf_names
     worker_dir = compose_worker_base_prompt(
         base,
         on_demand_entries=[
@@ -327,8 +337,6 @@ def test_worker_opening_drops_ceo_orchestration_context():
     )
     assert "page_ui" in worker_dir
     assert "data_file_landing" in worker_dir
-    assert "staffing" not in worker_dir
-    assert "lead_subteam" not in worker_dir
     assert "delivery" not in worker_dir
     assert "local_desk" not in worker_dir
     lead_dir = compose_worker_base_prompt(
@@ -338,8 +346,8 @@ def test_worker_opening_drops_ceo_orchestration_context():
             for s in reg.available({"delegate"}, audience=AUDIENCE_WORKER)
         ],
     )
-    assert "lead_subteam" in lead_dir
-    assert "staffing" not in lead_dir
+    assert "page_ui" in lead_dir
+    assert "delivery" not in lead_dir
 
 
 def test_run_skill_does_not_ban_curl():

@@ -65,7 +65,7 @@ def attach_workspace_file_index(prompt: str, file_index: str) -> str:
 
 
 async def _safe_index(backend: WorkspaceBackend) -> list[str] | None:
-    """Newest-first workspace file paths; ``None`` if indexing unavailable/failed.
+    """Newest-first workspace file paths; ``None`` if listing unavailable/failed.
 
     ``[]`` means the index ran successfully but the workspace has no files.
     """

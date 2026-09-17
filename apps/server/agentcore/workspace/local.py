@@ -8,11 +8,9 @@ backend then returns the same typed values / raises the same ``WorkspaceError``
 subclasses as ``ServerWorkspace`` — so the file tools and the engine run against
 it **unchanged** (the whole point of the P0 seam).
 
-All ops (read / list / grep / ``code_search`` / the mutating ops / ``execute``) are
-wired end-to-end through the channel and handled by the desktop — except the BM25
-index SQLite file, which lives under the API ``data_dir/code_index/`` (channel cannot
-open a desktop SQLite handle). Sidecar local turns use ``ServerWorkspace`` on disk
-instead and keep the index beside the workspace. Two policies make ``execute`` safe
+All ops (read / list / grep / the mutating ops / ``execute``) are
+wired end-to-end through the channel and handled by the desktop. Sidecar local
+turns use ``ServerWorkspace`` on disk instead. Two policies make ``execute`` safe
 on the user's real machine (双模式工作区 P2d 执行门):
 
 * **Approval** is enforced *upstream* at the engine's ``ApprovalGate`` (before the
@@ -28,10 +26,7 @@ on the user's real machine (双模式工作区 P2d 执行门):
 from __future__ import annotations
 
 import base64
-import hashlib
-import re
-from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
@@ -48,13 +43,7 @@ from agentcore.workspace.external_mounts import (
     is_external_namespace,
     route_external,
 )
-from agentcore.workspace.indexing.manager import IndexManager
-from agentcore.workspace.indexing.registry import (
-    shared_index_maintainer_for_dir,
-    shared_index_manager_for_dir,
-)
 from agentcore.workspace.protocol import (
-    CodeSearchResult,
     DirEntry,
     DirListing,
     GlobFilesQuery,
@@ -74,12 +63,7 @@ from agentcore.workspace.protocol import (
     WorkspaceIOError,
 )
 
-if TYPE_CHECKING:
-    from agentcore.workspace.indexing.maintainer import IndexMaintainer
-
 logger = get_logger(__name__)
-
-_SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9._-]+")
 
 # Default extra transport budget (seconds) over a code execution's own timeout
 # (see Settings.workspace_execute_timeout_slack_seconds). Used when a LocalWorkspace
@@ -122,13 +106,6 @@ class LocalWorkspace:
         # W3 session read-only mounts (``external/<alias>/…``). Empty by default;
         # ``attach_external_mounts`` wires grants at turn start.
         self._mounts: dict[str, ExternalMount] = {}
-        # BM25 index lives on the API host (channel cannot open SQLite on the
-        # desktop). Keyed by desktop root + subpath so fallback cloud→desktop
-        # turns share one cache. Sidecar local turns use ServerWorkspace instead.
-        # Query is ensure-free; IndexMaintainer builds in the background (still
-        # channel-reads for ensure — channel CODE_SEARCH is a later slice).
-        self._index_manager: IndexManager | None = None
-        self._index_maintainer: IndexMaintainer | None = None
         # Turn material paths for AI list AI-noise reveal (passed as reveal_paths).
         # Set by prepare/wire from ``collect_turn_material_paths``; default empty.
         self.ai_list_materials: frozenset[str] = frozenset()
@@ -170,61 +147,7 @@ class LocalWorkspace:
         return out
 
     def _mark_mutated(self) -> None:
-        """Mark snapshot + index dirty; do not schedule maintenance mid-turn.
-
-        Local shares one channel with tools — IndexMaintainer must not race
-        mutations. Turn end drains via ``flush_code_index_maintenance`` instead
-        (awaited on normal terminals; fire-and-forget on cold PAUSED so
-        ``turn_runs`` can release before a slow index rebuild).
-        ``start_code_index_maintenance`` / ``code_search`` kicks stay unchanged.
-        """
         self._dirty = True
-        if self._index_manager is not None:
-            self._index_manager.mark_content_dirty()
-
-    def start_code_index_maintenance(self) -> None:
-        """Kick coalesced background ensure via the process-wide index-dir registry."""
-        self._get_index_manager()
-        self._index_maintainer = shared_index_maintainer_for_dir(
-            self._index_cache_dir(), self
-        )
-        self._index_maintainer.schedule()
-
-    async def flush_code_index_maintenance(self) -> None:
-        """Schedule (if dirty) and await index maintenance — turn-end drain.
-
-        Uses workspace ``dirty`` as well as ``content_dirty`` so a mutation that
-        lands while an in-flight ensure clears ``content_dirty`` still gets a
-        follow-up refresh (without mid-turn ``schedule`` / channel contention).
-        """
-        manager = self._index_manager
-        maintainer = self._index_maintainer
-        needs_refresh = self._dirty or (manager is not None and manager.content_dirty)
-        building = maintainer is not None and maintainer.building
-        if not needs_refresh and not building:
-            return
-        if needs_refresh:
-            if manager is None:
-                if not building:
-                    return
-            else:
-                maintainer = shared_index_maintainer_for_dir(
-                    self._index_cache_dir(), self
-                )
-                self._index_maintainer = maintainer
-                maintainer.schedule()
-        if maintainer is not None:
-            await maintainer.drain()
-
-    def _get_index_manager(self) -> IndexManager:
-        if self._index_manager is None:
-            self._index_manager = shared_index_manager_for_dir(self._index_cache_dir())
-        return self._index_manager
-
-    def _index_cache_dir(self) -> Path:
-        root_key = _SAFE_SEGMENT.sub("_", self._channel.root_id or "unknown")[:80]
-        base_digest = hashlib.sha256(self._base.encode("utf-8")).hexdigest()[:16]
-        return Path(settings.data_dir) / "code_index" / root_key / base_digest
 
     def attach_external_mounts(self, mounts: dict[str, ExternalMount]) -> None:
         """Attach session-scoped read-only mounts for this turn (W3)."""
@@ -502,9 +425,9 @@ class LocalWorkspace:
         # The desktop indexes the bound local root (its fsApi.listFiles walk: ignore
         # dirs pruned, capped) and returns {entries|paths, truncated}, so @ mentions +
         # the worker manifest see the same flat view as cloud. ``entries`` may carry
-        # mtime_ms/size_bytes fingerprints so ensure_index can skip unchanged reads.
-        # ``order`` selects the sort ("path" alphabetical for @, "recent" newest-first
-        # for the manifest budget). ``base`` scopes the walk to this workspace's
+        # mtime_ms/size_bytes. ``order`` selects the sort ("path" alphabetical
+        # for @, "recent" newest-first for the manifest budget). ``base`` scopes
+        # the walk to this workspace's
         # subtree (工作区对称化 D1a) so a shared container root indexes only this
         # workspace; returned paths are stripped back to workspace-relative.
         # Read-only → not dirty.
@@ -607,26 +530,6 @@ class LocalWorkspace:
             count=int(value["count"]),
             first_line=None if first_line is None else int(first_line),
         )
-
-    async def code_search(
-        self,
-        query: str,
-        *,
-        language: str | None = None,
-        path_prefix: str = ".",
-        max_results: int = 10,
-    ) -> CodeSearchResult:
-        manager = self._get_index_manager()
-        return await manager.search(
-            query,
-            language=language,
-            path_prefix=path_prefix,
-            max_results=max_results,
-        )
-
-    async def ensure_code_index(self, *, force: bool = False) -> bool:
-        manager = self._get_index_manager()
-        return await manager.ensure_index(self, force=force)
 
     async def grep(self, query: GrepQuery) -> GrepResult:
         root_id, rel, alias = self._route(query.directory)

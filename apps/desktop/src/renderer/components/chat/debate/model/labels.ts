@@ -137,7 +137,7 @@ export function debateFormBlurb(form: DebateForm): string {
     case "roundtable":
       return "主持人分题点名串行对话，挖到分歧根源（crux）即止——你带走共识/分歧地图，而非强行裁定对错。";
     default:
-      return "两个 AI 各执正反、多轮交锋，最后给你一份带倾向与置信度的决策简报——不是单个 AI 的一面之词。";
+      return "两个 AI 各执正反、多轮交锋，最后给你一份带倾向与把握的决策简报——不是单个 AI 的一面之词。";
   }
 }
 

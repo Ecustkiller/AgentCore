@@ -303,7 +303,6 @@ def project_interaction_leaf(rec: InteractionRecord) -> dict[str, Any]:
             "form": p.get("form", "debate"),
             "rationale": p.get("rationale", ""),
             "factPointers": p.get("fact_pointers") or [],
-            "thorough": bool(p.get("thorough", True)),
             "maxRounds": int(p.get("max_rounds") or 5),
             "note": p.get("note") if isinstance(p.get("note"), str) else None,
         }

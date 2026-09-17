@@ -680,59 +680,6 @@ async def test_illegal_json_args_return_explicit_error_not_empty_dict():
     assert parse_failed[0].get("parse_class") == "escape"
 
 
-async def test_remember_parse_failure_truncated_vs_escape_copy():
-    """remember：truncated → 整篇一次 write；escape → 修转义；截断禁原样重发全部。"""
-    tracked = _OkTool("remember", output="ok")
-    reg = ToolRegistry()
-    reg.register(tracked)
-
-    # Unsalvageable truncated: unclosed key, close still leaves invalid JSON.
-    trunc = '{"content": "hello", "bad'
-    sink = EventSink()
-    with capture_logs() as logs:
-        messages, terminal, attempts = await execute_tools(
-            [_call("c1", "remember", trunc)],
-            reg,
-            _ctx(),
-            sink,
-            approval_gate=None,
-            run_id="r1",
-        )
-    assert terminal is None
-    assert tracked.executed is False
-    assert attempts[0].parse_failure is True
-    content = messages[0].content or ""
-    assert "不是合法 JSON" in content
-    assert "一篇完整" in content or "完整一篇" in content
-    assert "一次 write" in content
-    assert "分多次 remember" not in content
-    assert "省略号" in content
-    assert "禁止原样重发" in content or "不要原样重发" in content
-    # Escape-default imperative (教原样重发) must not appear on truncated.
-    assert "后，原样重发全部参数" not in content
-    trunc_logs = [e for e in logs if e.get("event") == "tool.args_parse_failed"]
-    assert trunc_logs and trunc_logs[0].get("parse_class") == "truncated"
-
-    escape = '{"content":"查 "foo" 规则"}'
-    with capture_logs() as logs2:
-        messages2, _, attempts2 = await execute_tools(
-            [_call("c2", "remember", escape)],
-            reg,
-            _ctx(),
-            EventSink(),
-            approval_gate=None,
-            run_id="r2",
-        )
-    assert attempts2[0].parse_failure is True
-    esc = messages2[0].content or ""
-    assert "不是合法 JSON" in esc
-    assert "转义" in esc
-    assert "一篇完整" not in esc
-    assert "完整一篇" not in esc
-    esc_logs = [e for e in logs2 if e.get("event") == "tool.args_parse_failed"]
-    assert esc_logs and esc_logs[0].get("parse_class") == "escape"
-
-
 async def test_default_parse_failure_truncated_forbids_full_replay():
     """default 工具 truncated 禁「原样重发全部」；escape 仍可教修转义后原样重发。"""
     tracked = _OkTool("ok_a", output="alpha")
@@ -1267,46 +1214,6 @@ async def test_execute_end_ok_omits_reason():
     assert len(ends) == 1
     assert ends[0]["status"] == "ok"
     assert "reason" not in ends[0]
-
-
-class _CodeSearchMetaTool:
-    """Stub that mirrors code_search metadata (index_status) for execute_end forward."""
-
-    @property
-    def schema(self) -> ToolSchema:
-        return ToolSchema(
-            name="code_search",
-            description="stub",
-            parameters={"type": "object", "properties": {}},
-            face=ToolFace.FILE,
-        )
-
-    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
-        return ToolResult(
-            tool_call_id="",
-            success=True,
-            output="hit",
-            metadata={"match_count": 1, "index_status": "ready"},
-        )
-
-
-async def test_execute_end_forwards_code_search_index_status():
-    reg = ToolRegistry()
-    reg.register(_CodeSearchMetaTool())
-    with capture_logs() as logs:
-        await execute_tools(
-            [_call("c1", "code_search", '{"query":"ApprovalGate"}')],
-            reg,
-            _ctx(),
-            EventSink(),
-            approval_gate=None,
-            run_id="r1",
-        )
-    ends = [e for e in logs if e.get("event") == "tool.execute_end"]
-    assert len(ends) == 1
-    assert ends[0]["status"] == "ok"
-    assert ends[0]["tool"] == "code_search"
-    assert ends[0]["index_status"] == "ready"
 
 
 _SHELL_OBSERVE_KEYS = frozenset({"command_preview", "action", "cwd_preview"})

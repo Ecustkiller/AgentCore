@@ -12,6 +12,7 @@ from agentcore.tools.builtin.file_ops.prepare_path import prepare_tool_path
 from agentcore.tools.protocol import ToolContext, ToolResult
 from agentcore.workspace import grant_store
 from agentcore.workspace.ensure_host_path import format_external_mount_error
+from agentcore.workspace.host_path import split_host_parent
 from agentcore.workspace.hot_attach import attach_grants_to_backend
 from agentcore.workspace.server import ServerWorkspace
 
@@ -98,23 +99,123 @@ async def test_prepare_maps_not_found():
 
 
 @pytest.mark.asyncio
-async def test_file_retry_parent_on_not_directory(tmp_path):
+async def test_host_file_path_mints_parent_directory(tmp_path):
     from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 
     channel = MagicMock()
     channel.sink = MagicMock()
     channel.registry = MagicMock()
     channel.request_external_mount = AsyncMock(
-        side_effect=[
-            ExternalMountError("not a dir", reason="not_directory"),
-            {
-                "root_id": "root-1",
-                "alias": "downloads",
-                "label": "下载",
-                "display_label": "下载",
-                "namespace": "external/downloads",
-            },
-        ]
+        return_value={
+            "root_id": "root-1",
+            "alias": "downloads",
+            "label": "下载",
+            "display_label": "下载",
+            "namespace": "external/downloads",
+        }
+    )
+    backend = ServerWorkspace(
+        root=tmp_path,
+        sandbox=SubprocessSandbox(),
+        root_label="conv:x",
+        location="server",
+    )
+    dest = r"D:\Downloads\foo.pdf"
+    got = await prepare_tool_path(
+        dest,
+        _ctx(desktop_channel=channel, backend=backend, conversation_id="conv-hot"),
+    )
+    assert got == "external/downloads/foo.pdf"
+    assert channel.request_external_mount.await_count == 1
+    kwargs = channel.request_external_mount.await_args.kwargs
+    parent, _name = split_host_parent(dest)
+    assert kwargs["path"] == parent
+    assert not kwargs.get("target_name")
+    grants = await grant_store.list_grants("conv-hot")
+    assert len(grants) == 1
+    assert grants[0].root_id == "root-1"
+
+
+@pytest.mark.asyncio
+async def test_missing_copy_dest_mints_parent_directory(tmp_path):
+    from agentcore.tools.sandbox.subprocess import SubprocessSandbox
+
+    channel = MagicMock()
+    channel.sink = MagicMock()
+    channel.registry = MagicMock()
+    channel.request_external_mount = AsyncMock(
+        return_value={
+            "root_id": "root-1",
+            "alias": "yuan",
+            "label": "袁莹",
+            "namespace": "external/yuan",
+        }
+    )
+    backend = ServerWorkspace(
+        root=tmp_path,
+        sandbox=SubprocessSandbox(),
+        root_label="conv:x",
+        location="server",
+    )
+    dest = r"C:\Users\1\Desktop\案件\在办\袁莹\bill.xlsx"
+    got = await prepare_tool_path(
+        dest,
+        _ctx(desktop_channel=channel, backend=backend, conversation_id="conv-copy"),
+        grant_mode="organize",
+    )
+    assert got == "external/yuan/bill.xlsx"
+    assert channel.request_external_mount.await_count == 1
+    kwargs = channel.request_external_mount.await_args.kwargs
+    parent, _name = split_host_parent(dest)
+    assert kwargs["path"] == parent
+    assert kwargs["mode"] == "organize"
+    assert not kwargs.get("target_name")
+
+
+@pytest.mark.asyncio
+async def test_list_file_path_does_not_split_to_parent(tmp_path):
+    from agentcore.tools.sandbox.subprocess import SubprocessSandbox
+
+    channel = MagicMock()
+    channel.sink = MagicMock()
+    channel.registry = MagicMock()
+    channel.request_external_mount = AsyncMock(
+        side_effect=ExternalMountError("not a dir", reason="not_directory")
+    )
+    backend = ServerWorkspace(
+        root=tmp_path,
+        sandbox=SubprocessSandbox(),
+        root_label="conv:x",
+        location="server",
+    )
+    dest = r"D:\Downloads\foo.pdf"
+    result = await prepare_tool_path(
+        dest,
+        _ctx(desktop_channel=channel, backend=backend, conversation_id="conv-list"),
+        as_directory=True,
+    )
+    assert isinstance(result, ToolResult)
+    assert result.success is False
+    assert "reason=not_directory" in (result.error or "")
+    assert channel.request_external_mount.await_count == 1
+    kwargs = channel.request_external_mount.await_args.kwargs
+    assert kwargs["path"] == dest
+
+
+@pytest.mark.asyncio
+async def test_well_known_file_mints_well_known_root(tmp_path):
+    from agentcore.tools.sandbox.subprocess import SubprocessSandbox
+
+    channel = MagicMock()
+    channel.sink = MagicMock()
+    channel.registry = MagicMock()
+    channel.request_external_mount = AsyncMock(
+        return_value={
+            "root_id": "root-1",
+            "alias": "downloads",
+            "label": "下载",
+            "namespace": "external/downloads",
+        }
     )
     backend = ServerWorkspace(
         root=tmp_path,
@@ -123,14 +224,15 @@ async def test_file_retry_parent_on_not_directory(tmp_path):
         location="server",
     )
     got = await prepare_tool_path(
-        r"D:\Downloads\foo.pdf",
-        _ctx(desktop_channel=channel, backend=backend, conversation_id="conv-hot"),
+        "~/Downloads/foo.pdf",
+        _ctx(desktop_channel=channel, backend=backend, conversation_id="conv-wk"),
     )
     assert got == "external/downloads/foo.pdf"
-    assert channel.request_external_mount.await_count == 2
-    grants = await grant_store.list_grants("conv-hot")
-    assert len(grants) == 1
-    assert grants[0].root_id == "root-1"
+    assert channel.request_external_mount.await_count == 1
+    kwargs = channel.request_external_mount.await_args.kwargs
+    assert kwargs["well_known"] == "downloads"
+    assert not kwargs.get("target_name")
+    assert not kwargs.get("path")
 
 
 @pytest.mark.asyncio

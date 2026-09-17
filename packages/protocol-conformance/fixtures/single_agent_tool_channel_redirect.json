@@ -34,7 +34,7 @@
         "tool_call_id": "tc1",
         "tool_name": "code_execute",
         "status": "redirect",
-        "result": "打开源码再正则扫描请用 grep（检测到：re.findall(）。在工作区搜符号、字符串或计数请用 grep；概念定位用 code_search；看命中正文用 file_read。解析表格、改文件、对内存数据跑计算仍用 run。",
+        "result": "打开源码再正则扫描请用 grep（检测到：re.findall(）。在工作区搜符号、字符串或计数请用 grep；看命中正文用 file_read。解析表格、改文件、对内存数据跑计算仍用 run。",
         "failure": {
           "code": "source_grep_redirect"
         }
@@ -113,7 +113,7 @@
         "arguments": {
           "code": "open('index.html').read()"
         },
-        "result": "打开源码再正则扫描请用 grep（检测到：re.findall(）。在工作区搜符号、字符串或计数请用 grep；概念定位用 code_search；看命中正文用 file_read。解析表格、改文件、对内存数据跑计算仍用 run。",
+        "result": "打开源码再正则扫描请用 grep（检测到：re.findall(）。在工作区搜符号、字符串或计数请用 grep；看命中正文用 file_read。解析表格、改文件、对内存数据跑计算仍用 run。",
         "status": "redirect",
         "failure": {
           "code": "source_grep_redirect"

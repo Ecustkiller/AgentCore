@@ -80,7 +80,7 @@ class SpeechFormatSample:
                 DebateSide(key="pro", name="正方", stance=self.stance_pro),
                 DebateSide(key="con", name="反方", stance=self.stance_con),
             ],
-            policy=RoundPolicy(thorough=True, max_rounds=5),
+            policy=RoundPolicy(max_rounds=5),
         )
 
     def side(self) -> DebateSide:

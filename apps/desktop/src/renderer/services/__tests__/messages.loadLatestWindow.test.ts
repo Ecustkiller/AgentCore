@@ -21,8 +21,11 @@ vi.mock("@/services/api", () => ({
 }));
 
 const persistOpenedCache = vi.fn().mockResolvedValue(undefined);
+const persistResidentOpenedCache = vi.fn();
 vi.mock("@/services/offlineCache", () => ({
   persistOpenedCache: (...args: unknown[]) => persistOpenedCache(...args),
+  persistResidentOpenedCache: (...args: unknown[]) =>
+    persistResidentOpenedCache(...args),
 }));
 
 import { getRuntime, useConversationStore } from "@/stores/conversation";
@@ -65,7 +68,13 @@ function mockWindow(
       content: m.content,
       reasoning_content: m.reasoning ?? null,
       created_at: m.createdAt || "2026-01-01T00:00:00Z",
-      runs: m.runs ?? null,
+      runs: m.runs
+        ? {
+            events: m.runs.events,
+            finish_reason: m.runs.finishReason,
+            events_complete: m.runs.eventsComplete !== false,
+          }
+        : null,
     })),
     total: messages.length,
     has_more_before: flags.before,
@@ -78,6 +87,7 @@ beforeEach(() => {
   logEvent.mockClear();
   apiGet.mockReset();
   persistOpenedCache.mockClear();
+  persistResidentOpenedCache.mockClear();
   resetStreamOwnershipForTests();
   useConversationStore.setState({
     currentConversationId: null,
@@ -174,6 +184,74 @@ describe("loadLatestWindow write gates", () => {
         conversation_id: "a",
       }),
     );
+  });
+
+  it("keeps a complete journal when the latest window GET is slim", async () => {
+    store().switchConversation("a");
+    const completeRuns = {
+      events: [
+        { type: "run_plan" } as never,
+        { type: "run_started" } as never,
+        { type: "run_completed" } as never,
+      ],
+      finishReason: "stop" as const,
+      eventsComplete: true as const,
+    };
+    store().setMessageWindow(
+      [
+        msg("m1", "user", "调研"),
+        msg("m2", "assistant", "结论", {
+          executionId: "exec-1",
+          runs: completeRuns,
+        }),
+      ],
+      { hasMoreBefore: false, hasMoreAfter: false },
+      "a",
+    );
+
+    mockWindow([
+      msg("m1", "user", "调研"),
+      msg("m2", "assistant", "结论（更新）", {
+        executionId: "exec-1",
+        runs: {
+          events: [{ type: "run_plan" } as never],
+          finishReason: "stop",
+          eventsComplete: false,
+        },
+      }),
+    ]);
+    await expect(loadLatestWindow("a", { softRefresh: true })).resolves.toBe(
+      true,
+    );
+
+    const assistant = getRuntime("a").messages.find((m) => m.id === "m2");
+    expect(assistant?.content).toBe("结论（更新）");
+    expect(assistant?.runs?.eventsComplete).not.toBe(false);
+    expect(assistant?.runs?.events).toHaveLength(3);
+    const persisted = persistOpenedCache.mock.calls[0]?.[1] as Message[];
+    expect(persisted.find((m) => m.id === "m2")?.runs?.events).toHaveLength(3);
+  });
+
+  it("does not persist a slim journal before GET-one completes", async () => {
+    store().switchConversation("a");
+
+    mockWindow([
+      msg("m1", "user", "调研"),
+      msg("m2", "assistant", "结论", {
+        executionId: "exec-1",
+        runs: {
+          events: [{ type: "run_plan" } as never],
+          finishReason: "stop",
+          eventsComplete: false,
+        },
+      }),
+    ]);
+    await expect(loadLatestWindow("a")).resolves.toBe(true);
+
+    expect(getRuntime("a").messages.find((m) => m.id === "m2")?.content).toBe(
+      "结论",
+    );
+    expect(persistOpenedCache).not.toHaveBeenCalled();
   });
 
   it("refuses whole-window replace while a local stream is pumping", async () => {

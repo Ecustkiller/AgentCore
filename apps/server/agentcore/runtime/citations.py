@@ -4,10 +4,10 @@
 worker 执行器（runs.executor）、委派工具（tools.delegate）与回合管线（pipeline）
 都能复用同一套去重/编号逻辑，而不会引入循环导入。
 
-编号 = 来源在 sink 中的 1-based 序号 = 客户端「来源」卡渲染的序号；engine 在 CEO
-路径把这个号折回工具输出（:func:`annotate_tool_citations`），让模型按号引用，正文
-里的 [n] 始终对得上卡片。worker 路径只做合并、不做标注（见 engine 的 annotate
-开关），因为 worker 的本地编号会在汇入回合卡时被重排，标注反而会误导。
+编号 = 来源在 sink 中的 1-based 序号 = 正文 ``[n]`` 解析序号；engine 在 CEO
+路径把这个号折回工具输出（:func:`annotate_tool_citations`），让模型按号引用。
+worker 路径只做合并、不做标注（见 engine 的 annotate 开关），因为 worker
+的本地编号会在汇入回合池时被重排，标注反而会误导。
 
 域名分级单源在 :mod:`agentcore.core.citation_tier`（叶工具可直接引用，不碰 runtime）。
 本模块 re-export，供 runtime / 台账既有 import 路径保持稳定。
@@ -208,7 +208,7 @@ def out_of_range_markers(content: str, citation_count: int) -> list[int]:
     """返回 ``content`` 正文里指向「不存在来源卡」的引用角标编号（升序去重）。
 
     合法编号是 ``1..citation_count``（= 来源卡数）。返回 ``n < 1`` 或 ``n > 上限``
-    的那些——客户端只把 ``1..上限`` 渲染成可点角标、越界的留成纯文本，即模型引用了
+    的那些——客户端只把 ``1..上限`` 渲染成可点链接、越界的留成纯文本，即模型引用了
     一个没有卡片的编号。仅用于可观测度量；对话出口不剥正文。
 
     扫描前抠掉代码块 / 行内代码 / Markdown 链接，镜像客户端 remark 插件的跳过规则，

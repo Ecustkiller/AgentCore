@@ -71,8 +71,8 @@ describe("workspaceIgnore", () => {
   });
 
   it("skips system file suffixes (UI + AI)", () => {
-    expect(shouldSkipSystemFileName("code_search.db")).toBe(true);
-    expect(shouldSkipSystemFileName("CODE_SEARCH.DB")).toBe(true);
+    expect(shouldSkipSystemFileName("cache.db")).toBe(true);
+    expect(shouldSkipSystemFileName("CACHE.DB")).toBe(true);
     expect(shouldSkipSystemFileName("foo.pyc")).toBe(true);
     expect(shouldSkipSystemFileName("photo.png")).toBe(false);
     expect(shouldSkipSystemFileName("readme.md")).toBe(false);
@@ -90,17 +90,17 @@ describe("workspaceIgnore", () => {
     expect(shouldSkipAiNoiseFileName("t.hdf5")).toBe(true);
     expect(shouldSkipAiNoiseFileName("m.pkl")).toBe(true);
     expect(shouldSkipAiNoiseFileName("m.pickle")).toBe(true);
-    expect(shouldSkipAiNoiseFileName("code_search.db")).toBe(false);
+    expect(shouldSkipAiNoiseFileName("cache.db")).toBe(false);
     expect(shouldSkipFileName("hero.png")).toBe(true);
     expect(shouldSkipFileName("data.parquet")).toBe(true);
     expect(shouldSkipFileName("app.log")).toBe(true);
-    expect(shouldSkipFileName("code_search.db")).toBe(true);
+    expect(shouldSkipFileName("cache.db")).toBe(true);
   });
 
   it("workspace entry helpers respect the two tiers", () => {
     expect(shouldSkipWorkspaceEntry(".git", true)).toBe(true);
     expect(shouldSkipWorkspaceEntry("index", true, AGENTCORE_ROOT)).toBe(true);
-    expect(shouldSkipWorkspaceEntry("code_search.db", false)).toBe(true);
+    expect(shouldSkipWorkspaceEntry("cache.db", false)).toBe(true);
     expect(shouldSkipWorkspaceEntry("hero.png", false)).toBe(true);
     expect(shouldSkipWorkspaceEntry("notes.md", false)).toBe(false);
 
@@ -108,7 +108,7 @@ describe("workspaceIgnore", () => {
     expect(shouldSkipSystemWorkspaceEntry("index", true, AGENTCORE_ROOT)).toBe(
       true,
     );
-    expect(shouldSkipSystemWorkspaceEntry("code_search.db", false)).toBe(true);
+    expect(shouldSkipSystemWorkspaceEntry("cache.db", false)).toBe(true);
     expect(shouldSkipSystemWorkspaceEntry("hero.png", false)).toBe(false);
     expect(shouldSkipSystemWorkspaceEntry("notes.md", false)).toBe(false);
   });

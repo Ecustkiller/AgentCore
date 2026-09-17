@@ -140,7 +140,7 @@ async def _build_ceo_context(
     skill_registry = build_system_skill_registry()
     stats = _seed_workspace(root, tier=workspace)
     backend = ServerWorkspace(root=root, sandbox=SubprocessSandbox())
-    from agentcore.workspace.project_shell import desk_is_visibly_empty
+    from agentcore.workspace.desk_empty import desk_is_visibly_empty
 
     workspace_facts = build_workspace_context(
         backend,

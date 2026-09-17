@@ -106,9 +106,6 @@ PROGRESS_TOOLS = frozenset(
 # CEO orchestration primitives: parse-only thrashing must not retire them
 # (same posture as LANDING_TOOLS keeping the pen — keep the dispatcher).
 ORCHESTRATION_TOOLS = frozenset({"delegate", "ask_user"})
-# Memory tools: parse-only thrashing must not retire them (same keep posture as
-# ORCHESTRATION_TOOLS — independent set; do NOT fold into ORCHESTRATION_TOOLS).
-MEMORY_TOOLS = frozenset({"remember"})
 
 
 def _collapse_malformed_required_args(name: str, parsed: dict[str, object]) -> dict[str, object]:

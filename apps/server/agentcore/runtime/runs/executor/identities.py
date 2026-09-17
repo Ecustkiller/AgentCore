@@ -76,8 +76,8 @@ _WORKER_LEAF_INTRO = """\
 不能再向下委派。够不到用户。"""
 
 # Captain intro: identity + nest honesty. Depth honesty branches on MAX_DELEGATION_DEPTH.
-# Staffing HOW → consult(lead_subteam) (requires_tools=delegate, worker-only).
-# Not the CEO encyclopedia and not identity.
+# Staffing HOW on nested ``delegate`` description (same fill contract as root).
+# Not identity.
 
 
 def _worker_captain_intro(*, depth: int) -> str:

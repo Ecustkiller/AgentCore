@@ -71,6 +71,36 @@ class ToolCallDelta:
 LLMContent = str | list[dict] | None
 
 
+def normalize_thinking_blocks(raw: Any) -> list[dict] | None:
+    """Keep only echoable Anthropic thinking / redacted_thinking blocks.
+
+    Unsigned ``thinking`` blocks cannot be sent back and are dropped.
+    """
+    if not isinstance(raw, list) or not raw:
+        return None
+    out: list[dict] = []
+    for block in raw:
+        if not isinstance(block, dict):
+            continue
+        kind = block.get("type")
+        if kind == "thinking":
+            signature = block.get("signature")
+            if not isinstance(signature, str) or not signature:
+                continue
+            out.append(
+                {
+                    "type": "thinking",
+                    "thinking": str(block.get("thinking") or ""),
+                    "signature": signature,
+                }
+            )
+        elif kind == "redacted_thinking":
+            data = block.get("data")
+            if isinstance(data, str) and data:
+                out.append({"type": "redacted_thinking", "data": data})
+    return out or None
+
+
 def llm_content_text(content: LLMContent) -> str:
     """Extract plain text from ``LLMMessage.content`` (str or multimodal parts).
 
@@ -117,6 +147,10 @@ class LLMMessage:
     reasoning_content: str | None = None
     # Tool-result audience (``ceo`` = orchestration; not sent to the LLM wire).
     audience: str | None = None
+    # Opaque Anthropic thinking / redacted_thinking blocks (signature included).
+    # Display text stays on ``reasoning_content``; the /messages leaf echoes these
+    # on the next tool round. Not a user-facing column.
+    thinking_blocks: list[dict] | None = None
 
 
 @dataclass
@@ -275,6 +309,7 @@ class LLMResponse:
     latency_ms: int = 0
     empty_diagnosis: str | None = None
     empty_raw_preview: str | None = None
+    thinking_blocks: list[dict] | None = None
 
 
 @dataclass
@@ -293,6 +328,8 @@ class LLMChunk:
     #   treat the stream as a hard raise/discard.
     stream_reset: bool = False
     aborted: bool = False
+    # Signed Anthropic thinking blocks, typically on the finish chunk.
+    thinking_blocks: list[dict] | None = None
 
 
 class LLMProvider(Protocol):

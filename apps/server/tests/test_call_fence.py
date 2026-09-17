@@ -353,7 +353,8 @@ def test_build_provider_wraps_with_fence(monkeypatch):
         )
     )
     assert isinstance(provider, ObservingLLMProvider)
-    assert unwrap_provider(provider).__class__.__name__ == "OpenAICompatibleProvider"
+    assert unwrap_provider(provider).__class__.__name__ == "ProtocolDispatchProvider"
+    assert unwrap_provider(provider)._openai.__class__.__name__ == "OpenAICompatibleProvider"
     assert observe_provider(provider) is provider  # idempotent
     # BYOK 设置·测试 calls probe on the fence-wrapped provider — must not AttributeError.
     assert callable(getattr(provider, "probe", None))

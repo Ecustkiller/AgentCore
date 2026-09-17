@@ -3,7 +3,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { DEMO_DEBATE_EXECUTION, DEMO_DEBATE_MODEL } from "./demoDebate";
 
 /**
- * 手册「真组件预览」：辩论室记分牌。
+ * 手册「真组件预览」：辩论室顶栏。
  * 复用 {@link Scoreboard} + 手造已收场 DebateModel。
  * 自带 TooltipProvider（手册入口 tooltip）；手册深链需外层 Router（产品手册页已有）。
  */

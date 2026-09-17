@@ -1,7 +1,7 @@
 """LLM rewrite helpers for preference / profile / navigation — NOT the live idle path.
 
 Live idle chats store a session digest and mark it digested; they do **not** call
-this module. Always-files are written by ``remember``, explore, daily-review
+this module. Always-files are written by explore, daily-review
 checkbox, and the file page. ``apply_explicit_memory_ops`` still serves daily
 review. The consolidator below remains for unit tests of whole-file rewrite /
 nav merge — not a production writer.
@@ -755,7 +755,7 @@ async def consolidate_semantic_memory(
         return None
 
 
-# --- Explicit remember (CEO tool path) ---------------------------------------
+# --- Explicit memory ops (daily review / file page) --------------------------
 
 
 async def apply_explicit_memory_ops(
@@ -767,7 +767,7 @@ async def apply_explicit_memory_ops(
     section_cap: int | None = None,
     collect_items: list[MemoryUpdateItem] | None = None,
 ) -> bool:
-    """Apply ops directly to semantic files (explicit user remember). Immediate effect.
+    """Apply ops directly to semantic files (daily review / file page). Immediate effect.
 
     A file the always quota refuses is skipped with the rest still applied, and the
     refusals ride one card that names them (CTX-A2).

@@ -1,7 +1,7 @@
-"""共享证据包（Evidence Pack）——庭前「共享事实库 → 对抗论证」的数据契约。
+"""共享证据包（Evidence Pack）——开赛「共享事实库 → 对抗论证」的数据契约。
 
 行业实践：附件/底料先组装为双方共享的证据包，再开辩；禁止对同一附件各自深挖 ReAct。
-本模块只负责契约 + 从主持人上下文机械组装 + 完整度驱动的外证跳过计划（庭前舰队已删；
+本模块只负责契约 + 从主持人上下文机械组装 + 完整度驱动的外证跳过计划（调查员舰队已删；
 发言期有界预算见 ``debater_budgets_from_completeness``）；LLM 精炼条款锚/争议点留给后续步。
 """
 
@@ -23,12 +23,11 @@ EvidenceSourceKind = Literal[
     "workspace",
 ]
 PackCompleteness = Literal["full", "partial", "empty"]
-# 庭前舰队已删：外证计划恒为 skip（观测字段仍保留 mode/reason）。
+# 调查员舰队已删：外证计划恒为 skip（观测字段仍保留 mode/reason）。
 ExternalEvidenceMode = Literal["skip"]
 ExternalEvidencePath = Literal[
     "evidence_pack",
     "no_pack",
-    "fast",
 ]
 
 # 与 ``_build_attachment_context`` 产出的块头对齐。
@@ -89,7 +88,7 @@ class DisputeCandidate:
 
 @dataclass
 class EvidencePack:
-    """双方共享的庭前证据包。"""
+    """双方共享的开赛证据包。"""
 
     sources: list[EvidenceSource] = field(default_factory=list)
     dispute_candidates: list[DisputeCandidate] = field(default_factory=list)
@@ -220,7 +219,7 @@ def thin_dispute_candidates(
         out.append(
             DisputeCandidate(
                 claim=f"「{side.name}」主张：{stance}",
-                why_contested="共享证据上的对抗论证点（庭前候选，开辩后由双方展开）",
+                why_contested="共享证据上的对抗论证点（开辩后由双方展开）",
                 related_source_ids=ids,
             )
         )
@@ -278,7 +277,7 @@ def assemble_evidence_pack_from_host(
     disputes = thin_dispute_candidates(sides, source_ids=source_ids) if sides else []
     notes = (
         f"从主持人上下文组装共享证据包（{len(usable)} 份可用正文附件）；"
-        "庭前不派员、不对同一附件深度 file_read/grep。"
+        "不对同一附件深度 file_read/grep。"
     )
     return EvidencePack(
         sources=pack_sources,
@@ -291,7 +290,7 @@ def assemble_evidence_pack_from_host(
 
 @dataclass(frozen=True)
 class ExternalEvidencePlan:
-    """完整度驱动的外证跳过计划（庭前舰队已删；发言期预算另见 debater_budgets）。"""
+    """完整度驱动的外证跳过计划（调查员舰队已删；发言期预算另见 debater_budgets）。"""
 
     mode: ExternalEvidenceMode
     retrieval_budget: int
@@ -332,15 +331,12 @@ def resolve_external_evidence_plan(
     completeness: PackCompleteness,
     path: ExternalEvidencePath,
 ) -> ExternalEvidencePlan:
-    """由完整度 / 路径解析外证计划：庭前永不派员（恒 skip）。
+    """由完整度 / 路径解析外证计划：永不派员（恒 skip）。
 
-    - ``fast`` → skip
     - ``evidence_pack`` + ``full`` → skip（``evidence_pack_full``）
     - ``evidence_pack`` + ``partial``/``empty`` → skip（发言期对称有界预算）
     - ``no_pack`` → skip（发言期对称有界预算）
     """
-    if path == "fast":
-        return _skip_plan(reason="fast")
     if path == "evidence_pack":
         if completeness == "full":
             return _skip_plan(reason="evidence_pack_full")
@@ -355,7 +351,7 @@ def debater_budgets_from_completeness(
     side_keys: Sequence[str],
     completeness: PackCompleteness,
 ) -> dict[str, int]:
-    """庭前后辩手 per-side ``retrieval_budget``。
+    """完整度对应的辩手 per-side ``retrieval_budget``。
 
     - ``full`` → 0（共享包已充分，禁外证扫网）
     - ``partial``/``empty`` → 各方对称有界残搜（``BOUNDED_GAP_FILL_RETRIEVAL_BUDGET``）
@@ -385,7 +381,7 @@ def format_evidence_completeness_notice(
         return ""
     path_bit = f"路径={path}；" if path else ""
     return (
-        "【庭前取证·证据不完整】"
+        "【材料不完整】"
         f"{path_bit}完整度={completeness}。"
         "开辩与审议时【禁止】假定已充分取证；缺证侧主张须标【待核实】，"
         "主持人开场与双方发言须显式承认本侧或共享包证据缺口。\n"

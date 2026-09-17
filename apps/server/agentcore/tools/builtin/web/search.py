@@ -552,7 +552,8 @@ class WebSearchTool:
         return ToolSchema(
             name="web_search",
             description=(
-                "搜公网实时信息（摘要优先）。核对原文用 web_fetch。"
+                "缺窗口里没有的公网事实（版本、出处、是否存在）才搜。"
+                "摘要优先；核对原文用 web_fetch。"
             ),
             parameters={
                 "type": "object",
@@ -890,7 +891,7 @@ class WebSearchTool:
         （``weak``）默认仍回模型；``search_policy=debate_evidence`` 下 weak 与
         商城/词典/医院百科硬剔（可进 dropped）。``search_policy=academic_literature``
         偏论文/DOI、降权百科词典门户，并在 junk/空结果时戳 ``evidence_gap``。
-        可被 ``#rN`` 显式引用；来源卡不打档位徽标，``deep_read`` 标「已读」。
+        可被 ``#rN`` 显式引用；用户面链接不打档位徽标，``deep_read`` 在预览标「已读」。
         """
         kept, blocked_hosts = _split_blocked(results)
 

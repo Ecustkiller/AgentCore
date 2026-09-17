@@ -260,7 +260,6 @@ async def test_debate_plan_only_emits_debater_plan_skips_speakers():
                 "motion": "该不该做 X",
                 "form": "debate",
                 "sides": _sides(),
-                "thorough": False,
             },
             debate._base_tool_context,
         )

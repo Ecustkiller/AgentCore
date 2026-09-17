@@ -7,7 +7,7 @@
  * 真图三件：① `HeroGraph` 看团队跑一遍 ② `GraphLegend` 图例
  * ③ `MechanismScenarios` 机制场景画廊。
  * 共用 `EmbeddedGraphCanvas`（真实 AgentNode / StepEdge / ELK / WaveLanes）。
- * 拍板卡 / 审批卡 / 记分牌等 UI 预览在 `pages/toolbox/manual/embeds/`，不经本 barrel。
+ * 拍板卡 / 审批卡 / 辩论室顶栏等 UI 预览在 `pages/toolbox/manual/embeds/`，不经本 barrel。
  */
 export { GraphLegend } from "./mechanism/GraphLegend";
 export { HeroGraph } from "./mechanism/HeroGraph";

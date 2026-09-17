@@ -4,8 +4,9 @@ Layers (see docs/03-AI核心/Agent记忆与知识系统.md; two-layer long-term 
 - working memory: in-memory conversation history + per-turn run state (runtime data)
 - episodic long-term: per-session ≤200-char digests in ``memory_episodes``
   (consolidation input only)
-- semantic long-term: 偏好/画像/主题 files, maintained by remember / explore /
-  the file page (idle session digests do not rewrite always-files)
+- semantic long-term: 偏好/画像/主题 files, maintained by the file page
+  (idle session digests do not rewrite always-files); user rules are
+  ``.agentcore/规则/*.md`` via ``file_write``
 
 Plus auto conversation titles (a sidebar UX feature, not a memory layer).
 """

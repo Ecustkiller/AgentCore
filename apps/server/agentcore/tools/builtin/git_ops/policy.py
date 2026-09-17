@@ -20,22 +20,12 @@ _ALLOWED_SUBCOMMANDS = frozenset(
         "diff",
         "log",
         "fetch",
-        "show",
-        "blame",
         "add",
         "commit",
-        "branch",
         "checkout",
         "push",
         "pull",
-        "init_baseline",
         "clone",
-        "stash",
-        "merge",
-        "rebase",
-        "cherry-pick",
-        "tag",
-        "remote",
         "create_pr",
     }
 )
@@ -44,75 +34,28 @@ _ALWAYS_WRITE_SUBCOMMANDS = frozenset(
     {
         "add",
         "commit",
-        "branch",
         "checkout",
         "push",
         "pull",
-        "init_baseline",
         "clone",
-        "merge",
-        "rebase",
-        "cherry-pick",
         "create_pr",
     }
 )
-# Action-gated verbs: only listed actions mutate; ``list`` is read-only / no approval.
-_ACTION_WRITE_MAP: dict[str, frozenset[str]] = {
-    "stash": frozenset({"push", "pop"}),
-    "tag": frozenset({"create"}),
-    "remote": frozenset({"add"}),
-}
-_WRITE_SUBCOMMANDS = _ALWAYS_WRITE_SUBCOMMANDS | frozenset(_ACTION_WRITE_MAP)
-# Writes that never take ``.git/index.lock``: refs (``branch`` / ``tag``), config
-# (``remote add``), or the network alone (``push`` reads refs, ``create_pr`` is REST,
-# ``clone`` writes a *new* dest tree — not this workspace's index). They stay
-# outside the per-repo serializer (``repo_lock``) so they keep running beside an
-# index writer — and so ``push``'s remote round trip cannot park an unrelated
-# ``commit`` behind a minute of network. Everything else is serialized by
-# subtraction, so a newly allowlisted write queues by default.
-_NO_INDEX_LOCK_SUBCOMMANDS = frozenset(
-    {"branch", "tag", "remote", "push", "create_pr", "clone"}
-)
+_WRITE_SUBCOMMANDS = _ALWAYS_WRITE_SUBCOMMANDS
+# Writes that never take ``.git/index.lock``: network-only (``push`` reads refs,
+# ``create_pr`` is REST, ``clone`` writes a *new* dest tree — not this workspace's
+# index). They stay outside the per-repo serializer (``repo_lock``) so they keep
+# running beside an index writer — and so ``push``'s remote round trip cannot park
+# an unrelated ``commit`` behind a minute of network. Everything else is serialized
+# by subtraction, so a newly allowlisted write queues by default.
+_NO_INDEX_LOCK_SUBCOMMANDS = frozenset({"push", "create_pr", "clone"})
 _INDEX_LOCK_SUBCOMMANDS = _WRITE_SUBCOMMANDS - _NO_INDEX_LOCK_SUBCOMMANDS
 _NO_REPO_CODE = "no_repo"
 # Root ``.git`` exists but git refuses it as a work tree — never a soft ``no_repo``.
 _REPO_UNUSABLE_CODE = "repo_unusable"
-_DIRTY_SKIP_CODE = "dirty_skip"
-_ALREADY_REPO_CODE = "already_repo"
 # Another index-mutating git call still holds this repo after the bounded wait —
 # nothing ran, so this is queue pressure, never a git / repo fault.
 _REPO_BUSY_CODE = "repo_busy"
-_INIT_BASELINE_MESSAGE = "Initial commit (AgentCore baseline)"
-_INIT_BASELINE_AUTHOR_NAME = "AgentCore"
-_INIT_BASELINE_AUTHOR_EMAIL = "agentcore@local"
-# Strategy / force knobs rejected on merge / rebase / cherry-pick before argv.
-_COLLAB_DANGER_KEYS = frozenset(
-    {
-        "force",
-        "force_with_lease",
-        "forceWithLease",
-        "hard",
-        "interactive",
-        "autosquash",
-        "strategy",
-        "strategy_option",
-        "strategyOption",
-        "no_ff",
-        "no-ff",
-        "ff_only",
-        "ff-only",
-        "squash",
-        "continue",
-        "abort",
-        "skip",
-        "onto",
-        "root",
-        "mainline",
-        "no_commit",
-        "no-commit",
-        "signoff",
-    }
-)
 
 
 def git_write_subcommands() -> frozenset[str]:
@@ -122,23 +65,15 @@ def git_write_subcommands() -> frozenset[str]:
 
 def git_call_is_write(arguments: dict[str, Any] | None = None) -> bool:
     """Whether this git tool call mutates repo state (approval / ensure_repo)."""
-    args = arguments or {}
-    sub = str(args.get("subcommand", "")).strip().lower()
-    if sub in _ALWAYS_WRITE_SUBCOMMANDS:
-        return True
-    allowed_actions = _ACTION_WRITE_MAP.get(sub)
-    if allowed_actions is None:
-        return False
-    action = str(args.get("action") or "list").strip().lower() or "list"
-    return action in allowed_actions
+    sub = str((arguments or {}).get("subcommand", "")).strip().lower()
+    return sub in _WRITE_SUBCOMMANDS
 
 
 def git_call_needs_repo_lock(arguments: dict[str, Any] | None = None) -> bool:
     """Whether this call must hold the per-repo lock (it will take ``index.lock``).
 
     Read-only calls never qualify: ``GIT_OPTIONAL_LOCKS=0`` keeps them off the index
-    entirely. Action-gated verbs go through ``git_call_is_write`` first, so
-    ``stash list`` stays a free read while ``stash push`` queues.
+    entirely.
     """
     args = arguments or {}
     if not git_call_is_write(args):
@@ -150,8 +85,6 @@ _FORBIDDEN_PATTERNS = git_forbidden_subcommands()
 _PROTECTED_BRANCHES = git_protected_branches()
 _DIFF_OUTPUT_LIMIT = 16000
 _STATUS_LINE_LIMIT = 200
-# blame is line-oriented; reuse status porcelain line budget.
-_BLAME_LINE_LIMIT = _STATUS_LINE_LIMIT
 # Per-subprocess ceiling. Engine outer = serial_ops × this + kill slack.
 _GIT_TIMEOUT = 20.0
 _GIT_KILL_SLACK = 5.0
@@ -182,12 +115,6 @@ _GITHUB_API_CALLS = 2
 _SERIAL_GIT_OPS: dict[str, int] = {
     # branch --show-current + commit + rev-parse --short HEAD
     "commit": 3,
-    # branch --show-current (protected-branch refusal) + the primary command
-    "merge": 2,
-    "rebase": 2,
-    "cherry-pick": 2,
-    # init + add -A + commit + rev-parse --short + branch --show-current
-    "init_baseline": 5,
     # branch --show-current + remote
     "push": 2,
     # remote
@@ -244,22 +171,12 @@ GIT_TOOL_PARAMETERS: dict[str, Any] = {
                 "diff",
                 "log",
                 "fetch",
-                "show",
-                "blame",
                 "add",
                 "commit",
-                "branch",
                 "checkout",
                 "push",
                 "pull",
-                "init_baseline",
                 "clone",
-                "stash",
-                "merge",
-                "rebase",
-                "cherry-pick",
-                "tag",
-                "remote",
                 "create_pr",
             ],
             # 审批 / 无仓策略在失败回执，勿在此复述。
@@ -268,7 +185,7 @@ GIT_TOOL_PARAMETERS: dict[str, Any] = {
         "paths": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "status/diff/add/show/blame 路径；add/blame 必填（blame 仅一文件）。",
+            "description": "status/diff/add 路径；add 必填。",
         },
         "staged": {
             "type": "boolean",
@@ -294,11 +211,11 @@ GIT_TOOL_PARAMETERS: dict[str, Any] = {
         },
         "message": {
             "type": "string",
-            "description": "commit 必填；stash push 可选。",
+            "description": "commit 必填。",
         },
         "branch": {
             "type": "string",
-            "description": "branch/checkout 分支名（二者必填）。",
+            "description": "checkout 分支名（必填）。",
         },
         "create": {
             "type": "boolean",
@@ -315,28 +232,9 @@ GIT_TOOL_PARAMETERS: dict[str, Any] = {
             "description": "push 设上游。",
             "default": False,
         },
-        "object": {
-            "type": "string",
-            "description": "show 对象。",
-            "default": "HEAD",
-        },
-        "action": {
-            "type": "string",
-            "enum": ["list", "push", "pop", "create", "add"],
-            "description": "stash / tag / remote 的动作。",
-            "default": "list",
-        },
-        "ref": {
-            "type": "string",
-            "description": "merge/rebase/cherry-pick 目标引用。",
-        },
-        "name": {
-            "type": "string",
-            "description": "tag create 名；remote add 远程名。",
-        },
         "url": {
             "type": "string",
-            "description": "remote add / clone 的仓库 URL。",
+            "description": "clone 的仓库 URL。",
         },
         "dest": {
             "type": "string",
@@ -363,6 +261,7 @@ GIT_TOOL_PARAMETERS: dict[str, Any] = {
     "required": ["subcommand"],
 }
 
+
 def _ref_token_error(ref: str, *, label: str, start: float) -> ToolResult | None:
     """Reject empty / option-like refs before they reach argv."""
     if not ref:
@@ -375,46 +274,6 @@ def _ref_token_error(ref: str, *, label: str, start: float) -> ToolResult | None
     if any(ch.isspace() for ch in ref):
         return _error(f"{label} 的 ref 不能包含空白", start)
     return None
-
-
-def _collab_danger_keys_error(
-    arguments: dict[str, Any], *, label: str, start: float
-) -> ToolResult | None:
-    hit = sorted(k for k in arguments if k in _COLLAB_DANGER_KEYS)
-    if not hit:
-        return None
-    return _error(
-        f"{label} 禁止危险/策略旋钮（{', '.join(hit)}）；"
-        "冲突时诚实失败，不自动 resolve，不支持 --force 类参数。",
-        start,
-    )
-
-
-def _name_token_error(name: str, *, label: str, start: float) -> ToolResult | None:
-    if not name:
-        return _error(f"{label} 需要 name 参数", start)
-    if name.startswith("-"):
-        return _error(
-            f"{label} 的 name 不能以 '-' 开头（防止被 git 解析为选项）",
-            start,
-        )
-    if any(ch.isspace() for ch in name) or ":" in name:
-        return _error(f"{label} 的 name 不能包含空白或 ':'", start)
-    return None
-
-
-def _remote_url_error(url: str, start: float) -> ToolResult | None:
-    if not url:
-        return _error("remote add 需要 url 参数", start)
-    if url.startswith("-"):
-        return _error(
-            "remote url 不能以 '-' 开头（防止被 git 解析为选项）",
-            start,
-        )
-    if any(ch.isspace() for ch in url):
-        return _error("remote url 不能包含空白", start)
-    return None
-
 
 
 def _validate_add_paths(paths: list[Any], start: float) -> ToolResult | None:

@@ -1,13 +1,5 @@
 ---
 description: 全端部署（后端+官网+手机+管理后台+桌面）——用户说「部署/上线/发版」时读；凭据存 deploy/.env.deploy.local 不入仓。
-globs:
-  - "apps/website/**"
-  - "apps/mobile/**"
-  - "apps/admin/**"
-  - "apps/desktop/**"
-  - "apps/server/**"
-  - "deploy/**"
-  - ".github/workflows/*"
 alwaysApply: false
 ---
 

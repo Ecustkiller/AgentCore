@@ -117,7 +117,6 @@ def stage_card_required(
     form: str,
     rationale: str,
     fact_pointers: list[str] | None = None,
-    thorough: bool = True,
     max_rounds: int = 5,
     note: str | None = None,
     host_execution_id: str | None = None,
@@ -136,7 +135,6 @@ def stage_card_required(
         "form": form,
         "rationale": rationale,
         "fact_pointers": list(fact_pointers or []),
-        "thorough": thorough,
         "max_rounds": max_rounds,
     }
     if note is not None:

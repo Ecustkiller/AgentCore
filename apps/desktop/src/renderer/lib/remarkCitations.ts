@@ -1,10 +1,10 @@
 /**
  * Remark plugin: turn inline citation markers `[n]` / `#rN` into custom `citemark`
- * elements so the Markdown renderer can map them to citation chips.
+ * elements so the Markdown renderer can map them to sentence-level source marks.
  *
  * Payload rides on `data.hProperties` (same pattern as {@link ./remarkEvidence}):
  * react-markdown's default `urlTransform` strips non-http(s) link schemes, so the
- * older `cite:n` encoding never reached the chip component.
+ * older `cite:n` encoding never reached the mark component.
  *
  * - `[n]` outside `1..max` stay literal text.
  * - `#rN` only rewritten when present in ``knownLedgerIds``; unknown ids stay text

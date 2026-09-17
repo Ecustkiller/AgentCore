@@ -272,7 +272,7 @@ export interface PlanReviewResolvedPayload {
 /** 阶段推进卡（批 B）：命题卡升级为可操作交互；幕 1 收尾后耐久展示。
  * 
  * 信息密度 = 最小决策集：命题 + 双方立场 + 形态/轮次默认 + 嘱咐空位。
- * ``sides`` 复用 motion 卡薄立场；``thorough`` / ``max_rounds`` 为默认展示（卡上不可改）。
+ * ``sides`` 复用 motion 卡薄立场；``max_rounds`` 为默认展示（卡上不可改）。
  * 可选宿主三元组（机制直传，旧客户端忽略）：开辩锚定幕 1 图。 */
 export interface StageCardRequiredPayload {
   stage_card_id: string;
@@ -282,7 +282,6 @@ export interface StageCardRequiredPayload {
   form: DebateForm;
   rationale: string;
   fact_pointers?: string[];
-  thorough?: boolean;
   max_rounds?: number;
   note?: string;
   /** 幕 1 宿主 execution_id；缺省则开辩时再 resolve_debate_host_attach。 */
@@ -1294,16 +1293,14 @@ export interface DebateEvidencePack {
 export interface DebatePretrialStartedPayload {
   execution_id: string;
   moderator_run_id: string;
-  thorough?: boolean;
   sides?: DebatePretrialSideInfo[];
   /** Set when pretrial is skipped immediately; absent when phase proceeds. */
-  skip_reason?: "fast" | "dossier_sufficient" | "evidence_pack" | "no_pack";
+  skip_reason?: "evidence_pack" | "no_pack";
 }
 
 export interface DebatePretrialOrdersPayload {
   execution_id: string;
   moderator_run_id: string;
-  thorough?: boolean;
   sides?: DebatePretrialSideInfo[];
   orders?: DebatePretrialOrder[];
   /** Present when pretrial takes the shared evidence-pack path. */
@@ -1321,11 +1318,10 @@ export interface DebatePretrialOrdersPayload {
 export interface DebatePretrialCompletedPayload {
   execution_id: string;
   moderator_run_id: string;
-  thorough?: boolean;
   sides?: DebatePretrialSideInfo[];
   status?: "done" | "skipped" | "degraded";
   /** Present when status=skipped. */
-  skip_reason?: "fast" | "dossier_sufficient" | "evidence_pack" | "no_pack";
+  skip_reason?: "evidence_pack" | "no_pack";
   orders?: DebatePretrialOrder[];
   fallback_self_search?: boolean;
   evidence_ready?: boolean;
@@ -1337,7 +1333,7 @@ export interface DebatePretrialCompletedPayload {
   evidence_pack?: DebateEvidencePack;
   /** Resolved external-evidence mode; production emits skip only. */
   external_evidence_mode?: "skip";
-  /** Skip reason: evidence_pack_full | evidence_pack_partial | no_pack | fast | … */
+  /** Skip reason: evidence_pack_full | evidence_pack_partial | no_pack | … */
   external_evidence_reason?: string;
 }
 

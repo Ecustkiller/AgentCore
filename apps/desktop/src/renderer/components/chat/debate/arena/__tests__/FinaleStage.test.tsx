@@ -2,7 +2,7 @@
 /**
  * 终审区钻取惯例（全场统一「名字/身份行 = 打开 run 详情侧栏」）：
  * - 「主持人终审」标题在 moderatorRun 在时是钻取按钮，侧栏标题沿用「主持人」；
- * - 终审不挂模型徽章 / 三方署名（模型名只留记分牌）；
+ * - 终审不挂模型徽章 / 三方署名（模型名不在辩论室顶栏）；
  * - 「裁决过程」文字链接已删（文字链接只留给就地展开）；
  * - moderatorRun 缺席（进行中 / 旧产物）时标题退回纯文本。
  *
@@ -267,7 +267,7 @@ describe("FinaleStage 终审布局", () => {
     expect(screen.queryByText("ROI 清晰")).toBeNull();
   });
 
-  it("红队：裁决卡为方案评定（无加固建议），handoffs 空仍渲染「留给你的」加固建议 + 风险清单", () => {
+  it("红队：裁决卡为方案评定（无加固建议），handoffs 空仍渲染「留给你的」加固建议 + 风险清单", async () => {
     render(
       <FinaleStage
         model={settledBriefModel({
@@ -306,7 +306,7 @@ describe("FinaleStage 终审布局", () => {
       />,
     );
 
-    expect(screen.getByText("方案评定")).toBeTruthy();
+    expect(await screen.findByText("方案评定")).toBeTruthy();
     // 红队裁决卡保留争点；加固建议在「留给你的」
     expect(screen.getByText("争点")).toBeTruthy();
     expect(screen.getByText("留给你的")).toBeTruthy();

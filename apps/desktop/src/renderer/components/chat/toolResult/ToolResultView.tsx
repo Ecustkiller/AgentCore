@@ -27,6 +27,7 @@ import type {
 } from "@/types/events";
 import { type ReactNode, useMemo } from "react";
 import { Favicon } from "../Favicon";
+import { SourceHitRow } from "../SourceHitRow";
 import { CodeDiagnosticsResult } from "./CodeDiagnosticsResult";
 import { SearchHitResult } from "./SearchHitResult";
 import {
@@ -398,41 +399,20 @@ function clampLine(line: string): string {
   return line.length > 140 ? `${line.slice(0, 140)}…` : line;
 }
 
-/** Search hits as source-style cards (favicon · title · snippet), each opening in
- * the system browser — mirrors {@link SourceCards} so a search step reads the same
- * as the answer's sources. */
+/** Search hits share {@link SourceHitRow} with the merged fetch collection. */
 function WebSearchResult({ display }: { display: WebSearchDisplay }) {
   return (
     <div className="mt-1 space-y-1">
       <div className="flex max-h-72 flex-col gap-0.5 overflow-y-auto pr-1">
         {display.results.map((r, i) => (
-          <a
+          <SourceHitRow
             key={`${r.url}-${i}`}
-            href={r.url}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-start gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-accent"
-          >
-            <span className="mt-0.5 w-4 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-              {i + 1}
-            </span>
-            <Favicon
-              site={r.site}
-              title={r.title}
-              size={16}
-              className="mt-0.5"
-            />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-xs font-medium text-foreground">
-                {cleanSourceTitle(r.title) || r.site || r.url}
-              </span>
-              {r.snippet && (
-                <span className="mt-0.5 line-clamp-2 block text-xs text-muted-foreground">
-                  {r.snippet}
-                </span>
-              )}
-            </span>
-          </a>
+            index={i + 1}
+            url={r.url}
+            title={r.title}
+            site={r.site}
+            snippet={r.snippet}
+          />
         ))}
       </div>
     </div>
@@ -441,7 +421,7 @@ function WebSearchResult({ display }: { display: WebSearchDisplay }) {
 
 /** Single-page read card (工具结果富渲染): a source-style header (favicon · title ·
  * site, opens in the system browser) plus the extracted body preview — mirrors
- * {@link WebSearchResult} / {@link SourceCards} for the header and the bordered
+ * {@link WebSearchResult} for the header and the bordered
  * header+body shell of {@link SkillConsultResult}. */
 function WebFetchResult({ display }: { display: WebFetchDisplay }) {
   const title = cleanSourceTitle(display.title) || display.site || display.url;

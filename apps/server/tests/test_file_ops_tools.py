@@ -40,11 +40,6 @@ from tests.user_face_helpers import assert_user_face_clean
 
 
 def _ctx(workspace: Path, *, agent_id: str = "a") -> ToolContext:
-    # These tests are not empty-desk cases. A visible user file keeps project-shell
-    # strip from rewriting nested paths the assertions pin.
-    keep = workspace / "README.md"
-    if not keep.exists():
-        keep.write_text("desk\n", encoding="utf-8")
     return ToolContext.create(
         execution_id="e",
         run_id="s",
@@ -842,7 +837,7 @@ def test_file_read_schema_teaches_default_full_read():
     assert "省略则尽量整读" in limit["description"]
     assert "超安全顶截断" in limit["description"]
     desc = schema.description
-    assert "grep" in desc or "code_search" in desc
+    assert "grep" in desc
     assert "glob" in desc
     assert "web_fetch" in desc
     assert "file_list" in desc

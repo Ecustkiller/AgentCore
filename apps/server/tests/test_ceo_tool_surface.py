@@ -554,7 +554,9 @@ def test_assembled_offers_create_folder():
 def test_assembled_ceo_omits_retired_folder_profile():
     names = set(_assemble(folder_id="fold-1").names)
     assert "update_folder_profile" not in names
-    assert "remember" in names
+    assert "remember" not in names
+    assert "code_search" not in names
+    assert "project_shell" not in names
 
 
 def test_register_always_ceo_tools_declare_loop():
@@ -574,7 +576,9 @@ def test_register_always_ceo_tools_declare_loop():
         "read_image",
     } <= names
     assert "consult" not in names  # CeoWire.CONSULT — hand-wired with has_entries
-    assert names.isdisjoint({"delegate", "debate", "ask_user", "remember", "wait"})
+    assert names.isdisjoint(
+        {"delegate", "debate", "ask_user", "remember", "wait", "code_search"}
+    )
 
 
 def test_assembled_omits_read_image_when_vision_unconfigured():

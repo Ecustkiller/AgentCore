@@ -153,23 +153,84 @@ export function overlayIncomingWithRicherExisting(
   });
 }
 
+function journalIsSlim(m: Message): boolean {
+  return m.runs?.eventsComplete === false;
+}
+
+function journalIsComplete(m: Message): boolean {
+  return m.runs != null && m.runs.eventsComplete !== false;
+}
+
+/**
+ * Server list is window authority (membership / order / body / status).
+ * A slim ``eventsComplete=false`` row is not a newer journal — keep the
+ * already-complete ``runs`` (and paired process) so offline opened cache
+ * can still fold the team graph.
+ */
+export function preserveCompleteRunsFromExisting(
+  incoming: Message,
+  existing: Message,
+): Message {
+  if (!journalIsSlim(incoming) || !journalIsComplete(existing)) {
+    return incoming;
+  }
+  if (
+    incoming.executionId &&
+    existing.executionId &&
+    incoming.executionId !== existing.executionId
+  ) {
+    return incoming;
+  }
+  return {
+    ...incoming,
+    runs: existing.runs,
+    process: existing.process ?? incoming.process,
+    executionId: existing.executionId ?? incoming.executionId,
+  };
+}
+
+/** Stamp complete journals from ``existing`` onto the server window by identity. */
+export function overlayCompleteRunsOnServerWindow(
+  incoming: Message[],
+  existing: Message[],
+): Message[] {
+  if (existing.length === 0) return incoming;
+  return incoming.map((inc) => {
+    const ex = findMatchingMessage(existing, inc);
+    return ex ? preserveCompleteRunsFromExisting(inc, ex) : inc;
+  });
+}
+
+/** True when any row still needs GET …/messages/{id} before opened cache may store it. */
+export function windowHasSlimJournal(messages: Message[]): boolean {
+  return messages.some((m) => m.runs?.eventsComplete === false);
+}
+
 /**
  * Apply a persisted latest window over local memory.
  *
  * No unconfirmed tail → server list is the whole window (idle reopen / follow
- * catch-up of someone else's turn). Unconfirmed tail → overlay the persisted
- * prefix, keep this client's send (and stamp a same-content REST user onto the
- * optimistic user instead of duplicating it).
+ * catch-up of someone else's turn), with complete journals kept when the GET
+ * slimmed ``runs``. Unconfirmed tail → overlay the persisted prefix, keep this
+ * client's send (and stamp a same-content REST user onto the optimistic user
+ * instead of duplicating it).
  */
 export function adoptLatestWindowMessages(
   incoming: Message[],
   existing: Message[],
   opts: UnconfirmedTailOpts = {},
 ): Message[] {
+  const incomingKeptRuns = overlayCompleteRunsOnServerWindow(
+    incoming,
+    existing,
+  );
   const suffix = unconfirmedLocalTail(existing, opts);
-  if (suffix.length === 0) return incoming;
+  if (suffix.length === 0) return incomingKeptRuns;
 
-  const overlaid = overlayIncomingWithRicherExisting(incoming, existing);
+  const overlaid = overlayIncomingWithRicherExisting(
+    incomingKeptRuns,
+    existing,
+  );
   const confirmed = existing.slice(0, existing.length - suffix.length);
   const result = [...overlaid];
 

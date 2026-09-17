@@ -16,9 +16,13 @@ import { Button } from "@/components/ui";
 import {
   ensureFullMessageRuns,
   fetchMessageWindow,
+  scheduleEnsureFullRunsForWindow,
   shouldSetGeneratingOnHydrate,
 } from "@/services/messages";
-import { loadCachedConversation } from "@/services/offlineCache";
+import {
+  loadCachedConversation,
+  persistOpenedCache,
+} from "@/services/offlineCache";
 import { loadRecovery } from "@/services/resume";
 import { scheduleHydrateAttachSettle } from "@/services/turns";
 import {
@@ -26,8 +30,10 @@ import {
   type Message,
   assistantProjectionId,
   getRuntime,
+  overlayCompleteRunsOnServerWindow,
   useActiveMessages,
   useConversationStore,
+  windowHasSlimJournal,
 } from "@/stores/conversation";
 import {
   ExecutionScopeContext,
@@ -139,7 +145,10 @@ export function TurnDetailPage() {
               !getRuntime(conversationId).isGenerating
             ) {
               s.setMessageWindow(
-                win.messages,
+                overlayCompleteRunsOnServerWindow(
+                  win.messages,
+                  getRuntime(conversationId).messages,
+                ),
                 {
                   hasMoreBefore: win.hasMoreBefore,
                   hasMoreAfter: win.hasMoreAfter,
@@ -149,6 +158,21 @@ export function TurnDetailPage() {
               s.setMemoryUpdates(win.memoryUpdates, conversationId);
               if (shouldSetGeneratingOnHydrate(win.messages)) {
                 s.setGenerating(true, conversationId);
+              }
+              if (win.messages.length > 0) {
+                const merged = getRuntime(conversationId).messages;
+                if (!windowHasSlimJournal(merged)) {
+                  void persistOpenedCache(
+                    conversationId,
+                    merged,
+                    win.memoryUpdates,
+                    {
+                      hasMoreBefore: win.hasMoreBefore,
+                      hasMoreAfter: win.hasMoreAfter,
+                    },
+                  );
+                }
+                scheduleEnsureFullRunsForWindow(conversationId);
               }
             }
           }

@@ -11,7 +11,6 @@ def load_roster() -> tuple[type, ...]:
     from agentcore.tools.builtin.archive_create import ArchiveCreateTool
     from agentcore.tools.builtin.archive_extract import ArchiveExtractTool
     from agentcore.tools.builtin.browser import BrowserTool
-    from agentcore.tools.builtin.code_search import CodeSearchTool
     from agentcore.tools.builtin.docs_read import DocsReadTool
     from agentcore.tools.builtin.docs_write import DocsWriteTool
     from agentcore.tools.builtin.file_ops import (
@@ -54,7 +53,6 @@ def load_roster() -> tuple[type, ...]:
         ArchiveCreateTool,
         DownloadUrlTool,
         GrepTool,
-        CodeSearchTool,
         DocsReadTool,
         DocsWriteTool,
         GitTool,

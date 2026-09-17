@@ -558,6 +558,7 @@ async def react_loop(
                         reasoning=last_asst.reasoning_content or "",
                         usage=None,
                         tool_calls=pending,
+                        thinking_blocks=last_asst.thinking_blocks,
                     ),
                     messages=messages,
                     tools=tools,
@@ -924,6 +925,7 @@ async def react_loop(
                     empty_raw_preview=round_result.empty_raw_preview,
                     finish_reason=round_result.finish_reason,
                     provider_base_url=round_result.provider_base_url,
+                    thinking_blocks=round_result.thinking_blocks,
                 )
                 # 协调监听豁免：captain 在活跃协调中对纯进展事件保持静默（无正文、无工具）
                 # 是被指引的合法行为，不进 B2 空响应梯子；ALL_COMPLETED 注入即关闭 session，

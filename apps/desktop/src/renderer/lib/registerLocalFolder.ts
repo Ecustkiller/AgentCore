@@ -88,14 +88,7 @@ export async function pickAndRegisterLocalFolder(opts?: {
       addFolderCache(folder);
     }
 
-    // Silent Cursor-style index + MCP + rules/memory warm: ensure sidecar (fire-and-forget).
-    if (window.sidecarApi?.warmCodeIndex) {
-      void window.sidecarApi
-        .warmCodeIndex({ rootId: picked.root.id, subpath: "" })
-        .catch(() => {
-          /* best-effort; no toast */
-        });
-    }
+    // Silent MCP + rules/memory warm: ensure sidecar (fire-and-forget).
     if (window.sidecarApi?.warmMcpDiscover) {
       void window.sidecarApi
         .warmMcpDiscover({

@@ -63,7 +63,7 @@ class GrepTool:
             name="grep",
             description=(
                 "用正则搜工作区文件内容（ripgrep / Rust regex）。返回 `path:line: text`。"
-                "按文件名用 `glob`；概念定位用 code_search。"
+                "按文件名用 `glob`。"
             ),
             parameters={
                 "type": "object",
@@ -114,7 +114,9 @@ class GrepTool:
 
         from agentcore.tools.builtin.file_ops.prepare_path import prepare_tool_path
 
-        prepared = await prepare_tool_path(rel_dir, context, start=start)
+        prepared = await prepare_tool_path(
+            rel_dir, context, start=start, as_directory=True
+        )
         if isinstance(prepared, ToolResult):
             return prepared
         rel_dir = prepared
@@ -263,8 +265,7 @@ def _empty_result_note(*, pattern: str, rel_dir: str, glob: str) -> str:
     tips = (
         "可执行下一步：① 不确定位置则省略 path 从根再搜，勿猜 src/@scope；"
         "② 换更短/同义的 pattern，或开 case_insensitive；"
-        "③ 若是概念/意图而非确切字符串，改用 code_search；"
-        "④ 按文件名找用 glob。"
+        "③ 按文件名找用 glob。"
     )
     return f"本次 grep 未匹配 /{pattern}/{scope}{glob_note}。不要据此断定代码不存在。{tips}"
 

@@ -68,8 +68,6 @@ async def build_turn_backend(
             conversation_id,
             workspace_channel=bootstrap_ch,
         )
-    # Code-index maintenance is kicked from write paths / code_search only —
-    # not at turn entry (keeps TTFT / first thinking packet off the index path).
     # A′ write-lock short waits: emit workspace_lock_wait so desktop never fakes Thinking…
     bind_wait = getattr(backend, "set_lock_waiting_hook", None)
     if callable(bind_wait):

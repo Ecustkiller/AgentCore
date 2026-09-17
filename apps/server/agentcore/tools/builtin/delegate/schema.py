@@ -1,9 +1,9 @@
 """Delegate tool schema and constants.
 
-Schema layer (工具面瘦身): short trigger + 拆任务合同 + playbook/tasks 互斥.
+Schema layer (工具面瘦身): 信息判据四问 + 拆任务合同 + playbook/tasks 互斥.
 何时用写在本 description（根 / 嵌套共用 ``DELEGATE_WHEN``，窗绑定分叉）；
-根 CEO 编制 HOW → ``consult(staffing)``；嵌套 lead → ``consult(lead_subteam)``.
-task 参数只留自包含对比边界；填约束/路径/凭据 HOW 在上述 consult。
+编制 HOW 写在本按钮（根 / 嵌套共用填参与一块验收；嵌套另加拆层）。
+不进常驻核、不另开按需 skill。
 """
 
 from __future__ import annotations
@@ -29,29 +29,60 @@ TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
     },
 }
 
-# Shared when-to-use polarity (根 CEO / 嵌套 lead 同一条信息判据).
+# Shared when-to-use（根 / 嵌套同一条信息判据操作形；场面表不进按钮）。
 # 窗绑定与机械尾巴分叉：根=会话窗+立刻返回；嵌套=这张任务卡+阻塞收工。
-# 编制 HOW 仍分 consult：根 staffing / 嵌套 lead_subteam。
 DELEGATE_WHEN = (
-    "能切开才并行或交叉验证，或过程不该进你这扇窗；"
-    "切不出去的现场、窗里已有证据、一眼能收口不必派。"
+    "切出去判断还成立吗？否→自己做。"
+    "切出去是换墙钟还是换注意力？都没有→自己做。"
+    "写成目标·边界·验收再加编排和综述，还小于收益吗？否→自己做。"
+    "收益只认墙钟和注意力，人数不是理由。"
+    "过程进你这扇窗之后每轮都还在 ≠ 这一回合装得下。"
     "有写权 ≠ 自己做完。不知读哪 ≠ 自己连搜。"
+)
+
+# 写 tasks 时必见。原 consult(staffing)/lead_subteam 上收进本按钮。
+DELEGATE_STAFF_HOW = (
+    "1 人只在活本身是一块："
+    "同一份成稿的查证与起草是一块；点名了多份来源仍是 1 人取证。"
+    "审查者 ≠ 作者。"
+    "交了队长 ≠ 再平铺同名角色。"
+    "收口后再动同一支团队：只写还要干的人并点名上一批 run_id ≠ 把上一批整表再交一遍。"
+    "只报告的活默认 1 人、不催写盘。"
+)
+# 开局会注入用户原话 / 前置结果 / 并行队友任务；task 只写这一人的增量。
+TASK_WINDOW_HOW = (
+    "这一人的目标+边界+验收。"
+    "用户原话、前置结果、并行队友任务由引擎注入 ≠ 再抄进 task。"
+    "≠逐步改法、章节骨架。"
+)
+TASK_FILL_HOW = (
+    "已拍板约束同一行「已确认约束：…」，没有则「（无）」；"
+    "未拍板的标假设，改法与现状不进该行。"
+    "未装配能力 ≠ 写入。"
+    "点名入口或成品路径用工作区相对路径（正斜杠）。"
+    "验收写清了解到什么算够：能拿去接着聊或接着做即可 ≠ 把范围内每处都查一遍。"
+    "公开渠道没有：确认没有，用已有材料估计并标明不确定 = 完成。"
+)
+NESTED_STAFF_HOW = (
+    "整段里程碑、空仓库多模块仍应拆 ≠ 凡大活必嵌套 ≠ 为了编排而编排。"
+    "收工后由你整合交差。"
 )
 
 DELEGATE_DESCRIPTION = (
     f"拆任务给临时团队（默认手写顶层 tasks：role+task，≤{MAX_DELEGATION_TASKS}；非终结）。"
     f"默认用本工具：{DELEGATE_WHEN}"
     "你的窗跟会话走。"
-    "HOW→consult(staffing)。"
+    f"{DELEGATE_STAFF_HOW}"
 )
 
-# Nested captain: blocking wait, not coordination. HOW is a different consult.
+# Nested captain: blocking wait, not coordination. Same fill contract; extra 拆层.
 NESTED_DELEGATE_DESCRIPTION = (
     f"把当前任务拆给由你指挥的子团队（手写 tasks：role+task，≤{MAX_DELEGATION_TASKS}；"
     "调用后等到子队收工）。"
     f"{DELEGATE_WHEN}"
     "你的窗跟这张任务卡走，卡上已是一件则留下。"
-    "HOW→consult(lead_subteam)。"
+    f"{DELEGATE_STAFF_HOW}"
+    f"{NESTED_STAFF_HOW}"
 )
 
 DELEGATE_PARAMETERS = {
@@ -69,10 +100,7 @@ DELEGATE_PARAMETERS = {
                     "role": {"type": "string"},
                     "task": {
                         "type": "string",
-                        "description": (
-                            "自包含=目标+边界+验收（worker 看不到完整历史）"
-                            "≠逐步改法、章节骨架。"
-                        ),
+                        "description": TASK_WINDOW_HOW + TASK_FILL_HOW,
                     },
                     "deliverable": TASK_DELIVERABLE_SCHEMA,
                     "id": {
@@ -97,8 +125,6 @@ DELEGATE_PARAMETERS = {
                     },
                     "continue_from_run_id": {
                         "type": "string",
-                        # 「动同一支团队 / 不限条数 / 勿冷派整团」HOW → staffing。
-                        # 这里只留本字段自己的填法。
                         "description": (
                             "同人续派（调查后确认修 / 改稿 / 收口后接着干）；填已完成 run_id。"
                         ),

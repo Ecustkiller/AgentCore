@@ -59,7 +59,7 @@ def test_ignored_dirs_include_git_and_ide_caches_not_bare_internal():
 
 def test_internal_zone_relpath_is_path_aware():
     assert is_internal_zone_relpath("AgentCore/index")
-    assert is_internal_zone_relpath("AgentCore/index/code_search.db")
+    assert is_internal_zone_relpath("AgentCore/index/cache.db")
     assert is_internal_zone_relpath("AgentCore/trash/x")
     assert is_internal_zone_relpath("AgentCore/baselines/m.zip")
     assert not is_internal_zone_relpath("AgentCore")
@@ -85,8 +85,8 @@ def test_ignored_dir_entry_path_aware_and_ancestor_noise():
 def test_system_suffixes_hide_from_ui_and_ai():
     assert ".db" in SYSTEM_IGNORED_FILE_SUFFIXES
     assert ".sqlite" in SYSTEM_IGNORED_FILE_SUFFIXES
-    assert is_system_ignored_file_name("code_search.db")
-    assert is_system_ignored_file_name("CODE_SEARCH.DB")
+    assert is_system_ignored_file_name("cache.db")
+    assert is_system_ignored_file_name("CACHE.DB")
     assert is_system_ignored_file_name("x.pyc")
     assert not is_system_ignored_file_name("photo.png")
     assert not is_system_ignored_file_name("readme.md")
@@ -112,21 +112,21 @@ def test_ai_noise_suffixes_are_media_archives_binaries():
     assert is_ai_noise_file_name("app.LOG")
     assert is_ai_noise_file_name("data.PARQUET")
     assert is_ai_noise_file_name("model.pkl")
-    assert not is_ai_noise_file_name("code_search.db")  # system tier
+    assert not is_ai_noise_file_name("cache.db")  # system tier
     assert not is_ai_noise_file_name("report.pdf")  # office docs stay listable
 
 
 def test_ignored_file_suffixes_combine_both_tiers():
     assert ".db" in IGNORED_FILE_SUFFIXES
     assert ".png" in IGNORED_FILE_SUFFIXES
-    assert is_ignored_file_name("code_search.db")
+    assert is_ignored_file_name("cache.db")
     assert is_ignored_file_name("photo.PNG")
     assert not is_ignored_file_name("readme.md")
     assert not is_ignored_file_name("report.pdf")
 
 
 def test_ignored_relpath_prunes_nested_noise():
-    assert is_ignored_relpath("AgentCore/index/code_search.db")
+    assert is_ignored_relpath("AgentCore/index/cache.db")
     assert is_ignored_relpath("node_modules/pkg/index.js")
     assert is_ignored_relpath("vendor/github.com/foo/bar.go")
     assert is_ignored_relpath("logs/dev.jsonl")
@@ -322,7 +322,7 @@ async def test_index_files_skips_internal_zone_db_and_media(tmp_path: Path):
     (tmp_path / "hero.png").write_bytes(b"png")
     ac = tmp_path / "AgentCore" / "index"
     ac.mkdir(parents=True)
-    (ac / "code_search.db").write_bytes(b"db")
+    (ac / "cache.db").write_bytes(b"db")
     (tmp_path / "AgentCore" / "规则").mkdir(parents=True)
     (tmp_path / "AgentCore" / "规则" / "x.md").write_text("r", encoding="utf-8")
     (tmp_path / "index").mkdir()
@@ -372,7 +372,7 @@ async def test_recursive_list_hides_internal_zones_keeps_bare_index(tmp_path: Pa
     """Cloud UI expands AgentCore via recursive list — zones must not leak."""
     (tmp_path / "ok.txt").write_text("x", encoding="utf-8")
     (tmp_path / "AgentCore" / "index").mkdir(parents=True)
-    (tmp_path / "AgentCore" / "index" / "code_search.db").write_bytes(b"db")
+    (tmp_path / "AgentCore" / "index" / "cache.db").write_bytes(b"db")
     (tmp_path / "AgentCore" / "trash").mkdir(parents=True)
     (tmp_path / "AgentCore" / "baselines").mkdir(parents=True)
     (tmp_path / "AgentCore" / "规则").mkdir(parents=True)

@@ -842,6 +842,8 @@ def evaluate_rings(bundle: GoldenBundle) -> GoldenReport:
     debate_files = [p for p in files if p.startswith(DEBATE_PREFIX)]
     has_brief = any("决策简报" in p for p in debate_files)
     has_narrative = any("交锋叙事线" in p for p in debate_files)
+    has_merged = any(p.rsplit("/", 1)[-1].startswith("辩论·") for p in debate_files)
+    has_legacy_pair = has_brief and has_narrative
     brief_skeleton: dict[str, bool] = {}
     debate_result_n = 0
     for e in events:
@@ -864,19 +866,19 @@ def evaluate_rings(bundle: GoldenBundle) -> GoldenReport:
     )
     if debate_result_n == 0:
         gaps.append("debate_result：journal 未见该事件，无法检四维骨架")
-    ring5_pass = has_brief and has_narrative and skeleton_ok
+    ring5_pass = (has_merged or has_legacy_pair) and skeleton_ok
     ring5 = RingResult(
         5,
         "双产物落盘+debate_result 四维骨架",
         "PASS" if ring5_pass else "FAIL",
         (
-            f"brief_file={has_brief} narrative_file={has_narrative} "
+            f"merged_file={has_merged} legacy_pair={has_legacy_pair} "
             f"skeleton={brief_skeleton} debate_result_n={debate_result_n}"
         ),
         {
             "debate_files": debate_files,
-            "has_brief_file": has_brief,
-            "has_narrative_file": has_narrative,
+            "has_merged_file": has_merged,
+            "has_legacy_pair": has_legacy_pair,
             "brief_skeleton": brief_skeleton,
             "debate_result_count": debate_result_n,
         },

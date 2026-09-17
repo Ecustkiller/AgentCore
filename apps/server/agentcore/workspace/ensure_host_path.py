@@ -15,9 +15,8 @@ from agentcore.workspace.external_mounts import external_ns, parse_external_path
 from agentcore.workspace.host_path import (
     ClassifiedPath,
     GrantMode,
-    is_forbidden_host_root,
     mode_covers,
-    split_host_parent,
+    split_host_entry_for_mount,
 )
 from agentcore.workspace.hot_attach import attach_grants_to_backend
 
@@ -168,8 +167,9 @@ async def ensure_host_path(
 ) -> str:
     """Return ``external/<alias>/…`` for a classified host path.
 
-    ``not_directory`` on a file path retries the parent directory (structured,
-    not an intent guess). Listing a file does not retry.
+    A file or a name being created (``as_directory=False``) mints the parent
+    folder and keeps the last segment as remainder. Listing a directory mints
+    the path as given. The desktop still only locates an existing folder.
     """
     if classified.kind == "forbidden":
         if classified.forbidden_reason == "home_not_well_known":
@@ -184,43 +184,22 @@ async def ensure_host_path(
     well_known = classified.well_known
     target_name = classified.target_name
     remainder = classified.remainder
-
-    try:
-        return await _mint(
-            context,
+    if not as_directory:
+        path, well_known, target_name, remainder = split_host_entry_for_mount(
             path=path,
             well_known=well_known,
             target_name=target_name,
             remainder=remainder,
-            grant_mode=grant_mode,
         )
-    except ExternalMountError as e:
-        if e.reason != "not_directory" or as_directory:
-            raise
-        if well_known and target_name:
-            extra = "/".join(p for p in (target_name, remainder) if p)
-            return await _mint(
-                context,
-                path=None,
-                well_known=well_known,
-                target_name=None,
-                remainder=extra,
-                grant_mode=grant_mode,
-            )
-        if path:
-            parent, name = split_host_parent(path)
-            if is_forbidden_host_root(parent):
-                raise
-            extra = "/".join(p for p in (name, remainder) if p)
-            return await _mint(
-                context,
-                path=parent,
-                well_known=None,
-                target_name=None,
-                remainder=extra,
-                grant_mode=grant_mode,
-            )
-        raise
+
+    return await _mint(
+        context,
+        path=path,
+        well_known=well_known,
+        target_name=target_name,
+        remainder=remainder,
+        grant_mode=grant_mode,
+    )
 
 
 def _lookup_mount(context: ToolContext, alias: str):

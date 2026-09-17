@@ -126,7 +126,7 @@ def test_complete_without_reasoning_still_emits_human_content():
 
 
 def test_format_verdict_is_user_facing_only():
-    """终审只写倾向 / 胜负手 / 置信 / 交接，不写比分、不倒灌简报全文。"""
+    """终审只写倾向 / 胜负手 / 把握 / 未决，不写比分、不倒灌简报全文。"""
     text = format_moderator_output(
         "brief",
         {
@@ -146,10 +146,10 @@ def test_format_verdict_is_user_facing_only():
     assert "## 终审" in text
     assert "**倾向**：反方略稳" in text
     assert "**胜负手**：正方熔断成本无据" in text
-    assert "**置信**：medium" in text
-    assert "需你定夺" in text
-    assert "事实分歧" in text
-    assert "待解问题" in text
+    assert "**把握**：medium" in text
+    assert "要你拍" in text
+    assert "还没核实" in text
+    assert "只能等" in text
     assert "不该出现在时间线" not in text
     assert "也不该倒灌" not in text
     assert "命门" not in text
@@ -199,7 +199,7 @@ async def test_run_emits_frame_assess_brief_on_moderator_run():
         motion="该不该做 X",
         form=DebateForm.DEBATE,
         sides=_sides(),
-        policy=RoundPolicy(thorough=False, max_rounds=1),
+        policy=RoundPolicy(max_rounds=1),
     )
     mod = Moderator(provider=llm, model="m", run_id="debate_mod1", sink=sink)
     await mod.run(config, run_round=runner)

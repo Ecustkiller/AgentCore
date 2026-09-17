@@ -26,9 +26,8 @@ from typing import Any
 # ── Git hard-ban (single source for git_ops + breaker) ───────────────────────
 
 # Ordinary ``push`` is allowlisted (approval + CEO-delegate); force / protected
-# targets stay hard-denied below. reset/clean remain banned. G2 collaboration
-# verbs (stash/merge/rebase/cherry-pick/tag/remote) are allowlisted in git_ops
-# with execution-layer guards — not in this hard-ban set.
+# targets stay hard-denied below. reset/clean remain banned. Collaboration verbs
+# (stash/merge/rebase/…) are not on the git tool allowlist.
 GIT_FORBIDDEN_SUBCOMMANDS: frozenset[str] = frozenset({"reset", "clean"})
 GIT_PROTECTED_BRANCHES: frozenset[str] = frozenset({"main", "master"})
 
@@ -417,8 +416,6 @@ def _path_args_for_tool(tool_name: str, arguments: dict[str, Any]) -> list[str]:
         if glob:
             paths.append(glob)
         return paths
-    if tool_name == "code_search":
-        return [str(arguments.get("path_prefix") or "")]
     return []
 
 
@@ -487,7 +484,7 @@ def evaluate_tool_call(tool_name: str, arguments: dict[str, Any] | None) -> Brea
     name = (tool_name or "").strip()
 
     # Sensitive path reads: templates allow; credentials ASK; key material DENY.
-    if name in {"file_read", "grep", "code_search"}:
+    if name in {"file_read", "grep"}:
         for path in _path_args_for_tool(name, args):
             kind = classify_sensitive_path(path)
             if kind is SensitivePathClass.DENY:
@@ -534,35 +531,6 @@ def evaluate_tool_call(tool_name: str, arguments: dict[str, Any] | None) -> Brea
                 reason=(
                     f"Git 子命令 '{sub}' 被硬禁清单拒绝（reset/clean 等不可由"
                     "权限模式或本轮放行放开）。请改由用户在本机终端手动完成。"
-                ),
-            )
-        action = str(args.get("action") or "").strip().lower()
-        # G2: destructive stash/tag/remote actions stay DENY (not grantable).
-        if sub == "stash" and action in {"drop", "clear"}:
-            return BreakerHit(
-                verdict=BreakerVerdict.DENY,
-                rule_id="git.forbidden_stash_destructive",
-                reason=(
-                    "禁止 git stash drop/clear（不可由权限模式或本轮放行放开）。"
-                    "请改用 list/push/pop，或由用户在本机终端手动处理。"
-                ),
-            )
-        if sub == "tag" and action in {"delete", "remove", "rm"}:
-            return BreakerHit(
-                verdict=BreakerVerdict.DENY,
-                rule_id="git.forbidden_tag_delete",
-                reason=(
-                    "禁止删除 tag（不可由权限模式或本轮放行放开）。"
-                    "仅允许 list / create（轻量标签）。"
-                ),
-            )
-        if sub == "remote" and action in {"remove", "rm", "delete"}:
-            return BreakerHit(
-                verdict=BreakerVerdict.DENY,
-                rule_id="git.forbidden_remote_remove",
-                reason=(
-                    "禁止 git remote remove（不可由权限模式或本轮放行放开）。"
-                    "仅允许 list / add。"
                 ),
             )
         # Ordinary push may proceed to approval; force / protected-branch target DENY.

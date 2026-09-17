@@ -140,7 +140,7 @@ export const mechanismChapter: ManualChapterContent = {
         },
         {
           type: "paragraph",
-          text: "辩论时的记分牌与终审",
+          text: "辩论时的顶栏与终审",
           emphasis: true,
         },
         {

@@ -403,14 +403,7 @@ def project_cleared_write_args(
             else:
                 new_calls.append(call)
         if changed:
-            projected.append(
-                LLMMessage(
-                    role="assistant",
-                    content=message.content,
-                    tool_calls=new_calls,
-                    reasoning_content=message.reasoning_content,
-                )
-            )
+            projected.append(replace(message, tool_calls=new_calls))
         else:
             projected.append(message)
     return projected

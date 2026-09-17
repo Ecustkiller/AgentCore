@@ -210,7 +210,11 @@ export function RunDetailBody({
           打开辩论室
         </Button>
       )}
-      <ReceivedContextSection key={runId} blocks={contextBlocks} />
+      <ReceivedContextSection
+        key={runId}
+        blocks={contextBlocks}
+        process={process}
+      />
     </>
   );
 

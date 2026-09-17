@@ -2,8 +2,8 @@
 
 ## 为什么有这道棘轮
 
-工具 schema 是**每一轮**都重发的输入：低频工具改按需后开场表已瘦一截，但常驻面
-（delegate / git / ask_user …）仍坐在 prefix 前段——一改就是全量 miss。它的膨胀方式
+工具 schema 是**每一轮**都重发的输入：低频工具（含 git）改按需后开场表已瘦一截，但常驻面
+（delegate / ask_user …）仍坐在 prefix 前段——一改就是全量 miss。它的膨胀方式
 几乎总是同一种：同一条约束在工具描述、参数描述、兄弟工具里各抄一份，或者字段删了、负面
 清单还留着。每份副本单看都「只多几十字」，没人拦就月月长。
 
@@ -13,7 +13,8 @@
 ## 红了怎么办
 
 - **超了上限**：先问是不是又抄了一份别处已有的话。同一条约束只留一处：
-  取值语义留在参数描述，跨工具路由 / 审批策略留在工具描述，HOW 留在 skill / consult。
+  取值语义留在参数描述，跨工具路由 / 审批策略留在工具描述，HOW 默认留在 skill / consult；
+  写参当轮必见的合同可上收进该工具（现：delegate 编制）。
   确实是**新增**的有效语义 → 把这里的数字调上去，并在 PR 里说清多出来的是什么。
 - **远低于上限**（比如又砍了一批）：把数字调下来，棘轮才继续咬合。
 
@@ -122,6 +123,12 @@ from agentcore.tools.protocol import ToolSchema
 # 实测桌面 1373、web 1205。cap 1410→1380、1240→1210。
 # 2026-09-16 开场收口：delegate 场面表出按钮进 staffing；resolve_folder 匹配序出按钮。
 # 实测 delegate 1929、resolve_folder 274。cap 1970→1930、340→280。
+# 2026-09-18 delegate：when-to-use 从口号换成信息判据四问（路由尺出核归按钮）。
+# 实测 1994。cap 1930→2000（抬顶=新语义，非回潮抄写）。
+# 2026-09-18 delegate：编制 HOW 从 staffing / lead_subteam 上收到按钮（写参当轮必见）。
+# 实测 2236。cap 2000→2240（抬顶=新语义，非回潮抄写）。
+# 2026-09-18 delegate.task：开局窗事实换掉「看不到完整历史」真空自包含。
+# 实测 2254。cap 2240→2260（抬顶=新语义，非回潮抄写）。
 # 2026-09-16 git：enum / default / min / max 出 description（同 09-14 host/browser）。
 # 实测 2129。cap 2190→2130。
 # 2026-09-16 删 run/browser.purpose（审批旁白，执行忽略；标题由 command/action 派生）。
@@ -136,14 +143,20 @@ from agentcore.tools.protocol import ToolSchema
 # 实测 ask_user 桌面 1251 / web 1083。cap 1300→1260、1130→1090。
 # 2026-09-16 冻 host os_log max_entries / max_bytes（执行硬默认 40/24k；桌面 80/48k 仍为病理阀）。
 # 实测 host 1628。cap 1870→1630。
+# 2026-09-18 git 收内环 PR 面（11 子命令）并改按需：砍 show/blame/branch/stash/merge
+# /rebase/cherry-pick/tag/remote/init_baseline 与 action/object/ref。实测 1590。cap 2130→1590。
+# 2026-09-18 questions[] 卡形与 escalate 共用；label 取值语义去「用户选」。
+# 实测 ask_user 桌面 1244 / web 1076。cap 1260→1250、1090→1080。
+# 2026-09-18 删 debate.thorough（点名开辩即认真档；轻量挑刺/多视角走 delegate）。
+# 实测 debate 1166。cap 1250→1170。
 _CAPS: dict[str, int] = {
     "browser": 910,
-    "git": 2130,
+    "git": 1590,
     "host": 1630,
     "run": 790,
-    "delegate": 1930,
-    "debate": 1250,
-    "ask_user": 1260,
+    "delegate": 2260,
+    "debate": 1170,
+    "ask_user": 1250,
     "list_folders": 210,
     "resolve_folder": 280,
     "create_folder": 480,
@@ -154,7 +167,8 @@ _TOTAL_CAP = sum(_CAPS.values())
 # 2026-09-10 填卡 HOW 出按钮。实测 1212。cap 1240→1220。
 # 2026-09-16 删 options.detail。实测 1127。cap 1210→1130。
 # 2026-09-16 删 message。实测 1083。cap 1130→1090。
-_ASK_USER_WEB_CAP = 1090
+# 2026-09-18 卡形共用。实测 1076。cap 1090→1080。
+_ASK_USER_WEB_CAP = 1080
 
 # Worker-only：escalate / handoff / 写盘三件套曾把身份段或 consult HOW 再抄一遍到按钮上。
 # 2026-08-29 escalate blocking：已拒凭据→false 短触发（身份段不进按钮）。当次实测 1698。cap 1690→1700。
@@ -167,6 +181,7 @@ _ASK_USER_WEB_CAP = 1090
 # str_replace 632 / escalate 1508。
 # 2026-09-10 波 2：escalate 卡片去补集；实测 1387。cap 1510→1390。
 # 2026-09-16 escalate 填卡 HOW 出按钮（权衡/推荐归 ask_kickoff）。实测 1350。cap 1390→1350。
+# 2026-09-18 questions[] 与 ask_user 共用卡形。实测 1349。cap 保持 1350。
 # 2026-09-08 撤 long_form_landing：写工具 description 去掉 HOW→consult。实测 write 334 /
 # str_replace 601。cap write 500→340、str_replace 640→610。
 # 2026-09-01 常驻文件面：回收站/扁平化手册出按钮，恢复路径留回执。实测
@@ -192,7 +207,7 @@ _COORD_CAPS: dict[str, int] = {
 _WORKER_CAPS: dict[str, int] = {
     "escalate": 1350,
     "handoff": 250,
-    "file_write": 310,
+    "file_write": 330,
     "str_replace": 560,
 }
 # 2026-09-06 区外路径改走 file_* 本机路径（运行时挂载）：when-to-use 进 description。
@@ -208,16 +223,18 @@ _WORKER_CAPS: dict[str, int] = {
 # file_write 扁平。实测 file_read 671 / grep 763 / glob 459 / file_write 303。
 # cap 690→680、810→770、530→460、340→310。
 # 2026-09-16 grep：max_results 出按钮，执行冻默认 50。实测 665。cap 770→670。
+# 2026-09-18 file_write：用户规则写 AgentCore/规则/*.md 进 description。实测 327。cap 310→330。
+# 2026-09-18 用户规则条目地址改 `.agentcore/规则`：file_list / file_delete when-to-use。
+# 实测 file_list 314 / file_delete 380。cap 300→320、360→380。
 _FILE_CAPS: dict[str, int] = {
-    "file_delete": 360,
+    "file_delete": 380,
     "file_read": 680,
     "grep": 670,
     "file_move": 330,
     "file_copy": 440,
     "glob": 460,
-    "file_list": 300,
+    "file_list": 320,
     "mkdir": 240,
-    "code_search": 550,
 }
 # 2026-09-09 query 定位（唯一命中打开 / 多场列出）。
 # 实测 search_conversations 857 / read_conversation 825。
@@ -332,7 +349,6 @@ def _measured_coord() -> dict[str, int]:
 
 
 def _measured_file() -> dict[str, int]:
-    from agentcore.tools.builtin.code_search import CodeSearchTool
     from agentcore.tools.builtin.file_ops import (
         FileCopyTool,
         FileDeleteTool,
@@ -353,7 +369,6 @@ def _measured_file() -> dict[str, int]:
         "glob": measure_openai_tool_chars(GlobTool().schema),
         "file_list": measure_openai_tool_chars(FileListTool().schema),
         "mkdir": measure_openai_tool_chars(MkdirTool().schema),
-        "code_search": measure_openai_tool_chars(CodeSearchTool().schema),
     }
 
 
@@ -444,6 +459,7 @@ def test_git_policy_matrix_lives_in_receipts_not_schema():
     assert "dirty_skip" not in tool_desc
     assert "ff-only" not in tool_desc
     assert "init_baseline" not in tool_desc
+    assert "HOW→consult(git)" not in tool_desc
     assert "请确认" in tool_desc
     assert "回执" in tool_desc
     assert "delegate" not in tool_desc
@@ -461,14 +477,12 @@ def test_git_policy_matrix_lives_in_receipts_not_schema():
     remote = GIT_TOOL_PARAMETERS["properties"]["remote"]
     assert remote.get("default") == "origin"
     assert "默认" not in remote["description"]
-    obj = GIT_TOOL_PARAMETERS["properties"]["object"]
-    assert obj.get("default") == "HEAD"
-    assert "默认" not in obj["description"]
-    action = GIT_TOOL_PARAMETERS["properties"]["action"]
-    assert action.get("enum") == ["list", "push", "pop", "create", "add"]
-    assert action.get("default") == "list"
-    assert "list|" not in action["description"]
-    assert "默认" not in action["description"]
+    props = GIT_TOOL_PARAMETERS["properties"]
+    assert "object" not in props
+    assert "action" not in props
+    assert "ref" not in props
+    assert "name" not in props
+    assert "force" not in props
 
 
 def test_run_description_is_one_command_face():
@@ -484,17 +498,18 @@ def test_on_demand_faces_point_how_to_consult():
     assert "HOW→consult(run)" in RunTool().schema.description
     assert "HOW→consult(browser)" in BrowserTool().schema.description
     assert "HOW→consult(debate_and_review)" in DEBATE_DESCRIPTION
-    assert "HOW→consult(staffing)" in DELEGATE_DESCRIPTION
+    assert "HOW→consult" not in DELEGATE_DESCRIPTION
     from agentcore.tools.builtin.delegate.schema import (
+        DELEGATE_STAFF_HOW,
         DELEGATE_WHEN,
         NESTED_DELEGATE_DESCRIPTION,
+        NESTED_STAFF_HOW,
     )
 
-    assert "HOW→consult(lead_subteam)" in NESTED_DELEGATE_DESCRIPTION
-    assert "staffing" not in NESTED_DELEGATE_DESCRIPTION
-    assert "lead_subteam" not in DELEGATE_DESCRIPTION
-    assert "等到子队收工" in NESTED_DELEGATE_DESCRIPTION
-    assert "切不出去" in NESTED_DELEGATE_DESCRIPTION
+    assert DELEGATE_STAFF_HOW in DELEGATE_DESCRIPTION
+    assert DELEGATE_STAFF_HOW in NESTED_DELEGATE_DESCRIPTION
+    assert NESTED_STAFF_HOW in NESTED_DELEGATE_DESCRIPTION
+    assert NESTED_STAFF_HOW not in DELEGATE_DESCRIPTION
     assert DELEGATE_WHEN in DELEGATE_DESCRIPTION
     assert DELEGATE_WHEN in NESTED_DELEGATE_DESCRIPTION
     assert "成篇落盘" not in NESTED_DELEGATE_DESCRIPTION
@@ -554,7 +569,6 @@ def test_on_demand_faces_point_how_to_consult():
         "motion",
         "sides",
         "cross_model",
-        "thorough",
         "background",
         "moderator_model",
     }

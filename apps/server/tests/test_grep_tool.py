@@ -181,7 +181,6 @@ def test_grep_schema_teaches_omit_path_when_unsure():
     assert "max_results" not in schema.description
     assert "省略 path" not in schema.description
     assert "禁止猜测" not in schema.description
-    assert "code_search" in schema.description
     assert "`glob`" in schema.description
     assert "file_list" not in schema.description
     path = schema.parameters["properties"]["path"]["description"]
@@ -388,7 +387,6 @@ async def test_grep_no_matches(tmp_path: Path):
     assert result.success is True
     assert "未匹配" in result.output or "没有匹配" in result.output
     assert "可执行下一步" in result.output
-    assert "code_search" in result.output
     assert "glob" in result.output
     assert "file_list(pattern)" not in result.output
     assert result.metadata["match_count"] == 0

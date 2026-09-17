@@ -4,6 +4,7 @@ from agentcore.workspace.host_path import (
     classify_tool_path,
     is_forbidden_host_root,
     mode_covers,
+    split_host_entry_for_mount,
     split_host_parent,
     workspace_rel_under_disk_root,
 )
@@ -82,6 +83,51 @@ def test_split_host_parent():
     p2, n2 = split_host_parent("/tmp/foo.pdf")
     assert n2 == "foo.pdf"
     assert p2 == "/tmp"
+
+
+def test_split_host_entry_for_mount_abs_file():
+    parent, well_known, target, remainder = split_host_entry_for_mount(
+        path=r"C:\Users\1\Desktop\案件\袁莹\bill.xlsx",
+        well_known=None,
+        target_name=None,
+        remainder="",
+    )
+    assert well_known is None
+    assert target is None
+    assert remainder == "bill.xlsx"
+    assert parent == split_host_parent(r"C:\Users\1\Desktop\案件\袁莹\bill.xlsx")[0]
+
+
+def test_split_host_entry_for_mount_skips_drive_root_parent():
+    path = r"C:\bill.xlsx"
+    assert is_forbidden_host_root(split_host_parent(path)[0])
+    got = split_host_entry_for_mount(
+        path=path, well_known=None, target_name=None, remainder=""
+    )
+    assert got == (path, None, None, "")
+
+
+def test_split_host_entry_for_mount_well_known_file():
+    path, well_known, target, remainder = split_host_entry_for_mount(
+        path=None,
+        well_known="downloads",
+        target_name="foo.pdf",
+        remainder="",
+    )
+    assert path is None
+    assert well_known == "downloads"
+    assert target is None
+    assert remainder == "foo.pdf"
+
+
+def test_split_host_entry_for_mount_keeps_nested_well_known_remainder():
+    got = split_host_entry_for_mount(
+        path=None,
+        well_known="desktop",
+        target_name="咨询",
+        remainder="a.md",
+    )
+    assert got == (None, "desktop", "咨询", "a.md")
 
 
 def test_workspace_rel_under_disk_root(tmp_path):

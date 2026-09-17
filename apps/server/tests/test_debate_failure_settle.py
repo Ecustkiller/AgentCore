@@ -243,7 +243,7 @@ async def test_brief_crash_without_closing_beat_still_lands_result(tmp_path):
     sink = EventSink()
     tool = _tool(llm, ctx=_ctx(tmp_path), sink=sink)
     result = await tool.execute(
-        {"motion": "该不该做 X", "form": "debate", "sides": _sides(), "thorough": False},
+        {"motion": "该不该做 X", "form": "debate", "sides": _sides()},
         _ctx(tmp_path),
     )
     assert result.success is True
@@ -259,16 +259,22 @@ async def test_brief_crash_without_closing_beat_still_lands_result(tmp_path):
 
 
 async def test_closing_crash_keeps_brief_and_rounds(tmp_path, monkeypatch):
-    """新场不调结辩 runner：boom 注入不触发，简报与叙事线照常交付，closings 空。"""
+    """新场不构造结辩 runner：make_closing_runner 不被调用，简报与叙事线照常交付。"""
+    from agentcore.runtime.debate import rounds as rounds_mod
     from agentcore.tools.builtin.debate import tool as tool_mod
 
+    calls: list[object] = []
+
     def _boom_closing_runner(*_a, **_k):  # noqa: ANN002, ANN003
+        calls.append(True)
+
         async def run_closing(*, sides, rounds):  # noqa: ANN001, ARG001
             raise RuntimeError("closing wave 503")
 
         return run_closing
 
-    monkeypatch.setattr(tool_mod, "make_closing_runner", _boom_closing_runner)
+    monkeypatch.setattr(rounds_mod, "make_closing_runner", _boom_closing_runner)
+    assert not hasattr(tool_mod, "make_closing_runner")
 
     llm = _DebateLLM()
     sink = EventSink()
@@ -278,6 +284,7 @@ async def test_closing_crash_keeps_brief_and_rounds(tmp_path, monkeypatch):
         _ctx(tmp_path),
     )
     assert result.success is True
+    assert calls == []  # 热路不构造 make_closing_runner
 
     events = await _drain(sink)
     payload = next(e for e in events if e.type == EventType.DEBATE_RESULT).payload
@@ -299,7 +306,7 @@ async def test_moderator_crash_emits_run_failed_terminal_frame(tmp_path):
     sink = EventSink()
     tool = _tool(llm, ctx=_ctx(tmp_path), sink=sink)
     result = await tool.execute(
-        {"motion": "该不该做 X", "form": "debate", "sides": _sides(), "thorough": False},
+        {"motion": "该不该做 X", "form": "debate", "sides": _sides()},
         _ctx(tmp_path),
     )
     assert result.success is False

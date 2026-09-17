@@ -78,7 +78,7 @@ def playbook_args_schema_description() -> str:
     """``delegate.playbook_args`` schema description.
 
     Always-on path skips consult, so schema must carry required keys.
-    Cap / fold / omit HOW lives in slots + skill.
+    Cap / fold / omit HOW lives in slots.
     """
     cues: list[str] = []
     for p in PLAYBOOKS.values():
@@ -89,7 +89,7 @@ def playbook_args_schema_description() -> str:
     return (
         "具名 playbook 快捷槽位对象（与 playbook 联用）。"
         f"必填槽：{required_cues}。"
-        "其余可选槽→consult(staffing)。"
+        "其余可选槽省略用默认。"
     )
 
 

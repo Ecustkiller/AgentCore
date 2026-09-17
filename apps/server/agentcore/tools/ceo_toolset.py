@@ -32,7 +32,6 @@ from agentcore.tools.builtin import (
 from agentcore.tools.builtin.ask_user import AskUserTool
 from agentcore.tools.builtin.consult import ConsultTool
 from agentcore.tools.builtin.delegate import DelegateTool
-from agentcore.tools.builtin.remember import RememberTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registration import register_always_ceo_tools
 from agentcore.tools.registry import ToolRegistry
@@ -190,7 +189,6 @@ def _assemble_ceo_toolset(
         skill_registry=skill_registry,
         include_vision=include_vision,
     )
-    chat_tools.register(RememberTool(folder_id=folder_id))
     if checkpoint_enabled:
         chat_tools.register(
             AskUserTool(

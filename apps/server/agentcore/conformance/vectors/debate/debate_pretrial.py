@@ -1,4 +1,4 @@
-"""庭前取证 conformance：fast 秒过 + Evidence Pack full（调查员舰队向量已退役）。"""
+"""庭前取证 conformance：Evidence Pack full（调查员舰队向量已退役）。"""
 
 from __future__ import annotations
 
@@ -21,177 +21,6 @@ from agentcore.runtime.events import (
 
 from .._common import _CONV, _COST, _USAGE
 from ._builders import _moderator_agents_runs, _pro_con_debater_agents, _pro_con_debater_runs
-
-
-def _multi_agent_debate_pretrial_fast() -> list[SSEEvent]:
-    """thorough=False：庭前秒过（skip_reason=fast），无取证员。"""
-    cap, mod = "captain1", "debate_mod_fast"
-    pro_run, con_run = f"{mod}_r1_pro", f"{mod}_r1_con"
-    mod_agents, mod_runs = _moderator_agents_runs(mod, cap, "主持正反辩论：快速对碰")
-    debater_agents = _pro_con_debater_agents()
-    debater_runs = _pro_con_debater_runs(
-        mod,
-        pro_run,
-        con_run,
-        pro_task="快速支持",
-        con_task="快速反对",
-    )
-    sides_wire = [
-        {"key": "pro", "name": "支持方"},
-        {"key": "con", "name": "反对方"},
-    ]
-    return [
-        message_start("m1", conversation_id=_CONV),
-        content_delta("快速对碰。"),
-        run_plan(
-            execution_id="exec_fast",
-            plan_type="debate",
-            task_summary="正反辩论：快速对碰",
-            agents=mod_agents,
-            runs=mod_runs,
-        ),
-        run_started(mod, mod, parent_run_id=cap),
-        debate_pretrial_started(
-            execution_id="exec_fast",
-            moderator_run_id=mod,
-            thorough=False,
-            sides=sides_wire,
-            skip_reason="fast",
-        ),
-        debate_pretrial_completed(
-            execution_id="exec_fast",
-            moderator_run_id=mod,
-            thorough=False,
-            sides=sides_wire,
-            status="skipped",
-            skip_reason="fast",
-            orders=[],
-            fallback_self_search=False,
-            evidence_ready=False,
-            completeness="empty",
-            incomplete=False,
-            evidence_ledger_count=0,
-            evidence_ledger_delta=[],
-        ),
-        debate_round_started(
-            execution_id="exec_fast",
-            moderator_run_id=mod,
-            round_no=1,
-            focus="核心一击",
-            cross_exam_enabled=False,
-            opening="",
-            form="debate",
-        ),
-        run_plan(
-            execution_id="exec_fast",
-            plan_type="debate",
-            task_summary="",
-            agents=debater_agents,
-            runs=debater_runs,
-        ),
-        run_started(pro_run, pro_run, parent_run_id=mod, stance="pro", round_no=1),
-        run_output_delta(pro_run, pro_run, "支持。"),
-        run_completed(
-            pro_run,
-            pro_run,
-            output_summary="支持方",
-            duration_ms=400,
-            role="member",
-            model="deepseek-v4-flash",
-            usage=_USAGE,
-            cost=_COST,
-        ),
-        run_started(con_run, con_run, parent_run_id=mod, stance="con", round_no=1),
-        run_output_delta(con_run, con_run, "反对。"),
-        run_completed(
-            con_run,
-            con_run,
-            output_summary="反对方",
-            duration_ms=400,
-            role="member",
-            model="deepseek-v4-flash",
-            usage=_USAGE,
-            cost=_COST,
-        ),
-        run_completed(
-            mod,
-            mod,
-            output_summary="1 轮·快速",
-            duration_ms=1200,
-            role="主持人",
-            model="deepseek-v4-flash",
-            usage=_USAGE,
-            cost=_COST,
-        ),
-        debate_result(
-            execution_id="exec_fast",
-            moderator_run_id=mod,
-            payload={
-                "form": "debate",
-                "motion": "快速对碰命题",
-                "stop_reason": "converged",
-                "opening": "",
-                "narrative_first": False,
-                "sides": [
-                    {
-                        "key": "pro",
-                        "name": "支持方",
-                        "stance": "支持",
-                        "is_subject": False,
-                    },
-                    {
-                        "key": "con",
-                        "name": "反对方",
-                        "stance": "反对",
-                        "is_subject": False,
-                    },
-                ],
-                "rounds": [
-                    {
-                        "round_no": 1,
-                        "focus": "核心一击",
-                        "summary": "快速交锋。",
-                        "verdict": {
-                            "real_clash": True,
-                            "new_arguments": False,
-                            "converged": True,
-                            "stop_reason": "converged",
-                            "rationale": "单轮即收",
-                        },
-                        "sides": [
-                            {
-                                "key": "pro",
-                                "name": "支持方",
-                                "run_id": pro_run,
-                                "ok": True,
-                            },
-                            {
-                                "key": "con",
-                                "name": "反对方",
-                                "run_id": con_run,
-                                "ok": True,
-                            },
-                        ],
-                        "clashes": [],
-                        "cross_exam": [],
-                        "scores": {},
-                    }
-                ],
-                "closings": [],
-                "brief": {
-                    "crux": "快速分歧",
-                    "strongest_points": {"pro": "支持", "con": "反对"},
-                    "handoffs": [],
-                    "decisive": "",
-                    "leaning": "未决",
-                    "confidence": "low",
-                    "recommendation": "需要更深入再辩",
-                },
-                "evidence_ledger": [],
-            },
-        ),
-        message_end(FinishReason.END_TURN, input_tokens=500, output_tokens=80, cost=_COST),
-    ]
 
 
 def _pack_source(
@@ -274,13 +103,11 @@ def _multi_agent_debate_pretrial_evidence_pack_full() -> list[SSEEvent]:
         debate_pretrial_started(
             execution_id="exec_ep_full",
             moderator_run_id=mod,
-            thorough=True,
             sides=sides_wire,
         ),
         debate_pretrial_orders(
             execution_id="exec_ep_full",
             moderator_run_id=mod,
-            thorough=True,
             sides=sides_wire,
             orders=[],
             evidence_pack=pack_wire,
@@ -292,7 +119,6 @@ def _multi_agent_debate_pretrial_evidence_pack_full() -> list[SSEEvent]:
         debate_pretrial_completed(
             execution_id="exec_ep_full",
             moderator_run_id=mod,
-            thorough=True,
             sides=sides_wire,
             status="skipped",
             skip_reason="evidence_pack",
@@ -458,7 +284,7 @@ def _multi_agent_debate_pretrial_evidence_pack_full() -> list[SSEEvent]:
 
 
 def _multi_agent_debate_pretrial_no_pack() -> list[SSEEvent]:
-    """thorough 无 pack：skip_reason=no_pack，无取证员，进入立论（发言期有界预算由 runtime 写入）。"""
+    """无 pack：skip_reason=no_pack，无取证员，进入立论（发言期有界预算由 runtime 写入）。"""
     cap, mod = "captain1", "debate_mod_nopack"
     pro_run, con_run = f"{mod}_r1_pro", f"{mod}_r1_con"
     mod_agents, mod_runs = _moderator_agents_runs(mod, cap, "主持正反辩论：是否采用方案 A")
@@ -497,13 +323,11 @@ def _multi_agent_debate_pretrial_no_pack() -> list[SSEEvent]:
         debate_pretrial_started(
             execution_id="exec_nopack",
             moderator_run_id=mod,
-            thorough=True,
             sides=sides_wire,
         ),
         debate_pretrial_orders(
             execution_id="exec_nopack",
             moderator_run_id=mod,
-            thorough=True,
             sides=sides_wire,
             orders=[],
             completeness="empty",
@@ -513,7 +337,6 @@ def _multi_agent_debate_pretrial_no_pack() -> list[SSEEvent]:
         debate_pretrial_completed(
             execution_id="exec_nopack",
             moderator_run_id=mod,
-            thorough=True,
             sides=sides_wire,
             status="skipped",
             skip_reason="no_pack",
@@ -705,13 +528,11 @@ def _multi_agent_debate_pretrial_evidence_pack_partial() -> list[SSEEvent]:
         debate_pretrial_started(
             execution_id="exec_ep_partial",
             moderator_run_id=mod,
-            thorough=True,
             sides=sides_wire,
         ),
         debate_pretrial_orders(
             execution_id="exec_ep_partial",
             moderator_run_id=mod,
-            thorough=True,
             sides=sides_wire,
             orders=[],
             evidence_pack=pack_wire,
@@ -723,7 +544,6 @@ def _multi_agent_debate_pretrial_evidence_pack_partial() -> list[SSEEvent]:
         debate_pretrial_completed(
             execution_id="exec_ep_partial",
             moderator_run_id=mod,
-            thorough=True,
             sides=sides_wire,
             status="skipped",
             skip_reason="evidence_pack",

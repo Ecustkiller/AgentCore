@@ -4,7 +4,7 @@ import type { DebateModel } from "../model";
 
 /**
  * 主持人身份符号（贯穿剧本主列）：法槌 + 「主持人」。
- * 模型徽章只挂记分牌，此处不重复。终审舞台用更大标题变体（「主持人终审」）。
+ * 模型徽章不在辩论室顶栏，此处不重复。终审舞台用更大标题变体（「主持人终审」）。
  */
 export function ModeratorIdentity({
   gavelSize = 13,
@@ -23,7 +23,7 @@ export function ModeratorIdentity({
   );
 }
 
-/** 记分牌用：`moderatorRunId` → `execution.runs` → `model`。直播态 id 为空 → null。 */
+/** 顶栏回放解析：`moderatorRunId` → `execution.runs` → `model`。直播态 id 为空 → null。 */
 export function resolveModeratorModel(
   debate: Pick<DebateModel, "moderatorRunId">,
   execution: Pick<Execution, "runs">,

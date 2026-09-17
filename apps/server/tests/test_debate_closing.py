@@ -57,7 +57,7 @@ def _config() -> DebateConfig:
         motion="该不该做 X",
         form=DebateForm.DEBATE,
         sides=_two_sides(),
-        policy=RoundPolicy(thorough=True, max_rounds=5),
+        policy=RoundPolicy(max_rounds=5),
     )
 
 

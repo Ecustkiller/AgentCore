@@ -1,9 +1,8 @@
 import { EvidenceLedgerProvider } from "@/components/chat/EvidenceLedgerContext";
 import { buildLedgerMap } from "@/lib/evidenceLedger";
 import type { Execution } from "@/stores/execution";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useMemo, useRef, useState } from "react";
 import { toDebateModel } from "../model";
-import { ClosingBlocks } from "./ClosingBlocks";
 import { FinaleStage } from "./FinaleStage";
 import { Scoreboard } from "./Scoreboard";
 import { Transcript } from "./Transcript";
@@ -15,9 +14,10 @@ import {
   loadDebateArenaLayout,
   saveDebateArenaLayout,
 } from "./debateLayoutPreference";
+import { ClosingBlocks } from "./replayLazy";
 
 /**
- * 辩论室赛事页：记分牌 + 阶段化剧本主列 + 终审舞台（记分牌随内容滚动，不占 sticky 屏）。
+ * 辩论室赛事页：顶栏 + 阶段化剧本主列 + 终审舞台（顶栏随内容滚动，不占 sticky 屏）。
  */
 export function DebateArena({
   execution,
@@ -79,12 +79,14 @@ export function DebateArena({
             layoutMode={effectiveLayout}
           />
           {model.settled && model.closings.length > 0 && (
-            <ClosingBlocks
-              closings={model.closings}
-              execution={execution}
-              messageId={messageId}
-              layoutMode={effectiveLayout}
-            />
+            <Suspense fallback={null}>
+              <ClosingBlocks
+                closings={model.closings}
+                execution={execution}
+                messageId={messageId}
+                layoutMode={effectiveLayout}
+              />
+            </Suspense>
           )}
           {model.settled && (
             <FinaleStage

@@ -96,7 +96,7 @@ _DOSSIER_WRITE_PREFIXES: tuple[str, ...] = (
 # Directory set ↔ desktop ``LIST_FILES_SKIP_DIRS`` (parity gate).
 # Do NOT put bare ``index``/``trash``/``baselines`` here — see ``is_internal_zone_relpath``.
 # Runtime / scratch / lockfile-store names (``logs``, ``tmp``, ``vendor``, …) match
-# common VCS ignore + code-search practice so BM25/grep are not flooded by ops text.
+# common VCS ignore so grep / listing are not flooded by ops text.
 IGNORED_DIRS: frozenset[str] = frozenset(
     {
         ".git",

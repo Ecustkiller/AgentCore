@@ -15,7 +15,7 @@ _DELIVERY = """\
 无等效替代 → `ask_user` 只覆盖这类目标，勿把工具表已有的导出器说成做不到。\
 用户明示当模板 → 先 `file_copy` 再改 ≠ 空白新建。\
 「缺口：」含 `package_install` 时，工作区里能过的检查 ≠ 用户机器上已经跑通；写明未装包，或 `export_to_local`。\
-交可打开的表时把表质量基线写入 task，勿用章节清单冒充表结构。\
+交可打开的表时 consult(data_file_landing)，把可打开合同写入 task，勿用章节清单冒充表结构。\
 其它无执行交付 → 落盘并标交付缺口，或只报告、不落盘。
 
 【路径】讨论/调研/审查类交付写 `AgentCore/文档/`：有专属出口才进 `research/`、`debate/`、`reviews/`；\

@@ -41,8 +41,8 @@ class ModelUnavailableReason(BaseModel):
     )
     required_protocol: Literal["openai_responses", "anthropic_messages"] = Field(
         description=(
-            "Upstream protocol this model needs that this gateway does not speak "
-            "(chat/completions only)."
+            "Protocol this catalog row needs that is unavailable on this origin. "
+            "Platform greys both; BYOK OpenCode already speaks anthropic_messages."
         ),
     )
 

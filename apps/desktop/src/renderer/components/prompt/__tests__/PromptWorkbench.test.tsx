@@ -44,6 +44,17 @@ vi.mock("@/components/markdown/MarkdownSourceEditor", async () => {
 vi.mock("@/components/markdown/sourceToolbar", () => ({
   SourceToolbar: () => null,
 }));
+vi.mock("@/components/prompt/PromptDocument", async () => {
+  const React = await import("react");
+  return {
+    PromptDocument: (props: { text: string }) =>
+      React.createElement(
+        "div",
+        { "data-testid": "prompt-preview" },
+        props.text,
+      ),
+  };
+});
 
 afterEach(() => {
   cleanup();
@@ -137,6 +148,7 @@ describe("PromptWorkbench", () => {
         titleEditable
         initialBody="body"
         initialTrigger="团队拆法"
+        triggerEnabled
         onSave={async () => true}
       />,
     );
@@ -147,7 +159,7 @@ describe("PromptWorkbench", () => {
     expect(line).toHaveProperty("value", "团队拆法");
     expect(line.getAttribute("placeholder")).toBe("用一句话说这是什么");
     expect(line.parentElement?.className).toContain("flex");
-    expect(line.parentElement?.className).toContain("items-baseline");
+    expect(line.parentElement?.className).toContain("items-start");
     expect(screen.getByTestId("cm-stub")).toBeTruthy();
   });
 
@@ -158,6 +170,7 @@ describe("PromptWorkbench", () => {
         titleEditable
         initialBody="怎么派"
         initialTrigger="派子队、拆里程碑时用"
+        triggerEnabled
         onSave={async () => true}
       />,
     );
@@ -196,6 +209,7 @@ describe("PromptWorkbench", () => {
         title="派单进阶"
         initialBody="HOW"
         initialTrigger="派单进阶"
+        triggerEnabled
       />,
     );
     expect(screen.queryByRole("heading", { name: "派单进阶" })).toBeNull();
@@ -231,15 +245,16 @@ describe("PromptWorkbench", () => {
         titleEditable
         initialBody="怎么审"
         initialTrigger="审合同时用"
+        triggerEnabled
         bindableTools={[{ id: "host", label: "本机" }]}
         onSave={onSave}
       />,
     );
     expect(screen.getByTestId("offered-tools")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "本机" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
     fireEvent.click(screen.getByRole("button", { name: "本机" }));
-    expect(
-      screen.getByRole("button", { name: "本机" }).getAttribute("aria-pressed"),
-    ).toBe("true");
+    expect(screen.getByRole("button", { name: "移除 本机" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await act(async () => {});
     expect(onSave).toHaveBeenCalledWith({
@@ -248,5 +263,65 @@ describe("PromptWorkbench", () => {
       body: "怎么审",
       offeredTools: ["host"],
     });
+  });
+
+  it("常驻不画目录句，未绑定则不画查阅后启用", () => {
+    render(
+      <PromptWorkbench
+        title="测试规则"
+        titleEditable
+        initialBody="# 规则\n末行写签名。"
+        initialTrigger="验证规则目录"
+        bindableTools={[
+          { id: "host", label: "本机" },
+          { id: "file_move", label: "工作区移动文件或目录" },
+        ]}
+        canAddOfferedTools={false}
+        onSave={async () => true}
+      />,
+    );
+    expect(screen.getByLabelText("名称")).toBeTruthy();
+    expect(screen.queryByLabelText("一句话介绍")).toBeNull();
+    expect(screen.queryByTestId("offered-tools")).toBeNull();
+    expect(screen.queryByText("工作区移动文件或目录")).toBeNull();
+  });
+
+  it("常驻已绑定只列出已选项，不能再添加", () => {
+    render(
+      <PromptWorkbench
+        title="合同审查"
+        titleEditable
+        initialBody="怎么审"
+        initialOfferedTools={["host"]}
+        bindableTools={[
+          { id: "host", label: "本机" },
+          { id: "debate", label: "开一场正反辩论" },
+        ]}
+        canAddOfferedTools={false}
+        onSave={async () => true}
+      />,
+    );
+    expect(screen.getByTestId("offered-tools")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "移除 本机" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "添加" })).toBeNull();
+    expect(screen.queryByText("开一场正反辩论")).toBeNull();
+  });
+
+  it("预览态渲染正文，不画封面与源码编辑器", () => {
+    render(
+      <PromptWorkbench
+        title="测试规则"
+        titleEditable
+        initialBody={"# 测试规则\n\n末行写签名。"}
+        previewing
+        leading={<span>tabs</span>}
+        onSave={async () => true}
+      />,
+    );
+    expect(screen.queryByLabelText("名称")).toBeNull();
+    expect(screen.queryByTestId("cm-stub")).toBeNull();
+    expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
+    expect(screen.getByText("测试规则", { exact: false })).toBeTruthy();
+    expect(screen.getByText("末行写签名。", { exact: false })).toBeTruthy();
   });
 });

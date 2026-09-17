@@ -5,7 +5,6 @@ import contextlib
 import time
 
 from agentcore.config import settings
-from agentcore.conversation.background import spawn_background
 from agentcore.conversation.common import (
     preview,
     resolve_folder_local_binding,
@@ -67,44 +66,6 @@ from agentcore.runtime.turn.runs import turn_runs
 from agentcore.workspace.attachments import persist_attachments
 
 logger = get_logger(__name__)
-
-
-def _block_code_index_flush(sink: EventSink) -> bool:
-    """True when turn-end must await index flush (non-PAUSED terminals).
-
-    Cold PAUSED (incl. team_preview) must not hold ``turn_runs`` while
-    ``flush_code_index_maintenance`` drains — resume drain would 409.
-    """
-    return sink._stream_finish_reason != FinishReason.PAUSED.value
-
-
-async def _flush_code_index_before_close(
-    backend: object | None,
-    *,
-    block: bool = True,
-) -> None:
-    """Local turn-end: drain deferred index maintenance before closing the sink.
-
-    When ``block`` is False (``FinishReason.PAUSED``), schedule flush
-    fire-and-forget so the turn task can finish and free ``turn_runs``.
-    Non-paused terminals still await (BY-DESIGN).
-    """
-    if backend is None:
-        return
-    flush = getattr(backend, "flush_code_index_maintenance", None)
-    if not callable(flush):
-        return
-
-    async def _run() -> None:
-        try:
-            await flush()
-        except Exception:
-            logger.exception("chat.code_index_flush_failed")
-
-    if block:
-        await _run()
-        return
-    spawn_background(_run())
 
 
 async def stream_chat(
@@ -256,9 +217,6 @@ async def stream_chat(
             sink.emit(message_end(FinishReason.ERROR))
     finally:
         if not sink._closed:
-            await _flush_code_index_before_close(
-                backend, block=_block_code_index_flush(sink)
-            )
             sink.close(reason="turn_finally")
 
 
@@ -430,9 +388,6 @@ async def regenerate_chat(
             sink.emit(message_end(FinishReason.ERROR))
     finally:
         if not sink._closed:
-            await _flush_code_index_before_close(
-                backend, block=_block_code_index_flush(sink)
-            )
             sink.close(reason="regenerate_finally")
 
 
@@ -705,9 +660,6 @@ async def resume_chat(
         if not settlement_durable:
             await restore_paused_turn(suspension)
         if not sink._closed:
-            await _flush_code_index_before_close(
-                backend, block=_block_code_index_flush(sink)
-            )
             sink.close(reason="resume_finally")
 
 
@@ -972,7 +924,4 @@ async def continue_chat(
                 message_id, conversation_id=conversation_id
             )
         if not sink._closed:
-            await _flush_code_index_before_close(
-                backend, block=_block_code_index_flush(sink)
-            )
             sink.close(reason="continue_finally")

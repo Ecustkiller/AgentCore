@@ -55,6 +55,7 @@ class FileDeleteTool:
             description=(
                 "删除工作区文件或目录（递归）。默认可逆；`permanent=true` 才永久删。"
                 "工作区根不可删。"
+                "用户规则删 `.agentcore/规则/*.md`。"
             ),
             parameters={
                 "type": "object",
@@ -85,7 +86,15 @@ class FileDeleteTool:
         if not rel_path:
             return _error("path 不能为空：请提供工作区内的相对文件路径", start)
 
-        from agentcore.workspace.project_shell import rewrite_project_shell_relpath
+        from .user_rules import maybe_user_rule_delete
+
+        rule_hit = await maybe_user_rule_delete(
+            requested_path=str(rel_path),
+            context=context,
+            start=start,
+        )
+        if rule_hit is not None:
+            return rule_hit
 
         prepared = await prepare_tool_path(
             rel_path, context, start=start, grant_mode="organize"
@@ -94,9 +103,6 @@ class FileDeleteTool:
             return prepared
         rel_path = prepared
 
-        rel_path, _shell_note = await rewrite_project_shell_relpath(
-            rel_path, context, register=False
-        )
         if not rel_path:
             return _error("path 不能为空：请提供工作区内的相对文件路径", start)
 
@@ -205,9 +211,12 @@ class FileMoveTool:
         if not source or not requested_dest:
             return _error("'source' 与 'destination' 均为必填", start)
 
-        from agentcore.workspace.project_shell import rewrite_project_shell_relpath
+        from .user_rules import maybe_user_rule_copy_or_move
 
-        # Dest first: empty-desk first shot may register; source then shares that slug.
+        blocked = maybe_user_rule_copy_or_move(str(source), str(requested_dest))
+        if blocked is not None:
+            return _error(blocked, start, contract_failure=True)
+
         prepared_dest = await prepared_write_relpath(requested_dest, context)
         if isinstance(prepared_dest, ToolResult):
             return prepared_dest
@@ -218,9 +227,6 @@ class FileMoveTool:
         if isinstance(prepared_src, ToolResult):
             return prepared_src
         source = prepared_src
-        source, _src_note = await rewrite_project_shell_relpath(
-            source, context, register=False
-        )
 
         if source == destination:
             # Idempotent: already at the (sanitized) target — e.g. dossier flatten.
@@ -366,9 +372,12 @@ class FileCopyTool:
         if not source or not requested_dest:
             return _error("'source' 与 'destination' 均为必填", start)
 
-        from agentcore.workspace.project_shell import rewrite_project_shell_relpath
+        from .user_rules import maybe_user_rule_copy_or_move
 
-        # Dest first: empty-desk first shot may register; source then shares that slug.
+        blocked = maybe_user_rule_copy_or_move(str(source), str(requested_dest))
+        if blocked is not None:
+            return _error(blocked, start, contract_failure=True)
+
         prepared_dest = await prepared_write_relpath(requested_dest, context)
         if isinstance(prepared_dest, ToolResult):
             return prepared_dest
@@ -379,9 +388,6 @@ class FileCopyTool:
         if isinstance(prepared_src, ToolResult):
             return prepared_src
         source = prepared_src
-        source, _src_note = await rewrite_project_shell_relpath(
-            source, context, register=False
-        )
 
         if source == destination:
             # Idempotent: already at the (sanitized) target — e.g. dossier flatten.
@@ -476,9 +482,17 @@ class MkdirTool:
         if not rel_path:
             return _error("path 不能为空：请提供工作区内的相对目录路径", start)
 
-        prepared = await prepared_write_relpath(
-            rel_path, context, register_bare=True
+        from .user_rules import maybe_user_rule_mkdir
+
+        rule_hit = await maybe_user_rule_mkdir(
+            requested_path=str(rel_path),
+            context=context,
+            start=start,
         )
+        if rule_hit is not None:
+            return rule_hit
+
+        prepared = await prepared_write_relpath(rel_path, context)
         if isinstance(prepared, ToolResult):
             return prepared
         rel_path, rename_note = prepared

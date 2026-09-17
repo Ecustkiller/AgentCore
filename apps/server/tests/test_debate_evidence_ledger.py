@@ -215,7 +215,7 @@ def test_debater_task_arms_ledger_check():
             DebateSide(key="pro", name="正方", stance="支持"),
             DebateSide(key="con", name="反方", stance="反对"),
         ],
-        policy=RoundPolicy.for_form(DebateForm.DEBATE, thorough=True),
+        policy=RoundPolicy.for_form(DebateForm.DEBATE),
     )
     payload = debater_task(cfg, cfg.sides[0], 0, round_no=1, focus="成本")
     assert payload["evidence_ledger_check"] is True

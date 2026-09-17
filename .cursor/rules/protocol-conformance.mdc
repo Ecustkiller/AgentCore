@@ -1,9 +1,25 @@
 ---
 description: 协议漂移巡检纪律——改动 SSE 事件→state 折叠(fold)、run 树投影、resume/审批状态机，或后端改事件契约时必读：共享向量/golden、assertNever 穷尽、pnpm conformance 门禁
 globs:
-  - "apps/desktop/src/renderer/**"
+  - "apps/desktop/src/renderer/protocol/**"
+  - "apps/desktop/src/renderer/stores/execution/**"
+  - "apps/desktop/src/renderer/stores/__tests__/execution/**"
+  - "apps/desktop/src/renderer/services/sse/**"
+  - "apps/desktop/src/renderer/lib/processTimeline.ts"
+  - "apps/desktop/src/renderer/lib/__tests__/processTimeline.test.ts"
+  - "apps/desktop/src/renderer/lib/foldMessageLane.ts"
+  - "apps/desktop/src/renderer/lib/turnOutcome.ts"
+  - "apps/desktop/src/renderer/lib/__tests__/turnOutcome*.tsx"
   - "packages/protocol-conformance/**"
-  - "apps/server/**"
+  - "packages/protocol-fold-kit/**"
+  - "packages/contract-types/**"
+  - "apps/server/agentcore/runtime/events/**"
+  - "apps/server/agentcore/runtime/interaction.py"
+  - "apps/server/agentcore/conformance/**"
+  - "apps/server/agentcore/api/sse.py"
+  - "apps/server/agentcore/replay/**"
+  - "apps/server/tests/test_conformance*.py"
+  - "apps/server/scripts/check_event_field_consumers.py"
 alwaysApply: false
 ---
 

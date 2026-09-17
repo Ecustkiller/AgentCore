@@ -7,13 +7,11 @@ from agentcore.runtime.skills.ask_midtask import _ASK_MIDTASK
 from agentcore.runtime.skills.data_file_landing import _DATA_FILE_LANDING
 from agentcore.runtime.skills.debate_and_review import _DEBATE_AND_REVIEW
 from agentcore.runtime.skills.delivery import _DELIVERY
-from agentcore.runtime.skills.lead_subteam import _LEAD_SUBTEAM
 from agentcore.runtime.skills.local_desk import _LOCAL_DESK
 from agentcore.runtime.skills.page_ui import _PAGE_UI
 from agentcore.runtime.skills.product_help import build_product_help_body
 from agentcore.runtime.skills.registry import (
     AUDIENCE_CEO_ONLY,
-    AUDIENCE_WORKER_ONLY,
     GROUP_DELIVERY,
     GROUP_ORCHESTRATION,
     GROUP_PRODUCT,
@@ -23,31 +21,11 @@ from agentcore.runtime.skills.registry import (
     SystemSkill,
 )
 from agentcore.runtime.skills.run import _RUN
-from agentcore.runtime.skills.staffing import _STAFFING
 
 # --- The system skills (single source of truth) -----------------------------
 # Catalog summaries: name-like (what this is), not a 19-way scene classifier.
 # Python len ≤80; HOW lives in the body. ``blurb`` is toolbox-card only.
 _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
-    SystemSkill(
-        name="staffing",
-        summary="团队拆法",
-        blurb="把任务拆成角色和并行，决定谁干什么",
-        body=_STAFFING,
-        # 根 CEO 编制 / 协调。嵌套 lead 的拆法不在此本 → ``lead_subteam``。
-        audience=AUDIENCE_CEO_ONLY,
-        group=GROUP_ORCHESTRATION,
-    ),
-    SystemSkill(
-        name="lead_subteam",
-        summary="子队拆法",
-        blurb="队员队长怎么把接到的任务再往下拆",
-        body=_LEAD_SUBTEAM,
-        # 持 delegate 的队员队长才进目录；叶子与 CEO 都不广告。
-        audience=AUDIENCE_WORKER_ONLY,
-        requires_tools=("delegate",),
-        group=GROUP_ORCHESTRATION,
-    ),
     SystemSkill(
         name="ask_kickoff",
         summary="开场提问",
@@ -90,8 +68,8 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     ),
     SystemSkill(
         name="data_file_landing",
-        summary="表格落盘",
-        blurb="表怎么落到工作区里的文件",
+        summary="整理表",
+        blurb="把数据文件整理成打开扫得懂的表",
         body=_DATA_FILE_LANDING,
         # Consult is CEO+worker. Body is the worker loop; CEO still consults to brief.
         # Do not gate on ``run``: this turn may have no execution assembled; the

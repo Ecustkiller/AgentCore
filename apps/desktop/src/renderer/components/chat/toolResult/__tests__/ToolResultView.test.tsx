@@ -280,6 +280,43 @@ describe("ToolResultView · web_fetch", () => {
   });
 });
 
+describe("ToolResultView · web_search", () => {
+  it("puts domain on the title row and keeps the snippet below", () => {
+    render(
+      <ToolResultView
+        data={data({
+          toolName: "web_search",
+          display: {
+            query: "Anthropic",
+            results: [
+              {
+                title: "Anthropic",
+                url: "https://www.anthropic.com",
+                site: "anthropic.com",
+                snippet: "AI safety company",
+              },
+              {
+                title: "anthropic.com",
+                url: "https://www.anthropic.com/news",
+                site: "anthropic.com",
+                snippet: "same title as host",
+              },
+            ],
+          },
+        })}
+      />,
+    );
+    const links = screen.getAllByRole("link");
+    expect(links).toHaveLength(2);
+    expect(links[0].textContent).toContain("Anthropic");
+    expect(links[0].textContent).toContain("· anthropic.com");
+    expect(links[0].textContent).toContain("AI safety company");
+    expect(links[1].textContent).toContain("anthropic.com");
+    expect(links[1].textContent).toContain("same title as host");
+    expect(links[1].textContent).not.toMatch(/anthropic\.com · anthropic\.com/);
+  });
+});
+
 describe("ToolResultView · error / redirect faces", () => {
   it("expands a file_read miss to the receipt, without the redundant sentence", () => {
     const { container } = render(

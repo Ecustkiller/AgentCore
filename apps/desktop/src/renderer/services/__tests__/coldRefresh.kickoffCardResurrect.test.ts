@@ -94,7 +94,6 @@ const TEAM_PREVIEW_REQUIRED = {
     form: "",
     sides: [],
     max_rounds: 0,
-    thorough: true,
     revision: 1,
     headline: "预计 5 人开工",
   },

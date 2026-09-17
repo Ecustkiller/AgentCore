@@ -2,7 +2,7 @@
 
 无新事件族：思考走 ``run_reasoning_delta``，人读产物走 ``run_output_delta``，都挂主持人
 run_id。连续 content 在 sink 里会合并——靠小标题分段；中间夹 reasoning 则自然切开。
-庭前取证 / 辩手发言 / 原始 JSON 不进这条时间线。
+开赛材料汇流 / 辩手发言 / 原始 JSON 不进这条时间线。
 """
 
 from __future__ import annotations
@@ -14,9 +14,9 @@ from agentcore.runtime.debate.moderator_common import _as_bool, _as_str, _as_str
 from agentcore.runtime.events import run_output_delta, run_reasoning_delta
 
 _HANDOFF_LABEL = {
-    "value": "需你定夺",
-    "fact": "事实分歧",
-    "question": "待解问题",
+    "value": "要你拍",
+    "fact": "还没核实",
+    "question": "只能等",
 }
 
 
@@ -95,7 +95,7 @@ def _format_assess(data: dict[str, Any], *, round_no: int) -> str:
 
 
 def _format_verdict(data: dict[str, Any]) -> str:
-    """终审只写用户面：倾向 / 胜负手 / 置信 / 交接。无比分、不倒灌 CEO 全文。"""
+    """终审只写用户面：倾向 / 胜负手 / 把握 / 未决。无比分、不倒灌 CEO 全文。"""
     lines: list[str] = []
     leaning = _as_str(data.get("leaning"))
     if leaning:
@@ -105,15 +105,15 @@ def _format_verdict(data: dict[str, Any]) -> str:
         lines.append(f"**胜负手**：{decisive}")
     confidence = _normalize_confidence(_as_str(data.get("confidence")))
     if confidence:
-        lines.append(f"**置信**：{confidence}")
+        lines.append(f"**把握**：{confidence}")
     handoff_lines: list[str] = []
     for item in _as_handoffs(data):
         if not item.text:
             continue
-        label = _HANDOFF_LABEL.get(item.kind, "待解问题")
+        label = _HANDOFF_LABEL.get(item.kind, "只能等")
         handoff_lines.append(f"- {label}：{item.text}")
     if handoff_lines:
-        lines.append("**交接**：\n" + "\n".join(handoff_lines))
+        lines.append("**未决**：\n" + "\n".join(handoff_lines))
     if not lines:
         return ""
     return "## 终审\n\n" + "\n\n".join(lines)

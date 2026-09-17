@@ -213,8 +213,6 @@ async def test_captain_identity_carries_when_to_split_guidance():
     await executor(plan.by_id("t_1"), {})
     sys = provider.system_messages[0]
     assert "再向下委派一层子团队" in sys
-    assert "consult(staffing)" not in sys
-    assert "consult(team_orchestration_advanced)" not in sys
     assert "薄切片" not in sys
     assert "先招人再整合" not in sys
     assert "写满步骤 ≠ 已切薄" not in sys
@@ -230,7 +228,6 @@ async def test_captain_identity_carries_when_to_split_guidance():
     from agentcore.tools.builtin.replan import _REPLAN_DESCRIPTION
 
     assert "计划已让出" in _REPLAN_DESCRIPTION
-    assert "consult(staffing)" not in _REPLAN_DESCRIPTION
     assert "binds=" not in _REPLAN_DESCRIPTION
     # Path-B encyclopedia 仍不进 identity。
     from agentcore.runtime.runs.executor.identities import build_worker_identity
@@ -238,7 +235,6 @@ async def test_captain_identity_carries_when_to_split_guidance():
     identity = build_worker_identity(has_dependents=False, captain=True)
     assert "<身份>" in identity and "队员" in identity
     assert "优先先嵌套" not in identity
-    assert "consult(lead_subteam)" not in identity
     assert "未嵌套禁写" not in identity
     assert "凡大活" not in identity
     assert "共写同一目标文件" not in identity

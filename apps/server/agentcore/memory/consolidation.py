@@ -9,7 +9,7 @@ summarizer still stores its episode (fallback text is raw material only) and
 advances the watermark; that wording must NEVER enter the conversation stream.
 
 After an episode lands it is marked digested immediately so leftovers do not
-accumulate. Always-files (偏好 / 画像 / 导航) are written only by ``remember``,
+accumulate. Always-files (偏好 / 画像 / 导航) are written only by
 explore, daily-review checkbox, or the file page. Digested episodes older than
 30 days are purged on each sweeper pass.
 
@@ -286,7 +286,7 @@ async def run_semantic_for_scope(
     """Mark undigested episodes digested. Idle chats do not rewrite always-files.
 
     ``store`` / ``credentials`` / ``eager`` / ``anchor_at`` are accepted for
-    call-site compatibility and ignored. Always-files are written by remember /
+    call-site compatibility and ignored. Always-files are written by
     explore / the file page — not this pass. Returns False
     (never a preference/profile/navigation change).
     """

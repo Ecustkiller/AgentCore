@@ -1,4 +1,4 @@
-import type { ContextBlockWire } from "@/types/events";
+import type { ContextBlockWire, ProcessStep } from "@/types/events";
 import { describe, expect, it } from "vitest";
 import {
   buildReceivedContextCatalog,
@@ -79,26 +79,60 @@ describe("buildReceivedContextCatalog", () => {
     ]);
   });
 
-  it("keeps system as one 常驻指令 item with the full body", () => {
-    const text = `你是 CEO。
+  it("lifts 设定 / 按需目录 / 工作区 and keeps factory as one row", () => {
+    const text = `互不依赖。
 
-<output_style>
-- 不用 emoji
-</output_style>
+<输出>
+直接给结论。
+</输出>
 
-<tool_use>
-并行调用独立工具。
-</tool_use>`;
+<设定>
+我的规则。
+</设定>
+
+<按需目录>
+consult(name) 拉全文。
+</按需目录>
+
+<工作区>
+桌面已连接。
+</工作区>`;
     const groups = buildReceivedContextCatalog(
       [block({ channel: "system", body: text, chars: text.length })],
       { includeSystem: true },
     );
     expect(groups).toHaveLength(1);
     expect(groups[0].id).toBe("standing");
-    expect(groups[0].items).toHaveLength(1);
-    expect(groups[0].items[0].label).toBe("常驻指令");
-    expect(groups[0].items[0].body).toBe(text);
-    expect(groups[0].items[0].chars).toBe(text.length);
+    const labels = groups[0].items.map((i) => i.label);
+    expect(labels).toEqual(["设定", "按需目录", "工作区", "出厂指令"]);
+    const setting = groups[0].items[0];
+    expect(setting?.tag).toBe("设定");
+    expect(setting?.absent).toBe(false);
+    expect(setting?.body).toContain("我的规则。");
+    expect(groups[0].items.some((i) => i.absent)).toBe(false);
+    const factory = groups[0].items.find((i) => i.label === "出厂指令");
+    expect(factory?.body).toContain("互不依赖。");
+    expect(factory?.body).toContain("直接给结论。");
+    expect(factory?.body).not.toContain("我的规则。");
+  });
+
+  it("marks missing 设定 as an absent row instead of backfilling", () => {
+    const text = `你是 CEO。
+
+<output_style>
+- 不用 emoji
+</output_style>`;
+    const groups = buildReceivedContextCatalog(
+      [block({ channel: "system", body: text, chars: text.length })],
+      { includeSystem: true },
+    );
+    const items = flattenCatalog(groups);
+    const setting = items.find((i) => i.tag === "设定");
+    expect(setting?.absent).toBe(true);
+    expect(setting?.chars).toBe(0);
+    expect(items.find((i) => i.label === "出厂指令")?.body).toContain(
+      "你是 CEO。",
+    );
   });
 
   it("hides the standing group when includeSystem is false", () => {
@@ -113,6 +147,29 @@ describe("buildReceivedContextCatalog", () => {
     expect(flattenCatalog(groups).some((i) => i.channel === "system")).toBe(
       false,
     );
+  });
+
+  it("indexes consult receipts from process without inventing a system slice", () => {
+    const process: ProcessStep[] = [
+      {
+        kind: "tool",
+        id: "c1",
+        tool_name: "consult",
+        arguments: { name: "写作风格" },
+        result: "按需规则全文。",
+        status: "success",
+        display: { name: "写作风格", origin: "user" },
+      },
+    ];
+    const groups = buildReceivedContextCatalog(
+      [block({ channel: "request", body: "目标" })],
+      { includeSystem: true, process },
+    );
+    expect(groups.map((g) => g.id)).toEqual(["turn", "later"]);
+    const later = groups.find((g) => g.id === "later")?.items[0];
+    expect(later?.channel).toBe("consult_receipt");
+    expect(later?.label).toBe("查阅 · 写作风格");
+    expect(later?.body).toBe("按需规则全文。");
   });
 
   it("buckets unknown channels into 其他", () => {
@@ -144,7 +201,26 @@ describe("defaultCatalogItemId", () => {
     expect(item?.channel).toBe("request");
   });
 
-  it("lists 常驻指令 first and selects it over 本回合工具", () => {
+  it("selects injected 设定 over 本回合工具 and 原始请求", () => {
+    const text = `<设定>
+我的规则。
+</设定>`;
+    const groups = buildReceivedContextCatalog(
+      [
+        block({ channel: "system", body: text, chars: text.length }),
+        block({ channel: "tools", body: "**web_search**" }),
+        block({ channel: "request", body: "目标" }),
+      ],
+      { includeSystem: true },
+    );
+    expect(groups.map((g) => g.id)).toEqual(["standing", "turn"]);
+    const id = defaultCatalogItemId(groups);
+    const item = flattenCatalog(groups).find((i) => i.id === id);
+    expect(item?.tag).toBe("设定");
+    expect(item?.absent).toBe(false);
+  });
+
+  it("falls back to 原始请求 when 设定 was not injected", () => {
     const groups = buildReceivedContextCatalog(
       [
         block({ channel: "system", body: "核" }),
@@ -153,25 +229,12 @@ describe("defaultCatalogItemId", () => {
       ],
       { includeSystem: true },
     );
-    expect(groups.map((g) => g.id)).toEqual(["standing", "turn"]);
-    expect(flattenCatalog(groups)[0]?.channel).toBe("system");
     const id = defaultCatalogItemId(groups);
     const item = flattenCatalog(groups).find((i) => i.id === id);
-    expect(item?.channel).toBe("system");
-    expect(item?.label).toBe("常驻指令");
-  });
-
-  it("prefers 常驻指令 over request when no tools row", () => {
-    const groups = buildReceivedContextCatalog(
-      [
-        block({ channel: "system", body: "核" }),
-        block({ channel: "request", body: "目标" }),
-      ],
-      { includeSystem: true },
+    expect(item?.channel).toBe("request");
+    expect(flattenCatalog(groups).find((i) => i.tag === "设定")?.absent).toBe(
+      true,
     );
-    const id = defaultCatalogItemId(groups);
-    const item = flattenCatalog(groups).find((i) => i.id === id);
-    expect(item?.channel).toBe("system");
   });
 
   it("falls back to the first TOC row when there is no request", () => {

@@ -808,7 +808,6 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
         elif etype == "debate_pretrial_started":
             debate_pretrial = {
                 "status": "running",
-                "thorough": bool(p.get("thorough", True)),
                 "skipReason": p.get("skip_reason"),
                 "sides": list(p.get("sides") or []),
                 "orders": [],
@@ -823,7 +822,6 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             if debate_pretrial is None:
                 debate_pretrial = {
                     "status": "running",
-                    "thorough": bool(p.get("thorough", True)),
                     "skipReason": None,
                     "sides": list(p.get("sides") or []),
                     "orders": [],
@@ -839,7 +837,6 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             completeness = p.get("completeness") or "empty"
             debate_pretrial = {
                 "status": p.get("status") or "done",
-                "thorough": bool(p.get("thorough", True)),
                 "skipReason": p.get("skip_reason"),
                 "sides": list(p.get("sides") or []),
                 "orders": list(p.get("orders") or []),

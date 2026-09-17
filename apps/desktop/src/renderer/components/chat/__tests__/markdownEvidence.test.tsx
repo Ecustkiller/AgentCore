@@ -20,6 +20,8 @@ describe("Markdown evidence badges (render seam)", () => {
     expect(verified.textContent).toContain("已核实");
     expect(verified.textContent).toContain("2024报表");
     expect(screen.queryByTitle(/暂无出处/)).toBeNull();
+    expect(verified.className.split(/\s+/)).toContain("inline-block");
+    expect(verified.className.split(/\s+/)).not.toContain("inline-flex");
   });
 
   it("renders a bare 【待核实】 as the unverified badge", () => {

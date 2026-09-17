@@ -57,7 +57,6 @@
       "payload": {
         "execution_id": "exec_ep_full",
         "moderator_run_id": "debate_mod_ep_full",
-        "thorough": true,
         "sides": [
           {
             "key": "pro",
@@ -76,7 +75,6 @@
       "payload": {
         "execution_id": "exec_ep_full",
         "moderator_run_id": "debate_mod_ep_full",
-        "thorough": true,
         "sides": [
           {
             "key": "pro",
@@ -133,7 +131,6 @@
       "payload": {
         "execution_id": "exec_ep_full",
         "moderator_run_id": "debate_mod_ep_full",
-        "thorough": true,
         "sides": [
           {
             "key": "pro",
@@ -803,7 +800,6 @@
     ],
     "debatePretrial": {
       "status": "skipped",
-      "thorough": true,
       "skipReason": "evidence_pack",
       "sides": [
         {

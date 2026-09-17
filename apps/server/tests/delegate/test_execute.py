@@ -646,19 +646,6 @@ async def test_run_plan_omits_tags_for_ordinary_batch():
     assert all("stance" not in r and "group" not in r and "round" not in r for r in plan_runs)
 
 
-def test_task_description_matches_what_worker_actually_receives():
-    t = tool(Provider([]))
-    task_desc = t.schema.parameters["properties"]["tasks"]["items"]["properties"]["task"][
-        "description"
-    ]
-    # 定案甲：自包含=目标+边界+验收；细则进任务范围/章节/落盘。
-    assert "自包含" in task_desc
-    assert "看不到完整历史" in task_desc
-    assert "目标" in task_desc and "边界" in task_desc and "验收" in task_desc
-    assert "逐步改法" in task_desc
-    assert "must_contain" not in task_desc
-    assert "细则进 deliverable.must_contain" not in task_desc
-
 async def test_playbook_instantiates_whole_team_and_runs():
     # 拆·playbook 固化 (§2.1): naming a固化形状 + slots expands to a full team and flows through the
     # SAME pipeline as a hand-written tasks array (map_fanout → N 方向专员).
@@ -791,14 +778,15 @@ def test_ceo_deliverable_schema_is_artifacts_only():
         "用户点名" in deliverable_props["description"]
         or "流水线" in deliverable_props["description"]
     )
-    assert "staffing" in t.schema.description
 
 
-def test_nested_delegate_description_points_at_lead_subteam():
+def test_nested_delegate_description_switches_at_depth():
+    from agentcore.tools.builtin.delegate.schema import (
+        DELEGATE_DESCRIPTION,
+        NESTED_DELEGATE_DESCRIPTION,
+    )
+
     t = tool(Provider([]))
-    assert "HOW→consult(staffing)" in t.schema.description
+    assert t.schema.description == DELEGATE_DESCRIPTION
     t._depth = 1
-    assert "HOW→consult(lead_subteam)" in t.schema.description
-    assert "等到子队收工" in t.schema.description
-    assert "staffing" not in t.schema.description
-    assert "team_orchestration_advanced" not in t.schema.description
+    assert t.schema.description == NESTED_DELEGATE_DESCRIPTION

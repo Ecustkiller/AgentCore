@@ -525,13 +525,6 @@ export interface SidecarProbeRequest {
 }
 
 /**
- * 打开/登记本机项目后静默暖代码索引：ensure sidecar（同 root 复用）+ initialize 后
- * 主进程显式踢 `warmCodeIndex` JSON-RPC（不挡 UI；无进度条）。回合 ensure 不自动踢。
- * 形状与 {@link SidecarProbeRequest} 对齐。
- */
-export type SidecarWarmCodeIndexRequest = SidecarProbeRequest;
-
-/**
  * 打开/登记本机项目后静默暖 MCP 列表：ensure + initialize 后，主进程本机
  * `mcp-service` list_tools，再显式踢 `warmMcpDiscover` JSON-RPC 把 `{servers}` seed
  * 进 sidecar 进程缓存。回合 ensure 不自动踢。
@@ -921,7 +914,6 @@ export const SIDECAR_CHANNELS = {
   occupancy: "sidecar:occupancy",
   resume: "sidecar:resume",
   probe: "sidecar:probe",
-  warmCodeIndex: "sidecar:warmCodeIndex",
   warmMcpDiscover: "sidecar:warmMcpDiscover",
   warmAccountRulesMemory: "sidecar:warmAccountRulesMemory",
   refreshLiveAccountRulesMemory: "sidecar:refreshLiveAccountRulesMemory",
@@ -977,11 +969,6 @@ export interface SidecarApi {
   /** 探活一个 root 的 sidecar（拉起 + initialize 握手即返回，不跑回合）。成功 = 本机环境能起
    * 本地引擎（握手成功的进程留存、被首个回合复用）；失败 reject（诊断经 `onStatus` 推送）。 */
   probe(req: SidecarProbeRequest): Promise<void>;
-  /**
-   * 打开/登记本机项目后静默暖索引：ensure + initialize 后显式踢 `warmCodeIndex` RPC。
-   * 失败可忽略（不 toast）；不挡 UI。回合 ensure / probe 不自动踢。
-   */
-  warmCodeIndex(req: SidecarWarmCodeIndexRequest): Promise<void>;
   /**
    * 打开/登记本机项目后静默暖 MCP：ensure + initialize 后本机 list_tools，再踢
    * `warmMcpDiscover` RPC seed（须带登录 userId）。失败可忽略；不挡 UI。

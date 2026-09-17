@@ -315,9 +315,8 @@ class DebateEvidencePack(WirePayload):
 class DebatePretrialStartedPayload(WirePayload):
     execution_id: str
     moderator_run_id: str
-    thorough: bool = True
     sides: list[DebatePretrialSideInfo] = Field(default_factory=list)
-    skip_reason: Literal["fast", "dossier_sufficient", "evidence_pack", "no_pack"] | None = absent(
+    skip_reason: Literal["evidence_pack", "no_pack"] | None = absent(
         "Set when pretrial is skipped immediately; absent when phase proceeds."
     )
 
@@ -325,7 +324,6 @@ class DebatePretrialStartedPayload(WirePayload):
 class DebatePretrialOrdersPayload(WirePayload):
     execution_id: str
     moderator_run_id: str
-    thorough: bool = True
     sides: list[DebatePretrialSideInfo] = Field(default_factory=list)
     orders: list[DebatePretrialOrder] = Field(default_factory=list)
     # 附件 Evidence Pack 路径：点单事件可携带 pack 摘要。
@@ -349,10 +347,9 @@ class DebatePretrialOrdersPayload(WirePayload):
 class DebatePretrialCompletedPayload(WirePayload):
     execution_id: str
     moderator_run_id: str
-    thorough: bool = True
     sides: list[DebatePretrialSideInfo] = Field(default_factory=list)
     status: Literal["done", "skipped", "degraded"] = "done"
-    skip_reason: Literal["fast", "dossier_sufficient", "evidence_pack", "no_pack"] | None = absent(
+    skip_reason: Literal["evidence_pack", "no_pack"] | None = absent(
         "Present when status=skipped."
     )
     orders: list[DebatePretrialOrder] = Field(default_factory=list)
@@ -362,7 +359,7 @@ class DebatePretrialCompletedPayload(WirePayload):
     evidence_ledger_delta: list[EvidenceLedgerEntry] = Field(default_factory=list)
     # 取证完整度一等公民：失败/截断不得伪装成满分 completed。
     completeness: Literal["full", "partial", "empty"] = "empty"
-    # 仅「实际走了取证且未 full」；intentional 秒过（fast 等）为 False。
+    # 仅「实际走了取证且未 full」；intentional 秒过（evidence_pack / no_pack）为 False。
     incomplete: bool = True
     evidence_pack: DebateEvidencePack | None = absent(
         "Present when pretrial assembled a shared evidence pack from host attachments."
@@ -371,5 +368,5 @@ class DebatePretrialCompletedPayload(WirePayload):
         "Resolved external-evidence mode; production emits skip only."
     )
     external_evidence_reason: str | None = absent(
-        "Skip reason: evidence_pack_full | evidence_pack_partial | no_pack | fast | …"
+        "Skip reason: evidence_pack_full | evidence_pack_partial | no_pack | …"
     )

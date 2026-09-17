@@ -150,7 +150,7 @@ async def test_next_round_emits_completed_log(monkeypatch):
         motion="X?",
         form=DebateForm.DEBATE,
         sides=[side],
-        policy=RoundPolicy(thorough=False, max_rounds=3),
+        policy=RoundPolicy(max_rounds=3),
     )
     history = [
         RoundResult(

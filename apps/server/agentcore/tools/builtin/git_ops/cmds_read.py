@@ -1,4 +1,4 @@
-"""Read-only git subcommands: status / diff / log / fetch / show / blame."""
+"""Read-only git subcommands: status / diff / log / fetch."""
 
 from __future__ import annotations
 
@@ -46,6 +46,7 @@ async def cmd_status(
     }
     return _ok(output, start, metadata=out_meta)
 
+
 async def cmd_diff(
     cwd: str,
     paths: list[str],
@@ -69,6 +70,7 @@ async def cmd_diff(
         output, start, output_limit=policy_mod._DIFF_OUTPUT_LIMIT, metadata=meta
     )
 
+
 async def cmd_log(
     cwd: str,
     paths: list[str],
@@ -91,6 +93,7 @@ async def cmd_log(
     footer = f"\n\n（共 {len(lines)} 条，可用 max_count 调整）"
     return _ok(body + footer, start, metadata=meta)
 
+
 async def cmd_fetch(
     cwd: str,
     arguments: dict[str, Any],
@@ -112,8 +115,7 @@ async def cmd_fetch(
     remotes = [line.strip() for line in remotes_out.splitlines() if line.strip()]
     if not remotes:
         return _error(
-            "当前仓库未配置 remote。请先配置 remote"
-            "（如 git remote add origin <url>）后再 fetch。",
+            "当前仓库未配置 remote。请用户添加 origin 后再 fetch。",
             start,
         )
     if remote not in remotes:
@@ -138,68 +140,3 @@ async def cmd_fetch(
     if detail:
         output += f"\n{detail}"
     return _ok(output, start, metadata={**meta, "remote": remote})
-
-async def cmd_show(
-    cwd: str,
-    object_ref: str,
-    paths: list[str],
-    *,
-    start: float,
-    meta: dict[str, Any],
-) -> ToolResult:
-    if object_ref.startswith("-"):
-        return _error(
-            "object 不能以 '-' 开头（防止被 git 解析为选项）",
-            start,
-        )
-    args = ["show", object_ref]
-    if paths:
-        args.extend(["--", *paths])
-    stdout, stderr, code = await spawn_mod._run_git(args, cwd=cwd)
-    if code != 0:
-        return await _git_failure(stdout, stderr, code, start, metadata=meta)
-    output = stdout.rstrip() or "（无内容）"
-    if len(output) > policy_mod._DIFF_OUTPUT_LIMIT:
-        output = truncate_head_tail(output, policy_mod._DIFF_OUTPUT_LIMIT)
-    return _ok(
-        output,
-        start,
-        output_limit=policy_mod._DIFF_OUTPUT_LIMIT,
-        metadata={**meta, "object": object_ref},
-    )
-
-async def cmd_blame(
-    cwd: str,
-    paths: list[str],
-    *,
-    start: float,
-    meta: dict[str, Any],
-) -> ToolResult:
-    if not paths:
-        return _error("blame 需要 paths 参数（显式单个文件路径）", start)
-    if len(paths) != 1:
-        return _error("blame 一次只接受一个文件路径", start)
-    path = paths[0]
-    if path.startswith("-"):
-        return _error(
-            "blame 路径不能以 '-' 开头（防止被 git 解析为选项）",
-            start,
-        )
-    stdout, stderr, code = await spawn_mod._run_git(["blame", "--", path], cwd=cwd)
-    if code != 0:
-        return await _git_failure(stdout, stderr, code, start, metadata=meta)
-    body = stdout.rstrip() or "（无 blame 输出）"
-    body, truncated, total = _truncate_line_output(
-        body, limit=policy_mod._BLAME_LINE_LIMIT, hint="请收窄文件范围或分段查看"
-    )
-    return _ok(
-        body,
-        start,
-        metadata={
-            **meta,
-            "path": path,
-            "truncated": truncated,
-            "blame_lines": total,
-        },
-    )
-

@@ -581,7 +581,6 @@ describe("toDebateModel live empty shell (no pretrial UI)", () => {
         planType: "debate",
         debatePretrial: {
           status: "running",
-          thorough: true,
           skipReason: null,
           sides: [{ key: "pro", name: "正方" }],
           orders: [],

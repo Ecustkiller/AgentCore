@@ -36,8 +36,6 @@ from agentcore.workspace.limits import (
 from agentcore.workspace.protocol import (
     AlreadyExists,
     AmbiguousMatch,
-    CodeIndexStatus,
-    CodeSearchResult,
     DirEntry,
     DirListing,
     GlobFilesQuery,
@@ -481,27 +479,6 @@ class RemoteCloudWorkspace:
             total_matches=total,
             truncated=truncated,
         )
-
-    async def code_search(
-        self,
-        query: str,
-        *,
-        language: str | None = None,
-        path_prefix: str = ".",
-        max_results: int = 10,
-    ) -> CodeSearchResult:
-        del query, language, path_prefix, max_results
-        return CodeSearchResult(
-            index_status=CodeIndexStatus.STALE,
-            index_stale=True,
-        )
-
-    async def ensure_code_index(self, *, force: bool = False) -> bool:
-        del force
-        return False
-
-    def start_code_index_maintenance(self) -> None:
-        return None
 
     async def execute(self, req: ExecutionRequest) -> ExecutionResult:
         del req

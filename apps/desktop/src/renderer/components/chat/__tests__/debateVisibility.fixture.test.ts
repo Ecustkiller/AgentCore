@@ -114,7 +114,7 @@ describe("debate L0 visibility · multi_agent_debate fixture", () => {
     expect(model.rounds.length).toBeGreaterThan(0);
     expect(model.rounds.some((r) => r.focus || r.summary)).toBe(true);
 
-    expect(debatePreviewSubtitle(execution)).toMatch(/置信/);
+    expect(debatePreviewSubtitle(execution)).toMatch(/把握/);
     const hook = debateConclusionHook(execution);
     expect(hook?.leaning).toBeTruthy();
   });

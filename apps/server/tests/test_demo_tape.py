@@ -1305,7 +1305,6 @@ async def test_player_skips_leftover_team_preview(monkeypatch, tmp_path: Path):
                 "primitive": "debate",
                 "motion": "m",
                 "max_rounds": 4,
-                "thorough": True,
             },
             "t_ms": 100,
         },

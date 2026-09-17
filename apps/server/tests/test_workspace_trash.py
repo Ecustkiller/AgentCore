@@ -158,7 +158,7 @@ def test_soft_delete_rejects_self_nest_under_agentcore(tmp_path: Path) -> None:
 def test_expand_delete_agentcore_soft_rules_hard_clears_zones(tmp_path: Path) -> None:
     ac = tmp_path / "AgentCore"
     _write(ac / "规则" / "r.md", "rule-body")
-    _write(ac / "index" / "code_search.db", "db")
+    _write(ac / "index" / "cache.db", "db")
     _write(ac / "trash" / "stale" / "content", "old")
     (ac / "baselines").mkdir(parents=True)
     (ac / "baselines" / "snap.zip").write_bytes(b"PK")

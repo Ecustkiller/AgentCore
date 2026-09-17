@@ -41,6 +41,7 @@ from agentcore.llm.provider.protocol import (
     ToolCall,
     ToolCallDelta,
     ToolCallFunction,
+    normalize_thinking_blocks,
 )
 from agentcore.llm.resolve import (
     ModelConfig,
@@ -385,6 +386,7 @@ def _llm_request_from_payload(
             tool_calls=_tool_calls_from_payload(m.get("tool_calls")),
             tool_call_id=m.get("tool_call_id"),
             reasoning_content=m.get("reasoning_content"),
+            thinking_blocks=normalize_thinking_blocks(m.get("thinking_blocks")),
         )
         for m in payload.get("messages", [])
     ]
@@ -568,6 +570,8 @@ async def _forward_unary(
     # the next round carries it (DeepSeek thinking-mode 400s without it).
     if response.reasoning_content is not None:
         message["reasoning_content"] = response.reasoning_content
+    if response.thinking_blocks:
+        message["thinking_blocks"] = response.thinking_blocks
     if tool_calls:
         message["tool_calls"] = tool_calls
     body = json.dumps(
@@ -679,6 +683,8 @@ async def _forward_stream(
                     captured["usage"] = chunk.usage
                     captured["model"] = request.model
                     data["usage"] = _usage_to_openai_wire(chunk.usage)
+                if chunk.thinking_blocks:
+                    data["thinking_blocks"] = chunk.thinking_blocks
                 if chunk.empty_diagnosis:
                     # Relay the provider's precise empty-response diagnosis (upstream_non_api /
                     # MODEL_UNKNOWN ...) so the sidecar surfaces the actionable hint instead of

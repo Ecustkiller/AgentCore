@@ -1,9 +1,11 @@
 import { Button } from "@/components/ui";
 import type { Execution } from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
+import { Suspense } from "react";
 import { type DebateModel, stopLabel } from "../model";
 import { finaleAnchorId } from "./anchors";
-import { BriefCard, RoundtableSpectrum } from "./brief";
+import { DebateBrief } from "./brief";
+import { ReplayBriefCard } from "./replayLazy";
 
 export function FinaleStage({
   model,
@@ -20,7 +22,6 @@ export function FinaleStage({
     : undefined;
   const brief = model.brief;
   const sides = model.sides;
-  const hasBrief = !!(brief && sides);
 
   return (
     <div
@@ -31,7 +32,7 @@ export function FinaleStage({
       <div className="mx-auto max-w-3xl">
         <div className="flex flex-wrap items-center gap-2">
           {moderatorRun ? (
-            // 点标题打开主持人 run；模型名只留记分牌，终审不再挂徽章。
+            // 点标题打开主持人 run；模型名走协作图 / 用量，终审与顶栏都不挂徽章。
             <Button
               variant="ghost"
               onClick={() =>
@@ -53,16 +54,20 @@ export function FinaleStage({
           </span>
         </div>
 
-        {hasBrief ? (
+        {brief && sides ? (
           <div className="mt-4 space-y-4">
-            {model.form === "roundtable" && (
-              <RoundtableSpectrum
-                brief={brief}
-                sides={sides}
-                subtopics={model.subtopics}
-              />
+            {model.form === "red_team" || model.form === "roundtable" ? (
+              <Suspense fallback={null}>
+                <ReplayBriefCard
+                  brief={brief}
+                  sides={sides}
+                  form={model.form}
+                  subtopics={model.subtopics}
+                />
+              </Suspense>
+            ) : (
+              <DebateBrief brief={brief} sides={sides} />
             )}
-            <BriefCard brief={brief} sides={sides} form={model.form} />
           </div>
         ) : (
           <p className="mt-4 text-sm text-muted-foreground">结论简报生成中…</p>

@@ -22,6 +22,7 @@ from agentcore.llm.provider.protocol import (
     ToolCall,
     ToolCallFunction,
     llm_content_text,
+    normalize_thinking_blocks,
 )
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.session import RunSession
@@ -73,6 +74,8 @@ def message_to_dict(m: LLMMessage) -> dict[str, Any]:
         out["tool_call_id"] = m.tool_call_id
     if m.reasoning_content:
         out["reasoning_content"] = m.reasoning_content
+    if m.thinking_blocks:
+        out["thinking_blocks"] = m.thinking_blocks
     return out
 
 
@@ -84,6 +87,7 @@ def message_from_dict(d: dict[str, Any]) -> LLMMessage:
         tool_calls=[_tool_call_from_dict(t) for t in tcs] if tcs else None,
         tool_call_id=d.get("tool_call_id"),
         reasoning_content=d.get("reasoning_content"),
+        thinking_blocks=normalize_thinking_blocks(d.get("thinking_blocks")),
     )
 
 

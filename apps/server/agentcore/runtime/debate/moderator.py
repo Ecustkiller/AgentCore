@@ -10,7 +10,7 @@
 3. **裁判 + 写小结**（:meth:`_judge_and_summarize`）：一次结构化调用同时产出交锋质量与收敛判定
    （真交锋？还在产生新论点？可收场？）、本轮小结，以及未收敛时的 ``next_focus``——同读本轮发言，
    合并去掉冗余 round-trip（辩论编排设计.md §二：真去重、非节流补丁）。
-4. **决策下一步**（:meth:`run` 循环体）：裁判判收敛 → 结辩与简报并行收场；否则进下一轮 / 触安全上限兜底。
+        4. **决策下一步**（:meth:`run` 循环体）：裁判判收敛 → 简报收场；否则进下一轮 / 触安全上限兜底。
 
 裁判 / 小结 / 简报 / 定议题都走 ``provider.complete`` 出结构化 JSON + 坏 JSON 容错（借鉴
 ``evals/judge.py``）；单测注入返回脚本化 JSON 的 fake provider，零成本验证循环 / 收敛 / 双产物。
@@ -19,7 +19,7 @@
 
 - :mod:`moderator_common` —— 截断 / JSON 容错 / prompt 块
 - :mod:`moderator_agenda` —— 定议题 / 质询 / 结辩门槛
-- :mod:`moderator_judge` —— 裁判 + 小结 + 记分
+- :mod:`moderator_judge` —— 裁判 + 小结
 - :mod:`moderator_brief` —— 收场简报
 - :mod:`moderator_timeline` —— 判定 complete → 既有 run delta
 
@@ -210,10 +210,10 @@ class Moderator:
         无 hook 即惰性同辙）。``max_rounds`` 始终是硬上限：用户连续 ``CONTINUE`` 也不会越过它。
         钩子**永不 block**——掌舵是 fire-and-forget，conclude 等当前轮跑完再生效。
 
-        质询回合（P1，辩论编排设计.md §4-2.1）：注入 ``run_cross_exam`` 且【认真辩透 + 对抗形态】
+        质询回合（P1，辩论编排设计.md §4-2.1）：注入 ``run_cross_exam`` 且正反 DEBATE
         （:meth:`_cross_exam_enabled`）时，每轮立论后插入一个【质询 beat】——主持人据立论生成定向各方
         的必答质询（:meth:`_cross_exam_questions`），被质询方经 runner 用 ``continue_run`` 正面作答，
-        问答喂进裁判【记分】（P2，:meth:`_judge_and_summarize`）。未注入 / 快速对碰 / 圆桌时跳过，
+        问答喂进裁判【记分】（P2，:meth:`_judge_and_summarize`）。未注入 / 圆桌时跳过，
         循环逐字回退到「立论→裁判」，零行为变化。
 
         证人答问（批 D1）：注入 ``run_witness_exam`` 且 ``witness_roster`` 非空、质询档开启时，
@@ -239,13 +239,11 @@ class Moderator:
         if kickoff_ask:
             pending_interjections = [UserInterjection(ask=kickoff_ask, target_key="")]
         profile = form_profile(config)
-        # 圆桌子题轴（O3 快速档 = 单子题）
+        # 圆桌子题轴
         subtopics: list[str] = []
         spoken_keys: set[str] = set()
         if config.form is DebateForm.ROUNDTABLE:
             subtopics = await frame_subtopics(self._complete_json, config)
-            if not config.policy.thorough:
-                subtopics = subtopics[:1]
         for round_no in range(1, config.policy.max_rounds + 1):
             self._round_no = round_no
             # 焦点优先级：掌舵覆写 > 圆桌子题轴 > 上轮 next_focus > _frame
@@ -392,8 +390,8 @@ class Moderator:
                         witness_exam = []
 
             # rounds 此刻是【已完成的历史轮】（本轮 rr 尚未 append）——喂给合并裁判作上一轮小结锚点。
-            # 裁判判定 + 本轮小结 + 记分读同一份发言（含质询问答），合并成一次结构化调用去冗余（§二）。
-            # M2：场级 evidence_ledger 注入记分（tier 锚定）；缺省=旧软约束零回归。
+            # 裁判判定 + 本轮小结读同一份发言（含质询问答），一次结构化调用。
+            # 场级 evidence_ledger 注入来源等级（tier）；缺省=软约束。
             verdict, summary = await self._judge_and_summarize(
                 config,
                 focus,
@@ -403,7 +401,7 @@ class Moderator:
                 evidence_ledger=evidence_ledger,
             )
             if absent_keys:
-                # 不做对抗性记分：缺席方不入分；有缺席则本轮清空 scores（无公平对照）。
+                # 旧场兼容：有缺席则丢掉本轮 scores（无公平对照）。
                 verdict.scores = {}
                 verdict.clashes = [
                     c
@@ -536,7 +534,7 @@ class Moderator:
     # ── 第2.5步：质询回合（质询回合 P1，辩论编排设计.md §4-2.1）──────────────
     @staticmethod
     def _cross_exam_enabled(config: DebateConfig) -> bool:
-        """质询回合仅在【认真辩透 + 对抗形态】开启。"""
+        """质询回合仅正反 DEBATE 开启。"""
         return cross_exam_enabled(config)
 
     @staticmethod
@@ -568,7 +566,7 @@ class Moderator:
             self._complete_json, config, focus, turns, labels
         )
 
-    # ── 第3+4步：裁判本轮 + 写本轮小结 + 记分（一次结构化调用）─────────────
+    # ── 第3+4步：裁判本轮 + 写本轮小结（一次结构化调用）─────────────
     async def _judge_and_summarize(
         self,
         config: DebateConfig,

@@ -1,27 +1,26 @@
 """CEO routing core fragment (FRAGMENT_CEO_CORE).
 
-Resident core = ``<身份>`` only（你是谁 / 对谁负责；默认交团队、协调收口，自己做只限短答和单点；对用户怎么开口）。
+Resident core = ``<身份>`` only（你是谁 / 对谁负责；默认交团队、协调收口；对用户怎么开口）。
 共享诚实元规则在基座 ``<诚实>``（用户可见主张不在核里再列变体表）；输出物理在基座 ``<输出>``；派前打算在
 ``delegate`` description；consult 钩在 ``<按需目录>`` / consult description。
-何时用 ``delegate`` / ``ask_user`` / ``debate`` 写在各工具 description；场面 HOW 的
-唯一所有者是 skill / consult 正文（``capability_how_suffix`` 只给 consult 拼；``run`` 走 skill body）。
+何时用 ``delegate`` / ``ask_user`` / ``debate`` 写在各工具 description（``delegate`` = 信息判据四问，不进核）；场面 HOW 的
+唯一所有者是 skill / consult 正文（``capability_how_suffix`` 只给 consult 拼；``run`` 走 skill body）；编制 HOW 在 ``delegate`` 按钮。
 ``<工作区>`` 只陈述本回合事实；``<按需目录>`` 只列这是什么。
-全员纪律（未装配不许假装用过）在 ``prompt/base.py``；未装配 ≠ 写进队员任务 在 ``consult(staffing)`` / ``consult(lead_subteam)``。
+全员纪律（未装配不许假装用过）在 ``prompt/base.py``；未装配 ≠ 写进队员任务 在 ``delegate.task``。
 不写编号判决树。每条纪律在装配后的提示串里只应出现一次。
 """
 
 # Appended ONLY to the entry CEO chat agent's prompt (not to delegated workers,
 # who do not hold the delegate tool). Identity, not a per-turn classifier:
-# ``<身份>`` includes the scale polarity (default to the team; self-do
-# only short answers and single-point acts). When-to-use scenes live on
-# ``delegate`` description. Product catalog → ``product_help``. Assembly state lives in ``<工作区>``.
+# ``<身份>`` keeps the default-to-team bias (挡自己干完). When-to-use lives on
+# ``delegate`` description（信息判据四问）. Product catalog → ``product_help``. Assembly state lives in ``<工作区>``.
 # HOW (depends_on / form / append / playbook / task writing / 拍板卡
-# / 区外授权手册…) lives in skills — one owner per piece of knowledge.
+# / 区外授权手册…) lives on the owning tool / skill — one owner per piece.
 _CEO_CORE_HINT = """
 <身份>
 你是 AgentCore 的 CEO：用户是老板，只跟你说话；你带队执行，对整段对话负责到底。\
 团队归你调度，之上是用户：岔路请示、收尾汇报。\
-默认交给团队，你负责协调和收口；自己做只限短答和单点。\
+默认交给团队，你负责协调和收口。\
 对人说话用大白话；内部工具名留在思考和参数里。
 </身份>"""
 

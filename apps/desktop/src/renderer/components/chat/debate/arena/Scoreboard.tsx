@@ -41,6 +41,8 @@ export function Scoreboard({
   const liveRound = model.rounds.find((r) => r.inFlight);
   const currentRoundNo = liveRound?.roundNo ?? model.rounds.length;
   const totalRounds = model.rounds.length;
+  const roster = debateRoster(model.rounds);
+  const isVersus = model.form === "debate" && roster.length === 2;
 
   const chapters: { id: string; label: string }[] = model.rounds.map((r) => ({
     id: roundAnchorId(r.roundNo),
@@ -56,13 +58,14 @@ export function Scoreboard({
   return (
     <div className="border-b border-border">
       <div className={`mx-auto ${DEBATE_ARENA_PAGE_MAX} px-1 py-3`}>
-        <div className="flex flex-wrap items-start gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <p
-            className="min-w-0 flex-1 basis-48 truncate text-base font-medium text-foreground"
+            className="min-w-0 flex-1 basis-40 truncate text-base font-medium text-foreground"
             title={motion}
           >
             {motion}
           </p>
+          {isVersus ? <VersusNames model={model} roster={roster} /> : null}
           <div className="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
             <StatusLine
               model={model}
@@ -74,9 +77,11 @@ export function Scoreboard({
           </div>
         </div>
 
-        <div className="mt-2">
-          <ScoreboardRow2 model={model} execution={execution} />
-        </div>
+        {!isVersus ? (
+          <div className="mt-2">
+            <ScoreboardRow2 model={model} execution={execution} />
+          </div>
+        ) : null}
 
         <div className="mt-2 flex flex-wrap items-center gap-2">
           {canSplit && layoutMode && onLayoutChange && (
@@ -142,7 +147,6 @@ function ScoreboardRow2({
   execution?: Pick<Execution, "runs">;
 }) {
   const roster = debateRoster(model.rounds);
-  const isVersus = model.form === "debate" && roster.length === 2;
   const moderatorModel = scoreboardModeratorModel(model, execution);
 
   if (model.form === "roundtable" && model.sides) {
@@ -235,39 +239,6 @@ function ScoreboardRow2({
     );
   }
 
-  if (isVersus) {
-    const proSide = model.sides?.find((s) => s.stance === "pro");
-    const conSide = model.sides?.find((s) => s.stance === "con");
-    const proRoster = proSide
-      ? roster.find((r) => r.sideKey === proSide.key)
-      : roster[0];
-    const conRoster = conSide
-      ? roster.find((r) => r.sideKey === conSide.key)
-      : roster[1];
-    if (!proRoster || !conRoster) return null;
-    const proModel = sideRunModel(model, proRoster.sideKey);
-    const conModel = sideRunModel(model, conRoster.sideKey);
-    return (
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-        <VersusSide
-          name={proRoster.name}
-          model={proModel}
-          colorVar={debateSideColorVar(proRoster.sideKey, proRoster.name)}
-          align="left"
-        />
-        <ModeratorChip model={moderatorModel} />
-        <div className="justify-self-end">
-          <VersusSide
-            name={conRoster.name}
-            model={conModel}
-            colorVar={debateSideColorVar(conRoster.sideKey, conRoster.name)}
-            align="right"
-          />
-        </div>
-      </div>
-    );
-  }
-
   if (model.form === "debate" && roster.length > 0) {
     return (
       <div className="flex flex-wrap items-center gap-1.5">
@@ -327,29 +298,54 @@ function sideRunModel(model: DebateModel, sideKey: string): string | undefined {
   return undefined;
 }
 
-function VersusSide({
-  name,
+function VersusNames({
   model,
-  colorVar,
-  align,
+  roster,
 }: {
-  name: string;
-  model?: string;
-  colorVar: string;
-  align: "left" | "right";
+  model: DebateModel;
+  roster: ReturnType<typeof debateRoster>;
 }) {
-  const vendor = modelVendorLabel(model);
+  const proSide = model.sides?.find((s) => s.stance === "pro");
+  const conSide = model.sides?.find((s) => s.stance === "con");
+  const proRoster = proSide
+    ? roster.find((r) => r.sideKey === proSide.key)
+    : roster[0];
+  const conRoster = conSide
+    ? roster.find((r) => r.sideKey === conSide.key)
+    : roster[1];
+  if (!proRoster || !conRoster) return null;
   return (
-    <div
-      className={`flex min-w-0 items-center gap-2 text-sm ${align === "right" ? "flex-row-reverse text-right" : ""}`}
-    >
-      <span
-        className="size-2 shrink-0 rounded-full"
-        style={{ backgroundColor: colorVar }}
-      />
-      <span className="font-medium text-foreground">{name}</span>
-      {vendor && <ModelBadge model={model ?? ""} />}
-    </div>
+    <span className="inline-flex min-w-0 max-w-full items-center gap-2 text-sm">
+      <span className="inline-flex min-w-0 items-center gap-1.5">
+        <span
+          className="size-2 shrink-0 rounded-full"
+          style={{
+            backgroundColor: debateSideColorVar(
+              proRoster.sideKey,
+              proRoster.name,
+            ),
+          }}
+        />
+        <span className="truncate font-medium text-foreground">
+          {proRoster.name}
+        </span>
+      </span>
+      <span className="text-muted-foreground">·</span>
+      <span className="inline-flex min-w-0 items-center gap-1.5">
+        <span
+          className="size-2 shrink-0 rounded-full"
+          style={{
+            backgroundColor: debateSideColorVar(
+              conRoster.sideKey,
+              conRoster.name,
+            ),
+          }}
+        />
+        <span className="truncate font-medium text-foreground">
+          {conRoster.name}
+        </span>
+      </span>
+    </span>
   );
 }
 

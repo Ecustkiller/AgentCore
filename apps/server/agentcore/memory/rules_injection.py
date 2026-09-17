@@ -54,7 +54,7 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-_REMEMBER_ACTIONS = frozenset({"write", "read", "delete", "list"})
+_RULE_MUTATE_ACTIONS = frozenset({"write", "read", "delete", "list"})
 _MAX_RULE_NAME_CHARS = 80
 _SKIP_ALWAYS_CONSULT_FILES = frozenset(
     {
@@ -128,7 +128,7 @@ def _format_rule_catalog(docs: Sequence[object]) -> str:
 
 @dataclass(frozen=True)
 class UserRuleMutationResult:
-    """Shared mutate outcome for ``remember`` tool + account ``/rules/remember``."""
+    """Shared mutate outcome for file overlay + account ``/rules/write|read|delete``."""
 
     action: str
     changed: bool
@@ -159,7 +159,7 @@ async def mutate_user_rule(
     read / unchanged skip the gate.
     """
     action_key = (action or "write").strip().lower() or "write"
-    if action_key not in _REMEMBER_ACTIONS:
+    if action_key not in _RULE_MUTATE_ACTIONS:
         return _fail(action_key, f"不支持的 action：{action_key}。")
 
     if action_key == "list":
@@ -333,6 +333,17 @@ def _injectable_body(raw: str) -> str | None:
     return body or None
 
 
+def _labeled_rule_body(name: str, content: str) -> str | None:
+    """Injectable body headed by the catalog address so ``<设定>`` names the entry."""
+    body = _injectable_body(content)
+    if not body:
+        return None
+    title = (name or "").strip() or "untitled.md"
+    from agentcore.memory.rule_files import rule_entry_relpath
+
+    return f"### {rule_entry_relpath(title)}\n{body}"
+
+
 @dataclass(frozen=True)
 class RuleFragment:
     """One always-injected rule doc, ready to place in ``<设定>``.
@@ -368,7 +379,7 @@ def _join_frags(**kwargs: object) -> list[RuleFragment]:
 async def _rule_bodies(repo: DocumentRepository, user_id: str, scope: str | None) -> list[str]:
     out: list[str] = []
     for doc in await repo.list_injectable_rules(user_id, scope, ai_maintained=False):
-        body = _injectable_body(doc.content)
+        body = _labeled_rule_body(str(getattr(doc, "name", "") or ""), doc.content)
         if body:
             out.append(body)
     return out
@@ -377,14 +388,18 @@ async def _rule_bodies(repo: DocumentRepository, user_id: str, scope: str | None
 def _cloud_rule_bodies(payload: Mapping[str, object], key: str) -> list[str]:
     out: list[str] = []
     for doc in _iter_cloud_rule_docs(payload, key):
-        body = _injectable_body(str(doc.get("content") or ""))
+        body = _labeled_rule_body(
+            str(doc.get("name") or ""), str(doc.get("content") or "")
+        )
         if body:
             out.append(body)
     return out
 
 
 def _cloud_doc_body(doc: Mapping[str, object]) -> str | None:
-    return _injectable_body(str(doc.get("content") or ""))
+    return _labeled_rule_body(
+        str(doc.get("name") or ""), str(doc.get("content") or "")
+    )
 
 
 async def _user_rule_fragments(

@@ -5,7 +5,7 @@ from __future__ import annotations
 from agentcore.core.errors import ValidationError
 from agentcore.llm.call_fence import observe_provider
 from agentcore.llm.credentials import LLMCredentials
-from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
+from agentcore.llm.provider.dispatch import build_credential_leaf
 from agentcore.llm.provider.platform import PlatformProvider
 from agentcore.llm.provider.protocol import LLMProvider
 from agentcore.llm.provider.router import ProviderRouter
@@ -93,7 +93,7 @@ def build_provider(
         return build_platform_provider(purpose=purpose)
     log_name = credentials.source
     shown = (display_name or "").strip() or (credentials.label or "").strip() or "服务商"
-    leaf: LLMProvider = OpenAICompatibleProvider(
+    leaf: LLMProvider = build_credential_leaf(
         name=log_name,
         api_key=credentials.api_key,
         base_url=credentials.base_url,
@@ -112,7 +112,7 @@ def _vendor_extras() -> dict[str, LLMProvider]:
         if not api_key:
             continue
         extras[prefix] = observe_provider(
-            OpenAICompatibleProvider(
+            build_credential_leaf(
                 name=prefix,
                 api_key=api_key,
                 base_url=getattr(settings, url_attr),

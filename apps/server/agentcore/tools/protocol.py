@@ -42,12 +42,6 @@ class WorkspaceSlot:
 
     backend: WorkspaceBackend
     material_paths: frozenset[str] = field(default_factory=frozenset)
-    # Per-desk cache for empty-desk project-shell (not turn-global: a fork sits
-    # on another root). ``None`` = not listed yet. Invalidated on backend rebind.
-    desk_visibly_empty: bool | None = None
-    # Test override for nested-Folder names. ``None`` = load from DB on register
-    # (``ownership_desk_id``). A frozenset skips the query (including empty).
-    child_folder_names: frozenset[str] | None = None
 
 
 def fork_workspace_slot(
@@ -230,19 +224,6 @@ class TurnPromotionLedger:
     reconciliation: dict[str, Any] | None = None
     promotions: list[dict[str, str]] = field(default_factory=list)
     delivery_verdict: Any = None
-
-
-@dataclass
-class TurnProjectShell:
-    """Empty-desk project-shell strip for one conversation turn.
-
-    Shared by reference across ``replace()`` (CEO ↔ worker) and workspace-slot
-    forks (``fork_workspace_slot`` only replaces ``_workspace``). First unknown
-    top-level segment on a visibly empty desk is ``stripped_slug``; later write /
-    read / mkdir / artifacts / write-claims strip that prefix for the turn.
-    """
-
-    stripped_slug: str | None = None
 
 
 @dataclass
@@ -523,8 +504,6 @@ class ToolContext:
     turn_target_desk: TurnTargetDeskHint = field(default_factory=TurnTargetDeskHint)
     # 历史归位重放 + delivery_verdict 槽（共享可变；``replace`` 浅拷贝同引用）。
     promotion_ledger: TurnPromotionLedger = field(default_factory=TurnPromotionLedger)
-    # 空桌工程壳剥段（共享可变；``replace`` / workspace fork 同引用）——见 ``TurnProjectShell``。
-    project_shell: TurnProjectShell = field(default_factory=TurnProjectShell)
     # Bare-chat landing write desk (``Conversation.auto_desk_folder_id``). Orthogonal
     # to birth ``folder_id`` / sidebar / memory. When set, CEO file tools + overview
     # sit on this Folder while affiliation stays 裸聊. Never auto-promote.
@@ -582,7 +561,6 @@ class ToolContext:
     @backend.setter
     def backend(self, value: WorkspaceBackend) -> None:
         self._workspace.backend = value
-        self._workspace.desk_visibly_empty = None
 
     @property
     def material_paths(self) -> frozenset[str]:

@@ -1,4 +1,4 @@
-"""庭前取证阶段单测：fast 秒过、Evidence Pack、无 pack 对称有界预算（无调查员舰队）。"""
+"""庭前取证阶段单测：Evidence Pack、无 pack 对称有界预算（无调查员舰队）。"""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from agentcore.runtime.debate.types import (
 )
 
 
-def _config(*, thorough: bool = True) -> DebateConfig:
+def _config() -> DebateConfig:
     return DebateConfig(
         motion="是否采用方案 A",
         form=DebateForm.DEBATE,
@@ -31,7 +31,7 @@ def _config(*, thorough: bool = True) -> DebateConfig:
             DebateSide(key="pro", name="支持方", stance="支持采用方案 A"),
             DebateSide(key="con", name="反对方", stance="反对采用方案 A"),
         ],
-        policy=RoundPolicy(thorough=thorough, max_rounds=1 if not thorough else 5),
+        policy=RoundPolicy(max_rounds=5),
     )
 
 
@@ -77,39 +77,6 @@ def test_preregister_turn_research_entries_maps_r_to_e():
 
 
 @pytest.mark.asyncio
-async def test_pretrial_fast_skips():
-    tool = MagicMock()
-    tool._sink = MagicMock()
-    tool._evidence_ledger = EvidenceLedger()
-    tool._depth = 0
-
-    started: list[dict] = []
-    completed: list[dict] = []
-
-    async def on_started(p: dict) -> None:
-        started.append(p)
-
-    async def on_completed(p: dict) -> None:
-        completed.append(p)
-
-    result = await run_pretrial_phase(
-        tool,
-        execution_id="e1",
-        moderator_run_id="mod1",
-        config=_config(thorough=False),
-        complete_json=AsyncMock(return_value={}),
-        on_started=on_started,
-        on_completed=on_completed,
-    )
-    assert result.skipped is True
-    assert result.skip_reason == "fast"
-    assert result.incomplete is False
-    assert started[0].get("skip_reason") == "fast"
-    assert completed[0]["status"] == "skipped"
-    assert completed[0]["incomplete"] is False
-
-
-@pytest.mark.asyncio
 async def test_pretrial_no_pack_skips_with_symmetric_bounded_budgets():
     """无可用 pack → 不派员；completeness=empty；各方对称有界发言期预算。"""
     from agentcore.runtime.debate.constants import BOUNDED_GAP_FILL_RETRIEVAL_BUDGET
@@ -120,7 +87,7 @@ async def test_pretrial_no_pack_skips_with_symmetric_bounded_budgets():
     tool._depth = 0
     tool._system_prompt = ""
 
-    cfg = _config(thorough=True)
+    cfg = _config()
     result = await run_pretrial_phase(
         tool,
         execution_id="e1",
@@ -139,7 +106,7 @@ async def test_pretrial_no_pack_skips_with_symmetric_bounded_budgets():
         "con": BOUNDED_GAP_FILL_RETRIEVAL_BUDGET,
     }
     assert BOUNDED_GAP_FILL_RETRIEVAL_BUDGET > 0
-    assert "庭前取证·证据不完整" in (cfg.research_dossier_index or "")
+    assert "材料不完整" in (cfg.research_dossier_index or "")
     assert cfg.evidence_completeness == "empty"
     payload = result.to_completed_payload()
     assert payload["status"] == "skipped"
@@ -192,7 +159,7 @@ async def test_pretrial_with_attachments_skips_fleet():
         }
     )
 
-    cfg = _config(thorough=True)
+    cfg = _config()
     result = await run_pretrial_phase(
         tool,
         execution_id="e1",
@@ -247,7 +214,7 @@ def test_assemble_evidence_pack_truncated_is_partial():
     assert any(s.failure == "truncated" for s in pack.sources)
     index = format_evidence_pack_index(pack)
     assert "完整度=partial" in index
-    assert "证据不完整" in index
+    assert "材料不完整" in index
 
 
 @pytest.mark.asyncio
@@ -261,7 +228,7 @@ async def test_pretrial_binary_attachments_no_fleet():
     tool._depth = 0
     tool._system_prompt = _ATTACHED_BINARY_ONLY_PROMPT
 
-    cfg = _config(thorough=True)
+    cfg = _config()
     result = await run_pretrial_phase(
         tool,
         execution_id="e1",
@@ -344,7 +311,7 @@ async def test_pretrial_partial_pack_skips_fleet_with_bounded_budgets():
     tool._system_prompt = prompt
 
     complete = AsyncMock(return_value={"orders": {}})
-    cfg = _config(thorough=True)
+    cfg = _config()
     result = await run_pretrial_phase(
         tool,
         execution_id="e1",
@@ -365,4 +332,4 @@ async def test_pretrial_partial_pack_skips_fleet_with_bounded_budgets():
         "con": BOUNDED_GAP_FILL_RETRIEVAL_BUDGET,
     }
     assert BOUNDED_GAP_FILL_RETRIEVAL_BUDGET > 0
-    assert "证据不完整" in (cfg.research_dossier_index or "")
+    assert "材料不完整" in (cfg.research_dossier_index or "")

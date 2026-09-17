@@ -250,7 +250,6 @@ async def test_confirmed_ask_does_not_skip_debate_team_preview():
                     {"key": "pro", "name": "正方", "stance": "应推广"},
                     {"key": "con", "name": "反方", "stance": "暂缓"},
                 ],
-                "thorough": True,
             },
             ctx(),
         )
@@ -274,7 +273,7 @@ def test_debate_kickoff_summary_shape():
             DebateSide(key="pro", name="正方", stance="应推广"),
             DebateSide(key="con", name="反方", stance="暂缓"),
         ],
-        policy=RoundPolicy(thorough=True, max_rounds=5),
+        policy=RoundPolicy(max_rounds=5),
     )
     args = {
         "motion": config.motion,
@@ -283,7 +282,6 @@ def test_debate_kickoff_summary_shape():
             {"key": "pro", "name": "正方", "stance": "应推广"},
             {"key": "con", "name": "反方", "stance": "暂缓"},
         ],
-        "thorough": True,
     }
     allocate_debate_run_ids(config, args)
     summary = debate_kickoff_summary(config, arguments=args)
@@ -294,7 +292,6 @@ def test_debate_kickoff_summary_shape():
     assert summary.workers == []
     card = summary.card_payload()
     assert card["primitive"] == "debate"
-    assert card["thorough"] is True
     assert summary.headline == "预计 2 方开赛"
     assert card["headline"] == "预计 2 方开赛"
     assert card["moderator_run_id"] == config.moderator_run_id
@@ -415,7 +412,6 @@ async def test_debate_top_level_must_kickoff():
                     {"key": "pro", "name": "正方", "stance": "应推广"},
                     {"key": "con", "name": "反方", "stance": "暂缓"},
                 ],
-                "thorough": True,
             },
             ctx(),
         )

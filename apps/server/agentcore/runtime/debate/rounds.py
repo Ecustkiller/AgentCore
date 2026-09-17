@@ -24,7 +24,6 @@ from agentcore.runtime.debate.cross_exam_parse import (
     parse_cross_exam_response,
 )
 from agentcore.runtime.debate.evidence_ledger import side_cited_ledger_ids
-from agentcore.runtime.debate.match_ledger import accumulate_match_ledger
 from agentcore.runtime.debate.prompt import (
     closing_context_blocks,
     closing_task,
@@ -403,7 +402,6 @@ async def next_round(
 
     sides = list(sides)
     last_round: RoundResult = history[-1] if history else None
-    match_ledger = accumulate_match_ledger(history) if history else []
     # 上游不预判：有门就往下传，「这次调用该不该弹卡」由 tool_exec 那个唯一收口点按
     # sandbox_approval 判（它拿得到工具名 / 参数 / 会话轴，这里拿不到）。
     worker_gate = tool._approval_gate
@@ -431,7 +429,6 @@ async def next_round(
                 focus,
                 last_round,
                 interjections,
-                match_ledger=match_ledger,
                 history=history,
             )
             speech_brief = round_draft_brief(
@@ -441,7 +438,6 @@ async def next_round(
                 focus,
                 last_round,
                 interjections,
-                match_ledger=match_ledger,
                 history=history,
             )
             context_blocks = round_context_blocks(
@@ -758,13 +754,10 @@ def make_cross_exam_runner(
 def make_closing_runner(
     tool: DebateTool, execution_id: str, moderator_run_id: str, config: DebateConfig
 ):
-    """结辩收束（阶段化发言角色 P4）的 :class:`~agentcore.runtime.debate.ClosingRunner` 实现工厂。
+    """冷冻回放用的结辩 runner 工厂。产品开辩热路不构造、不注入。
 
-    辩论收场后主持人请各方做结辩：本 runner 让每个仍有 session 的方用 ``continue_run`` 走【干净
-    成稿】（``allow_research=False``），brief 携带本场材料（历轮论点 / 质询让步 / clash 命门，见
-    :func:`closing_task`），并启用证据台账 id 闸。受 ``max_parallel`` 并发约束，
-    折算进账目，返回各方 :class:`ClosingStatement`（全文进该方 run 事件）。对称于
-    :func:`make_cross_exam_runner`；未成功立论 / 无 session 的方不参与结辩。仅在主持人判定开启结辩时被调。"""
+    旧场若开启结辩：各方用 ``continue_run`` 走干净成稿（``allow_research=False``），
+    brief 携带本场材料，启用证据台账 id 闸。未成功立论 / 无 session 的方不参与。"""
 
     async def run_closing(*, sides, rounds):  # noqa: ANN001
         from agentcore.runtime.runs import RunPhase, continue_run, resolve_max_parallel

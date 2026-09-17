@@ -104,7 +104,7 @@ async def test_build_keys_preview_ignores_non_ask_paths():
     assert (
         await build_keys_preview_line(
             _Backend(),
-            tool_name="code_search",
+            tool_name="web_search",
             arguments={"path": ".env"},
         )
         == ""

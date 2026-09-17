@@ -140,7 +140,7 @@ class StageCardRequiredPayload(WirePayload):
     """阶段推进卡（批 B）：命题卡升级为可操作交互；幕 1 收尾后耐久展示。
 
     信息密度 = 最小决策集：命题 + 双方立场 + 形态/轮次默认 + 嘱咐空位。
-    ``sides`` 复用 motion 卡薄立场；``thorough`` / ``max_rounds`` 为默认展示（卡上不可改）。
+    ``sides`` 复用 motion 卡薄立场；``max_rounds`` 为默认展示（卡上不可改）。
     可选宿主三元组（机制直传，旧客户端忽略）：开辩锚定幕 1 图。
     """
 
@@ -151,7 +151,6 @@ class StageCardRequiredPayload(WirePayload):
     form: DebateForm
     rationale: str
     fact_pointers: list[str] = Field(default_factory=list)
-    thorough: bool = True
     max_rounds: int = 5
     # Optional empty note slot — client may fill on start_debate; never enters motion gate.
     note: str | None = absent()

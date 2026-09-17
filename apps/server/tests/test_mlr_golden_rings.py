@@ -43,8 +43,7 @@ _TOPIC = "品牌是否应立即终止争议代言联名"
 
 _RESEARCH_FILES = list(EXPECTED_RESEARCH_FILES)
 _DEBATE_FILES = [
-    "AgentCore/文档/debate/决策简报·终止联名·abcd1234.md",
-    "AgentCore/文档/debate/交锋叙事线·终止联名·abcd1234.md",
+    "AgentCore/文档/debate/辩论·终止联名·abcd1234.md",
 ]
 
 _SERVER_ROOT = Path(__file__).resolve().parents[1]

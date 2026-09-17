@@ -222,6 +222,42 @@ def test_escalate_schema_options_are_one_line():
     assert "（推荐）" not in blob
 
 
+def test_escalate_questions_share_ask_user_card_shape():
+    """卡形单源：键与 ask_user 相同；队员不广告本机 action；必填/minItems 仍分列。"""
+    from agentcore.runtime.events import EventSink
+    from agentcore.tools.builtin.ask_user import AskUserTool
+
+    ask = AskUserTool(
+        sink=EventSink(),
+        conversation_id="c1",
+        timeout_seconds=30.0,
+    ).schema.parameters["properties"]["questions"]
+    esc = EscalateTool().schema.parameters["properties"]["questions"]
+    assert set(esc["items"]["properties"]) == set(ask["items"]["properties"])
+    assert set(esc["items"]["properties"]) == {
+        "prompt",
+        "kind",
+        "options",
+        "multiple",
+        "default",
+    }
+    assert "action" not in esc["items"]["properties"]["options"]["items"]["properties"]
+    assert "action" not in ask["items"]["properties"]["options"]["items"]["properties"]
+    assert ask.get("minItems") == 1
+    assert "minItems" not in esc
+    assert "required" not in esc
+    desktop = AskUserTool(
+        sink=EventSink(),
+        conversation_id="c1",
+        timeout_seconds=30.0,
+        advertise_bind_local_folder=True,
+    ).schema.parameters["properties"]["questions"]["items"]["properties"]["options"]["items"][
+        "properties"
+    ]
+    assert "action" in desktop
+    assert "action" not in esc["items"]["properties"]["options"]["items"]["properties"]
+
+
 @pytest.mark.asyncio
 async def test_blocking_escalate_drops_option_detail():
     seen: dict = {}

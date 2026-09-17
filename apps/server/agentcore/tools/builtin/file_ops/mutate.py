@@ -421,7 +421,10 @@ class FileWriteTool:
         # Schema layer: 这是什么。
         return ToolSchema(
             name="file_write",
-            description="把内容写入文件：创建（含上级目录）或整体覆盖已有文件。",
+            description=(
+                "把内容写入文件：创建（含上级目录）或整体覆盖已有文件。"
+                "用户规则写 .agentcore/规则/*.md。"
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -455,6 +458,17 @@ class FileWriteTool:
         # fast with the required-arg message instead (parity with str_replace/move).
         if not requested_path:
             return _error("path 不能为空：请提供工作区内的相对文件路径（如 report.md）", start)
+
+        from .user_rules import maybe_user_rule_write
+
+        rule_hit = await maybe_user_rule_write(
+            requested_path=str(requested_path),
+            content=content if isinstance(content, str) else str(content or ""),
+            context=context,
+            start=start,
+        )
+        if rule_hit is not None:
+            return rule_hit
 
         prepared = await prepared_write_relpath(
             requested_path, context, host_grant_mode="attach_rw"
@@ -673,6 +687,19 @@ class StrReplaceTool:
 
         if not rel_path:
             return _error("path 不能为空：请提供工作区内的相对文件路径", start)
+
+        from .user_rules import maybe_user_rule_str_replace
+
+        rule_hit = await maybe_user_rule_str_replace(
+            requested_path=str(rel_path),
+            old_string=old_string,
+            new_string=new_string,
+            replace_all=replace_all,
+            context=context,
+            start=start,
+        )
+        if rule_hit is not None:
+            return rule_hit
 
         prepared = await prepared_write_relpath(rel_path, context, host_grant_mode="attach_rw")
         if isinstance(prepared, ToolResult):

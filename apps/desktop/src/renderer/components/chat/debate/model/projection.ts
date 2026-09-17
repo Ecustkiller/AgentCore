@@ -18,7 +18,6 @@ import type {
   DebateFindingInfo,
   DebateNarrativeRound,
   DebateResultPayload,
-  DebateRoundScore,
   DebateRoundSide,
   DebateSpeechArgument,
   DebateThreadTurnInfo,
@@ -208,7 +207,7 @@ function settledModel(
       userInterjections: round.user_interjections ?? [],
       crossExam: resolveCrossExam(round.cross_exam, round.sides, execution),
       witnessExam: resolveWitnessExam(round.witness_exam, execution),
-      scores: resolveScores(round.scores, round.sides),
+      scores: [],
       sides,
       findings: resolveFindings(round.findings, round.sides, execution),
       threadTurns: resolveThreadTurns(
@@ -563,32 +562,6 @@ function resolveCrossExam(
   return out;
 }
 
-/** 把契约的本轮记分 dict（`sideKey` → {@link DebateRoundScore}）据本轮 `sides` 解析成可渲染的
- * {@link DebateScoreView}[]（按 `sides` 声明序，带名字 + 身份色）。引用不到 side 的记分（防御性）丢弃。 */
-function resolveScores(
-  scores: Record<string, DebateRoundScore> | undefined,
-  sides: readonly DebateRoundSide[],
-): DebateScoreView[] {
-  if (!scores) return [];
-  const out: DebateScoreView[] = [];
-  for (const side of sides) {
-    const sc = scores[side.key];
-    if (!sc) continue;
-    out.push({
-      sideKey: side.key,
-      name: side.name,
-      colorVar: debateSideColorVar(side.key, side.name),
-      argument: sc.argument,
-      engagement: sc.engagement,
-      evidence: sc.evidence,
-      penalties: sc.penalties ?? [],
-      note: sc.note,
-      total: sc.total,
-    });
-  }
-  return out;
-}
-
 /** 红队 finding 台账 → 展示态（全文靠 run_id）。 */
 function resolveFindings(
   findings: readonly DebateFindingInfo[] | undefined,
@@ -672,10 +645,7 @@ function resolveClosings(
 }
 
 /**
- * 把各轮各方的 {@link DebateScoreView} 累加成每方一个【累计分】（记分裁判 P2，镜像后端
- * `tally_scores`）——三维逐轮相加、罚分全场并起、净分累加，`note` 累计无意义留空。收场「记分总览」
- * 据此呈现势均力敌 / 谁占优（净分驱动 leaning，与实际交锋对齐）。无任何记分（未开启 P2）→ 空数组。
- * 名字/色取该方末次出现的（跨轮稳定）。按各方首次出现序排列（与阵营条一致）。
+ * 把各轮各方的 {@link DebateScoreView} 累加成每方一个累计分（协议兼容；产品面不展）。
  */
 export function tallyScores(rounds: DebateRoundModel[]): DebateScoreView[] {
   const tally = new Map<string, DebateScoreView>();

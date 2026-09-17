@@ -25,14 +25,16 @@ A」vs「on provider B」vs「on platform free quota」are genuinely different o
   list is not an empty dropdown. Discovery failure / empty still keeps the
   preset seed (never a 500). After the union, exact ids in the preset's
   ``hideFromPicker`` are omitted from new rows (retired official aliases);
-  already-pinned profile slots stay runnable. OpenCode Go/Zen ids in the
-  shared off-protocol map
+  already-pinned profile slots stay runnable. OpenCode Go/Zen ``/responses``
+  ids in the shared off-protocol map
   (:data:`agentcore.llm.byok_provider_presets.BYOK_OFF_PROTOCOL_MODELS`) stay
   listed (not silently dropped) but ``available=False`` with
-  :class:`ModelUnavailableReason`.
+  :class:`ModelUnavailableReason`. ``/messages`` ids (Claude / Union Alpha /
+  Qwen plus-max) are listed and selectable on those endpoints.
 * **platform** rows — the operator platform model set when platform credentials exist.
   Allowlist ids in the same off-protocol map stay listed (not silently dropped)
-  but ``available=False`` with :class:`ModelUnavailableReason`. No endpoint
+  but ``available=False`` with :class:`ModelUnavailableReason` (including
+  ``/messages`` — Claude is BYOK-on-Zen, not platform quota). No endpoint
   gate — see :func:`_platform_entry`.
 
 A keyless user on a deployment with no platform subsidy gets an EMPTY catalog — the UI
@@ -43,7 +45,8 @@ unmatched: default ∪ discovery). ``model_metadata`` only ENRICHES display fiel
 Catalog ``vision`` is stamped there from
 :mod:`agentcore.llm.image_accept`. Pricing reuses the community chain
 (:func:`pricing_for_model`).
-Off-protocol OpenCode ids are kept in that set (visible, not selectable).
+Off-protocol OpenCode ``/responses`` ids are kept in that set (visible, not selectable).
+``/messages`` ids are selectable on OpenCode BYOK.
 """
 
 from __future__ import annotations
@@ -216,10 +219,20 @@ def _off_protocol_unavailable(model_id: str) -> ModelUnavailableReason | None:
 
 
 def _off_protocol_reason(model_id: str, base_url: str) -> ModelUnavailableReason | None:
-    """OpenCode Go/Zen only: known off-protocol ids are listed but not selectable."""
+    """OpenCode Go/Zen: ``/responses`` ids stay listed but not selectable.
+
+    ``/messages`` ids are selectable here — the Zen/Go leaf POSTs ``/messages``.
+    Platform rows still grey every mapped id (no per-row endpoint at catalog time).
+    """
     if not is_opencode_byok_endpoint(base_url):
         return None
-    return _off_protocol_unavailable(model_id)
+    protocol = off_protocol_kind(model_id)
+    if protocol is None or protocol == "anthropic_messages":
+        return None
+    return ModelUnavailableReason(
+        code="upstream_protocol_unsupported",
+        required_protocol=protocol,
+    )
 
 
 def _dedupe(ids: list[str]) -> list[str]:
@@ -367,12 +380,13 @@ def _platform_entry(model_id: str) -> ModelCatalogEntry:
     """One platform-billed catalog row (nominal-price ledger, F4).
 
     Off-protocol ids use the shared exact map (:func:`off_protocol_kind`) and are
-    listed but not selectable. **No base_url gate** on this path: platform rows
-    have no per-row endpoint at catalog time (credentials resolve later via the
-    operator pool / per-model override / ``PLATFORM_BASE_URL``), and the default
-    URL is DeepSeek — gating on that URL would miss the allowlist misconfig this
-    exists to catch. BYOK still gates on OpenCode endpoints because the same id
-    can be chat/completions on another user-configured relay.
+    listed but not selectable — including ``/messages`` (Claude is the user's
+    OpenCode BYOK key, not platform quota). **No base_url gate** on this path:
+    platform rows have no per-row endpoint at catalog time (credentials resolve
+    later via the operator pool / per-model override / ``PLATFORM_BASE_URL``),
+    and the default URL is DeepSeek — gating on that URL would miss the
+    allowlist misconfig this exists to catch. BYOK OpenCode greys only
+    ``/responses``; ``/messages`` ids are selectable there.
     """
     reason = _off_protocol_unavailable(model_id)
     return _entry(

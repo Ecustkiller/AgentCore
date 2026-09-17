@@ -3,7 +3,6 @@ description: 前端跨端架构——产品页单树 + 壳自适应；能力黑�
 globs:
   - "apps/desktop/src/renderer/**"
   - "apps/mobile/**"
-  - "packages/**"
 alwaysApply: false
 ---
 

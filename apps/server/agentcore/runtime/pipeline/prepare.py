@@ -277,7 +277,7 @@ async def prepare_fresh_turn(
             "outlet_inventory",
             await_prepare_local_io(collect_outlet_inventory(backend)),
         )
-        from agentcore.workspace.project_shell import desk_is_visibly_empty
+        from agentcore.workspace.desk_empty import desk_is_visibly_empty
 
         desk_visibly_empty = await _timed_phase(
             "desk_empty",

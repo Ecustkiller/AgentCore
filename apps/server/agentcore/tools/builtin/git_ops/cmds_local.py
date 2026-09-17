@@ -1,4 +1,4 @@
-"""Local mutate git subcommands: init_baseline / add / commit / branch / checkout."""
+"""Local mutate git subcommands: add / commit / checkout."""
 
 from __future__ import annotations
 
@@ -7,82 +7,9 @@ from typing import Any
 from agentcore.tools.protocol import ToolResult
 
 from . import spawn as spawn_mod
-from .policy import (
-    _ALREADY_REPO_CODE,
-    _DIRTY_SKIP_CODE,
-    _INIT_BASELINE_AUTHOR_EMAIL,
-    _INIT_BASELINE_AUTHOR_NAME,
-    _INIT_BASELINE_MESSAGE,
-    _PROTECTED_BRANCHES,
-    _validate_add_paths,
-)
+from .policy import _PROTECTED_BRANCHES, _validate_add_paths
 from .results import _error, _git_failure, _ok
-from .spawn import _current_branch, _workspace_has_git_meta
-
-
-async def cmd_init_baseline(
-    cwd: str,
-    start: float,
-    *,
-    meta: dict[str, Any],
-) -> ToolResult:
-    """Init repo + first commit when missing; never force-commit a dirty existing tree."""
-    if await _workspace_has_git_meta(cwd):
-        porcelain, stderr, code = await spawn_mod._run_git(
-            ["status", "--porcelain"], cwd=cwd
-        )
-        if code != 0:
-            return await _git_failure(porcelain, stderr, code, start, metadata=meta)
-        if porcelain.strip():
-            return _ok(
-                "已有 Git 仓库且工作区有未提交改动，不代为 commit。"
-                "请用 status/diff 查看后由用户决定是否提交。",
-                start,
-                metadata={**meta, "code": _DIRTY_SKIP_CODE},
-            )
-        return _ok(
-            "已有 Git 仓库且工作区干净，无需 init_baseline。",
-            start,
-            metadata={**meta, "code": _ALREADY_REPO_CODE},
-        )
-
-    init_out, init_err, init_code = await spawn_mod._run_git(["init"], cwd=cwd)
-    if init_code != 0:
-        return await _git_failure(init_out, init_err, init_code, start, metadata=meta)
-
-    add_out, add_err, add_code = await spawn_mod._run_git(["add", "-A"], cwd=cwd)
-    if add_code != 0:
-        return await _git_failure(add_out, add_err, add_code, start, metadata=meta)
-
-    commit_args = [
-        "-c",
-        f"user.name={_INIT_BASELINE_AUTHOR_NAME}",
-        "-c",
-        f"user.email={_INIT_BASELINE_AUTHOR_EMAIL}",
-        "commit",
-        "--allow-empty",
-        "-m",
-        _INIT_BASELINE_MESSAGE,
-    ]
-    commit_out, commit_err, commit_code = await spawn_mod._run_git(commit_args, cwd=cwd)
-    if commit_code != 0:
-        return await _git_failure(
-            commit_out, commit_err, commit_code, start, metadata=meta
-        )
-
-    sha, _, sha_code = await spawn_mod._run_git(["rev-parse", "--short", "HEAD"], cwd=cwd)
-    short = sha.strip() if sha_code == 0 else ""
-    branch = await _current_branch(cwd)
-    bits = ["已初始化 Git 并完成首提交（AgentCore baseline）"]
-    if short:
-        bits.append(f"HEAD={short}")
-    if branch:
-        bits.append(f"分支={branch}")
-    return _ok(
-        "；".join(bits) + "。",
-        start,
-        metadata={**meta, "sha": short or None, "branch": branch or None},
-    )
+from .spawn import _current_branch
 
 
 async def cmd_add(
@@ -101,6 +28,7 @@ async def cmd_add(
     if detail:
         output += f"\n{detail}"
     return _ok(output, start, metadata=meta)
+
 
 async def cmd_commit(
     cwd: str, message: str, start: float, *, meta: dict[str, Any]
@@ -124,21 +52,6 @@ async def cmd_commit(
         output += f"\n{detail}"
     return _ok(output, start, metadata=meta)
 
-async def cmd_branch(
-    cwd: str, branch: str, start: float, *, meta: dict[str, Any]
-) -> ToolResult:
-    if not branch:
-        return _error("branch 需要 branch 参数", start)
-    if branch.startswith("-"):
-        return _error("分支名不能以 '-' 开头（防止被 git 解析为选项）", start)
-    stdout, stderr, code = await spawn_mod._run_git(["branch", branch], cwd=cwd)
-    if code != 0:
-        return await _git_failure(stdout, stderr, code, start, metadata=meta)
-    detail = (stdout or stderr).strip()
-    output = f"已创建分支 {branch}"
-    if detail:
-        output += f"\n{detail}"
-    return _ok(output, start, metadata=meta)
 
 async def cmd_checkout(
     cwd: str,
@@ -166,4 +79,3 @@ async def cmd_checkout(
     if detail:
         output += f"\n{detail}"
     return _ok(output, start, metadata=meta)
-

@@ -99,9 +99,7 @@ export interface DebateWitnessExamView {
 }
 
 /**
- * 一方某轮/累计的记分（记分裁判 P2）已解析成展示态：身份（名 + 稳定身份色）+ 三维分 + 罚分清单 +
- * 净分。由 {@link resolveScores}（逐轮）/ {@link tallyScores}（累计）把契约的 {@link DebateRoundScore}
- * （语义 key 引用）据本轮 `sides` 映射成名字/色——让「回避与被戳穿被记分、倾向由记分驱动」可见。
+ * 一方某轮的记分展示态（协议兼容；产品面不展）。
  */
 export interface DebateScoreView {
   sideKey: string;
@@ -185,8 +183,7 @@ export interface DebateRoundModel {
   crossExam: DebateCrossExamView[];
   /** 本轮证人答问（批 D1）。缺字段 / 未点名 → []。 */
   witnessExam: DebateWitnessExamView[];
-  /** 本轮记分裁判的各方得分（记分裁判 P2）。收场以权威 `debate_result.rounds[*].scores` 为准；
-   *  进行中恒空（live 孪生不携带）。空=未开启记分（快速对碰），前端不渲染比分。 */
+  /** 本轮各方得分：协议可带；产品面忽略（旧场也不展比分）。 */
   scores: DebateScoreView[];
   /** 红队 finding 台账（本轮）；空 = 旧载荷 / 非红队 → 降级为按方发言格。 */
   findings: DebateFindingView[];

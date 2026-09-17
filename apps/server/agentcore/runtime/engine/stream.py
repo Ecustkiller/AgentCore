@@ -144,6 +144,7 @@ class StreamRoundResult:
     aborted: bool = False
     # Upstream choice.finish_reason when present (stop / tool_calls / length / …).
     finish_reason: str | None = None
+    thinking_blocks: list[dict] | None = None
 
 
 async def stream_llm_round(
@@ -185,6 +186,7 @@ async def stream_llm_round(
     empty_diagnosis: str | None = None
     empty_raw_preview: str | None = None
     aborted = False
+    thinking_blocks: list[dict] | None = None
 
     # Phase-0 TTFT: only the first CEO/captain stream of the turn (cost_role).
     from agentcore.core.log_context import get_log_value
@@ -216,12 +218,13 @@ async def stream_llm_round(
 
     def _reset_attempt_state() -> None:
         _clear_accumulators()
-        nonlocal usage, finish_reason, empty_diagnosis, empty_raw_preview, aborted
+        nonlocal usage, finish_reason, empty_diagnosis, empty_raw_preview, aborted, thinking_blocks
         usage = None
         finish_reason = None
         empty_diagnosis = None
         empty_raw_preview = None
         aborted = False
+        thinking_blocks = None
         if record_ttft and latency_probe is not None:
             latency_probe.clear_ttft()
         if on_reset is not None:
@@ -261,6 +264,7 @@ async def stream_llm_round(
                             finish_reason = None
                             empty_diagnosis = None
                             empty_raw_preview = None
+                            thinking_blocks = None
                             if record_ttft and latency_probe is not None:
                                 latency_probe.clear_ttft()
                             if on_reset is not None:
@@ -324,6 +328,9 @@ async def stream_llm_round(
 
                         if chunk.usage:
                             usage = chunk.usage
+
+                        if chunk.thinking_blocks:
+                            thinking_blocks = chunk.thinking_blocks
                 hold.flush()
             except TimeoutError:
                 committed = bool(content_parts) or bool(tc_accumulators)
@@ -427,4 +434,5 @@ async def stream_llm_round(
         empty_raw_preview=empty_raw_preview,
         aborted=aborted,
         finish_reason=finish_reason,
+        thinking_blocks=thinking_blocks,
     )

@@ -451,7 +451,7 @@ class FileReadTool:
             name="file_read",
             description=(
                 "读取工作区文件。http(s) 用 web_fetch；目录用 file_list；"
-                "定位用 grep / glob / code_search。"
+                "定位用 grep / glob。"
                 "本机绝对路径可直接填（HOW→consult(local_desk)）。"
             ),
             parameters={
@@ -500,6 +500,18 @@ class FileReadTool:
         if looks_like_http_url(str(rel_path or "")):
             return _url_not_workspace_path_error(str(rel_path).strip(), start)
 
+        from .user_rules import maybe_user_rule_read
+
+        rule_hit = await maybe_user_rule_read(
+            requested_path=str(rel_path or ""),
+            offset=offset,
+            limit=limit,
+            context=context,
+            start=start,
+        )
+        if rule_hit is not None:
+            return rule_hit
+
         from .prepare_path import prepare_tool_path
 
         prepared = await prepare_tool_path(rel_path, context, start=start)
@@ -507,11 +519,6 @@ class FileReadTool:
             return prepared
         rel_path = prepared
 
-        from agentcore.workspace.project_shell import rewrite_project_shell_relpath
-
-        rel_path, _shell_note = await rewrite_project_shell_relpath(
-            rel_path, context, register=False
-        )
         path_key = (rel_path or "").strip().replace("\\", "/")
         ext = extension_of(path_key or rel_path)
         pdf_start = _effective_start_page(start_page_arg)
@@ -901,6 +908,7 @@ class FileListTool:
             description=(
                 "列出已知目录当前层（默认工作区根）。整树按名用 glob。"
                 "已挂载区外用 `external/<别名>/`。"
+                "用户规则列 `.agentcore/规则`。"
             ),
             parameters={
                 "type": "object",
@@ -929,6 +937,14 @@ class FileListTool:
         if is_bare_external_directory(directory):
             return bare_external_error(directory, context.backend, start)
 
+        from .user_rules import maybe_user_rule_list, merge_rule_dir_entries
+
+        rule_hit = await maybe_user_rule_list(
+            directory=directory, context=context, start=start
+        )
+        if rule_hit is not None:
+            return rule_hit
+
         from .prepare_path import prepare_tool_path
 
         prepared = await prepare_tool_path(
@@ -938,26 +954,28 @@ class FileListTool:
             return prepared
         directory = prepared
 
-        from agentcore.workspace.project_shell import rewrite_project_shell_relpath
-
-        directory, _shell_note = await rewrite_project_shell_relpath(
-            directory, context, register=False
-        )
-        if not directory:
-            directory = "."
-
         try:
             listing = await context.backend.list(directory, "*")
             entries = visible_list_entries(
                 list(listing.entries),
                 materials=context.material_paths,
             )
+            entries = merge_rule_dir_entries(directory, entries)
             output = (
                 format_ls_lines(entries) if entries else empty_list_message(directory)
             )
             if listing.truncated:
                 output += f"\n\n{LIST_TRUNCATED_NOTE}"
         except WorkspaceError as e:
+            from agentcore.memory.rule_files import classify_rule_path
+            from agentcore.workspace.protocol import NotADirectory, PathNotFound
+
+            from .user_rules import synthetic_agentcore_listing
+
+            if classify_rule_path(directory)[0] == "agentcore_root" and isinstance(
+                e, (PathNotFound, NotADirectory)
+            ):
+                return synthetic_agentcore_listing(start)
             return await map_listing_failure(
                 e, directory=directory, context=context, start=start
             )

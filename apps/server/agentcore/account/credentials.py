@@ -276,37 +276,68 @@ async def cloud_list_user_rules(
     )
 
 
-async def cloud_remember_rule(
+async def cloud_write_user_rule(
     creds: AccountCredentials,
     *,
-    action: str = "write",
-    name: str | None = None,
-    content: str | None = None,
+    name: str,
+    content: str,
     folder_id: str | None,
     apply: str | None = None,
     description: str | None = None,
 ) -> dict[str, Any]:
-    """POST ``…/account/rules/remember`` → structured mutate result."""
+    """POST ``…/account/rules/write`` → structured mutate result."""
     payload: dict[str, Any] = {
         "folder_id": folder_id,
-        "action": action or "write",
+        "name": name,
+        "content": content,
     }
-    if name is not None:
-        payload["name"] = name
-    if content is not None:
-        payload["content"] = content
     if apply is not None:
         payload["apply"] = apply
     if description is not None:
         payload["description"] = description
-    data = await _post_json(
+    return await _cloud_rule_mutate(creds, path="/rules/write", payload=payload, op="rules_write")
+
+
+async def cloud_read_user_rule(
+    creds: AccountCredentials,
+    *,
+    name: str,
+    folder_id: str | None,
+) -> dict[str, Any]:
+    """POST ``…/account/rules/read`` → structured mutate result."""
+    return await _cloud_rule_mutate(
         creds,
-        path="/rules/remember",
-        payload=payload,
-        op="rules_remember",
+        path="/rules/read",
+        payload={"folder_id": folder_id, "name": name},
+        op="rules_read",
     )
+
+
+async def cloud_delete_user_rule(
+    creds: AccountCredentials,
+    *,
+    name: str,
+    folder_id: str | None,
+) -> dict[str, Any]:
+    """POST ``…/account/rules/delete`` → structured mutate result."""
+    return await _cloud_rule_mutate(
+        creds,
+        path="/rules/delete",
+        payload={"folder_id": folder_id, "name": name},
+        op="rules_delete",
+    )
+
+
+async def _cloud_rule_mutate(
+    creds: AccountCredentials,
+    *,
+    path: str,
+    payload: dict[str, Any],
+    op: str,
+) -> dict[str, Any]:
+    data = await _post_json(creds, path=path, payload=payload, op=op)
     if not isinstance(data, dict):
-        raise AccountCloudError("account remember response is not an object")
+        raise AccountCloudError(f"account {op} response is not an object")
     catalog: list[dict[str, str]] = []
     raw_catalog = data.get("catalog")
     if isinstance(raw_catalog, list):
@@ -322,10 +353,10 @@ async def cloud_remember_rule(
     ok_raw = data.get("ok")
     return {
         "changed": bool(data.get("changed")),
-        "action": str(data.get("action") or action or "write"),
+        "action": str(data.get("action") or ""),
         "message": str(data.get("message") or ""),
-        "name": str(data.get("name") or name or ""),
-        "apply": str(data.get("apply") or apply or ""),
+        "name": str(data.get("name") or payload.get("name") or ""),
+        "apply": str(data.get("apply") or ""),
         "body": str(data.get("body") or ""),
         "catalog": catalog,
         "ok": True if ok_raw is None else bool(ok_raw),

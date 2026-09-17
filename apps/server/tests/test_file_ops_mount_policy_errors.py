@@ -35,9 +35,6 @@ def _module_msg_constants(mod: object) -> frozenset[str]:
 
 
 def _ctx(workspace: Path) -> ToolContext:
-    keep = workspace / "README.md"
-    if not keep.exists():
-        keep.write_text("desk\n", encoding="utf-8")
     return ToolContext.create(
         execution_id="e",
         run_id="s",

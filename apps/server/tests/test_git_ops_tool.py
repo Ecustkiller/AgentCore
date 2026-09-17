@@ -194,8 +194,10 @@ def test_forbidden_patterns_disjoint_from_allowlist():
     # future allowlist expansion cannot silently re-enable reset/clean.
     assert _FORBIDDEN_PATTERNS.isdisjoint(_ALLOWED_SUBCOMMANDS)
     assert {"reset", "clean"} <= _FORBIDDEN_PATTERNS
-    assert {"rebase", "merge", "stash"} <= _ALLOWED_SUBCOMMANDS
-    assert {"cherry-pick", "tag", "remote"} <= _ALLOWED_SUBCOMMANDS
+    assert {"rebase", "merge", "stash", "cherry-pick", "tag", "remote"}.isdisjoint(
+        _ALLOWED_SUBCOMMANDS
+    )
+    assert {"show", "blame", "branch", "init_baseline"}.isdisjoint(_ALLOWED_SUBCOMMANDS)
     assert "push" not in _FORBIDDEN_PATTERNS
     assert "push" in _ALLOWED_SUBCOMMANDS
     assert "push" in git_write_subcommands()
@@ -207,10 +209,7 @@ def test_forbidden_patterns_disjoint_from_allowlist():
     assert "clone" in git_write_subcommands()
     assert "fetch" in _ALLOWED_SUBCOMMANDS
     assert "fetch" not in git_write_subcommands()
-    assert {"show", "blame"} <= _ALLOWED_SUBCOMMANDS
-    assert git_write_subcommands().isdisjoint({"fetch", "show", "blame"})
-    assert {"merge", "rebase", "cherry-pick"} <= git_write_subcommands()
-    assert {"stash", "tag", "remote"} <= git_write_subcommands()
+    assert git_write_subcommands().isdisjoint({"fetch", "status", "diff", "log"})
 
 
 @pytest.mark.parametrize("subcommand", sorted(_FORBIDDEN_PATTERNS))
@@ -237,7 +236,7 @@ async def test_unknown_subcommand_rejected(tmp_path: Path):
 
 @pytest.mark.parametrize(
     "subcommand",
-    sorted(s for s in git_write_subcommands() if s not in {"init_baseline", "clone"}),
+    sorted(s for s in git_write_subcommands() if s not in {"clone"}),
 )
 async def test_ceo_context_does_not_role_deny_write_subcommands(
     tmp_path: Path, subcommand: str
@@ -248,19 +247,8 @@ async def test_ceo_context_does_not_role_deny_write_subcommands(
         args["paths"] = ["README.md"]
     elif subcommand == "commit":
         args["message"] = "x"
-    elif subcommand in ("branch", "checkout"):
+    elif subcommand == "checkout":
         args["branch"] = "other"
-    elif subcommand in ("merge", "rebase", "cherry-pick"):
-        args["ref"] = "other"
-    elif subcommand == "stash":
-        args["action"] = "push"
-    elif subcommand == "tag":
-        args["action"] = "create"
-        args["name"] = "v0"
-    elif subcommand == "remote":
-        args["action"] = "add"
-        args["name"] = "upstream"
-        args["url"] = "https://example.com/repo.git"
     elif subcommand == "create_pr":
         args["title"] = "PR"
     result = await GitTool().execute(args, _ceo_ctx(tmp_path / "repo"))
@@ -325,7 +313,7 @@ async def test_status_uses_workspace_repo_not_parent(tmp_path: Path):
 async def test_no_git_anywhere_reports_structured_no_repo(tmp_path: Path):
     bare = tmp_path / "not_a_repo"
     bare.mkdir()
-    for sub in ("status", "diff", "log", "fetch", "show", "blame"):
+    for sub in ("status", "diff", "log", "fetch"):
         result = await GitTool().execute({"subcommand": sub}, _ceo_ctx(bare))
         assert result.success is True
         assert result.metadata.get("code") == "no_repo"
@@ -509,14 +497,7 @@ async def test_commit_on_feature_branch_allowed(tmp_path: Path):
     assert "已提交" in result.output
 
 
-# --- branch / checkout args ---
-
-
-async def test_branch_requires_branch_name(tmp_path: Path):
-    repo = _init_repo(tmp_path / "repo")
-    result = await GitTool().execute({"subcommand": "branch"}, _worker_ctx(repo))
-    assert result.success is False
-    assert "branch 需要 branch 参数" in (result.error or "")
+# --- checkout args ---
 
 
 async def test_checkout_requires_branch_name(tmp_path: Path):
@@ -524,19 +505,6 @@ async def test_checkout_requires_branch_name(tmp_path: Path):
     result = await GitTool().execute({"subcommand": "checkout"}, _worker_ctx(repo))
     assert result.success is False
     assert "checkout 需要 branch 参数" in (result.error or "")
-
-
-@pytest.mark.parametrize("branch", ["-f", "--force", "-D"])
-async def test_branch_rejects_option_like_names(tmp_path: Path, branch: str):
-    # audit 05 P3-1: a ``-``-prefixed branch would be parsed by git as an option
-    # (e.g. ``branch -f``); reject before it ever reaches argv.
-    repo = _init_repo(tmp_path / "repo")
-    result = await GitTool().execute(
-        {"subcommand": "branch", "branch": branch},
-        _worker_ctx(repo),
-    )
-    assert result.success is False
-    assert "'-' 开头" in (result.error or "")
 
 
 @pytest.mark.parametrize("branch", ["-f", "--force", "-D"])
@@ -548,25 +516,6 @@ async def test_checkout_rejects_option_like_names(tmp_path: Path, branch: str):
     )
     assert result.success is False
     assert "'-' 开头" in (result.error or "")
-
-
-async def test_branch_creates_named_branch(tmp_path: Path):
-    repo = _init_repo(tmp_path / "repo")
-    result = await GitTool().execute(
-        {"subcommand": "branch", "branch": "feature/new"},
-        _worker_ctx(repo),
-    )
-    assert result.success is True
-    assert "已创建分支 feature/new" in result.output
-    branches = subprocess.run(
-        ["git", "branch", "--list", "feature/new"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-        text=True,
-        env=_GIT_ENV,
-    )
-    assert "feature/new" in branches.stdout
 
 
 async def test_checkout_create_switches_to_new_branch(tmp_path: Path):
@@ -683,7 +632,7 @@ async def test_push_to_local_bare_remote(tmp_path: Path):
     assert "feature/ship" in listed.stdout
 
 
-# --- fetch / pull / show / blame (G1) ---
+# --- fetch / pull ---
 
 
 def test_pull_requires_approval_fetch_does_not():
@@ -703,28 +652,6 @@ def test_pull_requires_approval_fetch_does_not():
         )
         is False
     )
-    assert (
-        tool_call_requires_approval(
-            "git", schema_approval, {"subcommand": "show"}
-        )
-        is False
-    )
-    assert (
-        tool_call_requires_approval(
-            "git", schema_approval, {"subcommand": "blame", "paths": ["README.md"]}
-        )
-        is False
-    )
-
-
-async def test_ceo_allows_fetch_show_blame(tmp_path: Path):
-    repo = _init_repo(tmp_path / "repo")
-    for sub, args in (
-        ("show", {"subcommand": "show"}),
-        ("blame", {"subcommand": "blame", "paths": ["README.md"]}),
-    ):
-        result = await GitTool().execute(args, _ceo_ctx(repo))
-        assert result.success is True, f"{sub}: {result.error}"
 
 
 async def test_fetch_from_local_bare_remote(tmp_path: Path):
@@ -1111,76 +1038,6 @@ async def test_network_cmds_local_no_extra_env_even_with_pat(
     assert seen_extra[0] is None
 
 
-async def test_show_and_blame_basic(tmp_path: Path):
-    repo = _init_repo(tmp_path / "repo")
-    shown = await GitTool().execute({"subcommand": "show"}, _ceo_ctx(repo))
-    assert shown.success is True
-    assert "hello" in shown.output or "init" in shown.output
-
-    blamed = await GitTool().execute(
-        {"subcommand": "blame", "paths": ["README.md"]},
-        _ceo_ctx(repo),
-    )
-    assert blamed.success is True
-    assert "hello" in blamed.output
-    assert blamed.metadata.get("path") == "README.md"
-
-
-async def test_blame_requires_single_path(tmp_path: Path):
-    repo = _init_repo(tmp_path / "repo")
-    empty = await GitTool().execute({"subcommand": "blame"}, _ceo_ctx(repo))
-    assert empty.success is False
-    assert "paths" in (empty.error or "")
-
-    multi = await GitTool().execute(
-        {"subcommand": "blame", "paths": ["README.md", "other.txt"]},
-        _ceo_ctx(repo),
-    )
-    assert multi.success is False
-    assert "一个文件" in (multi.error or "")
-
-
-async def test_show_truncates_long_output(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    from agentcore.tools.builtin import git_ops as git_mod
-
-    monkeypatch.setattr(git_mod.policy, "_DIFF_OUTPUT_LIMIT", 80)
-    repo = _init_repo(tmp_path / "repo")
-    (repo / "big.txt").write_text("x" * 400 + "\n", encoding="utf-8")
-    _run_git(repo, "add", "big.txt")
-    _run_git(repo, "commit", "-m", "big")
-    result = await GitTool().execute(
-        {"subcommand": "show", "object": "HEAD"},
-        _ceo_ctx(repo),
-    )
-    assert result.success is True
-    assert len(result.output) <= 80 + 50  # truncate_head_tail may use marker
-    assert "系统视图截断" in result.output or "……" in result.output
-
-
-async def test_blame_truncates_long_output(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    from agentcore.tools.builtin import git_ops as git_mod
-
-    monkeypatch.setattr(git_mod.policy, "_BLAME_LINE_LIMIT", 3)
-    repo = _init_repo(tmp_path / "repo")
-    (repo / "lines.txt").write_text(
-        "\n".join(f"line-{i}" for i in range(8)) + "\n", encoding="utf-8"
-    )
-    _run_git(repo, "add", "lines.txt")
-    _run_git(repo, "commit", "-m", "lines")
-    result = await GitTool().execute(
-        {"subcommand": "blame", "paths": ["lines.txt"]},
-        _ceo_ctx(repo),
-    )
-    assert result.success is True
-    assert "已截断" in result.output
-    assert result.metadata.get("truncated") is True
-    assert (result.metadata.get("blame_lines") or 0) >= 4
-
-
 # --- timeout contract / status narrowing ---
 
 
@@ -1202,20 +1059,18 @@ def test_git_tool_timeout_outlives_inner_ops():
     assert schema.timeout_seconds is None
     status_ceiling = git_tool_timeout_seconds({"subcommand": "status"})
     commit_ceiling = git_tool_timeout_seconds({"subcommand": "commit"})
-    merge_ceiling = git_tool_timeout_seconds({"subcommand": "merge"})
+    checkout_ceiling = git_tool_timeout_seconds({"subcommand": "checkout"})
     pull_ceiling = git_tool_timeout_seconds({"subcommand": "pull"})
     fetch_ceiling = git_tool_timeout_seconds({"subcommand": "fetch"})
     clone_ceiling = git_tool_timeout_seconds({"subcommand": "clone"})
     push_ceiling = git_tool_timeout_seconds({"subcommand": "push"})
     pr_ceiling = git_tool_timeout_seconds({"subcommand": "create_pr"})
-    baseline_ceiling = git_tool_timeout_seconds({"subcommand": "init_baseline"})
     # Read path spawns one git process (no repo probe) and never queues on the repo
     # lock — one inner budget + slack, unchanged by serialization.
     assert status_ceiling == _GIT_TIMEOUT + _GIT_KILL_SLACK
     # branch --show-current + commit + rev-parse --short HEAD, behind the repo queue
     assert commit_ceiling == 3 * _GIT_TIMEOUT + _GIT_REPO_LOCK_WAIT + _GIT_KILL_SLACK
-    # branch --show-current (protected-branch refusal) + merge, behind the repo queue
-    assert merge_ceiling == 2 * _GIT_TIMEOUT + _GIT_REPO_LOCK_WAIT + _GIT_KILL_SLACK
+    assert checkout_ceiling == _GIT_TIMEOUT + _GIT_REPO_LOCK_WAIT + _GIT_KILL_SLACK
     assert commit_ceiling > status_ceiling
     # Network subcommands also serialize on a bounded PAT lookup before the remote op;
     # only pull touches the index, so only pull pays the queue budget.
@@ -1239,21 +1094,9 @@ def test_git_tool_timeout_outlives_inner_ops():
         + _GITHUB_API_CALLS * _GITHUB_API_TIMEOUT
         + _GIT_KILL_SLACK
     )
-    assert baseline_ceiling == (
-        5 * _GIT_TIMEOUT + _GIT_REPO_LOCK_WAIT + _GIT_KILL_SLACK
-    )
     assert resolve_tool_timeout(schema, {"subcommand": "status"}) == status_ceiling
     assert resolve_tool_timeout(schema, {"subcommand": "commit"}) == commit_ceiling
     assert resolve_tool_timeout(schema, {"subcommand": "pull"}) == pull_ceiling
-    # Action-gated verbs must budget the queue exactly as they take it: stash push
-    # writes the index, stash list is a plain read.
-    assert git_tool_timeout_seconds({"subcommand": "stash", "action": "push"}) == (
-        _GIT_TIMEOUT + _GIT_REPO_LOCK_WAIT + _GIT_KILL_SLACK
-    )
-    assert (
-        git_tool_timeout_seconds({"subcommand": "stash", "action": "list"})
-        == status_ceiling
-    )
 
 
 def _declared_ceiling(fn: Any) -> float:
@@ -1325,8 +1168,6 @@ def _budget_probe(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, float]]:
         ({"subcommand": "status"}, "status -sb --untracked-files=no"),
         ({"subcommand": "diff"}, "diff"),
         ({"subcommand": "log", "max_count": 5}, "log -n5 --oneline"),
-        ({"subcommand": "show"}, "show HEAD"),
-        ({"subcommand": "blame", "paths": ["README.md"]}, "blame -- README.md"),
     ],
 )
 async def test_healthy_repo_read_spawns_one_git_process(
@@ -1364,9 +1205,6 @@ async def test_engine_ceiling_outlives_measured_inner_budget(
     _run_git(tmp_path, "init", "--bare", str(bare))
     _run_git(repo, "remote", "add", "origin", str(bare))
     (repo / "extra.txt").write_text("x\n", encoding="utf-8")
-    fresh = tmp_path / "fresh"
-    fresh.mkdir()
-    (fresh / "app.py").write_text("print('hi')\n", encoding="utf-8")
 
     ledger = _budget_probe(monkeypatch)
     from agentcore.tools.builtin.git_ops import cmds_remote as cmds_remote_mod
@@ -1384,11 +1222,9 @@ async def test_engine_ceiling_outlives_measured_inner_budget(
         ({"subcommand": "status"}, repo, False, False),
         ({"subcommand": "add", "paths": ["extra.txt"]}, repo, False, True),
         ({"subcommand": "commit", "message": "add extra"}, repo, False, True),
-        ({"subcommand": "merge", "ref": "feature/ship"}, repo, False, True),
         ({"subcommand": "push", "set_upstream": True}, repo, True, False),
         ({"subcommand": "fetch", "remote": "origin"}, repo, True, False),
         ({"subcommand": "pull", "remote": "origin"}, repo, True, True),
-        ({"subcommand": "init_baseline"}, fresh, False, True),
         (
             {"subcommand": "clone", "url": clone_src.as_uri()},
             clone_ws,
@@ -1621,9 +1457,6 @@ async def test_phases_name_the_leg_that_is_actually_running(
     _run_git(tmp_path, "init", "--bare", str(bare))
     _run_git(repo, "remote", "add", "origin", str(bare))
     (repo / "extra.txt").write_text("x\n", encoding="utf-8")
-    fresh = tmp_path / "fresh"
-    fresh.mkdir()
-    (fresh / "app.py").write_text("print('hi')\n", encoding="utf-8")
 
     remote_leg = [PHASE_LOCAL, PHASE_CREDENTIALS, PHASE_REMOTE]
     from agentcore.tools.builtin.git_ops import cmds_remote as cmds_remote_mod
@@ -1641,7 +1474,6 @@ async def test_phases_name_the_leg_that_is_actually_running(
         ({"subcommand": "status"}, repo, [PHASE_LOCAL]),
         ({"subcommand": "add", "paths": ["extra.txt"]}, repo, [PHASE_LOCAL]),
         ({"subcommand": "commit", "message": "extra"}, repo, [PHASE_LOCAL]),
-        ({"subcommand": "init_baseline"}, fresh, [PHASE_LOCAL]),
         ({"subcommand": "fetch", "remote": "origin"}, repo, remote_leg),
         ({"subcommand": "pull", "remote": "origin"}, repo, remote_leg),
         ({"subcommand": "push", "remote": "origin"}, repo, remote_leg),
@@ -1805,25 +1637,15 @@ def test_repo_lock_covers_exactly_the_index_writers():
         "add",
         "commit",
         "checkout",
-        "merge",
-        "rebase",
-        "cherry-pick",
         "pull",
-        "init_baseline",
     ):
         assert git_call_needs_repo_lock({"subcommand": sub}) is True, sub
     # Writes that never take index.lock keep their concurrency — push's remote round
     # trip must not park a sibling commit behind a minute of network.
-    for sub in ("push", "create_pr", "branch", "clone"):
+    for sub in ("push", "create_pr", "clone"):
         assert git_call_needs_repo_lock({"subcommand": sub}) is False, sub
-    for sub in ("status", "diff", "log", "fetch", "show", "blame"):
+    for sub in ("status", "diff", "log", "fetch"):
         assert git_call_needs_repo_lock({"subcommand": sub}) is False, sub
-    # Action-gated verbs follow the action, exactly as the approval gate does.
-    assert git_call_needs_repo_lock({"subcommand": "stash", "action": "push"}) is True
-    assert git_call_needs_repo_lock({"subcommand": "stash", "action": "pop"}) is True
-    assert git_call_needs_repo_lock({"subcommand": "stash"}) is False
-    assert git_call_needs_repo_lock({"subcommand": "tag", "action": "create"}) is False
-    assert git_call_needs_repo_lock({"subcommand": "remote", "action": "add"}) is False
     # The queue may only ever gate writes.
     assert git_write_subcommands() >= _INDEX_LOCK_SUBCOMMANDS
 
@@ -2032,60 +1854,6 @@ def test_parse_status_sb_extracts_branch():
     assert body2 == ""
 
 
-# --- init_baseline (P3 soft git baseline) ---
-
-
-async def test_init_baseline_creates_repo_and_first_commit(tmp_path: Path):
-    bare = tmp_path / "project"
-    bare.mkdir()
-    (bare / "app.py").write_text("print('hi')\n", encoding="utf-8")
-    assert not (bare / ".git").exists()
-
-    result = await GitTool().execute({"subcommand": "init_baseline"}, _ceo_ctx(bare))
-    assert result.success is True
-    assert (bare / ".git").exists()
-    assert "首提交" in result.output or "baseline" in result.output.lower()
-    assert result.metadata.get("sha")
-    # Tree is tracked after first commit.
-    status = await GitTool().execute(
-        {"subcommand": "status", "include_untracked": True}, _ceo_ctx(bare)
-    )
-    assert status.success is True
-    assert "app.py" not in (status.output or "") or "工作区干净" in (status.output or "")
-
-
-async def test_init_baseline_dirty_existing_repo_skips_commit(tmp_path: Path):
-    repo = _init_repo(tmp_path / "repo")
-    (repo / "README.md").write_text("dirty\n", encoding="utf-8")
-    result = await GitTool().execute({"subcommand": "init_baseline"}, _ceo_ctx(repo))
-    assert result.success is True
-    assert result.metadata.get("code") == "dirty_skip"
-    assert "不代为 commit" in result.output
-    # Dirty content must remain uncommitted.
-    porcelain = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-        text=True,
-        env=_GIT_ENV,
-    )
-    assert porcelain.stdout.strip()
-
-
-async def test_init_baseline_clean_existing_repo_reports_already(tmp_path: Path):
-    repo = _init_repo(tmp_path / "repo")
-    result = await GitTool().execute({"subcommand": "init_baseline"}, _ceo_ctx(repo))
-    assert result.success is True
-    assert result.metadata.get("code") == "already_repo"
-    assert "无需 init_baseline" in result.output
-
-
-def test_init_baseline_in_write_allowlist():
-    assert "init_baseline" in _ALLOWED_SUBCOMMANDS
-    assert "init_baseline" in git_write_subcommands()
-
-
 # --- clone (G3 Agent shallow clone under tool cwd) ---
 
 
@@ -2248,233 +2016,31 @@ async def test_clone_rejects_nonempty_dest(
     assert "非空" in (result.error or "")
 
 
-# --- G2 collaboration: stash / merge / rebase / cherry-pick / tag / remote ---
+# --- retired verbs stay off the allowlist ---
 
 
-def test_g2_list_actions_skip_approval_writes_require():
-    from agentcore.core.types import ToolApproval
-    from agentcore.runtime.approvals import tool_call_requires_approval
-    from agentcore.tools.builtin.git_ops import git_call_is_write
-
-    schema = ToolApproval.NEVER
-    assert tool_call_requires_approval(
-        "git", schema, {"subcommand": "stash", "action": "list"}
-    ) is False
-    assert tool_call_requires_approval(
-        "git", schema, {"subcommand": "stash", "action": "push"}
-    ) is True
-    assert tool_call_requires_approval(
-        "git", schema, {"subcommand": "tag", "action": "list"}
-    ) is False
-    assert tool_call_requires_approval(
-        "git", schema, {"subcommand": "tag", "action": "create", "name": "v1"}
-    ) is True
-    assert tool_call_requires_approval(
-        "git", schema, {"subcommand": "remote", "action": "list"}
-    ) is False
-    assert tool_call_requires_approval(
-        "git", schema, {"subcommand": "remote", "action": "add", "name": "u", "url": "https://x"}
-    ) is True
-    assert tool_call_requires_approval(
-        "git", schema, {"subcommand": "merge", "ref": "other"}
-    ) is True
-    assert git_call_is_write({"subcommand": "stash"}) is False  # default list
-    assert git_call_is_write({"subcommand": "stash", "action": "pop"}) is True
-
-
-async def test_stash_list_push_pop_roundtrip(tmp_path: Path):
-    repo = _init_repo(tmp_path / "repo")
-    (repo / "README.md").write_text("stashed\n", encoding="utf-8")
-    push = await GitTool().execute(
-        {"subcommand": "stash", "action": "push", "message": "wip"},
-        _worker_ctx(repo),
-    )
-    assert push.success is True, push.error
-    porcelain = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-        text=True,
-        env=_GIT_ENV,
-    )
-    assert not porcelain.stdout.strip()
-
-    listed = await GitTool().execute(
-        {"subcommand": "stash", "action": "list"}, _ceo_ctx(repo)
-    )
-    assert listed.success is True
-    assert "wip" in listed.output or "stash@{" in listed.output
-
-    pop = await GitTool().execute(
-        {"subcommand": "stash", "action": "pop"}, _worker_ctx(repo)
-    )
-    assert pop.success is True, pop.error
-    assert (repo / "README.md").read_text(encoding="utf-8") == "stashed\n"
-
-
-async def test_stash_drop_clear_rejected(tmp_path: Path):
-    repo = _init_repo(tmp_path / "repo")
-    for action in ("drop", "clear"):
-        result = await GitTool().execute(
-            {"subcommand": "stash", "action": action}, _worker_ctx(repo)
-        )
-        assert result.success is False
-        assert "禁止" in (result.error or "")
-
-
-async def test_merge_succeeds_and_conflict_stops_honestly(tmp_path: Path):
-    repo = _init_repo(tmp_path / "repo", branch="feature/base")
-    _run_git(repo, "checkout", "-b", "feature/a")
-    (repo / "README.md").write_text("A\n", encoding="utf-8")
-    _run_git(repo, "add", "README.md")
-    _run_git(repo, "commit", "-m", "a")
-    _run_git(repo, "checkout", "feature/base")
-    _run_git(repo, "checkout", "-b", "feature/b")
-    (repo / "README.md").write_text("B\n", encoding="utf-8")
-    _run_git(repo, "add", "README.md")
-    _run_git(repo, "commit", "-m", "b")
-
-    # Clean merge from a common ancestor with a non-conflicting side branch.
-    _run_git(repo, "checkout", "feature/base")
-    (repo / "other.txt").write_text("ok\n", encoding="utf-8")
-    _run_git(repo, "add", "other.txt")
-    _run_git(repo, "commit", "-m", "base advance")
-    ok = await GitTool().execute(
-        {"subcommand": "merge", "ref": "feature/a"}, _worker_ctx(repo)
-    )
-    assert ok.success is True, ok.error
-    assert "已合并" in ok.output
-
-    # Conflict: merge feature/b into feature/a lineage.
-    _run_git(repo, "checkout", "feature/a")
-    conflict = await GitTool().execute(
-        {"subcommand": "merge", "ref": "feature/b"}, _worker_ctx(repo)
-    )
-    assert conflict.success is False
-    assert conflict.metadata.get("conflict") is True or "冲突" in (conflict.error or "")
-    assert "自动 resolve" in (conflict.error or "") or "诚实" in (conflict.error or "")
-
-
-async def test_merge_rejects_force_knobs(tmp_path: Path):
-    repo = _init_repo(tmp_path / "repo")
-    result = await GitTool().execute(
-        {"subcommand": "merge", "ref": "other", "force": True},
-        _worker_ctx(repo),
-    )
+@pytest.mark.parametrize(
+    "subcommand",
+    [
+        "show",
+        "blame",
+        "branch",
+        "stash",
+        "merge",
+        "rebase",
+        "cherry-pick",
+        "tag",
+        "remote",
+        "init_baseline",
+    ],
+)
+async def test_retired_subcommands_rejected_by_allowlist(
+    tmp_path: Path, subcommand: str
+):
+    result = await GitTool().execute({"subcommand": subcommand}, _ceo_ctx(tmp_path))
     assert result.success is False
-    assert "禁止" in (result.error or "") or "旋钮" in (result.error or "")
-
-
-async def test_rebase_onto_upstream(tmp_path: Path):
-    repo = _init_repo(tmp_path / "repo", branch="feature/mainline")
-    (repo / "base.txt").write_text("base\n", encoding="utf-8")
-    _run_git(repo, "add", "base.txt")
-    _run_git(repo, "commit", "-m", "basefile")
-    _run_git(repo, "checkout", "-b", "feature/topic")
-    (repo / "topic.txt").write_text("topic\n", encoding="utf-8")
-    _run_git(repo, "add", "topic.txt")
-    _run_git(repo, "commit", "-m", "topic")
-    _run_git(repo, "checkout", "feature/mainline")
-    (repo / "base.txt").write_text("base2\n", encoding="utf-8")
-    _run_git(repo, "add", "base.txt")
-    _run_git(repo, "commit", "-m", "mainline advance")
-    _run_git(repo, "checkout", "feature/topic")
-    result = await GitTool().execute(
-        {"subcommand": "rebase", "ref": "feature/mainline"},
-        _worker_ctx(repo),
-    )
-    assert result.success is True, result.error
-    assert "rebase" in result.output.lower() or "已 rebase" in result.output
-
-
-async def test_rebase_conflict_stops(tmp_path: Path):
-    repo = _init_repo(tmp_path / "repo", branch="feature/mainline")
-    (repo / "README.md").write_text("main\n", encoding="utf-8")
-    _run_git(repo, "add", "README.md")
-    _run_git(repo, "commit", "-m", "main edit")
-    _run_git(repo, "checkout", "-b", "feature/topic")
-    # Reset topic to before main edit, then diverge.
-    _run_git(repo, "reset", "--hard", "HEAD~1")
-    (repo / "README.md").write_text("topic\n", encoding="utf-8")
-    _run_git(repo, "add", "README.md")
-    _run_git(repo, "commit", "-m", "topic edit")
-    result = await GitTool().execute(
-        {"subcommand": "rebase", "ref": "feature/mainline"},
-        _worker_ctx(repo),
-    )
-    assert result.success is False
-    assert result.metadata.get("conflict") is True or "冲突" in (result.error or "")
-
-
-async def test_cherry_pick_applies_commit(tmp_path: Path):
-    repo = _init_repo(tmp_path / "repo", branch="feature/a")
-    (repo / "pick.txt").write_text("picked\n", encoding="utf-8")
-    _run_git(repo, "add", "pick.txt")
-    _run_git(repo, "commit", "-m", "to pick")
-    sha = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-        text=True,
-        env=_GIT_ENV,
-    ).stdout.strip()
-    _run_git(repo, "checkout", "-b", "feature/b")
-    _run_git(repo, "reset", "--hard", "HEAD~1")
-    result = await GitTool().execute(
-        {"subcommand": "cherry-pick", "ref": sha},
-        _worker_ctx(repo),
-    )
-    assert result.success is True, result.error
-    assert (repo / "pick.txt").read_text(encoding="utf-8") == "picked\n"
-
-
-async def test_tag_list_and_create_rejects_delete(tmp_path: Path):
-    repo = _init_repo(tmp_path / "repo")
-    created = await GitTool().execute(
-        {"subcommand": "tag", "action": "create", "name": "v1.0"},
-        _worker_ctx(repo),
-    )
-    assert created.success is True, created.error
-    listed = await GitTool().execute(
-        {"subcommand": "tag", "action": "list"}, _ceo_ctx(repo)
-    )
-    assert listed.success is True
-    assert "v1.0" in listed.output
-    deleted = await GitTool().execute(
-        {"subcommand": "tag", "action": "delete", "name": "v1.0"},
-        _worker_ctx(repo),
-    )
-    assert deleted.success is False
-    assert "禁止" in (deleted.error or "")
-
-
-async def test_remote_list_and_add_rejects_remove(tmp_path: Path):
-    repo = _init_repo(tmp_path / "repo")
-    bare = tmp_path / "remote.git"
-    _run_git(tmp_path, "init", "--bare", str(bare))
-    added = await GitTool().execute(
-        {
-            "subcommand": "remote",
-            "action": "add",
-            "name": "origin",
-            "url": str(bare),
-        },
-        _worker_ctx(repo),
-    )
-    assert added.success is True, added.error
-    listed = await GitTool().execute(
-        {"subcommand": "remote", "action": "list"}, _ceo_ctx(repo)
-    )
-    assert listed.success is True
-    assert "origin" in listed.output
-    removed = await GitTool().execute(
-        {"subcommand": "remote", "action": "remove", "name": "origin"},
-        _worker_ctx(repo),
-    )
-    assert removed.success is False
-    assert "禁止" in (removed.error or "")
+    assert "不在允许列表中" in (result.error or "")
+    assert subcommand not in _ALLOWED_SUBCOMMANDS
 
 
 async def test_reset_and_clean_still_rejected(tmp_path: Path):
@@ -2488,16 +2054,3 @@ async def test_reset_and_clean_still_rejected(tmp_path: Path):
         )
 
 
-async def test_merge_on_protected_branch_rejected(tmp_path: Path):
-    repo = _init_repo(tmp_path / "repo", branch="main")
-    _run_git(repo, "checkout", "-b", "feature/side")
-    (repo / "side.txt").write_text("s\n", encoding="utf-8")
-    _run_git(repo, "add", "side.txt")
-    _run_git(repo, "commit", "-m", "side")
-    _run_git(repo, "checkout", "main")
-    result = await GitTool().execute(
-        {"subcommand": "merge", "ref": "feature/side"},
-        _worker_ctx(repo),
-    )
-    assert result.success is False
-    assert "main/master" in (result.error or "")

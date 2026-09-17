@@ -28,7 +28,6 @@ import {
   type SidecarTurnFilesDiffResult,
   type SidecarTurnResult,
   type SidecarWarmAccountRulesMemoryRequest,
-  type SidecarWarmCodeIndexRequest,
   type SidecarWarmMcpDiscoverRequest,
   type SidecarWorkspaceVersionResult,
 } from "@shared/sidecar-contract";
@@ -40,6 +39,7 @@ import {
   ipcInvalidArgsLogFields,
 } from "../ipc-validate";
 import { logDesktop } from "../log-service";
+import { startSidecarDevReload } from "./devReload";
 import { setLiveExternalMountsPusher } from "./liveExternalMounts";
 import { SidecarManager } from "./manager";
 import { resolveWorkspaceRoot } from "./workspace";
@@ -72,6 +72,7 @@ function assertSidecarShape(
 /** 注册全部 sidecar IPC handler。须在 app ready 后调用。 */
 export function registerSidecarIpc(): void {
   const manager = new SidecarManager();
+  const stopDevReload = startSidecarDevReload(manager);
   setLiveExternalMountsPusher((cid) => manager.pushLiveExternalMounts(cid));
 
   // IPC-004（第五轮 IPC 权限面审计）：每个句柄进入业务前在边界结构校验寻址 / 标识类 string
@@ -260,25 +261,6 @@ export function registerSidecarIpc(): void {
         req.subpath,
       );
       await manager.probe(req.rootId, req.subpath ?? "", workspaceRoot);
-    },
-  );
-
-  ipcMain.handle(
-    SIDECAR_CHANNELS.warmCodeIndex,
-    async (_e, req: SidecarWarmCodeIndexRequest): Promise<void> => {
-      assertSidecarShape(
-        SIDECAR_CHANNELS.warmCodeIndex,
-        req,
-        ["rootId"],
-        ["subpath"],
-      );
-      const root = await getStoredRoot(req.rootId);
-      if (!root) throw new Error("本地目录未授权或已移除");
-      const workspaceRoot = await resolveWorkspaceRoot(
-        root.absPath,
-        req.subpath,
-      );
-      await manager.warmCodeIndex(req.rootId, req.subpath ?? "", workspaceRoot);
     },
   );
 
@@ -478,5 +460,8 @@ export function registerSidecarIpc(): void {
     },
   );
 
-  app.on("before-quit", () => manager.disposeAll());
+  app.on("before-quit", () => {
+    stopDevReload();
+    manager.disposeAll();
+  });
 }

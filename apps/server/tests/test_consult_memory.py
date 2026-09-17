@@ -177,10 +177,7 @@ async def test_wire_worker_consult_omits_topic_notes(tmp_path, monkeypatch):
     assert consult is not None
     names = {e.name for e in await consult.source.list_directory("u")}
     assert "部署流程" not in names
-    assert "staffing" not in names
-    assert "team_orchestration_advanced" not in names
     assert "product_help" not in names
-    assert "long_form_landing" not in names
 
 
 async def test_merged_source_does_not_list_or_fetch_topics(tmp_path):

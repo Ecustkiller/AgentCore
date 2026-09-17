@@ -476,9 +476,6 @@ class DelegateTool:
                 # 参数/依赖校验打回是零成本可自纠——勿进熔断。
                 contract_failure=True,
             )
-        from agentcore.workspace.project_shell import rewrite_plan_project_shell
-
-        await rewrite_plan_project_shell(plan, self._base_tool_context)
         from agentcore.runtime.delegate.continuation import apply_continuation_tool_merges
         from agentcore.runtime.runs.research_quality import (
             batch_declares_review_files,

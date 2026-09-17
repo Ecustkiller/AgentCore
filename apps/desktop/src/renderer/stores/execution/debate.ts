@@ -75,7 +75,6 @@ function emptyRunningPretrial(
 ): DebatePretrialState {
   return {
     status: "running",
-    thorough: p.thorough !== false,
     skipReason: ("skip_reason" in p ? p.skip_reason : null) ?? null,
     sides: (p.sides ?? []).map((s) => ({ key: s.key, name: s.name })),
     orders: [],
@@ -106,7 +105,6 @@ export function foldDebatePretrial(
     const base = current ?? emptyRunningPretrial(p);
     return {
       ...base,
-      thorough: p.thorough !== false,
       sides:
         (p.sides ?? []).length > 0
           ? (p.sides ?? []).map((s) => ({ key: s.key, name: s.name }))
@@ -129,7 +127,6 @@ export function foldDebatePretrial(
     typeof p.incomplete === "boolean" ? p.incomplete : undefined;
   return {
     status: p.status || "done",
-    thorough: p.thorough !== false,
     skipReason: p.skip_reason ?? null,
     sides: (p.sides ?? []).map((s) => ({ key: s.key, name: s.name })),
     orders: (p.orders ?? []).map((o) => ({

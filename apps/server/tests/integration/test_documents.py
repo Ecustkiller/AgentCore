@@ -1,7 +1,7 @@
 """Document 子系统第一期 integration tests (Agent记忆与知识系统 §5.7).
 
 Against a real PG schema: the tree CRUD API, owner-scoping, user-rule injection (two-tier,
-read-side full injection), the ``remember`` directive→user-rule path, and the one-time
+read-side full injection), the ``file_write`` ``.agentcore/规则/`` overlay, and the one-time
 file→document migration (idempotent, non-clobbering). Auto-skips when PostgreSQL is
 unavailable (integration conftest).
 """
@@ -19,7 +19,7 @@ from agentcore.memory.store import (
     FileMemoryStore,
     topic_path,
 )
-from agentcore.tools.builtin.remember import RememberTool
+from agentcore.tools.builtin.file_ops import FileWriteTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
@@ -149,6 +149,7 @@ async def test_user_rule_injects_without_ai_notes(session_factory):
         prefs = await store.load(uid, PREFERENCES_MEMORY_FILE)
         core = await store.load(uid, CORE_MEMORY_FILE)
     assert "必须始终用中文" in rules_md
+    assert "### .agentcore/规则/用户规则.md" in rules_md
     assert "用 Python" not in rules_md
     assert "倾向简洁" not in rules_md
     assert "倾向简洁" in prefs
@@ -193,7 +194,7 @@ async def test_injection_admits_global_and_project_rules(session_factory):
     assert "项目规则" in rules_md
 
 
-# --- remember directive → user rule ----------------------------------------------------------
+# --- file_write .agentcore/规则 → user rule ----------------------------------------------------------
 
 
 def _ctx(user_id: str) -> ToolContext:
@@ -207,35 +208,35 @@ def _ctx(user_id: str) -> ToolContext:
     )
 
 
-async def test_remember_writes_user_rule_and_dedupes(session_factory, monkeypatch):
-    from agentcore.tools.builtin import remember as remember_mod
+async def test_file_write_rule_writes_user_rule_and_dedupes(session_factory, monkeypatch):
+    from agentcore.tools.builtin.file_ops import user_rules as overlay
 
-    monkeypatch.setattr(remember_mod, "async_session_factory", session_factory)
+    monkeypatch.setattr(overlay, "async_session_factory", session_factory)
+    monkeypatch.setattr(
+        "agentcore.account.credentials.get_account_credentials", lambda: None
+    )
     uid = str(uuid.uuid4())
-    tool = RememberTool(folder_id=None)
 
-    res = await tool.execute(
+    res = await FileWriteTool().execute(
         {
-            "name": "回复语言.md",
+            "path": ".agentcore/规则/回复语言.md",
             "content": "以后都用中文",
-            "description": "回复语言",
         },
         _ctx(uid),
     )
-    assert res.success and res.display["remembered"] is True and res.display["kind"] == "user_rule"
+    assert res.success is True
+    assert "已写入" in (res.output or "")
 
-    # Re-writing the same file with the same body is a no-op.
-    res2 = await tool.execute(
+    res2 = await FileWriteTool().execute(
         {
-            "name": "回复语言.md",
+            "path": ".agentcore/规则/回复语言.md",
             "content": "以后都用中文",
-            "description": "回复语言",
         },
         _ctx(uid),
     )
-    assert res2.success and res2.display["remembered"] is False
+    assert res2.success is True
+    assert (res2.metadata or {}).get("already_applied") is True
 
-    # It landed as an injectable ai_maintained=false rule doc.
     async with session_factory() as session:
         docs = await DocumentRepository(session).list_injectable_rules(
             uid, None, ai_maintained=False
@@ -346,7 +347,7 @@ async def test_migration_skips_soft_deleted_same_name(session_factory, tmp_path)
 
 
 async def test_new_writes_land_under_agentcore(session_factory):
-    """Memory notes + remember target land under AgentCore/{记忆,规则}/."""
+    """Memory notes + user-rule writes land under AgentCore/{记忆,规则}/."""
     from agentcore.db.repositories.documents import (
         AGENTCORE_ROOT_NAME,
         MEMORY_ROOT_NAME,

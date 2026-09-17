@@ -454,6 +454,38 @@ def test_transcript_round_trips_with_tool_calls_and_tool_results():
     assert restored[4].reasoning_content == "想了想"
 
 
+def test_transcript_round_trips_thinking_blocks():
+    transcript = [
+        LLMMessage(
+            role="assistant",
+            content="",
+            reasoning_content="plan",
+            thinking_blocks=[
+                {"type": "thinking", "thinking": "plan", "signature": "sig_x"}
+            ],
+            tool_calls=[
+                ToolCall(
+                    id="call_1",
+                    function=ToolCallFunction(name="web_search", arguments='{"q":"x"}'),
+                )
+            ],
+        )
+    ]
+    restored = transcript_from_json(transcript_to_json(transcript))
+    assert restored[0].thinking_blocks == [
+        {"type": "thinking", "thinking": "plan", "signature": "sig_x"}
+    ]
+    unsigned = transcript_from_json(
+        [
+            {
+                "role": "assistant",
+                "thinking_blocks": [{"type": "thinking", "thinking": "no-sig"}],
+            }
+        ]
+    )
+    assert unsigned[0].thinking_blocks is None
+
+
 def test_spec_round_trips_with_nested_policy_and_deliverable():
     spec = RunSpec(
         run_id="del_abc_1",

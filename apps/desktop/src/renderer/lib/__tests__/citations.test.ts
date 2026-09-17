@@ -1,4 +1,10 @@
-import { cleanSourceTitle, referencedCitationNumbers } from "@/lib/citations";
+import {
+  cleanSourceTitle,
+  inlineSourceLabel,
+  referencedCitationNumbers,
+  sourceTitleAndSite,
+  urlsPointSameSource,
+} from "@/lib/citations";
 import { describe, expect, it } from "vitest";
 
 describe("cleanSourceTitle", () => {
@@ -29,6 +35,71 @@ describe("cleanSourceTitle", () => {
   it("handles undefined and blank input", () => {
     expect(cleanSourceTitle(undefined)).toBe("");
     expect(cleanSourceTitle("   ")).toBe("");
+  });
+});
+
+describe("sourceTitleAndSite", () => {
+  it("joins title · site and omits site when it equals the title", () => {
+    expect(
+      sourceTitleAndSite({
+        title: "OpenAI Charter - Wikipedia",
+        site: "en.wikipedia.org",
+        url: "https://en.wikipedia.org/wiki/OpenAI",
+      }),
+    ).toEqual({ title: "OpenAI Charter", site: "en.wikipedia.org" });
+    expect(
+      sourceTitleAndSite({
+        title: "anthropic.com",
+        site: "anthropic.com",
+        url: "https://anthropic.com",
+      }),
+    ).toEqual({ title: "anthropic.com", site: undefined });
+  });
+});
+
+describe("inlineSourceLabel", () => {
+  it("prefers site over page title so a long <title> cannot break the sentence", () => {
+    expect(
+      inlineSourceLabel({
+        title: "OpenAI Charter - Wikipedia",
+        site: "en.wikipedia.org",
+        url: "https://en.wikipedia.org/wiki/OpenAI",
+      }),
+    ).toBe("en.wikipedia.org");
+  });
+
+  it("falls back to host when site is empty", () => {
+    expect(
+      inlineSourceLabel({
+        title: "unused title",
+        site: "",
+        url: "https://www.example.com/path",
+      }),
+    ).toBe("example.com");
+  });
+
+  it("falls back to 来源 when nothing resolvable", () => {
+    expect(inlineSourceLabel({ title: "only a title" })).toBe("来源");
+  });
+});
+
+describe("urlsPointSameSource", () => {
+  it("treats www, trailing slash, and hash as the same page", () => {
+    expect(
+      urlsPointSameSource(
+        "https://www.Example.com/a/",
+        "https://example.com/a#section",
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps query strings distinct", () => {
+    expect(
+      urlsPointSameSource(
+        "https://example.com/a?q=1",
+        "https://example.com/a?q=2",
+      ),
+    ).toBe(false);
   });
 });
 

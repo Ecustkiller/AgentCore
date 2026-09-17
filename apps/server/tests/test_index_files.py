@@ -36,7 +36,7 @@ def _seed(root: Path) -> None:
     (git / "config").write_text("g", encoding="utf-8")
     ac = root / "AgentCore" / "index"
     ac.mkdir(parents=True)
-    (ac / "code_search.db").write_bytes(b"db")
+    (ac / "cache.db").write_bytes(b"db")
     (root / "local.db").write_bytes(b"db")
 
 

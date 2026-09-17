@@ -186,6 +186,7 @@ class LlmRoundOutput:
     aborted: bool = False
     finish_reason: str | None = None
     provider_base_url: str | None = None
+    thinking_blocks: list[dict] | None = None
 
 
 def _fact_finish_reason(
@@ -383,6 +384,7 @@ async def run_llm_round(
         aborted=streamed.aborted,
         finish_reason=upstream_finish,
         provider_base_url=_provider_base_url(llm),
+        thinking_blocks=streamed.thinking_blocks,
     )
 
 

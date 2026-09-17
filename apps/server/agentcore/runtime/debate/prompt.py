@@ -18,7 +18,6 @@ from agentcore.runtime.debate.constants import (
     CX_LENGTH_HINT,
     FORM_LABELS,
     LENGTH_HINT,
-    QUICK_DEBATER_HINT,
 )
 from agentcore.runtime.debate.match_ledger import (
     accumulate_match_ledger,
@@ -243,7 +242,6 @@ def opening_draft_brief(
     案件底料同时进成稿（检索退化跳过时成稿仍可见共享事实；引用规则与检索侧一致）。
     """
     ask_block = _interjection_block(side, interjections)
-    quick_suffix = "" if config.policy.thorough else f"\n{QUICK_DEBATER_HINT}"
     bg_block = _background_block(config)
     dossier_block = _research_dossier_block(config)
     return (
@@ -251,7 +249,7 @@ def opening_draft_brief(
         f"请就本轮议题给出有力、具体、有论据的【开场立论】：聚焦你最能站住的论点，"
         f"用具体证据 / 例子 / 推理链支撑；关键事实主张按【证据状态铁律】标注"
         f"【已核实·#eN】/【待核实·推断】。"
-        f"{LENGTH_HINT}{quick_suffix}{bg_block}{dossier_block}"
+        f"{LENGTH_HINT}{bg_block}{dossier_block}"
     )
 
 
@@ -271,7 +269,6 @@ def debater_task(
     ``interjections`` 为开赛嘱咐等首轮预注入的全场/定向用户插话；空则零行为变化。
     ``turn_model`` = 本 turn 主模型（空 side 回退）；side 非空身份优先注入路由键（§7.5）。
     """
-    quick_suffix = "" if config.policy.thorough else f"\n{QUICK_DEBATER_HINT}"
     bg_block = _background_block(config)
     dossier_block = _research_dossier_block(config)
     ask_block = _interjection_block(side, interjections)
@@ -290,7 +287,7 @@ def debater_task(
         f"{_situation_header(config, side, focus=focus, ask_block=ask_block)}\n\n"
         f"{take_evidence}"
         f"关键事实主张按【证据状态铁律】标注。"
-        f"{EVIDENCE_NOTES_SPEC}{quick_suffix}{bg_block}{dossier_block}"
+        f"{EVIDENCE_NOTES_SPEC}{bg_block}{dossier_block}"
     )
     payload: dict[str, Any] = {
         "role": side.name,
@@ -310,8 +307,8 @@ def debater_task(
         ),
         "draft_system": draft_system(config, side, beat="opening"),
     }
-    # 有约定文档或庭前取证已汇流时：优先用庭前按完整度写下的 per-side 预算（full→0 / 缺口→有界）；
-    # 未写入时保留约定文档残搜旧路径（CEO 约定文档、无庭前）。
+    # 有约定文档或开赛材料已汇流时：优先用按完整度写下的 per-side 预算（full→0 / 缺口→有界）；
+    # 未写入时保留约定文档残搜旧路径。
     side_budgets = getattr(config, "debater_retrieval_budgets", None) or {}
     if side.key in side_budgets:
         payload["retrieval_budget"] = int(side_budgets[side.key])
@@ -403,12 +400,9 @@ def _ledger_and_own_blocks(
     history: Sequence[RoundResult] = (),
     include_own_titles: bool = False,
 ) -> str:
-    """台账摘要 +（可选）己方论点标题一览，供 feedback / brief / 结辩拼接。"""
-    names = {s.key: s.name for s in config.sides}
+    """可选己方论点标题一览。对局事件不再注入续辩（并进每轮小结）。"""
+    _ = (config, match_ledger)
     parts: list[str] = []
-    ledger_block = format_match_ledger_block(match_ledger, side_names=names)
-    if ledger_block:
-        parts.append(ledger_block.rstrip())
     if include_own_titles:
         own = format_own_argument_titles(history, side)
         if own:
@@ -429,7 +423,7 @@ def round_feedback(
     match_ledger: Sequence[LedgerEvent] = (),
     history: Sequence[RoundResult] = (),
 ) -> str:
-    """后续轮【检索阶段】feedback：情境 + 对方论点 + 对局台账 + 证据笔记交付物。"""
+    """后续轮【检索阶段】feedback：情境 + 对方论点 + 证据笔记交付物。"""
     engage, opp_block = _round_engage_and_opponents(config, side, last_round)
     challenged = _challenged_block(config, side, last_round)
     ask_block = _interjection_block(side, interjections)
@@ -458,7 +452,7 @@ def round_draft_brief(
     match_ledger: Sequence[LedgerEvent] = (),
     history: Sequence[RoundResult] = (),
 ) -> str:
-    """后续轮【成稿】brief（含对局台账 + 己方历轮论点标题一览）。"""
+    """后续轮【成稿】brief（含己方历轮论点标题一览）。"""
     engage, opp_block = _round_engage_and_opponents(config, side, last_round)
     challenged = _challenged_block(config, side, last_round)
     ask_block = _interjection_block(side, interjections)

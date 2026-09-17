@@ -32,7 +32,6 @@ from agentcore.memory.explore_profile import (
 from agentcore.memory.store import CORE_MEMORY_FILE, NAVIGATION_MEMORY_FILE, FileMemoryStore
 from agentcore.runtime.resolve.prompt import compose_ceo_chat_prompt
 from agentcore.runtime.skills import build_system_skill_registry
-from agentcore.tools.builtin.remember import RememberTool
 from agentcore.tools.builtin.update_folder_profile import UpdateFolderProfileTool
 from agentcore.tools.protocol import ToolContext, fork_explore_write_scope
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -409,7 +408,7 @@ async def test_write_folder_profile_cas_rejects_empty_content(tmp_path):
     assert not ok and not conflict and resulting == ""
 
 
-# --- 工具：裸聊 / remember 不碰画像 ---------------------------------
+# --- 工具：裸聊 / 用户规则不碰画像 ---------------------------------
 
 
 @pytest.mark.asyncio
@@ -452,9 +451,10 @@ async def test_update_folder_profile_does_not_write_or_hot_refresh(tmp_path, ep_
 
 
 @pytest.mark.asyncio
-async def test_remember_does_not_touch_folder_profile(tmp_path, monkeypatch):
-    """remember → user rule only; folder 画像.md stays untouched."""
-    from agentcore.tools.builtin import remember as remember_mod
+async def test_user_rule_write_does_not_touch_folder_profile(tmp_path, monkeypatch):
+    """file_write .agentcore/规则 → user rule only; folder 画像.md stays untouched."""
+    from agentcore.tools.builtin.file_ops import FileWriteTool
+    from agentcore.tools.builtin.file_ops import user_rules as overlay
 
     store = FileMemoryStore(tmp_path)
     uid = str(uuid4())
@@ -467,17 +467,13 @@ async def test_remember_does_not_touch_folder_profile(tmp_path, monkeypatch):
         async def __aexit__(self, *args):  # noqa: ANN002
             return None
 
-    def _fake_factory():
-        return _FakeSession()
-
-    async def _fake_mutate(repo, user_id, **kwargs):  # noqa: ANN001
+    async def _fake_mutate(repo, user_id, **kwargs):  # noqa: ARG002
         from agentcore.memory.rules_injection import UserRuleMutationResult
 
-        action = str(kwargs.get("action") or "write")
         name = str(kwargs.get("name") or "回复语言.md")
         content = kwargs.get("content")
         return UserRuleMutationResult(
-            action=action,
+            action="write",
             changed=True,
             message=f"已写入规则「{name}」（常驻）。",
             name=name,
@@ -485,20 +481,21 @@ async def test_remember_does_not_touch_folder_profile(tmp_path, monkeypatch):
             content=content if isinstance(content, str) else None,
         )
 
-    monkeypatch.setattr(remember_mod, "async_session_factory", _fake_factory)
-    monkeypatch.setattr(remember_mod, "mutate_user_rule", _fake_mutate)
-    monkeypatch.setattr(remember_mod, "DocumentRepository", lambda session: object())
+    monkeypatch.setattr(overlay, "async_session_factory", lambda: _FakeSession())
+    monkeypatch.setattr(overlay, "mutate_user_rule", _fake_mutate)
+    monkeypatch.setattr(
+        "agentcore.account.credentials.get_account_credentials", lambda: None
+    )
 
-    tool = RememberTool(folder_id=folder)
-    res = await tool.execute(
-        {"name": "回复语言.md", "content": "以后都用中文回复"},
-        _ctx(user_id=uid),
+    ctx = _ctx(user_id=uid)
+    ctx = replace(ctx, ownership_desk_id=folder)
+    res = await FileWriteTool().execute(
+        {"path": ".agentcore/规则/回复语言.md", "content": "以后都用中文回复"},
+        ctx,
     )
     assert res.success
-    assert res.display["kind"] == "user_rule"
     assert await store.load(uid, CORE_MEMORY_FILE, scope=folder) == ""
-    assert "画像" in tool.schema.description
-    assert "update_folder_profile" not in tool.schema.description
+    assert "画像" not in FileWriteTool().schema.description
 
 
 # --- 提示词闸：画像空注入 / 闲聊纪律文案 -----------------------------------------
@@ -528,7 +525,7 @@ def test_compose_prompt_cold_start_block_only_when_flagged():
     assert "用户点名刷新" in block
     assert "先轻探再 delegate 调研建档" in block
     assert "闲聊不开幕" not in block
-    assert "remember" in block
+    assert "用户规则" in block
     assert "写盘不得出 AgentCore/" in block
 
 

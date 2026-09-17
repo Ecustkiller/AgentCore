@@ -350,7 +350,7 @@ def test_workspace_has_entries_false_when_only_internal_index(
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
     root = resolve_workspace_root(user_id="u1", folder_rel_path=None, conversation_id="c1")
     (root / "AgentCore" / "index").mkdir(parents=True)
-    (root / "AgentCore" / "index" / "code_search.db").write_bytes(b"")
+    (root / "AgentCore" / "index" / "cache.db").write_bytes(b"")
     assert not workspace_has_entries(
         user_id="u1", folder_rel_path=None, conversation_id="c1"
     )
@@ -384,67 +384,3 @@ def test_workspace_has_entries_true_with_agentcore_docs(tmp_path: Path, monkeypa
     assert workspace_has_entries(
         user_id="u1", folder_rel_path=None, conversation_id="c4"
     )
-
-
-@pytest.mark.asyncio
-async def test_empty_server_workspace_start_index_does_not_mkdir(tmp_path: Path):
-    """Lazy B1: empty tree must not create AgentCore/index on maintenance kick."""
-    from agentcore.tools.sandbox.subprocess import SubprocessSandbox
-    from agentcore.workspace.stage_dirs import INDEX_REL
-
-    ws = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
-    ws.start_code_index_maintenance()
-    assert ws._index_maintainer is None  # noqa: SLF001
-    assert not (tmp_path / Path(*INDEX_REL.split("/"))).exists()
-
-    await ws.write("hello.py", "print(1)\n")
-    assert ws._index_maintainer is not None  # noqa: SLF001
-    await ws._index_maintainer.drain()  # noqa: SLF001
-    assert (tmp_path / Path(*INDEX_REL.split("/"))).is_dir()
-
-
-@pytest.mark.asyncio
-async def test_cloud_index_dir_lands_outside_the_tree(tmp_path: Path):
-    """A nested folder's index DB must not read as its parent's content."""
-    from agentcore.tools.sandbox.subprocess import SubprocessSandbox
-
-    root = tmp_path / "tree" / "设计"
-    root.mkdir(parents=True)
-    internal = tmp_path / "internal" / "folder" / "f1"
-    ws = ServerWorkspace(root=root, sandbox=SubprocessSandbox(), internal_root=internal)
-    assert ws.index_dir == internal / "index"
-
-    await ws.write("hello.py", "print(1)\n")
-    await ws._index_maintainer.drain()  # noqa: SLF001
-    assert (internal / "index").is_dir()
-    assert not (root / "AgentCore").exists()
-
-
-@pytest.mark.asyncio
-async def test_build_turn_backend_does_not_kick_code_index(monkeypatch, tmp_path):
-    """TTFT: turn entry must not schedule index maintenance."""
-    from unittest.mock import AsyncMock, MagicMock
-
-    from agentcore.config import settings
-    from agentcore.conversation import turn_backend as tb
-    from agentcore.runtime.events.sink import EventSink
-
-    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-    backend = MagicMock()
-    backend.location = "server"
-    backend.start_code_index_maintenance = MagicMock()
-    monkeypatch.setattr(tb, "build_workspace", lambda **_kwargs: backend)
-    monkeypatch.setattr(
-        tb.grant_store, "grants_as_dict", AsyncMock(return_value={})
-    )
-    monkeypatch.setattr(tb, "attach_grants_to_backend", AsyncMock())
-
-    result = await tb.build_turn_backend(
-        user_id="u1",
-        conversation_id="00000000-0000-0000-0000-00000000nok1",
-        folder_id=None,
-        sink=EventSink(),
-        local_binding=None,
-    )
-    assert result is backend
-    backend.start_code_index_maintenance.assert_not_called()

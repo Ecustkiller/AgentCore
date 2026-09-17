@@ -74,7 +74,10 @@ class EscalateTool:
     @property
     def schema(self) -> ToolSchema:
         # Schema layer: short trigger + field cues. When-to-stop lives here,
-        # not in the worker identity.
+        # not in the worker identity. questions[] 卡形与 ask_user 共用（无 action）。
+        # Local import：同 execute，避开经 ask_user 包 __init__ 的依赖环。
+        from agentcore.tools.builtin.ask_user.schema import questions_array_schema
+
         return ToolSchema(
             name=ESCALATE_TOOL_NAME,
             description=(
@@ -114,52 +117,13 @@ class EscalateTool:
                             "scope/dep 不停工。"
                         ),
                     },
-                    "questions": {
-                        "type": "array",
-                        "description": (
+                    "questions": questions_array_schema(
+                        description=(
                             "仅 blocking=true：二选一/多选时给选项（最多 5 题）；"
                             "开放问题省略。"
                         ),
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "prompt": {
-                                    "type": "string",
-                                    "description": "问句。",
-                                },
-                                "kind": {
-                                    "type": "string",
-                                    "enum": ["choice", "text"],
-                                    "description": "choice 或 text，默认 choice。",
-                                },
-                                "options": {
-                                    "type": "array",
-                                    "description": "kind=choice 候选项（最多 6）。",
-                                    "items": {
-                                        "type": "object",
-                                        "properties": {
-                                            "label": {
-                                                "type": "string",
-                                                "description": "选项文字（回传答案）。",
-                                            },
-                                        },
-                                        "required": ["label"],
-                                    },
-                                },
-                                "multiple": {
-                                    "type": "boolean",
-                                    "description": "可选：允许多选，默认 false。",
-                                },
-                                "default": {
-                                    "type": "string",
-                                    "description": (
-                                        "可选：暂定倾向（choice 须是某 label）。"
-                                    ),
-                                },
-                            },
-                            "required": ["prompt"],
-                        },
-                    },
+                        default_description="可选：暂定倾向（choice 须是某 label）。",
+                    ),
                 },
                 "required": ["question"],
             },

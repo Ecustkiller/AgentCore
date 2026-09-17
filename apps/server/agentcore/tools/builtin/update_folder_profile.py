@@ -1,7 +1,8 @@
 """update_folder_profile — retired writer; the live CEO table never wires it.
 
-Execute does not write ``画像.md`` / ``导航.md`` / ``主题/``. ``remember`` stays
-user-rules-only. File-page edits still go through documents / memory PUT.
+Execute does not write ``画像.md`` / ``导航.md`` / ``主题/``. User rules stay
+``.agentcore/规则/*.md`` via ``file_write``. File-page edits still go through
+documents / memory PUT.
 """
 
 from __future__ import annotations

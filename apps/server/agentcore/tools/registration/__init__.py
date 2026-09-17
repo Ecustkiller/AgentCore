@@ -7,7 +7,7 @@ capability catalog, and table / zero-arg ALWAYS wiring **collect** from
 declarations instead of maintaining parallel hand lists.
 
 CEO orchestration tools with heavy ``__init__`` deps (delegate / debate / ask_user
-/ memory gates / coordination) are still constructed in
+/ coordination) are still constructed in
 ``tools.ceo_toolset._assemble_ceo_toolset`` / coordination surface, but **which**
 tools exist and their audience / wire gate come from ``ToolRegistration`` — not
 a second tuple in ``catalog.py``. Zero/light-arg ALWAYS tools share

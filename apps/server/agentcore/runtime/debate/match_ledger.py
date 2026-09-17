@@ -1,9 +1,7 @@
-"""对局台账（P0 对局记忆）—— 解析 / 累积 / 注入摘要。
+"""旧场对局事件 —— 解析 / 累积 / 结辩回放摘要。
 
-裁判 ``judge_and_summarize`` 每轮 JSON 兼产 ``ledger_events``；主持人跨轮累积；下一轮
-``round_feedback`` / ``round_draft_brief`` / 结辩材料注入摘要块。服务端内部流转，不上 wire。
-
-→ 见设计: docs/03-AI核心/辩论编排设计.md
+新场不注入续辩（让步 / 仍争议 / 新点写进每轮小结）。裁判 JSON 若仍带 ``ledger_events``
+则解析；结辩冷冻回放仍可读。不上 wire。
 """
 
 from __future__ import annotations

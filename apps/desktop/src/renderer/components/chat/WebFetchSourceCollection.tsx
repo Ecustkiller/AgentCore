@@ -1,9 +1,8 @@
 import { Button } from "@/components/ui";
-import { cleanSourceTitle } from "@/lib/citations";
 import { useStreamAwareDisclosure } from "@/stores/disclosure";
 import type { Citation, ProcessStep, WebFetchDisplay } from "@/types/events";
 import { ChevronDown, ChevronRight, Globe } from "lucide-react";
-import { Favicon } from "./Favicon";
+import { SourceHitRow } from "./SourceHitRow";
 import {
   LiveFlow,
   LiveFlowDots,
@@ -19,7 +18,7 @@ function isWebFetchDisplay(d: unknown): d is WebFetchDisplay {
   return typeof x.url === "string" && typeof x.content === "string";
 }
 
-/** Aggregate source cards from each web_fetch step's display (never parse result JSON). */
+/** Aggregate source rows from each web_fetch step's display (never parse result JSON). */
 function sourcesFromTools(tools: ToolStep[]): Citation[] {
   const out: Citation[] = [];
   for (const t of tools) {
@@ -43,8 +42,8 @@ function sourcesFromTools(tools: ToolStep[]): Citation[] {
 /**
  * Merged view for a tool-group of ≥2 consecutive `web_fetch` calls: collapses to a bare
  *「Read page · N sources」header row (对齐工具组 / 思考过程的折叠态——折叠即收起细节，不再
- * 平铺来源 pills), expands into a SourceCards-aligned vertical list (index · favicon ·
- * title · domain · snippet). No inline page body — that stays on the single-`web_fetch`
+ * 平铺来源 pills), expands into the same hit rows as search (index · favicon ·
+ * title · domain, snippet below). Page body stays on the single-`web_fetch`
  * card. Replaces ToolLineGroup's chevron so there is only one disclosure layer;
  * persistence reuses the same `${turnKey}:tgrp:${groupKey}` key.
  */
@@ -103,41 +102,16 @@ export function WebFetchSourceCollection({
       </LiveFlow>
 
       {expanded && (
-        <div className="flex max-h-96 flex-col gap-1.5 overflow-y-auto pr-1">
+        <div className="flex max-h-96 flex-col gap-0.5 overflow-y-auto pr-1">
           {citations.map((c, i) => (
-            <a
+            <SourceHitRow
               key={`${c.url}-${i}`}
-              href={c.url}
-              target="_blank"
-              rel="noreferrer"
-              aria-label={`来源 ${i + 1}：${cleanSourceTitle(c.title) || c.site || c.url}`}
-              className="flex items-start gap-2.5 rounded-lg px-2.5 py-2 transition-colors hover:bg-accent"
-            >
-              <span className="mt-0.5 w-5 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                {i + 1}
-              </span>
-              <Favicon
-                site={c.site}
-                title={c.title}
-                size={18}
-                className="mt-0.5"
-              />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium text-foreground">
-                  {cleanSourceTitle(c.title) || c.site || c.url}
-                </span>
-                {c.site && (
-                  <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                    {c.site}
-                  </span>
-                )}
-                {c.snippet && (
-                  <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-                    {c.snippet}
-                  </p>
-                )}
-              </span>
-            </a>
+              index={i + 1}
+              url={c.url}
+              title={c.title}
+              site={c.site}
+              snippet={c.snippet}
+            />
           ))}
         </div>
       )}

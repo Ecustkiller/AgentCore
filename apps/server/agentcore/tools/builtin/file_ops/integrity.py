@@ -21,8 +21,8 @@ from .errors import _error
 logger = get_logger(__name__)
 
 # Artifact-first: skeleton vs prose (research QC / read-back / diagnostics), write_scope.
-# Completeness heuristics are not write-path gates (evals / remember
-# may still reuse ``has_omission_marker`` / ``is_severe_shrink``).
+# Completeness heuristics are not write-path gates (evals may still reuse
+# ``has_omission_marker`` / ``is_severe_shrink``).
 _OMISSION_LITERALS = (
     "中间省略",
     "已保留首尾",
@@ -39,7 +39,7 @@ _OMISSION_RE = re.compile(
 # (prefer str_replace for revisions; delete is reversible by default).
 # Length is advisory only (skill / schema 可选骨架分段) — no hard reject on oversized bodies.
 _SUBSTANTIAL_FILE_CHARS = 400
-# Eval / remember helper: same ratio the old overwrite nudge used.
+# Eval helper: same ratio the old overwrite nudge used.
 _INTEGRITY_SHRINK_RATIO = 0.6
 
 
@@ -216,8 +216,6 @@ async def prepared_write_relpath(
     path: str,
     context: ToolContext,
     *,
-    register: bool = True,
-    register_bare: bool = False,
     host_grant_mode: GrantMode = "organize",
 ) -> tuple[str, str] | ToolResult:
     """Like ``_prepare_write_relpath`` but returns the ToolResult on host-path failure."""
@@ -225,8 +223,6 @@ async def prepared_write_relpath(
         return await _prepare_write_relpath(
             path,
             context,
-            register=register,
-            register_bare=register_bare,
             host_grant_mode=host_grant_mode,
         )
     except WritePathPrepareError as e:
@@ -237,29 +233,23 @@ async def _prepare_write_relpath(
     path: str,
     context: ToolContext,
     *,
-    register: bool = True,
-    register_bare: bool = False,
     host_grant_mode: GrantMode = "organize",
 ) -> tuple[str, str]:
-    """Rewrite empty-desk shell, then sanitize; return ``(actual, rename_note)``.
+    """Host-path mint, then sanitize; return ``(actual, rename_note)``.
 
     Host OS paths mint a session grant first (never passed to
-    ``sanitize_write_relpath``). ``WritePathPrepareError`` carries the
-    model-facing ToolResult.
+    ``sanitize_write_relpath``). Write/mkdir dest is an entry: the parent
+    folder is mounted, last segment stays on the path.
+    ``WritePathPrepareError`` carries the model-facing ToolResult.
 
-    Shell strip lives here (workspace + turn slot) — not in diskless
-    ``sanitize_write_relpath``. Strip does not emit a note; ``rename_note`` is
-    only the sanitize tip when the cleaned path differs from the request.
-    ``/workspace/…`` strip alone does not count as a rename; dangerous-char /
-    dossier-flatten do.
-    ``register=False`` (delete) applies an existing slug only.
-    ``register_bare=True`` (mkdir) stamps a single-segment shell.
+    ``rename_note`` is only the sanitize tip when the cleaned path differs from
+    the request. ``/workspace/…`` strip alone does not count as a rename;
+    dangerous-char / dossier-flatten do.
     """
     from agentcore.workspace._paths import (
         normalize_workspace_path,
         sanitize_write_relpath,
     )
-    from agentcore.workspace.project_shell import rewrite_project_shell_relpath
 
     from .prepare_path import prepare_tool_path
 
@@ -269,23 +259,19 @@ async def _prepare_write_relpath(
     prepared = await prepare_tool_path(
         requested,
         context,
-        as_directory=register_bare,
+        as_directory=False,
         grant_mode=host_grant_mode,
     )
     if isinstance(prepared, ToolResult):
         raise WritePathPrepareError(prepared)
     requested = prepared
-    rewritten, shell_note = await rewrite_project_shell_relpath(
-        requested, context, register=register, register_bare=register_bare
-    )
-    # ``.`` is a valid workspace-root dest (archive_extract). Empty is a
-    # shell-stripped bare mkdir / invalid file path — callers treat them apart.
-    if rewritten == ".":
-        return ".", shell_note
-    if not rewritten:
-        return "", shell_note
-    actual = sanitize_write_relpath(rewritten)
-    baseline = normalize_workspace_path(rewritten, root_label="workspace")
+    # ``.`` is a valid workspace-root dest (archive_extract).
+    if requested == ".":
+        return ".", ""
+    if not requested:
+        return "", ""
+    actual = sanitize_write_relpath(requested)
+    baseline = normalize_workspace_path(requested, root_label="workspace")
     sanitize_note = ""
     if _norm_rel_path(actual) != _norm_rel_path(baseline):
         sanitize_note = (
@@ -294,8 +280,7 @@ async def _prepare_write_relpath(
             "嵌套 `/` 会压成 `_`（单文件名）；勿再 file_move/copy「改回」斜杠路径"
             "（规范化后常等同）。"
         )
-    note = " ".join(part for part in (shell_note, sanitize_note) if part)
-    return actual, note
+    return actual, sanitize_note
 
 
 def write_scope_rejection(context: ToolContext, path: str) -> str | None:

@@ -32,7 +32,7 @@ class FormProfile:
 
     ``unit`` 交互单元；``phases`` 轮内拓扑（phase 名序）；``cross_exam`` / ``closing`` 是否
     走正反共用的主持人→各方质询 / 结辩原语。新场 ``closing`` 恒假（结辩 runner 留旧场回放）；
-    ``has_rebuttal`` 红队 thorough 三拍的复攻拍（快速档 O3 = 两拍攻→应，无复攻）。
+    ``has_rebuttal`` 红队三拍的复攻拍。
     """
 
     form: DebateForm
@@ -45,40 +45,29 @@ class FormProfile:
 
 def form_profile(config: DebateConfig) -> FormProfile:
     """由 ``DebateConfig`` 派生本场 profile（单一入口，门槛与 Moderator 闸同源）。"""
-    thorough = config.policy.thorough
     if config.form is DebateForm.RED_TEAM:
-        phases: tuple[PhaseName, ...]
-        if thorough:
-            phases = ("attack", "merge", "defense", "rebuttal")
-        else:
-            phases = ("attack", "merge", "defense")  # O3 快速档：单轮两拍攻→应
         return FormProfile(
             form=DebateForm.RED_TEAM,
             unit="finding",
-            phases=phases,
+            phases=("attack", "merge", "defense", "rebuttal"),
             cross_exam=False,  # 三拍取代通用质询
             closing=False,  # O1：红队结辩移除
-            has_rebuttal=thorough,
+            has_rebuttal=True,
         )
     if config.form is DebateForm.ROUNDTABLE:
-        phases_rt: tuple[PhaseName, ...] = ("nominate_serial", "crux")
         return FormProfile(
             form=DebateForm.ROUNDTABLE,
             unit="thread_turn",
-            phases=phases_rt,
+            phases=("nominate_serial", "crux"),
             cross_exam=False,
             closing=False,
             has_rebuttal=False,
         )
-    # 正反：质询仍随 thorough；结辩新场恒关
-    phases_d: tuple[PhaseName, ...] = (
-        ("parallel_wave", "cross_exam") if thorough else ("parallel_wave",)
-    )
     return FormProfile(
         form=DebateForm.DEBATE,
         unit="side_turn",
-        phases=phases_d,
-        cross_exam=thorough,
+        phases=("parallel_wave", "cross_exam"),
+        cross_exam=True,
         closing=False,  # 新场不跑结辩；结辩 runner 留旧场回放
         has_rebuttal=False,
     )

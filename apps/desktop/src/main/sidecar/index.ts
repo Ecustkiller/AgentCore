@@ -6,11 +6,17 @@
 
 export type { Transport, SpawnConfig } from "./transport";
 export {
+  resolveSidecarServerDir,
   resolveSpawnConfig,
   formatSidecarExitError,
   scrubSocksProxyEnv,
   spawnTransport,
 } from "./transport";
+
+export {
+  sidecarDevReloadEnabled,
+  startSidecarDevReload,
+} from "./devReload";
 
 export { SidecarClient, SidecarRpcError } from "./client";
 

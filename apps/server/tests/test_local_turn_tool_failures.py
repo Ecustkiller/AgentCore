@@ -175,9 +175,9 @@ def test_tool_failures_from_journal_schema_from_missing_arg_message():
             {
                 "kind": "tool_call",
                 "payload": {
-                    "name": "code_search",
+                    "name": "grep",
                     "success": False,
-                    "result": "缺少必填参数：query",
+                    "result": "缺少必填参数：pattern",
                 },
             }
         ]

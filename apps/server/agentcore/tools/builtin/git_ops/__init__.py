@@ -2,19 +2,16 @@
 
 ServerWorkspace / Sidecar: thin shell over subprocess git under ``backend.root``.
 LocalWorkspace (no Path.root): same allowlisted surface via desktop ``git_run``.
-Read subcommands (status / diff / log / fetch / show / blame; stash/tag/remote
-``action=list``) run without approval; write subcommands (add / commit / branch /
-checkout / push / pull / init_baseline / clone / merge / rebase / cherry-pick /
-create_pr; stash push/pop; tag create; remote add) run on the same path for CEO
-and worker (mutating ops require user authorization). Push / create_pr
-always-confirm.
+Read subcommands (status / diff / log / fetch) run without approval; write
+subcommands (add / commit / checkout / push / pull / clone / create_pr) run on
+the same path for CEO and worker (mutating ops require user authorization).
+Push / create_pr always-confirm. Assembled but on-demand: schema stays off the
+opening FC table until ``consult(git)`` (or a window recall).
 Hard-banned at the breaker (``reset`` / ``clean``); force push /
 protected-branch targets stay DENY. Push itself is allowlisted but never force;
 ``create_pr`` is GitHub-only via API (not free ``gh`` shell); pull is always
-``--ff-only``; merge / rebase / cherry-pick stop honestly on conflict (no auto
-resolve); main/master current branch is hard-rejected for
-commit/push/merge/rebase/cherry-pick; missing remote / credentials fail honestly
-(``GIT_TERMINAL_PROMPT=0``).
+``--ff-only``; main/master current branch is hard-rejected for commit/push;
+missing remote / credentials fail honestly (``GIT_TERMINAL_PROMPT=0``).
 
 Timeout contract (aligned with ``terminal``): the engine wall-clock ceiling is
 ``serial_ops × _GIT_TIMEOUT + _NETWORK_IO_BUDGET + repo-lock wait +
@@ -40,7 +37,7 @@ Split axes (implementation modules):
 - ``repo_lock`` — per-repo serialization of index-mutating calls
 - ``phases`` — execution-phase reporting for the waiting UI
 - ``results`` — ToolResult helpers + truncation
-- ``cmds_read`` / ``cmds_local`` / ``cmds_remote`` / ``cmds_collab`` — subcommands
+- ``cmds_read`` / ``cmds_local`` / ``cmds_remote`` — subcommands
 - ``tool`` — GitTool registration + dispatch
 
 Public import path stays ``agentcore.tools.builtin.git_ops``.
@@ -58,8 +55,6 @@ from agentcore.tools.builtin.git_ops.phases import (
 from agentcore.tools.builtin.git_ops.policy import (
     _ALLOWED_SUBCOMMANDS,
     _ALWAYS_WRITE_SUBCOMMANDS,
-    _BLAME_LINE_LIMIT,
-    _COLLAB_DANGER_KEYS,
     _DIFF_OUTPUT_LIMIT,
     _FORBIDDEN_PATTERNS,
     _GIT_CREDENTIAL_TIMEOUT,
@@ -134,8 +129,6 @@ __all__ = [
     "_ALWAYS_WRITE_SUBCOMMANDS",
     "_AUTH_FAILURE_HINT",
     "_AUTH_FAILURE_MARKERS",
-    "_BLAME_LINE_LIMIT",
-    "_COLLAB_DANGER_KEYS",
     "_DIFF_OUTPUT_LIMIT",
     "_FORBIDDEN_PATTERNS",
     "_GITHUB_API_CALLS",

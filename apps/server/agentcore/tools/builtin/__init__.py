@@ -450,7 +450,6 @@ def file_only_tool_names() -> frozenset[str]:
             "archive_create",
             "download_url",
             "grep",
-            "code_search",
             "git",
         }
     )

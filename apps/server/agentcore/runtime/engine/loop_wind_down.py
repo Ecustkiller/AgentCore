@@ -382,6 +382,7 @@ class LoopWindDown:
                                 content=outcome.content or None,
                                 tool_calls=outcome.tool_calls or None,
                                 reasoning_content=outcome.reasoning or None,
+                                thinking_blocks=outcome.thinking_blocks,
                             )
                         )
                         for tc in outcome.tool_calls or []:

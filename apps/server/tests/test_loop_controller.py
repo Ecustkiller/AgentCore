@@ -1257,34 +1257,6 @@ def test_circuit_breaker_mixed_failures_keep_generic_warn():
     assert cb.message() is None
 
 
-def test_circuit_breaker_remember_parse_only_keeps_and_memory_steer():
-    """remember parse-only thrashing keeps the tool + memory-facing format steer."""
-    c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
-    parse = ToolAttempt("a", "remember", success=False, parse_failure=True)
-    c.record([parse])
-    assert not c.tool_circuit_breaker()
-    c.record([ToolAttempt("b", "remember", success=False, parse_failure=True)])
-    cb = c.tool_circuit_breaker()
-    assert cb.warned == ("remember",)
-    assert "remember" in cb.parse_only
-    assert cb.message() is None
-    # Parse-only: keep remember (do not circuit-disable).
-    c.record([ToolAttempt("c", "remember", success=False, parse_failure=True)])
-    cb2 = c.tool_circuit_breaker()
-    assert cb2.disabled == ()
-    assert cb2.message() is None
-    assert c.tool_failure_count("remember") == 3
-
-
-def test_circuit_breaker_remember_still_disables_on_real_failures():
-    """Non-parse remember failures still retire at disable threshold."""
-    c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
-    real = ToolAttempt("a", "remember", success=False, parse_failure=False)
-    c.record([real, real, real])
-    cb = c.tool_circuit_breaker()
-    assert cb.disabled == ("remember",)
-
-
 def test_circuit_breaker_other_parse_warn_is_class_aware():
     """Default-tool parse warn must cover truncate vs escape — not only「原样重发全部」."""
     c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
@@ -1652,7 +1624,7 @@ def test_factory_does_not_inject_files_or_report_delivery_idle():
     assert not files.take_delivery_idle_narrow_apply()
 
     report = create_loop_controller(
-        frozenset({"grep", "file_read", "code_search"}),
+        frozenset({"grep", "file_read"}),
         files_expected=True,
         report_delivery=True,
     )

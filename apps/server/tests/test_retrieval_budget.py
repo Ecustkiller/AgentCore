@@ -533,9 +533,9 @@ async def _run_worker_loop(
 async def test_react_loop_skips_balance_for_worker_that_never_retrieves():
     """非检索工具跑几轮也不注入——生产上多数 worker 走这条路。"""
     reg = ToolRegistry()
-    reg.register(_SearchStub(name="code_search"))
+    reg.register(_SearchStub(name="grep"))
     provider = _LoopProvider(
-        [_tool_round("c1", "code_search"), [LLMChunk(delta_content="交付")]]
+        [_tool_round("c1", "grep"), [LLMChunk(delta_content="交付")]]
     )
     budget = RetrievalBudgetState(limit=DEFAULT_RETRIEVAL_BUDGET)
     messages = await _run_worker_loop(provider, reg, budget)

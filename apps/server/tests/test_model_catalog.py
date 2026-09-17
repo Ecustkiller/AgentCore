@@ -350,7 +350,7 @@ async def test_catalog_platform_allowlist_marks_off_protocol_unselectable(monkey
     monkeypatch.setattr(
         catalog.settings,
         "platform_models",
-        "glm-5.2,grok-4.5,minimax-m2.7,grok-4.5-fast",
+        "glm-5.2,grok-4.5,union-alpha,grok-4.5-fast",
     )
     _mock_catalog(
         monkeypatch,
@@ -370,10 +370,11 @@ async def test_catalog_platform_allowlist_marks_off_protocol_unselectable(monkey
     assert grok.unavailable_reason.code == "upstream_protocol_unsupported"
     assert grok.unavailable_reason.required_protocol == "openai_responses"
 
-    minimax = platform["minimax-m2.7"]
-    assert minimax.available is False
-    assert minimax.unavailable_reason is not None
-    assert minimax.unavailable_reason.required_protocol == "anthropic_messages"
+    claude = platform["union-alpha"]
+    assert claude.available is False
+    assert claude.unavailable_reason is not None
+    assert claude.unavailable_reason.code == "upstream_protocol_unsupported"
+    assert claude.unavailable_reason.required_protocol == "anthropic_messages"
 
     # Lookalike / unpriced non-map id still hard-excluded (exact id only).
     assert "grok-4.5-fast" not in platform
@@ -381,7 +382,7 @@ async def test_catalog_platform_allowlist_marks_off_protocol_unselectable(monkey
     assert catalog.is_platform_listable("grok-4.5") is False
 
     assert await validate_model_choice(None, "u1", "grok-4.5", "platform") is False
-    assert await validate_model_choice(None, "u1", "minimax-m2.7", "platform") is False
+    assert await validate_model_choice(None, "u1", "union-alpha", "platform") is False
     assert await validate_model_choice(None, "u1", "glm-5.2", "platform") is True
 
 
@@ -406,7 +407,7 @@ async def test_catalog_excludes_models_without_curated_pricing(monkeypatch):
     assert "totally-unknown-relay-model" not in platform_ids
 
 
-# --- OpenCode off-protocol catalog (listed, not selectable) -------------------
+# --- OpenCode off-protocol catalog (/responses grey; /messages selectable) ---
 
 
 def _byok_off_protocol_row(mid: str, models: list):
@@ -438,6 +439,8 @@ async def test_opencode_go_catalog_marks_off_protocol_unselectable(monkeypatch):
                 "gpt-5.6-luna",
                 "minimax-m2.7",
                 "qwen3.7-max",
+                "union-alpha",
+                "claude-haiku-4-5",
             ]
         },
     )
@@ -454,14 +457,20 @@ async def test_opencode_go_catalog_marks_off_protocol_unselectable(monkeypatch):
     assert luna.unavailable_reason.required_protocol == "openai_responses"
 
     minimax = _byok_off_protocol_row("minimax-m2.7", cat.models)
-    assert minimax.available is False
-    assert minimax.unavailable_reason is not None
-    assert minimax.unavailable_reason.required_protocol == "anthropic_messages"
+    assert minimax.available is True
+    assert minimax.unavailable_reason is None
 
     qwen = _byok_off_protocol_row("qwen3.7-max", cat.models)
-    assert qwen.available is False
-    assert qwen.unavailable_reason is not None
-    assert qwen.unavailable_reason.required_protocol == "anthropic_messages"
+    assert qwen.available is True
+    assert qwen.unavailable_reason is None
+
+    union = _byok_off_protocol_row("union-alpha", cat.models)
+    assert union.available is True
+    assert union.unavailable_reason is None
+
+    haiku = _byok_off_protocol_row("claude-haiku-4-5", cat.models)
+    assert haiku.available is True
+    assert haiku.unavailable_reason is None
 
     flash = _byok_off_protocol_row("deepseek-v4-flash", cat.models)
     assert flash.available is True
@@ -472,6 +481,13 @@ async def test_opencode_go_catalog_marks_off_protocol_unselectable(monkeypatch):
 
     assert (
         await validate_model_choice(None, "u1", "grok-4.5", "byok", "prov-go") is False
+    )
+    assert (
+        await validate_model_choice(None, "u1", "union-alpha", "byok", "prov-go") is True
+    )
+    assert (
+        await validate_model_choice(None, "u1", "minimax-m2.7", "byok", "prov-go")
+        is True
     )
     assert (
         await validate_model_choice(None, "u1", "deepseek-v4-flash", "byok", "prov-go")
@@ -531,7 +547,7 @@ async def test_opencode_zen_catalog_marks_grok_unselectable(monkeypatch):
         selection=ModelSelection(
             model="deepseek-v4-flash", origin="byok", provider_id="prov-zen"
         ),
-        discovered={"prov-zen": ["kimi-k2.6", "grok-4.5"]},
+        discovered={"prov-zen": ["kimi-k2.6", "grok-4.5", "claude-haiku-4-5"]},
     )
     cat = await resolve_model_catalog(None, "u1")
     grok = _byok_off_protocol_row("grok-4.5", cat.models)
@@ -539,11 +555,18 @@ async def test_opencode_zen_catalog_marks_grok_unselectable(monkeypatch):
     assert grok.unavailable_reason is not None
     assert grok.unavailable_reason.code == "upstream_protocol_unsupported"
     assert grok.unavailable_reason.required_protocol == "openai_responses"
+    haiku = _byok_off_protocol_row("claude-haiku-4-5", cat.models)
+    assert haiku.available is True
+    assert haiku.unavailable_reason is None
     kimi = _byok_off_protocol_row("kimi-k2.6", cat.models)
     assert kimi.available is True
     assert kimi.unavailable_reason is None
     assert (
         await validate_model_choice(None, "u1", "grok-4.5", "byok", "prov-zen") is False
+    )
+    assert (
+        await validate_model_choice(None, "u1", "claude-haiku-4-5", "byok", "prov-zen")
+        is True
     )
 
 
@@ -582,10 +605,18 @@ def test_catalog_off_protocol_filter_uses_preset_singleton():
     assert catalog._off_protocol_reason("grok-4.5-fast", "https://opencode.ai/zen/go/v1") is None
     assert catalog._off_protocol_reason("grok-4.5", "https://opencode.ai/zen/go/v1") is not None
     assert catalog._off_protocol_reason("grok-4.5", "https://relay.example/openai/v1") is None
+    assert catalog._off_protocol_reason("union-alpha", "https://opencode.ai/zen/v1") is None
+    assert catalog._off_protocol_reason("claude-haiku-4-5", "https://opencode.ai/zen/go/v1") is None
+    assert catalog._off_protocol_reason("union-alpha", "https://openrouter.ai/api/v1") is None
+    assert catalog._off_protocol_reason("anthropic/claude-sonnet-4", "https://opencode.ai/zen/v1") is None
     # Platform path: same function object, no endpoint gate (see _platform_entry).
     assert catalog._off_protocol_unavailable("grok-4.5") is not None
     assert catalog._off_protocol_unavailable("grok-4.5-fast") is None
-    assert catalog._off_protocol_unavailable("glm-5.2") is None
+    assert catalog._off_protocol_unavailable("union-alpha") is not None
+    assert (
+        catalog._off_protocol_unavailable("union-alpha").required_protocol
+        == "anthropic_messages"
+    )
     assert (
         catalog._off_protocol_unavailable("grok-4.5").required_protocol
         == preset_fn("grok-4.5")

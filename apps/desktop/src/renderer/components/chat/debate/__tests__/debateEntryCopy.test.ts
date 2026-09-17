@@ -153,7 +153,7 @@ describe("debatePreviewSubtitle", () => {
 
   it("settled prefers brief leaning · confidence", () => {
     const execution = baseExecution({ debate: settledDebate });
-    expect(debatePreviewSubtitle(execution)).toBe("倾向暂缓上线 · 置信高");
+    expect(debatePreviewSubtitle(execution)).toBe("倾向暂缓上线 · 把握高");
     const hook = debateConclusionHook(execution);
     expect(hook?.leaning).toBe("倾向暂缓上线");
     expect(hook?.confidenceLabel).toBe("高");

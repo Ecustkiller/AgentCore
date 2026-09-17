@@ -1,6 +1,5 @@
 import { Markdown } from "@/components/chat/Markdown";
 import { PausedContinueSurface } from "@/components/chat/PausedContinueSurface";
-import { SourceCards } from "@/components/chat/SourceCards";
 import { TurnWarningBanner } from "@/components/chat/TurnWarningBanner";
 import { Button } from "@/components/ui";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +8,6 @@ import {
   statusAccentText,
   statusChip,
 } from "@/components/ui/tone-presets";
-import { buildCitationDisplayMap } from "@/lib/citationDisplayMap";
 import { copyText } from "@/lib/clipboard";
 import { resolveTurnDisplayMoney } from "@/lib/cost";
 import {
@@ -45,7 +43,7 @@ import { useExecutionStore, useMessageExecution } from "@/stores/execution";
 import { useMessageInteractionCards } from "@/stores/interactions";
 import { useUsageStore } from "@/stores/usage";
 import { AlertTriangle, Copy, KeyRound, RotateCcw } from "lucide-react";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AssistantMessageFooter,
@@ -206,25 +204,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     }
     return ids;
   }, [evidenceLedger, citations]);
-  // Display renumbering: append-only across stream frames so assigned numbers
-  // never jump. Reset when the message identity changes (component remounts per
-  // bubble; also guard via message.id in case of reuse).
-  const prevDisplayRef = useRef<Map<number, number>>(new Map());
-  const prevMessageIdRef = useRef(message.id);
-  if (prevMessageIdRef.current !== message.id) {
-    prevMessageIdRef.current = message.id;
-    prevDisplayRef.current = new Map();
-  }
-  const citationDisplay = useMemo(() => {
-    const next = buildCitationDisplayMap(
-      message.content,
-      citations.length,
-      prevDisplayRef.current,
-      citations,
-    );
-    prevDisplayRef.current = next.stableCited;
-    return next;
-  }, [message.content, citations]);
   const onOpenWorkspacePath = useCallback(
     (path: string) => {
       openWorkspaceDeliverable(conversationId, path);
@@ -313,7 +292,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       process={message.process ?? []}
       isStreaming={bubbleLive}
       citations={citations}
-      citationToDisplay={citationDisplay.toDisplay}
       knownLedgerIds={knownLedgerIds}
       evidenceLedger={evidenceLedger}
       composingTool={
@@ -345,7 +323,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           content={displayContent}
           conversationId={conversationId}
           citations={citations}
-          citationToDisplay={citationDisplay.toDisplay}
           knownLedgerIds={knownLedgerIds}
           evidenceLedger={evidenceLedger}
           isStreaming={bubbleLive}
@@ -448,14 +425,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
             </Button>
           )}
         </div>
-      )}
-      {citations.length > 0 && (
-        <SourceCards
-          citations={citations}
-          displayMap={citationDisplay}
-          turnKey={projectionId}
-          evidenceLedger={evidenceLedger}
-        />
       )}
       {/* 底部堆叠回退已废除（时间线一期）：交互卡只在 ProcessTimeline 标记槽渲染。
           不变量「有交互卡必有时间线标记」由 live 盖章 + reload journal 补标记保证。 */}

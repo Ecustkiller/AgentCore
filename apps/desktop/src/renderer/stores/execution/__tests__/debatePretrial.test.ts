@@ -12,7 +12,6 @@ import {
 describe("foldDebatePretrial", () => {
   it("started → running（组卷轻态）；orders 只更任务单；completed 权威覆盖", () => {
     let state = foldDebatePretrial(null, "debate_pretrial_started", {
-      thorough: true,
       sides: [
         { key: "pro", name: "支持方" },
         { key: "con", name: "反对方" },
@@ -24,7 +23,6 @@ describe("foldDebatePretrial", () => {
     expect(state?.incomplete).toBeUndefined();
 
     state = foldDebatePretrial(state, "debate_pretrial_orders", {
-      thorough: true,
       sides: [
         { key: "pro", name: "支持方" },
         { key: "con", name: "反对方" },
@@ -44,7 +42,6 @@ describe("foldDebatePretrial", () => {
 
     state = foldDebatePretrial(state, "debate_pretrial_completed", {
       status: "done",
-      thorough: true,
       sides: [
         { key: "pro", name: "支持方" },
         { key: "con", name: "反对方" },
@@ -72,7 +69,6 @@ describe("foldDebatePretrial", () => {
   it("旧 journal 缺 completeness/incomplete → 未知（不默认 empty→incomplete）", () => {
     const state = foldDebatePretrial(null, "debate_pretrial_completed", {
       status: "done",
-      thorough: true,
       sides: [
         { key: "pro", name: "支持方" },
         { key: "con", name: "反对方" },
@@ -87,40 +83,9 @@ describe("foldDebatePretrial", () => {
     expect(state?.incomplete).toBeUndefined();
   });
 
-  it("fast skip：completed 权威为 skipped；保留 wire 上的 incomplete（UI 靠 skipReason 抑制失败态）", () => {
-    let state = foldDebatePretrial(null, "debate_pretrial_started", {
-      thorough: false,
-      skip_reason: "fast",
-      sides: [
-        { key: "pro", name: "支持方" },
-        { key: "con", name: "反对方" },
-      ],
-    });
-    state = foldDebatePretrial(state, "debate_pretrial_completed", {
-      status: "skipped",
-      thorough: false,
-      skip_reason: "fast",
-      sides: [
-        { key: "pro", name: "支持方" },
-        { key: "con", name: "反对方" },
-      ],
-      orders: [],
-      evidence_ledger_count: 0,
-      evidence_ready: false,
-      fallback_self_search: false,
-      completeness: "empty",
-      incomplete: false,
-    });
-    expect(state?.status).toBe("skipped");
-    expect(state?.skipReason).toBe("fast");
-    expect(state?.incomplete).toBe(false);
-    expect(state?.completeness).toBe("empty");
-  });
-
   it("部分失败：degraded + incomplete（无缺口方字段）", () => {
     const state = foldDebatePretrial(null, "debate_pretrial_completed", {
       status: "degraded",
-      thorough: true,
       sides: [
         { key: "pro", name: "支持方" },
         { key: "con", name: "反对方" },
@@ -140,7 +105,6 @@ describe("foldDebatePretrial", () => {
   it("Evidence Pack 齐全：skip 外证", () => {
     const state = foldDebatePretrial(null, "debate_pretrial_completed", {
       status: "skipped",
-      thorough: true,
       sides: [
         { key: "pro", name: "支持方" },
         { key: "con", name: "反对方" },
@@ -165,7 +129,6 @@ describe("foldDebatePretrial", () => {
   it("Evidence Pack 缺口：skip 外证 + partial", () => {
     const state = foldDebatePretrial(null, "debate_pretrial_completed", {
       status: "skipped",
-      thorough: true,
       sides: [
         { key: "pro", name: "支持方" },
         { key: "con", name: "反对方" },
@@ -219,7 +182,6 @@ describe("pretrial_completed evidence_ledger_delta → 场级台账", () => {
             execution_id: "exec-pretrial-ledger",
             moderator_run_id: "mod",
             status: "done",
-            thorough: true,
             sides: [
               { key: "pro", name: "支持方" },
               { key: "con", name: "反对方" },
@@ -259,7 +221,6 @@ describe("pretrial_completed evidence_ledger_delta → 场级台账", () => {
         execution_id: "exec-pretrial-live",
         moderator_run_id: "mod",
         status: "done",
-        thorough: true,
         sides: [],
         orders: [],
         evidence_ledger_count: 1,

@@ -25,8 +25,8 @@ export interface WebSearchDisplay {
 
 /** `web_fetch` rich result (工具结果富渲染): a single source-style card header
  * (favicon · title · site) plus the extracted page body for the expandable
- * preview. Mirrors citation fields so it visually aligns with WebSearchResult /
- * SourceCards; the client never parses the model-facing JSON `result`. */
+ * preview. Mirrors citation fields so it visually aligns with WebSearchResult;
+ * the client never parses the model-facing JSON `result`. */
 export interface WebFetchDisplay {
   url: string;
   title: string;

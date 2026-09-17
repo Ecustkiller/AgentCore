@@ -99,6 +99,7 @@ async def handle_tool_calls_round(
                 content=outcome.content or None,
                 tool_calls=tool_calls,
                 reasoning_content=outcome.reasoning or None,
+                thinking_blocks=outcome.thinking_blocks,
             )
         )
     # Stamp same-round prose length so handoff can log deliverable body_chars

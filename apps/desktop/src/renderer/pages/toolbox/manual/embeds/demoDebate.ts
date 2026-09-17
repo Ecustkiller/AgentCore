@@ -103,7 +103,7 @@ const DEMO_ROUNDS: DebateRoundModel[] = [
   },
 ];
 
-/** 手册嵌入共用的已收场正反对垒演示数据（记分牌 / 终审舞台）。 */
+/** 手册嵌入共用的已收场正反对垒演示数据（顶栏 / 终审舞台）。 */
 export const DEMO_DEBATE_MESSAGE_ID = "manual-embed-debate";
 
 export const DEMO_DEBATE_MODEL: DebateModel = {

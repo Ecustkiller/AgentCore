@@ -52,7 +52,7 @@ class KickoffSummary:
     """Fan-out-facing job plan the kickoff gate shows / persists.
 
     ``primitive`` discriminates card layout. ``workers`` is the delegate分工表;
-    debate fills ``motion`` / ``sides`` / ``max_rounds`` / ``thorough`` instead
+    debate fills ``motion`` / ``sides`` / ``max_rounds`` instead
     (``workers`` stays empty). ``debate_arguments`` is the resume blob so
     ``recover_turn`` can re-enter ``DebateTool.execute`` after CONTINUE.
     ``headline`` is the user-facing lead (交付档 + 人数); empty = old frames.
@@ -65,7 +65,6 @@ class KickoffSummary:
     form: str = ""
     sides: list[dict[str, Any]] = field(default_factory=list)
     max_rounds: int = 0
-    thorough: bool = True
     debate_arguments: dict[str, Any] = field(default_factory=dict)
     # §7.5 裁判选型（开赛卡展示；可与辩手同模）。
     moderator_model: str = ""
@@ -93,7 +92,6 @@ class KickoffSummary:
             "form": self.form,
             "sides": list(self.sides),
             "max_rounds": self.max_rounds,
-            "thorough": self.thorough,
             "revision": self.revision if self.revision >= 1 else 1,
         }
         if self.headline:
@@ -268,7 +266,6 @@ def debate_kickoff_summary(
         form=config.form.value if hasattr(config.form, "value") else str(config.form),
         sides=sides,
         max_rounds=int(config.policy.max_rounds),
-        thorough=bool(config.policy.thorough),
         debate_arguments=dict(arguments),
         moderator_model=config.moderator_model or "",
         moderator_origin=config.moderator_origin or "",

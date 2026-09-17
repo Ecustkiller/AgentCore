@@ -41,7 +41,6 @@ def test_fold_projects_stage_card_but_recovery_pending_excludes_it():
                 "form": "debate",
                 "rationale": "真对立轴需对抗检验",
                 "fact_pointers": [],
-                "thorough": True,
                 "max_rounds": 5,
             },
         }
@@ -193,7 +192,6 @@ async def test_oral_debate_does_not_consume_stage_card(monkeypatch):
             "motion": _valid_card()["motion"],
             "form": "debate",
             "sides": _valid_card()["sides"],
-            "thorough": False,
         },
         tool._base_tool_context,
     )

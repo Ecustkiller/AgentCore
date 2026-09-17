@@ -11,12 +11,14 @@ from pathlib import Path
 import agentcore.evals as ev
 from agentcore.evals.seed_lint import lint_case, lint_suite
 
-_CORE_DIR = Path(ev.__file__).parent / "cases" / "core"
+_CASES = Path(ev.__file__).parent / "cases"
+_CORE_DIR = _CASES / "core"
+_STYLE_DIR = _CASES / "style"
 
 
-def _load_core_raw() -> list[dict]:
+def _load_suite_raw(suite_dir: Path) -> list[dict]:
     raws: list[dict] = []
-    for path in sorted(_CORE_DIR.glob("*.json")):
+    for path in sorted(suite_dir.glob("*.json")):
         loaded = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(loaded, list):
             raws.extend(loaded)
@@ -25,11 +27,36 @@ def _load_core_raw() -> list[dict]:
     return raws
 
 
+def _load_core_raw() -> list[dict]:
+    return _load_suite_raw(_CORE_DIR)
+
+
 def test_shipped_core_suite_lints_clean():
     raws = _load_core_raw()
     assert len(raws) >= 6, "core 种子套件应至少 6 例（§十三 倾向 6–8）"
     errors = lint_suite(raws)
     assert errors == [], f"core 套件 lint 不干净: {errors}"
+
+
+def test_shipped_style_suite_lints_clean():
+    raws = _load_suite_raw(_STYLE_DIR)
+    assert len(raws) == 6, "style 消融卷应恰好 6 例短答"
+    errors = lint_suite(raws)
+    assert errors == [], f"style 套件 lint 不干净: {errors}"
+    ids = {r["id"] for r in raws}
+    assert ids == {
+        "style_greet",
+        "style_thanks",
+        "style_explain",
+        "style_list",
+        "style_invite",
+        "style_en_mutex",
+    }
+    for raw in raws:
+        assert raw.get("path", "single") == "single"
+        assert raw.get("samples") == 3
+        names = {c["name"] for c in raw["checks"]}
+        assert "StyleClean" not in names
 
 
 def test_shipped_core_suite_covers_key_categories():

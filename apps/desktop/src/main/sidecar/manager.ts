@@ -426,6 +426,12 @@ export class SidecarManager {
     { wc: WebContents; rootId: string; subpath: string }
   >();
 
+  /**
+   * 开发态热更新主动弹进程的 entry key。这些关闭走 salvage，但不当成「引擎崩溃」
+   * 推 `exited`（否则 renderer 会把下一发误标成本地引擎退出）。
+   */
+  private readonly devReloadKeys = new Set<string>();
+
   constructor(
     private readonly spawnFn: (
       config: SpawnConfig,
@@ -441,9 +447,8 @@ export class SidecarManager {
    * 回合的工作区；缓存键含 subpath，故同容器根下的不同子路径工作区互不串台。状态推送仍按容器
    * `rootId`（与 renderer 的 sidecarStatus / `takeRecentSidecarFailure(rootId)` 对齐——诊断按根聚合）。
    *
-   * 不在此处踢 `warmCodeIndex` / `warmMcpDiscover`：服务端 `initialize` 已 schedule 代码
-   * 索引；MCP list 须桌面打开/登记显式 IPC（{@link warmCodeIndex} /
-   * {@link warmMcpDiscover}）。每回合 ensure（含 cache hit）再踢会与 prepare 叠跑。
+   * 不在此处踢 `warmMcpDiscover`：MCP list 须桌面打开/登记显式 IPC
+   * （{@link warmMcpDiscover}）。每回合 ensure（含 cache hit）再踢会与 prepare 叠跑。
    *
    * `warmAccountRulesMemory` / `warmMcpDiscover`：ensure 本身不踢；
    * {@link startTurn} / {@link resume}（及显式暖）在有票且该快照键**已过期**时续暖
@@ -477,7 +482,10 @@ export class SidecarManager {
       const gone = this.entries.get(key);
       if (gone) this.clearWarmKeepaliveTimer(gone);
       this.entries.delete(key);
-      this.pushStatus({ rootId, phase: "exited", detail: err.message });
+      const plannedReload = this.devReloadKeys.delete(key);
+      if (!plannedReload) {
+        this.pushStatus({ rootId, phase: "exited", detail: err.message });
+      }
       this.finalizeEphemeralTurns(rootId, subpath, err);
       const mine = this.conversationIdsOnSidecar(rootId, subpath);
       // 始终带范围：空名单 = 这台引擎没有可 salvage 的对话，禁止回落到全盘 OPEN。
@@ -734,29 +742,6 @@ export class SidecarManager {
     // 不传 inference：探活只验证环境能起；真实回合的 startTurn 会按回合重发云代理凭据。
     const entry = this.ensure(rootId, subpath, workspaceRoot, undefined);
     await entry.ready;
-  }
-
-  /**
-   * 打开/登记本机项目后：ensure sidecar + 等待 initialize，再显式踢 ``warmCodeIndex`` RPC。
-   * 与 {@link probe} 同形；语义上专供「打开项目必走到」暖索引，不挡 UI（RPC 失败只记日志）。
-   */
-  async warmCodeIndex(
-    rootId: string,
-    subpath: string,
-    workspaceRoot: string,
-  ): Promise<void> {
-    const entry = this.ensure(rootId, subpath, workspaceRoot, undefined);
-    await entry.ready;
-    try {
-      await entry.client.request("warmCodeIndex", {});
-    } catch (err: unknown) {
-      const detail = err instanceof Error ? err.message : String(err);
-      logDesktop({
-        level: "warn",
-        event: "sidecar.warm_code_index_failed",
-        fields: { rootId, detail },
-      });
-    }
   }
 
   /**
@@ -1636,6 +1621,27 @@ export class SidecarManager {
     this.entries.clear();
     this.turns.clear();
     this.lastWindowByCid.clear();
+    this.devReloadKeys.clear();
+  }
+
+  /**
+   * 开发态热更新：关掉已拉起的 sidecar，让下次 ensure 重新 spawn + import。
+   *
+   * 不走 {@link disposeAll}：那会先清空 `turns`，onClosed 的 salvage 名单变成空数组，
+   * 活着的本机 OPEN 文件会被跳过。这里只 dispose client，salvage 仍由 onClosed 做。
+   *
+   * @returns 关掉的进程数（0 = 当时没人在跑，下次 spawn 已是新代码）。
+   */
+  bounceForDevReload(): number {
+    const snapshot = [...this.entries.entries()];
+    if (snapshot.length === 0) return 0;
+    for (const [key] of snapshot) this.devReloadKeys.add(key);
+    for (const [, entry] of snapshot) {
+      this.clearWarmKeepaliveTimer(entry);
+      void entry.client.request("shutdown", {}).catch(() => {});
+      entry.client.dispose();
+    }
+    return snapshot.length;
   }
 
   /**

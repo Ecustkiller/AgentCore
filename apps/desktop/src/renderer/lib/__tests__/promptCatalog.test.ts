@@ -160,7 +160,7 @@ describe("buildPromptRail", () => {
     expect(rail.tools).toEqual([]);
   });
 
-  it("出厂工具合成一份，按能力面再开场即用排序", () => {
+  it("出厂工具一份列表，按能力面再开场即用排序；概览按 resident 分进两区", () => {
     const rail = buildPromptRail(
       {
         ...base,

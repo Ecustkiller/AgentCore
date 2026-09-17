@@ -36,8 +36,8 @@ from tests.llm_helpers import make_turn_profiles
 USER_ID = "u1"
 FOLDER_ID = "F1"
 TOPIC = "部署流程"
-SKILL = "staffing"
-SKILL_MARKER = "先定位入口就停"
+SKILL = "debate_and_review"
+SKILL_MARKER = "取证由辩论机制保证"
 PROJECT_BODY = "## 本项目部署\n- 用 pnpm deploy:backend\n- 生产机构建镜像\n"
 GLOBAL_BODY = "## 全局部署\n- 通用 CI 流程\n"
 

@@ -333,7 +333,6 @@ export type ProjectedInteraction =
       form: string;
       rationale: string;
       factPointers: string[];
-      thorough: boolean;
       maxRounds: number;
       note: string | null;
     };
@@ -341,7 +340,6 @@ export type ProjectedInteraction =
 /** 庭前取证投影（`debate_pretrial_*` 折叠；权威=completed）。 */
 export interface DebatePretrialProjection {
   status: "running" | "done" | "skipped" | "degraded" | string;
-  thorough: boolean;
   skipReason: string | null;
   sides: Array<{ key: string; name: string }>;
   orders: Array<{

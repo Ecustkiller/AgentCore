@@ -1,18 +1,9 @@
-"""庭前取证（辩论编排设计.md §二之二）。
+"""开赛材料汇流（辩论编排设计.md §五）。
 
-开赛后、首轮立论前的固有阶段：
+有附件/底料则组装共享证据包并写入来源账；没有则发言期再查。
+完整度只作内部检索预算（full → 立论外搜 0），不是产品阶段，也不拦开辩。
 
-1. **共享证据包优先**（附件已在主持人上下文）→ 组装 Evidence Pack
-   - ``completeness=full``：不开外证扫网；辩手发言期 ``retrieval_budget=0``
-   - ``partial``/``empty``：直接完成庭前；辩手对称有界发言期检索
-2. **无可用 pack**：直接完成庭前；认真档各方对称有界发言期检索
-3. ``thorough=False``：秒过（fast）
-
-边界（就地否决）：
-- 庭前调查员舰队已删除（点单 / 代派 / gap_fill 补跑）
-- 预算对称；台账强制汇流（Evidence Pack 登记）
-- 禁止以同批去重 / retry 冒充「共享事实库」改造
-- 外证是否开由完整度驱动（产品约束）；发言期预算由完整度对称分配
+调查员舰队已删。
 """
 
 from __future__ import annotations
@@ -31,7 +22,7 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-SkipReason = Literal["", "fast", "evidence_pack", "no_pack"]
+SkipReason = Literal["", "evidence_pack", "no_pack"]
 PackCompleteness = Literal["full", "partial", "empty"]
 
 
@@ -44,7 +35,7 @@ class PretrialResult:
     evidence_ready: bool = False
     debater_run_ids: dict[str, str] = field(default_factory=dict)
     evidence_pack: Any | None = None
-    # 取证完整度一等公民：失败 / 截断不得伪装成满分完成。
+    # 材料完整度（内部预算）：失败 / 截断不得伪装成满分。
     completeness: PackCompleteness = "empty"
     # 外证计划观测（mode 恒为 skip）。
     external_evidence_mode: str = ""
@@ -52,7 +43,7 @@ class PretrialResult:
 
     @property
     def incomplete(self) -> bool:
-        # intentional 秒过（fast / evidence_pack / no_pack）不得标 incomplete；
+        # intentional 秒过（evidence_pack / no_pack）不得标 incomplete；
         # 完整度仍写入 completeness，供发言期预算与约定文档标注使用。
         if self.skipped:
             return False
@@ -150,35 +141,15 @@ async def run_pretrial_phase(
     on_orders: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     on_completed: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> PretrialResult:
-    """庭前阶段编排入口（无调查员 spawn）。"""
+    """开赛材料汇流入口（无调查员 spawn）。"""
     del complete_json  # 点单 LLM 不再使用
     from agentcore.runtime.debate.evidence_pack import resolve_external_evidence_plan
 
     base_payload = {
         "execution_id": execution_id,
         "moderator_run_id": moderator_run_id,
-        "thorough": bool(config.policy.thorough),
         "sides": [{"key": s.key, "name": s.name} for s in config.sides],
     }
-
-    # 快速档：秒过
-    if not config.policy.thorough:
-        plan = resolve_external_evidence_plan(completeness="empty", path="fast")
-        _log_external_plan(plan, path="fast")
-        result = PretrialResult(
-            skipped=True,
-            skip_reason="fast",
-            completeness="empty",
-            external_evidence_mode=plan.mode,
-            external_evidence_reason=plan.reason,
-        )
-        config.external_evidence_mode = plan.mode
-        config.external_evidence_reason = plan.reason
-        if on_started is not None:
-            await on_started({**base_payload, "skip_reason": "fast"})
-        if on_completed is not None:
-            await on_completed({**base_payload, **result.to_completed_payload()})
-        return result
 
     if on_started is not None:
         await on_started(base_payload)

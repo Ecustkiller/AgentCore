@@ -108,7 +108,6 @@ def test_read_only_builtins_are_shared_with_ceo():
         "file_list",
         "glob",
         "grep",
-        "code_search",
         "git",
         "docs_read",
     ):
@@ -161,7 +160,7 @@ def test_ceo_prompt_lists_skill_directory_when_ask_user_wired():
     assert "编排：" in with_ask
     assert "- ask_kickoff：" in with_ask
     assert "- ask_midtask：" in with_ask
-    assert "- staffing：" in with_ask
+    assert "- product_help：" in with_ask
     assert "- asking_the_user：" not in with_ask
 
     without_ask = compose_ceo_chat_prompt(
@@ -175,10 +174,10 @@ def test_ceo_prompt_lists_skill_directory_when_ask_user_wired():
     assert "- asking_the_user：" not in without_ask
     assert "- ask_user_kickoff：" not in without_ask
     # …but the un-gated advanced skills still list.
-    assert "- staffing：" in without_ask
+    assert "- product_help：" in without_ask
 
 
-# Display face ≠ ceo_orchestration surface. Pin so Folder / board / remember
+# Display face ≠ ceo_orchestration surface. Pin so Folder / board tools
 # cannot slide back into the orchestration dumpster.
 _CATALOG_FACE: dict[str, ToolFace] = {
     "delegate": ToolFace.ORCHESTRATION,
@@ -194,7 +193,6 @@ _CATALOG_FACE: dict[str, ToolFace] = {
     "delete_folder": ToolFace.FOLDER,
     "list_folder_dir": ToolFace.FOLDER,
     "read_folder_file": ToolFace.FOLDER,
-    "remember": ToolFace.FOLDER,
     "read_image": ToolFace.BOARD,
     "table_ops": ToolFace.TABLE,
     "table_read": ToolFace.TABLE,
@@ -207,7 +205,9 @@ def test_capability_catalog_omits_retired_update_folder_profile():
     catalog = build_capability_catalog()
     names = {e.schema.name for e in catalog}
     assert "update_folder_profile" not in names
-    assert "remember" in names
+    assert "remember" not in names
+    assert "code_search" not in names
+    assert "project_shell" not in names
     assert all(e.summary != "更新文件夹画像" for e in catalog)
 
 

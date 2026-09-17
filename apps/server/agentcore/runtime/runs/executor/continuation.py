@@ -80,8 +80,10 @@ def _strip_historical_reasoning(transcript: list[LLMMessage]) -> list[LLMMessage
     """
     out: list[LLMMessage] = []
     for m in transcript:
-        if m.role == "assistant" and m.reasoning_content is not None:
-            out.append(replace(m, reasoning_content=None))
+        if m.role == "assistant" and (
+            m.reasoning_content is not None or m.thinking_blocks is not None
+        ):
+            out.append(replace(m, reasoning_content=None, thinking_blocks=None))
         else:
             out.append(m)
     return out

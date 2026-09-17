@@ -13,6 +13,7 @@ import {
   fetchMessageWindow,
   jumpToMessage,
   loadLatestWindow,
+  scheduleEnsureFullRunsForWindow,
   shouldSetGeneratingOnHydrate,
 } from "@/services/messages";
 import {
@@ -32,7 +33,9 @@ import {
   type Message,
   getRuntime,
   hasUnconfirmedLocalTail,
+  overlayCompleteRunsOnServerWindow,
   useConversationStore,
+  windowHasSlimJournal,
 } from "@/stores/conversation";
 import {
   WORKSPACE_TAB_ID,
@@ -100,10 +103,11 @@ function reconcileMessageWindow(
     }
     return false;
   }
-  s.setMessageWindow(messages, flags, id);
+  const merged = overlayCompleteRunsOnServerWindow(messages, existing);
+  s.setMessageWindow(merged, flags, id);
   s.setMemoryUpdates(memoryUpdates, id);
   clearLastEventId(id);
-  if (shouldSetGeneratingOnHydrate(messages)) {
+  if (shouldSetGeneratingOnHydrate(merged)) {
     s.setGenerating(true, id);
   }
   return true;
@@ -262,10 +266,14 @@ export function ConversationPage() {
               has_more_after: win.hasMoreAfter,
             });
             if (wrote && win.messages.length > 0) {
-              void persistOpenedCache(id, win.messages, win.memoryUpdates, {
-                hasMoreBefore: win.hasMoreBefore,
-                hasMoreAfter: win.hasMoreAfter,
-              });
+              const merged = getRuntime(id).messages;
+              if (!windowHasSlimJournal(merged)) {
+                void persistOpenedCache(id, merged, win.memoryUpdates, {
+                  hasMoreBefore: win.hasMoreBefore,
+                  hasMoreAfter: win.hasMoreAfter,
+                });
+              }
+              scheduleEnsureFullRunsForWindow(id);
             }
           } else {
             const rt = getRuntime(id);

@@ -6,7 +6,7 @@ _COLD_START_EXPLORE_HINT_TEMPLATE = """
 <冷启动探索>
 【冷启动探索幕】{reason_line}
 先轻探再 delegate 调研建档。\
-禁止用 `remember` 把文件夹简报写成用户规则。探索 pending 期间 worker 写盘不得出 AgentCore/ 约定记忆与探索笔记（本回合 create_folder 新建的云文件夹除外）。
+禁止把文件夹简报写成 `.agentcore/规则/` 用户规则。探索 pending 期间 worker 写盘不得出 AgentCore/ 约定记忆与探索笔记（本回合 create_folder 新建的云文件夹除外）。
 </冷启动探索>"""
 
 _COLD_START_EXPLORE_REASON_REFRESH = (

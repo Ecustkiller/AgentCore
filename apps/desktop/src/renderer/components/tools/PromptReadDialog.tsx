@@ -17,8 +17,9 @@ import type { PromptCatalogItem } from "@/lib/promptCatalog";
 import {
   promptItemShelfCopy,
   promptMineShelfOpts,
-  promptShelfHeaderChips,
+  promptReadHeaderChips,
 } from "@/lib/promptShelfTile";
+import { cn } from "@/lib/utils";
 import {
   ConnectorInspector,
   ConnectorStatusBadge,
@@ -43,7 +44,7 @@ export type ConnectorPick = {
 
 export type PromptReadLeaf = PromptCatalogItem | ConnectorPick;
 
-type MineView = "preview" | "source";
+type MineView = "preview" | "edit";
 
 export function PromptReadDialog({
   open,
@@ -97,12 +98,10 @@ export function PromptReadDialog({
   ) => void;
   onUnpublishMine: (item: Extract<PromptCatalogItem, { kind: "mine" }>) => void;
 }) {
-  const [mineView, setMineView] = useState<MineView>("source");
   const [publishOpen, setPublishOpen] = useState(false);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: item id is an intentional re-run key
   useEffect(() => {
-    setMineView("source");
     setPublishOpen(false);
   }, [item && "id" in item ? item.id : null]);
 
@@ -148,8 +147,13 @@ export function PromptReadDialog({
       }}
     >
       <DialogContent
-        size="lg"
-        className="flex max-h-[min(80vh,36rem)] flex-col"
+        size={mineItem ? "2xl" : "lg"}
+        className={cn(
+          "flex flex-col",
+          mineItem
+            ? "h-[min(85vh,52rem)] max-h-[min(85vh,52rem)]"
+            : "max-h-[min(80vh,36rem)]",
+        )}
         data-testid="prompt-read-dialog"
         onPointerDownOutside={(event) => {
           if (publishOpen) event.preventDefault();
@@ -161,7 +165,7 @@ export function PromptReadDialog({
           if (publishOpen) event.preventDefault();
         }}
       >
-        <DialogHeader>
+        <DialogHeader className="shrink-0">
           <div className="flex min-w-0 items-start gap-2">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
@@ -175,18 +179,8 @@ export function PromptReadDialog({
                   <ConnectorStatusBadge server={item.server} />
                 ) : null}
               </div>
-              {mineItem && showItem ? (
+              {canPublish || canUnpublish ? (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <SegmentedControl
-                    aria-label="阅读方式"
-                    value={mineView}
-                    onChange={setMineView}
-                    items={[
-                      { value: "preview", label: "预览" },
-                      { value: "source", label: "源码" },
-                    ]}
-                    className="w-auto"
-                  />
                   {canPublish ? (
                     <Button
                       type="button"
@@ -215,11 +209,15 @@ export function PromptReadDialog({
             {header.description}
           </DialogDescription>
         </DialogHeader>
-        <DialogBody className="flex min-h-0 flex-1 flex-col pb-5">
+        <DialogBody
+          className={cn(
+            "flex min-h-0 flex-1 flex-col",
+            mineItem ? "overflow-hidden px-0 pb-0" : "pb-5",
+          )}
+        >
           {showItem && item ? (
             <ReadBody
               item={item}
-              mineView={mineView}
               overlay={overlay}
               showToolsHint={showToolsHint}
               toolsHint={toolsHint}
@@ -263,7 +261,7 @@ function readHeader({
   installedListings: SkillStoreListing[];
 }): {
   title: string;
-  chips: ReturnType<typeof promptShelfHeaderChips>;
+  chips: ReturnType<typeof promptReadHeaderChips>;
   description: string;
 } {
   if (showItem && item) {
@@ -281,7 +279,7 @@ function readHeader({
     const copy = promptItemShelfCopy(item, mineOpts);
     return {
       title: copy.title,
-      chips: promptShelfHeaderChips(copy),
+      chips: promptReadHeaderChips(copy, item),
       description: copy.description || copy.title,
     };
   }
@@ -294,7 +292,6 @@ function readHeader({
 
 function ReadBody({
   item,
-  mineView,
   overlay,
   showToolsHint,
   toolsHint,
@@ -308,7 +305,6 @@ function ReadBody({
   onSaveMine,
 }: {
   item: PromptReadLeaf;
-  mineView: MineView;
   overlay: SkillCatalog;
   showToolsHint: boolean;
   toolsHint: string;
@@ -397,8 +393,8 @@ function ReadBody({
   if (item.kind === "mine") {
     return (
       <MineSkillEditor
+        key={item.id}
         item={item}
-        view={mineView}
         writable={overlay.writable}
         bindableTools={bindableTools}
         onSave={onSaveMine}
@@ -409,15 +405,17 @@ function ReadBody({
   return null;
 }
 
+function initialMineView(content: string): MineView {
+  return skillBodyFromContent(content).trim() ? "preview" : "edit";
+}
+
 function MineSkillEditor({
   item,
-  view,
   writable,
   bindableTools,
   onSave,
 }: {
   item: Extract<PromptCatalogItem, { kind: "mine" }>;
-  view: MineView;
   writable: boolean;
   bindableTools?: BindableToolOption[];
   onSave: (
@@ -430,6 +428,11 @@ function MineSkillEditor({
     },
   ) => Promise<boolean>;
 }) {
+  const onDemand = item.applyMode === "on_demand";
+  const pendingBody = Boolean(item.mineId) && !item.content;
+  const [view, setView] = useState<MineView>(() =>
+    pendingBody ? "preview" : initialMineView(item.content),
+  );
   const [body, setBody] = useState(() => skillBodyFromContent(item.content));
   const [offeredTools, setOfferedTools] = useState(() =>
     parseOffersTools(item.content),
@@ -454,6 +457,9 @@ function MineSkillEditor({
         setOfferedTools(parseOffersTools(doc.content));
         setVersion(doc.version);
         setLoading(false);
+        setView((current) =>
+          current === "edit" ? current : initialMineView(doc.content),
+        );
       })
       .catch(() => {
         if (!cancelled) setLoading(false);
@@ -463,20 +469,6 @@ function MineSkillEditor({
     };
   }, [item.mineId, item.content, item.version]);
 
-  if (view === "preview") {
-    if (loading) {
-      return <p className="text-sm text-muted-foreground">加载中…</p>;
-    }
-    return (
-      <PromptDocument
-        text={body}
-        compact={false}
-        framed={false}
-        maxHeightClass="max-h-none"
-      />
-    );
-  }
-
   return (
     <PromptWorkbench
       key={loading ? `${item.id}-loading` : item.id}
@@ -484,10 +476,24 @@ function MineSkillEditor({
       title={item.label}
       titleEditable
       badges={null}
+      leading={
+        <SegmentedControl
+          aria-label="阅读方式"
+          value={view}
+          onChange={setView}
+          items={[
+            { value: "preview", label: "预览" },
+            { value: "edit", label: "编辑" },
+          ]}
+          className="w-auto"
+        />
+      }
+      previewing={view === "preview"}
       initialTrigger={item.description}
-      triggerEnabled={item.applyMode === "on_demand"}
+      triggerEnabled={onDemand}
       initialOfferedTools={offeredTools}
       bindableTools={bindableTools}
+      canAddOfferedTools={onDemand}
       initialBody={body}
       bodyLoading={loading}
       readOnly={!writable}
@@ -498,7 +504,7 @@ function MineSkillEditor({
                 { ...item, version },
                 {
                   name: draft.title,
-                  description: draft.trigger,
+                  description: onDemand ? draft.trigger : item.description,
                   body: draft.body,
                   offeredTools: draft.offeredTools,
                 },

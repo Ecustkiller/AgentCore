@@ -705,12 +705,12 @@ def test_landed_status_echo_gets_one_strike_stop():
 # ── 3. 记忆复用 ──────────────────────────────────────────────────────────────
 
 
-def _staffing_consult() -> ConsultTool:
+def _handbook_consult() -> ConsultTool:
     return ConsultTool(
         source=MergedConsultSource(
             skill=SkillConsultSource(
                 registry=build_system_skill_registry(),
-                tool_names={"delegate"},
+                tool_names={"delegate", "debate"},
                 audience="ceo",
             )
         )
@@ -718,18 +718,18 @@ def _staffing_consult() -> ConsultTool:
 
 
 async def test_consult_reuses_turn_cache():
-    tool = _staffing_consult()
+    tool = _handbook_consult()
     token = consulted_memory_cache.set({})
     try:
-        first = await tool.execute({"name": "staffing"}, _ctx())
+        first = await tool.execute({"name": "debate_and_review"}, _ctx())
         assert first.success
-        assert "先定位入口就停" in first.output
+        assert "未点名" in first.output
         assert first.display["origin"] == "system"
         assert "kind" not in first.display
-        assert "staffing" in get_consult_cache()
-        second = await tool.execute({"name": "staffing"}, _ctx())
+        assert "debate_and_review" in get_consult_cache()
+        second = await tool.execute({"name": "debate_and_review"}, _ctx())
         assert second.success
-        assert "先定位入口就停" in second.output
+        assert "未点名" in second.output
         assert (second.display or {}).get("reused") is True
         assert (second.display or {}).get("origin") == "system"
         assert "kind" not in (second.display or {})
@@ -739,11 +739,11 @@ async def test_consult_reuses_turn_cache():
 
 async def test_consult_reuse_from_frame_omits_origin():
     """Resume-from-frame only restores bodies; display must not invent origin."""
-    body = "cached staffing body"
-    tool = _staffing_consult()
-    token = consulted_memory_cache.set({"staffing": body})
+    body = "cached handbook body"
+    tool = _handbook_consult()
+    token = consulted_memory_cache.set({"debate_and_review": body})
     try:
-        result = await tool.execute({"name": "staffing"}, _ctx())
+        result = await tool.execute({"name": "debate_and_review"}, _ctx())
         assert result.success and result.output == body
         assert (result.display or {}).get("reused") is True
         assert "origin" not in (result.display or {})

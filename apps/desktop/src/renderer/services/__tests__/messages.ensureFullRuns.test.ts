@@ -7,6 +7,12 @@ vi.mock("@/services/api", () => ({
   api: { get: (...args: unknown[]) => apiGet(...args) },
 }));
 
+const persistResidentOpenedCache = vi.hoisted(() => vi.fn());
+vi.mock("@/services/offlineCache", () => ({
+  persistOpenedCache: vi.fn(),
+  persistResidentOpenedCache,
+}));
+
 import {
   peekLastEventId,
   seedLastEventIdForTests,
@@ -75,6 +81,7 @@ beforeEach(() => {
   resetEnsureFullMessageRunsForTests();
   resetStreamOwnershipForTests();
   apiGet.mockReset();
+  persistResidentOpenedCache.mockClear();
   useExecutionStore.setState({ byId: {} });
   useConversationStore.setState({
     currentConversationId: null,
@@ -113,9 +120,12 @@ describe("ensureFullMessageRuns", () => {
         .length,
     ).toBe(2);
     expect(useExecutionStore.getState().byId[MID]?.plan?.id).toBe("exec-full");
+    expect(persistResidentOpenedCache).toHaveBeenCalledTimes(1);
+    expect(persistResidentOpenedCache).toHaveBeenCalledWith(CID);
 
     await ensureFullMessageRuns(CID, MID);
     expect(apiGet).toHaveBeenCalledTimes(1);
+    expect(persistResidentOpenedCache).toHaveBeenCalledTimes(1);
   });
 
   it("coalesces in-flight GETs for the same message", async () => {

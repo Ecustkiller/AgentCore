@@ -41,9 +41,15 @@ export interface SpawnConfig {
  *
  * @internal 导出供单测；生产路径经 SidecarManager → spawnFn。
  */
+/** 本机 sidecar 的服务端目录（dev：`apps/server`）。打包态仍解析，供测试覆写。 */
+export function resolveSidecarServerDir(): string {
+  return (
+    process.env.AGENTCORE_SERVER_DIR ?? join(app.getAppPath(), "..", "server")
+  );
+}
+
 export function resolveSpawnConfig(): SpawnConfig {
-  const serverDir =
-    process.env.AGENTCORE_SERVER_DIR ?? join(app.getAppPath(), "..", "server");
+  const serverDir = resolveSidecarServerDir();
 
   const cmdOverride = process.env.AGENTCORE_SIDECAR_CMD;
   if (cmdOverride) {

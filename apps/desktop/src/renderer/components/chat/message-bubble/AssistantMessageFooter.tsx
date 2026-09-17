@@ -218,7 +218,7 @@ export function MessageMoreMenu({
           {captainContext.length > 0 && (
             <DropdownMenuItem onSelect={() => setContextOpen(true)}>
               <Layers size={14} className="shrink-0 text-muted-foreground" />
-              收到的上下文 · {captainContext.length} 段
+              收到的上下文
             </DropdownMenuItem>
           )}
           {hasSpendUsage && usage && (
@@ -262,6 +262,7 @@ export function MessageMoreMenu({
       </DropdownMenu>
       <ReceivedContextDialog
         blocks={captainContext}
+        process={message.process}
         open={contextOpen}
         onOpenChange={setContextOpen}
       />

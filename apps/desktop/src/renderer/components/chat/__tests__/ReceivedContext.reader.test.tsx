@@ -75,6 +75,7 @@ describe("ReceivedContextSection reader", () => {
     expect(screen.queryByText("本回合")).toBeNull();
     expect(screen.queryByText("此前对话")).toBeNull();
     expect(screen.queryByText("环境")).toBeNull();
+    expect(screen.queryByText("系统")).toBeNull();
     expect(screen.queryByText("常驻指令")).toBeNull();
     expect(screen.queryByTestId("received-context-body")).toBeNull();
 
@@ -90,7 +91,7 @@ describe("ReceivedContextSection reader", () => {
     );
   });
 
-  it("opens the shared dialog with structured 常驻指令 sections", () => {
+  it("opens the shared dialog with 设定 and a factory row", () => {
     const system = `你是 CEO。
 
 <output_style>
@@ -109,19 +110,25 @@ describe("ReceivedContextSection reader", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: /常驻指令/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /设定/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "上下文" }));
-    expect(screen.getByRole("button", { name: /常驻指令/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /设定/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /出厂指令/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /输出风格/ })).toBeNull();
+    expect(
+      screen
+        .getByRole("button", { name: /原始请求/ })
+        .getAttribute("aria-current"),
+    ).toBe("true");
 
-    fireEvent.click(screen.getByRole("button", { name: /常驻指令/ }));
+    fireEvent.click(screen.getByRole("button", { name: /出厂指令/ }));
     const body = screen.getByTestId("received-context-body").textContent ?? "";
     expect(body).toContain("你是 CEO。");
     expect(body).toContain("- 不用 emoji");
     expect(body).toContain("并行调用独立工具。");
   });
 
-  it("hides 常驻指令 on a narrow layout", () => {
+  it("hides system slices on a narrow layout", () => {
     isNarrow = true;
     render(
       <ReceivedContextSection
@@ -138,8 +145,9 @@ describe("ReceivedContextSection reader", () => {
       "上下文",
     );
     fireEvent.click(screen.getByRole("button", { name: "上下文" }));
-    expect(screen.queryByText("常驻指令")).toBeNull();
-    expect(screen.queryByRole("button", { name: /输出风格/ })).toBeNull();
+    expect(screen.queryByText("系统")).toBeNull();
+    expect(screen.queryByRole("button", { name: /设定/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /出厂指令/ })).toBeNull();
     expect(screen.getByRole("button", { name: /原始请求/ })).toBeTruthy();
   });
 
@@ -219,13 +227,20 @@ describe("ReceivedContextSection reader", () => {
 });
 
 describe("ReceivedContextDialog reader", () => {
-  it("defaults to 常驻指令 even when 本回合工具 is present", () => {
+  it("defaults to injected 设定 even when 本回合工具 is present", () => {
+    const system = `<设定>
+我的规则。
+</设定>
+
+<输出>
+直接给结论。
+</输出>`;
     render(
       <ReceivedContextDialog
         open
         onOpenChange={() => undefined}
         blocks={[
-          block({ channel: "system", body: "你是 CEO。" }),
+          block({ channel: "system", body: system, chars: system.length }),
           block({
             channel: "tools",
             body: "**web_search**\n\n- `query`: string（必填）",
@@ -234,18 +249,18 @@ describe("ReceivedContextDialog reader", () => {
         ]}
       />,
     );
-    const standingBtn = screen.getByRole("button", { name: /常驻指令/ });
-    expect(standingBtn.getAttribute("aria-current")).toBe("true");
+    const settingBtn = screen.getByRole("button", { name: /设定/ });
+    expect(settingBtn.getAttribute("aria-current")).toBe("true");
     const nav = screen.getByRole("navigation", { name: "上下文目录" });
-    expect(nav.textContent?.indexOf("常驻指令")).toBeLessThan(
+    expect(nav.textContent?.indexOf("设定")).toBeLessThan(
       nav.textContent?.indexOf("本回合工具") ?? -1,
     );
-    expect(screen.getByTestId("received-context-body").textContent).toBe(
-      "你是 CEO。",
+    expect(screen.getByTestId("received-context-body").textContent).toContain(
+      "我的规则。",
     );
   });
 
-  it("defaults to 常驻指令 when there is no 本回合工具 row", () => {
+  it("defaults to 原始请求 when 设定 was not injected", () => {
     render(
       <ReceivedContextDialog
         open
@@ -258,18 +273,20 @@ describe("ReceivedContextDialog reader", () => {
     );
 
     expect(screen.getByRole("dialog", { name: "收到的上下文" })).toBeTruthy();
-    const standingBtn = screen.getByRole("button", { name: /常驻指令/ });
-    expect(standingBtn.getAttribute("aria-current")).toBe("true");
-    expect(standingBtn.className).toContain("text-sm");
-    expect(standingBtn.querySelector("span.tabular-nums")?.className).toContain(
+    const requestBtn = screen.getByRole("button", { name: /原始请求/ });
+    expect(requestBtn.getAttribute("aria-current")).toBe("true");
+    expect(requestBtn.className).toContain("text-sm");
+    expect(requestBtn.querySelector("span.tabular-nums")?.className).toContain(
       "text-xs",
     );
     expect(screen.getByTestId("received-context-body").textContent).toBe(
-      "你是 CEO。",
+      "调研竞品定价并给建议。",
     );
+    fireEvent.click(screen.getByRole("button", { name: /设定/ }));
+    expect(screen.getByTestId("received-context-absent")).toBeTruthy();
   });
 
-  it("defaults to 本回合工具 and keeps it on a narrow layout", () => {
+  it("defaults to 原始请求 and hides system slices on a narrow layout", () => {
     isNarrow = true;
     render(
       <ReceivedContextDialog
@@ -285,11 +302,37 @@ describe("ReceivedContextDialog reader", () => {
         ]}
       />,
     );
-    expect(screen.queryByRole("button", { name: /常驻指令/ })).toBeNull();
-    const toolsBtn = screen.getByRole("button", { name: /本回合工具/ });
-    expect(toolsBtn.getAttribute("aria-current")).toBe("true");
-    expect(screen.getByTestId("received-context-body").textContent).toContain(
-      "`query`: string（必填）",
+    expect(screen.queryByRole("button", { name: /设定/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /出厂指令/ })).toBeNull();
+    const requestBtn = screen.getByRole("button", { name: /原始请求/ });
+    expect(requestBtn.getAttribute("aria-current")).toBe("true");
+    expect(screen.getByTestId("received-context-body").textContent).toBe(
+      "发下参数",
+    );
+  });
+
+  it("lists consult receipts under 后来查阅", () => {
+    render(
+      <ReceivedContextDialog
+        open
+        onOpenChange={() => undefined}
+        blocks={[block({ channel: "request", body: "发下参数" })]}
+        process={[
+          {
+            kind: "tool",
+            id: "c1",
+            tool_name: "consult",
+            arguments: { name: "写作风格" },
+            result: "按需规则全文。",
+            status: "success",
+            display: { name: "写作风格", origin: "user" },
+          },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /查阅 · 写作风格/ }));
+    expect(screen.getByTestId("received-context-body").textContent).toBe(
+      "按需规则全文。",
     );
   });
 

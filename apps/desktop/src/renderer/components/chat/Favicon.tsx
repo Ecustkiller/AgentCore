@@ -1,3 +1,4 @@
+import { cn } from "@/lib/utils";
 import { BASE_URL } from "@/services/api";
 import { useState } from "react";
 
@@ -14,27 +15,32 @@ export function faviconUrl(domain: string): string {
 }
 
 /**
- * A site favicon avatar with a graceful fallback. Loads the icon via the backend
- * proxy ({@link faviconUrl}); on load failure (or when the host is unparseable) it
- * falls back to a neutral letter chip. Used by source cards and inline `[n]`
- * chips so a reader recognizes a source at a glance.
+ * Site favicon avatar. Loads via the backend proxy ({@link faviconUrl}); on
+ * failure (or unparseable host) falls back to a letter.
+ *
+ * The box's `em` is the box itself (`font-size` = `size`), so a sentence-level
+ * `"1em"` matches the surrounding text. Do not put a smaller `text-*` class on
+ * this node — that would shrink `width: 1em` with the letter. Letter scale lives
+ * on an inner span. Inline alignment is Font Awesome's `vertical-align: -0.125em`
+ * (not `text-bottom`, which parks a 1em box on the descender).
  */
 export function Favicon({
   site,
   title,
   size = 16,
-  className = "",
+  className,
 }: {
   /** Display hostname (sans leading www.); empty when the URL had no host. */
   site?: string;
   /** Fallback letter source when there's no host. */
   title?: string;
-  size?: number;
+  /** CSS length. Numbers are px (chrome rows); `"1em"` for sentence-level marks. */
+  size?: number | string;
   /** Extra classes on the avatar wrapper (e.g. an overlap ring). */
   className?: string;
 }) {
   const domain = site?.trim();
-  // Track the domain whose favicon failed (not a bare bool) so a re-rendered chip
+  // Track the domain whose favicon failed (not a bare bool) so a re-rendered mark
   // pointing at a *different* source retries the image instead of staying blank.
   const [failedDomain, setFailedDomain] = useState<string | null>(null);
 
@@ -43,8 +49,11 @@ export function Favicon({
 
   return (
     <span
-      className={`inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-xs font-medium text-muted-foreground ${className}`}
-      style={{ width: size, height: size }}
+      className={cn(
+        "inline-block shrink-0 overflow-hidden rounded-full bg-muted align-[-0.125em] leading-none text-muted-foreground",
+        className,
+      )}
+      style={{ width: size, height: size, fontSize: size }}
       aria-hidden
     >
       {showImg ? (
@@ -53,10 +62,12 @@ export function Favicon({
           alt=""
           loading="lazy"
           onError={() => setFailedDomain(domain)}
-          className="size-full object-contain"
+          className="block size-full object-contain"
         />
       ) : (
-        letter
+        <span className="flex size-full items-center justify-center text-[0.65em] font-medium leading-none">
+          {letter}
+        </span>
       )}
     </span>
   );

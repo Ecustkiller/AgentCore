@@ -8,6 +8,7 @@ import {
   promptConnectorShelfCopy,
   promptItemShelfCopy,
   promptMineShelfOpts,
+  promptReadHeaderChips,
 } from "@/lib/promptShelfTile";
 import type { CapabilityTool } from "@/services/capabilities";
 import type { SkillStoreListing } from "@/services/skillStore";
@@ -143,7 +144,7 @@ describe("promptItemShelfCopy", () => {
     expect(identity.accessory).toEqual([{ label: "官方" }]);
   });
 
-  it("官方 HOW 不打官方徽标和决策时刻组，只标非全员观众", () => {
+  it("官方 HOW 打官方徽标，不打决策时刻组，只标非全员观众", () => {
     const copy = promptItemShelfCopy(
       skillItem({
         summary: "团队拆法",
@@ -156,7 +157,7 @@ describe("promptItemShelfCopy", () => {
       title: "团队拆法",
       description: "把任务拆成角色和并行，决定谁干什么",
       tags: ["CEO"],
-      accessory: [],
+      accessory: [{ label: "官方" }],
     });
     expect(
       promptItemShelfCopy(
@@ -247,10 +248,10 @@ describe("promptItemShelfCopy", () => {
     expect(copy.title).toBe("file_read");
     expect(copy.description).toBe("读工作区文件");
     expect(copy.tags).toEqual([]);
-    expect(copy.accessory).toEqual([{ label: "开场即用" }]);
+    expect(copy.accessory).toEqual([{ label: "官方" }]);
     expect(
       promptItemShelfCopy(toolItem({ resident: false })).accessory,
-    ).toEqual([{ label: "查阅后启用" }]);
+    ).toEqual([{ label: "官方" }]);
     expect(
       promptItemShelfCopy(
         toolItem({
@@ -260,6 +261,26 @@ describe("promptItemShelfCopy", () => {
         }),
       ).tags,
     ).toEqual(["需审批", "CEO"]);
+  });
+
+  it("读卡标题旁为出厂工具补开场轴", () => {
+    const resident = toolItem({ resident: true });
+    expect(
+      promptReadHeaderChips(promptItemShelfCopy(resident), resident),
+    ).toEqual([{ label: "官方" }, { label: "开场即用" }]);
+    const deferred = toolItem({
+      resident: false,
+      approval: "grantable",
+      availableTo: ["ceo"],
+    });
+    expect(
+      promptReadHeaderChips(promptItemShelfCopy(deferred), deferred),
+    ).toEqual([
+      { label: "官方" },
+      { label: "查阅后启用" },
+      { label: "需审批" },
+      { label: "CEO" },
+    ]);
   });
 
   it("常驻满千字才标副标题", () => {
