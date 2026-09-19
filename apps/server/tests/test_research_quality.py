@@ -13,12 +13,10 @@ from agentcore.runtime.delegate.playbook_declaration import resolve_playbook_dec
 from agentcore.runtime.loop_controller import LoopController
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.research_quality import (
-    MIN_UPSTREAM_BODY_CHARS,
     academic_usable_citation_count,
     brief_may_satisfy_body_floor,
     collect_evidence_deficit_gaps,
     deliverable_is_report_delivery,
-    deliverable_signals_long_form,
     has_landed_prose_artifact,
     is_academic_usable_url,
     literature_evidence_deficit_hit,
@@ -43,10 +41,7 @@ def test_deliverable_is_report_delivery_structured_or():
     from agentcore.workspace.stage_dirs import DEBATE_DIR, RESEARCH_DIR, REVIEWS_DIR
 
     assert deliverable_is_report_delivery(
-        Deliverable(citation_mode="two_phase",  artifacts=["a.md"])
-    )
-    assert deliverable_is_report_delivery(
-        Deliverable( artifacts=[f"{REVIEWS_DIR}/审校.md"])
+        Deliverable(artifacts=[f"{REVIEWS_DIR}/审校.md"])
     )
     assert deliverable_is_report_delivery(
         Deliverable( artifacts=[f"{RESEARCH_DIR}/报告.md"])
@@ -74,18 +69,13 @@ def _ctx(tmp_path: Path, **kwargs) -> ToolContext:
         **kwargs)
 
 
-def test_long_form_audit_retired_length_leg():
-    """成篇硬审计不扫自由文；已删 min_length 腿恒 False。"""
-    assert not deliverable_signals_long_form({"min_length": 500})
-    assert not deliverable_signals_long_form({"min_length": 3000})
-    assert not deliverable_signals_long_form({"min_length": 5000, "name": "报告"})
-    # Free-text task/role alone must not trip the audit signal.
+def test_long_form_audit_does_not_scan_task_free_text():
+    """成篇硬审计不扫自由文。"""
     assert not plan_signals_long_form_audit(
         [
             {
                 "role": "撰稿",
                 "task": "写一篇起诉第三者立案实务研究报告，约 5000–8000 字",
-                "deliverable": {"min_length": 200},
             }
         ]
     )
@@ -94,18 +84,9 @@ def test_long_form_audit_retired_length_leg():
             {
                 "role": "撰稿",
                 "task": "随便写点",
-                "deliverable": {"min_length": 4000},
             }
         ]
     )
-
-
-def test_prose_research_intent_no_longer_a_predicate():
-    """Former is_research_report_intent / word-count RE predicates removed."""
-    from agentcore.runtime.runs import research_quality as rq
-
-    assert not hasattr(rq, "is_research_report_intent")
-    assert not hasattr(rq, "has_word_count_commitment")
 
 
 def test_paper_parallel_merge_discipline_constant():
@@ -160,7 +141,7 @@ def test_annotate_batch_meta_audit_flags():
 
 
 def test_parallel_brief_does_not_signal_long_form_audit():
-    """A 档摸底批：硬门只认 cite_write_review；min_length 腿已撤。"""
+    """A 档摸底批：硬门只认 cite_write_review。"""
     from agentcore.runtime.runs.playbooks import expand_playbook
     from agentcore.runtime.runs.research_quality import plan_signals_long_form_audit
 
@@ -169,16 +150,6 @@ def test_parallel_brief_does_not_signal_long_form_audit():
         {"topic": "开源选型", "angles": ["兼容", "闭源风险", "生态"]})
     assert errors == []
     assert plan_signals_long_form_audit(tasks) is False
-    # 对照：即使显式成篇 min_length 也不再进结构硬门信号
-    tasks_long = [
-        {
-            "id": "w",
-            "role": "撰稿人",
-            "task": "写报告",
-            "deliverable": {"form": "files", "min_length": 4000},
-        }
-    ]
-    assert plan_signals_long_form_audit(tasks_long) is False
 
 
 def test_audit_hard_block_after_soft_nudge():
@@ -209,13 +180,13 @@ def test_upstream_body_floor_predicate():
     assert not upstream_body_floor_satisfied(
         body_chars=0, landed_artifact_kinds={}, min_body_chars=0
     )
-    # Explicit contract floor.
+    # Optional internal floor (not a live CEO knob).
     assert upstream_body_floor_satisfied(
-        body_chars=MIN_UPSTREAM_BODY_CHARS,
+        body_chars=80,
         landed_artifact_kinds={},
-        min_body_chars=MIN_UPSTREAM_BODY_CHARS)
+        min_body_chars=80)
     assert not upstream_body_floor_satisfied(
-        body_chars=10, landed_artifact_kinds={}, min_body_chars=MIN_UPSTREAM_BODY_CHARS
+        body_chars=10, landed_artifact_kinds={}, min_body_chars=80
     )
     assert not upstream_body_floor_satisfied(
         body_chars=0, landed_artifact_kinds={"a.md": "skeleton"}, min_body_chars=80
@@ -253,7 +224,6 @@ async def test_handoff_execute_ignores_arguments_and_does_not_promote(tmp_path: 
     ctx = _ctx(
         tmp_path,
         handoff_requires_body=True,
-        handoff_min_body_chars=0,
         handoff_expects_landing=False,
         round_content_chars=0)
     result = await HandoffTool().execute(
@@ -268,11 +238,9 @@ async def test_handoff_execute_ignores_arguments_and_does_not_promote(tmp_path: 
 async def test_handoff_allows_brief_for_prose_with_dependents(tmp_path: Path):
     """有下游 prose：body=0 + 仅 summary → 仍交接（空交不再硬拒；prose 不升格 summary）。"""
     summary = "诊断结论：" + ("根因分析充分。" * 20)
-    assert len(summary) >= MIN_UPSTREAM_BODY_CHARS
     ctx = _ctx(
         tmp_path,
         handoff_requires_body=True,
-        handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS,
         handoff_expects_landing=False,
         round_content_chars=0)
     result = await HandoffTool().execute({"summary": summary}, ctx)
@@ -286,7 +254,6 @@ async def test_handoff_promotes_short_brief_when_below_floor(tmp_path: Path):
     ctx = _ctx(
         tmp_path,
         handoff_requires_body=True,
-        handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS,
         handoff_expects_landing=False,
         round_content_chars=0)
     result = await HandoffTool().execute({"summary": "太短"}, ctx)
@@ -298,11 +265,9 @@ async def test_handoff_promotes_short_brief_when_below_floor(tmp_path: Path):
 async def test_handoff_promotes_brief_when_meets_floor_non_prose(tmp_path: Path):
     """非 prose + 有下游：地板>0 但升格正文够长 → 仍可升格。"""
     summary = "调研结论：" + ("要点充分。" * 20)
-    assert len(summary) >= MIN_UPSTREAM_BODY_CHARS
     ctx = _ctx(
         tmp_path,
         handoff_requires_body=True,
-        handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS,
         handoff_expects_landing=True,
         round_content_chars=0)
     result = await HandoffTool().execute({"summary": summary}, ctx)
@@ -316,9 +281,8 @@ async def test_handoff_prose_allows_when_real_body_meets_floor(tmp_path: Path):
     ctx = _ctx(
         tmp_path,
         handoff_requires_body=True,
-        handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS,
         handoff_expects_landing=False,
-        round_content_chars=MIN_UPSTREAM_BODY_CHARS + 5)
+        round_content_chars=85)
     result = await HandoffTool().execute({"summary": "诊断已写入正文"}, ctx)
     assert result.success is True
     assert (result.final_text or "") == ""
@@ -329,7 +293,6 @@ async def test_handoff_allows_empty_body_when_required(tmp_path: Path):
     ctx = _ctx(
         tmp_path,
         handoff_requires_body=True,
-        handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS,
         round_content_chars=10)
     result = await HandoffTool().execute({"summary": "结论够长" * 10}, ctx)
     assert result.success is True
@@ -341,7 +304,6 @@ async def test_handoff_allows_empty_summary_when_body_zero(tmp_path: Path):
     ctx = _ctx(
         tmp_path,
         handoff_requires_body=True,
-        handoff_min_body_chars=0,
         round_content_chars=0)
     result = await HandoffTool().execute({"summary": "   "}, ctx)
     assert result.success is True
@@ -353,7 +315,6 @@ async def test_handoff_real_body_keeps_empty_final_text(tmp_path: Path):
     ctx = _ctx(
         tmp_path,
         handoff_requires_body=True,
-        handoff_min_body_chars=0,
         round_content_chars=19)
     result = await HandoffTool().execute({"summary": "Greeter 问好"}, ctx)
     assert result.success is True
@@ -370,11 +331,10 @@ def test_handoff_schema_has_no_brief_fields():
 
 @pytest.mark.asyncio
 async def test_handoff_allows_short_body_when_no_contract_floor(tmp_path: Path):
-    """无 min_length 时：有下游也不挡「一句话」级短正文。"""
+    """有下游也不挡「一句话」级短正文。"""
     ctx = _ctx(
         tmp_path,
         handoff_requires_body=True,
-        handoff_min_body_chars=0,
         round_content_chars=19)
     result = await HandoffTool().execute({"summary": "Greeter 问好"}, ctx)
     assert result.success is True
@@ -386,7 +346,6 @@ async def test_handoff_allows_empty_body_when_prose_landed(tmp_path: Path):
     ctx = _ctx(
         tmp_path,
         handoff_requires_body=True,
-        handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS,
         handoff_expects_landing=False,
         round_content_chars=0,
         landed_artifact_kinds={"notes.md": "prose"})
@@ -399,7 +358,6 @@ async def test_handoff_allows_empty_body_when_only_skeleton_landed(tmp_path: Pat
     ctx = _ctx(
         tmp_path,
         handoff_requires_body=True,
-        handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS,
         round_content_chars=0,
         landed_artifact_kinds={"outline.md": "skeleton"},
         has_landed_files=True,
@@ -415,7 +373,7 @@ async def test_handoff_prose_landed_survives_replace_empty_body(tmp_path: Path):
     base = _ctx(
         tmp_path,
         handoff_requires_body=True,
-        handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS)
+)
     # tool_round stamps round_content_chars; tool_exec replace()s again per call.
     write_round = replace(base, round_content_chars=12)
     write_ctx = replace(write_round)
@@ -438,7 +396,7 @@ async def test_handoff_skeleton_write_after_replace_still_handoffs(tmp_path: Pat
     base = _ctx(
         tmp_path,
         handoff_requires_body=True,
-        handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS)
+)
     write_ctx = replace(replace(base, round_content_chars=0))
     written = await FileWriteTool().execute(
         {"path": "outline.md", "content": _SKELETON_BODY}, write_ctx
@@ -455,8 +413,7 @@ async def test_handoff_allows_sufficient_body(tmp_path: Path):
     ctx = _ctx(
         tmp_path,
         handoff_requires_body=True,
-        handoff_min_body_chars=MIN_UPSTREAM_BODY_CHARS,
-        round_content_chars=MIN_UPSTREAM_BODY_CHARS + 5)
+        round_content_chars=85)
     result = await HandoffTool().execute({"summary": "调研要点已齐"}, ctx)
     assert result.success is True
 
@@ -553,7 +510,7 @@ def test_plan_is_literature_report_delivery_binds_research_report_not_brief():
     assert not b_errs
     assert plan_is_literature_report_delivery(brief) is False
 
-    # 同等成文：已声明 reviews/ files 审校座 + two_phase 约定文档
+    # 同等成文：已声明 reviews/ files 审校座
     assert plan_is_literature_report_delivery(
         [
             {
@@ -561,7 +518,6 @@ def test_plan_is_literature_report_delivery_binds_research_report_not_brief():
                 "deliverable": {
                     "form": "files",
                     "artifacts": ["AgentCore/文档/research/报告.md"],
-                    "citation_mode": "two_phase",
                 },
             },
             {
@@ -581,15 +537,10 @@ def test_plan_is_literature_report_delivery_binds_research_report_not_brief():
                 "deliverable": {
                     "form": "files",
                     "artifacts": ["AgentCore/文档/research/报告.md"],
-                    "citation_mode": "two_phase",
                 },
             },
             {"role": "学术审校员", "deliverable": {"name": "审校"}},
         ]
-    ) is False
-    # 仅 long-form 结构信号（已撤）→ 不进文献降档
-    assert plan_is_literature_report_delivery(
-        [{"role": "撰稿", "deliverable": {"min_length": 4000}}]
     ) is False
 
 
@@ -615,8 +566,8 @@ def test_collect_evidence_deficit_gaps_combinable_triggers():
             role="撰稿人",
             task="写",
             deliverable=Deliverable(
-                artifacts=[f"{RESEARCH_PREFIX}报告.md"],
-                citation_mode="two_phase")),
+                artifacts=[f"{RESEARCH_PREFIX}报告.md"]),
+        ),
         RunSpec(
             run_id="review",
             role="学术审校员",
@@ -734,8 +685,8 @@ def test_transcript_web_search_evidence_gap_triggers_deficit():
             role="撰稿人",
             task="写",
             deliverable=Deliverable(
-                artifacts=[f"{RESEARCH_PREFIX}报告.md"],
-                citation_mode="two_phase")),
+                artifacts=[f"{RESEARCH_PREFIX}报告.md"]),
+        ),
         RunSpec(
             run_id="review",
             role="学术审校员",
@@ -816,7 +767,7 @@ def test_named_review_without_files_not_elevated_playbook_review_lands():
                 "role": "验证员",
                 "task": "跑测试",
                 "depends_on": ["fix"],
-                "deliverable": {"form": "prose", "min_length": 40},
+                "deliverable": {"form": "prose"},
             },
         ],
         id_prefix="thin_review")
@@ -841,9 +792,6 @@ def test_named_review_without_files_not_elevated_playbook_review_lands():
     pb_review = next(t for t in tasks if t["id"] == "review")
     d = pb_review["deliverable"]
     assert "form" not in d
-    assert "requires_files" not in d
-    assert "min_length" not in d
-    assert "name" not in d
     assert d["artifacts"] == [f"{REVIEWS_DIR}/审校报告.md"]
     assert INDEPENDENT_REVIEW_REPORT_DISCIPLINE in pb_review["task"]
     assert batch_declares_review_files(tasks) is True

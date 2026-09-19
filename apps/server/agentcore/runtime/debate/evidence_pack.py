@@ -1,8 +1,8 @@
 """共享证据包（Evidence Pack）——开赛「共享事实库 → 对抗论证」的数据契约。
 
 行业实践：附件/底料先组装为双方共享的证据包，再开辩；禁止对同一附件各自深挖 ReAct。
-本模块只负责契约 + 从主持人上下文机械组装 + 完整度驱动的外证跳过计划（调查员舰队已删；
-发言期有界预算见 ``debater_budgets_from_completeness``）；LLM 精炼条款锚/争议点留给后续步。
+本模块负责契约、从主持人上下文机械组装、完整度驱动的检索预算，以及开赛材料汇流
+（``apply_opening_materials``）。不另开准备阶段、不发阶段事件。
 """
 
 from __future__ import annotations
@@ -12,8 +12,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from agentcore.core.logging import get_logger
+
 if TYPE_CHECKING:
-    from agentcore.runtime.debate.types import DebateSide
+    from agentcore.runtime.debate.types import DebateConfig, DebateSide
+
+logger = get_logger(__name__)
 
 EvidenceSourceKind = Literal[
     "attachment",
@@ -23,7 +27,7 @@ EvidenceSourceKind = Literal[
     "workspace",
 ]
 PackCompleteness = Literal["full", "partial", "empty"]
-# 调查员舰队已删：外证计划恒为 skip（观测字段仍保留 mode/reason）。
+# 开赛不另派外证：计划恒为 skip（观测字段仍保留 mode/reason）。
 ExternalEvidenceMode = Literal["skip"]
 ExternalEvidencePath = Literal[
     "evidence_pack",
@@ -471,3 +475,123 @@ def merge_pack_into_dossier_index(existing: str, pack: EvidencePack) -> str:
     if not prev:
         return pack_block
     return f"{prev}\n\n{pack_block}"
+
+
+@dataclass(frozen=True)
+class OpeningMaterialsResult:
+    path: ExternalEvidencePath
+    completeness: PackCompleteness
+    evidence_ready: bool
+
+
+def _append_incomplete_notice(
+    config: Any,
+    *,
+    completeness: PackCompleteness,
+    path: str,
+) -> None:
+    if completeness == "full":
+        return
+    notice = format_evidence_completeness_notice(
+        completeness=completeness,
+        path=path,
+    )
+    if not notice:
+        return
+    prev = (config.research_dossier_index or "").strip()
+    config.research_dossier_index = f"{prev}\n\n{notice}".strip() if prev else notice
+    logger.info(
+        "debate.opening_materials.incomplete",
+        completeness=completeness,
+        path=path,
+    )
+
+
+def _apply_external_plan(
+    config: Any,
+    *,
+    completeness: PackCompleteness,
+    path: ExternalEvidencePath,
+) -> None:
+    plan = resolve_external_evidence_plan(completeness=completeness, path=path)
+    logger.info(
+        "debate.opening_materials.external_plan",
+        path=path,
+        mode=plan.mode,
+        reason=plan.reason,
+        retrieval_budget=plan.retrieval_budget,
+        sides=list(plan.sides),
+        allow_web_fetch=plan.allow_web_fetch,
+        max_tasks_per_side=plan.max_tasks_per_side,
+        allow_external=plan.allow_external,
+    )
+    if not plan.allow_external:
+        logger.info(
+            "debate.opening_materials.external_skipped",
+            path=path,
+            reason=plan.reason,
+            completeness_driven=True,
+        )
+    config.external_evidence_mode = plan.mode
+    config.external_evidence_reason = plan.reason
+    config.evidence_completeness = completeness
+    config.debater_retrieval_budgets = debater_budgets_from_completeness(
+        side_keys=[s.key for s in config.sides],
+        completeness=completeness,
+    )
+    _append_incomplete_notice(config, completeness=completeness, path=path)
+
+
+def apply_opening_materials(
+    *,
+    system_prompt: str,
+    config: DebateConfig,
+    ledger: Any,
+) -> OpeningMaterialsResult:
+    """开赛材料汇流：有可用正文则组共享证据包并写入来源账；否则发言期再查。
+
+    完整度只作内部检索预算（full → 立论外搜 0），不发准备阶段事件。
+    """
+    pack = assemble_evidence_pack_from_host(
+        system_prompt=system_prompt or "",
+        motion=config.motion,
+        sides=config.sides,
+        background=config.background,
+    )
+    if pack is not None and pack.has_usable_body():
+        register_evidence_pack_on_ledger(ledger, pack)
+        config.evidence_pack = pack
+        config.research_dossier_index = merge_pack_into_dossier_index(
+            config.research_dossier_index, pack
+        )
+        _apply_external_plan(
+            config,
+            completeness=pack.completeness,
+            path="evidence_pack",
+        )
+        logger.info(
+            "debate.opening_materials.pack_assembled",
+            sources=len(pack.sources),
+            usable=sum(
+                1
+                for s in pack.sources
+                if (s.excerpt or "").strip()
+                and s.failure not in ("binary_no_text", "empty_body")
+            ),
+            completeness=pack.completeness,
+            incomplete=pack.completeness != "full",
+            external_mode=config.external_evidence_mode,
+            external_reason=config.external_evidence_reason,
+        )
+        return OpeningMaterialsResult(
+            path="evidence_pack",
+            completeness=pack.completeness,
+            evidence_ready=True,
+        )
+
+    _apply_external_plan(config, completeness="empty", path="no_pack")
+    return OpeningMaterialsResult(
+        path="no_pack",
+        completeness="empty",
+        evidence_ready=False,
+    )

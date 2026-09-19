@@ -81,7 +81,7 @@ class DebateTool:
     executor、后续轮 continue_run）与主持人自身 LLM 调用都折算进去，由 pipeline 折回回合总账。
     ``_debater_sessions`` 按 side.key 留住每个辩手的可续写 session，支撑跨轮带记忆。
 
-    顶层开辩不再挂开工卡；遗留开工帧 resume 为 410。
+    顶层开辩直接开跑；遗留编制确认帧 resume 为 410。
     嵌套 / 续跑 / full_auto 跳过语义对齐 delegate。
     """
 
@@ -165,12 +165,6 @@ class DebateTool:
         # 主持人节点终帧只发一次（``settle_moderator_node`` 的幂等闸）。
         self._moderator_settled: bool = False
 
-    def _kickoff_system_prompt(self) -> str:
-        return self._system_prompt
-
-    def _kickoff_tool_name(self) -> str:
-        return "debate"
-
     @property
     def usage(self) -> dict[str, int]:
         """本回合辩论累计 token 用量（辩手 + 主持人；pipeline 折回回合总账）。"""
@@ -200,8 +194,6 @@ class DebateTool:
         self,
         arguments: dict[str, Any],
         context: ToolContext,
-        *,
-        skip_kickoff: bool = False,
     ) -> ToolResult:
         from agentcore.llm.turn_auth_dead import (
             credential_source_from_llm,
@@ -248,8 +240,8 @@ class DebateTool:
                 policy = RoundPolicy(max_rounds=max_rounds_arg)
         except (KeyError, TypeError, ValueError):
             pass
-        # `_kickoff_ask` 为 resume 注入的内部键（非 schema / 非 wire），开赛嘱咐进首轮插话管道。
-        kickoff_ask = str(arguments.get("_kickoff_ask") or "").strip()
+        # `_opening_ask` 为内部键（非 schema / 非 wire），开赛嘱咐进首轮插话管道。
+        opening_ask = str(arguments.get("_opening_ask") or "").strip()
         mod_model, mod_origin, mod_provider_id, mod_err = parse_moderator_fields(
             arguments.get("moderator_model"),
             arguments.get("moderator_origin"),
@@ -263,7 +255,7 @@ class DebateTool:
             sides=sides,
             policy=policy,
             background=parse_background(arguments.get("background")),
-            kickoff_ask=kickoff_ask,
+            opening_ask=opening_ask,
             moderator_model=mod_model,
             moderator_origin=mod_origin,
             moderator_provider_id=mod_provider_id,
@@ -337,48 +329,25 @@ class DebateTool:
             user_id=user_id or None,
         )
 
-        # 开赛前预分配稳定 run_id（开工卡 wire + model_overrides 键）；resume 复用。
+        # 开赛前预分配稳定 run_id（model_overrides 键）；resume 复用。
         from agentcore.runtime.debate.models import allocate_debate_run_ids
 
         allocate_debate_run_ids(config, arguments)
 
-        if not skip_kickoff:
-            early = await self._kickoff_before_moderator(config, arguments)
-            if early is not None:
-                return early
-        elif self._debate_authorized_by is None:
-            # skip_kickoff 未显式授权：新路径缺省 = auto。
+        if self._depth == 0:
+            from agentcore.runtime.deep_research_auto import (
+                record_auto_debate,
+                tool_may_auto_debate,
+            )
+
+            if tool_may_auto_debate(self):
+                await record_auto_debate(self)
             self._debate_authorized_by = "auto"
 
         result = await self._run_moderator(config, usage_metadata)
         if not result.success:
             return result
         return result
-
-    async def _kickoff_before_moderator(
-        self,
-        config: DebateConfig,
-        arguments: dict[str, Any],
-    ) -> ToolResult | None:
-        """No new team_preview card before ``debate.started``. Nested still no-op.
-
-        ``skip_kickoff`` callers (stage_card / resume CONTINUE) never enter here.
-        ``deep_research_auto`` still records when the flag allows — it no longer
-        means "skip a card that would have hung".
-        """
-        _ = (config, arguments)
-        if self._depth != 0:
-            return None
-        from agentcore.runtime.deep_research_auto import (
-            record_auto_debate,
-            tool_may_auto_debate,
-        )
-
-        auto_adopt = tool_may_auto_debate(self)
-        if auto_adopt:
-            await record_auto_debate(self)
-        self._debate_authorized_by = "auto"
-        return None
 
     async def _resolve_host_attach(self, config: DebateConfig):
         """开辩独立成图，不链调研宿主。"""
@@ -435,7 +404,7 @@ class DebateTool:
                 logger.exception("debate.research_dossier_probe_failed")
                 config.research_dossier_index = ""
 
-        from agentcore.runtime.kickoff.debate_host import host_graph_binding
+        from agentcore.runtime.debate.host import host_graph_binding
 
         host_attach = await self._resolve_host_attach(config)
         if host_attach is not None:
@@ -494,7 +463,7 @@ class DebateTool:
                 parent_run_id=graph_parent,
                 sink=self._sink,
             )
-            # 掌舵窗口开在主持人开跑处（庭前取证期入的队也能被首轮边界捞到）；无活跃用户
+            # 掌舵窗口开在主持人开跑处（开赛后入的队也能被首轮边界捞到）；无活跃用户
             # 时不开——没挂 on_round_boundary，谁都捞不走，收下就是骗人。
             if self._ambient_armed:
                 open_steer_window(execution_id)
@@ -508,32 +477,12 @@ class DebateTool:
 
             cx_enabled = cross_exam_enabled(config)
 
-            # 庭前取证（§二之二）：首轮立论前；fast 档秒过。
-            from agentcore.runtime.debate.pretrial import run_pretrial_phase
-            from agentcore.runtime.events import (
-                debate_pretrial_completed,
-                debate_pretrial_orders,
-                debate_pretrial_started,
-            )
+            from agentcore.runtime.debate.evidence_pack import apply_opening_materials
 
-            async def _pt_started(p: dict) -> None:
-                self._sink.emit(debate_pretrial_started(**p))
-
-            async def _pt_orders(p: dict) -> None:
-                self._sink.emit(debate_pretrial_orders(**p))
-
-            async def _pt_completed(p: dict) -> None:
-                self._sink.emit(debate_pretrial_completed(**p))
-
-            await run_pretrial_phase(
-                self,
-                execution_id=execution_id,
-                moderator_run_id=moderator_run_id,
+            apply_opening_materials(
+                system_prompt=getattr(self, "_system_prompt", "") or "",
                 config=config,
-                complete_json=moderator._complete_json,
-                on_started=_pt_started,
-                on_orders=_pt_orders,
-                on_completed=_pt_completed,
+                ledger=self._evidence_ledger,
             )
 
             async def _emit_round_start(round_no: int, focus: str, opening: str) -> None:

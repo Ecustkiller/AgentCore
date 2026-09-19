@@ -45,7 +45,7 @@ def test_ask_user_schema_does_not_expose_blocking():
         timeout_seconds=30.0,
     )
     props = tool.schema.parameters["properties"]
-    assert set(props) == {"questions", "browser_login"}
+    assert set(props) == {"questions"}
     assert props["questions"]["minItems"] == 1
     assert tool.schema.parameters["required"] == ["questions"]
 

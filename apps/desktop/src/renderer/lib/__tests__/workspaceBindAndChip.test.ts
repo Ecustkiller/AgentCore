@@ -342,4 +342,22 @@ describe("resolveEffectiveWorkspace (chip status source)", () => {
     expect(formatWorkspaceChipLabel(ws)).toBe("Acme");
     expect(formatWorkspaceChipTitle(ws)).toBe("云端对话");
   });
+
+  it("stale authorized root → relocate title", () => {
+    const staleRoots: FsRoot[] = [
+      { id: "root-bound", name: "MyRepo", missing: true },
+    ];
+    const ws = resolveEffectiveWorkspace({
+      binding: projectLocal,
+      localContainerRootId: null,
+      roots: staleRoots,
+      folderName: "Acme",
+    });
+    expect(ws.isLocal).toBe(true);
+    expect(ws.rootMissing).toBe(false);
+    expect(ws.rootStale).toBe(true);
+    expect(formatWorkspaceChipTitle(ws)).toBe(
+      "文件夹找不到。请重新选择它所在的位置。",
+    );
+  });
 });

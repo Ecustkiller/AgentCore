@@ -49,7 +49,6 @@ const MULTI_SUBS: { id: string; label: string }[] = [
   { id: "delegate", label: "派单 / 子计划" },
   { id: "worker", label: "队员产物" },
   { id: "revise", label: "改稿 / 重规划" },
-  { id: "context", label: "上下文" },
   { id: "other", label: "其他" },
 ];
 
@@ -59,12 +58,9 @@ function multiSubOf(name: string): string {
   if (s.startsWith("blocking_escalate") || s.startsWith("escalation"))
     return "escalate";
   if (s.startsWith("legal")) return "legal";
-  if (s.startsWith("delegate") || s.startsWith("lead_subplan"))
-    return "delegate";
+  if (s.startsWith("delegate")) return "delegate";
   if (s.startsWith("worker")) return "worker";
   if (s.startsWith("plan_revised") || s.startsWith("revision")) return "revise";
-  if (s.startsWith("captain_context") || s.startsWith("received_context"))
-    return "context";
   return "other";
 }
 

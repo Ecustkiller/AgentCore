@@ -44,7 +44,6 @@ from agentcore.runtime.delegate.target_desktop_binding import (
     TargetFolderBinding,
     build_target_backend,
     load_target_folder_binding,
-    lookup_folder_display_names,
 )
 from agentcore.runtime.delegate.target_desktop_binding import (
     backend_local_root_id as _backend_local_root_id,
@@ -93,7 +92,6 @@ __all__ = [
     "gate_bare_chat_requires_target",
     "gate_conversation_id_is_not_folder",
     "load_target_folder_binding",
-    "lookup_folder_display_names",
     "rebuild_worker_prompt_for_target",
     "resolve_bare_chat_write_scope",
     "task_structurally_requires_write_desk",

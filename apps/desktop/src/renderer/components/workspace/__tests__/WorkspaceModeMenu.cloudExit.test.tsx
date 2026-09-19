@@ -72,6 +72,7 @@ function cloudState(
     viaContainer: false,
     folderName: "云项目",
     viaFolder: true,
+    rootStale: false,
   };
   return {
     binding: {

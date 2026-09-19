@@ -9,7 +9,6 @@ from agentcore.runtime.events import (
     message_end,
     message_start,
     run_completed,
-    run_failed,
     run_output_delta,
     run_output_reset,
     run_plan,
@@ -105,89 +104,6 @@ def _multi_agent_delegate() -> list[SSEEvent]:
         tool_use_end("dc1", "delegate", success=True, output="团队完成 2 项任务。"),
         content_delta(" 团队已完成。"),
         message_end(FinishReason.END_TURN, input_tokens=4000, output_tokens=800, cost=_COST),
-    ]
-
-def _multi_agent_worker_failed_debrief() -> list[SSEEvent]:
-    """多 Agent：worker 未过契约（run_failed）但仍调 handoff 提交了交接简报——失败节点也 surface 交接简报。
-    验 run_failed 携 debrief 折到 run.debrief（run 详情在错误旁展示作者结论 + 建议下一步），
-    而不是让失败运行只剩一条错误。progress = 0/1（失败终态不计入 completed）。"""
-    agents = [
-        {
-            "id": "w1",
-            "role": "研究员",
-            "thinking": True,
-        },
-    ]
-    plan_runs = [
-        {"id": "r1", "agent_id": "w1", "task": "调研", "depends_on": []},
-    ]
-    return [
-        message_start("m1", conversation_id=_CONV),
-        content_delta("我来安排调研。"),
-        tool_use_start("dc1", "delegate", {"tasks": [{"role": "研究员"}]}),
-        run_plan(
-            execution_id="exec1",
-            plan_type="multi_agent",
-            task_summary="调研 X",
-            agents=agents,
-            runs=plan_runs,
-        ),
-        run_started("r1", "w1"),
-        run_output_delta("r1", "w1", "初步调研，但缺少必需的引用来源"),
-        # 契约未过但产出 + handoff 交接简报仍在：run_failed 携 debrief，run 详情在错误旁展示作者结论。
-        run_failed(
-            "r1",
-            "w1",
-            "未通过契约：缺少必需的引用来源",
-            failure_kind="quality",
-            debrief={
-                "summary": "完成初步调研，但未满足引用契约",
-                "key_points": ["覆盖了三个主流方案", "引用来源缺失，结论待核实"],
-                "assumptions": "暂按公开资料整理",
-                "next_steps": "补齐权威引用后再定稿",
-            },
-        ),
-        tool_use_end("dc1", "delegate", success=True, output="团队完成（含 1 项未达标）。"),
-        content_delta(" 调研初步完成，但引用需补齐。"),
-        message_end(FinishReason.END_TURN, input_tokens=2000, output_tokens=400, cost=_COST),
-    ]
-
-
-def _multi_agent_worker_failed_format() -> list[SSEEvent]:
-    """多 Agent：worker 结构/格式闸失败 → run_failed.failure_kind=format（协作图「格式未过」）。
-    与 quality「未达标」分脸；棘轮 fold 投影 ``run.failureKind=format``。"""
-    agents = [
-        {
-            "id": "w1",
-            "role": "工程师",
-            "thinking": True,
-        },
-    ]
-    plan_runs = [
-        {"id": "r1", "agent_id": "w1", "task": "写审计报告", "depends_on": []},
-    ]
-    return [
-        message_start("m1", conversation_id=_CONV),
-        content_delta("我来安排审计报告。"),
-        tool_use_start("dc1", "delegate", {"tasks": [{"role": "工程师"}]}),
-        run_plan(
-            execution_id="exec1",
-            plan_type="multi_agent",
-            task_summary="写审计报告",
-            agents=agents,
-            runs=plan_runs,
-        ),
-        run_started("r1", "w1"),
-        run_output_delta("r1", "w1", '{"findings":[{"severity":"INVALID"}]}'),
-        run_failed(
-            "r1",
-            "w1",
-            "结构闸：findings[0] severity 无效",
-            failure_kind="format",
-        ),
-        tool_use_end("dc1", "delegate", success=True, output="团队完成（含 1 项格式未过）。"),
-        content_delta(" 结构字段需按 schema 补齐。"),
-        message_end(FinishReason.END_TURN, input_tokens=2000, output_tokens=400, cost=_COST),
     ]
 
 

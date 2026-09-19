@@ -18,11 +18,7 @@ import {
   resolveMergeLandingScope,
   setMergeLanding,
 } from "@/lib/mergeLandingPreference";
-import {
-  notifyActionError,
-  notifyInfo,
-  notifySuccess,
-} from "@/lib/toast";
+import { notifyActionError, notifyInfo, notifySuccess } from "@/lib/toast";
 import { prepareMergeLandingDiff } from "@/services/mergeLandingDiff";
 import {
   exportWorkspaceToLocal,

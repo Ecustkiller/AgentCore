@@ -537,7 +537,7 @@ async def _build_ceo_context(
     _seed_probe_workspace(root)
     backend = ServerWorkspace(root=root, sandbox=SubprocessSandbox())
     # 与 prepare 同形：显式 workspace_context（能力行可覆盖，供 BIND / 有执行分叉）
-    workspace_facts = build_workspace_context(
+    _workspace_facts = build_workspace_context(
         backend,
         desktop_online=True,
         run_enabled=code_execute,

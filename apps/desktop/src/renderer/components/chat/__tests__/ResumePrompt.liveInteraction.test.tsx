@@ -11,7 +11,7 @@ import type { SSEEvent } from "@/types/events";
 /**
  * Live cold card authority = InteractionStore.
  * leftover `team_preview_*` / `plan_review_*` via SSE is consume-and-skip (no IX / no stamp);
- * leftover IX upserted directly still does not paint a clickable kickoff shell.
+ * leftover IX upserted directly still does not paint a clickable leftover card.
  */
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -153,7 +153,7 @@ beforeEach(() => {
 });
 
 describe("ResumePrompt · live InteractionStore authority", () => {
-  it("team_preview_required with stamp does not paint a clickable kickoff shell", () => {
+  it("team_preview_required with stamp does not paint a clickable leftover card", () => {
     expect(usePausedTurnStore.getState().pending).toHaveLength(0);
 
     handleInteractionEvent(leftoverPreviewRequired("tp-live"), {
@@ -164,7 +164,6 @@ describe("ResumePrompt · live InteractionStore authority", () => {
     const { container } = renderResume();
 
     expect(container.querySelector(".mx-4")).toBeNull();
-    expect(screen.queryByText("此回合还停在开工确认")).toBeNull();
     expect(screen.queryByRole("button", { name: "继续" })).toBeNull();
     expect(screen.queryByRole("button", { name: "取消" })).toBeNull();
     expect(usePausedTurnStore.getState().pending).toHaveLength(0);
@@ -236,7 +235,6 @@ describe("ResumePrompt · live InteractionStore authority", () => {
     });
 
     expect(screen.queryByText("继续")).toBeNull();
-    expect(screen.queryByText("此回合还停在开工确认")).toBeNull();
     expect(useInteractionStore.getState().get("tp-late-stamp")).toBeUndefined();
   });
 
@@ -321,7 +319,6 @@ describe("ResumePrompt · live InteractionStore authority", () => {
 
     renderResume();
     expect(screen.queryByText("继续")).toBeNull();
-    expect(screen.queryByText("此回合还停在开工确认")).toBeNull();
     expect(useInteractionStore.getState().get("tp-round2")).toBeUndefined();
   });
 
@@ -445,9 +442,6 @@ describe("ResumePrompt · live InteractionStore authority", () => {
     renderResume();
     expect(screen.getByText("这次讨论怎么推进？")).toBeTruthy();
     expect(screen.queryByText("「研」已完成")).toBeNull();
-    expect(screen.queryByText("此回合还停在开工确认")).toBeNull();
-    expect(screen.queryByText("最新开工卡")).toBeNull();
-    expect(screen.queryByRole("button", { name: "授权并开工" })).toBeNull();
     expect(useInteractionStore.getState().get("pr-keep")).toBeUndefined();
   });
 
@@ -548,7 +542,6 @@ describe("ResumePrompt · ask continue → leftover team_preview SSE skip", () =
 
     renderResume();
     expect(screen.queryByText("继续")).toBeNull();
-    expect(screen.queryByText("此回合还停在开工确认")).toBeNull();
   });
 
   it("leftover plan_review_required after continue is skipped (no IX)", () => {
@@ -606,7 +599,6 @@ describe("ResumePrompt · ask continue → leftover team_preview SSE skip", () =
     ).toBeUndefined();
     renderResume();
     expect(screen.queryByText("继续")).toBeNull();
-    expect(screen.queryByText("此回合还停在开工确认")).toBeNull();
   });
 
   it("message_start after continue keeps stamp; leftover team_preview does not paint", () => {
@@ -638,7 +630,6 @@ describe("ResumePrompt · ask continue → leftover team_preview SSE skip", () =
 
     renderResume();
     expect(screen.queryByText("继续")).toBeNull();
-    expect(screen.queryByText("此回合还停在开工确认")).toBeNull();
   });
 
   it("unstamped window: no clickable card", () => {

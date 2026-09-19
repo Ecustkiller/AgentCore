@@ -10,11 +10,12 @@ import { useUIStore } from "@/stores/ui";
 /**
  * 会话路由判定：一个回合该走本地 sidecar，还是云端 SSE。
  *
- * 双模式工作区 §7.2：本机传统（`mode=local` + 本机根可用）新开回合**默认同侧** sidecar；
- * 云协作永不 sidecar。过桥仅探活失败等机制兜底（见 `turns.sendTurn`），不当默认。
+ * 双模式工作区 §7.2：本机传统（`mode=local` + 活本机根）新开回合**默认同侧** sidecar；
+ * 云协作永不 sidecar。死绑定（授权表有根、空子路径目录已不在盘上）不 probe、不降级云。
+ * 过桥仅探活失败等机制兜底（见 `turns.sendTurn`），不当默认。
  * 通用·进阶「允许本机执行」显式关 = 强制走云；unset / 默认关**不**挡本机传统同侧。
  *
- * 续跑例外：`origin=sidecar` / 已有本机活回合须跟本地事实（{@link resolveConversationLocalTarget}
+ * 续跑例外：`origin=sidecar` / 已有本机活回合须跟本地事实（{@link resolveLocalBind}
  * / {@link getActiveSidecarTarget}），忽略强制关——本机帧云端没有。
  *
  * sidecar 暂非真离线（LLM 仍经云推理代理）、被委派 worker 仍走审批门。
@@ -29,6 +30,30 @@ import { useUIStore } from "@/stores/ui";
 export interface SidecarTarget {
   rootId: string;
   subpath: string;
+}
+
+/**
+ * 本机绑定三态：未绑 / 活 / 死。
+ *
+ * - unbound：无本机绑定或授权表没有该 rootId → 新回合走云
+ * - live：授权根在表；空子路径目录在盘上，或非空子路径可 mkdir
+ * - stale：授权根在表，空子路径却不是目录 → **不 probe、不 spawn、不降级云**
+ */
+export type LocalBindResolution =
+  | { kind: "unbound" }
+  | { kind: "live"; rootId: string; subpath: string }
+  | { kind: "stale"; rootId: string; subpath: string; absPath?: string };
+
+export function liveSidecarTarget(
+  bind: LocalBindResolution,
+): SidecarTarget | null {
+  return bind.kind === "live"
+    ? { rootId: bind.rootId, subpath: bind.subpath }
+    : null;
+}
+
+function emptySubpath(subpath: string | null | undefined): boolean {
+  return !(subpath ?? "").replace(/^\/+|\/+$/g, "");
 }
 
 /**
@@ -167,71 +192,107 @@ function scratchFromWorkspaceCache(
 }
 
 /**
- * 解析会话的本地工作区目标（容器根 + scratch / 项目子路径），与 sidecar 寻址同构。
+ * 解析会话的本地工作区绑定（三态），与 sidecar 寻址同构。
  *
  * 项目会话：继承 Folder 的 `local_root_id` + `local_subpath`。
- * 裸聊：执行环境绑定根下一律 `conversations/<id>`（空 subpath 契约路径；
- * 不把所选根当工作区根打开全文）。根不在本机 → null（§八 降级走云）。
+ * 裸聊：执行环境绑定根下一律 `conversations/<id>`（空 subpath 契约路径）。
+ * 根不在授权表 → unbound。空子路径且 `listRoots.missing` → stale（不走云）。
  */
-export async function resolveConversationLocalTarget(
+export async function resolveLocalBind(
   conversationId: string,
-): Promise<SidecarTarget | null> {
+): Promise<LocalBindResolution> {
   const conv = getConversations().find((c) => c.id === conversationId) ?? null;
-  if (!conv) return null;
+  if (!conv) return { kind: "unbound" };
 
   if (conv.folderId) {
     const folder = getFolders().find((f) => f.id === conv.folderId);
-    if (!folder || folder.mode !== "local" || !folder.localRootId) return null;
+    if (!folder || folder.mode !== "local" || !folder.localRootId) {
+      return { kind: "unbound" };
+    }
     const roots = await window.fsApi.listRoots();
-    if (!roots.some((r) => r.id === folder.localRootId)) return null;
-    return {
-      rootId: folder.localRootId,
-      subpath: folder.localSubpath ?? "",
-    };
+    const root = roots.find((r) => r.id === folder.localRootId);
+    if (!root) return { kind: "unbound" };
+    const subpath = folder.localSubpath ?? "";
+    if (emptySubpath(subpath) && root.missing) {
+      return {
+        kind: "stale",
+        rootId: root.id,
+        subpath: "",
+        absPath: root.absPath,
+      };
+    }
+    return { kind: "live", rootId: root.id, subpath };
   }
 
   const cached = scratchFromWorkspaceCache(conversationId, null);
   const rootId =
     cached?.rootId ?? conv.localRootId ?? conv.localContainerRootId ?? null;
-  if (!rootId) return null;
+  if (!rootId) return { kind: "unbound" };
 
   const cachedSub = (cached?.subpath ?? "").replace(/^\/+|\/+$/g, "");
   // 非空服务端子路径优先；空 subpath → 隔离契约路径（含显式绑定他根）。
   const subpath = cachedSub || bareConversationScratchSubpath(conversationId);
 
   const roots = await window.fsApi.listRoots();
-  if (!roots.some((r) => r.id === rootId)) return null;
-  return { rootId, subpath };
+  const root = roots.find((r) => r.id === rootId);
+  if (!root) return { kind: "unbound" };
+  if (emptySubpath(subpath) && root.missing) {
+    return {
+      kind: "stale",
+      rootId,
+      subpath: "",
+      absPath: root.absPath,
+    };
+  }
+  return { kind: "live", rootId, subpath };
+}
+
+/**
+ * 解析会话的本地工作区目标（活绑定才返回）。死绑定 → null，**调用方不得据此走云**
+ * （新回合用 {@link resolveNewTurnBind}；本函数给续跑 / 附件等「只要 live target」的面）。
+ */
+export async function resolveConversationLocalTarget(
+  conversationId: string,
+): Promise<SidecarTarget | null> {
+  return liveSidecarTarget(await resolveLocalBind(conversationId));
+}
+
+/**
+ * 新开回合绑定：无引擎 / 显式强制关视为 unbound；否则 {@link resolveLocalBind}。
+ */
+export async function resolveNewTurnBind(
+  conversationId: string,
+): Promise<LocalBindResolution> {
+  if (!hasLocalEngine() || isSidecarForceOff()) return { kind: "unbound" };
+  return resolveLocalBind(conversationId);
 }
 
 /**
  * 解析**新开回合**应在其上跑 sidecar 的目标；不该走 sidecar 则 null（早退，不 probe / 不 spawn）。
  *
- * = 桌面有本地引擎、用户未显式强制关（{@link isSidecarForceOff}），**且**该会话有本机绑定
- * （{@link resolveConversationLocalTarget}：`mode=local` 项目 / 本机根在盘上）。
- * 云项目 / 无本地绑定 / 根不在本机 / 显式强制关 → null（交回云链路）。
+ * = 桌面有本地引擎、用户未显式强制关（{@link isSidecarForceOff}），**且**该会话是活本机绑定。
+ * 云项目 / 无本地绑定 / 根不在授权表 / 显式强制关 → null（交回云链路）。
+ * 死绑定也是 null——**sendTurn 必须先看 {@link resolveNewTurnBind} 的 stale，禁止把 null 当云**。
  * **不**因 unset→`SIDECAR_DEFAULT_ENABLED=false` 早退。
  *
  * 纯「新回合路由意图」，**不掺运行时健康**（探活由 `sendTurn` 收敛）。**续跑勿用本函数**：
- * `origin=sidecar` 须跟本地事实（{@link resolveConversationLocalTarget} /
+ * `origin=sidecar` 须跟本地事实（{@link resolveLocalBind} /
  * {@link getActiveSidecarTarget}），忽略强制关——见 `runResume`。
  */
 export async function resolveSidecarRoot(
   conversationId: string,
 ): Promise<SidecarTarget | null> {
-  if (!hasLocalEngine() || isSidecarForceOff()) return null;
-  return resolveConversationLocalTarget(conversationId);
+  return liveSidecarTarget(await resolveNewTurnBind(conversationId));
 }
 
 /**
- * 该会话是否「能用本地引擎」（桌面端 + 绑定本机存在的本地根），**不看强制关**——与
+ * 该会话是否「能用本地引擎」（桌面端 + 本机绑定，含死绑定），**不看强制关**——与
  * {@link isSidecarForceOff} / {@link isSidecarEnabled} 正交的公共查询。供 UI 判断某对话是否
- * 值得围绕本地引擎做状态展示 / 提示（如启动探活），只有真能走 sidecar 的对话
- * （local 模式 + 根在本机）才返回 true。
+ * 值得围绕本地引擎做状态展示 / 提示（如启动探活）。死绑定仍 true（芯片要给重新选择）。
  */
 export async function canConversationUseSidecar(
   conversationId: string,
 ): Promise<boolean> {
   if (!hasLocalEngine()) return false;
-  return (await resolveConversationLocalTarget(conversationId)) !== null;
+  return (await resolveLocalBind(conversationId)).kind !== "unbound";
 }

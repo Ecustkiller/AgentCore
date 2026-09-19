@@ -63,8 +63,8 @@ export function describeRoundVerdict(verdict: DebateVerdict): RoundVerdictView {
       default:
         return verdict.real_clash
           ? {
-              label: "交锋充分 · 可出结论",
-              hint: "双方已正面交锋、不再产生新论点，可以出结论了。",
+              label: "交锋充分 · 可收场",
+              hint: "双方已正面交锋、不再产生新论点，可以收场。",
             }
           : {
               label: "无更多新论点 · 可收尾",
@@ -90,7 +90,7 @@ const STOP_LABELS: Record<string, string> = {
   red_team_exhausted: "风险已挖尽",
   max_rounds: "达轮次上限",
   all_failed: "发言失败提前终止",
-  user_concluded: "你叫停出结论",
+  user_concluded: "你叫停收场",
 };
 
 /** 辩论收场原因的人话标签（流末终审 + 右轨裁决台共用；`null` → 「已收场」）。 */

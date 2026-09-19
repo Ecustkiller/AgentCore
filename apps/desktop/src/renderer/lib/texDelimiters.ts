@@ -64,11 +64,7 @@ function skipInlineCode(source: string, i: number): number {
   return -1;
 }
 
-function findClose(
-  source: string,
-  from: number,
-  close: "\\)" | "\\]",
-): number {
+function findClose(source: string, from: number, close: "\\)" | "\\]"): number {
   const n = source.length;
   let j = from;
   while (j < n) {

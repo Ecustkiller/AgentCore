@@ -6,7 +6,10 @@ import {
 } from "@/components/ui/popover";
 import { getConversations } from "@/hooks/useConversations";
 import { getFolders } from "@/hooks/useFolders";
-import { WORKSPACE_BINDING_CHANGED } from "@/lib/bindLocalFolder";
+import {
+  WORKSPACE_BINDING_CHANGED,
+  localPickerFailureCopy,
+} from "@/lib/bindLocalFolder";
 import {
   get as getBorrowOriginal,
   isBorrowActive,
@@ -17,6 +20,7 @@ import { notifyActionError } from "@/lib/toast";
 import {
   type EffectiveWorkspace,
   formatWorkspaceChipLabel,
+  localRootNeedsRelocate,
   resolveEffectiveWorkspace,
 } from "@/lib/workspaceEffectiveMode";
 import {
@@ -24,18 +28,18 @@ import {
   peekMergeLanding,
   registerMergeLanding,
 } from "@/services/cloudDeskExit";
+import { clearSidecarHealth } from "@/services/sidecarHealth";
 import {
   type WorkspaceBinding,
+  bindLocalWorkspace,
   getWorkspaceBinding,
 } from "@/services/workspaceBinding";
-import { useFoldersStore } from "@/stores/folders";
 import type { FsRoot } from "@shared/ipc-contract";
 import {
   AlertTriangle,
   ChevronDown,
   Cloud,
   FolderInput,
-  GitBranch,
   HardDrive,
   Loader2,
   MapPin,
@@ -172,13 +176,14 @@ export function WorkspaceModeTrigger({
   className?: string;
   chevron?: boolean;
 }) {
-  const { isLocal, rootMissing } = effective;
+  const { isLocal } = effective;
+  const needsRelocate = localRootNeedsRelocate(effective);
   const label = formatWorkspaceChipLabel(effective);
   return (
     <span
       className={`inline-flex min-w-0 items-center gap-1.5 overflow-hidden ${className}`}
     >
-      {isLocal && rootMissing ? (
+      {needsRelocate ? (
         <AlertTriangle size={13} className="shrink-0 text-muted-foreground" />
       ) : isLocal ? (
         <HardDrive size={13} className="shrink-0 text-primary" />
@@ -204,7 +209,8 @@ export function WorkspaceModeMenu({
   onActionDone?: () => void;
 }) {
   const { effective, roots, refresh } = state;
-  const { isLocal, rootMissing, rootName, viaFolder, folderName } = effective;
+  const { isLocal, rootName, viaFolder, folderName } = effective;
+  const needsRelocate = localRootNeedsRelocate(effective);
   const desktop = hasLocalFiles();
   const [exitBusy, setExitBusy] = useState(false);
   const [borrowEpoch, setBorrowEpoch] = useState(0);
@@ -228,8 +234,8 @@ export function WorkspaceModeMenu({
       : "云端对话";
 
   const subtitle = isLocal
-    ? rootMissing
-      ? "目录在本机不可用"
+    ? needsRelocate
+      ? "文件夹找不到"
       : rootName
         ? viaFolder
           ? `本机路径 · ${rootName}`
@@ -292,22 +298,46 @@ export function WorkspaceModeMenu({
     onActionDone?.();
   };
 
-  /** 云会话 → 当前 desk；遗留本机 → 新建云文件夹再 clone（不改绑本会话）。 */
-  const connectGit = () => {
-    let wsId: string | null = null;
-    if (!isLocal && conversationId) {
-      const conv = getConversations().find((c) => c.id === conversationId);
-      wsId = conv?.folderId
-        ? `folder:${conv.folderId}`
-        : `conv:${conversationId}`;
-    }
-    onActionDone?.();
-    useFoldersStore.getState().openConnectGit(wsId);
+  const onRelocateFolder = () => {
+    if (!conversationId || !desktop) return;
+    const rootId = effective.rootId;
+    void runExit(async () => {
+      const fsApi = window.fsApi;
+      if (!fsApi?.relocateRoot && !fsApi?.addRoot) {
+        const copy = localPickerFailureCopy("unavailable");
+        notifyActionError(copy.title, copy.detail);
+        return;
+      }
+      const listed = rootId ? roots.find((r) => r.id === rootId) : undefined;
+      try {
+        const result = listed
+          ? await fsApi.relocateRoot(listed.id)
+          : await fsApi.addRoot();
+        if (!result.ok) {
+          if (result.reason === "cancelled") return;
+          const copy = localPickerFailureCopy(result.reason, result.message);
+          notifyActionError(copy.title, copy.detail);
+          return;
+        }
+        if (!listed) {
+          await bindLocalWorkspace(conversationId, result.root.id);
+        }
+        clearSidecarHealth();
+        window.dispatchEvent(
+          new CustomEvent(WORKSPACE_BINDING_CHANGED, {
+            detail: { conversationId },
+          }),
+        );
+        onActionDone?.();
+      } catch (err) {
+        notifyActionError("重新选择文件夹失败", err);
+      }
+    });
   };
 
   const anyBusy = exitBusy;
   const showActions =
-    (isLocal && rootMissing) ||
+    needsRelocate ||
     (!isLocal && Boolean(desktop && conversationId)) ||
     exitBusy;
 
@@ -335,16 +365,16 @@ export function WorkspaceModeMenu({
 
       {showActions ? (
         <div className="p-1.5">
-          {isLocal && rootMissing ? (
+          {needsRelocate ? (
             <>
               <p className="px-2.5 py-1.5 text-xs text-muted-foreground">
-                目录在本机不可用。请重新绑定本机路径后再继续。
+                这个文件夹已经不在这台电脑上（改名、移动或删除）。请重新选择它所在的位置。
               </p>
               <ModeAction
-                icon={<GitBranch size={14} />}
-                label="从 Git 克隆"
-                hint="新建云文件夹并浅克隆"
-                onClick={connectGit}
+                icon={<FolderInput size={14} />}
+                label="重新选择文件夹"
+                hint="选择它现在所在的位置"
+                onClick={onRelocateFolder}
                 disabled={anyBusy}
               />
             </>
@@ -467,7 +497,7 @@ export function WorkspaceModeControl({
           className={
             triggerClassName ??
             `h-auto min-w-0 shrink gap-1.5 overflow-hidden px-2 py-1 text-xs font-medium ${
-              state.effective.isLocal && state.effective.rootMissing
+              localRootNeedsRelocate(state.effective)
                 ? "text-muted-foreground"
                 : "text-foreground"
             }`

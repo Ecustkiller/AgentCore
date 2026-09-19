@@ -266,11 +266,20 @@ def _collect_motions(events: list[dict[str, Any]]) -> list[str]:
     for e in events:
         p = _payload(e)
         et = _event_type(e)
+        if et == "debate_result":
+            m = str(p.get("motion") or "").strip()
+            if m:
+                out.append(m)
+        if et in {"tool_use_start", "tool_call_started"} and _tool_name(p) == "debate":
+            args = p.get("arguments") if isinstance(p.get("arguments"), dict) else {}
+            m = str(args.get("motion") or "").strip()
+            if m:
+                out.append(m)
+        # leftover journal：推进卡曾带 motion；新路径不再发卡。
         if et == "stage_card_required":
             m = str(p.get("motion") or "").strip()
             if m:
                 out.append(m)
-            continue
         args = p.get("arguments") if isinstance(p.get("arguments"), dict) else None
         if args and isinstance(args.get("motion_card"), dict):
             m = str(args["motion_card"].get("motion") or "").strip()
@@ -751,7 +760,7 @@ def evaluate_rings(bundle: GoldenBundle) -> GoldenReport:
     auth = str(ga.get("authorized_by") or act.get("authorized_by") or "")
     auth_ok = auth == "auto"
     team_preview = types.get("team_preview_required", 0)
-    # 推进卡 / 开工卡事件已退役；幕 2 现行 stamp authorized_by=auto。
+    # leftover stage_card / team_preview 事件已退役；幕 2 现行 stamp authorized_by=auto。
     ring3_pass = stage_req == 0 and stage_res == 0 and auth_ok and team_preview == 0
     ring3 = RingResult(
         3,

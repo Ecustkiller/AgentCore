@@ -35,9 +35,3 @@ def _stamp_retrieval_evidence_gap(
         meta.setdefault("search_policy", policy)
     state.evidence_meta = meta
     return state
-
-
-def _two_phase_citation(deliverable: Any) -> bool:
-    from agentcore.runtime.runs.research_quality import is_two_phase_citation_deliverable
-
-    return is_two_phase_citation_deliverable(deliverable)

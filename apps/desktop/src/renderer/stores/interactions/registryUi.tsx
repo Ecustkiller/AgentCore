@@ -6,9 +6,7 @@
 
 import { CheckpointCard } from "@/components/chat/CheckpointCard";
 import { EscalationCard } from "@/components/chat/EscalationCard";
-import {
-  ApprovalTrace,
-} from "@/components/chat/HotDecisionTrace";
+import { ApprovalTrace } from "@/components/chat/HotDecisionTrace";
 import { type RunEscalation, useMessageExecution } from "@/stores/execution";
 import { useInteractionStore } from "@/stores/interactions";
 import type { ReactNode } from "react";

@@ -1,4 +1,4 @@
-"""深度研究自治 — helper、ceo_format 指引分叉、debate 开赛卡放行域与上限降级。"""
+"""深度研究自治 — helper、ceo_format 指引分叉、自动开辩放行域与上限降级。"""
 
 from __future__ import annotations
 
@@ -148,7 +148,7 @@ def test_format_for_ceo_managed_axes_do_not_imply_auto_guidance():
     assert "可直接调 debate" not in out
 
 
-# ── 开赛卡放行域 ─────────────────────────────────────────────────
+# ── 自动开辩放行域 ─────────────────────────────────────────────────
 
 
 def _ctx(**kwargs) -> ToolContext:
@@ -224,7 +224,7 @@ def _debate_args() -> dict:
     }
 
 
-async def test_debate_flag_skips_kickoff_under_cap():
+async def test_debate_flag_opens_under_cap():
     tool, saved, sink = _debate_tool(deep_research_auto=True, debate_count=0)
 
     async def _fake_run(config, usage_metadata):
@@ -244,8 +244,8 @@ async def test_debate_flag_skips_kickoff_under_cap():
     assert tool._base_tool_context.deep_research_auto_debate_count == 0
 
 
-async def test_debate_flag_restores_kickoff_over_cap():
-    """超 cap 也不再挂新 team_preview（跳过开工卡已是默认路径）。"""
+async def test_debate_flag_opens_over_cap():
+    """超 cap 也不挂 team_preview（开辩直接开跑）。"""
     tool, saved, sink = _debate_tool(deep_research_auto=True, debate_count=1)
 
     async def _fake_run(config, usage_metadata):

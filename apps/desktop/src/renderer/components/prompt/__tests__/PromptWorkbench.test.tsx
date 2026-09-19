@@ -157,10 +157,28 @@ describe("PromptWorkbench", () => {
     expect(screen.getByText("一句话介绍")).toBeTruthy();
     const line = screen.getByLabelText("一句话介绍");
     expect(line).toHaveProperty("value", "团队拆法");
-    expect(line.getAttribute("placeholder")).toBe("用一句话说这是什么");
+    expect(line.getAttribute("placeholder")).toBe("干什么、什么时候该翻开");
+    expect(screen.queryByText(/CEO 不会主动翻开/)).toBeNull();
     expect(line.parentElement?.className).toContain("flex");
     expect(line.parentElement?.className).toContain("items-start");
     expect(screen.getByTestId("cm-stub")).toBeTruthy();
+  });
+
+  it("按需空介绍提示不会被主动翻开", () => {
+    render(
+      <PromptWorkbench
+        title="团队拆法"
+        titleEditable
+        initialBody="body"
+        triggerEnabled
+        onSave={async () => true}
+      />,
+    );
+    expect(
+      screen.getByLabelText("一句话介绍").getAttribute("placeholder"),
+    ).toBe("干什么、什么时候该翻开");
+    expect(screen.getByText(/CEO 不会主动翻开/)).toBeTruthy();
+    expect(screen.getByText(/输入框 @ 这一条/)).toBeTruthy();
   });
 
   it("目录句与标题不同时两句都在", () => {

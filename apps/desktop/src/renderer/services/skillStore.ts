@@ -145,7 +145,9 @@ function toListing(w: ListingWire): SkillStoreListing {
     installDocumentId: w.document_id ?? null,
     status: asListingStatus(w.status),
     offersTools: Array.isArray(w.offers_tools)
-      ? w.offers_tools.filter((name): name is string => typeof name === "string")
+      ? w.offers_tools.filter(
+          (name): name is string => typeof name === "string",
+        )
       : [],
   };
 }

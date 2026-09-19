@@ -346,10 +346,7 @@ describe("InterjectionTimeline", () => {
       } as never);
 
       render(
-        <InterjectionTimeline
-          messageId="m1"
-          interjectionId={`ij-${status}`}
-        />,
+        <InterjectionTimeline messageId="m1" interjectionId={`ij-${status}`} />,
       );
       expect(
         screen.getByTestId(`interjection-bubble-ij-${status}`),
@@ -409,18 +406,13 @@ describe("InterjectionTimeline", () => {
       } as never);
 
       const { container } = render(
-        <InterjectionTimeline
-          messageId="m1"
-          interjectionId={`ij-${status}`}
-        />,
+        <InterjectionTimeline messageId="m1" interjectionId={`ij-${status}`} />,
       );
       expect(container.firstChild).toBeNull();
       expect(
         screen.queryByTestId(`interjection-bubble-ij-${status}`),
       ).toBeNull();
-      expect(
-        screen.queryByTestId(`interjection-note-ij-${status}`),
-      ).toBeNull();
+      expect(screen.queryByTestId(`interjection-note-ij-${status}`)).toBeNull();
       expect(
         screen.queryByTestId(`interjection-status-ij-${status}`),
       ).toBeNull();

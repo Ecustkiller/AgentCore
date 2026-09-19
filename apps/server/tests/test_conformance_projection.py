@@ -180,21 +180,6 @@ def test_resume_content_reset_reinject_rewrites_after_ask_user(projected):
     assert p["interactions"][0]["status"] == "resolved"
 
 
-def test_debate_pretrial_evidence_pack_full_projection(projected):
-    """Evidence Pack 齐全：skip 外证、budget=0、completeness=full。"""
-    p = projected["multi_agent_debate_pretrial_evidence_pack_full"]
-    pt = p.get("debatePretrial")
-    assert pt is not None
-    assert pt["status"] == "skipped"
-    assert pt["skipReason"] == "evidence_pack"
-    assert pt["completeness"] == "full"
-    assert pt["incomplete"] is False
-    assert pt["externalEvidenceMode"] == "skip"
-    assert pt["externalEvidenceReason"] == "evidence_pack_full"
-    assert pt["evidenceReady"] is True
-    assert not any("_inv_" in r["id"] for r in p["runs"])
-
-
 def test_single_agent_citations(projected):
     p = projected["single_agent_citations"]
     assert p["status"] == "completed"
@@ -407,7 +392,7 @@ def test_process_tool_result_cap_matches_sink():
 
 
 def test_multi_agent_mlr_debate_acts():
-    """批 A2：幕1 MLR + 幕2 debate 新图+prev；最终投影以幕2 为准。不进预览目录。"""
+    """批 A2：幕1 MLR + 幕2 debate 新图+prev；最终投影以幕2 为准。预览目录调研→开辩代表态。"""
     from agentcore.conformance.projection import project_turn
     from agentcore.conformance.vectors.multi_agent.mlr_debate_acts import (
         _multi_agent_mlr_debate_acts,
@@ -482,88 +467,39 @@ def test_carrier_means_consult_smartart_boundary(projected):
     assert not any("SmartArt" in label and "已" in label for label in labels)
 
 
-def test_multi_agent_same_turn_mlr_debate_single_execution():
-    """同一条消息两幕共用一个 execution_id（从向量事件手推，不抄 golden）。不进预览目录。"""
-    from agentcore.conformance.projection import project_turn
-    from agentcore.conformance.vectors.multi_agent.same_turn_mlr_debate import (
-        _multi_agent_same_turn_mlr_debate,
-    )
-    from agentcore.runtime.events.types import EventType
-
-    events = list(_multi_agent_same_turn_mlr_debate())
-    message_ids = [
-        e.payload.get("message_id")
-        for e in events
-        if e.type == EventType.MESSAGE_START
-    ]
-    assert message_ids == ["m1"]
-    plans = [e for e in events if e.type == EventType.RUN_PLAN]
-    assert len(plans) >= 2
-    eids = {str(e.payload.get("execution_id") or "") for e in plans}
-    assert len(eids) == 1
-    eid = next(iter(eids))
-    assert eid
-    assert all(not e.payload.get("prev_execution_id") for e in plans)
-    act_ids = []
-    for plan in plans:
-        act = plan.payload.get("act") or {}
-        aid = str(act.get("act_id") or "")
-        if aid and aid not in act_ids:
-            act_ids.append(aid)
-    assert act_ids == ["act-1", "act-2"]
-    kinds = {
-        str((e.payload.get("act") or {}).get("kind") or "")
-        for e in plans
-        if (e.payload.get("act") or {}).get("act_id")
-    }
-    assert kinds == {"multi_agent", "debate"}
-
-    p = project_turn(
-        [{"type": e.type.value, "payload": e.payload} for e in events]
-    )
-    acts = p["acts"]
-    assert [a["actId"] for a in acts] == ["act-1", "act-2"]
-    assert acts[0]["kind"] == "multi_agent"
-    assert acts[1]["kind"] == "debate"
-    assert acts[1]["anchorRunId"] == "synthesizer"
-    assert acts[1]["authorizedBy"] == "auto"
-    run_by_id = {r["id"]: r for r in p["runs"]}
-    assert run_by_id["synthesizer"]["actId"] == "act-1"
-    assert run_by_id["debate_mod_same"]["actId"] == "act-2"
-    assert run_by_id["debate_mod_same_r1_pro"]["actId"] == "act-2"
-    assert run_by_id["debate_mod_same_r1_con"]["actId"] == "act-2"
-    team_eids = [s["execution_id"] for s in p["process"] if s.get("kind") == "team"]
-    assert team_eids == [eid]
-
-
 def test_mlr_vectors_stamp_authorized_by_auto():
-    """幕2 现行只 stamp auto；旧 stage_card/preview 不当 live 成员。"""
+    """幕2 现行只 stamp auto；调研-only 向量没有辩论幕。"""
     from agentcore.conformance.projection import project_turn
 
-    names = (
-        "multi_agent_mlr_debate_acts",
-        "multi_agent_mlr_debate_witness",
-        "multi_agent_same_turn_mlr_debate",
-        "multi_agent_stage_card_start_debate",
-        "multi_agent_two_act_lv",
+    _description, builder = VECTORS["multi_agent_mlr_debate_acts"]
+    events = [{"type": e.type.value, "payload": e.payload} for e in builder()]
+    p = project_turn(events)
+    debate = next(a for a in p["acts"] if a["kind"] == "debate")
+    assert debate["authorizedBy"] == "auto"
+    _research_desc, research = VECTORS["multi_agent_multi_lens_research"]
+    research_p = project_turn(
+        [{"type": e.type.value, "payload": e.payload} for e in research()]
     )
-    for name in names:
-        _description, builder = VECTORS[name]
-        events = [{"type": e.type.value, "payload": e.payload} for e in builder()]
-        p = project_turn(events)
-        debate = next(a for a in p["acts"] if a["kind"] == "debate")
-        assert debate["authorizedBy"] == "auto", name
-    _orphaned_desc, orphaned = VECTORS["multi_agent_stage_card_orphaned"]
-    orphaned_p = project_turn(
-        [{"type": e.type.value, "payload": e.payload} for e in orphaned()]
-    )
-    assert all(a["authorizedBy"] is None for a in orphaned_p["acts"])
+    assert not any(a["kind"] == "debate" for a in research_p["acts"])
+
+
+def test_preview_skip_writes_false_only():
+    from agentcore.conformance.vectors import PREVIEW_SKIP
+
+    assert frozenset({"multi_agent_legal_war_room"}) == PREVIEW_SKIP
+    assert PREVIEW_SKIP.issubset(VECTORS)
+    by_name = {fx["name"]: fx for fx in build_fixtures()}
+    for name in PREVIEW_SKIP:
+        assert by_name[name]["preview"] is False
+    for name, fx in by_name.items():
+        if name not in PREVIEW_SKIP:
+            assert "preview" not in fx
 
 
 # Vectors with no hand-verified assertion in any sentinel module. Ratchet: only down.
 # Raising it means a new vector shipped judged solely by "both folds agree with the
 # golden the oracle wrote" — legal, but it has to be an explicit line in the diff.
-_SENTINEL_UNCOVERED_BASELINE = 16
+_SENTINEL_UNCOVERED_BASELINE = 12
 
 
 def _sentinel_sources() -> str:

@@ -71,7 +71,8 @@ export function ConversationChangesPanel() {
     !!convWs &&
     !!wsState?.effective.isLocal &&
     !!wsState.effective.rootId &&
-    !wsState.effective.rootMissing;
+    !wsState.effective.rootMissing &&
+    !wsState.effective.rootStale;
   const rootId = canGit ? (wsState?.effective.rootId ?? null) : null;
   const workspaceSubpath = convWs?.subpath ?? "";
   const { status: gitStatus, refresh: refreshGit } = useGitRepoStatus(

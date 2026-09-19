@@ -454,10 +454,10 @@ export function TurnDetailPage() {
                     <div className="flex h-full w-full items-center justify-center">
                       <div className="text-center">
                         <p className="text-sm text-muted-foreground">
-                          确认开工后再看协作图
+                          这回合还没有团队进度
                         </p>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          回到对话点「开做」后，这里会展开团队进度
+                          队员开始干活后，这里会展开协作图
                         </p>
                       </div>
                     </div>

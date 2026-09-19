@@ -83,11 +83,11 @@ DEP_CONTEXT_BUDGET = 16000
 # multi-worker batch isn't clipped before the CEO can integrate it.
 DELEGATE_OUTPUT_LIMIT = 16000
 
-# Per-step product excerpt cap in a plan_review card: enough for the user to
-# recognise what just finished without shipping the whole product over SSE.
-# Prefer handoff debrief (summary + key_points); raw body markdown is fallback only
-# — 480 leaves room for ~8 short outline chapter lines after a one-line conclusion.
-PLAN_REVIEW_SUMMARY_CHARS = 480
+# Per-step product excerpt cap: enough to recognise what just finished without
+# shipping the whole product. Prefer handoff debrief (summary + key_points);
+# raw body markdown is fallback only — 480 leaves room for ~8 short outline
+# chapter lines after a one-line conclusion.
+HANDOFF_SUMMARY_CHARS = 480
 
 # Chars a summarize-policy dep (result_handling="summarize") is compressed to — a
 # tight digest for the large-fan-in token-saving case, independent of (and far

@@ -82,6 +82,7 @@ const boundEffective = {
   viaContainer: false,
   folderName: "Acme",
   viaFolder: true,
+  rootStale: false,
 };
 
 vi.mock("@/components/workspace/WorkspaceModeControl", () => ({

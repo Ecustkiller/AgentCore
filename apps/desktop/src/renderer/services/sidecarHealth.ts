@@ -138,10 +138,11 @@ export async function probeSidecar(
     });
     health.set(key, { health: "ok", at: nowMs(), detail: null });
     return { healthy: true, probed: true, detail: null };
-  } catch {
-    // 诊断由主进程 onStatus(error) 推入 sidecarStatus；取走它换出针对性提示（取不到则 null，
-    // 由调用方退回通用兜底文案）。写入 bad 缓存，TTL 内再发仍带同一 detail。
-    const detail = takeRecentSidecarFailure(target.rootId);
+  } catch (err) {
+    // 诊断优先取主进程 onStatus(error)；spawn 前抛出（死绑定）没有 status 推送，
+    // 改用 IPC 拒绝的 message（中文合同句），避免横幅只剩英文 JSON-RPC。
+    const fromIpc = sidecarIpcFailureMessage(err);
+    const detail = takeRecentSidecarFailure(target.rootId) ?? fromIpc;
     health.set(key, { health: "bad", at: nowMs(), detail });
     return {
       healthy: false,
@@ -149,6 +150,22 @@ export async function probeSidecar(
       detail,
     };
   }
+}
+
+function sidecarIpcFailureMessage(err: unknown): string | null {
+  if (!(err instanceof Error)) return null;
+  const stripped = err.message
+    .replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/i, "")
+    .trim();
+  if (!stripped || stripped === "Error") return null;
+  // 只抬主进程合同句；handshake/spawn 英文仍走通用「未能启动」，避免把 RPC 原文送上横幅。
+  if (
+    stripped.includes("这个文件夹已经不在这台电脑上") ||
+    stripped.includes("本地目录未授权")
+  ) {
+    return stripped;
+  }
+  return null;
 }
 
 // 进程真正拉起成功 → 提前作废该根 bad，避免 DEV 下偶发首探失败后整段误报不可用。

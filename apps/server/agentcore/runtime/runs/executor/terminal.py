@@ -109,11 +109,12 @@ def build_terminal_run_state(
     # (best-effort; None when it finished without one) so downstream dep injection / CEO
     # synthesis read the author's own 结论 + 建议下一步 instead of re-deriving them from
     # prose. Contract misses stay COMPLETED with warnings and still carry this brief.
-    # Nodes that expect a handoff (has dependents) but still lack a minimum-quality
-    # brief get an engine-synthesized degraded debrief so CEO / delivery_status can
-    # see「汇报不完整」. Only when salvageable half-product (body / disk / qualified
-    # brief) — empty inventory must not mint an empty ``degraded_synth``. Leaves
-    # are not gated: missing brief stays missing (CEO reads body or landed paths).
+    # Nodes that expect a handoff (has dependents) but still have no brief get an
+    # engine-synthesized degraded debrief so CEO / delivery_status can see
+    # 「汇报不完整」. A present (even short) author note is kept. Only when
+    # salvageable half-product (body / disk / brief) — empty inventory must not
+    # mint an empty ``degraded_synth``. Leaves are not gated: missing brief stays
+    # missing (CEO reads body or landed paths).
     debrief = debrief_from_transcript(messages)
     products = merge_file_products(
         file_products_from_transcript(messages),
@@ -135,7 +136,6 @@ def build_terminal_run_state(
             had_author_brief=author_brief is not None,
         )
     # 队员卡片/简报跟对话成稿同一口径：不剥 search-only / 未登记号。
-    # 落盘成文仍走文件合同 ``citation_quality_reworks``。
     path_rej = path_rejections_from_contract_messages(
         [*verdict.failures, *verdict.soft_failures]
     )

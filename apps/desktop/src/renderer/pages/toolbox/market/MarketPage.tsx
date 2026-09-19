@@ -19,6 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { artifactColorVar } from "@/lib/catalogColors";
+import { MARKET_CATALOG_CAPTION } from "@/lib/skillStoreCopy";
 import { notifyError, notifySuccess } from "@/lib/toast";
 import {
   type MarketKind,
@@ -492,7 +493,12 @@ export function MarketPage() {
               </p>
             ) : null}
             {showDescription ? (
-              <p className="text-sm text-foreground">{description}</p>
+              <div>
+                <p className="text-muted-foreground text-xs">
+                  {MARKET_CATALOG_CAPTION}
+                </p>
+                <p className="mt-1.5 text-sm text-foreground">{description}</p>
+              </div>
             ) : null}
             {offeredTools.length > 0 ? (
               <div data-testid="skill-store-offers">

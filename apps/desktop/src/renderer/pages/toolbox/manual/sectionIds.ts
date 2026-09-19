@@ -4,7 +4,7 @@
  * 信息架构：
  * - intro: what / mindset / quickstart
  * - collaboration: briefing / progress / checkpoint / autonomy / debate /
- *   control / memory
+ *   control / memory / prompts
  * - mechanism: live / legend / panorama / scenarios
  * - reference: tools / workspace / settings / faq / troubleshooting /
  *   privacy / glossary
@@ -29,6 +29,8 @@ export const MANUAL_SECTION_IDS = {
     /** 中途插手（含带现场续派） */
     control: "control",
     memory: "memory",
+    /** 怎么写才会被翻开的提示词 */
+    prompts: "prompts",
   },
   mechanism: {
     live: "live",

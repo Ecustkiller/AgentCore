@@ -1,6 +1,10 @@
 import type { CheckpointDisplay } from "@/stores/conversation/types";
 import { useMemo } from "react";
-import { type ApprovalView, entryToApproval, entryToCheckpoint } from "./adapters";
+import {
+  type ApprovalView,
+  entryToApproval,
+  entryToCheckpoint,
+} from "./adapters";
 import { useInteractionStore } from "./store";
 import type { InteractionEntry } from "./types";
 

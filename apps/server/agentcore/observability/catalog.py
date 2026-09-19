@@ -521,7 +521,6 @@ EVENTS: list[EventSpec] = [
             ' text；题上误写的 label 已收进 options）'
         ),
         fields={
-            'browser_login': FieldType('bool'),
             'card': FieldType('str'),
             'checkpoint_id': FieldType('str'),
             'intent': FieldType('str'),
@@ -598,9 +597,18 @@ EVENTS: list[EventSpec] = [
         name='consult.skill_replacements_snapshot_failed',
         description='历史兼容：换用 overlay 已撤，不再 emit',
     ),
-    EventSpec(name='contract.cite_phase_a_terminal_reject'),
-    EventSpec(name='contract.cite_upgrade'),
-    EventSpec(name='contract.cite_upgrade_exhausted'),
+    EventSpec(
+        name='contract.cite_phase_a_terminal_reject',
+        description='历史兼容：调研两阶段引用闸已撤，不再 emit',
+    ),
+    EventSpec(
+        name='contract.cite_upgrade',
+        description='历史兼容：调研两阶段引用升 B 已撤，不再 emit',
+    ),
+    EventSpec(
+        name='contract.cite_upgrade_exhausted',
+        description='历史兼容：调研两阶段引用升 B 已撤，不再 emit',
+    ),
     EventSpec(
         name='contract.failed',
         description='历史兼容：曾作 logger 事件名；现为 RunPhase.FAILED 的 error 字面，不再 emit',
@@ -609,7 +617,10 @@ EVENTS: list[EventSpec] = [
         name='contract.hard_gap_blocked_completion',
         description='历史兼容：曾因空交/未落盘把节点打成 FAILED；已撤',
     ),
-    EventSpec(name='contract.light_repair'),
+    EventSpec(
+        name='contract.light_repair',
+        description='历史兼容：格式/交接短修 extra LLM pass 已撤，不再 emit',
+    ),
     EventSpec(name='contract.retry'),
     EventSpec(name='contract.retry_skipped_budget'),
     EventSpec(name='contract.retry_skipped_interrupt'),
@@ -909,12 +920,12 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='debate.host_attach_fallback'),
     EventSpec(name='debate.mlr_host_resolve'),
     EventSpec(name='debate.model_plan_failed'),
+    EventSpec(name='debate.opening_materials.external_plan'),
+    EventSpec(name='debate.opening_materials.external_skipped'),
+    EventSpec(name='debate.opening_materials.incomplete'),
+    EventSpec(name='debate.opening_materials.pack_assembled'),
     EventSpec(name='debate.plan_only'),
     EventSpec(name='debate.plan_only_done'),
-    EventSpec(name='debate.pretrial.evidence_incomplete'),
-    EventSpec(name='debate.pretrial.evidence_pack_assembled'),
-    EventSpec(name='debate.pretrial.external_evidence_plan'),
-    EventSpec(name='debate.pretrial.external_evidence_skipped'),
     EventSpec(name='debate.research_dossier_index_failed'),
     EventSpec(name='debate.research_dossier_probe_failed'),
     EventSpec(name='debate.round1.build_failed'),
@@ -1030,7 +1041,6 @@ EVENTS: list[EventSpec] = [
         },
     ),
     EventSpec(name='delegate.delivery_status_failed'),
-    EventSpec(name='delegate.folder_display_name_failed'),
     EventSpec(
         name='delegate.force_unknown_gate',
         description=(
@@ -1132,7 +1142,6 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='demo_tape.director_seek'),
     EventSpec(name='demo_tape.director_speed'),
     EventSpec(name='demo_tape.import_failed'),
-    EventSpec(name='demo_tape.launch_pause_timeout'),
     EventSpec(name='demo_tape.launch_user_message_timeout'),
     EventSpec(name='demo_tape.pause_persist_failed'),
     EventSpec(name='demo_tape.paused'),
@@ -2065,9 +2074,20 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='pipeline.resume_rehydrated'),
     EventSpec(name='pipeline.resume_settled'),
     EventSpec(name='pipeline.resume_start'),
-    EventSpec(name='plan_review.ceo_review_done'),
-    EventSpec(name='plan_review.ceo_review_failed'),
-    EventSpec(name='plan_review.ceo_review_fallback'),
+    EventSpec(
+        name='plan_review.ceo_review_done',
+        description='历史兼容：曾在计划复核暂停前跑 LLM 把关成功时发出；把关模块已卸，不再发此事件',
+    ),
+    EventSpec(
+        name='plan_review.ceo_review_failed',
+        description='历史兼容：曾在计划复核 LLM 把关失败时发出；把关模块已卸，不再发此事件',
+    ),
+    EventSpec(
+        name='plan_review.ceo_review_fallback',
+        description=(
+            '历史兼容：曾在计划复核 LLM 把关回落确定性摘要时发出；把关模块已卸，不再发此事件'
+        ),
+    ),
     EventSpec(name='platform.model_credentials_not_object'),
     EventSpec(name='platform.model_credentials_parse_failed'),
     EventSpec(name='platform_catalog.pricing_missing'),

@@ -1,6 +1,6 @@
 """Open-turn deferral for memory consolidation (挂起/在跑回合防误整合).
 
-A conversation parked at a durable checkpoint (e.g. the team_preview 开工卡 — it
+A conversation parked at a durable checkpoint (e.g. ask_user — it
 legitimately sits idle for minutes waiting on the user) or holding a fresh RUNNING
 lease must NOT be consolidated: its window contains a partial assistant snapshot,
 and a pass would surface a premature memory card mid-turn. The runner skips

@@ -170,7 +170,6 @@ def cite_write_review(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[
                 ),
                 "deliverable": {
                     "artifacts": [artifact],
-                    "citation_mode": "two_phase",
                 },
             }
             if angle_fold_note and merged:
@@ -195,7 +194,6 @@ def cite_write_review(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[
                 ),
                 "deliverable": {
                     "artifacts": [artifact],
-                    "citation_mode": "two_phase",
                 },
             }
         )
@@ -216,7 +214,6 @@ def cite_write_review(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[
             "depends_on": research_ids,
             "deliverable": {
                 "artifacts": [outline_path],
-                "citation_mode": "two_phase",
             },
         }
     )
@@ -246,7 +243,6 @@ def cite_write_review(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[
             "depends_on": ["outline"],
             "deliverable": {
                 "artifacts": [main_path],
-                "citation_mode": "two_phase",
             },
         }
     )

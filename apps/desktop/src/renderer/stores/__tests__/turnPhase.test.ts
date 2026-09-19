@@ -397,10 +397,10 @@ describe("turn stop lifecycle", () => {
   });
 
   it("terminal + paused 仅 captain running → 不打 stop API", () => {
-    const kickoffPlan: ExecutionPlan = {
-      id: "exec-kickoff-pause",
+    const pausePlan: ExecutionPlan = {
+      id: "exec-pause-captain-only",
       planType: "multi_agent",
-      taskSummary: "开工确认",
+      taskSummary: "并行调研",
       agents: [
         { id: "ceo", role: "CEO" },
         { id: "w1", role: "研究员" },
@@ -422,7 +422,7 @@ describe("turn stop lifecycle", () => {
     enterTurnStreaming(CID);
     const mid = useConversationStore.getState().createAssistantMessage(CID);
     if (!mid) throw new Error("expected assistant message id");
-    useExecutionStore.getState().startExecution(kickoffPlan, mid);
+    useExecutionStore.getState().startExecution(pausePlan, mid);
     useExecutionStore.getState().recordFrame(
       {
         t: 1,

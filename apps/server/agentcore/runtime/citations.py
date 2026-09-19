@@ -177,7 +177,7 @@ def annotate_ledger_ids(
 # 客户端把正文里的 [n] 渲染成可点的来源角标，但只解析 1..来源数；越界的 [n]（模型
 # 引用了一个没有对应卡片的编号——多半是数错或想指上一轮的号）会被原样留成纯文本。
 # 服务端在 message_end 前用下面这支度量这种「引用了不存在来源」的发生率；对话出口
-# :func:`reconcile_citations` 只观测、不剥正文。落盘成文剥号走文件合同。
+# :func:`reconcile_citations` 只观测、不剥正文。
 #
 # P1 双轨：``[n]``（池序）与 ``#rN``（回合台账 id）并存——历史消息按 Q10 双轨解析；
 # 新 run 真理层为 ``#rN``。
@@ -327,7 +327,7 @@ def reconcile_citations(
     """对话出口观测：报告悬空 ``[n]`` / 非登记 ``#rN``，**不剥正文**。
 
     来源卡由 :func:`project_cited_citations` 按已登记 ``citable`` id 投影；
-    未登记号留白字。落盘成文剥号走合同闸，不走本函数。
+    未登记号留白字。不剥正文。
     """
     stray_n = out_of_range_markers(content, len(citations))
     stray_r = invalid_ledger_ref_ids(content, citable_ids)

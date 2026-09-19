@@ -15,9 +15,7 @@ import {
   processFoldMask,
   timelineNodeKeys,
 } from "@/lib/processTimeline";
-import type {
-  CheckpointDisplay,
-} from "@/stores/conversation";
+import type { CheckpointDisplay } from "@/stores/conversation";
 import { useStreamAwareDisclosure } from "@/stores/disclosure";
 import { type ExecutionJournal, useMessageExecution } from "@/stores/execution";
 import { renderTimelineInteractionCard } from "@/stores/interactions/registryUi";

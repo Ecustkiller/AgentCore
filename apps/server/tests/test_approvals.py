@@ -755,8 +755,8 @@ async def test_engine_does_not_gate_non_grantable_tool():
     assert not any(e.type is EventType.APPROVAL_REQUIRED for e in _drain(sink))
 
 
-async def test_kickoff_grant_via_gate_api():
-    """开工卡 grant is recorded on the gate (hot-path request_delegation_authorization retired)."""
+async def test_delegation_grant_via_gate_api():
+    """Delegation grant is recorded on the gate (hot-path request_delegation_authorization retired)."""
     reg = InteractionRegistry()
     sink = EventSink()
     gate = _gate(sink, reg)
@@ -783,8 +783,8 @@ async def test_kickoff_grant_via_gate_api():
     assert decision2 is ApprovalDecision.APPROVE
 
 
-async def test_kickoff_grant_covers_run():
-    """B · 开工已授执行类后，同 execution 的 run 静默（不逐次弹门）。"""
+async def test_delegation_grant_covers_run():
+    """B · 已授执行类后，同 execution 的 run 静默（不逐次弹门）。"""
     reg = InteractionRegistry()
     sink = EventSink()
     gate = _gate(sink, reg)
@@ -858,8 +858,8 @@ async def test_delegation_grant_skips_run_approval():
     assert _drain(sink) == []
 
 
-async def test_always_ask_policy_ignores_kickoff_grant():
-    """autonomy=always_ask（安全权限与治理 §三）：开工卡授权不短路——每个可授权调用仍出卡。"""
+async def test_always_ask_policy_ignores_delegation_grant():
+    """autonomy=always_ask（安全权限与治理 §三）：delegation grant 不短路——每个可授权调用仍出卡。"""
     from agentcore.core.types import AutonomyPolicy, recipe_to_axes
 
     reg = InteractionRegistry()
@@ -920,7 +920,7 @@ def test_delegation_grantable_tool_names_includes_execution_and_file_ops():
 
 
 async def test_session_file_trust_skips_mkdir_under_first_grant():
-    """开工授权：文件改动类会话信任，不必等开工卡（对齐 Composer 心智）。"""
+    """文件改动类会话信任，不必等 delegation grant（对齐 Composer 心智）。"""
     from agentcore.core.types import AutonomyPolicy, recipe_to_axes
     from agentcore.tools.builtin import approval_class_tool_names
 
@@ -1146,7 +1146,7 @@ async def test_session_host_trust_still_prompts_package_install():
 
 
 async def test_session_file_trust_does_not_cover_run():
-    """执行类仍需开工卡 / 逐次审批，不被文件会话信任短路。"""
+    """执行类仍需 delegation grant / 逐次审批，不被文件会话信任短路。"""
     from agentcore.core.types import AutonomyPolicy, recipe_to_axes
     from agentcore.tools.builtin import approval_class_tool_names
 

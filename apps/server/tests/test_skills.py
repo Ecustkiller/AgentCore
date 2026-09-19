@@ -371,6 +371,7 @@ def test_product_help_pins_section_ids_manual_paths_and_internal_action():
     ids = list_product_help_section_ids()
     assert "workspace" in ids
     assert "what" in ids
+    assert "prompts" in ids
     for sec in load_product_help_corpus()["sections"]:
         href = str(sec.get("href") or "")
         assert href.startswith("#/toolbox/manual/")

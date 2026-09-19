@@ -33,9 +33,6 @@ from agentcore.runtime.events.conversation_hub import (
     publish_conversation_signal,
 )
 from agentcore.runtime.events.debate import (
-    debate_pretrial_completed,
-    debate_pretrial_orders,
-    debate_pretrial_started,
     debate_result,
     debate_round,
     debate_round_started,
@@ -178,7 +175,4 @@ __all__ = [
     "debate_result",
     "debate_round_started",
     "debate_round",
-    "debate_pretrial_started",
-    "debate_pretrial_orders",
-    "debate_pretrial_completed",
 ]

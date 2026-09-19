@@ -84,7 +84,6 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "checkpoint_id": "str",
         "intent": "str",
         "card": "str",
-        "browser_login": "bool",
         "n_questions": "int",
         "n_options": "int",
     },
@@ -982,6 +981,15 @@ HISTORICAL_COMPAT: dict[str, str] = {
     ),
     "team_preview.research_first_rejected": (
         "历史兼容：曾把已退役的先调研续跑选项降级为停止；契约已拒收，不再发此事件"
+    ),
+    "plan_review.ceo_review_done": (
+        "历史兼容：曾在计划复核暂停前跑 LLM 把关成功时发出；把关模块已卸，不再发此事件"
+    ),
+    "plan_review.ceo_review_failed": (
+        "历史兼容：曾在计划复核 LLM 把关失败时发出；把关模块已卸，不再发此事件"
+    ),
+    "plan_review.ceo_review_fallback": (
+        "历史兼容：曾在计划复核 LLM 把关回落确定性摘要时发出；把关模块已卸，不再发此事件"
     ),
     "stage_card.consume_prepared": (
         "历史兼容：曾在点卡开辩前消费推进卡；入口已下线，不再发此事件"

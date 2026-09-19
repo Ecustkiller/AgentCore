@@ -1,6 +1,6 @@
-"""Pass-local round budget: dedicated light_repair cap; no product round fuse."""
+"""Pass-local round budget: dedicated write_pass / light_repair cap; no product round fuse."""
 
-from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, TokenUsage, ToolCallDelta
+from agentcore.llm.provider.protocol import LLMChunk, TokenUsage, ToolCallDelta
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.executor import build_agent_executor
@@ -13,9 +13,6 @@ from agentcore.runtime.runs.wave import WaveScheduler
 from agentcore.tools.builtin.handoff import HandoffTool
 from agentcore.tools.registry import ToolRegistry
 from tests.runs_executor.conftest import _ctx, _FileWriteTool, _ScriptedRounds
-
-# Retired sermon prefix — absence probes only; production no longer injects it.
-ROUND_BUDGET_AWARENESS_PREFIX = "[系统提示] 本段上限"
 
 
 def test_light_pass_rounds_are_dedicated():
@@ -48,14 +45,6 @@ def test_max_rounds_input_keeps_explicit_stamp():
         id_prefix="t",
     )
     assert plan_low.nodes[0].max_rounds is None
-
-
-def test_round_budget_awareness_helpers_removed():
-    from agentcore.runtime.runs.executor import retry as retry_mod
-
-    assert not hasattr(retry_mod, "format_round_budget_awareness")
-    assert not hasattr(retry_mod, "sync_round_budget_awareness")
-    assert not hasattr(retry_mod, "ROUND_BUDGET_AWARENESS_PREFIX")
 
 
 def test_bind_round_budget_on_begin_increments():
@@ -101,26 +90,8 @@ def test_bind_round_budget_stamps_coord_spend_on_same_channel():
         clear_active_coordination("e-round-stamp")
 
 
-def _is_fact(msg: LLMMessage) -> bool:
-    return (
-        msg.role == "user"
-        and isinstance(msg.content, str)
-        and msg.content.startswith(ROUND_BUDGET_AWARENESS_PREFIX)
-    )
-
-
-def _fact_texts(state) -> list[str]:  # noqa: ANN001
-    return [
-        m.content
-        for m in (state.transcript or [])
-        if m.role == "user"
-        and isinstance(m.content, str)
-        and m.content.startswith(ROUND_BUDGET_AWARENESS_PREFIX)
-    ]
-
-
-async def test_main_pass_does_not_inject_round_budget_awareness():
-    """Main produce pass must not tick remaining-rounds into the worker window."""
+async def test_main_pass_honors_explicit_max_rounds_without_extra_investigation():
+    """Explicit max_rounds stamps the pass; ceiling does not reopen a second investigation."""
     plan, _ = build_run_plan(
         [{"role": "W", "task": "write file", "max_rounds": 8}],
         id_prefix="t",
@@ -182,7 +153,6 @@ async def test_main_pass_does_not_inject_round_budget_awareness():
     state = res["t_1"]
     assert state.phase is RunPhase.COMPLETED
     assert provider.calls == 3
-    assert _fact_texts(state) == []
 
 
 async def test_react_stamps_coord_live_spend_for_ceo_brief():
@@ -269,197 +239,3 @@ async def test_react_stamps_coord_live_spend_for_ceo_brief():
         assert any(any(bit.startswith("已花 1400") for bit in row) for row in seen)
     finally:
         clear_active_coordination("e-live-spend")
-
-
-async def test_light_repair_does_not_announce_round_cap_after_exhaustion():
-    """Main pass hits max_rounds=1; light_repair still runs, without 本段上限 inject."""
-    plan, _ = build_run_plan(
-        [
-            {
-                "role": "W",
-                "task": "写报告",
-                "max_rounds": 1,
-                "deliverable": {"required_sections": ["结论"]},
-            }
-        ],
-        id_prefix="t",
-    )
-    provider = _ContentProviderWithRequests(
-        ["草稿里没有那个章节", "# 结论\n补上了必备章节"]
-    )
-    executor = build_agent_executor(
-        plan=plan,
-        llm=provider,
-        tools=ToolRegistry(),
-        sink=EventSink(),
-        base_tool_context=_ctx(),
-        system_prompt="SYS",
-        user_message="req",
-        execution_id="e",
-        approval_gate=None,
-    )
-    res = await WaveScheduler().run(plan, executor)
-    state = res["t_1"]
-    assert state.phase is RunPhase.COMPLETED
-    assert provider.calls == 2
-    repair_users = [
-        content
-        for req in provider.requests[1:]
-        for _role, content in req
-        if content.startswith(ROUND_BUDGET_AWARENESS_PREFIX)
-    ]
-    assert repair_users == []
-
-
-async def test_light_repair_runs_two_rounds_after_main_exhaustion():
-    """Main max_rounds=1 leftover would stop after 1 repair call; dedicated cap runs 2+."""
-    plan, _ = build_run_plan(
-        [
-            {
-                "role": "W",
-                "task": "写报告",
-                "max_rounds": 1,
-                "deliverable": {"required_sections": ["结论"]},
-            }
-        ],
-        id_prefix="t",
-    )
-    provider = _ScriptedRoundsWithRequests(
-        [
-            [LLMChunk(delta_content="草稿里没有那个章节")],
-            [
-                LLMChunk(
-                    delta_tool_calls=[
-                        ToolCallDelta(
-                            index=0,
-                            id="w1",
-                            function_name="file_write",
-                            arguments_delta='{"path": "notes.txt", "content": "scratch"}',
-                        )
-                    ]
-                )
-            ],
-            [LLMChunk(delta_content="# 结论\n补上了必备章节")],
-        ]
-    )
-    reg = ToolRegistry()
-    reg.register(_FileWriteTool())
-    executor = build_agent_executor(
-        plan=plan,
-        llm=provider,
-        tools=reg,
-        sink=EventSink(),
-        base_tool_context=_ctx(),
-        system_prompt="SYS",
-        user_message="req",
-        execution_id="e",
-        approval_gate=None,
-    )
-    res = await WaveScheduler().run(plan, executor)
-    state = res["t_1"]
-    assert state.phase is RunPhase.COMPLETED
-    assert provider.calls == 3
-    repair_facts = [
-        content
-        for req in provider.requests[1:]
-        for _role, content in req
-        if content.startswith(ROUND_BUDGET_AWARENESS_PREFIX)
-    ]
-    assert repair_facts == []
-
-
-async def test_contract_retry_skipped_after_round_ceiling():
-    """Hitting an explicit max_rounds stamp skips a full investigation retry."""
-    plan, _ = build_run_plan(
-        [
-            {
-                "role": "W",
-                "task": "emit json",
-                "max_rounds": 4,
-                "deliverable": {"output_format": "json"},
-            }
-        ],
-        id_prefix="t",
-    )
-    provider = _AlwaysWriteProvider()
-    reg = ToolRegistry()
-    reg.register(_FileWriteTool())
-    executor = build_agent_executor(
-        plan=plan,
-        llm=provider,
-        tools=reg,
-        sink=EventSink(),
-        base_tool_context=_ctx(),
-        system_prompt="SYS",
-        user_message="req",
-        execution_id="e",
-        approval_gate=None,
-    )
-    res = await WaveScheduler().run(plan, executor)
-    state = res["t_1"]
-    # Produce rounds: ceiling salvage may add a model call after the cap, but
-    # leftover under total=5 is not spent on a second investigation.
-    assert state.rounds == 4
-    assert state.phase is RunPhase.COMPLETED
-
-
-class _AlwaysWriteProvider:
-    """Burn ReAct rounds with file_write so each pass actually hits max_rounds."""
-
-    base_url = "http://test.invalid/v1"
-
-    def __init__(self) -> None:
-        self.calls = 0
-
-    async def stream(self, request):  # noqa: ANN001
-        self.calls += 1
-        n = self.calls
-        yield LLMChunk(
-            delta_tool_calls=[
-                ToolCallDelta(
-                    index=0,
-                    id=f"w{n}",
-                    function_name="file_write",
-                    arguments_delta=f'{{"path": "s{n}.txt", "content": "x"}}',
-                )
-            ]
-        )
-
-
-class _ScriptedRoundsWithRequests:
-    """Scripted ReAct rounds that record every request's messages."""
-
-    base_url = "http://test.invalid/v1"
-
-    def __init__(self, rounds: list[list[LLMChunk]]) -> None:
-        self._rounds = rounds
-        self.calls = 0
-        self.requests: list[list[tuple[str, str]]] = []
-
-    async def stream(self, request):  # noqa: ANN001
-        self.requests.append([(m.role, m.content or "") for m in request.messages])
-        chunks = (
-            self._rounds[self.calls]
-            if self.calls < len(self._rounds)
-            else [LLMChunk(delta_content="done")]
-        )
-        self.calls += 1
-        for chunk in chunks:
-            yield chunk
-
-
-class _ContentProviderWithRequests:
-    """Scripted content provider that records every request's messages."""
-
-    base_url = "http://test.invalid/v1"
-
-    def __init__(self, contents: list[str]) -> None:
-        self._contents = contents
-        self.calls = 0
-        self.requests: list[list[tuple[str, str]]] = []
-
-    async def stream(self, request):  # noqa: ANN001
-        self.requests.append([(m.role, m.content or "") for m in request.messages])
-        text = self._contents[self.calls] if self.calls < len(self._contents) else "done"
-        self.calls += 1
-        yield LLMChunk(delta_content=text)

@@ -259,21 +259,11 @@ def test_build_run_plan_leftover_native_key_does_not_clear_artifact_dir():
 
 
 def test_ceo_schema_exposes_artifacts_only():
-    """CEO 填参面只有 artifacts；内部旋钮不进 schema。"""
+    """CEO 填参面只有 artifacts。"""
     from agentcore.tools.builtin.delegate.schema import TASK_DELIVERABLE_SCHEMA
 
     props = TASK_DELIVERABLE_SCHEMA["properties"]
     assert set(props) == {"artifacts"}
-    for banned in (
-        "form",
-        "required_sections",
-        "output_format",
-        "strict",
-        "citation_mode",
-        "workspace_native",
-        "artifact_dir",
-    ):
-        assert banned not in props
 
 
 def test_shared_artifact_dir_not_sibling_cross():

@@ -1143,12 +1143,12 @@
       }
     },
     "debateRounds": [],
-    "debatePretrial": null,
     "crossExamEnabled": false,
     "debateOpening": null,
     "deliveryStatus": null,
     "turnWarning": null,
     "autoFolder": null,
     "userInterjections": []
-  }
+  },
+  "preview": false
 }

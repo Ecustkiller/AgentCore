@@ -91,6 +91,20 @@ describe("sidecarHealth — 首次探活 + 会话级健康缓存", () => {
     });
   });
 
+  it("探活失败无 onStatus 时抬主进程中文合同句", async () => {
+    probeMock.mockRejectedValue(
+      new Error(
+        "Error invoking remote method 'sidecar:probe': Error: 这个文件夹已经不在这台电脑上：/gone。请在工作区芯片里重新选择它所在的位置。",
+      ),
+    );
+    await expect(probeSidecar(target("r-gone"))).resolves.toEqual({
+      healthy: false,
+      probed: true,
+      detail:
+        "这个文件夹已经不在这台电脑上：/gone。请在工作区芯片里重新选择它所在的位置。",
+    });
+  });
+
   it("已 bad 的根：TTL 内命中缓存（false），仍带回上次诊断，不再拉起", async () => {
     takeRecentSidecarFailureMock.mockReturnValue(
       "本地引擎启动失败：spawn uv ENOENT",

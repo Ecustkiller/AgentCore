@@ -1153,13 +1153,13 @@ def test_debater_task_injects_research_dossier_index():
     # 真纯丙·H4：不再注入系统只读 tools 名单
     assert "tools" not in payload
 
-    # 庭前完整度驱动：full pack → 辩手 retrieval_budget=0（禁外证扫网）
+    # 开赛材料完整度驱动：full pack → 辩手 retrieval_budget=0（禁外证扫网）
     cfg_full = DebateConfig(
         motion="X",
         form=DebateForm.DEBATE,
         sides=sides,
         research_dossier_index=idx,
-        pretrial_evidence_ready=True,
+        evidence_pack=object(),
         evidence_completeness="full",
         debater_retrieval_budgets={"pro": 0, "con": 0},
     )

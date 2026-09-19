@@ -1,4 +1,4 @@
-"""引用即出处：对话成稿可挂已登记号（含 search-only）；落盘成文仍走 citation_quality。"""
+"""引用即出处：对话成稿可挂已登记号（含 search-only）。"""
 
 from __future__ import annotations
 
@@ -104,17 +104,9 @@ def test_finish_guard_search_only_passes_chat():
     )
 
 
-def test_citation_quality_search_only_blocked():
-    from agentcore.runtime.verify import citation_quality_reworks
-
-    reworks = citation_quality_reworks("见 #r1。", citable_ids=frozenset())
-    assert reworks and "#r1" in reworks[0]
-
-
 async def test_worker_search_only_rn_passes_without_reset():
     """仅 search-only 引用：保留 #rN，无 content_reset / Rework / 自动深读。"""
     led = _seed_ledger("https://example.com/a", deep_read=False)
-    assert led.draft_citable_ids() == frozenset()
     assert led.citable_ids() == frozenset({"#r1"})
     provider = _ScriptedProvider([[_content_chunk("结论见 #r1。")]])
     (content, _r, _u, rounds), _messages, _sink, resets = await _run_worker(
@@ -123,7 +115,6 @@ async def test_worker_search_only_rn_passes_without_reset():
     assert content == "结论见 #r1。"
     assert rounds == 1
     assert resets == []
-    assert led.draft_citable_ids() == frozenset()
     assert led.get("#r1")["deep_read"] is False
 
 
@@ -391,11 +382,10 @@ def test_turn_paused_captures_and_rehydrates_ledger():
     assert fact.evidence_ledger[0]["id"] == "#r1"
     assert fact.evidence_ledger[1]["id"] == "#r2"
 
-    # rehydrate → load_entries → id 连续；成稿闸仅 deep_read∪selected
+    # rehydrate → load_entries → id 连续
     restored = EvidenceLedgerCore(id_prefix="#r")
     restored.load_entries(fact.evidence_ledger or [])
     assert restored.citable_ids() == frozenset({"#r1", "#r2"})
-    assert restored.draft_citable_ids() == frozenset({"#r1"})
     assert (
         finish_guard(
             "挂起前已引用 #r1。",

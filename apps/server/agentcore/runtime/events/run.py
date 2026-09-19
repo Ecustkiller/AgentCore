@@ -349,8 +349,8 @@ def run_failed(
     retry_after: float | None = None,
 ) -> SSEEvent:
     payload: dict[str, Any] = {"run_id": run_id, "agent_id": agent_id, "error": error}
-    # Additive machine-readable face class (quality/format/model/call). Omit when unknown so
-    # old fixtures stay byte-identical and clients fall back to「失败」/空 error「调用失败」.
+    # Additive machine-readable face class (model/call). Omit when unknown so
+    # clients fall back to「失败」/空 error「调用失败」。
     if failure_kind:
         payload["failure_kind"] = failure_kind
     # 完工交接简报 on a FAILED run: a worker that produced a product + authored a 交接简报 but
@@ -473,7 +473,7 @@ def workspace_lock_wait(*, conversation_id: str, waiting: bool) -> SSEEvent:
     """同 folder 写锁短等：争锁前 ``waiting=true``，acquire 后 ``waiting=false``。
 
     Emitted via ``ServerWorkspace`` mutation-lock ``on_waiting`` (bound in
-    ``build_turn_backend``) when a write contends. A′: kickoff no longer holds the
+    ``build_turn_backend``) when a write contends. Pause does not hold the
     folder lock. EPHEMERAL — no journal; clients must not render empty 「Thinking…」
     while this is true（不得静默等锁）.
     """

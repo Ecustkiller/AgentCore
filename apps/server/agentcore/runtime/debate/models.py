@@ -265,7 +265,7 @@ def _available_entries(catalog: ModelCatalog) -> list[ModelCatalogEntry]:
 def candidate_from_entry(
     entry: ModelCatalogEntry, *, side_key: str = ""
 ) -> dict[str, Any]:
-    """开赛卡 / 错误载荷候选行（ref 为可抄写身份；origin/provider_id 仍作行属性）。"""
+    """错误载荷候选行（ref 为可抄写身份；origin/provider_id 仍作行属性）。"""
     ident = _entry_identity(entry)
     row: dict[str, Any] = {
         "ref": ident.ref() or entry.ref,
@@ -858,7 +858,7 @@ def collect_debate_identities(config: DebateConfig, *, turn_model: str = "") -> 
 
 
 def side_wire_fields(side: DebateSide) -> dict[str, Any]:
-    """开赛卡 / debate_result sides 行：有已消歧身份才带字段（absent 兼容旧向量）。"""
+    """debate_result sides 行：有已消歧身份才带字段（absent 兼容旧向量）。"""
     row: dict[str, Any] = {
         "key": side.key,
         "name": side.name,
@@ -887,7 +887,7 @@ def allocate_debate_run_ids(
     - 主持人：``debate_{uuid}``（与开赛后主持人节点 id 同形）
     - 各方槽位：``{moderator_run_id}_{side.key}``（``model_overrides`` 键；≠ 各拍发言 run）
 
-    写回 ``config`` 与可选 ``arguments``（resume blob / 开工卡持久化）。
+    写回 ``config`` 与可选 ``arguments``（resume blob）。
     """
     from dataclasses import replace
 

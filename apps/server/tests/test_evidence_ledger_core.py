@@ -18,29 +18,6 @@ def test_citable_for_tier_p2():
     assert citable_for_tier("blocked") is False
 
 
-def test_promote_refs_cited_in_landed_note_selects_search_only():
-    """方向笔记落盘：正文 #rN 升 selected，供 CEO 成稿闸继承。"""
-    led = EvidenceLedgerCore(id_prefix="#r")
-    led.load_entries(
-        [
-            {
-                "id": "#r1",
-                "url": "https://example.com/a",
-                "title": "A",
-                "tier": "unknown",
-                "citable": True,
-                "deep_read": False,
-                "selected": False,
-                "registrant": "worker:w1",
-            }
-        ]
-    )
-    assert led.draft_citable_ids() == frozenset()
-    newly = led.promote_refs_cited_in_landed_note("结论见 #r1 与伪造 #r9")
-    assert newly == frozenset({"#r1"})
-    assert led.draft_citable_ids() == frozenset({"#r1"})
-
-
 def test_load_entries_preserves_ids_and_continues():
     led = EvidenceLedgerCore(id_prefix="#r")
     led.load_entries(
@@ -232,32 +209,6 @@ def test_deep_read_upgrades_existing_entry():
     assert e["registrant"] == "worker:w1"
 
 
-def test_draft_citable_requires_deep_read_or_selected():
-    led = EvidenceLedgerCore(id_prefix="#r")
-    led.register_sync(
-        url="https://example.com/search-hit",
-        title="Hit",
-        registrant="ceo",
-        deep_read=False,
-    )
-    led.register_sync(
-        url="https://example.com/read",
-        title="Read",
-        registrant="ceo",
-        deep_read=True,
-    )
-    assert led.citable_ids() == frozenset({"#r1", "#r2"})
-    assert led.draft_citable_ids() == frozenset({"#r2"})
-    # web_fetch 升级后进入成稿闸
-    led.register_sync(
-        url="https://example.com/search-hit",
-        title="Hit",
-        registrant="ceo",
-        deep_read=True,
-    )
-    assert led.draft_citable_ids() == frozenset({"#r1", "#r2"})
-
-
 def test_mark_selected_from_content_and_hydrate():
     led = EvidenceLedgerCore(id_prefix="#r")
     led.register_sync(
@@ -280,7 +231,6 @@ def test_mark_selected_from_content_and_hydrate():
     restored = EvidenceLedgerCore(id_prefix="#r")
     restored.load_entries(led.all_entries())
     assert restored.get("#r1")["selected"] is True
-    assert restored.draft_citable_ids() == frozenset({"#r1"})
 
 
 def test_merge_history_ledgers_and_doc_kind():

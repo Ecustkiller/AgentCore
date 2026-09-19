@@ -7,7 +7,7 @@
 ``artifacts`` 验收行），模板拼接、不调 LLM。事件继续发射，供 ``finish_guard``
 读路径；聊天流产物清单卡已撤。**用户面**已否决验收大卡——对账档位全部静默。
 
-``delivered_files`` / CEO「已交付」= 仅 ``accepted``；cite-tier 等合同点名路径为
+``delivered_files`` / CEO「已交付」= 仅 ``accepted``；合同点名路径为
 ``rejected``，不得因 soft-COMPLETED 进入 delivered_files。主清单认 ``artifacts``
 （accepted+rejected）= 本 ``execution_id`` 各波**实际落盘**路径的并集（同 path
 后写覆盖）。声明路径已命中时，未声明备份不进清单、不打未通过；声明未命中时，

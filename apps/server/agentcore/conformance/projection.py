@@ -204,8 +204,6 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
     # 辩论逐轮叙事（debate_round_started / debate_round）：进行中实时叠加，折叠累积按 round_no
     # 升序。P2 DURABLE——落 journal，刷新后 hydrate/fold 重建；收场后全量叙事线亦在 debate。
     debate_rounds: list[dict[str, Any]] = []
-    # 庭前取证（§二之二）：started/orders/progress → completed 权威覆盖。
-    debate_pretrial: dict[str, Any] | None = None
     # 交付状态（delivery_status，能力闸门与交付诚实性）：同 execution_id 保最新。DURABLE。
     delivery_status: dict[str, Any] | None = None
     # 预检警告（turn_warning）：P2 DURABLE。
@@ -613,8 +611,9 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             if run is not None:
                 run["status"] = "failed"
                 run["error"] = p.get("error")
-                # Additive face class; absent on old journals → None（脸回退「失败」）.
-                run["failureKind"] = p.get("failure_kind")
+                # Additive face class; absent / unknown (old quality/format journals) → None.
+                kind = p.get("failure_kind")
+                run["failureKind"] = kind if kind in ("model", "call") else None
                 # Additive: files already landed before terminal failure.
                 run["productLanded"] = p.get("product_landed")
                 # 完工交接简报 on a failed run: the author's wrap-up when a contract-missing
@@ -786,56 +785,6 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                     "witness_exam": list(p.get("witness_exam") or []),
                 }
             )
-
-        elif etype == "debate_pretrial_started":
-            debate_pretrial = {
-                "status": "running",
-                "skipReason": p.get("skip_reason"),
-                "sides": list(p.get("sides") or []),
-                "orders": [],
-                "evidenceLedgerCount": 0,
-                "fallbackSelfSearch": False,
-                "evidenceReady": False,
-                "completeness": "empty",
-                "incomplete": True,
-            }
-
-        elif etype == "debate_pretrial_orders":
-            if debate_pretrial is None:
-                debate_pretrial = {
-                    "status": "running",
-                    "skipReason": None,
-                    "sides": list(p.get("sides") or []),
-                    "orders": [],
-                    "evidenceLedgerCount": 0,
-                    "fallbackSelfSearch": False,
-                    "evidenceReady": False,
-                    "completeness": "empty",
-                    "incomplete": True,
-                }
-            debate_pretrial["orders"] = list(p.get("orders") or [])
-
-        elif etype == "debate_pretrial_completed":
-            completeness = p.get("completeness") or "empty"
-            debate_pretrial = {
-                "status": p.get("status") or "done",
-                "skipReason": p.get("skip_reason"),
-                "sides": list(p.get("sides") or []),
-                "orders": list(p.get("orders") or []),
-                "evidenceLedgerCount": int(p.get("evidence_ledger_count") or 0),
-                "fallbackSelfSearch": bool(p.get("fallback_self_search")),
-                "evidenceReady": bool(p.get("evidence_ready")),
-                "completeness": completeness,
-                "incomplete": bool(p.get("incomplete", completeness != "full")),
-            }
-            if p.get("external_evidence_mode") is not None:
-                debate_pretrial["externalEvidenceMode"] = p.get(
-                    "external_evidence_mode"
-                )
-            if p.get("external_evidence_reason") is not None:
-                debate_pretrial["externalEvidenceReason"] = p.get(
-                    "external_evidence_reason"
-                )
 
         elif etype in (
             "team_preview_required",
@@ -1043,7 +992,6 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
         "cost": cost,
         "debate": debate,
         "debateRounds": debate_rounds,
-        "debatePretrial": debate_pretrial,
         "crossExamEnabled": cross_exam_enabled,
         "debateOpening": debate_opening,
         # 交付状态（delivery_status）：结构化交付对账（已交付/缺口/待操作），null 当无。

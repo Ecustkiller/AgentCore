@@ -1046,7 +1046,12 @@ describe("unknown journal events", () => {
             task_summary: "并行调研",
             agents: [{ id: "agent-1", role: "研究员" }],
             runs: [
-              { id: "run-1", agent_id: "agent-1", task: "调研", depends_on: [] },
+              {
+                id: "run-1",
+                agent_id: "agent-1",
+                task: "调研",
+                depends_on: [],
+              },
             ],
           },
         },

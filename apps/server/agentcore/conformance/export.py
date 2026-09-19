@@ -25,7 +25,7 @@ from agentcore.conformance.timestamps import (
     wall_clock_ms_sequence,
 )
 from agentcore.conformance.turn_verdict import project_turn_verdict
-from agentcore.conformance.vectors import VECTORS
+from agentcore.conformance.vectors import PREVIEW_SKIP, VECTORS
 from agentcore.runtime.events import SSEEvent
 
 # apps/server/agentcore/conformance/export.py → repo root is parents[4].
@@ -63,6 +63,8 @@ def build_fixtures() -> list[dict[str, Any]]:
         turn_verdict = project_turn_verdict(name, projected)
         if turn_verdict is not None:
             fixture["turnVerdict"] = turn_verdict
+        if name in PREVIEW_SKIP:
+            fixture["preview"] = False
         fixtures.append(fixture)
     return fixtures
 

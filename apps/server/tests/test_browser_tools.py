@@ -733,30 +733,24 @@ async def test_type_password_blocked_maps_to_tool_result(tmp_path):
     assert result.success is False
     assert result.contract_failure is True
     assert result.metadata.get("code") == "password_blocked"
-    # Fake ctx has no escalation channel → CEO path (ask_user), not escalate-only.
-    assert "ask_user(browser_login=true)" in _fail_text(result)
-    assert "browser_login" in _fail_text(result)
+    assert "不得填写" in _fail_text(result)
+    assert "右坞" in _fail_text(result)
     assert session.sent and session.sent[0].action == "type"
 
 
 def test_browser_type_schema_guides_password_login():
-    """约束在 type 参数；登录接管在 consult(CEO) / escalate(worker)，不进按钮。"""
+    """约束在 type 参数；登录接管在 consult HOW，不进按钮。"""
     from agentcore.runtime.resolve.prompt.ceo_core import capability_how_suffix
-    from agentcore.tools.builtin.escalate import EscalateTool
 
     text_desc = BrowserTypeTool().schema.parameters["properties"]["text"]["description"]
     assert "密码" in text_desc
     assert "password_blocked" not in text_desc
-    assert "browser_login" not in text_desc
     assert "ask_user" not in text_desc
     assert "escalate" not in text_desc
     assert "M0 不支持登录" not in text_desc
     assert "M0 不支持登录" not in BrowserTypeTool().schema.description
     how = capability_how_suffix({"browser"})
-    assert "ask_user(browser_login=true)" in how
-    assert "escalate(browser_login=true)" not in how
-    login = EscalateTool().schema.parameters["properties"]["browser_login"]["description"]
-    assert "blocking" in login
+    assert "永不代填密码" in how
 
 
 def test_navigate_schema_keeps_value_not_desktop_vs_cloud_playbook():

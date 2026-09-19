@@ -10,8 +10,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from agentcore.conformance.projection import project_turn
 from agentcore.conformance.recording_cut import (
     CUT_KEEP_EPHEMERAL,

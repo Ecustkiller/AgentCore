@@ -503,35 +503,6 @@ def test_schema_no_longer_says_mvp_leave_empty():
     assert "@platform" in model_desc
 
 
-def test_debate_kickoff_summary_includes_moderator_and_side_models():
-    from agentcore.runtime.kickoff.summary import debate_kickoff_summary
-
-    cfg = DebateConfig(
-        motion="谁更聪明",
-        form=DebateForm.DEBATE,
-        sides=[
-            DebateSide(
-                key="a",
-                name="正",
-                stance="支持",
-                model="gpt-4o",
-                origin="platform",
-            ),
-            DebateSide(key="b", name="反", stance="反对"),
-        ],
-        moderator_model="deepseek-v4-flash",
-        moderator_origin="platform",
-        same_model_debate=False,
-    )
-    summary = debate_kickoff_summary(cfg, arguments={})
-    card = summary.card_payload()
-    assert card["sides"][0]["model"] == "gpt-4o"
-    assert card["sides"][0]["origin"] == "platform"
-    assert "model" not in card["sides"][1]
-    assert card["moderator_model"] == "deepseek-v4-flash"
-    assert card["moderator_origin"] == "platform"
-
-
 def test_skill_teaches_catalog_ref_not_mvp_empty():
     from agentcore.runtime.skills import build_system_skill_registry
     from agentcore.tools.builtin.debate.schema import DEBATE_PARAMETERS

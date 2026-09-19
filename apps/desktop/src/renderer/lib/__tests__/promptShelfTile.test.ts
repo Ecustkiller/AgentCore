@@ -280,7 +280,8 @@ describe("promptItemShelfCopy", () => {
     const copy = promptItemShelfCopy(
       mineItem({
         label: "合同审查",
-        content: "---\napply: on_demand\noffers_tools: host, debate\n---\n怎么审",
+        content:
+          "---\napply: on_demand\noffers_tools: host, debate\n---\n怎么审",
       }),
       { sceneGroupLabel: "法律合规" },
     );

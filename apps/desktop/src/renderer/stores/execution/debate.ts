@@ -1,10 +1,4 @@
-import type {
-  DebateNarrativeRound,
-  DebatePretrialCompletedPayload,
-  DebatePretrialOrdersPayload,
-  DebatePretrialStartedPayload,
-} from "@/types/events";
-import type { DebatePretrialProjection } from "@agentcore/protocol-conformance";
+import type { DebateNarrativeRound } from "@/types/events";
 import type { Execution, RunNode } from "./types";
 
 /**
@@ -65,90 +59,6 @@ export function upsertDebateRound(
   const next = [...rounds];
   next[idx] = round;
   return next;
-}
-
-/** 庭前取证折叠态（与 oracle `DebatePretrialProjection` 同形）。 */
-export type DebatePretrialState = DebatePretrialProjection;
-
-function emptyRunningPretrial(
-  p: DebatePretrialStartedPayload | DebatePretrialOrdersPayload,
-): DebatePretrialState {
-  return {
-    status: "running",
-    skipReason: ("skip_reason" in p ? p.skip_reason : null) ?? null,
-    sides: (p.sides ?? []).map((s) => ({ key: s.key, name: s.name })),
-    orders: [],
-    evidenceLedgerCount: 0,
-    fallbackSelfSearch: false,
-    evidenceReady: false,
-  };
-}
-
-/**
- * 折叠 `debate_pretrial_*`（权威 = completed）。与后端 oracle / 手机 fold 同语义，
- * 供 live store · hydrate · conformanceFold 共用。
- */
-export function foldDebatePretrial(
-  current: DebatePretrialState | null,
-  type:
-    | "debate_pretrial_started"
-    | "debate_pretrial_orders"
-    | "debate_pretrial_completed",
-  payload: unknown,
-): DebatePretrialState | null {
-  if (type === "debate_pretrial_started") {
-    const p = payload as DebatePretrialStartedPayload;
-    return emptyRunningPretrial(p);
-  }
-  if (type === "debate_pretrial_orders") {
-    const p = payload as DebatePretrialOrdersPayload;
-    const base = current ?? emptyRunningPretrial(p);
-    return {
-      ...base,
-      sides:
-        (p.sides ?? []).length > 0
-          ? (p.sides ?? []).map((s) => ({ key: s.key, name: s.name }))
-          : base.sides,
-      orders: (p.orders ?? []).map((o) => ({
-        side_key: o.side_key,
-        tasks: (o.tasks ?? []).map((t) => ({
-          query: t.query,
-          ...(t.purpose ? { purpose: t.purpose } : {}),
-        })),
-        source: o.source ?? "empty",
-      })),
-    };
-  }
-  // completed — authoritative replace
-  const p = payload as DebatePretrialCompletedPayload;
-  // 缺 completeness/incomplete（旧 journal）= 未知，勿默认 empty→incomplete。
-  const completeness = p.completeness != null ? p.completeness : undefined;
-  const incomplete =
-    typeof p.incomplete === "boolean" ? p.incomplete : undefined;
-  return {
-    status: p.status || "done",
-    skipReason: p.skip_reason ?? null,
-    sides: (p.sides ?? []).map((s) => ({ key: s.key, name: s.name })),
-    orders: (p.orders ?? []).map((o) => ({
-      side_key: o.side_key,
-      tasks: (o.tasks ?? []).map((t) => ({
-        query: t.query,
-        ...(t.purpose ? { purpose: t.purpose } : {}),
-      })),
-      source: o.source ?? "empty",
-    })),
-    evidenceLedgerCount: p.evidence_ledger_count ?? 0,
-    fallbackSelfSearch: Boolean(p.fallback_self_search),
-    evidenceReady: Boolean(p.evidence_ready),
-    ...(completeness != null ? { completeness } : {}),
-    ...(incomplete != null ? { incomplete } : {}),
-    ...(p.external_evidence_mode != null
-      ? { externalEvidenceMode: p.external_evidence_mode }
-      : {}),
-    ...(p.external_evidence_reason != null
-      ? { externalEvidenceReason: p.external_evidence_reason }
-      : {}),
-  };
 }
 
 /**
@@ -253,7 +163,7 @@ export function debateBeatLabel(opts: {
 export function isDebate(execution: Execution): boolean {
   // 收场产物是辩论的强信号（debate_result 必带）。进行中无产物时退回辩手 run 的标签：
   // 2 方正反带 stance；无 stance 的辩手 / 证人席靠显式 group 白名单（禁 debate:* 前缀——
-  // 历史庭前附属 run 等不得把整场误判 / 击穿布局）。旧 journal 的 debate:red_team /
+  // 历史附属 run 等不得把整场误判 / 击穿布局）。旧 journal 的 debate:red_team /
   // debate:roundtable 仍在白名单，避免辩手节点掉出辩论图。
   return (
     execution.debate != null || execution.runs.some((r) => isDebateTaggedRun(r))

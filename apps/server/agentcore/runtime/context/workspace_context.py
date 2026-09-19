@@ -121,7 +121,7 @@ _OS_LABEL = {"win32": "Windows", "darwin": "macOS", "linux": "Linux"}
 def format_workspace_git_line(
     fact: WorkspaceGitFact, *, tool_enabled: bool = True
 ) -> str:
-    """Single git coordinate for ``<工作区>`` (never a kickoff gate).
+    """Single git coordinate for ``<工作区>`` (never a confirmation card).
 
     Unassembled git is a 缺口, not a Git line — do not name the branch
     when the model does not hold the tool. Repo-policy (``no_repo``)

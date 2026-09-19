@@ -16,7 +16,6 @@ import type {
   UsageBreakdown,
   WorkerRunPhase,
 } from "@/types/events";
-import type { DebatePretrialProjection } from "@agentcore/protocol-conformance";
 
 // Re-exported so run-detail components render the「收到的上下文」blocks from the store's
 // contract (上下文传递可视化) without reaching into the wire types directly.
@@ -289,15 +288,9 @@ export interface RunEscalation {
   /** 仅 arbitrated_by=ceo：是否经 ask_user 转交用户。 */
   via_user?: boolean;
   /**
-   * 浏览器登录等待 escalate（wire `browser_login`）。pending 时 EscalationCard 呈现
-   * 「需要你登录」+ 打开直播 CTA；主操作仍是 resolve「已登录，继续」。Desktop-local —
-   * 不进 conformance ProjectedTurn（golden 无此字段）。缺省 / false = 普通拍板卡。
-   */
-  browserLogin?: boolean;
-  /**
    * 非阻塞 raised 的来源标记（wire `run_escalation.source`）。
    * `validation_thrash` / `ceiling_backstop` → 卡住早停卡；缺省 / 其它 → 真·边干边上报。
-   * Desktop-local — 不进 conformance ProjectedTurn（与 browserLogin 同类；conformanceFold 勿带出）。
+   * Desktop-local — 不进 conformance ProjectedTurn（conformanceFold 勿带出）。
    * 旧流缺字段时按普通边干边上报。
    */
   source?: string;
@@ -312,7 +305,7 @@ export interface RunEscalation {
    * 这次挂起真实拿到的墙钟上限（秒，wire `timeout_seconds`）——只有运维配了
    * `checkpoint_timeout_seconds` 才有值。缺省 = 默认部署的无限期等待：不答就一直挂着，
    * 所以卡面**不得**无条件写「未答则按假设继续」（见 escalationWaitCopy）。
-   * Desktop-local — 不进 conformance ProjectedTurn（与 browserLogin 同类）。
+   * Desktop-local — 不进 conformance ProjectedTurn。
    */
   timeoutSeconds?: number;
 }
@@ -500,9 +493,7 @@ export interface Execution {
   /** 主持人开场白（`debate_round_started.opening`）：仅首轮携带；sticky 取第一个非空。
    * 收场 {@link debate}.opening 仍是权威。缺字段 / 老 journal → null。 */
   debateOpening: string | null;
-  /** 庭前取证（`debate_pretrial_*`）：开赛后首轮前；null = 无 / 老 journal。 */
-  debatePretrial: DebatePretrialProjection | null;
-  /** 场级证据台账（`debate_pretrial_completed` / `debate_round` 的
+  /** 场级证据台账（`debate_round` 的
    * `evidence_ledger_delta` 累积 / `debate_result.evidence_ledger`
    * 权威覆盖）：辩论徽章 `#rN` 溯源。桌面 UI 态——不进 conformance ProjectedTurn（oracle 经
    * `debate.evidence_ledger` 承载收场权威；live delta 同路径累积）。非辩论 / 旧 fixture 可缺省。 */

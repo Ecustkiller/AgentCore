@@ -463,18 +463,7 @@ class _BrowserToolBase:
             # Driver hard-rejects password fills (DOM-authoritative); map to a
             # machine-readable ToolResult so the model escalates for user login.
             if "password_blocked" in err:
-                # Worker has escalate channel; CEO does not — guide by role.
-                if context.escalation is not None:
-                    guide = (
-                        "请 escalate(blocking=true, browser_login=true) "
-                        "让用户在右坞完成登录并点「已登录，继续」。"
-                    )
-                else:
-                    guide = (
-                        "请 ask_user(browser_login=true) "
-                        "让用户在右坞完成登录并点「已登录，继续」。"
-                    )
-                msg = f"目标为密码输入框，AI 不得填写。{guide}"
+                msg = "目标为密码输入框，AI 不得填写。请让用户在右坞亲自完成登录。"
                 return ToolResult(
                     tool_call_id="",
                     success=False,

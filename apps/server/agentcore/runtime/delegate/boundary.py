@@ -5,11 +5,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
-from agentcore.runtime.runs.constants import PLAN_REVIEW_SUMMARY_CHARS
+from agentcore.runtime.runs.constants import HANDOFF_SUMMARY_CHARS
 
 if TYPE_CHECKING:
     from agentcore.runtime.runs.plan import RunPlan
-    from agentcore.runtime.runs.types import RunSpec
 
 DelegateTool = Any
 
@@ -24,7 +23,7 @@ def checkpoint_active(tool: DelegateTool) -> bool:
 def review_summary_text(
     state: Any | None,
     *,
-    limit: int = PLAN_REVIEW_SUMMARY_CHARS,
+    limit: int = HANDOFF_SUMMARY_CHARS,
 ) -> str:
     """Build a boundary-card excerpt for one completed run.
 

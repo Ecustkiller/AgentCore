@@ -1,6 +1,6 @@
 """Debate-form parser tests; engine commitment gate is withdrawn.
 
-Parser still classifies kickoff answers. Wrap-up is not nudged or blocked.
+Parser still classifies settled ask_user answers. Wrap-up is not nudged or blocked.
 """
 
 from __future__ import annotations
@@ -122,7 +122,7 @@ def _debate_gate_msgs(messages: list[LLMMessage]) -> list[LLMMessage]:
     ]
 
 
-def _kickoff_messages(*, settled: str) -> list[LLMMessage]:
+def _settled_ask_messages(*, settled: str) -> list[LLMMessage]:
     return [
         LLMMessage(role="user", content="开干"),
         LLMMessage(
@@ -198,7 +198,7 @@ def test_user_selected_debate_form_from_desktop_note():
     )
 
 
-def test_user_selected_debate_form_honors_card_default_on_bare_confirm():
+def test_user_selected_debate_form_bare_confirm_is_not_a_pick():
     args = json.dumps(
         {
             "questions": [
@@ -228,7 +228,7 @@ def test_user_selected_debate_form_honors_card_default_on_bare_confirm():
             content="用户确认：按你提出的方向继续。",
         ),
     ]
-    assert user_selected_debate_form(messages)
+    assert not user_selected_debate_form(messages)
 
 
 def test_should_debate_gate_respects_latches():
@@ -255,7 +255,7 @@ async def test_selected_debate_not_executed_injects_nudge():
     content, messages = await _run_captain(
         provider,
         _registry(_StubTool(name="debate")),
-        messages=_kickoff_messages(settled=_SETTLED_AFFIRM),
+        messages=_settled_ask_messages(settled=_SETTLED_AFFIRM),
     )
 
     assert content == "汇总已含论证，直接收官。"
@@ -280,7 +280,7 @@ async def test_debate_executed_passes_through():
     content, messages = await _run_captain(
         provider,
         _registry(_StubTool(name="debate")),
-        messages=_kickoff_messages(settled=_SETTLED_AFFIRM),
+        messages=_settled_ask_messages(settled=_SETTLED_AFFIRM),
     )
 
     assert content == "辩论后综述"
@@ -303,12 +303,12 @@ async def test_no_explicit_form_selection_no_intervene():
 
 @pytest.mark.asyncio
 async def test_decline_form_no_intervene():
-    """开工卡上明确不要辩论 → 不注入。"""
+    """settled ask_user 明确不要辩论 → 不注入。"""
     provider = _ScriptedProvider([[_content_chunk("无辩论交付")]])
     content, messages = await _run_captain(
         provider,
         _registry(_StubTool(name="debate")),
-        messages=_kickoff_messages(settled=_SETTLED_DECLINE),
+        messages=_settled_ask_messages(settled=_SETTLED_DECLINE),
     )
 
     assert content == "无辩论交付"
@@ -321,7 +321,7 @@ async def test_worker_role_never_fires():
     content, messages = await _run_captain(
         provider,
         _registry(_StubTool(name="debate")),
-        messages=_kickoff_messages(settled=_SETTLED_AFFIRM),
+        messages=_settled_ask_messages(settled=_SETTLED_AFFIRM),
         role="worker",
     )
 

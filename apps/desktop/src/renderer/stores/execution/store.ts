@@ -3,7 +3,6 @@ import { isGraphPerfEnabled, markGraphPerf } from "@/services/graphPerf";
 import type {
   CoordinationWaitPayload,
   DebateNarrativeRound,
-  DebatePretrialCompletedPayload,
   DebateResultPayload,
   DebateRoundPayload,
   DebateRoundStartedPayload,
@@ -16,8 +15,7 @@ import type {
 } from "@/types/events";
 import { turnStatusFromFinish } from "@agentcore/protocol-fold-kit";
 import { create } from "zustand";
-import { foldDebatePretrial, upsertDebateRound } from "./debate";
-import type { DebatePretrialState } from "./debate";
+import { upsertDebateRound } from "./debate";
 import { type RunFrame, frameFromEvent } from "./frames";
 import {
   ensureDelegateBatchStamps,
@@ -85,9 +83,7 @@ export interface ExecutionRuntime {
   crossExamEnabled: boolean;
   /** 主持人开场白（`debate_round_started.opening`，sticky 首个非空）。缺字段 → null。 */
   debateOpening: string | null;
-  /** 庭前取证（`debate_pretrial_*`）：开赛后首轮前；null = 无 / 老 journal。 */
-  debatePretrial: DebatePretrialState | null;
-  /** 场级证据台账（`debate_pretrial_completed` / `debate_round` 的
+  /** 场级证据台账（`debate_round` 的
    * `evidence_ledger_delta` 累积；收场由 `debate.evidence_ledger`
    * 权威覆盖）。驱动辩论徽章 `#rN` 溯源；不进 ProjectedTurn。 */
   evidenceLedger: EvidenceLedgerEntry[];
@@ -158,7 +154,7 @@ interface ExecutionState {
    * upsertDebateRound}; a no-plan slot ignores it. Drives the进行中 per-round overlay
    * before {@link recordDebateResult}'s 收场 product lands. */
   recordDebateRound: (round: DebateNarrativeRound, messageId: string) => void;
-  /** Merge one `debate_pretrial_completed` / `debate_round` `evidence_ledger_delta`
+  /** Merge one `debate_round` `evidence_ledger_delta`
    * into the slot's live evidence ledger. */
   recordEvidenceLedgerDelta: (
     delta: EvidenceLedgerEntry[],
@@ -168,15 +164,6 @@ interface ExecutionState {
   recordCrossExamEnabled: (enabled: boolean, messageId: string) => void;
   /** Sticky 首个非空主持人开场白（`debate_round_started.opening`）；后续空串不覆盖。 */
   recordDebateOpening: (opening: string, messageId: string) => void;
-  /** 折叠庭前取证事件（权威 = completed）。 */
-  recordDebatePretrial: (
-    type:
-      | "debate_pretrial_started"
-      | "debate_pretrial_orders"
-      | "debate_pretrial_completed",
-    payload: unknown,
-    messageId: string,
-  ) => void;
   /** Stamp a delegated worker's running-tool EXECUTION phase (`tool_use_progress` with
    * `run_id`). Transport-only — not a frame. */
   setWorkerToolPhase: (
@@ -234,7 +221,6 @@ const EMPTY_EXEC: ExecutionRuntime = {
   debateRounds: [],
   crossExamEnabled: false,
   debateOpening: null,
-  debatePretrial: null,
   evidenceLedger: [],
   workerToolPhases: {},
   runProcesses: null,
@@ -487,7 +473,6 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         debateRounds: [],
         crossExamEnabled: false,
         debateOpening: null,
-        debatePretrial: null,
         evidenceLedger: [],
         workerToolPhases: {},
         runProcesses: null,
@@ -590,13 +575,6 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         const trimmed = opening.trim();
         if (!cur.plan || !trimmed || cur.debateOpening) return null;
         return { debateOpening: trimmed };
-      }),
-
-    recordDebatePretrial: (type, payload, messageId) =>
-      patchExec(messageId, (cur) => {
-        if (!cur.plan) return null;
-        const next = foldDebatePretrial(cur.debatePretrial, type, payload);
-        return next === cur.debatePretrial ? null : { debatePretrial: next };
       }),
 
     setWorkerToolPhase: (payload, messageId) => {
@@ -730,7 +708,6 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         let debateRounds: DebateNarrativeRound[] = [];
         let crossExamEnabled = false;
         let debateOpening: string | null = null;
-        let debatePretrial: DebatePretrialState | null = null;
         let evidenceLedger: EvidenceLedgerEntry[] = [];
         let deliveryStatus: DeliveryStatusPayload | null = null;
         /** journal 内 `execution_completed.status`（若有）→ 覆盖 finishReason 投影。 */
@@ -762,26 +739,6 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
               userInterjections.push(leaf);
             } else {
               userInterjections[idx] = leaf;
-            }
-          } else if (
-            event.type === "debate_pretrial_started" ||
-            event.type === "debate_pretrial_orders" ||
-            event.type === "debate_pretrial_completed"
-          ) {
-            debatePretrial = foldDebatePretrial(
-              debatePretrial,
-              event.type,
-              event.payload,
-            );
-            // 与 live SSE / debate_round 同路径：pretrial_completed delta 并入场级台账。
-            if (event.type === "debate_pretrial_completed") {
-              const p = event.payload as DebatePretrialCompletedPayload;
-              if (p.evidence_ledger_delta?.length) {
-                evidenceLedger = mergeEvidenceLedger(
-                  evidenceLedger,
-                  p.evidence_ledger_delta,
-                );
-              }
             }
           } else if (event.type === "debate_round_started") {
             // P2 DURABLE：刷新后从 journal 重建辩论进行态（与 live recordDebateRound 同 fold）。
@@ -905,7 +862,6 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
               debateRounds,
               crossExamEnabled,
               debateOpening,
-              debatePretrial,
               evidenceLedger,
               workerToolPhases: {},
               runProcesses: hasUnsettledRuns({

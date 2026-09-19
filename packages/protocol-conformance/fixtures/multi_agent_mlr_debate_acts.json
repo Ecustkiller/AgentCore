@@ -1,6 +1,6 @@
 {
   "name": "multi_agent_mlr_debate_acts",
-  "description": "两幕链：幕1 MLR + 幕2 debate 新图 + prev（act-2/anchor=synthesizer；authorized_by=auto）",
+  "description": "幕1 多视角调研后，新回合开辩（新图接上幕）",
   "events": [
     {
       "type": "message_start",
@@ -318,7 +318,7 @@
       "payload": {
         "run_id": "synthesizer",
         "agent_id": "synthesizer",
-        "output_summary": "汇总完成并附命题卡",
+        "output_summary": "汇总完成",
         "duration_ms": 1200,
         "role": "member",
         "model": "deepseek-v4-pro",
@@ -1072,7 +1072,6 @@
         "witness_exam": []
       }
     ],
-    "debatePretrial": null,
     "crossExamEnabled": false,
     "debateOpening": "先从法律风险与舆情窗口切入。",
     "deliveryStatus": null,

@@ -22,8 +22,6 @@ export interface CheckpointDisplay {
   decision: CheckpointDecision | null;
   note: string;
   selected: string[];
-  /** Wire `browser_login` — CEO login gate; resume card mirrors escalate login UX. */
-  browserLogin?: boolean;
 }
 
 export interface Conversation {

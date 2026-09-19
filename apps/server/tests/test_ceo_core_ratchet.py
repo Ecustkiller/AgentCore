@@ -213,7 +213,6 @@ _GATED_MANUALS: tuple[tuple[str, str], ...] = (
     ("run", "wait_for"),
     ("host", "通用知识问答"),
     ("host", "Get-WinEvent"),
-    ("browser", "ask_user(browser_login=true)"),
     ("browser", "永不代填密码"),
     ("browser", "同一出站"),
 )

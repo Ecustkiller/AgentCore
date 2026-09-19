@@ -5,8 +5,8 @@ a NEW execution. User-interaction identities (checkpoint / approval / ask / esca
 / authorization) are keyed GLOBALLY on clients — the desktop InteractionStore's
 cross-conversation ``byId`` map ("resolved" tombstones never resurrect; a pending id
 keeps its first payload) and ``pausedTurns.removeByCheckpoint`` both match on the raw
-id — so re-emitting a recorded id makes the SECOND replay's kickoff card silently
-swallowed (开工卡永不出现). Every ``*_required`` id must therefore be reminted per
+id — so re-emitting a recorded id makes the SECOND replay's pause card silently
+swallowed. Every ``*_required`` id must therefore be reminted per
 replay, deterministically from ``(this turn's message_id, recorded id)`` so the send
 and resume legs of one turn agree and re-folds stay stable.
 

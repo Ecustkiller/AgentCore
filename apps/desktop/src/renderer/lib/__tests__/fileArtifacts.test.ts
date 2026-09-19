@@ -7,7 +7,11 @@ import {
   resolveFileArtifactsForCard,
   splitExportedSources,
 } from "@/lib/fileArtifacts";
-import type { DeliveryArtifact, DeliveryStatusPayload, ProcessStep } from "@/types/events";
+import type {
+  DeliveryArtifact,
+  DeliveryStatusPayload,
+  ProcessStep,
+} from "@/types/events";
 import { describe, expect, it } from "vitest";
 
 function toolStep(
@@ -158,8 +162,8 @@ describe("fileArtifacts from delivery_status.artifacts", () => {
         {
           path: "bad.md",
           status: "rejected",
-          reason: "citations_unverified",
-          detail: "缺 #rN",
+          reason: "contract_failed",
+          detail: "合同硬缺口",
           workspace_id: "folder:proj-1",
         },
       ],
@@ -173,8 +177,8 @@ describe("fileArtifacts from delivery_status.artifacts", () => {
         path: "bad.md",
         name: "bad.md",
         acceptance: "rejected",
-        acceptanceReason: "citations_unverified",
-        acceptanceDetail: "缺 #rN",
+        acceptanceReason: "contract_failed",
+        acceptanceDetail: "合同硬缺口",
         workspaceId: "folder:proj-1",
       },
     ]);
@@ -268,14 +272,9 @@ describe("leftover delivery_status.promoted skip", () => {
 
   it("does not remap listed paths from leftover from/to rows", () => {
     const arts = resolveFileArtifactsForCard(
-      status(
-        [{ path: `${WORKROOM}/起诉状.docx`, status: "accepted" }],
-        {
-          promoted: [
-            { from: `${WORKROOM}/起诉状.docx`, to: "起诉状.docx" },
-          ],
-        },
-      ),
+      status([{ path: `${WORKROOM}/起诉状.docx`, status: "accepted" }], {
+        promoted: [{ from: `${WORKROOM}/起诉状.docx`, to: "起诉状.docx" }],
+      }),
     );
     expect(arts[0]?.path).toBe(`${WORKROOM}/起诉状.docx`);
   });

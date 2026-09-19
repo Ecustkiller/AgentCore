@@ -50,7 +50,6 @@ function execution(overrides: Partial<Execution> = {}): Execution {
     debateRounds: [],
     crossExamEnabled: false,
     debateOpening: null,
-    debatePretrial: null,
     ...overrides,
   };
 }

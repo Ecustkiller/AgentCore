@@ -64,7 +64,7 @@ class DebateSide:
     内部仍为 ``model`` + ``origin`` + ``provider_id``。空 ``model`` = 回退 turn 主模型；
     非空须过目录校验后注入路由键。见 ``runtime.debate.models``。
 
-    ``run_id`` 是开赛前预分配的稳定槽位 id（开工卡 wire / ``model_overrides`` 键）；
+    ``run_id`` 是开赛前预分配的稳定槽位 id（``model_overrides`` 键）；
     与各拍发言 run（``{moderator}_rN_{key}``）不同。空 = 旧帧 / 未分配。
     """
 
@@ -119,16 +119,14 @@ class DebateConfig:
     # 可选案件底料（CEO 发起前已核实的客观事实清单）。空串 = 未传，首轮 debater_task
     # 零行为变化；非空时仅首轮以主持人名义喂给全部辩手（后续轮靠 session 记忆，不重复注入）。
     background: str = ""
-    # 开赛嘱咐（开工卡 CONTINUE+note）——内部字段，非 wire。非空时作首轮全场定向
+    # 开赛嘱咐——内部字段，非 wire。非空时作首轮全场定向
     # 用户插话：主持人定首轮焦点可见、首轮辩手 prompt 可见、verbatim 进 rounds[0].user_interjections。
     # 不覆写 motion / 不改 sides。
-    kickoff_ask: str = ""
+    opening_ask: str = ""
     # 工作区 AgentCore/文档/research/ 约定文档文件索引（开工时机制性探测后填入；空串 = 无约定文档，不注入）。
     # 仅文本通道：辩手底料 / 主持人议题 brief；非 wire 事件字段。
     research_dossier_index: str = ""
-    # 开赛材料已汇流：True → 首轮辩手检索预算按有约定文档下调，引用台账为主。
-    pretrial_evidence_ready: bool = False
-    # 共享证据包（附件已在主持人上下文时组装；非 wire 必填；空 = 未走 pack 路径）。
+    # 共享证据包（附件已在主持人上下文时组装；空 = 未走 pack 路径）。
     evidence_pack: Any | None = None
     # 材料完整度（内部预算）：full / partial / empty；full 时立论不再外搜。
     evidence_completeness: Literal["full", "partial", "empty"] = "full"
@@ -142,11 +140,11 @@ class DebateConfig:
     moderator_origin: str = ""
     moderator_provider_id: str = ""
     moderator_route: str = ""
-    # 开赛前预分配的主持人稳定 run_id（开工卡 / model_overrides 键；开赛后沿用，不重铸）。
+    # 开赛前预分配的主持人稳定 run_id（model_overrides 键；开赛后沿用，不重铸）。
     moderator_run_id: str = ""
-    # True = 目录只剩一模型，本场降级同模型并在开赛卡明示。
+    # True = 目录只剩一模型，本场降级同模型并在错误载荷明示。
     same_model_debate: bool = False
-    # §7.5 D：消歧零/多候选时挂结构化候选（开赛卡 / 工具错误载荷）；旧帧缺省空。
+    # §7.5 D：消歧零/多候选时挂结构化候选（工具错误载荷）；旧帧缺省空。
     model_candidates: list[dict[str, Any]] = field(default_factory=list)
 
 

@@ -1626,19 +1626,16 @@ def test_is_availability_status_question_narrow():
     )
 
 
-def test_cite_failure_path_rejected_not_in_delivered_files():
-    """Soft-COMPLETED + cite-tier path reject → artifacts rejected, not delivered_files."""
+def test_path_scoped_contract_reject_not_in_delivered_files():
+    """Path-scoped contract reject on COMPLETED → artifacts rejected, not delivered_files."""
     from agentcore.runtime.runs.file_acceptance import (
-        REASON_CITATIONS_UNVERIFIED,
+        REASON_CONTRACT_FAILED,
         build_file_acceptance,
         path_rejections_from_contract_messages,
     )
 
-    cite_msg = (
-        "`paper.md`：正文出现学位论文/期刊式著录标记（[D]）但未就地绑定本回合台账 #rN——"
-        "属于未核验或编造引用。"
-    )
-    path_rej = path_rejections_from_contract_messages([cite_msg])
+    fail_msg = "`paper.md` · 合同硬缺口"
+    path_rej = path_rejections_from_contract_messages([fail_msg])
     acceptance = build_file_acceptance(
         ["paper.md", "outline.md"],
         phase=RunPhase.COMPLETED,
@@ -1651,8 +1648,8 @@ def test_cite_failure_path_rejected_not_in_delivered_files():
             content="已落盘",
             files_touched=["paper.md", "outline.md"],
             file_acceptance=acceptance,
-            warnings=[cite_msg],
-            delivery_gaps=[{"description": cite_msg, "reason": REASON_CITATIONS_UNVERIFIED}],
+            warnings=[fail_msg],
+            delivery_gaps=[{"description": fail_msg, "reason": REASON_CONTRACT_FAILED}],
         )
     }
     payload = build_delivery_status(plan, results, execution_id="e-cite")
@@ -1660,7 +1657,7 @@ def test_cite_failure_path_rejected_not_in_delivered_files():
     assert payload["delivered_files"] == ["outline.md"]
     by_path = {a["path"]: a for a in payload["artifacts"]}
     assert by_path["paper.md"]["status"] == "rejected"
-    assert by_path["paper.md"]["reason"] == REASON_CITATIONS_UNVERIFIED
+    assert by_path["paper.md"]["reason"] == REASON_CONTRACT_FAILED
     assert by_path["outline.md"]["status"] == "accepted"
     assert payload["state"] == "partial"
 
@@ -1908,102 +1905,8 @@ def test_artifacts_omit_workspace_id_without_target_folder():
     assert "workspace_id" not in payload["artifacts"][0]
 
 
-def test_phase_b_cite_fail_rejected_not_in_delivered_files():
-    """阶段 B 引用不过闸 → rejected(citations_unverified)，不进 delivered_files；无 draft 行。"""
-    from agentcore.runtime.runs.file_acceptance import (
-        REASON_CITATIONS_UNVERIFIED,
-        build_file_acceptance,
-        path_rejections_from_contract_messages,
-    )
-
-    cite_msg = (
-        "`AgentCore/文档/research/渠道.md`：正文用了 #r3 这些台账引用来源，但它们不在"
-        "本回合成稿可引用集中（须 deep_read 或 selected；search-only / 伪造 / 越界均不可）。"
-    )
-    path_rej = path_rejections_from_contract_messages([cite_msg])
-    acceptance = build_file_acceptance(
-        ["AgentCore/文档/research/渠道.md"],
-        phase=RunPhase.COMPLETED,
-        path_rejections=path_rej,
-    )
-    # draft 不进 file_acceptance / artifacts（仅 accepted|rejected）
-    assert all(a["status"] in ("accepted", "rejected") for a in acceptance)
-    assert acceptance[0]["status"] == "rejected"
-    assert acceptance[0]["reason"] == REASON_CITATIONS_UNVERIFIED
-
-    plan = _plan(RunSpec(run_id="w1", task="调研渠道", role="调研员"))
-    results = {
-        "w1": RunState(
-            phase=RunPhase.COMPLETED,
-            content="草案已升 B 仍不过闸",
-            files_touched=["AgentCore/文档/research/渠道.md"],
-            file_acceptance=acceptance,
-            warnings=[cite_msg],
-        )
-    }
-    payload = build_delivery_status(plan, results, execution_id="e-phase-b")
-    assert payload is not None
-    assert payload["delivered_files"] == []
-    assert len(payload["artifacts"]) == 1
-    assert payload["artifacts"][0]["status"] == "rejected"
-    assert payload["artifacts"][0]["reason"] == REASON_CITATIONS_UNVERIFIED
-    assert all(a.get("status") != "draft" for a in payload["artifacts"])
-
-
-def test_two_phase_predicate_and_playbook_stamp():
-    from agentcore.runtime.runs.playbooks import PLAYBOOKS
-    from agentcore.runtime.runs.research_quality import is_two_phase_citation_deliverable
-    from agentcore.runtime.runs.types import Deliverable
-    from agentcore.workspace.stage_dirs import RESEARCH_PREFIX
-
-    assert is_two_phase_citation_deliverable(
-        Deliverable(citation_mode="two_phase",  artifacts=["a.md"])
-    )
-    assert not is_two_phase_citation_deliverable(Deliverable( artifacts=["a.md"]))
-    assert not is_two_phase_citation_deliverable(None)
-    # 路径入口已撤：约定文档落点由扫 role·task 的正则填出，不得当两阶段入口。
-    from agentcore.workspace.stage_dirs import REVIEWS_PREFIX
-
-    research_path = f"{RESEARCH_PREFIX}pricing_summary.md"
-    reviews_path = f"{REVIEWS_PREFIX}legal_review.md"
-    assert not is_two_phase_citation_deliverable(
-        Deliverable( artifacts=[research_path])
-    )
-    assert not is_two_phase_citation_deliverable(
-        Deliverable( artifacts=[reviews_path])
-    )
-    assert not is_two_phase_citation_deliverable(
-        Deliverable( artifact_dir=RESEARCH_PREFIX)
-    )
-    # 显式盖戳仍进；省略退出
-    assert is_two_phase_citation_deliverable(
-        Deliverable(citation_mode="two_phase",  artifacts=[research_path])
-    )
-    assert not is_two_phase_citation_deliverable(
-        Deliverable(
-            artifacts=[research_path],
-        )
-    )
-
-    tasks, errs = PLAYBOOKS["cite_write_review"].build({"topic": "测试主题", "angles": ["甲", "乙"]})
-    assert not errs
-    research_tasks = [t for t in tasks if str(t.get("id", "")).startswith("research_")]
-    assert research_tasks
-    for t in research_tasks:
-        assert t["deliverable"].get("citation_mode") == "two_phase"
-    write = next(t for t in tasks if t.get("id") == "write")
-    assert write["deliverable"].get("citation_mode") == "two_phase"
-
-    brief, brief_errs = PLAYBOOKS["map_fanout"].build(
-        {"topic": "测试主题", "angles": ["甲", "乙"]}
-    )
-    assert not brief_errs
-    for t in brief:
-        assert t["deliverable"].get("citation_mode") in (None, "")
-
-
 def _literature_report_plan() -> RunPlan:
-    """Minimal cite_write_review-shaped plan: writer + review + two_phase main file."""
+    """Minimal cite_write_review-shaped plan: writer + review + pinned files."""
     from agentcore.runtime.runs.types import Deliverable
     from agentcore.workspace.stage_dirs import RESEARCH_PREFIX, REVIEWS_PREFIX
 
@@ -2015,7 +1918,6 @@ def _literature_report_plan() -> RunPlan:
             role="撰稿人",
             deliverable=Deliverable(
                 artifacts=[main],
-                citation_mode="two_phase",
             ),
         ),
         RunSpec(
@@ -2213,7 +2115,6 @@ def test_map_fanout_junk_citations_not_evidence_deficit():
             role="方向专员",
             deliverable=Deliverable(
                 artifacts=[note],
-                citation_mode="two_phase",
             ),
         ),
         RunSpec(
@@ -2473,11 +2374,8 @@ def test_artifact_rejected_latches_requires_draft_ack():
         path_rejections_from_contract_messages,
     )
 
-    cite_msg = (
-        "`paper.md`：正文出现学位论文/期刊式著录标记（[D]）但未就地绑定本回合台账 #rN——"
-        "属于未核验或编造引用。"
-    )
-    path_rej = path_rejections_from_contract_messages([cite_msg])
+    fail_msg = "`paper.md` · 合同硬缺口"
+    path_rej = path_rejections_from_contract_messages([fail_msg])
     acceptance = build_file_acceptance(
         ["paper.md", "outline.md"],
         phase=RunPhase.COMPLETED,
@@ -2551,8 +2449,8 @@ def test_acceptance_counts_match_delivered_and_rejected():
         path_rejections_from_contract_messages,
     )
 
-    cite_msg = "`x.md`：未核验引用。"
-    path_rej = path_rejections_from_contract_messages([cite_msg])
+    fail_msg = "`x.md` · 合同硬缺口"
+    path_rej = path_rejections_from_contract_messages([fail_msg])
     acceptance = build_file_acceptance(
         ["x.md", "y.md"],
         phase=RunPhase.COMPLETED,
@@ -2751,14 +2649,11 @@ def test_maybe_emit_notes_reconciliation_for_the_accepted_gate():
     ledger = _promotion_ledger()
     assert ledger.reconciliation is None
 
-    cite_msg = (
-        "`bad.md`：正文出现学位论文/期刊式著录标记（[D]）但未就地绑定本回合台账 #rN——"
-        "属于未核验或编造引用。"
-    )
+    fail_msg = "`bad.md` · 合同硬缺口"
     acceptance = build_file_acceptance(
         ["good.md", "bad.md"],
         phase=RunPhase.COMPLETED,
-        path_rejections=path_rejections_from_contract_messages([cite_msg]),
+        path_rejections=path_rejections_from_contract_messages([fail_msg]),
     )
     plan = _plan(RunSpec(run_id="w1", task="写稿", role="撰写"))
     results = {

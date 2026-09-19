@@ -108,7 +108,7 @@ def execution_class_tool_names() -> frozenset[str]:
 
 
 def host_class_tool_names() -> frozenset[str]:
-    """Tools flagged ``host_class`` (Host face; not execution_class / not kickoff)."""
+    """Host-face tools (``host_class``; not execution_class / grant-covered)."""
     return frozenset(
         declared_tool_name(cls)
         for cls in declared_tools()

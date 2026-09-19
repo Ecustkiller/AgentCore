@@ -33,13 +33,13 @@ import {
 import { cn } from "@/lib/utils";
 import {
   type CreateLlmModelProfileInput,
-    type LlmModelProfileView,
-    type ModelProfileSlot,
-    createLlmModelProfile,
-    deleteLlmModelProfile,
-    profileSlotSummary,
-    setDefaultLlmModelProfile,
-    updateLlmModelProfile,
+  type LlmModelProfileView,
+  type ModelProfileSlot,
+  createLlmModelProfile,
+  deleteLlmModelProfile,
+  profileSlotSummary,
+  setDefaultLlmModelProfile,
+  updateLlmModelProfile,
 } from "@/services/llmModelProfiles";
 import type { LlmProviderView } from "@/services/llmProviders";
 import {

@@ -59,7 +59,6 @@ function exec(partial: {
     debateRounds: [],
     crossExamEnabled: false,
     debateOpening: null,
-    debatePretrial: null,
   };
 }
 

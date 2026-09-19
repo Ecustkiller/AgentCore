@@ -52,32 +52,6 @@ describe("statusFaceLabel", () => {
         undefined,
         null,
         false,
-        "未通过契约：缺少必需的引用来源",
-        null,
-        null,
-        "quality",
-      ).text,
-    ).toBe("未达标");
-    expect(
-      statusFaceLabel(
-        "failed",
-        null,
-        undefined,
-        null,
-        false,
-        "缺少必备章节：结论",
-        null,
-        null,
-        "format",
-      ).text,
-    ).toBe("格式未过");
-    expect(
-      statusFaceLabel(
-        "failed",
-        null,
-        undefined,
-        null,
-        false,
         "LLM 流在收尾时中断",
         null,
         null,
@@ -402,19 +376,19 @@ describe("buildAgentNodePresentation revision face", () => {
     });
   });
 
-  it("never leaks raw run.error into the peek (infra / format-gate text)", () => {
-    const gateError = "缺少必备章节：结论";
+  it("never leaks raw run.error into the peek", () => {
+    const gateError = "ConnectError: upstream 503";
     const p = buildAgentNodePresentation(
       baseNode({
         status: "failed",
         error: gateError,
-        failureKind: "format",
+        failureKind: "call",
         outputPreview: "",
       }),
     );
-    expect(p.peekActivity?.text).toBe(failureDetailSentence("format", null));
-    expect(p.peekActivity?.text).not.toContain("缺少必备章节");
-    expect(p.peekActivity?.text).not.toContain("结论");
+    expect(p.peekActivity?.text).toBe(failureDetailSentence("call", null));
+    expect(p.peekActivity?.text).not.toContain("ConnectError");
+    expect(p.peekActivity?.text).not.toContain("503");
   });
 
   it("peek keeps the saved-files fact; node face stays the failure kind", () => {
@@ -431,18 +405,6 @@ describe("buildAgentNodePresentation revision face", () => {
     expect(p.statusFace.cls).toContain("destructive");
     expect(p.peekActivity?.text).toBe(failureDetailSentence("call", true));
     expect(p.peekActivity?.text).not.toContain("ConnectError");
-  });
-
-  it("surfaces quality failureKind as 未达标 even when error lacks keywords", () => {
-    const p = buildAgentNodePresentation(
-      baseNode({
-        status: "failed",
-        error: "未通过契约：缺少必需的引用来源",
-        failureKind: "quality",
-        outputPreview: "",
-      }),
-    );
-    expect(p.statusFace.text).toBe("未达标");
   });
 
   it("debate via participant group without stance", () => {

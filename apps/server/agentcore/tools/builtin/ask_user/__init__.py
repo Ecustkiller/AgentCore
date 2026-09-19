@@ -2,7 +2,7 @@
 
 CEO-only: wired in ``runtime.pipeline`` next to ``delegate`` and deliberately NOT in
 ``build_builtin_registry`` (a delegated worker never talks to the user). This is the
-single「向用户发问」primitive — it absorbed the former 引导式开场 (``kickoff``): whether
+single「向用户发问」primitive — it absorbed the former 引导式开场: whether
 the CEO is **opening** a producible-but-underspecified request (做网站 / 文档…) or
 hitting a **mid-execution** high-cost fork (A vs B / an irreversible step), it asks the
 SAME way and through the SAME mechanism.
@@ -18,7 +18,7 @@ docs/03-AI核心/Agent协作模式.md（向用户发问）.
 The card's content is one adaptive shape (rich when opening, compact mid-task).
 Every card has at least one ``questions[]`` item; the user-visible stem is
 ``questions[].prompt`` (a one-sentence ask is a single fill-in question).
-Each question may pre-fill a ``default`` so a 想省事 user one-clicks through.
+Tendency is option-name markup (``（推荐）``), not a second default field.
 A mid-task A/B is one ``questions`` item.
 
 A submit answer is ``ToolEffect.CONTINUE`` (the CEO resumes with the user's picks); a

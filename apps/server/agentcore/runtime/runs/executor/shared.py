@@ -143,7 +143,7 @@ class HardGapBlock(NamedTuple):
     """Strict-node hard gap that blocks COMPLETED — reason + face ``failure_kind``."""
 
     reason: str
-    failure_kind: Literal["quality", "model"]
+    failure_kind: Literal["model", "call"]
 
 
 def _hard_gap_blocks_completion(

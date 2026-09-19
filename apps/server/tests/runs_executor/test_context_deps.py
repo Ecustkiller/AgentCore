@@ -217,7 +217,6 @@ async def test_dag_file_writing_upstream_passes_pointer_downstream():
                 ]
             )
         ],
-        # Pad past MIN_UPSTREAM_BODY_CHARS so brief-promotion fixtures stay realistic.
         # files_touched can flow into the downstream prompt.
             [
                 LLMChunk(

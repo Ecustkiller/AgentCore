@@ -2,7 +2,7 @@ import { api } from "@/services/api";
 
 /**
  * 沙箱浏览器输入客户端：直播画面上的指针/键盘经坐标换算后攒批 POST `…/browser/input`。
- * 仅 pending `browser_login`（escalate / ask_user）时由 BrowserLivePanel 挂捕获。
+ * 活直播且画面已聚焦时由 BrowserLivePanel 挂捕获。
  * 走 `services/api` 以复用 401 刷新 / CSRF。
  *
  * 坐标为帧像素空间（`browser_live_frame` 的 width/height）；前端把展示坐标换算到帧空间。

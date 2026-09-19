@@ -159,40 +159,6 @@ async def test_finalize_returns_suspend_and_skips_the_wait():
     assert any(e.type is EventType.CHECKPOINT_REQUIRED for e in _drain(sink))
 
 
-async def test_ask_user_browser_login_wire_flag():
-    """CEO ask_user(browser_login=true) → checkpoint_required.browser_login + frame flag."""
-    frames: list = []
-
-    async def saver(frame) -> None:  # noqa: ANN001
-        frames.append(frame)
-
-    async def deleter(_message_id: str) -> None:
-        return None
-
-    sink = EventSink()
-    tool = _ask_tool(saver, deleter, sink)
-    token = captain_transcript.set([LLMMessage(role="user", content="请登录")])
-    try:
-        res = await tool.execute(
-            {
-                "questions": [{"prompt": "请在右坞浏览器完成登录后继续"}],
-                "browser_login": True,
-            },
-            _ctx(),
-        )
-    finally:
-        captain_transcript.reset(token)
-
-    assert res.effect is ToolEffect.SUSPEND
-    assert len(frames) == 1
-    assert frames[0].browser_login is True
-    events = _drain(sink)
-    cp = next(e for e in events if e.type is EventType.CHECKPOINT_REQUIRED)
-    assert cp.payload.get("browser_login") is True
-    # Schema advertises the field; escalate stays off CEO toolset (catalog test elsewhere).
-    assert "browser_login" in tool.schema.parameters["properties"]
-
-
 async def test_finalize_fails_explicitly_when_frame_not_saved():
     # D11：无 transcript ⇒ 无法落盘 ⇒ 显式失败（不再窄兜底假等待）。
     frames: list = []

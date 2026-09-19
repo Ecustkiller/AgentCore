@@ -533,9 +533,7 @@ class Driver:
         # in the error string to a machine-readable ToolResult; never type.
         if await loc.evaluate(_IS_PASSWORD_JS):
             raise ValueError(
-                "password_blocked: AI 不得填写密码框；"
-                "worker 请 escalate(blocking=true, browser_login=true)；"
-                "CEO 请 ask_user(browser_login=true) 让用户在右坞完成登录并点「已登录，继续」"
+                "password_blocked: AI 不得填写密码框；请让用户在右坞亲自完成登录"
             )
         text = str(req.get("text", "") or "")
         # Focus + select-all, then CDP insertText (fill 对受控/contenteditable 不可靠).

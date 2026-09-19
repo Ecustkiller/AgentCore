@@ -14,7 +14,6 @@ from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.runs.constants import HANDOFF_TOOL_NAME
 from agentcore.runtime.runs.contract import (
     ContractVerdict,
-    is_format_repairable,
     is_zero_files_gap,
 )
 from agentcore.runtime.runs.executor.shared import _registry_without
@@ -198,23 +197,6 @@ def _narrow_for_light_repair(
     if HANDOFF_TOOL_NAME not in narrowed_allowed:
         narrowed_allowed = [*narrowed_allowed, HANDOFF_TOOL_NAME]
     return narrowed_registry, narrowed_allowed
-
-
-def _can_light_repair(
-    *,
-    verdict: ContractVerdict,
-    handoff_ok: bool,
-    light_repair_used: bool,
-) -> bool:
-    """Format / handoff-thin failures get one in-place light repair before full retry."""
-    if light_repair_used:
-        return False
-    if verdict.ok and handoff_ok:
-        return False
-    # Zero-disk gaps use write pass (not format light repair / full investigation retry).
-    if is_zero_files_gap(verdict):
-        return False
-    return not (not verdict.ok and not is_format_repairable(verdict))
 
 
 def _can_write_pass(

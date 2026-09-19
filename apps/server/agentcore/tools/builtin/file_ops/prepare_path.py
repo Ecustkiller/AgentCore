@@ -52,7 +52,8 @@ async def prepare_tool_path(
     pass through; write/organize upgrades the same mount by ``root_id``.
     Host paths mint a session grant (well-known Desktop/Downloads/Documents
     and already-granted roots silently; other first-time readonly abs paths
-    confirm on the desktop; organize/attach_rw always confirm) and rewrite. Sidecar (not cloud ``location=local``):
+    confirm on the desktop; organize/attach_rw always confirm) and rewrite.
+    Sidecar (not cloud ``location=local``):
     an OS-absolute path on/under ``backend.root`` becomes workspace-relative
     and is not minted as external.
     """

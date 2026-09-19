@@ -16,7 +16,6 @@ import {
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   conversationHasBrowserActivity,
-  conversationHasPendingBrowserLogin,
   isBrowserTool,
 } from "../browserActivity";
 
@@ -226,104 +225,6 @@ describe("conversationHasBrowserActivity", () => {
     // 本会话的消息里没有那一回合 → 判定为假（execution.byId 是跨会话全局表）。
     expect(
       conversationHasBrowserActivity(
-        [assistantMessage(MID)],
-        useExecutionStore.getState().byId,
-      ),
-    ).toBe(false);
-  });
-});
-
-describe("conversationHasPendingBrowserLogin", () => {
-  it("is false with no messages / no escalation", () => {
-    expect(conversationHasPendingBrowserLogin([], {})).toBe(false);
-    seedWorkerToolCall(MID, "browser_navigate");
-    expect(
-      conversationHasPendingBrowserLogin(
-        [assistantMessage(MID)],
-        useExecutionStore.getState().byId,
-      ),
-    ).toBe(false);
-  });
-
-  it("is true for a pending browserLogin escalate", () => {
-    const plan: ExecutionPlan = {
-      id: "exec-1",
-      planType: "multi_agent",
-      taskSummary: "登录",
-      agents: [{ id: "agent-1", role: "研究员" }],
-      runs: [{ id: "run-1", agentId: "agent-1", task: "登", dependsOn: [] }],
-    };
-    const exec = useExecutionStore.getState();
-    exec.startExecution(plan, MID);
-    exec.recordFrames(
-      [
-        {
-          t: 1,
-          kind: "run_started",
-          agentId: "agent-1",
-          runId: "run-1",
-          parentRunId: null,
-          runKind: "agent",
-          continuesRunId: null,
-        },
-        {
-          t: 2,
-          kind: "escalation_required",
-          escalationId: "esc-login",
-          runId: "run-1",
-          agentId: "agent-1",
-          question: "请登录",
-          assumption: "已登",
-          escalationKind: "normal",
-          browserLogin: true,
-        },
-      ],
-      MID,
-    );
-    expect(
-      conversationHasPendingBrowserLogin(
-        [assistantMessage(MID)],
-        useExecutionStore.getState().byId,
-      ),
-    ).toBe(true);
-  });
-
-  it("is false for a pending escalate without browserLogin", () => {
-    const plan: ExecutionPlan = {
-      id: "exec-1",
-      planType: "multi_agent",
-      taskSummary: "拍板",
-      agents: [{ id: "agent-1", role: "研究员" }],
-      runs: [{ id: "run-1", agentId: "agent-1", task: "问", dependsOn: [] }],
-    };
-    const exec = useExecutionStore.getState();
-    exec.startExecution(plan, MID);
-    exec.recordFrames(
-      [
-        {
-          t: 1,
-          kind: "run_started",
-          agentId: "agent-1",
-          runId: "run-1",
-          parentRunId: null,
-          runKind: "agent",
-          continuesRunId: null,
-        },
-        {
-          t: 2,
-          kind: "escalation_required",
-          escalationId: "esc-1",
-          runId: "run-1",
-          agentId: "agent-1",
-          question: "用哪个库？",
-          assumption: "Postgres",
-          escalationKind: "normal",
-        },
-      ],
-      MID,
-    );
-    expect(
-      conversationHasPendingBrowserLogin(
         [assistantMessage(MID)],
         useExecutionStore.getState().byId,
       ),

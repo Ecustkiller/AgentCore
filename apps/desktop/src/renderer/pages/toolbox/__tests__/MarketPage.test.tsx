@@ -1,3 +1,4 @@
+import { MARKET_CATALOG_CAPTION } from "@/lib/skillStoreCopy";
 import { APP_PATHS } from "@/pages/toolbox/manual/paths";
 import { MarketPage } from "@/pages/toolbox/market/MarketPage";
 import type { SkillStoreListing } from "@/services/skillStore";
@@ -108,6 +109,9 @@ describe("市场页", () => {
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "合同审查" }));
     expect(await screen.findByTestId("skill-store-dialog")).toBeTruthy();
+    expect(screen.getByTestId("skill-store-dialog").textContent).toContain(
+      MARKET_CATALOG_CAPTION,
+    );
     expect(screen.getByTestId("skill-store-dialog").textContent).toContain(
       "审合同时用",
     );

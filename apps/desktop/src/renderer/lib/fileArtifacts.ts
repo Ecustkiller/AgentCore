@@ -316,9 +316,7 @@ export function fileArtifactsFromExecution(
   for (const agent of execution.agents) {
     for (const tc of agent.toolCalls) {
       if (tc.toolName === "file_batch") {
-        out.push(
-          ...artifactsFromBatch(tc.arguments, tc.status === "success"),
-        );
+        out.push(...artifactsFromBatch(tc.arguments, tc.status === "success"));
         continue;
       }
       const a = artifactFromTool(

@@ -115,7 +115,10 @@ class FileBatchTool:
                                 },
                                 "destination": {
                                     "type": "string",
-                                    "description": "move / copy 的目标相对路径（已存在则跳过该项）。",
+                                    "description": (
+                                        "move / copy 的目标相对路径"
+                                        "（已存在则跳过该项）。"
+                                    ),
                                 },
                                 "permanent": {
                                     "type": "boolean",

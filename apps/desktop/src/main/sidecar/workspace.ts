@@ -1,5 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { workspaceRootGoneMessage } from "@shared/workspaceRootGone";
+import { isExistingDirectory } from "../fs/rootExists";
 
 /**
  * sidecar 进程的缓存键：`容器根 id + 工作区子路径`（工作区对称化 D1a）。
@@ -13,19 +15,27 @@ export function entryKey(rootId: string, subpath = ""): string {
 }
 
 /**
- * 把容器根绝对路径与工作区子路径（工作区对称化 D1a）拼成 sidecar 的 `workspaceRoot`。
+ * 把容器根绝对路径与工作区子路径拼成 sidecar 的 `workspaceRoot`。
  *
- * 子路径非空时返回 `容器根/子路径` 并**确保该目录存在**（懒建工作区首次产文件通常已建出，但
- * 防御性 mkdir 兜底极端早到的 sidecar 回合，避免引擎绑定到不存在的目录）。空子路径 = 容器根
- * 自身（恒存在），不触盘，与历史行为逐字节一致。
+ * - 空子路径 = 用户点名的项目根：必须已是目录。不 mkdir（禁止在空路径造冒牌工程）。
+ * - 非空子路径 = 容器下 scratch / 嵌套工作区：懒建 mkdir（默认 `conversations/<id>` 仍可建）。
  */
 export async function resolveWorkspaceRoot(
   absPath: string,
   subpath?: string,
 ): Promise<string> {
+  const root = (absPath ?? "").trim();
+  if (!root) {
+    throw new Error(workspaceRootGoneMessage());
+  }
   const sub = (subpath ?? "").replace(/^\/+|\/+$/g, "");
-  if (!sub) return absPath;
-  const workspaceRoot = join(absPath, sub);
+  if (!sub) {
+    if (!(await isExistingDirectory(root))) {
+      throw new Error(workspaceRootGoneMessage(root));
+    }
+    return root;
+  }
+  const workspaceRoot = join(root, sub);
   await mkdir(workspaceRoot, { recursive: true });
   return workspaceRoot;
 }

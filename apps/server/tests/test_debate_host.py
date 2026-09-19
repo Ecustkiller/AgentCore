@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agentcore.runtime.debate.events import debate_act_payload, moderator_plan_event
-from agentcore.runtime.kickoff.debate_host import (
+from agentcore.runtime.debate.host import (
     DebateHostAttach,
     host_graph_binding,
     is_mlr_synthesizer_id,
@@ -500,13 +500,13 @@ async def _first_plan_after_attach(monkeypatch):
         async def run(self, *_a, **_k):
             raise RuntimeError("stop after plan")
 
-    async def _skip_pretrial(*_a, **_k):
+    def _skip_opening(*_a, **_k):
         return None
 
     monkeypatch.setattr(debate_tool_mod, "Moderator", _FakeModerator)
     monkeypatch.setattr(
-        "agentcore.runtime.debate.pretrial.run_pretrial_phase",
-        _skip_pretrial,
+        "agentcore.runtime.debate.evidence_pack.apply_opening_materials",
+        _skip_opening,
     )
 
     tool = _debate_tool_for_host_bind()

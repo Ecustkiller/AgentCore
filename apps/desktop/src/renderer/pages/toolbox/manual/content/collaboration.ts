@@ -209,7 +209,7 @@ export const collaborationChapter: ManualChapterContent = {
       blocks: [
         {
           type: "lead",
-          text: "权限配方管「改文件 / 执行命令 / 组团卡」弹多少次。拍板卡仍会按需出现。",
+          text: "权限配方管「改文件 / 执行命令」弹多少次。拍板卡仍会按需出现。",
         },
         {
           type: "paragraph",
@@ -222,7 +222,7 @@ export const collaborationChapter: ManualChapterContent = {
           items: [
             {
               title: "谨慎",
-              desc: "改文件逐次问（云端与本地都问）；不预授执行；组团卡按规则。最稳，批量改文件时会很吵。",
+              desc: "改文件逐次问（云端与本地都问）；不预授执行。最稳，批量改文件时会很吵。",
             },
             {
               title: "全放行（推荐）",
@@ -251,7 +251,7 @@ export const collaborationChapter: ManualChapterContent = {
                 to: MANUAL_SECTION_IDS.collaboration.checkpoint,
               },
             },
-            " 的关系：配方减的是工具审批与组团卡疲劳；拍板仍走检查点。非法组合「免审执行 + 改文件逐次问」选不出。",
+            " 的关系：配方减的是工具审批疲劳；拍板仍走检查点。非法组合「免审执行 + 改文件逐次问」选不出。",
           ],
         },
       ],
@@ -443,7 +443,103 @@ export const collaborationChapter: ManualChapterContent = {
                 ),
               },
             },
+            "。怎么写才会被翻开见 ",
+            {
+              text: "怎么写提示词",
+              link: {
+                kind: "jump",
+                to: MANUAL_SECTION_IDS.collaboration.prompts,
+              },
+            },
             "。",
+          ],
+        },
+      ],
+    },
+    {
+      id: MANUAL_SECTION_IDS.collaboration.prompts,
+      title: "怎么写提示词",
+      icon: "BookOpen",
+      blocks: [
+        {
+          type: "lead",
+          text: "按需那一句是目录上的找书签。只写名词，CEO 往往翻不到；写清干什么、什么时候用，才会在对的时候打开。",
+        },
+        {
+          type: "paragraph",
+          text: "放哪一区",
+          emphasis: true,
+        },
+        {
+          type: "bullets",
+          items: [
+            {
+              title: "常驻",
+              desc: "每回合都要用的短规矩、口吻、禁区。不必靠一句话去找。",
+            },
+            {
+              title: "按需",
+              desc: "某一类任务的做法。平时只挂一行，相关时才翻开正文。",
+            },
+            {
+              title: "@ 点名",
+              desc: "这一句就要用：输入框 @ 那一条，不必改成常驻。没有斜杠菜单。",
+            },
+          ],
+        },
+        {
+          type: "paragraph",
+          text: "一句话介绍",
+          emphasis: true,
+        },
+        {
+          type: "paragraph",
+          text: "按需、我的、市场上来的：这一句同时说清干什么、什么时候该翻开。空着可以保存，但 CEO 不会主动翻；要当场用就 @。上架到市场必须有这句。",
+        },
+        {
+          type: "doDont",
+          good: {
+            items: [
+              "审、改、把关合同时用；用户拿出合同、条款、相对方文本时翻开。",
+              "写周报：用本公司口径；用户说「这周周报 / 周会材料」时翻开。",
+            ],
+          },
+          bad: {
+            items: ["合同审查", "写作", "帮助"],
+          },
+        },
+        {
+          type: "paragraph",
+          text: "正文写什么",
+          emphasis: true,
+        },
+        {
+          type: "bullets",
+          items: [
+            {
+              title: "可复用的做法",
+              desc: "先分清这回在干什么，再用现有组队能力，关键处问你。不要另造一套固定角色。",
+            },
+            {
+              title: "自家模板可以冻",
+              desc: "口吻、检查单、交付形态随你。产品不会把「写得更专业」做成出厂课。",
+            },
+            {
+              title: "查阅后启用",
+              desc: "需要本机连接器或查阅后才打开的手，在编辑里勾选。不会多装工具，审批照旧。",
+            },
+          ],
+        },
+        {
+          type: "callout",
+          variant: "tip",
+          text: [
+            "入口仅桌面：",
+            {
+              text: "工具箱",
+              link: { kind: "go", to: APP_PATHS.toolbox.guidelines },
+            },
+            " · 提示词。手机 / 窄屏无工具箱，口头说规矩即可。市场装来的是同一类提示词，装完也靠这一句被翻开。",
           ],
         },
       ],

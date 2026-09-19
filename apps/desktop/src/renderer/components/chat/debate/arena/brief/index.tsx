@@ -15,11 +15,7 @@ export function DebateBrief({
   return (
     <Card className="p-4">
       <VerdictCard brief={brief} sides={sides} />
-      <YourCallZone
-        divided
-        handoffs={handoffs}
-        recommendation={rec}
-      />
+      <YourCallZone divided handoffs={handoffs} recommendation={rec} />
     </Card>
   );
 }

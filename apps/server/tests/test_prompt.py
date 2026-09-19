@@ -50,7 +50,7 @@ from agentcore.tools.builtin.run import run_description
 _TASK_PROPS = DELEGATE_PARAMETERS["properties"]["tasks"]["items"]["properties"]
 _HANDBOOK_SIGNATURES = (
     "wait_for",
-    "ask_user(browser_login=true)",
+    "永不代填密码",
     "host(action=os_log)",
     "host(action=status)",
     "host(action=shell)",
@@ -163,7 +163,7 @@ def test_capability_how_gated_on_ceo_tool_names():
     browser = capability_how_suffix({"browser"})
     assert host.strip() and browser.strip()
     assert "wait_for" not in run_how
-    assert "ask_user(browser_login=true)" not in run_how
+    assert "永不代填密码" not in run_how
     assert "wait_for" not in host
     assert "wait_for" not in browser
     assert "wait_for" not in _LOCAL_DESK

@@ -172,39 +172,11 @@ function browserActivityCard(): ScriptPlan {
   };
 }
 
-/**
- * browser_login escalate：复用阻塞 escalate pending 向量，仅把
- * `escalation_required.payload.browser_login` 钉成 true（e2e 壳测 CTA，
- * 无独立 conformance 向量）。
- */
-function browserLoginEscalate(): ScriptPlan {
-  const fixture = loadFixture("multi_agent_blocking_escalate_pending");
-  const initial = fixture.events.map((ev) => {
-    if (ev.type !== "escalation_required") return ev;
-    return {
-      ...ev,
-      payload: {
-        ...(ev.payload ?? {}),
-        browser_login: true,
-        question: "请在浏览器完成登录后再继续。",
-      },
-    };
-  });
-  return {
-    name: "browser_login_escalate",
-    kind: "hot_gate",
-    initial,
-    continueSameStream: [],
-    resumeStream: [],
-  };
-}
-
 const PLANS: Record<string, () => ScriptPlan> = {
   single_agent_text: () => complete("single_agent_text"),
   multi_agent_delegate: () => complete("multi_agent_delegate"),
   multi_agent_debate: () => complete("multi_agent_debate"),
   browser_activity_card: () => browserActivityCard(),
-  browser_login_escalate: () => browserLoginEscalate(),
   approval_resolved_continue: () =>
     splitHot(loadFixture("approval_resolved_continue")),
   single_agent_checkpoint_resolved: () => splitColdCheckpoint(),

@@ -165,16 +165,14 @@ export function statusLabel(status: RunStatus): string {
 }
 
 /**
- * Short face label for a failed worker (quality / format / model interrupt / call).
+ * Short face label for a failed worker (model interrupt / call).
  * Prefer machine-readable ``failureKind``; keep a thin error-text fallback for old journals.
- * Full `error` stays in peek / run detail. Do not regex-guess format vs quality from error text.
+ * Unknown / retired kinds fall through to generic 「失败」. Full `error` stays in peek / run detail.
  */
 export function failureFaceLabel(
   error: string | null | undefined,
   failureKind?: import("@/types/events").RunFailureKind | null,
 ): string {
-  if (failureKind === "quality") return "未达标";
-  if (failureKind === "format") return "格式未过";
   if (failureKind === "model") return "模型中断";
   if (failureKind === "call") return "调用失败";
   const raw = (error ?? "").trim();
@@ -200,10 +198,8 @@ export function failureFaceLabel(
  * User-facing failure sentence — {@link failureFaceLabel} one level down (chip label vs
  * the detail line under it).
  *
- * `run.error` is a **model** face: on the infra paths it is `str(exception)` and on the
- * contract paths it names engine gates (「缺少必备章节：…」), which reads to
- * the user as if *they* forgot to hand something in. So curate by the machine-readable
- * `failureKind` and never render the raw text; it stays in logs / run detail for us.
+ * `run.error` is a **model** face: on the infra paths it is `str(exception)`.
+ * So curate by the machine-readable `failureKind` and never render the raw text; it stays in logs / run detail for us.
  */
 export function failureDetailSentence(
   failureKind?: import("@/types/events").RunFailureKind | null,
@@ -213,10 +209,6 @@ export function failureDetailSentence(
     return "中途出错了，不过已经生成的文件都保留了下来。";
   }
   switch (failureKind) {
-    case "quality":
-      return "产出没有达到要求，没有采用。可以让我重做这一部分。";
-    case "format":
-      return "产出的格式不符合要求，没有采用。可以让我重做这一部分。";
     case "model":
       return "模型响应中断，这一步没有完成。可以让我重试。";
     case "call":

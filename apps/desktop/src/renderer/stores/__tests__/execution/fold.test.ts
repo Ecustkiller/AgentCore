@@ -971,51 +971,6 @@ describe("projectExecution (fold)", () => {
     ]);
   });
 
-  it("folds browser_login onto RunEscalation.browserLogin", () => {
-    const frames: RunFrame[] = [
-      started("agent-1", "run-1"),
-      {
-        t: 2,
-        kind: "escalation_required",
-        escalationId: "esc-login",
-        runId: "run-1",
-        agentId: "agent-1",
-        question: "请在浏览器里登录后再继续",
-        assumption: "用户已登录",
-        escalationKind: "normal",
-        browserLogin: true,
-      },
-    ];
-    const esc = projectExecution(plan, frames, "running").runs.find(
-      (s) => s.id === "run-1",
-    )?.escalations[0];
-    expect(esc).toMatchObject({
-      id: "esc-login",
-      status: "pending",
-      browserLogin: true,
-      question: "请在浏览器里登录后再继续",
-    });
-  });
-
-  it("frameFromEvent maps wire browser_login → frame.browserLogin", () => {
-    const frame = frameFromEvent({
-      type: "escalation_required",
-      timestamp: "t",
-      payload: {
-        escalation_id: "e1",
-        run_id: "run-1",
-        agent_id: "agent-1",
-        question: "登录",
-        assumption: "已登",
-        browser_login: true,
-      },
-    } as SSEEvent);
-    expect(frame).toMatchObject({
-      kind: "escalation_required",
-      browserLogin: true,
-    });
-  });
-
   // 等待口径（诚实性）: 默认部署无墙钟上限，wire 不带 timeout_seconds ⇒ 状态里也不能凭空出现
   // 一个「会自动继续」的口径；运维配了上限才折进来，供卡面照实写。
   it("folds the wire wait ceiling onto RunEscalation.timeoutSeconds, absent by default", () => {

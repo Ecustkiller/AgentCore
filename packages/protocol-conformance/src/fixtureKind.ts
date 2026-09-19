@@ -10,6 +10,8 @@ export interface TurnFixtureWire {
   projected: ProjectedTurn;
   /** Optional turnOutcome sidecar; same harness, not a second gate. */
   turnVerdict?: ProjectedTurnVerdict;
+  /** Absent or true → `#/preview` / shoot. `false` → harness only. */
+  preview?: boolean;
 }
 
 /** True for turn-fold vectors; false for auxiliary blobs and simulation fold goldens.
@@ -25,4 +27,11 @@ export function isTurnFixture(raw: unknown): raw is TurnFixtureWire {
     projected !== null &&
     "status" in (projected as Record<string, unknown>)
   );
+}
+
+/** Turn fixtures that belong in `#/preview` / `pnpm shoot`. Export only writes
+ *  `preview: false` for skip names; absent is included. Harness stays `isTurnFixture`. */
+export function isPreviewFixture(raw: unknown): raw is TurnFixtureWire {
+  if (!isTurnFixture(raw)) return false;
+  return raw.preview !== false;
 }

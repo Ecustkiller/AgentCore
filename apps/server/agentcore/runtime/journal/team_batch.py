@@ -119,7 +119,7 @@ def team_batch_from_entries(entries: Iterable[Any] | None) -> dict[str, Any]:
                 break
 
     if not started and not terminal and not delivery_for_wave:
-        # 开工预览 / 未真正 kickoff：编制在计划里，人还没派出。
+        # 计划已有、人还没派出：编制在计划里。
         return dict(NO_BATCH)
     if delivery_for_wave or worker_ids <= terminal:
         return {"kind": "settled", "worker_count": n}

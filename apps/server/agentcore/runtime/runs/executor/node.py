@@ -24,12 +24,10 @@ from agentcore.runtime.events import run_started
 from agentcore.runtime.runs.executor.env import AgentExecutorEnv
 from agentcore.runtime.runs.executor.hooks import (
     _stamp_retrieval_evidence_gap,
-    _two_phase_citation,
 )
 from agentcore.runtime.runs.executor.identities import LeadSubteam
 from agentcore.runtime.runs.executor.loop import run_contract_loop
 from agentcore.runtime.runs.executor.retry import (
-    _can_light_repair,
     _can_write_pass,
     _files_expected,
     _narrow_for_light_repair,
@@ -62,9 +60,7 @@ __all__ = [
     # Kept importable for in-tree callers / tests that already reach them.
     "_files_expected",
     "_retry_token_budget",
-    "_can_light_repair",
     "_can_write_pass",
-    "_two_phase_citation",
 ]
 
 

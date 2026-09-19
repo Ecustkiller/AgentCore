@@ -150,9 +150,9 @@ async def test_interrupted_empty_pass_tells_retry_it_was_a_transport_cut():
 
 
 async def test_unknown_deliverable_fields_ignored_no_contract_retry():
-    """Deliverable 已删 min_length：遗留字段不得触发 contract.retry / 字数 soft tip。"""
+    """Unknown leftover deliverable keys do not trigger contract.retry."""
     plan, _ = build_run_plan(
-        [{"role": "A", "task": "做A", "deliverable": {"min_length": 40}}], id_prefix="t"
+        [{"role": "A", "task": "做A", "deliverable": {"bogus_gate": True}}], id_prefix="t"
     )
     provider = _RecordingRounds(
         [
@@ -174,7 +174,6 @@ async def test_unknown_deliverable_fields_ignored_no_contract_retry():
     state = res["t_1"]
     assert provider.calls == 1
     assert state.phase is RunPhase.COMPLETED
-    assert not any("少于" in w for w in (state.warnings or []))
     assert not any("传输中被中断" in w for w in (state.warnings or []))
 
 

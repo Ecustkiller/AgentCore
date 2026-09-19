@@ -14,7 +14,6 @@
 // one judge type for both ends; the committed golden JSON is the real contract checked.
 
 import { assertNever } from "@/lib/assertNever";
-import { SSE_EVENT_TYPE_VALUES } from "@agentcore/contract-types";
 import {
   type MessageLaneState,
   foldCitations,
@@ -34,7 +33,6 @@ import {
   type RunFrame,
   type RunNode,
   type UserInterjection,
-  foldDebatePretrial,
   frameFromEvent,
   mergePlanInto,
   planFromRunPlan,
@@ -42,7 +40,6 @@ import {
   upsertDebateRound,
   userInterjectionFromPayload,
 } from "@/stores/execution";
-import type { DebatePretrialState } from "@/stores/execution";
 import {
   defFromRequiredEvent,
   defFromResolvedEvent,
@@ -72,6 +69,7 @@ import type {
   TurnEvidenceLedgerEntry,
   TurnWarningPayload,
 } from "@/types/events";
+import { SSE_EVENT_TYPE_VALUES } from "@agentcore/contract-types";
 import type {
   CostBreakdown,
   ProjectedAgent,
@@ -140,7 +138,6 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
   let debateRounds: DebateNarrativeRound[] = [];
   let crossExamEnabled = false;
   let debateOpening: string | null = null;
-  let debatePretrial: DebatePretrialState | null = null;
   let deliveryStatus: DeliveryStatusPayload | null = null;
   /** journal 内最后一条 `execution_completed.status`（若有）→ 投影到 execution.status。 */
   let fromExecutionCompleted: ExecutionStatus | null = null;
@@ -355,16 +352,6 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
           cross_exam: p.cross_exam ?? [],
           witness_exam: p.witness_exam ?? [],
         });
-        break;
-      }
-      case "debate_pretrial_started":
-      case "debate_pretrial_orders":
-      case "debate_pretrial_completed": {
-        debatePretrial = foldDebatePretrial(
-          debatePretrial,
-          ev.type,
-          ev.payload,
-        );
         break;
       }
       case "approval_required":
@@ -603,7 +590,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
             ...(e.via_user != null ? { via_user: e.via_user } : {}),
           }
         : {}),
-      // 早停 source 可选；旧 golden 无此字段。桌面本地 id / browserLogin 等仍剥离。
+      // 早停 source 可选；旧 golden 无此字段。桌面本地 id 等仍剥离。
       ...(e.source ? { source: e.source } : {}),
     })),
     process: r.process,
@@ -646,7 +633,6 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     cost,
     debate,
     debateRounds,
-    debatePretrial,
     crossExamEnabled,
     debateOpening,
     deliveryStatus,
@@ -679,7 +665,7 @@ function mergeTurnLedger(
 
 /**
  * Plan 声明序（对齐 oracle / 手机）。仅在无 continue_run 时重排——有续派时保持
- * frame 序（与直播图一致，避免证人/旧磁带复攻插队）。庭前无 continue：主辩先声明；
+ * frame 序（与直播图一致，避免证人/旧磁带复攻插队）。无 continue 时主辩先声明；
  * 旧 journal 若仍有附属 run 先执行，frame 序会插到主辩前，此处校正。
  */
 function orderRunsForProjectedTurn(

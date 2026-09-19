@@ -44,7 +44,6 @@ export const APP_STATIC_ROUTES: readonly string[] = [
   "/preview",
   "/preview/whiteboard",
   "/preview/tables",
-  "/preview/ask-commence",
   "/preview/onboarding",
   "/preview/conversations",
   "/preview/files",

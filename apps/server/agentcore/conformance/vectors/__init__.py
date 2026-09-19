@@ -36,3 +36,6 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     **_RESUME_RELOAD,
     **_TURN_VERDICT,
 }
+
+# Harness still loads these; export writes ``preview: false`` so #/preview / shoot skip.
+PREVIEW_SKIP: frozenset[str] = frozenset({"multi_agent_legal_war_room"})

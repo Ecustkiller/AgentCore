@@ -17,6 +17,11 @@ export interface FsRoot {
    * 会话授权根（grant / `listSessionReadonlyRoots`）不下发。
    */
   absPath?: string;
+  /**
+   * `listRoots`：授权表里这条根的 absPath 此刻不是目录（改名 / 移动 / 删除）。
+   * 与「rootId 不在授权表」不是同一件事——后者根本没有这一行。
+   */
+  missing?: boolean;
   /** W3 session grant alias under ``external/<alias>/`` (omit for permanent roots). */
   alias?: string;
   /** Session access mode (readonly | organize | attach_rw); omit for permanent roots. */
@@ -264,6 +269,11 @@ export const FS_CHANNELS = {
   addRoot: "fs:addRoot",
   ensureDefaultRoot: "fs:ensureDefaultRoot",
   listRoots: "fs:listRoots",
+  /**
+   * 同一授权根改本机路径（死绑定：文件夹改名 / 移动 / 删除后重新选择）。
+   * 不 mint 新 rootId；会话 `local_root_id` 不变。
+   */
+  relocateRoot: "fs:relocateRoot",
   removeRoot: "fs:removeRoot",
   /** W3: session-scoped read-only root for one conversation. */
   grantSessionReadonlyRoot: "fs:grantSessionReadonlyRoot",
@@ -473,6 +483,10 @@ export interface StagedAttachment {
  */
 export interface FsApi {
   addRoot(): Promise<AddRootResult>;
+  /**
+   * 同一授权根改本机路径。取消 / 弹窗失败 / 无法访问与 {@link addRoot} 同形。
+   */
+  relocateRoot(rootId: string): Promise<AddRootResult>;
   /**
    * 取得（必要时自动创建 + 授权）默认本地容器根（`~/Documents/AgentCore`）。
    *

@@ -241,11 +241,10 @@ export async function loadRecovery(
       });
       useInteractionStore
         .getState()
-        .settleUnseenCold(
-          conversationId,
-          checkpointIdsFromPaused(livePaused),
-          { since, confirmed: ["server"] },
-        );
+        .settleUnseenCold(conversationId, checkpointIdsFromPaused(livePaused), {
+          since,
+          confirmed: ["server"],
+        });
       if (livePaused.length > 0) {
         finalizeGeneratingForPausedConversation(conversationId);
       }
@@ -455,7 +454,6 @@ export function surfaceResumeFromAssistant(
       question: cp.question,
       questions: cp.questions,
       intent: cp.intent,
-      ...(cp.browserLogin ? { browserLogin: true as const } : {}),
     });
     painted = true;
   }

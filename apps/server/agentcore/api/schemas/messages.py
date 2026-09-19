@@ -503,7 +503,6 @@ class PausedTurnSummary(BaseModel):
     question: str = ""
     questions: list[dict[str, Any]] = Field(default_factory=list)
     intent: AskCheckpointIntent | None = None
-    browser_login: bool = False
 
 
 class TurnRecoveryResponse(BaseModel):

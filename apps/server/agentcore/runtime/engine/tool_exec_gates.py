@@ -204,7 +204,7 @@ async def _check_safety_and_approval_gates(
     Returns a deny outcome, or ``None`` when the call may proceed to execute.
     """
     # P3 safety circuit breaker — last-line heuristic (not a security boundary).
-    # full_trust / kickoff / turn grants never override FORCE_APPROVAL or DENY.
+    # full_trust / delegation / turn grants never override FORCE_APPROVAL or DENY.
     from agentcore.runtime.safety_breaker import BreakerVerdict, evaluate_tool_call
 
     breaker = evaluate_tool_call(name, args)
@@ -422,7 +422,7 @@ async def _check_safety_and_approval_gates(
             context.backend, name, permission_axes=approval_gate.permission_axes
         )
         # INFO（非 debug）：round_end 后若长时间无 execute_end，靠此定位卡在审批还是执行。
-        # will_prompt peeks kickoff/session/_granted/_denied short-circuits so
+        # will_prompt peeks delegation/session/_granted/_denied short-circuits so
         # awaiting_approval is not true when authorize would silently pass.
         awaiting_approval = (not auto_pass) and approval_gate.will_prompt(
             tool_name=name,

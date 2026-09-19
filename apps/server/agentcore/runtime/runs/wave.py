@@ -181,7 +181,7 @@ class WaveScheduler:
           map, so the host gets smooth progress (one increment per node).
         - ``on_node_done`` (optional, additive) fires once per *executed* node with
           ``(run_id, state)`` at the same moment — hosts that only care about the
-          just-finished node (e.g. debate pretrial per-investigator persist) can
+          just-finished node (e.g. debate round persist) can
           avoid diffing the completed map. Cascade-skipped / never-ran nodes do not
           fire it.
         - ``on_boundary`` (受监督的波循环) is the host's decision-boundary hook, fired

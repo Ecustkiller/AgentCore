@@ -222,7 +222,7 @@ def test_normalize_questions_does_not_overwrite_option_action():
         ]
     )
     assert qs[0]["options"][0]["action"] == "open_local_project"  # preserved
-    assert qs[0]["options"][1]["action"] == "register_local_project"  # promoted via default
+    assert qs[0]["options"][1]["action"] == "register_local_project"
 
 
 def test_normalize_questions_drops_unknown_question_level_action():
@@ -342,7 +342,7 @@ def test_normalize_questions_empty_choice_lowers_to_text():
     assert qs[0]["kind"] == "text"
     assert qs[0]["options"] == []
     assert qs[0]["multiple"] is False
-    assert qs[0]["default"] == ""
+    assert "default" not in qs[0]
 
 
 def test_normalize_questions_flattened_multi_question_keeps_one_option_each():
@@ -379,7 +379,7 @@ def test_normalize_questions_text_ignores_question_level_label():
 
 
 async def test_ask_user_rejects_unparseable_questions_string():
-    """Garbage string must fail the tool — not open an empty-option kickoff card."""
+    """Garbage string must fail the tool — not open an empty-option card."""
     tool = AskUserTool(
         sink=EventSink(),
         conversation_id="c1",
@@ -477,9 +477,23 @@ async def test_ask_user_accepts_recommendation_in_label():
     assert "推荐标记" not in (res.output or "")
 
 
+def test_normalize_questions_drops_model_default():
+    qs = normalize_questions(
+        [
+            {
+                "prompt": "选哪条？",
+                "kind": "choice",
+                "default": "A（推荐）",
+                "options": [{"label": "A（推荐）"}, {"label": "B"}],
+            }
+        ]
+    )
+    assert "default" not in qs[0]
+    assert [o["label"] for o in qs[0]["options"]] == ["A（推荐）", "B"]
+
+
 def test_ask_user_schema_wires_fill_how_on_this_tool():
     from agentcore.tools.builtin.ask_user.schema import (
-        ASK_DEFAULT_HOW,
         ASK_LABEL_HOW,
         ASK_PROMPT_HOW,
         ASK_WHEN,
@@ -493,7 +507,7 @@ def test_ask_user_schema_wires_fill_how_on_this_tool():
     assert tool.schema.description == ASK_WHEN
     q = tool.schema.parameters["properties"]["questions"]["items"]["properties"]
     assert q["prompt"]["description"] == ASK_PROMPT_HOW
-    assert q["default"]["description"] == ASK_DEFAULT_HOW
+    assert "default" not in q
     props = q["options"]["items"]["properties"]
     assert "recommended" not in props
     assert props["label"]["description"] == ASK_LABEL_HOW

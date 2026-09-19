@@ -19,6 +19,7 @@ import {
   promptMineShelfOpts,
   promptReadHeaderChips,
 } from "@/lib/promptShelfTile";
+import { publishBlockReason } from "@/lib/skillStoreCopy";
 import { cn } from "@/lib/utils";
 import {
   ConnectorInspector,
@@ -237,6 +238,10 @@ export function PromptReadDialog({
             open={publishOpen}
             busy={busy}
             initialGroup={listing?.group ?? null}
+            blockReason={publishBlockReason(
+              mineItem.description,
+              mineItem.content,
+            )}
             onOpenChange={setPublishOpen}
             onConfirm={(group) => {
               setPublishOpen(false);

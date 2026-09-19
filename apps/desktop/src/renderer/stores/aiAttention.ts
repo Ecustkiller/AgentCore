@@ -42,6 +42,12 @@ export interface AiAttentionEntry {
 interface AiAttentionState {
   /** 按到达先后排列——提醒不跳序。快照 replace 用服务端给的顺序。 */
   entries: AiAttentionEntry[];
+  /**
+   * 增量 `resolved` 才 +1；fulfill 快照 replace 不动。协作感知靠它区分
+   * 「真的结了，同 id 再 required 可再弹」和「重连空表，不许重弹」。
+   */
+  resolvedSeq: number;
+  lastResolvedId: string | null;
   apply: (event: AiAttentionEvent) => void;
   replace: (entries: AiAttentionEntry[]) => void;
   clearConversation: (conversationId: string) => void;
@@ -94,6 +100,8 @@ function sameEntries(
 
 export const useAiAttentionStore = create<AiAttentionState>((set) => ({
   entries: [],
+  resolvedSeq: 0,
+  lastResolvedId: null,
 
   apply: (event) => {
     const entry = entryFromFields(event);
@@ -104,7 +112,12 @@ export const useAiAttentionStore = create<AiAttentionState>((set) => ({
         const next = state.entries.filter(
           (e) => e.interactionId !== entry.interactionId,
         );
-        return next.length === state.entries.length ? state : { entries: next };
+        if (next.length === state.entries.length) return state;
+        return {
+          entries: next,
+          lastResolvedId: entry.interactionId,
+          resolvedSeq: state.resolvedSeq + 1,
+        };
       });
       return;
     }

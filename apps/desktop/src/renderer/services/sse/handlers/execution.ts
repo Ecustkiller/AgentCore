@@ -21,7 +21,6 @@ import {
 import { useToolOutputLiveStore } from "@/stores/toolOutputLive";
 import type {
   CoordinationWaitPayload,
-  DebatePretrialCompletedPayload,
   DebateResultPayload,
   DebateRoundPayload,
   DebateRoundStartedPayload,
@@ -469,26 +468,6 @@ export function handleExecutionEvent(
         );
         if (p.evidence_ledger_delta?.length) {
           store.recordEvidenceLedgerDelta(p.evidence_ledger_delta, mid);
-        }
-      }
-      return true;
-    }
-    case "debate_pretrial_started":
-    case "debate_pretrial_orders":
-    case "debate_pretrial_completed": {
-      const mid = execMessageId(
-        conversationId,
-        routeHintFromPayload(event.payload),
-      );
-      if (mid) {
-        const store = useExecutionStore.getState();
-        store.recordDebatePretrial(event.type, event.payload, mid);
-        // 与 debate_round 同路径：pretrial_completed.evidence_ledger_delta 立刻 merge 进场级台账。
-        if (event.type === "debate_pretrial_completed") {
-          const p = event.payload as DebatePretrialCompletedPayload;
-          if (p.evidence_ledger_delta?.length) {
-            store.recordEvidenceLedgerDelta(p.evidence_ledger_delta, mid);
-          }
         }
       }
       return true;

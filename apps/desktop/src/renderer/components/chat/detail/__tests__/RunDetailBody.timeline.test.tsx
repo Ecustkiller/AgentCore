@@ -167,7 +167,6 @@ const mockExecution: Execution = {
   debateRounds: [],
   crossExamEnabled: false,
   debateOpening: null,
-  debatePretrial: null,
 };
 
 const HANDOFF_RECEIPT = "已收尾。";

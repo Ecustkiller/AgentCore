@@ -47,13 +47,13 @@ function completed(runId: string, agentId: string, t = 2): RunFrame {
 }
 
 describe("teamHasStartedRuns · inline graph gate", () => {
-  it("开工挂起（paused + 全 pending）不渲染图", () => {
+  it("开跑前挂起（paused + 全 pending）不渲染图", () => {
     const exec = projectExecution(plan, [], "paused");
     expect(exec.runs.every((r) => r.status === "pending")).toBe(true);
     expect(teamHasStartedRuns(exec.runs)).toBe(false);
   });
 
-  it("开工即停止（cancelled + 从未启动 → 全 skipped）不渲染图", () => {
+  it("开跑前停止（cancelled + 从未启动 → 全 skipped）不渲染图", () => {
     const exec = projectExecution(plan, [], "cancelled");
     expect(exec.runs.every((r) => r.status === "skipped")).toBe(true);
     expect(teamHasStartedRuns(exec.runs)).toBe(false);
@@ -73,13 +73,13 @@ describe("teamHasStartedRuns · inline graph gate", () => {
     expect(shouldShowTeamGraph(exec.runs)).toBe(true);
   });
 
-  it("队员仍 pending 也渲染图（无开工卡闸）", () => {
+  it("队员仍 pending 也渲染图", () => {
     const exec = projectExecution(plan, [], "running");
     expect(teamHasStartedRuns(exec.runs)).toBe(false);
     expect(shouldShowTeamGraph(exec.runs)).toBe(true);
   });
 
-  it("journal 回放 captain 已开、工人仍 pending → 出图（无开工卡闸）", () => {
+  it("journal 回放 captain 已开、工人仍 pending → 出图", () => {
     const withCaptain: ExecutionPlan = {
       ...plan,
       id: "exec-gate-captain",

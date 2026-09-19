@@ -1,4 +1,4 @@
-import { type Execution } from "@/stores/execution";
+import type { Execution } from "@/stores/execution";
 import { describe, expect, it } from "vitest";
 import { isDebateViewPending, resolveTurnDetailView } from "../turnDetailView";
 

@@ -498,7 +498,7 @@ def test_spec_round_trips_with_nested_policy_and_deliverable():
         role="研究员",
         tools=["web_search", "web_fetch"],
         deliverable=Deliverable(
-            required_sections=["结论"],
+            artifacts=["结论.md"],
             strict=True,
         ),
         policy=RunPolicy(result_handling="summarize"),
@@ -514,7 +514,7 @@ def test_spec_round_trips_with_nested_policy_and_deliverable():
     assert isinstance(restored.policy, RunPolicy)
     assert restored.policy.result_handling == "summarize"
     assert isinstance(restored.deliverable, Deliverable)
-    assert restored.deliverable.required_sections == ["结论"]
+    assert restored.deliverable.artifacts == ["结论.md"]
     assert restored.deliverable.strict is True
 
 
@@ -560,15 +560,11 @@ def test_spec_retired_deliverable_keys_are_ignored():
         "policy": {},
         "deliverable": {
             "form": "files",
-            "must_contain_soft": True,
-            "name": "retired",
         },
     }
     restored = spec_from_json(raw)
     assert restored.deliverable is not None
     assert restored.deliverable.artifacts == []
-    assert not hasattr(restored.deliverable, "must_contain_soft")
-    assert not hasattr(restored.deliverable, "name")
 
 
 def test_plan_json_drops_legacy_bind_after_deps():

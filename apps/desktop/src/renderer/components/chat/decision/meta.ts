@@ -10,13 +10,7 @@ import {
   parseCheckpointIntent,
 } from "@/lib/checkpointIntent";
 import type { CheckpointDecision, CheckpointIntent } from "@/types/events";
-import {
-  Ban,
-  Check,
-  Clock,
-  type LucideIcon,
-  Pencil,
-} from "lucide-react";
+import { Ban, Check, Clock, type LucideIcon, Pencil } from "lucide-react";
 import { QuestionMark } from "./QuestionMark";
 
 export type ResolvedToneKey = keyof typeof resolvedCheckpointTone;

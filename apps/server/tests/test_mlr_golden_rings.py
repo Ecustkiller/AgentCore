@@ -21,19 +21,14 @@ from agentcore.conformance.mlr_golden_rings import (
 from agentcore.conformance.vectors.multi_agent.mlr_debate_acts import (
     _multi_agent_mlr_debate_acts,
 )
-from agentcore.conformance.vectors.multi_agent.mlr_debate_witness import (
-    _multi_agent_mlr_debate_witness,
-)
-from agentcore.conformance.vectors.multi_agent.stage_card import (
-    _multi_agent_stage_card_orphaned,
-    _multi_agent_stage_card_start_debate,
+from agentcore.conformance.vectors.multi_agent.multi_lens_research import (
+    _multi_agent_multi_lens_research,
 )
 from agentcore.runtime.events import (
     FinishReason,
     checkpoint_required,
     message_end,
     message_start,
-    run_completed,
     run_started,
     tool_use_start,
 )
@@ -90,7 +85,7 @@ _WITNESSES_ROSTER = [
 
 
 def _inject_witness_into_events(events: list) -> list:
-    """给 stage_card 骨事件的 debate_result 注入证人点名 + 台账（不改向量文件）。"""
+    """给 mlr_debate_acts 骨事件的 debate_result 注入证人点名 + 台账（不改向量文件）。"""
     out = []
     for ev in events:
         if getattr(ev, "type", None) is not None:
@@ -126,9 +121,9 @@ def _inject_witness_into_events(events: list) -> list:
     return out
 
 
-def _enrich_stage_card_positive() -> list:
-    """以 stage_card 向量为骨，补齐六环所需事件（四透镜 / ask / 约定文档 file_read / 证人）。"""
-    base = list(_multi_agent_stage_card_start_debate())
+def _enrich_mlr_acts_positive() -> list:
+    """以 mlr_debate_acts 为骨，补齐六环所需事件（ask / 约定文档 file_read / 证人）。"""
+    base = list(_multi_agent_mlr_debate_acts())
     head = [
         message_start("m0", conversation_id="conv_golden"),
         tool_use_start("ask1", "ask_user", {"questions": [{"prompt": "确认启动多视角调研？"}]}),
@@ -146,47 +141,32 @@ def _enrich_stage_card_positive() -> list:
         message_end(FinishReason.PAUSED, input_tokens=10, output_tokens=5),
         message_start("m1b", conversation_id="conv_golden"),
     ]
-    extra_lenses = []
-    for rid in ("lens_1", "lens_2", "lens_3"):
-        extra_lenses.extend(
-            [
-                run_started(rid, rid),
-                run_completed(
-                    rid,
-                    rid,
-                    output_summary=f"{rid} 完成",
-                    duration_ms=100,
-                    role="member",
-                    model="deepseek-v4-flash",
-                ),
-            ]
-        )
     dossier_tools = [
         tool_use_start(
             "fr1",
             "file_read",
             {"path": "AgentCore/文档/research/汇总与命题卡.md"},
-            run_id="debate_mod_sc_r1_pro",
+            run_id="debate_mod_act2_r1_pro",
         ),
         tool_use_start(
             "fr2",
             "file_read",
             {"path": "AgentCore/文档/research/法律透镜报告.md"},
-            run_id="debate_mod_sc_r1_con",
+            run_id="debate_mod_act2_r1_con",
         ),
         tool_use_start(
             "ws1",
             "web_search",
             {"query": "补缺口"},
-            run_id="debate_mod_sc_r1_pro",
+            run_id="debate_mod_act2_r1_pro",
         ),
     ]
-    return _inject_witness_into_events(head + base + extra_lenses + dossier_tools)
+    return _inject_witness_into_events(head + base + dossier_tools)
 
 
 def _positive_bundle():
     return sse_events_to_bundle(
-        _enrich_stage_card_positive(),
+        _enrich_mlr_acts_positive(),
         user_prompt=_TOPIC,  # 与向量 motion 一致 → 保真
         workspace_files=_RESEARCH_FILES + _DEBATE_FILES,
         conversation_id="conv_golden_pos",
@@ -198,9 +178,9 @@ def _positive_bundle():
 
 
 def _negative_bundle():
-    """推进卡 orphan、无 research/、无同图授权 → 多环 FAIL；环6 N/A（无幕2）。"""
+    """调研未开辩：无幕2 → 多环 FAIL；环6 N/A。"""
     return sse_events_to_bundle(
-        _multi_agent_stage_card_orphaned(),
+        _multi_agent_multi_lens_research(),
         user_prompt=_LV_PROMPT,  # 超笼统且无 ask → 环1 FAIL
         workspace_files=[],  # 无落盘
         conversation_id="conv_golden_neg",
@@ -271,7 +251,7 @@ def test_mlr_debate_acts_vector_ring3_auto_auth():
 def test_witness_vector_ring6_pass():
     """证人 conformance 向量：环6 PASS（点名+台账）；环3 现行 auto 授权。"""
     bundle = sse_events_to_bundle(
-        _multi_agent_mlr_debate_witness(),
+        _inject_witness_into_events(list(_multi_agent_mlr_debate_acts())),
         user_prompt=_TOPIC,
         workspace_files=_RESEARCH_FILES + _DEBATE_FILES,
     )
@@ -286,7 +266,7 @@ def test_witness_vector_ring6_pass():
 def test_ring6_fail_when_named_but_no_ledger():
     """点名有、台账无 → 环6 FAIL。"""
     events = []
-    for ev in _enrich_stage_card_positive():
+    for ev in _enrich_mlr_acts_positive():
         if isinstance(ev, dict) and ev.get("type") == "debate_result":
             p = dict(ev["payload"])
             p["evidence_ledger"] = [
@@ -313,7 +293,7 @@ def test_ring6_fail_when_named_but_no_ledger():
 def test_ring6_na_when_roster_empty():
     """witnesses=[] 显式空 roster → 环6 N/A（探测无 session）。"""
     events = []
-    for ev in _enrich_stage_card_positive():
+    for ev in _enrich_mlr_acts_positive():
         if isinstance(ev, dict) and ev.get("type") == "debate_result":
             p = dict(ev["payload"])
             p["witnesses"] = []
@@ -338,10 +318,10 @@ def test_ring6_na_when_roster_empty():
     assert report.all_pass  # N/A 不阻断
 
 
-def test_stage_card_vector_partial_pass_ring3_structure():
-    """stage_card 向量：环3 无推进卡事件 + authorized_by=auto；缺证人 → 环6 FAIL；缺约定文档 → 环2/5 FAIL。"""
+def test_mlr_debate_acts_vector_partial_pass_ring3_structure():
+    """mlr_debate_acts：环3 无推进卡事件 + authorized_by=auto；缺证人 → 环6 FAIL；缺约定文档 → 环2/5 FAIL。"""
     bundle = sse_events_to_bundle(
-        _multi_agent_stage_card_start_debate(),
+        _multi_agent_mlr_debate_acts(),
         user_prompt=_TOPIC,
         workspace_files=[],
     )
@@ -358,7 +338,7 @@ def test_stage_card_vector_partial_pass_ring3_structure():
 
 def test_ring1_na_when_prompt_clear():
     bundle = sse_events_to_bundle(
-        _multi_agent_stage_card_start_debate(),
+        _multi_agent_mlr_debate_acts(),
         user_prompt=(
             "请基于已有卷宗，就「品牌是否应立即终止争议代言联名」做多视角调研："
             "法律条款、合同违约金、舆情窗口与文化圈层冲突均需覆盖，输出命题卡。"
@@ -381,7 +361,7 @@ def test_cost_metrics_when_turn_ids_present():
     """带 turn_id 的事件才能分幕费用；缺 turn_id 时进 gaps 而非硬造。"""
     tagged = []
     current = "m1"
-    for ev in _multi_agent_stage_card_start_debate():
+    for ev in _multi_agent_mlr_debate_acts():
         if ev.type.value == "message_start":
             current = str(ev.payload.get("message_id") or current)
         tagged.append(
@@ -402,7 +382,7 @@ def test_cost_metrics_when_turn_ids_present():
 def test_cost_gap_without_message_costs():
     report = evaluate_rings(
         sse_events_to_bundle(
-            _multi_agent_stage_card_start_debate(),
+            _multi_agent_mlr_debate_acts(),
             user_prompt=_TOPIC,
             workspace_files=[],
         )
@@ -435,7 +415,7 @@ def test_ring4_total_is_observation_only():
             )
     report = evaluate_rings(
         sse_events_to_bundle(
-            _enrich_stage_card_positive() + extra,
+            _enrich_mlr_acts_positive() + extra,
             user_prompt=_TOPIC,
             workspace_files=_RESEARCH_FILES + _DEBATE_FILES,
         )
@@ -461,7 +441,7 @@ def test_ring4_fails_when_single_run_exceeds_budget():
         )
     report = evaluate_rings(
         sse_events_to_bundle(
-            _enrich_stage_card_positive() + extra,
+            _enrich_mlr_acts_positive() + extra,
             user_prompt=_TOPIC,
             workspace_files=_RESEARCH_FILES + _DEBATE_FILES,
         )
@@ -497,7 +477,7 @@ def test_ring4_rejected_attempts_do_not_count_as_violation():
         )
     report = evaluate_rings(
         sse_events_to_bundle(
-            _enrich_stage_card_positive() + extra,
+            _enrich_mlr_acts_positive() + extra,
             user_prompt=_TOPIC,
             workspace_files=_RESEARCH_FILES + _DEBATE_FILES,
         )
@@ -514,7 +494,7 @@ def test_ring4_rejected_attempts_do_not_count_as_violation():
 
 def test_search_attribution_excludes_lens_and_witness():
     """环4 检索口径只计辩手：幕1 透镜本职检索与证人答问核实不得挤占辩手预算口径。"""
-    events = _enrich_stage_card_positive() + [
+    events = _enrich_mlr_acts_positive() + [
         # 幕1 透镜检索（run_started 声明 stance 缺省 → 非辩手）
         run_started("del_x_lens_0", "del_x_lens_0"),
         tool_use_start("lw1", "web_search", {"query": "底料"}, run_id="del_x_lens_0"),

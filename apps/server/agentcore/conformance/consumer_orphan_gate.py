@@ -117,9 +117,6 @@ _EVENT_FACTORY_NAMES: frozenset[str] = frozenset(
         "debate_result",
         "debate_round_started",
         "debate_round",
-        "debate_pretrial_started",
-        "debate_pretrial_orders",
-        "debate_pretrial_completed",
     }
 )
 

@@ -26,7 +26,7 @@ import {
 const REGISTERED = INTERACTION_REGISTRY.map((d) => d.kind);
 
 describe("INTERACTION_REGISTRY live kinds", () => {
-  it("registers live UserInteractionKind rows (no kickoff / plan_review card)", () => {
+  it("registers live UserInteractionKind rows (approval / ask_user / escalation)", () => {
     expect([...new Set(REGISTERED)].sort()).toEqual(
       ["approval", "ask_user", "escalation"].sort(),
     );

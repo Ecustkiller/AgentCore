@@ -150,6 +150,13 @@ from agentcore.tools.protocol import ToolSchema
 # 实测 debate 1166。cap 1250→1170。
 # 2026-09-19 ask_user：填卡合同从 consult skill 上收到按钮（写参当轮必见）。
 # 实测桌面 1286 / web 1118。cap 1250→1290、1080→1120（抬顶=新语义，非回潮抄写）。
+# 2026-09-19 倾向只留 label「（推荐）」；模型面删 questions[].default。
+# 实测桌面 1185 / web 1017。cap 1290→1190、1120→1020。
+# 2026-09-19 删 ask_user.browser_login。实测桌面 1104。cap 1190→1110。
+# 2026-09-19 ask_user when 收成挡路+标假设+已钉/未钉；choice 下沉 label。
+# 实测桌面 1065。cap 1110→1070。
+# 2026-09-19 ask_user when/填卡再收：挡路口号并进猜错；已钉≠自拟；prompt/label 对比句。
+# 实测桌面 1046。cap 1070→1050。
 _CAPS: dict[str, int] = {
     "browser": 910,
     "git": 1590,
@@ -157,7 +164,7 @@ _CAPS: dict[str, int] = {
     "run": 790,
     "delegate": 2260,
     "debate": 1170,
-    "ask_user": 1290,
+    "ask_user": 1050,
     "folders": 410,
     "create_folder": 470,
 }
@@ -169,7 +176,11 @@ _TOTAL_CAP = sum(_CAPS.values())
 # 2026-09-16 删 message。实测 1083。cap 1130→1090。
 # 2026-09-18 卡形共用。实测 1076。cap 1090→1080。
 # 2026-09-19 填卡合同上收。实测 1118。cap 1080→1120。
-_ASK_USER_WEB_CAP = 1120
+# 2026-09-19 删 questions[].default。实测 1017。cap 1120→1020。
+# 2026-09-19 删 browser_login。实测 936。cap 1020→940。
+# 2026-09-19 ask_user when 收短。实测 897。cap 940→900。
+# 2026-09-19 ask_user when/填卡再收。实测 878。cap 900→880。
+_ASK_USER_WEB_CAP = 880
 
 # Worker-only：escalate / handoff / 写盘三件套曾把身份段或 consult HOW 再抄一遍到按钮上。
 # 2026-08-29 escalate blocking：已拒凭据→false 短触发（身份段不进按钮）。当次实测 1698。cap 1690→1700。
@@ -183,6 +194,8 @@ _ASK_USER_WEB_CAP = 1120
 # 2026-09-10 波 2：escalate 卡片去补集；实测 1387。cap 1510→1390。
 # 2026-09-16 escalate 填卡 HOW 出按钮（权衡/推荐归 ask_kickoff）。实测 1350。cap 1390→1350。
 # 2026-09-18 questions[] 与 ask_user 共用卡形。实测 1349。cap 保持 1350。
+# 2026-09-19 删 questions[].default。实测 1273。cap 1350→1280。
+# 2026-09-19 删 escalate.browser_login。实测 1152。cap 1280→1160。
 # 2026-09-08 撤 long_form_landing：写工具 description 去掉 HOW→consult。实测 write 334 /
 # str_replace 601。cap write 500→340、str_replace 640→610。
 # 2026-09-01 常驻文件面：回收站/扁平化手册出按钮，恢复路径留回执。实测
@@ -206,7 +219,7 @@ _COORD_CAPS: dict[str, int] = {
     "replan": 1290,
 }
 _WORKER_CAPS: dict[str, int] = {
-    "escalate": 1350,
+    "escalate": 1160,
     "handoff": 250,
     "file_write": 330,
     "str_replace": 560,
@@ -351,12 +364,12 @@ def _measured_coord() -> dict[str, int]:
 
 def _measured_file() -> dict[str, int]:
     from agentcore.tools.builtin.file_ops import (
+        FileBatchTool,
         FileDeleteTool,
         FileListTool,
         FileReadTool,
         GlobTool,
         MkdirTool,
-        FileBatchTool,
     )
     from agentcore.tools.builtin.grep import GrepTool
 
@@ -552,7 +565,6 @@ def test_on_demand_faces_point_how_to_consult():
     }
     assert set(_ask_user_schema(desktop=True).parameters["properties"]) == {
         "questions",
-        "browser_login",
     }
     assert set(RunTool().schema.parameters["properties"]) == {
         "command",

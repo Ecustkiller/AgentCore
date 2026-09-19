@@ -80,8 +80,6 @@ export interface PendingResume {
   questions: AskQuestion[];
   /** ask_user chrome intent after {@link parseCheckpointIntent}. */
   intent: AskUiIntent;
-  /** ask_user browser_login=true → login card；点「打开浏览器」才 reveal 右坞. */
-  browserLogin?: boolean;
   /** Where the durable frame lives — drives {@link runResume} sidecar vs server routing. */
   origin: ResumeOrigin;
   /** 这张壳进入本地时的{@link beginPausedSnapshot 观察序号}；由 store 自己盖，外部构造
@@ -91,9 +89,7 @@ export interface PendingResume {
 
 /** `steps` / `pending` arrive as loose JSON dicts (backend ``list[dict]``); map
  * them to the known display shapes, tolerating any missing field. */
-const toSteps = (
-  raw: PausedTurnSummary["steps"],
-): PendingResume["steps"] =>
+const toSteps = (raw: PausedTurnSummary["steps"]): PendingResume["steps"] =>
   (raw ?? []).map((s) => ({
     run_id: String(s.run_id ?? ""),
     role: String(s.role ?? ""),
@@ -139,7 +135,7 @@ const toQuestions = (raw: PausedTurnSummary["questions"]): AskQuestion[] =>
     kind: q.kind === "text" ? "text" : "choice",
     options: toOptions(q.options),
     multiple: Boolean(q.multiple),
-    default: String(q.default ?? ""),
+    ...(q.default ? { default: String(q.default) } : {}),
   }));
 
 const toIntent = (raw: unknown): AskUiIntent => parseCheckpointIntent(raw);
@@ -217,9 +213,6 @@ function entryFromSummary(
     question: s.question ?? "",
     questions: toQuestions(s.questions),
     intent: toIntent((s as { intent?: unknown }).intent),
-    ...((s as { browser_login?: unknown }).browser_login === true
-      ? { browserLogin: true as const }
-      : {}),
     origin,
   };
 }

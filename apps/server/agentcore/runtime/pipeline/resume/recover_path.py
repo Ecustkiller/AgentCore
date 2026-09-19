@@ -146,7 +146,7 @@ async def recover_and_rebuild_window(
     # 终稿多段衔接: when the pause kept deliverable prose, steer the resumed answer
     # round to continue it (join_segments alone can't invent transitions). Skip when
     # settle used terminal INTERACT (no CEO round), or user STOP'd / ADJUST'd a
-    # checkpoint (拒答/拒开工/调整开工回灌 CEO，但勿把「续写正文」steer 压上去).
+    # checkpoint (拒答回灌 CEO，但勿把「续写正文」steer 压上去).
     # 若 pre_pause 是「请确认」姿势，改用互斥续写 steer（勿把确认话术续成「已全部收卷」）。
     if (
         pre_pause.strip()

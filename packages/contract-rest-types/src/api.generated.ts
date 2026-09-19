@@ -10079,7 +10079,7 @@ export interface components {
         };
         /**
          * HostAxis
-         * @description 本机 Host 面授权（与 ``command`` 正交；不挂 execution_class / 不吃 kickoff 静默授）。
+         * @description 本机 Host 面授权（与 ``command`` 正交；不挂 execution_class / 不吃 delegation 静默授）。
          * @enum {string}
          */
         HostAxis: "off" | "ask" | "session";
@@ -11347,11 +11347,6 @@ export interface components {
          *     mid-task fork). Unused ``steps`` / ``pending`` stay empty.
          */
         PausedTurnSummary: {
-            /**
-             * Browser Login
-             * @default false
-             */
-            browser_login: boolean;
             /** Checkpoint Id */
             checkpoint_id: string;
             /** Intent */

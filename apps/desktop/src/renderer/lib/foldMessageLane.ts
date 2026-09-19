@@ -348,7 +348,7 @@ function journalMarkerInsertIndex(
 
 /** Reload 补标记（时间线一期）: backfill every positional marker the journal implies
  * into a persisted `process[]` — `run_plan` → `team`，`*_required` → registry marker
- * （开工卡 journal 事件 skip，不补标记）。保证不变量「有交互卡必有时间线
+ * （退役 team_preview / plan_review journal 事件 skip，不补标记）。保证不变量「有交互卡必有时间线
  * 标记」在重载后成立（底部堆叠回退已废除，缺标记的卡会整段消失）。
  *
  * 纯补标记：绝不吞正文。absorb 只走 ``content_reset``；重载的 process 是终态，

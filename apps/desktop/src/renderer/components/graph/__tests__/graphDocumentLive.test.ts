@@ -104,7 +104,6 @@ function minimalExec(output = ""): Execution {
     debateRounds: [],
     crossExamEnabled: false,
     debateOpening: null,
-    debatePretrial: null,
   };
 }
 

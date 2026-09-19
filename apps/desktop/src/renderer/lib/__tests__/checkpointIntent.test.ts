@@ -1,5 +1,5 @@
-import { parseCheckpointIntent } from "../checkpointIntent";
 import { describe, expect, it } from "vitest";
+import { parseCheckpointIntent } from "../checkpointIntent";
 
 describe("parseCheckpointIntent", () => {
   it("folds leftover wire names and unknowns into decision", () => {

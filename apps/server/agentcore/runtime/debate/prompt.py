@@ -259,7 +259,7 @@ def debater_task(
     dossier_block = _research_dossier_block(config)
     ask_block = _interjection_block(side, interjections)
     has_dossier = bool((config.research_dossier_index or "").strip()) or bool(
-        getattr(config, "pretrial_evidence_ready", False)
+        getattr(config, "evidence_pack", None)
     )
     if has_dossier:
         take_evidence = "请为开场立论做取证，然后产出【证据笔记】。"
@@ -298,7 +298,7 @@ def debater_task(
     side_budgets = getattr(config, "debater_retrieval_budgets", None) or {}
     if side.key in side_budgets:
         payload["retrieval_budget"] = int(side_budgets[side.key])
-    elif has_dossier or getattr(config, "pretrial_evidence_ready", False):
+    elif has_dossier or getattr(config, "evidence_pack", None):
         from agentcore.runtime.runs.retrieval_budget import (
             DEFAULT_RETRIEVAL_BUDGET_DEBATER_WITH_DOSSIER,
         )

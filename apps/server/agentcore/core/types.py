@@ -62,7 +62,7 @@ class CommandAxis(StrEnum):
 
 
 class HostAxis(StrEnum):
-    """本机 Host 面授权（与 ``command`` 正交；不挂 execution_class / 不吃 kickoff 静默授）。"""
+    """本机 Host 面授权（与 ``command`` 正交；不挂 execution_class / 不吃 delegation 静默授）。"""
 
     OFF = "off"
     ASK = "ask"

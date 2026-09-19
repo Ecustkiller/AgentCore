@@ -91,7 +91,7 @@ class ToolRegistration:
     # but gVisor/netns healthy (host_kind=sandbox; never open_local_bridge_session).
     browser_class: bool = False
     # Host 第三能力面: gated by ``host≠off`` + desktop backfill channel (desktop_online).
-    # Must NOT set ``execution_class`` — L2/L3 never enter kickoff silent grant.
+    # Must NOT set ``execution_class`` — L2/L3 never enter command=auto silent grant.
     host_class: bool = False
     # Desktop-online-only tools (≠ Host face): gated solely by ``desktop_online``.
     # Not gated by ``host≠off``.

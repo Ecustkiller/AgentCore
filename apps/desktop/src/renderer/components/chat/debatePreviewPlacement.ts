@@ -11,7 +11,7 @@ function isWorkerRun(run: TeamGraphRun): boolean {
 /**
  * True once a **worker** left the never-started states (`pending`, or terminal
  * `skipped` from finalize before a start). Captain `run_started` is the CEO
- * turn itself (often emitted before `run_plan` / kickoff) and must not count —
+ * turn itself (often emitted before `run_plan`) and must not count —
  * live SSE drops that frame; journal hydrate restores it.
  * Hang / stop-before-start stay graph-less unless workers are already running.
  * Mid-wave pause (completed worker nodes exist) still shows the graph.
@@ -23,7 +23,7 @@ export function teamHasStartedRuns(runs: readonly TeamGraphRun[]): boolean {
 }
 
 /**
- * Inline graph visibility. Graph is not gated on leftover kickoff IX;
+ * Inline graph visibility. Pending roster still shows; leftover team_preview IX is not a gate.
  */
 export function shouldShowTeamGraph(
   runs: readonly TeamGraphRun[] | null | undefined,

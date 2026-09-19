@@ -25,6 +25,7 @@ from agentcore.runtime.runs.serialize import (
 )
 from agentcore.runtime.suspension import (
     AskUserSuspension,
+    SuspensionKind,
     find_tool_call_id,
     suspension_from_json,
 )

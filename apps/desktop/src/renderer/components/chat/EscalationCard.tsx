@@ -21,7 +21,6 @@ import {
   Megaphone,
 } from "lucide-react";
 import { useState } from "react";
-import { BrowserLoginDecisionCard } from "./BrowserLoginDecisionCard";
 import {
   AskNoteField,
   AskQuestionFields,
@@ -72,17 +71,7 @@ export function EscalationCard({
   ) {
     return <ResolvedEscalation escalation={escalation} role={role} />;
   }
-  // browser_login must stay user-facing (password); check before awaiting=ceo.
-  if (escalation.status === "pending" && escalation.browserLogin) {
-    return (
-      <PendingBrowserLoginEscalation
-        escalation={escalation}
-        role={role}
-        conversationId={conversationId}
-      />
-    );
-  }
-  // 写权冲突：结构化「移交写权 / 保持原主」（与 browser_login 同属用户直达例外）。
+  // 写权冲突：结构化「移交写权 / 保持原主」（用户直达例外）。
   if (
     escalation.status === "pending" &&
     (escalation.ownershipPaths?.length ?? 0) > 0
@@ -143,43 +132,6 @@ function useEscalationSubmit(
   };
 
   return { submitting, busy, send };
-}
-
-/** 浏览器登录等待 escalate：不 auto-resume；用户完成登录后点「已登录，继续」resolve。 */
-function PendingBrowserLoginEscalation({
-  escalation,
-  role,
-  conversationId,
-}: {
-  escalation: RunEscalation;
-  role: string;
-  conversationId: string | null;
-}) {
-  const { submitting, busy, send } = useEscalationSubmit(
-    conversationId,
-    escalation.id,
-  );
-  const submitKind =
-    submitting === "answer"
-      ? ("logged_in" as const)
-      : submitting === "use_assumption"
-        ? ("use_assumption" as const)
-        : null;
-  return (
-    <BrowserLoginDecisionCard
-      roleLabel={role}
-      question={escalation.question}
-      assumption={escalation.assumption || undefined}
-      conversationId={conversationId}
-      revealKey={escalation.id ?? "browser-login"}
-      timeoutSeconds={escalation.timeoutSeconds}
-      busy={busy}
-      submitting={submitKind}
-      kindTag={escalationKindTag(escalation) || undefined}
-      onLoggedIn={() => send({ kind: "answer", answer: "已登录，继续" })}
-      onUseAssumption={() => send({ kind: "use_assumption" })}
-    />
-  );
 }
 
 function PendingOwnershipEscalation({

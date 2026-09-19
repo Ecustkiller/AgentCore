@@ -1,7 +1,7 @@
 """AGENT-node react+capture loop body + contract decision ladder orchestration.
 
 Split from ``.node`` — pure move; consumed only by the node facade.
-Domain hooks (cite) and retry predicates live in sibling modules.
+Retry predicates live in sibling modules.
 """
 
 from __future__ import annotations
@@ -18,26 +18,19 @@ from agentcore.runtime.runs.contract import (
     ContractVerdict,
     check_contract,
     collect_opaque_source_data_paths,
-    format_cite_upgrade_feedback,
     format_feedback,
     format_handoff_feedback,
     format_interrupted_pass_note,
-    format_light_repair_feedback,
     format_write_pass_feedback,
     handoff_expectation_met,
     is_zero_files_gap,
-    needs_file_contents,
-    partition_citation_failures,
-    strip_invalid_ledger_refs_from_surfaces,
     worker_expects_handoff,
 )
 from agentcore.runtime.runs.executor.context import (
-    _load_artifact_contents,
     _safe_index_files,
 )
 from agentcore.runtime.runs.executor.env import AgentExecutorEnv
 from agentcore.runtime.runs.executor.retry import (
-    _can_light_repair,
     _can_write_pass,
     _narrow_for_light_repair,
     _pass_max_rounds,
@@ -77,9 +70,6 @@ class ContractLoopResult:
     cutoff_reasons: list[str]
     tool_failures: list[dict]
     write_pass_used: bool
-    two_phase: bool
-    cite_upgrade_used: bool
-    artifact_contents: dict[str, str] | None
     workspace_paths: list[str] | None
     product_landing_artifacts: list[str] | None
     runtime_file_products: list[Any]
@@ -123,7 +113,6 @@ async def run_contract_loop(
     tighten_verify_exec_thrash = prepared.tighten_verify_exec_thrash
     token_ceiling = prepared.token_ceiling
     attempts = prepared.attempts
-    two_phase = prepared.two_phase
 
     run_usage = run_usage_box[0]
     run_rounds = run_rounds_box[0]
@@ -173,22 +162,17 @@ async def run_contract_loop(
     # C·掐断透明化：正轨 token 撞顶等结构化原因码（与 DEGRADED 分流正交）。
     cutoff_reasons: list[str] = []
     # Sticky across attempts: cutoff_reasons is cleared each pass, but a round
-    # fuse already blown must not reopen a full investigation after light_repair.
+    # fuse already blown must not reopen a full investigation after write_pass.
     round_ceiling_hit = False
     # Last accepted react pass's tool-failure facts (circuit-breaker tally).
     tool_failures: list[dict] = []
     # Cross-pass LoopController latches (validation path-stop / thrash).
     pass_controller_seed: dict | None = None
     controller_seed_out: list[dict] = []
-    # Format-only / handoff-thin: one in-place light repair before full contract.retry.
     # Zero-disk (pinned landing): one short write pass — never a full investigation retry.
-    # 调研两阶段：A 跳过引用闸；cite 不干净时同 worker 自动升 B（一次），不过则 rejected。
-    light_repair_used = False
     write_pass_used = False
-    cite_upgrade_used = False
     light_mode = False
     runtime_file_products: list[Any] = []
-    artifact_contents: dict[str, str] | None = None
     workspace_paths: list[str] | None = None
     source_data_paths: list[str] | None = None
     attempt = 0
@@ -239,7 +223,7 @@ async def run_contract_loop(
         )
         use_rtd = (
             attempt == 0
-            and not light_repair_used
+            and not write_pass_used
             and spec.research_then_draft
             and (spec.draft_brief or "").strip()
         )
@@ -348,66 +332,23 @@ async def run_contract_loop(
             retained_content = content
         # files_written backs pinned-path landing; workspace_paths
         # reconciles declarative artifacts against the live workspace (+ this
-        # run's own writes). Handoff gate: nodes with downstream dependents must
-        # submit a non-empty brief (one correction shot, then degraded synth).
-        # Product gate: any successful write counts (dossier notes under
-        # research/reviews/debate included — see landing_product).
+        # run's own writes). Product gate: any successful write counts.
         touched_now = files_touched_from_transcript(messages)
         product_touched_now = filter_product_landing_paths(
             touched_now, product_landing_artifacts
         )
         product_files_written = len(product_touched_now)
-        # Always classify failed landing attempts so zero-disk tips can
-        # attribute channel_dead / write_failed (not only true zero-attempt).
         landing_fail_kind = landing_write_failure_kind(messages)
         debrief_now = debrief_from_transcript(messages)
-        # Re-index the live workspace only when reconciling declarative
-        # artifacts — otherwise this run's own writes are enough.
-        # 交付形态对齐: for a FILE deliverable, load the landed files' text so the
-        # contract's content checks (section / JSON / citation) read the product on
-        # disk, not just chat prose — artifacts declared → matching paths; else this
-        # run's own writes. ``needs_file_contents`` skips the read for prose /
-        # existence-only non-content deliverables. Citation / bibliography: when the
-        # turn evidence ledger is connected, check_contract scans the same content
-        # surfaces already loaded here.
-        artifact_contents = None
-        turn_ledger = env.turn_evidence_ledger
-        load_contents = needs_file_contents(
-            deliverable,
-            landed_paths=touched_now,
-        )
         if deliverable and deliverable.artifacts:
             live_index = await _safe_index_files(tool_ctx.backend)
             workspace_paths = list(dict.fromkeys([*live_index, *touched_now]))
-            if load_contents:
-                patterns = list(
-                    dict.fromkeys([*deliverable.artifacts, *touched_now])
-                )
-                artifact_contents = await _load_artifact_contents(
-                    tool_ctx.backend,
-                    patterns,
-                    workspace_paths,
-                )
         else:
             workspace_paths = list(touched_now)
-            if touched_now and load_contents:
-                artifact_contents = await _load_artifact_contents(
-                    tool_ctx.backend,
-                    touched_now,
-                    workspace_paths,
-                )
         source_data_paths = collect_opaque_source_data_paths(
             material_paths=getattr(tool_ctx, "material_paths", None),
             workspace_paths=workspace_paths,
             landed_paths=touched_now,
-        )
-        # 调研阶段 A：广搜草案不跑成稿引用闸；升 B（cite_upgrade_used）后再验。
-        in_phase_a = two_phase and not cite_upgrade_used
-        turn_ledger_entries = (
-            turn_ledger.all_entries() if turn_ledger is not None else None
-        )
-        turn_citable_ids = (
-            turn_ledger.draft_citable_ids() if turn_ledger is not None else None
         )
         verdict = check_contract(
             content,
@@ -415,18 +356,10 @@ async def run_contract_loop(
             files_written=product_files_written,
             debrief=debrief_now,
             workspace_paths=workspace_paths,
-            artifact_contents=artifact_contents,
-            ledger_entries=turn_ledger_entries,
-            citable_ids=turn_citable_ids,
-            enforce_citations=not in_phase_a,
             landing_failure_kind=landing_fail_kind,
             can_execute=can_execute,
             source_data_paths=source_data_paths,
         )
-        # Handoff gate only forces a correction shot when the tool is actually
-        # offered (production worker registry). Empty-registry unit tests still
-        # get a degraded synth below without burning an extra LLM round.
-        # One sentence: has dependents → must; last hop is not gated.
         needs_handoff = worker_expects_handoff(env.plan, spec.run_id)
         handoff_offered = worker_tools.get_optional(HANDOFF_TOOL_NAME) is not None
         handoff_ok = (
@@ -434,129 +367,8 @@ async def run_contract_loop(
             or handoff_expectation_met(debrief_now)
             or not handoff_offered
         )
-        checked_files = (
-            list(artifact_contents.keys()) if artifact_contents else None
-        )
-        # 调研 A→B：阶段 A 已过非引用合同 → 探测引用闸；仅引用问题则先自动剥离再决定。
-        if in_phase_a and verdict.ok:
-            probe = check_contract(
-                content,
-                deliverable,
-                files_written=product_files_written,
-                debrief=debrief_now,
-                workspace_paths=workspace_paths,
-                artifact_contents=artifact_contents,
-                ledger_entries=turn_ledger_entries,
-                citable_ids=turn_citable_ids,
-                enforce_citations=True,
-                landing_failure_kind=landing_fail_kind,
-                can_execute=can_execute,
-                source_data_paths=source_data_paths,
-            )
-            cite_fail, other_fail = partition_citation_failures(probe.failures)
-            if other_fail:
-                verdict = probe
-            elif cite_fail:
-                # 1) 自动剥离落盘（及正文）非法 #rN，写回后再验；过则免 LLM。
-                new_arts, new_body, stripped_ids = (
-                    strip_invalid_ledger_refs_from_surfaces(
-                        artifact_contents=artifact_contents,
-                        body=content,
-                        citable_ids=turn_citable_ids,
-                    )
-                )
-                if stripped_ids and new_arts and artifact_contents:
-                    for path, text in new_arts.items():
-                        if artifact_contents.get(path) == text:
-                            continue
-                        try:
-                            await tool_ctx.backend.write(path, text)
-                        except Exception:  # noqa: BLE001
-                            logger.warning(
-                                "contract.cite_upgrade",
-                                action="strip_write_failed",
-                                path=path,
-                                exc_info=True,
-                            )
-                    artifact_contents = new_arts
-                    content = new_body
-                    checked_files = (
-                        list(artifact_contents.keys()) if artifact_contents else None
-                    )
-                    probe = check_contract(
-                        content,
-                        deliverable,
-                        files_written=product_files_written,
-                        debrief=debrief_now,
-                        workspace_paths=workspace_paths,
-                        artifact_contents=artifact_contents,
-                        ledger_entries=turn_ledger_entries,
-                        citable_ids=turn_citable_ids,
-                        enforce_citations=True,
-                        landing_failure_kind=landing_fail_kind,
-                        can_execute=can_execute,
-                        source_data_paths=source_data_paths,
-                    )
-                    cite_fail, other_fail = partition_citation_failures(
-                        probe.failures
-                    )
-                    if other_fail:
-                        verdict = probe
-                    elif not cite_fail:
-                        cite_upgrade_used = True  # 已按 B 处理，跳过阶段 A 安全网重验
-                        logger.info(
-                            "contract.cite_upgrade",
-                            run_id=spec.run_id,
-                            action="auto_strip",
-                            stripped=stripped_ids,
-                            tokens_spent=run_usage.fuse_tokens,
-                            rounds_spent=run_rounds,
-                        )
-                        # 剥完即过 → 直接验收，不开 LLM。
-                        cite_fail = []
-                # 2) 剥完仍有引用/书目问题 → 一次 light_mode 短修（禁检索/深读）。
-                if cite_fail and not other_fail:
-                    cite_upgrade_used = True
-                    light_mode = True
-                    parts = [
-                        format_cite_upgrade_feedback(
-                            cite_fail,
-                            checked_files=checked_files,
-                        )
-                    ]
-                    if needs_handoff and handoff_offered and not handoff_expectation_met(debrief_now):
-                        parts.append(
-                            format_handoff_feedback(
-                                present_but_thin=debrief_now is not None,
-                            )
-                        )
-                    messages.append(
-                        _retry_message("\n\n".join(p for p in parts if p))
-                    )
-                    logger.info(
-                        "contract.cite_upgrade",
-                        run_id=spec.run_id,
-                        action="light_repair",
-                        failures=cite_fail,
-                        stripped=stripped_ids or None,
-                        tokens_spent=run_usage.fuse_tokens,
-                        rounds_spent=run_rounds,
-                    )
-                    continue
-            # else: already cite-clean → accept as B-ready (handoff 仍可走下方返工)
         if (verdict.ok and handoff_ok) or attempt == attempts - 1:
             break
-        # B 升级后仍仅引用不过闸 → 收口为 rejected（不再满合同重试 cite）。
-        if two_phase and cite_upgrade_used and not verdict.ok:
-            cite_fail, other_fail = partition_citation_failures(verdict.failures)
-            if cite_fail and not other_fail:
-                logger.info(
-                    "contract.cite_upgrade_exhausted",
-                    run_id=spec.run_id,
-                    failures=cite_fail,
-                )
-                break
-        # 二次触顶：已达硬顶则不再开 correction pass（立即收口）。
         if token_ceiling > 0 and run_usage.fuse_tokens >= token_ceiling:
             logger.info(
                 "contract.retry_skipped_budget",
@@ -566,7 +378,6 @@ async def run_contract_loop(
                 ceiling=token_ceiling,
             )
             break
-        # 定案 B：已交接成功且进入预算收尾/将尽 → 跳过契约返工（勿空转收尾）。
         budget_wind_down = _wind_down_entered(
             cutoff_reasons=cutoff_reasons,
             token_ceiling=token_ceiling,
@@ -586,56 +397,9 @@ async def run_contract_loop(
                 failures=verdict.failures,
             )
             break
-        # 断流归因：这一遍是被 LLM 传输失败掐断的（ERROR = 没收到正文，
-        # DEGRADED = 只收到片段），不是 worker 自己写砸了。不标注的话它会把
-        # 「产出为空」当成自己的锅，重试轮里只补一次 handoff 而不重写正文。
         pass_interrupted = any(
             fr in (FinishReason.ERROR, FinishReason.DEGRADED) for fr in finish_override
         )
-        # 断流收尾且合同已过、仅缺 handoff：勿开 light_repair（会清掉 finish_override），
-        # 直接收口 → terminal 保留 FINISH_INTERRUPT + degraded 对账。
-        if pass_interrupted and verdict.ok and not handoff_ok:
-            logger.info(
-                "contract.retry_skipped_interrupt",
-                run_id=spec.run_id,
-                reason="finish_interrupt_handoff",
-                handoff_ok=False,
-            )
-            break
-        if (
-            _can_light_repair(
-                verdict=verdict,
-                handoff_ok=handoff_ok,
-                light_repair_used=light_repair_used,
-            )
-        ):
-            light_repair_used = True
-            light_mode = True
-            parts = []
-            if not verdict.ok:
-                parts.append(
-                    format_light_repair_feedback(
-                        verdict,
-                        prior_content=content,
-                        checked_files=checked_files,
-                    )
-                )
-            if needs_handoff and handoff_offered and not handoff_expectation_met(debrief_now):
-                parts.append(
-                    format_handoff_feedback(
-                        present_but_thin=debrief_now is not None,
-                    )
-                )
-            messages.append(_retry_message("\n\n".join(p for p in parts if p)))
-            logger.info(
-                "contract.light_repair",
-                run_id=spec.run_id,
-                failures=verdict.failures,
-                handoff_ok=handoff_ok,
-                tokens_spent=run_usage.fuse_tokens,
-                rounds_spent=run_rounds,
-            )
-            continue
         if (
             _can_write_pass(
                 verdict=verdict,
@@ -645,14 +409,10 @@ async def run_contract_loop(
             )
         ):
             write_pass_used = True
-            light_mode = True  # reuse narrow write/handoff surface + short rounds
+            light_mode = True
             parts = [format_write_pass_feedback(verdict)]
             if needs_handoff and handoff_offered and not handoff_expectation_met(debrief_now):
-                parts.append(
-                    format_handoff_feedback(
-                        present_but_thin=debrief_now is not None,
-                    )
-                )
+                parts.append(format_handoff_feedback())
             messages.append(_retry_message("\n\n".join(p for p in parts if p)))
             logger.info(
                 "contract.write_pass",
@@ -662,7 +422,6 @@ async def run_contract_loop(
                 rounds_spent=run_rounds,
             )
             continue
-        # Write pass already spent and still zero disk → hard-fail path (no full retry).
         if write_pass_used and is_zero_files_gap(verdict):
             logger.info(
                 "contract.write_pass_exhausted",
@@ -697,22 +456,14 @@ async def run_contract_loop(
         if pass_interrupted:
             parts.append(format_interrupted_pass_note())
         if not verdict.ok:
-            parts.append(format_feedback(verdict, checked_files=checked_files))
+            parts.append(format_feedback(verdict))
         if needs_handoff and handoff_offered and not handoff_expectation_met(debrief_now):
-            parts.append(
-                format_handoff_feedback(
-                    present_but_thin=debrief_now is not None,
-                )
-            )
+            parts.append(format_handoff_feedback())
         messages.append(_retry_message("\n\n".join(p for p in parts if p)))
-        cite_fail_retry, _other_retry = partition_citation_failures(verdict.failures)
-        # Full contract.retry: refill only within original retrieval cap, and
-        # never after wind_down（不得恢复全量检索）. 写盘形态返工缺的是定向补写而非检索；
-        # 引用类失败例外——它本就需要重读来源。
         rb = tool_ctx.retrieval_budget
         original_rb = int(spec.retrieval_budget or (rb.limit if rb else 0) or 0)
         wind_down = budget_wind_down
-        write_disk_form = bool(files_expected) and not cite_fail_retry
+        write_disk_form = bool(files_expected)
         slice_n = rework_refill_slots(
             original_limit=original_rb,
             wind_down_entered=wind_down,
@@ -746,56 +497,6 @@ async def run_contract_loop(
         )
         attempt += 1
 
-    # 调研两阶段安全网：若未升到 B 就收口，仍把成稿引用闸失败并入 verdict，
-    # 避免草案被 silent accepted（draft 不得进 delivered_files）。
-    if two_phase and not cite_upgrade_used and verdict.ok:
-        _touched_safe = files_touched_from_transcript(messages)
-        _product_safe = len(
-            filter_product_landing_paths(
-                _touched_safe,
-                product_landing_artifacts,
-            )
-        )
-        probe = check_contract(
-            content,
-            deliverable,
-            files_written=_product_safe,
-            debrief=debrief_from_transcript(messages),
-            workspace_paths=workspace_paths,
-            artifact_contents=artifact_contents,
-            ledger_entries=(
-                env.turn_evidence_ledger.all_entries()
-                if env.turn_evidence_ledger is not None
-                else None
-            ),
-            citable_ids=(
-                env.turn_evidence_ledger.draft_citable_ids()
-                if env.turn_evidence_ledger is not None
-                else None
-            ),
-            enforce_citations=True,
-            landing_failure_kind=landing_write_failure_kind(messages),
-            can_execute=can_execute,
-            source_data_paths=source_data_paths,
-        )
-        cite_fail, other_fail = partition_citation_failures(probe.failures)
-        if other_fail:
-            verdict = probe
-        elif cite_fail:
-            verdict = ContractVerdict(
-                ok=False,
-                failures=cite_fail,
-                warnings=list(probe.warnings),
-                warning_rows=list(probe.warning_rows),
-                soft_failures=list(probe.soft_failures),
-                visual_failures=list(probe.visual_failures),
-            )
-            logger.info(
-                "contract.cite_phase_a_terminal_reject",
-                run_id=spec.run_id,
-                failures=cite_fail,
-            )
-
     return ContractLoopResult(
         content=content,
         reasoning=reasoning,
@@ -808,9 +509,6 @@ async def run_contract_loop(
         cutoff_reasons=cutoff_reasons,
         tool_failures=tool_failures,
         write_pass_used=write_pass_used,
-        two_phase=two_phase,
-        cite_upgrade_used=cite_upgrade_used,
-        artifact_contents=artifact_contents,
         workspace_paths=workspace_paths,
         product_landing_artifacts=product_landing_artifacts,
         runtime_file_products=runtime_file_products,

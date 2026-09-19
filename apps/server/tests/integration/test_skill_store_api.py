@@ -227,6 +227,9 @@ async def test_skill_store_publish_rejects_ineligible(client):
     empty_desc = await _create_on_demand(client, "空说明.md", "有正文")
     r = await client.post("/v1/skill-store", json=_publish_body(empty_desc["id"]))
     assert r.status_code == 400
+    assert r.json()["detail"]["message"] == (
+        "先写一句话介绍：干什么、什么时候该翻开。没这句，别人装了 CEO 也找不到。"
+    )
 
     empty_body = await client.post(
         "/v1/documents",
@@ -242,6 +245,7 @@ async def test_skill_store_publish_rejects_ineligible(client):
         "/v1/skill-store", json=_publish_body(empty_body.json()["id"])
     )
     assert r.status_code == 400
+    assert r.json()["detail"]["message"] == "先写正文。空的做法上架没有用。"
 
 
 async def test_skill_store_admin_sees_reports(client, make_admin):

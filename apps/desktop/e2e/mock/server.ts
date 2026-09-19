@@ -107,7 +107,6 @@ function syncRecoveryFromEvents(
           question: String(payload.question ?? ""),
           questions: Array.isArray(payload.questions) ? payload.questions : [],
           intent: "decision",
-          browser_login: false,
           user_message: "",
           user_message_id: "",
           steps: [],

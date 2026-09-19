@@ -7,7 +7,7 @@ identity, redrives the unfinished DAG through
 :func:`agentcore.runtime.recover.recover_turn`, and degrades to an honest
 ``interrupted`` terminal when the redrive cannot run.
 
-User-driven resume (plan_review / team_preview / ask_user) lives in
+User-driven resume (ask_user / approval / escalation) lives in
 :mod:`agentcore.runtime.recover`.
 
 Backlog (not this iteration):

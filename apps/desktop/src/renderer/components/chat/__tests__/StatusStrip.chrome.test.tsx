@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 /**
- * 协作图状态条只留战绩。有接续 run、非零 collab、resolved 开工卡时，
- * 条上不得再出现「接续 N 次」「互相把关」「预计 N 人开工」、
+ * 协作图状态条只留战绩。有接续 run、非零 collab 时，
+ * 条上不得再出现「接续 N 次」「互相把关」「预计」、
  * 「回放协作过程」。
- * 数据字段 / formatCollabSummary / teamPreviewLead 仍保留，只是不画在这条上。
+ * 数据字段 / formatCollabSummary 仍保留，只是不画在这条上。
  */
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { conversationKeys } from "@/lib/queryKeys";
@@ -133,6 +133,5 @@ describe("StatusStrip · 去掉多余 chrome", () => {
     expect(screen.queryByText(/接续/)).toBeNull();
     expect(screen.queryByText(/互相把关/)).toBeNull();
     expect(screen.queryByText(/预计/)).toBeNull();
-    expect(screen.queryByTestId("graph-team-preview")).toBeNull();
   });
 });

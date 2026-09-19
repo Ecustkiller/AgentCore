@@ -5,7 +5,7 @@
 // Usage:
 //   node scripts/shoot-graph-perf.mjs
 //   node scripts/shoot-graph-perf.mjs multi_agent_debate_multibeat
-//   pnpm -C apps/desktop exec node scripts/shoot-graph-perf.mjs multi_agent_two_act_lv
+//   pnpm -C apps/desktop exec node scripts/shoot-graph-perf.mjs multi_agent_debate_multibeat
 //
 // Args: [scenario] [midframeK]
 //   scenario  — default multi_agent_debate_multibeat

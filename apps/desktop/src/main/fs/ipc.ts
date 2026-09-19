@@ -31,12 +31,14 @@ import { coerceIpcBytes } from "./ipcBytes";
 import { openTempFileFromBytes } from "./openTemp";
 import { readFile, readTextFile, writeTextFile } from "./preview";
 import { resolveGrantAbsPath } from "./resolveGrantAbsPath";
+import { isExistingDirectory } from "./rootExists";
 import {
   clearSessionRoots,
   deleteRoot,
   ensureReady,
   findRootByAbsPath,
   getAllRoots,
+  getRoot,
   initRoots,
   listSessionRoots,
   revokeSessionRoot,
@@ -197,56 +199,103 @@ const invalidWriteResult = (): FsWriteResult => ({
   message: INVALID_ARGS,
 });
 
+type PickedDirectory =
+  | { ok: true; absPath: string }
+  | { ok: false; reason: "cancelled" }
+  | { ok: false; reason: "dialog_failed" | "unauthorized"; message: string };
+
+async function pickDirectoryForRoot(): Promise<PickedDirectory> {
+  const win =
+    BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+  let result: Electron.OpenDialogReturnValue;
+  try {
+    result = win
+      ? await dialog.showOpenDialog(win, { properties: ["openDirectory"] })
+      : await dialog.showOpenDialog({ properties: ["openDirectory"] });
+  } catch (e) {
+    return {
+      ok: false,
+      reason: "dialog_failed",
+      message:
+        e instanceof Error && e.message.trim()
+          ? e.message
+          : "系统未能打开文件夹选择器",
+    };
+  }
+  if (result.canceled || result.filePaths.length === 0) {
+    return { ok: false, reason: "cancelled" };
+  }
+
+  try {
+    const absPath = await fs.realpath(result.filePaths[0]);
+    await fs.access(absPath);
+    return { ok: true, absPath };
+  } catch {
+    return {
+      ok: false,
+      reason: "unauthorized",
+      message: "所选目录无法访问，未能完成本机授权",
+    };
+  }
+}
+
 /** 注册全部 fs IPC handler。须在 app ready 后调用。 */
 export function registerFsIpc(): void {
   initRoots();
 
   ipcMain.handle(FS_CHANNELS.addRoot, async (): Promise<AddRootResult> => {
     await ensureReady();
-    const win =
-      BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
-    let result: Electron.OpenDialogReturnValue;
-    try {
-      result = win
-        ? await dialog.showOpenDialog(win, { properties: ["openDirectory"] })
-        : await dialog.showOpenDialog({ properties: ["openDirectory"] });
-    } catch (e) {
-      return {
-        ok: false,
-        reason: "dialog_failed",
-        message:
-          e instanceof Error && e.message.trim()
-            ? e.message
-            : "系统未能打开文件夹选择器",
-      };
-    }
-    if (result.canceled || result.filePaths.length === 0) {
-      return { ok: false, reason: "cancelled" };
-    }
+    const picked = await pickDirectoryForRoot();
+    if (!picked.ok) return picked;
 
-    let absPath: string;
-    try {
-      absPath = await fs.realpath(result.filePaths[0]);
-      await fs.access(absPath);
-    } catch {
-      return {
-        ok: false,
-        reason: "unauthorized",
-        message: "所选目录无法访问，未能完成本机授权",
-      };
-    }
-
-    const existing = findRootByAbsPath(absPath);
+    const existing = findRootByAbsPath(picked.absPath);
     if (existing && !existing.sessionOnly) {
       return { ok: true, root: { id: existing.id, name: existing.name } };
     }
 
     const id = randomUUID();
-    const name = basename(absPath) || absPath;
-    setRoot({ id, name, absPath });
+    const name = basename(picked.absPath) || picked.absPath;
+    setRoot({ id, name, absPath: picked.absPath });
     await saveRoots();
     return { ok: true, root: { id, name } };
   });
+
+  ipcMain.handle(
+    FS_CHANNELS.relocateRoot,
+    async (_e, p: unknown): Promise<AddRootResult> => {
+      const args = requireStringFields(p, ["rootId"]);
+      if (!args) {
+        return {
+          ok: false,
+          reason: "unauthorized",
+          message: INVALID_ARGS,
+        };
+      }
+      await ensureReady();
+      const current = getRoot(args.rootId);
+      if (!current || current.sessionOnly) {
+        return {
+          ok: false,
+          reason: "unauthorized",
+          message: "找不到该本机文件夹授权",
+        };
+      }
+      const picked = await pickDirectoryForRoot();
+      if (!picked.ok) return picked;
+      const collision = findRootByAbsPath(picked.absPath);
+      if (collision && collision.id !== args.rootId && !collision.sessionOnly) {
+        return {
+          ok: false,
+          reason: "unauthorized",
+          message: "该目录已经是另一个本机文件夹",
+        };
+      }
+      const name = basename(picked.absPath) || picked.absPath;
+      setRoot({ ...current, absPath: picked.absPath, name });
+      await saveRoots();
+      return { ok: true, root: { id: current.id, name } };
+    },
+  );
 
   // 桌面默认本地容器根（双模式工作区 §八.7）：显式「本机草稿」裸聊与本地项目创建
   // 复用；新建裸聊默认已切云，不再自动调用。幂等：已存在同路径的根则复用。
@@ -334,11 +383,14 @@ export function registerFsIpc(): void {
 
   ipcMain.handle(FS_CHANNELS.listRoots, async (): Promise<FsRoot[]> => {
     await ensureReady();
-    return getAllRoots().map((r) => ({
-      id: r.id,
-      name: r.name,
-      absPath: r.absPath,
-    }));
+    return Promise.all(
+      getAllRoots().map(async (r) => ({
+        id: r.id,
+        name: r.name,
+        absPath: r.absPath,
+        missing: !(await isExistingDirectory(r.absPath)),
+      })),
+    );
   });
 
   ipcMain.handle(FS_CHANNELS.removeRoot, async (_e, p: unknown) => {

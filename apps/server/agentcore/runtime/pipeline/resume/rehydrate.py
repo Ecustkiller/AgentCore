@@ -15,7 +15,6 @@ from agentcore.core.logging import get_logger
 from agentcore.runtime.events import EventSink, message_start
 from agentcore.runtime.facts import TurnPausedFact, pre_pause_from_journal
 from agentcore.runtime.journal.entries import _PROCESS_PREFIX, _RUN_PROCESS_PREFIX
-from agentcore.runtime.loop_controller import LoopController
 from agentcore.runtime.suspension import TurnSuspension
 
 logger = get_logger(__name__)

@@ -152,7 +152,8 @@ export function foldInteractions(
         const id = str(p.interaction_id);
         const kind = str(p.kind);
         if (!(kind in INTERACTION_KIND_WIRE)) break;
-        if (id && kind) settle(map, kind as ProjectedInteraction["kind"], id, "orphaned");
+        if (id && kind)
+          settle(map, kind as ProjectedInteraction["kind"], id, "orphaned");
         break;
       }
       case "turn_end":

@@ -91,8 +91,9 @@ export function otherDeskFolderId(
 ): string | undefined {
   if (!hint?.folderId) return undefined;
   if (!conversationId) return hint.folderId;
-  const sitting = getConversations().find((c) => c.id === conversationId)
-    ?.folderId;
+  const sitting = getConversations().find(
+    (c) => c.id === conversationId,
+  )?.folderId;
   if (typeof sitting === "string" && sitting && sitting === hint.folderId) {
     return undefined;
   }

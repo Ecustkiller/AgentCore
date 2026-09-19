@@ -32,7 +32,7 @@
 import { mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isTurnFixture } from "@agentcore/protocol-conformance/fixtureKind";
+import { isPreviewFixture } from "@agentcore/protocol-conformance/fixtureKind";
 import { chromium } from "playwright";
 import { createServer } from "vite";
 import {
@@ -69,7 +69,7 @@ async function loadScenarios() {
   const scenarios = [];
   for (const file of files) {
     const raw = JSON.parse(await readFile(resolve(fixturesDir, file), "utf8"));
-    if (!isTurnFixture(raw)) continue;
+    if (!isPreviewFixture(raw)) continue;
     scenarios.push({
       name: raw.name,
       description: raw.description ?? "",

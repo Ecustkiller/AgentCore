@@ -781,31 +781,3 @@ async def _safe_index_files(backend: object) -> list[str]:
     except Exception as e:  # noqa: BLE001 — manifest is best-effort, never fail a run
         logger.debug("workspace.index_failed", error=str(e))
         return []
-
-
-async def _load_artifact_contents(
-    backend: object,
-    patterns: list[str],
-    workspace_paths: list[str],
-) -> dict[str, str]:
-    """Best-effort read of workspace texts matching artifact patterns (JSON file gate).
-
-    Used when ``output_format=json`` + ``artifacts`` so the contract can verify
-    parseability of landed files. Missing / unreadable paths are omitted; the
-    contract reports unread failures when no readable match parses.
-    """
-    from agentcore.runtime.runs.contract import matching_artifact_paths
-
-    read = getattr(backend, "read", None)
-    if read is None:
-        return {}
-    out: dict[str, str] = {}
-    for pattern in patterns:
-        for path in matching_artifact_paths(pattern, workspace_paths):
-            if path in out:
-                continue
-            try:
-                out[path] = await read(path)
-            except Exception as e:  # noqa: BLE001 — contents are best-effort
-                logger.debug("workspace.artifact_read_failed", path=path, error=str(e))
-    return out

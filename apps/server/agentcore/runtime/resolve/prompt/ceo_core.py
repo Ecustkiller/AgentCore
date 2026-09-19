@@ -52,7 +52,7 @@ _BROWSER_HOW = """
 云端沙箱相对路径会失败。须凭回执与页面证据验收，不要只看没报错；\
 click 看 clicked.was_disabled；type 看 typed.matched。缺 ref / 验收失败再 snapshot。\
 省略 session_id：本 run 已绑定 → 对话内唯一/激活 → 新建并绑定本 run。\
-登录 → `ask_user(browser_login=true)`；永不代填密码。
+永不代填密码。
 """
 
 

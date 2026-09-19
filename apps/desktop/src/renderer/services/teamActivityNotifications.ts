@@ -35,7 +35,7 @@ import { useSidePanelStore } from "@/stores/sidePanel";
 /**
  * 协作感知出口 (前端UX设计.md §一)：只读订阅对话生成态 + 交互态 + 挂起态。
  * 壳在场且场面在眼前 → 静默；壳在场但人不在这条对话（也没打开它的浮窗）→ 应用内提示；
- * 壳不在场 → 桌面系统通知。同一事件只出一条。
+ * 壳不在场 → 桌面系统通知。横幅只在卡从无到有时弹；同一对话一条槽位（新卡再响、替换不叠）。
  * 纯前端感知层——不碰 SSE 契约 / 协议 fold，不新增事件；接线一次于 AppShell（与 realtime /
  * updates 同处），随会话常驻。
  *
@@ -54,7 +54,8 @@ import { useSidePanelStore } from "@/stores/sidePanel";
  * 以上三条通道只看得见**本端流过**的对话。第四条 `ai_attention`（云对话多端同权 B2 · L1）
  * 补上另一端起的回合：账号级 firehose 送「哪个对话在等你」，因此从没在这台机器上打开过的
  * 对话也能提醒。四条通道共用一张去重表（信号里的 `interaction_id` 与卡的 id 同一个），
- * 谁先到谁弹，另一条不重复打扰。
+ * 谁先到谁弹，另一条不重复打扰。fulfill 空快照只灭灯、不把已弹过的 id 当成「可以再弹」；
+ * 增量 `resolved` 之后同 id 再 required 才再响。关掉横幅 ≠ 已处理。
  */
 
 /** 从会话缓存解析标题（非 React 调用）——缺（未加载 / 已删）时返回 null，调用方据此静默。 */
@@ -85,6 +86,11 @@ function jumpAction(
 
 function toastLine(conversationTitle: string | null, headline: string): string {
   return conversationTitle ? `「${conversationTitle}」${headline}` : headline;
+}
+
+/** sonner 同 id 替换；与系统通知按对话一条槽位对齐。 */
+function ambientToastId(conversationId: string): string {
+  return `team-activity:${conversationId}`;
 }
 
 /**
@@ -129,6 +135,7 @@ function notifyAmbient(
     nativeMobile: isNativeRuntime(),
   });
   if (outlet === "silence") return;
+  const toastId = ambientToastId(conversationId);
   if (outlet === "os") {
     const { title, body } = osNotificationCopy(conversationTitle, headline);
     void showNativeNotification(title, body, { conversationId });
@@ -136,14 +143,14 @@ function notifyAmbient(
   }
   const message = toastLine(conversationTitle, headline);
   if (kind === "error") {
-    notifyError(message, undefined, { action });
+    notifyError(message, undefined, { action, id: toastId });
     return;
   }
   if (kind === "success") {
-    notifySuccess(message, { action });
+    notifySuccess(message, { action, id: toastId });
     return;
   }
-  notifyInfo(message, { action });
+  notifyInfo(message, { action, id: toastId });
 }
 
 function notifyTurnEnd(conversationId: string, failed: boolean): void {
@@ -265,21 +272,41 @@ function conversationHasPausedTurn(conversationId: string): boolean {
  * calls it on unmount). Idempotent per call — each invocation owns its own subscriptions.
  */
 export function startTeamActivityNotifications(): () => void {
-  // Seed with hot blocking cards / stage cards / pauses / attention already pending
-  // at startup so a reconnect replay doesn't re-toast prompts the user already knows
-  // about. 一张表跨四条通道：同一张卡从 firehose 与对话流两路到达只弹一次。
+  // Seed with hot blocking cards / pauses / attention already pending at startup
+  // so a reconnect replay doesn't re-toast prompts the user already knows about.
+  // 一张表跨四条通道：同一张卡从 firehose 与对话流两路到达只弹一次。
+  //
+  // 空快照会暂时清空 attention 表——那不是「结了」。只把本地通道消失、或增量
+  // `resolved` 当成可再弹；attention-only 的缺口留在 notified 里，避免重连连弹。
   const notified = liveNotifiableIds();
+  const seenLocal = new Set([
+    ...notifiableInteractionIds(),
+    ...pendingPauseIds(),
+  ]);
   const prune = (): void => {
-    const live = liveNotifiableIds();
-    for (const seen of notified) {
-      if (!live.has(seen)) notified.delete(seen);
+    const liveLocal = new Set([
+      ...notifiableInteractionIds(),
+      ...pendingPauseIds(),
+    ]);
+    const liveAttn = new Set(attentionIds());
+    for (const id of [...notified]) {
+      if (liveLocal.has(id) || liveAttn.has(id)) continue;
+      if (!seenLocal.has(id)) continue;
+      notified.delete(id);
+      seenLocal.delete(id);
     }
   };
   /** 未通知过 → 记账并返回 true（调用方随即弹）。 */
-  const claim = (id: string): boolean => {
+  const claim = (id: string, local: boolean): boolean => {
+    if (local) seenLocal.add(id);
     if (notified.has(id)) return false;
     notified.add(id);
     return true;
+  };
+  const releaseIfIdle = (id: string): void => {
+    if (liveNotifiableIds().has(id)) return;
+    notified.delete(id);
+    seenLocal.delete(id);
   };
 
   const unsubConversation = useConversationStore.subscribe((state, prev) => {
@@ -318,7 +345,7 @@ export function startTeamActivityNotifications(): () => void {
   const unsubInteractions = useInteractionStore.subscribe((state) => {
     for (const e of state.byId.values()) {
       if (!isNotifiableInteraction(e)) continue;
-      if (!claim(e.id)) continue;
+      if (!claim(e.id, true)) continue;
       notifyHotBlocking(e);
     }
     prune();
@@ -327,15 +354,18 @@ export function startTeamActivityNotifications(): () => void {
   const unsubPaused = usePausedTurnStore.subscribe((state) => {
     for (const p of state.pending) {
       if (!isColdResumeKind(p.kind)) continue;
-      if (!claim(p.checkpointId)) continue;
+      if (!claim(p.checkpointId, true)) continue;
       notifyAwaitingDecision(p.conversationId, p.kind);
     }
     prune();
   });
 
-  const unsubAttention = useAiAttentionStore.subscribe((state) => {
+  const unsubAttention = useAiAttentionStore.subscribe((state, prev) => {
+    if (state.resolvedSeq !== prev.resolvedSeq && state.lastResolvedId) {
+      releaseIfIdle(state.lastResolvedId);
+    }
     for (const entry of state.entries) {
-      if (claim(entry.interactionId)) notifyAttention(entry);
+      if (claim(entry.interactionId, false)) notifyAttention(entry);
     }
     prune();
   });

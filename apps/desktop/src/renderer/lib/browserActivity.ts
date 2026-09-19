@@ -50,31 +50,3 @@ export function conversationHasBrowserActivity(
   }
   return false;
 }
-
-/**
- * 本会话是否存在 pending 的 `browserLogin` escalate（→ 沙箱直播画面可点、注入 input）。
- * 与 EscalationCard「需要你登录」同源：扫 execution 投影 `run.escalations`。
- * CEO ``ask_user(browser_login)`` 走 cold pause，由调用方另扫 pausedTurns。
- */
-export function conversationHasPendingBrowserLogin(
-  messages: Message[],
-  executionById: Record<string, ExecutionRuntime>,
-): boolean {
-  for (const msg of messages) {
-    if (msg.role !== "assistant") continue;
-    const rt = executionById[assistantProjectionId(msg)];
-    if (!rt) continue;
-    const exec = projectRuntime(rt);
-    if (!exec) continue;
-    for (const run of exec.runs) {
-      if (
-        run.escalations.some(
-          (e) => e.status === "pending" && e.browserLogin === true,
-        )
-      ) {
-        return true;
-      }
-    }
-  }
-  return false;
-}

@@ -42,7 +42,6 @@ export function entryToCheckpoint(e: InteractionEntry): CheckpointDisplay {
       settlement.status === "resolved"
         ? arr<string>(e.resolution?.selected)
         : [],
-    ...(p.browser_login === true ? { browserLogin: true as const } : {}),
   };
 }
 
@@ -131,7 +130,6 @@ export function entryToColdResume(
     question: cp.question,
     questions: cp.questions,
     intent: cp.intent,
-    ...(cp.browserLogin ? { browserLogin: true as const } : {}),
   };
 }
 

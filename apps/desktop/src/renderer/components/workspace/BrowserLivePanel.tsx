@@ -1,7 +1,4 @@
-import {
-  conversationHasBrowserActivity,
-  conversationHasPendingBrowserLogin,
-} from "@/lib/browserActivity";
+import { conversationHasBrowserActivity } from "@/lib/browserActivity";
 import {
   type InputBatcher,
   createInputBatcher,
@@ -18,7 +15,6 @@ import { useBrowserSessionsStore } from "@/stores/browserSessions";
 import { useConversationStore } from "@/stores/conversation";
 import { runtimeOf } from "@/stores/conversation/runtime";
 import { useExecutionStore } from "@/stores/execution";
-import { usePausedTurnStore } from "@/stores/pausedTurns";
 import {
   Loader2,
   type LucideIcon,
@@ -45,10 +41,9 @@ import {
  * tab 自身条件常驻（{@link useBrowserRegion}），故本组件在「本会话用过浏览器、但此刻无直播」时
  * 也会被挂载 —— `no_session` 占位态正是这条常态路径的正文，不是异常。
  *
- * 非登录只看。仅 pending `browser_login`（escalate 或 CEO ask_user）且有活直播时，画面变可交互
- * 面——捕获点击/键盘/滚轮，把展示坐标 {@link toFrameSpace} 换算到帧像素空间，经
- * {@link createInputBatcher} 攒批 POST（避免事件洪泛）。登录中短提示引导回对话点「已登录，继续」。
- * 密码等键入不回显不留存（缓冲仅在飞、不落任何持久缓存）。
+ * 活直播（有帧、未结束、连接开着）画面可交互：用户点过画面（聚焦）后可点/键入/滚动，经
+ * {@link toFrameSpace} 换算到帧像素、{@link createInputBatcher} 攒批 POST。未聚焦不抢聊天键盘
+ * （不自动 focus）。无帧 / 已结束只看。密码等键入不回显不留存（缓冲仅在飞、不落任何持久缓存）。
  */
 
 /** base64（不含 data: 前缀）→ Blob，供 `URL.createObjectURL` 逐帧换图。 */
@@ -130,21 +125,7 @@ export function BrowserLivePanel({
   const [status, setStatus] = useState<BrowserLiveState | null>(null);
   const [connection, setConnection] =
     useState<BrowserLiveConnection>("connecting");
-  const pendingEscalationLogin = useExecutionStore((s) =>
-    conversationHasPendingBrowserLogin(
-      runtimeOf(useConversationStore.getState(), conversationId).messages,
-      s.byId,
-    ),
-  );
-  const pendingAskUserLogin = usePausedTurnStore((s) =>
-    s.pending.some(
-      (p) =>
-        p.conversationId === conversationId &&
-        p.kind === "ask_user" &&
-        p.browserLogin === true,
-    ),
-  );
-  const pendingBrowserLogin = pendingEscalationLogin || pendingAskUserLogin;
+  const [focused, setFocused] = useState(false);
   // Track the live object URL outside React state so the cleanup / next-frame swap can
   // revoke the previous one synchronously (state is async, and a stale closure would leak).
   const frameUrlRef = useRef<string | null>(null);
@@ -155,6 +136,7 @@ export function BrowserLivePanel({
   const batcherRef = useRef<InputBatcher | null>(null);
   const draggingRef = useRef(false);
   const composingRef = useRef(false);
+  const focusedRef = useRef(false);
 
   useEffect(() => {
     const client = startBrowserLive(
@@ -189,12 +171,16 @@ export function BrowserLivePanel({
   const showFrame = frameUrl !== null && status !== "no_session";
   const isLive =
     showFrame && status !== "session_closed" && connection === "open";
-  // 仅 pending 登录 + 活直播 → 画面可点；否则只看。
+  // 活直播才可交互；无帧 / 已结束 / 重连只看。不自动 focus。
   const inputEnabled =
-    pendingBrowserLogin &&
-    showFrame &&
-    status === "started" &&
-    connection === "open";
+    showFrame && status === "started" && connection === "open";
+
+  useEffect(() => {
+    if (!inputEnabled) {
+      focusedRef.current = false;
+      setFocused(false);
+    }
+  }, [inputEnabled]);
 
   useEffect(() => {
     if (!inputEnabled) return;
@@ -212,11 +198,12 @@ export function BrowserLivePanel({
     };
   }, [inputEnabled, conversationId, sessionId]);
 
-  useEffect(() => {
-    if (inputEnabled) surfaceRef.current?.focus();
-  }, [inputEnabled]);
+  const setSurfaceFocused = (next: boolean): void => {
+    focusedRef.current = next;
+    setFocused(next);
+  };
 
-  // ---- 输入捕获（仅 pending 登录时挂到交互面）→ 换算帧空间 → 攒批 ----------------
+  // ---- 输入捕获（活直播挂到交互面；键/滚仅聚焦后生效）→ 换算帧空间 → 攒批 ----------------
   const pushMouse = (
     type: "down" | "up" | "move" | "wheel",
     e: { clientX: number; clientY: number },
@@ -244,6 +231,7 @@ export function BrowserLivePanel({
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>): void => {
     e.preventDefault();
+    setSurfaceFocused(true);
     surfaceRef.current?.focus();
     draggingRef.current = true;
     try {
@@ -256,7 +244,7 @@ export function BrowserLivePanel({
 
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
     // 仅拖拽时发送 move（避免悬停洪泛）；批处理器再就地合并连续 move。
-    if (!draggingRef.current) return;
+    if (!draggingRef.current || !focusedRef.current) return;
     pushMouse("move", e);
   };
 
@@ -267,6 +255,7 @@ export function BrowserLivePanel({
     } catch {
       /* nothing captured */
     }
+    if (!focusedRef.current) return;
     pushMouse("up", e, { button: e.button });
   };
 
@@ -275,10 +264,13 @@ export function BrowserLivePanel({
   };
 
   const onWheel = (e: ReactWheelEvent<HTMLDivElement>): void => {
+    if (!focusedRef.current) return;
+    e.preventDefault();
     pushMouse("wheel", e, { delta_x: e.deltaX, delta_y: e.deltaY });
   };
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>): void => {
+    if (!focusedRef.current) return;
     if (composingRef.current) return; // IME 组合中 → 交给 compositionend 兜底
     e.preventDefault();
     batcherRef.current?.push({
@@ -291,6 +283,7 @@ export function BrowserLivePanel({
   };
 
   const onKeyUp = (e: ReactKeyboardEvent<HTMLDivElement>): void => {
+    if (!focusedRef.current) return;
     if (composingRef.current) return;
     e.preventDefault();
     batcherRef.current?.push({
@@ -310,6 +303,7 @@ export function BrowserLivePanel({
     e: React.CompositionEvent<HTMLDivElement>,
   ): void => {
     composingRef.current = false;
+    if (!focusedRef.current) return;
     // IME/组合输入兜底：只灌最终合成文本，不逐键上报（不缓存键入内容）。
     if (e.data) batcherRef.current?.push({ kind: "text", text: e.data });
   };
@@ -326,20 +320,15 @@ export function BrowserLivePanel({
         </span>
       </div>
 
-      {pendingBrowserLogin && (
-        <div className="flex shrink-0 items-center gap-1.5 border-b border-primary/20 bg-primary/5 px-3 py-1.5 text-xs text-foreground">
-          请在此完成登录，然后回到对话点「已登录，继续」
-        </div>
-      )}
-
       <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-2">
         {showFrame && frameUrl ? (
           inputEnabled ? (
             <div
               ref={surfaceRef}
-              // biome-ignore lint/a11y/noNoninteractiveTabindex: a login surface must be focusable to capture keyboard input injected into the sandbox browser; there is no semantic element for "proxy the user's device input to another screen".
-              tabIndex={0}
-              aria-label="登录中的浏览器画面（点击 / 键入 / 滚动即操作远端）"
+              tabIndex={-1}
+              aria-label="浏览器直播画面（点击后可操作）"
+              onFocus={() => setSurfaceFocused(true)}
+              onBlur={() => setSurfaceFocused(false)}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
@@ -349,7 +338,11 @@ export function BrowserLivePanel({
               onKeyUp={onKeyUp}
               onCompositionStart={onCompositionStart}
               onCompositionEnd={onCompositionEnd}
-              className="flex h-full w-full cursor-crosshair items-center justify-center outline-none ring-2 ring-primary/40 ring-inset"
+              className={`flex h-full w-full items-center justify-center outline-none ${
+                focused
+                  ? "cursor-crosshair ring-2 ring-primary/40 ring-inset"
+                  : "cursor-pointer"
+              }`}
             >
               <img
                 src={frameUrl}
@@ -392,8 +385,7 @@ export function BrowserLivePanel({
  * - 本会话**曾有** `browser_*` 活动 → 显示（常驻，便于回头看直播）；
  * - 或本会话仍有带 URL / serverSession 的页签（用户页 / 冷恢复）→ 自动带上内容 tab。
  *
- * **不做 auto-surface 面板**：AI 用浏览器是高频常态，自动弹面板是打扰；唯一需要抢注意力的是 pending
- * `browser_login`，那条由登录卡「打开浏览器」CTA 负责（点按才 `showBrowser()`）。
+ * **不做 auto-surface 面板**：AI 用浏览器是高频常态，自动弹面板是打扰。入口是坞 tab / `+`。
  *
  * 收窄订阅（同 SidePanel 纪律）：execution 选择器内算布尔；pages 只看本对话是否有实质页签。
  */

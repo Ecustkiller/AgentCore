@@ -450,7 +450,7 @@ def file_only_tool_names() -> frozenset[str]:
 
 
 def delegation_grantable_tool_names() -> frozenset[str]:
-    """Tools covered by a kickoff / per-delegation grant (统一授权白名单).
+    """Tools covered by a per-delegation grant (统一授权白名单).
 
     File-mutation class + ``git`` writes + every declared ``execution_class`` tool.
     """

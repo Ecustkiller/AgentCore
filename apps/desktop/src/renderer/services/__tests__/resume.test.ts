@@ -423,7 +423,7 @@ describe("cold checkpoint terminal authority", () => {
     expect(conversationHasColdPending(CID)).toBe(false);
   });
 
-  it("attach replay of leftover kickoff required after journal resolved does not paint", () => {
+  it("attach replay of leftover team_preview required after journal resolved does not paint", () => {
     seedTurn("5e78ddbf-turn");
     stampJournalResolved("tp1");
     applyInteractionWireEvent(
@@ -441,7 +441,7 @@ describe("cold checkpoint terminal authority", () => {
     expect(listVisibleColdResumes(CID)).toHaveLength(0);
   });
 
-  it("message_end(paused) leftover kickoff shell is not clickable when journal has *_resolved", () => {
+  it("message_end(paused) leftover team_preview is not clickable when journal has *_resolved", () => {
     seedTurn("m-server-tp");
     stampJournalResolved("tp1");
     applyInteractionWireEvent(

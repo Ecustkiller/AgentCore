@@ -114,12 +114,6 @@ def test_describe_deliverable_empty_without_instance_facts():
     assert "交付路径" in desc
 
 
-def test_describe_deliverable_renders_sections():
-    desc = describe_deliverable(Deliverable(required_sections=["结论"]))
-    assert "结论" in desc
-    assert "form=" not in desc
-
-
 def test_ceo_schema_deliverable_is_artifacts_only():
     props = TASK_DELIVERABLE_SCHEMA["properties"]
     assert set(props) == {"artifacts"}

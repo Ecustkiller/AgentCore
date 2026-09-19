@@ -232,10 +232,10 @@ async def _wire_continuation_toolset(
     # Resume has no turn attachments carrier — materials empty; attachments/
     # path exemption on the list helpers still applies.
     backend.ai_list_materials = frozenset()
+    from agentcore.llm.image_accept import model_accepts_images
     from agentcore.runtime.coordination.session import (
         invalidate_verify_cache_for_execution,
     )
-    from agentcore.llm.image_accept import model_accepts_images
 
     base_tool_context = ToolContext.create(
         execution_id=resume_execution_id,

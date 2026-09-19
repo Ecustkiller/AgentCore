@@ -15,13 +15,43 @@ vi.mock("@/hooks/useConversations", () => ({
   restoreConversationCache: vi.fn(),
   syncConversationListPreview: vi.fn(),
 }));
-vi.mock("@/services/sidecarRouting", () => ({
-  resolveSidecarRoot: vi.fn(),
-  resolveConversationLocalTarget: vi.fn(() => Promise.resolve(null)),
-  getActiveSidecarTarget: vi.fn(() => null),
-  setActiveSidecarTurn: vi.fn(),
-  isSidecarEnabled: vi.fn(() => true),
-}));
+vi.mock("@/services/sidecarRouting", () => {
+  const resolveSidecarRoot = vi.fn();
+  const resolveConversationLocalTarget = vi.fn(() => Promise.resolve(null));
+  return {
+    resolveSidecarRoot,
+    resolveConversationLocalTarget,
+    resolveLocalBind: vi.fn(async (conversationId: string) => {
+      const t = (await resolveConversationLocalTarget(conversationId)) as {
+        rootId: string;
+        subpath: string;
+      } | null;
+      return t
+        ? { kind: "live" as const, rootId: t.rootId, subpath: t.subpath }
+        : { kind: "unbound" as const };
+    }),
+    resolveNewTurnBind: vi.fn(async (conversationId: string) => {
+      const t = (await resolveSidecarRoot(conversationId)) as {
+        rootId: string;
+        subpath: string;
+      } | null;
+      return t
+        ? { kind: "live" as const, rootId: t.rootId, subpath: t.subpath }
+        : { kind: "unbound" as const };
+    }),
+    liveSidecarTarget: (bind: {
+      kind: string;
+      rootId?: string;
+      subpath?: string;
+    }) =>
+      bind.kind === "live" && typeof bind.rootId === "string"
+        ? { rootId: bind.rootId, subpath: bind.subpath ?? "" }
+        : null,
+    getActiveSidecarTarget: vi.fn(() => null),
+    setActiveSidecarTurn: vi.fn(),
+    isSidecarEnabled: vi.fn(() => true),
+  };
+});
 vi.mock("@/services/turns/midFlight", () => ({
   sendMidFlightMessage: vi.fn(),
 }));
@@ -62,6 +92,8 @@ import {
   getActiveSidecarTarget,
   isSidecarEnabled,
   resolveConversationLocalTarget,
+  resolveLocalBind,
+  resolveNewTurnBind,
   resolveSidecarRoot,
   setActiveSidecarTurn,
 } from "@/services/sidecarRouting";
@@ -80,7 +112,9 @@ import { type PendingResume, usePausedTurnStore } from "@/stores/pausedTurns";
 import { runRegenerate, runResume, sendTurn } from "../turns";
 
 const resolveSidecarRootMock = vi.mocked(resolveSidecarRoot);
+const resolveNewTurnBindMock = vi.mocked(resolveNewTurnBind);
 const resolveLocalTargetMock = vi.mocked(resolveConversationLocalTarget);
+const resolveLocalBindMock = vi.mocked(resolveLocalBind);
 const getActiveSidecarTargetMock = vi.mocked(getActiveSidecarTarget);
 const isSidecarEnabledMock = vi.mocked(isSidecarEnabled);
 const hasLocalEngineMock = vi.mocked(hasLocalEngine);
@@ -128,6 +162,18 @@ beforeEach(() => {
   useConversationStore.setState({ currentConversationId: null, byId: {} });
   usePausedTurnStore.setState({ pending: [] });
   vi.clearAllMocks();
+  resolveNewTurnBindMock.mockImplementation(async (conversationId: string) => {
+    const t = await resolveSidecarRootMock(conversationId);
+    return t
+      ? { kind: "live" as const, rootId: t.rootId, subpath: t.subpath }
+      : { kind: "unbound" as const };
+  });
+  resolveLocalBindMock.mockImplementation(async (conversationId: string) => {
+    const t = await resolveLocalTargetMock(conversationId);
+    return t
+      ? { kind: "live" as const, rootId: t.rootId, subpath: t.subpath }
+      : { kind: "unbound" as const };
+  });
   streamConversationMock.mockResolvedValue(undefined);
   sendMidFlightMock.mockResolvedValue({
     kind: "received",
@@ -530,6 +576,39 @@ describe("sendTurn — 探活路由（引擎不可用报错）", () => {
     expect(useConversationStore.getState().byId.c1?.executionVia).toBeNull();
     expect(notifyInfoMock).not.toHaveBeenCalled();
   });
+
+  it("死绑定 → 中文横幅，不 probe、不走云", async () => {
+    resolveNewTurnBindMock.mockResolvedValue({
+      kind: "stale",
+      rootId: "r1",
+      subpath: "",
+      absPath: "/Users/zoo/J-",
+    });
+
+    const result = await sendTurn(spec());
+
+    expect(result.unstartedRefusal).toBe(true);
+    expect(probeSidecarMock).not.toHaveBeenCalled();
+    expect(streamConversationMock).not.toHaveBeenCalled();
+    expect(streamViaSidecarMock).not.toHaveBeenCalled();
+    expect(useConversationStore.getState().byId.c1?.executionVia).not.toBe(
+      "cloud_bridge",
+    );
+    expect(useConversationStore.getState().byId.c1?.error).toContain(
+      "这个文件夹已经不在这台电脑上",
+    );
+    expect(useConversationStore.getState().byId.c1?.error).toContain(
+      "/Users/zoo/J-",
+    );
+    expect(logEventMock).toHaveBeenCalledWith(
+      "info",
+      "turn.stream_path",
+      expect.objectContaining({
+        via: "sidecar",
+        reason: "root_stale",
+      }),
+    );
+  });
 });
 
 describe("runRegenerate — 探活路由（与 sendTurn 同形）", () => {
@@ -793,7 +872,6 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
 
     await runResume("m1", "continue", "");
 
-    expect(resolveLocalTargetMock).not.toHaveBeenCalled();
     expect(resumeViaSidecarMock).toHaveBeenCalledWith(
       expect.objectContaining({
         rootId: "r-active",
@@ -835,6 +913,35 @@ describe("runResume — 续跑探活（不降级、本机帧只在本地）", ()
     expect(usePausedTurnStore.getState().pending).toHaveLength(1); // 续跑卡保留
     expect(useConversationStore.getState().byId.c1?.error).toContain(
       "本地引擎暂不可用",
+    );
+  });
+
+  it("死绑定 → 文件夹消失横幅，不 probe、不走云", async () => {
+    resolveLocalBindMock.mockResolvedValue({
+      kind: "stale",
+      rootId: "r1",
+      subpath: "",
+      absPath: "/Users/zoo/J-",
+    });
+    getActiveSidecarTargetMock.mockReturnValue({
+      rootId: "r-active",
+      subpath: "",
+      turnId: "t1",
+    });
+
+    await expect(runResume("m1", "continue", "")).rejects.toThrow(
+      /workspace root gone/,
+    );
+
+    expect(probeSidecarMock).not.toHaveBeenCalled();
+    expect(resumeViaSidecarMock).not.toHaveBeenCalled();
+    expect(resumeConversationMock).not.toHaveBeenCalled();
+    expect(usePausedTurnStore.getState().pending).toHaveLength(1);
+    expect(useConversationStore.getState().byId.c1?.error).toContain(
+      "这个文件夹已经不在这台电脑上",
+    );
+    expect(useConversationStore.getState().byId.c1?.error).toContain(
+      "/Users/zoo/J-",
     );
   });
 

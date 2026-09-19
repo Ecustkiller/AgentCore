@@ -97,7 +97,8 @@ function sanitizeAttachment(raw: unknown): PendingAttachment | null {
   if (typeof a.citedRootId === "string") out.citedRootId = a.citedRootId;
   if (typeof a.citedRelPath === "string") out.citedRelPath = a.citedRelPath;
   if (typeof a.binary === "boolean") out.binary = a.binary;
-  if (typeof a.sourceFolderId === "string") out.sourceFolderId = a.sourceFolderId;
+  if (typeof a.sourceFolderId === "string")
+    out.sourceFolderId = a.sourceFolderId;
   return out;
 }
 

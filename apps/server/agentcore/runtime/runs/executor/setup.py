@@ -109,7 +109,6 @@ class AgentNodePrepared:
     received_blocks: list[ContextBlock]
     token_ceiling: int
     attempts: int
-    two_phase: bool
 
 
 async def prepare_agent_node(
@@ -243,7 +242,6 @@ async def _prepare_agent_node(
         verify_policy=spec.verify_policy or "",
         # 成篇交接：空交不再硬拒；下游靠指针 / 缺席标注消费已有内容。
         handoff_requires_body=False,
-        handoff_min_body_chars=0,
         handoff_expects_landing=deliverable_expects_landing(deliverable),
         accepts_images=model_accepts_images(priced_model or ""),
     )
@@ -444,10 +442,6 @@ async def _prepare_agent_node(
 
     attempts = 1 + min(DEFAULT_CONTRACT_RETRIES, MAX_CONTRACT_RETRIES)
 
-    from agentcore.runtime.runs.executor.hooks import _two_phase_citation
-
-    two_phase = _two_phase_citation(deliverable)
-
     return AgentNodePrepared(
         profile=profile,
         priced_model=priced_model,
@@ -465,5 +459,4 @@ async def _prepare_agent_node(
         received_blocks=received_blocks,
         token_ceiling=token_ceiling,
         attempts=attempts,
-        two_phase=two_phase,
     )

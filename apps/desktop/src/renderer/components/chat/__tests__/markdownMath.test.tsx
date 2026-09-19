@@ -21,9 +21,7 @@ describe("Markdown math", () => {
   });
 
   it("does not typeset \\( inside a fenced code block", () => {
-    const { container } = render(
-      <Markdown content={"```\n\\(x^2\\)\n```"} />,
-    );
+    const { container } = render(<Markdown content={"```\n\\(x^2\\)\n```"} />);
     expect(container.querySelector(".katex")).toBeNull();
     expect(container.querySelector("code")?.textContent).toContain("\\(x^2\\)");
   });

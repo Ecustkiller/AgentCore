@@ -53,14 +53,11 @@ export type AskTone =
  * The answer-state engine for a structured ask: per-question picks (choice → option(s),
  * text → typed value) plus per-question free-text notes (choice only; keyed by
  * `question.id`). Cards with no questions keep a card-level `note`. Does not seed
- * `default` — the generic card opens with nothing checked (认同推荐项须再点一下).
+ * leftover `default` — the card opens with nothing checked (认同推荐项须再点一下).
  * `compose(intent)` flattens it all into ONE readable answer (答复模型 α — the only
- * reader is the CEO / worker, an LLM). Empty picks + no note still emit「按你的默认」
- * for protocol compatibility; the desktop card must not send that path.
+ * reader is the CEO / worker, an LLM). Desktop must not send empty continue.
  */
-export function useAskAnswer(
-  content: AskUserContent,
-) {
+export function useAskAnswer(content: AskUserContent) {
   const [answers, setAnswers] = useState<Record<string, string[]>>(() => {
     const init: Record<string, string[]> = {};
     for (const q of content.questions) {
@@ -93,7 +90,7 @@ export function useAskAnswer(
     setAnswers((cur) => ({ ...cur, [q.id]: value ? [value] : [] }));
   };
 
-  // How many decisions already carry a value (retired kickoff preview chrome).
+  // How many questions already have a pick (card chrome).
   const presetCount = content.questions.filter(
     (q) => (answers[q.id] ?? []).length > 0,
   ).length;
@@ -382,7 +379,6 @@ function QuestionField({
             value={answer[0] ?? ""}
             onChange={(e) => onSetText(e.target.value)}
             disabled={disabled}
-            placeholder={question.default || undefined}
             className={`w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none disabled:opacity-40 ${tone.focus}`}
           />
         ) : (
@@ -390,8 +386,6 @@ function QuestionField({
             <div className="flex flex-col gap-1.5">
               {question.options.map((opt) => {
                 const active = answer.includes(opt.label);
-                const isDefault =
-                  !!question.default && opt.label === question.default;
                 const desktopFolder = isDesktopFolderAction(opt.action);
                 const canRunFolder =
                   desktopFolder &&
@@ -445,11 +439,6 @@ function QuestionField({
                       }
                     >
                       <span className="whitespace-pre-wrap">{opt.label}</span>
-                      {isDefault && (
-                        <span className="ml-1 shrink-0 text-muted-foreground">
-                          ·默认
-                        </span>
-                      )}
                     </Button>
                   </div>
                 );
@@ -484,7 +473,7 @@ export function questionHasExplicitReply(
 }
 
 /** Explicit user input: every question has a pick/text or（choice）本题人话.
- * Card `default` does not count (打开不预选). Empty question list uses
+ * Card leftover `default` does not count (打开不预选). Empty question list uses
  * `cardNote`（无题澄清可交；纯人话升级看整卡 note）. 整卡有字不得放行未答的其他题. */
 export function hasExplicitAskReply(
   content: AskUserContent,
@@ -533,8 +522,6 @@ export function composeAnswer(
       lines.push(qNote ? `${head} · 补充：${qNote}` : head);
     } else if (qNote) {
       lines.push(`${q.prompt}：${qNote}`);
-    } else if (q.default) {
-      lines.push(`${q.prompt}：（按你的默认）`);
     }
   }
   if (lines.length === 0) return cardTrimmed;

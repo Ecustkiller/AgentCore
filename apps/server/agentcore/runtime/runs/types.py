@@ -79,8 +79,6 @@ class RunOrigin(StrEnum):
 class Deliverable:
     """一个 node 的完整交付物规格——描述性 + 约束性合一。"""
 
-    output_format: str = "text"
-    required_sections: list[str] = field(default_factory=list)
     # Declarative artifact path list (files / dirs / globs). When non-empty, the
     # contract gate reconciles each pattern against the live workspace (existence),
     # and a batch that declares any artifacts auto-enables completion acceptance.
@@ -93,15 +91,9 @@ class Deliverable:
     # explicit dir was declared. Acceptance: empty artifacts → no path pin unless
     # this field is set; non-empty artifacts → exact / trailing-/ / glob.
     artifact_dir: str = ""
-    # Parsed for old JSON. Does not FAIL the node: contract misses stay
+    # Parsed for leftover JSON. Does not FAIL the node: contract misses stay
     # COMPLETED with warnings after retries.
     strict: bool = False
-    # 调研类两阶段引用验收（块 2）：``two_phase`` = 广搜落盘为 draft（A，不跑成稿
-    # 引用闸 / 不因 cite 重试）→ 同 worker 自动升级 B（deep_read 或无编号综述）后再跑
-    # 现有引用闸；过 → accepted，不过 → rejected(citations_unverified)。
-    # 省略 / None = 现状（每次合同检查都跑引用闸）。draft 仅内部态，不进
-    # ``delivery_status.artifacts`` / ``delivered_files``。
-    citation_mode: Literal["two_phase"] | None = None
 
 
 RunContract = Deliverable
@@ -252,7 +244,7 @@ class RunSpec:
     # Enforce 在 engine ``tool_exec``（有 run 身份处），与 LoopController 正交。
     retrieval_budget: int | None = None
     # Per-run web_search posture (结构化信号，禁止靠 prompt 触发)。
-    # ``""`` = 默认调研；``"debate_evidence"`` = 庭前取证员 / 辩手 speech research
+    # ``""`` = 默认调研；``"debate_evidence"`` = 辩手 speech research
     # （weak 档与商城/词典/医院百科硬剔）；``"academic_literature"`` = 成文综述
     # （偏论文/DOI、降权百科词典门户、junk 戳 evidence_gap）。经 task payload →
     # builder → ToolContext。
@@ -276,17 +268,12 @@ class RunSpec:
     # 「same wave」: independent chains that share a topological layer by chance
     # are NOT siblings. A node with no same-fan-out peer leaves it blank.
     sibling_summary: str = ""
-    # plan_review CONTINUE：主 Agent llm 把关压缩要点（REPLACE，非 append）。
-    # 与 ``steer`` 分通道；渲染在 steer 之前。空 = 无 / deterministic 不下发。
+    # leftover plan_review 压缩要点（REPLACE）。空 = 无。旧序列化计划可能仍带。
     gate_notes: str = ""
-    # Mid-course user steer (结构化挂起 adjust): the note the user gave at a
-    # plan_review checkpoint with the ``adjust`` decision, injected by the host hook
-    # onto the checkpoint's not-yet-run (transitive) dependents — exactly the work
-    # building on the reviewed output, not unrelated parallel branches — so the steer
-    # redirects the remaining work (the executor renders it as a high-priority
-    # instruction block). Empty for plan-time specs and for ``continue`` / ``stop``;
+    # Mid-course user steer (结构化挂起 ADJUST): injected onto not-yet-run
+    # transitive dependents. Empty for plan-time specs and for continue / stop;
     # accumulates (one block per adjust) when a node is steered across multiple
-    # checkpoints before it runs. → 见设计: docs/03-AI核心/执行引擎架构设计.md §检查点决策语义
+    # checkpoints before it runs.
     steer: str = ""
     # 跨文件夹指挥 · 形状甲：本 worker 的目标 Folder id（解析后的文件夹身份）。
     # 有值 → prepare_agent_node 另建 backend + 记忆跟该 folder；None → 坐会话默认桌。
@@ -307,7 +294,7 @@ class ContextBlock:
     ``channel`` buckets the block for the UI: ``request`` (团队级原始请求) / ``tools``
     (开场实际发给模型的 function-calling 表，镜像当时 ``tool_defs``) / ``team_position``
     (DAG 拓扑：并行队友 + 产出去向) / ``dependency`` (上游产物注入) / ``workspace`` (工作区文件
-    清单) / ``task`` / ``deliverable`` / ``gate_notes`` (用户已放行的主 Agent 把关) /
+    清单) / ``task`` / ``deliverable`` / ``gate_notes`` (旧计划复核写入；新卡不再写) /
     ``steer`` (用户中途操舵，最后最高优先). A ``dependency`` block additionally records its
     provenance — the upstream ``source_role`` / ``source_run_id`` that produced it, the
     ``fidelity`` the executor chose (``pointer`` 递指针 / ``summarize`` / ``pass_through``),

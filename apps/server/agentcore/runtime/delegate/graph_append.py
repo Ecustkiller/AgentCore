@@ -164,7 +164,7 @@ async def resolve_latest_mlr_execution(*, conversation_id: str) -> str | None:
     try:
         from agentcore.db.base import async_session_factory
         from agentcore.db.repositories import TurnJournalRepository
-        from agentcore.runtime.kickoff.debate_host import synthesizer_run_id
+        from agentcore.runtime.debate.host import synthesizer_run_id
 
         async with async_session_factory() as session:
             repo = TurnJournalRepository(session)

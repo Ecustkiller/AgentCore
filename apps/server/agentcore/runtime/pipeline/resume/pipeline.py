@@ -1,4 +1,4 @@
-"""Durable resume pipeline orchestrator for plan_review / ask_user checkpoints."""
+"""Durable resume pipeline orchestrator for leftover plan_review / live ask_user checkpoints."""
 
 from __future__ import annotations
 
@@ -77,7 +77,7 @@ async def resume_chat_pipeline(
     permission_axes: PermissionAxes | None = None,
     x_client_platform: str | None = None,
 ) -> dict:
-    """Continue a turn paused at a plan_review / ask_user checkpoint (结构化挂起 2b resume).
+    """Continue a turn paused at a leftover plan_review / live ask_user checkpoint (结构化挂起 2b resume).
 
     Rebuilds the turn from the §8.3 turn journal and finishes it: re-wire the CEO
     toolset, seed the display journal with the pre-pause graph, **rebuild the CEO window
@@ -317,12 +317,12 @@ async def resume_chat_pipeline(
         # into the client bubble (display-only). Engine CEO on_reset stays None.
         arm_content_reset_reinjection(sink, pre_pause)
 
-        # G5 settle 侧补标: team_preview / plan_review paused before tool return.
+        # G5 settle 侧补标: leftover / ask_user paused before tool return.
         if hydrated.from_turn_paused:
             controller_seed = mark_controller_after_settle(controller_seed, suspension)
 
         # Terminal INTERACT settle: closing text ends the turn without another CEO
-        # round. First ask_user / kickoff stop CONTINUE-feeds the CEO; a second
+        # round. First ask_user STOP CONTINUE-feeds the CEO; a second
         # consecutive same-turn stop upgrades settle back to INTERACT.
         if settled.terminal_text is not None:
             if settled.terminal_text:
@@ -341,10 +341,9 @@ async def resume_chat_pipeline(
             result["audit_drops"] = audit_recorder.drops
             return result
 
-        # Re-entrant pause: settle hit another durable checkpoint (plan_review /
-        # team_preview SUSPEND while resume_plan ran). Mirror the live engine —
-        # FinishReason.PAUSED, no CEO continuation (else a second team_preview
-        # can overwrite the fresh plan_review frame).
+        # Re-entrant pause: settle hit another durable checkpoint (ask_user
+        # SUSPEND while resume_plan ran). Mirror the live engine —
+        # FinishReason.PAUSED, no CEO continuation.
         if settled.effect is ToolEffect.SUSPEND:
             logger.info(
                 "pipeline.resume_re_suspended",

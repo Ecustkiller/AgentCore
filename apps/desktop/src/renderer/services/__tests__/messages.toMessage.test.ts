@@ -323,11 +323,6 @@ describe("toMessage (reload hydrate)", () => {
                 conversation_id: "c1",
                 steps: [{ run_id: "r1", role: "调研", summary: "方案就绪" }],
                 pending: [{ run_id: "r2", role: "执行" }],
-                ceo_review: {
-                  conclusion: "方案可行，建议放行。",
-                  risks: ["回滚预案缺失"],
-                  suggestions: ["先灰度"],
-                },
               },
             },
           ],

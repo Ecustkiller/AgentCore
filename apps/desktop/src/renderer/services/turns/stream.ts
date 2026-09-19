@@ -15,8 +15,9 @@ import type { SupportDiagnosticIds } from "@/lib/supportDiagnostics";
 import { markSidecarUnhealthy, probeSidecar } from "@/services/sidecarHealth";
 import {
   isSidecarEnabled,
+  liveSidecarTarget,
   resolveConversationLocalTarget,
-  resolveSidecarRoot,
+  resolveNewTurnBind,
   setActiveSidecarTurn,
 } from "@/services/sidecarRouting";
 import {
@@ -43,6 +44,7 @@ import {
   throwIfCannotOpenStream,
 } from "@/stores/conversation/turnPhaseActions";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
+import { workspaceRootGoneMessage } from "@shared/workspaceRootGone";
 import { dismissRecoverableHints } from "./dismissRecovery";
 import {
   finalizeGeneratingIfNeeded,
@@ -210,7 +212,7 @@ export async function sendTurn(spec: SendTurnSpec): Promise<SendTurnResult> {
 
   // Composer already opened Thinking behind the user bubble. Reuse that id
   // when it is still a clean placeholder; truncate only a failed-try leftover.
-  // A′: kickoff no longer holds folder workspace_lock — 不得静默等锁. Residual
+  // Folder workspace_lock is not held across a pause — 不得静默等锁. Residual
   // write-lock short waits emit ``workspace_lock_wait`` so the bubble shows
   // 「等待工作区…」instead of faking Thinking…. Cloud desk boot emits
   // ``desk_provision_wait`` → 「正在准备云端环境」. In-flight 同对话排队时
@@ -226,12 +228,22 @@ export async function sendTurn(spec: SendTurnSpec): Promise<SendTurnResult> {
   try {
     traceTurnMilestone(conversationId, "send_start");
     // 路由（双模式工作区 §7.2）：本机传统默认同侧 sidecar =
-    //   有本地引擎 + 未显式强制关（sidecarPreference!=="off"；unset 不挡）+ 会话绑本机根。
+    //   有本地引擎 + 未显式强制关（sidecarPreference!=="off"；unset 不挡）+ 活本机绑定。
     // 贴文件不改场地：区内引用 / 区外复制进 attachments/ 都跟绑定走。
     // 云链路：纯云会话 / 显式强制关。探活失败与启动期失败出诊断横幅，不自动过桥。
-    // 点名是 prompt 软提示，不挡本机。resolveSidecarRoot 早退不 probe；
-    // 健康由下方 probe 仅在有 target 时收敛。
-    const sidecarTarget = await resolveSidecarRoot(conversationId);
+    // 死绑定：授权根在表、空子路径目录已不在盘 → 横幅，不 probe、不走云。
+    // 点名是 prompt 软提示，不挡本机。resolveNewTurnBind 早退不 probe；
+    // 健康由下方 probe 仅在有 live target 时收敛。
+    const bind = await resolveNewTurnBind(conversationId);
+    if (bind.kind === "stale") {
+      logStreamPath(conversationId, "sidecar", "root_stale", {
+        root_id: bind.rootId,
+      });
+      throw new StreamError("sidecar", undefined, {
+        serverMessage: workspaceRootGoneMessage(bind.absPath),
+      });
+    }
+    const sidecarTarget = liveSidecarTarget(bind);
     throwIfCannotOpenStream(conversationId, ac.signal);
     traceTurnMilestone(conversationId, "sidecar_resolve", {
       target: sidecarTarget

@@ -75,7 +75,6 @@ def test_map_fanout_fans_out_notes_without_write_pipeline():
         assert "≤12 词" not in t["task"]
         assert "为凑台账编号" in t["task"]
         assert "文件名或路径" in t["task"]
-        assert d.get("citation_mode") in (None, "")
         assert "定位" in t["task"] and "技术栈" in t["task"]
         assert "必读书单" in t["task"] or "章节大纲" in t["task"]
         assert "定优化方案" in t["task"]
@@ -140,18 +139,11 @@ def test_cite_write_review_fans_out_one_researcher_per_angle_then_outline_then_w
     assert by_id["review"]["role"] == "学术审校员"
     # 审校落盘契约写死在 playbook（form=files + reviews/），不靠运行时扫角色名抬契约。
     review_d = by_id["review"]["deliverable"]
-    assert "form" not in review_d
-    assert "requires_files" not in review_d
-    assert "name" not in review_d
-    assert "min_length" not in review_d
     assert review_d["artifacts"] == ["AgentCore/文档/reviews/审校报告.md"]
     assert "复核落盘" in by_id["review"]["task"]
     # 审校节点显式墙钟 300s（CEO 显式 timeout_ms）。
     assert by_id["review"]["timeout_ms"] == 300_000
     assert by_id["outline"].get("checkpoint_after") is not True
-    assert "requires_files" not in by_id["write"]["deliverable"]
-    assert "name" not in by_id["write"]["deliverable"]
-    assert "form" not in by_id["write"]["deliverable"]
     assert by_id["write"]["deliverable"]["artifacts"] == ["AgentCore/文档/research/报告.md"]
     assert "单主文件" in by_id["write"]["task"]
     assert "AgentCore/文档/research/报告.md" in by_id["write"]["task"]

@@ -19,7 +19,7 @@ export const CONTEXT_CHANNEL_META: Record<
   team_brief: { label: "团队共识", hint: "本回合主协调为全员设定的共识" },
   gate_notes: {
     label: "把关要点",
-    hint: "用户已放行的主 Agent 注意事项（非否决）",
+    hint: "把关时写入的注意事项",
   },
   steer: { label: "中途指示", hint: "执行中追加的操舵" },
   team_result: { label: "回传", hint: "委派的队员交回 CEO 的产物" },

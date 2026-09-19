@@ -1,4 +1,5 @@
-"""Same-turn consecutive checkpoint STOP streak (ask_user / team_preview / plan_review).
+"""Same-turn consecutive checkpoint STOP streak (ask_user; leftover
+team_preview / plan_review still counted on old journals).
 
 First STOP keeps the CONTINUE-feed-to-CEO path (拒答可见). A second consecutive
 STOP in the same turn (same user message / journal) force-closes via terminal
@@ -6,8 +7,8 @@ STOP in the same turn (same user message / journal) force-closes via terminal
 ``*_resolved`` journal facts — survives suspend / resume without a soft-reminder
 counter. Non-STOP decisions reset the streak.
 
-``ADJUST`` is excluded even though team_preview adjust shares STOP's no-grant
-feed-CEO path: consecutive revises must not escalate the turn to terminal.
+``ADJUST`` is excluded even though leftover team_preview adjust shared STOP's
+no-grant feed-CEO path: consecutive revises must not escalate the turn to terminal.
 """
 
 from __future__ import annotations
@@ -58,7 +59,7 @@ def consecutive_checkpoint_stops(
             continue
         raw = str(payload.get("decision") or "").strip().lower()
         if raw == CheckpointDecision.ADJUST.value:
-            # team_preview adjust reuses STOP's no-grant feed-CEO path but must
+            # leftover team_preview adjust reused STOP's no-grant feed-CEO path but must
             # never increment the consecutive-stop terminal (multi-round revise).
             streak = 0
         elif raw == CheckpointDecision.STOP.value:
@@ -76,7 +77,7 @@ def is_repeated_checkpoint_stop(
 ) -> bool:
     """True when ``decision`` is STOP and the journal already ends on ≥1 STOP.
 
-    ``ADJUST`` is never a repeated stop — even on team_preview, where it shares
+    ``ADJUST`` is never a repeated stop — even on leftover team_preview, where it shares
     STOP's no-grant feed-CEO path.
     """
     return (

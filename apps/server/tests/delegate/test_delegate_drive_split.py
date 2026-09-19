@@ -7,9 +7,9 @@ import inspect
 
 import pytest
 
-from agentcore.runtime.delegate.drive_preview import team_preview_before_workers
 from agentcore.runtime.delegate.drive_redirect import RedirectController
 from agentcore.runtime.delegate.drive_terminal import post_session_all_completed
+from agentcore.runtime.delegate.worker_grant import maybe_auto_grant_before_workers
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.redirect_queue import RunRedirectRequest
 from agentcore.runtime.runs.types import RunSpec
@@ -25,8 +25,6 @@ def test_drive_public_exports_stable():
     drive_mod = _drive_mod()
     assert callable(drive_mod.drive)
     assert callable(drive_mod.drive_coordinated)
-    # Private helpers remain importable from drive (existing tests rely on this).
-    assert drive_mod._team_preview_before_workers is team_preview_before_workers
     assert drive_mod._post_session_all_completed is post_session_all_completed
 
 
@@ -77,45 +75,32 @@ def test_cold_fallback_mints_unique_redir_ids():
 
 
 @pytest.mark.asyncio
-async def test_team_preview_skips_when_seeded():
+async def test_auto_grant_skips_when_seeded():
     class _Tool:
         _depth = 0
 
-    plan = RunPlan(nodes=[RunSpec(run_id="a", agent_id="a", role="r", task="t")])
-    result = await team_preview_before_workers(
+    await maybe_auto_grant_before_workers(
         _Tool(),
-        plan,
-        complexity_hint="standard",
         seed_completed={"a": object()},  # type: ignore[dict-item]
-        call_idx=0,
     )
-    assert result is None
 
 
 @pytest.mark.asyncio
-async def test_team_preview_skips_light_handwritten():
-    """普通 light 手写任务仍跳过开工卡（早返回，不进 kickoff）。"""
-
+async def test_auto_grant_top_level_without_gate_is_noop():
     class _Tool:
         _depth = 0
         _active_playbook = None
         _permission_axes = None
         _base_tool_context = type("C", (), {"backend": None})()
 
-    plan = RunPlan(nodes=[RunSpec(run_id="a", agent_id="a", role="r", task="t")])
-    result = await team_preview_before_workers(
+    await maybe_auto_grant_before_workers(
         _Tool(),
-        plan,
-        complexity_hint="light",
         seed_completed=None,
-        call_idx=0,
     )
-    assert result is None
 
 
 @pytest.mark.asyncio
-async def test_team_preview_light_with_capability_auth_does_not_skip():
-    """light 任务也不再挂新开工卡。"""
+async def test_auto_grant_light_without_gate_is_noop():
     from agentcore.core.types import AutonomyPolicy
 
     class _Tool:
@@ -126,12 +111,7 @@ async def test_team_preview_light_with_capability_auth_does_not_skip():
         _base_tool_context = type("C", (), {"backend": None})()
         _approval_gate = None
 
-    plan = RunPlan(nodes=[RunSpec(run_id="a", agent_id="a", role="r", task="t")])
-    result = await team_preview_before_workers(
+    await maybe_auto_grant_before_workers(
         _Tool(),
-        plan,
-        complexity_hint="light",
         seed_completed=None,
-        call_idx=0,
     )
-    assert result is None

@@ -663,7 +663,6 @@ async def test_browser_and_grant_consult_how_without_schema_reprint():
         "u", "browser"
     )
     assert browser is not None
-    assert "ask_user(browser_login=true)" in browser
     assert "永不代填密码" in browser
     assert "password_blocked" not in browser
     assert "验收 / 截图" not in browser

@@ -229,7 +229,7 @@ class LoopController(
         # 成篇硬门：cite_write_review / deliverable 结构信号 — nudge 后仍不可直接 end_turn。
         self._audit_hard_required: bool = False
         self._audit_includes_review: bool = False
-        # Soft debate-commitment nudge: user picked a debate form on kickoff; at most once.
+        # Soft debate-commitment nudge: user picked a debate form on settled ask_user; at most once.
         self._debate_gate_fired: bool = False
         self._debate_executed: bool = False
         # Turn-token ceiling wrap-up steer (策略 A Step 2): at most once per run, captain-only.

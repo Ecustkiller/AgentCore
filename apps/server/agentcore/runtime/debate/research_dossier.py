@@ -34,6 +34,7 @@ _FOOTER_LINE_RE = re.compile(
     re.MULTILINE,
 )
 _URL_LIKE = re.compile(r"^https?://", re.IGNORECASE)
+_BIBLIO_TYPE_MARKER_RE = re.compile(r"\[(?:D|J|M|C|N)\]")
 
 
 @dataclass(frozen=True)
@@ -101,15 +102,12 @@ def ensure_research_file_anchors(
     无条目 / 空正文 → 原样返回。
 
     若正文已有未绑定 ``#rN`` 的 GB/T 书目形态（``[D]/[J]``…），**不**补脚注——
-    避免文末锚制造假安心；交由合同闸 ``citation_quality_reworks`` 返工。
+    避免文末锚制造假安心。
     """
     text = content or ""
     if extract_research_ledger_anchors(text):
         return text
-    # 有未核验书目形态时不补脚注（与合同闸对齐，勿用文末 #rN 蒙混段内 [D]）。
-    from agentcore.runtime.verify import citation_quality_reworks
-
-    if citation_quality_reworks(text, ledger_entries=list(ledger_entries) or []):
+    if _BIBLIO_TYPE_MARKER_RE.search(text) and not extract_ledger_ref_ids(text):
         return text
     usable = [
         e

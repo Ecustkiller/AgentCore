@@ -127,7 +127,7 @@ async def stream_chat(
 
         # A′: no whole-turn workspace_lock — write/snapshot sinks hold the key.
         # Compact stays outside the lock (conversation DB, not workspace disk).
-        # 不得静默等锁：kickoff 不握 folder 锁；写路径短等经 workspace_lock_wait SSE。
+        # 不得静默等锁：pause 不握 folder 锁；写路径短等经 workspace_lock_wait SSE。
         resident_attachments = await persist_attachments(
             backend, attachments, sitting_folder_id=ws_folder_id
         )
@@ -350,7 +350,7 @@ async def regenerate_chat(
         )
 
         # A′: no whole-turn workspace_lock — write/snapshot sinks hold the key.
-        # 不得静默等锁：kickoff 不握 folder 锁；写路径短等经 workspace_lock_wait SSE。
+        # 不得静默等锁：pause 不握 folder 锁；写路径短等经 workspace_lock_wait SSE。
         await run_and_persist(
             conversation_id=conversation_id,
             user_message=user_message,
@@ -402,14 +402,14 @@ async def resume_chat(
     llm_supports_tools: bool | None = None,
     x_client_platform: str | None = None,
 ) -> None:
-    """Continue a turn paused at a plan_review / ask_user checkpoint (结构化挂起 2b resume).
+    """Continue a leftover plan_review / live ask_user pause (结构化挂起 2b resume).
 
     The route prewrote the ``*_resolved`` settlement AND claimed (DELETE) the
     ``paused_turns`` row before dispatching here, so settlement is durable on entry.
     Per D1 (sidecar parity) a durable settlement is never rolled back: cancel / failure
     after this point projects as interrupted_after_decision, NOT a frame restore —
-    restoring would resurrect the already-authorized decision card (e.g. the team_preview
-    kickoff card reappearing after 停止 lands mid-continuation).
+    restoring would resurrect the already-authorized decision card (e.g. leftover team_preview
+    reappearing after 停止 lands mid-continuation).
     """
     conversation_id = suspension.conversation_id
     user_id = suspension.user_id
@@ -417,7 +417,7 @@ async def resume_chat(
     # AND claims the frame BEFORE dispatching here, so settlement is durable on entry. A
     # durable settlement is never rolled back — cancel / failure after this point is
     # interrupted_after_decision, not a frame restore (restoring would resurrect the
-    # already-authorized card, e.g. the team_preview kickoff reappearing after 停止 mid-run).
+    # already-authorized card, e.g. leftover team_preview reappearing after 停止 mid-run).
     settlement_durable = True
     backend = None
     try:
@@ -467,7 +467,7 @@ async def resume_chat(
         suspension_saver, suspension_deleter = suspension_callbacks()
 
         # A′: no whole-turn workspace_lock — write/snapshot sinks hold the key.
-        # 不得静默等锁：kickoff 不握 folder 锁；写路径短等经 workspace_lock_wait SSE。
+        # 不得静默等锁：pause 不握 folder 锁；写路径短等经 workspace_lock_wait SSE。
         trace_id = suspension.trace_id or new_trace_id()
         # Fresh attempt_id on every resume (same message_id / journal turn_id).
         attempt_id = new_id()

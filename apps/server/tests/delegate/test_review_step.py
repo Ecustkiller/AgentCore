@@ -1,7 +1,7 @@
 """Boundary excerpt: prefer handoff debrief over truncated body markdown."""
 
 from agentcore.runtime.delegate.boundary import review_summary_text
-from agentcore.runtime.runs.constants import PLAN_REVIEW_SUMMARY_CHARS
+from agentcore.runtime.runs.constants import HANDOFF_SUMMARY_CHARS
 from agentcore.runtime.runs.types import RunState
 
 
@@ -62,4 +62,4 @@ def test_review_summary_truncates_to_cap():
     )
     text = review_summary_text(state)
     assert text.endswith("…")
-    assert len(text) == PLAN_REVIEW_SUMMARY_CHARS + 1  # body + ellipsis
+    assert len(text) == HANDOFF_SUMMARY_CHARS + 1  # body + ellipsis

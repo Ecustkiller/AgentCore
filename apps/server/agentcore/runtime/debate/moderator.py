@@ -223,11 +223,11 @@ class Moderator:
         # 交互式「加角度」：用户在上一轮边界给的下一轮焦点覆写（空=主持人自动定焦点）。
         focus_override = ""
         # 交互式「追问」：用户在上一轮边界注入、待【本轮】辩手正面回应的问题（消费后清空）。
-        # 开赛嘱咐（config.kickoff_ask）预注入为首轮全场定向插话——与中途追问同管道。
+        # 开赛嘱咐（config.opening_ask）预注入为首轮全场定向插话——与中途追问同管道。
         pending_interjections: list[UserInterjection] = []
-        kickoff_ask = (config.kickoff_ask or "").strip()
-        if kickoff_ask:
-            pending_interjections = [UserInterjection(ask=kickoff_ask, target_key="")]
+        opening_ask = (config.opening_ask or "").strip()
+        if opening_ask:
+            pending_interjections = [UserInterjection(ask=opening_ask, target_key="")]
         profile = form_profile(config)
         for round_no in range(1, config.policy.max_rounds + 1):
             self._round_no = round_no

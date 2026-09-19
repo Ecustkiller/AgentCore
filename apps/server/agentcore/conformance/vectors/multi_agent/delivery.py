@@ -303,7 +303,7 @@ def _multi_agent_export_docx_artifacts() -> list[SSEEvent]:
 def _multi_agent_pptx_promised_md_only() -> list[SSEEvent]:
     """选 pptx 却只落 md/脚本：部分交付卡可见；产物结构窄闸已撤，终稿承认缺口。
 
-    前置假定用户已在开工卡选定 format_id=f0（PowerPoint）；本向量钉部分交付——
+    前置假定用户已选定 format_id=f0（PowerPoint）；本向量钉部分交付——
     delivery_status=partial（无 .pptx）+ 诚实终稿。引擎不再因「PPT 已落盘」
     content_reset。对照 ``multi_agent_delivery_status_partial``。
     """

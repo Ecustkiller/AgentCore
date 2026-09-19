@@ -1,4 +1,4 @@
-"""Debate SSE event factories (result / round / pretrial)."""
+"""Debate SSE event factories (result / round)."""
 
 from __future__ import annotations
 
@@ -63,18 +63,3 @@ def debate_round(
             **payload,
         },
     )
-
-
-def debate_pretrial_started(**payload: Any) -> SSEEvent:
-    """庭前取证开场（可带 skip_reason 秒过）。"""
-    return SSEEvent(type=EventType.DEBATE_PRETRIAL_STARTED, payload=dict(payload))
-
-
-def debate_pretrial_orders(**payload: Any) -> SSEEvent:
-    """庭前准备摘要（Evidence Pack / 空订单 + 外证计划）。"""
-    return SSEEvent(type=EventType.DEBATE_PRETRIAL_ORDERS, payload=dict(payload))
-
-
-def debate_pretrial_completed(**payload: Any) -> SSEEvent:
-    """庭前收口（done / skipped / degraded + ledger delta）。"""
-    return SSEEvent(type=EventType.DEBATE_PRETRIAL_COMPLETED, payload=dict(payload))

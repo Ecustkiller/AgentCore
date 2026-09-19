@@ -46,7 +46,6 @@ def checkpoint_required(
     question: str,
     questions: list[dict[str, Any]] | None = None,
     intent: AskCheckpointIntent | None = None,
-    browser_login: bool | None = None,
 ) -> SSEEvent:
     payload: dict[str, Any] = {
         "checkpoint_id": checkpoint_id,
@@ -56,8 +55,6 @@ def checkpoint_required(
     }
     if intent is not None:
         payload["intent"] = intent
-    if browser_login is True:
-        payload["browser_login"] = True
     return SSEEvent(type=EventType.CHECKPOINT_REQUIRED, payload=payload)
 
 
@@ -85,7 +82,6 @@ def escalation_required(
     questions: list[dict[str, Any]] | None = None,
     kind: str = "normal",
     awaiting: str = "user",
-    browser_login: bool | None = None,
     ownership_paths: list[str] | None = None,
     lock_owner_run_id: str | None = None,
     timeout_seconds: float | None = None,
@@ -96,8 +92,6 @@ def escalation_required(
     prompt replays inline on reload. ``kind`` is the escalate taxonomy
     (normal / scope / dep), orthogonal to blocking. ``awaiting`` is ``user`` (经典可答卡)
     or ``ceo`` (协调模式等主管仲裁，初始不作为用户可答卡).
-    ``browser_login`` (narrow D16 exception): when true, the pending escalate asks
-    the user to finish login in the dock and tap「已登录，继续」. Absent/false on old streams.
     ``ownership_paths`` / ``lock_owner_run_id``: write-lock conflict 结构化裁决（移交写权）。
     ``timeout_seconds``: the wall-clock ceiling this suspend actually got. ABSENT is the
     default deployment (D2 ``checkpoint_timeout_seconds=None``) = waits indefinitely, so a
@@ -114,10 +108,6 @@ def escalation_required(
         "kind": kind if kind in ("normal", "scope", "dep") else "normal",
         "awaiting": who,
     }
-    # Absent-forward-compat: only emit when explicitly true (old clients ignore unknown;
-    # generators omit false so old journals stay bit-identical).
-    if browser_login is True:
-        payload["browser_login"] = True
     paths = [p for p in (ownership_paths or []) if isinstance(p, str) and p.strip()]
     if paths:
         payload["ownership_paths"] = paths

@@ -885,8 +885,8 @@ def test_first_round_still_frames_opening():
     assert result.rounds[0].focus == "首轮焦点"
 
 
-def test_kickoff_ask_seeds_round1_interjection():
-    """开赛嘱咐（kickoff_ask）预注入为首轮全场插话：跑进 run_round、verbatim 进 rounds[0]。"""
+def test_opening_ask_seeds_round1_interjection():
+    """开赛嘱咐（opening_ask）预注入为首轮全场插话：跑进 run_round、verbatim 进 rounds[0]。"""
     class _KickoffFrameLLM(_ScriptedLLM):
         async def complete(self, request):  # noqa: ANN001
             step = request.scenario.rsplit(".", 1)[-1]
@@ -904,7 +904,7 @@ def test_kickoff_ask_seeds_round1_interjection():
         form=DebateForm.DEBATE,
         sides=_two_sides(),
         policy=RoundPolicy(max_rounds=1),
-        kickoff_ask=ask,
+        opening_ask=ask,
     )
     llm = _KickoffFrameLLM(judge_results=[_CONVERGE])
     runner = _RecordingRunner()

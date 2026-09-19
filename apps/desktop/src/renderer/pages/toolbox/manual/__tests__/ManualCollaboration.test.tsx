@@ -20,6 +20,7 @@ const SECTION_IDS = [
   "debate",
   "control",
   "memory",
+  "prompts",
 ] as const;
 
 describe("ManualCollaboration", () => {
@@ -41,6 +42,9 @@ describe("ManualCollaboration", () => {
     expect(sectionText("debate")).not.toMatch(/掌舵/);
     expect(sectionText("control")).not.toMatch(/「出结论」/);
     expect(sectionText("control")).toMatch(/自己出结论/);
+    expect(sectionText("autonomy")).not.toMatch(/组团卡/);
+    expect(sectionText("checkpoint")).not.toMatch(/组团卡/);
+    expect(document.body.textContent).not.toMatch(/拒开工/);
     expect(document.getElementById("autonomy")?.textContent).toMatch(/自主度/);
     expect(document.getElementById("control")?.textContent).toMatch(/中途插手/);
     expect(document.getElementById("checkpoint")?.textContent).toMatch(
@@ -61,6 +65,11 @@ describe("ManualCollaboration", () => {
     expect(sectionText("memory")).toMatch(/常驻/);
     expect(sectionText("memory")).toMatch(/按需/);
     expect(sectionText("memory")).toMatch(/@ 点名/);
+    expect(sectionText("memory")).toMatch(/怎么写才会被翻开/);
+    expect(screen.getAllByText("怎么写提示词").length).toBeGreaterThan(0);
+    expect(sectionText("prompts")).toMatch(/干什么、什么时候/);
+    expect(sectionText("prompts")).toMatch(/一句话介绍/);
+    expect(sectionText("prompts")).toMatch(/没有斜杠菜单/);
     expect(sectionText("checkpoint")).not.toMatch(/工作流等人关卡/);
     expect(screen.queryByText("设为定时")).toBeNull();
     expect(sectionText("progress")).toMatch(/唯一的常驻视图/);

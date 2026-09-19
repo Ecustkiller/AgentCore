@@ -216,7 +216,6 @@ def test_build_plan_ignores_reviewer_least_privilege_tools():
                 "tools": ["file_list", "file_read"],
                 "deliverable": {
                     "form": "prose",
-                    "required_sections": ["问题", "建议", "评分"],
                 },
             }
         ],

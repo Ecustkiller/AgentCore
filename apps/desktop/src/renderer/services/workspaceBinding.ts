@@ -132,10 +132,10 @@ export async function unbindWorkspace(
 }
 
 /**
- * True when a binding points at a desktop root this device no longer has — the
- * "路径不存在" degradation (§八): the root was removed, or it was bound on another
- * device (local projects don't follow you across machines). The UI then offers a
- * reconnect (re-pick the folder) or a switch back to cloud, never failing silently.
+ * True when a binding points at a desktop root this device no longer has in
+ * its authorization table — removed from settings, or bound on another machine.
+ * Disk-gone while still in the table is `FsRoot.missing` / chip `rootStale`,
+ * not this helper. The UI offers relocate (same rootId) or reconnect.
  */
 export function isBoundRootMissing(
   binding: WorkspaceBinding | null,

@@ -29,31 +29,12 @@ FIELD_CONSUMER_BASELINE: tuple[FieldConsumerBaselineGroup, ...] = (
         leaves=frozenset({"audience"}),
     ),
     FieldConsumerBaselineGroup(
-        id="debate.evidence_pack",
-        reason=(
-            "庭前证据包：UI 读 completeness / skip_reason / external_evidence_mode；"
-            "不读 evidence_pack 子树与 external_evidence blob。"
-        ),
-        leaves=frozenset(
-            {
-                "evidence_pack",
-                "dispute_candidates",
-                "excerpt",
-                "ledger_ids",
-                "related_source_ids",
-                "source_id",
-                "why_contested",
-                "external_evidence",
-            }
-        ),
-    ),
-    FieldConsumerBaselineGroup(
         id="debate.witnesses_absent",
         reason=(
             "辩论结果证人席与缺席标记：witnesses 整段、lens_label、sides.absent "
-            "未进辩论卡渲染。"
+            "未进辩论卡渲染。brief.risk_severities 随比分退出产品面，界面不读。"
         ),
-        leaves=frozenset({"witnesses", "lens_label", "absent"}),
+        leaves=frozenset({"witnesses", "lens_label", "absent", "risk_severities"}),
     ),
     FieldConsumerBaselineGroup(
         id="evidence_ledger.doc_kind",
@@ -86,10 +67,11 @@ FIELD_CONSUMER_BASELINE: tuple[FieldConsumerBaselineGroup, ...] = (
     FieldConsumerBaselineGroup(
         id="delivery_status.gaps",
         reason=(
-            "交付缺口叶：桌面只读 delivery_status.state / summary / artifacts，"
-            "完成态条有意不挂 unmet。唯一生产读点在已拆的手机 SPA。"
+            "交付缺口叶与 delivered_files：桌面只读 delivery_status.state / summary / artifacts，"
+            "完成态条有意不挂 unmet；已交付路径走 artifacts，不读 delivered_files 并列清单。"
+            "唯一生产读点在已拆的手机 SPA。"
         ),
-        leaves=frozenset({"gaps"}),
+        leaves=frozenset({"gaps", "delivered_files"}),
     ),
     FieldConsumerBaselineGroup(
         id="debate.moderator_provider_id",

@@ -3,12 +3,11 @@
 Mirrors the check_contract / out_of_range_markers test posture: finish_guard is a
 pure function over content returning concrete rework items, and format_guard_steer
 renders them into one injected ``[系统提示]``. Chat finish_guard covers structural
-completeness and CEO delivery honesty — not ``#rN`` / ``[n]`` / bibliography
-(those stay on :func:`citation_quality_reworks` for file contracts). 产物结构窄闸已撤。
+completeness and CEO delivery honesty — not ``#rN`` / ``[n]`` / bibliography.
 """
 
 from agentcore.runtime.closing_posture import closing_honesty_verdict_hit
-from agentcore.runtime.verify import citation_quality_reworks, finish_guard, format_guard_steer
+from agentcore.runtime.verify import finish_guard, format_guard_steer
 
 
 def test_in_range_citations_pass():
@@ -102,88 +101,6 @@ def test_chat_finish_guard_allows_search_only_and_forged_rn():
     assert finish_guard("见 #r9。", check_citations=False) == []
     assert finish_guard("无标记正文", check_citations=False) == []
     assert finish_guard("李四. 某某研究[J]. #r1", check_citations=False) == []
-
-
-def test_citation_quality_search_only_and_forgery_still_fail():
-    """落盘成文闸仍拒 search-only / 伪造。"""
-    reworks = citation_quality_reworks("见 #r1。", citable_ids=frozenset())
-    assert reworks and "#r1" in reworks[0]
-    assert "search-only" in reworks[0]
-    bad = citation_quality_reworks("见 #r9。", citable_ids=frozenset({"#r1"}))
-    assert bad and "#r9" in bad[0]
-    assert citation_quality_reworks("无标记正文", citable_ids=frozenset()) == []
-
-
-def test_bibliography_announcement_rework():
-    entries = [
-        {
-            "id": "#r1",
-            "url": "https://example.com/x",
-            "title": "研究生开题答辩公告",
-            "snippet": "公示安排",
-            "deep_read": True,
-            "doc_kind": "announcement",
-        }
-    ]
-    reworks = citation_quality_reworks(
-        "参见张三. 某问题研究[D]. #r1",
-        citable_ids=frozenset({"#r1"}),
-        ledger_entries=entries,
-    )
-    assert reworks and any("开题" in r or "公告" in r for r in reworks)
-    assert finish_guard("参见张三. 某问题研究[D]. #r1", check_citations=False) == []
-
-
-def test_bibliography_requires_deep_read():
-    entries = [
-        {
-            "id": "#r1",
-            "url": "https://example.com/paper",
-            "title": "正式论文",
-            "snippet": "",
-            "deep_read": False,
-            "doc_kind": "",
-        }
-    ]
-    reworks = citation_quality_reworks(
-        "李四. 某某研究[J]. #r1",
-        citable_ids=frozenset(),  # search-only 也不在 draft
-        ledger_entries=entries,
-    )
-    assert reworks
-    assert any("deep_read" in r for r in reworks)
-
-
-def test_bibliography_unbound_type_marker_rework():
-    """GB/T [D] without any #rN must rework on the file contract (fabricated thesis-style cite)."""
-    reworks = citation_quality_reworks(
-        "郝万鑫. 某问题研究[D]. 长江大学, 2026.",
-        citable_ids=frozenset(),
-        ledger_entries=[],  # ledger connected (empty ok)
-    )
-    assert reworks
-    assert any("#rN" in r or "编造" in r or "未核验" in r for r in reworks)
-
-
-def test_bibliography_bound_type_marker_skips_unbound_gate():
-    entries = [
-        {
-            "id": "#r1",
-            "url": "https://example.com/paper",
-            "title": "正式论文",
-            "snippet": "",
-            "deep_read": True,
-            "doc_kind": "thesis",
-        }
-    ]
-    assert (
-        citation_quality_reworks(
-            "张三. 某问题研究[D]. #r1",
-            citable_ids=frozenset({"#r1"}),
-            ledger_entries=entries,
-        )
-        == []
-    )
 
 
 def test_blocked_empty_delivery_claim_does_not_rework():

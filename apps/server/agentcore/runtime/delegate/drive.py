@@ -10,7 +10,6 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from agentcore.runtime.delegate.drive_finalize import finalize_drive
-from agentcore.runtime.delegate.drive_preview import team_preview_before_workers
 from agentcore.runtime.delegate.drive_redirect import RedirectController
 from agentcore.runtime.delegate.drive_setup import (
     apply_delegation_grant,
@@ -19,6 +18,7 @@ from agentcore.runtime.delegate.drive_setup import (
     resolve_worker_gate,
 )
 from agentcore.runtime.delegate.drive_terminal import post_session_all_completed
+from agentcore.runtime.delegate.worker_grant import maybe_auto_grant_before_workers
 from agentcore.runtime.events import run_skipped
 from agentcore.runtime.runs.drive_reach import register_drive, unregister_drive
 from agentcore.runtime.runs.redrive_sites import ResumeHint
@@ -32,7 +32,6 @@ if TYPE_CHECKING:
 type DelegateTool = Any
 
 # Re-export for tests / callers that imported private helpers from this module.
-_team_preview_before_workers = team_preview_before_workers
 _post_session_all_completed = post_session_all_completed
 
 
@@ -114,8 +113,8 @@ async def drive(
     ``coordinate=False`` for classic blocking. Pass ``session`` only from the
     background task (:func:`drive_coordinated`).
 
-    ``team_preview_before_workers`` still runs on the CEO path before the coordinate
-    fork (silent grant / MLR keep). It no longer durable-pauses for a new card.
+    ``maybe_auto_grant_before_workers`` still runs on the CEO path before the
+    coordinate fork (silent grant). It does not hang a card.
     """
     tool._pending_boundary = None
     tool._pending_pause = False
@@ -268,9 +267,9 @@ async def _drive_body(
 
     payer = credential_source_from_llm(getattr(tool, "_llm", None))
 
-    # 团队预审：仍在 coordinate fork 之前（CEO 主路径）跑 silent grant / MLR keep；
-    # 不再为新 team_preview 挂起。后台 drive_coordinated 带 session，跳过本闸。
-    # 增量委派（合并进活跃协调）同样不再挂开工卡。
+    # silent grant / MLR keep 仍在 coordinate fork 之前（CEO 主路径）跑；
+    # 不再挂编制确认卡。后台 drive_coordinated 带 session，跳过本闸。
+    # 增量委派（合并进活跃协调）同样不发卡。
     merging_into_active = False
     if session is None and seed_completed is None:
         from agentcore.runtime.coordination.session import active_coordination
@@ -283,8 +282,8 @@ async def _drive_body(
         )
 
     # 收口后冷开整团重派硬闸（与同图 replan 补跑闸分轨；共用 MAX_GAP_FILL_ADDS）。
-    # 须在 team_preview 之前拒，避免开工卡先弹出。append / 并入活跃图不走本闸。
-    # 后台 drive_coordinated 带 session：前台 try_start 已过本闸，跳过（同 team_preview）。
+    # 须在 silent grant / 开跑之前拒。append / 并入活跃图不走本闸。
+    # 后台 drive_coordinated 带 session：前台 try_start 已过本闸，跳过。
     # session 路径 merging_into_active 恒 False、seed_completed 常为 None，且此时
     # active session 是刚建的空名册，重入会把已准入的 replaces/continue 误拒。
     # 同队续派走 continue_from_run_id，判定在闸内。
@@ -368,15 +367,10 @@ async def _drive_body(
         )
 
     if session is None:
-        preview_early = await team_preview_before_workers(
+        await maybe_auto_grant_before_workers(
             tool,
-            plan,
-            complexity_hint=complexity_hint,
             seed_completed=seed_completed,
-            call_idx=call_idx,
         )
-        if preview_early is not None:
-            return preview_early
 
     # 同构再委派护栏：活跃协调上角色+任务高度同构 → 结构化拒绝。
     # 触顶换马甲护栏：近期 thrashing worker + 相似 task/artifacts → 拒冷派

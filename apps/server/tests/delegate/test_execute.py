@@ -134,27 +134,6 @@ async def test_single_worker_keeps_plain_worker_identity():
     assert all("正文直达用户" not in sys for sys in _system_prompts(provider))
 
 
-async def test_single_worker_section_miss_still_folds_to_ceo():
-    """Worker 缺必备章节（即使带 strict）→ 软完成，仍走 format_for_ceo，不直出。"""
-    t = tool(Provider(["X"]))
-    result = await t.execute(
-        {
-            "tasks": [
-                {
-                    "role": "A",
-                    "task": "a",
-                    "deliverable": {"required_sections": ["结论"], "strict": True},
-                }
-            ],
-            "finalize": True,
-            "coordinate": False,
-        },
-        ctx(),
-    )
-    assert result.is_terminal is False
-    assert result.effect is not ToolEffect.HANDOFF
-
-
 def test_should_auto_light_delegate():
     assert delegate_prelude_mod._should_auto_light_delegate(
         [{"role": "工程师", "task": "做A"}]
@@ -167,9 +146,6 @@ def test_should_auto_light_delegate():
     )
     assert not delegate_prelude_mod._should_auto_light_delegate(
         [{"role": "A", "task": "a", "depends_on": ["x"]}]
-    )
-    assert not delegate_prelude_mod._should_auto_light_delegate(
-        [{"role": "A", "task": "a", "checkpoint_after": True}]
     )
     # leftover bind_after_deps is dropped, not a wave-boundary feature
     assert delegate_prelude_mod._should_auto_light_delegate(
@@ -277,29 +253,6 @@ async def test_explicit_light_with_file_deliverable_kept_for_repair(monkeypatch)
     assert captured["max_rounds"] is None
 
 
-async def test_explicit_light_with_retired_min_length_kept(monkeypatch):
-    """显式 light + 已删 min_length 不再忽略 → 保留 light。"""
-    spy = LogSpy()
-    monkeypatch.setattr(delegate_tool_mod, "logger", spy)
-    monkeypatch.setattr(delegate_prelude_mod, "logger", spy)
-    t = tool(Provider(["OUT"]))
-    await t.execute(
-        {
-            "tasks": [
-                {
-                    "role": "写手",
-                    "task": "写长报告",
-                    "deliverable": {"min_length": 3000, "name": "报告"},
-                }
-            ],
-            "complexity_hint": "light",
-        },
-        ctx(),
-    )
-    assert spy.get("delegate.started")["complexity_hint"] == "light"
-    assert not any(name == "delegate.complexity_hint_ignored" for name, _ in spy.events)
-
-
 async def test_multi_worker_keeps_standard_complexity_hint(monkeypatch):
     spy = LogSpy()
     monkeypatch.setattr(delegate_tool_mod, "logger", spy)
@@ -319,21 +272,6 @@ async def test_explicit_standard_complexity_hint_not_overridden(monkeypatch):
         {
             "tasks": [{"role": "工程师", "task": "做A"}],
             "complexity_hint": "standard",
-        },
-        ctx(),
-    )
-    assert spy.get("delegate.started")["complexity_hint"] == "standard"
-
-
-async def test_single_worker_with_checkpoint_keeps_standard_complexity_hint(monkeypatch):
-    spy = LogSpy()
-    monkeypatch.setattr(delegate_tool_mod, "logger", spy)
-    t = tool(Provider(["OUT"]))
-    await t.execute(
-        {
-            "tasks": [
-                {"role": "工程师", "task": "做A", "checkpoint_after": True},
-            ],
         },
         ctx(),
     )

@@ -75,13 +75,13 @@ uv run python scripts/demo_tape_http_walk.py --tape <tape-id>
 uv run python scripts/demo_tape_http_walk.py --tape <tape-id> --autostart
 ```
 
-准备模式脚本会：`POST /v1/demo-tape/prepare` → `POST …/messages`（触发文本）→ SSE 收到 `message_end`（组队直接开跑，不等开工卡）→ 校验会话中用户消息 = 发送文本、节奏上限。若磁带中途碰到真的 `ask_user` 卡，再 `POST …/resume` continue。
+准备模式脚本会：`POST /v1/demo-tape/prepare` → `POST …/messages`（触发文本）→ SSE 收到 `message_end`（组队直接开跑）→ 校验会话中用户消息 = 发送文本、节奏上限。若磁带中途碰到真的 `ask_user` 卡，再 `POST …/resume` continue。
 
 ---
 
 ## 备选：立即开播（auto-start）
 
-命令面板搜「立即开播」，或选 **「演示回放 · … · 立即开播」**（hint：开发 · 一键）。行为与旧一键相同：`POST /v1/demo-tape/start` 建会话、绑定、并以磁带原始用户消息直接开回合；接口在用户消息落库后返回（组队直接开跑，不等开工卡）。
+命令面板搜「立即开播」，或选 **「演示回放 · … · 立即开播」**（hint：开发 · 一键）。行为与旧一键相同：`POST /v1/demo-tape/start` 建会话、绑定、并以磁带原始用户消息直接开回合；接口在用户消息落库后返回（组队直接开跑）。
 
 桌面 UX 验收脚本 `apps/desktop/scripts/smoke-demo-tape.mjs` 走这条 auto-start 路径（六拍点），不必手打开场。
 

@@ -348,8 +348,12 @@ describe("PromptOverview", () => {
     expect(screen.getByText("用到才翻")).toBeTruthy();
     expect(screen.queryByText("只读说明书")).toBeNull();
     expect(within(always).getByText("读工作区文件")).toBeTruthy();
-    expect(within(onDemandTools).getByText("本机排查 / 修理 / 查看这台电脑")).toBeTruthy();
-    expect(within(always).queryByText("本机排查 / 修理 / 查看这台电脑")).toBeNull();
+    expect(
+      within(onDemandTools).getByText("本机排查 / 修理 / 查看这台电脑"),
+    ).toBeTruthy();
+    expect(
+      within(always).queryByText("本机排查 / 修理 / 查看这台电脑"),
+    ).toBeNull();
     expect(within(onDemand).queryByText("读工作区文件")).toBeNull();
   });
 

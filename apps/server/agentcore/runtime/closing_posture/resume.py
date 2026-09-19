@@ -116,8 +116,8 @@ def reconcile_resume_closing(
     Do not expand that closed set; the card settlement is the join signal (67a9e6d6).
 
     When pre-pause is ask framing（方向：先问你…）and post-resume already dispatched
-    （方向：派团队… / 按确认默认）, keep only the post-resume segment — empty continue
-    accepted the default; stacking「先问你」+「派团队」is dishonest（0cb83288）.
+    （方向：派团队…）, keep only the post-resume segment — stacking「先问你」+「派团队」
+    is dishonest. Old bubbles may still say「按确认默认」; that phrase is leftover.
 
     When pre-pause is a dispatch/process kickoff（方向：派团队…）and post-resume has
     content, keep only the post-resume segment — kickoff must not become the opening
@@ -164,8 +164,6 @@ def resume_continuity_steer(*, prior_deliverable: str) -> str:
     if prior and claims_posture_c(prior) and not claims_posture_a(prior):
         return (
             "[系统提示] 用户已通过确认卡作答。请基于用户答复推进下一步。"
-            "若卡上有预填 default 且用户空 continue = 确认该 default："
-            "派工/正文须用该 default 并标「按确认默认」。"
             "上轮已给出确认选项时须承接，【禁止】空转确认、不承接选项。"
             "有交付对账卡时以档位为准；非正式完成不得姿势 A。"
         )

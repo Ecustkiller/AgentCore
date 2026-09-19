@@ -857,7 +857,7 @@ class DeleteFolderTool:
     shapes are deliberately absent: 按名 / 按路径删 (跨层同名合法 ⇒ 必然误删), 批量删
     (one card must never authorise N deletions), and 彻底删 (``/permanent`` and
     trash purge stay user-only). ``GRANTABLE`` + 恒确认 (``runtime.always_confirm``) so no
-    turn / kickoff / session grant can swallow the card — several deletions in one
+    turn / delegation / session grant can swallow the card — several deletions in one
     round each prompt.
     """
 

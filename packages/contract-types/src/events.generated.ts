@@ -196,13 +196,18 @@ export interface AskOption {
   section?: string;
 }
 
+/** One ask_user / escalate card question.
+ * 
+ * ``default`` remains parseable on leftover frames / journals. New events omit
+ * it; clients must not treat it as tendency or pre-select. Tendency is
+ * option-name markup (``（推荐）`` / ``(recommended)``). */
 export interface AskQuestion {
   id: string;
   prompt: string;
   kind: "choice" | "text";
   options: AskOption[];
   multiple: boolean;
-  default: string;
+  default?: string;
 }
 
 export type CheckpointIntent = "decision";
@@ -214,8 +219,6 @@ export interface CheckpointRequiredPayload {
   question: string;
   questions: AskQuestion[];
   intent?: CheckpointIntent;
-  /** true=CEO 请求用户在右坞浏览器完成登录（同 escalate browser_login 体验）。旧流缺字段按 false。 */
-  browser_login?: boolean;
 }
 
 export interface CheckpointResolvedPayload {
@@ -364,11 +367,7 @@ export interface RunPhasePayload {
 
 export type EscalationKind = "normal" | "scope" | "dep";
 
-export type RunFailureKind =
-  | "quality"
-  | "format"
-  | "model"
-  | "call";
+export type RunFailureKind = "model" | "call";
 
 /** 升级实时可见 (非阻塞 raised): a worker flagged a decision/blocker and kept working.
  * 
@@ -415,8 +414,6 @@ export interface EscalationRequiredPayload {
   kind?: EscalationKind;
   /** 谁在仲裁：user=经典可答卡；ceo=协调模式等主管。旧流缺字段按 user。 */
   awaiting?: "user" | "ceo";
-  /** true=请用户在右坞完成登录并点「已登录，继续」（回合仍 running）。旧流缺字段按 false。 */
-  browser_login?: boolean;
   /** 写权冲突路径列表；有值时前端呈现「移交写权 / 保持原主」。旧流缺字段按无。 */
   ownership_paths?: string[];
   /** 当前写权持有者 run_id。旧流缺字段按无。 */
@@ -546,7 +543,7 @@ export interface DeliveryAction {
 /** One path-level acceptance row on ``delivery_status`` (主清单数据源).
  * 
  * ``status=accepted`` → counts toward ``delivered_files`` / CEO「已交付」;
- * ``rejected`` carries ``reason`` (e.g. ``citations_unverified`` / ``run_failed``)
+ * ``rejected`` carries ``reason`` (e.g. ``run_failed``)
  * and optional ``detail`` for the file checklist. Undeclared extras are omitted
  * (not rejected). Draft is out of scope for block 1.
  * ``workspace_id``: landing desk when the plan node set ``target_folder_id``
@@ -1088,95 +1085,6 @@ export interface DebateRoundPayload extends DebateRoundInfo {
   moderator_run_id: string;
 }
 
-export interface DebatePretrialSideInfo {
-  key: string;
-  name: string;
-}
-
-export interface DebatePretrialTask {
-  query: string;
-  purpose?: string;
-}
-
-export interface DebatePretrialOrder {
-  side_key: string;
-  tasks?: DebatePretrialTask[];
-  source?: "debater" | "auto" | "empty";
-}
-
-export interface DebateEvidencePackSource {
-  source_id: string;
-  kind: "attachment" | "conversation" | "background" | "dossier" | "workspace";
-  label: string;
-  path?: string | null;
-  excerpt?: string;
-  complete?: boolean;
-  failure?: string | null;
-}
-
-export interface DebateEvidencePackDispute {
-  claim: string;
-  why_contested?: string | null;
-  related_source_ids?: string[];
-}
-
-/** 共享证据包（庭前附件路径）；完整度一等公民。 */
-export interface DebateEvidencePack {
-  motion?: string | null;
-  completeness?: "full" | "partial" | "empty";
-  notes?: string | null;
-  sources?: DebateEvidencePackSource[];
-  dispute_candidates?: DebateEvidencePackDispute[];
-  ledger_ids?: Record<string, string> | null;
-}
-
-export interface DebatePretrialStartedPayload {
-  execution_id: string;
-  moderator_run_id: string;
-  sides?: DebatePretrialSideInfo[];
-  /** Set when pretrial is skipped immediately; absent when phase proceeds. */
-  skip_reason?: "evidence_pack" | "no_pack";
-}
-
-export interface DebatePretrialOrdersPayload {
-  execution_id: string;
-  moderator_run_id: string;
-  sides?: DebatePretrialSideInfo[];
-  orders?: DebatePretrialOrder[];
-  /** Present when pretrial takes the shared evidence-pack path. */
-  evidence_pack?: DebateEvidencePack;
-  /** Present when orders event is emitted for the evidence-pack path. */
-  path?: "evidence_pack";
-  /** Evidence completeness when path=evidence_pack*. */
-  completeness?: "full" | "partial" | "empty";
-  /** True when completeness is not full (evidence-pack path). */
-  incomplete?: boolean;
-  /** External-evidence plan (mode=skip + reason/budget); production emits skip only. */
-  external_evidence?: Record<string, unknown>;
-}
-
-export interface DebatePretrialCompletedPayload {
-  execution_id: string;
-  moderator_run_id: string;
-  sides?: DebatePretrialSideInfo[];
-  status?: "done" | "skipped" | "degraded";
-  /** Present when status=skipped. */
-  skip_reason?: "evidence_pack" | "no_pack";
-  orders?: DebatePretrialOrder[];
-  fallback_self_search?: boolean;
-  evidence_ready?: boolean;
-  evidence_ledger_count?: number;
-  evidence_ledger_delta?: EvidenceLedgerEntry[];
-  completeness?: "full" | "partial" | "empty";
-  incomplete?: boolean;
-  /** Present when pretrial assembled a shared evidence pack from host attachments. */
-  evidence_pack?: DebateEvidencePack;
-  /** Resolved external-evidence mode; production emits skip only. */
-  external_evidence_mode?: "skip";
-  /** Skip reason: evidence_pack_full | evidence_pack_partial | no_pack | … */
-  external_evidence_reason?: string;
-}
-
 /** 协作质量: turn-level orchestration signals for 诊断模式. Omitted on single-agent
  * turns and legacy streams. */
 export interface TurnCollabMetrics {
@@ -1456,9 +1364,6 @@ export type SSEPayloadMap = {
   debate_result: DebateResultPayload;
   debate_round_started: DebateRoundStartedPayload;
   debate_round: DebateRoundPayload;
-  debate_pretrial_started: DebatePretrialStartedPayload;
-  debate_pretrial_orders: DebatePretrialOrdersPayload;
-  debate_pretrial_completed: DebatePretrialCompletedPayload;
   message_end: MessageEndPayload;
   error: ErrorPayload;
   title_generated: TitleGeneratedPayload;

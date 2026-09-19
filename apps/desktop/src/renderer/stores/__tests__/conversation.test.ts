@@ -744,8 +744,7 @@ describe("conversation store", () => {
 // ask_user: the one asking surface (统一开场引导 + 途中拍板). A card lives on the
 // assistant message it paused — set live via InteractionStore, flipped on resolve;
 // journal reload hydrates through hydrateInteractionsFromJournal
-// (see interactions.test.ts). The opening flavor carries the rich content the
-// former kickoff did (questions).
+// (see interactions.test.ts). The opening flavor carries questions.
 describe("ask_user cards (统一开场引导 + 途中拍板)", () => {
   const reqPayload = (id: string): CheckpointRequiredPayload => ({
     checkpoint_id: id,

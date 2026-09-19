@@ -13,7 +13,6 @@ from agentcore.runtime.events import (
 )
 from agentcore.tools.builtin.ask_user.intent import resolve_ask_checkpoint_intent
 from agentcore.tools.builtin.ask_user.schema import (
-    ASK_DEFAULT_HOW,
     ASK_LABEL_HOW,
     ASK_PROMPT_HOW,
     ASK_RETRY_HINT,
@@ -71,8 +70,8 @@ class AskUserTool:
     base_system_prompt: str = ""
     user_message: str = ""
     # Prior conversation turns (same shape as DelegateTool._history); captured on
-    # suspend for resume parity. ask_user ⊥ kickoff/team_preview — no skip via
-    # journal checkpoint_resolved.
+    # suspend for resume parity. Leftover team_preview / plan_review resolved
+    # facts do not skip a live ask.
     history: list[dict[str, Any]] | None = None
     message_id: str | None = None
     suspension_saver: SuspensionSaver | None = None
@@ -90,7 +89,7 @@ class AskUserTool:
     @property
     def schema(self) -> ToolSchema:
         # Schema: when-to-use + 填卡合同（写参当轮必见）。卡形与 escalate 共用；
-        # 推荐 / 桌上结果只叠在本按钮。本机 action / 空 continue 仍是本工具覆盖。
+        # 推荐 / 桌上结果只叠在本按钮。本机 action 仍是本工具覆盖。
         allowed_actions = advertised_option_actions(
             desktop=self.advertise_bind_local_folder,
             workspace_location=self.workspace_location,
@@ -117,13 +116,8 @@ class AskUserTool:
                         description="问句写 prompt（1–5 道）。",
                         min_items=1,
                         option_properties=option_extras,
-                        default_description=ASK_DEFAULT_HOW,
                         prompt_description=ASK_PROMPT_HOW,
                     ),
-                    "browser_login": {
-                        "type": "boolean",
-                        "description": "true=请用户在右坞登录（AI 不经手密码）。",
-                    },
                 },
                 "required": ["questions"],
             },
@@ -177,8 +171,6 @@ class AskUserTool:
                 opt.pop("well_known", None)
                 opt.pop("target_name", None)
 
-        browser_login = bool(arguments.get("browser_login"))
-
         checkpoint_id = new_id()
         from agentcore.runtime.suspension import captain_transcript
 
@@ -189,7 +181,6 @@ class AskUserTool:
             question=stem,
             questions=questions,
             intent=intent,
-            browser_login=True if browser_login else None,
         )
         # 结构化挂起 2b + D11: persist the durable frame BEFORE finalize. Save success
         # ⇒ 挂起即收口 (②); save failure ⇒ explicit error (no in-memory wait fallback).
@@ -222,7 +213,6 @@ class AskUserTool:
                 questions=questions,
                 required_event=required,
                 intent=intent,
-                browser_login=browser_login,
             )
         except Exception:
             # D11：运行态落帧失败 ⇒ 显式失败终止回合（与配置态不可用同文案）。
@@ -243,7 +233,6 @@ class AskUserTool:
                 "checkpoint.finalized",
                 checkpoint_id=checkpoint_id,
                 intent=intent,
-                browser_login=browser_login,
                 n_questions=len(questions),
                 n_options=sum(len(q.get("options") or []) for q in questions),
             )

@@ -67,7 +67,6 @@ def build_hot_interaction_required(req: InteractionRequest) -> SSEEvent | None:
         questions=list(questions) if isinstance(questions, list) else None,
         kind=str(payload.get("kind") or "normal"),
         awaiting=who,
-        browser_login=True if payload.get("browser_login") is True else None,
         ownership_paths=list(ownership) if isinstance(ownership, list) else None,
         lock_owner_run_id=(
             str(payload["lock_owner_run_id"])

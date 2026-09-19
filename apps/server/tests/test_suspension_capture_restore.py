@@ -466,7 +466,8 @@ async def test_resume_chat_does_not_restore_on_success() -> None:
 async def test_resume_chat_does_not_restore_after_settlement_on_cancel() -> None:
     """D1: /stop mid-continuation (CancelledError) must not resurrect the decision card.
 
-    Regression for「授权开赛 → 辩论续播中点停止 → 开工卡复活」: the cloud route prewrites
+    Regression for leftover team_preview resurrect after 授权开跑 → 辩论续播中点停止:
+    the cloud route prewrites
     settlement + claims the frame before dispatch, so a cancel after that is
     interrupted_after_decision, never a frame restore.
     """

@@ -84,18 +84,6 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
         Disposition.DURABLE,
         "辩论单轮叙事——hydrateFromJournal / fold 重建逐轮焦点/小结/裁判（P2）",
     ),
-    EventType.DEBATE_PRETRIAL_STARTED: (
-        Disposition.DURABLE,
-        "庭前取证开场——赛事页庭前区块进行态；可带 skip_reason",
-    ),
-    EventType.DEBATE_PRETRIAL_ORDERS: (
-        Disposition.DURABLE,
-        "庭前主辩点单——各方取证任务 + 对称取证员数量",
-    ),
-    EventType.DEBATE_PRETRIAL_COMPLETED: (
-        Disposition.DURABLE,
-        "庭前取证收口——done/skipped/degraded + evidence_ledger_delta",
-    ),
     EventType.TURN_WARNING: (
         Disposition.DURABLE,
         "回合前软门禁提示——用户可见；runs 投影 → toMessage 重现横幅（P2）",

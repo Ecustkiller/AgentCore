@@ -173,7 +173,6 @@ function teamExecution(runs: Execution["runs"]): Execution {
     debateRounds: [],
     crossExamEnabled: false,
     debateOpening: null,
-    debatePretrial: null,
     evidenceLedger: [],
   };
 }

@@ -84,7 +84,7 @@ class ApprovalDecision(StrEnum):
 
 @dataclass(frozen=True)
 class DelegationGrant:
-    """An active per-delegation grant keyed by ``execution_id`` (开工卡一次授权)."""
+    """An active per-delegation grant keyed by ``execution_id``."""
 
     execution_id: str
 
@@ -176,15 +176,15 @@ class ApprovalGate:
     # Injected from ``per_call_tool_names()`` — empty by default (Cursor-aligned);
     # non-empty keeps the downgrade path for defense in depth / future re-tighten.
     per_call_tools: frozenset[str] = frozenset()
-    # Medium-risk tools a kickoff grant covers (统一授权白名单). Injected from
+    # Medium-risk tools a delegation grant covers (统一授权白名单). Injected from
     # ``delegation_grantable_tool_names`` — see tools.builtin.
     # Host L2/L3 must NOT be in this set (host_class · Host 定案).
     delegation_grantable_tools: frozenset[str] = frozenset()
     # Host-face GRANTABLE tools (host_class ∩ GRANTABLE). When ``host=session``,
-    # these skip per-call cards without eating kickoff / command=auto silent grant.
+    # these skip per-call cards without eating delegation / command=auto silent grant.
     host_class_tools: frozenset[str] = frozenset()
-    # Three-axis session permission (能力授权 / 写文件 / 组团卡). ``command=ask``
-    # refuses kickoff grants; ``file_write=session`` trusts reversible mutations;
+    # Three-axis session permission (能力授权 / 写文件 / 执行). ``command=ask``
+    # refuses delegation grants; ``file_write=session`` trusts reversible mutations;
     # ``command=auto`` auto-passes execution (see sandbox_approval).
     # ``host`` axis is orthogonal: ask = per-call Host GRANTABLE actions
     # (shell / open_settings / set_audio / restart_service);
@@ -197,7 +197,7 @@ class ApprovalGate:
     _delegation_grants: dict[str, DelegationGrant] = field(default_factory=dict)
 
     def _delegation_covers(self, execution_id: str, tool_name: str) -> bool:
-        # command=ask: never silently consume a kickoff grant (对齐 observe 执行侧).
+        # command=ask: never silently consume a delegation grant (对齐 observe 执行侧).
         # command=auto: execution auto-passes elsewhere; grant still covers if present.
         if not self.permission_axes.auto_executes:
             return False
@@ -209,8 +209,8 @@ class ApprovalGate:
         """file_write=session: trust reversible file-mutation class without per-call cards.
 
         Permanent deletes and structured ``git push`` / ``create_pr`` still prompt.
-        Execution-class tools are not in ``file_op_tools`` and still need kickoff /
-        turn grant / per-call / auto.
+        Execution-class tools are not in ``file_op_tools`` and still need a
+        delegation grant / turn grant / per-call / auto.
         """
         if not self.permission_axes.trusts_file_writes:
             return False
@@ -227,7 +227,7 @@ class ApprovalGate:
         return tool_name in self.host_class_tools
 
     def grant_delegation(self, execution_id: str) -> None:
-        """Record a kickoff grant so medium-risk tools skip per-call for this delegation."""
+        """Record a per-delegation grant so medium-risk tools skip per-call for this execution."""
         if not execution_id:
             return
         self._delegation_grants[execution_id] = DelegationGrant(execution_id=execution_id)
@@ -253,12 +253,12 @@ class ApprovalGate:
 
         Mirrors the opening short-circuits of ``authorize`` (delegation / session
         file / session host / turn ``_granted`` / ``_denied``). ``force=True``
-        always prompts so safety-breaker telemetry stays honest under kickoff or
-        session trust that would otherwise auto-pass.
+        always prompts so safety-breaker telemetry stays honest under a
+        delegation grant or session trust that would otherwise auto-pass.
         """
         if force:
             return True
-        # Always-confirm: never short-circuit via session / kickoff / turn grants.
+        # Always-confirm: never short-circuit via session / delegation / turn grants.
         if _requires_always_confirm(tool_name, arguments):
             return tool_name not in self._denied
         if self._delegation_covers(execution_id, tool_name):
@@ -282,7 +282,7 @@ class ApprovalGate:
     ) -> ApprovalDecision:
         """Block until the user authorizes (or denies) this tool call.
 
-        A kickoff grant (``grant_delegation`` / continue on the开工卡) short-circuits
+        A delegation grant (``grant_delegation``) short-circuits
         medium-risk tools for THAT ``execution_id`` before the per-turn grant or
         per-call prompt — unless ``command=ask``. Under ``file_write=session``, the
         file-mutation class is also session-trusted (permanent deletes still prompt).
@@ -290,16 +290,16 @@ class ApprovalGate:
         ``APPROVE_ALWAYS_FILES`` whitelists the whole ``file_op_tools`` class.
         A prior ``DENY`` for ``tool_name`` this turn short-circuits without re-prompting.
 
-        ``force=True`` (true safety-breaker one-shot): skip kickoff / turn /
+        ``force=True`` (true safety-breaker one-shot): skip delegation / turn /
         session-file grants so catastrophic shapes still require a human click even
         under ``command=auto``. Turn-wide grants from a forced card are refused
         (one-shot only) so a single click cannot silently clear sibling destructive
         prompts. Callers pass ``force=False`` for ``sensitive.path_read_ask`` so
         APPROVE_ALWAYS may write a same-tool turn grant while still forcing the
-        first card via the breaker entrance (read tools are not kickoff/session
+        first card via the breaker entrance (read tools are not delegation/session
         covered). Structured ``git push`` / ``create_pr`` and
         ``host(action=install_package)``
-        likewise always prompt (session / kickoff / turn grants do not cover them).
+        likewise always prompt (session / delegation / turn grants do not cover them).
         """
         always_confirm = _requires_always_confirm(tool_name, arguments)
 

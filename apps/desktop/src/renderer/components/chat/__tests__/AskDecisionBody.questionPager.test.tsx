@@ -219,7 +219,8 @@ describe("AskDecisionBody question pager", () => {
         .closest("button")
         ?.getAttribute("aria-pressed"),
     ).toBe("false");
-    expect(screen.getByText("默认")).toBeTruthy();
+    expect(screen.getByText("甲（推荐）")).toBeTruthy();
+    expect(screen.queryByText("默认")).toBeNull();
     expect(screen.queryByText(/^推荐$/)).toBeNull();
     expect(primaryButton(/^提交$/).disabled).toBe(true);
     expect(primaryButton(/^取消$/).disabled).toBe(false);
@@ -369,7 +370,7 @@ describe("AskDecisionBody question pager", () => {
     expect(screen.getByText("方案 A（推荐）")).toBeTruthy();
     expect(screen.queryByText("React")).toBeNull();
     expect(screen.queryByText(/^推荐$/)).toBeNull();
-    expect(screen.getByText("默认")).toBeTruthy();
+    expect(screen.queryByText("默认")).toBeNull();
 
     const q2 = primaryButton("第 2 题，共 2 题");
     expect(q2.disabled).toBe(false);

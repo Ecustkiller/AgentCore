@@ -105,7 +105,7 @@ def _context() -> ToolContext:
     )
 
 
-def _kickoff_ask_user_args(*, default: str = "辩论（正反攻防）") -> str:
+def _leftover_ask_user_args(*, default: str = "辩论（正反攻防）") -> str:
     return json.dumps(
         {
             "questions": [
@@ -183,30 +183,10 @@ def test_user_declined_debate_form():
     assert user_selected_debate_form(messages) is False
 
 
-def test_user_confirm_honors_ask_user_default():
-    args = _kickoff_ask_user_args(default="辩论（正反攻防）")
-    messages = [
-        LLMMessage(
-            role="assistant",
-            content="",
-            tool_calls=[
-                ToolCall(
-                    id="au1",
-                    function=ToolCallFunction(name="ask_user", arguments=args),
-                )
-            ],
-        ),
-        LLMMessage(
-            role="tool",
-            tool_call_id="au1",
-            content="用户确认：按你提出的方向继续。",
-        ),
-    ]
-    assert user_selected_debate_form(messages) is True
-
-
-def test_user_confirm_honors_recommendation_mark_without_default():
-    args = json.dumps(
+def test_bare_confirm_is_not_a_debate_pick():
+    """空确认 / leftover default / label「（推荐）」都不算用户点了辩论。"""
+    leftover_default = _leftover_ask_user_args(default="辩论（正反攻防）")
+    recommended = json.dumps(
         {
             "questions": [
                 {
@@ -217,30 +197,30 @@ def test_user_confirm_honors_recommendation_mark_without_default():
                         {"label": "红队压测"},
                         {"label": "不需要辩论环节"},
                     ],
-                    "default": "",
                 }
             ],
         },
         ensure_ascii=False,
     )
-    messages = [
-        LLMMessage(
-            role="assistant",
-            content="",
-            tool_calls=[
-                ToolCall(
-                    id="au1",
-                    function=ToolCallFunction(name="ask_user", arguments=args),
-                )
-            ],
-        ),
-        LLMMessage(
-            role="tool",
-            tool_call_id="au1",
-            content="用户确认：按你提出的方向继续。",
-        ),
-    ]
-    assert user_selected_debate_form(messages) is True
+    for args in (leftover_default, recommended):
+        messages = [
+            LLMMessage(
+                role="assistant",
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        id="au1",
+                        function=ToolCallFunction(name="ask_user", arguments=args),
+                    )
+                ],
+            ),
+            LLMMessage(
+                role="tool",
+                tool_call_id="au1",
+                content="用户确认：按你提出的方向继续。",
+            ),
+        ]
+        assert user_selected_debate_form(messages) is False
 
 
 def test_silent_when_no_kickoff_signal():

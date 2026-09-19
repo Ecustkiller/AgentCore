@@ -46,7 +46,6 @@ const DECISION_LABEL: Record<string, string> = {
   adjust: "调整",
   stop: "停止",
   use_assumption: "按假设继续",
-  logged_in: "已登录，继续",
   timeout: "超时自动推进",
 };
 

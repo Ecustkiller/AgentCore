@@ -432,9 +432,9 @@ def _multi_agent_user_interjection_with_mentions() -> list[SSEEvent]:
 
 
 def _multi_agent_solo_coordinate_interjection() -> list[SSEEvent]:
-    """单 worker + 协调：非阻塞 kickoff → 执行期插话可达 → CEO cancel_worker。
+    """单 worker + 协调：非阻塞开跑 → 执行期插话可达 → CEO cancel_worker。
 
-    钉「solo 也进协调」组合：开工卡 / team_synthesis_preview 仍不发（相邻 ≥2 闸不变），
+    钉「solo 也进协调」组合：leftover team_preview / team_synthesis_preview 仍不发（相邻 ≥2 闸不变），
     但 delegate 立即返回『团队已启动』，CEO 自由；用户中途「把它停止」经
     user_interjection 注入后由 cancel_worker 终止队员。
     """

@@ -507,7 +507,6 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
     case "escalation_required": {
       // 阻塞式求决策: a worker SUSPENDED on a blocking escalate — append a `pending` card.
       // awaiting=ceo → 等主管仲裁（不可答）；缺省 → 经典可答卡。
-      // browserLogin → EscalationCard「需要你登录」+ 打开直播 CTA。
       const run = s.runIndex.get(f.runId);
       if (run)
         run.escalations.push({
@@ -520,7 +519,6 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
           kind: f.escalationKind,
           questions: f.questions ?? [],
           ...(f.awaiting === "ceo" ? { awaiting: "ceo" as const } : {}),
-          ...(f.browserLogin ? { browserLogin: true as const } : {}),
           ...(f.ownershipPaths && f.ownershipPaths.length > 0
             ? { ownershipPaths: f.ownershipPaths }
             : {}),
@@ -737,7 +735,6 @@ export function finalizeFold(
     debateRounds,
     crossExamEnabled,
     debateOpening,
-    debatePretrial: null,
     evidenceLedger: Array.isArray(debate?.evidence_ledger)
       ? debate.evidence_ledger
       : [],
@@ -833,9 +830,7 @@ export function describeFrame(frame: RunFrame, plan: ExecutionPlan): string {
         ? `${role(frame.agentId)} 卡住早停`
         : `${role(frame.agentId)} 边干边上报`;
     case "escalation_required":
-      return frame.browserLogin
-        ? `${role(frame.agentId)} 需要你登录`
-        : `${role(frame.agentId)} 求决策 · 待你拍板`;
+      return `${role(frame.agentId)} 求决策 · 待你拍板`;
     case "escalation_resolved":
       if (frame.status === "resolved") {
         return `${role(frame.agentId)} 已获答复 · 继续`;

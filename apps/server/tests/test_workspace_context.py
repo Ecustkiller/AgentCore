@@ -53,7 +53,7 @@ def _assert_how_identifiers_not_in_facts(ctx: str) -> None:
         "register_local_project",
         "host(action=",
         "consult(",
-        "ask_user(browser_login=true)",
+        "永不代填密码",
         "create_folder",
         "mkdir",
     ):
@@ -386,7 +386,6 @@ def test_browser_capability_override():
     assert "仅 worker" not in out
     assert "浏览器宿主：" not in out
     assert "完整预览" not in out
-    assert "ask_user(browser_login=true)" not in out
     assert "browser_open" not in out
     assert "同一出站" not in out
     assert "请人贴" not in out
@@ -449,7 +448,6 @@ def test_browser_unassembled_guide_mentions_bind_or_gvisor():
     assert "或启用云端沙箱浏览器" not in out
     assert "同轮可开工" not in out
     assert "【能力未装配·统一姿势】" not in out
-    assert "ask_user(browser_login=true)" not in out
     _assert_how_identifiers_not_in_facts(out)
 
 

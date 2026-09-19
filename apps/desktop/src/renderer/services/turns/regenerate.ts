@@ -22,8 +22,10 @@ import {
   type SidecarTarget,
   getActiveSidecarTarget,
   isSidecarEnabled,
+  liveSidecarTarget,
   resolveConversationLocalTarget,
-  resolveSidecarRoot,
+  resolveLocalBind,
+  resolveNewTurnBind,
 } from "@/services/sidecarRouting";
 import {
   type OutgoingAgentMention,
@@ -52,6 +54,7 @@ import {
 } from "@/stores/conversation/turnPhaseActions";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
+import { workspaceRootGoneMessage } from "@shared/workspaceRootGone";
 import {
   finalizeGeneratingIfNeeded,
   finalizeHonestStopAbort,
@@ -65,18 +68,32 @@ function shouldResumeViaSidecar(origin: "sidecar" | "server"): boolean {
   return origin === "sidecar";
 }
 
+type ResumeSidecarTarget =
+  | { kind: "target"; target: SidecarTarget }
+  | { kind: "stale"; absPath?: string }
+  | { kind: "none" };
+
 /**
  * 续跑本机帧的寻址：跟本地事实，**忽略**显式强制关（`sidecarPreference==="off"`）。
- * 优先活回合登记，否则会话本地绑定（勿用 `resolveSidecarRoot`——强制关早退会挡续跑）。
+ * 死绑定（文件夹不在盘上）先于活回合登记；否则优先活回合，再会话本地绑定
+ * （勿用 `resolveSidecarRoot`——强制关早退会挡续跑）。
  */
 async function resolveResumeSidecarTarget(
   conversationId: string,
-): Promise<SidecarTarget | null> {
+): Promise<ResumeSidecarTarget> {
+  const bind = await resolveLocalBind(conversationId);
+  if (bind.kind === "stale") {
+    return { kind: "stale", absPath: bind.absPath };
+  }
   const active = getActiveSidecarTarget(conversationId);
   if (active) {
-    return { rootId: active.rootId, subpath: active.subpath };
+    return {
+      kind: "target",
+      target: { rootId: active.rootId, subpath: active.subpath },
+    };
   }
-  return resolveConversationLocalTarget(conversationId);
+  const live = liveSidecarTarget(bind);
+  return live ? { kind: "target", target: live } : { kind: "none" };
 }
 
 /**
@@ -217,7 +234,21 @@ export async function runRegenerate(
   };
 
   try {
-    const sidecarTarget = await resolveSidecarRoot(conversationId);
+    const bind = await resolveNewTurnBind(conversationId);
+    throwIfCannotOpenStream(conversationId, ac.signal);
+    if (bind.kind === "stale") {
+      logEvent("info", "turn.stream_path", {
+        conversation_id: conversationId,
+        via: "sidecar",
+        reason: "root_stale",
+        regenerate: true,
+        root_id: bind.rootId,
+      });
+      throw new StreamError("sidecar", undefined, {
+        serverMessage: workspaceRootGoneMessage(bind.absPath),
+      });
+    }
+    const sidecarTarget = liveSidecarTarget(bind);
     throwIfCannotOpenStream(conversationId, ac.signal);
     const probe = sidecarTarget ? await probeSidecar(sidecarTarget) : null;
     throwIfCannotOpenStream(conversationId, ac.signal);
@@ -414,9 +445,11 @@ export async function runResume(
   const origin = resolveResumeOrigin(conversationId, resumeMessageId);
   const viaSidecar = shouldResumeViaSidecar(origin);
   // origin=sidecar：跟本地事实，忽略显式强制关（勿 resolveSidecarRoot）。
-  const sidecarTarget = viaSidecar
+  const resumeBind = viaSidecar
     ? await resolveResumeSidecarTarget(conversationId)
     : null;
+  const sidecarTarget =
+    resumeBind?.kind === "target" ? resumeBind.target : null;
 
   const raiseSidecarUnavailable = (detail: string | null) => {
     // Drop the bad-health cache so the next ResumePrompt submit re-probes
@@ -435,6 +468,15 @@ export async function runResume(
   // A paused sidecar frame lives ONLY on this machine — never degrade to cloud
   // (cloud has no such frame → guaranteed 404). No local target → keep card + banner.
   // Throw so callers (submitInteraction) do not markResolved on a silent early exit.
+  if (viaSidecar && resumeBind?.kind === "stale") {
+    store.setError(
+      workspaceRootGoneMessage(resumeBind.absPath),
+      null,
+      conversationId,
+      null,
+    );
+    throw new Error("resume blocked: workspace root gone");
+  }
   if (viaSidecar && !sidecarTarget) {
     raiseSidecarUnavailable(null);
     throw new Error("resume blocked: sidecar unavailable");

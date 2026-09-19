@@ -1026,7 +1026,7 @@ def try_start_coordination(
     roster = "、".join(roles)
     added_count, completed_count = _start_echo_counts(plan, seed_completed)
     # Wording: only pre-filled terminal seeds (append / partial resume) use「已追加」;
-    # empty seed dict (team_preview continue) still reads as fresh「团队已启动」.
+    # empty seed dict (cold start) still reads as fresh「团队已启动」.
     append_echo = completed_count > 0
     logger.info(
         "delegate.coordinate_started",

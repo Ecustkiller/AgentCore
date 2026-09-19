@@ -9,8 +9,8 @@
 - 空 URL（底料等）按归一化 title 去重
 - ``tier`` 单源 :func:`citation_tier_for_url`；``blocked`` 默拒登记
 - ``citable``：登记仍宽——已登记档（含 ``weak``）均为 ``True``；``blocked`` 不进台账
-- 成稿闸（``#r``）：``draft_citable_ids`` = ``deep_read ∪ selected``（对齐辩论
-  ``commit_research`` 精神；search-only 不得进成稿闸）
+- 对话成稿可挂全部 ``citable``；``selected`` = settle 时正文实际引用且已
+  ``deep_read`` 的 id
 - asyncio 单进程内对分配路径加锁，支撑并行登记不撞号
 """
 
@@ -38,7 +38,7 @@ def _norm_title(title: str) -> str:
 def citable_for_tier(tier: str) -> bool:
     """登记宽：已登记档均可挂台账 id（含 ``weak``）；``blocked`` 不进台账。
 
-    成稿 ``#rN`` 闸见 :meth:`EvidenceLedgerCore.draft_citable_ids`（更窄）。
+    对话成稿可挂全部已登记 ``citable`` id。
     """
     return tier != "blocked"
 
@@ -57,16 +57,6 @@ def infer_doc_kind(
     if _ANNOUNCEMENT_KIND_RE.search(blob):
         return _DOC_KIND_ANNOUNCEMENT
     return ""
-
-
-def is_announcement_doc_kind(doc_kind: str, *, title: str = "", snippet: str = "") -> bool:
-    """书目形态闸：元数据呈开题/答辩/公告类 → True。"""
-    kind = (doc_kind or "").strip().casefold()
-    if kind in {_DOC_KIND_ANNOUNCEMENT, "notice", "defense", "proposal"}:
-        return True
-    if kind:
-        return False
-    return bool(_ANNOUNCEMENT_KIND_RE.search(f"{title or ''} {snippet or ''}"))
 
 
 @dataclass
@@ -99,19 +89,8 @@ class EvidenceLedgerCore:
         return [dict(e) for e in self._entries]
 
     def citable_ids(self) -> frozenset[str]:
-        """登记宽：``citable=true`` 的全量 id（含 search-only）。
-
-        对话成稿 / 来源卡用本集。落盘成文闸用 :meth:`draft_citable_ids`。
-        """
+        """登记宽：``citable=true`` 的全量 id（含 search-only）。对话成稿 / 来源卡用本集。"""
         return frozenset(e["id"] for e in self._entries if e.get("citable"))
-
-    def draft_citable_ids(self) -> frozenset[str]:
-        """落盘成文 ``#rN`` 闸：``deep_read ∪ selected``（search-only 不得进）。"""
-        return frozenset(
-            e["id"]
-            for e in self._entries
-            if e.get("citable") and (e.get("deep_read") or e.get("selected"))
-        )
 
     def mark_selected_from_content(self, content: str) -> frozenset[str]:
         """settle：正文实际引用且已 ``deep_read`` 的 id 持久标 ``selected``。"""
@@ -122,25 +101,6 @@ class EvidenceLedgerCore:
         for e in self._entries:
             eid = e["id"]
             if eid not in cited or not e.get("deep_read"):
-                continue
-            if not e.get("selected"):
-                newly.add(eid)
-            e["selected"] = True
-        return frozenset(newly)
-
-    def promote_refs_cited_in_landed_note(self, content: str) -> frozenset[str]:
-        """调研方向笔记落盘：正文已引用且可登记的 ``#rN`` 升为 ``selected``。
-
-        供 CEO 汇总成稿闸继承队员笔记中的引用（search-only 亦可，因队员已写入交付物）。
-        伪造 / 越界 id 仍不进台账，本方法只提升已登记条目。
-        """
-        from agentcore.runtime.citations import extract_ledger_ref_ids
-
-        cited = set(extract_ledger_ref_ids(content or ""))
-        newly: set[str] = set()
-        for e in self._entries:
-            eid = e["id"]
-            if eid not in cited or not e.get("citable"):
                 continue
             if not e.get("selected"):
                 newly.add(eid)

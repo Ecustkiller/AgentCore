@@ -2,7 +2,6 @@ import { ConversationRoute } from "@/components/chat/ConversationRoute";
 import { AppShell } from "@/components/layout/AppShell";
 import { RouteError } from "@/components/layout/RouteError";
 import { NarrowBlockedPage } from "@/lib/narrowLayout";
-import { AskCommencePreviewPage } from "@/pages/AskCommencePreviewPage";
 import { ConversationsPage } from "@/pages/ConversationsPage";
 import { ConversationsPreviewPage } from "@/pages/ConversationsPreviewPage";
 import { DocEditorPage } from "@/pages/DocEditorPage";
@@ -233,8 +232,6 @@ export const router = createHashRouter([
       // SSE vector — see preview/whiteboardScenes.ts + scripts/shoot-whiteboard.mjs).
       { path: "preview/whiteboard", element: <WhiteboardPreviewPage /> },
       { path: "preview/tables", element: <TablesPreviewPage /> },
-      // Preview：已退役 ask 开场布局对照（现生产 = 通用澄清卡）。
-      { path: "preview/ask-commence", element: <AskCommencePreviewPage /> },
       // Preview 首启体验（草稿空态两态 + composer 生成中插话态）.
       { path: "preview/onboarding", element: <OnboardingPreviewPage /> },
       // Preview 全部对话管理页（时间线列表 · mock 数据离线自检）.

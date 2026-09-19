@@ -30,7 +30,8 @@ resume claims the frame (see ``runtime/suspension/persistence.py``). The display
 entries — a property, never stored (P0-B Phase 3). The frame thus carries only the
 resume *control* state, not a second copy of the replay stream.
 
-The frame is captured by the suspending face (``AskUserTool``) — both read the live CEO transcript off :data:`captain_transcript`,
+The frame is captured by the suspending face (``AskUserTool``) — both read the
+live CEO transcript off :data:`captain_transcript`,
 published by the captain executor — and persisted by
 ``runtime/suspension/persistence.py``. Pure data + a contextvar here; no DB, no engine.
 """
@@ -288,7 +289,7 @@ class AskUserSuspension(TurnSuspension):
     No plan tail: resume just maps the user's answer to the ``ask_user`` tool result
     and continues the CEO loop. Carries the unified card payload so resume re-emits the
     full prompt: ``question`` (the framing / opening line — the tool's ``message``)
-    and ``questions`` (the askable items, each with kind/options/multiple/default).
+    and ``questions`` (the askable items, each with kind/options/multiple).
     ``questions`` is empty for a compact mid-task fork.
     """
 
@@ -297,9 +298,6 @@ class AskUserSuspension(TurnSuspension):
     question: str = ""
     questions: list[dict[str, Any]] = field(default_factory=list)
     intent: AskCheckpointIntent = "decision"
-    # CEO browser login gate (ask_user browser_login=true) — resume card mirrors
-    # escalate's「需要你登录 / 已登录，继续」; absent/false on older frames.
-    browser_login: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +315,6 @@ _EMPTY_SUMMARY_EXTRAS: dict[str, Any] = {
     "question": "",
     "questions": [],
     "intent": None,
-    "browser_login": False,
 }
 
 
@@ -339,8 +336,6 @@ def _ask_user_frame_extras(s: TurnSuspension) -> dict[str, Any]:
         "questions": list(s.questions),
         "intent": s.intent,
     }
-    if s.browser_login:
-        extras["browser_login"] = True
     return extras
 
 
@@ -349,7 +344,6 @@ def _ask_user_from_extras(data: dict[str, Any]) -> dict[str, Any]:
         "question": data.get("question", "") or "",
         "questions": list(data.get("questions") or []),
         "intent": coerce_ask_checkpoint_intent(data.get("intent")),
-        "browser_login": data.get("browser_login") is True,
     }
 
 
@@ -360,7 +354,6 @@ def _ask_user_summary_extras(s: TurnSuspension) -> dict[str, Any]:
         "question": s.question,
         "questions": list(s.questions),
         "intent": s.intent,
-        "browser_login": bool(s.browser_login),
     }
 
 

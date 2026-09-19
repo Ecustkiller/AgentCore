@@ -76,6 +76,8 @@ const deviceIdentityApi: DeviceIdentityApi = {
 
 const fsApi: FsApi = {
   addRoot: () => ipcRenderer.invoke(FS_CHANNELS.addRoot),
+  relocateRoot: (rootId) =>
+    ipcRenderer.invoke(FS_CHANNELS.relocateRoot, { rootId }),
   ensureDefaultRoot: () => ipcRenderer.invoke(FS_CHANNELS.ensureDefaultRoot),
   checkoutArchive: (archiveBase64) =>
     ipcRenderer.invoke(FS_CHANNELS.checkoutArchive, { archiveBase64 }),

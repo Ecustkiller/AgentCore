@@ -75,7 +75,7 @@ export type RunStatus =
   | "skipped";
 
 /** `run_failed.failure_kind` — collaboration-graph face class (additive). */
-export type RunFailureKind = "quality" | "format" | "model" | "call";
+export type RunFailureKind = "model" | "call";
 
 /** A web source consulted for the assistant message (citations event). */
 export interface ProjectedCitation {
@@ -317,34 +317,6 @@ export type ProjectedInteraction =
       awaiting?: "user" | "ceo";
     };
 
-/** 庭前取证投影（`debate_pretrial_*` 折叠；权威=completed）。 */
-export interface DebatePretrialProjection {
-  status: "running" | "done" | "skipped" | "degraded" | string;
-  skipReason: string | null;
-  sides: Array<{ key: string; name: string }>;
-  orders: Array<{
-    side_key: string;
-    tasks: Array<{ query: string; purpose?: string }>;
-    source: string;
-  }>;
-  evidenceLedgerCount: number;
-  fallbackSelfSearch: boolean;
-  evidenceReady: boolean;
-  /**
-   * 取证完整度：full / partial / empty（权威=completed）。
-   * 缺字段（旧 journal / running）= 未知，勿默认 empty。
-   */
-  completeness?: "full" | "partial" | "empty" | string;
-  /**
-   * 明确 incomplete 字段时才有值；缺则未知（勿用 completeness 缺省推 incomplete）。
-   */
-  incomplete?: boolean;
-  /** 外证计划 mode：生产仅 skip。 */
-  externalEvidenceMode?: "skip" | string | null;
-  /** 外证跳过原因（evidence_pack_full / evidence_pack_partial / no_pack / fast / …）。 */
-  externalEvidenceReason?: string | null;
-}
-
 /** Turn-level structured error from the transport ``error`` SSE event (reload face
  * authority when content is empty). Null when the turn never emitted ``error``. */
 export interface ProjectedTurnError {
@@ -412,8 +384,6 @@ export interface ProjectedTurn {
    * 就叠出主持人逐轮焦点 / 小结 / 裁判，而非干等 {@link debate} 收场。P2 DURABLE——落 journal，
    * 刷新后 hydrate/fold 重建；收场后全量叙事线亦在 {@link debate}。非辩论恒 `[]`。 */
   debateRounds: DebateNarrativeRound[];
-  /** 庭前取证（`debate_pretrial_*`）：开赛后首轮前；null 当无 / 老 journal。 */
-  debatePretrial: DebatePretrialProjection | null;
   /** 本场是否开启质询（`debate_round_started.cross_exam_enabled`）：首轮开场即达。缺字段 /
    * 老 journal → `false`（UI 回退「正在小结…」）。 */
   crossExamEnabled: boolean;

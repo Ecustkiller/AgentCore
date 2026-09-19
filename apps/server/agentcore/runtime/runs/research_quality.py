@@ -10,12 +10,6 @@
 不认已删字数字段腿。``map_fanout`` / 普通多角摸底**不**因多人而进硬门。审校落盘**不**靠角色名
 抬落盘——只认 playbook / 已声明的 ``reviews/`` artifacts。
 
-调研两阶段引用（块 2）：**只认** ``citation_mode=="two_phase"``（playbook / CEO 盖戳）
-→ A 检索草案不跑成稿引用闸 → 同 worker 自动升级 B 后再验；未声明退出；
-draft 不进 ``file_acceptance`` / artifacts 主清单。路径入口（声明或落盘在
-``research/`` · ``reviews/`` 下即算调研类）已撤——那个落点由扫 role·task 的正则填出，
-是隔一层的自由文推断；即兴委派要成稿级引用验收须自报 ``citation_mode``。
-
 文献成文证据降档（学术综述诚实性）：``cite_write_review`` / 同等成文综述在证据不足时
 由 ``delivery_status`` 注入 ``reason=evidence_deficit`` blocking gap → state 不得
 ``delivered``（仅 partial/blocked）。**不**扫「综述已完成」等完成话术词；**不**套
@@ -77,10 +71,6 @@ INDEPENDENT_REVIEW_REPORT_DISCIPLINE = (
     "逐条写清结论与证据指针（文件:行号）；"
     "禁止仅用十余字 handoff 冒充过闸；handoff 只作速览+路径。"
 )
-
-# Playbook 显式声明上游 prose 地板时的默认值。
-# 不再作为「有下游 → 一律抬 min」的拓扑常量；运行时交接地板固定非空。
-MIN_UPSTREAM_BODY_CHARS = 80
 
 
 def _deliverable_files_shaped(deliverable: Any) -> bool:
@@ -171,12 +161,6 @@ def deliverable_is_report_delivery(deliverable: Any) -> bool:
     """
     if deliverable is None:
         return False
-    if isinstance(deliverable, dict):
-        if deliverable.get("citation_mode") == "two_phase":
-            return True
-    else:
-        if getattr(deliverable, "citation_mode", None) == "two_phase":
-            return True
     return (
         deliverable_declares_reviews_files(deliverable)
         or deliverable_declares_research_files(deliverable)
@@ -291,24 +275,6 @@ def research_report_main_artifact(output_path: str | None = None) -> str:
     if cleaned:
         return cleaned.lstrip("/")
     return DEFAULT_RESEARCH_REPORT_ARTIFACT
-
-
-def is_two_phase_citation_deliverable(deliverable: Any) -> bool:
-    """True when deliverable explicitly opts into A(draft)→B(cite-tier) acceptance.
-
-    只认显式 ``citation_mode=="two_phase"``（playbook / CEO 盖戳）；未声明一律否。
-    **无路径入口**：原「声明的 ``artifacts`` / ``artifact_dir`` 或
-    已落盘路径在 ``research/`` · ``reviews/`` 下即算调研类」已撤——那个落点是扫
-    role·task 的正则填出来的，等于隔一层的自由文推断。``playbooks/research.py``
-    逐处盖戳，即兴委派要成稿级引用验收须自报 ``citation_mode``。
-    """
-    if deliverable is None:
-        return False
-    if isinstance(deliverable, dict):
-        mode = deliverable.get("citation_mode")
-    else:
-        mode = getattr(deliverable, "citation_mode", None)
-    return mode == "two_phase"
 
 
 # ── 文献成文证据降档（delivery_status 消费）────────────────────────────────
@@ -428,23 +394,15 @@ def _node_role(node: Any) -> str:
 def plan_is_literature_report_delivery(plan_nodes: object) -> bool:
     """True for ``cite_write_review`` / 同等成文综述；``map_fanout`` 默认 False.
 
-    判定（结构字段，不扫 task/角色自由文；不认已删字数字段）：
-    - 批内已声明 reviews/ files 审校座 **且** 存在显式 ``citation_mode=two_phase``
-      deliverable（``cite_write_review`` 与手写同构；``map_fanout`` 无审校落盘 → 不进）。
-      成稿座只按落盘路径推断的旧腿随两阶段路径入口一并撤。
+    判定（结构字段，不扫 task/角色自由文）：批内已声明 reviews/ files 审校座
+    （``cite_write_review`` 与手写同构；``map_fanout`` 无审校落盘 → 不进）。
     """
     if not isinstance(plan_nodes, (list, tuple)) or not plan_nodes:
         return False
     as_tasks = [
         {"role": _node_role(n), "deliverable": _node_deliverable(n)} for n in plan_nodes
     ]
-    if not batch_declares_review_files(as_tasks):
-        return False
-    for node in plan_nodes:
-        deliverable = _node_deliverable(node)
-        if is_two_phase_citation_deliverable(deliverable):
-            return True
-    return False
+    return batch_declares_review_files(as_tasks)
 
 
 def is_academic_usable_url(url: str) -> bool:

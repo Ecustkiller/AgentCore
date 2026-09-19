@@ -127,9 +127,7 @@ describe("ResolvedCheckpoint 单行折叠", () => {
     const row = label.closest("button")?.className.split(/\s+/) ?? [];
     expect(row).toContain("w-auto");
     expect(row).not.toContain("w-full");
-    expect(document.body.textContent).not.toContain(
-      resolvedDecision.question,
-    );
+    expect(document.body.textContent).not.toContain(resolvedDecision.question);
     fireEvent.click(screen.getByText("已取消本回合"));
     expect(document.body.textContent).toContain(resolvedDecision.question);
   });

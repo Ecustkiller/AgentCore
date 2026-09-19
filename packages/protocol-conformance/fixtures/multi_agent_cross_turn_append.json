@@ -1,6 +1,6 @@
 {
   "name": "multi_agent_cross_turn_append",
-  "description": "跨回合协作图续接：m1 建图完成 → m2 新 execution_id + prev_execution_id=exec1 → 追加批收口；进度分母只含本图；不再 graph_append / host_message_id divert",
+  "description": "跨回合协作图续接：m1 建图完成 → m2 新 execution_id + prev_execution_id=exec1 → 追加批收口；进度分母只含本图",
   "events": [
     {
       "type": "message_start",
@@ -530,7 +530,6 @@
     },
     "debate": null,
     "debateRounds": [],
-    "debatePretrial": null,
     "crossExamEnabled": false,
     "debateOpening": null,
     "deliveryStatus": null,

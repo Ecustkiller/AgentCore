@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import Field
-
 from agentcore.runtime.approvals import ApprovalDecision
 from agentcore.runtime.checkpoints import AskCheckpointIntent, CheckpointDecision
 from agentcore.runtime.events.payloads._base import WirePayload, absent
@@ -61,12 +59,19 @@ class AskOption(WirePayload):
 
 
 class AskQuestion(WirePayload):
+    """One ask_user / escalate card question.
+
+    ``default`` remains parseable on leftover frames / journals. New events omit
+    it; clients must not treat it as tendency or pre-select. Tendency is
+    option-name markup (``（推荐）`` / ``(recommended)``).
+    """
+
     id: str
     prompt: str
     kind: Literal["choice", "text"]
     options: list[AskOption]
     multiple: bool
-    default: str
+    default: str | None = absent()
 
 
 class CheckpointRequiredPayload(WirePayload):
@@ -77,10 +82,6 @@ class CheckpointRequiredPayload(WirePayload):
     question: str
     questions: list[AskQuestion]
     intent: AskCheckpointIntent | None = absent(ts_type="CheckpointIntent")
-    browser_login: bool | None = absent(
-        "true=CEO 请求用户在右坞浏览器完成登录（同 escalate browser_login 体验）。"
-        "旧流缺字段按 false。"
-    )
 
 
 class CheckpointResolvedPayload(WirePayload):
@@ -111,10 +112,6 @@ class EscalationRequiredPayload(WirePayload):
     kind: EscalationKind | None = absent("旧流缺字段时前端按 `normal`。与 blocking 轴正交。")
     awaiting: Literal["user", "ceo"] | None = absent(
         "谁在仲裁：user=经典可答卡；ceo=协调模式等主管。旧流缺字段按 user。"
-    )
-    browser_login: bool | None = absent(
-        "true=请用户在右坞完成登录并点「已登录，继续」（回合仍 running）。"
-        "旧流缺字段按 false。"
     )
     ownership_paths: list[str] | None = absent(
         "写权冲突路径列表；有值时前端呈现「移交写权 / 保持原主」。旧流缺字段按无。"

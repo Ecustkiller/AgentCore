@@ -30,7 +30,6 @@ from agentcore.runtime.pipeline.resume import (
 from agentcore.runtime.suspension import AskUserSuspension
 from agentcore.tools.builtin.ask_user import ask_user_tool_result
 from agentcore.tools.builtin.ask_user.result import (
-    confirmed_defaults_summary,
     structured_options_summary,
 )
 
@@ -69,8 +68,8 @@ def test_result_continue_empty_uses_legacy_when_no_defaults():
     assert "按你提出的方向继续" in res.output
 
 
-def test_result_continue_empty_injects_confirmed_defaults():
-    """案 0cb83288 · B：空 continue + 卡上 default → 用户确认默认：… + 按确认默认。"""
+def test_result_continue_empty_ignores_leftover_default():
+    """空 continue 不把 leftover questions[].default 当成用户点过的项。"""
     questions = [
         {
             "id": "q0",
@@ -81,20 +80,19 @@ def test_result_continue_empty_injects_confirmed_defaults():
             "default": "上班族 + 半天块通用模板",
         }
     ]
-    assert "上班族" in confirmed_defaults_summary(questions)
     res = ask_user_tool_result(
         CheckpointResponse(decision=CheckpointDecision.CONTINUE, note="", selected=[]),
         questions=questions,
     )
     assert res.effect is ToolEffect.CONTINUE
-    assert res.output.startswith("用户确认默认：")
-    assert "按确认默认" in res.output
-    assert "先问你" not in res.output
-    assert "上班族 + 半天块通用模板" in res.output
+    assert "复述" in res.output
+    assert "半天块" in res.output
+    assert "用户确认默认" not in res.output
+    assert "按确认默认" not in res.output
 
 
 def test_result_continue_empty_restates_options_without_default():
-    """d4d5：空 continue + 有选项无 default → 复述选项，禁冲成空模板。"""
+    """d4d5：空 continue + 有选项 → 复述选项，不假装点过某一项。"""
     questions = [
         {
             "id": "q0",

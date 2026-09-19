@@ -151,7 +151,7 @@ function runOutputText(execution: Execution, run: RunNode | null): string {
 
 /** 把一个回合的 {@link Execution} 归一成 {@link DebateModel}；非辩论 / 进行中尚无任何
  * 轮次且无开赛壳信号 → null (不渲染)。收场以 `debate` 为权威；否则从 `debateRounds` + run 树重建。
- * 首轮立论前可用空骨架进辩论室（`debatePretrial` fold / 开场白 / planType / 辩标签），不渲染庭前 UI。 */
+ * 首轮立论前可用空骨架进辩论室（开场白 / planType / 辩标签）。 */
 export function toDebateModel(execution: Execution): DebateModel | null {
   if (execution.debate) {
     return settledModel(execution, execution.debate);
@@ -159,10 +159,9 @@ export function toDebateModel(execution: Execution): DebateModel | null {
   return liveModel(execution);
 }
 
-/** 无轮次时是否仍撑起辩论室空骨架（不依赖庭前 UI 区块）。 */
+/** 无轮次时是否仍撑起辩论室空骨架。 */
 function canEnterLiveDebateShell(execution: Execution): boolean {
   return (
-    execution.debatePretrial != null ||
     !!execution.debateOpening?.trim() ||
     execution.planType === "debate" ||
     isDebate(execution)

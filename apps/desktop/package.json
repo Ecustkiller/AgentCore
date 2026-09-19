@@ -1,6 +1,6 @@
 {
   "name": "agentcore-desktop",
-  "version": "0.9.30",
+  "version": "0.9.31",
   "description": "AgentCore Desktop - Multi-Agent AI Workspace",
   "author": "AgentCore",
   "main": "./out/main/index.js",
@@ -11,7 +11,6 @@
     "shoot": "node scripts/shoot.mjs",
     "shoot:manual": "node scripts/shoot-manual.mjs",
     "shoot:whiteboard": "node scripts/shoot-whiteboard.mjs",
-    "shoot:ask-commence": "node scripts/shoot-ask-commence.mjs",
     "shoot:onboarding": "node scripts/shoot-onboarding.mjs",
     "shoot:conversations": "node scripts/shoot-conversations.mjs",
     "shoot:files": "node scripts/shoot-files.mjs",

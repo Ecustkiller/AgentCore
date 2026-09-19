@@ -1,6 +1,6 @@
 {
   "name": "multi_agent_multi_lens_research",
-  "description": "多 Agent·多视角深度调研幕1：delegate → 4 透镜并行流式 → 汇总分析师落盘综述；开辩由用户点名（不靠 handoff motion_card 催场）",
+  "description": "多 Agent·多视角深度调研幕1：delegate → 4 透镜并行流式 → 汇总分析师落盘综述；开辩由用户点名",
   "events": [
     {
       "type": "message_start",
@@ -974,7 +974,6 @@
     },
     "debate": null,
     "debateRounds": [],
-    "debatePretrial": null,
     "crossExamEnabled": false,
     "debateOpening": null,
     "deliveryStatus": null,

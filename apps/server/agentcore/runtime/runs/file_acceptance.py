@@ -4,7 +4,7 @@ At run wrap-up each landed path gets ``accepted`` or ``rejected`` (+ reason).
 ``delivery_status.delivered_files`` / CEO「已交付」only count ``accepted``
 that still exist on disk (tool self-report is not enough; see
 ``reject_absent_paths`` / ``stamp_results_disk_truth``).
-Cite-tier / contract failures that name a path reject that path even when the
+Contract failures that name a path reject that path even when the
 run soft-COMPLETEDs — so soft-COMPLETED must not smuggle those paths into the
 delivered list. Declared artifact / ``artifact_dir`` vs landed path: exact / dir / glob after
 normalize, **or** the write-sanitizer flatten (dossier nested ``a/b.md`` →
@@ -13,10 +13,6 @@ the declared path did land** (backups). If the pin missed, extras stay on
 the card — they are the product. Missing declared paths are a
 ``path_mismatch`` **warning** gap, not a row on the extra file, and do not
 block ``delivered``.
-
-调研两阶段（``citation_mode=two_phase``）：阶段 A 草案仅内部态，不写入本表；
-阶段 B 过闸 → ``accepted``；不过 → ``rejected(citations_unverified)``。draft 永不
-出现在 ``delivery_status.artifacts`` 主清单。
 """
 
 from __future__ import annotations
@@ -29,7 +25,6 @@ from typing import Any
 from agentcore.runtime.runs.types import RunPhase
 from agentcore.tools.file_products import FileProduct
 
-REASON_CITATIONS_UNVERIFIED = "citations_unverified"
 REASON_CONTRACT_FAILED = "contract_failed"
 REASON_RUN_FAILED = "run_failed"
 # Gap reason when a declared path did not land (delivery_status); no longer
@@ -39,8 +34,6 @@ REASON_PATH_MISMATCH = "path_mismatch"
 REASON_NOT_ON_DISK = "not_on_disk"
 _NOT_ON_DISK_DETAIL = "工作区没有该文件（工具自报不算落盘）"
 
-# Citation / bibliography failures from ``_artifact_citation_failures``.
-_CITE_PATH_RE = re.compile(r"^`([^`]+)`\s*[：:]\s*(.*)$", re.DOTALL)
 # Hard placeholder (and similar) hit lines embed ``path`` · label · …
 _EMBEDDED_PATH_RE = re.compile(r"`([^`]+)`\s*·")
 _SOFT_NOTE_MARKERS = (
@@ -139,19 +132,12 @@ def path_rejections_from_contract_messages(
 ) -> dict[str, tuple[str, str]]:
     """Map path → (reason_code, detail) from contract failure / soft_failure copy.
 
-    Soft reminder notes (待核实等) never reject — only hard / cite-shaped messages.
+    Soft reminder notes (待核实等) never reject — only hard path-scoped messages.
     """
     out: dict[str, tuple[str, str]] = {}
     for raw in messages or []:
         text = str(raw).strip()
         if not text:
-            continue
-        cite = _CITE_PATH_RE.match(text)
-        if cite:
-            path = cite.group(1).strip()
-            detail = (cite.group(2) or "").strip() or text
-            if path:
-                out[path] = (REASON_CITATIONS_UNVERIFIED, detail)
             continue
         if any(m in text for m in _SOFT_NOTE_MARKERS):
             continue

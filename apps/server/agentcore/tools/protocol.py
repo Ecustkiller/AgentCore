@@ -148,9 +148,7 @@ class EscalationChannel:
     """
 
     armed: bool
-    # ``request(question, assumption, questions, kind, awaiting="user",
-    # browser_login=False)`` — trailing ``browser_login`` is optional for
-    # backward-compatible mocks (defaults False on the production channel).
+    # ``request(question, assumption, questions, kind, awaiting="user")``.
     request: Callable[..., Awaitable[EscalationOutcome]]
 
 
@@ -502,8 +500,6 @@ class ToolContext:
     # 成篇交接：有下游依赖时 handoff 须带可消费交付（非空正文或已落盘 prose）；
     # 由 worker executor 按 DAG 写入。False/默认 = 叶节点或不强制。
     handoff_requires_body: bool = False
-    # 有下游时正文地板字数；生产恒为 0（仅要求非空）。禁止从已删字段回填或发明地板。
-    handoff_min_body_chars: int = 0
     # True when this node expects on-disk landing (pinned artifacts / artifact_dir).
     # Not-landing + 有下游：禁止用 summary 升格冒充交接地板正文。
     handoff_expects_landing: bool = False

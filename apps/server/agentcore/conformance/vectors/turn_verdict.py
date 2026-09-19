@@ -41,7 +41,7 @@ def _turn_verdict_team_host() -> list[SSEEvent]:
             runs=plan_runs,
         ),
         run_started("r1", "w1"),
-        run_failed("r1", "w1", "调研失败", failure_kind="quality"),
+        run_failed("r1", "w1", "调研失败", failure_kind="call"),
         tool_use_end("dc1", "delegate", success=True, output="团队完成（含 1 项失败）。"),
         error_event("LLM_ERROR", "本轮未能完成，请重试。"),
         content_delta(" 调研未完成。"),

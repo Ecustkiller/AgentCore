@@ -44,6 +44,15 @@ import { setLiveExternalMountsPusher } from "./liveExternalMounts";
 import { SidecarManager } from "./manager";
 import { resolveWorkspaceRoot } from "./workspace";
 
+async function liveWorkspaceRoot(
+  rootId: string,
+  subpath?: string,
+): Promise<string> {
+  const root = await getStoredRoot(rootId);
+  if (!root) throw new Error("本地目录未授权或已移除");
+  return resolveWorkspaceRoot(root.absPath, subpath);
+}
+
 /**
  * sidecar IPC 边界校验：失败时先落 `sidecar.ipc_invalid_args`（desktop.jsonl +
  * dev stdout），再原样抛出——renderer 横幅可展示字段级原因，排查不再只靠 stderr。
@@ -98,12 +107,7 @@ export function registerSidecarIpc(): void {
         ["subpath", "userId"],
         ["folderId", "localRootId", "localSubpath"],
       );
-      const root = await getStoredRoot(req.rootId);
-      if (!root) throw new Error("本地目录未授权或已移除");
-      const workspaceRoot = await resolveWorkspaceRoot(
-        root.absPath,
-        req.subpath,
-      );
+      const workspaceRoot = await liveWorkspaceRoot(req.rootId, req.subpath);
       return manager.startTurn(e.sender, req, workspaceRoot);
     },
   );
@@ -240,12 +244,7 @@ export function registerSidecarIpc(): void {
         ["subpath", "userMessageId", "userId"],
         ["folderId", "localRootId", "localSubpath"],
       );
-      const root = await getStoredRoot(req.rootId);
-      if (!root) throw new Error("本地目录未授权或已移除");
-      const workspaceRoot = await resolveWorkspaceRoot(
-        root.absPath,
-        req.subpath,
-      );
+      const workspaceRoot = await liveWorkspaceRoot(req.rootId, req.subpath);
       return manager.resume(e.sender, req, workspaceRoot, req.inference);
     },
   );
@@ -254,12 +253,7 @@ export function registerSidecarIpc(): void {
     SIDECAR_CHANNELS.probe,
     async (_e, req: SidecarProbeRequest): Promise<void> => {
       assertSidecarShape(SIDECAR_CHANNELS.probe, req, ["rootId"], ["subpath"]);
-      const root = await getStoredRoot(req.rootId);
-      if (!root) throw new Error("本地目录未授权或已移除");
-      const workspaceRoot = await resolveWorkspaceRoot(
-        root.absPath,
-        req.subpath,
-      );
+      const workspaceRoot = await liveWorkspaceRoot(req.rootId, req.subpath);
       await manager.probe(req.rootId, req.subpath ?? "", workspaceRoot);
     },
   );
@@ -273,12 +267,7 @@ export function registerSidecarIpc(): void {
         ["rootId"],
         ["subpath", "userId"],
       );
-      const root = await getStoredRoot(req.rootId);
-      if (!root) throw new Error("本地目录未授权或已移除");
-      const workspaceRoot = await resolveWorkspaceRoot(
-        root.absPath,
-        req.subpath,
-      );
+      const workspaceRoot = await liveWorkspaceRoot(req.rootId, req.subpath);
       await manager.warmMcpDiscover(
         req.rootId,
         req.subpath ?? "",
@@ -298,12 +287,7 @@ export function registerSidecarIpc(): void {
         ["subpath", "userId"],
         ["folderId"],
       );
-      const root = await getStoredRoot(req.rootId);
-      if (!root) throw new Error("本地目录未授权或已移除");
-      const workspaceRoot = await resolveWorkspaceRoot(
-        root.absPath,
-        req.subpath,
-      );
+      const workspaceRoot = await liveWorkspaceRoot(req.rootId, req.subpath);
       await manager.warmAccountRulesMemory(
         req.rootId,
         req.subpath ?? "",
@@ -365,12 +349,7 @@ export function registerSidecarIpc(): void {
         ["rootId", "messageId"],
         ["subpath"],
       );
-      const root = await getStoredRoot(req.rootId);
-      if (!root) throw new Error("本地目录未授权或已移除");
-      const workspaceRoot = await resolveWorkspaceRoot(
-        root.absPath,
-        req.subpath,
-      );
+      const workspaceRoot = await liveWorkspaceRoot(req.rootId, req.subpath);
       return manager.turnFilesDiff(req, workspaceRoot);
     },
   );
@@ -384,12 +363,7 @@ export function registerSidecarIpc(): void {
         ["rootId", "snapshotId"],
         ["subpath"],
       );
-      const root = await getStoredRoot(req.rootId);
-      if (!root) throw new Error("本地目录未授权或已移除");
-      const workspaceRoot = await resolveWorkspaceRoot(
-        root.absPath,
-        req.subpath,
-      );
+      const workspaceRoot = await liveWorkspaceRoot(req.rootId, req.subpath);
       await manager.restoreTurnBaseline(req, workspaceRoot);
     },
   );
@@ -406,12 +380,7 @@ export function registerSidecarIpc(): void {
         ["rootId", "name"],
         ["subpath"],
       );
-      const root = await getStoredRoot(req.rootId);
-      if (!root) throw new Error("本地目录未授权或已移除");
-      const workspaceRoot = await resolveWorkspaceRoot(
-        root.absPath,
-        req.subpath,
-      );
+      const workspaceRoot = await liveWorkspaceRoot(req.rootId, req.subpath);
       return manager.createWorkspaceVersion(req, workspaceRoot);
     },
   );
@@ -428,12 +397,7 @@ export function registerSidecarIpc(): void {
         ["rootId", "versionId"],
         ["subpath"],
       );
-      const root = await getStoredRoot(req.rootId);
-      if (!root) throw new Error("本地目录未授权或已移除");
-      const workspaceRoot = await resolveWorkspaceRoot(
-        root.absPath,
-        req.subpath,
-      );
+      const workspaceRoot = await liveWorkspaceRoot(req.rootId, req.subpath);
       return manager.restoreWorkspaceVersion(req, workspaceRoot);
     },
   );
@@ -450,12 +414,7 @@ export function registerSidecarIpc(): void {
         ["rootId", "conversationId"],
         ["subpath"],
       );
-      const root = await getStoredRoot(req.rootId);
-      if (!root) throw new Error("本地目录未授权或已移除");
-      const workspaceRoot = await resolveWorkspaceRoot(
-        root.absPath,
-        req.subpath,
-      );
+      const workspaceRoot = await liveWorkspaceRoot(req.rootId, req.subpath);
       return manager.listBrowserSessions(req, workspaceRoot);
     },
   );

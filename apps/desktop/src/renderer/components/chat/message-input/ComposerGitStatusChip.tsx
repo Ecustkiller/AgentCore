@@ -26,7 +26,8 @@ export function ComposerGitStatusChip({
     !!convWs &&
     !!state?.effective.isLocal &&
     !!state.effective.rootId &&
-    !state.effective.rootMissing;
+    !state.effective.rootMissing &&
+    !state.effective.rootStale;
 
   const { status } = useGitRepoStatus(
     canProbe ? state?.effective.rootId : null,

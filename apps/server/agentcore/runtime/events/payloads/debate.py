@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import Field
 
@@ -223,106 +223,3 @@ class DebateRoundStartedPayload(WirePayload):
 class DebateRoundPayload(DebateRoundInfo):
     execution_id: str
     moderator_run_id: str
-
-
-class DebatePretrialSideInfo(WirePayload):
-    key: str
-    name: str
-
-
-class DebatePretrialTask(WirePayload):
-    query: str
-    purpose: str = ""
-
-
-class DebatePretrialOrder(WirePayload):
-    side_key: str
-    tasks: list[DebatePretrialTask] = Field(default_factory=list)
-    source: Literal["debater", "auto", "empty"] = "empty"
-
-
-class DebateEvidencePackSource(WirePayload):
-    source_id: str
-    kind: Literal["attachment", "conversation", "background", "dossier", "workspace"]
-    label: str
-    path: str | None = None
-    excerpt: str = ""
-    complete: bool = True
-    failure: str | None = None
-
-
-class DebateEvidencePackDispute(WirePayload):
-    claim: str
-    why_contested: str | None = None
-    related_source_ids: list[str] = Field(default_factory=list)
-
-
-class DebateEvidencePack(WirePayload):
-    """共享证据包（庭前附件路径）；完整度一等公民。"""
-
-    motion: str | None = None
-    completeness: Literal["full", "partial", "empty"] = "empty"
-    notes: str | None = None
-    sources: list[DebateEvidencePackSource] = Field(default_factory=list)
-    dispute_candidates: list[DebateEvidencePackDispute] = Field(default_factory=list)
-    ledger_ids: dict[str, str] | None = None
-
-
-class DebatePretrialStartedPayload(WirePayload):
-    execution_id: str
-    moderator_run_id: str
-    sides: list[DebatePretrialSideInfo] = Field(default_factory=list)
-    skip_reason: Literal["evidence_pack", "no_pack"] | None = absent(
-        "Set when pretrial is skipped immediately; absent when phase proceeds."
-    )
-
-
-class DebatePretrialOrdersPayload(WirePayload):
-    execution_id: str
-    moderator_run_id: str
-    sides: list[DebatePretrialSideInfo] = Field(default_factory=list)
-    orders: list[DebatePretrialOrder] = Field(default_factory=list)
-    # 附件 Evidence Pack 路径：点单事件可携带 pack 摘要。
-    evidence_pack: DebateEvidencePack | None = absent(
-        "Present when pretrial takes the shared evidence-pack path."
-    )
-    path: Literal["evidence_pack"] | None = absent(
-        "Present when orders event is emitted for the evidence-pack path."
-    )
-    completeness: Literal["full", "partial", "empty"] | None = absent(
-        "Evidence completeness when path=evidence_pack*."
-    )
-    incomplete: bool | None = absent(
-        "True when completeness is not full (evidence-pack path)."
-    )
-    external_evidence: dict[str, Any] | None = absent(
-        "External-evidence plan (mode=skip + reason/budget); production emits skip only."
-    )
-
-
-class DebatePretrialCompletedPayload(WirePayload):
-    execution_id: str
-    moderator_run_id: str
-    sides: list[DebatePretrialSideInfo] = Field(default_factory=list)
-    status: Literal["done", "skipped", "degraded"] = "done"
-    skip_reason: Literal["evidence_pack", "no_pack"] | None = absent(
-        "Present when status=skipped."
-    )
-    orders: list[DebatePretrialOrder] = Field(default_factory=list)
-    fallback_self_search: bool = False
-    evidence_ready: bool = False
-    evidence_ledger_count: int = 0
-    evidence_ledger_delta: list[EvidenceLedgerEntry] = Field(default_factory=list)
-    # 取证完整度一等公民：失败/截断不得伪装成满分 completed。
-    completeness: Literal["full", "partial", "empty"] = "empty"
-    # 仅「实际走了取证且未 full」；intentional 秒过（evidence_pack / no_pack）为 False。
-    incomplete: bool = True
-    evidence_pack: DebateEvidencePack | None = absent(
-        "Present when pretrial assembled a shared evidence pack from host attachments."
-    )
-    external_evidence_mode: Literal["skip"] | None = absent(
-        "Resolved external-evidence mode; production emits skip only."
-    )
-    external_evidence_reason: str | None = absent(
-        "Skip reason: evidence_pack_full | evidence_pack_partial | no_pack | …"
-    )

@@ -202,8 +202,6 @@ export type RunFrame =
       // builder always sets it (`?? []`); optional so hand-built fixtures may omit it.
       questions?: AskQuestion[];
       awaiting?: "user" | "ceo";
-      /** Wire `browser_login` — 登录等待 escalate；缺省 false。 */
-      browserLogin?: boolean;
       /** Wire `ownership_paths` — 写权冲突结构化裁决。 */
       ownershipPaths?: string[];
       lockOwnerRunId?: string;
@@ -386,7 +384,10 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         runId: p.run_id,
         agentId: p.agent_id,
         error: p.error,
-        failureKind: p.failure_kind,
+        failureKind:
+          p.failure_kind === "model" || p.failure_kind === "call"
+            ? p.failure_kind
+            : undefined,
         productLanded: p.product_landed ?? null,
         errorCode: p.error_code ?? null,
         retryable: p.retryable ?? null,
@@ -491,7 +492,6 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
           p.kind === "scope" || p.kind === "dep" ? p.kind : "normal",
         questions: p.questions ?? [],
         awaiting: p.awaiting === "ceo" ? "ceo" : "user",
-        ...(p.browser_login === true ? { browserLogin: true as const } : {}),
         ...(paths.length > 0 ? { ownershipPaths: paths } : {}),
         ...(typeof p.lock_owner_run_id === "string" &&
         p.lock_owner_run_id.trim()

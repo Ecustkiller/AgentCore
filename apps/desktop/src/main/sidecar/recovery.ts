@@ -11,7 +11,7 @@ import { sidecarDataDir } from "../outbox-writeback";
  *
  * 续跑帧由 Python `LocalPausedTurnStore` 落在 `<dataDir>/paused/*.json`，每条记录含顶层
  * `conversation_id` / `created_at` 与已投影好的 `summary`（= 服务端 `PausedTurnSummary` 形状）。
- * 这里读顶层 ``summary``（开工卡）+ 可选 ``display_runs``（协作图），按会话过滤、
+ * 这里读顶层 ``summary``（挂起交互）+ 可选 ``display_runs``（协作图），按会话过滤、
  * 按时间排序。summary 与 Python ``listPaused`` RPC 同源；display_runs 仅桌面 hydrate 用。
  * 经 `recovery` IPC 的 `paused[]` / `pausedRuns` 返回（原独立 listPaused 通道已退役）。
  * 尽力而为：任何读/解析失败都降级为「无待续跑」，绝不阻塞重开会话。

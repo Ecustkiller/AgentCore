@@ -4,7 +4,7 @@ Prereq: backend running with ``DEMO_TAPE_REPLAY_ENABLED=true``.
 
 From apps/server::
 
-    # Primary: prepare → user message → stream (no kickoff card)
+    # Primary: prepare → user message → stream (group starts immediately)
     uv run python scripts/demo_tape_http_walk.py --tape lv-molihua-trademark
 
     # Auto-start (smoke / legacy one-click)

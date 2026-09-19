@@ -6,7 +6,6 @@ import time
 from typing import Any
 
 from agentcore.core.types import ToolApproval, ToolFace
-from agentcore.tools.file_products import file_product
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_BOTH,

@@ -45,10 +45,7 @@ export type TimelineProcessKind = "checkpoint" | "escalation" | "approval";
 export interface TimelineMarkerDef {
   processKind: TimelineProcessKind;
   /** Id field on the ProcessStep wire shape. */
-  stepIdField:
-    | "checkpoint_id"
-    | "escalation_id"
-    | "approval_id";
+  stepIdField: "checkpoint_id" | "escalation_id" | "approval_id";
 }
 
 export interface InteractionSseRequiredEffects {

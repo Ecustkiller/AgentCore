@@ -29,13 +29,17 @@ const infoIcon = <Info size={16} className="text-primary" />;
 export function notifyError(
   err: unknown,
   context?: string,
-  opts?: { action?: { label: string; onClick: () => void } },
+  opts?: {
+    action?: { label: string; onClick: () => void };
+    id?: string | number;
+  },
 ): void {
   if (typeof err === "string") {
     toast.error(context ?? err, {
       description: context ? err : undefined,
       icon: errorIcon,
       action: opts?.action,
+      id: opts?.id,
     });
     return;
   }
@@ -61,6 +65,7 @@ export function notifyError(
       description,
       icon: infoIcon,
       action: toastAction,
+      id: opts?.id,
     });
     return;
   }
@@ -68,6 +73,7 @@ export function notifyError(
     description,
     icon: errorIcon,
     action: opts?.action,
+    id: opts?.id,
   });
 }
 
@@ -77,12 +83,14 @@ export function notifySuccess(
   opts?: {
     description?: string;
     action?: { label: string; onClick: () => void };
+    id?: string | number;
   },
 ): void {
   toast.success(message, {
     description: opts?.description,
     icon: successIcon,
     action: opts?.action,
+    id: opts?.id,
   });
 }
 
@@ -142,6 +150,7 @@ export function notifyInfo(
     description?: string;
     duration?: number;
     action?: { label: string; onClick: () => void };
+    id?: string | number;
   },
 ): void {
   toast(message, {
@@ -149,5 +158,6 @@ export function notifyInfo(
     duration: opts?.duration,
     icon: infoIcon,
     action: opts?.action,
+    id: opts?.id,
   });
 }

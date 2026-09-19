@@ -1,11 +1,11 @@
-"""调研链证据探测。开工卡 resume / 先调研回灌文案已退役。
+"""调研链证据探测。先调研按键 / 回灌文案已退役。
 """
 
 from __future__ import annotations
 
 import pytest
 
-from agentcore.runtime.kickoff.research_first import has_research_chain_evidence
+from agentcore.runtime.debate.research_first import has_research_chain_evidence
 from agentcore.runtime.suspension import suspension_from_json
 from agentcore.tools.builtin.motion_card import parse_motion_card
 

@@ -30,11 +30,9 @@ from agentcore.runtime.runs.constants import HANDOFF_TOOL_NAME
 from agentcore.runtime.runs.contract import (
     check_contract,
     collect_opaque_source_data_paths,
-    needs_file_contents,
 )
 from agentcore.runtime.runs.executor.context import (
     _context_block_payloads,
-    _load_artifact_contents,
     _safe_index_files,
 )
 from agentcore.runtime.runs.executor.shared import (
@@ -403,39 +401,15 @@ async def _continue_run_scoped(
         cost = asdict(calculate_cost(priced_model, round_usage))
         touched_for_gate = files_touched_from_transcript(messages)
         deliverable = spec.deliverable
-        artifact_contents = None
         workspace_paths = list(touched_for_gate)
-        # 交付形态对齐: a continuation of a FILE deliverable re-checks the contract against
-        # the landed files too (same semantics as the cold executor), so a file-form draft
-        # the author corrects on disk is not re-failed for「缺章节 / 太短」on empty prose.
-        load_contents = needs_file_contents(
-            deliverable,
-            landed_paths=touched_for_gate,
-        )
         if deliverable and deliverable.artifacts:
             live_index = await _safe_index_files(tool_ctx.backend)
             workspace_paths = list(dict.fromkeys([*live_index, *touched_for_gate]))
-            if load_contents:
-                patterns = list(
-                    dict.fromkeys([*deliverable.artifacts, *touched_for_gate])
-                )
-                artifact_contents = await _load_artifact_contents(
-                    tool_ctx.backend,
-                    patterns,
-                    workspace_paths,
-                )
-        elif touched_for_gate and load_contents:
-            artifact_contents = await _load_artifact_contents(
-                tool_ctx.backend,
-                touched_for_gate,
-                workspace_paths,
-            )
         source_data_paths = collect_opaque_source_data_paths(
             material_paths=getattr(tool_ctx, "material_paths", None),
             workspace_paths=workspace_paths,
             landed_paths=touched_for_gate,
         )
-        turn_ledger = _turn_ledger_var.get()
         artifacts = (
             list(deliverable.artifacts)
             if deliverable is not None and deliverable.artifacts
@@ -450,13 +424,6 @@ async def _continue_run_scoped(
             files_written=product_written,
             debrief=debrief_from_transcript(messages),
             workspace_paths=workspace_paths,
-            artifact_contents=artifact_contents,
-            ledger_entries=(
-                turn_ledger.all_entries() if turn_ledger is not None else None
-            ),
-            citable_ids=(
-                turn_ledger.draft_citable_ids() if turn_ledger is not None else None
-            ),
             landing_failure_kind=landing_write_failure_kind(messages),
             can_execute=can_execute,
             source_data_paths=source_data_paths,

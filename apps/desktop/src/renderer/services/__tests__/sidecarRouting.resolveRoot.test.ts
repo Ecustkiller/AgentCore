@@ -32,7 +32,9 @@ vi.mock("@/stores/conversation", () => ({
 import { getConversations } from "@/hooks/useConversations";
 import { getFolders } from "@/hooks/useFolders";
 import {
+  canConversationUseSidecar,
   resolveConversationLocalTarget,
+  resolveLocalBind,
   resolveSidecarRoot,
 } from "@/services/sidecarRouting";
 
@@ -149,6 +151,78 @@ describe("resolveSidecarRoot（新回合路由 · 本机传统默认同侧）", 
     expect(await resolveSidecarRoot("c-local")).toEqual({
       rootId: "proj-root",
       subpath: "",
+    });
+  });
+
+  it("空子路径 + listRoots.missing → stale，不走 sidecar、仍算能用本机", async () => {
+    getConvs.mockReturnValue([
+      {
+        id: "c-local",
+        title: "t",
+        folderId: "f-local",
+        localContainerRootId: null,
+      },
+    ]);
+    getFolds.mockReturnValue([
+      {
+        id: "f-local",
+        name: "LegacyLocal",
+        mode: "local",
+        localRootId: "proj-root",
+        localSubpath: "",
+      },
+    ]);
+    window.fsApi = {
+      listRoots: vi.fn().mockResolvedValue([
+        {
+          id: "proj-root",
+          name: "LegacyLocal",
+          absPath: "/Users/zoo/J-",
+          missing: true,
+        },
+      ]),
+    } as unknown as typeof window.fsApi;
+
+    uiState.sidecarPreference = "unset";
+    expect(await resolveLocalBind("c-local")).toEqual({
+      kind: "stale",
+      rootId: "proj-root",
+      subpath: "",
+      absPath: "/Users/zoo/J-",
+    });
+    expect(await resolveConversationLocalTarget("c-local")).toBeNull();
+    expect(await resolveSidecarRoot("c-local")).toBeNull();
+    expect(await canConversationUseSidecar("c-local")).toBe(true);
+  });
+
+  it("scratch 子路径即使容器 missing 仍 live（可 mkdir）", async () => {
+    getConvs.mockReturnValue([
+      {
+        id: "c1",
+        title: "t",
+        folderId: null,
+        localContainerRootId: "container",
+      },
+    ]);
+    window.fsApi = {
+      listRoots: vi.fn().mockResolvedValue([
+        {
+          id: "container",
+          name: "AgentCore",
+          absPath: "/Users/me/Documents/AgentCore",
+          missing: true,
+        },
+      ]),
+    } as unknown as typeof window.fsApi;
+
+    expect(await resolveLocalBind("c1")).toEqual({
+      kind: "live",
+      rootId: "container",
+      subpath: "conversations/c1",
+    });
+    expect(await resolveSidecarRoot("c1")).toEqual({
+      rootId: "container",
+      subpath: "conversations/c1",
     });
   });
 });

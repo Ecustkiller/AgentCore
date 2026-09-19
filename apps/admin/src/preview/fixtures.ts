@@ -1,5 +1,5 @@
 import type { ProjectedTurn } from "@agentcore/protocol-conformance";
-import { isTurnFixture } from "@agentcore/protocol-conformance/fixtureKind";
+import { isPreviewFixture } from "@agentcore/protocol-conformance/fixtureKind";
 
 export interface PreviewFixture {
   name: string;
@@ -14,7 +14,7 @@ interface RawFixture {
   projected: ProjectedTurn;
 }
 
-// Same committed vectors as desktop `#/preview`. ChatView reads `projected` only.
+// Same committed vectors as desktop `#/preview` (`preview !== false`). ChatView reads `projected` only.
 const modules = import.meta.glob(
   "../../../../packages/protocol-conformance/fixtures/*.json",
   { eager: true },
@@ -23,7 +23,7 @@ const modules = import.meta.glob(
 export const PREVIEW_FIXTURES: PreviewFixture[] = Object.entries(modules)
   .sort(([a], [b]) => a.localeCompare(b))
   .map(([, mod]) => mod.default)
-  .filter(isTurnFixture)
+  .filter(isPreviewFixture)
   .map((fx) => ({
     name: fx.name,
     description: fx.description ?? "",

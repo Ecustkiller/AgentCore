@@ -73,7 +73,7 @@ class HostOp(StrEnum):
     APPS = "host_apps"
     # L1 bounded OS event-log summary (CEO+worker · NEVER · 禁整机倾倒)
     OS_LOG_SUMMARY = "host_os_log_summary"
-    # P3 general host shell (CEO+worker · GRANTABLE · host_class · 禁 kickoff)
+    # P3 general host shell (CEO+worker · GRANTABLE · host_class · 禁 delegation 静默授)
     SHELL = "host_shell"
     OPEN_SETTINGS = "host_open_settings"
     # L3 controlled whitelist (worker · GRANTABLE · host_class only)

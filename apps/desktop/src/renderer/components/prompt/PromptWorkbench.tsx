@@ -37,7 +37,9 @@ const APPLY_MODE_ITEMS = [
 
 const TITLE_LABEL = "名称";
 const CATALOG_LINE_LABEL = "一句话介绍";
-const CATALOG_LINE_PLACEHOLDER = "用一句话说这是什么";
+const CATALOG_LINE_PLACEHOLDER = "干什么、什么时候该翻开";
+const CATALOG_LINE_EMPTY_HINT =
+  "没写这句，CEO 不会主动翻开。要当场用，在输入框 @ 这一条。";
 const AUTOSAVE_DEBOUNCE_MS = 1500;
 
 const TITLE_FIELD_CLASS =
@@ -97,6 +99,7 @@ export function PromptWorkbench({
 }) {
   const titleId = useId();
   const catalogLineId = useId();
+  const catalogHintId = useId();
   const [titleValue, setTitleValue] = useState(title);
   const [trigger, setTrigger] = useState(initialTrigger ?? "");
   const [offeredTools, setOfferedTools] = useState<string[]>(
@@ -250,49 +253,52 @@ export function PromptWorkbench({
         </div>
       ) : null}
       {showCatalogLine ? (
-        readOnly ? (
-          <div
-            className={cn(
-              showTitleRow && "mt-2",
-              "flex min-w-0 items-start gap-2",
-            )}
-          >
-            <span className="shrink-0 pt-1.5 text-muted-foreground text-xs">
-              {CATALOG_LINE_LABEL}
-            </span>
-            <span className="min-w-0 whitespace-pre-wrap text-muted-foreground text-sm">
-              {triggerText || CATALOG_LINE_PLACEHOLDER}
-            </span>
-          </div>
-        ) : (
-          <label
-            htmlFor={catalogLineId}
-            className={cn(
-              showTitleRow && "mt-2",
-              "flex min-w-0 items-start gap-2",
-            )}
-          >
-            <span className="shrink-0 pt-1.5 text-muted-foreground text-xs">
-              {CATALOG_LINE_LABEL}
-            </span>
-            <Textarea
-              id={catalogLineId}
-              aria-label={CATALOG_LINE_LABEL}
-              placeholder={CATALOG_LINE_PLACEHOLDER}
-              rows={2}
-              value={trigger}
-              onChange={(event) => {
-                const next = event.target.value;
-                setTrigger(next);
-                markDirty({ trigger: next });
-              }}
-              className={cn(
-                CATALOG_FIELD_CLASS,
-                "min-h-8 min-w-0 flex-1 text-sm",
-              )}
-            />
-          </label>
-        )
+        <div className={cn(showTitleRow && "mt-2")}>
+          {readOnly ? (
+            <div className="flex min-w-0 items-start gap-2">
+              <span className="shrink-0 pt-1.5 text-muted-foreground text-xs">
+                {CATALOG_LINE_LABEL}
+              </span>
+              <span className="min-w-0 whitespace-pre-wrap text-muted-foreground text-sm">
+                {triggerText || CATALOG_LINE_PLACEHOLDER}
+              </span>
+            </div>
+          ) : (
+            <label
+              htmlFor={catalogLineId}
+              className="flex min-w-0 items-start gap-2"
+            >
+              <span className="shrink-0 pt-1.5 text-muted-foreground text-xs">
+                {CATALOG_LINE_LABEL}
+              </span>
+              <Textarea
+                id={catalogLineId}
+                aria-label={CATALOG_LINE_LABEL}
+                aria-describedby={triggerText ? undefined : catalogHintId}
+                placeholder={CATALOG_LINE_PLACEHOLDER}
+                rows={2}
+                value={trigger}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setTrigger(next);
+                  markDirty({ trigger: next });
+                }}
+                className={cn(
+                  CATALOG_FIELD_CLASS,
+                  "min-h-8 min-w-0 flex-1 text-sm",
+                )}
+              />
+            </label>
+          )}
+          {!readOnly && !triggerText ? (
+            <p
+              id={catalogHintId}
+              className="mt-1 text-muted-foreground text-xs"
+            >
+              {CATALOG_LINE_EMPTY_HINT}
+            </p>
+          ) : null}
+        </div>
       ) : null}
       {showOfferedTools ? (
         <div className={cn((showTitleRow || showCatalogLine) && "mt-3")}>

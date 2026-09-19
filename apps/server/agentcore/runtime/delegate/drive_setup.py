@@ -152,18 +152,18 @@ def apply_delegation_grant(
     worker_gate: Any,
     seed_completed: dict[str, RunState] | None,
 ) -> bool:
-    """Kickoff grant from resume / full_auto. Returns whether grant was started this call.
+    """Delegation grant from resume / ``command=auto``. Returns whether grant was started this call.
 
     ``True`` means this drive segment owns revoke-on-exit (unless a live coordination
     session keeps the grant for merge-rearm — see ``drive`` finally).
     """
-    # Kickoff grant: issued by resume (continue/adjust) or full_auto auto-grant.
-    # Hot-path ``request_delegation_authorization`` retired — capability auth lives
-    # on the durable开工卡 (team_preview) or is silent under full_auto.
+    # Delegation grant: issued by resume (continue/adjust) or command=auto.
+    # Capability auth is silent under command=auto; leftover team_preview continue
+    # already granted and is not recovered as a new card.
     if worker_gate is None:
         return False
-    # Mid-plan resume already granted on the kickoff continue path; do not treat as
-    # a fresh segment owner (avoids double-revoke bookkeeping). Still a no-op apply.
+    # Mid-plan resume already granted; do not treat as a fresh segment owner
+    # (avoids double-revoke bookkeeping). Still a no-op apply.
     if seed_completed is not None:
         return False
     from agentcore.core.types import DEFAULT_PERMISSION_AXES

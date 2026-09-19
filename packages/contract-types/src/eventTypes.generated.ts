@@ -14,9 +14,6 @@ export type SSEEventType =
   | "content_delta"
   | "content_reset"
   | "coordination_wait"
-  | "debate_pretrial_completed"
-  | "debate_pretrial_orders"
-  | "debate_pretrial_started"
   | "debate_result"
   | "debate_round"
   | "debate_round_started"
@@ -85,9 +82,6 @@ export const SSE_EVENT_TYPE_VALUES = [
   "content_delta",
   "content_reset",
   "coordination_wait",
-  "debate_pretrial_completed",
-  "debate_pretrial_orders",
-  "debate_pretrial_started",
   "debate_result",
   "debate_round",
   "debate_round_started",

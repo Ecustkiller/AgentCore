@@ -107,7 +107,7 @@ Agent 没有「文件开在编辑器里」。写盘占用只包住**这一次** 
 | 档 | 信号（例） | 座位 / 修路 |
 |---|---|---|
 | **Hard** | 结构契约失败、能力缺失等 | `FAILED` → 进 `vacated_run_ids`；同座可 auto-`replaces` |
-| **Soft** | 薄交接、引用可剥、批次 `files_written` soft note、结构不达标（缺章节） | 仍 `COMPLETED`；**不** vacated；修路 = **同座位** replan/append（系统 auto-`replaces`） |
+| **Soft** | 薄交接、批次 `files_written` soft note | 仍 `COMPLETED`；**不** vacated；修路 = **同座位** replan/append（系统 auto-`replaces`） |
 
 声明未命中时工人另写下的文件即产物，不是 soft 缺口。→ [执行引擎](/docs/03-AI核心/执行引擎架构设计.md)。
 

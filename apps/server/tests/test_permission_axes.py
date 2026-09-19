@@ -209,7 +209,6 @@ def test_less_interrupt_and_managed_same_axes():
     axes = recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)
     assert axes == DEFAULT_PERMISSION_AXES
     assert axes == recipe_to_axes(AutonomyPolicy.MANAGED)
-    assert not hasattr(axes, "honors_kickoff_grant")
     assert axes.auto_executes is True
     assert not hasattr(axes, "implies_deep_research_auto")
     assert axes.host is HostAxis.SESSION

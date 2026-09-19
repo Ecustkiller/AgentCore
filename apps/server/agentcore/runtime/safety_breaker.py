@@ -7,7 +7,7 @@ gate obvious credential / key-material paths (template allow → credential ask 
 key deny). They do **not** intercept every dangerous command — comments, audit
 copy, and approval-card hints must not claim otherwise.
 
-Permission presets (including ``full_trust``), kickoff grants, and turn-wide
+Permission presets (including ``full_trust``), delegation grants, and turn-wide
 「本轮放行」never override these rules. Aligns with Claude Code's practice that
 bypass mode still trips the circuit breaker.
 

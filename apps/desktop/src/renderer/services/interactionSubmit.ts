@@ -1,11 +1,11 @@
 import { notifyError, notifyInfo } from "@/lib/toast";
 import { ApiError } from "@/services/api";
+import type { CheckpointUserDecision } from "@/services/checkpoint";
 import {
   isSidecarSettleUnavailableError,
   resolveInteraction,
 } from "@/services/interaction";
 import type { ResolveInteractionBody } from "@/services/interaction";
-import type { CheckpointUserDecision } from "@/services/checkpoint";
 import { isPausedFrameGone, runResume } from "@/services/turns";
 import {
   INTERACTION_SUBMIT_PATH,

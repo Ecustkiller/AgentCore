@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { TOOL_LABELS_ZH, toolLabelZh } from "../toolLabelsZh";
 
 describe("toolLabelZh", () => {
-  it("覆盖审批 / 委派 / 开工卡原先三表并集键", () => {
+  it("覆盖审批 / 委派 / 工具标签并集键", () => {
     expect(toolLabelZh("file_write")).toBe("写入文件");
     expect(toolLabelZh("code_execute")).toBe("执行代码");
     expect(toolLabelZh("git")).toBe("Git 写入");

@@ -63,7 +63,7 @@ def worker_gate_applies(backend: WorkspaceBackend | None) -> bool:
     of backend location (tool_exec only narrows when ``role=="worker"``).
 
     This is a *policy* predicate consumed by the tool_exec chokepoint (and the
-    kickoff-card decision), **not** a hand-out rule: whether a worker is handed the
+    delegation-grant decision), **not** a hand-out rule: whether a worker is handed the
     turn's ``ApprovalGate`` object is no longer predicted upstream — it always is,
     when the turn has one.
     """

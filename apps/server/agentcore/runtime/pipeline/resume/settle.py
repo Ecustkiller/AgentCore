@@ -46,7 +46,7 @@ def append_resumed_tool_results(
     """Close the settled tool-call in the rebuilt CEO transcript (结构化挂起 2b).
 
     The transcript ends with the assistant message that issued the suspended call
-    (``delegate`` / ``debate`` for kickoff, ``ask_user`` for ask_user — the pause
+    (``delegate`` / ``debate`` / ``ask_user`` — the pause
     happened inside it). Append that call's settled result so the loop continues
     from a valid assistant-tool_call → tool-result pair.
 

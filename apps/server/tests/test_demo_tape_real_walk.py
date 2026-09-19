@@ -31,7 +31,7 @@ def _leftover_slice(events: list[dict], *, tail: int = 15) -> list[dict]:
 
 @pytest.mark.asyncio
 async def test_real_tape_double_replay_skips_leftover_kickoff(monkeypatch):
-    """真磁带连放两次：leftover team_preview skip，不 persist 开工卡，两次都播完切片。"""
+    """真磁带连放两次：leftover team_preview skip，不 persist 新帧，两次都播完切片。"""
     if not TAPE.exists():
         pytest.skip(f"tape not exported yet: {TAPE}")
 

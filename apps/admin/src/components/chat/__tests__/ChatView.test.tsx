@@ -69,7 +69,6 @@ function turn(partial: Partial<ProjectedTurn> = {}): ProjectedTurn {
     cost: null,
     debate: null,
     debateRounds: [],
-    debatePretrial: null,
     crossExamEnabled: false,
     debateOpening: null,
     deliveryStatus: null,

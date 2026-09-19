@@ -597,48 +597,6 @@ async def test_worker_failure_before_any_usage_has_no_ledger_row():
     assert not state.cost
 
 
-async def test_contract_retired_min_length_ignored_no_soft_tip():
-    # S3：已删 min_length 不再产生 soft tip / retry；短文照常 COMPLETED。
-    plan, _ = build_run_plan(
-        [{"role": "A", "task": "做A", "deliverable": {"min_length": 8}}], id_prefix="t"
-    )
-    provider = _ContentProvider(["短"])
-    res = await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
-    assert provider.calls == 1
-    assert res["t_1"].phase is RunPhase.COMPLETED
-    assert res["t_1"].content == "短"
-    assert not any("少于" in w for w in (res["t_1"].warnings or []))
-
-
-async def test_contract_retired_must_contain_ignored_no_soft_tip():
-    # S3：已删 must_contain 不再 soft tip / 续写。
-    plan, _ = build_run_plan(
-        [{"role": "A", "task": "做A", "deliverable": {"must_contain": ["风险"]}}], id_prefix="t"
-    )
-    provider = _ContentProvider(["没有那个词"])
-    res = await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
-    assert provider.calls == 1
-    assert res["t_1"].phase is RunPhase.COMPLETED
-    assert not any("风险" in w for w in (res["t_1"].warnings or []))
-
-
-async def test_contract_section_retry_continues_on_same_transcript():
-    # required_sections 仍返工：续写同 transcript，worker 可见旧稿。
-    plan, _ = build_run_plan(
-        [{"role": "A", "task": "做A", "deliverable": {"required_sections": ["结论"]}}],
-        id_prefix="t",
-    )
-    provider = _ContentProvider(["没有章节", "# 结论\n已补上"])
-    await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
-    assert provider.calls == 2
-    second = provider.requests[1]
-    assert any(role == "assistant" and content == "没有章节" for role, content in second)
-    last_role, last_content = second[-1]
-    assert last_role == "user"
-    assert ("修正" in last_content) or ("补全" in last_content)
-    assert "结论" in last_content
-
-
 async def test_completed_run_captures_full_transcript():
     # T1/T2: a finished worker's full transcript is captured on RunState so the run
     # is recoverable (留人). It ends with the worker's final answer (react_loop omits
@@ -656,44 +614,12 @@ async def test_completed_run_captures_full_transcript():
     assert transcript[-1].content == "最终产出"
 
 
-async def test_contract_requirements_stated_in_first_prompt():
-    plan, _ = build_run_plan(
-        [{"role": "A", "task": "做A", "deliverable": {"required_sections": ["结论"]}}], id_prefix="t"
-    )
-    provider = _ContentProvider(["# 结论\n好的"])
-    await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
-    assert "交付物规格" in provider.user_messages[0]
-    assert "结论" in provider.user_messages[0]
-    assert "建议正文骨架" not in provider.user_messages[0]
-    assert "检索预算" not in provider.user_messages[0]
-
-
-async def test_default_files_includes_form_how_in_deliverable_spec():
+async def test_default_files_omits_deliverable_spec_without_paths():
     plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
     provider = _ContentProvider(["正文"])
     await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
     opening = provider.user_messages[0]
     assert "交付物规格" not in opening
-    assert "form=files" not in opening
-    assert "检索预算" not in opening
-
-
-async def test_contract_section_miss_soft_completes_even_if_strict():
-    plan, _ = build_run_plan(
-        [
-            {
-                "role": "A",
-                "task": "做A",
-                "deliverable": {"required_sections": ["结论"], "strict": True},
-            }
-        ],
-        id_prefix="t",
-    )
-    provider = _ContentProvider(["没有章节", "还是没有"])
-    res = await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
-    state = res["t_1"]
-    assert state.phase is RunPhase.COMPLETED
-    assert any("缺少必备章节" in w for w in (state.warnings or []))
 
 
 async def test_worker_system_prompt_grants_structure_ownership():
@@ -711,22 +637,6 @@ async def test_worker_system_prompt_grants_structure_ownership():
     assert "队员" in sys
 
 
-async def test_contract_retired_min_length_even_strict_ignored():
-    # S3：已删 min_length；strict 也不因字数 FAILED / soft tip。
-    plan, _ = build_run_plan(
-        [{"role": "A", "task": "做A", "deliverable": {"min_length": 50, "strict": True}}],
-        id_prefix="t",
-    )
-    assert plan.nodes[0].policy.on_failure == "retry"
-    sink = EventSink()
-    provider = _ContentProvider(["短"])
-    res = await WaveScheduler().run(plan, _executor(plan, provider, sink))
-    sink.close()
-    assert provider.calls == 1
-    assert res["t_1"].phase is RunPhase.COMPLETED
-    assert not any("少于" in w for w in (res["t_1"].warnings or []))
-
-
 async def test_contract_empty_hard_fail_not_wave_retried():
     # Empty product completes honestly; in-executor contract retries still run but
     # the wave must not re-dispatch (empty body, tokens already spent twice).
@@ -740,19 +650,6 @@ async def test_contract_empty_hard_fail_not_wave_retried():
     state = res["t_1"]
     assert state.phase is RunPhase.COMPLETED
     assert not (state.content or "").strip()
-
-
-async def test_contract_retired_min_length_dict_ignored_completes():
-    # S3：派单 JSON 仍带已删 min_length → 忽略，短文首轮 COMPLETED、无字数 soft tip。
-    plan, _ = build_run_plan(
-        [{"role": "A", "task": "做A", "deliverable": {"min_length": 50}}], id_prefix="t"
-    )
-    provider = _ContentProvider(["短"])
-    res = await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
-    assert provider.calls == 1
-    assert res["t_1"].phase is RunPhase.COMPLETED
-    assert res["t_1"].content == "短"
-    assert not any("少于" in w for w in (res["t_1"].warnings or []))
 
 
 async def test_no_contract_passes_first_try_without_extra_call():

@@ -26,10 +26,7 @@ import { loadFixtures } from "@agentcore/protocol-conformance";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 /** Timeline-kind interactions = the ones whose card/痕迹 rides a process marker. */
-const TIMELINE_KINDS: InteractionKind[] = [
-  "ask_user",
-  "escalation",
-];
+const TIMELINE_KINDS: InteractionKind[] = ["ask_user", "escalation"];
 
 /** Weak-form kinds (D5): marker required; row gated on resolved/orphaned — not in strong card invariant. */
 const TRACE_KINDS: InteractionKind[] = ["approval"];

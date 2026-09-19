@@ -25,6 +25,10 @@ const fail = (): FsResult<never> => ({
 
 const fsApi: FsApi = {
   addRoot: async () => ({ ok: false as const, reason: "cancelled" as const }),
+  relocateRoot: async () => ({
+    ok: false as const,
+    reason: "cancelled" as const,
+  }),
   ensureDefaultRoot: async () => ({ id: "web-preview", name: "Web 预览" }),
   listRoots: async () => [],
   removeRoot: async () => {},

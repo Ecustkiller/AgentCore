@@ -70,7 +70,6 @@ def _is_handoff_gate_feedback(messages) -> bool:  # noqa: ANN001
     joined = "\n".join(m.content or "" for m in messages if m.role == "user")
     return (
         "尚未调用 handoff" in joined
-        or "交接便条信息量不足" in joined
         or "再调用 handoff" in joined
     )
 
@@ -537,9 +536,7 @@ async def test_strict_degraded_handoff_completes_when_files_landed():
     reg.register(_FileWriteTool())
     # Write artifact so contract exists, but never call handoff → degraded synth
     # after handoff correction shot still empty → 有落盘则放行 COMPLETED。
-    from agentcore.runtime.runs.research_quality import MIN_UPSTREAM_BODY_CHARS
-
-    body_pad = "分区正文填充。" * ((MIN_UPSTREAM_BODY_CHARS // 7) + 1)
+    body_pad = "分区正文填充。" * 12
     rounds = [
         [
             LLMChunk(
@@ -613,9 +610,7 @@ async def test_strict_zero_landing_soft_completes_without_degraded_dependents():
         ],
         id_prefix="t",
     )
-    from agentcore.runtime.runs.research_quality import MIN_UPSTREAM_BODY_CHARS
-
-    body_pad = "分区正文填充。" * ((MIN_UPSTREAM_BODY_CHARS // 7) + 1)
+    body_pad = "分区正文填充。" * 12
     provider = _ContentProvider(["只有文字没有落盘。" + body_pad])
     executor = build_agent_executor(
         plan=plan,

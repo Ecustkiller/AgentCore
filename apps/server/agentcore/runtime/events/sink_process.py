@@ -49,7 +49,7 @@ def _insert_marker_step(
     """Insert a positional marker into ``steps`` (caller owns dedup).
 
     ``before_last_team`` inserts ahead of the last ``team`` marker (legacy
-    开工卡 order). New turns no longer emit that marker.
+    leftover team_preview order). New turns no longer emit that marker.
     """
     if before_last_team:
         for i in range(len(steps) - 1, -1, -1):
@@ -174,7 +174,8 @@ class SinkProcessMixin:
         Ordinal tail persist covers the common append case. Two compensations:
 
         - Mid-insert behind the cursor (``team`` already journaled at ``run_plan``,
-          then 开工卡 / 授权 inserts before it): schedule the marker alone and advance
+          then leftover team_preview / 授权 inserts before it): schedule the
+          marker alone and advance
           the cursor by one so the shifted tail is not re-journaled.
         - Open tool ahead of the marker holds the cursor (SUSPEND ``ask_user``): schedule
           the marker and seed past the lane.
@@ -219,7 +220,7 @@ class SinkProcessMixin:
 
         Mirrors the live SSE ``*_required`` accumulate path (close open text → insert
         → ordinal tail persist) so ``before_last_team`` markers keep live order in
-        ``process_*`` (开工卡 before ``team``). When an open tool ahead of the marker
+        ``process_*`` (leftover team_preview before ``team``). When an open tool ahead of the marker
         holds the cursor (SUSPEND ``ask_user`` never emits ``tool_use_end`` before
         pause), fall back to scheduling the marker fact + seeding the cursor past
         the lane — same compensation the old always-``seed_captain(len)`` path used,

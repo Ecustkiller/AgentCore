@@ -97,7 +97,6 @@ function toExecution(name: string): Execution {
     debateRounds: p.debateRounds,
     crossExamEnabled: p.crossExamEnabled,
     debateOpening: p.debateOpening,
-    debatePretrial: null,
   };
 }
 

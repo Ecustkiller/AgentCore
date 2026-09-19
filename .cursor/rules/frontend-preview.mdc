@@ -25,7 +25,7 @@ alwaysApply: false
 - **需要看画面时才 shoot**：对不准渲染、改手册内容源 `pages/toolbox/manual/content/` 或手册渲染器、改协作图宿主/布局/fit/视口（后者另跑 `shoot:graph-probe`）。`pnpm -C apps/desktop shoot <场景名过滤>` → `shoot-out/*.png`。无过滤全量约 4 min（4 worker），只在发布门禁（→ `verify-scope.mdc`）。
 - **`pnpm shoot` 是渲染冒烟门禁**（`ci.yml` frontend job **在跑**；Lint 早失败则后续 skipped）：任一场景渲染崩（未捕获报错 / `#/preview` 挂不上）即红。**发布前本地必跑**全量 `pnpm shoot` / `release:gate`。
 - **滚动条占位类 bug（内容被切一截 / 行「上浮」留白）测不出**：`pnpm shoot` 与任何 headless Chromium 用 overlay 滚动条、不占位，必假绿。症状对得上就改用 `chromium.launch({ headless: false })`（或真实 Electron）复现——全局 `globals.css` 给每个滚动容器留 10px 槽，固定高的 chrome 行（tab 条）会被切。
-- 新 AI 态补向量：后端 `conformance/vectors/` 加场景 → `cd apps/server && uv run python -m agentcore.conformance.export` 重导 fixture → `#/preview` 与 `pnpm conformance` 同步刷新。**改 UI 时别忘了向量的 `description` 也是文本**：曾出现 `multi_agent_coordination_wait` 的 description 还在描述早已删掉的 StatusStrip 分支，测试才是准的那一侧。
+- 新 AI 态补向量：后端 `conformance/vectors/` 加场景 → `cd apps/server && uv run python -m agentcore.conformance.export` 重导 fixture → `#/preview` 与 `pnpm conformance` 同步刷新。`#/preview` 目录只收现行可达产品态；fixture 标 `preview: false`（`PREVIEW_SKIP`）的仍进 harness，不进目录 / `pnpm shoot`。历史标本不占目录、也不留向量。**改 UI 时别忘了向量的 `description` 也是文本**：曾出现 `multi_agent_coordination_wait` 的 description 还在描述早已删掉的 StatusStrip 分支，测试才是准的那一侧。
 - **「否决手写 mock 态」只管 `#/preview` 回放面，别推广到组件单测。** `components/chat/__tests__/StatusStrip.*` 那批手搓 `ExecutionPlan` + `RunFrame` 的用例是**已定案例外**，**禁止**改成 `loadFixtures` 回放：约半数断言是负向 chrome（「条上不准出现 X」），向量不编码这类事实，改回放后断言照样手写；而 payload 形状已由 TS 类型守住，换来的只是把组件单测耦到数百行向量上、失败定位变差。既有回放先例（`debatePreviewMount.fixture.test.ts` 等）针对的是「整回合 fold 后的呈现」，不是状态条的负向断言。
 
 完整机制 / 浏览器打桩 / AuthGate 离线旁路 / 被否决方案（Storybook、手写 mock 态）→ [`前端技术与架构.md` §十 SSE 与协议一致性](/docs/04-前端/前端技术与架构.md)。

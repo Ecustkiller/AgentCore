@@ -9,7 +9,11 @@ import {
 import { queryClient } from "@/lib/queryClient";
 import { notifyError, notifyInfo, notifySuccess } from "@/lib/toast";
 import { startTeamActivityNotifications } from "@/services/teamActivityNotifications";
-import { applyAiAttention, useAiAttentionStore } from "@/stores/aiAttention";
+import {
+  applyAiAttention,
+  applyAiAttentionSnapshot,
+  useAiAttentionStore,
+} from "@/stores/aiAttention";
 import {
   applyAiTurnActivity,
   useAiTurnActivityStore,
@@ -145,7 +149,11 @@ describe("startTeamActivityNotifications", () => {
     useConversationStore.setState({ currentConversationId: OTHER, byId: {} });
     usePausedTurnStore.getState().clear();
     useInteractionStore.getState().clear();
-    useAiAttentionStore.getState().clear();
+    useAiAttentionStore.setState({
+      entries: [],
+      resolvedSeq: 0,
+      lastResolvedId: null,
+    });
     useAiTurnActivityStore.getState().clear();
     window.location.hash = `#/conversations/${OTHER}`;
     stop = startTeamActivityNotifications();
@@ -155,7 +163,11 @@ describe("startTeamActivityNotifications", () => {
     stop();
     usePausedTurnStore.getState().clear();
     useInteractionStore.getState().clear();
-    useAiAttentionStore.getState().clear();
+    useAiAttentionStore.setState({
+      entries: [],
+      resolvedSeq: 0,
+      lastResolvedId: null,
+    });
     useAiTurnActivityStore.getState().clear();
     useConversationStore.setState({ currentConversationId: null, byId: {} });
   });
@@ -513,6 +525,66 @@ describe("startTeamActivityNotifications", () => {
     frame("resolved");
     frame("required");
     expect(notifyInfoMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("fulfill 空快照再播种同一张卡不重弹", () => {
+    seedTitle(CID, "重连");
+    applyAiAttention({
+      type: "ai_attention",
+      state: "required",
+      conversation_id: CID,
+      turn_id: "t1",
+      interaction_id: "ask-snap",
+      kind: "ask_user",
+      title: "短句",
+    });
+    expect(notifyInfoMock).toHaveBeenCalledTimes(1);
+    applyAiAttentionSnapshot({ entries: [] });
+    applyAiAttentionSnapshot({
+      entries: [
+        {
+          interaction_id: "ask-snap",
+          conversation_id: CID,
+          turn_id: "t1",
+          kind: "ask_user",
+          title: "短句",
+        },
+      ],
+    });
+    expect(notifyInfoMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("同一对话新卡再响，应用内 toast id 按对话替换", () => {
+    seedTitle(CID, "测试提问功能");
+    applyAiAttention({
+      type: "ai_attention",
+      state: "required",
+      conversation_id: CID,
+      turn_id: "t1",
+      interaction_id: "ask-1",
+      kind: "ask_user",
+      title: "第一问",
+    });
+    applyAiAttention({
+      type: "ai_attention",
+      state: "required",
+      conversation_id: CID,
+      turn_id: "t2",
+      interaction_id: "ask-2",
+      kind: "ask_user",
+      title: "第二问",
+    });
+    expect(notifyInfoMock).toHaveBeenCalledTimes(2);
+    expect(notifyInfoMock).toHaveBeenNthCalledWith(
+      1,
+      "「测试提问功能」需要你的回应",
+      expect.objectContaining({ id: `team-activity:${CID}` }),
+    );
+    expect(notifyInfoMock).toHaveBeenNthCalledWith(
+      2,
+      "「测试提问功能」需要你的回应",
+      expect.objectContaining({ id: `team-activity:${CID}` }),
+    );
   });
 
   it("人就在那个对话页 → 不打扰", () => {

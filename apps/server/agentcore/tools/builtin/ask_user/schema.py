@@ -38,31 +38,25 @@ def advertised_option_actions(
 
 
 # Shared questions[] card shape (ask_user + escalate). Per-tool overlays:
-# array description / minItems / option.action / default 短触发.
+# array description / minItems / option.action 短触发.
 # 填卡合同只叠在 ask_user（写参当轮必见）；escalate 不抄推荐 / 桌上结果。
+# 倾向只在 label 名末「（推荐）」；不广告 questions[].default。
 _PROMPT_DESC = "问句。"
 _KIND_DESC = "choice 或 text，默认 choice。"
 _OPTIONS_DESC = f"kind=choice 候选项（最多 {_MAX_OPTIONS}）。"
 _LABEL_DESC = "选项名（回传答案）。"
 _MULTIPLE_DESC = "可选：允许多选，默认 false。"
-_DEFAULT_DESC = "可选。"
 
-# 原 consult(ask_kickoff)/ask_midtask 上收进本按钮。consult 回执赶不上这张卡。
+# 原 consult 开场/途中手册上收进本按钮。consult 回执赶不上这张卡。
 ASK_WHEN = (
-    "向用户发问（唯一问用户原语）。挡路才问：猜错会做错 → 先问；"
-    "仅可逆低杠杆才标假设。暂停回合等人答复。"
-    "形态未钉先问；已钉立刻派。"
-    "现有能力做不到 → 问句第一句说清做不到什么，再给替代；坚持则按所选继续。"
-    "明显次优 → 标假设继续。"
-    "未点名主体 ≠ 自拟后派。"
-    "choice 只服务下一步 ≠ 把正文已摆出的候选再投进卡。"
+    "向用户发问（唯一；调用即停）。猜错会做错才问；"
+    "可逆低杠杆或明显次优 → 标假设继续。已钉立刻派 ≠ 自拟后派。"
+    "能力盖不住 → 第一句说缺口再给替代；坚持则按所选继续。"
 )
-ASK_PROMPT_HOW = "要什么 / 给谁 / 做到哪一档。不要在正文再抄；假设和背景写正文。"
-ASK_DEFAULT_HOW = (
-    "有倾向时填。空 continue=确认。「继续」≠ 上轮选项已确认：须复述（或卡上 default）。"
-)
+ASK_PROMPT_HOW = "要什么 / 给谁 / 做到哪一档。问句在卡上 ≠ 再抄进正文。假设和背景写正文。"
 ASK_LABEL_HOW = (
-    "桌上结果；权衡写进选项名 ≠ 编制套餐。有倾向时该项第一、名末「（推荐）」。"
+    "桌上结果；权衡写进选项名 ≠ 编制套餐 ≠ 正文候选再投卡。"
+    "有倾向时该项第一、名末「（推荐）」。"
 )
 
 
@@ -71,13 +65,13 @@ def questions_array_schema(
     description: str,
     min_items: int | None = None,
     option_properties: dict[str, Any] | None = None,
-    default_description: str | None = None,
     prompt_description: str | None = None,
 ) -> dict[str, Any]:
     """JSON Schema for ``questions`` — one card shape, two callers.
 
     ``option_properties`` merge onto ``{label}`` (CEO desktop may add ``action``).
     Escalate omits ``action`` and ``minItems``; array description stays per-tool.
+    Tendency is label markup only; ``default`` is not advertised.
     """
     option_props: dict[str, Any] = {
         "label": {"type": "string", "description": _LABEL_DESC},
@@ -111,10 +105,6 @@ def questions_array_schema(
                 "multiple": {
                     "type": "boolean",
                     "description": _MULTIPLE_DESC,
-                },
-                "default": {
-                    "type": "string",
-                    "description": default_description or _DEFAULT_DESC,
                 },
             },
             "required": ["prompt"],
@@ -284,11 +274,10 @@ def normalize_questions(
     *,
     max_options: int = _MAX_OPTIONS,
 ) -> list[dict[str, Any]]:
-    """Cap (≤5) + id the questions, normalizing kind/options/multiple/default.
+    """Cap (≤5) + id the questions, normalizing kind/options/multiple.
 
-    ``default`` is optional here (unlike the old kickoff): an opening question should
-    pre-fill one, but a mid-task fork usually wants the user to actively choose, so it
-    is left empty when the CEO omits it. ``max_options`` forwards to
+    Tendency lives in option labels (``（推荐）``). A leftover model ``default`` is
+    dropped, not copied onto the card. ``max_options`` forwards to
     :func:`normalize_options`.
 
     Choice with no options after absorb is lowered to ``text`` so the card is
@@ -315,32 +304,22 @@ def normalize_questions(
                 raw_options, max_options=max_options
             )
             multiple = bool(it.get("multiple") or False)
-            default = str(it.get("default") or "").strip()
-            # Models sometimes put a desktop action on the question. Promote only
-            # onto the intended choice — never every option (a sibling "skip /
-            # 口头汇报" must not inherit register/open/bind).
+            # Models sometimes put a desktop action on the question. Promote onto
+            # the first option that does not already have one — never every
+            # option (a sibling "skip / 口头汇报" must not inherit register/open/bind).
             q_action = str(it.get("action") or "").strip()
             if q_action in _ALLOWED_OPTION_ACTIONS:
-                targets: list[dict[str, Any]] = []
-                if default:
-                    targets = [
-                        opt
-                        for opt in options
-                        if opt.get("label") == default and "action" not in opt
-                    ]
-                if not targets and options and "action" not in options[0]:
-                    targets = [options[0]]
-                for opt in targets:
-                    opt["action"] = q_action
+                for opt in options:
+                    if "action" not in opt:
+                        opt["action"] = q_action
+                        break
             if not options:
                 kind = "text"
                 options = []
                 multiple = False
-                default = ""
         else:
             options = []
             multiple = False
-            default = ""
         out.append(
             {
                 "id": f"q{i}",
@@ -348,7 +327,6 @@ def normalize_questions(
                 "kind": kind,
                 "options": options,
                 "multiple": multiple,
-                "default": default,
             }
         )
     return out

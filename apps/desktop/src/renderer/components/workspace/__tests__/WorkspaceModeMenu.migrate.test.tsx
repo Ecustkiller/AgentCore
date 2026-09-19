@@ -5,7 +5,7 @@ import {
 } from "@/components/workspace/WorkspaceModeControl";
 import type { EffectiveWorkspace } from "@/lib/workspaceEffectiveMode";
 import { useFoldersStore } from "@/stores/folders";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/capabilities", () => ({
@@ -24,6 +24,7 @@ function healthyLocalState(
     rootId: "root-1",
     rootName: "my-app",
     rootMissing: false,
+    rootStale: false,
     viaContainer: false,
     folderName: "本机项目",
     viaFolder: true,
@@ -68,13 +69,15 @@ describe("WorkspaceModeMenu · local traditional status", () => {
     expect(screen.queryByText(/请迁移到云后再继续/)).toBeNull();
   });
 
-  it("root-missing local: honest rebind copy + Git clone (not migrate debt copy)", () => {
+  it("root-stale local: relocate copy, not Git clone", () => {
     const state = healthyLocalState({
+      roots: [{ id: "root-1", name: "my-app", missing: true }],
       effective: {
         isLocal: true,
-        rootId: "root-gone",
-        rootName: null,
-        rootMissing: true,
+        rootId: "root-1",
+        rootName: "my-app",
+        rootMissing: false,
+        rootStale: true,
         viaContainer: false,
         folderName: "本机项目",
         viaFolder: true,
@@ -82,14 +85,38 @@ describe("WorkspaceModeMenu · local traditional status", () => {
     });
     render(<WorkspaceModeMenu state={state} conversationId="c1" />);
     expect(
-      screen.getByText(/目录在本机不可用。请重新绑定本机路径后再继续/),
+      screen.getByText(
+        /这个文件夹已经不在这台电脑上（改名、移动或删除）。请重新选择它所在的位置/,
+      ),
     ).toBeTruthy();
-    expect(screen.getByText("从 Git 克隆")).toBeTruthy();
+    expect(screen.getByText("重新选择文件夹")).toBeTruthy();
+    expect(screen.queryByText("从 Git 克隆")).toBeNull();
+    expect(screen.queryByText("迁移到云")).toBeNull();
+  });
+
+  it("root-missing local: reconnect copy, not Git clone", () => {
+    const state = healthyLocalState({
+      effective: {
+        isLocal: true,
+        rootId: "root-gone",
+        rootName: null,
+        rootMissing: true,
+        rootStale: false,
+        viaContainer: false,
+        folderName: "本机项目",
+        viaFolder: true,
+      },
+    });
+    render(<WorkspaceModeMenu state={state} conversationId="c1" />);
+    expect(
+      screen.getByText(
+        /这个文件夹已经不在这台电脑上（改名、移动或删除）。请重新选择它所在的位置/,
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("重新选择文件夹")).toBeTruthy();
+    expect(screen.queryByText("从 Git 克隆")).toBeNull();
     expect(screen.queryByText("迁移到云")).toBeNull();
     expect(screen.queryByText("遗留：先改云拷贝再合回")).toBeNull();
     expect(screen.queryByText("备份到云")).toBeNull();
-
-    fireEvent.click(screen.getByText("从 Git 克隆"));
-    expect(useFoldersStore.getState().connectGitOpen).toBe(true);
   });
 });

@@ -2,7 +2,7 @@
  * Project pause-frame display runs onto the assistant bubble + execution store.
  *
  * Local sidecar pause writeback skips cloud ``turn_journal``, so GET messages
- * often has ``runs=null`` while a kickoff/resume card is pending. Recovery
+ * often has ``runs=null`` while a durable pause card is pending. Recovery
  * carries ``pausedRuns`` from the on-disk frame (pinned at pause save); this
  * helper fills the collab-graph journal without attach-replaying a live turn.
  */

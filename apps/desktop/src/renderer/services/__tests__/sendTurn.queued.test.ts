@@ -8,11 +8,31 @@ vi.mock("@/hooks/useConversations", () => ({
   restoreConversationCache: vi.fn(),
   syncConversationListPreview: vi.fn(),
 }));
-vi.mock("@/services/sidecarRouting", () => ({
-  resolveSidecarRoot: vi.fn(() => Promise.resolve(null)),
-  resolveConversationLocalTarget: vi.fn(() => Promise.resolve(null)),
-  isSidecarEnabled: vi.fn(() => true),
-}));
+vi.mock("@/services/sidecarRouting", () => {
+  const resolveSidecarRoot = vi.fn();
+  return {
+    resolveSidecarRoot,
+    resolveConversationLocalTarget: vi.fn(() => Promise.resolve(null)),
+    resolveNewTurnBind: vi.fn(async (conversationId: string) => {
+      const t = (await resolveSidecarRoot(conversationId)) as {
+        rootId: string;
+        subpath: string;
+      } | null;
+      return t
+        ? { kind: "live" as const, rootId: t.rootId, subpath: t.subpath }
+        : { kind: "unbound" as const };
+    }),
+    liveSidecarTarget: (bind: {
+      kind: string;
+      rootId?: string;
+      subpath?: string;
+    }) =>
+      bind.kind === "live" && typeof bind.rootId === "string"
+        ? { rootId: bind.rootId, subpath: bind.subpath ?? "" }
+        : null,
+    isSidecarEnabled: vi.fn(() => true),
+  };
+});
 vi.mock("@/lib/capabilities", () => ({
   hasLocalEngine: vi.fn(() => true),
 }));

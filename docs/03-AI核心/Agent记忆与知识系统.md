@@ -60,7 +60,7 @@ offers_tools: host, debate  # 可选；查阅后启用的已装配按需工具 /
 
 **`description` 怎么来**：**异步**生成、**只在空时**生成、非空永不自动覆盖。异步是因为同步会把一次纯数据写入变成依赖 LLM 可用性。「仅空时生成」则零新字段地绕开「这条摘要是 AI 拟的还是用户手写的」。代价是 AI 拟的摘要可能随正文过时，用户要刷新就**清空**。空 `description` **不是错误状态**——目录里只显示名字。→ 见代码: `documents/description.py`
 
-**巩固写的按需条目走同一条补写路径**。巩固经 `MemoryStore.save` 只落正文，不顺手写 `description`。**按需条目送到模型面前的全部信息就是「名字 + `description`」**，空摘要 = 实际不可检索。故 `apply: on_demand` 且摘要为空 → 排补写，与用户经 documents API 写入同一函数、同一「仅空时生成」语义。常驻条目不排——它整篇进 prompt。→ 见代码: `memory/document_store.py`
+**巩固写的按需条目走同一条补写路径**。巩固经 `MemoryStore.save` 只落正文，不顺手写 `description`。**按需条目送到模型面前的全部信息就是「名字 + `description`」**，空摘要 = 实际不可检索。按需 `description` 写干什么、何时该查阅。故 `apply: on_demand` 且摘要为空 → 排补写，与用户经 documents API 写入同一函数、同一「仅空时生成」语义。常驻条目不排——它整篇进 prompt。→ 见代码: `memory/document_store.py`
 
 **按需目录只认 `description`，不回退取正文首行。** 首行是为阅读写的具体事实，既不概括这条讲什么，也不说何时该来查它；回退取首行会把「没有检索摘要」伪装成误导性摘要，比空更糟。→ 见代码: `memory/injection.py` · `memory/rules_injection.py`
 

@@ -18,12 +18,11 @@ PlanRevisionKind = Literal["bind", "steer"]
 ActKind = Literal["multi_agent", "debate"]
 # 幕授权来源：现行只写 auto。旧 journal 的 stage_card / preview 不当 live 成员。
 ActAuthorizedBy = Literal["auto"]
-# run_failed 可机读原因类（additive）：协作图脸优先按此类贴文案。
-# quality=内容契约/硬缺口→「未达标」；
-# format=结构/格式闸（缺章节·JSON）→「格式未过」；
+# run_failed 可机读原因类：协作图脸优先按此类贴文案。
 # model=中断/停滞/降级交接→「模型中断」；call=LLM/超时→「调用失败」；
 # 缺省→「失败」/空 error「调用失败」。禁前端扫正文猜脸。
-RunFailureKind = Literal["quality", "format", "model", "call"]
+# 旧 journal 若仍带 quality/format，未知值丢弃，不当专名脸。
+RunFailureKind = Literal["model", "call"]
 
 
 class PlanRevision(WirePayload):
@@ -327,7 +326,7 @@ class DeliveryArtifact(WirePayload):
     """One path-level acceptance row on ``delivery_status`` (主清单数据源).
 
     ``status=accepted`` → counts toward ``delivered_files`` / CEO「已交付」;
-    ``rejected`` carries ``reason`` (e.g. ``citations_unverified`` / ``run_failed``)
+    ``rejected`` carries ``reason`` (e.g. ``run_failed``)
     and optional ``detail`` for the file checklist. Undeclared extras are omitted
     (not rejected). Draft is out of scope for block 1.
     ``workspace_id``: landing desk when the plan node set ``target_folder_id``

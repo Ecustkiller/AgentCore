@@ -163,7 +163,6 @@ let mockExecution: Execution = {
   debateRounds: [],
   crossExamEnabled: false,
   debateOpening: null,
-  debatePretrial: null,
 };
 
 function seed(opts: {

@@ -63,7 +63,7 @@ pnpm promo:capture full --tape <tape-id>
 | `full` | `promo:capture:full --tape <id>` | 结构静帧 + 章节静帧 |
 | `clip` | `promo:capture:clip --tape <id>` | SPEED=1 流式短片 + 抽帧 |
 
-`full` 拍产品结构面（开场输入、开工卡、辩论室、协作图、导演台章节），**不**按某条片子的金句做内容门禁。
+`full` 拍产品结构面（开场输入、辩论室、协作图、导演台章节），**不**按某条片子的金句做内容门禁。
 
 ---
 

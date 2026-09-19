@@ -1,6 +1,7 @@
 /**
  * 生产通用澄清卡 —— AskCardShell + 行式选项（{@link AskRowGroup}）。
- * 无开场仪式主 CTA。打开不预选 `default`；AI 倾向写在选项 label 原文。`default` 走行右灰字「默认」。
+ * 无开场仪式主 CTA。打开不预选。AI 倾向写在选项 label 原文「（推荐）」。
+ * 旧帧可能仍带 `default`，不画「默认」、不预选。
  * 当前题干画在卡头（旧帧无题则 `question`）；可见面不画「需要你拍板」和图标。
  * `questions.length ≥ 2`：体内一次一题，头右侧 {@link AskQuestionPager} 可点切换各题
  * （没写补充也能切）；非末题主 CTA「下一题」（只推进），末题才「提交」才 resume。
@@ -31,7 +32,7 @@ import { ArrowRight, FolderOpen, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AskCardFooter, AskCardShell } from "./AskCardShell";
-import { CommenceNote } from "./AskCommenceParts";
+import { AskNote } from "./AskNote";
 import { type AskRow, AskRowGroup } from "./AskOptionRow";
 import {
   ASK_AUTO_ADVANCE_MS,
@@ -366,7 +367,6 @@ export function AskDecisionBody({
       return {
         key: opt.label,
         label: opt.label,
-        hint: q.default && opt.label === q.default ? "默认" : undefined,
         icon: desktopFolder ? (
           bindBusy ? (
             <Loader2 size={12} className="animate-spin" />
@@ -467,7 +467,7 @@ export function AskDecisionBody({
                   value={(answer.answers[q.id] ?? [])[0] ?? ""}
                   onChange={(next) => answer.setText(q, next)}
                   disabled={busy}
-                  placeholder={q.default || "填写你的答案"}
+                  placeholder="填写你的答案"
                 />
               </div>
             ) : (
@@ -500,7 +500,7 @@ export function AskDecisionBody({
 
         {!hasQuestions && (
           <div className="px-2">
-            <CommenceNote answer={answer} disabled={busy} compact />
+            <AskNote answer={answer} disabled={busy} compact />
           </div>
         )}
       </div>

@@ -452,7 +452,7 @@ export function BrowserActivityCard({
 /**
  * Single browser step expanded body: leftover facts the title line did not
  * carry (destination URL when the chip is the page title) plus the key-frame.
- * No second Navigate header; 打开浏览器 stays on the dock tab / login card.
+ * No second Navigate header; 打开浏览器 stays on the dock tab / `+`.
  * ≥2 consecutive steps → {@link BrowserActivityCard}.
  */
 export function BrowserResult({

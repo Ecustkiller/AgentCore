@@ -554,11 +554,6 @@ def test_deliverable_parsed_onto_policy():
                 "role": "A",
                 "task": "a",
                 "deliverable": {
-                    "required_sections": ["结论", "  "],  # blank dropped
-                    "must_contain": ["风险"],  # deleted — ignored
-                    "min_length": 100,  # deleted — ignored
-                    "must_contain_soft": True,  # deleted — ignored
-                    "output_format": "json",
                     "strict": True,
                 },
             }
@@ -567,12 +562,8 @@ def test_deliverable_parsed_onto_policy():
     )
     c = plan.nodes[0].deliverable
     assert c is not None
-    assert c.required_sections == ["结论"]
-    assert c.output_format == "json"
     assert c.strict is True
-    assert not hasattr(c, "must_contain")
-    assert not hasattr(c, "min_length")
-    assert not hasattr(c, "must_contain_soft")
+    assert c.artifacts == []
 
 
 def test_no_deliverable_does_not_expect_landing():
@@ -677,21 +668,6 @@ def test_prose_with_downstream_keeps_form():
     d = plan.by_id("t_diagnose").deliverable
     assert d is not None
     assert d.artifacts == []
-    assert not hasattr(d, "min_length")
-
-
-def test_deliverable_invalid_output_format_falls_back_to_text():
-    plan, _ = build_run_plan(
-        [
-            {
-                "role": "A",
-                "task": "a",
-                "deliverable": {"output_format": "xml", "form": "prose"},
-            }
-        ],
-        id_prefix="t",
-    )
-    assert plan.nodes[0].deliverable.output_format == "text"
 
 
 # --- 阶段2 嵌套子任务: tree-position stamping (delegation on by default) --------

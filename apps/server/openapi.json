@@ -8718,7 +8718,7 @@
         "type": "object"
       },
       "HostAxis": {
-        "description": "本机 Host 面授权（与 ``command`` 正交；不挂 execution_class / 不吃 kickoff 静默授）。",
+        "description": "本机 Host 面授权（与 ``command`` 正交；不挂 execution_class / 不吃 delegation 静默授）。",
         "enum": [
           "off",
           "ask",
@@ -11554,11 +11554,6 @@
       "PausedTurnSummary": {
         "description": "A turn awaiting resume after a durable ask_user pause.\n\nSurfaced on conversation reopen so the client can re-render the right resume card\nby ``kind`` and offer the kind-appropriate actions → the resume endpoint\n(ask_user: continue / stop).\n``message_id`` is both the pause key and the id the resumed assistant message will\nreuse, so an optimistic bubble reconciles cleanly.\n\nLeftover ``team_preview`` / ``plan_review`` frames are skipped on list (not serialized);\nresume of a leftover frame is 410 Gone.\nask_user carries the unified card payload\n``question`` (the framing / opening line) + ``questions`` (empty for a compact\nmid-task fork). Unused ``steps`` / ``pending`` stay empty.",
         "properties": {
-          "browser_login": {
-            "default": false,
-            "title": "Browser Login",
-            "type": "boolean"
-          },
           "checkpoint_id": {
             "title": "Checkpoint Id",
             "type": "string"
@@ -17185,7 +17180,7 @@
   "info": {
     "description": "Multi-Agent AI Workspace API",
     "title": "AgentCore",
-    "version": "0.7.23"
+    "version": "0.7.24"
   },
   "openapi": "3.1.0",
   "paths": {

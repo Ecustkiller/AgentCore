@@ -1,5 +1,5 @@
 import type { SSEEvent } from "@/types/events";
-import { isTurnFixture } from "@agentcore/protocol-conformance/fixtureKind";
+import { isPreviewFixture } from "@agentcore/protocol-conformance/fixtureKind";
 import {
   type FoldReplaySource,
   openEventDocument,
@@ -14,11 +14,11 @@ export interface PreviewFixture {
   source: FoldReplaySource;
 }
 
-// Every committed turn-fold conformance vector doubles as a preview scenario.
-// Auxiliary blobs (non-turn fixtures) are excluded — same
-// contract as protocol-conformance harness `isTurnFixture`. Documents are opened
-// through the shared supersets source adapter so tape/recording-shaped inputs
-// (and legacy kind/ts dialect) can feed the same replay path.
+// Committed turn-fold vectors with `preview !== false` are preview scenarios.
+// `preview: false` stays in the conformance harness (`isTurnFixture`) only.
+// Documents are opened through the shared supersets source adapter so
+// tape/recording-shaped inputs (and legacy kind/ts dialect) can feed the same
+// replay path.
 const modules = import.meta.glob(
   "../../../../../packages/protocol-conformance/fixtures/*.json",
   { eager: true },
@@ -27,7 +27,7 @@ const modules = import.meta.glob(
 export const PREVIEW_FIXTURES: PreviewFixture[] = Object.entries(modules)
   .sort(([a], [b]) => a.localeCompare(b))
   .map(([, mod]) => mod.default)
-  .filter(isTurnFixture)
+  .filter(isPreviewFixture)
   .map((fx) => {
     const doc = openEventDocument(fx);
     const source = prepareFoldSource(fx);

@@ -17,14 +17,24 @@ export interface EffectiveWorkspace {
   rootId: string | null;
   /** Human folder name when resolvable from the desktop root list. */
   rootName: string | null;
-  /** Explicit bind whose root is gone on this device (§八). */
+  /** Explicit bind whose rootId is not in this device's authorization table. */
   rootMissing: boolean;
+  /** Authorized root whose absPath is no longer a directory on this machine. */
+  rootStale: boolean;
   /** True when locality comes from default container, not an explicit bind. */
   viaContainer: boolean;
   /** Project name when the conversation inherits a folder workspace. */
   folderName: string | null;
   /** Binding lives on the project (vs bare conversation scratch). */
   viaFolder: boolean;
+}
+
+function rootStaleOnDisk(
+  rootId: string | null,
+  roots: readonly FsRoot[],
+): boolean {
+  if (!rootId) return false;
+  return Boolean(roots.find((r) => r.id === rootId)?.missing);
 }
 
 export function resolveEffectiveWorkspace(opts: {
@@ -45,6 +55,7 @@ export function resolveEffectiveWorkspace(opts: {
       rootId: boundRootId,
       rootName,
       rootMissing: isBoundRootMissing(binding, roots),
+      rootStale: rootStaleOnDisk(boundRootId, roots),
       viaContainer: binding?.source === "container",
       folderName: viaFolder ? folderName : null,
       viaFolder,
@@ -59,6 +70,7 @@ export function resolveEffectiveWorkspace(opts: {
       rootId: localContainerRootId,
       rootName,
       rootMissing: !roots.some((r) => r.id === localContainerRootId),
+      rootStale: rootStaleOnDisk(localContainerRootId, roots),
       viaContainer: true,
       folderName: null,
       viaFolder: false,
@@ -70,10 +82,16 @@ export function resolveEffectiveWorkspace(opts: {
     rootId: null,
     rootName: null,
     rootMissing: false,
+    rootStale: false,
     viaContainer: false,
     folderName: viaFolder ? folderName : null,
     viaFolder,
   };
+}
+
+/** Chip warning + 重新选择文件夹：授权表没有，或盘上路径已失效。 */
+export function localRootNeedsRelocate(ws: EffectiveWorkspace): boolean {
+  return ws.isLocal && (ws.rootMissing || ws.rootStale);
 }
 
 /**
@@ -93,6 +111,9 @@ export function formatWorkspaceChipLabel(ws: EffectiveWorkspace): string {
  * （文件夹绑定，≠ 执行路径）。执行路径不在大众 Composer 产品面展示。
  */
 export function formatWorkspaceChipTitle(ws: EffectiveWorkspace): string {
+  if (localRootNeedsRelocate(ws)) {
+    return "文件夹找不到。请重新选择它所在的位置。";
+  }
   if (ws.viaFolder) {
     return ws.isLocal
       ? `${LOCAL_TRADITIONAL_LABEL}（本机文件夹权威，≠离线）`

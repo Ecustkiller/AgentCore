@@ -123,7 +123,7 @@ def test_resume_continuity_steer_for_confirm_pre_pause():
     assert "先问你" not in steer
     assert "请确认" not in steer
     assert "档位" in steer
-    assert "按确认默认" in steer
+    assert "按确认默认" not in steer
     assert "空转确认" in steer or "承接选项" in steer
 
 

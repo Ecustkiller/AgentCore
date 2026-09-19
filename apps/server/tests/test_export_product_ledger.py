@@ -12,7 +12,7 @@ from pathlib import Path
 
 from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.runs.file_acceptance import (
-    REASON_CITATIONS_UNVERIFIED,
+    REASON_CONTRACT_FAILED,
     build_file_acceptance,
     fold_exported_sources,
 )
@@ -152,7 +152,7 @@ def test_fold_keeps_source_when_export_was_rejected():
             "kind": "docx",
             "derived_from": "报告.md",
             "status": "rejected",
-            "reason": REASON_CITATIONS_UNVERIFIED,
+            "reason": REASON_CONTRACT_FAILED,
         },
     ]
     assert fold_exported_sources(acceptance) == (["报告.md"], [])

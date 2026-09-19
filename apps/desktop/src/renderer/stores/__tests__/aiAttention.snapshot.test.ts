@@ -7,7 +7,11 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 
 afterEach(() => {
-  useAiAttentionStore.setState({ entries: [] });
+  useAiAttentionStore.setState({
+    entries: [],
+    resolvedSeq: 0,
+    lastResolvedId: null,
+  });
 });
 
 describe("aiAttention snapshot / banner filter", () => {
@@ -63,5 +67,42 @@ describe("aiAttention snapshot / banner filter", () => {
       aiAttentionEntriesExcept("here").map((e) => e.conversationId),
     ).toEqual(["away"]);
     expect(useAiAttentionStore.getState().entries).toHaveLength(2);
+  });
+
+  it("空快照灭灯但不记 resolved（重连 ≠ 结案）", () => {
+    applyAiAttention({
+      type: "ai_attention",
+      state: "required",
+      conversation_id: "c1",
+      turn_id: "t",
+      interaction_id: "keep",
+      kind: "ask_user",
+      title: "真灯",
+    });
+    const seq = useAiAttentionStore.getState().resolvedSeq;
+    applyAiAttentionSnapshot({ entries: [] });
+    expect(useAiAttentionStore.getState().entries).toEqual([]);
+    expect(useAiAttentionStore.getState().resolvedSeq).toBe(seq);
+
+    applyAiAttention({
+      type: "ai_attention",
+      state: "required",
+      conversation_id: "c1",
+      turn_id: "t",
+      interaction_id: "keep",
+      kind: "ask_user",
+      title: "真灯",
+    });
+    applyAiAttention({
+      type: "ai_attention",
+      state: "resolved",
+      conversation_id: "c1",
+      turn_id: "t",
+      interaction_id: "keep",
+      kind: "ask_user",
+      title: "真灯",
+    });
+    expect(useAiAttentionStore.getState().resolvedSeq).toBe(seq + 1);
+    expect(useAiAttentionStore.getState().lastResolvedId).toBe("keep");
   });
 });

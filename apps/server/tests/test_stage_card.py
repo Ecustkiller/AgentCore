@@ -66,9 +66,7 @@ async def test_resolve_interaction_rejects_stage_card_kind():
 async def test_drive_top_level_no_longer_hangs_team_preview(monkeypatch):
     """顶层也不再挂 team_preview。"""
     from agentcore.core.types import AutonomyPolicy
-    from agentcore.runtime.delegate.drive import _team_preview_before_workers
-    from agentcore.runtime.runs.plan import RunPlan
-    from agentcore.runtime.runs.types import RunSpec
+    from agentcore.runtime.delegate.worker_grant import maybe_auto_grant_before_workers
 
     monkeypatch.setattr(
         "agentcore.runtime.sandbox_approval.worker_gate_applies", lambda *_a, **_k: False
@@ -82,23 +80,14 @@ async def test_drive_top_level_no_longer_hangs_team_preview(monkeypatch):
         _base_tool_context = type("C", (), {"backend": None})()
         _approval_gate = None
 
-    plan = RunPlan(nodes=[RunSpec(run_id="a", agent_id="a", role="r", task="t")])
-    result = await _team_preview_before_workers(
+    await maybe_auto_grant_before_workers(
         _Tool(),
-        plan,
-        complexity_hint="standard",
         seed_completed=None,
-        call_idx=0,
     )
-    assert result is None
-    result2 = await _team_preview_before_workers(
+    await maybe_auto_grant_before_workers(
         _Tool(),
-        plan,
-        complexity_hint="standard",
         seed_completed=None,
-        call_idx=1,
     )
-    assert result2 is None
 
 
 @pytest.mark.asyncio

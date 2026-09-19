@@ -45,19 +45,14 @@ SCOPE_DAG = [
 
 
 def _upstream_body(marker: str) -> str:
-    """Pad a short fixture marker past the upstream handoff body floor."""
-    from agentcore.runtime.runs.research_quality import MIN_UPSTREAM_BODY_CHARS
-
-    if len(marker.strip()) >= MIN_UPSTREAM_BODY_CHARS:
-        return marker
-    return marker + "\n" + ("调研正文填充。" * ((MIN_UPSTREAM_BODY_CHARS // 7) + 1))
+    """Fixture LLM bodies; empty-handoff is the only remaining body gate."""
+    return marker
 
 
 class Provider:
     """Fake LLM: one scripted content chunk per call, optionally a usage chunk."""
 
     def __init__(self, contents: list[str], usage: TokenUsage | None = None) -> None:
-        # Pad past MIN_UPSTREAM_BODY_CHARS so handoff accepts short fixture markers.
         self._contents = [_upstream_body(c) for c in contents]
         self._usage = usage
         self.calls = 0

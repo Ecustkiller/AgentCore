@@ -93,12 +93,4 @@ describe("EscalationCard · 配了超时的部署", () => {
       screen.getByText(/2 小时内未裁则按此继续：暂按 Postgres 继续/),
     ).toBeTruthy();
   });
-
-  it("carries the ceiling into the browser-login card", () => {
-    renderCard({ ...pending, browserLogin: true, timeoutSeconds: 900 });
-    expect(screen.getByText(/需要你登录/)).toBeTruthy();
-    expect(
-      screen.getByText(/15 分钟内未答则按此继续：暂按 Postgres 继续/),
-    ).toBeTruthy();
-  });
 });

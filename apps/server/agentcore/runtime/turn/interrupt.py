@@ -162,7 +162,7 @@ def compose_interrupt_body(content: str, *, reason: TurnInterruptReason) -> str:
     max_rounds, token_budget. USER_STOP empty stays silent — the user pressed stop.
 
     REDRIVE_FAILED: always leave a user-visible honesty note in the body so a
-    kickoff bubble cannot freeze as「已开工」while the team was silently cleared.
+    opening bubble cannot freeze as「已开工」while the team was silently cleared.
     """
     from agentcore.runtime.engine.tool_protocol_sanitize import prepare_assistant_content
 

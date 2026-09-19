@@ -46,7 +46,11 @@ import {
   ThumbsUp,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { CloneMessageAction, MessageTime, RegenerateMessageAction } from "./MessageActions";
+import {
+  CloneMessageAction,
+  MessageTime,
+  RegenerateMessageAction,
+} from "./MessageActions";
 import { useCopyAction } from "./useCopyAction";
 
 /** Signal-only summary (cost / duration) — token + ReAct rounds live in「更多」. */

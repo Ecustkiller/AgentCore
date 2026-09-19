@@ -192,17 +192,16 @@ describe("StatusStrip · FailureStrip scoreboard", () => {
         kind: "run_failed",
         runId: "r-ceo",
         agentId: "ceo",
-        error: "format check failed",
-        failureKind: "format",
+        error: "ConnectError: upstream 503",
+        failureKind: "call",
       },
     ];
     const exec = projectExecution(plan, frames, "failed");
     renderStrip(exec);
 
     expect(screen.getByTestId("status-strip-failed")).toBeTruthy();
-    expect(
-      screen.queryByText(failureDetailSentence("format", null)),
-    ).toBeNull();
+    expect(screen.queryByText("ConnectError: upstream 503")).toBeNull();
+    expect(screen.queryByText(failureDetailSentence("call", null))).toBeNull();
   });
 
   it("files already saved before the failure paint 部分完成, not 失败", () => {

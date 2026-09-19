@@ -39,6 +39,12 @@ from agentcore.runtime.skills.platform_shelf import (
 
 router = APIRouter(prefix="/skill-store", tags=["skill-store"])
 
+# Keep in sync with apps/desktop/src/renderer/lib/skillStoreCopy.ts
+PUBLISH_MISSING_INTRO = (
+    "先写一句话介绍：干什么、什么时候该翻开。没这句，别人装了 CEO 也找不到。"
+)
+PUBLISH_MISSING_BODY = "先写正文。空的做法上架没有用。"
+
 
 class SkillStoreListingRow(BaseModel):
     id: str
@@ -214,10 +220,10 @@ async def _require_source_doc(
             detail={"message": "只能上架账号里已启用的按需技能"},
         )
     if not (doc.description or "").strip():
-        raise HTTPException(status_code=400, detail={"message": "上架需要 description"})
+        raise HTTPException(status_code=400, detail={"message": PUBLISH_MISSING_INTRO})
     stripped = strip_entry_frontmatter(doc.content or "")
     if stripped is None or not stripped.strip():
-        raise HTTPException(status_code=400, detail={"message": "这份技能还没有正文"})
+        raise HTTPException(status_code=400, detail={"message": PUBLISH_MISSING_BODY})
     return doc
 
 

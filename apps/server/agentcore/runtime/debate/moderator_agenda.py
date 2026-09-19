@@ -96,10 +96,10 @@ async def frame_round(
     气泡，故非硬依赖）。后续轮恒 ``""``（换轮点题由前端模板承担）。
     """
     if not history:
-        kickoff = (config.kickoff_ask or "").strip()
-        kickoff_block = (
-            f"\n用户开赛嘱咐（定首轮焦点时优先呼应其关心的争议点；勿覆写命题本身）：\n{kickoff}\n"
-            if kickoff
+        ask = (config.opening_ask or "").strip()
+        ask_block = (
+            f"\n用户开赛嘱咐（定首轮焦点时优先呼应其关心的争议点；勿覆写命题本身）：\n{ask}\n"
+            if ask
             else ""
         )
         dossier = (config.research_dossier_index or "").strip()
@@ -121,7 +121,7 @@ async def frame_round(
         user = (
             f"辩论命题：{config.motion}\n\n参与方：\n{_sides_block(config)}\n\n"
             f"{_frame_form_hint(config.form)}\n"
-            f"{kickoff_block}{dossier_block}{incomplete_block}\n"
+            f"{ask_block}{dossier_block}{incomplete_block}\n"
             "请把命题拆成【第一轮】各方应集中交锋的一个最核心争议焦点——挑命题里【最承重】的"
             "那个争议点开场（分量最大、最能带出后续交锋的），别开在边角枝节上。"
             "焦点必须是【一句短语、不超过 30 字】、像一个小标题，聚焦【单一】具体可辩的争议点——"

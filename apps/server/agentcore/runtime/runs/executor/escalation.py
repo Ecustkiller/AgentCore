@@ -43,22 +43,20 @@ def build_escalation_channel(
         kind: str = "normal",
         awaiting: str = "user",
         *,
-        browser_login: bool = False,
         ownership_paths: list[str] | None = None,
         lock_owner_run_id: str = "",
     ) -> EscalationOutcome:
         # Cap: count this conversation's already-parked blocking escalates. The check
         # and the suspend's create() run with no await between them (single loop), so
         # the count can't race (设计 §4.7). Over cap ⇒ degrade (proceed on assumption).
-        # browser_login / write-lock ownership are always user-facing — never CEO.
-        want_browser_login = bool(browser_login)
+        # Write-lock ownership is always user-facing — never CEO.
         own_paths = [
             p for p in (ownership_paths or []) if isinstance(p, str) and p.strip()
         ]
         ownership_conflict = bool(own_paths)
         who = (
             "user"
-            if want_browser_login or ownership_conflict
+            if ownership_conflict
             else (awaiting if awaiting in ("user", "ceo") else "user")
         )
         awaiting_ceo = who == "ceo"
@@ -174,8 +172,6 @@ def build_escalation_channel(
             "kind": esc_kind,
             "awaiting": who,
         }
-        if want_browser_login:
-            suspend_payload["browser_login"] = True
         if own_paths:
             suspend_payload["ownership_paths"] = own_paths
         lock_owner = (lock_owner_run_id or "").strip()
@@ -203,7 +199,6 @@ def build_escalation_channel(
                         questions=questions,
                         kind=esc_kind,
                         awaiting=who,
-                        browser_login=want_browser_login or None,
                         ownership_paths=own_paths or None,
                         lock_owner_run_id=lock_owner or None,
                         timeout_seconds=env.escalation_timeout,

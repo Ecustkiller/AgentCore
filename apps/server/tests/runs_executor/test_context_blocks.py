@@ -159,7 +159,7 @@ async def test_context_blocks_channel_sequence_and_single_source():
     plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
     spec = replace(
         plan.by_id("t_1"),
-        deliverable=Deliverable(required_sections=["结论"]),
+        deliverable=Deliverable(artifacts=["report.md"]),
         gate_notes="把关要点文",
         steer="按新方向调整",
     )
@@ -179,11 +179,7 @@ async def test_context_blocks_channel_sequence_and_single_source():
     assert blocks[-2].channel == "gate_notes"
     assert blocks[-2].body == "把关要点文"
     deliverable = next(b for b in blocks if b.channel == "deliverable")
-    assert "结论" in deliverable.body
-    assert "form=" not in deliverable.body
-    assert "建议正文骨架" not in deliverable.body
-    assert "检索预算" not in deliverable.body
-    assert "交付形态" not in deliverable.body
+    assert "report.md" in deliverable.body
 
 
 async def test_context_blocks_omit_deliverable_without_instance_facts():

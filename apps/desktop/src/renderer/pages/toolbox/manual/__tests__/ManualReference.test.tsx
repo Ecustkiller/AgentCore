@@ -98,8 +98,12 @@ describe("ManualReference", () => {
     expect(screen.getByText("检查点与审批")).toBeTruthy();
     expect(screen.getByText("跑偏了 / 中途想改方向？")).toBeTruthy();
     expect(screen.getByText("中途插手")).toBeTruthy();
+    expect(screen.getByText("写的提示词怎么才会被用上？")).toBeTruthy();
+    expect(screen.getByText("怎么写提示词")).toBeTruthy();
     expect(screen.queryByText(/ask_user/)).toBeNull();
     expect(screen.queryByText(/plan_review/)).toBeNull();
+    expect(document.body.textContent).not.toMatch(/组团卡/);
+    expect(document.body.textContent).not.toMatch(/拒开工/);
   });
 
   it("renders settings rows including memory", () => {

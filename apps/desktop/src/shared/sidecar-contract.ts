@@ -865,7 +865,7 @@ export interface SidecarRecoveryResponse {
   paused: SidecarPausedTurn[];
   /**
    * message_id → pause 落盘时投影的 display runs（挂起重开协作图）。
-   * 与 ``paused[]`` summary 分离：summary 只喂开工卡 store，runs 走 hydrate。
+   * 与 ``paused[]`` summary 分离：summary 只喂挂起交互 store，runs 走 hydrate。
    */
   pausedRuns?: Record<string, SidecarRunsPayload>;
   /**

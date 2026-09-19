@@ -2083,7 +2083,7 @@ def test_ingest_scan_rejects_unsanitized_memory_and_system_contacts():
 
 
 def test_export_allows_wired_cold_and_hot_approval_pauses():
-    assert TAPE_WIRED_PAUSE_KINDS == frozenset({"checkpoint_required"})
+    assert frozenset({"checkpoint_required"}) == TAPE_WIRED_PAUSE_KINDS
     assert "plan_review_required" not in TAPE_WIRED_PAUSE_KINDS
     assert "team_preview_required" not in TAPE_WIRED_PAUSE_KINDS
     assert "checkpoint_required" not in TAPE_UNWIRED_PAUSE_KINDS

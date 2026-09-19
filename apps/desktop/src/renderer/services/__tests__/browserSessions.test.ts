@@ -13,12 +13,14 @@ vi.mock("@/services/sidecarRouting", () => ({
   getActiveSidecarTarget: vi.fn(() => null),
   resolveSidecarRoot: vi.fn(() => Promise.resolve(null)),
   resolveConversationLocalTarget: vi.fn(() => Promise.resolve(null)),
+  resolveLocalBind: vi.fn(() => Promise.resolve({ kind: "unbound" as const })),
 }));
 
 import { api } from "@/services/api";
 import {
   getActiveSidecarTarget,
   resolveConversationLocalTarget,
+  resolveLocalBind,
   resolveSidecarRoot,
 } from "@/services/sidecarRouting";
 import {
@@ -34,6 +36,7 @@ const postMock = vi.mocked(api.post);
 const getActiveMock = vi.mocked(getActiveSidecarTarget);
 const resolveRootMock = vi.mocked(resolveSidecarRoot);
 const resolveLocalMock = vi.mocked(resolveConversationLocalTarget);
+const resolveBindMock = vi.mocked(resolveLocalBind);
 
 beforeEach(() => {
   getMock.mockReset();
@@ -42,9 +45,11 @@ beforeEach(() => {
   getActiveMock.mockReset();
   resolveRootMock.mockReset();
   resolveLocalMock.mockReset();
+  resolveBindMock.mockReset();
   getActiveMock.mockReturnValue(null);
   resolveRootMock.mockResolvedValue(null);
   resolveLocalMock.mockResolvedValue(null);
+  resolveBindMock.mockResolvedValue({ kind: "unbound" });
   vi.stubGlobal("window", {});
 });
 
@@ -152,6 +157,20 @@ describe("browserSessions service", () => {
     resolveLocalMock.mockResolvedValue({
       rootId: "root-1",
       subpath: "conversations/c1",
+    });
+
+    const result = await listBrowserSessions("c1");
+
+    expect(getMock).not.toHaveBeenCalled();
+    expect(result).toEqual({ sessions: [], activeSessionId: null });
+  });
+
+  it("listBrowserSessions returns empty for stale bind (no cloud GET)", async () => {
+    resolveBindMock.mockResolvedValue({
+      kind: "stale",
+      rootId: "root-1",
+      subpath: "",
+      absPath: "/gone",
     });
 
     const result = await listBrowserSessions("c1");

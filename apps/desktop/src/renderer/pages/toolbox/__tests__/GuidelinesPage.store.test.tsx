@@ -1,4 +1,5 @@
 import { __resetCapabilitiesCacheForTests } from "@/components/tools/useCapabilities";
+import { PUBLISH_MISSING_INTRO } from "@/lib/skillStoreCopy";
 import type { Capabilities } from "@/services/capabilities";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 // @vitest-environment jsdom
@@ -198,7 +199,7 @@ describe("我的提示词上架入口", () => {
   async function openMineItem() {
     fireEvent.click(await screen.findByText("合同审查", { exact: false }));
     const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByText("合同审查"));
+    fireEvent.click(within(dialog).getByRole("heading", { name: "合同审查" }));
     return dialog;
   }
 
@@ -212,6 +213,26 @@ describe("我的提示词上架入口", () => {
     await waitFor(() => {
       expect(publishSkill).toHaveBeenCalledWith("d1", "writing");
     });
+  });
+
+  it("缺介绍上架用人话拦住", async () => {
+    vi.mocked(getSkillCatalog).mockResolvedValue({
+      ...mineCatalog,
+      mine: [{ ...mineCatalog.mine[0], description: "" }],
+    });
+    renderPage();
+    await openMineItem();
+    fireEvent.click(await screen.findByRole("button", { name: "上架" }));
+    const dialog = await screen.findByRole("dialog", { name: "上架到市场" });
+    expect(within(dialog).getByText(PUBLISH_MISSING_INTRO)).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: "上架" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(
+      within(dialog).queryByRole("group", { name: "提示词分组" }),
+    ).toBeNull();
+    expect(publishSkill).not.toHaveBeenCalled();
   });
 
   it("已上架的可写下架", async () => {

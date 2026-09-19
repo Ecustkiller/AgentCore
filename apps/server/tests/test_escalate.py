@@ -64,7 +64,6 @@ async def test_worker_escalate_logs_question_and_assumption(monkeypatch):
     # the WHY + the fallback — the substance the enrichment adds
     assert esc["question"] == "该走方案A还是方案B?"
     assert esc["assumption"] == "暂按方案A继续"
-    assert esc["browser_login"] is False
 
 
 async def test_worker_escalate_question_preview_is_capped(monkeypatch):
@@ -81,71 +80,6 @@ async def test_worker_escalate_question_preview_is_capped(monkeypatch):
     assert len(esc["question"]) == 201  # 200-char cap + the one ellipsis char
     assert esc["has_assumption"] is False
     assert esc["assumption"] == ""
-    assert esc["browser_login"] is False
-
-
-async def test_browser_login_promotes_to_blocking_and_requires_assumption(monkeypatch):
-    """browser_login=true forces blocking; missing assumption is rejected."""
-    spy = LogSpy()
-    monkeypatch.setattr(escalate_mod, "logger", spy)
-
-    result = await EscalateTool().execute(
-        {"question": "请在右坞完成登录", "browser_login": True},
-        _ctx(),
-    )
-    assert result.success is False
-    assert "assumption" in (result.error or "")
-    assert not any(name == "worker.escalate" for name, _ in spy.events)
-
-
-async def test_browser_login_with_assumption_logs_promoted_blocking(monkeypatch):
-    spy = LogSpy()
-    monkeypatch.setattr(escalate_mod, "logger", spy)
-
-    result = await EscalateTool().execute(
-        {
-            "question": "请在右坞完成登录",
-            "assumption": "用户登录后继续",
-            "browser_login": True,
-            # blocking omitted — should promote
-        },
-        _ctx(),
-    )
-    assert result.success is True  # unarmed channel → non-blocking fallthrough after promote
-    esc = spy.get("worker.escalate")
-    assert esc["blocking"] is True
-    assert esc["browser_login"] is True
-
-
-def test_escalation_required_emits_browser_login_only_when_true():
-    with_flag = escalation_required(
-        "r1",
-        "a1",
-        escalation_id="e1",
-        question="请登录",
-        assumption="登录后继续",
-        browser_login=True,
-    )
-    assert with_flag.payload.get("browser_login") is True
-
-    without = escalation_required(
-        "r1",
-        "a1",
-        escalation_id="e1",
-        question="普通问题",
-        assumption="暂按 A",
-        browser_login=False,
-    )
-    assert "browser_login" not in without.payload
-
-    omitted = escalation_required(
-        "r1",
-        "a1",
-        escalation_id="e1",
-        question="普通问题",
-        assumption="暂按 A",
-    )
-    assert "browser_login" not in omitted.payload
 
 
 def test_escalation_required_carries_timeout_only_when_ops_configured_one():
@@ -182,7 +116,6 @@ def test_escalate_schema_teaches_blocking_choice():
     assert "勿自己改" not in desc
     assert "勿只标假设" not in desc
     assert "默认 false" not in desc
-    assert "browser_login" not in desc
     assert "kind：" not in desc
     kind = schema.parameters["properties"]["kind"]["description"]
     assert "别硬猜" not in kind
@@ -190,8 +123,6 @@ def test_escalate_schema_teaches_blocking_choice():
     assert "默认 false" in blocking
     assert "报一声继续" in blocking or "原地等" in blocking
     assert "已拒凭据" in blocking and "false" in blocking
-    login = schema.parameters["properties"]["browser_login"]["description"]
-    assert "blocking" in login
     # 身份段整句不进按钮
     assert "挂起等密钥" not in blocking
     assert "已明确拒绝已有凭据" not in blocking
@@ -239,7 +170,6 @@ def test_escalate_questions_share_ask_user_card_shape():
         "kind",
         "options",
         "multiple",
-        "default",
     }
     assert "action" not in esc["items"]["properties"]["options"]["items"]["properties"]
     assert "action" not in ask["items"]["properties"]["options"]["items"]["properties"]
@@ -296,98 +226,6 @@ async def test_blocking_escalate_drops_option_detail():
     opts = seen["questions"][0]["options"]
     assert [o["label"] for o in opts] == ["方案A：先出契约", "方案B：先一条主路径"]
     assert all("detail" not in o for o in opts)
-
-
-@pytest.mark.asyncio
-async def test_blocking_channel_forwards_browser_login():
-    seen: dict = {}
-
-    async def _request(
-        q,
-        a,
-        questions,
-        kind,
-        awaiting="user",
-        *,
-        browser_login=False,
-        ownership_paths=None,
-        lock_owner_run_id="",
-    ):
-        seen["browser_login"] = browser_login
-        seen["awaiting"] = awaiting
-        return EscalationOutcome(status="resolved", answer="已登录")
-
-    ctx = ToolContext.create(
-        execution_id="e",
-        run_id="w1",
-        agent_id="a",
-        backend=ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
-        user_id="u",
-        conversation_id="c1",
-        escalation=EscalationChannel(armed=True, request=_request),
-    )
-    result = await EscalateTool().execute(
-        {
-            "question": "请在右坞完成登录",
-            "assumption": "用户登录后继续",
-            "blocking": True,
-            "browser_login": True,
-        },
-        ctx,
-    )
-    assert result.success is True
-    assert seen["browser_login"] is True
-    assert seen["awaiting"] == "user"
-    assert "用户就你的升级问题答复" in result.output
-
-
-@pytest.mark.asyncio
-async def test_browser_login_skips_ceo_arbitration_when_coordination_active(monkeypatch):
-    """Password login must stay user-facing even with a living CEO (never CEO-await)."""
-    seen: dict = {}
-
-    async def _request(
-        q,
-        a,
-        questions,
-        kind,
-        awaiting="user",
-        *,
-        browser_login=False,
-        ownership_paths=None,
-        lock_owner_run_id="",
-    ):
-        seen["awaiting"] = awaiting
-        seen["browser_login"] = browser_login
-        return EscalationOutcome(status="resolved", answer="已登录")
-
-    class _FakeCoord:
-        active = True
-
-    monkeypatch.setattr(
-        "agentcore.runtime.coordination.session.active_coordination",
-        lambda _eid: _FakeCoord(),
-    )
-    ctx = ToolContext.create(
-        execution_id="e",
-        run_id="w1",
-        agent_id="a",
-        backend=ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
-        user_id="u",
-        conversation_id="c1",
-        escalation=EscalationChannel(armed=True, request=_request),
-    )
-    result = await EscalateTool().execute(
-        {
-            "question": "请在右坞完成登录",
-            "assumption": "用户登录后继续",
-            "browser_login": True,
-        },
-        ctx,
-    )
-    assert result.success is True
-    assert seen["browser_login"] is True
-    assert seen["awaiting"] == "user"
 
 
 @pytest.mark.asyncio

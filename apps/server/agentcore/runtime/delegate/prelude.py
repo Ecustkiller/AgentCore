@@ -230,8 +230,7 @@ def resolve_delegate_prelude(
             nodes=len(tasks_raw),
             notes=len(playbook_notes),
         )
-        # MLR keep 标记延后到真正开跑（team_preview CONTINUE / pre-auth 跳过），
-        # 避免 STOP / 调度失败仍挡住回合收尾 orphan。
+        # MLR keep 标记延后到真正开跑，避免 STOP / 调度失败仍挡住回合收尾 orphan。
     else:
         active_playbook = None
         active_playbook_args = None

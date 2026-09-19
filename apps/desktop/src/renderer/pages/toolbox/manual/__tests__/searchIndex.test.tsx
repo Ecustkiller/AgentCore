@@ -125,6 +125,11 @@ describe("searchIndex", () => {
     expect(memory?.haystack).toMatch(/@ 点名/);
     expect(memory?.haystack).not.toMatch(/Webhook/i);
     expect(memory?.haystack).not.toContain("设为定时");
+
+    const prompts = entries.find((e) => e.id === "collaboration-prompts");
+    expect(prompts?.label).toBe("怎么写提示词");
+    expect(prompts?.haystack).toContain("一句话介绍");
+    expect(prompts?.haystack).toMatch(/干什么、什么时候/);
   });
 
   it("content search entries cover all four chapters", () => {

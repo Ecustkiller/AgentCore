@@ -208,7 +208,7 @@ def _multi_agent_mlr_debate_acts() -> list[SSEEvent]:
         run_completed(
             "synthesizer",
             "synthesizer",
-            output_summary="汇总完成并附命题卡",
+            output_summary="汇总完成",
             duration_ms=1200,
             role="member",
             model="deepseek-v4-pro",

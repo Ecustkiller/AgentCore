@@ -43,7 +43,6 @@ from agentcore.runtime.runs.types import (
 # frontend pairs into a side-by-side comparison; anything else is dropped (lenient)
 # so a stray value never leaks onto the graph.
 _VALID_STANCES = frozenset({"pro", "con"})
-_VALID_OUTPUT_FORMATS = frozenset({"text", "json"})
 # DAG 节点可显式声明 timeout_ms；缺省不填 → ``policy.timeout_s`` 保持 None（无默认墙钟）。
 # Consumer-oriented phrasing only — bare 「上游」「前置」 false-fire on seed tasks
 # that *are* the upstream ("作为上游产出…"). Keep advisory; never a hard reject.
@@ -994,25 +993,17 @@ def _parse_deliverable(item: dict[str, Any]) -> Deliverable:
 
 
 def _deliverable_from_dict(raw: dict[str, Any]) -> Deliverable:
-    required_sections = _str_list(raw.get("required_sections"))
     artifacts = _str_list(raw.get("artifacts"))
-    fmt = raw.get("output_format")
-    output_format = fmt if fmt in _VALID_OUTPUT_FORMATS else "text"
     artifact_dir_raw = raw.get("artifact_dir", "")
     artifact_dir = (
         artifact_dir_raw.replace("\\", "/").strip().rstrip("/")
         if isinstance(artifact_dir_raw, str)
         else ""
     )
-    citation_mode_raw = raw.get("citation_mode")
-    citation_mode = citation_mode_raw if citation_mode_raw == "two_phase" else None
     return Deliverable(
-        output_format=output_format,
-        required_sections=required_sections,
         artifacts=artifacts,
         artifact_dir=artifact_dir,
         strict=bool(raw.get("strict", False)),
-        citation_mode=citation_mode,  # type: ignore[arg-type]
     )
 
 

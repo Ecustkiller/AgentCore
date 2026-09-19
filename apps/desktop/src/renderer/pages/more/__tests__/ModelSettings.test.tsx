@@ -351,9 +351,7 @@ describe("ModelSettings (profiles)", () => {
     expect(screen.getByText("主模型")).toBeTruthy();
     expect(screen.getByText("必填，下一回合生效")).toBeTruthy();
     expect(screen.getByText("高级 · 其他模型")).toBeTruthy();
-    expect(
-      screen.getByText("组队/后台：跟随主模型"),
-    ).toBeTruthy();
+    expect(screen.getByText("组队/后台：跟随主模型")).toBeTruthy();
     expect(screen.queryByText("组队队员")).toBeNull();
     expect(screen.queryByText("后台任务")).toBeNull();
     expect(screen.queryByText("识图模型（可选）")).toBeNull();

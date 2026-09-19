@@ -14,22 +14,6 @@ def _option_label(opt: Any) -> str:
     return str(opt or "").strip()
 
 
-def confirmed_defaults_summary(
-    questions: list[dict[str, Any]] | None = None,
-) -> str:
-    """Join card ``default`` labels for empty-continue inject (案 B)."""
-    parts: list[str] = []
-    for q in questions or []:
-        if not isinstance(q, dict):
-            continue
-        default = str(q.get("default") or "").strip()
-        if not default:
-            continue
-        prompt = str(q.get("prompt") or "").strip()
-        parts.append(f"{prompt}={default}" if prompt else default)
-    return "；".join(parts)
-
-
 def structured_options_summary(
     questions: list[dict[str, Any]] | None = None,
 ) -> str:
@@ -71,10 +55,9 @@ def ask_user_tool_result(
     answer is composed where the data is — no structured wire payload the only-reader CEO
     would just flatten back to prose anyway).
 
-    Empty continue (no note/picks) with card defaults → inject「用户确认默认：…」so the
-    resumed CEO must honor those defaults and mark「按确认默认」(案 0cb83288 · B)；
-    empty continue with options but no default → inject「复述并沿用上轮确认选项」(d4d5)；
-    no card default/options → legacy「按你提出的方向继续」fallback (Cursor 空 continue ≈ 接受默认).
+    Empty continue (no note/picks) with options → inject「复述并沿用上轮确认选项」
+    so the CEO does not invent a new menu; that is not a pick of any one option.
+    No options → legacy「按你提出的方向继续」. Leftover ``questions[].default`` is ignored.
     """
     decision = response.decision
     if decision is CheckpointDecision.ADJUST:
@@ -90,32 +73,24 @@ def ask_user_tool_result(
         elif picks:
             output = f"用户选择：{picks}。请按此继续。"
         else:
-            defaults = confirmed_defaults_summary(questions)
-            if defaults:
+            options = structured_options_summary(questions)
+            if options:
                 output = (
-                    f"用户确认默认：{defaults}。"
-                    "请按确认默认推进派工/正文，并在正文标「按确认默认」；"
-                    "【禁止】借继续另拟一套，也【禁止】叠已结算的确认话术。"
+                    f"用户确认继续。请复述并沿用上轮确认选项：{options}。"
+                    "【禁止】空转确认、不承接选项；"
+                    "【禁止】另拟一套，也【禁止】叠已结算的确认话术。"
                 )
             else:
-                options = structured_options_summary(questions)
-                if options:
-                    output = (
-                        f"用户确认继续。请复述并沿用上轮确认选项：{options}。"
-                        "【禁止】空转确认、不承接选项；"
-                        "【禁止】另拟一套，也【禁止】叠已结算的确认话术。"
-                    )
-                else:
-                    output = "用户确认：按你提出的方向继续。"
+                output = "用户确认：按你提出的方向继续。"
         return ToolResult(tool_call_id="", success=True, output=output)
     if decision is CheckpointDecision.STOP:
-        # 拒答可见：回灌 CEO（对齐开工卡取消 / OpenAI reject→resume）；非空 continue。
+        # 拒答可见：回灌 CEO（对齐 OpenAI reject→resume）；非空 continue。
         # 拒答后默认收口——真实回合里「换假设继续」被当成了平级选项，模型接着又起了
         # 一轮工具，用户只能去按硬停止。收口是默认，继续是例外。
         head = "用户取消了澄清，未作答。"
         guidance = (
             "默认据此收口：用正文说清已完成什么、卡在哪、建议的下一步；"
-            "【禁止】再弹 ask_user 或开工卡追问（换个问法也不行）。"
+            "【禁止】再弹 ask_user 追问（换个问法也不行）。"
             "仅当手上工作已能无歧义推进时才换假设继续，并在正文写明所换假设。"
         )
         output = (

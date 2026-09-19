@@ -54,7 +54,8 @@ def stamp_named_file_pins(
         fid = raw_src.strip() if isinstance(raw_src, str) else ""
         if not fid or (sitting and fid == sitting):
             continue
-        rel = _pinable_rel(att.get("workspace_path") if isinstance(att.get("workspace_path"), str) else None)
+        raw_path = att.get("workspace_path")
+        rel = _pinable_rel(raw_path if isinstance(raw_path, str) else None)
         if rel is None:
             continue
         context.named_file_pins.add(fid, rel)

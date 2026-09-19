@@ -1,11 +1,10 @@
 """交付形态对齐 (executor wiring): a FILE deliverable's contract checks read the run's
 LANDED files, not just the chat body.
 
-Reproduces the real-conversation false-fail: a worker writes a paper carrying every
-required section to a workspace file but streams only a terse chat note — the old gate
-checked ``required_sections`` / ``min_length`` against the note alone and wrongly failed
-「缺章节 / 太短」. The pure semantics live in ``test_runs_contract.py``; this exercises the
-executor's load-then-check path against a real workspace backend.
+A worker writes a paper to a workspace file but streams only a terse chat note —
+the contract still sees the landed path. The pure semantics live in
+``test_runs_contract.py``; this exercises the executor's load-then-check path
+against a real workspace backend.
 """
 
 import json
@@ -61,9 +60,7 @@ class _RealFileWriteTool:
 
 
 class _WriteThenTerseProse:
-    """Round 1 writes the paper to disk; round 2 streams a terse chat note that (on
-    purpose) lacks the required sections and is short — so only the FILE can satisfy
-    the contract."""
+    """Round 1 writes the paper to disk; round 2 streams a terse chat note."""
 
     def __init__(self, path: str, paper: str, note: str) -> None:
         self._rounds = [
@@ -121,8 +118,6 @@ async def test_file_deliverable_sections_and_length_read_from_written_file(tmp_p
                 "deliverable": {
                     "form": "files",
                     "artifacts": [paper_path],
-                    "required_sections": ["方法", "结论"],
-                    "min_length": 80,
                 },
             }
         ],
@@ -131,7 +126,6 @@ async def test_file_deliverable_sections_and_length_read_from_written_file(tmp_p
     reg = ToolRegistry()
     reg.register(_RealFileWriteTool())
     paper = "# 方法\n" + "详实的方法论描述。" * 12 + "\n\n# 结论\n" + "扎实可信的结论。" * 12
-    # The chat note deliberately lacks the sections and is short.
     provider = _WriteThenTerseProse(paper_path, paper, f"论文已写入 {paper_path}")
     executor = build_agent_executor(
         plan=plan,
@@ -147,7 +141,6 @@ async def test_file_deliverable_sections_and_length_read_from_written_file(tmp_p
     res = await WaveScheduler().run(plan, executor)
     state = res["t_1"]
     assert state.phase is RunPhase.COMPLETED
-    # Sections + min_length are satisfied by the FILE, so no contract shortfall / retry.
     assert state.warnings == []
     assert provider.calls == 2
     assert state.files_touched == [paper_path]

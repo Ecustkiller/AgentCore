@@ -574,20 +574,11 @@ describe("toDebateModel live opening", () => {
   });
 });
 
-describe("toDebateModel live empty shell (no pretrial UI)", () => {
-  it("returns empty-rounds skeleton when debatePretrial fold exists", () => {
+describe("toDebateModel live empty shell", () => {
+  it("returns empty-rounds skeleton when planType is debate", () => {
     const model = toDebateModel(
       baseExecution({
         planType: "debate",
-        debatePretrial: {
-          status: "running",
-          skipReason: null,
-          sides: [{ key: "pro", name: "正方" }],
-          orders: [],
-          evidenceLedgerCount: 0,
-          fallbackSelfSearch: false,
-          evidenceReady: false,
-        },
       }),
     );
     expect(model).not.toBeNull();

@@ -169,12 +169,12 @@ function computeProjection(
       rt.debateOpening,
     );
   }
-  // 证据台账 / 庭前取证是 runtime 槽位态（非 frame 折叠）：投影时挂上；收场权威优先。
+  // 证据台账是 runtime 槽位态（非 frame 折叠）：投影时挂上；收场权威优先。
   const evidenceLedger =
     rt.debate && Array.isArray(rt.debate.evidence_ledger)
       ? rt.debate.evidence_ledger
       : rt.evidenceLedger;
-  return { ...base, evidenceLedger, debatePretrial: rt.debatePretrial };
+  return { ...base, evidenceLedger };
 }
 
 /** Project a specific message's execution at its current playhead — live tail
