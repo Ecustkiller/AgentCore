@@ -203,6 +203,9 @@ async def _try_landing_backend(
         )
         return _LandingBackendAttempt(backend=None, missing=True)
 
+    if not conversation_id:
+        return _LandingBackendAttempt(backend=None)
+
     backend = build_target_backend(
         user_id=user_id,
         folder_id=binding.folder_id,
