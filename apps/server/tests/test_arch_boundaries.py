@@ -159,15 +159,21 @@ def test_leaf_web_tools_do_not_import_runtime_or_llm() -> None:
     """Leaf tools are self-contained — no reach into runtime/llm.
 
     Orchestration primitives (delegate/debate) legitimately drive the runtime.
+    ``named_desk_read`` is the one-shot other-Folder bind: it loads a Folder and
+    builds a desk, so it is not a leaf I/O module.
     """
-    files = _py_files(
-        "tools/builtin/web",
-        "tools/builtin/grep.py",
-        "tools/builtin/archive_create.py",
-        "tools/builtin/archive_extract.py",
-        "tools/builtin/file_ops",
-        "tools/cleared_write_stub.py",
-    )
+    files = [
+        p
+        for p in _py_files(
+            "tools/builtin/web",
+            "tools/builtin/grep.py",
+            "tools/builtin/archive_create.py",
+            "tools/builtin/archive_extract.py",
+            "tools/builtin/file_ops",
+            "tools/cleared_write_stub.py",
+        )
+        if p.name != "named_desk_read.py"
+    ]
     assert _violations(files, ("agentcore.runtime", "agentcore.llm")) == {}
 
 
@@ -286,16 +292,12 @@ _RUNTIME_OVERSIZE_EXEMPT: frozenset[str] = frozenset(
         "coordination/host.py",
         "coordination/session.py",
         "debate/models.py",
-        "debate/prompt.py",
         "debate/rounds.py",
         "debate/types.py",
         "delegate/completion.py",
         "delegate/delivery_status.py",
         "engine/loop.py",
         "runs/builder.py",
-        "runs/contract.py",
-        "runs/executor/context.py",
-        "runs/executor/loop.py",
         "runs/research_quality.py",
         "runs/wave.py",
     }

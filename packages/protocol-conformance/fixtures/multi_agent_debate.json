@@ -393,6 +393,109 @@
       "timestamp": "2026-01-01T00:00:02.921Z"
     },
     {
+      "type": "debate_round",
+      "payload": {
+        "execution_id": "exec1",
+        "moderator_run_id": "debate_mod1",
+        "round_no": 1,
+        "focus": "方案 A 的收益与风险敞口",
+        "summary": "支持方强调收益可量化，反对方指出缺乏风险兜底，焦点收敛到风险可控性。",
+        "verdict": {
+          "real_clash": true,
+          "new_arguments": false,
+          "converged": true,
+          "stop_reason": "双方核心分歧已充分暴露，无新论据。",
+          "rationale": "争点收敛到风险可控性这一关键点，继续无新增信息。"
+        },
+        "sides": [
+          {
+            "key": "pro",
+            "name": "支持方",
+            "run_id": "debate_mod1_r1_pro",
+            "ok": true,
+            "absent": false,
+            "arguments": [
+              {
+                "id": "arg-0",
+                "title": "支持理由：收益可量化",
+                "body": "支持理由：收益可量化——首年可降本【已核实·2024成本审计】约 18%，同类系统迁移回收周期约两个季度【待核实·推断】。"
+              }
+            ]
+          },
+          {
+            "key": "con",
+            "name": "反对方",
+            "run_id": "debate_mod1_r1_con",
+            "ok": true,
+            "absent": false,
+            "arguments": [
+              {
+                "id": "arg-0",
+                "title": "反对理由：风险缺兜底",
+                "body": "反对理由：风险缺兜底——迁移期存在双写不一致窗口【已核实·内部SRE复盘】，尾部故障率恐被低估【待核实·推断】。"
+              }
+            ]
+          }
+        ],
+        "clashes": [
+          {
+            "from_key": "con",
+            "to_key": "pro",
+            "point": "收益可量化但未对冲风险敞口，量化口径回避了尾部风险。"
+          }
+        ],
+        "cross_exam": [
+          {
+            "target": "pro",
+            "questioner": "",
+            "exchanges": [
+              {
+                "question": "收益量化口径是否计入了尾部风险？请是/否直接回答。",
+                "answer": "量化口径未含尾部风险【待核实·推断】"
+              },
+              {
+                "question": "若熔断触发、灰度止损，已投入成本由谁承担？",
+                "answer": "成本由灰度预算池兜底、触发熔断即回滚【已核实·灰度预案v2】"
+              }
+            ],
+            "answer_run_id": "debate_mod1_r1_cx_pro"
+          },
+          {
+            "target": "con",
+            "questioner": "",
+            "exchanges": [
+              {
+                "question": "你主张的风险敞口，有无可量化的历史故障率支撑？没有就直说。",
+                "answer": "暂无统一口径的历史故障率【待核实·推断】；但同类系统的尾部事件可作参照【已核实·SRE年报】"
+              }
+            ],
+            "answer_run_id": "debate_mod1_r1_cx_con"
+          }
+        ],
+        "scores": {
+          "pro": {
+            "argument": 4,
+            "engagement": 3,
+            "evidence": 3,
+            "penalties": [],
+            "note": "收益量化扎实，质询下承认口径未含尾部但给出熔断兜底。",
+            "total": 10
+          },
+          "con": {
+            "argument": 3,
+            "engagement": 4,
+            "evidence": 2,
+            "penalties": [
+              "以未证实的尾部风险当既定事实"
+            ],
+            "note": "紧咬风险敞口命门、回应完整，但缺量化证据且有一处未支撑主张。",
+            "total": 8
+          }
+        }
+      },
+      "timestamp": "2026-01-01T00:00:02.922Z"
+    },
+    {
       "type": "debate_result",
       "payload": {
         "execution_id": "exec1",
@@ -542,7 +645,7 @@
           "recommendation": "先小流量灰度验证风险，再决定是否全量。"
         }
       },
-      "timestamp": "2026-01-01T00:00:02.922Z"
+      "timestamp": "2026-01-01T00:00:02.923Z"
     },
     {
       "type": "message_end",
@@ -565,7 +668,7 @@
         },
         "rounds": 0
       },
-      "timestamp": "2026-01-01T00:00:02.923Z"
+      "timestamp": "2026-01-01T00:00:02.924Z"
     }
   ],
   "projected": {
@@ -1098,11 +1201,79 @@
       {
         "round_no": 1,
         "focus": "方案 A 的收益与风险敞口",
-        "summary": "",
-        "verdict": null,
-        "sides": [],
-        "clashes": [],
-        "cross_exam": [],
+        "summary": "支持方强调收益可量化，反对方指出缺乏风险兜底，焦点收敛到风险可控性。",
+        "verdict": {
+          "real_clash": true,
+          "new_arguments": false,
+          "converged": true,
+          "stop_reason": "双方核心分歧已充分暴露，无新论据。",
+          "rationale": "争点收敛到风险可控性这一关键点，继续无新增信息。"
+        },
+        "sides": [
+          {
+            "key": "pro",
+            "name": "支持方",
+            "run_id": "debate_mod1_r1_pro",
+            "ok": true,
+            "absent": false,
+            "arguments": [
+              {
+                "id": "arg-0",
+                "title": "支持理由：收益可量化",
+                "body": "支持理由：收益可量化——首年可降本【已核实·2024成本审计】约 18%，同类系统迁移回收周期约两个季度【待核实·推断】。"
+              }
+            ]
+          },
+          {
+            "key": "con",
+            "name": "反对方",
+            "run_id": "debate_mod1_r1_con",
+            "ok": true,
+            "absent": false,
+            "arguments": [
+              {
+                "id": "arg-0",
+                "title": "反对理由：风险缺兜底",
+                "body": "反对理由：风险缺兜底——迁移期存在双写不一致窗口【已核实·内部SRE复盘】，尾部故障率恐被低估【待核实·推断】。"
+              }
+            ]
+          }
+        ],
+        "clashes": [
+          {
+            "from_key": "con",
+            "to_key": "pro",
+            "point": "收益可量化但未对冲风险敞口，量化口径回避了尾部风险。"
+          }
+        ],
+        "cross_exam": [
+          {
+            "target": "pro",
+            "questioner": "",
+            "exchanges": [
+              {
+                "question": "收益量化口径是否计入了尾部风险？请是/否直接回答。",
+                "answer": "量化口径未含尾部风险【待核实·推断】"
+              },
+              {
+                "question": "若熔断触发、灰度止损，已投入成本由谁承担？",
+                "answer": "成本由灰度预算池兜底、触发熔断即回滚【已核实·灰度预案v2】"
+              }
+            ],
+            "answer_run_id": "debate_mod1_r1_cx_pro"
+          },
+          {
+            "target": "con",
+            "questioner": "",
+            "exchanges": [
+              {
+                "question": "你主张的风险敞口，有无可量化的历史故障率支撑？没有就直说。",
+                "answer": "暂无统一口径的历史故障率【待核实·推断】；但同类系统的尾部事件可作参照【已核实·SRE年报】"
+              }
+            ],
+            "answer_run_id": "debate_mod1_r1_cx_con"
+          }
+        ],
         "witness_exam": []
       }
     ],

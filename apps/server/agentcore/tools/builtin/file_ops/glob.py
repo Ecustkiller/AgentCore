@@ -58,7 +58,7 @@ class GlobTool:
         return ToolSchema(
             name="glob",
             description=(
-                "按文件名 globstar 查找。省略 path=整仓。"
+                "globstar 查找。省略 path=整仓。"
                 "一层列举用 file_list；勿只填 `*`。"
             ),
             parameters={
@@ -67,9 +67,8 @@ class GlobTool:
                     "pattern": {
                         "type": "string",
                         "description": (
-                            "globstar。无斜杠=任意深度文件名；"
-                            "有斜杠=相对路径（`*` 一层，`**` 递归）；"
-                            "递归全部 `**/*`。"
+                            "globstar。无斜杠=文件名；有斜杠=相对路径"
+                            "（`*` 一层，`**` 递归）。"
                         ),
                     },
                     "path": {
