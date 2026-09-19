@@ -36,15 +36,18 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
 # ---- runsc：gVisor 沙箱二进制（云端 code_execute 灰度，安全权限与治理.md §五）----
-# 官方发布只在 storage.googleapis.com；大陆构建不通时用 RUNSC_URL 指镜像源，
-# 或 INSTALL_RUNSC=0 跳过（镜像可用；缺 runsc 时 GVISOR_ENABLED=true 启动期健康探测失败
-# 不拒启——打 sandbox.cloud_health_failed warning、执行类整类不装配、能力行如实显示未装配，
-# fail-safe）。
+# 官方发布只在 storage.googleapis.com。2026-07 起 latest 是 gvisor.tar.bz2
+# （runsc + 同级 gvisor-bin/），不再提供单独的 …/x86_64/runsc。大陆构建不通时用
+# RUNSC_URL 指镜像源，或 INSTALL_RUNSC=0 跳过（镜像可用；缺 runsc 时
+# GVISOR_ENABLED=true 启动期健康探测失败不拒启——打 sandbox.cloud_health_failed
+# warning、执行类整类不装配、能力行如实显示未装配，fail-safe）。
 # 校验：默认取 ${RUNSC_URL}.sha512；镜像源无校验文件时 RUNSC_SHA512=skip 显式跳过。
 FROM python:3.12-slim AS runsc
 ARG INSTALL_RUNSC=1
-ARG RUNSC_URL=https://storage.googleapis.com/gvisor/releases/release/latest/x86_64/runsc
+ARG RUNSC_URL=https://storage.googleapis.com/gvisor/releases/release/latest/x86_64/gvisor.tar.bz2
 ARG RUNSC_SHA512=""
+ENV RUNSC_URL=${RUNSC_URL} \
+    RUNSC_SHA512=${RUNSC_SHA512}
 COPY scripts/fetch_runsc.py /fetch_runsc.py
 RUN mkdir -p /out \
     && if [ "$INSTALL_RUNSC" = "1" ]; then \
@@ -156,7 +159,8 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends fonts-noto-cjk fontconfig git iproute2; \
     rm -rf /var/lib/apt/lists/*
 
-# ④ runsc 二进制（INSTALL_RUNSC=0 时该层只拷到一个空目录占位）。
+# ④ runsc + gvisor-bin/（INSTALL_RUNSC=0 时该层只拷到一个空目录占位）。
+# gVisor 2026-07+ 运行时在 runsc 同目录找 gvisor-bin/；COPY 整棵 /out 才能带上。
 COPY --from=runsc /out/ /usr/local/bin/
 # ④b ripgrep 二进制（INSTALL_RG=0 时占位空目录；缺 rg 时 grep 工具显式失败）。
 COPY --from=ripgrep /out/ /usr/local/bin/
