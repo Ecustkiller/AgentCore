@@ -13,7 +13,7 @@ the oracle never invents behavior the product doesn't already have:
 - the 思考·正文·工具·协作 ``process`` timeline mirrors ``EventSink._accumulate_process``
   (reasoning/content deltas coalesce; one step per captain tool call resolved by its
   tool_use_end; zero-width positional markers — ``team`` at run_plan, ``checkpoint`` /
-  ``ask`` / ``plan_review`` at their *_required — fix where the graph / interaction
+  ``ask`` at their *_required — fix where the graph / interaction
   cards render in chronological order; orchestration tool steps are dropped, the
   ``team`` marker stands in), carried for single-agent AND multi-agent turns (统一团队
   时间线 — the CEO's own steps), parity with ``process_timeline()`` (which only goes

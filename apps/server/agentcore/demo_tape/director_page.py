@@ -694,14 +694,14 @@ DIRECTOR_HTML = """<!DOCTYPE html>
       if (soft) {
         return {
           kind: "awaiting_paused",
-          title: "等待授权卡 · 已暂停",
-          detail: "真交互停在授权卡；导演节拍已冻结（state 仍为 awaiting_interaction）",
+          title: "等待澄清卡 · 已暂停",
+          detail: "真交互停在澄清卡；导演节拍已冻结（state 仍为 awaiting_interaction）",
         };
       }
       return {
         kind: "awaiting",
-        title: "等待授权卡",
-        detail: "桌面点「授权开赛」，或向前 seek 自动代确认",
+        title: "等待澄清卡",
+        detail: "桌面填写澄清卡，或向前 seek 自动代确认",
       };
     }
     if (st === "paused" || soft) {
@@ -825,7 +825,7 @@ DIRECTOR_HTML = """<!DOCTYPE html>
     };
     for (const ch of list) {
       if (ch.id === "opening") ensure("开场").items.push(ch);
-      else if (ch.id === "team_preview") ensure("组队授权").items.push(ch);
+      else if (ch.id === "team_preview") continue;
       else if (ch.id === "verdict") ensure("终审").items.push(ch);
       else {
         const m = /^r(\\d+)_/.exec(ch.id);

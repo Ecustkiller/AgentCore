@@ -64,6 +64,10 @@ def test_open_pause_false_on_leftover_plan_review():
     assert has_open_durable_pause([_ev("plan_review_required", "p1")]) is False
 
 
+def test_open_pause_false_on_leftover_team_preview():
+    assert has_open_durable_pause([_ev("team_preview_required", "tp1")]) is False
+
+
 def test_open_pause_false_when_resolved():
     journal = [_ev("checkpoint_required", "c1"), _ev("checkpoint_resolved", "c1")]
     assert has_open_durable_pause(journal) is False

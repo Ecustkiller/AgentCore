@@ -1,14 +1,12 @@
-"""委派编排三项增强：CEO 评审前置 / handoff 写参清理 / 记忆复用。"""
+"""委派编排增强：handoff 写参清理 / 记忆复用。"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.context.consult_sources import MergedConsultSource, SkillConsultSource
-from agentcore.runtime.delegate.ceo_review import deterministic_ceo_review, run_ceo_review
 from agentcore.runtime.engine.write_args_clear import (
     landed_result_note,
     project_cleared_write_args,
@@ -20,7 +18,6 @@ from agentcore.runtime.memory_consult_cache import (
     remember_consult,
     seed_consult_cache_from_window,
 )
-from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 from agentcore.runtime.skills import build_system_skill_registry
 from agentcore.tools.builtin.consult import ConsultTool
 from agentcore.tools.cleared_write_stub import cleared_write_stub_rejection
@@ -39,54 +36,7 @@ def _ctx(user_id: str = "u") -> ToolContext:
     )
 
 
-def _state(summary: str, *, files: list[str] | None = None) -> RunState:
-    return RunState(
-        phase=RunPhase.COMPLETED,
-        content=summary,
-        debrief={"summary": summary, "key_points": ["要点A"], "assumptions": ["假设X"]},
-        files_touched=files or [],
-    )
-
-
-# ── 1. CEO 评审前置 ──────────────────────────────────────────────────────────
-
-
-def test_deterministic_ceo_review_shape():
-    nodes = [RunSpec(run_id="r1", agent_id="r1", role="架构师", task="写规格")]
-    completed = {"r1": _state("规格已落盘", files=["docs/spec.md"])}
-    review = deterministic_ceo_review(nodes, completed)
-    assert "规格" in review["conclusion"] or "架构师" in review["conclusion"]
-    assert review["risks"]
-    assert review["suggestions"]
-    assert review["source"] == "deterministic"
-    assert any("docs/spec.md" in s for s in review["suggestions"])
-
-
-async def test_run_ceo_review_uses_llm_json():
-    class _LLM:
-        async def complete(self, request):  # noqa: ANN001
-            return SimpleNamespace(
-                content=json.dumps(
-                    {
-                        "conclusion": "规格可过，缺错误处理",
-                        "risks": ["无超时策略"],
-                        "suggestions": ["补错误边界"],
-                    },
-                    ensure_ascii=False,
-                )
-            )
-
-    nodes = [RunSpec(run_id="r1", agent_id="r1", role="架构师", task="写规格")]
-    review = await run_ceo_review(
-        nodes=nodes,
-        completed={"r1": _state("done", files=["a.md"])},
-        llm=_LLM(),
-        model="test-model",
-    )
-    assert review["conclusion"] == "规格可过，缺错误处理"
-    assert review["risks"] == ["无超时策略"]
-    assert review["suggestions"] == ["补错误边界"]
-    assert review["source"] == "llm"
+# ── leftover plan_review ──────────────────────────────────────────────────
 
 
 def test_leftover_plan_review_required_is_unknown_kind():

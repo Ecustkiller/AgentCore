@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 import { chromium } from "playwright";
 import { preview } from "vite";
 import { desktopDir, resolveCapturePaths, loadCreds } from "../shared/paths.mjs";
-import { dismissOnboarding, clickAuthorize, ensureDebateRoom } from "../shared/ui.mjs";
+import { dismissOnboarding, ensureDebateRoom } from "../shared/ui.mjs";
 
 let outRoot;
 let clipsDir;
@@ -92,10 +92,6 @@ async function main() {
     if (prep.user_prompt) await composer.fill(prep.user_prompt);
     await composer.press("Enter");
 
-    for (let i = 0; i < 100; i++) {
-      if (await clickAuthorize(page)) break;
-      await page.waitForTimeout(400);
-    }
     await ensureDebateRoom(page);
     await page.waitForTimeout(1500);
 

@@ -3,7 +3,7 @@
  *
  * Invoked via: node scripts/promo_capture.mjs full --tape <id> [--out]
  *
- * Structural stills (best-effort): user-prompt, team-preview, debate-opening,
+ * Structural stills (best-effort): user-prompt, debate-opening,
  * collab-graph. Plus one still per director chapter id.
  */
 
@@ -17,7 +17,6 @@ import {
   dismissOnboarding,
   ensureDebateRoom,
   ensureCollabGraph,
-  clickAuthorize,
   captureProbe,
   waitUi,
   landAfterSeek,
@@ -272,23 +271,16 @@ async function main() {
     });
 
     await composer.press("Enter");
-    console.log("sent; waiting kickoff…");
+    console.log("sent; waiting debate…");
 
     try {
-      await waitUi(page, (p) => p.authorize || p.waitKickoff, {
+      await waitUi(page, (p) => p.debate, {
         timeoutMs: 120_000,
-        label: "team_preview card",
-      });
-      await markStill(page, report, {
-        id: "team-preview",
-        file: "team-preview.png",
-        label: "开工卡",
+        label: "debate room",
       });
     } catch (e) {
-      report.missing.push({ id: "team-preview", reason: String(e.message || e) });
+      report.missing.push({ id: "debate-opening", reason: String(e.message || e) });
     }
-
-    await clickAuthorize(page);
 
     for (let i = 0; i < 40; i++) {
       await ensureDebateRoom(page);

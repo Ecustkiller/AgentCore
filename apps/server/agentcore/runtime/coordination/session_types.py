@@ -269,9 +269,9 @@ def should_enter_coordination(
     enters. Solo (1 worker) enters so mid-flight interjections and
     ``cancel_worker`` stay reachable while the worker runs.
 
-    Adjacent ≥2 gates (kickoff plan-preview, team_synthesis_preview, cold-start
-    explore roster) are independent and stay multi-worker-only — solo keeps its
-    zero-friction kickoff appearance.
+    Adjacent ≥2 gates (team_synthesis_preview, cold-start
+    explore roster) are independent and stay multi-worker-only — solo keeps a
+    zero-friction appearance.
 
     **Invariant B**: CEO arbitration (``resolve_escalation`` / ``awaiting=ceo``)
     is available iff a coordination session is active. Classic blocking escalate

@@ -36,8 +36,6 @@ const beats = {
   "1_enter_stream": false,
   "2_inline_graph": false,
   "2_canvas_graph": false,
-  "3_team_preview_pause": false,
-  "3_resume_continue": false,
   "4_debate_room": false,
   "5_ceo_wrap": false,
   "6_navigate_back": false,
@@ -231,45 +229,7 @@ async function main() {
     beats["1_enter_stream"] = p.userMsg || /演示|商标/.test(p.textSnippet);
     console.log("beat1 enter", { userMsg: p.userMsg, streaming: p.streaming, url: page.url() });
 
-    // Wait for interactive ResumePrompt (授权开赛) — not only the passive marker.
-    for (let i = 0; i < 60; i++) {
-      p = await probe(page);
-      if (p.authorize || (await page.getByRole("button", { name: /授权开赛/ }).isVisible().catch(() => false))) {
-        break;
-      }
-      await page.waitForTimeout(500);
-    }
-    summary.shots.preview = await shot(page, "02-team-preview");
-    summary.probeLog.push({ t: "preview", ...p });
-    beats["3_team_preview_pause"] = !!(
-      p.waitKickoff ||
-      p.authorize ||
-      (await page.getByText(/开工卡/).isVisible().catch(() => false))
-    );
-    console.log("beat3 preview", {
-      waitKickoff: p.waitKickoff,
-      authorize: p.authorize,
-      kickoffCard: await page.getByText(/开工卡/).isVisible().catch(() => false),
-    });
-
-    // Click 授权开赛
-    const authBtn = page.getByRole("button", { name: /授权开赛|授权并开工|开做/ });
-    await authBtn.first().waitFor({ state: "visible", timeout: 20_000 }).catch(() => {});
-    if (await authBtn.first().isVisible().catch(() => false)) {
-      await authBtn.first().click();
-      beats["3_resume_continue"] = true;
-      console.log("clicked authorize");
-    } else {
-      const cont = page.getByRole("button", { name: /^继续$/ });
-      if (await cont.isVisible().catch(() => false)) {
-        await cont.click();
-        beats["3_resume_continue"] = true;
-      }
-    }
-    await page.waitForTimeout(1500);
-    summary.shots.afterResume = await shot(page, "03-after-resume");
-
-    // Wait for collaboration graph (react-flow)
+    // Kickoff card is retired — tape plays through; wait for the collaboration graph.
     for (let i = 0; i < 60; i++) {
       p = await probe(page);
       if (p.reactFlow > 0 && p.reactFlowNodes > 0) break;
@@ -372,7 +332,6 @@ async function main() {
     // CEO wrap is post-debate; require debate evidence + settled stream.
     beats["5_ceo_wrap"] =
       stopGone &&
-      beats["3_resume_continue"] &&
       (beats["2_inline_graph"] || beats["4_debate_room"]) &&
       /维持|改判|汇总|结论|一审|庭审/.test(p.textSnippet);
     summary.fidelity = {

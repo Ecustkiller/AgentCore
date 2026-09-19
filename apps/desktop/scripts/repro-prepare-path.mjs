@@ -1,6 +1,6 @@
 // Repro of the PRODUCT prepare-path (user types opening message) for demo tape.
-// Captures: thinking-state duration at start (bug 1) + whether 授权开赛 appears
-// after the case brief (bug 2). Screenshots + per-second probe timeline.
+// Kickoff is retired — tape plays through. Captures thinking-state duration at
+// start and whether debate streams without an authorize beat.
 //
 //   $env:REPRO_API='http://localhost:8020'; $env:REPRO_SPEED='1'; $env:REPRO_GAP='3000'
 //   node scripts/repro-prepare-path.mjs
@@ -20,8 +20,8 @@ const PORT = Number(process.env.REPRO_PORT ?? 5174);
 const TAPE = process.env.REPRO_TAPE ?? "lv-molihua-trademark";
 const SPEED = Number(process.env.REPRO_SPEED ?? 1);
 const GAP = Number(process.env.REPRO_GAP ?? 3000);
-// "prepare" = user types opening message (live surfaceResumeFromLiveTurn path);
-// "autostart" = 一键开播 /start then attach → GET /recovery surfaces the card.
+// "prepare" = user types opening message;
+// "autostart" = 一键开播 /start then attach (returns after the user message lands).
 const MODE = process.env.REPRO_MODE ?? "prepare";
 const outDir = resolve(desktopDir, "demo-tape-out");
 process.env.VITE_API_URL = API;
@@ -103,11 +103,10 @@ async function main() {
 
     let t0;
     if (MODE === "autostart") {
-      // 一键开播: /start plays server-side and blocks until the turn pauses; then we
-      // navigate and the card must surface via GET /recovery (not a live stream).
+      // 一键开播: /start returns after the user message lands; attach the live stream.
       const body = await launch("start");
       const cid = body.conversation_id;
-      console.log("autostarted (paused server-side)", cid);
+      console.log("autostarted", cid);
       t0 = Date.now();
       await page.goto(new URL(`index.webapp.html#/conversations/${cid}`, base).href, {
         waitUntil: "load",
@@ -138,6 +137,7 @@ async function main() {
     let authorizeAt = null;
     let briefAt = null;
     let delegatingAt = null;
+    let debateAt = null;
     let shotBrief = false;
     let shotDelegating = false;
     for (let i = 0; i < 220; i++) {
@@ -155,7 +155,6 @@ async function main() {
           shotBrief = true;
         }
       }
-      // 案情简介之后、开工卡之前的「正在生成 委派任务 · N 字」——本次修复的目标态。
       if (p.delegating && delegatingAt === null) {
         delegatingAt = t;
         if (!shotDelegating) {
@@ -166,33 +165,15 @@ async function main() {
       if (p.authorize && authorizeAt === null) {
         authorizeAt = t;
         await shot(page, "repro-02-authorize");
+      }
+      if (p.debate && debateAt === null) {
+        debateAt = t;
+        await shot(page, "repro-04-debate");
         break;
       }
       await page.waitForTimeout(400);
     }
 
-    // Resume → debate: click 授权开赛 and confirm the debate actually streams (full flow).
-    let debateAt = null;
-    if (authorizeAt !== null) {
-      const btn = page.getByRole("button", { name: "授权开赛" });
-      if (await btn.isVisible().catch(() => false)) {
-        await btn.click();
-        const tResume = Date.now();
-        console.log("clicked 授权开赛; polling debate…");
-        for (let i = 0; i < 70; i++) {
-          const p = await probe(page);
-          const t = Date.now() - t0;
-          summary.timeline.push({ t, phase: "resume", ...p, snippet: undefined });
-          if (p.debate && debateAt === null) {
-            debateAt = Date.now() - tResume;
-            await shot(page, "repro-04-debate");
-            break;
-          }
-          await page.waitForTimeout(700);
-        }
-      }
-    }
-    // Final state shot even if authorize never appeared.
     await shot(page, "repro-03-final");
     const pend = await probe(page);
     summary.marks = {
@@ -203,14 +184,14 @@ async function main() {
       delegatingAppeared: delegatingAt !== null,
       authorizeMs: authorizeAt,
       authorizeAppeared: authorizeAt !== null,
-      debateAfterResumeMs: debateAt,
+      debateMs: debateAt,
       debateStreamed: debateAt !== null,
       finalSnippet: pend.snippet,
       finalHasStop: pend.stop,
       finalHasAuthorize: pend.authorize,
       finalWaitKickoff: pend.waitKickoff,
     };
-    summary.ok = authorizeAt !== null;
+    summary.ok = debateAt !== null && authorizeAt === null;
   } catch (err) {
     summary.fatal = String(err?.stack ?? err);
     await shot(page, "repro-99-fatal");

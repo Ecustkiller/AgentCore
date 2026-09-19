@@ -58,8 +58,8 @@ __all__ = [
     "salvage_incomplete_turn",
 ]
 
-_PAUSE_REQUIRED_TYPES = ("checkpoint_required", "team_preview_required")
-_PAUSE_RESOLVED_TYPES = ("checkpoint_resolved", "team_preview_resolved")
+_PAUSE_REQUIRED_TYPES = ("checkpoint_required",)
+_PAUSE_RESOLVED_TYPES = ("checkpoint_resolved",)
 
 
 async def create_assistant_placeholder(
@@ -80,7 +80,10 @@ async def create_assistant_placeholder(
 
 
 def has_open_durable_pause(journal: list[dict]) -> bool:
-    """True if the journal ends on an UNRESOLVED plan_review / ask_user checkpoint."""
+    """True if the journal has an unresolved live ask_user checkpoint.
+
+    Leftover ``team_preview`` / ``plan_review`` frames are not a durable pause.
+    """
     required: set[str] = set()
     resolved: set[str] = set()
     for event in journal:

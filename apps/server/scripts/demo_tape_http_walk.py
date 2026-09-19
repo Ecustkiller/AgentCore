@@ -4,7 +4,7 @@ Prereq: backend running with ``DEMO_TAPE_REPLAY_ENABLED=true``.
 
 From apps/server::
 
-    # Primary: prepare → user message → stream + resume
+    # Primary: prepare → user message → stream (no kickoff card)
     uv run python scripts/demo_tape_http_walk.py --tape lv-molihua-trademark
 
     # Auto-start (smoke / legacy one-click)
@@ -104,7 +104,6 @@ async def walk(args: argparse.Namespace) -> None:
         headers = {"Authorization": f"Bearer {token}"}
         collected: list[tuple[int, str, dict]] = []
         start = time.monotonic()
-        checkpoint_id: str | None = None
         trigger_text: str | None = None
 
         if args.tape:
@@ -227,25 +226,23 @@ async def walk(args: argparse.Namespace) -> None:
                     collected=collected,
                 )
 
-        for _t, et, payload in collected:
-            if et == "team_preview_required":
-                checkpoint_id = str(payload.get("checkpoint_id") or "")
         if stopped == "error":
             raise SystemExit("stream ended with error before pause/complete")
 
-        # Opening segment should include search / case-brief style content before pause.
         early_types = {et for _t, et, _p in collected}
-        # Still assert we got some assistant activity before pause/complete.
-        if (
-            "team_preview_required" not in early_types
-            and collected
-            and not any(
-                et in {"text_delta", "tool_call_started", "thinking_delta", "run_started"}
-                for et in early_types
-            )
+        if collected and not any(
+            et
+            in {
+                "text_delta",
+                "content_delta",
+                "tool_call_started",
+                "thinking_delta",
+                "run_started",
+            }
+            for et in early_types
         ):
             print(
-                f"warn: unusual early event set before pause: {sorted(early_types)[:20]}"
+                f"warn: unusual early event set: {sorted(early_types)[:20]}"
             )
 
         paused = _is_paused(collected)
@@ -256,16 +253,17 @@ async def walk(args: argparse.Namespace) -> None:
 
         if not paused and not items:
             if collected:
-                print("OK: tape completed without pause (no team_preview on tape?)")
+                print("OK: tape completed without a live pause")
                 _assert_gaps(collected, args.max_gap_ms)
+                if trigger_text and not args.autostart:
+                    await _assert_trigger_message(client, base, headers, conv, trigger_text)
                 return
             raise SystemExit(f"no stream events and no paused recovery: {recovery}")
 
         if not items:
             raise SystemExit(f"paused stream but no recovery.paused: {recovery}")
         message_id = str(items[0].get("message_id") or "")
-        if not checkpoint_id:
-            checkpoint_id = str(items[0].get("checkpoint_id") or "")
+        checkpoint_id = str(items[0].get("checkpoint_id") or "")
         if not message_id:
             raise SystemExit(f"cannot parse paused payload: {items[0]}")
         if not checkpoint_id:
@@ -289,30 +287,30 @@ async def walk(args: argparse.Namespace) -> None:
                 collected=collected,
             )
 
-        kinds = [et for _t, et, _p in collected]
-        assert "team_preview_required" in kinds
-        assert "team_preview_resolved" in kinds
-        assert kinds.count("team_preview_resolved") >= 1
         _assert_gaps(collected, args.max_gap_ms)
 
         if trigger_text and not args.autostart:
-            msgs = await client.get(
-                f"{base}/v1/conversations/{conv}/messages", headers=headers
-            )
-            if msgs.status_code == 200:
-                body = msgs.json()
-                items_list = body.get("data") if isinstance(body, dict) else body
-                if isinstance(items_list, list):
-                    _assert_user_message_content(items_list, trigger_text)
-                else:
-                    raise SystemExit(f"unexpected messages body: {body!r}")
-            else:
-                raise SystemExit(
-                    f"GET messages failed {msgs.status_code}: {msgs.text}"
-                )
+            await _assert_trigger_message(client, base, headers, conv, trigger_text)
 
         mode = "autostart" if args.autostart else "prepare"
-        print(f"OK: {mode} → pause → resume → complete; gap cap respected")
+        print(f"OK: {mode} → live pause → resume → complete; gap cap respected")
+
+
+async def _assert_trigger_message(
+    client: httpx.AsyncClient,
+    base: str,
+    headers: dict[str, str],
+    conv: str,
+    trigger_text: str,
+) -> None:
+    msgs = await client.get(f"{base}/v1/conversations/{conv}/messages", headers=headers)
+    if msgs.status_code != 200:
+        raise SystemExit(f"GET messages failed {msgs.status_code}: {msgs.text}")
+    body = msgs.json()
+    items_list = body.get("data") if isinstance(body, dict) else body
+    if not isinstance(items_list, list):
+        raise SystemExit(f"unexpected messages body: {body!r}")
+    _assert_user_message_content(items_list, trigger_text)
 
 
 def _assert_gaps(collected: list[tuple[int, str, dict]], max_gap_ms: int) -> None:

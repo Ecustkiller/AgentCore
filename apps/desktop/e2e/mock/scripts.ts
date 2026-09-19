@@ -3,8 +3,8 @@
  *
  * §八 切段落点：运行期按事件类型识别边界（不用导出期标注）。
  * - hot（approval）：在 `*_required` 后暂停同流，等 POST interactions 再续推后续段
- * - cold（ask_user / checkpoint）：首段用带 `message_end(paused)` 的 finalized 向量；
- *   resume 段从 `*_resolved` 起推（事件仍全部来自真实向量）
+ * - cold（ask_user / checkpoint）：首段用 `single_agent_checkpoint` 并补
+ *   `message_end(paused)`；resume 段从 resolved 向量的 `*_resolved` 起推
  */
 import {
   type ConformanceEvent,
@@ -57,11 +57,11 @@ function splitHot(fixture: ConformanceFixture): ScriptPlan {
 }
 
 /**
- * Cold gate: pin finalized (paused close) for the first SSE, and the
+ * Cold gate: pin the paused close for the first SSE, and the
  * resolved_continue vector's post-gate tail for POST resume.
  */
 function splitColdCheckpoint(): ScriptPlan {
-  const finalized = loadFixture("single_agent_checkpoint_finalized");
+  const paused = loadFixture("single_agent_checkpoint");
   const cont = loadFixture("single_agent_checkpoint_resolved");
   const resolvedIdx = indexOfType(cont.events, "checkpoint_resolved");
   if (resolvedIdx < 0) {
@@ -69,16 +69,23 @@ function splitColdCheckpoint(): ScriptPlan {
       "single_agent_checkpoint_resolved missing checkpoint_resolved",
     );
   }
-  const requiredIdx = indexOfType(finalized.events, "checkpoint_required");
+  const requiredIdx = indexOfType(paused.events, "checkpoint_required");
   if (requiredIdx < 0) {
-    throw new Error(
-      "single_agent_checkpoint_finalized missing checkpoint_required",
-    );
+    throw new Error("single_agent_checkpoint missing checkpoint_required");
   }
+  const last = paused.events[paused.events.length - 1];
+  const initial: ConformanceEvent[] = [
+    ...paused.events,
+    {
+      type: "message_end",
+      payload: { finish_reason: "paused" },
+      timestamp: last?.timestamp ?? "2026-01-01T00:00:00.005Z",
+    },
+  ];
   return {
     name: "single_agent_checkpoint_resolved",
     kind: "cold_gate",
-    initial: finalized.events,
+    initial,
     continueSameStream: [],
     resumeStream: cont.events.slice(resolvedIdx),
   };

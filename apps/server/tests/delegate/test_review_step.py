@@ -1,8 +1,8 @@
-"""plan_review step summary: prefer handoff debrief over truncated body markdown."""
+"""Boundary excerpt: prefer handoff debrief over truncated body markdown."""
 
-from agentcore.runtime.delegate.boundary import review_step, review_summary_text
+from agentcore.runtime.delegate.boundary import review_summary_text
 from agentcore.runtime.runs.constants import PLAN_REVIEW_SUMMARY_CHARS
-from agentcore.runtime.runs.types import RunSpec, RunState
+from agentcore.runtime.runs.types import RunState
 
 
 def test_review_summary_prefers_debrief_over_markdown_body():
@@ -63,17 +63,3 @@ def test_review_summary_truncates_to_cap():
     text = review_summary_text(state)
     assert text.endswith("…")
     assert len(text) == PLAN_REVIEW_SUMMARY_CHARS + 1  # body + ellipsis
-
-
-def test_review_step_wires_role_and_summary():
-    node = RunSpec(run_id="outline", role="提纲编辑", task="拟提纲")
-    state = RunState(
-        content="## 提纲\n| 章节 |",
-        debrief={"summary": "结构已定", "key_points": ["章一", "章二"]},
-    )
-    step = review_step(node, {"outline": state})
-    assert step == {
-        "run_id": "outline",
-        "role": "提纲编辑",
-        "summary": "结构已定\n· 章一\n· 章二",
-    }

@@ -76,37 +76,6 @@ async def _wait_for_user_message(conversation_id: str, *, timeout_s: float = 10.
     )
 
 
-async def _wait_for_paused_or_settled(
-    conversation_id: str,
-    task: asyncio.Task[object],
-    *,
-    timeout_s: float = 120.0,
-) -> None:
-    """Block until the tape hits its first durable pause (or the turn ends).
-
-    One-click start returns before the desktop navigates + ``loadRecovery``. If we
-    return at user-message time only, a fast tape can pause *after* that recovery
-    read — the UI then hydrates the passive「等待开工确认」marker with no
-    ResumePrompt, and never grows a collaboration graph. Waiting here makes
-    recovery authoritative on first open.
-    """
-    from agentcore.runtime.suspension.persistence import list_paused_turns
-
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        if task.done():
-            return
-        frames = await list_paused_turns(conversation_id)
-        if frames:
-            return
-        await asyncio.sleep(0.05)
-    logger.warning(
-        "demo_tape.launch_pause_timeout",
-        conversation_id=conversation_id,
-        timeout_s=timeout_s,
-    )
-
-
 @router.get("", response_model=DemoTapeCatalogResponse)
 async def get_demo_tape_catalog(_user: AuthUser) -> DemoTapeCatalogResponse:
     """List available tapes when replay is enabled; 404 when the switch is off."""
@@ -204,7 +173,6 @@ async def start_demo_tape(
         user_id=user.user_id,
     )
     await _wait_for_user_message(prepared.conversation_id)
-    await _wait_for_paused_or_settled(prepared.conversation_id, task)
 
     logger.info(
         "demo_tape.started",

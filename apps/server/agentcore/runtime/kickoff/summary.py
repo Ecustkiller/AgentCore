@@ -83,7 +83,7 @@ class KickoffSummary:
     revision_note: str = ""
 
     def card_payload(self) -> dict[str, Any]:
-        """Wire fields for ``team_preview_required`` / suspension extras."""
+        """Summary extras for debate / delegate kickoff (not a live user card)."""
         out: dict[str, Any] = {
             "primitive": self.primitive,
             "workers": list(self.workers),

@@ -89,16 +89,6 @@ export async function loginIfNeeded(page, { user, pass }) {
   return { userBox, composer };
 }
 
-export async function clickAuthorize(page) {
-  const authBtn = page.getByRole("button", { name: /授权开赛|授权并开工|开做/ });
-  if (await authBtn.first().isVisible().catch(() => false)) {
-    await authBtn.first().click();
-    await page.waitForTimeout(800);
-    return true;
-  }
-  return false;
-}
-
 export async function captureProbe(page) {
   return page.evaluate(() => {
     const clone = document.body?.cloneNode(true);

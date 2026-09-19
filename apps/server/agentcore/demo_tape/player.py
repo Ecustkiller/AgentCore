@@ -685,8 +685,7 @@ async def play_tape_events(
 
     Event prep (normalize / remint / legacy captain ``run_id`` strip) is the shared
     SINK source adapter (:mod:`agentcore.replay`). This player keeps demo-tape
-    application decoration: pacing, wired durable-pause cards (team_preview /
-    ask_user / plan_review), hot-path approval await via InteractionRegistry,
+    application decoration: pacing, wired durable-pause cards (ask_user), hot-path approval await via InteractionRegistry,
     message lifecycle alignment with shared bootstrap. When ``transport`` is set
     (director console), speed / pause / burst-seek are read live from that metronome.
     ``turn_index`` is frozen into pause-frame meta so resume continues the same act.

@@ -246,7 +246,6 @@ async def test_start_route_registers_detached_turn(monkeypatch):
     )
     monkeypatch.setattr(route_mod, "emit_preflight_warnings", lambda *_a, **_k: None)
     monkeypatch.setattr(route_mod, "_wait_for_user_message", AsyncMock())
-    monkeypatch.setattr(route_mod, "_wait_for_paused_or_settled", AsyncMock())
     monkeypatch.setattr(route_mod.turn_runs, "register", _register)
 
     created_tasks: list = []
