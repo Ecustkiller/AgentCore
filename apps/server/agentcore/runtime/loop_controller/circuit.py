@@ -49,10 +49,10 @@ class ToolCircuitBreakerMixin:
         """Tools whose cumulative failures crossed a threshold (call after ``record``).
 
         Returns the tools that *newly* hit the warn / disable threshold this round
-        (each transition fires once per tool per run). The engine injects the
-        :meth:`CircuitBreak.message` and removes any ``disabled`` tools from the
-        toolset for the remaining rounds. A tool that leaps straight to the disable
-        count is only disabled (no redundant warn).
+        (each transition fires once per tool per run). The engine execute-denies
+        any ``disabled`` tools for the remaining rounds; ``tools[]`` is not
+        shrunk. A tool that leaps straight to the disable count is only
+        disabled (no redundant warn).
 
         Landing / write tools (``LANDING_TOOLS``) are never circuit-disabled **except**
         when the local desk fulfiller is gone (``_workspace_channel_dead``):

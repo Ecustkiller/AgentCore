@@ -1,6 +1,6 @@
 /**
- * AgentCore 桌面端打包配置（P2-1；docs/05-平台与运维/部署与运维.md §7.6、
- * docs/04-前端/前端技术与架构.md §7.6；通道定案 §7.6c）。
+ * AgentCore 桌面端打包配置（P2-1；docs/05-平台与运维/发布与门禁.md §1.6、
+ * docs/04-前端/前端技术与架构.md §7.6；通道定案 §1.6c）。
  *
  * 出 Windows(NSIS) / macOS(DMG+zip, arm64) / Linux(AppImage)；
  * MVP 不签名（内测；正式发布前再申请代码签名 / Mac 公证）。Win 优先。
@@ -107,7 +107,7 @@ const config = {
     icon: abs(identity.macIcon),
     // dmg = 首装与当前「下载安装包」路径；zip / latest-mac.yml 仍上传供版本检查。
     // 内测未签名：Gatekeeper 常报「已损坏」，首装/替换后须 xattr -cr；Squirrel.Mac 拒装未签名
-    // 更新，主进程 codesign 探测到无签名身份即降级为引导手动下载（发布与门禁.md §7.6）。
+    // 更新，主进程 codesign 探测到无签名身份即降级为引导手动下载（发布与门禁.md §1.6）。
     target: ["dmg", "zip"],
     category: "public.app-category.productivity",
   },

@@ -584,74 +584,34 @@ async def test_run_plan_omits_tags_for_ordinary_batch():
     assert all("stance" not in r and "group" not in r and "round" not in r for r in plan_runs)
 
 
-async def test_playbook_instantiates_whole_team_and_runs():
-    # 拆·playbook 固化 (§2.1): naming a固化形状 + slots expands to a full team and flows through the
-    # SAME pipeline as a hand-written tasks array (map_fanout → N 方向专员).
+async def test_handwritten_parallel_team_runs():
     t = tool(Provider([]))
     result = await t.execute(
         {
-            "playbook": "map_fanout",
-            "playbook_args": {"topic": "主题 X", "angles": ["方向 A", "方向 B"]},
+            "tasks": [
+                {"role": "方向 A 专员", "task": "摸底方向 A"},
+                {"role": "方向 B 专员", "task": "摸底方向 B"},
+            ],
         },
         ctx(),
     )
     assert result.success is True
     assert result.is_terminal is False
-    assert "方向专员" in result.output  # the role the playbook minted
+    assert "方向 A 专员" in result.output
+    assert "方向 B 专员" in result.output
 
 
-async def test_playbook_unknown_name_rejected():
-    t = tool(Provider([]))
-    result = await t.execute({"playbook": "does_not_exist"}, ctx())
-    assert result.success is False
-    assert "未知 playbook" in (result.error or "")
-
-
-async def test_playbook_missing_required_slot_rejected():
-    t = tool(Provider([]))
-    result = await t.execute({"playbook": "cite_write_review", "playbook_args": {}}, ctx())
-    assert result.success is False
-    assert "topic" in (result.error or "")
-
-
-async def test_playbook_and_tasks_are_mutually_exclusive():
-    t = tool(Provider([]))
-    result = await t.execute(
-        {
-            "playbook": "cite_write_review",
-            "playbook_args": {"topic": "X"},
-            "tasks": [{"role": "a", "task": "b"}],
-        },
-        ctx(),
-    )
-    assert result.success is False
-    assert "二选一" in (result.error or "")
-    assert "手写 tasks" in (result.error or "")
-    assert result.contract_failure is True
-
-
-async def test_playbook_xor_and_hoist_conflict_skip_circuit_breaker():
-    """S5 R1：playbook⊕tasks / 冲突内嵌 criteria 连拒须标 contract_failure，勿熔断 delegate。"""
+async def test_empty_delegate_is_contract_failure_not_circuit_break():
+    """缺 tasks 连拒须标 contract_failure，勿熔断 delegate。"""
     from agentcore.runtime.loop_controller import LoopController, ToolAttempt
 
     t = tool(Provider([]))
-    xor = await t.execute(
-        {
-            "playbook": "cite_write_review",
-            "playbook_args": {"topic": "X"},
-            "tasks": [
-                {"role": "实现", "task": "写 CLI"},
-                {"role": "测试", "task": "写测试"},
-            ],
-        },
-        ctx(),
-    )
-    assert xor.success is False
-    assert xor.contract_failure is True
+    empty = await t.execute({}, ctx())
+    assert empty.success is False
+    assert empty.contract_failure is True
 
     hoist = await t.execute(
         {
-            "playbook_none_reason": "简单双任务流水线",
             "tasks": [
                 {
                     "role": "实现",
@@ -677,26 +637,25 @@ async def test_playbook_xor_and_hoist_conflict_skip_circuit_breaker():
     assert "tasks[].completion_criteria" not in (hoist.error or "")
 
     c = LoopController()
-    for i, res in enumerate((xor, hoist, xor)):
+    for i in range(3):
         c.record(
             [
                 ToolAttempt(
                     f"fp{i}",
                     "delegate",
                     success=False,
-                    contract_failure=res.contract_failure,
+                    contract_failure=True,
                 )
             ]
         )
         assert not c.tool_circuit_breaker().disabled
 
 
-def test_schema_cues_xor_and_top_level_completion_criteria():
+def test_schema_omits_retired_completion_criteria():
     t = tool(Provider([]))
-    playbook_desc = t.schema.parameters["properties"]["playbook"]["description"]
-    assert "二选一" in playbook_desc
-    assert "二选一" not in t.schema.description
     props = t.schema.parameters["properties"]
+    assert "playbook" not in props
+    assert "playbook_args" not in props
     assert "completion_criteria" not in props
     assert "finalize" not in props
     # S3 字段已删 ⇒ 描述里也不留负面清单（体积棘轮见

@@ -42,6 +42,7 @@ from agentcore.api.schemas import (
 from agentcore.config import settings
 from agentcore.conversation.common import (
     default_permission_axes_for_user,
+    fallback_title,
     mint_title_if_empty,
 )
 from agentcore.conversation.context_gap import visible_window_messages
@@ -49,6 +50,7 @@ from agentcore.conversation.export import (
     conversation_to_json,
     conversation_to_markdown,
 )
+from agentcore.conversation.fork_title import next_fork_title
 from agentcore.conversation.store import MESSAGE_STATUS_RUNNING
 from agentcore.core.errors import AuthorizationError, ConflictError, NotFoundError
 from agentcore.core.logging import get_logger
@@ -262,9 +264,11 @@ async def duplicate_conversation(
     Owner-scoped (404 for a non-owner / missing source / cutoff not in this chat).
     ``until_message_id`` is required: the copy includes that row and every earlier
     row; later turns stay on the source. The original is unchanged. Inherits folder
-    (same workspace) and local-first intent, titled「… 副本」. Content-level fields
-    only — ``MessageRepository.copy_through`` does not copy the team-graph journal.
-    A still-generating cutoff is 409. Returns the new conversation summary.
+    (same workspace) and local-first intent. Title is ``{stem} (n)`` with n from 1
+    among the caller's live chats (empty source uses the sidebar fallback, then
+    「新对话」). Content-level fields only — ``MessageRepository.copy_through``
+    does not copy the team-graph journal. A still-generating cutoff is 409.
+    Returns the new conversation summary.
     """
     src = await conv_repo.get_by_id(conversation_id, user_id=user.user_id)
     if not src:
@@ -279,7 +283,14 @@ async def duplicate_conversation(
     if usage.get("status") == MESSAGE_STATUS_RUNNING:
         raise ConflictError("这条回复还在生成，不能克隆")
     base = (src.title or "").strip()
-    title = (f"{base} 副本" if base else "副本")[:500]
+    if not base:
+        first_users = await msg_repo.first_user_contents_for_conversations(
+            [conversation_id]
+        )
+        raw = first_users.get(conversation_id) or ""
+        if raw:
+            base = fallback_title(raw)
+    title = next_fork_title(base, await conv_repo.list_live_titles(user.user_id))
     # 克隆：有源钉则拷贝；源为存量 null 则拍当时账号默认。
     from agentcore.llm.model_profiles import LlmModelProfileService
 

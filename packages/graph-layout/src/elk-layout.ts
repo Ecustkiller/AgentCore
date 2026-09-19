@@ -651,7 +651,12 @@ function debateGraphShape(
  * a 参与者×轮次 grid, not a single collapsed parallel unit.
  */
 export function workerGraphShape(runs: ShapeRun[]): GraphShape {
-  const workers = runs.filter((r) => r.kind !== "captain");
+  // Non-debate same-person continuations fold into one graph seat.
+  const workers = runs.filter(
+    (r) =>
+      r.kind !== "captain" &&
+      !(r.continuesRunId != null && !isDebateTaggedRun(r)),
+  );
   if (workers.length === 0) return { depth: 1, parallelism: 1 };
   const ids = new Set(workers.map((r) => r.id));
   const byId = new Map(workers.map((r) => [r.id, r]));

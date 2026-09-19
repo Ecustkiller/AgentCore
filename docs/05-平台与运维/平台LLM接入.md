@@ -42,7 +42,7 @@ skip_if:
 
 ## 三、sidecar 推理代理
 
-桌面本地引擎**不拿 BYOK key**——经服务端出网：`POST /v1/inference/token` 铸 scoped token + 服务端解析 `model`；`POST /v1/inference/v1/chat/completions` 过同一道计费闸后转发。模型以服务端解析为准。`X-AgentCore-Role: vision` **已退役**（硬失败）。→ `api/routes/inference/`；整体 → [双模式工作区](/docs/02-架构/双模式工作区.md)。
+桌面本地引擎**不拿 BYOK key**——经服务端出网：`POST /v1/inference/token` 铸 scoped token + 服务端解析 `model`；`POST /v1/inference/v1/chat/completions` 过同一道计费闸后转发。模型以服务端解析为准。`X-AgentCore-Role: vision` **已退役**（硬失败）。→ `api/routes/inference/`；整体 → [工作区](/docs/02-架构/工作区.md)。
 
 **铸票 `token.model`**：可选 body `{ conversation_id? }`。有合法且属该用户的会话 → 与代理主槽同源 expand（`resolve_conversation_model_selection(...).model`，会话钉组合优先）；缺省 / 会话不存在或不属于该用户 → 账号默认（`resolve_user_chat_model`）。JWT **只绑 user**，不把 `conversation_id` 塞进 claims；返回的 model id 诚实透传（禁 silent 把 `flash-free` 糊成 `flash`）。
 

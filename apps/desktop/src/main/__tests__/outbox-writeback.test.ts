@@ -695,15 +695,25 @@ describe("drainOutbox", () => {
     );
     expect(
       normalizeToolFailureCode(
-        "delegate 缺 tasks/playbook：请在 payload 顶层直接放非空 `tasks`",
+        'delegate 缺 tasks：默认顶层放非空 `tasks`，可抄：{"tasks":[{"role":"角色","task":"目标+边界+验收"}]}（deliverable 可选）。',
       ),
     ).toBe("declaration_empty");
     expect(
+      normalizeToolFailureCode(
+        "delegate 缺 tasks/playbook：请在 payload 顶层直接放非空 `tasks`",
+      ),
+    ).toBe("other");
+    expect(
       normalizeToolFailureCode("playbook 与 tasks 二选一，不可同时传。…"),
-    ).toBe("declaration_xor");
+    ).toBe("other");
     expect(normalizeToolFailureCode("未知 playbook『x』；可用：a。")).toBe(
-      "declaration_unknown",
+      "other",
     );
+    expect(normalizeToolFailureCode("delegate 须传手写 `tasks`，其余…")).toBe(
+      "other",
+    );
+    expect(normalizeToolFailureCode("x", "declaration_xor")).toBe("other");
+    expect(normalizeToolFailureCode("x", "declaration_unknown")).toBe("other");
     expect(normalizeToolFailureCode("缺少参数")).toBe("other");
     expect(normalizeToolFailureCode("缺少必填参数：query")).toBe("schema");
     expect(normalizeToolFailureCode("x", "egress_connect")).toBe(
@@ -1485,6 +1495,18 @@ describe("toRecordTurnBody", () => {
       duration_ms: 57_000,
     });
     expect(body.duration_ms).toBe(57_000);
+  });
+
+  it("forwards generation_ms when present", () => {
+    const body = toRecordTurnBody({
+      user_message_id: "u1",
+      conversation_id: "c1",
+      user_message: "hello",
+      content: "world",
+      trace_id: "a".repeat(32),
+      generation_ms: 1_900,
+    });
+    expect(body.generation_ms).toBe(1_900);
   });
 
   it("forwards agent_mentions when present", () => {

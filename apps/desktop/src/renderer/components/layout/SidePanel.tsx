@@ -103,7 +103,7 @@ function isDetailTabLive(
 }
 
 /**
- * The conversation's single right-docked surface (前端UX设计.md §十 · 方案 B):
+ * The conversation's single right-docked surface (前端UX设计.md §四 · 方案 B):
  * `[工作区*] [改动?] | 内容 tabs | [+]`.
  * 「工作区」常驻固定 tab：不可关、可 detach。「改动」按需打开、可关。
  */

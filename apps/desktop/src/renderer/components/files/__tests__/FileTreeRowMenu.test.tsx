@@ -67,17 +67,19 @@ function openMenu(node: FileNode, source: FileSource) {
 }
 
 describe("FileTreeRowMenu 目录下载", () => {
-  it("caps.transfer 时目录行出现下载，并带 isDir", async () => {
+  it("目录行不出现 zip 下载，可写源仍有新建文件", async () => {
     const download = vi.fn().mockResolvedValue(undefined);
     openMenu(
       { path: "docs", name: "docs", isDir: true },
       stubSource({ download }),
     );
-    fireEvent.click(await screen.findByText("下载"));
-    expect(download).toHaveBeenCalledWith("docs", "docs.zip", { isDir: true });
+    expect(await screen.findByText("新建文件")).toBeTruthy();
+    expect(screen.queryByText("下载")).toBeNull();
+    expect(screen.queryByText("新建文件夹")).toBeNull();
+    expect(download).not.toHaveBeenCalled();
   });
 
-  it("只读协作桌（无 edit）目录行仍可下载", async () => {
+  it("只读协作桌（无 edit）目录行既无下载也无新建", async () => {
     const download = vi.fn().mockResolvedValue(undefined);
     openMenu(
       { path: "docs", name: "docs", isDir: true },
@@ -86,8 +88,19 @@ describe("FileTreeRowMenu 目录下载", () => {
         download,
       }),
     );
-    expect(await screen.findByText("下载")).toBeTruthy();
+    expect(screen.queryByText("下载")).toBeNull();
     expect(screen.queryByText("新建文件")).toBeNull();
+    expect(screen.queryByText("新建文件夹")).toBeNull();
+  });
+
+  it("文件行仍可下载", async () => {
+    const download = vi.fn().mockResolvedValue(undefined);
+    openMenu(
+      { path: "a.md", name: "a.md", isDir: false },
+      stubSource({ download }),
+    );
+    fireEvent.click(await screen.findByText("下载"));
+    expect(download).toHaveBeenCalledWith("a.md", "a.md", { isDir: false });
   });
 
   it("无 transfer 时目录行不出现下载", () => {

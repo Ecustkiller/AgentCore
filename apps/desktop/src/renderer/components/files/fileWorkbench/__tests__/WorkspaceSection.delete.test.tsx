@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * 文件中枢工作区轨：右键「删除对话」一键软删（撤销 toast），「删除文件夹」仍走弹窗。
+ * 文件中枢工作区轨：右键「删除对话」一键软删（撤销 toast），「删除文件夹」不再挂在「我的文件」。
  */
 
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -168,14 +168,13 @@ describe("工作区轨删除", () => {
     expect(mocks.deleteFolder).not.toHaveBeenCalled();
   });
 
-  it("右键删除文件夹仍打开确认弹窗，不立刻删", async () => {
+  it("右键不再出现删除文件夹", async () => {
     renderSection();
 
     fireEvent.contextMenu(screen.getByText("季度报告"));
-    fireEvent.click(await screen.findByText("删除文件夹…"));
-
-    expect(await screen.findByText("删除文件夹「季度报告」？")).toBeTruthy();
-    expect(screen.getByText("立即永久删除（不可恢复）")).toBeTruthy();
+    await screen.findByText("重命名");
+    expect(screen.queryByText("删除文件夹…")).toBeNull();
+    expect(screen.queryByText("删除文件夹「季度报告」？")).toBeNull();
     expect(mocks.deleteFolder).not.toHaveBeenCalled();
     expect(mocks.deleteConversation).not.toHaveBeenCalled();
   });

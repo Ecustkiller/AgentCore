@@ -81,8 +81,9 @@ function isWorkerScopedToolUse(eventType: string, payload: unknown): boolean {
 }
 
 /**
- * stopping：诚实过渡态——继续消费 run_*（含级联终态帧），正文/工具突变仍挡；
- * 仅后端 message_end/error 才定格。terminal：放行下一回合 message_start + 无害 meta。
+ * stopping：Stop 点击后的过渡——图已本地 cancelled；继续消费 run_*（含级联终态帧），
+ * 正文/工具突变仍挡；``message_end(cancelled)`` 把 phase 推进 stopped。
+ * terminal：放行下一回合 message_start + 无害 meta。
  *
  * terminal 也放行 run_*：对齐云端 / sidecar D1——`message_end` 后 sink 仍可为 live
  * detached drive 续推 `run_completed` / `run_tool_progress`（conformance

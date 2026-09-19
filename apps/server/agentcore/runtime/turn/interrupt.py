@@ -418,6 +418,8 @@ async def close_turn_interrupted(
                     if body_reasoning is None and existing_reasoning:
                         body_reasoning = existing_reasoning
                 body = compose_interrupt_body(raw or "", reason=resolved)
+                from agentcore.runtime.turn.latency import interrupt_usage_clocks
+
                 await MessageRepository(session).upsert_assistant(
                     conversation_id=conversation_id,
                     message_id=message_id,
@@ -429,6 +431,7 @@ async def close_turn_interrupted(
                         "incomplete": True,
                         "finish_reason": finish.value,
                         "interrupt_reason": resolved.value,
+                        **interrupt_usage_clocks(),
                     },
                     merge=True,
                 )

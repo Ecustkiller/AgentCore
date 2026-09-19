@@ -1,4 +1,4 @@
-# AgentCore 备份定时器（部署与运维.md §7.7）。每日跑一次 .service。
+# AgentCore 备份定时器（发布与门禁.md §1.7）。每日跑一次 .service。
 # 启用：sudo systemctl enable --now agentcore-backup.timer
 # 查看：systemctl list-timers agentcore-backup.timer
 

@@ -1,5 +1,5 @@
 /**
- * Soft outdated-client gate (部署与运维.md §7.6): compare local build to
+ * Soft outdated-client gate (发布与门禁.md §1.6): compare local build to
  * `GET /updates/policy`.min_desktop_version. Empty min / `dev` builds never count
  * as outdated.
  */

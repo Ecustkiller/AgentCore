@@ -55,7 +55,7 @@ def test_mcp_capability_label_matrix():
     assert mcp_capability_label(degraded, desktop_online=True) == "降级（无可用工具）"
 
 
-def test_register_mcp_tools_deferred_grantable():
+def test_register_mcp_tools_grantable():
     result = McpDiscoverResult(
         ready_servers=1,
         tool_count=1,
@@ -75,12 +75,11 @@ def test_register_mcp_tools_deferred_grantable():
         assert tool.schema.approval is ToolApproval.GRANTABLE
         assert "MCP" in tool.schema.description
         assert "mcp_echo_ping" in registry.names
-        assert "mcp_echo_ping" in registry.deferred_names
         offered = {
             str((d.get("function") or {}).get("name") or d.get("name") or "")
             for d in registry.get_openai_definitions()
         }
-        assert "mcp_echo_ping" not in offered
+        assert "mcp_echo_ping" in offered
 
 
 def test_desktop_touch_tool_names_cover_mcp_and_host():
@@ -147,12 +146,11 @@ def test_ceo_default_registry_has_no_mcp_until_registered():
         ),
     )
     assert "mcp_s_t" in ceo.names
-    assert "mcp_s_t" in ceo.deferred_names
     offered = {
         str((d.get("function") or {}).get("name") or d.get("name") or "")
         for d in ceo.get_openai_definitions()
     }
-    assert "mcp_s_t" not in offered
+    assert "mcp_s_t" in offered
 
 
 @pytest.mark.asyncio

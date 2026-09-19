@@ -105,8 +105,26 @@ def test_message_end_auto_fills_duration_from_probe():
         probe.anchor_mono -= 2.5  # ~2500ms elapsed
         ev = message_end(FinishReason.END_TURN)
         assert ev.payload["duration_ms"] >= 2500
+        assert "generation_ms" not in ev.payload
     finally:
         reset_turn_latency(token)
+
+
+def test_message_end_auto_fills_generation_from_probe():
+    from agentcore.runtime.turn.latency import bind_turn_latency, reset_turn_latency
+
+    probe, token = bind_turn_latency()
+    try:
+        probe.add_generation_ms(880)
+        ev = message_end(FinishReason.END_TURN)
+        assert ev.payload["generation_ms"] == 880
+    finally:
+        reset_turn_latency(token)
+
+
+def test_message_end_omits_generation_without_probe():
+    ev = message_end(FinishReason.END_TURN)
+    assert "generation_ms" not in ev.payload
 
 
 def test_run_completed_carries_role_model_usage_cost():

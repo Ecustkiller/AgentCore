@@ -2,7 +2,7 @@
 import { FileTree } from "@/components/files/FileTree";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { FileNode, FileSource } from "@/lib/fileSource";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/files/FileTreeRowMenu", () => ({
@@ -18,7 +18,7 @@ vi.mock("@/lib/toast", () => ({
 vi.mock("@/hooks/useFolders", () => ({ getFolders: vi.fn(() => []) }));
 
 function makeSource(): FileSource {
-  let entries: FileNode[] = [];
+  const entries: FileNode[] = [];
   return {
     id: "workspace:mkdir",
     label: "工作区",
@@ -26,45 +26,23 @@ function makeSource(): FileSource {
     listDir: async () => entries,
     read: async () => ({ kind: "text", text: "", truncated: false }),
     createFile: async () => {},
-    mkdir: async (path) => {
-      const name = path.split("/").pop() ?? path;
-      entries = [...entries, { path, name, isDir: true }];
+    mkdir: async () => {
+      throw new Error("mkdir should not be offered from the toolbar");
     },
     move: async () => {},
     delete: async () => {},
   };
 }
 
-describe("FileTree mkdir", () => {
-  it("toolbar 新建文件夹 creates 未命名文件夹 then enters rename", async () => {
+describe("FileTree toolbar", () => {
+  it("offers 新建文件 and not 新建文件夹", async () => {
     render(
       <TooltipProvider>
         <FileTree source={makeSource()} onOpenFile={vi.fn()} />
       </TooltipProvider>,
     );
     await screen.findByText("暂无文件");
-    fireEvent.click(screen.getByRole("button", { name: "新建文件夹" }));
-    await waitFor(() => {
-      expect(screen.getByDisplayValue("未命名文件夹")).toBeTruthy();
-    });
-  });
-
-  it("a second 新建文件夹 increments the default name", async () => {
-    const source = makeSource();
-    render(
-      <TooltipProvider>
-        <FileTree source={source} onOpenFile={vi.fn()} />
-      </TooltipProvider>,
-    );
-    await screen.findByText("暂无文件");
-    fireEvent.click(screen.getByRole("button", { name: "新建文件夹" }));
-    await waitFor(() => {
-      expect(screen.getByDisplayValue("未命名文件夹")).toBeTruthy();
-    });
-    fireEvent.blur(screen.getByDisplayValue("未命名文件夹"));
-    fireEvent.click(screen.getByRole("button", { name: "新建文件夹" }));
-    await waitFor(() => {
-      expect(screen.getByDisplayValue("未命名文件夹 (2)")).toBeTruthy();
-    });
+    expect(screen.getByRole("button", { name: "新建文件" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "新建文件夹" })).toBeNull();
   });
 });

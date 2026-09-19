@@ -180,7 +180,7 @@ async def run_and_persist(
             # First file-mutating tool captures the turn baseline unbudgeted in
             # execute (not here — greetings must not zip). Pipeline execution
             # (tools, cross-desk delegate re-probes) stays unbudgeted, per
-            # 双模式工作区.md §7.7.
+            # 工作区.md §7.7.
             budget_token = None
             if not prepare_local_io_deadline_bound() and backend_uses_local_channel(backend):
                 budget_token = bind_prepare_local_io_deadline()

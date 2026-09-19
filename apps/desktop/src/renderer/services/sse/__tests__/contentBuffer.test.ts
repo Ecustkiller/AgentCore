@@ -4,6 +4,7 @@ import {
   queueContentDelta,
   queueReasoningDelta,
 } from "@/services/sse/contentBuffer";
+import { resetCappedFlush } from "@/services/sse/streamFlushScheduler";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -21,6 +22,7 @@ beforeEach(() => {
 
 afterEach(() => {
   flushPendingContent(CONV);
+  resetCappedFlush(`content:${CONV}`);
   vi.unstubAllGlobals();
 });
 

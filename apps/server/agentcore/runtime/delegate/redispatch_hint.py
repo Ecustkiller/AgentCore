@@ -8,9 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentcore.runtime.delegate.playbook_declaration import (
-    declaration_reject_gate,
-)
+from agentcore.runtime.delegate.empty_tasks import is_empty_delegate_error
 from agentcore.runtime.engine.tool_exec import TOOL_FAILED_MARKER
 from agentcore.runtime.events.types import FinishReason
 from agentcore.runtime.facts import FactKind
@@ -46,6 +44,6 @@ def prior_turn_has_redispatch_fingerprint(entries: list[dict[str, Any]] | None) 
         if payload.get("success") is not False:
             continue
         cleaned = _clean_tool_result(str(payload.get("result") or ""))
-        if declaration_reject_gate(cleaned) == "empty":
+        if is_empty_delegate_error(cleaned):
             return True
     return False

@@ -37,7 +37,7 @@ class ServerSettings(BaseModel):
     # Native mobile floor (HTTP 426 hard gate). Covers android / ios; mobile-web is a
     # browser surface and never gated. Deliberately absent from /updates/policy — the
     # Android shell discovers versions from the brand CDN android/latest.json, never
-    # that endpoint (发布与门禁.md §7.6a). Empty = no gate; raising it is a release-time
+    # that endpoint (发布与门禁.md §1.6a). Empty = no gate; raising it is a release-time
     # decision, so production ships empty.
     mobile_min_version: str = ""
 

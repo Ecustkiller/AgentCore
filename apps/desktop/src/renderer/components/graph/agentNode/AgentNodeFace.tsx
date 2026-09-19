@@ -8,7 +8,6 @@ import {
   graphBadgePrimary,
 } from "@/components/ui/tone-presets";
 import { useRunningElapsed } from "@/hooks/useRunningElapsed";
-import { useActiveTurnPhase } from "@/stores/conversation";
 import {
   projectRuntime,
   toolLabel,
@@ -201,10 +200,7 @@ function useAgentNodeStopOverride(
       .clearIfSettled(executionId, runId, status);
   }, [executionId, runId, status]);
 
-  const turnPhase = useActiveTurnPhase();
   if (covered && isStoppableRunStatus(status)) return "停止请求中…";
-  if (turnPhase === "stopping" && isStoppableRunStatus(status))
-    return "停止中…";
   return null;
 }
 

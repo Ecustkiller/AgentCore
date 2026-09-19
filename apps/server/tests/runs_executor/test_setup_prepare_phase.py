@@ -198,7 +198,7 @@ async def test_infra_retry_appends_continue_user_after_transcript():
     assert messages[-1].role == "user"
     assert "续干指令" in (messages[-1].content or "")
     assert messages[2].tool_calls[0].id == "fw"
-    assert messages[2].reasoning_content is None
+    assert messages[2].reasoning_content == "think-here"
 
 
 async def test_crash_redrive_restores_transcript_without_continue_user():

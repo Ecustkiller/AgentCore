@@ -149,7 +149,6 @@ export function RunInterveneControls({
                       conversationId,
                       executionId,
                       runId,
-                      scope: "node",
                     });
                   } finally {
                     setStopSubmitting(false);

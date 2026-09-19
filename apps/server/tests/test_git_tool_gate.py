@@ -146,11 +146,10 @@ def test_capability_line_git_unassembled_when_desktop_offline():
     assert "装配启用" not in out
     assert "在桌面客户端打开【本对话】" not in out
     assert "文件读写与其它已装配工具不受影响" not in out
-    # 「未装配怎么开工 / 勿声称已用」写在共享基座 <诚实>，事实层不复述
+    # 声称纪律在基座对照结构面，事实层不复述开工姿势
     assert "同轮可开工" not in out
     from agentcore.runtime.resolve.prompt import _CEO_CORE_HINT, _DEFAULT_SYSTEM_PROMPT
 
-    assert "未装配" in _DEFAULT_SYSTEM_PROMPT and "不得声称" in _DEFAULT_SYSTEM_PROMPT
     assert "git…）" not in _DEFAULT_SYSTEM_PROMPT  # 不按能力枚举
     assert "未装配能力" not in _CEO_CORE_HINT
     # An unassembled turn must not advise a tool the model does not hold.

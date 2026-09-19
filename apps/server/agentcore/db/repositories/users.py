@@ -231,7 +231,7 @@ class UserRepository:
         await self._session.commit()
 
     async def set_autonomy_policy(self, user_id: str, policy: str) -> None:
-        """Set the user's capability-authorization posture (安全权限与治理 §三)."""
+        """Set the user's capability-authorization posture (安全权限与治理 §二)."""
         await self._session.execute(
             update(User).where(User.user_id == user_id).values(autonomy_policy=policy)
         )

@@ -1,7 +1,6 @@
-"""Tests for CEO folders / create_folder.
+"""Tests for CEO folders (list / resolve).
 
 P0 桶 A：列名册与按路径解析（嵌套后同名末段合法，故 resolve 走路径）。
-P1 桶 C：云 create（同指挥面；不碰会话归属；可挂到某一层）。
 """
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ import pytest
 
 from agentcore.core.types import ToolApproval, ToolFace
 from agentcore.tools.builtin.folders import (
-    CreateFolderTool,
     FoldersTool,
     resolve_folders_by_path,
 )
@@ -207,7 +205,6 @@ def test_folders_schema_and_registration():
     desc = tool.schema.description
     _assert_short_trigger(desc)
     assert "rel_path" in desc
-    assert "file_list" in desc
     assert "名册" in desc
     assert "不常驻" in desc
     assert "跨桌" in desc
@@ -235,42 +232,12 @@ def test_folders_schema_and_registration():
     assert reg.ceo_wire is CeoWire.ALWAYS
 
 
-def test_create_folder_schema_and_registration():
-    tool = CreateFolderTool()
-    assert tool.schema.name == "create_folder"
-    props = tool.schema.parameters["properties"]
-    assert "name" in props
-    # Nesting: the model must be able to say WHERE the new folder hangs.
-    assert "parent_path" in props
-    assert tool.schema.parameters["required"] == ["name"]
-    assert tool.schema.face is ToolFace.FOLDER
-    assert tool.schema.approval is ToolApproval.NEVER
-    # Cloud-only surface: no local_root_id / mode param (local = 桶 D).
-    assert "local_root_id" not in props
-    assert "mode" not in props
-    desc = tool.schema.description
-    _assert_short_trigger(desc)
-    assert "mode=cloud" in desc
-    assert "open_local_project" in desc
-    # Must not read as "make a subdirectory" — that is mkdir.
-    assert "mkdir" in desc
-    assert "用户明确" in desc or "明确要求" in desc
-    # 过闸/裸聊写盘禁令在回执；create_folder 不复述。
-    assert "禁止为过写盘闸" not in desc
-    assert "自动建云文件夹" not in desc
-    parent_desc = props["parent_path"]["description"]
-    assert "folders" in parent_desc
-    assert "顶层" in parent_desc
-    reg = tool_registration(CreateFolderTool)
-    assert reg.surface is ToolSurface.CEO_ORCHESTRATION
-    assert reg.audience == (AUDIENCE_CEO,)
-    assert reg.ceo_wire is CeoWire.ALWAYS
-
-
 def test_declared_roster_includes_folder_tools():
     names = {declared_tool_name(cls) for cls in declared_tools()}
     assert "folders" in names
-    assert "create_folder" in names
+    assert "create_folder" not in names
+    assert "delete_folder" not in names
+    assert "mkdir" not in names
 
 
 # --- execute (repo mocked) --------------------------------------------------
@@ -319,59 +286,6 @@ def _patch_list(monkeypatch: pytest.MonkeyPatch, folders: list[_FakeFolder]) -> 
     monkeypatch.setattr(folders_mod, "FolderRepository", _Repo)
 
 
-def _patch_create(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    created: list[dict[str, Any]] | None = None,
-    existing: list[_FakeFolder] | None = None,
-) -> list[dict[str, Any]]:
-    """Stub FolderRepository create/list; return the create call log for assertions."""
-    import agentcore.tools.builtin.folders as folders_mod
-
-    calls = created if created is not None else []
-    roster = existing or []
-
-    class _Repo:
-        def __init__(self, session: Any) -> None:
-            del session
-
-        async def list_by_user(self, user_id: str) -> list[_FakeFolder]:
-            del user_id
-            return roster
-
-        async def create(
-            self,
-            *,
-            user_id: str,
-            name: str,
-            local_root_id: str | None = None,
-            local_subpath: str | None = None,
-            parent_rel_path: str | None = None,
-        ) -> _FakeFolder:
-            calls.append(
-                {
-                    "user_id": user_id,
-                    "name": name,
-                    "local_root_id": local_root_id,
-                    "local_subpath": local_subpath,
-                    "parent_rel_path": parent_rel_path,
-                }
-            )
-            rel = f"{parent_rel_path}/{name}" if parent_rel_path else name
-            return _FakeFolder(id="new-cloud-1", name=name, rel_path=rel)
-
-    class _CM:
-        async def __aenter__(self) -> object:
-            return object()
-
-        async def __aexit__(self, *args: object) -> None:
-            return None
-
-    monkeypatch.setattr(folders_mod, "async_session_factory", lambda: _CM())
-    monkeypatch.setattr(folders_mod, "FolderRepository", _Repo)
-    return calls
-
-
 async def test_list_folders_returns_folder_summary_shape(monkeypatch: pytest.MonkeyPatch):
     _patch_list(
         monkeypatch,
@@ -416,8 +330,9 @@ async def test_list_folders_empty(monkeypatch: pytest.MonkeyPatch):
     assert result.success
     assert result.display == {"count": 0}
     assert "还没有文件夹" in result.output
-    assert "create_folder" in result.output
-    # Empty roster: create only for explicit new / multi-line; not write-gate default.
+    assert "我的文件" in result.output
+    assert "create_folder" not in result.output
+    # Empty roster: create is human-side; auto-desk covers write, not a tool.
     assert "自动建云文件夹" in result.output
     assert "过写盘闸" in result.output or "勿" in result.output
     # Empty roster must not default-nudge open_local_project as the create path.
@@ -467,7 +382,8 @@ async def test_resolve_zero(monkeypatch: pytest.MonkeyPatch):
     assert result.success
     assert result.display["status"] == "not_found"
     assert "ask_user" in result.output or "folders" in result.output
-    assert "create_folder" in result.output  # mention only as explicit-new path
+    assert "create_folder" not in result.output
+    assert "我的文件" in result.output
     assert "自动建云文件夹" in result.output
     assert "禁止静默猜" in result.output
     # Nested rosters: tell the model to check the level before giving up.
@@ -577,139 +493,3 @@ async def test_list_folders_non_db_failure_keeps_generic_path(
     assert not result.success
     assert result.error == "unexpected boom"
     assert "数据库不可用" not in result.output
-
-
-# --- create_folder (P1 桶 C) --------------------------------------------------
-
-
-async def test_create_folder_cloud_success(monkeypatch: pytest.MonkeyPatch):
-    calls = _patch_create(monkeypatch)
-    ctx = _ctx(user_id="owner-1", conversation_id="conv-stay")
-    result = await CreateFolderTool().execute(
-        {"name": "  New Cloud App  "},
-        ctx,
-    )
-    assert result.success
-    assert result.display["status"] == "created"
-    assert result.display["folder_id"] == "new-cloud-1"
-    assert result.display["name"] == "New Cloud App"
-    assert result.display["mode"] == "cloud"
-    assert result.display["conversation_untouched"] is True
-    assert calls == [
-        {
-            "user_id": "owner-1",
-            "name": "New Cloud App",
-            "local_root_id": None,
-            "local_subpath": None,
-            "parent_rel_path": None,
-        }
-    ]
-    # FolderSummary-shaped folder in payload
-    payload = json.loads(result.output.split("\n", 1)[1])
-    assert payload["status"] == "created"
-    assert payload["conversation_untouched"] is True
-    folder = payload["folder"]
-    assert folder["id"] == "new-cloud-1"
-    assert folder["mode"] == "cloud"
-    assert folder["local_root_id"] is None
-    assert "path" not in folder
-    assert "未改会话" in result.output or "conversation_untouched" in result.output
-    assert "运行时继承" in result.output or "省略" in result.output
-    assert ctx.turn_target_desk.folder_id == "new-cloud-1"
-    assert "new-cloud-1" in ctx.turn_created_folder_ids
-
-
-async def test_create_folder_nested_under_parent_path(monkeypatch: pytest.MonkeyPatch):
-    calls = _patch_create(
-        monkeypatch,
-        existing=[_FakeFolder(id="p1", name="设计", rel_path="工作/设计")],
-    )
-    result = await CreateFolderTool().execute(
-        {"name": "图标", "parent_path": "工作/设计"},
-        _ctx(user_id="owner-1"),
-    )
-    assert result.success
-    assert calls[0]["parent_rel_path"] == "工作/设计"
-    assert result.display["rel_path"] == "工作/设计/图标"
-    assert "工作/设计/图标" in result.output
-
-
-async def test_create_folder_parent_not_found_creates_nothing(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    calls = _patch_create(monkeypatch, existing=[_FakeFolder(id="p1", name="设计")])
-    result = await CreateFolderTool().execute(
-        {"name": "图标", "parent_path": "不存在的层"},
-        _ctx(),
-    )
-    assert not result.success
-    assert result.error == "parent_not_found"
-    assert calls == []
-    assert "没有创建任何东西" in result.output
-
-
-async def test_create_folder_parent_ambiguous_creates_nothing(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    calls = _patch_create(
-        monkeypatch,
-        existing=[
-            _FakeFolder(id="a", name="图标", rel_path="设计/图标"),
-            _FakeFolder(id="b", name="图标", rel_path="归档/图标"),
-        ],
-    )
-    result = await CreateFolderTool().execute(
-        {"name": "线稿", "parent_path": "图标"},
-        _ctx(),
-    )
-    assert not result.success
-    assert result.error == "parent_ambiguous"
-    assert calls == []
-    assert "没有创建任何东西" in result.output
-    assert "设计/图标" in result.output and "归档/图标" in result.output
-
-
-async def test_create_folder_does_not_touch_conversation(monkeypatch: pytest.MonkeyPatch):
-    """Invariant: create is account Folder only — never rebinds conversation.folder_id."""
-    import agentcore.tools.builtin.folders as folders_mod
-
-    _patch_create(monkeypatch)
-    # If create ever starts mutating conversations, these would be imported/called.
-    assert not hasattr(folders_mod, "ConversationRepository")
-    assert "ConversationRepository" not in folders_mod.__dict__
-
-    conversation_mutations: list[str] = []
-
-    def _forbid_conversation_touch(*_a: Any, **_k: Any) -> None:
-        conversation_mutations.append("touched")
-        raise AssertionError("create_folder must not touch conversations")
-
-    # Belt: even if someone later imports Conversation models into this module,
-    # a stray setattr on conversation.folder_id should fail the test loudly.
-    monkeypatch.setattr(
-        folders_mod,
-        "ConversationRepository",
-        type(
-            "ForbiddenConversationRepo",
-            (),
-            {
-                "__init__": lambda self, *a, **k: _forbid_conversation_touch(),
-                "update": staticmethod(_forbid_conversation_touch),
-            },
-        ),
-        raising=False,
-    )
-
-    result = await CreateFolderTool().execute(
-        {"name": "Stay Put"},
-        _ctx(conversation_id="conv-must-not-rebind"),
-    )
-    assert result.success
-    assert conversation_mutations == []
-    assert result.display.get("conversation_untouched") is True
-
-
-async def test_create_folder_missing_name():
-    result = await CreateFolderTool().execute({}, _ctx())
-    assert not result.success
-    assert result.error == "missing name"

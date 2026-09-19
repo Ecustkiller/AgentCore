@@ -1,4 +1,4 @@
-"""Resume 沿用用户当前自主度（安全权限与治理 §三）——不再硬编码 FIRST_GRANT。
+"""Resume 沿用用户当前自主度（安全权限与治理 §二）——不再硬编码 FIRST_GRANT。
 
 批 2 授权模型统一后，:func:`resume_chat_pipeline` 的 ``ApprovalGate`` 曾把
 ``autonomy_policy`` 硬编码为 ``FIRST_GRANT``：挂起期间改了设置的用户，续跑照旧按旧档跑。

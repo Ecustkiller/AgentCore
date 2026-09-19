@@ -19,6 +19,7 @@ from agentcore.conversation.store.outbox import (
     to_record_turn_body,
     tool_failures_from_journal,
 )
+from agentcore.tools.builtin.delegate.schema import EMPTY_DELEGATE_MSG
 
 pytestmark = pytest.mark.anyio
 
@@ -34,18 +35,7 @@ _TRACE = "0123456789abcdef0123456789abcdef"
         ("ConnectError: connection refused", None, "egress_connect"),
         ("连接超时（无法连上该站点）", None, "egress_connect"),
         ("缺少必填参数：query", None, "schema"),
-        (
-            "delegate 缺 tasks/playbook：请在 payload 顶层直接放非空 `tasks`",
-            None,
-            "declaration_empty",
-        ),
-        ("delegate 须传手写 `tasks`，其余…", None, "declaration_empty"),
-        (
-            "playbook 与 tasks 二选一，不可同时传。手写 tasks：去掉具名…",
-            None,
-            "declaration_xor",
-        ),
-        ("未知 playbook『x』；可用：a, b。", None, "declaration_unknown"),
+        (EMPTY_DELEGATE_MSG, None, "declaration_empty"),
         ("anything", "declaration_empty", "declaration_empty"),
         ("anything", "searxng_unreachable", "searxng_unreachable"),
         ("searxng down", "egress_connect", "egress_connect"),
@@ -204,7 +194,7 @@ def test_tool_failures_from_journal_git_no_repo_code():
 
 def test_tool_failures_from_journal_declaration_empty():
     """Local delegate declaration empty → code is declaration_empty, not other."""
-    from agentcore.runtime.delegate.playbook_declaration import _EMPTY_DELEGATE_MSG
+    from agentcore.tools.builtin.delegate.schema import EMPTY_DELEGATE_MSG
 
     failures = tool_failures_from_journal(
         [
@@ -213,7 +203,7 @@ def test_tool_failures_from_journal_declaration_empty():
                 "payload": {
                     "name": "delegate",
                     "success": False,
-                    "result": _EMPTY_DELEGATE_MSG,
+                    "result": EMPTY_DELEGATE_MSG,
                 },
             }
         ]

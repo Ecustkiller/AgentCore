@@ -358,15 +358,7 @@ def test_circuit_breaker_still_counts_real_execution_failures():
     assert cb.disabled == ()
     assert "file_write" in cb.force_segmented
     assert c.tool_failure_count("file_write") == 3
-    msg = cb.message() or ""
-    assert "连续写盘失败" in msg
-    assert "file_write" in msg and "str_replace" in msg
-    assert "file_append" not in msg
-    assert "已收窄" not in msg
-    assert "停用" not in msg
-    assert "短骨架" not in msg
-    assert "JSON 转义" not in msg
-    assert "【强制】" not in msg
+    assert cb.message() is None
 
 
 def test_circuit_breaker_parse_only_write_tools_force_segmented_not_disable():
@@ -384,13 +376,7 @@ def test_circuit_breaker_parse_only_write_tools_force_segmented_not_disable():
     disable = c.tool_circuit_breaker()
     assert disable.disabled == ()
     assert "file_write" in disable.force_segmented
-    disable_msg = disable.message() or ""
-    assert "连续写盘失败" in disable_msg
-    assert "file_append" not in disable_msg
-    assert "已收窄" not in disable_msg
-    assert "停用" not in disable_msg
-    assert "短骨架" not in disable_msg
-    assert "原样重发" not in disable_msg
+    assert disable.message() is None
 
 
 def test_retire_tools_hard_disables_family_on_first_failure():
@@ -417,9 +403,7 @@ def test_retire_tools_hard_disables_family_on_first_failure():
     assert set(cb.disabled) == set(family)
     assert cb.warned == ()
     assert cb.retire_message == steer
-    msg = cb.message()
-    assert msg is not None and steer in msg
-    assert "已多次失败" not in msg
+    assert cb.message() is None
     # Idempotent: further failures do not re-fire.
     c.record(
         [
@@ -484,7 +468,8 @@ def test_workspace_channel_dead_disables_landing_tools():
     assert "file_list" in cb.disabled
     assert "index_files" in cb.disabled
     assert not cb.force_segmented
-    assert WORKSPACE_CHANNEL_DEAD_RETIRE_STEER in (cb.message() or "")
+    assert cb.retire_message == WORKSPACE_CHANNEL_DEAD_RETIRE_STEER
+    assert cb.message() is None
 
 
 def test_single_op_channel_timeout_does_not_sticky_or_notice():
@@ -685,7 +670,7 @@ def test_retire_tools_honored_even_with_contract_failure():
     cb = c.tool_circuit_breaker()
     assert cb.disabled == ("browser",)
     assert cb.retire_message == steer
-    assert "egress" in (cb.message() or "")
+    assert cb.message() is None
 
 
 def test_permanent_sandbox_network_does_not_retire_run_family():
@@ -901,8 +886,7 @@ def test_validation_same_fingerprint_stops_path_at_two():
     assert c.tool_failure_count("delegate") == 0
     assert cb.validation_stop is not None
     assert "delegate" in (cb.validation_stop or "")
-    msg = cb.message() or ""
-    assert "同因" in msg or "路径" in msg
+    assert cb.message() is None
     assert not c.is_thrashing()
     # Re-hit after path-stop: hard stop / thrashing (do not burn max_rounds).
     c.record([rej])
@@ -1280,12 +1264,9 @@ def test_apply_circuit_breaker_force_segmented_keeps_write_pens():
     out = apply_circuit_breaker(
         c, messages=messages, run_id="r1", round_idx=0, disabled_tools=disabled
     )
-    assert out.message is not None
-    assert "file_append" not in (out.message or "")
-    assert "已收窄" not in (out.message or "")
+    assert out.message is None
     assert "file_write" not in disabled
     assert "str_replace" not in disabled
-    assert out.refresh_tool_defs is False
 
 
 # --- B2: no-output early stop (unproductive rounds) ---

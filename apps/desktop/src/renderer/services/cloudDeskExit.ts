@@ -1,9 +1,9 @@
 /**
- * 云桌标准出口编排（§五 · §7.6）：ZIP / 导出到本机文件夹（工作区工具条）/
- * 合回落点登记与 Diff 勾选合回（工作区芯片）。
+ * 云桌标准出口编排（§五 · §7.6）：合回落点登记与 Diff 勾选合回（工作区芯片）。
+ * ZIP / 整树 checkout 函数仍在（合回内部与 REST），不挂人侧导出菜单。
  *
  * 合回主路径 = 云快照 zip（内存）vs 落点现态 → handoff-review 判定 → MergeLandingReview。
- * 不经 applyHandoffJob；≠ mode=local、≠ 过桥默认。整树 checkout 仅「导出到本机文件夹」旁路。
+ * 不经 applyHandoffJob；≠ mode=local、≠ 过桥默认。人侧导出 ZIP / 到本机文件夹已卸。
  *
  * 已知限制（首刀）：无 last-merge base（同路径异内容一律 conflict）；不做云删→落点删；
  * 单文件 >5MB / 整包 >100MB / 文件数过多诚实跳过或拒绝。
@@ -20,10 +20,6 @@ import {
 } from "@/lib/mergeLandingPreference";
 import { notifyActionError, notifyInfo, notifySuccess } from "@/lib/toast";
 import { prepareMergeLandingDiff } from "@/services/mergeLandingDiff";
-import {
-  exportWorkspaceToLocal,
-  exportWorkspaceZip,
-} from "@/services/workspace";
 import { useMergeLandingReviewStore } from "@/stores/mergeLandingReview";
 import type { FsRoot } from "@shared/ipc-contract";
 
@@ -84,54 +80,6 @@ export async function registerMergeLanding(
   }
   setMergeLanding(scopeForConversation(conversationId), picked.root.id);
   return { ok: true, root: picked.root };
-}
-
-export async function exportCloudDeskZip(
-  conversationId: string,
-): Promise<CloudDeskExitResult> {
-  try {
-    await exportWorkspaceZip(conversationId);
-    notifySuccess("已导出 ZIP");
-    return { ok: true };
-  } catch (e) {
-    notifyActionError("导出 ZIP 失败", e);
-    return {
-      ok: false,
-      reason: "error",
-      message: e instanceof Error ? e.message : "导出 ZIP 失败",
-    };
-  }
-}
-
-/** 每次弹目录；不必先登记合回落点。 */
-export async function exportCloudDeskToPickedFolder(
-  conversationId: string,
-): Promise<CloudDeskExitResult> {
-  try {
-    const result = await exportWorkspaceToLocal(conversationId);
-    if (result.ok) {
-      notifySuccess(
-        `已导出 ${result.fileCount} 个文件到「${result.destName}」`,
-      );
-      return { ok: true };
-    }
-    if (result.reason === "cancelled")
-      return { ok: false, reason: "cancelled" };
-    if (result.reason === "unavailable") {
-      await exportWorkspaceZip(conversationId);
-      notifySuccess("已导出 ZIP");
-      return { ok: true };
-    }
-    notifyActionError("导出到本机失败", new Error(result.message));
-    return { ok: false, reason: "error", message: result.message };
-  } catch (e) {
-    notifyActionError("导出到本机失败", e);
-    return {
-      ok: false,
-      reason: "error",
-      message: e instanceof Error ? e.message : "导出失败",
-    };
-  }
 }
 
 /** 解析/登记合回落点（缺则 picker）；与 Diff 合回共用偏好。 */

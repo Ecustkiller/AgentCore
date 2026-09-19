@@ -1,8 +1,7 @@
 """Captain wrap-up hook.
 
-Debate-commitment / cite_write_review audit gates and tool-failure system
-mutation are withdrawn — playbook nodes, tool receipts, and synthesis facts
-own those paths.
+Debate-commitment / long-form audit gates and tool-failure system
+mutation are withdrawn — tool receipts and synthesis facts own those paths.
 """
 
 from __future__ import annotations

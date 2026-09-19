@@ -80,7 +80,7 @@ def test_dossier_filename_truncated_under_name_max():
 
 
 def test_dossier_collapses_dunder_directory_underscores():
-    """``__tests__`` flattened through reviews must match playbook slug collapse."""
+    """``__tests__`` flattened through reviews collapses consecutive underscores."""
     assert (
         sanitize_write_relpath(
             f"{REVIEWS_PREFIX}code-audit-0-pages___tests___Analytics.md"

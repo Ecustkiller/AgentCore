@@ -1,13 +1,6 @@
 import { Badge, CATALOG_GRID_CLASS, CatalogTile } from "@/components/ui";
 import { type ArtifactKind, artifactColorVar } from "@/lib/catalogColors";
-import {
-  FileText,
-  type LucideIcon,
-  PenLine,
-  Presentation,
-  Share2,
-  Table2,
-} from "lucide-react";
+import { type LucideIcon, PenLine, Presentation, Share2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 const UNAVAILABLE = "尚未开放";
@@ -29,24 +22,10 @@ const CREATION_TOOLS: CreationTool[] = [
     href: "/whiteboard",
   },
   {
-    kind: "doc",
-    title: "文档",
-    description: "可反复编辑的长文。",
-    icon: FileText,
-    href: "/docs",
-  },
-  {
     kind: "mindmap",
     title: "思维导图",
     description: "可展开收起的结构图。",
     icon: Share2,
-  },
-  {
-    kind: "table",
-    title: "多维表格",
-    description: "带类型列的表。",
-    icon: Table2,
-    href: "/tables",
   },
   {
     kind: "slides",
@@ -56,7 +35,7 @@ const CREATION_TOOLS: CreationTool[] = [
   },
 ];
 
-/** 工具箱 · 创作。白板、文档、多维表格可点进列表；未开工两项 muted，不可点。 */
+/** 工具箱 · 创作。白板可点进列表；思维导图 / 幻灯片 muted，不可点。 */
 export function CreationPage() {
   const navigate = useNavigate();
   return (

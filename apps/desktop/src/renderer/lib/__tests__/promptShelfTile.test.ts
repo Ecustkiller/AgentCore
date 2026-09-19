@@ -25,19 +25,6 @@ function sharedItem(): PromptCatalogItem {
   };
 }
 
-function identityItem(): PromptCatalogItem {
-  return {
-    id: "identity",
-    kind: "identity",
-    group: "factory",
-    label: "角色身份",
-    depth: 0,
-    ceoIdentity: "你是团队的 CEO",
-    nestedIdentity: "",
-    leafIdentity: "",
-  };
-}
-
 function mineItem(over: {
   label: string;
   description?: string;
@@ -138,14 +125,11 @@ function listing(over: Partial<SkillStoreListing>): SkillStoreListing {
 }
 
 describe("promptItemShelfCopy", () => {
-  it("准则和身份用产品简介，不把正文塞进卡面", () => {
-    expect(promptItemShelfCopy(sharedItem()).description).toBe(
-      "每回合都在的工作宪法",
-    );
-    const identity = promptItemShelfCopy(identityItem());
-    expect(identity.description).toBe("三套互斥身份，点开看全文");
-    expect(identity.description).not.toContain("CEO");
-    expect(identity.accessory).toEqual([{ label: "官方" }]);
+  it("准则用产品简介，不把正文塞进卡面", () => {
+    const shared = promptItemShelfCopy(sharedItem());
+    expect(shared.description).toBe("每回合都在的工作宪法");
+    expect(shared.description).not.toContain("you are the constitution");
+    expect(shared.accessory).toEqual([{ label: "官方" }]);
   });
 
   it("官方 HOW 打官方徽标，不打决策时刻组，只标非全员观众", () => {

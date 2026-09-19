@@ -730,6 +730,8 @@ class MessageDetail(BaseModel):
     # 回合墙钟用时 (主回复 meta)：与 message_end.duration_ms / turn_metrics 同锚；
     # 写入 usage JSON，读路径投影。null for user / pre-feature rows.
     duration_ms: int | None = None
+    # 各次 LLM 吐字时长之和 (ms)：与 message_end.generation_ms 同锚；写入 usage JSON。
+    generation_ms: int | None = None
     # Progressive assistant-row lifecycle (messages.usage.status): running / complete /
     # incomplete / failed. Projected on read like ``rounds`` (not part of UsageBreakdown).
     # In-flight turns carry ``running`` + may hold partial content/reasoning (P1 overlay
@@ -930,14 +932,12 @@ class MessageListResponse(BaseModel):
 # handoff is the separate explicit bridge).
 
 # Coarse failure codes for local-turn write-back stats (not a full taxonomy).
-# ``declaration_*`` = delegate playbook declaration gate (empty / xor / unknown).
+# ``declaration_empty`` = delegate 缺非空 ``tasks``.
 LOCAL_TURN_TOOL_FAILURE_CODES = frozenset(
     {
         "searxng_unreachable",
         "egress_connect",
         "declaration_empty",
-        "declaration_xor",
-        "declaration_unknown",
         "exec_timeout",
         "exec_forced_stop",
         "schema",
@@ -1042,14 +1042,11 @@ def normalize_local_turn_tool_failure_code(message: str, *, code: str | None = N
         return "exec_timeout"
     if raw_code == "exec_forced_stop":
         return "exec_forced_stop"
-    # Declaration gate: structured reject templates (not free-text intent scan).
-    from agentcore.runtime.delegate.playbook_declaration import (
-        try_declaration_reject_gate,
-    )
+    # Empty-tasks reject (structured template, not free-text intent scan).
+    from agentcore.tools.builtin.delegate.schema import is_empty_delegate_error
 
-    gate = try_declaration_reject_gate(message or "")
-    if gate is not None:
-        return f"declaration_{gate}"
+    if is_empty_delegate_error(message or ""):
+        return "declaration_empty"
     from agentcore.tools.sandbox.exec_env import (
         is_disaster_timeout_text,
         looks_like_exec_timeout_text,
@@ -1179,6 +1176,9 @@ class RecordTurnRequest(BaseModel):
     # Whole-turn product-AI wall clock (ms). Same number as live ``message_end``.
     # Optional so older desktops still write back; omitted → usage has no duration.
     duration_ms: int | None = Field(None, ge=0)
+    # Decode-window sum (ms). Same number as live ``message_end.generation_ms``.
+    # Optional so older desktops still write back; omitted → no 输出速度 on reload.
+    generation_ms: int | None = Field(None, ge=0)
     # The local turn's trace_id (32-hex), stamped by the desktop on every cloud
     # inference-proxy LLM call this turn made. Reusing it for the persisted reply joins
     # the reasoning logs + the bubble under ONE trace (打通气泡↔日志).

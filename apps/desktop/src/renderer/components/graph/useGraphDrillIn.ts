@@ -54,7 +54,7 @@ export function useGraphDrillIn(
   );
 
   // Highlight follows focusSurface (dock active OR a float) — closing the dock
-  // must not clear a floating run's lit node (UX §十).
+  // must not clear a floating run's lit node (UX §四).
   const litRunId = useSidePanelStore((s) => {
     const focusId = sidePanelFocusTabId(s);
     const active = s.tabs.find((t) => t.id === focusId);

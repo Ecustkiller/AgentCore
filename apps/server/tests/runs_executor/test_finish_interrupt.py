@@ -144,8 +144,7 @@ async def test_interrupted_empty_pass_tells_retry_it_was_a_transport_cut():
     assert provider.calls >= 2, "空产出应触发一次 contract 回炉"
     retry_prompt = "\n".join(c for _, c in provider.requests[-1])
     assert "传输中被中断" in retry_prompt
-    assert "不代表你上一轮写得不好" in retry_prompt
-    assert "不要只调用 handoff 交空简报" in retry_prompt
+    assert "不代表你上一轮写得不好" not in retry_prompt
     assert state.content.strip()
 
 

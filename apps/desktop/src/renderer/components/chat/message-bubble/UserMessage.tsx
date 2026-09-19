@@ -2,7 +2,8 @@ import {
   CollapsibleSpeech,
   USER_BUBBLE_COLLAPSED_MAX_H,
 } from "@/components/chat/debate/CollapsibleSpeech";
-import { Button } from "@/components/ui";
+import { Button, IconButton } from "@/components/ui";
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import { hasInlineMarkers, renderInlineLabels } from "@/lib/inlineBody";
 import {
   MESSAGE_ACTION_REVEAL_CLASS,
@@ -17,7 +18,7 @@ import {
 import { useQueuedTurns } from "@/stores/queuedTurns";
 import { Check, Copy, Pencil, X } from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-import { MessageAction, MessageTime } from "./MessageActions";
+import { MessageTime } from "./MessageActions";
 import { SyncStatusHint } from "./SyncStatusHint";
 import {
   UserChipTray,
@@ -208,16 +209,16 @@ export function UserMessage({ message }: MessageBubbleProps) {
             )}
             data-testid="user-message-chrome"
           >
-            <MessageAction
-              icon={copied ? <Check size={13} /> : <Copy size={13} />}
-              label={copied ? "已复制" : "复制"}
-              onClick={onCopy}
-            />
-            <MessageAction
-              icon={<Pencil size={13} />}
-              label="编辑"
-              onClick={startEdit}
-            />
+            <SimpleTooltip label={copied ? "已复制" : "复制"}>
+              <IconButton size="sm" aria-label="复制" onClick={onCopy}>
+                {copied ? <Check size={14} /> : <Copy size={14} />}
+              </IconButton>
+            </SimpleTooltip>
+            <SimpleTooltip label="编辑">
+              <IconButton size="sm" aria-label="编辑" onClick={startEdit}>
+                <Pencil size={14} />
+              </IconButton>
+            </SimpleTooltip>
             <MessageTime iso={message.createdAt} />
           </div>
         )}

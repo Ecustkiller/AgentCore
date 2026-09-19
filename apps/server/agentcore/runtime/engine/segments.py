@@ -80,19 +80,3 @@ def join_segments(acc: str, new: str) -> str:
         return left
     return f"{left}\n\n{right}"
 
-
-def deliverable_continuity_instruction(*, prior_deliverable: str) -> str:
-    """Steer the next answer round to continue an already-kept deliverable.
-
-    Used at force_finalize / resume when ``final_content`` / pre-pause text will be
-    joined into the persisted终稿. Not a rewrite pass — one short ``[系统提示]`` so the
-    model writes a natural continuation instead of a second standalone essay.
-    """
-    preview = prior_deliverable.strip()
-    if len(preview) > 600:
-        preview = preview[:600].rstrip() + "…"
-    return (
-        "[系统提示] 本回合对用户可见的交付正文已有前文（将与你的续写拼接为同一篇持久化终稿）。"
-        "请自然衔接续写：不要重复开场白，不要复述已交付内容，不要另起一篇独立答卷。"
-        f"已交付前文如下（仅供衔接参考）：\n---\n{preview}\n---"
-    )

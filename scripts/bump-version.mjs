@@ -7,7 +7,7 @@
  *   node scripts/bump-version.mjs mobile 0.2.0
  *   node scripts/bump-version.mjs --dry-run desktop patch
  *
- * Tracks do NOT bump together — each artifact has its own semver (部署与运维 §7.1).
+ * Tracks do NOT bump together — each artifact has its own semver (发布与门禁 §1.1).
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -136,7 +136,7 @@ function writePyprojectVersion(filePath, version) {
   writeFileSync(filePath, next, "utf8");
 }
 
-/** Website download fallback — must track desktop semver (部署与运维 §7.6). */
+/** Website download fallback — must track desktop semver (发布与门禁 §1.6). */
 const DESKTOP_FALLBACK_FILES = [
   join(ROOT, "apps/website/functions/api/desktop-release.mjs"),
   join(ROOT, "apps/website/scripts/fetch-release.mjs"),

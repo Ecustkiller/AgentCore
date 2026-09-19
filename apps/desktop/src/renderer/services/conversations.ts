@@ -232,7 +232,7 @@ export async function requestAutoTitle(
 
 /** Clone the transcript through one message into a new conversation (克隆对话).
  * ``untilMessageId`` is the cutoff (that row and every earlier one). Returns the
- * new row — same folder as the source, titled「… 副本」. */
+ * new row — same folder as the source, titled ``{stem} (n)``. */
 export async function duplicateConversation(
   id: string,
   untilMessageId: string,

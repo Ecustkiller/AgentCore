@@ -43,10 +43,8 @@
 
 from __future__ import annotations
 
-import io
 import shutil
 import subprocess
-import zipfile
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -55,7 +53,6 @@ import httpx
 import pytest
 
 from agentcore.core.types import ToolApproval
-from agentcore.tools.builtin.archive import ArchiveTool
 from agentcore.tools.builtin.file_ops import (
     FileBatchTool,
     FileWriteTool,
@@ -193,20 +190,6 @@ async def _run_md_export(root: Path, _mp: pytest.MonkeyPatch) -> ToolResult:
     )
 
 
-def _seed_zip(root: Path) -> None:
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
-        zf.writestr("readme.md", "# hi")
-        zf.writestr("docs/note.txt", "alpha")
-    (root / "pkg.zip").write_bytes(buf.getvalue())
-
-
-async def _run_archive(root: Path, _mp: pytest.MonkeyPatch) -> ToolResult:
-    return await ArchiveTool().execute(
-        {"action": "extract", "archive": "pkg.zip", "dest": "out"}, _ctx(root)
-    )
-
-
 async def _run_download_url(root: Path, monkeypatch: pytest.MonkeyPatch) -> ToolResult:
     async def _fake_request(_client, _method, url, **_kwargs):
         return httpx.Response(
@@ -282,12 +265,6 @@ _CASES: tuple[_Case, ...] = (
     ),
     # 导出件：产物是 .docx / .pdf，入参那份 md 是它的源（``derived_from``），不是产物。
     _Case("md_export", _run_md_export, (("note.docx", "docx", "note.md"),), _seed_note_md),
-    _Case(
-        "archive",
-        _run_archive,
-        (("out/readme.md", "md", None), ("out/docs/note.txt", "txt", None)),
-        _seed_zip,
-    ),
     _Case("download_url", _run_download_url, (("uploads/file.bin", "file", None),)),
     # 间接落盘（沙箱 copy-out）：报的是 copy-out 的 EXACT 路径，含中文顿号也不会被散文切错。
     _Case(

@@ -23,7 +23,6 @@ import {
   precedingUserMessageId,
   supportDiagnosticExtrasFromError,
 } from "@/lib/supportDiagnostics";
-import { notifySuccess } from "@/lib/toast";
 import {
   assistantHasTeamStrip,
   isAttestedPauseContinue,
@@ -180,9 +179,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     if (!supportDiagnosticText) return;
     void buildSupportDiagnosticPack(supportDiagnosticIds).then((text) => {
       if (!text) return;
-      void copyText(text).then((ok) => {
-        if (ok) notifySuccess("已复制排查包");
-      });
+      void copyText(text);
     });
   };
   const hasReasoning =
@@ -441,6 +438,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           onRegenerate={handleRegenerate}
           displayError={displayError}
           pinSupportPack={outcome.supportPackHost === "more"}
+          showRegenerate={outcome.showRegenerate}
         />
       ) : showCostMeta || outcome.supportPackHost === "more" ? (
         <div

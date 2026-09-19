@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`buildGraphScene · golden > continuation chain → top-level continuation edges, no sub-team box 1`] = `
+exports[`buildGraphScene · golden > continuation chain → folded into one seat, no extra nodes 1`] = `
 {
   "acts": [
     {
@@ -10,18 +10,14 @@ exports[`buildGraphScene · golden > continuation chain → top-level continuati
       "title": null,
       "unitIds": [
         "w1",
-        "w1_v2",
-        "w1_v3",
       ],
     },
   ],
   "beatFoldsByHost": {},
   "debateStages": [],
   "edges": [
-    "continuation:w1->w1_v2",
-    "continuation:w1_v2->w1_v3",
     "dep:__input__->w1",
-    "dep:w1_v3->captain",
+    "dep:w1->captain",
   ],
   "fold": {
     "debateUnits": [],
@@ -35,6 +31,12 @@ exports[`buildGraphScene · golden > continuation chain → top-level continuati
   },
   "lanes": [],
   "nodeGroup": {},
+  "seatFoldsByHost": {
+    "w1": [
+      "w1_v2",
+      "w1_v3",
+    ],
+  },
   "subTeams": [],
   "units": [
     {
@@ -42,20 +44,6 @@ exports[`buildGraphScene · golden > continuation chain → top-level continuati
       "debate": false,
       "groupId": null,
       "id": "w1",
-      "memberIds": [],
-    },
-    {
-      "actId": "act-1",
-      "debate": false,
-      "groupId": null,
-      "id": "w1_v2",
-      "memberIds": [],
-    },
-    {
-      "actId": "act-1",
-      "debate": false,
-      "groupId": null,
-      "id": "w1_v3",
       "memberIds": [],
     },
   ],
@@ -179,6 +167,7 @@ exports[`buildGraphScene · golden > debate multibeat → beat folds into round 
     "mod_r2_con": "__group__mod",
     "mod_r2_pro": "__group__mod",
   },
+  "seatFoldsByHost": {},
   "subTeams": [
     {
       "groupId": "__group__mod",
@@ -303,6 +292,7 @@ exports[`buildGraphScene · golden > multi-act (≥2) → act bands + acts→uni
     "mod_r1_con": "__group__mod",
     "mod_r1_pro": "__group__mod",
   },
+  "seatFoldsByHost": {},
   "subTeams": [
     {
       "groupId": "__group__mod",
@@ -400,6 +390,7 @@ exports[`buildGraphScene · golden > multi-delegate → two 委派 lane bands, n
     },
   ],
   "nodeGroup": {},
+  "seatFoldsByHost": {},
   "subTeams": [],
   "units": [
     {
@@ -484,6 +475,7 @@ exports[`buildGraphScene · golden > nested sub-team → nested compounds + node
     "lead": "__group__lead",
     "mpm": "__group__mpm",
   },
+  "seatFoldsByHost": {},
   "subTeams": [
     {
       "groupId": "__group__lead",

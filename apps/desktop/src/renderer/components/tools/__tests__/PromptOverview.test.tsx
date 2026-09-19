@@ -44,19 +44,6 @@ function sharedItem(text: string): PromptCatalogItem {
   };
 }
 
-function identityItem(ceoIdentity: string): PromptCatalogItem {
-  return {
-    id: "identity",
-    kind: "identity",
-    group: "factory",
-    label: "角色身份",
-    depth: 0,
-    ceoIdentity,
-    nestedIdentity: "",
-    leafIdentity: "",
-  };
-}
-
 function mineItem(over: {
   id: string;
   label: string;
@@ -127,7 +114,7 @@ const otherFolder: PromptRailFolder = {
 
 function filledRail(): PromptRail {
   return emptyRail({
-    constitution: [sharedItem("aaaa"), identityItem("xxxxxxxxxxxx")],
+    constitution: [sharedItem("aaaa")],
     alwaysMine: [
       mineItem({
         id: "rule",
@@ -205,13 +192,12 @@ describe("PromptOverview", () => {
     const onOpenItem = vi.fn();
     renderOverview({ onOpenItem });
     fireEvent.click(screen.getByRole("button", { name: "全员共享准则" }));
-    fireEvent.click(screen.getByRole("button", { name: "角色身份" }));
     fireEvent.click(screen.getByRole("button", { name: "短约束" }));
     expect(onOpenItem.mock.calls.map((call) => call[0])).toEqual([
       "shared",
-      "identity",
       mineCatalogId("rule"),
     ]);
+    expect(screen.queryByRole("button", { name: "角色身份" })).toBeNull();
     expect(
       within(screen.getByTestId("prompt-rail-always")).getByRole("button", {
         name: "读工作区文件",
@@ -243,16 +229,13 @@ describe("PromptOverview", () => {
     const onOpenItem = vi.fn();
     renderOverview({
       rail: emptyRail({
-        constitution: [sharedItem(""), identityItem("")],
+        constitution: [sharedItem("")],
       }),
       onOpenItem,
     });
     fireEvent.click(screen.getByRole("button", { name: "全员共享准则" }));
-    fireEvent.click(screen.getByRole("button", { name: "角色身份" }));
-    expect(onOpenItem.mock.calls.map((call) => call[0])).toEqual([
-      "shared",
-      "identity",
-    ]);
+    expect(onOpenItem.mock.calls.map((call) => call[0])).toEqual(["shared"]);
+    expect(screen.queryByRole("button", { name: "角色身份" })).toBeNull();
     expect(screen.queryByTestId("prompt-rail-official")).toBeNull();
     expect(screen.queryByTestId("prompt-rail-tools")).toBeNull();
     expect(screen.queryByTestId("prompt-rail-factory")).toBeNull();
@@ -375,13 +358,17 @@ describe("PromptOverview", () => {
     expect(screen.queryByRole("button", { name: "拖到这里" })).toBeNull();
   });
 
-  it("货架卡走同一套填槽：身份不塞正文、官方 HOW 不打组名、连接器不标本机", () => {
+  it("货架卡走同一套填槽：准则不塞正文、官方 HOW 不打组名、连接器不标本机", () => {
     renderOverview({
       showConnectors: true,
       connectors: [{ id: "connector:fs", label: "Filesystem" }],
     });
-    expect(screen.getByText("三套互斥身份，点开看全文")).toBeTruthy();
-    expect(screen.queryByText("xxxxxxxxxxxx")).toBeNull();
+    expect(screen.getByText("每回合都在的工作宪法")).toBeTruthy();
+    expect(screen.queryByText("aaaa")).toBeNull();
+    expect(screen.queryByText("角色身份")).toBeNull();
+    expect(
+      screen.queryByText("主 Agent 常驻身份；队员按任务写编制"),
+    ).toBeNull();
     expect(screen.getByText("写一条按需薄技能")).toBeTruthy();
     expect(
       within(screen.getByTestId("prompt-rail-official")).queryByText("编排"),

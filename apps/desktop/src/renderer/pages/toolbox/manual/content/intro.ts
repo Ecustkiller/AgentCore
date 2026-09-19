@@ -20,7 +20,7 @@ export const introChapter: ManualChapterContent = {
       blocks: [
         {
           type: "lead",
-          text: "AgentCore 是 Multi-Agent AI 工作台：你只对接一位 CEO；简单问题它直接答，复杂任务它组团协作后把结果交给你。",
+          text: "AgentCore 是 Multi-Agent AI 工作台：你只对接一位 CEO；轻问它直接答，该协作时组团后把结果交给你。",
         },
         {
           type: "callout",
@@ -47,8 +47,8 @@ export const introChapter: ManualChapterContent = {
               desc: "怎么拆、谁来做、先后顺序——交给 CEO。",
             },
             {
-              title: "小事秒答，大事才组团",
-              desc: "闲聊或简单问答直接回；需要产出或多人协作时才拉人。",
+              title: "轻问秒答，该协作才组团",
+              desc: "闲聊或简单问答直接回；要并行、独立验证或成篇时才拉人。",
             },
             {
               title: "全程透明，随时插手",
@@ -76,7 +76,7 @@ export const introChapter: ManualChapterContent = {
             },
             {
               title: "看它干活",
-              desc: "简单问题秒回；复杂任务会弹出协作图，谁在做什么一目了然。",
+              desc: "轻问秒回；组团时会弹出协作图，谁在做什么一目了然。",
             },
             {
               title: "收结果",

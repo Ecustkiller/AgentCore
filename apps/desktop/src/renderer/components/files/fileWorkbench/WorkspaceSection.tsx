@@ -6,7 +6,6 @@ import {
 } from "@/components/files/fileTreeActions";
 import type { FileSortBy } from "@/components/files/fileTreeTypes";
 import { IconButton } from "@/components/files/parts";
-import { DeleteFolderDialog } from "@/components/folders/DeleteFolderDialog";
 import { FolderCollabMark } from "@/components/folders/FolderCollabMark";
 import { FolderMembersDialog } from "@/components/folders/FolderMembersDialog";
 import { Button, ConfirmDialog } from "@/components/ui";
@@ -18,27 +17,18 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import {
-  getConversations,
   useDeleteConversation,
   useRenameConversation,
   useRestoreConversation,
 } from "@/hooks/useConversations";
-import {
-  getFolders,
-  releaseFolderConversations,
-  useDeleteFolder,
-  usePermanentDeleteFolder,
-  useRestoreFolder,
-  useUpdateFolder,
-} from "@/hooks/useFolders";
+import { getFolders, useUpdateFolder } from "@/hooks/useFolders";
 import { removeConversationScratch } from "@/hooks/useWorkspaces";
 import { notifyConversationDeleted } from "@/lib/conversationDeleteCopy";
 import { useConversationLocationId } from "@/lib/conversationLocation";
-import { deriveGroupWorkspaceIsLocal } from "@/lib/conversationWorkspaceMode";
 import type { FileSource } from "@/lib/fileSource";
 import { queryClient } from "@/lib/queryClient";
 import { workspaceKeys } from "@/lib/queryKeys";
-import { notifyActionError, notifyError, notifyInfo } from "@/lib/toast";
+import { notifyActionError, notifyError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
   canShareFolder,
@@ -47,7 +37,7 @@ import {
   folderRoleLabel,
   isFolderOwner,
 } from "@/services/folders";
-import { type WorkspaceInfo, wsExportZip } from "@/services/workspaces";
+import type { WorkspaceInfo } from "@/services/workspaces";
 import {
   useConversationGenerating,
   useConversationStore,
@@ -57,18 +47,15 @@ import {
   ChevronDown,
   ChevronRight,
   Cloud,
-  Download,
   Eraser,
   FilePlus,
   Folder,
   FolderOpen,
-  FolderPlus,
   FolderSearch,
   FolderUp,
   GitBranch,
   HardDrive,
   History,
-  Loader2,
   MessageSquare,
   Pencil,
   Trash2,
@@ -91,7 +78,7 @@ import {
  * Folders (`folder:<id>`) may also render nested folder rows (`nested`) and
  * folder-scope entries inside the tree's ``.agentcore`` row (`renderWorkroomLead`).
  *
- * - `folder:<id>` 文件夹：右键可重命名 / 「删除文件夹」（与侧栏 {@link WorkspaceGroupHeader}
+ * - `folder:<id>` 文件夹：右键可重命名（与侧栏 {@link WorkspaceGroupHeader}
  *   同构）。本机 `conv:` 有用户可见文件时进「本机文件夹」（改名=对话标题，删除=删对话）；云端 `conv:` 不列。
  */
 export function WorkspaceSection({
@@ -109,7 +96,6 @@ export function WorkspaceSection({
   nested,
   depth = 0,
   hideRootDirs,
-  onCreateSubfolder,
   showLocationBadge = true,
   offlineCloud = false,
   filterQuery = "",
@@ -137,12 +123,6 @@ export function WorkspaceSection({
   depth?: number;
   /** Forwarded to {@link FileTree}: child-folder dirs already shown as rail rows. */
   hideRootDirs?: readonly string[];
-  /**
-   * Replaces the tree's plain `mkdir` at this root with「在此新建文件夹」, so a
-   * folder created at a folder's top level is a real folder (可分组 / 可记忆),
-   * not a bare directory the rail cannot address.
-   */
-  onCreateSubfolder?: () => void;
   /** Off inside 我的文件 / 本机文件夹 — the section header already says which. */
   showLocationBadge?: boolean;
   /** N4-A: cloud workspace while read-only offline — grey + hint, keep visible. */
@@ -163,11 +143,9 @@ export function WorkspaceSection({
   const inputRef = useRef<HTMLInputElement>(null);
   const skipBlurRef = useRef(false);
   const [pendingAction, setPendingAction] = useState<TreeAction | null>(null);
-  const [deleteFolderOpen, setDeleteFolderOpen] = useState(false);
   const [clearScratchOpen, setClearScratchOpen] = useState(false);
   const [clearingScratch, setClearingScratch] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
-  const [exporting, setExporting] = useState(false);
   const [editing, setEditing] = useState(false);
   const pendingRenameFolderId = useFoldersStore((s) => s.pendingRenameFolderId);
   const clearPendingRename = useFoldersStore((s) => s.clearPendingRename);
@@ -178,9 +156,6 @@ export function WorkspaceSection({
   const restoreConversationMutation = useRestoreConversation();
   const renameMutation = useRenameConversation();
   const renameFolderMutation = useUpdateFolder();
-  const deleteFolderMutation = useDeleteFolder();
-  const permanentDeleteMutation = usePermanentDeleteFolder();
-  const restoreFolderMutation = useRestoreFolder();
   const locationId = useConversationLocationId();
   const dropConversationRuntime = useConversationStore(
     (s) => s.dropConversationRuntime,
@@ -191,7 +166,7 @@ export function WorkspaceSection({
   /** Cloud workspace only — clone API requires cloud location. */
   const canClone = !isLocal && !offlineCloud && !!source?.caps.edit;
   /**
-   * 版本 / 软删区 / 导出 ZIP —— 服务端对本机工作区一律 409，所以入口按能力
+   * 版本 / 软删区 —— 服务端对本机工作区一律 409，所以入口按能力
    * 位 + ws 种类先行门控，不让用户点进一个必然失败的动作。本机工作区的版本与回收站是
    * 另一条轨（盘上版本区 / 系统回收站），不在这里冒充。
    */
@@ -201,14 +176,10 @@ export function WorkspaceSection({
   const folder = folderId
     ? (getFolders().find((f) => f.id === folderId) ?? null)
     : null;
-  const folderIsLocal = folder ? deriveGroupWorkspaceIsLocal(folder) : isLocal;
   const shareable = folder ? canShareFolder(folder) : false;
-  // Missing cache row is not "I own this" — members would otherwise see 删除文件夹.
+  // Missing cache row is not "I own this" — members would otherwise see owner-only rename.
   const folderOwner = Boolean(folder && isFolderOwner(folder));
   const folderRole = folder ? folderMyRole(folder) : "owner";
-
-  const liveFolderConvs = () =>
-    folderId ? getConversations().filter((c) => c.folderId === folderId) : [];
 
   useEffect(() => {
     if (flashing) rootRef.current?.scrollIntoView({ block: "nearest" });
@@ -239,10 +210,6 @@ export function WorkspaceSection({
   }, [ws.name, editing]);
 
   const requestTreeAction = (action: TreeAction) => {
-    if (action === "dir" && onCreateSubfolder) {
-      onCreateSubfolder();
-      return;
-    }
     if (expanded) {
       runTreeAction(treeRef.current, action);
     } else {
@@ -267,18 +234,6 @@ export function WorkspaceSection({
   /** 版本 / 软删区在右侧详情区开成一个标签页（与打开文件同一个出口）。 */
   const openPanel = (path: string) =>
     onOpenFile(path, workspacePanelTabName(path, ws.name));
-
-  const exportZip = async () => {
-    if (exporting) return;
-    setExporting(true);
-    try {
-      await wsExportZip(ws.wsId);
-    } catch (e) {
-      notifyActionError("导出工作区失败", e);
-    } finally {
-      setExporting(false);
-    }
-  };
 
   /** Inline rename, for both flavours of root: a `conv:` scratch renames the
    * conversation, a `folder:` row renames the folder itself (§5.4 用户起名). */
@@ -322,45 +277,6 @@ export function WorkspaceSection({
     notifyConversationDeleted(title, () =>
       restoreConversationMutation.mutate(conversationId),
     );
-  };
-
-  /** Mirrors the sidebar's delete: 撤销 toast raised from the awaited handler,
-   * because this section unmounts as soon as the folder is gone. */
-  const confirmDeleteFolder = async () => {
-    if (!folderId) return;
-    const name = folder?.name ?? ws.name;
-    try {
-      await deleteFolderMutation.mutateAsync(folderId);
-    } catch (err) {
-      notifyError(err, "删除文件夹失败");
-      return;
-    }
-    setDeleteFolderOpen(false);
-    const leftActive = releaseFolderConversations(folderId, {
-      dropRuntime: dropConversationRuntime,
-      locationId,
-    });
-    if (leftActive) navigate("/");
-    notifyInfo("已删除文件夹", {
-      description: name,
-      duration: 8000,
-      action: {
-        label: "撤销",
-        onClick: () => restoreFolderMutation.mutate({ id: folderId, name }),
-      },
-    });
-  };
-
-  const confirmPermanentDeleteFolder = () => {
-    if (!folderId) return;
-    for (const { id } of liveFolderConvs()) {
-      dropConversationRuntime(id);
-      if (id === locationId) navigate("/");
-    }
-    permanentDeleteMutation.mutate(folderId, {
-      onSuccess: () => setDeleteFolderOpen(false),
-      onError: (err) => notifyError(err, "彻底删除失败"),
-    });
   };
 
   /** Cloud conv scratch only: wipe top-level entries; root itself stays. */
@@ -472,12 +388,6 @@ export function WorkspaceSection({
           >
             <FilePlus size={14} />
           </IconButton>
-          <IconButton
-            title={onCreateSubfolder ? "在此新建文件夹" : "新建文件夹"}
-            onClick={() => requestTreeAction("dir")}
-          >
-            <FolderPlus size={14} />
-          </IconButton>
         </div>
       )}
       {showLocationBadge && (
@@ -541,12 +451,6 @@ export function WorkspaceSection({
                   <FilePlus size={14} className="shrink-0" />
                   <span className="flex-1 truncate">新建文件</span>
                 </ContextMenuItem>
-                <ContextMenuItem onSelect={() => requestTreeAction("dir")}>
-                  <FolderPlus size={14} className="shrink-0" />
-                  <span className="flex-1 truncate">
-                    {onCreateSubfolder ? "在此新建文件夹" : "新建文件夹"}
-                  </span>
-                </ContextMenuItem>
                 {source.caps.transfer && (
                   <>
                     <ContextMenuItem
@@ -581,20 +485,6 @@ export function WorkspaceSection({
                 <ContextMenuItem onSelect={() => openPanel(WS_TRASH_PATH)}>
                   <Trash2 size={14} className="shrink-0" />
                   <span className="flex-1 truncate">软删区…</span>
-                </ContextMenuItem>
-                <ContextMenuItem
-                  disabled={exporting}
-                  // 打包要等一次快照 + 一次下载，菜单关掉后动作仍在跑（故不 preventDefault）。
-                  onSelect={() => void exportZip()}
-                >
-                  {exporting ? (
-                    <Loader2 size={14} className="shrink-0 animate-spin" />
-                  ) : (
-                    <Download size={14} className="shrink-0" />
-                  )}
-                  <span className="flex-1 truncate">
-                    {exporting ? "导出 ZIP（进行中）" : "导出 ZIP"}
-                  </span>
                 </ContextMenuItem>
                 <ContextMenuSeparator />
               </>
@@ -649,18 +539,6 @@ export function WorkspaceSection({
                 <span className="flex-1 truncate">删除对话</span>
               </ContextMenuItem>
             )}
-            {folderId && folderOwner && (
-              <>
-                <ContextMenuSeparator />
-                <ContextMenuItem
-                  variant="danger"
-                  onSelect={() => setDeleteFolderOpen(true)}
-                >
-                  <Trash2 size={14} className="shrink-0" />
-                  <span className="flex-1 truncate">删除文件夹…</span>
-                </ContextMenuItem>
-              </>
-            )}
           </ContextMenuContent>
         </ContextMenu>
       )}
@@ -669,17 +547,6 @@ export function WorkspaceSection({
           {nested}
           {tree}
         </>
-      )}
-      {folderId && folderOwner && (
-        <DeleteFolderDialog
-          open={deleteFolderOpen}
-          onOpenChange={setDeleteFolderOpen}
-          name={folder?.name ?? ws.name}
-          liveConvCount={liveFolderConvs().length}
-          isLocal={folderIsLocal}
-          onConfirm={() => void confirmDeleteFolder()}
-          onPermanentConfirm={confirmPermanentDeleteFolder}
-        />
       )}
       {shareable && folder && (
         <FolderMembersDialog

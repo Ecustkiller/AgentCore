@@ -69,7 +69,7 @@ class TurnExploreGate:
     (:func:`fork_explore_write_scope`) so siblings do not share write permission.
 
     ``turn_created_folder_ids`` is a turn-level ledger (shared by reference on
-    fork): folders minted this turn via ``create_folder`` / first auto-desk.
+    fork): folders minted this turn via first auto-desk.
     A worker whose ``target_folder_id`` is in this set may write the project
     tree even while explore-pending still locks the birth folder.
     """
@@ -175,7 +175,7 @@ class ToolSchema:
 class TurnTargetDeskHint:
     """Turn-scoped soft default desk for bare-chat ``delegate`` (not session birth).
 
-    ``create_folder`` / unique ``folders(action=resolve)`` stamp a folder id onto the CEO
+    ``folders(action=resolve)`` stamps a folder id onto the CEO
     :class:`ToolContext`. A second distinct id in the same turn clears the default
     so multi-folder fan-out still requires explicit ``target_folder_id``. Never
     rewrites conversation ``folder_id``.
@@ -629,7 +629,7 @@ class ToolContext:
         return frozenset(self._explore_gate.turn_created_folder_ids)
 
     def note_turn_created_folder(self, folder_id: str | None) -> None:
-        """Record a cloud folder minted this turn (create_folder / first auto-desk)."""
+        """Record a cloud folder minted this turn (first auto-desk)."""
         if not isinstance(folder_id, str):
             return
         cleaned = folder_id.strip()

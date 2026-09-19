@@ -17,7 +17,7 @@ export interface SegmentedControlProps<T extends string = string> {
 }
 
 /**
- * In-place mutually exclusive capsule switch (login↔register, role identity).
+ * In-place mutually exclusive capsule switch (login↔register).
  * Selected segment lifts as a card. Not SectionTabs (routed accent capsule) or TabChip (dock).
  */
 export function SegmentedControl<T extends string>({

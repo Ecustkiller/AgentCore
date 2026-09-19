@@ -15,7 +15,10 @@ import {
   traceGraphProjection,
 } from "@/services/graphTrace";
 import type { Execution, RunNode, RunStatus } from "@/stores/execution";
-import { debateBeatFromContext } from "@/stores/execution";
+import {
+  debateBeatFromContext,
+  isSeatFoldedContinuation,
+} from "@/stores/execution";
 import type { GraphEdge } from "@/stores/graph";
 import {
   type GroupLayout,
@@ -260,7 +263,7 @@ export function projectFlowNodes({
 
   for (const [i, run] of workerRuns.entries()) {
     // 质询/复攻/crux 折进同轮宿主，不独立成图节点。
-    if (isDebateFoldedBeatRun(run)) {
+    if (isDebateFoldedBeatRun(run) || isSeatFoldedContinuation(run)) {
       foldedIds.push(run.id);
       continue;
     }
@@ -305,13 +308,21 @@ export function projectFlowNodes({
     const foldedCx = (scene.beatFoldsByHost.get(run.id) ?? [])
       .map((id) => runById.get(id))
       .filter((r): r is RunNode => r != null);
-    const roundRuns = foldedCx.length > 0 ? [run, ...foldedCx] : [run];
-    const aggregatedStatus: RunStatus =
-      foldedCx.length > 0
+    const seatFolded = (scene.seatFoldsByHost.get(run.id) ?? [])
+      .map((id) => runById.get(id))
+      .filter((r): r is RunNode => r != null)
+      .sort((a, b) => a.continuationIndex - b.continuationIndex);
+    const seatMode = seatFolded.length > 0;
+    const overlay = seatMode ? seatFolded : foldedCx;
+    const roundRuns = overlay.length > 0 ? [run, ...overlay] : [run];
+    const seatTail = seatFolded[seatFolded.length - 1] ?? null;
+    const aggregatedStatus: RunStatus = seatMode
+      ? (seatTail?.status ?? run.status)
+      : foldedCx.length > 0
         ? aggregateDebateRoundStatus(roundRuns.map((r) => r.status))
         : run.status;
     const activeBeat =
-      foldedCx.length > 0
+      !seatMode && foldedCx.length > 0
         ? debateRoundActiveBeat(
             run.status,
             foldedCx.map((r) => r.status),
@@ -320,10 +331,11 @@ export function projectFlowNodes({
     const phaseLabel = debateRoundPhaseLabel(
       aggregatedStatus,
       activeBeat,
-      foldedCx.length > 0,
+      !seatMode && foldedCx.length > 0,
     );
-    const faceRun =
-      activeBeat === "cross_exam"
+    const faceRun = seatTail
+      ? seatTail
+      : activeBeat === "cross_exam"
         ? (foldedCx.find((r) => r.status === "running") ??
           foldedCx[foldedCx.length - 1] ??
           run)
@@ -333,8 +345,8 @@ export function projectFlowNodes({
     const output = agent ? agent.outputChunks.join("") : "";
     const reasoning = agent ? agent.reasoningChunks.join("") : "";
     const focused =
-      litRunId === run.id || foldedCx.some((r) => r.id === litRunId);
-    const isContinuation = run.continuesRunId != null;
+      litRunId === run.id || overlay.some((r) => r.id === litRunId);
+    const isContinuation = seatMode || run.continuesRunId != null;
     const isSubtask =
       !isContinuation &&
       !!run.parentRunId &&
@@ -343,7 +355,7 @@ export function projectFlowNodes({
     const foldedChildCount = foldInfo.descendants.get(run.id)?.length ?? 0;
     const size = nodeSizes[run.id];
     const durationMs =
-      foldedCx.length > 0 ? sumDurationMs(roundRuns) : run.durationMs;
+      overlay.length > 0 ? sumDurationMs(roundRuns) : run.durationMs;
     // 轮节点聚合口径与 durationMs 一致：成本 / token 计入折进的质询作答。
     // BYOK：total 已是产品名义 ¥；遗留 USD 估算仍走 pickCostMoney 的 ≈$。face 不显钱。
     // 无 FX：折进的 run 同凭据来源 → 同币种，按首个记名。
@@ -361,8 +373,9 @@ export function projectFlowNodes({
       (n, r) => n + (r.usage ? r.usage.input + r.usage.output : 0),
       0,
     );
-    const activateId =
-      aggregatedStatus === "running" && faceRun.id !== run.id
+    const activateId = seatMode
+      ? run.id
+      : aggregatedStatus === "running" && faceRun.id !== run.id
         ? faceRun.id
         : run.id;
     const cxActivateId =
@@ -432,12 +445,13 @@ export function projectFlowNodes({
       handleDirection,
       isSubtask,
       isRevision: isContinuation,
-      continuationIndex: run.continuationIndex,
+      continuationIndex: seatTail?.continuationIndex ?? run.continuationIndex,
       continuesRunId: run.continuesRunId,
       round: run.round,
-      debateBeat: isContinuation
-        ? debateBeatFromContext(run.receivedContext)
-        : null,
+      debateBeat:
+        !seatMode && isContinuation
+          ? debateBeatFromContext(run.receivedContext)
+          : null,
       debateRoundPhase: phaseLabel,
       debateCrossExamMark: settledMark,
       onActivateCrossExam:
@@ -446,7 +460,7 @@ export function projectFlowNodes({
           : undefined,
       group: run.group,
       revisionSummary: isContinuation
-        ? revisionFeedbackSummary(run.receivedContext)
+        ? revisionFeedbackSummary(faceRun.receivedContext)
         : null,
       revised: run.revised,
       replacesRunId: run.replacesRunId,

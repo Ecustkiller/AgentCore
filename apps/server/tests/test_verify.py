@@ -70,7 +70,7 @@ def test_format_steer_renders_problems():
     assert steer.startswith("[系统提示]")
     assert "问题甲" in steer
     assert "问题乙" in steer
-    assert "核验未通过" in steer
+    assert "核验未通过" not in steer
     assert "引用核验" not in steer
 
 
@@ -78,13 +78,11 @@ def test_format_steer_empty_when_clean():
     assert format_guard_steer([]) == ""
 
 
-def test_format_steer_marks_automated_and_suppresses_acknowledgement():
-    # 这条 steer 以 role=user 进窗口，模型易把它当用户纠错而寒暄致谢——那句会漏进
-    # 可见交付。文案须自证是系统自动核验、非用户，并禁止致谢/复述/寒暄。
+def test_format_steer_is_fact_only():
     steer = format_guard_steer(["问题甲"])
-    assert "自动核验" in steer
-    assert "非用户" in steer
-    assert "道谢" in steer
+    assert "自动核验" not in steer
+    assert "道谢" not in steer
+    assert "问题甲" in steer
 
 
 def test_guard_to_steer_roundtrip():

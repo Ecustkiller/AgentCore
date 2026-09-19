@@ -14,6 +14,7 @@ import {
   formatLiveElapsed,
   formatMessageTime,
   formatMessageTimeOfDay,
+  formatOutputSpeed,
   formatQuotaRemaining,
   pickCostMoney,
   stripDurationFaceSuffix,
@@ -229,6 +230,20 @@ describe("formatDuration / formatDurationSec", () => {
     expect(stripDurationFaceSuffix("已完成 · 1m 28s · 含质询")).toBe(
       "已完成 · 1m 28s · 含质询",
     );
+  });
+});
+
+describe("formatOutputSpeed", () => {
+  it("hides short bursts and tiny replies", () => {
+    expect(formatOutputSpeed(9, 1_000)).toBeNull();
+    expect(formatOutputSpeed(80, 249)).toBeNull();
+    expect(formatOutputSpeed(0, 1_000)).toBeNull();
+  });
+
+  it("formats decode throughput from output tokens and generation_ms", () => {
+    expect(formatOutputSpeed(80, 2_000)).toBe("40/秒");
+    expect(formatOutputSpeed(19, 2_000)).toBe("9.5/秒");
+    expect(formatOutputSpeed(10, 1_000)).toBe("10/秒");
   });
 });
 

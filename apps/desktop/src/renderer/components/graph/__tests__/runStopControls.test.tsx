@@ -7,16 +7,9 @@ import {
   useExecutionStore,
 } from "@/stores/execution";
 import { useRunStopPendingStore } from "@/stores/runStopPending";
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GraphTeamStopControl } from "../GraphTeamStopControl";
 import { AgentNodeCardFace } from "../agentNode/AgentNodeFace";
 import { buildAgentNodePresentation } from "../agentNode/presentation";
 import type { AgentNodeData } from "../agentNode/shared";
@@ -168,13 +161,6 @@ describe("graph run-stop entries", () => {
     expect(screen.queryByText("停止请求中…")).toBeNull();
   });
 
-  it("node status line shows 停止中… while the whole turn is stopping", () => {
-    convPhase.turnPhase = "stopping";
-    renderNodeFace();
-    expect(screen.getByText("停止中…")).toBeTruthy();
-    expect(screen.queryByText(/^执行中/)).toBeNull();
-  });
-
   it("node status line does not show stop-pending copy for settled workers", () => {
     useRunStopPendingStore.getState().markPending("exec-stop", "r1");
     renderNodeFace(nodeData({ status: "completed", isAnimating: false }));
@@ -195,88 +181,5 @@ describe("graph run-stop entries", () => {
     renderNodeFace();
     expect(screen.getByText("停止请求中…")).toBeTruthy();
     expect(screen.queryByText(/^执行中/)).toBeNull();
-  });
-
-  it("team entry calls submitRunStop without run scope and keeps honest pending", async () => {
-    wrap(<GraphTeamStopControl />);
-
-    const btn = screen.getByRole("button", { name: "停止任务" });
-    fireEvent.click(btn);
-
-    await waitFor(() => {
-      expect(submitRunStop).toHaveBeenCalledWith(CID, {
-        executionId: "exec-stop",
-        runId: null,
-      });
-    });
-    expect(screen.getByRole("button", { name: "停止请求中…" })).toBeTruthy();
-    expect(useExecutionStore.getState().byId[MID]?.status).toBe("running");
-  });
-
-  // 整队停止同样按服务端回答：引擎手里已经没有这批工作时，不留「停止请求中…」。
-  it("team entry clears pending when the engine has no live drive", async () => {
-    submitRunStop.mockResolvedValue({
-      queued: 0,
-      accepted: false,
-      reason: "no_live_drive",
-      detail: "这批工作已经不在引擎手里了，没有能停的在跑队员。",
-    });
-    wrap(<GraphTeamStopControl />);
-
-    fireEvent.click(screen.getByRole("button", { name: "停止任务" }));
-
-    await waitFor(() => {
-      expect(submitRunStop).toHaveBeenCalled();
-    });
-    await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "停止请求中…" })).toBeNull();
-    });
-    expect(useRunStopPendingStore.getState().isPending("exec-stop", null)).toBe(
-      false,
-    );
-  });
-
-  it("team entry hides when no active workers remain", () => {
-    useExecutionStore.setState({ byId: {} });
-    const single: ExecutionPlan = {
-      id: "exec-done",
-      planType: "multi_agent",
-      taskSummary: "单人",
-      agents: [{ id: "w1", role: "研究员" }],
-      runs: [{ id: "r1", agentId: "w1", task: "调研", dependsOn: [] }],
-    };
-    useExecutionStore.getState().startExecution(single, MID);
-    useExecutionStore.getState().recordFrame(
-      {
-        t: 1,
-        kind: "run_started",
-        runId: "r1",
-        agentId: "w1",
-        parentRunId: null,
-        runKind: "agent",
-        continuesRunId: null,
-      },
-      MID,
-    );
-    useExecutionStore.getState().recordFrame(
-      {
-        t: 2,
-        kind: "run_completed",
-        runId: "r1",
-        agentId: "w1",
-        outputSummary: "done",
-        durationMs: 10,
-      },
-      MID,
-    );
-
-    wrap(<GraphTeamStopControl />);
-    expect(screen.queryByRole("button", { name: "停止任务" })).toBeNull();
-  });
-
-  it("hides the team entry while the whole turn is stopping", () => {
-    convPhase.turnPhase = "stopping";
-    wrap(<GraphTeamStopControl />);
-    expect(screen.queryByRole("button", { name: "停止任务" })).toBeNull();
   });
 });

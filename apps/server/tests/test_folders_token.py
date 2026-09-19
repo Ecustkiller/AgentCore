@@ -34,8 +34,8 @@ from agentcore.security import (
     decode_inference_token,
 )
 from agentcore.tools.builtin.folders import (
-    CreateFolderTool,
     FoldersTool,
+    create_cloud_folder,
 )
 from agentcore.tools.protocol import ToolContext
 
@@ -316,19 +316,14 @@ async def test_create_folder_cloud_http_path(
     )
 
     with folders_credentials_scope(folders_creds):
-        result = await CreateFolderTool().execute({"name": "NewCloud"}, _ctx())
-    assert result.success
-    assert "created-1" in result.output
+        folder = await create_cloud_folder(user_id="u1", name="NewCloud")
+    assert folder["id"] == "created-1"
 
 
 async def test_create_folder_nested_cloud_http_path(
     monkeypatch: pytest.MonkeyPatch, folders_creds
 ):
-    """``parent_path`` resolves off the same cloud roster, then rides HTTP as an id."""
-
-    async def _fake_list(creds: FoldersCredentials) -> list[dict[str, Any]]:
-        del creds
-        return [_summary(id="parent-1", name="设计", rel_path="工作/设计")]
+    """Auto-desk / REST nest by already-resolved parent_id over the same HTTP path."""
 
     async def _fake_create(
         creds: FoldersCredentials, *, name: str, parent_id: str | None = None
@@ -336,17 +331,15 @@ async def test_create_folder_nested_cloud_http_path(
         assert parent_id == "parent-1"
         return _summary(id="created-2", name=name, rel_path=f"工作/设计/{name}")
 
-    monkeypatch.setattr("agentcore.folders.credentials.cloud_list_folders", _fake_list)
     monkeypatch.setattr(
         "agentcore.folders.credentials.cloud_create_cloud_folder", _fake_create
     )
 
     with folders_credentials_scope(folders_creds):
-        result = await CreateFolderTool().execute(
-            {"name": "图标", "parent_path": "工作/设计"}, _ctx()
+        folder = await create_cloud_folder(
+            user_id="u1", name="图标", parent_id="parent-1", parent_rel_path="工作/设计"
         )
-    assert result.success
-    assert result.display["rel_path"] == "工作/设计/图标"
+    assert folder["rel_path"] == "工作/设计/图标"
 
 
 async def test_resolve_folder_cloud_http_path(

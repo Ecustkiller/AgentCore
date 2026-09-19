@@ -1,7 +1,8 @@
-"""CEO tool-surface gating: idle vs coordination (工具面瘦身).
+"""CEO tool-surface: wait/replan on the opening table; idle fails at execute.
 
-拍板分态：闲聊态 = delegate + ask_user 常驻；debate 仍注册（开场按需）。
-闲聊可查阅后开辩；replan + 协调四件套仅协调态 / 受监督让出时注入（与执行闸对齐）。
+Root CEO (depth 0) opening table includes delegate + ask_user + debate + wait suite
++ replan. Nested leads get replan without the parent wait suite. Never demote
+mid-chain (prefix cache).
 """
 
 from __future__ import annotations
@@ -87,7 +88,8 @@ def test_solo_worker_enters_coordination_surface():
         current_execution_id.reset(token)
 
 
-def test_idle_surface_omits_gated_tools():
+def test_idle_surface_keeps_gated_tools_on_opening_table():
+    """Idle still offers wait/replan; execute is the gate (prefix cache)."""
     reg = ToolRegistry()
     delegate = _fake_delegate()
     reg.register(delegate)
@@ -99,7 +101,7 @@ def test_idle_surface_omits_gated_tools():
     )
     names = set(reg.names)
     assert "delegate" in names
-    assert names.isdisjoint(COORDINATION_GATED_TOOLS)
+    assert names >= COORDINATION_GATED_TOOLS
 
 
 def test_coordination_surface_includes_gated_tools():
@@ -126,7 +128,8 @@ def test_coordination_surface_includes_gated_tools():
         current_execution_id.reset(token)
 
 
-def test_promote_on_supervised_yield_adds_replan_only():
+def test_promote_on_root_delegate_adds_wait_suite_and_replan():
+    """Root CEO (depth 0) opening table includes wait suite even before a live graph."""
     reg = ToolRegistry()
     delegate = _fake_delegate(supervised=True)
     reg.register(delegate)
@@ -135,8 +138,7 @@ def test_promote_on_supervised_yield_adds_replan_only():
     names = set(reg.names)
     assert "replan" in names
     assert "delegate" in names
-    # No live coordination → coord suite stays out
-    assert "wait" not in names
+    assert "wait" in names
 
 
 def test_promote_on_coordination_adds_full_surface():
@@ -158,9 +160,9 @@ def test_promote_on_coordination_adds_full_surface():
         current_execution_id.reset(token)
 
 
-def test_harvest_close_drops_replan_and_wait_suite():
-    """批次收口后会话关掉、无受监督计划 → 菜单摘掉 replan / wait 套件。"""
-    eid = "exec-harvest-demote"
+def test_harvest_close_keeps_replan_and_wait_suite():
+    """批次收口后会话关掉也不摘表——idle 调用在 execute 失败。"""
+    eid = "exec-harvest-keep"
     token = current_execution_id.set(eid)
     try:
         _activate_coordination(eid)
@@ -172,18 +174,17 @@ def test_harvest_close_drops_replan_and_wait_suite():
         assert "wait" in reg.names
 
         clear_active_coordination()
-        assert promote_coordination_surface_if_needed(reg) is True
+        assert promote_coordination_surface_if_needed(reg) is False
         names = set(reg.names)
         assert "delegate" in names
-        assert names.isdisjoint(COORDINATION_GATED_TOOLS)
-        assert promote_coordination_surface_if_needed(reg) is False
+        assert names >= COORDINATION_GATED_TOOLS
     finally:
         clear_active_coordination()
         current_execution_id.reset(token)
 
 
-def test_partial_failure_keeps_replan_drops_wait_suite():
-    """部分失败 stash：计划还开着 → 留 replan；会话已关 → 摘 wait 套件。"""
+def test_partial_failure_keeps_wait_suite_on_table():
+    """部分失败 stash：计划还开着；会话关掉也不摘 wait（前缀缓存）。"""
     eid = "exec-partial-stash"
     token = current_execution_id.set(eid)
     try:
@@ -196,17 +197,17 @@ def test_partial_failure_keeps_replan_drops_wait_suite():
 
         delegate._supervised = object()
         clear_active_coordination()
-        assert promote_coordination_surface_if_needed(reg) is True
+        assert promote_coordination_surface_if_needed(reg) is False
         assert "replan" in reg.names
-        assert "wait" not in reg.names
-        assert "cancel_worker" not in reg.names
+        assert "wait" in reg.names
+        assert "cancel_worker" in reg.names
     finally:
         clear_active_coordination()
         current_execution_id.reset(token)
 
 
-def test_register_include_false_drops_gated_tools():
-    """装配入口 include=False 须真正摘下，不能留下上次挂上的 replan。"""
+def test_register_include_false_does_not_drop_gated_tools():
+    """装配入口 include=False 不再摘表。"""
     reg = ToolRegistry()
     delegate = _fake_delegate()
     reg.register(delegate)
@@ -217,7 +218,7 @@ def test_register_include_false_drops_gated_tools():
     register_coordination_surface(
         reg, delegate_tool=delegate, sink=MagicMock(), include=False
     )
-    assert set(reg.names).isdisjoint(COORDINATION_GATED_TOOLS)
+    assert set(reg.names) >= COORDINATION_GATED_TOOLS
 
 
 def test_ensure_before_llm_installs_wait_when_coordination_live():
@@ -258,8 +259,11 @@ def test_member_never_gets_coordination_suite_from_parent_session():
         # 队员的嵌套 delegate 句柄：depth≥1，且与父图共享 execution_id
         reg.register(_fake_delegate(depth=1))
 
-        assert promote_coordination_surface_if_needed(reg) is False
-        assert set(reg.names).isdisjoint(COORDINATION_GATED_TOOLS)
+        assert promote_coordination_surface_if_needed(reg) is True
+        assert "replan" in reg.names
+        assert "wait" not in reg.names
+        assert "cancel_worker" not in reg.names
+        assert "resolve_escalation" not in reg.names
     finally:
         clear_active_coordination()
         current_execution_id.reset(token)
@@ -277,15 +281,10 @@ def test_nested_lead_still_gets_replan_on_supervised_yield():
     assert "cancel_worker" not in reg.names
 
 
-def test_nested_lead_opening_omits_replan_until_supervised():
-    """开场只有 delegate；子计划让出后才挂 replan（与 CEO 闲聊/协调同构）。"""
+def test_nested_lead_opening_includes_replan_without_wait():
+    """嵌套 lead 开场就有 replan；wait 仍是父图的杠杆。Idle 调用在 execute 失败。"""
     reg = ToolRegistry()
     reg.register(_fake_delegate(supervised=False, depth=1))
-    assert promote_coordination_surface_if_needed(reg) is False
-    assert "replan" not in reg.names
-
-    delegate = reg.get("delegate")
-    delegate._supervised = object()
     assert promote_coordination_surface_if_needed(reg) is True
     assert "replan" in reg.names
     assert "wait" not in reg.names
@@ -318,15 +317,16 @@ def test_resync_binding_follows_hot_graph_merge():
         delegate._base_tool_context = SimpleNamespace(execution_id=host)
         reg.register(delegate)
 
-        # 回绑前：父任务仍指向本回合 mint 的 eid → 找不到宿主会话
+        # 回绑前：父任务仍指向本回合 mint 的 eid → 找不到宿主会话（execute 闸）。
+        # 工具表开场已钉死，不靠回绑才挂 wait。
         assert coordination_surface_active() is False
-        assert promote_coordination_surface_if_needed(reg) is False
-        assert "wait" not in reg.names
+        assert promote_coordination_surface_if_needed(reg) is True
+        assert "wait" in reg.names
 
         assert resync_coordination_binding(reg) is True
         assert current_execution_id.get() == host
         assert coordination_surface_active() is True
-        assert promote_coordination_surface_if_needed(reg) is True
+        assert promote_coordination_surface_if_needed(reg) is False
         assert set(reg.names) >= COORDINATION_GATED_TOOLS
     finally:
         clear_active_coordination()
@@ -514,21 +514,20 @@ def _assemble(
 
 
 def test_assembled_idle_surface_split():
-    """闲聊态：delegate / ask_user / debate 仍注册；replan + 协调四件套不在。
+    """闲聊态：delegate / ask_user / debate 与协调套件都在开场表。
 
     ``consult`` is has_entries-gated via async ``wire_ceo_consult`` (not in sync assemble).
-    debate 开场按需，不进 OpenAI 表。
+    debate 已装配即进 OpenAI 表；idle 的 wait/replan 在 execute 失败。
     """
     reg = _assemble()
     names = set(reg.names)
     assert {"delegate", "ask_user", "debate"} <= names
-    assert names.isdisjoint(COORDINATION_GATED_TOOLS)
+    assert names >= COORDINATION_GATED_TOOLS
     offered = {
         (d.get("function") or {}).get("name") or d.get("name")
         for d in reg.get_openai_definitions()
     }
-    assert "debate" not in offered
-    assert "debate" in set(reg.deferred_names)
+    assert "debate" in offered
 
 
 def test_assembled_ceo_omits_escalate_and_handoff():
@@ -539,13 +538,13 @@ def test_assembled_ceo_omits_escalate_and_handoff():
     assert "handoff" not in reg.names
 
 
-def test_assembled_offers_create_folder():
-    """跨文件夹 P1：create_folder 须进 live CEO 装配（勿只挂 catalog / 漏 prepare.register）。"""
+def test_assembled_offers_folders_not_folder_crud():
+    """跨桌点名走 folders；新建/删除给人侧。"""
     names = set(_assemble().names)
-    assert {
-        "folders",
-        "create_folder",
-    } <= names
+    assert "folders" in names
+    assert "create_folder" not in names
+    assert "delete_folder" not in names
+    assert "mkdir" not in names
 
 
 def test_assembled_ceo_omits_retired_folder_profile():
@@ -564,10 +563,8 @@ def test_register_always_ceo_tools_declare_loop():
     reg = ToolRegistry()
     register_always_ceo_tools(reg, skill_registry=build_system_skill_registry())
     names = set(reg.names)
-    assert {
-        "folders",
-        "create_folder",
-    } <= names
+    assert "folders" in names
+    assert "create_folder" not in names
     assert "consult" not in names  # CeoWire.CONSULT — hand-wired with has_entries
     assert names.isdisjoint(
         {"delegate", "debate", "ask_user", "remember", "wait", "code_search"}

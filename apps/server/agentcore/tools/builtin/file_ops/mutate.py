@@ -633,20 +633,15 @@ class StrReplaceTool:
                     "old_string": {
                         "type": "string",
                         "minLength": 1,
-                        "description": (
-                            "要替换的精确文本（不可为空），需带足够的上下文以在文件中唯一。"
-                        ),
+                        "description": "要替换的精确文本。",
                     },
                     "new_string": {
                         "type": "string",
-                        "description": (
-                            "替换后的文本（必须与 old_string 不同；"
-                            "单次替换建议一节为宜，不硬拒字数）。"
-                        ),
+                        "description": "替换后的文本（必须与 old_string 不同）。",
                     },
                     "replace_all": {
                         "type": "boolean",
-                        "description": ("替换所有出现处，而非要求唯一匹配（默认 false）。"),
+                        "description": "替换所有出现处，而非要求唯一匹配。",
                         "default": False,
                     },
                 },

@@ -75,7 +75,6 @@ async def test_drive_top_level_no_longer_hangs_team_preview(monkeypatch):
     class _Tool:
         _depth = 0
         _permission_axes = AutonomyPolicy.LESS_INTERRUPT
-        _active_playbook = None
         _pending_pause = False
         _base_tool_context = type("C", (), {"backend": None})()
         _approval_gate = None

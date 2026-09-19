@@ -1,8 +1,6 @@
-"""In-memory table_ops / table_read / assembly — no PostgreSQL."""
+"""In-memory table apply_ops / ``<表格>`` envelope — no PostgreSQL."""
 
 from __future__ import annotations
-
-from pathlib import Path
 
 from agentcore.runtime.resolve.prompt import (
     TURN_ENVELOPE_FENCE,
@@ -13,13 +11,6 @@ from agentcore.table.context import render_table_section
 from agentcore.table.ops import apply_ops
 from agentcore.table.schema import blank_seed, new_id
 from agentcore.table.state import TableState
-from agentcore.tools.builtin.table_ops import TableOpsTool
-from agentcore.tools.builtin.table_read import TableReadTool
-from agentcore.tools.protocol import ToolContext
-from agentcore.tools.registration import register_table_ceo_tools
-from agentcore.tools.registry import ToolRegistry
-from agentcore.tools.sandbox.subprocess import SubprocessSandbox
-from agentcore.workspace.server import ServerWorkspace
 
 
 def _blank(title: str = "任务") -> TableState:
@@ -33,25 +24,6 @@ def _blank(title: str = "任务") -> TableState:
         views=[view],
         active_view_id=view["id"],
         schema_version=1,
-    )
-
-
-def _def_names(reg: ToolRegistry) -> set[str]:
-    names: set[str] = set()
-    for d in reg.get_openai_definitions():
-        fn = d.get("function") or {}
-        names.add(str(fn.get("name") or d.get("name") or ""))
-    return names
-
-
-def _ctx(*, table_id: str | None = None) -> ToolContext:
-    return ToolContext.create(
-        execution_id="e",
-        run_id="s",
-        agent_id="a",
-        backend=ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
-        user_id="u1",
-        table_id=table_id,
     )
 
 
@@ -184,33 +156,6 @@ def test_same_batch_add_column_then_fill_unordered():
     assert result.state.rows[0]["cells"].get(new_col) == "hello"
 
 
-async def test_table_ops_without_table_id_fails_cleanly():
-    result = await TableOpsTool().execute(
-        {"ops": [{"op": "update_cells", "row_id": "r", "cells": {"c": "x"}}]},
-        _ctx(table_id=None),
-    )
-    assert result.success is False
-    assert result.error == "table_ops：当前没有绑定表格。请 @ 已导入的 csv。"
-
-
-async def test_table_read_without_table_id_fails_cleanly():
-    result = await TableReadTool().execute({}, _ctx(table_id=None))
-    assert result.success is False
-    assert result.error == "table_read：当前没有绑定表格。请 @ 已导入的 csv。"
-
-
-def test_table_session_can_assemble_and_offer_tools():
-    reg = ToolRegistry()
-    register_table_ceo_tools(reg)
-    assert "table_ops" in reg.names
-    assert "table_read" in reg.names
-    assert "table_ops" not in _def_names(reg)
-    assert reg.offer("table_ops") is True
-    names = _def_names(reg)
-    assert "table_ops" in names
-    assert "table_read" in names
-
-
 def test_empty_table_context_does_not_change_compose_bytes():
     bare = compose_ceo_chat_prompt("BASE", ceo_tool_names=set())
     assert compose_ceo_chat_prompt("BASE", ceo_tool_names=set()) == bare
@@ -324,10 +269,3 @@ def test_set_view_persists_column_widths():
     assert result.ok
     assert result.state is not None
     assert result.state.views[0]["config"]["column_widths"][cid] == 240
-
-
-def test_catalog_summaries_are_what_not_when():
-    assert TableOpsTool.registration.catalog_summary == "改当前表格"
-    assert TableReadTool.registration.catalog_summary == "读当前表格"
-    assert "HOW→consult" not in TableOpsTool().schema.description
-    assert "HOW→consult" not in TableReadTool().schema.description

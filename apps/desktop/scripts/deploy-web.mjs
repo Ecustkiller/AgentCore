@@ -13,7 +13,7 @@
  * NOT touch the Nginx config: the one-time wiring (a `location /` serving that dir with
  * SPA try_files, MERGED into the EXISTING app. server block that already proxies /api +
  * /storage — that block lives on the machine, not in this repo) is a manual step. See
- * deploy/nginx/app-web.conf and docs/05-平台与运维/部署与运维.md §二.
+ * deploy/nginx/app-web.conf and docs/05-平台与运维/部署拓扑与环境.md §二.
  *
  * SSH creds come from deploy/.env.deploy.local (DEPLOY_SSH_*). Deps are assumed installed
  * (run `pnpm install` first on a fresh clone — skipped to avoid the electron postinstall).

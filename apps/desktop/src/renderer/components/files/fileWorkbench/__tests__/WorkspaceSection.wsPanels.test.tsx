@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 /**
- * 「我的文件」里云端文件夹的三件能力入口——版本 / 软删区 / 导出 ZIP。
+ * 「我的文件」里云端文件夹的能力入口——版本 / 软删区。
  *
- * 这三件此前只有对话右坞才有，从文件页进来的用户得绕回某个对话才够得着。这里钉的是
+ * 这件此前只有对话右坞才有，从文件页进来的用户得绕回某个对话才够得着。这里钉的是
  * 入口的**门控**（后端对本机工作区一律 409，不能让用户点进一个必然失败的
- * 动作）与**出口**（版本 / 软删区走开标签页那条缝，导出直接触发打包下载）。
+ * 动作）与**出口**（版本 / 软删区走开标签页那条缝）。导出 ZIP 已从人侧卸下。
  */
 
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -62,9 +62,6 @@ vi.mock("@/stores/conversation", () => ({
     sel({ currentConversationId: null, dropConversationRuntime: vi.fn() }),
 }));
 
-vi.mock("@/services/workspaces", () => ({ wsExportZip: vi.fn() }));
-
-import { wsExportZip } from "@/services/workspaces";
 import { WorkspaceSection } from "../WorkspaceSection";
 
 function source(over: Partial<FileSource["caps"]> = {}): FileSource {
@@ -123,7 +120,7 @@ beforeEach(() => {
   getFoldersMock.mockReturnValue([]);
 });
 
-describe("云端文件夹的版本 / 软删区 / 导出入口", () => {
+describe("云端文件夹的版本 / 软删区入口", () => {
   it("版本与软删区各开一个带工作区名的标签页", async () => {
     const onOpenFile = vi.fn();
     const { unmount } = renderSection({ onOpenFile });
@@ -147,13 +144,15 @@ describe("云端文件夹的版本 / 软删区 / 导出入口", () => {
     );
   });
 
-  it("导出 ZIP 打包整个工作区", async () => {
+  it("云端根不挂导出 ZIP", async () => {
     renderSection({});
 
     fireEvent.contextMenu(screen.getByText("季度报告"));
-    fireEvent.click(await screen.findByText("导出 ZIP"));
-
-    await waitFor(() => expect(wsExportZip).toHaveBeenCalledWith("folder:f1"));
+    await screen.findByText("版本…");
+    expect(screen.queryByText("导出 ZIP")).toBeNull();
+    expect(screen.queryByText("导出到本机文件夹")).toBeNull();
+    expect(screen.queryByText("新建文件夹")).toBeNull();
+    expect(screen.queryByText("在此新建文件夹")).toBeNull();
   });
 
   it("本机文件夹不挂这三项：它的版本与回收站是另一条轨", async () => {

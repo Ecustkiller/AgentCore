@@ -144,6 +144,7 @@ export interface ConversationState {
       usage?: UsageBreakdown;
       rounds?: number;
       durationMs?: number;
+      generationMs?: number;
       finishReason?: string;
       collab?: import("@/types/events").TurnCollabMetrics;
       outcome?: "ok" | "partial" | "paused" | "error" | null;

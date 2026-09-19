@@ -3924,7 +3924,7 @@
         "type": "object"
       },
       "CapabilityGuidelines": {
-        "description": "The system-prompt TEMPLATE the agents follow (静态 蓝图; the per-turn verbatim\nprompt is served separately, see the message prompt endpoint).\n\n``shared_base`` is the base every agent (CEO + workers) shares (identity, output\nstyle, tool-use, safety); ``worker_leaf`` / ``worker_captain`` are ``<身份>``\ntemplates — not the per-turn prompt (form HOW is 交付物规格 in 收到的上下文);\n``ceo_addon`` is the CEO\ncoordinator's layers on top of that base\n(routing core + 按需目录 + citation guidance); ``ceo`` is the full chat\nsystem-prompt template (shared base + ceo_addon), composed by the SAME\n``compose_ceo_chat_prompt`` the live turn uses, so it never drifts.",
+        "description": "The system-prompt TEMPLATE the agents follow (静态 蓝图; the per-turn verbatim\nprompt is served separately, see the message prompt endpoint).\n\n``shared_base`` is the base every agent (CEO + workers) shares (output\nstyle, tool-use, safety); ``worker_leaf`` / ``worker_captain`` are empty\n(no factory worker ``<身份>``; nest-cap is a live opening fact) — not the\nper-turn prompt (form HOW is 交付物规格 in 收到的上下文);\n``ceo_addon`` is the CEO\ncoordinator's layers on top of that base\n(routing core + 按需目录 + citation guidance); ``ceo`` is the full chat\nsystem-prompt template (shared base + ceo_addon), composed by the SAME\n``compose_ceo_chat_prompt`` the live turn uses, so it never drifts.",
         "properties": {
           "ceo": {
             "title": "Ceo",
@@ -10495,6 +10495,17 @@
             "title": "Followups",
             "type": "array"
           },
+          "generation_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation Ms"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -12143,6 +12154,18 @@
               }
             ],
             "title": "Finish Reason"
+          },
+          "generation_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation Ms"
           },
           "harvest_kind": {
             "anyOf": [
@@ -17180,7 +17203,7 @@
   "info": {
     "description": "Multi-Agent AI Workspace API",
     "title": "AgentCore",
-    "version": "0.7.24"
+    "version": "0.7.25"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -17279,7 +17302,7 @@
     },
     "/updates/policy": {
       "get": {
-        "description": "Desktop auto-update policy (发布与门禁.md §7.6).\n\nThe desktop updater polls this before each check and pauses downloads when\n``enabled`` is false — a kill switch for a bad release. ``min_desktop_version``\nis the hard floor: clients force update when older, and the server rejects\n``X-Client-Platform=desktop`` business APIs below it with ``CLIENT_TOO_OLD``\n(HTTP 426). Empty ``DESKTOP_MIN_VERSION`` → ``min_desktop_version: null``\n(dev-friendly; no gate). This endpoint itself is exempt from the API gate so\noutdated clients can still learn the floor.\n\nUnauthenticated and dependency-free (like ``/version``) so the updater can\nreach it pre-login. The kill-switch client is **fail-open**: any error or\nnon-200 is treated as enabled.\n\nStaged rollout (stagingPercentage) and beta/stable channels ride on the\nfeature-flag system (发布与门禁.md §7.9) and are not part of this payload yet.\nPer-flag ``min_client_version`` (§7.9) remains a separate line from this\nglobal desktop floor.",
+        "description": "Desktop auto-update policy (发布与门禁.md §1.6).\n\nThe desktop updater polls this before each check and pauses downloads when\n``enabled`` is false — a kill switch for a bad release. ``min_desktop_version``\nis the hard floor: clients force update when older, and the server rejects\n``X-Client-Platform=desktop`` business APIs below it with ``CLIENT_TOO_OLD``\n(HTTP 426). Empty ``DESKTOP_MIN_VERSION`` → ``min_desktop_version: null``\n(dev-friendly; no gate). This endpoint itself is exempt from the API gate so\noutdated clients can still learn the floor.\n\nUnauthenticated and dependency-free (like ``/version``) so the updater can\nreach it pre-login. The kill-switch client is **fail-open**: any error or\nnon-200 is treated as enabled.\n\nStaged rollout (stagingPercentage) and beta/stable channels ride on the\nfeature-flag system (发布与门禁.md §1.9) and are not part of this payload yet.\nPer-flag ``min_client_version`` (§1.9) remains a separate line from this\nglobal desktop floor.",
         "operationId": "updates_policy_updates_policy_get",
         "responses": {
           "200": {
@@ -25527,7 +25550,7 @@
     },
     "/v1/conversations/{conversation_id}/duplicate": {
       "post": {
-        "description": "Clone the transcript through one message into a new conversation (克隆对话).\n\nOwner-scoped (404 for a non-owner / missing source / cutoff not in this chat).\n``until_message_id`` is required: the copy includes that row and every earlier\nrow; later turns stay on the source. The original is unchanged. Inherits folder\n(same workspace) and local-first intent, titled「… 副本」. Content-level fields\nonly — ``MessageRepository.copy_through`` does not copy the team-graph journal.\nA still-generating cutoff is 409. Returns the new conversation summary.",
+        "description": "Clone the transcript through one message into a new conversation (克隆对话).\n\nOwner-scoped (404 for a non-owner / missing source / cutoff not in this chat).\n``until_message_id`` is required: the copy includes that row and every earlier\nrow; later turns stay on the source. The original is unchanged. Inherits folder\n(same workspace) and local-first intent. Title is ``{stem} (n)`` with n from 1\namong the caller's live chats (empty source uses the sidebar fallback, then\n「新对话」). Content-level fields only — ``MessageRepository.copy_through``\ndoes not copy the team-graph journal. A still-generating cutoff is 409.\nReturns the new conversation summary.",
         "operationId": "duplicate_conversation_v1_conversations__conversation_id__duplicate_post",
         "parameters": [
           {
@@ -33903,7 +33926,7 @@
     },
     "/v1/folders/{folder_id}": {
       "delete": {
-        "description": "软删项目（对话就地归档；工作区走保留期自动清理）。\n\nNested folders go with it, and the directory is parked in the tombstone area so\nthe name is free again immediately (双模式工作区 §5.4).\n\nReachable with a folders narrow ticket so the sidecar CEO's ``delete_folder``\nlands on the same path as the sidebar. The irreversible twin below stays\naccess-session only.",
+        "description": "软删项目（对话就地归档；工作区走保留期自动清理）。\n\nNested folders go with it, and the directory is parked in the tombstone area so\nthe name is free again immediately (双模式工作区 §5.4).\n\nReachable with a folders narrow ticket so sidecar and the sidebar share\nthe same soft-delete path. The irreversible twin below stays\naccess-session only.",
         "operationId": "delete_folder_v1_folders__folder_id__delete",
         "parameters": [
           {

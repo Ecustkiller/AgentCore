@@ -13,7 +13,7 @@ PDF 首版不做 OCR，写入明确降级提示。解析失败不阻塞驻留，
 ``read_bytes`` 再 ``extract_office_bytes``（IPC 摄入 25 MiB）。PDF 认 ``start_page`` 开窗。
 ``convert_with_markitdown`` 仅服务非 docx 桶；``preparse_resident`` 仍只服务附件驻留。
 
-→ 见决策：docs/02-架构/双模式工作区.md §七（Office 云=本地）与附件驻留实现。
+→ 见决策：docs/02-架构/工作区.md §七（Office 云=本地）与附件驻留实现。
 """
 
 from __future__ import annotations

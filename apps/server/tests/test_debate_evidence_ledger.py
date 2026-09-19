@@ -147,7 +147,8 @@ def test_demote_and_steer():
     assert demoted == "主张【待核实·推断】成立。"
     steer = format_evidence_ledger_steer(["【已核实·#r99】"])
     assert steer.startswith("[系统提示]")
-    assert "笔记" in steer
+    assert "【已核实·#r99】" in steer
+    assert "道谢" not in steer
 
 
 def test_format_evidence_ledger_for_judge_and_brief():

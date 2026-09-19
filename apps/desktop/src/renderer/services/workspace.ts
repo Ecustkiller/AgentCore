@@ -156,7 +156,7 @@ export async function downloadWorkspaceFile(
  * Download a conversation-workspace directory as zip (selected dir as archive root).
  *
  * Independent of {@link downloadWorkspaceFile} — GET `.../files/{path}` stays
- * preview / single-file. Root「导出 ZIP」is still snapshot create+download.
+ * preview / single-file. Root「导出 ZIP」人侧已卸；函数仍给合回 / REST。
  */
 export async function downloadWorkspaceArchive(
   conversationId: string,

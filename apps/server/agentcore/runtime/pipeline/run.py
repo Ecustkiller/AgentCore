@@ -105,9 +105,8 @@ async def run_chat_pipeline(
     the memory SCOPE so a project conversation also gets that project's memory layer
     injected (global + project), and ``consult`` searches both (Agent记忆与知识系统 §二).
 
-    ``table_id`` marks a 表格会话: the CEO gains ``table_read`` / ``table_ops`` (server-side
-    ``apply_ops`` on DB). ``None`` → those tools fail cleanly. ``table_selection`` is this
-    turn's selected row ids for ``<表格>`` (not stored on the message).
+    ``table_id`` marks a 表格会话 so ``<表格>`` facts can render. ``table_selection`` is this
+    turn's selected row ids (not stored on the message).
 
     ``x_client_platform`` is the raw ``X-Client-Platform`` header (desktop / mobile-web /
     …). Gates ``ask_user``'s ``action=bind_local_folder`` advertisement and the

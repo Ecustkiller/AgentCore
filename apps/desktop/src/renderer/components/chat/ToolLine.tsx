@@ -75,9 +75,9 @@ const PEEK_SUPPRESSED = new Set([
   "consult_memory",
   "consult_rule",
   "consult",
-  // 跨会话对话日志：标题已自解释；search 场数 / read 对话标题走 inlineMeta。
+  // 跨会话对话日志：标题已自解释；read 对话标题走 inlineMeta。
   "search_conversations",
-  // web_search / web_fetch / read_conversation：计数或标题并进 inlineMeta，折叠无第二行。
+  // web_search：折叠不挂条数。web_fetch / read_conversation：标题并进 inlineMeta。
   "web_search",
   "web_fetch",
   "read_conversation",
@@ -100,9 +100,6 @@ const PEEK_SUPPRESSED = new Set([
   "md_to_docx",
   "md_to_pdf",
   "md_export",
-  "archive_extract",
-  "archive_create",
-  "archive",
   "download_url",
   "read_image",
   "code_search",
@@ -453,9 +450,9 @@ export function ToolLine({
     isBrowserTool(step.tool_name) ||
     (step.tool_name === "terminal" && detail);
   const phaseText = running ? toolPhaseText(step.phase) : null;
-  // 完成态元信息并进标题行、不另起 peek：web_search「N results」、
-  // list_folders「N folders」、search_conversations「N 场对话」、str_replace +/-、
-  // file_write「N 行」、file_read 窗口「a–b 行」、write 家族 / code_diagnostics、browser_* detail。
+  // 完成态元信息并进标题行、不另起 peek：str_replace +/-、file_write「N 行」、
+  // file_read 窗口「a–b 行」、write 家族 / code_diagnostics、browser_* detail、
+  // web_fetch / read_conversation 标题。检索 / 盘点条数不进折叠行。
   const titleStat = toolLineTitleStat(data);
   const writeDiagPeek =
     status === "success" && WRITE_FAMILY_TOOLS.has(step.tool_name)
@@ -465,10 +462,6 @@ export function ToolLine({
   const inlineMeta = (() => {
     if (status === "success") {
       if (browserTail) return browserTail;
-      if (step.tool_name === "web_search") return peek || null;
-      if (step.tool_name === "list_folders" || step.tool_name === "folders")
-        return peek || null;
-      if (step.tool_name === "search_conversations") return peek || null;
       if (step.tool_name === "code_diagnostics") {
         const diag = extractCodeDiagnostics(data.display);
         if (diag) {
@@ -610,9 +603,9 @@ export function ToolLine({
 }
 
 /** ≥2 consecutive `web_search` — flatten to top-level ToolLines (no outer group
- * shell). Each search already carries query + result count on its own row; wrapping
- * them in「Search web A · B」only adds a redundant disclosure layer (unlike
- * web_fetch, which merges into one source collection). */
+ * shell). Each search already carries its query on its own row; wrapping them in
+ * 「Search web A · B」only adds a redundant disclosure layer (unlike web_fetch,
+ * which merges into one source collection). */
 function isWebSearchFlatGroup(
   tools: Extract<ProcessStep, { kind: "tool" }>[],
 ): boolean {
@@ -664,7 +657,7 @@ export function ToolLineGroup({
     );
   }
   // Pure web_search runs: skip the outer group shell — each call is already a
-  // self-explanatory top-level row (query + inline result count).
+  // self-explanatory top-level row (query on the title).
   if (isWebSearchFlatGroup(tools)) {
     return (
       <div className="space-y-2">

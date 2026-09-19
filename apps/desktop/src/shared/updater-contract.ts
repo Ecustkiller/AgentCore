@@ -1,7 +1,7 @@
 /**
  * 自动更新 IPC 契约 —— 主进程 / preload / renderer 三端共享的单一真相源。
  *
- * 行为锚定 `docs/05-平台与运维/发布与门禁.md` §7.6：**发现仍走 electron-updater feed**
+ * 行为锚定 `docs/05-平台与运维/发布与门禁.md` §1.6：**发现仍走 electron-updater feed**
  *（`latest.yml`，品牌域，几 KB）；**安装包不走 electron-updater 下载/安装**。用户同意后
  * 主进程把官网同款 GitHub 安装包拉到系统「下载」文件夹，下完由用户点「打开安装包」
  *（`openInstaller` → `shell.openPath`）。软更新：同意后关窗 + 短 toast，进度在

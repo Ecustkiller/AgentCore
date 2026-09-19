@@ -30,7 +30,6 @@ from agentcore.tools.builtin import (
 )
 from agentcore.tools.registration import (
     host_class_tool_names,
-    register_table_ceo_tools,
 )
 from agentcore.tools.registry import ToolRegistry
 from agentcore.workspace.protocol import WorkspaceBackend
@@ -168,7 +167,6 @@ async def assemble_ceo_turn(
     from agentcore.runtime.resolve.prepare import _wire_conversation_log_tools
     from agentcore.tools.ceo_toolset import wire_ceo_consult
     from agentcore.tools.mcp import register_mcp_tools
-    from agentcore.tools.on_demand import offer_tools_from_window
 
     register_mcp_tools(chat_tools, prepared.mcp_discover)
     _wire_conversation_log_tools(chat_tools, folder_id=folder_id)
@@ -179,12 +177,6 @@ async def assemble_ceo_turn(
         folder_id=folder_id,
         user_id=prepared.base_tool_context.user_id,
     )
-    offer_tools_from_window(chat_tools, history)
-    offer_tools_from_window(prepared.worker_tools, history)
-
-    if prepared.base_tool_context.table_id:
-        register_table_ceo_tools(chat_tools)
-        chat_tools.offer("table_ops")
 
     # The entry chat agent gets the SLIM CEO core + the unified ``<按需目录>``.
     # Advanced HOW detail is pulled via ``consult``. Never open a write-explore
@@ -193,7 +185,6 @@ async def assemble_ceo_turn(
 
     apply_explore_profile_surface(chat_tools, pending=False)
     ceo_tool_names = {schema.name for schema in chat_tools.list_all()}
-    ceo_offered_names = set(chat_tools.offered_names)
     on_demand_entries: list = []
     consult_tool = chat_tools.get_optional("consult")
     if consult_tool is not None and getattr(consult_tool, "source", None) is not None:
@@ -215,7 +206,6 @@ async def assemble_ceo_turn(
         prepared.system_prompt,
         skill_registry=prepared.skill_registry,
         ceo_tool_names=ceo_tool_names,
-        ceo_offered_names=ceo_offered_names,
         on_demand_entries=on_demand_entries,
     )
     # 可用性诚实性 · 甲：偏窄短问 → 复用最近 delivery_status 发卡到本回合答复面。

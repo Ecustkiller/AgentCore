@@ -44,7 +44,6 @@ def annotate_batch_meta(
     *,
     node_count: int,
     has_deps: bool,
-    playbook: str | None = None,
     audit_hard: bool = False,
     includes_review: bool = False,
 ) -> Any:
@@ -54,8 +53,6 @@ def annotate_batch_meta(
     meta = dict(getattr(result, "metadata", None) or {})
     meta["batch_nodes"] = node_count
     meta["batch_has_deps"] = has_deps
-    if playbook:
-        meta["batch_playbook"] = playbook
     if audit_hard:
         meta["audit_hard"] = True
     if includes_review:

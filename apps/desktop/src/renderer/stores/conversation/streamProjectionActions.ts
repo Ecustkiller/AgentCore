@@ -439,6 +439,9 @@ export function createStreamProjectionActions(
             ...(meta.durationMs !== undefined
               ? { durationMs: meta.durationMs }
               : {}),
+            ...(meta.generationMs !== undefined
+              ? { generationMs: meta.generationMs }
+              : {}),
             ...(meta.finishReason !== undefined
               ? { finishReason: meta.finishReason }
               : {}),

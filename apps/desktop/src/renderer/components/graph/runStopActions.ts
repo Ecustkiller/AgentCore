@@ -13,18 +13,17 @@ export function isStoppableRunStatus(status: string): boolean {
  * Fire a structured run-stop (never guesses from free text). Marks honest
  * pending state; does **not** flip run status to cancelled locally.
  *
- * 回执由服务端给：只有引擎真的收下（`accepted`）才留着「停止请求中…」的在飞态并说
- * 「引擎将停下」。够不着时（驱动已退出 / run 不在当前计划里）把在飞态撤掉，照原话告诉
- * 用户什么都没发生——先前这里无论如何都报成功，是那句假承诺的出处。
+ * 回执由服务端给：只有引擎真的收下（`accepted`）才留着「停止请求中…」的在飞态
+ * （图 / 停止中铬条自己变，不再另贴成功收据）。够不着时（驱动已退出 / run 不在
+ * 当前计划里）把在飞态撤掉，照原话告诉用户什么都没发生——先前这里无论如何都报
+ * 成功，是那句假承诺的出处。
  */
 export async function requestRunStop(opts: {
   conversationId: string;
   executionId: string;
-  runId?: string | null;
-  /** Toast noun: node vs team. */
-  scope: "node" | "team";
+  runId: string;
 }): Promise<RunStopAck | null> {
-  const { conversationId, executionId, runId = null, scope } = opts;
+  const { conversationId, executionId, runId } = opts;
   const store = useRunStopPendingStore.getState();
   if (store.isPending(executionId, runId)) return null;
 
@@ -44,18 +43,10 @@ export async function requestRunStop(opts: {
     const wholeTurnStopping =
       runtimeOf(useConversationStore.getState(), conversationId).turnPhase ===
       "stopping";
-    if (ack.reason === "no_live_drive" && wholeTurnStopping) {
-      toast.info("整轮正在停下来");
-    } else {
+    if (!(ack.reason === "no_live_drive" && wholeTurnStopping)) {
       toast.warning("没有停下任何工作", { description: interveneAckText(ack) });
     }
     return ack;
   }
-  toast.success(scope === "team" ? "已请求停止任务" : "已请求停止此成员", {
-    description:
-      scope === "team"
-        ? "队员将陆续停下；主 Agent 会留下来继续交代（不会结束整轮对话）。"
-        : interveneAckText(ack),
-  });
   return ack;
 }

@@ -454,7 +454,6 @@ def test_token_wind_down_threshold_and_tool_narrowing():
             "handoff",
             "file_write",
             "str_replace",
-            "mkdir",
             "file_batch",
             "file_list",
             "md_export",
@@ -575,8 +574,6 @@ def test_wind_down_allowed_tools_are_persist_and_handoff():
         narrow_tools_for_wind_down,
         narrow_tools_for_wind_down_breach,
         wind_down_allowed_tools,
-        wind_down_instruction_timeout,
-        wind_down_instruction_token,
     )
 
     available = {
@@ -598,14 +595,6 @@ def test_wind_down_allowed_tools_are_persist_and_handoff():
     assert set(landing) >= {"file_write", "handoff"}
     assert "web_search" not in landing
     assert narrow_tools_for_wind_down_breach(available, keep_landing=False) == ["handoff"]
-
-    for text in (
-        wind_down_instruction_token(),
-        wind_down_instruction_timeout(),
-    ):
-        assert text.startswith("[系统提示]")
-    assert "硬顶" in wind_down_instruction_token()
-    assert "超时" in wind_down_instruction_timeout()
 
 
 def test_wind_down_breach_detection_and_local_force():
@@ -819,7 +808,6 @@ async def test_single_round_jump_past_soft_still_gets_wind_down(monkeypatch):
     from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
     from agentcore.runtime.engine import react_loop
     from agentcore.runtime.events import EventSink
-    from agentcore.runtime.runs.cutoff import wind_down_instruction_token
     from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
     from agentcore.tools.registry import ToolRegistry
     from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -908,15 +896,15 @@ async def test_single_round_jump_past_soft_still_gets_wind_down(monkeypatch):
     )
 
     assert usage.total_tokens >= 80_000
-    assert any(
-        (m.content or "").startswith(wind_down_instruction_token()[:12])
-        or "收尾窗口" in (m.content or "")
+    assert not any(
+        (m.content or "").startswith("[系统提示]")
         for m in messages
+        if m.role == "user"
     )
     # Second LLM call is the wind-down round (not a ban-write finalize).
     assert len(provider.round_tool_names) >= 2
     wind_tools = set(provider.round_tool_names[1])
     assert "file_write" in wind_tools
     assert "handoff" in wind_tools
-    assert "web_search" not in wind_tools
+    assert "web_search" in wind_tools
     assert "已落盘" in content or content.strip()

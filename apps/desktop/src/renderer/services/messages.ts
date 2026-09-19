@@ -159,6 +159,8 @@ export interface BackendMessage {
   rounds?: number | null;
   /** 回合墙钟用时 (ms)：与 message_end.duration_ms 同锚；重载自 usage JSON 投影。 */
   duration_ms?: number | null;
+  /** 各次 LLM 吐字时长之和 (ms)：与 message_end.generation_ms 同锚。 */
+  generation_ms?: number | null;
   /** Server-attested turn result (`turn_metrics.status` / `message_end.outcome`). */
   outcome?: ("ok" | "partial" | "paused" | "error") | null;
   /** 协作质量 (学·度量 §2.5): orchestration signals（采集仍在、产品不展示调度明细）; nested in usage column. */
@@ -357,6 +359,7 @@ export function toMessage(m: BackendMessage): Message {
     usage: m.usage ?? undefined,
     rounds: m.rounds ?? undefined,
     durationMs: m.duration_ms ?? undefined,
+    generationMs: m.generation_ms ?? undefined,
     collab: m.collab ?? undefined,
     teamBatch: m.team_batch ?? undefined,
     // 回复反馈 (点赞/点踩): replay the persisted rating so a reloaded bubble shows the

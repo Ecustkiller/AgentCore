@@ -6,7 +6,6 @@ from agentcore.core.types import ToolFace
 from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
 from agentcore.runtime.engine.constants import (
     FINALIZE_COORDINATION_TOOLS,
-    FINALIZE_INSTRUCTION_FILES,
     FINALIZE_PERSIST_TOOLS,
 )
 from agentcore.runtime.engine.finalize import force_finalize, run_finalize_round
@@ -79,6 +78,7 @@ def _registry(*, with_persist: bool = False) -> ToolRegistry:
 
 
 def test_resolve_finalize_coordination_tools_filters_to_allowlist():
+    """Execute allowlist is coordination-only; wire table is a different helper."""
     reg = _registry()
     defs = resolve_finalize_coordination_tools(reg, None, set())
     names = {d["function"]["name"] for d in (defs or [])}
@@ -87,7 +87,7 @@ def test_resolve_finalize_coordination_tools_filters_to_allowlist():
 
 
 def test_files_form_force_finalize_surface_keeps_file_write_and_handoff():
-    """form=files / artifacts：force_finalize 工具面含 file_write+handoff。"""
+    """form=files / artifacts：finalize 执行门含 file_write+handoff。"""
     reg = _registry(with_persist=True)
     assert finalize_allows_persist(reg, None, expects_landing=True) is True
     defs = resolve_finalize_coordination_tools(
@@ -118,7 +118,7 @@ def test_files_form_force_finalize_surface_keeps_file_write_and_handoff():
 
 
 def test_channel_dead_finalize_disables_persist():
-    """Sticky channel_dead: finalize drops persist tools + FILES instruction path."""
+    """Sticky channel_dead: execute allowlist drops persist; FILES instruction stays off."""
     reg = _registry(with_persist=True)
     assert (
         finalize_allows_persist(
@@ -134,18 +134,8 @@ def test_channel_dead_finalize_disables_persist():
     assert names == FINALIZE_COORDINATION_TOOLS
 
 
-def test_finalize_instruction_is_fact_only():
-    from agentcore.runtime.engine.constants import FINALIZE_INSTRUCTION
-
-    assert FINALIZE_INSTRUCTION.startswith("[系统提示]")
-    assert "强制收口" in FINALIZE_INSTRUCTION
-    assert FINALIZE_INSTRUCTION_FILES == FINALIZE_INSTRUCTION
-
-
 @pytest.mark.asyncio
-async def test_channel_dead_finalize_round_uses_coordination_instruction_not_files():
-    from agentcore.runtime.engine.constants import FINALIZE_INSTRUCTION
-
+async def test_channel_dead_finalize_round_uses_coordination_tools_not_files():
     provider = _ScriptedProvider([[_content_chunk("通道已死，改交接")]])
     messages = [LLMMessage(role="user", content="go")]
     reg = _registry(with_persist=True)
@@ -163,11 +153,14 @@ async def test_channel_dead_finalize_round_uses_coordination_instruction_not_fil
         workspace_channel_dead=True,
     )
     assert result.kind == "answer"
-    assert "file_write" not in (provider.last_tool_names or [])
-    assert any(FINALIZE_INSTRUCTION in (m.content or "") for m in messages)
+    assert "file_write" in (provider.last_tool_names or [])
+    assert "handoff" in (provider.last_tool_names or [])
+    assert "delegate" in (provider.last_tool_names or [])
+    assert not any("[系统提示]" in (m.content or "") for m in messages)
     provider = _ScriptedProvider([[_content_chunk("已落盘")]])
     messages = [LLMMessage(role="user", content="go")]
     reg = _registry(with_persist=True)
+    reg.register(_StubTool("web_search", face=ToolFace.SEARCH))
     result = await run_finalize_round(
         messages=messages,
         llm=provider,
@@ -183,10 +176,8 @@ async def test_channel_dead_finalize_round_uses_coordination_instruction_not_fil
     assert result.kind == "answer"
     assert "file_write" in (provider.last_tool_names or [])
     assert "handoff" in (provider.last_tool_names or [])
-    assert "web_search" not in (provider.last_tool_names or [])
-    assert any(
-        FINALIZE_INSTRUCTION in (m.content or "") for m in messages
-    )
+    assert "web_search" in (provider.last_tool_names or [])
+    assert not any("[系统提示]" in (m.content or "") for m in messages)
 
 
 @pytest.mark.asyncio
@@ -207,7 +198,8 @@ async def test_soft_finalize_uses_coordination_tools_not_none():
     )
     assert result.kind == "answer"
     assert provider.last_tool_choice == "auto"
-    assert set(provider.last_tool_names or []) == FINALIZE_COORDINATION_TOOLS
+    assert set(provider.last_tool_names or []) == set(reg.names)
+    assert "file_read" in (provider.last_tool_names or [])
 
 
 @pytest.mark.asyncio
@@ -366,3 +358,53 @@ async def test_empty_soft_finalize_with_prior_falls_back_to_tool_free():
     assert "hard answer" in content
     assert provider.calls == 2
     assert provider.last_tool_choice == "none"
+    assert set(provider.last_tool_names or []) == set(reg.names)
+    assert provider.last_tool_names
+
+
+@pytest.mark.asyncio
+async def test_hard_tool_free_keeps_opening_table():
+    provider = _ScriptedProvider([[_content_chunk("hard answer")]])
+    messages = [LLMMessage(role="user", content="go")]
+    reg = _registry()
+    result = await run_finalize_round(
+        messages=messages,
+        llm=provider,
+        profile=make_profile_params(),
+        active_model="m",
+        tools=reg,
+        allowed_tool_names=None,
+        disabled_tools=set(),
+        emit_content=lambda _d: None,
+        emit_reasoning=lambda _d: None,
+        hard_tool_free=True,
+    )
+    assert result.kind == "answer"
+    assert provider.last_tool_choice == "none"
+    assert set(provider.last_tool_names or []) == set(reg.names)
+    assert "file_read" in (provider.last_tool_names or [])
+
+
+@pytest.mark.asyncio
+async def test_soft_finalize_drops_investigation_calls_keeps_table():
+    provider = _ScriptedProvider(
+        [[_content_chunk("收尾答案"), _tool_chunk("file_read")]]
+    )
+    messages = [LLMMessage(role="user", content="go")]
+    reg = _registry()
+    result = await run_finalize_round(
+        messages=messages,
+        llm=provider,
+        profile=make_profile_params(),
+        active_model="m",
+        tools=reg,
+        allowed_tool_names=None,
+        disabled_tools=set(),
+        emit_content=lambda _d: None,
+        emit_reasoning=lambda _d: None,
+    )
+    assert result.kind == "answer"
+    assert result.tool_calls is None
+    assert provider.last_tool_choice == "auto"
+    assert "file_read" in (provider.last_tool_names or [])
+    assert set(provider.last_tool_names or []) == set(reg.names)

@@ -8,10 +8,7 @@ from __future__ import annotations
 
 
 def load_roster() -> tuple[type, ...]:
-    from agentcore.tools.builtin.archive import ArchiveTool
     from agentcore.tools.builtin.browser import BrowserTool
-    from agentcore.tools.builtin.docs_read import DocsReadTool
-    from agentcore.tools.builtin.docs_write import DocsWriteTool
     from agentcore.tools.builtin.file_ops import (
         FileBatchTool,
         FileDeleteTool,
@@ -19,7 +16,6 @@ def load_roster() -> tuple[type, ...]:
         FileReadTool,
         FileWriteTool,
         GlobTool,
-        MkdirTool,
         StrReplaceTool,
     )
     from agentcore.tools.builtin.git_ops import GitTool
@@ -41,14 +37,10 @@ def load_roster() -> tuple[type, ...]:
         FileListTool,
         GlobTool,
         FileDeleteTool,
-        MkdirTool,
         FileBatchTool,
         MdExportTool,
-        ArchiveTool,
         DownloadUrlTool,
         GrepTool,
-        DocsReadTool,
-        DocsWriteTool,
         GitTool,
         RunTool,
         # L3 团队浏览器：单一 ``browser``（GRANTABLE · action 政策表；CEO+worker）

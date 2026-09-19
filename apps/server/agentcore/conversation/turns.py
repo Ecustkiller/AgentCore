@@ -111,7 +111,7 @@ async def stream_chat(
             permission_axes = await resolve_permission_axes(session, conversation_id)
 
             # If this conversation is a table's dedicated thread, hand its table id
-            # to the pipeline so the CEO gets table_ops / table_read.
+            # to the pipeline so ``<表格>`` facts can render.
             table = await TableRepository(session).get_by_conversation_id(
                 conversation_id, user_id=user_id
             )

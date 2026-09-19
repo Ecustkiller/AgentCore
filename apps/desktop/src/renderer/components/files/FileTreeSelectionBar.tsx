@@ -21,7 +21,7 @@ export function FileTreeSelectionBar({
   onClear,
 }: {
   count: number;
-  /** 选区里能下载的项数（文件另存；文件夹整夹 zip）。 */
+  /** 选区里能下载的文件数（单文件另存；不含目录 zip）。 */
   downloadableCount: number;
   canDownload: boolean;
   canMutate: boolean;
@@ -42,7 +42,7 @@ export function FileTreeSelectionBar({
       </span>
       <div className="flex-1" />
       {canDownload && downloadableCount > 0 && (
-        <SimpleTooltip label="文件另存；文件夹下载为 zip">
+        <SimpleTooltip label="文件另存">
           <Button
             variant="ghost"
             disabled={busy}

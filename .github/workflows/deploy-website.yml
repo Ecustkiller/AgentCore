@@ -1,7 +1,7 @@
 name: Deploy Website
 
 # ⚠️ 已弃用自动触发 — 官网改由 Cursor Agent 本地 `pnpm -C apps/website deploy:pages` 部署。
-# 见 docs/05-平台与运维/部署与运维.md §二、.cursor/rules/cursor-deploy.mdc
+# 见 docs/05-平台与运维/部署拓扑与环境.md §二、.cursor/rules/cursor-deploy.mdc
 # 仅保留 workflow_dispatch 作紧急备用（需 Actions 配额可用）。
 
 on:

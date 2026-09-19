@@ -109,15 +109,6 @@ export function promptItemShelfCopy(
       accessory: [chip("官方")],
     };
   }
-  if (item.kind === "identity") {
-    return {
-      title: item.label,
-      subtitle,
-      description: "三套互斥身份，点开看全文",
-      tags: [],
-      accessory: [chip("官方")],
-    };
-  }
   if (item.kind === "skill") {
     return {
       title: item.label,

@@ -449,11 +449,10 @@ async def test_consult_degrades_on_unknown_name():
 
 
 async def test_consult_unknown_name_is_plain_soft_miss():
-    """Unknown name is a plain soft miss (no playbook special-case)."""
+    """Unknown name is a plain soft miss."""
     tool = _skill_consult()
     result = await tool.execute({"name": "no_such_handbook"}, _ctx())
     assert result.success
-    assert "delegate(playbook=" not in result.output
     assert "没有名为" in result.output
 
 
@@ -481,9 +480,10 @@ def test_skill_layer_keys_and_pointers():
 
     assert "target_folder_id" not in DELEGATE_DESCRIPTION
     assert "consult(delivery)" not in DELEGATE_DESCRIPTION
-    assert "create_folder" in desk
-    assert "mkdir" in desk
+    assert "create_folder" not in desk
+    assert "mkdir" not in desk
     assert "wait_for" in run
     assert "depends_on" in task_props
-    assert "playbook" in top_props
+    assert "playbook" not in top_props
+    assert "playbook_args" not in top_props
     assert "append_to_execution_id" in top_props

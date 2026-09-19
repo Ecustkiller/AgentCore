@@ -34,7 +34,7 @@ import { Loader2, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
-/** Human-readable line for each updater phase (发布与门禁.md §7.6). */
+/** Human-readable line for each updater phase (发布与门禁.md §1.6). */
 function updateStatusText(status: UpdaterStatus): string | undefined {
   switch (status.phase) {
     case "idle":

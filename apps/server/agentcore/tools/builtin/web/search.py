@@ -478,53 +478,21 @@ def _is_debate_run(run_id: str) -> bool:
     return (run_id or "").startswith("debate_")
 
 
-def _empty_result_note(
-    query: str, *, empty_streak: int = 0, web_fetch_retired: bool = False
-) -> str:
-    """Honest, actionable note when a live/cached search returned zero hits.
-
-    Does not rewrite the query or re-search — feedback only, at the failure site.
-    After consecutive empties, require an explicit strategy change (成篇质量定案).
-    When ``web_fetch`` is already retired, do not urge deep-read as the next move.
-    """
-    base = (
-        "本次搜索未返回任何结果。可能是查询过于具体/生僻，或搜索引擎暂时受限"
-        "（如被限流）。不要据此断定该信息不存在。"
-    )
+def _empty_result_note(query: str) -> str:
+    """Honest miss note: empty SERP ≠ 信息不存在. Split tip only when the query is verbose."""
+    base = "本次搜索未返回任何结果。不要据此断定该信息不存在。"
     if _query_word_count(query) > _VERBOSE_QUERY_WORD_THRESHOLD:
         tip = (
             "当前查询词明显过多——建议拆分：一次只搜 2–3 个核心词，"
             "其余概念留到下一轮再搜。"
         )
     else:
-        tip = "建议换用更通用或同义的关键词重试，或改用其他信息来源。"
-    streak_tip = ""
-    if empty_streak >= 2:
-        if web_fetch_retired:
-            streak_tip = (
-                f"【须换策略】已连续 {empty_streak} 次空结果："
-                "禁止沿用同一空转 query 再搜；基于已有材料收口写作，"
-                "勿再催 web_fetch（已停用）或把继续检索当默认出路。"
-            )
-        else:
-            streak_tip = (
-                f"【须换策略】已连续 {empty_streak} 次空结果："
-                "禁止沿用同一空转 query 再搜；必须改写关键词/缩短专名、"
-                "换权威来源类型，或先对已有命中 web_fetch 深读后再搜。"
-            )
-    return f"{base}{tip}{streak_tip}"
-
-
-def _hit_read_nudge() -> str:
-    """Soft tip after non-empty SERP: prefer deep-read before another search."""
-    return (
-        "【少搜多读】已有命中：优先对相关链接 web_fetch 深读核对后再开新搜，"
-        "勿把预算耗在重复空转检索上。"
-    )
+        tip = "建议换用更通用或同义的关键词重试。"
+    return f"{base}{tip}"
 
 
 def _strategy_change_note(*, empty_streak: int, web_fetch_retired: bool) -> str:
-    """Consecutive empty/weak injection: strategy change (no web_fetch when retired)."""
+    """Consecutive empty/weak injection: one owner for 须换策略 (no web_fetch when retired)."""
     if web_fetch_retired:
         return (
             f"【须换策略】已连续 {empty_streak} 次无效/空检索："
@@ -535,7 +503,6 @@ def _strategy_change_note(*, empty_streak: int, web_fetch_retired: bool) -> str:
         f"【须换策略】已连续 {empty_streak} 次无效/空检索："
         "禁止沿用同一空转 query；须改写关键词或先 web_fetch 深读已有材料。"
     )
-
 
 
 class WebSearchTool:
@@ -553,7 +520,7 @@ class WebSearchTool:
             name="web_search",
             description=(
                 "缺窗口里没有的公网事实（版本、出处、是否存在）才搜。"
-                "摘要优先；核对原文用 web_fetch。"
+                "摘要优先。"
             ),
             parameters={
                 "type": "object",
@@ -941,12 +908,6 @@ class WebSearchTool:
             )
             if rel_note:
                 notes.append(rel_note)
-            if empty_streak >= 2:
-                notes.append(
-                    _strategy_change_note(
-                        empty_streak=empty_streak, web_fetch_retired=web_fetch_retired
-                    )
-                )
         elif not items:
             if filtered.dropped:
                 # Backend returned hits but all were filtered (e.g. debate_evidence deny).
@@ -956,23 +917,10 @@ class WebSearchTool:
                     uniformly_weak=False,
                     evidence_gap=filtered.evidence_gap,
                 )
-                notes.append(
-                    rel_note
-                    or _empty_result_note(
-                        query,
-                        empty_streak=empty_streak,
-                        web_fetch_retired=web_fetch_retired,
-                    )
-                )
+                notes.append(rel_note or _empty_result_note(query))
             else:
                 # Honesty (D5): genuine empty SERP (HTTP 200, zero hits).
-                notes.append(
-                    _empty_result_note(
-                        query,
-                        empty_streak=empty_streak,
-                        web_fetch_retired=web_fetch_retired,
-                    )
-                )
+                notes.append(_empty_result_note(query))
         else:
             rel_note = relevance_note(
                 dropped=filtered.dropped,
@@ -986,8 +934,12 @@ class WebSearchTool:
                 close_hint = consume_post_read_retire_search_hint(run_id or "")
                 if close_hint:
                     notes.append(close_hint)
-            else:
-                notes.append(_hit_read_nudge())
+        if is_empty_injection and empty_streak >= 2:
+            notes.append(
+                _strategy_change_note(
+                    empty_streak=empty_streak, web_fetch_retired=web_fetch_retired
+                )
+            )
         if notes:
             payload["note"] = "".join(notes)
         if dropped_hosts:

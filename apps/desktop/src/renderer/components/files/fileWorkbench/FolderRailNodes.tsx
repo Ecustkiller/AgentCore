@@ -3,7 +3,7 @@ import { WorkspaceSection } from "@/components/files/fileWorkbench/WorkspaceSect
 import type { Tab } from "@/components/files/fileWorkbench/storage";
 import type { FileSource } from "@/lib/fileSource";
 import { type FolderTreeNode, childFolderNames } from "@/lib/folderTree";
-import { type FolderMeta, isFolderOwner } from "@/services/folders";
+import type { FolderMeta } from "@/services/folders";
 import type { WorkspaceInfo } from "@/services/workspaces";
 import type { ReactNode } from "react";
 
@@ -20,8 +20,6 @@ export interface FolderRailHost {
   /** 树内兄弟排序（名称 / 大小 / 修改时间），中枢顶栏统一选、所有根共用。 */
   sortBy: FileSortBy;
   offline: boolean;
-  /** 在此新建文件夹 — a real nested folder, not a bare `mkdir`. */
-  onCreateSubfolder: (parent: FolderMeta) => void;
   /** Per-folder entries inside ``.agentcore``, when the host shows conventions. */
   renderWorkroomLead?: (folder: FolderMeta, indent: number) => ReactNode;
   /**
@@ -60,11 +58,6 @@ export function FolderRailRow({
       depth={node?.depth ?? 0}
       showLocationBadge={false}
       hideRootDirs={node ? childFolderNames(node) : undefined}
-      onCreateSubfolder={
-        folder.mode === "cloud" && isFolderOwner(folder)
-          ? () => host.onCreateSubfolder(folder)
-          : undefined
-      }
       source={host.sourceByWs.get(wsId) ?? null}
       offlineCloud={host.offline && ws.location === "cloud"}
       activePath={host.activeTab?.wsId === wsId ? host.activeTab.path : null}

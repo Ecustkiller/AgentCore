@@ -109,6 +109,8 @@ apps/server/tmp/
 /.cursor-tmp-*
 # Local scratch dump dir at repo root only (leading slash; not apps/**/.tmp)
 /.tmp/
+# Investigation packs / local review dumps at repo root (not /tmp_* prefix)
+/tmp/
 apps/server/_tmp_*
 apps/server/tmp_*
 # One-off review / audit scratch (maintainer-local; not published)

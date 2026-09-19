@@ -17,8 +17,8 @@ from .policy import (
     _GIT_NETWORK_TIMEOUT,
     _GITHUB_API_TIMEOUT,
     _PROTECTED_BRANCHES,
+    GIT_REMOTE,
     _ref_token_error,
-    _remote_name_error,
 )
 from .results import _error, _git_failure, _ok
 from .spawn import _cloud_network_extra_env, _current_branch, _resolve_pr_token
@@ -169,14 +169,7 @@ async def cmd_push(
             start,
         )
 
-    remote = str(arguments.get("remote") or "origin").strip() or "origin"
-    remote_err = _remote_name_error(remote, start)
-    if remote_err is not None:
-        return remote_err
-    if remote in {"-f", "--force", "--force-with-lease"}:
-        return _error("禁止 force push", start)
-
-    set_upstream = bool(arguments.get("set_upstream", False))
+    remote = GIT_REMOTE
 
     branch = await _current_branch(cwd)
     if not branch:
@@ -208,11 +201,8 @@ async def cmd_push(
             start,
         )
 
-    args = ["push"]
-    if set_upstream:
-        args.append("--set-upstream")
     # Remote name + current branch only — never a src:dst refspec.
-    args.extend([remote, branch])
+    args = ["push", "--set-upstream", remote, branch]
     # Network-bound; the engine outer budgets this via _GIT_NETWORK_TIMEOUT.
     extra = await _cloud_network_extra_env(context)
     stdout, stderr, code = await spawn_mod._run_git(
@@ -226,9 +216,7 @@ async def cmd_push(
         # Auth / network failures surface honestly (GIT_TERMINAL_PROMPT=0).
         return await _git_failure(stdout, stderr, code, start, metadata=meta)
     detail = (stdout or stderr).strip()
-    action = f"已推送 {branch} → {remote}"
-    if set_upstream:
-        action += "（已设置上游）"
+    action = f"已推送 {branch} → {remote}（已设置上游）"
     output = action if not detail else f"{action}\n{detail}"
     return _ok(output, start, metadata={**meta, "remote": remote, "branch": branch})
 
@@ -260,10 +248,7 @@ async def cmd_pull(
             start,
         )
 
-    remote = str(arguments.get("remote") or "origin").strip() or "origin"
-    remote_err = _remote_name_error(remote, start)
-    if remote_err is not None:
-        return remote_err
+    remote = GIT_REMOTE
 
     remotes_out, remotes_err, remotes_code = await spawn_mod._run_git(["remote"], cwd=cwd)
     if remotes_code != 0:
@@ -323,10 +308,7 @@ async def cmd_create_pr(
     if not title:
         return _error("create_pr 需要 title 参数", start)
     body = str(arguments.get("body") or "")
-    remote = str(arguments.get("remote") or "origin").strip() or "origin"
-    remote_err = _remote_name_error(remote, start)
-    if remote_err is not None:
-        return remote_err
+    remote = GIT_REMOTE
 
     remotes_out, remotes_err, remotes_code = await spawn_mod._run_git(["remote"], cwd=cwd)
     if remotes_code != 0:
@@ -364,9 +346,7 @@ async def cmd_create_pr(
             metadata={**meta, "code": "not_github"},
         )
 
-    head = str(arguments.get("head") or "").strip()
-    if not head:
-        head = await _current_branch(cwd)
+    head = await _current_branch(cwd)
     if not head:
         return _error("无法确定当前分支（head），拒绝 create_pr", start)
     head_err = _ref_token_error(head, label="create_pr head", start=start)

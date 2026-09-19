@@ -630,6 +630,19 @@ describe("TurnComposer variants", () => {
     expect(screen.queryByRole("button", { name: "停止生成" })).toBeNull();
   });
 
+  it("stopping after freeze (not generating): still 停止中…, no 发送", () => {
+    genMock.value = false;
+    useConversationStore.setState({
+      byId: {
+        [DRAFT_KEY]: { ...EMPTY_RUNTIME, turnPhase: "stopping" },
+      },
+    });
+    renderComposer("bar");
+    expect(screen.getByRole("button", { name: "停止中…" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "发送" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "停止生成" })).toBeNull();
+  });
+
   it("stopping + draft: 排队/插队 remain; stop button is 停止中…", async () => {
     genMock.value = true;
     useConversationStore.setState({
@@ -646,7 +659,7 @@ describe("TurnComposer variants", () => {
     expect(screen.queryByRole("button", { name: "停止生成" })).toBeNull();
   });
 
-  it("stop HTTP rollback: stopping UI returns to 停止生成", () => {
+  it("streaming while generating: stop button is 停止生成 (not 停止中…)", () => {
     genMock.value = true;
     useConversationStore.setState({
       byId: {
@@ -828,6 +841,22 @@ describe("TurnComposer variants", () => {
     expect(screen.queryByRole("button", { name: "发送" })).toBeNull();
     expect(screen.queryByRole("button", { name: "出结论" })).toBeNull();
     expect(screen.getByRole("button", { name: "停止生成" })).toBeTruthy();
+  });
+
+  it("live debate + stopping after freeze: still 停止中…, no 发送", () => {
+    genMock.value = false;
+    seedLiveDebate();
+    useConversationStore.setState({
+      byId: {
+        [OUTCOME_CID]: {
+          ...useConversationStore.getState().byId[OUTCOME_CID],
+          turnPhase: "stopping",
+        },
+      },
+    });
+    renderComposer("bar");
+    expect(screen.getByRole("button", { name: "停止中…" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "发送" })).toBeNull();
   });
 
   it("live debate: hides @ 入口 (card 常显 and bar ＋菜单)", () => {

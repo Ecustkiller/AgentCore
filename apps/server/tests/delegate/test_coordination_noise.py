@@ -368,13 +368,11 @@ def test_coordination_tool_schemas_are_short_triggers():
     assert "无需处置" in wait_desc
     assert "可静默" in wait_desc
     assert "请示" in wait_desc
-    assert "delegate" in wait_desc
     assert "假装推进" not in wait_desc
     assert "同构再派" not in wait_desc
 
     cancel = CancelWorkerTool().schema
     assert "终止" in cancel.description
-    assert "delegate" in cancel.description
     run_id = cancel.parameters["properties"]["run_id"]["description"]
     assert "完整 run_id" in run_id
     assert "同时匹配" not in run_id

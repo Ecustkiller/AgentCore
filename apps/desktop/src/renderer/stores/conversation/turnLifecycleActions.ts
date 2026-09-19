@@ -2,7 +2,7 @@ import { hasActiveRunningWorkers } from "@/components/graph/helpers";
 import { discardAllPendingChunks } from "@/services/sse/contentBuffer";
 import { flushPendingFrames } from "@/services/sse/execFrameBuffer";
 import { stopConversation } from "@/services/stopTurn";
-import { armStopHydrateWatchdog } from "@/services/turns/stopHydrate";
+import { commitLocalUserStop } from "@/services/turns/helpers";
 import {
   execRuntime,
   projectExecution,
@@ -97,8 +97,8 @@ export function createTurnLifecycleActions(
       const key = conversationId ?? DRAFT_KEY;
       const phase = activeRuntime(get()).turnPhase;
 
-      // GAP A：CEO 已收口（terminal）但 execution 仍可停（含 detached）→ 仅硬取消，
-      // 不进入 stopping 等第二次 message_end（会死等）。UI 靠后续 run/execution 帧收口。
+      // GAP A：CEO 已收口（terminal）但 execution 仍可停（含 detached）→ 冻图 +
+      // 硬取消，不进入 stopping 等第二次 message_end。
       if (isTerminalPhase(phase)) {
         if (
           !conversationId ||
@@ -106,6 +106,7 @@ export function createTurnLifecycleActions(
         ) {
           return;
         }
+        commitLocalUserStop(conversationId);
         void stopConversation(conversationId).catch(() => {
           get().setError(
             "停止请求失败，引擎可能仍在运行",
@@ -126,25 +127,23 @@ export function createTurnLifecycleActions(
         useExecutionStore.getState().setCoordinationWait(null, waitMid);
       }
 
-      // 诚实过渡：落盘已缓冲的 run_*，丢弃正文缓冲；保持 SSE 不断（不 abort），
-      // 也不本地伪造 cancelled / finalize——等后端 message_end 定格。
+      // 点击即定格：冻图 + 盖 cancelled + 关生成锁。保持 SSE 不断（不 abort），
+      // 迟到 run_* 仍入折对账；RPC 失败不得把图打回 running。
       discardAllPendingChunks(key);
       flushPendingFrames(key);
       clearInteractionPrompts(key);
+      commitLocalUserStop(conversationId ?? key);
 
       if (!conversationId) return;
       void stopConversation(conversationId)
         .then(() => {
           if (get().byId[key]?.turnPhase === "stopping") {
             get().clearError(conversationId);
-            armStopHydrateWatchdog(conversationId);
           }
         })
         .catch(() => {
           const rt = get().byId[key] ?? EMPTY_RUNTIME;
           if (rt.turnPhase !== "stopping") return;
-          // 回滚过渡态，允许用户继续看流并再点停止。
-          get().setTurnPhase("streaming", conversationId);
           get().setError(
             "停止请求失败，引擎可能仍在运行",
             () => get().stopGeneration(),

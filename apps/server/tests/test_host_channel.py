@@ -24,8 +24,6 @@ from agentcore.tools.builtin import (
 )
 from agentcore.tools.builtin.host import (
     HostTool,
-    clamp_package_timeout,
-    clamp_shell_timeout,
     host_call_requires_approval,
     host_tool_timeout_seconds,
     normalize_os_log_args,
@@ -120,16 +118,27 @@ async def test_host_status_fanout_all_facets():
 
 
 @pytest.mark.asyncio
-async def test_host_status_facets_subset():
+async def test_host_status_ignores_leftover_facets():
     channel = MagicMock()
-    channel.request_host = AsyncMock(return_value={"platform": "win32", "hostname": "DESKTOP-1"})
+
+    async def _reply(op, args, timeout=None):
+        return {"op": op.value, "ok": True}
+
+    channel.request_host = AsyncMock(side_effect=_reply)
     result = await HostTool().execute(
         {"action": "status", "facets": ["info"]},
         _ctx(channel=channel),
     )
     assert result.success
-    assert "DESKTOP-1" in result.output
-    channel.request_host.assert_awaited_once_with(HostOp.INFO, {}, timeout=20.0)
+    ops = [c.args[0] for c in channel.request_host.await_args_list]
+    assert ops == [
+        HostOp.INFO,
+        HostOp.AUDIO_DEVICES,
+        HostOp.STORAGE,
+        HostOp.POWER,
+        HostOp.NETWORK_SUMMARY,
+        HostOp.APPS,
+    ]
 
 
 @pytest.mark.asyncio
@@ -297,7 +306,7 @@ async def test_host_os_log_via_channel():
         {
             "source": "App",
             "level": "error",
-            "minutes": 30,
+            "minutes": 60,
             "max_entries": 40,
             "max_bytes": 24_000,
         },
@@ -326,14 +335,14 @@ async def test_host_os_log_truncated_note_teaches_narrowing():
     assert "max_entries" not in payload
     assert "max_bytes" not in payload
     assert "os_event_log_bounded_summary" not in payload["note"]
-    assert "收窄来源、级别或时间窗" in payload["note"]
+    assert "收窄来源或级别" in payload["note"]
 
 
-def test_normalize_os_log_args_clamps():
+def test_normalize_os_log_args_ignores_leftover_minutes():
     out = normalize_os_log_args(
         {"minutes": 99999, "max_entries": 999, "max_bytes": 9_999_999, "level": "nope"}
     )
-    assert out["minutes"] == 1440
+    assert out["minutes"] == 60
     assert out["max_entries"] == 40
     assert out["max_bytes"] == 24_000
     assert out["level"] == "warning"
@@ -391,10 +400,6 @@ def test_shell_fuse_and_timeout_helpers():
     assert shell_cmd_env_blocks("Get-ChildItem $env:APPDATA") is None
     assert shell_cmd_env_blocks("dir %APPDATA%\\Cursor\\logs")
     assert shell_cmd_env_blocks("echo %LOCALAPPDATA%")
-    assert clamp_shell_timeout(None) == 60
-    assert clamp_shell_timeout(999) == 120
-    assert clamp_shell_timeout(0) == 1
-    assert clamp_shell_timeout("45") == 45
 
 
 @pytest.mark.asyncio
@@ -427,8 +432,8 @@ async def test_host_shell_forwards_with_timeout():
     call = channel.request_host.await_args
     assert call.args[0] is HostOp.SHELL
     assert call.args[1]["command"] == "echo ok"
-    assert call.args[1]["timeout_seconds"] == 15
-    assert call.kwargs["timeout"] == 30.0  # 15 + 15 slack
+    assert call.args[1]["timeout_seconds"] == 60
+    assert call.kwargs["timeout"] == 75.0
     assert call.args[1]["conversation_id"] == ""
     assert "cwd" not in call.args[1]
 
@@ -504,18 +509,21 @@ def test_host_dynamic_timeout_aligns_today_tiers():
     assert "device_id" not in schema.parameters["properties"]
     assert "max_entries" not in schema.parameters["properties"]
     assert "max_bytes" not in schema.parameters["properties"]
+    assert "facets" not in schema.parameters["properties"]
+    assert "timeout_seconds" not in schema.parameters["properties"]
+    assert "minutes" not in schema.parameters["properties"]
     assert host_tool_timeout_seconds({"action": "status"}) == 45.0
-    assert host_tool_timeout_seconds({"action": "status", "facets": ["info"]}) == 20.0
+    assert host_tool_timeout_seconds({"action": "status", "facets": ["info"]}) == 45.0
     assert host_tool_timeout_seconds({"action": "os_log"}) == 45.0
     assert host_tool_timeout_seconds({"action": "open_settings"}) == 30.0
     assert host_tool_timeout_seconds({"action": "set_audio"}) == 45.0
     assert host_tool_timeout_seconds({"action": "restart_service"}) == 60.0
     assert host_tool_timeout_seconds({"action": "shell"}) == 75.0
-    assert host_tool_timeout_seconds({"action": "shell", "timeout_seconds": 120}) == 135.0
+    assert host_tool_timeout_seconds({"action": "shell", "timeout_seconds": 120}) == 75.0
     assert host_tool_timeout_seconds({"action": "install_package"}) == 630.0
     assert (
         host_tool_timeout_seconds({"action": "install_package", "timeout_seconds": 900})
-        == 930.0
+        == 630.0
     )
     assert resolve_tool_timeout(schema, {"action": "install_package"}) == 630.0
     assert resolve_tool_timeout(schema, {"action": "shell"}) == 75.0
@@ -672,8 +680,8 @@ async def test_host_package_install_forwards_winget():
     assert call.args[0] is HostOp.PACKAGE_INSTALL
     assert call.args[1]["manager"] == "winget"
     assert call.args[1]["package_id"] == "Microsoft.VisualStudioCode"
-    assert call.args[1]["timeout_seconds"] == 120
-    assert call.kwargs["timeout"] == 150.0  # 120 + 30 slack
+    assert call.args[1]["timeout_seconds"] == 600
+    assert call.kwargs["timeout"] == 630.0
 
 
 @pytest.mark.asyncio
@@ -711,9 +719,6 @@ def test_shell_silent_install_and_package_helpers():
     assert validate_package_install_args(
         manager="apt", package_id="docker.io", cask=True
     )
-    assert clamp_package_timeout(None) == 600
-    assert clamp_package_timeout(30) == 60
-    assert clamp_package_timeout(9999) == 900
 
 
 def test_host_absent_without_desktop_online():

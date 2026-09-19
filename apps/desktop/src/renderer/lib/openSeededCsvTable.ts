@@ -2,7 +2,6 @@ import {
   conversationIdOf,
   folderIdOf,
 } from "@/components/files/fileWorkbench/storage";
-import { appNavigate } from "@/lib/appNavigate";
 import { isWebPreview } from "@/lib/preview";
 import { lookupTableBySource } from "@/services/tables";
 
@@ -65,14 +64,10 @@ export async function lookupSeededCsvTableId(
   }
 }
 
+/** Unloaded table surface: csv always opens as a file. Never navigates to `/tables`. */
 export async function tryNavigateSeededCsv(
-  opts: SeededCsvDesk,
-  go?: (to: string) => void,
+  _opts: SeededCsvDesk,
+  _go?: (to: string) => void,
 ): Promise<boolean> {
-  const id = await lookupSeededCsvTableId(opts);
-  if (!id) return false;
-  const to = `/tables/${id}`;
-  if (go) go(to);
-  else appNavigate(to);
-  return true;
+  return false;
 }

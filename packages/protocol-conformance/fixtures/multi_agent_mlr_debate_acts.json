@@ -23,10 +23,39 @@
         "tool_call_id": "dc1",
         "tool_name": "delegate",
         "arguments": {
-          "playbook": "lens_crosscheck",
-          "playbook_args": {
-            "topic": "品牌是否应立即终止争议代言联名"
-          },
+          "tasks": [
+            {
+              "id": "lens_0",
+              "role": "法律视角",
+              "task": "梳理解约条款"
+            },
+            {
+              "id": "lens_1",
+              "role": "品牌商业视角",
+              "task": "评估营收冲击"
+            },
+            {
+              "id": "lens_2",
+              "role": "舆情公关视角",
+              "task": "盘点声量窗口"
+            },
+            {
+              "id": "lens_3",
+              "role": "文化社会视角",
+              "task": "分析圈层冲突"
+            },
+            {
+              "id": "synthesizer",
+              "role": "汇总分析师",
+              "task": "交叉验证综述 · 品牌是否应立即终止争议代言联名",
+              "depends_on": [
+                "lens_0",
+                "lens_1",
+                "lens_2",
+                "lens_3"
+              ]
+            }
+          ],
           "coordinate": false
         }
       },

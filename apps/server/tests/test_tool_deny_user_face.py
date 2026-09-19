@@ -52,6 +52,7 @@ DENY_FACE_CODES = (
     "timeout",
     "retrieval_budget_exhausted",
     "landed_status_name",
+    "circuit_tool_disabled",
     ErrorCode.TOOL_NOT_FOUND,
 )
 
@@ -151,10 +152,10 @@ async def test_every_deny_code_has_curated_user_copy():
 
 async def test_user_denied_approval_is_not_answered_with_an_order():
     """User clicks 拒绝 → the model is told to stop; the user is not ordered around."""
-    tool = _Stub("delete_folder", approval=ToolApproval.GRANTABLE)
+    tool = _Stub("file_write", approval=ToolApproval.GRANTABLE)
     sink = EventSink()
     _messages, _terminal, attempts = await execute_tools(
-        [_call("c1", "delete_folder")],
+        [_call("c1", "file_write")],
         _registry(tool),
         _ctx(),
         sink,
@@ -166,7 +167,7 @@ async def test_user_denied_approval_is_not_answered_with_an_order():
     assert attempts[0].policy_failure is True
     model, user = _faces(sink)
     assert model == (
-        "工具 'delete_folder' 未获用户授权，该操作未执行。"
+        "工具 'file_write' 未获用户授权，该操作未执行。"
         "请改用其他方案或询问如何继续，不要再调用此工具。"
     )
     assert_user_face_clean(user)
@@ -198,11 +199,11 @@ async def test_grantable_without_gate_does_not_promise_a_missing_screen():
 
 
 async def test_always_confirm_without_gate_does_not_promise_a_missing_screen():
-    """恒确认 (delete_folder) with nobody to ask — same split, same curated sentence."""
-    tool = _Stub("delete_folder")
+    """恒确认 (git push) with nobody to ask — same split, same curated sentence."""
+    tool = _Stub("git")
     sink = EventSink()
     await execute_tools(
-        [_call("c1", "delete_folder", '{"folder_id":"f1"}')],
+        [_call("c1", "git", '{"subcommand":"push"}')],
         _registry(tool),
         _ctx(),
         sink,
@@ -213,7 +214,7 @@ async def test_always_confirm_without_gate_does_not_promise_a_missing_screen():
     assert tool.executed is False
     model, user = _faces(sink)
     assert model == (
-        "工具 'delete_folder' 必须由用户逐次确认，但当前路径弹不出确认卡，已拒绝执行。"
+        "工具 'git' 必须由用户逐次确认，但当前路径弹不出确认卡，已拒绝执行。"
         "请改用其他方案，或让用户在可确认的界面重试。"
     )
     assert_user_face_clean(user)
@@ -293,6 +294,49 @@ async def test_run_allowlist_deny_keeps_engine_words_off_the_user_face():
     )
     assert_user_face_clean(user)
     assert user == _CURATED_BY_CODE["allowlist_deny"]
+
+
+async def test_circuit_tool_disabled_keeps_engine_words_off_the_user_face():
+    """Table stays; execute-deny steers the model, user hears the tool stopped."""
+    tool = _Stub("flaky")
+    sink = EventSink()
+    await execute_tools(
+        [_call("c1", "flaky")],
+        _registry(tool),
+        _ctx(),
+        sink,
+        approval_gate=None,
+        run_id="r1",
+        disabled_tools={"flaky"},
+    )
+
+    assert tool.executed is False
+    model, user = _faces(sink)
+    assert "已因连续失败停用" in model
+    assert_user_face_clean(user)
+    assert user == _CURATED_BY_CODE["circuit_tool_disabled"]
+
+
+async def test_web_fetch_retired_execute_deny_keeps_steer_off_the_user_face():
+    from agentcore.tools.builtin.web._net import WEB_FETCH_RETIRE_STEER
+
+    tool = _Stub("web_fetch")
+    sink = EventSink()
+    await execute_tools(
+        [_call("c1", "web_fetch")],
+        _registry(tool),
+        _ctx(),
+        sink,
+        approval_gate=None,
+        run_id="r1",
+        disabled_tools={"web_fetch", "web_search"},
+    )
+
+    assert tool.executed is False
+    model, user = _faces(sink)
+    assert model == WEB_FETCH_RETIRE_STEER
+    assert_user_face_clean(user)
+    assert user == _CURATED_BY_CODE["web_fetch_retired"]
 
 
 async def test_retrieval_budget_exhausted_keeps_ledger_talk_off_the_user_face():

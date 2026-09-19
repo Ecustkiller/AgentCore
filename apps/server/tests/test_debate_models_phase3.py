@@ -525,7 +525,9 @@ def test_skill_teaches_catalog_ref_not_mvp_empty():
     assert "路由键" in model_desc
     assert "cross_model" in DEBATE_PARAMETERS["properties"]
     assert "moderator_model" in DEBATE_PARAMETERS["properties"]
-    assert "可与辩手同模" in DEBATE_PARAMETERS["properties"]["moderator_model"]["description"]
+    moderator_desc = DEBATE_PARAMETERS["properties"]["moderator_model"]["description"]
+    assert "sides[].model" in moderator_desc
+    assert "@platform" not in moderator_desc
 
 
 def test_schema_exposes_moderator_model():

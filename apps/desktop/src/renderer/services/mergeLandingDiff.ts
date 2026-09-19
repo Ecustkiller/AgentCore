@@ -46,7 +46,7 @@ export async function prepareMergeLandingDiff(
   const blob = await res.blob();
   if (blob.size > MERGE_LANDING_ARCHIVE_MAX_BYTES) {
     throw new Error(
-      `云端快照约 ${Math.round(blob.size / (1024 * 1024))}MB，超过合回 Diff 上限（${Math.round(MERGE_LANDING_ARCHIVE_MAX_BYTES / (1024 * 1024))}MB）。请改用「导出 ZIP」或缩小工作区后再试。`,
+      `云端快照约 ${Math.round(blob.size / (1024 * 1024))}MB，超过合回 Diff 上限（${Math.round(MERGE_LANDING_ARCHIVE_MAX_BYTES / (1024 * 1024))}MB）。请缩小工作区后再试。`,
     );
   }
 

@@ -187,21 +187,21 @@ export function useFileTreeBatch(opts: {
     })();
   }, [confirm, source, reloadDirs, clear, report]);
 
-  const downloadableCount = source.download ? topLevel.length : 0;
+  const downloadableCount = source.download
+    ? topLevel.filter((i) => !i.isDir).length
+    : 0;
 
   const runDownload = useCallback(() => {
     const download = source.download;
     if (!download) return;
-    if (topLevel.length === 0) return;
+    const files = topLevel.filter((i) => !i.isDir);
+    if (files.length === 0) return;
     void (async () => {
       setBusy(true);
       const outcome = await runBatch(
-        topLevel.map((i) => i.path),
-        (path) => {
-          const item = topLevel.find((i) => i.path === path);
-          const isDir = item?.isDir ?? false;
-          return download(path, downloadSaveName(path, isDir), { isDir });
-        },
+        files.map((i) => i.path),
+        (path) =>
+          download(path, downloadSaveName(path, false), { isDir: false }),
       );
       setBusy(false);
       report("下载", outcome);

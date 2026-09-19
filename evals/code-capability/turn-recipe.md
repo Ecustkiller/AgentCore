@@ -1,6 +1,6 @@
 # 可复现 turn 调用配方（事实）
 
-> 只记录仓库现状用法；不改产品契约。权威背景：[本地开发](../../docs/02-架构/本地开发.md)、[双模式工作区 §十 sidecar](../../docs/02-架构/双模式工作区.md)、[认证与会话](../../docs/05-平台与运维/认证与会话.md)。
+> 只记录仓库现状用法；不改产品契约。权威背景：[本地开发](../../docs/02-架构/本地开发.md)、[工作区 §七 sidecar](../../docs/02-架构/工作区.md)、[认证与会话](../../docs/05-平台与运维/认证与会话.md)。
 
 ## 0. 公共前置
 
@@ -94,7 +94,7 @@ pnpm dev
    - **本地项目 Folder**：创建项目 `mode=local`，选择已授权根
 3. 桌面主进程把根记入 userData `fs-roots.json`（`id` + `absPath`）；sidecar 以解析后的 **绝对工作区路径** 为 `workspaceRoot` 跑同一 `run_chat_pipeline`。
 
-路由事实（[双模式工作区 §十](../../docs/02-架构/双模式工作区.md)）：
+路由事实（[工作区 §七](../../docs/02-架构/工作区.md)）：
 
 - **绑本机本地文件夹**的对话默认走 sidecar；裸聊未绑 / 云项目 / 带附件仍走云。
 - sidecar 通道：主进程 spawn `python -m agentcore.sidecar`，stdio **JSON-RPC**（`initialize` / `startTurn` / `respond` / `resume` / `cancel`…）；事件经 `turn/event` 桥回，复用同一套 `dispatchSSEEvent`。
@@ -115,7 +115,7 @@ pnpm dev
 - 磁盘：直接在试件目录看文件 / 跑 `GOLDEN.md` 命令。
 - 产物卡「查看改动」：本地走 sidecar `turnFilesDiff`；云走 `GET …/files/diff`（见 `apps/desktop/src/renderer/services/turnFilesDiff.ts`）。
 - 回退到回合基线（若有基线按钮）：确认后本机 unzip / 云 `restore_snapshot`——**S4 建议用工作区副本**，避免毁掉其它并行场景的盘。
-- 失败复盘：同一套 `conversation_id` / `trace_id` + `logs/dev.jsonl`；本地 outbox 回写见双模式工作区 §10.3。
+- 失败复盘：同一套 `conversation_id` / `trace_id` + `logs/dev.jsonl`；本地 outbox 回写见工作区 §七。
 
 ---
 

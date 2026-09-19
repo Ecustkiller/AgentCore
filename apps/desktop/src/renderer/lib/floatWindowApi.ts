@@ -1,5 +1,5 @@
 /**
- * Preload bridge for方案 C 真 OS 浮窗（UX §十）.
+ * Preload bridge for方案 C 真 OS 浮窗（UX §四）.
  *
  * Web / 单测无 preload → helpers no-op；桌面以 `floatWindowApi` 可用性为真窗门控。
  */

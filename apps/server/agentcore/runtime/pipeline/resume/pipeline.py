@@ -30,7 +30,11 @@ from agentcore.runtime.pipeline.resume.rehydrate import (
     bootstrap_resume_display,
     mark_controller_after_settle,
 )
-from agentcore.runtime.pipeline.resume.wire import restamp_workspace_facts, wire_resume_turn
+from agentcore.runtime.pipeline.resume.wire import (
+    append_workspace_restamp_envelope,
+    restamp_workspace_facts,
+    wire_resume_turn,
+)
 from agentcore.runtime.pipeline.settle import (
     salvage_failed_captain,
     salvage_pipeline_exception,
@@ -302,9 +306,6 @@ async def resume_chat_pipeline(
             dict(getattr(suspension, "consulted_memory", None) or {})
         )
         seeded = seed_consult_cache_from_window(messages)
-        from agentcore.tools.on_demand import offer_tools_from_window
-
-        offer_tools_from_window(wired.chat_tools, messages)
         if seeded or get_consult_cache():
             logger.info(
                 "consult.cache_seeded",
@@ -390,6 +391,9 @@ async def resume_chat_pipeline(
             supports_tools=llm_supports_tools,
             controller_seed=controller_seed,
             turn_evidence_ledger=turn_evidence_ledger.get(),
+        )
+        append_workspace_restamp_envelope(
+            messages, getattr(wired, "workspace_restamp_envelope", "") or ""
         )
         captain_state = await run_captain(captain_spec, messages)
 

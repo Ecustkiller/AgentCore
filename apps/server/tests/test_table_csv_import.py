@@ -157,7 +157,7 @@ async def test_ingest_products_skips_attachments_and_binds_single_csv(monkeypatc
             FileProduct(path="data.csv", kind="csv"),
         ],
     )
-    note = await ingest_landed_csv_products(result, ctx, offer_tools=False)
+    note = await ingest_landed_csv_products(result, ctx)
     assert seen == ["data.csv"]
     assert note == "ok:data.csv"
     assert ctx.table_id == "t1"

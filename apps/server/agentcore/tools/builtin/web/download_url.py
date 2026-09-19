@@ -151,7 +151,6 @@ class DownloadUrlTool:
                 "把 HTTP(S) URL 的原始字节下载到工作区相对路径。"
                 f"大小上限约 {max_mib} MiB（≠ file_read 读闸）。"
                 "安装包可落盘、本工具不执行。"
-                "网页正文用 web_fetch；已有 zip 解压用 archive。"
             ),
             parameters={
                 "type": "object",

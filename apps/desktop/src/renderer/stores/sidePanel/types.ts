@@ -1,5 +1,5 @@
 /**
- * Unified conversation side panel types & constants (前端UX设计.md §十).
+ * Unified conversation side panel types & constants (前端UX设计.md §四).
  * ONE flat tab strip (方案 B · 图1式):
  *
  *  - 「工作区」(first)：不可销毁、可 detach 为应用内浮窗；
@@ -32,7 +32,7 @@ export const DEFAULT_WIDTH = 400;
 
 /** Cap on closable content tabs: opening beyond the limit drops the oldest (fixed tabs exempt). */
 export const MAX_TABS = 12;
-/** Cap on simultaneous in-app floats (前端UX设计.md §十); reject further float until dock/close. */
+/** Cap on simultaneous in-app floats (前端UX设计.md §四); reject further float until dock/close. */
 export const MAX_FLOATS = 8;
 
 export const OPEN_KEY = "side-panel-open";
@@ -96,7 +96,7 @@ export function browserDismissKey(conversationId: string | null): string {
 
 /**
  * A run-detail tab — one per revision chain (tab id = chain root) or standalone
- * run. Clicking an inline graph node pins that run here (前端UX设计.md §十);
+ * run. Clicking an inline graph node pins that run here (前端UX设计.md §四);
  * switching rounds/chips updates `runId` in place without a new tab. Scoped by
  * message so two turns that each pin a run never collide in the strip (§9.3).
  */
@@ -121,7 +121,7 @@ export type EndpointKind = "prompt" | "answer";
  * A content tab — the turn's endpoint chat bubble (the user's prompt or the CEO's
  * final answer) surfaced in the docked panel. The 全屏放大态 has no
  * chat column alongside, so an endpoint reads here — like a worker drill — instead
- * of a foot drawer (协作图与双视图UX.md §六 两个入口：聊天内嵌 ⇄ 全屏放大). Endpoints are bubbles, not runs, so they
+ * of a foot drawer (协作图与双视图UX.md §三 两个入口：聊天内嵌 ⇄ 全屏放大). Endpoints are bubbles, not runs, so they
  * ride this kind rather than RunDetailBody. Scoped by the turn (`messageId`) so it
  * lights that graph's endpoint node; `contentMessageId` is the bubble rendered.
  */
@@ -144,7 +144,7 @@ export interface ContentDetailTab {
  * A simple-turn Q&A tab — the whole CEO-only exchange (user prompt + assistant
  * answer) for a no-execution turn. Pure dialogue has no execution
  * plan, so it must not ride `content` (whose live check requires a plan) or
- * `run` (前端UX设计.md §十 详情面板（右坞）).
+ * `run` (前端UX设计.md §四 详情面板（右坞）).
  */
 export interface SimpleTurnDetailTab {
   /** Discriminator: full Q&A for a no-execution turn. */
@@ -240,7 +240,7 @@ export interface SidePanelFloat {
 }
 
 /**
- * Focus surface for graph / run highlight (前端UX设计.md §十):
+ * Focus surface for graph / run highlight (前端UX设计.md §四):
  * dock active tab, or a specific float — must not require `open === true`.
  */
 export type SidePanelFocusSurface =

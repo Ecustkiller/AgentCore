@@ -492,7 +492,7 @@ def _coordination_start_echo(
     completed: int,
     seeded: bool,
 ) -> str:
-    """One-sentence host fact for the CEO tool result (playbook lives in ceo_core)."""
+    """One-sentence host fact for the CEO tool result."""
     if seeded:
         return (
             f"【队员已追加·协调模式】已追加 {added} 名队员（{roster}）；"

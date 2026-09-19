@@ -153,12 +153,19 @@ export type TurnOutcome = {
    */
   showSessionBanner: boolean;
   /**
-   * Assistant footer chrome (copy / cost / feedback / 重新生成).
-   * Named recovery (`configure` / `wait_then_retry` / `send_next`) hides it.
-   * When recovery is `none` on an error/partial, footer 重新生成 is the unique
-   * retry control — including team-strip turns that closed the bubble card.
+   * Assistant utility chrome (copy / clone / feedback / cost / time).
+   * True once the turn has stopped writing and there is copyable product
+   * (body / reasoning / process) or an empty hard-fail card whose unique
+   * retry is footer 重新生成. Named recovery does **not** hide this.
    */
   showFooter: boolean;
+  /**
+   * Footer 重新生成. Only when {@link showFooter} and `recovery=none` —
+   * named recovery (`configure` / `wait_then_retry` / `send_next` /
+   * `continue` / `resume`) is the unique retry, including team-strip
+   * turns that closed the bubble card.
+   */
+  showRegenerate: boolean;
   /**
    * Empty user-stop, or an empty shell with no engine/server verdict: omit the
    * bubble. kind is `ok`. Do not invent ``interrupted`` to fill the hole.
@@ -433,6 +440,7 @@ function quietFlags(): Pick<
   | "showComposerHint"
   | "showSessionBanner"
   | "showFooter"
+  | "showRegenerate"
   | "hideEmptyBubble"
   | "showStripFailure"
   | "showStripStopped"
@@ -445,6 +453,7 @@ function quietFlags(): Pick<
     showComposerHint: false,
     showSessionBanner: false,
     showFooter: false,
+    showRegenerate: false,
     hideEmptyBubble: false,
     showStripFailure: false,
     showStripStopped: false,
@@ -454,10 +463,31 @@ function quietFlags(): Pick<
   };
 }
 
-function namedRecoveryHidesFooter(kind: TurnRecoveryKind): boolean {
-  return (
-    kind === "configure" || kind === "wait_then_retry" || kind === "send_next"
-  );
+/** Visible product the two-tier copy can export — not the error-card sentence. */
+function hasCopyableProduct(input: TurnOutcomeInput): boolean {
+  if ((input.content ?? "").trim()) return true;
+  if ((input.reasoning ?? "").trim()) return true;
+  return (input.processLength ?? 0) > 0;
+}
+
+/**
+ * Utility row vs regenerate. Named recovery hides regenerate only;
+ * copy stays if there is something to copy.
+ */
+function footerFlags(args: {
+  hideEmptyBubble: boolean;
+  input: TurnOutcomeInput;
+  recoveryKind: TurnRecoveryKind;
+  errorFaceCopyable: boolean;
+}): Pick<TurnOutcome, "showFooter" | "showRegenerate"> {
+  const showFooter =
+    !args.hideEmptyBubble &&
+    (hasCopyableProduct(args.input) ||
+      (args.errorFaceCopyable && args.recoveryKind === "none"));
+  return {
+    showFooter,
+    showRegenerate: showFooter && args.recoveryKind === "none",
+  };
 }
 
 function withOutcomeMoment(
@@ -510,11 +540,11 @@ export function arbitrateTurnOutcome(input: TurnOutcomeInput): TurnOutcome {
     (isCancelCode(face?.code) || (kind === "ok" && face == null));
   const sessionCopy = (input.conversationError ?? "").trim();
   const hasTeamStrip = Boolean(input.hasTeamStrip);
-  const hasBody = Boolean((input.content ?? "").trim());
 
   const fr = input.finishReason ?? undefined;
 
-  // `kind=paused` is a frozen read-only path — flag formulas must stay byte-stable.
+  // `kind=paused` recovery / why stay frozen. Utility chrome follows
+  // copyable product (not a second recovery).
   if (kind === "paused") {
     // Cancel face must not become a warning card if kind is still paused
     // (attested leftover / resolved-card pauseSignal). Stop is not an error.
@@ -531,12 +561,13 @@ export function arbitrateTurnOutcome(input: TurnOutcomeInput): TurnOutcome {
     const showSessionBanner = Boolean(
       sessionCopy && !showBubbleBanner && !attestedContinue,
     );
-    const showFooter =
-      !attestedContinue &&
-      !hideEmptyBubble &&
-      face?.code !== "TURN_INTERRUPTED" &&
-      (hasBody ||
-        Boolean(showBubbleBanner && face && !isCancelCode(face.code)));
+    const { showFooter, showRegenerate } = footerFlags({
+      hideEmptyBubble,
+      input,
+      recoveryKind: recovery.kind,
+      errorFaceCopyable:
+        Boolean(showBubbleBanner && face) && !isCancelCode(face?.code),
+    });
     let message: string | null = null;
     if (attestedContinue) {
       // Why only — wait belongs on the Continue control when Retry-After is attested.
@@ -559,6 +590,7 @@ export function arbitrateTurnOutcome(input: TurnOutcomeInput): TurnOutcome {
       showComposerHint,
       showSessionBanner,
       showFooter,
+      showRegenerate,
       hideEmptyBubble,
       showStripFailure: false,
       showStripStopped: false,
@@ -607,15 +639,14 @@ export function arbitrateTurnOutcome(input: TurnOutcomeInput): TurnOutcome {
     !isCancelCode(face?.code) &&
     fr !== "cancelled" &&
     !hideEmptyBubble;
-  const showFooter =
-    !hideEmptyBubble &&
-    !namedRecoveryHidesFooter(recovery.kind) &&
-    (hasBody ||
-      Boolean(
-        (showBubbleBanner || showStripFailure) &&
-          face &&
-          !isCancelCode(face.code),
-      ));
+  const { showFooter, showRegenerate } = footerFlags({
+    hideEmptyBubble,
+    input,
+    recoveryKind: recovery.kind,
+    errorFaceCopyable:
+      Boolean((showBubbleBanner || showStripFailure) && face) &&
+      !isCancelCode(face?.code),
+  });
 
   let supportPackHost: TurnSupportPackHost = "none";
   if (showBubbleBanner) supportPackHost = "bubble";
@@ -650,6 +681,7 @@ export function arbitrateTurnOutcome(input: TurnOutcomeInput): TurnOutcome {
     showComposerHint,
     showSessionBanner,
     showFooter,
+    showRegenerate,
     hideEmptyBubble,
     showStripFailure,
     showStripStopped,

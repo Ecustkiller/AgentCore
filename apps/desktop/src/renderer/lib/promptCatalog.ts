@@ -1,7 +1,3 @@
-import {
-  extractCeoIdentity,
-  splitWorkerGuideline,
-} from "@/lib/splitGuidelineRoles";
 import type {
   Capabilities,
   CapabilitySkill,
@@ -34,16 +30,6 @@ export type PromptCatalogItem =
       label: string;
       depth: 0;
       text: string;
-    }
-  | {
-      id: "identity";
-      kind: "identity";
-      group: "factory";
-      label: string;
-      depth: 0;
-      ceoIdentity: string;
-      nestedIdentity: string;
-      leafIdentity: string;
     }
   | {
       id: string;
@@ -91,7 +77,7 @@ export interface PromptCatalogGroup {
   items: PromptCatalogItem[];
 }
 
-export const DEFAULT_PROMPT_CATALOG_ID = "identity";
+export const DEFAULT_PROMPT_CATALOG_ID = "shared";
 export const OVERVIEW_CATALOG_ID = "overview";
 export const FOLDER_KEY_OFFICIAL = "official";
 export const FOLDER_KEY_TOOLS = "tools";
@@ -176,16 +162,6 @@ export function buildPromptCatalog(data: Capabilities): PromptCatalogGroup[] {
       label: "全员共享准则",
       depth: 0,
       text: data.guidelines.shared_base,
-    },
-    {
-      id: "identity",
-      kind: "identity",
-      group: "factory",
-      label: "角色身份",
-      depth: 0,
-      ceoIdentity: extractCeoIdentity(data.guidelines.ceo_addon),
-      nestedIdentity: splitWorkerGuideline(data.guidelines.worker_captain),
-      leafIdentity: splitWorkerGuideline(data.guidelines.worker_leaf),
     },
   ];
   const onDemand: PromptCatalogItem[] = sortSkills(data.skills).map(
@@ -417,7 +393,7 @@ export interface PromptRailFolder {
 }
 
 export interface PromptRail {
-  /** 全员准则 / 角色身份 — product constitution, read-only. */
+  /** 全员准则 — product constitution, read-only. */
   constitution: PromptCatalogItem[];
   /** Retired AI memory cores; always empty. User rules live in alwaysMine. */
   memory: PromptCatalogItem[];

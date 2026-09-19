@@ -220,7 +220,7 @@ class Folder(Base):
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Who asked for the soft-delete (最近删除 recycle bin). ``'user'`` = a deliberate
-    # delete from the sidebar / CEO ``delete_folder``, the only kind the recycle bin
+    # delete from the sidebar, the only kind the recycle bin
     # lists and restores. ``'auto_desk_reclaim'`` = a race loser's silently-minted
     # bare-chat cloud desk being reclaimed — machine litter that carries a
     # conversation-derived name and would otherwise read as a real project. NULL =

@@ -136,7 +136,7 @@ function AppShellFrame() {
 
   // Auto-update lives at the shell so the consent dialog / "打开安装包" toast (and
   // 关于 page status) stay live regardless of route. Main process schedules checks;
-  // download starts only after the user confirms (发布与门禁.md §7.6).
+  // download starts only after the user confirms (发布与门禁.md §1.6).
   useEffect(() => startUpdates(), []);
   useEffect(() => startAndroidUpdates(), []);
 
@@ -210,7 +210,7 @@ function AppShellFrame() {
         {!hideSidebar && !isNarrow && <Sidebar />}
         <main className="relative flex min-h-0 flex-1 overflow-hidden">
           <Outlet />
-          {/* 浮窗壳：宽屏桌面常挂（UX §十，⊥ SidePanel.open）；窄屏 / Capacitor 不挂。 */}
+          {/* 浮窗壳：宽屏桌面常挂（UX §四，⊥ SidePanel.open）；窄屏 / Capacitor 不挂。 */}
           {!floatsDisabled && <SidePanelFloatHost />}
         </main>
       </div>

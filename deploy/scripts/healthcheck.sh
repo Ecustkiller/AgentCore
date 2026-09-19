@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# AgentCore 健康巡检 + 告警（部署与运维.md §7.8「可观测·巡检」）。
+# AgentCore 健康巡检 + 告警（发布与门禁.md §1.8「可观测·巡检」）。
 #
 # 单次探测 /readyz：HTTP 200/503 **仅由 PostgreSQL 决定**（Redis 是限流软依赖，
 # 不因 redis 失败回 503；详见 body 字段 / 日志 redis.probe_failed）。HTTP 非 200
@@ -16,7 +16,7 @@
 # 用法：
 #   healthcheck.sh                 # 一次探测（systemd timer / cron 反复调）
 #
-# 配置（可经环境或 $AGENTCORE_HOME/.env 覆盖，部署与运维.md §8.2）：
+# 配置（可经环境或 $AGENTCORE_HOME/.env 覆盖，部署拓扑与环境.md §7.2）：
 #   AGENTCORE_HOME     部署根目录                （默认 /opt/agentcore）
 #   HEALTH_URL         探测地址                  （默认 http://127.0.0.1:8000/readyz）
 #   HEALTH_TIMEOUT     单次探测超时(s)           （默认 10）

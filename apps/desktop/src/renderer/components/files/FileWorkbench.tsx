@@ -44,7 +44,7 @@ import { EmptyHint, InlineError } from "@/components/files/parts";
 import { PendingFolderInvites } from "@/components/folders/PendingFolderInvites";
 import { NarrowBackHeader } from "@/components/layout/NarrowBackHeader";
 import { NarrowMenuButton } from "@/components/layout/NarrowMenuButton";
-import { Button, SearchField } from "@/components/ui";
+import { SearchField } from "@/components/ui";
 import { WorkspaceTrashSection } from "@/components/workspace/TrashSection";
 import { useConversations } from "@/hooks/useConversations";
 import { useCreateFolder, useFolders } from "@/hooks/useFolders";
@@ -58,10 +58,6 @@ import {
 } from "@/lib/folderTree";
 import { useNarrowLayoutState } from "@/lib/narrowLayout";
 import { useReadOnlyOffline } from "@/lib/offlineMode";
-import {
-  isSeededCsvCandidate,
-  tryNavigateSeededCsv,
-} from "@/lib/openSeededCsvTable";
 import { notifyError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
@@ -120,15 +116,13 @@ const RULES_WS = "__rules__";
  * Rows come from the folder list rather than `/v1/workspaces`, so a folder just
  * created shows up before the workspace list refetches; a folder with no
  * workspace row yet falls back to {@link folderWorkspaceFallback}. Lifecycle
- * (new file·folder / upload / reveal in OS / open chat / delete folder / rename)
+ * (new file / upload / reveal in OS / open chat / rename)
  * lives on each root's **right-click menu** to keep the rail clean; the rail header is a **name + path
  * filter** (real-time, case-insensitive substring over folder names and, for
  * expanded trees, file/folder names + relative paths; session-only, not persisted
  * — it's a search, not a preference). No content full-text search.
  *
- * The two container actions §5.4 leaves are the zone headers' own: 我的文件「+」
- * (and the empty-state button) POSTs「未命名文件夹」then renames in place
- * (nested via a row's「在此新建文件夹」); 本机文件夹「+」opens one off the disk. Chats live on `/conversations`; the two cross-link — a root's
+ * The remaining disk action on this rail is 本机文件夹「+」(opens one off the disk). Cloud product folders are created from Composer. Chats live on `/conversations`; the two cross-link — a root's
  * 「查看对话」jumps here→there, and「浏览文件」jumps there→here (via `focusWsId`
  * = `folder:<id>`，which expands + highlights the target root).
  */
@@ -201,13 +195,11 @@ export function FileWorkbench({
   const conversations = useConversations();
   const folders = useFolders();
   const createFolder = useCreateFolder();
-  const requestUntitled = useFoldersStore((s) => s.requestUntitledCloudFolder);
   const pendingUntitledCreate = useFoldersStore((s) => s.pendingUntitledCreate);
   const clearUntitledCreateRequest = useFoldersStore(
     (s) => s.clearUntitledCreateRequest,
   );
   const finishUntitledCreate = useFoldersStore((s) => s.finishUntitledCreate);
-  const untitledCreateBusy = useFoldersStore((s) => s.untitledCreateBusy);
   const pendingRevealFolderId = useFoldersStore((s) => s.pendingRevealFolderId);
   const clearPendingReveal = useFoldersStore((s) => s.clearPendingReveal);
 
@@ -432,7 +424,7 @@ export function FileWorkbench({
     return () => window.clearTimeout(t);
   }, [pendingRevealFolderId, folders, expandWs, clearPendingReveal]);
 
-  // 区头 + / 空态 / 命令面板 / 行上「在此新建」：立刻落地「未命名文件夹」，行上改名。
+  // store 仍可 requestUntitledCloudFolder：立刻落地「未命名文件夹」，行上改名。
   useEffect(() => {
     if (!pendingUntitledCreate) return;
     const parentId = pendingUntitledCreate.parentId;
@@ -571,28 +563,15 @@ export function FileWorkbench({
     [tabs, activeKey],
   );
 
-  // 打开文件：已灌数 csv 进活表；其余已开则激活其标签，未开则新增并激活。
+  // 打开文件：已开则激活其标签，未开则新增并激活。
   const openFile = (wsId: string, path: string, name: string) => {
-    const openTab = () => {
-      const key = tabKey(wsId, path);
-      setTabs((prev) =>
-        prev.some((t) => tabKey(t.wsId, t.path) === key)
-          ? prev
-          : [...prev, { wsId, path, name }],
-      );
-      setActiveKey(key);
-    };
-    if (
-      wsId === MEMORY_WS ||
-      wsId === RULES_WS ||
-      !isSeededCsvCandidate(path)
-    ) {
-      openTab();
-      return;
-    }
-    void tryNavigateSeededCsv({ path, workspaceId: wsId }).then((opened) => {
-      if (!opened) openTab();
-    });
+    const key = tabKey(wsId, path);
+    setTabs((prev) =>
+      prev.some((t) => tabKey(t.wsId, t.path) === key)
+        ? prev
+        : [...prev, { wsId, path, name }],
+    );
+    setActiveKey(key);
   };
 
   const reportDirty = useCallback((key: string, state: FileDirtyState) => {
@@ -691,7 +670,6 @@ export function FileWorkbench({
     filterQuery: treeFilterQuery,
     sortBy,
     offline,
-    onCreateSubfolder: (parent) => requestUntitled(parent.id),
     renderWorkroomLead: showMemory
       ? (folder, indent) => (
           <EntriesSection
@@ -801,15 +779,6 @@ export function FileWorkbench({
                       />
                     }
                     title="还没有文件夹"
-                    action={
-                      <Button
-                        variant="primary"
-                        disabled={untitledCreateBusy}
-                        onClick={() => requestUntitled()}
-                      >
-                        新建文件夹
-                      </Button>
-                    }
                   />
                 ) : (
                   <FolderRailNodes nodes={cloudFolderNodes} host={railHost} />

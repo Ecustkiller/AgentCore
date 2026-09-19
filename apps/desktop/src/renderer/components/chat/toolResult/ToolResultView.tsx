@@ -156,12 +156,6 @@ function consultHasExpandBody(d: ToolResultData): boolean {
   return isSkillConsultDisplay(d.display) && Boolean(d.display.summary?.trim());
 }
 
-function isListFoldersCountDisplay(d: unknown): d is { count: number } {
-  if (!d || typeof d !== "object") return false;
-  const x = d as Record<string, unknown>;
-  return typeof x.count === "number" && Number.isFinite(x.count);
-}
-
 /** `search_conversations` / `read_conversation` display — metadata only (body in result). */
 function isConversationLogDisplay(d: unknown): d is ConversationLogDisplay {
   if (!d || typeof d !== "object") return false;
@@ -289,7 +283,8 @@ export function toolLineTitleStat(d: ToolResultData): ToolLineTitleStat | null {
 }
 
 /** A compact one-line peek for the collapsed row — display-aware so it reads as
- * 「3 results」/「exit 1」rather than the first line of a JSON / "stdout:" blob.
+ * 「标题 · 域名」/ identity rather than the first line of a JSON / "stdout:" blob.
+ * Retrieval / inventory counts stay off the collapsed row (expand to read hits).
  * Collapsed error rows stay one line (title + red ✗): product `failure.message`
  * is not peeked here (specific copy lives in the expanded detail; generic copy
  * is hidden). Display-derived summaries still apply; expand shows technical
@@ -299,16 +294,17 @@ export function toolResultPeek(d: ToolResultData): string {
   if (isSuccessfulHandoff(d.toolName, d.status)) {
     return clampLine(handoffSummaryPeek(d.args));
   }
-  if (isWebSearchDisplay(d.display)) {
-    const n = d.display.results.length;
-    return n > 0 ? `${n} result${n === 1 ? "" : "s"}` : "No results";
-  }
+  // Title already names the query or verb. Hit counts / empty lines are
+  // model-facing; expand the row to read hits. Do not fall through to the
+  // first-line peek (that would paste a regex or a raw hit).
   if (
-    (d.toolName === "list_folders" || d.toolName === "folders") &&
-    isListFoldersCountDisplay(d.display)
+    d.toolName === "grep" ||
+    d.toolName === "web_search" ||
+    d.toolName === "list_folders" ||
+    d.toolName === "folders" ||
+    d.toolName === "search_conversations"
   ) {
-    const n = d.display.count;
-    return `${n} folder${n === 1 ? "" : "s"}`;
+    return "";
   }
   if (isWebFetchDisplay(d.display)) {
     const title =
@@ -343,11 +339,7 @@ export function toolResultPeek(d: ToolResultData): string {
       }
       return d.display.truncated ? "截断" : "已查阅对话";
     }
-    if (typeof d.display.result_count === "number") {
-      const n = d.display.result_count;
-      return `${n} 场对话`;
-    }
-    return "已查阅对话";
+    return "";
   }
   if (isBrowserDisplay(d.display)) {
     return browserResultPeek(d.display);
@@ -374,10 +366,6 @@ export function toolResultPeek(d: ToolResultData): string {
   if (d.status === "error") {
     return "";
   }
-  // grep: pattern is already on the ToolLine title. Hit counts / files_only /
-  // 「未匹配」are model-facing; expand the row to read hits. Do not fall through
-  // to the first-line peek (that would paste a regex or a raw hit).
-  if (d.toolName === "grep") return "";
   const line = (d.result ?? "").split("\n").find((l) => l.trim()) ?? "";
   return clampLine(line);
 }
@@ -513,8 +501,8 @@ function ConsultEntryCard({
  * Aligns with the display wire-cap (~6000) discipline (跨会话对话日志定案). */
 const CONVERSATION_LOG_PREVIEW_CHARS = 6000;
 
-/** Worker conversation-log expand body. Title / hit-count /「打开」live on the
- * ToolLine; this card is transcript-only (no id chrome). */
+/** Worker conversation-log expand body. Read title lives on the ToolLine; this
+ * card is transcript-only (no id chrome). */
 function ConversationLogResult({ result }: { result: string }) {
   const preview =
     result.length > CONVERSATION_LOG_PREVIEW_CHARS

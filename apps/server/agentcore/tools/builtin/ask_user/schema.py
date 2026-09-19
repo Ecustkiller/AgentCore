@@ -45,14 +45,10 @@ _PROMPT_DESC = "问句。"
 _KIND_DESC = "choice 或 text，默认 choice。"
 _OPTIONS_DESC = f"kind=choice 候选项（最多 {_MAX_OPTIONS}）。"
 _LABEL_DESC = "选项名（回传答案）。"
-_MULTIPLE_DESC = "可选：允许多选，默认 false。"
+_MULTIPLE_DESC = "可选：允许多选。"
 
-# 原 consult 开场/途中手册上收进本按钮。consult 回执赶不上这张卡。
-ASK_WHEN = (
-    "向用户发问（唯一；调用即停）。猜错会做错才问；"
-    "可逆低杠杆或明显次优 → 标假设继续。已钉立刻派 ≠ 自拟后派。"
-    "能力盖不住 → 第一句说缺口再给替代；坚持则按所选继续。"
-)
+# WHEN 短触发。填卡合同在 prompt/label。consult 赶不上这张卡。
+ASK_WHEN = "向用户发问（唯一；调用即停）。"
 ASK_PROMPT_HOW = "要什么 / 给谁 / 做到哪一档。问句在卡上 ≠ 再抄进正文。假设和背景写正文。"
 ASK_LABEL_HOW = (
     "桌上结果；权衡写进选项名 ≠ 编制套餐 ≠ 正文候选再投卡。"

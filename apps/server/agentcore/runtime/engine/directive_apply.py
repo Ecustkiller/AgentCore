@@ -27,7 +27,6 @@ from .governance import (
     apply_circuit_breaker,
     govern_after_tools,
     note_delegate_batches,
-    resolve_openai_tool_defs,
 )
 from .outcome import RoundOutcome
 from .round import apply_finish_guard_rework
@@ -80,8 +79,6 @@ class DirectiveApplyResult:
     final_reasoning: str = ""
     total_usage: TokenUsage | None = None
     finish_guard_reworks: int = 0
-    tool_defs: list[dict[str, Any]] | None = None
-    tool_defs_changed: bool = False
 
 
 async def apply_loop_directive(
@@ -263,6 +260,7 @@ async def apply_loop_directive(
                     run_id=run_id,
                     role=role,
                     allowed_tool_names=finalize_allowed,
+                    disabled_tools=disabled_tools,
                 )
                 messages.extend(tool_results)
                 if gate_escalation_sink is not None and role == "worker":
@@ -293,7 +291,6 @@ async def apply_loop_directive(
                     )
                 controller.record(attempts)
                 note_delegate_batches(controller, tool_calls, attempts)
-                tool_defs = resolve_openai_tool_defs(tools, finalize_allowed, disabled_tools)
                 breaker = apply_circuit_breaker(
                     controller,
                     messages=messages,
@@ -301,8 +298,6 @@ async def apply_loop_directive(
                     round_idx=round_idx,
                     disabled_tools=disabled_tools,
                 )
-                if breaker.refresh_tool_defs:
-                    tool_defs = resolve_openai_tool_defs(tools, finalize_allowed, disabled_tools)
                 _ = govern_after_tools(
                     outcome=RoundOutcome(
                         content=coordination.content,
@@ -326,8 +321,6 @@ async def apply_loop_directive(
                     final_content=final_content,
                     final_reasoning=final_reasoning,
                     total_usage=total_usage,
-                    tool_defs=tool_defs,
-                    tool_defs_changed=True,
                     finish_guard_reworks=finish_guard_reworks,
                 )
             return DirectiveApplyResult(

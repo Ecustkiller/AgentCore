@@ -405,8 +405,8 @@ async def get_folders_api_user(
     Inference tokens are refused (wrong type on both decoders). Sidecar must never
     receive an access token — it uses the folders ticket only.
 
-    Soft-delete is in scope so the sidecar CEO's ``delete_folder`` shares one path
-    with the sidebar. The irreversible ``DELETE /{id}/permanent`` deliberately stays
+    Soft-delete is in scope so sidecar and the sidebar share one REST path.
+    The irreversible ``DELETE /{id}/permanent`` deliberately stays
     on ``AuthUser`` — never reachable with a folders ticket.
     """
     bearer = _bearer_token(authorization)

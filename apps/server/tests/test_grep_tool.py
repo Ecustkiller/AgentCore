@@ -181,7 +181,6 @@ def test_grep_schema_teaches_omit_path_when_unsure():
     assert "max_results" not in schema.description
     assert "省略 path" not in schema.description
     assert "禁止猜测" not in schema.description
-    assert "`glob`" in schema.description
     assert "file_list" not in schema.description
     path = schema.parameters["properties"]["path"]["description"]
     assert "不确定时省略" not in path

@@ -1,4 +1,5 @@
 import type { Execution, RunStatus } from "@/stores/execution";
+import { isSeatFoldedContinuation, seatFaceRun } from "@/stores/execution";
 import type { CoordinationWaitPayload } from "@/types/events";
 
 /**
@@ -12,15 +13,43 @@ const WORKER_TERMINAL = new Set<string>([
   "skipped",
 ]);
 
-/** Worker runs only (CEO captain sink is not a delegate progress unit). */
+function seatCountedRuns(
+  execution: Execution,
+  opts?: { workersOnly?: boolean },
+) {
+  return execution.runs.filter((r) => {
+    if (isSeatFoldedContinuation(r)) return false;
+    if (opts?.workersOnly && r.kind === "captain") return false;
+    return true;
+  });
+}
+
+/** Worker seats only (CEO captain sink is not a delegate progress unit).
+ * 同人续写折进座位，不另占分母。 */
 export function workerProgress(execution: Execution): {
   completed: number;
   total: number;
 } {
-  const workers = execution.runs.filter((r) => r.kind !== "captain");
+  const workers = seatCountedRuns(execution, { workersOnly: true });
   return {
-    completed: workers.filter((r) => r.status === "completed").length,
+    completed: workers.filter(
+      (r) => seatFaceRun(r, execution.runs).status === "completed",
+    ).length,
     total: workers.length,
+  };
+}
+
+/** 条上 n/m：座位（含 CEO 汇总），同人续写不另计。 */
+export function graphProgress(execution: Execution): {
+  completed: number;
+  total: number;
+} {
+  const counted = seatCountedRuns(execution);
+  return {
+    completed: counted.filter(
+      (r) => seatFaceRun(r, execution.runs).status === "completed",
+    ).length,
+    total: counted.length,
   };
 }
 
@@ -52,17 +81,20 @@ export function coordinationWaitWorkerRows(
   execution: Execution,
 ): CoordinationWaitWorkerRow[] {
   return execution.runs
-    .filter((r) => r.kind !== "captain")
-    .map((r) => ({
-      runId: r.id,
-      role:
-        execution.agents.find((a) => a.id === r.agentId)?.role ??
-        r.role ??
-        r.id,
-      status: r.status,
-      summary: (r.outputSummary ?? "").trim(),
-      witnessSeat: r.group === "debate:witness" && r.continuesRunId == null,
-    }));
+    .filter((r) => r.kind !== "captain" && !isSeatFoldedContinuation(r))
+    .map((r) => {
+      const face = seatFaceRun(r, execution.runs);
+      return {
+        runId: r.id,
+        role:
+          execution.agents.find((a) => a.id === r.agentId)?.role ??
+          r.role ??
+          r.id,
+        status: face.status,
+        summary: (face.outputSummary ?? r.outputSummary ?? "").trim(),
+        witnessSeat: r.group === "debate:witness" && r.continuesRunId == null,
+      };
+    });
 }
 
 /** Short captain-node caption: 等谁 (n/m). No 已等秒数 — duplicates strip 用时. */

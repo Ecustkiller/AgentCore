@@ -12,7 +12,7 @@
  *     beta 绝不写入扁平 desktop/ 或 stable/
  *   {BASE}/android/latest.json|AgentCore-*-android.apk
  *
- * → docs/05-平台与运维/发布与门禁.md §7.6b / §7.6c
+ * → docs/05-平台与运维/发布与门禁.md §1.6b / §1.6c
  */
 
 /** @typedef {"stable" | "beta"} DesktopChannel */

@@ -204,7 +204,7 @@ async def ceiling_finalize(
         workspace_channel_dead=controller.workspace_channel_dead,
     )
     # CEO / captain：硬顶强制收口不得无条件姿势 A（finish_guard 被绕过）。
-    # max_rounds / token_budget 对称；worker salvage 靠 finalize 注入的 ceiling_honesty_steer。
+    # max_rounds / token_budget 对称；诚实靠档位降级，不灌 `[系统提示]`。
     if role != "worker" and ceiling_reason in ("max_rounds", "token_budget"):
         from agentcore.runtime.closing_posture import (
             downgrade_verdict_for_ceiling,
@@ -267,6 +267,7 @@ async def ceiling_finalize(
             run_id=run_id,
             role=role,
             allowed_tool_names=allowed_tool_names,
+            disabled_tools=disabled_tools,
         )
         messages.extend(tool_results)
         if gate_escalation_sink is not None and role == "worker":

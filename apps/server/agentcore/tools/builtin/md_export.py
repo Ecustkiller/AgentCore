@@ -78,12 +78,12 @@ class MdExportTool:
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "工作区内的 Markdown 相对路径（如 `docs/报告.md`）",
+                        "description": "工作区内的 Markdown 相对路径",
                     },
                     "format": {
                         "type": "string",
                         "enum": list(EXPORT_FORMATS),
-                        "description": "docx=Word；pdf=PDF。必填，无默认。",
+                        "description": "docx=Word；pdf=PDF。",
                     },
                     "layout": {
                         "type": "string",

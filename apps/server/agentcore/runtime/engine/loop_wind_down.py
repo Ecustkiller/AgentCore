@@ -1,13 +1,12 @@
-"""Worker wind-down / delivery-idle / timeout-grace tool-surface narrowing.
+"""Worker wind-down / delivery-idle / timeout-grace execute-layer deny.
 
 Split from ``loop.py`` — pure move. The ReAct round sequencer stays on the loop;
 this object owns the worker cutoff surface (enter, arm, breach, delivery-idle
-narrow) and the allowlist the loop reads via :meth:`effective_allowed`.
+narrow). Opening ``tools[]`` stays frozen; wind-down denies at execute.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -37,8 +36,7 @@ class LoopWindDown:
     """Worker-only cutoff surface: token/timeout/retrieval wind-down + delivery-idle.
 
     Constructed once per ``react_loop`` after the :class:`LoopController` exists.
-    ``refresh_tool_defs`` is rebound by the loop so allowlist changes re-project
-    the OpenAI tool schema the model sees.
+    Opening ``tools[]`` stays frozen; ``wind_down_whitelist`` is execute-deny.
     """
 
     def __init__(
@@ -54,7 +52,6 @@ class LoopWindDown:
         files_expected: bool,
         live_allowed: list[str] | None,
         controller: LoopController,
-        refresh_tool_defs: Callable[[], None],
     ) -> None:
         self.role = role
         self.run_id = run_id
@@ -66,11 +63,9 @@ class LoopWindDown:
         self.files_expected = files_expected
         self.live_allowed = live_allowed
         self.controller = controller
-        self.refresh_tool_defs = refresh_tool_defs
-        # B·收尾窗口：预算软顶 / 超时预警后收窄到落盘+诊断+handoff（不改硬顶语义）。
+        # B·收尾窗口：预算软顶 / 超时预警后执行层收窄到落盘+诊断+handoff（不改硬顶语义、不改表）。
         self.wind_down_active = False
         self.wind_down_reason = ""
-        self.wind_down_effective_allowed: list[str] | None = None
         self.wind_down_whitelist: frozenset[str] | None = None
         self.wind_down_breach_count = 0
         # delivery_idle 工具收窄（factory 对交文件已关；显式构造仍可能走此路径）。
@@ -78,22 +73,17 @@ class LoopWindDown:
         self.delivery_idle_narrow_active = False
 
     def effective_allowed(self) -> list[str] | None:
-        if self.wind_down_effective_allowed is not None:
-            return self.wind_down_effective_allowed
         return self.live_allowed
 
     def enter_wind_down(self, reason: str, instruction: str | None = None, *, tokens: int) -> None:
         if self.wind_down_active or self.role != "worker":
             return
         from agentcore.runtime.runs.cutoff import (
-            narrow_tools_for_wind_down,
             wind_down_allowed_tools,
-            wind_down_instruction_retrieval,
-            wind_down_instruction_timeout,
-            wind_down_instruction_token,
             worker_keeps_file_read_in_wind_down,
         )
 
+        del instruction  # Tool table is the contract; no [系统提示].
         self.wind_down_active = True
         self.wind_down_reason = reason
         available = set(self.tools.names)
@@ -101,21 +91,6 @@ class LoopWindDown:
             available=available, allowed=self.live_allowed
         )
         self.wind_down_whitelist = wind_down_allowed_tools(keep_file_read=keep_file_read)
-        narrowed = narrow_tools_for_wind_down(
-            available,
-            allowed=self.live_allowed,
-            keep_file_read=keep_file_read,
-        )
-        self.wind_down_effective_allowed = narrowed
-        self.refresh_tool_defs()
-        if instruction is None:
-            if reason == "token_budget":
-                instruction = wind_down_instruction_token()
-            elif reason == "worker_timeout":
-                instruction = wind_down_instruction_timeout()
-            else:
-                instruction = wind_down_instruction_retrieval()
-        self.messages.append(LLMMessage(role="user", content=instruction))
         from agentcore.config import settings as _settings
 
         logger.info(
@@ -130,7 +105,7 @@ class LoopWindDown:
                 if reason == "token_budget"
                 else None
             ),
-            allowed_tools=narrowed,
+            allowed_tools=sorted(self.wind_down_whitelist),
             keep_file_read=keep_file_read,
         )
         from agentcore.runtime.runs.run_phase_emit import emit_run_phase
@@ -147,28 +122,11 @@ class LoopWindDown:
         self.delivery_idle_narrow_active = True
         if self.wind_down_active:
             return
-        from agentcore.runtime.runs.cutoff import (
-            narrow_tools_for_wind_down,
-            worker_keeps_file_read_in_wind_down,
-        )
-
-        available = set(self.tools.names)
-        keep_file_read = worker_keeps_file_read_in_wind_down(
-            available=available, allowed=self.live_allowed
-        )
-        narrowed = narrow_tools_for_wind_down(
-            available,
-            allowed=self.live_allowed,
-            keep_file_read=keep_file_read,
-        )
-        self.live_allowed = narrowed
-        self.refresh_tool_defs()
         logger.info(
             "engine.delivery_idle_narrow_apply",
             run_id=self.run_id,
             role=self.role,
-            allowed_tools=narrowed,
-            keep_file_read=keep_file_read,
+            allowed_tools=self.live_allowed,
         )
 
     def consume_timeout_wind_down_pending(self) -> bool:
@@ -258,11 +216,9 @@ class LoopWindDown:
             from agentcore.runtime.engine.directive import Continue, Return
             from agentcore.runtime.runs.cutoff import (
                 WIND_DOWN_ALLOWED_TOOLS,
-                narrow_tools_for_wind_down_breach,
                 should_force_local_after_wind_down_breach,
                 wind_down_breach_tool_names,
                 wind_down_deny_output,
-                worker_keeps_file_read_in_wind_down,
             )
 
             effective_whitelist = self.wind_down_whitelist or WIND_DOWN_ALLOWED_TOOLS
@@ -282,10 +238,6 @@ class LoopWindDown:
                     self.files_expected
                     and self.controller is not None
                     and not self.controller.landing_succeeded
-                )
-                keep_file_read = keep_landing and worker_keeps_file_read_in_wind_down(
-                    available=set(self.tools.names),
-                    allowed=list(effective_whitelist),
                 )
                 logger.warning(
                     "engine.wind_down_breach",
@@ -355,13 +307,6 @@ class LoopWindDown:
                     ]
                     for tc in denied:
                         _journal_wind_down_deny(tc, tc.function.name or "")
-                    self.wind_down_effective_allowed = narrow_tools_for_wind_down_breach(
-                        set(self.tools.names),
-                        keep_landing=keep_landing,
-                        keep_file_read=keep_file_read,
-                        allowed=list(effective_whitelist),
-                    )
-                    self.refresh_tool_defs()
                     if not kept:
                         self.messages.append(
                             LLMMessage(

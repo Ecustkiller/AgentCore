@@ -324,6 +324,10 @@ export const collaborationChapter: ManualChapterContent = {
               desc: "太慢或方向不对，点停止结束当前回合。",
             },
             {
+              title: "让主 Agent 停某个队员",
+              desc: "说一声即可，它停的是那一个人，不必你再点按钮。这和停掉本机正在跑的程序不是一回事。",
+            },
+            {
               title: "团队还在跑时说话",
               desc: "直接发送马上给主 Agent。要等团队收工后再说，点「排队」。只改某一人仍走详情「立即改此人」。",
             },
@@ -333,7 +337,7 @@ export const collaborationChapter: ManualChapterContent = {
             },
             {
               title: "带现场续派",
-              desc: "产物大致对、只改局部：唤回原队员带完整现场接着改（口语也叫「同人接续」），协作图上挂「续 ×N」，右坞接续链可切各版全文。不是从零重来。",
+              desc: "产物大致对、只改局部：唤回原队员带完整现场接着改（口语也叫「同人接续」），图上还是同一个人，右坞往下接新过程。不是从零重来。",
             },
             {
               title: "辩论进行中说话",

@@ -24,10 +24,8 @@ from agentcore.workspace.protocol import (
 
 from .listing import (
     GLOB_DEFAULT_MAX_ENTRIES,
-    GLOB_MAX_ENTRIES_CAP,
     GlobPlan,
     bare_external_error,
-    clamp_glob_max_entries,
     compile_glob_patterns,
     format_glob_lines,
     glob_leftover_error,
@@ -58,8 +56,7 @@ class GlobTool:
         return ToolSchema(
             name="glob",
             description=(
-                "globstar 查找。省略 path=整仓。"
-                "一层列举用 file_list；勿只填 `*`。"
+                "globstar 查找。省略 path=整仓。勿只填 `*`。"
             ),
             parameters={
                 "type": "object",
@@ -74,13 +71,6 @@ class GlobTool:
                     "path": {
                         "type": "string",
                         "description": "搜索根（默认 `.`=整仓）。",
-                    },
-                    "max_entries": {
-                        "type": "integer",
-                        "description": "最多返回条数。触顶页脚诚实。",
-                        "default": GLOB_DEFAULT_MAX_ENTRIES,
-                        "minimum": 1,
-                        "maximum": GLOB_MAX_ENTRIES_CAP,
                     },
                 },
                 "required": ["pattern"],
@@ -100,10 +90,9 @@ class GlobTool:
         if plans is None:
             return glob_pattern_reject(pattern, start)
 
-        directory = str(
-            arguments.get("path") or arguments.get("directory") or "."
-        ).strip() or "."
-        max_entries = clamp_glob_max_entries(arguments.get("max_entries"))
+        # Search root is schema ``path`` only; leftover ``directory`` is ignored.
+        directory = str(arguments.get("path") or ".").strip() or "."
+        max_entries = GLOB_DEFAULT_MAX_ENTRIES
         reveal_archives = pattern_targets_archives(pattern)
 
         if is_bare_external_directory(directory):

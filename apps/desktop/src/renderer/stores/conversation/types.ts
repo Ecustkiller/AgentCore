@@ -178,6 +178,11 @@ export interface Message {
   rounds?: number;
   /** 回合墙钟用时 (ms)：live 自 message_end.duration_ms；重载自 MessageDetail.duration_ms。 */
   durationMs?: number;
+  /**
+   * 各次 LLM 吐字时长之和 (ms)：live 自 message_end.generation_ms；
+   * 重载自 MessageDetail.generation_ms。缺省 = 旧记录，不在「更多」里编速度。
+   */
+  generationMs?: number;
   finishReason?: string;
   /**
    * Server-attested turn result (`message_end.outcome` live; REST

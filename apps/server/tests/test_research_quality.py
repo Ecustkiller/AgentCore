@@ -9,7 +9,6 @@ import pytest
 
 from agentcore.runtime.delegate.batch_shape import annotate_batch_meta
 from agentcore.runtime.delegate.delivery_status import build_delivery_status
-from agentcore.runtime.delegate.playbook_declaration import resolve_playbook_declaration
 from agentcore.runtime.loop_controller import LoopController
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.research_quality import (
@@ -104,26 +103,11 @@ def test_paper_parallel_merge_discipline_constant():
     assert research_report_main_artifact("\\drafts\\a.md") == "drafts/a.md"
 
 
-def test_research_handwritten_ok_without_declaration():
-    """调研意图手写 tasks：可不声明 playbook；不再强推 cite_write_review / 收紧预算。"""
-    name, err = resolve_playbook_declaration(
-        {
-            "tasks": [{"role": "调研员", "task": "写实务研究报告"}],
-        }
-    )
-    assert err is None
-    assert name is None
-
-
-def test_resolve_optional_research_report_still_expands():
-    name, err = resolve_playbook_declaration(
-        {
-            "playbook": "cite_write_review",
-            "playbook_args": {"topic": "立案实务"},
-        }
-    )
-    assert err is None
-    assert name == "cite_write_review"
+def test_research_handwritten_ok_without_named_pipeline():
+    """调研意图手写 tasks：不再强推成文审校座。"""
+    assert plan_is_literature_report_delivery(
+        [{"role": "调研员", "task": "写实务研究报告"}]
+    ) is False
 
 
 def test_annotate_batch_meta_audit_flags():
@@ -132,28 +116,27 @@ def test_annotate_batch_meta_audit_flags():
         result,
         node_count=5,
         has_deps=True,
-        playbook="cite_write_review",
         audit_hard=True,
         includes_review=True)
-    assert stamped.metadata["batch_playbook"] == "cite_write_review"
+    assert "batch_playbook" not in stamped.metadata
     assert stamped.metadata["audit_hard"] is True
     assert stamped.metadata["batch_includes_review"] is True
 
 
 def test_parallel_brief_does_not_signal_long_form_audit():
-    """A 档摸底批：硬门只认 cite_write_review。"""
-    from agentcore.runtime.runs.playbooks import expand_playbook
+    """摸底批：硬门只认 reviews/ 结构，不因多人进门。"""
     from agentcore.runtime.runs.research_quality import plan_signals_long_form_audit
 
-    tasks, errors = expand_playbook(
-        "map_fanout",
-        {"topic": "开源选型", "angles": ["兼容", "闭源风险", "生态"]})
-    assert errors == []
+    tasks = [
+        {"role": "方向专员", "task": "摸底兼容"},
+        {"role": "方向专员", "task": "摸底闭源风险"},
+        {"role": "方向专员", "task": "摸底生态"},
+    ]
     assert plan_signals_long_form_audit(tasks) is False
 
 
 def test_audit_hard_block_after_soft_nudge():
-    """Engine no longer hard-blocks wrap-up after cite_write_review; stamps remain."""
+    """Engine no longer hard-blocks wrap-up after a review-shaped batch; stamps remain."""
     from agentcore.runtime.engine import governance as gov
     from agentcore.runtime.loop_controller import LoopController
 
@@ -472,70 +455,36 @@ def test_retrieval_empty_streak_helpers():
     assert budget.consecutive_empty_searches == 0
 
 
-def test_research_report_write_task_has_chapter_discipline():
-    from agentcore.runtime.runs.playbooks import expand_playbook
-
-    tasks, errors = expand_playbook("cite_write_review", {"topic": "X", "angles": ["甲", "乙"]})
-    assert not errors
-    write = next(t for t in tasks if t["id"] == "write")
-    assert "一次 file_write 完整正文" in write["task"]
-    assert "file_delete" not in write["task"]
-    assert "章边界" in write["task"]
-    # 中间环约定文档契约：调研 + 提纲 form=files，路径在 RESEARCH_DIR，角度名入文件名。
-    from agentcore.workspace.stage_dirs import RESEARCH_DIR
-
-    research = [t for t in tasks if t["id"].startswith("research_")]
-    assert len(research) == 2
-    for t, angle in zip(research, ["甲", "乙"], strict=True):
-        d = t["deliverable"]
-        assert "form" not in d
-        assert d["artifacts"] == [f"{RESEARCH_DIR}/{angle}调研报告.md"]
-    outline = next(t for t in tasks if t["id"] == "outline")
-    assert "form" not in outline["deliverable"]
-    assert outline["deliverable"]["artifacts"] == [f"{RESEARCH_DIR}/提纲.md"]
-
-
-def test_plan_is_literature_report_delivery_binds_research_report_not_brief():
-    from agentcore.runtime.runs.playbooks import expand_playbook
-
-    rr, errs = expand_playbook(
-        "cite_write_review", {"topic": "医学文献", "angles": ["成像", "生成"]}
-    )
-    assert not errs
-    assert plan_is_literature_report_delivery(rr) is True
-
-    brief, b_errs = expand_playbook(
-        "map_fanout", {"topic": "开源选型", "angles": ["兼容", "生态"]}
-    )
-    assert not b_errs
-    assert plan_is_literature_report_delivery(brief) is False
-
+def test_plan_is_literature_report_delivery_binds_reviews_not_role_name():
     # 同等成文：已声明 reviews/ files 审校座
     assert plan_is_literature_report_delivery(
         [
             {
                 "role": "撰稿人",
                 "deliverable": {
-                    "form": "files",
                     "artifacts": ["AgentCore/文档/research/报告.md"],
                 },
             },
             {
                 "role": "学术审校员",
                 "deliverable": {
-                    "form": "files",
                     "artifacts": ["AgentCore/文档/reviews/审校报告.md"],
                 },
             },
         ]
     )
+    assert plan_is_literature_report_delivery(
+        [
+            {"role": "方向专员", "task": "摸底兼容"},
+            {"role": "方向专员", "task": "摸底生态"},
+        ]
+    ) is False
     # 仅角色名叫审校、未声明 reviews files → 不进文献降档
     assert plan_is_literature_report_delivery(
         [
             {
                 "role": "撰稿人",
                 "deliverable": {
-                    "form": "files",
                     "artifacts": ["AgentCore/文档/research/报告.md"],
                 },
             },
@@ -723,10 +672,9 @@ def test_transcript_web_search_evidence_gap_triggers_deficit():
     assert "结构化证据差" in gaps[0]["description"]
 
 
-def test_named_review_without_files_not_elevated_playbook_review_lands():
-    """名叫审校但未声明 files 不再被抬契约；playbook 审校默认落盘仍成立。"""
+def test_named_review_without_files_not_elevated():
+    """名叫审校但未声明 files 不再被抬契约；声明 reviews/ 才算审校座。"""
     from agentcore.runtime.runs.builder import build_run_plan
-    from agentcore.runtime.runs.playbooks import expand_playbook
     from agentcore.runtime.runs.research_quality import (
         INDEPENDENT_REVIEW_REPORT_DISCIPLINE,
         batch_declares_review_files,
@@ -741,7 +689,6 @@ def test_named_review_without_files_not_elevated_playbook_review_lands():
             {
                 "role": "轻量审校",
                 "deliverable": {
-                    "form": "files",
                     "artifacts": [f"{REVIEWS_DIR}/审校报告.md"],
                 },
             }
@@ -754,7 +701,7 @@ def test_named_review_without_files_not_elevated_playbook_review_lands():
                 "id": "fix",
                 "role": "修补员",
                 "task": "改炮塔购买",
-                "deliverable": {"form": "files", "requires_files": True},
+                "deliverable": {"artifacts": ["src/a.py"]},
             },
             {
                 "id": "review",
@@ -767,31 +714,16 @@ def test_named_review_without_files_not_elevated_playbook_review_lands():
                 "role": "验证员",
                 "task": "跑测试",
                 "depends_on": ["fix"],
-                "deliverable": {"form": "prose"},
             },
         ],
         id_prefix="thin_review")
     assert errors == []
     by_role = {n.role: n for n in plan.nodes}
     review = by_role["独立复核员"]
-    # 漏填=files；不因角色名钉审校 artifacts / 纪律段。
     assert review.deliverable is not None
     assert review.deliverable.artifacts == []
-    assert "form" not in review.deliverable.__dataclass_fields__
     assert INDEPENDENT_REVIEW_REPORT_DISCIPLINE not in (review.task or "")
 
     verify = by_role["验证员"]
     assert verify.deliverable is not None
     assert verify.deliverable.artifacts == []
-
-    # playbook 审校默认落盘仍成立
-    tasks, pb_errs = expand_playbook(
-        "cite_write_review", {"topic": "X", "angles": ["甲", "乙"]}
-    )
-    assert not pb_errs
-    pb_review = next(t for t in tasks if t["id"] == "review")
-    d = pb_review["deliverable"]
-    assert "form" not in d
-    assert d["artifacts"] == [f"{REVIEWS_DIR}/审校报告.md"]
-    assert INDEPENDENT_REVIEW_REPORT_DISCIPLINE in pb_review["task"]
-    assert batch_declares_review_files(tasks) is True

@@ -81,7 +81,7 @@ from agentcore.tools.builtin.web.web_fetch import (
     _extract_text,
     _make_snippet,
 )
-from agentcore.tools.protocol import ToolContext, ToolResult
+from agentcore.tools.protocol import RetrievalBudgetState, ToolContext, ToolResult
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 
@@ -717,7 +717,6 @@ async def test_web_fetch_not_a_web_url_survives_file_redirect(monkeypatch):
 def test_web_fetch_schema_routes_workspace_paths_to_file_read():
     schema = WebFetchTool().schema
     assert "file_read" in schema.description
-    assert "download_url" in schema.description
     assert "不要补 https://" not in schema.description
     url_desc = schema.parameters["properties"]["url"]["description"]
     assert "http://" in url_desc and "https://" in url_desc
@@ -2499,6 +2498,45 @@ async def test_web_search_empty_long_query_suggests_trim_to_core_words(monkeypat
     assert "2–3 个核心词" in note
 
 
+async def test_web_search_hit_receipt_has_no_search_how(monkeypatch):
+    """有命中且未过滤：回执不灌下一招 HOW（when-to-use 在按钮）。"""
+
+    class _Backend:
+        async def search(self, query, max_results=5, on_phase=None, *, language=None):
+            return [
+                SearchResult(
+                    "Alpha paper",
+                    "https://arxiv.org/abs/1",
+                    "alpha findings from the paper",
+                )
+            ]
+
+    monkeypatch.setattr(search_mod, "get_search_backend", lambda: _Backend())
+    result = await WebSearchTool().execute({"query": "alpha"}, _ctx())
+    assert result.success is True
+    payload = json.loads(result.output)
+    assert payload["results"]
+    assert "note" not in payload
+
+
+async def test_consecutive_empty_searches_append_strategy_change(monkeypatch):
+    """连续空注入：【须换策略】只在 streak≥2 由单一生成点挂上。"""
+
+    class _Backend:
+        async def search(self, query, max_results=5, on_phase=None, *, language=None):
+            return []
+
+    monkeypatch.setattr(search_mod, "get_search_backend", lambda: _Backend())
+    ctx = _ctx()
+    ctx.retrieval_budget = RetrievalBudgetState(limit=14)
+    tool = WebSearchTool()
+    first = json.loads((await tool.execute({"query": "q1"}, ctx)).output)
+    second = json.loads((await tool.execute({"query": "q2"}, ctx)).output)
+    assert "须换策略" not in (first.get("note") or "")
+    assert "须换策略" in (second.get("note") or "")
+    assert "禁止沿用" in second["note"]
+
+
 async def test_web_search_ignores_max_results_argument(monkeypatch):
     monkeypatch.setattr(search_cache_mod, "_registry", SearchCacheRegistry())
     seen: list[int] = []
@@ -2669,7 +2707,6 @@ def test_web_search_schema_documents_query_contract():
     assert "书名号" in blob  # 中文专名豁免
     assert "摘要优先" in blob  # 默认摘要优先基调
     assert "搜到 ≠ 可挂来源号" not in blob
-    assert "web_fetch" in blob  # 核对原文
     assert "聚焦查询" not in schema.description
     assert "补搜" not in schema.description
     assert "不要一上来并行" not in schema.description
@@ -3530,7 +3567,7 @@ def test_web_fetch_retire_steer_closes_web_search_thrash():
 
 
 def test_search_notes_skip_web_fetch_nudge_when_retired():
-    """After web_fetch retirement, empty/hit search notes must not urge deep-read."""
+    """web_fetch 已退役：空结果不催深读；须换策略不把 fetch 当下一步。"""
     from agentcore.tools.builtin.web._net import (
         POST_READ_RETIRE_SEARCH_HINT,
         clear_web_fetch_retired,
@@ -3546,10 +3583,8 @@ def test_search_notes_skip_web_fetch_nudge_when_retired():
     clear_web_fetch_retired(run_id)
     mark_web_fetch_retired(run_id)
 
-    empty = _empty_result_note("q", empty_streak=2, web_fetch_retired=True)
-    assert "先对已有命中 web_fetch" not in empty
-    assert "勿再催 web_fetch" in empty
-    assert "继续检索当默认出路" in empty
+    empty = _empty_result_note("q")
+    assert "web_fetch" not in empty
 
     weak = _strategy_change_note(empty_streak=2, web_fetch_retired=True)
     assert "先 web_fetch" not in weak

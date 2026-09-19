@@ -10,9 +10,8 @@ Gate: when ``spent >= engine_turn_token_ceiling`` (>0), reject new ``delegate`` 
 ``debate`` and soft-stop WaveScheduler admission (in-flight drain only). Nested
 sub-teams share this remaining pool — no reserved envelopes.
 
-When the ceiling is hit, inject a one-shot CEO wrap-up steer via the existing
-soft-gate seam (``maybe_inject_turn_token_budget_gate``) so the captain closes on
-completed output — no parallel channel, no force_finalize.
+When the ceiling is hit, new ``delegate`` / ``debate`` is rejected at the
+execute layer; the captain sees the reject receipt. No extra ``[系统提示]``.
 
 Orthogonal to per-worker ``engine_worker_token_ceiling``. No USD / tiers / CEO
 override / cancel-in-flight / nested envelopes / delivery-reserve soft gate.
@@ -128,13 +127,6 @@ def budget_skip_warning_for_active_scope(*, credential_source: str) -> str:
             TURN_AUTH_DEAD_REJECT_MESSAGE
         )
     return TURN_TOKEN_CEILING_WARNING
-
-
-def turn_token_budget_wrap_prompt() -> str:
-    """CEO one-shot ``[系统提示]``：触顶事实（新派已在执行层拒绝）。"""
-    ceiling = resolve_turn_token_ceiling()
-    spent = current_turn_tokens()
-    return f"[系统提示] 本回合累计 token 已触顶（已用 {spent} / 上限 {ceiling}）。"
 
 
 def tokens_from_journal_entries(entries: list[dict[str, Any]] | None) -> int:

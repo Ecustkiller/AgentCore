@@ -76,7 +76,7 @@ export interface FileSourceCaps {
   edit: boolean;
   /**
    * 轴3 快照（备份 / 版本 / 恢复）对该源可用（云端工作区为真，本地源 / 只读协作为假）。
-   * 对话工作区面板与文件中枢都据此门控版本 / 软删区 / 导出 ZIP 入口（见 WorkspacePanel、
+   * 对话工作区面板与文件中枢都据此门控版本 / 软删区入口（见 WorkspacePanel、
    * fileWorkbench/WorkspaceSection）——服务端对本机工作区一律 409，故先行门控，
    * 不让用户点进一个必然失败的动作。
    */
@@ -170,8 +170,9 @@ export interface FileSource {
   /** 写原始字节到 `path`（建/覆盖）。仅当 `caps.edit || caps.transfer`。 */
   writeBytes?(path: string, body: Blob): Promise<void>;
   /**
-   * 经浏览器把 `path` 存到用户磁盘。文件走单项下载；目录打成以该目录为根的 zip
-   *（传 `opts.isDir`）。仅当 `caps.transfer`。本机源不实现——文件已在盘上，用资源管理器。
+   * 经浏览器把 `path` 存到用户磁盘。仅单文件下载进入产品菜单；目录 zip 仍由
+   * `opts.isDir` 表达（合回等内部路径），不挂文件树。仅当 `caps.transfer`。
+   * 本机源不实现——文件已在盘上，用资源管理器。
    */
   download?(
     path: string,

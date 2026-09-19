@@ -1,7 +1,10 @@
 import {
+  agentNodeFaceIsStreaming,
+  agentNodeLiveInstantSig,
   agentNodeLiveSig,
   deriveAgentNodeLive,
 } from "@/components/graph/graphLive";
+import type { GraphScene } from "@/components/graph/scene";
 import type { AgentState, Execution, RunNode } from "@/stores/execution";
 import { describe, expect, it } from "vitest";
 
@@ -38,6 +41,22 @@ function run(
     sideKey: null,
     ...partial,
   };
+}
+
+function continuationCtx(body: string): RunNode["receivedContext"] {
+  return [
+    {
+      channel: "continuation",
+      heading: "continuation",
+      body,
+      chars: body.length,
+      truncated: false,
+      source_role: "",
+      source_run_id: "",
+      fidelity: "",
+      files: [],
+    },
+  ];
 }
 
 function agent(
@@ -122,6 +141,11 @@ describe("agentNodeLiveSig", () => {
     };
     expect(agentNodeLiveSig(next, "r1")).toBe(idleSig);
     expect(agentNodeLiveSig(next, "r2")).not.toBe(agentNodeLiveSig(base, "r2"));
+    expect(agentNodeLiveInstantSig(next, "r2")).toBe(
+      agentNodeLiveInstantSig(base, "r2"),
+    );
+    expect(agentNodeFaceIsStreaming(next, "r2")).toBe(true);
+    expect(agentNodeFaceIsStreaming(next, "r1")).toBe(false);
   });
 
   it("changes when tool_use_end flips status without changing toolCalls.length", () => {
@@ -164,6 +188,51 @@ describe("agentNodeLiveSig", () => {
       ],
     };
     expect(agentNodeLiveSig(after, "r1")).not.toBe(before);
+    expect(agentNodeLiveInstantSig(after, "r1")).not.toBe(
+      agentNodeLiveInstantSig(base, "r1"),
+    );
+  });
+
+  it("instant sig ignores tool char floods but follows tool name", () => {
+    const base = exec({
+      agents: [
+        agent({
+          id: "a1",
+          role: "研究员",
+          status: "working",
+          currentRunId: "r1",
+          toolProgress: { toolName: "file_write", chars: 12 },
+        }),
+      ],
+      runs: [run({ id: "r1", agentId: "a1", status: "running" })],
+    });
+    const agent0 = base.agents[0];
+    expect(agent0).toBeDefined();
+    if (!agent0) throw new Error("expected agent");
+    const moreChars: Execution = {
+      ...base,
+      agents: [
+        {
+          ...agent0,
+          toolProgress: { toolName: "file_write", chars: 4800 },
+        },
+      ],
+    };
+    const otherTool: Execution = {
+      ...base,
+      agents: [
+        {
+          ...agent0,
+          toolProgress: { toolName: "grep", chars: 12 },
+        },
+      ],
+    };
+    expect(agentNodeLiveInstantSig(moreChars, "r1")).toBe(
+      agentNodeLiveInstantSig(base, "r1"),
+    );
+    expect(agentNodeLiveInstantSig(otherTool, "r1")).not.toBe(
+      agentNodeLiveInstantSig(base, "r1"),
+    );
   });
 });
 
@@ -211,5 +280,56 @@ describe("deriveAgentNodeLive", () => {
     const face = deriveAgentNodeLive(execution, faceRun, deriveOpts);
     expect(face).not.toHaveProperty("reviewConcern");
     expect(face.outputPreview).toContain("建议重写");
+  });
+
+  it("seat fold follows continuation tail status and output", () => {
+    const execution = exec({
+      agents: [
+        agent({
+          id: "a1",
+          role: "计时测试员",
+          status: "idle",
+          outputChunks: ["old"],
+        }),
+        agent({
+          id: "a2",
+          role: "计时测试员",
+          status: "working",
+          currentRunId: "r1b",
+          outputChunks: ["new-tail"],
+        }),
+      ],
+      runs: [
+        run({ id: "r1", agentId: "a1", status: "cancelled" }),
+        run({
+          id: "r1b",
+          agentId: "a2",
+          status: "running",
+          continuesRunId: "r1",
+          continuationIndex: 1,
+          receivedContext: continuationCtx("取消"),
+        }),
+      ],
+    });
+    const host = execution.runs[0];
+    expect(host).toBeDefined();
+    if (!host) throw new Error("expected host");
+    const scene = {
+      seatFoldsByHost: new Map([["r1", ["r1b"]]]),
+      beatFoldsByHost: new Map(),
+      fold: {
+        descendants: new Map(),
+        debateUnits: new Set(),
+        folded: new Set(),
+        unitOf: new Map(),
+      },
+    } as unknown as GraphScene;
+    const face = deriveAgentNodeLive(execution, host, { ...deriveOpts, scene });
+    expect(face.status).toBe("running");
+    expect(face.runId).toBe("r1");
+    expect(face.outputPreview).toContain("new-tail");
+    expect(face.isRevision).toBe(true);
+    expect(face.continuationIndex).toBe(1);
+    expect(face.revisionSummary).toBe("取消");
   });
 });

@@ -167,8 +167,6 @@ def test_leaf_web_tools_do_not_import_runtime_or_llm() -> None:
         for p in _py_files(
             "tools/builtin/web",
             "tools/builtin/grep.py",
-            "tools/builtin/archive_create.py",
-            "tools/builtin/archive_extract.py",
             "tools/builtin/file_ops",
             "tools/cleared_write_stub.py",
         )
@@ -297,9 +295,11 @@ _RUNTIME_OVERSIZE_EXEMPT: frozenset[str] = frozenset(
         "delegate/completion.py",
         "delegate/delivery_status.py",
         "engine/loop.py",
+        "engine/tool_exec_call.py",
         "runs/builder.py",
         "runs/research_quality.py",
         "runs/wave.py",
+        "turn/runs.py",
     }
 )
 

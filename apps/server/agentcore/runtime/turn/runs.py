@@ -52,7 +52,7 @@ from agentcore.fulfill.user_signal import (
     push_turn_activity_done,
     push_turn_activity_running,
 )
-from agentcore.runtime.events import EventSink
+from agentcore.runtime.events import EventSink, message_end
 from agentcore.runtime.events.types import FinishReason
 
 logger = get_logger(__name__)
@@ -201,6 +201,19 @@ class TurnRunRegistry:
     def _mark_user_stopped(run: TurnRun) -> None:
         run.user_stopped = True
         setattr(run.task, _TASK_USER_STOPPED, True)
+
+    @staticmethod
+    def _emit_user_stop_close(run: TurnRun) -> None:
+        """Live ``message_end(cancelled)`` before child drain / salvage.
+
+        UI freezes on click; this frame confirms ``stopping`` → ``stopped``.
+        Wave teardown must not block it. Idempotent if salvage emits again.
+        """
+        sink = run.sink
+        if sink._closed or sink._stream_finish_reason is not None:
+            return
+        with contextlib.suppress(Exception):
+            sink.emit(message_end(FinishReason.CANCELLED))
 
     @staticmethod
     def _mark_superseded(run: TurnRun) -> None:
@@ -595,6 +608,7 @@ class TurnRunRegistry:
         if run is None or run.task.done():
             return False
         self._mark_user_stopped(run)
+        self._emit_user_stop_close(run)
         return True
 
     def stop(self, conversation_id: str) -> bool:
@@ -617,6 +631,7 @@ class TurnRunRegistry:
         if run is None or run.task.done():
             return False
         self._mark_user_stopped(run)
+        self._emit_user_stop_close(run)
         with contextlib.suppress(Exception):
             from agentcore.runtime.coordination.session import (
                 cancel_coordination_on_user_stop,

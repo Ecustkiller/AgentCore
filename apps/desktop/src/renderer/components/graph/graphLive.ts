@@ -13,6 +13,7 @@ import {
 import {
   coordinationWaitCaptainCaption,
   waitingWorkerRoles,
+  workerProgress,
 } from "@/components/chat/teamSynthesisPhase";
 import type { InjectGraphOverlay } from "@/lib/causalInject";
 import {
@@ -47,6 +48,7 @@ import {
 } from "./agentNode/shared";
 import { INPUT_ID } from "./constants";
 import { useGraphActions } from "./graphActions";
+import { useGraphLivePreviewTick } from "./graphLivePreviewTick";
 import {
   aggregateDebateRoundStatus,
   captainSinkPreview,
@@ -111,10 +113,10 @@ function chunkMetaSig(chunks: readonly string[]): string {
   return `${n}:${last?.length ?? 0}`;
 }
 
-function toolProgressSig(
+function toolProgressNameSig(
   tp: AgentState["toolProgress"] | null | undefined,
 ): string {
-  return tp ? `${tp.toolName}:${tp.chars}` : "";
+  return tp?.toolName ?? "";
 }
 
 function toolExecLiveSig(
@@ -147,12 +149,22 @@ function toolCallsSig(toolCalls: AgentState["toolCalls"] | undefined): string {
   return `${toolCalls.length}:${running}:${success}:${error}`;
 }
 
+function agentFaceInstantSig(agent: AgentState | undefined): string {
+  if (!agent) return "";
+  return [
+    toolProgressNameSig(agent.toolProgress),
+    toolExecLiveSig(agent.toolExecutionLive),
+    toolCallsSig(agent.toolCalls),
+  ].join("|");
+}
+
 function agentFaceSig(agent: AgentState | undefined): string {
   if (!agent) return "";
   return [
     chunkMetaSig(agent.outputChunks),
     chunkMetaSig(agent.reasoningChunks),
-    toolProgressSig(agent.toolProgress),
+    toolProgressNameSig(agent.toolProgress),
+    agent.toolProgress ? String(agent.toolProgress.chars) : "",
     toolExecLiveSig(agent.toolExecutionLive),
     toolCallsSig(agent.toolCalls),
   ].join("|");
@@ -186,6 +198,28 @@ export function agentNodeLiveSig(
   runId: string,
   foldedRunIds: readonly string[] = EMPTY_FOLDED,
 ): string {
+  return agentNodeRoundSig(execution, runId, foldedRunIds, agentFaceSig);
+}
+
+/**
+ * Instant Live signature for React subscriptions: status / phase / tool identity.
+ * Streaming chunk tails and tool char counts are excluded — those refresh via
+ * {@link useGraphLivePreviewTick} (~0.1s) so a token flood does not repaint the face.
+ */
+export function agentNodeLiveInstantSig(
+  execution: Execution | null,
+  runId: string,
+  foldedRunIds: readonly string[] = EMPTY_FOLDED,
+): string {
+  return agentNodeRoundSig(execution, runId, foldedRunIds, agentFaceInstantSig);
+}
+
+function agentNodeRoundSig(
+  execution: Execution | null,
+  runId: string,
+  foldedRunIds: readonly string[],
+  faceSig: (agent: AgentState | undefined) => string,
+): string {
   if (!execution) return "";
   const run = execution.runs.find((r) => r.id === runId);
   if (!run) return `missing:${runId}`;
@@ -197,9 +231,25 @@ export function agentNodeLiveSig(
   const parts: string[] = [];
   for (const r of round) {
     const agent = execution.agents.find((a) => a.id === r.agentId);
-    parts.push(`${r.id}:${runFaceSig(r)}:${agentFaceSig(agent)}`);
+    parts.push(`${r.id}:${runFaceSig(r)}:${faceSig(agent)}`);
   }
   return parts.join(";");
+}
+
+/** True when this face should tick preview text (host or a folded beat is running). */
+export function agentNodeFaceIsStreaming(
+  execution: Execution | null,
+  runId: string,
+  foldedRunIds: readonly string[] = EMPTY_FOLDED,
+): boolean {
+  if (!execution) return false;
+  const ids = [runId, ...foldedRunIds];
+  for (const id of ids) {
+    if (execution.runs.find((r) => r.id === id)?.status === "running") {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Captain sink Live signature — worker status transitions, not chunk deltas. */
@@ -285,13 +335,21 @@ export function deriveAgentNodeLive(
   const foldedCx = (opts.scene?.beatFoldsByHost.get(run.id) ?? [])
     .map((id) => runById.get(id))
     .filter((r): r is RunNode => r != null);
-  const roundRuns = foldedCx.length > 0 ? [run, ...foldedCx] : [run];
-  const aggregatedStatus: RunStatus =
-    foldedCx.length > 0
+  const seatFolded = (opts.scene?.seatFoldsByHost.get(run.id) ?? [])
+    .map((id) => runById.get(id))
+    .filter((r): r is RunNode => r != null)
+    .sort((a, b) => a.continuationIndex - b.continuationIndex);
+  const seatMode = seatFolded.length > 0;
+  const overlay = seatMode ? seatFolded : foldedCx;
+  const roundRuns = overlay.length > 0 ? [run, ...overlay] : [run];
+  const seatTail = seatFolded[seatFolded.length - 1] ?? null;
+  const aggregatedStatus: RunStatus = seatMode
+    ? (seatTail?.status ?? run.status)
+    : foldedCx.length > 0
       ? aggregateDebateRoundStatus(roundRuns.map((r) => r.status))
       : run.status;
   const activeBeat =
-    foldedCx.length > 0
+    !seatMode && foldedCx.length > 0
       ? debateRoundActiveBeat(
           run.status,
           foldedCx.map((r) => r.status),
@@ -300,10 +358,11 @@ export function deriveAgentNodeLive(
   const phaseLabel = debateRoundPhaseLabel(
     aggregatedStatus,
     activeBeat,
-    foldedCx.length > 0,
+    !seatMode && foldedCx.length > 0,
   );
-  const faceRun =
-    activeBeat === "cross_exam"
+  const faceRun = seatTail
+    ? seatTail
+    : activeBeat === "cross_exam"
       ? (foldedCx.find((r) => r.status === "running") ??
         foldedCx[foldedCx.length - 1] ??
         run)
@@ -314,8 +373,8 @@ export function deriveAgentNodeLive(
   const reasoningChunks = agent?.reasoningChunks ?? [];
   const outputChars = sumChunkChars(outputChunks);
   const focused =
-    opts.litRunId === run.id || foldedCx.some((r) => r.id === opts.litRunId);
-  const isContinuation = run.continuesRunId != null;
+    opts.litRunId === run.id || overlay.some((r) => r.id === opts.litRunId);
+  const isContinuation = seatMode || run.continuesRunId != null;
   const isSubtask =
     !isContinuation &&
     !!run.parentRunId &&
@@ -323,7 +382,7 @@ export function deriveAgentNodeLive(
     workerIdSet.has(run.parentRunId);
   const foldedChildCount = foldInfo?.descendants.get(run.id)?.length ?? 0;
   const durationMs =
-    foldedCx.length > 0 ? sumDurationMs(roundRuns) : run.durationMs;
+    overlay.length > 0 ? sumDurationMs(roundRuns) : run.durationMs;
   // 无 FX：同一节点内各 run 同凭据来源 → 同价卡表 → 同币种，按首个记名。
   let costNano = 0;
   let costEstimated = false;
@@ -339,8 +398,9 @@ export function deriveAgentNodeLive(
     (n, r) => n + (r.usage ? r.usage.input + r.usage.output : 0),
     0,
   );
-  const activateId =
-    aggregatedStatus === "running" && faceRun.id !== run.id
+  const activateId = seatMode
+    ? run.id
+    : aggregatedStatus === "running" && faceRun.id !== run.id
       ? faceRun.id
       : run.id;
   const cxActivateId =
@@ -412,12 +472,13 @@ export function deriveAgentNodeLive(
     handleDirection: opts.handleDirection,
     isSubtask,
     isRevision: isContinuation,
-    continuationIndex: run.continuationIndex,
+    continuationIndex: seatTail?.continuationIndex ?? run.continuationIndex,
     continuesRunId: run.continuesRunId,
     round: run.round,
-    debateBeat: isContinuation
-      ? debateBeatFromContext(run.receivedContext)
-      : null,
+    debateBeat:
+      !seatMode && isContinuation
+        ? debateBeatFromContext(run.receivedContext)
+        : null,
     debateRoundPhase: phaseLabel,
     debateCrossExamMark: settledMark,
     onActivateCrossExam:
@@ -426,7 +487,7 @@ export function deriveAgentNodeLive(
         : undefined,
     group: run.group,
     revisionSummary: isContinuation
-      ? revisionFeedbackSummary(run.receivedContext)
+      ? revisionFeedbackSummary(faceRun.receivedContext)
       : null,
     revised: run.revised,
     replacesRunId: run.replacesRunId,
@@ -522,12 +583,19 @@ function pendingShell(shell: AgentNodeShell): AgentNodeData {
 export function useAgentNodeLive(shell: AgentNodeShell): AgentNodeData {
   const actions = useGraphActions();
   const scene = useGraphScene();
-  const foldedRunIds = scene?.beatFoldsByHost.get(shell.runId) ?? EMPTY_FOLDED;
+  const foldedRunIds =
+    scene?.seatFoldsByHost.get(shell.runId) ??
+    scene?.beatFoldsByHost.get(shell.runId) ??
+    EMPTY_FOLDED;
   const liveSig = useActiveExecField((rt) =>
-    agentNodeLiveSig(projectRuntime(rt), shell.runId, foldedRunIds),
+    agentNodeLiveInstantSig(projectRuntime(rt), shell.runId, foldedRunIds),
   );
+  const streaming = useActiveExecField((rt) =>
+    agentNodeFaceIsStreaming(projectRuntime(rt), shell.runId, foldedRunIds),
+  );
+  const previewTick = useGraphLivePreviewTick(streaming);
   const getExecution = useLiveExecutionGetter();
-  // biome-ignore lint/correctness/useExhaustiveDependencies: liveSig is intentional invalidation key (getExecution reads fresh)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: liveSig + previewTick gate fresh derive
   return useMemo(() => {
     const execution = getExecution();
     if (!execution) return pendingShell(shell);
@@ -543,7 +611,7 @@ export function useAgentNodeLive(shell: AgentNodeShell): AgentNodeData {
       activateNode: actions.activateNode,
       toggleUnitExpand: actions.toggleUnitExpand,
     });
-  }, [liveSig, shell, scene, actions, getExecution]);
+  }, [liveSig, previewTick, shell, scene, actions, getExecution]);
 }
 
 export type EndpointLive = {
@@ -604,8 +672,9 @@ export function useCaptainEndpointLive(runId: string): EndpointLive {
         })
       : ("pending" as RunStatus);
     const waitingRoles = execution ? waitingWorkerRoles(execution) : [];
+    const seatWait = execution ? workerProgress(execution) : wait;
     const waitCaption = (
-      coordinationWaitCaptainCaption(wait, { waitingRoles }) ?? ""
+      coordinationWaitCaptainCaption(seatWait, { waitingRoles }) ?? ""
     ).trim();
     const sinkStatus: RunStatus =
       waitCaption && !detached ? "running" : captainStatus;

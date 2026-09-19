@@ -23,7 +23,7 @@ import {
 import { Loader2 } from "lucide-react";
 
 /**
- * Consent-first update explanation dialog (发布与门禁.md §7.6).
+ * Consent-first update explanation dialog (发布与门禁.md §1.6).
  *
  * Soft update: only the `available` consent surface — 「下载安装包」关窗并后台下载
  * 到系统「下载」文件夹。Force-update hard gate: non-dismissible multi-phase

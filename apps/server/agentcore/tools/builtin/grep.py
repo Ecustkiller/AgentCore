@@ -62,8 +62,7 @@ class GrepTool:
         return ToolSchema(
             name="grep",
             description=(
-                "用正则搜工作区文件内容（ripgrep / Rust regex）。返回 `path:line: text`。"
-                "按文件名用 `glob`。"
+                "用正则搜工作区文件内容。返回 `path:line: text`。"
             ),
             parameters={
                 "type": "object",
@@ -79,17 +78,17 @@ class GrepTool:
                     },
                     "glob": {
                         "type": "string",
-                        "description": "可选：按文件名过滤，如 '*.py'。",
+                        "description": "可选：按文件名过滤。",
                     },
                     "case_insensitive": {
                         "type": "boolean",
-                        "description": "不区分大小写匹配（默认 false）。",
+                        "description": "不区分大小写匹配。",
                         "default": False,
                     },
                     "files_only": {
                         "type": "boolean",
                         "description": (
-                            "只返回匹配到的文件列表及每个文件的匹配数，而非匹配行（默认 false）。"
+                            "只返回匹配到的文件列表及每个文件的匹配数，而非匹配行。"
                         ),
                         "default": False,
                     },

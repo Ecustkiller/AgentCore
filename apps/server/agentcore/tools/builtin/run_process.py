@@ -6,8 +6,10 @@ desk guest — short exec to background / kill, host-runtime logs, ledger keyed 
 ``conversation_id``.
 
 Not a model-facing tool. Callers pass the argument keys the execute body already
-reads: ``subcommand``, ``command``, ``cwd``, ``wait_for``, ``wait_timeout_seconds``,
-``name``, ``process_id``, ``tail_lines``.
+reads: ``subcommand``, ``command``, ``cwd``, ``wait_for``, ``name``,
+``process_id``. Ready-wait ceiling is frozen
+(``_DEFAULT_WAIT_TIMEOUT_SECONDS``); leftover ``wait_timeout_seconds`` is ignored.
+Read tail is frozen (``_DEFAULT_TAIL_LINES``); leftover ``tail_lines`` is ignored.
 """
 
 from __future__ import annotations
@@ -49,28 +51,17 @@ _WORKSPACE_IO_ERROR = "workspace_io_error"
 # Spawn / first-chunk ceiling when ``wait_for`` is absent (channel + engine).
 _FAST_TIMEOUT_SECONDS = 60.0
 _DEFAULT_WAIT_TIMEOUT_SECONDS = 30.0
-_MAX_WAIT_TIMEOUT_SECONDS = 300.0
 _DEFAULT_TAIL_LINES = 80
-
-
-def clamp_wait_timeout_seconds(raw: Any) -> float:
-    """Normalize ``wait_timeout_seconds`` into ``[1, MAX]`` (default when missing)."""
-    if raw is None:
-        return _DEFAULT_WAIT_TIMEOUT_SECONDS
-    try:
-        value = float(raw)
-    except (TypeError, ValueError):
-        return _DEFAULT_WAIT_TIMEOUT_SECONDS
-    return max(1.0, min(value, _MAX_WAIT_TIMEOUT_SECONDS))
 
 
 def process_op_timeout_seconds(arguments: dict[str, Any] | None) -> float:
     """Per-op channel / engine ceiling for one process-manage call.
 
     With ``wait_for``, both the channel transport deadline and the engine wall
-    must outlive ``wait_timeout + slack`` so the caller does not cancel while
-    the desktop is still waiting for the ready signal. Without ``wait_for``,
-    start returns after spawn + first chunk (fast path).
+    must outlive the frozen ready-wait + slack so the caller does not cancel
+    while the desktop is still waiting for the ready signal. Without
+    ``wait_for``, start returns after spawn + first chunk (fast path).
+    Leftover ``wait_timeout_seconds`` does not change the ceiling.
     """
     slack = float(settings.workspace_execute_timeout_slack_seconds)
     if not arguments:
@@ -80,7 +71,7 @@ def process_op_timeout_seconds(arguments: dict[str, Any] | None) -> float:
     )
     if not wait_for:
         return _FAST_TIMEOUT_SECONDS
-    return clamp_wait_timeout_seconds(arguments.get("wait_timeout_seconds")) + slack
+    return _DEFAULT_WAIT_TIMEOUT_SECONDS + slack
 
 
 def _error(
@@ -340,23 +331,13 @@ async def _cloud_dispatch(
         if not process_id:
             return _arg_error("read 需要 process_id 参数", start)
         wait_for = str(arguments.get("wait_for") or "").strip()
-        tail_lines = _DEFAULT_TAIL_LINES
-        if arguments.get("tail_lines") is not None:
-            try:
-                tail_lines = int(arguments["tail_lines"])
-            except (TypeError, ValueError):
-                return _arg_error("tail_lines 必须是整数", start)
         value = await read_desk_process(
             context.backend,
             conversation_id=conv,
             process_id=process_id,
             wait_for=wait_for,
-            wait_timeout_seconds=clamp_wait_timeout_seconds(
-                arguments.get("wait_timeout_seconds")
-            )
-            if wait_for
-            else 30.0,
-            tail_lines=tail_lines,
+            wait_timeout_seconds=_DEFAULT_WAIT_TIMEOUT_SECONDS,
+            tail_lines=_DEFAULT_TAIL_LINES,
             cache_bucket=bucket,
         )
         return _process_result(
@@ -404,9 +385,7 @@ async def _cloud_start(
         cwd=str(arguments.get("cwd") or "").strip(),
         name=str(arguments.get("name") or "").strip(),
         wait_for=wait_for,
-        wait_timeout_seconds=clamp_wait_timeout_seconds(
-            arguments.get("wait_timeout_seconds")
-        ),
+        wait_timeout_seconds=_DEFAULT_WAIT_TIMEOUT_SECONDS,
         cache_bucket=cache_bucket,
     )
     return _process_result("start", value, start, had_wait_for=bool(wait_for), cloud=True)
@@ -427,9 +406,7 @@ async def _cmd_start(
         args["cwd"] = cwd
     if wait_for:
         args["wait_for"] = wait_for
-        args["wait_timeout_seconds"] = clamp_wait_timeout_seconds(
-            arguments.get("wait_timeout_seconds")
-        )
+        args["wait_timeout_seconds"] = _DEFAULT_WAIT_TIMEOUT_SECONDS
     name = str(arguments.get("name") or "").strip()
     if name:
         args["name"] = name
@@ -450,18 +427,14 @@ async def _cmd_read(
     if not process_id:
         return _arg_error("read 需要 process_id 参数", start)
 
-    args: dict[str, Any] = {"process_id": process_id}
+    args: dict[str, Any] = {
+        "process_id": process_id,
+        "tail_lines": _DEFAULT_TAIL_LINES,
+    }
     wait_for = str(arguments.get("wait_for") or "").strip()
     if wait_for:
         args["wait_for"] = wait_for
-        args["wait_timeout_seconds"] = clamp_wait_timeout_seconds(
-            arguments.get("wait_timeout_seconds")
-        )
-    if arguments.get("tail_lines") is not None:
-        try:
-            args["tail_lines"] = int(arguments["tail_lines"])
-        except (TypeError, ValueError):
-            return _arg_error("tail_lines 必须是整数", start)
+        args["wait_timeout_seconds"] = _DEFAULT_WAIT_TIMEOUT_SECONDS
 
     assert context.workspace_channel is not None
     value = await context.workspace_channel.request(

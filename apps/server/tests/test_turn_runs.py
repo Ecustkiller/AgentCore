@@ -76,6 +76,45 @@ async def test_stop_unknown_conversation_is_false():
     assert reg.stop("missing") is False
 
 
+async def test_stop_emits_message_end_cancelled_before_unwind():
+    """user_stop 立刻 message_end；子任务收尸不得挡住这一帧。"""
+    reg = TurnRunRegistry()
+    sink = EventSink()
+    started = asyncio.Event()
+
+    async def _body() -> None:
+        started.set()
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(_body())
+    await started.wait()
+    reg.register(conversation_id="c1", task=task, sink=sink)
+
+    assert reg.stop("c1") is True
+    assert sink._stream_finish_reason == FinishReason.CANCELLED.value
+    ev = await asyncio.wait_for(sink.get(), timeout=1.0)
+    assert ev is not None
+    assert ev.type == EventType.MESSAGE_END
+    assert ev.payload["finish_reason"] == FinishReason.CANCELLED
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+async def test_mark_user_stop_emits_message_end_without_cancelling():
+    reg = TurnRunRegistry()
+    sink = EventSink()
+    task = asyncio.create_task(_never())
+    reg.register(conversation_id="c1", task=task, sink=sink)
+
+    assert reg.mark_user_stop("c1") is True
+    assert sink._stream_finish_reason == FinishReason.CANCELLED.value
+    assert not task.done()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
 async def test_stop_all_and_drain_cancels_every_live_run():
     from agentcore.runtime.turn.runs import TurnRunRegistry
 

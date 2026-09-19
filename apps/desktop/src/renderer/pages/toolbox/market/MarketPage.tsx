@@ -191,11 +191,6 @@ export function MarketPage() {
     try {
       const next = await installSkill(row.id);
       patchSkill(next);
-      notifySuccess(
-        row.hasUpdate
-          ? `已更新到「我的${TOOLBOX_KIND_LABEL.skills}」`
-          : `已安装到「我的${TOOLBOX_KIND_LABEL.skills}」`,
-      );
     } catch (err) {
       notifyError(err, row.hasUpdate ? "更新失败" : "安装失败");
     } finally {

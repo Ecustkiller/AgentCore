@@ -1,4 +1,50 @@
+import { isDebateTaggedRun } from "./debate";
 import type { Execution, RunNode } from "./types";
+
+/**
+ * 同人续写（非辩论）在协作图上折进现场根座位，不另开节点。
+ * 辩论续轮 / 质询仍走各自的列与 beat 折叠。
+ */
+export function isSeatFoldedContinuation(r: {
+  continuesRunId?: string | null;
+  stance?: string | null;
+  group?: string | null;
+}): boolean {
+  return r.continuesRunId != null && !isDebateTaggedRun(r);
+}
+
+/** 座位脸跟链尾：热修 / 再派后看最新一截的状态。辩论续写返回自身。 */
+export function seatFaceRun<
+  T extends {
+    id: string;
+    continuesRunId?: string | null;
+    continuationIndex?: number;
+    stance?: string | null;
+    group?: string | null;
+  },
+>(run: T, all: readonly T[]): T {
+  if (isSeatFoldedContinuation(run)) return run;
+  const folded = all
+    .filter((r) => r.continuesRunId === run.id && isSeatFoldedContinuation(r))
+    .sort((a, b) => (a.continuationIndex ?? 0) - (b.continuationIndex ?? 0));
+  return folded[folded.length - 1] ?? run;
+}
+
+/**
+ * 非辩论同人接续链。点座位根或任一续写 run 都返回整链；辩论链返回 null
+ *（那边仍走轮次横轨）。
+ */
+export function hotfixSeatChain(
+  execution: Execution,
+  runId: string,
+): ContinuationChain | null {
+  const chain = continuationChains(execution).find((c) =>
+    c.versions.some((v) => v.run.id === runId),
+  );
+  if (!chain) return null;
+  if (chain.versions.some((v) => isDebateTaggedRun(v.run))) return null;
+  return chain;
+}
 
 /** Minimal run shape for walking `continuesRunId` to the chain root. */
 export interface ContinuationLink {

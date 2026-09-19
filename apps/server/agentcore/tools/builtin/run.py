@@ -85,7 +85,6 @@ def run_op_timeout_seconds(
             {
                 "command": args.get("command"),
                 "wait_for": args.get("wait_for"),
-                "wait_timeout_seconds": args.get("wait_timeout_seconds"),
             }
         )
     return float(_VERIFY_DISASTER_SECONDS + _ENGINE_TIMEOUT_SLACK_SECONDS)
@@ -156,10 +155,6 @@ class RunTool:
                             "可选。匹配此正则再返回；省略则起来就返回。"
                         ),
                     },
-                    "wait_timeout_seconds": {
-                        "type": "number",
-                        "description": "可选。就绪等待上限（秒）；前台命令忽略。",
-                    },
                     "action": {
                         "type": "string",
                         "enum": ["read", "stop", "list"],
@@ -217,8 +212,6 @@ class RunTool:
             "subcommand": action,
             "process_id": arguments.get("process_id"),
             "wait_for": arguments.get("wait_for"),
-            "wait_timeout_seconds": arguments.get("wait_timeout_seconds"),
-            "tail_lines": arguments.get("tail_lines"),
         }
         return await process_manage(
             {k: v for k, v in mapped.items() if v is not None},
@@ -233,7 +226,6 @@ class RunTool:
             "command": arguments.get("command"),
             "cwd": arguments.get("cwd"),
             "wait_for": arguments.get("wait_for"),
-            "wait_timeout_seconds": arguments.get("wait_timeout_seconds"),
         }
         return await process_manage(
             {k: v for k, v in mapped.items() if v is not None},

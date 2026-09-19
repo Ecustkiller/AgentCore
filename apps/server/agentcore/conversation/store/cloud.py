@@ -303,6 +303,9 @@ def _usage_metadata(
     dm = result.get("duration_ms", duration_ms)
     if dm is not None:
         meta["duration_ms"] = int(dm)
+    gm = _positive_duration_ms(result.get("generation_ms"))
+    if gm is not None:
+        meta["generation_ms"] = gm
     if extra:
         meta.update(extra)
     return meta
@@ -588,6 +591,7 @@ class CloudStore:
     ) -> None:
         """Persist a cancelled turn's already-streamed reply + finished work."""
         from agentcore.core.assistant_content import prepare_assistant_content
+        from agentcore.runtime.turn.latency import interrupt_usage_clocks
 
         streamed = (content or "").strip()
         # Salvage B: cut at first DSML open; upsert still applies strip + length top.
@@ -610,6 +614,7 @@ class CloudStore:
                         "status": MESSAGE_STATUS_INCOMPLETE,
                         "incomplete": True,
                         "finish_reason": FinishReason.CANCELLED.value,
+                        **interrupt_usage_clocks(),
                     },
                     merge=True,
                 )
@@ -1179,6 +1184,7 @@ class CloudStore:
         cache_miss_tokens: int = 0,
         rounds: int = 0,
         duration_ms: int | None = None,
+        generation_ms: int | None = None,
         trace_id: str,
         finish_reason: str | None = None,
         llm_credentials: LLMCredentials | None = None,
@@ -1395,6 +1401,12 @@ class CloudStore:
         )
         if wall_ms is not None:
             usage_metadata["duration_ms"] = wall_ms
+        gen_ms = _positive_duration_ms(
+            generation_ms,
+            runs.get("generation_ms") if isinstance(runs, dict) else None,
+        )
+        if gen_ms is not None:
+            usage_metadata["generation_ms"] = gen_ms
         local_outcome = (
             coerce_produced_outcome(runs.get("outcome"))
             if isinstance(runs, dict)

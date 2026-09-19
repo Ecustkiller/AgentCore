@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.context.consult_sources import (
     MergedConsultSource,
     SkillConsultSource,
@@ -25,7 +23,6 @@ from agentcore.runtime.resolve.prompt.compose import (
 from agentcore.runtime.runs.executor.shared import _registry_without
 from agentcore.runtime.skills import build_system_skill_registry
 from agentcore.tools.builtin import build_builtin_registry
-from agentcore.tools.builtin.archive import ArchiveTool
 from agentcore.tools.builtin.browser import BrowserTool
 from agentcore.tools.builtin.consult import ConsultTool
 from agentcore.tools.builtin.file_ops.read import FileReadTool
@@ -40,7 +37,6 @@ from agentcore.tools.on_demand import (
     family_of,
     is_mcp_tool_name,
     is_on_demand_tool,
-    offer_tools_from_window,
 )
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registration import (
@@ -106,17 +102,11 @@ def test_resident_tools_are_not_on_the_roster():
         "run",
         "search_conversations",
         "read_conversation",
-        "mkdir",
         "file_delete",
     ):
         assert not is_on_demand_tool(name), name
     for name in (
         "file_batch",
-        "archive",
-        "table_ops",
-        "table_read",
-        "docs_read",
-        "docs_write",
         "debate",
         "md_export",
         "git",
@@ -132,32 +122,20 @@ def test_resident_tools_are_not_on_the_roster():
     assert not is_on_demand_tool("mcp")  # prefix is mcp_ + server + tool
 
 
-def test_openai_defs_omit_deferred_until_offer():
+def test_openai_defs_include_assembled_on_demand():
     reg = ToolRegistry()
     reg.register(FileReadTool())
     reg.register(MdExportTool())
     assert "md_export" in reg.names
     assert "file_read" in reg.names
-    assert set(reg.deferred_names) == {"md_export"}
-    assert _def_names(reg) == {"file_read"}
-
-    assert reg.offer("md_export") is True
     assert _def_names(reg) == {"file_read", "md_export"}
-    assert not reg.deferred_names
-    assert reg.offer("md_export") is False  # idempotent
-    # Retired names promote the current tool (consult / window recall), never execute.
-    reg2 = ToolRegistry()
-    reg2.register(MdExportTool())
-    assert reg2.offer("md_to_pdf") is True
-    assert _def_names(reg2) == {"md_export"}
 
 
-def test_execute_path_works_while_deferred():
-    """Zero-loss: catalog + get still see the tool before consult promotes it."""
+def test_execute_path_sees_opening_table():
     reg = ToolRegistry()
     host = HostTool()
     reg.register(host)
-    assert "host" not in _def_names(reg)
+    assert "host" in _def_names(reg)
     assert reg.get_optional("host") is host
     assert any(s.name == "host" for s in reg.list_all())
 
@@ -176,30 +154,14 @@ async def test_directory_lists_only_assembled_on_demand_tools():
 
 def test_directory_groups_sections_and_compacts_tool_families():
     host = ConsultDirectoryEntry(name="host", summary="本机排查", section="tool")
-    ops = ConsultDirectoryEntry(
-        name="table_ops",
-        summary="改表",
-        section="tool",
-        family="table_ops+table_read",
-        family_label="表格",
-    )
-    read = ConsultDirectoryEntry(
-        name="table_read",
-        summary="读表",
-        section="tool",
-        family="table_ops+table_read",
-        family_label="表格",
-    )
     skill = ConsultDirectoryEntry(
         name="data_file_landing", summary="整理表", section="skill", group="交付"
     )
-    out = render_on_demand_directory([host, ops, read, skill])
+    out = render_on_demand_directory([host, skill])
     assert "能力指引：" in out
     assert "交付：" in out
     assert "低频工具：" in out
     assert "- host：本机排查" in out
-    assert "- 表格：table_ops、table_read" in out
-    assert "- table_ops：改表" not in out
     assert "- data_file_landing：整理表" in out
 
 
@@ -228,40 +190,6 @@ async def test_merged_consult_copies_group_and_face():
     assert host.section == "tool"
 
 
-def test_offer_tools_from_window_promotes_consulted_and_called():
-    reg = ToolRegistry()
-    reg.register(HostTool())
-    reg.register(BrowserTool())
-    assert "host" in reg.deferred_names
-    msgs = [
-        LLMMessage(
-            role="assistant",
-            content="",
-            tool_calls=[
-                ToolCall(
-                    id="c1",
-                    function=ToolCallFunction(
-                        name="consult", arguments='{"name": "host"}'
-                    ),
-                )
-            ],
-        ),
-        LLMMessage(
-            role="assistant",
-            content="",
-            tool_calls=[
-                ToolCall(
-                    id="c2",
-                    function=ToolCallFunction(name="browser", arguments="{}"),
-                )
-            ],
-        ),
-    ]
-    assert offer_tools_from_window(reg, msgs) == 2
-    assert _def_names(reg) == {"host", "browser"}
-    assert offer_tools_from_window(reg, msgs) == 0
-
-
 def _named_stub(name: str):
     from agentcore.core.types import ToolApproval, ToolFace
     from agentcore.tools.protocol import ToolSchema
@@ -280,32 +208,10 @@ def _named_stub(name: str):
     return _Stub()
 
 
-def test_offer_tools_from_window_promotes_skill_mapped_debate():
-    reg = ToolRegistry()
-    reg.register(_named_stub("debate"))
-    assert "debate" in reg.deferred_names
-    msgs = [
-        LLMMessage(
-            role="assistant",
-            content="",
-            tool_calls=[
-                ToolCall(
-                    id="c1",
-                    function=ToolCallFunction(
-                        name="consult", arguments='{"name": "debate_and_review"}'
-                    ),
-                )
-            ],
-        )
-    ]
-    assert offer_tools_from_window(reg, msgs) == 1
-    assert _def_names(reg) == {"debate"}
-
-
 async def test_consult_user_skill_offers_bound_on_demand_tools():
     reg = ToolRegistry()
     reg.register(HostTool())
-    assert "host" in reg.deferred_names
+    assert "host" in _def_names(reg)
     body = "---\napply: on_demand\noffers_tools: host\n---\n怎么审\n"
 
     class _FakeRule:
@@ -329,7 +235,7 @@ async def test_consult_user_skill_offers_bound_on_demand_tools():
     assert hit is not None
     assert "怎么审" in hit.body
     assert "offers_tools" not in hit.body
-    assert "已启用工具 `host`" in hit.body
+    assert "已在开场表" in hit.body
     assert _def_names(reg) == {"host"}
 
 
@@ -359,36 +265,7 @@ async def test_consult_always_skill_does_not_repeat_body():
     assert hit is not None
     assert "每回合都带着的教法" not in hit.body
     assert "已在常驻设定中" in hit.body
-    assert "已启用工具 `host`" in hit.body
-    assert _def_names(reg) == {"host"}
-
-
-def test_offer_tools_from_window_reads_consult_enable_ack():
-    from agentcore.tools.on_demand import format_enabled_tools_note
-
-    reg = ToolRegistry()
-    reg.register(HostTool())
-    assert "host" in reg.deferred_names
-    msgs = [
-        LLMMessage(
-            role="assistant",
-            content="",
-            tool_calls=[
-                ToolCall(
-                    id="c1",
-                    function=ToolCallFunction(
-                        name="consult", arguments='{"name": "合同审查"}'
-                    ),
-                )
-            ],
-        ),
-        LLMMessage(
-            role="tool",
-            content="怎么审" + format_enabled_tools_note(["host"]),
-            tool_call_id="c1",
-        ),
-    ]
-    assert offer_tools_from_window(reg, msgs) == 1
+    assert "已在开场表" in hit.body
     assert _def_names(reg) == {"host"}
 
 
@@ -437,8 +314,7 @@ async def test_consult_debate_and_review_offers_debate():
     )
     hit = await merged.fetch_hit("u", "debate_and_review")
     assert hit is not None
-    assert "已启用工具 `debate`" in hit.body
-    assert "本回合下一模型轮" in hit.body
+    assert "已在开场表" in hit.body
     assert _def_names(reg) == {"debate"}
 
 
@@ -482,34 +358,13 @@ def test_explore_profile_unregisters_even_when_pending():
 
 
 async def test_consult_offers_export_and_resolves_retired_names():
+    """md_export has no consult HOW; it is already on the opening table."""
     reg = ToolRegistry()
     reg.register(MdExportTool())
     src = ToolConsultSource(registry=reg, audience="ceo")
-    body = await src.fetch_by_name("u", "md_export")
-    assert body is not None
-    assert "已启用工具 `md_export`" in body
-    assert "md_to_pdf" not in body
-    assert _def_names(reg) == {"md_export"}
-
-    reg2 = ToolRegistry()
-    reg2.register(MdExportTool())
-    retired = await ToolConsultSource(registry=reg2, audience="ceo").fetch_by_name(
-        "u", "md_to_docx"
-    )
-    assert retired is not None
-    assert "已启用工具 `md_export`" in retired
-    assert _def_names(reg2) == {"md_export"}
-
-
-async def test_consult_archive_enables_the_tool():
-    assert family_of("archive") == frozenset({"archive"})
-    reg = ToolRegistry()
-    reg.register(ArchiveTool())
-    src = ToolConsultSource(registry=reg, audience="ceo")
-    body = await src.fetch_by_name("u", "archive")
-    assert body is not None
-    assert "已启用工具 `archive`" in body
-    assert _def_names(reg) == {"archive"}
+    assert "md_export" in _def_names(reg)
+    assert await src.fetch_by_name("u", "md_export") is None
+    assert await src.fetch_by_name("u", "md_to_docx") is None
 
 
 async def test_host_consult_returns_how():
@@ -518,8 +373,7 @@ async def test_host_consult_returns_how():
     src = ToolConsultSource(registry=reg, audience="ceo")
     body = await src.fetch_by_name("u", "host")
     assert body is not None
-    assert "已启用工具 `host`" in body
-    assert "本回合下一模型轮" in body
+    assert "已在开场表" in body
     assert "通用知识问答" in body
     assert "通识 FAQ" not in body
     assert "Get-WinEvent" in body
@@ -534,25 +388,19 @@ async def test_host_consult_worker_gets_enable_ack_not_ceo_how():
     src = ToolConsultSource(registry=reg, audience="worker")
     body = await src.fetch_by_name("u", "host")
     assert body is not None
-    assert "已启用工具 `host`" in body
-    assert "本回合下一模型轮" in body
+    assert "已在开场表" in body
     assert "schema 免批" not in body
     assert "通识 FAQ" not in body
     assert "Get-WinEvent" not in body
 
 
-async def test_git_consult_enables_without_handbook():
-    """No git skill: consult only offers the tool; body is enable-ack."""
+async def test_git_consult_already_on_table():
+    """No git HOW: consult misses; the tool is already on the opening table."""
     reg = ToolRegistry()
     reg.register(GitTool())
     src = ToolConsultSource(registry=reg, audience="ceo")
-    assert "git" not in _def_names(reg)
-    body = await src.fetch_by_name("u", "git")
-    assert body is not None
-    assert "已启用工具 `git`" in body
-    assert "本回合下一模型轮" in body
-    assert "HOW→consult(git)" not in body
-    assert _def_names(reg) == {"git"}
+    assert "git" in _def_names(reg)
+    assert await src.fetch_by_name("u", "git") is None
 
 
 async def test_consult_unknown_or_unassembled_is_miss():
@@ -583,7 +431,7 @@ async def test_consult_cache_does_not_skip_tool_offer():
         result = await tool.execute({"name": "host"}, _ctx())
         assert result.success
         assert result.output != "STALE — must not skip offer"
-        assert "已启用工具 `host`" in (result.output or "")
+        assert "已在开场表" in (result.output or "")
         assert "host" in _def_names(reg)
         assert result.display["origin"] == "system"
         assert "kind" not in result.display
@@ -595,7 +443,6 @@ def test_clone_preserves_already_offered_tools():
     base = ToolRegistry()
     base.register(HostTool())
     base.register(FileReadTool())
-    base.offer("host")
     cloned = _registry_without(base, "file_read")
     assert "host" in cloned.names
     assert "host" in _def_names(cloned)
@@ -612,8 +459,10 @@ def test_preamble_and_core_make_consult_discoverable():
     assert "成套" not in preamble
     assert "不必等用户再发一条" not in preamble
     assert "下一模型轮" not in _DEFAULT_SYSTEM_PROMPT
-    assert "本回合下一模型轮" in desc
-    assert "成套" in desc
+    assert "已装配工具在开场表" in desc
+    assert "不必靠查阅进表" in desc
+    assert "下一模型轮" not in desc
+    assert "成套" not in desc
     assert "consult(browser)" not in _CEO_CORE_HINT
     # consult 钩在按需目录 / 装配后的 CEO 串，不进 <身份> 核。
     assert "consult(name)" not in _CEO_CORE_HINT
@@ -630,10 +479,6 @@ def test_family_of_covers_browser_and_solo_tools():
     assert browser == frozenset({"browser"})
     assert family_of("run") == frozenset({"run"})
     assert family_of("host") == frozenset({"host"})
-    assert family_of("table_ops") == frozenset({"table_ops", "table_read"})
-    assert family_of("table_read") == frozenset({"table_ops", "table_read"})
-    assert family_of("docs_read") == frozenset({"docs_read", "docs_write"})
-    assert family_of("docs_write") == frozenset({"docs_read", "docs_write"})
     assert family_of("debate") == frozenset({"debate"})
     assert family_of("md_export") == frozenset({"md_export"})
     assert "md_to_docx" not in ON_DEMAND_TOOL_NAMES
@@ -685,7 +530,6 @@ _STUFFED_WORKER_RESIDENT = frozenset(
         "file_list",
         "glob",
         "file_delete",
-        "mkdir",
         "grep",
         "run",
         "escalate",
@@ -712,32 +556,19 @@ def _stuffed_worker() -> ToolRegistry:
     return registry
 
 
-def test_stuffed_worker_opening_table_omits_on_demand_tools():
-    """Locks the opening FC win: 22 registered; consult 另 wire，不在此表."""
+def test_stuffed_worker_opening_table_includes_assembled_tools():
+    """Assembled tools — including former on-demand — sit on the opening FC table."""
     registry = _stuffed_worker()
-    assert registry.count == 22
+    assert registry.count == 18
     assert "read_image" not in registry.names
     offered = _def_names(registry)
-    assert offered == _STUFFED_WORKER_RESIDENT
-    chars = sum(
-        len(json.dumps(d, ensure_ascii=False)) for d in registry.get_openai_definitions()
-    )
-    # 2026-09-18 git 出开场表（按需）。实测 6463。锁回实测整十。
-    # 2026-09-18 file_write 用户规则 when-to-use。实测 6486。锁回实测整十。
-    # 2026-09-18 用户规则条目 `.agentcore/规则` 进 file_list / file_delete。实测 6533。锁回实测整十。
-    # 2026-09-19 file_read 图片走当前主力。实测 6555。锁回实测整十。
-    assert chars <= 6560, f"队员开场工具表变胖：{chars}"
-    deferred = set(registry.deferred_names)
-    assert deferred <= ON_DEMAND_TOOL_NAMES
-    assert "browser" in deferred
-    assert "git" in deferred
-    assert "run" not in deferred
-    assert "host" in deferred
-    assert "md_export" in deferred
+    assert offered == set(registry.names)
+    assert offered >= _STUFFED_WORKER_RESIDENT
+    assert {"browser", "git", "host", "md_export"} <= offered
 
 
 def _playwright_mcp_result(*, tool_count: int = 24) -> McpDiscoverResult:
-    """A Playwright-sized batch: many tools, none should land on the opening table."""
+    """A Playwright-sized batch: assembled MCP lands on the opening table."""
     specs = tuple(
         McpToolSpec(
             server_id="playwright",
@@ -756,38 +587,32 @@ def _playwright_mcp_result(*, tool_count: int = 24) -> McpDiscoverResult:
     )
 
 
-async def test_stuffed_worker_opening_table_omits_mcp_tools():
-    """Hanging MCP must not grow the opening FC table (Playwright = 24 schemas)."""
+async def test_stuffed_worker_opening_table_includes_mcp_tools():
+    """Assembled MCP lands on the opening FC table; consult is HOW-only (miss)."""
     registry = _stuffed_worker()
     opening_before = _def_names(registry)
     count_before = registry.count
-    assert count_before == 22
-    assert opening_before == _STUFFED_WORKER_RESIDENT
+    assert count_before == 18
+    assert opening_before == set(registry.names)
 
     registered = register_mcp_tools(registry, _playwright_mcp_result(tool_count=24))
     assert registered == 24
-    assert registry.count == 46
-    offered = _def_names(registry)
-    assert offered == opening_before
+    assert registry.count == 42
     mcp_names = {n for n in registry.names if n.startswith("mcp_")}
     assert len(mcp_names) == 24
-    assert mcp_names <= set(registry.deferred_names)
-    assert mcp_names.isdisjoint(offered)
+    offered = _def_names(registry)
+    assert mcp_names <= offered
+    assert offered == set(registry.names)
 
     first = next(iter(sorted(mcp_names)))
     src = ToolConsultSource(registry=registry)
-    body = await src.fetch_by_name("u", first)
-    assert body is not None
-    assert f"已启用工具 `{first}`" in body
-    offered_after = _def_names(registry)
-    assert mcp_names <= offered_after
-    assert offered_after == opening_before | mcp_names
+    assert await src.fetch_by_name("u", first) is None
     playwright_family = family_of(first, registry=registry)
     assert playwright_family == mcp_names
 
 
-def test_ceo_chat_tools_after_assemble_wire_hold_deferred_work_tools():
-    """CEO holds notify + logs + mcp_*; notify/mcp deferred; logs opening-resident."""
+def test_ceo_chat_tools_after_assemble_wire_include_work_tools():
+    """CEO holds logs + mcp_* + debate on the opening table."""
     from agentcore.llm.profiles import default_turn_profiles
     from agentcore.runtime.events import EventSink
     from agentcore.runtime.resolve.prepare import (
@@ -836,19 +661,14 @@ def test_ceo_chat_tools_after_assemble_wire_hold_deferred_work_tools():
     assert len(mcp_names) == 2
     assert names.isdisjoint({"escalate", "handoff"})
 
-    deferred = set(mcp_names)
-    assert deferred <= set(chat_tools.deferred_names)
     offered = _def_names(chat_tools)
-    assert deferred.isdisjoint(offered)
+    assert mcp_names <= offered
     assert {"search_conversations", "read_conversation"} <= offered
-    assert {"debate"} <= set(
-        chat_tools.deferred_names
-    )
-    assert {"debate"}.isdisjoint(offered)
+    assert "debate" in offered
 
 
-async def test_mcp_directory_lists_assembled_tools_and_consult_promotes_server_family():
-    """Catalog lists MCP by live description; consult offers the whole Server."""
+async def test_mcp_directory_omits_assembled_tools_already_on_table():
+    """MCP is on the opening table; the model catalog does not list it as HOW."""
     registry = ToolRegistry()
     registry.register(FileReadTool())
     registry.register(
@@ -881,25 +701,19 @@ async def test_mcp_directory_lists_assembled_tools_and_consult_promotes_server_f
             input_schema={"type": "object", "properties": {}},
         )
     )
-    assert _def_names(registry) == {"file_read"}
+    assert _def_names(registry) == {
+        "file_read",
+        "mcp_echo_ping",
+        "mcp_echo_list",
+        "mcp_fs_read",
+    }
     src = ToolConsultSource(registry=registry)
     entries = await src.list_directory("u")
-    names = [e.name for e in entries]
-    assert names == ["mcp_echo_ping", "mcp_echo_list", "mcp_fs_read"]
-    by_name = {e.name: e.summary for e in entries}
-    assert "Ping the echo server" in by_name["mcp_echo_ping"]
-    assert "Echo" in by_name["mcp_echo_ping"]
-    assert "file_read" not in names
-
-    body = await src.fetch_by_name("u", "mcp_echo_ping")
-    assert body is not None
-    assert "已启用工具 `mcp_echo_ping`" in body
-    assert "mcp_echo_list" in body
-    assert _def_names(registry) == {"file_read", "mcp_echo_ping", "mcp_echo_list"}
-    assert "mcp_fs_read" in registry.deferred_names
+    assert [e.name for e in entries] == []
+    assert await src.fetch_by_name("u", "mcp_echo_ping") is None
 
 
-async def test_consult_mcp_server_alias_offers_family():
+async def test_consult_mcp_server_alias_is_not_a_how_entry():
     registry = ToolRegistry()
     registry.register(
         McpDynamicTool(
@@ -924,12 +738,8 @@ async def test_consult_mcp_server_alias_offers_family():
     src = ToolConsultSource(registry=registry)
     entries = await src.list_directory("u")
     rendered = render_on_demand_directory(entries)
-    assert "连接器：" in rendered
-    assert "MCP · Echo：mcp_echo_ping、mcp_echo_list" in rendered
-    assert "- mcp_echo_ping：" not in rendered
-    body = await src.fetch_by_name("u", "echo")
-    assert body is not None
-    assert "已启用工具 `mcp_echo_ping`" in body or "已启用工具 `mcp_echo_list`" in body
+    assert "连接器：" not in rendered
+    assert await src.fetch_by_name("u", "echo") is None
     assert "mcp_echo_ping" in _def_names(registry)
     assert "mcp_echo_list" in _def_names(registry)
 
@@ -969,9 +779,7 @@ async def test_consult_tool_promotes_mcp_and_skips_stale_cache():
         result = await tool.execute({"name": "mcp_echo_ping"}, _ctx())
         assert result.success
         assert result.output != "STALE — must not skip offer"
-        assert "已启用工具 `mcp_echo_ping`" in (result.output or "")
+        assert "没有名为" in (result.output or "")
         assert "mcp_echo_ping" in _def_names(reg)
-        assert result.display["origin"] == "system"
-        assert "kind" not in result.display
     finally:
         consulted_memory_cache.reset(token)

@@ -1,6 +1,6 @@
 """Audit-gate tests: engine soft/hard wrap-up block is withdrawn.
 
-Playbook stamps remain. Scripted fake provider — zero LLM.
+Scripted fake provider — zero LLM.
 """
 
 from __future__ import annotations
@@ -151,7 +151,7 @@ async def _run_captain(
 
 
 def test_nudge_copy_cites_audit_keywords():
-    """Engine audit [系统提示] copy is withdrawn; playbook still expands review nodes."""
+    """Engine audit [系统提示] copy is withdrawn."""
     from agentcore.runtime.engine import governance as gov
 
     assert not hasattr(gov, "audit_gate_nudge_prompt")
@@ -160,7 +160,7 @@ def test_nudge_copy_cites_audit_keywords():
     assert not hasattr(gov, "maybe_inject_audit_gate")
 
 
-def test_hard_prompt_cites_new_playbook_ids():
+def test_hard_prompt_withdrawn():
     from agentcore.runtime.engine import governance as gov
 
     assert not hasattr(gov, "audit_gate_hard_prompt")
@@ -204,8 +204,7 @@ def test_should_audit_gate_requires_hard_flag():
 class _AuditHardStubTool(_StubTool):
     """Delegate stub that stamps audit_hard so soft gate can fire in integration tests.
 
-    Also stamps includes_review so the hard block does not discard the post-nudge
-    wrap-up (mirrors cite_write_review playbook with built-in review).
+    Also stamps includes_review so the hard block does not discard the post-nudge wrap-up.
     """
 
     async def execute(self, arguments, context) -> ToolResult:  # noqa: ANN001
@@ -290,7 +289,7 @@ async def test_hard_required_without_review_blocks_then_second_delegate_delivers
 
 @pytest.mark.asyncio
 async def test_substantial_without_audit_hard_skips_soft_gate():
-    """map_fanout / ordinary multi-angle: substantial but no hard → no soft nudge."""
+    """Ordinary multi-angle: substantial but no hard → no soft nudge."""
     delegate = _StubTool(name="delegate", face=ToolFace.ORCHESTRATION)
     provider = _ScriptedProvider(
         [

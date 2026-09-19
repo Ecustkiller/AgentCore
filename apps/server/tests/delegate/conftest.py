@@ -75,7 +75,7 @@ class LocalBackend:
 class NestingProvider:
     """Fake LLM driving exactly one nested delegation level."""
 
-    CAPTAIN_MARK = "再向下委派一层子团队"
+    CAPTAIN_MARK = "你的子成员"
 
     def __init__(self, usage: TokenUsage | None = None) -> None:
         self._usage = usage
@@ -83,7 +83,8 @@ class NestingProvider:
 
     async def stream(self, request):
         system = next((m.content or "" for m in request.messages if m.role == "system"), "")
-        is_captain = self.CAPTAIN_MARK in system
+        user = next((m.content or "" for m in request.messages if m.role == "user"), "")
+        is_captain = self.CAPTAIN_MARK in user or self.CAPTAIN_MARK in system
         has_result = any(m.role == "tool" for m in request.messages)
         # One-level harness: only the first captain nests. Under MAX=3, depth-2 is
         # also captain — do not auto-fan deeper or tree-shape asserts explode.

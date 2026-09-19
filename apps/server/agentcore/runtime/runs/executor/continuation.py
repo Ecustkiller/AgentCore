@@ -66,27 +66,6 @@ from agentcore.tools.registry import ToolRegistry
 logger = get_logger(__name__)
 
 
-def _strip_historical_reasoning(transcript: list[LLMMessage]) -> list[LLMMessage]:
-    """Drop prior-beat ``reasoning_content`` before continue_run replays transcript.
-
-    DeepSeek ignores historical reasoning across turns; keeping it only wastes input
-    tokens. Copies via ``replace`` so the stored session transcript is untouched until
-    the continuation result is committed. Within this beat, ``react_loop`` still
-    records reasoning on new tool-call turns; ``openai_compatible`` echoes those (or
-    pads ``""`` when omitted) — historical tool-call turns with ``None`` after strip
-    get the same empty-string pad at payload time.
-    """
-    out: list[LLMMessage] = []
-    for m in transcript:
-        if m.role == "assistant" and (
-            m.reasoning_content is not None or m.thinking_blocks is not None
-        ):
-            out.append(replace(m, reasoning_content=None, thinking_blocks=None))
-        else:
-            out.append(m)
-    return out
-
-
 def _record_continuation_run_head(
     run_id: str,
     messages: list[LLMMessage],
@@ -297,7 +276,7 @@ async def _continue_run_scoped(
             write_coordinator=coord,
             write_ancestors=frozenset(set(prior_anc) | {session.run_id}),
         )
-        messages = _strip_historical_reasoning(session.transcript)
+        messages = list(session.transcript)
         citations: list[dict] = []
         worker_tools = tools
         # 真纯丙：续派也不再靠 spec.tools 白名单收窄；H2：prose 不再硬卸写盘。

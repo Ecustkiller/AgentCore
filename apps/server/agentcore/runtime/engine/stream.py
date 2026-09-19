@@ -198,6 +198,13 @@ async def stream_llm_round(
         and get_log_value("cost_role") == "captain"
         and latency_probe.begin_captain_stream()
     )
+    # Decode window: first output chunk → this stream's end (captain + workers).
+    first_out_mono: float | None = None
+
+    def _note_decode_chunk() -> None:
+        nonlocal first_out_mono
+        if first_out_mono is None:
+            first_out_mono = time.monotonic()
 
     def _note_content_visible() -> None:
         if record_ttft and latency_probe is not None:
@@ -210,11 +217,13 @@ async def stream_llm_round(
     )
 
     def _clear_accumulators() -> None:
+        nonlocal first_out_mono
         content_parts.clear()
         reasoning_parts.clear()
         tc_accumulators.clear()
         tc_progress_at.clear()
         hold.discard()
+        first_out_mono = None
 
     def _reset_attempt_state() -> None:
         _clear_accumulators()
@@ -287,18 +296,21 @@ async def stream_llm_round(
                             reasoning_parts.append(chunk.delta_reasoning)
                             emit_reasoning(chunk.delta_reasoning)
                             hold.note_reasoning()
+                            _note_decode_chunk()
                             if record_ttft and latency_probe is not None:
                                 latency_probe.note_reasoning_chunk()
 
                         if chunk.delta_content:
                             content_parts.append(chunk.delta_content)
                             hold.offer_content(chunk.delta_content)
+                            _note_decode_chunk()
 
                         if chunk.finish_reason:
                             finish_reason = chunk.finish_reason
 
                         if chunk.delta_tool_calls:
                             hold.flush()
+                            _note_decode_chunk()
                             if record_ttft and latency_probe is not None:
                                 latency_probe.note_content_or_tool_chunk()
                             for tc_delta in chunk.delta_tool_calls:
@@ -400,6 +412,11 @@ async def stream_llm_round(
     finally:
         if record_ttft and latency_probe is not None:
             latency_probe.end_captain_stream()
+
+    if first_out_mono is not None and latency_probe is not None:
+        latency_probe.add_generation_ms(
+            int((time.monotonic() - first_out_mono) * 1000)
+        )
 
     content = "".join(content_parts)
     reasoning = "".join(reasoning_parts)

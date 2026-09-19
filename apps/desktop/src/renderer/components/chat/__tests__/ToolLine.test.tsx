@@ -210,7 +210,7 @@ describe("ToolLine · 过程工具默认折叠", () => {
     expect(screen.queryByText(/搜索：/)).toBeNull();
   });
 
-  it("inlines web_search result count into the title row when collapsed", () => {
+  it("does not inline web_search result count into the title row when collapsed", () => {
     const { container } = render(
       <ToolLine
         step={step({
@@ -232,13 +232,12 @@ describe("ToolLine · 过程工具默认折叠", () => {
         })}
       />,
     );
-    expect(screen.getByText(/1 result/)).toBeTruthy();
-    expect(screen.getByText(/1 result/).className).toMatch(/max-w-\[40%\]/);
+    expect(screen.queryByText(/1 result/)).toBeNull();
     expect(screen.queryByText("深圳天气预报")).toBeNull();
     expect(collapsedSubline(container)).toBeNull();
   });
 
-  it("inlines web_search count on nested rows too", () => {
+  it("does not inline web_search count on nested rows either", () => {
     const { container } = render(
       <ToolLine
         nested
@@ -259,7 +258,7 @@ describe("ToolLine · 过程工具默认折叠", () => {
         })}
       />,
     );
-    expect(screen.getByText(/5 results/)).toBeTruthy();
+    expect(screen.queryByText(/5 results/)).toBeNull();
     expect(screen.queryByText("hit 1")).toBeNull();
     expect(collapsedSubline(container)).toBeNull();
   });
@@ -1031,12 +1030,38 @@ describe("ToolLineGroup · web_fetch 来源集合", () => {
 
   it("merges ≥2 web_fetch into a count-title header without collapsed pills", () => {
     renderWithTooltip(<ToolLineGroup tools={sources} isStreaming={false} />);
-    expect(screen.getByText("Read page · 2 sources")).toBeTruthy();
+    const header = screen.getByRole("button", {
+      name: /Read page · 2 sources/,
+    });
+    expect(header).toBeTruthy();
+    // Button primitive defaults to font-medium; process headers override to
+    // font-normal (ToolLine / ThinkingHeader / DefaultToolLineGroup).
+    expect(header.className).toMatch(/font-normal/);
     // 折叠态收敛为纯标题行（对齐工具组 / 思考过程）——来源 pills 移到展开态，不再平铺。
     expect(screen.queryByText("zhuanlan.zhihu.com")).toBeNull();
     expect(screen.queryByText("baike.baidu.com")).toBeNull();
     // Merged view does not inline page bodies.
     expect(screen.queryByText(/正文不应出现在合并态/)).toBeNull();
+  });
+
+  it("does not hang 未找到 on the collapsed source-collection header", () => {
+    renderWithTooltip(
+      <ToolLineGroup
+        tools={[
+          sources[0],
+          readUrlStep("r-fail", {
+            url: "https://missing.example.com/x",
+            title: "",
+            site: "missing.example.com",
+            status: "error",
+          }),
+        ]}
+        isStreaming={false}
+      />,
+    );
+    expect(screen.getByText("Read page · 2 sources")).toBeTruthy();
+    expect(screen.queryByTestId("tool-group-fault")).toBeNull();
+    expect(screen.queryByText("未找到")).toBeNull();
   });
 
   it("expands to search-style title · domain rows with snippet, without body", () => {
@@ -1137,7 +1162,7 @@ describe("ToolLineGroup · web_search 平铺", () => {
     expect(screen.getByText(/Search web 1 · Run code 1/)).toBeTruthy();
     fireEvent.click(screen.getByText(/Search web 1 · Run code 1/));
     expect(screen.getByText("天气")).toBeTruthy();
-    expect(screen.getByText(/3 results/)).toBeTruthy();
+    expect(screen.queryByText(/3 results/)).toBeNull();
     expect(screen.queryByText("天气 hit 1")).toBeNull();
     expect(collapsedSubline(container)).toBeNull();
   });

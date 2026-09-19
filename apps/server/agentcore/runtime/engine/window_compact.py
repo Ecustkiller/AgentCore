@@ -1,14 +1,13 @@
-"""Worker mid-run window compaction: fold older ReAct rounds into a rolling summary.
+"""Worker / captain mid-run window compaction: fold older ReAct rounds into a rolling summary.
 
-Orthogonal to conversation compaction (cross-user-turn chat) and to ``tool_clear``
-/ ``write_args_clear`` (same-window tool-result / write-arg projection). This
-layer compresses the worker's own assistant/tool *transcript* once it is long
-enough that context rot sets in — well before the 8M fuse or a 1M model window.
+Orthogonal to conversation compaction (cross-user-turn chat). Sliding
+``tool_clear`` / ``write_args_clear`` / browser-snapshot omit used to rewrite
+mid-history every round; this layer is the only same-window rewrite — once, then
+append-only until the next compact.
 
 Canonical ``messages`` and the turn journal stay full. Resume rebuilds the fat
 window via ``window_from_journal``, then ``build_request_window`` re-applies this
-projection from the latest ``window_compact`` fact (same posture as tool_clear).
-UI is unchanged. Captain / solo chat loops do not use this path.
+projection from the latest ``window_compact`` fact. UI is unchanged.
 
 → 执行引擎架构设计 §三 · 工人回合内 window compact
 """
@@ -346,7 +345,7 @@ async def maybe_compact_worker_window(
 
     Never raises. Never mutates ``messages``. Returns whether a new summary was stored.
     """
-    if role != "worker" or not settings.engine_window_compact_enabled:
+    if role not in ("worker", "captain") or not settings.engine_window_compact_enabled:
         return False
     if not run_id or not conversation_id or not user_id:
         return False

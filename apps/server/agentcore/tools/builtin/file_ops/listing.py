@@ -56,7 +56,6 @@ _RECURSIVE_UNDER_RE = re.compile(r"^(.+)/\*\*/([^/]+)$")
 
 GLOB_DEPTH = 8
 GLOB_DEFAULT_MAX_ENTRIES = 50
-GLOB_MAX_ENTRIES_CAP = 200
 
 _LS_LEFTOVER_MSG = (
     "file_list 只列当前一层（directory，默认 `.`）。"
@@ -64,7 +63,7 @@ _LS_LEFTOVER_MSG = (
     "勿再传 {fields}。"
 )
 _GLOB_LEFTOVER_MSG = (
-    "glob 按文件名查找。搜索根用 path（可省=整仓根；directory 与 path 同义）。"
+    "glob 按文件名查找。搜索根用 path（可省=整仓根）。"
     "勿传 {fields}。一层列举请用 file_list。"
 )
 _GLOB_EMPTY_MSG = (
@@ -423,19 +422,9 @@ def glob_no_match_hint(
 def glob_truncated_footer(*, max_entries: int, elided_count: int) -> str:
     extra = f"；另有 {elided_count} 个条目未列出" if elided_count else ""
     return (
-        f"（已达列举上限 max_entries={max_entries}{extra}。"
-        "可收窄 pattern 或提高 max_entries。）"
+        f"（已达列举上限 {max_entries} 条{extra}。"
+        "可收窄 pattern。）"
     )
-
-
-def clamp_glob_max_entries(value: object) -> int:
-    if not isinstance(value, (int, str, float)):
-        return GLOB_DEFAULT_MAX_ENTRIES
-    try:
-        raw = int(value)
-    except (TypeError, ValueError):
-        return GLOB_DEFAULT_MAX_ENTRIES
-    return max(1, min(raw, GLOB_MAX_ENTRIES_CAP))
 
 
 def visible_list_entries(

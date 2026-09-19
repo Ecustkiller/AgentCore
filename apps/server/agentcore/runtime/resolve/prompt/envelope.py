@@ -5,11 +5,11 @@ Date, workspace (+ CEO file index), scene gates, attachments, table, and source
 ledger ride a synthetic user message fenced with ``[系统提示]``. The envelope
 is rebuilt each LLM call, snapshotted on ``turn_started``, and never persisted
 as a conversation-history turn.
-Workers keep date + workspace in system this slice.
-Do not copy this envelope onto workers: their chain is run-scoped. If a later
-slice moves worker facts, only resume restamp goes after history as
-``[系统提示]``; date stays in worker system; debate stays out. Tool-failure
-facts stay in receipts / synthesis, not ``role: system``.
+Workers keep date + workspace in system. Do not copy the CEO envelope onto
+workers: their chain is run-scoped. Resume restamp of worker facts appends
+``[系统提示]`` after history and never rewrites the emitted ``role: system``;
+date stays in worker system; debate stays out. Tool-failure facts stay in
+receipts / synthesis, not ``role: system``.
 See docs/03-AI核心/执行引擎架构设计.md §七.
 """
 

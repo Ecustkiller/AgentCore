@@ -1,7 +1,7 @@
-"""Playbook 路由回归（报告型，不卡门禁）.
+"""路由回归（报告型，不卡门禁）.
 
-把「普通人怎么说 → CEO 落到哪」变成可复跑观测：是否派团队、``playbook`` /
-``intensity``、是否发卡、思考里点名却没做（think/act 分歧）。教科书措辞是对照
+把「普通人怎么说 → CEO 落到哪」变成可复跑观测：是否派团队、手写 ``tasks``
+人数、是否发卡、思考里点名却没做（think/act 分歧）。教科书措辞是对照
 基线（线通不通）；口语措辞才是真实说法到不到。
 
 真跑 LLM（dev BYOK / ``EVAL_DEEPSEEK_*``），禁止默认踩 ``PLATFORM_API_KEY``，
@@ -31,7 +31,6 @@ from pathlib import Path
 from typing import Any, Literal
 
 from agentcore.evals.types import EvalConfigError
-from agentcore.runtime.runs.playbooks import PLAYBOOKS
 
 _CODEBASE_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "playbook_routing_codebase"
 
@@ -55,7 +54,6 @@ _COLLOQUIAL_BAN = frozenset(
         "delegate",
         "落盘",
         "代码审计",
-        *PLAYBOOKS.keys(),
     }
 )
 
@@ -111,7 +109,8 @@ SCENARIOS: tuple[RoutingScenario, ...] = (
         key="research_brief_parallel",
         phrasing="textbook",
         category="research_brief",
-        expect_playbook="map_fanout",
+        expect_playbook="",
+        expect_action="DELEGATE",
         user_message=(
             "帮我调研一下开源协议选型，多 Agent 对比摸清许可证兼容和商业闭源风险，"
             "先不要写成正式报告。"
@@ -143,7 +142,8 @@ SCENARIOS: tuple[RoutingScenario, ...] = (
         key="research_mit_vs_gpl_chat",
         phrasing="colloquial",
         category="research_brief",
-        expect_playbook="map_fanout",
+        expect_playbook="",
+        expect_action="DELEGATE",
         user_message=(
             "我们公司项目准备开源，我纠结该用 MIT 还是 GPL，"
             "你帮我把各自限制和风险讲清楚就行，先别写成文档。"
@@ -154,7 +154,8 @@ SCENARIOS: tuple[RoutingScenario, ...] = (
         key="research_knowledge_base_chat",
         phrasing="colloquial",
         category="research_brief",
-        expect_playbook="map_fanout",
+        expect_playbook="",
+        expect_action="DELEGATE",
         user_message=(
             "我想先搞明白现在做个人知识库的几个主流产品和我们差在哪，"
             "先不用出报告，跟我对着聊。"
@@ -215,7 +216,7 @@ SCENARIOS: tuple[RoutingScenario, ...] = (
         key="discuss_license_no_doc_waiver",
         phrasing="colloquial",
         category="research_brief",
-        expect_playbook="map_fanout",
+        expect_playbook="",
         user_message=(
             "我们公司项目准备开源，我纠结该用 MIT 还是 GPL，"
             "你帮我把各自限制和风险讲清楚就行。"
@@ -227,7 +228,7 @@ SCENARIOS: tuple[RoutingScenario, ...] = (
         key="discuss_license_round2_short_answers",
         phrasing="colloquial",
         category="research_brief",
-        expect_playbook="map_fanout",
+        expect_playbook="",
         user_message="1. 给社区贡献\n2. 没有\n3. 更在意传染性",
         workspace="empty",
         expect_action="DELEGATE|ASK",
@@ -518,7 +519,7 @@ def classify_landing(
     allowed_actions = split_expect_action(expect_action or "")
 
     if not offered:
-        landing, note = "not_offered", "工具面上没有该 playbook 槽/枚举，属于选不到"
+        landing, note = "not_offered", "工具面上没有 delegate"
     elif (
         expect_max_recon_rounds is not None
         and recon_rounds > expect_max_recon_rounds
@@ -556,10 +557,10 @@ def classify_landing(
         else:
             landing, note = (
                 "handwritten_tasks",
-                f"未填具名 playbook，改走手写 tasks（n={task_count}）",
+                f"手写 tasks（n={task_count}）",
             )
     else:
-        landing, note = "empty_delegate", "发出了 delegate，但既无具名 playbook 也无 tasks"
+        landing, note = "empty_delegate", "发出了 delegate，但无 tasks"
 
     return {
         "playbook_offered": offered,
@@ -577,7 +578,7 @@ def _negated(text: str, start: int) -> bool:
 
 def extract_think_mentions(reasoning: str, *, known_playbooks: Sequence[str] | None = None) -> dict:
     """从思考文本抽出强意图落点（赋值 / 派 / 用 playbook），忽略否定。"""
-    known = frozenset(known_playbooks or PLAYBOOKS.keys())
+    known = frozenset(known_playbooks or ())
     text = reasoning or ""
     playbooks: list[str] = []
     for m in _STRONG_PLAYBOOK.finditer(text):
@@ -759,7 +760,6 @@ def lint_scenarios(scenarios: Sequence[RoutingScenario] = SCENARIOS) -> None:
         raise EvalConfigError(f"教科书对照至少 3 条（got {n_text}）")
     if n_col < 8:
         raise EvalConfigError(f"口语场景至少 8 条（got {n_col}）")
-    known = set(PLAYBOOKS.keys())
     workspaces = {s.workspace for s in scenarios}
     if "codebase" not in workspaces:
         raise EvalConfigError("至少要有一档 workspace=codebase（真实代码量，避免空仓假象）")
@@ -773,10 +773,9 @@ def lint_scenarios(scenarios: Sequence[RoutingScenario] = SCENARIOS) -> None:
         raise EvalConfigError("至少一条场景须声明 expect_max_recon_rounds（绑仓讨论摸底禁连搜）")
     for s in scenarios:
         if s.expect_playbook:
-            if s.expect_playbook not in known:
-                raise EvalConfigError(f"{s.key}: 未知 expect_playbook {s.expect_playbook!r}")
+            raise EvalConfigError(f"{s.key}: 编制只手写 tasks，勿设 expect_playbook")
         elif not s.expect_action:
-            raise EvalConfigError(f"{s.key}: 空 expect_playbook 须同时声明 expect_action")
+            raise EvalConfigError(f"{s.key}: 须声明 expect_action")
         if s.expect_action:
             parts = split_expect_action(s.expect_action)
             if not parts or any(p not in _ACTIONS for p in parts):

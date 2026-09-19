@@ -39,7 +39,7 @@ async def test_duplicate_stops_at_cutoff_and_leaves_source(client, session_facto
     assert dup.status_code == 201, dup.text
     body = dup.json()
     assert body["id"] != cid
-    assert body["title"] == "源 副本"
+    assert body["title"] == "源 (1)"
     assert body["message_count"] == 2
     assert body["last_message_preview"] == "a1"
 
@@ -88,3 +88,82 @@ async def test_duplicate_running_cutoff_409(client, session_factory):
         json={"until_message_id": ph.id},
     )
     assert r.status_code == 409
+
+
+async def _seed_turn(session_factory, cid: str, *, user: str, assistant: str):
+    async with session_factory() as session:
+        repo = MessageRepository(session)
+        await repo.create(conversation_id=cid, role="user", content=user)
+        return await repo.upsert_assistant(
+            conversation_id=cid,
+            content=assistant,
+            metadata={"status": MESSAGE_STATUS_COMPLETE},
+        )
+
+
+async def test_duplicate_numbers_second_fork(client, session_factory):
+    await register_and_login(client, "dupnum")
+    cid = (await client.post("/v1/conversations", json={"title": "源"})).json()["id"]
+    cutoff = await _seed_turn(session_factory, cid, user="q", assistant="a")
+
+    first = await client.post(
+        f"/v1/conversations/{cid}/duplicate",
+        json={"until_message_id": cutoff.id},
+    )
+    second = await client.post(
+        f"/v1/conversations/{cid}/duplicate",
+        json={"until_message_id": cutoff.id},
+    )
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    assert first.json()["title"] == "源 (1)"
+    assert second.json()["title"] == "源 (2)"
+
+
+async def test_duplicate_peels_legacy_copy_suffix(client, session_factory):
+    await register_and_login(client, "duplegacy")
+    cid = (await client.post("/v1/conversations", json={"title": "源 副本"})).json()[
+        "id"
+    ]
+    cutoff = await _seed_turn(session_factory, cid, user="q", assistant="a")
+    dup = await client.post(
+        f"/v1/conversations/{cid}/duplicate",
+        json={"until_message_id": cutoff.id},
+    )
+    assert dup.status_code == 201, dup.text
+    assert dup.json()["title"] == "源 (1)"
+
+
+async def test_duplicate_empty_title_uses_fallback(client, session_factory):
+    await register_and_login(client, "dupempty")
+    cid = (await client.post("/v1/conversations", json={})).json()["id"]
+    cutoff = await _seed_turn(
+        session_factory, cid, user="帮我写周报", assistant="好"
+    )
+    dup = await client.post(
+        f"/v1/conversations/{cid}/duplicate",
+        json={"until_message_id": cutoff.id},
+    )
+    assert dup.status_code == 201, dup.text
+    assert dup.json()["title"] == "帮我写周报 (1)"
+
+
+async def test_duplicate_archived_slot_is_free(client, session_factory):
+    await register_and_login(client, "duparch")
+    cid = (await client.post("/v1/conversations", json={"title": "源"})).json()["id"]
+    cutoff = await _seed_turn(session_factory, cid, user="q", assistant="a")
+    first = await client.post(
+        f"/v1/conversations/{cid}/duplicate",
+        json={"until_message_id": cutoff.id},
+    )
+    assert first.status_code == 201, first.text
+    archived = await client.patch(
+        f"/v1/conversations/{first.json()['id']}", json={"archived": True}
+    )
+    assert archived.status_code == 200, archived.text
+    second = await client.post(
+        f"/v1/conversations/{cid}/duplicate",
+        json={"until_message_id": cutoff.id},
+    )
+    assert second.status_code == 201, second.text
+    assert second.json()["title"] == "源 (1)"

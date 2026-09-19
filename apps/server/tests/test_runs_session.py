@@ -53,7 +53,7 @@ class _ContentProvider:
 
 
 class _RecordingProvider:
-    """Fake LLM that keeps full ``LLMMessage`` lists so reasoning strip can be asserted."""
+    """Fake LLM that keeps full ``LLMMessage`` lists so historical reasoning can be asserted."""
 
     def __init__(self, rounds: list[list[LLMChunk]]) -> None:
         self._rounds = rounds
@@ -197,8 +197,8 @@ async def test_continue_run_revises_from_transcript_and_extends_it():
     assert state.transcript[-1].content == "修订版"
 
 
-async def test_continue_run_strips_historical_reasoning_but_keeps_current_beat_echo():
-    """跨 beat 续写：历史上行不含 reasoning；本 beat 工具链仍回传思考。"""
+async def test_continue_run_keeps_historical_reasoning_and_current_beat_echo():
+    """跨 beat 续写：历史 assistant 的 reasoning 原样留下；本 beat 工具链仍回传思考。"""
     session = _session_with_reasoning()
     hist_before = [
         (m.role, m.content, m.reasoning_content)
@@ -244,32 +244,36 @@ async def test_continue_run_strips_historical_reasoning_but_keeps_current_beat_e
     assert state.content == "续写终稿"
     assert len(provider.requests) == 2
 
-    # First uplink: every prior-beat assistant has reasoning stripped.
-    for m in provider.requests[0]:
-        if m.role == "assistant":
-            assert m.reasoning_content is None
+    by_id = {
+        (m.tool_calls[0].id if m.tool_calls else None): m
+        for m in provider.requests[0]
+        if m.role == "assistant"
+    }
+    assert by_id["tc_hist"].reasoning_content == "历史 beat 工具链思考"
+    finals = [
+        m
+        for m in provider.requests[0]
+        if m.role == "assistant" and m.content == "第一版产出"
+    ]
+    assert finals and finals[0].reasoning_content == "历史 beat 终稿思考草稿"
 
-    # Stored session unchanged until commit (strip copies, does not mutate).
     assert [
         (m.role, m.content, m.reasoning_content)
         for m in session.transcript
         if m.role == "assistant"
     ] == hist_before
 
-    # Second uplink (same beat after tool): historical still stripped; this beat's
-    # tool-call turn keeps its reasoning for DeepSeek echo.
     hist_contents = {"", "第一版产出"}
     for m in provider.requests[1]:
         if m.role != "assistant":
             continue
-        if m.content in hist_contents or (
-            m.tool_calls and m.tool_calls[0].id == "tc_hist"
-        ):
-            assert m.reasoning_content is None
+        if m.tool_calls and m.tool_calls[0].id == "tc_hist":
+            assert m.reasoning_content == "历史 beat 工具链思考"
+        elif m.content == "第一版产出":
+            assert m.reasoning_content == "历史 beat 终稿思考草稿"
         elif m.tool_calls and m.tool_calls[0].id == "tc_now":
             assert m.reasoning_content == "本 beat 工具思考"
 
-    # Continuation transcript written for session commit has history stripped.
     hist_in_result = [
         m
         for m in state.transcript
@@ -277,7 +281,10 @@ async def test_continue_run_strips_historical_reasoning_but_keeps_current_beat_e
         and (m.content in hist_contents or (m.tool_calls and m.tool_calls[0].id == "tc_hist"))
     ]
     assert hist_in_result
-    assert all(m.reasoning_content is None for m in hist_in_result)
+    assert any(
+        m.tool_calls and m.tool_calls[0].id == "tc_hist" and m.reasoning_content
+        for m in hist_in_result
+    )
 
 
 async def test_continue_run_does_not_mutate_stored_transcript_until_committed():

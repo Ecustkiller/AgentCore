@@ -14,7 +14,7 @@ Budget exhaustion uses the existing channel-unresponsive copy — that aborts
 prepare, it does not mean mid-turn file tools are disconnected. The budget is
 in force only inside a :func:`prepare_local_io_span`; execution-phase tool IO —
 including a delegate re-probing a *target* desk — never sees it bound
-(双模式工作区.md §7.7).
+(工作区.md §7.7).
 
 A single mid-turn settle timeout fails that op only. Session file-family retire
 follows fulfiller presence (``workspace.presence``), not timeout counts.

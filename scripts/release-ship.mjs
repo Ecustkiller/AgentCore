@@ -299,7 +299,7 @@ async function main() {
     );
   } else {
     cutoverLines.push(
-      "纯后端热修通常不必跟发桌面/官网；协议变更则同日跟 admin（见发布与门禁 §7.4）",
+      "纯后端热修通常不必跟发桌面/官网；协议变更则同日跟 admin（见发布与门禁 §1.4）",
     );
   }
   cutoverLines.push(

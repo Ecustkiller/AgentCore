@@ -120,7 +120,6 @@ def test_escalate_schema_teaches_blocking_choice():
     kind = schema.parameters["properties"]["kind"]["description"]
     assert "别硬猜" not in kind
     blocking = schema.parameters["properties"]["blocking"]["description"]
-    assert "默认 false" in blocking
     assert "报一声继续" in blocking or "原地等" in blocking
     assert "已拒凭据" in blocking and "false" in blocking
     # 身份段整句不进按钮

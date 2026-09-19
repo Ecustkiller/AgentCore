@@ -25,7 +25,6 @@ import {
   precedingUserMessageId,
   supportDiagnosticExtrasFromError,
 } from "@/lib/supportDiagnostics";
-import { notifySuccess } from "@/lib/toast";
 import {
   assistantHasTeamStrip,
   turnOutcomeForAssistant,
@@ -151,10 +150,11 @@ export function TurnComposer({
   const isGenerating = useActiveGenerating();
   const coordinationActive = useCoordinationActive();
   const teamLive = useLiveCoordinatingTurn();
-  const deskOccupied = isGenerating || teamLive;
   const liveDebate = useLiveDebateSteer();
   const turnPhase = useActiveTurnPhase();
   const isStopping = turnPhase === "stopping";
+  // 冻图会立刻关 isGenerating、execution 也不再算活队；停完之前输入框仍走停止，不露出发送。
+  const deskOccupied = isGenerating || teamLive || isStopping;
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const byId = useInteractionStore((s) => s.byId);
   const pausedPending = usePausedTurnStore((s) => s.pending);
@@ -222,9 +222,7 @@ export function TurnComposer({
     if (!supportDiagnosticIds || !supportDiagnosticText) return;
     void buildSupportDiagnosticPack(supportDiagnosticIds).then((text) => {
       if (!text) return;
-      void copyText(text).then((ok) => {
-        if (ok) notifySuccess("已复制排查包");
-      });
+      void copyText(text);
     });
   };
   const serverStatus = useServerHealthStore((s) => s.status);
@@ -731,7 +729,7 @@ export function TurnComposer({
   const sendControls = liveDebate ? (
     <div className="flex items-center gap-1.5">
       {hasDraft ? primarySendButton : null}
-      {isGenerating ? stopButton : null}
+      {isGenerating || isStopping ? stopButton : null}
     </div>
   ) : deskOccupied ? (
     hasDraft ? (

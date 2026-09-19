@@ -17,9 +17,9 @@
 - **多 Agent 团队协作**：CEO 按需 `delegate`、协商、辩论、升级决策——不是父任务硬拆子任务
 - **过程可观测**：协作图、检查点、工具与引用可回看
 - **关口拍板**：只在真需要决策处停下来问你——澄清、工具审批、升级求决；其余自己跑
-- **产物落到工作区**：云端工作区为主；桌面 Sidecar 承接本机文件 / 终端 / 预览
+- **产物落到工作区**：桌面默认本地对话（本机文件 / 终端 / 预览）；云端对话并列，产物落云桌
 - **模型接入灵活**：默认 BYOK；也可走平台网关
-- **多端**：桌面（主客户端）、手机 Web / Capacitor、管理后台
+- **多端**：桌面（主客户端）、窄屏走同源 web（`app.`）、Android Capacitor 壳、管理后台
 
 主循环全文与「一个功能算不算产品功能」的判据 → [`docs/01-产品/产品定位与品牌.md`](docs/01-产品/产品定位与品牌.md)  
 术语 → [`docs/01-产品/术语表.md`](docs/01-产品/术语表.md)
@@ -120,7 +120,7 @@ cp apps/desktop/.env.example apps/desktop/.env.local
 pnpm -C apps/desktop dev
 ```
 
-可选：手机 Web `pnpm -C apps/mobile dev`（`:5175`）；管理后台见 [`apps/admin/README.md`](apps/admin/README.md)。
+可选：Android / 窄屏壳 `pnpm -C apps/mobile dev`（`:5175`）；独立手机网页站已下线。管理后台见 [`apps/admin/README.md`](apps/admin/README.md)。
 
 ### 按改动面的最小命令
 

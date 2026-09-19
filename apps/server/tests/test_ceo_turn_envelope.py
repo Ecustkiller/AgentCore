@@ -27,7 +27,7 @@ def test_frozen_ceo_system_omits_runtime_and_workspace():
     )
     assert "<运行时>" not in ceo
     assert "</工作区>" not in ceo
-    assert "<身份>" in ceo
+    assert "<身份>" not in ceo
     assert "<按需目录>" in ceo
 
 

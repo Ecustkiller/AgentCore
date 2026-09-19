@@ -22,13 +22,10 @@ from agentcore.runtime.facts import LlmCallFact, NoteFact, RoundBoundaryFact, re
 from agentcore.runtime.loop_controller import Intervention, LoopController
 from agentcore.runtime.verify import finish_guard, format_guard_steer
 
-from .browser_snapshot_clear import project_omitted_browser_snapshots
 from .directive import Continue, LoopDirective, Return, Rework
 from .outcome import RoundOutcome
 from .segments import tool_calls_to_dicts
 from .stream import stream_llm_round
-from .tool_clear import EXEC_OUTPUT_CLEAR_TOOLS, project_cleared_window
-from .write_args_clear import project_cleared_write_args
 
 logger = get_logger(__name__)
 
@@ -57,101 +54,17 @@ def build_request_window(
     *,
     run_id: str = "",
 ) -> list[LLMMessage]:
-    """Project the LLM window: tool-result / write-args clearing, then window compact."""
-    # B1：在投影清理前用完整 transcript 闩锁 browser_* 成功（收口对账真源）。
+    """Project the LLM window: append-only, plus a frozen window-compact prefix.
+
+    Sliding ``tool_clear`` / ``write_args_clear`` / browser-snapshot omit used to
+    rewrite mid-history every round and forfeit the prefix cache. Compaction is
+    the only rewrite, applied from the stored ``window_compact`` fact.
+    """
+    del investigation_tools  # B1 latch still needs the full transcript.
     from agentcore.runtime.closing_posture import note_browser_tool_success_from_messages
 
     note_browser_tool_success_from_messages(messages)
     window = messages
-    if investigation_tools:
-        cleared = project_cleared_window(
-            window,
-            clearable_tools=investigation_tools,
-            keep_recent=settings.engine_tool_clear_keep_recent,
-            min_chars=settings.engine_tool_clear_min_chars,
-            summary_max_chars=settings.engine_tool_clear_file_read_summary_max_chars,
-        )
-        if cleared is not window:
-            chars_saved = sum(
-                len(old.content or "") - len(new.content or "")
-                for old, new in zip(window, cleared, strict=True)
-                if old.content != new.content
-            )
-            n_cleared = sum(
-                1
-                for old, new in zip(window, cleared, strict=True)
-                if old.content != new.content
-            )
-            logger.info(
-                "engine.tool_clear",
-                cleared=n_cleared,
-                chars_saved=chars_saved,
-                round=round_idx,
-            )
-            window = cleared
-    exec_cleared = project_cleared_window(
-        window,
-        clearable_tools=EXEC_OUTPUT_CLEAR_TOOLS,
-        keep_recent=settings.engine_tool_clear_exec_keep_recent,
-        min_chars=settings.engine_tool_clear_min_chars,
-        summary_max_chars=0,
-        already_executed=True,
-    )
-    if exec_cleared is not window:
-        chars_saved = sum(
-            len(old.content or "") - len(new.content or "")
-            for old, new in zip(window, exec_cleared, strict=True)
-            if old.content != new.content
-        )
-        n_cleared = sum(
-            1
-            for old, new in zip(window, exec_cleared, strict=True)
-            if old.content != new.content
-        )
-        logger.info(
-            "engine.tool_clear_exec",
-            cleared=n_cleared,
-            chars_saved=chars_saved,
-            round=round_idx,
-        )
-        window = exec_cleared
-    # Handoff 缓存崩塌：落盘后的 file_write 等大 body 仍在 assistant tool_calls.args。
-    # 近端 keep_recent 条 assistant 消息留全文供下一刀衔接；更早的（含随后的
-    # run / 交接）投影侧压成 path。canonical messages 不动。
-    write_cleared = project_cleared_write_args(
-        window,
-        min_chars=500,
-        keep_recent=settings.engine_write_args_clear_keep_recent,
-    )
-    if write_cleared is not window:
-        n_writes = sum(
-            1
-            for old, new in zip(window, write_cleared, strict=True)
-            if old is not new and old.role == "assistant"
-        )
-        logger.info(
-            "engine.write_args_clear",
-            cleared=n_writes,
-            keep_recent=settings.engine_write_args_clear_keep_recent,
-            round=round_idx,
-        )
-        window = write_cleared
-    # Browser snapshot trees: keep only the newest full elements/accessibility_tree;
-    # older browser_* results drop those fields and gain ref_delta vs the next tree
-    # (field-level omit, not whole [已清理]).
-    browser_cleared = project_omitted_browser_snapshots(window, keep_recent=1)
-    if browser_cleared is not window:
-        n_omitted = sum(
-            1
-            for old, new in zip(window, browser_cleared, strict=True)
-            if old.content != new.content
-        )
-        logger.info(
-            "engine.browser_snapshot_clear",
-            omitted=n_omitted,
-            round=round_idx,
-        )
-        window = browser_cleared
     if run_id:
         from .window_compact import apply_stored_window_compact
 

@@ -3,8 +3,6 @@ import { skillBodyFromContent } from "@/services/skillCatalog";
 
 /** Factory constitution slice — catalog id `shared`. */
 export const BASE_CORE_LABEL = "基座+CEO核";
-/** Role `<身份>` switcher — catalog id `identity`. */
-export const IDENTITY_LABEL = "角色身份";
 
 export interface AlwaysListRow {
   catalogId: string;
@@ -33,17 +31,6 @@ export function formatAlwaysRowChars(chars: number): string | null {
   return formatPromptChars(chars);
 }
 
-function identityChars(
-  item: Extract<PromptCatalogItem, { kind: "identity" }>,
-): number {
-  return Math.max(
-    promptCharLen(item.ceoIdentity),
-    promptCharLen(item.nestedIdentity),
-    promptCharLen(item.leafIdentity),
-  );
-}
-
-/** Prefer the always-pool count when the rail already measured it. */
 function mineResidentChars(
   item: Extract<PromptCatalogItem, { kind: "mine" }>,
 ): number {
@@ -53,7 +40,6 @@ function mineResidentChars(
 
 function alwaysItemChars(item: PromptCatalogItem): number {
   if (item.kind === "shared") return promptCharLen(item.text);
-  if (item.kind === "identity") return identityChars(item);
   if (item.kind === "mine") return mineResidentChars(item);
   return 0;
 }

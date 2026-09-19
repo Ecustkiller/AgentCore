@@ -47,7 +47,6 @@ async def test_auto_grant_before_workers_does_not_hang_a_card():
     real = tool(provider)
     real._depth = 0
     real._pending_pause = False
-    real._active_playbook = None
     real._permission_axes = AutonomyPolicy.LESS_INTERRUPT
 
     await maybe_auto_grant_before_workers(

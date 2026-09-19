@@ -9,6 +9,7 @@ import {
   debateSides,
   execRuntime,
   hasContinuations,
+  hotfixSeatChain,
   isDebate,
   planFromRunPlan,
   projectExecution,
@@ -595,6 +596,9 @@ describe("定向唤回 版本链 (乙 热修 P4)", () => {
       "run-1_rev_a",
       "run-1_rev_b",
     ]);
+    const seat = hotfixSeatChain(exec, "run-1_rev_b");
+    expect(seat?.originalId).toBe("run-1");
+    expect(seat?.versions).toHaveLength(3);
   });
 
   it("continuationChains yields one chain per revised worker, in graph order", () => {

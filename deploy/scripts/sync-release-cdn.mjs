@@ -16,7 +16,7 @@
  * (see prune-release-cdn.mjs). `--prune-dry-run` lists deletes without rm;
  * `--skip-prune` leaves old artifacts in place.
  *
- * Desktop channels (§7.6c):
+ * Desktop channels (发布与门禁.md §1.6c):
  *   stable (default) → write desktop/stable/* and mirror same content to flat desktop/
  *     (旧客户端曾把 desktop/latest.yml 当 feed；镜像避免断更)
  *   beta → write desktop/beta/* only（绝不污染 flat 或 stable）
@@ -27,7 +27,7 @@
  *   AGENTCORE_DOWNLOADS_HOST     (optional; nginx server_name / tunnel hostname)
  *   AGENTCORE_DOWNLOADS_ROOT     (optional; remote dir, default /opt/agentcore/downloads)
  *
- * Prerequisites: downloads-remote-install + Cloudflare Tunnel Public Hostname — §7.6b.
+ * Prerequisites: downloads-remote-install + Cloudflare Tunnel Public Hostname — 发布与门禁.md §1.6b.
  */
 import {
   existsSync,

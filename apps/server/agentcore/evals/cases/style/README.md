@@ -1,4 +1,4 @@
-# `<输出>` 套话消融（观察-only）
+# 基座输出句套话消融（观察-only）
 
 用来回答：删「语气自然、专业」和「不套话」会不会让套话开场 / 客套收尾变多。
 不裁判「专不专业」。**种子 JSON 入库**（`evals lint --suite style` / CI seed lint 钉这 6 例）；**消融报告 `eval-out/` 不入库**，也不进 `release:gate`。

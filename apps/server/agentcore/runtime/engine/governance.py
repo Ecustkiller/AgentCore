@@ -11,7 +11,6 @@ from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolFace
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall
 from agentcore.runtime.events import FinishReason
-from agentcore.runtime.facts import NoteFact, record_turn_fact
 from agentcore.runtime.loop_controller import (
     Intervention,
     LoopController,
@@ -66,35 +65,9 @@ def maybe_inject_turn_token_budget_gate(
     round_idx: int,
     role: str,
 ) -> bool:
-    """Inject the turn-token wrap-up steer once for the CEO captain. Returns True if injected.
-
-    Soft only: tools stay (delegate/debate already reject at execute). Does not
-    force_finalize — reject copy + this one-shot steer is enough to push wrap-up.
-    """
-    if not should_turn_token_budget_gate(controller, role=role):
-        return False
-
-    from agentcore.runtime.turn.token_budget import (
-        current_turn_tokens,
-        resolve_turn_token_ceiling,
-        turn_token_budget_wrap_prompt,
-    )
-
-    controller.mark_turn_token_budget_gate_fired()
-    nudge = turn_token_budget_wrap_prompt()
-    logger.info(
-        "engine.turn_token_budget_nudge",
-        round=round_idx,
-        spent=current_turn_tokens(),
-        ceiling=resolve_turn_token_ceiling(),
-    )
-    messages.append(LLMMessage(role="user", content=nudge))
-    record_turn_fact(
-        NoteFact(
-            role="user", content=nudge, reason="turn_token_budget", run_id=run_id
-        ).to_fact()
-    )
-    return True
+    """Retired: execute-layer reject copy is enough. Never injects."""
+    del controller, messages, run_id, round_idx, role
+    return False
 
 
 # Successful returns that enter post-delegate synthesis mode (G5: live/resume symmetric).
@@ -235,12 +208,17 @@ def resolve_openai_tool_defs(
     allowed_tool_names: list[str] | None,
     disabled_tools: set[str],
 ) -> list[dict[str, Any]] | None:
-    """Resolve OpenAI tool definitions minus circuit-broken tools."""
+    """Resolve the opening OpenAI tool table.
+
+    ``disabled_tools`` is execute-deny only (circuit / channel-dead / web retire)
+    and must not shrink ``tools[]`` mid-chain. Kept on the signature for call-site
+    parity with ``react_loop`` / finalize.
+    """
+    _ = disabled_tools
     if allowed_tool_names is None:
         candidates = tools.names if tools.count > 0 else []
     else:
         candidates = list(allowed_tool_names)
-    candidates = [name for name in candidates if name not in disabled_tools]
     if not candidates:
         return None
     return tools.get_openai_definitions(candidates) or None
@@ -257,11 +235,11 @@ def finalize_allows_persist(
     """True when finalize should keep file_write+handoff (pinned landing / wind_down).
 
     Not-landing or writes absent from registry → coordination only (finalize
-    does not urge writes). ``files_expected`` → offer persist when ``file_write``
+    does not urge writes). ``files_expected`` → execute persist when ``file_write``
     is registered. 真纯丙后执行层默认 unrestricted，不再依赖「名单缺写盘补写」。
 
     ``workspace_channel_dead`` / sticky session·channel dead → never retain persist
-    (Phase 1 may already strip tools; still avoid FINALIZE_INSTRUCTION_FILES).
+    (execute-layer deny; tool table stays the opening set).
     """
     if workspace_channel_dead or is_workspace_channel_sticky_dead():
         return False
@@ -275,7 +253,7 @@ def finalize_allows_persist(
 
 
 def finalize_tool_allowlist(*, persist: bool) -> frozenset[str]:
-    """Names offered on a forced-finalize round."""
+    """Names that may still execute on a forced-finalize round."""
     if persist:
         return FINALIZE_COORDINATION_TOOLS | FINALIZE_PERSIST_TOOLS
     return FINALIZE_COORDINATION_TOOLS
@@ -290,11 +268,11 @@ def resolve_finalize_coordination_tools(
     expects_landing: bool = False,
     workspace_channel_dead: bool = False,
 ) -> list[dict[str, Any]] | None:
-    """OpenAI tool defs for a forced-finalize round.
+    """Execute-allowlist projection for a forced-finalize round (not the wire table).
 
-    Default = coordination only. When the worker surface still offers ``file_write``
-    (pinned landing / wind_down), also keep ``file_write`` + ``handoff``
-    so landing is possible — never strip persist tools then claim a report-only wrap.
+    Wire ``tools[]`` is ``resolve_openai_tool_defs``. Default execute set =
+    coordination only. When landing is in play, also execute ``file_write`` +
+    ``handoff`` — never strip persist then claim a report-only wrap.
     """
     if allowed_tool_names is None:
         candidates = list(tools.names) if tools.count > 0 else []
@@ -414,11 +392,12 @@ def apply_workspace_channel_dead_retire(
     controller: LoopController | None = None,
     tool_context: Any | None = None,
 ) -> bool:
-    """Seed or restore ``WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS`` from live presence.
+    """Seed or restore execute-deny for ``WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS``.
 
-    Called at ``react_loop`` entry and before each LLM round. When the fulfiller
-    returns, the file family is offered again. Returns whether tool defs should
-    be refreshed.
+    Called at ``react_loop`` entry and before each LLM round. The OpenAI table
+    stays frozen; execute fails while the family is in ``disabled_tools``. When
+    the fulfiller returns, execute is allowed again. Returns whether the
+    execute-deny set changed.
     """
     from agentcore.workspace.limits import WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS
 
@@ -485,10 +464,12 @@ def _revive_workspace_file_family(
 
 @dataclass(frozen=True)
 class CircuitBreakerOutcome:
-    """Result of applying the B2 tool-failure circuit breaker after a tool round."""
+    """Result of applying the B2 tool-failure circuit breaker after a tool round.
+
+    Disabled names stay on the wire table; execute-deny is ``disabled_tools``.
+    """
 
     message: str | None
-    refresh_tool_defs: bool
 
 
 def apply_circuit_breaker(
@@ -499,9 +480,8 @@ def apply_circuit_breaker(
     round_idx: int,
     disabled_tools: set[str],
 ) -> CircuitBreakerOutcome:
-    """Retire wedged tools and inject a steer when the breaker trips."""
+    """Latch wedged tools for execute-deny. Does not shrink the OpenAI table."""
     breaker = controller.tool_circuit_breaker()
-    refresh = bool(breaker.disabled)
     if breaker.disabled:
         disabled_tools.update(breaker.disabled)
         from agentcore.runtime.audit.hooks import on_tool_disabled
@@ -514,8 +494,8 @@ def apply_circuit_breaker(
             )
             # Persist web_fetch disable across react_loop restart (stream-stall →
             # Wave retry / contract write_pass). Same process + run_id.
-            # Also strip web_search so deep-read death cannot become search thrash
-            # (failures do not charge retrieval_budget).
+            # web_search execute-denies with it so deep-read death cannot become
+            # search thrash (failures do not charge retrieval_budget).
             if tool_name == "web_fetch":
                 from agentcore.tools.builtin.web._net import (
                     WEB_FETCH_RETIRE_STEER,
@@ -523,11 +503,8 @@ def apply_circuit_breaker(
                 )
 
                 mark_web_fetch_retired(run_id, message=WEB_FETCH_RETIRE_STEER)
-                if "web_search" not in disabled_tools:
-                    disabled_tools.add("web_search")
-                    refresh = True
-    breaker_message = breaker.message()
-    if breaker_message is not None:
+                disabled_tools.add("web_search")
+    if breaker.disabled or breaker.force_segmented or breaker.validation_stop:
         logger.info(
             "engine.tool_circuit_breaker",
             warned=list(breaker.warned),
@@ -535,16 +512,7 @@ def apply_circuit_breaker(
             force_segmented=sorted(breaker.force_segmented),
             round=round_idx,
         )
-        messages.append(LLMMessage(role="user", content=breaker_message))
-        record_turn_fact(
-            NoteFact(
-                role="user",
-                content=breaker_message,
-                reason="circuit_breaker",
-                run_id=run_id,
-            ).to_fact()
-        )
-    return CircuitBreakerOutcome(message=breaker_message, refresh_tool_defs=refresh)
+    return CircuitBreakerOutcome(message=None)
 
 
 def decide_llm_failure(

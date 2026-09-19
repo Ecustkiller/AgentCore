@@ -133,7 +133,7 @@ export function handleExecutionEvent(
       recordFrameNow(event, conversationId);
       return true;
     }
-    // 高频纯累积帧 (流式性能，白屏卡死修复): rAF 合批，避免逐 token 全图重折叠 + 全消费者重
+    // 高频纯累积帧 (流式性能，白屏卡死修复): ≤60Hz 合批，避免逐 token 全图重折叠 + 全消费者重
     // 渲染 (整条流 O(n²))。run_output_reset (交付前核验回炉 finish_guard 的 worker 对偶,
     // content_reset 之于 CEO 气泡: 清 worker 已流式累积的草稿产出、重写版从干净态重累积) 也走
     // 同一有序缓冲，故与它清理的 delta 天然保序。Folds via the same frame path; transport-only.

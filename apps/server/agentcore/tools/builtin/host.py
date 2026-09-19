@@ -50,16 +50,15 @@ _ALLOWED_ACTIONS = frozenset(
 _NEVER_APPROVE_ACTIONS = frozenset({_ACTION_STATUS, _ACTION_OS_LOG})
 _APPROVAL_ACTIONS = _ALLOWED_ACTIONS - _NEVER_APPROVE_ACTIONS
 
-# L1 os_log: model path freezes entry/byte budgets to defaults. Desktop still
-# clamps incoming HostOp args (pathology valve; model cannot raise them).
+# L1 os_log: model path freezes minutes / entry / byte budgets to defaults.
+# Desktop still clamps incoming HostOp args (pathology valve; model cannot raise them).
 _OS_LOG_MINUTES_DEFAULT = 60
-_OS_LOG_MINUTES_MAX = 1440
 _OS_LOG_ENTRIES_DEFAULT = 40
 _OS_LOG_BYTES_DEFAULT = 24_000
 _OS_LOG_LEVELS = frozenset({"error", "warning", "info", "any"})
 _OS_LOG_SOURCE_MAX = 120
 _OS_LOG_TRUNCATED_NOTE = (
-    "摘要已截断；请收窄来源、级别或时间窗后再查，勿据此断言已覆盖全部事件。"
+    "摘要已截断；请收窄来源或级别后再查，勿据此断言已覆盖全部事件。"
 )
 
 # L2 panel whitelist — closed set (安全权限与治理 / Host 定案 P1).
@@ -69,14 +68,12 @@ _OPEN_SETTINGS_PANELS = frozenset({"sound", "display", "network", "apps", "about
 _PACKAGE_MANAGERS = frozenset({"winget", "brew", "apt"})
 _PACKAGE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+\-/@]{0,199}$")
 
-# action=shell: optional timeout clamp (seconds). Desktop kills the process at this budget.
+# action=shell: frozen timeout. Desktop kills the process at this budget.
 _SHELL_TIMEOUT_DEFAULT = 60
-_SHELL_TIMEOUT_MAX = 120
 _SHELL_CHANNEL_SLACK_SECONDS = 15.0
 
-# action=install_package: Docker Desktop / VS Code installs often exceed shell 120s.
+# action=install_package: Docker Desktop / VS Code installs often exceed shell 60s.
 _PACKAGE_TIMEOUT_DEFAULT = 600
-_PACKAGE_TIMEOUT_MAX = 900
 _PACKAGE_CHANNEL_SLACK_SECONDS = 30.0
 
 # status facets → (HostOp, today's per-op engine ceiling). Ping / os_log excluded.
@@ -151,39 +148,20 @@ HOST_TOOL_PARAMETERS: dict[str, Any] = {
             "enum": sorted(_ALLOWED_ACTIONS),
             "description": "本机动作。",
         },
-        "facets": {
-            "type": "array",
-            "items": {"type": "string", "enum": list(_STATUS_FACET_ORDER)},
-            "description": "status 可选投影；默认全要。",
-        },
         "source": {
             "type": "string",
-            "description": "os_log 可选：来源/应用/Provider 子串（如 Application、docker）。",
+            "description": "os_log 来源子串。",
             "maxLength": _OS_LOG_SOURCE_MAX,
         },
         "level": {
             "type": "string",
             "enum": sorted(_OS_LOG_LEVELS),
             "default": "warning",
-            "description": "os_log：最低关注级别（warning 含 error）。",
-        },
-        "minutes": {
-            "type": "integer",
-            "description": "os_log 回看分钟。",
-            "default": _OS_LOG_MINUTES_DEFAULT,
-            "minimum": 1,
-            "maximum": _OS_LOG_MINUTES_MAX,
+            "description": "os_log 最低级别。",
         },
         "command": {
             "type": "string",
             "description": "shell：本机短时命令（非空）。",
-        },
-        "timeout_seconds": {
-            "type": "integer",
-            "description": (
-                f"shell 默认 {_SHELL_TIMEOUT_DEFAULT}、上限 {_SHELL_TIMEOUT_MAX}；"
-                f"install_package 默认 {_PACKAGE_TIMEOUT_DEFAULT}、上限 {_PACKAGE_TIMEOUT_MAX}。"
-            ),
         },
         "panel": {
             "type": "string",
@@ -197,7 +175,7 @@ HOST_TOOL_PARAMETERS: dict[str, Any] = {
         "manager": {
             "type": "string",
             "enum": sorted(_PACKAGE_MANAGERS),
-            "description": "install_package：winget（Win）/ brew（macOS·Linux）/ apt（Linux）。",
+            "description": "install_package 包管理器。",
         },
         "package_id": {
             "type": "string",
@@ -252,17 +230,6 @@ def shell_silent_install_blocks(command: str) -> str | None:
     return None
 
 
-def clamp_package_timeout(raw: Any) -> int:
-    """Parse optional timeout_seconds for package install; default 600, clamp to [60, 900]."""
-    if raw is None or raw == "":
-        return _PACKAGE_TIMEOUT_DEFAULT
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        return _PACKAGE_TIMEOUT_DEFAULT
-    return max(60, min(_PACKAGE_TIMEOUT_MAX, value))
-
-
 def validate_package_install_args(
     *,
     manager: str,
@@ -304,71 +271,18 @@ def shell_cmd_env_blocks(command: str) -> str | None:
     )
 
 
-def clamp_shell_timeout(raw: Any) -> int:
-    """Parse optional timeout_seconds; default 60, clamp to [1, 120]."""
-    if raw is None or raw == "":
-        return _SHELL_TIMEOUT_DEFAULT
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        return _SHELL_TIMEOUT_DEFAULT
-    return max(1, min(_SHELL_TIMEOUT_MAX, value))
-
-
-def _clamp_os_log_int(raw: Any, *, default: int, lo: int, hi: int) -> int:
-    if raw is None or raw == "":
-        return default
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        return default
-    return max(lo, min(hi, value))
-
-
 def normalize_os_log_args(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Clamp minutes / level / source; entry and byte budgets are frozen defaults."""
+    """Clamp level / source; minutes / entry / byte budgets are frozen defaults."""
     source = str(arguments.get("source") or "").strip()[:_OS_LOG_SOURCE_MAX]
     raw_level = str(arguments.get("level") or "warning").strip().lower()
     level = raw_level if raw_level in _OS_LOG_LEVELS else "warning"
     return {
         "source": source,
         "level": level,
-        "minutes": _clamp_os_log_int(
-            arguments.get("minutes"),
-            default=_OS_LOG_MINUTES_DEFAULT,
-            lo=1,
-            hi=_OS_LOG_MINUTES_MAX,
-        ),
+        "minutes": _OS_LOG_MINUTES_DEFAULT,
         "max_entries": _OS_LOG_ENTRIES_DEFAULT,
         "max_bytes": _OS_LOG_BYTES_DEFAULT,
     }
-
-
-def normalize_status_facets(raw: Any) -> tuple[list[str], str | None]:
-    """Ordered unique status facets; default all. Error string when invalid."""
-    if raw is None or raw == "" or raw == []:
-        return list(_STATUS_FACET_ORDER), None
-    if isinstance(raw, str):
-        items: list[Any] = [raw]
-    elif isinstance(raw, list):
-        items = raw
-    else:
-        return [], (
-            "facets 须为字符串数组"
-            f"（{'/'.join(_STATUS_FACET_ORDER)}）。"
-        )
-    out: list[str] = []
-    seen: set[str] = set()
-    for item in items:
-        name = str(item).strip().lower()
-        if name not in _STATUS_FACETS:
-            return [], (
-                f"未知 facets={item!r}；仅允许：{', '.join(_STATUS_FACET_ORDER)}。"
-            )
-        if name not in seen:
-            seen.add(name)
-            out.append(name)
-    return (out or list(_STATUS_FACET_ORDER)), None
 
 
 def host_tool_timeout_seconds(arguments: dict[str, Any] | None = None) -> float:
@@ -376,18 +290,11 @@ def host_tool_timeout_seconds(arguments: dict[str, Any] | None = None) -> float:
     args = arguments or {}
     action = host_action_name(args)
     if action == _ACTION_SHELL:
-        return float(clamp_shell_timeout(args.get("timeout_seconds"))) + (
-            _SHELL_CHANNEL_SLACK_SECONDS
-        )
+        return float(_SHELL_TIMEOUT_DEFAULT) + _SHELL_CHANNEL_SLACK_SECONDS
     if action == _ACTION_INSTALL_PACKAGE:
-        return float(clamp_package_timeout(args.get("timeout_seconds"))) + (
-            _PACKAGE_CHANNEL_SLACK_SECONDS
-        )
+        return float(_PACKAGE_TIMEOUT_DEFAULT) + _PACKAGE_CHANNEL_SLACK_SECONDS
     if action == _ACTION_STATUS:
-        facets, err = normalize_status_facets(args.get("facets"))
-        if err or not facets:
-            return _STATUS_FACETS["apps"][1]
-        return max(_STATUS_FACETS[name][1] for name in facets)
+        return max(timeout for _, timeout in _STATUS_FACETS.values())
     return _ACTION_TIMEOUTS.get(action, _STATUS_FACETS["apps"][1])
 
 
@@ -408,7 +315,7 @@ def _os_log_model_payload(value: Any) -> dict[str, Any]:
 
 
 def _model_json(payload: dict[str, Any]) -> str:
-    """Compact model-facing JSON. Treat-as-data lives in ``<输入>``, not a wrapper tag."""
+    """Compact model-facing JSON. No wrapper tag: isolation is ``role=tool``, not a receipt note."""
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -520,12 +427,7 @@ async def _host_call(
     return _host_result(value, action=action)
 
 
-async def _execute_status(
-    arguments: dict[str, Any], context: ToolContext
-) -> ToolResult:
-    facets, err = normalize_status_facets(arguments.get("facets"))
-    if err:
-        return _fail(err, contract_failure=True)
+async def _execute_status(context: ToolContext) -> ToolResult:
     channel = context.desktop_channel
     if channel is None:
         return _no_channel_error()
@@ -546,7 +448,7 @@ async def _execute_status(
             return facet, value
         return facet, {"value": value}
 
-    pairs = await asyncio.gather(*(_one(facet) for facet in facets))
+    pairs = await asyncio.gather(*(_one(facet) for facet in _STATUS_FACET_ORDER))
     payload = {facet: value for facet, value in pairs}
     failed = [
         f"{facet}: {value['error']}"
@@ -632,7 +534,7 @@ async def _execute_shell(
             "省略 wait_for 则起来就返回。"
             "用 action=read|list 确认进程仍在跑。"
         )
-    timeout_seconds = clamp_shell_timeout(arguments.get("timeout_seconds"))
+    timeout_seconds = _SHELL_TIMEOUT_DEFAULT
     channel = context.desktop_channel
     if channel is None:
         return _no_channel_error()
@@ -717,7 +619,7 @@ async def _execute_install_package(
     )
     if invalid:
         return _fail(invalid, contract_failure=True)
-    timeout_seconds = clamp_package_timeout(arguments.get("timeout_seconds"))
+    timeout_seconds = _PACKAGE_TIMEOUT_DEFAULT
     channel = context.desktop_channel
     if channel is None:
         return _no_channel_error()
@@ -785,7 +687,7 @@ class HostTool:
             )
 
         if action == _ACTION_STATUS:
-            return await _execute_status(arguments, context)
+            return await _execute_status(context)
         if action == _ACTION_OS_LOG:
             return await _execute_os_log(arguments, context)
         if action == _ACTION_SHELL:

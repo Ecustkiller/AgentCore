@@ -5,6 +5,12 @@ import {
 } from "@/stores/conversation/turnPhase";
 import { getTurnPhase } from "@/stores/conversation/turnPhaseActions";
 import { sameTurnStampedServerId } from "./helpers";
+import {
+  cancelCappedFlush,
+  noteCappedFlush,
+  resetCappedFlush,
+  scheduleCappedFlush,
+} from "./streamFlushScheduler";
 
 /**
  * Ensure the streamed conversation's last message is a streaming assistant
@@ -59,32 +65,26 @@ type PendingChunk = {
 };
 
 /**
- * rAF 合批 CEO 气泡的流式正文 + 思考（content_delta / reasoning_delta，流式渲染性能）。
+ * 60Hz 合批 CEO 气泡的流式正文 + 思考（content_delta / reasoning_delta，流式渲染性能）。
  *
  * 后端逐 token 推 content_delta / reasoning_delta，每个都直接写 store 会让 Markdown / 思考区
  * 每 token 全量重渲染（叠加块级记忆化前尤甚），逐 token 叠加即整条流 O(n²)——「长输出白屏
- * 卡死」的 CEO 气泡侧根因。这里把同一会话「一帧内」到达的 delta 攒成一批，在下一次 animation
- * frame 一次性 append——把每秒上百次 store 写入降到 ≤60 次。按 conversationId 分桶，故多个
- * 后台会话各自合批、互不串台。
+ * 卡死」的 CEO 气泡侧根因。这里把同一会话到达的 delta 攒成一批，按 ≤60Hz 写出（跟屏幕刷新
+ * 脱钩；144Hz 上纯 rAF 会把预算打穿）。按 conversationId 分桶，多个后台会话各自合批、互不串台。
  *
- * 正文与思考是同一气泡上的两个独立字段（互不拼接），共享同一条回合生命周期，故共用一个 rAF。
+ * 正文与思考是同一气泡上的两个独立字段（互不拼接），共享同一条回合生命周期，故共用一条合批。
  * Chunks 按**到达顺序**入队（相邻同类型合并），flush 时 FIFO 写出——保证 `process[]` fold
  * 顺序与 SSE 到达顺序一致。旧实现用两个桶且 flush 时固定先 content 后 reasoning，同帧交错
  * 会把「先思考后正文」折成「正文→思考」并在 process 时间线里拆出多个思考块。
  *
  * 必须在回合收尾前 flush：`appendToLastMessage` / `appendReasoningToLastMessage` 都不校验
- * `isStreaming`，缓冲若漏到收尾之后，rAF 回调会把尾 token 追加到已结束（极端情况下是下一条）
+ * `isStreaming`，缓冲若漏到收尾之后，迟到 flush 会把尾 token 追加到已结束（极端情况下是下一条）
  * 的消息上。故 `message_end` / `error` 分支会先 flush，传输层 finally 再兜底 flush。
  */
 const pendingChunks = new Map<string, PendingChunk[]>();
-const pendingFrame = new Map<string, number>();
 
-function cancelFrame(conversationId: string): void {
-  const frame = pendingFrame.get(conversationId);
-  if (frame !== undefined) {
-    cancelAnimationFrame(frame);
-    pendingFrame.delete(conversationId);
-  }
+function contentFlushKey(conversationId: string): string {
+  return `content:${conversationId}`;
 }
 
 function enqueueChunk(
@@ -107,10 +107,11 @@ function enqueueChunk(
   scheduleFlush(conversationId);
 }
 
-/** 立即写出某会话已缓冲的正文+思考（按到达顺序），并取消其挂起的 frame。无缓冲时为 no-op。
- * stopping/terminal 态丢弃缓冲（不 append），避免停止后迟到 rAF 把 UI 拉回生成态。 */
+/** 立即写出某会话已缓冲的正文+思考（按到达顺序），并取消其挂起的 flush。无缓冲时为 no-op。
+ * stopping/terminal 态丢弃缓冲（不 append），避免停止后迟到 flush 把 UI 拉回生成态。 */
 export function flushPendingContent(conversationId: string): void {
-  cancelFrame(conversationId);
+  const key = contentFlushKey(conversationId);
+  cancelCappedFlush(key);
   const q = pendingChunks.get(conversationId);
   if (!q?.length) return;
   pendingChunks.delete(conversationId);
@@ -124,36 +125,34 @@ export function flushPendingContent(conversationId: string): void {
       store.appendReasoningToLastMessage(chunk.text, conversationId, opts);
     }
   }
+  noteCappedFlush(key);
 }
 
-/** 丢弃某会话全部未写出缓冲（正文+思考），取消挂起 frame。停止生成时用。 */
+/** 丢弃某会话全部未写出缓冲（正文+思考），取消挂起 flush。停止生成时用。 */
 export function discardAllPendingChunks(conversationId: string): void {
-  cancelFrame(conversationId);
+  resetCappedFlush(contentFlushKey(conversationId));
   pendingChunks.delete(conversationId);
 }
 
-/** 丢弃某会话已缓冲但未写出的**正文**（取消挂起 frame，且不 append）。`content_reset` 用：
+/** 丢弃某会话已缓冲但未写出的**正文**（不 append）。`content_reset` 用：
  * 那批 delta 属于被交付前核验否决的违规正文，无需落到气泡。思考不受影响（其未被否决）；若无
- * 待写 chunk 则一并取消挂起 frame。无缓冲时为 no-op。 */
+ * 待写 chunk 则一并取消挂起 flush。无缓冲时为 no-op。 */
 export function discardPendingContent(conversationId: string): void {
   const q = pendingChunks.get(conversationId);
   if (!q) return;
   const kept = q.filter((c) => c.kind === "reasoning");
   if (kept.length === 0) {
     pendingChunks.delete(conversationId);
-    cancelFrame(conversationId);
+    resetCappedFlush(contentFlushKey(conversationId));
   } else {
     pendingChunks.set(conversationId, kept);
   }
 }
 
 function scheduleFlush(conversationId: string): void {
-  if (pendingFrame.has(conversationId)) return;
-  const frame = requestAnimationFrame(() => {
-    pendingFrame.delete(conversationId);
+  scheduleCappedFlush(contentFlushKey(conversationId), () => {
     flushPendingContent(conversationId);
   });
-  pendingFrame.set(conversationId, frame);
 }
 
 /** 把一段正文 delta 入队，并确保已排定一次 frame flush。`replace` 见 {@link PendingChunk}。 */
@@ -165,7 +164,7 @@ export function queueContentDelta(
   enqueueChunk(conversationId, "content", delta, replace);
 }
 
-/** 把一段思考(reasoning) delta 入队，并确保已排定一次 frame flush（与正文共用 rAF）。 */
+/** 把一段思考(reasoning) delta 入队，并确保已排定一次 flush（与正文共用合批）。 */
 export function queueReasoningDelta(
   conversationId: string,
   delta: string,

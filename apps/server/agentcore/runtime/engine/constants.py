@@ -23,24 +23,17 @@ MAX_PARALLEL_TOOLS = 5
 # the bubble ever feels jittery (raise) or laggy (lower).
 TOOL_PROGRESS_STEP = 64
 
-# Injected when convergence governance forces finalize (stuck loop / round or
-# token ceiling). Tools are already narrowed; copy is the reason, not a tool menu.
-FINALIZE_INSTRUCTION = "[系统提示] 本轮强制收口。"
-
-# Persist vs coordination-only is the live tool table. Alias kept for call sites.
-FINALIZE_INSTRUCTION_FILES = FINALIZE_INSTRUCTION
-
-# Coordination tools still offered during a forced-finalize round; investigation and
-# execution tools are withheld so the model cannot keep spinning reads/writes.
+# Names that may still execute on a forced-finalize round. Opening ``tools[]``
+# stays frozen; investigation calls are dropped after the LLM round (or
+# ``tool_choice=none`` on the hard salvage).
 FINALIZE_COORDINATION_TOOLS = frozenset({"delegate", "consult", "ask_user"})
 
-# Persist tools kept on finalize when the worker's tool surface still offers
-# file_write (pinned landing / artifacts / wind_down) — mirrors wind_down intent.
+# Persist tools still executable on finalize when landing is in play
+# (pinned landing / artifacts / wind_down) — mirrors wind_down intent.
 FINALIZE_PERSIST_TOOLS = frozenset({"file_write", "handoff"})
 
-# Investigation + execution tools blocked during finalize (by name, explicit list).
-# ``file_write`` is removed from the effective forbid-set when persist finalize is on
-# (see ``resolve_finalize_coordination_tools``).
+# Investigation + execution names blocked at execute on finalize (by name).
+# ``file_write`` leaves this set when persist finalize is on.
 FINALIZE_FORBIDDEN_TOOLS = frozenset(
     {
         "file_read",

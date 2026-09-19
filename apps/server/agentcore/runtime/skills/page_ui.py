@@ -1,4 +1,4 @@
-"""Skill body: page_ui (挡预训练默认脸的观感原则；不是建站 playbook / 不是设计课 / 不是质检闸)."""
+"""Skill body: page_ui (挡预训练默认脸的观感原则；不是建站套餐 / 不是设计课 / 不是质检闸)."""
 
 from __future__ import annotations
 

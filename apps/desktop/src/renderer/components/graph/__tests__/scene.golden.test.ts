@@ -114,6 +114,7 @@ function snapshotScene(scene: GraphScene) {
     },
     nodeGroup: sortedMap(scene.nodeGroup),
     beatFoldsByHost: sortedListMap(scene.beatFoldsByHost),
+    seatFoldsByHost: sortedListMap(scene.seatFoldsByHost),
   };
 }
 
@@ -147,7 +148,7 @@ function multiDelegateWithContinuationExec(): Execution {
   ]);
 }
 
-/** Same-person continuation chain (hotfix v2/v3) staying top-level (non-debate). */
+/** Same-person continuation chain (hotfix v2/v3) folded into one seat. */
 function continuationChainExec(): Execution {
   return mkExec([
     captain,
@@ -308,19 +309,16 @@ describe("buildGraphScene · golden", () => {
     );
   });
 
-  it("continuation chain → top-level continuation edges, no sub-team box", () => {
+  it("continuation chain → folded into one seat, no extra nodes", () => {
     const scene = buildGraphScene(continuationChainExec(), {
       inputId: INPUT_ID,
     });
     expect(scene.subTeams).toHaveLength(0);
-    expect(scene.nodeGroup.get("w1_v2") ?? null).toBeNull();
-    expect(
-      scene.edges
-        .filter((e) => e.kind === "continuation")
-        .map((e) => `${e.source}->${e.target}`)
-        .sort(),
-    ).toEqual(["w1->w1_v2", "w1_v2->w1_v3"]);
-    // bookend：仅冷开局根接 input；仅链尖汇 CEO（省略中间续的实线 dep）。
+    expect(scene.nodeIds).toContain("w1");
+    expect(scene.nodeIds).not.toContain("w1_v2");
+    expect(scene.nodeIds).not.toContain("w1_v3");
+    expect(scene.seatFoldsByHost.get("w1")).toEqual(["w1_v2", "w1_v3"]);
+    expect(scene.edges.filter((e) => e.kind === "continuation")).toEqual([]);
     expect(
       scene.edges
         .filter((e) => e.kind === "dep" && e.source === INPUT_ID)
@@ -332,7 +330,7 @@ describe("buildGraphScene · golden", () => {
         .filter((e) => e.kind === "dep" && e.target === "captain")
         .map((e) => e.source)
         .sort(),
-    ).toEqual(["w1_v3"]);
+    ).toEqual(["w1"]);
     expect(snapshotScene(scene)).toMatchSnapshot();
   });
 

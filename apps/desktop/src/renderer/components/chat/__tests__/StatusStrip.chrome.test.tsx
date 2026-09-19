@@ -126,7 +126,7 @@ describe("StatusStrip · 去掉多余 chrome", () => {
     const { execution } = renderStrip();
     expect(execution.runs.some((r) => r.continuesRunId != null)).toBe(true);
 
-    expect(screen.getByText(/3\/3/)).toBeTruthy();
+    expect(screen.getByText(/2\/2/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "在画布打开" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "回放协作过程" })).toBeNull();
     expect(screen.queryByText(/团队完成/)).toBeNull();

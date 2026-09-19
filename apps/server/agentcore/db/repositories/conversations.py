@@ -1223,6 +1223,18 @@ class ConversationRepository:
         )
         return result.scalars().all()
 
+    async def list_live_titles(self, user_id: str) -> list[str]:
+        """Non-empty titles of the same live set as :meth:`list_all_by_user`.
+
+        Backs clone numbering (``报告 (1)``) so archived / 最近删除 rows do not
+        occupy a slot.
+        """
+        return [
+            title
+            for conv in await self.list_all_by_user(user_id)
+            if (title := (conv.title or "").strip())
+        ]
+
     async def set_local_binding(
         self, conversation_id: str, *, root_id: str | None, subpath: str | None = None
     ) -> None:

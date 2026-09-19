@@ -12,7 +12,6 @@ import {
   ChevronsDownUp,
   FilePlus,
   FileText,
-  FolderPlus,
   Loader2,
   RefreshCw,
 } from "lucide-react";
@@ -65,8 +64,7 @@ export const FILE_TREE_SILENT_DEBOUNCE_MS = 200;
  * tree that backs both the Files page (a local OS root) and the conversation
  * workspace panel (the server workspace). Capabilities gate the chrome: upload
  * appears only when the source can transfer bytes; live updates only when it can
- * watch. New directories are created immediately as「未命名文件夹」then renamed
- * (Finder); new files stay name-first. Right-click + drag-to-move stay on the
+ * watch. New files stay name-first. Right-click + drag-to-move stay on the
  * tree, with per-source persisted fold state. The container owns where a clicked
  * file opens (via `onOpenFile`).
  */
@@ -937,14 +935,6 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
                         aria-label="新建文件"
                       >
                         <FilePlus size={14} />
-                      </IconButton>
-                    </SimpleTooltip>
-                    <SimpleTooltip label="新建文件夹">
-                      <IconButton
-                        onClick={() => openCreate("", "dir")}
-                        aria-label="新建文件夹"
-                      >
-                        <FolderPlus size={14} />
                       </IconButton>
                     </SimpleTooltip>
                   </div>

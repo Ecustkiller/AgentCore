@@ -26,7 +26,6 @@ _CEO_ORCHESTRATION = {
     "replan",
     "debate",
     "folders",
-    "create_folder",
     "ask_user",
 }
 # Worker-only collaboration channel. Write / execute built-ins are CEO+worker.
@@ -38,10 +37,8 @@ _CEO_AND_WORKER_MUTATION = {
     "file_write",
     "str_replace",
     "file_delete",
-    "mkdir",
     "file_batch",
     "md_export",
-    "archive",
     "download_url",
     "run",
 }
@@ -105,7 +102,6 @@ def test_read_only_builtins_are_shared_with_ceo():
         "glob",
         "grep",
         "git",
-        "docs_read",
     ):
         assert name in entries
         assert set(entries[name].available_to) == {AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER}
@@ -174,12 +170,6 @@ _CATALOG_FACE: dict[str, ToolFace] = {
     "escalate": ToolFace.ORCHESTRATION,
     "handoff": ToolFace.ORCHESTRATION,
     "folders": ToolFace.FOLDER,
-    "create_folder": ToolFace.FOLDER,
-    "delete_folder": ToolFace.FOLDER,
-    "table_ops": ToolFace.TABLE,
-    "table_read": ToolFace.TABLE,
-    "docs_read": ToolFace.DOC,
-    "docs_write": ToolFace.DOC,
 }
 
 
@@ -213,22 +203,10 @@ def test_on_demand_directory_splits_folder_off_orchestration():
     out = render_on_demand_directory(
         [
             ConsultDirectoryEntry(
-                name="create_folder",
-                summary="新建云文件夹",
+                name="folders",
+                summary="列出或解析云文件夹",
                 section="tool",
                 face=ToolFace.FOLDER.value,
-            ),
-            ConsultDirectoryEntry(
-                name="table_ops",
-                summary="改当前表格",
-                section="tool",
-                face=ToolFace.TABLE.value,
-            ),
-            ConsultDirectoryEntry(
-                name="docs_read",
-                summary="读创作文档",
-                section="tool",
-                face=ToolFace.DOC.value,
             ),
             ConsultDirectoryEntry(
                 name="delegate",
@@ -240,10 +218,8 @@ def test_on_demand_directory_splits_folder_off_orchestration():
     )
     assert "文件夹：" in out
     assert "白板：" not in out
-    assert "表格：" in out
-    assert "文档：" in out
+    assert "表格：" not in out
+    assert "文档：" not in out
     assert "编排：" in out
-    assert out.index("文件夹：") < out.index("- create_folder：新建云文件夹") < out.index("表格：")
-    assert out.index("表格：") < out.index("- table_ops：改当前表格") < out.index("文档：")
-    assert out.index("文档：") < out.index("- docs_read：读创作文档") < out.index("编排：")
+    assert out.index("文件夹：") < out.index("- folders：列出或解析云文件夹") < out.index("编排：")
     assert out.index("编排：") < out.index("- delegate：派活")

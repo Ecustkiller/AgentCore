@@ -193,7 +193,8 @@ describe("AssistantMessage turn cost at bubble end", () => {
       }),
     );
     expect(screen.getByText("¥5.00")).toBeTruthy();
-    expect(screen.getByText("用时 12s")).toBeTruthy();
+    expect(screen.getByText("12s")).toBeTruthy();
+    expect(screen.queryByText(/用时/)).toBeNull();
     expect(screen.getByRole("button", { name: "复制" })).toBeTruthy();
   });
 
@@ -315,7 +316,7 @@ describe("AssistantMessage turn cost at bubble end", () => {
       }),
     );
     expect(screen.queryByText("未计价")).toBeNull();
-    expect(screen.getByText("用时 57s")).toBeTruthy();
+    expect(screen.getByText("57s")).toBeTruthy();
   });
 
   it("具名恢复关 footer 时费用行仍在主回复末尾", () => {
@@ -353,7 +354,7 @@ describe("AssistantMessage turn cost at bubble end", () => {
     );
     expect(screen.getByText("¥4.00")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "重新生成" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "复制" })).toBeNull();
+    expect(screen.getByRole("button", { name: "复制" })).toBeTruthy();
   });
 
   it("轮次不在气泡脚，只在更多用量详情", async () => {

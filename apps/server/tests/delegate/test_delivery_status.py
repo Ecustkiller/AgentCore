@@ -1906,7 +1906,7 @@ def test_artifacts_omit_workspace_id_without_target_folder():
 
 
 def _literature_report_plan() -> RunPlan:
-    """Minimal cite_write_review-shaped plan: writer + review + pinned files."""
+    """Minimal literature-shaped plan: writer + review + pinned files."""
     from agentcore.runtime.runs.types import Deliverable
     from agentcore.workspace.stage_dirs import RESEARCH_PREFIX, REVIEWS_PREFIX
 
@@ -1933,7 +1933,7 @@ def _literature_report_plan() -> RunPlan:
 
 
 def test_literature_evidence_deficit_depresses_delivered():
-    """证据不足（几乎无学术源）→ cite_write_review 形对账不得 delivered。"""
+    """证据不足（几乎无学术源）→ 已声明 reviews/ 对账不得 delivered。"""
     from agentcore.workspace.stage_dirs import RESEARCH_PREFIX
 
     main = f"{RESEARCH_PREFIX}报告.md"
@@ -2103,7 +2103,7 @@ def test_literature_adequate_evidence_stays_delivered():
 
 
 def test_map_fanout_junk_citations_not_evidence_deficit():
-    """map_fanout 默认不套证据降档（即使 citation 全是水站）。"""
+    """未声明 reviews/ 时不套证据降档（即使 citation 全是水站）。"""
     from agentcore.runtime.runs.types import Deliverable
     from agentcore.workspace.stage_dirs import RESEARCH_PREFIX
 

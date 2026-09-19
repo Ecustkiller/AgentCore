@@ -4,14 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { uiSet } from "@/lib/uiStorage";
 import type { FolderMeta } from "@/services/folders";
 import { useFoldersStore } from "@/stores/folders";
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -98,7 +91,7 @@ function renderHub() {
   );
 }
 
-describe("FileWorkbench · 新建文件夹", () => {
+describe("FileWorkbench · 我的文件空态", () => {
   afterEach(() => {
     state.folders = [];
     uiSet("files-ws-expanded", []);
@@ -112,23 +105,23 @@ describe("FileWorkbench · 新建文件夹", () => {
     cleanup();
   });
 
-  it("empty 我的文件 keeps the zone header and a primary 新建文件夹 action", () => {
+  it("empty 我的文件 keeps the zone header and has no 新建文件夹", () => {
     renderHub();
     expect(screen.getByText("我的文件")).toBeTruthy();
     expect(screen.getByText("还没有文件夹")).toBeTruthy();
-    const buttons = screen.getAllByRole("button", { name: "新建文件夹" });
-    expect(buttons.length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByRole("button", { name: "新建文件夹" })).toBeNull();
   });
 
-  it("empty-state 新建文件夹 POSTs 未命名文件夹 and enters rename", async () => {
+  it("command-palette untitled request still POSTs 未命名文件夹 and enters rename", async () => {
     createFolderMutate.mockImplementation(async () => {
       const folder = untitledFolder({ id: "n1", name: "未命名文件夹" });
       state.folders = [folder];
       return { folder, created: true };
     });
     renderHub();
-    const buttons = screen.getAllByRole("button", { name: "新建文件夹" });
-    fireEvent.click(buttons[buttons.length - 1]);
+    act(() => {
+      useFoldersStore.getState().requestUntitledCloudFolder();
+    });
 
     await waitFor(() => {
       expect(createFolderMutate).toHaveBeenCalledWith({

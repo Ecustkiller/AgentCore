@@ -34,23 +34,6 @@ function sharedItem(text: string): PromptCatalogItem {
   };
 }
 
-function identityItem(
-  ceoIdentity: string,
-  nestedIdentity = "",
-  leafIdentity = "",
-): PromptCatalogItem {
-  return {
-    id: "identity",
-    kind: "identity",
-    group: "factory",
-    label: "角色身份",
-    depth: 0,
-    ceoIdentity,
-    nestedIdentity,
-    leafIdentity,
-  };
-}
-
 function mineItem(over: {
   id: string;
   label: string;
@@ -92,11 +75,10 @@ function mineItem(over: {
 describe("buildAlwaysRows", () => {
   it("空核也进名单", () => {
     const rail = emptyRail({
-      constitution: [sharedItem(""), identityItem("")],
+      constitution: [sharedItem("")],
     });
     expect(buildAlwaysRows(rail).map((row) => row.label)).toEqual([
       "全员共享准则",
-      "角色身份",
     ]);
   });
 

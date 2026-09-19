@@ -44,7 +44,6 @@ class WaitTool:
             description=(
                 "协调中无需处置时调用：确认继续等团队事件。"
                 f"{COORDINATION_PERIOD_HINT}"
-                "勿用 delegate 占位等待。"
             ),
             parameters={
                 "type": "object",
@@ -120,10 +119,7 @@ class CancelWorkerTool:
     def schema(self) -> ToolSchema:
         return ToolSchema(
             name="cancel_worker",
-            description=(
-                "协调中终止一名在跑或排队未开的队员。"
-                "追加全新队员用 delegate；波边界让出后用 replan。"
-            ),
+            description="协调中终止一名在跑或排队未开的队员。",
             parameters={
                 "type": "object",
                 "properties": {

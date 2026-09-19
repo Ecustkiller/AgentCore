@@ -271,12 +271,13 @@ def _rpc_error_for_salvage_finish(
 
 
 def _emit_user_stop_message_end(sink: EventSink) -> None:
-    """Live stop confirmation for the UI (honest ``stopping`` → ``stopped``).
+    """Live stop confirmation for the UI (``stopping`` → ``stopped``).
 
     Must run before ``sink.close()`` so the event pump still drains it. JSON-RPC
     ``TURN_CANCELLED`` alone is not enough — the renderer confirms on ``message_end``.
+    Idempotent if ``turn_runs`` already emitted on ``mark_user_stop`` / ``stop``.
     """
-    if sink._closed:
+    if sink._closed or sink._stream_finish_reason is not None:
         return
     with contextlib.suppress(Exception):
         sink.emit(message_end(FinishReason.CANCELLED))
@@ -287,7 +288,7 @@ def _emit_cancel_end_if_cancelling(sink: EventSink) -> None:
     task = asyncio.current_task()
     if task is None or not task.cancelling():
         return
-    if sink._closed:
+    if sink._closed or sink._stream_finish_reason is not None:
         return
     with contextlib.suppress(Exception):
         sink.emit(message_end(_salvage_finish_reason()))
@@ -609,7 +610,7 @@ class TurnExecutionMixin:
                     # Sidecar is spawned only by the desktop Electron host. Pass
                     # platform=desktop so prepare builds DesktopClientChannel and
                     # MCP/Host discover over the existing ClientTool fulfill path
-                    # (docs/02-架构/双模式工作区.md · Host / 本机回填). Never infer
+                    # (docs/02-架构/工作区.md · Host / 本机回填). Never infer
                     # desktop_online from location=local.
                     # Bind inference JWT for web_search cloud fallback when local
                     # SearXNG is unreachable (ContextVar; reset after turn).
@@ -878,6 +879,7 @@ class TurnExecutionMixin:
             cache_miss_tokens=int(result.get("cache_miss_tokens", 0) or 0),
             rounds=int(result.get("rounds", 0) or 0),
             duration_ms=result.get("duration_ms"),
+            generation_ms=result.get("generation_ms"),
             trace_id=trace_id,
             finish_reason=finish,
             origin=origin,

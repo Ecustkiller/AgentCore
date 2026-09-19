@@ -3,8 +3,8 @@
 ``sibling_role`` rejects **true parallel double-booking** of a seat: same
 normalized role, no ancestor edge, and no disjoint deliverable scope. Serial
 same-seat via ``depends_on`` is a legal handoff. Parallel fan-out that keeps
-the same role name but scopes distinct deliverables (playbook evaluators /
-angle specialists) is also legal — do not force playbook renames.
+the same role name but scopes distinct deliverables (parallel evaluators /
+angle specialists) is also legal — do not force unique role names.
 
 Parallel co-writes of the same file are allowed (short lock + CAS).
 ``find_sibling_artifact_crosses`` still exists as a detector; production

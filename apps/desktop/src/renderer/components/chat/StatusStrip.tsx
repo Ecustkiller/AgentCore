@@ -1,5 +1,6 @@
 import { PausedContinueSurface } from "@/components/chat/PausedContinueSurface";
 import {
+  graphProgress,
   isTeamSynthesizing,
   workerProgress,
   workersAreTerminal,
@@ -323,12 +324,11 @@ function RunningStrip({
       detached: Boolean(backgroundBadge),
     });
   const workers = workerProgress(execution);
-  const { completed, total } = execution.progress;
-  const progressLabel = liveWait
-    ? `${liveWait.completed}/${liveWait.total}`
-    : synthesizing
+  const graph = graphProgress(execution);
+  const progressLabel =
+    liveWait || synthesizing
       ? `${workers.completed}/${workers.total}`
-      : `${completed}/${total}`;
+      : `${graph.completed}/${graph.total}`;
   const frames = useActiveExecField((rt) => rt.frames);
   const elapsedSec = useRunningElapsed(!stopping, frames[0]?.t, {
     freezeWhenStopped: true,
@@ -396,7 +396,7 @@ function PausedStrip({
     onContinue: () => void;
   } | null;
 }) {
-  const { completed, total } = execution.progress;
+  const { completed, total } = graphProgress(execution);
 
   return (
     <div className="px-3 py-1.5" data-testid="status-strip-paused">
@@ -440,7 +440,7 @@ function IdleStrip({
   onMaximize,
 }: StatusStripProps) {
   const frames = useActiveExecField((rt) => rt.frames);
-  const { completed, total } = execution.progress;
+  const { completed, total } = graphProgress(execution);
   const ms = elapsedMs(frames);
   const duration = ms > 0 ? formatDuration(ms) : "";
 
@@ -472,7 +472,7 @@ function CompletedStrip({
   onMaximize,
 }: StatusStripProps & { stopped?: boolean }) {
   const frames = useActiveExecField((rt) => rt.frames);
-  const { completed, total } = execution.progress;
+  const { completed, total } = graphProgress(execution);
   const ms = elapsedMs(frames);
   const duration = ms > 0 ? formatDuration(ms) : "";
 
@@ -519,7 +519,7 @@ function PartialStrip({
   onMaximize,
 }: StatusStripProps) {
   const frames = useActiveExecField((rt) => rt.frames);
-  const { completed, total } = execution.progress;
+  const { completed, total } = graphProgress(execution);
   const ms = elapsedMs(frames);
   const duration = ms > 0 ? formatDuration(ms) : "";
 
@@ -554,7 +554,7 @@ function FailureStrip({
 }: StatusStripProps) {
   const detached = useActiveExecField((rt) => rt.executionDetached);
   const frames = useActiveExecField((rt) => rt.frames);
-  const { completed, total } = execution.progress;
+  const { completed, total } = graphProgress(execution);
   const ms = elapsedMs(frames);
   const duration = ms > 0 ? formatDuration(ms) : "";
 

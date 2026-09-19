@@ -25,11 +25,9 @@ import {
   CloudUpload,
   Cpu,
   Download,
-  FileText,
   Files,
   FlaskConical,
   FolderKey,
-  FolderPlus,
   GitBranch,
   HardDrive,
   Heart,
@@ -50,7 +48,6 @@ import {
   SlidersHorizontal,
   Store,
   Sun,
-  Table2,
   Terminal,
   UserCog,
   Workflow,
@@ -129,26 +126,6 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       keywords: ["new", "chat", "compose", "xinjian", "duihua"],
       shortcut: chord("n"),
       run: () => startNewConversation(navigate),
-    },
-    {
-      id: "new-folder",
-      title: "在「我的文件」里新建文件夹",
-      category: "操作",
-      icon: FolderPlus,
-      keywords: [
-        "new",
-        "folder",
-        "project",
-        "workspace",
-        "xinjian",
-        "wenjianjia",
-        "wodewenjian",
-        "gongzuoqu",
-      ],
-      run: () => {
-        navigate("/files");
-        useFoldersStore.getState().requestUntitledCloudFolder();
-      },
     },
     // Dev-only 磁带回放：仅当服务端 DEMO_TAPE_REPLAY_ENABLED 且目录非空时注入。
     // 主入口 = 准备模式（空会话，用户亲自发消息开播）；立即开播为备选。
@@ -372,22 +349,6 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       icon: Palette,
       keywords: ["whiteboard", "canvas", "board", "baiban", "huaban", "画板"],
       run: go("/whiteboard"),
-    },
-    {
-      id: "nav-docs",
-      title: "文档",
-      category: "前往",
-      icon: FileText,
-      keywords: ["docs", "document", "wendang", "报告"],
-      run: go("/docs"),
-    },
-    {
-      id: "nav-tables",
-      title: "多维表格",
-      category: "前往",
-      icon: Table2,
-      keywords: ["tables", "spreadsheet", "biaoge", "表格", "多维"],
-      run: go("/tables"),
     },
     {
       id: "nav-messages",

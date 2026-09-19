@@ -42,7 +42,7 @@ class _StubDelegate:
 
 
 class _StubReplan:
-    """Companion replan on the LeadSubteam bundle — opening offer must omit it."""
+    """Companion replan on the LeadSubteam bundle — opening table includes it."""
 
     @property
     def schema(self) -> ToolSchema:
@@ -62,11 +62,10 @@ async def _noop_dispose() -> None:
     return None
 
 
-def _stub_subteam() -> LeadSubteam:
-    """The factory's return shape (受监督子计划 B): a lead's delegate + replan bundle.
-    Opening registry registers delegate only; these identity / depth-cap tests
-    still only care that a bundle is minted."""
+def _stub_subteam(*, depth: int = 1) -> LeadSubteam:
+    """Lead bundle. ``depth`` must match the factory captain_depth so wait stays off."""
     stub = _StubDelegate()
+    stub._depth = depth
     replan = _StubReplan()
     return LeadSubteam(
         tools=(stub, replan),
@@ -124,7 +123,7 @@ async def test_nested_delegate_offered_only_within_depth_cap():
 
     def factory(captain_run_id: str, captain_depth: int):
         calls.append((captain_run_id, captain_depth))
-        return _stub_subteam()
+        return _stub_subteam(depth=captain_depth)
 
     plan = RunPlan()
     plan.add(_spec("d1", depth=1))
@@ -145,7 +144,7 @@ async def test_nested_delegate_withheld_at_depth_cap():
 
     def factory(captain_run_id: str, captain_depth: int):
         calls.append(captain_run_id)
-        return _stub_subteam()
+        return _stub_subteam(depth=captain_depth)
 
     plan = RunPlan()
     plan.add(_spec("d3", depth=3))  # at the cap
@@ -158,39 +157,40 @@ async def test_captain_worker_gets_captain_identity_and_delegate_tool():
     provider = _ContentProvider(["X"])
     plan = RunPlan()
     plan.add(_spec("d1", depth=1))
-    executor = _nesting_executor(plan, provider, lambda rid, d: _stub_subteam())
+    executor = _nesting_executor(plan, provider, lambda rid, d: _stub_subteam(depth=d))
     await executor(plan.by_id("d1"), {})
-    # A within-cap worker is told it may lead a nested sub-team (on by default).
-    assert provider.system_messages[0].lstrip().startswith("<身份>")
-    assert "再向下委派一层子团队" in provider.system_messages[0]
-    # depth-1 children may still nest — honesty must not claim they cannot.
-    assert "你的子成员仍可再向下委派一层" in provider.system_messages[0]
-    assert "你的子成员不能再向下委派" not in provider.system_messages[0]
+    # Child-cap honesty is an opening fact, not ``<身份>``.
+    user = provider.user_messages[0]
+    sys = provider.system_messages[0]
+    assert sys == "SYS"
+    assert "<身份>" not in sys
+    assert "你的子成员仍可再向下委派一层" in user
+    assert "你的子成员不能再向下委派" not in user
 
 
-async def test_captain_worker_opening_omits_replan():
-    """开场只挂 delegate；bundle 里的 companion replan 要等子计划存在才 offer。"""
+async def test_captain_worker_opening_includes_replan():
+    """开场挂 delegate + companion replan；wait 仍是父图杠杆。"""
     provider = _RecordToolsProvider(["X"])
     plan = RunPlan()
     plan.add(_spec("d1", depth=1))
-    executor = _nesting_executor(plan, provider, lambda rid, d: _stub_subteam())
+    executor = _nesting_executor(plan, provider, lambda rid, d: _stub_subteam(depth=d))
     await executor(plan.by_id("d1"), {})
     assert provider.tool_names, "expected at least one LLM request"
     opening = provider.tool_names[0]
     assert "delegate" in opening
-    assert "replan" not in opening
+    assert "replan" in opening
+    assert "wait" not in opening
 
 
 async def test_default_worker_is_captain_within_depth_cap():
     provider = _ContentProvider(["X"])
     plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
     # Delegation is on by default — a depth-1 worker within the cap is a captain.
-    executor = _nesting_executor(plan, provider, lambda rid, d: _stub_subteam())
+    executor = _nesting_executor(plan, provider, lambda rid, d: _stub_subteam(depth=d))
     await executor(plan.by_id("t_1"), {})
-    sys = provider.system_messages[0]
-    # Captain-only markers — the leaf intro carries neither.
-    assert "再向下委派一层子团队" in sys
-    assert "薄切片" not in sys
+    user = provider.user_messages[0]
+    assert "你的子成员仍可再向下委派一层" in user
+    assert "薄切片" not in user
 
 
 async def test_depth_two_captain_children_are_leaves():
@@ -198,22 +198,22 @@ async def test_depth_two_captain_children_are_leaves():
     provider = _ContentProvider(["X"])
     plan = RunPlan()
     plan.add(_spec("d2", depth=2))
-    executor = _nesting_executor(plan, provider, lambda rid, d: _stub_subteam())
+    executor = _nesting_executor(plan, provider, lambda rid, d: _stub_subteam(depth=d))
     await executor(plan.by_id("d2"), {})
-    sys = provider.system_messages[0]
-    assert "再向下委派一层子团队" in sys
-    assert "只能再嵌套这一层，你的子成员不能再向下委派" in sys
-    assert "你的子成员仍可再向下委派一层" not in sys
+    user = provider.user_messages[0]
+    assert "你的子成员不能再向下委派" in user
+    assert "你的子成员仍可再向下委派一层" not in user
 
 
 async def test_captain_identity_carries_when_to_split_guidance():
     provider = _ContentProvider(["X"])
     plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
-    executor = _nesting_executor(plan, provider, lambda rid, d: _stub_subteam())
+    executor = _nesting_executor(plan, provider, lambda rid, d: _stub_subteam(depth=d))
     await executor(plan.by_id("t_1"), {})
+    user = provider.user_messages[0]
     sys = provider.system_messages[0]
-    assert "再向下委派一层子团队" in sys
-    assert "薄切片" not in sys
+    assert "你的子成员仍可再向下委派一层" in user
+    assert "薄切片" not in user
     assert "先招人再整合" not in sys
     assert "写满步骤 ≠ 已切薄" not in sys
     assert "≠ 两段" not in sys
@@ -222,7 +222,7 @@ async def test_captain_identity_carries_when_to_split_guidance():
     assert "已经做了很久" not in sys
     assert "不要为委派而委派" not in sys
     assert "第一件事用 delegate" not in sys
-    assert "你的子成员仍可再向下委派一层" in sys
+    assert "你的子成员仍可再向下委派一层" in user
     assert "会改变还在跑的队友" not in sys
     assert "计划已让出" not in sys
     from agentcore.tools.builtin.replan import _REPLAN_DESCRIPTION
@@ -233,20 +233,11 @@ async def test_captain_identity_carries_when_to_split_guidance():
     from agentcore.runtime.runs.executor.identities import build_worker_identity
 
     identity = build_worker_identity(has_dependents=False, captain=True)
-    assert "<身份>" in identity and "队员" in identity
-    assert "优先先嵌套" not in identity
-    assert "未嵌套禁写" not in identity
-    assert "凡大活" not in identity
-    assert "共写同一目标文件" not in identity
-    assert "4 个 sub-worker" not in identity
+    assert identity == "你的子成员仍可再向下委派一层。"
+    assert "<身份>" not in identity
     leaf = build_worker_identity(has_dependents=False, captain=False)
-    assert "<身份>" in leaf and "</身份>" in leaf
-    assert "队员" in leaf.split("<身份>", 1)[1].split("</身份>", 1)[0]
-    assert "先招人再整合" not in leaf
-    assert "写满步骤 ≠ 已切薄" not in leaf
-    assert "≠ 两段" not in leaf
-    assert "【开局】" not in leaf
-    assert "再向下委派一层子团队" not in leaf
+    assert leaf == ""
+    assert "你的子成员" not in leaf
 
 
 async def test_depth_three_subworker_keeps_leaf_identity():
@@ -258,10 +249,11 @@ async def test_depth_three_subworker_keeps_leaf_identity():
         depth=3,
     )
     # At the depth cap: delegate tools withheld — depth-3 sub-workers are always leaves.
-    executor = _nesting_executor(plan, provider, lambda rid, d: _stub_subteam())
+    executor = _nesting_executor(plan, provider, lambda rid, d: _stub_subteam(depth=d))
     await executor(plan.by_id("t_1"), {})
-    assert "不能再向下委派" in provider.system_messages[0]
-    assert "再向下委派一层子团队" not in provider.system_messages[0]
+    user = provider.user_messages[0]
+    assert "你的子成员" not in user
+    assert "<身份>" not in provider.system_messages[0]
 
 
 async def test_worker_identities_omit_tool_safety_caution():
@@ -273,7 +265,7 @@ async def test_worker_identities_omit_tool_safety_caution():
         parent_run_id="cap",
         depth=3,  # depth cap → leaf identity
     )
-    leaf_exec = _nesting_executor(leaf_plan, leaf_provider, lambda rid, d: _stub_subteam())
+    leaf_exec = _nesting_executor(leaf_plan, leaf_provider, lambda rid, d: _stub_subteam(depth=d))
     await leaf_exec(leaf_plan.by_id("t_1"), {})
     leaf_sys = leaf_provider.system_messages[0]
     assert "<写工具谨慎>" not in leaf_sys
@@ -282,10 +274,11 @@ async def test_worker_identities_omit_tool_safety_caution():
     captain_provider = _ContentProvider(["Y"])
     captain_plan = RunPlan()
     captain_plan.add(_spec("d1", depth=1))
-    captain_exec = _nesting_executor(captain_plan, captain_provider, lambda rid, d: _stub_subteam())
+    captain_exec = _nesting_executor(captain_plan, captain_provider, lambda rid, d: _stub_subteam(depth=d))
     await captain_exec(captain_plan.by_id("d1"), {})
+    captain_user = captain_provider.user_messages[0]
     captain_sys = captain_provider.system_messages[0]
-    assert "再向下委派一层子团队" in captain_sys  # captain identity in play
+    assert "你的子成员仍可再向下委派一层" in captain_user
     assert "<写工具谨慎>" not in captain_sys
 
 
@@ -313,8 +306,6 @@ async def test_handoff_topology_lives_on_tool_not_identity():
     assert "修复完成" not in leaf
     assert "现象已消除" not in leaf and "已全部落地" not in leaf
     assert "有工具活动或较长交付" not in leaf
-    assert "权威文档冲突" not in leaf
-    assert "静默改权威稿" not in leaf
     assert "找路径" not in leaf
     assert "前置结果" not in leaf
     assert "全仓 glob" not in leaf
@@ -357,10 +348,10 @@ async def test_handoff_topology_lives_on_tool_not_identity():
     )
     up_provider = _ContentProvider(["UP"])
     leaf_provider = _ContentProvider(["LEAF"])
-    await _nesting_executor(plan, up_provider, lambda rid, d: _stub_subteam())(
+    await _nesting_executor(plan, up_provider, lambda rid, d: _stub_subteam(depth=d))(
         plan.by_id("t_arch"), {}
     )
-    await _nesting_executor(plan, leaf_provider, lambda rid, d: _stub_subteam())(
+    await _nesting_executor(plan, leaf_provider, lambda rid, d: _stub_subteam(depth=d))(
         plan.by_id("t_impl"), {}
     )
     assert "必须调用 handoff" not in up_provider.system_messages[0]
@@ -389,7 +380,7 @@ async def test_handoff_topology_lives_on_tool_not_identity():
     assert HandoffTool().schema.parameters.get("properties") == {}
 
 
-def test_catalog_identity_is_identity_only():
+def test_catalog_empty_live_captain_nest_fact():
     from agentcore.runtime.runs.contract import describe_deliverable
     from agentcore.runtime.runs.executor.identities import (
         build_worker_identity,
@@ -399,17 +390,12 @@ def test_catalog_identity_is_identity_only():
 
     live = build_worker_identity(has_dependents=False)
     catalog = build_worker_identity_catalog(captain=False)
-    assert live == catalog
-    assert "form=files" not in live
-    assert "form=prose" not in live
-    assert "form=workspace" not in catalog
-    assert catalog.count("<身份>") == 1
-    assert "不能再向下委派" in catalog
-    nested = build_worker_identity_catalog(captain=True)
-    assert "再向下委派一层子团队" in nested
-    assert "还可以再向下委派一层子团队" not in nested
-    assert "form=prose" not in nested
-    assert "form=workspace" not in nested
+    assert live == catalog == ""
+    nested_catalog = build_worker_identity_catalog(captain=True)
+    assert nested_catalog == ""
+    nested_live = build_worker_identity(has_dependents=False, captain=True)
+    assert nested_live == "你的子成员仍可再向下委派一层。"
+    assert "<身份>" not in nested_live
     files = describe_deliverable(Deliverable(artifacts=["report.md"]))
     assert "form=files" not in files
     assert "form=prose" not in files
@@ -470,8 +456,8 @@ def test_worker_identity_teaches_escalate_blocking_choice():
     blocking = EscalateTool().schema.parameters["properties"]["blocking"]["description"]
     assert "报一声" in desc or "报一声" in blocking
     assert "猜错作废" in desc
-    assert "设计稿" in desc
-    assert "扩范围" in desc
+    assert "拍板" in desc
+    assert "职责偏离" in desc
     assert "已拒凭据" in blocking
     captain = build_worker_identity(has_dependents=False, captain=True)
     assert "小问题（路径拼写" not in captain
@@ -483,7 +469,7 @@ async def test_executor_never_wires_direct_to_user_register():
     """单人 / 多节点 / 嵌套 lead：身份提示词都不长直出段。"""
     solo, _ = build_run_plan([{"role": "工程师", "task": "改一行"}], id_prefix="s")
     solo_provider = _ContentProvider(["OUT"])
-    await _nesting_executor(solo, solo_provider, lambda rid, d: _stub_subteam())(
+    await _nesting_executor(solo, solo_provider, lambda rid, d: _stub_subteam(depth=d))(
         solo.nodes[0], {}
     )
     assert "正文直达用户" not in solo_provider.system_messages[0]
@@ -492,7 +478,7 @@ async def test_executor_never_wires_direct_to_user_register():
         [{"role": "A", "task": "做A"}, {"role": "B", "task": "做B"}], id_prefix="m"
     )
     multi_provider = _ContentProvider(["A", "B"])
-    await _nesting_executor(multi, multi_provider, lambda rid, d: _stub_subteam())(
+    await _nesting_executor(multi, multi_provider, lambda rid, d: _stub_subteam(depth=d))(
         multi.nodes[0], {}
     )
     assert "正文直达用户" not in multi_provider.system_messages[0]
@@ -501,7 +487,7 @@ async def test_executor_never_wires_direct_to_user_register():
         [{"role": "子队员", "task": "改一行"}], id_prefix="n", depth=2
     )
     nested_provider = _ContentProvider(["OUT"])
-    await _nesting_executor(nested, nested_provider, lambda rid, d: _stub_subteam())(
+    await _nesting_executor(nested, nested_provider, lambda rid, d: _stub_subteam(depth=d))(
         nested.nodes[0], {}
     )
     assert "正文直达用户" not in nested_provider.system_messages[0]
@@ -515,10 +501,10 @@ async def test_executor_passes_registry_capability_into_identity():
         id_prefix="cap",
     )
     provider = _ContentProvider(["OUT"])
-    await _nesting_executor(plan, provider, lambda rid, d: _stub_subteam())(
+    await _nesting_executor(plan, provider, lambda rid, d: _stub_subteam(depth=d))(
         plan.nodes[0], {}
     )
-    assert "本回合执行环境未装配" in provider.system_messages[0]
+    assert "本回合执行环境未装配" in provider.user_messages[0]
 
 
 async def test_worker_escalation_is_harvested_and_nonblocking():

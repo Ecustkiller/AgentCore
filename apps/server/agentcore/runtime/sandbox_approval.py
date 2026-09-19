@@ -1,4 +1,4 @@
-"""Sandbox → approval policy table (安全权限与治理 §三 / §五).
+"""Sandbox → approval policy table (安全权限与治理 §二 / §三).
 
 Maps the workspace execution environment to whether GRANTABLE *execution-class*
 tools still need a human approval prompt. File-mutation tools: local workers

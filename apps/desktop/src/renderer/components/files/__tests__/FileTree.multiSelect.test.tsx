@@ -186,7 +186,7 @@ describe("文件树多选（对齐桌面文件管理器）", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
-  it("批量下载：文件夹整夹打成 zip，与文件一并成功", async () => {
+  it("批量下载只下文件，跳过选中的目录", async () => {
     const source = makeSource();
     renderTree(source);
     fireEvent.click(await screen.findByText("docs"));
@@ -195,8 +195,8 @@ describe("文件树多选（对齐桌面文件管理器）", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /下载/ }));
 
-    await waitFor(() => expect(source.downloaded).toEqual(["docs", "a.md"]));
-    expect(notifySuccess).toHaveBeenCalledWith("已下载 2 项");
+    await waitFor(() => expect(source.downloaded).toEqual(["a.md"]));
+    expect(notifySuccess).toHaveBeenCalledWith("已下载 1 项");
     expect(screen.queryByText(/失败/)).toBeNull();
   });
 

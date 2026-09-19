@@ -118,13 +118,10 @@ def merge_citations(sink: list[dict[str, Any]], new: list[dict[str, Any]]) -> di
 # A2 引用编号：每条 web 工具结果都被标注上 engine 为其来源分配的规范编号（= 来源卡
 # 序号）。模型用这些确切编号引用，于是正文 [n] 总能解析到正确的卡片——而非自己猜一个
 # 后端按到达顺序独立分配的序号（那在乱序使用、子集、去重与限量时都会错位）。
-_CITATION_NUMBER_HINT = "\n\n[来源编号] 上述来源对应的引用号，正文中用方括号角标引用（如 [1]）："
+_CITATION_NUMBER_HINT = "\n\n[来源编号] "
 
-# 引用即出处 P1：回合共享台账 stable id（``#rN``）注解——汇入后不变，禁止 handoff 重排。
-_CITATION_LEDGER_HINT = (
-    "\n\n[已登记来源] 台账 id（汇入后不变）；成稿挂 #rN 须已深读或 selected"
-    "（仅 search 登记不可）；笔记行尾 / 正文按下列 id 引用："
-)
+# 引用即出处 P1：回合共享台账 stable id（``#rN``）对照表——汇入后不变，禁止 handoff 重排。
+_CITATION_LEDGER_HINT = "\n\n[已登记来源] "
 
 
 def annotate_tool_citations(

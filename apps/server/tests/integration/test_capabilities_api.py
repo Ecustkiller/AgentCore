@@ -88,29 +88,27 @@ async def test_capabilities_exposes_prompt_template(client):
     assert guidelines["shared_base"]
     ceo = guidelines["ceo"]
     addon = guidelines["ceo_addon"]
-    # The CEO template carries the routing core + the always-on 按需目录.
-    assert "CEO" in ceo
+    # The CEO template carries the always-on 按需目录; factory identity is empty.
+    assert "<身份>" not in ceo
     assert "按需目录" in ceo
     # The shared base is a prefix of the CEO prompt (it layers hints onto the base).
     assert ceo.startswith(guidelines["shared_base"])
     # ceo_addon is the catalog delta (no repeated shared-base sections).
     assert addon
-    assert "CEO" in addon
+    assert "<身份>" not in addon
+    assert "<按需目录>" in addon
     assert addon == ceo[len(guidelines["shared_base"]) :].lstrip("\n")
     assert ceo == guidelines["shared_base"] + ceo[len(guidelines["shared_base"]) :]
-    # Worker identity templates: leaf cannot nest; captain can. Not the per-turn prompt.
+    # Worker catalog: factory identity empty. Nest-cap is live-only.
     leaf = guidelines["worker_leaf"]
     captain = guidelines["worker_captain"]
-    assert "<身份>" in leaf
-    assert "不能再向下委派" in leaf
-    assert "再向下委派一层子团队" not in leaf
-    assert "<身份>" in captain
-    assert "再向下委派一层子团队" in captain
-    assert "还可以再向下委派一层子团队" not in captain
-    assert leaf != captain
-    # Catalog is identity only; form HOW is per-turn 交付物规格.
+    assert leaf == ""
+    assert captain == ""
+    assert "你的子成员" not in leaf
+    assert "你的子成员" not in captain
+    # Catalog is not form HOW (per-turn 交付物规格).
     for body in (leaf, captain):
         assert "form=files" not in body
         assert "form=prose" not in body
         assert "form=workspace" not in body
-        assert body.count("<身份>") == 1
+        assert "<身份>" not in body

@@ -278,7 +278,6 @@ async def test_approve_always_files_grants_whole_class():
             "file_write",
             "str_replace",
             "file_delete",
-            "mkdir",
             "file_batch",
         }
     )
@@ -859,7 +858,7 @@ async def test_delegation_grant_skips_run_approval():
 
 
 async def test_always_ask_policy_ignores_delegation_grant():
-    """autonomy=always_ask（安全权限与治理 §三）：delegation grant 不短路——每个可授权调用仍出卡。"""
+    """autonomy=always_ask（安全权限与治理 §二）：delegation grant 不短路——每个可授权调用仍出卡。"""
     from agentcore.core.types import AutonomyPolicy, recipe_to_axes
 
     reg = InteractionRegistry()
@@ -919,7 +918,7 @@ def test_delegation_grantable_tool_names_includes_execution_and_file_ops():
     assert "file_write" in names
 
 
-async def test_session_file_trust_skips_mkdir_under_first_grant():
+async def test_session_file_trust_skips_file_write_under_first_grant():
     """文件改动类会话信任，不必等 delegation grant（对齐 Composer 心智）。"""
     from agentcore.core.types import AutonomyPolicy, recipe_to_axes
     from agentcore.tools.builtin import approval_class_tool_names
@@ -937,9 +936,9 @@ async def test_session_file_trust_skips_mkdir_under_first_grant():
     )
 
     decision = await gate.authorize(
-        tool_name="mkdir",
-        tool_call_id="mk-1",
-        arguments={"path": "AgentCore/文档/research/设计"},
+        tool_name="file_write",
+        tool_call_id="w-1",
+        arguments={"path": "AgentCore/文档/research/设计.md"},
     )
     assert decision is ApprovalDecision.APPROVE
     assert _drain(sink) == []
@@ -1176,7 +1175,7 @@ async def test_session_file_trust_does_not_cover_run():
 
 
 async def test_observe_policy_ignores_session_file_trust():
-    """只观察：文件会话信任关闭，mkdir 仍出卡。"""
+    """只观察：文件会话信任关闭，file_write 仍出卡。"""
     from agentcore.core.types import AutonomyPolicy, recipe_to_axes
     from agentcore.tools.builtin import approval_class_tool_names
 
@@ -1193,12 +1192,12 @@ async def test_observe_policy_ignores_session_file_trust():
     )
 
     resolver = asyncio.create_task(
-        _resolve_when_ready(reg, "mk-1", ApprovalDecision.APPROVE, "conv-1")
+        _resolve_when_ready(reg, "w-1", ApprovalDecision.APPROVE, "conv-1")
     )
     decision = await gate.authorize(
-        tool_name="mkdir",
-        tool_call_id="mk-1",
-        arguments={"path": "docs"},
+        tool_name="file_write",
+        tool_call_id="w-1",
+        arguments={"path": "docs/x.md"},
     )
     await resolver
     assert decision is ApprovalDecision.APPROVE
@@ -1262,7 +1261,7 @@ def test_will_prompt_matrix_short_circuits_and_force():
     assert gate.will_prompt(tool_name="run", arguments={}) is True
 
     # Session file trust (LESS_INTERRUPT) covers reversible file ops.
-    assert gate.will_prompt(tool_name="mkdir", arguments={"path": "docs/x"}) is False
+    assert gate.will_prompt(tool_name="file_write", arguments={"path": "docs/x.md"}) is False
     # Permanent delete still prompts under session file trust.
     assert (
         gate.will_prompt(
@@ -1294,8 +1293,8 @@ def test_will_prompt_matrix_short_circuits_and_force():
     )
     assert (
         gate.will_prompt(
-            tool_name="mkdir",
-            arguments={"path": "docs/x"},
+            tool_name="file_write",
+            arguments={"path": "docs/x.md"},
             force=True,
         )
         is True

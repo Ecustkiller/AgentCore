@@ -3,12 +3,14 @@ import {
   type Message,
   getActiveRuntime,
   getRuntime,
+  lastAssistantProjectionId,
   useConversationStore,
 } from "@/stores/conversation";
 import {
   completeTurnPhase,
   getTurnPhase,
 } from "@/stores/conversation/turnPhaseActions";
+import { execRuntime, useExecutionStore } from "@/stores/execution";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 
 /** The user's explicit stop (abort button) — never surfaced as an error. */
@@ -27,7 +29,25 @@ export function finalizeGeneratingIfNeeded(conversationId: string): void {
 }
 
 /**
- * Honest-stop Abort 收口：RPC 可能先于 ``message_end`` reject。
+ * Stop 点击即冻图 / 盖 cancelled / 关生成锁。phase 仍走 ``stopping``，等
+ * ``message_end(cancelled)`` 进 ``stopped``。迟到 ``run_*`` 可对账已完成
+ * 节点，不得把 ``execution.status`` 打回 running。
+ */
+export function commitLocalUserStop(conversationId: string): void {
+  const mid = lastAssistantProjectionId(getRuntime(conversationId).messages);
+  if (mid) {
+    const exec = useExecutionStore.getState();
+    const rt = execRuntime(exec, mid);
+    if (rt.plan && rt.status !== "cancelled" && rt.status !== "failed") {
+      exec.setStatus("cancelled", mid);
+    }
+  }
+  useConversationStore.getState().finalizeLastMessage(conversationId);
+  stampHonestStopCancelled(conversationId);
+}
+
+/**
+ * Abort 收口：RPC / 流在 ``message_end`` 前 reject。
  * ``stopping`` → ``stopped``，清 ``isGenerating``。用户停止盖 ``cancelled``；
  * ``AbortError`` message 为 ``Interrupted`` 时不得盖成 cancelled，尾巴若还没
  * ``finishReason`` 则盖 ``interrupted``。

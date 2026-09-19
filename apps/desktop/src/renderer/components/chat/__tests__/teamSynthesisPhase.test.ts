@@ -1,5 +1,6 @@
 import {
   coordinationWaitCaptainCaption,
+  graphProgress,
   isTeamSynthesizing,
   teamSynthesisPhaseLabel,
   waitingWorkerRoles,
@@ -79,6 +80,24 @@ describe("teamSynthesisPhase", () => {
       ],
     });
     expect(workerProgress(e)).toEqual({ completed: 2, total: 2 });
+  });
+
+  it("workerProgress folds same-person continuation into one seat", () => {
+    const e = exec({
+      status: "running",
+      runs: [
+        run({ id: "cap", status: "pending", kind: "captain" }),
+        run({ id: "w1", status: "cancelled" }),
+        run({
+          id: "w1b",
+          status: "completed",
+          continuesRunId: "w1",
+          continuationIndex: 1,
+        }),
+      ],
+    });
+    expect(workerProgress(e)).toEqual({ completed: 1, total: 1 });
+    expect(graphProgress(e)).toEqual({ completed: 1, total: 2 });
   });
 
   it("isTeamSynthesizing when all workers done and turn still running", () => {

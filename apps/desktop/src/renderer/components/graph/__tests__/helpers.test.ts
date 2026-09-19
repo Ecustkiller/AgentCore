@@ -1011,8 +1011,8 @@ describe("buildGraphStructure · bookend sink edges", () => {
     ).toBe(false);
   });
 
-  it("续链：只根接 input、只链尖汇 CEO；continuation 点线保留", () => {
-    const { rawEdges } = buildGraphStructure(
+  it("续链：同人续写折进座位，只根接 input 并汇 CEO", () => {
+    const { nodeIds, rawEdges } = buildGraphStructure(
       [
         captain(),
         run("w1"),
@@ -1027,27 +1027,22 @@ describe("buildGraphStructure · bookend sink edges", () => {
       ],
       "__input__",
     );
+    expect(nodeIds).toContain("w1");
+    expect(nodeIds).not.toContain("w1_v2");
+    expect(nodeIds).not.toContain("w1_v3");
     const inputTargets = rawEdges
       .filter((e) => e.source === "__input__")
       .map((e) => e.target)
       .sort();
     expect(inputTargets).toEqual(["w1"]);
-    expect(sinkTargets(rawEdges)).toEqual(["w1_v3"]);
-    expect(
-      rawEdges
-        .filter((e) => e.kind === "continuation")
-        .map((e) => `${e.source}->${e.target}`)
-        .sort(),
-    ).toEqual(["w1->w1_v2", "w1_v2->w1_v3"]);
+    expect(sinkTargets(rawEdges)).toEqual(["w1"]);
+    expect(rawEdges.filter((e) => e.kind === "continuation")).toEqual([]);
     expect(
       rawEdges.some((e) => e.source === "w1" && e.target === "captain"),
-    ).toBe(false);
-    expect(
-      rawEdges.some((e) => e.source === "w1_v2" && e.target === "captain"),
-    ).toBe(false);
+    ).toBe(true);
   });
 
-  it("续链上有真实 dependsOn 的续仍画 peer dep", () => {
+  it("续链上有真实 dependsOn 的续绑到座位根", () => {
     const { rawEdges } = buildGraphStructure(
       [
         captain(),
@@ -1062,16 +1057,15 @@ describe("buildGraphStructure · bookend sink edges", () => {
     );
     expect(
       rawEdges.some(
-        (e) => e.kind === "dep" && e.source === "a_v2" && e.target === "b",
+        (e) => e.kind === "dep" && e.source === "a" && e.target === "b",
       ),
     ).toBe(true);
     expect(
       rawEdges.some(
-        (e) =>
-          e.kind === "continuation" && e.source === "a" && e.target === "a_v2",
+        (e) => e.kind === "dep" && e.source === "a_v2" && e.target === "b",
       ),
-    ).toBe(true);
-    // a 有续后继不进 CEO；a_v2 被 b dependsOn，也不进；仅 b → captain。
+    ).toBe(false);
+    expect(rawEdges.filter((e) => e.kind === "continuation")).toEqual([]);
     expect(sinkTargets(rawEdges)).toEqual(["b"]);
     expect(
       rawEdges.filter((e) => e.source === "__input__").map((e) => e.target),

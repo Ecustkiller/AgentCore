@@ -1,18 +1,11 @@
-"""Collapse old write-tool arguments in the model-facing window (handoff 缓存崩塌).
+"""Retired per-round sliding projection for old write-tool arguments.
 
-After a worker ``file_write`` / ``str_replace`` lands, the assistant
-message still carries the FULL body inside ``tool_calls[].function.arguments``. Older
-rounds re-pay that body as cache_miss (case: handoff round ~28k in / ~27k miss).
+Do not call from ``build_request_window``. Same-window rewrite is window compact
+only. Sliding this every round rewrote mid-history and forfeited the prefix cache
+(old comment 「28k 记成 miss」 was this projection's own loop).
 
-This projection — applied at request-assembly time only, like ``tool_clear`` — keeps the
-**original write tool name**. Writes that have fallen out of the near window reduce args
-to ``{"path": …}`` and append a size / structure digest to that call's **tool result**.
-The latest ``keep_recent`` **assistant messages** (every thought, not only write
-rounds) keep full ``content`` / ``old_string`` / ``new_string`` so the immediately
-next thought can chain an edit. Older completed writes collapse even if the model
-then only ``run`` / talks / handoff — waiting for the next write left bodies in
-the window for the rest of the job. Canonical ``messages`` / journal keep the full
-args; resume rebuilds then re-applies.
+The functions below still collapse old write args when invoked as a library.
+Canonical ``messages`` / journal keep the full args.
 
 定案：掉出近端窗的写，参数槽只留 path（模型不能把摘要当正文回灌）。近端保留全文。
 历代投影（``content:"[已清理]"`` 假稿纸 → ``_landed_summary`` 模板 → 合成名

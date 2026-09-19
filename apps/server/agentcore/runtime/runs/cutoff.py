@@ -64,7 +64,6 @@ WIND_DOWN_ALLOWED_TOOLS = frozenset(
         "file_write",
         "str_replace",
         "file_batch",
-        "mkdir",
         "file_list",
         "md_export",
     }

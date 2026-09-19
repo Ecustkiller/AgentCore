@@ -293,7 +293,6 @@ def compose_ceo_chat_prompt(
     *,
     ceo_tool_names: set[str],
     on_demand_entries: Sequence[ConsultDirectoryEntry] = (),
-    ceo_offered_names: set[str] | None = None,
     # Deprecated: skill_registry / memory_topics / on_demand_rules — prefer on_demand_entries.
     skill_registry: object | None = None,
     memory_topics: Sequence[object] = (),
@@ -301,16 +300,13 @@ def compose_ceo_chat_prompt(
 ) -> str:
     """Compose the frozen CEO system prompt from the clean base.
 
-    Layers the entry coordinator's identity + unified ``<按需目录>`` (only when
+    Layers the entry coordinator's residual identity (empty unless proven) + unified ``<按需目录>`` (only when
     ``consult`` is wired). Date, workspace (+ CEO file index), scene gates,
     attachments, table, and the source ledger ride the turn envelope — not this
     string. ``on_demand_entries`` must match the tool's merged source.
-    ``ceo_offered_names`` is the OpenAI table this turn (on-demand tools omitted until
-    consult). Host / terminal / browser / grant HOW is consult-owned and must not
-    hang on this frozen prompt — even when catalog/eval omit ``offered`` or a
-    later round already has the tool on the table.
+    Host / terminal / browser / grant HOW is consult-owned and must not
+    hang on this frozen prompt.
     """
-    del ceo_offered_names
     ceo_core = resolve(FRAGMENT_CEO_CORE, _CEO_CORE_HINT)
     if on_demand_entries:
         entries = list(on_demand_entries)

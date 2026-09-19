@@ -109,7 +109,7 @@ class WorkspaceSettings(BaseModel):
     # None-pass.
     sandboxd_socket: str = "/run/agentcore/sandboxd.sock"
 
-    # ── gVisor 灰度护栏（部署与运维.md §云端执行灰度 / 安全权限与治理.md §五）──
+    # ── gVisor 灰度护栏（部署拓扑与环境.md · 云端执行 / 安全权限与治理.md §三）──
     # Global cap on concurrently RUNNING cloud sandbox executions per API process
     # (single-uvicorn production ⇒ effectively per host). Sized for the 2C8G box.
     gvisor_max_concurrent_executions: int = 2

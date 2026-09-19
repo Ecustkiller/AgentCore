@@ -81,7 +81,7 @@ class EscalateTool:
         return ToolSchema(
             name=ESCALATE_TOOL_NAME,
             description=(
-                "向上通道：必须由上级/用户拍板或职责偏离才报（设计稿冲突、扩范围）。"
+                "向上通道：必须由上级/用户拍板或职责偏离才报。"
                 "报一声继续（默认）；猜错作废才原地等。"
             ),
             parameters={
@@ -98,7 +98,7 @@ class EscalateTool:
                     "blocking": {
                         "type": "boolean",
                         "description": (
-                            "默认 false=报一声继续；true=原地等（须 assumption）。"
+                            "false=报一声继续；true=原地等（须 assumption）。"
                             "已拒凭据→false。"
                         ),
                     },
@@ -111,10 +111,7 @@ class EscalateTool:
                         ),
                     },
                     "questions": questions_array_schema(
-                        description=(
-                            "仅 blocking=true：二选一/多选时给选项（最多 5 题）；"
-                            "开放问题省略。"
-                        ),
+                        description="可选。",
                     ),
                 },
                 "required": ["question"],

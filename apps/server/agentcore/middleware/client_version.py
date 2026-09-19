@@ -1,4 +1,4 @@
-"""Client minimum-version hard gates (发布与门禁.md §7.6).
+"""Client minimum-version hard gates (发布与门禁.md §1.6).
 
 Two independently configured floors with identical semantics. When set, requests
 on ``/v1/*`` whose ``X-Client-Version`` is strictly below the floor are rejected

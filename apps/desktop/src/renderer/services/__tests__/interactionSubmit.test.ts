@@ -476,12 +476,10 @@ describe("submitInteraction · 已经结了的回执", () => {
 });
 
 describe("提交没走成时的提示", () => {
-  it("「已经结了」不是错——多端同权下是常态，不报红", () => {
+  it("「已经结了」不是错——多端同权下是常态，不出提示", () => {
     notifySubmitInteractionResult("already_settled");
 
-    expect(vi.mocked(notifyInfo)).toHaveBeenCalledWith(
-      submitInteractionFeedback("already_settled"),
-    );
+    expect(vi.mocked(notifyInfo)).not.toHaveBeenCalled();
     expect(vi.mocked(notifyError)).not.toHaveBeenCalled();
   });
 

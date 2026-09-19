@@ -2,7 +2,7 @@
 #
 # server compose 只编排基础设施（PG/Redis/SearXNG）；本文件叠加后端 API 容器。
 # 两个文件用 -f 合并为同一 compose project，故 api 经服务名直连基础设施
-# （覆盖 env_file 里的 127.0.0.1 串，见 部署与运维.md §8.2）。
+# （覆盖 env_file 里的 127.0.0.1 串，见 部署拓扑与环境.md §7.2）。
 #
 # 用法（服务器）：
 #   docker compose \
@@ -13,14 +13,14 @@
 # 镜像由 CI 构建推 ACR；deploy-server.sh 设 IMAGE_TAG=<sha> 后 pull 部署。
 # 本地可 `up --build` 直接从 apps/server 构建。
 #
-# 注：worker 容器（部署与运维.md §三 当前容器清单）暂不纳入——当前执行引擎是
+# 注：worker 容器（部署拓扑与环境.md §三 当前容器清单）暂不纳入——当前执行引擎是
 # 进程内 asyncio 协程，无独立 worker 入口；贸然起第二个 `python -m agentcore`
 # 会重复跑后台循环（如 retention sweep），是 bug 而非扩容。待有专用 worker 入口再加。
 # 因此 compose 仍保持单个 api 容器。云执行 overlay 另起 **sandboxd**（不是
 # 第二份 `python -m agentcore`）。容器内也**不能**靠 WEB_CONCURRENCY>1 扩 uvicorn
 # worker：履约中枢与对话事件流是进程内单例，多 worker 启动即拒（见部署拓扑 §六）。
 
-# 日志：json-file 驱动 + 轮转，封顶单容器 10m×5=50MB（部署与运维.md §7.8「可观测·日志」）。
+# 日志：json-file 驱动 + 轮转，封顶单容器 10m×5=50MB（发布与门禁.md §1.8「可观测·日志」）。
 x-logging: &default-logging
   driver: json-file
   options:

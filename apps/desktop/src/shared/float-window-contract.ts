@@ -2,7 +2,7 @@
  * 真 OS 浮窗（方案 C）IPC 契约 —— 主进程 / preload / renderer 三端共享。
  *
  * 桌面「弹出」= 独立 BrowserWindow（对标 JetBrains Window / VS Code Aux）。
- * Web 无真窗，不注入本 API。详见 docs/04-前端/前端UX设计.md §十。
+ * Web 无真窗，不注入本 API。详见 docs/04-前端/前端UX设计.md §四。
  */
 
 /** 与右坞应用内浮层同一上限。 */

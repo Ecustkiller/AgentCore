@@ -48,8 +48,7 @@ describe("requestRunStop toast", () => {
     await requestRunStop({
       conversationId: "c1",
       executionId: "exec1",
-      runId: null,
-      scope: "team",
+      runId: "r1",
     });
 
     expect(toast.warning).toHaveBeenCalledWith("没有停下任何工作", {
@@ -65,11 +64,30 @@ describe("requestRunStop toast", () => {
     await requestRunStop({
       conversationId: "c1",
       executionId: "exec1",
-      runId: null,
-      scope: "team",
+      runId: "r1",
     });
 
     expect(toast.warning).not.toHaveBeenCalled();
-    expect(toast.info).toHaveBeenCalledWith("整轮正在停下来");
+    expect(toast.info).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("engine accepted a member stop: graph chrome is the receipt, no toast", async () => {
+    submitRunStop.mockResolvedValue({
+      queued: 0,
+      accepted: true,
+      reason: "stopping",
+      detail: "引擎将停下这名队员。",
+    });
+
+    await requestRunStop({
+      conversationId: "c1",
+      executionId: "exec1",
+      runId: "r1",
+    });
+
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(toast.info).not.toHaveBeenCalled();
+    expect(toast.warning).not.toHaveBeenCalled();
   });
 });

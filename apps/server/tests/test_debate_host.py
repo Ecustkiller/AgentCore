@@ -24,17 +24,17 @@ from agentcore.runtime.debate.host import (
 def test_research_chain_evidence_mirrors_research_first_inverse():
     assert research_chain_evidence([]) is False
     assert research_chain_evidence([], has_research_artifacts=True) is True
-    playbook_only = [
+    handwritten_delegate = [
         {
             "kind": "tool_call",
             "payload": {
                 "name": "delegate",
-                "arguments": '{"playbook": "lens_crosscheck"}',
+                "arguments": '{"tasks":[{"role":"调研员","task":"摸底方向 A"}]}',
                 "success": True,
             },
         }
     ]
-    assert research_chain_evidence(playbook_only) is False
+    assert research_chain_evidence(handwritten_delegate) is False
 
 
 def test_next_act_id_defaults_and_increments():

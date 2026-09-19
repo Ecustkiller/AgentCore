@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# AgentCore 数据库恢复（部署与运维.md §7.7「破坏性干净恢复」）。
+# AgentCore 数据库恢复（发布与门禁.md §1.7「破坏性干净恢复」）。
 #
 # ⚠️ 危险：DROP SCHEMA public CASCADE 清空当前库后回灌备份。误用 = 数据全失。
 #
-# 流程（§7.7）：解析备份 → 完整性校验 → 确认门 → 停应用（避免并发写）→
+# 流程（发布与门禁.md §1.7）：解析备份 → 完整性校验 → 确认门 → 停应用（避免并发写）→
 # DROP SCHEMA public CASCADE + CREATE SCHEMA（非空库直接灌会主键冲突）→
 # gunzip | psql 回灌 → 不自动起应用（须重新 deploy 对齐版本）。
 #
@@ -81,4 +81,4 @@ if ! gunzip -c "$BACKUP_FILE" | dc exec -T postgres psql -U "$PG_USER" -d "$PG_D
 fi
 
 log "恢复完成 ✅  源：$(basename "$BACKUP_FILE")"
-warn "按 §7.7 恢复后不自动起应用——请重新 deploy 对齐版本（deploy-server.sh <sha>）后再起 api。"
+warn "按 发布与门禁.md §1.7 恢复后不自动起应用——请重新 deploy 对齐版本（deploy-server.sh <sha>）后再起 api。"

@@ -9,7 +9,6 @@ import {
   buildSupportDiagnosticPack,
   formatSupportDiagnosticText,
 } from "@/lib/supportDiagnostics";
-import { notifySuccess } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { isReconnectQuietBanner } from "@/services/turns/helpers";
 import {
@@ -76,9 +75,7 @@ export function ComposerSendErrorNotice({
     if (!composerPack || !composerPackText) return;
     void buildSupportDiagnosticPack(composerPack).then((text) => {
       if (!text) return;
-      void copyText(text).then((ok) => {
-        if (ok) notifySuccess("已复制排查包");
-      });
+      void copyText(text);
     });
   }, [composerPack, composerPackText]);
 

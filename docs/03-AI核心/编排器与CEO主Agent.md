@@ -13,17 +13,17 @@ skip_if:
 
 # 编排器与 CEO 主 Agent
 
-> **权威范围**：CEO 定位、职责边界、路由 / 团队形态 / 认知分工判据、**具名 playbook 准入与名单**、关键字段语义、`replan`。检查点 → [检查点](/docs/03-AI核心/检查点.md)。实现细节 → 见代码: `apps/server/agentcore/runtime/`。探索写画像已停 → [记忆 · 冷启动探索幕](/docs/03-AI核心/Agent记忆与知识系统.md)。
+> **权威范围**：CEO 定位、职责边界、路由 / 团队形态 / 认知分工判据、关键字段语义、`replan`。检查点 → [检查点](/docs/03-AI核心/检查点.md)。实现细节 → 见代码: `apps/server/agentcore/runtime/`。探索写画像已停 → [记忆 · 冷启动探索幕](/docs/03-AI核心/Agent记忆与知识系统.md)。
 >
-> **主循环归属**：接住「**说**」（唯一对话入口）并实现「**组**」（判轻重、自动组队）→ [主循环](/docs/01-产品/产品定位与品牌.md)。
+> **主循环归属**：接住「**说**」（唯一对话入口）并实现「**组**」（判轻重、按信息结构组队）→ [主循环](/docs/01-产品/产品定位与品牌.md)。
 
 ## 核心定位
 
 编排能力归属会话型 **CEO 主 Agent**：唯一对话入口与声音，也是团队规划大脑。用户是老板；CEO 受雇掌管团队、对其负责——关键岔路请示、收尾汇报。确需团队时经 `delegate` 下达子任务，执行引擎调度 worker，CEO **用自己的声音**收尾。
 
-CEO 是**管理者**，也是判断者：要不要拉人由他判（模型自判）。持已装配干活工具，与工人同形（写盘 / `run` 短·验证·长驻 / `host` 全 action / `browser` 含 screenshot / git 写（按需） / 对话日志）；超规模仍自判 `delegate`。身份只留「默认交给团队、协调和收口」（挡自己干完）；何时派的操作形在 `delegate` description（与下表同一条四问，不进核）。编制 HOW 写在 `delegate` description / task 参数。场面是例子，不是触发器。成件事交团队。何时派 → [信息判据](#信息判据)。
+CEO 是**管理者**，也是判断者：要不要拉人由他判（模型自判）。持已装配干活工具，与工人同形（写盘 / `run` 短·验证·长驻 / `host` 全 action / `browser` 含 screenshot / git 写（按需） / 对话日志）。工厂身份无残差、不注入（回潮须 eval 证明后再按入场闸加 `<身份>`）；署名 / 「你是谁」走 `product_help`，不进核。何时派的操作形在 `delegate` description（与下表同一条四问，不进核）。编制 HOW 写在 `delegate` description / task 参数。场面是例子，不是触发器。何时派 → [信息判据](#信息判据)。
 
-底线：对用户呈现**一个 CEO 声音**；轻量闲聊 / 单点直答 / 窗口里已有证据的小落盘与纯启服（零编排开销）；超规模走团队。
+底线：对用户呈现**一个 CEO 声音**；切不出去或换不到墙钟 / 注意力的自己做（闲聊 / 单点直答 / 窗口里已有证据的小落盘与纯启服，零编排开销）；四问成立才走团队。
 
 ### 职责边界
 
@@ -38,19 +38,19 @@ CEO 是**管理者**，也是判断者：要不要拉人由他判（模型自判
 
 **探路 vs 摸底**（`delegate` description / eval，不是常驻核判决树，不是引擎硬闸）：探路只回答「从哪几个入口进」（看目录、按名找）。停手条件是认识上的——能点名入口即可写目标·约束·验收、执行层可留给工人——不是轮次配额。窗口或目录已点名的少量路径 → 自己读。还不知读哪 / 要连搜收齐 → 立刻 `delegate`（成规模取证 = 摸底）。窗口里入口已在 → 探路已结束。**组队靠 CEO 自判 + 工具 description 四问**；引擎不剥调查工具、不丢闸后长文。引擎不扫用户原文猜意图。细则 → `delegate` description。
 
-工具结构分界：builtin 干活工具（读 / 写 / 跑，含 action）CEO+worker 同形，审批只认 `ToolSchema.approval`（GRANTABLE 走同一 `ApprovalGate`，不因角色另造闸）。**仍仅 worker** = `escalate` / `handoff`（工人通道）。MCP：CEO 可持，开场不灌 schema、`consult` 成族晋升（与工人同闸）。**`run`** schema `GRANTABLE`。**`host`** schema `NEVER`、CEO 可持，GRANTABLE action 运行时升 `host` 轴。动作表 → [工具 · Host](/docs/03-AI核心/工具与能力系统.md)。自研编排（否决 LangGraph / CrewAI 等）：编排是核心壁垒，须完全掌控。聊天优先 + 按需编排（否决「编排器唯一入口」——每条消息付编排税）。
+工具结构分界：builtin 干活工具（读 / 写 / 跑，含 action）CEO+worker 同形，审批只认 `ToolSchema.approval`（GRANTABLE 走同一 `ApprovalGate`，不因角色另造闸）。**仍仅 worker** = `escalate` / `handoff`（工人通道）。MCP：CEO 可持，**已启用即进开场表**（与工人同闸）。**`run`** schema `GRANTABLE`。**`host`** schema `NEVER`、CEO 可持，GRANTABLE action 运行时升 `host` 轴。动作表 → [工具 · Host](/docs/03-AI核心/工具与能力系统.md)。自研编排（否决 LangGraph / CrewAI 等）：编排是核心壁垒，须完全掌控。聊天优先 + 按需编排（否决「编排器唯一入口」——每条消息付编排税）。
 
-**档位取舍**：工具面取档 1（CEO 持干活工具）+ 路由仍自判（身份默认交团队 + 工具 description 四问；编制细则在 `delegate` description / eval，不进常驻核）。曾否决档 1 全能 CEO 后因编排税重开工具面；现干活面（含 `run` / `host` L3 / git 写（按需） / 截图 / 对话日志 / MCP 按需）与工人同形，不再用角色硬闸卸权。复利仍在（大文件进 CEO 窗此后每回合都付），用规模路由守团队。**否决**把 `escalate` / `handoff` 灌进 CEO。**否决**把 MCP schema 灌进开场 FC 表。**否决**再立搬家工具当收口仪式 → [术语表 · 成品归位](/docs/01-产品/术语表.md)。系统收口第二轮把同一结论重讲一遍已删 → [执行引擎 · 团队终态](/docs/03-AI核心/执行引擎架构设计.md)。
+**档位取舍**：工具面取档 1（CEO 持干活工具）+ 路由仍自判（工具 description 四问；编制细则在 `delegate` description / eval，不进常驻核）。曾否决档 1 全能 CEO 后因编排税重开工具面；现干活面（含 `run` / `host` L3 / git / 截图 / 对话日志 / MCP）与工人同形，不再用角色硬闸卸权。复利仍在（大文件进 CEO 窗此后每回合都付），用信息判据守该派的派、该留的留。**否决**把 `escalate` / `handoff` 灌进 CEO。**否决**为缓存少派工。协调套件（`wait` / `replan` / …）**开场即在 CEO 表上**，闲聊误调由执行闸拒绝。**推翻**「MCP 不上开场表 / 协调套件中途晋升」。**否决**再立搬家工具当收口仪式 → [术语表 · 成品归位](/docs/01-产品/术语表.md)。系统收口第二轮把同一结论重讲一遍已删 → [执行引擎 · 团队终态](/docs/03-AI核心/执行引擎架构设计.md)。
 
 ## 路由 / 团队 / 认知分工
 
-发问优先：先判是否**挡路**（桌上结果未钉且猜错会做错），再走信息判据。挡路 → `ask_user` 短澄清（可穿插探路）；仅可逆低杠杆才标假设继续。产品原则全文 → [检查点 · §一 · 挡路拍板](/docs/03-AI核心/检查点.md)；无开场提案/场面硬账。**规格已齐立刻派**；能力盖不住才短问载体，次优标假设继续——见下节。何时用写在 `delegate` description（四问）；编制 HOW 写在 `delegate` description / task 参数；常驻核不写路由尺。
+发问优先：先判是否**挡路**（桌上结果未钉且猜错会做错），再走信息判据。挡路 → `ask_user` 短澄清（可穿插探路）；仅可逆低杠杆才标假设继续。产品原则全文 → [检查点 · §一 · 挡路拍板](/docs/03-AI核心/检查点.md)；无开场提案/场面硬账。**规格已齐且四问成立 → 立刻派**；能力盖不住才短问载体，次优标假设继续——见下节。何时用写在 `delegate` description（四问）；编制 HOW 写在 `delegate` description / task 参数；常驻核不写路由尺。
 
 ### 信息判据
 
 要不要 `delegate` 看信息结构，不看场面名。收益只认两条：墙钟（弱依赖切片并行）和注意力（容量、不许见面、进**你这扇窗**后面还要付）。人数、工种头衔、「看起来像团队」不是理由。根 CEO 与嵌套 lead **同一条判据**；第 4 问只绑定窗，不另立「优先嵌套」。
 
-产品 AI 操作形只在 `delegate` description：根 / 嵌套共用 `DELEGATE_WHEN`（本表 1–3 问 +「进窗后每轮都在 ≠ 这一回合装得下」+ 两个吸引子 ≠）；第 4 问窗绑定写在各 description 分叉。编制 HOW 与 when-to-use 同属 `delegate` 按钮，不进常驻核。身份不再用「短答和单点」当路由尺。场面表不进提示词。
+产品 AI 操作形只在 `delegate` description：根 / 嵌套共用 `DELEGATE_WHEN`（本表 1–3 问 +「进窗后每轮都在 ≠ 这一回合装得下」+ 两个吸引子 ≠）；第 4 问窗绑定写在各 description 分叉。编制 HOW 与 when-to-use 同属 `delegate` 按钮，不进常驻核。身份不写路由尺。场面表不进提示词。
 
 | 顺序 | 问题 | 否 → |
 |---|---|---|
@@ -65,8 +65,8 @@ CEO 是**管理者**，也是判断者：要不要拉人由他判（模型自判
 |---|---|
 | **直答** | 第 1 或 3 条否。例子：闲聊 / 窗里已有证据的追问、单点确认、读已知少量文件、聊天里短文或短改写、窗里已有证据的小落盘、开工前探路（只定位入口）；**本回合能力问答对照开场工具表**（已装配则 `consult`/短探，禁止用邻格未装配写否决论文；权威 → [上下文工程](/docs/03-AI核心/上下文工程.md)）；**已装配时纯启服 / 重启 / 看长驻是否活着**（`run`，云桌/本机；勿为此派 `runtime_ready` 批） |
 | **委派** | 第 1 条是，且第 2 条有墙钟或注意力。例子：成篇落盘、可运行应用、成规模取证（横扫多来源、自己会连搜收齐）、要并行、要交叉验证、对照行业或点名多方案。讨论 / 先不成文 ≠ 自己做完。**不是**「有落盘就必须派」——一行 / 一处且窗口里已有证据 → 自己写。同一问里多块：能切开才派；必须同一窗看的对比仍直答。路径已点名则自己读，不知读哪则派。CEO 绝不为省委派把整份代码贴进正文。几人见下行 |
-| **团队形态** | 成件事交团队；按活的结构组队，人数不是优化目标。可并行就并行，要交叉验证就独立审。点名对比 N 个对象 → 至少 N 人（同一话题多个切面 ≠ N）。1 人只在活本身就是一块（修一处、短文、窗口已有证据的小落盘）。同一份用户要提交的成稿，查证与起草是一块；点名了多份来源仍是 1 人取证。勿按工种头衔凑满。广度调查按结构编制，task 点明「回报精炼结论」。有结构的活就派、该落盘就落盘。仅把「论文/开源」当资料源 ≠ 要成文。可提交长文 / 用户点名审校才上 `cite_write_review` 满编；普通构想不默认学术审校。规格已齐或卡已结算 → 立刻派，勿把「答完澄清」做成默认 `end_turn`。闲聊自己回；干活默认派。猜错会做错才短问（原则 → [检查点 · 挡路拍板](/docs/03-AI核心/检查点.md)）。公共事件按结构组队（异质透镜并行 + 汇总）；点名开辩 → `debate`。上游注入下游由引擎保真（有文件递路径）。糊「做个网站」只消歧展示页 / 工具壳 / 业务应用。ask `label` 只写桌上结果，不映射编制套餐。做软件无专段 HOW，编制交给模型。编制 HOW 写在 `delegate` description / task 参数（常驻核不写判决树）。 |
-| **认知分工** | 约束归 CEO、专业方案归专家；task 只写【目标·约束·验收】；事实取证的验收允许「确认公开没有」为完成；了解到什么算够（写法 → `delegate.task`）；编制按活的结构、不按话题套默认人数、人数不是优化目标；`contract` 是验收契约非结构蓝图；审查类「重点关注」进 `team_brief`，勿写进 task 替 worker 作答 |
+| **团队形态** | 加人只换墙钟或注意力；人数不是目标，也不是能开就开。弱依赖才并行；要交叉验证就独立审。点名对比 N 个对象 → 至少 N 人（同一话题多个切面 ≠ N）。1 人只在活本身就是一块（修一处、短文、窗口已有证据的小落盘）。同一份用户要提交的成稿，查证与起草是一块；点名了多份来源仍是 1 人取证。勿按工种头衔凑满。广度调查按结构编制，task 点明「回报精炼结论」。仅把「论文/开源」当资料源 ≠ 要成文。可提交长文 / 用户点名审校才上手写独立审校岗；普通构想不默认学术审校。规格已齐或卡已结算且四问成立 → 立刻派，勿把「答完澄清」做成默认 `end_turn`。闲聊自己回。猜错会做错才短问（原则 → [检查点 · 挡路拍板](/docs/03-AI核心/检查点.md)）。公共事件按结构组队（异质透镜并行 + 汇总）；点名开辩 → `debate`。上游注入下游由引擎保真（有文件递路径）。糊「做个网站」只消歧展示页 / 工具壳 / 业务应用。ask `label` 只写桌上结果，不映射编制。做软件无专段 HOW，编制交给模型。编制 HOW 写在 `delegate` description / task 参数（常驻核不写判决树）。 |
+| **认知分工** | 约束归 CEO、专业方案归专家；task 只写【目标·约束·验收】；事实取证的验收允许「确认公开没有」为完成；了解到什么算够（写法 → `delegate.task`）；编制按活的结构、不按话题套默认人数、人数不是目标；`contract` 是验收契约非结构蓝图；审查类「重点关注」进 `team_brief`，勿写进 task 替 worker 作答 |
 
 ### 载体/手段
 
@@ -76,13 +76,13 @@ CEO 是**管理者**，也是判断者：要不要拉人由他判（模型自判
 
 **部分材料明示范围**：用户附材料并收窄为本轮附件 / 工作区已有产物时，须先对照动手（缺口分析或改一版）；缺整仓只说明局限与单点缺件——禁止整轮只催源码。与打开本地项目正交（开项目=换工程面，非开工前置）。
 
-**编制**：成件事交团队；按活的结构组队，人数不是优化目标。1 人只在活本身是一块。同一份成稿的查证与起草是一块；点名了多份来源仍是 1 人取证。勿按工种头衔凑满。「按缝拆、能少则少 / 跨域合成少派」已撤销（与 Multi-Agent 优势最大化冲突）。评测跑法 → [本地开发 · evals](/docs/02-架构/本地开发.md)。
+**编制**：加人只换墙钟或注意力；人数不是目标，也不是能开就开。1 人只在活本身是一块。同一份成稿的查证与起草是一块；点名了多份来源仍是 1 人取证。勿按工种头衔凑满。「能少则少 / 真并行才多人」与「能开就开」都不是默认（前者漏独立审与点名对比；后者按空位凑人）。评测跑法 → [本地开发 · evals](/docs/02-架构/本地开发.md)。
 
 ## `delegate` / `replan`
 
-`delegate` 默认**非终态**：worker 跑完交回 CEO，CEO 写简短概览收尾（否决独立 SYNTHESIS 合稿节点；单 worker 成功亦然）。曾有 `finalize=true` 单人直出（HANDOFF 当回合答复、省合成轮），与「一个 CEO 声音」冲突，已撤。图由 CEO 在 ReAct 循环里增量声明——非外部一次性 JSON 计划。**参数主路**：默认手写顶层 `tasks`；具名 `playbook` = 固化流水线快捷套餐（与 tasks XOR，禁同时有内容）。准入与现行名单 → 下文「具名 playbook」。
+`delegate` 默认**非终态**：worker 跑完交回 CEO，CEO 写简短概览收尾（否决独立 SYNTHESIS 合稿节点；单 worker 成功亦然）。曾有 `finalize=true` 单人直出（HANDOFF 当回合答复、省合成轮），与「一个 CEO 声音」冲突，已撤。图由 CEO 在 ReAct 循环里增量声明——非外部一次性 JSON 计划。**参数**：只填手写顶层 `tasks`。
 
-**跨文件夹（✅）**：跨已登记文件夹的摸底与改盘一律 `delegate` 各填 `target_folder_id`（写不写盘由 write_scope/grant 正交）；本回合点名的邻桌活文件例外：CEO `file_read` 一次性只读绑定（见 [工作区 · §5.2](/docs/02-架构/双模式工作区.md#52-会话归属与可达多桌)）。均不改会话 `folder_id`。裸聊建桌、Composer 两选、本机传统 → [工作区 · §五、绑定：文件夹即工作区 · 双通道入口](/docs/02-架构/双模式工作区.md)。
+**跨文件夹（✅）**：跨已登记文件夹的摸底与改盘一律 `delegate` 各填 `target_folder_id`（写不写盘由 write_scope/grant 正交）；本回合点名的邻桌活文件例外：CEO `file_read` 一次性只读绑定（见 [工作区 · §5.2](/docs/02-架构/工作区.md#52-会话归属与可达多桌)）。均不改会话 `folder_id`。裸聊建桌、Composer 两选、本机传统 → [工作区 · §五、绑定：文件夹即工作区 · 双通道入口](/docs/02-架构/工作区.md)。
 
 | 动作 | 语义 |
 |---|---|
@@ -144,53 +144,9 @@ CEO 契约没有顶层 `force`，闸没有模型可填的跳过键，解析层�
 
 **不把** drive 事件流合成进协作图通道（合成列观察项）。写只走 drive / session；读视图与 UI 只派生。本表是该分工的**唯一权威**（协作模式 / 协作图 UX 只留短指针）→ [协作图 UX](/docs/04-前端/协作图与双视图UX.md)
 
-收尾：先对账拼图边（4b：冲突 / 缺口 / 重复）→ 核验原始目标（4a：完工判定）→ 写概览；未达成就续派 / `replan`，别假装收工。`playbook`：默选手写顶层 `tasks`；具名本只冻「形状就是活」的骨架（名单与准入 → 下文「具名 playbook」）。做软件 / 建站 / 工具台 / 点名对比 / 局部单功能一律手写——**已删**具名 `build_app` / `build_website` / `build_website_verify` / `compare_options` / `build_feature`。做软件无专段 HOW。多角摸清按活的结构编制（有独立块才 `map_fanout`；讨论对齐不发卡，干活默认派、收口仍 CEO 写），正式长文成文专线 `cite_write_review`（点选成文≠立刻满编；普通构想不默认学术审校）。代码审查手写 `tasks`。**Agent/自动化**不靠场面硬账；缺形态且挡住编制时 `ask_user` 短问（label 写桌上结果，不设讨论类开场菜单；桌上结果已是对话本身则不发卡；糊「做个网站」须消歧展示页/工具壳/业务应用，禁编制档 / 禁具名建站套餐），由模型自洽选择交付路径 → [检查点 · §一 · 挡路拍板](/docs/03-AI核心/检查点.md)。用户点名开辩才走 `debate` → [辩论编排设计](/docs/03-AI核心/辩论编排设计.md)。
+收尾：先对账拼图边（4b：冲突 / 缺口 / 重复）→ 核验原始目标（4a：完工判定）→ 写概览；未达成就续派 / `replan`，别假装收工。`delegate` 只填手写顶层 `tasks`。做软件 / 建站 / 工具台 / 点名对比 / 局部单功能一律手写。做软件无专段 HOW。多角摸清按活的结构编制（有独立块才并行扇出；讨论对齐不发卡，收口仍 CEO 写），正式长文需要独立审校时手写审校岗（点选成文≠立刻满编；普通构想不默认学术审校）。代码审查手写 `tasks`。**Agent/自动化**不靠场面硬账；缺形态且挡住编制时 `ask_user` 短问（label 写桌上结果，不设讨论类开场菜单；桌上结果已是对话本身则不发卡；糊「做个网站」须消歧展示页/工具壳/业务应用，禁编制档），由模型自洽选择交付路径 → [检查点 · §一 · 挡路拍板](/docs/03-AI核心/检查点.md)。用户点名开辩才走 `debate` → [辩论编排设计](/docs/03-AI核心/辩论编排设计.md)。
 
 提示词怎么写（内容闸、宪法非法例、一层一所有者、事故入场闸；工作纪律分层见所有者表）→ [上下文工程 · 提示词设计原则](/docs/03-AI核心/上下文工程.md#提示词设计原则)。禁止为读规则再派 worker。失败工具回执留在历史，不另注易变尾。`delivery_status` 仍 stamp 同轮对账（合回正品 / 同轮档位），不抄进下一轮提示。
-
-## 具名 playbook {#具名-playbook}
-
-> 服务主循环「**组**」：老板不选流程、不填表单。CEO 默选手写编制；只有冻死还值的流水线才进名单。
-
-**主路**是手写顶层 `tasks`。具名 `playbook` 与 `tasks` XOR：点名一本 + 填槽，引擎展开成 `build_run_plan` 已能消费的 tasks 数组——同一条执行管线，不加子系统。不是通用模板引擎，也不是老板的流程菜单。窄协议 / 恢复 / 续派形状留在 CEO 运行时词汇。
-
-### 价值原则（形状就是活）
-
-具名 playbook 只冻**这件事本身的正确做法**：换主题后节点 / 角色 / 合同仍一样，且漏一步活就不成立。
-
-| 真价值 | 假价值（禁止当准入） |
-|---|---|
-| 形状就是活（独立审校、必须验证、摸清禁止升成文） | 给一个领域发标准班子 / 默认文件图纸 / 工种流水线 |
-| 内部合同手写抄不便宜（结构闸、引用时序、命题卡） | 把领域名当总路标（「做软件 → 套本」） |
-| 减法：冻住不要多出来的步 | 协作图好看、规定交付必须/不许某种文件形态 |
-
-检验：真实 AI 开发（已有仓库上改、先对齐再按方案做第一期、一句话从零做）里，这本是在执行用户的活，还是覆盖成工厂图纸？覆盖 → 不进名单。技能可教 HOW（如 `consult(debate_and_review)`），**不等于**登记具名流水线。
-
-### 准入（加本必须同时满足；过不了 → 手写或技能）
-
-1. **拓扑固定**：除同类扇出超限折叠外，不按调用改节点数 / 角色。结构分叉退回手写。
-2. **内部合同手写抄不便宜**：结构闸、引用时序、命题卡、必填验收槽。只有 task 文案不同 → 不算。
-3. **高频，且 CEO 手写经常写错形状**（漏审校、漏 `verify`、一人包办 N 对象）。
-4. **与现有名字正交**：同拓扑只差默认槽 / 落盘文案 → 合并进槽，或删较弱的那本。
-5. **不拿场景当名字**：「调研 / 审计 / 修码 / 做软件」是桌上结果或技能；playbook 名的是流水线形状。
-6. **通过「形状就是活」检验**（上节）。领域工厂图纸过不了第 5–6 条。
-
-**否决**：按场景加本（建站、做软件、对比选型、单功能交付）；把 brief / 对比 / 多透镜合成一本再加 `kind=` 槽（分叉藏进一名）；扫用户原文猜该用哪本；把 `debate` 收进 `PLAYBOOKS`（它已是另一条确定性骨架）。
-
-### 现行名单
-
-id 标流水线形状，不标桌上结果。**不设别名**，旧名与未知名同处理。
-
-| 名字 | 形状 | 审计 |
-|---|---|---|
-| `cite_write_review` | 取证→提纲→成文→独立审校；引擎闸已撤（playbook 仍展开审校岗） | 留。形状就是正式长文 |
-| `map_fanout` | N 路并行一页地图、无合成/审校节点；防误升成文专线 | 留。价值在减法 |
-
-**已删**：`code_audit`（审查是桌上结果，与 `map_fanout` 同拓扑；内部 JSON 台账 + 五章标题闸过不了准入。HOW 留 `delegate` description）；`lens_crosscheck`（与手写「N 异质透镜 + 汇总交叉核验」同拓扑，场景包装不是合同；HOW 留 `delegate` description）；`diagnose_fix_verify`（单症状修码一人够；独立验证不是修码保底编制）；`build_app`（Vue/SPA 工厂图纸，不是「做软件」；真实开发会覆盖用户方案）；`compare_options`（与手写「点名对比 ≥N 人」同拓扑）；`build_feature`（前后端并行 = 技能「契约共享面」，且 `include[]` 分叉）；更早的 `build_website` / `build_website_verify`（建站套餐；现手写）。共享口径只走非空 `team_brief` 或短规格岗，不因具名本另开边信道。
-
-**现行钉死**：上表两本全留；`debate` 不进 `PLAYBOOKS`。加本仍过本节准入。
-
-→ 见代码: `runtime/runs/playbooks/`
 
 ## 关键字段语义（摘要）
 
@@ -201,8 +157,8 @@ id 标流水线形状，不标桌上结果。**不设别名**，旧名与未知�
 | ~~`result_handling`~~ | ✅ **CEO 不填**。有落盘递路径；散文默认全文、过长引擎裁。不作用于 CEO 综述。→ [Agent 协作模式 · handoff](/docs/03-AI核心/Agent协作模式.md) |
 | ~~`complexity_hint`~~ | ✅ **CEO 不填**。单人只交文字时引擎可自判轻；不映射 worker token/超时 |
 | ~~`coordination`~~ | ✅ **CEO 不填**。权威 → [Agent 协作模式](/docs/03-AI核心/Agent协作模式.md) |
-| `deliverable` | **✅ 派活单只留 `artifacts`**：用户点名或流水线/画布写死才填路径；省略/空对象/无对象 = 不催写盘、不建写桌、可 auto-light、`files_not_landed` 不 blocking。写不写盘由 task 验收 + 模型决定；引擎只认非空 `artifacts` 或非空 `artifact_dir`。节点上永远有 Deliverable。旧 JSON 的 `form` / `workspace_native` 走 `_filtered` 丢弃，不翻译。CEO/`replan` schema 只暴露 `artifacts`；`strict` / `artifact_dir` 仍可解析、不进填参面。零写不把队员打 FAILED（仍 COMPLETED，缺口进提醒）；`strict` 仍可解析、不翻成败。收工用户面认实际落盘，不以声明路径当白名单（声明命中时备份仍不进清单）；路径验收 HOW → [执行引擎](/docs/03-AI核心/执行引擎架构设计.md)。✅ 任何成功写盘都算产品落盘（含 `research/` 等中间笔记；`artifacts` 不再门控是否计入）→ 见代码: `runtime/runs/landing_product.py`。**数据文件整理且无执行**：完整交付 = 原件结构报告 + 待跑变换脚本（两份写进 `task`，不必钉 `artifacts`）+ 一句「运算环境暂时不可用，稍后再试」——这是完成态，不是「表的缺口」；禁止手抄 csv 顶替、禁止让用户绑本机文件夹。硬缺口 `no_exec_table` 的前提是本回合存在 worker 无法可靠解析的源数据文件（附件 / 工作区源文件的类型信号，不扫正文、不靠文件名）；数据内联在消息里、无此类源文件时落 csv/xlsx 不是缺口。否决加闸扫收口话术。→ skill `data_file_landing`。不再有按验收 kind 的队形闸。已删 `form` 三档 / `workspace_native` / `requires_files` / `name` / `must_contain` / `min_length` / `must_contain_soft`（见下节） |
-| `write_scope` ✅ | worker 本批可写范围：`none` / `explore_memory`（仅 `AgentCore/` 约定记忆与探索笔记）/ `project`（用户工程树，默认满权限批次）。探索硬挡 pending 时上限 `explore_memory`；越权在**写工具层**拒，不在 `delegate` 入口因钉路径拒整批。否决：explore 专用 playbook 分叉、pending 时静默改写 deliverable |
+| `deliverable` | **✅ 派活单只留 `artifacts`**：用户点名或画布写死才填路径；省略/空对象/无对象 = 不催写盘、不建写桌、可 auto-light、`files_not_landed` 不 blocking。写不写盘由 task 验收 + 模型决定；引擎只认非空 `artifacts` 或非空 `artifact_dir`。节点上永远有 Deliverable。旧 JSON 的 `form` / `workspace_native` 走 `_filtered` 丢弃，不翻译。CEO/`replan` schema 只暴露 `artifacts`；`strict` / `artifact_dir` 仍可解析、不进填参面。零写不把队员打 FAILED（仍 COMPLETED，缺口进提醒）；`strict` 仍可解析、不翻成败。收工用户面认实际落盘，不以声明路径当白名单（声明命中时备份仍不进清单）；路径验收 HOW → [执行引擎](/docs/03-AI核心/执行引擎架构设计.md)。✅ 任何成功写盘都算产品落盘（含 `research/` 等中间笔记；`artifacts` 不再门控是否计入）→ 见代码: `runtime/runs/landing_product.py`。**数据文件整理且无执行**：完整交付 = 原件结构报告 + 待跑变换脚本（两份写进 `task`，不必钉 `artifacts`）+ 一句「运算环境暂时不可用，稍后再试」——这是完成态，不是「表的缺口」；禁止手抄 csv 顶替、禁止让用户绑本机文件夹。硬缺口 `no_exec_table` 的前提是本回合存在 worker 无法可靠解析的源数据文件（附件 / 工作区源文件的类型信号，不扫正文、不靠文件名）；数据内联在消息里、无此类源文件时落 csv/xlsx 不是缺口。否决加闸扫收口话术。→ skill `data_file_landing`。不再有按验收 kind 的队形闸。已删 `form` 三档 / `workspace_native` / `requires_files` / `name` / `must_contain` / `min_length` / `must_contain_soft`（见下节） |
+| `write_scope` ✅ | worker 本批可写范围：`none` / `explore_memory`（仅 `AgentCore/` 约定记忆与探索笔记）/ `project`（用户工程树，默认满权限批次）。探索硬挡 pending 时上限 `explore_memory`；越权在**写工具层**拒，不在 `delegate` 入口因钉路径拒整批。否决：pending 时静默改写 deliverable |
 | `continue_from_run_id` | 带现场续派；权威 → [多轮编排与同人续派](/docs/03-AI核心/多轮编排与同人续派.md) |
 | worker 模型 ✅ | 每 worker **节点/run** 可选显式模型身份（与辩论辩手身份同族）；**省略** = Worker 槽（空则 follow 主）。CEO/`tasks[]` 节点显式仍有效；人不在确认面改模。定案全文 ↓ |
 
@@ -216,37 +172,37 @@ schema **没有** `completion_criteria` 字段。引擎不按验收标签硬判�
 
 ### 交付契约：CEO 填参面不含的字段
 
-CEO/`replan` 可见契约**没有**：`playbook_none_reason`、`deliverable.name`、`tasks[].objective`、`must_contain`、`min_length`、`requires_files`、`must_contain_soft`。**禁止回潮**。
+CEO/`replan` 可见契约**没有**：`deliverable.name`、`tasks[].objective`、`must_contain`、`min_length`、`requires_files`、`must_contain_soft`。**禁止回潮**。
 
 **写盘只认** 非空 `artifacts` ∪ 非空 `artifact_dir`；省略 / 空对象 = 不催写。目标语义并入 `task`。禁止扫 task 猜形态。
 
-**成篇审校岗**：只认具名 `playbook=cite_write_review` 展开独立审校；引擎不再软提示、也不硬拦 `end_turn`。**否决**字数结构腿与扫 task 自由文补门。handoff 正文地板 = 非空（不暴露 CEO 字数旋钮）。
+**成篇审校岗**：独立审校靠手写 tasks；引擎不再软提示、也不硬拦 `end_turn`。**否决**字数结构腿与扫 task 自由文补门。handoff 正文地板 = 非空（不暴露 CEO 字数旋钮）。
 
-**边界**：playbook 内部可留 `artifact_dir`；`strict` 仍可解析、不把节点打 FAILED。`write_scope` 不变。CEO 填参面只有 `artifacts`。→ 见代码: `tools/builtin/delegate/schema.py` + `runtime/runs/types.py` + `runtime/runs/contract.py`
+**边界**：leftover `artifact_dir` 仍可解析、不进填参面；`strict` 仍可解析、不把节点打 FAILED。`write_scope` 不变。CEO 填参面只有 `artifacts`。→ 见代码: `tools/builtin/delegate/schema.py` + `runtime/runs/types.py` + `runtime/runs/contract.py`
 
 ### 交付物：钉路径才催写
 
 CEO 派活不声明「看 / 存文档 / 改工程」三档。写不写盘由 task 验收 + 模型决定；引擎只认结构钉路径。产物地位（拿走 vs 抽屉）禁止 worker 自判，用户点名才钉 `artifacts`。
 
-**CEO / 画布可见**（仅此）：可选 `artifacts`（用户点名或流水线/画布写死才填，不扫 task 自由文、不发明文件名）。省略 / 空对象 = 不催写盘。收工用户面认实际落盘，不以声明路径当白名单（声明命中时备份仍不进清单）——路径验收 HOW → [执行引擎](/docs/03-AI核心/执行引擎架构设计.md)。
+**CEO / 画布可见**（仅此）：可选 `artifacts`（用户点名或画布写死才填，不扫 task 自由文、不发明文件名）。省略 / 空对象 = 不催写盘。收工用户面认实际落盘，不以声明路径当白名单（声明命中时备份仍不进清单）——路径验收 HOW → [执行引擎](/docs/03-AI核心/执行引擎架构设计.md)。
 
 **省略**：无对象 / 空对象 / leftover `form` 键丢掉 → 不 expects_landing。打招呼等「只报告」靠省略。裸文件名仍 join `工作稿/`；`src/` 等业务路径不拧进 `AgentCore/文档/`。leftover `artifact_dir` 仍钉。
 
-**离开 CEO 填参、固定流程内部可留**：`artifact_dir` 常量。`strict` 仍可解析、不把节点打 FAILED。
+**离开 CEO 填参**：leftover `artifact_dir` 仍可解析。`strict` 仍可解析、不把节点打 FAILED。
 
-开场「交付物规格」只列实例事实（有声明才渲染「交付路径」、非工作稿落点目录）。没有路径/目录实例则整块省略。身份只留 `<身份>`，不展览交法。过程稿抽屉在工作区事实行。检索预算不进此块。
+开场「交付物规格」只列实例事实（有声明才渲染「交付路径」、非工作稿落点目录）。没有路径/目录实例则整块省略。工厂身份无残差则不注入，不展览交法。过程稿抽屉在工作区事实行。检索预算不进此块。
 
 **`write_scope` 不在本契约改。** 闲聊第一次真写再给桌子。
 
 **否决**：把 `form` 三档加回 schema / 画布；扫 role·task 自由文猜催写；把质检字段再露回 CEO schema；用声明路径当收工白名单（认盘）；把章节 / JSON 形态 / 落盘出处闸加回合同；把零写升硬失败。→ 见代码: `tools/builtin/delegate/schema.py` · `runtime/runs/types.py` · `runtime/runs/builder.py` · `runtime/runs/artifact_dir.py` · `runtime/runs/contract.py` · `runtime/runs/executor/identities.py`
 
-**设计原则**（Why；跟代码对不上的才写在这里）：`task` 已是这一人的验收（目标·约束·验收）。再加「看 / 存 / 改」枚举是第二条声明，违反勿增实体。落点只在已有名字时钉，工人自起名是默认。结构化验收写在具名流水线 / 合同代码里，不交给经理模型现场设计 QA 表。开局会注入原始用户请求、前置结果、并行队友任务；task 不要把这些再抄一遍。写法 → `delegate.task`。
+**设计原则**（Why；跟代码对不上的才写在这里）：`task` 已是这一人的验收（目标·约束·验收）。再加「看 / 存 / 改」枚举是第二条声明，违反勿增实体。落点只在已有名字时钉，工人自起名是默认。结构化验收写在合同代码里，不交给经理模型现场设计 QA 表。开局会注入原始用户请求、前置结果、并行队友任务；task 不要把这些再抄一遍。写法 → `delegate.task`。
 
-**行业对照**（钉原则，不是跟风清单）：CrewAI 任务是人写的 `description` + 一段 `expected_output` 自然语言，可选 `output_file`（≈ 我们的 `artifacts`）；`output_json` / Pydantic / guardrail 是**开发者代码**，不是经理 Agent 填的验收对象。LangGraph 节点写进开发者定的 typed state。Cursor / Claude Code / Codex 任务是自然语言，真相是磁盘文件 + 测试 / 人审。OpenAI Agents 的 `output_type` 是开发者预置的响应 schema。共同点：**验收旋钮不进编排 LLM 的工具参数**。CEO 填参面只留可选 `artifacts`；playbook 钉路径对应他们的流水线落点，不另立章节 / JSON / 出处闸。已删的三档枚举曾把形态分类塞回经理参数表，与这条对照相反。
+**行业对照**（钉原则，不是跟风清单）：CrewAI 任务是人写的 `description` + 一段 `expected_output` 自然语言，可选 `output_file`（≈ 我们的 `artifacts`）；`output_json` / Pydantic / guardrail 是**开发者代码**，不是经理 Agent 填的验收对象。LangGraph 节点写进开发者定的 typed state。Cursor / Claude Code / Codex 任务是自然语言，真相是磁盘文件 + 测试 / 人审。OpenAI Agents 的 `output_type` 是开发者预置的响应 schema。共同点：**验收旋钮不进编排 LLM 的工具参数**。CEO 填参面只留可选 `artifacts`，不另立章节 / JSON / 出处闸。已删的三档枚举曾把形态分类塞回经理参数表，与这条对照相反。
 
-**否决把章节 / JSON / 落盘出处闸加回合同**（含 playbook 内部盖戳）：那是质量启发式，不是路径存在性。成稿引用走对话气泡与台账；落盘不另验出处。零写不因 `strict` 打 FAILED（COMPLETED + 提醒）。
+**否决把章节 / JSON / 落盘出处闸加回合同**：那是质量启发式，不是路径存在性。成稿引用走对话气泡与台账；落盘不另验出处。零写不因 `strict` 打 FAILED（COMPLETED + 提醒）。
 
-**网页质检（已撤）**：不再对落盘 HTML/CSS/JS/SVG 做静态扫描或 HTML↔CSS 接缝。误伤做软件、属质量启发式；页面观感交给模型与浏览器壳、人审。可见界面的方向 HOW 在 `consult(page_ui)`（按需；挡预训练默认脸；不是闸、不是建站 playbook、不是设计课）→ [工具与能力 · 系统 Skill 按需目录](/docs/03-AI核心/工具与能力系统.md#系统-skill-按需目录)。合同字段 `web_quality_soft_exempt*` 一并删除。禁复活、禁再露 CEO schema。→ 见代码: `runtime/runs/contract.py`
+**网页质检（已撤）**：不再对落盘 HTML/CSS/JS/SVG 做静态扫描或 HTML↔CSS 接缝。误伤做软件、属质量启发式；页面观感交给模型与浏览器壳、人审。可见界面的方向 HOW 在 `consult(page_ui)`（按需；挡预训练默认脸；不是闸、不是设计课）→ [工具与能力 · 系统 Skill 按需目录](/docs/03-AI核心/工具与能力系统.md#系统-skill-按需目录)。合同字段 `web_quality_soft_exempt*` 一并删除。禁复活、禁再露 CEO schema。→ 见代码: `runtime/runs/contract.py`
 
 **占位扫描（已撤）**：不再扫落盘 HTML/Markdown 的骨架电话、TODO、示例/虚构自注。质量交给模型、下一轮编辑与人看页。合同字段 `placeholder_hard_exempt*` 一并删除。禁复活、禁写进提示词。→ 见代码: `runtime/runs/contract.py`
 
@@ -256,17 +212,17 @@ CEO 派活不声明「看 / 存文档 / 改工程」三档。写不写盘由 tas
 
 ### 派单填参面
 
-开局全队共识只走顶层 `team_brief`。≥2 篇完整成稿且共享口径未进 brief、无短规格 → 先 brief 或短规格岗，不靠边信道代替 `depends_on`（不新套餐、不复活 `consumer_deps` 猜两段）；审查线索进 brief；零上游成功补人走 `replaces_run_id`；根 CEO **默认非阻塞**（阻塞仅嵌套 lead）；用户明文看提纲 → 先派再 `ask_user`；下游未定 → 先跑再 `replan(add)` / 再 `delegate`；轻/标准由引擎自判（未钉路径的单人可 auto-light）；上游保真有文件递路径、散文默认全文；扇入默认宽松（≥1 上游成功即跑，不让经理勾 AND/OR）。
+开局全队共识只走顶层 `team_brief`。≥2 篇完整成稿且共享口径未进 brief、无短规格 → 先 brief 或短规格岗，不靠边信道代替 `depends_on`（不复活 `consumer_deps` 猜两段）；审查线索进 brief；零上游成功补人走 `replaces_run_id`；根 CEO **默认非阻塞**（阻塞仅嵌套 lead）；用户明文看提纲 → 先派再 `ask_user`；下游未定 → 先跑再 `replan(add)` / 再 `delegate`；轻/标准由引擎自判（未钉路径的单人可 auto-light）；上游保真有文件递路径、散文默认全文；扇入默认宽松（≥1 上游成功即跑，不让经理勾 AND/OR）。
 
-**边界**：`checkpoint_after` 已从 RunSpec 卸下（多余键忽略）；playbook 不写。旧 JSON 的 `bind_after_deps` / `replan.binds` 丢弃、不翻译。CEO 可见 schema → 见代码: `tools/builtin/delegate/schema.py`
+**边界**：`checkpoint_after` 已从 RunSpec 卸下（多余键忽略）。旧 JSON 的 `bind_after_deps` / `replan.binds` 丢弃、不翻译。CEO 可见 schema → 见代码: `tools/builtin/delegate/schema.py`
 
 ### 不扫角色名改写 deliverable
 
 不匹配 role 名正则/子串，也不据此**静默改写** deliverable（塞 `reviews/` artifacts / 追加纪律文案）。
 
-审校落盘纪律**仅当** playbook 或 deliverable **已声明**非空 `artifacts`（或等价结构 flag）时施加；`cite_write_review` 等在 playbook **写死**审校员路径契约。成篇审校岗只认具名 `playbook=cite_write_review`（无字数结构腿）；引擎软提示 / 硬拦 `end_turn` **已撤**。**不加**新 `completion_criteria` kind（见上节）。
+审校落盘纪律**仅当** deliverable **已声明**非空 `artifacts`（或等价结构 flag）时施加。引擎软提示 / 硬拦 `end_turn` **已撤**。**不加**新 `completion_criteria` kind（见上节）。
 
-删猜测入口优于保留误伤面；否决「降软但仍扫角色名」。能力回退用 playbook 结构补，不靠旁路正则。名叫「审校/review」但未钉路径的轻角色不被抬契约。→ 见代码: `runtime/runs/research_quality.py`（结构谓词）+ `runtime/runs/playbooks/research.py`（审校路径契约）
+删猜测入口优于保留误伤面；否决「降软但仍扫角色名」。名叫「审校/review」但未钉路径的轻角色不被抬契约。→ 见代码: `runtime/runs/research_quality.py`
 
 **委派一次性软提示族（已撤）**：不再扫 task 文案猜漏 `depends_on`（`consumer_deps`）、单 grant 设计+实现混装（`design_impl_same_grant`）、根单节点手写写工程无切片钉（`root_slice_honesty`）。三条都是成功路径上的一次性尾巴（不拒收、不改图），净负。`depends_on` 字段与 DAG 边仍在；假两段禁令已撤出提示词（编制交给模型），不默认真两段 / MVP 切片。禁复活扫描补闸。→ 见代码: `runtime/delegate/prelude.py`
 
@@ -309,26 +265,23 @@ CEO 派活不声明「看 / 存文档 / 改工程」三档。写不写盘由 tas
 | `validate_criteria_kind_fit` 扫 task 拟合硬闸 | **已撤** |
 | `host(action=shell)` fuse 改可批可跑（B）/ 仅改文案当终案（D） | **否决** → [安全 · 熔断方案 C](/docs/05-平台与运维/安全权限与治理.md) |
 | 扫角色名静默改写 deliverable | **已删**（见上节） |
-| 扫 role·task 自由文正则决定产物落 `research` 还是 `reviews` | **净删除**：意图分类器形态，且误判对用户不可见；落点只认显式来源；裸文件名进 `工作稿/`，空 `artifacts` 不钉目录 → [工作区 §四](/docs/02-架构/双模式工作区.md#四约定文档目录约定) |
+| 扫 role·task 自由文正则决定产物落 `research` 还是 `reviews` | **净删除**：意图分类器形态，且误判对用户不可见；落点只认显式来源；裸文件名进 `工作稿/`，空 `artifacts` 不钉目录 → [工作区 §四](/docs/02-架构/工作区.md#四约定文档目录约定) |
 | 产物地位（成品 vs 过程材料）靠路径推断 / 派单预判 / worker 自判 | **否决**（worker 无自贬动机）；用户点名拿走才钉路径；经理不发明路径，工人自起名是默认；裸文件名进 `工作稿/`，空 `artifacts` 不钉目录，打开走终稿路径 / 工作区树。收口再搬的 `promote_product` **已撤销** → [术语表 · 成品归位](/docs/01-产品/术语表.md) |
 | 约定目录未命中软提醒催 CEO 归位 / 返工 | ✅ **已撤**（有落盘即认盘；`artifact_dir` 不命中不发软待办）。点名 `artifacts` 未命中仍可 warning。禁复活催搬、禁提示词补闸 → [执行引擎 · 路径验收](/docs/03-AI核心/执行引擎架构设计.md) |
-| 手写 `min_length` 字数腿 / 扫自由文补成篇硬门 | **否决**（成篇审校岗只认 `cite_write_review`；引擎闸已撤；见 CEO 填参面） |
-| 成篇先软提示再硬拦 `end_turn`（含 `content_reset`） | ✅ **已撤**（playbook 仍展开审校岗；收口不再拦） |
+| 手写 `min_length` 字数腿 / 扫自由文补成篇硬门 | **否决**（引擎闸已撤；见 CEO 填参面） |
+| 成篇先软提示再硬拦 `end_turn`（含 `content_reset`） | ✅ **已撤**（收口不再拦） |
 | 空画像+工程短语硬挡 / 换绑硬挡 / 每回合空画像软幕 / 点名先了解硬挡写画像 | ✅ **已撤**（系统不再开探索幕写画像；点名「先了解」当普通干活） |
 | 辩论承诺软闸（扫开工卡正反 / 红队 / 圆桌） | ✅ **已撤**（开辩仍由用户点名） |
 | 裸 `requires_files` 第三写盘开关 | **已删**（写盘只认非空 `artifacts` ∪ 非空 `artifact_dir`；省略不催写） |
 | `deliverable.form` 三档（prose / files / workspace） | **已删**（task 验收 + 认盘；禁止加回 schema / 画布 / 兼容翻译层） |
 | `must_contain_soft` 空兼容位 | **已删**（见死字段清理） |
-| 连 playbook 内部验收字段一并拆成纯提示词 | **否决**（砍更狠；见钉路径契约） |
-| 按场景加 playbook（建站 / 做软件 / 对比选型 / 单功能交付） | **否决**；已删 `build_app` / `compare_options` / `build_feature`（及更早建站本）；做软件 / 点名对比 / 局部功能改手写；做软件无专段 HOW |
-| 编制「能少则少 / 真并行才多人」当默认 | **否决**（人数不是优化目标；1 人只在活本身是一块；勿按工种头衔凑满） |
+| 编制「能少则少 / 真并行才多人」或「能开就开 / Multi-Agent 优势最大化」当默认 | **否决**（人数不是目标；加人只换墙钟或注意力。真并行才多人漏独立审 / N 对比） |
+| 身份核「默认交给团队」当路由尺 | **已撤**（与四问「否→自己做」对打；路由只在 `delegate` description） |
 | 做软件禁单 HTML 薄旁路 | **否决**（硬闸已撤，禁提示词补闸） |
-| 讨论类开场三选卡当产品菜单 | **否决**（闲聊自己回；干活默认派；猜错会做错才短问。拍板 HOW 在 `ask_user` / 检查点） |
+| 讨论类开场三选卡当产品菜单 | **否决**（闲聊自己回；猜错会做错才短问。拍板 HOW 在 `ask_user` / 检查点） |
 | 绿场默认真两段 / 「立刻派 ≠ 立刻全量」缩收 | **否决**（档没钉且猜错会做错才短问；假两段禁令已撤出提示词） |
 | 交付类 ask 建议档闭集（主路径 / 一次做完 / 只改一处） | **否决**（挡路问做到哪一档；label 写桌上结果、不映射编制；闭集被口头译成 MVP） |
-| 成文编号树（默认 A / 档 1–3 / C·D·E）当闭集分类器 | **否决**（有结构就派、该落盘就落盘；满编审校仅长文 / 可提交 / 用户点名） |
-| 用桌上结果当 playbook 名（调研 / 审计 / 修码） | **否决**（准入第 5 条；名形状；不设旧 id 别名） |
-| 把 brief / 对比 / 多透镜合成一本再加 `kind=` | **否决**（分叉藏进一名，比分本更难路由） |
+| 成文编号树（默认 A / 档 1–3 / C·D·E）当闭集分类器 | **否决**（四问成立才派、该落盘就落盘；满编审校仅长文 / 可提交 / 用户点名） |
 | 网页质检（anti-slop / 假电话 / 未闭合标签 / HTML↔CSS 接缝） | ✅ **已撤**（误伤做软件、质量启发式；观感交给模型与浏览器壳）；禁复活、禁再露 CEO schema |
 | 占位扫描（骨架电话 / TODO / 示例·虚构自注） | ✅ **已撤**（质量启发式；文案交给模型）；`placeholder_hard_exempt*` 一并删除；禁复活、禁写进提示词 |
 | `consumer_deps` 扫 task 漏边软提示 | ✅ **已撤**（净负软尾巴）；禁复活、禁提示词补闸 |
@@ -342,9 +295,9 @@ CEO 派活不声明「看 / 存文档 / 改工程」三档。写不写盘由 tas
 | 用「这一回合装得下」当路由键 | **否决**（已出核；注意力是进窗后每轮都在 / 不许见面 / 容量，不是当回合塞得下） |
 | 账号级角色→模型矩阵 / `ModelTier{fast,strong}` 质量档 / 自动降级 / silent 回退野模型 | **否决**（与 per-run 显式覆盖正交；见上节 Per-worker） |
 | 无 UI 的 CEO 暗箱选模（有字段但图/用量不可见） | **否决** |
-| 可用性短问模型注入 / 上轮空委派重派教案 / 委派后再调查提醒 / 空转 NUDGE 文案 / 熔断 warn 教案 / 轮次余额播报 | ✅ **已撤**（检索数字改挂 `web_search`/`web_fetch` 回执；额度用尽 wind_down 留；熔断到阈仍卸工具、只留「已停用」） |
-| 收尾窗口违约再教（「你调用了检索/非落盘工具」） | ✅ **已撤**（进窗仍卸工具并留一句事实；违约只收窄/拒执行/二次本地收口，不再灌 HOW） |
-| 强制 FINALIZE 交卷教案（「立即给出最终答案 / 立刻 file_write」） | ✅ **已撤**（仍卸调查工具；注入只报强制收口，不复述工具表） |
+| 可用性短问模型注入 / 上轮空委派重派教案 / 委派后再调查提醒 / 空转 NUDGE 文案 / 熔断 warn 教案 / 轮次余额播报 | ✅ **已撤**（检索数字改挂 `web_search`/`web_fetch` 回执；额度用尽 wind_down **不删表**、执行层拒绝，不灌进窗句；熔断到阈仍记账 / 执行拒、不灌「已停用」句） |
+| 收尾窗口违约再教（「你调用了检索/非落盘工具」） | ✅ **已撤**（进窗不删表；违约只拒执行 / `tool_choice=none` / 二次本地收口，不再灌 HOW） |
+| 强制 FINALIZE 交卷教案（「立即给出最终答案 / 立刻 file_write」） | ✅ **已撤**（不删调查工具；不灌强制收口句，执行门 + `tool_choice` 即合同） |
 
 ## 检查点
 

@@ -157,6 +157,7 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "delegated": "bool",
         "workers": "int",
         "duration_ms": "int",
+        "generation_ms": "int",
         "boundary_yields": "int",
         "scope_signals": "int",
         "revises": "int",
@@ -1092,12 +1093,6 @@ HISTORICAL_COMPAT: dict[str, str] = {
     ),
     "board.read_vision_failed": (
         "历史兼容：曾在白板 AI 视觉读失败时发出；白板 AI 工具面已卸，不再发此事件"
-    ),
-    "archive_extract.done": (
-        "历史兼容：曾为独立 archive_extract 工具完成事件；现为 archive.extract_done"
-    ),
-    "archive_create.done": (
-        "历史兼容：曾为独立 archive_create 工具完成事件；现为 archive.create_done"
     ),
     "read_image.read": (
         "历史兼容：曾为独立 read_image 工具读图；现并入 file_read，不再发此事件"

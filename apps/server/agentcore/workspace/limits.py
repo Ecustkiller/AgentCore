@@ -105,18 +105,16 @@ WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS: tuple[str, ...] = (
     "str_replace",
     "file_delete",
     "file_batch",
-    "mkdir",
     "grep",
     "host",
     # Ambient listing rides the same local channel — retire with the file family
     # so post-dead index_files rejects are not leftover noise.
     "index_files",
     # Export / land-bytes tools: every call round-trips the same dead backend
-    # (read the .md or .zip, write the sibling artifact / members / downloaded
-    # bytes), so leaving them on the surface only buys guaranteed-failed rounds.
-    # download_url even burns its network fetch first, then fails on write.
+    # (read the .md, write the sibling artifact / downloaded bytes), so leaving
+    # them on the surface only buys guaranteed-failed rounds. download_url even
+    # burns its network fetch first, then fails on write.
     "md_export",
-    "archive",
     "download_url",
 )
 

@@ -10,7 +10,7 @@ import type { UpdaterApi, UpdaterStatus } from "@shared/updater-contract";
 import { create } from "zustand";
 
 /**
- * 自动更新状态的前端落点（发布与门禁.md §7.6）。主进程权威持有状态机；发现新版本后
+ * 自动更新状态的前端落点（发布与门禁.md §1.6）。主进程权威持有状态机；发现新版本后
  * **不**自动下载——本 store 弹说明窗，用户同意后再 `download()`（GitHub 安装包落到
  * 「下载」文件夹）。软更新：同意后立刻关窗 + 短 toast，后台下载；进度在「设置 · 关于」；
  * 就绪 sticky toast「打开安装包」。强制更新硬闸仍全屏跟进度。订阅在应用外壳启动
@@ -267,7 +267,7 @@ export function startUpdates(): () => void {
 
   // Hand the cloud API base URL to the main process (it can't read import.meta.env)
   // so the updater can poll the remote circuit breaker; this also triggers its first
-  // check (发布与门禁.md §7.6).
+  // check (发布与门禁.md §1.6).
   void api.configure(BASE_URL);
 
   void api.getStatus().then((status) => {
@@ -275,7 +275,7 @@ export function startUpdates(): () => void {
     maybeOpenDialogForStatus(status, { force: false });
   });
 
-  // Force-update hard gate (部署与运维.md §7.6) — Electron only; web skips.
+  // Force-update hard gate (发布与门禁.md §1.6) — Electron only; web skips.
   void pollOutdatedPolicy();
 
   return api.onStatus((status) => {

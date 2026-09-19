@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 import pytest
@@ -14,6 +15,7 @@ from agentcore.runtime.turn.latency import (
     TurnLatencyProbe,
     bind_turn_latency,
     get_turn_latency,
+    interrupt_usage_clocks,
     reset_turn_latency,
     stamp_turn_wall,
     turn_wall_ms,
@@ -190,6 +192,66 @@ async def test_stream_worker_does_not_record_ttft():
         reset_turn_latency(token)
 
 
+@pytest.mark.asyncio
+async def test_stream_records_generation_ms_for_worker_and_captain():
+    probe, token = bind_turn_latency()
+    try:
+
+        async def _slow_chunks(*deltas: str):
+            for i, d in enumerate(deltas):
+                if i:
+                    await asyncio.sleep(0.04)
+                yield LLMChunk(delta_content=d)
+            yield LLMChunk(finish_reason="stop")
+
+        class _Slow:
+            def __init__(self, deltas: tuple[str, ...]) -> None:
+                self._deltas = deltas
+
+            async def stream(self, request: LLMRequest):
+                del request
+                async for c in _slow_chunks(*self._deltas):
+                    yield c
+
+        with log_context(cost_role="member"):
+            await stream_llm_round(
+                _Slow(("w1", "w2")), _req(), lambda _d: None, lambda _d: None
+            )
+        worker_ms = probe.generation_ms
+        assert worker_ms >= 30
+        with log_context(cost_role="captain"):
+            await stream_llm_round(
+                _Slow(("c1", "c2")), _req(), lambda _d: None, lambda _d: None
+            )
+        assert probe.generation_ms >= worker_ms + 30
+    finally:
+        reset_turn_latency(token)
+
+
+@pytest.mark.asyncio
+async def test_stream_reset_drops_discarded_decode_window():
+    probe, token = bind_turn_latency()
+    try:
+
+        class _ResetThenSlow:
+            async def stream(self, request: LLMRequest):
+                del request
+                yield LLMChunk(delta_content="gone")
+                await asyncio.sleep(0.05)
+                yield LLMChunk(stream_reset=True)
+                yield LLMChunk(delta_content="kept")
+                yield LLMChunk(finish_reason="stop")
+
+        with log_context(cost_role="captain"):
+            await stream_llm_round(
+                _ResetThenSlow(), _req(), lambda _d: None, lambda _d: None
+            )
+        # Only the post-reset tail counts — not the slept discarded prefix.
+        assert probe.generation_ms < 40
+    finally:
+        reset_turn_latency(token)
+
+
 def test_bind_get_reset_contextvar():
     assert get_turn_latency() is None
     probe, token = bind_turn_latency()
@@ -223,6 +285,50 @@ def test_stamp_turn_wall_writes_explicit():
     assert target["duration_ms"] == 57_000
 
 
+def test_add_generation_ms_skips_non_positive():
+    probe = TurnLatencyProbe(anchor_mono=time.monotonic())
+    probe.add_generation_ms(0)
+    probe.add_generation_ms(-1)
+    assert probe.generation_ms == 0
+    probe.add_generation_ms(40)
+    probe.add_generation_ms(60)
+    assert probe.generation_ms == 100
+
+
+def test_stamp_turn_wall_stamps_generation_from_probe():
+    probe, token = bind_turn_latency()
+    try:
+        probe.add_generation_ms(1_200)
+        target: dict = {}
+        stamp_turn_wall(target, duration_ms=5_000)
+        assert target["duration_ms"] == 5_000
+        assert target["generation_ms"] == 1_200
+        probe.add_generation_ms(300)
+        stamp_turn_wall(target, duration_ms=99)
+        # duration stays; generation grows
+        assert target["duration_ms"] == 5_000
+        assert target["generation_ms"] == 1_500
+    finally:
+        reset_turn_latency(token)
+
+
+def test_interrupt_usage_clocks_from_probe():
+    probe, token = bind_turn_latency()
+    try:
+        probe.add_generation_ms(1_900)
+        clocks = interrupt_usage_clocks(duration_ms=5_000)
+        assert clocks["duration_ms"] == 5_000
+        assert clocks["generation_ms"] == 1_900
+    finally:
+        reset_turn_latency(token)
+
+
+def test_interrupt_usage_clocks_omits_missing_generation():
+    clocks = interrupt_usage_clocks(duration_ms=12)
+    assert clocks["duration_ms"] == 12
+    assert "generation_ms" not in clocks
+
+
 def test_log_chat_turn_complete_emits_phase0_keys(monkeypatch):
     spy = LogSpy()
     monkeypatch.setattr(complete_mod, "logger", spy)
@@ -244,4 +350,5 @@ def test_log_chat_turn_complete_emits_phase0_keys(monkeypatch):
     assert kw["assemble_ms"] is None
     assert kw["ttft_reasoning_ms"] is not None
     assert kw["ttft_content_ms"] is None
+    assert kw["generation_ms"] is None
     assert kw["reply_preview"]

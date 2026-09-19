@@ -35,14 +35,10 @@ _BUILTIN_ORDER = [
     "file_list",
     "glob",
     "file_delete",
-    "mkdir",
     "file_batch",
     "md_export",
-    "archive",
     "download_url",
     "grep",
-    "docs_read",
-    "docs_write",
     "git",
     "run",
 ]
@@ -78,11 +74,7 @@ _CATALOG_ORCHESTRATION_ORDER = [
     "debate",
     "consult",
     "folders",
-    "create_folder",
-    "delete_folder",
     "ask_user",
-    "table_ops",
-    "table_read",
 ]
 
 _CATALOG_AVAILABLE_TO: dict[str, tuple[str, ...]] = {
@@ -94,16 +86,12 @@ _CATALOG_AVAILABLE_TO: dict[str, tuple[str, ...]] = {
     "glob": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "grep": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "git": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
-    "docs_read": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
-    "docs_write": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     # Write / execute: CEO + worker (same GRANTABLE ApprovalGate)
     "file_write": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "str_replace": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "file_delete": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
-    "mkdir": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "file_batch": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "md_export": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
-    "archive": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "download_url": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "run": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "host": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
@@ -117,11 +105,7 @@ _CATALOG_AVAILABLE_TO: dict[str, tuple[str, ...]] = {
     "debate": (AVAILABLE_TO_CEO,),
     "consult": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "folders": (AVAILABLE_TO_CEO,),
-    "create_folder": (AVAILABLE_TO_CEO,),
-    "delete_folder": (AVAILABLE_TO_CEO,),
     "ask_user": (AVAILABLE_TO_CEO,),
-    "table_ops": (AVAILABLE_TO_CEO,),
-    "table_read": (AVAILABLE_TO_CEO,),
 }
 
 
@@ -180,8 +164,6 @@ def test_tool_registry_builtin_approvals_snapshot():
         "glob",
         "grep",
         "git",
-        "docs_read",
-        "docs_write",
     }
     grantable = set(_BUILTIN_ORDER) - never
     for name in never:
@@ -196,10 +178,8 @@ def test_tool_registry_grant_sets_snapshot():
             "file_write",
             "str_replace",
             "file_delete",
-            "mkdir",
             "file_batch",
             "md_export",
-            "archive",
             "download_url",
         }
     )
@@ -268,8 +248,6 @@ def test_tool_registry_declarations_cover_roster():
         "glob",
         "grep",
         "git",
-        "docs_read",
-        "docs_write",
     } | frozenset(_BROWSER_CEO_ORDER)
 
     declared = declared_tools()
@@ -320,20 +298,12 @@ def test_tool_registry_declarations_cover_roster():
         "debate": CeoWire.ALWAYS,
         "consult": CeoWire.CONSULT,
         "folders": CeoWire.ALWAYS,
-        "create_folder": CeoWire.ALWAYS,
-        "delete_folder": CeoWire.ALWAYS,
         "ask_user": CeoWire.CHECKPOINT,
-        "table_ops": CeoWire.TABLE,
-        "table_read": CeoWire.TABLE,
     }
 
-    # 指挥面同样「CEO 永不持 GRANTABLE」，唯一破例是 delete_folder：删文件夹每次都要
-    # 用户点确认卡（恒确认，见 runtime.always_confirm），破例本身钉在这里可审。
+    # 指挥面「CEO 永不持 GRANTABLE」：文件夹生杀给人侧，模型面只留 list/resolve。
     # 走目录取 schema——delegate / debate 是重依赖手工装配，直接 cls() 构不出来。
     catalog_approvals = {e.schema.name: e.schema.approval for e in build_capability_catalog()}
     for name in _CATALOG_ORCHESTRATION_ORDER:
-        expected = (
-            ToolApproval.GRANTABLE if name == "delete_folder" else ToolApproval.NEVER
-        )
-        assert catalog_approvals[name] is expected, name
-    assert requires_always_confirm("delete_folder", {}) is True
+        assert catalog_approvals[name] is ToolApproval.NEVER, name
+    assert requires_always_confirm("delete_folder", {}) is False

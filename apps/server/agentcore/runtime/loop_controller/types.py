@@ -23,8 +23,8 @@ DEFAULT_THRESHOLD = 3
 DEFAULT_EMPTY_THRESHOLD = 2
 # Tool failure circuit breaker (B2): cumulative (run-scoped, args-agnostic) failure
 # counts per tool. At the warn threshold the model is told to stop retrying that
-# tool; at the disable threshold the tool is removed from the toolset for the rest
-# of the run. Unlike REPEATED_FAILURE detection (which keys on the exact call
+# tool; at the disable threshold later calls fail at execute (the OpenAI table
+# stays). Unlike REPEATED_FAILURE detection (which keys on the exact call
 # fingerprint within the sliding window), this counts a tool failing *any* way and
 # never resets — it catches "this tool just isn't working out, no matter the args".
 DEFAULT_TOOL_FAILURE_WARN = 2
@@ -306,44 +306,13 @@ class CircuitBreak:
         )
 
     def message(self) -> str | None:
-        """The single ``[系统提示]`` to inject this round, or ``None``.
+        """Retired model-facing ``[系统提示]``.
 
-        Anchored to the concrete fact (which tool, what now happens).
-        Disable first, then force-segmented write steer. Warn-only trips are
-        silent to the model. ``web_fetch`` 仅在显式退役时走研究向收口文案
-        （累计失败不再警告/卸工具）。
+        Disable / force_segmented / validation_stop still latch on this object
+        and the tool table / receipts / hard-stop; they do not ride a user-role
+        sermon. Warn-only trips were already silent.
         """
-        parts: list[str] = []
-        if self.disabled:
-            if self.retire_message:
-                parts.append(self.retire_message.strip())
-            else:
-                parse_d = tuple(n for n in self.disabled if n in self.parse_only)
-                other_d = tuple(n for n in self.disabled if n not in self.parse_only)
-                read_d = tuple(n for n in other_d if n == "web_fetch")
-                other_d = tuple(n for n in other_d if n != "web_fetch")
-                if read_d:
-                    from agentcore.tools.builtin.web._net import WEB_FETCH_RETIRE_STEER
-
-                    parts.append(WEB_FETCH_RETIRE_STEER)
-                if other_d:
-                    names = "、".join(f"`{n}`" for n in other_d)
-                    parts.append(f"工具 {names} 已停用。")
-                if parse_d:
-                    names = "、".join(f"`{n}`" for n in parse_d)
-                    parts.append(f"工具 {names} 因参数不是合法 JSON 已停用。")
-        if self.force_segmented:
-            names = "、".join(f"`{n}`" for n in self.force_segmented)
-            parts.append(
-                f"工具 {names} 连续写盘失败：写文件能力保持可用（`file_write` / `str_replace`）。"
-                "请改用更短但完整的 `file_write`，或用 `str_replace` 在唯一锚"
-                "（含写回执 `end_preview`）后续写。"
-            )
-        if self.validation_stop:
-            parts.append(self.validation_stop.strip())
-        if not parts:
-            return None
-        return "[系统提示] " + " ".join(parts)
+        return None
 
 
 def fingerprint_tool_call(name: str, arguments: str) -> str:

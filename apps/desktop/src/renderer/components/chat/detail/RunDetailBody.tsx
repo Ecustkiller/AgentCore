@@ -20,7 +20,11 @@ import { groupToolRuns, timelineNodeKeys } from "@/lib/processTimeline";
 import type { AgentAuditEvent } from "@/services/audit";
 import { permissionAxesShortLabel } from "@/services/permissionAxes";
 import { activeRuntime, useConversationStore } from "@/stores/conversation";
-import { continuationChains, useMessageRun } from "@/stores/execution";
+import {
+  continuationChains,
+  hotfixSeatChain,
+  useMessageRun,
+} from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import { turnDetailPath } from "@/stores/ui";
 import { isLiveRunStatus } from "@agentcore/protocol-fold-kit";
@@ -36,6 +40,10 @@ import { DebriefSection } from "./sections/RunDebrief";
 import { EscalationSection } from "./sections/RunEscalations";
 import { RunOutcomeAcceptSection } from "./sections/RunOutcomeAccept";
 import { ResourceSection } from "./sections/RunResources";
+import {
+  SeatInstructionMark,
+  SeatPriorSegments,
+} from "./sections/SeatPriorSegments";
 import { Section } from "./sections/shared";
 
 /**
@@ -100,15 +108,25 @@ export function RunDetailBody({
   );
 
   const execution = viewed?.execution;
-  const run = viewed?.run;
-  const agent = viewed?.agent;
-  const runCaps = runActCapabilities(execution, runId);
+  const viewedRun = viewed?.run;
+  const viewedAgent = viewed?.agent;
   const turnAudit = useTurnAudit(
     conversationId != null ? conversationId : null,
     messageId,
   );
 
-  if (!execution || !run || !agent) return null;
+  if (!execution || !viewedRun || !viewedAgent) return null;
+
+  const seatChain = hotfixSeatChain(execution, viewedRun.id);
+  const run = seatChain
+    ? (seatChain.versions[seatChain.versions.length - 1]?.run ?? viewedRun)
+    : viewedRun;
+  const origin = seatChain?.versions[0]?.run ?? viewedRun;
+  const agent =
+    execution.agents.find((a) => a.id === run.agentId) ?? viewedAgent;
+  const originAgent =
+    execution.agents.find((a) => a.id === origin.agentId) ?? viewedAgent;
+  const runCaps = runActCapabilities(execution, run.id);
 
   // 整轮停只给 captain：队员栏再夹一枚方块停止，会和「停止这位队员」看起来像同一件事。
   // 整轮硬停的主入口是输入框。「跑完再说」走输入框排队，不在右坞再放填草稿入口。
@@ -136,14 +154,15 @@ export function RunDetailBody({
     conversationId != null && !isCaptainRun && isLiveRunStatus(run.status);
   const thinkingLive = isThinkingLivePlaceholder(agent);
 
-  const isModerator = isDebateModeratorRun(execution, run.id);
-  const chain =
-    continuationChains(execution).find((c) =>
-      c.versions.some((v) => v.run.id === run.id),
-    ) ?? null;
-  const taskSection = selectRunTaskSection(run);
+  const isModerator = isDebateModeratorRun(execution, origin.id);
+  const debateChain = seatChain
+    ? null
+    : (continuationChains(execution).find((c) =>
+        c.versions.some((v) => v.run.id === viewedRun.id),
+      ) ?? null);
+  const taskSection = selectRunTaskSection(origin);
   const contextBlocks = receivedContextForList(
-    run.receivedContext,
+    origin.receivedContext,
     taskSection.promotedTask,
   );
 
@@ -161,18 +180,22 @@ export function RunDetailBody({
   const showDebrief =
     Boolean(run.debrief) && !processHasSuccessfulHandoff(process);
   const showConclusion = Boolean(run.outputSummary) && !run.debrief;
-  const showResources = Boolean(run.usage || run.cost);
+  const showResources = Boolean(
+    (seatChain?.versions.some((v) => v.run.usage || v.run.cost) ?? false) ||
+      run.usage ||
+      run.cost,
+  );
   const nodes = showTimeline
     ? groupToolRuns(absorbHandoffBriefContent(process, run.debrief))
     : [];
-  const nodeKeys = timelineNodeKeys(nodes);
-  const timelineKey = `${messageId}:${runId}`;
+  const nodeKeys = timelineNodeKeys(nodes).map((k) => `${run.id}:${k}`);
+  const timelineKey = `${messageId}:${run.id}`;
   const live = agent.status === "working";
 
   const headerStart = (
     <>
       <span className="flex-1 truncate text-sm font-medium text-foreground">
-        {agent.role}
+        {originAgent.role}
       </span>
       {run.replacesRunId != null && (
         <Badge
@@ -208,9 +231,9 @@ export function RunDetailBody({
         </Button>
       )}
       <ReceivedContextSection
-        key={runId}
+        key={origin.id}
         blocks={contextBlocks}
-        process={process}
+        process={origin.process}
       />
     </>
   );
@@ -223,7 +246,7 @@ export function RunDetailBody({
           executionId={execution.id}
           runId={run.id}
           runStatus={run.status}
-          role={agent.role}
+          role={originAgent.role}
           redirectCapable={runCaps.runRedirect}
           headerStart={headerStart}
         />
@@ -238,29 +261,41 @@ export function RunDetailBody({
         <CollapsibleSpeech
           contentKey={taskSection.body}
           fadeToClass="from-card"
-          sceneKey={`run:${runId}:task`}
+          sceneKey={`run:${origin.id}:task`}
         >
           <Markdown content={taskSection.body} />
         </CollapsibleSpeech>
       </Section>
 
-      {chain && (
+      {debateChain && (
         <ContinuationChainSection
-          chain={chain}
-          currentRunId={run.id}
+          chain={debateChain}
+          currentRunId={viewedRun.id}
           agents={execution.agents}
           execution={execution}
           onSelect={(rid, role) => showRunDetail(messageId, rid, role)}
         />
       )}
 
-      {run.escalations.length > 0 && (
-        <EscalationSection
-          run={run}
-          role={agent.role}
+      {seatChain ? (
+        <SeatPriorSegments
+          versions={seatChain.versions.slice(0, -1)}
           conversationId={conversationId}
-          interactive={turnInteractive}
+          messageId={messageId}
         />
+      ) : null}
+      {seatChain ? <SeatInstructionMark run={run} /> : null}
+
+      {(seatChain?.versions ?? [{ run }]).map(({ run: er }) =>
+        er.escalations.length > 0 ? (
+          <EscalationSection
+            key={er.id}
+            run={er}
+            role={originAgent.role}
+            conversationId={conversationId}
+            interactive={turnInteractive}
+          />
+        ) : null,
       )}
 
       {run.error && (
@@ -275,13 +310,15 @@ export function RunDetailBody({
           surface it + let the user record an explicit accept.
           Gated to terminal runs so an in-flight run never triggers the audit read. */}
       {conversationId != null &&
-        run.status !== "pending" &&
-        run.status !== "running" && (
-          <RunOutcomeAcceptSection
-            conversationId={conversationId}
-            messageId={messageId}
-            runId={runId}
-          />
+        (seatChain?.versions ?? [{ run }]).map(({ run: er }) =>
+          er.status !== "pending" && er.status !== "running" ? (
+            <RunOutcomeAcceptSection
+              key={er.id}
+              conversationId={conversationId}
+              messageId={messageId}
+              runId={er.id}
+            />
+          ) : null,
         )}
     </>
   );
@@ -310,9 +347,20 @@ export function RunDetailBody({
             />
           </Section>
         ) : null}
-        {showResources && (
-          <ResourceSection run={run} agent={agent} keyBase={`run:${runId}`} />
-        )}
+        {showResources &&
+          (seatChain?.versions ?? [{ run }]).map(({ run: er }) => {
+            const erAgent =
+              execution.agents.find((a) => a.id === er.agentId) ?? agent;
+            if (!er.usage && !er.cost) return null;
+            return (
+              <ResourceSection
+                key={er.id}
+                run={er}
+                agent={erAgent}
+                keyBase={`run:${er.id}`}
+              />
+            );
+          })}
       </>
     ) : null;
 

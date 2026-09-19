@@ -11,6 +11,7 @@
  * scene's conclusions — it must NOT re-derive them:
  *   - 「接续链归哪个子队盒」→ {@link GraphScene.nodeGroup} / {@link GraphScene.layoutHints}
  *   - 「辩论 beat 折进哪个宿主」→ {@link GraphScene.beatFoldsByHost}
+ *   - 「同人续写折进哪个座位」→ {@link GraphScene.seatFoldsByHost}
  *   - 分带归属 → {@link GraphScene.bands} (structural membership; pixels via
  *     {@link projectSceneBands}, never node-AABB reverse-derivation)
  *
@@ -29,6 +30,7 @@ import type {
   ExecutionStatus,
   RunNode,
 } from "@/stores/execution";
+import { isSeatFoldedContinuation, seatFaceRun } from "@/stores/execution";
 import type { GraphEdge, GraphLayout } from "@/stores/graph";
 import {
   type LayoutHints,
@@ -158,6 +160,8 @@ export interface GraphScene {
   nodeGroup: Map<string, string | null>;
   /** 折进拍宿主 run id → 被折 beat run ids（质询/复攻/crux）——唯一结论。 */
   beatFoldsByHost: Map<string, string[]>;
+  /** 现场根 → 折进该座位的同人续写 run ids（非辩论）。 */
+  seatFoldsByHost: Map<string, string[]>;
   /** ELK compound-build hints (continuation descendants + edge ownership). */
   layoutHints: LayoutHints;
   /** CEO 汇聚点 run id（kind==="captain"）；无则 null。 */
@@ -256,10 +260,11 @@ export function computeTopologicalRunWaves(
 
 /**
  * Top-level worker runs that participate in lane banding (exclude captain +
- * folded nested sub-workers — those live inside a sub-team box). Pure
- * continuations (`continuesRunId != null`) stay visible on the graph but do not
- * enter 委派/波次 strips — only cold-start units count. Structural: every such
- * unit is positioned by ELK, so it needs no position filter here.
+ * folded nested sub-workers — those live inside a sub-team box). Continuations
+ * (`continuesRunId != null`) do not enter 委派/波次 strips — hotfix seats are
+ * already hidden, debate rounds stay as graph nodes but still skip 委派 lanes.
+ * Structural: every such unit is positioned by ELK, so it needs no position
+ * filter here.
  */
 function laneEligibleRunIds(
   runs: GraphRunLike[],
@@ -556,6 +561,7 @@ export function buildGraphScene(
   // 辩论 beat 折进宿主（唯一结论；下游投影据此取被折 run 数据）。
   const workerRuns = workerRunsOf(runs) as GraphRunLike[];
   const workerIds = new Set(workerRuns.map((r) => r.id));
+  const workerById = new Map(workerRuns.map((r) => [r.id, r]));
   const beatFoldsByHost = new Map<string, string[]>();
   for (const r of workerRuns) {
     if (!isDebateFoldedBeatRun(r)) continue;
@@ -566,10 +572,27 @@ export function buildGraphScene(
     beatFoldsByHost.set(hostId, arr);
   }
 
+  const seatFoldsByHost = new Map<string, string[]>();
+  for (const r of workerRuns) {
+    if (!isSeatFoldedContinuation(r) || !r.continuesRunId) continue;
+    if (!workerIds.has(r.continuesRunId)) continue;
+    const arr = seatFoldsByHost.get(r.continuesRunId) ?? [];
+    arr.push(r.id);
+    seatFoldsByHost.set(r.continuesRunId, arr);
+  }
+  for (const ids of seatFoldsByHost.values()) {
+    ids.sort((a, b) => {
+      const ia = workerById.get(a)?.continuationIndex ?? 0;
+      const ib = workerById.get(b)?.continuationIndex ?? 0;
+      return ia - ib;
+    });
+  }
+
   // 顶层布局单元（unitOf===self 且未折叠）→ 幕归属。
   const subTeamByParent = new Map(subTeams.map((st) => [st.parentId, st]));
   const units: SceneUnit[] = [];
   for (const r of workerRuns) {
+    if (isSeatFoldedContinuation(r)) continue;
     if (foldInfo.folded.has(r.id)) continue;
     if (foldInfo.unitOf.get(r.id) !== r.id) continue;
     const st = subTeamByParent.get(r.id);
@@ -600,6 +623,7 @@ export function buildGraphScene(
     fold: foldInfo,
     nodeGroup: layoutHints.nodeGroup,
     beatFoldsByHost,
+    seatFoldsByHost,
     layoutHints,
     captainId,
     activeActId: computeActiveActId(acts),
@@ -618,7 +642,8 @@ function actMemberRuns(
   return workerRunsOf(execution.runs).filter(
     (r) =>
       (r.actId ?? "act-1") === actId &&
-      !isDebateFoldedBeatRun(r as GraphRunLike),
+      !isDebateFoldedBeatRun(r as GraphRunLike) &&
+      !isSeatFoldedContinuation(r),
   );
 }
 
@@ -634,7 +659,10 @@ interface ActDerived {
 }
 
 /** Aggregate an act's runs into card-ready derived state — only real run data. */
-function computeActDerived(members: RunNode[]): ActDerived {
+function computeActDerived(
+  members: RunNode[],
+  allWorkers: readonly RunNode[],
+): ActDerived {
   const roles: string[] = [];
   const seenRoles = new Set<string>();
   const seenAgents = new Set<string>();
@@ -643,23 +671,33 @@ function computeActDerived(members: RunNode[]): ActDerived {
   let anyDuration = false;
   let pendingDecisions = 0;
   for (const r of members) {
+    const face = seatFaceRun(r, allWorkers);
     const role = r.role ?? r.agentId ?? r.id;
     if (!seenRoles.has(role)) {
       seenRoles.add(role);
       roles.push(role);
     }
     if (r.agentId) seenAgents.add(r.agentId);
-    if (r.status === "completed" || r.status === "skipped") completed++;
+    if (face.status === "completed" || face.status === "skipped") completed++;
     if (r.durationMs != null && r.durationMs > 0) {
       durationMs += r.durationMs;
       anyDuration = true;
     }
-    for (const e of r.escalations ?? []) {
-      if (e.status === "pending") pendingDecisions++;
+    const folded = allWorkers.filter(
+      (x) => x.continuesRunId === r.id && isSeatFoldedContinuation(x),
+    );
+    for (const piece of [r, ...folded]) {
+      if (piece.durationMs != null && piece.durationMs > 0 && piece !== r) {
+        durationMs += piece.durationMs;
+        anyDuration = true;
+      }
+      for (const e of piece.escalations ?? []) {
+        if (e.status === "pending") pendingDecisions++;
+      }
+      if (piece.checkpoint?.status === "pending") pendingDecisions++;
     }
-    if (r.checkpoint?.status === "pending") pendingDecisions++;
   }
-  const statuses = members.map((r) => r.status);
+  const statuses = members.map((r) => seatFaceRun(r, allWorkers).status);
   let status: ExecutionStatus;
   if (statuses.some((s) => s === "running")) status = "running";
   else if (pendingDecisions > 0) status = "paused";
@@ -705,10 +743,12 @@ function buildActs(
   units: SceneUnit[],
   captainId: string | null,
 ): SceneAct[] {
+  const allWorkers = workerRunsOf(execution.runs);
   const decls = execution.acts;
   if (!decls || decls.length === 0) {
     const derived = computeActDerived(
       actMemberRuns(execution, "act-1", captainId),
+      allWorkers,
     );
     return [
       {
@@ -733,6 +773,7 @@ function buildActs(
   }): SceneAct => {
     const derived = computeActDerived(
       actMemberRuns(execution, base.actId, captainId),
+      allWorkers,
     );
     const sa: SceneAct = { ...base, unitIds: [], ...derived };
     byActId.set(base.actId, sa);

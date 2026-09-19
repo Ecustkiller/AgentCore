@@ -1,4 +1,4 @@
-"""Filesystem meta tools: delete / mkdir."""
+"""Filesystem meta tools: delete."""
 
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ from agentcore.tools.registration import (
 )
 from agentcore.tools.write_replay import is_write_replay
 from agentcore.workspace.protocol import (
-    AlreadyExists,
     OutsideWorkspace,
     PathNotFound,
     WorkspaceError,
@@ -30,7 +29,6 @@ from .errors import (
 from .integrity import (
     _claim_write_path,
     _reject_write_scope,
-    prepared_write_relpath,
 )
 from .prepare_path import prepare_tool_path
 
@@ -52,7 +50,7 @@ class FileDeleteTool:
         return ToolSchema(
             name="file_delete",
             description=(
-                "删除工作区文件或目录（递归）。默认可逆；`permanent=true` 才永久删。"
+                "删除工作区文件或目录（递归）。`permanent=true` 才永久删。"
                 "工作区根不可删。"
                 "用户规则删 `.agentcore/规则/*.md`。"
             ),
@@ -65,9 +63,7 @@ class FileDeleteTool:
                     },
                     "permanent": {
                         "type": "boolean",
-                        "description": (
-                            "true=永久不可恢复；省略或 false=可逆（默认）。"
-                        ),
+                        "description": "true=永久不可恢复；省略或 false=可逆。",
                         "default": False,
                     },
                 },
@@ -161,102 +157,5 @@ class FileDeleteTool:
             tool_call_id="",
             success=True,
             output=msg,
-            duration_ms=int((time.monotonic() - start) * 1000),
-        )
-
-
-class MkdirTool:
-    """Create an empty directory (with parents) within the workspace."""
-
-    registration = ToolRegistration(
-        surface=ToolSurface.BUILTIN,
-        audience=AUDIENCE_BOTH,
-        # 只建目录：台账记的是文件产物，空目录不是交付物。
-        file_products=FileProductsContract.NO_PRODUCT,
-        workspace_io=True,
-        catalog_summary="在工作区建目录",
-    )
-
-    @property
-    def schema(self) -> ToolSchema:
-        return ToolSchema(
-            name="mkdir",
-            description=(
-                "建工作区根下的结构目录（缺上级一并建）。"
-                "套应用名/话题名当工程根 ≠ 本工具。"
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "要创建的相对目录路径",
-                    },
-                },
-                "required": ["path"],
-            },
-            face=ToolFace.FILE,
-            approval=ToolApproval.GRANTABLE,
-        )
-
-    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
-        start = time.monotonic()
-        rel_path = arguments.get("path", "")
-
-        if not rel_path:
-            return _error("path 不能为空：请提供工作区内的相对目录路径", start)
-
-        from .user_rules import maybe_user_rule_mkdir
-
-        rule_hit = await maybe_user_rule_mkdir(
-            requested_path=str(rel_path),
-            context=context,
-            start=start,
-        )
-        if rule_hit is not None:
-            return rule_hit
-
-        prepared = await prepared_write_relpath(rel_path, context)
-        if isinstance(prepared, ToolResult):
-            return prepared
-        rel_path, rename_note = prepared
-        if not rel_path or rel_path == ".":
-            output = "已创建目录 ."
-            if rename_note:
-                output = f"{output}。{rename_note}"
-            return ToolResult(
-                tool_call_id="",
-                success=True,
-                output=output,
-                duration_ms=int((time.monotonic() - start) * 1000),
-            )
-
-        scope_denied = _reject_write_scope(
-            context, rel_path, start, event="file_write.scope_rejected"
-        )
-        if scope_denied is not None:
-            return scope_denied
-
-        try:
-            await context.backend.mkdir(rel_path)
-        except OutsideWorkspace as e:
-            return _outside_workspace_error(
-                rel_path, start, location=context.backend.location, reason=str(e)
-            )
-        except AlreadyExists:
-            return _error(f"路径已存在：{rel_path}", start)
-        except WorkspaceError as e:
-            dead = _maybe_channel_dead_error(e, start)
-            if dead is not None:
-                return dead
-            return _error(f"创建目录失败：{e}", start, user_face=False)
-
-        output = f"已创建目录 {rel_path}"
-        if rename_note:
-            output = f"{output}。{rename_note}"
-        return ToolResult(
-            tool_call_id="",
-            success=True,
-            output=output,
             duration_ms=int((time.monotonic() - start) * 1000),
         )

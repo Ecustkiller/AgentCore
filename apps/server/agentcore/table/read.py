@@ -1,4 +1,4 @@
-"""Filter / sort a table snapshot for table_read."""
+"""Filter / sort a table snapshot (prompt facts and REST-side helpers)."""
 
 from __future__ import annotations
 

@@ -79,6 +79,34 @@ export function formatCompact(n: number): string {
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
+/** Hide thresholds for 输出速度 in「更多」— short bursts and tiny replies are noise. */
+export const OUTPUT_SPEED_MIN_TOKENS = 10;
+export const OUTPUT_SPEED_MIN_MS = 250;
+
+/**
+ * 输出速度 for the assistant「更多」usage panel.
+ * `outputTokens / (generationMs/1000)` — decode window only, not whole-turn 用时.
+ * Returns null when the number would lie or jitter (old rows, sidecar token-empty).
+ */
+export function formatOutputSpeed(
+  outputTokens: number,
+  generationMs: number,
+): string | null {
+  if (
+    !Number.isFinite(outputTokens) ||
+    !Number.isFinite(generationMs) ||
+    outputTokens < OUTPUT_SPEED_MIN_TOKENS ||
+    generationMs < OUTPUT_SPEED_MIN_MS
+  ) {
+    return null;
+  }
+  const tps = outputTokens / (generationMs / 1000);
+  if (!Number.isFinite(tps) || tps <= 0) return null;
+  const rounded = tps >= 10 ? Math.round(tps) : Math.round(tps * 10) / 10;
+  const text = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  return `${text}/秒`;
+}
+
 /** 取文本末尾若干字符并折行成单段预览（用于 worker 节点的实时输出片段：运行中
  * 最新内容在末尾，tail 才是「正在写什么」）。 */
 export function tailText(text: string, max = 80): string {

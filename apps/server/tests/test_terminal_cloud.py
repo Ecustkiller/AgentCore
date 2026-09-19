@@ -377,6 +377,28 @@ async def test_cloud_read_and_stop_round_trip(tmp_path: Path):
     assert any(script.endswith("/stop.sh") for script in sandbox.execs)
 
 
+async def test_cloud_read_ignores_leftover_tail_lines(tmp_path: Path):
+    lines = [f"line-{i}" for i in range(1, 101)]
+    sandbox = _FakeDesk(tmp_path / "scratch", auto_log="\n".join(lines) + "\n")
+    backend = _backend(tmp_path, sandbox)
+    started = await process_manage(
+        {"subcommand": "start", "command": "pnpm dev"},
+        _ctx(backend),
+    )
+    assert started.success
+    process_id = started.display["process_id"]
+    read = await process_manage(
+        {"subcommand": "read", "process_id": process_id, "tail_lines": 10},
+        _ctx(backend),
+    )
+    assert read.success
+    output = str(read.display.get("output") or "")
+    out_lines = output.splitlines()
+    assert len(out_lines) == 80
+    assert out_lines[0] == "line-21"
+    assert out_lines[-1] == "line-100"
+
+
 class _PreviewClient:
     def __init__(self) -> None:
         self.registers: list[tuple[str, str, dict[str, Any]]] = []

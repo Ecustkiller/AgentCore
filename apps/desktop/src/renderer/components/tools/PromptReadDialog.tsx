@@ -2,7 +2,6 @@ import { PromptDocument } from "@/components/prompt/PromptDocument";
 import { PromptWorkbench } from "@/components/prompt/PromptWorkbench";
 import type { BindableToolOption } from "@/components/prompt/PromptWorkbench";
 import { PublishSkillDialog } from "@/components/tools/PublishSkillDialog";
-import { RoleIdentityBlock } from "@/components/tools/RoleIdentityBlock";
 import { ToolInspector } from "@/components/tools/ToolInspector";
 import { Badge, Button, SegmentedControl } from "@/components/ui";
 import {
@@ -357,16 +356,6 @@ function ReadBody({
             ? toolsHint
             : undefined
         }
-      />
-    );
-  }
-
-  if (item.kind === "identity") {
-    return (
-      <RoleIdentityBlock
-        ceoIdentity={item.ceoIdentity}
-        nestedIdentity={item.nestedIdentity}
-        leafIdentity={item.leafIdentity}
       />
     );
   }

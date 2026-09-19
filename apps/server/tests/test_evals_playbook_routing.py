@@ -27,11 +27,11 @@ from agentcore.evals.playbook_routing import (
 )
 from agentcore.evals.types import EvalConfigError
 
-_LEGACY_EXPECT = {
-    "research_brief_parallel": "map_fanout",
-    "research_mit_vs_gpl_chat": "map_fanout",
-    "research_knowledge_base_chat": "map_fanout",
-}
+_RESEARCH_BRIEF_HANDWRITTEN = (
+    "research_brief_parallel",
+    "research_mit_vs_gpl_chat",
+    "research_knowledge_base_chat",
+)
 
 _AUDIT_HANDWRITTEN = (
     "code_audit_report",
@@ -52,7 +52,7 @@ def test_scenarios_lint_ok():
     assert sum(1 for s in SCENARIOS if s.phrasing == "textbook") >= 3
     assert any(s.workspace == "codebase" for s in SCENARIOS)
     keys = {s.key for s in SCENARIOS}
-    assert set(_LEGACY_EXPECT) <= keys
+    assert set(_RESEARCH_BRIEF_HANDWRITTEN) <= keys
     assert set(_GREENFIELD_HANDWRITTEN) <= keys
     assert set(_AUDIT_HANDWRITTEN) <= keys
     assert "discuss_license_no_doc_waiver" in keys
@@ -66,12 +66,12 @@ def test_scenarios_lint_ok():
     assert "compare_three_js_frameworks" in keys
 
 
-def test_legacy_named_playbook_scenarios_unchanged():
+def test_research_brief_expects_handwritten_delegate():
     by_key = {s.key: s for s in SCENARIOS}
-    for key, pb in _LEGACY_EXPECT.items():
+    for key in _RESEARCH_BRIEF_HANDWRITTEN:
         sc = by_key[key]
-        assert sc.expect_playbook == pb
-        assert sc.expect_action == ""
+        assert sc.expect_playbook == ""
+        assert sc.expect_action == "DELEGATE"
         assert sc.expect_max_workers is None
         assert sc.prior_turns == ()
     assert "先别写成文档" in by_key["research_mit_vs_gpl_chat"].user_message
@@ -105,7 +105,7 @@ def test_greenfield_expects_handwritten_delegate():
 def test_discuss_and_prd_fixture_fields():
     by_key = {s.key: s for s in SCENARIOS}
     discuss = by_key["discuss_license_no_doc_waiver"]
-    assert discuss.expect_playbook == "map_fanout"
+    assert discuss.expect_playbook == ""
     assert "DELEGATE" in discuss.expect_action and "ASK" in discuss.expect_action
     assert "DIRECT" not in discuss.expect_action
     round2 = by_key["discuss_license_round2_short_answers"]
@@ -183,9 +183,9 @@ def test_lint_empty_playbook_requires_expect_action():
         lint_scenarios((bad, *SCENARIOS[1:]))
 
 
-def test_lint_rejects_unknown_expect_playbook():
+def test_lint_rejects_expect_playbook():
     bad = replace(SCENARIOS[0], expect_playbook="not_a_real_playbook")
-    with pytest.raises(EvalConfigError, match="未知 expect_playbook"):
+    with pytest.raises(EvalConfigError, match="勿设 expect_playbook"):
         lint_scenarios((bad, *SCENARIOS[1:]))
 
 
@@ -431,7 +431,9 @@ def test_think_act_catches_named_playbook_then_ask_user():
         "我直接 delegate cite_write_review。\n"
         "让我派工。"
     )
-    mentions = extract_think_mentions(reasoning)
+    mentions = extract_think_mentions(
+        reasoning, known_playbooks=("cite_write_review",)
+    )
     assert "cite_write_review" in mentions["playbooks"]
     assert "lean" in mentions["intensities"]
     div = think_act_divergences(
@@ -448,7 +450,9 @@ def test_think_act_on_recorded_colloquial_excerpt():
         "推荐 playbook=\"cite_write_review\"。\n"
         "我直接 delegate cite_write_review。"
     )
-    mentions = extract_think_mentions(reasoning)
+    mentions = extract_think_mentions(
+        reasoning, known_playbooks=("cite_write_review",)
+    )
     div = think_act_divergences(mentions, action="ASK", playbook=None, intensity=None)
     assert "cite_write_review" in mentions["playbooks"]
     assert any(
@@ -458,7 +462,9 @@ def test_think_act_on_recorded_colloquial_excerpt():
 
 def test_think_act_ignores_negated_playbook():
     reasoning = "不要用 playbook=cite_write_review，改走对话对齐。"
-    mentions = extract_think_mentions(reasoning)
+    mentions = extract_think_mentions(
+        reasoning, known_playbooks=("cite_write_review",)
+    )
     assert "cite_write_review" not in mentions["playbooks"]
     assert think_act_divergences(mentions, action="DIRECT", playbook=None, intensity=None) == []
 
@@ -697,10 +703,8 @@ def test_execution_entry_assembles_surface_and_parses_delegate():
     assert packed["task_count"] == 1
     assert packed["delegated"] is True
     assert packed["tool_surface"]["offered"] is True
-    enum = packed["tool_surface"].get("playbook_enum") or []
-    assert "cite_write_review" in enum
-    assert "map_fanout" in enum
-    assert "build_app" not in enum
+    assert packed["tool_surface"].get("playbook_property_present") is False
+    assert packed["tool_surface"].get("playbook_enum") == []
     assert packed["think_act_divergences"] == []
 
 

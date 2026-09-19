@@ -25,13 +25,9 @@ _EXPECTED_NAMES = {
     "file_list",
     "glob",
     "file_delete",
-    "mkdir",
     "file_batch",
     "md_export",
-    "archive",
     "grep",
-    "docs_read",
-    "docs_write",
     "git",
     "run",
 }
@@ -47,14 +43,10 @@ _CEO_DEFAULT_NAMES = {
     "file_list",
     "glob",
     "file_delete",
-    "mkdir",
     "file_batch",
     "md_export",
-    "archive",
     "download_url",
     "grep",
-    "docs_read",
-    "docs_write",
     "git",
     "run",
 }
@@ -62,10 +54,8 @@ _MUTATION_NAMES = {
     "file_write",
     "str_replace",
     "file_delete",
-    "mkdir",
     "file_batch",
     "md_export",
-    "archive",
     "download_url",
 }
 
@@ -107,10 +97,8 @@ def test_write_and_exec_tools_are_grantable():
     assert approvals["run"] is ToolApproval.GRANTABLE
     # Destructive / mutating file ops require the same consent as writes.
     assert approvals["file_delete"] is ToolApproval.GRANTABLE
-    assert approvals["mkdir"] is ToolApproval.GRANTABLE
     assert approvals["file_batch"] is ToolApproval.GRANTABLE
     assert approvals["md_export"] is ToolApproval.GRANTABLE
-    assert approvals["archive"] is ToolApproval.GRANTABLE
     # Read-only tools auto-run (no approval prompt).
     assert approvals["file_read"] is ToolApproval.NEVER
     assert approvals["file_list"] is ToolApproval.NEVER
@@ -127,10 +115,8 @@ def test_file_mutation_class_is_grantable_filesystem_without_code_execute():
         "file_write",
         "str_replace",
         "file_delete",
-        "mkdir",
         "file_batch",
         "md_export",
-        "archive",
         "download_url",
     }
     assert "code_execute" not in names

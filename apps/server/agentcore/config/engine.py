@@ -36,22 +36,14 @@ class EngineSettings(BaseModel):
     # runs/constants.py::MAX_PARALLEL_DELEGATIONS，值同步为 12）。
     engine_max_parallel_delegations: int = 12
 
-    # 当轮调查结果（NEVER + FILESYSTEM/SEARCH/RESEARCH）投影窗：只留最近 N 个
-    # 「含已完成大读」的 assistant 消息的全文（一轮并行多读都留，单位同写参窗）。
-    # journal / UI 仍全文。旧结果 → 稳定指针；file_read 另附 ≤1200 字结构摘要。
-    # 2 打堆叠税（工人长调查把多份读窗整段带进下一轮 LLM）；不拧单次安全顶、
-    # 不把 file_read 塞回通用 4k 头尾裁（那伤单次读手感）。host / terminal 走
-    # 独立 exec 窗，不进本集合。
+    # Retired sliding-clear knobs (not on ``build_request_window``). Settings
+    # remain so library projections / tests stay byte-stable. Same-window rewrite
+    # is window compact only.
     engine_tool_clear_keep_recent: int = 2
     engine_tool_clear_min_chars: int = 2000
-    # host / terminal 当轮 stdout 独立投影窗（不进 investigation_tools，
-    # 以免改空转治理）。指针禁止教重跑。1 = 只留最近一轮全文（并行多 exec
-    # 都留）。code_execute / test_run 不在此列（改码对照 / 验证诚实性）。
+    # host / terminal 独立 keep-recent（library projection only; 不进热路径）。
     engine_tool_clear_exec_keep_recent: int = 1
-    # 写参投影窗：已完成且正文 ≥ min_chars 的 file_write / str_replace，
-    # 只留最近 N 条 assistant 消息里的全文（下一刀可当 old_string）。跑命令 / 说话
-    # / 交接也计数——旧口径只数「含写的轮」会让稿子在写完后一直躺到下一次写。
-    # 更早的压成 path + 结果侧摘要。1 = 刚说过的那一句；0 = 全部压扁（旧行为）。
+    # 写参 keep-recent（library projection only; 不进热路径）。
     engine_write_args_clear_keep_recent: int = 1
     # R1: when clearing a large file_read result, append a deterministic structural
     # digest (chars). 0 = pointer-only rollback (no summary). Must keep
@@ -59,10 +51,9 @@ class EngineSettings(BaseModel):
     engine_tool_clear_file_read_summary_max_chars: int = 1200
 
     # Worker mid-run window compact (lossy summary of older ReAct rounds).
-    # Orthogonal to tool_clear (same-window tool bodies) and to conversation
-    # compaction (cross-user-turn chat). Journal / UI stay full; projection only.
-    # Captain / solo loops ignore this. 64k last-prompt is rot, not 1M overflow;
-    # recency=2 matches investigation tool_clear so the live tool pair stays.
+    # Orthogonal to conversation compaction (cross-user-turn chat). Journal / UI
+    # stay full; projection only. Captain / solo loops ignore this. 64k last-prompt
+    # is rot, not 1M overflow; recency=2 keeps the live tool pair.
     engine_window_compact_enabled: bool = True
     engine_window_compact_prompt_tokens: int = 64_000
     engine_window_compact_recency_rounds: int = 2
@@ -74,7 +65,7 @@ class EngineSettings(BaseModel):
     engine_window_compact_near_tokens: int = 200_000
     engine_window_compact_cooldown_rounds: int = 2
 
-    # Worker 累计 token 硬顶 (loose backstop): tool_clear + window compact 挑大梁做
+    # Worker 累计 token 硬顶 (loose backstop): window compact 挑大梁做
     # 上下文瘦身,这只是防失控的安全阀。每轮末比对 ``TokenUsage.fuse_tokens``
     # （新读入 + 新写出；缓存前言不计），到顶即收口。
     # 经 ``apply_worker_budgets`` 统一回填到各 worker；CEO 显式 ``token_ceiling`` 优先。

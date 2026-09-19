@@ -16,7 +16,7 @@
  *   electron-builder --publish never → assert local assets → gh upload --clobber
  *   → parse `gh release view` asset list (missing → non-zero exit).
  *
- * See docs/05-平台与运维/部署与运维.md §7.6 — pre-create draft release.
+ * See docs/05-平台与运维/发布与门禁.md §1.6 — pre-create draft release.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";

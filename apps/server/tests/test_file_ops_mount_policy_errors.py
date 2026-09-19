@@ -1,13 +1,10 @@
 """file_ops: mount-policy deny must surface the real reason (not 「超出工作区」)."""
 
-import io
-import zipfile
 from pathlib import Path
 
 import httpx
 import pytest
 
-from agentcore.tools.builtin.archive import ArchiveTool
 from agentcore.tools.builtin.file_ops import FileReadTool, FileWriteTool
 from agentcore.tools.builtin.file_ops import errors as file_ops_errors
 from agentcore.tools.builtin.file_ops.errors import (
@@ -110,25 +107,6 @@ async def test_write_organize_mount_rejects_with_real_reason(tmp_path: Path):
     assert "write" in err
     assert not (ext / "out" / "report.md").exists()
     assert not (ws / "out" / "report.md").exists()
-
-
-async def test_archive_extract_organize_mount_rejects_with_real_reason(tmp_path: Path):
-    ws = tmp_path / "ws"
-    ext = tmp_path / "AgentCode"
-    ws.mkdir()
-    ext.mkdir()
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
-        zf.writestr("readme.md", "# leak")
-    (ws / "pkg.zip").write_bytes(buf.getvalue())
-    result = await ArchiveTool().execute(
-        {"action": "extract", "archive": "pkg.zip", "dest": "external/AgentCode/out"},
-        _ctx_organize(ws, ext),
-    )
-    assert result.success is False
-    _assert_organize_policy(result.error or "")
-    assert not (ext / "out" / "readme.md").exists()
-    assert not (ws / "out" / "readme.md").exists()
 
 
 async def test_download_url_organize_mount_rejects_with_real_reason(

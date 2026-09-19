@@ -1647,7 +1647,7 @@ def test_all_completed_inject_skips_audit_nudge_for_brief_and_writing():
         [
             CoordinationEvent(
                 kind=CoordinationEventKind.ALL_COMPLETED,
-                payload={"completed": 2, "total": 2, "playbook": "map_fanout"},
+                payload={"completed": 2, "total": 2},
             )
         ],
     )
@@ -1707,18 +1707,6 @@ def test_all_completed_inject_omits_audit_nudge_even_for_audit_wave():
     )
     assert "独立审计" not in text
     assert "先派审计再收尾" not in text
-
-    by_playbook = CoordinationSession(execution_id="e-rr", total_workers=1)
-    rr_text = format_coordination_events(
-        by_playbook,
-        [
-            CoordinationEvent(
-                kind=CoordinationEventKind.ALL_COMPLETED,
-                payload={"completed": 1, "total": 1, "playbook": "cite_write_review"},
-            )
-        ],
-    )
-    assert "先派审计再收尾" not in rr_text
 
 
 def test_inject_close_omits_closing_how():

@@ -41,7 +41,7 @@ skip_if:
 | CanvasShell | 白板深页 | `layout/CanvasShell`：返回 IconButton + 标题槽 + 状态字 + 右动作 + 可选顶栏下横幅 + 铺满剩余画布。不抽引擎、不抽画布内工具条 |
 | CatalogTile | 工具箱市场货架 / 创作套件 / 提示词概览 | L2 `CatalogTile`（身份行 / 简介槽固定两行 / tags / footer）。禁止再手写第三套磁贴 |
 | SectionTabs | 同一页分区（工具箱种类） | L2 `SectionTabs`；选中 `bg-accent` 胶囊 + 线框图标。**不是**右坞 `TabChip`，也不是 `SegmentedControl`（灰槽抬卡），也不是 inverse |
-| SegmentedControl | 表单里就地二选一 / 三选一（登录↔注册、提示词角色身份） | L2 `SegmentedControl`；槽底抬起选中项。**不是** `SectionTabs`，也不是右坞 `TabChip` |
+| SegmentedControl | 表单里就地二选一 / 三选一（登录↔注册） | L2 `SegmentedControl`；槽底抬起选中项。**不是** `SectionTabs`，也不是右坞 `TabChip` |
 
 新卡优先 DecisionCard+Button。
 
@@ -108,7 +108,7 @@ node scripts/check-ui-tokens.mjs --src apps/desktop/src/renderer
 | 状态 / 角色 / 所选胶囊 | 文字标签走 `Badge`（`pill`）。计数圆点、进度条、头像圈不是徽章 |
 | 动作底栏 | Decision / Dialog 右下锚点；不扫输入框、工具条、协作图干预 |
 | 新面先点名 L3 | 新页 / 新交付物须先说用哪套 Primitive / Pattern，禁止第三套壳。白板**画布工具条** / 辩论室保持登记例外（控件仍用同一套按钮与徽章） |
-| 消息操作行 | 窄屏常显；md+ hover / focus-within。助手复制·克隆对话·重新生成、用户复制·编辑与发送时刻、IM 回复与 IM 时间共用 `MESSAGE_ACTION_REVEAL_CLASS`。用户气泡脚 md+ 叠在气泡下沿，闲置不占流。助手完成时刻常显 |
+| 消息操作行 | 窄屏常显；md+ hover / focus-within。助手复制·克隆对话·重新生成、用户复制·编辑与发送时刻、IM 回复与 IM 时间共用 `MESSAGE_ACTION_REVEAL_CLASS`。用户复制·编辑与助手底栏同一套 `IconButton`（tooltip 标名）。用户气泡脚 md+ 叠在气泡右下沿、宽随动作、不钉气泡内容宽；闲置不占流。**否决**脚上铺「复制」「编辑」胶囊、把脚宽锁在短句气泡上。助手完成时刻常显 |
 | 文档 tab 动作 | 内容撑宽横条（VS Code 编辑器 tab）：关闭/弹出 **overlay** 标题尾，闲置不占槽。活跃 tab 常显 × 并留右槽（避免压住末字）；弹出仅 hover / focus-within。未保存 = 标题前 primary 圆点（`dirty`），不改 ×。`TabChip`。**否决** Chrome 均分宽 + 流内占位（右坞不是均分条）；**否决** `opacity-0` 仍占 `size-5` |
 | 列表行动作 | 固定列宽（VS Code 资源管理器 / 对话行）：hover / focus-within 才进流，标题 truncate。**否决** 对流内槽 `opacity-0`（闲置仍吃标题宽）。对话行已是；文件夹头 / Git 悬停动作对齐。最近删除右侧由保留期 Badge 定宽，不套 overlay |
 | 品牌字体 | 仅 BrandMark Latin；正文系统栈 |

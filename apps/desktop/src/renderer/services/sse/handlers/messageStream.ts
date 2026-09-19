@@ -10,7 +10,6 @@ import { clearQueuedTurnLocally } from "@/services/turns/cancelQueuedTurn";
 import { settleConsumedResume } from "@/services/turns/consumedResume";
 import { notifySteerDegradedToQueue } from "@/services/turns/queuedNotify";
 import { insertQueuedTurnUserBubble } from "@/services/turns/queuedTurnLocal";
-import { clearStopHydrateWatchdog } from "@/services/turns/stopHydrate";
 import {
   completeTurnPhase,
   getRuntime,
@@ -287,6 +286,10 @@ export function handleMessageStreamEvent(
             typeof payload.duration_ms === "number"
               ? payload.duration_ms
               : undefined,
+          generationMs:
+            typeof payload.generation_ms === "number"
+              ? payload.generation_ms
+              : undefined,
           finishReason: payload.finish_reason,
           collab: payload.collab,
           outcome: payload.outcome ?? null,
@@ -330,6 +333,8 @@ export function handleMessageStreamEvent(
             payload.finish_reason === "interrupted";
           if (paused || attested === "paused") {
             useExecutionStore.getState().setStatus("paused", mid);
+          } else if (rt.status === "cancelled") {
+            // Stop 已本地定格：迟到非 cancelled 收口不得把图打回 completed。
           } else if (rt.status !== "failed") {
             if (cancelled) {
               useExecutionStore.getState().setStatus("cancelled", mid);
@@ -358,7 +363,6 @@ export function handleMessageStreamEvent(
       // preceding error event's failed phase so continue can open a stream.
       const phase = getTurnPhase(conversationId);
       if (phase === "stopping") {
-        clearStopHydrateWatchdog(conversationId);
         completeTurnPhase(conversationId, "stopped");
       } else if (paused || parseTurnOutcomeKind(payload.outcome) === "paused") {
         if (phase !== "stopped") {
@@ -381,27 +385,30 @@ export function handleMessageStreamEvent(
       ensureStreamingAssistant(conversationId);
       const store = useConversationStore.getState();
       const payload = event.payload as ErrorPayload;
-      store.attachErrorToLastMessage(
-        {
-          code: payload.code,
-          message: payload.message,
-          context: payload.context,
-        },
-        conversationId,
-      );
-      store.finalizeLastMessage(conversationId);
-      clearInteractionPrompts(conversationId);
       const mid = lastAssistantProjectionId(
         getRuntime(conversationId).messages,
       );
-      if (mid && execRuntime(useExecutionStore.getState(), mid).plan) {
+      const execRt = mid
+        ? execRuntime(useExecutionStore.getState(), mid)
+        : null;
+      const frozenStop = execRt?.status === "cancelled";
+      if (!frozenStop) {
+        store.attachErrorToLastMessage(
+          {
+            code: payload.code,
+            message: payload.message,
+            context: payload.context,
+          },
+          conversationId,
+        );
+      }
+      store.finalizeLastMessage(conversationId);
+      clearInteractionPrompts(conversationId);
+      if (mid && execRt?.plan && !frozenStop) {
         useExecutionStore.getState().setStatus("failed", mid);
       }
       // Same as message_end: keep the complete window; idle prune is LRU-only.
       finalizeTurnTrace(conversationId);
-      if (getTurnPhase(conversationId) === "stopping") {
-        clearStopHydrateWatchdog(conversationId);
-      }
       completeTurnPhase(
         conversationId,
         getTurnPhase(conversationId) === "stopping" ? "stopped" : "failed",

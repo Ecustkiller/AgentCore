@@ -2,7 +2,6 @@ import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import type { GraphLayout } from "@/stores/graph";
 import { GitBranch } from "lucide-react";
-import type { ReactNode } from "react";
 import { LAYOUT_OPTIONS } from "./constants";
 
 interface GraphToolbarProps {
@@ -12,8 +11,6 @@ interface GraphToolbarProps {
   injectFlowAvailable?: boolean;
   showAuditInjectFlow?: boolean;
   onShowAuditInjectFlowChange?: (on: boolean) => void;
-  /** Optional left-of-layout controls (e.g. mid-flight「停止任务」). */
-  leading?: ReactNode;
 }
 
 /**
@@ -27,14 +24,12 @@ export function GraphToolbar({
   injectFlowAvailable = false,
   showAuditInjectFlow = false,
   onShowAuditInjectFlowChange,
-  leading,
 }: GraphToolbarProps) {
   return (
     <div
       className="absolute right-3 top-3 z-10 flex items-center gap-2"
       onContextMenu={(e) => e.stopPropagation()}
     >
-      {leading}
       <div className="flex items-center gap-0.5 rounded-lg border border-border bg-card/90 p-1 shadow-sm backdrop-blur">
         {injectFlowAvailable && onShowAuditInjectFlowChange && (
           <SimpleTooltip label="始终显示审计数据流（默认仅在打开 run 详情时高亮）">

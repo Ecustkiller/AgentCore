@@ -22,7 +22,6 @@ from agentcore.runtime.delegate.drive import drive
 from agentcore.runtime.delegate.graph_identity import resolve_graph_identity
 from agentcore.runtime.delegate.plan_events import plan_event
 from agentcore.runtime.delegate.prelude import (
-    DelegateCallFlags,
     DelegatePreludeReject,
     resolve_delegate_prelude,
 )
@@ -182,9 +181,6 @@ class DelegateTool:
         self._pending_pause: bool = False
         # Turn-level team consensus (team_brief): survives across delegate calls in one CEO turn.
         self._team_brief: str | None = None
-        # 当前 execute 展开的 playbook 名 / playbook_args（prelude 镜像）。
-        self._active_playbook: str | None = None
-        self._active_playbook_args: dict[str, Any] | None = None
         # Turn user-message provenance (historical ``execution_harvest`` origin).
         from agentcore.runtime.delegate.post_close_gate import current_user_message_origin
 
@@ -285,13 +281,6 @@ class DelegateTool:
             approval=ToolApproval.NEVER,
         )
 
-    def _apply_call_flags(self, flags: DelegateCallFlags | None) -> None:
-        """把前奏解析出的 per-call 标记镜像到实例上（抽出前这几行内联在 execute 里）。"""
-        if flags is None:
-            return
-        self._active_playbook = flags.playbook
-        self._active_playbook_args = flags.playbook_args
-
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         from agentcore.llm.turn_auth_dead import credential_source_from_llm
         from agentcore.runtime.runs import build_run_plan
@@ -299,23 +288,18 @@ class DelegateTool:
         prelude = resolve_delegate_prelude(
             arguments,
             tools=self._tools,
-            user_message=self._user_message,
-            conversation_id=self._conversation_id,
             depth=self._depth,
             sub_workers_spawned=self._sub_workers_spawned,
             credential_source=credential_source_from_llm(self._llm),
         )
-        self._apply_call_flags(prelude.flags)
         if isinstance(prelude, DelegatePreludeReject):
             return prelude.result
-        playbook = prelude.playbook
         tasks_raw = prelude.tasks_raw
-        playbook_notes = prelude.playbook_notes
         valid_tools = prelude.valid_tools
         complexity_hint = prelude.complexity_hint
 
         # §4.2b·2b / 改法④A：无出生且写盘缺目标 → 先静默建云桌，再闸。
-        # 裸聊同回合唯一 create/resolve / auto 可经 turn_target_desk 继承缺省目标。
+        # 裸聊同回合唯一 resolve / auto 可经 turn_target_desk 继承缺省目标。
         from agentcore.runtime.delegate.target_desktop import (
             bare_chat_local_scratch_write_ok,
             ensure_bare_chat_auto_cloud_desk,
@@ -476,11 +460,7 @@ class DelegateTool:
         # 真纯丙：续派 tools 声明已忽略；merge 保留兼容旧 session 字段（执行层不收窄）。
         await apply_continuation_tool_merges(plan, self)
 
-        batch_includes_review = (
-            playbook == "cite_write_review" or batch_declares_review_files(tasks_raw)
-        )
-        # 成篇硬门只认 playbook==cite_write_review（及既有非字数结构腿由 includes_review 覆盖）。
-        batch_audit_hard = playbook == "cite_write_review"
+        batch_includes_review = batch_declares_review_files(tasks_raw)
         from agentcore.runtime.delegate.completion import (
             execution_capability_warning,
         )
@@ -527,7 +507,6 @@ class DelegateTool:
                 )
             self._team_brief = brief
 
-        playbook_name = playbook.strip() if isinstance(playbook, str) and playbook.strip() else None
         # 禁止先 merge 再 sibling 整图——会把已完成同座+同路径误判成同批交叉。
         added_nodes_for_anchor: list = list(plan.nodes)
 
@@ -675,8 +654,6 @@ class DelegateTool:
                     )
                 )
             summary = f"[plan-only] 已记录计划（{len(plan.nodes)} 节点），跳过执行。"
-            if playbook_notes:
-                summary = summary + "\n\n" + "\n\n".join(playbook_notes)
             logger.info("delegate.plan_only", nodes=len(plan.nodes), call=call_idx)
             from agentcore.runtime.delegate.batch_shape import annotate_batch_meta
 
@@ -690,8 +667,6 @@ class DelegateTool:
                 ),
                 node_count=len(added_nodes_for_anchor),
                 has_deps=any(n.depends_on for n in added_nodes_for_anchor),
-                playbook=playbook_name,
-                audit_hard=batch_audit_hard,
                 includes_review=batch_includes_review,
             )
         from agentcore.runtime.delegate.batch_shape import annotate_batch_meta
@@ -717,8 +692,6 @@ class DelegateTool:
             tails: list[str] = []
             if capability_warning:
                 tails.append(capability_warning)
-            if playbook_notes:
-                tails.extend(playbook_notes)
             if latest_miss_degraded_note:
                 tails.append(latest_miss_degraded_note)
             if prev_execution_id:
@@ -767,8 +740,6 @@ class DelegateTool:
             result,
             node_count=len(added_nodes_for_anchor),
             has_deps=any(n.depends_on for n in added_nodes_for_anchor),
-            playbook=playbook if isinstance(playbook, str) else None,
-            audit_hard=batch_audit_hard,
             includes_review=batch_includes_review,
         )
 

@@ -1,10 +1,10 @@
 name: Build Backend Image
 
-# 后端 api 镜像构建推 ACR（部署与运维.md §7.5 选择性构建 / §7.1 版本钉定）。
+# 后端 api 镜像构建推 ACR（发布与门禁.md §1.5 选择性构建 / §1.1 版本钉定）。
 # push master → 构建 api 镜像（钉 GIT_SHA/BUILT_AT）→ 推 ACR，打 <short-sha> + latest 双标签。
-# 这里只「构建推仓」，不部署——部署是 prod-* tag 触发的 deploy-backend.yml（§7.2 发布点）。
+# 这里只「构建推仓」，不部署——部署是 prod-* tag 触发的 deploy-backend.yml（发布与门禁.md §1.2 发布点）。
 #
-# 为何每次 master 都构建 api（不按路径过滤）：§7.5「api 例外，始终真实构建」——其 /version 是
+# 为何每次 master 都构建 api（不按路径过滤）：§1.5「api 例外，始终真实构建」——其 /version 是
 # 版本可观测唯一出口；且保证「每个 master SHA 都有 api 镜像」，prod-* tag 才能钉任意 SHA 部署。
 # （多服务时其余服务可 retag latest→sha 省构建，当前仅 api 单服务，暂不需要。）
 #
@@ -57,7 +57,7 @@ jobs:
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
-      # GIT_SHA/BUILT_AT 构建期钉入镜像 ENV（运行时经 GET /version 暴露，§7.1）。
+      # GIT_SHA/BUILT_AT 构建期钉入镜像 ENV（运行时经 GET /version 暴露，发布与门禁.md §1.1）。
       # GitHub Actions 网络直连 Docker Hub/ghcr，无需国内镜像。gha 缓存复用层。
       - name: Build & push (<short-sha> + latest)
         uses: docker/build-push-action@v6

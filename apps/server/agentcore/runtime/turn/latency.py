@@ -2,9 +2,16 @@
 
 ``elapsed_ms`` / ``turn_wall_ms`` is a **product settle fact**: the whole-turn
 wall clock stamped onto ``message_end.duration_ms`` and persisted
-(``messages.usage.duration_ms``). That number is the bubble-footer 「用时」.
+(``messages.usage.duration_ms``). That number is the bubble-footer duration
+(``12s`` / ``2m 34s``; no 「用时」 prefix — the completion clock is on the same row).
 The collaboration-graph strip uses a different clock (fact-stream span after
 ``run_plan``) — two surfaces, two clocks; do not merge them here.
+
+``generation_ms`` is a third clock: sum of each LLM stream's decode window
+(first reasoning / content / tool-call chunk → that stream's end). It excludes
+tools, waiting on teammates, and checkpoints. Persist on ``message_end`` /
+``messages.usage``; the bubble 「更多」 derives 输出速度 from it. Missing stays
+absent — never a fake ``0``.
 
 Four Phase-0 fields remain observation-only on ``chat.turn_complete``:
 
@@ -39,6 +46,7 @@ class TurnLatencyProbe:
     assemble_ms: int | None = None
     ttft_reasoning_ms: int | None = None
     ttft_content_ms: int | None = None
+    generation_ms: int = 0
     _captain_stream_armed: bool = False
     _captain_first_stream_done: bool = False
     _recording_this_stream: bool = False
@@ -90,6 +98,11 @@ class TurnLatencyProbe:
         if self._recording_this_stream and self.ttft_content_ms is None:
             self.ttft_content_ms = self.elapsed_ms()
 
+    def add_generation_ms(self, ms: int) -> None:
+        """Accumulate one LLM stream's decode window (captain and workers)."""
+        if ms > 0:
+            self.generation_ms += ms
+
     def as_log_fields(self) -> dict[str, int | None]:
         """Always emit the four keys; absent paths are ``None`` (not ``0``)."""
         return {
@@ -126,27 +139,71 @@ def turn_wall_ms() -> int | None:
     return probe.elapsed_ms()
 
 
+def _positive_int(raw: object) -> int | None:
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        n = raw
+    elif isinstance(raw, float) and raw.is_integer():
+        n = int(raw)
+    else:
+        return None
+    return n if n > 0 else None
+
+
+def stamp_turn_generation(target: dict) -> int | None:
+    """Write ``generation_ms`` (decode-window sum). Larger of existing vs probe wins."""
+    probe = get_turn_latency()
+    incoming = probe.generation_ms if probe is not None else 0
+    prev = _positive_int(target.get("generation_ms")) or 0
+    ms = max(prev, incoming)
+    if ms > 0:
+        target["generation_ms"] = ms
+        return ms
+    return None
+
+
 def stamp_turn_wall(
     target: dict, *, duration_ms: int | None = None
 ) -> int | None:
     """Write ``duration_ms`` onto a settle / persist dict once.
 
     Existing positive values win so later sidecar harvest wait cannot stretch
-    the number already shown on ``message_end``.
+    the number already shown on ``message_end``. Also stamps ``generation_ms``
+    from the bound probe (decode windows may still grow; max wins).
     """
-    existing = target.get("duration_ms")
+    existing = _positive_int(target.get("duration_ms"))
     if existing is not None:
-        try:
-            n = int(existing)
-        except (TypeError, ValueError):
-            pass
-        else:
-            if n > 0:
-                return n
+        stamp_turn_generation(target)
+        return existing
     ms = duration_ms if duration_ms is not None else turn_wall_ms()
     if ms is not None:
         target["duration_ms"] = ms
+    stamp_turn_generation(target)
     return ms
+
+
+def interrupt_usage_clocks(
+    *,
+    duration_ms: int | None = None,
+    generation_ms: int | None = None,
+) -> dict[str, int]:
+    """Clocks to persist on stop / interrupt salvage.
+
+    Bound probe fills gaps. Missing stays absent — never a fake ``0``.
+    """
+    target: dict = {}
+    if duration_ms is not None:
+        target["duration_ms"] = duration_ms
+    if generation_ms is not None:
+        target["generation_ms"] = generation_ms
+    stamp_turn_wall(target)
+    out: dict[str, int] = {}
+    for key in ("duration_ms", "generation_ms"):
+        val = _positive_int(target.get(key))
+        if val is not None:
+            out[key] = val
+    return out
 
 
 def reset_turn_latency(token: Token) -> None:

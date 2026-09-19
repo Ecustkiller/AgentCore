@@ -1,12 +1,12 @@
-"""consult — unified on-demand pull for skills / rules / deferred tools.
+"""consult — unified on-demand pull for skills / HOW-bearing tools / rules.
 
 One tool + one ``<按需目录>`` for CEO and workers. Backed by a single
 :class:`~agentcore.runtime.context.consult_sources.MergedConsultSource` so the
 prompt catalog and ``fetch_by_name`` cannot drift.
 
-Soft miss on unknown / empty name (``success=True`` + available names). Playbook-name
-special-case and hard skill failures are intentionally gone — playbooks stay visible
-via ``delegate``'s own schema.
+Assembled tool schemas sit on the opening FC table; this tool does not
+promote them. Soft miss on unknown / empty name (``success=True`` + available
+names). Hard skill failures are intentionally gone.
 """
 
 from __future__ import annotations
@@ -22,12 +22,7 @@ from agentcore.runtime.memory_consult_cache import (
     lookup_consult_origin,
     remember_consult,
 )
-from agentcore.tools.on_demand import (
-    enabled_tool_names_from_text,
-    is_on_demand_tool,
-    offer_bound_tools,
-    offer_skill_promoted_tools,
-)
+from agentcore.tools.on_demand import is_on_demand_tool
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_BOTH,
@@ -72,7 +67,8 @@ class ConsultTool:
         return ToolSchema(
             name="consult",
             description=(
-                "按目录 name 拉全文。低频工具本回合下一模型轮进表；成套任一即整组启用。"
+                "按目录 name 拉全文（技能 / 有 HOW 的工具 / 设定）。"
+                "已装配工具在开场表，不必靠查阅进表。"
             ),
             parameters={
                 "type": "object",
@@ -109,8 +105,6 @@ class ConsultTool:
             cached = lookup_consult(raw)
             if cached is not None:
                 logger.info("consult.reuse", name=raw)
-                self._offer_skill_promoted(raw)
-                self._offer_from_consult_output(cached)
                 return ToolResult(
                     tool_call_id="",
                     success=True,
@@ -148,16 +142,3 @@ class ConsultTool:
             output_limit=_CONSULT_OUTPUT_LIMIT,
             display=_consult_display(raw, origin=origin),
         )
-
-    def _offer_skill_promoted(self, name: str) -> None:
-        """Cache hits skip fetch; still enable tools a skill consult unlocks."""
-        tool_src = getattr(self.source, "tool", None)
-        registry = getattr(tool_src, "registry", None) if tool_src is not None else None
-        if registry is not None:
-            offer_skill_promoted_tools(registry, name)
-
-    def _offer_from_consult_output(self, output: str) -> None:
-        tool_src = getattr(self.source, "tool", None)
-        registry = getattr(tool_src, "registry", None) if tool_src is not None else None
-        if registry is not None:
-            offer_bound_tools(registry, enabled_tool_names_from_text(output))

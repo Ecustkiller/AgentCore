@@ -247,16 +247,20 @@ def message_end(
     cost: dict[str, Any] | None = None,
     collab: dict[str, int] | None = None,
     duration_ms: int | None = None,
+    generation_ms: int | None = None,
     outcome: str | None = None,
     team_batch: dict[str, Any] | None = None,
 ) -> SSEEvent:
     # 未显式传入时复用 TurnLatencyProbe（与 chat.turn_complete 同锚）；无 probe 则省略字段。
-    if duration_ms is None:
+    if duration_ms is None or generation_ms is None:
         from agentcore.runtime.turn.latency import get_turn_latency
 
         probe = get_turn_latency()
         if probe is not None:
-            duration_ms = probe.elapsed_ms()
+            if duration_ms is None:
+                duration_ms = probe.elapsed_ms()
+            if generation_ms is None and probe.generation_ms > 0:
+                generation_ms = probe.generation_ms
     payload: dict[str, Any] = {
         "finish_reason": finish_reason,
         "usage": {
@@ -273,6 +277,8 @@ def message_end(
         payload["collab"] = collab
     if duration_ms is not None:
         payload["duration_ms"] = int(duration_ms)
+    if generation_ms is not None and int(generation_ms) > 0:
+        payload["generation_ms"] = int(generation_ms)
     if outcome in ("ok", "partial", "paused", "error"):
         payload["outcome"] = outcome
     if isinstance(team_batch, dict) and team_batch.get("kind"):

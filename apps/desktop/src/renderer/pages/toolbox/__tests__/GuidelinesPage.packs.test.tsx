@@ -207,6 +207,7 @@ describe("GuidelinesPage 提示词阅读器", () => {
     });
     expect(screen.queryByText("共享准则正文")).toBeNull();
 
+    expect(screen.queryByText("角色身份")).toBeNull();
     fireEvent.click(screen.getByText("全员共享准则"));
     const dialog = readDialog();
     expect(within(dialog).getByText("共享准则正文")).toBeTruthy();
@@ -235,36 +236,7 @@ describe("GuidelinesPage 提示词阅读器", () => {
     expect(screen.queryByText(/先在「我的技能」里写一份，再来换用/)).toBeNull();
   });
 
-  it("渲染三选一角色身份，不把身份叠成四层", async () => {
-    vi.mocked(getCapabilities).mockResolvedValue(base);
-    renderPage();
-
-    await waitFor(() => {
-      expect(screen.getByTestId("prompt-overview")).toBeTruthy();
-    });
-    fireEvent.click(screen.getByText("角色身份"));
-    const dialog = await screen.findByRole("dialog");
-    expect(
-      within(dialog).getByRole("heading", { name: "角色身份" }),
-    ).toBeTruthy();
-    expect(within(dialog).getByRole("tab", { name: "主 Agent" })).toBeTruthy();
-    expect(
-      within(dialog).getByRole("tab", { name: "可再委派的队员" }),
-    ).toBeTruthy();
-    expect(within(dialog).getByRole("tab", { name: "叶子队员" })).toBeTruthy();
-    expect(within(dialog).getByText("主 Agent 身份正文")).toBeTruthy();
-    expect(screen.queryByText(/本回合三选一/)).toBeNull();
-    expect(screen.queryByText("CEO 专属提示词")).toBeNull();
-    expect(screen.queryByText("队员身份（队长）")).toBeNull();
-    expect(screen.queryByText("队员身份（叶子）")).toBeNull();
-    expect(screen.queryByText("队员交付合同")).toBeNull();
-    expect(screen.queryByText("本节点交付形态")).toBeNull();
-    expect(screen.queryByText("用户只跟你说话，对整段对话负责。")).toBeNull();
-    expect(screen.queryByText("对节点交差，还可再带一层子队。")).toBeNull();
-    expect(screen.queryByText("对节点交差，不能再向下委派。")).toBeNull();
-  });
-
-  it("切换页签只换身份，不展览交付形态、不含按需目录", async () => {
+  it("货架没有角色身份卡，也不展览工种人格或 addon 正文", async () => {
     const contract =
       "【落盘文件】成品写入工作区；正文只报路径、怎么用、关键取舍。";
     vi.mocked(getCapabilities).mockResolvedValue({
@@ -282,32 +254,17 @@ describe("GuidelinesPage 提示词阅读器", () => {
     await waitFor(() => {
       expect(screen.getByTestId("prompt-overview")).toBeTruthy();
     });
-    fireEvent.click(screen.getByText("角色身份"));
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText("主 Agent 核。")).toBeTruthy();
-    expect(within(dialog).queryByText("按需目录")).toBeNull();
-    expect(within(dialog).queryByText("lead_subteam")).toBeNull();
+    expect(screen.queryByText("角色身份")).toBeNull();
+    expect(screen.queryByText("主 Agent 核。")).toBeNull();
+    expect(screen.queryByText("lead_subteam")).toBeNull();
+    expect(screen.queryByText("叶子身份。")).toBeNull();
+    expect(screen.queryByText("可再委派身份。")).toBeNull();
+    expect(screen.queryByText("CEO 专属提示词")).toBeNull();
+    expect(screen.queryByText("队员身份（队长）")).toBeNull();
+    expect(screen.queryByText("队员身份（叶子）")).toBeNull();
     expect(screen.queryByText("队员交付合同")).toBeNull();
     expect(screen.queryByText("本节点交付形态")).toBeNull();
     expect(screen.queryByText(contract)).toBeNull();
-
-    fireEvent.click(within(dialog).getByRole("tab", { name: "叶子队员" }));
-    expect(within(dialog).getByText("叶子身份。")).toBeTruthy();
-    expect(within(dialog).queryByText("主 Agent 核。")).toBeNull();
-    expect(within(dialog).queryByText(contract)).toBeNull();
-    expect(screen.queryByText("本节点交付形态")).toBeNull();
-
-    fireEvent.click(
-      within(dialog).getByRole("tab", { name: "可再委派的队员" }),
-    );
-    expect(within(dialog).getByText("可再委派身份。")).toBeTruthy();
-    expect(within(dialog).queryByText(contract)).toBeNull();
-    expect(screen.queryByText("本节点交付形态")).toBeNull();
-
-    fireEvent.click(within(dialog).getByRole("tab", { name: "主 Agent" }));
-    expect(within(dialog).getByText("主 Agent 核。")).toBeTruthy();
-    expect(screen.queryByText("本节点交付形态")).toBeNull();
-    expect(within(dialog).queryByText(contract)).toBeNull();
   });
 
   it("官方 HOW 只读，不能改这一条", async () => {
@@ -347,17 +304,17 @@ describe("GuidelinesPage 提示词阅读器", () => {
     expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
   });
 
-  it("没有范围选择器；目录不分来源区；常驻账号条目跟在身份后", async () => {
+  it("没有范围选择器；目录不分来源区；常驻账号条目跟在准则后", async () => {
     vi.mocked(getCapabilities).mockResolvedValue(base);
     renderPage();
 
     await waitFor(() => {
       expect(screen.getByTestId("prompt-overview")).toBeTruthy();
     });
-    fireEvent.click(screen.getByText("角色身份"));
+    fireEvent.click(screen.getByText("全员共享准则"));
     const dialog = await screen.findByRole("dialog");
     expect(
-      within(dialog).getByRole("heading", { name: "角色身份" }),
+      within(dialog).getByRole("heading", { name: "全员共享准则" }),
     ).toBeTruthy();
     expect(screen.queryByRole("navigation", { name: "提示词目录" })).toBeNull();
     expect(screen.queryByLabelText("技能目录范围")).toBeNull();

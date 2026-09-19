@@ -12,6 +12,11 @@ MULTI_LENS_COURTROOM_TRIGGERS: Final[tuple[str, ...]] = (
 )
 _COURTROOM = "/".join(MULTI_LENS_COURTROOM_TRIGGERS)
 
+# 填 background 的 HOW：consult 正文唯一所有者；schema 只留短触发。
+BACKGROUND_HOW = (
+    "若传：赛前客观事实，每条附来源与日期；未决/推断勿当既定事实。"
+)
+
 _DEBATE_AND_REVIEW = """\
 <正反辩论>
 【入口】用户点名开辩 / 模拟庭审 / 终局对抗（含【""" + _COURTROOM + """】等）→ 直调 \
@@ -24,6 +29,7 @@ _DEBATE_AND_REVIEW = """\
 
 对不上模型名时，照抄工具回执列出的目录身份 ≠ 再问用户这是哪家模型。\
 纯价值观命题不必传 `background`。
+""" + BACKGROUND_HOW + """
 
 开辩前：忠于用户点名的对立双方，不得砍掉或偷换一方。关键指代模糊先澄清，\
 用 `ask_user` 确认，勿自挑一解开辩。

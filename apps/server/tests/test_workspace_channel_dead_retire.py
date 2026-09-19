@@ -1,7 +1,8 @@
-"""Presence-disconnect seeds the file-family into disabled_tools.
+"""Presence-disconnect seeds the file-family into execute-deny.
 
-Teammates that never hit a disconnect envelope must still stop seeing ``file_*``
-when ``session.workspace_channel_dead`` or live hub presence is gone.
+Teammates that never hit a disconnect envelope still stop executing ``file_*``
+when ``session.workspace_channel_dead`` or live hub presence is gone. The
+OpenAI table stays the opening set.
 """
 
 from __future__ import annotations
@@ -199,7 +200,6 @@ def test_backend_write_tools_retire_with_the_file_family():
     )
     for name in (
         "md_export",
-        "archive",
         "download_url",
     ):
         assert name in WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS
@@ -306,7 +306,7 @@ def test_hang_latch_not_revived_by_presence():
 
 
 async def test_sibling_worker_seeds_disabled_from_session_channel_dead():
-    """Fresh react_loop with session sticky must not offer file_* (no dead envelope)."""
+    """Fresh react_loop with session sticky still offers file_*; execute denies."""
     clear_active_coordination()
     session = CoordinationSession(
         execution_id="exec-react-sibling",
@@ -316,13 +316,22 @@ async def test_sibling_worker_seeds_disabled_from_session_channel_dead():
     session.workspace_channel_dead = True
     set_active_coordination(session)
     try:
+        read = _StubTool("file_read")
+        write = _StubTool("file_write")
+        other = _StubTool("other")
         reg = ToolRegistry()
-        reg.register(_StubTool("file_read"))
-        reg.register(_StubTool("file_write"))
-        reg.register(_StubTool("other"))
-        provider = _ToolsRecordingProvider([[_content_chunk("done")]])
+        reg.register(read)
+        reg.register(write)
+        reg.register(other)
+        provider = _ToolsRecordingProvider(
+            [
+                [_tool_chunk("file_read", "{}")],
+                [_content_chunk("done")],
+            ]
+        )
+        messages = [LLMMessage(role="user", content="go")]
         await react_loop(
-            messages=[LLMMessage(role="user", content="go")],
+            messages=messages,
             llm=provider,
             tools=reg,
             sink=EventSink(),
@@ -336,14 +345,17 @@ async def test_sibling_worker_seeds_disabled_from_session_channel_dead():
         assert provider.offered
         offered = provider.offered[0]
         assert "other" in offered
-        assert "file_read" not in offered
-        assert "file_write" not in offered
+        assert "file_read" in offered
+        assert "file_write" in offered
+        assert read.calls == 0
+        denied = [m.content or "" for m in messages if m.role == "tool"]
+        assert any("本地文件读写工具已停用" in s for s in denied)
     finally:
         clear_active_coordination()
 
 
-async def test_react_loop_round_poll_channel_is_dead_strips_file_family():
-    """Alive at entry; mid-team presence stamp → next LLM round drops file family."""
+async def test_react_loop_round_poll_channel_is_dead_keeps_file_family_on_table():
+    """Alive at entry; mid-team presence stamp → next LLM round still offers files."""
     clear_active_coordination()
     session = CoordinationSession(
         execution_id="e",
@@ -383,14 +395,14 @@ async def test_react_loop_round_poll_channel_is_dead_strips_file_family():
         assert len(provider.offered) >= 2
         assert "file_list" in provider.offered[0]
         assert "other" in provider.offered[0]
-        assert "file_list" not in provider.offered[1]
+        assert "file_list" in provider.offered[1]
         assert "other" in provider.offered[1]
     finally:
         clear_active_coordination()
 
 
 def test_apply_retire_revives_when_fulfiller_returns():
-    """Live fulfiller clears the family retire so write tools are offered again."""
+    """Live fulfiller clears the family execute-deny so write tools run again."""
     from agentcore.fulfill.hub import default_fulfiller_hub
     from agentcore.runtime.interaction import InteractionRegistry
     from agentcore.workspace.channel import WorkspaceChannel

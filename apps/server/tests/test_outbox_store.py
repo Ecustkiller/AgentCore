@@ -292,6 +292,40 @@ def test_salvage_marks_ready(tmp_path):
     assert body["journal"] == [{"kind": "x"}]
 
 
+def test_salvage_stamps_generation_ms_from_probe(tmp_path):
+    from agentcore.runtime.turn.latency import bind_turn_latency, reset_turn_latency
+
+    store = OutboxStore(tmp_path / "outbox")
+    store.bind_turn(
+        conversation_id="c1",
+        user_message_id="u1",
+        user_message="hi",
+        message_id="m1",
+        trace_id="c" * 32,
+    )
+    probe, token = bind_turn_latency()
+    probe.add_generation_ms(1_900)
+
+    async def run() -> dict:
+        await store.begin_turn(conversation_id="c1", message_id="m1", trace_id="c" * 32)
+        await store.salvage(
+            journal=[{"kind": "x"}],
+            content="partial+",
+            conversation_id="c1",
+            trace_id="c" * 32,
+            message_id="m1",
+        )
+        return json.loads((tmp_path / "outbox" / "u1.json").read_text(encoding="utf-8"))
+
+    try:
+        record = _drive(run())
+    finally:
+        reset_turn_latency(token)
+    assert record["generation_ms"] == 1_900
+    body = to_record_turn_body(record)
+    assert body["generation_ms"] == 1_900
+
+
 def test_to_record_turn_body_includes_sorted_journal(tmp_path):
     """Crash salvage: runs=None but journal map must ride the write-back body.
 

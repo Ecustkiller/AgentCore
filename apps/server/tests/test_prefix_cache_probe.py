@@ -1019,7 +1019,8 @@ def test_the_real_ceo_layers_splice_into_leaf_sections():
     keys = [leaf.key for leaf in flatten_sections(_conversation_sections[cid].scopes)]
     assert "ceo_prompt" not in keys and "ceo_base" not in keys  # containers were spliced
     assert keys[0] == "base"
-    assert "ceo_core" in keys
+    # Empty FRAGMENT_CEO_CORE is skipped (Assembler omits falsy fragments).
+    assert "ceo_core" not in keys
     assert "memory_rules" in keys
     assert "runtime_context" not in keys
     assert "workspace_facts" not in keys

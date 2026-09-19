@@ -134,7 +134,7 @@ async def test_channel_log_via_git_run():
             },
         ],
     )
-    log = await GitTool().execute({"subcommand": "log", "max_count": 5}, ctx)
+    log = await GitTool().execute({"subcommand": "log"}, ctx)
     assert log.success is True
     assert "abc1234" in log.output
     assert len(channel.calls) == 1

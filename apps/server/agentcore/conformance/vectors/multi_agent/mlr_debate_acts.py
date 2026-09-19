@@ -168,8 +168,27 @@ def _multi_agent_mlr_debate_acts() -> list[SSEEvent]:
             "dc1",
             "delegate",
             {
-                "playbook": "lens_crosscheck",
-                "playbook_args": {"topic": _TOPIC},
+                "tasks": [
+                    {
+                        "id": rid,
+                        "role": role,
+                        "task": task,
+                    }
+                    for rid, role, task in (
+                        ("lens_0", "法律视角", "梳理解约条款"),
+                        ("lens_1", "品牌商业视角", "评估营收冲击"),
+                        ("lens_2", "舆情公关视角", "盘点声量窗口"),
+                        ("lens_3", "文化社会视角", "分析圈层冲突"),
+                    )
+                ]
+                + [
+                    {
+                        "id": "synthesizer",
+                        "role": "汇总分析师",
+                        "task": f"交叉验证综述 · {_TOPIC}",
+                        "depends_on": ["lens_0", "lens_1", "lens_2", "lens_3"],
+                    }
+                ],
                 "coordinate": False,
             },
         ),

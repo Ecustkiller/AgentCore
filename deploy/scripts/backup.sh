@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# AgentCore 全量数据库备份（部署与运维.md §7.7「备份与恢复策略」）。
+# AgentCore 全量数据库备份（发布与门禁.md §1.7「备份与恢复策略」）。
 #
 # pg_dump 整库 → gzip 落 BACKUP_DIR，保留最近 N 份（轮转）。只备 PostgreSQL
 # （不可重建的主数据）：Redis 是缓存丢了自愈、SearXNG 无状态，均不备。DATA_DIR 下
@@ -12,7 +12,7 @@
 # 用法：
 #   backup.sh                       # 一次全量备份 + 轮转
 #
-# 配置（可经环境或 $AGENTCORE_HOME/.env 覆盖，部署与运维.md §8.2）：
+# 配置（可经环境或 $AGENTCORE_HOME/.env 覆盖，部署拓扑与环境.md §7.2）：
 #   AGENTCORE_HOME   部署根目录          （默认 /opt/agentcore）
 #   BACKUP_DIR       备份落点            （默认 $AGENTCORE_HOME/backups）
 #   BACKUP_KEEP      保留最近几份        （默认 7；约 2C8G / 日备 ~2G 时 KEEP=14 会再穿 80% 水位）

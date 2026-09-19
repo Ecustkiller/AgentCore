@@ -13,16 +13,14 @@ from agentcore.llm.model_selection import SelectedCall, build_selected_request
 from agentcore.llm.profiles import ProfileParams
 from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
 from agentcore.llm.provider.protocol import LLMMessage, TokenUsage, ToolCall
-from agentcore.runtime.facts import NoteFact, record_turn_fact
 from agentcore.tools.registry import ToolRegistry
 
-from .constants import FINALIZE_INSTRUCTION, FINALIZE_INSTRUCTION_FILES
 from .governance import (
     finalize_allows_persist,
     finalize_tool_allowlist,
-    resolve_finalize_coordination_tools,
+    resolve_openai_tool_defs,
 )
-from .segments import deliverable_continuity_instruction, join_segments
+from .segments import join_segments
 from .stream import stream_llm_round
 
 logger = get_logger(__name__)
@@ -43,17 +41,6 @@ class FinalizeRoundResult:
     tool_calls: list[ToolCall] | None = None
 
 
-def _record_note(*, content: str, reason: str, run_id: str) -> None:
-    record_turn_fact(
-        NoteFact(
-            role="user",
-            content=content,
-            reason=reason,
-            run_id=run_id,
-        ).to_fact()
-    )
-
-
 def _inject_finalize_instructions(
     messages: list[LLMMessage],
     *,
@@ -63,23 +50,13 @@ def _inject_finalize_instructions(
     outstanding_tool_failures: list | None = None,
     ceiling_reason: str = "",
 ) -> None:
-    """Inject continuity (when prior交付 exists) then the standard finalize steer."""
-    del outstanding_tool_failures
-    prior = prior_deliverable.strip()
-    if prior:
-        continuity = deliverable_continuity_instruction(prior_deliverable=prior)
-        messages.append(LLMMessage(role="user", content=continuity))
-        _record_note(content=continuity, reason="continuity", run_id=run_id)
-    if ceiling_reason:
-        from agentcore.runtime.closing_posture import ceiling_honesty_steer
+    """Retired: tool table / ``tool_choice`` is the finalize contract.
 
-        honesty = ceiling_honesty_steer(reason=ceiling_reason)
-        if honesty:
-            messages.append(LLMMessage(role="user", content=honesty))
-            _record_note(content=honesty, reason="ceiling_honesty", run_id=run_id)
-    instruction = FINALIZE_INSTRUCTION_FILES if persist else FINALIZE_INSTRUCTION
-    messages.append(LLMMessage(role="user", content=instruction))
-    _record_note(content=instruction, reason="finalize", run_id=run_id)
+    Continuity lives in history + ``join_segments``; ceiling honesty is the
+    verdict downgrade. No user-role ``[系统提示]``.
+    """
+    del messages, run_id, prior_deliverable, persist, outstanding_tool_failures
+    del ceiling_reason
 
 
 async def run_finalize_round(
@@ -104,7 +81,11 @@ async def run_finalize_round(
     ceiling_reason: str = "",
     workspace_channel_dead: bool = False,
 ) -> FinalizeRoundResult:
-    """One finalize LLM round: coordination (+ persist when files), or tool-free."""
+    """One finalize LLM round: opening ``tools[]`` stay on the wire.
+
+    Execute allowlist is coordination (+ persist when files). ``hard_tool_free``
+    sets ``tool_choice=none`` and does not omit the table.
+    """
     persist = finalize_allows_persist(
         tools,
         allowed_tool_names,
@@ -122,24 +103,13 @@ async def run_finalize_round(
             ceiling_reason=ceiling_reason,
         )
 
-    if hard_tool_free:
-        tool_defs = None
-        tool_choice = "none"
-    else:
-        from agentcore.runtime.resolve.ceo_surface import (
-            ensure_coordination_surface_before_llm,
-        )
+    from agentcore.runtime.resolve.ceo_surface import (
+        ensure_coordination_surface_before_llm,
+    )
 
-        ensure_coordination_surface_before_llm(tools)
-        tool_defs = resolve_finalize_coordination_tools(
-            tools,
-            allowed_tool_names,
-            disabled_tools,
-            files_expected=files_expected,
-            expects_landing=expects_landing,
-            workspace_channel_dead=workspace_channel_dead,
-        )
-        tool_choice = "auto" if tool_defs else "none"
+    ensure_coordination_surface_before_llm(tools)
+    tool_defs = resolve_openai_tool_defs(tools, allowed_tool_names, disabled_tools)
+    tool_choice = "none" if hard_tool_free or not tool_defs else "auto"
 
     request = build_selected_request(
         SelectedCall(model=active_model, profile=profile),
@@ -319,7 +289,7 @@ async def force_finalize(
         )
         return combined_content, combined_reasoning, total_usage, rounds, None
 
-    # Empty soft round → hard tool-free fallback (instruction already injected once).
+    # Empty soft round → hard tool-free fallback.
     try:
         hard = await run_finalize_round(
             messages=messages,

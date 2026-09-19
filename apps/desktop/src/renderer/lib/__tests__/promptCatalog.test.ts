@@ -39,20 +39,17 @@ const base: Capabilities = {
 };
 
 describe("buildPromptCatalog", () => {
-  it("出厂按常驻/按需分区：准则身份在常驻，官方怎么做在按需", () => {
+  it("出厂按常驻/按需分区：准则在常驻，官方怎么做在按需", () => {
     const groups = buildPromptCatalog(base);
     expect(groups.map((g) => g.id)).toEqual(["always", "on_demand"]);
     expect(groups.map((g) => g.label)).toEqual(["常驻", "按需"]);
-    expect(groups[0]?.items.map((i) => i.id)).toEqual(["shared", "identity"]);
+    expect(groups[0]?.items.map((i) => i.id)).toEqual(["shared"]);
     expect(groups[1]?.items.map((i) => i.id)).toEqual([
       skillCatalogId("thin_skill"),
     ]);
     const items = flattenPromptCatalog(groups);
-    const identity = items.find((i) => i.id === "identity");
-    expect(identity?.kind === "identity" && identity.leafIdentity).toBe(
-      "<身份>\n叶子\n</身份>",
-    );
-    expect(DEFAULT_PROMPT_CATALOG_ID).toBe("identity");
+    expect(items.find((i) => i.id === "identity")).toBeUndefined();
+    expect(DEFAULT_PROMPT_CATALOG_ID).toBe("shared");
     const thin = items.find((i) => i.id === skillCatalogId("thin_skill"));
     expect(thin?.kind === "skill" && thin.label).toBe("薄技能");
     expect(thin?.kind === "skill" && thin.tocGroup).toBe("");
@@ -119,23 +116,17 @@ describe("buildPromptCatalog", () => {
     expect(groups.find((g) => g.id === "on_demand")?.items).toEqual([]);
     expect(
       groups.find((g) => g.id === "always")?.items.map((i) => i.id),
-    ).toEqual(["shared", "identity"]);
-    const identity = flattenPromptCatalog(groups).find(
-      (i) => i.id === "identity",
-    );
-    expect(identity?.kind === "identity" && identity.leafIdentity).toBe(
-      "叶子整段",
-    );
+    ).toEqual(["shared"]);
+    expect(
+      flattenPromptCatalog(groups).find((i) => i.id === "identity"),
+    ).toBeUndefined();
   });
 });
 
 describe("buildPromptRail", () => {
-  it("准则身份在常驻，核不进货架，官方 HOW 在按需轨", () => {
+  it("准则在常驻，核不进货架，官方 HOW 在按需轨", () => {
     const rail = buildPromptRail(base, buildMineCatalogRows([], []), [], null);
-    expect(rail.constitution.map((row) => row.id)).toEqual([
-      "shared",
-      "identity",
-    ]);
+    expect(rail.constitution.map((row) => row.id)).toEqual(["shared"]);
     expect(rail.memory).toEqual([]);
     expect(rail.alwaysMine).toEqual([]);
     expect(rail.folders).toEqual([]);
@@ -213,10 +204,7 @@ describe("buildPromptRail", () => {
       [],
       null,
     );
-    expect(rail.constitution.map((row) => row.id)).toEqual([
-      "shared",
-      "identity",
-    ]);
+    expect(rail.constitution.map((row) => row.id)).toEqual(["shared"]);
     expect(rail.memory).toEqual([]);
     const other = rail.folders.find((folder) => folder.source === "other");
     expect(other?.items.map((row) => row.id)).toEqual([mineCatalogId("d1")]);

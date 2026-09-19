@@ -4,7 +4,7 @@ Stateless networking primitives live in :mod:`agentcore.core.net`. This module
 holds the in-process per-host breaker used by ``web_fetch`` / search backends, and
 the run-scoped ``web_fetch`` retirement latch that survives ``react_loop`` restart
 (stream-stall → ``run.failed`` → Wave ``on_failure=retry``, contract write_pass /
-retry) so a disabled web-read tool is not re-offered into another empty-spin pass.
+retry) so execute keeps denying web-read (table stays) across another spin pass.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ WEB_HOST_CIRCUIT_COOLDOWN = 120.0  # how long a tripped host stays short-circuit
 
 # Model-facing hard-stop after the run-scoped tool circuit breaker disables web_fetch.
 # Survives loop restart via :func:`mark_web_fetch_retired` so Wave/contract retries
-# cannot re-open the same empty-spin surface. Fact only — tools already withheld.
+# still execute-deny. Fact only — tools stay on the table.
 WEB_FETCH_RETIRE_STEER = "web_fetch 外网深读已因连续失败停用。"
 
 # Defense-in-depth if web_search still runs after retirement (tests / race before

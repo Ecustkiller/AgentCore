@@ -163,18 +163,13 @@ def _assemble_ceo_toolset(
         session_loader=session_loader,
     )
     chat_tools.register(debate_tool)
-    from agentcore.runtime.resolve.ceo_surface import (
-        coordination_surface_active,
-        register_coordination_surface,
-    )
+    from agentcore.runtime.resolve.ceo_surface import register_coordination_surface
 
     register_coordination_surface(
         chat_tools,
         delegate_tool=delegate_tool,
         sink=sink,
-        include=coordination_surface_active(
-            execution_id=base_tool_context.execution_id
-        ),
+        include=True,
     )
     register_always_ceo_tools(
         chat_tools,

@@ -1,10 +1,8 @@
-"""回合内工具结果清理 (clear_tool_uses): pure-function + loop-integration tests.
+"""回合内工具结果清理: library projection tests (not request-assembly).
 
-The projection ``project_cleared_window`` collapses OLD re-fetchable read-only tool
-results to a compact stable pointer in the model-facing window, while the canonical
-``messages`` list keeps the full output (so resume / journal are byte-identical). These
-tests pin: what gets cleared vs kept, the prefix-cache invariants (stable + monotonic
-+ structure-preserving + idempotent), and the wiring into ``react_loop``.
+``project_cleared_window`` is off the ReAct hot path. These tests pin the
+library: what gets cleared vs kept, prefix-cache invariants of the projection
+itself, and that ``build_request_window`` / ``react_loop`` do **not** slide it.
 """
 
 import json
@@ -328,17 +326,15 @@ async def _run_loop(provider: _CapturingProvider) -> None:
     )
 
 
-async def test_loop_clears_old_reads_in_request_window(monkeypatch):
+async def test_loop_does_not_clear_old_reads_in_request_window(monkeypatch):
     monkeypatch.setattr(settings, "engine_tool_clear_keep_recent", 2)
     monkeypatch.setattr(settings, "engine_tool_clear_min_chars", 100)
     provider = _CapturingProvider([[LLMChunk(delta_content="调查完成，结论如下。")]])
     await _run_loop(provider)
     window = provider.windows[0]
-    # 6 older serial rounds cleared, 2 most-recent rounds kept full — the canonical
-    # messages the loop holds are untouched (only the request view is projected).
-    assert len(_cleared_ids(window)) == 6
-    kept = [m for m in window if m.role == "tool" and not (m.content or "").startswith("[已清理")]
-    assert len(kept) == 2 and all(len(m.content or "") == 200 for m in kept)
+    assert _cleared_ids(window) == []
+    kept = [m for m in window if m.role == "tool"]
+    assert len(kept) == 8 and all(len(m.content or "") == 200 for m in kept)
 
 
 async def test_loop_no_clear_when_keep_recent_high(monkeypatch):
@@ -540,15 +536,8 @@ def test_exec_and_investigation_windows_independent(monkeypatch):
         msgs += _read_pair(f"r{i}", f"src/f{i}.py", "R" * 200)
         msgs += _exec_pair(f"s{i}", "run", {"action": "read", "process_id": f"p{i}"}, "S" * 200)
     out = build_request_window(msgs, investigation_tools=CLEARABLE, round_idx=0)
-    assert set(_cleared_ids(out)) == {"r0", "s0", "s1"}
-    stub = next(m for m in out if m.tool_call_id == "s0")
-    assert "p0" in (stub.content or "")
-    assert "勿仅为回看而重跑" in (stub.content or "")
-    read_stub = next(m for m in out if m.tool_call_id == "r0")
-    assert "path='src/f0.py'" in (read_stub.content or "")
-    assert "status=content_cleared" in (read_stub.content or "")
-    assert "disk=intact" in (read_stub.content or "")
-    assert "reread=omit_offset_limit" in (read_stub.content or "")
+    assert out is msgs
+    assert _cleared_ids(out) == []
 
 
 def test_build_request_window_leaves_code_execute(monkeypatch):
@@ -558,8 +547,8 @@ def test_build_request_window_leaves_code_execute(monkeypatch):
     assert _cleared_ids(out) == []
 
 
-def test_build_request_window_keeps_recent_write_args():
-    """近端一轮 str_replace 全文留在 arguments；更早的 file_write 压成 path。"""
+def test_build_request_window_does_not_slide_write_args():
+    """Write args stay in the window; compact is the only rewrite."""
     old = "OLD" * 200
     new = "NEW" * 200
     msgs: list[LLMMessage] = [LLMMessage(role="user", content="go")]
@@ -596,11 +585,11 @@ def test_build_request_window_keeps_recent_write_args():
     out = build_request_window(msgs, investigation_tools=CLEARABLE, round_idx=0)
     older = json.loads(out[1].tool_calls[0].function.arguments)
     recent = json.loads(out[3].tool_calls[0].function.arguments)
-    assert older == {"path": "a.md"}
+    assert older["content"] == old
     assert recent["new_string"] == new
 
 
-async def test_loop_clears_old_exec_in_request_window(monkeypatch):
+async def test_loop_does_not_clear_old_exec_in_request_window(monkeypatch):
     monkeypatch.setattr(settings, "engine_tool_clear_exec_keep_recent", 1)
     monkeypatch.setattr(settings, "engine_tool_clear_min_chars", 100)
     provider = _CapturingProvider([[LLMChunk(delta_content="完成。")]])
@@ -620,6 +609,6 @@ async def test_loop_clears_old_exec_in_request_window(monkeypatch):
         approval_gate=None,
     )
     window = provider.windows[0]
-    assert _cleared_ids(window) == ["h0", "h1", "h2"]
+    assert _cleared_ids(window) == []
     stub = next(m for m in window if m.tool_call_id == "h0")
-    assert "勿仅为回看而重跑" in (stub.content or "")
+    assert "Y" * 50 in (stub.content or "")

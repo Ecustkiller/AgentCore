@@ -123,4 +123,12 @@ describe("manual route / anchor gates", () => {
   it("不把未落地的 /explore 空壳当已知用户路由", () => {
     expect(isKnownAppRoute("/explore")).toBe(false);
   });
+
+  it("does not treat unloaded /docs /tables as known user routes", () => {
+    expect(isKnownAppRoute("/docs")).toBe(false);
+    expect(isKnownAppRoute("/docs/abc")).toBe(false);
+    expect(isKnownAppRoute("/tables")).toBe(false);
+    expect(isKnownAppRoute("/tables/abc")).toBe(false);
+    expect(isKnownAppRoute("/preview/tables")).toBe(false);
+  });
 });

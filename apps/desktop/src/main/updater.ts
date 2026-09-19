@@ -27,7 +27,7 @@ import { isMacAutoUpdateInstallCapable } from "./mac-auto-update-capable";
 
 declare const __DESKTOP_RELEASE_CHANNEL__: string | undefined;
 
-// 检查频率（发布与门禁.md §7.6）：启动 + 每 4h + 系统唤醒。
+// 检查频率（发布与门禁.md §1.6）：启动 + 每 4h + 系统唤醒。
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 /** download-progress 落盘节流，避免刷盘。 */
 const PROGRESS_LOG_MIN_MS = 1000;
@@ -159,7 +159,7 @@ function packageSizeBytes(info: UpdateInfo): number | null {
 }
 
 /**
- * 远程熔断查询（发布与门禁.md §7.6）：检查前查后端策略
+ * 远程熔断查询（发布与门禁.md §1.6）：检查前查后端策略
  * `GET /updates/policy`，`enabled:false` 即暂停检查（坏版本急停闸）。**fail-open**。
  */
 async function updatesEnabled(): Promise<boolean> {

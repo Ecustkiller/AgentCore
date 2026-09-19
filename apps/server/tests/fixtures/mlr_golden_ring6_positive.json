@@ -77,10 +77,19 @@
         "tool_call_id": "dc1",
         "tool_name": "delegate",
         "arguments": {
-          "playbook": "lens_crosscheck",
-          "playbook_args": {
-            "topic": "品牌是否应立即终止争议代言联名"
-          }
+          "tasks": [
+            {
+              "id": "lens_0",
+              "role": "法律视角",
+              "task": "梳理解约条款"
+            },
+            {
+              "id": "synthesizer",
+              "role": "汇总分析师",
+              "task": "交叉验证综述 · 品牌是否应立即终止争议代言联名",
+              "depends_on": ["lens_0"]
+            }
+          ]
         }
       }
     },

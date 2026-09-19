@@ -704,7 +704,7 @@ async def test_default_parse_failure_truncated_forbids_full_replay():
 
 
 async def test_delegate_parse_failure_steers_away_from_nested_arguments():
-    """delegate JSON parse fail：明示顶层放 tasks/playbook，禁止再包 arguments。"""
+    """delegate JSON parse fail：明示顶层放 tasks，禁止再包 arguments。"""
     tracked = _OkTool("delegate", output="ok")
     reg = ToolRegistry()
     reg.register(tracked)
@@ -726,9 +726,6 @@ async def test_delegate_parse_failure_steers_away_from_nested_arguments():
     assert "禁止再包一层" in content or "禁止再包" in content
     assert "arguments" in content
     assert "tasks" in content
-    from agentcore.runtime.runs.playbooks import available_playbooks
-
-    assert available_playbooks() not in content
 
 
 class _CapturingArgsTool:
@@ -761,10 +758,10 @@ def test_unwrap_nested_delegate_arguments_success_and_no_false_positive():
     assert out is not None
     assert out["tasks"] == inner_tasks
 
-    as_dict = {"arguments": {"playbook": "cite_write_review", "playbook_args": {"topic": "X"}}}
+    as_dict = {"arguments": {"tasks": [{"role": "调研员", "task": "写 X"}]}}
     out2 = unwrap_nested_delegate_arguments(as_dict)
     assert out2 is not None
-    assert out2["playbook"] == "cite_write_review"
+    assert out2["tasks"][0]["role"] == "调研员"
 
     # Narrow wrappers: parameters / input sole payload key (same salvage family).
     via_params = {"parameters": {"tasks": inner_tasks}}

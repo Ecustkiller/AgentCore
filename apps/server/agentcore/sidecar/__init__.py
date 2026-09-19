@@ -1,6 +1,6 @@
 """Sidecar — host the SAME runtime engine in a process on the user's machine.
 
-This package is the local-engine half of 双模式工作区 §十 (Sidecar
+This package is the local-engine half of 工作区 §七 (Sidecar
 可迁移核): the desktop spawns ``python -m agentcore.sidecar`` and drives it over
 stdio JSON-RPC, so a turn runs entirely on the user's machine (files + code touch
 the real local disk directly — no ``WorkspaceChannel`` round-trip per op).
@@ -16,7 +16,7 @@ only the §8.6 host ports are swapped for local implementations:
   key is never placed on the user's machine), wired via the per-turn
   ``LLMCredentials`` the engine already injects into ``build_provider``.
 
-Persistence is progressive **OutboxStore** on disk (as-built: 双模式工作区 §10.3):
+Persistence is progressive **OutboxStore** on disk (as-built: 工作区.md §七):
 begin / checkpoint / journal / finalize land under ``<dataDir>/outbox/``; the
 Electron main-process writebacker drains ready records via Bearer
 ``POST .../local-turns`` → ``CloudStore.finalize(mode="local")``. Spend is metered
@@ -25,5 +25,5 @@ client. Packaging is handled too: a packaged
 desktop ships a standalone CPython + ``--target`` site-packages and spawns it when
 ``app.isPackaged`` (no system Python/venv/uv needed — see
 ``apps/desktop/scripts/bundle-sidecar.mjs``). Still deferred: offline LLM. See
-``docs/02-架构/双模式工作区.md``（完全离线 ⏳；详细提案不在公开仓）。
+``docs/02-架构/工作区.md``（完全离线为提案；详细提案不在公开仓）。
 """

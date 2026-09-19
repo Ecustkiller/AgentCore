@@ -5,10 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from agentcore.tools.builtin.file_ops import (
+    FileBatchTool,
     FileListTool,
     FileReadTool,
     FileWriteTool,
-    MkdirTool,
 )
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -44,10 +44,11 @@ async def test_empty_desk_write_keeps_requested_dir(tmp_path: Path):
 
 async def test_empty_desk_mkdir_creates_named_dir(tmp_path: Path):
     ctx = _empty_ctx(tmp_path)
-    made = await MkdirTool().execute({"path": "测试"}, ctx)
+    made = await FileBatchTool().execute(
+        {"operations": [{"op": "mkdir", "path": "测试"}]}, ctx
+    )
     assert made.success is True
     assert (tmp_path / "测试").is_dir()
-    assert "已创建目录 测试" in (made.output or "")
 
     listed = await FileListTool().execute({"directory": "测试"}, ctx)
     assert listed.success is True

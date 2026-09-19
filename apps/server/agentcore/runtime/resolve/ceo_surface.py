@@ -1,12 +1,9 @@
 """CEO orchestration tool surface: idle vs coordination gating.
 
 Injection aligns with the coordination tools' execution gate
-(``active_coordination``): idle chat omits replan / coordination suite;
-``delegate`` + ``ask_user`` stay always-on. ``debate`` stays registered
-(on-demand opening table). Mid-turn promotion (coordination starts or
-supervised wave yield) registers the gated tools in place; harvest / session
-close demotes them so a dead ``replan`` is not still on the menu. One-time
-prefix-cache miss on promote is acceptable.
+(``active_coordination``): ``delegate`` + ``ask_user`` stay always-on;
+the wait / replan suite is on the opening table too. Idle calls fail at
+execute. Never demote mid-chain (prefix cache).
 
 Also owns COST-004 tools-surface observation (exact JSON chars + a token band)
 for ``ceo_turn`` and ``worker_run``. The coordination-period hint is owned by
@@ -27,23 +24,15 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-COORDINATION_GATED_TOOLS: frozenset[str] = frozenset(
-    {
-        "replan",
-        "wait",
-        "cancel_worker",
-        "resolve_escalation",
-        "queue_user_message",
-    }
-)
-
-# wait 套件只跟活协调会话；replan 另跟受监督让出（部分失败 stash / 波边界）。
+# wait 套件只跟根 CEO 开场表；嵌套 lead 只有 replan。Idle 调用在 execute 失败。
 _WAIT_SUITE: tuple[str, ...] = (
     "wait",
     "cancel_worker",
     "resolve_escalation",
     "queue_user_message",
 )
+
+COORDINATION_GATED_TOOLS: frozenset[str] = frozenset(("replan", *_WAIT_SUITE))
 
 COORDINATION_PERIOD_HINT = (
     "【协调期】图在转、无新结论可静默；对用户开口只谈请示/阻塞/阶段结论/回应中途插话。"
@@ -177,10 +166,11 @@ def register_coordination_surface(
     sink: Any,
     include: bool,
 ) -> None:
-    """Register replan + coord suite when ``include`` is True; drop them when False."""
-    if not include:
-        _unregister_named(chat_tools, tuple(COORDINATION_GATED_TOOLS))
-        return
+    """Put replan + wait suite on the opening table. ``include`` is ignored.
+
+    Idle calls fail at execute. Never unregister mid-chain (prefix cache).
+    """
+    del include
     from agentcore.runtime.coordination.tools import (
         CancelWorkerTool,
         QueueUserMessageTool,
@@ -202,36 +192,23 @@ def register_coordination_surface(
 
 
 def ensure_coordination_surface_before_llm(chat_tools: ToolRegistry) -> bool:
-    """Before an LLM round: sync gated tools to live coordination / supervised yield.
-
-    Closes the one-beat gap where a coordination brief tells the CEO to call
-    ``wait`` but the registry still lacks it (hint ahead of tool-surface).
-    After harvest the inverse: drop ``replan`` / wait 套件 so a closed plan
-    cannot still offer a dead lever. Same path as
-    :func:`promote_coordination_surface_if_needed`.
-    """
+    """Before an LLM round: fill missing gated tools. Never drop mid-chain."""
     return promote_coordination_surface_if_needed(chat_tools)
 
 
 def promote_coordination_surface_if_needed(chat_tools: ToolRegistry) -> bool:
-    """Mid-turn: add or drop gated tools to match coordination / supervised state.
+    """Ensure gated tools are registered. Never drop them mid-chain.
 
-    ``replan`` stays while a live session OR ``_supervised`` is set (部分失败
-    stash / 波边界). wait 套件只跟活协调。两者皆无（批次已收口）则摘下，
-    避免收工后菜单里还留着已经失效的入口。
-
-    Returns True when OpenAI tool defs must be refreshed.
+    Root CEO (depth 0): wait suite + replan stay on the opening table.
+    Nested leads (depth ≥ 1): replan only — wait is the parent's lever.
+    Idle calls fail at execute. Removing tools would forfeit the prefix cache.
     """
     delegate = chat_tools.get_optional("delegate")
     if delegate is None:
         return False
 
-    supervised = getattr(delegate, "_supervised", None) is not None
-    coord = _owns_coordination(delegate) and coordination_surface_active()
+    depth = int(getattr(delegate, "_depth", 0) or 0)
     sink = getattr(delegate, "_sink", None)
-    want_replan = coord or supervised
-    want_wait = bool(coord and sink is not None)
-
     from agentcore.runtime.coordination.tools import (
         CancelWorkerTool,
         QueueUserMessageTool,
@@ -241,16 +218,12 @@ def promote_coordination_surface_if_needed(chat_tools: ToolRegistry) -> bool:
     from agentcore.tools.builtin.replan import ReplanTool
 
     added: list[str] = []
-    removed: list[str] = []
 
-    if want_replan:
-        if chat_tools.get_optional("replan") is None:
-            chat_tools.register(ReplanTool(delegate=delegate))  # type: ignore[arg-type]
-            added.append("replan")
-    else:
-        removed.extend(_unregister_named(chat_tools, ("replan",)))
+    if chat_tools.get_optional("replan") is None:
+        chat_tools.register(ReplanTool(delegate=delegate))  # type: ignore[arg-type]
+        added.append("replan")
 
-    if want_wait:
+    if depth == 0:
         if chat_tools.get_optional("wait") is None:
             chat_tools.register(WaitTool())
             added.append("wait")
@@ -260,21 +233,20 @@ def promote_coordination_surface_if_needed(chat_tools: ToolRegistry) -> bool:
         if chat_tools.get_optional("resolve_escalation") is None:
             chat_tools.register(ResolveEscalationTool())
             added.append("resolve_escalation")
-        if chat_tools.get_optional("queue_user_message") is None:
+        if chat_tools.get_optional("queue_user_message") is None and sink is not None:
             chat_tools.register(QueueUserMessageTool(sink=sink))
             added.append("queue_user_message")
-    else:
-        removed.extend(_unregister_named(chat_tools, _WAIT_SUITE))
 
-    if added or removed:
+    if added:
         logger.info(
             "ceo.tool_surface.promoted",
             added=added,
-            removed=removed,
-            coordination=coord,
-            supervised=supervised,
+            removed=[],
+            depth=depth,
+            coordination=_owns_coordination(delegate) and coordination_surface_active(),
+            supervised=getattr(delegate, "_supervised", None) is not None,
         )
-    return bool(added or removed)
+    return bool(added)
 
 
 def observe_tools_offered(

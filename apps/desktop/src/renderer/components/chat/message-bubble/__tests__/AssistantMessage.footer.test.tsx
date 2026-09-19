@@ -305,6 +305,24 @@ describe("AssistantMessage footer gate", () => {
     expect(screen.queryByTestId("assistant-footer")).toBeNull();
   });
 
+  it("attested paused 有正文：已暂停+继续，仍挂效用 footer", () => {
+    renderBubble(
+      settledMessage({
+        content: "半成品答案",
+        finishReason: "paused",
+        outcome: "paused",
+        error: {
+          code: "LLM_RATE_LIMIT",
+          message: "上游限流，暂时无法继续本回合。请约 2 秒后再试。",
+        },
+      }),
+    );
+    expect(screen.getByTestId("paused-continue-surface")).toBeTruthy();
+    expect(screen.getByText("已暂停")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "继续" })).toBeTruthy();
+    expect(screen.getByTestId("assistant-footer")).toBeTruthy();
+  });
+
   it("限流 + interrupted finish：只亮限流横幅，不并写「直接发送下一条」", () => {
     renderBubble(
       settledMessage({

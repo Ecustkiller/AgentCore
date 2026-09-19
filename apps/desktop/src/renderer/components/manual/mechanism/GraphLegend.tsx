@@ -197,7 +197,7 @@ export function GraphLegend() {
         <LegendRow
           sample={<EdgeSample variant="continuation" />}
           name="接续（点线）"
-          desc="同一人带现场接着干（「续 ×N」），不是新队员。"
+          desc="辩论轮次之间的接续；同人改方向 / 再派不另开节点。"
         />
         <LegendRow
           sample={<EdgeSample variant="running" />}
@@ -215,7 +215,7 @@ export function GraphLegend() {
             </span>
           }
           name="带现场续派"
-          desc="同人接续角标：铅笔 +「续 ×N」；卡片优先露出改点。"
+          desc="同人接续角标：铅笔 +「续 ×N」；仍是同一个座位，卡片露出改点。"
         />
         <LegendRow
           sample={<span className={graphBadgeMutedPlain}>第 N 轮</span>}

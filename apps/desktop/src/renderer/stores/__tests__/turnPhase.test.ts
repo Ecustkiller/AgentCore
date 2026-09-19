@@ -23,12 +23,6 @@ vi.mock("@/services/api", () => ({
   },
 }));
 
-vi.mock("@/services/turns/stopHydrate", () => ({
-  armStopHydrateWatchdog: vi.fn(),
-  clearStopHydrateWatchdog: vi.fn(),
-  resetStopHydrateWatchdogForTests: vi.fn(),
-}));
-
 vi.mock("@/lib/toast", () => ({
   notifyError: vi.fn(),
   notifyInfo: vi.fn(),
@@ -70,7 +64,6 @@ describe("turn stop lifecycle", () => {
 
     useConversationStore.getState().stopGeneration();
     expect(getTurnPhase(CID)).toBe("stopping");
-    // 诚实过渡：不本地 finalize，isGenerating 保持至后端终态
     expect(getRuntime(CID).isGenerating).toBe(false);
 
     expect(() => throwIfCannotOpenStream(CID)).toThrow(
@@ -122,7 +115,7 @@ describe("turn stop lifecycle", () => {
 
     useConversationStore.getState().stopGeneration();
     expect(getTurnPhase(CID)).toBe("stopping");
-    expect(getRuntime(CID).isGenerating).toBe(true);
+    expect(getRuntime(CID).isGenerating).toBe(false);
 
     dispatchSSEEvent(
       {
@@ -152,14 +145,14 @@ describe("turn stop lifecycle", () => {
 
     ensureStreamingAssistant(CID);
 
-    expect(getRuntime(CID).isGenerating).toBe(true);
+    expect(getRuntime(CID).isGenerating).toBe(false);
     expect(getRuntime(CID).messages.length).toBe(beforeCount);
     const last = getRuntime(CID).messages.at(-1);
     expect(last?.content ?? "").not.toContain("迟到正文");
-    expect(last?.isStreaming).toBe(true);
+    expect(last?.isStreaming).toBe(false);
   });
 
-  it("stopping 态继续消费 run_* 帧，不伪造 cancelled", () => {
+  it("Stop 点击即冻图 cancelled，迟到 run_* 仍入折对账", () => {
     beginTurnPreflight(CID);
     enterTurnStreaming(CID);
     const mid = useConversationStore.getState().createAssistantMessage(CID);
@@ -181,7 +174,7 @@ describe("turn stop lifecycle", () => {
     useConversationStore.getState().stopGeneration();
     expect(getTurnPhase(CID)).toBe("stopping");
     expect(execRuntime(useExecutionStore.getState(), mid).status).toBe(
-      "running",
+      "cancelled",
     );
 
     dispatchSSEEvent(
@@ -208,7 +201,7 @@ describe("turn stop lifecycle", () => {
     expect(frames.some((f) => f.kind === "run_completed")).toBe(true);
     expect(frames.some((f) => f.kind === "run_cancelled")).toBe(true);
     expect(execRuntime(useExecutionStore.getState(), mid).status).toBe(
-      "running",
+      "cancelled",
     );
   });
 
@@ -490,6 +483,9 @@ describe("turn stop lifecycle", () => {
     useExecutionStore.getState().startExecution(plan, mid);
     useConversationStore.getState().stopGeneration();
     expect(getTurnPhase(CID)).toBe("stopping");
+    expect(execRuntime(useExecutionStore.getState(), mid).status).toBe(
+      "cancelled",
+    );
 
     dispatchSSEEvent(
       {
@@ -548,7 +544,7 @@ describe("turn stop lifecycle", () => {
     );
   });
 
-  it("stopping 态收到 error → terminal stopped + 气泡挂错 + 图 failed", () => {
+  it("stopping 态收到 error 不得把已冻的图打成 failed", () => {
     beginTurnPreflight(CID);
     enterTurnStreaming(CID);
     const mid = useConversationStore.getState().createAssistantMessage(CID);
@@ -557,6 +553,9 @@ describe("turn stop lifecycle", () => {
     useExecutionStore.getState().startExecution(plan, mid);
     useConversationStore.getState().stopGeneration();
     expect(getTurnPhase(CID)).toBe("stopping");
+    expect(execRuntime(useExecutionStore.getState(), mid).status).toBe(
+      "cancelled",
+    );
 
     dispatchSSEEvent(
       {
@@ -568,10 +567,10 @@ describe("turn stop lifecycle", () => {
 
     const last = getRuntime(CID).messages.at(-1);
     expect(getTurnPhase(CID)).toBe("stopped");
-    expect(last?.error?.code).toBe("ABORT");
+    expect(last?.error).toBeUndefined();
     expect(last?.isStreaming).toBe(false);
     expect(execRuntime(useExecutionStore.getState(), mid).status).toBe(
-      "failed",
+      "cancelled",
     );
   });
 
@@ -597,19 +596,27 @@ describe("turn stop lifecycle", () => {
     );
   });
 
-  it("/stop 失败时回滚 streaming 并 setError 可再点停止", async () => {
+  it("/stop 失败时保持 stopping + 冻图，错误可再点停止", async () => {
     apiPost.mockRejectedValueOnce(new Error("network down"));
     beginTurnPreflight(CID);
     enterTurnStreaming(CID);
-    useConversationStore.getState().createAssistantMessage(CID);
+    const mid = useConversationStore.getState().createAssistantMessage(CID);
+    if (!mid) throw new Error("expected assistant message id");
+    useExecutionStore.getState().startExecution(plan, mid);
 
     useConversationStore.getState().stopGeneration();
+    expect(execRuntime(useExecutionStore.getState(), mid).status).toBe(
+      "cancelled",
+    );
 
     await vi.waitFor(() => {
-      expect(getTurnPhase(CID)).toBe("streaming");
+      expect(getTurnPhase(CID)).toBe("stopping");
       expect(getRuntime(CID).error).toBe("停止请求失败，引擎可能仍在运行");
       expect(typeof getRuntime(CID).retry).toBe("function");
     });
+    expect(execRuntime(useExecutionStore.getState(), mid).status).toBe(
+      "cancelled",
+    );
   });
 
   it("新回合 beginTurnPreflight 从 terminal 正确重置", () => {

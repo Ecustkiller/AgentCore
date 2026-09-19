@@ -113,7 +113,8 @@ async def test_depth_three_subworker_cannot_delegate_further():
     class DeepProvider(NestingProvider):
         async def stream(self, request):
             system = next((m.content or "" for m in request.messages if m.role == "system"), "")
-            is_captain = self.CAPTAIN_MARK in system
+            user = next((m.content or "" for m in request.messages if m.role == "user"), "")
+            is_captain = self.CAPTAIN_MARK in user or self.CAPTAIN_MARK in system
             has_result = any(m.role == "tool" for m in request.messages)
             if is_captain and not has_result:
                 self.delegate_calls += 1
@@ -196,7 +197,7 @@ class _LeadScopeSteerProvider:
     then the sub-plan resumes. Distinguishes lead / sub-a / sub-b by identity marker + task in
     the user message + round (tool-result presence)."""
 
-    CAPTAIN_MARK = "再向下委派一层子团队"
+    CAPTAIN_MARK = "你的子成员"
 
     def __init__(self, usage: TokenUsage | None = None) -> None:
         self._usage = usage
@@ -209,7 +210,7 @@ class _LeadScopeSteerProvider:
         system = next((m.content or "" for m in request.messages if m.role == "system"), "")
         user = next((m.content or "" for m in request.messages if m.role == "user"), "")
         # See _LeadBindReplanProvider: depth-1 only (MAX=3).
-        is_lead = "你的子成员仍可再向下委派一层" in system
+        is_lead = "你的子成员仍可再向下委派一层" in user or "你的子成员仍可再向下委派一层" in system
         tool_msgs = [m for m in request.messages if m.role == "tool"]
         last_tool = (tool_msgs[-1].content or "") if tool_msgs else ""
         if is_lead and not tool_msgs:

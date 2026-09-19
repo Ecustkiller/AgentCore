@@ -1,7 +1,7 @@
 """drop workflow store + user_workflows
 
 User canvas workflows, clock/webhook proxy runs, and the workflow store are
-retired. Official named playbooks stay in runtime/runs/playbooks.
+retired. Named playbooks were not stored in this table.
 
 Revision ID: c1e7a9d4b2f6
 Revises: f3c9a1e6b8d2

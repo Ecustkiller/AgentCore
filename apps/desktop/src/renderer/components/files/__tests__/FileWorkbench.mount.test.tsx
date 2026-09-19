@@ -71,9 +71,7 @@ describe("FileWorkbench mount", () => {
     expect(screen.queryByText("一次快速对话")).toBeNull();
     expect(screen.getByText("还没有文件夹")).toBeTruthy();
     expect(screen.getByText("我的文件")).toBeTruthy();
-    expect(
-      screen.getAllByRole("button", { name: "新建文件夹" }).length,
-    ).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByRole("button", { name: "新建文件夹" })).toBeNull();
     expect(screen.queryByText("共享空间")).toBeNull();
     expect(screen.queryByText("挂载共享")).toBeNull();
     expect(screen.queryByText("还没有共享空间")).toBeNull();

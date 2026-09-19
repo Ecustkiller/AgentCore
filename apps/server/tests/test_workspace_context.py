@@ -657,7 +657,7 @@ def test_workspace_facts_follow_resident_core_for_ceo_and_worker():
     assert "出站：产品网络" in env and "出站：产品网络" in worker
     assert "同一出站" not in env and "同一出站" not in worker
     assert "执行：云端沙箱" not in env and "执行：云端沙箱" not in worker
-    assert ceo.index("<身份>") > 0
+    assert "<身份>" not in ceo
     assert worker.index("</运行时>") < worker.index("<工作区>\n")
     assert "文件：空" in env
     assert env.index("文件：空") < env.index("</工作区>")

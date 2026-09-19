@@ -25,7 +25,6 @@ from .governance import (
     apply_circuit_breaker,
     govern_after_tools,
     note_delegate_batches,
-    resolve_openai_tool_defs,
 )
 from .outcome import RoundOutcome
 from .tool_exec import execute_tools
@@ -39,10 +38,7 @@ class ToolRoundResult:
     directive: LoopDirective
     final_content: str
     total_usage: TokenUsage
-    # Set when the round continues after tools (circuit breaker may have refreshed).
-    # ``None`` means leave the caller's ``tool_defs`` unchanged (terminal Return).
-    tool_defs: list[dict[str, Any]] | None = None
-    tool_defs_changed: bool = False
+    # Terminal Return leaves the caller's opening ``tool_defs`` unchanged.
 
 
 async def handle_tool_calls_round(
@@ -108,12 +104,9 @@ async def handle_tool_calls_round(
         tool_context,
         round_content_chars=len(outcome.content or ""),
     )
-    # Team-gate / circuit-breaker strip from defs; also deny at execute so a
-    # scripted or rogue tool_call cannot land after hard-stop.
-    exec_allowed = allowed_tool_names
-    if disabled_tools:
-        base = list(tools.names) if allowed_tool_names is None else list(allowed_tool_names)
-        exec_allowed = [n for n in base if n not in disabled_tools]
+    # Opening grant stays on ``allowed_tool_names``. Circuit / channel-dead /
+    # web-retire live in ``disabled_tools`` and fail at execute — the OpenAI
+    # table is not shrunk mid-chain.
     tool_results, terminal, attempts = await execute_tools(
         tool_calls,
         tools,
@@ -126,7 +119,8 @@ async def handle_tool_calls_round(
         ledger_registrant=ledger_registrant,
         run_id=run_id,
         role=role,
-        allowed_tool_names=exec_allowed,
+        allowed_tool_names=allowed_tool_names,
+        disabled_tools=disabled_tools,
     )
     messages.extend(tool_results)
     if gate_escalation_sink is not None and role == "worker":
@@ -224,12 +218,6 @@ async def handle_tool_calls_round(
     controller.record(outcome.attempts)
     # Mark post-delegate mode if delegate was called
     note_delegate_batches(controller, tool_calls, outcome.attempts)
-    # 工具面瘦身: after tools run, coordination / supervised yield may have appeared —
-    # promote gated tools onto the registry before re-resolving OpenAI defs.
-    from agentcore.runtime.resolve.ceo_surface import promote_coordination_surface_if_needed
-
-    surface_changed = promote_coordination_surface_if_needed(tools)
-    tool_defs = resolve_openai_tool_defs(tools, allowed_tool_names, disabled_tools)
     breaker = apply_circuit_breaker(
         controller,
         messages=messages,
@@ -237,8 +225,6 @@ async def handle_tool_calls_round(
         round_idx=round_idx,
         disabled_tools=disabled_tools,
     )
-    if breaker.refresh_tool_defs or surface_changed:
-        tool_defs = resolve_openai_tool_defs(tools, allowed_tool_names, disabled_tools)
     directive = govern_after_tools(
         outcome,
         controller,
@@ -255,6 +241,4 @@ async def handle_tool_calls_round(
         directive=directive,
         final_content=final_content,
         total_usage=total_usage,
-        tool_defs=tool_defs,
-        tool_defs_changed=True,
     )

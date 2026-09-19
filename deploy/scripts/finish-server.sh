@@ -135,7 +135,7 @@ else
     echo "ERROR: 探不到 workspaces/ 体积（输出：${ws_probe:-<空>}）— 证不明「没有数据会丢」，终止部署"
     exit 1
   else
-    # 轮转放在写新档**之前**：归档是用户文件的整份拷贝（不是 §7.7 那种 MB 级、可长期堆着的
+    # 轮转放在写新档**之前**：归档是用户文件的整份拷贝（不是 发布与门禁.md §1.7 那种 MB 级、可长期堆着的
     # pg_dump），先降到 KEEP-1 份，峰值占盘就是 KEEP 份而不是 KEEP+1；写档全程盘上仍留着
     # 上一份完整归档，中途失败也不至于两手空空。
     mapfile -t ws_old < <(ls -1 "$BACKUP_DIR"/pre-deploy-*-workspaces.tar.gz 2>/dev/null | sort)

@@ -54,7 +54,7 @@ function parseView(raw: string | null): TurnDetailView | null {
 
 /**
  * Full-screen turn detail — graph / debate for one turn.
- * Pure deep-read / replay surface (协作图与双视图UX.md §六 两个入口：聊天内嵌 ⇄ 全屏放大); no conversation-level
+ * Pure deep-read / replay surface (协作图与双视图UX.md §三 两个入口：聊天内嵌 ⇄ 全屏放大); no conversation-level
  * composer. Top bar is back + view switch only (no whole-turn stop, no taskSummary).
  */
 export function TurnDetailPage() {

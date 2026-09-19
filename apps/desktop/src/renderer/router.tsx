@@ -4,8 +4,6 @@ import { RouteError } from "@/components/layout/RouteError";
 import { NarrowBlockedPage } from "@/lib/narrowLayout";
 import { ConversationsPage } from "@/pages/ConversationsPage";
 import { ConversationsPreviewPage } from "@/pages/ConversationsPreviewPage";
-import { DocEditorPage } from "@/pages/DocEditorPage";
-import { DocsPage } from "@/pages/DocsPage";
 import { FilesPage } from "@/pages/FilesPage";
 import { FilesPreviewPage } from "@/pages/FilesPreviewPage";
 import { FloatWindowPage } from "@/pages/FloatWindowPage";
@@ -13,9 +11,6 @@ import { MessagesPage } from "@/pages/MessagesPage";
 import { MorePage } from "@/pages/MorePage";
 import { OnboardingPreviewPage } from "@/pages/OnboardingPreviewPage";
 import { PreviewPage } from "@/pages/PreviewPage";
-import { TableEditorPage } from "@/pages/TableEditorPage";
-import { TablesPage } from "@/pages/TablesPage";
-import { TablesPreviewPage } from "@/pages/TablesPreviewPage";
 import { TurnDetailPage } from "@/pages/TurnDetailPage";
 import { WhiteboardCanvasPage } from "@/pages/WhiteboardCanvasPage";
 import { WhiteboardPage } from "@/pages/WhiteboardPage";
@@ -48,7 +43,7 @@ import { MarketPage } from "@/pages/toolbox/market/MarketPage";
 import { Navigate, createHashRouter } from "react-router-dom";
 
 export const router = createHashRouter([
-  // Desktop OS float window (UX §十 · 方案 C): sibling of AppShell so it skips
+  // Desktop OS float window (UX §四 · 方案 C): sibling of AppShell so it skips
   // sidebar / main dock / app TitleBar. Hash: #/float?cid=…&tab=….
   {
     path: "/float",
@@ -77,22 +72,6 @@ export const router = createHashRouter([
       },
       { path: "files", element: <FilesPage /> },
       {
-        path: "docs",
-        element: (
-          <NarrowBlockedPage>
-            <DocsPage />
-          </NarrowBlockedPage>
-        ),
-      },
-      {
-        path: "docs/:docId",
-        element: (
-          <NarrowBlockedPage>
-            <DocEditorPage />
-          </NarrowBlockedPage>
-        ),
-      },
-      {
         path: "whiteboard",
         element: (
           <NarrowBlockedPage>
@@ -105,22 +84,6 @@ export const router = createHashRouter([
         element: (
           <NarrowBlockedPage>
             <WhiteboardCanvasPage />
-          </NarrowBlockedPage>
-        ),
-      },
-      {
-        path: "tables",
-        element: (
-          <NarrowBlockedPage>
-            <TablesPage />
-          </NarrowBlockedPage>
-        ),
-      },
-      {
-        path: "tables/:tableId",
-        element: (
-          <NarrowBlockedPage>
-            <TableEditorPage />
           </NarrowBlockedPage>
         ),
       },
@@ -231,7 +194,6 @@ export const router = createHashRouter([
       // Companion offline preview for the self-built whiteboard canvas (a scene surface, not an
       // SSE vector — see preview/whiteboardScenes.ts + scripts/shoot-whiteboard.mjs).
       { path: "preview/whiteboard", element: <WhiteboardPreviewPage /> },
-      { path: "preview/tables", element: <TablesPreviewPage /> },
       // Preview 首启体验（草稿空态两态 + composer 生成中插话态）.
       { path: "preview/onboarding", element: <OnboardingPreviewPage /> },
       // Preview 全部对话管理页（时间线列表 · mock 数据离线自检）.

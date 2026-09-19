@@ -166,7 +166,6 @@ async def test_download_url_labels_installer_ext(tmp_path: Path, monkeypatch: py
 async def test_download_url_schema_points_off_shell_wget():
     schema = DownloadUrlTool().schema
     assert schema.name == "download_url"
-    assert "web_fetch" in schema.description
     assert "code_execute" not in schema.description
     assert "terminal" not in schema.description
     assert "host(action=shell)" not in schema.description

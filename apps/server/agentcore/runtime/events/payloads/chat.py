@@ -293,6 +293,11 @@ class MessageEndPayload(WirePayload):
     )
     # 回合墙钟用时 (主回复 meta)：与 chat.turn_complete / turn_metrics 同锚；可选，旧向量可省略。
     duration_ms: int | None = absent()
+    # 各次 LLM 吐字时长之和（首个输出块 → 该次调用结束）。不含工具 / 等人。旧向量可省略。
+    generation_ms: int | None = absent(
+        "Sum of per-call LLM decode windows (first output chunk → stream end). "
+        "Excludes tools and waits. Absent on old journals."
+    )
     # 回合结果质量（与 finish_reason 正交）：ok | partial | paused | error。
     # ``paused`` 本波不产出（产品面卡下一波才落）。旧向量可省略，fold 从批次表达位回推。
     outcome: Literal["ok", "partial", "paused", "error"] | None = absent(

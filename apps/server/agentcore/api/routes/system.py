@@ -173,7 +173,7 @@ async def version() -> dict[str, str]:
 
 @router.get("/updates/policy", response_model=UpdatesPolicyResponse)
 async def updates_policy() -> UpdatesPolicyResponse:
-    """Desktop auto-update policy (发布与门禁.md §7.6).
+    """Desktop auto-update policy (发布与门禁.md §1.6).
 
     The desktop updater polls this before each check and pauses downloads when
     ``enabled`` is false — a kill switch for a bad release. ``min_desktop_version``
@@ -188,8 +188,8 @@ async def updates_policy() -> UpdatesPolicyResponse:
     non-200 is treated as enabled.
 
     Staged rollout (stagingPercentage) and beta/stable channels ride on the
-    feature-flag system (发布与门禁.md §7.9) and are not part of this payload yet.
-    Per-flag ``min_client_version`` (§7.9) remains a separate line from this
+    feature-flag system (发布与门禁.md §1.9) and are not part of this payload yet.
+    Per-flag ``min_client_version`` (§1.9) remains a separate line from this
     global desktop floor.
     """
     raw = settings.desktop_min_version.strip()

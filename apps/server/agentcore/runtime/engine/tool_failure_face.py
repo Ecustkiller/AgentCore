@@ -113,6 +113,10 @@ _CURATED_BY_CODE: dict[str, str] = {
     ),
     # The task is out of time / tokens and only finishing tools stay open.
     "wind_down_deny": "本次任务已接近时间或用量上限，正在整理结果，这一步用到的工具已经停用。",
+    # Circuit / liveness retire: tool stays on the OpenAI table; this call did not run.
+    "circuit_tool_disabled": (
+        "这个工具连续失败太多次，这次任务里不再继续用它，这一步没有执行。"
+    ),
     # Safety fuse. Nothing ran, so the user's files and data are untouched — say so.
     "safety_breaker_deny": (
         "出于安全考虑，这一步操作已被拦下，没有执行。如果确实需要，请告诉我你想怎么做。"

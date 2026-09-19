@@ -14,22 +14,20 @@ function renderPage() {
       <Routes>
         <Route path="/" element={<CreationPage />} />
         <Route path="/whiteboard" element={<div>板列表</div>} />
-        <Route path="/docs" element={<div>文档列表</div>} />
-        <Route path="/tables" element={<div>表格列表</div>} />
       </Routes>
     </MemoryRouter>,
   );
 }
 
 describe("CreationPage", () => {
-  it("lists the suite; 白板 文档 多维表格 are openable", () => {
+  it("lists 白板 plus muted 思维导图 / 幻灯片; no 文档 or 多维表格", () => {
     renderPage();
     expect(screen.getByRole("button", { name: "白板" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "文档" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "多维表格" })).toBeTruthy();
     expect(screen.getByText("无限画布，自由摆元素。")).toBeTruthy();
-    expect(screen.getByText("可反复编辑的长文。")).toBeTruthy();
-    expect(screen.getByText("带类型列的表。")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "文档" })).toBeNull();
+    expect(screen.queryByText("文档")).toBeNull();
+    expect(screen.queryByRole("button", { name: "多维表格" })).toBeNull();
+    expect(screen.queryByText("多维表格")).toBeNull();
     for (const title of UNAVAILABLE) {
       expect(screen.getByText(title)).toBeTruthy();
       expect(screen.queryByRole("button", { name: title })).toBeNull();
@@ -44,17 +42,5 @@ describe("CreationPage", () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "白板" }));
     expect(screen.getByText("板列表")).toBeTruthy();
-  });
-
-  it("文档 opens the doc list", () => {
-    renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "文档" }));
-    expect(screen.getByText("文档列表")).toBeTruthy();
-  });
-
-  it("多维表格 opens the table list", () => {
-    renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "多维表格" }));
-    expect(screen.getByText("表格列表")).toBeTruthy();
   });
 });

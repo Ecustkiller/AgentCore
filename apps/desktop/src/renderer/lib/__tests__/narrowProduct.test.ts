@@ -10,8 +10,8 @@ describe("isNarrowBlockedPath", () => {
     expect(isNarrowBlockedPath("/toolbox")).toBe(true);
     expect(isNarrowBlockedPath("/toolbox/manual/intro")).toBe(true);
     expect(isNarrowBlockedPath("/whiteboard/abc")).toBe(true);
-    expect(isNarrowBlockedPath("/docs/abc")).toBe(true);
-    expect(isNarrowBlockedPath("/tables/abc")).toBe(true);
+    expect(isNarrowBlockedPath("/docs/abc")).toBe(false);
+    expect(isNarrowBlockedPath("/tables/abc")).toBe(false);
     expect(isNarrowBlockedPath("/more/shortcuts")).toBe(true);
   });
 
@@ -68,9 +68,9 @@ describe("isNarrowHiddenPaletteId", () => {
     ).toBe(false);
   });
 
-  it("keeps 新建云文件夹 on narrow (write, not local-disk)", () => {
+  it("does not hide 新建对话 on narrow", () => {
     expect(
-      isNarrowHiddenPaletteId("new-folder", {
+      isNarrowHiddenPaletteId("new-conversation", {
         restrictNarrow: true,
         forceLightTheme: false,
       }),

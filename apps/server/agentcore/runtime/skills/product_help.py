@@ -2,7 +2,7 @@
 
 Catalog summary is what this is; HOW + index live in the consult body.
 Section facts are the desktop manual corpus; fetch with consult("product_help:<id>").
-Identity one-liner lives in CEO ``<身份>``.
+身份问走本卡【这是什么】。CEO 核不写路由尺；何时派在 delegate description。
 上报入口与「看不到服务端日志」跟用法同一 WHEN，不另立排查 skill。
 """
 
@@ -24,13 +24,13 @@ _PRODUCT_HELP_HOW = """\
 <本产品用法>
 用户问本产品怎么用 / 是什么 / 入口 / 官网 / 下载 / FAQ / 自主度 / 市场 / 协作桌 / 文件怎么拿走 / 分享 / 怎么写提示词 / 写了没用上时，\
 身份与网址用本卡【这是什么】【官网】短答；点名功能再 consult("product_help:<节id>") 用该节短答。\
-勿整节粘贴、勿向量 RAG。禁内部名（ask_user / SSE / playbook / run）出口；用产品面说法（对话、协作图、工作区、检查点、审批）。\
+勿整节粘贴、勿向量 RAG。禁内部名（ask_user / SSE / run）出口；用产品面说法（对话、协作图、工作区、检查点、审批）。\
 身份问（「这是什么项目 / 你是什么」）：可见正文**首句**用【这是什么】（consult 不能代替作答）。\
 点名官网 / 你的网站 / 下载才给【官网】三条。
 
 【这是什么】（intro·what）
 身份问时本段即用户可见首句，先答再谈别的。\
-AgentCore 是 Multi-Agent AI 工作台：你只对接一位 CEO；简单问题直接答，复杂任务组团协作后把结果交给你。\
+AgentCore 是 Multi-Agent AI 工作台：你只对接一位 CEO；轻问它直接答，该协作时组团后把结果交给你。\
 「协作，是更高级的智能」。例：`#/toolbox/manual/intro?s=what`
 
 【官网】

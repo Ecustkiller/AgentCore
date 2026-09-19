@@ -1,16 +1,14 @@
 import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { pickAndOpenLocalFolder } from "@/lib/openLocalFolder";
-import { useFoldersStore } from "@/stores/folders";
-import { FolderPlus, HardDrive } from "lucide-react";
+import { HardDrive } from "lucide-react";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
 /**
- * A rail zone title (我的文件 / 本机文件夹 / 与我共享) plus its one create
- * action. §5.4 leaves exactly two ways to make a container — build a folder
- * in 我的文件, or open one off the local disk — so each zone owns the action
- * that belongs to it instead of one combined「新建」menu.
+ * A rail zone title (我的文件 / 本机文件夹 / 与我共享) plus, for 本机文件夹,
+ * the one disk action that still belongs on the header. Cloud product folders
+ * are created from Composer, not from this rail.
  */
 export function RailSectionHeader({
   label,
@@ -29,27 +27,9 @@ export function RailSectionHeader({
   );
 }
 
-/** 我的文件 — the cloud folder tree; 「+」creates a top-level untitled folder. */
+/** 我的文件 — the cloud folder tree. Create goes through Composer. */
 export function MyFilesRailHeader() {
-  const requestUntitled = useFoldersStore((s) => s.requestUntitledCloudFolder);
-  const busy = useFoldersStore((s) => s.untitledCreateBusy);
-
-  return (
-    <RailSectionHeader
-      label="我的文件"
-      action={
-        <SimpleTooltip label="新建文件夹">
-          <IconButton
-            aria-label="新建文件夹"
-            disabled={busy}
-            onClick={() => requestUntitled()}
-          >
-            <FolderPlus size={13} />
-          </IconButton>
-        </SimpleTooltip>
-      }
-    />
-  );
+  return <RailSectionHeader label="我的文件" />;
 }
 
 /** 本机文件夹 — disk folders opened before, newest activity first (VS Code 语义). */

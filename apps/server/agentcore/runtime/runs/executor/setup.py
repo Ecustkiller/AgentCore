@@ -259,19 +259,15 @@ async def _prepare_agent_node(
         and spec.depth < MAX_DELEGATION_DEPTH
     )
     if is_captain:
-        # Bundle still mints delegate + companion replan (dispose / 波边界 binding,
-        # 受监督子计划 B 去特例). Opening offer is delegate only — same idea as
-        # CEO idle vs coordination. replan lands after nested delegate sets
-        # _supervised, via promote_coordination_surface_if_needed. Turn-end
-        # dispose still runs in the finally below.
+        # Bundle mints delegate + companion replan. Both ride the opening table
+        # (prefix cache). Idle replan fails at execute until a nested plan exists.
         lead_subteam = env.delegate_factory(spec.run_id, spec.depth)
         # §4.2b·3：子派默认继承父目标桌（再点名才换）。
         child_delegate = lead_subteam.tools[0]
         parent_desk = spec.target_folder_id or env.session_folder_id
         if parent_desk:
             child_delegate._default_target_folder_id = parent_desk  # type: ignore[attr-defined]
-        opening = tuple(t for t in lead_subteam.tools if t.schema.name != "replan")
-        worker_tools = _registry_with(worker_tools, *opening)
+        worker_tools = _registry_with(worker_tools, *lead_subteam.tools)
         from agentcore.runtime.runs.executor.captain_consult import (
             offer_nested_lead_consult,
         )
@@ -373,17 +369,17 @@ async def _prepare_agent_node(
     hint = get_resume_hint(spec.run_id)
     if hint is not None and hint.kind is ResumeKind.CRASH:
         # Same-turn assistant+tool_calls must keep reasoning_content so thinking
-        # dialects can echo it on the next provider call (stripping is for a
-        # later beat after 续干). Do not append a 续干 user line — that would
-        # sit after pending assistant tool_calls (invalid).
+        # dialects can echo it on the next provider call. Do not append a 续干
+        # user line — that would sit after pending assistant tool_calls (invalid).
         messages[:] = list(hint.transcript)
     elif hint is not None:
         from agentcore.runtime.runs.executor.continuation import (
             _record_continuation_run_head,
-            _strip_historical_reasoning,
         )
 
-        messages[:] = _strip_historical_reasoning(list(hint.transcript))
+        # Append-only: keep prior-beat reasoning bytes so the provider prefix
+        # cache can reuse the last request. Echo stays in the send layer.
+        messages[:] = list(hint.transcript)
         messages.append(
             _continuation_message(
                 "上一跳因临时上游失败中断。请在已有现场与产出上继续完成原任务。"
@@ -427,7 +423,7 @@ async def _prepare_agent_node(
             run_context(spec.run_id, agent_id, _context_block_payloads(received_blocks))
         )
 
-    # Worker 累计 token 硬顶 (loose backstop · 真执行): tool_clear + window compact
+    # Worker 累计 token 硬顶 (loose backstop · 真执行): window compact
     # 挑大梁做上下文瘦身,这只在失控时收口。≤0 = 关闭。
     # react_loop 每轮末比对累计 usage。CEO / solo 路径不经此分支,保持 0。
     # 辩论辩手两阶段检索与普通 worker 共用 ``engine_worker_token_ceiling``：

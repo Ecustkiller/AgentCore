@@ -6,11 +6,10 @@
 ``folder_id``); workspace binding is set at create and is immutable thereafter.
 
 List / create / get-by-id / soft-delete accept either an access session or a
-folders narrow ticket (sidecar cloud roster) — the sidecar-hosted CEO owns the
-same roster verbs the sidebar does (``delete_folder`` 软删经此路)。
+folders narrow ticket (sidecar cloud roster) — the sidecar asks the same
+account roster the sidebar does (soft-delete via ``DELETE /{id}``).
 Permanent delete / rename / 最近删除 remain access-session only: 彻底删
-只由用户确认（删除弹窗勾选，或「最近删除」里再确认），恢复是用户的补救面，AI
-永远够不到（这一轮 AI 只能软删不能恢复、不能彻底删）。
+只由用户确认（删除弹窗勾选，或「最近删除」里再确认），恢复是用户的补救面。
 """
 
 from collections.abc import Sequence
@@ -490,8 +489,8 @@ async def delete_folder(
     Nested folders go with it, and the directory is parked in the tombstone area so
     the name is free again immediately (双模式工作区 §5.4).
 
-    Reachable with a folders narrow ticket so the sidecar CEO's ``delete_folder``
-    lands on the same path as the sidebar. The irreversible twin below stays
+    Reachable with a folders narrow ticket so sidecar and the sidebar share
+    the same soft-delete path. The irreversible twin below stays
     access-session only.
     """
     try:

@@ -127,7 +127,7 @@ async def hibernate_folder_injection_cache(
 
     Soft-delete keeps documents so restore can bring 设定 back; this only drops
     (and optionally re-warms) the sidecar/API prepare cache. ``rewarm`` is for
-    the ticketed sidecar after ``delete_folder``: the next list/load is global-only.
+    the ticketed sidecar after folder soft-delete: the next list/load is global-only.
     """
     uid = (user_id or "").strip()
     if not uid:

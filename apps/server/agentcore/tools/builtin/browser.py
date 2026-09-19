@@ -11,9 +11,9 @@ dir; the keyframe path rides that step's ``tool_use_end.display`` (the shared
 frontend contract — DURABLE, replayable).
 
 Page-derived text (title, accessibility tree, visible_text, console lines) is returned
-inside ``untrusted_web_content`` with ``source_url``. Treat-as-data is the shared
-``<输入>`` rule — this field isolates third-party prose; it does not repeat the
-instruction. Mutation tools decide success from structured receipts
+inside ``untrusted_web_content`` with ``source_url``. The field isolates third-party
+prose; it does not repeat a treat-as-data instruction. Mutation tools decide
+success from structured receipts
 (``typed.matched`` / ``clicked.was_disabled``); driver ``ok`` alone is not enough.
 """
 
@@ -610,6 +610,8 @@ class _BrowserToolBase:
         return path, None
 
 
+_SCROLL_DY = 600
+
 BROWSER_TOOL_PARAMETERS: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -636,11 +638,6 @@ BROWSER_TOOL_PARAMETERS: dict[str, Any] = {
         "snapshot_version": {
             "type": "integer",
             "description": "click/type：获取该 ref 的 snapshot 版本号（用于校验 ref 是否过期）",
-        },
-        "dy": {
-            "type": "integer",
-            "description": "scroll：垂直滚动像素（向下为正）",
-            "default": 600,
         },
         "session_id": _SESSION_ID_PARAM,
     },
@@ -675,11 +672,7 @@ class BrowserTool(_BrowserToolBase):
                 args["snapshot_version"] = arguments["snapshot_version"]
             return args
         if action == _ACTION_SCROLL:
-            try:
-                dy = int(arguments.get("dy", 600))
-            except (TypeError, ValueError):
-                dy = 600
-            return {"dy": dy}
+            return {"dy": _SCROLL_DY}
         return {}
 
     def _detail(self, arguments: dict[str, Any], data: dict[str, Any]) -> str:
@@ -693,7 +686,7 @@ class BrowserTool(_BrowserToolBase):
         if action == _ACTION_TYPE:
             return f"在 {arguments.get('ref')} 输入文本"
         if action == _ACTION_SCROLL:
-            return f"滚动 {self._driver_args(arguments)['dy']}px"
+            return f"滚动 {_SCROLL_DY}px"
         if action == _ACTION_SNAPSHOT:
             return f"读取页面结构（v{data.get('snapshot_version')}）"
         if action == _ACTION_CONSOLE:

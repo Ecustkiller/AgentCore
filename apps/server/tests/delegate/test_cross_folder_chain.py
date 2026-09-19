@@ -308,7 +308,7 @@ async def test_bare_chat_prose_no_target_passes_2b_gate(
 async def test_bare_chat_turn_hint_passes_2b_gate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """同回合唯一 create/resolve 写入 turn_target_desk 后，缺省 delegate 可过 2b 闸且不重复建。"""
+    """同回合唯一 resolve / 自动建桌写入 turn_target_desk 后，缺省 delegate 可过 2b 闸且不重复建。"""
 
     class _DummyLLM(LLMProvider):
         async def complete(self, *args, **kwargs):  # noqa: ANN002, ANN003

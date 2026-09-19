@@ -48,7 +48,7 @@ function defaultDemoRect(): FloatingPanelRect {
 }
 
 /**
- * In-app float host (UX §十 · 方案 B): shell-mounted via SidePanelFloatHost,
+ * In-app float host (UX §四 · 方案 B): shell-mounted via SidePanelFloatHost,
  * **not** under `SidePanel.open`. Closing the dock must not unmount this layer.
  */
 export function FloatingPanelHost({

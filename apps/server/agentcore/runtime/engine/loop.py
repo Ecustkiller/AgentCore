@@ -326,8 +326,8 @@ async def react_loop(
 
     disabled_tools: set[str] = set()
     # Re-apply run-scoped web_fetch retirement from a prior pass (stream-stall →
-    # Wave retry, or contract write_pass/retry) so the tool is not re-offered.
-    # web_search stays closed with it — otherwise restart re-opens search thrash.
+    # Wave retry, or contract write_pass/retry) so execute denies. Table stays.
+    # web_search execute-denies with it — otherwise restart re-opens search thrash.
     if run_id:
         from agentcore.tools.builtin.web._net import is_web_fetch_retired
 
@@ -410,7 +410,6 @@ async def react_loop(
         files_expected=files_expected,
         live_allowed=(list(allowed_tool_names) if allowed_tool_names is not None else None),
         controller=controller,
-        refresh_tool_defs=lambda: None,
     )
 
     def _effective_allowed() -> list[str] | None:
@@ -421,38 +420,27 @@ async def react_loop(
 
     tool_defs: list[dict[str, Any]] | None = _resolve_tool_defs()
 
-    def _refresh_tool_defs() -> None:
-        nonlocal tool_defs
-        tool_defs = _resolve_tool_defs()
-
-    wind_down.refresh_tool_defs = _refresh_tool_defs
-
     def _maybe_retire_workspace_channel_dead() -> None:
-        """Session/presence miss → strip file family; reconnect restores it."""
-        nonlocal tool_defs
-        if apply_workspace_channel_dead_retire(
+        """Session/presence miss → execute-deny the file family; table stays."""
+        apply_workspace_channel_dead_retire(
             disabled_tools=disabled_tools,
             controller=controller,
             tool_context=tool_context,
-        ):
-            tool_defs = _resolve_tool_defs()
+        )
 
     def _maybe_retire_exec_env_dead() -> None:
         """Kept for call-site parity; env-dead no longer strips ``run``."""
-        nonlocal tool_defs
-        if apply_exec_env_dead_retire(
+        apply_exec_env_dead_retire(
             disabled_tools=disabled_tools,
             controller=controller,
             tool_context=tool_context,
-        ):
-            tool_defs = _resolve_tool_defs()
+        )
 
     # Entry: teammates that never hit a dead envelope still inherit session sticky.
     _maybe_retire_workspace_channel_dead()
     _maybe_retire_exec_env_dead()
-    # Nested worker lead may resume with _supervised already set (new react_loop).
-    # Promote before the opening observe / first LLM so replan is on the menu
-    # (CEO wait 套件 still gated on depth==0 + live session inside promote).
+    # Nested worker lead: replan is on the opening table (prefix cache).
+    # Wait suite stays depth==0 only.
     from agentcore.runtime.resolve.ceo_surface import (
         ensure_coordination_surface_before_llm,
     )
@@ -462,8 +450,7 @@ async def react_loop(
     if role == "worker":
         from agentcore.runtime.resolve.ceo_surface import observe_tools_offered
 
-        # Opening offer only (wind_down narrowing is a later round). Pass the
-        # resolved defs so allowed/disabled filtering is what the model sees.
+        # Opening offer only. Wind-down no longer shrinks the OpenAI table.
         observe_tools_offered(tools, scope="worker_run", tool_defs=tool_defs or [])
     # 跑/修·打开验证·贴码写回：引擎不再扫用户文硬分叉；选型/验收靠提示词 + 结构字段。
     active_model: str | None = base_model
@@ -592,8 +579,6 @@ async def react_loop(
             directive = tool_round.directive
             final_content = tool_round.final_content
             total_usage = tool_round.total_usage
-            if tool_round.tool_defs_changed:
-                tool_defs = tool_round.tool_defs
             if not isinstance(directive, Continue):
                 applied = await apply_loop_directive(
                     directive=directive,
@@ -642,8 +627,6 @@ async def react_loop(
                 if applied.total_usage is not None:
                     total_usage = applied.total_usage
                 finish_guard_reworks = applied.finish_guard_reworks
-                if applied.tool_defs_changed:
-                    tool_defs = applied.tool_defs
 
         # ``max_rounds <= 0`` = no product round fuse. Increment-at-start so
         # ``continue`` and early ``return`` keep the same 0-based index as the
@@ -784,9 +767,8 @@ async def react_loop(
                 from agentcore.runtime.runs.run_phase_emit import emit_run_phase
 
                 emit_run_phase(sink, run_id, agent_id, "thinking")
-            # 协调已活 / 嵌套 lead 已有子计划 → 进入本轮 LLM 前装好闸内工具
-            # （CEO wait 套件；nested worker 仅 replan）。不按 role 跳过：
-            # worker 续跑时 _supervised 可能已在，须赶在首轮 LLM 前挂上。
+            # 协调套件开场已钉在表上；ensure 只补缺、永不摘。
+            # nested worker 仅 replan。
             from agentcore.runtime.resolve.ceo_surface import (
                 ensure_coordination_surface_before_llm,
             )
@@ -799,7 +781,7 @@ async def react_loop(
             _maybe_retire_workspace_channel_dead()
             _maybe_retire_exec_env_dead()
             try:
-                if role == "worker" and run_id and turn_evidence_ledger is None:
+                if role in ("worker", "captain") and run_id and turn_evidence_ledger is None:
                     from .window_compact import maybe_compact_worker_window
 
                     await maybe_compact_worker_window(
@@ -1022,8 +1004,6 @@ async def react_loop(
                         directive = tool_round.directive
                         final_content = tool_round.final_content
                         total_usage = tool_round.total_usage
-                        if tool_round.tool_defs_changed:
-                            tool_defs = tool_round.tool_defs
                         # Delivery-idle tool narrow is retired (inject no longer latches).
                         if (
                             role == "worker"
@@ -1111,8 +1091,6 @@ async def react_loop(
             if applied.total_usage is not None:
                 total_usage = applied.total_usage
             finish_guard_reworks = applied.finish_guard_reworks
-            if applied.tool_defs_changed:
-                tool_defs = applied.tool_defs
             if (
                 applied.action == "continue"
                 and not outcome.has_tool_calls
@@ -1156,13 +1134,6 @@ async def react_loop(
                     limit=rb.limit,
                     used=rb.used,
                 )
-            if role == "worker" and rb is not None and wind_down.wind_down_active:
-                # 收尾窗口已禁检索：清掉 resume 窗口里残留的旧余额 [系统提示]。
-                from agentcore.runtime.runs.retrieval_budget import (
-                    drop_retrieval_budget_awareness,
-                )
-
-                drop_retrieval_budget_awareness(messages)
             continue
 
         result = await ceiling_finalize(

@@ -1,5 +1,5 @@
 """File operations tools (read, write, list, precise str_replace edit, delete,
-mkdir, batch).
+batch).
 
 Thin shells over ``ToolContext.backend``: each tool parses arguments, calls the
 workspace backend, maps typed ``WorkspaceError`` failures back to user-facing
@@ -13,7 +13,7 @@ Split axes (implementation modules):
 - ``read`` — file_read / file_list (one-layer LS; FileListTool still in read.py)
 - ``listing`` / ``glob`` — listing helpers + globstar search
 - ``mutate`` — write / str_replace
-- ``meta`` — delete / mkdir
+- ``meta`` — delete
 - ``batch`` — file_batch
 
 Public import path stays ``agentcore.tools.builtin.file_ops``.
@@ -39,7 +39,6 @@ from agentcore.tools.builtin.file_ops.integrity import (
 from agentcore.tools.builtin.file_ops.listing import expand_brace_globs
 from agentcore.tools.builtin.file_ops.meta import (
     FileDeleteTool,
-    MkdirTool,
 )
 from agentcore.tools.builtin.file_ops.mutate import (
     FileWriteTool,
@@ -60,7 +59,6 @@ __all__ = [
     "FileReadTool",
     "FileWriteTool",
     "GlobTool",
-    "MkdirTool",
     "StrReplaceTool",
     "FILE_READ_SAFETY_CHAR_CAP",
     "FILE_READ_SAFETY_LINE_CAP",

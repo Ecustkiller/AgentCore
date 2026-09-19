@@ -1,7 +1,7 @@
 name: Deploy Web Client
 
 # ⚠️ 已弃用自动触发 — 改由 Cursor Agent 本地 `pnpm -C apps/desktop deploy:web` 部署。
-# 见 docs/05-平台与运维/部署与运维.md §二、.cursor/rules/cursor-deploy.mdc
+# 见 docs/05-平台与运维/部署拓扑与环境.md §二、.cursor/rules/cursor-deploy.mdc
 #
 # web 客户端（apps/desktop 渲染层跑在浏览器，形态 A）同源部署在 app. 根路径：页面 app./、
 # API app./api/ 同一台 Nginx → 第一方 cookie、零 CORS。本工作流只「同步文件 + reload」，

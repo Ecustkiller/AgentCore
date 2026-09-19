@@ -2,10 +2,10 @@
 
 One aggregate endpoint over the platform's agent capabilities — every tool (CEO +
 worker, annotated with who may call it), the system Skills registered at runtime
-(identical for every user), the CEO system-prompt template, and worker identity
-templates. Skills are derived from the SAME registry the runtime wires so the
-图鉴 never drifts from the live turn. Domain SOPs (法律等) live on the Skill
-store shelf, not here.
+(identical for every user), the CEO system-prompt template, and empty
+worker identity slots (live nest-cap is per-turn). Skills are derived from
+the SAME registry the runtime wires so the 图鉴 never drifts from the live
+turn. Domain SOPs (法律等) live on the Skill store shelf, not here.
 """
 
 from fastapi import APIRouter
@@ -65,8 +65,8 @@ async def get_capabilities(_user: AuthUser) -> CapabilitiesResponse:
     ]
 
     # Templates, not per-turn prompts: CEO compose uses the catalog's CEO tool names
-    # so the 按需目录 reflects the full repertoire; worker identities share the live
-    # ``<身份>`` builder (form HOW is per-turn 交付物规格, not catalogued here).
+    # so the 按需目录 reflects the full repertoire; worker identity slots are empty
+    # (no factory ``<身份>``; nest-cap is a live opening fact, not catalogued here).
     # Memory / attachments stay out — this is the deployment-wide blueprint.
     ceo_tool_names = {
         entry.schema.name for entry in catalog if AVAILABLE_TO_CEO in entry.available_to

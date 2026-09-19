@@ -1,4 +1,4 @@
-# AgentCore 健康巡检（部署与运维.md §7.8「可观测·巡检」）。
+# AgentCore 健康巡检（发布与门禁.md §1.8「可观测·巡检」）。
 # 由 agentcore-healthcheck.timer 驱动的 oneshot；脚本自身防抖 + 告警。
 #
 # 安装：

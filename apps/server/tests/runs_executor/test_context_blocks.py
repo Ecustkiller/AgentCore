@@ -166,6 +166,7 @@ async def test_context_blocks_channel_sequence_and_single_source():
     blocks = _build_context_blocks(plan, spec, {}, "原始请求", None)
     assert [b.channel for b in blocks] == [
         "request",
+        "role",
         "task",
         "deliverable",
         "gate_notes",
@@ -186,7 +187,7 @@ async def test_context_blocks_omit_deliverable_without_instance_facts():
     plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
     spec = plan.by_id("t_1")
     blocks = _build_context_blocks(plan, spec, {}, "原始请求", None)
-    assert [b.channel for b in blocks] == ["request", "task"]
+    assert [b.channel for b in blocks] == ["request", "role", "task"]
     assert all(b.channel != "deliverable" for b in blocks)
 
 
@@ -304,7 +305,7 @@ def test_worker_run_context_mirrors_system_without_double_inject():
     assert sink[0].heading == _WORKER_SYSTEM_HEADING
     assert sink[0].body == msgs[0].content
     assert "SYS" in sink[0].body
-    assert "<身份>" in sink[0].body
+    assert "<身份>" not in sink[0].body
     user = msgs[1].content or ""
     assert f"## {_WORKER_SYSTEM_HEADING}" not in user
     assert "<身份>" not in user
@@ -470,15 +471,18 @@ def test_worker_turn_observe_covers_identity(monkeypatch):
     spec = RunSpec(run_id="x", agent_id="x", role="汇报员", task="t")
     msgs = _build_messages(_plan(spec), spec, {}, "SYS", "原始请求")
     system = msgs[0].content or ""
-    assert system.startswith("<身份>")
-    assert "SYS" in system
-    assert "你的角色：汇报员" in system
+    user = msgs[1].content or ""
+    assert system.startswith("SYS")
+    assert "<身份>" not in system
+    assert "你的角色：汇报员" not in system
+    assert "## 你的角色" in user
+    assert "汇报员" in user
     rows = [r for r in captured if r.get("event") == "cost.prompt_assembled"]
     assert len(rows) == 1
     row = rows[0]
     assert row["scope"] == "worker_turn"
     assert row["sections"]["worker_base"] == 3
-    assert row["sections"]["identity"] > 0
+    assert "identity" not in row["sections"]
     assert row["sections"]["role"] == len("你的角色：汇报员")
 
 

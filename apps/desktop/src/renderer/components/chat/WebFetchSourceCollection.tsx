@@ -8,7 +8,6 @@ import {
   LiveFlowDots,
   LiveFlowText,
 } from "./message-bubble/LiveFlow";
-import { toolGroupFaultLabel } from "./toolResult/toolFaultFace";
 
 type ToolStep = Extract<ProcessStep, { kind: "tool" }>;
 
@@ -44,7 +43,9 @@ function sourcesFromTools(tools: ToolStep[]): Citation[] {
  *「Read page · N sources」header row (对齐工具组 / 思考过程的折叠态——折叠即收起细节，不再
  * 平铺来源 pills), expands into the same hit rows as search (index · favicon ·
  * title · domain, snippet below). Page body stays on the single-`web_fetch`
- * card. Replaces ToolLineGroup's chevron so there is only one disclosure layer;
+ * card. Folded header is title-only — fetch misses do not hang「未找到」
+ * (the row already says N sources; user does not retry the fetch). Replaces
+ * ToolLineGroup's chevron so there is only one disclosure layer;
  * persistence reuses the same `${turnKey}:tgrp:${groupKey}` key.
  */
 export function WebFetchSourceCollection({
@@ -64,7 +65,6 @@ export function WebFetchSourceCollection({
   );
 
   const citations = sourcesFromTools(tools);
-  const groupFault = !expanded ? toolGroupFaultLabel(tools) : null;
   const running = tools.some((t) => t.status === "running");
   const count = tools.length;
   const title = `Read page · ${count} source${count === 1 ? "" : "s"}`;
@@ -76,7 +76,7 @@ export function WebFetchSourceCollection({
           variant="ghost"
           onClick={toggleExpanded}
           aria-expanded={expanded}
-          className="h-auto w-full justify-start gap-1.5 px-0 py-0 text-sm text-muted-foreground hover:bg-transparent hover:text-foreground"
+          className="h-auto w-full justify-start gap-1.5 px-0 py-0 text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground"
         >
           <span className="flex items-center gap-1.5">
             <Globe size={14} className="shrink-0" />
@@ -84,14 +84,6 @@ export function WebFetchSourceCollection({
             <LiveFlowText className="min-w-0 truncate text-left">
               {title}
             </LiveFlowText>
-            {groupFault && (
-              <span
-                data-testid="tool-group-fault"
-                className="shrink-0 text-xs text-muted-foreground/70"
-              >
-                {groupFault}
-              </span>
-            )}
             {expanded ? (
               <ChevronDown size={14} className="shrink-0" />
             ) : (

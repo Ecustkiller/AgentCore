@@ -468,7 +468,7 @@ async def test_deliverable_only_drops_steer_acknowledgement_after_rework():
     assert "谢谢指正" not in content
     assert "我先查一下" not in content
     # 证明确实走了回炉路径（注入过一条 finish_guard 纠错 steer）。
-    steers = [m for m in messages if m.role == "user" and m.content and "核验未通过" in m.content]
+    steers = [m for m in messages if m.role == "user" and m.content and "没有闭合" in m.content]
     assert len(steers) == 1
 
 
@@ -1280,9 +1280,8 @@ async def test_llm_failure_errors_immediately():
 class _ToolsRecordingProvider:
     """Scripted provider that records the tool names offered to it each round.
 
-    Lets a test assert the circuit breaker actually removed a disabled tool from the
-    toolset (request.tools) on the round after it tripped, not just that a steer was
-    injected.
+    Lets a test assert the circuit breaker keeps the opening table (request.tools)
+    after it trips, and that later calls fail at execute.
     """
 
     def __init__(self, rounds: list[list[LLMChunk]]) -> None:
@@ -1302,15 +1301,17 @@ async def test_circuit_breaker_warns_then_disables_failing_tool():
     # `flaky` fails with DIFFERENT args every round (so fingerprint-keyed
     # REPEATED_FAILURE never trips) and the model writes content each round (so the
     # unproductive early-stop never trips) — isolating the cumulative circuit breaker:
-    # warn at the 2nd failure, disable (remove from the toolset) at the 3rd.
+    # warn at the 2nd failure, execute-deny at the 3rd. The OpenAI table stays.
+    flaky = _StubTool(success=False, name="flaky")
     reg = ToolRegistry()
-    reg.register(_StubTool(success=False, name="flaky"))
+    reg.register(flaky)
     reg.register(_StubTool(success=True, name="other"))
     provider = _ToolsRecordingProvider(
         [
-            [_content_chunk("t0"), _tool_chunk("flaky", '{"q": "a"}')],
-            [_content_chunk("t1"), _tool_chunk("flaky", '{"q": "b"}')],
-            [_content_chunk("t2"), _tool_chunk("flaky", '{"q": "c"}')],
+            [_content_chunk("t0"), _tool_chunk("flaky", '{"q": "a"}', call_id="c0")],
+            [_content_chunk("t1"), _tool_chunk("flaky", '{"q": "b"}', call_id="c1")],
+            [_content_chunk("t2"), _tool_chunk("flaky", '{"q": "c"}', call_id="c2")],
+            [_content_chunk("t3"), _tool_chunk("flaky", '{"q": "d"}', call_id="c3")],
             [_content_chunk("done")],
         ]
     )
@@ -1329,10 +1330,12 @@ async def test_circuit_breaker_warns_then_disables_failing_tool():
 
     steers = [m.content or "" for m in messages if m.role == "user"]
     assert not any("请不要再以相同方式调用" in s for s in steers)  # warn-only trips are silent
-    assert any("停用" in s for s in steers)  # disable at 3 failures
-    # the disabled tool is gone from the toolset offered on the round AFTER disable
+    assert not any("停用" in s for s in steers)  # disable is execute-deny, not a user sermon
     assert provider.offered[0] == ["flaky", "other"]
-    assert provider.offered[-1] == ["other"]
+    assert provider.offered[-1] == ["flaky", "other"]
+    assert flaky.calls == 3  # fourth call is execute-denied
+    denied = [m.content or "" for m in messages if m.role == "tool"]
+    assert any("已因连续失败停用" in s for s in denied)
 
 
 async def test_web_fetch_tally_does_not_retire_or_strip_search():
@@ -1384,7 +1387,7 @@ async def test_web_fetch_tally_does_not_retire_or_strip_search():
 
 
 async def test_web_fetch_explicit_retire_survives_react_loop_restart():
-    """显式退役闩仍跨 react_loop 重启（Wave / write_pass），并连带收 web_search。"""
+    """显式退役闩仍跨 react_loop 重启（Wave / write_pass）：表仍在，执行拒绝。"""
     from agentcore.tools.builtin.web._net import (
         WEB_FETCH_RETIRE_STEER,
         clear_web_fetch_retired,
@@ -1401,13 +1404,21 @@ async def test_web_fetch_explicit_retire_survives_react_loop_restart():
         backend=ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
         user_id="u",
     )
+    fetch = _StubTool(success=True, name="web_fetch")
+    search = _StubTool(success=True, name="web_search")
     reg = ToolRegistry()
-    reg.register(_StubTool(success=True, name="web_fetch"))
-    reg.register(_StubTool(success=True, name="web_search"))
+    reg.register(fetch)
+    reg.register(search)
     reg.register(_StubTool(success=True, name="other"))
-    provider = _ToolsRecordingProvider([[_content_chunk("done2")]])
+    provider = _ToolsRecordingProvider(
+        [
+            [_content_chunk("t0"), _tool_chunk("web_fetch", "{}", call_id="c0")],
+            [_content_chunk("done2")],
+        ]
+    )
+    messages: list[LLMMessage] = [LLMMessage(role="user", content="retry")]
     await react_loop(
-        messages=[LLMMessage(role="user", content="retry")],
+        messages=messages,
         llm=provider,
         tools=reg,
         sink=EventSink(),
@@ -1417,7 +1428,10 @@ async def test_web_fetch_explicit_retire_survives_react_loop_restart():
         run_id=run_id,
         approval_gate=None,
     )
-    assert provider.offered[0] == ["other"]
+    assert provider.offered[0] == ["web_fetch", "web_search", "other"]
+    assert fetch.calls == 0
+    denied = [m.content or "" for m in messages if m.role == "tool"]
+    assert any("web_fetch" in s and "停用" in s for s in denied)
     clear_web_fetch_retired(run_id)
 
 
@@ -1603,9 +1617,8 @@ def _openai_tool_names(request) -> list[str]:  # noqa: ANN001
     return names
 
 
-@pytest.mark.parametrize("supervised,expect_replan", [(False, False), (True, True)])
-async def test_worker_nested_lead_replan_follows_supervised(supervised: bool, expect_replan: bool):
-    """嵌套 lead：无子计划时开口无 replan；续跑已有 _supervised 时首轮 LLM 已挂上。"""
+async def test_worker_nested_lead_opening_has_replan_not_wait():
+    """嵌套 lead：开场表钉 replan，不含 wait 套件。``_supervised`` 不再是晋升闸。"""
 
     class _Rec(_ScriptedProvider):
         def __init__(self) -> None:
@@ -1618,7 +1631,7 @@ async def test_worker_nested_lead_replan_follows_supervised(supervised: bool, ex
                 yield chunk
 
     delegate = _StubTool(name="delegate", face=ToolFace.ORCHESTRATION)
-    delegate._supervised = object() if supervised else None
+    delegate._supervised = None
     delegate._depth = 1
     delegate._sink = None
     reg = ToolRegistry()
@@ -1639,8 +1652,5 @@ async def test_worker_nested_lead_replan_follows_supervised(supervised: bool, ex
     assert provider.names, "expected at least one LLM request"
     opening = provider.names[0]
     assert "delegate" in opening
-    if expect_replan:
-        assert "replan" in opening
-        assert "wait" not in opening
-    else:
-        assert "replan" not in opening
+    assert "replan" in opening
+    assert "wait" not in opening

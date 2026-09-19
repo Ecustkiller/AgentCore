@@ -419,10 +419,8 @@ def file_mutation_tool_names() -> frozenset[str]:
             "file_write",
             "str_replace",
             "file_delete",
-            "mkdir",
             "file_batch",
             "md_export",
-            "archive",
             "download_url",
         }
     )
@@ -438,10 +436,8 @@ def file_only_tool_names() -> frozenset[str]:
             "file_list",
             "glob",
             "file_delete",
-            "mkdir",
             "file_batch",
             "md_export",
-            "archive",
             "download_url",
             "grep",
             "git",

@@ -89,7 +89,6 @@ async def test_auto_grant_skips_when_seeded():
 async def test_auto_grant_top_level_without_gate_is_noop():
     class _Tool:
         _depth = 0
-        _active_playbook = None
         _permission_axes = None
         _base_tool_context = type("C", (), {"backend": None})()
 
@@ -106,7 +105,6 @@ async def test_auto_grant_light_without_gate_is_noop():
     class _Tool:
         _depth = 0
         _permission_axes = AutonomyPolicy.LESS_INTERRUPT
-        _active_playbook = None
         _pending_pause = False
         _base_tool_context = type("C", (), {"backend": None})()
         _approval_gate = None

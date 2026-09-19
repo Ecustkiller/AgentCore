@@ -18,7 +18,7 @@ import {
 import type { ReactNode } from "react";
 
 /**
- * Tab body shared by the docked SidePanel and in-app floats (UX §十).
+ * Tab body shared by the docked SidePanel and in-app floats (UX §四).
  * Keep chrome-free so the same surface renders in either host.
  */
 export function SidePanelSurfaceBody({

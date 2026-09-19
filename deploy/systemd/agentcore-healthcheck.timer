@@ -1,4 +1,4 @@
-# AgentCore 健康巡检定时器（部署与运维.md §7.8）。每分钟跑一次 .service。
+# AgentCore 健康巡检定时器（发布与门禁.md §1.8）。每分钟跑一次 .service。
 # 启用：sudo systemctl enable --now agentcore-healthcheck.timer
 # 查看：systemctl list-timers agentcore-healthcheck.timer
 

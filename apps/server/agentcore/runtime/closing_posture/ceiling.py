@@ -27,8 +27,8 @@ def ceiling_honesty_steer(*, reason: str) -> str | None:
     """One-line fact when force_finalize hits a hard ceiling.
 
     Honesty is symmetric for ``max_rounds`` / ``token_budget``. HOW (姿势 A /
-    ``continue_from_run_id``) lives on base ``<诚实>`` and the continuation
-    tool; verdict still downgrades in code.
+    ``continue_from_run_id``) lives on the shared-base honesty sentence and the
+    continuation tool; verdict still downgrades in code.
     """
     r = (reason or "").strip()
     lead = _CEILING_HONESTY_STEER_LEAD.get(r)

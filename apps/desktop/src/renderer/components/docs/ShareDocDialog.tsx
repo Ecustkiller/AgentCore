@@ -114,8 +114,7 @@ function ShareDialogBody({
   };
 
   const handleCopy = async (share: Share) => {
-    if (await copyText(shareLink(share))) notifySuccess("链接已复制");
-    else notifyError("复制失败");
+    if (!(await copyText(shareLink(share)))) notifyError("复制失败");
   };
 
   const handleRevoke = async (share: Share) => {

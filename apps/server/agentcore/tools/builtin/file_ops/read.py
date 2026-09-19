@@ -74,7 +74,7 @@ from .observe import (
 from .path_hints import enrich_missing_path_message
 
 # Safety cap for one file_read view (disk original text). Distinct from
-# tool_clear ``min_chars`` and worker token ceilings — do not reuse those.
+# retired sliding-clear ``min_chars`` and worker token ceilings — do not reuse those.
 FILE_READ_SAFETY_LINE_CAP = 2000
 FILE_READ_SAFETY_CHAR_CAP = 80_000
 _DEFAULT_READ_LINES = FILE_READ_SAFETY_LINE_CAP
@@ -450,8 +450,7 @@ class FileReadTool:
             name="file_read",
             description=(
                 "读取工作区文件。图片发给当前模型（不收图则说明限制）。"
-                "http(s) 用 web_fetch；目录用 file_list；"
-                "定位用 grep / glob。"
+                "http(s) 用 web_fetch。"
                 "本机绝对路径可直接填（HOW→consult(local_desk)）。"
             ),
             parameters={
@@ -466,7 +465,7 @@ class FileReadTool:
                     },
                     "offset": {
                         "type": "integer",
-                        "description": "起始行号（1-based，含）。省略则从第 1 行。",
+                        "description": "起始行号（1-based，含）。",
                         "minimum": 1,
                     },
                     "limit": {
@@ -926,7 +925,7 @@ class FileListTool:
         return ToolSchema(
             name="file_list",
             description=(
-                "列出已知目录当前层（默认工作区根）。整树按名用 glob。"
+                "列出已知目录当前层（默认工作区根）。"
                 "已挂载区外用 `external/<别名>/`。"
                 "用户规则列 `.agentcore/规则`。"
             ),

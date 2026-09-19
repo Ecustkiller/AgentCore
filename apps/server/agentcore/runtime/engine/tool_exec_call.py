@@ -69,6 +69,34 @@ logger = get_logger(__name__)
 
 _MISSING_FILE_MODEL_MSG = "内部资源缺失，请换一种方式继续，不要原样重试。"
 
+_CIRCUIT_TOOL_DISABLED_MSG = (
+    "工具 '{name}' 已因连续失败停用，未执行。请改用其他方案，不要原样重试该路径。"
+)
+
+
+def _disabled_tool_denial(
+    name: str, *, disabled_set: frozenset[str], run_id: str
+) -> tuple[str, str] | None:
+    """Model-facing fact + failure code when ``name`` is mid-chain execute-deny."""
+    if not name or name not in disabled_set:
+        return None
+    from agentcore.tools.builtin.web._net import WEB_FETCH_RETIRE_STEER
+    from agentcore.workspace.limits import (
+        WORKSPACE_CHANNEL_DEAD_RETIRE_STEER,
+        WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS,
+    )
+
+    if name in {"web_fetch", "web_search"}:
+        msg = WEB_FETCH_RETIRE_STEER
+        if name == "web_search":
+            msg = f"{WEB_FETCH_RETIRE_STEER} web_search 一并停用。"
+        return msg, "web_fetch_retired"
+    family = frozenset(WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS)
+    if name in family and family <= disabled_set:
+        return WORKSPACE_CHANNEL_DEAD_RETIRE_STEER, "workspace_channel_dead"
+    _ = run_id
+    return _CIRCUIT_TOOL_DISABLED_MSG.format(name=name), "circuit_tool_disabled"
+
 
 def _pop_native_image_parts(meta: dict[str, Any]) -> tuple[dict[str, Any], ...]:
     """Lift image parts off metadata so they never land in logs / fingerprints."""
@@ -97,6 +125,7 @@ async def run_one_tool(
     run_id: str,
     role: str,
     allowed_set: frozenset[str] | None,
+    disabled_set: frozenset[str],
     approval_gate: ApprovalGate | None,
     file_read_inflight: dict[str, asyncio.Future[ToolResult]],
 ) -> ToolCallQuad:
@@ -166,10 +195,6 @@ async def run_one_tool(
                     inner_keys=sorted(unwrapped.keys())[:20],
                     has_tasks=isinstance(unwrapped.get("tasks"), list)
                     and bool(unwrapped.get("tasks")),
-                    has_playbook=bool(
-                        isinstance(unwrapped.get("playbook"), str)
-                        and str(unwrapped.get("playbook") or "").strip()
-                    ),
                 )
                 args = unwrapped
                 with contextlib.suppress(TypeError, ValueError):
@@ -226,6 +251,50 @@ async def run_one_tool(
                     "error_class": ERROR_CLASS_VALIDATION,
                     "permission_kind": "landed_status_name",
                 },
+            ),
+            [],
+        )
+
+    disabled_denial = _disabled_tool_denial(
+        name, disabled_set=disabled_set, run_id=run_id
+    )
+    if disabled_denial is not None:
+        error_msg, deny_code = disabled_denial
+        sink.emit(
+            tool_use_end(
+                tc.id,
+                name or raw_name,
+                success=False,
+                output=error_msg,
+                failure=tool_failure_fields(code=deny_code),
+                run_id=event_run_id,
+            )
+        )
+        logger.info(
+            "tool.execute_end",
+            tool=name or raw_name,
+            status=deny_code,
+            duration_ms=0,
+            reason=error_msg,
+        )
+        return (
+            _failed_tool_message(tc.id, error_msg),
+            None,
+            ToolAttempt(
+                fingerprint,
+                name or raw_name,
+                success=False,
+                policy_failure=True,
+                error_summary=error_msg,
+                meta=_attempt_meta_with_landing_path(
+                    name or raw_name,
+                    args,
+                    {
+                        "error_class": ERROR_CLASS_PERMISSION,
+                        "permission_kind": deny_code,
+                        **cross_turn_retry_meta(CrossTurnRetry.FUTILE),
+                    },
+                ),
             ),
             [],
         )
@@ -628,12 +697,7 @@ async def run_one_tool(
     if result.file_products:
         from agentcore.table.land_csv import ingest_landed_csv_products
 
-        note = await ingest_landed_csv_products(
-            result,
-            context,
-            registry=registry if role == "captain" else None,
-            offer_tools=role == "captain",
-        )
+        note = await ingest_landed_csv_products(result, context)
         if note:
             prior = (result.output or "").rstrip()
             result.output = f"{prior}\n{note}" if prior else note

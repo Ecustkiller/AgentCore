@@ -136,6 +136,11 @@ def _project_message_detail(
     duration_ms = usage.get("duration_ms")
     if duration_ms is not None:
         detail.duration_ms = int(duration_ms)
+    generation_ms = usage.get("generation_ms")
+    if generation_ms is not None:
+        n = int(generation_ms)
+        if n > 0:
+            detail.generation_ms = n
     # Assistant-row lifecycle (usage.status) — overlay criterion for stream_state.
     status = usage.get("status")
     if status is not None:
@@ -839,6 +844,7 @@ async def record_local_turn_endpoint(
         cache_miss_tokens=body.cache_miss_tokens,
         rounds=body.rounds,
         duration_ms=body.duration_ms,
+        generation_ms=body.generation_ms,
         trace_id=body.trace_id,
         finish_reason=body.finish_reason,
         llm_credentials=credentials,

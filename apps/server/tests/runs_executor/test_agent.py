@@ -633,8 +633,7 @@ async def test_worker_system_prompt_grants_structure_ownership():
     assert "填字" not in sys
     assert "起点线索" not in sys
     assert "答题边界" not in sys
-    assert "<身份>" in sys
-    assert "队员" in sys
+    assert "<身份>" not in sys
 
 
 async def test_contract_empty_hard_fail_not_wave_retried():

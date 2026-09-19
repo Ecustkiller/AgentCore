@@ -124,4 +124,4 @@ Agent 没有「文件开在编辑器里」。写盘占用只包住**这一次** 
 | 独立 Arena | **否决** |
 | 树级共享 Semaphore | **否决**（父子互等死锁） |
 | 便签墙 / worker 侧向广播 | **否决**（第四套实体；不留波内推送。旧 journal `team_note_posted` 跳过、不展示） |
-| 两篇成稿靠边信道互焊 / 互 `depends_on` 成环 | **否决**；先非空 `team_brief` 或短规格岗。不新 playbook；不复活 `consumer_deps` 漏边软提示 |
+| 两篇成稿靠边信道互焊 / 互 `depends_on` 成环 | **否决**；先非空 `team_brief` 或短规格岗。不复活 `consumer_deps` 漏边软提示 |

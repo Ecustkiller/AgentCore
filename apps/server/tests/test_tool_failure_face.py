@@ -303,6 +303,7 @@ _DETERMINISTIC_CODES = (
     "approval_denied",
     "args_parse_failed",
     "auth_failed",
+    "circuit_tool_disabled",
     "blocked_host",
     "egress_unavailable",
     "fake_ip_proxy_blocked",

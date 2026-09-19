@@ -1,4 +1,4 @@
-"""Resume recover path: settle checkpoint, rebuild window, optional continuity."""
+"""Resume recover path: settle checkpoint, rebuild window."""
 
 from __future__ import annotations
 
@@ -143,29 +143,7 @@ async def recover_and_rebuild_window(
         )
         raise ResumeOpenToolCallsError()
 
-    # 终稿多段衔接: when the pause kept deliverable prose, steer the resumed answer
-    # round to continue it (join_segments alone can't invent transitions). Skip when
-    # settle used terminal INTERACT (no CEO round), or user STOP'd / ADJUST'd a
-    # checkpoint (拒答回灌 CEO，但勿把「续写正文」steer 压上去).
-    # 若 pre_pause 是「请确认」姿势，改用互斥续写 steer（勿把确认话术续成「已全部收卷」）。
-    if (
-        pre_pause.strip()
-        and settled.terminal_text is None
-        and decision is not CheckpointDecision.STOP
-        and decision is not CheckpointDecision.ADJUST
-    ):
-        from agentcore.runtime.closing_posture import resume_continuity_steer
-        from agentcore.runtime.facts import NoteFact, record_turn_fact
-
-        continuity = resume_continuity_steer(prior_deliverable=pre_pause)
-        messages.append(LLMMessage(role="user", content=continuity))
-        record_turn_fact(
-            NoteFact(
-                role="user",
-                content=continuity,
-                reason="continuity",
-                run_id=captain_run_id,
-            ).to_fact()
-        )
+    # Continuity [系统提示] retired: pre_pause is already in history;
+    # splice is reconcile_resume_closing / join_segments.
 
     return RecoveredResume(messages=messages, pre_pause=pre_pause, settled=settled)

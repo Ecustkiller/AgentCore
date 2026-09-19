@@ -25,7 +25,7 @@ from agentcore.runtime.debate.research_first import has_research_chain_evidence
 logger = get_logger(__name__)
 
 _SYNTHESIZER_ID = "synthesizer"
-# DAG 铸造：playbook raw id ``synthesizer`` → ``{del_<uuid>|add_<uuid>}_synthesizer``。
+# DAG 铸造：raw id ``synthesizer`` → ``{del_<uuid>|add_<uuid>}_synthesizer``。
 _SYNTHESIZER_SUFFIX = "_synthesizer"
 
 

@@ -179,14 +179,12 @@ def _apply_cutoff_reasons(
 
 def _registry_with(base: ToolRegistry, *extra: Tool) -> ToolRegistry:
     """A per-worker registry = the shared team tools + the worker's own extra tools
-    (opening: nested ``delegate``; companion ``replan`` is promoted later once a
-    sub-plan exists). Returns a fresh registry; the shared ``base`` is never
-    mutated (it backs every worker in the team and must stay delegate-free for leaf
-    workers)."""
+    (opening: nested ``delegate`` + companion ``replan``). Returns a fresh registry;
+    the shared ``base`` is never mutated (it backs every worker in the team and
+    must stay delegate-free for leaf workers)."""
     registry = ToolRegistry()
     for schema in base.list_all():
         registry.register(base.get(schema.name))
-    registry.inherit_offers(base)
     for tool in extra:
         registry.register(tool)
     return registry
@@ -203,7 +201,6 @@ def _registry_without(base: ToolRegistry, *names: str) -> ToolRegistry:
     for schema in base.list_all():
         if schema.name not in drop:
             registry.register(base.get(schema.name))
-    registry.inherit_offers(base)
     return registry
 
 

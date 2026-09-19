@@ -7,7 +7,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { copyText } from "@/lib/clipboard";
-import { notifySuccess } from "@/lib/toast";
 import {
   type UserProfile,
   acceptFriendRequest,
@@ -197,9 +196,7 @@ export function UserProfileDialog({
                 aria-label="复制用户名"
                 className="size-6"
                 onClick={() => {
-                  void copyText(profile.username).then((ok) => {
-                    if (ok) notifySuccess("已复制用户名");
-                  });
+                  void copyText(profile.username);
                 }}
               >
                 <Copy size={12} />

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Any
 from unittest.mock import MagicMock
 
 from agentcore.tools.builtin import build_builtin_registry
@@ -15,7 +16,7 @@ from agentcore.tools.builtin.run import (
 )
 from agentcore.tools.builtin.run_verify import _is_pnpm_filter_verify_argv
 from agentcore.tools.builtin.test_parsers import parse_vitest_output
-from agentcore.tools.protocol import ToolContext
+from agentcore.tools.protocol import ToolContext, ToolResult
 from agentcore.tools.sandbox.protocol import ExecutionRequest, ExecutionResult
 
 
@@ -38,6 +39,7 @@ def test_schema_is_one_command_face():
     assert "code" not in props
     assert "check" not in props
     assert "subcommand" not in props
+    assert "tail_lines" not in props
 
 
 def test_classify_verify_and_long_running():
@@ -199,6 +201,34 @@ async def test_unshaped_generate_script_uses_disaster_wall():
     assert result.success is True
     assert backend.requests[0].timeout_seconds == EXEC_DISASTER_TIMEOUT_S
     assert backend.requests[0].idle_timeout_seconds is None
+
+
+async def test_execute_read_ignores_leftover_tail_lines(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def _fake_pm(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        del context
+        captured["arguments"] = arguments
+        return ToolResult(tool_call_id="", success=True, output="ok", duration_ms=0)
+
+    monkeypatch.setattr("agentcore.tools.builtin.run.process_manage", _fake_pm)
+    ctx = ToolContext.create(
+        execution_id="e",
+        run_id="s",
+        agent_id="worker",
+        backend=_FakeShortBackend(),  # type: ignore[arg-type]
+        user_id="u",
+    )
+    result = await RunTool().execute(
+        {"action": "read", "process_id": "p1", "tail_lines": 40},
+        ctx,
+    )
+    assert result.success is True
+    args = captured["arguments"]
+    assert isinstance(args, dict)
+    assert args["subcommand"] == "read"
+    assert args["process_id"] == "p1"
+    assert "tail_lines" not in args
 
 
 async def test_foreground_wait_timeout_is_ignored():

@@ -20,7 +20,6 @@ from agentcore.tools.builtin.file_ops import (
     FileReadTool,
     FileWriteTool,
     GlobTool,
-    MkdirTool,
     StrReplaceTool,
     expand_brace_globs,
 )
@@ -868,10 +867,7 @@ def test_file_read_schema_teaches_default_full_read():
     assert "省略则尽量整读" in limit["description"]
     assert "超安全顶截断" in limit["description"]
     desc = schema.description
-    assert "grep" in desc
-    assert "glob" in desc
     assert "web_fetch" in desc
-    assert "file_list" in desc
     assert "consult(local_desk)" in desc
     path_desc = schema.parameters["properties"]["path"]["description"]
     assert "web_fetch" not in path_desc
@@ -1266,7 +1262,7 @@ def test_write_schema_does_not_teach_completeness_gates():
     replace_desc = StrReplaceTool().schema.description
     assert "完全匹配" in replace_desc or "精确替换" in replace_desc
     new_desc = StrReplaceTool().schema.parameters["properties"]["new_string"]["description"]
-    assert "不硬拒" in new_desc
+    assert "old_string" in new_desc
 
 
 def test_classify_write_kind_helpers():
@@ -1292,7 +1288,7 @@ def test_delete_schema_is_short_trigger():
     """恢复路径在成功回执，不进每轮 schema。"""
     schema = FileDeleteTool().schema
     blob = schema.description + schema.parameters["properties"]["permanent"]["description"]
-    assert "可逆" in schema.description
+    assert "可逆" in schema.parameters["properties"]["permanent"]["description"]
     assert "permanent" in schema.description
     assert "系统回收站" not in blob
     assert "AgentCore/trash" not in blob
@@ -1566,22 +1562,6 @@ async def test_copy_skips_existing_destination(tmp_path: Path):
     assert "已存在" in result.output
 
 
-def test_mkdir_schema_teaches_structure_not_app_shell():
-    desc = MkdirTool().schema.description
-    assert "结构目录" in desc
-    assert "套应用名/话题名当工程根" in desc
-    assert "≠" in desc
-
-
-async def test_mkdir_creates_and_refuses_existing(tmp_path: Path):
-    result = await MkdirTool().execute({"path": "out/docs"}, _ctx(tmp_path))
-    assert result.success is True
-    assert (tmp_path / "out" / "docs").is_dir()
-    result = await MkdirTool().execute({"path": "out/docs"}, _ctx(tmp_path))
-    assert result.success is False
-    assert "已存在" in result.error
-
-
 async def test_file_batch_partial_failure_continues(tmp_path: Path):
     (tmp_path / "a.txt").write_text("a", encoding="utf-8")
     result = await FileBatchTool().execute(
@@ -1653,14 +1633,13 @@ def test_file_list_schema_is_one_layer_ls():
     schema = FileListTool().schema
     props = schema.parameters["properties"]
     assert set(props) == {"directory"}
-    assert "glob" in schema.description
 
 
 def test_glob_schema_requires_pattern():
     schema = GlobTool().schema
     assert schema.parameters["required"] == ["pattern"]
     props = schema.parameters["properties"]
-    assert set(props) == {"pattern", "path", "max_entries"}
+    assert set(props) == {"pattern", "path"}
     assert "无斜杠" in props["pattern"]["description"]
     assert "`**`" in props["pattern"]["description"]
 
@@ -1800,15 +1779,29 @@ async def test_glob_missing_path_finds_named_dir(tmp_path: Path):
     assert "不存在" in (result.output or "")
 
 
-async def test_glob_directory_alias(tmp_path: Path):
+async def test_glob_leftover_directory_does_not_change_search_root(tmp_path: Path):
     src = tmp_path / "src"
     src.mkdir()
     (src / "a.py").write_text("x", encoding="utf-8")
-    result = await GlobTool().execute(
-        {"pattern": "*.py", "directory": "src"}, _ctx(tmp_path)
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "b.py").write_text("x", encoding="utf-8")
+    ctx = _ctx(tmp_path)
+
+    omitted = await GlobTool().execute({"pattern": "*.py"}, ctx)
+    leftover = await GlobTool().execute(
+        {"pattern": "*.py", "directory": "src"}, ctx
     )
-    assert result.success is True
-    assert "src/a.py" in (result.output or "")
+    assert leftover.success is True
+    assert leftover.contract_failure is not True
+    assert (leftover.output or "") == (omitted.output or "")
+    assert "src/a.py" in (leftover.output or "")
+    assert "other/b.py" in (leftover.output or "")
+
+    scoped = await GlobTool().execute({"pattern": "*.py", "path": "src"}, ctx)
+    assert scoped.success is True
+    assert "src/a.py" in (scoped.output or "")
+    assert "other/b.py" not in (scoped.output or "")
 
 
 async def test_glob_empty_pattern_rejected(tmp_path: Path):

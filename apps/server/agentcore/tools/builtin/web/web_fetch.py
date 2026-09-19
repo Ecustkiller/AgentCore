@@ -513,7 +513,7 @@ class WebFetchTool:
             name="web_fetch",
             description=(
                 "公网 http(s) 网页正文（web_search 摘要不够或须核对原文时再深读）。"
-                "工作区路径用 file_read；落盘用 download_url。"
+                "工作区路径用 file_read。"
             ),
             parameters={
                 "type": "object",
@@ -556,7 +556,6 @@ class WebFetchTool:
                     "code": "web_fetch_retired",
                     "retire_tools": ["web_fetch"],
                     "error_class": "permanent",
-                    # CircuitBreak.message() prefixes ``[系统提示]`` once.
                     "retire_message": retire_msg,
                 },
             )

@@ -304,7 +304,7 @@ def test_build_request_window_applies_compact_after_clears() -> None:
 
 
 @pytest.mark.asyncio
-async def test_maybe_compact_skips_captain_and_records_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_maybe_compact_records_captain_and_worker(monkeypatch: pytest.MonkeyPatch) -> None:
     from agentcore.runtime.engine import window_compact as wc
 
     wc._cooldown_until_round.clear()
@@ -316,28 +316,13 @@ async def test_maybe_compact_skips_captain_and_records_worker(monkeypatch: pytes
 
     monkeypatch.setattr(wc, "_summarize_worker_fold", _fake)
     msgs = _worker_window(8)
-    assert (
-        await maybe_compact_worker_window(
-            msgs,
-            run_id="w1",
-            role="captain",
-            round_idx=3,
-            last_prompt_tokens=80_000,
-            conversation_id="c1",
-            user_id="u1",
-            model_id=None,
-        )
-        is False
-    )
-    assert calls == []
-
     log = TurnFactLog()
     token = current_fact_log.set(log)
     try:
         wrote = await maybe_compact_worker_window(
             msgs,
             run_id="w1",
-            role="worker",
+            role="captain",
             round_idx=3,
             last_prompt_tokens=80_000,
             conversation_id="c1",

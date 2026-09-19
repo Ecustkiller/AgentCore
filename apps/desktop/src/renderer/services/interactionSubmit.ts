@@ -1,4 +1,4 @@
-import { notifyError, notifyInfo } from "@/lib/toast";
+import { notifyError } from "@/lib/toast";
 import { ApiError } from "@/services/api";
 import type { CheckpointUserDecision } from "@/services/checkpoint";
 import {
@@ -92,17 +92,13 @@ export function submitInteractionFeedback(
 
 /**
  * 提交没走成时的提示。`already_settled` 不是错——多端同权下卡被先到的那端结掉是常态，
- * 报成红色失败会让用户以为出了故障。
+ * 卡收起就是回执，不再另贴「已经处理过了」；报成红色失败会让用户以为出了故障。
  */
 export function notifySubmitInteractionResult(
   result: Exclude<SubmitInteractionResult, "ok">,
 ): void {
-  const copy = submitInteractionFeedback(result);
-  if (result === "already_settled") {
-    notifyInfo(copy);
-    return;
-  }
-  notifyError(copy);
+  if (result === "already_settled") return;
+  notifyError(submitInteractionFeedback(result));
 }
 
 export type HotSubmitBody = ResolveInteractionBody;

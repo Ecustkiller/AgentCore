@@ -18,13 +18,13 @@
 resume / plan_review：派工过程 kickoff（方向：派团队…）不进用户可见续写基底与 G6 重灌，
 终稿另写交付说明，避免过程流水账（ce1ecfc2）。
 
-``finish_guard`` / resume ``join`` / 确认姿势 steer 均消费本模块。
+``finish_guard`` / resume ``join`` 均消费本模块。
 
 Thin facade — implementation split by axis (under ``runtime/closing_posture/``):
 
 * ``.core`` — tier & posture-A/C/draft + honesty rework
-* ``.resume`` — resume / continuity join & steer
-* ``.ceiling`` — hard-ceiling steer / verdict downgrade（用户面不贴【收口说明】）
+* ``.resume`` — resume / continuity join
+* ``.ceiling`` — hard-ceiling verdict downgrade（用户面不贴【收口说明】）
 * ``.ceo_mutation`` — CEO mutation / disk-landing claims
 * ``.cloud_web`` — cloud web verify latch + enforce
 * ``.cutoff`` — cutoff / token_budget latch（用户面不贴【收口说明】）
@@ -109,7 +109,6 @@ from .resume import (
     is_process_dispatch_preamble,
     pre_pause_for_user_visible_continuity,
     reconcile_resume_closing,
-    resume_continuity_steer,
     rewrite_stale_ask_after_dispatch,
 )
 from .verify_budget import (
@@ -185,7 +184,6 @@ __all__ = [
     "reconcile_resume_closing",
     "reconcile_unresolved_write_ownership_latch",
     "reset_turn_scoped_closing_state",
-    "resume_continuity_steer",
     "rewrite_stale_ask_after_dispatch",
     "run_ids_for_write_ownership_scan",
     "tier_forbids_posture_a",

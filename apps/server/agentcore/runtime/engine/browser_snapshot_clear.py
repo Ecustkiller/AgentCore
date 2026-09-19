@@ -1,19 +1,10 @@
-"""回合内 browser 大树投影：折叠旧 snapshot 的 elements / accessibility_tree。
+"""Retired per-round sliding projection for old browser snapshot trees.
 
-Within one ReAct turn, repeated ``browser(action=snapshot)`` (and any browser result whose
-``untrusted_web_content`` carries an elements list or accessibility tree) re-pays those
-large trees every round. This module keeps only the most recent ``keep_recent`` results
-verbatim and strips the bulky tree fields from older ones — a PURE projection at
-request-assembly time (``build_request_window``), like ``tool_clear`` / ``write_args_clear``.
+Do not call from ``build_request_window``. Same-window rewrite is window compact
+only. Sliding this every round rewrote mid-history and forfeited the prefix cache.
 
-When an older tree is folded, the projection also attaches ``ref_delta: {added, removed}``
-comparing that tree's refs to the next newer browser tree in the window — so the model can
-see structural change without retaining a second full tree (``keep_recent=1`` stays).
-
-Canonical ``messages`` / Turn Journal keep the full output; resume rebuilds then
-re-applies. Prefix-cache safe: the omitted stub is a pure function of the original
-JSON plus the next tree's refs (stable ``sort_keys`` dump); once a result falls out of
-the keep-window its bytes stay fixed across rounds because its successor tree is fixed.
+The functions below still omit older ``elements`` / ``accessibility_tree`` when
+invoked as a library. Canonical ``messages`` / journal keep the full output.
 """
 
 from __future__ import annotations

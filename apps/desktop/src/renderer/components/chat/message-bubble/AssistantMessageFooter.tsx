@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { copyText } from "@/lib/clipboard";
-import { formatCompact, formatDuration } from "@/lib/format";
+import { formatCompact, formatDuration, formatOutputSpeed } from "@/lib/format";
 import { MESSAGE_ACTION_REVEAL_CLASS } from "@/lib/messageActionReveal";
 import { formatMessageExport } from "@/lib/messageExport";
 import { completedAtIso } from "@/lib/runningElapsed";
@@ -20,7 +20,7 @@ import {
   precedingUserMessageId,
   supportDiagnosticExtrasFromError,
 } from "@/lib/supportDiagnostics";
-import { notifyError, notifySuccess } from "@/lib/toast";
+import { notifyError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { setMessageFeedback } from "@/services/messages";
 import type { UsageBreakdown } from "@/services/usage";
@@ -53,7 +53,7 @@ import {
 } from "./MessageActions";
 import { useCopyAction } from "./useCopyAction";
 
-/** Signal-only summary (cost / duration) — token + ReAct rounds live in「更多」. */
+/** Signal-only summary (cost / duration) — token, 输出速度, ReAct rounds live in「更多」. */
 export function AssistantMessageMetaSummary({
   costText,
   durationMs,
@@ -81,7 +81,11 @@ export function AssistantMessageMetaSummary({
   }
   if (durationText) {
     pushSep();
-    parts.push(<span key="dur">用时 {durationText}</span>);
+    parts.push(
+      <span key="dur" aria-label={`用时 ${durationText}`}>
+        {durationText}
+      </span>,
+    );
   }
 
   return (
@@ -91,8 +95,16 @@ export function AssistantMessageMetaSummary({
   );
 }
 
-function UsageDetailPanel({ usage }: { usage: UsageBreakdown }) {
+function UsageDetailPanel({
+  usage,
+  generationMs,
+}: {
+  usage: UsageBreakdown;
+  generationMs?: number;
+}) {
   const cache = cacheUsageDisplay(usage);
+  const speedText =
+    generationMs != null ? formatOutputSpeed(usage.output, generationMs) : null;
   return (
     <div className="space-y-1 px-3 py-1.5 text-xs text-muted-foreground">
       <div className="flex justify-between gap-3 tabular-nums">
@@ -129,6 +141,12 @@ function UsageDetailPanel({ usage }: { usage: UsageBreakdown }) {
         <span>输出</span>
         <span className="text-foreground">{formatCompact(usage.output)}</span>
       </div>
+      {speedText ? (
+        <div className="flex justify-between gap-3 tabular-nums">
+          <span>输出速度</span>
+          <span className="text-foreground">{speedText}</span>
+        </div>
+      ) : null}
       {usage.reasoning > 0 && (
         <div className="flex justify-between gap-3 tabular-nums">
           <span>思考</span>
@@ -141,12 +159,8 @@ function UsageDetailPanel({ usage }: { usage: UsageBreakdown }) {
   );
 }
 
-async function copyDiagnostic(
-  label: string,
-  value: string,
-  description?: string,
-) {
-  if (await copyText(value)) notifySuccess(`已复制 ${label}`, { description });
+async function copyDiagnostic(value: string) {
+  await copyText(value);
 }
 
 /** 消息永久链接 (对话基础功能补齐): a hash anchor that reopens the conversation and
@@ -210,7 +224,6 @@ export function MessageMoreMenu({
             <DropdownMenuItem
               onSelect={() =>
                 void copyDiagnostic(
-                  "消息链接",
                   messagePermalink(conversationId, serverMessageId),
                 )
               }
@@ -231,7 +244,10 @@ export function MessageMoreMenu({
                 <DropdownMenuSeparator />
               )}
               <DropdownMenuLabel>用量详情</DropdownMenuLabel>
-              <UsageDetailPanel usage={usage} />
+              <UsageDetailPanel
+                usage={usage}
+                generationMs={message.generationMs}
+              />
               {message.rounds != null && message.rounds > 1 && (
                 <div className="flex justify-between gap-3 px-3 pb-1.5 text-xs text-muted-foreground">
                   <span>ReAct 轮次</span>
@@ -249,7 +265,7 @@ export function MessageMoreMenu({
                 onSelect={() => {
                   void buildSupportDiagnosticPack(diagnosticIds).then(
                     (text) => {
-                      if (text) void copyDiagnostic("排查包", text);
+                      if (text) void copyDiagnostic(text);
                     },
                   );
                 }}
@@ -323,6 +339,7 @@ export function AssistantMessageFooter({
   onRegenerate,
   displayError,
   pinSupportPack = false,
+  showRegenerate,
 }: {
   message: Message;
   captainContext: ContextBlockWire[];
@@ -332,6 +349,8 @@ export function AssistantMessageFooter({
   displayError?: { code: string; message: string } | null;
   /** Team-strip fail/partial: keep「更多」visible (not hover-reveal) as the pack host. */
   pinSupportPack?: boolean;
+  /** Arbitrator: hide when a named recovery is already the unique retry. */
+  showRegenerate: boolean;
 }) {
   const hasProcess = (message.process?.length ?? 0) > 0;
   // Prefer displayError so synthesizable empty failures (no error payload) still copy.
@@ -403,7 +422,9 @@ export function AssistantMessageFooter({
             </SimpleTooltip>
           )}
           <FeedbackButtons message={message} />
-          <RegenerateMessageAction onRegenerate={onRegenerate} />
+          {showRegenerate ? (
+            <RegenerateMessageAction onRegenerate={onRegenerate} />
+          ) : null}
           <CloneMessageAction messageId={message.id} />
           {!pinSupportPack ? more : null}
         </div>

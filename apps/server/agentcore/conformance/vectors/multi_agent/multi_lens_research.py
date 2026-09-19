@@ -1,6 +1,6 @@
 """多视角深度调研（幕 1）端到端合成向量。
 
-对齐历史多维调研图（录制时具名 ``lens_crosscheck``）：CEO delegate →
+对齐历史多维调研图：CEO delegate →
 4 异质透镜并行 → 汇总分析师 depends_on 四路（handoff 携 ``motion_card``）→
 CEO 收尾呈报「建议开辩」（开辩入口是对话里点名，不是 followups chips）。
 
@@ -95,8 +95,24 @@ def _multi_agent_multi_lens_research() -> list[SSEEvent]:
             "dc1",
             "delegate",
             {
-                "playbook": "lens_crosscheck",
-                "playbook_args": {"topic": _TOPIC},
+                "tasks": [
+                    {
+                        "id": rid,
+                        "role": role,
+                        "task": task,
+                    }
+                    for rid, role, task in _LENSES
+                ]
+                + [
+                    {
+                        "id": "synthesizer",
+                        "role": "汇总分析师",
+                        "task": (
+                            f"交叉验证综述（共识/冲突/分歧；必要时附建议开辩命题卡）· {_TOPIC}"
+                        ),
+                        "depends_on": [rid for rid, _role, _task in _LENSES],
+                    }
+                ],
                 "coordinate": False,
             },
         ),

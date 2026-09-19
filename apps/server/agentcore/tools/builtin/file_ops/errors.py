@@ -296,8 +296,8 @@ def _outside_workspace_msg(
         return (
             f"路径 '{path}' 超出了工作区范围。"
             "若要把该本机目录进当前云桌：引导 Composer「先在云上做」；"
-            "仅当用户明确要求新建云文件夹时才用 create_folder"
-            "（禁止为过写盘闸而建；云会话裸聊写盘缺桌由运行时自动建云桌）；"
+            "云会话裸聊写盘缺桌由运行时自动建云桌；"
+            "用户要新开云文件夹：在「我的文件」新建；"
             "打开本机目录用 open_local_project / register_local_project / "
             "bind_local_folder（≠离线）。"
             f"若本意是工作区内文件：{relative_fix}"

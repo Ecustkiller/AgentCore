@@ -10,7 +10,7 @@ import {
   useRef,
 } from "react";
 
-/** Session-level geometry for one in-app float (UX §十 · 应用内浮窗). */
+/** Session-level geometry for one in-app float (UX §四 · 应用内浮窗). */
 export type FloatingPanelRect = {
   x: number;
   y: number;
@@ -66,7 +66,7 @@ function clampRect(
 }
 
 /**
- * In-app float chrome (JetBrains Float spirit · UX §十): title · drag · focus
+ * In-app float chrome (JetBrains Float spirit · UX §四): title · drag · focus
  * raise · dock · close. Geometry is session-level via `rect` / `onRectChange`.
  * Body is a slot — SidePanel / run body wiring is a separate block.
  */

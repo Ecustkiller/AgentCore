@@ -4,7 +4,7 @@ code: apps/server/agentcore/memory/
 related:
   - docs/03-AI核心/上下文传递可视化.md
   - docs/03-AI核心/上下文工程.md
-  - docs/02-架构/双模式工作区.md
+  - docs/02-架构/工作区.md
   - docs/03-AI核心/工具与能力系统.md
   - docs/01-产品/现行信息.md
   - docs/03-AI核心/编排器与CEO主Agent.md
@@ -14,7 +14,7 @@ skip_if:
 
 # Agent 记忆与知识系统
 
-> **边界**：记忆分层 / 注入 / 约定目录 = **本文**；通道可视化 → [上下文传递可视化](/docs/03-AI核心/上下文传递可视化.md)；注入侧 Assembler / 按需与写侧配额 → [上下文工程](/docs/03-AI核心/上下文工程.md)；云/本地 Backend → [双模式工作区](/docs/02-架构/双模式工作区.md)。
+> **边界**：记忆分层 / 注入 / 约定目录 = **本文**；通道可视化 → [上下文传递可视化](/docs/03-AI核心/上下文传递可视化.md)；注入侧 Assembler / 按需与写侧配额 → [上下文工程](/docs/03-AI核心/上下文工程.md)；云/本地 Backend → [工作区](/docs/02-架构/工作区.md)。
 >
 > → 见代码：`apps/server/agentcore/memory/`
 >
@@ -50,7 +50,7 @@ offers_tools: host, debate  # 可选；查阅后启用的已装配按需工具 /
 
 - **已知键只有这些**。判据：**能被文件系统结构本身承载的留在结构里，不能承载的才进 frontmatter**。名字由文件名承载、作用域由目录层级承载，导出时不会丢，进 frontmatter 反而制造第二个可写副本（文件名与 `title:` 打架时听谁的）；生效档、摘要、绑定手脚没有任何结构能承载，只能进。`offers_tools` 不派生 DB 列：装配表是活回合事实，不是条目索引。
 - **键名英文 + 生效档用枚举**。用户手改 frontmatter 是边缘路径（主编辑路径是 UI，UI 恒显中文徽章）；生态互通与 AI 生成正确率才是主路径——`apply` / `description` 与 DB 列 `apply_mode` / `description` 同名同值，派生是恒等映射、无需一张会漂的中英对照表，从 Cursor `.mdc` 粘一条过来零成本。不取 Cursor 的 `alwaysApply: true|false`：布尔的 `false` 要靠否定推导出「按需」，且日后真需第三档就得破契约。
-- **生效两档**：`always | on_demand`。**否决**第三档 `conditional`（布尔 `alwaysApply: false` 靠否定推导「按需」，真要第三档就得破契约）。绑定手脚不是第三档加载：常驻仍只把正文打进 `<设定>`，工具表仍等 `consult`。
+- **生效两档**：`always | on_demand`。**否决**第三档 `conditional`（布尔 `alwaysApply: false` 靠否定推导「按需」，真要第三档就得破契约）。绑定手脚不是第三档加载：常驻仍只把正文打进 `<设定>`；工具若已装配则已在开场表，consult 只取正文。
 - **`ai_maintained` 不进 frontmatter**，是「frontmatter 为真源」的唯一例外：它描述的是**写入者身份**而非条目内容，且 AI 有权写正文——若在正文里，AI 只需写一行 `ai_maintained: false` 就能伪装成用户规则，绕开「AI 写入遇满停摆」的写侧闸并污染治理线。真源留 DB，只由写入路径按调用者身份设置。
 - **不引 YAML，自写严格小解析器**：已知键用不上 YAML 的表达力，却要吃它的坑（`apply: no` 解析成布尔 False、`description: 12:30` 当六十进制、锚点与多行标量），且服务端今天并无 YAML 依赖。**已知键按 `key: value` 行解析；未知键当不透明文本原样保留；写回走文本级最小编辑**——绝不 parse-then-serialize，那会吃掉未知键、注释与键序（往返数据丢失），而正文要被反复读写。该子集本身是合法 YAML，故外部粘贴的简单 frontmatter 直接可用，`globs: [...]` 之类也不炸（不解释其值）。`offers_tools` 非法 token 丢弃、不当解析失败。
 - **「键缺席」≠「解析失败」**：没写 `apply` 是定义良好的状态，缺省 **`on_demand`**——默认常驻等于随手粘个文件就静默扩大每回合注入面。空 `description` 同理不是错误。
@@ -81,13 +81,13 @@ offers_tools: host, debate  # 可选；查阅后启用的已装配按需工具 /
 - **按需** → **一个**目录（名字 + `description`）+ **一个** `consult`
 - **`@` 提及** = ✅ 运行时把一条按需条目临时当常驻用；不是 frontmatter 的第三个取值。对话页 `@` 点名设定走 `kind=document`（`document_id`），注入 `<钉住条目>`，**不**进附件块、不落盘。@ 工作区文件 / 图片 / 对话仍走附件体系，按被 @ 的东西分流。→ 见代码: `runtime/resolve/attachment_context.py` · 桌面 `useMentionMenu.ts`
 
-**合并 consult 的两处定案**：单工具 audience = **CEO + worker**（Skill 对 worker 同样露出 HOW；代价是 worker 常驻目录多几行）。门控为单一 `has_entries`。拉不到统一为**软 miss**（`success=True` + 「没有这条」，名字拼错不该炸回合）；playbook 入口靠 `delegate` 工具 schema 自身可见。观测事件合一为 `consult.{hit,miss}`。
+**合并 consult 的两处定案**：单工具 audience = **CEO + worker**（Skill 对 worker 同样露出 HOW；代价是 worker 常驻目录多几行）。门控为单一 `has_entries`。拉不到统一为**软 miss**（`success=True` + 「没有这条」，名字拼错不该炸回合）。观测事件合一为 `consult.{hit,miss}`。
 
 **基座边界**：进基座 = 会被注入的条目（纯 DB 正文）。不进 = 运行产物（✅ `工作稿` / `research` / `debate` / `reviews`）、代码、附件、用户仓库自带 md → 盘上文件 + `file_read`。**系统 Skill 正文也不进基座**（真源在代码）但**参与 `<按需目录>`**——「不进基座」讲的是存储归属，不是可见性。情景摘要落 `memory_episodes` 后立刻消化、不注入、**不进基座**（消化状态在 `memory_scope_states`）。**否决**把消化状态当基座条目打标：会继承条目语义，frontmatter 盖进 JSON sidecar 后记账静默失效。消化状态用 `digested_at`；消化满 `memory_episode_retention_days`（默认 30 天）硬删。`文档/` 是纯产物目录。
 
 **配额：闸在写侧，读侧全量。** 常驻满了就不许再往常驻加；读侧永远全量注入、不截断。引擎不替用户挤：无分池、无自动淘汰、无 AI 溢出决策。常驻池的唯一界是 `memory_always_max_chars`。**否决**读侧每文件封顶、以及任何**拿闸上限当分母**的呈现（「还剩 N 万字」/ 百分比 / 进度条）——用量条会把安全阀读成「还能再塞」。闸对人不可见，只拦 AI 巩固；停摆卡只说「常驻太多，AI 暂时记不下新的」，不报字符配额。→ 见代码: `memory/always_quota.py`
 
-- **读侧不截断、不按权威排序淘汰**。常驻块按用户规则层叠（不把核叶排进设定）。取消 `role` 三分仍 ⏳。
+- **读侧不截断、不按权威排序淘汰**。常驻块按用户规则层叠（不把核叶排进设定）。
 - **计量用字符数，取消条数上限**：条目化后 `MAX_INSTRUCTION_DOCS` 失去意义（一条可长可短）。真实成本是 token，但本闸意在防无意膨胀而非精算成本，字符数确定性好且不绑某个模型的 tokenizer。闸的数字不进产品文案。**行尾仍可标每条常驻占用**（`always_chars`）：职责与满池卡片的 `quota_holder` 同源——回答「该删谁」；不足千字（含 0）一律不标。工具箱提示词页用货架卡点开条目，不画常驻构成条（「该删谁」看对话配额卡的 `quota_holder` 与卡上 ≥千字的副标题）。文件夹作用域的计量仍是「全局 ∪ 本文件夹」（`global_chars` / `project_chars`，已落库 wire），只给闸与卡片用，文件页不再画两段进度条。**池只计用户自己的规则**（`ai_maintained=false`）；AI 维护核叶（偏好 / 画像 / 导航）不占池、`always_chars` 为 null（与读侧 `<设定>` 只注入用户规则一致）。
 - **闸对「谁在写」敏感**。**用户**编辑已有常驻致超限 → **放行 + 警告**：拒绝保存他正在写的内容不可接受；他可借此把单条改大绕过闸，那是可见的自主选择。**AI** 写入用户规则——新建**或**归并进已有常驻——遇满一律**停摆**。若 AI 归并也放行，闸对最主要的增长源即失效（AI 只需永远归并、从不新建，常驻就能无限膨胀）。写 AI 维护核叶不走此闸（核叶不占池）。判据用写侧已有的 `ai_maintained`，不引入新概念。
 - **AI 停摆 = 推卡片，不降级、不留额度池**（不把该常驻的新条目改写成按需，也不给 AI 单独配额），与「治理靠可见性」一致。卡片须按「同一未决状态只推一次、用户处理或内容变化才重置」抑制重复：这是状态告知，非否决表里的累计计数软提醒。
@@ -145,7 +145,7 @@ GROUP BY 1;
 
 ### 文档/项目 归位
 
-基座条目在 `documents` 虚拟树里（`parent_id`），不是盘上文件；本机传统模式对基座条目也不是「本机文件为权威」。`文档/` 才是工作区盘；`文档/项目/` 厚约定已迁为 `主题/` 存量稿（不进模型），`文档/` 只留运行产物（`工作稿` / `research` / `debate` / `reviews`）。迁移是一次性读盘入 DB，**不**建双向同步。盘上原件归档进 `文档/已迁入记忆/`——不得留下「看得见、改得动、却无效果」的副本（原地双写比删除更伤人；直接删则动用户自己的盘）。服务端 pass 只看得见云文件夹（`rel_path IS NOT NULL`）；本机绑定盘上的存量未迁，但已无特殊语义，是普通文件。裸聊 scratch 不纳入。一次性 pass 须晚于 `migrate_workspace_tree.py`（读迁移后的 `tree/` 落点；跑反会扫到 0 个却打印成功）→ [双模式工作区 §5.4 去「项目」概念 · 容器统一为文件夹](/docs/02-架构/双模式工作区.md)。→ 见代码: `memory/migrate_project_docs.py` · `scripts/migrate_project_docs.py`
+基座条目在 `documents` 虚拟树里（`parent_id`），不是盘上文件；本机传统模式对基座条目也不是「本机文件为权威」。`文档/` 才是工作区盘；`文档/项目/` 厚约定已迁为 `主题/` 存量稿（不进模型），`文档/` 只留运行产物（`工作稿` / `research` / `debate` / `reviews`）。迁移是一次性读盘入 DB，**不**建双向同步。盘上原件归档进 `文档/已迁入记忆/`——不得留下「看得见、改得动、却无效果」的副本（原地双写比删除更伤人；直接删则动用户自己的盘）。服务端 pass 只看得见云文件夹（`rel_path IS NOT NULL`）；本机绑定盘上的存量未迁，但已无特殊语义，是普通文件。裸聊 scratch 不纳入。一次性 pass 须晚于 `migrate_workspace_tree.py`（读迁移后的 `tree/` 落点；跑反会扫到 0 个却打印成功）→ [工作区 §5.4 去「项目」概念 · 容器统一为文件夹](/docs/02-架构/工作区.md)。→ 见代码: `memory/migrate_project_docs.py` · `scripts/migrate_project_docs.py`
 
 ⏳ **余项**：取消 `role` 三分。用户技能入基座 ✅（系统 Skill 真源留代码；官方 HOW 只读，不占槽 → [工具与能力 · 用户技能](/docs/03-AI核心/工具与能力系统.md#用户技能与可编目录)）。
 
@@ -168,7 +168,7 @@ GROUP BY 1;
 
 ## 一、分层
 
-> 存储名仍认下列叶子；文件页 UI 已取消「记忆 / 规则 / 文档」三夹。⏳ 取消 `role` 三分 → 上节余项。
+> 存储名仍认下列叶子；文件页 UI 已取消「记忆 / 规则 / 文档」三夹。DB `role` 余项 → 上节。
 
 | 层级 | 载体 | 生命周期 | 状态 |
 |------|------|----------|------|
@@ -176,7 +176,7 @@ GROUP BY 1;
 | **用户规则** | 文件树 `rule` + `ai_maintained=false` | 持久、进下一场 | ✅ |
 | 文件夹知识库 / 跨 Agent 共享 | — | — | ❌ 延后 |
 
-记忆与规则**同载体、不同注入**：用户规则（`ai_maintained=false`）进 `<设定>` / 按需 `consult`；AI 维护笔记留盘，**不**进下一场对话。作用域靠**位置**（全局 = 云端根；文件夹层 = Folder 下同名夹），不另立开关。协作桌成员吃同一张桌的**已有**文件夹层**用户规则**，不是本表「文件夹知识库 / 跨 Agent 共享」那种另立实体 → [工作区 · §八、协作桌（文件夹成员）](/docs/02-架构/双模式工作区.md)。账号级仍私有。
+记忆与规则**同载体、不同注入**：用户规则（`ai_maintained=false`）进 `<设定>` / 按需 `consult`；AI 维护笔记留盘，**不**进下一场对话。作用域靠**位置**（全局 = 云端根；文件夹层 = Folder 下同名夹），不另立开关。协作桌成员吃同一张桌的**已有**文件夹层**用户规则**，不是本表「文件夹知识库 / 跨 Agent 共享」那种另立实体 → [工作区 · §八、协作桌（文件夹成员）](/docs/02-架构/工作区.md)。账号级仍私有。
 
 ```
 AgentCore/                ✅ UI `.agentcore`（用户平时不必打开；打开入口是终稿路径可点与工作区树）
@@ -193,7 +193,7 @@ AgentCore/                ✅ UI `.agentcore`（用户平时不必打开；打�
     └── research/ debate/ reviews/  运行产物（无 `项目/`）
 ```
 
-- 叠加注入：绑定文件夹的对话 = 全局用户规则 + **祖先链各层（外→内）** + 当前层用户规则。祖先层由 `rel_path` 前缀解析，注入顺序即优先级（近的覆盖远的），`consult` 取按需用户规则正文反向从最近层找起 → 定案 [双模式工作区 §5.4](/docs/02-架构/双模式工作区.md)。AI 笔记（偏好 / 画像 / 导航 / 主题）不沿这条读路径进 prompt。
+- 叠加注入：绑定文件夹的对话 = 全局用户规则 + **祖先链各层（外→内）** + 当前层用户规则。祖先层由 `rel_path` 前缀解析，注入顺序即优先级（近的覆盖远的），`consult` 取按需用户规则正文反向从最近层找起 → 定案 [工作区 §5.4](/docs/02-架构/工作区.md)。AI 笔记（偏好 / 画像 / 导航 / 主题）不沿这条读路径进 prompt。
 - **用户规则加载**：对外仅 `always` | `on_demand`；新建/存量默认 always。短硬约束常驻；长条文/偶发场景标按需，相关回合由模型 `consult` 自取（谁来拉 = 模型自选）。CEO 用 `file_write` / `file_read` / `file_delete` / `file_list` 操作 `.agentcore/规则/*.md`（一个主题一篇；提示词条目，不落工作区盘，落到 documents；工作区根列举看不到）。`apply` / `description` 在篇首 YAML，缺省 always。队员不能改。`<设定>` 注入带 `### .agentcore/规则/文件名`。
 - **规则按需 ≠ 记忆主题**：on_demand 规则仍走 `<按需目录>` + `consult`（约束/合规附录）；主题文件留盘，不进目录。勿把百科塞进规则凑按需。
 - **双层文件夹知识**：短入口 / 厚内容仍落 `导航.md` / `主题/`（仅文件页可改；系统不再写）；读侧不把它们拼进下一场对话。不写用户仓库根 `AGENTS.md` / `docs/`。
@@ -201,7 +201,7 @@ AgentCore/                ✅ UI `.agentcore`（用户平时不必打开；打�
 - 冲突：用户规则靠措辞 + 就近相关性。读侧按层叠顺序，近的在后。
 - `文档/` 与同树旁路 `AgentCore/index/`（系统噪音；不写入、不检索）正交：导航/主题管叙事路由。勿与 `~/Documents/AgentCore/` 工作区容器混淆。
 - 主题继续 `name=主题/<slug>.md`（非真实嵌套 folder）——有意设计。文件页把这些行收进**默认折叠**的「主题」夹（条数写在夹上；夹内只显示 slug），不是三分夹回潮。
-- **约定常量**：约定文档子目录 `research`/`debate`/`reviews`（过程稿抽屉 `工作稿`）→ 代码 `workspace/stage_dirs.py`；`文档/` 已无 `项目/`。`AgentCore/` 整体 UI = **`.agentcore`**；用户要拿走的文件在派单时写入工作区，否则留在抽屉、从终稿路径或工作区树打开 → [工作区 §四](/docs/02-架构/双模式工作区.md#四约定文档目录约定)。
+- **约定常量**：约定文档子目录 `research`/`debate`/`reviews`（过程稿抽屉 `工作稿`）→ 代码 `workspace/stage_dirs.py`；`文档/` 已无 `项目/`。`AgentCore/` 整体 UI = **`.agentcore`**；用户要拿走的文件在派单时写入工作区，否则留在抽屉、从终稿路径或工作区树打开 → [工作区 §四](/docs/02-架构/工作区.md#四约定文档目录约定)。
 
 → 见代码：`memory/document_store.py`、`memory/migrate_agentcore.py`
 
@@ -209,7 +209,7 @@ AgentCore/                ✅ UI `.agentcore`（用户平时不必打开；打�
 
 ## 二、注入
 
-> 按需侧「单目录 + 单工具」；写侧常驻配额闸 → `memory/always_quota.py` + `GET /v1/documents/always-quota`（`file_write` overlay / `mutate_user_rule` 与文件页同一闸）；读侧全量不截断。⏳ 取消 `role` 三分 → 目标形态余项。
+> 按需侧「单目录 + 单工具」；写侧常驻配额闸 → `memory/always_quota.py` + `GET /v1/documents/always-quota`（`file_write` overlay / `mutate_user_rule` 与文件页同一闸）；读侧全量不截断。DB `role` 余项 → 目标形态。
 
 1. 工作记忆经 `load_recent_history` 进窗口（CEO / worker 共用）。
 2. `<设定>` 只叠用户自己的常驻规则（`ai_maintained=false`）：全局 → 祖先外→内 → 当前。标签只说在哪张桌。AI 维护笔记（偏好 / 画像 / 导航 / 主题）留盘，**不进** `<设定>`，也 **不进** `<按需目录>` / `consult`。改顺序会一次性打穿前缀缓存，之后新前缀稳住。桌面 sidecar **有 account 票**时：prepare/resume 对 always 用户规则 / on_demand 规则目录 **只读进程快照缓存**（miss → 空注入、不 await 云 HTTP）；`consult` 取规则正文与目录**同一份快照**（不另打 `/rules/list`）。assemble 的 explore/画像/scope-state 经 `prepare_reads_cache_only` 同样只读快照（warm 含每作用域 scope-state）；非回合 `warmAccountRulesMemory` 并行拉取并 seed（`/rules/list` 一次供 always+on_demand，并回传云算好的 `folder_chain` 与祖先层规则；warm 仍把**祖先各层的画像 / 主题 / scope-state 一并拉进同一快照**——不拼进 prompt。本机没有 folders 表，链只能由云给）。快照有 **300s TTL**（他机改动 / 漏刷的兜底），故 warm 回传 `ttlSeconds`、桌面按 account+folder 记到期时点并在下次用前**提前续期**；**本机文件页写入**（规则 / 记忆叶子）与 sidecar 上写 `.agentcore/规则/` 成功后立刻对**活着的** sidecar 强制重暖（忽略 TTL）。**detached execution 存活期**（`execution_detached` → `execution_completed`）桌面按同一 TTL **周期续暖**——CEO 回合 `startTurn` 已返回、团队仍跑时必须续，后台团队跑完只通知、不另开回合。只 warm 一次的话，TTL 到期后 miss 即空注入——用户规则会**静默**全失，故续期握手属契约而非优化。空注入仍打 `account.rules_memory_cache_miss`。**无票**仍走本地 DB。
@@ -250,7 +250,7 @@ AgentCore/                ✅ UI `.agentcore`（用户平时不必打开；打�
 | 导航.md | 下次能省掉的一步 | 动作清单实证 | 仅文件页。系统不写 |
 | 主题/*.md | 以后还会来查的厚知识 | 不能从产品或工作区当场拿到 | 仅文件页。对话内仍只写用户规则 |
 
-**能从产品或工作区当场拿到的，不准写进用户记忆。** playbook / 工具 / Skill / 手册答案的真源在产品（`consult` / `delegate` / 手册）；路径与代码的真源在工作区（`file_read` / `grep`）。旧场原文用 `search_conversations`，不升格成设定。抄进主题不会改变以后怎么做，只会过时、挤按需目录 → [现行信息](/docs/01-产品/现行信息.md)。闲聊 / 查产品功能 / 一次性试写：摘要仍落库，**零常驻写入、零新主题、零卡片**。
+**能从产品或工作区当场拿到的，不准写进用户记忆。** 工具 / Skill / 手册答案的真源在产品（`consult` / `delegate` / 手册）；路径与代码的真源在工作区（`file_read` / `grep`）。旧场原文用 `search_conversations`，不升格成设定。抄进主题不会改变以后怎么做，只会过时、挤按需目录 → [现行信息](/docs/01-产品/现行信息.md)。闲聊 / 查产品功能 / 一次性试写：摘要仍落库，**零常驻写入、零新主题、零卡片**。
 
 - 用户明示指令 → CEO `file_write` **用户规则**（`ai_maintained=false`）✅：`.agentcore/规则/*.md`，一个主题一篇 markdown，整篇覆盖。给人看先写在对话里，确认后再写。队员不能改。文件页仍可人手改删（与对话内操作双轨，非互斥）。冲突：同名文件以后写为准，不以一句一条去重碰运气。**内容完整性**：半截/`…` 收尾或中段残缺标记 → 拒写入（与 [工具参数契约](/docs/03-AI核心/工具与能力系统.md) 同纪律）。
 - 记忆能力**产品层恒开**（无用户总闸）；内容由对话内写规则与文件页编辑/清空双轨控制。异常回合仍跳过沉淀并推进 watermark。
@@ -269,7 +269,7 @@ AgentCore/                ✅ UI `.agentcore`（用户平时不必打开；打�
 
 ## 四、跨会话对话日志
 
-Worker / CEO 开场即持 `search_conversations` / `read_conversation`，检索本账号历史原文。**过往事实走这里**（上次方案、旧场约定），不靠画像 / 主题笔记。短查询自己搜读，成规模查阅仍可派。`query` 必填：未加引号的词须**同场都出现**（标题或可见用户/助手正文）；一次 1–2 词，词多易空可另开短查询；引号包精确短语。默认 20 条、最多 100。侧栏全局搜 GET `/v1/search` 的 conversation 段仍只搜标题整串（消息面仍是正文子串）。默认 `scope=folder`（裸聊无文件夹则按 all）；`scope=all` 全账号。含已归档、不含已删除。摘要带命中条序。`read_conversation` 可凭 `conversation_id` 打开，或只传 `query`：唯一命中则打开，多场列出请再带编号；有编号时同一 query 从第一条命中读起。默认 `focus=dialogue`（用户/助手可见正文）；工具/辩论/思考走 `focus=process`。超长按**消息下标**分页（`m:N`），10 万字是病态安全阀不是内容整形。用户 `@` 对话附件走同一套对话稿（不信客户端浅文）。能力**产品层恒开**（无独立隐私闸；运行时不再穿 `memory_enabled` / `conversation_history_access`，两列已 drop）。控制面为编辑/清空长期记忆与删除对话，而非总开关。
+Worker / CEO 开场即持 `search_conversations` / `read_conversation`，检索本账号历史原文。**过往事实走这里**（上次方案、旧场约定），不靠画像 / 主题笔记。短查询自己搜读，成规模查阅仍可派。`query` 必填：未加引号的词须**同场都出现**（标题或可见用户/助手正文）；一次 1–2 词，词多易空可另开短查询；引号包精确短语。固定 20 条。侧栏全局搜 GET `/v1/search` 的 conversation 段仍只搜标题整串（消息面仍是正文子串）。默认 `scope=folder`（裸聊无文件夹则按 all）；`scope=all` 全账号。含已归档、不含已删除。摘要带命中条序。`read_conversation` 可凭 `conversation_id` 打开，或只传 `query`：唯一命中则打开，多场列出请再带编号；有编号时同一 query 从第一条命中读起。默认 `focus=dialogue`（用户/助手可见正文）；工具/辩论/思考走 `focus=process`。超长按**消息下标**分页（`m:N`），10 万字是病态安全阀不是内容整形。用户 `@` 对话附件走同一套对话稿（不信客户端浅文）。能力**产品层恒开**（无独立隐私闸；运行时不再穿 `memory_enabled` / `conversation_history_access`，两列已 drop）。控制面为编辑/清空长期记忆与删除对话，而非总开关。
 
 **对外口径**（CEO 对用户说话）：白话三层——当前会话 / 你写的规矩 / 旧场可查（可自己查；成规模可派）；不报工具名与内部角色；禁止装不知道或空口编造。「需要派人去查」仅当选择 `delegate`，不是能力锁。→ 见代码：`runtime/skills/product_help.py`（【记忆/历史·对人怎么说】）
 
@@ -279,7 +279,7 @@ Worker / CEO 开场即持 `search_conversations` / `read_conversation`，检索�
 
 ## 五、其它要点
 
-- **自动标题**：侧边栏 UX，非记忆层；不进 Agent 上下文。云/本地均在首条用户消息可用后并行铸题（只用用户首句，`assistant_reply=""`）。云走 `schedule_title_generation` + SSE `title_generated`；本地 sidecar 无云 SSE，桌面首发并行 `POST …/auto-title`，回合回写仅空标题兜底（`_title_inflight` 时跳过）。**`title` 只存模型铸出的真标题**：429 / 超时 / 解析失败 / 闸拒一律不写库、字段保持空，靠既有「title 为空」触发在后续回合再铸（不是新重试队列）。展示层截断首句由**读接口**用 `fallback_title` 填进响应 `title`（列表 / grouped / GET；DB 列仍空）。无用户消息时响应保持空，客户端显示「新对话」。`fallback_title` 仍用于 `chat.title_degraded.title_chars` 与目录名形状判断。**429 不在这层重试**：退避与放弃归 LLM 网关。失败落 `chat.title_degraded`（`reason` 归因，`persisted` 区分是否写入过 `title`——现网失败为 `false`）。已有真标题后再铸仍否决。
+- **自动标题**：侧边栏 UX，非记忆层；不进 Agent 上下文。云/本地均在首条用户消息可用后并行铸题（只用用户首句，`assistant_reply=""`）。云走 `schedule_title_generation` + SSE `title_generated`；本地 sidecar 无云 SSE，桌面首发并行 `POST …/auto-title`，回合回写仅空标题兜底（`_title_inflight` 时跳过）。**`title` 只存模型铸出的真标题**：429 / 超时 / 解析失败 / 闸拒一律不写库、字段保持空，靠既有「title 为空」触发在后续回合再铸（不是新重试队列）。展示层截断首句由**读接口**用 `fallback_title` 填进响应 `title`（列表 / grouped / GET；DB 列仍空）。无用户消息时响应保持空，客户端显示「新对话」。`fallback_title` 仍用于 `chat.title_degraded.title_chars` 与目录名形状判断。**429 不在这层重试**：退避与放弃归 LLM 网关。失败落 `chat.title_degraded`（`reason` 归因，`persisted` 区分是否写入过 `title`——现网失败为 `false`）。已有真标题后再铸仍否决。**例外**：克隆对话把 `{stem} (n)` 写入列（分叉名，权威 → [术语表 · 克隆对话](/docs/01-产品/术语表.md)），不是铸题失败兜底。
 - **会话摘要记忆层已移除**：跨会话情景对 CEO 分工帮助有限；可复用信号由长期记忆承载。两层协议的「情景沉淀」不注入——与本否决不冲突。
 - **搜索**：取消向量 RAG 作 prompt 自动注入；agentic 检索（`file_read`/`grep`）为主路。工作区文件清单走 `index_files`（@ 提及 / CEO 概览 / worker 名册），不是符号索引。非 RAG 层。→ 见代码：桌面 `opIndexFiles`
 - **远期**：TWM / recall / 委派预算等延后到窗口不足时（DeepSeek 1M 远大于 MVP 用量）。

@@ -25,10 +25,7 @@ vi.mock("@/lib/toast", () => ({
   notifyWarning: vi.fn(),
 }));
 
-vi.mock("@/services/workspace", () => ({
-  exportWorkspaceZip: vi.fn(),
-  exportWorkspaceToLocal: vi.fn(),
-}));
+vi.mock("@/services/workspace", () => ({}));
 
 vi.mock("@/services/mergeLandingDiff", () => ({
   prepareMergeLandingDiff: vi.fn(),

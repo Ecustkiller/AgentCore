@@ -39,13 +39,13 @@ def test_has_research_chain_evidence_preserves_old_offer_sources():
         }
     ]
     assert has_research_chain_evidence(entries_card) is True
-    entries_playbook = [
+    entries_delegate = [
         {
             "kind": "tool_call",
             "payload": {
                 "name": "delegate",
                 "arguments": (
-                    '{"playbook": "lens_crosscheck", "playbook_args": {"topic": "T"}}'
+                    '{"tasks": [{"role": "法律视角", "task": "T"}]}'
                 ),
                 "success": True,
                 "result": "done",
@@ -54,7 +54,7 @@ def test_has_research_chain_evidence_preserves_old_offer_sources():
             },
         }
     ]
-    assert has_research_chain_evidence(entries_playbook) is False
+    assert has_research_chain_evidence(entries_delegate) is False
 
 
 def test_leftover_team_preview_frame_skips_hydrate():

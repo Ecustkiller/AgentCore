@@ -5,8 +5,9 @@ Four sources (skill / on-demand tool / rule / memory) each implement :class:`Con
 and tool ``fetch_by_name`` — directory listing and name resolution cannot drift.
 
 On-demand **tools** ride this directory without sharing a Tool base class: they stay
-on the registry (execute / catalog / permission axes); ``consult`` only promotes them
-onto the OpenAI table. Namespace priority on collision: skill → tool → rule → memory.
+on the registry (execute / catalog / permission axes). The model catalog only lists
+tools whose HOW lives in consult (host / browser); schemas are already on the
+opening FC table. Namespace priority on collision: skill → tool → rule → memory.
 Shadowed names log ``consult.name_shadowed``.
 """
 
@@ -104,11 +105,11 @@ class SkillConsultSource:
 
 @dataclass
 class ToolConsultSource:
-    """Registered on-demand tools: directory row + consult promotes the family.
+    """HOW-bearing assembled tools: directory row + consult body, never a gate.
 
     ``registry`` is the live CEO/worker toolset for this turn. Listing only includes
-    tools that are actually assembled (host withheld → no host_* rows). Fetch offers
-    the family so the next LLM round sees the OpenAI schemas.
+    tools that are assembled **and** have a consult HOW (host / browser). MCP and
+    other on-demand names stay on the FC table but off this catalog.
     """
 
     registry: Any
@@ -118,6 +119,7 @@ class ToolConsultSource:
         del user_id
         from agentcore.tools.on_demand import (
             family_catalog_meta,
+            has_consult_how,
             is_mcp_tool_name,
             is_on_demand_tool,
             on_demand_face,
@@ -126,7 +128,7 @@ class ToolConsultSource:
 
         entries: list[ConsultDirectoryEntry] = []
         for name in self.registry.names:
-            if not is_on_demand_tool(name):
+            if not is_on_demand_tool(name) or not has_consult_how(name):
                 continue
             tool = self.registry.get_optional(name)
             description = tool.schema.description if tool is not None else ""
@@ -151,6 +153,7 @@ class ToolConsultSource:
         del user_id
         from agentcore.tools.on_demand import (
             family_of,
+            has_consult_how,
             is_on_demand_tool,
             render_tool_consult_body,
             resolve_on_demand_name,
@@ -165,12 +168,12 @@ class ToolConsultSource:
         if self.registry.get_optional(resolved) is None:
             return None
         key = resolved
-        self.registry.offer(key)
+        if not has_consult_how(key):
+            return None
         enabled = [
             n
             for n in self.registry.names
             if n in family_of(key, registry=self.registry)
-            and n not in self.registry.deferred_names
         ]
         tool = self.registry.get(key)
         return render_tool_consult_body(
@@ -442,7 +445,7 @@ async def build_merged_consult_source_for_user(
 def _apply_consult_tool_offers(
     body: str, *, kind: str, name: str, registry: object
 ) -> str:
-    """Promote bound on-demand tools. Never runs at always-inject time — consult only."""
+    """Append an on-table note for skill/rule ``offers_tools``. Does not promote."""
     from agentcore.documents.frontmatter import (
         FrontmatterError,
         offers_tools_from_content,

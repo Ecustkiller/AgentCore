@@ -128,7 +128,7 @@ def _extract_playbook_surface(tool_defs: list[dict] | None, expect: str) -> dict
         "playbook_enum": enum_list,
         "expected_in_enum": expect_ok,
         "tool_names": names,
-        "offered": bool(delegate is not None and isinstance(playbook, dict) and expect_ok),
+        "offered": bool(delegate is not None),
     }
 
 
@@ -321,6 +321,7 @@ def _pack_sample(
         "tool_surface": {
             "offered": surface.get("offered"),
             "expected_in_enum": surface.get("expected_in_enum"),
+            "playbook_property_present": surface.get("playbook_property_present"),
             "playbook_enum": surface.get("playbook_enum"),
         },
     }

@@ -37,7 +37,6 @@ from agentcore.tools.ceo_toolset import wire_worker_consult
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registration import (
     host_class_tool_names,
-    register_table_ceo_tools,
 )
 from agentcore.tools.registry import ToolRegistry
 from agentcore.workspace.locate import workspace_channel_for_tools
@@ -56,29 +55,45 @@ _WORKSPACE_CONTEXT_RE = re.compile(
 )
 
 
-def restamp_workspace_facts(prompt: str, facts: str) -> str:
-    """Replace/append ``<工作区>`` for post-bind resume workers.
+def _workspace_block(text: str) -> str:
+    match = _WORKSPACE_CONTEXT_RE.search(text or "")
+    return (match.group(0) if match else "").strip()
 
-    Insertion matches :data:`~agentcore.runtime.context.contributor.SectionOrder.WORKSPACE_FACTS`
-    (750): immediately before the attachment volatile tail, not after
-    ``</运行时>`` (that was the pre-2026-08-19 slot in front of the core).
-    Facts-only — CEO file index is not restamped here (workers must not receive it).
+
+def restamp_workspace_facts(prompt: str, facts: str) -> str:
+    """Post-history ``[系统提示]`` envelope when frozen ``<工作区>`` is stale.
+
+    Empty string = no restamp (prompt has no workspace block, or it already
+    matches). Never rewrites ``prompt``. Facts-only — CEO file index is not
+    attached (workers must not receive it).
     """
-    stripped = _WORKSPACE_CONTEXT_RE.sub("", prompt or "").rstrip()
-    if not facts:
-        return stripped
-    insert_at = -1
-    for marker in ("<附件>", "<队员点名>"):
-        idx = stripped.find(marker)
-        if idx >= 0 and (insert_at < 0 or idx < insert_at):
-            insert_at = idx
-    if insert_at >= 0:
-        head = stripped[:insert_at].rstrip()
-        tail = stripped[insert_at:]
-        if head:
-            return f"{head}\n{facts}\n{tail}"
-        return f"{facts}\n{tail}"
-    return f"{stripped}\n{facts}" if stripped else facts
+    from agentcore.runtime.resolve.prompt.envelope import TURN_ENVELOPE_FENCE
+
+    facts_n = (facts or "").strip()
+    if not facts_n:
+        return ""
+    old = _workspace_block(prompt)
+    if not old:
+        return ""
+    new = _workspace_block(facts_n) or facts_n
+    if old == new:
+        return ""
+    return f"{TURN_ENVELOPE_FENCE}\n{facts_n}"
+
+
+def append_workspace_restamp_envelope(messages: list[Any], envelope: str) -> None:
+    """Append a restamp envelope after history. No-op when empty or already last."""
+    env = (envelope or "").strip()
+    if not env:
+        return
+    from agentcore.llm.provider.protocol import LLMMessage
+
+    if messages:
+        last = messages[-1]
+        content = getattr(last, "content", None) or ""
+        if getattr(last, "role", None) == "user" and str(content).strip() == env:
+            return
+    messages.append(LLMMessage(role="user", content=env))
 
 
 @dataclass
@@ -93,6 +108,7 @@ class ResumedWiring:
     chat_tools: ToolRegistry
     bound_execution_id: str
     execution_id_token: object
+    workspace_restamp_envelope: str = ""
 
 
 async def _wire_continuation_toolset(
@@ -299,36 +315,48 @@ async def _wire_continuation_toolset(
     )
     session_store = default_session_registry().get_or_create(conversation_id)
     checkpoint_enabled = settings.checkpoint_gate_enabled
-    # Re-stamp environment facts onto the worker base: continuation rebuilds the
-    # backend from the CURRENT binding, so workers must not inherit a stale cloud
-    # ``<工作区>``. Worker restamp is facts-only — do not attach the CEO file index.
+    # Frozen worker system is not rewritten. If ``<工作区>`` drifted (bind-during
+    # ask_user), spawn a fresh opening template for *new* workers and append a
+    # ``[系统提示]`` envelope after the continuing CEO history.
     git_fact = await detect_workspace_git(backend)
     from agentcore.workspace.desk_empty import desk_is_visibly_empty
 
-    refreshed_base = restamp_workspace_facts(
-        base_system_prompt,
-        build_workspace_context(
-            backend,
-            desktop_online=desktop_online,
-            exec_languages=exec_languages,
-            permission_axes=permission_axes,
-            mcp_enabled=mcp_discover.tool_count > 0,
-            mcp_label=mcp_label,
-            git_fact=git_fact,
-            outlet_inventory=await collect_outlet_inventory(backend),
-            desk_folder_id=sitting_folder_id,
-            desk_folder_label=(getattr(backend, "root_label", None) or "").strip() or None,
-            desk_is_birth=folder_id is not None,
-            desk_visibly_empty=await desk_is_visibly_empty(backend),
-        ),
+    workspace_facts = build_workspace_context(
+        backend,
+        desktop_online=desktop_online,
+        exec_languages=exec_languages,
+        permission_axes=permission_axes,
+        mcp_enabled=mcp_discover.tool_count > 0,
+        mcp_label=mcp_label,
+        git_fact=git_fact,
+        outlet_inventory=await collect_outlet_inventory(backend),
+        desk_folder_id=sitting_folder_id,
+        desk_folder_label=(getattr(backend, "root_label", None) or "").strip() or None,
+        desk_is_birth=folder_id is not None,
+        desk_visibly_empty=await desk_is_visibly_empty(backend),
     )
+    workspace_restamp_envelope = restamp_workspace_facts(
+        base_system_prompt,
+        workspace_facts,
+    )
+    spawn_base = base_system_prompt
+    if workspace_restamp_envelope:
+        from agentcore.runtime.resolve.prompt.rebuild import rebuild_fresh_worker_base_prompt
+
+        spawn_base = await rebuild_fresh_worker_base_prompt(
+            user_id=user_id,
+            folder_id=sitting_folder_id,
+            backend=backend,
+            permission_axes=permission_axes,
+            desktop_online=desktop_online,
+        )
     # Look up via ``resume.pipeline`` so any module-level monkeypatch on that
     # submodule (parity with fresh-turn ``pipeline.run`` seams) is honoured.
     assemble = resume_pipeline_mod._assemble_ceo_toolset
     delegate_tool, debate_tool, chat_tools = assemble(
         llm=llm,
         sink=sink,
-        base_system_prompt=refreshed_base,
+        base_system_prompt=spawn_base,
         user_message=user_message,
         history=[],
         worker_tools=worker_tools,
@@ -363,10 +391,6 @@ async def _wire_continuation_toolset(
         user_id=user_id,
     )
 
-    if table_id:
-        register_table_ceo_tools(chat_tools)
-        chat_tools.offer("table_ops")
-
     from agentcore.runtime.resolve.ceo_surface import apply_explore_profile_surface
 
     apply_explore_profile_surface(chat_tools, pending=False)
@@ -380,6 +404,7 @@ async def _wire_continuation_toolset(
         chat_tools=chat_tools,
         bound_execution_id=bound_execution_id,
         execution_id_token=execution_id_token,
+        workspace_restamp_envelope=workspace_restamp_envelope,
     )
 
 

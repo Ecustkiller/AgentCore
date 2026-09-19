@@ -119,7 +119,7 @@ def deliverable_expects_landing(deliverable: Deliverable | None) -> bool:
 
 
 def raw_deliverable_expects_landing(raw: object) -> bool:
-    """Same landing predicate on a CEO/playbook task dict (before parse).
+    """Same landing predicate on a CEO task dict (before parse).
 
     No object / empty object / omitted keys → not landing. Non-empty
     ``artifacts`` or non-empty ``artifact_dir`` only. Does not read leftover

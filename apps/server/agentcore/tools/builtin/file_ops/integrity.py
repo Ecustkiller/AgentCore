@@ -265,7 +265,7 @@ async def _prepare_write_relpath(
     if isinstance(prepared, ToolResult):
         raise WritePathPrepareError(prepared)
     requested = prepared
-    # ``.`` is a valid workspace-root dest (archive extract).
+    # ``.`` is a valid workspace-root dest.
     if requested == ".":
         return ".", ""
     if not requested:

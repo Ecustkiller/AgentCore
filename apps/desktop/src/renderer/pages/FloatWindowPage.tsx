@@ -18,7 +18,7 @@ import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 
 /**
- * Thin OS-window shell for方案 C（UX §十 · 真 OS 窗）.
+ * Thin OS-window shell for方案 C（UX §四 · 真 OS 窗）.
  * Hash: `#/float?cid=…&tab=…` — body reuses {@link SidePanelSurfaceBody};
  * projection state arrives via BroadcastChannel from the main window (SSE authority).
  *

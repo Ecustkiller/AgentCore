@@ -1,4 +1,4 @@
-# AgentCore 数据库定时备份（部署与运维.md §7.7「备份与恢复策略」）。
+# AgentCore 数据库定时备份（发布与门禁.md §1.7「备份与恢复策略」）。
 # 由 agentcore-backup.timer 驱动的 oneshot；脚本自身做 pg_dump|gzip + 轮转保留。
 #
 # 安装：

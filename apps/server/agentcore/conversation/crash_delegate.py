@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 def _user_message_from_journal(entries: tuple[dict[str, Any], ...] | list[dict]) -> str | None:
-    """Extract the turn's user line from ``turn_started`` (required for worker playbooks)."""
+    """Extract the turn's user line from ``turn_started``."""
     for entry in entries:
         if (entry.get("kind") or "") != FactKind.TURN_STARTED.value:
             continue

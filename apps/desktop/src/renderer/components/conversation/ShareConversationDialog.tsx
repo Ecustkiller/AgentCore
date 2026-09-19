@@ -12,7 +12,7 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import { getConversations } from "@/hooks/useConversations";
 import { copyText } from "@/lib/clipboard";
 import { formatMessageTime } from "@/lib/format";
-import { notifyError, notifySuccess } from "@/lib/toast";
+import { notifyError } from "@/lib/toast";
 import {
   type CreateShareOptions,
   type Share,
@@ -98,8 +98,7 @@ function ShareDialogBody({ conversationId }: { conversationId: string }) {
   };
 
   const handleCopy = async (share: Share) => {
-    if (await copyText(shareLink(share))) notifySuccess("链接已复制");
-    else notifyError("复制失败");
+    if (!(await copyText(shareLink(share)))) notifyError("复制失败");
   };
 
   const handleRevoke = async (share: Share) => {

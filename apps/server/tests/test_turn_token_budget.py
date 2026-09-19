@@ -196,7 +196,7 @@ async def test_delegate_execute_rejects_when_ceiling_hit(monkeypatch):
         )
         tool._tools.list_all = MagicMock(return_value=[])
         result = await tool.execute(
-            {"playbook_none_reason": "x" * 20, "tasks": []},
+            {"tasks": []},
             MagicMock(),
         )
         assert result.success is False
@@ -335,24 +335,7 @@ def test_reason_constant_reserved_in_cutoff():
     assert resolve_turn_token_ceiling() in (0, 30_000_000) or resolve_turn_token_ceiling() >= 0
 
 
-def test_wrap_prompt_is_explicit_close_not_fake_done(monkeypatch):
-    from agentcore.runtime.turn.token_budget import turn_token_budget_wrap_prompt
-
-    monkeypatch.setattr(
-        "agentcore.runtime.turn.token_budget.resolve_turn_token_ceiling",
-        lambda: 100,
-    )
-    token = bind_turn_token_meter(seed=100)
-    try:
-        text = turn_token_budget_wrap_prompt()
-        assert text.startswith("[系统提示]")
-        assert "触顶" in text
-        assert "100" in text
-    finally:
-        reset_turn_token_meter(token)
-
-
-def test_maybe_inject_turn_token_budget_gate_one_shot(monkeypatch):
+def test_maybe_inject_turn_token_budget_gate_never_injects(monkeypatch):
     from agentcore.llm.provider.protocol import LLMMessage
     from agentcore.runtime.engine.governance import (
         create_loop_controller,
@@ -379,14 +362,11 @@ def test_maybe_inject_turn_token_budget_gate_one_shot(monkeypatch):
                 round_idx=2,
                 role="captain",
             )
-            is True
+            is False
         )
-        assert len(messages) == 1
-        assert "触顶" in (messages[0].content or "")
-        assert controller.turn_token_budget_gate_fired is True
+        assert messages == []
+        assert controller.turn_token_budget_gate_fired is False
 
-        # One-shot latch
-        assert should_turn_token_budget_gate(controller, role="captain") is False
         assert (
             maybe_inject_turn_token_budget_gate(
                 controller,
@@ -397,13 +377,13 @@ def test_maybe_inject_turn_token_budget_gate_one_shot(monkeypatch):
             )
             is False
         )
-        assert len(messages) == 1
+        assert messages == []
     finally:
         reset_turn_token_meter(token)
 
 
 def test_audit_and_debate_gates_suppressed_when_ceiling_hit():
-    """触顶收口仍走 token wrap；成篇/辩论承诺闸已撤，不再催派。"""
+    """触顶禁新派；成篇/辩论承诺闸已撤，不再催派。"""
     from agentcore.runtime.engine import governance as gov
 
     assert not hasattr(gov, "should_audit_gate")

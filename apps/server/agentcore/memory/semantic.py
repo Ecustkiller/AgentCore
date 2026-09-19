@@ -110,7 +110,7 @@ You maintain a user's long-term SEMANTIC memory from recent SESSION SUMMARIES (e
 digests). This pass is NOT the live idle path — idle chats do not rewrite always-files.
 When invoked (tests / explicit rewrite), merge durable knowledge about the USER and
 their FOLDERS, deduplicate across sessions, and drop one-off chat trivia. Product
-capabilities (playbooks, tools, skills, handbook answers) live in the product ≠ this memory.
+capabilities (tools, skills, handbook answers) live in the product ≠ this memory.
 This pass rewrites 偏好.md / 画像.md / 导航.md only. 主题/*.md is written by explore
 or the file page — not this pass.
 

@@ -17,7 +17,7 @@ export type ClipboardEntry = {
  */
 export interface BatchMenuActions {
   count: number;
-  /** 选区里能下载的项数（文件另存；文件夹整夹 zip）。 */
+  /** 选区里能下载的文件数（单文件另存；不含目录 zip）。 */
   downloadableCount: number;
   onDownload: () => void;
   onCut: () => void;
@@ -32,7 +32,7 @@ export interface BatchMenuActions {
 export type FileSortBy = "name" | "mtime";
 
 export interface FileTreeHandle {
-  /** 由外层（如多根工作区的根节点右键菜单）触发的「在源根处新建」。目录立即落地再改名。 */
+  /** 由外层（如多根工作区的根节点右键菜单）触发的「在源根处新建」。 */
   startCreate: (kind: "file" | "dir") => void;
   /** 刷新根 + 所有已展开目录。 */
   refresh: () => void;

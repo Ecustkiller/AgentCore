@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from agentcore.runtime.delegate.playbook_declaration import (
-    _EMPTY_DELEGATE_MSG,
-)
 from agentcore.runtime.delegate.redispatch_hint import (
     prior_turn_has_redispatch_fingerprint,
 )
@@ -12,6 +9,7 @@ from agentcore.runtime.engine.tool_exec import TOOL_FAILED_MARKER, with_tool_fai
 from agentcore.runtime.events.types import FinishReason
 from agentcore.runtime.facts import FactKind
 from agentcore.runtime.journal.entries import KIND_TURN_END
+from agentcore.tools.builtin.delegate.schema import EMPTY_DELEGATE_MSG
 
 
 def _tool_call(
@@ -81,7 +79,7 @@ def test_fingerprint_on_unproductive_finish_reason():
 
 
 def test_fingerprint_on_empty_gate_failed_delegate():
-    raw = _EMPTY_DELEGATE_MSG
+    raw = EMPTY_DELEGATE_MSG
     assert (
         prior_turn_has_redispatch_fingerprint(
             [_tool_call(name="delegate", success=False, result=raw)]
@@ -100,16 +98,14 @@ def test_fingerprint_on_empty_gate_failed_delegate():
 
 
 def test_other_delegate_contract_failures_do_not_trip_empty_gate():
-    """XOR / unknown rejects are contract_failure but not the empty fingerprint."""
-    from agentcore.runtime.delegate.playbook_declaration import PLAYBOOK_TASKS_XOR_MSG
-
+    """其它契约打回不是 empty-tasks fingerprint。"""
     assert (
         prior_turn_has_redispatch_fingerprint(
             [
                 _tool_call(
                     name="delegate",
                     success=False,
-                    result=PLAYBOOK_TASKS_XOR_MSG,
+                    result="委派任务无效：role 不能为空",
                 )
             ]
         )
@@ -121,7 +117,7 @@ def test_other_delegate_contract_failures_do_not_trip_empty_gate():
                 _tool_call(
                     name="web_search",
                     success=False,
-                    result=_EMPTY_DELEGATE_MSG,
+                    result=EMPTY_DELEGATE_MSG,
                 )
             ]
         )

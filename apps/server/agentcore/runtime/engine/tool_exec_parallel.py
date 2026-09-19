@@ -47,6 +47,7 @@ async def execute_tools(
     run_id: str = "",
     role: str = "",
     allowed_tool_names: list[str] | None = None,
+    disabled_tools: set[str] | None = None,
 ) -> tuple[list[LLMMessage], ToolResult | None, list[ToolAttempt]]:
     """Execute tool calls (parallel, capped).
 
@@ -68,6 +69,10 @@ async def execute_tools(
     **also enforces at execute** so a model cannot land side effects by calling a
     registered tool that was never granted (e.g. debater ``file_write``).
 
+    ``disabled_tools`` is the mid-chain execute-deny set (circuit breaker,
+    workspace channel dead, web_fetch retirement). Those names stay on the
+    OpenAI table; a call still fails here.
+
     When ``citation_sink`` is provided, web sources surfaced by successful research
     tools are merged into it (arrival order, deduped, capped) — **池语义不变**.
     When ``turn_evidence_ledger`` is set, the same hits are also registered into the
@@ -87,6 +92,7 @@ async def execute_tools(
     # Captain self-tools: inline timeline (no run_id on wire); facts/audit keep run_id.
     event_run_id = "" if role == "captain" else run_id
     allowed_set = None if allowed_tool_names is None else frozenset(allowed_tool_names)
+    disabled_set = frozenset(disabled_tools) if disabled_tools else frozenset()
     # Same-round file_read path coalesce (leader Future → fan-out clones).
     file_read_inflight: dict[str, asyncio.Future[ToolResult]] = {}
 
@@ -100,6 +106,7 @@ async def execute_tools(
             run_id=run_id,
             role=role,
             allowed_set=allowed_set,
+            disabled_set=disabled_set,
             approval_gate=approval_gate,
             file_read_inflight=file_read_inflight,
         )

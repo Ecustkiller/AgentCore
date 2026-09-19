@@ -433,19 +433,17 @@ def test_format_retrieval_budget_receipt_is_numbers_only():
 
 
 @pytest.mark.asyncio
-async def test_awareness_sync_never_injects_and_drops_stale():
-    """扣费后也不再灌 [系统提示]；顺手清掉简历窗口里的旧教案。"""
+async def test_awareness_sync_never_injects_and_keeps_stale():
+    """扣费后也不再灌 [系统提示]；旧教案留在历史上（不抽，以免打穿前缀）。"""
+    stale = f"{RETRIEVAL_BUDGET_AWARENESS_PREFIX}：已用 1 次…"
     messages = [
         LLMMessage(role="system", content="sys"),
-        LLMMessage(
-            role="user",
-            content=f"{RETRIEVAL_BUDGET_AWARENESS_PREFIX}：已用 1 次…",
-        ),
+        LLMMessage(role="user", content=stale),
     ]
     rb = RetrievalBudgetState(limit=DEFAULT_RETRIEVAL_BUDGET)
     assert await rb.try_reserve("web_search")
     assert sync_retrieval_budget_awareness(messages, rb) is None
-    assert _awareness_lines(messages) == []
+    assert _awareness_lines(messages) == [stale]
     assert messages[0].role == "system"
 
 
@@ -575,7 +573,7 @@ async def test_react_loop_puts_balance_on_tool_receipts():
 
 @pytest.mark.asyncio
 async def test_react_loop_drops_balance_when_budget_exhausted():
-    """耗尽 → wind_down 收尾话术接管，余额播报撤走（行为与改动前一致）。"""
+    """耗尽 → wind_down 收窄工具表，余额播报撤走；不另灌进窗句。"""
     reg = ToolRegistry()
     reg.register(_SearchStub())
     provider = _LoopProvider(
@@ -590,15 +588,13 @@ async def test_react_loop_drops_balance_when_budget_exhausted():
 
     assert budget.remaining == 0
     assert _awareness_lines(messages) == []
-    wind_down = [
-        m.content
-        for m in messages
-        if m.role == "user"
+    assert not any(
+        m.role == "user"
         and isinstance(m.content, str)
         and m.content.startswith("[系统提示] 检索预算已用尽")
-    ]
-    assert len(wind_down) == 1
-    # 最后一轮模型只看到收尾指令，没有自相矛盾的「还剩」播报。
+        for m in messages
+    )
+    # 最后一轮模型没有自相矛盾的「还剩」播报。
     assert provider.seen[-1] == []
 
 
@@ -652,16 +648,16 @@ async def test_react_loop_logs_per_tool_spend_with_final_row(monkeypatch):
     assert final[0]["critical"] is False
 
 
-def test_drop_awareness_only_touches_balance_line():
+def test_drop_awareness_is_noop():
+    stale = f"{RETRIEVAL_BUDGET_AWARENESS_PREFIX}：已用 1 次…"
     messages = [
         LLMMessage(role="system", content="sys"),
         LLMMessage(role="user", content="[系统提示] 检索预算已用尽。收尾窗口。"),
-        LLMMessage(role="user", content=f"{RETRIEVAL_BUDGET_AWARENESS_PREFIX}：已用 1 次…"),
+        LLMMessage(role="user", content=stale),
     ]
-    assert drop_retrieval_budget_awareness(messages) is True
-    assert len(messages) == 2
-    assert messages[-1].content.startswith("[系统提示] 检索预算已用尽")
     assert drop_retrieval_budget_awareness(messages) is False
+    assert len(messages) == 3
+    assert messages[-1].content == stale
 
 
 @pytest.mark.asyncio

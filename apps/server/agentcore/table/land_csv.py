@@ -26,12 +26,11 @@ if TYPE_CHECKING:
     from agentcore.db.repositories.tables import TableRepository
     from agentcore.table.state import TableState
     from agentcore.tools.protocol import ToolContext, ToolResult
-    from agentcore.tools.registry import ToolRegistry
 
 logger = get_logger(__name__)
 
 _IMPORT_NOTE = (
-    "已导入多维表格「{title}」。改格子用 table_ops；再写此 csv 会覆盖整表。"
+    "已导入多维表格「{title}」。再写此 csv 会覆盖整表。"
 )
 
 
@@ -49,9 +48,6 @@ def should_ingest_csv_path(path: str) -> bool:
 async def ingest_landed_csv_products(
     result: ToolResult,
     context: ToolContext,
-    *,
-    registry: ToolRegistry | None = None,
-    offer_tools: bool = False,
 ) -> str:
     """Import each landed csv product. Failures are notes, not write failures."""
     if not result.file_products:
@@ -70,8 +66,6 @@ async def ingest_landed_csv_products(
     unique = list(dict.fromkeys(ids))
     if len(unique) == 1:
         context.table_id = unique[0]
-        if offer_tools and registry is not None:
-            _ensure_table_tools_offered(registry)
     return "\n".join(notes)
 
 
@@ -178,11 +172,3 @@ async def _overwrite(
         columns=mapped.columns,
         rows=mapped.rows,
     )
-
-
-def _ensure_table_tools_offered(registry: ToolRegistry) -> None:
-    from agentcore.tools.registration import register_table_ceo_tools
-
-    if registry.get_optional("table_ops") is None:
-        register_table_ceo_tools(registry)
-    registry.offer("table_ops")

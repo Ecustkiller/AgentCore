@@ -443,7 +443,7 @@ async def _check_safety_and_approval_gates(
         else:
             if awaiting_approval:
                 # Only when a human will actually see the card: resolve id-only
-                # arguments (delete_folder → 文件夹路径) from the authoritative source
+                # arguments from the authoritative source
                 # so the user is not asked to approve a bare UUID.
                 from agentcore.runtime.approval_preview import enrich_approval_preview
 

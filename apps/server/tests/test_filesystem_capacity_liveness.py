@@ -14,11 +14,11 @@ from agentcore.runtime.tool_deadline import (
     set_tool_deadline,
 )
 from agentcore.tools.builtin.file_ops import (
+    FileBatchTool,
     FileListTool,
     FileReadTool,
     FileWriteTool,
     GlobTool,
-    MkdirTool,
 )
 from agentcore.tools.builtin.grep import GrepTool
 from agentcore.tools.protocol import ToolContext
@@ -487,7 +487,7 @@ async def test_file_read_channel_dead_stamps_family_retire(tmp_path: Path):
     assert result.metadata.get("liveness_timeout") is not True
     assert result.metadata.get("workspace_channel_dead") is True
     assert "file_write" in (result.metadata.get("retire_tools") or [])
-    assert "mkdir" in (result.metadata.get("retire_tools") or [])
+    assert "file_batch" in (result.metadata.get("retire_tools") or [])
     assert "连不上" in (result.error or "")
     from agentcore.workspace.limits import WORKSPACE_CHANNEL_DEAD_RETIRE_STEER
 
@@ -501,7 +501,7 @@ async def test_file_read_channel_dead_stamps_family_retire(tmp_path: Path):
         (FileListTool(), {"directory": "."}, "list"),
         (GlobTool(), {"pattern": "*.py"}, "glob_files"),
         (FileWriteTool(), {"path": "a.txt", "content": "x"}, "write"),
-        (MkdirTool(), {"path": "nested/d"}, "mkdir"),
+        (FileBatchTool(), {"operations": [{"op": "mkdir", "path": "nested/d"}]}, "mkdir"),
         (GrepTool(), {"pattern": "x"}, "grep"),
     ],
 )
@@ -546,7 +546,7 @@ async def test_filesystem_tools_single_timeout_no_family_retire(
         (FileListTool(), {"directory": "."}, "list"),
         (GlobTool(), {"pattern": "*.py"}, "glob_files"),
         (FileWriteTool(), {"path": "a.txt", "content": "x"}, "write"),
-        (MkdirTool(), {"path": "nested/d"}, "mkdir"),
+        (FileBatchTool(), {"operations": [{"op": "mkdir", "path": "nested/d"}]}, "mkdir"),
         (GrepTool(), {"pattern": "x"}, "grep"),
     ],
 )
@@ -679,8 +679,7 @@ def test_liveness_circuit_first_fail_retires():
     br = ctrl.tool_circuit_breaker()
     assert br.disabled == ("file_read",)
     assert br.warned == ()
-    msg = br.message() or ""
-    assert "停用" in msg or "原样重试" in msg or "换路径" in msg
+    assert br.message() is None
 
 
 def test_circuit_break_liveness_field_defaults():

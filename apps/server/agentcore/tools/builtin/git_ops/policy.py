@@ -29,6 +29,8 @@ _ALLOWED_SUBCOMMANDS = frozenset(
         "create_pr",
     }
 )
+GIT_REMOTE = "origin"
+GIT_LOG_MAX_COUNT = 20
 # Always-mutating verbs (approval + write ensure_repo).
 _ALWAYS_WRITE_SUBCOMMANDS = frozenset(
     {
@@ -192,23 +194,6 @@ GIT_TOOL_PARAMETERS: dict[str, Any] = {
             "description": "diff 暂存区。",
             "default": False,
         },
-        "include_untracked": {
-            "type": "boolean",
-            "description": "status 含未跟踪。",
-            "default": False,
-        },
-        "max_count": {
-            "type": "integer",
-            "description": "log 条数。",
-            "default": 20,
-            "minimum": 1,
-            "maximum": 100,
-        },
-        "oneline": {
-            "type": "boolean",
-            "description": "log 单行。",
-            "default": True,
-        },
         "message": {
             "type": "string",
             "description": "commit 必填。",
@@ -220,16 +205,6 @@ GIT_TOOL_PARAMETERS: dict[str, Any] = {
         "create": {
             "type": "boolean",
             "description": "checkout 新建分支。",
-            "default": False,
-        },
-        "remote": {
-            "type": "string",
-            "description": "fetch/pull/push 远程名。",
-            "default": "origin",
-        },
-        "set_upstream": {
-            "type": "boolean",
-            "description": "push 设上游。",
             "default": False,
         },
         "url": {
@@ -252,10 +227,6 @@ GIT_TOOL_PARAMETERS: dict[str, Any] = {
         "base": {
             "type": "string",
             "description": "create_pr 目标分支。",
-        },
-        "head": {
-            "type": "string",
-            "description": "create_pr 源分支。",
         },
     },
     "required": ["subcommand"],
@@ -298,15 +269,3 @@ def _normalize_paths(raw_paths: Any) -> list[str]:
     if not raw_paths:
         return []
     return [str(p) for p in raw_paths if str(p).strip()]
-
-
-def _remote_name_error(remote: str, start: float) -> ToolResult | None:
-    """Reject option-like / refspec remote tokens before they reach argv."""
-    if remote.startswith("-"):
-        return _error("remote 名不能以 '-' 开头（防止被 git 解析为选项）", start)
-    if ":" in remote or any(ch.isspace() for ch in remote):
-        return _error(
-            "remote 仅允许远程名（默认 origin），禁止 refspec 或空白",
-            start,
-        )
-    return None

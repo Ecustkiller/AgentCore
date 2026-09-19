@@ -3,7 +3,7 @@
  * （process + execution → fileArtifacts），并含 Local zip 基线
  *（不依赖 file_*；脚本删事故仍可进 restore，但零文件差异的回合不展示；
  * 问候等未改文件的回合不留底）。
- * 供右坞「改动」tab 按需显隐（前端UX设计.md §十）。
+ * 供右坞「改动」tab 按需显隐（前端UX设计.md §四）。
  */
 
 import {

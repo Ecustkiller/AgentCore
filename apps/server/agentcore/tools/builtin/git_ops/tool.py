@@ -61,24 +61,16 @@ async def _dispatch(
     paths = _normalize_paths(arguments.get("paths"))
 
     if subcommand == "status":
-        include_untracked = bool(arguments.get("include_untracked", False))
-        return await cmds_read.cmd_status(
-            cwd, paths, start, include_untracked=include_untracked, meta=base_meta
-        )
+        return await cmds_read.cmd_status(cwd, paths, start, meta=base_meta)
     if subcommand == "diff":
         staged = bool(arguments.get("staged", False))
         return await cmds_read.cmd_diff(
             cwd, paths, staged=staged, start=start, meta=base_meta
         )
     if subcommand == "log":
-        max_count = int(arguments.get("max_count", 20))
-        max_count = max(1, min(max_count, 100))
-        oneline = bool(arguments.get("oneline", True))
         return await cmds_read.cmd_log(
             cwd,
             paths,
-            max_count=max_count,
-            oneline=oneline,
             start=start,
             meta=base_meta,
         )
@@ -152,7 +144,7 @@ class GitTool:
             name="git",
             description=(
                 # 无仓 / 审批 / ff-only 合同在代码与失败回执，不预写进按钮。
-                "工作区根结构化 Git（仅根 `.git`；探路优先 glob/grep）。"
+                "工作区根结构化 Git（仅根 `.git`）。"
                 "写入会请确认。细节看失败回执。"
             ),
             parameters=GIT_TOOL_PARAMETERS,

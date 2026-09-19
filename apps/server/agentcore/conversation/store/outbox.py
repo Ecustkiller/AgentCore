@@ -709,6 +709,7 @@ class OutboxStore:
                 "cache_miss_tokens",
                 "rounds",
                 "duration_ms",
+                "generation_ms",
             ):
                 if key in kwargs and kwargs[key] is not None:
                     record[key] = int(kwargs[key] or 0)
@@ -753,6 +754,8 @@ class OutboxStore:
         harvest_kind: str | None = None,
         interrupt_reason: str | None = None,
         error: str | None = None,
+        duration_ms: int | None = None,
+        generation_ms: int | None = None,
     ) -> None:
         """Seal an open umid-keyed record as ready (stop / interrupt / engine error).
 
@@ -871,6 +874,13 @@ class OutboxStore:
             atts = ctx.get("attachments")
             if isinstance(atts, list) and atts and not record.get("attachments"):
                 record["attachments"] = atts
+            from agentcore.runtime.turn.latency import interrupt_usage_clocks
+
+            for key, val in interrupt_usage_clocks(
+                duration_ms=duration_ms,
+                generation_ms=generation_ms,
+            ).items():
+                record[key] = val
             ops = record.setdefault("ops", [])
             if "salvage" not in ops:
                 ops.append("salvage")
@@ -1189,6 +1199,14 @@ def to_record_turn_body(record: dict[str, Any]) -> dict[str, Any]:
             duration_ms = 0
         if duration_ms > 0:
             body["duration_ms"] = duration_ms
+    raw_generation = record.get("generation_ms")
+    if raw_generation is not None:
+        try:
+            generation_ms = int(raw_generation)
+        except (TypeError, ValueError):
+            generation_ms = 0
+        if generation_ms > 0:
+            body["generation_ms"] = generation_ms
     for key in ("origin", "execution_id", "harvest_kind"):
         val = record.get(key)
         if isinstance(val, str) and val.strip():

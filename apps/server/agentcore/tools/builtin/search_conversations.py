@@ -17,7 +17,6 @@ from agentcore.conversation.log_export import search_hit_from_messages
 from agentcore.core.logging import get_logger
 from agentcore.core.search_query import (
     SEARCH_DEFAULT_LIMIT,
-    SEARCH_HARD_CAP,
     parse_conversation_search_terms,
 )
 from agentcore.core.types import ToolApproval, ToolFace
@@ -231,11 +230,8 @@ async def run_conversation_search(
                 display={"result_count": 0, "scope": scope},
             ),
         )
-    try:
-        limit = int(arguments.get("limit") or SEARCH_DEFAULT_LIMIT)
-    except (TypeError, ValueError):
-        limit = SEARCH_DEFAULT_LIMIT
-    limit = max(1, min(limit, SEARCH_HARD_CAP))
+    # leftover ``limit`` is ignored; execute freeze at SEARCH_DEFAULT_LIMIT.
+    limit = SEARCH_DEFAULT_LIMIT
 
     explicit_folder = str(arguments.get("folder_id") or "").strip() or None
     resolved_folder: str | None = None
@@ -334,7 +330,6 @@ class SearchConversationsTool:
             name="search_conversations",
             description=(
                 "检索本账号历史对话（过往事实）。"
-                "打开用 read_conversation。"
                 "用户规则 ≠ 本工具。"
             ),
             parameters={
@@ -344,7 +339,7 @@ class SearchConversationsTool:
                         "type": "string",
                         "description": (
                             "标题与可见用户/助手正文。未加引号的词须同场都出现；"
-                            "一次 1–2 词，词多易空可另开短查询。引号包精确短语。"
+                            "引号包精确短语。"
                         ),
                     },
                     "scope": {
@@ -356,13 +351,6 @@ class SearchConversationsTool:
                     "folder_id": {
                         "type": "string",
                         "description": "其它文件夹 id（须属同一用户）。",
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "返回条数。",
-                        "default": SEARCH_DEFAULT_LIMIT,
-                        "minimum": 1,
-                        "maximum": SEARCH_HARD_CAP,
                     },
                 },
                 "required": ["query"],

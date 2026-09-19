@@ -554,7 +554,7 @@ async def test_continue_ceo_rebuilds_worker_base_not_chat_prompt(monkeypatch):
         assemble_system_prompt(),
         ceo_tool_names={"consult", "delegate"},
     )
-    assert "对整段对话负责到底" in ceo_chat_prompt
+    assert ceo_chat_prompt.strip()
 
     captured: dict[str, str] = {}
     wired = SimpleNamespace(

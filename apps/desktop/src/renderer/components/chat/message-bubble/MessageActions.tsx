@@ -1,4 +1,4 @@
-import { Button, IconButton } from "@/components/ui";
+import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useDuplicateConversation } from "@/hooks/useConversations";
 import { formatMessageTime } from "@/lib/format";
@@ -7,23 +7,6 @@ import { useConversationStore } from "@/stores/conversation";
 import { Check, GitFork, RefreshCw, X } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-
-/** Small icon+label action shown beneath a message on hover. */
-export function MessageAction({
-  icon,
-  label,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <Button variant="neutral" className="px-1.5" icon={icon} onClick={onClick}>
-      {label}
-    </Button>
-  );
-}
 
 /**
  * Assistant footer regenerate — always confirm (定案：截断其后历史 + 新贵回合，不可逆).

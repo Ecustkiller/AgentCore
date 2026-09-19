@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { continuationRootId } from "../continuation";
+import { continuationRootId, isSeatFoldedContinuation } from "../continuation";
 
 describe("continuationRootId", () => {
   it("returns the run itself when it has no continuesRunId", () => {
@@ -42,5 +42,31 @@ describe("continuationRootId", () => {
         { id: "b", continuesRunId: "a" },
       ]),
     ).toBe("a");
+  });
+});
+
+describe("isSeatFoldedContinuation", () => {
+  it("folds non-debate continuations and leaves debate tagged runs visible", () => {
+    expect(
+      isSeatFoldedContinuation({
+        continuesRunId: "r1",
+        stance: null,
+        group: null,
+      }),
+    ).toBe(true);
+    expect(
+      isSeatFoldedContinuation({
+        continuesRunId: "r1",
+        stance: "pro",
+        group: "debate:debate",
+      }),
+    ).toBe(false);
+    expect(
+      isSeatFoldedContinuation({
+        continuesRunId: null,
+        stance: null,
+        group: null,
+      }),
+    ).toBe(false);
   });
 });

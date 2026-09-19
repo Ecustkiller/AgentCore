@@ -14,9 +14,8 @@ class LeadSubteam:
     objects + the ``dispose`` closure here):
 
     - ``tools`` — the lead's own ``delegate`` PLUS the companion ``replan`` bound to
-      THAT delegate instance. The bundle mints both (dispose / 波边界 binding); the
-      opening registry registers ``delegate`` only. ``replan`` is offered after a
-      nested sub-plan exists (``_supervised``), via ``promote_coordination_surface_if_needed``.
+      THAT delegate instance. Both ride the opening table (prefix cache). Idle
+      ``replan`` fails at execute until a nested sub-plan exists.
       Wiring ``replan`` for a lead (not just the root CEO) is the 去特例 fix: a lead
       supervises its own sub-plan's 波边界 (子队员 escalate scope)
       exactly like the CEO — without it a yielding sub-plan would be a dead-end.
@@ -47,14 +46,26 @@ DelegateFactory = Callable[[str, int], LeadSubteam]
 ESCALATION_CONCURRENCY_CAP = 3
 
 
-def _worker_identity_core(*, captain: bool, depth: int) -> str:
-    intro = _worker_captain_intro(depth=depth) if captain else _WORKER_LEAF_INTRO
-    return f"<身份>\n{intro}\n</身份>"
+def worker_child_nest_fact(*, depth: int) -> str:
+    """Captain-only opening fact: whether this lead's children may nest.
+
+    Not ``<身份>`` — the tool table already distinguishes captain/leaf;
+    this sentence is the residual the captain's own tools cannot encode
+    (it is about the children's cap).
+    """
+    if depth < MAX_DELEGATION_DEPTH - 1:
+        return "你的子成员仍可再向下委派一层。"
+    return "你的子成员不能再向下委派。"
 
 
 def build_worker_identity_catalog(*, captain: bool, depth: int = 1) -> str:
-    """Toolbox template: ``<身份>`` only. Form HOW is per-turn 交付物规格."""
-    return _worker_identity_core(captain=captain, depth=depth)
+    """Toolbox template: factory worker ``<身份>`` is empty.
+
+    Nest-cap is a live opening fact, not a catalog identity. Form HOW is
+    per-turn 交付物规格.
+    """
+    _ = (captain, depth)
+    return ""
 
 
 # 环境能力自述（能写 ≠ 能跑）: appended ONLY when the turn's worker registry carries no
@@ -68,34 +79,6 @@ _WORKER_NO_EXECUTION_POLICY = (
     "【本回合执行环境未装配】没有 run：【能】写文件，【不能】运行。注明未运行。"
 )
 
-# Leaf-worker intro (no nested delegate). Isolated context, no follow-ups, no delegate.
-# Product membership lives here (shared base does not write 队员 / <身份>).
-# 品类介绍 / 标假设 → escalate description；不进身份。
-_WORKER_LEAF_INTRO = """\
-你是 AgentCore 的队员，只负责划定好的这一件任务（所需上下文已给你）。\
-不能再向下委派。够不到用户。"""
-
-# Captain intro: identity + nest honesty. Depth honesty branches on MAX_DELEGATION_DEPTH.
-# Staffing HOW on nested ``delegate`` description (same fill contract as root).
-# Not identity.
-
-
-def _worker_captain_intro(*, depth: int) -> str:
-    # Children land at depth+1; they may nest iff depth+1 < MAX (i.e. depth < MAX-1).
-    if depth < MAX_DELEGATION_DEPTH - 1:
-        nest_honesty = (
-            "你可以再向下委派一层子团队（你的子成员仍可再向下委派一层），看到产出后由你整合。"
-        )
-    else:
-        nest_honesty = (
-            "你可以再向下委派一层子团队（只能再嵌套这一层，你的子成员不能再向下委派），"
-            "看到产出后由你整合。"
-        )
-    return (
-        "你是 AgentCore 的队员，只负责划定好的这一件任务（所需上下文已给你）。够不到用户。"
-        f"{nest_honesty}"
-    )
-
 
 def build_worker_identity(
     *,
@@ -104,25 +87,25 @@ def build_worker_identity(
     depth: int = 1,
     can_execute: bool = True,
 ) -> str:
-    """Assemble a worker's ``<身份>`` preamble (leaf / captain).
+    """Per-turn worker facts that are not ``<身份>``.
 
+    Leaf default is empty: scope / no-delegate / audience live in the tool
+    table, task block, and ``escalate`` / ``handoff`` descriptions.
+    Captain adds nest-cap honesty (children's tools, not this node's).
     ``has_dependents`` is accepted for call-site stability; handoff must-vs-may
-    lives on the handoff tool description, not this identity.
-    Form HOW lives on the per-turn 交付物规格 channel, not here.
-    ``captain`` selects the nested-delegation intro;
-    ``depth`` (when captain) picks honest child-nesting copy vs ``MAX_DELEGATION_DEPTH``.
-    ``can_execute`` is computed after exec-env sticky retire (and after the
-    execution class is absent from the registry, e.g. cloud without sandbox):
-    False layers the 能写≠能跑 self-description so the prompt never over-claims
-    a callable ``code_execute`` the turn withheld (能力闸门与交付诚实性).
+    lives on the handoff tool description.
+    Form HOW lives on the per-turn 交付物规格 channel.
+    ``can_execute`` False layers 能写≠能跑 so the prompt never over-claims
+    a callable ``run`` the turn withheld.
     """
     _ = has_dependents
-    no_exec = "" if can_execute else f"\n\n{_WORKER_NO_EXECUTION_POLICY}"
-    core = _worker_identity_core(captain=captain, depth=depth)
-    return f"{core}{no_exec}"
+    parts: list[str] = []
+    if captain:
+        parts.append(worker_child_nest_fact(depth=depth))
+    if not can_execute:
+        parts.append(_WORKER_NO_EXECUTION_POLICY)
+    return "\n\n".join(parts)
 
 
-# Defaults for callers that don't yet know topology (solo / leaf assumption).
-# Prefer :func:`build_worker_identity` at the executor so captain/leaf matches.
+# Default for ``_build_messages`` when the caller has not resolved topology.
 _WORKER_IDENTITY = build_worker_identity(has_dependents=False, captain=False)
-_WORKER_CAPTAIN_IDENTITY = build_worker_identity(has_dependents=False, captain=True)

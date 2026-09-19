@@ -21,7 +21,6 @@ import {
   FilePlus,
   FileText,
   FileType,
-  FolderPlus,
   FolderSearch,
   Pencil,
   Scissors,
@@ -136,7 +135,6 @@ export function FileTreeRowMenu({
   const copyPath = async () => {
     try {
       await source.copyOsPath?.(node.path);
-      notifySuccess("已复制路径");
     } catch (e) {
       notifyActionError("复制路径失败", e);
     }
@@ -144,11 +142,11 @@ export function FileTreeRowMenu({
 
   // Groups separated systematically (a leading separator only when both sides are
   // non-empty) so no group ever yields a double rule. The primary group (dir →
-  // 下载/新建; file → 下载/打开) is always present when transfer or mutate is on,
+  // 新建文件; file → 下载/打开) is always present when transfer or mutate is on,
   // so 系统集成 / 编辑 just prefix a rule. `caps.edit === false` (e.g. shared-space
-  // viewer) hides mutate actions; download still rides on `caps.transfer`.
+  // viewer) hides mutate actions; single-file download still rides on `caps.transfer`.
   const canMutate = source.caps.edit;
-  const canDownload = source.caps.transfer && !!source.download;
+  const canDownload = source.caps.transfer && !!source.download && !node.isDir;
   const exportMdToDocx = async (
     path: string,
     layout: "standard" | "official",
@@ -188,20 +186,12 @@ export function FileTreeRowMenu({
         <>
           {downloadItem}
           {canMutate ? (
-            <>
-              <ContextMenuItem
-                onSelect={() => onContextCreate(node.path, "file")}
-              >
-                <FilePlus size={14} className="shrink-0" />
-                <span className="flex-1 truncate">新建文件</span>
-              </ContextMenuItem>
-              <ContextMenuItem
-                onSelect={() => onContextCreate(node.path, "dir")}
-              >
-                <FolderPlus size={14} className="shrink-0" />
-                <span className="flex-1 truncate">新建文件夹</span>
-              </ContextMenuItem>
-            </>
+            <ContextMenuItem
+              onSelect={() => onContextCreate(node.path, "file")}
+            >
+              <FilePlus size={14} className="shrink-0" />
+              <span className="flex-1 truncate">新建文件</span>
+            </ContextMenuItem>
           ) : null}
         </>
       ) : (

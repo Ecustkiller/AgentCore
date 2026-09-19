@@ -442,6 +442,31 @@ def test_emit_user_stop_message_end_sets_cancelled_finish_reason():
     assert sink._stream_finish_reason == FinishReason.CANCELLED.value
 
 
+def test_emit_user_stop_message_end_is_idempotent():
+    sink = EventSink()
+    _emit_user_stop_message_end(sink)
+    _emit_user_stop_message_end(sink)
+    assert sink._stream_finish_reason == FinishReason.CANCELLED.value
+
+
+async def test_emit_cancel_end_if_cancelling_skips_when_already_closed_reason():
+    sink = EventSink()
+    _emit_user_stop_message_end(sink)
+
+    async def _body() -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            _emit_cancel_end_if_cancelling(sink)
+
+    task = asyncio.create_task(_body())
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert sink._stream_finish_reason == FinishReason.CANCELLED.value
+
+
 async def test_emit_cancel_end_if_cancelling_only_when_task_cancelling():
     sink = EventSink()
     # Not cancelling → no-op

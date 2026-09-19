@@ -11,7 +11,7 @@ import { AlertTriangle, Loader2 } from "lucide-react";
 import type { ReactNode } from "react";
 
 /**
- * Hard force-update gate (部署与运维 / 发布与门禁 §7.6).
+ * Hard force-update gate (发布与门禁 §1.6).
  * Shown when local Electron build < policy.min_desktop_version. Blocks AppShell
  * until the client is updated; web clients never render ({@link hasAutoUpdater}
  * is false). Fail-open: missing policy leaves this hidden.

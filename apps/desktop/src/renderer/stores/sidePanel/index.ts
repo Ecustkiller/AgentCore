@@ -1,5 +1,5 @@
 /**
- * Unified conversation side panel (前端UX设计.md §十) — the chat's single
+ * Unified conversation side panel (前端UX设计.md §四) — the chat's single
  * right-docked surface. Package split by responsibility axis; public API is
  * unchanged — import from `@/stores/sidePanel`.
  */

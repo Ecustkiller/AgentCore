@@ -843,7 +843,6 @@ async def test_search_tool_excludes_host(monkeypatch):
 def test_search_schema_is_folder_default_and_body_when():
     schema = SearchConversationsTool().schema
     desc = schema.description
-    assert "read_conversation" in desc
     assert "过往事实" in desc
     assert "用户规则" in desc
     assert "偏好" not in desc
@@ -863,11 +862,8 @@ def test_search_schema_is_folder_default_and_body_when():
     assert "global_chats" not in props
     assert "include_archived" not in props
     assert "updated_within_hours" not in props
-    limit = props["limit"]
-    assert limit.get("default") == 20
-    assert limit.get("maximum") == 100
-    assert "硬顶" not in limit["description"]
-    assert "默认" not in limit["description"]
+    assert "limit" not in props
+    assert "limit" not in desc
 
 
 @pytest.mark.asyncio
@@ -977,6 +973,45 @@ async def test_search_ignores_include_archived_argument(monkeypatch):
     assert captured.get("include_archived") is True
     assert captured.get("updated_after") is None
     assert captured.get("global_chats_only") is False
+
+
+@pytest.mark.asyncio
+async def test_search_ignores_leftover_limit(monkeypatch):
+    from agentcore.core.search_query import SEARCH_DEFAULT_LIMIT
+
+    captured: dict = {}
+
+    class FakeConvRepo:
+        def __init__(self, session):
+            pass
+
+        async def search_with_projections(self, *a, **kw):
+            captured.update(kw)
+            return []
+
+    class FakeMsgRepo:
+        def __init__(self, session):
+            pass
+
+        async def list_all_for_conversation(self, cid):
+            return []
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.search_conversations.ConversationRepository",
+        FakeConvRepo,
+    )
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.search_conversations.MessageRepository",
+        FakeMsgRepo,
+    )
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.search_conversations.async_session_factory",
+        lambda: _AsyncCm(),
+    )
+    tool = SearchConversationsTool(folder_id="F1")
+    result = await tool.execute({"query": "oauth", "limit": 100}, _ctx())
+    assert result.success is True
+    assert captured.get("limit") == SEARCH_DEFAULT_LIMIT
 
 
 @pytest.mark.asyncio

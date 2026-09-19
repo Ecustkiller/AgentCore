@@ -24,7 +24,12 @@ from agentcore.workspace.protocol import (
     WorkspaceError,
 )
 
-from .errors import _error, _liveness_workspace_error, _outside_workspace_msg
+from .errors import (
+    _error,
+    _liveness_workspace_error,
+    _op_liveness_timeout_error,
+    _outside_workspace_msg,
+)
 from .integrity import prepared_write_relpath, write_scope_rejection
 from .prepare_path import prepare_tool_path
 
@@ -42,16 +47,21 @@ def _workspace_item_fail(
     return "fail", f"{prefix}：{e}", []
 
 
-def _stop_if_presence(
+def _stop_if_channel(
     exc_or_detail: BaseException | str,
     start: float,
     products: list[FileProduct],
 ) -> ToolResult | None:
-    if workspace_channel_failure_kind(exc_or_detail) != "presence":
-        return None
-    dead = _liveness_workspace_error(str(exc_or_detail), start)
-    dead.file_products = products
-    return dead
+    kind = workspace_channel_failure_kind(exc_or_detail)
+    if kind == "presence":
+        dead = _liveness_workspace_error(str(exc_or_detail), start)
+        dead.file_products = products
+        return dead
+    if kind == "liveness":
+        timed = _op_liveness_timeout_error(str(exc_or_detail), start)
+        timed.file_products = products
+        return timed
+    return None
 
 
 def _batch_op_label(item: dict[str, Any]) -> str:
@@ -86,7 +96,7 @@ class FileBatchTool:
         return ToolSchema(
             name="file_batch",
             description=(
-                "工作区 move / copy / delete / mkdir。单条也走本工具（operations 一项）。"
+                "工作区 move / copy / delete / mkdir。"
                 f"最多 {_BATCH_MAX_OPS} 项。逐项执行：单项失败不中断整批。"
             ),
             parameters={
@@ -162,13 +172,13 @@ class FileBatchTool:
             try:
                 status, detail, landed = await self._run_one(op, item, context)
             except Exception as e:  # noqa: BLE001 — batch must continue
-                dead = _stop_if_presence(e, start, products)
+                dead = _stop_if_channel(e, start, products)
                 if dead is not None:
                     return dead
                 fail_n += 1
                 lines.append(f"{i}. 失败 · {label}：{e}")
                 continue
-            dead = _stop_if_presence(detail, start, products) if status == "fail" else None
+            dead = _stop_if_channel(detail, start, products) if status == "fail" else None
             if dead is not None:
                 return dead
             if status == "ok":

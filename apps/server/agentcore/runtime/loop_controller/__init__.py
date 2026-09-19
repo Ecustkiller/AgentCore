@@ -226,7 +226,7 @@ class LoopController(
         self._post_delegate_investigation_count: int = 0
         # Soft audit-gate nudge (协作优先阶段 3 返工环): at most once per run, captain-only.
         self._audit_gate_fired: bool = False
-        # 成篇硬门：cite_write_review / deliverable 结构信号 — nudge 后仍不可直接 end_turn。
+        # 成篇硬门：reviews/ 结构信号 — nudge 后仍不可直接 end_turn。
         self._audit_hard_required: bool = False
         self._audit_includes_review: bool = False
         # Soft debate-commitment nudge: user picked a debate form on settled ask_user; at most once.
@@ -249,7 +249,7 @@ class LoopController(
 
         ``node_count`` / ``has_deps`` describe this batch so the audit gate can tell
         a substantial first batch (nodes ≥3 or any depends_on) from a light one.
-        ``audit_hard`` / ``includes_review`` stamp成篇硬门（cite_write_review playbook）.
+        ``audit_hard`` / ``includes_review`` stamp成篇硬门（reviews/ 结构声明）.
         """
         self._post_delegate = True
         self._post_delegate_investigation_count = 0
@@ -281,12 +281,12 @@ class LoopController(
 
     @property
     def audit_hard_required(self) -> bool:
-        """True when long-form / cite_write_review batches require audit before end_turn."""
+        """True when long-form batches require audit before end_turn."""
         return self._audit_hard_required
 
     @property
     def audit_includes_review(self) -> bool:
-        """True when an independent review wave already ran (playbook or follow-up)."""
+        """True when an independent review wave already ran (declared reviews/ or follow-up)."""
         return self._audit_includes_review
 
     def mark_audit_satisfied(self) -> None:

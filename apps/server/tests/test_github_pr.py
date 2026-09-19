@@ -355,7 +355,12 @@ async def test_git_tool_create_pr_success_mocked(
     )
 
     result = await GitTool().execute(
-        {"subcommand": "create_pr", "title": "Hello", "base": "main"},
+        {
+            "subcommand": "create_pr",
+            "title": "Hello",
+            "base": "main",
+            "head": "main",
+        },
         _worker_ctx(repo),
     )
     assert result.success is True

@@ -602,8 +602,6 @@ async def test_push_rejects_force_and_refspec_args(tmp_path: Path):
         {"subcommand": "push", "force_with_lease": True},
         {"subcommand": "push", "refspec": "feature:main"},
         {"subcommand": "push", "branch": "main"},
-        {"subcommand": "push", "remote": "--force"},
-        {"subcommand": "push", "remote": "origin feature:main"},
     ):
         result = await GitTool().execute(args, _worker_ctx(repo))
         assert result.success is False
@@ -616,11 +614,11 @@ async def test_push_to_local_bare_remote(tmp_path: Path):
     _run_git(tmp_path, "init", "--bare", str(bare))
     _run_git(repo, "remote", "add", "origin", str(bare))
     result = await GitTool().execute(
-        {"subcommand": "push", "set_upstream": True},
+        {"subcommand": "push", "set_upstream": False},
         _worker_ctx(repo),
     )
     assert result.success is True
-    assert "已推送 feature/ship → origin" in result.output
+    assert "已推送 feature/ship → origin（已设置上游）" in result.output
     # Remote received the branch.
     listed = subprocess.run(
         ["git", "--git-dir", str(bare), "branch", "--list", "feature/ship"],
@@ -1165,9 +1163,10 @@ def _budget_probe(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, float]]:
 @pytest.mark.parametrize(
     "args,expected_argv",
     [
-        ({"subcommand": "status"}, "status -sb --untracked-files=no"),
+        ({"subcommand": "status"}, "status -sb"),
+        ({"subcommand": "status", "include_untracked": False}, "status -sb"),
         ({"subcommand": "diff"}, "diff"),
-        ({"subcommand": "log", "max_count": 5}, "log -n5 --oneline"),
+        ({"subcommand": "log"}, "log -n20 --oneline"),
     ],
 )
 async def test_healthy_repo_read_spawns_one_git_process(
@@ -1222,7 +1221,7 @@ async def test_engine_ceiling_outlives_measured_inner_budget(
         ({"subcommand": "status"}, repo, False, False),
         ({"subcommand": "add", "paths": ["extra.txt"]}, repo, False, True),
         ({"subcommand": "commit", "message": "add extra"}, repo, False, True),
-        ({"subcommand": "push", "set_upstream": True}, repo, True, False),
+        ({"subcommand": "push", "set_upstream": False}, repo, True, False),
         ({"subcommand": "fetch", "remote": "origin"}, repo, True, False),
         ({"subcommand": "pull", "remote": "origin"}, repo, True, True),
         (
@@ -1811,21 +1810,20 @@ async def test_repo_lock_wait_is_bounded_and_releases_cleanly():
     lock.release()
 
 
-async def test_status_hides_untracked_by_default(tmp_path: Path):
+async def test_status_shows_untracked(tmp_path: Path):
     repo = _init_repo(tmp_path / "repo")
     (repo / "ghost.txt").write_text("untracked\n", encoding="utf-8")
     result = await GitTool().execute({"subcommand": "status"}, _ceo_ctx(repo))
     assert result.success is True
-    assert "ghost.txt" not in result.output
-    assert result.metadata.get("include_untracked") is False
+    assert "ghost.txt" in result.output
+    assert "include_untracked" not in (result.metadata or {})
 
-    shown = await GitTool().execute(
-        {"subcommand": "status", "include_untracked": True},
+    leftover = await GitTool().execute(
+        {"subcommand": "status", "include_untracked": False},
         _ceo_ctx(repo),
     )
-    assert shown.success is True
-    assert "ghost.txt" in shown.output
-    assert shown.metadata.get("include_untracked") is True
+    assert leftover.success is True
+    assert "ghost.txt" in leftover.output
 
 
 async def test_status_truncates_long_porcelain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

@@ -170,7 +170,7 @@ describe("UserMessage agent mention chips", () => {
         ],
       }),
     );
-    fireEvent.click(screen.getByText("编辑"));
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
     const draft = screen.getByTestId("user-inline-draft");
     expect(
       within(draft).queryByRole("button", { name: "打开 brief.md" }),
@@ -201,7 +201,7 @@ describe("UserMessage agent mention chips", () => {
     ];
     const agentMentions = [{ agentId: "w1", role: "研究员" }];
     renderUser(userMsg({ content, attachments, agentMentions }));
-    fireEvent.click(screen.getByText("复制"));
+    fireEvent.click(screen.getByRole("button", { name: "复制" }));
     await waitFor(() => {
       expect(copyText).toHaveBeenCalledWith(
         renderInlineLabels(content, attachments, agentMentions),
@@ -218,7 +218,7 @@ describe("UserMessage agent mention chips", () => {
         agentMentions: [{ agentId: "w1", role: "研究员" }],
       }),
     );
-    fireEvent.click(screen.getByText("编辑"));
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
     expect(screen.getByTestId("user-inline-draft")).toBeTruthy();
     expect(
       screen.getByTestId("user-inline-draft").textContent ?? "",
@@ -248,9 +248,13 @@ describe("UserMessage send chrome", () => {
     const chrome = screen.getByTestId("user-message-chrome");
     expect(chrome.className).toContain("md:absolute");
     expect(chrome.className).toContain("md:top-full");
-    expect(chrome.className).toContain("md:inset-x-0");
-    expect(chrome.textContent).toContain("复制");
-    expect(chrome.textContent).toContain("编辑");
+    expect(chrome.className).toContain("md:right-0");
+    expect(chrome.className).toContain("md:w-max");
+    expect(chrome.className).not.toContain("md:inset-x-0");
+    expect(screen.getByRole("button", { name: "复制" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "编辑" })).toBeTruthy();
+    expect(chrome.textContent).not.toContain("复制");
+    expect(chrome.textContent).not.toContain("编辑");
   });
 
   it("hides send chrome while a turn is generating", () => {

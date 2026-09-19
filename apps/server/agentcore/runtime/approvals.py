@@ -452,7 +452,7 @@ class ApprovalGate:
             if req.payload.get("tool_name") not in tool_names:
                 continue
             # Never sweep always-confirm calls (git push/create_pr ·
-            # host install_package · delete_folder).
+            # host install_package).
             pending_args = req.payload.get("arguments")
             pending_tool = str(req.payload.get("tool_name") or "")
             if _requires_always_confirm(

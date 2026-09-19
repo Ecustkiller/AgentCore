@@ -24,7 +24,6 @@ import {
   Plus,
   ScrollText,
   Unplug,
-  UserRound,
   Wrench,
 } from "lucide-react";
 import type { DragEvent, ReactNode } from "react";
@@ -97,7 +96,7 @@ export function PromptOverview({
 }) {
   const alwaysRows = useMemo(() => buildAlwaysRows(rail), [rail]);
   const constitutionRows = alwaysRows.filter(
-    (row) => row.item.kind === "shared" || row.item.kind === "identity",
+    (row) => row.item.kind === "shared",
   );
   const alwaysMineRows = alwaysRows.filter((row) => row.item.kind === "mine");
   const residentTools = useMemo(
@@ -503,12 +502,6 @@ function tileVisual(item: PromptCatalogItem): {
   if (item.kind === "shared") {
     return {
       icon: <ScrollText size={18} />,
-      colorVar: artifactColorVar("guidelines"),
-    };
-  }
-  if (item.kind === "identity") {
-    return {
-      icon: <UserRound size={18} />,
       colorVar: artifactColorVar("guidelines"),
     };
   }

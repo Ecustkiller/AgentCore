@@ -93,15 +93,12 @@ DEBATE_PARAMETERS = {
                     "stance": {
                         "type": "string",
                         "maxLength": STANCE_MAX_CHARS,
-                        "description": (
-                            f"一句话立场（≤{STANCE_MAX_CHARS} 字）；只写主张结论，事实归 background。"
-                        ),
+                        "description": "一句话立场；只写主张结论，事实归 background。",
                     },
                     "model": {
                         "type": "string",
                         "description": (
-                            "辩手模型：目录身份 @platform/{id} 或 @byok/{provider_id}/{id}，"
-                            "或可读提及（「glm-5.2」/「平台 Flash」/「DeepSeek」）。"
+                            "辩手模型：目录身份 @platform/{id} 或 @byok/{provider_id}/{id}，或可读提及。"
                             "空=跟主模型。勿写未加 @ 的 platform/{id} 路由键。"
                         ),
                     },
@@ -118,17 +115,11 @@ DEBATE_PARAMETERS = {
         },
         "background": {
             "type": "string",
-            "description": (
-                "（可选）赛前客观事实清单，每条附【来源】与【日期】；"
-                "未决/推断勿当既定事实。细则→debate_and_review。"
-            ),
+            "description": "可选。赛前客观事实。",
         },
         "moderator_model": {
             "type": "string",
-            "description": (
-                "（可选）裁判模型：同 sides[].model 填法（目录身份或提及）。"
-                "空=系统默认（可与辩手同模）。"
-            ),
+            "description": "同 sides[].model。空=系统默认。",
         },
     },
     "required": ["motion", "sides"],

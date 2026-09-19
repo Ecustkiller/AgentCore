@@ -183,7 +183,7 @@ export type CheckpointDecision =
  * native client action instead of a plain text answer (unknown/absent → plain option):
  * `open_local_project` / `register_local_project` / `bind_local_folder` are
  * **本机传统** wire enums（桌面默认同通道；云协作是选项：「先在云上做」/「从 Git 克隆」；≠离线；
- * 网页/手机无本机盘；``create_folder`` 仍只建云）。
+ * 网页/手机无本机盘；新开云文件夹走「我的文件」）。
  * ``review_kind`` / ``body`` / ``slug`` / ``section`` remain on the wire for
  * historical events. */
 export interface AskOption {
@@ -1127,6 +1127,8 @@ export interface MessageEndPayload {
   /** 本回合团队状态（turn journal 派生）。没派工是 no_batch，不是缺字段。 */
   team_batch?: TeamBatchStatus;
   duration_ms?: number;
+  /** Sum of per-call LLM decode windows (first output chunk → stream end). Excludes tools and waits. Absent on old journals. */
+  generation_ms?: number;
   /** Turn-level result quality, independent of finish_reason. partial = landed product with gaps. paused is reserved (not produced this wave). */
   outcome?: "ok" | "partial" | "paused" | "error";
 }

@@ -3,8 +3,8 @@
 ``seed_completed`` is terminal nodes only (Wave will not re-dispatch those
 ids). Unfinished workers that already have a ReAct window are passed as
 :class:`ResumeHint` maps — crash keeps the journal transcript (including
-in-flight ``tool_calls`` + reasoning); infra strips historical reasoning
-and appends a 续干 user line.
+in-flight ``tool_calls`` + reasoning) and does not append a 续干 user;
+infra keeps that same transcript and appends a 续干 user line.
 
 Trailing assistant ``tool_calls`` without a matching tool message are the
 in-flight write (or any tool) to replay with the **same** ``tool_call_id``.

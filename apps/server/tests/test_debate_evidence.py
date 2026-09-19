@@ -50,7 +50,7 @@ from agentcore.runtime.debate.prompt import (
     round_feedback,
     side_system,
 )
-from agentcore.tools.builtin.debate.schema import DEBATE_DESCRIPTION, DEBATE_PARAMETERS
+from agentcore.tools.builtin.debate.schema import DEBATE_PARAMETERS
 from agentcore.tools.builtin.web.search import WebSearchTool
 
 # --- 共用夹具 ---------------------------------------------------------------
@@ -709,24 +709,24 @@ def test_cx_draft_brief_carries_output_budget():
     assert "冒号" in brief or "截断" in brief
 
 
-def test_background_schema_requires_source_date_and_bans_inference_as_fact():
-    """background：schema 短触发留来源/日期/未决；个案判例不进 skill。"""
+def test_background_how_lives_in_skill_not_schema():
+    """background 填法 HOW 在 consult 正文；schema 只留短触发。个案判例不进 skill。"""
     from agentcore.runtime.skills import build_system_skill_registry
+    from agentcore.runtime.skills.debate_and_review import BACKGROUND_HOW
 
     bg_desc = DEBATE_PARAMETERS["properties"]["background"]["description"]
-    assert "来源" in bg_desc and "日期" in bg_desc
-    assert "未决" in bg_desc or "推断" in bg_desc
-    assert "debate_and_review" in bg_desc or "debate_and_review" in DEBATE_DESCRIPTION
+    assert BACKGROUND_HOW not in bg_desc
+    assert "来源" not in bg_desc
+    assert "细则" not in bg_desc
 
     skill = build_system_skill_registry().get("debate_and_review")
     assert skill is not None
     body = skill.body
+    assert BACKGROUND_HOW in body
     assert "二审" not in body
     assert "被告表示将上诉" not in body
     assert "纯价值观" in body
     assert "不必传" in body
-    assert "每条带来源" not in body
-    assert "未决" not in body
 
 
 def test_background_block_prompt_bans_rewriting_pending_as_fact():

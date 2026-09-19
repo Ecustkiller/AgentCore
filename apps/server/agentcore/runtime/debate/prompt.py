@@ -148,6 +148,11 @@ EVIDENCE_NOTES_SPEC = (
 )
 
 
+def _debater_stance(side: DebateSide) -> str:
+    """Stance lock — tools do not distinguish sides; this sentence is the residual."""
+    return f"你是一场结构化辩论中的辩手，代表「{side.name}」。"
+
+
 def role_directive(config: DebateConfig, side: DebateSide) -> str:
     """正反辩手指引。"""
     del config, side
@@ -155,26 +160,19 @@ def role_directive(config: DebateConfig, side: DebateSide) -> str:
 
 
 def side_system(config: DebateConfig, side: DebateSide) -> str:
-    """检索阶段系统提示：角色 + 举证/查询铁律。前言/骨架纪律改挂成稿 draft_system。"""
-    base = (
-        f"你是一场结构化辩论中的辩手，代表「{side.name}」。坚定但理性地为你的立场辩护："
-        "论据具体、直面对方、不偷换概念、不因篇幅长而堆砌；用具体证据 / 例子 / 推理链支撑论点，"
-        "而非泛泛断言或空喊口号。"
-    )
+    """检索阶段系统提示：立场 + 举证/查询铁律。前言/骨架纪律改挂成稿 draft_system。"""
     return (
-        f"{base}{role_directive(config, side)}"
+        f"{_debater_stance(side)}{role_directive(config, side)}"
         f"{EVIDENCE_RULE}{SEARCH_QUERY_RULE}"
     )
 
 
 def draft_system(config: DebateConfig, side: DebateSide, *, beat: BeatKind) -> str:
-    """成稿阶段系统提示：角色 + 举证标记 + 禁止前言；立论/续辩另挂论点骨架。"""
-    base = (
-        f"你是一场结构化辩论中的辩手，代表「{side.name}」。坚定但理性地为你的立场辩护："
-        "论据具体、直面对方、不偷换概念、不因篇幅长而堆砌；用具体证据 / 例子 / 推理链支撑论点，"
-        "而非泛泛断言或空喊口号。"
+    """成稿阶段系统提示：立场 + 举证标记 + 禁止前言；立论/续辩另挂论点骨架。"""
+    text = (
+        f"{_debater_stance(side)}{role_directive(config, side)}"
+        f"{EVIDENCE_RULE}{NO_PREAMBLE_RULE}"
     )
-    text = f"{base}{role_directive(config, side)}{EVIDENCE_RULE}{NO_PREAMBLE_RULE}"
     if beat in ("opening", "continue", "attack", "defense", "rebuttal", "thread"):
         text += ARGUMENT_SKELETON_RULE
     if beat == "attack":

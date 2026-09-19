@@ -19,15 +19,25 @@ function data(p: Partial<ToolResultData>): ToolResultData {
 }
 
 describe("toolResultPeek", () => {
-  it("summarizes a web_search by hit count", () => {
+  it("does not peek web_search hit counts onto the collapsed title", () => {
     expect(
       toolResultPeek(
         data({
           toolName: "web_search",
           display: { query: "q", results: [{}, {}] },
+          result: "2 results",
         }),
       ),
-    ).toBe("2 results");
+    ).toBe("");
+    expect(
+      toolResultPeek(
+        data({
+          toolName: "web_search",
+          display: { query: "q", results: [] },
+          result: "No results",
+        }),
+      ),
+    ).toBe("");
   });
 
   it("summarizes a web_fetch as「标题 · 域名」", () => {
@@ -171,7 +181,7 @@ describe("toolResultPeek", () => {
     ).toBe("部署流程");
   });
 
-  it("summarizes list_folders display.count as N folders", () => {
+  it("does not peek list_folders counts onto the collapsed title", () => {
     expect(
       toolResultPeek(
         data({
@@ -180,13 +190,13 @@ describe("toolResultPeek", () => {
           result: "共 3 个文件夹：\n[...]",
         }),
       ),
-    ).toBe("3 folders");
+    ).toBe("");
     expect(
       toolResultPeek(data({ toolName: "list_folders", display: { count: 1 } })),
-    ).toBe("1 folder");
+    ).toBe("");
     expect(
       toolResultPeek(data({ toolName: "list_folders", display: { count: 0 } })),
-    ).toBe("0 folders");
+    ).toBe("");
   });
 
   it("does not treat folder-command display.name as consult peek", () => {
@@ -246,16 +256,25 @@ describe("toolResultPeek", () => {
     ).toBe("合规附录");
   });
 
-  it("summarizes search_conversations by result_count", () => {
+  it("does not peek search_conversations counts onto the collapsed title", () => {
     expect(
       toolResultPeek(
         data({
           toolName: "search_conversations",
           display: { result_count: 3, scope: "project" },
-          result: "…",
+          result: "找到 3 场对话（scope=project）：",
         }),
       ),
-    ).toBe("3 场对话");
+    ).toBe("");
+    expect(
+      toolResultPeek(
+        data({
+          toolName: "search_conversations",
+          display: { result_count: 0, scope: "all" },
+          result: "未找到可查阅的历史对话",
+        }),
+      ),
+    ).toBe("");
   });
 
   it("names the title for a read_conversation (with leftover 截断 mark)", () => {

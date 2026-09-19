@@ -314,7 +314,7 @@ async def test_delegate_execute_rejects_when_auth_dead():
         )
         tool._tools.list_all = MagicMock(return_value=[])
         result = await tool.execute(
-            {"playbook_none_reason": "x" * 20, "tasks": []},
+            {"tasks": []},
             MagicMock(),
         )
         assert result.success is False

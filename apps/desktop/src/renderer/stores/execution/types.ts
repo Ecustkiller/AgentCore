@@ -104,9 +104,6 @@ export const TOOL_LABELS: Record<string, string> = {
   md_to_docx: "Export Word",
   md_to_pdf: "Export PDF",
   md_export: "Export document",
-  archive_extract: "Extract archive",
-  archive_create: "Create archive",
-  archive: "Archive",
   download_url: "Download file",
   read_image: "Read image",
   code_diagnostics: "Check types",
@@ -378,7 +375,7 @@ export interface RunNode {
   /** 同人接续（续派 / 热修 / 辩论续写）：现场根 run id（星型），null = 冷开局。
    * 未进 plan 的续写由 `run_started` 合成；计划内续派节点亦在 started 时写入本字段。 */
   continuesRunId: string | null;
-  /** 接续序号（同根链上第几次续写，1-based）；0 = 非接续。角标「续 ×N」据此派生。 */
+  /** 接续序号（同根链上第几次续写，1-based）；0 = 非接续。座位角标「续 ×N」据此派生。 */
   continuationIndex: number;
   /**「计划已调整」轻痕迹 (设计 §7.2): set by a `plan_revised` frame to "bind" (a late-bound
    * placeholder finalised from upstream evidence) or "steer" (a not-yet-run node re-steered
@@ -435,7 +432,7 @@ export interface NodeTiming {
   outcome: string;
 }
 
-/** 调度埋点量化 (深层诊断指标, 前端UX设计.md §十): one WaveScheduler segment's observability
+/** 调度埋点量化 (深层诊断指标, 前端UX设计.md §四): one WaveScheduler segment's observability
  * snapshot, folded from a `batch_metrics` frame. `busyMs / wallMs ≈` 平均并发; `slotStarved > 0`
  * ⇒ the `width` 并发上限 throttled ready nodes. The boundary tallies count 受监督波循环 yields
  * fired this segment (leftover `bindBoundaries` from historical journals / scope 漂移返工 / checkpoint 用户复核); the escalate tallies

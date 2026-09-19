@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 /**
  * Process-tool chrome: folder command surface + export/search/board/notes/git
- * fold to one title line (icon + English verb + chips). Count meta is inline;
- * results stay expanded-only. The block comment detaches @vitest-environment
+ * fold to one title line (icon + English verb + chips). Retrieval / inventory
+ * counts stay expanded-only. The block comment detaches @vitest-environment
  * from the import block so organizeImports keeps it file-leading.
  */
 
@@ -146,18 +146,6 @@ const FOLD_FAMILY: {
     result: "已导出 PDF：报告.pdf",
   },
   {
-    tool: "archive_extract",
-    label: "Extract archive",
-    args: { archive: "pkg.zip", dest: "out" },
-    result: "已解压 12 个文件",
-  },
-  {
-    tool: "archive_create",
-    label: "Create archive",
-    args: { sources: ["src"], dest: "pkg.zip" },
-    result: "已打包 pkg.zip",
-  },
-  {
     tool: "download_url",
     label: "Download file",
     args: { url: "https://example.com/a.pdf", path: "a.pdf" },
@@ -238,7 +226,7 @@ describe("ToolLine · 过程工具折叠一行", () => {
     },
   );
 
-  it("list_folders success inlineMeta shows N folders", () => {
+  it("list_folders success does not inline a folder count", () => {
     const { container } = renderWithTooltip(
       <ToolLine
         step={step({
@@ -250,28 +238,13 @@ describe("ToolLine · 过程工具折叠一行", () => {
       />,
     );
     expect(screen.getByText("List folders")).toBeTruthy();
-    expect(screen.getByText(/3 folders/)).toBeTruthy();
-    expect(screen.getByText(/3 folders/).className).toMatch(/max-w-\[40%\]/);
+    expect(screen.queryByText(/3 folders/)).toBeNull();
     expect(collapsedSubline(container)).toBeNull();
     fireEvent.click(screen.getByText("List folders"));
     expect(screen.getByText(/共 3 个文件夹/)).toBeTruthy();
   });
 
-  it("list_folders 1 folder singular inlineMeta", () => {
-    renderWithTooltip(
-      <ToolLine
-        step={step({
-          tool_name: "list_folders",
-          result: "共 1 个文件夹：",
-          display: { count: 1 },
-          status: "success",
-        })}
-      />,
-    );
-    expect(screen.getByText(/1 folder$/)).toBeTruthy();
-  });
-
-  it("search_conversations success inlineMeta shows N 场对话", () => {
+  it("search_conversations success does not inline a hit count", () => {
     const { container } = renderWithTooltip(
       <ToolLine
         step={step({
@@ -285,12 +258,12 @@ describe("ToolLine · 过程工具折叠一行", () => {
     );
     expect(screen.getByText("Search conversations")).toBeTruthy();
     expect(screen.getByText("部署")).toBeTruthy();
-    expect(screen.getByText(/3 场对话/)).toBeTruthy();
+    expect(screen.queryByText(/3 场对话/)).toBeNull();
     expect(collapsedSubline(container)).toBeNull();
     fireEvent.click(screen.getByText("Search conversations"));
     expect(screen.getByText(/上周方案/)).toBeTruthy();
     expect(screen.queryByText("检索对话")).toBeNull();
-    expect(screen.getAllByText(/3 场对话/)).toHaveLength(1);
+    expect(screen.queryByText(/3 场对话/)).toBeNull();
   });
 
   it("file_list chips directory; '.' stays off the title", () => {

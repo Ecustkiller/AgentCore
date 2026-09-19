@@ -84,7 +84,7 @@ export interface paths {
         };
         /**
          * Updates Policy
-         * @description Desktop auto-update policy (发布与门禁.md §7.6).
+         * @description Desktop auto-update policy (发布与门禁.md §1.6).
          *
          *     The desktop updater polls this before each check and pauses downloads when
          *     ``enabled`` is false — a kill switch for a bad release. ``min_desktop_version``
@@ -99,8 +99,8 @@ export interface paths {
          *     non-200 is treated as enabled.
          *
          *     Staged rollout (stagingPercentage) and beta/stable channels ride on the
-         *     feature-flag system (发布与门禁.md §7.9) and are not part of this payload yet.
-         *     Per-flag ``min_client_version`` (§7.9) remains a separate line from this
+         *     feature-flag system (发布与门禁.md §1.9) and are not part of this payload yet.
+         *     Per-flag ``min_client_version`` (§1.9) remains a separate line from this
          *     global desktop floor.
          */
         get: operations["updates_policy_updates_policy_get"];
@@ -2107,9 +2107,11 @@ export interface paths {
          *     Owner-scoped (404 for a non-owner / missing source / cutoff not in this chat).
          *     ``until_message_id`` is required: the copy includes that row and every earlier
          *     row; later turns stay on the source. The original is unchanged. Inherits folder
-         *     (same workspace) and local-first intent, titled「… 副本」. Content-level fields
-         *     only — ``MessageRepository.copy_through`` does not copy the team-graph journal.
-         *     A still-generating cutoff is 409. Returns the new conversation summary.
+         *     (same workspace) and local-first intent. Title is ``{stem} (n)`` with n from 1
+         *     among the caller's live chats (empty source uses the sidebar fallback, then
+         *     「新对话」). Content-level fields only — ``MessageRepository.copy_through``
+         *     does not copy the team-graph journal. A still-generating cutoff is 409.
+         *     Returns the new conversation summary.
          */
         post: operations["duplicate_conversation_v1_conversations__conversation_id__duplicate_post"];
         delete?: never;
@@ -4135,8 +4137,8 @@ export interface paths {
          *     Nested folders go with it, and the directory is parked in the tombstone area so
          *     the name is free again immediately (双模式工作区 §5.4).
          *
-         *     Reachable with a folders narrow ticket so the sidecar CEO's ``delete_folder``
-         *     lands on the same path as the sidebar. The irreversible twin below stays
+         *     Reachable with a folders narrow ticket so sidecar and the sidebar share
+         *     the same soft-delete path. The irreversible twin below stays
          *     access-session only.
          */
         delete: operations["delete_folder_v1_folders__folder_id__delete"];
@@ -7956,9 +7958,10 @@ export interface components {
          * @description The system-prompt TEMPLATE the agents follow (静态 蓝图; the per-turn verbatim
          *     prompt is served separately, see the message prompt endpoint).
          *
-         *     ``shared_base`` is the base every agent (CEO + workers) shares (identity, output
-         *     style, tool-use, safety); ``worker_leaf`` / ``worker_captain`` are ``<身份>``
-         *     templates — not the per-turn prompt (form HOW is 交付物规格 in 收到的上下文);
+         *     ``shared_base`` is the base every agent (CEO + workers) shares (output
+         *     style, tool-use, safety); ``worker_leaf`` / ``worker_captain`` are empty
+         *     (no factory worker ``<身份>``; nest-cap is a live opening fact) — not the
+         *     per-turn prompt (form HOW is 交付物规格 in 收到的上下文);
          *     ``ceo_addon`` is the CEO
          *     coordinator's layers on top of that base
          *     (routing core + 按需目录 + citation guidance); ``ceo`` is the full chat
@@ -10895,6 +10898,8 @@ export interface components {
             feedback?: string | null;
             /** Followups */
             followups?: string[];
+            /** Generation Ms */
+            generation_ms?: number | null;
             /** Id */
             id: string;
             /** Origin */
@@ -11632,6 +11637,8 @@ export interface components {
             execution_id?: string | null;
             /** Finish Reason */
             finish_reason?: string | null;
+            /** Generation Ms */
+            generation_ms?: number | null;
             /** Harvest Kind */
             harvest_kind?: string | null;
             /**

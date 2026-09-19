@@ -156,23 +156,3 @@ def reconcile_resume_closing(
     from agentcore.runtime.engine.segments import join_segments
 
     return rewrite_stale_ask_after_dispatch(join_segments(left, right))
-
-
-def resume_continuity_steer(*, prior_deliverable: str) -> str:
-    """Steer the resumed CEO round; avoid amplifying stale confirm / kickoff framing."""
-    prior = (prior_deliverable or "").strip()
-    if prior and claims_posture_c(prior) and not claims_posture_a(prior):
-        return (
-            "[系统提示] 用户已通过确认卡作答。请基于用户答复推进下一步。"
-            "上轮已给出确认选项时须承接，【禁止】空转确认、不承接选项。"
-            "有交付对账卡时以档位为准；非正式完成不得姿势 A。"
-        )
-    if prior and is_process_dispatch_preamble(prior):
-        return (
-            "[系统提示] 用户已确认计划/委派，派工过程段不要续进终稿。"
-            "请另写一份给用户的交付说明；不要工作日志。"
-            "有交付对账卡时以档位为准；非正式完成不得姿势 A。"
-        )
-    from agentcore.runtime.engine.segments import deliverable_continuity_instruction
-
-    return deliverable_continuity_instruction(prior_deliverable=prior_deliverable)

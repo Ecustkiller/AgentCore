@@ -55,6 +55,9 @@ def log_chat_turn_complete(
             "ttft_content_ms": None,
         }
     )
+    generation_ms = None
+    if probe is not None and probe.generation_ms > 0:
+        generation_ms = probe.generation_ms
     outcome = result.get("outcome")
     logger.info(
         "chat.turn_complete",
@@ -73,6 +76,7 @@ def log_chat_turn_complete(
         escalations=collab.get("escalations", 0),
         revises=collab.get("revises", 0),
         duration_ms=duration_ms,
+        generation_ms=generation_ms,
         error=result.get("error"),
         **phase0,
         **extra,

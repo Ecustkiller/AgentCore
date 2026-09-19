@@ -6,6 +6,7 @@ import {
   isDebateFoldedBeat,
   isDebateStatementBeat,
   isDebateTaggedRun,
+  isSeatFoldedContinuation,
 } from "@/stores/execution";
 import type { GraphEdge } from "@/stores/graph";
 import { subTeamGroupId } from "./ids";
@@ -437,7 +438,8 @@ export function computeGraphFold(
           return modId;
         }
       }
-      // Non-debate continuations stay individually visible (continuation chain on the graph).
+      // Non-debate continuations stay unit-of-self here; graph structure hides
+      // them via seat fold (like debate beats) so the seat is not a compound box.
       unitOf.set(runId, runId);
       return runId;
     }
@@ -520,6 +522,22 @@ export function buildGraphStructure(
   const { folded, unitOf, descendants, debateUnits } = foldInfo;
   const runById = new Map(workerRuns.map((r) => [r.id, r]));
   const isContinuation = (r: GraphRunLike): boolean => r.continuesRunId != null;
+  /** 同人续写折进现场根，图上不占座位（辩论续轮除外）。 */
+  const seatHidden = new Set(
+    workerRuns.filter(isSeatFoldedContinuation).map((r) => r.id),
+  );
+  const remapSeat = (id: string): string => {
+    const r = runById.get(id);
+    if (
+      r &&
+      seatHidden.has(id) &&
+      r.continuesRunId &&
+      workerIds.has(r.continuesRunId)
+    ) {
+      return r.continuesRunId;
+    }
+    return id;
+  };
   /** 同幕 parent 才进子队盒；跨幕 parent 是幕间衔接边，不折盒。 */
   const isSub = (r: GraphRunLike): boolean => {
     if (isContinuation(r)) return false;
@@ -554,7 +572,7 @@ export function buildGraphStructure(
     debateUnits.has(unit) || expandedUnits.has(unit);
 
   const isLayoutVisible = (runId: string): boolean => {
-    if (beatHidden.has(runId)) return false;
+    if (seatHidden.has(runId) || beatHidden.has(runId)) return false;
     if (!folded.has(runId)) return true;
     const unit = unitOf.get(runId) ?? runId;
     return isUnitExpanded(unit);
@@ -576,20 +594,49 @@ export function buildGraphStructure(
   const edgeSet = new Map<string, GraphEdge>();
 
   const addEdge = (e: GraphEdge, lift = false) => {
-    const src = lift ? (unitOf.get(e.source) ?? e.source) : e.source;
-    const tgt = lift ? (unitOf.get(e.target) ?? e.target) : e.target;
+    const seated: GraphEdge = {
+      ...e,
+      source: remapSeat(e.source),
+      target: remapSeat(e.target),
+    };
+    if (seated.source === seated.target) return;
+    const src = lift
+      ? (unitOf.get(seated.source) ?? seated.source)
+      : seated.source;
+    const tgt = lift
+      ? (unitOf.get(seated.target) ?? seated.target)
+      : seated.target;
     if (src === tgt) return;
-    if (beatHidden.has(src) || beatHidden.has(tgt)) return;
+    if (
+      seatHidden.has(src) ||
+      seatHidden.has(tgt) ||
+      beatHidden.has(src) ||
+      beatHidden.has(tgt)
+    )
+      return;
     if (!isLayoutVisible(src) && folded.has(src)) return;
     if (!isLayoutVisible(tgt) && folded.has(tgt)) return;
-    const lifted = lift ? liftEdgeEndpoints(e.source, e.target, unitOf) : null;
+    const lifted = lift
+      ? liftEdgeEndpoints(seated.source, seated.target, unitOf)
+      : null;
     const finalSrc = lifted?.source ?? src;
     const finalTgt = lifted?.target ?? tgt;
     if (finalSrc === finalTgt) return;
-    if (beatHidden.has(finalSrc) || beatHidden.has(finalTgt)) return;
+    if (
+      seatHidden.has(finalSrc) ||
+      seatHidden.has(finalTgt) ||
+      beatHidden.has(finalSrc) ||
+      beatHidden.has(finalTgt)
+    )
+      return;
     const key = edgeKey({ ...e, source: finalSrc, target: finalTgt });
     if (edgeSet.has(key)) return;
-    edgeSet.set(key, { ...e, id: e.id, source: finalSrc, target: finalTgt });
+    edgeSet.set(key, {
+      ...seated,
+      id: e.id,
+      source: finalSrc,
+      target: finalTgt,
+    });
   };
 
   for (const run of workerRuns) {
@@ -716,14 +763,18 @@ export function buildGraphStructure(
   }
 
   const topWorkers = workerRuns.filter(
-    (r) => unitOf.get(r.id) === r.id && !folded.has(r.id),
+    (r) =>
+      unitOf.get(r.id) === r.id && !folded.has(r.id) && !seatHidden.has(r.id),
   );
   if (topWorkers.length > 0 && captainId) {
     // Units that another top-level worker depends on (i.e. have a downstream
     // peer). Leaves = not in this set → bookend edge into the CEO sink.
     const dependedOn = new Set<string>();
     for (const r of topWorkers) {
-      for (const dep of r.dependsOn) dependedOn.add(unitOf.get(dep) ?? dep);
+      for (const dep of r.dependsOn) {
+        const seated = remapSeat(dep);
+        dependedOn.add(unitOf.get(seated) ?? seated);
+      }
     }
     // 补派/接手：被 replaces_run_id 指向的失败节点不再作 CEO 汇入；补派节点本身
     // 也不是从用户输入扇出的新根（depends_on=[] 时勿画 input→补派）。
@@ -731,7 +782,7 @@ export function buildGraphStructure(
     for (const r of topWorkers) {
       const from = r.replacesRunId;
       if (!from) continue;
-      replacedUnits.add(unitOf.get(from) ?? from);
+      replacedUnits.add(unitOf.get(remapSeat(from)) ?? remapSeat(from));
     }
     nodeIds.push(inputId, captainId);
     for (const r of topWorkers) {

@@ -258,16 +258,14 @@ def test_unified_browser_name_folds_like_legacy_snapshot():
     assert "elements" not in old["untrusted_web_content"]
 
 
-def test_build_request_window_applies_projection():
+def test_build_request_window_does_not_omit_browser_snapshots():
     msgs: list[LLMMessage] = [LLMMessage(role="user", content="go")]
     msgs += _snapshot_pair("s0", version=1, elements="[e1] old")
     msgs += _snapshot_pair("s1", version=2, elements="[e2] new")
 
     out = build_request_window(msgs, investigation_tools=frozenset(), round_idx=0)
-    assert out is not msgs
+    assert out is msgs
     old = json.loads(_tool_content(out, "s0"))
     new = json.loads(_tool_content(out, "s1"))
-    assert old["untrusted_web_content"].get("omitted") is True
-    assert "elements" not in old["untrusted_web_content"]
-    assert old["ref_delta"]["added"] == ["e2"]
+    assert "elements" in old["untrusted_web_content"]
     assert new["untrusted_web_content"]["elements"] == "[e2] new"

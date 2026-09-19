@@ -141,32 +141,19 @@ def _build_messages(
     worker aims to meet it on the first pass. This builds only the opening turn; a
     contract retry no longer rebuilds from scratch — the executor CONTINUES on this
     same transcript by appending the shortfall (:func:`_retry_message`), so the
-    worker sees its own prior draft. ``identity`` is the worker's self-awareness
-    preamble — the leaf-worker default, or the captain variant for a worker
-    authorized to lead one nested sub-team.
+    worker sees its own prior draft. ``identity`` / role / supplement ride the
+    opening **user** card so parallel workers share a byte-identical ``role: system``.
+    Leaf identity default is empty.
 
-    单一源 (上下文传递可视化): ``system_content`` is assembled once (identity + shared
-    base + contract). The LLM ``system`` message is that string. Material blocks from
+    单一源 (上下文传递可视化): ``system_content`` is the shared base only. The LLM
+    ``system`` message is that string. Material blocks from
     :func:`_build_context_blocks` RENDER the user message — they are NOT joined with
     the system block (that would double-inject the prompt into the user turn). When
     ``blocks_sink`` is given, the sink is ``[system block mirroring system_content]``
     plus an optional ``tools`` block (opening ``tool_defs``, same list the first LLM
     round is offered) plus the material list, so ``run_context`` shows the same
     system + tool table the LLM ate."""
-    # Stable ``<身份>`` sits in front of the shared base so leaf workers share a
-    # cacheable prefix; node contract (form / handoff) stays after the base.
-    core, sep, rest = identity.partition("</身份>")
-    if sep:
-        sys_parts = [f"{core}{sep}", system_prompt]
-        if rest.strip():
-            sys_parts.append(rest.strip())
-    else:
-        sys_parts = [system_prompt, identity]
-    if spec.role:
-        sys_parts.append(f"你的角色：{spec.role}")
-    if spec.system_prompt_supplement:
-        sys_parts.append(spec.system_prompt_supplement)
-    system_content = "\n\n".join(p for p in sys_parts if p)
+    system_content = system_prompt
     _observe_worker_opening(
         worker_base=system_prompt,
         identity=identity,
@@ -182,6 +169,7 @@ def _build_messages(
         deliverable,
         team_brief,
         context_inject=context_inject,
+        identity=identity,
     )
     if blocks_sink is not None:
         blocks_sink.append(
@@ -211,6 +199,7 @@ def _build_context_blocks(
     team_brief: str | None = None,
     *,
     context_inject: Mapping[str, str] | None = None,
+    identity: str = "",
 ) -> list[ContextBlock]:
     """The ordered material :class:`ContextBlock` list a worker's opening **user**
     message is rendered FROM (上下文传递可视化, worker 侧). Each block becomes a
@@ -240,9 +229,31 @@ def _build_context_blocks(
         )
         blocks.append(
             ContextBlock(channel="team_position", heading="你在团队中的位置", body=position)
-        )
+            )
     else:
         blocks.append(ContextBlock(channel="request", heading="原始用户请求", body=user_message))
+    if spec.role:
+        blocks.append(
+            ContextBlock(
+                channel="role",
+                heading="你的角色",
+                body=str(spec.role).strip(),
+            )
+        )
+    ident = (identity or "").strip()
+    if ident:
+        blocks.append(
+            ContextBlock(channel="identity", heading="本回合能力", body=ident)
+        )
+    supplement = (spec.system_prompt_supplement or "").strip()
+    if supplement:
+        blocks.append(
+            ContextBlock(
+                channel="supplement",
+                heading="补充说明",
+                body=supplement,
+            )
+        )
     blocks.extend(_dep_context_blocks(plan, spec.depends_on, completed))
     blocks.extend(_context_inject_blocks(context_inject))
     if team_brief:
@@ -300,8 +311,7 @@ def _offered_tools_block(tool_defs: list[dict] | None) -> ContextBlock | None:
     """Mirror the opening OpenAI ``tools`` array as one ``channel=tools`` block.
 
     Same list the first LLM round is offered — not a registry replay. Empty / missing
-    defs omit the block (no empty「本回合工具」row). Mid-turn consult promote and
-    wind-down narrowing are later rounds; this snapshot is 开场.
+    defs omit the block (no empty「本回合工具」row). This snapshot is 开场.
     """
     if not tool_defs:
         return None
@@ -455,13 +465,13 @@ def _context_block_payloads(blocks: list[ContextBlock]) -> list[dict[str, Any]]:
 def _upstream_intermediate_persist_hint(spec: RunSpec) -> str:
     """A1: where upstream links may park large intermediates for downstream ``file_read``.
 
-    Playbook-pinned ``artifacts`` win (strict task-book paths). Otherwise free-form
+    Declared ``artifacts`` win (strict task-book paths). Otherwise free-form
     teams self-locate; if they cannot, park under ``DRAFTS_DIR`` with a descriptive
     filename — never workspace-root ``findings-<role>.md``. Does not replace
-    playbook pinning; only guides free teams.
+    pinned artifacts; only guides free teams.
 
     不知放哪才进工作稿，不把省略 deliverable 钉成工作稿义务；``research/`` 仍只接
-    playbook / 显式声明 → [术语表 · 成品归位].
+    显式声明 → [术语表 · 成品归位].
     """
     pinned = [
         p.strip().replace("\\", "/")

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# AgentCore 一键部署 / 回退脚本（部署与运维.md §三 CI/CD）。
+# AgentCore 一键部署 / 回退脚本（部署拓扑与环境.md §三 CI/CD）。
 #
 #   git checkout <sha> → pull 镜像 → 起基础设施 → 迁移前 DB 快照 → 迁移前 workspaces/ 快照 →
 #   停 api → alembic upgrade head → schema gate → workspace tree 迁移 →
@@ -11,9 +11,9 @@
 #   deploy-server.sh [<sha>|<tag>|latest]    # 缺省 latest（= origin/<branch> HEAD）
 #
 # 正向部署传新 SHA；回退传旧 SHA（镜像在 ACR 秒级切换，回退自动跳过正向迁移，
-# 库需对齐时从 backups/ 手动恢复——见 §7.7）。
+# 库需对齐时从 backups/ 手动恢复——见 发布与门禁.md §1.7）。
 #
-# 配置（可经环境或 $AGENTCORE_HOME/.env 覆盖，部署与运维.md §8.2）：
+# 配置（可经环境或 $AGENTCORE_HOME/.env 覆盖，部署拓扑与环境.md §7.2）：
 #   AGENTCORE_HOME   部署根目录            （默认 /opt/agentcore）
 #   GIT_BRANCH       latest 解析的分支      （默认 master，对齐 ci.yml / 仓库主干）
 #   IMAGE_REGISTRY   ACR 仓库（含命名空间） （compose 拉取用）
@@ -27,7 +27,7 @@
 set -euo pipefail
 
 # ── 自更新防护：先把自己拷到临时副本再 exec，避免 git checkout 中途改写本脚本
-#    导致运行中的 shell 读到半截内容（部署与运维.md §三）。──
+#    导致运行中的 shell 读到半截内容（部署拓扑与环境.md §三）。──
 if [[ "${_DEPLOY_REEXEC:-}" != "1" ]]; then
   _self_tmp="$(mktemp)"
   cp "$0" "$_self_tmp"
@@ -146,7 +146,7 @@ for ((i = 1; i <= 30; i++)); do
 done
 stage "infra up + postgres ready"
 
-# ── 6. 迁移前 DB 快照（仅正向；失败即终止，避免无快照迁移，见 §7.7）──
+# ── 6. 迁移前 DB 快照（仅正向；失败即终止，避免无快照迁移，见 发布与门禁.md §1.7）──
 if [[ "$IS_ROLLBACK" -eq 0 && "${SKIP_SNAPSHOT:-0}" != "1" ]]; then
   mkdir -p "$BACKUP_DIR"
   snapshot="$BACKUP_DIR/pre-deploy-$(date +%Y%m%d-%H%M%S)-$SHORT_SHA.sql.gz"
@@ -174,7 +174,7 @@ if [[ "$IS_ROLLBACK" -eq 0 && "${SKIP_WORKSPACE_SNAPSHOT:-0}" != "1" ]]; then
     err "探不到 workspaces/ 体积（输出：${ws_probe:-<空>}）— 证不明「没有数据会丢」，终止部署"
     exit 1
   else
-    # 轮转放在写新档**之前**：归档是用户文件的整份拷贝（不是 §7.7 那种 MB 级、可长期堆着的
+    # 轮转放在写新档**之前**：归档是用户文件的整份拷贝（不是 发布与门禁.md §1.7 那种 MB 级、可长期堆着的
     # pg_dump），先降到 KEEP-1 份，峰值占盘就是 KEEP 份而不是 KEEP+1；写档全程盘上仍留着
     # 上一份完整归档，中途失败也不至于两手空空。
     WORKSPACE_BACKUP_KEEP="${WORKSPACE_BACKUP_KEEP:-2}"

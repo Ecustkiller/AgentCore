@@ -92,6 +92,8 @@ export interface OutboxRecord {
   rounds?: number;
   /** Whole-turn product-AI wall clock (ms); same number as live message_end. */
   duration_ms?: number;
+  /** Decode-window sum (ms); same number as live message_end.generation_ms. */
+  generation_ms?: number;
   finish_reason?: string | null;
   phase?: string;
   updated_at?: number;
@@ -298,13 +300,15 @@ function journalMapAfterSeq(
 
 const TOOL_FAILURE_MESSAGE_MAX = 200;
 
+/** Mirror server ``EMPTY_DELEGATE_MSG`` (delegate.schema). */
+const EMPTY_DELEGATE_MSG =
+  'delegate 缺 tasks：默认顶层放非空 `tasks`，可抄：{"tasks":[{"role":"角色","task":"目标+边界+验收"}]}（deliverable 可选）。';
+
 /** Known local-turn write-back failure codes (mirrors server frozenset). */
 const LOCAL_TURN_TOOL_FAILURE_CODES = new Set([
   "searxng_unreachable",
   "egress_connect",
   "declaration_empty",
-  "declaration_xor",
-  "declaration_unknown",
   "exec_timeout",
   "exec_forced_stop",
   "schema",
@@ -419,21 +423,9 @@ export function normalizeToolFailureCode(
     return "exec_forced_stop";
   }
   const raw = message || "";
-  // Mirror server try_declaration_reject_gate prefixes / templates.
-  if (
-    raw.startsWith("playbook 与 tasks 二选一") ||
-    raw.startsWith("手写 tasks 时勿传")
-  ) {
-    return "declaration_xor";
-  }
-  if (
-    raw.startsWith("delegate 须传手写") ||
-    raw.startsWith("delegate 缺 tasks/playbook")
-  ) {
+  // Empty-tasks reject: current EMPTY_DELEGATE_MSG only (not retired prefixes).
+  if (raw === EMPTY_DELEGATE_MSG) {
     return "declaration_empty";
-  }
-  if (raw.startsWith("未知 playbook")) {
-    return "declaration_unknown";
   }
   if (
     raw.includes("ExecEnvProbeFailed:") ||
@@ -720,6 +712,13 @@ export function toRecordTurnBody(
     record.duration_ms > 0
   ) {
     body.duration_ms = Math.floor(record.duration_ms);
+  }
+  if (
+    typeof record.generation_ms === "number" &&
+    Number.isFinite(record.generation_ms) &&
+    record.generation_ms > 0
+  ) {
+    body.generation_ms = Math.floor(record.generation_ms);
   }
   const journal = journalEntriesFromMap(record.journal);
   if (journal) body.journal = journal;

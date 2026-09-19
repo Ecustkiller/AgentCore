@@ -1,4 +1,4 @@
-# AgentCore 后端镜像（部署与运维.md §三 / §7.1）。
+# AgentCore 后端镜像（部署拓扑与环境.md §三 / 发布与门禁.md §1.1）。
 # 多阶段：builder 用 uv 按 uv.lock 复现依赖到 venv；runtime 只带 venv + 源码，
 # 非 root 运行。GIT_SHA / BUILT_AT 构建期注入并经 GET /version 暴露。
 #
@@ -197,7 +197,7 @@ RUN set -eux; \
     grep -q '^app:' /opt/agentcore/guest-rootfs/etc/group \
       || echo "app:x:${gid}:" >> /opt/agentcore/guest-rootfs/etc/group
 
-# 构建溯源：构建期钉入镜像 ENV，运行时经 GET /version 暴露（部署与运维.md §7.1）。
+# 构建溯源：构建期钉入镜像 ENV，运行时经 GET /version 暴露（发布与门禁.md §1.1）。
 # 必须放在 apt / guest 树 / Chromium 等重型层之后：这两个值每次构建都变，而 ARG
 # 声明后的 RUN 会隐式把 ARG 值计入缓存 key——放 runtime 开头会把整段重型层缓存打穿。
 # 放这里只影响元数据层，零成本。
@@ -210,7 +210,7 @@ USER app
 
 EXPOSE 8000
 
-# 存活探针：/livez 进程在即恒 200（部署与运维.md §7）。仍用 urllib，不改绑 curl。
+# 存活探针：/livez 进程在即恒 200（发布与门禁.md）。仍用 urllib，不改绑 curl。
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD ["python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/livez', timeout=3).status==200 else 1)"]
 

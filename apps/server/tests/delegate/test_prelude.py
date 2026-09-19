@@ -15,7 +15,6 @@ from agentcore.llm.turn_auth_dead import (
 )
 from agentcore.runtime.delegate.prelude import (
     DelegateBatchRequest,
-    DelegateCallFlags,
     DelegatePreludeReject,
     resolve_delegate_prelude,
 )
@@ -34,8 +33,6 @@ def run(arguments: dict, **over):
     """Call the prelude with test defaults (root captain, empty tool surface)."""
     kwargs = {
         "tools": ToolRegistry(),
-        "user_message": "原始请求",
-        "conversation_id": "conv-1",
         "depth": 0,
         "sub_workers_spawned": 0,
         "credential_source": "user",
@@ -73,8 +70,6 @@ def test_turn_token_ceiling_rejects_before_anything_else(monkeypatch):
     finally:
         reset_turn_token_meter(token)
     assert out.result.contract_failure is True
-    # 硬顶发生在读 playbook 之前 → 实例上的 per-call 标记保持原样。
-    assert out.flags is None
     assert spy.get("delegate.turn_token_ceiling_rejected")["ceiling"] == (
         resolve_turn_token_ceiling()
     )
@@ -90,7 +85,6 @@ def test_turn_auth_dead_rejects(monkeypatch):
     finally:
         reset_turn_auth_dead(token)
     assert out.result.contract_failure is True
-    assert out.flags is None
     assert spy.get("delegate.turn_auth_dead_rejected") == {}
 
 
@@ -106,50 +100,34 @@ def test_turn_auth_dead_other_source_does_not_reject(monkeypatch):
     assert "delegate.turn_auth_dead_rejected" not in [n for n, _ in spy.events]
 
 
-def test_empty_declaration_rejected_with_gate(monkeypatch):
-    """既无 tasks 又无 playbook → 声明闸打回，日志带 gate 分类。"""
+def test_empty_tasks_rejected(monkeypatch):
     spy = LogSpy()
     monkeypatch.setattr(prelude_mod, "logger", spy)
+    from agentcore.tools.builtin.delegate.schema import (
+        EMPTY_DELEGATE_MSG,
+        HANDWRITTEN_TASKS_SKELETON,
+    )
+
     out = rejected({})
-    assert "delegate 缺 tasks/playbook" in (out.result.error or "")
+    assert out.result.error == EMPTY_DELEGATE_MSG
+    assert HANDWRITTEN_TASKS_SKELETON in (out.result.error or "")
     assert out.result.contract_failure is True
-    assert out.flags is None
-    assert spy.get("delegate.playbook_declaration_rejected")["gate"] == "empty"
+    assert spy.get("delegate.empty_rejected")["has_tasks"] is False
+
+    empty_list = rejected({"tasks": []})
+    assert empty_list.result.error == EMPTY_DELEGATE_MSG
+    assert empty_list.result.contract_failure is True
 
 
-def test_unknown_playbook_rejected(monkeypatch):
-    spy = LogSpy()
-    monkeypatch.setattr(prelude_mod, "logger", spy)
-    out = rejected({"playbook": "nope"})
-    assert "未知 playbook" in (out.result.error or "")
-    assert spy.get("delegate.playbook_declaration_rejected")["gate"] == "unknown"
+def test_unknown_top_level_keys_do_not_expand_or_xor():
+    """未知顶层键不展开、不 XOR；没有 tasks 仍是缺 tasks，同传手写 tasks 照收。"""
+    from agentcore.tools.builtin.delegate.schema import EMPTY_DELEGATE_MSG
 
-
-def test_playbook_xor_tasks_defense_in_depth():
-    """`tasks` 非 list（声明闸看不见）但真值 → 前奏兜住 XOR，不半跑。"""
-    out = rejected({"playbook": "cite_write_review", "tasks": "写点东西"})
-    assert "二选一" in (out.result.error or "")
-    assert out.result.contract_failure is True
-    # XOR 发生在写 _active_playbook 之前。
-    assert out.flags is None
-
-
-def test_playbook_expand_errors_rejected(monkeypatch):
-    spy = LogSpy()
-    monkeypatch.setattr(prelude_mod, "logger", spy)
     out = rejected({"playbook": "cite_write_review"})
-    assert (out.result.error or "").startswith("playbook 实例化失败：")
-    assert out.result.contract_failure is True
-    assert out.flags is None
-    assert spy.get("delegate.playbook_rejected")["playbook"] == "cite_write_review"
+    assert out.result.error == EMPTY_DELEGATE_MSG
 
-
-def test_empty_tasks_rejected_and_clears_playbook_marks():
-    out = rejected({"tasks": []})
-    assert "缺 tasks/playbook" in (out.result.error or "")
-    assert out.result.contract_failure is True
-    # 声明闸 empty：flags 尚未写入。
-    assert out.flags is None
+    batch = accepted({"playbook": "cite_write_review", "tasks": _ONE_TASK})
+    assert batch.tasks_raw == _ONE_TASK
 
 
 def test_sub_fanout_cap_rejected_at_depth(monkeypatch):
@@ -162,9 +140,9 @@ def test_sub_fanout_cap_rejected_at_depth(monkeypatch):
         sub_workers_spawned=1,
     )
     assert "子团队扇出已达上限" in (out.result.error or "")
+    assert "分批" not in (out.result.error or "")
     # 扇出拒绝不是契约自纠打回（保持原样：不设 contract_failure）。
     assert out.result.contract_failure is False
-    assert out.flags == DelegateCallFlags(playbook=None, playbook_args=None)
     logged = spy.get("delegate.sub_fanout_rejected")
     assert logged["spawned"] == 1
     assert logged["requested"] == MAX_WORKER_SUBDELEGATIONS
@@ -183,24 +161,7 @@ def test_handwritten_tasks_normalized():
     tools = ToolRegistry()
     out = accepted({"tasks": _ONE_TASK}, tools=tools)
     assert out.tasks_raw == _ONE_TASK
-    assert out.playbook is None
-    assert out.playbook_notes == []
     assert out.valid_tools == {s.name for s in tools.list_all()}
-    assert out.flags == DelegateCallFlags(playbook=None, playbook_args=None)
-
-
-def test_playbook_expands_tasks_and_carries_marks(monkeypatch):
-    spy = LogSpy()
-    monkeypatch.setattr(prelude_mod, "logger", spy)
-    args = {"topic": "GEO 官网"}
-    out = accepted({"playbook": "cite_write_review", "playbook_args": args})
-    assert out.playbook == "cite_write_review"
-    assert len(out.tasks_raw) > 1
-    assert out.flags.playbook == "cite_write_review"
-    assert out.flags.playbook_args == args
-    # 拷贝而非引用：CEO 传进来的 dict 不该被下游改写。
-    assert out.flags.playbook_args is not args
-    assert spy.get("delegate.playbook")["nodes"] == len(out.tasks_raw)
 
 
 def test_single_dependency_free_worker_infers_light(monkeypatch):

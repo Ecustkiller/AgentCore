@@ -15,7 +15,7 @@ skip_if:
 >
 > **主循环归属**：「**看**」（赛事页看交锋）；进行中插手是「**拍**」→ [主循环](/docs/01-产品/产品定位与品牌.md)。
 
-## 四、前端呈现
+## 一、前端呈现
 
 辩论前端 = **赛事页**（顶栏 + 正反主列）；live 与收场同一 `toDebateModel` 流。入口：`TurnDetailPage?view=debate`（状态条「打开辩论室」）。点主持人节点 → 右坞与其它 AI 同一套过程时间线；赛事页仍是看交锋的面。→ `components/chat/debate/arena/`。
 
@@ -33,7 +33,7 @@ skip_if:
 
 ### 窄屏
 
-走桌面辩论室同一套（`DebateArena` / `TurnDetailPage?view=debate`）；旧手机 `DebateView` 精简面已随 fold 退役。权威一句 → [前端 UX §十五](/docs/04-前端/前端UX设计.md)。
+走桌面辩论室同一套（`DebateArena` / `TurnDetailPage?view=debate`）；旧手机 `DebateView` 精简面已随 fold 退役。权威一句 → [前端 UX §九](/docs/04-前端/前端UX设计.md)。
 
 ## 否决 / 退场
 

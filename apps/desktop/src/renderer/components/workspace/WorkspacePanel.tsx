@@ -1,21 +1,11 @@
 import { EntriesSection } from "@/components/files/fileWorkbench/EntriesSection";
 import { createAndOpenScopeEntry } from "@/components/files/fileWorkbench/createScopeEntry";
 import { EmptyHint, IconButton } from "@/components/files/parts";
-import { Button, IconButton as UiIconButton } from "@/components/ui";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { SimpleTooltip } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui";
 import { useConversationFileSource } from "@/hooks/useConversationFileSource";
 import { getConversations, useConversations } from "@/hooks/useConversations";
 import { useConversationWorkspace } from "@/hooks/useWorkspaces";
 import { hasLocalFiles } from "@/lib/capabilities";
-import {
-  exportCloudDeskToPickedFolder,
-  exportCloudDeskZip,
-} from "@/services/cloudDeskExit";
 import { useConversationStore } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
 import {
@@ -24,14 +14,7 @@ import {
   sidePanelFocusTabId,
   useSidePanelStore,
 } from "@/stores/sidePanel";
-import {
-  Download,
-  FolderDown,
-  FolderOpen,
-  Loader2,
-  Trash2,
-  X,
-} from "lucide-react";
+import { FolderOpen, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ExternalMountsSection } from "./ExternalMountsSection";
 import { FilesSection } from "./FilesSection";
@@ -43,7 +26,7 @@ import { WorkspaceModeBar } from "./WorkspaceModeBar";
  * Workspace mode of the conversation side panel — the file-in/out surface for a
  * conversation's project space (双模式工作区). Files are the panel's always-on body;
  * this view injects workspace-level affordances into the files toolbar's single
- * header row (FileBrowser owns that row): 云端/本地选择器 (leading) plus 导出菜单 / 软删区
+ * header row (FileBrowser owns that row): 云端/本地选择器 (leading) plus 软删区
  * (trailing). The shell (SidePanel) owns the frame / resize / close.
  *
  * 快照不在此面板。云端命名版本在「我的文件」根右键「版本…」；
@@ -68,7 +51,6 @@ export function WorkspaceMode() {
     conversations.find((c) => c.id === conversationId)?.folderId?.trim() ||
     null;
   const [trashOpen, setTrashOpen] = useState(false);
-  const [exporting, setExporting] = useState(false);
 
   // 与文件中枢同一份数据 + 同一个解析器：对话→其工作区(WorkspaceInfo)→FileSource。本地走桌面
   // IPC、云端走 REST，故 Agent 在本地写的文件这里也能列出（修复「写在本地、读在云端」）。
@@ -105,16 +87,6 @@ export function WorkspaceMode() {
     );
   }
 
-  const runExport = async (fn: () => Promise<unknown>) => {
-    if (!conversationId || exporting) return;
-    setExporting(true);
-    try {
-      await fn();
-    } finally {
-      setExporting(false);
-    }
-  };
-
   const emptyTreeHint = "工作区暂无文件。";
 
   const isCloudWorkspace = ws?.location === "cloud";
@@ -131,7 +103,7 @@ export function WorkspaceMode() {
 
   return (
     <div className="relative flex h-full flex-col">
-      {/* 单行面板头：云端选择器（leading）+ 文件操作 + 导出 / 软删区（trailing）合到
+      {/* 单行面板头：云端选择器（leading）+ 文件操作 + 软删区（trailing）合到
           FilesSection 的工具栏一行（文件操作经其内部 FileTree 的 ref 驱动），不再单独占一行。 */}
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="min-h-0 flex-1">
@@ -166,26 +138,9 @@ export function WorkspaceMode() {
               <>
                 <WorkspaceClientTools source={source} />
                 {source?.caps.snapshots ? (
-                  <>
-                    <WorkspaceExportMenu
-                      fsAvailable={fsAvailable}
-                      exporting={exporting}
-                      onExportFolder={() =>
-                        void runExport(() =>
-                          exportCloudDeskToPickedFolder(conversationId),
-                        )
-                      }
-                      onExportZip={() =>
-                        void runExport(() => exportCloudDeskZip(conversationId))
-                      }
-                    />
-                    <IconButton
-                      title="软删区"
-                      onClick={() => setTrashOpen(true)}
-                    >
-                      <Trash2 size={14} />
-                    </IconButton>
-                  </>
+                  <IconButton title="软删区" onClick={() => setTrashOpen(true)}>
+                    <Trash2 size={14} />
+                  </IconButton>
                 ) : localRootId ? (
                   <IconButton title="软删区" onClick={() => setTrashOpen(true)}>
                     <Trash2 size={14} />
@@ -278,83 +233,5 @@ function WorkspaceFolderEntries({
         );
       }}
     />
-  );
-}
-
-function WorkspaceExportMenu({
-  fsAvailable,
-  exporting,
-  onExportFolder,
-  onExportZip,
-}: {
-  fsAvailable: boolean;
-  exporting: boolean;
-  onExportFolder: () => void;
-  onExportZip: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const icon = exporting ? (
-    <Loader2 size={14} className="animate-spin" />
-  ) : fsAvailable ? (
-    <FolderDown size={14} />
-  ) : (
-    <Download size={14} />
-  );
-
-  if (!fsAvailable) {
-    return (
-      <IconButton title="导出 ZIP" disabled={exporting} onClick={onExportZip}>
-        {icon}
-      </IconButton>
-    );
-  }
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <SimpleTooltip label="导出">
-        <PopoverTrigger asChild>
-          <UiIconButton
-            disabled={exporting}
-            aria-label="导出"
-            aria-expanded={open}
-            aria-haspopup="menu"
-          >
-            {icon}
-          </UiIconButton>
-        </PopoverTrigger>
-      </SimpleTooltip>
-      <PopoverContent align="end" className="w-56 p-1.5">
-        <Button
-          variant="ghost"
-          onClick={() => {
-            setOpen(false);
-            onExportFolder();
-          }}
-          className="h-auto w-full justify-start px-2.5 py-1.5 text-left text-xs font-medium"
-        >
-          <span className="min-w-0 flex-1">
-            <span className="block truncate">导出到本机文件夹</span>
-            <span className="block truncate text-xs font-normal text-muted-foreground">
-              每次可选目录
-            </span>
-          </span>
-        </Button>
-        <Button
-          variant="ghost"
-          onClick={() => {
-            setOpen(false);
-            onExportZip();
-          }}
-          className="h-auto w-full justify-start px-2.5 py-1.5 text-left text-xs font-medium"
-        >
-          <span className="min-w-0 flex-1">
-            <span className="block truncate">导出 ZIP</span>
-            <span className="block truncate text-xs font-normal text-muted-foreground">
-              下载云端快照拷贝
-            </span>
-          </span>
-        </Button>
-      </PopoverContent>
-    </Popover>
   );
 }

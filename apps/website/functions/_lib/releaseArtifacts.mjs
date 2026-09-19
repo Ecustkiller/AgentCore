@@ -6,7 +6,7 @@
  *   1. CDN desktop/latest.json + android/latest.json（version / filenames）
  *   2. FALLBACK_VERSION → 构造 GitHub asset URLs（SSG / offline）
  *
- * → apps/website/functions/_lib/downloadsCdn.mjs · 发布与门禁.md §7.6b
+ * → apps/website/functions/_lib/downloadsCdn.mjs · 发布与门禁.md §1.6b
  */
 import {
   androidArtifactUrls,

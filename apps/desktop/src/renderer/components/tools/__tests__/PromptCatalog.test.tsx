@@ -283,11 +283,19 @@ describe("PromptCatalog 概览", () => {
     expect(screen.getByRole("button", { name: "新建条目" })).toBeTruthy();
     expect(screen.queryByTestId("prompt-overview-updates")).toBeNull();
     expect(screen.queryByRole("button", { name: "最近学到" })).toBeNull();
-    const dialog = await openReadDialog(alwaysRail(), "角色身份");
+    expect(screen.queryByText("角色身份")).toBeNull();
+    const dialog = await openReadDialog(alwaysRail(), "全员共享准则");
     expect(
-      within(dialog).getByRole("heading", { name: "角色身份" }),
+      within(dialog).getByRole("heading", { name: "全员共享准则" }),
     ).toBeTruthy();
     expect(within(dialog).getByText("官方")).toBeTruthy();
+    expect(within(dialog).queryByRole("tab")).toBeNull();
+    expect(within(dialog).getByText("共享准则正文")).toBeTruthy();
+    expect(within(dialog).queryByText("主 Agent 身份正文")).toBeNull();
+    expect(
+      within(dialog).queryByText("队员跟全员准则走，专精写在每次派工里。"),
+    ).toBeNull();
+    expect(within(dialog).queryByText("叶子身份正文")).toBeNull();
     expect(within(dialog).queryByText("三选一")).toBeNull();
     expect(screen.queryByTestId("memory-updates-view")).toBeNull();
     expect(screen.getByTestId("prompt-overview")).toBeTruthy();
@@ -581,7 +589,7 @@ describe("PromptCatalog 拖拽搬家", () => {
 
   it("拖到常驻区里的条目也写成常驻", async () => {
     await renderMineCatalog();
-    fireEvent.drop(screen.getByText("角色身份"), {
+    fireEvent.drop(screen.getByText("全员共享准则"), {
       dataTransfer: dropTransfer("d1"),
     });
     await waitFor(() => {
@@ -638,7 +646,7 @@ describe("PromptCatalog 拖拽搬家", () => {
 
   it("官方 HOW 拖到根不搬家", async () => {
     await renderMineCatalog();
-    fireEvent.drop(screen.getByText("角色身份"), {
+    fireEvent.drop(screen.getByText("全员共享准则"), {
       dataTransfer: dropSkillTransfer("staffing"),
     });
     expect(reparentDocument).not.toHaveBeenCalled();

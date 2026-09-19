@@ -799,6 +799,16 @@ describe("buildGraphStructure · 多修订版本链（辩论逐轮）", () => {
   });
 });
 
+describe("workerGraphShape · 同人续写座位", () => {
+  it("does not count hotfix continuations as extra parallel lanes", () => {
+    const shape = workerGraphShape([
+      { id: "w1", dependsOn: [] },
+      { id: "w1b", dependsOn: [], continuesRunId: "w1" },
+    ]);
+    expect(shape.parallelism).toBe(1);
+  });
+});
+
 describe("fitWidthBox (embed height cap)", () => {
   it("shrinks zoom when content is taller than EMBED_MAX_HEIGHT (no clip)", () => {
     // 4 路并行 leftright 典型 footprint：宽约一列节点、高超 520。

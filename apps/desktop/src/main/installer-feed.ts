@@ -2,7 +2,7 @@
  * 桌面安装包地址（与官网 /download 同链：GitHub Releases）。
  *
  * 版本发现仍走品牌域 `latest.yml`；真正下的 ~190MB 安装包不走 Tunnel。
- * → 发布与门禁.md §7.6 / §7.6b
+ * → 发布与门禁.md §1.6 / §1.6b
  */
 
 export const DOWNLOADS_ORIGIN = "https://downloads.fashitianxia.xyz";

@@ -492,9 +492,12 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
       }
       // Same execution → an incremental delegate batch: merge in unseen
       // agents/runs while keeping the existing frame stream and playhead.
-      patchExec(messageId, () => ({
+      patchExec(messageId, (slice) => ({
         plan: mergePlanInto(cur, plan),
-        status: "running",
+        status:
+          slice.status === "cancelled" || slice.status === "failed"
+            ? slice.status
+            : "running",
         runProcesses: null,
       }));
     },

@@ -16,7 +16,7 @@
 | fold / 协议 | 桌面树；同文档 §十；根目录 `pnpm conformance`（只跑桌面） |
 | 前端总读序 | [`前端地图`](../../docs/04-前端/前端地图.md) |
 | 目录边界 | [`项目结构` §四](../../docs/02-架构/项目结构.md) |
-| Android 发版 / CORS / FCM 闸 | [`发布与门禁` §7.6a Android APK（官网侧载）](../../docs/05-平台与运维/发布与门禁.md)；本目录命令见下 |
+| Android 发版 / CORS / FCM 闸 | [`发布与门禁` §1.6a Android APK（官网侧载）](../../docs/05-平台与运维/发布与门禁.md)；本目录命令见下 |
 | clone 后跑通 | [`本地开发`](../../docs/02-架构/本地开发.md) §3 |
 
 产品减法与商店 / iOS 余项以设计文档为准；远期能力见 [`产品路线图摘要`](../../docs/01-产品/产品路线图摘要.md)（提案全文不在公开仓）。
@@ -59,7 +59,7 @@ pnpm -C apps/mobile android:open
 
 ## Android 发版（侧载 APK）
 
-产品机制、CORS、CDN、硬地板 → [`发布与门禁` §7.6a Android APK（官网侧载）](../../docs/05-平台与运维/发布与门禁.md)。本目录只留包内命令：
+产品机制、CORS、CDN、硬地板 → [`发布与门禁` §1.6a Android APK（官网侧载）](../../docs/05-平台与运维/发布与门禁.md)。本目录只留包内命令：
 
 ```bash
 pnpm -C apps/mobile release:android

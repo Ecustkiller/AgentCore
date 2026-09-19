@@ -5,8 +5,9 @@ names, consult pointers, fences, assembly order, date granularity, one-layer-one
 Does not pin teaching Chinese. Skill HOW bodies belong in ``test_skills.py``;
 this file only asserts those identifiers are absent from the core / compose opening.
 
-The CEO core is identity tags — not a numbered routing classifier. Honesty / output /
-inbound trust live in the shared base. HOW lives in system Skills / tool descriptions.
+The CEO factory core is empty unless residual identity is injected. Honesty / output
+live in the shared base. Who to trust is message roles and injection fences.
+HOW lives in system Skills / tool descriptions.
 """
 
 import json
@@ -72,47 +73,34 @@ def test_derive_ceo_addon_splits_shared_prefix_from_full_ceo_prompt():
     addon = derive_ceo_addon(base, ceo)
     assert addon
     assert "<文件夹清单>" not in ceo
-    assert "<身份>" in addon
-    assert "<输出>" not in addon
+    assert "<身份>" not in addon
+    assert "<按需目录>" in addon
+    assert "emoji" not in addon
     assert ceo.startswith(base)
     assert addon == ceo[len(base) :].lstrip("\n")
     assert ceo == base + ceo[len(base) :]
 
 
-def test_shared_base_xml_tags():
+def test_shared_base_is_untagged_paragraph():
     out = assemble_system_prompt()
-    for tag in ("输出", "输入", "诚实", "工作权威"):
-        assert f"<{tag}>" in out and f"</{tag}>" in out
     assert "<身份>" not in out
     assert "</工作区>" not in out
     assert "<运行时>" not in out
-    assert _DEFAULT_SYSTEM_PROMPT.count("<输出>") == 1
-    assert _DEFAULT_SYSTEM_PROMPT.count("<诚实>") == 1
+    assert "\n\n" not in _DEFAULT_SYSTEM_PROMPT
+    assert re.search(
+        r"<([a-zA-Z_\u4e00-\u9fff][a-zA-Z0-9_\u4e00-\u9fff]*)>",
+        _DEFAULT_SYSTEM_PROMPT,
+    ) is None
 
 
 def test_output_english_affordances():
-    style = assemble_system_prompt().split("<输出>", 1)[1].split("</输出>", 1)[0]
-    assert "emoji" in style
-
-
-def test_inbound_tags_fences_and_system_prompt_marker():
     base = assemble_system_prompt()
-    assert "<输入>" in base and "</输入>" in base
-    inbound = base.split("<输入>", 1)[1].split("</输入>", 1)[0]
-    assert "【数据】" in inbound
-    assert "[系统提示]" in inbound
-    ceo = _compose_ceo({"delegate", "consult"})
-    assert "<输入>" in ceo
-    assert "[系统提示]" in ceo
-    assert "【数据】" in ceo
+    assert "emoji" in base
+    assert "emoji" not in _CEO_CORE_HINT
 
 
 def test_web_search_not_restated_in_base_tooling():
-    out = assemble_system_prompt()
-    tool = out.split("<输出>", 1)[0]
-    honesty = out.split("<诚实>", 1)[1].split("</诚实>", 1)[0]
-    assert "web_search" not in tool
-    assert "#rN" in honesty
+    assert "web_search" not in assemble_system_prompt()
 
 
 def test_runtime_context_uses_date_granularity_for_cache_stability():
@@ -134,7 +122,7 @@ def test_output_style_survives_memory_and_context_layers():
         rules_markdown="- 用户偏好简洁回复",
         extra_context="<附件>...</附件>",
     )
-    assert "<输出>" in out
+    assert "emoji" in out
     assert "用户偏好简洁回复" in out
     assert "<附件>" in out
     assert "<设定>" in out and "</设定>" in out
@@ -144,10 +132,10 @@ def test_output_style_survives_memory_and_context_layers():
 def test_style_precedes_ceo_only_core_when_composed():
     base = assemble_system_prompt()
     ceo = _compose_ceo({"delegate", "consult"})
-    assert "<输出>" in base
-    assert "<输出>" not in _CEO_CORE_HINT
-    assert ceo.find("<输出>") < ceo.find("<身份>")
-    assert ceo.find("<身份>") < ceo.find("<按需目录>")
+    assert ceo.startswith(base)
+    assert "emoji" not in _CEO_CORE_HINT
+    assert "<身份>" not in ceo
+    assert "<按需目录>" in ceo
     assert "<运行时>" not in ceo
 
 
@@ -169,19 +157,13 @@ def test_capability_how_gated_on_ceo_tool_names():
     assert "wait_for" not in _LOCAL_DESK
     assert "delegate" not in host
 
-    for names, offered in (
-        ({"delegate", "consult"}, None),
-        ({"delegate", "run", "host", "browser"}, None),
-        (
-            {"delegate", "run", "host", "browser"},
-            {"delegate", "run", "host", "browser"},
-        ),
-        ({"delegate", "run", "host", "browser"}, {"delegate"}),
+    for names in (
+        {"delegate", "consult"},
+        {"delegate", "run", "host", "browser"},
     ):
         prompt = compose_ceo_chat_prompt(
             assemble_system_prompt(),
             ceo_tool_names=names,
-            **({"ceo_offered_names": offered} if offered is not None else {}),
         )
         for sig in _HANDBOOK_SIGNATURES:
             assert sig not in prompt
@@ -236,12 +218,10 @@ def test_delegate_schema_keys_one_layer():
     assert "depends_on" in _TASK_PROPS
     assert "target_folder_id" in _TASK_PROPS
     assert "append_to_execution_id" in props
-    assert "playbook" in props
     for key in (
         "depends_on",
         "target_folder_id",
         "append_to_execution_id",
-        "playbook",
     ):
         assert key not in hint
         assert key not in DELEGATE_DESCRIPTION
@@ -254,6 +234,7 @@ def test_how_identifiers_not_in_resident_core():
     for key in (
         "folders",
         "create_folder",
+        "mkdir",
         "md_export",
         "consult(name)",
         "consult(browser)",
@@ -276,10 +257,8 @@ def test_how_identifiers_not_in_resident_core():
         assert fence not in hint
     assert "【对人说】" not in _DEFAULT_SYSTEM_PROMPT
     assert _RULES_ROUTING_FENCE not in hint
-    role = hint.split("<身份>", 1)[1].split("</身份>", 1)[0]
-    assert "delegate" not in role
-    assert "Cursor" not in role
-    assert ".mdc" not in role
+    assert not hint.strip()
+    assert "<身份>" not in hint
 
 
 def test_delegate_when_is_shared_window_bound():
@@ -305,15 +284,11 @@ def test_delegate_when_is_shared_window_bound():
 
 def test_work_authority_does_not_host_tool_when_to_use():
     shared = _DEFAULT_SYSTEM_PROMPT
-    assert "<工作权威>" in shared and "</工作权威>" in shared
-    assert "AGENTS.md" in shared
     assert "escalate" not in shared
     assert "ask_user" not in shared
     worker = compose_worker_base_prompt(assemble_system_prompt())
     ceo = _compose_ceo({"delegate", "consult", "ask_user"})
-    assert worker.count("<诚实>") == 1
-    assert ceo.count("<诚实>") == 1
-    assert ceo.count("<身份>") == 1
+    assert "<身份>" not in ceo
     assert "<身份>" not in worker
 
 

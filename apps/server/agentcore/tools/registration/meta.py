@@ -66,7 +66,6 @@ class CeoWire(StrEnum):
     # Unified on-demand catalog non-empty → ``consult`` (技能 ∪ 规则 ∪ 低频工具).
     CONSULT = "consult"
     CHECKPOINT = "checkpoint"
-    TABLE = "table"
     # Advertised in catalog; runtime inject via ``ceo_surface`` (idle/coord gate).
     COORDINATION = "coordination"
 

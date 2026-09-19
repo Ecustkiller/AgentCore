@@ -10,7 +10,7 @@ from agentcore.tools.protocol import ToolContext, ToolResult
 from . import policy as policy_mod
 from . import spawn as spawn_mod
 from .phases import PHASE_REMOTE
-from .policy import _remote_name_error
+from .policy import GIT_LOG_MAX_COUNT, GIT_REMOTE
 from .results import _error, _git_failure, _ok, _truncate_line_output
 from .spawn import _cloud_network_extra_env, _parse_status_sb
 
@@ -20,13 +20,11 @@ async def cmd_status(
     paths: list[str],
     start: float,
     *,
-    include_untracked: bool,
     meta: dict[str, Any],
 ) -> ToolResult:
     # Single subprocess: branch header + porcelain (avoids branch + status serial).
+    # Untracked files are always listed; leftover include_untracked is ignored.
     args = ["status", "-sb"]
-    if not include_untracked:
-        args.append("--untracked-files=no")
     if paths:
         args.extend(["--", *paths])
     stdout, stderr, code = await spawn_mod._run_git(args, cwd=cwd)
@@ -40,7 +38,6 @@ async def cmd_status(
     output += body if body else "（工作区干净）"
     out_meta = {
         **meta,
-        "include_untracked": include_untracked,
         "truncated": truncated,
         "status_lines": total,
     }
@@ -75,14 +72,10 @@ async def cmd_log(
     cwd: str,
     paths: list[str],
     *,
-    max_count: int,
-    oneline: bool,
     start: float,
     meta: dict[str, Any],
 ) -> ToolResult:
-    args = ["log", f"-n{max_count}"]
-    if oneline:
-        args.append("--oneline")
+    args = ["log", f"-n{GIT_LOG_MAX_COUNT}", "--oneline"]
     if paths:
         args.extend(["--", *paths])
     stdout, stderr, code = await spawn_mod._run_git(args, cwd=cwd)
@@ -90,7 +83,7 @@ async def cmd_log(
         return await _git_failure(stdout, stderr, code, start, metadata=meta)
     lines = [line for line in stdout.splitlines() if line.strip()]
     body = "\n".join(lines) if lines else "（无提交记录）"
-    footer = f"\n\n（共 {len(lines)} 条，可用 max_count 调整）"
+    footer = f"\n\n（共 {len(lines)} 条）"
     return _ok(body + footer, start, metadata=meta)
 
 
@@ -102,11 +95,9 @@ async def cmd_fetch(
     meta: dict[str, Any],
     context: ToolContext,
 ) -> ToolResult:
-    """Fetch from a named remote — read-only, no approval."""
-    remote = str(arguments.get("remote") or "origin").strip() or "origin"
-    remote_err = _remote_name_error(remote, start)
-    if remote_err is not None:
-        return remote_err
+    """Fetch from origin — read-only, no approval."""
+    _ = arguments
+    remote = GIT_REMOTE
 
     remotes_out, remotes_err, remotes_code = await spawn_mod._run_git(["remote"], cwd=cwd)
     if remotes_code != 0:

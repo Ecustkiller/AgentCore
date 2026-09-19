@@ -61,6 +61,7 @@ describe("arbitrateTurnOutcome", () => {
     expect(o.showBubbleBanner).toBe(false);
     expect(o.showSessionBanner).toBe(false);
     expect(o.showFooter).toBe(false);
+    expect(o.showRegenerate).toBe(false);
     expect(o.showStripFailure).toBe(false);
     expect(o.showStripStopped).toBe(false);
     expect(o.supportPackHost).toBe("none");
@@ -392,7 +393,8 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
     expect(o.showStripFailure).toBe(false);
     expect(o.showBubbleBanner).toBe(false);
     expect(o.showComposerHint).toBe(false);
-    expect(o.showFooter).toBe(false);
+    expect(o.showFooter).toBe(true);
+    expect(o.showRegenerate).toBe(true);
     expect(o.showTurnWarning).toBe(false);
     expect(o.recovery.kind).toBe("none");
     expect(o.supportPackHost).toBe("none");
@@ -608,6 +610,7 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
     expect(o.showBubbleBanner).toBe(true);
     expect(o.showComposerHint).toBe(false);
     expect(o.showFooter).toBe(true);
+    expect(o.showRegenerate).toBe(true);
     expect(o.supportPackHost).toBe("bubble");
   });
 
@@ -620,6 +623,7 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
     expect(o.showBubbleBanner).toBe(true);
     expect(o.showComposerHint).toBe(false);
     expect(o.showFooter).toBe(true);
+    expect(o.showRegenerate).toBe(true);
     expect(o.supportPackHost).toBe("bubble");
   });
 
@@ -633,6 +637,7 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
     expect(o.showComposerHint).toBe(false);
     expect(o.recovery.kind).toBe("none");
     expect(o.showFooter).toBe(true);
+    expect(o.showRegenerate).toBe(true);
     expect(o.supportPackHost).toBe("none");
   });
 
@@ -645,6 +650,7 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
     expect(o.showBubbleBanner).toBe(false);
     expect(o.showComposerHint).toBe(false);
     expect(o.showFooter).toBe(true);
+    expect(o.showRegenerate).toBe(true);
     expect(o.recovery.kind).toBe("none");
   });
 
@@ -685,6 +691,7 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
     expect(o.recovery.kind).toBe("configure");
     expect(o.recovery.label).toBe("接入自己的 Key");
     expect(o.showFooter).toBe(false);
+    expect(o.showRegenerate).toBe(false);
   });
 
   it("conformance envelope keeps hasTeamStrip + supportPackHost", () => {
@@ -719,5 +726,73 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
         supportPackHost: "composer",
       }),
     ).toBeNull();
+  });
+});
+
+describe("arbitrateTurnOutcome · utility footer vs regenerate", () => {
+  it("attested paused with body keeps copy footer, hides regenerate", () => {
+    const o = arbitrateTurnOutcome(
+      measuredCase({ attestedKind: "paused", content: "半成品" }),
+    );
+    expect(isAttestedPauseContinue(o)).toBe(true);
+    expect(o.showFooter).toBe(true);
+    expect(o.showRegenerate).toBe(false);
+    expect(o.showBubbleBanner).toBe(false);
+  });
+
+  it("attested paused with process-only keeps copy footer, hides regenerate", () => {
+    const o = arbitrateTurnOutcome(
+      measuredCase({ attestedKind: "paused", processLength: 2 }),
+    );
+    expect(isAttestedPauseContinue(o)).toBe(true);
+    expect(o.showFooter).toBe(true);
+    expect(o.showRegenerate).toBe(false);
+  });
+
+  it("named wait recovery with body keeps copy, hides regenerate", () => {
+    const o = arbitrateTurnOutcome(measuredCase({ content: "半成品" }));
+    expect(o.kind).toBe("partial");
+    expect(o.recovery.kind).toBe("wait_then_retry");
+    expect(o.showFooter).toBe(true);
+    expect(o.showRegenerate).toBe(false);
+  });
+
+  it("configure recovery with body keeps copy, hides regenerate", () => {
+    const o = arbitrateTurnOutcome({
+      content: "半成品",
+      finishReason: "error",
+      messageError: {
+        code: "LLM_KEY_INVALID",
+        message: "API Key 无效或已过期，请检查后重试。",
+      },
+    });
+    expect(o.recovery.kind).toBe("configure");
+    expect(o.showFooter).toBe(true);
+    expect(o.showRegenerate).toBe(false);
+  });
+
+  it("gate pause with body keeps copy, hides regenerate", () => {
+    const o = arbitrateTurnOutcome({
+      content: "先说明背景",
+      finishReason: "paused",
+      hasDedicatedPauseOrAskUi: true,
+    });
+    expect(o.kind).toBe("paused");
+    expect(o.recovery.kind).toBe("resume");
+    expect(o.showFooter).toBe(true);
+    expect(o.showRegenerate).toBe(false);
+  });
+
+  it("empty interrupt with process keeps copy, hides regenerate", () => {
+    const o = arbitrateTurnOutcome({
+      content: "",
+      finishReason: "interrupted",
+      hasTeamStrip: true,
+      processLength: 1,
+    });
+    expect(o.recovery.kind).toBe("send_next");
+    expect(o.showFooter).toBe(true);
+    expect(o.showRegenerate).toBe(false);
+    expect(o.showComposerHint).toBe(true);
   });
 });

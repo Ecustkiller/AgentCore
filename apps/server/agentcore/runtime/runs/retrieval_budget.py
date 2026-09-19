@@ -8,8 +8,8 @@ query-contract rejects do not consume budget. CEO / delegate schema 不可配置
 字段；额度只来自统一常量（辩手有约定文档窄例外由辩论内部 writer 补写）。
 
 预算感知：花过额度的检索调用在工具回执上挂一行已用/剩余数字；不再每轮注入
-``[系统提示]`` 教案。耗尽转 wind_down。存量窗口里的旧余额播报由
-:func:`drop_retrieval_budget_awareness` 在收尾窗口清掉。
+``[系统提示]`` 教案。耗尽转 wind_down。旧窗口里残留的余额播报也不再抽掉
+（同窗只追加；瘦身交给 window compact）。
 """
 
 from __future__ import annotations
@@ -203,35 +203,23 @@ class RetrievalBudgetAwareness:
     reads: int
 
 
-def _is_awareness_message(msg: LLMMessage) -> bool:
-    return (
-        msg.role == "user"
-        and isinstance(msg.content, str)
-        and msg.content.startswith(RETRIEVAL_BUDGET_AWARENESS_PREFIX)
-    )
-
-
 def drop_retrieval_budget_awareness(messages: list[LLMMessage]) -> bool:
-    """Remove the balance message; True ⇒ transcript changed.
+    """Retired: stripping mid-history sermons forfeits the prefix cache.
 
-    Called on its own once the run stops searching (wind_down / exhausted), where a
-    lingering "还剩 N 次" would contradict the 收尾 instruction.
+    Kept so call sites / tests compile. Never mutates ``messages``.
     """
-    if not any(_is_awareness_message(m) for m in messages):
-        return False
-    messages[:] = [m for m in messages if not _is_awareness_message(m)]
-    return True
+    del messages
+    return False
 
 
 def sync_retrieval_budget_awareness(
     messages: list[LLMMessage], state: RetrievalBudgetState
 ) -> RetrievalBudgetAwareness | None:
-    """No longer injects a ``[系统提示]``. Drops leftover sermons from resumed windows.
+    """No longer injects a ``[系统提示]``. Does not rewrite history.
 
     Balance lives on charged ``web_search`` / ``web_fetch`` receipts.
     """
-    del state
-    drop_retrieval_budget_awareness(messages)
+    del messages, state
     return None
 
 

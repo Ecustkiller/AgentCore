@@ -1,7 +1,7 @@
 name: Deploy Admin Console
 
 # ⚠️ 已弃用自动触发 — 改由 Cursor Agent 本地 `pnpm -C apps/admin deploy:production` 部署。
-# 见 docs/05-平台与运维/部署与运维.md §二、.cursor/rules/cursor-deploy.mdc
+# 见 docs/05-平台与运维/部署拓扑与环境.md §二、.cursor/rules/cursor-deploy.mdc
 #
 # 下方 office.example.com 为自托管占位；用 GitHub vars（OFFICE_HOST）覆盖。
 # admin 打**自己域**下的 /api（cookie 隔离，与 deploy-production.mjs / office-admin.conf

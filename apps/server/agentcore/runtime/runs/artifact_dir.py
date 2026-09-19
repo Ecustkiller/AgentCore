@@ -13,7 +13,7 @@
 分键，**不是**收口催搬。仅目录未命中且已有落盘 → 认实际路径，不发软待办。
 具体文件路径 = C3 归属与 sibling 互斥。裸目录**永不**注入 ``artifacts`` 冒充归属键。
 
-不做：``file_write`` 启发式改写、根目录搬迁、省略 playbook 手写特例。
+不做：``file_write`` 启发式改写、根目录搬迁。
 """
 
 from __future__ import annotations

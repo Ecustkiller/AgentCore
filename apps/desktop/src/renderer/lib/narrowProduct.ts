@@ -1,6 +1,6 @@
 /**
  * Viewport policy for narrow / Capacitor chrome — not physical capabilities.
- * 权威 → 前端技术 §五：窄屏不上工具箱 / 白板 / 文档 / 手册 / 快捷键设置…
+ * 权威 → 前端技术 §五：窄屏不上工具箱 / 白板 / 手册 / 快捷键设置…
  */
 
 export const NARROW_HIDDEN_SETTINGS_PATHS = new Set([
@@ -12,8 +12,6 @@ export const NARROW_HIDDEN_SETTINGS_PATHS = new Set([
 
 const NARROW_BLOCKED_PREFIXES = [
   "/whiteboard",
-  "/docs",
-  "/tables",
   "/toolbox",
   "/explore",
 ] as const;
@@ -26,8 +24,6 @@ export const NARROW_HIDDEN_PALETTE_IDS = new Set([
   "open-local-project",
   "grant-readonly-folder",
   "nav-whiteboard",
-  "nav-docs",
-  "nav-tables",
   "nav-toolbox",
   "nav-guidelines",
   "nav-store",

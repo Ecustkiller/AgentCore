@@ -14,9 +14,8 @@
   连同提问一起丢了。**下面那条 assembly-claim 测试就是这个 bug 的回归守卫。**
 - 可履约的操作手册 = **consult 正文**（``capability_how_suffix`` 只给 consult 拼，不挂冻结核）。
   通道不在的回合，手册是一份证明履行不了的说明书。
-- **诚实底线双向且常驻**：未装配不许假装用过（缺失那一回合才用到）；已装配不许假装没有
-  （按需工具未进开场表的那一回合才用到）。都不许按可用性下线。
-  「禁止把仅结构自检说成跑绿」「禁止称不可产的工具已装配」这类留在核里是对的。
+- **诚实底线常驻**：用户可见主张对照本回合结构面（工具回执 / 来源编号 / 工具表 /
+  按需目录）。不按可用性下线。变体表不进核。
 
 ## 红了怎么办
 
@@ -205,7 +204,39 @@ from agentcore.runtime.resolve.prompt import (
 # cap 降到 960。
 # 2026-09-19 诚实段：装配对照表出核，留目录能查阅 ≠ 没有。当次实测 918。
 # cap 降到 920。
-_RESIDENT_CAP = 920
+# 2026-09-20 诚实段：删「关键数字/结论旁标 #rN」（密度 HOW；双条件已覆盖对照）。
+# 当次实测 888。cap 降到 890。
+# 2026-09-20 身份残差：CEO 核只留默认交团队；署名/大白话出核。当次实测 795。
+# cap 降到 800。
+# 2026-09-20 出口通道残差归位：内部工具名不出口进核（共享 <输出> 不能收 CEO 专属出口）。
+# 当次实测 809。cap 810（抬顶=说话通道残差，非百科回潮）。
+# 2026-09-20 不复述用户刚说的话出基座进核（对用户开口残差；总长平移）。
+# 2026-09-20 凭据第三截（再索要 / 让用户自己跑）进核；基座留落盘+可见输出标签。
+# 当次实测 808。cap 保持 810。
+# 2026-09-20 诚实双条件：对用户说的事实 → 主张（同真改口，不进核）。
+# 基座删扩范围·改契约·新依赖分类器（内容闸不成立；工人 WHEN 在 escalate）。
+# 当次实测 767。cap 降到 770。
+# 2026-09-20 基座删设计稿与代码冲突 / 交付物即该文档（点名约束执行 + 用户本意已覆盖）。
+# 当次实测 738。cap 降到 740。
+# 2026-09-20 基座交给模型：开场只留并发事实；输出去掉直接给结论/写偏了；
+# 输入拿掉任务卡、注入原话、记忆；诚实只留结构面；权威只留凭据
+# （用户指令 vs 设定归设定块前言）。当次实测 435。cap 降到 440。
+# 2026-09-20 凭据句与空 <工作权威> 出基座（写侧熔断 / CEO 不回索）。当次实测 394。cap 降到 400。
+# 2026-09-20 基座 <输出>：适合可视化的内容优先呈现（媒介合同；不点 mermaid）。
+# 当次实测 413。cap 提到 420（抬顶=输出媒介语义，非回潮）。
+# 2026-09-20 基座删听谁的常驻段（角色与注入点承担；数据隔离不进散文）。
+# 当次实测 277。cap 降到 280。
+# 2026-09-20 诚实段：对照面并进按需目录；补集「不得声称已用」与换路 HOW 出基座。
+# 当次实测 234。cap 降到 240。
+# 2026-09-20 诚实段：补集「未对照则不得声称」出基座（正向已覆盖）。
+# 当次实测 225。cap 降到 230。
+# 2026-09-20 基座收成一段无标签（开场并发、中段输出、末句诚实）。当次实测 199。
+# cap 降到 200。
+# 2026-09-20 身份删「默认交给团队」（路由只在 delegate 四问）。当次实测 183。
+# cap 降到 190。
+# 2026-09-20 工厂身份清空（出口通道三句出核；无残差不注入）。当次实测 118。
+# cap 降到 120。
+_RESIDENT_CAP = 120
 
 # (门工具, 该手册的签名字面) —— 手册只在门开的回合出现，不许常驻。
 # run 的 HOW 在 skill body（consult(run) 命中 skill），不进 capability_how_suffix。
@@ -253,7 +284,7 @@ def test_core_states_no_tool_assembly_claims():
 def test_core_does_not_restate_computed_workspace_facts():
     """已在事实行算出来的事实，核里不留第二份（第三份就是漂移的开始）。"""
     hint = _CEO_CORE_HINT
-    # 「无原生生图工具」已下沉 consult(run)；出网/生图声称走基座诚实双条件，核不点名。
+    # 「无原生生图工具」已下沉 consult(run)；出网/生图声称走基座诚实对照，核不点名。
     assert "无原生生图工具" not in hint
     assert "出站网络" not in hint
     assert "出站网络" not in assemble_system_prompt()
@@ -278,20 +309,12 @@ def test_gated_manuals_do_not_ride_the_resident_core(gate_tool: str, signature: 
         assert signature in capability_how_suffix({gate_tool}), (
             f"{gate_tool} 的 consult 手册丢了签名 {signature}"
         )
-    catalog_like = compose_ceo_chat_prompt(
+    frozen = compose_ceo_chat_prompt(
         assemble_system_prompt(),
         ceo_tool_names={"delegate", gate_tool},
     )
-    offered = compose_ceo_chat_prompt(
-        assemble_system_prompt(),
-        ceo_tool_names={"delegate", gate_tool},
-        ceo_offered_names={"delegate", gate_tool},
-    )
-    assert signature not in catalog_like, (
-        f"{signature} 不应因图鉴漏传 offered 挂回核（{gate_tool}）"
-    )
-    assert signature not in offered, (
-        f"{signature} 不应在工具已进表时再挂进冻结核（{gate_tool}）"
+    assert signature not in frozen, (
+        f"{signature} 不应挂进冻结核（{gate_tool}）"
     )
 
 
@@ -302,14 +325,11 @@ def test_honesty_floors_stay_resident():
     hint = _CEO_CORE_HINT
     base = assemble_system_prompt()
     assert "对得上这回合" in base
-    assert "未对照则不得声称" in base
-    assert "未对照则不得声称" not in hint
+    assert "对得上这回合" not in hint
     assert "已落盘" not in base
     assert "已落盘" not in hint
     assert "结构自检" not in _DELIVERY
     assert "用户机器上已经跑通" in _DELIVERY
     assert "export_to_local" in _DELIVERY
     assert "不可产" in _DELIVERY and "等效替代" in _DELIVERY
-    assert "未装配" in base
     assert "邻格" not in base
-    assert "用别的路继续" in base

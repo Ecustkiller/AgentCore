@@ -123,15 +123,11 @@ describe("paletteCommands · 前往发现性", () => {
     board?.run();
     expect(baseCtx.navigate).toHaveBeenCalledWith("/whiteboard");
 
-    const docs = cmds.find((c) => c.id === "nav-docs");
-    expect(docs?.title).toBe("文档");
-    docs?.run();
-    expect(baseCtx.navigate).toHaveBeenCalledWith("/docs");
-
-    const tables = cmds.find((c) => c.id === "nav-tables");
-    expect(tables?.title).toBe("多维表格");
-    tables?.run();
-    expect(baseCtx.navigate).toHaveBeenCalledWith("/tables");
+    expect(cmds.find((c) => c.id === "nav-docs")).toBeUndefined();
+    expect(cmds.find((c) => c.id === "nav-tables")).toBeUndefined();
+    expect(cmds.find((c) => c.id === "new-folder")).toBeUndefined();
+    expect(cmds.some((c) => c.title === "文档")).toBe(false);
+    expect(cmds.some((c) => c.title === "多维表格")).toBe(false);
 
     expect(cmds.some((c) => c.id.includes("explore"))).toBe(false);
     expect(

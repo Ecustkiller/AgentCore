@@ -11,7 +11,6 @@ export const TOOL_LABELS_ZH: Record<string, string> = {
   file_copy: "复制文件",
   mkdir: "创建目录",
   file_batch: "批量文件操作",
-  archive: "压缩包",
   md_export: "导出 Word/PDF",
   md_to_docx: "导出 Word",
   md_to_pdf: "导出 PDF",

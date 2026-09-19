@@ -1,9 +1,12 @@
-"""回合内工具结果清理 (clear_tool_uses): collapse OLD tool results in the LLM view.
+"""Retired per-round sliding projection for old tool results.
 
-Within one ReAct run a long worker re-reads many files / pages and may also pile
-``host`` / ``run`` stdout; every round re-sends those bodies. This module
-collapses OLD results into a compact, stable pointer so the model still knows the
-call happened without carrying the full body.
+Do not call from ``build_request_window`` / ``react_loop``. Same-window rewrite
+is window compact only (prefix-cache contract). Structural helpers
+(``structural_file_read_summary`` and digest prefixes) remain for the compaction
+ledger in ``working_set``.
+
+The functions below still collapse OLD results into a compact pointer when
+invoked as a library. Canonical ``messages`` / journal stay full.
 
 Two families, **independent** keep-windows (do not share ``keep_recent``; do not
 put exec tools into ``investigation_tools`` — that set also drives idle-governance):
@@ -12,20 +15,13 @@ put exec tools into ``investigation_tools`` — that set also drives idle-govern
   verbatim; only invite a fresh call when that body is gone from context.
 - Exec output (``host`` / ``run``): pointer forbids re-run-to-recover.
 
-Design — a PURE projection applied at request-assembly time only (``build_request``),
-NOT a mutation of the canonical window:
+Design — a PURE projection, **not** a mutation of the canonical window:
 
 - The canonical ``messages`` list AND the durable Turn Journal keep the FULL output.
-  Resume rebuilds the full window via ``window_from_journal`` then runs the same
-  ``react_loop``, so the projection re-applies and lands byte-for-byte on the live
-  window — no journal change, no resume divergence. (执行引擎架构设计 §三)
 - The UI is unaffected: tool results render from ``tool_use_end`` / the journal, not
-  the cleared LLM window, so the user still sees full output. Clearing is invisible.
-- Prefix-cache safe: a cleared result's pointer is a pure function of its own
-  (tool, args, original length), so once a result falls out of the keep-window its
-  pointer bytes are FIXED across rounds and stay at the same position. The cleared
-  region therefore remains cache-hittable; only the moving boundary near the tail
-  (which re-caches every round anyway) misses.
+  a cleared LLM window.
+- Prefix-cache: sliding this every round rewrites mid-history (official Example 2)
+  and forfeits the frozen prefix. Compact once instead.
 
 Investigation clear = the run's ``investigation_tools`` (NEVER + FILESYSTEM /
 SEARCH / RESEARCH) past ``keep_recent`` **assistant rounds** (not N calls) and
@@ -38,7 +34,7 @@ R1 (file_read): complete views (footer ``（全文 N 行）``) stay — clearing
 made models treat a context digest as a truncated file. Windowed / grep /
 search results still collapse. Cleared ``file_read`` stubs are structured
 (path / content_cleared / disk=intact / reread=omit_offset_limit) plus an
-optional deterministic digest (no LLM).
+optional structural digest (no LLM).
 """
 
 from __future__ import annotations

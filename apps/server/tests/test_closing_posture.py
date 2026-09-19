@@ -10,7 +10,6 @@ from agentcore.runtime.closing_posture import (
     is_formal_complete_tier,
     mutual_exclusion_rework,
     reconcile_resume_closing,
-    resume_continuity_steer,
     tier_forbids_posture_a,
 )
 from agentcore.runtime.verify import finish_guard
@@ -116,17 +115,6 @@ def test_rewrite_stale_ask_after_dispatch_same_message():
     assert "日程文档已落盘" in out
 
 
-def test_resume_continuity_steer_for_confirm_pre_pause():
-    steer = resume_continuity_steer(
-        prior_deliverable="需要先确认一个关键信息：调研对象是什么？"
-    )
-    assert "先问你" not in steer
-    assert "请确认" not in steer
-    assert "档位" in steer
-    assert "按确认默认" not in steer
-    assert "空转确认" in steer or "承接选项" in steer
-
-
 def test_reconcile_drops_confirm_pre_pause_when_new_delivers():
     """resume 拼接真源：C pre_pause ∪ A 续写 → 只保留续写。"""
     pre = "方向：先问你 / 关键缺口。调研对象未明确——请确认："
@@ -163,17 +151,12 @@ def test_reconcile_keeps_neutral_join():
     assert "渠道策略" in out
 
 
-def test_resume_continuity_steer_falls_back_for_deliverable():
-    steer = resume_continuity_steer(prior_deliverable="已交付的前半段分析如下。")
-    assert "自然衔接续写" in steer
-
-
 def test_reconcile_drops_dispatch_kickoff_pre_pause():
     """plan_review 后续写：派工 kickoff 不拼进交付终稿（ce1ecfc2 流水账）。"""
     from agentcore.runtime.closing_posture import is_process_dispatch_preamble
 
     pre = (
-        "方向：派团队 — 用户明示 cite_write_review 成文落盘，"
+        "方向：派团队 — 用户明示成文落盘，"
         "主体（医学报告生成近三年文献）已点名，直接开委派。"
     )
     new = (
@@ -183,17 +166,6 @@ def test_reconcile_drops_dispatch_kickoff_pre_pause():
     assert is_process_dispatch_preamble(pre)
     assert reconcile_resume_closing(pre, new) == new
     assert "派团队" not in reconcile_resume_closing(pre, new)
-
-
-def test_resume_continuity_steer_for_dispatch_kickoff():
-    steer = resume_continuity_steer(
-        prior_deliverable="方向：派团队 — 直接开委派，组建团队并行调研。"
-    )
-    assert "交付说明" in steer
-    assert "自然衔接续写" not in steer
-    assert "已交付前文如下" not in steer
-    assert "方向：派团队" not in steer
-    assert "开委派" not in steer
 
 
 def test_partial_verdict_rejects_posture_a():
@@ -490,7 +462,6 @@ def test_cloud_web_verify_honesty_banner_soft_only():
 def test_max_rounds_ceiling_honesty_steer_and_banner():
     """max_rounds：steer 禁止无条件通过；用户面不再贴【收口说明】。"""
     from agentcore.runtime.closing_posture import (
-        ceiling_honesty_steer,
         downgrade_verdict_for_max_rounds,
         enforce_ceiling_closing_honesty,
     )
@@ -498,11 +469,6 @@ def test_max_rounds_ceiling_honesty_steer_and_banner():
         DeliveryVerdict,
         current_delivery_verdict,
     )
-
-    steer = ceiling_honesty_steer(reason="max_rounds")
-    assert steer is not None
-    assert "max_rounds" in steer
-    assert "强制收口" in steer
 
     dishonest = "修复已全部完成，已完整可用。"
     out = enforce_ceiling_closing_honesty(dishonest, reason="max_rounds")
@@ -531,7 +497,6 @@ def test_max_rounds_ceiling_honesty_steer_and_banner():
 def test_token_budget_ceiling_honesty_steer_and_banner_symmetric_with_max_rounds():
     """token_budget ↔ max_rounds：诚实 steer / 用户面不贴横幅 / verdict 降档对称。"""
     from agentcore.runtime.closing_posture import (
-        ceiling_honesty_steer,
         downgrade_verdict_for_ceiling,
         enforce_ceiling_closing_honesty,
     )
@@ -539,12 +504,6 @@ def test_token_budget_ceiling_honesty_steer_and_banner_symmetric_with_max_rounds
         DeliveryVerdict,
         current_delivery_verdict,
     )
-
-    steer = ceiling_honesty_steer(reason="token_budget")
-    assert steer is not None
-    assert "token_budget" in steer
-    assert "强制收口" in steer
-    assert ceiling_honesty_steer(reason="other") is None
 
     dishonest = "修复已全部完成，已完整可用。"
     out = enforce_ceiling_closing_honesty(dishonest, reason="token_budget")
@@ -808,7 +767,6 @@ def test_b1_over_seat_latch_does_not_rework():
 def test_b1_ceiling_steer_unchanged_without_hollow_scan():
     """硬顶 steer / enforce 仍在；掐断 latch 不清气泡。"""
     from agentcore.runtime.closing_posture import (
-        ceiling_honesty_steer,
         clear_cutoff_delivery_gap,
         closing_honesty_rework,
         enforce_ceiling_closing_honesty,
@@ -817,9 +775,6 @@ def test_b1_ceiling_steer_unchanged_without_hollow_scan():
     )
 
     sample = "先把已落地的部分列出来。"
-    steer = ceiling_honesty_steer(reason="token_budget")
-    assert steer is not None
-    assert "强制收口" in steer
     out = enforce_ceiling_closing_honesty(sample, reason="token_budget")
     assert out == sample
     assert "【收口说明】" not in out

@@ -5,8 +5,14 @@ import {
   getTurnPhase,
   useConversationStore,
 } from "@/stores/conversation";
+import {
+  type ExecutionPlan,
+  execRuntime,
+  useExecutionStore,
+} from "@/stores/execution";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  commitLocalUserStop,
   finalizeGeneratingIfNeeded,
   finalizeHonestStopAbort,
   isInterruptAbort,
@@ -17,6 +23,7 @@ const CID = "conv-honest-stop-abort";
 beforeEach(() => {
   useConversationStore.setState({ currentConversationId: CID, byId: {} });
   useConversationStore.getState().switchConversation(CID);
+  useExecutionStore.setState({ byId: {} });
 });
 
 describe("finalizeHonestStopAbort", () => {
@@ -129,5 +136,45 @@ describe("finalizeGeneratingIfNeeded", () => {
     useConversationStore.getState().createAssistantMessage(CID);
     finalizeGeneratingIfNeeded(CID);
     expect(getRuntime(CID).isGenerating).toBe(false);
+  });
+});
+
+describe("commitLocalUserStop", () => {
+  const plan: ExecutionPlan = {
+    id: "exec-local-stop",
+    planType: "multi_agent",
+    taskSummary: "并行调研",
+    agents: [{ id: "w1", role: "研究员" }],
+    runs: [{ id: "r1", agentId: "w1", task: "调研", dependsOn: [] }],
+  };
+
+  it("冻图 cancelled、关生成锁、盖 finishReason", () => {
+    beginTurnPreflight(CID);
+    enterTurnStreaming(CID);
+    const mid = useConversationStore.getState().createAssistantMessage(CID);
+    if (!mid) throw new Error("expected assistant");
+    useExecutionStore.getState().startExecution(plan, mid);
+    useExecutionStore.getState().recordFrame(
+      {
+        t: 1,
+        kind: "run_started",
+        runId: "r1",
+        agentId: "w1",
+        parentRunId: null,
+        runKind: "agent",
+        continuesRunId: null,
+      },
+      mid,
+    );
+
+    commitLocalUserStop(CID);
+
+    expect(getRuntime(CID).isGenerating).toBe(false);
+    expect(
+      getRuntime(CID).messages.find((m) => m.id === mid)?.finishReason,
+    ).toBe("cancelled");
+    expect(execRuntime(useExecutionStore.getState(), mid).status).toBe(
+      "cancelled",
+    );
   });
 });

@@ -37,7 +37,7 @@ export async function fetchVersion(): Promise<VersionInfo> {
 /**
  * Desktop update policy (`GET /updates/policy`): kill switch + soft minimum
  * version. Unauthenticated on the server; used by the Electron shell for the
- * outdated soft banner (部署与运维.md §7.6).
+ * outdated soft banner (发布与门禁.md §1.6).
  */
 export async function fetchUpdatesPolicy(): Promise<UpdatesPolicy> {
   const p = await api.get<BackendUpdatesPolicy>("/updates/policy");

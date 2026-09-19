@@ -261,29 +261,20 @@ export const SCENARIOS: Scenario[] = [
   {
     title: "带现场续派",
     advanced: true,
-    desc: "CEO 唤回刚干完的同一位队员，带着上次的现场接着改——图上挂一条点线「续 ×N」。是同一个人的下一次产出，不是新队员；现场对不上会明确拒绝，不会悄悄换人。",
+    desc: "CEO 唤回刚干完的同一位队员，带着上次的现场接着改——图上还是同一个人，角标「续 ×N」。不是新队员；现场对不上会明确拒绝，不会悄悄换人。",
     nodes: [
       input("把上一版报告的第 2 章重写得更详细"),
       agent("orig", "撰写员", "completed", {
         task: "撰写报告初稿",
-        durationMs: 6400,
-        toolCount: 2,
-      }),
-      agent("rev", "撰写员", "completed", {
-        task: "撰写报告初稿",
         revisionSummary: "重写第 2 章并扩充论据",
-        durationMs: 3800,
-        toolCount: 1,
+        durationMs: 10200,
+        toolCount: 3,
         isRevision: true,
         continuationIndex: 1,
       }),
       captain("rcap", "completed", "已交付重写后的第 2 章，其余章节沿用初稿。"),
     ],
-    edges: [
-      edge("__input__", "orig"),
-      edge("orig", "rcap"),
-      edge("orig", "rev", "continuation"),
-    ],
+    edges: [edge("__input__", "orig"), edge("orig", "rcap")],
   },
   {
     title: "大团队并行",

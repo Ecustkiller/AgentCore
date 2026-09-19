@@ -66,7 +66,7 @@ export const mechanismChapter: ManualChapterContent = {
       blocks: [
         {
           type: "lead",
-          text: "你点发送之后，团队怎么接单、怎么分工、怎么交到你手里？简单对话直接答；复杂任务才拉起一支团队。",
+          text: "你点发送之后，团队怎么接单、怎么分工、怎么交到你手里？轻问直接答；该协作才拉起一支团队。",
         },
         {
           type: "cards",
@@ -74,7 +74,7 @@ export const mechanismChapter: ManualChapterContent = {
           items: [
             {
               title: "接单准备",
-              desc: "CEO 接到目标，备好该用的能力与上下文。闲聊当场答；需要产出、变更或多人协作时才组团。",
+              desc: "CEO 接到目标，备好该用的能力与上下文。闲聊当场答；要并行、独立验证或成篇时才组团。",
               icon: "Target",
             },
             {
@@ -99,7 +99,7 @@ export const mechanismChapter: ManualChapterContent = {
             },
             {
               title: "CEO 判断要不要组团",
-              desc: "闲聊或简单问答直接作答；需要产出、变更或多人时才拉团队。",
+              desc: "闲聊或简单问答直接作答；要并行、独立验证或成篇时才拉团队。",
             },
             {
               title: "分工图成形、分批推进",

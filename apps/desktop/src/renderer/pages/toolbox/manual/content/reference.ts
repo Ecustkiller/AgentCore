@@ -119,7 +119,7 @@ export const referenceChapter: ManualChapterContent = {
             },
             {
               title: "我的文件",
-              desc: "在「我的文件」里新建文件夹，可任意嵌套；文件在服务端，手机、网页看到同一份。随手裸聊则用对话临时空间。",
+              desc: "云端文件夹在这里；新建云桌走对话里的「新建或加入」。文件在服务端，手机、网页看到同一份。随手裸聊则用对话临时空间。",
             },
             {
               title: "协作桌",
@@ -155,7 +155,7 @@ export const referenceChapter: ManualChapterContent = {
             },
             {
               title: "云上文件拿到电脑",
-              desc: "桌面对话顶栏「合回到本机」（首次选落点，冲突默认留你电脑上已有的文件），或工作区工具条导出 ZIP / 导出到本机文件夹；文件页「我的文件」云端文件夹也可导出 ZIP。Web / 手机无「合回到本机」，走文件面板下载或导出 ZIP。若打开的就是本机文件夹，文件已经在那台电脑上。",
+              desc: "桌面对话顶栏「合回到本机」（首次选落点，冲突默认留你电脑上已有的文件）。Web / 手机无「合回到本机」，走文件面板逐个下载。若打开的就是本机文件夹，文件已经在那台电脑上。",
             },
             {
               title: "分享这场对话",
@@ -166,7 +166,7 @@ export const referenceChapter: ManualChapterContent = {
         {
           type: "callout",
           variant: "warning",
-          text: "云端文件不在你电脑上：用合回、导出 ZIP 或文件面板下载拿走。打开的是本机文件夹时，才是电脑上的真实路径。",
+          text: "云端文件不在你电脑上：用合回或文件面板下载拿走。打开的是本机文件夹时，才是电脑上的真实路径。",
         },
         {
           type: "callout",
@@ -244,7 +244,7 @@ export const referenceChapter: ManualChapterContent = {
               a: [
                 {
                   type: "text",
-                  text: "CEO 判断这件事一个人答更快，就直接干、不派队员。复杂、可并行、或你明确要求多人时，才会组团。",
+                  text: "CEO 判断这件事一个人答更快，就直接干、不派队员。要并行、独立验证、成篇，或你明确要求多人时，才会组团。",
                 },
               ],
             },
@@ -365,7 +365,7 @@ export const referenceChapter: ManualChapterContent = {
               a: [
                 {
                   type: "text",
-                  text: "桌面：对话顶栏「合回到本机」或工作区导出 ZIP；Web / 手机走文件面板下载或导出 ZIP。若打开的就是本机文件夹，文件已经在那台电脑上。",
+                  text: "桌面：对话顶栏「合回到本机」。Web / 手机走文件面板下载。若打开的就是本机文件夹，文件已经在那台电脑上。",
                 },
               ],
             },
@@ -815,7 +815,7 @@ export const referenceChapter: ManualChapterContent = {
               a: [
                 {
                   type: "text",
-                  text: "协作图上同一现场根的「续 ×N」节点链；各版全文在右坞接续链点开。有接续标记才是同人，无标记的同角色再委派仍是冷启动新人。",
+                  text: "同一现场根在图上仍是一个座位（可挂「续 ×N」角标）；各版在右坞往下接，不另开节点。有接续标记才是同人，无标记的同角色再委派仍是冷启动新人。辩论轮次仍分列。",
                 },
               ],
             },

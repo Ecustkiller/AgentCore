@@ -13,7 +13,6 @@ from agentcore.core.error_codes import ErrorCode
 from agentcore.runtime.events import EventType
 from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.tools.builtin.run_process import (
-    clamp_wait_timeout_seconds,
     process_manage,
     process_op_timeout_seconds,
 )
@@ -88,13 +87,44 @@ def test_process_op_timeout_raises_for_wait_for():
         "wait_for": "ready",
         "wait_timeout_seconds": 45,
     }
-    assert process_op_timeout_seconds(wait_args) == 45.0 + slack
+    assert process_op_timeout_seconds(wait_args) == 30.0 + slack
+    assert process_op_timeout_seconds(
+        {"subcommand": "start", "command": "x", "wait_for": "ready"}
+    ) == 30.0 + slack
 
 
-def test_clamp_wait_timeout_bounds():
-    assert clamp_wait_timeout_seconds(None) == 30.0
-    assert clamp_wait_timeout_seconds(0) == 1.0
-    assert clamp_wait_timeout_seconds(9999) == 300.0
+def test_leftover_wait_timeout_does_not_change_ceiling():
+    slack = settings.workspace_execute_timeout_slack_seconds
+    leftover = {
+        "subcommand": "start",
+        "command": "x",
+        "wait_for": "ready",
+        "wait_timeout_seconds": 9999,
+    }
+    assert process_op_timeout_seconds(leftover) == 30.0 + slack
+
+
+@pytest.mark.parametrize("leftover", [40, "abc"])
+async def test_leftover_tail_lines_does_not_change_read_tail(leftover: int | str):
+    channel, registry = _channel()
+    response = {
+        "ok": True,
+        "value": {
+            "process_id": "p1",
+            "status": "running",
+            "output": "err line\n",
+        },
+    }
+    result, event = await _round_trip(
+        process_manage(
+            {"subcommand": "read", "process_id": "p1", "tail_lines": leftover},
+            _ctx(channel),
+        ),
+        registry,
+        response,
+    )
+    assert result.success
+    assert event.payload["args"] == {"process_id": "p1", "tail_lines": 80}
 
 
 # --- op contract serialization ---------------------------------------------
@@ -132,7 +162,7 @@ async def test_start_emits_process_start_op_and_formats_result():
         "command": "pnpm dev",
         "cwd": "apps/web",
         "wait_for": "Listening",
-        "wait_timeout_seconds": 20.0,
+        "wait_timeout_seconds": 30.0,
         "name": "web",
     }
     assert result.success
@@ -214,14 +244,14 @@ async def test_read_stop_list_op_shapes():
     }
     result, event = await _round_trip(
         process_manage(
-            {"subcommand": "read", "process_id": "p1", "tail_lines": 40},
+            {"subcommand": "read", "process_id": "p1"},
             _ctx(channel),
         ),
         registry,
         read_resp,
     )
     assert event.payload["op"] == WorkspaceOp.PROCESS_READ
-    assert event.payload["args"] == {"process_id": "p1", "tail_lines": 40}
+    assert event.payload["args"] == {"process_id": "p1", "tail_lines": 80}
     assert result.success and result.display["subcommand"] == "read"
     _drain()
 
@@ -294,7 +324,7 @@ async def test_start_with_wait_for_extends_channel_timeout(monkeypatch):
         response,
     )
     slack = settings.workspace_execute_timeout_slack_seconds
-    assert captured[-1] == 40.0 + slack
+    assert captured[-1] == 30.0 + slack
 
 
 async def test_missing_channel_errors():
@@ -327,7 +357,6 @@ class _RaisingChannel:
         {"subcommand": "start"},
         {"subcommand": "read"},
         {"subcommand": "stop"},
-        {"subcommand": "read", "process_id": "p1", "tail_lines": "abc"},
     ],
 )
 async def test_argument_rejections_are_coded_and_off_the_breaker_tally(arguments):

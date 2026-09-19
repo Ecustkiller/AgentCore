@@ -140,9 +140,8 @@ def iter_zip_file_members(
 ) -> list[tuple[str, bytes]]:
     """Return ``(relpath, content)`` for every safe file member (zip-slip → raise).
 
-    Used by ``archive_extract`` (fail-closed). :func:`unzip_into` shares
-    :func:`zip_member_relpath` but skips slip entries so storage restore can
-    continue. Optional ceilings guard zip bombs.
+    :func:`unzip_into` shares :func:`zip_member_relpath` but skips slip entries so
+    storage restore can continue. Optional ceilings guard zip bombs.
     """
     out: list[tuple[str, bytes]] = []
     total_bytes = 0

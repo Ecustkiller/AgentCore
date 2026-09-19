@@ -29,8 +29,8 @@ compact copy (``prefix_breach`` / ``prefix_breach_section`` / ``tools_changed`` 
 - **命中率** — ``hit_ratio`` = cache_hit_tokens / input_tokens, with ``cache_reported`` saying
   whether the provider spoke about caching at all (a silent provider is NOT a 0% hit).
 - **被什么击穿** — ``breach`` classifies the first divergence (tools table / system prompt /
-  mid-history rewrite / pure append). Tools sit ahead of messages: a consult promotion that
-  only appends history is still ``tools``, not ``history_growth``. ``breach_section`` names
+  mid-history rewrite / pure append). Tools sit ahead of messages: a mid-chain
+  ``tools[]`` rewrite is still ``tools``, not ``history_growth``. ``breach_section`` names
   the leaf when the system prompt is the culprit (e.g. ``workspace_facts`` = 文件索引变动,
   ``attachment_context`` = 变尾段本身). ``folder_catalog`` slot is kept;
   production no longer assembles that section.

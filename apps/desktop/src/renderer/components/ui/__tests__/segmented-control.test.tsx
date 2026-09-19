@@ -12,9 +12,9 @@ const TWO = [
 ] as const;
 
 const THREE = [
-  { value: "ceo", label: "主 Agent" },
-  { value: "nested", label: "可再委派的队员" },
-  { value: "leaf", label: "叶子队员" },
+  { value: "low", label: "低" },
+  { value: "mid", label: "中" },
+  { value: "high", label: "高" },
 ] as const;
 
 describe("SegmentedControl", () => {
@@ -44,15 +44,15 @@ describe("SegmentedControl", () => {
   it("keeps three items on a horizontally scrollable track", () => {
     render(
       <SegmentedControl
-        aria-label="角色身份"
-        value="ceo"
+        aria-label="强度"
+        value="low"
         onChange={vi.fn()}
         items={THREE}
       />,
     );
-    const list = screen.getByRole("tablist", { name: "角色身份" });
+    const list = screen.getByRole("tablist", { name: "强度" });
     expect(list.className).toContain("overflow-x-auto");
-    expect(screen.getByRole("tab", { name: "主 Agent" }).className).toContain(
+    expect(screen.getByRole("tab", { name: "低" }).className).toContain(
       "shrink-0",
     );
   });
@@ -60,19 +60,19 @@ describe("SegmentedControl", () => {
   it("forwards id and aria-controls onto each tab", () => {
     render(
       <SegmentedControl
-        aria-label="角色身份"
-        value="ceo"
+        aria-label="强度"
+        value="low"
         onChange={vi.fn()}
         items={THREE.map((item) => ({
           ...item,
-          id: `role-tab-${item.value}`,
-          "aria-controls": "role-identity-panel",
+          id: `level-tab-${item.value}`,
+          "aria-controls": "level-panel",
         }))}
       />,
     );
-    const tab = screen.getByRole("tab", { name: "主 Agent" });
-    expect(tab.id).toBe("role-tab-ceo");
-    expect(tab.getAttribute("aria-controls")).toBe("role-identity-panel");
+    const tab = screen.getByRole("tab", { name: "低" });
+    expect(tab.id).toBe("level-tab-low");
+    expect(tab.getAttribute("aria-controls")).toBe("level-panel");
   });
 
   it("notifies onChange when a tab is clicked", () => {
@@ -92,10 +92,10 @@ describe("SegmentedControl", () => {
   it("moves aria-selected after a controlled update", () => {
     function Harness() {
       const [value, setValue] =
-        useState<(typeof THREE)[number]["value"]>("ceo");
+        useState<(typeof THREE)[number]["value"]>("low");
       return (
         <SegmentedControl
-          aria-label="角色身份"
+          aria-label="强度"
           value={value}
           onChange={setValue}
           items={THREE}
@@ -103,16 +103,12 @@ describe("SegmentedControl", () => {
       );
     }
     render(<Harness />);
-    fireEvent.click(screen.getByRole("tab", { name: "叶子队员" }));
+    fireEvent.click(screen.getByRole("tab", { name: "高" }));
     expect(
-      screen
-        .getByRole("tab", { name: "叶子队员" })
-        .getAttribute("aria-selected"),
+      screen.getByRole("tab", { name: "高" }).getAttribute("aria-selected"),
     ).toBe("true");
     expect(
-      screen
-        .getByRole("tab", { name: "主 Agent" })
-        .getAttribute("aria-selected"),
+      screen.getByRole("tab", { name: "低" }).getAttribute("aria-selected"),
     ).toBe("false");
   });
 });

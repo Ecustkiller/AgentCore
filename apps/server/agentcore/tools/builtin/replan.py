@@ -47,7 +47,6 @@ logger = get_logger(__name__)
 # Schema layer: short trigger. 字段 HOW 在让出简报与参数，不指空 consult。
 _REPLAN_DESCRIPTION = (
     "在 delegate 让出『计划已让出』后续跑同一计划（非终结）。"
-    "协调中加新角色用 delegate，勿等本工具。"
 )
 
 _REPLAN_PARAMETERS = {

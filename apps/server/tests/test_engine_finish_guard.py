@@ -137,7 +137,7 @@ async def test_ceo_structural_defect_reworks():
     (content, _r, _u, rounds), messages, sink = await _run(provider, citation_sink=[])
     assert rounds == 2
     assert content.endswith("完成。")
-    steers = [m for m in messages if m.role == "user" and m.content and "核验未通过" in m.content]
+    steers = [m for m in messages if m.role == "user" and m.content and "没有闭合" in m.content]
     assert len(steers) == 1
     assert "没有闭合" in steers[0].content
     assert len(_resets(sink)) == 1
