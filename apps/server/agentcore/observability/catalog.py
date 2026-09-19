@@ -598,18 +598,6 @@ EVENTS: list[EventSpec] = [
         description='历史兼容：换用 overlay 已撤，不再 emit',
     ),
     EventSpec(
-        name='contract.cite_phase_a_terminal_reject',
-        description='历史兼容：调研两阶段引用闸已撤，不再 emit',
-    ),
-    EventSpec(
-        name='contract.cite_upgrade',
-        description='历史兼容：调研两阶段引用升 B 已撤，不再 emit',
-    ),
-    EventSpec(
-        name='contract.cite_upgrade_exhausted',
-        description='历史兼容：调研两阶段引用升 B 已撤，不再 emit',
-    ),
-    EventSpec(
         name='contract.failed',
         description='历史兼容：曾作 logger 事件名；现为 RunPhase.FAILED 的 error 字面，不再 emit',
     ),
@@ -617,13 +605,8 @@ EVENTS: list[EventSpec] = [
         name='contract.hard_gap_blocked_completion',
         description='历史兼容：曾因空交/未落盘把节点打成 FAILED；已撤',
     ),
-    EventSpec(
-        name='contract.light_repair',
-        description='历史兼容：格式/交接短修 extra LLM pass 已撤，不再 emit',
-    ),
     EventSpec(name='contract.retry'),
     EventSpec(name='contract.retry_skipped_budget'),
-    EventSpec(name='contract.retry_skipped_interrupt'),
     EventSpec(name='contract.write_pass'),
     EventSpec(name='contract.write_pass_exhausted'),
     EventSpec(
@@ -2981,7 +2964,6 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='worker.timeout_hard'),
     EventSpec(name='worker.timeout_warn'),
     EventSpec(name='working_set.load_failed'),
-    EventSpec(name='workspace.artifact_read_failed'),
     EventSpec(
         name='workspace.atomic_replace_recovered',
         description='工作区原子写 os.replace 在短暂占用后成功（WinError 5/32 重试）',
