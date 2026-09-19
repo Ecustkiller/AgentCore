@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from agentcore.runtime.events import (
     FinishReason,
     SSEEvent,
@@ -357,7 +359,7 @@ def _multi_agent_debate() -> list[SSEEvent]:
         debate_round(
             execution_id="exec1",
             moderator_run_id=mod,
-            payload=debate_payload["rounds"][0],
+            payload=cast(list[dict[str, Any]], debate_payload["rounds"])[0],
         ),
         debate_result(execution_id="exec1", moderator_run_id=mod, payload=debate_payload),
         message_end(FinishReason.END_TURN, input_tokens=3000, output_tokens=500, cost=_COST),
