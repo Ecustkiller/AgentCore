@@ -17,7 +17,9 @@ vi.mock("@/hooks/useConversations", () => ({
 }));
 vi.mock("@/services/sidecarRouting", () => {
   const resolveSidecarRoot = vi.fn();
-  const resolveConversationLocalTarget = vi.fn(() => Promise.resolve(null));
+  const resolveConversationLocalTarget = vi.fn((_conversationId: string) =>
+    Promise.resolve(null),
+  );
   return {
     resolveSidecarRoot,
     resolveConversationLocalTarget,
