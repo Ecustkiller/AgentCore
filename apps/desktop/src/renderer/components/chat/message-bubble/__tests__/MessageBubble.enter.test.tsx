@@ -5,6 +5,7 @@ import {
   getRuntime,
   useConversationStore,
 } from "@/stores/conversation";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -43,10 +44,18 @@ function user(): Message {
 }
 
 function renderBubble(message: Message) {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
   return render(
-    <MemoryRouter>
-      <MessageBubble message={message} />
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <MessageBubble message={message} />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
