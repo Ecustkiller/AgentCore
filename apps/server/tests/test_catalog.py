@@ -25,8 +25,7 @@ _CEO_ORCHESTRATION = {
     "delegate",
     "replan",
     "debate",
-    "list_folders",
-    "resolve_folder",
+    "folders",
     "create_folder",
     "ask_user",
 }
@@ -39,13 +38,10 @@ _CEO_AND_WORKER_MUTATION = {
     "file_write",
     "str_replace",
     "file_delete",
-    "file_move",
-    "file_copy",
     "mkdir",
     "file_batch",
     "md_export",
-    "archive_extract",
-    "archive_create",
+    "archive",
     "download_url",
     "run",
 }
@@ -143,38 +139,28 @@ def test_mutation_and_execution_are_shared_with_ceo():
         }
 
 
-def test_ceo_prompt_lists_skill_directory_when_ask_user_wired():
-    """compose_ceo_chat_prompt is the single source for runtime + 能力图鉴; its 按需目录
-    must gate ask_kickoff / ask_midtask on ask_user being wired (the live-user invariant)."""
+def test_ceo_prompt_skill_directory_gates_on_required_tools():
+    """compose_ceo_chat_prompt 按需目录按 requires_tools 显隐（debate 手册跟 debate 工具）。"""
     registry = build_system_skill_registry()
     base = assemble_system_prompt()
 
-    # The directory renders one「- {name}：{summary}」line per visible skill; match that
-    # marker (not the bare name, which also appears in the CEO core hint's prose).
-    with_ask = compose_ceo_chat_prompt(
+    with_debate = compose_ceo_chat_prompt(
         base,
         skill_registry=registry,
-        ceo_tool_names={"delegate", "consult", "ask_user"},
+        ceo_tool_names={"delegate", "consult", "debate"},
     )
-    assert "按需目录" in with_ask
-    assert "编排：" in with_ask
-    assert "- ask_kickoff：" in with_ask
-    assert "- ask_midtask：" in with_ask
-    assert "- product_help：" in with_ask
-    assert "- asking_the_user：" not in with_ask
+    assert "按需目录" in with_debate
+    assert "编排：" in with_debate
+    assert "- debate_and_review：" in with_debate
+    assert "- product_help：" in with_debate
 
-    without_ask = compose_ceo_chat_prompt(
+    without_debate = compose_ceo_chat_prompt(
         base,
         skill_registry=registry,
         ceo_tool_names={"delegate", "consult"},
     )
-    # ask books require the ask_user tool — directory lines gated out…
-    assert "- ask_kickoff：" not in without_ask
-    assert "- ask_midtask：" not in without_ask
-    assert "- asking_the_user：" not in without_ask
-    assert "- ask_user_kickoff：" not in without_ask
-    # …but the un-gated advanced skills still list.
-    assert "- product_help：" in without_ask
+    assert "- debate_and_review：" not in without_debate
+    assert "- product_help：" in without_debate
 
 
 # Display face ≠ ceo_orchestration surface. Pin so Folder / board tools
@@ -187,13 +173,9 @@ _CATALOG_FACE: dict[str, ToolFace] = {
     "ask_user": ToolFace.ORCHESTRATION,
     "escalate": ToolFace.ORCHESTRATION,
     "handoff": ToolFace.ORCHESTRATION,
-    "list_folders": ToolFace.FOLDER,
-    "resolve_folder": ToolFace.FOLDER,
+    "folders": ToolFace.FOLDER,
     "create_folder": ToolFace.FOLDER,
     "delete_folder": ToolFace.FOLDER,
-    "list_folder_dir": ToolFace.FOLDER,
-    "read_folder_file": ToolFace.FOLDER,
-    "read_image": ToolFace.BOARD,
     "table_ops": ToolFace.TABLE,
     "table_read": ToolFace.TABLE,
     "docs_read": ToolFace.DOC,
@@ -227,7 +209,7 @@ def test_catalog_faces_are_not_an_orchestration_dumpster():
     assert doc == {n for n, f in _CATALOG_FACE.items() if f is ToolFace.DOC}
 
 
-def test_on_demand_directory_splits_folder_and_board_off_orchestration():
+def test_on_demand_directory_splits_folder_off_orchestration():
     out = render_on_demand_directory(
         [
             ConsultDirectoryEntry(
@@ -235,12 +217,6 @@ def test_on_demand_directory_splits_folder_and_board_off_orchestration():
                 summary="新建云文件夹",
                 section="tool",
                 face=ToolFace.FOLDER.value,
-            ),
-            ConsultDirectoryEntry(
-                name="read_image",
-                summary="读工作区图",
-                section="tool",
-                face=ToolFace.BOARD.value,
             ),
             ConsultDirectoryEntry(
                 name="table_ops",
@@ -263,12 +239,11 @@ def test_on_demand_directory_splits_folder_and_board_off_orchestration():
         ]
     )
     assert "文件夹：" in out
-    assert "白板：" in out
+    assert "白板：" not in out
     assert "表格：" in out
     assert "文档：" in out
     assert "编排：" in out
-    assert out.index("文件夹：") < out.index("- create_folder：新建云文件夹") < out.index("白板：")
-    assert out.index("白板：") < out.index("- read_image：读工作区图") < out.index("表格：")
+    assert out.index("文件夹：") < out.index("- create_folder：新建云文件夹") < out.index("表格：")
     assert out.index("表格：") < out.index("- table_ops：改当前表格") < out.index("文档：")
     assert out.index("文档：") < out.index("- docs_read：读创作文档") < out.index("编排：")
     assert out.index("编排：") < out.index("- delegate：派活")

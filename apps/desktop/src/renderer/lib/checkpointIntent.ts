@@ -1,10 +1,7 @@
 /** Unrecognized checkpoint intent (including retired ask shells) → decision. */
-export type AskUiIntent = "decision" | "organize_plan";
+export type AskUiIntent = "decision";
 
-/** Normalize wire/recovery `intent` — only organize_plan keeps chrome; all else → decision. */
-export function parseCheckpointIntent(raw: unknown): AskUiIntent {
-  if (raw === "organize_plan") {
-    return raw;
-  }
+/** Normalize wire/recovery `intent` — every pause uses the generic clarification chrome. */
+export function parseCheckpointIntent(_raw: unknown): AskUiIntent {
   return "decision";
 }

@@ -1,20 +1,14 @@
-/** 幕授权来源 → 图上角标/锚点副文案（批 A/B · authorized_by）。 */
+/** 幕授权来源 → 图上角标/锚点副文案（authorized_by）。 */
 import type { ActAuthorizedBy } from "@/stores/execution";
 
 const LABELS: Record<ActAuthorizedBy, string> = {
-  stage_card: "经推进卡授权",
   auto: "自动开辩",
-  preview: "已授权开跑",
 };
 
 export function actAuthorizedByLabel(
   authorizedBy: ActAuthorizedBy | string | null | undefined,
 ): string | null {
-  if (
-    authorizedBy === "stage_card" ||
-    authorizedBy === "auto" ||
-    authorizedBy === "preview"
-  ) {
+  if (authorizedBy === "auto") {
     return LABELS[authorizedBy];
   }
   return null;

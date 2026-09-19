@@ -1,14 +1,12 @@
 """Compose / assemble system prompts from prompt fragments."""
 
 import re
-import time
 from collections.abc import Sequence
 
 from agentcore.config import settings
 from agentcore.core.types import TOOL_FACE_LABELS, TOOL_FACE_ORDER
 from agentcore.runtime.context import ContextAssembler, SectionOrder
 from agentcore.runtime.context.consultable import ConsultDirectoryEntry
-from agentcore.runtime.context.workspace_overview import attach_workspace_file_index
 from agentcore.runtime.resolve.profile import (
     FRAGMENT_BASE,
     FRAGMENT_CEO_CORE,
@@ -16,16 +14,9 @@ from agentcore.runtime.resolve.profile import (
 )
 from agentcore.runtime.resolve.prompt.base import (
     _DEFAULT_SYSTEM_PROMPT,
-    _RUNTIME_CONTEXT_TEMPLATE,
+    render_runtime_date_block,
 )
-from agentcore.runtime.resolve.prompt.ceo_core import (
-    _CEO_CORE_HINT,
-    _attachment_material_block,
-)
-from agentcore.runtime.resolve.prompt.cold_start import (
-    _FOLDER_NAV_STALE_HINT,
-    _explore_act_block,
-)
+from agentcore.runtime.resolve.prompt.ceo_core import _CEO_CORE_HINT
 from agentcore.runtime.resolve.prompt.memory_rules import _format_rules
 from agentcore.runtime.skills.registry import SKILL_GROUP_ORDER
 
@@ -42,13 +33,13 @@ def assemble_system_prompt(
     block. This base prompt is shared by the CEO
     chat agent and the delegated workers (runs/executor/), so both reach every agent.
 
-    Per-turn ``<工作区>`` environment facts are NOT in this base — they
-    ride :data:`SectionOrder.WORKSPACE_FACTS` on both :func:`compose_ceo_chat_prompt`
-    and :func:`compose_worker_base_prompt` so a location / capability restamp cannot
-    sit in front of the resident core (see ``SectionOrder`` Exception 2026-08-19).
+    Per-turn ``<运行时>`` / ``<工作区>`` are NOT in this base. Workers add both on
+    :func:`compose_worker_base_prompt`. CEO date + workspace ride the turn envelope
+    (:func:`~agentcore.runtime.resolve.prompt.envelope.render_ceo_turn_envelope`),
+    not ``role: system``.
 
     Sections are stitched by :class:`ContextAssembler` (上下文注入统一): base →
-    runtime context → memory <设定> → attachment context, joined with "\n". Empty
+    memory <设定> → attachment context, joined with "\n". Empty
     optional sections (memory, attachments) are skipped. Catalog / tests that omit
     facts stay byte-identical to this render — load-bearing for DeepSeek prefix-cache
     identity of the shared prefix.
@@ -59,13 +50,9 @@ def assemble_system_prompt(
     the shared base. A base override reaches both workers and the CEO (whose base_prompt
     is this function's output).
     """
-    runtime_context = _RUNTIME_CONTEXT_TEMPLATE.format(
-        date=time.strftime("%Y-%m-%d %Z", time.localtime())
-    )
     return (
         ContextAssembler()
         .add("base", resolve(FRAGMENT_BASE, _DEFAULT_SYSTEM_PROMPT), SectionOrder.BASE)
-        .add("runtime_context", runtime_context, SectionOrder.RUNTIME_CONTEXT)
         .add(
             "memory_rules",
             _format_rules(rules_markdown),
@@ -83,8 +70,8 @@ def _on_demand_preamble(*, with_summaries: bool) -> list[str]:
     """Shared intro lines for ``<按需目录>`` (CEO and worker both get name＋摘要).
 
     The preamble states ONLY that this is the on-demand catalog and how to pull
-    full text. WHEN / four kinds / deferred-tool promotion live in the consult
-    tool description.
+    full text. WHEN / deferred-tool promotion / family enable live in the consult
+    tool description. Kinds are section headings, not preamble.
     """
     detail = "name＋一行摘要" if with_summaries else "name"
     return [
@@ -180,7 +167,8 @@ def _grouped_tool_rows(
             continue
         label = lead.family_label.strip() or lead.name
         names = "、".join(m.name for m in members)
-        lines.append(f"- {label}（查阅任一即整组启用）：{names}")
+        # 成套启用合同在 consult description，目录行只写组名与成员。
+        lines.append(f"- {label}：{names}")
     return lines
 
 
@@ -267,9 +255,10 @@ def compose_worker_base_prompt(
 ) -> str:
     """Build the delegated worker's system prompt from the shared base.
 
-    Layers the same ``<按需目录>`` (name＋摘要) the CEO sees when ``on_demand_entries``
-    is non-empty, then per-turn workspace facts (same :data:`SectionOrder.WORKSPACE_FACTS`
-    the CEO uses), then the attachment block last (缓存友好). Summaries are the existing
+    Layers date (``<运行时>``), the same ``<按需目录>`` (name＋摘要) the CEO sees when
+    ``on_demand_entries`` is non-empty, then per-turn workspace facts, then the
+    attachment block last (缓存友好). CEO date + workspace live in the turn envelope
+    instead; workers keep both in system this slice. Summaries are the existing
     ``description`` / skill ``summary`` strings — this does not rewrite them.
     """
     if on_demand_entries:
@@ -290,6 +279,7 @@ def compose_worker_base_prompt(
     return (
         ContextAssembler()
         .add("shared_base", shared_base, SectionOrder.BASE)
+        .add("runtime_context", render_runtime_date_block(), SectionOrder.RUNTIME_CONTEXT)
         .add("on_demand_directory", on_demand_block, SectionOrder.SKILL_DIRECTORY)
         .add("workspace_facts", workspace_context, SectionOrder.WORKSPACE_FACTS)
         .add("attachment_context", attachment_context, SectionOrder.ATTACHMENT)
@@ -303,26 +293,18 @@ def compose_ceo_chat_prompt(
     *,
     ceo_tool_names: set[str],
     on_demand_entries: Sequence[ConsultDirectoryEntry] = (),
-    workspace_context: str | None = None,
-    workspace_file_index: str | None = None,
-    table_context: str | None = None,
-    cold_start_explore: bool | str | None = False,
-    folder_nav_stale: bool = False,
-    attachment_material: bool = False,
     ceo_offered_names: set[str] | None = None,
     # Deprecated: skill_registry / memory_topics / on_demand_rules — prefer on_demand_entries.
     skill_registry: object | None = None,
     memory_topics: Sequence[object] = (),
     on_demand_rules: Sequence[object] = (),
 ) -> str:
-    """Compose the CEO chat agent's system prompt from the clean base.
+    """Compose the frozen CEO system prompt from the clean base.
 
-    Layers the entry coordinator's hint stack onto the shared base: the SLIM CEO core
-    + unified ``<按需目录>`` (only when ``consult`` is wired) + per-turn workspace
-    facts (same :data:`SectionOrder.WORKSPACE_FACTS` workers use, after the core). CEO
-    file index (``workspace_file_index``) splices into that ``<工作区>`` as the last
-    subsection; workers never receive it. ``on_demand_entries``
-    must match the tool's merged source.
+    Layers the entry coordinator's identity + unified ``<按需目录>`` (only when
+    ``consult`` is wired). Date, workspace (+ CEO file index), scene gates,
+    attachments, table, and the source ledger ride the turn envelope — not this
+    string. ``on_demand_entries`` must match the tool's merged source.
     ``ceo_offered_names`` is the OpenAI table this turn (on-demand tools omitted until
     consult). Host / terminal / browser / grant HOW is consult-owned and must not
     hang on this frozen prompt — even when catalog/eval omit ``offered`` or a
@@ -330,18 +312,6 @@ def compose_ceo_chat_prompt(
     """
     del ceo_offered_names
     ceo_core = resolve(FRAGMENT_CEO_CORE, _CEO_CORE_HINT)
-    reason = (
-        "refresh"
-        if cold_start_explore is True or cold_start_explore == "refresh"
-        else None
-    )
-    explore_block = _explore_act_block(reason)
-    material_block = _attachment_material_block(attachment_material)
-    stale_block = (
-        _FOLDER_NAV_STALE_HINT.strip()
-        if folder_nav_stale and not explore_block
-        else ""
-    )
     if on_demand_entries:
         entries = list(on_demand_entries)
     else:
@@ -373,24 +343,10 @@ def compose_ceo_chat_prompt(
         ContextAssembler()
         .add("ceo_base", base_prompt, SectionOrder.BASE)
         .add("ceo_core", ceo_core, SectionOrder.CEO_CORE)
-        .add("cold_start_explore", explore_block, SectionOrder.CEO_CORE)
-        .add("attachment_material", material_block, SectionOrder.CEO_CORE)
-        .add("folder_nav_stale", stale_block, SectionOrder.CEO_CORE)
         .add("on_demand_directory", on_demand_block, SectionOrder.SKILL_DIRECTORY)
-        .add(
-            "workspace_facts",
-            attach_workspace_file_index(
-                workspace_context or "",
-                workspace_file_index or "",
-            )
-            or None,
-            SectionOrder.WORKSPACE_FACTS,
-        )
-        .add("table_context", table_context, SectionOrder.TABLE_FACTS)
-        # D4: 见 assemble_system_prompt —— ``SectionOrder.FOLDER_CATALOG`` 槽位保留、
-        # 生产不装配该段（名册改 list_folders）。workspace_facts 在核之后、紧邻易变尾
-        # （见 SectionOrder Exception 2026-08-19）。CEO 文件索引附在同一 ``<工作区>``
-        # 末节，不另开标签。
+        # Frozen system: constitution + identity + catalog. Volatile facts observe
+        # on ``ceo_envelope`` (render_ceo_turn_envelope). FOLDER_CATALOG slot stays
+        # unused (名册改 folders).
         .track_sections(scope="ceo_chat")
         .render()
     )

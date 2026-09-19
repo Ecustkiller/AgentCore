@@ -151,8 +151,8 @@ async def settle_successful_turn(
         # 辩论：主持人一行 + 每个辩手每轮一行（含 continue_run 续写），各自 parented
         # 到上级（辩手→主持人、主持人→captain），与 delegate 同形折账。
         *(asdict(r) for r in debate_tool.run_ledger),
-        # Vision sub-calls (attachment eye→text / read_image) are their own
-        # role=vision rows, parented to the calling run. Empty unless a read billed.
+        # Vision sub-calls (historical ``role=vision`` rows). Empty unless a
+        # retired eye billed; native images ride the main model.
         *(asdict(r) for r in vision_cost_sink),
     ]
     turn_cost = aggregate_cost(cost_runs)

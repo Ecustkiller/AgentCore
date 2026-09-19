@@ -227,7 +227,7 @@ exports[`buildGraphScene · golden > multi-act (≥2) → act bands + acts→uni
     },
     {
       "actId": "act-2",
-      "authorizedBy": "stage_card",
+      "authorizedBy": "auto",
       "kind": "debate",
       "title": "辩论对抗",
       "unitIds": [
@@ -290,7 +290,7 @@ exports[`buildGraphScene · golden > multi-act (≥2) → act bands + acts→uni
     {
       "id": "act-band-act-2",
       "kind": "act",
-      "label": "辩论对抗 · 经推进卡授权",
+      "label": "辩论对抗 · 自动开辩",
       "memberRunIds": [
         "mod",
         "mod_r1_pro",

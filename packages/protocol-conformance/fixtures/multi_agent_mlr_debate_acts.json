@@ -1,6 +1,6 @@
 {
   "name": "multi_agent_mlr_debate_acts",
-  "description": "批A2·两幕链：幕1 MLR multi_agent + 幕2 debate 新图 + prev（act-2/anchor=synthesizer；authorized_by=preview；不再 divert）",
+  "description": "两幕链：幕1 MLR + 幕2 debate 新图 + prev（act-2/anchor=synthesizer；authorized_by=auto）",
   "events": [
     {
       "type": "message_start",
@@ -447,7 +447,7 @@
           "kind": "debate",
           "title": "辩论对抗",
           "anchor_run_id": "synthesizer",
-          "authorized_by": "preview"
+          "authorized_by": "auto"
         }
       },
       "timestamp": "2026-01-01T00:00:04.416Z"
@@ -521,7 +521,7 @@
           "kind": "debate",
           "title": "辩论对抗",
           "anchor_run_id": "synthesizer",
-          "authorized_by": "preview"
+          "authorized_by": "auto"
         }
       },
       "timestamp": "2026-01-01T00:00:04.419Z"
@@ -972,7 +972,7 @@
         "kind": "debate",
         "title": "辩论对抗",
         "anchorRunId": "synthesizer",
-        "authorizedBy": "preview"
+        "authorizedBy": "auto"
       }
     ],
     "progress": {
@@ -1069,15 +1069,12 @@
         "sides": [],
         "clashes": [],
         "cross_exam": [],
-        "witness_exam": [],
-        "findings": [],
-        "thread_turns": []
+        "witness_exam": []
       }
     ],
     "debatePretrial": null,
     "crossExamEnabled": false,
     "debateOpening": "先从法律风险与舆情窗口切入。",
-    "teamSynthesisPreview": null,
     "deliveryStatus": null,
     "turnWarning": null,
     "autoFolder": null,

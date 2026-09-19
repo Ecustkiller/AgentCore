@@ -481,7 +481,7 @@ export interface FsApi {
   ensureDefaultRoot(): Promise<FsRoot>;
   /**
    * 云 → 本机单向 checkout：弹目录选择器并解压 zip（纯导出，不登记授权根）。
-   * 合回落点写出走 Diff / 只合回产物，不经本 API。取消 → `{ reason:"cancelled" }`。
+   * 合回落点写出走 Diff 勾选合回，不经本 API。取消 → `{ reason:"cancelled" }`。
    */
   checkoutArchive(archiveBase64: string): Promise<CheckoutArchiveResult>;
   /**

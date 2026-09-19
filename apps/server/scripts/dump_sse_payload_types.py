@@ -44,6 +44,7 @@ HEADER = """\
 import type { SSEEventType } from "./eventTypes.generated";
 
 export type { SSEEventType } from "./eventTypes.generated";
+export { SSE_EVENT_TYPE_VALUES } from "./eventTypes.generated";
 
 export interface SSEEvent<T = unknown> {
   type: SSEEventType;

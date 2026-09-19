@@ -14,7 +14,6 @@ from agentcore.runtime.events import (
     run_plan,
     run_progress,
     run_started,
-    team_synthesis_preview,
     tool_use_end,
     tool_use_start,
 )
@@ -23,14 +22,11 @@ from .._common import _CONV, _COST, _USAGE
 
 
 def _multi_agent_coordinate() -> list[SSEEvent]:
-    """多 Agent·CEO 协调模式：≥2 worker 并行 + 合成草稿预览 + 收束。
+    """多 Agent·CEO 协调模式：≥2 worker 并行 + 收束。
 
     Wire 形状对齐 coordinate=true 路径的可见事件（非阻塞 delegate 立即返回后 CEO 继续
-    ReAct）。单 worker 协调见 ``multi_agent_solo_coordinate_interjection``（无
-    team_synthesis_preview）。本向量钉并行两队员、update_synthesis 推送的
-    team_synthesis_preview（P2 DURABLE——fold 同 key 保最新进
-    ProjectedTurn.teamSynthesisPreview）、完成后 CEO 终稿。亦作「刷新重建」钉：golden
-    断言末次 preview 文案。
+    ReAct）。单 worker 协调见 ``multi_agent_solo_coordinate_interjection``。
+    本向量钉并行两队员与完成后 CEO 终稿。团队进展预览事件已退役，不进本向量。
     """
     agents = [
         {
@@ -75,17 +71,6 @@ def _multi_agent_coordinate() -> list[SSEEvent]:
         ),
         run_started("r1", "w1"),
         run_started("r2", "w2"),
-        # CEO update_synthesis → team_synthesis_preview（草稿正文在 text；workers 可空）。
-        # P2 DURABLE：三端 fold 同 key 保最新 → ProjectedTurn.teamSynthesisPreview。
-        team_synthesis_preview(
-            execution_id="exec1",
-            completed=0,
-            total=2,
-            headline="合成草稿更新 · 已完成 0/2",
-            text="两边刚起步；接口方向按开局共识对齐。",
-            workers=[],
-            in_progress=True,
-        ),
         run_output_delta("r1", "w1", "调研结论"),
         run_completed(
             "r1",
@@ -98,29 +83,6 @@ def _multi_agent_coordinate() -> list[SSEEvent]:
             cost=_COST,
         ),
         run_progress(1, 2),
-        # 确定性进度预览（drive._progress）：有 worker 摘要行。
-        team_synthesis_preview(
-            execution_id="exec1",
-            completed=1,
-            total=2,
-            headline="已完成 1/2：✅ 研究员 ⏳ 撰写员",
-            text="已完成 1/2：✅ 研究员 ⏳ 撰写员\n· 研究员：完成调研",
-            workers=[
-                {
-                    "run_id": "r1",
-                    "role": "研究员",
-                    "status": "completed",
-                    "summary": "完成调研",
-                },
-                {
-                    "run_id": "r2",
-                    "role": "撰写员",
-                    "status": "pending",
-                    "summary": "",
-                },
-            ],
-            in_progress=True,
-        ),
         run_output_delta("r2", "w2", "成稿"),
         run_completed(
             "r2",
@@ -199,28 +161,6 @@ def _multi_agent_coordination_wait() -> list[SSEEvent]:
             cost=_COST,
         ),
         run_progress(1, 2),
-        team_synthesis_preview(
-            execution_id="exec1",
-            completed=1,
-            total=2,
-            headline="已完成 1/2：✅ 研究员 ⏳ 撰写员",
-            text="已完成 1/2：✅ 研究员 ⏳ 撰写员\n· 研究员：完成调研",
-            workers=[
-                {
-                    "run_id": "r1",
-                    "role": "研究员",
-                    "status": "completed",
-                    "summary": "完成调研",
-                },
-                {
-                    "run_id": "r2",
-                    "role": "撰写员",
-                    "status": "pending",
-                    "summary": "",
-                },
-            ],
-            in_progress=True,
-        ),
         # CEO 进入 await_coordination_injection 空等——前端应显示等待指示。
         coordination_wait(
             execution_id="exec1",

@@ -17,7 +17,6 @@ afterEach(cleanup);
 
 const emptyCards = {
   checkpoints: [] as never[],
-  planReviews: [] as never[],
 };
 
 function renderTimeline(

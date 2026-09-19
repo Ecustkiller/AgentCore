@@ -265,7 +265,7 @@ async def _prepare_write_relpath(
     if isinstance(prepared, ToolResult):
         raise WritePathPrepareError(prepared)
     requested = prepared
-    # ``.`` is a valid workspace-root dest (archive_extract).
+    # ``.`` is a valid workspace-root dest (archive extract).
     if requested == ".":
         return ".", ""
     if not requested:
@@ -277,7 +277,7 @@ async def _prepare_write_relpath(
         sanitize_note = (
             f"注意：请求路径已清理，实际写入 `{actual}`。"
             "约定文档区（`AgentCore/文档/` 下 research/reviews/debate）前缀之后"
-            "嵌套 `/` 会压成 `_`（单文件名）；勿再 file_move/copy「改回」斜杠路径"
+            "嵌套 `/` 会压成 `_`（单文件名）；勿再 file_batch move/copy「改回」斜杠路径"
             "（规范化后常等同）。"
         )
     return actual, sanitize_note

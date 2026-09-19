@@ -90,7 +90,19 @@ function buildRows(
   };
 
   steps.forEach((step, i) => {
-    if ((step as { kind: string }).kind === "ask") return;
+    const kind = (step as { kind: string }).kind;
+    if (
+      kind !== "reasoning" &&
+      kind !== "content" &&
+      kind !== "tool" &&
+      kind !== "team" &&
+      kind !== "checkpoint" &&
+      kind !== "escalation" &&
+      kind !== "approval" &&
+      kind !== "user_interjection"
+    ) {
+      return;
+    }
     if (step.kind === "tool") {
       toolRun.push(step);
       return;
@@ -300,14 +312,10 @@ function SlotRow({
       </>
     );
   }
-  if (step.kind === "checkpoint" || (step.kind as string) === "ask") {
+  if (step.kind === "checkpoint") {
     const ask = resolvedAskForStep(step, interactions);
     if (!ask) return null;
     return <AskReadCard ask={ask} />;
-  }
-  if (step.kind === "graph_append") {
-    // 旧 journal 槽位标记：产品聊天不画回链铬条（协作图 UX §六）。
-    return null;
   }
   return null;
 }

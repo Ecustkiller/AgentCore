@@ -1,17 +1,11 @@
-import { toCeoReview } from "@/lib/ceoReview";
 import {
   type AskUiIntent,
   parseCheckpointIntent,
 } from "@/lib/checkpointIntent";
 import type { components } from "@/types/api.generated";
-import type {
-  AskOption,
-  AskQuestion,
-  CeoReviewSummary,
-  PlanReviewPending,
-  PlanReviewStep,
-} from "@/types/events";
+import type { AskOption, AskQuestion } from "@/types/events";
 import { create } from "zustand";
+import { isColdResumeKind } from "./interactions/registry";
 
 type PausedTurnSummary = components["schemas"]["PausedTurnSummary"];
 type SuspensionKind = components["schemas"]["SuspensionKind"];
@@ -52,19 +46,17 @@ export function beginPausedSnapshot(): number {
 }
 
 /**
- * A turn that paused at a plan_review / ask_user checkpoint, was DURABLY persisted,
+ * A turn that paused at an ask_user checkpoint, was DURABLY persisted,
  * then lost its live SSE — client disconnect / server restart (结构化挂起 2b). On
  * conversation reopen the client loads these from the recovery snapshot (GET /recovery)
- * and offers 继续 / 调整 / 停止, each driving POST .../resume to continue on a fresh stream.
+ * and offers 继续 / 停止, each driving POST .../resume to continue on a fresh stream.
  *
  * Mirrors the approvals store: one entry per paused turn, tagged with its
  * `conversationId` so several conversations can each hold their own pending
  * resumes; the card above the composer renders only the active conversation's.
  *
- * `kind` selects the card the {@link ResumePrompt} renders: plan_review reviews the
- * finished `steps` + gated `pending`; ask_user re-asks the unified card content
- * (`question` / `questions`).
- * The unused set is empty for the other kind.
+ * `kind` is always ask_user (leftover plan_review / team_preview frames are
+ * skipped on list). Unused `steps` / `pending` stay empty.
  */
 export interface PendingResume {
   /** The paused turn's assistant message_id — the resume key, and the id the
@@ -78,12 +70,10 @@ export interface PendingResume {
   userMessage: string;
   /** Client-minted id of the user bubble (pinned on pause write-back). */
   userMessageId: string;
-  /** plan_review: the just-completed checkpoint step(s) under review. */
-  steps: PlanReviewStep[];
-  /** plan_review: the downstream nodes gated behind the pause. */
-  pending: PlanReviewPending[];
-  /** plan_review: 主 Agent 暂停前的把关摘要（absent = 旧帧 / 无摘要 → 不渲染）。 */
-  ceoReview?: CeoReviewSummary;
+  /** Unused on ask_user (leftover recovery dicts stay empty). */
+  steps: Array<{ run_id: string; role: string; summary: string }>;
+  /** Unused on ask_user (leftover recovery dicts stay empty). */
+  pending: Array<{ run_id: string; role: string }>;
   /** ask_user: the framing / opening line (always shown). */
   question: string;
   /** ask_user: the askable items (途中岔路通常一个；开场可多个). */
@@ -101,14 +91,18 @@ export interface PendingResume {
 
 /** `steps` / `pending` arrive as loose JSON dicts (backend ``list[dict]``); map
  * them to the known display shapes, tolerating any missing field. */
-const toSteps = (raw: PausedTurnSummary["steps"]): PlanReviewStep[] =>
+const toSteps = (
+  raw: PausedTurnSummary["steps"],
+): PendingResume["steps"] =>
   (raw ?? []).map((s) => ({
     run_id: String(s.run_id ?? ""),
     role: String(s.role ?? ""),
     summary: String(s.summary ?? ""),
   }));
 
-const toPending = (raw: PausedTurnSummary["pending"]): PlanReviewPending[] =>
+const toPending = (
+  raw: PausedTurnSummary["pending"],
+): PendingResume["pending"] =>
   (raw ?? []).map((p) => ({
     run_id: String(p.run_id ?? ""),
     role: String(p.role ?? ""),
@@ -192,7 +186,7 @@ interface PausedTurnState {
   /** Drop one paused turn (it is being / has been resumed). Idempotent. */
   remove: (messageId: string) => void;
   /** Drop the paused turn whose checkpoint just settled on the LIVE stream
-   * (checkpoint_resolved / plan_review_resolved). The server deletes the durable
+   * (checkpoint_resolved). The server deletes the durable
    * frame on an in-process resolve, so mirror that here — otherwise a 待恢复 card
    * left over from a duplicate surface lingers and 404s when clicked (its frame is
    * already gone). Keyed by checkpoint_id (what the resolve event carries).
@@ -220,8 +214,6 @@ function entryFromSummary(
     userMessageId: s.user_message_id ?? "",
     steps: toSteps(s.steps),
     pending: toPending(s.pending),
-    // REST 快照尚未列该字段进 schema；宽松读，后端带了就透传（absent → undefined）。
-    ceoReview: toCeoReview((s as { ceo_review?: unknown }).ceo_review),
     question: s.question ?? "",
     questions: toQuestions(s.questions),
     intent: toIntent((s as { intent?: unknown }).intent),
@@ -244,10 +236,12 @@ export const usePausedTurnStore = create<PausedTurnState>((set) => ({
   setForConversation: (conversationId, entries, opts) => {
     const since = opts?.since ?? observationSeq;
     const confirmed = opts?.confirmed ?? ALL_ORIGINS;
-    const incoming = entries.map(({ summary, origin }) => ({
-      ...entryFromSummary(conversationId, summary, origin),
-      surfacedSeq: nextObservationSeq(),
-    }));
+    const incoming = entries
+      .filter(({ summary }) => isColdResumeKind(summary.kind))
+      .map(({ summary, origin }) => ({
+        ...entryFromSummary(conversationId, summary, origin),
+        surfacedSeq: nextObservationSeq(),
+      }));
     const restated = new Set(incoming.map((p) => p.messageId));
     set((state) => ({
       pending: [

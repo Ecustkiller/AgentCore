@@ -358,7 +358,7 @@ def test_assess_system_carries_source_tier():
 
 
 def test_judge_prompt_injects_ledger_tiers():
-    """M2：裁判 user prompt 注入本轮引用 #eN 的结构化 tier（替代纯软约束猜等级）。"""
+    """M2：裁判 user prompt 注入本轮引用 #rN 的结构化 tier（替代纯软约束猜等级）。"""
     from agentcore.runtime.debate.evidence_ledger import EvidenceLedger
 
     led = EvidenceLedger()

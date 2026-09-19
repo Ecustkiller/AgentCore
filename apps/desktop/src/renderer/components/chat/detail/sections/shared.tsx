@@ -6,7 +6,7 @@ export function Section({
   children,
 }: {
   title: string;
-  /** Optional right-aligned header control (e.g. the 版本链's 对比 deep-link). */
+  /** Optional right-aligned header control. */
   action?: React.ReactNode;
   children: React.ReactNode;
 }) {

@@ -1,7 +1,7 @@
 """辩论双产物落盘 —— 收口时机制性写入案子工作区 ``AgentCore/文档/debate/``。
 
 与 journal / UI 同源：决策简报与交锋叙事线用 :mod:`types` 的同一套渲染。
-一场一份（结论在上、过程在下；圆桌过程先行）。落盘失败只记警告，不阻断收口；
+一场一份（结论在上、过程在下）。落盘失败只记警告，不阻断收口；
 成功路径供 CEO 输出尾部引用。
 """
 
@@ -54,7 +54,7 @@ def artifact_paths(*, motion: str, stamp: str) -> DebateArtifactPaths:
 def render_debate_file(
     result: DebateResult, *, act1_summary_path: str | None = None
 ) -> str:
-    """一场一份 markdown：元信息 + 简报 + 叙事线（圆桌过程先行）。"""
+    """一场一份 markdown：元信息 + 简报 + 叙事线。"""
     meta = (
         f"- **命题**：{result.config.motion}\n"
         f"- **形态**：{_form_label(result.config.form)}\n"
@@ -64,7 +64,7 @@ def render_debate_file(
         meta += f"- **幕1 汇总**：`{act1_summary_path}`\n"
     brief = _render_brief(result.brief, result.config).strip()
     narrative = _render_narrative_l1(result.rounds).strip()
-    blocks = [narrative, brief] if result.narrative_first else [brief, narrative]
+    blocks = [brief, narrative]
     parts = [f"# {_FILE_TITLE}", "", meta.rstrip(), ""]
     for block in blocks:
         if block:

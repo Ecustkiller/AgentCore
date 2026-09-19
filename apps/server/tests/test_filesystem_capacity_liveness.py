@@ -344,7 +344,8 @@ async def test_file_read_office_extract_timeout_is_observation_not_liveness(tmp_
     assert "markitdown" not in out.lower()
     assert "请用 code_execute" not in out
     assert "code_execute" not in out
-    assert "read_image" in out
+    assert "read_image" not in out
+    assert "按文件名归类" in out
     assert "请用户" not in out
 
 
@@ -368,8 +369,6 @@ async def test_file_read_channel_liveness_maps_meta(tmp_path: Path):
     assert result.metadata.get("workspace_channel_dead") is not True
     assert not result.metadata.get("retire_tools")
     assert "活性挂起" in (result.error or "")
-    assert "停用全部本地文件" not in (result.error or "")
-    assert "禁止再调用文件工具" not in (result.error or "")
 
 
 def test_workspace_reconnect_detail_is_not_presence_or_liveness():
@@ -490,9 +489,9 @@ async def test_file_read_channel_dead_stamps_family_retire(tmp_path: Path):
     assert "file_write" in (result.metadata.get("retire_tools") or [])
     assert "mkdir" in (result.metadata.get("retire_tools") or [])
     assert "连不上" in (result.error or "")
-    assert "禁止再调用文件工具" in (result.error or "") or "停用全部本地文件" in (
-        result.error or ""
-    )
+    from agentcore.workspace.limits import WORKSPACE_CHANNEL_DEAD_RETIRE_STEER
+
+    assert WORKSPACE_CHANNEL_DEAD_RETIRE_STEER in (result.error or "")
 
 
 @pytest.mark.asyncio
@@ -538,7 +537,6 @@ async def test_filesystem_tools_single_timeout_no_family_retire(
     assert result.metadata.get("timeout_layer") == "channel_op"
     assert result.metadata.get("workspace_channel_dead") is not True
     assert not result.metadata.get("retire_tools")
-    assert "停用全部本地文件" not in (result.error or "")
 
 
 @pytest.mark.asyncio
@@ -597,9 +595,9 @@ async def test_filesystem_tools_channel_dead_stamps_retire(
     retire = result.metadata.get("retire_tools") or []
     for name in WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS:
         assert name in retire
-    assert "停用全部本地文件" in (result.error or "") or "禁止再调用文件工具" in (
-        result.error or ""
-    )
+    from agentcore.workspace.limits import WORKSPACE_CHANNEL_DEAD_RETIRE_STEER
+
+    assert WORKSPACE_CHANNEL_DEAD_RETIRE_STEER in (result.error or "")
 
 
 @pytest.mark.asyncio

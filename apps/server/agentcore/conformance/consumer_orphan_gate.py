@@ -37,10 +37,8 @@ from agentcore.conformance.consumer_orphan_allowlist import (
     CONSUMER_ORPHAN_ALLOWLIST,
     PRODUCER_ORPHAN_ALLOWLIST,
 )
-from agentcore.runtime.events.payloads.process import RETIRED_PROCESS_STEP_KINDS
-from agentcore.runtime.events.types import RETIRED_EVENT_TYPE_VALUES, EventType
+from agentcore.runtime.events.types import EventType
 from agentcore.runtime.interaction import INTERACTION_KIND_SPECS, InteractionKind
-from agentcore.runtime.kickoff.retired import LEFTOVER_TEAM_PREVIEW_KIND
 
 SurfaceKind = Literal["sse", "interaction", "process_step"]
 
@@ -67,10 +65,6 @@ _EVENT_FACTORY_NAMES: frozenset[str] = frozenset(
         "approval_resolved",
         "checkpoint_required",
         "checkpoint_resolved",
-        "plan_review_required",
-        "plan_review_resolved",
-        "stage_card_required",
-        "stage_card_resolved",
         "workspace_op_required",
         "browser_live_frame",
         "browser_live_status",
@@ -89,7 +83,6 @@ _EVENT_FACTORY_NAMES: frozenset[str] = frozenset(
         "turn_saved",
         "turn_warning",
         "run_plan",
-        "graph_append",
         "plan_revised",
         "run_started",
         "run_context",
@@ -103,7 +96,6 @@ _EVENT_FACTORY_NAMES: frozenset[str] = frozenset(
         "escalation_resolved",
         "interaction_orphaned",
         "run_escalation_gate",
-        "team_synthesis_preview",
         "coordination_wait",
         "workspace_lock_wait",
         "desk_provision_wait",
@@ -763,8 +755,6 @@ def run_consumer_orphan_gate() -> ConsumerOrphanResult:
     for wire in sorted(sse_registered):
         if _allowlisted_consumer("sse", wire):
             continue
-        if wire in RETIRED_EVENT_TYPE_VALUES:
-            continue
         if wire in sse_producers:
             continue
         orphans.append(
@@ -788,7 +778,7 @@ def run_consumer_orphan_gate() -> ConsumerOrphanResult:
     for kind in sorted(interaction_registered):
         if _allowlisted_consumer("interaction", kind):
             continue
-        if kind == LEFTOVER_TEAM_PREVIEW_KIND and kind not in live_interaction_kinds:
+        if kind not in live_interaction_kinds:
             continue
         if kind in live_interaction_kinds and (
             kind in spec_interaction_kinds or kind in _BRIDGE_ONLY_INTERACTION_KINDS
@@ -811,8 +801,6 @@ def run_consumer_orphan_gate() -> ConsumerOrphanResult:
 
     for kind in sorted(process_registered):
         if _allowlisted_consumer("process_step", kind):
-            continue
-        if kind in RETIRED_PROCESS_STEP_KINDS:
             continue
         if kind in process_producers:
             continue

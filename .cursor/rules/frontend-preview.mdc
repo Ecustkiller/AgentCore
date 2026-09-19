@@ -1,5 +1,5 @@
 ---
-description: 想离线查看某个 AI 态（辩论/派单/升级/审批/计划复核/工具/引用…）、或要对不准的渲染跑截图冒烟时读——#/preview 离线回放 conformance 向量、帧滑块、pnpm dev:web、pnpm shoot 无头截图（非改完默认）、shoot:graph-probe、CI 渲染冒烟。默认验证仍是点名 vitest。别靠跑真实 AI 看前端效果。
+description: 想离线查看某个 AI 态（辩论/派单/升级/审批/工具/引用…）、或要对不准的渲染跑截图冒烟时读——#/preview 离线回放 conformance 向量、帧滑块、pnpm dev:web、pnpm shoot 无头截图（非改完默认）、shoot:graph-probe、CI 渲染冒烟。默认验证仍是点名 vitest。别靠跑真实 AI 看前端效果。
 alwaysApply: false
 ---
 

@@ -51,7 +51,7 @@ describe("mergePlanInto taskSummary", () => {
           kind: "debate",
           title: "该不该上微服务",
           anchorRunId: null,
-          authorizedBy: "stage_card",
+          authorizedBy: "auto",
         },
       ],
     };

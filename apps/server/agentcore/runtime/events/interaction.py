@@ -1,4 +1,4 @@
-"""User-interaction SSE event factories (approval / checkpoint / plan_review / escalation)."""
+"""User-interaction SSE event factories (approval / checkpoint / escalation)."""
 
 from __future__ import annotations
 
@@ -73,98 +73,6 @@ def checkpoint_resolved(
             "selected": selected or [],
         },
     )
-
-
-def plan_review_required(
-    *,
-    checkpoint_id: str,
-    conversation_id: str,
-    steps: list[dict[str, Any]],
-    pending: list[dict[str, Any]],
-    ceo_review: dict[str, Any] | None = None,
-) -> SSEEvent:
-    payload: dict[str, Any] = {
-        "checkpoint_id": checkpoint_id,
-        "conversation_id": conversation_id,
-        "steps": steps,
-        "pending": pending,
-    }
-    if ceo_review is not None:
-        payload["ceo_review"] = ceo_review
-    return SSEEvent(
-        type=EventType.PLAN_REVIEW_REQUIRED,
-        payload=payload,
-    )
-
-
-def plan_review_resolved(*, checkpoint_id: str, decision: str, note: str = "") -> SSEEvent:
-    return SSEEvent(
-        type=EventType.PLAN_REVIEW_RESOLVED,
-        payload={
-            "checkpoint_id": checkpoint_id,
-            "decision": decision,
-            "note": note,
-        },
-    )
-
-
-def stage_card_required(
-    *,
-    stage_card_id: str,
-    conversation_id: str,
-    motion: str,
-    sides: list[dict[str, Any]],
-    form: str,
-    rationale: str,
-    fact_pointers: list[str] | None = None,
-    max_rounds: int = 5,
-    note: str | None = None,
-    host_execution_id: str | None = None,
-    synthesizer_run_id: str | None = None,
-    host_message_id: str | None = None,
-) -> SSEEvent:
-    """阶段推进卡登记（批 B）：幕 1 收尾后耐久展示，不挂起回合。
-
-    可选宿主三元组（机制直传，旧客户端忽略）：开辩时锚定幕 1 图，免再查。
-    """
-    payload: dict[str, Any] = {
-        "stage_card_id": stage_card_id,
-        "conversation_id": conversation_id,
-        "motion": motion,
-        "sides": list(sides or []),
-        "form": form,
-        "rationale": rationale,
-        "fact_pointers": list(fact_pointers or []),
-        "max_rounds": max_rounds,
-    }
-    if note is not None:
-        payload["note"] = note
-    for key, val in (
-        ("host_execution_id", host_execution_id),
-        ("synthesizer_run_id", synthesizer_run_id),
-        ("host_message_id", host_message_id),
-    ):
-        text = (val or "").strip() if isinstance(val, str) else ""
-        if text:
-            payload[key] = text
-    return SSEEvent(type=EventType.STAGE_CARD_REQUIRED, payload=payload)
-
-
-def stage_card_resolved(
-    *,
-    stage_card_id: str,
-    decision: str,
-    note: str = "",
-    motion_override: str | None = None,
-) -> SSEEvent:
-    payload: dict[str, Any] = {
-        "stage_card_id": stage_card_id,
-        "decision": decision,
-        "note": note or "",
-    }
-    if motion_override is not None:
-        payload["motion_override"] = motion_override
-    return SSEEvent(type=EventType.STAGE_CARD_RESOLVED, payload=payload)
 
 
 def escalation_required(
@@ -258,7 +166,7 @@ def escalation_resolved(
 def interaction_orphaned(
     *, interaction_id: str, kind: str, reason: str | None = None
 ) -> SSEEvent:
-    """pending 交互失效。``kind`` ∈ 热路 kind / stage_card / team_preview。"""
+    """pending 交互失效。``kind`` 为热路 live kind。"""
     payload: dict[str, Any] = {"interaction_id": interaction_id, "kind": kind}
     text = (reason or "").strip()
     if text:

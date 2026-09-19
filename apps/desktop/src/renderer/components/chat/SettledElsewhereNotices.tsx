@@ -55,7 +55,6 @@ export function SettledElsewhereNotices() {
     const unsub = useInteractionStore.subscribe((state, prev) => {
       for (const [id, entry] of state.byId) {
         if (entry.conversationId !== conversationId) continue;
-        if (entry.kind === "stage_card") continue;
         if (entry.status !== "resolved" || !entry.settledElsewhere) continue;
         // 本端上一刻还显示着它 → 这一下的消失需要交代。
         if (prev.byId.get(id)?.status !== "pending") continue;

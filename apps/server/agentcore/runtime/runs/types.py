@@ -189,7 +189,7 @@ class RunSpec:
     research_then_draft: bool = False
     draft_brief: str = ""
     draft_system: str = ""
-    # 证据台账 id 闸（仅辩手两阶段成稿）：成稿【已核实·#eN】须 ∈ 场级台账。
+    # 证据台账 id 闸（仅辩手两阶段成稿）：成稿【已核实·#rN】须 ∈ 场级台账。
     # 普通 worker 默认 False。台账对象经 AgentExecutorEnv / continue_run 注入，不进 RunSpec。
     evidence_ledger_check: bool = False
     # 辩论方键（登记 evidence_ledger.side_key）；非辩手恒空。
@@ -219,15 +219,6 @@ class RunSpec:
     round: int = 0
     # ── topology / governance ──
     depends_on: list[str] = field(default_factory=list)
-    # Plan-time structured-suspend marker (结构化挂起 2a): when True, the
-    # WaveScheduler pauses *after* this node completes and *before* its dependents
-    # run, awaiting a user plan_review (continue / stop) over the unified
-    # interaction bridge — the one thing a CEO ``ask_user`` cannot express, since a
-    # ``delegate`` is atomic to the CEO (it gets no wave-boundary control). Inert by
-    # default and whenever the scheduler is driven without an ``on_boundary`` hook
-    # (autonomous jobs / tests), so a plan with no checkpoint marks runs byte-for-
-    # byte as before. → 见设计: docs/03-AI核心/执行引擎架构设计.md §检查点决策语义
-    checkpoint_after: bool = False
     parent_run_id: str | None = None
     # Tree position — also the SOLE determinant of whether this worker may nest a
     # sub-team (阶段2 嵌套子任务). Any worker with ``depth < MAX_DELEGATION_DEPTH``
@@ -512,7 +503,7 @@ class BatchMetrics:
     # ── 受监督波循环边界埋点 (boundaries fired this run, by reason; see docstring) ──
     bind_boundaries: int = 0  # leftover wire; live BIND is gone
     scope_boundaries: int = 0  # 计划漂移返工触发数 (SCOPE yields)
-    checkpoint_boundaries: int = 0  # CHECKPOINT yields (user plan_review)
+    checkpoint_boundaries: int = 0  # leftover CHECKPOINT arm; stays 0
     # ── escalate 信号埋点 (raw → host derives scope 占比) ──
     escalations: int = 0  # total escalations harvested across THIS run's nodes
     scope_escalations: int = 0  # of which carried kind=scope (deviation signal)

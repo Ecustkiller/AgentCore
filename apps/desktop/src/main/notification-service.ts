@@ -1,23 +1,29 @@
 /**
- * 桌面 OS 原生通知 —— 跨对话协作感知在窗口失焦时的系统栏出口。
+ * 桌面 OS 原生通知 —— 壳不在场时协作感知的系统栏出口。
  *
- * Renderer 无法伪造：通知由主进程 `Notification` 弹出；点击聚焦窗口并可选带回
- * `conversationId` 供 renderer 跳转。
+ * Renderer 无法伪造：通知由主进程 `Notification` 弹出；点击还原主窗并带回
+ * `conversationId` 供主窗 renderer 跳转（真窗没有这条跳转接线）。
  */
 import {
   NOTIFICATION_CHANNELS,
   type NotificationShowInput,
   type NotificationShowResult,
 } from "@shared/notification-contract";
-import { BrowserWindow, Notification, ipcMain } from "electron";
+import { type BrowserWindow, Notification, ipcMain } from "electron";
+
+let getMainWindow: () => BrowserWindow | null = () => null;
+
+export function configureNotificationService(deps: {
+  getMainWindow: () => BrowserWindow | null;
+}): void {
+  getMainWindow = deps.getMainWindow;
+}
 
 function focusMainWindow(): BrowserWindow | null {
-  const win =
-    BrowserWindow.getFocusedWindow() ??
-    BrowserWindow.getAllWindows()[0] ??
-    null;
-  if (!win) return null;
+  const win = getMainWindow();
+  if (!win || win.isDestroyed()) return null;
   if (win.isMinimized()) win.restore();
+  if (!win.isVisible()) win.show();
   win.focus();
   return win;
 }
@@ -42,9 +48,11 @@ export function showOsNotification(
   if (!Notification.isSupported()) {
     return { ok: false, reason: "系统不支持原生通知" };
   }
+  // 不传 icon：Win11 顶栏 attribution 已有 AUMID 图标，再传会变成正文
+  // appLogoOverride，和产品名叠成重复身份。macOS 用 bundle 图标。
   const notification = new Notification({
     title: input.title,
-    body: input.body,
+    ...(input.body ? { body: input.body } : {}),
   });
   notification.on("click", () => {
     const win = focusMainWindow();

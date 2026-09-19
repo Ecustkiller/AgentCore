@@ -473,7 +473,7 @@ async def test_build_cursor_replay_does_not_double_explicit_orphan(monkeypatch):
 # message_start is EPHEMERAL (never journaled) yet it is the only frame carrying the
 # server assistant message_id — the key a resume submit uses. Desktop always sends
 # Last-Event-ID, so without a synthetic stamp at the head of this segment the replayed
-# ask_user / plan_review / team_preview card binds to a client-only (or previous-turn)
+# ask_user / checkpoint card binds to a client-only (or previous-turn)
 # id and the「继续」card cannot be painted / 404s on submit.
 
 
@@ -497,7 +497,7 @@ def test_live_message_start_is_not_flagged_as_replay():
 
 
 async def test_build_cursor_replay_stamps_bubble_before_the_durable_card(monkeypatch):
-    """Paused-at-plan_review turn: the stamp leads, so the card binds to this turn's id."""
+    """Paused-at-checkpoint turn: the stamp leads, so the card binds to this turn's id."""
     rows = [
         {
             "seq": 1,
@@ -507,8 +507,12 @@ async def test_build_cursor_replay_stamps_bubble_before_the_durable_card(monkeyp
         },
         {
             "seq": 2,
-            "kind": "plan_review_required",
-            "payload": {"checkpoint_id": "cp1", "conversation_id": "c1", "steps": [], "pending": []},
+            "kind": "checkpoint_required",
+            "payload": {
+                "checkpoint_id": "cp1",
+                "conversation_id": "c1",
+                "question": "继续？",
+            },
             "ts": "t1",
         },
         {"kind": "turn_end", "payload": {"finish_reason": "paused"}, "ts": None},
@@ -526,10 +530,44 @@ async def test_build_cursor_replay_stamps_bubble_before_the_durable_card(monkeyp
         "full_replay": True,
     }
     types = [e.type for e in events]
-    assert types.index(EventType.MESSAGE_START) < types.index(EventType.PLAN_REVIEW_REQUIRED)
+    assert types.index(EventType.MESSAGE_START) < types.index(EventType.CHECKPOINT_REQUIRED)
     # paused survives to the close frame → the client routes to the durable resume card.
     assert events[-1].type == EventType.MESSAGE_END
     assert events[-1].payload["finish_reason"] == "paused"
+
+
+async def test_build_cursor_replay_skips_leftover_plan_review(monkeypatch):
+    """Leftover plan_review_required is not a live EventType — attach skip."""
+    rows = [
+        {
+            "seq": 1,
+            "kind": "process_content",
+            "payload": {"kind": "content", "text": "阶段成果如下。"},
+            "ts": "t0",
+        },
+        {
+            "seq": 2,
+            "kind": "plan_review_required",
+            "payload": {
+                "checkpoint_id": "cp1",
+                "conversation_id": "c1",
+                "steps": [],
+                "pending": [],
+            },
+            "ts": "t1",
+        },
+        {"kind": "turn_end", "payload": {"finish_reason": "paused"}, "ts": None},
+    ]
+    _patch_journal_repo(monkeypatch, rows)
+
+    events = await build_cursor_replay(
+        turn_id="m1", conversation_id="c1", after_seq=-1, memory_channels={}, memory_agent_ids={}
+    )
+    types = [e.type.value for e in events]
+    assert "plan_review_required" not in types
+    assert "plan_review_resolved" not in types
+    assert events[0].type == EventType.MESSAGE_START
+    assert events[-1].type == EventType.MESSAGE_END
 
 
 async def test_build_cursor_replay_stamps_even_with_empty_journal(monkeypatch):

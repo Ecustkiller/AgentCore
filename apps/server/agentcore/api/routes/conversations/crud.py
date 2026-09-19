@@ -31,6 +31,7 @@ from agentcore.api.schemas import (
     CreateConversationRequest,
     DeletedConversationListResponse,
     DeletedConversationSummary,
+    DuplicateConversationRequest,
     FolderGroup,
     GroupedConversationsResponse,
     PermissionAxesUpdate,
@@ -48,6 +49,7 @@ from agentcore.conversation.export import (
     conversation_to_json,
     conversation_to_markdown,
 )
+from agentcore.conversation.store import MESSAGE_STATUS_RUNNING
 from agentcore.core.errors import AuthorizationError, ConflictError, NotFoundError
 from agentcore.core.logging import get_logger
 from agentcore.db.models import Conversation
@@ -250,23 +252,32 @@ async def create_conversation(
 @router.post("/{conversation_id}/duplicate", response_model=ConversationSummary, status_code=201)
 async def duplicate_conversation(
     conversation_id: str,
+    body: DuplicateConversationRequest,
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     msg_repo: MessageRepository = Depends(get_message_repo),
 ):
-    """Clone a conversation into a brand-new one carrying a copy of its transcript (克隆对话).
+    """Clone the transcript through one message into a new conversation (克隆对话).
 
-    Owner-scoped (404 for a non-owner / missing source). The copy inherits the source's
-    folder (so it stays in the same project/workspace) and local-first intent, with a
-    「… 副本」title, then bulk-copies the source's messages via
-    ``MessageRepository.copy_all`` (content-level fields only — see that method for what is
-    intentionally not carried over, e.g. the team-graph replay journal). Returns the new
-    conversation summary with its (copied) message count so the sidebar can insert it.
+    Owner-scoped (404 for a non-owner / missing source / cutoff not in this chat).
+    ``until_message_id`` is required: the copy includes that row and every earlier
+    row; later turns stay on the source. The original is unchanged. Inherits folder
+    (same workspace) and local-first intent, titled「… 副本」. Content-level fields
+    only — ``MessageRepository.copy_through`` does not copy the team-graph journal.
+    A still-generating cutoff is 409. Returns the new conversation summary.
     """
     src = await conv_repo.get_by_id(conversation_id, user_id=user.user_id)
     if not src:
         raise NotFoundError("对话不存在")
     await _require_conversation_write(conversation_id, user.user_id, conv_repo._session)
+    until = await msg_repo.get_by_id(
+        body.until_message_id, conversation_id=conversation_id
+    )
+    if until is None:
+        raise NotFoundError("消息不存在")
+    usage = until.usage if isinstance(until.usage, dict) else {}
+    if usage.get("status") == MESSAGE_STATUS_RUNNING:
+        raise ConflictError("这条回复还在生成，不能克隆")
     base = (src.title or "").strip()
     title = (f"{base} 副本" if base else "副本")[:500]
     # 克隆：有源钉则拷贝；源为存量 null 则拍当时账号默认。
@@ -286,7 +297,11 @@ async def duplicate_conversation(
         deep_research_auto=bool(getattr(src, "deep_research_auto", False)),
         model_profile_id=src_pin,
     )
-    count = await msg_repo.copy_all(conversation_id, new_conv.id)
+    count = await msg_repo.copy_through(
+        conversation_id, new_conv.id, until_message_id=body.until_message_id
+    )
+    if count is None:
+        raise NotFoundError("消息不存在")
     # Sidebar inserts this row into an infinite-stale cache — same preview
     # overlay as list/grouped, or the clone stays blank until a full refetch.
     previews = await msg_repo.previews_for_conversations([new_conv.id])
@@ -684,12 +699,10 @@ async def delete_conversation(
     # kill its read-only links so a stale snapshot can't outlive it. Owner already
     # proven by the soft_delete above, so a blanket per-conversation revoke is safe.
     await share_repo.revoke_all_for_conversation(conversation_id)
-    # W3/P1: drop conversation external grants + organize plan/journal.
-    from agentcore.workspace import grant_store, organize_journal, organize_plan_store
+    # W3/P1: drop conversation external grants.
+    from agentcore.workspace import grant_store
 
     await grant_store.clear_conversation(conversation_id)
-    organize_plan_store.clear_conversation(conversation_id)
-    organize_journal.clear_conversation(conversation_id)
     # L3 team-browser: tear down any live sandbox session (no-op when none exists;
     # teardown errors are swallowed+logged inside the registry, never fail the delete).
     from agentcore.runtime.browser import default_browser_session_registry

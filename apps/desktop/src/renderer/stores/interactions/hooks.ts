@@ -1,14 +1,6 @@
-import type {
-  CheckpointDisplay,
-  PlanReviewDisplay,
-} from "@/stores/conversation/types";
+import type { CheckpointDisplay } from "@/stores/conversation/types";
 import { useMemo } from "react";
-import {
-  type ApprovalView,
-  entryToApproval,
-  entryToCheckpoint,
-  entryToPlanReview,
-} from "./adapters";
+import { type ApprovalView, entryToApproval, entryToCheckpoint } from "./adapters";
 import { useInteractionStore } from "./store";
 import type { InteractionEntry } from "./types";
 
@@ -33,21 +25,18 @@ export function useMessageInteractionCards(
   messageId: string,
 ): {
   checkpoints: CheckpointDisplay[];
-  planReviews: PlanReviewDisplay[];
 } {
   const byId = useInteractionStore((s) => s.byId);
   return useMemo(() => {
     const checkpoints: CheckpointDisplay[] = [];
-    const planReviews: PlanReviewDisplay[] = [];
     if (!conversationId) {
-      return { checkpoints, planReviews };
+      return { checkpoints };
     }
     for (const e of byId.values()) {
       if (!matchesMessage(e, conversationId, messageId)) continue;
       if (e.kind === "ask_user") checkpoints.push(entryToCheckpoint(e));
-      else if (e.kind === "plan_review") planReviews.push(entryToPlanReview(e));
     }
-    return { checkpoints, planReviews };
+    return { checkpoints };
   }, [byId, conversationId, messageId]);
 }
 

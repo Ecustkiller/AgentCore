@@ -36,10 +36,10 @@ def code_execution_enabled_for(backend: WorkspaceBackend | None) -> bool:
        ``health(net)`` probe withholds the class. TTL-refreshed in the
        background on read.
     2. **This desk can exec**: a gVisor ``ServerWorkspace`` must already hold a
-       started guest (prepare / resume provisioned it). Host ping without a
-       registered desk is not enough. Backends without ``cloud_desk_ready``
-       (test doubles) and the subprocess escape hatch keep health/config-only
-       semantics.
+       started guest (provisioned when this server root was bound). Host ping
+       without a registered desk is not enough. Backends without
+       ``cloud_desk_ready`` (test doubles) and the subprocess escape hatch keep
+       health/config-only semantics.
 
     An unprobed process (tests, lifespan not run, config off) keeps config-only
     semantics unless the backend is a gVisor desk with no guest.
@@ -419,13 +419,10 @@ def file_mutation_tool_names() -> frozenset[str]:
             "file_write",
             "str_replace",
             "file_delete",
-            "file_move",
-            "file_copy",
             "mkdir",
             "file_batch",
             "md_export",
-            "archive_extract",
-            "archive_create",
+            "archive",
             "download_url",
         }
     )
@@ -441,13 +438,10 @@ def file_only_tool_names() -> frozenset[str]:
             "file_list",
             "glob",
             "file_delete",
-            "file_move",
-            "file_copy",
             "mkdir",
             "file_batch",
             "md_export",
-            "archive_extract",
-            "archive_create",
+            "archive",
             "download_url",
             "grep",
             "git",

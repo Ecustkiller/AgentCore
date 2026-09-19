@@ -94,8 +94,8 @@ export function splitFactDisplay(raw: string): FactDisplay {
 
   const body = raw
     .replace(/【([^】]{1,24})】/gu, " ")
-    .replace(/[（(][^）)]*(?:#e\d+|tier\s*=|unknown待评)[^）)]*[）)]/gi, " ")
-    .replace(/(?:tier\s*=\s*\w+|unknown待评|#e\d+)/gi, " ")
+    .replace(/[（(][^）)]*(?:#r\d+|tier\s*=|unknown待评)[^）)]*[）)]/gi, " ")
+    .replace(/(?:tier\s*=\s*\w+|unknown待评|#r\d+)/gi, " ")
     .replace(/\(\s*[,，;；/]*\s*\)/g, " ")
     .replace(/（\s*[,，;；/]*\s*）/g, " ")
     .replace(/\s{2,}/g, " ")

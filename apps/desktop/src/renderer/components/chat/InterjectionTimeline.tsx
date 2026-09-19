@@ -29,7 +29,7 @@ import { useExecutionStore } from "@/stores/execution";
  * 主时间线尚无同内容用户泡时保留完整气泡；已有则折成一行锚点（防双泡）。
  * DURABLE：五态来自 execution.userInterjections（live SSE / journal hydrate）；
  * 正文以主时间线用户泡为准。
- * `addressed` 只留用户泡：徽章与服务端 note 不画（结果已在图/回复）。
+ * `injected` / `addressed` 只留用户泡：徽章与服务端 note 不画（结果已在续写/图）。
  */
 export function InterjectionTimeline({
   messageId,
@@ -97,6 +97,7 @@ function InterjectionServerNote({ note }: { note: string }) {
  * 同内容用户泡已在主时间线：一行时序注记，正文不重复。
  */
 function InterjectionQueuedAnchor({ item }: { item: UserInterjection }) {
+  if (!showInterjectionStatusChrome(item.status)) return null;
   const tone = interjectionStatusTone(item.status);
   return (
     <div

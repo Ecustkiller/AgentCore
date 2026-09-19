@@ -70,6 +70,14 @@ logger = get_logger(__name__)
 _MISSING_FILE_MODEL_MSG = "内部资源缺失，请换一种方式继续，不要原样重试。"
 
 
+def _pop_native_image_parts(meta: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    """Lift image parts off metadata so they never land in logs / fingerprints."""
+    raw = meta.pop("native_image_parts", None)
+    if not isinstance(raw, list):
+        return ()
+    return tuple(p for p in raw if isinstance(p, dict))
+
+
 def _is_missing_file_exc(exc: BaseException) -> bool:
     if isinstance(exc, FileNotFoundError):
         return True
@@ -752,6 +760,7 @@ async def run_one_tool(
     if not result.success and not policy_failure:
         error_summary = output if isinstance(output, str) else ""
     result_meta = dict(result.metadata) if result.metadata else {}
+    native_image_parts = _pop_native_image_parts(result_meta)
     if (
         not result.success
         and getattr(context, "execution_id", None)
@@ -785,6 +794,7 @@ async def run_one_tool(
                 args,
                 result_meta or None,
             ),
+            native_image_parts=native_image_parts,
         ),
         citations,
     )

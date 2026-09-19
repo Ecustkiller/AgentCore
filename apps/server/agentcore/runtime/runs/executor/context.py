@@ -371,6 +371,7 @@ def _build_captain_context_blocks(
     history: list[dict],
     user_message: str,
     tool_defs: list[dict] | None = None,
+    turn_envelope: str = "",
 ) -> list[ContextBlock]:
     """The ordered :class:`ContextBlock` list describing the CEO captain's OPENING context
     (上下文传递可视化, CEO 侧 通道①): its ``system`` prompt (决策②: 桌面按需弹窗对所有人可见 /
@@ -385,12 +386,15 @@ def _build_captain_context_blocks(
     their user message is still rendered FROM material blocks only. Every fold routes
     the captain's run_context turn-level (``captainContext`` on the chat bubble), never
     onto a graph node. 通道⑤ (the CEO reading workers' products back on resume) is a
-    separate ratchet, not this opening."""
+    separate ratchet, not this opening. Envelope XML is concatenated into the
+    ``system`` body (no new channel) so ``<工作区>`` still pins in the catalog."""
+    from agentcore.runtime.resolve.prompt.envelope import visualization_system_body
+
     blocks: list[ContextBlock] = [
         ContextBlock(
             channel="system",
             heading="CEO 系统提示（本回合实际遵循的系统指令）",
-            body=chat_system_prompt,
+            body=visualization_system_body(chat_system_prompt, turn_envelope),
         )
     ]
     tools_block = _offered_tools_block(tool_defs)

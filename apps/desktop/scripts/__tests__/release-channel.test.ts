@@ -30,6 +30,7 @@ describe("release-channel.mjs", () => {
       artifactSlug: "AgentCore",
       channelLabelZh: "稳定",
     });
+    expect(id.windowsAppUserModelId).toBe(id.appId);
   });
 
   it("resolves beta identity (appId / productName / publish url)", () => {
@@ -43,6 +44,7 @@ describe("release-channel.mjs", () => {
       artifactSlug: "AgentCore",
       channelLabelZh: "测试",
     });
+    expect(id.windowsAppUserModelId).toBe(id.appId);
   });
 
   it("parses --channel from argv over env", () => {

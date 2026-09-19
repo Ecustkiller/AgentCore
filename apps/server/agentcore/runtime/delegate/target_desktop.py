@@ -81,9 +81,11 @@ __all__ = [
     "LocalRootClaimBook",
     "TargetDesktopError",
     "TargetFolderBinding",
+    "AdoptedAutoDesk",
     "apply_target_desktop",
     "bare_chat_local_scratch_write_ok",
     "bind_tool_context_to_landing_desk",
+    "adopt_persisted_auto_desk",
     "build_target_backend",
     "effective_target_folder_id",
     "ensure_bare_chat_auto_cloud_desk",
@@ -132,95 +134,183 @@ async def _assert_target_local_root_ready(backend: Any, *, folder_id: str) -> No
         ) from exc
 
 
-async def bind_tool_context_to_landing_desk(
-    context: ToolContext,
-    *,
-    folder_id: str,
-) -> bool:
-    """Point CEO file tools at the landing Folder without rewriting birth affiliation.
+@dataclass(frozen=True)
+class AdoptedAutoDesk:
+    """Birth scratch swapped onto a persisted bare-chat landing Folder."""
 
-    Mutates ``context.backend`` / ``workspace_channel`` / ``auto_desk_folder_id`` in
-    place. Returns False when the Folder cannot be bound (caller keeps birth desk).
-    """
-    cleaned = folder_id.strip() if isinstance(folder_id, str) else ""
-    if not cleaned:
-        return False
-    try:
-        binding = await load_target_folder_binding(folder_id=cleaned, user_id=context.user_id)
-    except TargetDesktopError as e:
-        # Infra / cloud failure — do not clear the pointer (folder may still exist).
-        logger.warning(
-            "delegate.auto_desk_bind_failed",
-            folder_id=cleaned,
-            error=e.message,
-        )
-        return False
-    except Exception as e:  # noqa: BLE001 — never break delegate on bind miss
-        logger.warning(
-            "delegate.auto_desk_bind_failed",
-            folder_id=cleaned,
-            error=str(e),
-        )
-        return False
-    if binding is None:
-        # Folder gone / soft-deleted / denied — clear pointer so the next turn remints.
-        logger.warning(
-            "delegate.auto_desk_bind_failed",
-            folder_id=cleaned,
-            error="folder missing or denied",
-        )
-        if getattr(context, "auto_desk_folder_id", None) == cleaned:
-            context.auto_desk_folder_id = None
-        await _clear_stale_auto_desk_folder_id(
-            user_id=context.user_id,
-            conversation_id=context.conversation_id,
-            folder_id=cleaned,
-        )
-        return False
+    backend: Any
+    folder_id: str
 
-    sink = None
+
+@dataclass(frozen=True)
+class _LandingBackendAttempt:
+    backend: Any | None
+    folder_id: str | None = None
+    moved: int = 0
+    missing: bool = False
+
+
+def _sink_from_tool_context(context: ToolContext, sink: Any | None) -> Any:
+    if sink is not None:
+        return sink
     for holder in (context.workspace_channel, context.desktop_channel):
         if holder is None:
             continue
         candidate = getattr(holder, "sink", None)
         if candidate is not None:
-            sink = candidate
-            break
-    if sink is None:
-        from agentcore.runtime.events import EventSink
+            return candidate
+    from agentcore.runtime.events import EventSink
 
-        sink = EventSink()
+    return EventSink()
+
+
+async def _try_landing_backend(
+    *,
+    folder_id: str,
+    user_id: str,
+    conversation_id: str | None,
+    old_backend: Any,
+    sink: Any,
+) -> _LandingBackendAttempt:
+    """Load Folder, build backend, migrate scratch. Does not boot a guest."""
+    cleaned = folder_id.strip() if isinstance(folder_id, str) else ""
+    if not cleaned:
+        return _LandingBackendAttempt(backend=None)
+    try:
+        binding = await load_target_folder_binding(folder_id=cleaned, user_id=user_id)
+    except TargetDesktopError as e:
+        logger.warning(
+            "delegate.auto_desk_bind_failed",
+            folder_id=cleaned,
+            error=e.message,
+        )
+        return _LandingBackendAttempt(backend=None)
+    except Exception as e:  # noqa: BLE001 — never break the turn on bind miss
+        logger.warning(
+            "delegate.auto_desk_bind_failed",
+            folder_id=cleaned,
+            error=str(e),
+        )
+        return _LandingBackendAttempt(backend=None)
+    if binding is None:
+        logger.warning(
+            "delegate.auto_desk_bind_failed",
+            folder_id=cleaned,
+            error="folder missing or denied",
+        )
+        await _clear_stale_auto_desk_folder_id(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            folder_id=cleaned,
+        )
+        return _LandingBackendAttempt(backend=None, missing=True)
 
     backend = build_target_backend(
-        user_id=context.user_id,
+        user_id=user_id,
         folder_id=binding.folder_id,
         folder_rel_path=binding.rel_path,
-        conversation_id=context.conversation_id,
+        conversation_id=conversation_id,
         sink=sink,
         local_binding=binding.local_binding,
     )
-    from agentcore.workspace.locate import workspace_channel_for_tools
     from agentcore.workspace.migrate_tree import migrate_and_transfer_cloud_backend
 
-    old_backend = context.backend
     moved = migrate_and_transfer_cloud_backend(old_backend, backend)
-    # Keep ToolContext.material_paths (shared slot) — relative paths still apply
-    # after the tree move; stamp the same set onto the new backend above.
+    return _LandingBackendAttempt(
+        backend=backend,
+        folder_id=binding.folder_id,
+        moved=moved,
+    )
 
+
+async def adopt_persisted_auto_desk(
+    *,
+    birth_folder_id: str | None,
+    user_id: str,
+    conversation_id: str | None,
+    birth_backend: Any,
+    sink: Any,
+) -> AdoptedAutoDesk | None:
+    """Swap onto the persisted bare-chat landing Folder. Does not provision.
+
+    Prepare / resume boot the returned root so the turn starts a guest on the
+    sitting desk, not the scratch it is about to abandon.
+    Local workspaces and born-into-folder sessions skip. ``None`` keeps birth.
+    """
+    if birth_folder_id:
+        return None
+    if getattr(birth_backend, "location", None) == "local":
+        return None
+    if not user_id or not conversation_id:
+        return None
+    persisted = await _load_auto_desk_folder_id(
+        user_id=user_id, conversation_id=conversation_id
+    )
+    if not persisted:
+        return None
+    attempt = await _try_landing_backend(
+        folder_id=persisted,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        old_backend=birth_backend,
+        sink=sink,
+    )
+    if attempt.backend is None:
+        return None
+    return AdoptedAutoDesk(backend=attempt.backend, folder_id=attempt.folder_id or persisted)
+
+
+async def bind_tool_context_to_landing_desk(
+    context: ToolContext,
+    *,
+    folder_id: str,
+    sink: Any | None = None,
+) -> bool:
+    """Point CEO file tools at the landing Folder without rewriting birth affiliation.
+
+    Mutates ``context.backend`` / ``workspace_channel`` / ``auto_desk_folder_id`` in
+    place, then provisions that root. Returns False when the Folder cannot be
+    bound (caller keeps birth desk).
+    """
+    cleaned = folder_id.strip() if isinstance(folder_id, str) else ""
+    if not cleaned:
+        return False
+    resolved_sink = _sink_from_tool_context(context, sink)
+    attempt = await _try_landing_backend(
+        folder_id=cleaned,
+        user_id=context.user_id,
+        conversation_id=context.conversation_id,
+        old_backend=context.backend,
+        sink=resolved_sink,
+    )
+    if attempt.backend is None:
+        if attempt.missing and getattr(context, "auto_desk_folder_id", None) == cleaned:
+            context.auto_desk_folder_id = None
+        return False
+
+    from agentcore.tools.sandbox.desk_provision import provision_server_desk
+    from agentcore.workspace.locate import workspace_channel_for_tools
+
+    backend = attempt.backend
     context.backend = backend
     context.workspace_channel = workspace_channel_for_tools(
         backend,
         user_id=context.user_id,
         conversation_id=context.conversation_id,
     )
-    context.auto_desk_folder_id = binding.folder_id
+    context.auto_desk_folder_id = attempt.folder_id
     context.shared_workspace = True
+    await provision_server_desk(
+        backend,
+        conversation_id=context.conversation_id,
+        sink=resolved_sink,
+    )
     logger.info(
         "delegate.auto_desk_ceo_bound",
-        folder_id=binding.folder_id,
+        folder_id=attempt.folder_id,
         conversation_id=context.conversation_id,
         conversation_untouched=True,
-        scratch_entries_moved=moved,
+        scratch_entries_moved=attempt.moved,
     )
     return True
 
@@ -290,7 +380,7 @@ async def ensure_bare_chat_auto_cloud_desk(
         bound = True
         if tool_context is not None:
             bound = await bind_tool_context_to_landing_desk(
-                tool_context, folder_id=persisted
+                tool_context, folder_id=persisted, sink=sink
             )
         if bound:
             turn_target_desk.note_folder(persisted)
@@ -360,7 +450,9 @@ async def ensure_bare_chat_auto_cloud_desk(
     if tool_context is not None:
         if announce:
             tool_context.note_turn_created_folder(folder_id)
-        await bind_tool_context_to_landing_desk(tool_context, folder_id=folder_id)
+        await bind_tool_context_to_landing_desk(
+            tool_context, folder_id=folder_id, sink=sink
+        )
     if announce and sink is not None:
         from agentcore.runtime.events import auto_folder_created
 
@@ -435,6 +527,17 @@ async def apply_target_desktop(
     if target_root and local_root_claims is not None:
         await local_root_claims.try_claim(target_root)
 
+    from agentcore.tools.sandbox.desk_provision import provision_server_desk
+
+    # Guest liveness is an invariant of *this* server root. Boot before the
+    # execution-class predicate so a freshly minted folder can keep ``run``.
+    # ``run`` itself still must not start-detach.
+    await provision_server_desk(
+        backend,
+        conversation_id=base_tool_context.conversation_id,
+        sink=sink,
+    )
+
     desktop_online = base_tool_context.desktop_channel is not None
     attachment_context = base_tool_context.attachment_context or None
     worker_prompt = await rebuild_worker_prompt_for_target(
@@ -451,11 +554,12 @@ async def apply_target_desktop(
     # ``not_linux`` and retire the family as「本机执行环境不可用」.
     from agentcore.runtime.runs.executor.shared import _registry_without
     from agentcore.tools.builtin import execution_class_enabled_for
+    from agentcore.tools.registration import execution_class_tool_names
 
     tools_for_desk = worker_tools
     if not execution_class_enabled_for(backend, permission_axes):
         tools_for_desk = _registry_without(
-            worker_tools, "run"
+            worker_tools, *sorted(execution_class_tool_names())
         )
     tools = await _registry_rewire_consult_tools(
         tools_for_desk,

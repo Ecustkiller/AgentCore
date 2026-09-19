@@ -1631,7 +1631,7 @@ async def test_ceo_str_replace_miss_still_not_assembled():
     assert "form=prose" not in content
 
 
-@pytest.mark.parametrize("name", ["str_replace", "file_copy"])
+@pytest.mark.parametrize("name", ["str_replace", "file_batch"])
 async def test_write_allowlist_deny_no_handoff_as_write(name: str):
     """写盘工具不在 allowlist 时说明缺授权，勿劝 handoff 正文冒充落盘。"""
     reg = ToolRegistry()
@@ -2074,3 +2074,55 @@ async def test_local_code_execute_outer_timeout_stays_liveness():
     assert "活性挂起" in (messages[0].content or "")
     ends = [e for e in sink._history if e.type == EventType.TOOL_USE_END]  # noqa: SLF001
     assert ends[0].payload.get("failure", {}).get("code") == "liveness_timeout"
+
+
+class _ImageReadTool:
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="file_read",
+            description="stub",
+            parameters={"type": "object", "properties": {}},
+            face=ToolFace.FILE,
+        )
+
+    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output="已把工作区图片发给当前模型",
+            metadata={
+                "native_image_parts": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,aa"},
+                    }
+                ]
+            },
+        )
+
+
+async def test_execute_tools_appends_user_image_parts_not_in_meta():
+    from agentcore.llm.provider.protocol import llm_content_text
+
+    reg = ToolRegistry()
+    reg.register(_ImageReadTool())
+    sink = EventSink()
+    messages, _terminal, attempts = await execute_tools(
+        [_call("c1", "file_read", '{"path":"shot.png"}')],
+        reg,
+        _ctx(),
+        sink,
+        approval_gate=None,
+        run_id="r1",
+    )
+    assert attempts[0].success is True
+    assert "native_image_parts" not in (attempts[0].meta or {})
+    assert attempts[0].native_image_parts
+    users = [m for m in messages if m.role == "user"]
+    assert users
+    content = users[-1].content
+    assert isinstance(content, list)
+    assert any(p.get("type") == "image_url" for p in content if isinstance(p, dict))
+    assert "file_read" in llm_content_text(content)
+

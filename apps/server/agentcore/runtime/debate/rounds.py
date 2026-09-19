@@ -616,7 +616,7 @@ def make_cross_exam_runner(
                     complete_brief = cx_completion_brief(qs, state.content)
                     complete_run_id = f"{cx_run_id}_complete"
                     # 补全文本随后并入正式答复、并进结辩允许集 —— 它必须过与主答同一道
-                    # 证据台账 id 闸，否则未绑定的 #eN 从这条「续写」溜进正文，还会在结辩
+                    # 证据台账 id 闸，否则未绑定的 #rN 从这条「续写」溜进正文，还会在结辩
                     # 里被当成合法引用。补全禁检索（不产新笔记），故允许集 = 本方 transcript
                     # 里已引用过的 id（与结辩闸同基准）。
                     prior_cited = side_cited_ledger_ids(
@@ -783,7 +783,7 @@ def make_closing_runner(
             feedback = closing_task(config, side, rounds)
             # 收到的上下文：task 块 body 逐字复用 feedback；材料孪生块与 brief 同源。
             context_blocks = closing_context_blocks(config, side, feedback, rounds)
-            # 结辩无检索：闸基准 = 本方历轮发言 / 质询 / transcript 已引用 #eN 并集。
+            # 结辩无检索：闸基准 = 本方历轮发言 / 质询 / transcript 已引用 #rN 并集。
             prior_cited = side_cited_ledger_ids(
                 rounds, side.key, transcript=session.transcript
             )

@@ -73,8 +73,8 @@ def _clip(text: str, limit: int = _OPP_CLIP) -> str:
 def _background_block(config: DebateConfig) -> str:
     """首轮可选案件底料块：空串 → 不注入（零行为变化）；非空 → 裁剪后以主持人名义喂双方。
 
-    底料中的【已核实】标签与 CEO 回合 ``#rN`` 须已由 :func:`preregister_background`
-    改写 / 映射为场级 ``#eN``（辩论开场预登记）；本块只负责注入文案。
+    底料中的【已核实】标签与当轮 ``#rN`` 已由 :func:`preregister_background`
+    预登记（继承当轮账，不翻译字头）；本块只负责注入文案。
     """
     bg = (config.background or "").strip()
     if not bg:
@@ -83,7 +83,7 @@ def _background_block(config: DebateConfig) -> str:
     return (
         "\n\n【主持人整理的案件底料·双方共享】\n"
         "以下为开场前已核实的客观事实清单（非观点、非评价；每条应带来源与日期）。"
-        "引用其中事实时，【沿用清单中的【已核实·#eN】台账 id】——不得把本底料本身包装成新的"
+        "引用其中事实时，【沿用清单中的【已核实·#rN】台账 id】——不得把本底料本身包装成新的"
         "【已核实】来源；清单未写明为既定事实的未决 / 推断状态（如「表示将上诉」≠「已进入二审」）"
         "不得改写成既定事实。\n"
         f"{clipped}\n"
@@ -100,11 +100,11 @@ def _research_dossier_block(config: DebateConfig) -> str:
 
 # 举证责任·证据状态铁律（辩论编排设计.md §4-2.3，证据台账 M1）。放进辩手
 # 【系统提示】而非每轮 task：辩手跨轮走 continue_run 复用同一 session（系统提示只发一次却全程生效），
-# 故立论 / 续论 / 质询作答一律受此约束。成稿只许沿用本方证据笔记中出现过的 #eN；
+# 故立论 / 续论 / 质询作答一律受此约束。成稿只许沿用本方证据笔记中出现过的 #rN；
 # 机械闸校验 id ∈ 本方笔记引用集（结辩 = 历轮并集）。
 EVIDENCE_RULE = (
     "\n【举证责任】关键事实主张（数字 / 金额 / 日期 / 案号 / 引用 / 先例 / 统计口径）须紧跟标记："
-    "【已核实·#eN】= id 已出现在本方本轮证据笔记（沿用底料也须写入笔记；成稿禁止从全场清单盲配，只写 id、不要自由出处短语）；"
+    "【已核实·#rN】= id 已出现在本方本轮证据笔记（沿用底料也须写入笔记；成稿禁止从全场清单盲配，只写 id、不要自由出处短语）；"
     "否则【待核实·推断】。诚实标注待核实不扣分；把待核实硬拗成既定事实才扣。"
 )
 
@@ -139,32 +139,18 @@ ARGUMENT_SKELETON_RULE = (
 
 # 证据笔记正向产出规格（检索阶段交付物）：ReAct 循环的 stop 正文 = 笔记，不是发言。
 # 成稿阶段另起干净调用，从源头消除收工叙述与案情复述混入发言。
-# 主张↔来源绑定前移到检索阶段：行尾 #eN 在「刚读完该来源」时写入，禁止成稿盲配。
+# 主张↔来源绑定前移到检索阶段：行尾 #rN 在「刚读完该来源」时写入，禁止成稿盲配。
 EVIDENCE_NOTES_SPEC = (
     "\n【证据笔记·本阶段交付物】本阶段只产出证据笔记，不是正式发言。"
-    "事实要点行尾标注来源 #eN（刚读完 / 刚决定采用该来源时绑定）；"
-    "成稿【已核实·#eN】只能沿用本笔记出现过的 id，否则标【待核实·推断】；沿用底料 #eN 也须写入笔记。"
+    "事实要点行尾标注来源 #rN（刚读完 / 刚决定采用该来源时绑定）；"
+    "成稿【已核实·#rN】只能沿用本笔记出现过的 id，否则标【待核实·推断】；沿用底料 #rN 也须写入笔记。"
     "另记对本方有利的线索与必须正面回应的缺口。禁止写正式立论 / 结辩，禁止寒暄与案件简介复述。"
 )
 
 
 def role_directive(config: DebateConfig, side: DebateSide) -> str:
-    """按形态 / 角色给辩手的差异化指引。"""
-    if config.form is DebateForm.RED_TEAM:
-        if side.is_subject:
-            return (
-                "（你是被审视的方案方：红队会单向施压找你的漏洞，你的职责是诚实回应、能修补"
-                "就给出修补、修不了的风险要坦白承认，不要嘴硬。）"
-            )
-        return (
-            "（你是红队：职责是尽力挖出该方案的风险、漏洞、失败场景与边界条件，单向施压，"
-            "不需要你自己另提方案。）"
-        )
-    if config.form is DebateForm.ROUNDTABLE:
-        return (
-            "（这是多方圆桌：你代表一个特定视角，平等陈述并回应他人，目标是铺满观点光谱、"
-            "贡献你这一视角独有的洞察，而非压倒对方。）"
-        )
+    """正反辩手指引。"""
+    del config, side
     return "（这是正反辩论：直接攻防，针锋相对地回应对方最强论点。）"
 
 
@@ -248,7 +234,7 @@ def opening_draft_brief(
         f"{_situation_header(config, side, focus=focus, ask_block=ask_block)}\n\n"
         f"请就本轮议题给出有力、具体、有论据的【开场立论】：聚焦你最能站住的论点，"
         f"用具体证据 / 例子 / 推理链支撑；关键事实主张按【证据状态铁律】标注"
-        f"【已核实·#eN】/【待核实·推断】。"
+        f"【已核实·#rN】/【待核实·推断】。"
         f"{LENGTH_HINT}{bg_block}{dossier_block}"
     )
 
@@ -299,7 +285,7 @@ def debater_task(
         "research_then_draft": True,
         # 结构化检索姿态：辩手 speech research 收紧（weak / 商城词典硬剔）。
         "search_policy": "debate_evidence",
-        # 证据台账 id 闸：开场立论成稿的【已核实·#eN】须 ∈ 场级台账。
+        # 证据台账 id 闸：开场立论成稿的【已核实·#rN】须 ∈ 场级台账。
         "evidence_ledger_check": True,
         "side_key": side.key,
         "draft_brief": opening_draft_brief(
@@ -381,14 +367,11 @@ def _round_engage_and_opponents(
     config: DebateConfig, side: DebateSide, last_round: RoundResult
 ) -> tuple[str, str]:
     opponents = [t for t in last_round.ok_turns if t.side_key != side.key]
+    engage = "请【针对性回应】（驳斥站不住的、承认确有道理的、推进你的立场）"
     if opponents:
         opp_block = "\n\n".join(f"### {t.side_name}\n{_clip(t.content)}" for t in opponents)
     else:
         opp_block = "（对方上一轮无有效发言）"
-    if config.form is DebateForm.ROUNDTABLE:
-        engage = "请【回应并补充】（呼应有道理的、标出你视角下的分歧、贡献你这一视角独有的洞察）"
-    else:
-        engage = "请【针对性回应】（驳斥站不住的、承认确有道理的、推进你的立场）"
     return engage, opp_block
 
 
@@ -470,7 +453,7 @@ def round_draft_brief(
         f"对方上一轮的论点如下，{engage}：\n"
         f"{opp_block}{challenged}\n\n"
         f"直接输出你本轮的【完整发言】：**只补本轮焦点下的新论点 / 新回应**，用具体证据 / 例子 / "
-        f"推理链支撑；关键事实主张按【证据状态铁律】标注【已核实·#eN】/【待核实·推断】；"
+        f"推理链支撑；关键事实主张按【证据状态铁律】标注【已核实·#rN】/【待核实·推断】；"
         f"不要重述你上一轮已说过的内容、不要复述对方原话、不要罗列改动清单。"
         f"{LENGTH_HINT}"
     )
@@ -528,7 +511,7 @@ def cx_draft_brief(
         f"{skeleton}\n\n"
         "作答要求：\n"
         "- 每条先用「是 / 否 / 部分成立」明确表态，再用具体证据或推理支撑；\n"
-        "- 凡涉及具体事实的前提都按【证据状态铁律】标注【已核实·#eN】/【待核实·推断】，"
+        "- 凡涉及具体事实的前提都按【证据状态铁律】标注【已核实·#rN】/【待核实·推断】，"
         "拿不出台账 id 就诚实标【待核实·推断】、别含糊带过或硬拗成已核实；\n"
         "- 若该认输 / 让步就坦诚承认，别答非所问、打太极或复述已说过的立论来回避；\n"
         f"- {CX_LENGTH_HINT}\n\n"
@@ -757,7 +740,7 @@ def closing_task(
         "- 对方针对你最关键的那条反驳，为何【不成立 / 已被你回应】。\n"
         "【不得引入任何新论据 / 新事实 / 新案例】、不复述你之前的全文、不逐条罗列改动；"
         "结辩里引用的既有事实沿用你此前的证据状态标记（不把待核实的东西临门包装成已核实当胜负手）；"
-        "【已核实·#eN】只能沿用本方历轮发言 / 笔记中已出现过的 id，禁止临门臆造新 id、盲配未用过的台账号或自由出处短语；"
+        "【已核实·#rN】只能沿用本方历轮发言 / 笔记中已出现过的 id，禁止临门臆造新 id、盲配未用过的台账号或自由出处短语；"
         "已撤回论据禁止再当胜负手。"
         f"{CLOSING_LENGTH_HINT}\n\n"
         "直接输出你的结辩陈词。"

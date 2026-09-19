@@ -38,3 +38,4 @@ export {
   type GraphShape,
   type FitWidthBox,
 } from "./elk-layout";
+export { isDebateTaggedRun } from "./debateTag";

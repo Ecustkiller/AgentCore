@@ -45,6 +45,7 @@ describe("ToolInspector", () => {
   it("说明书导语是 schema description，不是卡上 summary", () => {
     render(<ToolInspector tool={tool} hideChrome />);
     const guide = screen.getByTestId("tool-face-guide");
+    expect(guide.textContent).toContain("web_search");
     expect(guide.textContent).toContain("一次只搜");
     expect(guide.textContent).toContain("带出处");
   });

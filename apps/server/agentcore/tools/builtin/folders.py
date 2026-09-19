@@ -6,7 +6,7 @@
 （``FolderSummary`` 字段，含 ``rel_path``；无 OS 绝对路径）。
 
 **嵌套是真的**：云文件夹落在 ``workspaces/<user>/tree/<rel_path>/``，父子关系由
-``rel_path`` 前缀单一表达。因此 ``resolve_folder`` 按**路径**解析而不只按名字——
+``rel_path`` 前缀单一表达。因此 ``folders(action=resolve)`` 按**路径**解析而不只按名字——
 ``设计/图标`` 与 ``归档/图标`` 是两个文件夹，只按末段名匹配必然在嵌套账号上误命中；
 ``create_folder`` 同理能用 ``parent_path`` 指定挂在哪一层。
 
@@ -45,8 +45,9 @@ from agentcore.workspace.cloud_tree import normalize_rel_path, rel_path_segments
 
 logger = get_logger(__name__)
 
-LIST_FOLDERS_TOOL_NAME = "list_folders"
-RESOLVE_FOLDER_TOOL_NAME = "resolve_folder"
+FOLDERS_TOOL_NAME = "folders"
+_ACTION_LIST = "list"
+_ACTION_RESOLVE = "resolve"
 CREATE_FOLDER_TOOL_NAME = "create_folder"
 DELETE_FOLDER_TOOL_NAME = "delete_folder"
 
@@ -64,17 +65,17 @@ _NAME_SHAPED_ARG_KEYS = (
 )
 _DELETE_BY_NAME_REFUSED = (
     "delete_folder 只按 folder_id 删，【不接受文件夹名 / 路径】——跨层同名合法"
-    "（`设计/图标` 与 `归档/图标`），按名删必然误删。请先 list_folders / resolve_folder "
+    "（`设计/图标` 与 `归档/图标`），按名删必然误删。请先 folders "
     "拿到该文件夹的 id 再调用；多个命中先 ask_user（kind=choice，选项须含完整路径）"
     "让用户选，禁止静默猜「最近」。"
 )
 _DELETE_MISSING_ID = (
-    "缺少 folder_id（要删除的文件夹 id）。先 list_folders / resolve_folder 拿 id；"
+    "缺少 folder_id（要删除的文件夹 id）。先 folders 拿 id；"
     "本工具不接受文件夹名 / 路径。"
 )
 _DELETE_NOT_FOUND = (
     "文件夹不存在或不属于当前账号，【没有删除任何东西】。"
-    "请用 list_folders 核对后再试，勿凭记忆里的 id 重试。"
+    "请用 folders 核对后再试，勿凭记忆里的 id 重试。"
 )
 _DELETE_DONE_HINT = (
     "软删：文件夹连同它的子文件夹一起进最近删除，成员对话就地归档（不删除对话本身）；"
@@ -93,7 +94,7 @@ _AMBIGUOUS_HINT = (
     "禁止静默猜「最近」；禁止用 open_local_project 冒充选已有文件夹（那会新会话）。"
 )
 _NOT_FOUND_HINT = (
-    "零命中：请向用户确认文件夹名 / 路径，或用 list_folders 核对后再 ask_user；"
+    "零命中：请向用户确认文件夹名 / 路径，或用 folders 核对后再 ask_user；"
     "嵌套账号注意先确认层级（`设计/图标` ≠ 顶层 `图标`）。"
     "【勿】为过写盘闸而 create_folder / ask_user 建夹——"
     "裸聊写盘：云会话由运行时自动建云文件夹；"
@@ -390,30 +391,65 @@ def _json_output(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
-class ListFoldersTool:
-    """CEO-only: list the authenticated user's live folders (名册 + 树中位置)."""
+class FoldersTool:
+    """CEO-only: list the live folder roster, or resolve a path to a Folder id."""
 
     registration = ToolRegistration(
         surface=ToolSurface.CEO_ORCHESTRATION,
         audience=AUDIENCE_CEO_ONLY,
         ceo_wire=CeoWire.ALWAYS,
-        catalog_summary="列出云文件夹",
+        catalog_summary="列出或解析云文件夹",
     )
 
     @property
     def schema(self) -> ToolSchema:
         return ToolSchema(
-            name=LIST_FOLDERS_TOOL_NAME,
+            name=FOLDERS_TOOL_NAME,
             description=(
                 "文件夹名册（rel_path）。名册不常驻，跨桌先列；当前桌→file_list。"
-                "按路径定位→resolve_folder。"
             ),
-            parameters={"type": "object", "properties": {}, "required": []},
+            parameters={
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": [_ACTION_LIST, _ACTION_RESOLVE],
+                        "description": (
+                            "list 列出名册；resolve 按路径解析为 id（嵌套同名须完整路径）。"
+                        ),
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": (
+                            "resolve：文件夹路径（POSIX、相对云盘树根，如 `设计/图标`）"
+                            "或用户口述的单个名字（精确或可唯一子串）。"
+                        ),
+                    },
+                },
+                "required": ["action"],
+            },
             face=ToolFace.FOLDER,
             approval=ToolApproval.NEVER,
         )
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        action = str(arguments.get("action") or "").strip()
+        if action == _ACTION_LIST:
+            return await self._execute_list(arguments, context)
+        if action == _ACTION_RESOLVE:
+            return await self._execute_resolve(arguments, context)
+        if not action:
+            error = "action 为必填（list / resolve）。"
+        else:
+            error = f"action `{action}` 不在允许列表（list / resolve）。"
+        return ToolResult(
+            tool_call_id="",
+            success=False,
+            output="",
+            error=error,
+        )
+
+    async def _execute_list(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         del arguments  # no params
         try:
             folders = await _load_user_folder_summaries(context.user_id)
@@ -466,42 +502,7 @@ class ListFoldersTool:
             display={"count": len(folders)},
         )
 
-
-class ResolveFolderTool:
-    """CEO-only: resolve a spoken / typed folder path to a Folder id."""
-
-    registration = ToolRegistration(
-        surface=ToolSurface.CEO_ORCHESTRATION,
-        audience=AUDIENCE_CEO_ONLY,
-        ceo_wire=CeoWire.ALWAYS,
-        catalog_summary="按路径找到云文件夹",
-    )
-
-    @property
-    def schema(self) -> ToolSchema:
-        return ToolSchema(
-            name=RESOLVE_FOLDER_TOOL_NAME,
-            description=(
-                "按路径解析已有文件夹为 id。嵌套同名须传完整路径。"
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": (
-                            "文件夹路径（POSIX、相对云盘树根，如 `设计/图标`）"
-                            "或用户口述的单个名字（精确或可唯一子串）。"
-                        ),
-                    },
-                },
-                "required": ["path"],
-            },
-            face=ToolFace.FOLDER,
-            approval=ToolApproval.NEVER,
-        )
-
-    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+    async def _execute_resolve(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         path = str(arguments.get("path") or "").strip()
         if not path:
             return ToolResult(
@@ -615,7 +616,7 @@ class CreateFolderTool:
 
     Mirrors ``POST /v1/folders`` with ``mode=cloud``, optionally nested under an
     existing folder. Returns FolderSummary-shaped payload for subsequent
-    ``resolve_folder`` / ``delegate(target_folder_id=…)``. Never mutates the current
+    ``folders`` / ``delegate(target_folder_id=…)``. Never mutates the current
     conversation's ``folder_id`` or starts a new session. Local register-stay-command
     -surface is bucket D — not this tool.
     """
@@ -650,8 +651,8 @@ class CreateFolderTool:
                         "description": (
                             "可选。挂在这个已有文件夹下面（POSIX 路径，如 `设计`、"
                             "`工作/设计`）。省略 = 建在云盘顶层。"
-                            "解析规则同 resolve_folder；零命中或多命中会失败并让你先 "
-                            "list_folders / resolve_folder 确认。"
+                            "解析规则同 folders(action=resolve)；零命中或多命中会失败并让你先 "
+                            "folders 确认。"
                         ),
                     },
                 },
@@ -794,7 +795,7 @@ class CreateFolderTool:
             success=False,
             output=(
                 f"上级文件夹 `{parent_path}` 不存在，【没有创建任何东西】。"
-                "请先 list_folders 核对路径；确实要建在顶层就省略 parent_path，"
+                "请先 folders 核对路径；确实要建在顶层就省略 parent_path，"
                 "【不要】为了过参数而临时另建一层。"
             ),
             error="parent_not_found",
@@ -810,7 +811,7 @@ def _delete_failure_result(exc: Exception, *, deleted_unknown: bool) -> ToolResu
     from agentcore.workspace.locks import WorkspaceBusyError
 
     tail = (
-        "该文件夹是否已删除【无法确定】，请 list_folders 核对后再决定是否重试。"
+        "该文件夹是否已删除【无法确定】，请 folders 核对后再决定是否重试。"
         if deleted_unknown
         else "未删除任何东西。"
     )
@@ -882,7 +883,7 @@ class DeleteFolderTool:
                     "folder_id": {
                         "type": "string",
                         "description": (
-                            "要删除的文件夹 id（UUID，来自 list_folders / resolve_folder / "
+                            "要删除的文件夹 id（UUID，来自 folders / "
                             "create_folder 返回的 id 字段）。【不接受名字或路径】。"
                         ),
                     },

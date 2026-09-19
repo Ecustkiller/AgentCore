@@ -52,10 +52,17 @@ describe("allowsSseEvent — interaction *_required on stopping/terminal", () =>
   });
 
   it.each(TERMINAL_OR_STOPPING)(
-    "allows approval_resolved / stage_card_resolved in phase %s",
+    "allows approval_resolved in phase %s",
     (phase) => {
       expect(allowsSseEvent(phase, "approval_resolved")).toBe(true);
-      expect(allowsSseEvent(phase, "stage_card_resolved")).toBe(true);
+    },
+  );
+
+  it.each(TERMINAL_OR_STOPPING)(
+    "does not special-case leftover stage_card events in phase %s",
+    (phase) => {
+      expect(allowsSseEvent(phase, "stage_card_required")).toBe(false);
+      expect(allowsSseEvent(phase, "stage_card_resolved")).toBe(false);
     },
   );
 
@@ -132,9 +139,9 @@ describe("allowsSseEvent — interaction *_required on stopping/terminal", () =>
   });
 
   it.each(TERMINAL_OR_STOPPING)(
-    "allows team_synthesis_preview in phase %s (detached captain-node live preview)",
+    "does not special-case unknown event types in phase %s",
     (phase) => {
-      expect(allowsSseEvent(phase, "team_synthesis_preview")).toBe(true);
+      expect(allowsSseEvent(phase, "retired_unknown_event")).toBe(false);
     },
   );
 });

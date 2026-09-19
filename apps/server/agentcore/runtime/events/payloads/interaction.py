@@ -12,10 +12,8 @@ from pydantic import Field
 
 from agentcore.runtime.approvals import ApprovalDecision
 from agentcore.runtime.checkpoints import AskCheckpointIntent, CheckpointDecision
-from agentcore.runtime.debate.types import DebateForm
 from agentcore.runtime.events.payloads._base import WirePayload, absent
 from agentcore.runtime.events.payloads.run import EscalationKind
-from agentcore.runtime.events.payloads.shared import MotionCardSide
 
 
 class ApprovalRequiredPayload(WirePayload):
@@ -41,9 +39,8 @@ class AskOption(WirePayload):
     `open_local_project` / `register_local_project` / `bind_local_folder` are
     **本机传统** wire enums（桌面默认同通道；云协作是选项：「先在云上做」/「从 Git 克隆」；≠离线；
     网页/手机无本机盘；``create_folder`` 仍只建云）。
-    Structured ``op`` / ``source`` / ``destination`` / ``path`` fields carry
-    organize_plan items for plan-bound ``file_batch``. ``review_kind`` / ``body`` /
-    ``slug`` / ``section`` remain on the wire for historical events."""
+    ``review_kind`` / ``body`` / ``slug`` / ``section`` remain on the wire for
+    historical events."""
 
     label: str
     detail: str | None = absent()
@@ -55,10 +52,6 @@ class AskOption(WirePayload):
         ]
         | None
     ) = absent()
-    op: Literal["move", "copy", "delete", "mkdir"] | None = absent()
-    source: str | None = absent()
-    destination: str | None = absent()
-    path: str | None = absent()
     review_kind: (
         Literal["preference", "profile", "topic", "rule", "doc"] | None
     ) = absent()
@@ -95,79 +88,6 @@ class CheckpointResolvedPayload(WirePayload):
     decision: CheckpointDecision
     note: str
     selected: list[str] | None = absent()
-
-
-class PlanReviewStep(WirePayload):
-    run_id: str
-    role: str
-    summary: str
-
-
-class PlanReviewPending(WirePayload):
-    run_id: str
-    role: str
-
-
-class CeoReviewSummary(WirePayload):
-    """主 Agent 在 plan_review 前对本波产出的把关摘要
-    （拍板卡展示；继续时 llm 压缩注入 gate_notes）。"""
-
-    conclusion: str
-    risks: list[str]
-    suggestions: list[str]
-    source: Literal["llm", "deterministic"] | None = absent(
-        "把关来源；旧帧缺省。仅 llm 在 CONTINUE 时压缩注入 gate_notes。"
-    )
-
-
-class PlanReviewRequiredPayload(WirePayload):
-    checkpoint_id: str
-    conversation_id: str
-    steps: list[PlanReviewStep]
-    pending: list[PlanReviewPending]
-    ceo_review: CeoReviewSummary | None = absent(
-        "CEO 评审前置把关摘要；旧帧 / 旧向量可缺省。"
-    )
-
-
-class PlanReviewResolvedPayload(WirePayload):
-    checkpoint_id: str
-    decision: CheckpointDecision
-    note: str
-
-
-class StageCardRequiredPayload(WirePayload):
-    """阶段推进卡（批 B）：命题卡升级为可操作交互；幕 1 收尾后耐久展示。
-
-    信息密度 = 最小决策集：命题 + 双方立场 + 形态/轮次默认 + 嘱咐空位。
-    ``sides`` 复用 motion 卡薄立场；``max_rounds`` 为默认展示（卡上不可改）。
-    可选宿主三元组（机制直传，旧客户端忽略）：开辩锚定幕 1 图。
-    """
-
-    stage_card_id: str
-    conversation_id: str
-    motion: str
-    sides: list[MotionCardSide]
-    form: DebateForm
-    rationale: str
-    fact_pointers: list[str] = Field(default_factory=list)
-    max_rounds: int = 5
-    # Optional empty note slot — client may fill on start_debate; never enters motion gate.
-    note: str | None = absent()
-    host_execution_id: str | None = absent(
-        "幕 1 宿主 execution_id；缺省则开辩时再 resolve_debate_host_attach。"
-    )
-    synthesizer_run_id: str | None = absent("幕 1 汇总员 run_id（挂点锚）。")
-    host_message_id: str | None = absent("幕 1 宿主 turn / message id。")
-
-
-class StageCardResolvedPayload(WirePayload):
-    """推进卡裁决。decision 二值：start_debate（可带 motion_override/note）/ research_first。"""
-
-    stage_card_id: str
-    decision: Literal["start_debate", "research_first"]
-    note: str = ""
-    motion_override: str | None = absent()
 
 
 class EscalationRequiredPayload(WirePayload):
@@ -234,15 +154,14 @@ class EscalationResolvedPayload(WirePayload):
 
 
 class InteractionOrphanedPayload(WirePayload):
-    """pending 交互失效（假卡消灭）。含热路 kind + 推进卡 stage_card。"""
+    """pending 交互失效（假卡消灭）。热路 kind + 辩论轮。"""
 
     interaction_id: str
     kind: Literal[
         "approval",
         "escalation",
         "debate_round",
-        "stage_card",
     ]
     reason: str | None = absent(
-        "可选失效原因（如 stage_card superseded）；缺省不传，旧客户端忽略。"
+        "可选失效原因；缺省不传，旧客户端忽略。"
     )

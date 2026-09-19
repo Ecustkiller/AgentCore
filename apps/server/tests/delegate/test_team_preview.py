@@ -335,15 +335,13 @@ async def test_team_preview_continue_then_arms_coordination():
     clear_active_coordination("e")
 
 
-async def test_leftover_kickoff_frame_refuses_hydrate_resume_plan_restores_brief():
-    """存量开工卡 from_json 410；resume_plan 仍可按 kwargs 回灌 team_brief。"""
-    from agentcore.core.errors import GoneError
-    from agentcore.runtime.kickoff.retired import TEAM_PREVIEW_UNRECOVERABLE
+async def test_leftover_kickoff_frame_skips_hydrate_resume_plan_restores_brief():
+    """存量开工卡 from_json 未知 kind；resume_plan 仍可按 kwargs 回灌 team_brief。"""
     from agentcore.runtime.runs import build_run_plan
     from agentcore.runtime.suspension import suspension_from_json
 
     clear_active_coordination()
-    with pytest.raises(GoneError, match=TEAM_PREVIEW_UNRECOVERABLE):
+    with pytest.raises(ValueError, match="unknown suspension kind"):
         suspension_from_json(
             {
                 "kind": "team_preview",
@@ -389,7 +387,6 @@ async def test_leftover_kickoff_frame_refuses_hydrate_resume_plan_restores_brief
         checkpoint_run_ids=set(),
         execution_id="e",
         coordinate=False,
-        apply_kickoff_grant=True,
         team_brief="统一用中文交付",
     )
     assert resumed.success is True

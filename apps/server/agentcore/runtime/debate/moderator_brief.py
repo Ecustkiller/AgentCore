@@ -41,21 +41,8 @@ _BRIEF_SYSTEM = (
 
 
 def _brief_form_hint(form: DebateForm) -> str:
-    """各形态「简报该产出什么」的差异指引（喂给 :func:`build_brief`）。
-
-    呼应 :attr:`DebateResult.narrative_first`：决策类（正反/红队）简报先行、为决策负责；
-    探讨类（圆桌）过程先行、简报是观点地图小结。"""
-    if form is DebateForm.RED_TEAM:
-        return (
-            "这是【红队挑刺】：简报应是【finding 台账视图 + 门决】——围绕刺→处置→复核全线程，"
-            "给出 conditional_pass / needs_major_rework / not_viable；must-fix 来自未关闭的 "
-            "critical/major。"
-        )
-    if form is DebateForm.ROUNDTABLE:
-        return (
-            "这是【多方圆桌】：简报应是【共识/分歧地图】——按子题组织各方主张、收敛处与分裂处"
-            "（标注 crux：事实/价值/假设），而非强行裁谁对谁错；末尾点出开放问题。"
-        )
+    """正反简报产出规格。"""
+    del form
     return (
         "这是【正反辩论】：一句倾向（可带「若…则翻」）、一个胜负手、把握档 high|medium|low、"
         "未决三栏。不要并排甩观点，不要另写建议复述倾向。"
@@ -226,74 +213,29 @@ async def build_brief(
 
     evidence_block = format_evidence_ledger_for_brief(evidence_ledger, rounds)
     last_turns = _turns_block(rounds[-1].ok_turns, clip=_TURN_CLIP)
-    sides_keys = ", ".join(s.key for s in config.sides)
-    is_roundtable = config.form is DebateForm.ROUNDTABLE
-    is_debate = config.form is DebateForm.DEBATE
-    if is_roundtable:
-        align_note = (
-            "圆桌不裁谁对谁错；decisive 可留空或写「无胜负手（圆桌）」；leaning 写观点光谱"
-            "小结而非点名赢家。"
-        )
-        decisive_field = '  "decisive": "圆桌无胜负手：可留空或写「无胜负手（圆桌）」",\n'
-        leaning_field = '  "leaning": "观点光谱小结（各视角成立前提与张力，非裁出赢家；可稍长）",\n'
-        confidence_field = (
-            '  "confidence": "把握档及其成立条件（说明在什么前提下倾向会反转）",\n'
-        )
-        recommendation_field = (
-            '  "recommendation": "给用户的下一步动作单句，不复述判断理由",\n'
-        )
-        field_mutex = (
-            "【字段互斥·各司其职、互不复述】："
-            "crux = 争议焦点；strongest_points = 各方命门单句；"
-            "leaning = 观点光谱小结（不裁赢家）；confidence = 把握与前提；"
-            "recommendation = 下一步动作单句。"
-        )
-        strongest_field = (
-            f'  "strongest_points": {{"<side_key∈[{sides_keys}]>": '
-            '"该方命门单句≤60字，禁分号堆叠"}},\n'
-        )
-    elif is_debate:
-        align_note = "倾向须与本轮交锋方向同向。"
-        decisive_field = (
-            '  "decisive": "定局的那一个交锋点（单句≤50字：谁的哪点被证伪 / 无据 / 回避；'
-            '诚实认输不算回避）；不重讲倾向",\n'
-        )
-        leaning_field = (
-            '  "leaning": "倾向方向（正方/反方）+ 命题一句；反转用「若…则翻」紧跟句号或分号后",\n'
-        )
-        confidence_field = '  "confidence": "high 或 medium 或 low，只填档、不写散文",\n'
-        recommendation_field = (
-            '  "recommendation": "仅当未决三栏都空时写一句下一步，否则空串",\n'
-        )
-        field_mutex = (
-            "【正反简报·各司其职】："
-            "leaning = 倾向方向 + 命题一句，反转用「若…则翻」紧跟句号或分号后；"
-            "decisive = 一个交锋点，不重讲倾向；"
-            "confidence = 只填 high|medium|low；"
-            "未决三栏 = 要你拍 / 还没核实 / 只能等；"
-            "recommendation = 仅三栏都空时写一句，否则空；"
-            "crux 正反留空；strongest_points 给 {}。"
-        )
-        strongest_field = '  "strongest_points": {},\n'
-    else:
-        align_note = ""
-        decisive_field = (
-            '  "decisive": "定门决的那一个 finding / 交锋点（单句≤50字）",\n'
-        )
-        leaning_field = '  "leaning": "门决倾向一句话",\n'
-        confidence_field = (
-            '  "confidence": "把握档及其成立条件（说明在什么前提下倾向会反转）",\n'
-        )
-        recommendation_field = (
-            '  "recommendation": "加固建议单句，不复述判断理由",\n'
-        )
-        field_mutex = (
-            "【字段互斥】：leaning / decisive / recommendation 各写一件事，互不复述。"
-        )
-        strongest_field = (
-            f'  "strongest_points": {{"<side_key∈[{sides_keys}]>": '
-            '"该方命门单句≤60字，禁分号堆叠"}},\n'
-        )
+    is_debate = config.form == DebateForm.DEBATE
+    align_note = "倾向须与本轮交锋方向同向。"
+    decisive_field = (
+        '  "decisive": "定局的那一个交锋点（单句≤50字：谁的哪点被证伪 / 无据 / 回避；'
+        '诚实认输不算回避）；不重讲倾向",\n'
+    )
+    leaning_field = (
+        '  "leaning": "倾向方向（正方/反方）+ 命题一句；反转用「若…则翻」紧跟句号或分号后",\n'
+    )
+    confidence_field = '  "confidence": "high 或 medium 或 low，只填档、不写散文",\n'
+    recommendation_field = (
+        '  "recommendation": "仅当未决三栏都空时写一句下一步，否则空串",\n'
+    )
+    field_mutex = (
+        "【正反简报·各司其职】："
+        "leaning = 倾向方向 + 命题一句，反转用「若…则翻」紧跟句号或分号后；"
+        "decisive = 一个交锋点，不重讲倾向；"
+        "confidence = 只填 high|medium|low；"
+        "未决三栏 = 要你拍 / 还没核实 / 只能等；"
+        "recommendation = 仅三栏都空时写一句，否则空；"
+        "crux 正反留空；strongest_points 给 {}。"
+    )
+    strongest_field = '  "strongest_points": {},\n'
     handoff_taxonomy = (
         "【未决三栏·互斥归类，勿重叠】："
         "value_disputes = 要你拍——只有你的选择能闭合，每条须是你可直接回答的一个问句；"

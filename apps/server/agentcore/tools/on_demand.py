@@ -26,21 +26,15 @@ RETIRED_ON_DEMAND_NAMES: dict[str, str] = {
 
 # Consulting any member offers every assembled sibling in the same family.
 _FAMILIES: tuple[frozenset[str], ...] = (
-    frozenset({"archive_extract", "archive_create"}),
     frozenset({"create_folder", "delete_folder"}),
-    frozenset({"file_move", "file_copy", "file_batch"}),
     frozenset({"table_ops", "table_read"}),
     frozenset({"docs_read", "docs_write"}),
-    frozenset({"list_folder_dir", "read_folder_file"}),
 )
 
 _FAMILY_LABELS: dict[frozenset[str], str] = {
-    frozenset({"archive_extract", "archive_create"}): "压缩包",
     frozenset({"create_folder", "delete_folder"}): "文件夹增删",
-    frozenset({"file_move", "file_copy", "file_batch"}): "搬移/批量",
     frozenset({"table_ops", "table_read"}): "表格",
     frozenset({"docs_read", "docs_write"}): "创作文档",
-    frozenset({"list_folder_dir", "read_folder_file"}): "跨桌只读",
 }
 
 # Skill consult → enable the matching on-demand tool (HOW 与按钮同一查阅)。

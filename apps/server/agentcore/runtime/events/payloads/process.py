@@ -9,7 +9,7 @@ the turn's side channels by id). Emitted to TS as one inline discriminated union
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import Field
 
@@ -56,22 +56,8 @@ class ProcessTeamStep(WirePayload):
     execution_id: str
 
 
-class ProcessGraphAppendStep(WirePayload):
-    """跨回合同图追加锚点：新回合过程时间线上的「已往上方协作图追加 N 名成员」。"""
-
-    kind: Literal["graph_append"]
-    execution_id: str
-    host_message_id: str
-    added_count: int
-
-
 class ProcessCheckpointStep(WirePayload):
     kind: Literal["checkpoint"]
-    checkpoint_id: str
-
-
-class ProcessPlanReviewStep(WirePayload):
-    kind: Literal["plan_review"]
     checkpoint_id: str
 
 
@@ -92,14 +78,6 @@ class ProcessApprovalStep(WirePayload):
     approval_id: str
 
 
-class ProcessStageCardStep(WirePayload):
-    """阶段推进卡时间线落点：required 时刻落锚；行渲染由 resolved/orphaned 门控
-   （pending 操作面在 Dock；历史回看显「已开辩 / 已失效」轻痕迹）。"""
-
-    kind: Literal["stage_card"]
-    stage_card_id: str
-
-
 class ProcessUserInterjectionStep(WirePayload):
     """用户运行中插话的时间线落点：插话真实发生在回合中途，marker 钉住它的发生位置，
     避免气泡统一堆到回合末尾造成因果倒置。同 `interjection_id` 只落一次（首次 received），
@@ -114,14 +92,21 @@ PROCESS_STEP_MEMBERS: tuple[type[WirePayload], ...] = (
     ProcessContentStep,
     ProcessToolStep,
     ProcessTeamStep,
-    ProcessGraphAppendStep,
     ProcessCheckpointStep,
-    ProcessPlanReviewStep,
     ProcessEscalationStep,
     ProcessApprovalStep,
-    ProcessStageCardStep,
     ProcessUserInterjectionStep,
 )
 
-# Retired process-step discriminants that may still sit on historical process[] rows.
-RETIRED_PROCESS_STEP_KINDS: frozenset[str] = frozenset({"ask", "team_preview"})
+
+def _process_step_kind(model: type[WirePayload]) -> str:
+    annotation = model.model_fields["kind"].annotation
+    args = get_args(annotation)
+    if len(args) != 1 or not isinstance(args[0], str):
+        raise TypeError(f"{model.__name__}.kind must be a single-string Literal")
+    return args[0]
+
+
+PROCESS_STEP_KINDS: frozenset[str] = frozenset(
+    _process_step_kind(model) for model in PROCESS_STEP_MEMBERS
+)

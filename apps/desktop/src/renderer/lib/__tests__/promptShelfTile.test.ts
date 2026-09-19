@@ -41,6 +41,7 @@ function identityItem(): PromptCatalogItem {
 function mineItem(over: {
   label: string;
   description?: string;
+  content?: string;
   memoryKind?: "preferences" | "profile" | null;
   disputed?: boolean;
   applyMode?: "always" | "on_demand";
@@ -53,7 +54,7 @@ function mineItem(over: {
     depth: 0,
     mineId: "x",
     description: over.description ?? "",
-    content: "",
+    content: over.content ?? "",
     version: "v1",
     applyMode: over.applyMode ?? "on_demand",
     aiMaintained: over.memoryKind != null,
@@ -70,6 +71,7 @@ function skillItem(over: {
   blurb?: string;
   group?: string;
   audience?: string[];
+  requiresTools?: string[];
 }): Extract<PromptCatalogItem, { kind: "skill" }> {
   return {
     id: skillCatalogId("staffing"),
@@ -86,6 +88,7 @@ function skillItem(over: {
       group: over.group ?? "",
       blurb: over.blurb ?? "",
       audience: over.audience,
+      requires_tools: over.requiresTools ?? [],
     },
   };
 }
@@ -129,6 +132,7 @@ function listing(over: Partial<SkillStoreListing>): SkillStoreListing {
     documentId: "x",
     installDocumentId: null,
     status: "published",
+    offersTools: [],
     ...over,
   };
 }
@@ -164,6 +168,15 @@ describe("promptItemShelfCopy", () => {
         skillItem({ summary: "薄技能", blurb: "写一条按需薄技能" }),
       ).tags,
     ).toEqual([]);
+    expect(
+      promptItemShelfCopy(
+        skillItem({
+          summary: "正反辩论",
+          blurb: "正反两边对碰",
+          requiresTools: ["debate"],
+        }),
+      ).tags,
+    ).toEqual(["工具"]);
   });
 
   it("简介与标题相同时留空槽，不复述", () => {
@@ -243,11 +256,11 @@ describe("promptItemShelfCopy", () => {
     ).toEqual([{ label: "我的" }]);
   });
 
-  it("出厂工具简介用 summary，能力面不进底栏，例外才打标签", () => {
+  it("出厂工具标题用中文简介，底栏打工具，例外才叠加", () => {
     const copy = promptItemShelfCopy(toolItem({ resident: true }));
-    expect(copy.title).toBe("file_read");
-    expect(copy.description).toBe("读工作区文件");
-    expect(copy.tags).toEqual([]);
+    expect(copy.title).toBe("读工作区文件");
+    expect(copy.description).toBe("");
+    expect(copy.tags).toEqual(["工具"]);
     expect(copy.accessory).toEqual([{ label: "官方" }]);
     expect(
       promptItemShelfCopy(toolItem({ resident: false })).accessory,
@@ -260,14 +273,26 @@ describe("promptItemShelfCopy", () => {
           availableTo: ["ceo"],
         }),
       ).tags,
-    ).toEqual(["需审批", "CEO"]);
+    ).toEqual(["工具", "需审批", "CEO"]);
+  });
+
+  it("绑了手脚的我的条目打工具，不把名单铺上卡", () => {
+    const copy = promptItemShelfCopy(
+      mineItem({
+        label: "合同审查",
+        content: "---\napply: on_demand\noffers_tools: host, debate\n---\n怎么审",
+      }),
+      { sceneGroupLabel: "法律合规" },
+    );
+    expect(copy.tags).toEqual(["工具", "法律合规"]);
+    expect(copy.tags.join(" ")).not.toContain("host");
   });
 
   it("读卡标题旁为出厂工具补开场轴", () => {
     const resident = toolItem({ resident: true });
     expect(
       promptReadHeaderChips(promptItemShelfCopy(resident), resident),
-    ).toEqual([{ label: "官方" }, { label: "开场即用" }]);
+    ).toEqual([{ label: "官方" }, { label: "开场即用" }, { label: "工具" }]);
     const deferred = toolItem({
       resident: false,
       approval: "grantable",
@@ -278,6 +303,7 @@ describe("promptItemShelfCopy", () => {
     ).toEqual([
       { label: "官方" },
       { label: "查阅后启用" },
+      { label: "工具" },
       { label: "需审批" },
       { label: "CEO" },
     ]);

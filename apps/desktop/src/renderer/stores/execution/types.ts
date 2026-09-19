@@ -51,8 +51,8 @@ export type ExecutionStatus =
 /** 幕类型 = 能力档取用键（首批 multi_agent / debate）。 */
 export type ActKind = "multi_agent" | "debate";
 
-/** 幕授权来源（批 B）：stage_card=推进卡；auto=新开默认；preview=存量 leftover 标记（非新开开工卡）。 */
-export type ActAuthorizedBy = "stage_card" | "auto" | "preview";
+/** 幕授权来源：auto=新开默认。未知/旧戳不认。 */
+export type ActAuthorizedBy = "auto";
 
 /** One act in an execution's act sequence (批 A1 幕契约). */
 export interface ExecutionAct {
@@ -93,10 +93,9 @@ export const TOOL_LABELS: Record<string, string> = {
   glob: "Glob",
   list_folders: "List folders",
   resolve_folder: "Resolve folder",
+  folders: "Folders",
   create_folder: "Create folder",
   delete_folder: "Delete folder",
-  list_folder_dir: "List folder dir",
-  read_folder_file: "Read folder file",
   str_replace: "Edit file",
   file_delete: "Delete file",
   file_move: "Move file",
@@ -108,6 +107,7 @@ export const TOOL_LABELS: Record<string, string> = {
   md_export: "Export document",
   archive_extract: "Extract archive",
   archive_create: "Create archive",
+  archive: "Archive",
   download_url: "Download file",
   read_image: "Read image",
   code_diagnostics: "Check types",
@@ -243,10 +243,10 @@ export interface WorkerToolPhaseLive {
   toolName: string;
 }
 
-/** A structured DAG checkpoint (plan_review, 结构化挂起 2a) that paused the scheduler
- * *after* a run completed and *before* its dependents ran. `decision` is null while
- * the user has not answered; on resolve it records 继续/停止 (`continue`/`stop`; an
- * engine timeout folds in as `timeout`). Drives the node's pause badge. */
+/** Leftover DAG pause badge on a run. Live plan_review no longer stamps this;
+ * leftover frames skip and the field stays null. `decision` is null while
+ * unresolved; on resolve it records 继续/停止 (`continue`/`stop`; an
+ * engine timeout folds in as `timeout`). */
 export interface RunCheckpoint {
   status: "pending" | "resolved";
   decision: CheckpointDecision | null;
@@ -402,9 +402,8 @@ export interface RunNode {
    * 「先后追加的两批任务」与拓扑波次。协议 / ProjectedTurn 不承载此字段。
    */
   delegateBatch?: number;
-  /** A `checkpoint_after` pause that fired *after* this run (plan_review, 结构化挂起
-   * 2a); null for a run that never gated. Surfaced as a node pause badge so the
-   * graph shows where the scheduler stopped for the user. */
+  /** Leftover DAG pause badge after this run; null when the run never gated.
+   * Live plan_review no longer stamps this field. */
   checkpoint: RunCheckpoint | null;
   /** 收到的上下文 (上下文传递可视化): the structured ContextBlocks this run was fed at
    * assembly time, from its `run_context` frame — the SAME data the LLM saw (系统 /
@@ -505,7 +504,7 @@ export interface Execution {
   debatePretrial: DebatePretrialProjection | null;
   /** 场级证据台账（`debate_pretrial_completed` / `debate_round` 的
    * `evidence_ledger_delta` 累积 / `debate_result.evidence_ledger`
-   * 权威覆盖）：辩论徽章 `#eN` 溯源。桌面 UI 态——不进 conformance ProjectedTurn（oracle 经
+   * 权威覆盖）：辩论徽章 `#rN` 溯源。桌面 UI 态——不进 conformance ProjectedTurn（oracle 经
    * `debate.evidence_ledger` 承载收场权威；live delta 同路径累积）。非辩论 / 旧 fixture 可缺省。 */
   evidenceLedger?: EvidenceLedgerEntry[];
 }

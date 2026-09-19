@@ -39,6 +39,8 @@ export interface PendingAttachment {
   citedRelPath?: string;
   /** 二进制驻留：无 UTF-8 正文内联。 */
   binary?: boolean;
+  /** 邻桌活文件所在 Folder；发送时不复制进当前工作区。 */
+  sourceFolderId?: string;
   /**
    * 浏览器草稿：尚无 conversationId 时暂存 File，建会话后由
    * ``ensureAttachmentResident`` PUT 到云工作区 ``attachments/``。

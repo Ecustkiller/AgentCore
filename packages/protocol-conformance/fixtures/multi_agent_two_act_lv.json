@@ -1,6 +1,6 @@
 {
   "name": "multi_agent_two_act_lv",
-  "description": "批R2·幕级 LOD 验收：LV 案量级两幕（幕1 MLR 含法律子队 + 幕2 辩论新图+prev 含证人/补派两轮），约 18 节点，供内嵌 + 全屏协作图幕摘要卡链 + 聚焦幕验单屏可读",
+  "description": "LV 案量级两幕：幕1 含子队调研 + 幕2 证人辩论（authorized_by=auto；shoot:graph-probe）",
   "events": [
     {
       "type": "message_start",
@@ -657,7 +657,7 @@
           "kind": "debate",
           "title": "辩论对抗",
           "anchor_run_id": "synthesizer",
-          "authorized_by": "stage_card"
+          "authorized_by": "auto"
         }
       },
       "timestamp": "2026-01-01T00:00:05.423Z"
@@ -701,7 +701,7 @@
           "kind": "debate",
           "title": "辩论对抗",
           "anchor_run_id": "synthesizer",
-          "authorized_by": "stage_card"
+          "authorized_by": "auto"
         }
       },
       "timestamp": "2026-01-01T00:00:05.425Z"
@@ -776,7 +776,7 @@
           "kind": "debate",
           "title": "辩论对抗",
           "anchor_run_id": "synthesizer",
-          "authorized_by": "stage_card"
+          "authorized_by": "auto"
         }
       },
       "timestamp": "2026-01-01T00:00:05.428Z"
@@ -799,7 +799,7 @@
       "payload": {
         "run_id": "debate_mod_lv_r1_pro",
         "agent_id": "d_pro",
-        "delta": "第十二条可解除【已核实·#e2】，应立即终止。"
+        "delta": "第十二条可解除【已核实·#r2】，应立即终止。"
       },
       "timestamp": "2026-01-01T00:00:05.430Z"
     },
@@ -1789,7 +1789,7 @@
         "thinking": true,
         "status": "completed",
         "currentRunId": null,
-        "output": "第十二条可解除【已核实·#e2】，应立即终止。",
+        "output": "第十二条可解除【已核实·#r2】，应立即终止。",
         "reasoning": "",
         "toolProgress": null
       },
@@ -1995,7 +1995,7 @@
         "process": [
           {
             "kind": "content",
-            "text": "第十二条可解除【已核实·#e2】，应立即终止。"
+            "text": "第十二条可解除【已核实·#r2】，应立即终止。"
           }
         ]
       },
@@ -2480,7 +2480,7 @@
         "kind": "debate",
         "title": "辩论对抗",
         "anchorRunId": "synthesizer",
-        "authorizedBy": "stage_card"
+        "authorizedBy": "auto"
       }
     ],
     "progress": {
@@ -2703,9 +2703,7 @@
             ],
             "answer_run_id": "debate_mod_lv_r1_wit_lens_0"
           }
-        ],
-        "findings": [],
-        "thread_turns": []
+        ]
       },
       {
         "round_no": 2,
@@ -2734,15 +2732,12 @@
         ],
         "clashes": [],
         "cross_exam": [],
-        "witness_exam": [],
-        "findings": [],
-        "thread_turns": []
+        "witness_exam": []
       }
     ],
     "debatePretrial": null,
     "crossExamEnabled": true,
     "debateOpening": "先核清解除条款事实再谈立场。",
-    "teamSynthesisPreview": null,
     "deliveryStatus": null,
     "turnWarning": null,
     "autoFolder": null,

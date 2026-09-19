@@ -78,16 +78,16 @@ def test_ledger_append_dedup_and_ids():
         title="B",
         side_key="pro",
     )
-    assert a == "#e1"
-    assert b == "#e1"  # URL 去重
-    assert c == "#e2"
-    assert led.ids == frozenset({"#e1", "#e2"})
-    assert led.get("#e1")["side_key"] == "pro"  # 首登方保留
+    assert a == "#r1"
+    assert b == "#r1"  # URL 去重
+    assert c == "#r2"
+    assert led.ids == frozenset({"#r1", "#r2"})
+    assert led.get("#r1")["side_key"] == "pro"  # 首登方保留
     delta1 = led.drain_delta()
-    assert [e["id"] for e in delta1] == ["#e1", "#e2"]
+    assert [e["id"] for e in delta1] == ["#r1", "#r2"]
     assert led.drain_delta() == []
     led.register(url="https://example.com/c", title="C", side_key="con")
-    assert [e["id"] for e in led.drain_delta()] == ["#e3"]
+    assert [e["id"] for e in led.drain_delta()] == ["#r3"]
     assert len(led.all_entries()) == 3
 
 
@@ -99,58 +99,53 @@ def test_preregister_background_rewrites_tags():
         "行业规模【待核实·推断】。"
     )
     out = preregister_background(led, bg)
-    assert "【已核实·#e1】" in out
-    assert "【已核实·#e2】" in out
+    assert "【已核实·#r1】" in out
+    assert "【已核实·#r2】" in out
     assert "【待核实·推断】" in out
     assert "【已核实·判决书】" not in out
-    assert led.get("#e1")["url"] == ""
-    assert led.get("#e1")["tier"] == "unknown"
-    assert led.get("#e1")["side_key"] == MODERATOR_SIDE_KEY
-    assert led.get("#e1")["title"] == "判决书"
+    assert led.get("#r1")["url"] == ""
+    assert led.get("#r1")["tier"] == "unknown"
+    assert led.get("#r1")["side_key"] == MODERATOR_SIDE_KEY
+    assert led.get("#r1")["title"] == "判决书"
 
 
-def test_preregister_background_maps_ceo_r_refs():
-    """主持人底料中的 CEO 回合 #rN：注入即登记为场级 #eN，正文改写，避免辩手引用悬空。"""
+def test_preregister_background_keeps_turn_r_refs():
+    """底料里的当轮 #rN 原样保留；继承核后续号，不翻译。"""
     from agentcore.runtime.citations import invalid_ledger_ref_ids
+    from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 
-    led = EvidenceLedger()
+    core = EvidenceLedgerCore(id_prefix="#r")
+    core.register_sync(url="https://court.example/a", title="判决", registrant="ceo")
+    core.register_sync(url="https://court.example/b", title="判例", registrant="ceo")
+    core.register_sync(url="https://court.example/c", title="补充", registrant="ceo")
+    led = EvidenceLedger(core=core)
     bg = (
         "一审判决认定构成商标近似#r1；"
-        "赔偿口径参考同类判例#r2与补充说明#r10。"
+        "赔偿口径参考同类判例#r2与补充说明#r3。"
     )
     out = preregister_background(led, bg)
-    assert "#r1" not in out
-    assert "#r2" not in out
-    assert "#r10" not in out
-    assert "#e1" in out and "#e2" in out and "#e3" in out
-    assert led.get("#e1")["origin_id"] == "#r1"
-    assert led.get("#e2")["origin_id"] == "#r2"
-    assert led.get("#e3")["origin_id"] == "#r10"
-    assert led.get("#e1")["side_key"] == MODERATOR_SIDE_KEY
-    # 改写后正文不再含平台闸所扫的悬空 #rN
+    assert "#r1" in out and "#r2" in out and "#r3" in out
     assert invalid_ledger_ref_ids(out, led.ids) == []
-    # 幂等：再跑一次不重号、不残留 #r
-    out2 = preregister_background(led, out)
-    assert out2 == out
+    assert preregister_background(led, out) == out
     assert len(led.all_entries()) == 3
 
 
 def test_ledger_id_in_tag_and_invalid():
-    assert ledger_id_in_tag("【已核实·#e3】") == "#e3"
-    assert ledger_id_in_tag("【已核实·判决书 #e3】") == "#e3"  # 双写可解析
+    assert ledger_id_in_tag("【已核实·#r3】") == "#r3"
+    assert ledger_id_in_tag("【已核实·判决书 #r3】") == "#r3"  # 双写可解析
     assert ledger_id_in_tag("【已核实·街访数据】") is None
-    assert ledger_id_in_tag("【已核实·#e9") is None  # 残缺
-    known = frozenset({"#e1", "#e2"})
-    speech = "A【已核实·#e1】；B【已核实·街访数据】；C【已核实·#e9】；D【待核实·推断】。"
+    assert ledger_id_in_tag("【已核实·#r9") is None  # 残缺
+    known = frozenset({"#r1", "#r2"})
+    speech = "A【已核实·#r1】；B【已核实·街访数据】；C【已核实·#r9】；D【待核实·推断】。"
     bad = invalid_verified_tags(speech, known)
-    assert bad == ["【已核实·#e9】", "【已核实·街访数据】"]
+    assert bad == ["【已核实·#r9】", "【已核实·街访数据】"]
 
 
 def test_demote_and_steer():
-    text = "主张【已核实·#e99】成立。"
-    demoted = demote_verified_tags(text, ["【已核实·#e99】"])
+    text = "主张【已核实·#r99】成立。"
+    demoted = demote_verified_tags(text, ["【已核实·#r99】"])
     assert demoted == "主张【待核实·推断】成立。"
-    steer = format_evidence_ledger_steer(["【已核实·#e99】"])
+    steer = format_evidence_ledger_steer(["【已核实·#r99】"])
     assert steer.startswith("[系统提示]")
     assert "笔记" in steer
 
@@ -195,15 +190,15 @@ def test_format_evidence_ledger_for_judge_and_brief():
 
 
 def test_evidence_notes_spec_requires_line_tail_id():
-    """笔记规格：事实要点行尾绑定 #eN（检索阶段，非成稿盲配）。"""
-    assert "行尾标注来源 #eN" in EVIDENCE_NOTES_SPEC
+    """笔记规格：事实要点行尾绑定 #rN（检索阶段，非成稿盲配）。"""
+    assert "行尾标注来源 #rN" in EVIDENCE_NOTES_SPEC
     assert "刚读完" in EVIDENCE_NOTES_SPEC or "刚决定采用" in EVIDENCE_NOTES_SPEC
     assert "只能沿用本笔记出现过的 id" in EVIDENCE_NOTES_SPEC
     assert "本方本轮证据笔记" in EVIDENCE_RULE or "证据笔记" in EVIDENCE_RULE
 
 
 def test_evidence_rule_teaches_id_format():
-    assert "【已核实·#eN】" in EVIDENCE_RULE
+    assert "【已核实·#rN】" in EVIDENCE_RULE
     assert "自由出处短语" in EVIDENCE_RULE or "只写 id" in EVIDENCE_RULE
 
 
@@ -229,15 +224,15 @@ def test_format_ledger_hint_lists_ids():
     led.register(url="https://a.example/x", title="甲", side_key="pro")
     led.register(url="https://b.example/y", title="乙", side_key="pro")
     hint_all = format_evidence_ledger_hint(led)
-    assert "#e1" in hint_all and "#e2" in hint_all
-    hint_sub = format_evidence_ledger_hint(led, ids={"#e1"})
-    assert "#e1" in hint_sub
-    assert "#e2" not in hint_sub
+    assert "#r1" in hint_all and "#r2" in hint_all
+    hint_sub = format_evidence_ledger_hint(led, ids={"#r1"})
+    assert "#r1" in hint_sub
+    assert "#r2" not in hint_sub
     assert "本方已绑定来源" in hint_sub
 
 
 def test_extract_ledger_ids_and_side_cited_union():
-    assert extract_ledger_ids("要点 12% #e3\n另一条 #e1") == frozenset({"#e1", "#e3"})
+    assert extract_ledger_ids("要点 12% #r3\n另一条 #r1") == frozenset({"#r1", "#r3"})
     rounds = [
         RoundResult(
             round_no=1,
@@ -247,13 +242,13 @@ def test_extract_ledger_ids_and_side_cited_union():
                     side_key="pro",
                     side_name="正方",
                     run_id="r1",
-                    content="降本 12%【已核实·#e1】。",
+                    content="降本 12%【已核实·#r1】。",
                 ),
                 SideTurn(
                     side_key="con",
                     side_name="反方",
                     run_id="r2",
-                    content="对方夸大【已核实·#e9】。",
+                    content="对方夸大【已核实·#r9】。",
                 ),
             ],
             verdict=JudgeVerdict(real_clash=True, new_arguments=True, converged=False),
@@ -261,14 +256,14 @@ def test_extract_ledger_ids_and_side_cited_union():
                 CrossExamExchange(
                     target="pro",
                     exchanges=[
-                        CrossExamQa(question="数字？", answer="见年报【已核实·#e2】。")
+                        CrossExamQa(question="数字？", answer="见年报【已核实·#r2】。")
                     ],
                 )
             ],
         )
     ]
-    assert side_cited_ledger_ids(rounds, "pro") == frozenset({"#e1", "#e2"})
-    assert side_cited_ledger_ids(rounds, "con") == frozenset({"#e9"})
+    assert side_cited_ledger_ids(rounds, "pro") == frozenset({"#r1", "#r2"})
+    assert side_cited_ledger_ids(rounds, "con") == frozenset({"#r9"})
 
 
 def test_commit_research_narrows_registration():
@@ -294,16 +289,16 @@ def test_commit_research_narrows_registration():
         registrant="pro",
         deep_read=False,
     )
-    assert e1 == "#e1" and e2 == "#e2" and e3 == "#e3"
+    assert e1 == "#r1" and e2 == "#r2" and e3 == "#r3"
     assert led.ids == frozenset()  # 尚未 commit
-    newly = led.commit_research(note_cited_ids={"#e3"})
-    assert newly == frozenset({"#e2", "#e3"})  # deep_read + 笔记引用
-    assert led.ids == frozenset({"#e2", "#e3"})
-    assert "#e1" not in led.ids
+    newly = led.commit_research(note_cited_ids={"#r3"})
+    assert newly == frozenset({"#r2", "#r3"})  # deep_read + 笔记引用
+    assert led.ids == frozenset({"#r2", "#r3"})
+    assert "#r1" not in led.ids
     wire_ids = {e["id"] for e in led.all_entries()}
-    assert wire_ids == {"#e2", "#e3"}
+    assert wire_ids == {"#r2", "#r3"}
     delta = led.drain_delta()
-    assert {e["id"] for e in delta} == {"#e2", "#e3"}
+    assert {e["id"] for e in delta} == {"#r2", "#r3"}
 
 
 @dataclass
@@ -344,14 +339,14 @@ def _ctx() -> ToolContext:
 
 
 def test_pipeline_ledger_guard_rework_then_pass():
-    """闸基准 = 笔记引用集：台账有 #e1 但笔记未绑 → 拦；笔记绑了才放行。"""
+    """闸基准 = 笔记引用集：台账有 #r1 但笔记未绑 → 拦；笔记绑了才放行。"""
     led = EvidenceLedger()
     led.register(url="https://ex.com/a", title="年报", side_key="pro")
     led.register(url="https://ex.com/noise", title="噪声", side_key="pro")
     llm = _SequenceDraftLLM(
         [
-            "论点【已核实·#e2】。",  # 台账有但笔记未绑 → 违规
-            "论点【已核实·#e1】。",
+            "论点【已核实·#r2】。",  # 台账有但笔记未绑 → 违规
+            "论点【已核实·#r1】。",
         ]
     )
     sink = _FakeSink()
@@ -376,17 +371,17 @@ def test_pipeline_ledger_guard_rework_then_pass():
             evidence_ledger=led,
             side_key="pro",
             check_evidence_ledger=True,
-            # 模拟本轮笔记只绑定了 #e1（成稿阶段 notes 为空时靠 allowed 传入）
-            allowed_ledger_ids=frozenset({"#e1"}),
+            # 模拟本轮笔记只绑定了 #r1（成稿阶段 notes 为空时靠 allowed 传入）
+            allowed_ledger_ids=frozenset({"#r1"}),
         )
 
     speech, *_ = asyncio.run(_run())
-    assert speech == "论点【已核实·#e1】。"
+    assert speech == "论点【已核实·#r1】。"
     assert llm.stream_calls == 2
     assert any(e.type is EventType.RUN_OUTPUT_RESET for e in sink.events)
-    # 成稿 hint 只列已绑定 #e1（回炉 steer 会点名违规标签，故不断言 last_user 全无 #e2）
-    assert "- #e1 · 年报" in llm.last_user
-    assert "- #e2 ·" not in llm.last_user
+    # 成稿 hint 只列已绑定 #r1（回炉 steer 会点名违规标签，故不断言 last_user 全无 #r2）
+    assert "- #r1 · 年报" in llm.last_user
+    assert "- #r2 ·" not in llm.last_user
 
 
 def test_pipeline_ledger_guard_demote_on_second_fail():
@@ -421,7 +416,7 @@ def test_pipeline_ledger_guard_demote_on_second_fail():
             evidence_ledger=led,
             side_key="pro",
             check_evidence_ledger=True,
-            allowed_ledger_ids=frozenset({"#e1"}),
+            allowed_ledger_ids=frozenset({"#r1"}),
         )
 
     speech, *_ = asyncio.run(_run())
@@ -431,14 +426,14 @@ def test_pipeline_ledger_guard_demote_on_second_fail():
 
 
 def test_pipeline_closing_allows_prior_cited_union_only():
-    """结辩：只许沿用历轮已引用 id；台账里有但从未引用过的 #e2 仍拦。"""
+    """结辩：只许沿用历轮已引用 id；台账里有但从未引用过的 #r2 仍拦。"""
     led = EvidenceLedger()
     led.register(url="https://ex.com/a", title="年报", side_key="pro")
     led.register(url="https://ex.com/b", title="披萨", side_key="pro")
     llm = _SequenceDraftLLM(
         [
-            "结辩【已核实·#e2】。",
-            "结辩【已核实·#e1】。",
+            "结辩【已核实·#r2】。",
+            "结辩【已核实·#r1】。",
         ]
     )
     sink = _FakeSink()
@@ -463,9 +458,9 @@ def test_pipeline_closing_allows_prior_cited_union_only():
             evidence_ledger=led,
             side_key="pro",
             check_evidence_ledger=True,
-            allowed_ledger_ids=frozenset({"#e1"}),  # 历轮只引过 #e1
+            allowed_ledger_ids=frozenset({"#r1"}),  # 历轮只引过 #r1
         )
 
     speech, *_ = asyncio.run(_run())
-    assert "【已核实·#e1】" in speech
+    assert "【已核实·#r1】" in speech
     assert llm.stream_calls == 2

@@ -50,7 +50,7 @@ describe("splitValueCall", () => {
 describe("splitFactDisplay", () => {
   it("去掉台账机器串，留下人话与状态", () => {
     const out = splitFactDisplay(
-      "EU 责任框架是否存在缺口（#e12/#e15, tier=unknown待评）【待核实】",
+      "EU 责任框架是否存在缺口（#r12/#r15, tier=unknown待评）【待核实】",
     );
     expect(out.body).toBe("EU 责任框架是否存在缺口");
     expect(out.statusLabels).toEqual(["待核实"]);

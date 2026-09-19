@@ -52,7 +52,7 @@ import {
 /**
  * Shared workspace mode control — status for established chats (project inherit /
  * bare scratch). 出生定终身：不改当前会话 folder。§五：云会话不再主推打开本地 /
- * 绑定本机。云桌合回主入口见 §7.6（导出在工具条，只合回产物在导出菜单）。
+ * 绑定本机。云桌合回主入口见 §7.6（导出 ZIP / 到本机文件夹在工具条）。
  */
 
 export interface WorkspaceModeState {

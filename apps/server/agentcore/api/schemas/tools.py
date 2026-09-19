@@ -32,7 +32,7 @@ class CapabilitySkill(BaseModel):
     ``group`` is the Chinese 能力指引 subtitle (编排 / 工作区 / 交付 / 产品 / 工具).
     ``blurb`` is the toolbox shelf description only — not the consult directory.
     ``audience`` is who may see the entry (ceo / worker), same tokens as tool
-    ``available_to``."""
+    ``available_to``. ``requires_tools`` is the wired-tool gate (empty = no gate)."""
 
     name: str
     summary: str
@@ -40,6 +40,7 @@ class CapabilitySkill(BaseModel):
     group: str = ""
     blurb: str = ""
     audience: list[str] = Field(default_factory=lambda: ["ceo", "worker"])
+    requires_tools: list[str] = Field(default_factory=list)
 
 
 class CapabilityGuidelines(BaseModel):

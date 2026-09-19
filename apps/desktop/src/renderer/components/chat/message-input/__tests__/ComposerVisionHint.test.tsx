@@ -156,7 +156,7 @@ describe("ComposerVisionHint", () => {
     expect(screen.queryByTestId("composer-vision-hint")).toBeNull();
   });
 
-  it("识图槽已填 → 不展示", () => {
+  it("识图槽已填但主模型不收图 → 仍展示", () => {
     useComposerDraftStore.getState().setAttachments("__draft__", [png]);
     useProfilesMock.mockReturnValue({
       data: profiles([slottedProfile, textProfile]),
@@ -166,7 +166,8 @@ describe("ComposerVisionHint", () => {
     } as unknown as ReturnType<typeof useLlmModelProfiles>);
     useComposerProfileDraftStore.getState().setProfileId("user-slot");
     render(<ComposerVisionHint />);
-    expect(screen.queryByTestId("composer-vision-hint")).toBeNull();
+    expect(screen.getByTestId("composer-vision-hint")).toBeTruthy();
+    expect(screen.getByText(COMPOSER_VISION_HINT)).toBeTruthy();
   });
 
   it("会话钉住的组合优先于账号默认", () => {

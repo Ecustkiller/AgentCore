@@ -595,42 +595,7 @@ class _StubBackend:
 
 
 @pytest.mark.asyncio
-async def test_image_with_vision_reader_injects_text_and_bills():
-    reader = _StubVisionReader(model="kimi-k2.5", credential_source="user")
-    backend = _StubBackend({"attachments/pic.png": b"\x89PNG\r\nfake"})
-    sink: list = []
-
-    out = await _build_attachment_context(
-        [
-            {
-                "name": "pic.png",
-                "path": "attachments/pic.png",
-                "text": "",
-                "binary": True,
-                "workspace_path": "attachments/pic.png",
-            }
-        ],
-        vision_reader=reader,  # type: ignore[arg-type]
-        backend=backend,  # type: ignore[arg-type]
-        cost_sink=sink,
-    )
-    assert out is not None
-    assert "[image / vision]" in out
-    assert "图中有一只猫和一行标题" in out
-    assert "未配置识图" not in out
-    assert "CEO has no run" not in out
-    assert len(reader.calls) == 1
-    assert len(sink) == 1
-    assert sink[0].role == "vision"
-    assert sink[0].model == "kimi-k2.5"
-    # BYOK slot → same curated nominal, estimated column only (not quota).
-    assert sink[0].cost_estimated_nano > 0
-    assert sink[0].cost_total_nano == 0
-    assert sink[0].cost.get("pricing_source") == "curated"
-
-
-@pytest.mark.asyncio
-async def test_image_without_vision_reader_honest_unconfigured():
+async def test_image_without_native_vision_honest_unconfigured():
     out = await _build_attachment_context(
         [
             {
@@ -648,13 +613,11 @@ async def test_image_without_vision_reader_honest_unconfigured():
     assert out is not None
     assert "[image]" in out
     assert "当前主模型不收图" in out
-    assert "未配置识图兜底" in out
+    assert "未配置识图兜底" not in out
     assert "勿把工作区路径当作已读图" in out
     assert "勿索要重发" in out
     assert "vision 槽" not in out
     assert "VISION_*" not in out
-    assert "未配置识图（组合" not in out
-    # Must not fall back to the generic binary / delegate run block.
     assert "[binary]" not in out
     assert "CEO has no run" not in out
 
@@ -743,8 +706,8 @@ async def test_office_extract_declares_lossy_tables_without_run():
 
 
 @pytest.mark.asyncio
-async def test_heic_routes_to_vision_not_run():
-    """HEIC/HEIF must take eye→text, not the generic [binary]/run path."""
+async def test_heic_routes_to_image_not_run():
+    """HEIC/HEIF stay on the image path, not the generic [binary]/run path."""
     out = await _build_attachment_context(
         [
             {
@@ -762,13 +725,13 @@ async def test_heic_routes_to_vision_not_run():
     assert out is not None
     assert "[image]" in out
     assert "当前主模型不收图" in out
-    assert "未配置识图兜底" in out
+    assert "未配置识图兜底" not in out
     assert "[binary]" not in out
     assert "CEO has no run" not in out
 
 
 @pytest.mark.asyncio
-async def test_heif_ext_without_mime_routes_to_vision():
+async def test_heif_ext_without_mime_routes_to_image():
     out = await _build_attachment_context(
         [
             {
@@ -788,8 +751,8 @@ async def test_heif_ext_without_mime_routes_to_vision():
 
 
 @pytest.mark.asyncio
-async def test_generic_image_mime_routes_to_vision():
-    """image/* (non-excluded) follows vision even when subtype is not in the allowlist."""
+async def test_generic_image_mime_routes_to_image():
+    """image/* (non-excluded) follows the image path even when subtype is not in the allowlist."""
     out = await _build_attachment_context(
         [
             {
@@ -811,7 +774,7 @@ async def test_generic_image_mime_routes_to_vision():
 
 @pytest.mark.asyncio
 async def test_svg_mime_excluded_from_vision_path():
-    """SVG is image/* but not a raster for eye→text — stay on binary path."""
+    """SVG is image/* but not a raster — stay on binary path."""
     out = await _build_attachment_context(
         [
             {
@@ -833,7 +796,7 @@ async def test_svg_mime_excluded_from_vision_path():
 
 @pytest.mark.asyncio
 async def test_main_native_vision_builds_image_parts_skips_reader():
-    """Main catalog vision → multimodal parts; VisionReader must not be called."""
+    """Main catalog vision → multimodal parts; unused VisionReader must not be called."""
     reader = _StubVisionReader(credential_source="user")
     backend = _StubBackend({"attachments/pic.jpg": b"\xff\xd8\xffjpeg"})
     parts: list[dict] = []

@@ -46,6 +46,8 @@ LIST_TRUNCATED_NOTE = (
 LS_REMOVED_FIELDS: tuple[str, ...] = ("pattern", "recursive", "max_depth")
 GLOB_REMOVED_FIELDS: tuple[str, ...] = ("recursive", "max_depth")
 _STAR_CLASS_PATTERNS: frozenset[str] = frozenset({"*", "**", "**/*"})
+# Entire-pattern dump (`*` / `**`) is not a search. `**/*` stays explicit globstar.
+_NAMELESS_LISTING_PATTERNS: frozenset[str] = frozenset({"*", "**"})
 _BRACE_GLOB_RE = re.compile(r"\{([^{}]+)\}")
 _ANY_DIR_RECURSIVE_RE = re.compile(r"^\*\*/([^*/]+)/\*\*/([^/]+)$")
 _ANY_DIR_CONTENTS_RE = re.compile(r"^(?:\*\*/)?([^*/]+)/\*\*(?:/\*)?$")
@@ -61,18 +63,19 @@ _LS_LEFTOVER_MSG = (
     "按文件名递归查找请用 glob。"
     "勿再传 {fields}。"
 )
-_FOLDER_DIR_LEFTOVER_MSG = (
-    "list_folder_dir 只列目标文件夹当前一层（folder_id + directory）。"
-    "勿再传 {fields}。"
-    "跨文件夹按名查找请 delegate 到该 folder_id；不要用 glob（glob 只搜本会话出生桌）。"
-)
 _GLOB_LEFTOVER_MSG = (
-    "glob 永远递归，搜索根用 path（可省=整仓根；directory 与 path 同义）。"
+    "glob 按文件名查找。搜索根用 path（可省=整仓根；directory 与 path 同义）。"
     "勿传 {fields}。一层列举请用 file_list。"
 )
 _GLOB_EMPTY_MSG = (
     "glob 需要非空 pattern（例如 `*.py`、`**/*.ts`、`**/name/**`）。"
     "一层列举请用 file_list。"
+)
+_GLOB_NAMELESS_MSG = (
+    "glob 按文件名查找，不是一层列举。"
+    "看当前层用 file_list。"
+    "递归全部用 `**/*`。"
+    "勿只填 `*` 或 `**`。"
 )
 
 
@@ -138,7 +141,7 @@ def external_directory_hint(backend: Any) -> str:
     if not mounts:
         return (
             f"{guide}；本对话尚无会话级区外目录授权"
-            "（对本机路径 `file_read` / `file_copy` 后才会出现 mounts）。"
+            "（对本机路径 `file_read` / `file_batch` copy 后才会出现 mounts）。"
         )
     parts = [f"`external/{a}/`" for a in mounts]
     return f"{guide}；当前 mounts：{'；'.join(parts)}。"
@@ -155,17 +158,6 @@ def ls_leftover_error(arguments: dict[str, Any], start: float) -> ToolResult | N
         return None
     return _error(
         _LS_LEFTOVER_MSG.format(fields=" / ".join(fields)),
-        start,
-        contract_failure=True,
-    )
-
-
-def folder_dir_leftover_error(arguments: dict[str, Any], start: float) -> ToolResult | None:
-    fields = leftover_fields(arguments, LS_REMOVED_FIELDS)
-    if not fields:
-        return None
-    return _error(
-        _FOLDER_DIR_LEFTOVER_MSG.format(fields=" / ".join(fields)),
         start,
         contract_failure=True,
     )
@@ -238,13 +230,23 @@ def _compile_star_dir_plan(raw: str) -> GlobPlan | None:
     return GlobPlan(None, prefix, _star_or_all(name), 1, True)
 
 
-def compile_glob_pattern(pattern: str) -> GlobPlan | None:
-    """Compile one globstar pattern onto ``rg --files`` (None if empty)."""
-    raw = (pattern or "").strip().replace("\\", "/").strip("/")
+def is_nameless_listing_pattern(pattern: str) -> bool:
+    """True when any brace alternative is a nameless dump (`*` / `**`)."""
+    raw = (pattern or "").strip()
     if not raw:
+        return False
+    for item in expand_brace_globs(raw):
+        token = item.strip().replace("\\", "/").strip("/")
+        if token in _NAMELESS_LISTING_PATTERNS:
+            return True
+    return False
+
+
+def compile_glob_pattern(pattern: str) -> GlobPlan | None:
+    """Compile one globstar pattern onto ``rg --files`` (None if empty or nameless)."""
+    raw = (pattern or "").strip().replace("\\", "/").strip("/")
+    if not raw or raw in _NAMELESS_LISTING_PATTERNS:
         return None
-    if raw in _STAR_CLASS_PATTERNS:
-        return GlobPlan(None, ".", "*", GLOB_DEPTH)
 
     leading_any = raw.startswith("**/")
     body = raw[3:] if leading_any else raw
@@ -288,7 +290,7 @@ def compile_glob_pattern(pattern: str) -> GlobPlan | None:
 
 
 def compile_glob_patterns(pattern: str) -> list[GlobPlan] | None:
-    """Brace-expand then compile. ``None`` only when the whole pattern is empty."""
+    """Brace-expand then compile. ``None`` when empty or nameless ``*`` / ``**``."""
     raw = (pattern or "").strip()
     if not raw:
         return None
@@ -367,9 +369,13 @@ def glob_plan_to_files_query(
 
 
 def glob_pattern_reject(pattern: str, start: float) -> ToolResult:
-    """``contract_failure`` for an empty glob pattern."""
-    del pattern
-    return _error(_GLOB_EMPTY_MSG, start, contract_failure=True)
+    """``contract_failure`` for an empty or nameless glob pattern."""
+    msg = (
+        _GLOB_NAMELESS_MSG
+        if is_nameless_listing_pattern(pattern)
+        else _GLOB_EMPTY_MSG
+    )
+    return _error(msg, start, contract_failure=True)
 
 
 def format_ls_lines(entries: list[DirEntry]) -> str:

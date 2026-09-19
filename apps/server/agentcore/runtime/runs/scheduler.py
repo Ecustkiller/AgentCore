@@ -38,17 +38,13 @@ class BoundaryReason(Enum):
     control to the host's :data:`OnBoundary` hook; the reason tells the host which
     arm is in play:
 
-    - ``CHECKPOINT``: a ``checkpoint_after`` node COMPLETED and downstream work
-      remains — the existing user ``plan_review`` (continue / adjust / stop).
     - ``SCOPE`` (偏离信号 / 自底向上反应臂): a COMPLETED node flagged a 职责/范围 deviation
       (``escalate kind=scope``) while not-yet-run downstream remains — the CEO reads the
       deviation + the node's output and re-steers the un-run tail (``replan``).
-      No live user (≠ ``CHECKPOINT``).
 
     → 见设计: docs/03-AI核心/执行引擎架构设计.md §受监督的波循环
     """
 
-    CHECKPOINT = "checkpoint"
     SCOPE = "scope"
 
 
@@ -58,13 +54,11 @@ class BoundaryOutcome(Enum):
     Generalises the old ``on_checkpoint`` bool (proceed / stop) to a three-way
     verdict so the same seam serves both arms:
 
-    - ``PROCEED``: resolve and keep scheduling — a CHECKPOINT continues to the gated
-      downstream.
+    - ``PROCEED``: resolve and keep scheduling.
     - ``YIELD``: soft-pause like ``should_stop`` — drain in-flight, return the partial
       map with the un-run tail LEFT OUT, so a resume re-runs exactly it (the CEO-arm
       hand-back: the CEO acts on the boundary then resumes the same DAG).
-    - ``ABORT``: graceful abort — drain, then materialise the un-run tail as SKIPPED
-      (the existing plan_review ``stop`` shape).
+    - ``ABORT``: graceful abort — drain, then materialise the un-run tail as SKIPPED.
     """
 
     PROCEED = "proceed"
@@ -76,7 +70,7 @@ class BoundaryOutcome(Enum):
 # boundary with the reason, the triggering node(s), and the completed-so-far map;
 # returns the :class:`BoundaryOutcome`. Like :data:`RunExecutor` it stays a
 # host-injected callable, so the scheduler owns no interaction / LLM concern — the
-# host decides how to resolve each boundary (user plan_review or CEO replan).
+# host decides how to resolve each boundary (CEO replan).
 OnBoundary = Callable[
     [BoundaryReason, Sequence[RunSpec], Mapping[str, RunState]],
     Awaitable[BoundaryOutcome],

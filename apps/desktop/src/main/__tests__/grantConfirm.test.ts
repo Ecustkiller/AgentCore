@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { type Mock, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({
@@ -6,7 +7,13 @@ vi.mock("electron", () => ({
 }));
 
 import { dialog } from "electron";
-import { confirmFolderWriteGrant, sessionModeCovers } from "../fs/grantConfirm";
+import {
+  absIsUnderAnyRoot,
+  confirmFolderReadGrant,
+  confirmFolderWriteGrant,
+  grantNeedsConfirm,
+  sessionModeCovers,
+} from "../fs/grantConfirm";
 
 const showMessageBox = dialog.showMessageBox as unknown as Mock;
 
@@ -22,6 +29,71 @@ describe("sessionModeCovers", () => {
     expect(sessionModeCovers("organize", "attach_rw")).toBe(false);
     expect(sessionModeCovers("attach_rw", "organize")).toBe(true);
     expect(sessionModeCovers(undefined, "organize")).toBe(false);
+  });
+});
+
+describe("grantNeedsConfirm", () => {
+  it("well-known and inbox abs stay silent on first readonly mint", () => {
+    expect(
+      grantNeedsConfirm({
+        mode: "readonly",
+        haveMode: undefined,
+        wellKnown: "downloads",
+        absUnderInbox: false,
+      }),
+    ).toBe(false);
+    expect(
+      grantNeedsConfirm({
+        mode: "readonly",
+        haveMode: undefined,
+        wellKnown: null,
+        absUnderInbox: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("model-invented non-inbox abs confirms on first readonly mint", () => {
+    expect(
+      grantNeedsConfirm({
+        mode: "readonly",
+        haveMode: undefined,
+        wellKnown: null,
+        absUnderInbox: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("already-granted session root does not re-ask", () => {
+    expect(
+      grantNeedsConfirm({
+        mode: "readonly",
+        haveMode: "readonly",
+        wellKnown: null,
+        absUnderInbox: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("organize / attach_rw still confirm even under inbox", () => {
+    expect(
+      grantNeedsConfirm({
+        mode: "organize",
+        haveMode: "readonly",
+        wellKnown: "desktop",
+        absUnderInbox: true,
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("absIsUnderAnyRoot", () => {
+  it("matches the inbox root and a nested file", () => {
+    const inbox = join("/tmp", "Downloads");
+    expect(absIsUnderAnyRoot(inbox, [inbox])).toBe(true);
+    expect(absIsUnderAnyRoot(join(inbox, "pack.zip"), [inbox])).toBe(true);
+    expect(absIsUnderAnyRoot(join("/tmp", "Projects", "app"), [inbox])).toBe(
+      false,
+    );
   });
 });
 
@@ -49,5 +121,22 @@ describe("confirmFolderWriteGrant", () => {
     const box = showMessageBox.mock.calls.at(-1)?.[0];
     expect(box.buttons).toEqual(["取消", "允许改这个目录"]);
     expect(box.detail).toContain("可覆盖");
+  });
+});
+
+describe("confirmFolderReadGrant", () => {
+  it("取消为默认；允许只读", async () => {
+    showMessageBox.mockResolvedValueOnce({ response: 0 });
+    await expect(
+      confirmFolderReadGrant({ displayLabel: "工程" }),
+    ).resolves.toBe(false);
+    showMessageBox.mockResolvedValueOnce({ response: 1 });
+    await expect(
+      confirmFolderReadGrant({ displayLabel: "工程" }),
+    ).resolves.toBe(true);
+    const box = showMessageBox.mock.calls.at(-1)?.[0];
+    expect(box.defaultId).toBe(0);
+    expect(box.buttons).toEqual(["取消", "允许只读"]);
+    expect(box.detail).toContain("不能改原件");
   });
 });

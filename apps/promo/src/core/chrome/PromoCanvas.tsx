@@ -29,7 +29,7 @@ import { GraphStage } from "../graph/GraphStage";
  * a mirrored composer: the product canvas reads as a pure board by default.
  *
  * The spine cards mirror SimpleTurnNode / TurnSummaryNode; the focused card mirrors
- * FocusedTurnNode; the right rail mirrors CanvasDecisionPanel (指挥台, 计划复核 + 工作者
+ * FocusedTurnNode; the right rail mirrors CanvasDecisionPanel (指挥台, 拍板 + 工作者
  * 上报). Bottom-anchored so the focused turn sits low (under a spotlight) with
  * earlier turns climbing into the header — the same latest-turn camera the real
  * canvas parks on.
@@ -310,7 +310,7 @@ function ZoomControls() {
 }
 
 /** 图上指挥 指挥台 (前端UX设计.md §6.2): the boss's pending decisions docked right.
- * Mirrors CanvasDecisionPanel — a 计划复核 checkpoint (plan_review) + a worker
+ * Mirrors CanvasDecisionPanel — an ask_user checkpoint + a worker
  * 上报 (成本分析 waiting on the budget cap that paused the budget turn above). */
 function CommandDeck() {
   return (
@@ -331,20 +331,19 @@ function CommandDeck() {
         <div className="rounded-xl border border-warning/30 bg-warning/5 p-3">
           <div className="mb-1.5 flex items-center gap-1.5">
             <ClipboardCheck size={14} className="text-warning" />
-            <span className="text-sm font-medium text-warning">计划复核</span>
+            <span className="text-sm font-medium text-foreground">
+              CEO 已定稿产品策略，待你确认推进
+            </span>
           </div>
-          <p className="text-sm font-medium text-foreground">
-            CEO 已定稿产品策略，待你确认推进
-          </p>
-          <p className="mt-1 text-xs leading-snug text-muted-foreground">
+          <p className="text-xs leading-snug text-muted-foreground">
             综合圆桌辩论的主持人裁决：先验证关键风险，再分阶段放大投入，锁定团队协作主线。确认后并行产出产品需求与技术方案。
           </p>
           <div className="mt-3 flex gap-2">
             <span className="flex-1 rounded-lg bg-primary px-3 py-1.5 text-center text-sm font-medium text-primary-foreground">
-              继续
+              提交
             </span>
             <span className="flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-center text-sm text-foreground">
-              调整
+              取消
             </span>
           </div>
         </div>

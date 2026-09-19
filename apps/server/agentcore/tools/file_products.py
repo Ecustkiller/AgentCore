@@ -203,7 +203,6 @@ def with_file_products_marker(content: str, products: Iterable[FileProduct]) -> 
 LANDING_TOOL_NAMES: tuple[str, ...] = (
     "file_write",
     "str_replace",
-    "file_move",
-    "file_copy",
+    "file_batch",
 )
 LANDING_TOOLS: frozenset[str] = frozenset(LANDING_TOOL_NAMES)

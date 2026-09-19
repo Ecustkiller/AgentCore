@@ -17,8 +17,9 @@ class MessageAttachment(BaseModel):
 
     Text files carry client-extracted ``text``. Raster image attachments are
     **resident-first** (``binary=True`` + ``workspace_path``); at send-turn prepare
-    the server eye→texts them via ``VisionReader`` into the attachment prompt block
-    (main LLM stays text-only — not native multimodal). Binary office/PDF may gain
+    they become native ``image_url`` parts on the **current main** model when it
+    accepts images, else an honest「当前主模型不收图」note (no sidecar eye).
+    Binary office/PDF may gain
     server-side ``text`` after分流预解析 (markitdown → ``*.md`` copy); xlsx/csv
     stay path-only so workers can ``code_execute``. ``kind="conversation"`` references
     another of the user's conversations: recent messages are materialized into
@@ -46,6 +47,10 @@ class MessageAttachment(BaseModel):
     # Client-pre-resident path under ``attachments/`` (引用即驻留). When set,
     # ``persist_attachments`` skips rewriting and keeps this path.
     workspace_path: str | None = None
+    # This-turn @ citation of a live file on another registered Folder.
+    # Server does not copy it onto the sitting desk; ``file_read`` binds that
+    # Folder once. Omit when the file is on the sitting desk.
+    source_folder_id: str | None = Field(default=None, max_length=64)
 
 
 class AgentMention(BaseModel):
@@ -73,6 +78,9 @@ class StoredAttachment(BaseModel):
     truncated: bool = False
     kind: Literal["file", "dir", "conversation", "document"] = "file"
     workspace_path: str | None = None
+    # Live file on another registered Folder (this-turn cite). None for copies
+    # under ``attachments/`` and same-desk citations.
+    source_folder_id: str | None = None
     # Set only for kind="conversation": the referenced conversation's id, so the
     # stored chip can label it and (later) jump back to that conversation.
     conversation_id: str | None = None
@@ -164,10 +172,11 @@ class SetMessageFeedbackRequest(BaseModel):
 # --- Interaction resolve (§8.2 unified suspend-resume bridge) ---
 # One ``POST /conversations/{id}/interactions/{interaction_id}`` settles hot-path
 # interactions; the body is discriminated on ``kind`` (approval /
-# client_tool / escalation / stage_card). Cold-path
-# ``ask_user`` / ``plan_review`` are NOT in this union — they
-# finalize the turn and continue via ``POST .../resume``. Leftover
-# ``team_preview`` frames refuse resume (410 Gone); new cards are not emitted.
+# client_tool / escalation). Cold-path
+# ``ask_user`` is NOT in this union — it
+# finalize the turn and continue via ``POST .../resume``. Unknown
+# leftover kinds (old ``team_preview`` / ``stage_card`` / ``plan_review``) are not in the
+# live union — POST is 422; hung leftover frames are skipped, not restored.
 
 
 class ResolveApprovalInteraction(BaseModel):
@@ -234,25 +243,11 @@ class ResolveEscalationInteraction(BaseModel):
     transfer_ownership: bool = False
 
 
-class ResolveStageCardInteraction(BaseModel):
-    """Leftover 阶段推进卡：kind 仍在 journal，已不是开辩入口。
-
-    热路 ``POST …/interactions/{id}`` 一律 410。开辩须用户在对话里点名。
-    字段仍接受 ``start_debate`` / ``research_first``（旧客户端），服务端不执行。
-    """
-
-    kind: Literal["stage_card"] = "stage_card"
-    decision: Literal["start_debate", "research_first"]
-    note: str = Field("", max_length=4000)
-    motion_override: str | None = Field(None, max_length=2000)
-
-
 # Discriminated union body for the unified resolve endpoint.
 ResolveInteractionRequest = (
     ResolveApprovalInteraction
     | ResolveClientToolInteraction
     | ResolveEscalationInteraction
-    | ResolveStageCardInteraction
 )
 
 
@@ -287,12 +282,6 @@ def interaction_result_from_body(body: ResolveInteractionRequest) -> Any:
             "answer": body.answer,
             "use_assumption": body.use_assumption,
             "transfer_ownership": body.transfer_ownership,
-        }
-    if isinstance(body, ResolveStageCardInteraction):
-        return {
-            "decision": body.decision,
-            "note": body.note,
-            "motion_override": body.motion_override,
         }
 
     raise ValueError(f"unknown interaction kind: {getattr(body, 'kind', None)!r}")
@@ -432,19 +421,17 @@ class AcceptRunOutcomeResponse(BaseModel):
 class ResumeTurnRequest(BaseModel):
     """Body for ``POST .../messages/{message_id}/resume`` (结构化挂起 2b).
 
-    Continues a turn that paused at a plan_review / ask_user checkpoint and was
+    Continues a turn that paused at an ask_user checkpoint and was
     DURABLY persisted (so it survived a client disconnect / server restart — the live
     in-process resolve is the corresponding interaction instead). Same decision
-    vocabulary as the live resolve: ``continue`` (proceed — run the gated downstream
-    for plan_review / accept the CEO direction for ask_user),
-    ``adjust`` (plan_review: inject ``note`` as a steer then continue;
-    ``note`` must be non-empty),
+    vocabulary as the live resolve: ``continue`` (accept the CEO direction),
+    ``adjust`` (rejected on ask_user; leftover ``plan_review`` resume is 410),
     or ``stop`` (end the turn here). ``selected``
-    carries the option(s) the user picked from an ask_user menu (ignored for
-    plan_review; the server drops any pick not actually offered). The engine-only
+    carries the option(s) the user picked from an ask_user menu (the server drops
+    any pick not actually offered). The engine-only
     ``timeout`` is never sent by a client.
 
-    Leftover ``team_preview`` resume is 410 Gone (new cards are not emitted).
+    Leftover ``team_preview`` / ``plan_review`` resume is 410 Gone (new cards are not emitted).
     Extra leftover kickoff keys from old clients (``excluded_run_ids`` /
     ``write_capability_overrides`` / ``model_overrides``) are not in this schema
     and 422. Hot-path ``ResolveInteraction`` is not extended.
@@ -475,13 +462,12 @@ class PendingInteractionSummary(BaseModel):
 
     Surfaced on conversation reopen via ``GET .../recovery``. ``payload`` is the
     original ``*_required`` wire payload verbatim. Cold-path pauses stay in ``paused``.
-    Includes hot-path (approval / escalation) and durable ``stage_card``.
+    Includes hot-path (approval / escalation).
     """
 
     kind: Literal[
         "approval",
         "escalation",
-        "stage_card",
     ]
     id: str
     message_id: str
@@ -489,20 +475,19 @@ class PendingInteractionSummary(BaseModel):
 
 
 class PausedTurnSummary(BaseModel):
-    """A turn awaiting resume after a durable plan_review / ask_user pause.
+    """A turn awaiting resume after a durable ask_user pause.
 
     Surfaced on conversation reopen so the client can re-render the right resume card
     by ``kind`` and offer the kind-appropriate actions → the resume endpoint
-    (plan_review: continue / adjust / stop; ask_user: continue / stop).
+    (ask_user: continue / stop).
     ``message_id`` is both the pause key and the id the resumed assistant message will
     reuse, so an optimistic bubble reconciles cleanly.
 
-    Leftover ``team_preview`` (开工卡) frames are skipped on list (not serialized);
+    Leftover ``team_preview`` / ``plan_review`` frames are skipped on list (not serialized);
     resume of a leftover frame is 410 Gone.
-    plan_review carries ``steps`` (the reviewed checkpoint nodes) + ``pending`` (the
-    gated downstream); ask_user carries the unified card payload
+    ask_user carries the unified card payload
     ``question`` (the framing / opening line) + ``questions`` (empty for a compact
-    mid-task fork). The unused set is empty for the other kinds.
+    mid-task fork). Unused ``steps`` / ``pending`` stay empty.
     """
 
     message_id: str
@@ -511,7 +496,7 @@ class PausedTurnSummary(BaseModel):
     user_message: str = ""
     # Client-minted id of the user bubble (sidecar write-back pins the persisted row).
     user_message_id: str = ""
-    # plan_review
+    # unused leftover slots (retired plan_review card)
     steps: list[dict[str, Any]] = Field(default_factory=list)
     pending: list[dict[str, Any]] = Field(default_factory=list)
     # ask_user
@@ -529,10 +514,10 @@ class TurnRecoveryResponse(BaseModel):
 
     - ``live_running``: a detached in-flight run is still alive to 续看 (实时重连续看
       C1 · slice 1b) — the client attaches (``GET .../stream``) to replay + tail it.
-    - ``paused``: turns that durably paused at a plan_review / ask_user checkpoint and
+    - ``paused``: turns that durably paused at an ask_user checkpoint and
       lost their live stream (结构化挂起 2b) — each renders a resume card.
     - ``pending_interactions``: hot-path interactions still awaiting settlement
-      (journal fold: approval / escalation / stage_card).
+      (journal fold: approval / escalation).
       Cold-path stays in ``paused``.
     """
 

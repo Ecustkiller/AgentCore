@@ -1,5 +1,5 @@
 /**
- * CodeMirror6 内联实时预览：把 mermaid / markmap / 数学块($$) / GFM 表格 / frontmatter 就地
+ * CodeMirror6 内联实时预览：把 mermaid / markmap / 数学块($$ / \[) / GFM 表格 / frontmatter 就地
  * 渲染成 React widget，光标进入块内（选区与块相交）时还原为源码以便编辑。「所见即所得是视图而非
  * 模型」——源仍是 markdown 文本本身，widget 只是装饰，故零 round-trip 债、diff 干净（见文档
  * 编辑器落地设计 §二）。
@@ -20,6 +20,7 @@
  */
 
 import { DiagramBlock } from "@/components/chat/Diagram";
+import { findTexMathSpans } from "@/lib/texDelimiters";
 import { syntaxTree } from "@codemirror/language";
 import {
   type EditorState,
@@ -160,6 +161,36 @@ function collectFrontmatter(
   return { from: open.from, to: close.to };
 }
 
+function rangesOverlap(
+  span: { from: number; to: number },
+  ranges: { from: number; to: number }[],
+): boolean {
+  return ranges.some((r) => span.from < r.to && span.to > r.from);
+}
+
+/** Display `\[...\]` on their own lines — inline `\(` stays source, same as `$`. */
+function collectTexDisplay(
+  state: EditorState,
+  out: RawBlock[],
+  skip: { from: number; to: number }[],
+): void {
+  const text = state.doc.toString();
+  for (const span of findTexMathSpans(text)) {
+    if (!span.display) continue;
+    if (rangesOverlap(span, skip)) continue;
+    const startLine = state.doc.lineAt(span.from);
+    const endLine = state.doc.lineAt(Math.max(span.from, span.to - 1));
+    const before = startLine.text.slice(0, span.from - startLine.from).trim();
+    const after = endLine.text.slice(span.to - endLine.from).trim();
+    if (before || after) continue;
+    const r = lineAligned(state, span.from, span.to);
+    out.push({
+      ...r,
+      widget: makeMathWidget(span.tex.trim()),
+    });
+  }
+}
+
 function collectMath(
   state: EditorState,
   out: RawBlock[],
@@ -243,6 +274,7 @@ function collectBlocks(state: EditorState): RawBlock[] {
     },
   });
   collectMath(state, out, skip);
+  collectTexDisplay(state, out, skip);
   out.sort((a, b) => a.from - b.from);
   return out;
 }

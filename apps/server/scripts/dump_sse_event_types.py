@@ -28,6 +28,11 @@ def main() -> None:
     for v in values:
         lines.append(f'  | "{v}"')
     lines[-1] = f"{lines[-1]};"
+    lines.append("")
+    lines.append("export const SSE_EVENT_TYPE_VALUES = [")
+    for v in values:
+        lines.append(f'  "{v}",')
+    lines.append("] as const satisfies readonly SSEEventType[];")
     content = "\n".join(lines) + "\n"
 
     out = (

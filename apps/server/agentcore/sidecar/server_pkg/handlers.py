@@ -769,6 +769,10 @@ class HandlerMixin:
             )
             return
 
+        parsed = await self._try_parse_resume_params(request_id, params)
+        if parsed is None:
+            return
+
         busy_reason = self.busy_reason_for_resume(conversation_id, message_id)
         if busy_reason is not None:
             await self._on_resume_when_busy(
@@ -777,6 +781,7 @@ class HandlerMixin:
                 message_id=message_id,
                 conversation_id=conversation_id,
                 busy_reason=busy_reason,
+                parsed=parsed,
             )
             return
 
@@ -789,20 +794,9 @@ class HandlerMixin:
         if await self._reject_if_missing_inference(request_id, op="resume"):
             return
 
-        from agentcore.core.errors import GoneError
-        from agentcore.runtime.kickoff.retired import TEAM_PREVIEW_UNRECOVERABLE
-
-        try:
-            suspension = await self._paused_store.claim(
-                message_id, conversation_id=conversation_id
-            )
-        except GoneError:
-            await self._send(
-                protocol.make_error(
-                    request_id, protocol.INVALID_PARAMS, TEAM_PREVIEW_UNRECOVERABLE
-                )
-            )
-            return
+        suspension = await self._paused_store.claim(
+            message_id, conversation_id=conversation_id
+        )
         if suspension is None:
             await self._send(
                 protocol.make_error(
@@ -811,7 +805,6 @@ class HandlerMixin:
             )
             return
 
-        parsed = self._parse_resume_params(params)
         decision = parsed["decision"]
         note = parsed["note"]
         selected = parsed["selected"]
@@ -849,6 +842,17 @@ class HandlerMixin:
         )
         self._register_turn(message_id, task, conversation_id=conversation_id)
 
+    async def _try_parse_resume_params(
+        self, request_id: Any, params: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        try:
+            return self._parse_resume_params(params)
+        except ValueError as exc:
+            await self._send(
+                protocol.make_error(request_id, protocol.INVALID_PARAMS, str(exc))
+            )
+            return None
+
     def _parse_resume_params(self, params: dict[str, Any]) -> dict[str, Any]:
         decision = parse_decision(params.get("decision"))
         note = str(params.get("note") or "")
@@ -869,6 +873,7 @@ class HandlerMixin:
         message_id: str,
         conversation_id: str,
         busy_reason: str,
+        parsed: dict[str, Any],
     ) -> None:
         """Busy cold resume: prewrite → ``resume_deferred`` → wait → claim → run.
 
@@ -908,20 +913,9 @@ class HandlerMixin:
             )
             return
 
-        from agentcore.core.errors import GoneError
-        from agentcore.runtime.kickoff.retired import TEAM_PREVIEW_UNRECOVERABLE
-
-        try:
-            peeked = await self._paused_store.load(
-                message_id, conversation_id=conversation_id
-            )
-        except GoneError:
-            await self._send(
-                protocol.make_error(
-                    request_id, protocol.INVALID_PARAMS, TEAM_PREVIEW_UNRECOVERABLE
-                )
-            )
-            return
+        peeked = await self._paused_store.load(
+            message_id, conversation_id=conversation_id
+        )
         if peeked is None:
             await self._send(
                 protocol.make_error(
@@ -930,7 +924,6 @@ class HandlerMixin:
             )
             return
 
-        parsed = self._parse_resume_params(params)
         decision = parsed["decision"]
         note = parsed["note"]
         selected = parsed["selected"]

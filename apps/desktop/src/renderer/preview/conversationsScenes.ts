@@ -213,9 +213,9 @@ export const CONVERSATIONS_PREVIEW_SCENES: readonly ConversationsPreviewScene[] 
       description: "归档行与时间线同密度",
     },
     {
-      id: "conversations-collaboration",
-      title: "文件夹协作时间线",
-      description: "文件夹筛选 · 幕摘要 + 阶段产物",
+      id: "conversations-folder",
+      title: "文件夹筛选",
+      description: "选中文件夹 · 对话列表 + 浏览文件",
     },
     {
       id: "conversations-trash",
@@ -223,67 +223,6 @@ export const CONVERSATIONS_PREVIEW_SCENES: readonly ConversationsPreviewScene[] 
       description: "已删对话 + 已删文件夹 · 保留期倒计时 + 恢复",
     },
   ] as const;
-
-/** Offline mock for `#/preview/conversations?s=conversations-collaboration`. */
-export function buildCollaborationTimelineMock(folderId: string) {
-  return {
-    folder_id: folderId,
-    total: 2,
-    limit: 20,
-    offset: 0,
-    dossier_refs_note:
-      "路径级约定文档消费事实（本场辩论开赛注入或会话内 file_read），非跨会话过程边",
-    items: [
-      {
-        conversation_id: "c-pin-1",
-        title: "Q3 路线图讨论",
-        updated_at: hoursAgo(2),
-        execution_id: "exec-1",
-        host_turn_id: "turn-mlr-1",
-        acts: [
-          {
-            act_id: "act-1",
-            kind: "multi_agent" as const,
-            title: "多视角调研",
-          },
-          {
-            act_id: "act-2",
-            kind: "debate" as const,
-            title: "辩论对抗",
-          },
-        ],
-        dossier_refs: [
-          {
-            path: "AgentCore/文档/research/法律透镜报告.md",
-            sources: ["dossier_inject", "file_read"] as (
-              | "dossier_inject"
-              | "file_read"
-            )[],
-          },
-          {
-            path: "AgentCore/文档/research/汇总与命题卡.md",
-            sources: ["file_read"] as ("dossier_inject" | "file_read")[],
-          },
-        ],
-      },
-      {
-        conversation_id: "c-today-2",
-        title: "审批流文案校对",
-        updated_at: hoursAgo(4),
-        execution_id: "exec-2",
-        host_turn_id: "turn-debate-1",
-        acts: [
-          {
-            act_id: "act-1",
-            kind: "debate" as const,
-            title: "辩论对抗",
-          },
-        ],
-        dossier_refs: [],
-      },
-    ],
-  };
-}
 
 export function buildConversationsPreviewGrouped(): GroupedConversations {
   return {

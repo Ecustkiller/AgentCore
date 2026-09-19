@@ -262,8 +262,8 @@ def test_closing_evidence_guard_rewrites_once_on_unknown_id():
     led.register(url="https://ex.com/audit", title="2024成本审计", side_key="pro")
     llm = _SequenceDraftLLM(
         [
-            "结辩：街访支持【已核实·#e99】。",
-            "结辩：降本可核实【已核实·#e1】，应有条件采用。",
+            "结辩：街访支持【已核实·#r99】。",
+            "结辩：降本可核实【已核实·#r1】，应有条件采用。",
         ]
     )
     sink = _FakeSink()
@@ -287,12 +287,12 @@ def test_closing_evidence_guard_rewrites_once_on_unknown_id():
             evidence_ledger=led,
             side_key="pro",
             check_evidence_ledger=True,
-            allowed_ledger_ids=frozenset({"#e1"}),
+            allowed_ledger_ids=frozenset({"#r1"}),
         )
     )
     assert llm.stream_calls == 2
-    assert "【已核实·#e1】" in speech
-    assert "【已核实·#e99】" not in speech
+    assert "【已核实·#r1】" in speech
+    assert "【已核实·#r99】" not in speech
     assert "[系统提示]" in llm.last_user
     resets = [e for e in sink.events if e.type is EventType.RUN_OUTPUT_RESET]
     assert len(resets) == 1
@@ -327,7 +327,7 @@ def test_closing_evidence_guard_demotes_after_second_violation():
             evidence_ledger=led,
             side_key="pro",
             check_evidence_ledger=True,
-            allowed_ledger_ids=frozenset({"#e1"}),
+            allowed_ledger_ids=frozenset({"#r1"}),
         )
     )
     assert llm.stream_calls == 2

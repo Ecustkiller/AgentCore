@@ -6,7 +6,7 @@ import io
 import zipfile
 from pathlib import Path
 
-from agentcore.tools.builtin.archive_extract import ArchiveExtractTool
+from agentcore.tools.builtin.archive import ArchiveTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
@@ -35,8 +35,8 @@ async def test_archive_extract_success(tmp_path: Path):
         tmp_path / "pkg.zip",
         {"_inventory/a.txt": "alpha", "readme.md": "# hi"},
     )
-    result = await ArchiveExtractTool().execute(
-        {"archive": "pkg.zip", "dest": "out"},
+    result = await ArchiveTool().execute(
+        {"action": "extract","archive": "pkg.zip", "dest": "out"},
         _ctx(tmp_path),
     )
     assert result.success is True
@@ -54,8 +54,8 @@ async def test_archive_extract_rejects_zip_slip(tmp_path: Path):
         zf.writestr("../escape.txt", "evil")
     (tmp_path / "evil.zip").write_bytes(buf.getvalue())
 
-    result = await ArchiveExtractTool().execute(
-        {"archive": "evil.zip", "dest": "out"},
+    result = await ArchiveTool().execute(
+        {"action": "extract","archive": "evil.zip", "dest": "out"},
         _ctx(tmp_path),
     )
     assert result.success is False
@@ -65,8 +65,8 @@ async def test_archive_extract_rejects_zip_slip(tmp_path: Path):
 
 
 async def test_archive_extract_missing_archive(tmp_path: Path):
-    result = await ArchiveExtractTool().execute(
-        {"archive": "missing.zip", "dest": "out"},
+    result = await ArchiveTool().execute(
+        {"action": "extract","archive": "missing.zip", "dest": "out"},
         _ctx(tmp_path),
     )
     assert result.success is False
@@ -74,8 +74,8 @@ async def test_archive_extract_missing_archive(tmp_path: Path):
 
 
 async def test_archive_extract_in_schema_and_points_off_code_execute():
-    schema = ArchiveExtractTool().schema
-    assert schema.name == "archive_extract"
+    schema = ArchiveTool().schema
+    assert schema.name == "archive"
     assert "code_execute" not in schema.description
     assert "zip-slip" not in schema.description
 
@@ -123,8 +123,8 @@ async def test_archive_extract_rejects_lied_file_size(tmp_path: Path, monkeypatc
     monkeypatch.setattr(zipfile.ZipFile, "infolist", infolist)
     monkeypatch.setattr(zipfile.ZipFile, "open", patched_open)
 
-    result = await ArchiveExtractTool().execute(
-        {"archive": "lied.zip", "dest": "out"},
+    result = await ArchiveTool().execute(
+        {"action": "extract","archive": "lied.zip", "dest": "out"},
         _ctx(tmp_path),
     )
     assert result.success is False

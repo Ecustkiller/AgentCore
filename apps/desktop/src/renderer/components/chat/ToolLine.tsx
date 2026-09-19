@@ -91,10 +91,9 @@ const PEEK_SUPPRESSED = new Set([
   // 文件夹指挥面 + 同类漏网：折叠一行，结果只在展开。
   "list_folders",
   "resolve_folder",
+  "folders",
   "create_folder",
   "delete_folder",
-  "list_folder_dir",
-  "read_folder_file",
   "remember",
   "update_folder_profile",
   "file_batch",
@@ -103,6 +102,7 @@ const PEEK_SUPPRESSED = new Set([
   "md_export",
   "archive_extract",
   "archive_create",
+  "archive",
   "download_url",
   "read_image",
   "code_search",
@@ -119,6 +119,7 @@ const PEEK_SUPPRESSED = new Set([
   "file_delete",
   "file_move",
   "file_copy",
+  "file_batch",
   "mkdir",
   // CEO 协调原语：标题已自解释（撤队员 / 裁决求助另挂角色名），peek 只是操作确认文案。
   // wait 成功回执不是过程信息（无 peek / 无 chevron，见 hasToolResultBody）。
@@ -128,7 +129,7 @@ const PEEK_SUPPRESSED = new Set([
   "resolve_escalation",
   "queue_user_message",
   "wait",
-  // grep 计数走标题 inlineMeta；未知结果形状不得再起一行贴正则/命中原文。
+  // grep：标题已有 pattern；命中列表只在展开。折叠不挂计数 / 未匹配。
   "grep",
   // 本机 Host：标题已自解释；折叠不 peek。
   "host",
@@ -452,7 +453,7 @@ export function ToolLine({
     isBrowserTool(step.tool_name) ||
     (step.tool_name === "terminal" && detail);
   const phaseText = running ? toolPhaseText(step.phase) : null;
-  // 完成态元信息并进标题行、不另起 peek：web_search「N results」、grep 匹配计数、
+  // 完成态元信息并进标题行、不另起 peek：web_search「N results」、
   // list_folders「N folders」、search_conversations「N 场对话」、str_replace +/-、
   // file_write「N 行」、file_read 窗口「a–b 行」、write 家族 / code_diagnostics、browser_* detail。
   const titleStat = toolLineTitleStat(data);
@@ -465,8 +466,8 @@ export function ToolLine({
     if (status === "success") {
       if (browserTail) return browserTail;
       if (step.tool_name === "web_search") return peek || null;
-      if (step.tool_name === "grep") return peek || null;
-      if (step.tool_name === "list_folders") return peek || null;
+      if (step.tool_name === "list_folders" || step.tool_name === "folders")
+        return peek || null;
       if (step.tool_name === "search_conversations") return peek || null;
       if (step.tool_name === "code_diagnostics") {
         const diag = extractCodeDiagnostics(data.display);

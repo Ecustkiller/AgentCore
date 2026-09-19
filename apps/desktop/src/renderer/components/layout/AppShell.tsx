@@ -7,6 +7,7 @@ import { startAndroidUpdates } from "@/lib/androidUpdates";
 import { bindAppNavigate } from "@/lib/appNavigate";
 import { isWebClient } from "@/lib/capabilities";
 import { NarrowLayoutProvider, useNarrowLayoutState } from "@/lib/narrowLayout";
+import { startShellPresence } from "@/lib/nativeNotification";
 import { isRailHotkeyHintModifier } from "@/lib/railHotkeys";
 import {
   GLOBAL_SHORTCUTS,
@@ -139,15 +140,15 @@ function AppShellFrame() {
   useEffect(() => startUpdates(), []);
   useEffect(() => startAndroidUpdates(), []);
 
-  // 跨对话完成通知 (前端UX设计.md §一 全局协作感知): ambient, read-only subscription so a team
-  // finishing / failing / needing approval in a conversation the user isn't viewing
-  // surfaces a toast with a one-click jump. Lives at the shell so it spans every route.
+  // 协作感知 (前端UX设计.md §一): 壳 × 场面选出口。订阅挂在壳上，跨路由常驻。
   useEffect(() => {
+    const stopPresence = startShellPresence();
     const stopActivity = startTeamActivityNotifications();
     const stopNativeRouting = startNativeNotificationRouting();
     return () => {
       stopActivity();
       stopNativeRouting();
+      stopPresence();
     };
   }, []);
 

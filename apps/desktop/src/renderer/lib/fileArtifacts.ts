@@ -7,9 +7,8 @@
 // 声明且落盘路径并进最新一条事件；未声明备份不在清单里。导出件（.docx / .pdf）只存在于
 // 工具自报的产物行里——工具入参只有源 md，故任何按参数合成的清单都会漏掉它。
 //
-// ``promotedFrom`` 只兼容历史 ``delivery_status.promoted``（``promote_product`` 已撤销；
-// 新回合不再搬家）。不按「成品 / 过程材料」分组——位置看路径；文件树把
-// ``AgentCore/`` 标成 ``.agentcore`` 并钉顶。
+// 不按「成品 / 过程材料」分组——位置看路径；文件树把
+// ``AgentCore/`` 标成 ``.agentcore`` 并钉顶。旧搬家名单 leftover skip，不在主清单上画旧路径。
 //
 // 中间稿折叠：行里自报的 ``derived_from`` 是唯一依据（见 {@link splitExportedSources}），
 // 不按扩展名 / 工具名猜派生关系；折叠只降级、不删除。
@@ -25,11 +24,7 @@
 // 真相仍以工作区文件树为准。
 
 import type { Execution } from "@/stores/execution";
-import type {
-  DeliveryPromotion,
-  DeliveryStatusPayload,
-  ProcessStep,
-} from "@/types/events";
+import type { DeliveryStatusPayload, ProcessStep } from "@/types/events";
 import { toWorkspaceRelPath } from "@shared/workspace-path";
 
 /** 文件变更类型 —— 决定图标 / 文案 / 是否可预览（删除态无文件可看）。 */
@@ -60,11 +55,6 @@ export interface FileArtifact {
   acceptance?: ArtifactAcceptance;
   acceptanceReason?: string;
   acceptanceDetail?: string;
-  /**
-   * 已归位成品的过程稿旧路径（`path` 已是归位后的新路径，旧路径盘上不再存在）。
-   * 不据此分组；位置以 `path` 为准。
-   */
-  promotedFrom?: string;
   /** 产出工具自报的产物类型（`md` / `docx` / `pdf` / `code` / …）；未自报时缺省。 */
   kind?: string;
   /** 自报的派生源：本产物是那份文件的导出件（`md_export`：docx ← 源 md）。 */
@@ -131,6 +121,47 @@ function changeFromTool(
   return undefined;
 }
 
+function artifactsFromBatch(
+  args: Record<string, unknown>,
+  succeeded: boolean,
+): FileArtifact[] {
+  if (!succeeded) return [];
+  const ops = args.operations;
+  if (!Array.isArray(ops)) return [];
+  const out: FileArtifact[] = [];
+  for (const raw of ops) {
+    if (!raw || typeof raw !== "object") continue;
+    const item = raw as Record<string, unknown>;
+    const op = asStr(item.op);
+    if (op === "move") {
+      const to = toWorkspaceRelPath(asStr(item.destination));
+      if (!to) continue;
+      const from = toWorkspaceRelPath(asStr(item.source));
+      out.push({
+        path: to,
+        name: basename(to),
+        op: "move",
+        fromPath: from || undefined,
+        change: { kind: "move", fromPath: from },
+      });
+    } else if (op === "copy") {
+      const to = toWorkspaceRelPath(asStr(item.destination));
+      if (!to) continue;
+      out.push({ path: to, name: basename(to), op: "write" });
+    } else if (op === "delete") {
+      const path = toWorkspaceRelPath(asStr(item.path));
+      if (!path) continue;
+      out.push({
+        path,
+        name: basename(path),
+        op: "delete",
+        change: { kind: "delete" },
+      });
+    }
+  }
+  return out;
+}
+
 /** 把一次工具调用映射成文件产物；非文件工具 / 未成功 / 缺路径 → null（不进卡）。 */
 function artifactFromTool(
   toolName: string,
@@ -183,53 +214,26 @@ export function hasChangePreviews(artifacts: FileArtifact[]): boolean {
 }
 
 /**
- * 历史 ``promoted`` 对照表（键 = 路径）。``promote_product`` 已撤销，新回合不再搬家；
- * 本表只为旧会话回放仍带 ``{from,to}`` 的卡。
- */
-function promotionsByPath(
-  deliveryStatus: DeliveryStatusPayload,
-): Map<string, DeliveryPromotion> {
-  const out = new Map<string, DeliveryPromotion>();
-  if (!Array.isArray(deliveryStatus.promoted)) return out;
-  for (const row of deliveryStatus.promoted) {
-    const from = toWorkspaceRelPath(asStr(row.from));
-    const to = toWorkspaceRelPath(asStr(row.to));
-    if (!from || !to) continue;
-    const entry: DeliveryPromotion = { from, to };
-    out.set(from, entry);
-    out.set(to, entry);
-  }
-  return out;
-}
-
-/**
  * 主清单：有 ``deliveryStatus.artifacts`` 字段时用之（含空数组）；
  * 缺字段 → null（调用方应视为空，勿再扫工具列表）。
  *
- * 归位过的行落在新路径上（后端已改写；本地按对照表兜一道），并记下旧路径供分组。
+ * 路径以验收行为准（后端已按归位台账改写）。旧搬家名单 leftover skip。
  */
 export function fileArtifactsFromDeliveryStatus(
   deliveryStatus: DeliveryStatusPayload | null | undefined,
 ): FileArtifact[] | null {
   if (!deliveryStatus || !Array.isArray(deliveryStatus.artifacts)) return null;
-  const promotions = promotionsByPath(deliveryStatus);
   const out: FileArtifact[] = [];
   for (const row of deliveryStatus.artifacts) {
-    const listedPath = toWorkspaceRelPath(asStr(row.path));
-    if (!listedPath) continue;
+    const path = toWorkspaceRelPath(asStr(row.path));
+    if (!path) continue;
     const status = row.status;
     if (status !== "accepted" && status !== "rejected") continue;
-    // 只有 accepted 可归位（质量态是位置态的前提）。
-    const promotion =
-      status === "accepted" ? promotions.get(listedPath) : undefined;
-    const path = promotion?.to ?? listedPath;
     const workspaceId =
       typeof row.workspace_id === "string" && row.workspace_id.trim()
         ? row.workspace_id.trim()
         : undefined;
-    // 派生源同样跟着归位改路径，否则源被归位后中间稿折叠会认不出自己的源。
-    const listedSource = toWorkspaceRelPath(asStr(row.derived_from));
-    const derivedFrom = promotions.get(listedSource)?.to ?? listedSource;
+    const derivedFrom = toWorkspaceRelPath(asStr(row.derived_from));
     out.push({
       path,
       name: basename(path),
@@ -239,7 +243,6 @@ export function fileArtifactsFromDeliveryStatus(
       ...(workspaceId ? { workspaceId } : {}),
       ...(row.kind ? { kind: row.kind } : {}),
       ...(derivedFrom ? { derivedFrom } : {}),
-      ...(promotion ? { promotedFrom: promotion.from } : {}),
     });
   }
   return dedupe(out);
@@ -288,6 +291,12 @@ export function fileArtifactsFromProcess(
   const out: FileArtifact[] = [];
   for (const step of process) {
     if (step.kind !== "tool") continue;
+    if (step.tool_name === "file_batch") {
+      out.push(
+        ...artifactsFromBatch(step.arguments, step.status === "success"),
+      );
+      continue;
+    }
     const a = artifactFromTool(
       step.tool_name,
       step.arguments,
@@ -306,6 +315,12 @@ export function fileArtifactsFromExecution(
   const out: FileArtifact[] = [];
   for (const agent of execution.agents) {
     for (const tc of agent.toolCalls) {
+      if (tc.toolName === "file_batch") {
+        out.push(
+          ...artifactsFromBatch(tc.arguments, tc.status === "success"),
+        );
+        continue;
+      }
       const a = artifactFromTool(
         tc.toolName,
         tc.arguments,

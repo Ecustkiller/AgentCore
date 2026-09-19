@@ -52,6 +52,9 @@ export const RESIDENT_LABEL = {
   deferred: "查阅后启用",
 } as const;
 
+/** Shelf tag: this card is a factory tool, or consulting it enables tools. */
+export const PROMPT_TOOLS_TAG = "工具";
+
 /** Which side of the team holds a tool — the CEO coordinator, the 队员 (workers),
  * or both. Neutral styling: this is metadata, not a status. */
 export function availabilityLabel(availableTo: string[]): string {

@@ -133,7 +133,7 @@ def _multi_agent_debate_pretrial_evidence_pack_full() -> list[SSEEvent]:
             evidence_ledger_count=1,
             evidence_ledger_delta=[
                 {
-                    "id": "#e1",
+                    "id": "#r1",
                     "url": "",
                     "title": "合同.md",
                     "snippet": "甲乙双方约定价款与交付期限……",
@@ -161,7 +161,7 @@ def _multi_agent_debate_pretrial_evidence_pack_full() -> list[SSEEvent]:
             runs=debater_runs,
         ),
         run_started(pro_run, pro_run, parent_run_id=mod, stance="pro", round_no=1),
-        run_output_delta(pro_run, pro_run, "支持续签【已核实·#e1】。"),
+        run_output_delta(pro_run, pro_run, "支持续签【已核实·#r1】。"),
         run_completed(
             pro_run,
             pro_run,
@@ -173,7 +173,7 @@ def _multi_agent_debate_pretrial_evidence_pack_full() -> list[SSEEvent]:
             cost=_COST,
         ),
         run_started(con_run, con_run, parent_run_id=mod, stance="con", round_no=1),
-        run_output_delta(con_run, con_run, "反对续签【已核实·#e1】。"),
+        run_output_delta(con_run, con_run, "反对续签【已核实·#r1】。"),
         run_completed(
             con_run,
             con_run,
@@ -264,7 +264,7 @@ def _multi_agent_debate_pretrial_evidence_pack_full() -> list[SSEEvent]:
                 },
                 "evidence_ledger": [
                     {
-                        "id": "#e1",
+                        "id": "#r1",
                         "url": "",
                         "title": "合同.md",
                         "snippet": "甲乙双方约定价款与交付期限……",
@@ -558,7 +558,7 @@ def _multi_agent_debate_pretrial_evidence_pack_partial() -> list[SSEEvent]:
             evidence_ledger_count=1,
             evidence_ledger_delta=[
                 {
-                    "id": "#e1",
+                    "id": "#r1",
                     "url": "",
                     "title": "长约.md",
                     "snippet": "条款正文…",
@@ -586,7 +586,7 @@ def _multi_agent_debate_pretrial_evidence_pack_partial() -> list[SSEEvent]:
             runs=debater_runs,
         ),
         run_started(pro_run, pro_run, parent_run_id=mod, stance="pro", round_no=1),
-        run_output_delta(pro_run, pro_run, "支持【已核实·#e1】。"),
+        run_output_delta(pro_run, pro_run, "支持【已核实·#r1】。"),
         run_completed(
             pro_run,
             pro_run,
@@ -598,7 +598,7 @@ def _multi_agent_debate_pretrial_evidence_pack_partial() -> list[SSEEvent]:
             cost=_COST,
         ),
         run_started(con_run, con_run, parent_run_id=mod, stance="con", round_no=1),
-        run_output_delta(con_run, con_run, "反对【已核实·#e1】。"),
+        run_output_delta(con_run, con_run, "反对【已核实·#r1】。"),
         run_completed(
             con_run,
             con_run,
@@ -685,7 +685,7 @@ def _multi_agent_debate_pretrial_evidence_pack_partial() -> list[SSEEvent]:
                 },
                 "evidence_ledger": [
                     {
-                        "id": "#e1",
+                        "id": "#r1",
                         "url": "",
                         "title": "长约.md",
                         "snippet": "条款正文…",

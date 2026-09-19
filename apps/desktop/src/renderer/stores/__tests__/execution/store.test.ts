@@ -1034,52 +1034,30 @@ describe("worker tool_use_progress overlay", () => {
   });
 });
 
-describe("team_synthesis_preview (CEO 协调模式 Phase 1)", () => {
-  it("stores the latest preview on the runtime (transport-only)", () => {
-    store().startExecution(plan, MID);
-    expect(rt().teamSynthesisPreview).toBeNull();
-    store().setTeamSynthesisPreview(
-      {
-        execution_id: "exec-1",
-        completed: 1,
-        total: 2,
-        headline: "已完成 1/2：✅ React 研究员 ⏳ Vue 研究员",
-        text: "已完成 1/2：✅ React 研究员 ⏳ Vue 研究员\n· React 研究员：ok",
-        workers: [
-          {
-            run_id: "run-1",
-            role: "React 研究员",
-            status: "completed",
-            summary: "ok",
+describe("unknown journal events", () => {
+  it("does not fold unknown types into runtime slots", () => {
+    store().hydrateFromJournal(MID, {
+      events: [
+        {
+          type: "run_plan",
+          payload: {
+            execution_id: "exec-1",
+            plan_type: "multi_agent",
+            task_summary: "并行调研",
+            agents: [{ id: "agent-1", role: "研究员" }],
+            runs: [
+              { id: "run-1", agent_id: "agent-1", task: "调研", depends_on: [] },
+            ],
           },
-          {
-            run_id: "run-2",
-            role: "Vue 研究员",
-            status: "pending",
-            summary: "",
-          },
-        ],
-        in_progress: true,
-      },
-      MID,
-    );
-    expect(rt().teamSynthesisPreview?.completed).toBe(1);
-    expect(rt().teamSynthesisPreview?.headline).toContain("✅ React 研究员");
-  });
-
-  it("ignores preview when no plan is active", () => {
-    store().setTeamSynthesisPreview(
-      {
-        execution_id: "x",
-        completed: 0,
-        total: 2,
-        headline: "x",
-        text: "x",
-        workers: [],
-        in_progress: true,
-      },
-      MID,
-    );
-    expect(rt().teamSynthesisPreview).toBeNull();
+        },
+        {
+          type: "retired_unknown_event",
+          payload: { headline: "x" },
+        },
+      ],
+      finishReason: "end_turn",
+    } as never);
+    expect(rt().plan?.id).toBe("exec-1");
+    expect(rt().frames).toEqual([]);
   });
 });

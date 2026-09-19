@@ -67,7 +67,7 @@ _WITNESS_EXAM = [
 ]
 _WITNESS_LEDGER = [
     {
-        "id": "#e1",
+        "id": "#r1",
         "url": "",
         "title": "证人·法律：合同第十二条原文如何表述解除条件？",
         "snippet": "第十二条写明「严重损害品牌声誉时可单方解除」。",
@@ -248,13 +248,13 @@ def test_negative_sample_fails_expected_rings():
     by = {r.ring: r for r in report.rings}
     assert by[1].status == "FAIL"  # 超笼统无 ask
     assert by[2].status == "FAIL"  # 缺四透镜/文件/保真
-    assert by[3].status == "FAIL"  # 无 resolved start_debate
+    assert by[3].status == "FAIL"  # 无幕2 authorized_by=auto
     assert by[5].status == "FAIL"  # 无 debate/ 双产物
     assert by[6].status == "N/A"  # 无幕2 辩论
 
 
-def test_mlr_debate_acts_vector_fails_stage_card_auth():
-    """幕序列向量走 preview 授权、无推进卡 → 环3 FAIL；有透镜+辩论无证人 → 环6 FAIL。"""
+def test_mlr_debate_acts_vector_ring3_auto_auth():
+    """幕序列向量走 auto 授权、无推进卡 → 环3 PASS；有透镜+辩论无证人 → 环6 FAIL。"""
     bundle = sse_events_to_bundle(
         _multi_agent_mlr_debate_acts(),
         user_prompt=_TOPIC,
@@ -262,14 +262,14 @@ def test_mlr_debate_acts_vector_fails_stage_card_auth():
     )
     report = evaluate_rings(bundle)
     by = {r.ring: r for r in report.rings}
-    assert by[3].status == "FAIL"
-    assert by[3].checks.get("authorized_by") == "preview"
+    assert by[3].status == "PASS"
+    assert by[3].checks.get("authorized_by") == "auto"
     assert by[6].status == "FAIL"
     assert by[6].checks["named_count"] == 0
 
 
 def test_witness_vector_ring6_pass():
-    """证人 conformance 向量：环6 PASS（点名+台账）；环3 可能因授权源非 stage_card 而 FAIL。"""
+    """证人 conformance 向量：环6 PASS（点名+台账）；环3 现行 auto 授权。"""
     bundle = sse_events_to_bundle(
         _multi_agent_mlr_debate_witness(),
         user_prompt=_TOPIC,
@@ -339,7 +339,7 @@ def test_ring6_na_when_roster_empty():
 
 
 def test_stage_card_vector_partial_pass_ring3_structure():
-    """stage_card 向量本身：环3 结构字段齐全；缺证人 → 环6 FAIL；缺约定文档 → 环2/5 FAIL。"""
+    """stage_card 向量：环3 无推进卡事件 + authorized_by=auto；缺证人 → 环6 FAIL；缺约定文档 → 环2/5 FAIL。"""
     bundle = sse_events_to_bundle(
         _multi_agent_stage_card_start_debate(),
         user_prompt=_TOPIC,
@@ -347,9 +347,9 @@ def test_stage_card_vector_partial_pass_ring3_structure():
     )
     report = evaluate_rings(bundle)
     by = {r.ring: r for r in report.rings}
-    assert by[3].checks["stage_card_required"] is True
-    assert by[3].checks["stage_card_resolved_start_debate"] is True
-    assert by[3].checks["authorized_by"] == "stage_card"
+    assert by[3].checks["stage_card_required"] == 0
+    assert by[3].checks["stage_card_resolved"] == 0
+    assert by[3].checks["authorized_by"] == "auto"
     # 无工作区文件 → 环2/5 FAIL；有透镜+辩论无证人 → 环6 FAIL
     assert by[2].status == "FAIL"
     assert by[5].status == "FAIL"

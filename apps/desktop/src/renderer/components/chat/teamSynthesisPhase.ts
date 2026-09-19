@@ -93,7 +93,7 @@ export function coordinationWaitCaptainCaption(
  * ``turnTerminal`` without detach is still the same-turn writing window
  * (attach grace). Hiding the spinner while attached painted a false「已汇总」.
  *
- * ``paused``: cold ask / plan_review hang — workers may be 2/2, but CEO is
+ * ``paused``: cold ask hang — workers may be 2/2, but CEO is
  * waiting on the user (same invariant as deriveCaptainStatus).
  */
 export function isTeamSynthesizing(

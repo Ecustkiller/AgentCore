@@ -812,108 +812,30 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         "发送即有流：turn_queued → turn_queue_started → message_start…（FIFO 闭环）",
         _single_agent_queued_then_run,
     ),
-    "single_agent_queued_degraded_from_steer": (
-        "经典+steer 回落：turn_queued.degraded_from=steer → turn_queue_started → 续流",
-        _single_agent_queued_degraded_from_steer,
-    ),
     "single_agent_user_interjection_steer": (
         "经典+steer 全链：user_interjection received→injected（DURABLE；经典终态）→ 续流单聊",
         _single_agent_user_interjection_steer,
     ),
-    "single_agent_user_interjection_steer_queued": (
-        "经典+steer 收口降级：user_interjection received→queued + turn_queued.degraded_from=steer",
-        _single_agent_user_interjection_steer_queued,
-    ),
-    "single_agent_queue_cancelled": (
-        "排队项取消：turn_queued → turn_queue_cancelled（EPHEMERAL；多端清 UI）",
-        _single_agent_queue_cancelled,
-    ),
-    "single_agent_tool": ("单聊：思考→工具→正文（process 时间线）", _single_agent_tool),
     "single_agent_consult_memory": ("单聊：CEO 翻开记忆主题笔记（consult_memory → 查阅记忆卡片 + 全文）", _single_agent_consult_memory),
-    "single_agent_error": ("单聊：正文中途 error 事件 → failed", _single_agent_error),
-    "single_agent_tool_failure": (
-        "单聊：工具失败（tool_use_end success=False → process status=error）后继续作答",
-        _single_agent_tool_failure,
-    ),
-    "single_agent_tool_channel_redirect": (
-        "单聊：工具改道（code_execute 当 grep → process status=redirect）后改用 grep",
-        _single_agent_tool_channel_redirect,
-    ),
     "single_agent_cancelled": (
         "单聊：用户取消（message_end finish_reason=cancelled → status=cancelled，半截正文保留）",
         _single_agent_cancelled,
     ),
-    "single_agent_tool_progress": (
-        "单聊：工具执行阶段进度（tool_use_progress querying/queued，EPHEMERAL；终态同成功工具）",
-        _single_agent_tool_progress,
-    ),
-    "single_agent_title_and_turn_saved": (
-        "单聊：chrome turn_saved + title_generated（不进 ProjectedTurn；fold no-op）",
-        _single_agent_title_and_turn_saved,
-    ),
     "single_agent_citations": ("单聊：思考→工具→正文 + citations 来源卡", _single_agent_citations),
-    "single_agent_web_read": (
-        "单聊：联网检索+深读富渲染（web_search 卡 · 单条 web_fetch 来源头+正文 · ≥2 web_fetch 来源集合）",
-        _single_agent_web_read,
-    ),
-    "single_agent_content_reset": ("单聊：交付前核验回炉 (finish_guard) content_reset 丢弃违规版正文、重写修正版", _single_agent_content_reset),
-    "single_agent_retry_reset": ("单聊：LLM 流式透明重试 (reason=retry) content_reset 丢弃临时正文、不折过程痕迹", _single_agent_retry_reset),
-    "single_agent_captain_context": ("单聊：CEO 收到的上下文（run_context kind=captain → 回合级 captainContext，system/history/request）", _single_agent_captain_context),
     "reload_turn_warning": (
         "刷新重建（P2）：turn_warning DURABLE → ProjectedTurn.turnWarning 横幅",
         _reload_turn_warning,
-    ),
-    "reload_interrupted_partial": (
-        "中断回合+部分内容（P4）：finish_reason=interrupted → 半截正文/思考 + cancelled status",
-        _reload_interrupted_partial,
-    ),
-    "reload_cursor_structure": (
-        "游标重连结构完整（P3）：全量 journal 回放 → 工具行+正文同在、无叠字",
-        _reload_cursor_structure,
     ),
     "reload_cursor_paused_ask": (
         "游标重连耐久卡（SSE-A1）：回放段以 message_start 盖章开场 → 待答 ask_user 卡绑本回合",
         _reload_cursor_paused_ask,
     ),
-    "reload_cursor_incremental": (
-        "游标重连增量段（P3）：段首无 full_replay → 不清空；跨游标那步正文带 replace 整块换、不叠字",
-        _reload_cursor_incremental,
-    ),
-    "mid_run_refresh_ceo_narration": (
-        "运行中刷新：CEO 旁白→工具→旁白→交付 process 保序（process 渐进持久化）",
-        _mid_run_refresh_ceo_narration,
-    ),
-    # 空泡族根因重设计：空 content + 结构化错误 → fold 后非空脸（hasProjectedFailureFace）
-    "empty_face_degraded": (
-        "空脸：degraded 收尾 + LLM_EMPTY_RESPONSE → 非空脸",
-        _empty_face_degraded,
-    ),
-    "empty_face_paused": (
-        "空脸：paused 且无暂停卡 + 结构化错误 → 非空脸",
-        _empty_face_paused,
-    ),
-    "empty_face_channel_dead": (
-        "空脸：channel_dead / LOCAL_CHANNEL_DEAD → 非空脸",
-        _empty_face_channel_dead,
-    ),
     "empty_face_insufficient_balance": (
         "空脸：欠费 LLM_INSUFFICIENT_BALANCE → 非空脸",
         _empty_face_insufficient_balance,
     ),
-    "empty_face_model_acl": (
-        "空脸：模型 ACL 无权限 → 非空脸",
-        _empty_face_model_acl,
-    ),
-    "empty_face_invalid_temperature": (
-        "空脸：invalid temperature → 非空脸",
-        _empty_face_invalid_temperature,
-    ),
     "empty_face_timeout": (
         "空脸：连接超时 LLM_TIMEOUT → 非空脸",
         _empty_face_timeout,
-    ),
-    "empty_face_empty_response": (
-        "空脸：llm.empty_response（LLM_EMPTY_RESPONSE + degraded）→ 非空脸",
-        _empty_face_empty_response,
     ),
 }

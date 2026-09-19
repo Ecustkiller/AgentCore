@@ -416,7 +416,18 @@ def test_captain_context_blocks_inserts_opening_tools():
     assert blocks[-1].body == "发下参数"
 
 
-def test_worker_run_context_mirrors_tools_without_joining_user():
+def test_captain_system_block_concatenates_envelope_xml():
+    blocks = _build_captain_context_blocks(
+        "你是 CEO。",
+        [],
+        "go",
+        turn_envelope="[系统提示]\n<工作区>\n桌：设计\n</工作区>",
+    )
+    assert [b.channel for b in blocks] == ["system", "request"]
+    assert blocks[0].body.startswith("你是 CEO。")
+    assert "[系统提示]" not in blocks[0].body
+    assert "<工作区>" in blocks[0].body
+    assert "桌：设计" in blocks[0].body
     spec = RunSpec(run_id="x", agent_id="x", role="调研员", task="调研竞品")
     defs = [
         {

@@ -55,20 +55,8 @@ _CROSS_EXAM_SYSTEM = (
 
 
 def _frame_form_hint(form: DebateForm) -> str:
-    """各形态「该把本轮焦点定成什么」的差异指引（喂给 :func:`frame_round`）。
-
-    与裁判向的形态指引（判收敛）正交——这条是议题向：定一个贴合形态、能逼出
-    好交锋的焦点。圆桌尤其受益（要的是铺光谱的维度轴，而非二元对立）。"""
-    if form is DebateForm.RED_TEAM:
-        return (
-            "形态=红队挑刺：把焦点对准【被审方案的一个具体风险面】（某失败场景 / 边界条件 / "
-            "隐含假设的漏洞），让红队能集中火力施压、方案方能正面回应修补。"
-        )
-    if form is DebateForm.ROUNDTABLE:
-        return (
-            "形态=多方圆桌：把焦点定成一个能【摊开观点光谱】的维度轴——各方在此维度上自然分化、"
-            "各有独特定位，而非逼出二元对立。好的圆桌焦点让每个视角都有独到的话可说。"
-        )
+    """正反：把焦点落在真正分胜负的 crux。"""
+    del form
     return (
         "形态=正反辩论：把焦点落在【真正分胜负的 crux】上——双方最根本的那个分歧点，"
         "而非双方其实都同意的外围枝节。"
@@ -76,19 +64,8 @@ def _frame_form_hint(form: DebateForm) -> str:
 
 
 def _form_guidance(form: DebateForm) -> str:
-    """各形态的裁判 / 收敛判据差异（辩论编排设计.md §三表格）。
-
-    质询问题生成也复用此指引（对抗形态下的交锋语义）。"""
-    if form is DebateForm.RED_TEAM:
-        return (
-            "形态=红队挑刺：红队单向攻击「被审方案」、方案方回应修补。收敛judge的重点是"
-            "「风险是否已挖尽（无新风险可挖）」与「方案方是否已修补」，而非对称攻防。"
-        )
-    if form is DebateForm.ROUNDTABLE:
-        return (
-            "形态=多方圆桌：3+ 视角多边碰撞，无需对称攻防。收敛judge的重点是「观点光谱是否已"
-            "铺满（不再冒出本质上的新视角）」，允许各方并非针锋相对。"
-        )
+    """正反收敛判据。"""
+    del form
     return (
         "形态=正反辩论：正反对称攻防。收敛judge的重点是「是否还有实质新论点」与「分歧是否已"
         "归结为价值/偏好之争（AI 判不了、该交用户）」。"
@@ -96,11 +73,9 @@ def _form_guidance(form: DebateForm) -> str:
 
 
 def cross_exam_enabled(config: DebateConfig) -> bool:
-    """质询回合仅正反 DEBATE 开启（提案 O1/§3.2：红队三拍取代通用质询）。
-
-    多方圆桌跳过。与裁判记分共命运——不开质询也能记分，但开了质询，回避 /
-    被戳穿才有据可扣（engagement）。"""
-    return config.form is DebateForm.DEBATE
+    """质询回合开启（产品只开正反）。"""
+    del config
+    return True
 
 
 def closing_enabled(config: DebateConfig) -> bool:

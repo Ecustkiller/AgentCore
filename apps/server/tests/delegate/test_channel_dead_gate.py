@@ -396,7 +396,6 @@ def test_ceo_inject_names_workspace_channel_dead():
     assert CHANNEL_DEAD_USER_VISIBLE in text
     for token in ("工作区/本地文件连不上", "稍后重试", "重开桌面", "已有材料收口"):
         assert token in text
-    assert "禁止再派需要写盘的队员" in text
 
 
 def test_ceo_inject_user_stop_unchanged_when_channel_dead():

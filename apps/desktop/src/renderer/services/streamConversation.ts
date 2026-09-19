@@ -11,7 +11,7 @@ import {
   notifyUnauthorized,
   tryRefresh,
 } from "@/services/api";
-import type { PlanReviewUserDecision } from "@/services/planReview";
+import type { CheckpointUserDecision } from "@/services/checkpoint";
 import {
   dispatchSSEEvent,
   flushPendingContent,
@@ -587,6 +587,8 @@ export interface OutgoingAttachment {
   binary?: boolean;
   /** 客户端已写入工作区或区内引用时的相对路径。 */
   workspace_path?: string;
+  /** 邻桌活文件所在 Folder；与 ``workspace_path`` 一起构成只读跨桌点名。 */
+  source_folder_id?: string;
 }
 
 /** `@Agent` 点名（与 attachments 并列；不扩展 MessageAttachment.kind）。 */
@@ -687,7 +689,7 @@ export async function regenerateConversation({
 export interface ResumeConversationOptions {
   conversationId: string;
   messageId: string;
-  decision: PlanReviewUserDecision;
+  decision: CheckpointUserDecision;
   note: string;
   selected?: string[];
   /** Structured website style pick (s0/s1/…). */

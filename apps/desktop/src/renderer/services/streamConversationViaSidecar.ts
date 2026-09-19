@@ -124,7 +124,7 @@ export interface ResumeViaSidecarOptions {
   subpath?: string;
   /** 挂起回合的 assistant message_id（续跑键；也是事件路由 / cancel 的寻址键）。 */
   messageId: string;
-  decision: "continue" | "adjust" | "stop" | "research_first";
+  decision: "continue" | "adjust" | "stop";
   note: string;
   selected?: string[];
   /** Structured website style pick (s0/s1/…). */
@@ -152,6 +152,7 @@ function toSidecarAttachments(
     ...(a.document_id ? { document_id: a.document_id } : {}),
     ...(a.binary ? { binary: a.binary } : {}),
     ...(a.workspace_path ? { workspace_path: a.workspace_path } : {}),
+    ...(a.source_folder_id ? { source_folder_id: a.source_folder_id } : {}),
   }));
 }
 

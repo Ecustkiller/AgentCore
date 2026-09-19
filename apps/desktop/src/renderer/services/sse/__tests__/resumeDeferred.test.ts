@@ -25,7 +25,7 @@ beforeEach(() => {
   useConversationStore.getState().switchConversation(CID);
   useConversationStore.getState().setTurnPhase("streaming", CID);
   useInteractionStore.getState().upsertRequired({
-    kind: "plan_review",
+    kind: "ask_user",
     conversationId: CID,
     messageId: MID,
     payload: {

@@ -40,11 +40,11 @@ logger = get_logger(__name__)
 
 
 def _has_wave_boundary_features(tasks_raw: list[Any]) -> bool:
-    """True when any task needs CHECKPOINT / DAG wave-boundary machinery."""
+    """True when any task has DAG edges (wave-boundary machinery)."""
     for task in tasks_raw:
         if not isinstance(task, dict):
             continue
-        if task.get("depends_on") or task.get("checkpoint_after"):
+        if task.get("depends_on"):
             return True
     return False
 

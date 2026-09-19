@@ -6,12 +6,11 @@
  * `message_end` 之后的 terminal 窗。门闩若挡掉它，失效卡就一直显示可点、点必失败，
  * 直到刷新或切会话才变灰。
  *
- * 为什么不能靠 conformance 兜：那套 fold 直接吃事件数组，**没有 turnPhase 门闩**这一层，
- * 同一条 `multi_agent_stage_card_orphaned` 向量在裁判里恒绿。要抓这个只能从
- * `dispatchSSEEvent` 进——门闩就在它里面。
+ * 为什么不能靠一致性回放兜：那套 fold 直接吃事件数组，**没有 turnPhase 门闩**这一层。
+ * 要抓这个只能从 `dispatchSSEEvent` 进——门闩就在它里面。
  *
- * 也不能靠 `message_end` 那道热三类兜底：stage_card 是跨回合耐久卡，收口后仍可正常
- * 待办，把它一并灰掉会误杀真实待办；这里要的是「服务端说它死了」这条事实本身。
+ * 也不能靠 `message_end` 那道热三类兜底：冷卡（ask_user）收口后仍 pending，
+ * 把它一并灰掉会误杀真实待办；这里要的是「服务端说它死了」这条事实本身。
  */
 import { logEvent } from "@/lib/log";
 import { dispatchSSEEvent } from "@/services/sse/dispatch";
@@ -39,7 +38,7 @@ vi.mock("@/lib/toast", () => ({
 }));
 
 const CID = "conv-orphan-gate";
-const CARD = "sc_stage_1";
+const CARD = "cp_1";
 const logEventMock = vi.mocked(logEvent);
 
 function startTurn(): void {
@@ -48,14 +47,13 @@ function startTurn(): void {
   useConversationStore.getState().createAssistantMessage(CID);
 }
 
-function stageCardRequired(): void {
+function checkpointRequired(): void {
   dispatchSSEEvent(
     {
-      type: "stage_card_required",
+      type: "checkpoint_required",
       payload: {
-        stage_card_id: CARD,
-        motion: "要不要就这个结论开个辩论",
-        form: "debate",
+        checkpoint_id: CARD,
+        question: "继续吗？",
       },
     } as never,
     { conversationId: CID, source: "server" },
@@ -66,7 +64,7 @@ function orphaned(): void {
   dispatchSSEEvent(
     {
       type: "interaction_orphaned",
-      payload: { interaction_id: CARD, kind: "stage_card" },
+      payload: { interaction_id: CARD, kind: "ask_user" },
     } as never,
     { conversationId: CID, source: "server" },
   );
@@ -86,7 +84,7 @@ beforeEach(() => {
 describe("dispatchSSEEvent · interaction_orphaned 收尾帧", () => {
   it("message_end 之后到达仍把卡灰掉（terminal 窗不得丢）", () => {
     startTurn();
-    stageCardRequired();
+    checkpointRequired();
     expect(cardStatus()).toBe("pending");
 
     dispatchSSEEvent(
@@ -96,7 +94,7 @@ describe("dispatchSSEEvent · interaction_orphaned 收尾帧", () => {
       } as never,
       { conversationId: CID, source: "server" },
     );
-    // 热三类兜底不覆盖 stage_card——所以这张卡此刻仍是可点的 pending。
+    // 热三类兜底不覆盖冷卡：ask_user 在 message_end 后仍 pending。
     expect(cardStatus()).toBe("pending");
     expect(useConversationStore.getState().byId[CID]?.turnPhase).toBe(
       "completed",
@@ -114,7 +112,7 @@ describe("dispatchSSEEvent · interaction_orphaned 收尾帧", () => {
 
   it("stopping 窗（用户按停、后端仍在收尾）同样放行", () => {
     startTurn();
-    stageCardRequired();
+    checkpointRequired();
     useConversationStore.getState().setTurnPhase("stopping", CID);
 
     orphaned();

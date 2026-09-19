@@ -40,7 +40,6 @@ from agentcore.tools.registration import (
     register_table_ceo_tools,
 )
 from agentcore.tools.registry import ToolRegistry
-from agentcore.vision import resolve_vision_reader_for_conversation
 from agentcore.workspace.locate import workspace_channel_for_tools
 from agentcore.workspace.protocol import WorkspaceBackend
 
@@ -129,6 +128,21 @@ async def _wire_continuation_toolset(
     from agentcore.tools.sandbox.exec_languages import resolve_exec_languages
 
     raise_if_local_workspace_fulfiller_absent(user_id=user_id, backend=backend)
+    auto_desk_folder_id: str | None = None
+    if folder_id is None:
+        from agentcore.runtime.delegate.target_desktop import adopt_persisted_auto_desk
+
+        adopted = await adopt_persisted_auto_desk(
+            birth_folder_id=folder_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            birth_backend=backend,
+            sink=sink,
+        )
+        if adopted is not None:
+            backend = adopted.backend
+            auto_desk_folder_id = adopted.folder_id
+    sitting_folder_id = folder_id or auto_desk_folder_id
     exec_languages = await resolve_exec_languages(backend)
     # Host / MCP backfill needs a desktop client — orthogonal to workspace location.
     # Member turns: same client header, but no desktop fulfill (协作桌 · 否决本地共享).
@@ -202,8 +216,7 @@ async def _wire_continuation_toolset(
         user_id=user_id,
         conversation_id=conversation_id,
     )
-    # Vision cost sink shared by reference across derived run contexts — symmetric
-    # with the fresh-turn path (run.py).
+    # Resume has no turn attachments; vision sink stays empty (native-only images).
     vision_cost_sink: list[RunCost] = []
     from agentcore.runtime.journal import execution_id_from_journal
 
@@ -222,6 +235,7 @@ async def _wire_continuation_toolset(
     from agentcore.runtime.coordination.session import (
         invalidate_verify_cache_for_execution,
     )
+    from agentcore.llm.image_accept import model_accepts_images
 
     base_tool_context = ToolContext.create(
         execution_id=resume_execution_id,
@@ -238,14 +252,11 @@ async def _wire_continuation_toolset(
         table_id=table_id,
         desktop_channel=desktop_channel,
         workspace_channel=workspace_channel,
-        # Cloud expands the profile slot; ticketed sidecar reuses the inference JWT.
-        vision_reader=await resolve_vision_reader_for_conversation(
-            user_id=user_id,
-            conversation_id=conversation_id,
-            llm_credentials=llm_credentials,
+        accepts_images=model_accepts_images(
+            profiles.model_for("chat") if profiles is not None else ""
         ),
-        cost_sink=vision_cost_sink,
-        shared_workspace=folder_id is not None,
+        shared_workspace=folder_id is not None or auto_desk_folder_id is not None,
+        auto_desk_folder_id=auto_desk_folder_id,
         ownership_desk_id=(
             str(folder_id).strip()
             if isinstance(folder_id, str) and folder_id.strip()
@@ -258,23 +269,8 @@ async def _wire_continuation_toolset(
         folder_local_subpath=folder_local_subpath,
         on_file_landed=invalidate_verify_cache_for_execution,
     )
-    if folder_id is None:
-        from agentcore.runtime.delegate.target_desktop import (
-            _load_auto_desk_folder_id,
-            bind_tool_context_to_landing_desk,
-        )
-
-        auto_desk = await _load_auto_desk_folder_id(
-            user_id=user_id, conversation_id=conversation_id
-        )
-        if auto_desk:
-            # Bind validates existence; on miss it clears the pointer for remint.
-            # Only note the desk after a successful bind (avoid poisoning turn hint).
-            ok = await bind_tool_context_to_landing_desk(
-                base_tool_context, folder_id=auto_desk
-            )
-            if ok:
-                base_tool_context.turn_target_desk.note_folder(auto_desk)
+    if auto_desk_folder_id:
+        base_tool_context.turn_target_desk.note_folder(auto_desk_folder_id)
     from agentcore.runtime.closing_posture import reset_turn_scoped_closing_state
     from agentcore.runtime.coordination.session import current_execution_id
 
@@ -320,9 +316,9 @@ async def _wire_continuation_toolset(
             mcp_label=mcp_label,
             git_fact=git_fact,
             outlet_inventory=await collect_outlet_inventory(backend),
-            desk_folder_id=folder_id,
+            desk_folder_id=sitting_folder_id,
             desk_folder_label=(getattr(backend, "root_label", None) or "").strip() or None,
-            desk_is_birth=True,
+            desk_is_birth=folder_id is not None,
             desk_visibly_empty=await desk_is_visibly_empty(backend),
         ),
     )

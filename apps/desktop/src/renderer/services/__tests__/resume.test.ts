@@ -5,10 +5,7 @@ import {
   useInteractionStore,
 } from "@/stores/interactions";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
-import type {
-  CheckpointRequiredPayload,
-  PlanReviewRequiredPayload,
-} from "@/types/events";
+import type { CheckpointRequiredPayload } from "@/types/events";
 import { beforeEach, describe, expect, it } from "vitest";
 import { toMessage } from "../messages";
 import {
@@ -72,16 +69,6 @@ const cpPayload = (
   ...over,
 });
 
-const prPayload = (
-  over: Partial<PlanReviewRequiredPayload> = {},
-): PlanReviewRequiredPayload => ({
-  checkpoint_id: "pr1",
-  conversation_id: CID,
-  steps: [{ run_id: "r1", role: "调研", summary: "方案就绪" }],
-  pending: [{ run_id: "r2", role: "执行" }],
-  ...over,
-});
-
 function upsertAsk(messageId = "client-uuid"): void {
   ix().upsertRequired({
     kind: "ask_user",
@@ -92,14 +79,18 @@ function upsertAsk(messageId = "client-uuid"): void {
   });
 }
 
-function upsertPlanReview(messageId = "client-uuid"): void {
-  ix().upsertRequired({
-    kind: "plan_review",
-    conversationId: CID,
-    messageId,
-    origin: "server",
-    payload: prPayload() as unknown as Record<string, unknown>,
-  });
+function leftoverPlanReviewRequired(checkpointId = "pr1"): void {
+  applyInteractionWireEvent(
+    "plan_review_required" as string,
+    {
+      checkpoint_id: checkpointId,
+      conversation_id: CID,
+      steps: [{ run_id: "r1", role: "调研", summary: "方案就绪" }],
+      pending: [{ run_id: "r2", role: "执行" }],
+    },
+    CID,
+    "m-server-pr",
+  );
 }
 
 describe("surfaceResumeFromLiveTurn", () => {
@@ -123,50 +114,14 @@ describe("surfaceResumeFromLiveTurn", () => {
     });
   });
 
-  it("surfaces one plan_review resume entry carrying steps + pending", () => {
+  it("does not surface leftover plan_review resume card", () => {
     seedTurn("m-server-2");
-    upsertPlanReview();
-
+    leftoverPlanReviewRequired();
     surfaceResumeFromLiveTurn(CID, "server");
 
-    const entries = paused().pending;
-    expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({
-      messageId: "m-server-2",
-      checkpointId: "pr1",
-      kind: "plan_review",
-    });
-    expect(entries[0].steps).toEqual([
-      { run_id: "r1", role: "调研", summary: "方案就绪" },
-    ]);
-    expect(entries[0].pending).toEqual([{ run_id: "r2", role: "执行" }]);
-    // 无 ceo_review 的 payload → 不合成空摘要。
-    expect(entries[0].ceoReview).toBeUndefined();
-  });
-
-  it("plan_review 带 ceo_review 时透传把关摘要到 resume 帧", () => {
-    seedTurn("m-server-cr");
-    ix().upsertRequired({
-      kind: "plan_review",
-      conversationId: CID,
-      messageId: "client-uuid",
-      origin: "server",
-      payload: prPayload({
-        ceo_review: {
-          conclusion: "可放行",
-          risks: ["回滚预案缺失"],
-          suggestions: ["先灰度"],
-        },
-      }) as unknown as Record<string, unknown>,
-    });
-
-    surfaceResumeFromLiveTurn(CID, "server");
-
-    expect(paused().pending[0]?.ceoReview).toEqual({
-      conclusion: "可放行",
-      risks: ["回滚预案缺失"],
-      suggestions: ["先灰度"],
-    });
+    expect(paused().pending).toHaveLength(0);
+    expect(listVisibleColdResumes(CID)).toHaveLength(0);
+    expect(ix().get("pr1")).toBeUndefined();
   });
 
   it("does not surface leftover team_preview unstick shell", () => {
@@ -427,9 +382,7 @@ describe("listVisibleColdResumes (InteractionStore authority)", () => {
 describe("cold checkpoint terminal authority", () => {
   function stampJournalResolved(
     checkpointId: string,
-    type:
-      | "checkpoint_resolved"
-      | "plan_review_resolved" = "checkpoint_resolved",
+    type: "checkpoint_resolved" = "checkpoint_resolved",
   ): void {
     const assistant = [...getMessages()]
       .reverse()
@@ -458,14 +411,14 @@ describe("cold checkpoint terminal authority", () => {
   }
 
   it("POST drop reopen keeps submitting when journal already has *_resolved", () => {
-    seedTurn("m-server-pr");
-    upsertPlanReview("m-server-pr");
-    expect(ix().beginSubmit("pr1")).toBe(true);
-    stampJournalResolved("pr1", "plan_review_resolved");
+    seedTurn("m-server-ask");
+    upsertAsk("m-server-ask");
+    expect(ix().beginSubmit("cp1")).toBe(true);
+    stampJournalResolved("cp1");
 
-    ix().reopen("pr1");
+    ix().reopen("cp1");
 
-    expect(ix().get("pr1")?.status).toBe("submitting");
+    expect(ix().get("cp1")?.status).toBe("submitting");
     expect(listVisibleColdResumes(CID)).toHaveLength(0);
     expect(conversationHasColdPending(CID)).toBe(false);
   });

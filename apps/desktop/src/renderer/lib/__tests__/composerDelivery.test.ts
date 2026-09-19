@@ -48,7 +48,6 @@ describe("composerDelivery", () => {
           coordinationWait: null,
           deliveryStatus: null,
           userInterjections: [],
-          teamSynthesisPreview: null,
         } as never,
       },
     });

@@ -246,7 +246,7 @@ function multiActExec(): Execution {
       kind: "debate",
       title: "辩论对抗",
       anchorRunId: "synthesizer",
-      authorizedBy: "stage_card",
+      authorizedBy: "auto",
     },
   ];
   return mkExec(
@@ -381,7 +381,7 @@ describe("buildGraphScene · golden", () => {
     expect(scene.bands.lanes.map((b) => b.kind)).toEqual(["act", "act"]);
     expect(scene.bands.lanes.map((b) => b.label)).toEqual([
       "多视角调研",
-      "辩论对抗 · 经推进卡授权",
+      "辩论对抗 · 自动开辩",
     ]);
     // debate moderator stays its own unit, not folded into synthesizer.
     expect(scene.fold.unitOf.get("mod")).toBe("mod");
@@ -415,7 +415,7 @@ describe("buildGraphScene · golden", () => {
         kind: "debate",
         title: "辩论对抗",
         anchorRunId: "synthesizer",
-        authorizedBy: "stage_card",
+        authorizedBy: "auto",
       },
     ];
     const scene = buildGraphScene(

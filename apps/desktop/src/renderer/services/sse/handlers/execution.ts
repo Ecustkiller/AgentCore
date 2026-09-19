@@ -28,13 +28,11 @@ import type {
   DeliveryStatusPayload,
   EscalationRequiredPayload,
   ExecutionDetachedPayload,
-  GraphAppendPayload,
   RunContextPayload,
   RunEscalationPayload,
   RunPlanPayload,
   RunStartedPayload,
   SSEEvent,
-  TeamSynthesisPreviewPayload,
   ToolUseEndPayload,
   ToolUseProgressPayload,
   ToolUseStartPayload,
@@ -92,14 +90,6 @@ export function handleExecutionEvent(
   const { conversationId } = ctx;
 
   switch (event.type) {
-    case "graph_append": {
-      // 旧 journal 兼容：锚点落在【当时追加回合】process。新路径不再发此事件
-      //（改用 run_plan.prev_execution_id + 本回合开图）。
-      const p = event.payload as GraphAppendPayload;
-      flushPendingContent(conversationId);
-      useConversationStore.getState().stampGraphAppend(p, conversationId);
-      return true;
-    }
     case "run_plan": {
       const payload = event.payload as RunPlanPayload;
       const mid = execMessageId(conversationId, {
@@ -109,7 +99,7 @@ export function handleExecutionEvent(
       });
       if (!mid) return true;
       useExecutionStore.getState().ingestPlan(planFromRunPlan(payload), mid);
-      // 旧 journal 跨回合同图追加：不在最新气泡插 team（锚点由 graph_append）。
+      // 旧 journal 跨回合同图追加：不在最新气泡插 team。
       // 新路径无 host_message_id → 本回合正常开图。
       if (payload.host_message_id) return true;
       if (
@@ -180,7 +170,7 @@ export function handleExecutionEvent(
     // 阻塞式求决策: a worker SUSPENDED on a blocking escalate (escalation_required) then settled
     // (escalation_resolved). Both fold onto the run's escalations via the same frame path
     // (projectExecution appends `pending` / flips `resolved`|`assumed`|`timed_out`), driving the bubble's
-    // EscalationCard + the node badge. UNLIKE the gates (approval / plan_review) they do NOT pause
+    // EscalationCard + the node badge. UNLIKE the gates (approval) they do NOT pause
     // the turn — siblings keep running — so there is no conversation-store card, just the journaled
     // frame; both are journaled, so the exchange replays inline on reload.
     // 统一时间线二期: escalation_required / run_escalation 另 stamp CEO 时间线标记（sseVia=execution，
@@ -208,24 +198,6 @@ export function handleExecutionEvent(
         }
       }
       recordFrameNow(event, conversationId);
-      return true;
-    }
-    // CEO 协调模式：多 worker 团队进展摘要。P2 DURABLE——入 journal；live 另 stamp 到
-    // execution runtime（同 key 保最新），hydrateFromJournal 取最后一条重建，供 StatusStrip
-    // 「团队进展」预览行。
-    case "team_synthesis_preview": {
-      const mid = execMessageId(
-        conversationId,
-        routeHintFromPayload(event.payload),
-      );
-      if (mid) {
-        useExecutionStore
-          .getState()
-          .setTeamSynthesisPreview(
-            event.payload as TeamSynthesisPreviewPayload,
-            mid,
-          );
-      }
       return true;
     }
     // CEO 协调等待：captain 空等团队事件。EPHEMERAL——仅 live；waiting=false 清除。
@@ -461,8 +433,6 @@ export function handleExecutionEvent(
             clashes: [],
             cross_exam: [],
             witness_exam: [],
-            findings: [],
-            thread_turns: [],
           },
           mid,
         );
@@ -494,8 +464,6 @@ export function handleExecutionEvent(
             clashes: p.clashes,
             cross_exam: p.cross_exam ?? [],
             witness_exam: p.witness_exam ?? [],
-            findings: p.findings ?? [],
-            thread_turns: p.thread_turns ?? [],
           },
           mid,
         );

@@ -14,12 +14,12 @@
 // one judge type for both ends; the committed golden JSON is the real contract checked.
 
 import { assertNever } from "@/lib/assertNever";
+import { SSE_EVENT_TYPE_VALUES } from "@agentcore/contract-types";
 import {
   type MessageLaneState,
   foldCitations,
   foldContentDelta,
   foldContentReset,
-  foldGraphAppendMarker,
   foldInteractionTimelineMarker,
   foldReasoningDelta,
   foldTeamMarker,
@@ -46,6 +46,7 @@ import type { DebatePretrialState } from "@/stores/execution";
 import {
   defFromRequiredEvent,
   defFromResolvedEvent,
+  isLeftoverInteractionSse,
   wireFor,
 } from "@/stores/interactions";
 import type {
@@ -60,14 +61,12 @@ import type {
   DebateRoundStartedPayload,
   DeliveryStatusPayload,
   EvidenceLedgerPayload,
-  GraphAppendPayload,
   MessageEndPayload,
   ReasoningDeltaPayload,
   RunContextPayload,
   RunPlanPayload,
   RunStartedPayload,
   SSEEvent,
-  TeamSynthesisPreviewPayload,
   ToolUseEndPayload,
   ToolUseStartPayload,
   TurnEvidenceLedgerEntry,
@@ -96,6 +95,7 @@ function foldLaneFromInteractionEvent(
   eventType: string,
   payload: Record<string, unknown>,
 ): MessageLaneState {
+  if (isLeftoverInteractionSse(eventType)) return lane;
   const def = defFromRequiredEvent(eventType);
   if (!def?.timeline) return lane;
   const id = payload[wireFor(def.kind).idField];
@@ -141,7 +141,6 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
   let crossExamEnabled = false;
   let debateOpening: string | null = null;
   let debatePretrial: DebatePretrialState | null = null;
-  let teamSynthesisPreview: TeamSynthesisPreviewPayload | null = null;
   let deliveryStatus: DeliveryStatusPayload | null = null;
   /** journal 内最后一条 `execution_completed.status`（若有）→ 投影到 execution.status。 */
   let fromExecutionCompleted: ExecutionStatus | null = null;
@@ -161,14 +160,10 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
   // hydrateFromJournal does, then project.
   let plan: ExecutionPlan | null = null;
   const frames: RunFrame[] = [];
+  const liveEventTypes = new Set<string>(SSE_EVENT_TYPE_VALUES);
 
   for (const ev of events) {
-    const leftoverType = ev.type as string;
-    if (
-      leftoverType === "team_preview_required" ||
-      leftoverType === "team_preview_resolved" ||
-      leftoverType === "team_note_posted"
-    ) {
+    if (!liveEventTypes.has(ev.type as string)) {
       continue;
     }
     switch (ev.type) {
@@ -236,26 +231,13 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         const payload = ev.payload as RunPlanPayload;
         const next = planFromRunPlan(payload);
         plan = plan && plan.id === next.id ? mergePlanInto(plan, next) : next;
-        // 旧 journal 跨回合同图追加：带 host_message_id 的生长 run_plan 不插 team
-        //（锚点由 graph_append）。新路径无此字段 → 本回合开图。
+        // 旧 journal 跨回合同图追加：带 host_message_id 的生长 run_plan 不插 team。
+        // 新路径无此字段 → 本回合开图。
         if (!payload.host_message_id) {
           // 协作图时间线落点: the first plan of an execution drops a `team` marker fixing
           // the graph's slot in the CEO timeline (later same-id batches no-op).
           messageLane = foldTeamMarker(messageLane, next.id);
         }
-        break;
-      }
-      case "graph_append": {
-        const p = ev.payload as GraphAppendPayload;
-        messageLane = foldGraphAppendMarker(
-          messageLane,
-          p.execution_id,
-          p.host_message_id,
-          p.added_count,
-          p.act_id,
-          p.act_kind,
-          p.authorized_by,
-        );
         break;
       }
       case "run_started": {
@@ -358,8 +340,6 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
           clashes: [],
           cross_exam: [],
           witness_exam: [],
-          findings: [],
-          thread_turns: [],
         });
         break;
       }
@@ -374,8 +354,6 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
           clashes: p.clashes,
           cross_exam: p.cross_exam ?? [],
           witness_exam: p.witness_exam ?? [],
-          findings: p.findings ?? [],
-          thread_turns: p.thread_turns ?? [],
         });
         break;
       }
@@ -389,10 +367,8 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         );
         break;
       }
-      case "plan_review_required":
-      case "checkpoint_required":
       case "approval_required":
-      case "stage_card_required": {
+      case "checkpoint_required": {
         maybeRecordInteractionFrame(ev.type, ev, frames);
         messageLane = foldLaneFromInteractionEvent(
           messageLane,
@@ -401,10 +377,8 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         );
         break;
       }
-      case "plan_review_resolved":
-      case "checkpoint_resolved":
       case "approval_resolved":
-      case "stage_card_resolved": {
+      case "checkpoint_resolved": {
         maybeRecordInteractionFrame(ev.type, ev, frames);
         break;
       }
@@ -504,11 +478,6 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         autoFolder = { folderId: p.folder_id, name: p.name };
         break;
       }
-      case "team_synthesis_preview": {
-        // 同 key 保最新（后写覆盖）——journal append-only，fold 侧去重。
-        teamSynthesisPreview = ev.payload as TeamSynthesisPreviewPayload;
-        break;
-      }
       case "delivery_status": {
         // 交付状态：同 execution_id 保最新（后写覆盖）；载荷 artifacts 已是各波并集。
         deliveryStatus = ev.payload as DeliveryStatusPayload;
@@ -536,6 +505,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         break;
       }
       default:
+        if (isLeftoverInteractionSse(ev.type)) break;
         assertNever(ev.type);
     }
   }
@@ -658,16 +628,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     content: messageLane.content,
     reasoning: messageLane.reasoning,
     captainContext,
-    // 桌面呈现扩展（act_id/act_kind）不进 ProjectedTurn，避免与 golden 漂移。
-    process: messageLane.process.map((step) => {
-      if (step.kind !== "graph_append") return step;
-      return {
-        kind: "graph_append" as const,
-        execution_id: step.execution_id,
-        host_message_id: step.host_message_id,
-        added_count: step.added_count,
-      };
-    }),
+    process: messageLane.process,
     citations: messageLane.citations as ProjectedCitation[],
     evidenceLedger,
     citedIds,
@@ -688,7 +649,6 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     debatePretrial,
     crossExamEnabled,
     debateOpening,
-    teamSynthesisPreview,
     deliveryStatus,
     turnWarning,
     autoFolder,
@@ -719,7 +679,7 @@ function mergeTurnLedger(
 
 /**
  * Plan 声明序（对齐 oracle / 手机）。仅在无 continue_run 时重排——有续派时保持
- * frame 序（与直播图一致，避免证人/红队复攻插队）。庭前无 continue：主辩先声明；
+ * frame 序（与直播图一致，避免证人/旧磁带复攻插队）。庭前无 continue：主辩先声明；
  * 旧 journal 若仍有附属 run 先执行，frame 序会插到主辩前，此处校正。
  */
 function orderRunsForProjectedTurn(

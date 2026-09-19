@@ -65,6 +65,7 @@ export interface BackendMessage {
     truncated: boolean;
     kind?: "file" | "dir" | "conversation" | "document";
     workspace_path?: string | null;
+    source_folder_id?: string | null;
     conversation_id?: string | null;
     document_id?: string | null;
   }[];
@@ -385,6 +386,7 @@ export function toMessage(m: BackendMessage): Message {
           truncated: a.truncated,
           kind: a.kind ?? "file",
           workspacePath: a.workspace_path ?? undefined,
+          sourceFolderId: a.source_folder_id ?? undefined,
           conversationId: a.conversation_id ?? undefined,
           documentId: a.document_id ?? undefined,
         }))

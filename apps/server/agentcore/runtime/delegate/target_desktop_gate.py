@@ -23,7 +23,7 @@ SCRATCH_NO_WRITE_IDENTITY_HINT = (
 # Conversation UUID is not a Folder id — models copy the nearby conversation_id.
 CONV_ID_AS_FOLDER_MSG = (
     "target_folder_id 不能填当前对话 ID；"
-    "请用 list_folders 或 resolve_folder 拿到真正的文件夹 ID 后再派。"
+    "请用 folders 拿到真正的文件夹 ID 后再派。"
 )
 
 

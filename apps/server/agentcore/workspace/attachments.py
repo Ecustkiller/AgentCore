@@ -165,7 +165,10 @@ async def _enrich_with_preparse(
 
 
 async def persist_attachments(
-    backend: WorkspaceBackend, attachments: list[dict] | None
+    backend: WorkspaceBackend,
+    attachments: list[dict] | None,
+    *,
+    sitting_folder_id: str | None = None,
 ) -> list[dict]:
     """Write file attachments into the workspace; return them enriched in order.
 
@@ -175,6 +178,10 @@ async def persist_attachments(
     Client-claimed paths that fail the residency check clear ``workspace_path``,
     set ``resident_missing`` + ``claimed_workspace_path``, and log
     ``attachment.resident_missing`` so prompt assembly stays honest.
+
+    ``source_folder_id`` naming another registered Folder (≠ ``sitting_folder_id``)
+    is a live-file cite: keep ``workspace_path``, skip exists/copy on this desk.
+
     Office pre-parse (sibling ``*.md``) runs only for transfer copies under
     ``attachments/`` — citations must not mutate the user's tree.
     Only ``kind="file"`` is persisted; directory listings, conversation references,
@@ -192,12 +199,33 @@ async def persist_attachments(
 
     used: set[str] = set()
     enriched: list[dict] = []
+    sitting = (
+        sitting_folder_id.strip()
+        if isinstance(sitting_folder_id, str) and sitting_folder_id.strip()
+        else ""
+    )
     for att in attachments:
         item = dict(att)
         kind = att.get("kind") or "file"
         text = att.get("text") or ""
         binary = bool(att.get("binary"))
         pre = _normalize_client_workspace_path(att.get("workspace_path"))
+        raw_src = att.get("source_folder_id")
+        source_folder_id = (
+            raw_src.strip() if isinstance(raw_src, str) and raw_src.strip() else ""
+        )
+        other_desk = bool(source_folder_id and source_folder_id != sitting)
+
+        if kind == "file" and pre and other_desk:
+            # Live file on another registered Folder — do not verify/copy on
+            # the sitting desk. ``file_read`` one-shot binds that Folder.
+            item["workspace_path"] = pre
+            item["source_folder_id"] = source_folder_id
+            item["binary"] = binary
+            item.pop("resident_missing", None)
+            item.pop("claimed_workspace_path", None)
+            enriched.append(item)
+            continue
 
         if kind == "file" and pre:
             # 桌面声称路径已在工作区（区内引用或 attachments/ 副本）；写进提示前先验盘。
@@ -259,8 +287,9 @@ def to_stored_metadata(attachments: list[dict]) -> list[dict]:
     Pre-parse copies live on disk under ``*.md``; they are not persisted as
     message columns (agents find them via workspace path / file tools).
     """
-    return [
-        {
+    out: list[dict] = []
+    for a in attachments:
+        row = {
             "name": a.get("name"),
             "path": a.get("path"),
             "truncated": bool(a.get("truncated")),
@@ -270,8 +299,11 @@ def to_stored_metadata(attachments: list[dict]) -> list[dict]:
             "document_id": a.get("document_id"),
             "binary": bool(a.get("binary")),
         }
-        for a in attachments
-    ]
+        src = a.get("source_folder_id")
+        if isinstance(src, str) and src.strip():
+            row["source_folder_id"] = src.strip()
+        out.append(row)
+    return out
 
 
 def interjection_attachment_meta(attachments: list[dict]) -> list[dict]:

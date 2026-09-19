@@ -95,9 +95,31 @@ function syncRecoveryFromEvents(
         },
       ];
     }
+    if (ev.type === "checkpoint_required") {
+      const id = String(payload.checkpoint_id ?? "");
+      if (!id) continue;
+      recovery.paused = [
+        ...(recovery.paused ?? []),
+        {
+          kind: "ask_user",
+          checkpoint_id: id,
+          message_id: String(payload.message_id ?? "m1"),
+          question: String(payload.question ?? ""),
+          questions: Array.isArray(payload.questions) ? payload.questions : [],
+          intent: "decision",
+          browser_login: false,
+          user_message: "",
+          user_message_id: "",
+          steps: [],
+          pending: [],
+        },
+      ];
+    }
     if (
       ev.type === "team_preview_required" ||
-      ev.type === "team_preview_resolved"
+      ev.type === "team_preview_resolved" ||
+      ev.type === "plan_review_required" ||
+      ev.type === "plan_review_resolved"
     ) {
       continue;
     }
@@ -349,7 +371,7 @@ async function handleResumePost(
   const plan =
     conv?.plan ??
     (conv?.scriptName ? buildPlan(conv.scriptName) : null) ??
-    buildPlan("team_preview_resolved_continue");
+    buildPlan("single_agent_checkpoint_resolved");
   if (plan.resumeStream.length === 0) {
     json(req, res, 404, {
       error: { code: "not_paused", message: "no resume segment for script" },

@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any
 
 from agentcore.core.logging import get_logger
-from agentcore.core.types import ToolApproval, ToolFace
 from agentcore.storage._archive import ArchiveLimitError, zip_dir
 from agentcore.tools.builtin.file_ops import (
     _outside_workspace_msg,
@@ -24,13 +23,7 @@ from agentcore.tools.builtin.file_ops import (
 )
 from agentcore.tools.cross_turn_retry import CROSS_TURN_RETRY_KEY, CrossTurnRetry
 from agentcore.tools.file_products import FileProduct, file_product
-from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
-from agentcore.tools.registration import (
-    AUDIENCE_BOTH,
-    FileProductsContract,
-    ToolRegistration,
-    ToolSurface,
-)
+from agentcore.tools.protocol import ToolContext, ToolResult
 from agentcore.workspace._paths import normalize_workspace_path
 from agentcore.workspace.limits import FILE_TOO_LARGE_DETAIL, is_file_too_large_detail
 from agentcore.workspace.protocol import (
@@ -43,54 +36,17 @@ from agentcore.workspace.protocol import (
 
 logger = get_logger(__name__)
 
-ARCHIVE_CREATE_TOOL_NAME = "archive_create"
-
 # Align extract's zip-bomb ceilings (raw file bytes before zip).
 _CREATE_MAX_FILES = 5_000
 _CREATE_MAX_BYTES = 200 * 1024 * 1024  # 200 MiB
 
 
-class ArchiveCreateTool:
+async def run_create(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     """Pack workspace files or directories into a destination ``.zip``."""
+    return await _ArchiveCreateBody().execute(arguments, context)
 
-    registration = ToolRegistration(
-        surface=ToolSurface.BUILTIN,
-        audience=AUDIENCE_BOTH,
-        file_products=FileProductsContract.SELF_REPORT,
-        workspace_io=True,
-        resident=False,
-        catalog_summary="工作区文件/目录打成 zip",
-    )
 
-    @property
-    def schema(self) -> ToolSchema:
-        return ToolSchema(
-            name=ARCHIVE_CREATE_TOOL_NAME,
-            description=(
-                "把工作区内的文件或目录打成 zip 落到指定相对路径。"
-                "大包持久打包请用本工具。"
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "sources": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": (
-                            "工作区相对路径（文件或目录，如 `src` / `docs/a.md`）"
-                        ),
-                    },
-                    "dest": {
-                        "type": "string",
-                        "description": "目标 `.zip` 相对路径（如 `out/pkg.zip`）",
-                    },
-                },
-                "required": ["sources", "dest"],
-            },
-            face=ToolFace.FILE,
-            approval=ToolApproval.GRANTABLE,
-        )
-
+class _ArchiveCreateBody:
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         start = time.monotonic()
         sources = _parse_sources(arguments.get("sources"))
@@ -162,7 +118,7 @@ class ArchiveCreateTool:
 
         total_bytes = int(n)
         logger.info(
-            "archive_create.done",
+            "archive.create_done",
             dest=dest_path,
             sources=len(sources),
             files=len(files),

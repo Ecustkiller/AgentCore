@@ -1,4 +1,5 @@
 import {
+  PROMPT_TOOLS_TAG,
   RESIDENT_LABEL,
   exceptionAudienceTags,
 } from "@/components/tools/catalogMeta";
@@ -6,6 +7,7 @@ import type { PromptCatalogItem } from "@/lib/promptCatalog";
 import { formatAlwaysRowChars } from "@/lib/promptSizes";
 import { skillStoreGroupLabel } from "@/pages/toolbox/market/skillStoreGroups";
 import type { CapabilitySkill } from "@/services/capabilities";
+import { parseOffersTools } from "@/services/skillCatalog";
 import type { SkillStoreListing } from "@/services/skillStore";
 
 export type PromptShelfChipTone =
@@ -49,6 +51,10 @@ function distinctLine(value: string | undefined, title: string): string {
 
 function chip(label: string, tone?: PromptShelfChipTone): PromptShelfChip {
   return tone ? { label, tone } : { label };
+}
+
+function toolsTag(hasTools: boolean): string[] {
+  return hasTools ? [PROMPT_TOOLS_TAG] : [];
 }
 
 function skillAudience(skill: CapabilitySkill): string[] {
@@ -116,18 +122,23 @@ export function promptItemShelfCopy(
     return {
       title: item.label,
       description: distinctLine(item.skill.blurb, item.label),
-      tags: exceptionAudienceTags(skillAudience(item.skill)),
+      tags: [
+        ...toolsTag((item.skill.requires_tools?.length ?? 0) > 0),
+        ...exceptionAudienceTags(skillAudience(item.skill)),
+      ],
       accessory: [chip("官方")],
     };
   }
   if (item.kind === "tool") {
+    const title = distinctLine(item.tool.summary, "") || item.label;
     const tags = [
+      ...toolsTag(true),
       ...(item.tool.approval === "grantable" ? ["需审批"] : []),
       ...exceptionAudienceTags(item.tool.available_to),
     ];
     return {
-      title: item.label,
-      description: distinctLine(item.tool.summary, item.label),
+      title,
+      description: distinctLine(item.tool.summary, title),
       tags,
       accessory: [chip("官方")],
     };
@@ -140,7 +151,10 @@ function mineShelfCopy(
   opts: PromptMineShelfOpts & { subtitle?: string },
 ): PromptShelfCopy {
   const description = distinctLine(item.description, item.label);
-  const tags = opts.sceneGroupLabel ? [opts.sceneGroupLabel] : [];
+  const tags = [
+    ...toolsTag(parseOffersTools(item.content).length > 0),
+    ...(opts.sceneGroupLabel ? [opts.sceneGroupLabel] : []),
+  ];
   return {
     title: item.label,
     subtitle: opts.subtitle,

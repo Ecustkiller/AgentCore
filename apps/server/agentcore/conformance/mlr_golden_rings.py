@@ -743,33 +743,27 @@ def evaluate_rings(bundle: GoldenBundle) -> GoldenReport:
         },
     )
 
-    stage_req = types.get("stage_card_required", 0) >= 1
-    stage_res_start = False
-    for e in events:
-        if _event_type(e) != "stage_card_resolved":
-            continue
-        p = _payload(e)
-        if str(p.get("decision") or "") == "start_debate":
-            stage_res_start = True
+    stage_req = types.get("stage_card_required", 0)
+    stage_res = types.get("stage_card_resolved", 0)
     exec_info = _host_and_debate_execution(events)
     ga = exec_info["graph_append"] or {}
     act = exec_info["debate_act"] or {}
     auth = str(ga.get("authorized_by") or act.get("authorized_by") or "")
-    auth_ok = auth == "stage_card"
+    auth_ok = auth == "auto"
     team_preview = types.get("team_preview_required", 0)
-    # 推进卡一步：有 resolved(start_debate) + authorized_by=stage_card，且无多余开工卡
-    ring3_pass = stage_req and stage_res_start and auth_ok and team_preview == 0
+    # 推进卡 / 开工卡事件已退役；幕 2 现行 stamp authorized_by=auto。
+    ring3_pass = stage_req == 0 and stage_res == 0 and auth_ok and team_preview == 0
     ring3 = RingResult(
         3,
-        "推进卡一步授权 start_debate",
+        "幕2 开辩授权（无推进卡事件）",
         "PASS" if ring3_pass else "FAIL",
         (
-            f"required={stage_req} resolved_start_debate={stage_res_start} "
+            f"stage_card_required={stage_req} stage_card_resolved={stage_res} "
             f"authorized_by={auth!r} team_preview={team_preview}"
         ),
         {
             "stage_card_required": stage_req,
-            "stage_card_resolved_start_debate": stage_res_start,
+            "stage_card_resolved": stage_res,
             "authorized_by": auth,
             "team_preview_required": team_preview,
         },

@@ -1,5 +1,5 @@
 """Unit tests for the context assembly spine (ContextAssembler + PromptContributor)
-and the CEO turn prompt it renders (pipeline.assemble.build_chat_system_prompt)."""
+and the CEO turn envelope it renders (render_ceo_turn_envelope)."""
 
 from __future__ import annotations
 
@@ -162,17 +162,16 @@ def _spy_on_observe(monkeypatch) -> list[dict]:
 
 
 def _ceo_turn(**overrides: object) -> str:
-    from agentcore.runtime.pipeline.assemble import build_chat_system_prompt
+    from agentcore.runtime.resolve.prompt import render_ceo_turn_envelope
 
     sections: dict[str, object] = {
-        "ceo_prompt": "CEO",
-        "prior_delegate_retry": "",
         "attachment_context": "",
         "registered_sources": "",
         "soft_cap": None,
+        "include_runtime": False,
     }
     sections.update(overrides)
-    return build_chat_system_prompt(**sections)  # type: ignore[arg-type]
+    return render_ceo_turn_envelope(**sections)  # type: ignore[arg-type]
 
 
 def test_ceo_turn_renders_the_source_ledger_after_the_volatile_tail():
@@ -182,7 +181,7 @@ def test_ceo_turn_renders_the_source_ledger_after_the_volatile_tail():
         attachment_context="<attachments/>",
         registered_sources="<已登记来源/>",
     )
-    assert out == "CEO\n<attachments/>\n<已登记来源/>"
+    assert out == "[系统提示]\n<attachments/>\n<已登记来源/>"
 
 
 def test_ceo_turn_table_facts_sit_between_attachments_and_sources():
@@ -191,16 +190,11 @@ def test_ceo_turn_table_facts_sit_between_attachments_and_sources():
         table_context="<表格/>",
         registered_sources="<已登记来源/>",
     )
-    assert out == "CEO\n<附件/>\n<表格/>\n<已登记来源/>"
+    assert out == "[系统提示]\n<附件/>\n<表格/>\n<已登记来源/>"
 
 
 def test_ceo_turn_empty_sections_render_prefix_only():
-    assert _ceo_turn() == "CEO"
-
-
-def test_ceo_turn_renders_prior_delegate_retry():
-    out = _ceo_turn(prior_delegate_retry="<上轮重派/>")
-    assert out == "CEO\n<上轮重派/>"
+    assert _ceo_turn() == ""
 
 
 def test_ceo_turn_observation_covers_the_source_ledger(monkeypatch):
@@ -216,9 +210,11 @@ def test_ceo_turn_observation_covers_the_source_ledger(monkeypatch):
     row = captured[0]
     assert row["event"] == "cost.prompt_assembled"
     assert row["sections"]["registered_sources"] == len(ledger)
-    assert row["total_chars"] == len("CEO") + len(ledger)
+    assert row["total_chars"] == len(ledger)
     assert row["section_digests"]["registered_sources"] == digest_text(ledger)
-    assert row["assembly_hash"] == assembly_hash(out)  # hash covers the rendered ledger
+    from agentcore.runtime.resolve.prompt import strip_turn_envelope_fence
+
+    assert row["assembly_hash"] == assembly_hash(strip_turn_envelope_fence(out))
 
 
 def test_ceo_turn_soft_cap_fires_on_a_ledger_that_alone_blows_it(monkeypatch):

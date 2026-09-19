@@ -284,7 +284,7 @@ async def resume_message(
 ):
     """Continue a durably-paused turn via SSE (结构化挂起 2b ``POST .../resume``).
 
-    The turn paused at a plan_review / ask_user checkpoint and lost its
+    The turn paused at an ask_user checkpoint and lost its
     live stream (disconnect / restart); only its persisted frame survived.
 
     Settlement 预写 (D8)：① peek frame → ② busy 则 deferred（预写后 ``resume_deferred``，
@@ -299,7 +299,8 @@ async def resume_message(
     连接续流。谁也没消费掉这张卡（没有结论行）才是真失效（404，文案区分「超保留期清理」
     与「回合已重新生成」）。
 
-    ``body.selected`` carries the user's ask_user picks (ignored for plan_review).
+    ``body.selected`` carries the user's ask_user picks.
+    Leftover ``plan_review`` frames resume as 410 Gone.
     Gated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota
     — all BEFORE settlement/claim, so a refused turn keeps its resumable frame.
     """

@@ -6,8 +6,8 @@
 折进宿主 + 结辩 + 主持人点名幕1「法律」证人答问。约 18 节点（幕1 八 · 幕2 十），供内嵌 + 全屏
 ``shoot:graph-probe`` 验单屏可读；**只增不改**既有向量/golden。
 
-跨回合两幕同图：m1 完成 MLR → m2 开辩挂同一 ``execution_id``，``graph_append`` 锚点 synthesizer，
-``run_plan.act`` = act-2 / debate / authorized_by=stage_card。
+跨回合两幕：m1 完成 MLR → m2 开辩 mint 新 ``execution_id``，``prev_execution_id`` 链到幕 1，
+``run_plan.act`` = act-2 / debate / authorized_by=auto。
 """
 
 from __future__ import annotations
@@ -475,7 +475,7 @@ def _act2_events(act2: dict) -> list[SSEEvent]:
             act=act2,
         ),
         run_started(_PRO, "d_pro", parent_run_id=_MOD, stance="pro", group="debate:debate", round_no=1),
-        run_output_delta(_PRO, "d_pro", "第十二条可解除【已核实·#e2】，应立即终止。"),
+        run_output_delta(_PRO, "d_pro", "第十二条可解除【已核实·#r2】，应立即终止。"),
         run_completed(
             _PRO,
             "d_pro",
@@ -625,6 +625,6 @@ def _multi_agent_two_act_lv() -> list[SSEEvent]:
         "kind": "debate",
         "title": "辩论对抗",
         "anchor_run_id": "synthesizer",
-        "authorized_by": "stage_card",
+        "authorized_by": "auto",
     }
     return [*_act1_events(act1), *_act2_events(act2)]

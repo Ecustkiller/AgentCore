@@ -424,8 +424,8 @@ describe("ToolLine · 过程工具默认折叠", () => {
     expect(collapsedSubline(container)).toBeNull();
   });
 
-  it("inlines grep match count into the title row when collapsed", () => {
-    const { container } = render(
+  it("suppresses grep hit counts — title pattern is enough", () => {
+    const { container, rerender } = render(
       <ToolLine
         step={step({
           tool_name: "grep",
@@ -438,10 +438,36 @@ describe("ToolLine · 过程工具默认折叠", () => {
     );
     expect(screen.getByText("Grep code")).toBeTruthy();
     expect(screen.getByText("include_usage|stream_options")).toBeTruthy();
-    expect(screen.getByText(/1 处匹配 · 1 个文件/)).toBeTruthy();
-    expect(screen.getByText(/1 处匹配 · 1 个文件/).className).toMatch(
-      /max-w-\[40%\]/,
+    expect(screen.queryByText(/处匹配/)).toBeNull();
+    expect(screen.queryByText(/个文件/)).toBeNull();
+    expect(collapsedSubline(container)).toBeNull();
+
+    rerender(
+      <ToolLine
+        step={step({
+          tool_name: "grep",
+          arguments: { pattern: "foo" },
+          result: "3 个文件匹配 /foo/\na.ts: 2",
+          status: "success",
+        })}
+      />,
     );
+    expect(screen.getByText("foo")).toBeTruthy();
+    expect(screen.queryByText(/个文件/)).toBeNull();
+
+    rerender(
+      <ToolLine
+        step={step({
+          tool_name: "grep",
+          arguments: { pattern: "Nope" },
+          result:
+            "本次 grep 未匹配 /Nope/。不要据此断定代码不存在。可执行下一步：① 收窄",
+          status: "success",
+        })}
+      />,
+    );
+    expect(screen.getByText("Nope")).toBeTruthy();
+    expect(screen.queryByText(/未匹配/)).toBeNull();
     expect(collapsedSubline(container)).toBeNull();
   });
 
@@ -1726,18 +1752,9 @@ describe("toolDetail · title chip", () => {
     expect(toolDetail({ destination: "only-dest.md" })).toBe("");
   });
 
-  it("chips directory for file_list / list_folder_dir; skips '.' and folder_id UUID", () => {
+  it("chips directory for file_list; skips '.' and folder_id UUID", () => {
     expect(toolDetail({ directory: "src/app" }, "file_list")).toBe("src/app");
     expect(toolDetail({ directory: "." }, "file_list")).toBe("");
-    expect(
-      toolDetail(
-        {
-          directory: "docs",
-          folder_id: "550e8400-e29b-41d4-a716-446655440000",
-        },
-        "list_folder_dir",
-      ),
-    ).toBe("docs");
     expect(
       toolDetail(
         { folder_id: "550e8400-e29b-41d4-a716-446655440000" },

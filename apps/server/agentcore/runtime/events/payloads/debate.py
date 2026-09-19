@@ -17,7 +17,7 @@ class EvidenceLedgerEntry(WirePayload):
     旧 journal / 旧向量缺字段 → 前端忽略，零回归。
     """
 
-    id: str  # #e1, #e2, …
+    id: str  # #r1, #r2, …
     url: str = ""
     title: str = ""
     snippet: str = ""
@@ -59,40 +59,8 @@ class DebateRoundSide(WirePayload):
     absent: bool = False
     # 结构化论点大纲；缺字段 / 空列表（老 journal）→ 前端启发式回退 parseSpeechArguments。
     arguments: list[DebateSpeechArgument] = Field(default_factory=list)
-    # 轮内 beat；缺字段（老 journal / 正反）→ statement。
+    # 轮内 beat；缺字段（老 journal / 正反）→ statement。旧磁带可带已删形态拍名。
     beat: Literal["statement", "attack", "defense", "rebuttal", "thread", "crux"] = "statement"
-
-
-class DebateFindingInfo(WirePayload):
-    """红队 finding 结构载荷（O2：全文靠 run_id）。"""
-
-    id: str
-    severity: Literal["critical", "major", "minor"]
-    target: str
-    attacker_key: str
-    status: Literal["open", "answered", "closed", "escalated", "deadlocked", "unanswered"]
-    disposition: str = ""
-    attack_run_id: str = ""
-    response_run_id: str = ""
-    rebuttal_run_id: str = ""
-    merged_from: list[str] = Field(default_factory=list)
-
-
-class DebateThreadTurnInfo(WirePayload):
-    """圆桌线程 turn 结构载荷（O2：全文靠 run_id）。"""
-
-    speaker: str
-    reply_to: str = ""
-    run_id: str
-    ok: bool = True
-    beat: Literal["thread", "crux"] = "thread"
-
-
-class DebateConsensusMapItem(WirePayload):
-    topic: str
-    consensus: list[str] = Field(default_factory=list)
-    divergences: list[str] = Field(default_factory=list)
-    crux: str = ""
 
 
 class DebateVerdict(WirePayload):
@@ -180,10 +148,6 @@ class DebateRoundInfo(WirePayload):
     scores: dict[str, DebateRoundScore] = Field(default_factory=dict)
     # 本轮新登记的证据台账增量（live 徽章可溯源）；缺字段（老事件）→ []。
     evidence_ledger_delta: list[EvidenceLedgerEntry] = Field(default_factory=list)
-    # 红队 finding 台账（结构 only）；缺字段（老事件）→ []。
-    findings: list[DebateFindingInfo] = Field(default_factory=list)
-    # 圆桌线程 turn 序；缺字段（老事件）→ []。
-    thread_turns: list[DebateThreadTurnInfo] = Field(default_factory=list)
 
 
 class DebateNarrativeRound(WirePayload):
@@ -195,8 +159,6 @@ class DebateNarrativeRound(WirePayload):
     clashes: list[DebateClash]
     cross_exam: list[DebateCrossExam]
     witness_exam: list[DebateWitnessExam] = Field(default_factory=list)
-    findings: list[DebateFindingInfo] = Field(default_factory=list)
-    thread_turns: list[DebateThreadTurnInfo] = Field(default_factory=list)
 
 
 class DebateHandoffInfo(WirePayload):
@@ -211,10 +173,6 @@ class DebateBriefInfo(WirePayload):
     strongest_points: dict[str, str]
     # 退役：新场次恒空；旧载荷降级渲染仍可读。
     risk_severities: dict[str, str] = Field(default_factory=dict)
-    findings: list[DebateFindingInfo] = Field(default_factory=list)
-    gate: str = ""
-    must_fix: list[str] = Field(default_factory=list)
-    consensus_map: list[DebateConsensusMapItem] = Field(default_factory=list)
     handoffs: list[DebateHandoffInfo] = Field(default_factory=list)
     decisive: str = ""
     leaning: str
@@ -238,8 +196,6 @@ class DebateResultPayload(WirePayload):
     brief: DebateBriefInfo
     # 全场证据台账（权威）；缺字段（老事件）→ []。不动 citations_event。
     evidence_ledger: list[EvidenceLedgerEntry] = Field(default_factory=list)
-    # 圆桌子题轴；缺字段（老事件）→ []。
-    subtopics: list[str] = Field(default_factory=list)
     # §7.5 裁判选型；缺字段（老 journal）→ 前端忽略。
     moderator_model: str | None = absent("裁判模型 id。")
     moderator_origin: Literal["platform", "byok"] | None = absent("裁判模型来源。")

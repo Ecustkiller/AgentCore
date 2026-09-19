@@ -17,7 +17,8 @@ ROLE_MEMBER = "member"
 ROLE_ARENA = "arena"
 ROLE_TITLE = "title"
 ROLE_MEMORY = "memory"
-# ``vision`` tags a 读图 sub-call (attachment eye→text / ``read_image``): an in-turn
+# ``vision`` tags a historical 读图 sub-call (retired eye). Native images ride
+# the current main model and do not mint this role.
 # tool-layer call to a SEPARATE vision model (qwen-vl ≠ the run's chat model). It is
 # NOT a Run/Agent — it gets its own priced ledger row (one model = one row,
 # 同跨档不复价) so its spend shows as its own line on the turn team payroll

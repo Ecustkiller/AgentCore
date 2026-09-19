@@ -15,7 +15,6 @@ import { hasLocalFiles } from "@/lib/capabilities";
 import {
   exportCloudDeskToPickedFolder,
   exportCloudDeskZip,
-  mergeArtifactsOnlyToLanding,
 } from "@/services/cloudDeskExit";
 import { useConversationStore } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
@@ -179,19 +178,6 @@ export function WorkspaceMode() {
                       onExportZip={() =>
                         void runExport(() => exportCloudDeskZip(conversationId))
                       }
-                      onMergeArtifacts={
-                        isCloudWorkspace && fsAvailable
-                          ? () =>
-                              void runExport(async () => {
-                                const roots =
-                                  (await window.fsApi?.listRoots()) ?? [];
-                                await mergeArtifactsOnlyToLanding(
-                                  conversationId,
-                                  roots,
-                                );
-                              })
-                          : undefined
-                      }
                     />
                     <IconButton
                       title="软删区"
@@ -300,14 +286,11 @@ function WorkspaceExportMenu({
   exporting,
   onExportFolder,
   onExportZip,
-  onMergeArtifacts,
 }: {
   fsAvailable: boolean;
   exporting: boolean;
   onExportFolder: () => void;
   onExportZip: () => void;
-  /** 云桌 + 本机盘：只把最近一回合交付路径写入合回落点。 */
-  onMergeArtifacts?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const icon = exporting ? (
@@ -371,23 +354,6 @@ function WorkspaceExportMenu({
             </span>
           </span>
         </Button>
-        {onMergeArtifacts && (
-          <Button
-            variant="ghost"
-            onClick={() => {
-              setOpen(false);
-              onMergeArtifacts();
-            }}
-            className="h-auto w-full justify-start px-2.5 py-1.5 text-left text-xs font-medium"
-          >
-            <span className="min-w-0 flex-1">
-              <span className="block truncate">只合回产物</span>
-              <span className="block truncate text-xs font-normal text-muted-foreground">
-                仅写入本回合交付文件，已有的不覆盖
-              </span>
-            </span>
-          </Button>
-        )}
       </PopoverContent>
     </Popover>
   );

@@ -78,7 +78,7 @@ class FileBatchTool:
         file_products=FileProductsContract.SELF_REPORT,
         workspace_io=True,
         resident=False,
-        catalog_summary="一次多条移动/复制/删除/建目录",
+        catalog_summary="工作区移动/复制/删除/建目录",
     )
 
     @property
@@ -86,7 +86,7 @@ class FileBatchTool:
         return ToolSchema(
             name="file_batch",
             description=(
-                "一次提交多条工作区文件操作（move / copy / delete / mkdir）。"
+                "工作区 move / copy / delete / mkdir。单条也走本工具（operations 一项）。"
                 f"最多 {_BATCH_MAX_OPS} 项。逐项执行：单项失败不中断整批。"
             ),
             parameters={
@@ -115,7 +115,7 @@ class FileBatchTool:
                                 },
                                 "destination": {
                                     "type": "string",
-                                    "description": "move / copy 的目标相对路径",
+                                    "description": "move / copy 的目标相对路径（已存在则跳过该项）。",
                                 },
                                 "permanent": {
                                     "type": "boolean",
@@ -126,23 +126,8 @@ class FileBatchTool:
                             "required": ["op"],
                         },
                     },
-                    "organize_plan_id": {
-                        "type": "string",
-                        "description": (
-                            "整理方案卡确认后返回的 plan_id。携带时：范围校验仅允许方案内"
-                            "条目，并跳过 GRANTABLE 二次审批；执行成功项写入可撤销日志。"
-                        ),
-                    },
-                    "organize_undo": {
-                        "type": "boolean",
-                        "description": (
-                            "true = 撤销本会话最近一次整理（逆回放 move/mkdir；删除项只提示"
-                            "去回收站）。单次有效。勿与 operations / organize_plan_id 同用。"
-                        ),
-                        "default": False,
-                    },
                 },
-                "required": [],
+                "required": ["operations"],
             },
             face=ToolFace.FILE,
             approval=ToolApproval.GRANTABLE,
@@ -150,29 +135,14 @@ class FileBatchTool:
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         start = time.monotonic()
-        if bool(arguments.get("organize_undo")):
-            return await self._undo(context, start)
-
         raw = arguments.get("operations")
         if not isinstance(raw, list) or not raw:
-            return _error("operations 必须是非空数组（撤销请用 organize_undo=true）", start)
+            return _error("operations 必须是非空数组", start)
         if len(raw) > _BATCH_MAX_OPS:
             return _error(f"operations 最多 {_BATCH_MAX_OPS} 项", start)
 
-        plan_id = str(arguments.get("organize_plan_id") or "").strip()
-        if plan_id:
-            from agentcore.workspace.organize_plan_store import get_plan, ops_within_plan
-
-            plan = get_plan(plan_id)
-            if plan is None or plan.conversation_id != context.conversation_id:
-                return _error(f"整理方案不存在或已失效：{plan_id}", start)
-            scope_err = ops_within_plan(plan, [i for i in raw if isinstance(i, dict)])
-            if scope_err:
-                return _error(scope_err, start)
-
         lines: list[str] = [f"本次共 {len(raw)} 项："]
         ok_n = skip_n = fail_n = 0
-        successes: list[dict[str, Any]] = []
         products: list[FileProduct] = []
 
         for i, item in enumerate(raw, start=1):
@@ -201,7 +171,6 @@ class FileBatchTool:
             if status == "ok":
                 ok_n += 1
                 lines.append(f"{i}. 成功 · {detail}")
-                successes.append(item)
                 products.extend(landed)
             elif status == "skip":
                 skip_n += 1
@@ -209,19 +178,6 @@ class FileBatchTool:
             else:
                 fail_n += 1
                 lines.append(f"{i}. 失败 · {detail}")
-
-        if plan_id and successes:
-            from agentcore.workspace import organize_journal
-
-            organize_journal.record_batch(
-                conversation_id=context.conversation_id,
-                plan_id=plan_id,
-                successes=successes,
-            )
-            lines.append(
-                f"已记录整理日志（plan={plan_id}）。可用 file_batch(organize_undo=true) 撤销"
-                "本次 move/mkdir；删除项请到系统回收站手动恢复。"
-            )
 
         summary = f"完成：成功 {ok_n}，跳过 {skip_n}，失败 {fail_n}"
         lines.append(summary)
@@ -236,63 +192,8 @@ class FileBatchTool:
                 "skip": skip_n,
                 "fail": fail_n,
                 "total": len(raw),
-                "organize_plan_id": plan_id or None,
             },
             # 部分成功也如实记账：只报真正落地的那几件（跳过 / 失败项没有产物）。
-            file_products=products,
-        )
-
-    async def _undo(self, context: ToolContext, start: float) -> ToolResult:
-        from agentcore.workspace import organize_journal
-        from agentcore.workspace.organize_plan_store import deactivate_plan
-
-        journal = organize_journal.get_journal(context.conversation_id)
-        if journal is None:
-            return _error("没有可撤销的整理记录", start)
-        if journal.undone:
-            return _error("本次整理已撤销过（仅单次有效）", start)
-        undo_ops, deletes = organize_journal.build_undo_operations(journal)
-        lines: list[str] = ["撤销本次整理："]
-        ok_n = skip_n = fail_n = 0
-        products: list[FileProduct] = []
-        for i, item in enumerate(undo_ops, start=1):
-            op = str(item.get("op", "")).strip()
-            try:
-                status, detail, landed = await self._run_one(op, item, context)
-            except Exception as e:  # noqa: BLE001
-                dead = _stop_if_presence(e, start, products)
-                if dead is not None:
-                    return dead
-                fail_n += 1
-                lines.append(f"{i}. 失败 · {e}")
-                continue
-            if status == "ok":
-                ok_n += 1
-                lines.append(f"{i}. 成功 · {detail}")
-                products.extend(landed)
-            elif status == "skip":
-                skip_n += 1
-                lines.append(f"{i}. 跳过 · {detail}")
-            else:
-                fail_n += 1
-                lines.append(f"{i}. 失败 · {detail}")
-        if deletes:
-            lines.append(
-                "以下删除项未自动还原，请到系统回收站手动恢复：\n"
-                + "\n".join(f"- {p}" for p in deletes)
-            )
-        organize_journal.mark_undone(context.conversation_id)
-        deactivate_plan(journal.plan_id)
-        summary = f"撤销完成：成功 {ok_n}，跳过 {skip_n}，失败 {fail_n}"
-        lines.append(summary)
-        return ToolResult(
-            tool_call_id="",
-            success=fail_n == 0,
-            output="\n".join(lines),
-            error="" if fail_n == 0 else summary,
-            duration_ms=int((time.monotonic() - start) * 1000),
-            metadata={"ok": ok_n, "skip": skip_n, "fail": fail_n, "undo": True},
-            # 逆回放也是搬家：文件此刻落在还原后的路径上，与正向 move 同口径自报。
             file_products=products,
         )
 
@@ -418,7 +319,7 @@ class FileBatchTool:
             detail = f"{op} {source} → {destination}（源与目标相同，无需操作）"
             if rename_note:
                 detail = f"{detail}。{rename_note}"
-            # 幂等成功也自报：文件就在 destination 上，与单支 file_move / file_copy 同口径。
+            # 幂等成功也自报：文件就在 destination 上。
             return "ok", detail, [file_product(destination)]
         for p in (source, destination) if op == "move" else (destination,):
             scope_err = write_scope_rejection(context, p)

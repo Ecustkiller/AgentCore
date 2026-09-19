@@ -35,7 +35,7 @@ def resume_settled(
     *,
     message_id: str,
     conversation_id: str,
-    kind: Literal["ask_user", "plan_review"],
+    kind: Literal["ask_user"],
     checkpoint_id: str,
     decision: str,
     decided_at: str,

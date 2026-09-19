@@ -4,13 +4,10 @@ import type { ExecutionJournal } from "@/stores/execution";
 import type { components } from "@/types/api.generated";
 import type {
   AskQuestion,
-  CeoReviewSummary,
   CheckpointDecision,
   Citation,
   ContextBlockWire,
   CostBreakdown,
-  PlanReviewPending,
-  PlanReviewStep,
   ProcessStep,
   UsageBreakdown,
 } from "@/types/events";
@@ -27,17 +24,6 @@ export interface CheckpointDisplay {
   selected: string[];
   /** Wire `browser_login` — CEO login gate; resume card mirrors escalate login UX. */
   browserLogin?: boolean;
-}
-
-export interface PlanReviewDisplay {
-  id: string;
-  steps: PlanReviewStep[];
-  pending: PlanReviewPending[];
-  status: "pending" | "resolved";
-  decision: CheckpointDecision | null;
-  note: string;
-  /** 主 Agent 暂停前的把关摘要（拍板中心专属展示；旧数据 absent → 不渲染）。 */
-  ceoReview?: CeoReviewSummary;
 }
 
 export interface Conversation {
@@ -105,6 +91,8 @@ export interface MessageAttachmentMeta {
   truncated: boolean;
   kind?: "file" | "dir" | "conversation" | "document";
   workspacePath?: string;
+  /** 邻桌活文件所在 Folder（本回合只读点名）。 */
+  sourceFolderId?: string;
   conversationId?: string;
   documentId?: string;
 }

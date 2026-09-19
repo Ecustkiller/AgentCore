@@ -181,19 +181,15 @@ def _format_one(
         ownership_bit = _format_ownership_escalation_hint(p)
         if p.get("blocking"):
             assume_bit = f"；队员假设：{assumption}" if assumption else ""
+            timeout_bit = "；超时无响应时队员会按假设继续。" if assumption else ""
             return (
                 f"- escalation【阻塞仲裁】【{role}】run_id={run_id} "
                 f"{esc_kind}（via {src}）：{question}{assume_bit}"
-                f"{ownership_bit}"
-                " ——你须仲裁：resolve_escalation(run_id, answer) 直裁；"
-                "偏好/授权/费用类须先 ask_user 征询用户，再 "
-                "resolve_escalation(run_id, answer, via_user=true)。"
-                "超时无响应时队员会按假设继续，勿永久卡住。"
+                f"{ownership_bit}{timeout_bit}"
             )
         return (
             f"- escalation【{role}】{esc_kind}（via {src}）：{question}"
             f"{ownership_bit}"
-            " ——可 cancel_worker、ask_user 请用户裁决。"
         )
     if ev.kind is CoordinationEventKind.TIMEOUT:
         rid = p.get("run_id") or "?"
@@ -253,7 +249,7 @@ def _format_one(
         ):
             lines.append(
                 "本波是写盘形态，工作区未见已接受文件。"
-                "队员回合结束不是用户交付；不得向用户宣称完成。"
+                "队员回合结束不是用户交付。"
             )
         return "\n".join(lines)
     if ev.kind is CoordinationEventKind.DRIVE_CANCELLED:
@@ -275,15 +271,10 @@ def _format_one(
         brief = p.get("brief") or ""
         if reason == "checkpoint":
             detail = f" 已完成摘要：{brief}" if brief.strip() else ""
-            return (
-                f"- boundary_yield（checkpoint）：这些节点要求用户把关，"
-                "必须立即用 ask_user 把关键内容交用户拍板，"
-                f"不得自行替用户决定。{detail}"
-            )
-        return (
-            f"- boundary_yield（{reason}）：计划在波边界让出——"
-            f"{brief or '请用 replan 续跑或收口'}。"
-        )
+            return f"- boundary_yield（checkpoint）：这些节点要求用户把关。{detail}"
+        if brief.strip():
+            return f"- boundary_yield（{reason}）：计划在波边界让出——{brief}"
+        return f"- boundary_yield（{reason}）：计划在波边界让出。"
     if ev.kind is CoordinationEventKind.USER_INTERJECTION:
         iid = p.get("interjection_id") or "?"
         text = (p.get("content") or "").strip()
@@ -302,9 +293,6 @@ def _format_one(
         mention = format_agent_mention_prompt(_interjection_mentions(session, p))
         if mention:
             lines.extend(mention.splitlines())
-        lines.append(
-            f"  先开口；独立新活用 queue_user_message(interjection_id={iid})。"
-        )
         return "\n".join(lines)
     return f"- {ev.kind.value}：{p}"
 

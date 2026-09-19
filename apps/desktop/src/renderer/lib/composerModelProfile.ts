@@ -84,7 +84,6 @@ export function profileCanSeeImages(
   catalogModels: ModelCatalogItem[],
 ): boolean {
   if (!profile) return false;
-  if (profile.vision?.model?.trim()) return true;
   const main = profile.main;
   if (!main?.model) return false;
   return slotHasCatalogVision(main, catalogModels);
@@ -103,11 +102,10 @@ export function shouldShowComposerVisionHint(opts: {
 }): boolean {
   if (!opts.hasImage) return false;
   if (!opts.profile) return false;
-  if (opts.profile.vision?.model?.trim()) return false;
   // Catalog still loading: don't flash「不能看图」on a VL main.
   if (opts.catalogModels.length === 0) return false;
   return !profileCanSeeImages(opts.profile, opts.catalogModels);
 }
 
 /** Pre-send muted line; does not block send. */
-export const COMPOSER_VISION_HINT = "当前组合不能看图，也未配置识图";
+export const COMPOSER_VISION_HINT = "当前主模型不能看图";

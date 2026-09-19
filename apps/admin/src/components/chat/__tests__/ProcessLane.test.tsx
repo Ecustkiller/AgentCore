@@ -165,10 +165,24 @@ describe("ProcessLane", () => {
             execution_id: "exec1",
             host_message_id: "m1",
             added_count: 3,
-          },
+          } as never,
         ]}
       />,
     );
     expect(screen.queryByText(/续图/)).toBeNull();
+  });
+
+  it("does not paint leftover stage_card process steps", () => {
+    render(
+      <ProcessLane
+        steps={[
+          {
+            kind: "stage_card",
+            stage_card_id: "sc1",
+          } as never,
+        ]}
+      />,
+    );
+    expect(screen.queryByText(/推进/)).toBeNull();
   });
 });

@@ -278,8 +278,6 @@ async def test_approve_always_files_grants_whole_class():
             "file_write",
             "str_replace",
             "file_delete",
-            "file_move",
-            "file_copy",
             "mkdir",
             "file_batch",
         }

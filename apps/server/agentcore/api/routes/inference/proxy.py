@@ -114,43 +114,6 @@ def _explicit_selection_from_requested(requested: str | None) -> ModelSelection 
     return ModelSelection(model=rest, origin="byok", provider_id=prefix)
 
 
-async def _resolve_vision_slot_selection(
-    session: AsyncSession,
-    user_id: str,
-    conv,
-) -> ModelSelection | None:
-    """Dedicated vision slot, else image-accepting main; else ``None`` (try VISION_*)."""
-    from agentcore.llm.model_profiles import LlmModelProfileService
-    from agentcore.vision.factory import pick_vision_selection
-
-    svc = LlmModelProfileService(session)
-    if conv is not None:
-        expanded = await svc.expand_for_conversation(user_id, conv)
-    else:
-        expanded = await svc.expand(user_id, None)
-    return pick_vision_selection(vision=expanded.vision, main=expanded.main)
-
-
-def _platform_vision_fallback_config() -> ModelConfig | None:
-    """Operator ``VISION_*`` — same predicate as :func:`build_vision_reader`."""
-    from agentcore.config import settings as app_settings
-
-    if getattr(app_settings, "billing_mode", "byok") != "platform":
-        return None
-    key = (getattr(app_settings, "vision_api_key", None) or "").strip()
-    url = (getattr(app_settings, "vision_base_url", None) or "").strip()
-    if not key or not url:
-        return None
-    model = (getattr(app_settings, "vision_model", None) or "kimi-k2.5").strip()
-    return ModelConfig(
-        model=model,
-        base_url=url,
-        api_key=key,
-        source="platform",
-        purpose="chat",
-    )
-
-
 async def _resolve_inference_credentials(
     session: AsyncSession,
     cost_repo: CostEventRepository,
@@ -168,6 +131,10 @@ async def _resolve_inference_credentials(
     )
     from agentcore.runtime.costing import ROLE_MEMBER, ROLE_VISION
 
+    # Before any slot expand: sidecar must not mint a second reader.
+    if cost_role == ROLE_VISION:
+        raise ValidationError("读图角色已退役：图走当前主力多模态，不再单独调识图槽")
+
     conv = None
     if conversation_id:
         conv = await ConversationRepository(session).get_by_id(
@@ -177,51 +144,39 @@ async def _resolve_inference_credentials(
         selection = await resolve_conversation_model_selection(session, conv, user.user_id)
     else:
         selection = await resolve_account_default_model(session, user.user_id)
-
-    # Vision expands the profile slot (or VISION_*), not the mint/chat body model.
-    # Per-worker node override (catalog route key) is member-only.
-    if cost_role == ROLE_VISION:
-        vision_sel = await _resolve_vision_slot_selection(session, user.user_id, conv)
-        if vision_sel is None:
-            fallback = _platform_vision_fallback_config()
-            if fallback is None:
-                raise ValidationError("读图能力未配置")
-            return fallback
-        selection = vision_sel
-    else:
-        explicit = _explicit_selection_from_requested(requested_model)
-        if explicit is not None:
-            ok = await validate_model_choice(
-                session,
-                user.user_id,
-                explicit.model,
-                explicit.origin,
-                explicit.provider_id,
-            )
-            if not ok:
-                raise ValidationError(
-                    "节点模型不可用或未在目录中："
-                    f"model={explicit.model} · origin={explicit.origin}"
-                    + (
-                        f" · provider_id={explicit.provider_id}"
-                        if explicit.provider_id
-                        else ""
-                    )
-                    + "。请改选可用模型，禁止 silent 回退。"
+    explicit = _explicit_selection_from_requested(requested_model)
+    if explicit is not None:
+        ok = await validate_model_choice(
+            session,
+            user.user_id,
+            explicit.model,
+            explicit.origin,
+            explicit.provider_id,
+        )
+        if not ok:
+            raise ValidationError(
+                "节点模型不可用或未在目录中："
+                f"model={explicit.model} · origin={explicit.origin}"
+                + (
+                    f" · provider_id={explicit.provider_id}"
+                    if explicit.provider_id
+                    else ""
                 )
-            selection = explicit
-        elif cost_role == ROLE_MEMBER:
-            # Delegated workers without a node identity: profile Worker slot (else main).
-            # Captain / arena / product-chrome roles keep the conversation main model.
-            worker = await resolve_account_worker_selection(
-                session, user.user_id, conv=conv
+                + "。请改选可用模型，禁止 silent 回退。"
             )
-            if worker is not None and (
-                worker.model != selection.model
-                or worker.origin != selection.origin
-                or worker.provider_id != selection.provider_id
-            ):
-                selection = worker
+        selection = explicit
+    elif cost_role == ROLE_MEMBER:
+        # Delegated workers without a node identity: profile Worker slot (else main).
+        # Captain / arena / product-chrome roles keep the conversation main model.
+        worker = await resolve_account_worker_selection(
+            session, user.user_id, conv=conv
+        )
+        if worker is not None and (
+            worker.model != selection.model
+            or worker.origin != selection.origin
+            or worker.provider_id != selection.provider_id
+        ):
+            selection = worker
 
     credentials = await preflight_llm_credentials(
         session=session,

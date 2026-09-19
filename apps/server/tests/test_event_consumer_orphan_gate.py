@@ -282,8 +282,21 @@ def test_release_gate_wires_log_catalog_check_and_orphan_cli():
     assert "check_event_consumer_orphans.py" in src
 
 
-def test_graph_append_is_not_flagged_as_orphan():
-    """BY-DESIGN: factory kept for old journal replay; live handler still consumes it."""
+def test_non_live_event_names_are_not_contract_orphans():
+    from agentcore.runtime.events.types import EventType
+
+    live = {e.value for e in EventType}
+    assert "graph_append" not in live
+    assert "team_synthesis_preview" not in live
+    assert "stage_card_required" not in live
+    assert "stage_card_resolved" not in live
+    assert "graph_append" not in live
+    assert "team_synthesis_preview" not in live
+    assert "stage_card_required" not in live
+    assert "stage_card_resolved" not in live
     result = run_consumer_orphan_gate()
     keys = {o.key for o in result.orphans} | {o.key for o in result.producer_orphans}
     assert "graph_append" not in keys
+    assert "team_synthesis_preview" not in keys
+    assert "stage_card_required" not in keys
+    assert "stage_card_resolved" not in keys

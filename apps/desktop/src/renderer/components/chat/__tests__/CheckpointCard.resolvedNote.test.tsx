@@ -108,33 +108,30 @@ describe("ResolvedCheckpoint 单行折叠", () => {
     expect(document.body.textContent).toContain("这一题的问句");
   });
 
-  it("stop / research_first resolved 占「已取消本回合」存根；收起不见问句", () => {
-    for (const decision of ["stop", "research_first"] as const) {
-      render(
-        <CheckpointCard
-          checkpoint={{
-            ...resolvedDecision,
-            id: `cp-${decision}`,
-            decision,
-            note: "",
-          }}
-        />,
-      );
-      const label = screen.getByText("已取消本回合");
-      expect(label).toBeTruthy();
-      expect(label.className).toContain("text-sm");
-      expect(label.className).not.toContain("text-xs");
-      expect(label.className).not.toContain("font-medium");
-      const row = label.closest("button")?.className.split(/\s+/) ?? [];
-      expect(row).toContain("w-auto");
-      expect(row).not.toContain("w-full");
-      expect(document.body.textContent).not.toContain(
-        resolvedDecision.question,
-      );
-      fireEvent.click(screen.getByText("已取消本回合"));
-      expect(document.body.textContent).toContain(resolvedDecision.question);
-      cleanup();
-    }
+  it("stop resolved 占「已取消本回合」存根；收起不见问句", () => {
+    render(
+      <CheckpointCard
+        checkpoint={{
+          ...resolvedDecision,
+          id: "cp-stop",
+          decision: "stop",
+          note: "",
+        }}
+      />,
+    );
+    const label = screen.getByText("已取消本回合");
+    expect(label).toBeTruthy();
+    expect(label.className).toContain("text-sm");
+    expect(label.className).not.toContain("text-xs");
+    expect(label.className).not.toContain("font-medium");
+    const row = label.closest("button")?.className.split(/\s+/) ?? [];
+    expect(row).toContain("w-auto");
+    expect(row).not.toContain("w-full");
+    expect(document.body.textContent).not.toContain(
+      resolvedDecision.question,
+    );
+    fireEvent.click(screen.getByText("已取消本回合"));
+    expect(document.body.textContent).toContain(resolvedDecision.question);
   });
 
   it("展开存根用 question prompt，不用 question 总述", () => {

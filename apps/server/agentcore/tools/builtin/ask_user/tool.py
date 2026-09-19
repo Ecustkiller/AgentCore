@@ -11,16 +11,13 @@ from agentcore.runtime.events import (
     EventSink,
     checkpoint_required,
 )
-from agentcore.tools.builtin.ask_user.card import (
-    CARD_KINDS,
-    CARD_RETRY_HINT,
-    card_max_options,
-    card_overrides_intent,
-    parse_card,
-    validate_card_shape,
-)
 from agentcore.tools.builtin.ask_user.intent import resolve_ask_checkpoint_intent
 from agentcore.tools.builtin.ask_user.schema import (
+    ASK_DEFAULT_HOW,
+    ASK_LABEL_HOW,
+    ASK_PROMPT_HOW,
+    ASK_RETRY_HINT,
+    ASK_WHEN,
     ListArgError,
     advertised_option_actions,
     card_stem,
@@ -92,18 +89,15 @@ class AskUserTool:
 
     @property
     def schema(self) -> ToolSchema:
-        # Schema: short trigger. HOW → ask_kickoff / ask_midtask skills.
-        # questions[] 卡形与 escalate 共用；本机 action / 空 continue 仍是本工具覆盖。
-        tool_desc = (
-            "向用户发问（唯一问用户原语）。挡路才问：猜错会做错 → 先问；"
-            "仅可逆低杠杆才标假设。暂停回合等人答复。"
-            "HOW→consult(ask_kickoff)、consult(ask_midtask)。"
-        )
+        # Schema: when-to-use + 填卡合同（写参当轮必见）。卡形与 escalate 共用；
+        # 推荐 / 桌上结果只叠在本按钮。本机 action / 空 continue 仍是本工具覆盖。
         allowed_actions = advertised_option_actions(
             desktop=self.advertise_bind_local_folder,
             workspace_location=self.workspace_location,
         )
-        option_extras: dict[str, Any] = {}
+        option_extras: dict[str, Any] = {
+            "label": {"type": "string", "description": ASK_LABEL_HOW},
+        }
         if allowed_actions:
             bits: list[str] = []
             if "open_local_project" in allowed_actions:
@@ -115,25 +109,20 @@ class AskUserTool:
             }
         return ToolSchema(
             name="ask_user",
-            description=tool_desc,
+            description=ASK_WHEN,
             parameters={
                 "type": "object",
                 "properties": {
                     "questions": questions_array_schema(
                         description="问句写 prompt（1–5 道）。",
                         min_items=1,
-                        option_properties=option_extras or None,
-                        default_description="可选；空 continue=确认。",
-                        prompt_description="用户看见的问句。",
+                        option_properties=option_extras,
+                        default_description=ASK_DEFAULT_HOW,
+                        prompt_description=ASK_PROMPT_HOW,
                     ),
                     "browser_login": {
                         "type": "boolean",
                         "description": "true=请用户在右坞登录（AI 不经手密码）。",
-                    },
-                    "card": {
-                        "type": "string",
-                        "enum": ["organize_plan"],
-                        "description": "可选。整理清单 organize_plan（恰好 1 题多选）。",
                     },
                 },
                 "required": ["questions"],
@@ -143,32 +132,8 @@ class AskUserTool:
         )
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
-        card_parsed = parse_card(arguments.get("card"))
-        # Success returns a known card literal (also a str); errors return a Chinese
-        # guidance string not in CARD_KINDS.
-        if card_parsed is None:
-            card = None
-        elif card_parsed in CARD_KINDS:
-            card = card_parsed  # type: ignore[assignment]
-        else:
-            logger.info(
-                "ask_user.card_rejected",
-                conversation_id=self.conversation_id,
-                card=str(arguments.get("card")),
-                reason="unknown",
-            )
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error=str(card_parsed) + CARD_RETRY_HINT,
-            )
-
         try:
-            questions = normalize_questions(
-                arguments.get("questions"),
-                max_options=card_max_options(card),
-            )
+            questions = normalize_questions(arguments.get("questions"))
         except ListArgError as exc:
             logger.info(
                 "ask_user.list_arg_rejected",
@@ -181,7 +146,7 @@ class AskUserTool:
                 output="",
                 error=(
                     f"{exc} 请直接传 JSON 数组，不要把数组再序列化成字符串。"
-                    f"{CARD_RETRY_HINT}"
+                    f"{ASK_RETRY_HINT}"
                 ),
             )
         if not questions:
@@ -191,7 +156,7 @@ class AskUserTool:
                 output="",
                 error=(
                     "ask_user 需要至少一道 question（问句写 prompt）。"
-                    f"只问一句话也出一道题。{CARD_RETRY_HINT}"
+                    f"只问一句话也出一道题。{ASK_RETRY_HINT}"
                 ),
             )
         stem = card_stem(questions)
@@ -214,32 +179,10 @@ class AskUserTool:
 
         browser_login = bool(arguments.get("browser_login"))
 
-        if card is not None:
-            card_err = validate_card_shape(card, questions=questions)
-            if card_err:
-                # Observability for card-shape rejects: count + shape details.
-                logger.info(
-                    "ask_user.card_rejected",
-                    conversation_id=self.conversation_id,
-                    card=card,
-                    reason="shape",
-                    questions=len(questions),
-                )
-                return ToolResult(
-                    tool_call_id="",
-                    success=False,
-                    output="",
-                    error=card_err + CARD_RETRY_HINT,
-                )
-
         checkpoint_id = new_id()
         from agentcore.runtime.suspension import captain_transcript
 
-        intent = (
-            card_overrides_intent(card)
-            if card is not None
-            else resolve_ask_checkpoint_intent(captain_transcript.get())
-        )
+        intent = resolve_ask_checkpoint_intent(captain_transcript.get())
         required = checkpoint_required(
             checkpoint_id=checkpoint_id,
             conversation_id=self.conversation_id,
@@ -300,7 +243,6 @@ class AskUserTool:
                 "checkpoint.finalized",
                 checkpoint_id=checkpoint_id,
                 intent=intent,
-                card=card,
                 browser_login=browser_login,
                 n_questions=len(questions),
                 n_options=sum(len(q.get("options") or []) for q in questions),

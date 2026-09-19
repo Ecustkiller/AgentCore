@@ -17,7 +17,6 @@ import {
 } from "@/lib/processTimeline";
 import type {
   CheckpointDisplay,
-  PlanReviewDisplay,
 } from "@/stores/conversation";
 import { useStreamAwareDisclosure } from "@/stores/disclosure";
 import { type ExecutionJournal, useMessageExecution } from "@/stores/execution";
@@ -147,7 +146,7 @@ const ProcessRow = memo(function ProcessRow({
       </div>
     );
   }
-  // Positional markers (team/checkpoint/ask/plan_review) are resolved in the timeline
+  // Positional markers (team/checkpoint) are resolved in the timeline
   // map, never routed here — only a `tool` step reaches this tail.
   if (step.kind === "tool")
     return (
@@ -167,7 +166,6 @@ export function TimelineNodeView({
   journal,
   conversationId,
   checkpoints,
-  planReviews,
   onOpenWorkspacePath,
   isStreaming,
 }: {
@@ -181,7 +179,6 @@ export function TimelineNodeView({
   journal?: ExecutionJournal;
   conversationId: string | null;
   checkpoints: CheckpointDisplay[];
-  planReviews: PlanReviewDisplay[];
   onOpenWorkspacePath?: (path: string) => void;
   isStreaming: boolean;
 }) {
@@ -194,10 +191,6 @@ export function TimelineNodeView({
       />
     ) : null;
   }
-  if (node.kind === "graph_append") {
-    // 旧 journal 槽位标记：思考尾仍认它；产品聊天不画回链铬条。
-    return null;
-  }
   if (node.kind === "user_interjection") {
     return messageId ? (
       <InterjectionTimeline
@@ -208,17 +201,14 @@ export function TimelineNodeView({
   }
   if (
     node.kind === "checkpoint" ||
-    node.kind === "plan_review" ||
     node.kind === "escalation" ||
-    node.kind === "approval" ||
-    node.kind === "stage_card"
+    node.kind === "approval"
   ) {
     const card = renderTimelineInteractionCard(
       node.kind,
       node,
       {
         checkpoints,
-        planReviews,
       },
       {
         messageId: messageId ?? "",
@@ -256,6 +246,14 @@ export function TimelineNodeView({
   );
 }
 
+/** Marker that anchors the collaboration graph slot. */
+export function graphSlotExecutionId(
+  step: ProcessStep | undefined,
+): string | null {
+  if (step?.kind === "team") return step.execution_id;
+  return null;
+}
+
 /**
  * In-stream fallback: generic Thinking… when the tail has no live node.
  * Live chrome = running/wait tool, streaming reasoning/content,
@@ -263,17 +261,6 @@ export function TimelineNodeView({
  * pending user gate. Markers are not live by themselves — delegate/debate omit
  * tool steps (isMarkerStandinTool) and stand in as `team` / interaction markers.
  */
-/** Markers that anchor the collaboration graph slot. `graph_append` is a
- * slot marker only (no user chrome) — its liveness is the graph it belongs to,
- * same gate as `team`. */
-export function graphSlotExecutionId(
-  step: ProcessStep | undefined,
-): string | null {
-  if (step?.kind === "team" || step?.kind === "graph_append")
-    return step.execution_id;
-  return null;
-}
-
 export function shouldShowThinkingTail(args: {
   isStreaming: boolean;
   composingTool: boolean;
@@ -300,14 +287,12 @@ export function ProcessEndChrome({
   composingTool,
   messageId,
   checkpoints,
-  planReviews,
 }: {
   process: ProcessStep[];
   isStreaming: boolean;
   composingTool: { toolName: string; chars: number } | null;
   messageId?: string;
   checkpoints: CheckpointDisplay[];
-  planReviews: PlanReviewDisplay[];
 }) {
   const execution = useMessageExecution(messageId ?? null);
   const last = process[process.length - 1];
@@ -318,9 +303,7 @@ export function ProcessEndChrome({
     if (!executionGraphCapabilities(execution).showsTeamGraph) return false;
     return shouldShowTeamGraph(execution.runs);
   })();
-  const pendingUserGate =
-    checkpoints.some((c) => c.status === "pending") ||
-    planReviews.some((p) => p.status === "pending");
+  const pendingUserGate = checkpoints.some((c) => c.status === "pending");
   const showThinkingTail = shouldShowThinkingTail({
     isStreaming,
     composingTool: Boolean(composingTool),
@@ -350,7 +333,6 @@ export function ProcessTimeline({
   journal,
   conversationId,
   checkpoints,
-  planReviews,
   onOpenWorkspacePath,
   /** When false, never collapse reasoning/tool rows into a summary.
    * Default true keeps CEO bubble chrome. */
@@ -368,7 +350,6 @@ export function ProcessTimeline({
   journal?: ExecutionJournal;
   conversationId: string | null;
   checkpoints: CheckpointDisplay[];
-  planReviews: PlanReviewDisplay[];
   onOpenWorkspacePath?: (path: string) => void;
   collapseProcessSteps?: boolean;
   /** Harvested `run.debrief` — fills an empty successful handoff row. */
@@ -385,10 +366,9 @@ export function ProcessTimeline({
   const nodeKeys = timelineNodeKeys(nodes);
 
   const { reasoningCount, toolCount } = countProcessStats(nodes);
-  const pendingGateIds = new Set([
-    ...checkpoints.filter((c) => c.status === "pending").map((c) => c.id),
-    ...planReviews.filter((p) => p.status === "pending").map((p) => p.id),
-  ]);
+  const pendingGateIds = new Set(
+    checkpoints.filter((c) => c.status === "pending").map((c) => c.id),
+  );
   const foldMask = processFoldMask(nodes, pendingGateIds);
   const firstFoldIndex = foldMask.indexOf(true);
   // 仅有弱痕迹、无推理/工具时不折叠（避免空摘要按钮）；单段纯 Thought 也不折。
@@ -405,11 +385,11 @@ export function ProcessTimeline({
   const processSummary = formatProcessSummary(reasoningCount, toolCount);
 
   // 协作图应在 CEO 回复下方: when prose only exists as fallbackContent (no content
-  // step), slot it before the first team/graph_append marker — never after the
+  // step), slot it before the first team marker — never after the
   // whole timeline (that put the graph above the CEO lead-in).
   const fallbackBeforeTeamIdx =
     !hasContentStep && fallbackContent
-      ? nodes.findIndex((n) => n.kind === "team" || n.kind === "graph_append")
+      ? nodes.findIndex((n) => n.kind === "team")
       : -1;
   const showFallbackAfter =
     !hasContentStep && Boolean(fallbackContent) && fallbackBeforeTeamIdx < 0;
@@ -443,7 +423,6 @@ export function ProcessTimeline({
       journal={journal}
       conversationId={conversationId}
       checkpoints={checkpoints}
-      planReviews={planReviews}
       onOpenWorkspacePath={onOpenWorkspacePath}
       isStreaming={isStreaming}
     />
@@ -512,7 +491,6 @@ export function ProcessTimeline({
         composingTool={composingTool}
         messageId={messageId}
         checkpoints={checkpoints}
-        planReviews={planReviews}
       />
     </div>
   );

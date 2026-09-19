@@ -24,16 +24,11 @@ MAX_PARALLEL_TOOLS = 5
 TOOL_PROGRESS_STEP = 64
 
 # Injected when convergence governance forces finalize (stuck loop / round or
-# token ceiling). Tools are already narrowed; copy is a fact, not a HOW sermon.
-FINALIZE_INSTRUCTION = (
-    "[系统提示] 调查与执行类工具已停用。本轮仅保留 delegate / consult / ask_user。"
-)
+# token ceiling). Tools are already narrowed; copy is the reason, not a tool menu.
+FINALIZE_INSTRUCTION = "[系统提示] 本轮强制收口。"
 
-# Files-form / artifacts: persist tools stay on the surface (align with wind_down).
-FINALIZE_INSTRUCTION_FILES = (
-    "[系统提示] 调查与新战线工具已停用。"
-    "本轮仅保留 file_write / handoff 与 delegate / consult / ask_user。"
-)
+# Persist vs coordination-only is the live tool table. Alias kept for call sites.
+FINALIZE_INSTRUCTION_FILES = FINALIZE_INSTRUCTION
 
 # Coordination tools still offered during a forced-finalize round; investigation and
 # execution tools are withheld so the model cannot keep spinning reads/writes.

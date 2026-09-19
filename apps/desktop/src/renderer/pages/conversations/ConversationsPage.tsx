@@ -40,7 +40,6 @@ import {
 import { type ReactNode, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArchivedConversationManageRow } from "./ArchivedConversationManageRow";
-import { CollaborationTimelinePanel } from "./CollaborationTimeline";
 import { ConversationManageRow } from "./ConversationManageRow";
 import { DeletedConversationManageRow } from "./DeletedConversationManageRow";
 import { DeletedFolderManageRow } from "./DeletedFolderManageRow";
@@ -284,9 +283,6 @@ export function ConversationsPage() {
             </div>
 
             <div className="relative mt-3 min-h-0 flex-1 overflow-y-auto">
-              {isFolderFilter && (
-                <CollaborationTimelinePanel folderId={selected} />
-              )}
               {isTrashView ? (
                 <RecentlyDeletedPane
                   conversations={deletedConversationList}

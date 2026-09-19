@@ -17,8 +17,8 @@ interface GraphToolbarProps {
 }
 
 /**
- * Layout selector (top-right). Zoom + fit live in
- * {@link import("./CanvasZoomControls")} (bottom-left).
+ * Layout selector (top-right). Fullscreen pan / zoom / fit are
+ * gestures + F / 右键「适应画布」— no dedicated chrome.
  * Dependency layouts only: 左右流 / 树形.
  */
 export function GraphToolbar({

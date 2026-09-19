@@ -3,9 +3,8 @@
 Covers ``max_rounds`` and ``token_budget`` symmetrically (worker salvage + CEO).
 Does **not** expand the posture-A closed set.
 
-Both reasons teach ``continue_from_run_id`` continuation (same main file).
-Honesty remains in the private steer: do not claim unconditional pass.
 User-visible 【收口说明】 prefixes are gone — the fuse is not a caption.
+Continuation HOW lives on the continuation tool, not this steer.
 Round ceiling is a fuse, not a live countdown injected every ReAct round.
 """
 
@@ -18,14 +17,6 @@ from .core import is_formal_complete_tier
 # Hard-ceiling reasons that share the max_rounds honesty steer path.
 _CEILING_HONESTY_REASONS = frozenset({"max_rounds", "token_budget"})
 
-# Executable next step after a hard ceiling (round fuse or token). Shared
-# wording for the private steer (not user-visible).
-_CEILING_CONTINUE_TEACH = (
-    "【续作】下一刀用 `continue_from_run_id` 续同一主文件；"
-    "禁止并行同角色抢同一路径；"
-    "`replaces_run_id` 仅冷接手。"
-)
-
 _CEILING_HONESTY_STEER_LEAD = {
     "max_rounds": "本回合已达轮次硬上限（max_rounds），强制收口。",
     "token_budget": "本回合已达 token 预算硬上限（token_budget），强制收口。",
@@ -33,23 +24,17 @@ _CEILING_HONESTY_STEER_LEAD = {
 
 
 def ceiling_honesty_steer(*, reason: str) -> str | None:
-    """Steer force_finalize when hard ceiling forbids unconditional pass claims.
+    """One-line fact when force_finalize hits a hard ceiling.
 
-    Honesty is symmetric for ``max_rounds`` / ``token_budget``. Continuation
-    teach (``continue_from_run_id``) is shared — the fuse already blew; the
-    next user turn may resume the same file.
+    Honesty is symmetric for ``max_rounds`` / ``token_budget``. HOW (姿势 A /
+    ``continue_from_run_id``) lives on base ``<诚实>`` and the continuation
+    tool; verdict still downgrades in code.
     """
     r = (reason or "").strip()
     lead = _CEILING_HONESTY_STEER_LEAD.get(r)
     if lead is None:
         return None
-    return (
-        f"[系统提示] {lead}"
-        "【禁止】无条件宣称验证通过 / 已修好 / 已全部完成 / 已完整可用等姿势 A；"
-        "须按「部分落地 + 未闭合项」收口：点名已落地与未闭合，勿假装验收过关。"
-        f"{_CEILING_CONTINUE_TEACH}"
-        "有交付对账卡时以档位为准；非正式完成不得姿势 A。"
-    )
+    return f"[系统提示] {lead}"
 
 
 def enforce_ceiling_closing_honesty(content: str, *, reason: str) -> str:

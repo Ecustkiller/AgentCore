@@ -11,11 +11,14 @@ describe("INTERACTION_CARD_NAME", () => {
       approval: "工具审批",
       escalation: "拍板请求",
       ask_user: "提问确认",
-      plan_review: "计划复核",
-      stage_card: "推进卡",
     });
+    expect(Object.keys(INTERACTION_CARD_NAME)).not.toContain("plan_review");
     expect(Object.keys(INTERACTION_CARD_NAME)).not.toContain("team_preview");
+    expect(Object.keys(INTERACTION_CARD_NAME)).not.toContain("stage_card");
     expect(interactionCardName("approval")).toBe("工具审批");
+    expect(interactionCardName("plan_review")).toBe(
+      INTERACTION_CARD_NAME_UNKNOWN,
+    );
     expect(interactionCardName("what_is_this")).toBe(
       INTERACTION_CARD_NAME_UNKNOWN,
     );

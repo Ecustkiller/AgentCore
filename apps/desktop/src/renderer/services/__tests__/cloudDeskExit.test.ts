@@ -34,11 +34,6 @@ vi.mock("@/services/mergeLandingDiff", () => ({
   prepareMergeLandingDiff: vi.fn(),
 }));
 
-vi.mock("@/services/mergeArtifactsOnly", () => ({
-  resolveMergeArtifactRefs: vi.fn(),
-  writeArtifactsToLanding: vi.fn(),
-}));
-
 const { openSession } = vi.hoisted(() => ({
   openSession: vi.fn(),
 }));
@@ -51,41 +46,15 @@ vi.mock("@/stores/mergeLandingReview", () => ({
   },
 }));
 
-vi.mock("@/stores/conversation", () => ({
-  getRuntime: vi.fn(() => ({ messages: [{ role: "assistant", id: "a1" }] })),
-  lastAssistantProjectionId: vi.fn(() => "a1"),
-}));
-
-vi.mock("@/stores/execution", () => ({
-  useExecutionStore: {
-    getState: vi.fn(() => ({ byId: {} })),
-  },
-}));
-
 import { notifyInfo, notifySuccess } from "@/lib/toast";
 import {
-  mergeArtifactsOnlyToLanding,
   mergeBackToLanding,
   peekMergeLanding,
   registerMergeLanding,
 } from "@/services/cloudDeskExit";
-import {
-  resolveMergeArtifactRefs,
-  writeArtifactsToLanding,
-} from "@/services/mergeArtifactsOnly";
 import { prepareMergeLandingDiff } from "@/services/mergeLandingDiff";
-import { useExecutionStore } from "@/stores/execution";
 
 const prepareMock = prepareMergeLandingDiff as unknown as ReturnType<
-  typeof vi.fn
->;
-const resolveRefsMock = resolveMergeArtifactRefs as unknown as ReturnType<
-  typeof vi.fn
->;
-const writeArtifactsMock = writeArtifactsToLanding as unknown as ReturnType<
-  typeof vi.fn
->;
-const execGetState = useExecutionStore.getState as unknown as ReturnType<
   typeof vi.fn
 >;
 const notifyInfoMock = notifyInfo as unknown as ReturnType<typeof vi.fn>;
@@ -98,11 +67,8 @@ describe("cloudDeskExit · merge landing", () => {
     memory.clear();
     openSession.mockReset();
     prepareMock.mockReset();
-    resolveRefsMock.mockReset();
-    writeArtifactsMock.mockReset();
     notifyInfoMock.mockReset();
     notifySuccessMock.mockReset();
-    execGetState.mockReturnValue({ byId: {} });
     __setUiStorageBackendForTests({
       getItem: (key) => memory.get(key) ?? null,
       setItem: (key, value) => {
@@ -205,66 +171,5 @@ describe("cloudDeskExit · merge landing", () => {
     });
     expect(notifyInfoMock).toHaveBeenCalledWith("已有合回评审进行中");
     expect(notifySuccessMock).not.toHaveBeenCalled();
-  });
-
-  it("mergeArtifactsOnlyToLanding：无产物 → 提示且不写盘", async () => {
-    await registerMergeLanding("c-folder");
-    resolveRefsMock.mockReturnValue([]);
-
-    const result = await mergeArtifactsOnlyToLanding("c-folder", [
-      { id: "root-x", name: "landing" },
-    ]);
-    expect(result).toEqual({
-      ok: false,
-      reason: "unavailable",
-      message: "本回合无交付产物",
-    });
-    expect(notifyInfoMock).toHaveBeenCalledWith("本回合无交付产物");
-    expect(writeArtifactsMock).not.toHaveBeenCalled();
-  });
-
-  it("mergeArtifactsOnlyToLanding：有产物 → 只写那些路径", async () => {
-    await registerMergeLanding("c-folder");
-    resolveRefsMock.mockReturnValue([{ path: "out/a.md" }]);
-    writeArtifactsMock.mockResolvedValue({
-      written: ["out/a.md"],
-      skippedExisting: [],
-      errors: [],
-    });
-
-    const result = await mergeArtifactsOnlyToLanding("c-folder", [
-      { id: "root-x", name: "landing" },
-    ]);
-    expect(result).toEqual({ ok: true });
-    expect(writeArtifactsMock).toHaveBeenCalledWith({
-      conversationId: "c-folder",
-      rootId: "root-x",
-      refs: [{ path: "out/a.md" }],
-    });
-    expect(notifySuccessMock).toHaveBeenCalled();
-    expect(prepareMock).not.toHaveBeenCalled();
-  });
-
-  it("mergeArtifactsOnlyToLanding：传入 refs 则不读 latest delivery", async () => {
-    await registerMergeLanding("c-folder");
-    resolveRefsMock.mockReturnValue([]);
-    writeArtifactsMock.mockResolvedValue({
-      written: ["card.md"],
-      skippedExisting: [],
-      errors: [],
-    });
-
-    const result = await mergeArtifactsOnlyToLanding(
-      "c-folder",
-      [{ id: "root-x", name: "landing" }],
-      [{ path: "card.md" }],
-    );
-    expect(result).toEqual({ ok: true });
-    expect(resolveRefsMock).not.toHaveBeenCalled();
-    expect(writeArtifactsMock).toHaveBeenCalledWith({
-      conversationId: "c-folder",
-      rootId: "root-x",
-      refs: [{ path: "card.md" }],
-    });
   });
 });

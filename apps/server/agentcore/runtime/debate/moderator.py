@@ -36,7 +36,6 @@ from typing import TYPE_CHECKING, Any
 from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
 from agentcore.llm.provider.protocol import LLMMessage, LLMProvider, LLMRequest, TokenUsage
-from agentcore.runtime.debate.findings import accumulate_findings, derive_gate
 from agentcore.runtime.debate.form_profile import form_profile
 from agentcore.runtime.debate.moderator_agenda import (
     _CROSS_EXAM_SYSTEM,
@@ -57,11 +56,6 @@ from agentcore.runtime.debate.moderator_common import (
     _parse_json_object,
 )
 from agentcore.runtime.debate.moderator_judge import _ASSESS_SYSTEM, judge_and_summarize
-from agentcore.runtime.debate.moderator_phases import (
-    frame_subtopics,
-    run_red_team_round,
-    run_roundtable_round,
-)
 from agentcore.runtime.debate.moderator_timeline import emit_moderator_complete
 from agentcore.runtime.debate.types import (
     STOP_ALL_FAILED,
@@ -71,20 +65,16 @@ from agentcore.runtime.debate.types import (
     STOP_USER_CONCLUDED,
     ClosingRunner,
     ClosingStatement,
-    ConsensusMapItem,
     CrossExamExchange,
     CrossExamRunner,
     DebateBrief,
     DebateConfig,
-    DebateForm,
     DebateResult,
-    Finding,
     JudgeVerdict,
     RoundDecision,
     RoundResult,
     RoundRunner,
     SideTurn,
-    ThreadTurn,
     UserInterjection,
     WitnessExamExchange,
     WitnessExamRunner,
@@ -239,21 +229,11 @@ class Moderator:
         if kickoff_ask:
             pending_interjections = [UserInterjection(ask=kickoff_ask, target_key="")]
         profile = form_profile(config)
-        # 圆桌子题轴
-        subtopics: list[str] = []
-        spoken_keys: set[str] = set()
-        if config.form is DebateForm.ROUNDTABLE:
-            subtopics = await frame_subtopics(self._complete_json, config)
         for round_no in range(1, config.policy.max_rounds + 1):
             self._round_no = round_no
-            # 焦点优先级：掌舵覆写 > 圆桌子题轴 > 上轮 next_focus > _frame
+            # 焦点优先级：掌舵覆写 > 上轮 next_focus > _frame
             if focus_override:
                 focus = focus_override
-            elif config.form is DebateForm.ROUNDTABLE and subtopics:
-                idx = min(round_no - 1, len(subtopics) - 1)
-                focus = subtopics[idx]
-                if round_no == 1 and not opening:
-                    opening = f"本场圆桌将沿子题轴展开：{'；'.join(subtopics)}。"
             else:
                 prior_focus = (rounds[-1].verdict.next_focus if rounds else "").strip()
                 if prior_focus:
@@ -271,41 +251,15 @@ class Moderator:
             if on_round_start is not None:
                 await on_round_start(round_no, focus, opening if round_no == 1 else "")
 
-            findings: list[Finding] = []
-            thread_turns: list[ThreadTurn] = []
-            if profile.unit == "finding":
-                turns, findings = await run_red_team_round(
-                    complete_json=self._complete_json,
-                    config=config,
-                    profile=profile,
-                    run_round=run_round,
+            turns = list(
+                await run_round(
                     round_no=round_no,
                     focus=focus,
+                    sides=config.sides,
                     history=rounds,
                     interjections=interjections,
-                    prior_findings=accumulate_findings(rounds),
                 )
-            elif profile.unit == "thread_turn":
-                turns, thread_turns, spoken_keys = await run_roundtable_round(
-                    complete_json=self._complete_json,
-                    config=config,
-                    run_round=run_round,
-                    round_no=round_no,
-                    focus=focus,
-                    history=rounds,
-                    interjections=interjections,
-                    spoken_keys=spoken_keys,
-                )
-            else:
-                turns = list(
-                    await run_round(
-                        round_no=round_no,
-                        focus=focus,
-                        sides=config.sides,
-                        history=rounds,
-                        interjections=interjections,
-                    )
-                )
+            )
             # 追问被本轮承接（无论发言成败，本轮确已带着它跑过）⇒ 标记 answered，随本轮留痕复盘。
             answered = [replace(i, answered=True) for i in interjections]
             if not any(t.ok for t in turns):
@@ -324,8 +278,6 @@ class Moderator:
                     verdict,
                     summary="本轮各方均未产出有效发言，辩论提前终止。",
                     user_interjections=answered,
-                    findings=findings,
-                    thread_turns=thread_turns,
                 )
                 rounds.append(rr)
                 if on_round is not None:
@@ -334,12 +286,11 @@ class Moderator:
                 break
 
             # 缺席轮一等语义：部分失败续赛 → 失败方显式标缺席；跳过对其质询与对抗记分。
-            # 红队：方案方 defense 已在 phase 内标 absent；攻击侧失败方此处补标。
             turns = [replace(t, absent=True) if not t.ok else t for t in turns]
             absent_keys = {t.side_key for t in turns if t.absent}
             present_turns = [t for t in turns if t.ok]
 
-            # 质询 beat：仅 DEBATE profile（O1：红队三拍取代通用质询）。
+            # 质询 beat：正反开启。
             cross_exam: list[CrossExamExchange] = []
             witness_exam: list[WitnessExamExchange] = []
             if (
@@ -408,15 +359,6 @@ class Moderator:
                     for c in verdict.clashes
                     if c.from_key not in absent_keys and c.to_key not in absent_keys
                 ]
-            # 圆桌：子题轴铺满 → 收敛
-            if (
-                config.form is DebateForm.ROUNDTABLE
-                and subtopics
-                and round_no >= len(subtopics)
-            ):
-                verdict.converged = True
-                if not verdict.stop_reason:
-                    verdict.stop_reason = STOP_CONVERGED
             rr = RoundResult(
                 round_no,
                 focus,
@@ -426,8 +368,6 @@ class Moderator:
                 user_interjections=answered,
                 cross_exam=cross_exam,
                 witness_exam=witness_exam,
-                findings=findings,
-                thread_turns=thread_turns,
             )
             rounds.append(rr)
             if on_round is not None:
@@ -499,20 +439,6 @@ class Moderator:
                 brief = await self._brief(config, rounds, evidence_ledger=evidence_ledger)
             except Exception as exc:  # noqa: BLE001 — 简报抖动不得吞掉已跑完的轮次
                 brief = _settled_brief(exc, config, rounds)
-        # 红队：台账权威快照 + 门决挂 brief；圆桌：共识地图挂 brief（LLM 简报可再润色）
-        if config.form is DebateForm.RED_TEAM:
-            ledger = accumulate_findings(rounds)
-            gate, must_fix = derive_gate(ledger)
-            brief.findings = ledger
-            brief.gate = gate
-            brief.must_fix = must_fix
-            brief.risk_severities = {}  # 退役：新场次恒空
-        elif config.form is DebateForm.ROUNDTABLE and not brief.consensus_map:
-            brief.consensus_map = [
-                ConsensusMapItem(topic=rr.focus, consensus=[], divergences=[], crux="")
-                for rr in rounds
-                if rr.focus
-            ]
         return DebateResult(
             config=config,
             rounds=rounds,
@@ -521,7 +447,6 @@ class Moderator:
             opening=opening,
             closings=closings,
             witnesses=list(witness_roster),
-            subtopics=subtopics,
         )
 
     # ── 第1步：定本轮议题 ────────────────────────────────────────────────

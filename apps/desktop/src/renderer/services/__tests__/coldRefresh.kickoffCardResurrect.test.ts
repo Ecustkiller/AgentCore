@@ -7,8 +7,8 @@
  * （leftover team_preview 不画可点开工壳）→ 图走 shouldShowTeamGraph
  * （只看 IX 原始 status + execution.runs，不复用 settled 判据）。
  *
- * 事件字段抄自 conformance `gates._team_preview_finalized` / `team_preview_resolved`
- * （checkpoint_id=tp1, execution_id=exec1, tools/workers 原文）。
+ * leftover 开工卡 journal（checkpoint_id=tp1, execution_id=exec1）；
+ * 本文件自备工人/工具名单，不依赖已删的预览回放。
  */
 import { shouldShowTeamGraph } from "@/components/chat/debatePreviewPlacement";
 import {
@@ -45,7 +45,7 @@ const CID = "conv-kickoff-refresh";
 const MID = "m1";
 const TP = "tp1";
 
-/** gates._team_preview_finalized workers / tools / run_plan — 逐字。 */
+/** leftover 开工卡 journal 用的工人 / 工具 / 编制。 */
 const WORKERS = [
   { run_id: "r1", role: "调研", task: "调研方案", depends_on: [] },
   { run_id: "r2", role: "撰写", task: "写初稿", depends_on: ["r1"] },

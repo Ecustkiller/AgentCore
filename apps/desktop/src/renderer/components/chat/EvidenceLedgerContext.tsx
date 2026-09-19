@@ -6,7 +6,7 @@ const EvidenceLedgerContext = createContext<ReadonlyMap<
   EvidenceLedgerEntry
 > | null>(null);
 
-/** 辩论室 / 发言 Markdown 树：把场级台账 map 传给 {@link EvidenceBadge} 解析 `#eN`。 */
+/** 辩论室 / 发言 Markdown 树：把场级台账 map 传给 {@link EvidenceBadge} 解析 `#rN`。 */
 export function EvidenceLedgerProvider({
   ledger,
   children,

@@ -4,7 +4,6 @@ import { useInteractionStore } from "@/stores/interactions";
 import { type PendingResume, usePausedTurnStore } from "@/stores/pausedTurns";
 import type { ComponentType } from "react";
 import { AskUserResumeCard } from "./AskUserResumeCard";
-import { PlanReviewResumeCard } from "./PlanReviewResumeCard";
 
 /** Zustand getSnapshot must return a cached empty — a fresh `[]` loops React. */
 const EMPTY_MESSAGES: { id: string; role: string }[] = [];
@@ -49,16 +48,15 @@ export function ResumePrompt() {
 }
 
 function ResumeCard({ turn }: { turn: PendingResume }) {
-  if (turn.kind !== "ask_user" && turn.kind !== "plan_review") return null;
+  if (turn.kind !== "ask_user") return null;
   const Card = COLD_RESUME_CARDS[turn.kind];
   return <Card turn={turn} />;
 }
 
 /** Operable cold-path resume cards. */
 const COLD_RESUME_CARDS: Record<
-  "ask_user" | "plan_review",
+  "ask_user",
   ComponentType<{ turn: PendingResume }>
 > = {
   ask_user: AskUserResumeCard,
-  plan_review: PlanReviewResumeCard,
 };

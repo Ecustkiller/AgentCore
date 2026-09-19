@@ -177,15 +177,13 @@ class DelegateTool:
         self._acc = WorkerResultAccumulator()
         self._supervised: SupervisedRun | None = None
         self._pending_boundary: tuple[BoundaryReason, list[RunSpec]] | None = None
-        # 挂起即收口 (②): set by the CHECKPOINT boundary hook when it finalizes the turn at a
-        # plan_review pause (frame saved) — ``drive`` reads it after the scheduler soft-pauses
-        # and returns a SUSPEND ToolResult. False on every ordinary drive.
+        # 挂起即收口 (②): ask_user persist / 协调 BOUNDARY_YIELD 置位；``drive`` 在调度器
+        # 软暂停后读它。普通 drive 为 False。
         self._pending_pause: bool = False
         # Turn-level team consensus (team_brief): survives across delegate calls in one CEO turn.
         self._team_brief: str | None = None
-        # 当前 execute 展开的 playbook 名（team_preview pre-auth 判定用）。
+        # 当前 execute 展开的 playbook 名 / playbook_args（prelude 镜像）。
         self._active_playbook: str | None = None
-        # 当前 playbook_args（kickoff headline 只读 intensity；手写 tasks 为 None）。
         self._active_playbook_args: dict[str, Any] | None = None
         # Turn user-message provenance (historical ``execution_harvest`` origin).
         from agentcore.runtime.delegate.post_close_gate import current_user_message_origin
@@ -612,13 +610,11 @@ class DelegateTool:
         coordinate_flag = (
             bool(arguments["coordinate"]) if "coordinate" in arguments else True
         )
-        has_checkpoint = any(bool(n.checkpoint_after) for n in plan.nodes)
         defer_graph = should_defer_run_plan_emit_to_merge(
             self,
             execution_id=execution_id,
             coordinate=coordinate_flag,
             worker_count=len(plan.nodes),
-            has_checkpoint=has_checkpoint,
         )
 
         from agentcore.runtime.audit.hooks import on_delegate_plan
@@ -808,7 +804,6 @@ class DelegateTool:
         checkpoint_run_ids: set[str],
         execution_id: str,
         coordinate: bool = False,
-        apply_kickoff_grant: bool = False,
         team_brief: str | None = None,
         ceo_review: dict | None = None,
         resume_hints: dict | None = None,
@@ -816,49 +811,14 @@ class DelegateTool:
         if team_brief:
             self._team_brief = team_brief
         if decision is CheckpointDecision.STOP:
-            # team_preview STOP → soft guidance; plan_review STOP keeps format_for_ceo.
-            return await finalize_stopped(
-                self,
-                plan,
-                seed_completed,
-                kickoff_cancelled=apply_kickoff_grant,
-                note=note,
-            )
-        if decision is CheckpointDecision.TIMEOUT and apply_kickoff_grant:
-            # team_preview TIMEOUT ≠ CONTINUE：不 grant、不开工，回灌 CEO 自行收尾。
-            # plan_review TIMEOUT（apply_kickoff_grant=False）本轮仍走下方 drive。
-            return await finalize_stopped(
-                self,
-                plan,
-                seed_completed,
-                kickoff_timeout=True,
-                note=note,
-            )
-        if decision is CheckpointDecision.ADJUST and apply_kickoff_grant:
-            # team_preview ADJUST：不 grant、不开工，意见回灌 CEO 修订后重出卡。
-            # plan_review ADJUST（apply_kickoff_grant=False）仍走下方 steer + drive。
-            return await finalize_stopped(
-                self,
-                plan,
-                seed_completed,
-                kickoff_adjusted=True,
-                note=note,
-            )
+            return await finalize_stopped(self, plan, seed_completed)
 
-        # Steer: plan_review ADJUST; kickoff CONTINUE+note ≡ 嘱咐注入未跑队员.
-        # plan_review CONTINUE+note does not steer (apply_kickoff_grant=False; UI still has 调整).
-        if note.strip() and (
-            decision is CheckpointDecision.ADJUST
-            or (decision is CheckpointDecision.CONTINUE and apply_kickoff_grant)
-        ):
+        # Steer: plan_review ADJUST. CONTINUE+note does not steer (UI still has 调整).
+        if note.strip() and decision is CheckpointDecision.ADJUST:
             apply_steer(plan, seed_completed, checkpoint_run_ids, note.strip())
         # plan_review CONTINUE：读帧上 llm ceo_review → 压缩 REPLACE 注入 gate_notes。
-        # 开工卡路径 (apply_kickoff_grant) 不走；deterministic / 无 review → 不下发。
-        if (
-            decision is CheckpointDecision.CONTINUE
-            and not apply_kickoff_grant
-            and ceo_review is not None
-        ):
+        # deterministic / 无 review → 不下发。
+        if decision is CheckpointDecision.CONTINUE and ceo_review is not None:
             from agentcore.runtime.delegate.steer import (
                 apply_gate_notes,
                 compress_ceo_review_for_gate,
@@ -867,14 +827,6 @@ class DelegateTool:
             gate_body = compress_ceo_review_for_gate(ceo_review)
             if gate_body:
                 apply_gate_notes(plan, seed_completed, checkpoint_run_ids, gate_body)
-        # Kickoff (开工卡): continue → grant. ADJUST / TIMEOUT / STOP already returned above.
-        # apply_kickoff_grant is True only when resuming a team_preview suspension.
-        if (
-            apply_kickoff_grant
-            and self._approval_gate is not None
-            and decision is CheckpointDecision.CONTINUE
-        ):
-            self._approval_gate.grant_delegation(execution_id)
         # Resume never re-runs the original execute() path, so re-emit run_plan here:
         # FE Option A keeps the same pause bubble + projection key on message_start
         # (reuses the existing assistant; never delete+create) — re-bind the DAG under
@@ -887,8 +839,7 @@ class DelegateTool:
             nodes=len(plan.nodes),
         )
         # plan_review：仅经典路径 durable 挂起（协调态波边界只发 BOUNDARY_YIELD），续跑保持
-        # coordinate=False。team_preview：挂在 coordinate fork **之前**，开做后续跑须默认
-        # 臂后台（coordinate=True）；显式经典由调用方传 coordinate=False。
+        # coordinate=False。显式经典由调用方传 coordinate=False。
         from agentcore.runtime.delegate.batch_shape import annotate_batch_meta
 
         result = await drive(

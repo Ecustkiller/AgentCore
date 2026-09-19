@@ -21,7 +21,7 @@ function settle(
   act(() => {
     useInteractionStore.getState().markResumeSettled({
       id,
-      kind: "plan_review",
+      kind: "ask_user",
       conversationId,
       messageId: MID,
       decision: "continue",
@@ -51,7 +51,7 @@ describe("ResumeSettledNotices", () => {
 
     settle("cp-1", "complete");
 
-    expect(screen.getByText(/计划复核/)).toBeTruthy();
+    expect(screen.getByText(/提问确认/)).toBeTruthy();
     expect(screen.getByText(/以「继续」处理/)).toBeTruthy();
     expect(screen.getByText(/这次回合已经跑完/)).toBeTruthy();
 

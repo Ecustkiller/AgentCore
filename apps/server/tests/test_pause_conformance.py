@@ -33,12 +33,9 @@ from agentcore.runtime.events import EventSink
 from agentcore.runtime.facts import TurnFactLog, TurnStartedFact, current_fact_log
 from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.journal import (
-    completed_from_journal,
-    plan_from_journal,
     runs_from_entries,
     window_from_journal,
 )
-from agentcore.runtime.runs.serialize import plan_to_json, state_map_to_json
 from agentcore.runtime.suspension import captain_transcript
 from agentcore.tools.builtin.ask_user import AskUserTool
 from agentcore.tools.builtin.delegate import DelegateTool
@@ -325,42 +322,45 @@ async def test_pause_journal_after_completed_tool_round():
     assert transcript[4].tool_calls[0].function.name == "ask_user"  # type: ignore[index]
 
 
-# --- plan_review / delegate suspend golden (the harder pause shape) ----------------
+# --- leftover plan_review: extra checkpoint_after runs through (no pause) --------
 
 
-async def test_plan_review_pause_journal_projects_to_captain_transcript():
-    # The delegate counterpart of the ask_user golden — the harder shape: drive the REAL
-    # captain loop to a `delegate` whose plan checkpoints after s1, suspending the
-    # WaveScheduler at the wave boundary. The journal-at-pause interleaves the captain's
-    # facts with the WORKER's own (different run_id), and the suspended delegate has NO tool
-    # result yet. The fold must still reproduce the captain transcript byte-for-byte —
-    # gating the Phase 2 resume cutover for the plan_review suspend point.
+def test_fold_skips_leftover_plan_review_required():
+    from agentcore.runtime.journal.pending_interactions import (
+        fold_interactions,
+        fold_pending_interactions,
+    )
+
+    entries = [
+        {
+            "type": "plan_review_required",
+            "payload": {
+                "checkpoint_id": "cp_1",
+                "conversation_id": "c",
+                "steps": [{"run_id": "r1", "role": "调研", "summary": "方案就绪"}],
+                "pending": [{"run_id": "r2", "role": "执行"}],
+            },
+        }
+    ]
+    assert fold_pending_interactions(entries, message_id="m1") == []
+    assert fold_interactions(entries) == []
+
+
+async def test_delegate_checkpoint_after_extra_key_runs_through():
+    """多余键 checkpoint_after 不挂起：两 worker 跑完，captain 给出终稿。"""
     system_prompt = "你是 CEO。"
     user_message = "调研并撰写"
 
     captured: dict[str, object] = {}
 
     async def saver(frame) -> None:  # noqa: ANN001 - TurnSuspension
-        # The fact-log snapshot _save_pause_journal will persist (the pause instant — the
-        # delegate's tool result is not yet recorded) AND the captain_transcript snapshot.
-        captured["transcript"] = list(frame.transcript)
-        captured["journal_entries"] = list(frame.journal_entries)
-        # frame.completed = the scheduler's finished-worker seed at the checkpoint (s1) —
-        # the blob Phase 2 ⑥ replaces with a journal projection.
-        captured["completed"] = dict(frame.completed)
-        # frame.plan (frozen as JSON at the pause instant) = the DAG blob Phase 2 replaces
-        # with the ``plan_snapshot`` journal projection. Frozen now since the live object
-        # could be steered later.
-        captured["plan_json"] = plan_to_json(frame.plan)
+        captured["frame"] = frame
 
     async def deleter(_message_id: str) -> None:
         captured["deleted"] = True
 
     sink = EventSink()
     registry = InteractionRegistry()
-    # The captain's delegate runs its workers on this scripted provider: s1 → padded S1OUT
-    # (then the plan checkpoints), s2 → padded S2OUT (after resume). Separate from the captain
-    # provider. Pad past MIN_UPSTREAM_BODY_CHARS so handoff accepts.
     s1_body = _upstream_body("S1OUT")
     s2_body = _upstream_body("S2OUT")
     worker_provider = _ScriptedProvider(
@@ -426,10 +426,7 @@ async def test_plan_review_pause_journal_projects_to_captain_transcript():
     fl_token = current_fact_log.set(log)
     ct_token = captain_transcript.set(messages)
     try:
-        # ②: the delegate checkpoint finalizes the turn at the wave boundary (frame saved) —
-        # react_loop ends on PAUSED in place, with no parked plan_review to resolve. The saver
-        # snapshotted the pause frame under test before the boundary yielded.
-        await react_loop(
+        content, _reasoning, _usage, _rounds = await react_loop(
             messages=messages,
             llm=captain_provider,
             tools=reg,
@@ -445,54 +442,10 @@ async def test_plan_review_pause_journal_projects_to_captain_transcript():
         captain_transcript.reset(ct_token)
         current_fact_log.reset(fl_token)
 
-    assert "transcript" in captured, "the delegate checkpoint must have captured a frame"
-    persisted = captured["journal_entries"]  # type: ignore[assignment]
-
-    # THE GOLDEN: the window folded from the persisted journal == the captain transcript
-    # the frame snapshotted. Both end at the assistant issuing the suspended delegate (no
-    # tool result — the wave is parked), the interleaved worker facts (run_id="s1"…) excluded.
-    assert window_from_journal(persisted) == captured["transcript"]
-
-    # DISPLAY whole: the richer execution stream still surfaces the plan_review card.
-    runs = runs_from_entries(persisted)
-    assert runs is not None
-    assert any(e["type"] == "plan_review_required" for e in runs["events"])
-
-    # The shape: system, user, assistant(delegate) — no tool message for the suspended call.
-    transcript = captured["transcript"]
-    assert [m.role for m in transcript] == ["system", "user", "assistant"]  # type: ignore[union-attr]
-    assert transcript[2].tool_calls[0].function.name == "delegate"  # type: ignore[index]
-    assert all(m.role != "tool" for m in transcript)  # type: ignore[union-attr]
-    # And the journal really did interleave a worker's facts (proving run-scope isolation).
-    assert any(
-        e.get("kind") == "llm_call" and (e.get("payload") or {}).get("run_id") != "cap"
-        for e in persisted  # type: ignore[union-attr]
-    )
-
-    # THE COMPLETED GOLDEN (Phase 2 ⑥): the worker run-final facts fold back to the EXACT
-    # seed map the frame snapshotted — so a resume re-seeds finished nodes (s1) from the
-    # journal, gating the drop of frame.completed. Compared through the shared serializer
-    # (state_map_to_json) since both sides drop the heavy transcript → byte-for-byte equal.
-    projected = completed_from_journal(persisted)
-    # Same finished run_ids (only s1 — its minted id — ran before the checkpoint; s2 is
-    # downstream and runs post-resume) AND byte-for-byte equal seed RunStates.
-    assert set(projected) == set(captured["completed"])  # type: ignore[arg-type]
-    assert len(projected) == 1
-    assert state_map_to_json(projected) == state_map_to_json(captured["completed"])  # type: ignore[arg-type]
-    (s1_run_id,) = projected
-    assert s1_run_id.endswith("_s1")
-    assert projected[s1_run_id].content == s1_body
-
-    # THE PLAN GOLDEN (执行级事件溯源 Phase 2, frame.plan 退场): the ``plan_snapshot`` fact folds
-    # back to the EXACT DAG the frame snapshotted — so a resume rebuilds the plan (its minted
-    # run_ids matching the seed map above) from the journal, gating the drop of frame.plan.
-    # Compared through the shared serializer (plan_to_json) → byte-for-byte equal.
-    projected_plan = plan_from_journal(persisted)
-    assert projected_plan is not None
-    assert plan_to_json(projected_plan) == captured["plan_json"]
-    # Both nodes (s1 ran, s2 pending) survive with their minted ids + dependency edge.
-    assert [n.run_id for n in projected_plan.nodes] == [
-        n["run_id"]
-        for n in captured["plan_json"]["nodes"]  # type: ignore[index]
-    ]
-    assert projected_plan.nodes[1].depends_on == [projected_plan.nodes[0].run_id]
+    assert "最终答复" in (content or "")
+    assert worker_provider.calls == 2
+    assert captain_provider.calls == 2
+    assert captured == {}
+    assert registry.list_pending("c1") == []
+    assert any(m.role == "tool" for m in messages)
+    assert not any(str(e.type) == "plan_review_required" for e in sink._history)

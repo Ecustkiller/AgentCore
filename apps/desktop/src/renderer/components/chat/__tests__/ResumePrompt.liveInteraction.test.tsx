@@ -10,7 +10,7 @@ import type { SSEEvent } from "@/types/events";
 // @vitest-environment jsdom
 /**
  * Live cold card authority = InteractionStore.
- * leftover `team_preview_*` via SSE is consume-and-skip (no IX / no stamp);
+ * leftover `team_preview_*` / `plan_review_*` via SSE is consume-and-skip (no IX / no stamp);
  * leftover IX upserted directly still does not paint a clickable kickoff shell.
  */
 import { act, cleanup, render, screen } from "@testing-library/react";
@@ -89,6 +89,23 @@ function leftoverPreviewRequired(
     type: "team_preview_required" as string,
     timestamp: "",
     payload: tpPayload(checkpointId, over),
+  } as SSEEvent;
+}
+
+function leftoverPlanReviewRequired(
+  checkpointId: string,
+  over: Record<string, unknown> = {},
+): SSEEvent {
+  return {
+    type: "plan_review_required" as string,
+    timestamp: "",
+    payload: {
+      checkpoint_id: checkpointId,
+      conversation_id: CID,
+      steps: [{ run_id: "r1", role: "研", summary: "方案就绪" }],
+      pending: [],
+      ...over,
+    },
   } as SSEEvent;
 }
 
@@ -389,17 +406,9 @@ describe("ResumePrompt · live InteractionStore authority", () => {
         questions: [],
       },
     });
-    useInteractionStore.getState().upsertRequired({
-      kind: "plan_review",
+    handleInteractionEvent(leftoverPlanReviewRequired("pr-keep"), {
       conversationId: CID,
-      messageId: "m-server-tp",
-      origin: "server",
-      payload: {
-        checkpoint_id: "pr-keep",
-        conversation_id: CID,
-        steps: [{ run_id: "r1", role: "研" }],
-        pending: [],
-      },
+      source: "server",
     });
     // Older recovery shell — different checkpoint, would paint a second kickoff.
     usePausedTurnStore.getState().addLiveResume({
@@ -431,17 +440,37 @@ describe("ResumePrompt · live InteractionStore authority", () => {
       pausedPending: usePausedTurnStore.getState().pending,
       messages: useConversationStore.getState().byId[CID]?.messages ?? [],
     });
-    expect(visible.map((v) => v.kind).sort()).toEqual([
-      "ask_user",
-      "plan_review",
-    ]);
+    expect(visible.map((v) => v.kind)).toEqual(["ask_user"]);
 
     renderResume();
     expect(screen.getByText("这次讨论怎么推进？")).toBeTruthy();
-    expect(screen.getByText("「研」已完成")).toBeTruthy();
+    expect(screen.queryByText("「研」已完成")).toBeNull();
     expect(screen.queryByText("此回合还停在开工确认")).toBeNull();
     expect(screen.queryByText("最新开工卡")).toBeNull();
     expect(screen.queryByRole("button", { name: "授权并开工" })).toBeNull();
+    expect(useInteractionStore.getState().get("pr-keep")).toBeUndefined();
+  });
+
+  it("leftover plan_review SSE is skipped (no IX / no stamp / no clickable card)", () => {
+    handleInteractionEvent(leftoverPlanReviewRequired("pr-live"), {
+      conversationId: CID,
+      source: "server",
+    });
+    handleInteractionEvent(
+      {
+        type: "plan_review_resolved" as string,
+        timestamp: "",
+        payload: { checkpoint_id: "pr-live", decision: "continue" },
+      } as SSEEvent,
+      { conversationId: CID, source: "server" },
+    );
+
+    const { container } = renderResume();
+    expect(container.querySelector(".mx-4")).toBeNull();
+    expect(useInteractionStore.getState().get("pr-live")).toBeUndefined();
+    expect(screen.queryByText("计划复核")).toBeNull();
+    expect(screen.queryByRole("button", { name: "继续" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "调整" })).toBeNull();
   });
 });
 
@@ -520,6 +549,35 @@ describe("ResumePrompt · ask continue → leftover team_preview SSE skip", () =
     renderResume();
     expect(screen.queryByText("继续")).toBeNull();
     expect(screen.queryByText("此回合还停在开工确认")).toBeNull();
+  });
+
+  it("leftover plan_review_required after continue is skipped (no IX)", () => {
+    seedAskPaused();
+    useConversationStore.getState().setTurnPhase("streaming", CID);
+    expect(
+      useConversationStore.getState().resumePausedAssistant(SERVER, CID),
+    ).toBe("client-ask");
+
+    handleInteractionEvent(leftoverPlanReviewRequired("pr-after-ask"), {
+      conversationId: CID,
+      source: "server",
+    });
+
+    expect(
+      useInteractionStore.getState().byId.get("pr-after-ask"),
+    ).toBeUndefined();
+    expect(
+      selectVisibleColdResumes({
+        conversationId: CID,
+        byId: useInteractionStore.getState().byId,
+        pausedPending: usePausedTurnStore.getState().pending,
+        messages: useConversationStore.getState().byId[CID]?.messages,
+      }),
+    ).toHaveLength(0);
+
+    renderResume();
+    expect(screen.queryByText("计划复核")).toBeNull();
+    expect(screen.queryByRole("button", { name: "调整" })).toBeNull();
   });
 
   it("ensureStreamingAssistant reuses stamped paused bubble (no unstamped mint)", () => {

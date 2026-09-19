@@ -461,7 +461,7 @@ async def _drive_body(
                 has_deps=False,
             )
 
-    # CEO 协调模式：默认非阻塞臂（depth>0 / 显式 false / checkpoint_after 由 gate 拦下）。
+    # CEO 协调模式：默认非阻塞臂（depth>0 / 显式 false）。
     # 已有活跃协调会话时必须走 try_start（内部 merge），即使本批 coordinate=false。
     if session is None and (coordinate or merging_into_active):
         from agentcore.runtime.coordination.host import try_start_coordination

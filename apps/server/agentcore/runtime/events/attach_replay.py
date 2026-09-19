@@ -61,7 +61,6 @@ _PROCESS_STRUCTURAL_SUFFIXES = frozenset(
         "tool",
         "team",
         "checkpoint",
-        "plan_review",
         "team_preview",
         "escalation",
         "approval",
@@ -261,7 +260,7 @@ def journal_is_structured(rows: list[dict[str, Any]]) -> bool:
             EventType.RUN_PLAN.value,
             EventType.RUN_STARTED.value,
             EventType.CHECKPOINT_REQUIRED.value,
-            EventType.PLAN_REVIEW_REQUIRED.value,
+            "plan_review_required",
             "team_preview_required",
         ):
             return True
@@ -521,7 +520,7 @@ def replay_open_event(*, turn_id: str, conversation_id: str, full_replay: bool =
     {id}/resume``). The no-cursor path replays it out of the sink's ``_history``; the
     journal cursor path had no source for it, and clients always send ``Last-Event-ID``,
     so an attaching client kept its client-side bubble id (or, cross-turn, the PREVIOUS
-    turn's id). A turn that then stopped at ask_user / plan_review painted
+    turn's id). A turn that then stopped at ask_user painted
     no resume card at all (the durable-card surface refuses an unstamped bubble) or one
     bound to a stale id whose submit 404s — the user had to leave the conversation and
     come back.

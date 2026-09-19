@@ -104,30 +104,6 @@ def test_approval_alone_is_a_journal_surface():
     assert {"kind": "approval", "approval_id": "appr-1"} in process
 
 
-def test_stage_card_alone_is_a_journal_surface():
-    # Derived from INTERACTION_KIND_SPECS.journal_surface — stage_card_required used
-    # to be missing from the hand-copied surface set, so a host turn that only
-    # posted the card would vanish from reload events.
-    from agentcore.runtime.events import stage_card_required
-
-    sink = EventSink()
-    sink.emit(content_delta("调研收束，是否开辩？"))
-    sink.emit(
-        stage_card_required(
-            stage_card_id="sc-1",
-            conversation_id="c1",
-            motion="要不要开一场辩论",
-            sides=[{"id": "pro", "label": "正方"}],
-            form="debate",
-            rationale="事实已齐",
-        )
-    )
-    journal = sink.execution_journal()
-    assert journal is not None
-    assert [e["type"] for e in journal] == [EventType.STAGE_CARD_REQUIRED.value]
-    assert journal[0]["payload"]["stage_card_id"] == "sc-1"
-
-
 def test_durable_events_after_close_still_journal_display():
     """Pillar A: after sink.close, DURABLE display facts still update the in-memory
     journal (host/execution persist); SSE / history stay closed."""

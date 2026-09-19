@@ -2,8 +2,8 @@
  * Single registration table for user-facing decision / ask interactions.
  *
  * Wire shape (required/resolved event + id field) and behavior flags come from
- * codegen (`INTERACTION_KIND_WIRE`). Kind groupings (hot / cold-resume / hot-gate
- * / stage) and submit path are derived from those flags — do not
+ * codegen (`INTERACTION_KIND_WIRE`). Kind groupings (hot / cold-resume / hot-gate)
+ * and submit path are derived from those flags — do not
  * hand-copy kind names. This module adds desktop-only metadata: timeline
  * marker, SSE side-effects. Card titles live in protocol-fold-kit
  * (`INTERACTION_CARD_NAME`). Card components / cold resume renderers live
@@ -27,26 +27,20 @@ export type InteractionKind = UserInteractionKind;
 /**
  * Desktop transport for resolving a card. Derived from wire flags:
  * hot → "hot"; pausesTurn && !hot → "cold";
- * journalSurface leftover (not hot / not cold) → "stage" (no live submit);
+ * journalSurface leftover (not hot / not cold) → throw;
  * otherwise throw.
  */
-export type InteractionSubmitPath = "cold" | "hot" | "stage";
+export type InteractionSubmitPath = "cold" | "hot";
 
 export function submitPathOf(kind: InteractionKind): InteractionSubmitPath {
   const w = INTERACTION_KIND_WIRE[kind];
   if (w.hot) return "hot";
   if (w.pausesTurn) return "cold";
-  if (w.journalSurface) return "stage";
   throw new Error(`no submit path for interaction kind ${kind}`);
 }
 
 /** Process-step discriminant stamped into the CEO message lane. */
-export type TimelineProcessKind =
-  | "checkpoint"
-  | "plan_review"
-  | "escalation"
-  | "approval"
-  | "stage_card";
+export type TimelineProcessKind = "checkpoint" | "escalation" | "approval";
 
 export interface TimelineMarkerDef {
   processKind: TimelineProcessKind;
@@ -54,8 +48,7 @@ export interface TimelineMarkerDef {
   stepIdField:
     | "checkpoint_id"
     | "escalation_id"
-    | "approval_id"
-    | "stage_card_id";
+    | "approval_id";
 }
 
 export interface InteractionSseRequiredEffects {
@@ -83,7 +76,7 @@ export interface InteractionKindDef {
   sseResolved?: InteractionSseResolvedEffects;
 }
 
-/** The registry — one row per user-facing interaction kind (含 leftover journal 痕迹). */
+/** The registry — one row per user-facing interaction kind. */
 export const INTERACTION_REGISTRY: readonly InteractionKindDef[] = [
   {
     kind: "approval",
@@ -112,29 +105,22 @@ export const INTERACTION_REGISTRY: readonly InteractionKindDef[] = [
     sseRequired: { flushBuffers: true },
     sseResolved: { removePausedTurn: true },
   },
-  {
-    kind: "plan_review",
-    timeline: {
-      processKind: "plan_review",
-      stepIdField: "checkpoint_id",
-    },
-    sseRequired: { flushBuffers: true, recordExecFrame: true },
-    sseResolved: {
-      removePausedTurn: true,
-      flushFrames: true,
-      recordExecFrame: true,
-    },
-  },
-  {
-    kind: "stage_card",
-    // leftover journal 痕迹：活人面无提交；resolve 410。时间线只画已结 / 已失效。
-    timeline: {
-      processKind: "stage_card",
-      stepIdField: "stage_card_id",
-    },
-    sseRequired: { flushBuffers: true },
-  },
 ];
+
+/**
+ * Retired live kinds still present on historical SSE / journals.
+ * Consume-and-skip: no IX upsert, no timeline stamp.
+ */
+export const LEFTOVER_INTERACTION_SSE_TYPES: ReadonlySet<string> = new Set([
+  "team_preview_required",
+  "team_preview_resolved",
+  "plan_review_required",
+  "plan_review_resolved",
+]);
+
+export function isLeftoverInteractionSse(eventType: string): boolean {
+  return LEFTOVER_INTERACTION_SSE_TYPES.has(eventType);
+}
 
 function registeredKinds(): InteractionKind[] {
   return INTERACTION_REGISTRY.map((d) => d.kind);

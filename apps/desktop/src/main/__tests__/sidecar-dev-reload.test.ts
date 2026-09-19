@@ -100,17 +100,20 @@ describe("sidecarDevReloadEnabled", () => {
     ).toBe(false);
   });
 
-  it("unpackaged defaults on", () => {
-    expect(sidecarDevReloadEnabled({}, false)).toBe(true);
-  });
-
-  it("unpackaged honors explicit off", () => {
+  it("unpackaged defaults off", () => {
+    expect(sidecarDevReloadEnabled({}, false)).toBe(false);
     expect(
       sidecarDevReloadEnabled({ AGENTCORE_SIDECAR_RELOAD: "false" }, false),
     ).toBe(false);
+  });
+
+  it("unpackaged honors explicit on", () => {
     expect(
-      sidecarDevReloadEnabled({ AGENTCORE_SIDECAR_RELOAD: "off" }, false),
-    ).toBe(false);
+      sidecarDevReloadEnabled({ AGENTCORE_SIDECAR_RELOAD: "true" }, false),
+    ).toBe(true);
+    expect(
+      sidecarDevReloadEnabled({ AGENTCORE_SIDECAR_RELOAD: "1" }, false),
+    ).toBe(true);
   });
 });
 
@@ -125,6 +128,23 @@ describe("shouldIgnoreSidecarReloadPath", () => {
 });
 
 describe("startSidecarDevReload", () => {
+  it("no-ops when env omitted (default off)", () => {
+    const bounce = vi.fn(() => 1);
+    const watchFn = vi.fn();
+    const stop = startSidecarDevReload(
+      { bounceForDevReload: bounce },
+      {
+        packaged: false,
+        env: {},
+        watchDir: "/x/agentcore",
+        dirExists: () => true,
+        watchFn,
+      },
+    );
+    expect(watchFn).not.toHaveBeenCalled();
+    stop();
+  });
+
   it("no-ops when disabled", () => {
     const bounce = vi.fn(() => 1);
     const watchFn = vi.fn();
@@ -153,7 +173,7 @@ describe("startSidecarDevReload", () => {
       { bounceForDevReload: bounce },
       {
         packaged: false,
-        env: {},
+        env: { AGENTCORE_SIDECAR_RELOAD: "true" },
         watchDir: "/x/agentcore",
         dirExists: () => true,
         watchFn: (_dir, _opts, cb) => {
@@ -181,7 +201,7 @@ describe("startSidecarDevReload", () => {
       { bounceForDevReload: bounce },
       {
         packaged: false,
-        env: {},
+        env: { AGENTCORE_SIDECAR_RELOAD: "true" },
         watchDir: "/x/agentcore",
         dirExists: () => true,
         watchFn: (_dir, _opts, cb) => {

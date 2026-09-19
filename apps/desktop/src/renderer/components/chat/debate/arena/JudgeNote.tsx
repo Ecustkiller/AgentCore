@@ -1,22 +1,16 @@
 import { Loader2 } from "lucide-react";
-import {
-  type DebateForm,
-  type DebateRoundModel,
-  describeRoundVerdict,
-} from "../model";
+import { type DebateRoundModel, describeRoundVerdict } from "../model";
 import { ModeratorIdentity } from "./ModeratorIdentity";
 
 /** 裁判札记横带：逐轮小结 / 小结空窗 / 拟质询空窗。身份壳与开场入场、质询报幕一致。 */
 export function JudgeNote({
   text,
   round,
-  form,
   pending,
   pendingKind = "summary",
 }: {
   text: string;
   round?: DebateRoundModel;
-  form?: DebateForm;
   pending?: boolean;
   /** pending 文案分流：拟质询空窗 vs 小结空窗。缺省小结（向后兼容）。 */
   pendingKind?: "cross_exam" | "summary";
@@ -34,7 +28,7 @@ export function JudgeNote({
   }
 
   const verdict = round?.verdict;
-  const status = verdict && form ? describeRoundVerdict(verdict, form) : null;
+  const status = verdict ? describeRoundVerdict(verdict) : null;
 
   return (
     <div className="border-y border-border bg-muted/20 px-3 py-2.5">

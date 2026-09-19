@@ -2,7 +2,7 @@
 
 对齐历史多维调研图（录制时具名 ``lens_crosscheck``）：CEO delegate →
 4 异质透镜并行 → 汇总分析师 depends_on 四路（handoff 携 ``motion_card``）→
-CEO 收尾呈报「建议开辩」（开辩入口是 stage_card，不是 followups chips）。
+CEO 收尾呈报「建议开辩」（开辩入口是对话里点名，不是 followups chips）。
 
 流式中间态刻意留足：四路并行推进中、汇总未开跑、汇总进行中。
 """

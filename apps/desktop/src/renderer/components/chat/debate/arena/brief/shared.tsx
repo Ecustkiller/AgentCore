@@ -10,7 +10,7 @@ import type {
   DebateHandoffInfo,
   DebateSideInfo,
 } from "@/types/events";
-import { Lightbulb, Scale, Swords, Target, UserRound } from "lucide-react";
+import { Lightbulb, Scale, Swords, UserRound } from "lucide-react";
 import type { ReactNode } from "react";
 import {
   type StanceSide,
@@ -40,19 +40,12 @@ export function briefHandoffs(brief: DebateBriefInfo): DebateHandoffInfo[] {
  */
 export function VerdictCard({
   brief,
-  form,
   sides,
-  gate = null,
 }: {
   brief: DebateBriefInfo;
-  form: "debate" | "red_team";
   sides?: DebateSideInfo[];
-  /** 红队门决文案；正反不传。 */
-  gate?: string | null;
 }) {
-  const label = form === "red_team" ? "方案评定" : "结论倾向";
   const level = confidenceLevel(brief.confidence);
-  const showCrux = form === "red_team" && !!brief.crux;
   const { stanceLabel, stanceSide, thesis, reversal } = splitLeaning(
     brief.leaning,
     sides,
@@ -64,13 +57,12 @@ export function VerdictCard({
       <div className="flex items-center justify-between gap-2">
         <SectionLabel className="flex items-center gap-1">
           <Scale size={13} />
-          {label}
+          结论倾向
         </SectionLabel>
         <div className="flex shrink-0 items-center gap-1.5">
           {showStancePill && stanceLabel ? (
             <StancePill label={stanceLabel} side={stanceSide} />
           ) : null}
-          {gate && <span className={statusPillInline.primary}>{gate}</span>}
           <span
             className={`rounded-full px-1.5 py-0.5 text-xs font-medium ${confidencePill[level]}`}
           >
@@ -98,21 +90,11 @@ export function VerdictCard({
       {reversal ? (
         <p className="mt-1.5 text-sm text-muted-foreground">{reversal}</p>
       ) : null}
-      {(brief.decisive || showCrux) && (
+      {brief.decisive && (
         <div className="mt-3 space-y-1.5 border-t border-border pt-3">
-          {brief.decisive && (
-            <ReasonRow
-              icon={<Swords size={13} />}
-              label={form === "red_team" ? "定门决" : "胜负手"}
-            >
-              {brief.decisive}
-            </ReasonRow>
-          )}
-          {showCrux && (
-            <ReasonRow icon={<Target size={13} />} label="争点">
-              {brief.crux}
-            </ReasonRow>
-          )}
+          <ReasonRow icon={<Swords size={13} />} label="胜负手">
+            {brief.decisive}
+          </ReasonRow>
         </div>
       )}
     </div>
@@ -180,13 +162,11 @@ function ReasonRow({
 export function YourCallZone({
   handoffs,
   recommendation,
-  form,
   divided = false,
   shell = "plain",
 }: {
   handoffs: DebateHandoffInfo[];
   recommendation?: string;
-  form?: "debate" | "red_team";
   divided?: boolean;
   shell?: "plain" | "card";
 }) {
@@ -201,7 +181,7 @@ export function YourCallZone({
     return null;
   }
 
-  const recLabel = form === "red_team" ? "加固建议" : "建议";
+  const recLabel = "建议";
 
   const inner = (
     <div

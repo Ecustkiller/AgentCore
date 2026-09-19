@@ -348,11 +348,6 @@ def test_wrap_prompt_is_explicit_close_not_fake_done(monkeypatch):
         assert text.startswith("[系统提示]")
         assert "触顶" in text
         assert "100" in text
-        assert "delegate" in text or "派" in text
-        assert "假" in text or "伪装" in text
-        assert REASON_TURN_TOKEN_BUDGET in text
-        assert "禁止假装" in text or "伪装" in text
-        assert "下一回合" in text and "续跑" in text
     finally:
         reset_turn_token_meter(token)
 

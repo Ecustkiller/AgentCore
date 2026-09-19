@@ -2,6 +2,9 @@
  * Layout-only debate tag predicate (mirrors desktop `stores/execution/debate.ts`).
  * Duplicated here so this package never imports UI stores. Keep the group
  * whitelist in lockstep with the execution-store source of truth.
+ *
+ * `debate:red_team` / `debate:roundtable` stay so old journal 辩手 nodes remain
+ * in the debate compound; they are not product forms.
  */
 const DEBATE_PARTICIPANT_GROUPS = new Set([
   "debate:debate",
@@ -10,7 +13,7 @@ const DEBATE_PARTICIPANT_GROUPS = new Set([
   "debate:witness",
 ]);
 
-/** stance 非空或显式辩形态 / 证人席 group。 */
+/** stance 非空或白名单辩手 / 证人席 group。禁 `startsWith("debate:")`。 */
 export function isDebateTaggedRun(r: {
   stance?: string | null;
   group?: string | null;

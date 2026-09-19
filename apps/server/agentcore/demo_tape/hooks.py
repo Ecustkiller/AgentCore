@@ -10,13 +10,12 @@ from agentcore.runtime.checkpoints import CheckpointResponse
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.suspension import (
     AskUserSuspension,
-    PlanReviewSuspension,
     TurnSuspension,
 )
 
 logger = get_logger(__name__)
 
-_TAPE_RESUME_KINDS = (AskUserSuspension, PlanReviewSuspension)
+_TAPE_RESUME_KINDS = (AskUserSuspension,)
 
 
 def try_resolve_tape_binding(conversation_id: str):

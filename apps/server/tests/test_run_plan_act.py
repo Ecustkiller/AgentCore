@@ -7,8 +7,8 @@ from types import SimpleNamespace
 from agentcore.conformance.projection import _act_from_plan, project_turn
 from agentcore.runtime.debate.events import moderator_plan_event
 from agentcore.runtime.delegate.plan_events import plan_event
-from agentcore.runtime.events import graph_append, run_plan
-from agentcore.runtime.events.payloads.run import GraphAppendPayload, RunPlanPayload
+from agentcore.runtime.events import run_plan
+from agentcore.runtime.events.payloads.run import RunPlanPayload
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunSpec
 
@@ -36,20 +36,6 @@ def test_run_plan_payload_accepts_act():
     assert model.act.act_id == "act-1"
     assert model.act.kind == "multi_agent"
     assert model.act.title == "调研"
-
-
-def test_graph_append_payload_accepts_act_fields():
-    ev = graph_append(
-        execution_id="e1",
-        host_message_id="m1",
-        append_message_id="m2",
-        added_count=1,
-        act_id="act-1",
-        act_kind="multi_agent",
-    )
-    model = GraphAppendPayload.model_validate(ev.payload)
-    assert model.act_id == "act-1"
-    assert model.act_kind == "multi_agent"
 
 
 def test_delegate_plan_event_emits_act_1_multi_agent():

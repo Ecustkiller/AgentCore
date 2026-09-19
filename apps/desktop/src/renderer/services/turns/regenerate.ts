@@ -6,7 +6,7 @@ import {
   streamErrorAction,
 } from "@/lib/errors";
 import { logEvent } from "@/lib/log";
-import type { PlanReviewUserDecision } from "@/services/planReview";
+import type { CheckpointUserDecision } from "@/services/checkpoint";
 import {
   conversationHasColdPending,
   isClientOnlyResumeKey,
@@ -135,6 +135,7 @@ function toOutgoingAttachments(
     conversation_id: a.conversationId,
     document_id: a.documentId,
     workspace_path: a.workspacePath,
+    ...(a.sourceFolderId ? { source_folder_id: a.sourceFolderId } : {}),
   }));
 }
 
@@ -354,7 +355,7 @@ export interface RunResumeOptions {
 /**
  * Continue a durably-paused turn (结构化挂起 2b resume) and stream the continuation.
  *
- * The turn paused at a plan_review / ask_user checkpoint and was persisted, then
+ * The turn paused at an ask_user checkpoint and was persisted, then
  * lost its live stream (disconnect / restart). The user's decision (continue /
  * adjust / stop) — plus any ask_user option `selected` — is POSTed to the resume
  * endpoint, which claims the frame and drives the rest of the turn on a fresh SSE.
@@ -373,7 +374,7 @@ export interface RunResumeOptions {
  */
 export async function runResume(
   messageId: string,
-  decision: PlanReviewUserDecision,
+  decision: CheckpointUserDecision,
   note: string,
   selected: string[] = [],
   opts: RunResumeOptions = {},

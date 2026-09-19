@@ -4,11 +4,10 @@
 供 ``GET …/recovery``（热路 pending 子集）+ conformance oracle（ProjectedTurn.interactions）共用——
 **单一实现，不双写规则**。
 
-7 user-facing kind：approval / escalation /
-ask_user / plan_review / stage_card。
+user-facing kind：approval / escalation / ask_user。
 
 ``awaiting=ceo`` 的 escalation 不进用户可答清单（由活着的 CEO 仲裁）。
-冷路（ask_user / plan_review）的 frame 恢复仍走 ``paused_turns``；
+冷路（ask_user）的 frame 恢复仍走 ``paused_turns``；
 本 fold 只负责交互卡生命周期投影。
 
 ``turn_end`` / 非 ``paused`` 的 ``message_end`` = 回合终了：未结算的热卡
@@ -21,7 +20,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from agentcore.runtime.events.types import RETIRED_EVENT_TYPE_VALUES
 from agentcore.runtime.interaction import (
     INTERACTION_KIND_SPECS,
     RECOVERY_PENDING_KINDS,
@@ -110,9 +108,6 @@ def fold_interactions(entries: list[dict[str, Any]]) -> list[InteractionRecord]:
     for entry in entries:
         event_kind = str(entry.get("kind") or entry.get("type") or "")
         payload = dict(entry.get("payload") or {})
-        if event_kind in RETIRED_EVENT_TYPE_VALUES:
-            continue
-
         if event_kind == "interaction_orphaned":
             orphan_kind = str(payload.get("kind") or "")
             orphan_id = str(payload.get("interaction_id") or "")
@@ -281,9 +276,6 @@ def project_interaction_leaf(rec: InteractionRecord) -> dict[str, Any]:
             **base,
             "question": p.get("question", ""),
         }
-    if rec.kind == "plan_review":
-        run_ids = [s.get("run_id", "") for s in (p.get("steps") or [])]
-        return {**base, "runIds": run_ids}
     if rec.kind == "escalation":
         esc: dict[str, Any] = {
             **base,
@@ -295,17 +287,6 @@ def project_interaction_leaf(rec: InteractionRecord) -> dict[str, Any]:
         if p.get("awaiting") in ("user", "ceo"):
             esc["awaiting"] = p["awaiting"]
         return esc
-    if rec.kind == "stage_card":
-        return {
-            **base,
-            "motion": p.get("motion", ""),
-            "sides": p.get("sides") or [],
-            "form": p.get("form", "debate"),
-            "rationale": p.get("rationale", ""),
-            "factPointers": p.get("fact_pointers") or [],
-            "maxRounds": int(p.get("max_rounds") or 5),
-            "note": p.get("note") if isinstance(p.get("note"), str) else None,
-        }
     return base
 
 
@@ -327,7 +308,7 @@ def settlement_dedupe_key(
 
     ``kind`` 必须是**完整事件 kind**（required / resolved / orphaned 是三个不同事实），
     只对同一事实的双写去重。历史教训：曾折叠成交互族键，导致宿主回合里的
-    ``stage_card_required`` 行把同卡 ``stage_card_resolved`` / ``interaction_orphaned``
+    ``*_required`` 行把同卡 ``*_resolved`` / ``interaction_orphaned``
     的落库静默吞掉（卡在恢复视图永远 pending）。
     """
     if event_kind.endswith("_resolved") or event_kind.endswith("_required"):

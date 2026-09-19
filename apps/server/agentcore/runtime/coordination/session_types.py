@@ -261,8 +261,6 @@ def should_enter_coordination(
     coordinate: bool,
     worker_count: int,
     depth: int,
-    has_checkpoint: bool = False,
-    checkpoint_enabled: bool = False,
 ) -> bool:
     """Gate: ≥1 worker + root CEO; opt out with ``coordinate=False``.
 
@@ -275,13 +273,9 @@ def should_enter_coordination(
     explore roster) are independent and stay multi-worker-only — solo keeps its
     zero-friction kickoff appearance.
 
-    When the batch contains ``checkpoint_after`` nodes **and** the turn's checkpoint
-    gate is open, stay on classic blocking drive so durable plan_review cards fire.
-    Gate-off (evals / ``approvals_enabled=False``) leaves coordination unchanged.
-
     **Invariant B**: CEO arbitration (``resolve_escalation`` / ``awaiting=ceo``)
     is available iff a coordination session is active. Classic blocking escalate
-    (no live session — e.g. ``coordinate=false`` / nested lead / ``checkpoint_after``)
+    (no live session — e.g. ``coordinate=false`` / nested lead)
     therefore hangs on the **user**, never the CEO — otherwise worker↔CEO deadlock
     (CEO blocked inside ``delegate``, worker waiting for ``resolve_escalation``).
     Solo-in-coordination has a free CEO, so Invariant B holds the same way as
@@ -290,8 +284,6 @@ def should_enter_coordination(
     if coordinate is False:
         return False
     if depth != 0:
-        return False
-    if has_checkpoint and checkpoint_enabled:
         return False
     return worker_count >= 1
 

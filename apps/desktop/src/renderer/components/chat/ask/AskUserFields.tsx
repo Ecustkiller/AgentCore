@@ -54,23 +54,17 @@ export type AskTone =
  * text → typed value) plus per-question free-text notes (choice only; keyed by
  * `question.id`). Cards with no questions keep a card-level `note`. Does not seed
  * `default` — the generic card opens with nothing checked (认同推荐项须再点一下).
- * `seedAllMultiple` still selects every option on organize / daily-review walls.
  * `compose(intent)` flattens it all into ONE readable answer (答复模型 α — the only
  * reader is the CEO / worker, an LLM). Empty picks + no note still emit「按你的默认」
  * for protocol compatibility; the desktop card must not send that path.
  */
 export function useAskAnswer(
   content: AskUserContent,
-  opts?: { seedAllMultiple?: boolean },
 ) {
   const [answers, setAnswers] = useState<Record<string, string[]>>(() => {
     const init: Record<string, string[]> = {};
     for (const q of content.questions) {
-      if (opts?.seedAllMultiple && q.multiple && q.options.length > 0) {
-        init[q.id] = q.options.map((o) => o.label);
-      } else {
-        init[q.id] = [];
-      }
+      init[q.id] = [];
     }
     return init;
   });

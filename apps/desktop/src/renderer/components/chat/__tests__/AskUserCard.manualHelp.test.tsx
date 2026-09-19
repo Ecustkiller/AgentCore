@@ -17,7 +17,7 @@ vi.mock("@/lib/toast", () => ({
 
 afterEach(cleanup);
 
-const INTENTS: AskUiIntent[] = ["decision", "organize_plan"];
+const INTENTS: AskUiIntent[] = ["decision"];
 
 describe("AskUserCard manual help", () => {
   it.each(INTENTS)("%s 拍板卡不挂「看手册说明」", (intent) => {

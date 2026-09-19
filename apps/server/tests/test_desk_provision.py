@@ -1,4 +1,4 @@
-"""Cloud desk provision lives in prepare/resume — never inside ``run``."""
+"""Cloud desk provision follows the current server root — never inside ``run``."""
 
 from __future__ import annotations
 
@@ -40,6 +40,23 @@ async def test_provision_calls_ensure_on_server_backend():
 
     await provision_server_desk(_Server())  # type: ignore[arg-type]
     assert calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_provision_skips_ensure_when_desk_already_ready():
+    calls: list[int] = []
+
+    class _Server:
+        location = "server"
+
+        def cloud_desk_ready(self) -> bool:
+            return True
+
+        async def ensure_workspace_desk(self) -> None:
+            calls.append(1)
+
+    await provision_server_desk(_Server())  # type: ignore[arg-type]
+    assert calls == []
 
 
 @pytest.mark.asyncio
@@ -130,13 +147,23 @@ async def test_provision_emits_desk_wait_on_sink():
     assert events[2] == ("desk_provision_wait", False)
 
 
-def test_prepare_and_resume_call_provision():
+def test_prepare_and_resume_provision_final_sitting_root():
+    from agentcore.runtime.delegate import target_desktop as target_mod
     from agentcore.runtime.pipeline import prepare as prepare_mod
     from agentcore.runtime.pipeline.resume import wire as wire_mod
 
-    assert "provision_server_desk" in inspect.getsource(prepare_mod.prepare_fresh_turn)
+    prepare_src = inspect.getsource(prepare_mod.prepare_fresh_turn)
+    resume_src = inspect.getsource(wire_mod._wire_continuation_toolset)
+    for src in (prepare_src, resume_src):
+        assert src.index("adopt_persisted_auto_desk") < src.index("provision_server_desk")
+        assert "bind_tool_context_to_landing_desk" not in src
     assert "provision_server_desk" in inspect.getsource(
-        wire_mod._wire_continuation_toolset
+        target_mod.bind_tool_context_to_landing_desk
+    )
+    assert "provision_server_desk" in inspect.getsource(target_mod.apply_target_desktop)
+    assert "provision_server_desk" not in inspect.getsource(target_mod._try_landing_backend)
+    assert "provision_server_desk" not in inspect.getsource(
+        target_mod.adopt_persisted_auto_desk
     )
 
 

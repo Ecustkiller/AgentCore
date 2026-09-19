@@ -25,11 +25,10 @@ _LOCAL_DESK = """\
 Web/移动端无法履行工作区以外的本机授权 → 须用桌面客户端，下载链同样 `consult(product_help)`。
 
 【工作区以外】看/分析本机目录 → 直接 `file_read` / `file_list` / `glob` / `grep` 本机绝对路径或 ~/Desktop|Downloads|Documents（桌面在线时会只读接上，不必先问）。\
-整理/交付 → `file_copy` 到已挂 `external/<别名>/…` 或该本机路径（运行时请用户确认整理授权）；云上直接 `file_write` 本机路径会失败，先写工作区再 copy（单向、不覆盖）。\
-用户已口头同意整理 → 立刻 `file_copy`（已挂用 `external/` 路径）。多个候选 → `ask_user` 让人选后再对该路径读写。\
-打开本机文件夹时，旁边挂上的本机目录可改可覆盖 → `file_write` / `file_copy` 到已挂路径或该本机路径（运行时请用户确认可写授权）。\
+整理/交付 → `file_batch` copy 到已挂 `external/<别名>/…` 或该本机路径（运行时请用户确认整理授权）；云上直接 `file_write` 本机路径会失败，先写工作区再 copy（单向、不覆盖）。\
+用户已口头同意整理 → 立刻 `file_batch` copy（已挂用 `external/` 路径）。多个候选 → `ask_user` 让人选后再对该路径读写。\
+打开本机文件夹时，旁边挂上的本机目录可改可覆盖 → `file_write` / `file_batch` copy 到已挂路径或该本机路径（运行时请用户确认可写授权）。\
 挂载 ≠ 「同时开发两项目」的默认步。\
-整理方案用 `card="organize_plan"`。\
 仅当 `<工作区>` 出现「区外：」才可声称已授权 / 授权已确认（「区外：」= 工作区以外的本机路径已挂上）；无该行 = 无挂载。\
 点名找路径 ≠ `host(action=shell)` / `run` 探家目录。
 

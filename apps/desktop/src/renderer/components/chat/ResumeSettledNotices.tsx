@@ -47,7 +47,6 @@ export function ResumeSettledNotices() {
     const unsub = useInteractionStore.subscribe((state, prev) => {
       for (const [id, entry] of state.byId) {
         if (entry.conversationId !== conversationId) continue;
-        if (entry.kind === "stage_card") continue;
         const settled = entry.resumeSettled;
         if (!settled) continue;
         // 只在「刚落定」这一拍出条：切会话回来、重放整段都不该再闪一遍旧收口。

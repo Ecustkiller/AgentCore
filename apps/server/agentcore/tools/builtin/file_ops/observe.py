@@ -38,14 +38,13 @@ def ole_next() -> str:
 
 def scan_next() -> str:
     return (
-        "可用 read_image 看首页，或按文件名归类。"
-        "offset/limit / start_page 变不出文本层。"
+        "按文件名归类。offset/limit / start_page 变不出文本层。"
     )
 
 
 def extract_failed_next() -> str:
     return (
-        "可改 read_image 看首页，或按文件名归类继续整理。"
+        "按文件名归类继续整理。"
     )
 
 
@@ -59,7 +58,7 @@ def extract_failed_text(detail: str) -> str:
 def source_too_large_next() -> str:
     return (
         "源文件超过抽取摄入顶，本工具不能整份吞入。"
-        "可 read_image 看首页，或按文件名归类。"
+        "按文件名归类。"
     )
 
 

@@ -6,9 +6,9 @@ import { loadFixtures } from "@agentcore/protocol-conformance";
 import { describe, expect, it } from "vitest";
 
 describe("live opening from first debate_round_started (fixture)", () => {
-  it("roundtable: opening visible at first round_started frame, sticky through later frames", () => {
+  it("debate multibeat: opening visible at first round_started frame, sticky through later frames", () => {
     const fixture = loadFixtures().find(
-      (f) => f.name === "multi_agent_roundtable_rounds",
+      (f) => f.name === "multi_agent_debate_multibeat",
     );
     expect(fixture).toBeTruthy();
     if (!fixture) return;
@@ -21,7 +21,9 @@ describe("live opening from first debate_round_started (fixture)", () => {
     const early = foldToProjectedTurn(
       fixture.events.slice(0, firstStarted + 1),
     );
-    expect(early.debateOpening).toBe("圆桌开场：先问 AI 治理的风险从何而来。");
+    expect(early.debateOpening).toBe(
+      "多轮对抗开场：先把收益与风险敞口摆上台面。",
+    );
 
     const mid = foldToProjectedTurn(fixture.events.slice(0, firstStarted + 12));
     const full = foldToProjectedTurn(fixture.events);

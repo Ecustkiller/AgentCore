@@ -58,8 +58,8 @@ __all__ = [
     "salvage_incomplete_turn",
 ]
 
-_PAUSE_REQUIRED_TYPES = ("checkpoint_required", "plan_review_required", "team_preview_required")
-_PAUSE_RESOLVED_TYPES = ("checkpoint_resolved", "plan_review_resolved", "team_preview_resolved")
+_PAUSE_REQUIRED_TYPES = ("checkpoint_required", "team_preview_required")
+_PAUSE_RESOLVED_TYPES = ("checkpoint_resolved", "team_preview_resolved")
 
 
 async def create_assistant_placeholder(

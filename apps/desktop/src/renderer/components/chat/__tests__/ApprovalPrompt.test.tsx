@@ -586,7 +586,39 @@ describe("ApprovalCard extra payload (omit restatements of the headline)", () =>
     );
     expect(screen.getByText("a.txt")).toBeTruthy();
     expect(screen.getByText("hello body")).toBeTruthy();
+    expect(screen.getByText("1 行")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "展开" })).toBeNull();
     expect(screen.queryByText(/"content"/)).toBeNull();
+  });
+
+  it("clamps a long file_write body until 展开", () => {
+    const content = [
+      "# 示例文件",
+      "",
+      "这是刚写进工作区的一个演示文件，用来看看效果。",
+      "",
+      "## 能放什么",
+      "- 列表、层级标题",
+      "- 表格",
+    ].join("\n");
+    renderCard(
+      card({
+        toolName: "file_write",
+        arguments: { path: "示例.md", content },
+      }),
+    );
+    expect(screen.getByText("7 行")).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: /查看参数|查看内容|查看代码/ }),
+    ).toBeNull();
+    const pre = document.querySelector("pre");
+    expect(pre?.className).toContain("line-clamp-3");
+    fireEvent.click(screen.getByRole("button", { name: "展开" }));
+    expect(screen.getByRole("button", { name: "收起" })).toBeTruthy();
+    expect(document.querySelector("pre")?.className).toContain("max-h-40");
+    expect(document.querySelector("pre")?.className).not.toContain(
+      "line-clamp-3",
+    );
   });
 
   it("shows code_execute source as a code preview", () => {
@@ -597,7 +629,9 @@ describe("ApprovalCard extra payload (omit restatements of the headline)", () =>
       }),
     );
     expect(screen.getByText("print(1)")).toBeTruthy();
-    expect(document.querySelector(".code-block")).toBeTruthy();
+    expect(document.querySelector("pre")).toBeTruthy();
+    expect(document.querySelector(".code-block")).toBeNull();
+    expect(screen.queryByRole("button", { name: "展开" })).toBeNull();
   });
 
   it("uses run command as headline", () => {
@@ -632,7 +666,7 @@ describe("ApprovalCard extra payload (omit restatements of the headline)", () =>
     expect(screen.queryByText(/permanent/)).toBeNull();
   });
 
-  it("shows str_replace old and new as labeled previews", () => {
+  it("shows str_replace as a compact red/green summary", () => {
     renderCard(
       card({
         toolName: "str_replace",
@@ -643,11 +677,37 @@ describe("ApprovalCard extra payload (omit restatements of the headline)", () =>
         },
       }),
     );
-    expect(screen.getByText("原文")).toBeTruthy();
-    expect(screen.getByText("alpha")).toBeTruthy();
-    expect(screen.getByText("替换为")).toBeTruthy();
-    expect(screen.getByText("beta")).toBeTruthy();
+    expect(screen.getByText("- alpha")).toBeTruthy();
+    expect(screen.getByText("+ beta")).toBeTruthy();
+    expect(screen.queryByText("原文")).toBeNull();
+    expect(screen.queryByText("替换为")).toBeNull();
+    expect(screen.queryByRole("button", { name: "展开" })).toBeNull();
     expect(screen.queryByText(/"old_string"/)).toBeNull();
+  });
+
+  it("expands a long str_replace to labeled previews", () => {
+    const oldString = ["line a", "line b", "line c", "line d"].join("\n");
+    const newString = ["line a", "line x", "line c", "line d"].join("\n");
+    renderCard(
+      card({
+        toolName: "str_replace",
+        arguments: {
+          path: "a.txt",
+          old_string: oldString,
+          new_string: newString,
+        },
+      }),
+    );
+    expect(screen.getByText("- line a")).toBeTruthy();
+    expect(screen.getByText("+ line a")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "展开" }));
+    expect(screen.getByText("原文")).toBeTruthy();
+    expect(screen.getByText("替换为")).toBeTruthy();
+    const pres = [...document.querySelectorAll("pre")].map(
+      (el) => el.textContent,
+    );
+    expect(pres.some((t) => t?.includes("line b"))).toBe(true);
+    expect(pres.some((t) => t?.includes("line x"))).toBe(true);
   });
 
   it("renders leftover flags as labeled rows, not a JSON dump", () => {

@@ -11,7 +11,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.engine import join_segments
-from agentcore.runtime.engine.governance import create_loop_controller
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.facts import TurnPausedFact
 from agentcore.runtime.loop_controller import LoopController
@@ -22,11 +21,8 @@ from agentcore.runtime.pipeline.resume.rehydrate import (
     rehydrate_from_turn_paused,
 )
 from agentcore.runtime.pipeline.resume.window import pre_pause_content
-from agentcore.runtime.runs.plan import RunPlan
-from agentcore.runtime.runs.types import RunSpec
 from agentcore.runtime.suspension import (
     AskUserSuspension,
-    PlanReviewSuspension,
     turn_citations,
 )
 from tests.llm_helpers import make_profile_params
@@ -48,28 +44,6 @@ def _ask_frame(**kwargs) -> AskUserSuspension:
     )
     defaults.update(kwargs)
     return AskUserSuspension(**defaults)
-
-
-def _plan_review_frame(*, nodes: list[RunSpec] | None = None, **kwargs) -> PlanReviewSuspension:
-    plan_nodes = nodes or [
-        RunSpec(run_id="w1", agent_id="w1", role="A", task="t1"),
-        RunSpec(run_id="w2", agent_id="w2", role="B", task="t2", depends_on=["w1"]),
-    ]
-    defaults = dict(
-        message_id="m1",
-        conversation_id="c1",
-        user_id="u1",
-        captain_run_id="cap1",
-        checkpoint_id="ck1",
-        tool_call_id="call_del",
-        base_system_prompt="sys",
-        user_message="go",
-        plan=RunPlan(nodes=plan_nodes),
-        steps=[{"run_id": "w1", "role": "A", "summary": "done"}],
-        pending=[{"run_id": "w2", "role": "B"}],
-    )
-    defaults.update(kwargs)
-    return PlanReviewSuspension(**defaults)
 
 
 def _paused_entry(**payload_overrides) -> dict:
@@ -180,60 +154,8 @@ def test_rehydrate_legacy_frame_no_turn_paused():
 # --- settle 侧补标 (G5) ---------------------------------------------------------
 
 
-def test_batch_shape_from_plan_nodes():
-    frame = _plan_review_frame(
-        nodes=[
-            RunSpec(run_id="w1", agent_id="w1", role="A", task="t1"),
-            RunSpec(run_id="w2", agent_id="w2", role="B", task="t2"),
-            RunSpec(run_id="w3", agent_id="w3", role="C", task="t3", depends_on=["w1"]),
-        ]
-    )
-    nodes, has_deps = batch_shape_for_settled_suspension(frame)
-    assert nodes == 3
-    assert has_deps is True
-
-
 def test_batch_shape_ask_user_is_zero():
     assert batch_shape_for_settled_suspension(_ask_frame()) == (0, False)
-
-
-def test_settle_mark_sets_post_delegate_with_substantial_shape():
-    """plan_review snapshot has post_delegate=False; settle 补标 must set shape."""
-    seed = {
-        "post_delegate": False,
-        "delegate_count": 0,
-        "audit_gate_fired": False,
-        "first_batch_substantial": False,
-    }
-    frame = _plan_review_frame(
-        nodes=[
-            RunSpec(run_id="w1", agent_id="w1", role="A", task="t1"),
-            RunSpec(run_id="w2", agent_id="w2", role="B", task="t2"),
-            RunSpec(run_id="w3", agent_id="w3", role="C", task="t3", depends_on=["w1"]),
-        ]
-    )
-    marked = mark_controller_after_settle(seed, frame)
-    assert marked is not None
-    assert marked["post_delegate"] is True
-    assert marked["delegate_count"] == 1
-    assert marked["first_batch_substantial"] is True  # 3 nodes + deps
-
-    restored = create_loop_controller(frozenset(), seed=marked)
-    assert restored.has_delegated is True
-    assert restored.first_batch_substantial is True
-
-
-def test_settle_mark_plan_review_with_deps():
-    seed = {
-        "post_delegate": False,
-        "delegate_count": 0,
-        "audit_gate_fired": False,
-        "first_batch_substantial": False,
-    }
-    frame = _plan_review_frame()
-    marked = mark_controller_after_settle(seed, frame)
-    assert marked["post_delegate"] is True
-    assert marked["first_batch_substantial"] is True  # has_deps
 
 
 def test_settle_mark_skips_ask_user():
@@ -248,30 +170,6 @@ def test_settle_mark_without_shape_would_leave_substantial_false():
     c.mark_post_delegate()  # no node_count / has_deps
     assert c.has_delegated is True
     assert c.first_batch_substantial is False
-    # With shape from settle helper — substantial for 3-node DAG.
-    marked = mark_controller_after_settle(c.export_seed(), _plan_review_frame())
-    # delegate_count increments again (second batch); first_batch_substantial stays
-    # from the first mark (False) — so seed from turn_paused must start clean.
-    assert marked["delegate_count"] == 2
-    assert marked["first_batch_substantial"] is False
-
-    # Correct path: start from pause snapshot (post_delegate False), then settle mark.
-    clean = mark_controller_after_settle(
-        {
-            "post_delegate": False,
-            "delegate_count": 0,
-            "audit_gate_fired": False,
-            "first_batch_substantial": False,
-        },
-        _plan_review_frame(
-            nodes=[
-                RunSpec(run_id="w1", agent_id="w1", role="A", task="t1"),
-                RunSpec(run_id="w2", agent_id="w2", role="B", task="t2"),
-                RunSpec(run_id="w3", agent_id="w3", role="C", task="t3", depends_on=["w1"]),
-            ]
-        ),
-    )
-    assert clean["first_batch_substantial"] is True
 
 
 # --- finish / terminal reasoning join (G3) --------------------------------------

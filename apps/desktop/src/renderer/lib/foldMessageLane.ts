@@ -7,6 +7,7 @@ import {
   type InteractionKind,
   type TimelineMarkerDef,
   defFromRequiredEvent,
+  isLeftoverInteractionSse,
   wireFor,
 } from "@/stores/interactions/registry";
 import type {
@@ -22,10 +23,7 @@ import {
   appendCheckpointStep,
   appendContentStep,
   appendEscalationStep,
-  appendGraphAppendStep,
-  appendPlanReviewStep,
   appendReasoningStep,
-  appendStageCardStep,
   appendTeamStep,
   appendToolStep,
   appendUserInterjectionStep,
@@ -184,28 +182,6 @@ export function foldTeamMarker(
   return { ...state, process };
 }
 
-/** Fold a `graph_append` event into the appending turn's timeline as a slot marker. */
-export function foldGraphAppendMarker(
-  state: MessageLaneState,
-  executionId: string,
-  hostMessageId: string,
-  addedCount: number,
-  actId?: string | null,
-  actKind?: string | null,
-  authorizedBy?: string | null,
-): MessageLaneState {
-  const process = appendGraphAppendStep(
-    state.process,
-    executionId,
-    hostMessageId,
-    addedCount,
-    actId,
-    actKind,
-    authorizedBy,
-  );
-  return process === state.process ? state : { ...state, process };
-}
-
 /** Fold any registered interaction timeline marker (registry-driven). */
 export function foldInteractionTimelineMarker(
   state: MessageLaneState,
@@ -224,14 +200,10 @@ function appendMarkerStep(
   switch (marker.processKind) {
     case "checkpoint":
       return appendCheckpointStep(process, id);
-    case "plan_review":
-      return appendPlanReviewStep(process, id);
     case "escalation":
       return appendEscalationStep(process, id);
     case "approval":
       return appendApprovalStep(process, id);
-    case "stage_card":
-      return appendStageCardStep(process, id);
   }
 }
 
@@ -259,18 +231,6 @@ export function foldCheckpointMarker(
   );
 }
 
-/** Fold a `plan_review_required` into the timeline as a positional `plan_review` marker. */
-export function foldPlanReviewMarker(
-  state: MessageLaneState,
-  checkpointId: string,
-): MessageLaneState {
-  return foldInteractionTimelineMarker(
-    state,
-    requiredTimeline("plan_review"),
-    checkpointId,
-  );
-}
-
 /** Fold a `user_interjection` into the timeline as a zero-width positional marker.
  * Body / 五态 stay on the execution bypass; marker only pins chronology. Dedupes by id. */
 export function foldUserInterjectionMarker(
@@ -288,14 +248,9 @@ function isSettledProcessStep(step: ProcessStep): boolean {
   );
 }
 
-/** Leftover process markers that historically sat before `team`. */
-function isBeforeTeamMarker(step: ProcessStep): boolean {
-  return (step as { kind: string }).kind === "team_preview";
-}
-
 /**
  * Fold journal events before `endExclusive` into the settled (non-marker) prefix
- * length that should precede a `team` / `graph_append` slot.
+ * length that should precede a `team` slot.
  */
 function foldSettledPrefix(
   events: ReadonlyArray<{ type: string; payload?: unknown }>,
@@ -351,16 +306,17 @@ function foldSettledPrefix(
 }
 
 /**
- * Journal-relative insert index for a missing `team` / `graph_append` marker.
+ * Journal-relative insert index for a missing `team` marker.
  *
  * Counts settled steps implied by events before the marker, then maps that onto
  * the persisted process (skipping any already-present markers in between). When
  * the journal slice has no settled events but process already carries content
  * (minimal test / truncated events), falls back to append — same as legacy.
  *
- * `advancePastBeforeTeam`: after the settled prefix, skip leftover `team_preview`
- * process steps so hydrate inserts `team` after them (old journals). Current product no
- * longer emits kickoff cards — the graph appears when `run_plan` lands.
+ * `advancePastBeforeTeam`: after the settled prefix, pin `team` at the start when
+ * the journal slice has no settled events but process already carries content
+ * (legacy missing ``process_team`` hydrate). Current product emits the graph when
+ * `run_plan` lands.
  */
 function journalMarkerInsertIndex(
   process: ProcessStep[],
@@ -373,31 +329,21 @@ function journalMarkerInsertIndex(
   // steps (progressive ``process_*`` journals omit deltas from ``runs.events``):
   // - ``team`` (advancePastBeforeTeam): pin at start — post-plan 进展/终稿 must stay
   //   below the graph (legacy missing ``process_team`` hydrate).
-  // - ``graph_append``: keep append — intro content often precedes the anchor.
   if (!sawSettledEvent && process.some(isSettledProcessStep)) {
     return advancePastBeforeTeam ? 0 : process.length;
   }
-  let insertAt: number;
   if (count <= 0) {
-    insertAt = 0;
-  } else {
-    let seen = 0;
-    insertAt = process.length;
-    for (let i = 0; i < process.length; i++) {
-      if (!isSettledProcessStep(process[i])) continue;
-      seen++;
-      if (seen === count) {
-        insertAt = i + 1;
-        break;
-      }
+    return 0;
+  }
+  let seen = 0;
+  for (let i = 0; i < process.length; i++) {
+    if (!isSettledProcessStep(process[i])) continue;
+    seen++;
+    if (seen === count) {
+      return i + 1;
     }
   }
-  if (advancePastBeforeTeam) {
-    while (insertAt < process.length && isBeforeTeamMarker(process[insertAt])) {
-      insertAt++;
-    }
-  }
-  return insertAt;
+  return process.length;
 }
 
 /** Reload 补标记（时间线一期）: backfill every positional marker the journal implies
@@ -409,7 +355,7 @@ function journalMarkerInsertIndex(
  * resolved 后 CEO 的收尾正文必须保留。全部 append* 自带 dedup no-op，后端已写
  * 标记时原样返回。
  *
- * `team` / `graph_append` / `user_interjection` 按 journal 相对时序插入（禁止一律
+ * `team` / `user_interjection` 按 journal 相对时序插入（禁止一律
  * 尾部 append），避免队后进展/终稿 content 被挤到图/插话上方。 */
 export function ensureTimelineMarkersFromJournal(
   process: ProcessStep[] | undefined,
@@ -419,37 +365,6 @@ export function ensureTimelineMarkersFromJournal(
   for (let i = 0; i < events.length; i++) {
     const ev = events[i];
     const payload = (ev.payload ?? {}) as Record<string, unknown>;
-    if (ev.type === "graph_append") {
-      const executionId = payload.execution_id;
-      const hostMessageId = payload.host_message_id;
-      const addedCount = Number(payload.added_count ?? 0);
-      const actId = typeof payload.act_id === "string" ? payload.act_id : null;
-      const actKind =
-        typeof payload.act_kind === "string" ? payload.act_kind : null;
-      const authorizedBy =
-        typeof payload.authorized_by === "string"
-          ? payload.authorized_by
-          : null;
-      if (
-        typeof executionId === "string" &&
-        executionId &&
-        typeof hostMessageId === "string" &&
-        hostMessageId
-      ) {
-        const at = journalMarkerInsertIndex(steps, events, i, false);
-        steps = appendGraphAppendStep(
-          steps,
-          executionId,
-          hostMessageId,
-          addedCount,
-          actId,
-          actKind,
-          authorizedBy,
-          at,
-        );
-      }
-      continue;
-    }
     if (ev.type === "run_plan") {
       // 旧 journal 跨回合同图追加：生长 run_plan 带 host_message_id，不在追加回合插 team。
       // 新路径无此字段 → 正常补 team（本回合开图）。
@@ -479,12 +394,7 @@ export function ensureTimelineMarkersFromJournal(
       }
       continue;
     }
-    if (
-      ev.type === "team_preview_required" ||
-      ev.type === "team_preview_resolved"
-    ) {
-      continue;
-    }
+    if (isLeftoverInteractionSse(ev.type)) continue;
     const def = defFromRequiredEvent(ev.type);
     if (!def?.timeline) continue;
     const id = payload[wireFor(def.kind).idField];

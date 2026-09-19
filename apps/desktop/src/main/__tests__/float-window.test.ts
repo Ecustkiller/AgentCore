@@ -302,7 +302,7 @@ describe("openFloatWindow", () => {
         title: "Run 1",
       });
       expect(created[0]?.setAppDetails).toHaveBeenCalledWith({
-        appId: "com.agentcore.desktop",
+        appId: "xyz.fashitianxia.agentcore",
       });
     } finally {
       Object.defineProperty(process, "platform", { value: prev });

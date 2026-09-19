@@ -18,10 +18,10 @@ describe("interjectionStatusLabel", () => {
     expect(interjectionStatusLabel("addressed")).toBe("已纳入本回合合成");
   });
 
-  it("hides status chrome only for addressed", () => {
+  it("hides status chrome for injected and addressed", () => {
     expect(showInterjectionStatusChrome("addressed")).toBe(false);
+    expect(showInterjectionStatusChrome("injected")).toBe(false);
     expect(showInterjectionStatusChrome("received")).toBe(true);
-    expect(showInterjectionStatusChrome("injected")).toBe(true);
     expect(showInterjectionStatusChrome("queued")).toBe(true);
     expect(showInterjectionStatusChrome("failed")).toBe(true);
   });

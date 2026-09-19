@@ -5,7 +5,7 @@ import {
   resolveInteraction,
 } from "@/services/interaction";
 import type { ResolveInteractionBody } from "@/services/interaction";
-import type { PlanReviewUserDecision } from "@/services/planReview";
+import type { CheckpointUserDecision } from "@/services/checkpoint";
 import { isPausedFrameGone, runResume } from "@/services/turns";
 import {
   INTERACTION_SUBMIT_PATH,
@@ -109,7 +109,7 @@ export type HotSubmitBody = ResolveInteractionBody;
 
 export interface ColdSubmitArgs {
   messageId: string;
-  decision: PlanReviewUserDecision;
+  decision: CheckpointUserDecision;
   note: string;
   selected?: string[];
 }

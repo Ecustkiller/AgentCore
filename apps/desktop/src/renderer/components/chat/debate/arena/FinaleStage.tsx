@@ -1,11 +1,9 @@
 import { Button } from "@/components/ui";
 import type { Execution } from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
-import { Suspense } from "react";
 import { type DebateModel, stopLabel } from "../model";
 import { finaleAnchorId } from "./anchors";
 import { DebateBrief } from "./brief";
-import { ReplayBriefCard } from "./replayLazy";
 
 export function FinaleStage({
   model,
@@ -56,18 +54,7 @@ export function FinaleStage({
 
         {brief && sides ? (
           <div className="mt-4 space-y-4">
-            {model.form === "red_team" || model.form === "roundtable" ? (
-              <Suspense fallback={null}>
-                <ReplayBriefCard
-                  brief={brief}
-                  sides={sides}
-                  form={model.form}
-                  subtopics={model.subtopics}
-                />
-              </Suspense>
-            ) : (
-              <DebateBrief brief={brief} sides={sides} />
-            )}
+            <DebateBrief brief={brief} sides={sides} />
           </div>
         ) : (
           <p className="mt-4 text-sm text-muted-foreground">结论简报生成中…</p>

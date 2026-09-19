@@ -219,7 +219,8 @@ async def test_team_preview_capture_uses_final_content_and_marker_before_team() 
 
 
 @pytest.mark.asyncio
-async def test_plan_review_capture_includes_run_processes() -> None:
+async def test_leftover_plan_review_capture_skips_process_marker() -> None:
+    """存量 plan_review_required 不落 process_plan_review；run_process 仍 flush。"""
     fl_token = _bind_fact_log()
     sink = EventSink()
     sink._process.append({"kind": "content", "text": "复核前"})
@@ -252,11 +253,7 @@ async def test_plan_review_capture_includes_run_processes() -> None:
         and (e.get("payload") or {}).get("run_id") == "w1"
         for e in frame.journal_entries
     )
-    assert any(
-        e.get("kind") == "process_plan_review"
-        and (e.get("payload") or {}).get("checkpoint_id") == "cp-plan"
-        for e in frame.journal_entries
-    )
+    assert not any(e.get("kind") == "process_plan_review" for e in frame.journal_entries)
 
 
 @pytest.mark.asyncio
@@ -274,8 +271,8 @@ async def test_multi_cycle_capture_joins_content_reasoning_and_process() -> None
     t1 = current_captain_loop.set(mirror1)
     try:
         frame1, _ = await _capture(
-            suspension_kind="plan_review",
-            required_event=_required("plan_review_required", "cp-1"),
+            suspension_kind="ask_user",
+            required_event=_required("checkpoint_required", "cp-1"),
             sink=sink1,
             checkpoint_id="cp-1",
         )
@@ -306,8 +303,8 @@ async def test_multi_cycle_capture_joins_content_reasoning_and_process() -> None
     t2 = current_captain_loop.set(mirror2)
     try:
         frame2, paused_content = await _capture(
-            suspension_kind="plan_review",
-            required_event=_required("plan_review_required", "cp-2"),
+            suspension_kind="ask_user",
+            required_event=_required("checkpoint_required", "cp-2"),
             sink=sink2,
             checkpoint_id="cp-2",
         )
@@ -373,7 +370,7 @@ def test_build_turn_paused_fact_direct_ask_user_vs_other() -> None:
             journal_entries_before_trailing=[],
             sink=sink,
         )
-        plan = build_turn_paused_fact(
+        leftover = build_turn_paused_fact(
             checkpoint_id="c2",
             suspension_kind="plan_review",
             required_event=_required("plan_review_required", "c2"),
@@ -384,8 +381,8 @@ def test_build_turn_paused_fact_direct_ask_user_vs_other() -> None:
         current_captain_loop.reset(token)
 
     assert ask.content == "absorb-base"
-    assert plan.content == "keep-deliverable"
-    assert ask.reasoning == plan.reasoning == "r"
+    assert leftover.content == "keep-deliverable"
+    assert ask.reasoning == leftover.reasoning == "r"
 
 
 @pytest.mark.asyncio

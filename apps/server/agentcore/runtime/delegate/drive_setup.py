@@ -120,11 +120,9 @@ def resolve_on_boundary(
     session: Any,
 ) -> Any:
     """Wave boundary hook (checkpoint / coordination SCOPE)."""
-    # light 与 depends_on / checkpoint_after 并存时忽略 light：
-    # 不得据 light 关掉波边界（否则 checkpoint / SCOPE 无法让出）。
-    has_dag_boundary = any(
-        n.depends_on or n.checkpoint_after for n in plan.nodes
-    )
+    # light 与 depends_on 并存时忽略 light：
+    # 不得据 light 关掉波边界（否则 SCOPE 无法让出）。
+    has_dag_boundary = any(n.depends_on for n in plan.nodes)
     if complexity_hint == "light" and not has_dag_boundary:
         on_boundary = None
     else:
@@ -137,8 +135,7 @@ def resolve_on_boundary(
             else None
         )
     # Phase 3: under coordination, SCOPE/dep escalations → CEO event queue (PROCEED),
-    # not wave-boundary YIELD. CHECKPOINT skips durable plan_review (boundary_hook →
-    # ``_pending_boundary`` only).
+    # not wave-boundary YIELD.
     if session is not None:
         from agentcore.runtime.coordination.bridge import coordination_boundary_hook
 

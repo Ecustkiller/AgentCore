@@ -1,7 +1,9 @@
 import {
   decideDraftFolderAssign,
+  otherDeskFolderId,
   resolveFolderFromCitedRoot,
   resolveFolderFromIndexedEntry,
+  workspaceRelOnHintFolder,
 } from "@/components/chat/message-input/resolveAttachmentFolder";
 import { getConversations } from "@/hooks/useConversations";
 import { getFolders } from "@/hooks/useFolders";
@@ -119,6 +121,58 @@ describe("resolveFolderFromIndexedEntry", () => {
       folderId: "f-root",
       folderName: "整仓",
     });
+  });
+});
+
+describe("otherDeskFolderId", () => {
+  const hint = { folderId: "f-b", folderName: "邻桌" };
+
+  it("is the hint when the conversation is not on that folder", () => {
+    vi.mocked(getConversations).mockReturnValue([
+      {
+        id: "c1",
+        title: "当前",
+        folderId: "f-a",
+        updatedAt: "",
+        messageCount: 1,
+        lastMessagePreview: null,
+        localContainerRootId: null,
+      },
+    ]);
+    expect(otherDeskFolderId("c1", hint)).toBe("f-b");
+  });
+
+  it("is undefined when the conversation already sits on that folder", () => {
+    vi.mocked(getConversations).mockReturnValue([
+      {
+        id: "c1",
+        title: "当前",
+        folderId: "f-b",
+        updatedAt: "",
+        messageCount: 1,
+        lastMessagePreview: null,
+        localContainerRootId: null,
+      },
+    ]);
+    expect(otherDeskFolderId("c1", hint)).toBeUndefined();
+  });
+});
+
+describe("workspaceRelOnHintFolder", () => {
+  it("strips the folder localSubpath prefix", () => {
+    vi.mocked(getFolders).mockReturnValue([
+      folder("f-docs", "文档", {
+        mode: "local",
+        localRootId: "root-9",
+        localSubpath: "docs",
+      }),
+    ]);
+    expect(
+      workspaceRelOnHintFolder(
+        { folderId: "f-docs", folderName: "文档" },
+        "docs/guide.md",
+      ),
+    ).toBe("guide.md");
   });
 });
 

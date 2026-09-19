@@ -160,6 +160,24 @@ describe("setForConversation 的快照判据", () => {
 
     expect(messageIds()).toEqual([]);
   });
+
+  it("skips leftover plan_review snapshot frames (cold resume is ask_user only)", () => {
+    usePausedTurnStore.getState().setForConversation(CID, [
+      {
+        summary: {
+          message_id: "m-leftover",
+          checkpoint_id: "cp-pr",
+          kind: "plan_review",
+          user_message: "q",
+          steps: [],
+          pending: [],
+        } as unknown as PausedTurnSummary,
+        origin: "server",
+      },
+      snapshotEntry("m-ask"),
+    ]);
+    expect(messageIds()).toEqual(["m-ask"]);
+  });
 });
 
 describe("openRecovery", () => {

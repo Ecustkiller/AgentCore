@@ -454,8 +454,6 @@ def test_token_wind_down_threshold_and_tool_narrowing():
             "handoff",
             "file_write",
             "str_replace",
-            "file_move",
-            "file_copy",
             "mkdir",
             "file_batch",
             "file_list",
@@ -605,7 +603,9 @@ def test_wind_down_allowed_tools_are_persist_and_handoff():
         wind_down_instruction_token(),
         wind_down_instruction_timeout(),
     ):
-        assert "调查与外网工具已停用" in text
+        assert text.startswith("[系统提示]")
+    assert "硬顶" in wind_down_instruction_token()
+    assert "超时" in wind_down_instruction_timeout()
 
 
 def test_wind_down_breach_detection_and_local_force():

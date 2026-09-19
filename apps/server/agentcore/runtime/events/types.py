@@ -40,11 +40,6 @@ class EventType(StrEnum):
     APPROVAL_RESOLVED = "approval_resolved"
     CHECKPOINT_REQUIRED = "checkpoint_required"
     CHECKPOINT_RESOLVED = "checkpoint_resolved"
-    PLAN_REVIEW_REQUIRED = "plan_review_required"
-    PLAN_REVIEW_RESOLVED = "plan_review_resolved"
-    # 阶段推进卡（批 B）：幕 1 命题卡升级为可操作交互；跨回合耐久，不挂起幕 1。
-    STAGE_CARD_REQUIRED = "stage_card_required"
-    STAGE_CARD_RESOLVED = "stage_card_resolved"
     PLAN_REVISED = "plan_revised"
     WORKSPACE_OP_REQUIRED = "workspace_op_required"
     # External directory mount: transport-only client-tool — desktop mints a
@@ -68,9 +63,6 @@ class EventType(StrEnum):
     WORKSPACE_SNAPSHOT_DONE = "workspace_snapshot_done"
     WORKSPACE_SNAPSHOT_FAILED = "workspace_snapshot_failed"
     RUN_PLAN = "run_plan"
-    # 跨回合同图追加：新回合声明「已往上方协作图追加 N 名成员」锚点（落追加回合 journal）；
-    # 已停发：旧跨回合同图追加锚点（兼容旧 journal 回放）。新路径用 run_plan.prev_execution_id。
-    GRAPH_APPEND = "graph_append"
     RUN_STARTED = "run_started"
     RUN_CONTEXT = "run_context"
     RUN_OUTPUT_DELTA = "run_output_delta"
@@ -83,7 +75,7 @@ class EventType(StrEnum):
     # reason=user_stop → 只停这项工作（无热/冷续派）。
     RUN_CANCELLED = "run_cancelled"
     # 级联跳过 / graceful abort / 终端 cancel：未运行尾部物化为 SKIPPED（与 run_cancelled 正交）。
-    # reason=cascade → on_failure=skip 波及下游；reason=abort → 整波 ABORT / plan_review stop /
+    # reason=cascade → on_failure=skip 波及下游；reason=abort → 整波 ABORT / 调度 abort /
     # 父 force_cancel·nested 中止·user_stop（ask_user soft_stop 续跑取消除外）。
     RUN_SKIPPED = "run_skipped"
     RUN_PROGRESS = "run_progress"
@@ -100,8 +92,6 @@ class EventType(StrEnum):
     RUN_ESCALATION_GATE = "run_escalation_gate"
     ESCALATION_REQUIRED = "escalation_required"
     ESCALATION_RESOLVED = "escalation_resolved"
-    # Leftover ``team_synthesis_preview``：历史 journal 仍 fold；活人面不再 emit / 画队长节点。
-    TEAM_SYNTHESIS_PREVIEW = "team_synthesis_preview"
     # CEO 协调等待：captain 在 await_coordination_injection 空等团队事件期间推前端 UX。
     # EPHEMERAL——传输态心跳（进入 waiting=true / 退出 waiting=false；长等 ≤15s 刷新计数）；
     # 不落 journal（reload 时等待已结束或由 live SSE 重挂）。
@@ -110,14 +100,14 @@ class EventType(StrEnum):
     # acquire 后 waiting=false。EPHEMERAL——桌面禁空「Thinking…」冒充；无争用不发射
     # （不得静默等锁）。与同对话 FIFO turn_queued 正交。
     WORKSPACE_LOCK_WAIT = "workspace_lock_wait"
-    # 云桌开通短等：prepare/resume 里 ``ensure_workspace_desk`` 即将阻塞 → waiting=true；
+    # 云桌开通短等：绑定当前 server root 时 ``ensure_workspace_desk`` 即将阻塞 → waiting=true；
     # 开通结束（成功或失败）waiting=false。EPHEMERAL——空气泡「正在准备云端环境」，
     # 禁空 Thinking… 冒充开机。缺桌仍不装配 run（诚实失败，不冒充测过代码）。
     DESK_PROVISION_WAIT = "desk_provision_wait"
     # 交付状态（能力闸门与交付诚实性）：delegate 批次收尾时把已有的完成度缺口 / artifacts
     # 对账 / degraded 信号汇成结构化交付对账（已交付文件 / 缺口 / 操作元数据），
     # 模板拼接、不调 LLM。DURABLE——落 journal；前端 fold 同 execution_id 保最新（反映
-    # 最近一批委派的对账），供 finish_guard 与只合回产物读路径；用户面无验收大卡、
+    # 最近一批委派的对账），供 finish_guard 读路径；用户面无验收大卡、
     # 无聊天流产物清单卡。
     # 仅在有实质内容（有落盘文件或有缺口 / 行动项）时发射——纯 prose 成功批次保持无声。
     DELIVERY_STATUS = "delivery_status"
@@ -166,19 +156,16 @@ class EventType(StrEnum):
     BROWSER_LIVE_STATUS = "browser_live_status"
 
 
-# Retired wire names that may still sit on historical journal / recording rows.
-# Skip on replay/cut; unknown other names still raise.
-RETIRED_EVENT_TYPE_VALUES: frozenset[str] = frozenset(
-    {
-        "question_posted",
-        "question_resolved",
-        "delegation_authorization_required",
-        "delegation_authorization_resolved",
-        "team_preview_required",
-        "team_preview_resolved",
-        "team_note_posted",
-    }
-)
+LIVE_EVENT_TYPE_VALUES: frozenset[str] = frozenset(member.value for member in EventType)
+
+
+def is_live_event_type(value: object) -> bool:
+    """True when ``value`` is a current :class:`EventType` wire name.
+
+    Journal / recording / fold skip anything else (old chats, unknown names)
+    instead of keeping a named tombstone table.
+    """
+    return isinstance(value, str) and value in LIVE_EVENT_TYPE_VALUES
 
 
 class FinishReason(StrEnum):
@@ -194,7 +181,7 @@ class FinishReason(StrEnum):
     # (流式回复持久化 §3.4): stream_state → incomplete + turn_end(interrupted).
     INTERRUPTED = "interrupted"
     # 挂起即收口 (②): the turn ended NOT because it finished, but because it hit a durable
-    # checkpoint (ask_user blocking / plan_review) and finalized in place — its frame +
+    # checkpoint (ask_user blocking) and finalized in place — its frame +
     # journal are persisted and it awaits ``POST .../resume``. Distinct from END_TURN (the
     # turn is NOT done) and CANCELLED (no error / no abort): the client renders the stream's
     # close as the single resume card.

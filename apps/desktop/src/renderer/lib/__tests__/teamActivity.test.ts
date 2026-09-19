@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   conversationIdFromHash,
+  isConversationOnScene,
   isTransientRoute,
+  pickAmbientOutlet,
   runtimeHasError,
 } from "../teamActivity";
 
@@ -51,6 +53,10 @@ describe("conversationIdFromHash", () => {
     expect(conversationIdFromHash("#/conversations/abc123")).toBe("abc123");
   });
 
+  it("covers turn-detail routes", () => {
+    expect(conversationIdFromHash("#/conversations/abc/turn/t1")).toBe("abc");
+  });
+
   it("ignores the msg query anchor", () => {
     expect(conversationIdFromHash("#/conversations/abc?msg=m1")).toBe("abc");
   });
@@ -71,5 +77,76 @@ describe("isTransientRoute", () => {
   it("is false for real app routes", () => {
     expect(isTransientRoute("#/conversations/abc")).toBe(false);
     expect(isTransientRoute("#/files")).toBe(false);
+  });
+});
+
+describe("isConversationOnScene", () => {
+  it("is true on the conversation route", () => {
+    expect(isConversationOnScene("abc", "#/conversations/abc", [])).toBe(true);
+  });
+
+  it("is true when a float follows that conversation", () => {
+    expect(isConversationOnScene("abc", "#/files", ["abc"])).toBe(true);
+  });
+
+  it("is false on another route with no matching float", () => {
+    expect(isConversationOnScene("abc", "#/files", ["other"])).toBe(false);
+  });
+});
+
+describe("pickAmbientOutlet", () => {
+  it("silences when the shell is present and the scene is on screen", () => {
+    expect(
+      pickAmbientOutlet({
+        shellPresent: true,
+        onScene: true,
+        hasOsNotification: true,
+        nativeMobile: false,
+      }),
+    ).toBe("silence");
+  });
+
+  it("toasts when present but looking elsewhere", () => {
+    expect(
+      pickAmbientOutlet({
+        shellPresent: true,
+        onScene: false,
+        hasOsNotification: true,
+        nativeMobile: false,
+      }),
+    ).toBe("toast");
+  });
+
+  it("uses OS notification when the shell is away on desktop", () => {
+    expect(
+      pickAmbientOutlet({
+        shellPresent: false,
+        onScene: true,
+        hasOsNotification: true,
+        nativeMobile: false,
+      }),
+    ).toBe("os");
+  });
+
+  it("toasts on Capacitor when away (no Electron OS channel)", () => {
+    expect(
+      pickAmbientOutlet({
+        shellPresent: false,
+        onScene: false,
+        hasOsNotification: false,
+        nativeMobile: true,
+      }),
+    ).toBe("toast");
+  });
+
+  it("stays silent on web when the tab is away", () => {
+    expect(
+      pickAmbientOutlet({
+        shellPresent: false,
+        onScene: false,
+        hasOsNotification: false,
+        nativeMobile: false,
+      }),
+    ).toBe("silence");
   });
 });

@@ -95,7 +95,7 @@ afterEach(() => {
 });
 
 describe("StatusStrip · paused", () => {
-  it("plan_review 挂起（无 unsettled）显示静态暂停条，保留 M/N，不转圈、无解说句", () => {
+  it("冷路挂起（无 unsettled）显示静态暂停条，保留 M/N，不转圈、无解说句", () => {
     const exec = projectExecution(plan, waveDoneFrames, "paused");
     expect(exec.progress).toEqual({ completed: 1, total: 2 });
 
@@ -108,7 +108,7 @@ describe("StatusStrip · paused", () => {
     expect(container.querySelector(".animate-spin")).toBeNull();
   });
 
-  it("plan_review 全 pending 挂起同样静态暂停条，不转圈", () => {
+  it("冷路全 pending 挂起同样静态暂停条，不转圈", () => {
     const exec = projectExecution(plan, [], "paused");
     expect(exec.runs.every((r) => r.status === "pending")).toBe(true);
 

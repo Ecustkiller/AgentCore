@@ -14,7 +14,8 @@ const DEMO_APPROVAL: ApprovalView = {
   toolName: "file_write",
   arguments: {
     path: "reports/week-summary.md",
-    content: "# 周报摘要\n\n本周成本下降 12%，异常点已标注。\n",
+    content:
+      "# 周报摘要\n\n本周成本下降 12%，异常点已标注。\n\n## 明细\n\n- 成本项\n- 已标异常点\n",
   },
   resolving: false,
 };

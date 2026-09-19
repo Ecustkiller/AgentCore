@@ -1,7 +1,7 @@
 """批量 / 落字节工具的自报产物 → 交付物台账（契约见 ``tools/file_products.py``）。
 
 ``file_write`` 那批「笔」早已自报，但一次能产多件的 ``file_batch``、能落上千件的
-``archive_extract``、以及把网络字节写进工作区的 ``download_url`` 都还没接上：它们产出的
+``archive``、以及把网络字节写进工作区的 ``download_url`` 都还没接上：它们产出的
 文件于是全部不进台账——不出现在产物卡、不出现在用户面路径页脚、CEO 也看不见。
 
 这里按事故形状端到端钉死：真跑工具 → 引擎盖章 → ``files_touched`` / ``file_acceptance``。
@@ -27,8 +27,7 @@ from agentcore.runtime.runs.serialize import (
 )
 from agentcore.runtime.runs.types import RunPhase
 from agentcore.tools.builtin import archive_extract as archive_mod
-from agentcore.tools.builtin.archive_create import ArchiveCreateTool
-from agentcore.tools.builtin.archive_extract import ArchiveExtractTool
+from agentcore.tools.builtin.archive import ArchiveTool
 from agentcore.tools.builtin.file_ops import FileBatchTool
 from agentcore.tools.builtin.web import download_url as download_mod
 from agentcore.tools.builtin.web.download_url import DownloadUrlTool
@@ -186,8 +185,8 @@ async def test_archive_extract_reports_every_member_it_wrote(tmp_path: Path):
         {"docs/a.md": "# hi", "img/logo.png": "fake-png", "run.py": "print(1)"},
     )
 
-    result = await ArchiveExtractTool().execute(
-        {"archive": "pkg.zip", "dest": "out"}, _ctx(tmp_path)
+    result = await ArchiveTool().execute(
+        {"action": "extract","archive": "pkg.zip", "dest": "out"}, _ctx(tmp_path)
     )
 
     assert result.success is True
@@ -225,8 +224,8 @@ async def test_archive_extract_caps_reported_products_and_says_so(
         {f"f{i}.txt": str(i) for i in range(5)},
     )
 
-    result = await ArchiveExtractTool().execute(
-        {"archive": "many.zip", "dest": "."}, _ctx(tmp_path)
+    result = await ArchiveTool().execute(
+        {"action": "extract","archive": "many.zip", "dest": "."}, _ctx(tmp_path)
     )
 
     assert result.success is True
@@ -260,8 +259,8 @@ async def test_archive_extract_partial_write_still_reports_landed_members(
 
     backend.write_bytes = _fail_on_third  # type: ignore[method-assign]
 
-    result = await ArchiveExtractTool().execute(
-        {"archive": "pkg.zip", "dest": "out"}, ctx
+    result = await ArchiveTool().execute(
+        {"action": "extract","archive": "pkg.zip", "dest": "out"}, ctx
     )
 
     assert result.success is False
@@ -270,8 +269,8 @@ async def test_archive_extract_partial_write_still_reports_landed_members(
 
 
 async def test_archive_extract_failed_call_reports_no_product(tmp_path: Path):
-    result = await ArchiveExtractTool().execute(
-        {"archive": "missing.zip", "dest": "out"}, _ctx(tmp_path)
+    result = await ArchiveTool().execute(
+        {"action": "extract","archive": "missing.zip", "dest": "out"}, _ctx(tmp_path)
     )
     assert result.success is False
     assert result.file_products == []
@@ -282,8 +281,8 @@ async def test_archive_create_reports_the_zip_it_wrote(tmp_path: Path):
     src.mkdir()
     (src / "a.md").write_text("# hi", encoding="utf-8")
 
-    result = await ArchiveCreateTool().execute(
-        {"sources": ["src"], "dest": "pkg.zip"}, _ctx(tmp_path)
+    result = await ArchiveTool().execute(
+        {"action": "create","sources": ["src"], "dest": "pkg.zip"}, _ctx(tmp_path)
     )
 
     assert result.success is True
@@ -308,8 +307,8 @@ async def test_archive_create_reports_the_zip_it_wrote(tmp_path: Path):
 
 
 async def test_archive_create_failed_call_reports_no_product(tmp_path: Path):
-    result = await ArchiveCreateTool().execute(
-        {"sources": ["missing"], "dest": "out.zip"}, _ctx(tmp_path)
+    result = await ArchiveTool().execute(
+        {"action": "create","sources": ["missing"], "dest": "out.zip"}, _ctx(tmp_path)
     )
     assert result.success is False
     assert result.file_products == []

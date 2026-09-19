@@ -60,6 +60,7 @@ def build_captain_executor(
     supports_tools: bool | None = None,
     turn_evidence_ledger: EvidenceLedgerCore | None = None,
     native_image_parts: list[dict] | None = None,
+    chat_envelope: str = "",
 ) -> Callable[[RunSpec], Awaitable[RunState]]:
     """Build the executor for the turn's CAPTAIN root run — the CEO chat loop.
 
@@ -81,9 +82,10 @@ def build_captain_executor(
     that into the captain ledger row (no re-price).
 
     ``native_image_parts`` (optional): OpenAI ``image_url`` parts for the current
-    user turn when main catalog supports vision — never mixed with eye→text.
+    user turn when main catalog supports vision.
     """
     from agentcore.llm.provider.protocol import build_multimodal_user_content
+    from agentcore.runtime.resolve.prompt.envelope import opening_ceo_messages
 
     user_content = build_multimodal_user_content(user_message, native_image_parts or [])
 
@@ -91,10 +93,12 @@ def build_captain_executor(
         tool_ctx = replace(
             base_tool_context, run_id=spec.run_id, agent_id=spec.agent_id or spec.run_id
         )
-        messages = [LLMMessage(role="system", content=chat_system_prompt)]
-        for msg in history:
-            messages.append(LLMMessage(role=msg["role"], content=msg["content"]))
-        messages.append(LLMMessage(role="user", content=user_content))
+        messages = opening_ceo_messages(
+            system_prompt=chat_system_prompt,
+            history=history,
+            turn_envelope=chat_envelope,
+            user_content=user_content,
+        )
         from agentcore.runtime.engine.governance import resolve_openai_tool_defs
 
         opening_tools = (
@@ -110,6 +114,7 @@ def build_captain_executor(
                 history,
                 user_message,
                 tool_defs=opening_tools,
+                turn_envelope=chat_envelope,
             ),
             llm=llm,
             tools=tools,

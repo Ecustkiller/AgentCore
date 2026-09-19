@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { getConversations } from "@/hooks/useConversations";
+import { hasNativeNotification, isNativeRuntime } from "@/lib/capabilities";
 import {
-  shouldUseNativeNotification,
+  isShellPresent,
+  openFloatConversationIds,
   showNativeNotification,
 } from "@/lib/nativeNotification";
 import { queryClient } from "@/lib/queryClient";
@@ -27,8 +29,18 @@ vi.mock("@/lib/toast", () => ({
 }));
 vi.mock("@/lib/nativeNotification", () => ({
   showNativeNotification: vi.fn(() => Promise.resolve()),
-  shouldUseNativeNotification: vi.fn(() => false),
+  isShellPresent: vi.fn(() => true),
+  openFloatConversationIds: vi.fn(() => []),
+  startShellPresence: () => () => undefined,
 }));
+vi.mock("@/lib/capabilities", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/capabilities")>();
+  return {
+    ...actual,
+    hasNativeNotification: vi.fn(() => false),
+    isNativeRuntime: vi.fn(() => false),
+  };
+});
 vi.mock("@/lib/queryClient", () => ({
   queryClient: { invalidateQueries: vi.fn(() => Promise.resolve()) },
 }));
@@ -38,7 +50,10 @@ const notifyInfoMock = vi.mocked(notifyInfo);
 const notifySuccessMock = vi.mocked(notifySuccess);
 const notifyErrorMock = vi.mocked(notifyError);
 const showNativeNotificationMock = vi.mocked(showNativeNotification);
-const shouldUseNativeNotificationMock = vi.mocked(shouldUseNativeNotification);
+const isShellPresentMock = vi.mocked(isShellPresent);
+const openFloatConversationIdsMock = vi.mocked(openFloatConversationIds);
+const hasNativeNotificationMock = vi.mocked(hasNativeNotification);
+const isNativeRuntimeMock = vi.mocked(isNativeRuntime);
 const invalidateMock = vi.mocked(queryClient.invalidateQueries);
 
 function allToastMessages(): string[] {
@@ -116,8 +131,14 @@ describe("startTeamActivityNotifications", () => {
     notifySuccessMock.mockReset();
     notifyErrorMock.mockReset();
     showNativeNotificationMock.mockReset();
-    shouldUseNativeNotificationMock.mockReset();
-    shouldUseNativeNotificationMock.mockReturnValue(false);
+    isShellPresentMock.mockReset();
+    isShellPresentMock.mockReturnValue(true);
+    openFloatConversationIdsMock.mockReset();
+    openFloatConversationIdsMock.mockReturnValue([]);
+    hasNativeNotificationMock.mockReset();
+    hasNativeNotificationMock.mockReturnValue(false);
+    isNativeRuntimeMock.mockReset();
+    isNativeRuntimeMock.mockReturnValue(false);
     invalidateMock.mockReset();
     getConversationsMock.mockReset();
     getConversationsMock.mockReturnValue([]);
@@ -146,7 +167,7 @@ describe("startTeamActivityNotifications", () => {
     // pause frame lands before the completion microtask.
     usePausedTurnStore
       .getState()
-      .addLiveResume(resume({ kind: "plan_review", checkpointId: "cp-pr" }));
+      .addLiveResume(resume({ kind: "ask_user", checkpointId: "cp-ask" }));
     setGenerating(CID, false);
 
     await Promise.resolve(); // flush queueMicrotask
@@ -154,7 +175,7 @@ describe("startTeamActivityNotifications", () => {
 
     const messages = allToastMessages();
     expect(messages.some((m) => m.includes("已完成"))).toBe(false);
-    expect(messages).toContain("「团队辩论」计划待你确认");
+    expect(messages).toContain("「团队辩论」需要你的回应");
   });
 
   it("云对话完成认 reason=completed 弹已完成", () => {
@@ -253,7 +274,7 @@ describe("startTeamActivityNotifications", () => {
     expect(allToastMessages()).toEqual([]);
   });
 
-  it("挂起 ask_user / plan_review 按 kind 各弹一句", () => {
+  it("挂起 ask_user 弹一句；leftover plan_review 不弹", () => {
     seedTitle(CID, "拍板会话");
     usePausedTurnStore
       .getState()
@@ -266,11 +287,10 @@ describe("startTeamActivityNotifications", () => {
     notifyInfoMock.mockClear();
     usePausedTurnStore
       .getState()
-      .addLiveResume(resume({ kind: "plan_review", checkpointId: "cp-pr2" }));
-    expect(notifyInfoMock).toHaveBeenCalledWith(
-      "「拍板会话」计划待你确认",
-      expect.any(Object),
-    );
+      .addLiveResume(
+        resume({ kind: "plan_review" as never, checkpointId: "cp-pr2" }),
+      );
+    expect(notifyInfoMock).not.toHaveBeenCalled();
   });
 
   it("leftover team_preview 挂起不弹开工提醒（且不与已完成双弹）", async () => {
@@ -289,19 +309,9 @@ describe("startTeamActivityNotifications", () => {
     expect(allToastMessages()).toEqual([]);
   });
 
-  it("幕终 leftover stage_card 不弹确认推进", async () => {
+  it("幕终 leftover 推进卡不进 store，不弹确认推进", async () => {
     seedTitle(CID, "调研收口");
     setGenerating(CID, true);
-    useInteractionStore.getState().upsertRequired({
-      kind: "stage_card",
-      conversationId: CID,
-      messageId: "msg-sc",
-      payload: {
-        stage_card_id: "sc-1",
-        motion: "命题",
-        form: "debate",
-      },
-    });
     setGenerating(CID, false);
 
     await Promise.resolve();
@@ -552,8 +562,10 @@ describe("startTeamActivityNotifications", () => {
     expect(showNativeNotificationMock).not.toHaveBeenCalled();
   });
 
-  it("窗口失焦：只走系统通知，不叠 toast", () => {
-    shouldUseNativeNotificationMock.mockReturnValue(true);
+  it("壳不在场：当前对话也走系统通知，不叠 toast", () => {
+    isShellPresentMock.mockReturnValue(false);
+    hasNativeNotificationMock.mockReturnValue(true);
+    window.location.hash = `#/conversations/${CID}`;
     seedTitle(CID, "调研");
     applyAiTurnActivity({
       conversation_id: CID,
@@ -562,15 +574,30 @@ describe("startTeamActivityNotifications", () => {
     });
     expect(allToastMessages()).toEqual([]);
     expect(showNativeNotificationMock).toHaveBeenCalledTimes(1);
-    expect(showNativeNotificationMock).toHaveBeenCalledWith(
-      "AgentCore",
-      "「调研」已完成",
-      { conversationId: CID },
-    );
+    expect(showNativeNotificationMock).toHaveBeenCalledWith("调研", "已完成", {
+      conversationId: CID,
+    });
   });
 
-  it("失焦时等你审批也只走系统通知", () => {
-    shouldUseNativeNotificationMock.mockReturnValue(true);
+  it("壳不在场：别的对话只走系统通知", () => {
+    isShellPresentMock.mockReturnValue(false);
+    hasNativeNotificationMock.mockReturnValue(true);
+    seedTitle(CID, "调研");
+    applyAiTurnActivity({
+      conversation_id: CID,
+      state: "done",
+      reason: "completed",
+    });
+    expect(allToastMessages()).toEqual([]);
+    expect(showNativeNotificationMock).toHaveBeenCalledTimes(1);
+    expect(showNativeNotificationMock).toHaveBeenCalledWith("调研", "已完成", {
+      conversationId: CID,
+    });
+  });
+
+  it("壳不在场时等你审批也只走系统通知", () => {
+    isShellPresentMock.mockReturnValue(false);
+    hasNativeNotificationMock.mockReturnValue(true);
     seedTitle(CID, "手机上起的活");
     applyAiAttention({
       type: "ai_attention",
@@ -583,9 +610,65 @@ describe("startTeamActivityNotifications", () => {
     });
     expect(allToastMessages()).toEqual([]);
     expect(showNativeNotificationMock).toHaveBeenCalledWith(
-      "AgentCore",
-      "「手机上起的活」需要审批",
+      "手机上起的活",
+      "需要审批",
       { conversationId: CID },
     );
+  });
+
+  it("壳不在场且列表还没标题：OS title 用短句、body 空", () => {
+    isShellPresentMock.mockReturnValue(false);
+    hasNativeNotificationMock.mockReturnValue(true);
+    applyAiAttention({
+      type: "ai_attention",
+      state: "required",
+      conversation_id: "conv-unknown",
+      turn_id: "t1",
+      interaction_id: "ap-bg-untitled",
+      kind: "approval",
+      title: "要不要执行 rm -rf build/？",
+    });
+    expect(allToastMessages()).toEqual([]);
+    expect(showNativeNotificationMock).toHaveBeenCalledWith("需要审批", "", {
+      conversationId: "conv-unknown",
+    });
+  });
+
+  it("浮窗已打开该对话：主画布在别处也不打扰", () => {
+    openFloatConversationIdsMock.mockReturnValue([CID]);
+    window.location.hash = "#/files";
+    seedTitle(CID, "浮窗跟的");
+    applyAiTurnActivity({
+      conversation_id: CID,
+      state: "done",
+      reason: "completed",
+    });
+    expect(allToastMessages()).toEqual([]);
+    expect(showNativeNotificationMock).not.toHaveBeenCalled();
+  });
+
+  it("手机在线壳不在场：仍走应用内提示", () => {
+    isShellPresentMock.mockReturnValue(false);
+    isNativeRuntimeMock.mockReturnValue(true);
+    seedTitle(CID, "调研");
+    applyAiTurnActivity({
+      conversation_id: CID,
+      state: "done",
+      reason: "completed",
+    });
+    expect(notifySuccessMock).toHaveBeenCalledTimes(1);
+    expect(showNativeNotificationMock).not.toHaveBeenCalled();
+  });
+
+  it("网页壳不在场：静默", () => {
+    isShellPresentMock.mockReturnValue(false);
+    seedTitle(CID, "调研");
+    applyAiTurnActivity({
+      conversation_id: CID,
+      state: "done",
+      reason: "completed",
+    });
+    expect(allToastMessages()).toEqual([]);
+    expect(showNativeNotificationMock).not.toHaveBeenCalled();
   });
 });

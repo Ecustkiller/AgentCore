@@ -178,7 +178,7 @@
         "evidence_ledger_count": 1,
         "evidence_ledger_delta": [
           {
-            "id": "#e1",
+            "id": "#r1",
             "url": "",
             "title": "合同.md",
             "snippet": "甲乙双方约定价款与交付期限……",
@@ -264,7 +264,7 @@
       "payload": {
         "run_id": "debate_mod_ep_full_r1_pro",
         "agent_id": "debate_mod_ep_full_r1_pro",
-        "delta": "支持续签【已核实·#e1】。"
+        "delta": "支持续签【已核实·#r1】。"
       },
       "timestamp": "2026-01-01T00:00:00.011Z"
     },
@@ -312,7 +312,7 @@
       "payload": {
         "run_id": "debate_mod_ep_full_r1_con",
         "agent_id": "debate_mod_ep_full_r1_con",
-        "delta": "反对续签【已核实·#e1】。"
+        "delta": "反对续签【已核实·#r1】。"
       },
       "timestamp": "2026-01-01T00:00:00.512Z"
     },
@@ -443,7 +443,7 @@
         },
         "evidence_ledger": [
           {
-            "id": "#e1",
+            "id": "#r1",
             "url": "",
             "title": "合同.md",
             "snippet": "甲乙双方约定价款与交付期限……",
@@ -624,7 +624,7 @@
         "process": [
           {
             "kind": "content",
-            "text": "支持续签【已核实·#e1】。"
+            "text": "支持续签【已核实·#r1】。"
           }
         ]
       },
@@ -672,7 +672,7 @@
         "process": [
           {
             "kind": "content",
-            "text": "反对续签【已核实·#e1】。"
+            "text": "反对续签【已核实·#r1】。"
           }
         ]
       }
@@ -770,7 +770,7 @@
       },
       "evidence_ledger": [
         {
-          "id": "#e1",
+          "id": "#r1",
           "url": "",
           "title": "合同.md",
           "snippet": "甲乙双方约定价款与交付期限……",
@@ -793,9 +793,7 @@
         "sides": [],
         "clashes": [],
         "cross_exam": [],
-        "witness_exam": [],
-        "findings": [],
-        "thread_turns": []
+        "witness_exam": []
       }
     ],
     "debatePretrial": {
@@ -822,7 +820,6 @@
     },
     "crossExamEnabled": false,
     "debateOpening": "双方依共享证据包立论。",
-    "teamSynthesisPreview": null,
     "deliveryStatus": null,
     "turnWarning": null,
     "autoFolder": null,

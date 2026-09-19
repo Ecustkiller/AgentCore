@@ -730,7 +730,7 @@ describe("computeActBands", () => {
         kind: "debate",
         title: "辩论对抗",
         anchorRunId: "syn",
-        authorizedBy: "stage_card",
+        authorizedBy: "auto",
       },
     ];
     const bands = computeActBands(
@@ -745,7 +745,7 @@ describe("computeActBands", () => {
     );
     expect(bands.map((b) => b.label)).toEqual([
       "多视角调研",
-      "辩论对抗 · 经推进卡授权",
+      "辩论对抗 · 自动开辩",
     ]);
     expect(
       computeWaves(exec, {}, { width: 100, height: 100 }, "leftright", null),

@@ -180,7 +180,6 @@ export function useGraphViewport({
 
   return {
     containerRef,
-    rfRef,
     overflowing,
     fitView,
     centerNode,

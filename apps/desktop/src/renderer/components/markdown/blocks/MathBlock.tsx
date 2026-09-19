@@ -2,7 +2,7 @@
  * KaTeX 数学块渲染（与聊天预览共享同一 KaTeX 引擎，外观一致）。
  *
  * 读路径（{@link Markdown} via rehype-katex）与写路径（CodeMirror 内联实时预览此组件）
- * 同引擎渲染 `$$...$$`。KaTeX 样式已在 `styles/globals.css` 全局引入，无需在此重复 import。
+ * 同引擎渲染 `$$...$$` / `\[...\]`。KaTeX 样式已在 `styles/globals.css` 全局引入，无需在此重复 import。
  */
 
 import katex from "katex";

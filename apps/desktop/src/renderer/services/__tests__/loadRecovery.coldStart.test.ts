@@ -211,7 +211,7 @@ describe("loadRecovery cold start (no React Query / no resolveSidecarRoot)", () 
       paused: [
         {
           message_id: "m-pause",
-          kind: "plan_review",
+          kind: "ask_user",
           checkpoint_id: "cp1",
           user_message: "q",
           steps: [],
@@ -254,7 +254,7 @@ describe("loadRecovery cold start (no React Query / no resolveSidecarRoot)", () 
       paused: [
         {
           message_id: "m-cloud",
-          kind: "plan_review",
+          kind: "ask_user",
           checkpoint_id: "cp-cloud",
           user_message: "cloud q",
           steps: [],
@@ -352,30 +352,16 @@ describe("loadRecovery cold start (no React Query / no resolveSidecarRoot)", () 
     expect(usePausedTurnStore.getState().openRecovery[CID]).toBe("failed");
   });
 
-  it("recovery snapshot carrying ceo_review hydrates it onto the resume frame", async () => {
-    // REST schema 未列该字段；宽松读——后端带了就透传，absent → undefined。
+  it("skips leftover plan_review recovery frames (no pausedTurns / pausedCount)", async () => {
     apiGet.mockResolvedValue({
       live_running: false,
       paused: [
         {
-          message_id: "m-cr",
+          message_id: "m-leftover",
           kind: "plan_review",
-          checkpoint_id: "cp-cr",
+          checkpoint_id: "cp-pr",
           user_message: "q",
           steps: [{ run_id: "r1", role: "调研", summary: "ok" }],
-          pending: [],
-          ceo_review: {
-            conclusion: "可放行",
-            risks: ["预算偏乐观"],
-            suggestions: [],
-          },
-        },
-        {
-          message_id: "m-no-cr",
-          kind: "plan_review",
-          checkpoint_id: "cp-no-cr",
-          user_message: "q2",
-          steps: [],
           pending: [],
         },
       ],
@@ -384,17 +370,9 @@ describe("loadRecovery cold start (no React Query / no resolveSidecarRoot)", () 
 
     vi.stubGlobal("window", { __WEB__: true });
 
-    await loadRecovery(CID);
-    const entries = usePausedTurnStore.getState().pending;
-    expect(entries).toHaveLength(2);
-    const withReview = entries.find((e) => e.messageId === "m-cr");
-    const without = entries.find((e) => e.messageId === "m-no-cr");
-    expect(withReview?.ceoReview).toEqual({
-      conclusion: "可放行",
-      risks: ["预算偏乐观"],
-      suggestions: [],
-    });
-    expect(without?.ceoReview).toBeUndefined();
+    const r = await loadRecovery(CID);
+    expect(r.pausedCount).toBe(0);
+    expect(usePausedTurnStore.getState().pending).toHaveLength(0);
   });
 
   it("empty recovery pending does not wipe live approval cards", async () => {

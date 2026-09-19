@@ -35,30 +35,6 @@ def test_should_enter_coordination_gate():
     assert not should_enter_coordination(coordinate=False, worker_count=1, depth=0)
     assert not should_enter_coordination(coordinate=True, worker_count=0, depth=0)
     assert not should_enter_coordination(coordinate=True, worker_count=2, depth=1)
-    # B1: checkpoint_after batch + gate open → classic blocking (durable plan_review).
-    assert not should_enter_coordination(
-        coordinate=True,
-        worker_count=2,
-        depth=0,
-        has_checkpoint=True,
-        checkpoint_enabled=True,
-    )
-    # Gate off (evals): checkpoint nodes do not block coordination.
-    assert should_enter_coordination(
-        coordinate=True,
-        worker_count=2,
-        depth=0,
-        has_checkpoint=True,
-        checkpoint_enabled=False,
-    )
-    # Gate open but no checkpoint nodes → still enter.
-    assert should_enter_coordination(
-        coordinate=True,
-        worker_count=2,
-        depth=0,
-        has_checkpoint=False,
-        checkpoint_enabled=True,
-    )
 
 
 def test_coordination_snapshot_roundtrip():
@@ -1398,17 +1374,15 @@ async def test_concurrent_sessions_isolated_by_execution_id():
     clear_active_coordination()
 
 
-async def test_checkpoint_batch_skips_coordination_for_durable_plan_review():
-    """B1：含 checkpoint_after 且闸开 → 不进协调，回落经典 durable plan_review。"""
+async def test_checkpoint_after_extra_key_still_enters_coordination():
+    """多余键 checkpoint_after 不挡协调、不挂 plan_review。"""
     from agentcore.core.types import ToolEffect
-    from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
-    from agentcore.runtime.suspension import TurnSuspension, captain_transcript
     from tests.delegate.conftest import CKPT_DAG, tool_durable
 
     clear_active_coordination()
     registry = InteractionRegistry()
     sink = EventSink()
-    saved: list[TurnSuspension] = []
+    saved: list = []
 
     async def _save(frame):
         saved.append(frame)
@@ -1417,48 +1391,33 @@ async def test_checkpoint_batch_skips_coordination_for_durable_plan_review():
         pass
 
     t = tool_durable(Provider(["S1OUT", "S2OUT"]), sink, registry, _save, _drop)
-    transcript = [
-        LLMMessage(role="user", content="原始请求"),
-        LLMMessage(
-            role="assistant",
-            content=None,
-            tool_calls=[
-                ToolCall(
-                    id="call_del",
-                    function=ToolCallFunction(name="delegate", arguments="{}"),
-                )
-            ],
-        ),
-    ]
-    token = captain_transcript.set(transcript)
-    try:
-        # Default coordinate=True would enter coordination without B1; gate must skip.
-        result = await t.execute({"tasks": CKPT_DAG}, ctx())
-    finally:
-        captain_transcript.reset(token)
+    result = await t.execute({"tasks": CKPT_DAG}, ctx())
 
-    assert result.effect is ToolEffect.SUSPEND
-    assert "团队已启动" not in (result.output or "")
-    assert active_coordination("e") is None
-    assert len(saved) == 1
-    assert any(e.type is EventType.PLAN_REVIEW_REQUIRED for e in sink._history)
+    assert result.effect is not ToolEffect.SUSPEND
+    assert "团队已启动" in (result.output or "")
+    session = active_coordination("e")
+    assert session is not None
+    assert session.drive_task is not None
+    await asyncio.wait_for(session.drive_task, timeout=10)
+    assert saved == []
+    assert not any(str(e.type) == "plan_review_required" for e in sink._history)
+    clear_active_coordination("e")
 
 
-async def test_coordination_mid_checkpoint_still_boundary_yields():
-    """防御：已在协调态时（如 replan 中途加把关）checkpoint 仍 BOUNDARY_YIELD。"""
+async def test_coordination_mid_batch_ignores_checkpoint_after():
+    """已在协调态时，多余键 checkpoint_after 不 BOUNDARY_YIELD、不 persist。"""
     from agentcore.runtime.coordination.host import try_start_coordination
     from agentcore.runtime.coordination.session import (
         CoordinationSession,
         set_active_coordination,
     )
     from agentcore.runtime.runs import build_run_plan
-    from agentcore.runtime.suspension import TurnSuspension
     from tests.delegate.conftest import CKPT_DAG, tool_durable
 
     clear_active_coordination()
     registry = InteractionRegistry()
     sink = EventSink()
-    saved: list[TurnSuspension] = []
+    saved: list = []
 
     async def _save(frame):
         saved.append(frame)
@@ -1469,7 +1428,6 @@ async def test_coordination_mid_checkpoint_still_boundary_yields():
     t = tool_durable(Provider(["S1OUT", "S2OUT"]), sink, registry, _save, _drop)
     plan, errors = build_run_plan(CKPT_DAG, id_prefix="del_mid_", parent_run_id="CEO", depth=1)
     assert not errors
-    # Already-active session bypasses the entry gate (resume / mid-batch defense).
     session = CoordinationSession(execution_id="e", total_workers=len(plan.nodes))
     set_active_coordination(session)
     started = try_start_coordination(
@@ -1487,27 +1445,26 @@ async def test_coordination_mid_checkpoint_still_boundary_yields():
     assert session.drive_task is not None
     await asyncio.wait_for(session.drive_task, timeout=10)
 
-    assert saved == [], "协调态 checkpoint 不得 persist TurnSuspension"
+    assert saved == []
     events = session.drain_nowait()
-    kinds = [e.kind for e in events]
-    assert CoordinationEventKind.BOUNDARY_YIELD in kinds
-    byield = next(e for e in events if e.kind is CoordinationEventKind.BOUNDARY_YIELD)
-    assert byield.payload.get("reason") == "checkpoint"
-    assert not any(e.type is EventType.PLAN_REVIEW_REQUIRED for e in sink._history)
+    assert not any(
+        e.kind is CoordinationEventKind.BOUNDARY_YIELD
+        and (e.payload or {}).get("reason") == "checkpoint"
+        for e in events
+    )
+    assert not any(str(e.type) == "plan_review_required" for e in sink._history)
     clear_active_coordination("e")
 
 
-async def test_classic_checkpoint_still_durable_when_not_coordinating():
-    """经典阻塞 path（coordinate=false）仍 durable plan_review 挂起即收口。"""
+async def test_classic_checkpoint_after_extra_key_runs_through():
+    """经典阻塞 path（coordinate=false）：多余键不挂起，两 worker 跑完。"""
     from agentcore.core.types import ToolEffect
-    from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
-    from agentcore.runtime.suspension import TurnSuspension, captain_transcript
     from tests.delegate.conftest import CKPT_DAG, tool_durable
 
     clear_active_coordination()
     registry = InteractionRegistry()
     sink = EventSink()
-    saved: list[TurnSuspension] = []
+    saved: list = []
 
     async def _save(frame):
         saved.append(frame)
@@ -1516,28 +1473,14 @@ async def test_classic_checkpoint_still_durable_when_not_coordinating():
         pass
 
     t = tool_durable(Provider(["S1OUT", "S2OUT"]), sink, registry, _save, _drop)
-    transcript = [
-        LLMMessage(role="user", content="原始请求"),
-        LLMMessage(
-            role="assistant",
-            content=None,
-            tool_calls=[
-                ToolCall(
-                    id="call_del",
-                    function=ToolCallFunction(name="delegate", arguments="{}"),
-                )
-            ],
-        ),
-    ]
-    token = captain_transcript.set(transcript)
-    try:
-        result = await t.execute({"tasks": CKPT_DAG, "coordinate": False}, ctx())
-    finally:
-        captain_transcript.reset(token)
+    result = await t.execute({"tasks": CKPT_DAG, "coordinate": False}, ctx())
 
-    assert result.effect is ToolEffect.SUSPEND
-    assert len(saved) == 1
-    assert any(e.type is EventType.PLAN_REVIEW_REQUIRED for e in sink._history)
+    assert result.effect is not ToolEffect.SUSPEND
+    assert "S1OUT" in result.output
+    assert "S2OUT" in result.output
+    assert saved == []
+    assert active_coordination("e") is None
+    assert not any(str(e.type) == "plan_review_required" for e in sink._history)
 
 
 def test_coordination_budget_scales_with_batch_size():
@@ -1648,9 +1591,6 @@ def test_all_completed_inject_write_form_without_files_is_not_delivery():
         ],
     )
     assert "队员回合结束不是用户交付" in text
-    assert "不得向用户宣称完成" in text
-    assert "不得宣称已交付" not in text
-    assert "不要把队员回合结束当成用户交付" not in text
     assert "已接受落盘" not in text
     assert "活没干完就接着干" not in text
     from agentcore.runtime.coordination.inject import format_coordination_events
@@ -1944,7 +1884,7 @@ def test_harvest_inject_close_line_differs_by_outcome():
     assert "活没干完就接着干" not in paused_text
 
 
-def test_checkpoint_boundary_yield_instructs_ask_user():
+def test_checkpoint_boundary_yield_is_user_gate_fact():
     from agentcore.runtime.coordination.inject import format_coordination_events
 
     session = CoordinationSession(execution_id="e", total_workers=2)
@@ -1958,8 +1898,7 @@ def test_checkpoint_boundary_yield_instructs_ask_user():
         ],
     )
     assert "boundary_yield（checkpoint）" in text
-    assert "ask_user" in text
-    assert "不得自行替用户决定" in text
+    assert "用户把关" in text
     assert "提纲已出" in text
 
 
@@ -2272,7 +2211,6 @@ async def test_wait_still_injects_queued_escalation_despite_pending_arbitration(
     assert len(msgs) == 1
     text = msgs[0].content or ""
     assert "阻塞仲裁" in text
-    assert "resolve_escalation" in text
     assert "选 Postgres 还是 MySQL？" in text
     assert "等待团队事件超时" not in text
 

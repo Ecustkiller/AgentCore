@@ -203,7 +203,7 @@ describe("execMessageId graph routing", () => {
     );
   });
 
-  it("old journal live: graph_append + host_message_id still stamps anchor only on m2", () => {
+  it("host_message_id run_plan still merges onto m1 without inserting team on m2", () => {
     dispatchSSEEvent(
       {
         type: "message_start",
@@ -271,27 +271,6 @@ describe("execMessageId graph routing", () => {
       },
       { conversationId: CONV, source: "server" },
     );
-    dispatchSSEEvent(
-      {
-        type: "graph_append",
-        payload: {
-          execution_id: "exec1",
-          host_message_id: "m1",
-          append_message_id: "m2",
-          added_count: 1,
-          roles: ["撰写员"],
-          added_run_ids: ["r3"],
-        },
-        timestamp: "",
-      },
-      { conversationId: CONV, source: "server" },
-    );
-
-    const m2 = useConversationStore
-      .getState()
-      .byId[CONV].messages.find((m) => m.serverMessageId === "m2");
-    expect(m2?.process?.some((s) => s.kind === "graph_append")).toBe(true);
-    expect(m2?.process?.some((s) => s.kind === "team")).toBeFalsy();
 
     dispatchSSEEvent(
       {
@@ -316,6 +295,9 @@ describe("execMessageId graph routing", () => {
     );
 
     // Plan merges onto host; m2 stays without its own plan/team.
+    const m2 = useConversationStore
+      .getState()
+      .byId[CONV].messages.find((m) => m.serverMessageId === "m2");
     expect(useExecutionStore.getState().byId.m1?.plan?.runs.length).toBe(2);
     expect(useExecutionStore.getState().byId.m2?.plan).toBeFalsy();
     expect(m2?.process?.some((s) => s.kind === "team")).toBeFalsy();

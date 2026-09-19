@@ -14,7 +14,7 @@
 
 - **超了上限**：先问是不是又抄了一份别处已有的话。同一条约束只留一处：
   取值语义留在参数描述，跨工具路由 / 审批策略留在工具描述，HOW 默认留在 skill / consult；
-  写参当轮必见的合同可上收进该工具（现：delegate 编制）。
+  写参当轮必见的合同可上收进该工具（现：delegate 编制、ask_user 填卡）。
   确实是**新增**的有效语义 → 把这里的数字调上去，并在 PR 里说清多出来的是什么。
 - **远低于上限**（比如又砍了一批）：把数字调下来，棘轮才继续咬合。
 
@@ -42,8 +42,7 @@ from agentcore.tools.builtin.delegate.schema import (
 )
 from agentcore.tools.builtin.folders import (
     CreateFolderTool,
-    ListFoldersTool,
-    ResolveFolderTool,
+    FoldersTool,
 )
 from agentcore.tools.builtin.git_ops.policy import GIT_TOOL_PARAMETERS
 from agentcore.tools.builtin.git_ops.tool import GitTool
@@ -149,6 +148,8 @@ from agentcore.tools.protocol import ToolSchema
 # 实测 ask_user 桌面 1244 / web 1076。cap 1260→1250、1090→1080。
 # 2026-09-18 删 debate.thorough（点名开辩即认真档；轻量挑刺/多视角走 delegate）。
 # 实测 debate 1166。cap 1250→1170。
+# 2026-09-19 ask_user：填卡合同从 consult skill 上收到按钮（写参当轮必见）。
+# 实测桌面 1286 / web 1118。cap 1250→1290、1080→1120（抬顶=新语义，非回潮抄写）。
 _CAPS: dict[str, int] = {
     "browser": 910,
     "git": 1590,
@@ -156,10 +157,9 @@ _CAPS: dict[str, int] = {
     "run": 790,
     "delegate": 2260,
     "debate": 1170,
-    "ask_user": 1250,
-    "list_folders": 210,
-    "resolve_folder": 280,
-    "create_folder": 480,
+    "ask_user": 1290,
+    "folders": 410,
+    "create_folder": 470,
 }
 _TOTAL_CAP = sum(_CAPS.values())
 
@@ -168,7 +168,8 @@ _TOTAL_CAP = sum(_CAPS.values())
 # 2026-09-16 删 options.detail。实测 1127。cap 1210→1130。
 # 2026-09-16 删 message。实测 1083。cap 1130→1090。
 # 2026-09-18 卡形共用。实测 1076。cap 1090→1080。
-_ASK_USER_WEB_CAP = 1080
+# 2026-09-19 填卡合同上收。实测 1118。cap 1080→1120。
+_ASK_USER_WEB_CAP = 1120
 
 # Worker-only：escalate / handoff / 写盘三件套曾把身份段或 consult HOW 再抄一遍到按钮上。
 # 2026-08-29 escalate blocking：已拒凭据→false 短触发（身份段不进按钮）。当次实测 1698。cap 1690→1700。
@@ -224,14 +225,15 @@ _WORKER_CAPS: dict[str, int] = {
 # cap 690→680、810→770、530→460、340→310。
 # 2026-09-16 grep：max_results 出按钮，执行冻默认 50。实测 665。cap 770→670。
 # 2026-09-18 file_write：用户规则写 AgentCore/规则/*.md 进 description。实测 327。cap 310→330。
-# 2026-09-18 用户规则条目地址改 `.agentcore/规则`：file_list / file_delete when-to-use。
+# 2026-09-19 用户规则条目地址改 `.agentcore/规则`：file_list / file_delete when-to-use。
 # 实测 file_list 314 / file_delete 380。cap 300→320、360→380。
+# 2026-09-19 file_batch 吸收 file_move / file_copy（单条也走 operations 一项；
+# dest 已存在则跳过）。实测 1077。cap 占位 900→1080（抬顶=并入两把笔，非回潮抄写）。
 _FILE_CAPS: dict[str, int] = {
     "file_delete": 380,
     "file_read": 680,
     "grep": 670,
-    "file_move": 330,
-    "file_copy": 440,
+    "file_batch": 1080,
     "glob": 460,
     "file_list": 320,
     "mkdir": 240,
@@ -306,8 +308,7 @@ def _measured() -> dict[str, int]:
     sizes["delegate"] = measure_openai_tool_chars(_delegate_schema())
     sizes["debate"] = measure_openai_tool_chars(_debate_schema())
     sizes["ask_user"] = measure_openai_tool_chars(_ask_user_schema(desktop=True))
-    sizes["list_folders"] = measure_openai_tool_chars(ListFoldersTool().schema)
-    sizes["resolve_folder"] = measure_openai_tool_chars(ResolveFolderTool().schema)
+    sizes["folders"] = measure_openai_tool_chars(FoldersTool().schema)
     sizes["create_folder"] = measure_openai_tool_chars(CreateFolderTool().schema)
     return sizes
 
@@ -350,13 +351,12 @@ def _measured_coord() -> dict[str, int]:
 
 def _measured_file() -> dict[str, int]:
     from agentcore.tools.builtin.file_ops import (
-        FileCopyTool,
         FileDeleteTool,
         FileListTool,
-        FileMoveTool,
         FileReadTool,
         GlobTool,
         MkdirTool,
+        FileBatchTool,
     )
     from agentcore.tools.builtin.grep import GrepTool
 
@@ -364,8 +364,7 @@ def _measured_file() -> dict[str, int]:
         "file_delete": measure_openai_tool_chars(FileDeleteTool().schema),
         "file_read": measure_openai_tool_chars(FileReadTool().schema),
         "grep": measure_openai_tool_chars(GrepTool().schema),
-        "file_move": measure_openai_tool_chars(FileMoveTool().schema),
-        "file_copy": measure_openai_tool_chars(FileCopyTool().schema),
+        "file_batch": measure_openai_tool_chars(FileBatchTool().schema),
         "glob": measure_openai_tool_chars(GlobTool().schema),
         "file_list": measure_openai_tool_chars(FileListTool().schema),
         "mkdir": measure_openai_tool_chars(MkdirTool().schema),
@@ -554,7 +553,6 @@ def test_on_demand_faces_point_how_to_consult():
     assert set(_ask_user_schema(desktop=True).parameters["properties"]) == {
         "questions",
         "browser_login",
-        "card",
     }
     assert set(RunTool().schema.parameters["properties"]) == {
         "command",

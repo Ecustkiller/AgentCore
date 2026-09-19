@@ -403,7 +403,6 @@
     "debatePretrial": null,
     "crossExamEnabled": false,
     "debateOpening": null,
-    "teamSynthesisPreview": null,
     "deliveryStatus": {
       "execution_id": "exec1",
       "state": "partial",

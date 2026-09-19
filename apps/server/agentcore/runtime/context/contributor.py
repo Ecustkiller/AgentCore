@@ -63,19 +63,20 @@ class SectionOrder(IntEnum):
     # On-demand user rules (consult) — constraint appendices, NOT memory topics.
     # Same live-tool gate: render only when ``consult`` is wired this turn.
     RULE_DIRECTORY = 560
-    # Retired: 名册改 list_folders. Slot kept so billed prefix keys are not
+    # Retired: 名册改 folders. Slot kept so billed prefix keys are not
     # reshuffled. Production does not assemble this section.
     FOLDER_CATALOG = 570
     # Retired 2026-08-29: resident <citing_sources> HOW removed (#rN lives in
     # shared delivery_honesty). Slot kept so billed prefix keys are not reshuffled.
     CITATION = 600
-    # Retired 2026-08-29: resident <visualization> HOW removed (mermaid lives in
-    # the shared GFM sentence). Slot kept so billed prefix keys are not reshuffled.
+    # Retired 2026-08-29: resident <visualization> HOW removed. Slot kept so
+    # billed prefix keys are not reshuffled.
     CEO_VISUALIZATION = 700
     # Per-turn environment facts (location / desktop / capabilities). Volatile with
     # binding changes. Was 250 (in front of the ~19k CEO core); moved 2026-08-19 —
-    # see class docstring Exception. Both CEO and worker composers add this key;
-    # it is not baked into ``assemble_system_prompt``.
+    # see class docstring Exception. Worker compose and the CEO turn envelope add
+    # this key; it is not baked into ``assemble_system_prompt``. CEO ``role: system``
+    # stays frozen (constitution / identity / catalog).
     WORKSPACE_FACTS = 750
     # Retired as a separate XML tag 2026-09-01: CEO file index is the last
     # subsection of ``<工作区>`` (attached into WORKSPACE_FACTS). Slot kept so
@@ -93,8 +94,8 @@ class SectionOrder(IntEnum):
     # still stamps the same-turn ledger (合回 / finish_guard). Slot kept unused so
     # later sections keep their prefix-cache order.
     PRIOR_DELIVERY_GAPS = 855
-    # Cross-turn soft nudge when the prior turn journal fingerprints empty-delegate /
-    # unproductive (history drops tool I/O, so the fingerprint rides the volatile tail).
+    # Retired 2026-09-19: ``<上轮重派>`` one-shot withdrawn. Slot kept unused so
+    # later sections keep their prefix-cache order.
     PRIOR_DELEGATE_RETRY = 860
     # Cross-turn futile-retry hint retired; slot kept unused so later sections
     # keep their prefix-cache order.

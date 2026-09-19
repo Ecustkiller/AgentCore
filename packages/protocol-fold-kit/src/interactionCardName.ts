@@ -11,8 +11,6 @@ export const INTERACTION_CARD_NAME = {
   approval: "工具审批",
   escalation: "拍板请求",
   ask_user: "提问确认",
-  plan_review: "计划复核",
-  stage_card: "推进卡",
 } as const satisfies Record<UserInteractionKind, string>;
 
 /** 不在表里的 kind（含尚未 codegen 的）——不是某张卡的名字。 */

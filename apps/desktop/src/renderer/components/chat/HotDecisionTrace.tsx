@@ -1,6 +1,6 @@
 /**
- * 热审批 / 委派授权 / 阶段推进卡时间线痕迹（统一时间线二期 D3 + 打磨批）：
- * pending 期间仅决策区有操作面（推进卡在 Dock），时间线
+ * 热审批时间线痕迹（统一时间线二期 D3 + 打磨批）：
+ * pending 期间仅决策区有操作面，时间线
  * {@link timelineIntentionalEmpty}；resolved / orphaned 后在 required 时刻的标记槽
  * 显轻状态行。Store 里查不到 entry 是 {@link timelineMissingCard}，不要和 pending 合成一个 null。
  *
@@ -30,7 +30,7 @@ import {
   timelineMissingCard,
 } from "@/stores/interactions/timelineCardSlot";
 import type { ProcessStep } from "@/types/events";
-import { Check, X } from "lucide-react";
+import { Check } from "lucide-react";
 import { useMemo } from "react";
 
 function elsewhereSuffix(entry: InteractionEntry): string {
@@ -171,48 +171,6 @@ export function ApprovalTrace({
     >
       <Check size={12} className="shrink-0" />
       <span>{`${label}${unaskedSuffix}${elsewhereSuffix(entry)}`}</span>
-    </div>
-  );
-}
-
-/** 阶段推进卡时间线轻锚点：历史回看显「已开辩 / 已选补充调研 / 已失效」。 */
-export function StageCardTrace({ stageCardId }: { stageCardId: string }) {
-  const entry = useInteractionStore((s) => s.byId.get(stageCardId));
-  if (!entry || entry.kind !== "stage_card") {
-    return timelineMissingCard({
-      kind: "missing",
-      processKind: "stage_card",
-      id: stageCardId,
-    });
-  }
-  if (entry.status === "orphaned") {
-    return (
-      <div
-        className="flex items-center gap-1.5 text-xs text-muted-foreground"
-        data-testid="stage-card-trace"
-      >
-        <X size={12} className="shrink-0" />
-        <span>推进卡 · 已失效</span>
-      </div>
-    );
-  }
-  if (entry.status !== "resolved") return timelineIntentionalEmpty();
-  const decision =
-    typeof entry.resolution?.decision === "string"
-      ? entry.resolution.decision
-      : "";
-  const label = outcomeUnknown(entry)
-    ? "推进卡 · 已处理"
-    : decision === "research_first"
-      ? "推进卡 · 已选补充调研"
-      : "推进卡 · 已开辩";
-  return (
-    <div
-      className="flex items-center gap-1.5 text-xs text-muted-foreground"
-      data-testid="stage-card-trace"
-    >
-      <Check size={12} className="shrink-0" />
-      <span>{`${label}${elsewhereSuffix(entry)}`}</span>
     </div>
   );
 }

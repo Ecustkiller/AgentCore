@@ -611,3 +611,79 @@ describe("toDebateModel live empty shell (no pretrial UI)", () => {
     expect(toDebateModel(baseExecution())).toBeNull();
   });
 });
+
+describe("toDebateModel form coerce", () => {
+  const settledShell = {
+    motion: "m",
+    stop_reason: "converged",
+    opening: "o",
+    narrative_first: false,
+    moderator_run_id: "mod",
+    execution_id: "e1",
+    sides: [] as const,
+    rounds: [] as const,
+    closings: [] as const,
+    brief: {
+      crux: "",
+      strongest_points: {},
+      handoffs: [],
+      decisive: "",
+      leaning: "l",
+      confidence: "medium",
+      recommendation: "",
+    },
+  };
+
+  it("coerces settled red_team / roundtable / unknown form to debate", () => {
+    for (const form of ["red_team", "roundtable", "mystery"] as const) {
+      const model = toDebateModel(
+        baseExecution({
+          status: "completed",
+          debate: {
+            ...settledShell,
+            form,
+          } as unknown as Execution["debate"],
+        }),
+      );
+      expect(model?.form).toBe("debate");
+      expect(model?.settled).toBe(true);
+    }
+  });
+
+  it("live leftover participant group still projects as debate", () => {
+    const model = toDebateModel(
+      baseExecution({
+        runs: [
+          {
+            id: "d1",
+            agentId: "a1",
+            status: "running",
+            stance: null,
+            group: "debate:roundtable",
+            round: 1,
+            continuationIndex: 0,
+            continuesRunId: null,
+            parentRunId: null,
+            kind: "agent",
+            receivedContext: [],
+          } as unknown as RunNode,
+        ],
+        agents: [
+          {
+            id: "a1",
+            role: "视角甲",
+            status: "working",
+            outputChunks: [],
+            reasoningChunks: [],
+            currentRunId: "d1",
+            toolProgress: null,
+            toolExecutionLive: null,
+          } as unknown as AgentState,
+        ],
+      }),
+    );
+    expect(model).not.toBeNull();
+    expect(model?.form).toBe("debate");
+    expect(model?.settled).toBe(false);
+  });
+});

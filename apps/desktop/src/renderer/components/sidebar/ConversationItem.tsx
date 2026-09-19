@@ -22,7 +22,6 @@ import {
 import {
   useArchiveConversation,
   useDeleteConversation,
-  useDuplicateConversation,
   useRenameConversation,
   useRestoreConversation,
   useTogglePin,
@@ -68,7 +67,6 @@ import { usePausedTurnStore } from "@/stores/pausedTurns";
 import { useShareStore } from "@/stores/share";
 import {
   Archive,
-  Copy,
   Download,
   FileJson,
   MoreHorizontal,
@@ -134,7 +132,6 @@ export function ConversationItem({
   const deleteMutation = useDeleteConversation();
   const restoreMutation = useRestoreConversation();
   const pinMutation = useTogglePin();
-  const duplicateMutation = useDuplicateConversation();
   const archiveMutation = useArchiveConversation();
   const unarchiveMutation = useUnarchiveConversation();
   const folders = useFolders();
@@ -145,7 +142,7 @@ export function ConversationItem({
   const cloudRunning = useConversationCloudRunning(conversation.id);
   const graphLive = useConversationGraphLive(conversation.id);
   // 「等你」灯（前端UX设计.md §对话列表状态点）：热阻塞交互（审批 / 授权 / 升级拍板，
-  // CEO 仲裁除外）+ 可操作暂停帧（途中提问 / 计划复核）都算等用户。
+  // CEO 仲裁除外）+ 可操作暂停帧（途中提问）都算等用户。
   const awaitingInteraction = useInteractionStore((s) =>
     [...s.byId.values()].some(
       (e) => e.conversationId === conversation.id && isAwaitingUserEntry(e),
@@ -277,17 +274,6 @@ export function ConversationItem({
           });
         },
       },
-    });
-  };
-
-  const handleDuplicate = () => {
-    setMoreOpen(false);
-    duplicateMutation.mutate(conversation.id, {
-      onSuccess: (conv) => {
-        switchConversation(conv.id);
-        navigate(`/conversations/${conv.id}`);
-      },
-      onError: (err) => notifyError(err, "克隆失败"),
     });
   };
 
@@ -475,10 +461,6 @@ export function ConversationItem({
                         </span>
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem onSelect={handleDuplicate}>
-                        <Copy size={14} className="shrink-0" />
-                        <span className="flex-1 truncate">克隆对话</span>
-                      </DropdownMenuItem>
                       <DropdownMenuItem
                         onSelect={() =>
                           useShareStore.getState().open(conversation.id)
@@ -563,10 +545,6 @@ export function ConversationItem({
           </span>
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onSelect={handleDuplicate}>
-          <Copy size={14} className="shrink-0" />
-          <span className="flex-1 truncate">克隆对话</span>
-        </ContextMenuItem>
         <ContextMenuItem
           onSelect={() => useShareStore.getState().open(conversation.id)}
         >

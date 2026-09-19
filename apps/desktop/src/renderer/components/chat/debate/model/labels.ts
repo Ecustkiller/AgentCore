@@ -1,15 +1,15 @@
 import type { DebateSignal } from "@/components/ui/tone-presets";
 import { agentColorVar } from "@/lib/agentIdentity";
 import type { DebateVerdict } from "@/types/events";
-import type { DebateForm, DebateRoundModel, RoundVerdictView } from "./types";
+import type { DebateRoundModel, RoundVerdictView } from "./types";
 
 /**
  * 正反 2 方的**固定对垒色**（`pro`/`con` 语义 key → 专用辩论阵营 token）——取代「按名字 hash
  * 取色」：名字一撞 hash 就同色（真实会话里「加重派」「审慎派」双双落 `--agent-1` → 阵营分不开）。
  * 二元对抗是独立视觉语义，不走 `--agent-N` 身份色板，而用 `--debate-side-pro`（蓝）/
  * `--debate-side-con`（红）——一眼红蓝对垒、与并排左支持/右反对一致，且色相/彩度与状态色分离
- * （见 `packages/design-tokens/tokens.css` · color-tokens.mdc）。多方（圆桌 / 红队 / subject…）无
- * 对立轴 → 落回按名字 hash ({@link agentColorVar})。live↔收场同一 key 恒同色，跨群聊 / 简报 / 协作图节点一致。
+ * （见 `packages/design-tokens/tokens.css` · color-tokens.mdc）。无 pro/con 语义 key 的方
+ * （旧多方磁带 / subject…）无对立轴 → 落回按名字 hash ({@link agentColorVar})。live↔收场同一 key 恒同色，跨群聊 / 简报 / 协作图节点一致。
  */
 const DEBATE_STANCE_COLOR: Record<string, string> = {
   pro: "var(--debate-side-pro)",
@@ -40,13 +40,9 @@ export function roundSignal(round: DebateRoundModel): DebateSignal {
  *    用户拍板）——把后端每轮已带的 `stop_reason` 兑现成人话，而非压成笼统「已收敛」。
  *
  * `label` / `hint` 同源单一 switch（不漂移）：`label` 入 pill / 脊、`hint` 入 tooltip。
- * 形态感知：圆桌「各方并非针锋相对」是常态（不说「各说各话」、讲铺光谱）、红队是单向施压。
  * 配色仍由 {@link roundSignal} 决定（收敛绿 / 交锋蓝 / 平淡灰），此函数只产**文案**。
  */
-export function describeRoundVerdict(
-  verdict: DebateVerdict,
-  form: DebateForm,
-): RoundVerdictView {
+export function describeRoundVerdict(verdict: DebateVerdict): RoundVerdictView {
   if (verdict.converged) {
     switch (verdict.stop_reason) {
       case "focus_clarified":
@@ -65,12 +61,6 @@ export function describeRoundVerdict(
           hint: "本轮各方均未产出有效发言，辩论提前终止。",
         };
       default:
-        if (form === "roundtable") {
-          return {
-            label: "观点光谱已铺满 · 见结论",
-            hint: "各视角已铺开、不再冒出本质上的新视角，可看结论的观点地图。",
-          };
-        }
         return verdict.real_clash
           ? {
               label: "交锋充分 · 可出结论",
@@ -81,23 +71,6 @@ export function describeRoundVerdict(
               hint: "不再产生新论点，辩论可以收尾。",
             };
     }
-  }
-  if (form === "roundtable") {
-    return {
-      label: "观点还在铺开",
-      hint: "各视角还在补充，观点光谱尚未铺满。",
-    };
-  }
-  if (form === "red_team") {
-    return verdict.real_clash
-      ? {
-          label: "红队施压中 · 方案在回应",
-          hint: "红队正在挑刺施压、方案方在回应修补，风险还在挖。",
-        }
-      : {
-          label: "风险还在挖深",
-          hint: "风险尚未挖尽，红队还在深挖。",
-        };
   }
   return verdict.real_clash
     ? {
@@ -124,21 +97,6 @@ const STOP_LABELS: Record<string, string> = {
 export function stopLabel(reason: string | null): string {
   if (!reason) return "已收场";
   return STOP_LABELS[reason] ?? reason;
-}
-
-/**
- * 一句「这是什么」功能说明（形态感知）——给首次用户讲清这场辩论能给他什么，贴在辩论室 / 擂台标题
- * 下。正反给决策简报、红队给风险清单、圆桌给观点地图（与 {@link describeRoundVerdict} 同口径）。
- */
-export function debateFormBlurb(form: DebateForm): string {
-  switch (form) {
-    case "red_team":
-      return "红队逐条挑刺、方案方处置、红队复核——你带走每条都有下场的 finding 台账与门决（有条件通过 / 需大改 / 不可行）。";
-    case "roundtable":
-      return "主持人分题点名串行对话，挖到分歧根源（crux）即止——你带走共识/分歧地图，而非强行裁定对错。";
-    default:
-      return "两个 AI 各执正反、多轮交锋，最后给你一份带倾向与把握的决策简报——不是单个 AI 的一面之词。";
-  }
 }
 
 /**

@@ -3527,9 +3527,6 @@ def test_web_fetch_retire_steer_closes_web_search_thrash():
     from agentcore.tools.builtin.web._net import WEB_FETCH_RETIRE_STEER
 
     assert "停用" in WEB_FETCH_RETIRE_STEER
-    assert "收束继续 web_search" in WEB_FETCH_RETIRE_STEER
-    assert "请立即" not in WEB_FETCH_RETIRE_STEER
-    assert "不要把继续检索" not in WEB_FETCH_RETIRE_STEER
 
 
 def test_search_notes_skip_web_fetch_nudge_when_retired():

@@ -104,7 +104,7 @@ pnpm dev
 
 1. 打开已绑定会话，输入框粘贴该场景 `PROMPT.md`（或 parallel-briefs 指定文案）。
 2. 发送 → UI 走 sidecar `startTurn`（或降级云 `POST …/messages`）。
-3. 交互卡（AskUser / plan_review / 审批）：在 UI 决策；冷恢复走 `sidecar:recovery` / `resume`（与云 paused 投影同形）。
+3. 交互卡（AskUser / 审批）：在 UI 决策；冷恢复走 `sidecar:recovery` / `resume`（与云 paused 投影同形）。
 
 **D·引擎验收**：与 Desktop 主进程同构的 sidecar **JSON-RPC**（`initialize` / `startTurn` / `respond` / `resume` / `turnFilesDiff`…）算 Pass；人手点 Electron UI 为可选 **U 层**，不挡 D。勿用无关 curl/云 `POST …/messages` **冒充**本地 sidecar 主路径；云 API 仅作 **S6** 对照。
 

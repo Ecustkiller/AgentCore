@@ -136,31 +136,6 @@ def test_lint_rejects_round_no_out_of_range():
         lint_scenarios(bad)
 
 
-def test_lint_rejects_redteam_without_subject():
-    # 红队形态却无 is_subject 方（两方都不是被审方案方）。
-    sides = (
-        DebateSide(key="a", name="红队1", stance="attack"),
-        DebateSide(key="b", name="红队2", stance="attack"),
-    )
-    turns = (SideTurn("a", "红队1", "a_t", "攻"), SideTurn("b", "红队2", "b_t", "攻"))
-    bad = (
-        _mk("rt", expect_converge=True, form=DebateForm.RED_TEAM, sides=sides, turns=turns),
-        *_balanced(),
-    )
-    with pytest.raises(EvalConfigError, match="is_subject"):
-        lint_scenarios(bad)
-
-
-def test_lint_rejects_subject_on_nonredteam():
-    sides = (
-        DebateSide(key="pro", name="正方", stance="p", is_subject=True),
-        DebateSide(key="con", name="反方", stance="c"),
-    )
-    bad = (_mk("s", expect_converge=True, sides=sides), *_balanced())
-    with pytest.raises(EvalConfigError, match="is_subject"):
-        lint_scenarios(bad)
-
-
 def test_lint_rejects_expect_stop_on_continue():
     bad = (_mk("es", expect_converge=False, expect_stop=STOP_FOCUS_CLARIFIED), *_balanced())
     with pytest.raises(EvalConfigError, match="expect_stop"):

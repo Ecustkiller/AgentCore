@@ -55,9 +55,4 @@ def _turn_verdict_team_host() -> list[SSEEvent]:
     ]
 
 
-VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
-    "turn_verdict_team_host": (
-        "判决对账：团队图 + attested error → 条是主判决（hasTeamStrip + supportPackHost）",
-        _turn_verdict_team_host,
-    ),
-}
+VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {}

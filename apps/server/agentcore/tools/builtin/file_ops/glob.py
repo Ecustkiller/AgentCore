@@ -43,7 +43,7 @@ from .listing import (
 
 
 class GlobTool:
-    """Recursively find files/dirs by globstar. Never one-layer LS."""
+    """Find files/dirs by globstar. Never one-layer LS; nameless ``*`` is not a dump."""
 
     registration = ToolRegistration(
         surface=ToolSurface.BUILTIN,
@@ -57,7 +57,10 @@ class GlobTool:
     def schema(self) -> ToolSchema:
         return ToolSchema(
             name="glob",
-            description="按 globstar 递归查找。省略 path=整仓。一层列举用 file_list。",
+            description=(
+                "按文件名 globstar 查找。省略 path=整仓。"
+                "一层列举用 file_list；勿只填 `*`。"
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -65,7 +68,8 @@ class GlobTool:
                         "type": "string",
                         "description": (
                             "globstar。无斜杠=任意深度文件名；"
-                            "有斜杠=相对路径（`*` 一层，`**` 递归）。"
+                            "有斜杠=相对路径（`*` 一层，`**` 递归）；"
+                            "递归全部 `**/*`。"
                         ),
                     },
                     "path": {

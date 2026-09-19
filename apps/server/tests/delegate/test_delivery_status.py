@@ -2627,7 +2627,7 @@ def test_b1_cancel_zero_does_not_add_checklist_gap():
     clear_b1_closing_latches()
 
 
-# ── 成品归位（promoted）契约 ────────────────────────────────────────────────
+# ── 归位台账路径改写（搬家名单不上 live 卡） ─────────────────────────────────
 
 
 def _promotion_ledger():
@@ -2637,7 +2637,7 @@ def _promotion_ledger():
 
 
 def test_promoted_absent_when_nothing_was_promoted():
-    """零归位是合法状态：wire 上连 key 都不多一个，客户端按缺省空数组读。"""
+    """零归位：wire 上没有搬家名单。"""
     from agentcore.runtime.events import delivery_status
     from agentcore.runtime.events.payloads.run import DeliveryStatusPayload
 
@@ -2658,29 +2658,7 @@ def test_promoted_absent_when_nothing_was_promoted():
 
     event = delivery_status(**payload)
     assert "promoted" not in event.payload
-    model = DeliveryStatusPayload.model_validate(event.payload)
-    assert model.promoted == []
-
-
-def test_promoted_rows_ride_the_wire_as_from_to():
-    """``{from, to}``：``from`` 是关键字，模型用别名——wire 上必须是 ``from``。"""
-    from agentcore.runtime.events import delivery_status
-    from agentcore.runtime.events.payloads.run import DeliveryStatusPayload
-
-    event = delivery_status(
-        execution_id="e-promo",
-        state="delivered",
-        summary="已交付",
-        delivered_files=["讲稿.md"],
-        gaps=[],
-        actions=[],
-        artifacts=[{"path": "讲稿.md", "status": "accepted"}],
-        promoted=[{"from": "AgentCore/文档/工作稿/讲稿.md", "to": "讲稿.md"}],
-    )
-    assert event.payload["promoted"] == [{"from": "AgentCore/文档/工作稿/讲稿.md", "to": "讲稿.md"}]
-    model = DeliveryStatusPayload.model_validate(event.payload)
-    assert model.promoted[0].from_path == "AgentCore/文档/工作稿/讲稿.md"
-    assert model.promoted[0].to == "讲稿.md"
+    DeliveryStatusPayload.model_validate(event.payload)
 
 
 def test_promoted_paths_are_rewritten_on_a_later_batch():
@@ -2704,12 +2682,12 @@ def test_promoted_paths_are_rewritten_on_a_later_batch():
     assert payload is not None
     assert payload["delivered_files"] == ["讲稿.md"]
     assert [a["path"] for a in payload["artifacts"]] == ["讲稿.md"]
-    assert payload["promoted"] == [{"from": old, "to": "讲稿.md"}]
+    assert "promoted" not in payload
 
 
 @pytest.mark.asyncio
-async def test_availability_reinject_keeps_promoted_rows(monkeypatch):
-    """短问重发的是同一张卡（同 execution_id）：丢了 promoted 就抹掉旧路径的回查线索。"""
+async def test_availability_reinject_does_not_adopt_leftover_promoted(monkeypatch):
+    """短问重发：旧 journal 的搬家行不再接手进台账；上 wire 的卡也不带名单。"""
     from agentcore.runtime.delegate.delivery_status import (
         current_delivery_verdict,
         maybe_reinject_recent_delivery_for_availability_ask,
@@ -2758,9 +2736,8 @@ async def test_availability_reinject_keeps_promoted_rows(monkeypatch):
 
     assert ok is True
     cards = [e.payload for e in sink.history_snapshot() if e.type == EventType.DELIVERY_STATUS]
-    assert cards[0]["promoted"] == [{"from": old, "to": "讲稿.md"}]
-    # 台账接手旧行，本回合再归位时重发才不会把它们抹掉。
-    assert turn_promotions(ledger) == [{"from": old, "to": "讲稿.md"}]
+    assert "promoted" not in cards[0]
+    assert turn_promotions(ledger) == []
     current_delivery_verdict.set(None)
 
 

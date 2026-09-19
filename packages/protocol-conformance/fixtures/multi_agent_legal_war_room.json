@@ -1,6 +1,6 @@
 {
   "name": "multi_agent_legal_war_room",
-  "description": "法律「答辩状作战室」端到端 hero：consult_skill→delegate 起草→debate(red_team) 原告红队压测→delegate 核验(法条核验报告 + [待核验])→人审闸门 checkpoint 暂停",
+  "description": "法律「答辩状作战室」端到端 hero：consult_skill→delegate 起草→debate 正反交锋→delegate 核验(法条核验报告 + [待核验])→人审闸门 checkpoint 暂停",
   "events": [
     {
       "type": "message_start",
@@ -34,7 +34,7 @@
         "tool_call_id": "cs1",
         "tool_name": "consult_skill",
         "status": "success",
-        "result": "## 答辩状作战室\n1. 解析对方起诉状 + 我方事实 → 逐项答辩（程序抗辩 + 实体抗辩 + 质证 + 法律依据）。\n2. delegate 起草，debate(red_team, is_subject=我方答辩) 让原告红队单向压测，再逐点加固。\n3. delegate 核验逐条法条 / 时效，未核验不得引用、标 [待核验]；终稿标法域 + 免责 + 人审闸门。\n",
+        "result": "## 答辩状作战室\n1. 解析对方起诉状 + 我方事实 → 逐项答辩（程序抗辩 + 实体抗辩 + 质证 + 法律依据）。\n2. delegate 起草，debate 正反（我方答辩 vs 原告）交锋后再逐点加固。\n3. delegate 核验逐条法条 / 时效，未核验不得引用、标 [待核验]；终稿标法域 + 免责 + 人审闸门。\n",
         "display": {
           "skill_name": "legal_answer_brief",
           "summary": "答辩状要素结构 + 对方律师作战室编排 + 反幻觉硬约束"
@@ -45,7 +45,7 @@
     {
       "type": "content_delta",
       "payload": {
-        "delta": "按作战室打法组队：先起草，再让原告红队压一遍，核验法条，最后请你拍板。"
+        "delta": "按作战室打法组队：先起草，再开正反辩论，核验法条，最后请你拍板。"
       },
       "timestamp": "2026-01-01T00:00:00.005Z"
     },
@@ -181,7 +181,7 @@
     {
       "type": "content_delta",
       "payload": {
-        "delta": "现在让原告红队来压测我方答辩。"
+        "delta": "现在开一场正反辩论：我方答辩对原告。"
       },
       "timestamp": "2026-01-01T00:00:01.610Z"
     },
@@ -190,7 +190,7 @@
       "payload": {
         "execution_id": "exec1",
         "plan_type": "debate",
-        "task_summary": "红队审查：原告视角压测我方《民事答辩状》",
+        "task_summary": "正反辩论：我方答辩对原告《民事答辩状》",
         "agents": [
           {
             "id": "warroom_mod1",
@@ -202,7 +202,7 @@
           {
             "id": "warroom_mod1",
             "agent_id": "warroom_mod1",
-            "task": "主持红队审查：原告视角压测我方答辩",
+            "task": "主持正反辩论：我方答辩对原告",
             "depends_on": [],
             "parent_run_id": "captain1"
           }
@@ -233,43 +233,31 @@
             "thinking": true
           },
           {
-            "id": "d_red_proc",
-            "role": "程序红队",
-            "thinking": true
-          },
-          {
-            "id": "d_red_subst",
-            "role": "实体红队",
+            "id": "d_plaintiff",
+            "role": "原告",
             "thinking": true
           }
         ],
         "runs": [
           {
-            "id": "warroom_mod1_r1_defense",
+            "id": "warroom_mod1_r1_pro",
             "agent_id": "d_defense",
             "task": "为我方答辩抗辩并加固",
             "depends_on": [],
             "parent_run_id": "warroom_mod1",
-            "group": "debate:red_team",
-            "round": 1
+            "group": "debate:debate",
+            "round": 1,
+            "stance": "pro"
           },
           {
-            "id": "warroom_mod1_r1_redproc",
-            "agent_id": "d_red_proc",
-            "task": "以原告视角挖程序 / 送达漏洞",
+            "id": "warroom_mod1_r1_con",
+            "agent_id": "d_plaintiff",
+            "task": "以原告视角攻击答辩的程序与实体漏洞",
             "depends_on": [],
             "parent_run_id": "warroom_mod1",
-            "group": "debate:red_team",
-            "round": 1
-          },
-          {
-            "id": "warroom_mod1_r1_redsubst",
-            "agent_id": "d_red_subst",
-            "task": "以原告视角挖实体抗辩漏洞",
-            "depends_on": [],
-            "parent_run_id": "warroom_mod1",
-            "group": "debate:red_team",
-            "round": 1
+            "group": "debate:debate",
+            "round": 1,
+            "stance": "con"
           }
         ]
       },
@@ -278,7 +266,7 @@
     {
       "type": "run_started",
       "payload": {
-        "run_id": "warroom_mod1_r1_defense",
+        "run_id": "warroom_mod1_r1_pro",
         "agent_id": "d_defense",
         "parent_run_id": "warroom_mod1",
         "kind": "agent"
@@ -288,7 +276,7 @@
     {
       "type": "run_output_delta",
       "payload": {
-        "run_id": "warroom_mod1_r1_defense",
+        "run_id": "warroom_mod1_r1_pro",
         "agent_id": "d_defense",
         "delta": "我方：已补送达回执、异议函逐条对应批次，并就沉默项明确否认。"
       },
@@ -297,7 +285,7 @@
     {
       "type": "run_completed",
       "payload": {
-        "run_id": "warroom_mod1_r1_defense",
+        "run_id": "warroom_mod1_r1_pro",
         "agent_id": "d_defense",
         "output_summary": "我方抗辩 + 加固完成",
         "duration_ms": 900,
@@ -324,8 +312,8 @@
     {
       "type": "run_started",
       "payload": {
-        "run_id": "warroom_mod1_r1_redproc",
-        "agent_id": "d_red_proc",
+        "run_id": "warroom_mod1_r1_con",
+        "agent_id": "d_plaintiff",
         "parent_run_id": "warroom_mod1",
         "kind": "agent"
       },
@@ -334,64 +322,18 @@
     {
       "type": "run_output_delta",
       "payload": {
-        "run_id": "warroom_mod1_r1_redproc",
-        "agent_id": "d_red_proc",
-        "delta": "程序红队：到达举证缺签收链，送达争议对我方不利。"
+        "run_id": "warroom_mod1_r1_con",
+        "agent_id": "d_plaintiff",
+        "delta": "原告：到达举证缺签收链；质量异议函笼统、对部分诉请沉默易被推定认可。"
       },
       "timestamp": "2026-01-01T00:00:02.516Z"
     },
     {
       "type": "run_completed",
       "payload": {
-        "run_id": "warroom_mod1_r1_redproc",
-        "agent_id": "d_red_proc",
-        "output_summary": "程序红队挖掘完成",
-        "duration_ms": 840,
-        "role": "member",
-        "model": "deepseek-v4-flash",
-        "usage": {
-          "input": 1200,
-          "output": 300,
-          "reasoning": 120,
-          "cache_hit": 800,
-          "cache_miss": 400
-        },
-        "cost": {
-          "input": 240000,
-          "cached": 64000,
-          "output": 120000,
-          "total": 360000,
-          "currency": "CNY",
-          "pricing_source": "curated"
-        }
-      },
-      "timestamp": "2026-01-01T00:00:03.355Z"
-    },
-    {
-      "type": "run_started",
-      "payload": {
-        "run_id": "warroom_mod1_r1_redsubst",
-        "agent_id": "d_red_subst",
-        "parent_run_id": "warroom_mod1",
-        "kind": "agent"
-      },
-      "timestamp": "2026-01-01T00:00:03.356Z"
-    },
-    {
-      "type": "run_output_delta",
-      "payload": {
-        "run_id": "warroom_mod1_r1_redsubst",
-        "agent_id": "d_red_subst",
-        "delta": "实体红队：质量异议函笼统、对部分诉请沉默易被推定认可。"
-      },
-      "timestamp": "2026-01-01T00:00:03.357Z"
-    },
-    {
-      "type": "run_completed",
-      "payload": {
-        "run_id": "warroom_mod1_r1_redsubst",
-        "agent_id": "d_red_subst",
-        "output_summary": "实体红队挖掘完成",
+        "run_id": "warroom_mod1_r1_con",
+        "agent_id": "d_plaintiff",
+        "output_summary": "原告攻击完成",
         "duration_ms": 860,
         "role": "member",
         "model": "deepseek-v4-flash",
@@ -411,14 +353,14 @@
           "pricing_source": "curated"
         }
       },
-      "timestamp": "2026-01-01T00:00:04.216Z"
+      "timestamp": "2026-01-01T00:00:03.375Z"
     },
     {
       "type": "run_completed",
       "payload": {
         "run_id": "warroom_mod1",
         "agent_id": "warroom_mod1",
-        "output_summary": "原告红队三点攻击已被逐点回应",
+        "output_summary": "三点攻击已被逐点回应",
         "duration_ms": 2200,
         "role": "主持人",
         "model": "deepseek-v4-flash",
@@ -438,36 +380,29 @@
           "pricing_source": "curated"
         }
       },
-      "timestamp": "2026-01-01T00:00:04.217Z"
+      "timestamp": "2026-01-01T00:00:03.812Z"
     },
     {
       "type": "debate_result",
       "payload": {
         "execution_id": "exec1",
         "moderator_run_id": "warroom_mod1",
-        "form": "red_team",
+        "form": "debate",
         "motion": "以原告视角压测我方《民事答辩状》的稳健性",
-        "stop_reason": "red_team_exhausted",
+        "stop_reason": "converged",
         "narrative_first": false,
         "sides": [
           {
-            "key": "defense",
+            "key": "pro",
             "name": "我方答辩",
             "stance": "逐项抗辩成立、无需担责",
-            "is_subject": true,
-            "model": ""
-          },
-          {
-            "key": "red_proc",
-            "name": "程序红队（原告）",
-            "stance": "程序与送达举证存在硬伤",
             "is_subject": false,
             "model": ""
           },
           {
-            "key": "red_subst",
-            "name": "实体红队（原告）",
-            "stance": "实体抗辩不成立",
+            "key": "con",
+            "name": "原告",
+            "stance": "程序送达与实体抗辩均有硬伤",
             "is_subject": false,
             "model": ""
           }
@@ -476,43 +411,37 @@
           {
             "round_no": 1,
             "focus": "送达举证 / 质量异议具体性 / 沉默推定 三点攻防",
-            "summary": "原告红队挖出送达签收链缺失、异议函笼统、对部分诉请沉默三点；我方补证据并逐点否认加固。",
+            "summary": "原告挖出送达签收链缺失、异议函笼统、对部分诉请沉默三点；我方补证据并逐点否认加固。",
             "verdict": {
               "real_clash": true,
               "new_arguments": true,
               "converged": true,
-              "stop_reason": "red_team_exhausted",
+              "stop_reason": "converged",
               "rationale": "三点攻击已被逐点回应 / 加固，无新增有效攻击。"
             },
             "sides": [
               {
-                "key": "defense",
+                "key": "pro",
                 "name": "我方答辩",
-                "run_id": "warroom_mod1_r1_defense",
+                "run_id": "warroom_mod1_r1_pro",
                 "ok": true
               },
               {
-                "key": "red_proc",
-                "name": "程序红队（原告）",
-                "run_id": "warroom_mod1_r1_redproc",
-                "ok": true
-              },
-              {
-                "key": "red_subst",
-                "name": "实体红队（原告）",
-                "run_id": "warroom_mod1_r1_redsubst",
+                "key": "con",
+                "name": "原告",
+                "run_id": "warroom_mod1_r1_con",
                 "ok": true
               }
             ],
             "clashes": [
               {
-                "from_key": "red_proc",
-                "to_key": "defense",
+                "from_key": "con",
+                "to_key": "pro",
                 "point": "到达举证缺签收链，送达争议规则对我方不利。"
               },
               {
-                "from_key": "red_subst",
-                "to_key": "defense",
+                "from_key": "con",
+                "to_key": "pro",
                 "point": "质量异议函笼统、未指向批次 / 标准；对部分诉请沉默易被推定认可。"
               }
             ]
@@ -521,14 +450,10 @@
         "brief": {
           "crux": "我方答辩能否扛住原告对『送达举证 + 质量异议具体性 + 沉默推定』三点的攻击",
           "strongest_points": {
-            "red_proc": "到达举证缺签收链，按送达争议规则我方不利，是最尖锐风险。",
-            "red_subst": "质量异议函表述笼统、未指向具体批次 / 标准，难达异议成立要件；对原告主张沉默处易被推定认可。",
-            "defense": "已补送达回执 + 异议函逐条对应批次，并就沉默项明确否认。"
+            "con": "到达举证缺签收链是最尖锐风险；异议函笼统、沉默项易被推定认可。",
+            "pro": "已补送达回执 + 异议函逐条对应批次，并就沉默项明确否认。"
           },
-          "risk_severities": {
-            "red_proc": "high",
-            "red_subst": "medium"
-          },
+          "risk_severities": {},
           "handoffs": [
             {
               "kind": "value",
@@ -548,14 +473,14 @@
           "recommendation": "终稿前必须：① 补送达签收链证据 ② 异议函按批次 / 标准逐条具体化 ③ 对原告每项主张明确否认，杜绝沉默推定。"
         }
       },
-      "timestamp": "2026-01-01T00:00:04.218Z"
+      "timestamp": "2026-01-01T00:00:03.813Z"
     },
     {
       "type": "content_delta",
       "payload": {
         "delta": "再逐条核验法条与时效。"
       },
-      "timestamp": "2026-01-01T00:00:04.219Z"
+      "timestamp": "2026-01-01T00:00:03.814Z"
     },
     {
       "type": "tool_use_start",
@@ -570,7 +495,7 @@
           ]
         }
       },
-      "timestamp": "2026-01-01T00:00:04.220Z"
+      "timestamp": "2026-01-01T00:00:03.815Z"
     },
     {
       "type": "run_plan",
@@ -594,7 +519,7 @@
           }
         ]
       },
-      "timestamp": "2026-01-01T00:00:04.221Z"
+      "timestamp": "2026-01-01T00:00:03.816Z"
     },
     {
       "type": "run_started",
@@ -604,7 +529,7 @@
         "parent_run_id": null,
         "kind": "agent"
       },
-      "timestamp": "2026-01-01T00:00:04.222Z"
+      "timestamp": "2026-01-01T00:00:03.817Z"
     },
     {
       "type": "run_tool_progress",
@@ -614,7 +539,7 @@
         "tool_name": "web_search",
         "chars": 3
       },
-      "timestamp": "2026-01-01T00:00:04.223Z"
+      "timestamp": "2026-01-01T00:00:03.818Z"
     },
     {
       "type": "tool_use_start",
@@ -626,7 +551,7 @@
         },
         "run_id": "r_verify"
       },
-      "timestamp": "2026-01-01T00:00:04.224Z"
+      "timestamp": "2026-01-01T00:00:03.819Z"
     },
     {
       "type": "tool_use_end",
@@ -637,7 +562,7 @@
         "result": "命中：合同编通则解释第 65 条；送达规则未取到权威原文。",
         "run_id": "r_verify"
       },
-      "timestamp": "2026-01-01T00:00:04.225Z"
+      "timestamp": "2026-01-01T00:00:03.820Z"
     },
     {
       "type": "run_tool_progress",
@@ -647,7 +572,7 @@
         "tool_name": "file_write",
         "chars": 208
       },
-      "timestamp": "2026-01-01T00:00:04.226Z"
+      "timestamp": "2026-01-01T00:00:03.821Z"
     },
     {
       "type": "tool_use_start",
@@ -660,7 +585,7 @@
         },
         "run_id": "r_verify"
       },
-      "timestamp": "2026-01-01T00:00:04.227Z"
+      "timestamp": "2026-01-01T00:00:03.822Z"
     },
     {
       "type": "tool_use_end",
@@ -671,7 +596,7 @@
         "result": "已写入",
         "run_id": "r_verify"
       },
-      "timestamp": "2026-01-01T00:00:04.228Z"
+      "timestamp": "2026-01-01T00:00:03.823Z"
     },
     {
       "type": "run_output_delta",
@@ -680,7 +605,7 @@
         "agent_id": "w_verify",
         "delta": "核验完成：违约金调减引《合同编通则解释》第 65 条；送达规则标 [待核验]。"
       },
-      "timestamp": "2026-01-01T00:00:04.229Z"
+      "timestamp": "2026-01-01T00:00:03.824Z"
     },
     {
       "type": "run_completed",
@@ -707,7 +632,7 @@
           "pricing_source": "curated"
         }
       },
-      "timestamp": "2026-01-01T00:00:06.222Z"
+      "timestamp": "2026-01-01T00:00:05.817Z"
     },
     {
       "type": "tool_use_end",
@@ -717,25 +642,25 @@
         "status": "success",
         "result": "核验完成：法条核验报告.md（1 处 [待核验]）"
       },
-      "timestamp": "2026-01-01T00:00:06.223Z"
+      "timestamp": "2026-01-01T00:00:05.818Z"
     },
     {
       "type": "content_delta",
       "payload": {
-        "delta": "终稿前请你过一下：红队 3 个攻击点已逐点加固，法条已核验，有 1 处待人工确认。"
+        "delta": "终稿前请你过一下：3 个攻击点已逐点加固，法条已核验，有 1 处待人工确认。"
       },
-      "timestamp": "2026-01-01T00:00:06.224Z"
+      "timestamp": "2026-01-01T00:00:05.819Z"
     },
     {
       "type": "checkpoint_required",
       "payload": {
         "checkpoint_id": "cp1",
         "conversation_id": "conv_demo",
-        "question": "是否采纳终稿并提交？（含 1 处 [待核验] 法条）\n原告红队已挖尽收敛，核验报告与答辩状初稿见工作区；终稿将标注法域 + 免责。",
+        "question": "是否采纳终稿并提交？（含 1 处 [待核验] 法条）\n攻防已收敛，核验报告与答辩状初稿见工作区；终稿将标注法域 + 免责。",
         "questions": [],
         "intent": "decision"
       },
-      "timestamp": "2026-01-01T00:00:06.225Z"
+      "timestamp": "2026-01-01T00:00:05.820Z"
     }
   ],
   "projected": {
@@ -743,7 +668,7 @@
     "finishReason": null,
     "outcome": "ok",
     "error": null,
-    "content": "我先翻一下「答辩状作战室」的打法。按作战室打法组队：先起草，再让原告红队压一遍，核验法条，最后请你拍板。现在让原告红队来压测我方答辩。再逐条核验法条与时效。终稿前请你过一下：红队 3 个攻击点已逐点加固，法条已核验，有 1 处待人工确认。",
+    "content": "我先翻一下「答辩状作战室」的打法。按作战室打法组队：先起草，再开正反辩论，核验法条，最后请你拍板。现在开一场正反辩论：我方答辩对原告。再逐条核验法条与时效。终稿前请你过一下：3 个攻击点已逐点加固，法条已核验，有 1 处待人工确认。",
     "reasoning": "",
     "captainContext": [],
     "process": [
@@ -758,7 +683,7 @@
         "arguments": {
           "name": "legal_answer_brief"
         },
-        "result": "## 答辩状作战室\n1. 解析对方起诉状 + 我方事实 → 逐项答辩（程序抗辩 + 实体抗辩 + 质证 + 法律依据）。\n2. delegate 起草，debate(red_team, is_subject=我方答辩) 让原告红队单向压测，再逐点加固。\n3. delegate 核验逐条法条 / 时效，未核验不得引用、标 [待核验]；终稿标法域 + 免责 + 人审闸门。\n",
+        "result": "## 答辩状作战室\n1. 解析对方起诉状 + 我方事实 → 逐项答辩（程序抗辩 + 实体抗辩 + 质证 + 法律依据）。\n2. delegate 起草，debate 正反（我方答辩 vs 原告）交锋后再逐点加固。\n3. delegate 核验逐条法条 / 时效，未核验不得引用、标 [待核验]；终稿标法域 + 免责 + 人审闸门。\n",
         "status": "success",
         "display": {
           "skill_name": "legal_answer_brief",
@@ -767,7 +692,7 @@
       },
       {
         "kind": "content",
-        "text": "按作战室打法组队：先起草，再让原告红队压一遍，核验法条，最后请你拍板。"
+        "text": "按作战室打法组队：先起草，再开正反辩论，核验法条，最后请你拍板。"
       },
       {
         "kind": "team",
@@ -775,7 +700,7 @@
       },
       {
         "kind": "content",
-        "text": "现在让原告红队来压测我方答辩。再逐条核验法条与时效。终稿前请你过一下：红队 3 个攻击点已逐点加固，法条已核验，有 1 处待人工确认。"
+        "text": "现在开一场正反辩论：我方答辩对原告。再逐条核验法条与时效。终稿前请你过一下：3 个攻击点已逐点加固，法条已核验，有 1 处待人工确认。"
       },
       {
         "kind": "checkpoint",
@@ -817,22 +742,12 @@
         "toolProgress": null
       },
       {
-        "id": "d_red_proc",
-        "role": "程序红队",
+        "id": "d_plaintiff",
+        "role": "原告",
         "thinking": true,
         "status": "completed",
         "currentRunId": null,
-        "output": "程序红队：到达举证缺签收链，送达争议对我方不利。",
-        "reasoning": "",
-        "toolProgress": null
-      },
-      {
-        "id": "d_red_subst",
-        "role": "实体红队",
-        "thinking": true,
-        "status": "completed",
-        "currentRunId": null,
-        "output": "实体红队：质量异议函笼统、对部分诉请沉默易被推定认可。",
+        "output": "原告：到达举证缺签收链；质量异议函笼统、对部分诉请沉默易被推定认可。",
         "reasoning": "",
         "toolProgress": null
       },
@@ -910,10 +825,10 @@
       {
         "id": "warroom_mod1",
         "agentId": "warroom_mod1",
-        "task": "主持红队审查：原告视角压测我方答辩",
+        "task": "主持正反辩论：我方答辩对原告",
         "status": "completed",
         "dependsOn": [],
-        "outputSummary": "原告红队三点攻击已被逐点回应",
+        "outputSummary": "三点攻击已被逐点回应",
         "debrief": null,
         "durationMs": 2200,
         "error": null,
@@ -951,7 +866,7 @@
         "process": []
       },
       {
-        "id": "warroom_mod1_r1_defense",
+        "id": "warroom_mod1_r1_pro",
         "agentId": "d_defense",
         "task": "为我方答辩抗辩并加固",
         "status": "completed",
@@ -981,8 +896,8 @@
           "currency": "CNY",
           "pricing_source": "curated"
         },
-        "stance": null,
-        "group": "debate:red_team",
+        "stance": "pro",
+        "group": "debate:debate",
         "round": 1,
         "continuesRunId": null,
         "revised": null,
@@ -999,60 +914,12 @@
         ]
       },
       {
-        "id": "warroom_mod1_r1_redproc",
-        "agentId": "d_red_proc",
-        "task": "以原告视角挖程序 / 送达漏洞",
+        "id": "warroom_mod1_r1_con",
+        "agentId": "d_plaintiff",
+        "task": "以原告视角攻击答辩的程序与实体漏洞",
         "status": "completed",
         "dependsOn": [],
-        "outputSummary": "程序红队挖掘完成",
-        "debrief": null,
-        "durationMs": 840,
-        "error": null,
-        "failureKind": null,
-        "productLanded": null,
-        "parentRunId": "warroom_mod1",
-        "kind": "agent",
-        "role": "member",
-        "model": "deepseek-v4-flash",
-        "usage": {
-          "input": 1200,
-          "output": 300,
-          "reasoning": 120,
-          "cache_hit": 800,
-          "cache_miss": 400
-        },
-        "cost": {
-          "input": 240000,
-          "cached": 64000,
-          "output": 120000,
-          "total": 360000,
-          "currency": "CNY",
-          "pricing_source": "curated"
-        },
-        "stance": null,
-        "group": "debate:red_team",
-        "round": 1,
-        "continuesRunId": null,
-        "revised": null,
-        "replacesRunId": null,
-        "actId": "act-1",
-        "checkpoint": null,
-        "receivedContext": [],
-        "escalations": [],
-        "process": [
-          {
-            "kind": "content",
-            "text": "程序红队：到达举证缺签收链，送达争议对我方不利。"
-          }
-        ]
-      },
-      {
-        "id": "warroom_mod1_r1_redsubst",
-        "agentId": "d_red_subst",
-        "task": "以原告视角挖实体抗辩漏洞",
-        "status": "completed",
-        "dependsOn": [],
-        "outputSummary": "实体红队挖掘完成",
+        "outputSummary": "原告攻击完成",
         "debrief": null,
         "durationMs": 860,
         "error": null,
@@ -1077,8 +944,8 @@
           "currency": "CNY",
           "pricing_source": "curated"
         },
-        "stance": null,
-        "group": "debate:red_team",
+        "stance": "con",
+        "group": "debate:debate",
         "round": 1,
         "continuesRunId": null,
         "revised": null,
@@ -1090,7 +957,7 @@
         "process": [
           {
             "kind": "content",
-            "text": "实体红队：质量异议函笼统、对部分诉请沉默易被推定认可。"
+            "text": "原告：到达举证缺签收链；质量异议函笼统、对部分诉请沉默易被推定认可。"
           }
         ]
       },
@@ -1174,44 +1041,37 @@
       }
     ],
     "progress": {
-      "completed": 6,
-      "total": 6
+      "completed": 5,
+      "total": 5
     },
     "interactions": [
       {
         "kind": "ask_user",
         "id": "cp1",
         "status": "pending",
-        "question": "是否采纳终稿并提交？（含 1 处 [待核验] 法条）\n原告红队已挖尽收敛，核验报告与答辩状初稿见工作区；终稿将标注法域 + 免责。"
+        "question": "是否采纳终稿并提交？（含 1 处 [待核验] 法条）\n攻防已收敛，核验报告与答辩状初稿见工作区；终稿将标注法域 + 免责。"
       }
     ],
     "cost": null,
     "debate": {
       "execution_id": "exec1",
       "moderator_run_id": "warroom_mod1",
-      "form": "red_team",
+      "form": "debate",
       "motion": "以原告视角压测我方《民事答辩状》的稳健性",
-      "stop_reason": "red_team_exhausted",
+      "stop_reason": "converged",
       "narrative_first": false,
       "sides": [
         {
-          "key": "defense",
+          "key": "pro",
           "name": "我方答辩",
           "stance": "逐项抗辩成立、无需担责",
-          "is_subject": true,
-          "model": ""
-        },
-        {
-          "key": "red_proc",
-          "name": "程序红队（原告）",
-          "stance": "程序与送达举证存在硬伤",
           "is_subject": false,
           "model": ""
         },
         {
-          "key": "red_subst",
-          "name": "实体红队（原告）",
-          "stance": "实体抗辩不成立",
+          "key": "con",
+          "name": "原告",
+          "stance": "程序送达与实体抗辩均有硬伤",
           "is_subject": false,
           "model": ""
         }
@@ -1220,43 +1080,37 @@
         {
           "round_no": 1,
           "focus": "送达举证 / 质量异议具体性 / 沉默推定 三点攻防",
-          "summary": "原告红队挖出送达签收链缺失、异议函笼统、对部分诉请沉默三点；我方补证据并逐点否认加固。",
+          "summary": "原告挖出送达签收链缺失、异议函笼统、对部分诉请沉默三点；我方补证据并逐点否认加固。",
           "verdict": {
             "real_clash": true,
             "new_arguments": true,
             "converged": true,
-            "stop_reason": "red_team_exhausted",
+            "stop_reason": "converged",
             "rationale": "三点攻击已被逐点回应 / 加固，无新增有效攻击。"
           },
           "sides": [
             {
-              "key": "defense",
+              "key": "pro",
               "name": "我方答辩",
-              "run_id": "warroom_mod1_r1_defense",
+              "run_id": "warroom_mod1_r1_pro",
               "ok": true
             },
             {
-              "key": "red_proc",
-              "name": "程序红队（原告）",
-              "run_id": "warroom_mod1_r1_redproc",
-              "ok": true
-            },
-            {
-              "key": "red_subst",
-              "name": "实体红队（原告）",
-              "run_id": "warroom_mod1_r1_redsubst",
+              "key": "con",
+              "name": "原告",
+              "run_id": "warroom_mod1_r1_con",
               "ok": true
             }
           ],
           "clashes": [
             {
-              "from_key": "red_proc",
-              "to_key": "defense",
+              "from_key": "con",
+              "to_key": "pro",
               "point": "到达举证缺签收链，送达争议规则对我方不利。"
             },
             {
-              "from_key": "red_subst",
-              "to_key": "defense",
+              "from_key": "con",
+              "to_key": "pro",
               "point": "质量异议函笼统、未指向批次 / 标准；对部分诉请沉默易被推定认可。"
             }
           ]
@@ -1265,14 +1119,10 @@
       "brief": {
         "crux": "我方答辩能否扛住原告对『送达举证 + 质量异议具体性 + 沉默推定』三点的攻击",
         "strongest_points": {
-          "red_proc": "到达举证缺签收链，按送达争议规则我方不利，是最尖锐风险。",
-          "red_subst": "质量异议函表述笼统、未指向具体批次 / 标准，难达异议成立要件；对原告主张沉默处易被推定认可。",
-          "defense": "已补送达回执 + 异议函逐条对应批次，并就沉默项明确否认。"
+          "con": "到达举证缺签收链是最尖锐风险；异议函笼统、沉默项易被推定认可。",
+          "pro": "已补送达回执 + 异议函逐条对应批次，并就沉默项明确否认。"
         },
-        "risk_severities": {
-          "red_proc": "high",
-          "red_subst": "medium"
-        },
+        "risk_severities": {},
         "handoffs": [
           {
             "kind": "value",
@@ -1296,7 +1146,6 @@
     "debatePretrial": null,
     "crossExamEnabled": false,
     "debateOpening": null,
-    "teamSynthesisPreview": null,
     "deliveryStatus": null,
     "turnWarning": null,
     "autoFolder": null,

@@ -23,7 +23,7 @@ from agentcore.runtime.events import EventSink
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.tools.builtin.consult import ConsultTool
 from agentcore.tools.builtin.delegate.tool import DelegateTool
-from agentcore.tools.builtin.folders import ListFoldersTool, ResolveFolderTool
+from agentcore.tools.builtin.folders import FoldersTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 from tests.test_folders_tools import _ctx, _FakeFolder, _patch_list
@@ -60,13 +60,13 @@ async def test_resolve_delegate_target_desk_and_memory(
     )
     ceo_ctx = _ctx(user_id="owner-1", conversation_id="cmd-1")
 
-    listed = await ListFoldersTool().execute({}, ceo_ctx)
+    listed = await FoldersTool().execute({"action": "list"}, ceo_ctx)
     assert listed.success
     roster = json.loads(listed.output.split("\n", 1)[1])
     assert {f["id"] for f in roster["folders"]} >= {"folder_alpha", "folder_beta"}
 
     # Nested roster: the full path resolves, and so does the unambiguous suffix.
-    resolved = await ResolveFolderTool().execute({"path": "产品/Alpha App"}, ceo_ctx)
+    resolved = await FoldersTool().execute({"action": "resolve", "path": "产品/Alpha App"}, ceo_ctx)
     assert resolved.success
     assert resolved.display["status"] == "resolved"
     target_id = resolved.display["folder_id"]
@@ -161,11 +161,11 @@ async def test_same_last_segment_across_levels_is_ambiguous(
     )
     ceo_ctx = _ctx(user_id="owner-1")
 
-    ambiguous = await ResolveFolderTool().execute({"path": "图标"}, ceo_ctx)
+    ambiguous = await FoldersTool().execute({"action": "resolve", "path": "图标"}, ceo_ctx)
     assert ambiguous.display["status"] == "ambiguous"
     assert "设计/图标" in ambiguous.output and "归档/图标" in ambiguous.output
 
-    picked = await ResolveFolderTool().execute({"path": "归档/图标"}, ceo_ctx)
+    picked = await FoldersTool().execute({"action": "resolve", "path": "归档/图标"}, ceo_ctx)
     assert picked.display["status"] == "resolved"
     assert picked.display["folder_id"] == "archive"
 

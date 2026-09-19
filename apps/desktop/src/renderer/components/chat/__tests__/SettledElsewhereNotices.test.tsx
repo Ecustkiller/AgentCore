@@ -106,7 +106,7 @@ describe("SettledElsewhereNotices", () => {
     expect(screen.queryByTestId("settled-elsewhere")).toBeNull();
   });
 
-  it("空快照留桩：审批 / 升级出「已由另一端处理」，遗留推进卡不出活卡名", () => {
+  it("空快照留桩：审批 / 升级出「已由另一端处理」", () => {
     render(<SettledElsewhereNotices />);
     act(() => {
       useInteractionStore.getState().upsertRequired({
@@ -127,18 +127,6 @@ describe("SettledElsewhereNotices", () => {
           assumption: "a",
         },
       });
-      useInteractionStore.getState().upsertRequired({
-        kind: "stage_card",
-        conversationId: CID,
-        messageId: MID,
-        origin: "server",
-        payload: {
-          stage_card_id: "sc-h",
-          motion: "是否开辩",
-          sides: [],
-          form: "debate",
-        },
-      });
       useInteractionStore.getState().hydratePending(CID, [], {
         confirmed: ["server"],
       });
@@ -147,6 +135,5 @@ describe("SettledElsewhereNotices", () => {
     expect(screen.getAllByText("已由另一端处理")).toHaveLength(2);
     expect(screen.getByText(INTERACTION_CARD_NAME.approval)).toBeTruthy();
     expect(screen.getByText(INTERACTION_CARD_NAME.escalation)).toBeTruthy();
-    expect(screen.queryByText(INTERACTION_CARD_NAME.stage_card)).toBeNull();
   });
 });

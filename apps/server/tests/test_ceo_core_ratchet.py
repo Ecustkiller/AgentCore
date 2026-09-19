@@ -110,7 +110,7 @@ from agentcore.runtime.resolve.prompt import (
 # 2026-08-27 第 31 步：丙继续项目出核；误读地板并进基座 work_authority。
 # 当次实测 10287。cap 降到 10290。
 # 2026-08-27 现行信息清废名：核/基座去掉已死对照（两路 brief、format_options、
-# M0、用户硬/AI软、辩词式 #eN、暂靠提醒、引擎不剥、日历门槛、甲–戊不同套等）。
+# 辩词式引用号、暂靠提醒、引擎不剥、日历门槛、甲–戊不同套等）。
 # 当次实测 10107。cap 降到 10110。
 # 2026-08-27 playbook 更名进核 ⑤（research_report→cite_write_review、
 # parallel_brief→map_fanout）。场面 WHEN 下沉目录 / consult。当次实测 9560。cap 降到 9560。
@@ -195,7 +195,17 @@ from agentcore.runtime.resolve.prompt import (
 # cap 降到 1220。
 # 2026-09-18 身份删「短答和单点」路由尺（WHEN 归 delegate description）。核 −14。
 # cap 1220→1210。
-_RESIDENT_CAP = 1210
+# 2026-09-19 ``<运行时>`` 日期迁出共享基座（CEO 当轮信封 / 工人 compose）。
+# 当次实测 1023。cap 降到 1030。
+# 2026-09-19 基座 <输出>：渲染器清单出核，留公式记号 + mermaid。当次实测 992。
+# cap 降到 1000。
+# 2026-09-19 公式记号出核（KaTeX 认 \( / \[ / $ / $$）；<输出> 只留 mermaid 吸引子。
+# 当次实测 965。cap 降到 970。
+# 2026-09-19 mermaid 出核（围栏前端渲，不进 <输出>）。当次实测 953。
+# cap 降到 960。
+# 2026-09-19 诚实段：装配对照表出核，留目录能查阅 ≠ 没有。当次实测 918。
+# cap 降到 920。
+_RESIDENT_CAP = 920
 
 # (门工具, 该手册的签名字面) —— 手册只在门开的回合出现，不许常驻。
 # run 的 HOW 在 skill body（consult(run) 命中 skill），不进 capability_how_suffix。
@@ -214,7 +224,8 @@ def _ceo_resident_chars() -> int:
 
     2026-08-19 起这句才名副其实：``workspace_facts`` 已从基座（原 order 250、核前）
     挪到 order 750（核后、紧邻易变尾），所以 ``assemble_system_prompt()`` + 核不再把
-    每回合变的环境事实算进这段前缀。量的仍是无 facts 的基座——与生产付账前缀对齐。
+    每回合变的环境事实算进这段前缀。2026-09-19：``<运行时>`` 日期也离开基座（CEO 进当轮信封，
+    工人 compose 另加），量的仍是无 facts 的冻结核。
     """
     return len(assemble_system_prompt()) + len(_CEO_CORE_HINT)
 
@@ -300,6 +311,6 @@ def test_honesty_floors_stay_resident():
     assert "用户机器上已经跑通" in _DELIVERY
     assert "export_to_local" in _DELIVERY
     assert "不可产" in _DELIVERY and "等效替代" in _DELIVERY
-    assert "已装配" in base
+    assert "未装配" in base
     assert "邻格" not in base
     assert "用别的路继续" in base

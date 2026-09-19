@@ -34,8 +34,8 @@ class SystemSkill:
     toolbox card description only — never injected into ``<按需目录>`` or consult.
     ``body`` is HOW, returned only when ``consult(name)`` is called.
     ``requires_tools`` gates the catalog entry: the skill appears only when every
-    named tool is wired this turn (e.g. ``ask_kickoff`` / ``ask_midtask`` need
-    ``ask_user``), so the prompt never advertises a capability the CEO cannot act
+    named tool is wired this turn (e.g. ``run`` needs the ``run`` tool), so the
+    prompt never advertises a capability the CEO cannot act
     on. ``audience`` is who may *see* the entry (CEO vs worker). Default both.
     ``group`` is the Chinese 能力指引 subtitle (编排 / 工作区 / 交付 / 产品 / 工具).
     Directory listing and ``consult`` fetch share this filter — do not advertise

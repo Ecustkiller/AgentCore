@@ -1,6 +1,6 @@
 """成稿【已核实】证据标签守卫（纯函数，零 I/O）。
 
-证据台账闸：成稿中每个 ``【已核实·…】`` 必须含**本方笔记引用集**内的 ``#eN``
+证据台账闸：成稿中每个 ``【已核实·…】`` 必须含**本方笔记引用集**内的 ``#rN``
 （结辩无检索 = 本方历轮已引用并集）；否则回炉一次，二次违规剥离降级为【待核实·推断】（O2）。
 
 仍是机械存在性判定（零误报纪律不变）——基准从「id ∈ 场级台账」收紧为
@@ -15,8 +15,8 @@ from collections.abc import Collection, Sequence
 # 完整 / 残缺【已核实】标签均由 extract_verified_tags 统一抽取。
 _VERIFIED_TAG_PREFIX = "【已核实·"
 _PENDING_INFER = "【待核实·推断】"
-# 标签 note 内的台账 id（允许纯 ``#e3`` 或出处短语+#e3 双写）。
-_LEDGER_ID_RE = re.compile(r"#e(\d+)\b")
+# 标签 note 内的台账 id（允许纯 ``#r3`` 或出处短语+#r3 双写）。
+_LEDGER_ID_RE = re.compile(r"#r(\d+)\b")
 
 
 def extract_verified_tags(text: str) -> set[str]:
@@ -44,7 +44,7 @@ def extract_verified_tags(text: str) -> set[str]:
 
 
 def ledger_id_in_tag(tag: str) -> str | None:
-    """从【已核实·…】标签抽出 ``#eN``；无则 None（含残缺未闭合）。"""
+    """从【已核实·…】标签抽出 ``#rN``；无则 None（含残缺未闭合）。"""
     if not tag.startswith(_VERIFIED_TAG_PREFIX):
         return None
     if not tag.endswith("】"):
@@ -53,7 +53,7 @@ def ledger_id_in_tag(tag: str) -> str | None:
     m = _LEDGER_ID_RE.search(note)
     if not m:
         return None
-    return f"#e{m.group(1)}"
+    return f"#r{m.group(1)}"
 
 
 def invalid_verified_tags(
@@ -88,7 +88,7 @@ def format_evidence_ledger_steer(invalid_tags: Sequence[str]) -> str:
     return (
         "[系统提示] 交付前核验未通过（系统自动核验，非用户反馈），发现以下问题：\n"
         f"- 以下【已核实】标签未引用本方证据笔记中出现过的台账 id，或引用了未绑定的 id：{listed}。"
-        "【已核实】只能写成【已核实·#eN】（N 须已出现在本方本轮证据笔记；结辩则须为本方历轮已用过的 id）；"
+        "【已核实】只能写成【已核实·#rN】（N 须已出现在本方本轮证据笔记；结辩则须为本方历轮已用过的 id）；"
         "拿不出已绑定 id 的主张改标【待核实·推断】或删除该主张。\n"
         "请直接修正正文后再给出最终发言；不要为此道谢、复述或寒暄，直接改。"
     )

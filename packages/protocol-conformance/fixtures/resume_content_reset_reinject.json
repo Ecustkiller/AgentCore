@@ -92,32 +92,23 @@
       "timestamp": "2026-01-01T00:00:00.904Z"
     },
     {
-      "type": "plan_review_required",
+      "type": "checkpoint_required",
       "payload": {
         "checkpoint_id": "cp1",
         "conversation_id": "conv_demo",
-        "steps": [
-          {
-            "run_id": "r1",
-            "role": "调研",
-            "summary": "方案就绪"
-          }
-        ],
-        "pending": [
-          {
-            "run_id": "r2",
-            "role": "执行"
-          }
-        ]
+        "question": "方案已就绪，继续落地吗？",
+        "questions": [],
+        "intent": "decision"
       },
       "timestamp": "2026-01-01T00:00:00.905Z"
     },
     {
-      "type": "plan_review_resolved",
+      "type": "checkpoint_resolved",
       "payload": {
         "checkpoint_id": "cp1",
         "decision": "continue",
-        "note": ""
+        "note": "",
+        "selected": []
       },
       "timestamp": "2026-01-01T00:00:00.906Z"
     },
@@ -191,7 +182,7 @@
         "execution_id": "exec1"
       },
       {
-        "kind": "plan_review",
+        "kind": "checkpoint",
         "checkpoint_id": "cp1"
       },
       {
@@ -263,10 +254,7 @@
         "revised": null,
         "replacesRunId": null,
         "actId": "act-1",
-        "checkpoint": {
-          "status": "resolved",
-          "decision": "continue"
-        },
+        "checkpoint": null,
         "receivedContext": [],
         "escalations": [],
         "process": []
@@ -319,12 +307,10 @@
     },
     "interactions": [
       {
-        "kind": "plan_review",
+        "kind": "ask_user",
         "id": "cp1",
         "status": "resolved",
-        "runIds": [
-          "r1"
-        ]
+        "question": "方案已就绪，继续落地吗？"
       }
     ],
     "cost": {
@@ -340,7 +326,6 @@
     "debatePretrial": null,
     "crossExamEnabled": false,
     "debateOpening": null,
-    "teamSynthesisPreview": null,
     "deliveryStatus": null,
     "turnWarning": null,
     "autoFolder": null,

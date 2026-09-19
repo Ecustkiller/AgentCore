@@ -237,13 +237,6 @@ async def handle_tool_calls_round(
         round_idx=round_idx,
         disabled_tools=disabled_tools,
     )
-    # Honest finalize: keep system-prompt hard constraint in sync with the same
-    # run-scoped failure tally the circuit breaker uses (compensated → cleared).
-    from agentcore.runtime.tool_failures import sync_tool_failure_constraint_in_system
-
-    sync_tool_failure_constraint_in_system(
-        messages, controller.outstanding_tool_failures()
-    )
     if breaker.refresh_tool_defs or surface_changed:
         tool_defs = resolve_openai_tool_defs(tools, allowed_tool_names, disabled_tools)
     directive = govern_after_tools(

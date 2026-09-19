@@ -59,6 +59,7 @@ async def get_capabilities(_user: AuthUser) -> CapabilitiesResponse:
             group=skill.group,
             blurb=skill.blurb,
             audience=list(skill.audience),
+            requires_tools=list(skill.requires_tools),
         )
         for skill in skill_registry.list_all()
     ]

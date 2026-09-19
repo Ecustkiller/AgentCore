@@ -12,7 +12,6 @@ import type {
   ExecutionDetachedPayload,
   ProcessStep,
   RunPlanPayload,
-  TeamSynthesisPreviewPayload,
   ToolUseProgressPayload,
 } from "@/types/events";
 import { turnStatusFromFinish } from "@agentcore/protocol-fold-kit";
@@ -90,7 +89,7 @@ export interface ExecutionRuntime {
   debatePretrial: DebatePretrialState | null;
   /** 场级证据台账（`debate_pretrial_completed` / `debate_round` 的
    * `evidence_ledger_delta` 累积；收场由 `debate.evidence_ledger`
-   * 权威覆盖）。驱动辩论徽章 `#eN` 溯源；不进 ProjectedTurn。 */
+   * 权威覆盖）。驱动辩论徽章 `#rN` 溯源；不进 ProjectedTurn。 */
   evidenceLedger: EvidenceLedgerEntry[];
   /** Worker-scoped `tool_use_progress` (run_id present), keyed by run id. Transport-only —
    * merged onto agents at projection time; never journaled or replayed. */
@@ -103,10 +102,6 @@ export interface ExecutionRuntime {
    * (open thinking is not journaled; a stale seed would erase it every frame).
    */
   runProcesses: Record<string, ProcessStep[]> | null;
-  /** Leftover ``team_synthesis_preview`` snapshot（同 key 保最新）。P2 DURABLE：
-   * 重载由 hydrateFromJournal 取 journal 中最后一条重建。活人面不画：状态条与队长节点
-   * 都不挂过程稿。 */
-  teamSynthesisPreview: TeamSynthesisPreviewPayload | null;
   /** CEO 协调等待（`coordination_wait`）：captain 空等团队事件。EPHEMERAL——仅 live
    * stream；waiting=false / 回合结束 / `execution_detached` 清除。状态条只报 n/m；
    * CEO 节点等待句写等谁，不挂已等秒数。 */
@@ -190,12 +185,6 @@ interface ExecutionState {
   ) => void;
   /** Clear a worker's live EXECUTION phase when its tool finishes (`tool_use_end`). */
   clearWorkerToolPhase: (runId: string, messageId: string) => void;
-  /** Stamp the latest multi-worker team progress preview (`team_synthesis_preview`).
-   * Live stamp (同 key 保最新); journal is DURABLE — hydrateFromJournal rebuilds it. */
-  setTeamSynthesisPreview: (
-    preview: TeamSynthesisPreviewPayload,
-    messageId: string,
-  ) => void;
   /** Stamp / clear CEO coordination wait (`coordination_wait`). Transport-only. */
   setCoordinationWait: (
     wait: CoordinationWaitPayload | null,
@@ -249,7 +238,6 @@ const EMPTY_EXEC: ExecutionRuntime = {
   evidenceLedger: [],
   workerToolPhases: {},
   runProcesses: null,
-  teamSynthesisPreview: null,
   coordinationWait: null,
   executionDetached: null,
   deliveryStatus: null,
@@ -503,7 +491,6 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         evidenceLedger: [],
         workerToolPhases: {},
         runProcesses: null,
-        teamSynthesisPreview: null,
         coordinationWait: null,
         executionDetached: null,
         deliveryStatus: null,
@@ -632,11 +619,6 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         return { workerToolPhases: rest };
       }),
 
-    setTeamSynthesisPreview: (preview, messageId) =>
-      patchExec(messageId, (cur) =>
-        cur.plan ? { teamSynthesisPreview: preview } : null,
-      ),
-
     setCoordinationWait: (wait, messageId) =>
       patchExec(messageId, (cur) => {
         if (!cur.plan) return null;
@@ -686,7 +668,9 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
 
     setDeliveryStatus: (status, messageId) =>
       // 可用性短问可在无 plan 的 CEO 回合复用对账发卡——勿再要求 cur.plan。
-      patchExec(messageId, () => ({ deliveryStatus: status })),
+      patchExec(messageId, () => ({
+        deliveryStatus: status,
+      })),
 
     upsertUserInterjection: (item, messageId) =>
       // 经典 steer 无 run_plan；协调有 plan。二者都须可写 DURABLE 插话。
@@ -748,7 +732,6 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         let debateOpening: string | null = null;
         let debatePretrial: DebatePretrialState | null = null;
         let evidenceLedger: EvidenceLedgerEntry[] = [];
-        let teamSynthesisPreview: TeamSynthesisPreviewPayload | null = null;
         let deliveryStatus: DeliveryStatusPayload | null = null;
         /** journal 内 `execution_completed.status`（若有）→ 覆盖 finishReason 投影。 */
         let fromExecutionCompleted: ExecutionStatus | null = null;
@@ -815,8 +798,6 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
               clashes: [],
               cross_exam: [],
               witness_exam: [],
-              findings: [],
-              thread_turns: [],
             });
           } else if (event.type === "debate_round") {
             const p = event.payload as DebateRoundPayload;
@@ -829,8 +810,6 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
               clashes: p.clashes,
               cross_exam: p.cross_exam ?? [],
               witness_exam: p.witness_exam ?? [],
-              findings: p.findings ?? [],
-              thread_turns: p.thread_turns ?? [],
             });
             if (p.evidence_ledger_delta?.length) {
               evidenceLedger = mergeEvidenceLedger(
@@ -838,9 +817,6 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
                 p.evidence_ledger_delta,
               );
             }
-          } else if (event.type === "team_synthesis_preview") {
-            // P2 DURABLE：同 key 保最新（后写覆盖）；刷新后 StatusStrip 可重建。
-            teamSynthesisPreview = event.payload as TeamSynthesisPreviewPayload;
           } else if (event.type === "delivery_status") {
             // DURABLE：同 execution_id 保最新（后写覆盖）；刷新后交付卡可读。
             deliveryStatus = event.payload as DeliveryStatusPayload;
@@ -889,7 +865,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
           };
         }
         const cur = state.byId[messageId] ?? EMPTY_EXEC;
-        // Newer-wins: catch up after missed graph_append; never roll live back.
+        // Newer-wins: catch up after missed frames; never roll live back.
         if (!journalIsNewerThan(cur, plan, frames)) return {};
         // Detached mid-flight: captain may have finish_reason=stop while workers
         // still run — keep graph running + background stamp so soft refresh can
@@ -938,7 +914,6 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
               })
                 ? null
                 : reloadProcessOverlay(journal.runProcesses),
-              teamSynthesisPreview,
               coordinationWait: null,
               executionDetached: stillUnsettled
                 ? (cur.executionDetached ?? null)

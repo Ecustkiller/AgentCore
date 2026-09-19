@@ -11,13 +11,11 @@ def test_prior_futile_retries_module_is_gone():
 
 
 def test_ceo_turn_prompt_has_no_futile_retry_section():
-    from agentcore.runtime.pipeline.assemble import build_chat_system_prompt
+    from agentcore.runtime.resolve.prompt import render_ceo_turn_envelope
 
-    out = build_chat_system_prompt(
-        ceo_prompt="CEO",
-        prior_delegate_retry="",
+    out = render_ceo_turn_envelope(
         attachment_context="",
         registered_sources="",
-        soft_cap=None,
+        include_runtime=False,
     )
     assert "上轮徒劳重试" not in out

@@ -24,6 +24,7 @@ export const TREE_WRITE_TOOLS: ReadonlySet<string> = new Set([
   "file_copy",
   "mkdir",
   "file_batch",
+  "archive",
 ]);
 
 /** `makeCloudSource`：`workspace:${key}`。 */

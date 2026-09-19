@@ -42,10 +42,6 @@ class Disposition(StrEnum):
 EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
     # ---- DURABLE：落 turn_journal，reload 由 fold 重放（= 现 _JOURNAL_EVENT_TYPES） ----
     EventType.RUN_PLAN: (Disposition.DURABLE, "团队图/单体计划——重放团队结构与过程时间线的锚"),
-    EventType.GRAPH_APPEND: (
-        Disposition.DURABLE,
-        "跨回合同图追加锚点——追加回合 process 标记；生长帧续写宿主 turn_id journal",
-    ),
     EventType.RUN_STARTED: (Disposition.DURABLE, "某 run 起始——重放该节点的开始"),
     EventType.RUN_CONTEXT: (Disposition.DURABLE, "派发给 run 的上下文/依赖——重放收到的上下文"),
     EventType.RUN_COMPLETED: (Disposition.DURABLE, "run 完成（含 message_final）——重放产出/发言"),
@@ -65,13 +61,6 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
     EventType.TOOL_USE_END: (Disposition.DURABLE, "工具调用结束（结果）——重放工具结果"),
     EventType.CHECKPOINT_REQUIRED: (Disposition.DURABLE, "检查点挂起（耐久帧）——reload 重现待裁决卡"),
     EventType.CHECKPOINT_RESOLVED: (Disposition.DURABLE, "检查点已裁决——重放裁决结果"),
-    EventType.PLAN_REVIEW_REQUIRED: (Disposition.DURABLE, "计划复核挂起（耐久帧）——reload 重现复核卡"),
-    EventType.PLAN_REVIEW_RESOLVED: (Disposition.DURABLE, "计划复核已裁决——重放裁决"),
-    EventType.STAGE_CARD_REQUIRED: (
-        Disposition.DURABLE,
-        "阶段推进卡登记（跨回合耐久）——reload 重现开辩/补调研决议入口",
-    ),
-    EventType.STAGE_CARD_RESOLVED: (Disposition.DURABLE, "阶段推进卡已裁决——重放裁决"),
     EventType.PLAN_REVISED: (Disposition.DURABLE, "自主再绑定「计划已调整」轻痕迹——重放"),
     EventType.ESCALATION_REQUIRED: (Disposition.DURABLE, "升级请求（单一发射者）——重放升级"),
     EventType.ESCALATION_RESOLVED: (Disposition.DURABLE, "升级已处理——重放结果"),
@@ -115,13 +104,9 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
         Disposition.DURABLE,
         "裸聊写盘自动建文件夹——DURABLE；对话内不再渲染落点条，文件夹进「我的文件」",
     ),
-    EventType.TEAM_SYNTHESIS_PREVIEW: (
-        Disposition.DURABLE,
-        "协调模式团队进展预览——同 key 保最新由前端 fold 保证；刷新后 StatusStrip 可重建（P2）",
-    ),
     EventType.DELIVERY_STATUS: (
         Disposition.DURABLE,
-        "交付状态结构化对账（已交付/缺口/元数据）——同 execution_id 保最新；供 finish_guard 与只合回产物读路径（用户面无验收大卡、无聊天流产物清单卡）",
+        "交付状态结构化对账（已交付/缺口/元数据）——同 execution_id 保最新；供 finish_guard 读路径（用户面无验收大卡、无聊天流产物清单卡）",
     ),
     EventType.USER_INTERJECTION: (
         Disposition.DURABLE,

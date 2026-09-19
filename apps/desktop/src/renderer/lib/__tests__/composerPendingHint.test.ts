@@ -216,7 +216,7 @@ describe("composerPendingHint", () => {
       messageId: "m1",
       conversationId: CID,
       checkpointId: "cp1",
-      kind: "plan_review",
+      kind: "ask_user",
       userMessage: "计划",
       userMessageId: "u1",
       steps: [],

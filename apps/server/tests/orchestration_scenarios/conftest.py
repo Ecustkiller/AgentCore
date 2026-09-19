@@ -169,14 +169,6 @@ def patch_orchestration_seams(monkeypatch, provider: RoleScriptedProvider) -> No
         "agentcore.runtime.pipeline.run._assemble_ceo_toolset",
         _assemble_keeping_delegate,
     )
-
-    async def _no_vision(*_a, **_k):
-        return None
-
-    monkeypatch.setattr(
-        "agentcore.runtime.pipeline.prepare.resolve_vision_reader_for_conversation",
-        _no_vision,
-    )
     monkeypatch.setattr(TurnJournalWriter, "_drain", _fast_journal_drain)
     monkeypatch.setattr("agentcore.db.base.async_session_factory", _no_db)
     monkeypatch.setattr(

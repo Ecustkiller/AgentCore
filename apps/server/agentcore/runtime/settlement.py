@@ -20,9 +20,9 @@ from agentcore.runtime.journal.pending_interactions import settlement_dedupe_key
 from agentcore.runtime.journal.writer import TurnJournalWriter, current_journal_writer
 
 # Settlement event kinds that participate in prewrite + dedupe.
-# Resolved events + reconnect-answerable required (none today: leftover
-# ``stage_card`` is journal-only) + the cross-kind orphan fact. Derived from
-# INTERACTION_KIND_SPECS so a new kind cannot silently miss the dedupe set.
+# Resolved events + reconnect-answerable required (none today) + the
+# cross-kind orphan fact. Derived from INTERACTION_KIND_SPECS so a new kind
+# cannot silently miss the dedupe set.
 SETTLEMENT_EVENT_KINDS: frozenset[str] = frozenset(
     {
         *(
@@ -201,14 +201,8 @@ def cold_resume_settlement_event(
     selected: list[str] | None = None,
 ) -> SSEEvent:
     """Build the same ``*_resolved`` SSE recover will emit (D8 同形)."""
-    from agentcore.runtime.events import (
-        checkpoint_resolved,
-        plan_review_resolved,
-    )
-    from agentcore.runtime.suspension import (
-        AskUserSuspension,
-        PlanReviewSuspension,
-    )
+    from agentcore.runtime.events import checkpoint_resolved
+    from agentcore.runtime.suspension import AskUserSuspension
     from agentcore.tools.builtin.ask_user.schema import option_label
 
     if isinstance(suspension, AskUserSuspension):
@@ -219,12 +213,6 @@ def cold_resume_settlement_event(
             decision=decision,
             note=note,
             selected=picks,
-        )
-    if isinstance(suspension, PlanReviewSuspension):
-        return plan_review_resolved(
-            checkpoint_id=suspension.checkpoint_id,
-            decision=decision,
-            note=note,
         )
     raise ValueError(f"unknown suspension kind for cold settlement: {type(suspension)!r}")
 

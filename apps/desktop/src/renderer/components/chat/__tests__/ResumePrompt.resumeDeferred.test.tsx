@@ -57,15 +57,15 @@ beforeEach(() => {
   });
   useConversationStore.getState().setServerMessageIdOnLastMessage(MID, CID);
   useInteractionStore.getState().upsertRequired({
-    kind: "plan_review",
+    kind: "ask_user",
     conversationId: CID,
     messageId: MID,
     origin: "server",
     payload: {
       checkpoint_id: IX_ID,
       conversation_id: CID,
-      steps: [{ run_id: "r1", role: "调研", summary: "方案就绪" }],
-      pending: [{ run_id: "r2", role: "执行" }],
+      question: "这次讨论怎么推进？",
+      questions: [],
     },
   });
   useInteractionStore.getState().beginSubmit(IX_ID);

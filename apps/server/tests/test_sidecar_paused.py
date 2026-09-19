@@ -611,10 +611,8 @@ def _write_leftover_team_preview(
     )
 
 
-def test_resume_refuses_retired_team_preview(tmp_path, monkeypatch):
-    """本机 resume：存量 team_preview 诚实失败，不进 pipeline。"""
-    from agentcore.runtime.kickoff.retired import TEAM_PREVIEW_UNRECOVERABLE
-
+def test_resume_skips_unknown_team_preview(tmp_path, monkeypatch):
+    """本机 resume：存量 team_preview 当挂起不存在，不进 pipeline。"""
     async def fake_resume(**kwargs: Any) -> dict[str, Any]:
         raise AssertionError("pipeline must not run for retired team_preview")
 
@@ -647,14 +645,13 @@ def test_resume_refuses_retired_team_preview(tmp_path, monkeypatch):
     remaining = asyncio.run(drive())
     err = _response(sent, 11)
     assert "error" in err
-    assert err["error"]["code"] == protocol.INVALID_PARAMS
-    assert TEAM_PREVIEW_UNRECOVERABLE in err["error"]["message"]
+    assert err["error"]["code"] == protocol.PAUSED_TURN_NOT_FOUND
     assert remaining == []
     assert (tmp_path / "data" / "paused" / "m-tp.json").exists()
 
 
-def test_resume_rejects_illegal_team_preview_veto(tmp_path, monkeypatch):
-    """存量开工卡：非法否决也走退役拒绝（INVALID_PARAMS）并恢复帧。"""
+def test_resume_skips_leftover_team_preview_even_with_veto(tmp_path, monkeypatch):
+    """存量开工卡：未知 kind 当挂起不存在（不进否决校验）。"""
 
     async def fake_resume(**kwargs: Any) -> dict[str, Any]:
         raise AssertionError("pipeline must not run on invalid veto")
@@ -689,18 +686,15 @@ def test_resume_rejects_illegal_team_preview_veto(tmp_path, monkeypatch):
     remaining = asyncio.run(drive())
     err = _response(sent, 12)
     assert "error" in err
-    assert err["error"]["code"] == protocol.INVALID_PARAMS
-    from agentcore.runtime.kickoff.retired import TEAM_PREVIEW_UNRECOVERABLE
-
-    assert TEAM_PREVIEW_UNRECOVERABLE in err["error"]["message"]
+    assert err["error"]["code"] == protocol.PAUSED_TURN_NOT_FOUND
     assert remaining == []
     assert (tmp_path / "data" / "paused" / "m-bad.json").exists()
     scope = server.folder_scope_for("c1")
     assert scope is None or scope.folder_id != "should-not-stick"
 
 
-def test_resume_veto_rolls_back_stamped_folder(tmp_path, monkeypatch):
-    """存量开工卡退役拒绝不得改写已 stamp 的 folder_scope。"""
+def test_resume_unknown_kind_does_not_rewrite_stamped_folder(tmp_path, monkeypatch):
+    """存量未知挂起 kind 不得改写已 stamp 的 folder_scope。"""
 
     async def fake_resume(**kwargs: Any) -> dict[str, Any]:
         raise AssertionError("pipeline must not run on invalid veto")

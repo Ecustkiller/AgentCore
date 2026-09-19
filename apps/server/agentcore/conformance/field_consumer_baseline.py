@@ -24,14 +24,6 @@ class FieldConsumerBaselineGroup:
 
 FIELD_CONSUMER_BASELINE: tuple[FieldConsumerBaselineGroup, ...] = (
     FieldConsumerBaselineGroup(
-        id="graph_append.extra_ids",
-        reason=(
-            "旧跨回合同图追加：UI 读 host_message_id / added_count；"
-            "append_message_id 与 added_run_ids 未接线。"
-        ),
-        leaves=frozenset({"append_message_id", "added_run_ids"}),
-    ),
-    FieldConsumerBaselineGroup(
         id="tool_use_end.audience",
         reason="tool_use_end.audience 标记 CEO-only 工具输出；客户端未按此分支。",
         leaves=frozenset({"audience"}),
@@ -67,30 +59,6 @@ FIELD_CONSUMER_BASELINE: tuple[FieldConsumerBaselineGroup, ...] = (
         id="evidence_ledger.doc_kind",
         reason="回合台账 JSON 透传 doc_kind；徽章读 dossier_label 等，不读此叶。",
         leaves=frozenset({"doc_kind"}),
-    ),
-    FieldConsumerBaselineGroup(
-        id="stage_card.host_anchors",
-        reason=(
-            "舞台卡按 stage_card_id 交互；host_execution_id / synthesizer_run_id "
-            "是机制直传，契约注明旧客户端忽略。"
-        ),
-        leaves=frozenset({"host_execution_id", "synthesizer_run_id"}),
-    ),
-    FieldConsumerBaselineGroup(
-        id="stage_card.motion_override",
-        reason=(
-            "活人面已撤推进卡；stage_card_resolved.motion_override 仍在契约，"
-            "桌面不读。"
-        ),
-        leaves=frozenset({"motion_override"}),
-    ),
-    FieldConsumerBaselineGroup(
-        id="team_synthesis_preview.leftover",
-        reason=(
-            "活人面已撤：队长节点不再画草稿。fold 整包入库（历史 journal）；"
-            "UI 不读 in_progress。"
-        ),
-        leaves=frozenset({"in_progress"}),
     ),
     FieldConsumerBaselineGroup(
         id="turn_queue_started.remaining_depth",
@@ -138,7 +106,7 @@ FIELD_CONSUMER_BASELINE: tuple[FieldConsumerBaselineGroup, ...] = (
             "桌面简报只读 summary / key_points / assumptions / next_steps。"
             "历史 debrief JSON 与 wire 仍可躺着 motion_card，契约字段保留。"
         ),
-        leaves=frozenset({"motion_card"}),
+        leaves=frozenset({"motion_card", "fact_pointers"}),
     ),
     FieldConsumerBaselineGroup(
         id="ask_option.review_kind",

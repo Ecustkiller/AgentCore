@@ -348,6 +348,48 @@ async def test_persist_sanitizes_traversal_name(tmp_path: Path):
     assert not (tmp_path.parent / "evil.sh").exists()
 
 
+async def test_persist_other_desk_cite_skips_exists(tmp_path: Path):
+    ws = _ws(tmp_path)
+    out = await persist_attachments(
+        ws,
+        [
+            {
+                "name": "a.md",
+                "path": "docs/a.md",
+                "text": "# hi\n",
+                "workspace_path": "docs/a.md",
+                "source_folder_id": "folder-b",
+            }
+        ],
+        sitting_folder_id="folder-a",
+    )
+    assert out[0]["workspace_path"] == "docs/a.md"
+    assert out[0]["source_folder_id"] == "folder-b"
+    assert out[0].get("resident_missing") is not True
+    assert not (tmp_path / "docs" / "a.md").exists()
+    stored = to_stored_metadata(out)
+    assert stored[0]["source_folder_id"] == "folder-b"
+
+
+async def test_persist_same_desk_source_folder_still_verifies(tmp_path: Path):
+    ws = _ws(tmp_path)
+    out = await persist_attachments(
+        ws,
+        [
+            {
+                "name": "a.md",
+                "path": "docs/a.md",
+                "text": "",
+                "workspace_path": "docs/a.md",
+                "source_folder_id": "folder-a",
+            }
+        ],
+        sitting_folder_id="folder-a",
+    )
+    assert out[0].get("resident_missing") is True
+    assert "workspace_path" not in out[0] or out[0].get("workspace_path") is None
+
+
 async def test_persist_none_returns_empty(tmp_path: Path):
     assert await persist_attachments(_ws(tmp_path), None) == []
     assert await persist_attachments(_ws(tmp_path), []) == []

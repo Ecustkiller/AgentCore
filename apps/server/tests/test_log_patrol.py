@@ -279,7 +279,7 @@ def test_local_turn_id_invalid_claims_clipped_uuid_encode_frame():
             "event": "tool.execute_end",
             "level": "error",
             "exception": exc,
-            "tool": "read_folder_file",
+            "tool": "file_read",
         }
     )
     assert "local_turn_id_invalid" not in reg.match(

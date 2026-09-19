@@ -76,7 +76,7 @@ class _DebateLLM:
     触发一次补全续写）。
     ``cx_fail_sides`` 内的方对质询回空内容，驱动 runner 失败兜底（exchanges answer 空）。
     ``cx_completion_tag`` = 悬垂补全稿里带的证据标签（默认合规；填未绑定的
-    ``【已核实·#eN】`` 可驱动补全的台账 id 闸回炉 / 降级）。
+    ``【已核实·#rN】`` 可驱动补全的台账 id 闸回炉 / 降级）。
     """
 
     def __init__(
@@ -389,16 +389,16 @@ async def test_first_speech_in_later_round_keeps_true_round_no():
 
 
 async def test_later_round_beat_run_ids_stay_per_round():
-    """形态专属拍（红队 defense 等）同理：第 N 轮的开场波带 ``_r{n}_..._{beat}``。"""
+    """同轮非 statement 拍带 ``_r{n}_..._{beat}`` 后缀。"""
     llm = _DebateLLM(converge_at=1)
     sink = EventSink()
     tool = _tool(llm, sink=sink)
     config = DebateConfig(
-        motion="压测方案",
-        form=DebateForm.RED_TEAM,
+        motion="该不该做 X",
+        form=DebateForm.DEBATE,
         sides=[
-            DebateSide(key="plan", name="方案方", stance="推行", is_subject=True),
-            DebateSide(key="red", name="红队", stance="挑刺"),
+            DebateSide(key="pro", name="正方", stance="支持"),
+            DebateSide(key="con", name="反方", stance="反对"),
         ],
     )
     runner = make_round_runner(tool, "exec1", "mod1", config)
@@ -409,7 +409,7 @@ async def test_later_round_beat_run_ids_stay_per_round():
         history=[],
         beat="defense",
     )
-    assert [t.run_id for t in turns] == ["mod1_r3_plan_defense"]
+    assert [t.run_id for t in turns] == ["mod1_r3_pro_defense"]
 
 
 async def test_multi_round_cross_round_memory():
@@ -517,7 +517,7 @@ async def test_cross_exam_dangling_answer_triggers_one_repair():
 
 
 async def test_cross_exam_completion_passes_evidence_ledger_gate():
-    """悬垂补全走与主答同一道台账 id 闸：未绑定的 #eN 进不了并入正文的补全稿。
+    """悬垂补全走与主答同一道台账 id 闸：未绑定的 #rN 进不了并入正文的补全稿。
 
     补全文本会被并进正式答复、并随本方 transcript 成为结辩允许集的基准；若补全绕过闸
     （旧行为 ``continue_run`` 不传 ``check_evidence_ledger``），凭空 id 既进正文又在结辩
@@ -527,7 +527,7 @@ async def test_cross_exam_completion_passes_evidence_ledger_gate():
         converge_at=1,
         questions=_CX_QUESTIONS,
         cx_answer_style="dangling",
-        cx_completion_tag="【已核实·#e9】",  # 台账里根本没有 #e9
+        cx_completion_tag="【已核实·#r9】",  # 台账里根本没有 #r9
     )
     sink = EventSink()
     tool = _tool(llm, sink=sink)
@@ -543,11 +543,11 @@ async def test_cross_exam_completion_passes_evidence_ledger_gate():
     pro = next(c for c in cx if c["target"] == "pro")
     ans = pro["exchanges"][0]["answer"]
     assert "补全收束·pro" in ans  # 补全本身仍并入答复
-    assert "#e9" not in ans
+    assert "#r9" not in ans
     assert "【待核实·推断】" in ans
     # 结辩允许集的基准是本方 transcript；凭空 id 没落进去 ⇒ 结辩也引不了它。
     transcript = tool._debater_sessions["pro"].transcript
-    assert all("#e9" not in (m.content or "") for m in transcript)
+    assert all("#r9" not in (m.content or "") for m in transcript)
 
 
 async def test_cross_exam_real_runner_failed_answer_leaves_empty():
@@ -1145,7 +1145,7 @@ def test_debater_task_injects_research_dossier_index():
     for text in (task, brief):
         assert "【工作区约定文档索引·AgentCore/文档/research/】" in text
         assert "AgentCore/文档/research/法律透镜报告.md" in text
-        assert "【已核实·#eN】" in text
+        assert "【已核实·#rN】" in text
         assert "选读" in text
     assert "勿无差别" in task or "勿全量" in task
     assert payload.get("retrieval_budget") == DEFAULT_RETRIEVAL_BUDGET_DEBATER_WITH_DOSSIER

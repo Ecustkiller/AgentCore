@@ -59,22 +59,20 @@ async def test_capabilities_lists_system_skills_with_body(client):
 
     body = (await client.get("/v1/capabilities")).json()
     skills = {s["name"]: s for s in body["skills"]}
-    assert "ask_kickoff" in skills
-    assert set(skills["ask_kickoff"]["audience"]) == {"ceo", "worker"}
-    assert "ask_kickoff" in skills
-    assert "ask_midtask" in skills
     assert "page_ui" in skills
     assert skills["page_ui"]["summary"] == "页面观感"
     assert skills["page_ui"]["group"] == "交付"
-    assert "asking_the_user" not in skills
-    assert "ask_user_kickoff" not in skills
-    assert "verify_and_fix" not in skills
-    assert "long_form_landing" not in skills
+    assert set(skills["page_ui"]["audience"]) == {"ceo", "worker"}
     for skill in skills.values():
         assert skill["summary"]
         assert skill["body"]  # the full guidance, not just the catalog one-liner
         assert skill["blurb"]
         assert skill["blurb"] != skill["summary"]
+        assert "requires_tools" in skill
+        assert isinstance(skill["requires_tools"], list)
+    assert skills["debate_and_review"]["requires_tools"] == ["debate"]
+    assert skills["run"]["requires_tools"] == ["run"]
+    assert skills["page_ui"]["requires_tools"] == []
     # Skills are the system repertoire; domain SOPs are store SKUs, not this blueprint.
     from agentcore.runtime.skills.platform_shelf import platform_templates
 

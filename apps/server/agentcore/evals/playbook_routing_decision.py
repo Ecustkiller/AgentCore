@@ -120,11 +120,14 @@ async def run_until_terminal(
     user_message: str,
     max_rounds: int,
     history: Sequence[LLMMessage] | None = None,
+    turn_envelope: str = "",
 ) -> FirstMove:
     """CEO 决策环：探路 / consult 续跑，直到发卡、派团队、开辩或直答。"""
     messages = [LLMMessage(role="system", content=ceo_prompt)]
     if history:
         messages.extend(history)
+    if (turn_envelope or "").strip():
+        messages.append(LLMMessage(role="user", content=turn_envelope))
     messages.append(LLMMessage(role="user", content=user_message))
     usage = TokenUsage()
     trail: list[str] = []

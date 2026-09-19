@@ -1,14 +1,7 @@
-"""Single vision capability bit shared by CEO assembly and attachment honesty.
-
-False ⇒ do not put ``read_image`` on the CEO surface. Same reason
-``WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS`` withdraws it: a listed tool that cannot
-succeed only invites 「换个工具再看一眼图」 rounds that never can work.
+"""Legacy capability bit — unused by the live turn (no ``read_image`` surface).
 
 True when a :class:`~agentcore.vision.protocol.VisionReader` is wired **or** the
 main chat model accepts images (:func:`~agentcore.llm.image_accept.model_accepts_images`).
-Empty BYOK vision slot does not invent a platform reader
-(``build_vision_reader`` already refuses that); a reader may still be wired from
-an image-accepting main.
 """
 
 from __future__ import annotations

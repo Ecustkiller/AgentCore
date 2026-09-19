@@ -30,7 +30,6 @@ import type {
   RunDebrief,
   RunKind,
   Stance,
-  TeamSynthesisPreviewPayload,
   UsageBreakdown,
   WorkerRunPhase,
 } from "@agentcore/contract-types";
@@ -48,7 +47,6 @@ export type {
   PlanRevisionKind,
   ProcessStep,
   RunDebrief,
-  TeamSynthesisPreviewPayload,
   UsageBreakdown,
   WorkerRunPhase,
 };
@@ -124,15 +122,15 @@ export interface ProjectedAgent {
   toolProgress: { toolName: string; chars: number } | null;
 }
 
-/** A `checkpoint_after` pause on a run (plan_review, 结构化挂起 2a). `orphaned` =
- * 已失效 terminal (提问确认统一重构: the pending gate was invalidated by restart/recover). */
+/** Per-run checkpoint slot on the team graph (almost always `null`; ask_user is a
+ * turn-level card, not a node pause). `orphaned` = the pending gate was invalidated
+ * by restart/recover. */
 export interface ProjectedRunCheckpoint {
   status: "pending" | "resolved";
   decision:
     | "continue"
     | "adjust"
     | "stop"
-    | "research_first"
     | "timeout"
     | "orphaned"
     | null;
@@ -174,8 +172,8 @@ export interface RunEscalation {
 /** 幕类型 = 能力档取用键（首批 multi_agent / debate）。 */
 export type ActKind = "multi_agent" | "debate";
 
-/** 幕授权来源（批 B）：推进卡 / 自动开辩 / 存量 leftover（preview 非新开开工卡）。 */
-export type ActAuthorizedBy = "stage_card" | "auto" | "preview";
+/** 幕授权来源：现行只写 auto。旧戳不当 live 成员。 */
+export type ActAuthorizedBy = "auto";
 
 /** One act in an execution's act sequence (批 A1 幕契约). */
 export interface ProjectedAct {
@@ -309,12 +307,6 @@ export type ProjectedInteraction =
       question: string;
     }
   | {
-      kind: "plan_review";
-      id: string;
-      status: InteractionStatus;
-      runIds: string[];
-    }
-  | {
       kind: "escalation";
       id: string;
       status: InteractionStatus;
@@ -323,18 +315,6 @@ export type ProjectedInteraction =
       question: string;
       assumption: string;
       awaiting?: "user" | "ceo";
-    }
-  | {
-      kind: "stage_card";
-      id: string;
-      status: InteractionStatus;
-      motion: string;
-      sides: Array<{ key: string; name: string; stance: string }>;
-      form: string;
-      rationale: string;
-      factPointers: string[];
-      maxRounds: number;
-      note: string | null;
     };
 
 /** 庭前取证投影（`debate_pretrial_*` 折叠；权威=completed）。 */
@@ -417,8 +397,8 @@ export interface ProjectedTurn {
   /** Derived from run states (terminal-completed over total), cumulative across
    * multi-batch delegates — never the per-batch run_progress counters. */
   progress: { completed: number; total: number };
-  /** Full interaction inventory (7 kinds × pending|resolved|orphaned). Replaces the
-   * legacy single-slot `pendingInteraction` (P3 breaking). */
+  /** Full interaction inventory (live user-facing kinds × pending|resolved|orphaned).
+   * Replaces the legacy single-slot `pendingInteraction` (P3 breaking). */
   interactions: ProjectedInteraction[];
   /** Turn total from message_end.cost (回合总账); null until the turn ends or when no
    * turn ran (error/not-found paths). */
@@ -440,8 +420,6 @@ export interface ProjectedTurn {
   /** 主持人开场白（`debate_round_started.opening`）：仅首轮携带；sticky 取第一个非空，不被后续
    * 覆盖。收场 {@link debate}.opening 仍是权威。缺字段 / 老 journal → `null`。 */
   debateOpening: string | null;
-  /** 协调模式团队进展预览（`team_synthesis_preview`，同 key 保最新）：P2 DURABLE。null 当无。 */
-  teamSynthesisPreview: TeamSynthesisPreviewPayload | null;
   /** 交付状态（`delivery_status`，同 execution_id 保最新）：delegate 批次收尾的结构化交付
    * 对账——已交付文件 / 缺口 / 待用户操作（能力闸门与交付诚实性）。DURABLE，刷新后交付状态卡
    * 重建。null 当无（纯 prose 成功批次保持无声）。 */

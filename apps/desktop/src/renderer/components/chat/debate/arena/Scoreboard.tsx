@@ -1,7 +1,6 @@
 import { MANUAL_HELP, ManualHelpLink } from "@/components/ManualHelpLink";
 import type { Execution } from "@/stores/execution";
 import { ModelBadge } from "../ModelBadge";
-import { FINDING_STATUS, findingStatusCounts, gateLabel } from "../findings";
 import {
   type DebateModel,
   debateRoster,
@@ -9,12 +8,6 @@ import {
   modelVendorLabel,
   stopLabel,
 } from "../model";
-import {
-  RISK_LEVELS,
-  RISK_SEVERITY,
-  buildRiskItems,
-  riskCounts,
-} from "../severity";
 import { ModeratorIdentity, resolveModeratorModel } from "./ModeratorIdentity";
 import { closingAnchorId, finaleAnchorId, roundAnchorId } from "./anchors";
 import {
@@ -149,97 +142,7 @@ function ScoreboardRow2({
   const roster = debateRoster(model.rounds);
   const moderatorModel = scoreboardModeratorModel(model, execution);
 
-  if (model.form === "roundtable" && model.sides) {
-    return (
-      <div className="flex flex-wrap items-center gap-3">
-        <ModeratorChip model={moderatorModel} />
-        {model.sides.map((s) => (
-          <span
-            key={s.key}
-            className="inline-flex items-center gap-1.5 text-sm text-foreground"
-          >
-            <span
-              className="size-2 rounded-full"
-              style={{ backgroundColor: debateSideColorVar(s.key, s.name) }}
-            />
-            {s.name}
-          </span>
-        ))}
-      </div>
-    );
-  }
-
-  if (model.form === "red_team" && model.sides) {
-    const subject = model.sides.find((s) => s.is_subject);
-    const briefFindings = model.brief?.findings ?? [];
-    const liveFindings = model.rounds.flatMap((r) => r.findings);
-    const findings = briefFindings.length > 0 ? briefFindings : liveFindings;
-    const hasFindings = findings.length > 0;
-    const risks =
-      !hasFindings && model.brief
-        ? buildRiskItems(model.sides, model.brief)
-        : [];
-    const riskTally = riskCounts(risks);
-    const statusTally = findingStatusCounts(
-      findings.map((f) => ({ status: f.status })),
-    );
-    const gate = gateLabel(model.brief?.gate);
-    return (
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-3 text-sm">
-          <ModeratorChip model={moderatorModel} />
-          {subject && (
-            <span>
-              <span className="text-muted-foreground">方案方 </span>
-              <span className="font-medium">{subject.name}</span>
-            </span>
-          )}
-          <span className="text-muted-foreground">·</span>
-          <span className="text-muted-foreground">
-            红队 {roster.filter((r) => r.sideKey !== subject?.key).length} 人
-          </span>
-          {gate && (
-            <>
-              <span className="text-muted-foreground">·</span>
-              <span className="font-medium text-foreground">{gate}</span>
-            </>
-          )}
-        </div>
-        {hasFindings ? (
-          <div className="flex flex-wrap gap-1">
-            {(
-              [
-                "escalated",
-                "open",
-                "unanswered",
-                "answered",
-                "deadlocked",
-                "closed",
-              ] as const
-            )
-              .filter((s) => (statusTally[s] ?? 0) > 0)
-              .map((s) => (
-                <span key={s} className={FINDING_STATUS[s].pill}>
-                  {FINDING_STATUS[s].label} {statusTally[s]}
-                </span>
-              ))}
-          </div>
-        ) : (
-          model.settled && (
-            <div className="flex gap-1">
-              {RISK_LEVELS.filter((l) => riskTally[l] > 0).map((l) => (
-                <span key={l} className={RISK_SEVERITY[l].pill}>
-                  {RISK_SEVERITY[l].label} {riskTally[l]}
-                </span>
-              ))}
-            </div>
-          )
-        )}
-      </div>
-    );
-  }
-
-  if (model.form === "debate" && roster.length > 0) {
+  if (roster.length > 0) {
     return (
       <div className="flex flex-wrap items-center gap-1.5">
         <ModeratorChip model={moderatorModel} />

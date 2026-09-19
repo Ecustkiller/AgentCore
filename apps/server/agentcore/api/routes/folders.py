@@ -8,7 +8,7 @@
 List / create / get-by-id / soft-delete accept either an access session or a
 folders narrow ticket (sidecar cloud roster) — the sidecar-hosted CEO owns the
 same roster verbs the sidebar does (``delete_folder`` 软删经此路)。
-Permanent delete / rename / timeline / 最近删除 remain access-session only: 彻底删
+Permanent delete / rename / 最近删除 remain access-session only: 彻底删
 只由用户确认（删除弹窗勾选，或「最近删除」里再确认），恢复是用户的补救面，AI
 永远够不到（这一轮 AI 只能软删不能恢复、不能彻底删）。
 """
@@ -16,7 +16,7 @@ Permanent delete / rename / timeline / 最近删除 remain access-session only: 
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,10 +28,6 @@ from agentcore.api.dependencies import (
     get_folder_repo,
 )
 from agentcore.api.schemas import (
-    CollaborationDossierRef,
-    CollaborationTimelineAct,
-    CollaborationTimelineItem,
-    CollaborationTimelineResponse,
     CreateFolderRequest,
     DeletedFolderListResponse,
     DeletedFolderSummary,
@@ -52,10 +48,6 @@ from agentcore.core.errors import (
 )
 from agentcore.core.logging import get_logger
 from agentcore.db.repositories import FolderRepository
-from agentcore.folders.collaboration_timeline import (
-    display_act_title,
-    list_folder_collaboration_timeline,
-)
 from agentcore.folders.desk import resolve_desk_access
 from agentcore.folders.permanent_delete import (
     permanent_delete_folder,
@@ -537,63 +529,3 @@ async def delete_folder_permanent(
     if not deleted:
         raise NotFoundError("文件夹不存在")
     return StatusResponse()
-
-
-@router.get(
-    "/{folder_id}/collaboration-timeline",
-    response_model=CollaborationTimelineResponse,
-)
-async def get_collaboration_timeline(
-    folder_id: str,
-    user: AuthUser,
-    repo: FolderRepository = Depends(get_folder_repo),
-    session: AsyncSession = Depends(get_db),
-    limit: int = Query(20, ge=1, le=50),
-    offset: int = Query(0, ge=0),
-):
-    """项目协作时间线（读时聚合）：有 execution 的会话 + 幕序列摘要 + 约定文档引用条.
-
-    零写路径。约定文档快照（AgentCore/文档/research/ / debate/ 文件列表）复用工作区
-    文件 API，不在此返回。
-    """
-    folder = await repo.get_accessible(folder_id, user_id=user.user_id)
-    if not folder:
-        raise NotFoundError("文件夹不存在")
-    result = await list_folder_collaboration_timeline(
-        session,
-        folder_id=folder_id,
-        user_id=user.user_id,
-        limit=limit,
-        offset=offset,
-    )
-    items = [
-        CollaborationTimelineItem(
-            conversation_id=it.conversation_id,
-            title=it.title,
-            updated_at=it.updated_at,
-            execution_id=it.execution_id,
-            host_turn_id=it.host_turn_id,
-            acts=[
-                CollaborationTimelineAct(
-                    act_id=a.act_id,
-                    kind=a.kind if a.kind in ("multi_agent", "debate") else "multi_agent",
-                    title=display_act_title(kind=a.kind, title=a.title),
-                    started_at=a.started_at,
-                )
-                for a in it.acts
-            ],
-            dossier_refs=[
-                CollaborationDossierRef(path=r.path, sources=list(r.sources))
-                for r in it.dossier_refs
-            ],
-        )
-        for it in result.items
-    ]
-    return CollaborationTimelineResponse(
-        folder_id=result.folder_id,
-        items=items,
-        total=result.total,
-        limit=result.limit,
-        offset=result.offset,
-        dossier_refs_note=result.dossier_refs_note,
-    )

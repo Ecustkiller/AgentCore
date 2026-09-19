@@ -7,12 +7,7 @@ import {
   resolveFileArtifactsForCard,
   splitExportedSources,
 } from "@/lib/fileArtifacts";
-import type {
-  DeliveryArtifact,
-  DeliveryPromotion,
-  DeliveryStatusPayload,
-  ProcessStep,
-} from "@/types/events";
+import type { DeliveryArtifact, DeliveryStatusPayload, ProcessStep } from "@/types/events";
 import { describe, expect, it } from "vitest";
 
 function toolStep(
@@ -81,6 +76,26 @@ describe("fileArtifacts change previews (A1)", () => {
     expect(arts.find((a) => a.path === "new.ts")?.change).toEqual({
       kind: "move",
       fromPath: "old.ts",
+    });
+  });
+
+  it("file_batch operations[] emit per-op artifacts", () => {
+    const arts = fileArtifactsFromProcess([
+      toolStep("file_batch", {
+        operations: [
+          { op: "move", source: "old.ts", destination: "new.ts" },
+          { op: "copy", source: "a.md", destination: "b.md" },
+          { op: "delete", path: "gone.ts" },
+        ],
+      }),
+    ]);
+    expect(arts.find((a) => a.path === "new.ts")?.change).toEqual({
+      kind: "move",
+      fromPath: "old.ts",
+    });
+    expect(arts.find((a) => a.path === "b.md")?.op).toBe("write");
+    expect(arts.find((a) => a.path === "gone.ts")?.change).toEqual({
+      kind: "delete",
     });
   });
 
@@ -232,12 +247,12 @@ describe("fileArtifacts from delivery_status.artifacts", () => {
   });
 });
 
-describe("历史 delivery_status.promoted（promote_product 已撤销）", () => {
+describe("leftover delivery_status.promoted skip", () => {
   const WORKROOM = "AgentCore/文档/工作稿";
 
   function status(
     artifacts: DeliveryArtifact[],
-    promoted?: DeliveryPromotion[],
+    extra?: Record<string, unknown>,
   ): DeliveryStatusPayload {
     return {
       execution_id: "e1",
@@ -247,114 +262,22 @@ describe("历史 delivery_status.promoted（promote_product 已撤销）", () =>
       gaps: [],
       actions: [],
       artifacts,
-      ...(promoted ? { promoted } : {}),
-    };
+      ...extra,
+    } as DeliveryStatusPayload;
   }
 
-  it("行已按后端改写记 to：认出成品并留下旧路径，未归位的原样", () => {
-    const arts = resolveFileArtifactsForCard(
-      status(
-        [
-          { path: "起诉状.docx", status: "accepted" },
-          { path: `${WORKROOM}/取证清单.md`, status: "accepted" },
-        ],
-        [{ from: `${WORKROOM}/起诉状.docx`, to: "起诉状.docx" }],
-      ),
-    );
-    expect(arts).toEqual([
-      {
-        path: "起诉状.docx",
-        name: "起诉状.docx",
-        acceptance: "accepted",
-        promotedFrom: `${WORKROOM}/起诉状.docx`,
-      },
-      {
-        path: `${WORKROOM}/取证清单.md`,
-        name: "取证清单.md",
-        acceptance: "accepted",
-      },
-    ]);
-  });
-
-  it("旧路径快照（未经改写）同样认，行改挂到新路径上", () => {
+  it("does not remap listed paths from leftover from/to rows", () => {
     const arts = resolveFileArtifactsForCard(
       status(
         [{ path: `${WORKROOM}/起诉状.docx`, status: "accepted" }],
-        [{ from: `${WORKROOM}/起诉状.docx`, to: "起诉状.docx" }],
+        {
+          promoted: [
+            { from: `${WORKROOM}/起诉状.docx`, to: "起诉状.docx" },
+          ],
+        },
       ),
     );
-    expect(arts[0].path).toBe("起诉状.docx");
-    expect(arts[0].promotedFrom).toBe(`${WORKROOM}/起诉状.docx`);
-  });
-
-  it("跨回合再归位：旧行保留，链式 X→Y→Z 只留一行且认最近一跳", () => {
-    const arts = resolveFileArtifactsForCard(
-      status(
-        [{ path: "报告/年度总结.md", status: "accepted" }],
-        [
-          { from: `${WORKROOM}/年度总结.md`, to: "年度总结.md" },
-          { from: "年度总结.md", to: "报告/年度总结.md" },
-        ],
-      ),
-    );
-    expect(arts).toHaveLength(1);
-    expect(arts[0].path).toBe("报告/年度总结.md");
-    expect(arts[0].promotedFrom).toBe("年度总结.md");
-  });
-
-  it("零归位（空数组 / 缺字段）：一件成品都不标", () => {
-    const rows: DeliveryArtifact[] = [
-      { path: `${WORKROOM}/round.md`, status: "accepted" },
-    ];
-    for (const s of [status(rows, []), status(rows)]) {
-      expect(resolveFileArtifactsForCard(s)[0].promotedFrom).toBeUndefined();
-    }
-  });
-
-  it("只有 accepted 可归位：同路径的 rejected 行不标成品", () => {
-    const arts = resolveFileArtifactsForCard(
-      status(
-        [{ path: `${WORKROOM}/报告.md`, status: "rejected" }],
-        [{ from: `${WORKROOM}/报告.md`, to: "报告.md" }],
-      ),
-    );
-    expect(arts[0].path).toBe(`${WORKROOM}/报告.md`);
-    expect(arts[0].promotedFrom).toBeUndefined();
-  });
-
-  it("源也归位时 derivedFrom 跟着改，中间稿折叠不断链", () => {
-    // 后端只改写 artifacts[].path，derived_from 仍指旧路径——不一并改就认不出自己的源。
-    const arts = resolveFileArtifactsForCard(
-      status(
-        [
-          { path: "报告.md", status: "accepted", kind: "md" },
-          {
-            path: "报告.docx",
-            status: "accepted",
-            kind: "docx",
-            derived_from: `${WORKROOM}/报告.md`,
-          },
-        ],
-        [
-          { from: `${WORKROOM}/报告.md`, to: "报告.md" },
-          { from: `${WORKROOM}/报告.docx`, to: "报告.docx" },
-        ],
-      ),
-    );
-    expect(arts.map((a) => a.derivedFrom)).toEqual([undefined, "报告.md"]);
-    const { primary, intermediate } = splitExportedSources(arts);
-    expect(primary.map((a) => a.path)).toEqual(["报告.docx"]);
-    expect(intermediate.map((a) => a.path)).toEqual(["报告.md"]);
-  });
-
-  it("空 from / to 的畸形行跳过，不误标成品", () => {
-    const arts = resolveFileArtifactsForCard(
-      status(
-        [{ path: "报告.md", status: "accepted" }],
-        [{ from: "", to: "报告.md" }],
-      ),
-    );
-    expect(arts[0].promotedFrom).toBeUndefined();
+    expect(arts[0]?.path).toBe(`${WORKROOM}/起诉状.docx`);
   });
 });
 

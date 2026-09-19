@@ -9,8 +9,8 @@ fingerprint). If ``AGENTS.md`` / ``CLAUDE.md`` exists, a one-line pointer
 this-conversation writes / edits / exports (not reads; cap 8) so recent
 deliverables stay visible without a full-tree dump or mtime sample.
 
-CEO-only: :func:`compose_ceo_chat_prompt` attaches this body; workers never
-receive it. Best-effort: no backend / no ``index_files`` / listing failure →
+CEO-only: :func:`~agentcore.runtime.resolve.prompt.envelope.render_ceo_turn_envelope`
+attaches this body into ``<工作区>``; workers never receive it. Best-effort: no backend / no ``index_files`` / listing failure →
 ``""`` unless a convention file is present (conversation edits may still
 render). Successful empty index → ``文件：空``.
 """

@@ -1,13 +1,16 @@
 import { getConversations } from "@/hooks/useConversations";
+import { hasNativeNotification, isNativeRuntime } from "@/lib/capabilities";
 import {
-  shouldUseNativeNotification,
+  isShellPresent,
+  openFloatConversationIds,
   showNativeNotification,
 } from "@/lib/nativeNotification";
 import { queryClient } from "@/lib/queryClient";
 import { conversationKeys } from "@/lib/queryKeys";
 import {
-  conversationIdFromHash,
+  isConversationOnScene,
   isTransientRoute,
+  pickAmbientOutlet,
   runtimeHasError,
 } from "@/lib/teamActivity";
 import { notifyError, notifyInfo, notifySuccess } from "@/lib/toast";
@@ -27,18 +30,19 @@ import {
   useInteractionStore,
 } from "@/stores/interactions";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
+import { useSidePanelStore } from "@/stores/sidePanel";
 
 /**
- * 跨对话完成通知 (前端UX设计.md §一 全局协作感知)：只读订阅对话生成态 + 交互态 + 挂起态，当用户**不在**某对话
- * 页面时，该对话的关键事件（回合完成 / 失败 / 等你拍板 / 挂起等确认）提醒一次。前台走带「跳转」
- * action 的 toast，失焦 / 不可见改走系统通知——同一事件只出一条，不叠右下角。
+ * 协作感知出口 (前端UX设计.md §一)：只读订阅对话生成态 + 交互态 + 挂起态。
+ * 壳在场且场面在眼前 → 静默；壳在场但人不在这条对话（也没打开它的浮窗）→ 应用内提示；
+ * 壳不在场 → 桌面系统通知。同一事件只出一条。
  * 纯前端感知层——不碰 SSE 契约 / 协议 fold，不新增事件；接线一次于 AppShell（与 realtime /
  * updates 同处），随会话常驻。
  *
  * 云对话完成认 fulfill `ai_turn_activity` 的 `reason`：只对 `completed|error` 报完成/
  * 失败，`paused|stopped` 不报「已完成」。本机 sidecar / 本地容器忽略云信号，仍走本端
  * isGenerating↓。挂起收口（可操作 cold resume 仍在）也不是「已完成」，感知统一走
- * pausedTurns 订阅（ask_user / plan_review → 等待确认后继续）。
+ * pausedTurns 订阅（ask_user → 等待确认后继续）。
  *
  * 热阻塞卡（approval / escalation）走 InteractionStore 订阅，
  * 判定直接复用侧栏「等你」灯的 {@link isAwaitingUserEntry}（含 CEO 仲裁中的升级卡不打扰）
@@ -64,11 +68,12 @@ function jumpTo(conversationId: string): void {
   window.location.hash = `/conversations/${conversationId}`;
 }
 
-/** 该对话不是当前正看的、也不在开发回放态 → 值得弹通知。 */
-function shouldNotify(conversationId: string): boolean {
-  const hash = window.location.hash;
-  if (isTransientRoute(hash)) return false;
-  return conversationIdFromHash(hash) !== conversationId;
+function sceneFloatIds(): string[] {
+  const os = openFloatConversationIds();
+  if (os.length > 0) return os;
+  const floats = useSidePanelStore.getState().floats;
+  const cid = useConversationStore.getState().currentConversationId;
+  return floats.length > 0 && cid ? [cid] : [];
 }
 
 function jumpAction(
@@ -83,33 +88,53 @@ function toastLine(conversationTitle: string | null, headline: string): string {
 }
 
 /**
- * In-app 一句。OS / firehose 用带「AI」前缀的 kind 短句；产品里已经在 AgentCore，不再重复。
  * 禁止把卡上的 question / 工具名贴进来——正文在对话卡里。
  */
 const ATTENTION_TOAST_HEADLINE: Record<string, string> = {
   approval: "需要审批",
   escalation: "需要你的决定",
   ask_user: "需要你的回应",
-  plan_review: "计划待你确认",
 };
 
 function attentionHeadline(kind: string): string {
   return ATTENTION_TOAST_HEADLINE[kind] ?? "需要你处理";
 }
 
+/** OS：title=对话名（没有则短句），body=短句。系统顶栏已有产品身份，不写产品名。 */
+function osNotificationCopy(
+  conversationTitle: string | null,
+  headline: string,
+): { title: string; body: string } {
+  const name = conversationTitle?.trim() ?? "";
+  if (name) return { title: name, body: headline };
+  return { title: headline, body: "" };
+}
+
 /**
- * 前台 toast / 后台系统通知互斥。失焦时不往看不见的窗口塞 toast，避免回来一条过期提示。
+ * 壳 × 场面选出口。预览路由全程静默。
  */
 function notifyAmbient(
   conversationId: string,
-  message: string,
+  conversationTitle: string | null,
+  headline: string,
   kind: "success" | "error" | "info",
   action: { label: string; onClick: () => void },
 ): void {
-  if (shouldUseNativeNotification()) {
-    void showNativeNotification("AgentCore", message, { conversationId });
+  const hash = window.location.hash;
+  if (isTransientRoute(hash)) return;
+  const outlet = pickAmbientOutlet({
+    shellPresent: isShellPresent(),
+    onScene: isConversationOnScene(conversationId, hash, sceneFloatIds()),
+    hasOsNotification: hasNativeNotification(),
+    nativeMobile: isNativeRuntime(),
+  });
+  if (outlet === "silence") return;
+  if (outlet === "os") {
+    const { title, body } = osNotificationCopy(conversationTitle, headline);
+    void showNativeNotification(title, body, { conversationId });
     return;
   }
+  const message = toastLine(conversationTitle, headline);
   if (kind === "error") {
     notifyError(message, undefined, { action });
     return;
@@ -122,13 +147,12 @@ function notifyAmbient(
 }
 
 function notifyTurnEnd(conversationId: string, failed: boolean): void {
-  if (!shouldNotify(conversationId)) return;
   const title = titleOf(conversationId);
   if (!title) return;
-  const message = failed ? `「${title}」执行失败` : `「${title}」已完成`;
   notifyAmbient(
     conversationId,
-    message,
+    title,
+    failed ? "执行失败" : "已完成",
     failed ? "error" : "success",
     jumpAction(conversationId, "查看"),
   );
@@ -138,25 +162,25 @@ function notifyHotBlocking(entry: InteractionEntry): void {
   const headline = ATTENTION_TOAST_HEADLINE[entry.kind];
   if (!headline) return;
   const conversationId = entry.conversationId;
-  if (!shouldNotify(conversationId)) return;
   const title = titleOf(conversationId);
   if (!title) return;
   notifyAmbient(
     conversationId,
-    toastLine(title, headline),
+    title,
+    headline,
     "info",
     jumpAction(conversationId, "去处理"),
   );
 }
 
-/** ask_user / plan_review 挂起：按 kind 一句，不解释流程。 */
+/** ask_user 挂起：按 kind 一句，不解释流程。 */
 function notifyAwaitingDecision(conversationId: string, kind: string): void {
-  if (!shouldNotify(conversationId)) return;
   const title = titleOf(conversationId);
   if (!title) return;
   notifyAmbient(
     conversationId,
-    toastLine(title, attentionHeadline(kind)),
+    title,
+    attentionHeadline(kind),
     "info",
     jumpAction(conversationId, "去处理"),
   );
@@ -170,14 +194,14 @@ function notifyAwaitingDecision(conversationId: string, kind: string): void {
  * 列表失效，侧栏拿到行之后「等你」灯才有地方亮。
  */
 function notifyAttention(entry: AiAttentionEntry): void {
-  if (!shouldNotify(entry.conversationId)) return;
   const title = titleOf(entry.conversationId);
   if (!title) {
     void queryClient.invalidateQueries({ queryKey: conversationKeys.grouped });
   }
   notifyAmbient(
     entry.conversationId,
-    toastLine(title, attentionHeadline(entry.kind)),
+    title,
+    attentionHeadline(entry.kind),
     "info",
     jumpAction(entry.conversationId, "去处理"),
   );
@@ -237,7 +261,7 @@ function conversationHasPausedTurn(conversationId: string): boolean {
 }
 
 /**
- * Start the ambient cross-conversation notifier. Returns an unsubscribe fn (AppShell
+ * Start the ambient collaboration notifier. Returns an unsubscribe fn (AppShell
  * calls it on unmount). Idempotent per call — each invocation owns its own subscriptions.
  */
 export function startTeamActivityNotifications(): () => void {

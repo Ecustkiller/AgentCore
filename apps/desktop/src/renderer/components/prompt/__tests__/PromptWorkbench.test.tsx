@@ -225,15 +225,15 @@ describe("PromptWorkbench", () => {
   it("只读官方 HOW 不画封面大标题", () => {
     render(
       <PromptWorkbench
-        title="途中提问"
-        initialBody={"<途中提问>\n问。\n</途中提问>"}
+        title="正反辩论"
+        initialBody={"<正反辩论>\n辩。\n</正反辩论>"}
         readOnly
       />,
     );
-    expect(screen.queryByRole("heading", { name: "途中提问" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "正反辩论" })).toBeNull();
     expect(screen.queryByLabelText("名称")).toBeNull();
     expect(screen.queryByLabelText("一句话介绍")).toBeNull();
-    expect(lastEditorProps.initialDoc).toContain("<途中提问>");
+    expect(lastEditorProps.initialDoc).toContain("<正反辩论>");
   });
 
   it("勾选查阅后启用写入 draft", async () => {

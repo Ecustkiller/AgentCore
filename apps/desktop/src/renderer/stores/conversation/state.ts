@@ -4,7 +4,6 @@ import type {
   Citation,
   ContextBlockWire,
   CostBreakdown,
-  GraphAppendPayload,
   ResetReason,
   ToolUseEndPayload,
   ToolUseProgressPayload,
@@ -183,10 +182,6 @@ export interface ConversationState {
     interjectionId: string,
     conversationId?: string | null,
   ) => void;
-  stampPlanReviewMarker: (
-    checkpointId: string,
-    conversationId?: string | null,
-  ) => void;
   /** Registry-driven timeline marker stamp (approval / escalation / …). */
   stampTimelineMarker: (
     marker: TimelineMarkerDef,
@@ -214,11 +209,6 @@ export interface ConversationState {
   ) => void;
   setLastAssistantExecutionId: (
     executionId: string,
-    conversationId?: string | null,
-  ) => void;
-  /** 跨回合同图追加锚点——盖在【追加回合】最新助手气泡的 process 上。 */
-  stampGraphAppend: (
-    payload: GraphAppendPayload,
     conversationId?: string | null,
   ) => void;
   setCaptainContext: (

@@ -29,7 +29,6 @@ from agentcore.runtime.debate.types import (
     CrossExamExchange,
     DebateClash,
     DebateConfig,
-    DebateForm,
     JudgeVerdict,
     RoundResult,
     RoundScore,
@@ -180,13 +179,11 @@ async def judge_and_summarize(
 
     二者读的是同一份本轮发言。裁判位判交锋质量与收敛、书记位写本轮小结（须带新点 / 仍争议；
     若有让步也写上）。``history`` 经 :func:`_prior_ledger` 压成前几轮对照，让 ``new_arguments``
-    能判跨轮新论点。``evidence_ledger`` 非空时注入本轮引用的 ``#eN``（含 tier），供无据判断。
+    能判跨轮新论点。``evidence_ledger`` 非空时注入本轮引用的 ``#rN``（含 tier），供无据判断。
     旧场 JSON 若仍带 scores / ledger_events，照常解析；新场不再索要这两项。
     """
     round_no = len(history) + 1
     max_rounds = config.policy.max_rounds
-    # clash 上限随参与方数放宽：2 方正反 4 条够，3+ 方圆桌要容得下跨对的交锋边（A驳B、C驳A），
-    # 否则多方场景的交锋图被腰斩。仍设硬顶（_as_clashes 去重 + 截断），保叙事线轻量。
     clash_limit = max(4, len(config.sides) + 2)
     # 「别过早收敛」从机械楼层搬进裁判标准：第 1 轮开场各方往往尚未接火（real_clash=false
     # 是常态），默认继续以逼出下一轮交锋，仅当命题空泛到开场即无新论点才收。
@@ -209,11 +206,7 @@ async def judge_and_summarize(
     prev_block = f"上一轮小结（供小结续写认知推进线）：{prev}\n\n" if prev else ""
     # 前几轮对照：让裁判据已出现过的点判「本轮是否还有跨轮新论点」。
     ledger_block = _prior_ledger(history)
-    summary_touch = (
-        "（多方圆桌：侧重点出本轮新增 / 凸显了哪个视角、观点光谱往哪铺。）"
-        if config.form is DebateForm.ROUNDTABLE
-        else "点出本轮新点、仍争议；若有让步也写上。"
-    )
+    summary_touch = "点出本轮新点、仍争议；若有让步也写上。"
     cx_block = _cross_exam_block(config, cross_exam)
     from agentcore.runtime.debate.evidence_ledger import format_evidence_ledger_for_judge
 
@@ -240,7 +233,7 @@ async def judge_and_summarize(
         "与小结同源、不是额外任务；已收敛则 next_focus 给空串。"
         "只输出一个 JSON：\n"
         '{"real_clash": true/false, "new_arguments": true/false, "converged": true/false, '
-        '"stop_reason": "converged|focus_clarified|red_team_exhausted", '
+        '"stop_reason": "converged|focus_clarified", '
         '"next_focus": "未收敛时必填：仍存分歧压成的下一轮焦点；已收敛给空串", '
         '"rationale": "一句话点出本轮的实质推进：谁让步 / 谁补强 / 谁被驳倒", '
         '"clashes": [{"from": "<side_key>", "to": "<被反驳方 side_key>", '
@@ -250,7 +243,7 @@ async def judge_and_summarize(
         "- new_arguments：本轮相比【前几轮】是否还在产生跨轮新论点——已出现过的论点换措辞 / "
         "换例子重述不算新论点（=false），只有出现前几轮没有、且会推进交锋的论点才算 true；"
         "无前几轮（首轮）时看本轮是否亮出实质立论。\n"
-        "- converged：是否可以收场（无新论点 / 焦点已澄清为价值之争 / 红队风险已挖尽）。\n"
+        "- converged：是否可以收场（无新论点 / 焦点已澄清为价值之争）。\n"
         "- next_focus：仅【未收敛】时需要——把本轮小结里【仍存的决定性分歧】压成一句 ≤30 字的"
         "下一轮焦点短语（与定议题同规格、像小标题），供下一轮直接采用、避免再读一遍本轮发言；"
         "已收敛则给空串。\n"

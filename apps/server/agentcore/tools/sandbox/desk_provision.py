@@ -1,8 +1,10 @@
-"""Start the cloud workspace desk before assembling execution tools.
+"""Start the cloud workspace desk for the current server root.
 
-``run`` / short exec only talk to an already-running guest. Boot lives here
-(prepare / resume) and on browser / long-running attach — never inside
-``sandbox.execute``.
+``run`` / short exec only talk to an already-running guest. This module is the
+sole owner of guest boot on the chat path: whoever binds a new server root
+calls :func:`provision_server_desk` (prepare / resume on the *final* sitting
+desk; mid-turn landing bind; worker ``apply_target_desktop``). Browser /
+long-running attach may also ensure. Never inside ``sandbox.execute`` / ``run``.
 """
 
 from __future__ import annotations
@@ -59,12 +61,17 @@ async def provision_server_desk(
     conversation_id: str | None = None,
     sink: Any | None = None,
 ) -> None:
-    """Ensure the cloud desk is up. Never raises into the turn.
+    """Ensure the guest for this backend's workspace root is up. Never raises.
 
-    When ``sink`` is bound, emit ``desk_provision_wait`` so the air bubble
-    shows preparing-cloud rather than Thinking… while boot runs.
+    Call after the current server root is known — not on a birth scratch that
+    the turn is about to abandon. When ``sink`` is bound, emit
+    ``desk_provision_wait`` so the air bubble shows preparing-cloud rather
+    than Thinking… while boot runs.
     """
     if getattr(backend, "location", None) != "server":
+        return
+    ready = getattr(backend, "cloud_desk_ready", None)
+    if callable(ready) and ready():
         return
     ensure = getattr(backend, "ensure_workspace_desk", None)
     if not callable(ensure):

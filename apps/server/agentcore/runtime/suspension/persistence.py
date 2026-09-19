@@ -47,13 +47,10 @@ from agentcore.db.repositories import PausedTurnRepository, TurnJournalRepositor
 from agentcore.fulfill.user_signal import push_paused_card_settled
 from agentcore.push import PushNotification, notify_user
 from agentcore.runtime.journal.writer import current_journal_writer
-from agentcore.runtime.kickoff.retired import (
-    is_leftover_team_preview_frame,
-    refuse_if_leftover_team_preview,
-)
 from agentcore.runtime.settlement import align_cold_resume_resolved_to_winner
 from agentcore.runtime.suspension import (
     TurnSuspension,
+    is_live_suspension_kind,
     suspension_from_json,
 )
 from agentcore.runtime.turn.ceo_continue import is_ceo_continue_frame
@@ -323,7 +320,9 @@ async def load_paused_turn(
                 return None
             if is_ceo_continue_frame(row.frame):
                 return None
-            refuse_if_leftover_team_preview(row.frame)
+            kind = row.frame.get("kind") if isinstance(row.frame, dict) else None
+            if not is_live_suspension_kind(kind):
+                raise GoneError("该检查点已不再可用")
             return suspension_from_json(row.frame)
     except GoneError:
         raise
@@ -345,7 +344,10 @@ async def paused_turn_exists(message_id: str, *, conversation_id: str) -> bool:
         row = await PausedTurnRepository(db).get(message_id)
     if row is None or row.conversation_id != conversation_id:
         return False
-    return not is_ceo_continue_frame(row.frame)
+    if is_ceo_continue_frame(row.frame):
+        return False
+    kind = row.frame.get("kind") if isinstance(row.frame, dict) else None
+    return is_live_suspension_kind(kind)
 
 
 async def claim_paused_turn(
@@ -425,7 +427,17 @@ async def claim_paused_turn(
         from agentcore.runtime.journal.seq_space import split_live_and_overflow_rows
 
         live, overflow = split_live_and_overflow_rows(rows)
-        refuse_if_leftover_team_preview(claimed["frame"])
+        if not is_live_suspension_kind(
+            claimed["frame"].get("kind") if isinstance(claimed["frame"], dict) else None
+        ):
+            await _upsert_paused_frame(
+                message_id=claimed["message_id"],
+                conversation_id=claimed["conversation_id"],
+                user_id=claimed["user_id"],
+                frame=claimed["frame"],
+                trace_id=claimed["trace_id"],
+            )
+            return None
         suspension = suspension_from_json(claimed["frame"])
     except Exception as e:
         logger.error(
@@ -570,7 +582,8 @@ async def list_paused_turns(conversation_id: str) -> list[TurnSuspension]:
     for r in rows:
         if is_ceo_continue_frame(r.frame):
             continue
-        if is_leftover_team_preview_frame(r.frame):
+        try:
+            out.append(suspension_from_json(r.frame))
+        except ValueError:
             continue
-        out.append(suspension_from_json(r.frame))
     return out

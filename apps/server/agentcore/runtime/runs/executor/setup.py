@@ -181,6 +181,7 @@ async def _prepare_agent_node(
 
     # 无出生且无 target → 坐会话 scratch。云端默认禁写（冷启动 explore_memory 例外）；
     # 本机裸聊 scratch 就是桌，允许写盘。
+    from agentcore.llm.image_accept import model_accepts_images
     from agentcore.runtime.delegate.target_desktop import (
         SCRATCH_NO_WRITE_IDENTITY_HINT,
         bare_chat_local_scratch_write_ok,
@@ -203,6 +204,7 @@ async def _prepare_agent_node(
         run_id=spec.run_id,
         agent_id=agent_id,
         execution_id=env.execution_id,
+        named_desk_read=False,
         write_coordinator=env.write_coordinator,
         write_ancestors=env.ancestors_by_id.get(spec.run_id, frozenset()),
         ownership_desk_id=(
@@ -243,6 +245,7 @@ async def _prepare_agent_node(
         handoff_requires_body=False,
         handoff_min_body_chars=0,
         handoff_expects_landing=deliverable_expects_landing(deliverable),
+        accepts_images=model_accepts_images(priced_model or ""),
     )
     # 阶段2 嵌套子任务: hand this worker delegation tools when opted in.
     _trim_started = time.monotonic()

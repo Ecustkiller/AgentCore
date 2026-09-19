@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
+from agentcore.runtime.checkpoints import CheckpointDecision
 from agentcore.sidecar.server_pkg.ipc_contract import (
     resume_rpc_param_keys,
     resume_rpc_required_keys,
     turn_result_keys,
     turn_result_usage_keys,
 )
-from agentcore.sidecar.server_pkg.result import trim_result
+from agentcore.sidecar.server_pkg.result import parse_decision, trim_result
 
 
 def test_trim_result_keys_match_contract():
@@ -96,3 +99,13 @@ def test_trim_result_forwards_citations_and_runs_verbatim():
     assert out["citations"] == citations
     assert out["runs"] is not None
     assert "events" in out["runs"]
+
+
+def test_parse_decision_blank_continues_unknown_rejected():
+    assert parse_decision("") is CheckpointDecision.CONTINUE
+    assert parse_decision(None) is CheckpointDecision.CONTINUE
+    assert parse_decision("stop") is CheckpointDecision.STOP
+    with pytest.raises(ValueError, match="invalid decision"):
+        parse_decision("research_first")
+    with pytest.raises(ValueError, match="invalid decision"):
+        parse_decision("not-a-decision")

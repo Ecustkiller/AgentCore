@@ -37,7 +37,6 @@ vi.mock("@/hooks/useConversations", () => ({
     mutate: vi.fn(),
     mutateAsync: mocks.mutateAsync,
   }),
-  useDuplicateConversation: () => ({ mutate: vi.fn() }),
   useRenameConversation: () => ({ mutate: vi.fn() }),
   useRestoreConversation: () => ({ mutate: mocks.restoreMutate }),
   useTogglePin: () => ({ mutate: vi.fn() }),
@@ -172,6 +171,13 @@ describe("ConversationItem delete", () => {
 
     expectNoDeleteConfirm();
     await expectSoftDeleted();
+  });
+
+  it("context menu 不再提供整段克隆对话", async () => {
+    renderItem();
+    fireEvent.contextMenu(screen.getByText("当前会话"));
+    expect(await screen.findByText("删除对话")).toBeTruthy();
+    expect(screen.queryByText("克隆对话")).toBeNull();
   });
 
   it("soft-deletes from the more menu with no confirm step", async () => {

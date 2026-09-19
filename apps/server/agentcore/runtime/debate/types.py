@@ -3,8 +3,8 @@
 把辩论从「`delegate` 上的 stance/round 展示标记 + CEO 手搓跨轮 DAG」重设计为「主持人
 驱动、过程与结论双产物」的能力（见 docs/03-AI核心/辩论编排设计.md）。本模块只定形状：
 
-- :class:`DebateForm` / :class:`DebateSide` / :class:`DebateConfig` —— 一场辩论的配置（三
-  形态统一模型：参与方泛化为「立场标签」，破二元 pro/con）。
+- :class:`DebateForm` / :class:`DebateSide` / :class:`DebateConfig` —— 一场辩论的配置（产品
+  只开正反；参与方仍是立场标签）。
 - :class:`SideTurn` / :class:`JudgeVerdict` / :class:`RoundResult` —— 一轮的产物（各方发
   言 + 收敛裁判 + 主持人小结），是过程产物「交锋叙事线」的逐轮单元。
 - :class:`DebateBrief` / :class:`DebateResult` —— 双产物（决策简报 + 叙事线），主持人交回
@@ -40,26 +40,25 @@ def normalize_handoff_kind(raw: str) -> HandoffKind:
 # ── 轮次治理默认（辩论编排设计.md §五） ──────────────────────────────────────
 # 轮数永不暴露给用户设定：用户只选形态，收敛由主持人逐轮自判（无最小轮门槛强制多轮）。这些
 # 是纯「安全上限」（防失控的断路器），不是目标值——收敛永远可早于它发生。
-DEFAULT_MAX_ROUNDS = 5  # 安全上限（正反/红队）：达到即停（防失控兜底，非目标）
-# 圆桌（探讨型）上限略紧于辩论（铺满观点光谱即可，无需正反那种对抗强度的轮数）。
-DEFAULT_MAX_ROUNDS_ROUNDTABLE = 4
+DEFAULT_MAX_ROUNDS = 5  # 安全上限：达到即停（防失控兜底，非目标）
 
 
 class DebateForm(StrEnum):
-    """辩论的三形态（辩论编排设计.md §三）——一套主持人循环参数化而成，非独立执行路径。"""
+    """产品唯一形态：正反辩论。未知 / 已删 wire 值回落正反，旧磁带不炸。"""
 
-    DEBATE = "debate"  # 正反辩论：正/反 2 方对称攻防
-    RED_TEAM = "red_team"  # 红队挑刺：被审方案 + 1~N 红队单向攻击 → 方案方回应
-    ROUNDTABLE = "roundtable"  # 多方圆桌：3~N 个视角多边碰撞
+    DEBATE = "debate"
+
+    @classmethod
+    def _missing_(cls, value: object) -> DebateForm:
+        return cls.DEBATE
 
 
 @dataclass(frozen=True)
 class DebateSide:
     """一个参与方 —— 把 pro/con 泛化为「立场标签」（辩论编排设计.md §三）。
 
-    ``key`` 是机器标识（用于 run_id / 前端分桶 / 跨轮续写定位），``name`` 是展示名
-    （正方 / 红队A / 经济学视角），``stance`` 是喂给辩手的立场定位（拼进它的角色补充）。
-    ``is_subject`` 标记红队形态里那个「被审方案方」（单向攻击的承受方），其余形态恒 False。
+    ``key`` 是机器标识（用于 run_id / 前端分桶 / 跨轮续写定位），    ``name`` 是展示名（正方 / 反方），``stance`` 是喂给辩手的立场定位（拼进它的角色补充）。
+    ``is_subject`` 已无产品语义；新场恒 False。
 
     模型身份（Phase 3 · 真·多模型辩手，§7.5）产品面是目录 ``ref`` 或提及；解析后
     内部仍为 ``model`` + ``origin`` + ``provider_id``。空 ``model`` = 回退 turn 主模型；
@@ -100,10 +99,8 @@ class RoundPolicy:
 
     @classmethod
     def for_form(cls, form: DebateForm) -> RoundPolicy:
-        """形态默认 policy。圆桌探讨上限略紧（铺光谱即可）、正反/红队认真辩透；轮数仍由
-        主持人逐轮自判收敛，``max_rounds`` 只是安全上限。"""
-        if form is DebateForm.ROUNDTABLE:
-            return cls(max_rounds=DEFAULT_MAX_ROUNDS_ROUNDTABLE)
+        """正反默认 policy。轮数由主持人逐轮自判收敛，``max_rounds`` 只是安全上限。"""
+        del form
         return cls(max_rounds=DEFAULT_MAX_ROUNDS)
 
 
@@ -111,8 +108,8 @@ class RoundPolicy:
 class DebateConfig:
     """一场辩论的完整配置 —— 用户只抛「问题」或选「形态」，参与方/轮数由系统定。
 
-    ``motion`` 是辩论命题（用户问题）；``sides`` 是泛化后的参与方（≥2）；``policy`` 收敛/轮
-    次治理。辩手与主持人均跑统一 turn model（无质量档）。
+    ``motion`` 是辩论命题（用户问题）；``sides`` 是参与方（≥2）；``policy`` 收敛/轮次治理。
+    辩手与主持人均跑统一 turn model（无质量档）。``form`` 恒正反。
     """
 
     motion: str
@@ -152,14 +149,8 @@ class DebateConfig:
     # §7.5 D：消歧零/多候选时挂结构化候选（开赛卡 / 工具错误载荷）；旧帧缺省空。
     model_candidates: list[dict[str, Any]] = field(default_factory=list)
 
-    @property
-    def subject_side(self) -> DebateSide | None:
-        """红队形态里的「被审方案方」（其余形态返回 None）。"""
-        return next((s for s in self.sides if s.is_subject), None)
 
-
-# 发言 beat（轮内拓扑）：正反默认 statement；红队攻/应/复；圆桌线程 turn / crux 短答。
-# 缺字段（老 journal）→ 前端按 statement。
+# 发言 beat：正反默认 statement。旧磁带可带已删形态的 beat 名；缺字段 → statement。
 SpeechBeat = Literal["statement", "attack", "defense", "rebuttal", "thread", "crux"]
 
 
@@ -174,8 +165,7 @@ class SideTurn:
     图节点、并供跨轮续写定位同一辩手。``arguments`` 为后端解析的论点大纲（进 SSE 载荷；
     全文仍随 run 事件走）。
 
-    ``beat`` 区分轮内多拍（红队攻/应/复、圆桌线程）——正反攻防恒 ``statement``（零回归）；
-    同一 ``side_key`` 可在 ``RoundResult.turns`` 出现多条（每拍一条）。
+    ``beat`` 正反攻防恒 ``statement``；旧磁带可带已删形态的拍名。
     """
 
     side_key: str
@@ -287,123 +277,6 @@ class WitnessExamExchange:
     answer_run_id: str = ""
     seat_run_id: str = ""
     origin_caption: str = ""
-
-
-class FindingSeverity(StrEnum):
-    """红队 finding 严重度（提案 §3.2）——替换按方 ``risk_severities`` 的粒度。"""
-
-    CRITICAL = "critical"
-    MAJOR = "major"
-    MINOR = "minor"
-
-
-class FindingStatus(StrEnum):
-    """finding 生命周期：open → answered → closed / escalated / deadlocked；
-    ``unanswered`` = 方案方回应拍失败（O7）。"""
-
-    OPEN = "open"
-    ANSWERED = "answered"
-    CLOSED = "closed"
-    ESCALATED = "escalated"
-    DEADLOCKED = "deadlocked"
-    UNANSWERED = "unanswered"
-
-
-class FindingDisposition(StrEnum):
-    """方案方对 finding 的处置口径（提案 §3.2 回应拍）。"""
-
-    ACCEPT = "accept"
-    MITIGATE = "mitigate"
-    REBUT = "rebut"
-    DEFER = "defer"
-
-
-@dataclass
-class Finding:
-    """红队交互单元 —— 一条刺及其处置/复核状态（提案 §3.2）。
-
-    wire 只带结构（id / status / severity / target / 各方 run_id，O2）；主张全文 / 处置理由 /
-    复攻说明靠对应 ``*_run_id`` 关联执行事件。``claim`` 等全文仅服务端内部（裁判 / 注入）。
-    """
-
-    id: str
-    severity: FindingSeverity
-    target: str  # 指向方案的哪个环节/假设
-    attacker_key: str
-    status: FindingStatus = FindingStatus.OPEN
-    disposition: str = ""  # FindingDisposition value 或空
-    attack_run_id: str = ""
-    response_run_id: str = ""
-    rebuttal_run_id: str = ""
-    claim: str = ""  # 内部全文，不上 wire
-    response_note: str = ""  # 内部
-    rebuttal_note: str = ""  # 内部
-    merged_from: list[str] = field(default_factory=list)  # O5 被合并的源 id
-
-    def to_wire(self) -> dict:
-        """O2：只带结构；全文靠 run_id。"""
-        return {
-            "id": self.id,
-            "severity": self.severity.value if isinstance(self.severity, FindingSeverity) else str(self.severity),
-            "target": self.target,
-            "attacker_key": self.attacker_key,
-            "status": self.status.value if isinstance(self.status, FindingStatus) else str(self.status),
-            "disposition": self.disposition,
-            "attack_run_id": self.attack_run_id,
-            "response_run_id": self.response_run_id,
-            "rebuttal_run_id": self.rebuttal_run_id,
-            "merged_from": list(self.merged_from),
-        }
-
-
-@dataclass
-class ThreadTurn:
-    """圆桌交互单元 —— 线程内一次发言（提案 §3.3）。
-
-    wire 只带 speaker / reply_to / run_id / ok（O2）；全文靠 run_id。
-    """
-
-    speaker: str
-    run_id: str
-    reply_to: str = ""  # 空 = 开题
-    ok: bool = True
-    content: str = ""  # 内部全文
-    beat: SpeechBeat = "thread"
-
-    def to_wire(self) -> dict:
-        return {
-            "speaker": self.speaker,
-            "reply_to": self.reply_to,
-            "run_id": self.run_id,
-            "ok": self.ok,
-            "beat": self.beat,
-        }
-
-
-class GateDecision(StrEnum):
-    """红队门决（提案 §3.2）——收场产物，非比分。"""
-
-    CONDITIONAL_PASS = "conditional_pass"
-    NEEDS_MAJOR_REWORK = "needs_major_rework"
-    NOT_VIABLE = "not_viable"
-
-
-@dataclass
-class ConsensusMapItem:
-    """圆桌子题级共识/分歧地图条目（提案 §3.3）。"""
-
-    topic: str
-    consensus: list[str] = field(default_factory=list)
-    divergences: list[str] = field(default_factory=list)
-    crux: str = ""  # 分歧驱动：事实 / 价值 / 假设
-
-    def to_wire(self) -> dict:
-        return {
-            "topic": self.topic,
-            "consensus": list(self.consensus),
-            "divergences": list(self.divergences),
-            "crux": self.crux,
-        }
 
 
 @dataclass
@@ -532,7 +405,6 @@ class JudgeVerdict:
 # 终止条件词表（辩论编排设计.md §五）——裁判判收敛时给出的归因，前端可据此呈现「为何收场」。
 STOP_CONVERGED = "converged"  # 各方无实质新论点（开始重复）
 STOP_FOCUS_CLARIFIED = "focus_clarified"  # 分歧已归结为价值/偏好之争（AI 判不了，交用户）
-STOP_RED_TEAM_EXHAUSTED = "red_team_exhausted"  # 无新风险可挖（红队专用）
 STOP_MAX_ROUNDS = "max_rounds"  # 达轮数硬上限（兜底，由循环而非裁判判定）
 STOP_ALL_FAILED = "all_failed"  # 某轮全员发言失败，主持人提前终止
 STOP_USER_CONCLUDED = "user_concluded"  # 交互式逐轮：用户在轮边界选择「够了，出结论」
@@ -540,7 +412,6 @@ STOP_REASONS = frozenset(
     {
         STOP_CONVERGED,
         STOP_FOCUS_CLARIFIED,
-        STOP_RED_TEAM_EXHAUSTED,
         STOP_MAX_ROUNDS,
         STOP_ALL_FAILED,
         STOP_USER_CONCLUDED,
@@ -563,14 +434,10 @@ class RoundResult:
     # 驱动本轮的用户追问（交互式逐轮，opt-in）：用户在【上一轮】边界注入、本轮辩手须正面回应的
     # 问题（verbatim 复盘单元）。非交互 / 无追问恒空。详见 :class:`UserInterjection`。
     user_interjections: list[UserInterjection] = field(default_factory=list)
-    # 本轮质询问答（仅认真档正反）。被质询方 continue_run 作答，喂进裁判。红队/圆桌/快速档恒空。
+    # 本轮质询问答（仅正反）。被质询方 continue_run 作答，喂进裁判。
     cross_exam: list[CrossExamExchange] = field(default_factory=list)
     # 证人答问：冷冻回放。新场恒空。
     witness_exam: list[WitnessExamExchange] = field(default_factory=list)
-    # 红队 finding 台账增量（本轮合并后权威快照；对齐 evidence_ledger_delta 先例）。非红队恒空。
-    findings: list[Finding] = field(default_factory=list)
-    # 圆桌本轮线程 turn 序（点名串行 + 可选 crux）。非圆桌恒空。
-    thread_turns: list[ThreadTurn] = field(default_factory=list)
 
     @property
     def ok_turns(self) -> list[SideTurn]:
@@ -581,9 +448,7 @@ class RoundResult:
         """本轮结构化为 SSE 事件 payload —— ``debate_round`` 事件与 :meth:`DebateResult.
         to_event_payload` 的逐轮单元共用此一处（单一源，防漂移）。
 
-        承载叙事线一轮（focus / verdict / summary）+ 各方→辩手 ``run_id`` 映射；发言【全文】
-        不在此（体量大、随辩手 run 走执行事件），靠 ``sides[*].run_id`` 关联执行图辩手节点。
-        finding / 线程 turn 只带结构（O2）。
+        承载叙事线一轮（focus / verdict / summary）+ 各方→辩手 ``run_id`` 映射；        发言【全文】不在此（体量大、随辩手 run 走执行事件），靠 ``sides[*].run_id`` 关联执行图辩手节点。
         """
         return {
             "round_no": self.round_no,
@@ -667,10 +532,6 @@ class RoundResult:
                 }
                 for key, sc in self.verdict.scores.items()
             },
-            # 红队 finding 台账（结构 only，O2）；非红队 / 老载荷恒 []。
-            "findings": [f.to_wire() for f in self.findings],
-            # 圆桌线程 turn 序（结构 only）；非圆桌 / 老载荷恒 []。
-            "thread_turns": [t.to_wire() for t in self.thread_turns],
         }
 
 
@@ -696,20 +557,13 @@ class DebateBrief:
 
     crux: str  # 争议焦点：双方真正分歧在哪
     strongest_points: dict[str, str] = field(default_factory=dict)  # side_key → 去水最强论点
-    # 退役迁移（提案 §3.2）：按方 risk_severities → finding 粒度严重度。新场次恒空；旧载荷降级
-    # 渲染仍可读本字段（兼容向量钉住）。
+    # 退役字段：新场次恒空；旧载荷降级渲染仍可读。
     risk_severities: dict[str, str] = field(default_factory=dict)
-    # 红队 finding 台账权威快照（收场）+ 门决 / must-fix。非红队恒空 / 空串。
-    findings: list[Finding] = field(default_factory=list)
-    gate: str = ""  # GateDecision value
-    must_fix: list[str] = field(default_factory=list)  # 未关闭 critical/major 的 finding id
-    # 圆桌共识/分歧地图（按子题）。非圆桌恒空。
-    consensus_map: list[ConsensusMapItem] = field(default_factory=list)
     # 交接清单（统一模型）：按解决路径分类的「留给你的」条目；旧三平行字段已退役。
     handoffs: list[DebateHandoff] = field(default_factory=list)
-    # 胜负手：对抗形态下一句话点名定局的那个交锋点。圆桌不裁胜负，decisive 可空。
+    # 胜负手：一句话点名定局的那个交锋点。
     decisive: str = ""
-    leaning: str = ""  # 倾向（圆桌=观点光谱小结，非裁赢家）
+    leaning: str = ""
     confidence: str = ""  # 把握档 high|medium|low
     recommendation: str = ""  # 仅未决三栏都空时写一句
 
@@ -735,14 +589,6 @@ class DebateResult:
     closings: list[ClosingStatement] = field(default_factory=list)
     # 证人席位：冷冻回放花名册。新场恒空。
     witnesses: list[WitnessSeatInfo] = field(default_factory=list)
-    # 圆桌子题轴（frame 升级，提案 §3.3）；非圆桌恒空。
-    subtopics: list[str] = field(default_factory=list)
-
-    @property
-    def narrative_first(self) -> bool:
-        """呈现顺序（辩论编排设计.md §4.3）：探讨/学习类（圆桌）过程叙事线先行，决策类
-        （正反/红队）决策简报先行。前端据此排版，CEO 收尾文本也据此调整侧重。"""
-        return self.config.form is DebateForm.ROUNDTABLE
 
     @property
     def node_summary(self) -> str:
@@ -755,7 +601,7 @@ class DebateResult:
         return f"{len(self.rounds)} 轮 · {_stop_label(self.stop_reason)}"
 
     def to_ceo_output(self) -> str:
-        """折算回 CEO 循环的 markdown：决策简报 + 逐轮焦点小结（按形态调顺序）。
+        """折算回 CEO 循环的 markdown：决策简报先行，再逐轮焦点小结。
 
         尾部只提醒用自己的声音收尾并指向 skill；铁律正文留在
         ``debate_and_review``，不贴进 tool result。
@@ -767,7 +613,7 @@ class DebateResult:
             f"## 辩论结果（{_form_label(self.config.form)} · {rounds_n} 轮 · "
             f"{_stop_label(self.stop_reason)}）\n"
         )
-        body = [narrative_md, brief_md] if self.narrative_first else [brief_md, narrative_md]
+        body = [brief_md, narrative_md]
         tail = (
             "\n\n---\n以上为本场辩论的**决策简报 + 交锋叙事线**（用户可在界面展开逐轮攻防与"
             "各方全文）。用自己的声音收尾，不要粘贴本段指令。"
@@ -788,7 +634,7 @@ class DebateResult:
             "stop_reason": self.stop_reason,
             # 主持人开场白：前端「会说话的主持人」入场气泡；空则不渲染入场。
             "opening": self.opening,
-            "narrative_first": self.narrative_first,
+            "narrative_first": False,
             "sides": [
                 {
                     "key": s.key,
@@ -864,26 +710,16 @@ class DebateResult:
                 "strongest_points": dict(self.brief.strongest_points),
                 # 退役字段：新场次恒空；旧载荷降级渲染可读。
                 "risk_severities": dict(self.brief.risk_severities),
-                # 红队 finding 台账权威快照 + 门决（结构 only，O2）。
-                "findings": [f.to_wire() for f in self.brief.findings],
-                "gate": self.brief.gate,
-                "must_fix": list(self.brief.must_fix),
-                # 圆桌共识/分歧地图。
-                "consensus_map": [m.to_wire() for m in self.brief.consensus_map],
-                # 未决清单：kind 再过一遍 normalize（坏 kind → question），不丢条目。
                 "handoffs": [
                     {"kind": normalize_handoff_kind(h.kind), "text": h.text}
                     for h in self.brief.handoffs
                     if h.text
                 ],
-                # 胜负手：一句话点名定局的那个交锋点；空=未写。
                 "decisive": self.brief.decisive,
                 "leaning": self.brief.leaning,
                 "confidence": self.brief.confidence,
                 "recommendation": self.brief.recommendation,
             },
-            # 圆桌子题轴；非圆桌 / 老载荷恒 []。
-            "subtopics": list(self.subtopics),
         }
 
 
@@ -919,8 +755,7 @@ class CrossExamRunner(Protocol):
     主持人先据本轮立论生成【定向各方的必答质询】（:meth:`Moderator._cross_exam_questions`），再把
     ``questions``（side_key → 问题列表）交给本 runner：真实实现（DebateTool）让每个被质询方用
     ``continue_run`` 在自己 transcript 上正面作答，返回各方的 :class:`CrossExamExchange`（作答全文进
-    该方 session 记忆、下一轮立论续写可见）；单测注入 fake 零成本驱动。仅正反 DEBATE 开启
-    （圆桌 / 红队跳过，见 :meth:`Moderator._cross_exam_enabled`），故为**可选**注入——
+    该方 session 记忆、下一轮立论续写可见）；单测注入 fake 零成本驱动。仅正反开启，故为**可选**注入——
     未注入 / 未开启时循环逐字回退到「立论→裁判」，零行为变化。
     """
 
@@ -999,16 +834,10 @@ def _form_label(form: DebateForm) -> str:
     return FORM_LABELS.get(form, str(form))
 
 
-def _severity_label(sev: str) -> str:
-    """红队风险严重度枚举 → 中文（与前端风险看板同口径）；未知值原样回显。"""
-    return {"high": "高", "medium": "中", "low": "低"}.get(sev, sev)
-
-
 def _stop_label(reason: str) -> str:
     return {
         STOP_CONVERGED: "已收敛",
         STOP_FOCUS_CLARIFIED: "焦点已澄清为价值之争",
-        STOP_RED_TEAM_EXHAUSTED: "风险已挖尽",
         STOP_MAX_ROUNDS: "达轮数上限",
         STOP_ALL_FAILED: "辩手发言失败提前终止",
         STOP_USER_CONCLUDED: "用户选择出结论",
@@ -1016,38 +845,8 @@ def _stop_label(reason: str) -> str:
 
 
 def _render_brief(brief: DebateBrief, config: DebateConfig) -> str:
+    del config
     lines = ["### 决策简报"]
-    debate = config.form is DebateForm.DEBATE
-    if not debate:
-        if brief.crux:
-            lines.append(f"- **争议焦点**：{brief.crux}")
-        for side in config.sides:
-            point = brief.strongest_points.get(side.key)
-            if point:
-                sev = brief.risk_severities.get(side.key)
-                sev_tag = f"（风险严重度：{_severity_label(sev)}）" if sev else ""
-                lines.append(f"- **{side.name}最强论点**{sev_tag}：{point}")
-        if brief.findings:
-            lines.append("- **风险台账（finding）**：")
-            for f in brief.findings:
-                sev = f.severity.value if isinstance(f.severity, FindingSeverity) else f.severity
-                st = f.status.value if isinstance(f.status, FindingStatus) else f.status
-                lines.append(
-                    f"  - [{f.id}|{sev}|{st}] {f.target}" + (f"：{f.claim}" if f.claim else "")
-                )
-        if brief.gate:
-            mf = f"（must-fix：{', '.join(brief.must_fix)}）" if brief.must_fix else ""
-            lines.append(f"- **门决**：{brief.gate}{mf}")
-        if brief.consensus_map:
-            lines.append("- **共识/分歧地图**：")
-            for m in brief.consensus_map:
-                lines.append(f"  - **{m.topic}**")
-                if m.consensus:
-                    lines.append(f"    - 共识：{'；'.join(m.consensus)}")
-                if m.divergences:
-                    lines.append(f"    - 分歧：{'；'.join(m.divergences)}")
-                if m.crux:
-                    lines.append(f"    - crux：{m.crux}")
     if brief.leaning:
         lines.append(f"- **倾向**：{brief.leaning}")
     if brief.decisive:

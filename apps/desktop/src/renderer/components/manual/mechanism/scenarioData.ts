@@ -127,7 +127,7 @@ export const SCENARIOS: Scenario[] = [
   },
   {
     title: "正反辩论",
-    desc: "辩论三形态之一：正方与反方对垒，图上左右分带，最后汇到 CEO 裁决。另外两种——红队挑刺、多方圆桌——在「更多形态」里。",
+    desc: "正方与反方对垒，图上左右分带，最后汇到 CEO 裁决。",
     nodes: [
       input("评估是否采用激进重构方案"),
       agent("pro", "架构师", "completed", {
@@ -217,78 +217,6 @@ export const SCENARIOS: Scenario[] = [
       edge("r1", "cap2"),
       edge("r2", "cap2"),
       edge("r3", "cap2"),
-    ],
-  },
-  {
-    title: "红队挑刺",
-    advanced: true,
-    desc: "辩论三形态之二：方案方被审，红队专找风险与漏洞；挖尽或修补到位后收口，侧重风险清单与加固建议。",
-    nodes: [
-      input("压力测试这个上线方案，把隐患挖出来"),
-      agent("scheme", "方案方", "completed", {
-        group: "debate:red_team",
-        task: "陈述上线方案与已做防护",
-        durationMs: 4200,
-      }),
-      agent("rt1", "红队·安全", "completed", {
-        group: "debate:red_team",
-        task: "攻击权限边界与数据泄露面",
-        durationMs: 5100,
-      }),
-      agent("rt2", "红队·合规", "completed", {
-        group: "debate:red_team",
-        task: "挑刺审计留痕与用户告知义务",
-        durationMs: 4600,
-      }),
-      captain(
-        "rtcap",
-        "completed",
-        "共挖出 4 项高优风险；方案方已回应修补路径，建议上线前先关权限与告知两项。",
-      ),
-    ],
-    edges: [
-      edge("__input__", "scheme"),
-      edge("__input__", "rt1"),
-      edge("__input__", "rt2"),
-      edge("scheme", "rtcap"),
-      edge("rt1", "rtcap"),
-      edge("rt2", "rtcap"),
-    ],
-  },
-  {
-    title: "多方圆桌",
-    advanced: true,
-    desc: "辩论三形态之三：三个以上视角多边碰撞，把观点光谱铺开；适合探讨与学习，过程地图往往比单一裁决更有用。",
-    nodes: [
-      input("从产品、工程、运营三个视角讨论远程办公政策"),
-      agent("p1", "产品视角", "completed", {
-        group: "debate:roundtable",
-        task: "从用户体验与节奏谈利弊",
-        durationMs: 3800,
-      }),
-      agent("p2", "工程视角", "completed", {
-        group: "debate:roundtable",
-        task: "从协作成本与交付质量谈利弊",
-        durationMs: 4100,
-      }),
-      agent("p3", "运营视角", "completed", {
-        group: "debate:roundtable",
-        task: "从人效与合规谈利弊",
-        durationMs: 3900,
-      }),
-      captain(
-        "rtbcap",
-        "completed",
-        "三视角光谱已铺开：核心分歧在「同步密度」与「办公日门槛」，交给你拍板。",
-      ),
-    ],
-    edges: [
-      edge("__input__", "p1"),
-      edge("__input__", "p2"),
-      edge("__input__", "p3"),
-      edge("p1", "rtbcap"),
-      edge("p2", "rtbcap"),
-      edge("p3", "rtbcap"),
     ],
   },
   {

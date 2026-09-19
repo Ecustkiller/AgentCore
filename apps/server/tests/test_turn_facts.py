@@ -41,6 +41,7 @@ def test_turn_started_fact_entry_shape():
         "user_message": "写个脚本",
         "model_profile": "chat",
         "history_len": 4,
+        "turn_envelope": "",
     }
 
 

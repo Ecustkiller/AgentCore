@@ -274,16 +274,11 @@ def vision_run_cost(
     duration_ms: int = 0,
     credential_source: CredentialSource | None = None,
 ) -> RunCost:
-    """A ledger row for a vision sub-call (attachment eye→text / ``read_image``).
-    A tool-layer sub-call to a SEPARATE vision model (qwen-vl ≠ the run's chat model), so it
-    cannot fold into the run's usage — that would misprice it at the run's tier. Priced
-    here exactly once via the one ``calculate_cost`` (不变量 #2) under the dedicated
-    ``vision`` role, then routed into the turn's ``cost_runs`` via ``ToolContext.cost_sink``
-    so it lands on the turn's ``message_id`` (in-turn spend, unlike an off-turn background
-    call whose ``message_id`` stays NULL). ``parent_run_id`` is the calling captain's run
-    id, so the spend nests under the captain in the turn's run tree; ``rounds`` is 1 (one
-    vision call). A unique ``vis_`` run id keeps the ledger's idempotent upsert-by-run_id
-    honest.
+    """Historical ledger row for a sidecar vision sub-call (``role=vision``).
+
+    Live turns no longer mint this path: images ride the current main model.
+    Rows already in ``cost_events`` still fold at settle. A unique ``vis_`` run
+    id keeps the ledger's idempotent upsert-by-run_id honest.
     """
     body, billed, estimated, currency = _split_cost(
         asdict(calculate_cost(model, usage, credential_source=credential_source))

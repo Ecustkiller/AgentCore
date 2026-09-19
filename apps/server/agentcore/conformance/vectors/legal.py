@@ -33,9 +33,8 @@ def _multi_agent_legal_war_room() -> list[SSEEvent]:
     复用现有事件类型**组合**出法律 hero 的玻璃箱全流程——给它一个常驻离线预览场景 + CI 渲染冒烟门，
     **不新增事件类型 → fold 不碰**（守协议边界）。流程与 M2 实测形态一致：① CEO
     `consult_skill(legal_answer_brief)` 翻作战室打法；② `delegate` 起草律师出 `答辩状初稿.md`
-    （worker 内 `file_write`）；③ `debate(form=red_team)` 让**原告红队**单向压测我方答辩
-    （`defense` is_subject vs 程序 / 实体红队），收场 `debate_result` 承「风险看板 + 加固建议 +
-    我方回应」双产物，挖出 3 个攻击点（送达举证 / 质量异议具体性 / 沉默推定）；④ `delegate` 核验
+    （worker 内 `file_write`）；③ `debate` 正反（我方答辩 vs 原告）交锋，收场 `debate_result` 承
+    「决策简报 + 交锋叙事线」双产物，挖出 3 个攻击点（送达举证 / 质量异议具体性 / 沉默推定）；④ `delegate` 核验
     律师 `web_search` + 落 `法条核验报告.md`（带**出处** + `[待核验]`）；⑤ 终稿前 `checkpoint`
     人审闸门**暂停**（status=paused、pendingInteraction=checkpoint），把攻防 / 核验结论摊给律师
     拍板再收口。本向量取**人审暂停态**：停在人审闸门（status=paused、pendingInteraction=checkpoint），
@@ -46,14 +45,13 @@ def _multi_agent_legal_war_room() -> list[SSEEvent]:
     mod = "warroom_mod1"
     r_draft, w_draft = "r_draft", "w_draft"
     r_verify, w_verify = "r_verify", "w_verify"
-    subj_run = f"{mod}_r1_defense"
-    redp_run = f"{mod}_r1_redproc"
-    reds_run = f"{mod}_r1_redsubst"
+    pro_run = f"{mod}_r1_pro"
+    con_run = f"{mod}_r1_con"
 
     skill_guidance = (
         "## 答辩状作战室\n"
         "1. 解析对方起诉状 + 我方事实 → 逐项答辩（程序抗辩 + 实体抗辩 + 质证 + 法律依据）。\n"
-        "2. delegate 起草，debate(red_team, is_subject=我方答辩) 让原告红队单向压测，再逐点加固。\n"
+        "2. delegate 起草，debate 正反（我方答辩 vs 原告）交锋后再逐点加固。\n"
         "3. delegate 核验逐条法条 / 时效，未核验不得引用、标 [待核验]；终稿标法域 + 免责 + 人审闸门。\n"
     )
     draft_md = (
@@ -100,7 +98,7 @@ def _multi_agent_legal_war_room() -> list[SSEEvent]:
         {
             "id": mod,
             "agent_id": mod,
-            "task": "主持红队审查：原告视角压测我方答辩",
+            "task": "主持正反辩论：我方答辩对原告",
             "depends_on": [],
             "parent_run_id": cap,
         },
@@ -112,69 +110,50 @@ def _multi_agent_legal_war_room() -> list[SSEEvent]:
             "thinking": True,
         },
         {
-            "id": "d_red_proc",
-            "role": "程序红队",
-            "thinking": True,
-        },
-        {
-            "id": "d_red_subst",
-            "role": "实体红队",
+            "id": "d_plaintiff",
+            "role": "原告",
             "thinking": True,
         },
     ]
     debater_runs = [
         {
-            "id": subj_run,
+            "id": pro_run,
             "agent_id": "d_defense",
             "task": "为我方答辩抗辩并加固",
             "depends_on": [],
             "parent_run_id": mod,
-            "group": "debate:red_team",
+            "group": "debate:debate",
             "round": 1,
+            "stance": "pro",
         },
         {
-            "id": redp_run,
-            "agent_id": "d_red_proc",
-            "task": "以原告视角挖程序 / 送达漏洞",
+            "id": con_run,
+            "agent_id": "d_plaintiff",
+            "task": "以原告视角攻击答辩的程序与实体漏洞",
             "depends_on": [],
             "parent_run_id": mod,
-            "group": "debate:red_team",
+            "group": "debate:debate",
             "round": 1,
-        },
-        {
-            "id": reds_run,
-            "agent_id": "d_red_subst",
-            "task": "以原告视角挖实体抗辩漏洞",
-            "depends_on": [],
-            "parent_run_id": mod,
-            "group": "debate:red_team",
-            "round": 1,
+            "stance": "con",
         },
     ]
     debate_payload = {
-        "form": "red_team",
+        "form": "debate",
         "motion": "以原告视角压测我方《民事答辩状》的稳健性",
-        "stop_reason": "red_team_exhausted",
+        "stop_reason": "converged",
         "narrative_first": False,
         "sides": [
             {
-                "key": "defense",
+                "key": "pro",
                 "name": "我方答辩",
                 "stance": "逐项抗辩成立、无需担责",
-                "is_subject": True,
-                "model": "",
-            },
-            {
-                "key": "red_proc",
-                "name": "程序红队（原告）",
-                "stance": "程序与送达举证存在硬伤",
                 "is_subject": False,
                 "model": "",
             },
             {
-                "key": "red_subst",
-                "name": "实体红队（原告）",
-                "stance": "实体抗辩不成立",
+                "key": "con",
+                "name": "原告",
+                "stance": "程序送达与实体抗辩均有硬伤",
                 "is_subject": False,
                 "model": "",
             },
@@ -183,28 +162,27 @@ def _multi_agent_legal_war_room() -> list[SSEEvent]:
             {
                 "round_no": 1,
                 "focus": "送达举证 / 质量异议具体性 / 沉默推定 三点攻防",
-                "summary": "原告红队挖出送达签收链缺失、异议函笼统、对部分诉请沉默三点；我方补证据并逐点否认加固。",
+                "summary": "原告挖出送达签收链缺失、异议函笼统、对部分诉请沉默三点；我方补证据并逐点否认加固。",
                 "verdict": {
                     "real_clash": True,
                     "new_arguments": True,
                     "converged": True,
-                    "stop_reason": "red_team_exhausted",
+                    "stop_reason": "converged",
                     "rationale": "三点攻击已被逐点回应 / 加固，无新增有效攻击。",
                 },
                 "sides": [
-                    {"key": "defense", "name": "我方答辩", "run_id": subj_run, "ok": True},
-                    {"key": "red_proc", "name": "程序红队（原告）", "run_id": redp_run, "ok": True},
-                    {"key": "red_subst", "name": "实体红队（原告）", "run_id": reds_run, "ok": True},
+                    {"key": "pro", "name": "我方答辩", "run_id": pro_run, "ok": True},
+                    {"key": "con", "name": "原告", "run_id": con_run, "ok": True},
                 ],
                 "clashes": [
                     {
-                        "from_key": "red_proc",
-                        "to_key": "defense",
+                        "from_key": "con",
+                        "to_key": "pro",
                         "point": "到达举证缺签收链，送达争议规则对我方不利。",
                     },
                     {
-                        "from_key": "red_subst",
-                        "to_key": "defense",
+                        "from_key": "con",
+                        "to_key": "pro",
                         "point": "质量异议函笼统、未指向批次 / 标准；对部分诉请沉默易被推定认可。",
                     },
                 ],
@@ -213,14 +191,10 @@ def _multi_agent_legal_war_room() -> list[SSEEvent]:
         "brief": {
             "crux": "我方答辩能否扛住原告对『送达举证 + 质量异议具体性 + 沉默推定』三点的攻击",
             "strongest_points": {
-                "red_proc": "到达举证缺签收链，按送达争议规则我方不利，是最尖锐风险。",
-                "red_subst": "质量异议函表述笼统、未指向具体批次 / 标准，难达异议成立要件；对原告主张沉默处易被推定认可。",
-                "defense": "已补送达回执 + 异议函逐条对应批次，并就沉默项明确否认。",
+                "con": "到达举证缺签收链是最尖锐风险；异议函笼统、沉默项易被推定认可。",
+                "pro": "已补送达回执 + 异议函逐条对应批次，并就沉默项明确否认。",
             },
-            "risk_severities": {
-                "red_proc": "high",
-                "red_subst": "medium",
-            },
+            "risk_severities": {},
             "handoffs": [
                 {"kind": "value", "text": "以程序抗辩拖延 vs 实体一次性了结的策略取舍"},
                 {"kind": "fact", "text": "质量异议函是否在合理期限内送达原告口径不一"},
@@ -245,7 +219,7 @@ def _multi_agent_legal_war_room() -> list[SSEEvent]:
                 "summary": "答辩状要素结构 + 对方律师作战室编排 + 反幻觉硬约束",
             },
         ),
-        content_delta("按作战室打法组队：先起草，再让原告红队压一遍，核验法条，最后请你拍板。"),
+        content_delta("按作战室打法组队：先起草，再开正反辩论，核验法条，最后请你拍板。"),
         # ① delegate 起草律师 → 答辩状初稿.md（worker 内 file_write）
         tool_use_start("dc1", "delegate", {"tasks": [{"role": "起草律师"}]}),
         run_plan(
@@ -273,12 +247,12 @@ def _multi_agent_legal_war_room() -> list[SSEEvent]:
             cost=_COST,
         ),
         tool_use_end("dc1", "delegate", success=True, output="起草完成：答辩状初稿.md"),
-        # ② debate(red_team)：原告红队单向压测我方答辩（hero）
-        content_delta("现在让原告红队来压测我方答辩。"),
+        # ② debate：我方答辩 vs 原告
+        content_delta("现在开一场正反辩论：我方答辩对原告。"),
         run_plan(
             execution_id="exec1",
             plan_type="debate",
-            task_summary="红队审查：原告视角压测我方《民事答辩状》",
+            task_summary="正反辩论：我方答辩对原告《民事答辩状》",
             agents=mod_agents,
             runs=mod_runs,
         ),
@@ -290,12 +264,12 @@ def _multi_agent_legal_war_room() -> list[SSEEvent]:
             agents=debater_agents,
             runs=debater_runs,
         ),
-        run_started(subj_run, "d_defense", parent_run_id=mod),
+        run_started(pro_run, "d_defense", parent_run_id=mod),
         run_output_delta(
-            subj_run, "d_defense", "我方：已补送达回执、异议函逐条对应批次，并就沉默项明确否认。"
+            pro_run, "d_defense", "我方：已补送达回执、异议函逐条对应批次，并就沉默项明确否认。"
         ),
         run_completed(
-            subj_run,
+            pro_run,
             "d_defense",
             output_summary="我方抗辩 + 加固完成",
             duration_ms=900,
@@ -304,26 +278,16 @@ def _multi_agent_legal_war_room() -> list[SSEEvent]:
             usage=_USAGE,
             cost=_COST,
         ),
-        run_started(redp_run, "d_red_proc", parent_run_id=mod),
-        run_output_delta(redp_run, "d_red_proc", "程序红队：到达举证缺签收链，送达争议对我方不利。"),
-        run_completed(
-            redp_run,
-            "d_red_proc",
-            output_summary="程序红队挖掘完成",
-            duration_ms=840,
-            role="member",
-            model="deepseek-v4-flash",
-            usage=_USAGE,
-            cost=_COST,
-        ),
-        run_started(reds_run, "d_red_subst", parent_run_id=mod),
+        run_started(con_run, "d_plaintiff", parent_run_id=mod),
         run_output_delta(
-            reds_run, "d_red_subst", "实体红队：质量异议函笼统、对部分诉请沉默易被推定认可。"
+            con_run,
+            "d_plaintiff",
+            "原告：到达举证缺签收链；质量异议函笼统、对部分诉请沉默易被推定认可。",
         ),
         run_completed(
-            reds_run,
-            "d_red_subst",
-            output_summary="实体红队挖掘完成",
+            con_run,
+            "d_plaintiff",
+            output_summary="原告攻击完成",
             duration_ms=860,
             role="member",
             model="deepseek-v4-flash",
@@ -333,7 +297,7 @@ def _multi_agent_legal_war_room() -> list[SSEEvent]:
         run_completed(
             mod,
             mod,
-            output_summary="原告红队三点攻击已被逐点回应",
+            output_summary="三点攻击已被逐点回应",
             duration_ms=2200,
             role="主持人",
             model="deepseek-v4-flash",
@@ -391,14 +355,14 @@ def _multi_agent_legal_war_room() -> list[SSEEvent]:
         ),
         # ④ 终稿前人审闸门 → 暂停（status=paused，结论摊给律师拍板再收口）
         content_delta(
-            "终稿前请你过一下：红队 3 个攻击点已逐点加固，法条已核验，有 1 处待人工确认。"
+            "终稿前请你过一下：3 个攻击点已逐点加固，法条已核验，有 1 处待人工确认。"
         ),
         checkpoint_required(
             checkpoint_id="cp1",
             conversation_id=_CONV,
             question=(
                 "是否采纳终稿并提交？（含 1 处 [待核验] 法条）\n"
-                "原告红队已挖尽收敛，核验报告与答辩状初稿见工作区；终稿将标注法域 + 免责。"
+                "攻防已收敛，核验报告与答辩状初稿见工作区；终稿将标注法域 + 免责。"
             ),
             intent="decision",
         ),
@@ -408,7 +372,7 @@ def _multi_agent_legal_war_room() -> list[SSEEvent]:
 def _multi_agent_legal_war_room_settled() -> list[SSEEvent]:
     """多 Agent：法律「答辩状作战室」端到端【收口终稿态】(hero · §十一 方案① 来源卡接入)。
     姊妹向量 `multi_agent_legal_war_room` 取人审**暂停**态；本向量取**人审通过后的收口**态，专覆盖
-    §十一 方案①：consult → delegate 起草 → debate(red_team) 原告红队压测 → delegate 核验
+    §十一 方案①：consult → delegate 起草 → debate 正反交锋 → delegate 核验
     （`web_search` 命中权威法条源 → 这些源经 delegate 结果汇入回合「来源卡」）→ **CEO 收口正文
     完整输出答辩状终稿**，每条【已核验】法条带 `[n]` 角标连到对应来源卡（玻璃箱可审计 / 可溯源），
     仍 `[待核验]` 的送达规则**不编角标**（反幻觉：宁缺勿造，编造角标会被 finish_guard 拦回）；收口前
@@ -418,14 +382,13 @@ def _multi_agent_legal_war_room_settled() -> list[SSEEvent]:
     mod = "warroom_mod1"
     r_draft, w_draft = "r_draft", "w_draft"
     r_verify, w_verify = "r_verify", "w_verify"
-    subj_run = f"{mod}_r1_defense"
-    redp_run = f"{mod}_r1_redproc"
-    reds_run = f"{mod}_r1_redsubst"
+    pro_run = f"{mod}_r1_pro"
+    con_run = f"{mod}_r1_con"
 
     skill_guidance = (
         "## 答辩状作战室\n"
         "1. 解析对方起诉状 + 我方事实 → 逐项答辩（程序抗辩 + 实体抗辩 + 质证 + 法律依据）。\n"
-        "2. delegate 起草，debate(red_team, is_subject=我方答辩) 让原告红队单向压测，再逐点加固。\n"
+        "2. delegate 起草，debate 正反（我方答辩 vs 原告）交锋后再逐点加固。\n"
         "3. delegate 核验逐条法条 / 时效，未核验不得引用、标 [待核验]；终稿标法域 + 免责 + 人审闸门。\n"
     )
     draft_md = (
@@ -484,7 +447,7 @@ def _multi_agent_legal_war_room_settled() -> list[SSEEvent]:
         {
             "id": mod,
             "agent_id": mod,
-            "task": "主持红队审查：原告视角压测我方答辩",
+            "task": "主持正反辩论：我方答辩对原告",
             "depends_on": [],
             "parent_run_id": cap,
         },
@@ -496,69 +459,50 @@ def _multi_agent_legal_war_room_settled() -> list[SSEEvent]:
             "thinking": True,
         },
         {
-            "id": "d_red_proc",
-            "role": "程序红队",
-            "thinking": True,
-        },
-        {
-            "id": "d_red_subst",
-            "role": "实体红队",
+            "id": "d_plaintiff",
+            "role": "原告",
             "thinking": True,
         },
     ]
     debater_runs = [
         {
-            "id": subj_run,
+            "id": pro_run,
             "agent_id": "d_defense",
             "task": "为我方答辩抗辩并加固",
             "depends_on": [],
             "parent_run_id": mod,
-            "group": "debate:red_team",
+            "group": "debate:debate",
             "round": 1,
+            "stance": "pro",
         },
         {
-            "id": redp_run,
-            "agent_id": "d_red_proc",
-            "task": "以原告视角挖程序 / 送达漏洞",
+            "id": con_run,
+            "agent_id": "d_plaintiff",
+            "task": "以原告视角攻击答辩的程序与实体漏洞",
             "depends_on": [],
             "parent_run_id": mod,
-            "group": "debate:red_team",
+            "group": "debate:debate",
             "round": 1,
-        },
-        {
-            "id": reds_run,
-            "agent_id": "d_red_subst",
-            "task": "以原告视角挖实体抗辩漏洞",
-            "depends_on": [],
-            "parent_run_id": mod,
-            "group": "debate:red_team",
-            "round": 1,
+            "stance": "con",
         },
     ]
     debate_payload = {
-        "form": "red_team",
+        "form": "debate",
         "motion": "以原告视角压测我方《民事答辩状》的稳健性",
-        "stop_reason": "red_team_exhausted",
+        "stop_reason": "converged",
         "narrative_first": False,
         "sides": [
             {
-                "key": "defense",
+                "key": "pro",
                 "name": "我方答辩",
                 "stance": "逐项抗辩成立、无需担责",
-                "is_subject": True,
-                "model": "",
-            },
-            {
-                "key": "red_proc",
-                "name": "程序红队（原告）",
-                "stance": "程序与送达举证存在硬伤",
                 "is_subject": False,
                 "model": "",
             },
             {
-                "key": "red_subst",
-                "name": "实体红队（原告）",
-                "stance": "实体抗辩不成立",
+                "key": "con",
+                "name": "原告",
+                "stance": "程序送达与实体抗辩均有硬伤",
                 "is_subject": False,
                 "model": "",
             },
@@ -567,28 +511,27 @@ def _multi_agent_legal_war_room_settled() -> list[SSEEvent]:
             {
                 "round_no": 1,
                 "focus": "送达举证 / 质量异议具体性 / 沉默推定 三点攻防",
-                "summary": "原告红队挖出送达签收链缺失、异议函笼统、对部分诉请沉默三点；我方补证据并逐点否认加固。",
+                "summary": "原告挖出送达签收链缺失、异议函笼统、对部分诉请沉默三点；我方补证据并逐点否认加固。",
                 "verdict": {
                     "real_clash": True,
                     "new_arguments": True,
                     "converged": True,
-                    "stop_reason": "red_team_exhausted",
+                    "stop_reason": "converged",
                     "rationale": "三点攻击已被逐点回应 / 加固，无新增有效攻击。",
                 },
                 "sides": [
-                    {"key": "defense", "name": "我方答辩", "run_id": subj_run, "ok": True},
-                    {"key": "red_proc", "name": "程序红队（原告）", "run_id": redp_run, "ok": True},
-                    {"key": "red_subst", "name": "实体红队（原告）", "run_id": reds_run, "ok": True},
+                    {"key": "pro", "name": "我方答辩", "run_id": pro_run, "ok": True},
+                    {"key": "con", "name": "原告", "run_id": con_run, "ok": True},
                 ],
                 "clashes": [
                     {
-                        "from_key": "red_proc",
-                        "to_key": "defense",
+                        "from_key": "con",
+                        "to_key": "pro",
                         "point": "到达举证缺签收链，送达争议规则对我方不利。",
                     },
                     {
-                        "from_key": "red_subst",
-                        "to_key": "defense",
+                        "from_key": "con",
+                        "to_key": "pro",
                         "point": "质量异议函笼统、未指向批次 / 标准；对部分诉请沉默易被推定认可。",
                     },
                 ],
@@ -597,14 +540,10 @@ def _multi_agent_legal_war_room_settled() -> list[SSEEvent]:
         "brief": {
             "crux": "我方答辩能否扛住原告对『送达举证 + 质量异议具体性 + 沉默推定』三点的攻击",
             "strongest_points": {
-                "red_proc": "到达举证缺签收链，按送达争议规则我方不利，是最尖锐风险。",
-                "red_subst": "质量异议函表述笼统、未指向具体批次 / 标准，难达异议成立要件；对原告主张沉默处易被推定认可。",
-                "defense": "已补送达回执 + 异议函逐条对应批次，并就沉默项明确否认。",
+                "con": "到达举证缺签收链是最尖锐风险；异议函笼统、沉默项易被推定认可。",
+                "pro": "已补送达回执 + 异议函逐条对应批次，并就沉默项明确否认。",
             },
-            "risk_severities": {
-                "red_proc": "high",
-                "red_subst": "medium",
-            },
+            "risk_severities": {},
             "handoffs": [
                 {"kind": "value", "text": "以程序抗辩拖延 vs 实体一次性了结的策略取舍"},
                 {"kind": "fact", "text": "质量异议函是否在合理期限内送达原告口径不一"},
@@ -629,7 +568,7 @@ def _multi_agent_legal_war_room_settled() -> list[SSEEvent]:
                 "summary": "答辩状要素结构 + 对方律师作战室编排 + 反幻觉硬约束",
             },
         ),
-        content_delta("按作战室打法组队：先起草，再让原告红队压一遍，核验法条，最后请你拍板。"),
+        content_delta("按作战室打法组队：先起草，再开正反辩论，核验法条，最后请你拍板。"),
         # ① delegate 起草律师 → 答辩状初稿.md（worker 内 file_write）
         tool_use_start("dc1", "delegate", {"tasks": [{"role": "起草律师"}]}),
         run_plan(
@@ -657,12 +596,12 @@ def _multi_agent_legal_war_room_settled() -> list[SSEEvent]:
             cost=_COST,
         ),
         tool_use_end("dc1", "delegate", success=True, output="起草完成：答辩状初稿.md"),
-        # ② debate(red_team)：原告红队单向压测我方答辩（hero）
-        content_delta("现在让原告红队来压测我方答辩。"),
+        # ② debate：我方答辩 vs 原告
+        content_delta("现在开一场正反辩论：我方答辩对原告。"),
         run_plan(
             execution_id="exec1",
             plan_type="debate",
-            task_summary="红队审查：原告视角压测我方《民事答辩状》",
+            task_summary="正反辩论：我方答辩对原告《民事答辩状》",
             agents=mod_agents,
             runs=mod_runs,
         ),
@@ -674,12 +613,12 @@ def _multi_agent_legal_war_room_settled() -> list[SSEEvent]:
             agents=debater_agents,
             runs=debater_runs,
         ),
-        run_started(subj_run, "d_defense", parent_run_id=mod),
+        run_started(pro_run, "d_defense", parent_run_id=mod),
         run_output_delta(
-            subj_run, "d_defense", "我方：已补送达回执、异议函逐条对应批次，并就沉默项明确否认。"
+            pro_run, "d_defense", "我方：已补送达回执、异议函逐条对应批次，并就沉默项明确否认。"
         ),
         run_completed(
-            subj_run,
+            pro_run,
             "d_defense",
             output_summary="我方抗辩 + 加固完成",
             duration_ms=900,
@@ -688,26 +627,16 @@ def _multi_agent_legal_war_room_settled() -> list[SSEEvent]:
             usage=_USAGE,
             cost=_COST,
         ),
-        run_started(redp_run, "d_red_proc", parent_run_id=mod),
-        run_output_delta(redp_run, "d_red_proc", "程序红队：到达举证缺签收链，送达争议对我方不利。"),
-        run_completed(
-            redp_run,
-            "d_red_proc",
-            output_summary="程序红队挖掘完成",
-            duration_ms=840,
-            role="member",
-            model="deepseek-v4-flash",
-            usage=_USAGE,
-            cost=_COST,
-        ),
-        run_started(reds_run, "d_red_subst", parent_run_id=mod),
+        run_started(con_run, "d_plaintiff", parent_run_id=mod),
         run_output_delta(
-            reds_run, "d_red_subst", "实体红队：质量异议函笼统、对部分诉请沉默易被推定认可。"
+            con_run,
+            "d_plaintiff",
+            "原告：到达举证缺签收链；质量异议函笼统、对部分诉请沉默易被推定认可。",
         ),
         run_completed(
-            reds_run,
-            "d_red_subst",
-            output_summary="实体红队挖掘完成",
+            con_run,
+            "d_plaintiff",
+            output_summary="原告攻击完成",
             duration_ms=860,
             role="member",
             model="deepseek-v4-flash",
@@ -717,7 +646,7 @@ def _multi_agent_legal_war_room_settled() -> list[SSEEvent]:
         run_completed(
             mod,
             mod,
-            output_summary="原告红队三点攻击已被逐点回应",
+            output_summary="三点攻击已被逐点回应",
             duration_ms=2200,
             role="主持人",
             model="deepseek-v4-flash",
@@ -803,7 +732,7 @@ def _multi_agent_legal_case_analysis() -> list[SSEEvent]:
     与作战室同纪律——复用现有事件类型**组合**出三方研判玻璃箱全流程，**不新增事件类型 → fold
     不碰**。流程按 skill 编排（接案评估场景，载体=买卖合同货款纠纷）：① CEO
     `consult_skill(legal_case_analysis)` 翻三方研判打法；② `debate(form="debate")` 让**原告 / 被告
-    两方独立对称对抗**（非红队、无 is_subject）**两轮**收敛（第 2 轮辩手为首轮 `revision=2` 续写、
+    两方独立对称对抗**两轮**收敛（第 2 轮辩手为首轮 `revision=2` 续写、
     `converged` 收场），收场 `debate_result` 承「决策简报 + 交锋叙事线」双产物，交锋收敛到「质量异议
     的举证」；③ `delegate` **中立法官研判** worker 读交锋 → 按举证责任出实体研判、落 `接案研判.md`
     （worker 内 `file_write`）；④ `delegate` 核验 worker `web_search` + 落 `法条核验报告.md`（带
@@ -1185,19 +1114,7 @@ def _multi_agent_legal_case_analysis() -> list[SSEEvent]:
 
 VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "multi_agent_legal_war_room": (
-        "法律「答辩状作战室」端到端 hero：consult_skill→delegate 起草→debate(red_team) 原告红队压测→delegate 核验(法条核验报告 + [待核验])→人审闸门 checkpoint 暂停",
+        "法律「答辩状作战室」端到端 hero：consult_skill→delegate 起草→debate 正反交锋→delegate 核验(法条核验报告 + [待核验])→人审闸门 checkpoint 暂停",
         _multi_agent_legal_war_room,
-    ),
-    "multi_agent_legal_war_room_settled": (
-        "法律「答辩状作战室」收口终稿态 (§十一 方案①)：consult_skill→delegate 起草→debate(red_team) "
-        "原告红队压测→delegate 核验(web_search 命中法条源)→CEO 收口正文出终稿(已核验法条带 [n] 角标连到"
-        "来源卡、[待核验] 不编角标)→citations_event(2 张法条来源卡)→message_end(success)",
-        _multi_agent_legal_war_room_settled,
-    ),
-    "multi_agent_legal_case_analysis": (
-        "法律「三方视角案情研判」端到端收场：consult_skill(legal_case_analysis)→debate(form=debate) "
-        "原被告两轮对抗→delegate 中立法官研判(接案研判.md)→delegate 核验(法条核验报告 + [待核验])"
-        "→CEO 收口(倾向研判·非预测 + 法域 + 免责)",
-        _multi_agent_legal_case_analysis,
     ),
 }

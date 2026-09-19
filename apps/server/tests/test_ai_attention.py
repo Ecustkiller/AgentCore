@@ -91,7 +91,6 @@ def test_waiting_kinds_map_to_an_attention_kind():
         "approval",
         "escalation",
         "ask_user",
-        "plan_review",
     ):
         assert attention_kind_of(waiting) is AttentionKind(waiting)
 
@@ -115,7 +114,6 @@ def test_title_is_the_kind_headline_not_the_card():
     assert attention_title(AttentionKind.APPROVAL) == "AI 需要你的授权"
     assert attention_title(AttentionKind.ESCALATION) == "AI 需要你的决定"
     assert attention_title(AttentionKind.ASK_USER) == "AI 需要你的回应"
-    assert attention_title(AttentionKind.PLAN_REVIEW) == "AI 计划待你确认"
     headline, body = attention_push_copy(AttentionKind.APPROVAL)
     assert headline == "AI 需要你的授权"
     assert body == PUSH_FALLBACK_BODY
@@ -304,8 +302,8 @@ async def test_cold_card_signal_leaves_its_own_push_alone(hub: ChatHub, pushes):
         conversation_id="conv-1",
         turn_id="turn-1",
         interaction_id="cp-1",
-        kind=AttentionKind.PLAN_REVIEW,
-        title="AI 计划待你确认",
+        kind=AttentionKind.ASK_USER,
+        title="AI 需要你的回应",
         push=False,
     )
     assert pushes == []
@@ -386,7 +384,7 @@ async def test_a_card_that_notifies_for_itself_reads_as_not_requested(
 ):
     spy = _signal_spy(monkeypatch)
 
-    await _required(kind=AttentionKind.PLAN_REVIEW, push=False)
+    await _required(kind=AttentionKind.ASK_USER, push=False)
 
     signalled = spy.get("attention.signalled")
     assert signalled["pushed"] is False

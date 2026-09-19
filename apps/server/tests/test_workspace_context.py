@@ -18,6 +18,7 @@ from agentcore.runtime.resolve.prompt import (
     assemble_system_prompt,
     compose_ceo_chat_prompt,
     compose_worker_base_prompt,
+    render_ceo_turn_envelope,
 )
 from agentcore.tools.builtin import build_ceo_tool_registry
 
@@ -46,7 +47,7 @@ def _assert_how_identifiers_not_in_facts(ctx: str) -> None:
     for token in (
         "file_list",
         "target_folder_id",
-        "file_copy",
+        "file_batch",
         "bind_local_folder",
         "open_local_project",
         "register_local_project",
@@ -644,27 +645,29 @@ def test_workspace_facts_follow_resident_core_for_ceo_and_worker():
     ceo = compose_ceo_chat_prompt(
         base,
         ceo_tool_names={"delegate"},
+    )
+    env = render_ceo_turn_envelope(
         workspace_context=facts,
         workspace_file_index="文件：空",
+        include_runtime=False,
     )
     worker = compose_worker_base_prompt(base, workspace_context=facts)
-    assert "<工作区>\n" in ceo
+    assert "<工作区>\n" not in ceo
+    assert "<工作区>\n" in env
     assert "<工作区>\n" in worker
-    assert "执行：云端" in ceo and "执行：云端" in worker
-    assert "出站：产品网络" in ceo and "出站：产品网络" in worker
-    assert "同一出站" not in ceo and "同一出站" not in worker
-    assert "执行：云端沙箱" not in ceo and "执行：云端沙箱" not in worker
-    # Actual XML block (newline after the tag), not the core/base tag mention.
-    assert ceo.index("<身份>") < ceo.index("<工作区>\n")
+    assert "执行：云端" in env and "执行：云端" in worker
+    assert "出站：产品网络" in env and "出站：产品网络" in worker
+    assert "同一出站" not in env and "同一出站" not in worker
+    assert "执行：云端沙箱" not in env and "执行：云端沙箱" not in worker
+    assert ceo.index("<身份>") > 0
     assert worker.index("</运行时>") < worker.index("<工作区>\n")
-    assert "文件：空" in ceo
-    assert ceo.index("文件：空") < ceo.index("</工作区>")
-    # Closing tag is unique to the XML block (base ``<诚实>`` may mention the name).
+    assert "文件：空" in env
+    assert env.index("文件：空") < env.index("</工作区>")
     assert facts.count("</工作区>") == 1
-    assert ceo.count("</工作区>") == 1
+    assert env.count("</工作区>") == 1
     assert worker.count("</工作区>") == 1
-    assert ceo.count("<工作区>\n") == 1
-    assert "<工作区文件>" not in ceo
+    assert env.count("<工作区>\n") == 1
+    assert "<工作区文件>" not in env
     assert "文件：空" not in worker
     _assert_how_identifiers_not_in_facts(facts)
 

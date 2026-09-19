@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from agentcore.runtime.events import approval_resolved, checkpoint_resolved
-from agentcore.runtime.events.interaction import interaction_orphaned, stage_card_resolved
+from agentcore.runtime.events.interaction import interaction_orphaned
 from agentcore.runtime.journal.pending_interactions import settlement_dedupe_key
 from agentcore.runtime.journal.writer import TurnJournalWriter, current_journal_writer
 from agentcore.runtime.settlement import (
@@ -292,7 +292,7 @@ def test_align_rewrites_loser_decision_on_same_checkpoint() -> None:
 def test_align_is_noop_when_journal_already_matches_winner() -> None:
     entries = [
         {
-            "kind": "plan_review_resolved",
+            "kind": "checkpoint_resolved",
             "payload": {"checkpoint_id": "ck1", "decision": "continue"},
             "ts": "t1",
         }
@@ -310,12 +310,12 @@ def test_align_collapses_duplicate_resolved_rows_to_winner() -> None:
     entries = [
         {"kind": "turn_started", "payload": {}, "ts": "t0"},
         {
-            "kind": "plan_review_resolved",
+            "kind": "checkpoint_resolved",
             "payload": {"checkpoint_id": "ck1", "decision": "stop", "note": "a"},
             "ts": "t1",
         },
         {
-            "kind": "plan_review_resolved",
+            "kind": "checkpoint_resolved",
             "payload": {"checkpoint_id": "ck1", "decision": "continue", "note": "b"},
             "ts": "t2",
         },
@@ -324,7 +324,7 @@ def test_align_collapses_duplicate_resolved_rows_to_winner() -> None:
         entries, turn_id="m1", checkpoint_id="ck1", decision="continue"
     )
     assert aligned is not None
-    resolved = [e for e in aligned if e["kind"] == "plan_review_resolved"]
+    resolved = [e for e in aligned if e["kind"] == "checkpoint_resolved"]
     assert len(resolved) == 1
     assert resolved[0]["payload"]["decision"] == "continue"
     assert resolved[0]["payload"]["note"] == "a"
@@ -350,37 +350,37 @@ def test_align_leaves_other_checkpoints_and_required_rows() -> None:
 
 # --- 生命周期撞键回归（LV 黄金场实跑抓到的丢事实 bug）---
 # 教训：dedupe 键曾折叠成交互族（required/resolved/orphaned 同键），宿主回合里的
-# stage_card_required 行把同卡 resolved / orphaned 的落库静默吞掉。
+# required 行把同卡 resolved / orphaned 的落库静默吞掉。
 
 
-def _required_entry(card_id: str = "sc1") -> dict[str, Any]:
+def _required_entry(approval_id: str = "ap1") -> dict[str, Any]:
     return {
-        "kind": "stage_card_required",
-        "payload": {"stage_card_id": card_id, "motion": "M", "sides": []},
+        "kind": "approval_required",
+        "payload": {"approval_id": approval_id, "tool_call_id": approval_id, "tool_name": "x"},
         "ts": "t",
     }
 
 
 def test_settlement_dedupe_key_distinguishes_lifecycle() -> None:
     req = settlement_dedupe_key(
-        "t1", "stage_card_required", {"stage_card_id": "sc1"}
+        "t1", "approval_required", {"approval_id": "ap1"}
     )
     res = settlement_dedupe_key(
-        "t1", "stage_card_resolved", {"stage_card_id": "sc1"}
+        "t1", "approval_resolved", {"approval_id": "ap1"}
     )
     orph = settlement_dedupe_key(
-        "t1", "interaction_orphaned", {"kind": "stage_card", "interaction_id": "sc1"}
+        "t1", "interaction_orphaned", {"kind": "approval", "interaction_id": "ap1"}
     )
     assert req is not None and res is not None and orph is not None
     assert len({req, res, orph}) == 3, "同卡三种事实必须是三个键"
     # 同一事实两次 → 同键（幂等去重仍然成立）
     assert res == settlement_dedupe_key(
-        "t1", "stage_card_resolved", {"stage_card_id": "sc1", "decision": "start_debate"}
+        "t1", "approval_resolved", {"approval_id": "ap1", "decision": "approve"}
     )
 
 
 @pytest.mark.asyncio
-async def test_stage_card_resolved_not_blocked_by_required_row(
+async def test_approval_resolved_not_blocked_by_required_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """宿主回合已有 required 行（resume 种子化进 dedupe）⇒ resolved 落库不得被吞."""
@@ -393,14 +393,14 @@ async def test_stage_card_resolved_not_blocked_by_required_row(
     writer = TurnJournalWriter(turn_id="t_host", conversation_id="c1", trace_id=None)
     seed_settlement_dedupe_from_entries(writer, [_required_entry()])
 
-    event = stage_card_resolved(stage_card_id="sc1", decision="start_debate", note="")
+    event = approval_resolved(approval_id="ap1", tool_call_id="ap1", decision="approve")
     fut = writer.schedule_append(entry_from_sse(event))
     await writer.flush()
     if fut:
         await fut
 
     kinds = [r["entry"]["kind"] for r in store.rows]
-    assert kinds.count("stage_card_resolved") == 1
+    assert kinds.count("approval_resolved") == 1
 
 
 @pytest.mark.asyncio
@@ -418,7 +418,7 @@ async def test_stage_card_orphan_not_blocked_by_required_row(
     seed_settlement_dedupe_from_entries(writer, [_required_entry()])
 
     event = interaction_orphaned(
-        interaction_id="sc1", kind="stage_card", reason="superseded"
+        interaction_id="ap1", kind="approval", reason="superseded"
     )
     fut = writer.schedule_append(entry_from_sse(event))
     await writer.flush()
@@ -430,7 +430,7 @@ async def test_stage_card_orphan_not_blocked_by_required_row(
 
 
 @pytest.mark.asyncio
-async def test_stage_card_double_resolve_still_dedupes(
+async def test_approval_double_resolve_still_dedupes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """同一 resolved 事实双写（预写 + awaiter emit）仍只落一行."""
@@ -443,8 +443,8 @@ async def test_stage_card_double_resolve_still_dedupes(
     writer = TurnJournalWriter(turn_id="t_host", conversation_id="c1", trace_id=None)
     token = current_journal_writer.set(writer)
     try:
-        event = stage_card_resolved(
-            stage_card_id="sc1", decision="start_debate", note=""
+        event = approval_resolved(
+            approval_id="ap1", tool_call_id="ap1", decision="approve"
         )
         await prewrite_settlement(event)
         fut = writer.schedule_append(entry_from_sse(event))
@@ -455,7 +455,7 @@ async def test_stage_card_double_resolve_still_dedupes(
         current_journal_writer.reset(token)
 
     kinds = [r["entry"]["kind"] for r in store.rows]
-    assert kinds.count("stage_card_resolved") == 1
+    assert kinds.count("approval_resolved") == 1
 
 
 @pytest.mark.asyncio

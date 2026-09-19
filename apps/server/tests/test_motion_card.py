@@ -74,13 +74,13 @@ def test_parse_motion_card_defaults_form_to_debate():
     assert card["form"] == "debate"
 
 
-def test_parse_motion_card_accepts_legacy_forms():
-    """广告 enum 只留 debate；parse 仍接受历史三值。"""
-    for form in ("red_team", "roundtable"):
+def test_parse_motion_card_coerces_unknown_form_to_debate():
+    """产品只认 debate；历史 / 未知 form 回落正反，不硬拒旧卡。"""
+    for form in ("red_team", "roundtable", "mystery"):
         card, err = parse_motion_card(_valid_card(form=form))
         assert err == ""
         assert card is not None
-        assert card["form"] == form
+        assert card["form"] == "debate"
 
 
 def test_parse_motion_card_rejects_stance_over_limit():

@@ -45,34 +45,15 @@ def tool_call_requires_approval(
 ) -> bool:
     """Whether a tool call must pass ``ApprovalGate`` before execution.
 
-    GRANTABLE tools always do — except a plan-bound ``file_batch`` whose ops are
-    within a confirmed ``organize_plan`` (方案确认即批次授权，不再二次弹卡).
-    ``git`` / ``host`` are ``NEVER`` at schema level but mutating
-    subcommands / Host GRANTABLE actions are gated here — same posture as ``file_write``.
-    ``run`` is GRANTABLE except process manage (read/stop/list).
+    GRANTABLE tools always do. ``git`` / ``host`` are ``NEVER`` at schema
+    level but mutating subcommands / Host GRANTABLE actions are gated here —
+    same posture as ``file_write``. ``run`` is GRANTABLE except process manage
+    (read/stop/list).
     """
     if tool_name == "run":
         action = str(arguments.get("action") or "").strip().lower()
         if action in {"read", "stop", "list"}:
             return False
-    if tool_name == "file_batch":
-        plan_id = str(arguments.get("organize_plan_id") or "").strip()
-        if plan_id or bool(arguments.get("organize_undo")):
-            # Undo is a user-initiated reverse of an already-confirmed plan.
-            if bool(arguments.get("organize_undo")):
-                return False
-            from agentcore.workspace.organize_plan_store import get_plan, ops_within_plan
-
-            ops = arguments.get("operations")
-            if isinstance(ops, list):
-                plan = get_plan(plan_id)
-                if (
-                    plan is not None
-                    and plan.active
-                    and ops_within_plan(plan, [o for o in ops if isinstance(o, dict)])
-                    is None
-                ):
-                    return False
     if approval is ToolApproval.GRANTABLE:
         return True
     if tool_name == "git":
@@ -92,7 +73,7 @@ class ApprovalDecision(StrEnum):
     APPROVE = "approve"  # allow this one call
     APPROVE_ALWAYS = "approve_always"  # allow this tool for the rest of the turn
     # allow the whole file-mutation class (file_write / str_replace / file_delete /
-    # file_move) for the rest of the turn — one click for a multi-file or mixed-op
+    # file_batch) for the rest of the turn — one click for a multi-file or mixed-op
     # task instead of granting each tool name separately. code_execute is NOT in the
     # class (a higher-risk side effect) and keeps its own per-tool gate (安全权限与
     # 治理 §三 边界2: 信任"这类操作", 不是"随便干").
@@ -185,7 +166,7 @@ class ApprovalGate:
     # Per-tool approval wait ceilings; unset tools use timeout_seconds.
     timeout_overrides: dict[str, float] = field(default_factory=dict)
     # The file-mutation tool class an APPROVE_ALWAYS_FILES grant covers
-    # (file_write / str_replace / file_delete / file_move, PLUS git write
+    # (file_write / str_replace / file_delete / file_batch, PLUS git write
     # subcommands). Injected at construction via approval_class_tool_names()
     # (GRANTABLE ∩ FILESYSTEM + git) — see run.py / resume/pipeline.py wiring — so
     # one file-class grant also clears git writes; single source of truth.

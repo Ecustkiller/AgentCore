@@ -148,7 +148,6 @@ def test_cite_write_review_fans_out_one_researcher_per_angle_then_outline_then_w
     assert "复核落盘" in by_id["review"]["task"]
     # 审校节点显式墙钟 300s（CEO 显式 timeout_ms）。
     assert by_id["review"]["timeout_ms"] == 300_000
-    # 日常成文不写波间关；明文看提纲走 ask_user。画布 human_gate 才写 checkpoint_after。
     assert by_id["outline"].get("checkpoint_after") is not True
     assert "requires_files" not in by_id["write"]["deliverable"]
     assert "name" not in by_id["write"]["deliverable"]

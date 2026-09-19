@@ -248,7 +248,7 @@ describe("clearConversation 仍可用（打开对话不再走这条）", () => {
           interactionId: "y",
           conversationId: "other",
           turnId: "t",
-          kind: "plan_review",
+          kind: "ask_user",
           title: "别的会话",
         },
       ],

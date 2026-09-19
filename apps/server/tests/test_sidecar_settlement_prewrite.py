@@ -113,13 +113,11 @@ async def test_sidecar_settlement_prewrite_embeds_resume_frame(tmp_path) -> None
     assert sum(1 for e in entries2 if e.get("kind") == "process_reasoning") == 1
 
 
-def test_sidecar_settlement_prewrite_refuses_team_preview() -> None:
-    """存量开工卡不得 hydrate，因此不能预写 team_preview_resolved。"""
-    from agentcore.core.errors import GoneError
-    from agentcore.runtime.kickoff.retired import TEAM_PREVIEW_UNRECOVERABLE
+def test_sidecar_settlement_prewrite_skips_unknown_team_preview() -> None:
+    """存量开工卡不得 hydrate，因此不能预写。"""
     from agentcore.runtime.suspension import suspension_from_json
 
-    with pytest.raises(GoneError, match=TEAM_PREVIEW_UNRECOVERABLE):
+    with pytest.raises(ValueError, match="unknown suspension kind"):
         suspension_from_json(
             {
                 "kind": "team_preview",

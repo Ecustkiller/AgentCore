@@ -1,4 +1,4 @@
-"""Tests for CEO list_folders / resolve_folder / create_folder.
+"""Tests for CEO folders / create_folder.
 
 P0 桶 A：列名册与按路径解析（嵌套后同名末段合法，故 resolve 走路径）。
 P1 桶 C：云 create（同指挥面；不碰会话归属；可挂到某一层）。
@@ -16,8 +16,7 @@ import pytest
 from agentcore.core.types import ToolApproval, ToolFace
 from agentcore.tools.builtin.folders import (
     CreateFolderTool,
-    ListFoldersTool,
-    ResolveFolderTool,
+    FoldersTool,
     resolve_folders_by_path,
 )
 from agentcore.tools.protocol import ToolContext
@@ -34,7 +33,7 @@ from agentcore.workspace.server import ServerWorkspace
 
 _FOLDER_HOW_CONSULT = "HOW→consult(desks)"
 # schema 短触发；禁猜最近 / 过闸催建在回执；百科不进按钮。
-# 换桌对照句在 delegate target_folder_id / 认桌工具 description。
+# 换桌对照句在 delegate target_folder_id。
 _SCHEMA_ENCYCLOPEDIA_FORBIDDEN = (
     "先建后派",
     "先在云上做",
@@ -200,52 +199,39 @@ def test_resolve_blank_path_is_not_found():
 # --- schema / registration --------------------------------------------------
 
 
-def test_list_folders_schema_and_registration():
-    tool = ListFoldersTool()
-    assert tool.schema.name == "list_folders"
+def test_folders_schema_and_registration():
+    tool = FoldersTool()
+    assert tool.schema.name == "folders"
     assert tool.schema.face is ToolFace.FOLDER
     assert tool.schema.approval is ToolApproval.NEVER
     desc = tool.schema.description
     _assert_short_trigger(desc)
     assert "rel_path" in desc
-    assert "resolve_folder" in desc
     assert "file_list" in desc
     assert "名册" in desc
     assert "不常驻" in desc
     assert "跨桌" in desc
     assert "先列" in desc
     assert "清单已有" not in desc
-    reg = tool_registration(ListFoldersTool)
-    assert reg.surface is ToolSurface.CEO_ORCHESTRATION
-    assert reg.audience == (AUDIENCE_CEO,)
-    assert reg.ceo_wire is CeoWire.ALWAYS
-
-
-def test_resolve_folder_schema_and_registration():
-    tool = ResolveFolderTool()
-    assert tool.schema.name == "resolve_folder"
     props = tool.schema.parameters["properties"]
-    # Path-addressed, not name-addressed: nesting makes bare names ambiguous.
+    assert "action" in props
+    assert props["action"]["enum"] == ["list", "resolve"]
     assert "path" in props
     assert "name" not in props
-    assert tool.schema.parameters["required"] == ["path"]
-    assert tool.schema.approval is ToolApproval.NEVER
-    desc = tool.schema.description
-    _assert_short_trigger(desc)
-    assert "路径" in desc and "id" in desc
-    assert "完整路径" in desc
-    # 匹配顺序是 path 取值语义，不堆工具 description。
-    assert "路径后缀" not in desc
-    assert "子串" not in desc
+    assert tool.schema.parameters["required"] == ["action"]
     path_desc = props["path"]["description"]
     assert "精确" in path_desc
     assert "子串" in path_desc
     assert "后缀" not in path_desc
-    reg = tool_registration(ResolveFolderTool)
+    action_desc = props["action"]["description"]
+    assert "list" in action_desc
+    assert "resolve" in action_desc
+    assert "完整路径" in action_desc
+    assert "路径后缀" not in desc
+    assert "子串" not in desc
+    reg = tool_registration(FoldersTool)
     assert reg.surface is ToolSurface.CEO_ORCHESTRATION
-    assert AUDIENCE_CEO in reg.audience
-    assert reg.audience[0] == AUDIENCE_CEO
-    assert len(reg.audience) == 1
+    assert reg.audience == (AUDIENCE_CEO,)
     assert reg.ceo_wire is CeoWire.ALWAYS
 
 
@@ -273,7 +259,7 @@ def test_create_folder_schema_and_registration():
     assert "禁止为过写盘闸" not in desc
     assert "自动建云文件夹" not in desc
     parent_desc = props["parent_path"]["description"]
-    assert "resolve_folder" in parent_desc
+    assert "folders" in parent_desc
     assert "顶层" in parent_desc
     reg = tool_registration(CreateFolderTool)
     assert reg.surface is ToolSurface.CEO_ORCHESTRATION
@@ -283,8 +269,7 @@ def test_create_folder_schema_and_registration():
 
 def test_declared_roster_includes_folder_tools():
     names = {declared_tool_name(cls) for cls in declared_tools()}
-    assert "list_folders" in names
-    assert "resolve_folder" in names
+    assert "folders" in names
     assert "create_folder" in names
 
 
@@ -401,7 +386,7 @@ async def test_list_folders_returns_folder_summary_shape(monkeypatch: pytest.Mon
             ),
         ],
     )
-    result = await ListFoldersTool().execute({}, _ctx())
+    result = await FoldersTool().execute({"action": "list"}, _ctx())
     assert result.success
     assert result.display == {"count": 3}
     # Payload after the human lead-in
@@ -427,7 +412,7 @@ async def test_list_folders_returns_folder_summary_shape(monkeypatch: pytest.Mon
 
 async def test_list_folders_empty(monkeypatch: pytest.MonkeyPatch):
     _patch_list(monkeypatch, [])
-    result = await ListFoldersTool().execute({}, _ctx())
+    result = await FoldersTool().execute({"action": "list"}, _ctx())
     assert result.success
     assert result.display == {"count": 0}
     assert "还没有文件夹" in result.output
@@ -449,7 +434,7 @@ async def test_resolve_unique(monkeypatch: pytest.MonkeyPatch):
             _FakeFolder(id="other", name="Other"),
         ],
     )
-    result = await ResolveFolderTool().execute({"path": "solo"}, _ctx())
+    result = await FoldersTool().execute({"action": "resolve","path": "solo"}, _ctx())
     assert result.success
     assert result.display["status"] == "resolved"
     assert result.display["folder_id"] == "only"
@@ -469,7 +454,7 @@ async def test_resolve_nested_path(monkeypatch: pytest.MonkeyPatch):
             _FakeFolder(id="archive", name="图标", rel_path="归档/图标"),
         ],
     )
-    result = await ResolveFolderTool().execute({"path": "归档/图标"}, _ctx())
+    result = await FoldersTool().execute({"action": "resolve","path": "归档/图标"}, _ctx())
     assert result.success
     assert result.display["status"] == "resolved"
     assert result.display["folder_id"] == "archive"
@@ -478,10 +463,10 @@ async def test_resolve_nested_path(monkeypatch: pytest.MonkeyPatch):
 
 async def test_resolve_zero(monkeypatch: pytest.MonkeyPatch):
     _patch_list(monkeypatch, [_FakeFolder(id="a", name="Alpha")])
-    result = await ResolveFolderTool().execute({"path": "Missing"}, _ctx())
+    result = await FoldersTool().execute({"action": "resolve","path": "Missing"}, _ctx())
     assert result.success
     assert result.display["status"] == "not_found"
-    assert "ask_user" in result.output or "list_folders" in result.output
+    assert "ask_user" in result.output or "folders" in result.output
     assert "create_folder" in result.output  # mention only as explicit-new path
     assert "自动建云文件夹" in result.output
     assert "禁止静默猜" in result.output
@@ -506,7 +491,7 @@ async def test_resolve_ambiguous(monkeypatch: pytest.MonkeyPatch):
             ),
         ],
     )
-    result = await ResolveFolderTool().execute({"path": "Shop"}, _ctx())
+    result = await FoldersTool().execute({"action": "resolve","path": "Shop"}, _ctx())
     assert result.success
     assert result.display["status"] == "ambiguous"
     assert result.display["match_count"] == 2
@@ -521,7 +506,7 @@ async def test_resolve_ambiguous(monkeypatch: pytest.MonkeyPatch):
 
 
 async def test_resolve_missing_path_arg():
-    result = await ResolveFolderTool().execute({}, _ctx())
+    result = await FoldersTool().execute({"action": "resolve",}, _ctx())
     assert not result.success
     assert result.error == "missing path"
 
@@ -554,7 +539,7 @@ async def test_list_folders_db_unreachable_honest_message(
     err.__cause__ = cause
     _patch_list_raises(monkeypatch, err)
 
-    result = await ListFoldersTool().execute({}, _ctx())
+    result = await FoldersTool().execute({"action": "list"}, _ctx())
     assert not result.success
     assert result.error == DATABASE_UNAVAILABLE_CODE
     assert DATABASE_UNAVAILABLE_MESSAGE in result.output
@@ -574,7 +559,7 @@ async def test_resolve_folder_db_unreachable_honest_message(
     err = OperationalError("SELECT 1", {}, ConnectionRefusedError("refused"))
     _patch_list_raises(monkeypatch, err)
 
-    result = await ResolveFolderTool().execute({"path": "Alpha"}, _ctx())
+    result = await FoldersTool().execute({"action": "resolve","path": "Alpha"}, _ctx())
     assert not result.success
     assert result.error == DATABASE_UNAVAILABLE_CODE
     assert DATABASE_UNAVAILABLE_MESSAGE in result.output
@@ -588,7 +573,7 @@ async def test_list_folders_non_db_failure_keeps_generic_path(
 ):
     """Non-connectivity faults keep prior soft-fail semantics (not database_unavailable)."""
     _patch_list_raises(monkeypatch, RuntimeError("unexpected boom"))
-    result = await ListFoldersTool().execute({}, _ctx())
+    result = await FoldersTool().execute({"action": "list"}, _ctx())
     assert not result.success
     assert result.error == "unexpected boom"
     assert "数据库不可用" not in result.output

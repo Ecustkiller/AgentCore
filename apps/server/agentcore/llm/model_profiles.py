@@ -2,9 +2,9 @@
 
 A profile is ``{main, worker?, background?, vision?}`` plus optional vendor
 ``reasoning_effort``. Empty worker / background =
-follow_main. Empty vision does **not** persist follow_main into the slot columns.
-VisionReader resolve may reuse main credentials when that id accepts images
-(``llm.image_accept``); else platform ``VISION_*`` only when ``billing_mode=platform``.
+follow_main. The ``vision`` column is unused by live turns (images ride
+``main``); CRUD still round-trips the field so existing rows / duplicate-profile
+do not invent a second reader.
 
 **Not a model-metadata owner.** Platform 上架 / display enrichment live in
 :mod:`agentcore.llm.catalog` (+ :mod:`agentcore.llm.model_metadata`). System presets

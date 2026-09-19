@@ -30,7 +30,7 @@ function frame(turnStatus: string, decision = "continue") {
     payload: {
       message_id: MID,
       conversation_id: CID,
-      kind: "plan_review",
+      kind: "ask_user",
       checkpoint_id: IX_ID,
       decision,
       decided_at: "2026-08-13T09:30:00.000Z",
@@ -44,7 +44,7 @@ function pausedShell(): PendingResume {
     messageId: MID,
     conversationId: CID,
     checkpointId: IX_ID,
-    kind: "plan_review",
+    kind: "ask_user",
     userMessage: "go",
     userMessageId: "u1",
     steps: [],
@@ -73,7 +73,7 @@ function seedSubmittedCard(): void {
   conv.setTurnPhase("streaming", CID);
   usePausedTurnStore.setState({ pending: [pausedShell()] });
   useInteractionStore.getState().upsertRequired({
-    kind: "plan_review",
+    kind: "ask_user",
     conversationId: CID,
     messageId: MID,
     payload: { checkpoint_id: IX_ID, steps: [], pending: [] },
@@ -157,7 +157,7 @@ describe("resume_settled · 帧已被处理过", () => {
 
     const entry = useInteractionStore.getState().byId.get(IX_ID);
     expect(entry?.status).toBe("resolved");
-    expect(entry?.kind).toBe("plan_review");
+    expect(entry?.kind).toBe("ask_user");
     expect(entry?.conversationId).toBe(CID);
   });
 

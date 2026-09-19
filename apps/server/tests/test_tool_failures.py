@@ -1,15 +1,11 @@
-"""Tool-failure aggregation + finalize / CEO injection (honest soft-landing)."""
+"""Tool-failure aggregation + synthesis facts (honest soft-landing)."""
 
-from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.loop_controller import LoopController, ToolAttempt
 from agentcore.runtime.tool_failures import (
     ToolFailureFact,
-    format_hard_constraint,
     format_team_tool_failures_block,
     format_tool_failures_section,
     outstanding_facts,
-    sync_tool_failure_constraint_in_system,
-    team_outstanding_constraint_from_messages,
 )
 
 
@@ -67,7 +63,7 @@ def test_fail_after_success_reopens_outstanding():
     assert facts[0].succeeded_after is False
 
 
-def test_format_section_and_hard_constraint():
+def test_format_section_legend():
     facts = [
         ToolFailureFact(
             tool_name="code_execute",
@@ -82,46 +78,10 @@ def test_format_section_and_hard_constraint():
     assert "failures=2" in section
     assert "succeeded_after=false" in section
     assert "Sandbox crash" in section
-    assert "必须如实告知" in format_hard_constraint(facts)
+    assert outstanding_facts(facts)[0].outstanding is True
 
 
-def test_compensated_facts_skip_hard_constraint_injection():
-    messages = [LLMMessage(role="system", content="base prompt")]
-    compensated = [
-        ToolFailureFact(
-            tool_name="code_execute",
-            failure_count=2,
-            last_error="old",
-            succeeded_after=True,
-        )
-    ]
-    assert outstanding_facts(compensated) == []
-    assert sync_tool_failure_constraint_in_system(messages, outstanding_facts(compensated)) is False
-    assert "tool_failure_hard_constraint" not in (messages[0].content or "")
-
-
-def test_system_prompt_inject_and_clear():
-    messages = [LLMMessage(role="system", content="base prompt")]
-    outstanding = [
-        ToolFailureFact(
-            tool_name="code_execute",
-            failure_count=1,
-            last_error="crash",
-            succeeded_after=False,
-        )
-    ]
-    assert sync_tool_failure_constraint_in_system(messages, outstanding) is True
-    body = messages[0].content or ""
-    assert "<tool_failure_hard_constraint>" in body
-    assert "code_execute" in body
-    assert "禁止宣称已完成" in body
-
-    assert sync_tool_failure_constraint_in_system(messages, []) is True
-    assert "tool_failure_hard_constraint" not in (messages[0].content or "")
-    assert (messages[0].content or "").startswith("base prompt")
-
-
-def test_team_block_and_ceo_message_scan():
+def test_team_block_lists_facts():
     products = [
         {
             "role": "工程师",
@@ -139,23 +99,10 @@ def test_team_block_and_ceo_message_scan():
     block = format_team_tool_failures_block(products)
     assert "### tool_failures" in block
     assert "code_execute" in block
-    assert "【工具失败硬约束】" in block
     assert "succeeded_after=false" in block
 
-    messages = [
-        LLMMessage(role="system", content="ceo"),
-        LLMMessage(role="tool", content=block),
-    ]
-    text = team_outstanding_constraint_from_messages(messages)
-    assert text is not None
-    assert "禁止宣称已完成" in text
-    assert sync_tool_failure_constraint_in_system(
-        messages, [], constraint_text=text
-    )
-    assert "tool_failure_hard_constraint" in (messages[0].content or "")
 
-
-def test_team_block_omitted_when_only_compensated():
+def test_team_block_includes_compensated():
     products = [
         {
             "role": "工程师",
@@ -173,7 +120,3 @@ def test_team_block_omitted_when_only_compensated():
     block = format_team_tool_failures_block(products)
     assert "### tool_failures" in block
     assert "succeeded_after=true" in block
-    assert "【工具失败硬约束】" not in block
-    assert team_outstanding_constraint_from_messages(
-        [LLMMessage(role="tool", content=block)]
-    ) is None

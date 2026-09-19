@@ -16,8 +16,6 @@ from agentcore.runtime.loop_controller import (
     Intervention,
     LoopController,
     ToolAttempt,
-    delivery_idle_narrow_prompt,
-    delivery_idle_nudge_prompt,
 )
 from agentcore.tools.registry import ToolRegistry
 
@@ -38,68 +36,9 @@ def maybe_inject_delivery_idle(
     run_id: str,
     round_idx: int,
     role: str,
-) -> Literal["none", "nudge", "narrow"]:
-    """Inject read-idle steer when the controller bars are armed.
-
-    Factory only honors an explicitly constructed controller (nudge/narrow
-    /report / leftover recon copy). Product factory never arms any delivery_idle
-    bar. Orthogonal to token/timeout wind_down.
-    Narrow allowlist apply is consumed by the react loop via
-    :meth:`LoopController.take_delivery_idle_narrow_apply`.
-
-    When ``controller.workspace_channel_dead``: never narrow (write-surface copy),
-    and files/report nudge drops file_write pressure (handoff/escalate only).
-    """
-    if role != "worker" or controller.landing_succeeded:
-        return "none"
-
-    channel_dead = bool(controller.workspace_channel_dead)
-    rounds = controller.delivery_idle_rounds
-    if controller.delivery_idle_narrow_due() and not channel_dead:
-        controller.mark_delivery_idle_narrowed()
-        prompt = delivery_idle_narrow_prompt(rounds=rounds)
-        assert prompt is not None
-        logger.info(
-            "engine.delivery_idle_narrow",
-            round=round_idx,
-            idle_rounds=rounds,
-            nudge_bar=controller.delivery_idle_nudge_rounds,
-            narrow_bar=controller.delivery_idle_narrow_rounds,
-        )
-        messages.append(LLMMessage(role="user", content=prompt))
-        record_turn_fact(
-            NoteFact(
-                role="user", content=prompt, reason="delivery_idle_narrow", run_id=run_id
-            ).to_fact()
-        )
-        return "narrow"
-
-    if controller.delivery_idle_nudge_due():
-        controller.mark_delivery_idle_nudged()
-        prompt = delivery_idle_nudge_prompt(
-            rounds=rounds,
-            recon=controller.delivery_idle_recon,
-            report=controller.delivery_idle_report,
-            channel_dead=channel_dead and not controller.delivery_idle_recon,
-        )
-        logger.info(
-            "engine.delivery_idle_nudge",
-            round=round_idx,
-            idle_rounds=rounds,
-            nudge_bar=controller.delivery_idle_nudge_rounds,
-            narrow_bar=controller.delivery_idle_narrow_rounds,
-            recon=controller.delivery_idle_recon,
-            report=controller.delivery_idle_report,
-            channel_dead=channel_dead,
-        )
-        messages.append(LLMMessage(role="user", content=prompt))
-        record_turn_fact(
-            NoteFact(
-                role="user", content=prompt, reason="delivery_idle_nudge", run_id=run_id
-            ).to_fact()
-        )
-        return "nudge"
-
+) -> Literal["none"]:
+    """Product-retired. Never injects, even if an explicit controller still has bars."""
+    del controller, messages, run_id, round_idx, role
     return "none"
 
 
@@ -239,7 +178,8 @@ def create_loop_controller(
     investigation-round finalize is **retired**: factory always passes
     ``convergence_finalize_rounds=0``. Same-target spin
     (``engine_convergence_spin_rounds``) stays. Explicit ``LoopController``
-    construction may still pass ``finalize_rounds`` / idle bars.
+    construction may still pass ``finalize_rounds`` / idle bars (idle bars no
+    longer inject).
     ``report_delivery`` stays for call-site compatibility and does not drive idle.
     Orthogonal to token/timeout wind_down and never stamps DEGRADED / FAILED for
     read-idle.

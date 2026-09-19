@@ -4,9 +4,7 @@ import {
   foldCitations,
   foldContentDelta,
   foldContentReset,
-  foldGraphAppendMarker,
   foldInteractionTimelineMarker,
-  foldPlanReviewMarker,
   foldReasoningDelta,
   foldTeamMarker,
   foldToolUseEnd,
@@ -51,12 +49,10 @@ type StreamProjectionActions = Pick<
   | "attachErrorToLastMessage"
   | "stampCheckpointMarker"
   | "stampUserInterjectionMarker"
-  | "stampPlanReviewMarker"
   | "stampTimelineMarker"
   | "createAssistantMessage"
   | "finalizeLastMessage"
   | "setLastAssistantExecutionId"
-  | "stampGraphAppend"
   | "setCaptainContext"
 >;
 
@@ -488,20 +484,6 @@ export function createStreamProjectionActions(
         return { messages };
       }),
 
-    stampPlanReviewMarker: (checkpointId, conversationId) =>
-      patchConversation(conversationId, (rt) => {
-        const messages = [...rt.messages];
-        const idx = lastAssistantIndex(messages);
-        if (idx === -1) return null;
-        const msg = messages[idx];
-        const lane = foldPlanReviewMarker(
-          messageLaneFromMessage(msg),
-          checkpointId,
-        );
-        messages[idx] = { ...msg, process: lane.process };
-        return { messages };
-      }),
-
     stampTimelineMarker: (marker, id, conversationId) =>
       patchConversation(conversationId, (rt) => {
         const messages = [...rt.messages];
@@ -591,26 +573,6 @@ export function createStreamProjectionActions(
           ...(idChanged ? { executionId } : {}),
           ...(procChanged ? { process: lane.process } : {}),
         };
-        return { messages };
-      }),
-
-    stampGraphAppend: (payload, conversationId) =>
-      patchConversation(conversationId, (rt) => {
-        const messages = [...rt.messages];
-        const idx = lastAssistantIndex(messages);
-        if (idx === -1) return null;
-        const msg = messages[idx];
-        const lane = foldGraphAppendMarker(
-          messageLaneFromMessage(msg),
-          payload.execution_id,
-          payload.host_message_id,
-          payload.added_count,
-          payload.act_id,
-          payload.act_kind,
-          payload.authorized_by,
-        );
-        if (lane.process === msg.process) return null;
-        messages[idx] = { ...msg, process: lane.process };
         return { messages };
       }),
 

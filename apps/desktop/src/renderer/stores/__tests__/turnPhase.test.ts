@@ -307,7 +307,7 @@ describe("turn stop lifecycle", () => {
     });
   });
 
-  it("terminal + detached 仍消费 team_synthesis_preview（队长节点 live 预览）", () => {
+  it("terminal + detached unknown event does not re-enter the turn", () => {
     beginTurnPreflight(CID);
     enterTurnStreaming(CID);
     const mid = useConversationStore.getState().createAssistantMessage(CID);
@@ -342,37 +342,16 @@ describe("turn stop lifecycle", () => {
 
     dispatchSSEEvent(
       {
-        type: "team_synthesis_preview",
-        payload: {
-          execution_id: plan.id,
-          completed: 1,
-          total: 2,
-          headline: "已完成 1/2：✅ 研究员 ⏳ 撰写员",
-          text: "已完成 1/2：✅ 研究员 ⏳ 撰写员",
-          workers: [
-            {
-              run_id: "r1",
-              role: "研究员",
-              status: "completed",
-              summary: "ok",
-            },
-            {
-              run_id: "r2",
-              role: "撰写员",
-              status: "pending",
-              summary: "",
-            },
-          ],
-          in_progress: true,
-        },
+        type: "retired_unknown_event",
+        payload: { headline: "x" },
       } as never,
       { conversationId: CID, source: "server" },
     );
 
+    expect(getTurnPhase(CID)).toBe("completed");
     expect(
-      execRuntime(useExecutionStore.getState(), mid).teamSynthesisPreview
-        ?.headline,
-    ).toContain("✅ 研究员");
+      execRuntime(useExecutionStore.getState(), mid).executionDetached,
+    ).not.toBeNull();
   });
 
   it("terminal + detached running 点停止：打 stop API，不进入 stopping", async () => {

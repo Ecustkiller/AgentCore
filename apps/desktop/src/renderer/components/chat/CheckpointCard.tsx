@@ -18,7 +18,6 @@ import {
   flattenAskNotes,
   useAskAnswer,
 } from "./ask/AskUserFields";
-import { OrganizePlanBody } from "./ask/OrganizePlanBody";
 
 /**
  * Inline ask_user card — the CEO paused the turn to ask the user. This is the ONE
@@ -46,29 +45,14 @@ export function CheckpointCard({
   return timelineIntentionalEmpty();
 }
 
-/** Flatten per-question listed picks into resume `selected`. */
-export function collectAskSelected(
-  content: AskUserContent,
-  answers: Record<string, string[]>,
-): string[] {
-  const out: string[] = [];
-  for (const q of content.questions) {
-    for (const v of answers[q.id] ?? []) {
-      const t = v.trim();
-      if (t) out.push(t);
-    }
-  }
-  return out;
-}
-
 /**
  * The live, actionable ask_user card body — the single asking surface, shared by the
  * inline live card ({@link CheckpointCard}) and the durable 待恢复 resume card
  * (ResumePrompt). Settled by 提交 (→ continue) or 取消 (→ stop 硬停). Picks compose into ONE readable
  * note (答复模型 α), handed to `onSubmit`.
  *
- * 清单确认（`organize_plan`）走清单体；其余一律 {@link AskDecisionBody}。
- * 卡头是题干 / 批次标题；可见面不画「需要你拍板」和图标。真·风险审批由 ApprovalPrompt 承载（蓝）。
+ * 一律 {@link AskDecisionBody}。
+ * 卡头是题干；可见面不画「需要你拍板」和图标。真·风险审批由 ApprovalPrompt 承载（蓝）。
  */
 export function AskUserCard({
   content,
@@ -89,31 +73,23 @@ export function AskUserCard({
   conversationId?: string | null;
 }) {
   const chrome = parseCheckpointIntent(intent);
-  const ans = useAskAnswer(content, {
-    seedAllMultiple: chrome === "organize_plan",
-  });
+  const ans = useAskAnswer(content);
   const [submitting, setSubmitting] = useState<CheckpointUserDecision | null>(
     null,
   );
   const busy = submitting !== null;
-  const carriesSelected = chrome === "organize_plan";
 
   const send = (decision: CheckpointUserDecision, noteOverride?: string) => {
     if (busy) return;
     setSubmitting(decision);
-    const baseSelected =
-      decision === "continue" && carriesSelected
-        ? collectAskSelected(content, ans.answers)
-        : [];
-    const selected = baseSelected;
     const freeNote = flattenAskNotes(content, ans.notes, ans.note);
     const composed =
       noteOverride !== undefined
         ? noteOverride
-        : decision === "stop" || carriesSelected
+        : decision === "stop"
           ? freeNote
           : ans.compose(chrome);
-    Promise.resolve(onSubmit(decision, composed, selected)).catch((err) => {
+    Promise.resolve(onSubmit(decision, composed)).catch((err) => {
       notifyError(err, "提交失败");
       setSubmitting(null);
     });
@@ -130,19 +106,6 @@ export function AskUserCard({
     onContinue: () => send("continue"),
     onStop: () => send("stop"),
   };
-
-  if (chrome === "organize_plan") {
-    return (
-      <DecisionCard
-        tone="neutral"
-        animate
-        className="flex max-h-[min(60vh,36rem)] flex-col overflow-hidden p-0"
-        data-ask-intent="organize_plan"
-      >
-        <OrganizePlanBody {...shared} />
-      </DecisionCard>
-    );
-  }
 
   return (
     <DecisionCard

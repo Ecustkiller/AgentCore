@@ -79,7 +79,7 @@ def build_draft_user(
         f"{text}"
         "请根据发言任务与证据笔记，直接输出【正式发言】全文（自由 markdown）。"
         "证据笔记只作素材，勿整段粘贴笔记标题或复述案件简介；禁止过程叙述与收工汇报。"
-        "【已核实·#eN】只能沿用证据笔记中出现过的 id。"
+        "【已核实·#rN】只能沿用证据笔记中出现过的 id。"
     )
     steer = (guard_steer or "").strip()
     if steer:
@@ -121,9 +121,9 @@ async def research_then_draft(
     ``messages`` 就地延展：检索工具往返保留；成稿发言以 assistant 消息追加（供续轮记忆）。
     笔记正文不追加为产品消息——只经 journal 的 llm_call fact 可见。
 
-    检索期经 ``evidence_ledger.research_proxy()`` 把工具命中写入共享核并注解 ``#eN``，
+    检索期经 ``evidence_ledger.research_proxy()`` 把工具命中写入共享核并注解 ``#rN``，
     笔记行尾绑定 id；随后 ``commit_research`` 只提交 deep_read + 笔记引用子集上 wire。
-    成稿闸：``【已核实·#eN】`` 的 id 须 ∈ 本方笔记引用集 ∪ ``allowed_ledger_ids``
+    成稿闸：``【已核实·#rN】`` 的 id 须 ∈ 本方笔记引用集 ∪ ``allowed_ledger_ids``
     （结辩传入历轮并集）；违规回炉一次，再违规降级【待核实·推断】。
     """
     total_usage = TokenUsage()
@@ -142,7 +142,7 @@ async def research_then_draft(
 
     if tools_available:
         # 检索阶段：工具进度 / 思考可直播；正文不进 run_output_delta（避免笔记冒充发言）。
-        # 场级核经 proxy 注解 #eN（不发射回合 evidence_ledger SSE）。
+        # 场级核经 proxy 注解 #rN（不发射回合 evidence_ledger SSE）。
         research_ledger = (
             evidence_ledger.research_proxy() if evidence_ledger is not None else None
         )

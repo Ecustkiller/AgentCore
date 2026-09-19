@@ -2102,14 +2102,14 @@ export interface paths {
         put?: never;
         /**
          * Duplicate Conversation
-         * @description Clone a conversation into a brand-new one carrying a copy of its transcript (克隆对话).
+         * @description Clone the transcript through one message into a new conversation (克隆对话).
          *
-         *     Owner-scoped (404 for a non-owner / missing source). The copy inherits the source's
-         *     folder (so it stays in the same project/workspace) and local-first intent, with a
-         *     「… 副本」title, then bulk-copies the source's messages via
-         *     ``MessageRepository.copy_all`` (content-level fields only — see that method for what is
-         *     intentionally not carried over, e.g. the team-graph replay journal). Returns the new
-         *     conversation summary with its (copied) message count so the sidebar can insert it.
+         *     Owner-scoped (404 for a non-owner / missing source / cutoff not in this chat).
+         *     ``until_message_id`` is required: the copy includes that row and every earlier
+         *     row; later turns stay on the source. The original is unchanged. Inherits folder
+         *     (same workspace) and local-first intent, titled「… 副本」. Content-level fields
+         *     only — ``MessageRepository.copy_through`` does not copy the team-graph journal.
+         *     A still-generating cutoff is 409. Returns the new conversation summary.
          */
         post: operations["duplicate_conversation_v1_conversations__conversation_id__duplicate_post"];
         delete?: never;
@@ -2295,11 +2295,10 @@ export interface paths {
          * Resolve Interaction
          * @description Settle any paused hot-path interaction over the unified bridge (§8.2).
          *
-         *     ``stage_card``：leftover 推进卡 resolve 为 410；开辩须用户在对话里点名。
-         *     其它 kind（approval / delegation / client_tool / escalation）：Settlement 预写 (D8)
+         *     approval / client_tool / escalation：Settlement 预写 (D8)
          *     后 settle Future；journal 有 required、无 Future → 410。
-         *     Cold-path ``ask_user`` / ``plan_review`` 不在此 endpoint。
-         *     Leftover ``team_preview`` resume is 410 on ``POST …/resume``.
+         *     Cold-path ``ask_user`` 不在此 endpoint。
+         *     Leftover ``team_preview`` / ``plan_review`` resume is 410 on ``POST …/resume``.
          */
         post: operations["resolve_interaction_v1_conversations__conversation_id__interactions__interaction_id__post"];
         delete?: never;
@@ -2705,7 +2704,7 @@ export interface paths {
          * Resume Message
          * @description Continue a durably-paused turn via SSE (结构化挂起 2b ``POST .../resume``).
          *
-         *     The turn paused at a plan_review / ask_user checkpoint and lost its
+         *     The turn paused at an ask_user checkpoint and lost its
          *     live stream (disconnect / restart); only its persisted frame survived.
          *
          *     Settlement 预写 (D8)：① peek frame → ② busy 则 deferred（预写后 ``resume_deferred``，
@@ -2720,7 +2719,8 @@ export interface paths {
          *     连接续流。谁也没消费掉这张卡（没有结论行）才是真失效（404，文案区分「超保留期清理」
          *     与「回合已重新生成」）。
          *
-         *     ``body.selected`` carries the user's ask_user picks (ignored for plan_review).
+         *     ``body.selected`` carries the user's ask_user picks.
+         *     Leftover ``plan_review`` frames resume as 410 Gone.
          *     Gated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota
          *     — all BEFORE settlement/claim, so a refused turn keeps its resumable frame.
          */
@@ -4151,29 +4151,6 @@ export interface paths {
          *     queueing the user's rename behind it (不得静默改名).
          */
         patch: operations["update_folder_v1_folders__folder_id__patch"];
-        trace?: never;
-    };
-    "/v1/folders/{folder_id}/collaboration-timeline": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Collaboration Timeline
-         * @description 项目协作时间线（读时聚合）：有 execution 的会话 + 幕序列摘要 + 约定文档引用条.
-         *
-         *     零写路径。约定文档快照（AgentCore/文档/research/ / debate/ 文件列表）复用工作区
-         *     文件 API，不在此返回。
-         */
-        get: operations["get_collaboration_timeline_v1_folders__folder_id__collaboration_timeline_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/v1/folders/{folder_id}/invites": {
@@ -8007,7 +7984,7 @@ export interface components {
          *     ``group`` is the Chinese 能力指引 subtitle (编排 / 工作区 / 交付 / 产品 / 工具).
          *     ``blurb`` is the toolbox shelf description only — not the consult directory.
          *     ``audience`` is who may see the entry (ceo / worker), same tokens as tool
-         *     ``available_to``.
+         *     ``available_to``. ``requires_tools`` is the wired-tool gate (empty = no gate).
          */
         CapabilitySkill: {
             /** Audience */
@@ -8026,6 +8003,8 @@ export interface components {
             group: string;
             /** Name */
             name: string;
+            /** Requires Tools */
+            requires_tools?: string[];
             /** Summary */
             summary: string;
         };
@@ -8261,13 +8240,11 @@ export interface components {
          * CheckpointDecision
          * @description How the user (or a timeout / orphan) settled a checkpoint the CEO raised.
          *
-         *     ``CONTINUE`` / ``ADJUST`` / ``STOP`` are shared by ask_user / plan_review.
-         *     ``ADJUST`` on plan_review steers then continues. ask_user rejects ``ADJUST``.
-         *     ``RESEARCH_FIRST`` is debate stage_card only: 不开赛，回灌固定文案令 CEO 立即
-         *     手写多视角调研（与 STOP 同构的恢复分支）。
+         *     ``CONTINUE`` / ``STOP`` are ask_user. ``ADJUST`` is leftover vocabulary
+         *     (retired plan_review); ask_user rejects ``ADJUST``.
          * @enum {string}
          */
-        CheckpointDecision: "continue" | "adjust" | "stop" | "research_first" | "timeout" | "orphaned";
+        CheckpointDecision: "continue" | "adjust" | "stop" | "timeout" | "orphaned";
         /**
          * Citation
          * @description A web source consulted for an assistant message (source-card data).
@@ -8328,77 +8305,6 @@ export interface components {
         CloneRepoResponse: {
             /** Path */
             path: string;
-        };
-        /**
-         * CollaborationDossierRef
-         * @description Path-level 约定文档消费事实（开赛注入或会话内 file_read）— 非跨会话过程边。
-         */
-        CollaborationDossierRef: {
-            /** Path */
-            path: string;
-            /** Sources */
-            sources?: ("dossier_inject" | "file_read")[];
-        };
-        /** CollaborationTimelineAct */
-        CollaborationTimelineAct: {
-            /** Act Id */
-            act_id: string;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "multi_agent" | "debate";
-            /** Started At */
-            started_at?: string | null;
-            /** Title */
-            title?: string | null;
-        };
-        /** CollaborationTimelineItem */
-        CollaborationTimelineItem: {
-            /** Acts */
-            acts?: components["schemas"]["CollaborationTimelineAct"][];
-            /** Conversation Id */
-            conversation_id: string;
-            /** Dossier Refs */
-            dossier_refs?: components["schemas"]["CollaborationDossierRef"][];
-            /** Execution Id */
-            execution_id: string;
-            /** Host Turn Id */
-            host_turn_id: string;
-            /** Title */
-            title?: string | null;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-        };
-        /** CollaborationTimelineResponse */
-        CollaborationTimelineResponse: {
-            /**
-             * Dossier Refs Note
-             * @default 路径级约定文档消费事实（本场辩论开赛注入或会话内 file_read），非跨会话过程边
-             */
-            dossier_refs_note: string;
-            /** Folder Id */
-            folder_id: string;
-            /** Items */
-            items?: components["schemas"]["CollaborationTimelineItem"][];
-            /**
-             * Limit
-             * @default 20
-             */
-            limit: number;
-            /**
-             * Offset
-             * @default 0
-             */
-            offset: number;
-            /**
-             * Total
-             * @default 0
-             */
-            total: number;
         };
         /**
          * CommandAxis
@@ -9604,6 +9510,18 @@ export interface components {
             quota_warning?: string | null;
             /** Version */
             version: string;
+        };
+        /**
+         * DuplicateConversationRequest
+         * @description Clone the transcript through one message (克隆对话 / 行业 fork).
+         *
+         *     ``until_message_id`` is required — there is no whole-conversation clone without
+         *     a cutoff. The copy includes that row and every earlier row in render order;
+         *     later turns stay only on the source. Original conversation is unchanged.
+         */
+        DuplicateConversationRequest: {
+            /** Until Message Id */
+            until_message_id: string;
         };
         /**
          * EditChatMessageRequest
@@ -10902,8 +10820,9 @@ export interface components {
          *
          *     Text files carry client-extracted ``text``. Raster image attachments are
          *     **resident-first** (``binary=True`` + ``workspace_path``); at send-turn prepare
-         *     the server eye→texts them via ``VisionReader`` into the attachment prompt block
-         *     (main LLM stays text-only — not native multimodal). Binary office/PDF may gain
+         *     they become native ``image_url`` parts on the **current main** model when it
+         *     accepts images, else an honest「当前主模型不收图」note (no sidecar eye).
+         *     Binary office/PDF may gain
          *     server-side ``text`` after分流预解析 (markitdown → ``*.md`` copy); xlsx/csv
          *     stay path-only so workers can ``code_execute``. ``kind="conversation"`` references
          *     another of the user's conversations: recent messages are materialized into
@@ -10931,6 +10850,8 @@ export interface components {
             name: string;
             /** Path */
             path: string;
+            /** Source Folder Id */
+            source_folder_id?: string | null;
             /**
              * Text
              * @default
@@ -11411,20 +11332,19 @@ export interface components {
         };
         /**
          * PausedTurnSummary
-         * @description A turn awaiting resume after a durable plan_review / ask_user pause.
+         * @description A turn awaiting resume after a durable ask_user pause.
          *
          *     Surfaced on conversation reopen so the client can re-render the right resume card
          *     by ``kind`` and offer the kind-appropriate actions → the resume endpoint
-         *     (plan_review: continue / adjust / stop; ask_user: continue / stop).
+         *     (ask_user: continue / stop).
          *     ``message_id`` is both the pause key and the id the resumed assistant message will
          *     reuse, so an optimistic bubble reconciles cleanly.
          *
-         *     Leftover ``team_preview`` (开工卡) frames are skipped on list (not serialized);
+         *     Leftover ``team_preview`` / ``plan_review`` frames are skipped on list (not serialized);
          *     resume of a leftover frame is 410 Gone.
-         *     plan_review carries ``steps`` (the reviewed checkpoint nodes) + ``pending`` (the
-         *     gated downstream); ask_user carries the unified card payload
+         *     ask_user carries the unified card payload
          *     ``question`` (the framing / opening line) + ``questions`` (empty for a compact
-         *     mid-task fork). The unused set is empty for the other kinds.
+         *     mid-task fork). Unused ``steps`` / ``pending`` stay empty.
          */
         PausedTurnSummary: {
             /**
@@ -11435,7 +11355,7 @@ export interface components {
             /** Checkpoint Id */
             checkpoint_id: string;
             /** Intent */
-            intent?: ("decision" | "organize_plan") | null;
+            intent?: "decision" | null;
             kind: components["schemas"]["SuspensionKind"];
             /** Message Id */
             message_id: string;
@@ -11473,7 +11393,7 @@ export interface components {
          *
          *     Surfaced on conversation reopen via ``GET .../recovery``. ``payload`` is the
          *     original ``*_required`` wire payload verbatim. Cold-path pauses stay in ``paused``.
-         *     Includes hot-path (approval / escalation) and durable ``stage_card``.
+         *     Includes hot-path (approval / escalation).
          */
         PendingInteractionSummary: {
             /** Id */
@@ -11482,7 +11402,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "approval" | "escalation" | "stage_card";
+            kind: "approval" | "escalation";
             /** Message Id */
             message_id: string;
             /** Payload */
@@ -12130,48 +12050,20 @@ export interface components {
             use_assumption: boolean;
         };
         /**
-         * ResolveStageCardInteraction
-         * @description Leftover 阶段推进卡：kind 仍在 journal，已不是开辩入口。
-         *
-         *     热路 ``POST …/interactions/{id}`` 一律 410。开辩须用户在对话里点名。
-         *     字段仍接受 ``start_debate`` / ``research_first``（旧客户端），服务端不执行。
-         */
-        ResolveStageCardInteraction: {
-            /**
-             * Decision
-             * @enum {string}
-             */
-            decision: "start_debate" | "research_first";
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            kind: "stage_card";
-            /** Motion Override */
-            motion_override?: string | null;
-            /**
-             * Note
-             * @default
-             */
-            note: string;
-        };
-        /**
          * ResumeTurnRequest
          * @description Body for ``POST .../messages/{message_id}/resume`` (结构化挂起 2b).
          *
-         *     Continues a turn that paused at a plan_review / ask_user checkpoint and was
+         *     Continues a turn that paused at an ask_user checkpoint and was
          *     DURABLY persisted (so it survived a client disconnect / server restart — the live
          *     in-process resolve is the corresponding interaction instead). Same decision
-         *     vocabulary as the live resolve: ``continue`` (proceed — run the gated downstream
-         *     for plan_review / accept the CEO direction for ask_user),
-         *     ``adjust`` (plan_review: inject ``note`` as a steer then continue;
-         *     ``note`` must be non-empty),
+         *     vocabulary as the live resolve: ``continue`` (accept the CEO direction),
+         *     ``adjust`` (rejected on ask_user; leftover ``plan_review`` resume is 410),
          *     or ``stop`` (end the turn here). ``selected``
-         *     carries the option(s) the user picked from an ask_user menu (ignored for
-         *     plan_review; the server drops any pick not actually offered). The engine-only
+         *     carries the option(s) the user picked from an ask_user menu (the server drops
+         *     any pick not actually offered). The engine-only
          *     ``timeout`` is never sent by a client.
          *
-         *     Leftover ``team_preview`` resume is 410 Gone (new cards are not emitted).
+         *     Leftover ``team_preview`` / ``plan_review`` resume is 410 Gone (new cards are not emitted).
          *     Extra leftover kickoff keys from old clients (``excluded_run_ids`` /
          *     ``write_capability_overrides`` / ``model_overrides``) are not in this schema
          *     and 422. Hot-path ``ResolveInteraction`` is not extended.
@@ -12533,6 +12425,8 @@ export interface components {
             installed: boolean;
             /** Name */
             name: string;
+            /** Offers Tools */
+            offers_tools?: string[];
             /** Source Document Id */
             source_document_id: string;
             /** Status */
@@ -12583,6 +12477,8 @@ export interface components {
             installed: boolean;
             /** Name */
             name: string;
+            /** Offers Tools */
+            offers_tools?: string[];
             /** Source Document Id */
             source_document_id: string;
             /** Status */
@@ -12609,6 +12505,8 @@ export interface components {
             installed: boolean;
             /** Name */
             name: string;
+            /** Offers Tools */
+            offers_tools?: string[];
             /** Source Document Id */
             source_document_id: string;
             /** Status */
@@ -12712,6 +12610,8 @@ export interface components {
             path: string;
             /** Size Bytes */
             size_bytes?: number | null;
+            /** Source Folder Id */
+            source_folder_id?: string | null;
             /** Thumb Path */
             thumb_path?: string | null;
             /**
@@ -12871,11 +12771,11 @@ export interface components {
          * SuspensionKind
          * @description Which suspend point a durable frame captured (the JSON discriminator).
          *
-         *     Interaction kinds (plan_review / ask_user) mirror
+         *     Interaction kinds (ask_user) mirror
          *     :data:`DURABLE_INTERACTION_KINDS`.
          * @enum {string}
          */
-        SuspensionKind: "plan_review" | "ask_user";
+        SuspensionKind: "ask_user";
         /** TableColumn */
         TableColumn: {
             /** Id */
@@ -13396,10 +13296,10 @@ export interface components {
          *
          *     - ``live_running``: a detached in-flight run is still alive to 续看 (实时重连续看
          *       C1 · slice 1b) — the client attaches (``GET .../stream``) to replay + tail it.
-         *     - ``paused``: turns that durably paused at a plan_review / ask_user checkpoint and
+         *     - ``paused``: turns that durably paused at an ask_user checkpoint and
          *       lost their live stream (结构化挂起 2b) — each renders a resume card.
          *     - ``pending_interactions``: hot-path interactions still awaiting settlement
-         *       (journal fold: approval / escalation / stage_card).
+         *       (journal fold: approval / escalation).
          *       Cold-path stays in ``paused``.
          */
         TurnRecoveryResponse: {
@@ -17872,7 +17772,11 @@ export interface operations {
                 access_token?: string | null;
             };
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DuplicateConversationRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             201: {
@@ -18131,7 +18035,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ResolveApprovalInteraction"] | components["schemas"]["ResolveClientToolInteraction"] | components["schemas"]["ResolveEscalationInteraction"] | components["schemas"]["ResolveStageCardInteraction"];
+                "application/json": components["schemas"]["ResolveApprovalInteraction"] | components["schemas"]["ResolveClientToolInteraction"] | components["schemas"]["ResolveEscalationInteraction"];
             };
         };
         responses: {
@@ -19374,7 +19278,7 @@ export interface operations {
     attach_stream_v1_conversations__conversation_id__stream_get: {
         parameters: {
             query?: {
-                /** @description 对话级长订阅（云对话多端同权 B2）：空闲不返回 204，保持连接送心跳，此后每个新回合（发送 / 队列 drain / 冷 resume 唤醒 / stage_card）自动续播。缺省 false = 回合级 attach（旧客户端语义：无 live run → 204，回合收口即断流）。 */
+                /** @description 对话级长订阅（云对话多端同权 B2）：空闲不返回 204，保持连接送心跳，此后每个新回合（发送 / 队列 drain / 冷 resume 唤醒）自动续播。缺省 false = 回合级 attach（旧客户端语义：无 live run → 204，回合收口即断流）。 */
                 follow?: boolean;
             };
             header?: {
@@ -21715,44 +21619,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FolderSummary"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_collaboration_timeline_v1_folders__folder_id__collaboration_timeline_get: {
-        parameters: {
-            query?: {
-                limit?: number;
-                offset?: number;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                folder_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CollaborationTimelineResponse"];
                 };
             };
             /** @description Validation Error */

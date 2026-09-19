@@ -30,7 +30,6 @@ const FAMILIES: { id: string; label: string }[] = [
   { id: "single_agent", label: "单 Agent" },
   { id: "multi_agent", label: "多 Agent" },
   { id: "approval", label: "审批" },
-  { id: "plan_review", label: "计划复核" },
 ];
 
 const OTHER = { id: "other", label: "其他" };
@@ -45,7 +44,6 @@ function familyOf(name: string): { id: string; label: string } {
 // 未命中的长尾落到「其他」。展示顺序即此数组顺序。
 const MULTI_SUBS: { id: string; label: string }[] = [
   { id: "debate", label: "辩论 / 对抗" },
-  { id: "roundtable", label: "圆桌" },
   { id: "escalate", label: "升级" },
   { id: "legal", label: "法律战情室" },
   { id: "delegate", label: "派单 / 子计划" },
@@ -57,8 +55,7 @@ const MULTI_SUBS: { id: string; label: string }[] = [
 
 function multiSubOf(name: string): string {
   const s = name.slice("multi_agent_".length);
-  if (s.startsWith("debate") || s.startsWith("red_team")) return "debate";
-  if (s.startsWith("roundtable")) return "roundtable";
+  if (s.startsWith("debate")) return "debate";
   if (s.startsWith("blocking_escalate") || s.startsWith("escalation"))
     return "escalate";
   if (s.startsWith("legal")) return "legal";

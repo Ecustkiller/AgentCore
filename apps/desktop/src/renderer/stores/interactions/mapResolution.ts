@@ -10,7 +10,6 @@ function parseDecision(v: unknown): CheckpointDecision | null {
     v === "continue" ||
     v === "adjust" ||
     v === "stop" ||
-    v === "research_first" ||
     v === "timeout" ||
     v === "orphaned"
   ) {
@@ -20,7 +19,7 @@ function parseDecision(v: unknown): CheckpointDecision | null {
 }
 
 /**
- * Shared settlement fields for cold decision families (ask_user / plan_review). Replaces the duplicated status/decision/note branches that used
+ * Shared settlement fields for cold decision families (ask_user). Replaces the duplicated status/decision/note branches that used
  * to live in parallel entryTo* adapters.
  */
 export function mapEntryResolution(e: InteractionEntry): {

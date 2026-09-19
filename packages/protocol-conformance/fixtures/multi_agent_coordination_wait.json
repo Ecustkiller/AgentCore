@@ -146,32 +146,6 @@
       "timestamp": "2026-01-01T00:00:01.007Z"
     },
     {
-      "type": "team_synthesis_preview",
-      "payload": {
-        "execution_id": "exec1",
-        "completed": 1,
-        "total": 2,
-        "headline": "已完成 1/2：✅ 研究员 ⏳ 撰写员",
-        "text": "已完成 1/2：✅ 研究员 ⏳ 撰写员\n· 研究员：完成调研",
-        "workers": [
-          {
-            "run_id": "r1",
-            "role": "研究员",
-            "status": "completed",
-            "summary": "完成调研"
-          },
-          {
-            "run_id": "r2",
-            "role": "撰写员",
-            "status": "pending",
-            "summary": ""
-          }
-        ],
-        "in_progress": true
-      },
-      "timestamp": "2026-01-01T00:00:01.008Z"
-    },
-    {
       "type": "coordination_wait",
       "payload": {
         "execution_id": "exec1",
@@ -179,7 +153,7 @@
         "completed": 1,
         "total": 2
       },
-      "timestamp": "2026-01-01T00:00:01.009Z"
+      "timestamp": "2026-01-01T00:00:01.008Z"
     }
   ],
   "projected": {
@@ -325,28 +299,6 @@
     "debatePretrial": null,
     "crossExamEnabled": false,
     "debateOpening": null,
-    "teamSynthesisPreview": {
-      "execution_id": "exec1",
-      "completed": 1,
-      "total": 2,
-      "headline": "已完成 1/2：✅ 研究员 ⏳ 撰写员",
-      "text": "已完成 1/2：✅ 研究员 ⏳ 撰写员\n· 研究员：完成调研",
-      "workers": [
-        {
-          "run_id": "r1",
-          "role": "研究员",
-          "status": "completed",
-          "summary": "完成调研"
-        },
-        {
-          "run_id": "r2",
-          "role": "撰写员",
-          "status": "pending",
-          "summary": ""
-        }
-      ],
-      "in_progress": true
-    },
     "deliveryStatus": null,
     "turnWarning": null,
     "autoFolder": null,

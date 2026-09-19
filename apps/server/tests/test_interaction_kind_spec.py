@@ -15,7 +15,6 @@ from agentcore.runtime.interaction import (
     GATE_KINDS,
     HOT_KINDS,
     INTERACTION_KIND_SPECS,
-    JOURNAL_SURFACE_EVENTS,
     RECOVERY_PENDING_KINDS,
     InteractionKind,
     is_hot_user_pending_kind,
@@ -31,16 +30,14 @@ def test_specs_cover_every_user_facing_kind() -> None:
 
 def test_derived_behavior_sets_match_declared_flags() -> None:
     assert frozenset({"approval", "escalation"}) == HOT_KINDS
-    assert frozenset({"approval", "ask_user", "plan_review"}) == GATE_KINDS
+    assert frozenset({"approval", "ask_user"}) == GATE_KINDS
     assert frozenset({"approval", "escalation"}) == RECOVERY_PENDING_KINDS
-    assert frozenset({"approval", "escalation", "ask_user", "plan_review"}) == ATTENTION_KINDS
-    assert frozenset({InteractionKind.ASK_USER, InteractionKind.PLAN_REVIEW}) == DURABLE_INTERACTION_KINDS
+    assert frozenset({"approval", "escalation", "ask_user"}) == ATTENTION_KINDS
+    assert frozenset({InteractionKind.ASK_USER}) == DURABLE_INTERACTION_KINDS
     assert SUSPENSION_DURABLE is DURABLE_INTERACTION_KINDS
 
 
 def test_journal_surface_includes_every_spec_required_event() -> None:
-    assert EventType.STAGE_CARD_REQUIRED.value in JOURNAL_SURFACE_EVENTS
-    assert EventType.STAGE_CARD_REQUIRED.value in _JOURNAL_SURFACE_TYPES
     for spec in INTERACTION_KIND_SPECS.values():
         if spec.journal_surface:
             assert spec.required_event in _JOURNAL_SURFACE_TYPES
@@ -52,8 +49,6 @@ def test_settlement_event_kinds_are_derived_from_specs() -> None:
             EventType.APPROVAL_RESOLVED.value,
             EventType.ESCALATION_RESOLVED.value,
             EventType.CHECKPOINT_RESOLVED.value,
-            EventType.PLAN_REVIEW_RESOLVED.value,
-            EventType.STAGE_CARD_RESOLVED.value,
             EventType.INTERACTION_ORPHANED.value,
         }
     )

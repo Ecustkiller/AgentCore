@@ -1505,7 +1505,7 @@ def _finalizes(messages: list[LLMMessage]) -> list[LLMMessage]:
     return [
         m
         for m in messages
-        if m.role == "user" and m.content and "停止使用调查与执行类工具" in m.content
+        if m.role == "user" and m.content and "本轮强制收口" in m.content
     ]
 
 

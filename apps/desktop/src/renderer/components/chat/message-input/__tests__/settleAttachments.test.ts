@@ -103,6 +103,30 @@ describe("settleAttachments", () => {
     expect(ensure).not.toHaveBeenCalled();
   });
 
+  it("邻桌点名活文件不驻留进当前工作区", async () => {
+    const att = fileAttachment({
+      name: "a.md",
+      path: "docs/a.md",
+      text: "# hi",
+      binary: false,
+      fileBlob: undefined,
+      workspacePath: "docs/a.md",
+      sourceFolderId: "folder-b",
+    });
+
+    const res = await settleAttachments("c1", [att]);
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.outgoing).toEqual([
+      expect.objectContaining({
+        workspace_path: "docs/a.md",
+        source_folder_id: "folder-b",
+      }),
+    ]);
+    expect(ensure).not.toHaveBeenCalled();
+  });
+
   it("仍在传就等它落地（不从头重来）", async () => {
     const att = fileAttachment();
     let release!: (r: ResideResult) => void;

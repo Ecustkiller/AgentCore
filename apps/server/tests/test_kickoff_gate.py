@@ -27,8 +27,6 @@ from agentcore.runtime.facts import TurnFactLog, current_fact_log
 from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.kickoff import (
     debate_kickoff_summary,
-    has_unfulfilled_kickoff_adjust,
-    kickoff_adjust_state,
 )
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunSpec
@@ -515,76 +513,6 @@ async def test_delegate_full_auto_multi_skips_card():
     assert result.effect is not ToolEffect.SUSPEND
     assert saved == []
     await _drain_coord()
-
-
-def _adjust_journal(
-    *,
-    fulfilled: bool = False,
-    note: str = "人太多，改成一个人做",
-    first_id: str = "tp1",
-    second_id: str = "tp2",
-) -> list[dict]:
-    entries = [
-        {
-            "kind": "team_preview_required",
-            "payload": {"checkpoint_id": first_id, "revision": 1},
-            "ts": "t0",
-        },
-        {
-            "kind": "team_preview_resolved",
-            "payload": {"checkpoint_id": first_id, "decision": "adjust", "note": note},
-            "ts": "t1",
-        },
-    ]
-    if fulfilled:
-        entries.append(
-            {
-                "kind": "team_preview_required",
-                "payload": {
-                    "checkpoint_id": second_id,
-                    "revision": 2,
-                    "revised_from": first_id,
-                    "revision_note": note,
-                },
-                "ts": "t2",
-            }
-        )
-    return entries
-
-
-def test_kickoff_adjust_state_lineage_and_fulfillment():
-    note = "人太多，改成一个人做"
-    pending = _adjust_journal(note=note)
-    assert has_unfulfilled_kickoff_adjust(pending) is True
-    pending_state = kickoff_adjust_state(pending)
-    assert pending_state.revision == 2
-    assert pending_state.revised_from == "tp1"
-    assert pending_state.revision_note == note
-
-    done = _adjust_journal(fulfilled=True, note=note)
-    assert has_unfulfilled_kickoff_adjust(done) is False
-    done_state = kickoff_adjust_state(done)
-    assert done_state.revision == 1
-    assert done_state.revised_from is None
-    assert done_state.revision_note is None
-
-    # 第二轮 adjust：谱系接到上一张卡。
-    second = [
-        *done,
-        {
-            "kind": "team_preview_resolved",
-            "payload": {"checkpoint_id": "tp2", "decision": "adjust", "note": "再瘦"},
-            "ts": "t3",
-        },
-    ]
-    second_state = kickoff_adjust_state(second)
-    assert second_state.unfulfilled is True
-    assert second_state.revision == 3
-    assert second_state.revised_from == "tp2"
-    assert second_state.revision_note == "再瘦"
-
-    assert has_unfulfilled_kickoff_adjust([]) is False
-    assert kickoff_adjust_state([]).revision == 1
 
 
 async def test_unfulfilled_adjust_solo_still_hangs_card():

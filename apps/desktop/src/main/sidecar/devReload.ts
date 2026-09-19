@@ -16,19 +16,7 @@ export function sidecarDevReloadEnabled(
 ): boolean {
   if (packaged) return false;
   const raw = (env.AGENTCORE_SIDECAR_RELOAD ?? "").trim().toLowerCase();
-  if (raw === "false" || raw === "0" || raw === "no" || raw === "off") {
-    return false;
-  }
-  if (
-    raw === "" ||
-    raw === "true" ||
-    raw === "1" ||
-    raw === "yes" ||
-    raw === "on"
-  ) {
-    return true;
-  }
-  return false;
+  return raw === "true" || raw === "1" || raw === "yes" || raw === "on";
 }
 
 export function sidecarDevReloadWatchDir(
@@ -72,8 +60,9 @@ export type StartSidecarDevReloadOptions = {
  * 开发态：盯 `apps/server/agentcore/`，有变动则弹已拉起的 sidecar。
  *
  * 不是 uvicorn WatchFiles（那会跟 API 同命运、2s 硬杀 SSE）。桌面自己弹自己的
- * 子进程，stdio 父进程仍是 Electron。打包态永不启用。真跑前
- * `AGENTCORE_SIDECAR_RELOAD=false`。
+ * 子进程，stdio 父进程仍是 Electron。打包态永不启用。开发态默认关（Windows
+ * 监听会误报、并行改文件会掐活回合）；要对着改代码连发才显式
+ * `AGENTCORE_SIDECAR_RELOAD=true`。
  */
 export function startSidecarDevReload(
   manager: SidecarDevReloadManager,

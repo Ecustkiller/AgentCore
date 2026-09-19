@@ -31,9 +31,9 @@ from agentcore.workspace.server import ServerWorkspace
 # debate / delegate are wired on every path; ask_user is live-user only.
 # run skill is gated on the run tool (CEO+worker HOW).
 # data_file_landing / page_ui ride consult audience (worker loop vs CEO 派工).
-# 编制 HOW 在 delegate 按钮，不进本 registry。
+# 编制 HOW 在 delegate 按钮；填卡 HOW 在 ask_user 按钮。均不进本 registry。
 _FULL_TOOLS = {"delegate", "ask_user", "debate", "run"}
-_NO_LIVE_USER = {"delegate", "debate"}  # autonomous path: no ask_user
+_NO_LIVE_USER = {"delegate", "debate"}  # autonomous path: no ask_user / run
 
 
 def _skill_consult(
@@ -74,8 +74,6 @@ def test_registry_registers_the_system_skills():
         "local_desk",
         "product_help",
         "debate_and_review",
-        "ask_kickoff",
-        "ask_midtask",
         "run",
         "data_file_landing",
         "page_ui",
@@ -86,8 +84,6 @@ def test_registry_get_hit_and_miss():
     reg = build_system_skill_registry()
     assert reg.get("debate_and_review") is not None
     assert reg.get("no_such_skill") is None
-    assert reg.get("ask_kickoff") is not None
-    assert reg.get("ask_midtask") is not None
 
 
 def test_registry_rejects_duplicate_name():
@@ -102,9 +98,9 @@ def test_registry_rejects_duplicate_name():
 
 
 def test_available_hides_gated_skills_without_required_tools():
-    # ask_kickoff / ask_midtask need the ask_user tool. On the autonomous (no live user)
-    # path it is not wired, so it drops out of the catalog. data_file_landing is
-    # ungated (CEO still consults to brief) — not tied to delegate.
+    # run needs the run tool. On the autonomous (no live user) path it is not
+    # wired, so it drops out of the catalog. data_file_landing is ungated
+    # (CEO still consults to brief) — not tied to delegate.
     reg = build_system_skill_registry()
     available = {s.name for s in reg.available(_NO_LIVE_USER)}
     assert available == {
@@ -125,8 +121,6 @@ def test_available_shows_gated_skills_when_tools_wired():
         "local_desk",
         "product_help",
         "debate_and_review",
-        "ask_kickoff",
-        "ask_midtask",
         "run",
         "data_file_landing",
         "page_ui",
@@ -146,8 +140,6 @@ def test_available_audience_hides_ceo_only_from_workers():
         "local_desk",
         "product_help",
         "debate_and_review",
-        "ask_kickoff",
-        "ask_midtask",
         "run",
         "data_file_landing",
         "page_ui",
@@ -197,11 +189,11 @@ async def test_expand_skill_tool_names_unlocks_gated_skill():
             audience="ceo",
         )
     )
-    assert await leaf.fetch_by_name("u", "ask_kickoff") is None
-    expanded = expand_skill_tool_names(leaf, {"ask_user"})
+    assert await leaf.fetch_by_name("u", "run") is None
+    expanded = expand_skill_tool_names(leaf, {"run"})
     assert expanded is not leaf
-    assert await expanded.fetch_by_name("u", "ask_kickoff") is not None
-    assert await leaf.fetch_by_name("u", "ask_kickoff") is None
+    assert await expanded.fetch_by_name("u", "run") is not None
+    assert await leaf.fetch_by_name("u", "run") is None
 
 
 def test_splice_on_demand_directory_replaces_block():
@@ -236,8 +228,6 @@ async def test_ceo_consult_source_keeps_product_help():
         "local_desk",
         "product_help",
         "debate_and_review",
-        "ask_kickoff",
-        "ask_midtask",
         "run",
         "data_file_landing",
         "page_ui",
@@ -268,8 +258,6 @@ def test_directory_groups_skills_under_chinese_subtitles():
     for heading in ("编排：", "工作区：", "交付：", "产品：", "工具："):
         assert heading in ceo
     assert "- debate_and_review：" in ceo
-    assert "- ask_kickoff：" in ceo
-    assert "- ask_midtask：" in ceo
     assert "- local_desk：" in ceo
     assert "- delivery：" in ceo
     assert "- page_ui：" in ceo
@@ -282,8 +270,6 @@ def test_directory_groups_skills_under_chinese_subtitles():
     assert worker_src_names == {
         "data_file_landing",
         "page_ui",
-        "ask_kickoff",
-        "ask_midtask",
         "debate_and_review",
         "run",
     }
@@ -405,8 +391,6 @@ def test_product_help_pins_section_ids_manual_paths_and_internal_action():
 def test_directory_omits_gated_skills_on_autonomous_path():
     reg = build_system_skill_registry()
     out = render_skill_directory(reg, _NO_LIVE_USER)
-    assert "ask_kickoff" not in out
-    assert "ask_midtask" not in out
     assert "product_help" in out
     assert "- run：" not in out
 

@@ -4,9 +4,7 @@ import type { NormalizedInteraction } from "@/components/chat/chatTurn";
 const KIND_LABEL: Record<string, string> = {
   approval: "审批",
   ask_user: "提问",
-  plan_review: "计划复核",
   escalation: "升级",
-  stage_card: "推进卡",
 };
 
 const STATUS_TONE: Record<
@@ -27,10 +25,11 @@ export function InteractionLane({
 }: {
   interactions: NormalizedInteraction[];
 }) {
-  if (interactions.length === 0) return null;
+  const visible = interactions.filter((i) => i.kind !== "plan_review");
+  if (visible.length === 0) return null;
   return (
     <ul aria-label="交互" className="flex min-w-0 flex-wrap gap-2">
-      {interactions.map((i, index) => (
+      {visible.map((i, index) => (
         <li
           key={i.id || `${i.kind}-${index}`}
           className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-lg border border-border bg-muted/30 px-2.5 py-1 text-xs"

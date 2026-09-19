@@ -126,7 +126,11 @@ def test_landing_write_failure_kind_channel_dead_vs_write_failed():
     assert landing_write_failure_kind(dead) == "channel_dead"
 
     plain_fail = [
-        _assistant_call("c2", "file_copy", '{"source": "a", "destination": "b/out.txt"}'),
+        _assistant_call(
+            "c2",
+            "file_batch",
+            '{"operations":[{"op":"copy","source":"a","destination":"b/out.txt"}]}',
+        ),
         _tool_result("c2", with_tool_failed_marker("目标已存在：b/out.txt")),
     ]
     assert landing_write_failure_kind(plain_fail) == "write_failed"

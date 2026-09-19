@@ -8,19 +8,16 @@ import {
   debateGroups,
   debateLiveRounds,
   isDebate,
-  isDebateFormGroup,
 } from "@/stores/execution";
 import type {
   DebateClash,
   DebateClosing,
   DebateCrossExam,
   DebateCrossExamExchange,
-  DebateFindingInfo,
   DebateNarrativeRound,
   DebateResultPayload,
   DebateRoundSide,
   DebateSpeechArgument,
-  DebateThreadTurnInfo,
   DebateWitnessExam,
 } from "@/types/events";
 import { parseCrossExamResponse } from "./crossExamParse";
@@ -29,7 +26,6 @@ import type {
   DebateClashView,
   DebateClosingView,
   DebateCrossExamView,
-  DebateFindingView,
   DebateForm,
   DebateModel,
   DebateRosterSide,
@@ -37,7 +33,6 @@ import type {
   DebateScoreView,
   DebateSideModel,
   DebateSpeechArgumentView,
-  DebateThreadTurnView,
   DebateWitnessExamView,
 } from "./types";
 
@@ -209,16 +204,10 @@ function settledModel(
       witnessExam: resolveWitnessExam(round.witness_exam, execution),
       scores: [],
       sides,
-      findings: resolveFindings(round.findings, round.sides, execution),
-      threadTurns: resolveThreadTurns(
-        round.thread_turns,
-        round.sides,
-        execution,
-      ),
     };
   });
   return {
-    form: debate.form,
+    form: coerceDebateForm(debate.form),
     motion: debate.motion,
     stopReason: debate.stop_reason,
     moderatorRunId: debate.moderator_run_id,
@@ -240,7 +229,6 @@ function settledModel(
     evidenceLedger: Array.isArray(debate.evidence_ledger)
       ? debate.evidence_ledger
       : (execution.evidenceLedger ?? []),
-    subtopics: Array.isArray(debate.subtopics) ? debate.subtopics : null,
   };
 }
 
@@ -254,7 +242,7 @@ function liveModel(execution: Execution): DebateModel | null {
       : liveMultiSideRounds(execution);
   if (rounds.length === 0 && !canEnterLiveDebateShell(execution)) return null;
   return {
-    form: liveForm(execution),
+    form: "debate",
     motion: null,
     stopReason: null,
     moderatorRunId: null,
@@ -271,17 +259,11 @@ function liveModel(execution: Execution): DebateModel | null {
     settled: false,
     crossExamEnabled: execution.crossExamEnabled,
     evidenceLedger: execution.evidenceLedger ?? [],
-    subtopics: null,
   };
 }
 
-/** 进行中形态：从辩手 run 的 `group=debate:{form}` 标签推导 (收场前无 `debate_result`)。 */
-function liveForm(execution: Execution): DebateForm {
-  const tagged = execution.runs.find((r) => isDebateFormGroup(r.group));
-  const raw = tagged?.group?.slice("debate:".length);
-  if (raw === "red_team" || raw === "roundtable" || raw === "debate") {
-    return raw;
-  }
+/** 产品只认正反；历史 red_team / roundtable / 未知字符串一律当 debate。 */
+function coerceDebateForm(_raw: string | null | undefined): DebateForm {
   return "debate";
 }
 
@@ -339,12 +321,6 @@ function liveTwoSideRounds(
       crossExam: resolveLiveCrossExam(execution, roundNo, narr, sides),
       witnessExam: resolveWitnessExam(narr?.witness_exam, execution),
       scores: [],
-      findings: resolveFindings(narr?.findings, narr?.sides ?? [], execution),
-      threadTurns: resolveThreadTurns(
-        narr?.thread_turns,
-        narr?.sides ?? [],
-        execution,
-      ),
     });
   }
   return rounds;
@@ -373,8 +349,8 @@ function twoSide(
   };
 }
 
-/** 多方 (圆桌 / 红队 / 3+方) 进行中逐轮：发言由 {@link debateLiveRounds} (续写 revision
- * 重建) 提供，焦点/小结/裁判 由 `debateRounds` 按轮号合并。无 stance → 不分左右。 */
+/** 无 stance 的多方进行中逐轮（旧 journal group 走 {@link debateLiveRounds} 续写
+ * 重建）：焦点/小结/裁判 由 `debateRounds` 按轮号合并。不分左右。 */
 function liveMultiSideRounds(execution: Execution): DebateRoundModel[] {
   const speech = debateLiveRounds(execution);
   const roundNos = new Set<number>();
@@ -410,12 +386,6 @@ function liveMultiSideRounds(execution: Execution): DebateRoundModel[] {
       crossExam: resolveLiveCrossExam(execution, roundNo, narr, sideModels),
       witnessExam: resolveWitnessExam(narr?.witness_exam, execution),
       scores: [],
-      findings: resolveFindings(narr?.findings, narr?.sides ?? [], execution),
-      threadTurns: resolveThreadTurns(
-        narr?.thread_turns,
-        narr?.sides ?? [],
-        execution,
-      ),
     });
   }
   return rounds;
@@ -560,67 +530,6 @@ function resolveCrossExam(
     });
   }
   return out;
-}
-
-/** 红队 finding 台账 → 展示态（全文靠 run_id）。 */
-function resolveFindings(
-  findings: readonly DebateFindingInfo[] | undefined,
-  sides: readonly DebateRoundSide[],
-  execution: Execution,
-): DebateFindingView[] {
-  if (!findings?.length) return [];
-  const nameByKey = new Map(sides.map((s) => [s.key, s.name]));
-  // 同 key 多 beat 时取首次名字即可。
-  for (const s of sides) {
-    if (!nameByKey.has(s.key)) nameByKey.set(s.key, s.name);
-  }
-  return findings.map((f) => {
-    const attackerName = nameByKey.get(f.attacker_key) ?? f.attacker_key;
-    return {
-      id: f.id,
-      severity: f.severity,
-      target: f.target,
-      attackerKey: f.attacker_key,
-      attackerName,
-      attackerColorVar: debateSideColorVar(f.attacker_key, attackerName),
-      status: f.status,
-      disposition: f.disposition ?? "",
-      attackRun: f.attack_run_id
-        ? (execution.runs.find((r) => r.id === f.attack_run_id) ?? null)
-        : null,
-      responseRun: f.response_run_id
-        ? (execution.runs.find((r) => r.id === f.response_run_id) ?? null)
-        : null,
-      rebuttalRun: f.rebuttal_run_id
-        ? (execution.runs.find((r) => r.id === f.rebuttal_run_id) ?? null)
-        : null,
-      mergedFrom: f.merged_from ?? [],
-    };
-  });
-}
-
-/** 圆桌线程 turn → 展示态。 */
-function resolveThreadTurns(
-  turns: readonly DebateThreadTurnInfo[] | undefined,
-  sides: readonly DebateRoundSide[],
-  execution: Execution,
-): DebateThreadTurnView[] {
-  if (!turns?.length) return [];
-  const nameByKey = new Map(sides.map((s) => [s.key, s.name]));
-  return turns.map((t) => {
-    const speakerName = nameByKey.get(t.speaker) ?? t.speaker;
-    const replyTo = (t.reply_to ?? "").trim();
-    return {
-      speakerKey: t.speaker,
-      speakerName,
-      speakerColorVar: debateSideColorVar(t.speaker, speakerName),
-      replyToKey: replyTo,
-      replyToName: replyTo ? (nameByKey.get(replyTo) ?? replyTo) : "",
-      run: execution.runs.find((r) => r.id === t.run_id) ?? null,
-      ok: t.ok !== false,
-      beat: t.beat === "crux" ? "crux" : "thread",
-    };
-  });
 }
 
 /** 把契约的 {@link DebateClosing}（语义 key + `run_id` 引用）解析成可渲染的 {@link DebateClosingView}

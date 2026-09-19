@@ -36,10 +36,12 @@ export {
 export {
   INTERACTION_REGISTRY,
   INTERACTION_BY_KIND,
+  LEFTOVER_INTERACTION_SSE_TYPES,
   defFromRequiredEvent,
   defFromResolvedEvent,
   defFromTimelineProcess,
   interactionChannelEventTypes,
+  isLeftoverInteractionSse,
   submitPathOf,
   wireFor,
   type InteractionKindDef,
@@ -51,12 +53,10 @@ export {
   entryToApproval,
   entryToCheckpoint,
   entryToColdResume,
-  entryToPlanReview,
   isToolGranted,
   listColdPendingEntries,
   listMessageEntries,
   messageCheckpoints,
-  messagePlanReviews,
 } from "./adapters";
 export {
   useMessageInteractionCards,

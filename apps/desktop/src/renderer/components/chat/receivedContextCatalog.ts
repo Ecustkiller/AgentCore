@@ -37,7 +37,7 @@ export const CONTEXT_CHANNEL_META: Record<
   attack: { label: "进攻", hint: "本轮进攻陈词" },
   defense: { label: "防守", hint: "本轮防守陈词" },
   rebuttal: { label: "反驳", hint: "本轮反驳" },
-  thread: { label: "线索", hint: "本轮圆桌线索" },
+  thread: { label: "线索", hint: "本轮线索" },
   crux: { label: "争点", hint: "本轮争点" },
 };
 

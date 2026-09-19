@@ -47,20 +47,35 @@ def test_landing_tool_path_from_args():
     )
     assert (
         landing_tool_path_from_args(
-            "file_move", {"source": "a.py", "destination": "b.py"}
+            "file_batch",
+            {
+                "operations": [
+                    {"op": "move", "source": "a.py", "destination": "b.py"}
+                ]
+            },
         )
         == "b.py"
     )
     assert (
         landing_tool_path_from_args(
-            "file_copy", {"source": "a.py", "destination": "out/b.py"}
+            "file_batch",
+            {
+                "operations": [
+                    {"op": "copy", "source": "a.py", "destination": "out/b.py"}
+                ]
+            },
         )
         == "out/b.py"
     )
-    # file_copy / file_move use destination, not source / path.
+    # file_batch move/copy uses destination, not a stray path.
     assert (
         landing_tool_path_from_args(
-            "file_copy", {"source": "a.py", "path": "wrong.py"}
+            "file_batch",
+            {
+                "operations": [
+                    {"op": "copy", "source": "a.py", "path": "wrong.py"}
+                ]
+            },
         )
         is None
     )
@@ -94,7 +109,12 @@ def test_landing_tools_is_one_object_everywhere():
         assert (
             landing_tool_path_from_args(name, {"path": "p.txt"}) == "p.txt"
             or landing_tool_path_from_args(
-                name, {"source": "src", "destination": "dst.txt"}
+                name,
+                {
+                    "operations": [
+                        {"op": "copy", "source": "src", "destination": "dst.txt"}
+                    ]
+                },
             )
             == "dst.txt"
         )
@@ -108,8 +128,7 @@ async def test_every_landing_tool_self_reports_its_product(tmp_path):
     ``ToolResult.file_products`` 就是磁盘上那个路径；不自报即红。
     """
     from agentcore.tools.builtin.file_ops import (
-        FileCopyTool,
-        FileMoveTool,
+        FileBatchTool,
         FileWriteTool,
         StrReplaceTool,
     )
@@ -138,18 +157,15 @@ async def test_every_landing_tool_self_reports_its_product(tmp_path):
             "txt",
         ),
         (
-            "file_copy",
-            FileCopyTool(),
-            {"source": "src.txt", "destination": "out/copy.py"},
+            "file_batch",
+            FileBatchTool(),
+            {
+                "operations": [
+                    {"op": "copy", "source": "src.txt", "destination": "out/copy.py"}
+                ]
+            },
             "out/copy.py",
             "code",
-        ),
-        (
-            "file_move",
-            FileMoveTool(),
-            {"source": "src.txt", "destination": "out/moved.docx"},
-            "out/moved.docx",
-            "docx",
         ),
     ]
     assert {name for name, *_ in cases} == set(LANDING_TOOLS)

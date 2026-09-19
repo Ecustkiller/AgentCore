@@ -52,8 +52,6 @@ function round(overrides: Partial<DebateRoundModel> = {}): DebateRoundModel {
     crossExam: [],
     witnessExam: [],
     scores: [],
-    findings: [],
-    threadTurns: [],
     ...overrides,
   };
 }
@@ -76,7 +74,6 @@ function model(overrides: Partial<DebateModel> = {}): DebateModel {
     settled: false,
     crossExamEnabled: false,
     evidenceLedger: [],
-    subtopics: null,
     ...overrides,
   };
 }

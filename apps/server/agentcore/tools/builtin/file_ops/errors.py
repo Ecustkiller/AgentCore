@@ -304,7 +304,7 @@ def _outside_workspace_msg(
         )
     return (
         f"路径 '{path}' 超出了工作区范围。"
-        "若要把该本机目录加入本对话可改可覆盖：对该路径 `file_write` / `file_copy`"
+        "若要把该本机目录加入本对话可改可覆盖：对该路径 `file_write` / `file_batch` copy"
         "（运行时会请用户确认可写授权）。"
         "不要去改权限徽章。"
         f"{relative_fix}"

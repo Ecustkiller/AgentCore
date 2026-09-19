@@ -137,16 +137,9 @@ def test_channel_dead_finalize_disables_persist():
 def test_finalize_instruction_is_fact_only():
     from agentcore.runtime.engine.constants import FINALIZE_INSTRUCTION
 
-    for text in (FINALIZE_INSTRUCTION, FINALIZE_INSTRUCTION_FILES):
-        assert text.startswith("[系统提示]")
-        assert "已停用" in text
-        assert "请立即" not in text
-        assert "切勿" not in text
-        assert "禁止" not in text
-        assert "最终答案" not in text
-    assert "delegate" in FINALIZE_INSTRUCTION
-    assert "file_write" in FINALIZE_INSTRUCTION_FILES
-    assert "handoff" in FINALIZE_INSTRUCTION_FILES
+    assert FINALIZE_INSTRUCTION.startswith("[系统提示]")
+    assert "强制收口" in FINALIZE_INSTRUCTION
+    assert FINALIZE_INSTRUCTION_FILES == FINALIZE_INSTRUCTION
 
 
 @pytest.mark.asyncio
@@ -172,7 +165,6 @@ async def test_channel_dead_finalize_round_uses_coordination_instruction_not_fil
     assert result.kind == "answer"
     assert "file_write" not in (provider.last_tool_names or [])
     assert any(FINALIZE_INSTRUCTION in (m.content or "") for m in messages)
-    assert not any(FINALIZE_INSTRUCTION_FILES in (m.content or "") for m in messages)
     provider = _ScriptedProvider([[_content_chunk("已落盘")]])
     messages = [LLMMessage(role="user", content="go")]
     reg = _registry(with_persist=True)
@@ -193,7 +185,7 @@ async def test_channel_dead_finalize_round_uses_coordination_instruction_not_fil
     assert "handoff" in (provider.last_tool_names or [])
     assert "web_search" not in (provider.last_tool_names or [])
     assert any(
-        FINALIZE_INSTRUCTION_FILES in (m.content or "") for m in messages
+        FINALIZE_INSTRUCTION in (m.content or "") for m in messages
     )
 
 

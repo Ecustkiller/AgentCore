@@ -59,11 +59,30 @@ describe("debateLayoutPreference", () => {
       settled: false,
       crossExamEnabled: false,
       evidenceLedger: [],
-      subtopics: null,
     };
     expect(canUseSplitLayout(base)).toBe(true);
 
-    expect(canUseSplitLayout({ ...base, form: "red_team" })).toBe(false);
+    expect(
+      canUseSplitLayout({
+        ...base,
+        sides: [
+          {
+            key: "alpha",
+            name: "甲",
+            stance: "甲立场",
+            model: "",
+            is_subject: false,
+          },
+          {
+            key: "beta",
+            name: "乙",
+            stance: "乙立场",
+            model: "",
+            is_subject: false,
+          },
+        ],
+      }),
+    ).toBe(false);
     expect(
       canUseSplitLayout({
         ...base,
@@ -80,8 +99,6 @@ describe("debateLayoutPreference", () => {
             crossExam: [],
             witnessExam: [],
             scores: [],
-            findings: [],
-            threadTurns: [],
             sides: [
               {
                 key: "r1",

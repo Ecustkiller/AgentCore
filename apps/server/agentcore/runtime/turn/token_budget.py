@@ -131,18 +131,10 @@ def budget_skip_warning_for_active_scope(*, credential_source: str) -> str:
 
 
 def turn_token_budget_wrap_prompt() -> str:
-    """CEO one-shot ``[系统提示]``：触顶后基于已有产出收口（禁假完成 / 禁再派）。"""
+    """CEO one-shot ``[系统提示]``：触顶事实（新派已在执行层拒绝）。"""
     ceiling = resolve_turn_token_ceiling()
     spent = current_turn_tokens()
-    return (
-        f"[系统提示] 本回合累计 token 已触顶（已用 {spent} / 上限 {ceiling}）。"
-        "本回合禁止乱开新派单与新辩论；在飞任务结束后请立即基于已完成产出向用户收口——"
-        "汇总已有结论与落盘文件，并显式标出未完成缺口"
-        f"（gap 原因可用 `{REASON_TURN_TOKEN_BUDGET}`）。"
-        "**下一回合可续跑本图因额度未跑的节点**（append 同图 / replan 点名角色）；"
-        "禁止假装本回合已全部完成。"
-        "禁止再尝试无关的新 delegate/debate；禁止空转探路；禁止把部分完成伪装成全部交付。"
-    )
+    return f"[系统提示] 本回合累计 token 已触顶（已用 {spent} / 上限 {ceiling}）。"
 
 
 def tokens_from_journal_entries(entries: list[dict[str, Any]] | None) -> int:

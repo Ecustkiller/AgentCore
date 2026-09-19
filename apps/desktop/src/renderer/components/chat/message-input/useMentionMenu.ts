@@ -60,8 +60,10 @@ import {
 } from "./resideAttachment";
 import {
   type AttachmentFolderHint,
+  otherDeskFolderId,
   resolveFolderFromCitedRoot,
   resolveFolderFromIndexedEntry,
+  workspaceRelOnHintFolder,
 } from "./resolveAttachmentFolder";
 import type { MenuMode } from "./types";
 
@@ -722,10 +724,46 @@ export function useMentionMenu({
           kind: "dir",
         };
       } else {
-        // 文件：区内引用原路径；区外才复制进 attachments/（含二进制 xlsx）。
+        // 文件：同桌区内引用原路径；邻桌点名活文件（不复制）；区外才复制进 attachments/。
         // 本地根 sourceId = ``local:<rootId>`` 或 ``local:<rootId>:<subpath>``。
+        const hint = resolveFolderFromIndexedEntry(entry);
+        const otherDesk = otherDeskFolderId(conversationId, hint);
         const localMatch = /^local:([^:]+)(?::(.*))?$/.exec(entry.sourceId);
-        if (localMatch && hasLocalFiles()) {
+        if (localMatch && hasLocalFiles() && otherDesk && hint) {
+          const subBase = (localMatch[2] || "").replace(/^\/+|\/+$/g, "");
+          const containerRel = subBase
+            ? `${subBase}/${entry.relPath}`.replace(/\/+/g, "/")
+            : entry.relPath;
+          const source = sourcesRef.current.get(entry.sourceId);
+          let text = "";
+          let truncated = false;
+          let binary = false;
+          if (source) {
+            try {
+              const res = await source.read(entry.relPath);
+              if (res.kind === "text") {
+                text = res.text;
+                truncated = res.truncated;
+              } else if (res.kind !== "too-large") {
+                binary = true;
+              }
+            } catch {
+              /* cite still valid without inline preview */
+            }
+          }
+          next = {
+            id: crypto.randomUUID(),
+            key,
+            name: entry.name,
+            path: entry.display,
+            text,
+            truncated,
+            kind: "file",
+            workspacePath: workspaceRelOnHintFolder(hint, containerRel),
+            binary,
+            sourceFolderId: otherDesk,
+          };
+        } else if (localMatch && hasLocalFiles()) {
           const rootId = localMatch[1];
           const subBase = (localMatch[2] || "").replace(/^\/+|\/+$/g, "");
           const containerRel = subBase
@@ -784,6 +822,7 @@ export function useMentionMenu({
             truncated: res.truncated,
             kind: "file",
             workspacePath: entry.relPath.replace(/\\/g, "/"),
+            ...(otherDesk ? { sourceFolderId: otherDesk } : {}),
           };
         }
       }

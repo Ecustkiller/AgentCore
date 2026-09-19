@@ -3958,7 +3958,7 @@
         "type": "object"
       },
       "CapabilitySkill": {
-        "description": "A system Skill in the catalog (渐进披露): its catalog ``summary`` (the always-on\none-line trigger) plus the full ``body`` guidance the CEO pulls via consult.\n``group`` is the Chinese 能力指引 subtitle (编排 / 工作区 / 交付 / 产品 / 工具).\n``blurb`` is the toolbox shelf description only — not the consult directory.\n``audience`` is who may see the entry (ceo / worker), same tokens as tool\n``available_to``.",
+        "description": "A system Skill in the catalog (渐进披露): its catalog ``summary`` (the always-on\none-line trigger) plus the full ``body`` guidance the CEO pulls via consult.\n``group`` is the Chinese 能力指引 subtitle (编排 / 工作区 / 交付 / 产品 / 工具).\n``blurb`` is the toolbox shelf description only — not the consult directory.\n``audience`` is who may see the entry (ceo / worker), same tokens as tool\n``available_to``. ``requires_tools`` is the wired-tool gate (empty = no gate).",
         "properties": {
           "audience": {
             "items": {
@@ -3984,6 +3984,13 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "requires_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Requires Tools",
+            "type": "array"
           },
           "summary": {
             "title": "Summary",
@@ -4569,12 +4576,11 @@
         "type": "object"
       },
       "CheckpointDecision": {
-        "description": "How the user (or a timeout / orphan) settled a checkpoint the CEO raised.\n\n``CONTINUE`` / ``ADJUST`` / ``STOP`` are shared by ask_user / plan_review.\n``ADJUST`` on plan_review steers then continues. ask_user rejects ``ADJUST``.\n``RESEARCH_FIRST`` is debate stage_card only: 不开赛，回灌固定文案令 CEO 立即\n手写多视角调研（与 STOP 同构的恢复分支）。",
+        "description": "How the user (or a timeout / orphan) settled a checkpoint the CEO raised.\n\n``CONTINUE`` / ``STOP`` are ask_user. ``ADJUST`` is leftover vocabulary\n(retired plan_review); ask_user rejects ``ADJUST``.",
         "enum": [
           "continue",
           "adjust",
           "stop",
-          "research_first",
           "timeout",
           "orphaned"
         ],
@@ -4727,170 +4733,6 @@
           "path"
         ],
         "title": "CloneRepoResponse",
-        "type": "object"
-      },
-      "CollaborationDossierRef": {
-        "description": "Path-level 约定文档消费事实（开赛注入或会话内 file_read）— 非跨会话过程边。",
-        "properties": {
-          "path": {
-            "title": "Path",
-            "type": "string"
-          },
-          "sources": {
-            "items": {
-              "enum": [
-                "dossier_inject",
-                "file_read"
-              ],
-              "type": "string"
-            },
-            "title": "Sources",
-            "type": "array"
-          }
-        },
-        "required": [
-          "path"
-        ],
-        "title": "CollaborationDossierRef",
-        "type": "object"
-      },
-      "CollaborationTimelineAct": {
-        "properties": {
-          "act_id": {
-            "title": "Act Id",
-            "type": "string"
-          },
-          "kind": {
-            "enum": [
-              "multi_agent",
-              "debate"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "started_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Started At"
-          },
-          "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
-          }
-        },
-        "required": [
-          "act_id",
-          "kind"
-        ],
-        "title": "CollaborationTimelineAct",
-        "type": "object"
-      },
-      "CollaborationTimelineItem": {
-        "properties": {
-          "acts": {
-            "items": {
-              "$ref": "#/components/schemas/CollaborationTimelineAct"
-            },
-            "title": "Acts",
-            "type": "array"
-          },
-          "conversation_id": {
-            "title": "Conversation Id",
-            "type": "string"
-          },
-          "dossier_refs": {
-            "items": {
-              "$ref": "#/components/schemas/CollaborationDossierRef"
-            },
-            "title": "Dossier Refs",
-            "type": "array"
-          },
-          "execution_id": {
-            "title": "Execution Id",
-            "type": "string"
-          },
-          "host_turn_id": {
-            "title": "Host Turn Id",
-            "type": "string"
-          },
-          "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
-          },
-          "updated_at": {
-            "format": "date-time",
-            "title": "Updated At",
-            "type": "string"
-          }
-        },
-        "required": [
-          "conversation_id",
-          "updated_at",
-          "execution_id",
-          "host_turn_id"
-        ],
-        "title": "CollaborationTimelineItem",
-        "type": "object"
-      },
-      "CollaborationTimelineResponse": {
-        "properties": {
-          "dossier_refs_note": {
-            "default": "路径级约定文档消费事实（本场辩论开赛注入或会话内 file_read），非跨会话过程边",
-            "title": "Dossier Refs Note",
-            "type": "string"
-          },
-          "folder_id": {
-            "title": "Folder Id",
-            "type": "string"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/CollaborationTimelineItem"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "limit": {
-            "default": 20,
-            "title": "Limit",
-            "type": "integer"
-          },
-          "offset": {
-            "default": 0,
-            "title": "Offset",
-            "type": "integer"
-          },
-          "total": {
-            "default": 0,
-            "title": "Total",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "folder_id"
-        ],
-        "title": "CollaborationTimelineResponse",
         "type": "object"
       },
       "CommandAxis": {
@@ -7666,6 +7508,21 @@
           "version"
         ],
         "title": "DocumentWriteResult",
+        "type": "object"
+      },
+      "DuplicateConversationRequest": {
+        "description": "Clone the transcript through one message (克隆对话 / 行业 fork).\n\n``until_message_id`` is required — there is no whole-conversation clone without\na cutoff. The copy includes that row and every earlier row in render order;\nlater turns stay only on the source. Original conversation is unchanged.",
+        "properties": {
+          "until_message_id": {
+            "minLength": 1,
+            "title": "Until Message Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "until_message_id"
+        ],
+        "title": "DuplicateConversationRequest",
         "type": "object"
       },
       "EditChatMessageRequest": {
@@ -10444,7 +10301,7 @@
         "type": "object"
       },
       "MessageAttachment": {
-        "description": "A piece of context the user referenced (@-mention or paperclip).\n\nText files carry client-extracted ``text``. Raster image attachments are\n**resident-first** (``binary=True`` + ``workspace_path``); at send-turn prepare\nthe server eye→texts them via ``VisionReader`` into the attachment prompt block\n(main LLM stays text-only — not native multimodal). Binary office/PDF may gain\nserver-side ``text`` after分流预解析 (markitdown → ``*.md`` copy); xlsx/csv\nstay path-only so workers can ``code_execute``. ``kind=\"conversation\"`` references\nanother of the user's conversations: recent messages are materialized into\n``text`` client-side, and ``conversation_id`` records which one (for the chip +\nlater jump). ``kind=\"document\"`` pins an on-demand setting/note for this turn\n(``document_id``); the server loads the body — not an uploaded file.",
+        "description": "A piece of context the user referenced (@-mention or paperclip).\n\nText files carry client-extracted ``text``. Raster image attachments are\n**resident-first** (``binary=True`` + ``workspace_path``); at send-turn prepare\nthey become native ``image_url`` parts on the **current main** model when it\naccepts images, else an honest「当前主模型不收图」note (no sidecar eye).\nBinary office/PDF may gain\nserver-side ``text`` after分流预解析 (markitdown → ``*.md`` copy); xlsx/csv\nstay path-only so workers can ``code_execute``. ``kind=\"conversation\"`` references\nanother of the user's conversations: recent messages are materialized into\n``text`` client-side, and ``conversation_id`` records which one (for the chip +\nlater jump). ``kind=\"document\"`` pins an on-demand setting/note for this turn\n(``document_id``); the server loads the body — not an uploaded file.",
         "properties": {
           "binary": {
             "default": false,
@@ -10494,6 +10351,18 @@
             "maxLength": 4000,
             "title": "Path",
             "type": "string"
+          },
+          "source_folder_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Folder Id"
           },
           "text": {
             "default": "",
@@ -11683,7 +11552,7 @@
         "type": "object"
       },
       "PausedTurnSummary": {
-        "description": "A turn awaiting resume after a durable plan_review / ask_user pause.\n\nSurfaced on conversation reopen so the client can re-render the right resume card\nby ``kind`` and offer the kind-appropriate actions → the resume endpoint\n(plan_review: continue / adjust / stop; ask_user: continue / stop).\n``message_id`` is both the pause key and the id the resumed assistant message will\nreuse, so an optimistic bubble reconciles cleanly.\n\nLeftover ``team_preview`` (开工卡) frames are skipped on list (not serialized);\nresume of a leftover frame is 410 Gone.\nplan_review carries ``steps`` (the reviewed checkpoint nodes) + ``pending`` (the\ngated downstream); ask_user carries the unified card payload\n``question`` (the framing / opening line) + ``questions`` (empty for a compact\nmid-task fork). The unused set is empty for the other kinds.",
+        "description": "A turn awaiting resume after a durable ask_user pause.\n\nSurfaced on conversation reopen so the client can re-render the right resume card\nby ``kind`` and offer the kind-appropriate actions → the resume endpoint\n(ask_user: continue / stop).\n``message_id`` is both the pause key and the id the resumed assistant message will\nreuse, so an optimistic bubble reconciles cleanly.\n\nLeftover ``team_preview`` / ``plan_review`` frames are skipped on list (not serialized);\nresume of a leftover frame is 410 Gone.\nask_user carries the unified card payload\n``question`` (the framing / opening line) + ``questions`` (empty for a compact\nmid-task fork). Unused ``steps`` / ``pending`` stay empty.",
         "properties": {
           "browser_login": {
             "default": false,
@@ -11697,10 +11566,7 @@
           "intent": {
             "anyOf": [
               {
-                "enum": [
-                  "decision",
-                  "organize_plan"
-                ],
+                "const": "decision",
                 "type": "string"
               },
               {
@@ -11765,7 +11631,7 @@
         "type": "object"
       },
       "PendingInteractionSummary": {
-        "description": "One interaction still awaiting user settlement (journal fold).\n\nSurfaced on conversation reopen via ``GET .../recovery``. ``payload`` is the\noriginal ``*_required`` wire payload verbatim. Cold-path pauses stay in ``paused``.\nIncludes hot-path (approval / escalation) and durable ``stage_card``.",
+        "description": "One interaction still awaiting user settlement (journal fold).\n\nSurfaced on conversation reopen via ``GET .../recovery``. ``payload`` is the\noriginal ``*_required`` wire payload verbatim. Cold-path pauses stay in ``paused``.\nIncludes hot-path (approval / escalation).",
         "properties": {
           "id": {
             "title": "Id",
@@ -11774,8 +11640,7 @@
           "kind": {
             "enum": [
               "approval",
-              "escalation",
-              "stage_card"
+              "escalation"
             ],
             "title": "Kind",
             "type": "string"
@@ -13252,51 +13117,9 @@
         "title": "ResolveEscalationInteraction",
         "type": "object"
       },
-      "ResolveStageCardInteraction": {
-        "description": "Leftover 阶段推进卡：kind 仍在 journal，已不是开辩入口。\n\n热路 ``POST …/interactions/{id}`` 一律 410。开辩须用户在对话里点名。\n字段仍接受 ``start_debate`` / ``research_first``（旧客户端），服务端不执行。",
-        "properties": {
-          "decision": {
-            "enum": [
-              "start_debate",
-              "research_first"
-            ],
-            "title": "Decision",
-            "type": "string"
-          },
-          "kind": {
-            "const": "stage_card",
-            "default": "stage_card",
-            "title": "Kind",
-            "type": "string"
-          },
-          "motion_override": {
-            "anyOf": [
-              {
-                "maxLength": 2000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Motion Override"
-          },
-          "note": {
-            "default": "",
-            "maxLength": 4000,
-            "title": "Note",
-            "type": "string"
-          }
-        },
-        "required": [
-          "decision"
-        ],
-        "title": "ResolveStageCardInteraction",
-        "type": "object"
-      },
       "ResumeTurnRequest": {
         "additionalProperties": false,
-        "description": "Body for ``POST .../messages/{message_id}/resume`` (结构化挂起 2b).\n\nContinues a turn that paused at a plan_review / ask_user checkpoint and was\nDURABLY persisted (so it survived a client disconnect / server restart — the live\nin-process resolve is the corresponding interaction instead). Same decision\nvocabulary as the live resolve: ``continue`` (proceed — run the gated downstream\nfor plan_review / accept the CEO direction for ask_user),\n``adjust`` (plan_review: inject ``note`` as a steer then continue;\n``note`` must be non-empty),\nor ``stop`` (end the turn here). ``selected``\ncarries the option(s) the user picked from an ask_user menu (ignored for\nplan_review; the server drops any pick not actually offered). The engine-only\n``timeout`` is never sent by a client.\n\nLeftover ``team_preview`` resume is 410 Gone (new cards are not emitted).\nExtra leftover kickoff keys from old clients (``excluded_run_ids`` /\n``write_capability_overrides`` / ``model_overrides``) are not in this schema\nand 422. Hot-path ``ResolveInteraction`` is not extended.",
+        "description": "Body for ``POST .../messages/{message_id}/resume`` (结构化挂起 2b).\n\nContinues a turn that paused at an ask_user checkpoint and was\nDURABLY persisted (so it survived a client disconnect / server restart — the live\nin-process resolve is the corresponding interaction instead). Same decision\nvocabulary as the live resolve: ``continue`` (accept the CEO direction),\n``adjust`` (rejected on ask_user; leftover ``plan_review`` resume is 410),\nor ``stop`` (end the turn here). ``selected``\ncarries the option(s) the user picked from an ask_user menu (the server drops\nany pick not actually offered). The engine-only\n``timeout`` is never sent by a client.\n\nLeftover ``team_preview`` / ``plan_review`` resume is 410 Gone (new cards are not emitted).\nExtra leftover kickoff keys from old clients (``excluded_run_ids`` /\n``write_capability_overrides`` / ``model_overrides``) are not in this schema\nand 422. Hot-path ``ResolveInteraction`` is not extended.",
         "properties": {
           "decision": {
             "$ref": "#/components/schemas/CheckpointDecision"
@@ -14087,6 +13910,13 @@
             "title": "Name",
             "type": "string"
           },
+          "offers_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Offers Tools",
+            "type": "array"
+          },
           "source_document_id": {
             "title": "Source Document Id",
             "type": "string"
@@ -14224,6 +14054,13 @@
             "title": "Name",
             "type": "string"
           },
+          "offers_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Offers Tools",
+            "type": "array"
+          },
           "source_document_id": {
             "title": "Source Document Id",
             "type": "string"
@@ -14290,6 +14127,13 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "offers_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Offers Tools",
+            "type": "array"
           },
           "source_document_id": {
             "title": "Source Document Id",
@@ -14516,6 +14360,17 @@
               }
             ],
             "title": "Size Bytes"
+          },
+          "source_folder_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Folder Id"
           },
           "thumb_path": {
             "anyOf": [
@@ -14758,9 +14613,8 @@
         "type": "object"
       },
       "SuspensionKind": {
-        "description": "Which suspend point a durable frame captured (the JSON discriminator).\n\nInteraction kinds (plan_review / ask_user) mirror\n:data:`DURABLE_INTERACTION_KINDS`.",
+        "description": "Which suspend point a durable frame captured (the JSON discriminator).\n\nInteraction kinds (ask_user) mirror\n:data:`DURABLE_INTERACTION_KINDS`.",
         "enum": [
-          "plan_review",
           "ask_user"
         ],
         "title": "SuspensionKind",
@@ -15855,7 +15709,7 @@
         "type": "object"
       },
       "TurnRecoveryResponse": {
-        "description": "One-shot recovery snapshot for a conversation reopen (recovery 统一, 对称 §8.2).\n\nReopen needs to know, from ONE owner-gated point-in-time read, how to recover the\nconversation's latest turn:\n\n- ``live_running``: a detached in-flight run is still alive to 续看 (实时重连续看\n  C1 · slice 1b) — the client attaches (``GET .../stream``) to replay + tail it.\n- ``paused``: turns that durably paused at a plan_review / ask_user checkpoint and\n  lost their live stream (结构化挂起 2b) — each renders a resume card.\n- ``pending_interactions``: hot-path interactions still awaiting settlement\n  (journal fold: approval / escalation / stage_card).\n  Cold-path stays in ``paused``.",
+        "description": "One-shot recovery snapshot for a conversation reopen (recovery 统一, 对称 §8.2).\n\nReopen needs to know, from ONE owner-gated point-in-time read, how to recover the\nconversation's latest turn:\n\n- ``live_running``: a detached in-flight run is still alive to 续看 (实时重连续看\n  C1 · slice 1b) — the client attaches (``GET .../stream``) to replay + tail it.\n- ``paused``: turns that durably paused at an ask_user checkpoint and\n  lost their live stream (结构化挂起 2b) — each renders a resume card.\n- ``pending_interactions``: hot-path interactions still awaiting settlement\n  (journal fold: approval / escalation).\n  Cold-path stays in ``paused``.",
         "properties": {
           "live_running": {
             "default": false,
@@ -25678,7 +25532,7 @@
     },
     "/v1/conversations/{conversation_id}/duplicate": {
       "post": {
-        "description": "Clone a conversation into a brand-new one carrying a copy of its transcript (克隆对话).\n\nOwner-scoped (404 for a non-owner / missing source). The copy inherits the source's\nfolder (so it stays in the same project/workspace) and local-first intent, with a\n「… 副本」title, then bulk-copies the source's messages via\n``MessageRepository.copy_all`` (content-level fields only — see that method for what is\nintentionally not carried over, e.g. the team-graph replay journal). Returns the new\nconversation summary with its (copied) message count so the sidebar can insert it.",
+        "description": "Clone the transcript through one message into a new conversation (克隆对话).\n\nOwner-scoped (404 for a non-owner / missing source / cutoff not in this chat).\n``until_message_id`` is required: the copy includes that row and every earlier\nrow; later turns stay on the source. The original is unchanged. Inherits folder\n(same workspace) and local-first intent, titled「… 副本」. Content-level fields\nonly — ``MessageRepository.copy_through`` does not copy the team-graph journal.\nA still-generating cutoff is 409. Returns the new conversation summary.",
         "operationId": "duplicate_conversation_v1_conversations__conversation_id__duplicate_post",
         "parameters": [
           {
@@ -25723,6 +25577,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DuplicateConversationRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "201": {
             "content": {
@@ -26256,7 +26120,7 @@
     },
     "/v1/conversations/{conversation_id}/interactions/{interaction_id}": {
       "post": {
-        "description": "Settle any paused hot-path interaction over the unified bridge (§8.2).\n\n``stage_card``：leftover 推进卡 resolve 为 410；开辩须用户在对话里点名。\n其它 kind（approval / delegation / client_tool / escalation）：Settlement 预写 (D8)\n后 settle Future；journal 有 required、无 Future → 410。\nCold-path ``ask_user`` / ``plan_review`` 不在此 endpoint。\nLeftover ``team_preview`` resume is 410 on ``POST …/resume``.",
+        "description": "Settle any paused hot-path interaction over the unified bridge (§8.2).\n\napproval / client_tool / escalation：Settlement 预写 (D8)\n后 settle Future；journal 有 required、无 Future → 410。\nCold-path ``ask_user`` 不在此 endpoint。\nLeftover ``team_preview`` / ``plan_review`` resume is 410 on ``POST …/resume``.",
         "operationId": "resolve_interaction_v1_conversations__conversation_id__interactions__interaction_id__post",
         "parameters": [
           {
@@ -26334,8 +26198,7 @@
                   "mapping": {
                     "approval": "#/components/schemas/ResolveApprovalInteraction",
                     "client_tool": "#/components/schemas/ResolveClientToolInteraction",
-                    "escalation": "#/components/schemas/ResolveEscalationInteraction",
-                    "stage_card": "#/components/schemas/ResolveStageCardInteraction"
+                    "escalation": "#/components/schemas/ResolveEscalationInteraction"
                   },
                   "propertyName": "kind"
                 },
@@ -26348,9 +26211,6 @@
                   },
                   {
                     "$ref": "#/components/schemas/ResolveEscalationInteraction"
-                  },
-                  {
-                    "$ref": "#/components/schemas/ResolveStageCardInteraction"
                   }
                 ],
                 "title": "Body"
@@ -27844,7 +27704,7 @@
     },
     "/v1/conversations/{conversation_id}/messages/{message_id}/resume": {
       "post": {
-        "description": "Continue a durably-paused turn via SSE (结构化挂起 2b ``POST .../resume``).\n\nThe turn paused at a plan_review / ask_user checkpoint and lost its\nlive stream (disconnect / restart); only its persisted frame survived.\n\nSettlement 预写 (D8)：① peek frame → ② busy 则 deferred（预写后 ``resume_deferred``，\n槽空再 claim）/ idle 则立即 claim → ③ ``*_resolved`` 落库成功 → ④ claim → ⑤ resume\npipeline。settlement 写失败 ⇒ 5xx、不 claim、frame 保留可重试。settlement 落库后\npipeline 取消/失败 ⇒ interrupted_after_decision（D1：不复活决策卡）。\n\n同 ``message_id`` 重复提交一律**幂等成功**，不再 404：忙槽窗口内 join 已 park 的\nwaiter（跳过第二次预写，两条 SSE 共享同一次续跑）；帧已被那次续跑消费（peek 扑空 /\nclaim 竞争落败）则走 :func:`_resume_of_consumed_frame` —— 200 + ``resume_settled``\n事实帧（带的是**赢家**的决策：claim 赢家把结论与删帧写在同一事务里），本机在跑就同\n连接续流。谁也没消费掉这张卡（没有结论行）才是真失效（404，文案区分「超保留期清理」\n与「回合已重新生成」）。\n\n``body.selected`` carries the user's ask_user picks (ignored for plan_review).\nGated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota\n— all BEFORE settlement/claim, so a refused turn keeps its resumable frame.",
+        "description": "Continue a durably-paused turn via SSE (结构化挂起 2b ``POST .../resume``).\n\nThe turn paused at an ask_user checkpoint and lost its\nlive stream (disconnect / restart); only its persisted frame survived.\n\nSettlement 预写 (D8)：① peek frame → ② busy 则 deferred（预写后 ``resume_deferred``，\n槽空再 claim）/ idle 则立即 claim → ③ ``*_resolved`` 落库成功 → ④ claim → ⑤ resume\npipeline。settlement 写失败 ⇒ 5xx、不 claim、frame 保留可重试。settlement 落库后\npipeline 取消/失败 ⇒ interrupted_after_decision（D1：不复活决策卡）。\n\n同 ``message_id`` 重复提交一律**幂等成功**，不再 404：忙槽窗口内 join 已 park 的\nwaiter（跳过第二次预写，两条 SSE 共享同一次续跑）；帧已被那次续跑消费（peek 扑空 /\nclaim 竞争落败）则走 :func:`_resume_of_consumed_frame` —— 200 + ``resume_settled``\n事实帧（带的是**赢家**的决策：claim 赢家把结论与删帧写在同一事务里），本机在跑就同\n连接续流。谁也没消费掉这张卡（没有结论行）才是真失效（404，文案区分「超保留期清理」\n与「回合已重新生成」）。\n\n``body.selected`` carries the user's ask_user picks.\nLeftover ``plan_review`` frames resume as 410 Gone.\nGated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota\n— all BEFORE settlement/claim, so a refused turn keeps its resumable frame.",
         "operationId": "resume_message_v1_conversations__conversation_id__messages__message_id__resume_post",
         "parameters": [
           {
@@ -29195,13 +29055,13 @@
             }
           },
           {
-            "description": "对话级长订阅（云对话多端同权 B2）：空闲不返回 204，保持连接送心跳，此后每个新回合（发送 / 队列 drain / 冷 resume 唤醒 / stage_card）自动续播。缺省 false = 回合级 attach（旧客户端语义：无 live run → 204，回合收口即断流）。",
+            "description": "对话级长订阅（云对话多端同权 B2）：空闲不返回 204，保持连接送心跳，此后每个新回合（发送 / 队列 drain / 冷 resume 唤醒）自动续播。缺省 false = 回合级 attach（旧客户端语义：无 live run → 204，回合收口即断流）。",
             "in": "query",
             "name": "follow",
             "required": false,
             "schema": {
               "default": false,
-              "description": "对话级长订阅（云对话多端同权 B2）：空闲不返回 204，保持连接送心跳，此后每个新回合（发送 / 队列 drain / 冷 resume 唤醒 / stage_card）自动续播。缺省 false = 回合级 attach（旧客户端语义：无 live run → 204，回合收口即断流）。",
+              "description": "对话级长订阅（云对话多端同权 B2）：空闲不返回 204，保持连接送心跳，此后每个新回合（发送 / 队列 drain / 冷 resume 唤醒）自动续播。缺省 false = 回合级 attach（旧客户端语义：无 live run → 204，回合收口即断流）。",
               "title": "Follow",
               "type": "boolean"
             }
@@ -34272,104 +34132,6 @@
           }
         },
         "summary": "Update Folder",
-        "tags": [
-          "folders"
-        ]
-      }
-    },
-    "/v1/folders/{folder_id}/collaboration-timeline": {
-      "get": {
-        "description": "项目协作时间线（读时聚合）：有 execution 的会话 + 幕序列摘要 + 约定文档引用条.\n\n零写路径。约定文档快照（AgentCore/文档/research/ / debate/ 文件列表）复用工作区\n文件 API，不在此返回。",
-        "operationId": "get_collaboration_timeline_v1_folders__folder_id__collaboration_timeline_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "folder_id",
-            "required": true,
-            "schema": {
-              "title": "Folder Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 20,
-              "maximum": 50,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CollaborationTimelineResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Collaboration Timeline",
         "tags": [
           "folders"
         ]

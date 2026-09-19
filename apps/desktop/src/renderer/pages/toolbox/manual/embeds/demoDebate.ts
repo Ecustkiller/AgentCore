@@ -67,8 +67,6 @@ const DEMO_ROUNDS: DebateRoundModel[] = [
     userInterjections: [],
     crossExam: [],
     witnessExam: [],
-    findings: [],
-    threadTurns: [],
     scores: [
       score("pro", "加速派", 4, 3, 4, [], 11),
       score("con", "审慎派", 3, 4, 3, [], 10),
@@ -94,8 +92,6 @@ const DEMO_ROUNDS: DebateRoundModel[] = [
     userInterjections: [],
     crossExam: [],
     witnessExam: [],
-    findings: [],
-    threadTurns: [],
     scores: [
       score("pro", "加速派", 4, 4, 3, [], 11),
       score("con", "审慎派", 3, 3, 4, ["把未证实的尾部风险说成既定事实"], 9),
@@ -117,7 +113,6 @@ export const DEMO_DEBATE_MODEL: DebateModel = {
   narrativeFirst: true,
   crossExamEnabled: false,
   evidenceLedger: [],
-  subtopics: null,
   rounds: DEMO_ROUNDS,
   brief: {
     leaning:

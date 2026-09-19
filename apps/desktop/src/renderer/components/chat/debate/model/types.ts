@@ -2,15 +2,14 @@ import type { Stance } from "@/stores/execution";
 import type { RunNode } from "@/stores/execution";
 import type {
   DebateBriefInfo,
-  DebateFindingInfo,
-  DebateResultPayload,
   DebateSideInfo,
   DebateUserInterjection,
   DebateVerdict,
   EvidenceLedgerEntry,
 } from "@/types/events";
 
-export type DebateForm = DebateResultPayload["form"];
+/** 产品只认正反。未知 / 历史 form 字符串由投影 coerce 成本类型。 */
+export type DebateForm = "debate";
 
 /**
  * 一轮里的一方：身份 (名 + 稳定身份色) + 其辩手 run。`run` 收场/已裁判轮由 `run_id`
@@ -133,34 +132,6 @@ export interface DebateClosingView {
   ok: boolean;
 }
 
-/** 红队 finding 线程展示态：结构来自载荷，全文靠 run_id 关联。 */
-export interface DebateFindingView {
-  id: string;
-  severity: DebateFindingInfo["severity"];
-  target: string;
-  attackerKey: string;
-  attackerName: string;
-  attackerColorVar: string;
-  status: DebateFindingInfo["status"];
-  disposition: string;
-  attackRun: RunNode | null;
-  responseRun: RunNode | null;
-  rebuttalRun: RunNode | null;
-  mergedFrom: string[];
-}
-
-/** 圆桌线程 turn 展示态。 */
-export interface DebateThreadTurnView {
-  speakerKey: string;
-  speakerName: string;
-  speakerColorVar: string;
-  replyToKey: string;
-  replyToName: string;
-  run: RunNode | null;
-  ok: boolean;
-  beat: "thread" | "crux";
-}
-
 /**
  * 一轮的规范化单元——无论 live (verdict 可空、发言流式) 还是收场 (verdict 必有、全文已定)
  * 都是这一个形状。`inFlight` = 该轮尚未裁判 (live 的当前轮)。`clashes` = 本轮 L3 交锋边
@@ -185,10 +156,6 @@ export interface DebateRoundModel {
   witnessExam: DebateWitnessExamView[];
   /** 本轮各方得分：协议可带；产品面忽略（旧场也不展比分）。 */
   scores: DebateScoreView[];
-  /** 红队 finding 台账（本轮）；空 = 旧载荷 / 非红队 → 降级为按方发言格。 */
-  findings: DebateFindingView[];
-  /** 圆桌点名串行线程；空 = 旧载荷 / 非圆桌 → 降级为按方发言格。 */
-  threadTurns: DebateThreadTurnView[];
 }
 
 /**
@@ -210,7 +177,7 @@ export interface DebateModel {
   brief: DebateBriefInfo | null;
   sides: DebateSideInfo[] | null;
   /** 各方结辩陈词（阶段化发言角色 P4 · 结辩收束）：收场以权威 `debate_result.closings` 为准、据 run_id
-   *  解析陈词 run；进行中恒空（结辩是收场后一次性 beat，live 无孪生）。空=未开启结辩（快速对碰 / 圆桌），
+   *  解析陈词 run；进行中恒空（结辩是收场后一次性 beat，live 无孪生）。空=未开启结辩（快速对碰），
    *  前端不渲染结辩区。 */
   closings: DebateClosingView[];
   /** 主持人开场白：顶部「会说话的主持人」入场气泡。live 自首轮 `debate_round_started.opening`
@@ -221,10 +188,8 @@ export interface DebateModel {
   /** 本场是否开启质询（`debate_round_started.cross_exam_enabled`）。缺字段 / 老会话 → false，
    *  pending 文案回退「正在小结…」。 */
   crossExamEnabled: boolean;
-  /** 场级证据台账（live delta 累积 / 收场权威）：徽章 `#eN` 溯源。 */
+  /** 场级证据台账（live delta 累积 / 收场权威）：徽章 `#rN` 溯源。 */
   evidenceLedger: EvidenceLedgerEntry[];
-  /** 圆桌子题轴（收场权威）；进行中 / 非圆桌为 null。 */
-  subtopics: string[] | null;
 }
 
 /** 参辩名册的一方：语义 `sideKey` + 展示名 + 身份色——站队 / 拍板按 `sideKey` 记录用户取舍。 */

@@ -41,7 +41,11 @@ from agentcore.runtime.context import build_workspace_context, collect_outlet_in
 from agentcore.runtime.engine.governance import resolve_openai_tool_defs
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.pipeline import _assemble_ceo_toolset
-from agentcore.runtime.resolve.prompt import assemble_system_prompt, compose_ceo_chat_prompt
+from agentcore.runtime.resolve.prompt import (
+    assemble_system_prompt,
+    compose_ceo_chat_prompt,
+    render_ceo_turn_envelope,
+)
 from agentcore.runtime.skills import build_system_skill_registry
 from agentcore.tools.builtin import (
     browser_execution_enabled_for,
@@ -192,8 +196,8 @@ async def _build_ceo_context(
         base,
         skill_registry=skill_registry,
         ceo_tool_names=ceo_tool_names,
-        workspace_context=workspace_facts,
     )
+    turn_envelope = render_ceo_turn_envelope(workspace_context=workspace_facts)
     tool_defs = resolve_openai_tool_defs(chat_tools, None, set())
     gate_code = (
         code_execute if code_execute is not None else code_execution_enabled_for(backend)
@@ -205,6 +209,7 @@ async def _build_ceo_context(
         provider,
         profiles.get("chat"),
         ceo_prompt,
+        turn_envelope,
         tool_defs,
         chat_tools,
         ctx,
@@ -353,6 +358,7 @@ async def run_scripted_sample(
                 _provider,
                 profile,
                 ceo_prompt,
+                turn_envelope,
                 tool_defs,
                 chat_tools,
                 ctx,
@@ -377,6 +383,7 @@ async def run_scripted_sample(
                 sc.user_message,
                 rounds,
                 history=history or None,
+                turn_envelope=turn_envelope,
             )
             packed = _pack_sample(
                 sc=sc,

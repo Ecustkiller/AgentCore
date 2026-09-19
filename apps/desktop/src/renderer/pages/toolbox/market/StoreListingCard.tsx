@@ -1,3 +1,4 @@
+import { PROMPT_TOOLS_TAG } from "@/components/tools/catalogMeta";
 import { Badge, CatalogTile } from "@/components/ui";
 import { artifactColorVar } from "@/lib/catalogColors";
 import {
@@ -16,6 +17,7 @@ export type StoreShelfRow = {
   group?: SkillStoreGroup;
   installed: boolean;
   hasUpdate: boolean;
+  offersTools?: readonly string[];
 };
 
 export function StoreListingCard({
@@ -31,6 +33,8 @@ export function StoreListingCard({
 }) {
   const official = isOfficialAuthor(row.author);
   const copy = listingCopy(row);
+  const hasTools = Boolean(row.offersTools && row.offersTools.length > 0);
+  const groupLabel = row.group ? skillStoreGroupLabel(row.group) : "";
   return (
     <CatalogTile
       icon={<Icon size={18} />}
@@ -40,10 +44,19 @@ export function StoreListingCard({
       description={copy.subtitle || undefined}
       onClick={onOpen}
       tags={
-        row.group ? (
-          <Badge tone="muted" pill>
-            {skillStoreGroupLabel(row.group)}
-          </Badge>
+        hasTools || groupLabel ? (
+          <>
+            {hasTools ? (
+              <Badge tone="muted" pill>
+                {PROMPT_TOOLS_TAG}
+              </Badge>
+            ) : null}
+            {groupLabel ? (
+              <Badge tone="muted" pill>
+                {groupLabel}
+              </Badge>
+            ) : null}
+          </>
         ) : undefined
       }
       accessory={

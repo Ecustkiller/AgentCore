@@ -1,10 +1,9 @@
 /**
  * 云桌标准出口编排（§五 · §7.6）：ZIP / 导出到本机文件夹（工作区工具条）/
- * 合回落点登记与 Diff 勾选合回（工作区芯片）/ ① 仅产物快捷合回（导出菜单）。
+ * 合回落点登记与 Diff 勾选合回（工作区芯片）。
  *
  * 合回主路径 = 云快照 zip（内存）vs 落点现态 → handoff-review 判定 → MergeLandingReview。
  * 不经 applyHandoffJob；≠ mode=local、≠ 过桥默认。整树 checkout 仅「导出到本机文件夹」旁路。
- * ① 仅产物 = delivery 投影路径逐文件写落点（见 mergeArtifactsOnly）；≠ 整树覆盖。
  *
  * 已知限制（首刀）：无 last-merge base（同路径异内容一律 conflict）；不做云删→落点删；
  * 单文件 >5MB / 整包 >100MB / 文件数过多诚实跳过或拒绝。
@@ -23,20 +22,12 @@ import {
   notifyActionError,
   notifyInfo,
   notifySuccess,
-  notifyWarning,
 } from "@/lib/toast";
-import {
-  type MergeArtifactRef,
-  resolveMergeArtifactRefs,
-  writeArtifactsToLanding,
-} from "@/services/mergeArtifactsOnly";
 import { prepareMergeLandingDiff } from "@/services/mergeLandingDiff";
 import {
   exportWorkspaceToLocal,
   exportWorkspaceZip,
 } from "@/services/workspace";
-import { getRuntime, lastAssistantProjectionId } from "@/stores/conversation";
-import { useExecutionStore } from "@/stores/execution";
 import { useMergeLandingReviewStore } from "@/stores/mergeLandingReview";
 import type { FsRoot } from "@shared/ipc-contract";
 
@@ -183,13 +174,6 @@ async function ensureMergeLanding(
   };
 }
 
-/** 本回合（最近一条助手）delivery_status 投影。 */
-export function latestTurnDeliveryStatus(conversationId: string) {
-  const key = lastAssistantProjectionId(getRuntime(conversationId).messages);
-  if (!key) return null;
-  return useExecutionStore.getState().byId[key]?.deliveryStatus ?? null;
-}
-
 /**
  * 合回到本机：Diff 勾选写入已登记落点（冲突默认留本地）。
  */
@@ -233,80 +217,6 @@ export async function mergeBackToLanding(
     return { ok: false, reason: "cancelled" };
   } catch (e) {
     notifyActionError("合回到本机失败", e);
-    return {
-      ok: false,
-      reason: "error",
-      message: e instanceof Error ? e.message : "合回失败",
-    };
-  }
-}
-
-/**
- * §7.6 ① 只合回产物：仅写交付路径到落点，不碰其余本机树。
- * `refsOverride` 有值时用调用方清单，否则读最近一条助手 delivery。
- */
-export async function mergeArtifactsOnlyToLanding(
-  conversationId: string,
-  roots: FsRoot[],
-  refsOverride?: MergeArtifactRef[],
-): Promise<CloudDeskExitResult> {
-  if (!hasLocalFiles() || !window.fsApi?.workspaceOp) {
-    return {
-      ok: false,
-      reason: "unavailable",
-      message: "当前环境无法合回产物",
-    };
-  }
-
-  const refs =
-    refsOverride !== undefined
-      ? refsOverride
-      : resolveMergeArtifactRefs(latestTurnDeliveryStatus(conversationId));
-  if (refs.length === 0) {
-    notifyInfo("本回合无交付产物");
-    return {
-      ok: false,
-      reason: "unavailable",
-      message: "本回合无交付产物",
-    };
-  }
-
-  const landing = await ensureMergeLanding(conversationId, roots);
-  if (!landing.ok) return landing;
-
-  const label = landing.rootName;
-  try {
-    const summary = await writeArtifactsToLanding({
-      conversationId,
-      rootId: landing.rootId,
-      refs,
-    });
-
-    if (summary.errors.length > 0 && summary.written.length === 0) {
-      const first = summary.errors[0];
-      const detail = first?.detail || "写入失败";
-      notifyActionError("只合回产物失败", new Error(detail));
-      return { ok: false, reason: "error", message: detail };
-    }
-
-    const parts: string[] = [];
-    if (summary.written.length > 0) {
-      parts.push(`已写入 ${summary.written.length} 个`);
-    }
-    if (summary.skippedExisting.length > 0) {
-      parts.push(`跳过已有 ${summary.skippedExisting.length} 个`);
-      notifyWarning("落点已有同路径文件，已跳过（未覆盖）", {
-        description: summary.skippedExisting.slice(0, 5).join("、"),
-      });
-    }
-    if (summary.errors.length > 0) {
-      parts.push(`失败 ${summary.errors.length} 个`);
-    }
-
-    notifySuccess(`只合回产物「${label}」：${parts.join(" · ") || "无变更"}`);
-    return { ok: true };
-  } catch (e) {
-    notifyActionError("只合回产物失败", e);
     return {
       ok: false,
       reason: "error",

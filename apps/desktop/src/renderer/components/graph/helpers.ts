@@ -55,7 +55,7 @@ export function deriveCaptainStatus(
   opts?: { turnTerminal?: boolean; detached?: boolean },
 ): RunStatus {
   if (execution.status === "cancelled") return "cancelled";
-  // Cold pause (ask_user / plan_review / …): workers may all be done, but CEO
+  // Cold pause (ask_user / …): workers may all be done, but CEO
   // is waiting on the user — never paint the sink as「正在收尾」.
   // RunStatus has no `paused`; `pending` clears the synthesis spinner.
   if (execution.status === "paused") return "pending";
@@ -270,12 +270,12 @@ export function debateRoundPhaseLabel(
   hasCrossExam: boolean,
 ): string | null {
   if (!hasCrossExam || aggregated !== "running") return null;
-  // 正反质询与红队复攻 / 圆桌 crux 共用此后缀（图上不区分拍种细文案）。
+  // 正反质询与旧磁带复攻 / crux 共用此后缀（图上不区分拍种细文案）。
   return activeBeat === "cross_exam" ? "质询作答中" : "立论中";
 }
 
 /**
- * 收场态轮节点折进拍标记：正反「含质询」/ 红队「含复攻」/ 圆桌「含 crux」；
+ * 收场态轮节点折进拍标记：正反「含质询」；旧磁带 rebuttal/crux 仍走对应标记；
  * 失败时整行归因。立论失败（折进拍未败）不挂标记，沿用默认「失败」。
  */
 export type DebateCrossExamMark = {

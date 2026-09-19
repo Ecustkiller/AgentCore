@@ -292,7 +292,7 @@ describe("ensureTimelineMarkersFromJournal", () => {
     { type: "plan_review_required", payload: { checkpoint_id: "pr1" } },
   ];
 
-  it("backfills every marker a bare persisted process is missing", () => {
+  it("backfills live markers and skips leftover plan_review_required", () => {
     const process = ensureTimelineMarkersFromJournal(
       [{ kind: "content", text: "我来安排团队。" }],
       journal,
@@ -301,24 +301,24 @@ describe("ensureTimelineMarkersFromJournal", () => {
       { kind: "content", text: "我来安排团队。" },
       { kind: "team", execution_id: "exec1" },
       { kind: "checkpoint", checkpoint_id: "cp1" },
-      { kind: "plan_review", checkpoint_id: "pr1" },
     ]);
   });
 
   it("no-ops (dedup) when the persisted process already carries the markers", () => {
-    const persisted = [
+    const leftoverPlanReview = {
+      kind: "plan_review",
+      checkpoint_id: "pr1",
+    } as unknown as ProcessStep;
+    const persisted: ProcessStep[] = [
       { kind: "content", text: "我来安排团队。" },
-      { kind: "team_preview", checkpoint_id: "tp1" },
+      { kind: "team_preview", checkpoint_id: "tp1" } as unknown as ProcessStep,
       { kind: "team", execution_id: "exec1" },
       { kind: "checkpoint", checkpoint_id: "cp1" },
-      { kind: "plan_review", checkpoint_id: "pr1" },
+      leftoverPlanReview,
       { kind: "content", text: "收尾。" },
-    ] as const;
-    const process = ensureTimelineMarkersFromJournal(
-      [...persisted] as Parameters<typeof ensureTimelineMarkersFromJournal>[0],
-      journal,
-    );
-    expect(process).toEqual([...persisted]);
+    ];
+    const process = ensureTimelineMarkersFromJournal(persisted, journal);
+    expect(process).toEqual(persisted);
   });
 
   it("never absorbs settled trailing content", () => {
@@ -332,18 +332,10 @@ describe("ensureTimelineMarkersFromJournal", () => {
     ]);
   });
 
-  it("backfills graph_append and skips team for host_message_id run_plan", () => {
+  it("does not insert team for host_message_id run_plan", () => {
     const process = ensureTimelineMarkersFromJournal(
       [{ kind: "content", text: "再加一人。" }],
       [
-        {
-          type: "graph_append",
-          payload: {
-            execution_id: "exec1",
-            host_message_id: "m1",
-            added_count: 1,
-          },
-        },
         {
           type: "run_plan",
           payload: {
@@ -353,15 +345,7 @@ describe("ensureTimelineMarkersFromJournal", () => {
         },
       ],
     );
-    expect(process).toEqual([
-      { kind: "content", text: "再加一人。" },
-      {
-        kind: "graph_append",
-        execution_id: "exec1",
-        host_message_id: "m1",
-        added_count: 1,
-      },
-    ]);
+    expect(process).toEqual([{ kind: "content", text: "再加一人。" }]);
   });
 
   // 缺 team 且已有队后 content：按 journal 槽插入，禁止尾部 append 把终稿挤到图上方。
@@ -384,33 +368,7 @@ describe("ensureTimelineMarkersFromJournal", () => {
     ]);
   });
 
-  // 历史 journal 仍可能带 team_preview marker：插入 team 时保持 marker → 图 → 终稿。
-  it("inserts missing team after persisted team_preview (product order)", () => {
-    const process = ensureTimelineMarkersFromJournal(
-      [
-        { kind: "content", text: "我来安排团队。" },
-        {
-          kind: "team_preview",
-          checkpoint_id: "tp1",
-        } as unknown as ProcessStep,
-        { kind: "content", text: "终稿。" },
-      ],
-      [
-        { type: "content_delta", payload: { delta: "我来安排团队。" } },
-        { type: "run_plan", payload: { execution_id: "exec1" } },
-        { type: "content_delta", payload: { delta: "终稿。" } },
-      ],
-    );
-    expect(process).toEqual([
-      { kind: "content", text: "我来安排团队。" },
-      { kind: "team_preview", checkpoint_id: "tp1" },
-      { kind: "team", execution_id: "exec1" },
-      { kind: "content", text: "终稿。" },
-    ]);
-  });
-
-  // graph_append 同原则：缺锚点且已有追加后 content → 插在队后 content 之前。
-  it("inserts missing graph_append before post-append content (journal slot)", () => {
+  it("does not insert team for unknown journal types", () => {
     const process = ensureTimelineMarkersFromJournal(
       [
         { kind: "content", text: "再加一人。" },
@@ -419,12 +377,8 @@ describe("ensureTimelineMarkersFromJournal", () => {
       [
         { type: "content_delta", payload: { delta: "再加一人。" } },
         {
-          type: "graph_append",
-          payload: {
-            execution_id: "exec1",
-            host_message_id: "m1",
-            added_count: 1,
-          },
+          type: "retired_unknown_event",
+          payload: { execution_id: "exec1" },
         },
         {
           type: "run_plan",
@@ -438,12 +392,6 @@ describe("ensureTimelineMarkersFromJournal", () => {
     );
     expect(process).toEqual([
       { kind: "content", text: "再加一人。" },
-      {
-        kind: "graph_append",
-        execution_id: "exec1",
-        host_message_id: "m1",
-        added_count: 1,
-      },
       { kind: "content", text: "已追加。" },
     ]);
   });

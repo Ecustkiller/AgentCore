@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
  * 10 P3-4: end-to-end guard for the evidence-badge seam (举证责任 P3 + 证据台账 M1).
  * The chip only appears if a whole chain holds: remarkEvidence rewrites markers into an
  * `evidencemark` node → react-markdown maps that custom element to {@link EvidenceBadge}
- * → the node's `data.hProperties.dataKind` survives as `data-kind`. Ledger-resolved `#eN`
+ * → the node's `data.hProperties.dataKind` survives as `data-kind`. Ledger-resolved `#rN`
  * badges become clickable; unresolved / legacy free-text stay plain.
  */
 describe("Markdown evidence badges (render seam)", () => {
@@ -43,10 +43,10 @@ describe("Markdown evidence badges (render seam)", () => {
     expect(screen.getByText(/【已核实·2024报表】/)).toBeTruthy();
   });
 
-  it("resolves #eN badge label from ledger context", () => {
+  it("resolves #rN badge label from ledger context", () => {
     const ledger = buildLedgerMap([
       {
-        id: "#e3",
+        id: "#r3",
         url: "https://court.gov.cn/x",
         title: "判决书",
         site: "court.gov.cn",
@@ -57,23 +57,23 @@ describe("Markdown evidence badges (render seam)", () => {
     ]);
     render(
       <EvidenceLedgerProvider ledger={ledger}>
-        <Markdown content="降本【已核实·#e3】约 18%" evidence />
+        <Markdown content="降本【已核实·#r3】约 18%" evidence />
       </EvidenceLedgerProvider>,
     );
     const verified = screen.getByRole("button", {
       name: /已核实 · court.gov.cn/,
     });
     expect(verified.textContent).toContain("court.gov.cn");
-    expect(verified.textContent).not.toContain("#e3");
+    expect(verified.textContent).not.toContain("#r3");
     expect(verified.textContent).not.toContain("官方");
     expect(verified.textContent).not.toContain("弱源");
     expect(verified.textContent).not.toContain("待评");
   });
 
-  it("falls back to plain text badge when #eN is unresolved", () => {
-    render(<Markdown content="降本【已核实·#e99】约 18%" evidence />);
+  it("falls back to plain text badge when #rN is unresolved", () => {
+    render(<Markdown content="降本【已核实·#r99】约 18%" evidence />);
     const verified = screen.getByTitle(/有据可查/);
-    expect(verified.textContent).toContain("#e99");
+    expect(verified.textContent).toContain("#r99");
     expect(screen.queryByRole("button")).toBeNull();
   });
 
@@ -86,20 +86,19 @@ describe("Markdown evidence badges (render seam)", () => {
   it("shows dossier source in ledger popover when dossier_path is set", () => {
     const ledger = buildLedgerMap([
       {
-        id: "#e2",
+        id: "#r1",
         url: "https://court.example/x",
-        title: "法律 · #r1",
+        title: "法律透镜报告",
         site: "法律",
         tier: "unknown",
         side_key: "dossier",
         dossier_path: "AgentCore/文档/research/法律透镜报告.md",
-        origin_id: "#r1",
         dossier_label: "法律",
       },
     ]);
     render(
       <EvidenceLedgerProvider ledger={ledger}>
-        <Markdown content="条款【已核实·#e2】成立" evidence />
+        <Markdown content="条款【已核实·#r1】成立" evidence />
       </EvidenceLedgerProvider>,
     );
     fireEvent.click(screen.getByRole("button", { name: /已核实 · 法律/ }));
@@ -107,7 +106,6 @@ describe("Markdown evidence badges (render seam)", () => {
     expect(screen.queryByText("待评")).toBeNull();
     expect(screen.getByText(/约定文档来源/)).toBeTruthy();
     expect(screen.getByText(/法律透镜报告\.md/)).toBeTruthy();
-    expect(screen.getByText(/幕1 出处 #r1/)).toBeTruthy();
     expect(
       screen.getByRole("button", { name: /打开约定文档文件/ }),
     ).toBeTruthy();

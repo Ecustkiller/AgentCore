@@ -25,7 +25,7 @@ def debate_act_payload(tool: DebateTool) -> dict[str, Any]:
     if anchor:
         act["anchor_run_id"] = anchor
     authorized_by = getattr(tool, "_debate_authorized_by", None)
-    if authorized_by in ("stage_card", "auto", "preview"):
+    if authorized_by == "auto":
         act["authorized_by"] = authorized_by
     return act
 

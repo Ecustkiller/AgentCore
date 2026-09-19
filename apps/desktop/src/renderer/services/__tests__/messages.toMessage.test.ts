@@ -209,7 +209,7 @@ describe("toMessage (reload hydrate)", () => {
             },
           ],
           finish_reason: "stop",
-        } as NonNullable<BackendMessage["runs"]>,
+        } as unknown as NonNullable<BackendMessage["runs"]>,
       }),
     );
 
@@ -251,7 +251,7 @@ describe("toMessage (reload hydrate)", () => {
           ],
           finish_reason: "stop",
           events_complete: false,
-        } as NonNullable<BackendMessage["runs"]>,
+        } as unknown as NonNullable<BackendMessage["runs"]>,
       }),
     );
     expect(useExecutionStore.getState().byId["m-classic-slim"]).toBeUndefined();
@@ -297,7 +297,7 @@ describe("toMessage (reload hydrate)", () => {
             },
           ],
           finish_reason: "stop",
-        } as NonNullable<BackendMessage["runs"]>,
+        } as unknown as NonNullable<BackendMessage["runs"]>,
       }),
     );
 
@@ -332,14 +332,13 @@ describe("toMessage (reload hydrate)", () => {
             },
           ],
           finish_reason: "paused",
-        } as NonNullable<BackendMessage["runs"]>,
+        } as unknown as NonNullable<BackendMessage["runs"]>,
       }),
     );
 
     expect(usePausedTurnStore.getState().pending).toHaveLength(0);
     const entry = useInteractionStore.getState().get("pr-hydrate");
-    expect(entry?.status).toBe("pending");
-    expect(entry?.origin).toBeUndefined();
+    expect(entry).toBeUndefined();
   });
 
   it("surface 画卡后清会话 isGenerating（冷挂起不变量）", () => {
@@ -390,7 +389,7 @@ describe("toMessage (reload hydrate)", () => {
             },
           ],
           finish_reason: "paused",
-        } as NonNullable<BackendMessage["runs"]>,
+        } as unknown as NonNullable<BackendMessage["runs"]>,
       }),
     );
 
@@ -403,7 +402,7 @@ describe("toMessage (reload hydrate)", () => {
     ).toBe(false);
   });
 
-  it("journal cold interaction without ceo_review hydrates with no summary", () => {
+  it("leftover plan_review journal hydrate skips IX (no card)", () => {
     toMessage(
       row({
         id: "m-paused-no-cr",
@@ -424,14 +423,12 @@ describe("toMessage (reload hydrate)", () => {
             },
           ],
           finish_reason: "paused",
-        } as NonNullable<BackendMessage["runs"]>,
+        } as unknown as NonNullable<BackendMessage["runs"]>,
       }),
     );
 
     expect(usePausedTurnStore.getState().pending).toHaveLength(0);
-    expect(useInteractionStore.getState().get("pr-no-cr")?.status).toBe(
-      "pending",
-    );
+    expect(useInteractionStore.getState().get("pr-no-cr")).toBeUndefined();
   });
 
   it("does not surface pausedTurns when paused without journal interactions", () => {

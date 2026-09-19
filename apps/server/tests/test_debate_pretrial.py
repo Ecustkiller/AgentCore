@@ -8,7 +8,6 @@ import pytest
 
 from agentcore.runtime.debate.evidence_ledger import (
     EvidenceLedger,
-    preregister_turn_research_entries,
 )
 from agentcore.runtime.debate.evidence_pack import (
     assemble_evidence_pack_from_host,
@@ -56,24 +55,26 @@ on the workspace-relative path above.
 """
 
 
-def test_preregister_turn_research_entries_maps_r_to_e():
-    led = EvidenceLedger()
-    eids = preregister_turn_research_entries(
-        led,
-        [
-            {"id": "#r1", "url": "https://a.example", "title": "A"},
-            {"id": "#r2", "url": "https://b.example", "title": "B"},
-            {"id": "#e9", "url": "https://skip", "title": "skip"},  # ignore
-        ],
+def test_evidence_ledger_continues_turn_ids():
+    """开辩包当轮核：已有 #r1 续到 #r2，同 URL 去重回既有 id。"""
+    from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
+
+    core = EvidenceLedgerCore(id_prefix="#r")
+    assert (
+        core.register_sync(
+            url="https://a.example", title="A", registrant="ceo"
+        )
+        == "#r1"
     )
-    assert eids == ["#e1", "#e2"]
-    assert led.get("#e1")["origin_id"] == "#r1"
-    # idempotent
-    eids2 = preregister_turn_research_entries(
-        led, [{"id": "#r1", "url": "https://a.example", "title": "A"}]
+    led = EvidenceLedger(core=core)
+    assert led.get("#r1")["url"] == "https://a.example"
+    assert "#r1" in led.ids
+    assert [e["id"] for e in led.drain_delta()] == ["#r1"]
+    assert led.drain_delta() == []
+    assert (
+        led.register(url="https://b.example", title="B", side_key="pro") == "#r2"
     )
-    assert eids2 == ["#e1"]
-    assert len(led) == 2
+    assert led.register(url="https://a.example", title="A2", side_key="con") == "#r1"
 
 
 @pytest.mark.asyncio

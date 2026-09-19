@@ -1,15 +1,7 @@
-"""VisionReader — the port a vision model plugs into for 读图.
+"""VisionReader port — unused by the live turn (native multimodal on main).
 
-Conversation attachments and CEO ``read_image`` (workspace files) ask a
-``VisionReader`` to turn a PNG into a :class:`VisionReading` (the text the CEO
-reasons over + the sub-call's token usage so the spend can be billed). The port
-is deliberately one async method: input PNG (base64) + a prompt, output a reading.
-
-A reference implementation ships (``QwenVLReader``); a provider is enabled by
-setting ``VISION_API_KEY`` (or a profile vision slot / image-capable main). Empty
-config ⇒ the pipeline injects ``None`` and ``read_image`` returns a clean
-「读图能力未配置」error rather than pretending. A new provider (异构 API like
-Claude/Gemini) is one more ``VisionReader`` that returns a ``VisionReading``.
+Kept so historical tests and the unused factory still compile. Images in
+conversation attachments and workspace rasters go to the current main model.
 """
 
 from __future__ import annotations

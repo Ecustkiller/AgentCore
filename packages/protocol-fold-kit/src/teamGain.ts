@@ -13,7 +13,7 @@
  */
 export interface CollabCounts {
   boundary_yields?: number | null;
-  /** `boundary_yields` 中用户在计划复核里拍板造成的那份。 */
+  /** `boundary_yields` 中用户拍板造成的那份。 */
   boundary_yields_by_user?: number | null;
   scope_signals?: number | null;
   revises?: number | null;
@@ -54,7 +54,7 @@ export const COLLAB_SUMMARY_TOOLTIP =
  *    就在 `escalations` 里（wave.py 从同一份 `state.escalations` 计两次）。两个数直接并列
  *    会把同一次上报数成两处，故减掉重叠，让两段互不相交。
  * 2. `− *_by_user`：这一行说的是「**队友**互相把关」，而 `revises` 里混着用户点「立即改
- *    此人」的热修、`boundary_yields` 里混着用户在计划复核上的拍板。把用户自己的操作报成
+ *    此人」的热修、`boundary_yields` 里混着用户拍板。把用户自己的操作报成
  *    队友互检，等于拿用户的动作给团队记功——他一眼就知道那次是自己点的。
  */
 export function formatCollabSummary(

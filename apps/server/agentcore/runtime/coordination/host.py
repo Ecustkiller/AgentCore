@@ -56,7 +56,6 @@ def should_defer_run_plan_emit_to_merge(
     execution_id: str,
     coordinate: bool = True,
     worker_count: int = 0,
-    has_checkpoint: bool = False,
 ) -> bool:
     """True when durable ``run_plan`` / ``plan_snapshot`` must wait for arm success.
 
@@ -70,13 +69,10 @@ def should_defer_run_plan_emit_to_merge(
     existing = active_coordination(execution_id)
     if existing is not None and existing.active:
         return True
-    checkpoint_enabled = bool(getattr(tool, "_checkpoint_enabled", False))
     return should_enter_coordination(
         coordinate=coordinate,
         worker_count=worker_count,
         depth=int(getattr(tool, "_depth", 0) or 0),
-        has_checkpoint=has_checkpoint,
-        checkpoint_enabled=checkpoint_enabled,
     )
 
 
@@ -891,23 +887,11 @@ def try_start_coordination(
                 call_idx=call_idx,
             )
 
-    has_checkpoint = any(bool(n.checkpoint_after) for n in plan.nodes)
-    checkpoint_enabled = bool(getattr(tool, "_checkpoint_enabled", False))
     if session is None and not should_enter_coordination(
         coordinate=coordinate,
         worker_count=len(plan.nodes),
         depth=tool._depth,
-        has_checkpoint=has_checkpoint,
-        checkpoint_enabled=checkpoint_enabled,
     ):
-        if has_checkpoint and checkpoint_enabled:
-            logger.info(
-                "coordination.skipped",
-                reason="checkpoint_after_in_batch",
-                execution_id=execution_id,
-                nodes=len(plan.nodes),
-                checkpoint_nodes=sum(1 for n in plan.nodes if n.checkpoint_after),
-            )
         return None
 
     # Same-batch seat overlap before session create (defense if caller skipped

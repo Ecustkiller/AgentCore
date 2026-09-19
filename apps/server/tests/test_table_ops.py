@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agentcore.runtime.pipeline.assemble import build_chat_system_prompt
-from agentcore.runtime.resolve.prompt.compose import compose_ceo_chat_prompt
+from agentcore.runtime.resolve.prompt import (
+    TURN_ENVELOPE_FENCE,
+    compose_ceo_chat_prompt,
+    render_ceo_turn_envelope,
+)
 from agentcore.table.context import render_table_section
 from agentcore.table.ops import apply_ops
 from agentcore.table.schema import blank_seed, new_id
@@ -210,30 +213,25 @@ def test_table_session_can_assemble_and_offer_tools():
 
 def test_empty_table_context_does_not_change_compose_bytes():
     bare = compose_ceo_chat_prompt("BASE", ceo_tool_names=set())
-    assert compose_ceo_chat_prompt("BASE", ceo_tool_names=set(), table_context="") == bare
-    assert compose_ceo_chat_prompt("BASE", ceo_tool_names=set(), table_context=None) == bare
+    assert compose_ceo_chat_prompt("BASE", ceo_tool_names=set()) == bare
 
 
 def test_compose_renders_table_context():
-    out = compose_ceo_chat_prompt(
-        "BASE",
-        ceo_tool_names=set(),
+    out = render_ceo_turn_envelope(
         table_context="<表格>\n选中 1 行\n</表格>",
+        include_runtime=False,
     )
     assert "<表格>" in out
-    assert out.index("BASE") < out.index("<表格>")
 
 
 def test_build_chat_places_table_between_attachment_and_sources():
-    out = build_chat_system_prompt(
-        ceo_prompt="CEO",
-        prior_delegate_retry="",
+    out = render_ceo_turn_envelope(
         attachment_context="<附件/>",
         table_context="<表格/>",
         registered_sources="<已登记来源/>",
-        soft_cap=None,
+        include_runtime=False,
     )
-    assert out == "CEO\n<附件/>\n<表格/>\n<已登记来源/>"
+    assert out == f"{TURN_ENVELOPE_FENCE}\n<附件/>\n<表格/>\n<已登记来源/>"
 
 
 def test_empty_selection_omits_selected_block():

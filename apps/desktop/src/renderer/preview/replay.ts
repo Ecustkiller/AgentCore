@@ -32,7 +32,7 @@ function seedSlice(conversationId: string, userPrompt?: string): void {
   // Fresh slice each time so re-playing the same fixture starts clean.
   store.dropConversationRuntime(conversationId);
   // Align delete-conversation cleanup: pausedTurns + InteractionStore (+ siblings).
-  // Without clearing interactions, re-replay / frame scrub stacks stale stage_card /
+  // Without clearing interactions, re-replay / frame scrub stacks stale
   // approval entries from the prior run (shoot 假绿 / Dock 叠卡).
   purgeConversationRuntimeState(conversationId);
   // Execution frames key by the vector's FIXED server message id, so a re-replay

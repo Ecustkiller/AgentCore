@@ -4,7 +4,7 @@ Resident core = ``<身份>`` only（你是谁 / 对谁负责；默认交团队�
 共享诚实元规则在基座 ``<诚实>``（用户可见主张不在核里再列变体表）；输出物理在基座 ``<输出>``；派前打算在
 ``delegate`` description；consult 钩在 ``<按需目录>`` / consult description。
 何时用 ``delegate`` / ``ask_user`` / ``debate`` 写在各工具 description（``delegate`` = 信息判据四问，不进核）；场面 HOW 的
-唯一所有者是 skill / consult 正文（``capability_how_suffix`` 只给 consult 拼；``run`` 走 skill body）；编制 HOW 在 ``delegate`` 按钮。
+唯一所有者是 skill / consult 正文（``capability_how_suffix`` 只给 consult 拼；``run`` 走 skill body）；编制 HOW 在 ``delegate`` 按钮；填卡 HOW 在 ``ask_user`` 按钮。
 ``<工作区>`` 只陈述本回合事实；``<按需目录>`` 只列这是什么。
 全员纪律（未装配不许假装用过）在 ``prompt/base.py``；未装配 ≠ 写进队员任务 在 ``delegate.task``。
 不写编号判决树。每条纪律在装配后的提示串里只应出现一次。
@@ -75,8 +75,8 @@ def assemble_ceo_core(ceo_tool_names: set[str]) -> str:
     return _CEO_CORE_HINT
 
 
-# Scene-gated (同构 ``cold_start._explore_act_block``)：仅本回合有附件块或结构化
-# ``[resident missing]`` 时注入。不进 ``assemble_ceo_core`` / 常驻核。
+# Scene-gated：仅本回合有附件块或结构化 ``[resident missing]`` 时注入。
+# 不进 ``assemble_ceo_core`` / 常驻核。
 _ATTACHMENT_MATERIAL_HINT = """
 <本轮材料>
 【本轮材料收窄】本回合有附件块或结构化驻留缺件。

@@ -251,7 +251,8 @@ async def react_loop(
     (引用即出处 P1). ``annotate_citations`` gates finish_guard's legacy ``[n]`` check
     (CEO True / worker False)；``#rN`` id 存在闸在台账接通且正文出现约定标记时启用
     （Q5；worker 回炉 1 次 / CEO 跟配置）。without a ledger the old ``[n]=url``
-    annotate path still applies. Debate speakers omit the turn ledger (场级 ``#e``).
+    annotate path still applies. Debate speakers share the turn ``#r`` ledger
+    (research hits go through a drain-suppressing proxy).
     ``approval_gate`` (the turn's gate — captain and delegated workers alike) pauses
     GRANTABLE tool calls until the user authorizes them — a denial is fed back to
     the model as a tool result so it can adapt. It is REQUIRED: pass ``None`` only
@@ -959,8 +960,7 @@ async def react_loop(
                         promotion_ledger=tool_context.promotion_ledger,
                         role=role,
                     )
-                    # Soft debate-commitment / audit-gate: captain wrap-up —
-                    # discard the draft, inject nudge, continue (one-shot each).
+                    # Captain wrap-up hook (audit gates / system mutation withdrawn).
                     directive, rolled = maybe_soft_gate_no_tool_return(
                         directive=directive,
                         outcome=outcome,
@@ -1024,8 +1024,7 @@ async def react_loop(
                         total_usage = tool_round.total_usage
                         if tool_round.tool_defs_changed:
                             tool_defs = tool_round.tool_defs
-                        # Delivery-idle tool narrow（factory 交文件空转已关；
-                        # 显式构造仍可能 latch；可复用 wind_down 白名单）。
+                        # Delivery-idle tool narrow is retired (inject no longer latches).
                         if (
                             role == "worker"
                             and controller is not None
@@ -1123,8 +1122,7 @@ async def react_loop(
                 _ensure_assistant_so_far(
                     messages, applied.final_content or final_content
                 )
-            # Finalize-path govern may also latch delivery-idle narrow
-            # (explicit construction only; factory 交文件空转已关).
+            # Delivery-idle tool narrow is retired (inject no longer latches).
             if (
                 role == "worker"
                 and controller is not None

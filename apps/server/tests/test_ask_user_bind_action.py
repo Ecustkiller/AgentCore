@@ -89,7 +89,7 @@ def test_normalize_options_drops_detail():
     assert all("detail" not in o for o in out)
 
 
-def test_normalize_options_drops_detail_on_organize_ops():
+def test_normalize_options_drops_unknown_option_fields():
     out = normalize_options(
         [
             {
@@ -100,9 +100,7 @@ def test_normalize_options_drops_detail_on_organize_ops():
             }
         ]
     )
-    assert out[0]["op"] == "delete"
-    assert out[0]["path"] == "draft.md"
-    assert "detail" not in out[0]
+    assert out[0] == {"label": "移走草稿"}
 
 
 def test_normalize_options_drops_review_kind_fields():
@@ -479,31 +477,31 @@ async def test_ask_user_accepts_recommendation_in_label():
     assert "推荐标记" not in (res.output or "")
 
 
-def test_ask_user_schema_points_at_recommendation_in_label():
-    from agentcore.runtime.skills import build_system_skill_registry
+def test_ask_user_schema_wires_fill_how_on_this_tool():
+    from agentcore.tools.builtin.ask_user.schema import (
+        ASK_DEFAULT_HOW,
+        ASK_LABEL_HOW,
+        ASK_PROMPT_HOW,
+        ASK_WHEN,
+    )
 
     tool = AskUserTool(
         sink=EventSink(),
         conversation_id="c1",
         timeout_seconds=30.0,
     )
-    props = tool.schema.parameters["properties"]["questions"]["items"]["properties"]["options"][
-        "items"
-    ]["properties"]
+    assert tool.schema.description == ASK_WHEN
+    q = tool.schema.parameters["properties"]["questions"]["items"]["properties"]
+    assert q["prompt"]["description"] == ASK_PROMPT_HOW
+    assert q["default"]["description"] == ASK_DEFAULT_HOW
+    props = q["options"]["items"]["properties"]
     assert "recommended" not in props
-    assert "（推荐）" not in props["label"]["description"]
-    assert "放第一" not in props["label"]["description"]
-    kickoff = build_system_skill_registry().get("ask_kickoff").body
-    assert "（推荐）" in kickoff
-    assert "放第一" in kickoff
-    assert "不预选" in kickoff
-    assert "禁止" not in props["label"]["description"]
+    assert props["label"]["description"] == ASK_LABEL_HOW
     assert "detail" not in props
     blob = json.dumps(tool.schema.parameters, ensure_ascii=False)
     assert "password_blocked" not in blob
     assert "message" not in tool.schema.parameters["properties"]
-    card_desc = tool.schema.parameters["properties"]["card"]["description"]
-    assert "多问题用普通" not in card_desc
+    assert "card" not in tool.schema.parameters["properties"]
 
 
 def test_ask_user_schema_advertises_action_only_when_flagged():
@@ -541,7 +539,6 @@ def test_ask_user_schema_advertises_action_only_when_flagged():
     assert "grant_readonly_folder" not in advertised.schema.description
     assert "grant_organize_folder" not in advertised.schema.description
     assert "external_mount_readonly" not in advertised.schema.description
-    assert "HOW→consult(ask_kickoff)、consult(ask_midtask)。" in advertised.schema.description
     assert "HOW→consult(external_mount_readonly)" not in advertised.schema.description
     assert "grant_attach_folder" not in advertised.schema.description
     assert "只读用" not in advertised.schema.description
@@ -567,7 +564,7 @@ def test_ask_user_schema_advertises_action_only_when_flagged():
     assert "2-3" not in action_desc
     assert "well_known" not in props2
     assert "target_name" not in props2
-    # Desktop advertise must stay compact (dogfood ~3796 before slim); HOW → skill.
+    # Desktop advertise must stay compact; 填卡合同在按钮，本机 action 另计。
     adv_blob = advertised.schema.description + json.dumps(
         advertised.schema.parameters, ensure_ascii=False
     )
@@ -604,19 +601,14 @@ def test_ask_user_local_schema_omits_grant_and_open_bind():
     assert "well_known" not in props
     assert "open_local_project" not in tool.schema.description
     assert "grant_attach_folder" not in tool.schema.description
-    assert "HOW→consult(ask_kickoff)、consult(ask_midtask)。" in tool.schema.description
 
 
 def test_ask_user_organize_how_lives_in_skill():
-    """口头同意闭环 / 歧义 2～3 候选：HOW 钉 consult skill，不进工具 description。"""
+    """口头同意闭环 / 歧义 2～3 候选：HOW 钉 consult(local_desk)，不进 ask_user。"""
     from agentcore.runtime.skills import build_system_skill_registry
 
     registry = build_system_skill_registry()
-    kickoff = registry.get("ask_kickoff")
-    midtask = registry.get("ask_midtask")
     desk = registry.get("local_desk")
-    assert kickoff is not None
-    assert midtask is not None
     assert desk is not None
     from agentcore.runtime.resolve.prompt import capability_how_suffix
 
@@ -625,14 +617,12 @@ def test_ask_user_organize_how_lives_in_skill():
     assert "口头同意" in desk.body
     assert "grant_organize_folder" not in desk.body
     assert "consult(external_mount_readonly)" not in desk.body
-    assert "consult(external_mount_readonly)" not in kickoff.body
-    assert "consult(external_mount_readonly)" not in midtask.body
-    assert "consult(local_desk)" not in kickoff.body
-    assert "consult(local_desk)" not in midtask.body
-    assert "consult(team_local_desk)" not in kickoff.body
-    assert "consult(team_local_desk)" not in midtask.body
-    assert "整题要把本机文件夹接到工作区" not in midtask.body
-    assert "工作区以外的目录授权" not in midtask.body
     assert "旁边挂上的本机目录" in desk.body
     assert "旁根" not in desk.body
     assert "可写授权" in desk.body
+    tool = AskUserTool(
+        sink=EventSink(),
+        conversation_id="c1",
+        timeout_seconds=30.0,
+    )
+    assert "口头同意" not in tool.schema.description

@@ -19,12 +19,11 @@ _JOURNAL_EVENT_TYPES = DURABLE_EVENT_TYPES
 # runs_from_entries 对外清空 events（DURABLE 仍落 fact log）。
 #
 # 交互 required 事件从 INTERACTION_KIND_SPECS.journal_surface 派生（单一源；手维护
-# 第二份清单易静默遗漏 — 曾经漏掉 stage_card_required）。非交互门槛事件（图 / 插话 /
+# 第二份清单易静默遗漏）。非交互门槛事件（图 / 插话 /
 # 升级闸）不是 InteractionKind，留在下面这张小表。
 _NON_INTERACTION_JOURNAL_SURFACES = frozenset(
     {
         EventType.RUN_PLAN.value,
-        EventType.GRAPH_APPEND.value,
         EventType.RUN_ESCALATION.value,
         EventType.USER_INTERJECTION.value,
     }

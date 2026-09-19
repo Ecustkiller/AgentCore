@@ -104,8 +104,6 @@ WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS: tuple[str, ...] = (
     "file_write",
     "str_replace",
     "file_delete",
-    "file_move",
-    "file_copy",
     "file_batch",
     "mkdir",
     "grep",
@@ -118,13 +116,8 @@ WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS: tuple[str, ...] = (
     # bytes), so leaving them on the surface only buys guaranteed-failed rounds.
     # download_url even burns its network fetch first, then fails on write.
     "md_export",
-    "archive_extract",
-    "archive_create",
+    "archive",
     "download_url",
-    # Same shape: every call unconditionally reads workspace bytes through the dead
-    # backend (``read_bytes`` → base64 → vision), so it can only fail — and leaving it
-    # on the CEO surface invites 「换个工具再看一眼图」 rounds that never can work.
-    "read_image",
 )
 
 # Short user-visible honest sentence (chat bubble / harvest fallback). Soft steer
@@ -134,26 +127,15 @@ CHANNEL_DEAD_USER_VISIBLE = (
     "工作区/本地文件连不上，请稍后重试或重开桌面，基于已有材料收口。"
 )
 
-# CEO coordination inject: same fact as CHANNEL_DEAD_USER_VISIBLE, plus a
-# dispatch nail. The write-desk hard gate already rejects pinned landing; this
-# only names the constraint so the captain does not pretend files can still
-# be edited.
-CHANNEL_DEAD_CEO_INJECT = (
-    "工作区/本地文件连不上，请稍后重试或重开桌面，基于已有材料收口。"
-    "禁止再派需要写盘的队员。"
-)
+# CEO coordination inject: same fact as CHANNEL_DEAD_USER_VISIBLE.
+# The write-desk hard gate already rejects pinned landing.
+CHANNEL_DEAD_CEO_INJECT = CHANNEL_DEAD_USER_VISIBLE
 
-# CEO coordination inject when the local exec env is sticky-dead. Soft steer
+# CEO coordination inject when the local exec env is sticky-dead. Soft fact
 # only — no new delegate hard gate (no pinned-landing-shaped predicate for
 # "this task needs run").
-EXEC_ENV_DEAD_CEO_INJECT = (
-    "这台电脑此刻跑不了命令，基于已有材料收口；"
-    "禁止再派需要 run 的队员；只读/只写文档可以。"
-)
-EXEC_ENV_DEAD_CEO_INJECT_CLOUD = (
-    "云端隔离执行当前不可用，基于已有材料收口；"
-    "禁止再派需要 run 的队员；只读/只写文档可以。"
-)
+EXEC_ENV_DEAD_CEO_INJECT = "这台电脑此刻跑不了命令，基于已有材料收口。"
+EXEC_ENV_DEAD_CEO_INJECT_CLOUD = "云端隔离执行当前不可用，基于已有材料收口。"
 
 # Quiet user-visible line when the run family retires on hangs
 # (mirrors CHANNEL_DEAD_USER_VISIBLE — no card, one-shot content_delta).
@@ -204,9 +186,7 @@ EXEC_ENV_DEAD_USER_VISIBLE_BY_CODE: dict[str, str] = {
 # Re-exported here so delivery / tools reach them without importing pipeline.
 
 WORKSPACE_CHANNEL_DEAD_RETIRE_STEER = (
-    "工作区/本地文件连不上：本回合停用全部本地文件读写工具（桌面重新连上后会恢复）。"
-    "请向用户说明「工作区/本地文件连不上，请稍后重试或重开桌面」，基于已有材料收口；"
-    "禁止再调用文件工具，也禁止再派需要读写本地文件的队员。"
+    "工作区/本地文件连不上：本回合本地文件读写工具已停用（桌面重新连上后会恢复）。"
 )
 
 

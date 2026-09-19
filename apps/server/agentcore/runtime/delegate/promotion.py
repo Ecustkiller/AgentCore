@@ -1,9 +1,7 @@
-"""回合归位台账读写：历史 ``delivery_status.promoted`` 重放 + 结构化路径改写。
+"""回合归位台账读写：结构化路径改写。
 
-``promoted`` 的 ``{from, to}`` 是旧路径唯一的回查线索。成品归位工具已下线，本模块
-不再写新行；journal 重放仍会接手历史卡上的归位行，后续批次重建对账时按台账重映射，
-避免新卡复活已经搬走的路径。``apply_turn_promotions`` 在 promotions 空时 no-op
-（零归位不改任何字段，wire 上也不多一个 key）。
+成品归位工具已下线，本模块不再写新行。``apply_turn_promotions`` 在 promotions 空时
+no-op。测试仍可往台账塞行，验证后续批次对账不会把旧路径线索复活。
 
 台账本体 :class:`~agentcore.tools.protocol.TurnPromotionLedger` 挂在 ToolContext 上
 （共享可变对象）：``execute_tools`` 的 ``asyncio.gather`` 会复制 context，ContextVar
@@ -47,28 +45,19 @@ def adopt_journaled_reconciliation(
 ) -> None:
     """接手一条**别处落盘**的对账（journal 回灌 / 可用性短问重发）作本回合真源。
 
-    与 :func:`note_delivery_reconciliation` 的差别只在 ``promoted``：那条记的是本回合
-    自己刚发的卡（``promoted`` 本就出自台账），这条记的是落盘的卡——卡上已有的归位行
-    必须一并接手，否则后续批次重发时会把旧行抹掉（旧路径唯一的回查线索）。
-    仅在台账尚无归位行时接手：台账一旦开始记账就以台账为准，不做行级合并 / 去重。
+    与 :func:`note_delivery_reconciliation` 同写 ``reconciliation``；不再从卡上
+    接手历史搬家行（成品归位已下线）。
     """
     if ledger is None or not isinstance(payload, dict) or not payload.get("execution_id"):
         return
     ledger.reconciliation = dict(payload)
-    if ledger.promotions:
-        return
-    ledger.promotions.extend(
-        {"from": str(row["from"]), "to": str(row["to"])}
-        for row in payload.get("promoted") or []
-        if isinstance(row, dict) and row.get("from") and row.get("to")
-    )
 
 
 def turn_promotions(ledger: TurnPromotionLedger | None) -> list[dict[str, str]]:
     """台账里的已归位行（重发与后续批次的对账共用）。
 
-    跨回合重放时含上一轮从 journal 接手的行——这张卡的 ``promoted`` 讲的是「卡上这些
-    产物搬去了哪」，所以旧行必须留着（旧路径的回查线索）。
+    这些行只留在台账里做路径改写，不上 live 交付卡。live 路径不再写入；空表时
+    :func:`apply_turn_promotions` 原样返回。
     """
     if ledger is None:
         return []
@@ -129,12 +118,12 @@ def _rewrite_gaps(gaps: Sequence[Any], table: dict[str, str]) -> list[Any]:
 def apply_turn_promotions(
     payload: dict[str, Any], ledger: TurnPromotionLedger | None
 ) -> dict[str, Any]:
-    """Stamp ``promoted`` + rewrite promoted paths on a freshly built reconciliation.
+    """Rewrite promoted paths on a freshly built reconciliation.
 
     A later batch in the same turn rebuilds ``delivery_status`` from worker state,
     which still names the pre-move path — remap it so the newest card cannot
     resurrect a file that has already been promoted away. No promotions ⇒ payload
-    returned untouched (零归位不改任何字段，wire 上也不多一个 key）。
+    returned untouched.
 
     改写覆盖载荷上**所有结构化路径字段**：``delivered_files``、``artifacts[].path``、
     ``artifacts[].derived_from``（导出件血缘）、``gaps[].paths``。wire 上不留悬空引用是
@@ -152,5 +141,4 @@ def apply_turn_promotions(
     updated["delivered_files"] = [_rewrite(p, table) for p in payload.get("delivered_files") or []]
     updated["artifacts"] = _rewrite_rows(payload.get("artifacts") or [], table)
     updated["gaps"] = _rewrite_gaps(payload.get("gaps") or [], table)
-    updated["promoted"] = turn_promotions(ledger)
     return updated

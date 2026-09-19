@@ -40,18 +40,11 @@ def _stub_prepare_io(monkeypatch, *, on_attach, on_registry) -> None:
     async def _no_desk_label(*_a, **_k):
         return None
 
-    async def _no_vision(*_a, **_k):
-        return None
-
     monkeypatch.setattr(
         "agentcore.runtime.pipeline.prepare.assemble_turn_rules", _empty_rules
     )
     monkeypatch.setattr(
         "agentcore.runtime.pipeline.prepare.resolve_desk_folder_label", _no_desk_label
-    )
-    monkeypatch.setattr(
-        "agentcore.runtime.pipeline.prepare.resolve_vision_reader_for_conversation",
-        _no_vision,
     )
     monkeypatch.setattr(
         "agentcore.runtime.pipeline.prepare.build_worker_registry",

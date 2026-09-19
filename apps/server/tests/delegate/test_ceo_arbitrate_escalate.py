@@ -48,7 +48,7 @@ def test_escalate_tool_result_ceo_wording():
     assert "用户就你的升级问题答复" in user.output
 
 
-def test_inject_blocking_escalation_prompts_resolve():
+def test_inject_blocking_escalation_states_facts():
     session = CoordinationSession(execution_id="e", total_workers=2)
     text = format_coordination_events(
         session,
@@ -68,9 +68,8 @@ def test_inject_blocking_escalation_prompts_resolve():
         ],
     )
     assert "阻塞仲裁" in text
-    assert "resolve_escalation" in text
-    assert "via_user=true" in text
-    assert "ask_user" in text
+    assert "选 Postgres 还是 MySQL？" in text
+    assert "暂按 Postgres" in text
     assert "transfer_ownership" not in text
 
 

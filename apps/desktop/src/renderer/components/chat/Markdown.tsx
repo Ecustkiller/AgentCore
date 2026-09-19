@@ -7,6 +7,7 @@ import type { FileSource } from "@/lib/fileSource";
 import { remarkCitations } from "@/lib/remarkCitations";
 import { remarkEvidence } from "@/lib/remarkEvidence";
 import { remarkWorkspacePaths } from "@/lib/remarkWorkspacePaths";
+import { texDelimitersToDollars } from "@/lib/texDelimiters";
 import {
   isWorkspaceFilePath,
   normalizeWorkspaceRelPath,
@@ -316,7 +317,8 @@ interface Props {
 
 /**
  * Assistant-message Markdown: GFM (tables/strikethrough/task lists), syntax
- * highlighting with a per-block copy button, KaTeX math ($…$ / $$…$$),
+ * highlighting with a per-block copy button, KaTeX math ($…$ / $$…$$ and
+ * `\(...\)` / `\[...\]`),
  * ```mermaid / ```markmap diagrams (rendered via Diagram.tsx), and — when the
  * message has sources — `[n]` / `#rN` rewritten as favicon + site links; GFM
  * `[短名](url)` matching the ledger keeps the model text. Assistant replies may
@@ -540,7 +542,10 @@ export const Markdown = memo(function Markdown({
   // as one document with highlight, so any cross-block references the conservative
   // split would miss mid-stream resolve in the end state.
   const rehype = isStreaming ? rehypeStreaming : rehypeHighlighted;
-  const blocks = isStreaming ? splitMarkdownBlocks(content) : null;
+  // `\(`/`\[` → dollars before remark-math (and before the stream split so a
+  // closed display block stays in one chunk). Stored journal text is unchanged.
+  const mathContent = texDelimitersToDollars(content);
+  const blocks = isStreaming ? splitMarkdownBlocks(mathContent) : null;
 
   const streamCaret = isStreaming && !muted && content.trim().length > 0;
 
@@ -566,7 +571,7 @@ export const Markdown = memo(function Markdown({
         ))
       ) : (
         <MarkdownChunk
-          content={content}
+          content={mathContent}
           remarkPlugins={remarks}
           rehypePlugins={rehype}
           components={comps}

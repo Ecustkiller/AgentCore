@@ -116,11 +116,6 @@ class LoopWindDown:
             else:
                 instruction = wind_down_instruction_retrieval()
         self.messages.append(LLMMessage(role="user", content=instruction))
-        from agentcore.runtime.tool_failures import sync_tool_failure_constraint_in_system
-
-        sync_tool_failure_constraint_in_system(
-            self.messages, self.controller.outstanding_tool_failures()
-        )
         from agentcore.config import settings as _settings
 
         logger.info(
@@ -143,15 +138,7 @@ class LoopWindDown:
         emit_run_phase(self.sink, self.run_id, self.agent_id, "winding_down")
 
     def apply_delivery_idle_narrow(self) -> None:
-        """Narrow to write/诊断/handoff/必要读 after delivery-idle ladder.
-
-        Factory never arms files-expected delivery_idle; this path remains for
-        explicit LoopController construction (recon does not set narrow).
-        May reuse :func:`narrow_tools_for_wind_down`. Does **not** emit
-        ``engine.wind_down_enter`` / winding_down phase (budget wind_down stays
-        independent). If budget wind_down already active, surface is already
-        narrowed — no-op on allowlist. Collaboration keeps note tools.
-        """
+        """Narrow to write/诊断/handoff/必要读. Inject no longer latches this path."""
         if self.delivery_idle_narrow_active or self.role != "worker":
             return
         # Defense: report posts must never strip search even if a pending latch leaked.

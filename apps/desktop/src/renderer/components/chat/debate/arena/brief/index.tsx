@@ -14,12 +14,11 @@ export function DebateBrief({
   const rec = handoffs.length === 0 ? brief.recommendation : undefined;
   return (
     <Card className="p-4">
-      <VerdictCard brief={brief} form="debate" sides={sides} />
+      <VerdictCard brief={brief} sides={sides} />
       <YourCallZone
         divided
         handoffs={handoffs}
         recommendation={rec}
-        form="debate"
       />
     </Card>
   );

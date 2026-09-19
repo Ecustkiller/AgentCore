@@ -28,7 +28,6 @@ const execById = vi.hoisted(() => ({
 }));
 const interactionCards = vi.hoisted(() => ({
   checkpoints: [] as { status: "pending" | "resolved"; question?: string }[],
-  planReviews: [] as { status: "pending" | "resolved" }[],
 }));
 
 vi.mock("@/stores/conversation", async (importOriginal) => {
@@ -106,7 +105,6 @@ vi.mock("@/stores/interactions", async (importOriginal) => {
     ...actual,
     useMessageInteractionCards: () => ({
       checkpoints: interactionCards.checkpoints,
-      planReviews: interactionCards.planReviews,
     }),
   };
 });
@@ -164,7 +162,6 @@ afterEach(() => {
   convSlice.byId = undefined;
   execById.value = {};
   interactionCards.checkpoints = [];
-  interactionCards.planReviews = [];
 });
 
 describe("AssistantMessage footer gate", () => {

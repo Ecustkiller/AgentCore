@@ -321,13 +321,13 @@ def test_respond_settles_approval_with_enum_decision():
 def test_respond_refuses_kind_mismatch():
     """A respond whose kind ≠ the pending interaction's kind is refused
     (``resolved: false``) and leaves the Future pending — mirrors the cloud route's
-    kind guard, so a stray approval can't settle a plan_review (or vice versa)."""
+    kind guard, so a stray approval can't settle an escalation (or vice versa)."""
     registry = default_interaction_registry()
     sent, write_line = _recorder()
     server = SidecarServer(write_line)
 
     async def drive() -> bool:
-        fut = registry.create("cp_1", "c1", kind=InteractionKind.PLAN_REVIEW)
+        fut = registry.create("cp_1", "c1", kind=InteractionKind.ESCALATION)
         try:
             await server.handle_line(
                 json.dumps(

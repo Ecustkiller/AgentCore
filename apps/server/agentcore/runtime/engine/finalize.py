@@ -64,10 +64,7 @@ def _inject_finalize_instructions(
     ceiling_reason: str = "",
 ) -> None:
     """Inject continuity (when prior交付 exists) then the standard finalize steer."""
-    if outstanding_tool_failures:
-        from agentcore.runtime.tool_failures import sync_tool_failure_constraint_in_system
-
-        sync_tool_failure_constraint_in_system(messages, outstanding_tool_failures)
+    del outstanding_tool_failures
     prior = prior_deliverable.strip()
     if prior:
         continuity = deliverable_continuity_instruction(prior_deliverable=prior)

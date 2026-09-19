@@ -72,7 +72,6 @@ function turn(partial: Partial<ProjectedTurn> = {}): ProjectedTurn {
     debatePretrial: null,
     crossExamEnabled: false,
     debateOpening: null,
-    teamSynthesisPreview: null,
     deliveryStatus: null,
     turnWarning: null,
     autoFolder: null,

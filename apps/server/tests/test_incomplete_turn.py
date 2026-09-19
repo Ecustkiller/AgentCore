@@ -60,8 +60,8 @@ def test_open_pause_true_on_unresolved_checkpoint():
     assert has_open_durable_pause([_ev("checkpoint_required", "c1")]) is True
 
 
-def test_open_pause_true_on_unresolved_plan_review():
-    assert has_open_durable_pause([_ev("plan_review_required", "p1")]) is True
+def test_open_pause_false_on_leftover_plan_review():
+    assert has_open_durable_pause([_ev("plan_review_required", "p1")]) is False
 
 
 def test_open_pause_false_when_resolved():
@@ -150,7 +150,7 @@ def test_salvage_defers_to_resume_on_durable_pause(monkeypatch, capture):
     spawned, _ = capture
     monkeypatch.setattr(settings, "incomplete_turn_persist_enabled", True)
     monkeypatch.setattr(settings, "structured_suspension_persist_enabled", True)
-    journal = [_ev("run_plan"), _ev("plan_review_required", "p1")]
+    journal = [_ev("run_plan"), _ev("checkpoint_required", "c1")]
     salvage_incomplete_turn(
         sink=_Sink(journal), conversation_id="conv", trace_id="trace", message_id="m1"
     )
@@ -162,7 +162,7 @@ def test_salvage_runs_on_pause_when_persistence_disabled(monkeypatch, capture):
     monkeypatch.setattr(settings, "incomplete_turn_persist_enabled", True)
     monkeypatch.setattr(settings, "structured_suspension_persist_enabled", False)
     # No durable frame exists (2a in-memory only) ⇒ salvage the finished work instead.
-    journal = [_ev("run_plan"), _ev("plan_review_required", "p1")]
+    journal = [_ev("run_plan"), _ev("checkpoint_required", "c1")]
     salvage_incomplete_turn(
         sink=_Sink(journal), conversation_id="conv", trace_id="trace", message_id="m1"
     )

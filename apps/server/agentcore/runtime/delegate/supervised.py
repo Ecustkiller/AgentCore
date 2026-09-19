@@ -354,22 +354,8 @@ async def finalize_stopped(
     tool: DelegateTool,
     plan: RunPlan,
     seed_completed: dict[str, RunState],
-    *,
-    kickoff_cancelled: bool = False,
-    kickoff_timeout: bool = False,
-    kickoff_adjusted: bool = False,
-    note: str = "",
 ) -> ToolResult:
-    """Wrap up a partial plan without running the tail.
-
-    ``kickoff_cancelled`` marks team_preview STOP (drive_preview / resume_plan with
-    ``apply_kickoff_grant``). ``kickoff_timeout`` marks team_preview TIMEOUT on
-    the same grant path — no grant, no drive; copy aligns with ask timeout.
-    ``kickoff_adjusted`` marks team_preview ADJUST — same no-grant path, but
-    revise-and-resubmit guidance (not cancel「宜先问」). Those paths replace
-    ``format_for_ceo`` with soft guidance — plan_review / replan stop keep the
-    normal CEO brief.
-    """
+    """Wrap up a partial plan without running the tail (plan_review / replan stop)."""
     from agentcore.runtime.delegate.accumulate import (
         accumulate_usage,
         collect_citations,
@@ -416,20 +402,7 @@ async def finalize_stopped(
         for session in registered:
             await tool._session_saver(session)
     absorb_children(tool)
-    if kickoff_timeout:
-        from agentcore.runtime.kickoff.cancel_guidance import format_kickoff_timeout_result
-
-        output = format_kickoff_timeout_result(primitive="delegate", note=note)
-    elif kickoff_adjusted:
-        from agentcore.runtime.kickoff.adjust_guidance import format_kickoff_adjust_result
-
-        output = format_kickoff_adjust_result(primitive="delegate", note=note)
-    elif kickoff_cancelled:
-        from agentcore.runtime.kickoff.cancel_guidance import format_kickoff_cancel_result
-
-        output = format_kickoff_cancel_result(primitive="delegate", note=note)
-    else:
-        output = build_ceo_synthesis(tool, plan, results).text
+    output = build_ceo_synthesis(tool, plan, results).text
     return ToolResult(
         tool_call_id="",
         success=True,
@@ -446,37 +419,8 @@ def format_boundary_for_ceo(
     nodes: list[RunSpec],
 ) -> str:
     """The CEO-facing「计划已让出」brief when a supervised plan YIELDs."""
-    from agentcore.runtime.runs import BoundaryReason
-
-    if reason is BoundaryReason.SCOPE:
-        return format_scope_boundary(plan, results, nodes)
-    return format_checkpoint_boundary(plan, results, nodes)
-
-
-def format_checkpoint_boundary(plan: RunPlan, results: dict, nodes: list[RunSpec]) -> str:
-    """CHECKPOINT-arm brief (协调态波边界：事件而非回合暂停)."""
-    from agentcore.runtime.runs import RunPhase
-
-    lines = [
-        "## 计划已让出（checkpoint_after 波边界）",
-        "下列步骤已完成并声明了检查点。协调模式下**不挂起回合**——"
-        "若需用户拍板请用 `ask_user`；若可继续请 `replan` 放行下游。",
-    ]
-    for node in nodes:
-        state = results.get(node.run_id)
-        summary = review_summary_text(state)
-        lines.append(
-            f"\n### 已完成 · run_id: `{node.run_id}`"
-            f"（{node.role or node.run_id}）\n"
-            f"产出摘要：{summary or '（无产出）'}"
-        )
-    pending = [n.run_id for n in plan.nodes if n.run_id not in results]
-    done = sum(1 for s in results.values() if s and s.phase is RunPhase.COMPLETED)
-    lines.append(
-        "\n---\n"
-        f"当前已完成 {done} 步；待跑：{('、'.join(f'`{p}`' for p in pending)) or '（无）'}。"
-    )
-    return "\n".join(lines)
+    _ = reason
+    return format_scope_boundary(plan, results, nodes)
 
 
 def format_scope_boundary(plan: RunPlan, results: dict, nodes: list[RunSpec]) -> str:

@@ -161,8 +161,7 @@ export function InlineTeamGraph({
         ref={setHostNode}
         className="animate-task-card-enter mb-3 overflow-hidden rounded-xl border border-border bg-card"
       >
-        {/* 辩论全过程 / 版本对比等「过程产物」不再内联聊天——它们归全屏放大态（统一辩论室 /
-            统一「对比」视图），聊天正文状态条只留战绩 + 入口 CTA
+        {/* 辩论全过程不再内联聊天——归全屏辩论室；聊天正文状态条只留战绩 + 入口 CTA
             （协作图与双视图UX.md §六 两个入口：聊天内嵌 ⇄ 全屏放大）。
             prev_execution_id 协议链仍在，用户面不画回链铬条。 */}
         <StatusStrip

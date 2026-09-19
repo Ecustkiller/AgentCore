@@ -128,7 +128,9 @@ async def stream_chat(
         # A′: no whole-turn workspace_lock — write/snapshot sinks hold the key.
         # Compact stays outside the lock (conversation DB, not workspace disk).
         # 不得静默等锁：kickoff 不握 folder 锁；写路径短等经 workspace_lock_wait SSE。
-        resident_attachments = await persist_attachments(backend, attachments)
+        resident_attachments = await persist_attachments(
+            backend, attachments, sitting_folder_id=ws_folder_id
+        )
 
         await compact_before_turn(
             conversation_id,

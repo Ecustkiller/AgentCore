@@ -12,11 +12,10 @@ const LOOKUP_TOOLS = new Set([
   "file_delete",
   "file_move",
   "file_copy",
+  "file_batch",
   "web_fetch",
   "read_conversation",
   "search_conversations",
-  "read_folder_file",
-  "list_folder_dir",
 ]);
 
 /** Collapsed-row / folded-group word for a tool that didn't work. Uncolored.

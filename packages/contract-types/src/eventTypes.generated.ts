@@ -29,7 +29,6 @@ export type SSEEventType =
   | "execution_completed"
   | "execution_detached"
   | "external_mount_required"
-  | "graph_append"
   | "handoff_apply_done"
   | "handoff_job_started"
   | "handoff_snapshot_done"
@@ -38,8 +37,6 @@ export type SSEEventType =
   | "mcp_op_required"
   | "message_end"
   | "message_start"
-  | "plan_review_required"
-  | "plan_review_resolved"
   | "plan_revised"
   | "reasoning_delta"
   | "resume_deferred"
@@ -59,9 +56,6 @@ export type SSEEventType =
   | "run_skipped"
   | "run_started"
   | "run_tool_progress"
-  | "stage_card_required"
-  | "stage_card_resolved"
-  | "team_synthesis_preview"
   | "title_generated"
   | "tool_progress"
   | "tool_use_end"
@@ -77,3 +71,75 @@ export type SSEEventType =
   | "workspace_op_required"
   | "workspace_snapshot_done"
   | "workspace_snapshot_failed";
+
+export const SSE_EVENT_TYPE_VALUES = [
+  "approval_required",
+  "approval_resolved",
+  "auto_folder_created",
+  "batch_metrics",
+  "browser_live_frame",
+  "browser_live_status",
+  "checkpoint_required",
+  "checkpoint_resolved",
+  "citations",
+  "content_delta",
+  "content_reset",
+  "coordination_wait",
+  "debate_pretrial_completed",
+  "debate_pretrial_orders",
+  "debate_pretrial_started",
+  "debate_result",
+  "debate_round",
+  "debate_round_started",
+  "delivery_status",
+  "desk_provision_wait",
+  "error",
+  "escalation_required",
+  "escalation_resolved",
+  "evidence_ledger",
+  "execution_completed",
+  "execution_detached",
+  "external_mount_required",
+  "handoff_apply_done",
+  "handoff_job_started",
+  "handoff_snapshot_done",
+  "host_op_required",
+  "interaction_orphaned",
+  "mcp_op_required",
+  "message_end",
+  "message_start",
+  "plan_revised",
+  "reasoning_delta",
+  "resume_deferred",
+  "resume_settled",
+  "run_cancelled",
+  "run_completed",
+  "run_context",
+  "run_escalation",
+  "run_escalation_gate",
+  "run_failed",
+  "run_output_delta",
+  "run_output_reset",
+  "run_phase",
+  "run_plan",
+  "run_progress",
+  "run_reasoning_delta",
+  "run_skipped",
+  "run_started",
+  "run_tool_progress",
+  "title_generated",
+  "tool_progress",
+  "tool_use_end",
+  "tool_use_progress",
+  "tool_use_start",
+  "turn_queue_cancelled",
+  "turn_queue_started",
+  "turn_queued",
+  "turn_saved",
+  "turn_warning",
+  "user_interjection",
+  "workspace_lock_wait",
+  "workspace_op_required",
+  "workspace_snapshot_done",
+  "workspace_snapshot_failed",
+] as const satisfies readonly SSEEventType[];

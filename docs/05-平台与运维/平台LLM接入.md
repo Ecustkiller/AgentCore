@@ -26,9 +26,9 @@ skip_if:
 
 **模型组合**：CRUD `/v1/users/me/llm-model-profiles`；会话只认 `model_profile_id`（**新建拍快照**：create 写入当时账号默认或客户端所选 uuid；改账号默认不改旧会话）。存量 `null` 仍按账号默认展开（兼容活跟随）。PATCH 显式 `null` = 再钉当时默认（非清成活跟随）。设默认只在设置 / `PUT …/default`；输入框 picker 只选具体组合。可选 `reasoning_effort`：厂商官方 token（目录 `reasoning_effort.options`），null = 该主模型默认；主模型换到不列该 token 的叶则清掉。**元数据事实源** = `llm/catalog.py`（上架集）+ `llm/model_metadata.py`（展示 enrichment）；`model_profiles` 只做组合 CRUD / expand，系统预置 = 对 catalog 可见上架集的 uuid5 投影（`uuid5(…, agentcore:platform-preset:{model_id})`，无硬编码产品 UUID）。逻辑默认 = `PLATFORM_MODEL` 对应预置（须在上架集内）否则 allowlist 首个。明确不做：质量档矩阵、账号级角色→模型矩阵、输入框双 picker /「跟随账号默认」行。✅ **Per-worker 节点显式覆盖**（执行链 + sidecar proxy；确认面不提供人改模）与组合槽正交 → [编排器 · Per-worker 模型覆盖](/docs/03-AI核心/编排器与CEO主Agent.md#per-worker-模型覆盖abc-同一功能)。
 
-**识图槽 `vision`（可选）**：组合列不 persist follow main（空槽 ≠ 把 main 抄进槽）。解析 `VisionReader`：有槽 → 该槽凭据；槽空且 main 收图 → 复用 main（`read_image` / 对话贴图）；否则仅 `billing_mode=platform` 且 `VISION_*` 齐全走运维兜底（默认 `kimi-k2.5`，不上架 `PLATFORM_MODELS`）。BYOK 填槽不因 `billing_mode=byok` 关死。本机 sidecar **不**二次开 PG expand：读图走同一推理代理，`X-AgentCore-Role: vision`，云端按上列顺序解析槽；禁止本机拼 vendor key / 回落 sidecar `.env` 的 `VISION_*`。入账仍走回合 `cost_runs` 孤儿（与云 `vision.read` 同）；代理不写 `cost_calls`，避免和 sink 双记。
+**识图槽 `vision`（可选，已停用）**：组合列与 API 仍保留该槽，设置页不再编辑。图只进**当前主力**原生多模态（贴图挂当前 user；工作区光栅走 `file_read`）。主模型不收图 → 诚实说明，**不**走 VisionReader / `VISION_*` / 推理代理 `X-AgentCore-Role: vision`。历史 `role=vision` 入账行仍可折账。visual critic **已退役**。能力位只认该厂商契约（精确 id + 进程内负例），不是展示元数据家族继承、也不是 id 关键词。
 
-**对话贴图路由**：main 收图（`llm/image_accept.model_accepts_images`）→ 原生 multimodal（`image_url` 挂当前 user，跳过眼睛轨）；否则有 `VisionReader` → 眼→文；否则诚实「当前主模型不收图且未配置识图兜底」，不静默丢像素。同一图禁止双路径。能力位只认该厂商契约（精确 id + 进程内负例），不是展示元数据家族继承、也不是 id 关键词。visual critic **已退役**。CEO `read_image` 与对话贴图走 `VisionReader`（可来自槽或收图的 main）。
+**对话贴图路由**：main 收图（`llm/image_accept.model_accepts_images`）→ 原生 multimodal（`image_url` 挂当前 user）；否则诚实「当前主模型不收图」，不静默丢像素、不另开眼睛轨。工作区图片同一条：`file_read` 把像素发给这只模型。
 
 `llm/resolve.py` 单点：
 
@@ -42,7 +42,7 @@ skip_if:
 
 ## 三、sidecar 推理代理
 
-桌面本地引擎**不拿 BYOK key**——经服务端出网：`POST /v1/inference/token` 铸 scoped token + 服务端解析 `model`；`POST /v1/inference/v1/chat/completions` 过同一道计费闸后转发。模型以服务端解析为准。识图同路：`X-AgentCore-Role: vision` 时云端按识图槽解析，忽略 mint/chat 的 body `model`（那是主模型 id）。→ `api/routes/inference/`；整体 → [双模式工作区](/docs/02-架构/双模式工作区.md)。
+桌面本地引擎**不拿 BYOK key**——经服务端出网：`POST /v1/inference/token` 铸 scoped token + 服务端解析 `model`；`POST /v1/inference/v1/chat/completions` 过同一道计费闸后转发。模型以服务端解析为准。`X-AgentCore-Role: vision` **已退役**（硬失败）。→ `api/routes/inference/`；整体 → [双模式工作区](/docs/02-架构/双模式工作区.md)。
 
 **铸票 `token.model`**：可选 body `{ conversation_id? }`。有合法且属该用户的会话 → 与代理主槽同源 expand（`resolve_conversation_model_selection(...).model`，会话钉组合优先）；缺省 / 会话不存在或不属于该用户 → 账号默认（`resolve_user_chat_model`）。JWT **只绑 user**，不把 `conversation_id` 塞进 claims；返回的 model id 诚实透传（禁 silent 把 `flash-free` 糊成 `flash`）。
 
@@ -158,7 +158,7 @@ OpenCode 两条 OpenAI 兼容上游，**计费与目录不同，必须按精确 
 | 额度 | 月 ¥10 · 日 ¥10 · 日请求 500（`quota_*`） |
 | 价卡 | Flash = Go 公开单价 × **冻结 7.2**（截至 **2026-09-10**：谷时约 ¥1.08 / ¥4.32 / ¥0.0216 每百万；峰时 2×；`GO_COST_MULTIPLIER` 默认 1）。平台与用户 BYOK 同一把尺；额度只扣平台列。现金 COGS 仍是订阅月费，不是这把尺 |
 | 上下文窗 | 现网 Go Flash SKU **1M**（`deepseek-v4.1-flash` 与 `deepseek-v4-flash` 同）。目录展示与近顶压缩（窗 × 80% ≈ 800K）跟 SKU，禁止按端点猜成 Zen free 的 200K |
-| Vision | 本阶段不配 `VISION_*`（对话读图：BYOK 填 vision 槽，或槽空且 main 收图时复用 main） |
+| Vision | 不配 `VISION_*`。对话贴图 / 工作区光栅走当前主力多模态；主模型不收图则诚实说明 |
 | 公告 | 恢复时归档 `quota_unavailable`（以及仍在线的旧 `quota_jiurelay`）；发模板 **`quota_platform_restored`** → [产品公告文案模板 §4.2](/docs/05-平台与运维/产品公告文案模板.md) |
 
 **运维动作（按序，不得跳）**

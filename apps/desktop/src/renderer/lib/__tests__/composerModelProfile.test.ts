@@ -134,9 +134,9 @@ describe("lookupComposerProfile", () => {
 });
 
 describe("profileCanSeeImages / vision hint", () => {
-  it("true when catalog main has vision or the vision slot is filled", () => {
+  it("true when catalog main has vision; vision slot does not count", () => {
     expect(profileCanSeeImages(visionMain, catalog)).toBe(true);
-    expect(profileCanSeeImages(slotted, catalog)).toBe(true);
+    expect(profileCanSeeImages(slotted, catalog)).toBe(false);
     expect(profileCanSeeImages(textMain, catalog)).toBe(false);
   });
 
@@ -161,7 +161,7 @@ describe("profileCanSeeImages / vision hint", () => {
         profile: slotted,
         catalogModels: catalog,
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       shouldShowComposerVisionHint({
         hasImage: false,

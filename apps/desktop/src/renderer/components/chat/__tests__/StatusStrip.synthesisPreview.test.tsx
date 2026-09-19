@@ -107,18 +107,6 @@ beforeEach(() => {
 describe("StatusStrip · 不挂合成草稿行", () => {
   it("preview 事件不把草稿/小结画进工具栏", () => {
     useExecutionStore.getState().startExecution(plan, MID);
-    useExecutionStore.getState().setTeamSynthesisPreview(
-      {
-        execution_id: "exec-1",
-        completed: 1,
-        total: 2,
-        headline: "合成草稿更新 · 已完成 1/2",
-        text: "两边方向一致：优先方案 A，撰写员按此定稿。",
-        workers: [],
-        in_progress: true,
-      },
-      MID,
-    );
 
     renderStrip(projectExecution(plan, [], "running"));
 

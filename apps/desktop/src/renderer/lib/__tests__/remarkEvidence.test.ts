@@ -17,17 +17,17 @@ const evi = (kind: "verified" | "unverified", note = ""): MdNode => ({
 
 describe("splitEvidenceText", () => {
   it("splits a verified marker with a ledger id", () => {
-    expect(splitEvidenceText("降本【已核实·#e3】约 18%")).toEqual([
+    expect(splitEvidenceText("降本【已核实·#r3】约 18%")).toEqual([
       { type: "text", value: "降本" },
-      evi("verified", "#e3"),
+      evi("verified", "#r3"),
       { type: "text", value: "约 18%" },
     ]);
   });
 
-  it("keeps dual-write note text whole (phrase + #eN)", () => {
-    expect(splitEvidenceText("事实【已核实·街访数据 #e2】。")).toEqual([
+  it("keeps dual-write note text whole (phrase + #rN)", () => {
+    expect(splitEvidenceText("事实【已核实·街访数据 #r2】。")).toEqual([
       { type: "text", value: "事实" },
-      evi("verified", "街访数据 #e2"),
+      evi("verified", "街访数据 #r2"),
       { type: "text", value: "。" },
     ]);
   });

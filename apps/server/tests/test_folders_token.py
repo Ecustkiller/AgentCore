@@ -35,8 +35,7 @@ from agentcore.security import (
 )
 from agentcore.tools.builtin.folders import (
     CreateFolderTool,
-    ListFoldersTool,
-    ResolveFolderTool,
+    FoldersTool,
 )
 from agentcore.tools.protocol import ToolContext
 
@@ -236,7 +235,7 @@ async def test_list_folders_uses_cloud_when_creds_bound(
     )
 
     with folders_credentials_scope(folders_creds):
-        result = await ListFoldersTool().execute({}, _ctx())
+        result = await FoldersTool().execute({"action": "list"}, _ctx())
     assert result.success
     assert "cloud-only" in result.output
     assert db_called["n"] == 0
@@ -276,7 +275,7 @@ async def test_list_folders_uses_db_without_creds(monkeypatch: pytest.MonkeyPatc
     cloud_list = AsyncMock(side_effect=AssertionError("no cloud without creds"))
     monkeypatch.setattr("agentcore.folders.credentials.cloud_list_folders", cloud_list)
 
-    result = await ListFoldersTool().execute({}, _ctx())
+    result = await FoldersTool().execute({"action": "list"}, _ctx())
     assert result.success
     assert "FromDB" in result.output
     cloud_list.assert_not_awaited()
@@ -360,7 +359,7 @@ async def test_resolve_folder_cloud_http_path(
     monkeypatch.setattr("agentcore.folders.credentials.cloud_list_folders", _fake_list)
 
     with folders_credentials_scope(folders_creds):
-        result = await ResolveFolderTool().execute({"path": "solo"}, _ctx())
+        result = await FoldersTool().execute({"action": "resolve", "path": "solo"}, _ctx())
     assert result.success
     assert result.display["folder_id"] == "only"
 

@@ -12,7 +12,7 @@ from agentcore.runtime.delegate.graph_append import (
     peek_graph_host,
     register_graph_host,
 )
-from agentcore.runtime.events import EventSink, graph_append, run_plan
+from agentcore.runtime.events import EventSink, run_plan
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 from agentcore.tools.protocol import ToolResult
@@ -95,19 +95,8 @@ def test_sink_registers_host_and_team_marker():
 
 
 def test_sink_prev_run_plan_inserts_team_on_new_execution():
-    """跨回合新图：无 host_message_id，新 eid 插 team；旧 graph_append 仅兼容回放。"""
+    """跨回合新图：无 host_message_id，新 eid 插 team；不再发 graph_append。"""
     sink2 = EventSink(message_id="m2", conversation_id="c")
-    # 旧 journal 回放：graph_append 仍可落 process 锚点
-    sink2.emit(
-        graph_append(
-            execution_id="exec1",
-            host_message_id="m1",
-            append_message_id="m2",
-            added_count=1,
-            roles=["写"],
-            added_run_ids=["r2"],
-        )
-    )
     sink2.emit(
         run_plan(
             execution_id="exec2",
@@ -119,7 +108,7 @@ def test_sink_prev_run_plan_inserts_team_on_new_execution():
         )
     )
     process = sink2.process_timeline() or []
-    assert any(s.get("kind") == "graph_append" and s.get("added_count") == 1 for s in process)
+    assert not any(s.get("kind") == "graph_append" for s in process)
     assert any(s.get("kind") == "team" and s.get("execution_id") == "exec2" for s in process)
     assert peek_graph_host("exec2") == "m2"
 

@@ -21,6 +21,7 @@ export {
   isColdResumeKind,
   isHotGateInteractionKind,
   isHotInteractionKind,
+  isLeftoverInteractionSse,
   isStageInteractionKind,
   kindFromRequiredEvent,
   kindFromResolvedEvent,
@@ -108,7 +109,6 @@ export interface InteractionEntry {
  * - 冷 kind（`pausesTurn && !hot`）恒为假：可操作权威是 InteractionStore cold
  *   pending（ResumePrompt）；侧栏灯由调用方另订 pausedTurns recovery 壳或 cold
  *   pending，不经本函数。
- * - stage（`stage_card`）团队没停 → 不算。
  */
 export function isAwaitingUserEntry(entry: InteractionEntry): boolean {
   if (entry.status !== "pending" && entry.status !== "submitting") return false;

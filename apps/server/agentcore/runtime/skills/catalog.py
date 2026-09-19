@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from agentcore.runtime.skills.ask_kickoff import _ASK_KICKOFF
-from agentcore.runtime.skills.ask_midtask import _ASK_MIDTASK
 from agentcore.runtime.skills.data_file_landing import _DATA_FILE_LANDING
 from agentcore.runtime.skills.debate_and_review import _DEBATE_AND_REVIEW
 from agentcore.runtime.skills.delivery import _DELIVERY
@@ -26,22 +24,6 @@ from agentcore.runtime.skills.run import _RUN
 # Catalog summaries: name-like (what this is), not a 19-way scene classifier.
 # Python len ≤80; HOW lives in the body. ``blurb`` is toolbox-card only.
 _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
-    SystemSkill(
-        name="ask_kickoff",
-        summary="开场提问",
-        blurb="开工前把目标、约束和缺口问清楚",
-        body=_ASK_KICKOFF,
-        requires_tools=("ask_user",),
-        group=GROUP_ORCHESTRATION,
-    ),
-    SystemSkill(
-        name="ask_midtask",
-        summary="途中提问",
-        blurb="做到一半、缺事实或缺拍板时再问人",
-        body=_ASK_MIDTASK,
-        requires_tools=("ask_user",),
-        group=GROUP_ORCHESTRATION,
-    ),
     SystemSkill(
         name="debate_and_review",
         summary="正反辩论",

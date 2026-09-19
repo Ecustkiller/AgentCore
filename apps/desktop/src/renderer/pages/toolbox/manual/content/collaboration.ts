@@ -107,7 +107,7 @@ export const collaborationChapter: ManualChapterContent = {
             },
             {
               title: "在画布打开",
-              desc: "把这一回合放大成全屏：完整协作图、辩论过程、多次接续的对比都在这儿看。看完返回，聊天不受影响。",
+              desc: "把这一回合放大成全屏：完整协作图、辩论过程都在这儿看。看完返回，聊天不受影响。",
             },
             {
               title: "拍板就在聊天里",
@@ -333,7 +333,7 @@ export const collaborationChapter: ManualChapterContent = {
             },
             {
               title: "带现场续派",
-              desc: "产物大致对、只改局部：唤回原队员带完整现场接着改（口语也叫「同人接续」），协作图上挂「续 ×N」，可打开版本对比。不是从零重来。",
+              desc: "产物大致对、只改局部：唤回原队员带完整现场接着改（口语也叫「同人接续」），协作图上挂「续 ×N」，右坞接续链可切各版全文。不是从零重来。",
             },
             {
               title: "辩论进行中说话",

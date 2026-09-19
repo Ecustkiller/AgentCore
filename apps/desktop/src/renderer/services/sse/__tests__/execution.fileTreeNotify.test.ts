@@ -70,6 +70,7 @@ describe("tool_use_end / delivery_status → file tree notify", () => {
     "file_copy",
     "mkdir",
     "file_batch",
+    "archive",
   ])("notifies on successful %s", (tool) => {
     handleExecutionEvent(endEvent(tool), {
       conversationId: CID,

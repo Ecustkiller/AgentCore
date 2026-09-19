@@ -38,6 +38,7 @@ export const FILE_OP_TOOLS: ReadonlySet<string> = new Set([
   "file_copy",
   "mkdir",
   "file_batch",
+  "archive",
   "git",
 ]);
 

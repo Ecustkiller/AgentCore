@@ -73,7 +73,6 @@ class AttentionKind(StrEnum):
     APPROVAL = "approval"
     ESCALATION = "escalation"
     ASK_USER = "ask_user"
-    PLAN_REVIEW = "plan_review"
 
 
 if frozenset(k.value for k in AttentionKind) != ATTENTION_KINDS:
@@ -90,7 +89,6 @@ _KIND_HEADLINE: Mapping[AttentionKind, str] = {
     AttentionKind.APPROVAL: "AI 需要你的授权",
     AttentionKind.ESCALATION: "AI 需要你的决定",
     AttentionKind.ASK_USER: "AI 需要你的回应",
-    AttentionKind.PLAN_REVIEW: "AI 计划待你确认",
 }
 
 PUSH_FALLBACK_BODY = "AI 已停下来等你处理。"

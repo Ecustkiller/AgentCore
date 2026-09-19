@@ -16,10 +16,7 @@ from agentcore.runtime.events import EventSink, message_start
 from agentcore.runtime.facts import TurnPausedFact, pre_pause_from_journal
 from agentcore.runtime.journal.entries import _PROCESS_PREFIX, _RUN_PROCESS_PREFIX
 from agentcore.runtime.loop_controller import LoopController
-from agentcore.runtime.suspension import (
-    PlanReviewSuspension,
-    TurnSuspension,
-)
+from agentcore.runtime.suspension import TurnSuspension
 
 logger = get_logger(__name__)
 
@@ -188,26 +185,9 @@ def mark_controller_after_settle(
     controller_seed: dict[str, Any] | None,
     suspension: TurnSuspension,
 ) -> dict[str, Any] | None:
-    """After plan_review settle, latch post_delegate with batch shape.
+    """Ask-user settles leave the loop-controller seed unchanged.
 
-    Only meaningful on the ``turn_paused`` path (caller gates on ``from_turn_paused``):
-    the snapshot's ``post_delegate`` is False because the pause happened before the
-    delegate/debate tool returned. Ask-user settles leave the seed unchanged.
+    Leftover plan_review frames never reach settle (unknown kind / 410).
     """
-    if not isinstance(suspension, PlanReviewSuspension):
-        return controller_seed
-
-    controller = LoopController()
-    if controller_seed:
-        controller.apply_seed(controller_seed)
-    node_count, has_deps = batch_shape_for_settled_suspension(suspension)
-    controller.mark_post_delegate(node_count=node_count, has_deps=has_deps)
-    seed = controller.export_seed()
-    logger.info(
-        "pipeline.resume_settle_post_delegate",
-        kind=suspension.kind.value,
-        node_count=node_count,
-        has_deps=has_deps,
-        first_batch_substantial=seed.get("first_batch_substantial"),
-    )
-    return seed
+    _ = suspension
+    return controller_seed

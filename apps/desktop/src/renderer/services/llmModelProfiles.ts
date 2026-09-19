@@ -9,7 +9,7 @@ import type { components } from "@/types/api.generated";
  * 账号「模型组合」CRUD（设置·模型配置 / 输入框组合选择器）。
  *
  * 组合 = `{ main, worker?, background?, vision?, reasoning_effort? }`；
- * Worker / 后台空 = 跟随主模型；vision 空 = 组合未配专用识图槽（解析时 main 收图可复用 main，否则 platform VISION_* 或无 reader）。
+ * Worker / 后台空 = 跟随主模型；vision 槽 API 仍在，产品不再用（图走当前主模型）。
  * `reasoning_effort` 空 = 主模型厂商默认；仅官方 token。
  * 账号默认写在 `PUT …/default`；会话引用走 `conversations.model_profile_id`。
  */
@@ -109,8 +109,8 @@ export function slotDisplayName(
 }
 
 /**
- * 组合次要摘要：「主 · Worker」，有覆盖时再附「后台 / 识图」与思考强度官方 token。
- * Worker 空 =「跟随主模型」；后台 / 识图仅在已配置时追加（列表行勿撑宽）。
+ * 组合次要摘要：「主 · Worker」，有覆盖时再附「后台」与思考强度官方 token。
+ * Worker 空 =「跟随主模型」；后台仅在已配置时追加（列表行勿撑宽）。
  * 主模型方言发 reasoning_effort 时附厂商档（空存储 = 目录默认）。
  */
 export function profileSlotSummary(
@@ -134,11 +134,6 @@ export function profileSlotSummary(
       slotDisplayName(profile.background, catalogModels) ||
       profile.background.model;
     parts.push(`后台 ${bg}`);
-  }
-  if (profile.vision?.model) {
-    const vision =
-      slotDisplayName(profile.vision, catalogModels) || profile.vision.model;
-    parts.push(`识图 ${vision}`);
   }
   const effort = resolvedProfileEffort(
     profile,

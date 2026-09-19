@@ -14,8 +14,6 @@ from agentcore.runtime.engine.write_args_clear import (
     project_cleared_write_args,
     write_args_identity,
 )
-from agentcore.runtime.events import plan_review_required
-from agentcore.runtime.events.payloads.interaction import PlanReviewRequiredPayload
 from agentcore.runtime.memory_consult_cache import (
     consulted_memory_cache,
     get_consult_cache,
@@ -91,31 +89,33 @@ async def test_run_ceo_review_uses_llm_json():
     assert review["source"] == "llm"
 
 
-def test_plan_review_required_carries_ceo_review():
-    event = plan_review_required(
-        checkpoint_id="cp1",
-        conversation_id="c1",
-        steps=[{"run_id": "r1", "role": "架构师", "summary": "ok"}],
-        pending=[{"run_id": "r2", "role": "实现"}],
-        ceo_review={
-            "conclusion": "可过",
-            "risks": ["风险"],
-            "suggestions": ["建议"],
-        },
-    )
-    assert event.payload["ceo_review"]["conclusion"] == "可过"
-    PlanReviewRequiredPayload.model_validate(event.payload)
+def test_leftover_plan_review_required_is_unknown_kind():
+    """Live factory / EventType / payload 已退役；存量 kind=plan_review → unknown。"""
+    import pytest
 
+    import agentcore.runtime.events as events_mod
+    import agentcore.runtime.events.payloads.interaction as interaction_payloads
+    from agentcore.runtime.events import EventType
+    from agentcore.runtime.suspension import is_live_suspension_kind, suspension_from_json
 
-def test_plan_review_required_omits_ceo_review_when_absent():
-    event = plan_review_required(
-        checkpoint_id="cp1",
-        conversation_id="c1",
-        steps=[{"run_id": "r1", "role": "A", "summary": "x"}],
-        pending=[],
-    )
-    assert "ceo_review" not in event.payload
-    PlanReviewRequiredPayload.model_validate(event.payload)
+    assert not hasattr(events_mod, "plan_review_required")
+    assert not hasattr(interaction_payloads, "PlanReviewRequiredPayload")
+    assert not hasattr(EventType, "PLAN_REVIEW_REQUIRED")
+    assert is_live_suspension_kind("plan_review") is False
+    with pytest.raises(ValueError, match="unknown suspension kind"):
+        suspension_from_json(
+            {
+                "kind": "plan_review",
+                "message_id": "m1",
+                "conversation_id": "c1",
+                "user_id": "u1",
+                "captain_run_id": "cap",
+                "checkpoint_id": "cp1",
+                "tool_call_id": "tc1",
+                "base_system_prompt": "",
+                "user_message": "go",
+            }
+        )
 
 
 # ── 2. handoff 写参清理（原写工具名 + 参数只留 path，摘要归 tool result）──

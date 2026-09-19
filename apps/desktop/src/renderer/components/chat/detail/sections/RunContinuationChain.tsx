@@ -1,40 +1,29 @@
-import { charCount, outputOf } from "@/components/chat/compare/cells";
 import { Button } from "@/components/ui";
 import type {
   AgentState,
   ContinuationChain,
   Execution,
+  RunNode,
 } from "@/stores/execution";
 import {
   debateBeatFromContext,
   debateBeatLabel,
   isDebateTaggedRun,
 } from "@/stores/execution";
-import { Columns2 } from "lucide-react";
 import { RunStatusDot, Section } from "./shared";
 
-/** 侧面板版本链「对比」深链的预选对：热修编辑链 → 当前版 × 上一版（一眼看这版改了什么），看原始版
- * 时 → 原始 × 最新；辩论链 → undefined（让擂台走自然默认 正 × 反，同侧逐轮 diff 是噪音）。 */
-export function continuationComparePair(
-  chain: ContinuationChain,
-  currentRunId: string,
-): [string, string] | undefined {
-  const vs = chain.versions;
-  const isDebate = vs.some((v) => isDebateTaggedRun(v.run));
-  if (isDebate) return undefined;
-  const i = vs.findIndex((v) => v.run.id === currentRunId);
-  if (i > 0) return [vs[i - 1].run.id, vs[i].run.id];
-  return [vs[0].run.id, vs[vs.length - 1].run.id];
+function outputOf(execution: Execution, run: RunNode): string {
+  const agent = execution.agents.find((a) => a.id === run.agentId);
+  return agent ? agent.outputChunks.join("") : "";
+}
+
+function charCount(s: string): number {
+  return s.replace(/\s+/g, "").length;
 }
 
 /**
- * 轮次 / 版本 导航 (辩论逐轮 / 定向唤回「修订 vN」): the run's version chain as a horizontal
- * track — 第 N 轮 (a debate, labelled off the wire `round`) or vN (a 热修), the current version
- * highlighted, every other version a click that jumps the panel to it (上一版↔下一版 without
- * leaving the detail). The panel-scoped twin of the compare view's version track
- * ({@link import("@/components/chat/compare/ContinuationOverview").ContinuationOverview}), reusing the
- * same {@link continuationChains} projection so both read one source. A 热修 edit chip also shows its
- * 改动量 (Δ 字 vs 上一版) so the演进 reads at a glance; the 对比 deep-link opens the full diff.
+ * 轮次 / 版本导航（辩论逐轮 / 同人接续「续 ×N」）：本 run 的版本链横轨。
+ * 当前版高亮，点其它版在右坞换人（不离开详情）。热修帧旁标 Δ 字。
  */
 export function ContinuationChainSection({
   chain,
@@ -42,33 +31,16 @@ export function ContinuationChainSection({
   agents,
   execution,
   onSelect,
-  onCompare,
 }: {
   chain: ContinuationChain;
   currentRunId: string;
   agents: AgentState[];
   execution: Execution;
   onSelect: (runId: string, role?: string) => void;
-  /** 深链画布「对比」透镜看逐版/逐轮改动 (§4.2)；无会话 id 时省略。 */
-  onCompare?: () => void;
 }) {
   const isDebate = chain.versions.some((v) => isDebateTaggedRun(v.run));
   return (
-    <Section
-      title={isDebate ? "轮次" : "接续"}
-      action={
-        onCompare && (
-          <Button
-            variant="ghost"
-            onClick={onCompare}
-            className="h-6 shrink-0 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
-          >
-            <Columns2 size={12} />
-            {isDebate ? "对比各轮" : "对比接续"}
-          </Button>
-        )
-      }
-    >
+    <Section title={isDebate ? "轮次" : "接续"}>
       <div className="flex gap-1.5 overflow-x-auto pb-1">
         {chain.versions.map(({ version, run }, idx) => {
           const current = run.id === currentRunId;

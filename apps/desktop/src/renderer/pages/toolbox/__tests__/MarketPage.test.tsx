@@ -46,6 +46,7 @@ const ROW: SkillStoreListing = {
   documentId: "doc-1",
   installDocumentId: null,
   status: "published",
+  offersTools: [],
 };
 
 function shelf(items: SkillStoreListing[]) {
@@ -164,6 +165,16 @@ describe("市场页", () => {
     expect(screen.getAllByRole("button", { name: "民事答辩状" })).toHaveLength(
       1,
     );
+  });
+
+  it("绑了手脚的货架卡打工具，名单不铺上卡", async () => {
+    vi.mocked(listSkillStore).mockResolvedValue(
+      shelf([{ ...ROW, offersTools: ["host"] }]),
+    );
+    renderPage();
+    const card = await screen.findByRole("button", { name: "合同审查" });
+    expect(within(card).getByText("工具")).toBeTruthy();
+    expect(within(card).queryByText("host")).toBeNull();
   });
 
   it("用户货按组出条", async () => {

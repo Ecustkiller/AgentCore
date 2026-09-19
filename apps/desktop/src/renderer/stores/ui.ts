@@ -98,22 +98,17 @@ interface UIState {
 }
 
 /** Full-screen turn detail view (`#/conversations/:id/turn/:turnId?view=`). */
-export type TurnDetailView = "graph" | "debate" | "compare";
+export type TurnDetailView = "graph" | "debate";
 
 /** Build the hash-route path for a turn's full-screen detail page. */
 export function turnDetailPath(
   conversationId: string,
   turnId: string,
   view?: TurnDetailView,
-  comparePair?: [string, string],
 ): string {
   const path = `/conversations/${conversationId}/turn/${turnId}`;
   const params = new URLSearchParams();
   if (view) params.set("view", view);
-  if (comparePair) {
-    params.set("a", comparePair[0]);
-    params.set("b", comparePair[1]);
-  }
   const qs = params.toString();
   return qs ? `${path}?${qs}` : path;
 }

@@ -95,7 +95,7 @@ class EvidencePack:
     motion: str = ""
     completeness: PackCompleteness = "empty"
     notes: str = ""
-    # 台账登记后回填的 #eN（source_id → eid）；非 wire 必填。
+    # 台账登记后回填的 #rN（source_id → eid）；非 wire 必填。
     ledger_ids: dict[str, str] = field(default_factory=dict)
 
     def has_usable_body(self) -> bool:
@@ -419,8 +419,8 @@ def format_evidence_pack_index(pack: EvidencePack) -> str:
             f"- {eid} · {sid}" for sid, eid in pack.ledger_ids.items()
         )
         ledger_lines = (
-            "\n\n【证据包预登记台账·引用须用下列 #eN】\n"
-            "引用附件事实写成【已核实·#eN】（id 见下；双方共享，禁各造私证）。\n"
+            "\n\n【证据包预登记台账·引用须用下列 #rN】\n"
+            "引用附件事实写成【已核实·#rN】（id 见下；双方共享，禁各造私证）。\n"
             f"{mapped}"
         )
     incomplete_banner = format_evidence_completeness_notice(

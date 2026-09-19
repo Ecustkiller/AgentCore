@@ -18,8 +18,8 @@ from agentcore.runtime.resolve.attachment_conversation import (
 from agentcore.runtime.resolve.attachment_images import (
     _IMAGE_NATIVE_INDEX,
     _build_native_image_part,
+    _image_unsupported_block,
     _is_image_attachment,
-    _read_image_attachment_block,
 )
 from agentcore.workspace.attachment_parse import (
     MARKITDOWN_EXTENSIONS,
@@ -265,10 +265,8 @@ async def _build_attachment_prompt(
     does not tell the model to call it.
     Resident **image** attachments: when ``main_native_vision`` and
     ``native_image_parts`` is provided, bytes become multimodal ``image_url``
-    parts (no VisionReader); otherwise eye→text via ``vision_reader`` when
-    wired; without a reader the block states the main model does not accept
-    images and no vision fallback is configured (never silent path-only,
-    never「用 code_execute 开图」as primary).
+    parts on the current main model; otherwise an honest「当前主模型不收图」
+    note (never silent path-only, never a sidecar eye, never「用 run 开图」).
     Directories carry a recursive file listing (paths only);
     ``kind=conversation`` is **server deep-read** via ``log_export``
     (client shallow ``text`` is ignored). ``kind=document`` pins an on-demand
@@ -280,6 +278,7 @@ async def _build_attachment_prompt(
     """
     if not attachments:
         return AttachmentPrompt(None, (), None)
+    del vision_reader, cost_sink, vision_parent_run_id
 
     blocks: list[str] = []
     slots: list[str] = []
@@ -413,7 +412,7 @@ async def _build_attachment_prompt(
             add_block(block)
         elif binary or (ws_path and not text):
             # Binary (or empty-body resident / preparse failed): path only —
-            # except resident images → native multimodal or VisionReader eye→text.
+            # except resident images → native multimodal or an honest note.
             path = ws_path or att.get("path") or name
             if ws_path:
                 resident = True
@@ -445,19 +444,8 @@ async def _build_attachment_prompt(
                             "无法读取驻留图片字节，本回合未把该图发给主模型。"
                         )
                     continue
-                if vision_reader is None or backend is None:
-                    has_image_unconfigured = True
-                add_block(
-                    await _read_image_attachment_block(
-                        name=name,
-                        path=path,
-                        ws_path=ws_str,
-                        vision_reader=vision_reader,
-                        backend=backend,
-                        cost_sink=cost_sink,
-                        parent_run_id=vision_parent_run_id,
-                    )
-                )
+                has_image_unconfigured = True
+                add_block(_image_unsupported_block(name=name, path=path))
                 continue
             if ext in MARKITDOWN_EXTENSIONS:
                 has_office_unparsed = True
@@ -549,8 +537,8 @@ async def _build_attachment_prompt(
         ),
         image_note=(
             " Image attachments: the current main model does not accept images "
-            "and no vision fallback is configured — do not treat a bare path as "
-            "a reading, and do not default to run to open images."
+            "— do not treat a bare path as a reading, and do not default to "
+            "run to open images."
             if has_image_unconfigured
             else ""
         ),

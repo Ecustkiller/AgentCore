@@ -22,13 +22,13 @@ const EVIDENCE_ICON = "mr-[0.15em] inline-block size-[1em] align-[-0.125em]";
 /**
  * Sentence-level evidence mark for a debater's factual claim (举证责任 P3 + 证据台账 M1) —
  * rendered by {@link import("@/lib/remarkEvidence").remarkEvidence} in place of a
- * `【已核实·<出处|#eN>】` / `【待核实·推断】` marker inside debate speech markdown.
+ * `【已核实·<出处|#rN>】` / `【待核实·推断】` marker inside debate speech markdown.
  *
  * Box model is Primer Label-in-comment (`inline-block`) with a Font Awesome
  * inline icon (`vertical-align: -0.125em`), not a flex chip — flex baseline
  * would drop the mark below surrounding CJK.
  *
- * - **已核实 (verified)** → success tone. Note 含 `#eN` 且台账命中 → 文案换成
+ * - **已核实 (verified)** → success tone. Note 含 `#rN` 且台账命中 → 文案换成
  *   site/title，点击开溯源 Popover；未命中 / 旧自由文本 → 今日纯文案（不可点）。
  *   不叠域名档位徽标（官方 / 弱源 / 待评）——用户面只留已核实 / 待核实。
  * - **待核实 (unverified)** → muted tone（非琥珀）。

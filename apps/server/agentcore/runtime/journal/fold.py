@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from agentcore.runtime.events import _JOURNAL_SURFACE_TYPES, EventType, FinishReason
-from agentcore.runtime.events.payloads.process import RETIRED_PROCESS_STEP_KINDS
-from agentcore.runtime.events.types import RETIRED_EVENT_TYPE_VALUES
+from agentcore.runtime.events.payloads.process import PROCESS_STEP_KINDS
+from agentcore.runtime.events.types import is_live_event_type
 from agentcore.runtime.facts import EXECUTION_ONLY_KINDS, FactKind, pre_pause_from_journal
 from agentcore.runtime.runs.types import RunKind
 from agentcore.runtime.terminal import RUN_PRODUCT_EVENT_TYPES
@@ -63,9 +63,9 @@ def _has_team_marker(steps: list[dict[str, Any]], execution_id: str) -> bool:
 
 
 def _append_process_step(steps: list[dict[str, Any]], step: dict[str, Any]) -> None:
-    """Append a non-tool process step (retired kinds skipped)."""
+    """Append a non-tool process step (kinds not in the live union skipped)."""
     kind = step.get("kind")
-    if kind in RETIRED_PROCESS_STEP_KINDS:
+    if kind not in PROCESS_STEP_KINDS:
         return
     if kind == "team":
         eid = step.get("execution_id") or ""
@@ -245,8 +245,6 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
             # Execution-level facts carry engine-rebuild state, not client-foldable
             # display events — skip them so they never leak into runs.events.
             continue
-        elif kind in RETIRED_EVENT_TYPE_VALUES:
-            continue
         elif kind.startswith(_PROCESS_PREFIX):
             suffix = kind[len(_PROCESS_PREFIX) :]
             if suffix == "tool":
@@ -264,9 +262,13 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
                 suffix = kind[len(_RUN_PROCESS_PREFIX) :]
                 if suffix == "tool":
                     _upsert_tool_step(lane, step)
+                elif step.get("kind") not in PROCESS_STEP_KINDS:
+                    continue
                 else:
                     lane.append(step)
         else:
+            if not is_live_event_type(kind):
+                continue
             # Remember each agent (worker / revision) run's agent_id so the synthetic
             # delta block can be attributed (the captain run_started is kind=captain →
             # excluded, so its message_final never becomes a run-node delta). The captain
@@ -381,10 +383,12 @@ def window_from_journal(
       opening ``user`` captured when that run assembled its task-prompt. Preferred
       whenever present so a worker is never falsely headed by the CEO turn prompt.
     - ``turn_started`` → the **captain** head: a ``system`` message (the verbatim
-      captured prompt) + the ``user`` message, with ``history`` (prior turns —
-      supplied by the caller, since the facts carry only its length) spliced between
-      them exactly as the executor builds it. Used only when the target has no
-      ``run_head`` (captain / legacy unscoped fold).
+      frozen prompt) + optional ``[系统提示]`` envelope user + the real ``user``
+      message, with ``history`` (prior turns — supplied by the caller, since the
+      facts carry only its length) spliced between system and envelope exactly as
+      the executor builds it. Used only when the target has no ``run_head``
+      (captain / legacy unscoped fold). Journals without ``turn_envelope`` fold
+      as before (no extra user).
     - each ``llm_call`` of the target run that carried ``tool_calls`` → the ``assistant``
       message (``content`` / ``reasoning_content`` echoed verbatim — DeepSeek thinking
       mode 400s without the reasoning on a tool-call turn, see 平台LLM接入 · DeepSeek
@@ -474,10 +478,16 @@ def window_from_journal(
         window.append(LLMMessage(role="system", content=run_head.get("system_prompt") or ""))
         window.append(LLMMessage(role="user", content=run_head.get("user_message") or ""))
     elif use_turn_started and started is not None:
-        window.append(LLMMessage(role="system", content=started.get("system_prompt") or ""))
-        if history:
-            window.extend(history)
-        window.append(LLMMessage(role="user", content=started.get("user_message") or ""))
+        from agentcore.runtime.resolve.prompt.envelope import opening_ceo_messages
+
+        window.extend(
+            opening_ceo_messages(
+                system_prompt=started.get("system_prompt") or "",
+                history=history,
+                turn_envelope=started.get("turn_envelope") or "",
+                user_content=started.get("user_message") or "",
+            )
+        )
     elif started is None and run_head is None and not target:
         return None
 

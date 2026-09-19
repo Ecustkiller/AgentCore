@@ -28,10 +28,10 @@ from agentcore.runtime.journal import runs_from_entries, window_from_journal
 
 
 def _paused_journal() -> list[dict]:
-    """A realistic pause-at-delegate journal: a completed tool round (with a full-text
-    citation-annotated result + an injected note) then a suspended delegate (no tool_call
+    """A realistic pause-at-ask_user journal: a completed tool round (with a full-text
+    citation-annotated result + an injected note) then a suspended ask_user (no tool_call
     fact), interleaving the captain's execution facts with a display ``tool_use_start`` and
-    the trailing ``plan_review_required`` card — every payload shape the round trip must
+    the trailing ``checkpoint_required`` card — every payload shape the round trip must
     preserve byte-for-byte."""
     annotated = "结果正文\n\n[来源编号] 上述来源对应的引用号：[1]=https://example.com/a"
     return [
@@ -82,22 +82,22 @@ def _paused_journal() -> list[dict]:
                 {
                     "id": "d1",
                     "type": "function",
-                    "function": {"name": "delegate", "arguments": "{}"},
+                    "function": {"name": "ask_user", "arguments": "{}"},
                 }
             ],
             finish_reason="tool_calls",
         )
         .to_fact()
         .entry(),
-        # suspended INSIDE delegate: a display tool_use_start but NO tool_call fact.
+        # suspended INSIDE ask_user: a display tool_use_start but NO tool_call fact.
         {
             "kind": "tool_use_start",
-            "payload": {"tool_call_id": "d1", "tool_name": "delegate"},
+            "payload": {"tool_call_id": "d1", "tool_name": "ask_user"},
             "ts": None,
         },
         {
-            "kind": "plan_review_required",
-            "payload": {"checkpoint_id": "ck1", "steps": [], "pending": []},
+            "kind": "checkpoint_required",
+            "payload": {"checkpoint_id": "ck1", "question": "A 还是 B?"},
             "ts": None,
         },
     ]
@@ -128,7 +128,7 @@ def _expected_window(annotated: str) -> list[LLMMessage]:
                 ToolCall(
                     id="d1",
                     type="function",
-                    function=ToolCallFunction(name="delegate", arguments="{}"),
+                    function=ToolCallFunction(name="ask_user", arguments="{}"),
                 )
             ],
             reasoning_content=None,
@@ -156,17 +156,17 @@ async def test_journal_round_trips_through_postgres_and_window_folds(session_fac
     assert loaded == entries
 
     # THE GATE: the window folds the same from the DB-loaded journal as from the in-memory
-    # one — and equals the hand-computed captain transcript (suspended delegate has no tool
+    # one — and equals the hand-computed captain transcript (suspended ask_user has no tool
     # message; the completed search keeps its full-text annotated result; the note folds in).
     in_memory = window_from_journal(entries)
     from_db = window_from_journal(loaded)
     assert from_db == in_memory
     assert from_db == _expected_window(annotated)
 
-    # DISPLAY side also survives: the plan_review card + the tool cards project back.
+    # DISPLAY side also survives: the ask_user card + the tool cards project back.
     runs = runs_from_entries(loaded)
     assert runs is not None
-    assert any(e["type"] == "plan_review_required" for e in runs["events"])
+    assert any(e["type"] == "checkpoint_required" for e in runs["events"])
 
 
 async def test_find_latest_multi_agent_execution(session_factory):
@@ -314,12 +314,12 @@ async def test_replace_live_shrinks_occupancy_and_keeps_overflow(session_factory
     live = [
         {"kind": "run_plan", "payload": {"execution_id": "e1"}, "ts": "t0"},
         {
-            "kind": "plan_review_resolved",
+            "kind": "checkpoint_resolved",
             "payload": {"checkpoint_id": "ck1", "decision": "continue"},
             "ts": "t1",
         },
         {
-            "kind": "plan_review_resolved",
+            "kind": "checkpoint_resolved",
             "payload": {"checkpoint_id": "ck1", "decision": "stop"},
             "ts": "t2",
         },

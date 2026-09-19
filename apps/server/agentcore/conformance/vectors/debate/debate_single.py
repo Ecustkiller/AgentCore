@@ -38,16 +38,10 @@ def _multi_agent_debate() -> list[SSEEvent]:
     多出一个 ``_r1_cx_{key}`` 质询作答 run——faithful：作答是 continue_run，run_started 携 revision=2 +
     原辩手 stance/group/round）；``scores`` = 裁判本轮给各方的三维记分 + 罚分 + 净分；``brief.decisive``
     = 据逐轮记分推导的胜负手。三者均为附加字段（settledModel 据 answer_run_id 取回作答、据 scores/
-    decisive 渲染比分与胜负手），载荷恒带空集合/空对象。
-
-    亦承载【结辩收束 P4】端到端契约：收场 ``closings`` = 辩已辩尽后各方的结辩陈词（身份 verbatim 进载荷、
-    陈词全文随 ``run_id`` 的 continue_run 事件走，故各方在质询后再多一个 ``_closing_{key}`` 结辩 run——
-    faithful：结辩是 continue_run，run_started 携 revision=3 + 原辩手 stance/group/round）；settledModel 据
-    ``closings[*].run_id`` 取回陈词全文渲染「结辩陈词」区。载荷恒带空集合/空对象。"""
+    decisive 渲染比分与胜负手），载荷恒带空集合/空对象。新场不跑结辩，``closings`` 空列表。"""
     cap, mod = "captain1", "debate_mod1"
     pro_run, con_run = f"{mod}_r1_pro", f"{mod}_r1_con"
     pro_cx, con_cx = f"{mod}_r1_cx_pro", f"{mod}_r1_cx_con"
-    pro_closing, con_closing = f"{mod}_closing_pro", f"{mod}_closing_con"
     mod_agents, mod_runs = _moderator_agents_runs(mod, cap, "主持正反辩论：是否采用方案 A")
     debater_agents = _pro_con_debater_agents()
     debater_runs = _pro_con_debater_runs(
@@ -185,12 +179,7 @@ def _multi_agent_debate() -> list[SSEEvent]:
                 },
             },
         ],
-        # 结辩收束（P4）：辩已辩尽后各方的结辩陈词（身份 verbatim 进载荷、陈词全文随 run_id 的 run 走），
-        # settledModel 据 closings[*].run_id 取回渲染「结辩陈词」区。仅认真辩透 + 对抗形态开启。
-        "closings": [
-            {"key": "pro", "name": "支持方", "run_id": pro_closing, "ok": True},
-            {"key": "con", "name": "反对方", "run_id": con_closing, "ok": True},
-        ],
+        "closings": [],
         "brief": {
             "crux": "方案 A 的风险是否可控",
             "strongest_points": {"pro": "收益显著且可量化", "con": "风险敞口缺乏兜底"},
@@ -349,76 +338,6 @@ def _multi_agent_debate() -> list[SSEEvent]:
             con_cx,
             output_summary="反对方质询作答完成",
             duration_ms=620,
-            role="member",
-            model="deepseek-v4-flash",
-            usage=_USAGE,
-            cost=_COST,
-        ),
-        # 结辩收束（P4）：质询后、主持人终审前，各方 continue_run 做结辩陈词（faithful：结辩是续写，
-        # run_started 携 revision=3；run_context 首块 task=closing_task 逐字孪生 + closing 通道纯环节标记）。
-        run_started(
-            pro_closing, pro_closing, parent_run_id=mod, continues_run_id=pro_run,
-            stance="pro", group="debate:debate", round_no=1, side_key="pro",
-        ),
-        run_context(
-            pro_closing,
-            pro_closing,
-            [
-                _ctx_block(
-                    "task",
-                    "结辩环节",
-                    "## 结辩环节（本场辩论已充分交锋，现在请你做【结辩陈词】）\n"
-                    "这是你的**最后陈词**，不是新一轮立论——请【只讲胜负手】；"
-                    "【不得引入任何新论据 / 新事实 / 新案例】。直接输出你的结辩陈词。",
-                ),
-                _ctx_block("closing", "结辩环节", "本场辩论已充分交锋，现请做结辩陈词。"),
-            ],
-        ),
-        run_output_delta(
-            pro_closing,
-            pro_closing,
-            "结辩：方案 A 首年降本可核实【已核实·2024成本审计】，尾部风险有熔断兜底、"
-            "触发即回滚可控——收益确定、风险有解，应有条件采用。",
-        ),
-        run_completed(
-            pro_closing,
-            pro_closing,
-            output_summary="支持方结辩完成",
-            duration_ms=520,
-            role="member",
-            model="deepseek-v4-flash",
-            usage=_USAGE,
-            cost=_COST,
-        ),
-        run_started(
-            con_closing, con_closing, parent_run_id=mod, continues_run_id=con_run,
-            stance="con", group="debate:debate", round_no=1, side_key="con",
-        ),
-        run_context(
-            con_closing,
-            con_closing,
-            [
-                _ctx_block(
-                    "task",
-                    "结辩环节",
-                    "## 结辩环节（本场辩论已充分交锋，现在请你做【结辩陈词】）\n"
-                    "这是你的**最后陈词**，不是新一轮立论——请【只讲胜负手】；"
-                    "【不得引入任何新论据 / 新事实 / 新案例】。直接输出你的结辩陈词。",
-                ),
-                _ctx_block("closing", "结辩环节", "本场辩论已充分交锋，现请做结辩陈词。"),
-            ],
-        ),
-        run_output_delta(
-            con_closing,
-            con_closing,
-            "结辩：对方的收益量化口径始终未含尾部风险【待核实·推断】，双写不一致窗口"
-            "【已核实·内部SRE复盘】未有硬兜底——风险未对冲前不宜全量。",
-        ),
-        run_completed(
-            con_closing,
-            con_closing,
-            output_summary="反对方结辩完成",
-            duration_ms=540,
             role="member",
             model="deepseek-v4-flash",
             usage=_USAGE,

@@ -1,10 +1,13 @@
 /**
- * Session-root write-grant confirm (organize / attach_rw).
+ * Session-root grant confirm (readonly / organize / attach_rw).
  *
- * Read-only mounts stay silent. Write upgrades use a native system dialog
- * (same posture as execGate confirmDanger: cancel is default, Esc refuses).
- * Worker-triggered grants go through this IPC path — not CEO ask_user.
+ * Well-known Desktop/Downloads/Documents and already-sufficient session roots
+ * stay silent. First mint of any other readonly abs path uses a native system
+ * dialog (same posture as execGate: cancel is default, Esc refuses). Write
+ * upgrades always confirm. Worker-triggered grants go through this IPC path —
+ * not CEO ask_user.
  */
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { BrowserWindow, dialog } from "electron";
 
 export type SessionRootMode = "readonly" | "organize" | "attach_rw";
@@ -23,10 +26,59 @@ export function sessionModeCovers(
   return (have ? RANK[have] : -1) >= RANK[need];
 }
 
+/** True when ``absPath`` is a well-known inbox root or a file/dir under one. */
+export function absIsUnderAnyRoot(absPath: string, roots: string[]): boolean {
+  const abs = resolve(absPath);
+  for (const root of roots) {
+    if (!root) continue;
+    const r = resolve(root);
+    const rel = relative(r, abs);
+    if (rel === "") return true;
+    if (!rel.startsWith("..") && !isAbsolute(rel)) return true;
+    // Windows: relative("C:\\a", "C:\\a\\b") → "b"; outside → "..\\…"
+    if (rel === ".." || rel.startsWith(`..${sep}`)) continue;
+  }
+  return false;
+}
+
+export function grantNeedsConfirm(opts: {
+  mode: SessionRootMode;
+  haveMode: SessionRootMode | undefined;
+  wellKnown?: string | null;
+  absUnderInbox: boolean;
+}): boolean {
+  if (sessionModeCovers(opts.haveMode, opts.mode)) return false;
+  if (opts.mode === "readonly" && (opts.wellKnown || opts.absUnderInbox)) {
+    return false;
+  }
+  return true;
+}
+
 function activeWindow(): BrowserWindow | null {
   return (
     BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
   );
+}
+
+/** Native readonly-grant dialog. Default / Esc = 取消. */
+export async function confirmFolderReadGrant(opts: {
+  displayLabel: string;
+}): Promise<boolean> {
+  const win = activeWindow();
+  const box = {
+    type: "question" as const,
+    buttons: ["取消", "允许只读"],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    title: "AgentCore",
+    message: "允许只读访问该文件夹？",
+    detail: `${opts.displayLabel}\n本对话可读取其中的文件，不能改原件。仅本次对话。`,
+  };
+  const { response } = win
+    ? await dialog.showMessageBox(win, box)
+    : await dialog.showMessageBox(box);
+  return response === 1;
 }
 
 /** Native write-grant dialog. Default / Esc = 取消. */

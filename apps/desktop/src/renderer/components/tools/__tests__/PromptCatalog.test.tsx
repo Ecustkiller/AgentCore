@@ -303,6 +303,7 @@ describe("PromptCatalog 概览", () => {
           body: "run-how-body",
           group: "工具",
           blurb: "",
+          requires_tools: ["run"],
         },
         {
           name: "staffing",
@@ -341,6 +342,7 @@ describe("PromptCatalog 概览", () => {
           body: "r",
           group: "工具",
           blurb: "",
+          requires_tools: ["run"],
         },
         {
           name: "staffing",
@@ -373,6 +375,14 @@ describe("PromptCatalog 概览", () => {
     expect(within(onDemandRail()).queryByText("编排")).toBeNull();
     expect(within(onDemandRail()).getByText("CEO")).toBeTruthy();
     expect(previewText(onDemandRail(), "跑命令 / 启服")).toBeTruthy();
+    expect(
+      within(screen.getByTestId("prompt-tile-skill:run")).getByText("工具"),
+    ).toBeTruthy();
+    expect(
+      within(screen.getByTestId("prompt-tile-skill:staffing")).queryByText(
+        "工具",
+      ),
+    ).toBeNull();
   });
 
   it("无官方 HOW 时不出现官方货架块", async () => {
@@ -435,6 +445,7 @@ describe("PromptCatalog 概览", () => {
         installDocumentId: "d1",
         status: "published",
         group: "legal",
+        offersTools: [],
       },
     ]);
     vi.mocked(getSkillCatalog).mockResolvedValue({
@@ -885,10 +896,11 @@ describe("PromptCatalog 工具与连接器", () => {
     expect(screen.queryByRole("heading", { name: "工具" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "网络" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "出厂项" })).toBeNull();
-    const dialog = await openReadDialog(alwaysRail(), "web_search");
-    expect(screen.getByRole("heading", { name: "web_search" })).toBeTruthy();
-    expect(within(alwaysRail()).getByText("web_search")).toBeTruthy();
-    expect(within(onDemandRail()).queryByText("web_search")).toBeNull();
+    const dialog = await openReadDialog(alwaysRail(), "联网检索");
+    expect(screen.getByRole("heading", { name: "联网检索" })).toBeTruthy();
+    expect(within(alwaysRail()).getByText("联网检索")).toBeTruthy();
+    expect(within(onDemandRail()).queryByText("联网检索")).toBeNull();
+    expect(within(alwaysRail()).queryByText("web_search")).toBeNull();
     expect(
       within(screen.getByTestId("prompt-tile-tool:web_search")).queryByText(
         "开场即用",
@@ -899,21 +911,29 @@ describe("PromptCatalog 工具与连接器", () => {
         "官方",
       ),
     ).toBeTruthy();
+    expect(
+      within(screen.getByTestId("prompt-tile-tool:web_search")).getByText(
+        "工具",
+      ),
+    ).toBeTruthy();
     expect(within(dialog).queryByRole("button", { name: "返回" })).toBeNull();
     const guide = screen.getByTestId("tool-face-guide");
+    expect(guide.textContent).toContain("web_search");
     expect(guide.textContent).toContain("联网检索：给出查询词。");
     expect(guide.textContent).not.toMatch(/全员/);
     expect(within(dialog).queryByRole("tab", { name: "源码" })).toBeNull();
     expect(within(dialog).queryByRole("tab", { name: "说明" })).toBeNull();
     expect(within(dialog).getByText("官方")).toBeTruthy();
     expect(within(dialog).getByText("开场即用")).toBeTruthy();
+    expect(within(dialog).getByText("工具")).toBeTruthy();
     expect(screen.getByText("query")).toBeTruthy();
     expect(screen.getByText("要填")).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "关闭" }));
-    const hostDialog = await openReadDialog(onDemandRail(), "host");
-    expect(screen.getByRole("heading", { name: "host" })).toBeTruthy();
-    expect(within(onDemandRail()).getByText("host")).toBeTruthy();
-    expect(within(alwaysRail()).queryByText("host")).toBeNull();
+    const hostDialog = await openReadDialog(onDemandRail(), "本机");
+    expect(screen.getByRole("heading", { name: "本机" })).toBeTruthy();
+    expect(within(onDemandRail()).getByText("本机")).toBeTruthy();
+    expect(within(alwaysRail()).queryByText("本机")).toBeNull();
+    expect(within(hostDialog).getByText("host")).toBeTruthy();
     expect(within(hostDialog).queryByText("没有要填的参数")).toBeNull();
     expect(within(hostDialog).getByText("官方")).toBeTruthy();
     expect(within(hostDialog).getByText("查阅后启用")).toBeTruthy();
@@ -921,7 +941,7 @@ describe("PromptCatalog 工具与连接器", () => {
     expect(within(hostDialog).getByText("队员")).toBeTruthy();
     expect(
       within(screen.getByTestId("prompt-rail-on-demand-tools")).getByText(
-        "host",
+        "本机",
       ),
     ).toBeTruthy();
     expect(screen.queryByTestId("prompt-rail-resident-tools")).toBeNull();
@@ -936,7 +956,7 @@ describe("PromptCatalog 工具与连接器", () => {
     });
     const dialog = await screen.findByRole("dialog");
     expect(
-      within(dialog).getByRole("heading", { name: "web_search" }),
+      within(dialog).getByRole("heading", { name: "联网检索" }),
     ).toBeTruthy();
     expect(within(dialog).queryByRole("button", { name: "返回" })).toBeNull();
     expect(screen.getByTestId("tool-face-guide")).toBeTruthy();
@@ -1047,9 +1067,9 @@ describe("PromptCatalog 工具与连接器", () => {
     expect(alert.textContent).toBe("读配置失败");
     expect(alert.className).toContain("text-muted-foreground");
     expect(alert.className).not.toContain("destructive");
-    const dialog = await openReadDialog(alwaysRail(), "web_search");
+    const dialog = await openReadDialog(alwaysRail(), "联网检索");
     expect(
-      within(dialog).getByRole("heading", { name: "web_search" }),
+      within(dialog).getByRole("heading", { name: "联网检索" }),
     ).toBeTruthy();
   });
 

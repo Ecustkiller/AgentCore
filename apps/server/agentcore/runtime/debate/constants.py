@@ -40,8 +40,6 @@ CX_LENGTH_HINT = (
 # 展示名：键必须穷尽 DebateForm（权威成员集）；漏键 / 多键在 import 时炸。
 FORM_LABELS: dict[DebateForm, str] = {
     DebateForm.DEBATE: "正反辩论",
-    DebateForm.RED_TEAM: "红队挑刺",
-    DebateForm.ROUNDTABLE: "多方圆桌",
 }
 if set(FORM_LABELS) != set(DebateForm):
     missing = set(DebateForm) - set(FORM_LABELS)
@@ -50,15 +48,11 @@ if set(FORM_LABELS) != set(DebateForm):
         f"FORM_LABELS must cover DebateForm exactly; missing={missing!r} extra={extra!r}"
     )
 
-# 回放 / wire 全员（= DebateForm 声明序）。
+# 产品入口与 wire 同集（仅正反）。
 DEBATE_FORM_VALUES: tuple[str, ...] = tuple(m.value for m in DebateForm)
-
-# 产品入口只认正反。工具 schema 默认不暴露 form；若加回该字段，enum 须从此集派生。
-# 扩 DebateForm 不自动扩本集、也不自动加回模型面字段。
 DEBATE_SCHEMA_FORM_VALUES: tuple[str, ...] = (DebateForm.DEBATE.value,)
-if not set(DEBATE_SCHEMA_FORM_VALUES).issubset(set(DEBATE_FORM_VALUES)):
-    schema_extra = set(DEBATE_SCHEMA_FORM_VALUES) - set(DEBATE_FORM_VALUES)
+if set(DEBATE_SCHEMA_FORM_VALUES) != set(DEBATE_FORM_VALUES):
     raise RuntimeError(
-        "DEBATE_SCHEMA_FORM_VALUES must be a subset of DEBATE_FORM_VALUES; "
-        f"extra={schema_extra!r}"
+        "DEBATE_SCHEMA_FORM_VALUES must equal DEBATE_FORM_VALUES; "
+        f"schema={DEBATE_SCHEMA_FORM_VALUES!r} wire={DEBATE_FORM_VALUES!r}"
     )

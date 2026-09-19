@@ -3,7 +3,6 @@ import { conversationKeys, folderKeys } from "@/lib/queryKeys";
 import { ConversationsPage } from "@/pages/conversations/ConversationsPage";
 import {
   CONVERSATIONS_PREVIEW_SCENES,
-  buildCollaborationTimelineMock,
   buildConversationsPreviewArchived,
   buildConversationsPreviewConversationTrash,
   buildConversationsPreviewGrouped,
@@ -29,17 +28,6 @@ function seedPreviewCaches() {
     conversationKeys.trash,
     buildConversationsPreviewConversationTrash(),
   );
-  queryClient.setQueryData(
-    conversationKeys.collaborationTimeline(PREVIEW_FOLDER_ID),
-    buildCollaborationTimelineMock(PREVIEW_FOLDER_ID),
-  );
-  queryClient.setQueryData(["folder-dossier-snapshot", PREVIEW_FOLDER_ID], {
-    research: [
-      "AgentCore/文档/research/法律透镜报告.md",
-      "AgentCore/文档/research/汇总与命题卡.md",
-    ],
-    debate: ["AgentCore/文档/debate/brief.md"],
-  });
 }
 
 /**
@@ -107,9 +95,7 @@ export function ConversationsPreviewPage() {
             focusArchived={selected === "conversations-archived"}
             focusTrash={selected === "conversations-trash"}
             focusFolderId={
-              selected === "conversations-collaboration"
-                ? PREVIEW_FOLDER_ID
-                : null
+              selected === "conversations-folder" ? PREVIEW_FOLDER_ID : null
             }
           />
         )}

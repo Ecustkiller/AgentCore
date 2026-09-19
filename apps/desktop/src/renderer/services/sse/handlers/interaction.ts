@@ -8,6 +8,7 @@ import {
   defFromTimelineProcess,
   interactionChannelEventTypes,
   isColdResumeKind,
+  isLeftoverInteractionSse,
   kindFromRequiredEvent,
   useInteractionStore,
   wireFor,
@@ -18,6 +19,7 @@ import {
   type InteractionOrphanedPayload,
   isInteractionOrphanedEvent,
 } from "@/types/interactionExt";
+import { INTERACTION_KIND_WIRE } from "@agentcore/contract-types";
 import { flushPendingContent } from "../contentBuffer";
 import { flushPendingFrames } from "../execFrameBuffer";
 import { coldBindMessageId, execMessageId } from "../helpers";
@@ -66,9 +68,6 @@ function stampByProcessKind(
     case "checkpoint":
       store.stampCheckpointMarker(id, conversationId);
       break;
-    case "plan_review":
-      store.stampPlanReviewMarker(id, conversationId);
-      break;
     default:
       break;
   }
@@ -81,21 +80,20 @@ export function handleInteractionEvent(
   const { conversationId } = ctx;
   const live = ctx.replay !== true;
 
-  const leftoverType = event.type as string;
-  if (
-    leftoverType === "team_preview_required" ||
-    leftoverType === "team_preview_resolved"
-  ) {
-    return true;
-  }
-
   if (isInteractionOrphanedEvent(event.type)) {
     const p = event.payload as InteractionOrphanedPayload;
+    if (!(p.kind in INTERACTION_KIND_WIRE)) {
+      return true;
+    }
     useInteractionStore.getState().markOrphaned(p.interaction_id, {
       kind: p.kind,
       conversationId,
       messageId: execMessageId(conversationId) ?? "",
     });
+    return true;
+  }
+
+  if (isLeftoverInteractionSse(event.type)) {
     return true;
   }
 

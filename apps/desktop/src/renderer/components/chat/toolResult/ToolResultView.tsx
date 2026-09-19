@@ -303,7 +303,10 @@ export function toolResultPeek(d: ToolResultData): string {
     const n = d.display.results.length;
     return n > 0 ? `${n} result${n === 1 ? "" : "s"}` : "No results";
   }
-  if (d.toolName === "list_folders" && isListFoldersCountDisplay(d.display)) {
+  if (
+    (d.toolName === "list_folders" || d.toolName === "folders") &&
+    isListFoldersCountDisplay(d.display)
+  ) {
     const n = d.display.count;
     return `${n} folder${n === 1 ? "" : "s"}`;
   }
@@ -371,28 +374,12 @@ export function toolResultPeek(d: ToolResultData): string {
   if (d.status === "error") {
     return "";
   }
-  if (d.toolName === "grep") return grepCollapsedPeek(d.result);
+  // grep: pattern is already on the ToolLine title. Hit counts / files_only /
+  // 「未匹配」are model-facing; expand the row to read hits. Do not fall through
+  // to the first-line peek (that would paste a regex or a raw hit).
+  if (d.toolName === "grep") return "";
   const line = (d.result ?? "").split("\n").find((l) => l.trim()) ?? "";
   return clampLine(line);
-}
-
-/** Collapsed grep meta — pattern already lives in the ToolLine title.
- * Unknown shapes stay empty; expand the row to read hits. */
-function grepCollapsedPeek(result: string | null): string {
-  const line =
-    (result ?? "")
-      .split("\n")
-      .find((l) => l.trim())
-      ?.trim() ?? "";
-  if (!line) return "";
-  const hits = line.match(/^(\d+) 处匹配，分布在 (\d+) 个文件/);
-  if (hits) return `${hits[1]} 处匹配 · ${hits[2]} 个文件`;
-  const files = line.match(/^(\d+) 个文件匹配/);
-  if (files) return `${files[1]} 个文件`;
-  if (line.startsWith("本次 grep 未匹配")) return "未匹配";
-  // Pattern already lives in the ToolLine title. Unknown shapes (raw hits,
-  // head-tail chops) must not paste another 140 chars of regex onto the row.
-  return "";
 }
 
 function clampLine(line: string): string {

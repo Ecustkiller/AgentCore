@@ -24,6 +24,7 @@ _KNOWN_TOOL_ALIASES: dict[str, str] = {
     "md_to_docx": "md_export",
     "md_to_pdf": "md_export",
     "read": "file_read",
+    "read_image": "file_read",
     "search": "web_search",
     "websearch": "web_search",
     "google": "web_search",
@@ -38,8 +39,8 @@ _KNOWN_TOOL_ALIASES: dict[str, str] = {
     "find": "glob",
     "delete": "file_delete",
     "rm": "file_delete",
-    "mv": "file_move",
-    "cp": "file_copy",
+    "mv": "file_batch",
+    "cp": "file_batch",
 }
 
 

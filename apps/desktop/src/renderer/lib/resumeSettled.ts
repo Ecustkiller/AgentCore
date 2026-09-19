@@ -11,7 +11,7 @@
  * 不替任何人认领。
  */
 
-export type ResumeSettledCardKind = "ask_user" | "plan_review";
+export type ResumeSettledCardKind = "ask_user";
 
 export type ResumeSettledTurnStatus =
   | "running"
@@ -30,7 +30,7 @@ export interface ResumeSettledPayload {
   turn_status: ResumeSettledTurnStatus;
 }
 
-const CARD_KINDS: readonly string[] = ["ask_user", "plan_review"];
+const CARD_KINDS: readonly string[] = ["ask_user"];
 
 const TURN_STATUSES: readonly string[] = [
   "running",
@@ -45,7 +45,6 @@ const DECISION_LABEL: Record<string, string> = {
   continue: "继续",
   adjust: "调整",
   stop: "停止",
-  research_first: "先调研",
   use_assumption: "按假设继续",
   logged_in: "已登录，继续",
   timeout: "超时自动推进",

@@ -37,7 +37,7 @@ class WorkspaceSlot:
     ``dataclasses.replace`` on :class:`ToolContext` copies this object by
     reference, so a mid-turn rebind (``ctx.backend = new``) is visible to every
     snapshot that still shares the slot. Callers that deliberately sit on another
-    desk (``apply_target_desktop`` / ``folder_fs``) must pass a fresh slot.
+    desk (``apply_target_desktop``) must pass a fresh slot.
     """
 
     backend: WorkspaceBackend
@@ -177,7 +177,7 @@ class ToolSchema:
 class TurnTargetDeskHint:
     """Turn-scoped soft default desk for bare-chat ``delegate`` (not session birth).
 
-    ``create_folder`` / unique ``resolve_folder`` stamp a folder id onto the CEO
+    ``create_folder`` / unique ``folders(action=resolve)`` stamp a folder id onto the CEO
     :class:`ToolContext`. A second distinct id in the same turn clears the default
     so multi-folder fan-out still requires explicit ``target_folder_id``. Never
     rewrites conversation ``folder_id``.
@@ -202,8 +202,46 @@ class TurnTargetDeskHint:
 
 
 @dataclass
+class TurnNamedFilePins:
+    """This-turn @ citations of files on other registered Folders.
+
+    Shared mutable (``replace`` keeps the same object). ``file_read`` may
+    one-shot bind that Folder when the path is missing on the sitting desk.
+    Same relative path pinned to two folders is dropped (no search-all).
+    """
+
+    _folder_by_path: dict[str, str] = field(default_factory=dict, repr=False)
+    _ambiguous: set[str] = field(default_factory=set, repr=False)
+
+    def add(self, folder_id: str | None, rel_path: str | None) -> None:
+        if not isinstance(folder_id, str) or not isinstance(rel_path, str):
+            return
+        fid = folder_id.strip()
+        rel = rel_path.replace("\\", "/").strip().strip("/")
+        if not fid or not rel or rel in (".", ".."):
+            return
+        if rel in self._ambiguous:
+            return
+        prev = self._folder_by_path.get(rel)
+        if prev is None:
+            self._folder_by_path[rel] = fid
+            return
+        if prev != fid:
+            self._folder_by_path.pop(rel, None)
+            self._ambiguous.add(rel)
+
+    def folder_for(self, rel_path: str | None) -> str | None:
+        if not isinstance(rel_path, str):
+            return None
+        rel = rel_path.replace("\\", "/").strip().strip("/")
+        if not rel or rel in self._ambiguous:
+            return None
+        return self._folder_by_path.get(rel)
+
+
+@dataclass
 class TurnPromotionLedger:
-    """回合归位台账 —— 交付对账快照 + 已归位的 ``{from,to}``（历史事件 / journal 重放）。
+    """回合归位台账 —— 交付对账快照 + 可选路径改写表。
 
     **为何是 ToolContext 上的共享可变对象、而不是 ContextVar**：``execute_tools`` 用
     ``asyncio.gather`` 跑每个工具调用，gather 会复制 context —— 后台 drive 写的
@@ -213,8 +251,8 @@ class TurnPromotionLedger:
     天然隔离并发回合。
 
     ``reconciliation`` = 本回合最近一次 ``delivery_status`` 载荷。``promotions`` =
-    已归位行（journal 重放接手历史 ``{from,to}``），顺序即归位序。
-    读写口径见 :mod:`agentcore.runtime.delegate.promotion`。
+    路径改写表（空则 :func:`~agentcore.runtime.delegate.promotion.apply_turn_promotions`
+    no-op）。live 不再写入搬家行。
 
     ``delivery_verdict`` = 同一对象上的收口档位槽（``DeliveryVerdict | None``）。
     后台 drive 的 ContextVar ``set`` 写不回 CEO 父任务，必须挂在这本共享账上；
@@ -406,15 +444,13 @@ class ToolContext:
     # still leave the short-lived sidecar and land in the desktop main
     # process. ``None`` on cloud-only runs.
     workspace_channel: WorkspaceChannel | None = None
-    # 对话读图: optional vision port (attachment eye→text / ``read_image``).
-    # Cloud expands the conversation profile; ticketed sidecar uses the inference
-    # proxy (``X-AgentCore-Role: vision``). ``None`` ⇒ clean「读图能力未配置」.
-    # CEO context only (not workers).
+    # 对话读图已退役：像素只走当前主力多模态（``accepts_images``）。
+    # 槽位 / VisionReader 字段保留以免 ``replace`` 旧测试崩，恒为 None。
     vision_reader: VisionReader | None = None
-    # Turn-level sink for priced ``role=vision`` ledger rows (conversation image
-    # attachments / ``read_image``). Shared by every derived run via ``replace``
-    # (list by reference). ``None`` in tests / paths with no vision billing.
+    # Historical ``role=vision`` ledger sink; unused after native-only images.
     cost_sink: list[RunCost] | None = None
+    # Current run's chat model accepts image parts (``model_accepts_images``).
+    accepts_images: bool = False
     # 项目共享工作区 (folder 绑定): True ⇒ CEO overview / worker manifest 用稀疏清单
     # (附件 + 「另有 N 个」)；False ⇒ 裸聊 scratch，非附件文件照常列入。
     # Set on the pipeline base context from ``folder_id``; inherited by workers via
@@ -502,6 +538,12 @@ class ToolContext:
     # 裸聊同回合先建/解析后的软默认目标桌（共享可变；``replace`` 浅拷贝同引用）。
     # 仅缺省 ``delegate`` 目标时消费；多 id 同回合清空。≠ 会话出生 ``folder_id``。
     turn_target_desk: TurnTargetDeskHint = field(default_factory=TurnTargetDeskHint)
+    # This-turn @ citations on other desks (shared mutable).
+    named_file_pins: TurnNamedFilePins = field(default_factory=TurnNamedFilePins)
+    # CEO ``file_read`` may one-shot bind a this-turn named other Folder on
+    # PathNotFound. Workers stay false so they do not inherit CEO pins as a
+    # desk switch. Default true so tests / CEO share the same path.
+    named_desk_read: bool = True
     # 历史归位重放 + delivery_verdict 槽（共享可变；``replace`` 浅拷贝同引用）。
     promotion_ledger: TurnPromotionLedger = field(default_factory=TurnPromotionLedger)
     # Bare-chat landing write desk (``Conversation.auto_desk_folder_id``). Orthogonal
@@ -609,7 +651,7 @@ class ToolResult:
     model and loops; a terminal effect (``HANDOFF`` / ``INTERACT``) stops the loop
     because the tool already produced the turn's final user-facing answer, carried
     in ``final_text`` (so the model does not generate a second, duplicate reply).
-    ``ask_user`` stop / timeout and team_preview cancel / timeout feed ``CONTINUE``
+    ``ask_user`` stop / timeout feed ``CONTINUE``
     so the CEO sees the拒答 or unanswered card and may short-close; ``delegate``
     likewise stays ``CONTINUE``
     (workers' products return to the CEO loop). ``final_text`` (when a terminal

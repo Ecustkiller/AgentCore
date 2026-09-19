@@ -230,12 +230,16 @@ export async function requestAutoTitle(
   }
 }
 
-/** Clone a conversation into a brand-new one carrying a copy of its transcript
- * (克隆对话). Returns the new (server-shaped) row — same folder as the source,
- * titled「… 副本」— so the caller can insert it into the sidebar and open it. */
-export async function duplicateConversation(id: string): Promise<Conversation> {
+/** Clone the transcript through one message into a new conversation (克隆对话).
+ * ``untilMessageId`` is the cutoff (that row and every earlier one). Returns the
+ * new row — same folder as the source, titled「… 副本」. */
+export async function duplicateConversation(
+  id: string,
+  untilMessageId: string,
+): Promise<Conversation> {
   const res = await api.post<BackendConversation>(
     `/v1/conversations/${id}/duplicate`,
+    { until_message_id: untilMessageId },
   );
   return toConversation(res);
 }

@@ -17,7 +17,6 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import {
   useArchiveConversation,
   useDeleteConversation,
-  useDuplicateConversation,
   useRenameConversation,
   useRestoreConversation,
   useTogglePin,
@@ -55,7 +54,6 @@ import { usePausedTurnStore } from "@/stores/pausedTurns";
 import { useShareStore } from "@/stores/share";
 import {
   Archive,
-  Copy,
   Download,
   FileJson,
   MoreHorizontal,
@@ -101,7 +99,6 @@ export function ConversationManageRow({
   const deleteMutation = useDeleteConversation();
   const restoreMutation = useRestoreConversation();
   const pinMutation = useTogglePin();
-  const duplicateMutation = useDuplicateConversation();
   const archiveMutation = useArchiveConversation();
   const unarchiveMutation = useUnarchiveConversation();
   const folders = useFolders();
@@ -215,17 +212,6 @@ export function ConversationManageRow({
     notifyConversationDeleted(title, () =>
       restoreMutation.mutate(conversation.id),
     );
-  };
-
-  const handleDuplicate = () => {
-    setMoreOpen(false);
-    duplicateMutation.mutate(conversation.id, {
-      onSuccess: (conv) => {
-        switchConversation(conv.id);
-        navigate(`/conversations/${conv.id}`);
-      },
-      onError: (err) => notifyError(err, "克隆失败"),
-    });
   };
 
   const handleExport = async (format: ExportFormat) => {
@@ -400,10 +386,6 @@ export function ConversationManageRow({
                         <span className="flex-1 truncate">重命名</span>
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem onSelect={handleDuplicate}>
-                        <Copy size={14} className="shrink-0" />
-                        <span className="flex-1 truncate">克隆对话</span>
-                      </DropdownMenuItem>
                       <DropdownMenuItem
                         onSelect={() =>
                           useShareStore.getState().open(conversation.id)
@@ -474,10 +456,6 @@ export function ConversationManageRow({
           </span>
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onSelect={handleDuplicate}>
-          <Copy size={14} className="shrink-0" />
-          <span className="flex-1 truncate">克隆对话</span>
-        </ContextMenuItem>
         <ContextMenuItem
           onSelect={() => useShareStore.getState().open(conversation.id)}
         >

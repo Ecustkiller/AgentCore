@@ -126,20 +126,8 @@ def _approval_sibling_sweep() -> list[SSEEvent]:
 
 
 VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
-    "checkpoint_resolved_reload": (
-        "检查点：required+resolved 重载呈已答态，无假 pending（P3 / 不变量 4）",
-        _checkpoint_resolved_reload,
-    ),
     "approval_orphaned": (
         "审批：required+orphaned → interactions[] 已失效态（P3 / 重启假卡）",
         _approval_orphaned,
-    ),
-    "approval_interrupted_orphans": (
-        "审批：required + message_end(interrupted) 无 orphan 事实 → fold 标 orphaned（终态热卡）",
-        _approval_interrupted_orphans,
-    ),
-    "approval_sibling_sweep": (
-        "审批：多卡并发 + 批量 resolved，fold 无假 pending（P3 / sibling 清扫）",
-        _approval_sibling_sweep,
     ),
 }

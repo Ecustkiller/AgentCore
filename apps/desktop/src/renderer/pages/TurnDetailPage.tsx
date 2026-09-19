@@ -2,7 +2,6 @@ import {
   ConversationHydrateOverlay,
   type ConversationHydratePhase,
 } from "@/components/chat/ConversationHydrateOverlay";
-import { TurnCompare } from "@/components/chat/compare/TurnCompare";
 import { DebateArena } from "@/components/chat/debate/arena/DebateArena";
 import { shouldShowTeamGraph } from "@/components/chat/debatePreviewPlacement";
 import { GraphView } from "@/components/graph/GraphView";
@@ -37,25 +36,24 @@ import {
 } from "@/stores/conversation";
 import {
   ExecutionScopeContext,
-  hasContinuations,
   isDebate,
   useExecutionStore,
   useMessageExecution,
 } from "@/stores/execution";
 import { dismissFocusedFloat, useSidePanelStore } from "@/stores/sidePanel";
 import type { TurnDetailView } from "@/stores/ui";
-import { ArrowLeft, GitCompare, MessagesSquare, Network } from "lucide-react";
+import { ArrowLeft, MessagesSquare, Network } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { isDebateViewPending, resolveTurnDetailView } from "./turnDetailView";
 
 function parseView(raw: string | null): TurnDetailView | null {
-  if (raw === "graph" || raw === "debate" || raw === "compare") return raw;
+  if (raw === "graph" || raw === "debate") return raw;
   return null;
 }
 
 /**
- * Full-screen turn detail — graph / debate / compare for one turn.
+ * Full-screen turn detail — graph / debate for one turn.
  * Pure deep-read / replay surface (协作图与双视图UX.md §六 两个入口：聊天内嵌 ⇄ 全屏放大); no conversation-level
  * composer. Top bar is back + view switch only (no whole-turn stop, no taskSummary).
  */
@@ -71,12 +69,6 @@ export function TurnDetailPage() {
   const [hydrateRetry, setHydrateRetry] = useState(0);
 
   const requestedView = parseView(searchParams.get("view"));
-  const compareA = searchParams.get("a");
-  const compareB = searchParams.get("b");
-  const initialComparePair = useMemo<[string, string] | undefined>(() => {
-    if (compareA && compareB) return [compareA, compareB];
-    return undefined;
-  }, [compareA, compareB]);
 
   // Ensure conversation data is loaded (same contract as ConversationPage:
   // early ready after adopt / SWR cache; attach/settle runs in background).
@@ -308,9 +300,6 @@ export function TurnDetailPage() {
     )?.isStreaming ?? false;
 
   const debate = !!execution && isDebate(execution);
-  // 对比 tab：按「是否存在可修订 run」判断，不按整图是否含辩论
-  // （混合图幕 1 热修 + 幕 2 辩论时仍需对比入口）。
-  const showCompare = !!execution && hasContinuations(execution);
 
   const hasJournalToProject = !!(
     turnMessage?.executionId &&
@@ -333,10 +322,9 @@ export function TurnDetailPage() {
     return resolveTurnDetailView({
       requestedView,
       debate,
-      showCompare,
       execution,
     });
-  }, [requestedView, debate, showCompare, execution, debateViewPending]);
+  }, [requestedView, debate, execution, debateViewPending]);
 
   const setView = useCallback(
     (next: TurnDetailView) => {
@@ -344,10 +332,6 @@ export function TurnDetailPage() {
         (prev) => {
           const p = new URLSearchParams(prev);
           p.set("view", next);
-          if (next !== "compare") {
-            p.delete("a");
-            p.delete("b");
-          }
           return p;
         },
         { replace: true },
@@ -450,26 +434,11 @@ export function TurnDetailPage() {
                   辩论室
                 </Button>
               )}
-              {showCompare && (
-                <Button
-                  variant="ghost"
-                  onClick={() => setView("compare")}
-                  aria-pressed={view === "compare"}
-                  icon={<GitCompare size={14} />}
-                  className={
-                    view === "compare"
-                      ? "bg-accent text-foreground hover:bg-accent"
-                      : undefined
-                  }
-                >
-                  对比
-                </Button>
-              )}
             </div>
           </div>
         </div>
 
-        {/* Body row: the content column (graph/debate/compare) and the
+        {/* Body row: the content column (graph/debate) and the
             right-docked SidePanel sit side-by-side in a flex-ROW, so the panel
             docks to the side instead of falling to the bottom of the page column
             (mirrors AppShell/ConversationPage, where SidePanel is a flex-row
@@ -506,20 +475,6 @@ export function TurnDetailPage() {
                       conversationId={conversationId}
                       interactive={liveViewedTurn}
                     />
-                  </div>
-                )}
-              {!debateViewPending &&
-                view === "compare" &&
-                showCompare &&
-                execution && (
-                  <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                    <div className="mx-auto max-w-5xl">
-                      <TurnCompare
-                        execution={execution}
-                        messageId={scopeKey}
-                        initialPair={initialComparePair}
-                      />
-                    </div>
                   </div>
                 )}
               <ConversationHydrateOverlay

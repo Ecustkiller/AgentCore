@@ -140,7 +140,7 @@ uv run python scripts/demo_tape_export.py \
   --out ../../demos/tapes/my-multi.json
 ```
 
-导出即剪辑 + 门禁：按 `TAPE_EXCLUDED_KINDS` 剪掉回合生命周期（message_start/end）、录到的暂停结算（冷路 `*_resolved` + 热路 `approval_resolved`，回放时现场重发）、回合元信息（turn_saved/标题/citations）与客户端工具请求（workspace/board——回放不得触发真实副作用），其余逐字节保留；随后跑入库脱敏双防线（剥 `run_context` system 内用户长期记忆 `<rules>` → 合成占位，保留块结构；再扫描记忆标记 / system 体内邮箱·手机，命中即拒绝——与 conformance `recording_cut` 共用 `demo_tape/sanitize.py`）。导出期另拒：未接线 pause（当前无——冷路 `team_preview` / `checkpoint` / `plan_review` 与热路 `approval_*` 均已接线；`--force` 可越过未接线类，**不能**越过客户端工具断言与脱敏扫描）。成品磁带断言不得含 `*_op_required` 客户端工具请求（剪辑表之上的验证层）。原「下一步」followups chips **已产品下线**：导出若仍把历史 `followups_generated` 抬进 `meta.followups`，回放会忽略、不再落库/重发；开辩入口走阶段推进卡。`--user-prompt` 可覆盖 DB 查询（异机导出用）。磁带放仓库根 `demos/tapes/*.json`；命令面板按文件名 stem 列出。
+导出即剪辑 + 门禁：按 `TAPE_EXCLUDED_KINDS` 剪掉回合生命周期（message_start/end）、录到的暂停结算（冷路 `*_resolved` + 热路 `approval_resolved`，回放时现场重发）、回合元信息（turn_saved/标题/citations）与客户端工具请求（workspace/board——回放不得触发真实副作用），其余逐字节保留；随后跑入库脱敏双防线（剥 `run_context` system 内用户长期记忆 `<rules>` → 合成占位，保留块结构；再扫描记忆标记 / system 体内邮箱·手机，命中即拒绝——与 conformance `recording_cut` 共用 `demo_tape/sanitize.py`）。导出期另拒：未接线 pause（当前无——冷路 leftover `team_preview` / `plan_review` skip；live 冷路 `checkpoint`（ask_user）与热路 `approval_*` 已接线；`--force` 可越过未接线类，**不能**越过客户端工具断言与脱敏扫描）。成品磁带断言不得含 `*_op_required` 客户端工具请求（剪辑表之上的验证层）。原「下一步」followups chips **已产品下线**：导出若仍把历史 `followups_generated` 抬进 `meta.followups`，回放会忽略、不再落库/重发。`--user-prompt` 可覆盖 DB 查询（异机导出用）。磁带放仓库根 `demos/tapes/*.json`；命令面板按文件名 stem 列出。
 
 ## 导演控制台（第二屏 · OBS 录屏用）
 
@@ -172,7 +172,7 @@ http://localhost:8000/v1/demo-tape/director
 | `POST` | `/v1/demo-tape/director/{cid}/speed` | body `{ "speed": 0.5..8 }`，瞬时生效 |
 | `POST` | `/v1/demo-tape/director/{cid}/seek` | body `{ "t_ms" }` 或 `{ "event_index" }` 或 `{ "chapter_id" }` |
 
-Seek 语义：目标点之前的事件去延时爆发注入；向后 seek = 重启式倒带。跨过 `team_preview` / `checkpoint` / `plan_review` / `approval_*` 等真交互点时自动代确认；落点在交互点上则停在该卡（不代点）。进度条 `t_ms` 吸附最近事件边界。
+Seek 语义：目标点之前的事件去延时爆发注入；向后 seek = 重启式倒带。跨过 leftover 退役卡 skip；跨过 `checkpoint` / `approval_*` 等真交互点时自动代确认；落点在交互点上则停在该卡（不代点）。进度条 `t_ms` 吸附最近事件边界。
 
 ### 章节表生成规则
 
@@ -208,7 +208,7 @@ Seek 语义：目标点之前的事件去延时爆发注入；向后 seek = 重�
 - **磁带源 = 直播流录制（EventSink dev tap），journal 反推层已退役（2026-07）**：`DEMO_TAPE_RECORD_ENABLED` 下 `demo_tape/recorder.py` 在 `runtime/events/sink.py` 的 emit tap 上把每个回合**实际发出的 SSE 流**原样录下——真实节奏 + journal 从不存的 EPHEMERAL 直播感（打字 delta、`tool_progress` 委派心跳、工具相位）天然在录制里；导出（`export.py: build_tape_from_recording`）按 `TAPE_EXCLUDED_KINDS` 剪辑，再跑脱敏/扫描/导出门禁（见上），**不做节奏或正文合成**。曾经的 journal 反推启发式层（时间窗铺满、worker 流式重建、委派心跳合成、正文/思考锚定切分，约 1100 行）连同其全部「已修勿回退」条目一并退役——录制流天然满足那些不变量。**事件字段与线上 SSE 契约对齐**（`type`/`timestamp` + pacing 超集 `t_ms`；格式版本 2）；存量 v1 磁带（`kind`/`ts`）读时别名兼容、**不做格式迁移**（内容治理脱敏可就地改 body）。被否方案：继续修 journal 反推——补丁史（同层 6+ 处已修勿回退、坏过两次的铺窗）证明该缝会持续出补丁。
 - **回放身份 ≠ 录制身份（已修勿回退）**：磁带忠实保留录制时的 id，但桌面 InteractionStore 以 interaction id 为**跨会话全局键**（resolved 墓碑不复活、pending 首见保留），`pausedTurns.removeByCheckpoint` 也按裸 id 匹配——复用录制 checkpoint_id 时，同一桌面进程内**第二次回放**的 `team_preview_required` 被静默吞掉（历史事故：简介说完永久卡住、开工卡/协作图不出现、只等来「记忆已更新」卡）。修法：player 回放前按 `(本回合 message_id, 录制 id)` 确定性重铸**全部交互 id**（`demo_tape/identity.py`；send/resume 两段一致）。`run_id`/`execution_id`/`tool_call_id` 有意保持录制原值——各端按 message 域隔离、且字符串携带辩论结构（`debate_<exec>_r1_<side>`），重铸零收益反破坏投影。验收：`test_replaying_same_tape_twice_remints_distinct_checkpoints` + `test_real_tape_double_replay_mints_distinct_checkpoints`。
 - **「下一步」followups 已下线**：产品不再 mint/展示 CEO→用户 chips；磁带回放忽略 `meta.followups`（存量磁带可留字段）。开辩仍走 `motion_card` → 阶段推进卡。
-- **暂停即真实检查点**：磁带遇 `team_preview` / `checkpoint`（ask_user）/ `plan_review` 走冷路真暂停（落帧 + `POST …/resume`）；遇 `approval_*` 走热路真挂起（登记 `InteractionRegistry`、回合保持 running、`POST …/interactions/{id}` 热 resolve 后续播）——演示中人类拍板环节由录屏者掌控。挂起等待期间记忆 sweeper 会跳过该会话（`memory/consolidation.py` open-turn deferral，产品级修复）——不再出现「等授权时先弹记忆已更新卡」。冷路 `selected` / `adjust` 与热路 APPROVE/DENY/ALWAYS 均不改写后续磁带事件流（只记日志）；`stop` 走既有停止/salvage 路径并清理等待中的热路登记。
+- **暂停即真实检查点**：磁带遇 `checkpoint`（ask_user）走冷路真暂停（落帧 + `POST …/resume`）；遇 leftover `team_preview` / `plan_review` skip；遇 `approval_*` 走热路真挂起（登记 `InteractionRegistry`、回合保持 running、`POST …/interactions/{id}` 热 resolve 后续播）——演示中人类拍板环节由录屏者掌控。挂起等待期间记忆 sweeper 会跳过该会话（`memory/consolidation.py` open-turn deferral，产品级修复）——不再出现「等授权时先弹记忆已更新卡」。冷路 `selected` 与热路 APPROVE/DENY/ALWAYS 均不改写后续磁带事件流（只记日志）；`stop` 走既有停止/salvage 路径并清理等待中的热路登记。
 - **节奏坑（已修勿回退）**：磁带 `t_ms` 必须单调（`build_tape_from_recording` 对墙钟抖动做单调夹紧）；player 的 pacing 时钟不可回拨（曾在原速下表现为「正在思考」长卡死，4 倍速+2s 限幅时被掩盖）。
 - **player 跳过不可发射事件再计步（已修勿回退）**：`turn_paused` 等非 SSE 事实必须在 pacing 计算**之前**跳过，否则它们推进节奏时钟——曾表现为点「授权开赛」后 11 秒静默（resume 首拍应即时发出）。
 - **回放中断收口**：tape 分支与真实管线同样走 `CancelledError` salvage（`turn_runner.py`）——断流/停服不再留 `status=running` 僵尸行。
@@ -235,7 +235,7 @@ pnpm promo:capture full --tape <tape-id>
 - **不改** SSE / 协议契约、**不动**产品默认 UI（仅命令面板在开关开启时多准备/立即两条入口）。录制 tap 是纯观测缝（`sink.emit` 处理完后调用、异常只记警告不进回合），默认关闭。
 - `demos/recordings/` 已 gitignore（原样录制、可能含真实对话内容）；入库素材只放剪辑后的 `demos/tapes/`。
 - 回放 `cost_runs=[]`，尽量不写成本账本。
-- 磁带交互点均已接线：冷路 `team_preview` / `checkpoint`（ask_user）/ `plan_review`（落帧 + resume）；热路 `approval_*`（InteractionRegistry + 热 resolve，回合不收口）。决策均按录制内容续播，不分支。
+- 磁带交互点均已接线：冷路 `checkpoint`（ask_user，落帧 + resume）；leftover `team_preview` / `plan_review` skip；热路 `approval_*`（InteractionRegistry + 热 resolve，回合不收口）。决策均按录制内容续播，不分支。
 - 一盘磁带可含多幕（`turns[]`）：演示者逐条消息推进下一幕；`start` 只自动发第一幕；末幕播完自动解绑。存量单幕盘（顶层 `events`）读时归一为单幕，不改写文件。导出可按序传多个 `--message-id` / `--recording` 拼幕；单 id 用法与产物不变。导演台幕内 seek/章节照常，跨幕导航与 promo 多幕本期不做。
 - 桌面误绑本地会话 → 发消息走 sidecar，服务端绑定无效。防护：`demo_tape_bind.py` 默认拒绑本地；回放开关开启时 sidecar 对已绑定会话返回显式错误（日志 `demo_tape.sidecar_local_session_bound`）；一键「演示回放」入口本身只建云端会话。
 - `DEMO_TAPE_RECORD_ENABLED` / `DEMO_TAPE_REPLAY_ENABLED` 开启时启动日志会明示 **WatchFiles reload 已关闭**及原因；改代码后需手动重启后端。

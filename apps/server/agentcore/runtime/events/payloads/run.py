@@ -16,8 +16,8 @@ EscalationKind = Literal["normal", "scope", "dep"]
 PlanRevisionKind = Literal["bind", "steer"]
 # 幕类型 = 能力档取用键（首批 multi_agent / debate；single_agent 不进幕序列）。
 ActKind = Literal["multi_agent", "debate"]
-# 幕授权来源（批 B）：推进卡 / 自动开辩 / 存量 leftover（preview 非新开开工卡）。
-ActAuthorizedBy = Literal["stage_card", "auto", "preview"]
+# 幕授权来源：现行只写 auto。旧 journal 的 stage_card / preview 不当 live 成员。
+ActAuthorizedBy = Literal["auto"]
 # run_failed 可机读原因类（additive）：协作图脸优先按此类贴文案。
 # quality=内容契约/硬缺口→「未达标」；
 # format=结构/格式闸（缺章节·JSON）→「格式未过」；
@@ -61,7 +61,7 @@ class RunPlanAct(WirePayload):
     """幕声明（批 A1）：一张 execution 图由 1..N 幕组成；本批仅首幕 act-1。
 
     runs 归属 = 该 run_plan 声明的幕（``RunPlanRunEntry`` 不加字段）。
-    ``authorized_by``（批 B）：辩论幕的授权来源；调研幕缺省。
+    ``authorized_by``：辩论幕授权来源（现行 ``auto``）；调研幕缺省。
     """
 
     act_id: str
@@ -86,22 +86,6 @@ class RunPlanPayload(WirePayload):
     prev_execution_id: str | None = absent()
     # 幕声明（additive）：旧客户端 / 旧 journal 忽略；缺省时前端 fold 合成 act-1。
     act: RunPlanAct | None = absent()
-
-
-class GraphAppendPayload(WirePayload):
-    """已停发：旧跨回合同图追加锚点（兼容旧 journal 回放）。新路径用 prev_execution_id。"""
-
-    execution_id: str
-    host_message_id: str
-    append_message_id: str
-    added_count: int
-    roles: list[str] = Field(default_factory=list)
-    added_run_ids: list[str] = Field(default_factory=list)
-    # 幕归属（additive）：文案区分「开新幕」vs「同幕补派」属后续批次；本批只透传字段。
-    act_id: str | None = absent()
-    act_kind: ActKind | None = absent()
-    # 开幕授权来源（批 B，与 RunPlanAct.authorized_by 同形）。
-    authorized_by: ActAuthorizedBy | None = absent()
 
 
 class RunStartedPayload(WirePayload):
@@ -247,23 +231,6 @@ class RunEscalationGatePayload(WirePayload):
     signals: list[dict[str, Any]]
 
 
-class TeamSynthesisWorkerPreview(WirePayload):
-    run_id: str
-    role: str
-    status: Literal["pending", "completed", "failed", "cancelled"]
-    summary: str
-
-
-class TeamSynthesisPreviewPayload(WirePayload):
-    execution_id: str
-    completed: int
-    total: int
-    headline: str
-    text: str
-    workers: list[TeamSynthesisWorkerPreview]
-    in_progress: bool
-
-
 class CoordinationWaitPayload(WirePayload):
     """CEO 协调等待（``coordination_wait``）：captain 空等团队事件时的前端 UX 信号。
 
@@ -289,7 +256,7 @@ class WorkspaceLockWaitPayload(WirePayload):
 
 
 class DeskProvisionWaitPayload(WirePayload):
-    """云桌开通短等（``desk_provision_wait``）：首句/续跑 prepare 时的前端 UX 信号。
+    """云桌开通短等（``desk_provision_wait``）：绑定当前云桌时的前端 UX 信号。
 
     ``waiting=true`` 即将阻塞在 ``ensure_workspace_desk``；结束（成功或失败）后
     ``waiting=false``。EPHEMERAL——空气泡「正在准备云端环境」，禁空 Thinking… 冒充开机。
@@ -343,14 +310,12 @@ class DeliveryAction(WirePayload):
     桌面默认同通道（本地对话 / 打开本机文件夹），≠离线；云端对话并列可选)；
     ``export_to_local`` (云端已有 delivered_files → 导出到本机文件夹后即可 npm install / 本地运行；
     与 bind_local_folder 可并存但语义不同);
-    ``website_verify`` (legacy tape only — runtime 已停发整页 QA 续派按钮);
     ``continue_skipped_runs`` (turn/nested 额度 SKIPPED 未跑节点 → 下一回合续跑);
     unknown kinds render as a plain hint.
-    （成篇未写完改由对话框接着说——已撤 ``continue_writing`` 一键按钮。）
+    （成篇未写完改由对话框接着说——不另挂一键续写按钮。）
 
     Optional ``prompt`` is the exact user-turn text a client should send for
-    kinds that open a new message (e.g. ``continue_skipped_runs``; old
-    ``website_verify`` tapes still carry one). Absent for
+    kinds that open a new message (e.g. ``continue_skipped_runs``). Absent for
     non-message actions like ``bind_local_folder`` / ``export_to_local``."""
 
     kind: str
@@ -387,17 +352,6 @@ class DeliveryArtifact(WirePayload):
     derived_from: str | None = absent()
 
 
-class DeliveryPromotion(WirePayload):
-    """Historical ``delivery_status.promoted`` row（AI 工作间 → 用户工作区）.
-
-    ``promote_product`` 已撤销；本结构只兼容旧事件。``from`` 是当时的旧路径，``to``
-    是搬走后的位置。空数组是合法状态（字段缺省即空）。
-    """
-
-    from_path: str = Field(alias="from", description="AI 工作间旧路径（已不存在）")
-    to: str = Field(description="用户工作区新路径（现在的位置）")
-
-
 class DeliveryStatusPayload(WirePayload):
     """交付状态（能力闸门与交付诚实性）: the structured delivery reconciliation a
     delegate batch emits at wrap-up — 已交付文件 / 缺口 / 待用户操作 — so the client
@@ -410,9 +364,7 @@ class DeliveryStatusPayload(WirePayload):
     声明路径未落盘为 path_mismatch warning，不挡 delivered；声明未命中时实际落盘进
     ``artifacts``。声明命中时备份仍不进卡。
     ``artifacts``: path-level acceptance (accepted+rejected) for declared landings;
-    ``delivered_files`` remains accepted-only for older clients.
-    ``promoted``: 历史 ``{from, to}`` 归位行（``promote_product`` 已撤销；新回合不再写入）。
-    旧卡 journal 重放仍带此字段；无归位时缺省（= 空数组）。"""
+    ``delivered_files`` remains accepted-only for older clients."""
 
     execution_id: str
     state: DeliveryState
@@ -421,7 +373,6 @@ class DeliveryStatusPayload(WirePayload):
     gaps: list[DeliveryGap]
     actions: list[DeliveryAction]
     artifacts: list[DeliveryArtifact] = []
-    promoted: list[DeliveryPromotion] = []
 
 
 class UserInterjectionAttachment(WirePayload):
@@ -552,7 +503,7 @@ class ResumeSettledPayload(WirePayload):
 
     message_id: str
     conversation_id: str
-    kind: Literal["ask_user", "plan_review"]
+    kind: Literal["ask_user"]
     checkpoint_id: str
     decision: str
     decided_at: str

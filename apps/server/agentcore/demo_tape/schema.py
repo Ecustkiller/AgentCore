@@ -22,7 +22,6 @@ LEGACY_TAPE_FORMAT_VERSION = 1
 PAUSE_REQUIRED_KINDS = frozenset(
     {
         "checkpoint_required",
-        "plan_review_required",
     }
 )
 
@@ -30,7 +29,6 @@ PAUSE_REQUIRED_KINDS = frozenset(
 TAPE_WIRED_PAUSE_KINDS = frozenset(
     {
         "checkpoint_required",
-        "plan_review_required",
     }
 )
 TAPE_UNWIRED_PAUSE_KINDS = PAUSE_REQUIRED_KINDS - TAPE_WIRED_PAUSE_KINDS
@@ -48,9 +46,7 @@ TAPE_INTERACTIVE_PAUSE_KINDS = TAPE_WIRED_PAUSE_KINDS | TAPE_HOT_PAUSE_KINDS
 PAUSE_RESOLVED_KINDS = frozenset(
     {
         "checkpoint_resolved",
-        "plan_review_resolved",
         "approval_resolved",
-        "team_preview_resolved",
     }
 )
 
@@ -91,6 +87,10 @@ TAPE_EXCLUDED_KINDS = PAUSE_RESOLVED_KINDS | CLIENT_TOOL_REQUIRED_KINDS | frozen
         "error",
         "team_preview_required",
         "team_preview_resolved",
+        "plan_review_required",
+        "plan_review_resolved",
+        "stage_card_required",
+        "stage_card_resolved",
     }
 )
 

@@ -8,7 +8,6 @@ import { CheckpointCard } from "@/components/chat/CheckpointCard";
 import { EscalationCard } from "@/components/chat/EscalationCard";
 import {
   ApprovalTrace,
-  StageCardTrace,
 } from "@/components/chat/HotDecisionTrace";
 import { type RunEscalation, useMessageExecution } from "@/stores/execution";
 import { useInteractionStore } from "@/stores/interactions";
@@ -27,7 +26,6 @@ type TimelineNodeId = {
   checkpoint_id?: string;
   escalation_id?: string;
   approval_id?: string;
-  stage_card_id?: string;
 };
 
 export type TimelineRenderCtx = {
@@ -40,7 +38,7 @@ export type TimelineRenderCtx = {
  * Render the inline decision card / 痕迹 for a timeline process marker.
  *
  * Two empty paths (do not collapse them back to a bare `null`):
- * - {@link timelineIntentionalEmpty}: 设计上不画（`plan_review` 只在 ResumePrompt）。
+ * - {@link timelineIntentionalEmpty}: 设计上不画（pending 热痕迹、挂起即收口）。
  * - {@link timelineMissingCard}: 有标记但袋子/store 里没有实体；dev 占位，prod 仍空白。
  */
 export function renderTimelineInteractionCard(
@@ -98,25 +96,6 @@ export function renderTimelineInteractionCard(
           messageId={ctx?.messageId ?? ""}
         />
       );
-    }
-    case "stage_card": {
-      if (!node.stage_card_id) {
-        return timelineMissingCard({
-          kind: "missing",
-          processKind,
-          id: node.stage_card_id,
-        });
-      }
-      return (
-        <StageCardTrace
-          key={node.stage_card_id}
-          stageCardId={node.stage_card_id}
-        />
-      );
-    }
-    default: {
-      processKind satisfies "plan_review";
-      return timelineIntentionalEmpty();
     }
   }
 }

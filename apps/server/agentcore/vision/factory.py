@@ -1,19 +1,7 @@
-"""Build the optional VisionReader (「插上即用」).
+"""Unused VisionReader factory (live turns do not call this).
 
-Resolution order:
-
-1. Profile ``vision`` slot (when set) → credentials from that slot (BYOK provider or
-   platform model creds), regardless of ``billing_mode``.
-2. Else empty slot + main that ``model_accepts_images`` → same build with main's
-   :class:`~agentcore.llm.resolve.ModelSelection` (``read_image`` / attachment
-   eye→text reuse main credentials). Text-only main does **not** follow.
-3. Else platform fallback: ``billing_mode=platform`` + non-empty ``VISION_API_KEY`` /
-   ``VISION_BASE_URL`` → operator vision model.
-4. Else ``None`` (``read_image`` clean-fails「读图能力未配置」).
-
-Ticketed sidecar never opens local Postgres for this expand. It sends the turn's
-inference JWT to ``POST /v1/inference/v1/chat/completions`` with
-``X-AgentCore-Role: vision``; the cloud proxy applies the same order.
+Conversation images ride the current main model. Inference proxy rejects
+``X-AgentCore-Role: vision``. Kept so historical tests still compile.
 """
 
 from __future__ import annotations

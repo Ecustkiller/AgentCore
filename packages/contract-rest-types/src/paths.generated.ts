@@ -179,7 +179,6 @@ export const REST_PATH_TEMPLATES = [
   "/v1/folders/trash/{folder_id}",
   "/v1/folders/trash/{folder_id}/restore",
   "/v1/folders/{folder_id}",
-  "/v1/folders/{folder_id}/collaboration-timeline",
   "/v1/folders/{folder_id}/invites",
   "/v1/folders/{folder_id}/invites/accept",
   "/v1/folders/{folder_id}/invites/reject",

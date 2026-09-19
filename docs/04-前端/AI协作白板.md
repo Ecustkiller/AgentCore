@@ -16,7 +16,7 @@ skip_if:
 
 真白板（无限画布）✅ **手绘**。白板不是团队进度面、不是工作区、**不是**当前 Agent 作画面。**不做**把团队图做成对话页第三宿主（否决 → [协作图 UX §六](/docs/04-前端/协作图与双视图UX.md)）、不做独立 app。空间 JSON 与「文本典范」不冲突——scene 本质空间，文本表达不了。重叠面（团队图/mermaid/文件列表）不重做。
 
-**现状**：`/whiteboard` 列表与画布、`boards` 表、scene CAS、S3 溢出、自研 Canvas 引擎 ✅。白板 AI（老板命令栏、选区 AI、`board_ops` / `board_read`、`BoardChannel`、CLIENT_TOOL 白板通道、专用会话绑定）**已拆栈**，不休眠、不保留原契约。对话 `read_image` 仍可读工作区图（挂 `ToolFace.BOARD`，与白板画布无关）。跟进面 → [路线图 · 观察 · 白板 AI 另案](/docs/01-产品/产品路线图摘要.md)。
+**现状**：`/whiteboard` 列表与画布、`boards` 表、scene CAS、S3 溢出、自研 Canvas 引擎 ✅。白板 AI（老板命令栏、选区 AI、`board_ops` / `board_read`、`BoardChannel`、CLIENT_TOOL 白板通道、专用会话绑定）**已拆栈**，不休眠、不保留原契约。工作区读图走 `file_read`（与手绘白板无关）。跟进面 → [路线图 · 观察 · 白板 AI 另案](/docs/01-产品/产品路线图摘要.md)。
 
 主循环归属：支线**创作工具**；交付仍走工作区（「收」）。手绘白板不是交付主路径 → [定位 §二](/docs/01-产品/产品定位与品牌.md)。
 
@@ -60,8 +60,8 @@ skip_if:
 | 面 | 约束 |
 |---|---|
 | 后端 | CRUD + scene CAS。没有白板 AI 工具 / 通道 / 专用会话。发现改编排器 → 停（绊线） |
-| 协议 | 无 `board_op_required` / `board_read_required`。对话识图走附件 / `read_image` |
-| 读图 | 对话贴图与 CEO `read_image` 共用 `VisionReader`（组合 `vision` 槽，或槽空且 main 收图时复用 main，或 platform + `VISION_*`）；空配置干净失败。场景名 `vision.read`。权威 → [平台 LLM 接入 · 识图槽](/docs/05-平台与运维/平台LLM接入.md) |
+| 协议 | 无 `board_op_required` / `board_read_required`。对话识图走附件 / `file_read` |
+| 读图 | 贴图与工作区光栅走当前主力多模态；不收图则诚实说明。权威 → [平台 LLM 接入](/docs/05-平台与运维/平台LLM接入.md) |
 | 产物 | 白板不承载交付；成品在工作区 |
 
 ## 风险护栏

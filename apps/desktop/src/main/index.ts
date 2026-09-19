@@ -30,6 +30,7 @@ import { registerDeviceIdentityIpc } from "./device-identity";
 import {
   buildFloatHashRoute,
   destroyAllFloatWindows,
+  listFloatEntries,
   minimizeBrowserWindow,
   registerFloatWindowIpc,
 } from "./float-window";
@@ -41,13 +42,21 @@ import {
 } from "./local-store";
 import { registerLogIpc } from "./log-service";
 import { registerMcpIpc, shutdownAllMcpSessions } from "./mcp-service";
-import { registerNotificationIpc } from "./notification-service";
+import {
+  configureNotificationService,
+  registerNotificationIpc,
+} from "./notification-service";
 import { registerOutboxIpc } from "./outbox-writeback";
 // 主进程安全网须最先加载：拦截 updater/net 层未捕获的网络瞬态，避免 Electron 默认错误框。
 // （模块加载时已自注册；此处再调一次幂等，保证入口显式依赖。）
 import { installProcessSafetyNet } from "./process-safety-net";
 import { registerProcessIpc } from "./process-service";
 import { registerPtyIpc } from "./pty-service";
+import {
+  configureShellPresence,
+  registerShellPresenceIpc,
+  watchWindowForShellPresence,
+} from "./shell-presence";
 import { registerSidecarIpc } from "./sidecar-service";
 import { registerTerminalIpc } from "./terminal-service";
 import { initUpdater } from "./updater";
@@ -147,7 +156,7 @@ const WINDOWS_APP_USER_MODEL_ID =
   typeof __WINDOWS_APP_USER_MODEL_ID__ !== "undefined" &&
   __WINDOWS_APP_USER_MODEL_ID__
     ? __WINDOWS_APP_USER_MODEL_ID__
-    : "com.agentcore.desktop";
+    : "xyz.fashitianxia.agentcore";
 const icon =
   typeof __DESKTOP_RELEASE_CHANNEL__ !== "undefined" &&
   __DESKTOP_RELEASE_CHANNEL__ === "beta"
@@ -276,6 +285,7 @@ function createWindow(): BrowserWindow {
     },
   });
   mainWindowRef = mainWindow;
+  watchWindowForShellPresence(mainWindow);
   mainWindow.on("closed", () => {
     if (mainWindowRef === mainWindow) mainWindowRef = null;
     // 关主窗 ≈ 收应用：收尽真窗，避免只剩浮窗挂起进程。
@@ -345,7 +355,7 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(async () => {
-  // Windows 通知中心需要 AppUserModelId，否则 toast 静默失败。
+  // Windows 通知中心：AUMID 必须等于安装器 appId（NSIS 快捷方式），否则 toast 静默失败。
   if (process.platform === "win32") {
     app.setAppUserModelId(WINDOWS_APP_USER_MODEL_ID);
   }
@@ -360,6 +370,14 @@ app.whenReady().then(async () => {
   registerTerminalIpc();
   registerProcessIpc();
   registerPtyIpc();
+  configureShellPresence({
+    getMainWindow: () => mainWindowRef,
+    listFloatEntries,
+  });
+  configureNotificationService({
+    getMainWindow: () => mainWindowRef,
+  });
+  registerShellPresenceIpc();
   registerNotificationIpc();
   registerHostIpc();
   registerMcpIpc();

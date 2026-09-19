@@ -81,7 +81,7 @@ export function hasWorkspaceShell(): boolean {
   return hasLocalFiles() && !!window.terminalApi?.openShellAtRoot;
 }
 
-/** OS 原生通知（Electron Notification API）；web 无。 */
+/** OS 原生通知（Electron Notification API）；web / Capacitor 无此 IPC。 */
 export function hasNativeNotification(): boolean {
   return (
     typeof window !== "undefined" && !!window.notificationApi && !isWebRuntime()

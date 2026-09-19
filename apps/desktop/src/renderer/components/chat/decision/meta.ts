@@ -14,7 +14,6 @@ import {
   Ban,
   Check,
   Clock,
-  FolderTree,
   type LucideIcon,
   Pencil,
 } from "lucide-react";
@@ -40,7 +39,6 @@ export const ASK_RESOLVED_DECISION_ICON = {
   continue: QuestionMark,
   adjust: Pencil,
   stop: QuestionMark,
-  research_first: QuestionMark,
   timeout: Clock,
   orphaned: Ban,
 } as const satisfies Record<CheckpointDecision, LucideIcon>;
@@ -57,7 +55,6 @@ const ASK_CLARIFY_META = {
     adjust: { label: "已按你的调整继续", tone: "success" },
     // stop = 用户点「取消」硬停收口，非失败；与 timeout/orphaned 同档 muted，时间线占存根。
     stop: { label: "已取消本回合", tone: "muted" },
-    research_first: { label: "已取消本回合", tone: "muted" },
     timeout: { label: "未及时回应，已自行收尾", tone: "muted" },
     orphaned: {
       label: "已失效（回合已结束或服务已重启）",
@@ -68,11 +65,6 @@ const ASK_CLARIFY_META = {
 
 export const ASK_INTENT_META = {
   decision: ASK_CLARIFY_META,
-  organize_plan: {
-    ...ASK_CLARIFY_META,
-    cta: "确认并整理",
-    ctaIcon: FolderTree,
-  },
 } as const satisfies Record<AskUiIntent, AskIntentMeta>;
 
 export type AskResolvedOutcome = {
@@ -105,7 +97,7 @@ const SETTLED_UNKNOWN: AskResolvedOutcome = {
 
 /**
  * ask 结算脸：只有线材 `timeout` 才用超时文案。缺字段 / 未识别取值不猜。
- * 取消（stop / 误用 research_first）与确认、超时同形占时间线存根。
+ * 取消（stop）与确认、超时同形占时间线存根。
  */
 export function askResolvedDisplay(
   intent: CheckpointIntent | AskUiIntent,

@@ -1,6 +1,6 @@
 {
   "name": "multi_agent_stage_card_start_debate",
-  "description": "批B·推进卡：stage_card_required → start_debate → 幕2 新图+prev（authorized_by=stage_card）",
+  "description": "幕1 调研 → 幕2 开辩（authorized_by=auto）+ 换话题对照骨",
   "events": [
     {
       "type": "message_start",
@@ -181,36 +181,6 @@
       "timestamp": "2026-01-01T00:00:02.007Z"
     },
     {
-      "type": "stage_card_required",
-      "payload": {
-        "stage_card_id": "sc_stage_1",
-        "conversation_id": "conv_demo",
-        "motion": "品牌是否应立即终止争议代言联名",
-        "sides": [
-          {
-            "key": "pro",
-            "name": "立即终止方",
-            "stance": "应立刻切割止损"
-          },
-          {
-            "key": "con",
-            "name": "冷静观望方",
-            "stance": "证据未定不宜仓促解约"
-          }
-        ],
-        "form": "debate",
-        "rationale": "各方握同一事实却价值对立，继续取证无效",
-        "fact_pointers": [
-          "#r1"
-        ],
-        "max_rounds": 5,
-        "host_execution_id": "exec_stage_card",
-        "synthesizer_run_id": "synthesizer",
-        "host_message_id": "m1"
-      },
-      "timestamp": "2026-01-01T00:00:02.008Z"
-    },
-    {
       "type": "message_end",
       "payload": {
         "finish_reason": "end_turn",
@@ -231,7 +201,7 @@
         },
         "rounds": 0
       },
-      "timestamp": "2026-01-01T00:00:02.009Z"
+      "timestamp": "2026-01-01T00:00:02.008Z"
     },
     {
       "type": "message_start",
@@ -239,23 +209,14 @@
         "message_id": "m2",
         "conversation_id": "conv_demo"
       },
-      "timestamp": "2026-01-01T00:00:02.010Z"
-    },
-    {
-      "type": "stage_card_resolved",
-      "payload": {
-        "stage_card_id": "sc_stage_1",
-        "decision": "start_debate",
-        "note": ""
-      },
-      "timestamp": "2026-01-01T00:00:02.011Z"
+      "timestamp": "2026-01-01T00:00:02.009Z"
     },
     {
       "type": "content_delta",
       "payload": {
         "delta": "按此开辩。"
       },
-      "timestamp": "2026-01-01T00:00:02.012Z"
+      "timestamp": "2026-01-01T00:00:02.010Z"
     },
     {
       "type": "run_plan",
@@ -285,10 +246,10 @@
           "kind": "debate",
           "title": "辩论对抗",
           "anchor_run_id": "synthesizer",
-          "authorized_by": "stage_card"
+          "authorized_by": "auto"
         }
       },
-      "timestamp": "2026-01-01T00:00:02.013Z"
+      "timestamp": "2026-01-01T00:00:02.011Z"
     },
     {
       "type": "run_started",
@@ -298,7 +259,7 @@
         "parent_run_id": "c2",
         "kind": "agent"
       },
-      "timestamp": "2026-01-01T00:00:02.014Z"
+      "timestamp": "2026-01-01T00:00:02.012Z"
     },
     {
       "type": "debate_round_started",
@@ -311,7 +272,7 @@
         "opening": "先从法律风险切入。",
         "form": "debate"
       },
-      "timestamp": "2026-01-01T00:00:02.015Z"
+      "timestamp": "2026-01-01T00:00:02.013Z"
     },
     {
       "type": "run_plan",
@@ -359,10 +320,10 @@
           "kind": "debate",
           "title": "辩论对抗",
           "anchor_run_id": "synthesizer",
-          "authorized_by": "stage_card"
+          "authorized_by": "auto"
         }
       },
-      "timestamp": "2026-01-01T00:00:02.016Z"
+      "timestamp": "2026-01-01T00:00:02.014Z"
     },
     {
       "type": "run_started",
@@ -375,7 +336,7 @@
         "group": "debate:debate",
         "round": 1
       },
-      "timestamp": "2026-01-01T00:00:02.017Z"
+      "timestamp": "2026-01-01T00:00:02.015Z"
     },
     {
       "type": "run_output_delta",
@@ -384,7 +345,7 @@
         "agent_id": "debate_mod_sc_r1_pro",
         "delta": "应立即终止以止损。"
       },
-      "timestamp": "2026-01-01T00:00:02.018Z"
+      "timestamp": "2026-01-01T00:00:02.016Z"
     },
     {
       "type": "run_completed",
@@ -411,7 +372,7 @@
           "pricing_source": "curated"
         }
       },
-      "timestamp": "2026-01-01T00:00:02.917Z"
+      "timestamp": "2026-01-01T00:00:02.915Z"
     },
     {
       "type": "run_started",
@@ -424,7 +385,7 @@
         "group": "debate:debate",
         "round": 1
       },
-      "timestamp": "2026-01-01T00:00:02.918Z"
+      "timestamp": "2026-01-01T00:00:02.916Z"
     },
     {
       "type": "run_output_delta",
@@ -433,7 +394,7 @@
         "agent_id": "debate_mod_sc_r1_con",
         "delta": "宜冷静观望。"
       },
-      "timestamp": "2026-01-01T00:00:02.919Z"
+      "timestamp": "2026-01-01T00:00:02.917Z"
     },
     {
       "type": "run_completed",
@@ -460,7 +421,7 @@
           "pricing_source": "curated"
         }
       },
-      "timestamp": "2026-01-01T00:00:03.818Z"
+      "timestamp": "2026-01-01T00:00:03.816Z"
     },
     {
       "type": "debate_result",
@@ -506,7 +467,7 @@
         },
         "closings": []
       },
-      "timestamp": "2026-01-01T00:00:03.819Z"
+      "timestamp": "2026-01-01T00:00:03.817Z"
     },
     {
       "type": "run_completed",
@@ -533,14 +494,14 @@
           "pricing_source": "curated"
         }
       },
-      "timestamp": "2026-01-01T00:00:04.014Z"
+      "timestamp": "2026-01-01T00:00:04.012Z"
     },
     {
       "type": "content_delta",
       "payload": {
         "delta": "## 辩论收报\n倾向冷静观望。"
       },
-      "timestamp": "2026-01-01T00:00:04.015Z"
+      "timestamp": "2026-01-01T00:00:04.013Z"
     },
     {
       "type": "message_end",
@@ -563,7 +524,7 @@
         },
         "rounds": 0
       },
-      "timestamp": "2026-01-01T00:00:04.016Z"
+      "timestamp": "2026-01-01T00:00:04.014Z"
     }
   ],
   "projected": {
@@ -770,40 +731,14 @@
         "kind": "debate",
         "title": "辩论对抗",
         "anchorRunId": "synthesizer",
-        "authorizedBy": "stage_card"
+        "authorizedBy": "auto"
       }
     ],
     "progress": {
       "completed": 3,
       "total": 3
     },
-    "interactions": [
-      {
-        "kind": "stage_card",
-        "id": "sc_stage_1",
-        "status": "resolved",
-        "motion": "品牌是否应立即终止争议代言联名",
-        "sides": [
-          {
-            "key": "pro",
-            "name": "立即终止方",
-            "stance": "应立刻切割止损"
-          },
-          {
-            "key": "con",
-            "name": "冷静观望方",
-            "stance": "证据未定不宜仓促解约"
-          }
-        ],
-        "form": "debate",
-        "rationale": "各方握同一事实却价值对立，继续取证无效",
-        "factPointers": [
-          "#r1"
-        ],
-        "maxRounds": 5,
-        "note": null
-      }
-    ],
+    "interactions": [],
     "cost": {
       "input": 240000,
       "cached": 64000,
@@ -863,15 +798,12 @@
         "sides": [],
         "clashes": [],
         "cross_exam": [],
-        "witness_exam": [],
-        "findings": [],
-        "thread_turns": []
+        "witness_exam": []
       }
     ],
     "debatePretrial": null,
     "crossExamEnabled": false,
     "debateOpening": "先从法律风险切入。",
-    "teamSynthesisPreview": null,
     "deliveryStatus": null,
     "turnWarning": null,
     "autoFolder": null,

@@ -10,8 +10,6 @@ from agentcore.core.types import DEFAULT_PERMISSION_AXES, PermissionAxes
 from agentcore.llm.profiles import TurnProfiles
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.context import (
-    ContextAssembler,
-    SectionOrder,
     build_workspace_overview,
     resolve_channel_profile,
 )
@@ -22,6 +20,7 @@ from agentcore.runtime.resolve.prompt import (
     attachment_material_scene,
     compose_ceo_chat_prompt,
 )
+from agentcore.runtime.resolve.prompt.envelope import render_ceo_turn_envelope
 from agentcore.runtime.sessions import SessionLoader, SessionSaver, default_session_registry
 from agentcore.runtime.suspension import SuspensionDeleter, SuspensionSaver
 from agentcore.tools.builtin import (
@@ -41,7 +40,7 @@ from .prepare import PreparedTurn, _timed_phase
 
 @dataclass
 class AssembledTurn:
-    """Phase-2 outputs: wired CEO tools + assembled chat prompt."""
+    """Phase-2 outputs: wired CEO tools + frozen system prompt + turn envelope."""
 
     approval_gate: ApprovalGate | None
     permission_axes: PermissionAxes
@@ -49,46 +48,7 @@ class AssembledTurn:
     debate_tool: Any
     chat_tools: ToolRegistry
     chat_system_prompt: str
-
-
-def build_chat_system_prompt(
-    *,
-    ceo_prompt: str,
-    prior_delegate_retry: str,
-    attachment_context: str,
-    registered_sources: str,
-    table_context: str = "",
-    soft_cap: int | None,
-) -> str:
-    """Render the turn's CEO system prompt from its sections — the ONE assembly point.
-
-    Variable tail AFTER the stable hint stack (attachments +
-    来源台账) so the CEO prefix (base + hints, including ``<工作区>``
-    with the CEO file index already spliced) stays byte-identical across turns
-    except when those facts themselves change. Empty sections are dropped, so a
-    turn with none is byte-identical to the bare CEO prompt.
-
-    EVERY section the CEO's system prompt carries must come in through here. A fragment
-    appended to the returned string instead lands outside ``assembly_hash`` /
-    ``total_chars`` / ``section_digests``, so the prefix-drift signal and the soft cap
-    silently under-report by that whole block — and the fragments tempting enough to
-    append late (``registered_sources``: hydrated from the whole conversation) are
-    precisely the ones that grow every turn (CTX-A3).
-
-    COST-004 (仅观测起步): ``observe`` logs per-section chars + whether the soft cap is
-    exceeded, 攒据用、零行为改动。此处是「易变尾」与稳定前缀 (ceo_prompt) 同框的 choke
-    point, 正是未来「仅裁易变尾」软闸的作用点 (项目审计-成本性能专项 §九)。
-    """
-    return (
-        ContextAssembler()
-        .add("ceo_prompt", ceo_prompt, SectionOrder.BASE)
-        .add("prior_delegate_retry", prior_delegate_retry, SectionOrder.PRIOR_DELEGATE_RETRY)
-        .add("attachment_context", attachment_context, SectionOrder.ATTACHMENT)
-        .add("table_context", table_context, SectionOrder.TABLE_FACTS)
-        .add("registered_sources", registered_sources, SectionOrder.REGISTERED_SOURCES)
-        .observe(scope="ceo_turn", soft_cap=soft_cap)
-        .render()
-    )
+    chat_envelope: str
 
 
 async def assemble_ceo_turn(
@@ -118,7 +78,7 @@ async def assemble_ceo_turn(
     # (``build_ceo_tool_registry`` — web_search/web_fetch/file_read/file_list/
     # grep) plus the on-demand orchestration primitive ``delegate``. It holds
     # NONE of the production / mutation tools (file_write/str_replace/
-    # file_delete/file_move/code_execute); any work that produces or changes an
+    # file_delete/file_batch/code_execute); any work that produces or changes an
     # artifact is handed to a worker. There is no mandatory pre-turn
     # orchestrator pass — the CEO itself decides when/at what granularity to
     # delegate. ``delegate`` is NON-terminal: workers' products return to the
@@ -163,16 +123,13 @@ async def assemble_ceo_turn(
     # turn); bounded by TTL + count + byte caps, idle conversations reaped. An
     # expiry / miss falls back to 甲 (re-delegate). Cross-process persistence: P3.
     session_store = default_session_registry().get_or_create(conversation_id)
-    # Structured DAG checkpoints (结构化挂起 2a) share the SAME gate as ask_user
-    # (a live interactive user): an autonomous handoff job has no client to
-    # answer, so a checkpoint there would only ever time out. Computed here —
-    # before the delegate tool — because delegate consumes it too (it suspends
-    # the WaveScheduler at a wave boundary when a step is marked checkpoint_after).
+    # Structured DAG checkpoints retired; leftover extra keys ignored.
+    # Same live-user gate as ask_user: an autonomous handoff job has no client.
     checkpoint_enabled = settings.checkpoint_gate_enabled and approvals_enabled
     # The delegate tool gets the worker base prompt — the CLEAN base (no CEO chat
     # hints, reused verbatim by workers in runs/executor/ — they must not be told
     # about a delegate tool they do not hold) plus this turn's attachment block.
-    # message_id + the suspension closures arm durable plan_review pauses (结构化
+    # message_id + the suspension closures arm durable ask_user pauses (结构化
     # 挂起 2b) on the top-level delegate.
     # Look up via ``pipeline.run`` so governance tests can monkeypatch the seam.
     from agentcore.runtime.pipeline import run as run_mod
@@ -232,8 +189,6 @@ async def assemble_ceo_turn(
     # The entry chat agent gets the SLIM CEO core + the unified ``<按需目录>``.
     # Advanced HOW detail is pulled via ``consult``. Never open a write-explore
     # act; ``update_folder_profile`` stays off the live table.
-    explore_reason: str | None = None
-    folder_nav_stale = False
     from agentcore.runtime.resolve.ceo_surface import apply_explore_profile_surface
 
     apply_explore_profile_surface(chat_tools, pending=False)
@@ -262,11 +217,6 @@ async def assemble_ceo_turn(
         ceo_tool_names=ceo_tool_names,
         ceo_offered_names=ceo_offered_names,
         on_demand_entries=on_demand_entries,
-        workspace_context=prepared.workspace_facts,
-        workspace_file_index=workspace_overview,
-        cold_start_explore=explore_reason or False,
-        folder_nav_stale=folder_nav_stale,
-        attachment_material=attachment_material_scene(prepared.attachment_context),
     )
     # 可用性诚实性 · 甲：偏窄短问 → 复用最近 delivery_status 发卡到本回合答复面。
     from agentcore.runtime.delegate.delivery_status import (
@@ -282,10 +232,11 @@ async def assemble_ceo_turn(
     )
     # 出处诚实：hydrate 后注入「已登记来源」结构化摘要（对照台账字段，禁占位叙事）。
     # Tools register into the ledger only once the loop runs, so its content is settled
-    # for this turn's prompt here.
-    chat_system_prompt = build_chat_system_prompt(
-        ceo_prompt=chat_system_prompt,
-        prior_delegate_retry="",
+    # for this turn's envelope here. Frozen system stays byte-stable across turns.
+    chat_envelope = render_ceo_turn_envelope(
+        workspace_context=prepared.workspace_facts,
+        workspace_file_index=workspace_overview,
+        attachment_material=attachment_material_scene(prepared.attachment_context),
         attachment_context=prepared.attachment_context,
         table_context=prepared.table_context,
         registered_sources=format_registered_sources_prompt(evidence_ledger),
@@ -305,4 +256,5 @@ async def assemble_ceo_turn(
         debate_tool=debate_tool,
         chat_tools=chat_tools,
         chat_system_prompt=chat_system_prompt,
+        chat_envelope=chat_envelope,
     )

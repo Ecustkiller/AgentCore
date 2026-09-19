@@ -129,13 +129,13 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   // the same projection key — querying by the local client UUID silently missed
   // every card (统一投影键, 时间线一期).
   const projectionId = assistantProjectionId(message);
-  const { checkpoints, planReviews } = useMessageInteractionCards(
+  const { checkpoints } = useMessageInteractionCards(
     conversationId,
     projectionId,
   );
-  const hasDedicatedPauseOrAskUi =
-    checkpoints.some((c) => c.status === "pending") ||
-    planReviews.some((p) => p.status === "pending");
+  const hasDedicatedPauseOrAskUi = checkpoints.some(
+    (c) => c.status === "pending",
+  );
   const execSlot = useExecutionStore((s) => s.byId[projectionId]);
   const hasTeamStrip = assistantHasTeamStrip(message, execSlot);
   const outcome = turnOutcomeForAssistant(message, execSlot, {
@@ -302,7 +302,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       journal={message.runs}
       conversationId={conversationId}
       checkpoints={checkpoints}
-      planReviews={planReviews}
       onOpenWorkspacePath={onOpenWorkspacePath}
     />
   ) : (

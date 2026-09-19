@@ -24,7 +24,7 @@ describe("coldSettlement criterion", () => {
       checkpointIdIfColdResolved("plan_review_resolved", {
         checkpoint_id: "pr1",
       }),
-    ).toBe("pr1");
+    ).toBeNull();
     expect(
       checkpointIdIfColdResolved("checkpoint_resolved", {
         checkpoint_id: "cp1",
@@ -41,9 +41,10 @@ describe("coldSettlement criterion", () => {
       },
       { type: leftoverResolved, payload: { checkpoint_id: "tp1" } },
       { type: "plan_review_resolved", payload: { checkpoint_id: "pr1" } },
+      { type: "checkpoint_resolved", payload: { checkpoint_id: "cp1" } },
       { type: "approval_resolved", payload: { approval_id: "a1" } },
     ]);
-    expect([...ids].sort()).toEqual(["pr1"]);
+    expect([...ids].sort()).toEqual(["cp1"]);
   });
 
   it("collects journal events across messages", () => {
@@ -52,8 +53,8 @@ describe("coldSettlement criterion", () => {
         runs: {
           events: [
             {
-              type: "plan_review_resolved",
-              payload: { checkpoint_id: "pr1" },
+              type: "checkpoint_resolved",
+              payload: { checkpoint_id: "cp1" },
             },
           ],
         },
@@ -61,7 +62,7 @@ describe("coldSettlement criterion", () => {
       { runs: { events: [] } },
       {},
     ]);
-    expect(settledColdIdsFromEvents(events).has("pr1")).toBe(true);
+    expect(settledColdIdsFromEvents(events).has("cp1")).toBe(true);
   });
 
   it("is settled when journal, noted id, or entry is terminal", () => {

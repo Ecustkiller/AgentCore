@@ -81,10 +81,11 @@ def test_derive_ceo_addon_splits_shared_prefix_from_full_ceo_prompt():
 
 def test_shared_base_xml_tags():
     out = assemble_system_prompt()
-    for tag in ("输出", "输入", "诚实", "工作权威", "运行时"):
+    for tag in ("输出", "输入", "诚实", "工作权威"):
         assert f"<{tag}>" in out and f"</{tag}>" in out
     assert "<身份>" not in out
     assert "</工作区>" not in out
+    assert "<运行时>" not in out
     assert _DEFAULT_SYSTEM_PROMPT.count("<输出>") == 1
     assert _DEFAULT_SYSTEM_PROMPT.count("<诚实>") == 1
 
@@ -92,9 +93,6 @@ def test_shared_base_xml_tags():
 def test_output_english_affordances():
     style = assemble_system_prompt().split("<输出>", 1)[1].split("</输出>", 1)[0]
     assert "emoji" in style
-    assert "Markdown" in style
-    assert "LaTeX" in style
-    assert "mermaid" in style
 
 
 def test_inbound_tags_fences_and_system_prompt_marker():
@@ -118,16 +116,17 @@ def test_web_search_not_restated_in_base_tooling():
 
 
 def test_runtime_context_uses_date_granularity_for_cache_stability():
-    # The runtime-context line sits in the system-prompt prefix BEFORE the large
-    # stable hint stack, so it must NOT carry second-precision time: a value that
-    # changed every turn broke DeepSeek's exact-prefix cache for everything after it
-    # (the whole CEO hint stack got re-billed each turn). Pin date granularity + the
-    # call-to-call stability that makes the stable core cacheable within a day, so a
-    # refactor can't silently reintroduce the cache-buster.
-    out = assemble_system_prompt()
-    assert re.search(r"当前日期：\d{4}-\d{2}-\d{2}", out)
-    assert not re.search(r"\d{2}:\d{2}:\d{2}", out)  # no HH:MM:SS timestamp
-    assert assemble_system_prompt() == out  # byte-identical across calls (same day)
+    from agentcore.runtime.resolve.prompt import render_ceo_turn_envelope, render_runtime_date_block
+
+    block = render_runtime_date_block()
+    assert re.search(r"当前日期：\d{4}-\d{2}-\d{2}", block)
+    assert not re.search(r"\d{2}:\d{2}:\d{2}", block)
+    assert render_runtime_date_block() == block
+    env = render_ceo_turn_envelope()
+    assert re.search(r"当前日期：\d{4}-\d{2}-\d{2}", env)
+    worker = compose_worker_base_prompt(assemble_system_prompt())
+    assert re.search(r"当前日期：\d{4}-\d{2}-\d{2}", worker)
+    assert "<运行时>" not in assemble_system_prompt()
 
 
 def test_output_style_survives_memory_and_context_layers():
@@ -147,8 +146,9 @@ def test_style_precedes_ceo_only_core_when_composed():
     ceo = _compose_ceo({"delegate", "consult"})
     assert "<输出>" in base
     assert "<输出>" not in _CEO_CORE_HINT
-    assert ceo.find("<输出>") < ceo.find("<运行时>") < ceo.find("<身份>")
+    assert ceo.find("<输出>") < ceo.find("<身份>")
     assert ceo.find("<身份>") < ceo.find("<按需目录>")
+    assert "<运行时>" not in ceo
 
 
 def test_capability_how_gated_on_ceo_tool_names():
@@ -252,7 +252,7 @@ def test_how_identifiers_not_in_resident_core():
     for sig in _HANDBOOK_SIGNATURES:
         assert sig not in hint
     for key in (
-        "file_copy",
+        "folders",
         "create_folder",
         "md_export",
         "consult(name)",
@@ -358,7 +358,7 @@ def test_run_skill_does_not_ban_curl():
 
 
 def test_core_teaches_narrowed_attachment_scope_must_start():
-    # 定案 A：场面门（同构 cold_start）：常驻核不载全文，仅本回合有附件块 /
+    # 定案 A：场面门：常驻核不载全文，仅本回合有附件块 /
     # [resident missing] 时注入。
     hint = _CEO_CORE_HINT
     assert "【本轮材料收窄】" not in hint
@@ -367,17 +367,14 @@ def test_core_teaches_narrowed_attachment_scope_must_start():
     assert "【本轮材料收窄】" in gated
     assert "[resident missing]" in gated
 
+    from agentcore.runtime.resolve.prompt import render_ceo_turn_envelope
+
     names = {"consult", "delegate", "ask_user"}
     without = compose_ceo_chat_prompt(
         "BASE",
         ceo_tool_names=names,
-        attachment_material=False,
     )
-    with_flag = compose_ceo_chat_prompt(
-        "BASE",
-        ceo_tool_names=names,
-        attachment_material=True,
-    )
+    with_flag = render_ceo_turn_envelope(attachment_material=True, include_runtime=False)
     assert "<本轮材料>" not in without
     assert "<本轮材料>" in with_flag
     assert "【本轮材料收窄】" in with_flag

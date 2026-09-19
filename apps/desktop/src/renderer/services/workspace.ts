@@ -324,7 +324,7 @@ export type ExportWorkspaceToLocalResult =
 
 /**
  * 云 scratch → 本机单向 checkout（§八.7 / §7.6）：快照 → 用户选目录解压落地。
- * 不必登记合回落点；合回落点写出走 Diff / 只合回产物。非桌面 → unavailable。
+ * 不必登记合回落点；合回落点写出走 Diff 勾选合回。非桌面 → unavailable。
  */
 export async function exportWorkspaceToLocal(
   conversationId: string,

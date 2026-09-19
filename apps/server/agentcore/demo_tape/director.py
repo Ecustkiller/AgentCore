@@ -46,10 +46,7 @@ from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.interaction import InteractionKind, default_interaction_registry
 from agentcore.runtime.settlement import prewrite_cold_resume_settlement
-from agentcore.runtime.suspension import (
-    AskUserSuspension,
-    PlanReviewSuspension,
-)
+from agentcore.runtime.suspension import AskUserSuspension
 from agentcore.runtime.suspension.persistence import (
     claim_paused_turn,
     delete_paused_turn,
@@ -62,7 +59,7 @@ logger = get_logger(__name__)
 
 SinkSetup = Callable[[EventSink], None]
 
-_TAPE_DURABLE_KINDS = (AskUserSuspension, PlanReviewSuspension)
+_TAPE_DURABLE_KINDS = (AskUserSuspension,)
 
 
 def _tape_id_for(path: Path) -> str:

@@ -1,5 +1,4 @@
-"""Interaction resolution: settle a paused approval / escalation / delegation /
-stage_card."""
+"""Interaction resolution: settle a paused approval / escalation / client tool."""
 
 from __future__ import annotations
 
@@ -11,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agentcore.api.dependencies import AuthUser, get_conversation_repo, get_db
 from agentcore.api.schemas import (
     ResolveInteractionRequest,
-    ResolveStageCardInteraction,
     StatusResponse,
     interaction_result_from_body,
 )
@@ -90,22 +88,6 @@ async def _journal_pending_for_id(
     return None, None
 
 
-async def _resolve_stage_card(
-    *,
-    conversation_id: str,
-    interaction_id: str,
-    body: ResolveStageCardInteraction,
-    user: AuthUser,
-    session: AsyncSession,
-    x_client_platform: str | None,
-):
-    """Leftover 推进卡 is not a debate entry — 410."""
-    from agentcore.runtime.kickoff.retired import refuse_stage_card_resolve
-
-    _ = (conversation_id, interaction_id, body, user, session, x_client_platform)
-    refuse_stage_card_resolve()
-
-
 @router.post("/{conversation_id}/interactions/{interaction_id}")
 async def resolve_interaction(
     conversation_id: str,
@@ -118,25 +100,14 @@ async def resolve_interaction(
 ):
     """Settle any paused hot-path interaction over the unified bridge (§8.2).
 
-    ``stage_card``：leftover 推进卡 resolve 为 410；开辩须用户在对话里点名。
-    其它 kind（approval / delegation / client_tool / escalation）：Settlement 预写 (D8)
+    approval / client_tool / escalation：Settlement 预写 (D8)
     后 settle Future；journal 有 required、无 Future → 410。
-    Cold-path ``ask_user`` / ``plan_review`` 不在此 endpoint。
-    Leftover ``team_preview`` resume is 410 on ``POST …/resume``.
+    Cold-path ``ask_user`` 不在此 endpoint。
+    Leftover ``team_preview`` / ``plan_review`` resume is 410 on ``POST …/resume``.
     """
     access = await _require_conversation_write(conversation_id, user.user_id, session)
     if access.is_member_turn and body.kind == "client_tool":
         raise AuthorizationError("不能代结桌主的本机审批")
-
-    if isinstance(body, ResolveStageCardInteraction):
-        return await _resolve_stage_card(
-            conversation_id=conversation_id,
-            interaction_id=interaction_id,
-            body=body,
-            user=user,
-            session=session,
-            x_client_platform=x_client_platform,
-        )
 
     result = interaction_result_from_body(body)
     registry = default_interaction_registry()

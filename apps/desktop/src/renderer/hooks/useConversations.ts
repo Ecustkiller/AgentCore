@@ -309,13 +309,17 @@ export function usePurgeTrashedConversation() {
   });
 }
 
-/** Clone a conversation into a new one carrying a copy of its transcript (克隆对话).
- * Server-first (the copy only exists once the backend commits it); on success the
- * returned row is prepended to the sidebar cache so it appears at the top, and the
- * caller navigates into it. */
+/** Clone the transcript through one message (克隆对话). Server-first; on success
+ * the returned row is prepended to the sidebar cache so it appears at the top. */
 export function useDuplicateConversation() {
   return useMutation({
-    mutationFn: (id: string) => apiDuplicateConversation(id),
+    mutationFn: ({
+      id,
+      untilMessageId,
+    }: {
+      id: string;
+      untilMessageId: string;
+    }) => apiDuplicateConversation(id, untilMessageId),
     onSuccess: (conv) => upsertConversationFront(conv),
   });
 }

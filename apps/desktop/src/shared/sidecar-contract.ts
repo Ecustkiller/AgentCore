@@ -287,21 +287,22 @@ export interface SidecarTurnResult {
  *
  * 字段**严格**对齐服务端 `PausedTurnSummary`（snake_case）——renderer 把它**原样**喂给
  * 同一个 `usePausedTurnStore.setForConversation`（云 / 本地共用一套挂起卡渲染，零重映射，
- * 同 `SidecarRunsPayload` 对齐云 schema 的姿态）。sidecar 回合暂停于 plan_review / ask_user 检查点
+ * 同 `SidecarRunsPayload` 对齐云 schema 的姿态）。sidecar 回合暂停于 ask_user 检查点
  * 且应用关闭后，帧落本机文件；重开会话时由主进程直接读盘列出（不拉起 Python）。
+ * leftover `plan_review` / `team_preview` 帧不进此摘要（list skip / resume 410）。
  */
 export interface SidecarPausedTurn {
   message_id: string;
   /** 暂停点类型——决定续跑卡片形态。 */
-  kind: "plan_review" | "ask_user";
+  kind: "ask_user";
   checkpoint_id: string;
   user_message: string;
   /** Client-minted id of the user bubble (pinned on pause write-back). */
   user_message_id?: string;
-  /** plan_review：被复核的检查点步 / 被门控的下游步（ask_user 帧为空）。 */
+  /** Unused leftover slots (retired plan_review card). */
   steps: Record<string, unknown>[];
   pending: Record<string, unknown>[];
-  /** ask_user：统一卡片载荷（plan_review 帧为空）。 */
+  /** ask_user：统一卡片载荷。 */
   question: string;
   questions: Record<string, unknown>[];
 }
@@ -331,14 +332,13 @@ export interface SidecarResumeRequest {
   userId?: string;
   /** 挂起时已落库的原始 user 气泡 id —— outbox 幂等锚（同 startTurn.userMessageId）。 */
   userMessageId?: string;
-  /** continue / adjust / stop（冷 resume）；research_first 仅 stage_card 路径。 */
-  decision: "continue" | "adjust" | "stop" | "research_first";
+  /** continue / adjust / stop（冷 resume）。 */
+  decision: "continue" | "adjust" | "stop";
   /**
-   * continue：可选嘱咐；adjust：转向说明；stop：收尾语；
-   * research_first：stage_card 先调研，冷 resume 忽略 note。
+   * continue：可选嘱咐；adjust：转向说明；stop：收尾语。
    */
   note: string;
-  /** ask_user 的选项选择；plan_review 忽略。 */
+  /** ask_user 的选项选择。 */
   selected?: string[];
   /** Structured website style pick (s0/s1/…). */
   /**
@@ -763,6 +763,7 @@ export interface SidecarQueuedAttachment {
   document_id?: string;
   binary?: boolean;
   workspace_path?: string;
+  source_folder_id?: string;
 }
 
 /**

@@ -167,12 +167,12 @@ describe("submitInteraction path table", () => {
     expect(store().get("cp1")?.status).toBe("resolved");
   });
 
-  it("cold path after recovery: no interactions entry still calls runResume (plan_review)", async () => {
+  it("cold path after recovery: no interactions entry still calls runResume (ask_user)", async () => {
     // Recovery clears cold pending_interactions; pausedTurns is the authority.
     expect(store().get("pr1")).toBeUndefined();
     const result = await submitInteraction({
       id: "pr1",
-      kind: "plan_review",
+      kind: "ask_user",
       conversationId: "c1",
       cold: {
         messageId: "srv-m1",
@@ -221,7 +221,7 @@ describe("submitInteraction path table", () => {
     await expect(
       submitInteraction({
         id: "pr1",
-        kind: "plan_review",
+        kind: "ask_user",
         conversationId: "c1",
         cold: { messageId: "srv-m1", decision: "continue", note: "" },
       }),
@@ -233,7 +233,7 @@ describe("submitInteraction path table", () => {
 
   it("cold path: tracked entry reopens on runResume failure (no fake resolved)", async () => {
     store().upsertRequired({
-      kind: "plan_review",
+      kind: "ask_user",
       conversationId: "c1",
       messageId: "m1",
       payload: { checkpoint_id: "pr1", steps: [], pending: [] },
@@ -244,7 +244,7 @@ describe("submitInteraction path table", () => {
     await expect(
       submitInteraction({
         id: "pr1",
-        kind: "plan_review",
+        kind: "ask_user",
         conversationId: "c1",
         cold: { messageId: "srv-pr", decision: "continue", note: "" },
       }),
@@ -342,13 +342,13 @@ describe("submitInteraction path table", () => {
 
     const first = submitInteraction({
       id: "pr1",
-      kind: "plan_review",
+      kind: "ask_user",
       conversationId: "c1",
       cold: { messageId: "srv-m1", decision: "continue", note: "" },
     });
     const second = await submitInteraction({
       id: "pr1",
-      kind: "plan_review",
+      kind: "ask_user",
       conversationId: "c1",
       cold: { messageId: "srv-m1", decision: "continue", note: "" },
     });
@@ -429,7 +429,7 @@ describe("submitInteraction · 已经结了的回执", () => {
    */
   it("冷路帧真失效 → 卡作废（不冒充「已处理」、也不放回可点）", async () => {
     store().upsertRequired({
-      kind: "plan_review",
+      kind: "ask_user",
       conversationId: "c1",
       messageId: "m1",
       payload: { checkpoint_id: "pr-gone", steps: [], pending: [] },
@@ -441,7 +441,7 @@ describe("submitInteraction · 已经结了的回执", () => {
 
     const result = await submitInteraction({
       id: "pr-gone",
-      kind: "plan_review",
+      kind: "ask_user",
       conversationId: "c1",
       cold: { messageId: "srv-pr", decision: "continue", note: "" },
     });
@@ -455,7 +455,7 @@ describe("submitInteraction · 已经结了的回执", () => {
 
   it("冷路帧还在的失败仍放回可点（这次没发出去，不是卡结了）", async () => {
     store().upsertRequired({
-      kind: "plan_review",
+      kind: "ask_user",
       conversationId: "c1",
       messageId: "m1",
       payload: { checkpoint_id: "pr-busy", steps: [], pending: [] },
@@ -465,7 +465,7 @@ describe("submitInteraction · 已经结了的回执", () => {
     await expect(
       submitInteraction({
         id: "pr-busy",
-        kind: "plan_review",
+        kind: "ask_user",
         conversationId: "c1",
         cold: { messageId: "srv-pr", decision: "continue", note: "" },
       }),

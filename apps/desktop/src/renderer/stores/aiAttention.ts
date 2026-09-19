@@ -9,7 +9,7 @@
  * 灭断线期间的假灯）。增量 `ai_attention` 走 fulfill，过渡期也可从 realtime 入站；
  * replace 只认 fulfill 快照。打开对话不再清灯——当前页的 banner / 提醒自己过滤。
  *
- * 本存储只回答：**哪些对话正停着等人**。侧栏「等你」灯与跨对话提醒都读它。对话页
+ * 本存储只回答：**哪些对话正停着等人**。侧栏「等你」灯与协作感知出口都读它。对话页
  * 内真正的可操作面仍是 ApprovalPrompt / ResumePrompt。
  */
 import { useMemo } from "react";
@@ -172,7 +172,7 @@ export function clearAiAttention(): void {
   useAiAttentionStore.getState().clear();
 }
 
-/** 该对话是否正停着等人（跨对话信号；与页内卡的判定并联点亮侧栏灯）。 */
+/** 该对话是否正停着等人（多端同权信号；与页内卡的判定并联点亮侧栏灯）。 */
 export function useConversationAwaitingAttention(
   conversationId: string,
 ): boolean {
@@ -191,7 +191,7 @@ export function useRequiredConversationIds(): ReadonlySet<string> {
   }, [entries]);
 }
 
-/** 快照读（非 React 调用方：跨对话提醒的去重与对账）。 */
+/** 快照读（非 React 调用方：协作感知出口的去重与对账）。 */
 export function aiAttentionEntries(): readonly AiAttentionEntry[] {
   return useAiAttentionStore.getState().entries;
 }

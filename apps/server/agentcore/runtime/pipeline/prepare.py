@@ -42,7 +42,6 @@ from agentcore.tools.ceo_toolset import wire_worker_consult
 from agentcore.tools.mcp.wire import McpDiscoverResult
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
-from agentcore.vision import resolve_vision_reader_for_conversation
 from agentcore.workspace.cloud_tree import normalize_rel_path
 from agentcore.workspace.locate import (
     resolve_conversation_local_binding,
@@ -213,10 +212,6 @@ async def prepare_fresh_turn(
             folder_user_id=folder_rules_user_id,
         ),
     )
-    desk_folder_label = await _timed_phase(
-        "desk_folder_label",
-        resolve_desk_folder_label(folder_rules_user_id, folder_id),
-    )
     # Clean, stable base (base + date + workspace facts + memory): NO attachments,
     # NO CEO hints. This is the cacheable prefix shared by the CEO and reused
     # verbatim by workers. Environment facts ride the shared base so workers also
@@ -240,6 +235,25 @@ async def prepare_fresh_turn(
     )
 
     raise_if_local_workspace_fulfiller_absent(user_id=user_id, backend=backend)
+    auto_desk_folder_id: str | None = None
+    if folder_id is None:
+        from agentcore.runtime.delegate.target_desktop import adopt_persisted_auto_desk
+
+        adopted = await adopt_persisted_auto_desk(
+            birth_folder_id=folder_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            birth_backend=backend,
+            sink=sink,
+        )
+        if adopted is not None:
+            backend = adopted.backend
+            auto_desk_folder_id = adopted.folder_id
+    sitting_folder_id = folder_id or auto_desk_folder_id
+    desk_folder_label = await _timed_phase(
+        "desk_folder_label",
+        resolve_desk_folder_label(folder_rules_user_id, sitting_folder_id),
+    )
     with prepare_local_io_span(backend):
         from agentcore.tools.sandbox.exec_languages import resolve_exec_languages
 
@@ -303,31 +317,22 @@ async def prepare_fresh_turn(
         mcp_label=mcp_label,
         git_fact=git_fact,
         outlet_inventory=outlet_inventory,
-        desk_folder_id=folder_id,
+        desk_folder_id=sitting_folder_id,
         desk_folder_label=desk_folder_label,
-        desk_is_birth=True,
+        desk_is_birth=folder_id is not None,
         desk_visibly_empty=desk_visibly_empty,
     )
     system_prompt = assemble_system_prompt(
         rules_markdown=rules_markdown,
     )
-    # Resolve vision before attachment context so resident images can eye→text.
-    # Turn-level ``role=vision`` sink is shared by REFERENCE with ToolContext
-    # (attachment reads / ``read_image``; executor ``replace`` keeps the same list).
-    vision_cost_sink: list[RunCost] = []
-    vision_reader = await _timed_phase(
-        "vision",
-        resolve_vision_reader_for_conversation(
-            user_id=user_id,
-            conversation_id=conversation_id,
-            llm_credentials=llm_credentials,
-        ),
-    )
+    # Resolve whether this turn's main model can take image parts before
+    # attachment context so resident images go native multimodal (or honest note).
     from agentcore.llm.image_accept import model_accepts_images
 
     main_model = profiles.model_for("chat") if profiles is not None else ""
     main_native_vision = model_accepts_images(main_model)
     native_image_parts: list[dict] = []
+    vision_cost_sink: list[RunCost] = []
     # Built before the attachment block: its ``code_execute`` steer must follow this
     # turn's real worker assembly, never a second predicate. MCP / consult wiring
     # below only adds tools and cannot flip the execution class.
@@ -343,9 +348,7 @@ async def prepare_fresh_turn(
             attachments,
             user_id=user_id,
             host_conversation_id=conversation_id,
-            vision_reader=None if main_native_vision else vision_reader,
             backend=backend,
-            cost_sink=None if main_native_vision else vision_cost_sink,
             main_native_vision=main_native_vision,
             native_image_parts=native_image_parts if main_native_vision else None,
             available_tools=worker_tools.names,
@@ -468,11 +471,9 @@ async def prepare_fresh_turn(
         table_id=table_id,
         desktop_channel=desktop_channel,
         workspace_channel=workspace_channel,
-        # Profile vision slot → reader; else platform VISION_* when billing_mode=platform.
-        # Same instance already used for attachment eye→text above.
-        vision_reader=vision_reader,
-        cost_sink=vision_cost_sink,
-        shared_workspace=folder_id is not None,
+        accepts_images=main_native_vision,
+        shared_workspace=folder_id is not None or auto_desk_folder_id is not None,
+        auto_desk_folder_id=auto_desk_folder_id,
         ownership_desk_id=(
             str(folder_id).strip()
             if isinstance(folder_id, str) and folder_id.strip()
@@ -485,24 +486,15 @@ async def prepare_fresh_turn(
         folder_local_subpath=folder_local_subpath or None,
         on_file_landed=invalidate_verify_cache_for_execution,
     )
-    # Bare-chat landing desk: seed turn hint + bind CEO file tools (never birth folder_id).
-    if folder_id is None:
-        from agentcore.runtime.delegate.target_desktop import (
-            _load_auto_desk_folder_id,
-            bind_tool_context_to_landing_desk,
-        )
+    if auto_desk_folder_id:
+        base_tool_context.turn_target_desk.note_folder(auto_desk_folder_id)
+    from agentcore.tools.builtin.file_ops.named_desk_read import stamp_named_file_pins
 
-        auto_desk = await _load_auto_desk_folder_id(
-            user_id=user_id, conversation_id=conversation_id
-        )
-        if auto_desk:
-            # Bind validates existence; on miss it clears the pointer for remint.
-            # Only note the desk after a successful bind (avoid poisoning turn hint).
-            ok = await bind_tool_context_to_landing_desk(
-                base_tool_context, folder_id=auto_desk
-            )
-            if ok:
-                base_tool_context.turn_target_desk.note_folder(auto_desk)
+    stamp_named_file_pins(
+        base_tool_context,
+        attachments,
+        sitting_folder_id=sitting_folder_id,
+    )
     from agentcore.runtime.closing_posture import reset_turn_scoped_closing_state
     from agentcore.runtime.coordination.session import current_execution_id
 

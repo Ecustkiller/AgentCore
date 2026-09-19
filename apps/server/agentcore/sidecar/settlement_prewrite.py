@@ -116,8 +116,6 @@ def settlement_keys_in_entries(
 
 _KIND_TO_RESOLVED = {
     "ask_user": "checkpoint_resolved",
-    "plan_review": "plan_review_resolved",
-    "team_preview": "team_preview_resolved",
 }
 
 

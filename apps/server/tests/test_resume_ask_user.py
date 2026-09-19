@@ -1,12 +1,12 @@
 """ask_user durable resume — answer→result mapping + frame settlement (结构化挂起 2b).
 
-Pins the pure pieces the ask_user ``POST .../resume`` path adds on top of the
-plan_review machinery:
+Pins the pure pieces the ask_user ``POST .../resume`` path adds (the only live
+durable kind):
 
 - :func:`ask_user_tool_result` is the SINGLE source of truth shared by the live tool
   and resume — continue / stop / timeout all feed the CEO loop a ``CONTINUE``
   result (stop is 拒答 with soft guidance, not empty-continue「按默认」; wire stays
-  ``decision=stop``). ``ADJUST`` is rejected (plan_review only).
+  ``decision=stop``). ``ADJUST`` is rejected.
 - :func:`_settle_resumed_suspension` applies the user's decision to a paused frame by
   kind: for ask_user it emits the journaled ``checkpoint_resolved``, drops off-menu
   picks (same guard as the live tool), and on a **first** STOP leaves ``terminal_text``
@@ -91,33 +91,6 @@ def test_result_continue_empty_injects_confirmed_defaults():
     assert "按确认默认" in res.output
     assert "先问你" not in res.output
     assert "上班族 + 半天块通用模板" in res.output
-
-
-def test_result_continue_empty_injects_path_default():
-    """53f08：新建仓库/本地路径 default + option.path → 空 continue 注入路径。"""
-    questions = [
-        {
-            "id": "q0",
-            "prompt": "仓库路径",
-            "kind": "choice",
-            "options": [
-                {"label": "当前目录建仓", "path": "C:/Work/demo-repo"},
-                {"label": "另选文件夹"},
-            ],
-            "multiple": False,
-            "default": "当前目录建仓",
-        }
-    ]
-    summary = confirmed_defaults_summary(questions)
-    assert "当前目录建仓" in summary
-    assert "C:/Work/demo-repo" in summary
-    res = ask_user_tool_result(
-        CheckpointResponse(decision=CheckpointDecision.CONTINUE, note="", selected=[]),
-        questions=questions,
-    )
-    assert res.output.startswith("用户确认默认：")
-    assert "C:/Work/demo-repo" in res.output
-    assert "按确认默认" in res.output
 
 
 def test_result_continue_empty_restates_options_without_default():
@@ -296,69 +269,6 @@ async def test_settle_ask_user_drops_off_menu_picks():
     assert resolved and resolved[0]["payload"]["selected"] == ["A"]
 
 
-async def test_settle_organize_plan_continue_keeps_all_selected():
-    """B1: organize_plan confirm with full selected (= mobile keep-all) registers all ops."""
-    from agentcore.workspace import organize_plan_store
-
-    organize_plan_store.clear_all_for_tests()
-    try:
-        frame = AskUserSuspension(
-            message_id="m1",
-            conversation_id="c1",
-            user_id="u1",
-            captain_run_id="cap1",
-            checkpoint_id="ck-org",
-            tool_call_id="call_ask",
-            base_system_prompt="base",
-            user_message="整理桌面",
-            transcript=[],
-            question="保留哪些操作？",
-            intent="organize_plan",
-            questions=[
-                {
-                    "id": "q0",
-                    "prompt": "保留哪些操作？",
-                    "kind": "choice",
-                    "multiple": True,
-                    "default": "",
-                    "options": [
-                        {
-                            "label": "a → b",
-                            "op": "move",
-                            "source": "a",
-                            "destination": "b",
-                        },
-                        {"label": "删 x", "op": "delete", "path": "x"},
-                    ],
-                }
-            ],
-        )
-        sink = _sink_with_seeded_checkpoint()
-        settled = await settle_resumed_suspension(
-            frame,
-            decision=CheckpointDecision.CONTINUE,
-            note="",
-            selected=["a → b", "删 x"],
-            sink=sink,
-            delegate_tool=None,
-            execution_id="",
-        )
-        assert settled.terminal_text is None
-        assert "plan_id=ck-org" in settled.output
-        assert "保留 2 项" in settled.output
-        plan = organize_plan_store.get_plan("ck-org")
-        assert plan is not None
-        assert len(plan.operations) == 2
-        resolved = [
-            e
-            for e in (sink.execution_journal() or [])
-            if e["type"] == EventType.CHECKPOINT_RESOLVED.value
-        ]
-        assert resolved and resolved[0]["payload"]["selected"] == ["a → b", "删 x"]
-    finally:
-        organize_plan_store.clear_all_for_tests()
-
-
 # --- pre-pause carry-forward: a 2b resume keeps the CEO's pre-pause reply -----------
 
 
@@ -439,37 +349,21 @@ async def test_recover_window_skips_tool_result_on_suspend(monkeypatch):
     from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
     from agentcore.runtime.pipeline.resume import recover_path as rp
     from agentcore.runtime.recover import SettledSuspension
-    from agentcore.runtime.runs import RunPlan, RunSpec
-    from agentcore.runtime.suspension import PlanReviewSuspension
 
-    plan = RunPlan(nodes=[RunSpec(run_id="w1", task="t", role="研究员")])
-    suspension = PlanReviewSuspension(
-        message_id="m1",
-        conversation_id="c1",
-        user_id="u1",
-        captain_run_id="cap1",
-        checkpoint_id="cp1",
-        tool_call_id="call_del",
-        user_message="task",
-        base_system_prompt="sys",
-        journal_entries=[],
-        plan=plan,
-        steps=[{"run_id": "w1", "role": "研究员", "summary": "t"}],
-        pending=[],
-        transcript=[
-            LLMMessage(role="user", content="task"),
-            LLMMessage(
-                role="assistant",
-                content=None,
-                tool_calls=[
-                    ToolCall(
-                        id="call_del",
-                        function=ToolCallFunction(name="delegate", arguments="{}"),
-                    )
-                ],
-            ),
-        ],
-    )
+    suspension = _ask_frame()
+    suspension.transcript = [
+        LLMMessage(role="user", content="A 还是 B?"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="call_ask",
+                    function=ToolCallFunction(name="ask_user", arguments="{}"),
+                )
+            ],
+        ),
+    ]
     monkeypatch.setattr(
         rp,
         "resumed_captain_window",
@@ -576,7 +470,7 @@ async def test_recover_window_stop_skips_continuity_steer(monkeypatch):
 
 
 async def test_resume_pipeline_suspend_skips_ceo(monkeypatch):
-    """plan_review settle → SUSPEND must PAUSED-finish without arming the CEO loop."""
+    """Settle → SUSPEND must PAUSED-finish without arming the CEO loop."""
     from types import SimpleNamespace
 
     from agentcore.runtime.events import FinishReason
@@ -584,25 +478,9 @@ async def test_resume_pipeline_suspend_skips_ceo(monkeypatch):
     from agentcore.runtime.pipeline.resume.recover_path import RecoveredResume
     from agentcore.runtime.pipeline.resume.rehydrate import RehydratedTurnState
     from agentcore.runtime.recover import SettledSuspension
-    from agentcore.runtime.runs import RunPlan, RunSpec
-    from agentcore.runtime.suspension import PlanReviewSuspension
     from agentcore.workspace.protocol import WorkspaceBackend
 
-    plan = RunPlan(nodes=[RunSpec(run_id="w1", task="t", role="研究员")])
-    suspension = PlanReviewSuspension(
-        message_id="m1",
-        conversation_id="c1",
-        user_id="u1",
-        captain_run_id="cap1",
-        checkpoint_id="cp-preview",
-        tool_call_id="call_del",
-        user_message="task",
-        base_system_prompt="sys",
-        journal_entries=[],
-        plan=plan,
-        steps=[{"run_id": "w1", "role": "研究员", "summary": "t"}],
-        pending=[],
-    )
+    suspension = _ask_frame()
     sink = EventSink()
     llm = MagicMock()
     llm.supports_tools = True

@@ -25,8 +25,6 @@ export const PROMPT_TAG_LABELS: Record<string, string> = {
   local_desk: "本机目录进工作区",
   delivery: "交付环境",
   debate_and_review: "正反辩论",
-  ask_kickoff: "开场提问",
-  ask_midtask: "途中提问",
   page_ui: "页面观感",
   legal_answer_brief: "民事答辩状",
   legal_complaint: "民事起诉状",

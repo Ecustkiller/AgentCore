@@ -485,7 +485,6 @@ def test_workspace_channel_dead_disables_landing_tools():
     assert "index_files" in cb.disabled
     assert not cb.force_segmented
     assert WORKSPACE_CHANNEL_DEAD_RETIRE_STEER in (cb.message() or "")
-    assert "派需要读写本地文件的队员" in (cb.message() or "")
 
 
 def test_single_op_channel_timeout_does_not_sticky_or_notice():
@@ -1546,7 +1545,7 @@ def test_progress_tool_resets_spin_streak():
     assert c.convergence_action() is Intervention.CONTINUE
 
 
-# --- delivery_idle / 调查轮绝对顶：factory 关死；LoopController 显式构造仍可测梯子 ---
+# --- delivery_idle / 调查轮绝对顶：factory 关死；教案注入已撤 ---
 
 
 def test_factory_convergence_finalize_setting_absent():
@@ -1672,8 +1671,8 @@ def test_recon_idle_factory_never_nudges():
     assert not plain.take_delivery_idle_narrow_apply()
 
 
-def test_explicit_controller_still_injects_recon_idle():
-    """Leftover API: constructing LoopController with bars still injects."""
+def test_explicit_controller_does_not_inject_delivery_idle():
+    """Product-retired: explicit bars no longer inject."""
     from agentcore.runtime.engine.governance import maybe_inject_delivery_idle
 
     explicit = LoopController(
@@ -1688,19 +1687,9 @@ def test_explicit_controller_still_injects_recon_idle():
         maybe_inject_delivery_idle(
             explicit, messages=messages, run_id="r", round_idx=2, role="worker"
         )
-        == "nudge"
+        == "none"
     )
-    assert any("调查空转提醒" in str(m.content) for m in messages)
-
-
-def test_recon_idle_nudge_prompt_does_not_demand_writes():
-    from agentcore.runtime.loop_controller import delivery_idle_nudge_prompt
-
-    text = delivery_idle_nudge_prompt(rounds=8, recon=True)
-    assert "调查空转提醒" in text
-    assert "写盘" not in text
-    assert "str_replace" not in text
-    assert "handoff" in text.lower() or "escalate" in text.lower()
+    assert messages == []
 
 
 def test_landing_success_latches_for_wind_down():

@@ -1,15 +1,7 @@
-import { toCeoReview } from "@/lib/ceoReview";
 import { parseCheckpointIntent } from "@/lib/checkpointIntent";
-import type {
-  CheckpointDisplay,
-  PlanReviewDisplay,
-} from "@/stores/conversation/types";
+import type { CheckpointDisplay } from "@/stores/conversation/types";
 import type { PendingResume, ResumeOrigin } from "@/stores/pausedTurns";
-import type {
-  AskQuestion,
-  PlanReviewPending,
-  PlanReviewStep,
-} from "@/types/events";
+import type { AskQuestion } from "@/types/events";
 import type { InteractionKind } from "@/types/interactionExt";
 import { mapEntryResolution } from "./mapResolution";
 import { useInteractionStore } from "./store";
@@ -51,18 +43,6 @@ export function entryToCheckpoint(e: InteractionEntry): CheckpointDisplay {
         ? arr<string>(e.resolution?.selected)
         : [],
     ...(p.browser_login === true ? { browserLogin: true as const } : {}),
-  };
-}
-
-export function entryToPlanReview(e: InteractionEntry): PlanReviewDisplay {
-  const p = e.payload;
-  return {
-    id: e.id,
-    steps: arr<PlanReviewStep>(p.steps),
-    pending: arr<PlanReviewPending>(p.pending),
-    ...mapEntryResolution(e),
-    // 主 Agent 把关摘要：live SSE 与 journal 冷加载同走本映射（absent → undefined）。
-    ceoReview: toCeoReview(p.ceo_review),
   };
 }
 
@@ -111,15 +91,6 @@ export function messageCheckpoints(
   );
 }
 
-export function messagePlanReviews(
-  conversationId: string,
-  messageId: string,
-): PlanReviewDisplay[] {
-  return listMessageEntries(conversationId, messageId, ["plan_review"]).map(
-    entryToPlanReview,
-  );
-}
-
 /**
  * Kickoff-card grant list retired — backend `command=auto` already granted.
  * Approval prompts no longer hide based on a team_preview tools roster.
@@ -145,45 +116,23 @@ export function entryToColdResume(
   },
 ): PendingResume | null {
   if (!isColdResumeKind(e.kind)) return null;
-  const kind = e.kind;
-  const base = {
+  if (e.kind !== "ask_user") return null;
+  const cp = entryToCheckpoint(e);
+  return {
     messageId: opts.resumeMessageId,
     conversationId: e.conversationId,
     checkpointId: e.id,
     userMessage: opts.userMessage,
     userMessageId: opts.userMessageId,
     origin: opts.origin,
+    kind: e.kind,
+    steps: [],
+    pending: [],
+    question: cp.question,
+    questions: cp.questions,
+    intent: cp.intent,
+    ...(cp.browserLogin ? { browserLogin: true as const } : {}),
   };
-
-  if (kind === "ask_user") {
-    const cp = entryToCheckpoint(e);
-    return {
-      ...base,
-      kind,
-      steps: [],
-      pending: [],
-      question: cp.question,
-      questions: cp.questions,
-      intent: cp.intent,
-      ...(cp.browserLogin ? { browserLogin: true as const } : {}),
-    };
-  }
-
-  if (kind === "plan_review") {
-    const pr = entryToPlanReview(e);
-    return {
-      ...base,
-      kind,
-      steps: pr.steps,
-      pending: pr.pending,
-      ceoReview: pr.ceoReview,
-      question: "",
-      questions: [],
-      intent: "decision",
-    };
-  }
-
-  return null;
 }
 
 /** Cold pending entries for a conversation (ResumePrompt authority). */

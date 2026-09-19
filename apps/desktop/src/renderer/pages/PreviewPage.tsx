@@ -1,8 +1,6 @@
 import { ChatView } from "@/components/chat/ChatView";
 import { ScenarioList } from "@/components/preview/ScenarioList";
 import { Button } from "@/components/ui";
-import { applyTheme } from "@/lib/theme";
-import { useIsDark } from "@/lib/useIsDark";
 import { PREVIEW_FIXTURES } from "@/preview/fixtures";
 import {
   replayFixtureNow,
@@ -10,8 +8,8 @@ import {
   replayFixtureStreamed,
 } from "@/preview/replay";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
-import { type TurnDetailView, turnDetailPath, useUIStore } from "@/stores/ui";
-import { Moon, Play, Radio, Sun } from "lucide-react";
+import { type TurnDetailView, turnDetailPath } from "@/stores/ui";
+import { Play, Radio } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
@@ -21,7 +19,7 @@ const convIdFor = (name: string) => `preview-${name}`;
  * Hidden dev route (`#/preview`) for eyeballing every AI state offline. Each entry
  * is a committed conformance vector replayed through the real SSE dispatch into the
  * real ChatView — no backend, no LLM, no tokens. Reachable by typing the URL; not
- * in the nav.
+ * in the nav. Appearance follows the app theme (`useApplyTheme` on the shell).
  */
 export function PreviewPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -55,32 +53,9 @@ export function PreviewPage() {
 
   // Deep-link into a full-screen turn-detail view (`#/preview?s=…&zoom=<view>`):
   // after the fixture replays, navigate to `turnDetailPath` so a zoomed view that is
-  // otherwise only reachable by clicking (e.g. 对比) is deep-linkable + shoot-gatable.
-  // `zoom=compare` (旧别名 `revisions`) → 统一「对比」view; any other truthy value → the
-  // turn's default view.
+  // otherwise only reachable by clicking is deep-linkable + shoot-gatable.
+  // `zoom=debate` / `zoom=graph` → that tab; any other truthy value → the turn's default.
   const zoom = searchParams.get("zoom");
-
-  // Render theme (`#/preview?s=…&theme=light|dark`): an ephemeral light/dark
-  // override for the preview surface so a component can be eyeballed in both modes
-  // without flipping (or persisting) the whole app's theme. URL-driven like
-  // `s` / `k` / `zoom` so it's deep-linkable and survives selection / scrubbing.
-  // Absent → follow the app's real theme (`useApplyTheme` keeps owning it).
-  const themeParam =
-    searchParams.get("theme") === "dark"
-      ? "dark"
-      : searchParams.get("theme") === "light"
-        ? "light"
-        : null;
-  const appIsDark = useIsDark();
-  const isDark = themeParam ? themeParam === "dark" : appIsDark;
-
-  // Preserve the current theme across selection / scrubbing so flipping a
-  // scenario or dragging the frame slider doesn't drop the chosen preview theme.
-  const withChrome = (params: Record<string, string>) => {
-    const next: Record<string, string> = { ...params };
-    if (themeParam) next.theme = themeParam;
-    return next;
-  };
 
   const stopStreamed = () => {
     cancelRef.current?.();
@@ -88,18 +63,7 @@ export function PreviewPage() {
   };
 
   const select = (name: string) => {
-    setSearchParams(withChrome({ s: name }), { replace: true });
-  };
-
-  // Flip the preview surface light/dark via the URL. Ephemeral: it overrides the
-  // root `.dark` class while previewing but never writes the persisted app theme,
-  // and preserves the current scenario / frame.
-  const setTheme = (next: "light" | "dark") => {
-    const params: Record<string, string> = {};
-    if (selected) params.s = selected;
-    if (frame !== null) params.k = String(frame);
-    params.theme = next;
-    setSearchParams(params, { replace: true });
+    setSearchParams({ s: name }, { replace: true });
   };
 
   // Drag the scrubber → rewrite `?k=`. At/over the right end we drop `k` entirely
@@ -109,10 +73,10 @@ export function PreviewPage() {
   const setFrame = (value: number) => {
     if (!selected) return;
     if (value >= total) {
-      setSearchParams(withChrome({ s: selected }), { replace: true });
+      setSearchParams({ s: selected }, { replace: true });
     } else {
       setSearchParams(
-        withChrome({ s: selected, k: String(Math.max(1, value)) }),
+        { s: selected, k: String(Math.max(1, value)) },
         { replace: true },
       );
     }
@@ -176,13 +140,7 @@ export function PreviewPage() {
   useEffect(() => {
     if (!zoom || !selected) return;
     const focusView: TurnDetailView | undefined =
-      zoom === "compare" || zoom === "revisions"
-        ? "compare"
-        : zoom === "debate"
-          ? "debate"
-          : zoom === "graph"
-            ? "graph"
-            : undefined;
+      zoom === "debate" ? "debate" : zoom === "graph" ? "graph" : undefined;
     const t = setTimeout(() => {
       const cid = convIdFor(selected);
       const msgs = getRuntime(cid).messages;
@@ -195,20 +153,6 @@ export function PreviewPage() {
     }, 120);
     return () => clearTimeout(t);
   }, [zoom, selected, frame, navigate]);
-
-  // Apply the URL-selected preview theme by toggling the root `.dark` class (the
-  // same mechanism as the app's `applyTheme`), so the replayed surface — and
-  // theme-sensitive renderers like mermaid that read `.dark` off the root — flip
-  // exactly as in a real dark-mode session. Only overrides while `?theme=` is set;
-  // restores the app's persisted theme on change / unmount so the user's saved
-  // preference is never clobbered.
-  useEffect(() => {
-    if (!themeParam) return;
-    applyTheme(themeParam);
-    return () => {
-      applyTheme(useUIStore.getState().theme);
-    };
-  }, [themeParam]);
 
   return (
     <div
@@ -272,34 +216,6 @@ export function PreviewPage() {
           )}
           {current && (
             <div className="flex shrink-0 items-center gap-1.5">
-              {/* Ephemeral 浅⇄深 preview theme. Flips the SAME replayed slice
-                  without spinning up a real run or touching the persisted app theme. */}
-              <div className="mr-1 flex items-center gap-0.5 rounded-lg border border-border p-0.5">
-                <Button
-                  variant="ghost"
-                  onClick={() => setTheme("light")}
-                  aria-pressed={!isDark}
-                  aria-label="浅色预览"
-                  icon={<Sun size={14} />}
-                  className={
-                    !isDark
-                      ? "bg-accent text-foreground hover:bg-accent"
-                      : undefined
-                  }
-                />
-                <Button
-                  variant="ghost"
-                  onClick={() => setTheme("dark")}
-                  aria-pressed={isDark}
-                  aria-label="深色预览"
-                  icon={<Moon size={14} />}
-                  className={
-                    isDark
-                      ? "bg-accent text-foreground hover:bg-accent"
-                      : undefined
-                  }
-                />
-              </div>
               <Button
                 variant="neutral"
                 onClick={replayNow}

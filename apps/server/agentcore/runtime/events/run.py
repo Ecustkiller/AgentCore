@@ -70,39 +70,6 @@ def run_plan(
     )
 
 
-def graph_append(
-    *,
-    execution_id: str,
-    host_message_id: str,
-    append_message_id: str,
-    added_count: int,
-    roles: list[str] | None = None,
-    added_run_ids: list[str] | None = None,
-    act_id: str | None = None,
-    act_kind: str | None = None,
-    authorized_by: str | None = None,
-) -> SSEEvent:
-    """已停发：旧跨回合同图追加锚点（兼容旧 journal / 测试回放）。新路径用 prev_execution_id。"""
-    payload: dict[str, Any] = {
-        "execution_id": execution_id,
-        "host_message_id": host_message_id,
-        "append_message_id": append_message_id,
-        "added_count": int(added_count),
-        "roles": list(roles or []),
-        "added_run_ids": list(added_run_ids or []),
-    }
-    if act_id:
-        payload["act_id"] = act_id
-    if act_kind:
-        payload["act_kind"] = act_kind
-    if authorized_by:
-        payload["authorized_by"] = authorized_by
-    return SSEEvent(
-        type=EventType.GRAPH_APPEND,
-        payload=payload,
-    )
-
-
 def plan_revised(
     *,
     execution_id: str,
@@ -519,42 +486,12 @@ def workspace_lock_wait(*, conversation_id: str, waiting: bool) -> SSEEvent:
 def desk_provision_wait(*, conversation_id: str, waiting: bool) -> SSEEvent:
     """云桌开通短等：ensure 前 ``waiting=true``，结束后 ``waiting=false``。
 
-    Emitted from ``provision_server_desk`` (prepare / resume). EPHEMERAL — no
+    Emitted from ``provision_server_desk`` (current server root bind). EPHEMERAL — no
     journal; clients must not render empty 「Thinking…」 while the cloud desk boots.
     """
     return SSEEvent(
         type=EventType.DESK_PROVISION_WAIT,
         payload={"conversation_id": conversation_id, "waiting": waiting},
-    )
-
-
-def team_synthesis_preview(
-    *,
-    execution_id: str,
-    completed: int,
-    total: int,
-    headline: str,
-    text: str,
-    workers: list[dict[str, Any]],
-    in_progress: bool = True,
-) -> SSEEvent:
-    """Leftover ``team_synthesis_preview`` (historical journal).
-
-    Live paths no longer emit this. Fold still stores the latest payload per key
-    so old journals rebuild. Captain node does not paint it.
-    Must NOT reuse ``content_delta``.
-    """
-    return SSEEvent(
-        type=EventType.TEAM_SYNTHESIS_PREVIEW,
-        payload={
-            "execution_id": execution_id,
-            "completed": completed,
-            "total": total,
-            "headline": headline,
-            "text": text,
-            "workers": workers,
-            "in_progress": in_progress,
-        },
     )
 
 
@@ -567,7 +504,6 @@ def delivery_status(
     gaps: list[dict[str, Any]],
     actions: list[dict[str, Any]],
     artifacts: list[dict[str, Any]] | None = None,
-    promoted: list[dict[str, str]] | None = None,
 ) -> SSEEvent:
     """交付状态（能力闸门与交付诚实性）：delegate 批次收尾的结构化交付对账。
 
@@ -580,13 +516,11 @@ def delivery_status(
     ``artifacts`` = path acceptance rows；``delivered_files`` = accepted only.
     ``gaps`` items are ``{role, description}`` plus optional ``reason`` /
     ``severity`` / ``paths``；``actions`` 已知 kind 含 ``bind_local_folder`` /
-    ``website_verify`` / ``continue_skipped_runs``（已撤 ``continue_writing``）.
-    ``promoted`` = 历史 ``{from, to}`` 归位行（``promote_product`` 已撤销，新回合不再写入）。
-    零归位是合法状态，此时整条 key 不上 wire（客户端按缺省空数组读）。
+    ``export_to_local`` / ``continue_skipped_runs``.
     DURABLE：落 journal；folds 同 ``execution_id`` 保最新。
     Must NOT ride ``content_delta``（终稿正文与交付对账分离）。
     """
-    payload: dict[str, Any] = {
+    payload = {
         "execution_id": execution_id,
         "state": state,
         "summary": summary,
@@ -595,8 +529,6 @@ def delivery_status(
         "actions": actions,
         "artifacts": list(artifacts or []),
     }
-    if promoted:
-        payload["promoted"] = list(promoted)
     return SSEEvent(type=EventType.DELIVERY_STATUS, payload=payload)
 
 

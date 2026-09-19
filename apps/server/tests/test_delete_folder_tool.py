@@ -237,13 +237,13 @@ async def test_refuses_name_in_folder_id_without_touching_roster(
     assert not result.success
     assert result.error == "delete_by_name_refused"
     assert "不接受文件夹名 / 路径" in result.output
-    assert "resolve_folder" in result.output
+    assert "folders" in result.output
     assert calls.loaded == []
     assert calls.deleted == []
 
 
 async def test_refuses_path_in_folder_id(monkeypatch: pytest.MonkeyPatch):
-    """嵌套路径也不行：跨层同名合法，路径解析属于 resolve_folder 的职责。"""
+    """嵌套路径也不行：跨层同名合法，路径解析属于 folders 的职责。"""
     calls = _patch_repo(monkeypatch, {ALPHA_ID: _FakeFolder(id=ALPHA_ID, name="图标")})
     result = await DeleteFolderTool().execute({"folder_id": "设计/图标"}, _ctx())
     assert not result.success
@@ -276,7 +276,7 @@ async def test_missing_folder_id_is_distinct_from_name_delete(
     result = await DeleteFolderTool().execute({}, _ctx())
     assert not result.success
     assert result.error == "missing folder_id"
-    assert "list_folders" in result.output
+    assert "folders" in result.output
     assert calls.deleted == []
 
 

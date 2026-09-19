@@ -154,7 +154,7 @@ describe("pretrial_completed evidence_ledger_delta → 场级台账", () => {
     resetExecutionStore();
   });
 
-  it("hydrate：pretrial_completed 带 #e1 → ledger 有条目（不靠收场后再补）", () => {
+  it("hydrate：pretrial_completed 带 #r1 → ledger 有条目（不靠收场后再补）", () => {
     const journal: ExecutionJournal = {
       finishReason: "end_turn",
       events: [
@@ -194,7 +194,7 @@ describe("pretrial_completed evidence_ledger_delta → 场级台账", () => {
             incomplete: false,
             evidence_ledger_delta: [
               {
-                id: "#e1",
+                id: "#r1",
                 title: "庭前证据",
                 url: "https://example.com/e1",
                 site: "example.com",
@@ -206,7 +206,7 @@ describe("pretrial_completed evidence_ledger_delta → 场级台账", () => {
       ],
     };
     store().hydrateFromJournal(MID, journal);
-    expect(rt().evidenceLedger.map((e) => e.id)).toEqual(["#e1"]);
+    expect(rt().evidenceLedger.map((e) => e.id)).toEqual(["#r1"]);
     expect(rt().debatePretrial?.evidenceLedgerCount).toBe(1);
   });
 
@@ -230,7 +230,7 @@ describe("pretrial_completed evidence_ledger_delta → 场级台账", () => {
         incomplete: false,
         evidence_ledger_delta: [
           {
-            id: "#e1",
+            id: "#r1",
             title: "live 庭前",
             url: "https://example.com/live",
           },
@@ -241,7 +241,7 @@ describe("pretrial_completed evidence_ledger_delta → 场级台账", () => {
     store().recordEvidenceLedgerDelta(
       [
         {
-          id: "#e1",
+          id: "#r1",
           title: "live 庭前",
           url: "https://example.com/live",
         },
@@ -250,7 +250,7 @@ describe("pretrial_completed evidence_ledger_delta → 场级台账", () => {
     );
     expect(useExecutionStore.getState().byId[MID]?.evidenceLedger).toEqual([
       {
-        id: "#e1",
+        id: "#r1",
         title: "live 庭前",
         url: "https://example.com/live",
       },

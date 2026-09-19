@@ -1,14 +1,11 @@
-"""辩论「先多视角调研再辩」— 判据 / 回灌文案。开工卡 resume 已退役。
+"""调研链证据探测。开工卡 resume / 先调研回灌文案已退役。
 """
 
 from __future__ import annotations
 
 import pytest
 
-from agentcore.runtime.kickoff.research_first import (
-    has_research_chain_evidence,
-    research_first_tool_result,
-)
+from agentcore.runtime.kickoff.research_first import has_research_chain_evidence
 from agentcore.runtime.suspension import suspension_from_json
 from agentcore.tools.builtin.motion_card import parse_motion_card
 
@@ -60,30 +57,9 @@ def test_has_research_chain_evidence_preserves_old_offer_sources():
     assert has_research_chain_evidence(entries_playbook) is False
 
 
-def test_research_first_tool_result_fills_motion_topic():
-    text = research_first_tool_result(motion="该不该上四天工作制？", user_message="忽略我")
-    assert "先多视角调研再辩" in text
-    assert "请勿再次调用 debate" in text
-    assert "consult(deep_multi_lens_research)" not in text
-    assert "手写" in text
-    assert "lens_crosscheck" not in text
-    assert "playbook=" not in text
-    assert "该不该上四天工作制？" in text
-    assert "法律" in text
-    assert "忽略我" not in text
-
-
-def test_research_first_tool_result_falls_back_to_user_message():
-    text = research_first_tool_result(motion="", user_message="帮我分析 LV 案")
-    assert "帮我分析 LV 案" in text
-
-
-def test_leftover_team_preview_frame_refuses_hydrate():
-    """存量开工卡：from_json 走 410，不进 recover。"""
-    from agentcore.core.errors import GoneError
-    from agentcore.runtime.kickoff.retired import TEAM_PREVIEW_UNRECOVERABLE
-
-    with pytest.raises(GoneError, match=TEAM_PREVIEW_UNRECOVERABLE):
+def test_leftover_team_preview_frame_skips_hydrate():
+    """存量开工卡：from_json 未知 kind，不进 recover。"""
+    with pytest.raises(ValueError, match="unknown suspension kind"):
         suspension_from_json(
             {
                 "kind": "team_preview",

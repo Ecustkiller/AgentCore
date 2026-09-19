@@ -161,6 +161,14 @@ def _stub_member(monkeypatch, target: str, *, member_turn: bool) -> None:
         _no_provision,
     )
 
+    async def _no_auto_desk(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop.adopt_persisted_auto_desk",
+        _no_auto_desk,
+    )
+
 
 async def _capture_prepare_registry(
     monkeypatch, tmp_path: Path, *, member_turn: bool
@@ -175,19 +183,12 @@ async def _capture_prepare_registry(
     async def _no_desk_label(*_a, **_k):
         return None
 
-    async def _no_vision(*_a, **_k):
-        return None
-
     monkeypatch.setattr(
         "agentcore.runtime.pipeline.prepare.assemble_turn_rules", _empty_rules
     )
     monkeypatch.setattr(
         "agentcore.runtime.pipeline.prepare.resolve_desk_folder_label",
         _no_desk_label,
-    )
-    monkeypatch.setattr(
-        "agentcore.runtime.pipeline.prepare.resolve_vision_reader_for_conversation",
-        _no_vision,
     )
 
     channel_built = False

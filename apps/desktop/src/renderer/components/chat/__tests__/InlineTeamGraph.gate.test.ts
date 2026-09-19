@@ -59,7 +59,7 @@ describe("teamHasStartedRuns · inline graph gate", () => {
     expect(teamHasStartedRuns(exec.runs)).toBe(false);
   });
 
-  it("plan_review 波间挂起（已有完成节点）仍渲染图", () => {
+  it("波间挂起（已有完成节点）仍渲染图", () => {
     const frames: RunFrame[] = [started("r1", "w1"), completed("r1", "w1")];
     const exec = projectExecution(plan, frames, "paused");
     expect(exec.runs.find((r) => r.id === "r1")?.status).toBe("completed");

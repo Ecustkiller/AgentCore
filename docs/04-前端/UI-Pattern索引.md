@@ -27,7 +27,7 @@ skip_if:
 | Pattern | 场景 | 指针 |
 |---|---|---|
 | TabChip | 内容撑宽横条 tab（右坞 / 浏览器页签 / 文件详情） | L2 `TabChip`：闲置 = 图标+标题；关闭/弹出 overlay 标题尾 |
-| DecisionCard | ask_user / plan_review / approval / escalation | `DecisionCard` + 各 *Card |
+| DecisionCard | ask_user / approval / escalation | `DecisionCard` + 各 *Card |
 | StatusStrip | 协作图状态条 | `StatusStrip.tsx` |
 | PatternCardHeader | 后台任务卡头 | `BackgroundTaskCard.tsx` |
 | SurfaceRow | 侧栏/文件树/对话管理/设置导航/工具箱库存 | `SurfaceRow*`；库存行组合 → `pages/toolbox/InventoryRow.tsx` |
@@ -49,11 +49,11 @@ skip_if:
 
 动作组贴右下（`justify-end`），与 `DialogFooter` 同一锚点。提示 / hint 占左侧剩余。
 
-次要键 `outline`（与主按钮同高），主键 `primary` 实心。底栏不加装饰图标（忙碌 spinner 除外）；开工「就这样开做」可留火箭，计划复核「调整」可留铅笔。取消不用 `danger` / 停止牌——拒答后果用左侧 hint。审批「拒绝」仍是危险操作，不在此列。
+次要键 `outline`（与主按钮同高），主键 `primary` 实心。底栏不加装饰图标（忙碌 spinner 除外）；开工「就这样开做」可留火箭。取消不用 `danger` / 停止牌——拒答后果用左侧 hint。审批「拒绝」仍是危险操作，不在此列。
 
 | 类型 | 顺序 | 例子 |
 |---|---|---|
-| 两键（主 + 取消） | 取消 → 主 | 澄清 / 开工 / 计划复核（取消 · 调整 · 继续） |
+| 两键（主 + 取消） | 取消 → 主 | 澄清 / 开工 |
 | 多选项 | **只搬家、不换序** | 审批（允许… → 拒绝）、升级、终端确认、登录继续 |
 
 **不**扫输入框发送、工具条、协作图干预。铬条（`border-t` vs `pl-6`）正交，触达再收。窄屏长按钮折行难看时跟对话框：竖排、主按钮在上。
@@ -102,13 +102,13 @@ node scripts/check-ui-tokens.mjs --src apps/desktop/src/renderer
 | 认路选中 | 浅底 + 线框图标 `currentColor`：画布 `bg-accent text-accent-foreground`，侧栏 `bg-sidebar-accent text-sidebar-accent-foreground`。**否决**导航用 inverse（深底浅字）。inverse 只给 `IconButton` 停止生成 |
 | 页头一行 | `PageHeader`：h1 单行 + 可选同行 meta / 动作；禁副标题。设置 / 工具箱深页 / 枢纽页同一组件，用有没有 `back` 区分。工具箱壳不走 `PageHeader`；画布深页走 `CanvasShell` → [页头层级](#页头层级) |
 | 列表空态同一骨架 | 标题 + 可选一句说明 + 可选主操作 = `EmptyHint`。`DraftEmptyState` 仍是对话草稿特例 |
-| 货架卡 | 工具箱市场 / 创作 / 提示词概览 = `CatalogTile`。禁止再手写第三套磁贴。身份行：左色板图标、右名称、可选副标题；右上 `accessory` 只放状态或唯一身份（已装 / 有更新 / 尚未开放 / 官方）。通栏两行简介（空也占位）。提示词概览由 `promptShelfTile` 填槽，禁止再按叶子手写一套。官方 HOW 简介是 UI 专用句 `blurb`，不进模型目录。底栏 `tags` 放分类元数据（市场提示词与装进目录的副本 / 已上架的我的 = 场景组名；官方 HOW = CEO / 队员，全员不打；出厂工具 = 需审批与 CEO / 队员，默认不打。区标题已是连接器 / 常驻·按需则卡上不再重复开场轴）。点卡 = 居中 Dialog。市场发现首页按集合折行网格（封顶 +「查看全部」）；提示词页出厂闭集与我的同一套折行网格。不另开卡面、不用横滑条。格子宽随画布（min 240，1200 画布四列约 280）。出厂工具与连接器在提示词目录，走同一套货架卡；开场即用进常驻、查阅后启用进按需，产品件右上打官方 |
-| 盖层分工 | 确认 = `ConfirmDialog`；列表/树里起一个名字 = 行内改名（先落地「未命名…」再改；新建文件仍先填名，因为名字带着类型）。不在列表语境、或不止一个字段 = 居中 `Dialog` `size=md`（导入 / 克隆 / Composer 新建文件夹）。读卡 / 安装 = 居中 `Dialog` `size=lg`（市场 listing；提示词读卡同档）。挨着按钮 = 弹出菜单；一句结果 = Toast（跨对话提醒只写「对话名 + 要你干什么」，禁止贴卡正文）。命令面板 = `size=xl` + `position=top`；双栏阅读（收到的上下文）= `size=2xl`。宽度只走 `DialogContent.size`，禁止再手写 `max-w-*`。铬条：`DialogHeader` + 可选 `DialogBody` + 有按钮才 `DialogFooter`（取消 `outline` → 主 `primary`）。**禁止**用对话框伪装右侧抽屉。对话坞只挂在聊天页 |
+| 货架卡 | 工具箱市场 / 创作 / 提示词概览 = `CatalogTile`。禁止再手写第三套磁贴。身份行：左色板图标、右名称、可选副标题；右上 `accessory` 只放状态或唯一身份（已装 / 有更新 / 尚未开放 / 官方）。通栏两行简介（空也占位）。提示词概览由 `promptShelfTile` 填槽，禁止再按叶子手写一套。官方 HOW 简介是 UI 专用句 `blurb`，不进模型目录。底栏 `tags` 放分类元数据（会给模型手脚的打 **工具**：出厂工具、绑了 `offers_tools` 的我的/市场、声明了 `requires_tools` 的官方 HOW；市场提示词与装进目录的副本 / 已上架的我的 = 场景组名；官方 HOW = CEO / 队员，全员不打；出厂工具另打需审批与 CEO / 队员，默认不打。区标题已是连接器 / 常驻·按需则卡上不再重复开场轴）。出厂工具卡标题用 `catalog_summary`，协议名只在点开说明书。点卡 = 居中 Dialog。市场发现首页按集合折行网格（封顶 +「查看全部」）；提示词页出厂闭集与我的同一套折行网格。不另开卡面、不用横滑条。格子宽随画布（min 240，1200 画布四列约 280）。出厂工具与连接器在提示词目录，走同一套货架卡；开场即用进常驻、查阅后启用进按需，产品件右上打官方 |
+| 盖层分工 | 确认 = `ConfirmDialog`；列表/树里起一个名字 = 行内改名（先落地「未命名…」再改；新建文件仍先填名，因为名字带着类型）。不在列表语境、或不止一个字段 = 居中 `Dialog` `size=md`（导入 / 克隆 / Composer 新建文件夹）。读卡 / 安装 = 居中 `Dialog` `size=lg`（市场 listing；提示词读卡同档）。挨着按钮 = 弹出菜单；一句结果 = Toast（协作感知应用内提示只写「对话名 + 要你干什么」，禁止贴卡正文）。命令面板 = `size=xl` + `position=top`；双栏阅读（收到的上下文）= `size=2xl`。宽度只走 `DialogContent.size`，禁止再手写 `max-w-*`。铬条：`DialogHeader` + 可选 `DialogBody` + 有按钮才 `DialogFooter`（取消 `outline` → 主 `primary`）。**禁止**用对话框伪装右侧抽屉。对话坞只挂在聊天页 |
 | 分区 vs 打开的内容 | 同一页切块 = `SectionTabs`；表单里就地互斥 = `SegmentedControl`；右坞同时开着的文件/终端/浏览器 = `TabChip`。工具箱市场种类 = 筛选 chip，不是 `SectionTabs` → [前端 UX · 工具箱](/docs/04-前端/前端UX设计.md) |
 | 状态 / 角色 / 所选胶囊 | 文字标签走 `Badge`（`pill`）。计数圆点、进度条、头像圈不是徽章 |
 | 动作底栏 | Decision / Dialog 右下锚点；不扫输入框、工具条、协作图干预 |
 | 新面先点名 L3 | 新页 / 新交付物须先说用哪套 Primitive / Pattern，禁止第三套壳。白板**画布工具条** / 辩论室保持登记例外（控件仍用同一套按钮与徽章） |
-| 消息操作行 | 窄屏常显；md+ hover / focus-within。助手复制·重新生成、用户复制·编辑与发送时刻、IM 回复与 IM 时间共用 `MESSAGE_ACTION_REVEAL_CLASS`。用户气泡脚 md+ 叠在气泡下沿，闲置不占流。助手完成时刻常显 |
+| 消息操作行 | 窄屏常显；md+ hover / focus-within。助手复制·克隆对话·重新生成、用户复制·编辑与发送时刻、IM 回复与 IM 时间共用 `MESSAGE_ACTION_REVEAL_CLASS`。用户气泡脚 md+ 叠在气泡下沿，闲置不占流。助手完成时刻常显 |
 | 文档 tab 动作 | 内容撑宽横条（VS Code 编辑器 tab）：关闭/弹出 **overlay** 标题尾，闲置不占槽。活跃 tab 常显 × 并留右槽（避免压住末字）；弹出仅 hover / focus-within。未保存 = 标题前 primary 圆点（`dirty`），不改 ×。`TabChip`。**否决** Chrome 均分宽 + 流内占位（右坞不是均分条）；**否决** `opacity-0` 仍占 `size-5` |
 | 列表行动作 | 固定列宽（VS Code 资源管理器 / 对话行）：hover / focus-within 才进流，标题 truncate。**否决** 对流内槽 `opacity-0`（闲置仍吃标题宽）。对话行已是；文件夹头 / Git 悬停动作对齐。最近删除右侧由保留期 Badge 定宽，不套 overlay |
 | 品牌字体 | 仅 BrandMark Latin；正文系统栈 |

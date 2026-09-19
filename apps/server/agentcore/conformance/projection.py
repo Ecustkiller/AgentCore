@@ -42,6 +42,7 @@ from typing import Any
 from agentcore.runtime.engine.tool_channel_redirect import process_tool_status_from_end
 from agentcore.runtime.events.journal_config import cap_process_result
 from agentcore.runtime.events.sink import MARKER_STANDIN_TOOLS
+from agentcore.runtime.events.types import is_live_event_type
 from agentcore.runtime.interaction import GATE_KINDS
 from agentcore.runtime.journal.pending_interactions import (
     fold_interactions,
@@ -96,7 +97,7 @@ def _act_from_plan(p: dict[str, Any]) -> dict[str, Any]:
         if kind not in ("multi_agent", "debate"):
             kind = "multi_agent"
         auth = raw.get("authorized_by")
-        if auth not in ("stage_card", "auto", "preview"):
+        if auth != "auto":
             auth = None
         return {
             "actId": str(raw["act_id"]),
@@ -205,8 +206,6 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
     debate_rounds: list[dict[str, Any]] = []
     # 庭前取证（§二之二）：started/orders/progress → completed 权威覆盖。
     debate_pretrial: dict[str, Any] | None = None
-    # 协调模式团队进展预览（team_synthesis_preview）：同 key 保最新。P2 DURABLE。
-    team_synthesis_preview: dict[str, Any] | None = None
     # 交付状态（delivery_status，能力闸门与交付诚实性）：同 execution_id 保最新。DURABLE。
     delivery_status: dict[str, Any] | None = None
     # 预检警告（turn_warning）：P2 DURABLE。
@@ -217,9 +216,6 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
     # （含 injected）。DURABLE。
     user_interjections: list[dict[str, Any]] = []
     _user_interjection_by_id: dict[str, int] = {}
-    # plan_review_resolved carries only the checkpoint id → remember the gated run ids.
-    checkpoint_steps: dict[str, list[str]] = {}
-
     def agent_by_id(aid: str) -> dict[str, Any] | None:
         return next((a for a in agents if a["id"] == aid), None)
 
@@ -245,6 +241,8 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
     for ev in events:
         etype = ev.get("type") or ""
         p = ev.get("payload") or {}
+        if not is_live_event_type(etype):
+            continue
 
         if etype == "message_start":
             # 跨回合流：message_id 变化 = 新助手气泡 → 清空正文/过程时间线；
@@ -401,25 +399,13 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             if "cited_ids" in p and isinstance(p.get("cited_ids"), list):
                 cited_ids = [str(x) for x in p["cited_ids"]]
 
-        elif etype == "graph_append":
-            # 跨回合同图追加锚点（新回合 process 标记；生长帧带 host_message_id）。
-            process.append(
-                {
-                    "kind": "graph_append",
-                    "execution_id": p.get("execution_id") or "",
-                    "host_message_id": p.get("host_message_id") or "",
-                    "added_count": int(p.get("added_count") or 0),
-                }
-            )
-
         elif etype == "run_plan":
             ip = p.get("execution_id")
             act = _act_from_plan(p)
             # 跨回合同图追加：带 host_message_id 的生长 run_plan 不插新 team 标记
-            # （锚点由 graph_append 承担；宿主回合已有 team）。
-            # 协作图时间线落点 (统一团队时间线): the first run_plan of an execution drops a
-            # zero-width `team` marker at its chronological spot (later same-id batches merge
-            # into one graph → one marker). Mirrors EventSink._accumulate_process.
+            # （旧 divert 锚点已退役；宿主回合已有 team）。新路径无此字段 → 本回合开图。
+            # 协作图时间线落点：某 execution 的首张 run_plan 钉零宽 `team` 标记
+            # （同 id 后续批次并进同一张图）。与 EventSink._accumulate_process 同形。
             if (
                 not p.get("host_message_id")
                 and ip
@@ -782,14 +768,12 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                     "clashes": [],
                     "cross_exam": [],
                     "witness_exam": [],
-                    "findings": [],
-                    "thread_turns": [],
                 }
             )
 
         elif etype == "debate_round":
             # 一轮收尾（裁判+小结后）：焦点/小结/裁判/各方→辩手 run_id 映射/L3 交锋边/质询问答
-            # + 证人答问（批 D1）+ 红队 finding / 圆桌线程（缺字段→[]，旧载荷降级）。
+            # + 证人答问（批 D1）。
             upsert_round(
                 {
                     "round_no": p.get("round_no", 0),
@@ -800,8 +784,6 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                     "clashes": list(p.get("clashes") or []),
                     "cross_exam": list(p.get("cross_exam") or []),
                     "witness_exam": list(p.get("witness_exam") or []),
-                    "findings": list(p.get("findings") or []),
-                    "thread_turns": list(p.get("thread_turns") or []),
                 }
             )
 
@@ -855,8 +837,14 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                     "external_evidence_reason"
                 )
 
-        elif etype in ("team_preview_required", "team_preview_resolved", "team_note_posted"):
-            # Retired kickoff pair / team note wall — skip (old journal may still carry them).
+        elif etype in (
+            "team_preview_required",
+            "team_preview_resolved",
+            "team_note_posted",
+            "plan_review_required",
+            "plan_review_resolved",
+        ):
+            # Retired kickoff / plan_review pairs — skip (old journal may still carry them).
             pass
 
         elif etype == "approval_required":
@@ -881,39 +869,6 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
         elif etype == "checkpoint_resolved":
             pass
 
-        elif etype == "plan_review_required":
-            cid = p.get("checkpoint_id", "")
-            # 计划复核时间线落点: positional marker (card body folds separately).
-            if cid and not has_marker("plan_review", "checkpoint_id", cid):
-                process.append({"kind": "plan_review", "checkpoint_id": cid})
-            run_ids = [s.get("run_id", "") for s in (p.get("steps") or [])]
-            checkpoint_steps[cid] = run_ids
-            for rid in run_ids:
-                run = run_by_id(rid)
-                if run is not None:
-                    run["checkpoint"] = {"status": "pending", "decision": None}
-
-        elif etype == "plan_review_resolved":
-            cid = p.get("checkpoint_id", "")
-            for rid in checkpoint_steps.get(cid, []):
-                run = run_by_id(rid)
-                if run is not None:
-                    run["checkpoint"] = {
-                        "status": "resolved",
-                        "decision": p.get("decision"),
-                    }
-
-        elif etype == "stage_card_required":
-            # 阶段推进卡时间线落点：required 时刻锚点；生命周期仍由 fold_interactions 承载。
-            # 跨回合流下 message_start 会清 process，故多回合向量的最终 projected.process
-            # 通常不含此标记——标记落在宿主回合 journal，供历史回看。
-            sid = p.get("stage_card_id") or ""
-            if sid and not has_marker("stage_card", "stage_card_id", sid):
-                process.append({"kind": "stage_card", "stage_card_id": sid})
-
-        elif etype == "stage_card_resolved":
-            pass
-
         elif etype == "error":
             saw_error = True
             code = str(p.get("code") or "").strip() or "LLM_ERROR"
@@ -936,10 +891,6 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             fid = p.get("folder_id")
             if isinstance(fid, str) and fid.strip():
                 auto_folder = {"folderId": fid, "name": str(p.get("name") or "")}
-
-        elif etype == "team_synthesis_preview":
-            # 同 key 保最新（后写覆盖）。
-            team_synthesis_preview = p
 
         elif etype == "delivery_status":
             # 交付状态：同 execution_id 保最新（后写覆盖；artifacts 已是各波声明且落盘并集）。
@@ -1095,7 +1046,6 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
         "debatePretrial": debate_pretrial,
         "crossExamEnabled": cross_exam_enabled,
         "debateOpening": debate_opening,
-        "teamSynthesisPreview": team_synthesis_preview,
         # 交付状态（delivery_status）：结构化交付对账（已交付/缺口/待操作），null 当无。
         "deliveryStatus": delivery_status,
         "turnWarning": turn_warning,

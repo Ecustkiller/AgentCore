@@ -2,15 +2,10 @@
 // Render clients own product copy; this package only judges presence from the
 // folded ProjectedTurn (翻转默认：结构化错误 / 失败收尾 → 有脸；短豁免表除外).
 
-import type { ProjectedTurn } from "./projectedTurn";
+import { GATE_INTERACTION_KINDS, type ProjectedTurn } from "./projectedTurn";
 
 /** Interaction kinds that already own a dedicated pause / ask UI surface. */
-const DEDICATED_PAUSE_ASK_KINDS = new Set([
-  "checkpoint",
-  "plan_review",
-  "approval",
-  "stage_card",
-]);
+const DEDICATED_PAUSE_ASK_KINDS = new Set<string>(GATE_INTERACTION_KINDS);
 
 /**
  * True when a folded turn must present a non-empty failure face.

@@ -221,7 +221,7 @@ describe("FinaleStage 终审布局", () => {
               },
               {
                 kind: "fact",
-                text: "EU 责任框架是否存在缺口（#e12, tier=unknown待评）【待核实】",
+                text: "EU 责任框架是否存在缺口（#r12, tier=unknown待评）【待核实】",
               },
             ],
           },
@@ -239,7 +239,7 @@ describe("FinaleStage 终审布局", () => {
     expect(screen.getByText("EU 责任框架是否存在缺口")).toBeTruthy();
     expect(screen.getByText("待核实")).toBeTruthy();
     expect(screen.queryByText(/tier=unknown/)).toBeNull();
-    expect(screen.queryByText(/#e12/)).toBeNull();
+    expect(screen.queryByText(/#r12/)).toBeNull();
     expect(screen.queryByText("不要出现")).toBeNull();
   });
 
@@ -265,55 +265,5 @@ describe("FinaleStage 终审布局", () => {
     expect(screen.getByText("先做试点")).toBeTruthy();
     expect(screen.queryByText("最强论点")).toBeNull();
     expect(screen.queryByText("ROI 清晰")).toBeNull();
-  });
-
-  it("红队：裁决卡为方案评定（无加固建议），handoffs 空仍渲染「留给你的」加固建议 + 风险清单", async () => {
-    render(
-      <FinaleStage
-        model={settledBriefModel({
-          form: "red_team",
-          brief: {
-            leaning: "方案可过，需补安全网",
-            confidence: "medium",
-            decisive: "",
-            crux: "权限边界是否可接受",
-            recommendation: "加熔断",
-            strongest_points: {
-              subject: "已有回滚",
-              attacker: "权限过大",
-            },
-            handoffs: [],
-          },
-          sides: [
-            {
-              key: "subject",
-              name: "方案方",
-              stance: "",
-              model: undefined,
-              is_subject: true,
-            },
-            {
-              key: "attacker",
-              name: "红队",
-              stance: "",
-              model: undefined,
-              is_subject: false,
-            },
-          ],
-        })}
-        execution={executionWith([moderatorRun()])}
-        messageId="m1"
-      />,
-    );
-
-    expect(await screen.findByText("方案评定")).toBeTruthy();
-    // 红队裁决卡保留争点；加固建议在「留给你的」
-    expect(screen.getByText("争点")).toBeTruthy();
-    expect(screen.getByText("留给你的")).toBeTruthy();
-    expect(screen.getByText(/加固建议：/)).toBeTruthy();
-    expect(screen.getByText("加熔断")).toBeTruthy();
-    expect(screen.getByText("风险清单")).toBeTruthy();
-    expect(screen.getByText("方案方回应")).toBeTruthy();
-    expect(screen.queryByText("战果对照")).toBeNull();
   });
 });

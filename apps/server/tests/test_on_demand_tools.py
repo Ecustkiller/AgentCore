@@ -25,8 +25,7 @@ from agentcore.runtime.resolve.prompt.compose import (
 from agentcore.runtime.runs.executor.shared import _registry_without
 from agentcore.runtime.skills import build_system_skill_registry
 from agentcore.tools.builtin import build_builtin_registry
-from agentcore.tools.builtin.archive_create import ArchiveCreateTool
-from agentcore.tools.builtin.archive_extract import ArchiveExtractTool
+from agentcore.tools.builtin.archive import ArchiveTool
 from agentcore.tools.builtin.browser import BrowserTool
 from agentcore.tools.builtin.consult import ConsultTool
 from agentcore.tools.builtin.file_ops.read import FileReadTool
@@ -103,7 +102,7 @@ def test_resident_tools_are_not_on_the_roster():
         "web_search",
         "escalate",
         "handoff",
-        "list_folders",
+        "folders",
         "run",
         "search_conversations",
         "read_conversation",
@@ -112,22 +111,20 @@ def test_resident_tools_are_not_on_the_roster():
     ):
         assert not is_on_demand_tool(name), name
     for name in (
-        "file_move",
-        "file_copy",
         "file_batch",
-        "read_image",
+        "archive",
         "table_ops",
         "table_read",
         "docs_read",
         "docs_write",
         "debate",
-        "list_folder_dir",
-        "read_folder_file",
         "md_export",
         "git",
     ):
         assert is_on_demand_tool(name), name
         assert name in ON_DEMAND_TOOL_NAMES
+    assert "read_image" not in ON_DEMAND_TOOL_NAMES
+    assert not is_on_demand_tool("read_image")
     # Dynamic MCP names are not in the static set, but still ride the same gate.
     assert "mcp_playwright_browser_navigate" not in ON_DEMAND_TOOL_NAMES
     assert is_mcp_tool_name("mcp_playwright_browser_navigate")
@@ -179,30 +176,30 @@ async def test_directory_lists_only_assembled_on_demand_tools():
 
 def test_directory_groups_sections_and_compacts_tool_families():
     host = ConsultDirectoryEntry(name="host", summary="本机排查", section="tool")
-    extract = ConsultDirectoryEntry(
-        name="archive_extract",
-        summary="解压 zip",
+    ops = ConsultDirectoryEntry(
+        name="table_ops",
+        summary="改表",
         section="tool",
-        family="archive_create+archive_extract",
-        family_label="压缩包",
+        family="table_ops+table_read",
+        family_label="表格",
     )
-    create = ConsultDirectoryEntry(
-        name="archive_create",
-        summary="打成 zip",
+    read = ConsultDirectoryEntry(
+        name="table_read",
+        summary="读表",
         section="tool",
-        family="archive_create+archive_extract",
-        family_label="压缩包",
+        family="table_ops+table_read",
+        family_label="表格",
     )
     skill = ConsultDirectoryEntry(
         name="data_file_landing", summary="整理表", section="skill", group="交付"
     )
-    out = render_on_demand_directory([host, extract, create, skill])
+    out = render_on_demand_directory([host, ops, read, skill])
     assert "能力指引：" in out
     assert "交付：" in out
     assert "低频工具：" in out
     assert "- host：本机排查" in out
-    assert "压缩包（查阅任一即整组启用）：archive_extract、archive_create" in out
-    assert "- archive_extract：解压 zip" not in out
+    assert "- 表格：table_ops、table_read" in out
+    assert "- table_ops：改表" not in out
     assert "- data_file_landing：整理表" in out
 
 
@@ -504,23 +501,15 @@ async def test_consult_offers_export_and_resolves_retired_names():
     assert _def_names(reg2) == {"md_export"}
 
 
-async def test_consult_archive_extract_offers_create_sibling():
-    """同一 consult family：consult 解压同时 offer 打包。"""
-    assert family_of("archive_extract") == frozenset(
-        {"archive_extract", "archive_create"}
-    )
-    assert family_of("archive_create") == frozenset(
-        {"archive_extract", "archive_create"}
-    )
+async def test_consult_archive_enables_the_tool():
+    assert family_of("archive") == frozenset({"archive"})
     reg = ToolRegistry()
-    reg.register(ArchiveExtractTool())
-    reg.register(ArchiveCreateTool())
+    reg.register(ArchiveTool())
     src = ToolConsultSource(registry=reg, audience="ceo")
-    body = await src.fetch_by_name("u", "archive_extract")
+    body = await src.fetch_by_name("u", "archive")
     assert body is not None
-    assert "已启用工具 `archive_extract`" in body
-    assert "archive_create" in body
-    assert _def_names(reg) == {"archive_extract", "archive_create"}
+    assert "已启用工具 `archive`" in body
+    assert _def_names(reg) == {"archive"}
 
 
 async def test_host_consult_returns_how():
@@ -618,15 +607,13 @@ def test_preamble_and_core_make_consult_discoverable():
     desc = ConsultTool(source=None).schema.description  # type: ignore[arg-type]
     assert "按需目录" in preamble
     assert "consult(name)" in preamble
-    assert "全文未常驻" not in preamble
     assert "低频工具" not in preamble
-    assert "无需查阅" not in preamble
     assert "下一模型轮" not in preamble
+    assert "成套" not in preamble
     assert "不必等用户再发一条" not in preamble
     assert "下一模型轮" not in _DEFAULT_SYSTEM_PROMPT
     assert "本回合下一模型轮" in desc
-    assert "无需查阅" in desc
-    assert "系统能力指引" in desc
+    assert "成套" in desc
     assert "consult(browser)" not in _CEO_CORE_HINT
     # consult 钩在按需目录 / 装配后的 CEO 串，不进 <身份> 核。
     assert "consult(name)" not in _CEO_CORE_HINT
@@ -647,12 +634,6 @@ def test_family_of_covers_browser_and_solo_tools():
     assert family_of("table_read") == frozenset({"table_ops", "table_read"})
     assert family_of("docs_read") == frozenset({"docs_read", "docs_write"})
     assert family_of("docs_write") == frozenset({"docs_read", "docs_write"})
-    assert family_of("list_folder_dir") == frozenset(
-        {"list_folder_dir", "read_folder_file"}
-    )
-    assert family_of("read_folder_file") == frozenset(
-        {"list_folder_dir", "read_folder_file"}
-    )
     assert family_of("debate") == frozenset({"debate"})
     assert family_of("md_export") == frozenset({"md_export"})
     assert "md_to_docx" not in ON_DEMAND_TOOL_NAMES
@@ -733,9 +714,10 @@ def _stuffed_worker() -> ToolRegistry:
 
 
 def test_stuffed_worker_opening_table_omits_on_demand_tools():
-    """Locks the opening FC win: 25 registered; consult 另 wire，不在此表."""
+    """Locks the opening FC win: 22 registered; consult 另 wire，不在此表."""
     registry = _stuffed_worker()
-    assert registry.count == 25
+    assert registry.count == 22
+    assert "read_image" not in registry.names
     offered = _def_names(registry)
     assert offered == _STUFFED_WORKER_RESIDENT
     chars = sum(
@@ -744,7 +726,8 @@ def test_stuffed_worker_opening_table_omits_on_demand_tools():
     # 2026-09-18 git 出开场表（按需）。实测 6463。锁回实测整十。
     # 2026-09-18 file_write 用户规则 when-to-use。实测 6486。锁回实测整十。
     # 2026-09-18 用户规则条目 `.agentcore/规则` 进 file_list / file_delete。实测 6533。锁回实测整十。
-    assert chars <= 6540, f"队员开场工具表变胖：{chars}"
+    # 2026-09-19 file_read 图片走当前主力。实测 6555。锁回实测整十。
+    assert chars <= 6560, f"队员开场工具表变胖：{chars}"
     deferred = set(registry.deferred_names)
     assert deferred <= ON_DEMAND_TOOL_NAMES
     assert "browser" in deferred
@@ -779,12 +762,12 @@ async def test_stuffed_worker_opening_table_omits_mcp_tools():
     registry = _stuffed_worker()
     opening_before = _def_names(registry)
     count_before = registry.count
-    assert count_before == 25
+    assert count_before == 22
     assert opening_before == _STUFFED_WORKER_RESIDENT
 
     registered = register_mcp_tools(registry, _playwright_mcp_result(tool_count=24))
     assert registered == 24
-    assert registry.count == 49
+    assert registry.count == 46
     offered = _def_names(registry)
     assert offered == opening_before
     mcp_names = {n for n in registry.names if n.startswith("mcp_")}
@@ -859,10 +842,10 @@ def test_ceo_chat_tools_after_assemble_wire_hold_deferred_work_tools():
     offered = _def_names(chat_tools)
     assert deferred.isdisjoint(offered)
     assert {"search_conversations", "read_conversation"} <= offered
-    assert {"debate", "list_folder_dir", "read_folder_file"} <= set(
+    assert {"debate"} <= set(
         chat_tools.deferred_names
     )
-    assert {"debate", "list_folder_dir", "read_folder_file"}.isdisjoint(offered)
+    assert {"debate"}.isdisjoint(offered)
 
 
 async def test_mcp_directory_lists_assembled_tools_and_consult_promotes_server_family():
@@ -943,7 +926,7 @@ async def test_consult_mcp_server_alias_offers_family():
     entries = await src.list_directory("u")
     rendered = render_on_demand_directory(entries)
     assert "连接器：" in rendered
-    assert "MCP · Echo（查阅任一即整组启用）：mcp_echo_ping、mcp_echo_list" in rendered
+    assert "MCP · Echo：mcp_echo_ping、mcp_echo_list" in rendered
     assert "- mcp_echo_ping：" not in rendered
     body = await src.fetch_by_name("u", "echo")
     assert body is not None

@@ -9,8 +9,8 @@
 做法与 `calibration.py`（校准 eval LLMJudge ↔ 人工分）同构，但校准的是**辩论裁判自身的收敛判定**：
 
 1. **合成场景**（:data:`SCENARIOS`）：一组人工编写、带**金标 `expect_converge`** 的单轮辩论态——
-   覆盖「该收敛」（论点见顶重复 / 归结为价值之争 / 红队风险挖尽）与「该继续」
-   （开场首轮 / 冒出实质新论点 / 圆桌新视角 / 红队新风险）两侧。
+覆盖「该收敛」（论点见顶重复 / 归结为价值之争）与「该继续」
+  （开场首轮 / 冒出实质新论点）两侧。
 2. **过真实裁判**（:func:`run_debate_converge`）：对每个场景构 `DebateConfig` + 当前轮发言 + 历史
    长度（定 `round_no`），调**生产合并裁判 `_judge_and_summarize`** 取 `converged`（只读其裁判判定
    部分、弃小结），与金标比。
@@ -45,7 +45,6 @@ from agentcore.runtime.debate.moderator import Moderator
 from agentcore.runtime.debate.types import (
     STOP_CONVERGED,
     STOP_FOCUS_CLARIFIED,
-    STOP_RED_TEAM_EXHAUSTED,
     DebateClash,
     DebateConfig,
     DebateForm,
@@ -58,7 +57,7 @@ from agentcore.runtime.debate.types import (
 
 # 金标 stop_reason 只允许「收敛类」取值（max_rounds / all_failed / user_concluded 是循环层归因，
 # 非裁判判收敛时给的）——lint 据此校验 expect_stop。
-_CONVERGED_STOPS = frozenset({STOP_CONVERGED, STOP_FOCUS_CLARIFIED, STOP_RED_TEAM_EXHAUSTED})
+_CONVERGED_STOPS = frozenset({STOP_CONVERGED, STOP_FOCUS_CLARIFIED})
 
 
 @dataclass(frozen=True)
@@ -142,12 +141,10 @@ def _turn(key: str, name: str, content: str) -> SideTurn:
 
 # --- 合成场景集（金标）------------------------------------------------------
 # 每个场景的【当前轮发言】自身就带足金标信号（因裁判只看当前轮，见模块 docstring）：
-# 该收敛的场景里发言明说「无新论点 / 只是价值取舍 / 挖不到新风险」；该继续的场景里发言引入
-# 明确的实质新论点 / 新视角 / 新风险。刻意做成清晰无歧义的范例——量的是裁判对这些信号的敏感度。
+# 该收敛的场景里发言明说「无新论点 / 只是价值取舍」；该继续的场景里发言引入
+# 明确的实质新论点。刻意做成清晰无歧义的范例——量的是裁判对这些信号的敏感度。
 
 _S_DEBATE = DebateForm.DEBATE
-_S_RED = DebateForm.RED_TEAM
-_S_ROUND = DebateForm.ROUNDTABLE
 
 SCENARIOS: tuple[ConvergeScenario, ...] = (
     # ── 该收敛（若裁判判「继续」= over-conservatism，本盘点主信号）──────────────
@@ -209,35 +206,6 @@ SCENARIOS: tuple[ConvergeScenario, ...] = (
         expect_stop=STOP_FOCUS_CLARIFIED,
         why="分歧已归结为纯价值/优先级取舍（双方都承认无事实可裁）"
         "——正是 focus_clarified 收敛信号。",
-    ),
-    ConvergeScenario(
-        id="red_team_exhausted",
-        form=_S_RED,
-        motion="压力测试：新版限流方案的漏洞",
-        sides=(
-            _side("plan", "方案方", "为新版限流方案辩护并修补", is_subject=True),
-            _side("red", "红队", "尽力挖新版限流方案的漏洞与失败场景"),
-        ),
-        focus="剩余未覆盖的失败场景",
-        round_no=3,
-        max_rounds=5,
-        turns=(
-            _turn(
-                "plan",
-                "方案方",
-                "前两轮红队提的三类风险（突发流量、依赖抖动、配置漂移）我们都已给出修补并说明。"
-                "本轮红队没有指出新的攻击面。",
-            ),
-            _turn(
-                "red",
-                "红队",
-                "我方尽力再找，但确实没挖到新的失败场景了——之前提的都已被合理修补。到此风险面"
-                "基本挖尽，没有新的漏洞可攻。",
-            ),
-        ),
-        expect_converge=True,
-        expect_stop=STOP_RED_TEAM_EXHAUSTED,
-        why="红队明说挖不到新风险、方案方已修补此前所有风险（无新风险可挖）——红队形态收敛信号。",
     ),
     ConvergeScenario(
         id="plateau_reword",
@@ -326,63 +294,6 @@ SCENARIOS: tuple[ConvergeScenario, ...] = (
         why="反方引入此前未涉及的实质新论点（成本临界点 + 数据主权/合规），"
         "正方尚未回应，仍有新论点。",
     ),
-    ConvergeScenario(
-        id="roundtable_new_perspective",
-        form=_S_ROUND,
-        motion="如何看待 AI 生成内容对创作行业的影响",
-        sides=(
-            _side("tool", "工具论视角", "AI 是创作放大器"),
-            _side("labor", "劳动分配视角", "关注创作者生计与收益分配"),
-            _side("ethic", "法律伦理视角", "关注版权与创作伦理"),
-        ),
-        focus="AI 生成内容影响的核心维度",
-        round_no=2,
-        max_rounds=4,
-        turns=(
-            _turn("tool", "工具论视角", "AI 是放大器，降低创作门槛、让更多人能表达。"),
-            _turn(
-                "labor",
-                "劳动分配视角",
-                "但它冲击的是中腰部创作者的生计，收益进一步向平台与头部集中。",
-            ),
-            _turn(
-                "ethic",
-                "法律伦理视角",
-                "本轮我补一个前面没人谈的维度：训练数据的版权来源与署名权——这不是效率或分配问题，"
-                "而是创作伦理与法律根基问题。",
-            ),
-        ),
-        expect_converge=False,
-        why="圆桌本轮刚冒出一个前面未谈的独特视角（版权/创作伦理），观点光谱尚未铺满，不应收敛。",
-    ),
-    ConvergeScenario(
-        id="red_team_new_risk",
-        form=_S_RED,
-        motion="压力测试：用户注册流程的安全性",
-        sides=(
-            _side("plan", "方案方", "为注册流程辩护并修补", is_subject=True),
-            _side("red", "红队", "挖注册流程的安全漏洞"),
-        ),
-        focus="尚未覆盖的攻击面",
-        round_no=2,
-        max_rounds=5,
-        turns=(
-            _turn(
-                "plan",
-                "方案方",
-                "针对第 1 轮红队提的弱口令问题，我们已加强密码策略并对尝试加限流。",
-            ),
-            _turn(
-                "red",
-                "红队",
-                "本轮我提一个新的、更严重的攻击面：注册接口未防枚举——攻击者可据『邮箱已注册』的"
-                "差异化响应批量探测用户是否存在，配合撞库形成账户接管链路。这与上一轮的弱口令是"
-                "不同类别、且尚未修补的风险。",
-            ),
-        ),
-        expect_converge=False,
-        why="红队本轮挖出一类此前未涉及、且未被修补的新风险（枚举 → 账户接管），仍有新风险可挖。",
-    ),
     # ── 跨轮账本（H2：信号在 prior_rounds、当前轮不自报，须靠跨轮账本才判得对）──────────
     ConvergeScenario(
         id="crossround_reword",
@@ -461,48 +372,6 @@ SCENARIOS: tuple[ConvergeScenario, ...] = (
         why="自建派本轮引入账本里没有的实质新论点（数据主权/合规），非老论点重述——仍有跨轮新论点，"
         "不应收敛。",
     ),
-    ConvergeScenario(
-        id="crossround_redteam_reword",
-        form=_S_RED,
-        motion="压力测试：新版限流方案的漏洞",
-        sides=(
-            _side("plan", "方案方", "为新版限流方案辩护并修补", is_subject=True),
-            _side("red", "红队", "尽力挖新版限流方案的漏洞"),
-        ),
-        focus="剩余未覆盖的失败场景",
-        round_no=3,
-        max_rounds=5,
-        prior_rounds=(
-            PriorRound(
-                focus="突发流量下的失效",
-                summary="红队提出突发流量击穿限流；方案方以分级限流 + 排队降级修补。",
-                clashes=(("red", "plan", "峰值下计数器竞态导致限流失准"),),
-            ),
-            PriorRound(
-                focus="依赖抖动与配置漂移",
-                summary="红队提出依赖抖动、配置漂移两类风险；方案方以熔断兜底 + 配置校验修补。",
-                clashes=(("red", "plan", "配置漂移使阈值静默失效"),),
-            ),
-        ),
-        turns=(
-            _turn(
-                "red",
-                "红队",
-                "我再想想突发流量这块：要是瞬时峰值特别高，限流计数是不是还可能有点不准？"
-                "另外配置那块万一改错了会不会又失效？",
-            ),
-            _turn(
-                "plan",
-                "方案方",
-                "这两点其实就是前两轮的峰值竞态和配置漂移，我们已用分级限流 + 配置校验覆盖，"
-                "换个说法也还是同样的处置，没有新攻击面。",
-            ),
-        ),
-        expect_converge=True,
-        expect_stop=STOP_RED_TEAM_EXHAUSTED,
-        why="红队本轮只把账本里已挖过的风险（峰值竞态/配置漂移）换措辞重提、无账本外新攻击面，"
-        "方案方指出即旧风险——红队风险已挖尽，须靠跨轮账本判收敛。",
-    ),
 )
 
 
@@ -510,7 +379,7 @@ def lint_scenarios(scenarios: Sequence[ConvergeScenario] = SCENARIOS) -> None:
     """零 LLM 校验场景集结构（per-PR 硬门禁）：带病数据绝不开跑，与 gold-set loader 同口径。
 
     校验：id 唯一非空；≥2 方且 key 唯一；round_no 落在 ``[1, max_rounds]``；turns 非空且 side_key
-    均属声明方；红队形态恰有 1 个 is_subject（其余形态无）；``expect_stop`` 仅收敛场景可给、且取
+    均属声明方；``expect_stop`` 仅收敛场景可给、且取
     收敛类归因；集合两侧均衡（至少各 2 条 converge / continue，否则混淆矩阵无意义）。违例 raise
     :class:`~agentcore.evals.types.EvalConfigError`。
     """
@@ -555,11 +424,6 @@ def lint_scenarios(scenarios: Sequence[ConvergeScenario] = SCENARIOS) -> None:
                     raise EvalConfigError(
                         f"[{sc.id}] prior_rounds 交锋 side_key {frm!r}/{to!r} 不属于声明方"
                     )
-        subjects = [s for s in sc.sides if s.is_subject]
-        if sc.form is DebateForm.RED_TEAM and len(subjects) != 1:
-            raise EvalConfigError(f"[{sc.id}] 红队形态须恰有 1 个 is_subject（现 {len(subjects)}）")
-        if sc.form is not DebateForm.RED_TEAM and subjects:
-            raise EvalConfigError(f"[{sc.id}] 非红队形态不应有 is_subject")
         if sc.expect_stop:
             if not sc.expect_converge:
                 raise EvalConfigError(f"[{sc.id}] expect_stop 仅在 expect_converge=True 时有意义")

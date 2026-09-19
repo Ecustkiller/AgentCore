@@ -10,6 +10,10 @@ from typing import Any
 # card always lets the user steer beyond these.
 _MAX_QUESTIONS = 5  # 开场重点问题最多 5 个（对齐 Cursor 2.1 的 3–5）
 _MAX_OPTIONS = 6  # 每个 choice 问题的选项上限
+# Appended to every ask_user reject: the fix is a silent resend, not something to
+# narrate — without this the model tends to recount the failed call in its visible
+# prose ("The ask_user call failed because…"), which reads as fumbling to the user.
+ASK_RETRY_HINT = "改对后直接重发 ask_user 即可；不要在给用户看的正文里复述这次调用失败。"
 _LOCAL_PROJECT_ACTIONS: tuple[str, ...] = (
     "open_local_project",
     "register_local_project",
@@ -35,12 +39,31 @@ def advertised_option_actions(
 
 # Shared questions[] card shape (ask_user + escalate). Per-tool overlays:
 # array description / minItems / option.action / default 短触发.
+# 填卡合同只叠在 ask_user（写参当轮必见）；escalate 不抄推荐 / 桌上结果。
 _PROMPT_DESC = "问句。"
 _KIND_DESC = "choice 或 text，默认 choice。"
 _OPTIONS_DESC = f"kind=choice 候选项（最多 {_MAX_OPTIONS}）。"
 _LABEL_DESC = "选项名（回传答案）。"
 _MULTIPLE_DESC = "可选：允许多选，默认 false。"
 _DEFAULT_DESC = "可选。"
+
+# 原 consult(ask_kickoff)/ask_midtask 上收进本按钮。consult 回执赶不上这张卡。
+ASK_WHEN = (
+    "向用户发问（唯一问用户原语）。挡路才问：猜错会做错 → 先问；"
+    "仅可逆低杠杆才标假设。暂停回合等人答复。"
+    "形态未钉先问；已钉立刻派。"
+    "现有能力做不到 → 问句第一句说清做不到什么，再给替代；坚持则按所选继续。"
+    "明显次优 → 标假设继续。"
+    "未点名主体 ≠ 自拟后派。"
+    "choice 只服务下一步 ≠ 把正文已摆出的候选再投进卡。"
+)
+ASK_PROMPT_HOW = "要什么 / 给谁 / 做到哪一档。不要在正文再抄；假设和背景写正文。"
+ASK_DEFAULT_HOW = (
+    "有倾向时填。空 continue=确认。「继续」≠ 上轮选项已确认：须复述（或卡上 default）。"
+)
+ASK_LABEL_HOW = (
+    "桌上结果；权衡写进选项名 ≠ 编制套餐。有倾向时该项第一、名末「（推荐）」。"
+)
 
 
 def questions_array_schema(
@@ -184,11 +207,10 @@ def coerce_list_arg(
 def option_label(opt: Any) -> str:
     """The canonical label of a choice option, tolerant of both shapes.
 
-    Options normalize to ``{label}`` dicts (plus optional ``action`` /
-    organize_plan ``op`` fields), but a durable frame persisted before that
-    change (or a hand-built test) may still carry a bare string — both the live
-    tool and a resume read labels through here so an old paused turn still
-    settles. The label is the answer value
+    Options normalize to ``{label}`` dicts (plus optional ``action``), but a
+    durable frame persisted before that change (or a hand-built test) may still
+    carry a bare string — both the live tool and a resume read labels through
+    here so an old paused turn still settles. The label is the answer value
     (答复模型 α): no separate wire value exists. Tendency lives in the name
     (``（推荐）`` / ``(recommended)``), not a separate flag.
     """
@@ -209,10 +231,9 @@ def normalize_options(
 ) -> list[dict[str, Any]]:
     """Cap choice options, accepting either bare strings or rich objects.
 
-    Default cap is 6 (ordinary choice). ``card=organize_plan``
-    raises the cap to its list hat. A bare ``"Postgres"`` becomes
-    ``{"label": "Postgres"}``; an object may add ``action`` (a desktop client action
-    such as ``open_local_project`` / ``register_local_project`` / ``bind_local_folder``
+    Default cap is 6. A bare ``"Postgres"`` becomes ``{"label": "Postgres"}``;
+    an object may add ``action`` (a desktop client action such as
+    ``open_local_project`` / ``register_local_project`` / ``bind_local_folder``
     — unknown values drop so a hallucinated action never reaches the wire).
     ``detail`` is dropped even if the model filled it; put the trade-off in
     ``label``. Empty-label entries drop. Names may carry
@@ -230,21 +251,6 @@ def normalize_options(
             action = str(it.get("action") or "").strip()
             if action in _ALLOWED_OPTION_ACTIONS:
                 opt["action"] = action
-            # organize_plan structured fields (passed through for plan binding).
-            op = str(it.get("op") or "").strip()
-            if op in ("move", "copy", "delete", "mkdir"):
-                opt["op"] = op
-                if op in ("move", "copy"):
-                    src = str(it.get("source") or "").strip()
-                    dst = str(it.get("destination") or "").strip()
-                    if src:
-                        opt["source"] = src
-                    if dst:
-                        opt["destination"] = dst
-                else:
-                    p = str(it.get("path") or "").strip()
-                    if p:
-                        opt["path"] = p
         out.append(opt)
         if len(out) >= cap:
             break
@@ -282,8 +288,8 @@ def normalize_questions(
 
     ``default`` is optional here (unlike the old kickoff): an opening question should
     pre-fill one, but a mid-task fork usually wants the user to actively choose, so it
-    is left empty when the CEO omits it.     ``max_options`` forwards to
-    :func:`normalize_options` (cap raised for ``organize_plan``).
+    is left empty when the CEO omits it. ``max_options`` forwards to
+    :func:`normalize_options`.
 
     Choice with no options after absorb is lowered to ``text`` so the card is
     fill-in, never a zero-button choice. A question-level ``label`` with absent

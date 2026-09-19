@@ -200,44 +200,35 @@ async def test_recover_turn_resets_sites_when_resume_plan_raises():
     assert current_resume_hints.get() is None
 
 
-async def test_recover_turn_resume_plan_review_routes_through_same_primitive():
-    from agentcore.runtime.suspension import PlanReviewSuspension
+async def test_recover_turn_resume_ask_user_settles_without_resume_plan():
+    """Shared recover primitive: ask_user settle maps the answer, does not resume_plan."""
+    from agentcore.runtime.suspension import AskUserSuspension
 
     state = TurnState.from_journal(_partial_journal())
     sink = EventSink()
-    seen: dict = {}
-
-    async def _resume_plan(plan, seed_completed, **kwargs):
-        seen["seed"] = set(seed_completed)
-        seen["decision"] = kwargs.get("decision")
-        seen["ceo_review"] = kwargs.get("ceo_review")
-        seen["resume_hints"] = kwargs.get("resume_hints")
-        return ToolResult(tool_call_id="t1", success=True, output="resumed")
-
     delegate = MagicMock()
-    delegate.resume_plan = _resume_plan
 
-    review = {
-        "conclusion": "可过",
-        "risks": ["r"],
-        "suggestions": ["s"],
-        "source": "llm",
-    }
-    suspension = PlanReviewSuspension(
+    suspension = AskUserSuspension(
         message_id="m1",
         conversation_id="c1",
         user_id="u1",
         captain_run_id="cap1",
-        checkpoint_id="cp1",
-        tool_call_id="tc1",
-        user_message="task",
+        checkpoint_id="ck1",
+        tool_call_id="call_ask",
+        user_message="A 还是 B?",
         base_system_prompt="sys",
         journal_entries=_partial_journal(),
-        plan=state.plan or _plan_two_nodes(),
-        completed=dict(state.completed),
-        steps=[{"run_id": "w1", "role": "研究员", "summary": "…"}],
-        pending=[{"run_id": "w2", "role": "写手"}],
-        ceo_review=review,
+        question="A 还是 B?",
+        questions=[
+            {
+                "id": "q0",
+                "prompt": "A 还是 B?",
+                "kind": "choice",
+                "options": ["A", "B"],
+                "multiple": False,
+                "default": "",
+            }
+        ],
     )
 
     settled = await recover_turn(
@@ -248,66 +239,18 @@ async def test_recover_turn_resume_plan_review_routes_through_same_primitive():
         suspension=suspension,
         decision=CheckpointDecision.CONTINUE,
         note="",
+        selected=["A"],
     )
-    assert settled.output == "resumed"
-    assert seen["seed"] == {"w1"}
-    assert seen["decision"] is CheckpointDecision.CONTINUE
-    assert seen["ceo_review"] == review
-    assert seen["resume_hints"] in (None, {})
+    assert "A" in settled.output
+    assert settled.terminal_text is None
+    delegate.resume_plan.assert_not_called()
 
 
-async def test_recover_turn_plan_review_forwards_team_brief():
-    """plan_review 帧回灌 team_brief：恢复用全新 DelegateTool，须把开局共识带给 resume_plan。"""
-    from agentcore.runtime.suspension import PlanReviewSuspension
-
-    state = TurnState.from_journal(_partial_journal())
-    sink = EventSink()
-    seen: dict = {}
-
-    async def _resume_plan(plan, seed_completed, **kwargs):
-        seen["team_brief"] = kwargs.get("team_brief")
-        assert "coordination" not in kwargs
-        return ToolResult(tool_call_id="t1", success=True, output="resumed")
-
-    delegate = MagicMock()
-    delegate.resume_plan = _resume_plan
-
-    suspension = PlanReviewSuspension(
-        message_id="m1",
-        conversation_id="c1",
-        user_id="u1",
-        captain_run_id="cap1",
-        checkpoint_id="cp1",
-        tool_call_id="tc1",
-        user_message="task",
-        base_system_prompt="sys",
-        journal_entries=_partial_journal(),
-        plan=state.plan or _plan_two_nodes(),
-        completed=dict(state.completed),
-        steps=[{"run_id": "w1", "role": "研究员", "summary": "…"}],
-        team_brief="口径按 v2",
-    )
-    await recover_turn(
-        state=state,
-        sink=sink,
-        delegate_tool=delegate,
-        execution_id="x",
-        suspension=suspension,
-        decision=CheckpointDecision.CONTINUE,
-        note="",
-    )
-    assert seen["team_brief"] == "口径按 v2"
-
-
-async def test_leftover_team_preview_from_json_refuses():
+async def test_leftover_team_preview_from_json_skips():
     """Leftover team_preview frames fail at from_json — never recover_turn."""
-    import pytest
-
-    from agentcore.core.errors import GoneError
-    from agentcore.runtime.kickoff.retired import TEAM_PREVIEW_UNRECOVERABLE
     from agentcore.runtime.suspension import suspension_from_json
 
-    with pytest.raises(GoneError, match=TEAM_PREVIEW_UNRECOVERABLE):
+    with pytest.raises(ValueError, match="unknown suspension kind"):
         suspension_from_json(
             {
                 "kind": "team_preview",
@@ -324,50 +267,24 @@ async def test_leftover_team_preview_from_json_refuses():
         )
 
 
-async def test_recover_turn_plan_review_suspend_preserves_effect():
-    """plan_review settle SUSPEND is the same outer contract as team_preview."""
-    from agentcore.core.types import ToolEffect
-    from agentcore.runtime.suspension import PlanReviewSuspension
+async def test_leftover_plan_review_from_json_skips():
+    """Leftover plan_review frames fail at from_json — never recover_turn."""
+    from agentcore.runtime.suspension import suspension_from_json
 
-    state = TurnState.from_journal(_partial_journal())
-    sink = EventSink()
-
-    async def _resume_plan(plan, seed_completed, **kwargs):
-        return ToolResult(
-            tool_call_id="",
-            success=True,
-            output="",
-            effect=ToolEffect.SUSPEND,
+    with pytest.raises(ValueError, match="unknown suspension kind"):
+        suspension_from_json(
+            {
+                "kind": "plan_review",
+                "message_id": "m1",
+                "conversation_id": "c1",
+                "user_id": "u1",
+                "captain_run_id": "cap1",
+                "checkpoint_id": "cp1",
+                "tool_call_id": "tc1",
+                "base_system_prompt": "sys",
+                "user_message": "task",
+            }
         )
-
-    delegate = MagicMock()
-    delegate.resume_plan = _resume_plan
-
-    suspension = PlanReviewSuspension(
-        message_id="m1",
-        conversation_id="c1",
-        user_id="u1",
-        captain_run_id="cap1",
-        checkpoint_id="cp1",
-        tool_call_id="tc1",
-        user_message="task",
-        base_system_prompt="sys",
-        journal_entries=_partial_journal(),
-        plan=state.plan or _plan_two_nodes(),
-        completed=dict(state.completed),
-        steps=[{"run_id": "w1", "role": "研究员", "summary": "…"}],
-    )
-    settled = await recover_turn(
-        state=state,
-        sink=sink,
-        delegate_tool=delegate,
-        execution_id="x",
-        suspension=suspension,
-        decision=CheckpointDecision.CONTINUE,
-        note="",
-    )
-    assert settled.effect is ToolEffect.SUSPEND
-    assert settled.terminal_text is None
 
 
 async def test_sweeper_claims_expired_lease_and_invokes_recover(monkeypatch):

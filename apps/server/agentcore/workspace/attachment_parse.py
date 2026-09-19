@@ -72,7 +72,7 @@ TABLE_PREVIEW_MAX_PROMPT_CHARS = 4_000
 
 SCAN_NOTICE = (
     "这份文件几乎抽不到文本层（扫描件或纯图）。当前没有 OCR。"
-    "可用 read_image 看首页，或按文件名归类；"
+    "按文件名归类；"
     "offset/limit / start_page 变不出文本层。"
 )
 

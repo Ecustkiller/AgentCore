@@ -26,19 +26,18 @@ from ._builders import (
 
 
 def _multi_agent_debate_multibeat() -> list[SSEEvent]:
-    """多轮对抗辩论 + 每轮质询 + 结辩：钉死协作图「参与者×beat 列」契约。
+    """多轮对抗辩论 + 每轮质询：钉死协作图「参与者×beat 列」契约。
 
-    每方 5 个可见节点（首轮陈词无角标 + 第1轮质询 + 第2轮陈词 + 第2轮质询 + 结辩），
-    ``run_context`` 首块 task（真实 feedback 孪生）+ 浓缩通道块区分质询/结辩/续轮（复用既有
-    字段，不新造 beat wire）。golden 断言：进度 11/11；各续写 beat 含 task；两轮均带 cross_exam；
-    closings 齐。
+    每方 4 个可见节点（首轮陈词无角标 + 第1轮质询 + 第2轮陈词 + 第2轮质询），
+    ``run_context`` 首块 task（真实 feedback 孪生）+ 浓缩通道块区分质询/续轮（复用既有
+    字段，不新造 beat wire）。golden 断言：进度 9/9；各续写 beat 含 task；两轮均带 cross_exam。
+    新场不跑结辩，``closings`` 空列表。
     """
     cap, mod = "captain1", "debate_mb_mod1"
     pro_r1, con_r1 = f"{mod}_r1_pro", f"{mod}_r1_con"
     pro_r1_cx, con_r1_cx = f"{mod}_r1_cx_pro", f"{mod}_r1_cx_con"
     pro_r2, con_r2 = f"{mod}_r2_pro", f"{mod}_r2_con"
     pro_r2_cx, con_r2_cx = f"{mod}_r2_cx_pro", f"{mod}_r2_cx_con"
-    pro_closing, con_closing = f"{mod}_closing_pro", f"{mod}_closing_con"
     mod_agents, mod_runs = _moderator_agents_runs(
         mod, cap, "主持多轮正反辩论：是否采用方案 A"
     )
@@ -153,10 +152,7 @@ def _multi_agent_debate_multibeat() -> list[SSEEvent]:
                 "scores": {"pro": score, "con": score},
             },
         ],
-        "closings": [
-            {"key": "pro", "name": "支持方", "run_id": pro_closing, "ok": True},
-            {"key": "con", "name": "反对方", "run_id": con_closing, "ok": True},
-        ],
+        "closings": [],
         "brief": {
             "crux": "方案 A 风险是否可控",
             "strongest_points": {"pro": "灰度可兜底", "con": "双写窗口未解"},
@@ -183,14 +179,6 @@ def _multi_agent_debate_multibeat() -> list[SSEEvent]:
         ),
         _ctx_block("cross_exam", "第 2 轮 · 质询（必须正面回答）", "- 质询题"),
     ]
-    closing_ctx = [
-        _ctx_block(
-            "task",
-            "结辩环节",
-            "## 结辩环节\n请【只讲胜负手】；【不得引入任何新论据】。直接输出你的结辩陈词。",
-        ),
-        _ctx_block("closing", "结辩环节", "本场辩论已充分交锋，现请做结辩陈词。"),
-    ]
     r2_ctx = [
         _ctx_block(
             "task",
@@ -202,7 +190,7 @@ def _multi_agent_debate_multibeat() -> list[SSEEvent]:
     ]
     events: list[SSEEvent] = [
         message_start("m1", conversation_id=_CONV),
-        content_delta("多轮对抗辩论，每轮质询后结辩。"),
+        content_delta("多轮对抗辩论，每轮质询后收场。"),
         run_plan(
             execution_id="exec1",
             plan_type="debate",
@@ -310,24 +298,6 @@ def _multi_agent_debate_multibeat() -> list[SSEEvent]:
             delta="### 质询一\n须有一致性 SLA【待核实·推断】。",
             output_summary="反对方第2轮质询",
             duration_ms=590,
-        )),
-        *(_side_continue(
-            pro_closing, parent=mod, continues_run_id=pro_r1,
-            stance="pro",
-            round_no=2,
-            context_blocks=closing_ctx,
-            delta="结辩：收益确定、风险有解，应有条件采用。",
-            output_summary="支持方结辩",
-            duration_ms=500,
-        )),
-        *(_side_continue(
-            con_closing, parent=mod, continues_run_id=con_r1,
-            stance="con",
-            round_no=2,
-            context_blocks=closing_ctx,
-            delta="结辩：风险未对冲前不宜全量。",
-            output_summary="反对方结辩",
-            duration_ms=510,
         )),
         run_completed(
             mod,

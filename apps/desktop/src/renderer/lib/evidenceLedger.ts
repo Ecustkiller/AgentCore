@@ -1,14 +1,14 @@
 /**
- * 场级证据台账（evidence_ledger）前端工具——解析成稿 `#eN`、合并 live delta、徽章文案。
- * 与后端 `runtime/debate/evidence_ledger.py` / 提案 O1·O4·O5 同源约定。
+ * 场级证据台账（evidence_ledger）前端工具——解析成稿 `#rN`、合并 live delta、徽章文案。
+ * 与后端 `runtime/debate/evidence_ledger.py` 同源约定。
  */
 
 import type { EvidenceLedgerEntry } from "@/types/events";
 
-/** 成稿 note 中的台账 id（`#e3`；双写「出处短语 #e3」亦可抽出）。 */
-const LEDGER_ID_RE = /#e\d+/;
+/** 成稿 note 中的台账 id（`#r3`；双写「出处短语 #r3」亦可抽出）。 */
+const LEDGER_ID_RE = /#r\d+/;
 
-/** 从标记 note 抽出第一个 `#eN`；无则 null（旧自由文本出处）。 */
+/** 从标记 note 抽出第一个 `#rN`；无则 null（旧自由文本出处）。 */
 export function extractLedgerId(note: string): string | null {
   const m = LEDGER_ID_RE.exec(note);
   return m ? m[0] : null;

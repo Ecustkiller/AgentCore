@@ -3,10 +3,8 @@
 Hot-path kinds (approval / escalation / client_tool) share
 ONE in-process :class:`InteractionRegistry`: the engine task awaits an
 :class:`asyncio.Future`; a separate HTTP request (the unified resolve endpoint) settles
-it. Cold-path kinds (``ask_user`` / ``plan_review``) do **not** await
+it. Cold-path kinds (``ask_user``) do **not** await
 here — they finalize the turn onto a durable frame and continue via ``POST .../resume``.
-``stage_card`` is a journaled surface without a bridge Future.
-
 This is the §8.6 **ClientRequestBridge** port (Protocol in ``runtime/ports.py``):
 one pending registry → one ``list_pending`` → one resolve endpoint for hot-path kinds.
 Per-kind differences (the typed result; whether the exchange is journaled) stay in the
@@ -46,9 +44,6 @@ class InteractionKind(StrEnum):
     APPROVAL = "approval"  # GRANTABLE tool gate → result: ApprovalDecision
     ASK_USER = "ask_user"  # CEO checkpoint → result: CheckpointResponse
     CLIENT_TOOL = "client_tool"  # desktop workspace op → result: envelope dict
-    # DAG structured checkpoint (结构化挂起 2a): the WaveScheduler paused after a
-    # ``checkpoint_after`` step → result: CheckpointResponse (continue / stop).
-    PLAN_REVIEW = "plan_review"
     # 阻塞式求决策 (escalate blocking=true): a delegated worker hit a「猜错就作废」fork and
     # suspended. Classic path asks the user directly; coordination-active path awaits CEO
     # ``resolve_escalation`` (awaiting=ceo, not user-answerable) →
@@ -57,9 +52,6 @@ class InteractionKind(StrEnum):
     # and a timeout degrades to the worker's stated assumption
     # (设计: 编排器 · 失败与否决 / 协作模式 · escalate)。
     ESCALATION = "escalation"
-    # leftover 阶段推进卡：kind 仍在 journal / 时间线；热路 resolve 一律 410。
-    # 开辩须用户在对话里点名。不挂起幕 1，不占 bridge Future，不进 recovery pending。
-    STAGE_CARD = "stage_card"
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,26 +115,6 @@ INTERACTION_KIND_SPECS: Mapping[InteractionKind, InteractionKindSpec] = {
         reconnect_answerable=False,
         journal_surface=True,
         attention=True,
-    ),
-    InteractionKind.PLAN_REVIEW: InteractionKindSpec(
-        "plan_review_required",
-        "plan_review_resolved",
-        "checkpoint_id",
-        hot=False,
-        pauses_turn=True,
-        reconnect_answerable=False,
-        journal_surface=True,
-        attention=True,
-    ),
-    InteractionKind.STAGE_CARD: InteractionKindSpec(
-        "stage_card_required",
-        "stage_card_resolved",
-        "stage_card_id",
-        hot=False,
-        pauses_turn=False,
-        reconnect_answerable=False,
-        journal_surface=True,
-        attention=False,
     ),
 }
 
@@ -287,7 +259,7 @@ class InteractionRegistry:
         """Register a pending interaction, signal it, and await its resolution.
 
         The create → signal → await → discard dance every face (approval / ask_user
-        / client_tool / plan_review) used to copy verbatim. ``on_suspended`` is
+        / client_tool) used to copy verbatim. ``on_suspended`` is
         invoked right AFTER the entry is registered and BEFORE the await, so a racing
         resolve always finds it — each face passes its ``*_required`` SSE emit here.
         Raises :class:`TimeoutError` when unresolved within ``timeout`` (the caller

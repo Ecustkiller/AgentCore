@@ -72,19 +72,14 @@ class ConsultTool:
         return ToolSchema(
             name="consult",
             description=(
-                "按 name 从按需目录拉全文"
-                "（系统能力指引、按需用户规则、低频工具）。"
-                "相关再拉。低频工具查阅后本回合下一模型轮进表；"
-                "常驻设定与常驻工具无需查阅。"
+                "按目录 name 拉全文。低频工具本回合下一模型轮进表；成套任一即整组启用。"
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": (
-                            "要查阅的条目名称，取自系统提示词「按需目录」里列出的 name。"
-                        ),
+                        "description": "按需目录里列出的 name。",
                     },
                 },
                 "required": ["name"],

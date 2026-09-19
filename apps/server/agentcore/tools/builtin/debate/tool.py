@@ -81,7 +81,7 @@ class DebateTool:
     executor、后续轮 continue_run）与主持人自身 LLM 调用都折算进去，由 pipeline 折回回合总账。
     ``_debater_sessions`` 按 side.key 留住每个辩手的可续写 session，支撑跨轮带记忆。
 
-    顶层调用在主持人循环启动前走编排层开工卡（``team_preview``，primitive=debate）；
+    顶层开辩不再挂开工卡；遗留开工帧 resume 为 410。
     嵌套 / 续跑 / full_auto 跳过语义对齐 delegate。
     """
 
@@ -389,34 +389,31 @@ class DebateTool:
         if self._debate_authorized_by is None:
             self._debate_authorized_by = "auto"
 
-        # 底料预登记：【已核实·出处】→ 台账条目 + 改写为 #eN（咬合点 1）
+        # 底料预登记：无 id 的【已核实·出处】→ 台账 #rN
         from agentcore.runtime.debate.evidence_ledger import (
+            EvidenceLedger,
             preregister_background,
-            preregister_turn_research_entries,
         )
         from agentcore.runtime.debate.research_dossier import (
             format_research_dossier_index,
             list_research_artifact_paths,
         )
 
-        # 约定文档桥无条件化：CEO 回合 #rN → 场级 #eN（不论是否写入 background）。
         try:
             from agentcore.runtime.suspension import turn_evidence_ledger as _turn_led
 
             turn_core = _turn_led.get()
             if turn_core is not None:
-                preregister_turn_research_entries(
-                    self._evidence_ledger, turn_core.all_entries()
-                )
+                self._evidence_ledger = EvidenceLedger(core=turn_core)
         except Exception:  # noqa: BLE001
-            logger.exception("debate.turn_ledger_preregister_failed")
+            logger.exception("debate.turn_ledger_attach_failed")
 
         if (config.background or "").strip():
             config.background = preregister_background(
                 self._evidence_ledger, config.background
             )
 
-        # 幕1 约定文档：预登记进场级台账（#rN 锚 → #eN）+ 注入索引（含 #eN 映射）。
+        # 幕1 约定文档：已有 #rN 则复用；无锚文件登记整文件一条。
         try:
             from agentcore.runtime.debate.research_dossier import (
                 preregister_research_dossier,

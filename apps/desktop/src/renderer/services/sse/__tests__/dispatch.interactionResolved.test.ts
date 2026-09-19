@@ -155,20 +155,38 @@ describe("dispatchSSEEvent · *_resolved 收口帧", () => {
     beginTurnPreflight(CID);
     enterTurnStreaming(CID);
     useConversationStore.getState().createAssistantMessage(CID);
+    send("approval_required", {
+      approval_id: "ap_stop",
+      tool_call_id: "tc_stop",
+      tool_name: "file_write",
+    });
+    useConversationStore.getState().setTurnPhase("stopping", CID);
+
+    send("approval_resolved", {
+      approval_id: "ap_stop",
+      tool_call_id: "tc_stop",
+      decision: "approve",
+    });
+
+    expect(entry("ap_stop")?.status).toBe("resolved");
+    expectNothingDropped();
+  });
+
+  it("leftover stage_card 事件对不进 store", () => {
+    beginTurnPreflight(CID);
+    enterTurnStreaming(CID);
+    useConversationStore.getState().createAssistantMessage(CID);
     send("stage_card_required", {
       stage_card_id: "sc_1",
       motion: "要不要就这个结论开个辩论",
       form: "debate",
     });
     useConversationStore.getState().setTurnPhase("stopping", CID);
-
     send("stage_card_resolved", {
       stage_card_id: "sc_1",
       decision: "start_debate",
     });
-
-    expect(entry("sc_1")?.status).toBe("resolved");
-    expectNothingDropped();
+    expect(entry("sc_1")).toBeUndefined();
   });
 
   it("放行的只有收口帧：同窗正文突变与非收口帧照旧丢弃", () => {

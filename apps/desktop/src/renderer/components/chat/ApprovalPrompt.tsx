@@ -1,4 +1,8 @@
-import { CodeBlock } from "@/components/chat/CodeBlock";
+import {
+  approvalBodyNeedsClip,
+  countApprovalLines,
+  firstApprovalLine,
+} from "@/components/chat/approvalPreview";
 import {
   codeExecuteLanguage,
   deriveCodeExecuteRiskTags,
@@ -41,7 +45,12 @@ import {
 import { usePermissionChangeStore } from "@/stores/permissionChanges";
 import type { ApprovalDecision } from "@/types/events";
 import { Loader2, ShieldAlert } from "lucide-react";
-import { type ComponentPropsWithoutRef, useMemo, useState } from "react";
+import {
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+  useMemo,
+  useState,
+} from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 
@@ -343,6 +352,26 @@ function primaryArg(
   }
   if (toolName === "file_batch") {
     const ops = args.operations;
+    if (
+      Array.isArray(ops) &&
+      ops.length === 1 &&
+      ops[0] &&
+      typeof ops[0] === "object"
+    ) {
+      const one = ops[0] as Record<string, unknown>;
+      const source =
+        typeof one.source === "string" && one.source.trim()
+          ? one.source.trim()
+          : "";
+      const destination =
+        typeof one.destination === "string" && one.destination.trim()
+          ? one.destination.trim()
+          : "";
+      if (source && destination) return `${source} → ${destination}`;
+      const path =
+        typeof one.path === "string" && one.path.trim() ? one.path.trim() : "";
+      if (path) return path;
+    }
     if (Array.isArray(ops)) return `本次共 ${ops.length} 项`;
   }
   if (toolName === "file_move" || toolName === "file_copy") {
@@ -392,6 +421,12 @@ function isFacePreviewKey(toolName: string, key: string): boolean {
   if (
     (toolName === "file_move" || toolName === "file_copy") &&
     (key === "source" || key === "destination" || key === "path")
+  ) {
+    return true;
+  }
+  if (
+    toolName === "file_batch" &&
+    (key === "operations" || key === "source" || key === "destination")
   ) {
     return true;
   }
@@ -621,6 +656,8 @@ export function ApprovalCard({
     approval.arguments.content
       ? approval.arguments.content
       : null;
+  const writeLineCount =
+    writeBody != null ? countApprovalLines(writeBody) : null;
   const replaceOld =
     approval.toolName === "str_replace" &&
     typeof approval.arguments.old_string === "string" &&
@@ -741,6 +778,11 @@ export function ApprovalCard({
                   </SimpleTooltip>
                 </>
               ) : null}
+              {writeLineCount != null ? (
+                <span className="ml-1.5 shrink-0 tabular-nums font-normal text-muted-foreground/70">
+                  {writeLineCount} 行
+                </span>
+              ) : null}
             </p>
             {permanentDelete && (
               <div className="mt-1">
@@ -794,24 +836,30 @@ export function ApprovalCard({
               </p>
             )}
             {isCodeExecute && codeText != null && (
-              <div className="mt-1 space-y-1">
-                {codeTruncated && (
-                  <p className="text-xs text-muted-foreground">
-                    代码预览已截断
-                  </p>
+              <ApprovalCollapsiblePreview
+                text={codeText}
+                serverTruncated={codeTruncated}
+                truncatedLabel="代码预览已截断"
+                renderBody={(bodyClass) => (
+                  <ApprovalHighlightedCode
+                    code={codeText}
+                    language={codeExecuteLanguage(approval.arguments)}
+                    className={bodyClass}
+                  />
                 )}
-                <ApprovalHighlightedCode
-                  code={codeText}
-                  language={codeExecuteLanguage(approval.arguments)}
-                />
-              </div>
+              />
             )}
-            {writeBody != null && <ApprovalPlainPreview text={writeBody} />}
-            {replaceOld != null && (
-              <ApprovalPlainPreview label="原文" text={replaceOld} />
+            {writeBody != null && (
+              <ApprovalCollapsiblePreview
+                text={writeBody}
+                serverTruncated={isPreviewTruncated(writeBody)}
+              />
             )}
-            {replaceNew != null && (
-              <ApprovalPlainPreview label="替换为" text={replaceNew} />
+            {replaceOld != null && replaceNew != null && (
+              <ApprovalReplacePreview
+                oldText={replaceOld}
+                newText={replaceNew}
+              />
             )}
             {leftoverEntries.length > 0 && (
               <dl className="mt-1 space-y-0.5">
@@ -820,8 +868,8 @@ export function ApprovalCard({
                     <dt className="shrink-0 text-muted-foreground">
                       {LEFTOVER_ARG_LABELS[key] ?? key}
                     </dt>
-                    <dd className="min-w-0 whitespace-pre-wrap break-all font-mono text-foreground">
-                      {formatLeftoverValue(value)}
+                    <dd className="min-w-0 font-mono text-foreground">
+                      <LeftoverArgValue value={value} />
                     </dd>
                   </div>
                 ))}
@@ -857,33 +905,122 @@ export function ApprovalCard({
   );
 }
 
-function ApprovalPlainPreview({
-  label,
-  text,
+function previewBodyClass(long: boolean, open: boolean): string {
+  return cn(
+    "whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground",
+    long && !open && "line-clamp-3",
+    long && open && "max-h-40 overflow-auto",
+  );
+}
+
+function ApprovalPreviewToggle({
+  open,
+  onToggle,
 }: {
-  label?: string;
-  text: string;
+  open: boolean;
+  onToggle: () => void;
 }) {
-  const truncated = isPreviewTruncated(text);
   return (
-    <div className="mt-1 space-y-1">
-      {label ? <p className="text-xs text-muted-foreground">{label}</p> : null}
-      {truncated ? (
-        <p className="text-xs text-muted-foreground">预览已截断</p>
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      className="text-xs font-medium text-muted-foreground hover:text-foreground"
+    >
+      {open ? "收起" : "展开"}
+    </button>
+  );
+}
+
+function ApprovalCollapsiblePreview({
+  text,
+  serverTruncated = false,
+  truncatedLabel = "预览已截断",
+  compact = false,
+  renderBody,
+}: {
+  text: string;
+  serverTruncated?: boolean;
+  truncatedLabel?: string;
+  compact?: boolean;
+  renderBody?: (className: string) => ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const long = approvalBodyNeedsClip(text);
+  const bodyClass = previewBodyClass(long, open);
+  return (
+    <div className={cn(!compact && "mt-1", "space-y-1")}>
+      {serverTruncated && open ? (
+        <p className="text-xs text-muted-foreground">{truncatedLabel}</p>
       ) : null}
-      <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">
-        {text}
-      </pre>
+      {renderBody ? (
+        renderBody(bodyClass)
+      ) : (
+        <pre className={bodyClass}>{text}</pre>
+      )}
+      {long ? (
+        <ApprovalPreviewToggle
+          open={open}
+          onToggle={() => setOpen((v) => !v)}
+        />
+      ) : null}
     </div>
   );
+}
+
+function ApprovalReplacePreview({
+  oldText,
+  newText,
+}: {
+  oldText: string;
+  newText: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const long = approvalBodyNeedsClip(oldText) || approvalBodyNeedsClip(newText);
+  if (long && open) {
+    return (
+      <div className="mt-1 space-y-1">
+        <p className="text-xs text-muted-foreground">原文</p>
+        <pre className={previewBodyClass(true, true)}>{oldText}</pre>
+        <p className="text-xs text-muted-foreground">替换为</p>
+        <pre className={previewBodyClass(true, true)}>{newText}</pre>
+        <ApprovalPreviewToggle open onToggle={() => setOpen(false)} />
+      </div>
+    );
+  }
+  return (
+    <div className="mt-1 space-y-1">
+      <div className="space-y-0.5 font-mono text-xs">
+        <p className="truncate text-destructive">
+          - {truncateSnippet(firstApprovalLine(oldText))}
+        </p>
+        <p className="truncate text-success">
+          + {truncateSnippet(firstApprovalLine(newText))}
+        </p>
+      </div>
+      {long ? (
+        <ApprovalPreviewToggle open={false} onToggle={() => setOpen(true)} />
+      ) : null}
+    </div>
+  );
+}
+
+function LeftoverArgValue({ value }: { value: unknown }) {
+  const formatted = formatLeftoverValue(value);
+  if (approvalBodyNeedsClip(formatted)) {
+    return <ApprovalCollapsiblePreview text={formatted} compact />;
+  }
+  return <span className="whitespace-pre-wrap break-all">{formatted}</span>;
 }
 
 function ApprovalHighlightedCode({
   code,
   language,
+  className,
 }: {
   code: string;
   language: string;
+  className?: string;
 }) {
   const markdown = useMemo(
     () => fencedCodeMarkdown(code, language),
@@ -893,7 +1030,7 @@ function ApprovalHighlightedCode({
     <ReactMarkdown
       rehypePlugins={HIGHLIGHT_PLUGINS}
       components={{
-        pre: CodeBlock,
+        pre: ({ children }) => <pre className={className}>{children}</pre>,
         p: ({ children }) => <>{children}</>,
       }}
     >

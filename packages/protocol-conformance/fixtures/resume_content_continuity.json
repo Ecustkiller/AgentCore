@@ -1,6 +1,6 @@
 {
   "name": "resume_content_continuity",
-  "description": "挂起恢复：plan_review 前后正文续拼（resumed reload == live）",
+  "description": "挂起恢复：ask_user 前后正文续拼（resumed reload == live）",
   "events": [
     {
       "type": "message_start",
@@ -92,39 +92,30 @@
       "timestamp": "2026-01-01T00:00:00.904Z"
     },
     {
-      "type": "plan_review_required",
+      "type": "checkpoint_required",
       "payload": {
         "checkpoint_id": "cp1",
         "conversation_id": "conv_demo",
-        "steps": [
-          {
-            "run_id": "r1",
-            "role": "调研",
-            "summary": "方案就绪"
-          }
-        ],
-        "pending": [
-          {
-            "run_id": "r2",
-            "role": "执行"
-          }
-        ]
+        "question": "方案已就绪，继续落地吗？",
+        "questions": [],
+        "intent": "decision"
       },
       "timestamp": "2026-01-01T00:00:00.905Z"
     },
     {
-      "type": "plan_review_resolved",
+      "type": "checkpoint_resolved",
       "payload": {
         "checkpoint_id": "cp1",
         "decision": "continue",
-        "note": ""
+        "note": "",
+        "selected": []
       },
       "timestamp": "2026-01-01T00:00:00.906Z"
     },
     {
       "type": "content_delta",
       "payload": {
-        "delta": "按复核结论继续交付。"
+        "delta": "按确认继续交付。"
       },
       "timestamp": "2026-01-01T00:00:00.907Z"
     },
@@ -157,7 +148,7 @@
     "finishReason": "end_turn",
     "outcome": "ok",
     "error": null,
-    "content": "阶段成果如下。按复核结论继续交付。",
+    "content": "阶段成果如下。按确认继续交付。",
     "reasoning": "",
     "captainContext": [],
     "process": [
@@ -170,12 +161,12 @@
         "execution_id": "exec1"
       },
       {
-        "kind": "plan_review",
+        "kind": "checkpoint",
         "checkpoint_id": "cp1"
       },
       {
         "kind": "content",
-        "text": "按复核结论继续交付。"
+        "text": "按确认继续交付。"
       }
     ],
     "citations": [],
@@ -242,10 +233,7 @@
         "revised": null,
         "replacesRunId": null,
         "actId": "act-1",
-        "checkpoint": {
-          "status": "resolved",
-          "decision": "continue"
-        },
+        "checkpoint": null,
         "receivedContext": [],
         "escalations": [],
         "process": []
@@ -298,12 +286,10 @@
     },
     "interactions": [
       {
-        "kind": "plan_review",
+        "kind": "ask_user",
         "id": "cp1",
         "status": "resolved",
-        "runIds": [
-          "r1"
-        ]
+        "question": "方案已就绪，继续落地吗？"
       }
     ],
     "cost": {
@@ -319,7 +305,6 @@
     "debatePretrial": null,
     "crossExamEnabled": false,
     "debateOpening": null,
-    "teamSynthesisPreview": null,
     "deliveryStatus": null,
     "turnWarning": null,
     "autoFolder": null,

@@ -1008,8 +1008,6 @@ def test_the_real_ceo_layers_splice_into_leaf_sections():
         ceo_prompt = compose_ceo_chat_prompt(
             shared_base,
             ceo_tool_names=set(),
-            workspace_context="<工作区>本地桌面</工作区>",
-            workspace_file_index="文件：空",
         )
         (
             ContextAssembler()
@@ -1021,27 +1019,24 @@ def test_the_real_ceo_layers_splice_into_leaf_sections():
     keys = [leaf.key for leaf in flatten_sections(_conversation_sections[cid].scopes)]
     assert "ceo_prompt" not in keys and "ceo_base" not in keys  # containers were spliced
     assert keys[0] == "base"
-    assert {"runtime_context", "workspace_facts", "memory_rules", "ceo_core"} <= set(keys)
-    assert keys.index("ceo_core") < keys.index("workspace_facts")
-    assert "workspace_context" not in keys
-    assert keys[-1] == "workspace_facts"  # file index rides the end of facts, not a second tag
-    assert "文件：空" in ceo_prompt
-    assert ceo_prompt.index("本地桌面") < ceo_prompt.index("文件：空")
-    assert ceo_prompt.index("文件：空") < ceo_prompt.index("</工作区>")
+    assert "ceo_core" in keys
+    assert "memory_rules" in keys
+    assert "runtime_context" not in keys
+    assert "workspace_facts" not in keys
+    assert "</工作区>" not in ceo_prompt
 
 
 def test_a_growing_source_ledger_is_attributable_to_its_own_section():
     # CTX-A3: the 来源台账 hydrates from the whole conversation, so it is the tail section
     # most likely to break the prefix. While it was appended outside the assembler the
     # probe never saw it — a turn whose ONLY change was the ledger looked identical.
-    from agentcore.runtime.pipeline.assemble import build_chat_system_prompt
+    from agentcore.runtime.resolve.prompt import render_ceo_turn_envelope
 
     def _turn(sources: str) -> None:
-        build_chat_system_prompt(
-            ceo_prompt="CEO",
-            prior_delegate_retry="",
+        render_ceo_turn_envelope(
             attachment_context="",
             registered_sources=sources,
+            include_runtime=False,
             soft_cap=None,
         )
 

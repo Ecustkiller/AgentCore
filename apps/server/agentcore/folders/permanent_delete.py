@@ -59,10 +59,7 @@ async def _hard_delete_conversations(conv_ids: list[str]) -> None:
             await share_repo.revoke_all_for_conversation(conversation_id)
             await grant_store.clear_conversation(conversation_id)
             from agentcore.runtime.browser import default_browser_session_registry
-            from agentcore.workspace import organize_journal, organize_plan_store
 
-            organize_plan_store.clear_conversation(conversation_id)
-            organize_journal.clear_conversation(conversation_id)
             # L3 team-browser: cascade-close any live sandbox session (no-op when absent).
             await default_browser_session_registry().close(conversation_id)
             await conv_repo.hard_delete(conversation_id)

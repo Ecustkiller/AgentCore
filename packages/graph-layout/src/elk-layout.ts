@@ -533,7 +533,7 @@ export interface GraphShape {
   parallelism: number;
   /**
    * Debate compound only: participant lanes stacked inside the always-expanded
-   * box (正/反 = 2, 圆桌 = N). When set, {@link estimateBbox} sizes height from
+   * box (正/反 = 2, 旧多方磁带 = N). When set, {@link estimateBbox} sizes height from
    * the compound chrome + lane stack instead of treating the whole debate as a
    * single NODE_HEIGHT unit (which underestimates and flickers on measure).
    */
@@ -606,7 +606,7 @@ function debateGraphShape(
     if (isModerator) continue;
     laneRoots.add(w.id);
   }
-  // Roundtable / untagged sides: originals under the moderator still form lanes.
+  // Untagged / leftover multi-side originals under the moderator still form lanes.
   let modId: string | null = null;
   for (const rootId of laneRoots) {
     const root = byId.get(rootId);

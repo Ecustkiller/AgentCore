@@ -5,6 +5,7 @@ from agentcore.runtime.pipeline.prepare import resolve_desk_folder_label
 from agentcore.runtime.resolve.prompt import (
     assemble_system_prompt,
     compose_ceo_chat_prompt,
+    render_ceo_turn_envelope,
 )
 from agentcore.runtime.skills import build_system_skill_registry
 
@@ -15,14 +16,16 @@ def test_compose_ceo_omits_folder_catalog_tag():
         base,
         skill_registry=build_system_skill_registry(),
         ceo_tool_names={"delegate", "consult"},
-        workspace_context=(
-            "<工作区>\n桌：设计/图标（云端文件夹）。\n</工作区>"
-        ),
+    )
+    env = render_ceo_turn_envelope(
+        workspace_context="<工作区>\n桌：设计/图标（云端文件夹）。\n</工作区>",
+        include_runtime=False,
     )
     assert "<文件夹清单>" not in ceo
     assert "</文件夹清单>" not in ceo
-    assert "<工作区>" in ceo
-    assert "设计/图标" in ceo
+    assert "<工作区>\n" not in ceo
+    assert "<工作区>" in env
+    assert "设计/图标" in env
     assert "<设定>" in ceo
     assert "用中文" in ceo
 

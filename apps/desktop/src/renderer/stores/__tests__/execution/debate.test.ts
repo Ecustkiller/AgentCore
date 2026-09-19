@@ -129,7 +129,7 @@ describe("辩论/审查 display tags (前端UX设计.md §四)", () => {
   it("isDebate is true when runs carry a stance OR debate products exist", () => {
     expect(isDebate(projectExecution(debatePlan, [], "running"))).toBe(true);
     expect(isDebate(projectExecution(plan, [], "running"))).toBe(false);
-    // 收场产物是辩论的强信号——即便 runs 不带 stance（旧标签缺失 / roundtable 多方）。
+    // 收场产物是辩论的强信号——即便 runs 不带 stance（旧标签缺失 / 旧多方磁带）。
     const withProducts = projectExecution(plan, [], "completed", debateResult);
     expect(isDebate(withProducts)).toBe(true);
   });
@@ -213,13 +213,13 @@ describe("辩论/审查 display tags (前端UX设计.md §四)", () => {
     expect(groups[0].con).toHaveLength(1);
   });
 
-  it("debateLiveRounds reconstructs 圆桌/红队 multi-side rounds from revision chains", () => {
-    // 多方（无 stance）：首轮是 plan 节点（group debate:*），后续轮是续写 revision
+  it("debateLiveRounds reconstructs leftover multi-side rounds from revision chains", () => {
+    // 多方（无 stance）：首轮是 plan 节点（旧 journal group），后续轮是续写 revision
     // (revision N == 第 N 轮)，故 debateGroups 看不到、需走 revision 链重建逐轮。
     const roundtablePlan: ExecutionPlan = {
       id: "exec-rt",
       planType: "multi_agent",
-      taskSummary: "圆桌",
+      taskSummary: "多方旧磁带",
       agents: [
         { id: "a1", role: "中央视角" },
         { id: "a2", role: "去中心视角" },
@@ -431,7 +431,7 @@ describe("辩论/审查 display tags (前端UX设计.md §四)", () => {
     const roundtablePlan: ExecutionPlan = {
       id: "exec-rt-cx",
       planType: "multi_agent",
-      taskSummary: "圆桌质询混桶",
+      taskSummary: "多方质询混桶",
       agents: [{ id: "a1", role: "中央" }],
       runs: [
         {

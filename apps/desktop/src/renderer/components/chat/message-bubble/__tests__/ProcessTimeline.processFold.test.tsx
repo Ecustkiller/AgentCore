@@ -26,7 +26,6 @@ afterEach(cleanup);
 
 const emptyCards = {
   checkpoints: [] as never[],
-  planReviews: [] as never[],
 };
 
 const toolDone: ProcessStep = {
@@ -115,7 +114,6 @@ describe("ProcessTimeline · 非末段正文进过程折", () => {
         fallbackContent=""
         conversationId="c1"
         checkpoints={[resolvedAsk]}
-        planReviews={[]}
       />,
     );
     expect(screen.getByText("Used 1 tool")).toBeTruthy();
@@ -148,7 +146,6 @@ describe("ProcessTimeline · 非末段正文进过程折", () => {
         fallbackContent=""
         conversationId="c1"
         checkpoints={[pendingAsk]}
-        planReviews={[]}
       />,
     );
     expect(screen.getByText("Used 1 tool")).toBeTruthy();

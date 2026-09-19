@@ -212,7 +212,7 @@ function handleFrame(frame: string): void {
     } else if (event.type === "ai_attention") {
       // 「某个对话在等你」(云对话多端同权 B2 · L1)：AI 停在阻塞卡上时 required、任一端
       // 放行后 resolved。只送信号不送内容——落进 AiAttentionStore 点亮侧栏「等你」灯，
-      // 跨对话提醒（teamActivityNotifications）另订该 store 弹一条可跳转的提示。
+      // 协作感知（teamActivityNotifications）另订该 store 弹一条可跳转的提示。
       applyAiAttention(event as AiAttentionEvent);
     }
     // "ready" and any other event types: no-op here.

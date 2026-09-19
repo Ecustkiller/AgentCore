@@ -72,9 +72,10 @@ export function desktopDownloadUrlForChannel(channel) {
 export function resolveReleaseIdentity(channel) {
   const ch = parseReleaseChannel(channel ?? "stable");
   if (ch === "beta") {
+    const appId = "xyz.fashitianxia.agentcore.beta";
     return {
       channel: /** @type {const} */ ("beta"),
-      appId: "xyz.fashitianxia.agentcore.beta",
+      appId,
       productName: "AgentCore 测试版",
       shortcutName: "AgentCore 测试版",
       publishUrl: "https://downloads.fashitianxia.xyz/desktop/beta",
@@ -82,24 +83,25 @@ export function resolveReleaseIdentity(channel) {
       // 通道靠 appId / productName / feed 目录 / GitHub tag 预发布后缀区分。
       artifactSlug: "AgentCore",
       channelLabelZh: "测试",
-      /** Distinct from stable so Win taskbar does not merge the two installs. */
-      windowsAppUserModelId: "xyz.fashitianxia.agentcore.beta",
+      // 必须等于 appId（NSIS 快捷方式 AUMID）。与稳定轨不同，避免两套安装并进任务栏。
+      windowsAppUserModelId: appId,
       winIcon: "resources/channel-icons/icon-win-beta.png",
       macIcon: "resources/channel-icons/icon-mac-beta.png",
       linuxIcon: "resources/channel-icons/icon-win-beta.png",
       runtimeIcon: "resources/icon-beta.png",
     };
   }
+  const appId = "xyz.fashitianxia.agentcore";
   return {
     channel: /** @type {const} */ ("stable"),
-    appId: "xyz.fashitianxia.agentcore",
+    appId,
     productName: "AgentCore",
     shortcutName: "AgentCore",
     publishUrl: "https://downloads.fashitianxia.xyz/desktop/stable",
     artifactSlug: "AgentCore",
     channelLabelZh: "稳定",
-    /** Preserve pre-channel Win toast / taskbar id (do not retarget stable installs). */
-    windowsAppUserModelId: "com.agentcore.desktop",
+    // 必须等于 appId。分叉则 Win 系统通知静默失败。
+    windowsAppUserModelId: appId,
     winIcon: "build/icon-win.png",
     macIcon: "build/icon-mac.png",
     linuxIcon: "build/icon-win.png",

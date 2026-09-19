@@ -57,10 +57,7 @@ from agentcore.demo_tape.schema import (
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.events import EventSink, EventType, FinishReason
 from agentcore.runtime.events.types import SSEEvent
-from agentcore.runtime.suspension import (
-    AskUserSuspension,
-    PlanReviewSuspension,
-)
+from agentcore.runtime.suspension import AskUserSuspension
 from scripts.demo_tape_bind import build_parser
 
 
@@ -74,6 +71,10 @@ def test_tape_excluded_kinds_cut_lifecycle_settlements_and_client_ops():
     assert "message_end" in TAPE_EXCLUDED_KINDS
     assert "team_preview_resolved" in TAPE_EXCLUDED_KINDS
     assert "team_preview_required" in TAPE_EXCLUDED_KINDS
+    assert "plan_review_required" in TAPE_EXCLUDED_KINDS
+    assert "plan_review_resolved" in TAPE_EXCLUDED_KINDS
+    assert "stage_card_required" in TAPE_EXCLUDED_KINDS
+    assert "stage_card_resolved" in TAPE_EXCLUDED_KINDS
     assert "approval_resolved" in TAPE_EXCLUDED_KINDS
     # followups_generated stays cut — chips ride meta.followups, not the event stream.
     assert "followups_generated" in TAPE_EXCLUDED_KINDS
@@ -1272,8 +1273,17 @@ async def test_player_pathological_gaps_do_not_double_sleep(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_player_skips_leftover_team_preview(monkeypatch, tmp_path: Path):
-    """旧磁带 leftover team_preview_* skip：不进 PAUSE、不 persist 开工卡帧。"""
+@pytest.mark.parametrize(
+    ("required_kind", "resolved_kind"),
+    [
+        ("team_preview_required", "team_preview_resolved"),
+        ("plan_review_required", "plan_review_resolved"),
+    ],
+)
+async def test_player_skips_leftover_unknown_pause_kinds(
+    monkeypatch, tmp_path: Path, required_kind: str, resolved_kind: str
+):
+    """旧磁带 leftover *_required/_resolved skip：未知 EventType，不进 PAUSE、不 persist。"""
     from agentcore.demo_tape import player as player_mod
     from agentcore.demo_tape.binding import TapeBinding
     from agentcore.demo_tape.player import play_tape_events
@@ -1295,20 +1305,11 @@ async def test_player_skips_leftover_team_preview(monkeypatch, tmp_path: Path):
         {"kind": "run_started", "payload": {"run_id": "c1", "kind": "captain"}, "t_ms": 0},
         {"kind": "content_delta", "payload": {"delta": "开场"}, "t_ms": 50},
         {
-            "kind": "team_preview_required",
-            "payload": {
-                "checkpoint_id": "cp-tape",
-                "form": "debate",
-                "sides": [{"key": "lv", "name": "LV"}],
-                "workers": [],
-                "tools": [],
-                "primitive": "debate",
-                "motion": "m",
-                "max_rounds": 4,
-            },
+            "kind": required_kind,
+            "payload": {"checkpoint_id": "cp-tape"},
             "t_ms": 100,
         },
-        {"kind": "team_preview_resolved", "payload": {"decision": "continue"}, "t_ms": 200},
+        {"kind": resolved_kind, "payload": {"decision": "continue"}, "t_ms": 200},
         {
             "kind": "run_output_delta",
             "payload": {"run_id": "w1", "agent_id": "w1", "delta": "hello"},
@@ -1346,8 +1347,8 @@ async def test_player_skips_leftover_team_preview(monkeypatch, tmp_path: Path):
     assert saved == []
     assert result["content"] == "开场汇总"
     types = [e.type.value for e in sink._history]
-    assert "team_preview_required" not in types
-    assert "team_preview_resolved" not in types
+    assert required_kind not in types
+    assert resolved_kind not in types
     assert EventType.RUN_OUTPUT_DELTA in [e.type for e in sink._history]
     assert types.count("content_delta") == 2
 
@@ -2082,8 +2083,8 @@ def test_ingest_scan_rejects_unsanitized_memory_and_system_contacts():
 
 
 def test_export_allows_wired_cold_and_hot_approval_pauses():
-    assert "checkpoint_required" in TAPE_WIRED_PAUSE_KINDS
-    assert "plan_review_required" in TAPE_WIRED_PAUSE_KINDS
+    assert TAPE_WIRED_PAUSE_KINDS == frozenset({"checkpoint_required"})
+    assert "plan_review_required" not in TAPE_WIRED_PAUSE_KINDS
     assert "team_preview_required" not in TAPE_WIRED_PAUSE_KINDS
     assert "checkpoint_required" not in TAPE_UNWIRED_PAUSE_KINDS
     from agentcore.demo_tape.schema import TAPE_HOT_PAUSE_KINDS
@@ -2121,10 +2122,10 @@ def test_export_allows_wired_cold_and_hot_approval_pauses():
         ],
     }
     doc = build_tape_from_recording(recording, user_prompt="p")
+    # leftover plan_review is TAPE_EXCLUDED (unknown live type); wired cold stays.
     assert [e["type"] for e in doc["events"]] == [
         "content_delta",
         "checkpoint_required",
-        "plan_review_required",
     ]
 
     approval_rec = {
@@ -2239,18 +2240,6 @@ def test_build_tape_sanitizes_run_context_memory():
             EventType.CHECKPOINT_REQUIRED,
             EventType.CHECKPOINT_RESOLVED,
         ),
-        (
-            "plan_review_required",
-            "plan_review_resolved",
-            {
-                "checkpoint_id": "cp-plan",
-                "steps": [{"run_id": "r1", "role": "researcher", "summary": "done"}],
-                "pending": [{"run_id": "r2", "role": "writer"}],
-            },
-            PlanReviewSuspension,
-            EventType.PLAN_REVIEW_REQUIRED,
-            EventType.PLAN_REVIEW_RESOLVED,
-        ),
     ],
 )
 async def test_player_pauses_and_continues_cold_path_kinds(
@@ -2263,7 +2252,7 @@ async def test_player_pauses_and_continues_cold_path_kinds(
     event_required: EventType,
     event_resolved: EventType,
 ):
-    """checkpoint / plan_review: 挂起 → 用户提交 → 现场重发 resolved → 续播闭环。"""
+    """ask_user / checkpoint_required: 挂起 → 用户提交 → 现场重发 resolved → 续播闭环。"""
     from agentcore.demo_tape import player as player_mod
     from agentcore.demo_tape.binding import TapeBinding
     from agentcore.demo_tape.player import continue_tape_turn, play_tape_events
@@ -2321,11 +2310,7 @@ async def test_player_pauses_and_continues_cold_path_kinds(
     assert event_required in types
 
     # selected / adjust must not fork the recorded stream — still end with "after".
-    resume_decision = (
-        CheckpointDecision.ADJUST
-        if required_kind == "plan_review_required"
-        else CheckpointDecision.CONTINUE
-    )
+    resume_decision = CheckpointDecision.CONTINUE
     selected = ["q1"] if required_kind == "checkpoint_required" else []
     sink2 = EventSink(conversation_id="conv1", message_id="msg1")
     result2 = await continue_tape_turn(
@@ -2351,7 +2336,7 @@ async def test_player_pauses_and_continues_cold_path_kinds(
 
 @pytest.mark.asyncio
 async def test_cold_path_kinds_remint_distinct_across_replays(monkeypatch, tmp_path: Path):
-    """二次回放 remint 不串卡：checkpoint / plan_review 身份互不相同。"""
+    """二次回放 remint 不串卡：checkpoint_required 身份互不相同。"""
     from agentcore.demo_tape import player as player_mod
     from agentcore.demo_tape.binding import TapeBinding
     from agentcore.demo_tape.player import play_tape_events
@@ -2374,15 +2359,6 @@ async def test_cold_path_kinds_remint_distinct_across_replays(monkeypatch, tmp_p
             "kind": "checkpoint_required",
             "payload": {"checkpoint_id": "cp-recorded", "question": "q"},
             "t_ms": 0,
-        },
-        {
-            "kind": "plan_review_required",
-            "payload": {
-                "checkpoint_id": "pr-recorded",
-                "steps": [{"run_id": "r1"}],
-                "pending": [],
-            },
-            "t_ms": 50,
         },
     ]
     tape_path = tmp_path / "remint-cold.json"

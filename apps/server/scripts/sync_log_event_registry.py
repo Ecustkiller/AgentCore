@@ -980,6 +980,9 @@ HISTORICAL_COMPAT: dict[str, str] = {
     "team_preview.orphaned": (
         "历史兼容：曾在发新开工卡前结算旧 pending 时发出；开工卡产品位已拆，不再发此事件"
     ),
+    "team_preview.research_first_rejected": (
+        "历史兼容：曾把已退役的先调研续跑选项降级为停止；契约已拒收，不再发此事件"
+    ),
     "stage_card.consume_prepared": (
         "历史兼容：曾在点卡开辩前消费推进卡；入口已下线，不再发此事件"
     ),
@@ -1081,6 +1084,21 @@ HISTORICAL_COMPAT: dict[str, str] = {
     ),
     "board.read_vision_failed": (
         "历史兼容：曾在白板 AI 视觉读失败时发出；白板 AI 工具面已卸，不再发此事件"
+    ),
+    "archive_extract.done": (
+        "历史兼容：曾为独立 archive_extract 工具完成事件；现为 archive.extract_done"
+    ),
+    "archive_create.done": (
+        "历史兼容：曾为独立 archive_create 工具完成事件；现为 archive.create_done"
+    ),
+    "read_image.read": (
+        "历史兼容：曾为独立 read_image 工具读图；现并入 file_read，不再发此事件"
+    ),
+    "read_image.vision_failed": (
+        "历史兼容：曾为独立 read_image 视觉失败；现并入 file_read，不再发此事件"
+    ),
+    "attachment.vision_billing_failed": (
+        "历史兼容：曾为附件视觉计费失败；现并入 file_read 路径，不再发此事件"
     ),
 }
 

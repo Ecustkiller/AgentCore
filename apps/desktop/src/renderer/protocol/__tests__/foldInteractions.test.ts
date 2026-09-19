@@ -68,4 +68,19 @@ describe("foldInteractions terminal close", () => {
     ]);
     expect(leaves[0]?.status).toBe("resolved");
   });
+
+  it("skips leftover plan_review_* (retired kind, no stamp)", () => {
+    expect(
+      foldInteractions([
+        {
+          type: "plan_review_required",
+          payload: { checkpoint_id: "pr1", steps: [{ run_id: "r1" }] },
+        },
+        {
+          type: "plan_review_resolved",
+          payload: { checkpoint_id: "pr1", decision: "continue" },
+        },
+      ]),
+    ).toEqual([]);
+  });
 });

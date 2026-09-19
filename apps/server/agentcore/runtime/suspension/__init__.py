@@ -9,21 +9,13 @@ layer that makes that pause **durable**: a frozen frame carrying everything
 ``POST .../resume`` needs to rebuild and continue the turn on a fresh process.
 
 Two suspend points are persisted, sharing one frame via a ``kind`` discriminated
-union (base :class:`TurnSuspension` + :class:`PlanReviewSuspension` /
-:class:`AskUserSuspension`):
+union (base :class:`TurnSuspension` + :class:`AskUserSuspension`):
 
-- **plan_review** — the ``WaveScheduler`` paused at a wave boundary after a
-  ``checkpoint_after`` step (inside ``delegate``). Resume re-drives the remaining
-    plan tail, feeds the workers' product back as the suspended ``delegate`` tool
-  result, then continues the CEO loop. Carries only the reviewed ``steps`` / gated
-  ``pending`` (display re-render): the ``plan`` (with minted run_ids) and the
-  finished-worker ``completed`` seed are BOTH re-projected from the journal on resume
-  (``plan_from_journal`` / ``completed_from_journal``), not serialized — 执行级事件溯源 Phase 2.
-- **ask_user** — the CEO paused mid-loop on its ``ask_user`` checkpoint (the one
-  asking primitive — opening 引导 or mid-task fork). Resume maps the user's answer
-  to the ``ask_user`` tool result and continues the CEO loop (no plan tail). Carries
-  the card payload (message / questions) so
-  resume can re-emit it.
+- **ask_user** — the CEO paused mid-loop on its ``ask_user`` checkpoint. Resume maps
+  the user's answer to the ``ask_user`` tool result and continues the CEO loop.
+  Carries the card payload (message / questions) so resume can re-emit it.
+
+Leftover ``plan_review`` frames are an unknown ``kind``: list/hydrate skip; resume 410.
 
 Every frame shares: the CEO ``transcript`` at the pause (system + history + user +
 the assistant message carrying the suspended tool_call), the ``tool_call_id`` that
@@ -38,8 +30,7 @@ resume claims the frame (see ``runtime/suspension/persistence.py``). The display
 entries — a property, never stored (P0-B Phase 3). The frame thus carries only the
 resume *control* state, not a second copy of the replay stream.
 
-The frame is captured by the suspending face (the ``delegate`` checkpoint hook /
-``AskUserTool``) — both read the live CEO transcript off :data:`captain_transcript`,
+The frame is captured by the suspending face (``AskUserTool``) — both read the live CEO transcript off :data:`captain_transcript`,
 published by the captain executor — and persisted by
 ``runtime/suspension/persistence.py``. Pure data + a contextvar here; no DB, no engine.
 """
@@ -68,13 +59,11 @@ from agentcore.runtime.interaction import (
 
 if TYPE_CHECKING:
     from agentcore.llm.provider.protocol import LLMMessage
-    from agentcore.runtime.runs.plan import RunPlan
-    from agentcore.runtime.runs.types import RunState
 
 
 # The CEO captain's live message transcript for the current turn, published by the
 # captain executor before it runs the ReAct loop and read by a suspending face (the
-# ``delegate`` checkpoint hook / ``AskUserTool``) when it captures a suspension
+# ``AskUserTool``) when it captures a suspension
 # frame. A contextvar (not a parameter) because those faces are constructed by the
 # pipeline and invoked deep inside the captain's loop — they have no handle on the
 # messages list the loop mutates. The loop, the tool call, and the capture all run
@@ -117,11 +106,10 @@ turn_evidence_ledger: ContextVar[Any | None] = ContextVar("turn_evidence_ledger"
 class SuspensionKind(StrEnum):
     """Which suspend point a durable frame captured (the JSON discriminator).
 
-    Interaction kinds (plan_review / ask_user) mirror
+    Interaction kinds (ask_user) mirror
     :data:`DURABLE_INTERACTION_KINDS`.
     """
 
-    PLAN_REVIEW = InteractionKind.PLAN_REVIEW.value
     ASK_USER = InteractionKind.ASK_USER.value
 
 
@@ -131,7 +119,7 @@ class TurnSuspension:
 
     Keyed (in storage) by ``message_id`` (the pipeline's minted assistant id, reused
     when the resumed turn finally persists). Concrete subclasses
-    (:class:`PlanReviewSuspension` / :class:`AskUserSuspension`) add their kind's
+    (:class:`AskUserSuspension`) add their kind's
     resume substrate and set :attr:`kind`. Everything but :attr:`journal` (which
     lives in ``turn_journal``) is JSON-round-trippable (:meth:`to_json` /
     :func:`suspension_from_json`) into the ``paused_turns.frame`` column.
@@ -144,10 +132,10 @@ class TurnSuspension:
     conversation_id: str
     user_id: str
     captain_run_id: str
-    # The suspended interaction's id (the ``checkpoint_id`` of the plan_review /
-    # ask_user pause) — re-emitted on resume so the client flips the same card.
+    # The suspended interaction's id (the ``checkpoint_id`` of the ask_user
+    # pause) — re-emitted on resume so the client flips the same card.
     checkpoint_id: str
-    # The id of the suspended tool_call (``delegate`` / ``ask_user``) in the captured
+    # The id of the suspended tool_call (``ask_user``) in the captured
     # CEO transcript; the resumed tool result must echo it so the rebuilt transcript
     # is a valid assistant-tool_call → tool-result pair.
     tool_call_id: str
@@ -294,45 +282,6 @@ class TurnSuspension:
 
 
 @dataclass(kw_only=True)
-class PlanReviewSuspension(TurnSuspension):
-    """A turn frozen at a ``plan_review`` checkpoint — the WaveScheduler resume substrate.
-
-    The ``plan`` (with its already-minted run_ids) and the finished-node ``completed`` seed
-    are BOTH rebuilt from the journal on resume (``plan_from_journal`` / ``completed_from_journal``
-    — NOT serialized blobs, 执行级事件溯源 Phase 2), so the resumed drive re-mints nothing and
-    runs only the downstream tail; only the reviewed ``steps`` + gated ``pending`` (the card's
-    display re-render on reopen) ride in the frame.
-    """
-
-    kind: ClassVar[SuspensionKind] = SuspensionKind.PLAN_REVIEW
-
-    # The delegate's DAG (with minted run_ids). An in-memory carrier ONLY (执行级事件溯源
-    # Phase 2, frame.plan 退场): NOT serialized — resume rebuilds it from the journal's
-    # ``plan_snapshot`` fact (``plan_from_journal``); the delegate captures it here live for
-    # the conformance golden. An empty RunPlan placeholder on a claimed frame.
-    plan: RunPlan
-    # run_id → finished RunState (the WaveScheduler ``seed_completed`` for resume). An
-    # in-memory carrier ONLY (执行级事件溯源 Phase 2 ⑥): NOT serialized into the frame — resume
-    # re-seeds it from the journal's run-final facts (``completed_from_journal``), the
-    # delegate still captures it here live for the conformance golden. Empty on a claim.
-    completed: dict[str, RunState] = field(default_factory=dict)
-    # The just-completed checkpoint nodes the user is reviewing ({run_id, role, summary})
-    # and a peek at the gated downstream nodes ({run_id, role}) — re-emitted on resume.
-    steps: list[dict[str, Any]] = field(default_factory=list)
-    pending: list[dict[str, Any]] = field(default_factory=list)
-    team_brief: str | None = None
-    # CEO 评审前置把关摘要（随帧持久化；CONTINUE 时 llm 压缩注入下游 gate_notes）。
-    # 旧帧缺省 None → 行为与今日相同。
-    ceo_review: dict[str, Any] | None = None
-
-    @property
-    def checkpoint_run_ids(self) -> set[str]:
-        """run_ids of the reviewed checkpoint nodes — the roots an ``adjust`` steer
-        scopes to (its not-yet-run transitive dependents)."""
-        return {s["run_id"] for s in self.steps if "run_id" in s}
-
-
-@dataclass(kw_only=True)
 class AskUserSuspension(TurnSuspension):
     """A turn frozen at the CEO's ``ask_user`` checkpoint — the CEO-loop resume substrate.
 
@@ -383,43 +332,6 @@ class SuspensionKindCodec:
     summary_extras: Callable[[TurnSuspension], dict[str, Any]]
 
 
-def _plan_review_frame_extras(s: TurnSuspension) -> dict[str, Any]:
-    assert isinstance(s, PlanReviewSuspension)
-    # NOTE: NEITHER ``plan`` NOR ``completed`` is serialized (执行级事件溯源 Phase 2).
-    extras: dict[str, Any] = {"steps": list(s.steps), "pending": list(s.pending)}
-    if s.team_brief:
-        extras["team_brief"] = s.team_brief
-    if s.ceo_review:
-        extras["ceo_review"] = dict(s.ceo_review)
-    return extras
-
-
-def _plan_review_from_extras(data: dict[str, Any]) -> dict[str, Any]:
-    from agentcore.runtime.runs.serialize import plan_from_json
-
-    # Empty RunPlan placeholder (field required); resume fold replaces from journal.
-    raw_review = data.get("ceo_review")
-    return {
-        "plan": plan_from_json({}),
-        "steps": list(data.get("steps") or []),
-        "pending": list(data.get("pending") or []),
-        "team_brief": data.get("team_brief") or None,
-        "ceo_review": dict(raw_review) if isinstance(raw_review, dict) else None,
-    }
-
-
-def _plan_review_summary_extras(s: TurnSuspension) -> dict[str, Any]:
-    assert isinstance(s, PlanReviewSuspension)
-    out: dict[str, Any] = {
-        **_EMPTY_SUMMARY_EXTRAS,
-        "steps": list(s.steps),
-        "pending": list(s.pending),
-    }
-    if s.ceo_review:
-        out["ceo_review"] = dict(s.ceo_review)
-    return out
-
-
 def _ask_user_frame_extras(s: TurnSuspension) -> dict[str, Any]:
     assert isinstance(s, AskUserSuspension)
     extras: dict[str, Any] = {
@@ -453,13 +365,6 @@ def _ask_user_summary_extras(s: TurnSuspension) -> dict[str, Any]:
 
 
 SUSPENSION_KIND_CODECS: Mapping[SuspensionKind, SuspensionKindCodec] = {
-    SuspensionKind.PLAN_REVIEW: SuspensionKindCodec(
-        kind=SuspensionKind.PLAN_REVIEW,
-        cls=PlanReviewSuspension,
-        frame_extras=_plan_review_frame_extras,
-        from_extras=_plan_review_from_extras,
-        summary_extras=_plan_review_summary_extras,
-    ),
     SuspensionKind.ASK_USER: SuspensionKindCodec(
         kind=SuspensionKind.ASK_USER,
         cls=AskUserSuspension,
@@ -490,16 +395,24 @@ def suspension_paused_summary(suspension: TurnSuspension) -> dict[str, Any]:
     }
 
 
+def is_live_suspension_kind(value: object) -> bool:
+    """True when ``value`` is a current :class:`SuspensionKind` discriminator."""
+    if not isinstance(value, str):
+        return False
+    try:
+        SuspensionKind(value)
+    except ValueError:
+        return False
+    return True
+
+
 def suspension_from_json(data: dict[str, Any]) -> TurnSuspension:
     """Rebuild the right :class:`TurnSuspension` subclass from a stored frame dict.
 
-    Leftover ``kind=team_preview`` frames raise :class:`~agentcore.core.errors.GoneError`
-    (开工卡已退役) — no live subclass / codec.
+    Unknown ``kind`` (including leftover frames) raises :class:`ValueError` —
+    callers that list / peek skip; resume treats them as not found.
     """
     data = dict(data or {})
-    from agentcore.runtime.kickoff.retired import refuse_if_leftover_team_preview
-
-    refuse_if_leftover_team_preview(data)
     kind_raw = data.get("kind")
     try:
         kind = SuspensionKind(kind_raw)

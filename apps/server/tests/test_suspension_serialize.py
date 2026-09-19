@@ -25,8 +25,6 @@ from agentcore.runtime.runs.serialize import (
 )
 from agentcore.runtime.suspension import (
     AskUserSuspension,
-    PlanReviewSuspension,
-    SuspensionKind,
     find_tool_call_id,
     suspension_from_json,
 )
@@ -80,104 +78,22 @@ def test_state_map_round_trips():
     assert restored["del_abc_1"].content == "worker 产出"
 
 
-def test_turn_suspension_full_frame_round_trips():
-    transcript = [
-        LLMMessage(role="system", content="sys"),
-        LLMMessage(role="user", content="原始请求"),
-        LLMMessage(
-            role="assistant",
-            content=None,
-            reasoning_content="先派活",
-            tool_calls=[
-                ToolCall(
-                    id="call_del_1",
-                    function=ToolCallFunction(name="delegate", arguments='{"tasks":[]}'),
-                )
-            ],
-        ),
-    ]
-    plan = RunPlan(
-        nodes=[
-            RunSpec(run_id="del_abc_1", task="研究", role="研究员"),
-            RunSpec(run_id="del_abc_2", task="实现", role="工程师", depends_on=["del_abc_1"]),
-        ]
-    )
-    frame = PlanReviewSuspension(
-        message_id="m1",
-        conversation_id="c1",
-        user_id="u1",
-        captain_run_id="cap1",
-        checkpoint_id="ck1",
-        tool_call_id="call_del_1",
-        base_system_prompt="base sys",
-        user_message="原始请求",
-        folder_id="F1",
-        transcript=transcript,
-        plan=plan,
-        completed={"del_abc_1": _completed_state()},
-        journal_entries=[{"kind": "run_plan", "payload": {}, "ts": "t"}],
-        steps=[{"run_id": "del_abc_1", "role": "研究员", "summary": "…"}],
-        pending=[{"run_id": "del_abc_2", "role": "工程师"}],
-        ceo_review={
-            "conclusion": "可过",
-            "risks": ["r"],
-            "suggestions": ["s"],
-            "source": "llm",
-        },
-        trace_id="trace123",
-    )
-
-    restored = suspension_from_json(frame.to_json())
-
-    # The discriminator dispatched back to the plan_review subclass.
-    assert isinstance(restored, PlanReviewSuspension)
-    assert restored.kind is SuspensionKind.PLAN_REVIEW
-    assert restored.message_id == "m1"
-    assert restored.conversation_id == "c1"
-    assert restored.user_id == "u1"
-    assert restored.captain_run_id == "cap1"
-    assert restored.checkpoint_id == "ck1"
-    assert restored.tool_call_id == "call_del_1"
-    assert restored.base_system_prompt == "base sys"
-    assert restored.user_message == "原始请求"
-    assert restored.ceo_review == {
-        "conclusion": "可过",
-        "risks": ["r"],
-        "suggestions": ["s"],
-        "source": "llm",
-    }
-    assert frame.to_json()["ceo_review"]["source"] == "llm"
-    # The project scope survives the frame so resume re-wires consult to it.
-    assert restored.folder_id == "F1"
-    assert frame.to_json()["folder_id"] == "F1"
-    assert "memory_enabled" not in frame.to_json()
-    leftover = frame.to_json()
-    leftover["memory_enabled"] = False
-    ignored = suspension_from_json(leftover)
-    assert not hasattr(ignored, "memory_enabled")
-    assert restored.trace_id == "trace123"
-    # transcript / history are NOT serialized into the frame (Phase 2 ⑤) — the CEO window
-    # is rebuilt from turn_journal on claim; resume echoes the call via the serialized
-    # tool_call_id (asserted above), not a stored transcript blob.
-    assert "transcript" not in frame.to_json()
-    assert "history" not in frame.to_json()
-    assert restored.transcript == []
-    # NEITHER the ``plan`` (with minted ids) NOR the finished-worker ``completed`` seed is
-    # serialized (执行级事件溯源 Phase 2) — resume re-projects BOTH from the journal
-    # (``plan_from_journal`` / ``completed_from_journal``), so a claimed frame carries an
-    # empty plan placeholder + no completed.
-    assert "plan" not in frame.to_json()
-    assert restored.plan.nodes == []
-    assert "completed" not in frame.to_json()
-    assert restored.completed == {}
-    # steps / pending carried for card re-render; the journal is NOT serialized into
-    # the frame — it lives in turn_journal (§18.3), hydrated separately on claim.
-    assert "journal" not in frame.to_json()
-    assert restored.journal == []
-    assert restored.steps[0]["run_id"] == "del_abc_1"
-    assert restored.pending[0]["run_id"] == "del_abc_2"
-    # the reviewed checkpoint roots an adjust steer scopes to.
-    assert restored.checkpoint_run_ids == {"del_abc_1"}
+def test_leftover_plan_review_from_json_is_unknown_kind():
+    """存量 kind=plan_review 帧：无 codec、from_json → ValueError。"""
+    with pytest.raises(ValueError, match="unknown suspension kind"):
+        suspension_from_json(
+            {
+                "kind": "plan_review",
+                "message_id": "m1",
+                "conversation_id": "c1",
+                "user_id": "u1",
+                "captain_run_id": "cap1",
+                "checkpoint_id": "ck1",
+                "tool_call_id": "call_del_1",
+                "base_system_prompt": "sys",
+                "user_message": "原始请求",
+            }
+        )
 
 
 def test_ask_user_suspension_round_trips():
@@ -280,12 +196,9 @@ def test_ask_user_unknown_intent_coerces_to_decision():
     assert restored.intent == "decision"
 
 
-def test_leftover_team_preview_from_json_is_gone():
-    """存量 kind=team_preview 帧：无 codec、from_json → 410。"""
-    from agentcore.core.errors import GoneError
-    from agentcore.runtime.kickoff.retired import TEAM_PREVIEW_UNRECOVERABLE
-
-    with pytest.raises(GoneError, match=TEAM_PREVIEW_UNRECOVERABLE):
+def test_leftover_team_preview_from_json_is_unknown_kind():
+    """存量 kind=team_preview 帧：无 codec、from_json → ValueError。"""
+    with pytest.raises(ValueError, match="unknown suspension kind"):
         suspension_from_json(
             {
                 "kind": "team_preview",
@@ -301,48 +214,6 @@ def test_leftover_team_preview_from_json_is_gone():
                 "team_brief": "统一用中文交付",
             }
         )
-
-
-def test_plan_review_frame_round_trips_team_brief():
-    frame = PlanReviewSuspension(
-        message_id="m1",
-        conversation_id="c1",
-        user_id="u1",
-        captain_run_id="cap1",
-        checkpoint_id="ck1",
-        tool_call_id="call_del_1",
-        base_system_prompt="sys",
-        user_message="带检查点的团队",
-        plan=RunPlan(),
-        steps=[{"run_id": "w1", "role": "研究员", "summary": "…"}],
-        team_brief="口径按 v2 契约",
-    )
-    restored = suspension_from_json(frame.to_json())
-    assert isinstance(restored, PlanReviewSuspension)
-    assert restored.team_brief == "口径按 v2 契约"
-    assert not hasattr(restored, "coordination")
-    # 缺省批不写键；旧帧 coordination 键忽略。
-    plain = PlanReviewSuspension(
-        message_id="m2",
-        conversation_id="c1",
-        user_id="u1",
-        captain_run_id="cap1",
-        checkpoint_id="ck2",
-        tool_call_id="call_del_2",
-        base_system_prompt="sys",
-        user_message="普通团队",
-        plan=RunPlan(),
-    )
-    data = plain.to_json()
-    assert "coordination" not in data
-    assert "team_brief" not in data
-    restored_plain = suspension_from_json(data)
-    assert isinstance(restored_plain, PlanReviewSuspension)
-    assert restored_plain.team_brief is None
-    leftover = suspension_from_json({**data, "coordination": "wall"})
-    assert isinstance(leftover, PlanReviewSuspension)
-    assert leftover.team_brief is None
-    assert not hasattr(leftover, "coordination")
 
 
 def test_suspension_from_json_requires_kind():

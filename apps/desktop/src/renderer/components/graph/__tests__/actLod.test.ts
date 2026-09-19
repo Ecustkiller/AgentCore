@@ -39,7 +39,7 @@ function mkExec(specs: RunSpec[], status: Execution["status"]): Execution {
       kind: "debate",
       title: "辩论对抗",
       anchorRunId: "synthesizer",
-      authorizedBy: "stage_card",
+      authorizedBy: "auto",
     },
   ];
   const runs = specs.map((s) => ({

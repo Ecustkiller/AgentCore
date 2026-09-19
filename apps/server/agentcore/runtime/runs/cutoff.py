@@ -63,10 +63,8 @@ WIND_DOWN_ALLOWED_TOOLS = frozenset(
         "handoff",
         "file_write",
         "str_replace",
-        "file_move",
-        "file_copy",
-        "mkdir",
         "file_batch",
+        "mkdir",
         "file_list",
         "md_export",
     }
@@ -76,24 +74,15 @@ WIND_DOWN_FILE_READ = "file_read"
 
 
 def wind_down_instruction_token() -> str:
-    return (
-        "[系统提示] 累计 token 已接近预算硬顶。本轮起进入收尾窗口："
-        "调查与外网工具已停用。"
-    )
+    return "[系统提示] 累计 token 已接近预算硬顶。"
 
 
 def wind_down_instruction_timeout() -> str:
-    return (
-        "[系统提示] 墙钟已触及超时阈值。本轮为宽限交卷轮："
-        "调查与外网工具已停用。"
-    )
+    return "[系统提示] 墙钟已触及超时阈值。"
 
 
 def wind_down_instruction_retrieval() -> str:
-    return (
-        "[系统提示] 检索预算已用尽。本轮起进入收尾窗口："
-        "web_search / web_fetch 已停用。"
-    )
+    return "[系统提示] 检索预算已用尽。"
 
 
 def wind_down_deny_output(name: str) -> str:

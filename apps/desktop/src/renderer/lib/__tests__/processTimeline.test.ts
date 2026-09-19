@@ -2,7 +2,6 @@ import {
   PROCESS_STEP_KIND,
   type TimelineNode,
   appendContentStep,
-  appendStageCardStep,
   appendUserInterjectionStep,
   dropTrailingContentSteps,
   groupToolRuns,
@@ -216,11 +215,17 @@ describe("groupToolRuns", () => {
     ]);
   });
 
-  it("skips leftover retired ask / team_preview steps (not in the render union)", () => {
+  it("skips leftover retired ask / team_preview / stage_card / plan_review steps (not in the render union)", () => {
+    const leftoverStageCard = (stage_card_id: string): ProcessStep =>
+      ({ kind: "stage_card", stage_card_id }) as unknown as ProcessStep;
+    const leftoverPlanReview = (checkpoint_id: string): ProcessStep =>
+      ({ kind: "plan_review", checkpoint_id }) as unknown as ProcessStep;
     const nodes = groupToolRuns([
       content("导语"),
       leftoverTeamPreview("tp1"),
+      leftoverPlanReview("pr1"),
       { kind: "ask", checkpoint_id: "old" } as unknown as ProcessStep,
+      leftoverStageCard("sc1"),
       team("exec1"),
     ]);
     expect(nodes.map((n) => n.kind)).toEqual(["content", "team"]);
@@ -329,17 +334,6 @@ describe("dropTrailingContentSteps", () => {
   });
 });
 
-describe("appendStageCardStep", () => {
-  it("drops a stage_card marker and dedupes by id", () => {
-    const once = appendStageCardStep([content("调研呈报")], "sc1");
-    expect(once).toEqual([
-      { kind: "content", text: "调研呈报" },
-      { kind: "stage_card", stage_card_id: "sc1" },
-    ]);
-    expect(appendStageCardStep(once, "sc1")).toBe(once);
-  });
-});
-
 describe("promoteScalarContentIntoProcess", () => {
   it("inserts scalar CEO lead-in before the first team marker", () => {
     expect(
@@ -371,7 +365,8 @@ describe("PROCESS_STEP_KIND", () => {
   it("registers every current ProcessStep kind (compile-time Record; runtime mirror)", () => {
     expect(PROCESS_STEP_KIND.reasoning).toBe(true);
     expect(PROCESS_STEP_KIND.user_interjection).toBe(true);
-    expect(Object.keys(PROCESS_STEP_KIND).length).toBeGreaterThan(10);
+    expect("plan_review" in PROCESS_STEP_KIND).toBe(false);
+    expect(Object.keys(PROCESS_STEP_KIND).length).toBe(8);
   });
 });
 
@@ -380,16 +375,13 @@ describe("processFoldMask · 非末段正文进过程折", () => {
     kind: "checkpoint",
     checkpoint_id,
   });
-  const planReview = (checkpoint_id: string): ProcessStep => ({
-    kind: "plan_review",
-    checkpoint_id,
-  });
-  const graphAppend = (execution_id: string): ProcessStep => ({
-    kind: "graph_append",
-    execution_id,
-    host_message_id: "m1",
-    added_count: 1,
-  });
+  const leftoverPlanReview = (checkpoint_id: string): ProcessStep =>
+    ({ kind: "plan_review", checkpoint_id }) as unknown as ProcessStep;
+  const leftoverUnknown = (execution_id: string): ProcessStep =>
+    ({
+      kind: "retired_unknown",
+      execution_id,
+    }) as unknown as ProcessStep;
 
   function maskOf(process: ProcessStep[], pending: string[] = []) {
     return processFoldMask(groupToolRuns(process), new Set(pending));
@@ -447,23 +439,22 @@ describe("processFoldMask · 非末段正文进过程折", () => {
     ).toEqual([true, true, false]);
   });
 
-  it("treats content before a trailing plan_review as the answer", () => {
-    const process = [tool("a"), content("请过目这份提纲"), planReview("pr1")];
-    expect(maskOf(process)).toEqual([true, false, true]);
+  it("skips leftover trailing plan_review so the prior content is the answer", () => {
+    const process = [
+      tool("a"),
+      content("请过目这份提纲"),
+      leftoverPlanReview("pr1"),
+    ];
+    expect(maskOf(process)).toEqual([true, false]);
     expect([...trailingAnswerContentIndices(groupToolRuns(process))]).toEqual([
       1,
     ]);
   });
 
-  it("keeps a pending plan_review out of the fold", () => {
-    const process = [tool("a"), content("请过目这份提纲"), planReview("pr1")];
-    expect(maskOf(process, ["pr1"])).toEqual([true, false, false]);
-  });
-
-  it("skips trailing graph_append when finding the answer", () => {
-    expect(maskOf([tool("a"), content("最终答案"), graphAppend("e1")])).toEqual(
-      [true, false, false],
-    );
+  it("skips unknown process kinds when finding the answer", () => {
+    expect(
+      maskOf([tool("a"), content("最终答案"), leftoverUnknown("e1")]),
+    ).toEqual([true, false]);
   });
 
   it("does not fold team / interjection / escalation", () => {
@@ -483,9 +474,8 @@ describe("processFoldMask · 非末段正文进过程折", () => {
         tool("a"),
         tool("b"),
         { kind: "approval", approval_id: "ap1" },
-        { kind: "stage_card", stage_card_id: "sc1" },
         content("答案"),
       ]),
-    ).toEqual([true, true, true, true, false]);
+    ).toEqual([true, true, true, false]);
   });
 });

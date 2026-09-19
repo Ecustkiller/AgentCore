@@ -8,7 +8,7 @@ import type { DebatePretrialProjection } from "@agentcore/protocol-conformance";
 import type { Execution, RunNode } from "./types";
 
 /**
- * 辩论参与者 group 白名单（辩形态 / 证人席）。
+ * 辩论参与者 group 白名单（正反 / 证人席 / 旧 journal 的 red_team·roundtable 标签）。
  * 禁止 `startsWith("debate:")`——非白名单 group（含历史附属 run）不得晋升独立 debateUnits。
  */
 export const DEBATE_PARTICIPANT_GROUPS = new Set([
@@ -18,13 +18,13 @@ export const DEBATE_PARTICIPANT_GROUPS = new Set([
   "debate:witness",
 ]);
 
-/** 多方无 stance 的辩手席（圆桌 / 红队）；证人席另渠，不进 liveRounds。 */
+/** 旧 journal 多方无 stance 的辩手席；证人席另渠，不进 liveRounds。 */
 const DEBATE_LIVE_SIDE_GROUPS = new Set([
   "debate:red_team",
   "debate:roundtable",
 ]);
 
-/** 收场前 liveForm 可读的形态标签（不含 witness）。 */
+/** 收场前可识别的辩手 group（正反 + 旧 journal 标签；不含 witness）。 */
 export const DEBATE_FORM_GROUPS = new Set([
   "debate:debate",
   "debate:red_team",
@@ -191,7 +191,7 @@ export function debateBeatFromContext(
 export function isDebateStatementBeat(
   blocks: ReadonlyArray<{ channel: string }> | null | undefined,
 ): boolean {
-  // 正反立论 / 红队攻·回应 / 圆桌线程 = 可见宿主；复攻·crux·质询折进宿主。
+  // 立论及旧磁带 attack/defense/thread = 可见宿主；复攻·crux·质询折进宿主。
   const beat = debateBeatFromContext(blocks);
   return (
     beat === "statement" ||
@@ -252,8 +252,9 @@ export function debateBeatLabel(opts: {
  */
 export function isDebate(execution: Execution): boolean {
   // 收场产物是辩论的强信号（debate_result 必带）。进行中无产物时退回辩手 run 的标签：
-  // 2 方正反带 stance；多方圆桌/红队/证人席靠显式 group 白名单（禁 debate:* 前缀——
-  // 历史庭前附属 run 等不得把整场误判 / 击穿布局）。
+  // 2 方正反带 stance；无 stance 的辩手 / 证人席靠显式 group 白名单（禁 debate:* 前缀——
+  // 历史庭前附属 run 等不得把整场误判 / 击穿布局）。旧 journal 的 debate:red_team /
+  // debate:roundtable 仍在白名单，避免辩手节点掉出辩论图。
   return (
     execution.debate != null || execution.runs.some((r) => isDebateTaggedRun(r))
   );
@@ -332,24 +333,25 @@ export function debateGroups(execution: Execution): DebateGroup[] {
   return groups;
 }
 
-/** One round of a multi-side debate (圆桌 / 红队 / 3+方) in progress: the round number
- * + that round's debater run per side. Unlike {@link DebateGroup} (正/反 stance pairs),
- * multi-side rounds have no stance to pair, so each side's run just sits in the row. */
+/** One round of a leftover multi-side journal (no stance) in progress: the round
+ * number + that round's debater run per side. Unlike {@link DebateGroup} (正/反
+ * stance pairs), these rounds have no stance to pair, so each side's run just
+ * sits in the row. */
 export interface DebateLiveRound {
   round: number;
   runs: RunNode[];
 }
 
 /**
- * Multi-side debate (圆桌 / 红队 / 3+方) reconstructed into rounds for the in-progress
+ * Leftover multi-side journals reconstructed into rounds for the in-progress
  * inline view — the gap {@link debateGroups} leaves (it only pairs stance-tagged 2方
- * debates, so 圆桌/红队 showed nothing inline until 收场). Under the moderator +
- * continue_run redesign a debater's round 1 is a plan-declared node (group `debate:*`,
- * no stance) and every later round is a 续写 revision of it, so we walk each side's
- * revision chain and bucket by the revision's {@link RunNode.round} (乙 wire 携
- * round/stance · 单一轮次投影) — the SAME `round` field debateGroups reads.
- * renders via {@link RunNode}'s agent (the revision inherits the side's role + streams
- * its own output). Empty for 非辩论 / 2方正反 (handled by debateGroups) / 收场后.
+ * debates). Under the moderator + continue_run redesign a debater's round 1 is a
+ * plan-declared node (whitelist group, no stance) and every later round is a 续写
+ * revision of it, so we walk each side's revision chain and bucket by the revision's
+ * {@link RunNode.round} (乙 wire 携 round/stance · 单一轮次投影) — the SAME `round`
+ * field debateGroups reads. Renders via {@link RunNode}'s agent (the revision
+ * inherits the side's role + streams its own output). Empty for 非辩论 / 2方正反
+ * (handled by debateGroups) / 收场后.
  */
 export function debateLiveRounds(execution: Execution): DebateLiveRound[] {
   const sides = execution.runs.filter(

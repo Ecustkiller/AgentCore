@@ -418,8 +418,6 @@ def test_inject_interjection_keeps_text_and_queue_entry():
         ],
     )
     assert "优先做登录页" in text
-    assert "先开口" in text
-    assert "queue_user_message(interjection_id=inj-1)" in text
     assert "旧进度旁白" not in text
     assert "收到，仍按原计划" not in text
     assert "勿假装已办" not in text

@@ -11,11 +11,9 @@ import type { TurnDetailView } from "@/stores/ui";
 export function resolveTurnDetailView(args: {
   requestedView: TurnDetailView | null;
   debate: boolean;
-  showCompare: boolean;
   execution: Pick<Execution, "acts"> | null | undefined;
 }): TurnDetailView {
-  const { requestedView, debate, showCompare, execution } = args;
-  if (requestedView === "compare" && showCompare) return "compare";
+  const { requestedView, debate, execution } = args;
   if (requestedView === "debate" && debate) return "debate";
   if (requestedView === "graph") return "graph";
   return defaultTurnDetailView(execution, debate);

@@ -28,12 +28,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 /** Timeline-kind interactions = the ones whose card/痕迹 rides a process marker. */
 const TIMELINE_KINDS: InteractionKind[] = [
   "ask_user",
-  "plan_review",
   "escalation",
 ];
 
 /** Weak-form kinds (D5): marker required; row gated on resolved/orphaned — not in strong card invariant. */
-const TRACE_KINDS: InteractionKind[] = ["approval", "stage_card"];
+const TRACE_KINDS: InteractionKind[] = ["approval"];
 
 /** Marker step id for a timeline interaction entry, per registry wiring. */
 function markerMatches(step: ProcessStep, kind: InteractionKind, id: string) {
@@ -60,19 +59,15 @@ describe("timeline projection key + marker invariant (fixtures)", () => {
   });
 
   it("covers the timeline fixture families", () => {
-    // Sanity: the families the bug hit (检查点 / 计划复核)
-    // + 弱式痕迹（审批 / 阶段推进卡）。开工卡事件对已退役，不再进此表。
+    // Sanity: the families the bug hit (检查点)
+    // + 弱式痕迹（审批）。
     const names = FIXTURES.map((f) => f.name);
     expect(names).toEqual(
       expect.arrayContaining([
         "single_agent_checkpoint",
-        "plan_review_paused",
         "multi_agent_legal_war_room",
-        "multi_agent_stage_card_orphaned",
-        "multi_agent_stage_card_start_debate",
       ]),
     );
-    expect(names).not.toContain("team_preview_resolved_continue");
   });
   for (const fx of FIXTURES) {
     it(`${fx.name}: cards resolvable by projection key, every card marked`, () => {

@@ -1,23 +1,22 @@
 """System Skills: code-defined capability docs the CEO pulls on demand (渐进披露).
 
 提示词瘦身 P2 的落地。CEO 的常驻系统提示词只保留「决定干什么」的路由核心（见
-``prompt._CEO_CORE_HINT``）；「怎么干」的进阶机制——正反辩论 /
-向用户发问——下沉为 **系统 Skill**：代码定义、随 CEO 常备、以一
-张「按需目录」常驻（仅一行触发描述），模型决定要用某能力后才用 ``consult(name)``
-把完整指引拉回自己的 ReAct 循环。
+``prompt._CEO_CORE_HINT``）；「怎么干」的进阶机制（正反辩论、交付环境、本机进桌…）
+下沉为 **系统 Skill**：代码定义、随 CEO 常备、以一张「按需目录」常驻（仅一行触发
+描述），模型决定要用某能力后才用 ``consult(name)`` 把完整指引拉回自己的 ReAct 循环。
 
 这是 ``docs/03-AI核心/工具与能力系统.md §二`` 已定的「Skill 渐进披露」机制（目录模式 +
 按名拉取）的第一个实例。系统 Skill 与用户技能 / 商店快照共用 ``consult``（单一机制、
 多类来源）——正如内置工具与 MCP 共用 ``ToolRegistry``，不另造平行系统。域级官方货
 （法律等）不进本 registry，只经商店安装进用户条目。
 
-``requires_tools`` 把现有的 live-user 门（ask_user 仅在有活跃用户时装配）一般化：一个
-Skill 只在它依赖的工具全部装配时才进目录，故提示词永不广告 CEO 手里没有的能力（沿用
-现有不变量）。``audience`` 再按读者收一层（主管 vs 队员），目录与 ``consult`` 拉取共用
-这一滤；不扫任务原文猜意图。
+``requires_tools``：Skill 只在它依赖的工具全部装配时才进目录（如 ``run`` 需 ``run``
+工具），故提示词永不广告 CEO 手里没有的能力。``audience`` 再按读者收一层（主管 vs
+队员），目录与 ``consult`` 拉取共用这一滤；不扫任务原文猜意图。
 
 维护约定（防双源漂移）：各 Skill 的 ``body`` 是**面向模型的 HOW 操作指引**的单一真相源；
-编制 HOW 的所有者是 ``delegate`` 按钮（description / task 参数），不进本 registry。
+编制 HOW 的所有者是 ``delegate`` 按钮；填卡 HOW 的所有者是 ``ask_user`` 按钮。均不进
+本 registry。
 ``docs/03-AI核心`` 各专题只写设计意图与约束（What/Why），不逐字复述 body。改动编排行为时
 两处同步：行为语义以设计文档为准，喂给模型的措辞以各 skill 分文件 / 工具 schema 为准。
 

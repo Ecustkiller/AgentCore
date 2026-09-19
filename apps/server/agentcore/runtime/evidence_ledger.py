@@ -4,7 +4,7 @@
 调研台账共用本核。条目模型见提案《引用即出处》§二。
 
 规则：
-- append-only；id = ``{prefix}{n}``（登记序，默认 ``#e``）
+- append-only；id = ``{prefix}{n}``（登记序，默认 ``#r``）
 - 同 URL（:func:`normalize_citation_url`）去重 → 返回既有 id
 - 空 URL（底料等）按归一化 title 去重
 - ``tier`` 单源 :func:`citation_tier_for_url`；``blocked`` 默拒登记
@@ -73,7 +73,7 @@ def is_announcement_doc_kind(doc_kind: str, *, title: str = "", snippet: str = "
 class EvidenceLedgerCore:
     """回合 / 场级共享台账核：线程外 asyncio 单进程加锁分配 id。"""
 
-    id_prefix: str = "#e"
+    id_prefix: str = "#r"
     reject_blocked: bool = True
     _entries: list[dict[str, Any]] = field(default_factory=list)
     _by_url: dict[str, str] = field(default_factory=dict)
@@ -531,6 +531,20 @@ class EvidenceLedgerCore:
             if dossier_label and not (e.get("dossier_label") or "").strip():
                 e["dossier_label"] = dossier_label
             return
+
+    def stamp_dossier(
+        self,
+        entry_id: str,
+        *,
+        dossier_path: str = "",
+        dossier_label: str = "",
+    ) -> None:
+        """给已有条目补约定文档锚（空字段才写）。"""
+        self._upgrade_existing(
+            entry_id,
+            dossier_path=dossier_path,
+            dossier_label=dossier_label,
+        )
 
 
 def format_registered_sources_prompt(ledger: EvidenceLedgerCore | None) -> str:

@@ -1,6 +1,6 @@
 {
   "name": "multi_agent_stage_card_orphaned",
-  "description": "批B·推进卡：stage_card_required → 下回合未调 debate/未起 MLR → 收尾 interaction_orphaned",
+  "description": "幕1 调研后下回合换话题：不再发卡、不写 orphan 墓碑",
   "events": [
     {
       "type": "message_start",
@@ -155,36 +155,6 @@
       "timestamp": "2026-01-01T00:00:02.007Z"
     },
     {
-      "type": "stage_card_required",
-      "payload": {
-        "stage_card_id": "sc_stage_1",
-        "conversation_id": "conv_demo",
-        "motion": "品牌是否应立即终止争议代言联名",
-        "sides": [
-          {
-            "key": "pro",
-            "name": "立即终止方",
-            "stance": "应立刻切割止损"
-          },
-          {
-            "key": "con",
-            "name": "冷静观望方",
-            "stance": "证据未定不宜仓促解约"
-          }
-        ],
-        "form": "debate",
-        "rationale": "真对立轴须对抗检验",
-        "fact_pointers": [
-          "#r1"
-        ],
-        "max_rounds": 5,
-        "host_execution_id": "exec_stage_card",
-        "synthesizer_run_id": "synthesizer",
-        "host_message_id": "m1"
-      },
-      "timestamp": "2026-01-01T00:00:02.008Z"
-    },
-    {
       "type": "message_end",
       "payload": {
         "finish_reason": "end_turn",
@@ -205,7 +175,7 @@
         },
         "rounds": 0
       },
-      "timestamp": "2026-01-01T00:00:02.009Z"
+      "timestamp": "2026-01-01T00:00:02.008Z"
     },
     {
       "type": "message_start",
@@ -213,14 +183,14 @@
         "message_id": "m2",
         "conversation_id": "conv_demo"
       },
-      "timestamp": "2026-01-01T00:00:02.010Z"
+      "timestamp": "2026-01-01T00:00:02.009Z"
     },
     {
       "type": "content_delta",
       "payload": {
         "delta": "好的，我们换个话题。"
       },
-      "timestamp": "2026-01-01T00:00:02.011Z"
+      "timestamp": "2026-01-01T00:00:02.010Z"
     },
     {
       "type": "message_end",
@@ -243,15 +213,7 @@
         },
         "rounds": 0
       },
-      "timestamp": "2026-01-01T00:00:02.012Z"
-    },
-    {
-      "type": "interaction_orphaned",
-      "payload": {
-        "interaction_id": "sc_stage_1",
-        "kind": "stage_card"
-      },
-      "timestamp": "2026-01-01T00:00:02.013Z"
+      "timestamp": "2026-01-01T00:00:02.011Z"
     }
   ],
   "projected": {
@@ -396,33 +358,7 @@
       "completed": 2,
       "total": 2
     },
-    "interactions": [
-      {
-        "kind": "stage_card",
-        "id": "sc_stage_1",
-        "status": "orphaned",
-        "motion": "品牌是否应立即终止争议代言联名",
-        "sides": [
-          {
-            "key": "pro",
-            "name": "立即终止方",
-            "stance": "应立刻切割止损"
-          },
-          {
-            "key": "con",
-            "name": "冷静观望方",
-            "stance": "证据未定不宜仓促解约"
-          }
-        ],
-        "form": "debate",
-        "rationale": "真对立轴须对抗检验",
-        "factPointers": [
-          "#r1"
-        ],
-        "maxRounds": 5,
-        "note": null
-      }
-    ],
+    "interactions": [],
     "cost": {
       "input": 240000,
       "cached": 64000,
@@ -436,7 +372,6 @@
     "debatePretrial": null,
     "crossExamEnabled": false,
     "debateOpening": null,
-    "teamSynthesisPreview": null,
     "deliveryStatus": null,
     "turnWarning": null,
     "autoFolder": null,

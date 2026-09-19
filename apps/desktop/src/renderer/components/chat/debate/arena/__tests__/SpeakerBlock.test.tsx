@@ -73,8 +73,6 @@ function roundModel(sides: DebateSideModel[]): DebateRoundModel {
     crossExam: [],
     witnessExam: [],
     scores: [],
-    findings: [],
-    threadTurns: [],
   };
 }
 

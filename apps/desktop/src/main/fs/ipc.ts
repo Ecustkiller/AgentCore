@@ -21,7 +21,12 @@ import {
   grantSessionRun,
   requiresOpenConfirm,
 } from "./execGate";
-import { confirmFolderWriteGrant, sessionModeCovers } from "./grantConfirm";
+import {
+  absIsUnderAnyRoot,
+  confirmFolderReadGrant,
+  confirmFolderWriteGrant,
+  grantNeedsConfirm,
+} from "./grantConfirm";
 import { coerceIpcBytes } from "./ipcBytes";
 import { openTempFileFromBytes } from "./openTemp";
 import { readFile, readTextFile, writeTextFile } from "./preview";
@@ -419,11 +424,28 @@ export function registerFsIpc(): void {
           : existing
             ? "readonly"
             : undefined;
-      if (mode !== "readonly" && !sessionModeCovers(haveMode, mode)) {
-        const allowed = await confirmFolderWriteGrant({
+      const inboxRoots: string[] = [];
+      for (const key of ["desktop", "downloads", "documents"] as const) {
+        try {
+          inboxRoots.push(await realpathOrSelf(app.getPath(key)));
+        } catch {
+          /* well-known dir missing on this machine */
+        }
+      }
+      const absUnderInbox = absIsUnderAnyRoot(absPath, inboxRoots);
+      if (
+        grantNeedsConfirm({
           mode,
-          displayLabel: displayLabel || existing?.name || "该文件夹",
-        });
+          haveMode,
+          wellKnown: wellKnown ?? null,
+          absUnderInbox,
+        })
+      ) {
+        const label = displayLabel || existing?.name || "该文件夹";
+        const allowed =
+          mode === "readonly"
+            ? await confirmFolderReadGrant({ displayLabel: label })
+            : await confirmFolderWriteGrant({ mode, displayLabel: label });
         if (!allowed) {
           return { ok: false, reason: "cancelled", message: "用户拒绝授权" };
         }

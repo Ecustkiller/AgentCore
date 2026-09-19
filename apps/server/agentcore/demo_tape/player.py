@@ -51,8 +51,6 @@ from agentcore.runtime.events import (
     checkpoint_resolved,
     message_end,
     message_start,
-    plan_review_required,
-    plan_review_resolved,
 )
 from agentcore.runtime.events.types import SSEEvent
 from agentcore.runtime.facts import TurnFactLog, current_fact_log, pre_pause_from_journal
@@ -64,10 +62,8 @@ from agentcore.runtime.pipeline.resume.rehydrate import (
     arm_content_reset_reinjection,
     bootstrap_resume_display,
 )
-from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.suspension import (
     AskUserSuspension,
-    PlanReviewSuspension,
     TurnSuspension,
     captain_transcript,
 )
@@ -82,7 +78,6 @@ pacing_sleep = asyncio.sleep
 # Event type → (suspension_kind, resolved emitter name for logs).
 _WIRED_PAUSE_BY_EVENT: dict[str, str] = {
     "checkpoint_required": "ask_user",
-    "plan_review_required": "plan_review",
 }
 
 logger = get_logger(__name__)
@@ -301,13 +296,6 @@ def _build_required_event(
             questions=list(payload.get("questions") or []),
             intent=coerce_ask_checkpoint_intent(intent) if intent else None,
         )
-    elif et_name == "plan_review_required":
-        required = plan_review_required(
-            checkpoint_id=checkpoint_id,
-            conversation_id=conversation_id,
-            steps=list(payload.get("steps") or []),
-            pending=list(payload.get("pending") or []),
-        )
     else:
         raise ValueError(f"not a wired pause event: {et_name}")
     if ts:
@@ -333,12 +321,6 @@ def _emit_resolved_for_kind(
                 selected=list(selected or []),
             )
         )
-    elif kind == "plan_review":
-        sink.emit(
-            plan_review_resolved(
-                checkpoint_id=checkpoint_id, decision=decision, note=note
-            )
-        )
     else:
         raise ValueError(f"unknown suspension kind for resolve: {kind}")
 
@@ -346,8 +328,6 @@ def _emit_resolved_for_kind(
 def _suspension_kind_of(suspension: TurnSuspension) -> str:
     if isinstance(suspension, AskUserSuspension):
         return "ask_user"
-    if isinstance(suspension, PlanReviewSuspension):
-        return "plan_review"
     raise TypeError(f"unsupported tape suspension: {type(suspension).__name__}")
 
 
@@ -556,17 +536,6 @@ def _build_tape_frame(
             question=str(payload.get("question") or ""),
             questions=list(payload.get("questions") or []),
             intent=coerce_ask_checkpoint_intent(payload.get("intent")),
-        )
-    if kind == "plan_review":
-        raw_review = payload.get("ceo_review")
-        return PlanReviewSuspension(
-            **common,
-            tool_call_id=f"tape_plan_review_{checkpoint_id[:8]}",
-            plan=RunPlan(),
-            completed={},
-            steps=list(payload.get("steps") or []),
-            pending=list(payload.get("pending") or []),
-            ceo_review=dict(raw_review) if isinstance(raw_review, dict) else None,
         )
     raise ValueError(f"unknown tape pause kind: {kind}")
 

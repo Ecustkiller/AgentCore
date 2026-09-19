@@ -1119,6 +1119,167 @@ async def test_apply_target_desktop_cloud_api_keeps_exec_when_sandbox_healthy(
     assert "file_read" in names
 
 
+class _ProvisionDesk:
+    """Server backend whose guest appears only after ``ensure_workspace_desk``."""
+
+    location = "server"
+    _channel = None
+
+    def __init__(self, *, boot: bool = True) -> None:
+        self.ready = False
+        self.ensures = 0
+        self._boot = boot
+
+    def cloud_desk_ready(self) -> bool:
+        return self.ready
+
+    async def ensure_workspace_desk(self) -> None:
+        self.ensures += 1
+        if not self._boot:
+            from agentcore.core.errors import SandboxError
+
+            raise SandboxError("boot failed", code="exec_env_sandbox_unavailable")
+        self.ready = True
+
+
+def _gvisor_cloud_exec(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentcore.config import settings
+    from agentcore.tools.sandbox.cloud_health import set_cloud_sandbox_health_for_tests
+
+    monkeypatch.setattr(settings, "gvisor_enabled", True)
+    monkeypatch.setattr(
+        "agentcore.sidecar.server_pkg.core.is_sidecar_process", lambda: False
+    )
+    set_cloud_sandbox_health_for_tests(True)
+
+
+@pytest.mark.asyncio
+async def test_apply_target_desktop_provisions_before_execution_class(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Fresh target root: boot first, then keep ``run`` if the guest is up."""
+    _gvisor_cloud_exec(monkeypatch)
+    session_backend = SimpleNamespace(location="server", _channel=None)
+    target = _ProvisionDesk()
+    ctx = ToolContext.create(
+        execution_id="e",
+        run_id="r",
+        agent_id="a",
+        backend=session_backend,  # type: ignore[arg-type]
+        user_id="u1",
+        conversation_id="c1",
+    )
+    binding = SimpleNamespace(
+        folder_id="cloud_c",
+        rel_path="cloud_c",
+        name="云C",
+        local_binding=None,
+    )
+    worker_tools = ToolRegistry()
+    worker_tools.register(_NamedTool("run"))
+    worker_tools.register(_NamedTool("file_read"))
+
+    async def _fake_rebuild(**_kwargs):
+        return "CLOUD_PROMPT"
+
+    with (
+        patch(
+            "agentcore.runtime.delegate.target_desktop.load_target_folder_binding",
+            new=AsyncMock(return_value=binding),
+        ),
+        patch(
+            "agentcore.runtime.delegate.target_desktop.build_target_backend",
+            return_value=target,
+        ),
+        patch(
+            "agentcore.runtime.delegate.target_desktop.rebuild_worker_prompt_for_target",
+            new=_fake_rebuild,
+        ),
+        patch(
+            "agentcore.workspace.locate.workspace_channel_for_tools",
+            return_value=None,
+        ),
+    ):
+        applied = await apply_target_desktop(
+            target_folder_id="cloud_c",
+            session_folder_id="birth",
+            env_system_prompt="P",
+            base_tool_context=ctx,
+            worker_tools=worker_tools,
+            sink=MagicMock(),
+            local_root_claims=None,
+        )
+
+    assert target.ensures == 1
+    assert target.ready is True
+    names = set(applied.worker_tools.names)
+    assert "run" in names
+    assert "file_read" in names
+
+
+@pytest.mark.asyncio
+async def test_apply_target_desktop_strips_run_when_provision_fails(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _gvisor_cloud_exec(monkeypatch)
+    session_backend = SimpleNamespace(location="server", _channel=None)
+    target = _ProvisionDesk(boot=False)
+    ctx = ToolContext.create(
+        execution_id="e",
+        run_id="r",
+        agent_id="a",
+        backend=session_backend,  # type: ignore[arg-type]
+        user_id="u1",
+        conversation_id="c1",
+    )
+    binding = SimpleNamespace(
+        folder_id="cloud_c",
+        rel_path="cloud_c",
+        name="云C",
+        local_binding=None,
+    )
+    worker_tools = ToolRegistry()
+    worker_tools.register(_NamedTool("run"))
+    worker_tools.register(_NamedTool("file_read"))
+
+    async def _fake_rebuild(**_kwargs):
+        return "CLOUD_PROMPT"
+
+    with (
+        patch(
+            "agentcore.runtime.delegate.target_desktop.load_target_folder_binding",
+            new=AsyncMock(return_value=binding),
+        ),
+        patch(
+            "agentcore.runtime.delegate.target_desktop.build_target_backend",
+            return_value=target,
+        ),
+        patch(
+            "agentcore.runtime.delegate.target_desktop.rebuild_worker_prompt_for_target",
+            new=_fake_rebuild,
+        ),
+        patch(
+            "agentcore.workspace.locate.workspace_channel_for_tools",
+            return_value=None,
+        ),
+    ):
+        applied = await apply_target_desktop(
+            target_folder_id="cloud_c",
+            session_folder_id="birth",
+            env_system_prompt="P",
+            base_tool_context=ctx,
+            worker_tools=worker_tools,
+            sink=MagicMock(),
+            local_root_claims=None,
+        )
+
+    assert target.ensures == 1
+    assert target.ready is False
+    names = set(applied.worker_tools.names)
+    assert "run" not in names
+    assert "file_read" in names
+
+
 def test_auto_cloud_desk_name_takes_name_shaped_title():
     """显示宽度 ≤16、没有截断标记 → 直接当文件夹名（中西文同轨）。"""
     assert auto_cloud_desk_name(conversation_title="  抚养费起诉状  ") == "抚养费起诉状"
@@ -1353,7 +1514,7 @@ async def test_ensure_bare_chat_auto_cloud_desk_persists_on_first_mint(monkeypat
         persisted.append((conversation_id or "", folder_id))
         return AutoDeskPersistResult(folder_id, "won")
 
-    async def _fake_bind(context, *, folder_id: str) -> bool:
+    async def _fake_bind(context, *, folder_id: str, **_kwargs) -> bool:
         context.auto_desk_folder_id = folder_id
         return True
 
@@ -1423,7 +1584,7 @@ async def test_ensure_bare_chat_auto_cloud_desk_reuses_persisted(monkeypatch):
 
     binds: list[str] = []
 
-    async def _fake_bind(context, *, folder_id: str) -> bool:
+    async def _fake_bind(context, *, folder_id: str, **_kwargs) -> bool:
         binds.append(folder_id)
         context.auto_desk_folder_id = folder_id
         return True
@@ -1587,7 +1748,7 @@ async def test_ensure_bare_chat_race_loser_reclaims_orphan_mint(monkeypatch):
     async def _fake_reclaim(*, user_id: str, folder_id: str) -> None:
         reclaimed.append(folder_id)
 
-    async def _fake_bind(context, *, folder_id: str) -> bool:
+    async def _fake_bind(context, *, folder_id: str, **_kwargs) -> bool:
         context.auto_desk_folder_id = folder_id
         return True
 
@@ -1661,7 +1822,7 @@ async def test_ensure_bare_chat_dead_pointer_remints_after_bind_miss(monkeypatch
     async def _fake_persist(*, user_id: str, conversation_id: str | None, folder_id: str):
         return AutoDeskPersistResult(folder_id, "won")
 
-    async def _fake_bind(context, *, folder_id: str) -> bool:
+    async def _fake_bind(context, *, folder_id: str, **_kwargs) -> bool:
         binds.append(folder_id)
         if folder_id == "desk-dead":
             context.auto_desk_folder_id = None
@@ -1749,3 +1910,116 @@ async def test_bind_landing_desk_clears_stale_pointer_when_folder_missing(monkey
     assert ok is False
     assert ctx.auto_desk_folder_id is None
     assert cleared == [("c-bare", "desk-dead")]
+
+
+@pytest.mark.asyncio
+async def test_bind_landing_desk_provisions_new_root(monkeypatch: pytest.MonkeyPatch):
+    _gvisor_cloud_exec(monkeypatch)
+    from agentcore.runtime.delegate.target_desktop import bind_tool_context_to_landing_desk
+
+    target = _ProvisionDesk()
+    ctx = ToolContext.create(
+        execution_id="e",
+        run_id="r",
+        agent_id="ceo",
+        backend=SimpleNamespace(location="server"),  # type: ignore[arg-type]
+        user_id="u1",
+        conversation_id="c-bare",
+    )
+    binding = SimpleNamespace(
+        folder_id="desk-1",
+        rel_path="desk-1",
+        name="云文件夹",
+        local_binding=None,
+    )
+    with (
+        patch(
+            "agentcore.runtime.delegate.target_desktop.load_target_folder_binding",
+            new=AsyncMock(return_value=binding),
+        ),
+        patch(
+            "agentcore.runtime.delegate.target_desktop.build_target_backend",
+            return_value=target,
+        ),
+        patch(
+            "agentcore.workspace.locate.workspace_channel_for_tools",
+            return_value=None,
+        ),
+    ):
+        ok = await bind_tool_context_to_landing_desk(ctx, folder_id="desk-1")
+
+    assert ok is True
+    assert ctx.backend is target
+    assert target.ensures == 1
+    assert target.ready is True
+
+
+@pytest.mark.asyncio
+async def test_adopt_persisted_auto_desk_does_not_provision(monkeypatch: pytest.MonkeyPatch):
+    from agentcore.runtime.delegate.target_desktop import adopt_persisted_auto_desk
+
+    landing = _ProvisionDesk()
+    binding = SimpleNamespace(
+        folder_id="desk-1",
+        rel_path="desk-1",
+        name="云文件夹",
+        local_binding=None,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop._load_auto_desk_folder_id",
+        AsyncMock(return_value="desk-1"),
+    )
+    with (
+        patch(
+            "agentcore.runtime.delegate.target_desktop.load_target_folder_binding",
+            new=AsyncMock(return_value=binding),
+        ),
+        patch(
+            "agentcore.runtime.delegate.target_desktop.build_target_backend",
+            return_value=landing,
+        ),
+        patch(
+            "agentcore.workspace.migrate_tree.migrate_and_transfer_cloud_backend",
+            return_value=0,
+        ),
+    ):
+        adopted = await adopt_persisted_auto_desk(
+            birth_folder_id=None,
+            user_id="u1",
+            conversation_id="c-bare",
+            birth_backend=SimpleNamespace(location="server"),
+            sink=MagicMock(),
+        )
+
+    assert adopted is not None
+    assert adopted.folder_id == "desk-1"
+    assert adopted.backend is landing
+    assert landing.ensures == 0
+
+
+@pytest.mark.asyncio
+async def test_adopt_persisted_auto_desk_skips_birth_folder():
+    from agentcore.runtime.delegate.target_desktop import adopt_persisted_auto_desk
+
+    adopted = await adopt_persisted_auto_desk(
+        birth_folder_id="birth",
+        user_id="u1",
+        conversation_id="c1",
+        birth_backend=SimpleNamespace(location="server"),
+        sink=MagicMock(),
+    )
+    assert adopted is None
+
+
+@pytest.mark.asyncio
+async def test_adopt_persisted_auto_desk_skips_local_backend():
+    from agentcore.runtime.delegate.target_desktop import adopt_persisted_auto_desk
+
+    adopted = await adopt_persisted_auto_desk(
+        birth_folder_id=None,
+        user_id="u1",
+        conversation_id="c1",
+        birth_backend=SimpleNamespace(location="local"),
+        sink=MagicMock(),
+    )
+    assert adopted is None

@@ -234,35 +234,6 @@
       }
     },
     {
-      "type": "stage_card_required",
-      "payload": {
-        "stage_card_id": "sc_stage_1",
-        "conversation_id": "conv_demo",
-        "motion": "品牌是否应立即终止争议代言联名",
-        "sides": [
-          {
-            "key": "pro",
-            "name": "立即终止方",
-            "stance": "应立刻切割止损"
-          },
-          {
-            "key": "con",
-            "name": "冷静观望方",
-            "stance": "证据未定不宜仓促解约"
-          }
-        ],
-        "form": "debate",
-        "rationale": "各方握同一事实却价值对立，继续取证无效",
-        "fact_pointers": [
-          "#r1"
-        ],
-        "max_rounds": 5,
-        "host_execution_id": "exec_stage_card",
-        "synthesizer_run_id": "synthesizer",
-        "host_message_id": "m1"
-      }
-    },
-    {
       "type": "message_end",
       "payload": {
         "finish_reason": "end_turn",
@@ -292,14 +263,6 @@
       }
     },
     {
-      "type": "stage_card_resolved",
-      "payload": {
-        "stage_card_id": "sc_stage_1",
-        "decision": "start_debate",
-        "note": ""
-      }
-    },
-    {
       "type": "content_delta",
       "payload": {
         "delta": "按此开辩。"
@@ -320,7 +283,7 @@
         ],
         "act_id": "act-2",
         "act_kind": "debate",
-        "authorized_by": "stage_card"
+        "authorized_by": "auto"
       }
     },
     {
@@ -351,7 +314,7 @@
           "kind": "debate",
           "title": "辩论对抗",
           "anchor_run_id": "synthesizer",
-          "authorized_by": "stage_card"
+          "authorized_by": "auto"
         }
       }
     },
@@ -422,7 +385,7 @@
           "kind": "debate",
           "title": "辩论对抗",
           "anchor_run_id": "synthesizer",
-          "authorized_by": "stage_card"
+          "authorized_by": "auto"
         }
       }
     },
@@ -563,7 +526,7 @@
             ],
             "evidence_ledger_delta": [
               {
-                "id": "#e1",
+                "id": "#r1",
                 "url": "",
                 "title": "证人·法律：合同第十二条原文如何表述解除条件？",
                 "snippet": "第十二条写明「严重损害品牌声誉时可单方解除」。",
@@ -621,7 +584,7 @@
         ],
         "evidence_ledger": [
           {
-            "id": "#e1",
+            "id": "#r1",
             "url": "",
             "title": "证人·法律：合同第十二条原文如何表述解除条件？",
             "snippet": "第十二条写明「严重损害品牌声誉时可单方解除」。",

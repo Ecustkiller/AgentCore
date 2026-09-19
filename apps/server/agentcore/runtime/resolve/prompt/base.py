@@ -1,14 +1,16 @@
 """Shared system-prompt base fragment (FRAGMENT_BASE) + runtime date context."""
 
+import time
+
 # 全员基座（CEO + 每位 worker）：只写两工种同真的句子。
 # 输出物理、工具并行、输入分类、诚实元规则、工作权威。
 # 工种不对称（对人开口 / 用户可见面 / 卡住问谁）进角色 <身份> 或工具 description。
 # 身份在角色层唯一一块（CEO 核 / 队员 <身份>），基座不写「队员」、不套 <身份>。
 # 不写 CEO 路由、交法展览（已声明路径才进当场「交付物规格」）、配图场面分类、写工具谨慎（确认卡处理，不进常驻）。
 # 已落盘则可见输出是路径、要点和增量：CEO 与工人同真，写在 <输出>（把「直接给结论」写锋利）。
-# 气泡图发现面只在输出句点 mermaid（与 LaTeX 同句）。
+# 渲染器清单 / 公式记号 / mermaid 出核（围栏前端渲；记号在 KaTeX）。
 # 检索何时收敛写在 web_search description，不进本基座。
-# <诚实>：能查就查 / 主张对得上回执·编号·工具表（双条件）/ 已装配 vs 缺口（consult ≠ 未装配）。
+# <诚实>：能查就查 / 主张对得上回执·编号·工具表（双条件）/ 目录能查阅 ≠ 没有；未装配不得声称已用。
 # 不写「只挂已登记」（对得上来源编号的补集）、「标易变」（非每回合）。
 # 未装配 ≠ 写进队员任务 在 delegate task 参数，不进核。
 # 「邻格 ≠ 否决本格」出核（补集）；正向「用别的路继续」覆盖。
@@ -24,8 +26,6 @@ _DEFAULT_SYSTEM_PROMPT = """\
 <输出>
 直接给结论；不复述用户刚说的话。不使用 emoji。写偏了就直接改写。\
 完整稿已经写进文件时，结论是路径、要点和文件里没有的增量。用与用户相同的语言回复。
-
-回复以 GitHub 风格 Markdown 渲染，支持代码高亮、LaTeX（行内 $…$、独立 $$…$$）与 mermaid 图表。
 </输出>
 
 <输入>
@@ -39,7 +39,7 @@ _DEFAULT_SYSTEM_PROMPT = """\
 <诚实>
 能查就查。用了工具的结论必须基于实际返回，不编造事实、引用或结果。无从得知就如实简短说明。
 对用户说的事实须对得上这回合的工具回执、来源编号或工具表。未对照则不得声称。关键数字 / 结论旁标本回合来源编号（#rN）或写明待核实。
-本回合工具表里有的就是已装配；`<工作区>`「缺口：」才是未装配。没进工具表、须先 `consult` ≠ 未装配。未装配不得声称本回合已用该能力；一句边界后用别的路继续。
+没进本回合工具表、按需目录里能查阅 ≠ 没有。未装配不得声称本回合已用该能力；一句边界后用别的路继续。
 </诚实>
 
 <工作权威>
@@ -50,13 +50,19 @@ _DEFAULT_SYSTEM_PROMPT = """\
 密钥不落工作区明文；用户可见处只写「已识别凭据」；已给且本回合能代跑 ≠ 再索要明文 ≠ 改成用户自己执行。
 </工作权威>"""
 
-# Date granularity (NOT second-precision time) on purpose: this line sits in the
-# system-prompt prefix BEFORE the large stable hint stack, so a value that changed
-# every turn broke DeepSeek's exact-prefix cache for everything after it (~5k chars
-# of CEO hints were re-billed each turn instead of being a cache hit). A date is
-# byte-identical within a day → the whole stable core stays in the cached prefix.
-# Time-of-day, if ever needed, belongs in the per-turn user envelope (not cached).
+# Date granularity (NOT second-precision time) on purpose. CEO: this block rides
+# the per-turn user envelope (history can stay in the exact-prefix cache when the
+# date/workspace/ledger change). Workers this slice: still spliced into system
+# after the shared base. A date is byte-identical within a day. Time-of-day, if
+# ever needed, stays out of the frozen system prefix.
 _RUNTIME_CONTEXT_TEMPLATE = """
 <运行时>
 当前日期：{date}
 </运行时>"""
+
+
+def render_runtime_date_block() -> str:
+    """``<运行时>`` date line — CEO envelope and worker system share this render."""
+    return _RUNTIME_CONTEXT_TEMPLATE.format(
+        date=time.strftime("%Y-%m-%d %Z", time.localtime())
+    ).strip()

@@ -22,12 +22,12 @@
 // SHOOT_SETTLE_MS (default 800), SHOOT_WIDTH (1440), SHOOT_HEIGHT (900),
 // SHOOT_SCALE (2), SHOOT_THEME ("light" | "dark", default light),
 // SHOOT_WORKERS (default min(4, CPUs); 1 = old serial page),
-// SHOOT_ZOOM ("" default | e.g. "compare" [旧别名 "revisions"] → appends &zoom=<v>
-// to deep-link the turn-detail 放大态 view [对比 / 群聊 / …] otherwise only reachable by clicking;
-// pair with a longer SHOOT_SETTLE_MS, e.g. 1800, and a scenario filter like `revision`),
+// SHOOT_ZOOM ("" default | e.g. "debate" | "graph" → appends &zoom=<v>
+// to deep-link the turn-detail 放大态 view otherwise only reachable by clicking;
+// pair with a longer SHOOT_SETTLE_MS, e.g. 1800),
 // SHOOT_CLICK ("" default | button accessible-name → after settle, click the first
-// matching button then re-settle before the shot, to capture an interaction-gated state
-// like「对比两版」/「对比发言」; a scenario without the button is left as-is, not failed).
+// matching button then re-settle before the shot, to capture an interaction-gated state;
+// a scenario without the button is left as-is, not failed).
 
 import { mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";

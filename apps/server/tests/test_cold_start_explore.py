@@ -501,64 +501,16 @@ async def test_user_rule_write_does_not_touch_folder_profile(tmp_path, monkeypat
 # --- 提示词闸：画像空注入 / 闲聊纪律文案 -----------------------------------------
 
 
-def test_compose_prompt_cold_start_block_only_when_flagged():
+def test_compose_prompt_omits_withdrawn_explore_act():
     skills = build_system_skill_registry()
     names = {"consult", "update_folder_profile", "delegate"}
     without = compose_ceo_chat_prompt(
         "BASE",
         skill_registry=skills,
         ceo_tool_names=names,
-        cold_start_explore=False,
-    )
-    with_flag = compose_ceo_chat_prompt(
-        "BASE",
-        skill_registry=skills,
-        ceo_tool_names=names,
-        cold_start_explore=True,
     )
     assert "当前文件夹约定记忆「画像.md」为空" not in without
-    assert "当前文件夹约定记忆「画像.md」为空" not in with_flag
-    assert "<冷启动探索>" in with_flag
-    block = with_flag[
-        with_flag.find("<冷启动探索>") : with_flag.find("</冷启动探索>")
-    ]
-    assert "用户点名刷新" in block
-    assert "先轻探再 delegate 调研建档" in block
-    assert "闲聊不开幕" not in block
-    assert "用户规则" in block
-    assert "写盘不得出 AgentCore/" in block
-
-
-def test_compose_prompt_empty_and_rebind_no_longer_open_the_act():
-    skills = build_system_skill_registry()
-    names = {"update_folder_profile", "delegate"}
-    for reason in ("empty", "rebind"):
-        text = compose_ceo_chat_prompt(
-            "BASE",
-            skill_registry=skills,
-            ceo_tool_names=names,
-            cold_start_explore=reason,
-        )
-        assert "<冷启动探索>" not in text
-        assert "绑定已变" not in text
-        assert "当前文件夹约定记忆「画像.md」为空" not in text
-
-
-def test_compose_prompt_refresh_gate():
-    skills = build_system_skill_registry()
-    text = compose_ceo_chat_prompt(
-        "BASE",
-        skill_registry=skills,
-        ceo_tool_names={"update_folder_profile", "delegate"},
-        cold_start_explore="refresh",
-    )
-    assert "用户点名刷新" in text
-    assert "<冷启动探索>" in text
-    assert "合并" in text
-    assert "画像.md」为空" not in text
-    assert "【冷启动探索幕 · 绑定已变】" not in text
-    assert "写盘不得出 AgentCore/" in text
-    assert "create_folder 新建的云文件夹除外" in text
+    assert "<冷启动探索>" not in without
 
 
 def test_resolve_hard_explore_reason_never_opens_write_act():
@@ -578,7 +530,6 @@ def test_compose_prompt_without_profile_tool_skips_write_hint():
         "BASE",
         skill_registry=skills,
         ceo_tool_names={"delegate"},
-        cold_start_explore=False,
     )
     assert "【文件夹画像写入】" not in text
 
@@ -590,7 +541,6 @@ def test_compose_prompt_profile_write_how_lives_on_tool_schema():
         "BASE",
         skill_registry=skills,
         ceo_tool_names={"update_folder_profile", "delegate"},
-        cold_start_explore=False,
     )
     assert "【文件夹画像写入】" not in text
     tool = UpdateFolderProfileTool()
@@ -742,48 +692,12 @@ async def test_fingerprint_drift_marks_dirty_without_explore_reason(tmp_path, ep
     ) is None
 
 
-def test_compose_prompt_folder_nav_stale_soft_hint():
-    skills = build_system_skill_registry()
-    text = compose_ceo_chat_prompt(
-        "BASE",
-        skill_registry=skills,
-        ceo_tool_names={"update_folder_profile", "delegate"},
-        cold_start_explore=False,
-        folder_nav_stale=True,
-    )
-    assert "【文件夹结构提示】" in text
-    assert "当前文件夹约定记忆「画像.md」为空" not in text
-    assert "【冷启动探索幕 · 绑定已变】" not in text
-    # Named refresh still wins over the fingerprint soft hint.
-    blocked = compose_ceo_chat_prompt(
-        "BASE",
-        skill_registry=skills,
-        ceo_tool_names={"update_folder_profile", "delegate"},
-        cold_start_explore="refresh",
-        folder_nav_stale=True,
-    )
-    assert "用户点名刷新" in blocked
-    assert "【文件夹结构提示】" not in blocked
-    assert "写盘不得出 AgentCore/" in blocked
-    # Empty / rebind no longer open the act — stale hint still shows.
-    empty = compose_ceo_chat_prompt(
-        "BASE",
-        skill_registry=skills,
-        ceo_tool_names={"update_folder_profile", "delegate"},
-        cold_start_explore="empty",
-        folder_nav_stale=True,
-    )
-    assert "<冷启动探索>" not in empty
-    assert "【文件夹结构提示】" in empty
-
-
 def test_compose_prompt_folder_profile_empty_soft_hint_absent():
     skills = build_system_skill_registry()
     text = compose_ceo_chat_prompt(
         "BASE",
         skill_registry=skills,
         ceo_tool_names={"update_folder_profile", "delegate"},
-        cold_start_explore=False,
     )
     assert "<文件夹画像空>" not in text
     assert "【文件夹画像提示】" not in text

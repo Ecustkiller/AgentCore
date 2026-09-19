@@ -208,7 +208,7 @@ async def run_chat_pipeline(
 
     memory_cache_token = consulted_memory_cache.set({})
     # 回合共享调研台账（引用即出处 P1）：与引用池同入口创建；captain / 调研 worker
-    # 注入同一对象，并行登记原子拿 ``#rN``。辩论场级 ``#e`` 台账不经此路径。
+    # 注入同一对象，并行登记原子拿 ``#rN``。开辩继承此核，不另起字头。
     # 跨回合 hydrate：合并本会话历史 assistant 的 evidence_ledger（引擎核；LLM 可不带全文）。
     evidence_ledger = EvidenceLedgerCore(id_prefix="#r")
     evidence_ledger.merge_history_ledgers(history)
@@ -289,6 +289,7 @@ async def run_chat_pipeline(
             prepare_account_folder_id.reset(prepare_folder_token)
 
         chat_system_prompt = assembled.chat_system_prompt
+        chat_envelope = assembled.chat_envelope
 
         # --- Phase 3: Execute ---
         sink.emit(message_start(message_id, conversation_id=conversation_id))
@@ -304,6 +305,7 @@ async def run_chat_pipeline(
                 user_message=user_message,
                 model_profile=turn_model,
                 history_len=len(history),
+                turn_envelope=chat_envelope,
             ).to_fact()
         )
 
@@ -339,6 +341,7 @@ async def run_chat_pipeline(
             supports_tools=llm_supports_tools,
             turn_evidence_ledger=evidence_ledger,
             native_image_parts=prepared.native_image_parts,
+            chat_envelope=chat_envelope,
         )
         captain_state = await run_captain(captain_spec)
 

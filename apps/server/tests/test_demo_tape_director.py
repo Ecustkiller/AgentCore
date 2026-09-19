@@ -203,8 +203,14 @@ def test_transport_registry_preserves_speed_and_armed_burst_on_reattach():
 
 
 @pytest.mark.asyncio
-async def test_player_burst_skips_leftover_team_preview(monkeypatch):
-    """Seek past leftover team_preview skips the retired event (no emit / no pause)."""
+@pytest.mark.parametrize(
+    "leftover_type",
+    ["team_preview_required", "plan_review_required"],
+)
+async def test_player_burst_skips_leftover_unknown_pause_kinds(
+    monkeypatch, leftover_type: str
+):
+    """Seek past leftover unknown pause kinds skips the retired event (no emit / no pause)."""
     from agentcore.demo_tape import player as player_mod
     from agentcore.demo_tape.binding import TapeBinding
     from agentcore.demo_tape.player import play_tape_events
@@ -232,13 +238,8 @@ async def test_player_burst_skips_leftover_team_preview(monkeypatch):
     events = [
         {"type": "content_delta", "payload": {"delta": "开场"}, "t_ms": 0},
         {
-            "type": "team_preview_required",
-            "payload": {
-                "checkpoint_id": "cp-src",
-                "primitive": "debate",
-                "workers": [],
-                "tools": [],
-            },
+            "type": leftover_type,
+            "payload": {"checkpoint_id": "cp-src"},
             "t_ms": 100,
         },
         {"type": "content_delta", "payload": {"delta": "辩论中"}, "t_ms": 200},
@@ -275,8 +276,8 @@ async def test_player_burst_skips_leftover_team_preview(monkeypatch):
     assert result["content"] == "开场辩论中"
     assert saved == []
     types = [e.type.value for e in sink._history]
-    assert "team_preview_required" not in types
-    assert "team_preview_resolved" not in types
+    assert leftover_type not in types
+    assert leftover_type.replace("_required", "_resolved") not in types
     assert EventType.CONTENT_DELTA.value in types
     assert transport.state is PlaybackState.FINISHED
 
@@ -365,13 +366,12 @@ async def test_player_lands_on_checkpoint_without_auto_resolve(monkeypatch):
     ("required_type", "resolved_type"),
     [
         ("checkpoint_required", EventType.CHECKPOINT_RESOLVED),
-        ("plan_review_required", EventType.PLAN_REVIEW_RESOLVED),
     ],
 )
 async def test_player_burst_auto_resolves_cold_path_pauses(
     monkeypatch, required_type: str, resolved_type: EventType
 ):
-    """Seek past checkpoint / plan_review emits required+resolved (no durable hang)."""
+    """Seek past checkpoint_required emits required+resolved (no durable hang)."""
     from agentcore.demo_tape import player as player_mod
     from agentcore.demo_tape.binding import TapeBinding
     from agentcore.demo_tape.player import play_tape_events
@@ -389,17 +389,8 @@ async def test_player_burst_auto_resolves_cold_path_pauses(
 
     monkeypatch.setattr(TurnJournalWriter, "flush", noop_flush)
 
-    payload: dict
-    if required_type == "checkpoint_required":
-        payload = {"checkpoint_id": "cp-src", "question": "继续？"}
-        required_et = EventType.CHECKPOINT_REQUIRED
-    else:
-        payload = {
-            "checkpoint_id": "pr-src",
-            "steps": [{"run_id": "r1"}],
-            "pending": [],
-        }
-        required_et = EventType.PLAN_REVIEW_REQUIRED
+    payload = {"checkpoint_id": "cp-src", "question": "继续？"}
+    required_et = EventType.CHECKPOINT_REQUIRED
 
     events = [
         {"type": "content_delta", "payload": {"delta": "开场"}, "t_ms": 0},
@@ -455,9 +446,9 @@ def test_has_pause_before_covers_all_wired_kinds():
         {"type": "approval_required", "t_ms": 50},
     ]
     assert _has_pause_before(events, 0, 2) is True
-    assert _has_pause_before(events, 2, 4) is True
     assert _has_pause_before(events, 0, 1) is False
-    # leftover team_preview is retired — not a wired interactive pause.
+    # leftover plan_review / team_preview are retired — not wired interactive pauses.
+    assert _has_pause_before(events, 2, 4) is False
     assert _has_pause_before(events, 4, 5) is False
     assert _has_pause_before(events, 5, 6) is True
 

@@ -54,7 +54,7 @@ export interface StatusStripProps {
   onMaximize: () => void;
 }
 
-/** Workers still in flight while the turn is paused (ask / plan_review / continue).
+/** Workers still in flight while the turn is paused (ask_user / continue).
  * Pending-only (next wave queued, nothing spinning) keeps the static pause strip.
  * Captain running is the CEO turn itself — not a worker batch. */
 function hasActiveRunningRuns(execution: Execution): boolean {
@@ -380,7 +380,7 @@ function RunningStrip({
 }
 
 /**
- * Mid-turn pause (e.g. plan_review gate) while the graph stays visible.
+ * Mid-turn pause (e.g. ask_user gate) while the graph stays visible.
  * Static — no spinner — so pause is not painted as「正在协作 / 卡住」。
  */
 function PausedStrip({

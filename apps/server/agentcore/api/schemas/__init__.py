@@ -92,12 +92,6 @@ from .browser import (
     MouseInputEvent,
     TextInputEvent,
 )
-from .collaboration_timeline import (
-    CollaborationDossierRef,
-    CollaborationTimelineAct,
-    CollaborationTimelineItem,
-    CollaborationTimelineResponse,
-)
 from .common import StatusResponse
 from .conversations import (
     AutoTitleRequest,
@@ -111,6 +105,7 @@ from .conversations import (
     DeletedConversationSummary,
     DeletedFolderListResponse,
     DeletedFolderSummary,
+    DuplicateConversationRequest,
     FolderGroup,
     FolderMemberListResponse,
     FolderMemberSummary,
@@ -209,7 +204,6 @@ from .messages import (
     ResolveClientToolInteraction,
     ResolveEscalationInteraction,
     ResolveInteractionRequest,
-    ResolveStageCardInteraction,
     ResumeTurnRequest,
     RunsPayload,
     SendMessageRequest,
@@ -409,6 +403,7 @@ __all__ = [
     "AdminReplayTurnFinalState",
     # conversations + folders
     "CreateConversationRequest",
+    "DuplicateConversationRequest",
     "ContextGapModel",
     "ConversationSummary",
     "conversation_summary_from_orm",
@@ -430,10 +425,6 @@ __all__ = [
     "DeletedFolderSummary",
     "DeletedFolderListResponse",
     "GroupedConversationsResponse",
-    "CollaborationTimelineAct",
-    "CollaborationDossierRef",
-    "CollaborationTimelineItem",
-    "CollaborationTimelineResponse",
     # boards (AI 协作白板)
     "CreateBoardRequest",
     "UpdateBoardRequest",
@@ -534,7 +525,6 @@ __all__ = [
     "WorkspaceOpError",
     "ResolveClientToolInteraction",
     "ResolveEscalationInteraction",
-    "ResolveStageCardInteraction",
     "ResolveInteractionRequest",
     "interaction_result_from_body",
     "ResumeTurnRequest",

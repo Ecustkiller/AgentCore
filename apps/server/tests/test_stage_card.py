@@ -1,4 +1,4 @@
-"""阶段推进卡：fold 投影 / 点卡 410。遗留 pending 不进 recovery、不盖章。"""
+"""阶段推进卡：fold 投影 skip；kind 不在 live resolve union。遗留 pending 不进 recovery。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import pytest
 from agentcore.runtime.journal.pending_interactions import (
     fold_interactions,
     fold_pending_interactions,
-    project_interaction_leaf,
 )
 
 
@@ -26,7 +25,7 @@ def _valid_card(**overrides):
     return base
 
 
-def test_fold_projects_stage_card_but_recovery_pending_excludes_it():
+def test_fold_skips_leftover_stage_card_and_recovery_pending_excludes_it():
     entries = [
         {
             "type": "stage_card_required",
@@ -48,25 +47,19 @@ def test_fold_projects_stage_card_but_recovery_pending_excludes_it():
     pending = fold_pending_interactions(entries, message_id="m1")
     assert pending == []
     recs = fold_interactions(entries)
-    assert len(recs) == 1
-    assert recs[0].kind == "stage_card"
-    assert recs[0].id == "sc_1"
-    leaf = project_interaction_leaf(recs[0])
-    assert leaf["kind"] == "stage_card"
-    assert leaf["motion"] == "命题"
+    assert recs == []
 
 
 @pytest.mark.asyncio
-async def test_refuse_stage_card_resolve_is_gone():
-    from agentcore.core.errors import GoneError
-    from agentcore.runtime.kickoff.retired import (
-        STAGE_CARD_UNRECOVERABLE,
-        refuse_stage_card_resolve,
-    )
+async def test_resolve_interaction_rejects_stage_card_kind():
+    from pydantic import TypeAdapter, ValidationError
 
-    with pytest.raises(GoneError, match="开辩请直接") as ei:
-        refuse_stage_card_resolve()
-    assert ei.value.message == STAGE_CARD_UNRECOVERABLE
+    from agentcore.api.schemas.messages import ResolveInteractionRequest
+
+    with pytest.raises(ValidationError):
+        TypeAdapter(ResolveInteractionRequest).validate_python(
+            {"kind": "stage_card", "decision": "start_debate"}
+        )
 
 
 @pytest.mark.asyncio

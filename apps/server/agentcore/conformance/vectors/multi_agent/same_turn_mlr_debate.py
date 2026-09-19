@@ -79,7 +79,7 @@ def _multi_agent_same_turn_mlr_debate() -> list[SSEEvent]:
         "kind": "debate",
         "title": "正反辩论对抗",
         "anchor_run_id": "synthesizer",
-        "authorized_by": "preview",
+        "authorized_by": "auto",
     }
     debate_payload = {
         "form": "debate",

@@ -325,32 +325,107 @@ describe("InterjectionTimeline", () => {
     }
   });
 
-  it("hides addressed badge and in-graph note, keeps the user bubble", () => {
-    seedStreamingAssistant();
-    useExecutionStore.setState({
-      byId: {
-        m1: {
-          userInterjections: [
-            {
-              interjectionId: "ij-addr",
-              executionId: "e1",
-              content: "停止",
-              status: "addressed",
-              note: "已在本回合停掉对应成员",
-            },
-          ],
+  it.each(["addressed", "injected"] as const)(
+    "hides %s badge and note, keeps the user bubble",
+    (status) => {
+      seedStreamingAssistant();
+      useExecutionStore.setState({
+        byId: {
+          m1: {
+            userInterjections: [
+              {
+                interjectionId: `ij-${status}`,
+                executionId: "e1",
+                content: "停止",
+                status,
+                note: "已在本回合停掉对应成员",
+              },
+            ],
+          },
         },
-      },
-    } as never);
+      } as never);
 
-    render(<InterjectionTimeline messageId="m1" interjectionId="ij-addr" />);
-    expect(screen.getByTestId("interjection-bubble-ij-addr")).toBeTruthy();
-    expect(screen.getByText("停止")).toBeTruthy();
-    expect(screen.queryByTestId("interjection-status-ij-addr")).toBeNull();
-    expect(screen.queryByTestId("interjection-server-note")).toBeNull();
-    expect(screen.queryByText("已纳入本回合合成")).toBeNull();
-    expect(screen.queryByText("已在本回合停掉对应成员")).toBeNull();
-  });
+      render(
+        <InterjectionTimeline
+          messageId="m1"
+          interjectionId={`ij-${status}`}
+        />,
+      );
+      expect(
+        screen.getByTestId(`interjection-bubble-ij-${status}`),
+      ).toBeTruthy();
+      expect(screen.getByText("停止")).toBeTruthy();
+      expect(
+        screen.queryByTestId(`interjection-status-ij-${status}`),
+      ).toBeNull();
+      expect(screen.queryByTestId("interjection-server-note")).toBeNull();
+    },
+  );
+
+  it.each(["injected", "addressed"] as const)(
+    "hides folded %s anchor when later user bubble already carries the body",
+    (status) => {
+      useConversationStore.setState((s) => ({
+        byId: {
+          ...s.byId,
+          [DRAFT_KEY]: {
+            ...s.byId[DRAFT_KEY],
+            turnPhase: "streaming",
+            messages: [
+              {
+                id: "m1",
+                role: "assistant",
+                content: "正在说",
+                createdAt: new Date().toISOString(),
+                executionId: null,
+                isStreaming: true,
+              },
+              {
+                id: "u-steer",
+                role: "user",
+                content: "补充成本对比",
+                createdAt: new Date().toISOString(),
+                executionId: null,
+                isStreaming: false,
+              },
+            ],
+          },
+        },
+      }));
+      useExecutionStore.setState({
+        byId: {
+          m1: {
+            userInterjections: [
+              {
+                interjectionId: `ij-${status}`,
+                executionId: "e1",
+                content: "补充成本对比",
+                status,
+                note: "不该出现的收据",
+              },
+            ],
+          },
+        },
+      } as never);
+
+      const { container } = render(
+        <InterjectionTimeline
+          messageId="m1"
+          interjectionId={`ij-${status}`}
+        />,
+      );
+      expect(container.firstChild).toBeNull();
+      expect(
+        screen.queryByTestId(`interjection-bubble-ij-${status}`),
+      ).toBeNull();
+      expect(
+        screen.queryByTestId(`interjection-note-ij-${status}`),
+      ).toBeNull();
+      expect(
+        screen.queryByTestId(`interjection-status-ij-${status}`),
+      ).toBeNull();
+    },
+  );
 
   it("renders @ role chips matching history user bubbles", () => {
     seedStreamingAssistant();

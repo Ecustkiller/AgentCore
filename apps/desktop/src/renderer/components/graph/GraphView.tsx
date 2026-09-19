@@ -17,7 +17,6 @@ import { useGraphStore } from "@/stores/graph";
 import type { EndpointKind } from "@/stores/sidePanel";
 import { Background, type Edge, type Node, ReactFlow } from "@xyflow/react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CanvasZoomControls } from "./CanvasZoomControls";
 import { DebateStageBands } from "./DebateStageBands";
 import { GraphActionBar } from "./GraphActionBar";
 import { GraphContextMenu } from "./GraphContextMenu";
@@ -224,7 +223,7 @@ export const GraphView = memo(function GraphView({
     expandedUnits,
     focusedActId,
   );
-  const { containerRef, rfRef, overflowing, fitView, centerNode, onInit } =
+  const { containerRef, overflowing, fitView, centerNode, onInit } =
     useGraphViewport({
       fitMode,
       bbox,
@@ -607,17 +606,6 @@ export const GraphView = memo(function GraphView({
                     <span className="text-primary">⇢</span> 数据注入（审计）
                   </div>
                 )}
-
-              {interactive && (
-                <div className="absolute bottom-3 left-3 z-10">
-                  <CanvasZoomControls
-                    onZoomIn={() => rfRef.current?.zoomIn({ duration: 200 })}
-                    onZoomOut={() => rfRef.current?.zoomOut({ duration: 200 })}
-                    onFit={fitView}
-                    fitLabel="适应画布 (F)"
-                  />
-                </div>
-              )}
             </div>
           </ContextMenuTrigger>
 

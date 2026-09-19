@@ -131,13 +131,16 @@ async def test_duplicate_carries_last_visible_assistant_preview(
     async with session_factory() as session:
         repo = MessageRepository(session)
         await repo.create(conversation_id=cid, role="user", content="用户问题")
-        await repo.upsert_assistant(
+        asst = await repo.upsert_assistant(
             conversation_id=cid,
             content="克隆应带上的助手句",
             metadata={"status": MESSAGE_STATUS_COMPLETE},
         )
 
-    dup = await client.post(f"/v1/conversations/{cid}/duplicate")
+    dup = await client.post(
+        f"/v1/conversations/{cid}/duplicate",
+        json={"until_message_id": asst.id},
+    )
     assert dup.status_code == 201, dup.text
     body = dup.json()
     assert body["last_message_preview"] == "克隆应带上的助手句"

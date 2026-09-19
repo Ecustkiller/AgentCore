@@ -446,7 +446,7 @@ describe("buildAgentNodePresentation revision face", () => {
   });
 
   it("debate via participant group without stance", () => {
-    // isDebateTaggedRun：stance 或白名单 group（debate:debate / red_team /
+    // isDebateTaggedRun：stance 或白名单 group（debate:debate / 旧 red_team /
     // roundtable / witness）；禁 startsWith("debate:")——假 topic 不算辩手。
     const p = buildAgentNodePresentation(
       baseNode({

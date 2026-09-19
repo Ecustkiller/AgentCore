@@ -1,6 +1,6 @@
 {
   "name": "multi_agent_mlr_debate_witness",
-  "description": "批D1·证人模式：幕1 MLR + 幕2 辩论新图+prev；证人席位 + witness_exam 答问进台账（答问 run 挂辩论幕席位下，continues=席位根）",
+  "description": "证人模式：幕1 MLR + 幕2 辩论同图，主持人点名证人答问（authorized_by=auto）",
   "events": [
     {
       "type": "message_start",
@@ -447,7 +447,7 @@
           "kind": "debate",
           "title": "辩论对抗",
           "anchor_run_id": "synthesizer",
-          "authorized_by": "stage_card"
+          "authorized_by": "auto"
         }
       },
       "timestamp": "2026-01-01T00:00:04.416Z"
@@ -491,7 +491,7 @@
           "kind": "debate",
           "title": "辩论对抗",
           "anchor_run_id": "synthesizer",
-          "authorized_by": "stage_card"
+          "authorized_by": "auto"
         }
       },
       "timestamp": "2026-01-01T00:00:04.418Z"
@@ -566,7 +566,7 @@
           "kind": "debate",
           "title": "辩论对抗",
           "anchor_run_id": "synthesizer",
-          "authorized_by": "stage_card"
+          "authorized_by": "auto"
         }
       },
       "timestamp": "2026-01-01T00:00:04.421Z"
@@ -589,7 +589,7 @@
       "payload": {
         "run_id": "debate_mod_wit_r1_pro",
         "agent_id": "d_pro",
-        "delta": "第十二条可解除【已核实·#e2】，应立即终止。"
+        "delta": "第十二条可解除【已核实·#r2】，应立即终止。"
       },
       "timestamp": "2026-01-01T00:00:04.423Z"
     },
@@ -896,7 +896,7 @@
         "scores": {},
         "evidence_ledger_delta": [
           {
-            "id": "#e1",
+            "id": "#r1",
             "url": "",
             "title": "证人·法律：合同第十二条原文如何表述解除条件？",
             "snippet": "第十二条写明「严重损害品牌声誉时可单方解除」。",
@@ -906,7 +906,7 @@
             "side_key": "witness:lens_0"
           },
           {
-            "id": "#e2",
+            "id": "#r2",
             "url": "https://court.example/contract",
             "title": "法律 · #r1",
             "snippet": "约定文档 AgentCore/文档/research/法律透镜报告.md · 幕1 #r1",
@@ -1089,7 +1089,7 @@
         "closings": [],
         "evidence_ledger": [
           {
-            "id": "#e1",
+            "id": "#r1",
             "url": "",
             "title": "证人·法律：合同第十二条原文如何表述解除条件？",
             "snippet": "第十二条写明「严重损害品牌声誉时可单方解除」。",
@@ -1099,7 +1099,7 @@
             "side_key": "witness:lens_0"
           },
           {
-            "id": "#e2",
+            "id": "#r2",
             "url": "https://court.example/contract",
             "title": "法律 · #r1",
             "snippet": "约定文档 AgentCore/文档/research/法律透镜报告.md · 幕1 #r1",
@@ -1208,7 +1208,7 @@
         "thinking": true,
         "status": "completed",
         "currentRunId": null,
-        "output": "第十二条可解除【已核实·#e2】，应立即终止。",
+        "output": "第十二条可解除【已核实·#r2】，应立即终止。",
         "reasoning": "",
         "toolProgress": null
       },
@@ -1374,7 +1374,7 @@
         "process": [
           {
             "kind": "content",
-            "text": "第十二条可解除【已核实·#e2】，应立即终止。"
+            "text": "第十二条可解除【已核实·#r2】，应立即终止。"
           }
         ]
       },
@@ -1575,7 +1575,7 @@
         "kind": "debate",
         "title": "辩论对抗",
         "anchorRunId": "synthesizer",
-        "authorizedBy": "stage_card"
+        "authorizedBy": "auto"
       }
     ],
     "progress": {
@@ -1702,7 +1702,7 @@
       "closings": [],
       "evidence_ledger": [
         {
-          "id": "#e1",
+          "id": "#r1",
           "url": "",
           "title": "证人·法律：合同第十二条原文如何表述解除条件？",
           "snippet": "第十二条写明「严重损害品牌声誉时可单方解除」。",
@@ -1712,7 +1712,7 @@
           "side_key": "witness:lens_0"
         },
         {
-          "id": "#e2",
+          "id": "#r2",
           "url": "https://court.example/contract",
           "title": "法律 · #r1",
           "snippet": "约定文档 AgentCore/文档/research/法律透镜报告.md · 幕1 #r1",
@@ -1781,15 +1781,12 @@
             ],
             "answer_run_id": "debate_mod_wit_r1_wit_lens_0"
           }
-        ],
-        "findings": [],
-        "thread_turns": []
+        ]
       }
     ],
     "debatePretrial": null,
     "crossExamEnabled": true,
     "debateOpening": "先核清解除条款事实再谈立场。",
-    "teamSynthesisPreview": null,
     "deliveryStatus": null,
     "turnWarning": null,
     "autoFolder": null,

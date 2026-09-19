@@ -16,6 +16,10 @@ import {
 import { isSafeExternalUrl } from "@shared/safe-url";
 import { BrowserWindow, ipcMain, shell } from "electron";
 import { isRecord, requireStringFields } from "./ipc-validate";
+import {
+  broadcastShellPresence,
+  watchWindowForShellPresence,
+} from "./shell-presence";
 
 const DEFAULT_WIDTH = 640;
 const DEFAULT_HEIGHT = 800;
@@ -24,15 +28,15 @@ const MIN_HEIGHT = 240;
 /** 无 bounds 时相对主窗居中后再偏一点（对齐 VS Code aux cascade）。 */
 const DEFAULT_OFFSET = 48;
 /**
- * 与主进程 `app.setAppUserModelId` 同源——Windows 任务栏「单图标分组 + 多预览」。
- * 否决每真窗独立 AppUserModelID / 独立钉选图标。构建期按通道注入（beta 与 stable 隔离）。
+ * 与主进程 `app.setAppUserModelId` 同源（= 安装器 appId）——任务栏单图标分组 + 系统通知可送达。
+ * 否决每真窗独立 AppUserModelID；否决为 toast 另留一套 AUMID。构建期按通道注入。
  */
 declare const __WINDOWS_APP_USER_MODEL_ID__: string | undefined;
 const WINDOWS_APP_USER_MODEL_ID =
   typeof __WINDOWS_APP_USER_MODEL_ID__ !== "undefined" &&
   __WINDOWS_APP_USER_MODEL_ID__
     ? __WINDOWS_APP_USER_MODEL_ID__
-    : "com.agentcore.desktop";
+    : "xyz.fashitianxia.agentcore";
 
 export type FloatWindowDeps = {
   /** 主窗（收 closed 事件）；可暂为空。 */
@@ -267,6 +271,8 @@ export function openFloatWindow(input: FloatWindowOpenInput): boolean {
   floats.set(tabId, { win, conversationId });
   win.on("closed", () => removeEntry(tabId, win));
   lockFloatNavigation(win);
+  watchWindowForShellPresence(win);
+  broadcastShellPresence();
 
   win.once("ready-to-show", () => {
     if (!win.isDestroyed()) win.show();
@@ -309,6 +315,14 @@ export function floatWindowCount(): number {
 export function hasFloatWindow(tabId: string): boolean {
   const entry = floats.get(tabId);
   return Boolean(entry && !entry.win.isDestroyed());
+}
+
+/** Live OS floats for shell-presence / scene (conversation id at open). */
+export function listFloatEntries(): ReadonlyArray<{
+  win: BrowserWindow;
+  conversationId: string;
+}> {
+  return [...floats.values()].filter((e) => !e.win.isDestroyed());
 }
 
 /** True if `win` is a managed方案 C float (for chrome IPC routing). */

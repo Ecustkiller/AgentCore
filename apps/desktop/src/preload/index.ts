@@ -33,6 +33,7 @@ import { MCP_CHANNELS, type McpApi } from "@shared/mcp-contract";
 import {
   NOTIFICATION_CHANNELS,
   type NotificationApi,
+  type ShellPresenceSnapshot,
 } from "@shared/notification-contract";
 import {
   OUTBOX_CHANNELS,
@@ -391,6 +392,17 @@ const notificationApi: NotificationApi = {
     ipcRenderer.on(NOTIFICATION_CHANNELS.clicked, listener);
     return () =>
       ipcRenderer.removeListener(NOTIFICATION_CHANNELS.clicked, listener);
+  },
+  getPresence: () => ipcRenderer.invoke(NOTIFICATION_CHANNELS.presenceGet),
+  onPresenceChanged: (cb) => {
+    const listener = (_e: unknown, payload: ShellPresenceSnapshot) =>
+      cb(payload);
+    ipcRenderer.on(NOTIFICATION_CHANNELS.presenceChanged, listener);
+    return () =>
+      ipcRenderer.removeListener(
+        NOTIFICATION_CHANNELS.presenceChanged,
+        listener,
+      );
   },
 };
 

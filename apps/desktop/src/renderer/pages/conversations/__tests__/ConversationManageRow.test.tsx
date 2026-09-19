@@ -28,7 +28,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/hooks/useConversations", () => ({
   useArchiveConversation: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
   useDeleteConversation: () => ({ mutateAsync: mocks.deleteAsync }),
-  useDuplicateConversation: () => ({ mutate: vi.fn() }),
   useRenameConversation: () => ({ mutate: vi.fn() }),
   useRestoreConversation: () => ({ mutate: mocks.restore }),
   useTogglePin: () => ({ mutate: vi.fn() }),

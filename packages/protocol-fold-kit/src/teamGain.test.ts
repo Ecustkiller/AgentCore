@@ -90,7 +90,7 @@ describe("formatCollabSummary（队友互相挑出了几处）", () => {
     ).toBeNull();
   });
 
-  it("用户拍板的边界（计划复核）不算「中途改分工」", () => {
+  it("用户拍板的边界不算「中途改分工」", () => {
     expect(
       formatCollabSummary({
         boundary_yields: 3,

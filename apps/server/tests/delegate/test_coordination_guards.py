@@ -964,7 +964,7 @@ async def test_merge_allows_non_overlapping_append():
 
 
 def test_healthy_idle_inject_has_progress_and_no_action_guidance():
-    """健康流水线 idle 注入含进度视图，并明确导向无需追加动作。"""
+    """健康流水线 idle 注入含进度视图，不附下一动教案。"""
     from agentcore.runtime.coordination.inject import idle_yield_messages
     from agentcore.runtime.coordination.pipeline_view import (
         format_idle_yield_brief,
@@ -1008,8 +1008,6 @@ def test_healthy_idle_inject_has_progress_and_no_action_guidance():
     assert "Wave" in brief
     assert "在跑" in brief or "内容文案" in brief
     assert "依赖阻塞" in brief
-    assert "无需追加" in brief
-    assert "正常推进" in brief
     assert "【协调期】" not in brief
     assert "可静默" not in brief
     assert "谁还在跑" not in brief
@@ -1028,7 +1026,6 @@ def test_healthy_idle_inject_has_progress_and_no_action_guidance():
     msgs = idle_yield_messages(session)
     assert len(msgs) == 1
     assert "流水线进度" in (msgs[0].content or "")
-    assert "无需追加" in (msgs[0].content or "")
     assert "可静默" not in (msgs[0].content or "")
     assert "保持静默即可" not in (msgs[0].content or "")
     assert "cancel_worker" not in (msgs[0].content or "")

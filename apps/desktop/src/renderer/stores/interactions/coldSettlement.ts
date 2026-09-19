@@ -1,5 +1,5 @@
 /**
- * 冷卡服务端终态判据（ask_user / plan_review）。
+ * 冷卡服务端终态判据（ask_user）。
  *
  * 可点性只认这一份：checkpoint 一旦在服务端结算（journal 已有 live `*_resolved`，
  * 或本会话已观察过该终态），任何路径都不得再把它当待答卡画出来。

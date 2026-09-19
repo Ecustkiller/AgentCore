@@ -31,7 +31,7 @@ export const RUN_FRAME_EVENT_TYPES: ReadonlySet<string> = new Set([
   "escalation_resolved",
   "tool_use_start",
   "tool_use_end",
-  "plan_review_required",
+  "plan_review_required", // leftover journal: still bound wall-clock; not a live fold kind
   "plan_review_resolved",
   "plan_revised",
 ]);

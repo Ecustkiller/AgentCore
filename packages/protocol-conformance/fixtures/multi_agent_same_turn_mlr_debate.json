@@ -1,6 +1,6 @@
 {
   "name": "multi_agent_same_turn_mlr_debate",
-  "description": "同回合两幕同一张图：一条消息先 MLR 再 debate，单 execution_id、acts 两幕、无 prev",
+  "description": "同回合两幕同一张图：一条助手消息里先 MLR 再 debate，共用 execution_id（authorized_by=auto）",
   "events": [
     {
       "type": "message_start",
@@ -233,7 +233,7 @@
           "kind": "debate",
           "title": "正反辩论对抗",
           "anchor_run_id": "synthesizer",
-          "authorized_by": "preview"
+          "authorized_by": "auto"
         }
       },
       "timestamp": "2026-01-01T00:00:02.010Z"
@@ -306,7 +306,7 @@
           "kind": "debate",
           "title": "正反辩论对抗",
           "anchor_run_id": "synthesizer",
-          "authorized_by": "preview"
+          "authorized_by": "auto"
         }
       },
       "timestamp": "2026-01-01T00:00:02.013Z"
@@ -882,7 +882,7 @@
         "kind": "debate",
         "title": "正反辩论对抗",
         "anchorRunId": "synthesizer",
-        "authorizedBy": "preview"
+        "authorizedBy": "auto"
       }
     ],
     "progress": {
@@ -979,15 +979,12 @@
         "sides": [],
         "clashes": [],
         "cross_exam": [],
-        "witness_exam": [],
-        "findings": [],
-        "thread_turns": []
+        "witness_exam": []
       }
     ],
     "debatePretrial": null,
     "crossExamEnabled": false,
     "debateOpening": "先从法律风险与舆情窗口切入。",
-    "teamSynthesisPreview": null,
     "deliveryStatus": null,
     "turnWarning": null,
     "autoFolder": null,

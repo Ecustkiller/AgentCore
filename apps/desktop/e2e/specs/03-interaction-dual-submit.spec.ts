@@ -11,8 +11,8 @@ import {
 /**
  * Case 3 — 交互卡双提交面：
  * - 审批：POST interactions → 同流续段
- * - 计划复核：POST resume → 新流推进
- * 向量：`approval_resolved_continue`、`plan_review_resolved_continue`
+ * - 检查点 / ask_user：POST resume → 新流推进
+ * 向量：`approval_resolved_continue`、`single_agent_checkpoint_resolved`
  */
 test.describe("交互卡闭环（双提交面）", () => {
   test("审批卡：POST interactions 后同流续段到完成", async ({ page }) => {
@@ -45,7 +45,7 @@ test.describe("交互卡闭环（双提交面）", () => {
     });
   });
 
-  test("计划复核卡：POST resume 后新流推进到完成", async ({ page }) => {
+  test("检查点卡：POST resume 后新流推进到完成", async ({ page }) => {
     await openWebapp(page);
     await ensureAuthed(page);
 
@@ -61,20 +61,20 @@ test.describe("交互卡闭环（双提交面）", () => {
 
     await sendPrompt(
       page,
-      scriptPrompt("plan_review_resolved_continue", "请复核计划后放行"),
+      scriptPrompt("single_agent_checkpoint_resolved", "先对齐方向再动手"),
     );
     await expectHashConversation(page);
 
-    await expect(page.getByText("计划复核")).toBeVisible({
+    await expect(page.getByText("先做 A 还是 B？")).toBeVisible({
       timeout: 30_000,
     });
-    await page.getByRole("button", { name: "继续" }).click();
+    await page.getByRole("button", { name: "提交" }).click();
 
     const req = await resume;
     expect(req.method()).toBe("POST");
 
     await waitTurnSettled(page);
-    await expect(page.getByText("计划复核")).toBeHidden({
+    await expect(page.getByText("好，按 A 推进。")).toBeVisible({
       timeout: 20_000,
     });
   });

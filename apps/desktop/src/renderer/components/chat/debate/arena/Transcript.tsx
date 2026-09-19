@@ -14,7 +14,7 @@ import {
   partitionSides,
 } from "./debateLayoutPreference";
 import { openingText } from "./openingText";
-import { FindingThreads, ThreadTurns, WitnessExamSection } from "./replayLazy";
+import { WitnessExamSection } from "./replayLazy";
 
 export function Transcript({
   model,
@@ -81,8 +81,6 @@ export function Transcript({
   };
 
   const useSplit = layoutMode === "split" && model.form === "debate";
-  // 红队不渲染质询/结辩区块（三拍取代质询；结辩已移除）。
-  const showCrossExam = model.form === "debate";
 
   return (
     <div className="space-y-1">
@@ -90,36 +88,16 @@ export function Transcript({
 
       {model.rounds.map((round) => {
         const flat = isFlatRound(round);
-        const hasFindings = round.findings.length > 0;
-        const hasThread = round.threadTurns.length > 0;
-        // 红队有 finding → 线程英雄区；圆桌有 thread_turns → 线程英雄区；否则旧单波按方分栏。
-        const useFindingHero = model.form === "red_team" && hasFindings;
-        const useThreadHero = model.form === "roundtable" && hasThread;
-        const speechSides = useFindingHero
-          ? []
-          : useThreadHero
-            ? []
-            : uniqueSpeechSides(round.sides);
+        const speechSides = uniqueSpeechSides(round.sides);
 
         const allDone =
           round.sides.length > 0 &&
           round.sides.every((s) => s.run && s.run.status !== "running");
-        const findingRunning = round.findings.some(
-          (f) =>
-            f.attackRun?.status === "running" ||
-            f.responseRun?.status === "running" ||
-            f.rebuttalRun?.status === "running",
+        const showModeratorPending = round.inFlight && allDone;
+        const crossExamRunning = round.crossExam.some(
+          (cx) => cx.answerRun?.status === "running",
         );
-        const threadRunning = round.threadTurns.some(
-          (t) => t.run?.status === "running",
-        );
-        const showModeratorPending =
-          round.inFlight && allDone && !findingRunning && !threadRunning;
-        const crossExamRunning =
-          showCrossExam &&
-          round.crossExam.some((cx) => cx.answerRun?.status === "running");
         const pendingKind =
-          showCrossExam &&
           model.crossExamEnabled &&
           round.crossExam.length === 0 &&
           !crossExamRunning
@@ -146,24 +124,7 @@ export function Transcript({
               />
             ))}
 
-            {useFindingHero ? (
-              <Suspense fallback={null}>
-                <FindingThreads
-                  findings={round.findings}
-                  execution={execution}
-                  messageId={messageId}
-                />
-              </Suspense>
-            ) : useThreadHero ? (
-              <Suspense fallback={null}>
-                <ThreadTurns
-                  turns={round.threadTurns}
-                  execution={execution}
-                  messageId={messageId}
-                  subtopic={focusText || round.focus}
-                />
-              </Suspense>
-            ) : useSplit ? (
+            {useSplit ? (
               <div className={DEBATE_SPLIT_GRID}>
                 {(() => {
                   const { pro, con } = partitionSides(
@@ -187,7 +148,7 @@ export function Transcript({
               speechSides.map((side) => renderSpeakerBlock(side, round))
             )}
 
-            {showCrossExam && round.crossExam.length > 0 && (
+            {round.crossExam.length > 0 && (
               <CrossExamSection
                 exchanges={round.crossExam}
                 messageId={messageId}
@@ -207,7 +168,7 @@ export function Transcript({
             )}
 
             {round.summary && !round.inFlight ? (
-              <JudgeNote text={round.summary} round={round} form={model.form} />
+              <JudgeNote text={round.summary} round={round} />
             ) : (
               showModeratorPending &&
               !crossExamRunning && (
@@ -221,10 +182,7 @@ export function Transcript({
   );
 }
 
-/**
- * 同方多 beat（红队攻/复攻）时发言格去重：每 sideKey 只留首次（通常是攻击波 / 线程开题）。
- * finding / thread 英雄区不用此列表。
- */
+/** 同方多 beat 时发言格去重：每 sideKey 只留首次。 */
 function uniqueSpeechSides(
   sides: DebateModel["rounds"][number]["sides"],
 ): DebateModel["rounds"][number]["sides"] {

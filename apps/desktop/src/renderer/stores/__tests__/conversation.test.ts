@@ -1,7 +1,4 @@
-import type {
-  CheckpointRequiredPayload,
-  PlanReviewRequiredPayload,
-} from "@/types/events";
+import type { CheckpointRequiredPayload } from "@/types/events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const detachLocalBrowserHost = vi.fn().mockResolvedValue(undefined);
@@ -21,11 +18,7 @@ import {
   useConversationStore,
 } from "../conversation";
 import { execRuntime, useExecutionStore } from "../execution";
-import {
-  entryToCheckpoint,
-  entryToPlanReview,
-  useInteractionStore,
-} from "../interactions";
+import { entryToCheckpoint, useInteractionStore } from "../interactions";
 import { useQueuedTurnsStore } from "../queuedTurns";
 
 const store = () => useConversationStore.getState();
@@ -744,123 +737,6 @@ describe("conversation store", () => {
       });
       store().clearPendingFocus();
       expect(store().pendingFocus).toBeNull();
-    });
-  });
-});
-
-// 结构化挂起 2a (7.1): a plan_review card lives on the assistant message it paused —
-// set live via InteractionStore; journal reload hydrates through
-// hydrateInteractionsFromJournal (see interactions.test.ts).
-describe("plan_review cards (结构化挂起 2a)", () => {
-  const reqPayload = (
-    id: string,
-    runIds: string[],
-  ): PlanReviewRequiredPayload => ({
-    checkpoint_id: id,
-    conversation_id: "a",
-    steps: runIds.map((r) => ({
-      run_id: r,
-      role: `角色 ${r}`,
-      summary: "产出",
-    })),
-    pending: [{ run_id: "next", role: "下游" }],
-  });
-
-  describe("InteractionStore plan_review + process stamp (live)", () => {
-    it("upserts a pending card and stamps the process marker", () => {
-      store().switchConversation("a");
-      store().createAssistantMessage();
-      const mid = rt().messages[0].id;
-      const p = reqPayload("c1", ["run-1"]);
-      ix().upsertRequired({
-        kind: "plan_review",
-        conversationId: "a",
-        messageId: mid,
-        payload: p as unknown as Record<string, unknown>,
-      });
-      store().stampPlanReviewMarker("c1", "a");
-      expect(entryToPlanReview(mustGet("c1")).status).toBe("pending");
-      expect(
-        rt().messages[0].process?.some((s) => s.kind === "plan_review"),
-      ).toBe(true);
-    });
-
-    it("dedupes a re-delivered required event", () => {
-      store().switchConversation("a");
-      store().createAssistantMessage();
-      const mid = rt().messages[0].id;
-      const p = reqPayload("c1", ["run-1"]);
-      ix().upsertRequired({
-        kind: "plan_review",
-        conversationId: "a",
-        messageId: mid,
-        payload: p as unknown as Record<string, unknown>,
-      });
-      ix().upsertRequired({
-        kind: "plan_review",
-        conversationId: "a",
-        messageId: mid,
-        payload: p as unknown as Record<string, unknown>,
-      });
-      expect(
-        [...ix().byId.values()].filter((e) => e.kind === "plan_review"),
-      ).toHaveLength(1);
-    });
-
-    it("stamp is a no-op when there is no assistant message yet", () => {
-      store().switchConversation("a");
-      store().stampPlanReviewMarker("c1", "a");
-      expect(rt().messages).toHaveLength(0);
-    });
-
-    it("markResolved flips the card to resolved", () => {
-      store().switchConversation("a");
-      store().createAssistantMessage();
-      const mid = rt().messages[0].id;
-      ix().upsertRequired({
-        kind: "plan_review",
-        conversationId: "a",
-        messageId: mid,
-        payload: reqPayload("c1", ["run-1"]) as unknown as Record<
-          string,
-          unknown
-        >,
-      });
-      ix().markResolved({
-        kind: "plan_review",
-        id: "c1",
-        resolution: { decision: "stop", note: "就此打住" },
-      });
-      expect(entryToPlanReview(mustGet("c1"))).toMatchObject({
-        status: "resolved",
-        decision: "stop",
-        note: "就此打住",
-      });
-    });
-
-    it("markResolved records an adjust decision + its steer note", () => {
-      store().switchConversation("a");
-      store().createAssistantMessage();
-      const mid = rt().messages[0].id;
-      ix().upsertRequired({
-        kind: "plan_review",
-        conversationId: "a",
-        messageId: mid,
-        payload: reqPayload("c1", ["run-1"]) as unknown as Record<
-          string,
-          unknown
-        >,
-      });
-      ix().markResolved({
-        kind: "plan_review",
-        id: "c1",
-        resolution: { decision: "adjust", note: "把重点放在风险上" },
-      });
-      expect(entryToPlanReview(mustGet("c1"))).toMatchObject({
-        status: "resolved",
-        decision: "adjust",
-        note: "把重点放在风险上",
-      });
     });
   });
 });

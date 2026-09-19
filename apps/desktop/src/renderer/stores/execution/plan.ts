@@ -9,12 +9,7 @@ export function actFromRunPlan(p: RunPlanPayload): ExecutionAct {
       raw.kind === "debate" || raw.kind === "multi_agent"
         ? raw.kind
         : "multi_agent";
-    const auth =
-      raw.authorized_by === "stage_card" ||
-      raw.authorized_by === "auto" ||
-      raw.authorized_by === "preview"
-        ? raw.authorized_by
-        : null;
+    const auth = raw.authorized_by === "auto" ? "auto" : null;
     return {
       actId: raw.act_id,
       kind,

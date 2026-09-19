@@ -679,13 +679,13 @@ describe("runRegenerate — 探活路由（与 sendTurn 同形）", () => {
   });
 });
 
-/** 构造一个 sidecar 暂停帧（plan_review），续跑测试用：字段齐全、内容最小。 */
+/** 构造一个 sidecar 暂停帧（ask_user），续跑测试用：字段齐全、内容最小。 */
 function pendingFrame(messageId: string, conversationId = "c1"): PendingResume {
   return {
     messageId,
     conversationId,
     checkpointId: "ck1",
-    kind: "plan_review",
+    kind: "ask_user",
     userMessage: "原始请求",
     userMessageId: "u-orig",
     steps: [],

@@ -36,9 +36,7 @@ WEB_HOST_CIRCUIT_COOLDOWN = 120.0  # how long a tripped host stays short-circuit
 # Model-facing hard-stop after the run-scoped tool circuit breaker disables web_fetch.
 # Survives loop restart via :func:`mark_web_fetch_retired` so Wave/contract retries
 # cannot re-open the same empty-spin surface. Fact only — tools already withheld.
-WEB_FETCH_RETIRE_STEER = (
-    "web_fetch 外网深读已因连续失败停用，并已收束继续 web_search 空转。"
-)
+WEB_FETCH_RETIRE_STEER = "web_fetch 外网深读已因连续失败停用。"
 
 # Defense-in-depth if web_search still runs after retirement (tests / race before
 # disabled_tools refresh). One-shot per run_id.

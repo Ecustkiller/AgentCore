@@ -214,14 +214,14 @@ describe("PromptOverview", () => {
     ]);
     expect(
       within(screen.getByTestId("prompt-rail-always")).getByRole("button", {
-        name: "file_read",
+        name: "读工作区文件",
       }),
     ).toBeTruthy();
     expect(
       within(screen.getByTestId("prompt-rail-on-demand")).queryByRole(
         "button",
         {
-          name: "file_read",
+          name: "读工作区文件",
         },
       ),
     ).toBeNull();
@@ -276,7 +276,7 @@ describe("PromptOverview", () => {
     fireEvent.click(screen.getByRole("button", { name: "薄技能" }));
     fireEvent.click(
       within(screen.getByTestId("prompt-rail-on-demand")).getByRole("button", {
-        name: "host",
+        name: "本机排查 / 修理 / 查看这台电脑",
       }),
     );
     expect(onOpenItem.mock.calls.map((call) => call[0])).toEqual([
@@ -347,10 +347,10 @@ describe("PromptOverview", () => {
     expect(screen.getByText("每回合都带着")).toBeTruthy();
     expect(screen.getByText("用到才翻")).toBeTruthy();
     expect(screen.queryByText("只读说明书")).toBeNull();
-    expect(within(always).getByText("file_read")).toBeTruthy();
-    expect(within(onDemandTools).getByText("host")).toBeTruthy();
-    expect(within(always).queryByText("host")).toBeNull();
-    expect(within(onDemand).queryByText("file_read")).toBeNull();
+    expect(within(always).getByText("读工作区文件")).toBeTruthy();
+    expect(within(onDemandTools).getByText("本机排查 / 修理 / 查看这台电脑")).toBeTruthy();
+    expect(within(always).queryByText("本机排查 / 修理 / 查看这台电脑")).toBeNull();
+    expect(within(onDemand).queryByText("读工作区文件")).toBeNull();
   });
 
   it("空夹是拖放空卡，不是通栏虚线", () => {
@@ -388,6 +388,11 @@ describe("PromptOverview", () => {
       ).getByText("官方"),
     ).toBeTruthy();
     expect(
+      within(
+        screen.getByTestId(`prompt-tile-${skillCatalogId("thin_skill")}`),
+      ).queryByText("工具"),
+    ).toBeNull();
+    expect(
       within(screen.getByTestId("prompt-rail-connectors")).queryByText("本机"),
     ).toBeNull();
     expect(
@@ -398,6 +403,11 @@ describe("PromptOverview", () => {
     expect(
       within(screen.getByTestId("prompt-tile-tool:file_read")).getByText(
         "读工作区文件",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(screen.getByTestId("prompt-tile-tool:file_read")).getByText(
+        "工具",
       ),
     ).toBeTruthy();
     expect(

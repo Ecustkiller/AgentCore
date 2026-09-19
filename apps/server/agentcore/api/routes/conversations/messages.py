@@ -206,16 +206,27 @@ async def _persist_delivered_interjection_attachments(
         if not conv:
             return attachments
         folder_id = conv.folder_id
+        auto_desk_raw = getattr(conv, "auto_desk_folder_id", None)
+        from agentcore.conversation.common import resolve_turn_file_workspace
+
+        sitting_folder_id, _ = resolve_turn_file_workspace(
+            birth_folder_id=folder_id,
+            auto_desk_folder_id=(
+                auto_desk_raw if isinstance(auto_desk_raw, str) else None
+            ),
+        )
         local_binding = await resolve_local_binding(session, conv)
 
     backend = await build_turn_backend(
         user_id=user_id,
         conversation_id=conversation_id,
-        folder_id=folder_id,
+        folder_id=sitting_folder_id or folder_id,
         sink=sink,
         local_binding=local_binding,
     )
-    return await persist_attachments(backend, attachments)
+    return await persist_attachments(
+        backend, attachments, sitting_folder_id=sitting_folder_id
+    )
 
 
 @router.get("/{conversation_id}/messages", response_model=MessageListResponse)
@@ -701,7 +712,7 @@ async def attach_stream(
         False,
         description=(
             "对话级长订阅（云对话多端同权 B2）：空闲不返回 204，保持连接送心跳，"
-            "此后每个新回合（发送 / 队列 drain / 冷 resume 唤醒 / stage_card）自动续播。"
+            "此后每个新回合（发送 / 队列 drain / 冷 resume 唤醒）自动续播。"
             "缺省 false = 回合级 attach（旧客户端语义：无 live run → 204，回合收口即断流）。"
         ),
     ),

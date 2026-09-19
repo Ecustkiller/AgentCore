@@ -176,8 +176,7 @@ def test_backend_write_tools_retire_with_the_file_family():
     """Backend-bound export / land-bytes / read-bytes tools retire with the family.
 
     Left on the surface they fail on every call (``download_url`` even burns its
-    network fetch first; ``read_image`` reads the image bytes before any vision
-    call), which is exactly the thrash the family retire prevents.
+    network fetch first), which is exactly the thrash the family retire prevents.
     """
     clear_active_coordination()
     backend = _absent_local_backend()
@@ -200,10 +199,8 @@ def test_backend_write_tools_retire_with_the_file_family():
     )
     for name in (
         "md_export",
-        "archive_extract",
-        "archive_create",
+        "archive",
         "download_url",
-        "read_image",
     ):
         assert name in WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS
         assert name in disabled

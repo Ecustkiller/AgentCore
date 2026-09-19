@@ -8,7 +8,6 @@ import {
   collectMessageJournalEvents,
   entryToCheckpoint,
   entryToColdResume,
-  entryToPlanReview,
   isColdCheckpointSettled,
   isColdResumeKind,
   settledColdIdsFromEvents,
@@ -157,6 +156,12 @@ function checkpointIdsFromPaused(
   return ids;
 }
 
+function operablePaused(
+  paused: Array<PausedTurnSummary & { kind?: string }>,
+): PausedTurnSummary[] {
+  return paused.filter((p) => isColdResumeKind(p.kind));
+}
+
 function asPendingInteractions(
   res: TurnRecoveryResponse,
 ): PendingInteractionSummary[] {
@@ -181,10 +186,11 @@ function mergePausedWithOrigin(
 ): PausedTurnEntry[] {
   const byId = new Map<string, PausedTurnEntry>();
   for (const p of cloud) {
-    if (p?.message_id) byId.set(p.message_id, { summary: p, origin: "server" });
+    if (p?.message_id && isColdResumeKind(p.kind))
+      byId.set(p.message_id, { summary: p, origin: "server" });
   }
   for (const p of sidecar) {
-    if (p?.message_id)
+    if (p?.message_id && isColdResumeKind(p.kind))
       byId.set(p.message_id, { summary: p, origin: "sidecar" });
   }
   return [...byId.values()];
@@ -220,9 +226,10 @@ export async function loadRecovery(
   if (!hasLocalEngine()) {
     try {
       const cloud = await loadCloudRecovery(conversationId);
+      const livePaused = operablePaused(cloud.paused);
       usePausedTurnStore.getState().setForConversation(
         conversationId,
-        cloud.paused.map((summary) => ({
+        livePaused.map((summary) => ({
           summary,
           origin: "server" as const,
         })),
@@ -236,10 +243,10 @@ export async function loadRecovery(
         .getState()
         .settleUnseenCold(
           conversationId,
-          checkpointIdsFromPaused(cloud.paused),
+          checkpointIdsFromPaused(livePaused),
           { since, confirmed: ["server"] },
         );
-      if (cloud.paused.length > 0) {
+      if (livePaused.length > 0) {
         finalizeGeneratingForPausedConversation(conversationId);
       }
       usePausedTurnStore.getState().markOpenRecovery(conversationId, "ready");
@@ -247,7 +254,7 @@ export async function loadRecovery(
         sidecarLive: false,
         cloudLive: cloud.cloudLive,
         cloudKnown: true,
-        pausedCount: cloud.paused.length,
+        pausedCount: livePaused.length,
         unsynced: [],
       };
     } catch {
@@ -451,23 +458,6 @@ export function surfaceResumeFromAssistant(
       ...(cp.browserLogin ? { browserLogin: true as const } : {}),
     });
     painted = true;
-  } else {
-    const prEntry = pending.find((e) => e.kind === "plan_review");
-    if (prEntry) {
-      const pr = entryToPlanReview(prEntry);
-      usePausedTurnStore.getState().addLiveResume({
-        ...base,
-        checkpointId: pr.id,
-        kind: "plan_review",
-        steps: pr.steps,
-        pending: pr.pending,
-        ceoReview: pr.ceoReview,
-        question: "",
-        questions: [],
-        intent: "decision",
-      });
-      painted = true;
-    }
   }
   if (!painted) {
     // Stop = hard cancel: no Interaction ``*_required`` → no Resume card.

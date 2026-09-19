@@ -16,7 +16,7 @@ from agentcore.runtime.events.process_persist import (
     ProcessPersistCursor,
     should_persist_on_close,
 )
-from agentcore.runtime.events.types import RETIRED_EVENT_TYPE_VALUES, EventType, SSEEvent
+from agentcore.runtime.events.types import EventType, SSEEvent, is_live_event_type
 
 # Orchestration tools hand the turn to a sub-team and open a team execution. Their
 # captain-level call is NOT rendered as a tool step — the `team` marker (emitted at
@@ -71,7 +71,7 @@ def _marker_spec_for_required(
     marker surface or the id is empty.
     """
     raw = event_type.value if isinstance(event_type, EventType) else str(event_type)
-    if raw in RETIRED_EVENT_TYPE_VALUES:
+    if not is_live_event_type(raw):
         return None
     t = event_type if isinstance(event_type, EventType) else EventType(event_type)
     if t == EventType.CHECKPOINT_REQUIRED:
@@ -79,11 +79,6 @@ def _marker_spec_for_required(
         if not cid:
             return None
         return {"kind": "checkpoint", "checkpoint_id": cid}, False
-    if t == EventType.PLAN_REVIEW_REQUIRED:
-        cid = payload.get("checkpoint_id") or ""
-        if not cid:
-            return None
-        return {"kind": "plan_review", "checkpoint_id": cid}, False
     if t in (EventType.ESCALATION_REQUIRED, EventType.RUN_ESCALATION):
         eid = payload.get("escalation_id") or ""
         if not eid:
@@ -94,11 +89,6 @@ def _marker_spec_for_required(
         if not aid:
             return None
         return {"kind": "approval", "approval_id": aid}, False
-    if t == EventType.STAGE_CARD_REQUIRED:
-        sid = payload.get("stage_card_id") or ""
-        if not sid:
-            return None
-        return {"kind": "stage_card", "stage_card_id": sid}, False
     return None
 
 
@@ -138,7 +128,7 @@ class SinkProcessMixin:
     _interrupt_content_stash: str | None
 
     def _has_marker(self, kind: str, key: str, value: str) -> bool:
-        """Whether a positional marker step (team / checkpoint / ask / plan_review) for
+        """Whether a positional marker step (team / checkpoint / ask) for
         ``value`` is already in the timeline — keeps a replayed / multi-batch event from
         dropping a duplicate anchor. Scans seeded ⊕ live so resume-seeded anchors dedup."""
         return _step_has_marker(self._seeded_process, kind, key, value) or _step_has_marker(
@@ -371,17 +361,6 @@ class SinkProcessMixin:
                 futures.extend(
                     self._process_cursor.persist_new_captain_tail(self.raw_process())
                 )
-        elif t == EventType.GRAPH_APPEND:
-            # 已停发：仅兼容旧 journal 回放。
-            futures.extend(self._persist_closed_captain_text())
-            self._process.append(
-                {
-                    "kind": "graph_append",
-                    "execution_id": event.payload.get("execution_id") or "",
-                    "host_message_id": event.payload.get("host_message_id") or "",
-                    "added_count": int(event.payload.get("added_count") or 0),
-                }
-            )
         elif t == EventType.REASONING_DELTA:
             delta = event.payload.get("delta") or ""
             if not delta:
@@ -461,11 +440,9 @@ class SinkProcessMixin:
             )
         elif t in (
             EventType.CHECKPOINT_REQUIRED,
-            EventType.PLAN_REVIEW_REQUIRED,
             EventType.ESCALATION_REQUIRED,
             EventType.RUN_ESCALATION,
             EventType.APPROVAL_REQUIRED,
-            EventType.STAGE_CARD_REQUIRED,
         ):
             # Positional card / 痕迹 anchors — shared builder with synthesize_required_marker
             # (G7). Dedup scans seeded⊕live; insert targets live only.
@@ -531,7 +508,7 @@ class SinkProcessMixin:
     def process_timeline(self) -> list[dict[str, Any]] | None:
         # Persist the timeline whenever it carries STRUCTURE beyond the CEO's own text —
         # a tool, the team graph, or an interaction / 痕迹 marker (checkpoint / ask /
-        # plan_review / team_preview / escalation / approval /
+        # team_preview leftover skip / escalation / approval /
         # user_interjection).
         # A pure reasoning/content turn needs none (the content scalar IS the answer, and
         # reasoning rides its own column), matching the fold's "tool-less single-agent turn

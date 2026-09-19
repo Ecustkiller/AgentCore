@@ -1,8 +1,12 @@
 import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { useDuplicateConversation } from "@/hooks/useConversations";
 import { formatMessageTime } from "@/lib/format";
-import { Check, RefreshCw, X } from "lucide-react";
+import { notifyError } from "@/lib/toast";
+import { useConversationStore } from "@/stores/conversation";
+import { Check, GitFork, RefreshCw, X } from "lucide-react";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 /** Small icon+label action shown beneath a message on hover. */
 export function MessageAction({
@@ -67,6 +71,43 @@ export function RegenerateMessageAction({
         onClick={() => setConfirming(true)}
       >
         <RefreshCw size={14} />
+      </IconButton>
+    </SimpleTooltip>
+  );
+}
+
+/**
+ * Assistant footer clone — copy through this message into a new conversation.
+ * Non-destructive (original unchanged); cutoff is this bubble.
+ */
+export function CloneMessageAction({ messageId }: { messageId: string }) {
+  const conversationId = useConversationStore((s) => s.currentConversationId);
+  const switchConversation = useConversationStore((s) => s.switchConversation);
+  const navigate = useNavigate();
+  const duplicateMutation = useDuplicateConversation();
+
+  if (!conversationId) return null;
+
+  return (
+    <SimpleTooltip label="复制到这条为止，原对话不动">
+      <IconButton
+        size="sm"
+        aria-label="克隆对话"
+        disabled={duplicateMutation.isPending}
+        onClick={() => {
+          duplicateMutation.mutate(
+            { id: conversationId, untilMessageId: messageId },
+            {
+              onSuccess: (conv) => {
+                switchConversation(conv.id);
+                navigate(`/conversations/${conv.id}`);
+              },
+              onError: (err) => notifyError(err, "克隆失败"),
+            },
+          );
+        }}
+      >
+        <GitFork size={14} />
       </IconButton>
     </SimpleTooltip>
   );

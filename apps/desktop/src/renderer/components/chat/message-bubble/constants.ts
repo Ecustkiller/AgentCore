@@ -67,10 +67,9 @@ export const TOOL_META: Record<string, { Icon: LucideIcon; label: string }> = {
   glob: { Icon: Folder, label: "Glob" },
   list_folders: { Icon: Folder, label: "List folders" },
   resolve_folder: { Icon: Folder, label: "Resolve folder" },
+  folders: { Icon: Folder, label: "Folders" },
   create_folder: { Icon: Folder, label: "Create folder" },
   delete_folder: { Icon: Trash2, label: "Delete folder" },
-  list_folder_dir: { Icon: Folder, label: "List folder dir" },
-  read_folder_file: { Icon: FileText, label: "Read folder file" },
   str_replace: { Icon: Pencil, label: "Edit file" },
   file_delete: { Icon: Trash2, label: "Delete file" },
   file_move: { Icon: FileText, label: "Move file" },
@@ -82,6 +81,7 @@ export const TOOL_META: Record<string, { Icon: LucideIcon; label: string }> = {
   md_export: { Icon: FileText, label: "Export document" },
   archive_extract: { Icon: Package, label: "Extract archive" },
   archive_create: { Icon: Package, label: "Create archive" },
+  archive: { Icon: Package, label: "Archive" },
   download_url: { Icon: Globe, label: "Download file" },
   read_image: { Icon: ScanText, label: "Read image" },
   code_diagnostics: { Icon: Code2, label: "Check types" },
@@ -452,6 +452,21 @@ export function toolDetail(
     const check = typeof args.check === "string" ? args.check.trim() : "";
     // check=command 时芯片用真实命令；枚举词 "command" 本身不进标题。
     if (check && check !== "command") return asTitleDetail(check);
+  }
+  if (toolName === "file_batch") {
+    const ops = args.operations;
+    if (Array.isArray(ops) && ops.length === 1 && ops[0] && typeof ops[0] === "object") {
+      const one = fileTransferDetail(ops[0] as Record<string, unknown>);
+      if (one) return one;
+      const path =
+        typeof (ops[0] as Record<string, unknown>).path === "string"
+          ? String((ops[0] as Record<string, unknown>).path).trim()
+          : "";
+      if (path) return asTitleDetail(path);
+    }
+    if (Array.isArray(ops) && ops.length > 1) {
+      return asTitleDetail(`本次共 ${ops.length} 项`);
+    }
   }
   const transfer = fileTransferDetail(args);
   if (transfer) return transfer;

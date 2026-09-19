@@ -193,9 +193,6 @@ class WaveScheduler:
           (un-run tail materialised SKIPPED), ``YIELD`` soft-pauses like
           ``should_stop`` (partial map, un-run tail LEFT OUT for a resume). Three
           reasons fire it:
-          • ``CHECKPOINT`` (结构化挂起 2a) — a ``checkpoint_after`` node COMPLETED while
-            downstream remains (the user plan_review). A *failed* checkpoint node does
-            not pause — its ``on_failure`` governs the cascade.
           • ``SCOPE`` (偏离信号 / 自底向上反应臂) — a COMPLETED node flagged a 职责/范围
             deviation (``escalate kind=scope``) while not-yet-run downstream remains; the
             CEO re-steers the un-run tail. Fires once per signal (surfacing marks it
@@ -228,8 +225,6 @@ class WaveScheduler:
         # node is never dispatched twice across the continuous re-scan.
         dispatched: set[str] = set(completed)
         running: dict[asyncio.Task[RunState], str] = {}
-        # checkpoint_after nodes that COMPLETED and whose plan_review hasn't fired.
-        checkpoint_pending: list[RunSpec] = []
         aborted = False
         stopped = False
 
@@ -328,10 +323,9 @@ class WaveScheduler:
 
         try:
             while True:
-                # Freeze dispatch while aborting, soft-stopping, or holding a completed
-                # checkpoint node whose review hasn't fired (we must quiesce in-flight
-                # work before the pause so a 2b resume re-runs only the un-run tail).
-                holding = aborted or stopped or bool(checkpoint_pending)
+                # Freeze dispatch while aborting or soft-stopping (we must quiesce
+                # in-flight work before the pause so a resume re-runs only the un-run tail).
+                holding = aborted or stopped
                 if not holding and should_stop is not None and should_stop():
                     stopped = True  # soft pause: stop launching, drain in-flight
                     holding = True
@@ -538,30 +532,6 @@ class WaveScheduler:
                         # cascade-skip immediately; lenient dependents wait for
                         # remaining upstreams (≥1 COMPLETED → still run).
                         self._propagate_cancel_skip(plan, run_id, skipped, dispatched)
-                    elif state.phase is RunPhase.COMPLETED and on_boundary is not None:
-                        # Track for the plan_review pause only when a hook is wired;
-                        # without one the marker is fully inert (it must never freeze
-                        # dispatch of the downstream it would have gated).
-                        spec = plan.by_id(run_id)
-                        if spec is not None and spec.checkpoint_after:
-                            checkpoint_pending.append(spec)
-
-                # 结构化挂起 2a (CHECKPOINT boundary): fire the plan_review only once
-                # in-flight work has fully drained (quiescent) — so the snapshot the host
-                # persists is consistent — and only while downstream work remains to gate.
-                if on_boundary is not None and checkpoint_pending and not running:
-                    nodes = checkpoint_pending
-                    checkpoint_pending = []
-                    pending_remains = any(
-                        n.run_id not in completed and n.run_id not in skipped for n in plan.nodes
-                    )
-                    if pending_remains:
-                        checkpoint_boundaries += 1
-                        outcome = await on_boundary(BoundaryReason.CHECKPOINT, nodes, completed)
-                        if outcome is BoundaryOutcome.ABORT:
-                            aborted = True
-                        elif outcome is BoundaryOutcome.YIELD:
-                            stopped = True
 
                 # 反应臂边界 (受监督的波循环 SCOPE arm / 自底向上反应臂): a COMPLETED node
                 # flagged a 职责/范围 deviation (escalate kind=scope) OR a 依赖缺口·卡在缺输入

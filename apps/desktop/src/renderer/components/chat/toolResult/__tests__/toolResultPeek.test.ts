@@ -286,13 +286,10 @@ describe("toolResultPeek", () => {
     ).toBe("交叉验证完成，建议一周内表态");
   });
 
-  it("does not paste a raw grep hit line onto the collapsed title", () => {
+  it("does not peek grep summaries onto the collapsed title", () => {
     expect(
       toolResultPeek(data({ toolName: "grep", result: "match line\nmore" })),
     ).toBe("");
-  });
-
-  it("compacts grep hit / files_only / empty summaries for the title row", () => {
     expect(
       toolResultPeek(
         data({
@@ -301,21 +298,12 @@ describe("toolResultPeek", () => {
             "1 处匹配，分布在 1 个文件中（/include_usage/）\nsrc/a.ts:1: include_usage",
         }),
       ),
-    ).toBe("1 处匹配 · 1 个文件");
+    ).toBe("");
     expect(
       toolResultPeek(
         data({ toolName: "grep", result: "3 个文件匹配 /foo/\na.ts: 2" }),
       ),
-    ).toBe("3 个文件");
-    expect(
-      toolResultPeek(
-        data({
-          toolName: "grep",
-          result:
-            "2 处匹配，分布在 1 个文件中（/<(article|Collapsible|collapsed|折叠)/）\nsrc/a.ts:1: x",
-        }),
-      ),
-    ).toBe("2 处匹配 · 1 个文件");
+    ).toBe("");
     expect(
       toolResultPeek(
         data({
@@ -324,7 +312,7 @@ describe("toolResultPeek", () => {
             "本次 grep 未匹配 /Nope/。不要据此断定代码不存在。可执行下一步：① 收窄",
         }),
       ),
-    ).toBe("未匹配");
+    ).toBe("");
   });
 
   it("does not peek failure.message on error (collapsed stays one line)", () => {

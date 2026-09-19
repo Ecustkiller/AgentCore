@@ -574,7 +574,6 @@ async def _build_ceo_context(
         base,
         skill_registry=skill_registry,
         ceo_tool_names=ceo_tool_names,
-        workspace_context=workspace_facts,
     )
     tool_defs = resolve_openai_tool_defs(chat_tools, None, set())
     # 闸用能力：覆盖优先，否则跟 backend 谓词（与 workspace 行一致）

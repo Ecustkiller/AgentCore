@@ -7,7 +7,7 @@ import {
   submitInteraction,
   submitInteractionFeedback,
 } from "@/services/interactionSubmit";
-import type { PlanReviewUserDecision } from "@/services/planReview";
+import type { CheckpointUserDecision } from "@/services/checkpoint";
 import { useInteractionStore } from "@/stores/interactions";
 import type { PendingResume } from "@/stores/pausedTurns";
 import { MessageCircleQuestion } from "lucide-react";
@@ -122,7 +122,7 @@ export function AskUserResumeCard({ turn }: { turn: PendingResume }) {
           conversationId: turn.conversationId,
           cold: {
             messageId: turn.messageId,
-            decision: decision as PlanReviewUserDecision,
+            decision,
             note,
             selected,
           },

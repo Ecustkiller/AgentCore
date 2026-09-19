@@ -17,6 +17,7 @@ from agentcore.runtime.debate.research_dossier import (
     preregister_research_dossier,
     workspace_has_synthesizer,
 )
+from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 
@@ -75,7 +76,7 @@ def test_ensure_anchors_skips_footer_when_unbound_bibliography():
 
 
 @pytest.mark.asyncio
-async def test_preregister_research_dossier_maps_r_to_e(tmp_path: Path):
+async def test_preregister_research_dossier_reuses_r_ids(tmp_path: Path):
     research = tmp_path / "AgentCore" / "文档" / "research"
     research.mkdir(parents=True)
     (research / "法律透镜报告.md").write_text(
@@ -90,22 +91,52 @@ async def test_preregister_research_dossier_maps_r_to_e(tmp_path: Path):
     idx = await preregister_research_dossier(led, ws)
 
     assert "【工作区约定文档索引·AgentCore/文档/research/】" in idx
-    assert "【约定文档预登记台账·引用须用下列 #eN】" in idx
+    assert "【约定文档预登记台账·引用须用下列 #rN】" in idx
     assert "AgentCore/文档/research/法律透镜报告.md" in idx
     assert led.ids  # 至少一条
     legal = next(
         e for e in led.all_entries() if e.get("dossier_path", "").endswith("法律透镜报告.md")
     )
     assert legal["side_key"] == DOSSIER_SIDE_KEY
-    assert legal["origin_id"] == "#r1"
+    assert legal["id"] == "#r1"
     assert legal["dossier_label"] == "法律"
     assert legal["url"] == "https://court.example/x"
-    # 无锚汇总文件仍登记整文件一条
     synth = next(
         e for e in led.all_entries() if e.get("dossier_path") == SYNTHESIZER_FILE
     )
-    assert synth["origin_id"] == ""
     assert synth["dossier_label"] == "汇总"
+
+
+@pytest.mark.asyncio
+async def test_preregister_research_dossier_reuses_turn_core_id(tmp_path: Path):
+    """开辩继承当轮核：约定文档 #r1 复用既有条目，不另开号。"""
+    research = tmp_path / "AgentCore" / "文档" / "research"
+    research.mkdir(parents=True)
+    (research / "法律透镜报告.md").write_text(
+        "条款原文#r1。\n\n## 来源台账锚\n\n"
+        "- #r1 · https://court.example/x · 合同\n",
+        encoding="utf-8",
+    )
+    core = EvidenceLedgerCore()
+    assert (
+        core.register_sync(
+            url="https://court.example/x",
+            title="合同",
+            registrant="ceo",
+        )
+        == "#r1"
+    )
+    ws = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
+    led = EvidenceLedger(core=core)
+    idx = await preregister_research_dossier(led, ws)
+    legal = next(
+        e for e in led.all_entries() if e.get("dossier_path", "").endswith("法律透镜报告.md")
+    )
+    assert legal["id"] == "#r1"
+    assert legal["url"] == "https://court.example/x"
+    assert legal["dossier_label"] == "法律"
+    assert [e["id"] for e in led.all_entries() if e["id"] == "#r1"] == ["#r1"]
+    assert "#r1" in idx
 
 
 @pytest.mark.asyncio
@@ -130,7 +161,7 @@ async def test_workspace_has_synthesizer(tmp_path: Path):
 def test_format_index_with_ledger_lines():
     text = format_research_dossier_index(
         ["AgentCore/文档/research/a.md"],
-        ledger_lines=["- research/a.md → #e1（幕1 #r1）"],
+        ledger_lines=["- research/a.md → #r1"],
     )
     assert "约定文档预登记台账" in text
-    assert "#e1（幕1 #r1）" in text
+    assert "#r1" in text

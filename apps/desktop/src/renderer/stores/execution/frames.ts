@@ -2,12 +2,9 @@ import { resolveToolEndStatus } from "@/lib/channelRedirect";
 import type {
   AskQuestion,
   BatchMetricsPayload,
-  CheckpointDecision,
   ContextBlockWire,
   EscalationRequiredPayload,
   EscalationResolvedPayload,
-  PlanReviewRequiredPayload,
-  PlanReviewResolvedPayload,
   PlanRevisedPayload,
   PlanRevisionKind,
   ResetReason,
@@ -248,19 +245,6 @@ export type RunFrame =
       failure?: import("@/types/events").ToolFailure;
     }
   | {
-      t: number;
-      kind: "plan_review_required";
-      checkpointId: string;
-      // The just-completed step run ids this pause gates on (the badge targets).
-      runIds: string[];
-    }
-  | {
-      t: number;
-      kind: "plan_review_resolved";
-      checkpointId: string;
-      decision: CheckpointDecision;
-    }
-  | {
       // 「计划已调整」轻痕迹 (设计 §7.2): the CEO autonomously re-bound / re-steered
       // paused nodes via replan. Each entry tags an affected node's graph trace.
       t: number;
@@ -280,6 +264,12 @@ export function frameTimeOf(event: Pick<SSEEvent, "timestamp">): number {
  * that are not frames (e.g. `run_plan`). The single event→frame mapping shared
  * by the live SSE dispatch and journal replay, so there is one fold, not two. */
 export function frameFromEvent(event: SSEEvent): RunFrame | null {
+  if (
+    (event.type as string) === "plan_review_required" ||
+    (event.type as string) === "plan_review_resolved"
+  ) {
+    return null;
+  }
   const t = frameTimeOf(event);
   switch (event.type) {
     case "run_started": {
@@ -556,24 +546,6 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         display: p.display ?? null,
         status: resolveToolEndStatus(p.status, p.failure),
         ...(p.failure != null ? { failure: p.failure } : {}),
-      };
-    }
-    case "plan_review_required": {
-      const p = event.payload as PlanReviewRequiredPayload;
-      return {
-        t,
-        kind: "plan_review_required",
-        checkpointId: p.checkpoint_id,
-        runIds: (p.steps ?? []).map((s) => s.run_id),
-      };
-    }
-    case "plan_review_resolved": {
-      const p = event.payload as PlanReviewResolvedPayload;
-      return {
-        t,
-        kind: "plan_review_resolved",
-        checkpointId: p.checkpoint_id,
-        decision: p.decision,
       };
     }
     case "plan_revised": {

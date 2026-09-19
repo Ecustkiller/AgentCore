@@ -9,14 +9,16 @@ from agentcore.runtime.journal import runs_from_entries
 def parse_decision(raw: Any) -> CheckpointDecision:
     """Coerce the desktop's decision string into a :class:`CheckpointDecision`.
 
-    The client only ever sends continue / adjust / stop (timeout is engine-set); an
-    unknown / missing value defaults to ``CONTINUE`` (proceed) — the safe resume that
-    runs the gated downstream as-is rather than dropping work.
+    The client only ever sends continue / adjust / stop (timeout is engine-set).
+    Missing / blank defaults to ``CONTINUE``. Unknown values raise ``ValueError``.
     """
-    try:
-        return CheckpointDecision(str(raw or "").strip())
-    except ValueError:
+    text = str(raw or "").strip()
+    if not text:
         return CheckpointDecision.CONTINUE
+    try:
+        return CheckpointDecision(text)
+    except ValueError:
+        raise ValueError("invalid decision") from None
 
 
 def trim_result(turn_id: str, result: dict[str, Any], *, model: str) -> dict[str, Any]:

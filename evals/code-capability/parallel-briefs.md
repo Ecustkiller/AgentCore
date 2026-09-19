@@ -35,7 +35,7 @@
 |----|------|
 | 工作区 | 复制 `fix-me-kit` → `fix-me-kit-s3/`（试件已备） |
 | 路径 | D 引擎 + **U**（刷新/重进见卡）；`listPaused`/`resume` **不够**完成本场景 |
-| Prompt | 要求 Agent **先** `ask_user` 确认修复范围再改文件（或人在 plan_review/审批卡上停住） |
+| Prompt | 要求 Agent **先** `ask_user` 确认修复范围再改文件（或人在审批卡上停住） |
 | 验收 | 挂起可见 → 刷新/重开对话仍可续 → 决策后继续且先前约定不丢；记 message_id |
 | **边界** | 不与 S2/S4 共用目录；不验收 diff UI；不做多 Agent 强派 |
 | **本轮** | **待人手 / CDP**——步骤：[runbooks/s3-resume-ui.md](runbooks/s3-resume-ui.md)；解禁见 [README](README.md) |

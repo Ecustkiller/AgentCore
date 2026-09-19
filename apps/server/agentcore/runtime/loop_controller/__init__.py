@@ -66,8 +66,6 @@ from .types import (
     StuckReason,
     StuckSignal,
     ToolAttempt,
-    delivery_idle_narrow_prompt,
-    delivery_idle_nudge_prompt,
     fingerprint_tool_call,
     is_exec_env_timeout,
     resolve_error_class,
@@ -100,8 +98,6 @@ __all__ = [
     "StuckReason",
     "StuckSignal",
     "ToolAttempt",
-    "delivery_idle_narrow_prompt",
-    "delivery_idle_nudge_prompt",
     "fingerprint_tool_call",
     "is_exec_env_timeout",
     "resolve_error_class",
@@ -131,14 +127,11 @@ class LoopController(
         convergence_finalize_rounds: int = 0,
         convergence_spin_rounds: int = DEFAULT_THRESHOLD,
         expects_landing: bool = False,
-        # Idle bars (nudge → optional tool narrow). Product factory never arms
-        # any delivery_idle bar (files or recon). Explicit construction may still
-        # set these. Orthogonal to token/timeout wind_down. ≤0 disables each step.
+        # Idle bars kept for explicit construction; inject path is retired.
+        # Orthogonal to token/timeout wind_down. ≤0 disables tracking.
         delivery_idle_nudge_rounds: int = 0,
         delivery_idle_narrow_rounds: int = 0,
-        # True → nudge prompt is recon (conclude/handoff), not write-disk pressure.
         delivery_idle_recon: bool = False,
-        # Compat: report-landing copy. Factory never sets this.
         delivery_idle_report: bool = False,
         investigation_tools: frozenset[str] = frozenset(),
         product_landing_artifacts: tuple[str, ...] | list[str] | None = None,

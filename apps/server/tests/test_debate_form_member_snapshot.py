@@ -2,15 +2,14 @@
 
 两集分开钉，禁止把入口形态与回放全员捆成一次相等：
 
-- 回放 / wire 全员：``DebateForm`` = ``DEBATE_FORM_VALUES`` = ``FORM_LABELS`` 键 =
-  wire ``form``（``DebateForm`` 注解，不是手抄 ``Literal[...]``）
-- 产品入口：工具 schema **无** ``form`` 字段（写死正反）；``DEBATE_SCHEMA_FORM_VALUES``
-  == {debate} 只记录若加回字段时广告哪些值，须是全员的真子集
+- 产品与 wire 同集：``DebateForm`` = ``DEBATE_FORM_VALUES`` = ``FORM_LABELS`` 键 =
+  wire ``form``（``DebateForm`` 注解，不是手抄 ``Literal[...]``）= ``DEBATE_SCHEMA_FORM_VALUES``
+- 工具 schema **无** ``form`` 字段（写死正反）
 
 Optional: desktop ``FORM_LABEL`` Record keys (same member set as ``DebateForm``)
 when a map is present. Handoff motion_card withdrawn — a file without the map
 is skipped, not a failure.
-Adding a replay form without updating wire/labels fails this test; advertising a
+Adding a form without updating wire/labels fails this test; advertising a
 new form to the model is a separate schema change (add ``form`` back).
 """
 
@@ -29,7 +28,6 @@ from agentcore.runtime.debate.constants import (
 )
 from agentcore.runtime.debate.types import DebateForm
 from agentcore.runtime.events.payloads.debate import DebateResultPayload
-from agentcore.runtime.events.payloads.interaction import StageCardRequiredPayload
 from agentcore.runtime.events.payloads.shared import MotionCard
 from agentcore.tools.builtin.debate.schema import DEBATE_PARAMETERS
 
@@ -83,23 +81,19 @@ def test_debate_form_member_set_aligned_across_surfaces():
     derived = frozenset(DEBATE_FORM_VALUES)
     wire_result = _wire_form(DebateResultPayload)
     wire_motion = _wire_form(MotionCard)
-    wire_stage = _wire_form(StageCardRequiredPayload)
 
-    assert enum_vals == label_keys == derived == wire_result == wire_motion == wire_stage
+    assert enum_vals == label_keys == derived == advertised == wire_result == wire_motion
     assert set(FORM_LABELS) == set(DebateForm)
     assert list(DEBATE_FORM_VALUES) == [m.value for m in DebateForm]
-    assert len(enum_vals) >= 3  # ratchet: replay set never silently empty
+    assert enum_vals == frozenset({"debate"})
 
     assert "form" not in DEBATE_PARAMETERS["properties"]
     assert "form" not in DEBATE_PARAMETERS["required"]
     assert "is_subject" not in DEBATE_PARAMETERS["properties"]["sides"]["items"]["properties"]
-    assert advertised == frozenset({"debate"})
-    assert advertised < enum_vals  # 入口真子集，不是全员拷贝
     assert list(DEBATE_SCHEMA_FORM_VALUES) == ["debate"]
 
     _assert_wire_uses_debate_form(DebateResultPayload)
     _assert_wire_uses_debate_form(MotionCard)
-    _assert_wire_uses_debate_form(StageCardRequiredPayload)
 
 
 def test_desktop_form_label_keys_cover_debate_form():

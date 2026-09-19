@@ -47,10 +47,9 @@ const TOOL_LABEL: Record<string, string> = {
   glob: "Glob",
   list_folders: "List folders",
   resolve_folder: "Resolve folder",
+  folders: "Folders",
   create_folder: "Create folder",
   delete_folder: "Delete folder",
-  list_folder_dir: "List folder dir",
-  read_folder_file: "Read folder file",
   str_replace: "Edit file",
   file_delete: "Delete file",
   file_move: "Move file",
@@ -62,6 +61,7 @@ const TOOL_LABEL: Record<string, string> = {
   md_export: "Export document",
   archive_extract: "Extract archive",
   archive_create: "Create archive",
+  archive: "Archive",
   download_url: "Download file",
   read_image: "Read image",
   code_diagnostics: "Check types",
@@ -302,9 +302,6 @@ export function formatProcessExport(
         break;
       case "checkpoint":
         lines.push(MESSAGE_EXPORT_STEP_CHROME.checkpoint);
-        break;
-      case "plan_review":
-        lines.push(MESSAGE_EXPORT_STEP_CHROME.plan_review);
         break;
       default:
         break;

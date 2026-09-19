@@ -501,10 +501,8 @@ def test_max_rounds_ceiling_honesty_steer_and_banner():
 
     steer = ceiling_honesty_steer(reason="max_rounds")
     assert steer is not None
-    assert "部分落地" in steer
     assert "max_rounds" in steer
-    assert "continue_from_run_id" in steer
-    assert "replaces_run_id" in steer
+    assert "强制收口" in steer
 
     dishonest = "修复已全部完成，已完整可用。"
     out = enforce_ceiling_closing_honesty(dishonest, reason="max_rounds")
@@ -545,10 +543,7 @@ def test_token_budget_ceiling_honesty_steer_and_banner_symmetric_with_max_rounds
     steer = ceiling_honesty_steer(reason="token_budget")
     assert steer is not None
     assert "token_budget" in steer
-    assert "部分落地" in steer
-    assert "continue_from_run_id" in steer
-    assert "replaces_run_id" in steer
-    assert "禁止并行" in steer
+    assert "强制收口" in steer
     assert ceiling_honesty_steer(reason="other") is None
 
     dishonest = "修复已全部完成，已完整可用。"
@@ -824,8 +819,7 @@ def test_b1_ceiling_steer_unchanged_without_hollow_scan():
     sample = "先把已落地的部分列出来。"
     steer = ceiling_honesty_steer(reason="token_budget")
     assert steer is not None
-    assert "姿势 A" in steer
-    assert "continue_from_run_id" in steer
+    assert "强制收口" in steer
     out = enforce_ceiling_closing_honesty(sample, reason="token_budget")
     assert out == sample
     assert "【收口说明】" not in out

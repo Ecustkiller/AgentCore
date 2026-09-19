@@ -9,6 +9,7 @@ import type {
   InteractionKind,
   InteractionStatus,
 } from "@/types/interactionExt";
+import { INTERACTION_KIND_WIRE } from "@agentcore/contract-types";
 import { create } from "zustand";
 import {
   clearColdServerSettled,
@@ -23,6 +24,7 @@ import {
   idFromResolvedPayload,
   isColdResumeKind,
   isHotInteractionKind,
+  isLeftoverInteractionSse,
   kindFromRequiredEvent,
   kindFromResolvedEvent,
 } from "./types";
@@ -489,6 +491,7 @@ export const useInteractionStore = create<InteractionState>((set, get) => ({
     const sidecarLive = opts?.sidecarLive ?? false;
     const incoming = new Map<string, (typeof entries)[number]>();
     for (const e of entries) {
+      if (!(e.kind in INTERACTION_KIND_WIRE)) continue;
       if (isColdResumeKind(e.kind)) continue;
       incoming.set(e.id, e);
     }
@@ -683,14 +686,15 @@ export function applyInteractionWireEvent(
 ): boolean {
   const store = useInteractionStore.getState();
 
-  if (
-    eventType === "team_preview_required" ||
-    eventType === "team_preview_resolved"
-  ) {
+  if (isLeftoverInteractionSse(eventType)) {
     return true;
   }
 
   if (eventType === "interaction_orphaned") {
+    const leftoverKind = payload.kind as string;
+    if (!(leftoverKind in INTERACTION_KIND_WIRE)) {
+      return true;
+    }
     const id =
       typeof payload.interaction_id === "string"
         ? payload.interaction_id

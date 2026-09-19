@@ -43,8 +43,7 @@ export interface ContinuationChain {
   versions: ContinuationVersion[];
 }
 
-/** Whether any worker in the turn was 同人接续 — gates the统一「对比」透镜 + graph
- * continuation styling (mirrors {@link isDebate} for debates). */
+/** Whether any worker in the turn was 同人接续. */
 export function hasContinuations(execution: Execution): boolean {
   return execution.runs.some((r) => r.continuesRunId != null);
 }
@@ -52,8 +51,7 @@ export function hasContinuations(execution: Execution): boolean {
 /**
  * Group the turn's runs into continuation chains, one per continued original
  * (in first-seen original order). Each chain is the original (v1) followed by its
- * 续写 versions in ascending continuationIndex — the projection the统一「对比」透镜
- * lays out side by side. Originals with no continuation are omitted; a stray
+ * 续写 versions in ascending continuationIndex. Originals with no continuation are omitted; a stray
  * continuation whose original is absent is dropped.
  */
 export function continuationChains(execution: Execution): ContinuationChain[] {

@@ -3,10 +3,7 @@
  * 时间线空槽两条路径：有意为空 vs 卡片实体缺失。
  * 以前都返回 null，卡丢失时界面看起来正常，测试也无法断言这一故障。
  */
-import {
-  ApprovalTrace,
-  StageCardTrace,
-} from "@/components/chat/HotDecisionTrace";
+import { ApprovalTrace } from "@/components/chat/HotDecisionTrace";
 import { ProcessTimeline } from "@/components/chat/message-bubble/ProcessTimeline";
 import type { CheckpointDisplay } from "@/stores/conversation";
 import { useInteractionStore } from "@/stores/interactions";
@@ -27,7 +24,6 @@ vi.mock("@/stores/disclosure", () => ({
 
 const emptyBags: TimelineCardBags = {
   checkpoints: [],
-  planReviews: [],
 };
 
 const pendingCheckpoint: CheckpointDisplay = {
@@ -44,29 +40,6 @@ const pendingCheckpoint: CheckpointDisplay = {
 afterEach(cleanup);
 
 describe("classifyTimelineInteractionCard", () => {
-  it("plan_review 永远是有意为空（即使袋子里有卡）", () => {
-    const bags: TimelineCardBags = {
-      ...emptyBags,
-      planReviews: [
-        {
-          id: "pr-1",
-          steps: [],
-          pending: [],
-          status: "pending",
-          decision: null,
-          note: "",
-        },
-      ],
-    };
-    expect(
-      classifyTimelineInteractionCard(
-        "plan_review",
-        { checkpoint_id: "pr-1" },
-        bags,
-      ),
-    ).toEqual({ kind: "intentionalEmpty" });
-  });
-
   it("时间线有 checkpoint 标记但袋子里没有实体 → missing", () => {
     expect(
       classifyTimelineInteractionCard(
@@ -114,18 +87,6 @@ describe("renderTimelineInteractionCard", () => {
     const el = screen.getByTestId(TIMELINE_MISSING_CARD_TEST_ID);
     expect(el.getAttribute("data-process-kind")).toBe("checkpoint");
     expect(el.getAttribute("data-card-id")).toBe("cp-gone");
-  });
-
-  it("plan_review 有意为空：不出现 missing 占位", () => {
-    const node = renderTimelineInteractionCard(
-      "plan_review",
-      { checkpoint_id: "pr-1" },
-      emptyBags,
-    );
-    expect(node).toBeNull();
-    const { container } = render(node);
-    expect(screen.queryByTestId(TIMELINE_MISSING_CARD_TEST_ID)).toBeNull();
-    expect(container.textContent).toBe("");
   });
 
   it("checkpoint 实体在袋子里（pending）不是 missing", () => {
@@ -177,10 +138,15 @@ describe("ProcessTimeline · 有标记无实体", () => {
     expect(screen.queryByTestId(TIMELINE_MISSING_CARD_TEST_ID)).toBeNull();
   });
 
-  it("plan_review 标记不画卡、也不报 missing", () => {
+  it("leftover plan_review 标记不画卡、也不报 missing", () => {
     render(
       <ProcessTimeline
-        process={[{ kind: "plan_review", checkpoint_id: "pr-1" }]}
+        process={[
+          {
+            kind: "plan_review",
+            checkpoint_id: "pr-1",
+          } as unknown as import("@/types/events").ProcessStep,
+        ]}
         isStreaming={false}
         citations={[]}
         composingTool={null}
@@ -205,26 +171,5 @@ describe("热痕迹：pending 有意为空 vs 实体缺失", () => {
         .getByTestId(TIMELINE_MISSING_CARD_TEST_ID)
         .getAttribute("data-process-kind"),
     ).toBe("approval");
-  });
-
-  it("StageCardTrace pending 仍空白（不是 missing）", () => {
-    useInteractionStore.getState().upsertRequired({
-      kind: "stage_card",
-      conversationId: "c1",
-      messageId: "m1",
-      payload: { stage_card_id: "sc-pending", motion: "命题" },
-    });
-    const { container } = render(<StageCardTrace stageCardId="sc-pending" />);
-    expect(container.textContent).toBe("");
-    expect(screen.queryByTestId(TIMELINE_MISSING_CARD_TEST_ID)).toBeNull();
-  });
-
-  it("StageCardTrace 查不到 entry → missing 占位", () => {
-    render(<StageCardTrace stageCardId="sc-gone" />);
-    expect(
-      screen
-        .getByTestId(TIMELINE_MISSING_CARD_TEST_ID)
-        .getAttribute("data-process-kind"),
-    ).toBe("stage_card");
   });
 });

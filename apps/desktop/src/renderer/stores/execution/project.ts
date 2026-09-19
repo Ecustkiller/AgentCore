@@ -33,7 +33,7 @@ import {
  * `agentIndex` / `runIndex` map id → the SAME object held in `agents` / `runs` (not a
  * copy), so an in-place mutation through the index is visible in the array — replacing
  * the old O(n) `.find` per lookup with O(1). Only `agents` / `runs` are rendered;
- * `checkpointSteps` / `batches` are fold bookkeeping + turn-level output.
+ * `batches` are fold bookkeeping + turn-level output.
  */
 export interface FoldState {
   plan: ExecutionPlan;
@@ -41,9 +41,6 @@ export interface FoldState {
   runs: RunNode[];
   agentIndex: Map<string, AgentState>;
   runIndex: Map<string, RunNode>;
-  // plan_review_resolved carries only the checkpoint id, so remember which step
-  // run ids each pause gated on (from its _required frame) to apply the decision.
-  checkpointSteps: Map<string, string[]>;
   // 调度埋点量化 (深层诊断指标): WaveScheduler snapshots fold here in fire order, one per
   // delegate segment (a checkpoint / scope yield + resume appends another).
   batches: BatchMetricsSnapshot[];
@@ -156,7 +153,6 @@ export function initFold(plan: ExecutionPlan): FoldState {
     runs: [],
     agentIndex: new Map(),
     runIndex: new Map(),
-    checkpointSteps: new Map(),
     batches: [],
   };
 }
@@ -404,26 +400,6 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
         agent.status = "completed";
         agent.currentRunId = null;
         agent.toolProgress = null;
-      }
-      break;
-    }
-    case "plan_review_required": {
-      // 结构化挂起 2a: the scheduler paused after these step(s) completed; mark
-      // them pending so the node shows a「待放行」badge.
-      s.checkpointSteps.set(f.checkpointId, f.runIds);
-      for (const id of f.runIds) {
-        ensureRun(s, id);
-        const run = s.runIndex.get(id);
-        if (run) run.checkpoint = { status: "pending", decision: null };
-      }
-      break;
-    }
-    case "plan_review_resolved": {
-      for (const id of s.checkpointSteps.get(f.checkpointId) ?? []) {
-        const run = s.runIndex.get(id);
-        if (run) {
-          run.checkpoint = { status: "resolved", decision: f.decision };
-        }
       }
       break;
     }
@@ -877,12 +853,6 @@ export function describeFrame(frame: RunFrame, plan: ExecutionPlan): string {
         return face ? face.label : "改用其他工具";
       }
       return "工具失败";
-    case "plan_review_required":
-      return "执行暂停 · 待你放行";
-    case "plan_review_resolved":
-      return frame.decision === "stop"
-        ? "已停止 · 未运行下游"
-        : "已放行 · 继续";
     case "plan_revised": {
       const bound = frame.revisions.filter(
         (r) => r.revisionKind === "bind",

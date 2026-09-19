@@ -339,22 +339,33 @@ class MessageRepository:
         await self._session.commit()
         return (result.rowcount or 0) > 0
 
-    async def copy_all(self, source_conversation_id: str, target_conversation_id: str) -> int:
-        """Copy every message of one conversation into another (对话克隆). Returns the count.
+    async def copy_through(
+        self,
+        source_conversation_id: str,
+        target_conversation_id: str,
+        *,
+        until_message_id: str,
+    ) -> int | None:
+        """Copy the transcript through ``until_message_id`` (inclusive). Returns the count.
 
-        Backs 克隆对话 (duplicate a conversation): the target is a freshly-created empty
-        conversation, so this bulk-inserts fresh-id copies of the source's rows, preserving
-        render order (``created_at`` copied verbatim) and content-level fields (role /
-        content / reasoning / usage / attachments / agent_mentions / citations /
-        followups / cost).
+        Backs 克隆对话: the target is a freshly-created empty conversation. Copies
+        that row and every earlier row in render order (``created_at`` verbatim) and
+        content-level fields (role / content / reasoning / usage / attachments /
+        agent_mentions / citations / followups / cost). Later turns stay on the source.
+
+        Returns ``None`` if ``until_message_id`` is not in the source (caller 404s).
 
         Intentionally NOT copied: ``trace_id`` (a copy is not a real turn — reusing it would
         double-link the original turn's logs), ``feedback`` (a rating belongs to the turn the
         user actually rated), and the separate ``turn_journal`` replay stream (§8.3, keyed by
         message id) — so a cloned multi-agent turn keeps its final text but re-renders as a
-        plain bubble rather than replaying its team graph. A pragmatic MVP scope for 克隆.
+        plain bubble rather than replaying its team graph.
         """
         rows = await self.list_all_for_conversation(source_conversation_id)
+        cutoff = next((i for i, r in enumerate(rows) if r.id == until_message_id), None)
+        if cutoff is None:
+            return None
+        rows = rows[: cutoff + 1]
         copies = [
             Message(
                 id=new_id(),

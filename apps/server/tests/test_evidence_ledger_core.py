@@ -91,16 +91,16 @@ def test_register_sync_dedup_and_ids():
         query="foo bar",
         deep_read=True,
     )
-    assert a == "#e1"
-    assert b == "#e1"
-    assert c == "#e2"
-    assert led.ids == frozenset({"#e1", "#e2"})
-    e1 = led.get("#e1")
+    assert a == "#r1"
+    assert b == "#r1"
+    assert c == "#r2"
+    assert led.ids == frozenset({"#r1", "#r2"})
+    e1 = led.get("#r1")
     assert e1 is not None
     assert e1["registrant"] == "worker:w1"  # 首登方保留
     assert e1["tier"] == "unknown"
     assert e1["citable"] is True
-    e2 = led.get("#e2")
+    e2 = led.get("#r2")
     assert e2 is not None
     assert e2["query"] == "foo bar"
     assert e2["deep_read"] is True
@@ -118,12 +118,12 @@ def test_tier_and_citable_stamp():
         title="文库",
         registrant="ceo",
     )
-    assert official == "#e1"
-    assert weak == "#e2"
-    assert led.get("#e1")["tier"] == "official"
-    assert led.get("#e1")["citable"] is True
-    assert led.get("#e2")["tier"] == "weak"
-    assert led.get("#e2")["citable"] is True
+    assert official == "#r1"
+    assert weak == "#r2"
+    assert led.get("#r1")["tier"] == "official"
+    assert led.get("#r1")["citable"] is True
+    assert led.get("#r2")["tier"] == "weak"
+    assert led.get("#r2")["citable"] is True
 
 
 def test_blocked_rejected():
@@ -146,9 +146,9 @@ def test_blocked_accepted_when_reject_disabled():
         title="知道",
         registrant="pro",
     )
-    assert eid == "#e1"
-    assert led.get("#e1")["tier"] == "blocked"
-    assert led.get("#e1")["citable"] is False
+    assert eid == "#r1"
+    assert led.get("#r1")["tier"] == "blocked"
+    assert led.get("#r1")["citable"] is False
 
 
 def test_id_prefix_configurable():
@@ -181,7 +181,7 @@ def test_concurrent_register_no_id_collision():
     assert None not in ids
     assert len(ids) == 40
     assert len(set(ids)) == 40
-    assert set(ids) == {f"#e{i}" for i in range(1, 41)}
+    assert set(ids) == {f"#r{i}" for i in range(1, 41)}
 
 
 def test_concurrent_same_url_dedup():
@@ -202,7 +202,7 @@ def test_concurrent_same_url_dedup():
 
     ids, n = asyncio.run(_run())
     assert n == 1
-    assert set(ids) == {"#e1"}
+    assert set(ids) == {"#r1"}
 
 
 def test_deep_read_upgrades_existing_entry():

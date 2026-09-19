@@ -7,7 +7,12 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolEffect
-from agentcore.llm.provider.protocol import LLMMessage, ToolCall, llm_content_text
+from agentcore.llm.provider.protocol import (
+    LLMMessage,
+    ToolCall,
+    build_multimodal_user_content,
+    llm_content_text,
+)
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.engine.tool_call_fact_code import (
     tool_call_fact_code,
@@ -184,6 +189,7 @@ async def execute_tools(
     if terminal is None and terminals:
         terminal = terminals[0]
     attempts = [a for _, _, a, _ in quads]
+    _append_native_image_user_message(messages, attempts)
 
     # Merge web sources into mid-turn sink (deterministic call order) for pause /
     # legacy ``[n]``；台账登记 ``#rN`` 并 annotate。P2：用户可见卡由 settle 按
@@ -247,3 +253,33 @@ async def execute_tools(
         )
 
     return messages, terminal, attempts
+
+
+def _append_native_image_user_message(
+    messages: list[LLMMessage], attempts: list[ToolAttempt]
+) -> None:
+    """After tool results, send workspace rasters as a user multimodal message."""
+    parts: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for attempt in attempts:
+        for part in attempt.native_image_parts:
+            url = ""
+            if isinstance(part, dict):
+                image = part.get("image_url")
+                if isinstance(image, dict):
+                    url = str(image.get("url") or "")
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            parts.append(part)
+    if not parts:
+        return
+    messages.append(
+        LLMMessage(
+            role="user",
+            content=build_multimodal_user_content(
+                "以下是本轮 file_read 发给当前模型的工作区图片。",
+                parts,
+            ),
+        )
+    )

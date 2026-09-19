@@ -459,7 +459,12 @@ async def test_skill_store_install_keeps_offers_tools(client):
     published = await client.post("/v1/skill-store", json=_publish_body(doc["id"]))
     assert published.status_code == 200, published.text
     lid = published.json()["id"]
+    assert published.json()["offers_tools"] == ["host"]
     assert "offers_tools: host" in published.json()["content"]
+
+    listed = (await client.get("/v1/skill-store")).json()["data"]
+    row = next(item for item in listed if item["id"] == lid)
+    assert row["offers_tools"] == ["host"]
 
     await register_and_login(client, "ssbindbuyer")
     installed = await client.post(f"/v1/skill-store/{lid}/install")

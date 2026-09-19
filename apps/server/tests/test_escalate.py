@@ -208,7 +208,7 @@ def test_escalate_schema_stays_off_engine_internals():
 
 
 def test_escalate_schema_options_are_one_line():
-    """填卡 HOW 在 ask_kickoff；escalate 按钮不抄权衡/推荐。"""
+    """填卡 HOW 在 ask_user；escalate 按钮不抄权衡/推荐。"""
     props = (
         EscalateTool()
         .schema.parameters["properties"]["questions"]["items"]["properties"]["options"]["items"][

@@ -457,7 +457,7 @@ export function resolveAssistantFailureFace(input: {
   runsError?: StructuredErr;
   usageError?: StructuredErr;
   finishReason?: string | null;
-  /** True when pause/ask/checkpoint/plan_review/… card already carries the turn. */
+  /** True when pause/ask/checkpoint/… card already carries the turn. */
   hasDedicatedPauseOrAskUi?: boolean;
 }): AssistantFailureFace | null {
   if (input.isStreaming) return null;

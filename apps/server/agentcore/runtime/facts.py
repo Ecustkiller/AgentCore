@@ -19,9 +19,10 @@ completed / journal_entries / citations.
 This module owns the execution-level kinds (执行级事件溯源；as-built →
 执行引擎 §8.3):
 
-- :class:`TurnStartedFact` — the turn's head: the *verbatim* system prompt, the user
-  message, the model profile. Anchors the **captain** window fold (the system prompt is
-  dynamic — date / skill directory — so it is captured, never re-rendered).
+- :class:`TurnStartedFact` — the turn's head: the *verbatim* frozen system prompt, the
+  ephemeral turn envelope, the user message, the model profile. Anchors the **captain**
+  window fold (the envelope is dynamic — date / workspace / ledger — so it is captured,
+  never re-rendered; the frozen system is not restamped on resume).
 - :class:`RunHeadFact` — one worker (or continuation) run's opening task-prompt head:
   its *verbatim* system + opening user message. Anchors that run's window fold so a
   worker is never falsely headed by the turn-level ``turn_started`` (CEO) prompt.
@@ -153,17 +154,20 @@ class Fact:
 class TurnStartedFact:
     """The turn's head fact — the **captain** window fold's anchor.
 
-    ``system_prompt`` is captured *verbatim* (it is dynamic — date / skill directory —
-    so re-rendering it on resume could drift). ``history_len`` is the number of prior
-    conversation messages folded into the opening window (the history itself is a
-    projection of earlier turns, not duplicated here). Worker windows use
-    :class:`RunHeadFact` instead — never this turn-level head.
+    ``system_prompt`` is the frozen constitution / identity / catalog (captured
+    verbatim). ``turn_envelope`` is the ephemeral ``[系统提示]`` user message
+    (date / workspace / ledger); omit / empty on journals from before this field.
+    ``history_len`` is the number of prior conversation messages folded into the
+    opening window (the history itself is a projection of earlier turns, not
+    duplicated here). Worker windows use :class:`RunHeadFact` instead — never this
+    turn-level head.
     """
 
     system_prompt: str
     user_message: str
     model_profile: str
     history_len: int = 0
+    turn_envelope: str = ""
     kind: ClassVar[FactKind] = FactKind.TURN_STARTED
 
     def to_fact(self, ts: str | None = None) -> Fact:
@@ -174,6 +178,7 @@ class TurnStartedFact:
                 "user_message": self.user_message,
                 "model_profile": self.model_profile,
                 "history_len": self.history_len,
+                "turn_envelope": self.turn_envelope,
             },
             ts=ts,
         )

@@ -1,6 +1,6 @@
 """Single recover primitive: journal projection → seed WaveScheduler → settle / redrive.
 
-Resume (plan_review / ask_user) and crash redrive both route through
+Resume (ask_user) and crash redrive both route through
 :func:`recover_turn`. Leftover ``team_preview`` frames fail honestly.
 The journal remains the唯一事实源;
 :class:`~agentcore.runtime.turn.state.TurnState` is the sole projection entry.
@@ -20,12 +20,10 @@ from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.events import (
     EventSink,
     checkpoint_resolved,
-    plan_review_resolved,
 )
 from agentcore.runtime.recover_lease import bind_recovered_turn, recover_expired_lease
 from agentcore.runtime.suspension import (
     AskUserSuspension,
-    PlanReviewSuspension,
     TurnSuspension,
 )
 from agentcore.runtime.turn.state import TurnState
@@ -71,8 +69,8 @@ async def recover_turn(
 ) -> SettledSuspension:
     """Settle a resume decision or CONTINUE-redrive unfinished DAG from ``state``.
 
-    - With ``suspension`` + ``decision``: resume ask_user / plan_review.
-      Leftover ``team_preview`` frames never reach here (from_json / peek 410).
+    - With ``suspension`` + ``decision``: resume ask_user.
+      Leftover ``team_preview`` / ``plan_review`` frames never reach here (from_json / peek 410).
     - Without suspension (crash): ``decision`` defaults to CONTINUE; redrives unfinished
       plan nodes with ``seed_completed=state.completed`` (completed nodes skipped).
       Unfinished workers that already have a journal window travel as crash
@@ -148,18 +146,9 @@ async def _settle_resume(
 
     _ = debate_tool
 
-    # research_first 仅辩论开工卡合法；开工卡已退役，其它挂起点降级为 STOP。
-    if decision is CheckpointDecision.RESEARCH_FIRST:
-        logger.warning(
-            "team_preview.research_first_rejected",
-            kind=getattr(suspension.kind, "value", suspension.kind),
-            primitive=getattr(suspension, "primitive", None),
-        )
-        decision = CheckpointDecision.STOP
-
     # Same-turn consecutive STOP → terminal INTERACT (no further CEO round).
     # Streak is journal-derived so it survives suspend/resume; first STOP unchanged.
-    # ADJUST is excluded inside the helper (plan_review revise can repeat).
+    # ADJUST is excluded inside the helper.
     # Ignore the card being settled — cold-path prewrite of this checkpoint_id
     # must not count as a prior STOP (first cancel would otherwise INTERACT).
     force_close = is_repeated_checkpoint_stop(
@@ -196,28 +185,6 @@ async def _settle_resume(
         )
         allowed = {option_label(o) for q in suspension.questions for o in q.get("options", [])}
         response.selected = [s for s in response.selected if s in allowed]
-        if (
-            suspension.intent == "organize_plan"
-            and response.decision is CheckpointDecision.CONTINUE
-        ):
-            from agentcore.tools.builtin.ask_user.card import option_to_organize_op
-            from agentcore.workspace.organize_plan_store import register_plan
-
-            kept: list[dict] = []
-            for q in suspension.questions:
-                for o in q.get("options") or []:
-                    if not isinstance(o, dict):
-                        continue
-                    if option_label(o) not in response.selected:
-                        continue
-                    op = option_to_organize_op(o)
-                    if op:
-                        kept.append(op)
-            register_plan(
-                plan_id=suspension.checkpoint_id,
-                conversation_id=suspension.conversation_id,
-                operations=kept,
-            )
         sink.emit(
             checkpoint_resolved(
                 checkpoint_id=suspension.checkpoint_id,
@@ -268,59 +235,14 @@ async def _settle_resume(
                 else:
                     set_active_coordination(session)
         from agentcore.tools.builtin.ask_user import ask_user_tool_result
-        from agentcore.tools.builtin.ask_user.result import (
-            ask_user_organize_plan_result,
+
+        result = ask_user_tool_result(
+            response,
+            questions=list(suspension.questions or []),
         )
-
-        if suspension.intent == "organize_plan":
-            from agentcore.workspace.organize_plan_store import get_plan
-
-            org_plan = get_plan(suspension.checkpoint_id)
-            kept_n = len(org_plan.operations) if org_plan else 0
-            result = ask_user_organize_plan_result(
-                response,
-                plan_id=suspension.checkpoint_id,
-                kept_count=kept_n,
-            )
-        else:
-            result = ask_user_tool_result(
-                response,
-                questions=list(suspension.questions or []),
-            )
-            # 场面账（presentation_format / automation_delivery）已拆除风格账：
-            # resume 不再 record_*。
+        # 场面账（presentation_format / automation_delivery）已拆除风格账：
+        # resume 不再 record_*。
         terminal = result.final_text if result.effect is ToolEffect.INTERACT else None
         return _after_settle(SettledSuspension(result.output, terminal, result.effect))
-
-    if isinstance(suspension, PlanReviewSuspension):
-        sink.emit(
-            plan_review_resolved(
-                checkpoint_id=suspension.checkpoint_id,
-                decision=decision.value,
-                note=note,
-            )
-        )
-        logger.info(
-            "plan_review.resolved",
-            checkpoint_id=suspension.checkpoint_id,
-            decision=decision.value,
-        )
-        seed_completed = dict(state.completed) or suspension.completed
-        plan = state.plan or suspension.plan
-        eid = state.execution_id or execution_id
-        delegate_result = await delegate_tool.resume_plan(
-            plan,
-            seed_completed,
-            decision=decision,
-            note=note,
-            checkpoint_run_ids=suspension.checkpoint_run_ids,
-            execution_id=eid,
-            team_brief=suspension.team_brief,
-            # CONTINUE 时读帧上 ceo_review → llm 压缩注入 gate_notes（deterministic 不下发）。
-            ceo_review=suspension.ceo_review,
-        )
-        return _after_settle(
-            SettledSuspension(delegate_result.output, None, delegate_result.effect)
-        )
 
     raise ValueError(f"unknown suspension kind: {suspension.kind!r}")

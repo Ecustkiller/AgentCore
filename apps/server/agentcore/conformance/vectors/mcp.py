@@ -116,14 +116,6 @@ def _mcp_call_with_approval() -> list[SSEEvent]:
 
 
 VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
-    "mcp_call_tool_applied": (
-        "MCP：call_tool 成功（mcp_op_required 运输 + 工具步 + end_turn）",
-        _mcp_call_tool_applied,
-    ),
-    "mcp_call_tool_failed": (
-        "MCP：call_tool 握手/回填失败（工具步失败 + 回合仍收尾）",
-        _mcp_call_tool_failed,
-    ),
     "mcp_call_with_approval": (
         "MCP：GRANTABLE 通用审批通过后 mcp_op_required + 成功收尾",
         _mcp_call_with_approval,

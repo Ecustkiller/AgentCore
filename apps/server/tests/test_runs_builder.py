@@ -501,8 +501,8 @@ def test_invalid_round_dropped():
 # --- 结构化挂起 2a (checkpoint_after, 计划期挂起标记) -------------------------------
 
 
-def test_checkpoint_after_parsed_onto_spec():
-    # 计划期挂起标记: 宽松读取 (bool(...)), WaveScheduler 据此在节点后波间挂起.
+def test_checkpoint_after_extra_key_is_ignored():
+    # Retired extra key: discarded, not parsed onto RunSpec.
     plan, _ = build_run_plan(
         [
             {"role": "A", "task": "a", "checkpoint_after": True},
@@ -510,24 +510,22 @@ def test_checkpoint_after_parsed_onto_spec():
         ],
         id_prefix="t",
     )
-    # An untagged node defaults False, so a plan with no checkpoint is byte-identical.
-    assert plan.nodes[0].checkpoint_after is True
-    assert plan.nodes[1].checkpoint_after is False
+    assert not hasattr(plan.nodes[0], "checkpoint_after")
+    assert not hasattr(plan.nodes[1], "checkpoint_after")
 
 
-def test_checkpoint_after_parsed_on_dag_step():
+def test_checkpoint_after_extra_key_ignored_on_dag_step():
     tasks = [
         {"id": "s1", "role": "A", "task": "a", "checkpoint_after": True},
         {"id": "s2", "role": "B", "task": "b", "depends_on": ["s1"]},
     ]
     plan, errs = build_run_plan(tasks, id_prefix="t")
     assert errs == []
-    assert plan.by_id("t_s1").checkpoint_after is True
-    assert plan.by_id("t_s2").checkpoint_after is False
+    assert not hasattr(plan.by_id("t_s1"), "checkpoint_after")
+    assert not hasattr(plan.by_id("t_s2"), "checkpoint_after")
 
 
-def test_checkpoint_after_truthy_coerced():
-    # Lenient like the other flags: any falsy value (missing / 0 / "") → False.
+def test_checkpoint_after_extra_key_discarded():
     plan, _ = build_run_plan(
         [
             {"role": "A", "task": "a", "checkpoint_after": 0},
@@ -535,8 +533,8 @@ def test_checkpoint_after_truthy_coerced():
         ],
         id_prefix="t",
     )
-    assert plan.nodes[0].checkpoint_after is False
-    assert plan.nodes[1].checkpoint_after is False
+    assert not hasattr(plan.nodes[0], "checkpoint_after")
+    assert not hasattr(plan.nodes[1], "checkpoint_after")
 
 
 def test_dag_invalid_on_failure_falls_back_to_default():

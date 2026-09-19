@@ -5,7 +5,7 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
-from agentcore.tools.builtin.archive_create import ArchiveCreateTool
+from agentcore.tools.builtin.archive import ArchiveTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
@@ -33,8 +33,8 @@ async def test_archive_create_success(tmp_path: Path):
     (src / "nested").mkdir()
     (src / "nested" / "b.md").write_text("# hi", encoding="utf-8")
 
-    result = await ArchiveCreateTool().execute(
-        {"sources": ["src"], "dest": "out/pkg.zip"},
+    result = await ArchiveTool().execute(
+        {"action": "create","sources": ["src"], "dest": "out/pkg.zip"},
         _ctx(tmp_path),
     )
     assert result.success is True
@@ -59,8 +59,8 @@ async def test_archive_create_prunes_vcs_and_deps(tmp_path: Path):
     git.mkdir()
     (git / "HEAD").write_text("ref", encoding="utf-8")
 
-    result = await ArchiveCreateTool().execute(
-        {"sources": ["src"], "dest": "pkg.zip"},
+    result = await ArchiveTool().execute(
+        {"action": "create","sources": ["src"], "dest": "pkg.zip"},
         _ctx(tmp_path),
     )
     assert result.success is True
@@ -68,8 +68,8 @@ async def test_archive_create_prunes_vcs_and_deps(tmp_path: Path):
 
 
 async def test_archive_create_rejects_path_escape(tmp_path: Path):
-    result = await ArchiveCreateTool().execute(
-        {"sources": ["../secret"], "dest": "out.zip"},
+    result = await ArchiveTool().execute(
+        {"action": "create","sources": ["../secret"], "dest": "out.zip"},
         _ctx(tmp_path),
     )
     assert result.success is False
@@ -78,8 +78,8 @@ async def test_archive_create_rejects_path_escape(tmp_path: Path):
 
 
 async def test_archive_create_missing_source(tmp_path: Path):
-    result = await ArchiveCreateTool().execute(
-        {"sources": ["missing"], "dest": "out.zip"},
+    result = await ArchiveTool().execute(
+        {"action": "create","sources": ["missing"], "dest": "out.zip"},
         _ctx(tmp_path),
     )
     assert result.success is False
@@ -87,11 +87,11 @@ async def test_archive_create_missing_source(tmp_path: Path):
 
 
 async def test_archive_create_in_schema_and_points_off_code_execute():
-    schema = ArchiveCreateTool().schema
-    assert schema.name == "archive_create"
+    schema = ArchiveTool().schema
+    assert schema.name == "archive"
     assert "code_execute" not in schema.description
     assert "本工具" in schema.description
-    assert "HOW→consult(archive_create)" not in schema.description
+    assert "HOW→consult(archive)" not in schema.description
 
 
 async def test_archive_create_rejects_over_file_limit(
@@ -105,8 +105,8 @@ async def test_archive_create_rejects_over_file_limit(
     (src / "a.txt").write_text("a", encoding="utf-8")
     (src / "b.txt").write_text("b", encoding="utf-8")
 
-    result = await ArchiveCreateTool().execute(
-        {"sources": ["src"], "dest": "out.zip"},
+    result = await ArchiveTool().execute(
+        {"action": "create","sources": ["src"], "dest": "out.zip"},
         _ctx(tmp_path),
     )
     assert result.success is False

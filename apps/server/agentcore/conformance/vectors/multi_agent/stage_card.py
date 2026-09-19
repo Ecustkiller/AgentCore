@@ -1,4 +1,4 @@
-"""批 B：阶段推进卡 — 展示 → 点开辩 → 辩论幕生长（authorized_by=stage_card）+ orphaned。"""
+"""批 B：幕 1 调研 → 幕 2 开辩（authorized_by=auto）+ 换话题对照。"""
 
 from __future__ import annotations
 
@@ -8,15 +8,12 @@ from agentcore.runtime.events import (
     content_delta,
     debate_result,
     debate_round_started,
-    interaction_orphaned,
     message_end,
     message_start,
     run_completed,
     run_output_delta,
     run_plan,
     run_started,
-    stage_card_required,
-    stage_card_resolved,
     tool_use_end,
     tool_use_start,
 )
@@ -37,7 +34,6 @@ _EXEC = _EXEC_MLR
 _MOD = "debate_mod_sc"
 _PRO = f"{_MOD}_r1_pro"
 _CON = f"{_MOD}_r1_con"
-_CARD = "sc_stage_1"
 
 _SIDES = [
     {"key": "pro", "name": "立即终止方", "stance": "应立刻切割止损"},
@@ -71,7 +67,7 @@ def _mlr_agents_runs() -> tuple[list[dict], list[dict]]:
 
 
 def _multi_agent_stage_card_start_debate() -> list[SSEEvent]:
-    """推进卡展示 → resolved(start_debate) → 幕2 同图生长 authorized_by=stage_card。"""
+    """幕 1 调研收口 → 新回合开辩；act stamp authorized_by=auto。"""
     mlr_agents, mlr_runs = _mlr_agents_runs()
     mod_agents, mod_runs = _moderator_agents_runs(
         _MOD, "synthesizer", f"主持正反辩论：{_TOPIC}"
@@ -112,7 +108,7 @@ def _multi_agent_stage_card_start_debate() -> list[SSEEvent]:
         "kind": "debate",
         "title": "辩论对抗",
         "anchor_run_id": "synthesizer",
-        "authorized_by": "stage_card",
+        "authorized_by": "auto",
     }
     return [
         message_start("m1", conversation_id=_CONV),
@@ -167,23 +163,9 @@ def _multi_agent_stage_card_start_debate() -> list[SSEEvent]:
         ),
         tool_use_end("dc1", "delegate", success=True, output="多视角调研完成。"),
         content_delta("调研已呈报。"),
-        stage_card_required(
-            stage_card_id=_CARD,
-            conversation_id=_CONV,
-            motion=_TOPIC,
-            sides=_SIDES,
-            form="debate",
-            rationale="各方握同一事实却价值对立，继续取证无效",
-            fact_pointers=["#r1"],
-            max_rounds=5,
-            host_execution_id=_EXEC,
-            synthesizer_run_id="synthesizer",
-            host_message_id="m1",
-        ),
         message_end(FinishReason.END_TURN, input_tokens=4000, output_tokens=700, cost=_COST),
-        # ── 推进卡裁决 → 新回合机制直起辩论 ──
+        # ── 用户在对话里点名开辩 → 新回合机制直起辩论 ──
         message_start("m2", conversation_id=_CONV),
-        stage_card_resolved(stage_card_id=_CARD, decision="start_debate", note=""),
         content_delta("按此开辩。"),
         run_plan(
             execution_id=_EXEC_DEBATE,
@@ -258,7 +240,7 @@ def _multi_agent_stage_card_start_debate() -> list[SSEEvent]:
 
 
 def _multi_agent_stage_card_orphaned() -> list[SSEEvent]:
-    """推进卡展示后下回合未调 debate/未起 MLR → 收尾 interaction_orphaned。"""
+    """幕 1 调研后下回合换话题：不再发卡、不写 orphan 墓碑。"""
     mlr_agents, mlr_runs = _mlr_agents_runs()
     return [
         message_start("m1", conversation_id=_CONV),
@@ -295,23 +277,8 @@ def _multi_agent_stage_card_orphaned() -> list[SSEEvent]:
         ),
         tool_use_end("dc1", "delegate", success=True, output="完成"),
         content_delta("调研已呈报。"),
-        stage_card_required(
-            stage_card_id=_CARD,
-            conversation_id=_CONV,
-            motion=_TOPIC,
-            sides=_SIDES,
-            form="debate",
-            rationale="真对立轴须对抗检验",
-            fact_pointers=["#r1"],
-            max_rounds=5,
-            host_execution_id=_EXEC,
-            synthesizer_run_id="synthesizer",
-            host_message_id="m1",
-        ),
         message_end(FinishReason.END_TURN, input_tokens=3000, output_tokens=500, cost=_COST),
-        # 用户发消息不立即 orphan；本回合 CEO 既未调 debate 也未起 MLR → 收尾失效
         message_start("m2", conversation_id=_CONV),
         content_delta("好的，我们换个话题。"),
         message_end(FinishReason.END_TURN, input_tokens=200, output_tokens=40, cost=_COST),
-        interaction_orphaned(interaction_id=_CARD, kind="stage_card"),
     ]

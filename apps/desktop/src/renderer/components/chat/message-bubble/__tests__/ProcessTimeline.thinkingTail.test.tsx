@@ -3,7 +3,7 @@
  * In-stream Thinking… tail: `shouldShowThinkingTail` is the exported gate.
  * Live chrome (running/wait tool, streaming reasoning/content,
  * composing tool, visible graph at tail, pending user gate) suppresses the tail.
- * `graph_append` shares the team marker gate — it is not live by itself.
+ * The team marker is not live by itself.
  */
 import {
   ProcessTimeline,
@@ -23,7 +23,6 @@ afterEach(cleanup);
 
 const emptyCards = {
   checkpoints: [] as never[],
-  planReviews: [] as never[],
 };
 
 const toolDone: ProcessStep = {
@@ -39,13 +38,10 @@ const toolError: ProcessStep = { ...toolDone, status: "error" };
 const waitDone: ProcessStep = { ...toolDone, tool_name: "wait" };
 const waitRunning: ProcessStep = { ...waitDone, status: "running" };
 const team: ProcessStep = { kind: "team", execution_id: "e1" };
-const graphAppend: ProcessStep = {
-  kind: "graph_append",
-  execution_id: "e1",
-  host_message_id: "m1",
-  added_count: 2,
-};
-const planReview: ProcessStep = { kind: "plan_review", checkpoint_id: "pr1" };
+const leftoverPlanReview = {
+  kind: "plan_review",
+  checkpoint_id: "pr1",
+} as unknown as ProcessStep;
 
 const live = {
   isStreaming: true,
@@ -55,15 +51,14 @@ const live = {
 };
 
 describe("graphSlotExecutionId", () => {
-  it("resolves both graph slot markers so graph_append shares the team gate", () => {
+  it("resolves the team marker as the graph slot", () => {
     expect(graphSlotExecutionId(team)).toBe("e1");
-    expect(graphSlotExecutionId(graphAppend)).toBe("e1");
   });
 
   it("resolves nothing for non-slot tails", () => {
     expect(graphSlotExecutionId(undefined)).toBeNull();
     expect(graphSlotExecutionId(toolDone)).toBeNull();
-    expect(graphSlotExecutionId(planReview)).toBeNull();
+    expect(graphSlotExecutionId(leftoverPlanReview)).toBeNull();
   });
 });
 
@@ -87,27 +82,26 @@ describe("shouldShowThinkingTail", () => {
     ).toBe(false);
   });
 
-  it("shows for team and graph_append tails when the graph is not visible (same gate)", () => {
+  it("shows for team tails when the graph is not visible", () => {
     expect(shouldShowThinkingTail({ ...live, last: team })).toBe(true);
-    expect(shouldShowThinkingTail({ ...live, last: graphAppend })).toBe(true);
     expect(
       shouldShowThinkingTail({
         ...live,
-        last: graphAppend,
+        last: team,
         graphVisibleAtTail: true,
       }),
     ).toBe(false);
     expect(
       shouldShowThinkingTail({
         ...live,
-        last: graphAppend,
+        last: team,
         pendingUserGate: true,
       }),
     ).toBe(false);
     expect(
       shouldShowThinkingTail({
         ...live,
-        last: graphAppend,
+        last: team,
         isStreaming: false,
       }),
     ).toBe(false);
@@ -135,28 +129,17 @@ describe("shouldShowThinkingTail", () => {
     expect(shouldShowThinkingTail({ ...live, last: toolDone })).toBe(true);
     expect(shouldShowThinkingTail({ ...live, last: toolError })).toBe(true);
     expect(shouldShowThinkingTail({ ...live, last: undefined })).toBe(true);
-    expect(shouldShowThinkingTail({ ...live, last: planReview })).toBe(true);
+    expect(shouldShowThinkingTail({ ...live, last: leftoverPlanReview })).toBe(
+      true,
+    );
   });
 });
 
 describe("ProcessTimeline · thinking tail", () => {
-  it("paints Thinking… after a team or graph_append marker when no graph is mounted", () => {
-    const { rerender } = render(
+  it("paints Thinking… after a team marker when no graph is mounted", () => {
+    render(
       <ProcessTimeline
         process={[team]}
-        isStreaming
-        citations={[]}
-        composingTool={null}
-        fallbackContent=""
-        conversationId="c1"
-        {...emptyCards}
-      />,
-    );
-    expect(screen.getByText("Thinking…")).toBeTruthy();
-    expect(document.querySelector("[data-live-flow]")).not.toBeNull();
-    rerender(
-      <ProcessTimeline
-        process={[graphAppend]}
         isStreaming
         citations={[]}
         composingTool={null}

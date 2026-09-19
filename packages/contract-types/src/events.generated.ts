@@ -6,6 +6,7 @@
 import type { SSEEventType } from "./eventTypes.generated";
 
 export type { SSEEventType } from "./eventTypes.generated";
+export { SSE_EVENT_TYPE_VALUES } from "./eventTypes.generated";
 
 export interface SSEEvent<T = unknown> {
   type: SSEEventType;
@@ -139,12 +140,9 @@ export type ProcessStep =
   | { kind: "content"; text: string }
   | { kind: "tool"; id: string; tool_name: string; arguments: Record<string, unknown>; result: string | null; status: "running" | "success" | "error" | "redirect"; display?: ToolDisplay | null; failure?: ToolFailure; phase?: ToolPhase }
   | { kind: "team"; execution_id: string }
-  | { kind: "graph_append"; execution_id: string; host_message_id: string; added_count: number }
   | { kind: "checkpoint"; checkpoint_id: string }
-  | { kind: "plan_review"; checkpoint_id: string }
   | { kind: "escalation"; escalation_id: string }
   | { kind: "approval"; approval_id: string }
-  | { kind: "stage_card"; stage_card_id: string }
   | { kind: "user_interjection"; interjection_id: string };
 
 /** The user's settlement of a paused GRANTABLE tool call; mirrors the backend
@@ -175,7 +173,6 @@ export type CheckpointDecision =
   | "continue"
   | "adjust"
   | "stop"
-  | "research_first"
   | "timeout"
   | "orphaned";
 
@@ -187,17 +184,12 @@ export type CheckpointDecision =
  * `open_local_project` / `register_local_project` / `bind_local_folder` are
  * **本机传统** wire enums（桌面默认同通道；云协作是选项：「先在云上做」/「从 Git 克隆」；≠离线；
  * 网页/手机无本机盘；``create_folder`` 仍只建云）。
- * Structured ``op`` / ``source`` / ``destination`` / ``path`` fields carry
- * organize_plan items for plan-bound ``file_batch``. ``review_kind`` / ``body`` /
- * ``slug`` / ``section`` remain on the wire for historical events. */
+ * ``review_kind`` / ``body`` / ``slug`` / ``section`` remain on the wire for
+ * historical events. */
 export interface AskOption {
   label: string;
   detail?: string;
   action?: "open_local_project" | "register_local_project" | "bind_local_folder";
-  op?: "move" | "copy" | "delete" | "mkdir";
-  source?: string;
-  destination?: string;
-  path?: string;
   review_kind?: "preference" | "profile" | "topic" | "rule" | "doc";
   body?: string;
   slug?: string;
@@ -213,7 +205,7 @@ export interface AskQuestion {
   default: string;
 }
 
-export type CheckpointIntent = "decision" | "organize_plan";
+export type CheckpointIntent = "decision";
 
 /** The CEO paused the turn on an ask_user checkpoint (blocking). */
 export interface CheckpointRequiredPayload {
@@ -231,73 +223,6 @@ export interface CheckpointResolvedPayload {
   decision: CheckpointDecision;
   note: string;
   selected?: string[];
-}
-
-export interface PlanReviewStep {
-  run_id: string;
-  role: string;
-  summary: string;
-}
-
-export interface PlanReviewPending {
-  run_id: string;
-  role: string;
-}
-
-/** 主 Agent 在 plan_review 前对本波产出的把关摘要
- * （拍板卡展示；继续时 llm 压缩注入 gate_notes）。 */
-export interface CeoReviewSummary {
-  conclusion: string;
-  risks: string[];
-  suggestions: string[];
-  /** 把关来源；旧帧缺省。仅 llm 在 CONTINUE 时压缩注入 gate_notes。 */
-  source?: "llm" | "deterministic";
-}
-
-export interface PlanReviewRequiredPayload {
-  checkpoint_id: string;
-  conversation_id: string;
-  steps: PlanReviewStep[];
-  pending: PlanReviewPending[];
-  /** CEO 评审前置把关摘要；旧帧 / 旧向量可缺省。 */
-  ceo_review?: CeoReviewSummary;
-}
-
-export interface PlanReviewResolvedPayload {
-  checkpoint_id: string;
-  decision: CheckpointDecision;
-  note: string;
-}
-
-/** 阶段推进卡（批 B）：命题卡升级为可操作交互；幕 1 收尾后耐久展示。
- * 
- * 信息密度 = 最小决策集：命题 + 双方立场 + 形态/轮次默认 + 嘱咐空位。
- * ``sides`` 复用 motion 卡薄立场；``max_rounds`` 为默认展示（卡上不可改）。
- * 可选宿主三元组（机制直传，旧客户端忽略）：开辩锚定幕 1 图。 */
-export interface StageCardRequiredPayload {
-  stage_card_id: string;
-  conversation_id: string;
-  motion: string;
-  sides: MotionCardSide[];
-  form: DebateForm;
-  rationale: string;
-  fact_pointers?: string[];
-  max_rounds?: number;
-  note?: string;
-  /** 幕 1 宿主 execution_id；缺省则开辩时再 resolve_debate_host_attach。 */
-  host_execution_id?: string;
-  /** 幕 1 汇总员 run_id（挂点锚）。 */
-  synthesizer_run_id?: string;
-  /** 幕 1 宿主 turn / message id。 */
-  host_message_id?: string;
-}
-
-/** 推进卡裁决。decision 二值：start_debate（可带 motion_override/note）/ research_first。 */
-export interface StageCardResolvedPayload {
-  stage_card_id: string;
-  decision: "start_debate" | "research_first";
-  note?: string;
-  motion_override?: string;
 }
 
 export type PlanRevisionKind = "bind" | "steer";
@@ -336,13 +261,13 @@ export type ActKind = "multi_agent" | "debate";
 /** 幕声明（批 A1）：一张 execution 图由 1..N 幕组成；本批仅首幕 act-1。
  * 
  * runs 归属 = 该 run_plan 声明的幕（``RunPlanRunEntry`` 不加字段）。
- * ``authorized_by``（批 B）：辩论幕的授权来源；调研幕缺省。 */
+ * ``authorized_by``：辩论幕授权来源（现行 ``auto``）；调研幕缺省。 */
 export interface RunPlanAct {
   act_id: string;
   kind: ActKind;
   title?: string;
   anchor_run_id?: string;
-  authorized_by?: "stage_card" | "auto" | "preview";
+  authorized_by?: "auto";
 }
 
 export interface RunPlanPayload {
@@ -354,19 +279,6 @@ export interface RunPlanPayload {
   host_message_id?: string;
   prev_execution_id?: string;
   act?: RunPlanAct;
-}
-
-/** 已停发：旧跨回合同图追加锚点（兼容旧 journal 回放）。新路径用 prev_execution_id。 */
-export interface GraphAppendPayload {
-  execution_id: string;
-  host_message_id: string;
-  append_message_id: string;
-  added_count: number;
-  roles?: string[];
-  added_run_ids?: string[];
-  act_id?: string;
-  act_kind?: ActKind;
-  authorized_by?: "stage_card" | "auto" | "preview";
 }
 
 export type RunKind = "captain" | "agent";
@@ -533,29 +445,12 @@ export interface EscalationResolvedPayload {
   via_user?: boolean;
 }
 
-/** pending 交互失效（假卡消灭）。含热路 kind + 推进卡 stage_card。 */
+/** pending 交互失效（假卡消灭）。热路 kind + 辩论轮。 */
 export interface InteractionOrphanedPayload {
   interaction_id: string;
-  kind: "approval" | "escalation" | "debate_round" | "stage_card";
-  /** 可选失效原因（如 stage_card superseded）；缺省不传，旧客户端忽略。 */
+  kind: "approval" | "escalation" | "debate_round";
+  /** 可选失效原因；缺省不传，旧客户端忽略。 */
   reason?: string;
-}
-
-export interface TeamSynthesisWorkerPreview {
-  run_id: string;
-  role: string;
-  status: "pending" | "completed" | "failed" | "cancelled";
-  summary: string;
-}
-
-export interface TeamSynthesisPreviewPayload {
-  execution_id: string;
-  completed: number;
-  total: number;
-  headline: string;
-  text: string;
-  workers: TeamSynthesisWorkerPreview[];
-  in_progress: boolean;
 }
 
 /** CEO 协调等待（``coordination_wait``）：captain 空等团队事件时的前端 UX 信号。
@@ -578,7 +473,7 @@ export interface WorkspaceLockWaitPayload {
   waiting: boolean;
 }
 
-/** 云桌开通短等（``desk_provision_wait``）：首句/续跑 prepare 时的前端 UX 信号。
+/** 云桌开通短等（``desk_provision_wait``）：绑定当前云桌时的前端 UX 信号。
  * 
  * ``waiting=true`` 即将阻塞在 ``ensure_workspace_desk``；结束（成功或失败）后
  * ``waiting=false``。EPHEMERAL——空气泡「正在准备云端环境」，禁空 Thinking… 冒充开机。 */
@@ -635,14 +530,12 @@ export interface DeliveryGap {
  * 桌面默认同通道（本地对话 / 打开本机文件夹），≠离线；云端对话并列可选)；
  * ``export_to_local`` (云端已有 delivered_files → 导出到本机文件夹后即可 npm install / 本地运行；
  * 与 bind_local_folder 可并存但语义不同);
- * ``website_verify`` (legacy tape only — runtime 已停发整页 QA 续派按钮);
  * ``continue_skipped_runs`` (turn/nested 额度 SKIPPED 未跑节点 → 下一回合续跑);
  * unknown kinds render as a plain hint.
- * （成篇未写完改由对话框接着说——已撤 ``continue_writing`` 一键按钮。）
+ * （成篇未写完改由对话框接着说——不另挂一键续写按钮。）
  * 
  * Optional ``prompt`` is the exact user-turn text a client should send for
- * kinds that open a new message (e.g. ``continue_skipped_runs``; old
- * ``website_verify`` tapes still carry one). Absent for
+ * kinds that open a new message (e.g. ``continue_skipped_runs``). Absent for
  * non-message actions like ``bind_local_folder`` / ``export_to_local``. */
 export interface DeliveryAction {
   kind: string;
@@ -677,17 +570,6 @@ export interface DeliveryArtifact {
   derived_from?: string;
 }
 
-/** Historical ``delivery_status.promoted`` row（AI 工作间 → 用户工作区）.
- * 
- * ``promote_product`` 已撤销；本结构只兼容旧事件。``from`` 是当时的旧路径，``to``
- * 是搬走后的位置。空数组是合法状态（字段缺省即空）。 */
-export interface DeliveryPromotion {
-  /** AI 工作间旧路径（已不存在） */
-  from: string;
-  /** 用户工作区新路径（现在的位置） */
-  to: string;
-}
-
 /** 交付状态（能力闸门与交付诚实性）: the structured delivery reconciliation a
  * delegate batch emits at wrap-up — 已交付文件 / 缺口 / 待用户操作 — so the client
  * renders an honest delivery card instead of mining the CEO's prose.
@@ -699,9 +581,7 @@ export interface DeliveryPromotion {
  * 声明路径未落盘为 path_mismatch warning，不挡 delivered；声明未命中时实际落盘进
  * ``artifacts``。声明命中时备份仍不进卡。
  * ``artifacts``: path-level acceptance (accepted+rejected) for declared landings;
- * ``delivered_files`` remains accepted-only for older clients.
- * ``promoted``: 历史 ``{from, to}`` 归位行（``promote_product`` 已撤销；新回合不再写入）。
- * 旧卡 journal 重放仍带此字段；无归位时缺省（= 空数组）。 */
+ * ``delivered_files`` remains accepted-only for older clients. */
 export interface DeliveryStatusPayload {
   execution_id: string;
   state: DeliveryState;
@@ -710,7 +590,6 @@ export interface DeliveryStatusPayload {
   gaps: DeliveryGap[];
   actions: DeliveryAction[];
   artifacts?: DeliveryArtifact[];
-  promoted?: DeliveryPromotion[];
 }
 
 /** Attachment metadata on a mid-flight interjection (no inline text body). */
@@ -825,7 +704,7 @@ export interface ResumeDeferredPayload {
 export interface ResumeSettledPayload {
   message_id: string;
   conversation_id: string;
-  kind: "ask_user" | "plan_review";
+  kind: "ask_user";
   checkpoint_id: string;
   decision: string;
   decided_at: string;
@@ -878,7 +757,7 @@ export interface CostBreakdown {
 }
 
 /** 辩论形态成员集单源（``runtime.debate.types.DebateForm``）；wire / schema / 标签键同集。 */
-export type DebateForm = "debate" | "red_team" | "roundtable";
+export type DebateForm = "debate";
 
 /** One participant on a handoff ``motion_card`` (thin stance, not an argument list). */
 export interface MotionCardSide {
@@ -1010,36 +889,6 @@ export interface DebateRoundSide {
   beat?: "statement" | "attack" | "defense" | "rebuttal" | "thread" | "crux";
 }
 
-/** 红队 finding 结构载荷（O2：全文靠 run_id）。 */
-export interface DebateFindingInfo {
-  id: string;
-  severity: "critical" | "major" | "minor";
-  target: string;
-  attacker_key: string;
-  status: "open" | "answered" | "closed" | "escalated" | "deadlocked" | "unanswered";
-  disposition?: string;
-  attack_run_id?: string;
-  response_run_id?: string;
-  rebuttal_run_id?: string;
-  merged_from?: string[];
-}
-
-/** 圆桌线程 turn 结构载荷（O2：全文靠 run_id）。 */
-export interface DebateThreadTurnInfo {
-  speaker: string;
-  reply_to?: string;
-  run_id: string;
-  ok?: boolean;
-  beat?: "thread" | "crux";
-}
-
-export interface DebateConsensusMapItem {
-  topic: string;
-  consensus?: string[];
-  divergences?: string[];
-  crux?: string;
-}
-
 export interface DebateVerdict {
   real_clash: boolean;
   new_arguments: boolean;
@@ -1169,8 +1018,6 @@ export interface DebateRoundInfo {
   witness_exam?: DebateWitnessExam[];
   scores?: Record<string, DebateRoundScore>;
   evidence_ledger_delta?: EvidenceLedgerEntry[];
-  findings?: DebateFindingInfo[];
-  thread_turns?: DebateThreadTurnInfo[];
 }
 
 export interface DebateNarrativeRound {
@@ -1182,8 +1029,6 @@ export interface DebateNarrativeRound {
   clashes: DebateClash[];
   cross_exam: DebateCrossExam[];
   witness_exam?: DebateWitnessExam[];
-  findings?: DebateFindingInfo[];
-  thread_turns?: DebateThreadTurnInfo[];
 }
 
 /** 交接清单条目：按解决路径分类（value / fact / question）。 */
@@ -1196,10 +1041,6 @@ export interface DebateBriefInfo {
   crux: string;
   strongest_points: Record<string, string>;
   risk_severities?: Record<string, string>;
-  findings?: DebateFindingInfo[];
-  gate?: string;
-  must_fix?: string[];
-  consensus_map?: DebateConsensusMapItem[];
   handoffs?: DebateHandoffInfo[];
   decisive?: string;
   leaning: string;
@@ -1221,7 +1062,6 @@ export interface DebateResultPayload {
   witnesses?: DebateWitnessSeat[];
   brief: DebateBriefInfo;
   evidence_ledger?: EvidenceLedgerEntry[];
-  subtopics?: string[];
   /** 裁判模型 id。 */
   moderator_model?: string;
   /** 裁判模型来源。 */
@@ -1346,7 +1186,7 @@ export interface TurnCollabMetrics {
   escalations: number;
   /** 审计采集降级计数 (turn_metrics.audit_drops); 诊断模式 only. */
   audit_drops?: number;
-  /** boundary_yields 中由用户拍板造成的那部分 (plan_review checkpoint)。 */
+  /** boundary_yields 中由用户拍板造成的那部分。 */
   boundary_yields_by_user?: number;
   /** revises 中由用户「立即改此人」促成的那部分 (redirect 热修)。 */
   revises_by_user?: number;
@@ -1581,13 +1421,8 @@ export type SSEPayloadMap = {
   approval_resolved: ApprovalResolvedPayload;
   checkpoint_required: CheckpointRequiredPayload;
   checkpoint_resolved: CheckpointResolvedPayload;
-  plan_review_required: PlanReviewRequiredPayload;
-  plan_review_resolved: PlanReviewResolvedPayload;
-  stage_card_required: StageCardRequiredPayload;
-  stage_card_resolved: StageCardResolvedPayload;
   plan_revised: PlanRevisedPayload;
   run_plan: RunPlanPayload;
-  graph_append: GraphAppendPayload;
   run_started: RunStartedPayload;
   run_context: RunContextPayload;
   run_output_delta: RunOutputDeltaPayload;
@@ -1606,7 +1441,6 @@ export type SSEPayloadMap = {
   escalation_required: EscalationRequiredPayload;
   escalation_resolved: EscalationResolvedPayload;
   interaction_orphaned: InteractionOrphanedPayload;
-  team_synthesis_preview: TeamSynthesisPreviewPayload;
   coordination_wait: CoordinationWaitPayload;
   workspace_lock_wait: WorkspaceLockWaitPayload;
   desk_provision_wait: DeskProvisionWaitPayload;

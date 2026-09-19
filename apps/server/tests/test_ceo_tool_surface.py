@@ -543,11 +543,8 @@ def test_assembled_offers_create_folder():
     """跨文件夹 P1：create_folder 须进 live CEO 装配（勿只挂 catalog / 漏 prepare.register）。"""
     names = set(_assemble().names)
     assert {
-        "list_folders",
-        "resolve_folder",
+        "folders",
         "create_folder",
-        "list_folder_dir",
-        "read_folder_file",
     } <= names
 
 
@@ -568,12 +565,8 @@ def test_register_always_ceo_tools_declare_loop():
     register_always_ceo_tools(reg, skill_registry=build_system_skill_registry())
     names = set(reg.names)
     assert {
-        "list_folders",
-        "resolve_folder",
+        "folders",
         "create_folder",
-        "list_folder_dir",
-        "read_folder_file",
-        "read_image",
     } <= names
     assert "consult" not in names  # CeoWire.CONSULT — hand-wired with has_entries
     assert names.isdisjoint(
@@ -581,22 +574,14 @@ def test_register_always_ceo_tools_declare_loop():
     )
 
 
-def test_assembled_omits_read_image_when_vision_unconfigured():
-    """未配 VisionReader 且主模型非原生多模态 → 不把 read_image 装进 CEO 工具面。"""
+def test_assembled_omits_retired_read_image():
+    """read_image 已卸：图走 file_read / 贴图原生多模态。"""
     names = set(_assemble().names)
     assert "read_image" not in names
-
-
-def test_assembled_offers_read_image_when_vision_reader():
-    """vision 槽已解析出 VisionReader → read_image 仍在 live CEO 装配。"""
-    names = set(_assemble(vision_reader=object()).names)
-    assert "read_image" in names
-
-
-def test_assembled_offers_read_image_when_main_native_vision():
-    """主模型厂商契约收图、无 VisionReader → 仍装配（同一能力位）。"""
-    names = set(_assemble(model="gpt-4o").names)
-    assert "read_image" in names
+    names_reader = set(_assemble(vision_reader=object()).names)
+    assert "read_image" not in names_reader
+    names_native = set(_assemble(model="gpt-4o").names)
+    assert "read_image" not in names_native
 
 
 def test_assembled_coordination_surface_split():

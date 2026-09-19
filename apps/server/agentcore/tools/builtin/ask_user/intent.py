@@ -1,4 +1,4 @@
-"""Ordinary ask_user pauses are ``decision``. Explicit ``card`` overrides at the tool."""
+"""Ordinary ask_user pauses are ``decision``."""
 
 from __future__ import annotations
 
@@ -15,8 +15,7 @@ def resolve_ask_checkpoint_intent(
 ) -> AskCheckpointIntent:
     """Classify a blocking ``ask_user`` pause for the ``checkpoint_required`` payload.
 
-    Ordinary clarifying asks are always ``decision``. Organize / daily-review
-    settlement uses ``card`` → :func:`card_overrides_intent` at emit time.
+    Ordinary clarifying asks are always ``decision``.
     """
     _ = transcript
     return "decision"

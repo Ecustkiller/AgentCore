@@ -1,10 +1,13 @@
 """Paused-turn durable store — repository + persistence bridge (结构化挂起 2b).
 
 Backed by real PostgreSQL via the ``session_factory`` fixture (auto-skips when none
-is reachable). Pins the round trip that makes a plan_review pause survive a
+is reachable). Pins the round trip that makes an ask_user pause survive a
 disconnect / restart: upsert-by-message_id, the atomic claim (read-and-delete, so a
 turn is never resumed twice), conversation-scoped claim (IDOR-safe), the pending
 list for reopen, and the save/claim bridge the pipeline wires for ``/resume``.
+
+Leftover ``kind=plan_review`` frames: ``suspension_from_json`` ValueError; list skip;
+cloud peek ``GoneError`` 410. They are not restored as live pauses.
 
 Also pins 帧 ⊕ 结论: the party that consumes a frame stamps what ended the card in
 the SAME transaction (``paused_turn_outcomes``), so a concurrent second「继续」reads
@@ -21,6 +24,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 
 from agentcore.config import settings
+from agentcore.core.errors import GoneError
 from agentcore.db.models import (
     PAUSED_TURN_EXPIRED,
     PAUSED_TURN_SETTLED,
@@ -32,14 +36,13 @@ from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFuncti
 from agentcore.runtime.facts import LlmCallFact, RoundBoundaryFact, TurnStartedFact
 from agentcore.runtime.journal import window_from_journal
 from agentcore.runtime.pipeline.resume.window import resumed_captain_window
-from agentcore.runtime.runs import RunPhase, RunPlan, RunSpec, RunState
-from agentcore.runtime.suspension import PlanReviewSuspension, suspension_from_json
+from agentcore.runtime.suspension import AskUserSuspension, suspension_from_json
 from agentcore.runtime.suspension import persistence as persist_mod
 from agentcore.runtime.suspension import retention as retention_mod
 
 
 def _pause_journal_entries() -> list[dict]:
-    """A plan_review pause snapshot the suspending face captures (window-rebuildable)."""
+    """An ask_user pause snapshot the suspending face captures (window-rebuildable)."""
     return [
         TurnStartedFact(
             system_prompt="base sys", user_message="原始请求", model_profile="chat"
@@ -52,9 +55,9 @@ def _pause_journal_entries() -> list[dict]:
             round_idx=0,
             tool_calls=[
                 {
-                    "id": "call_del",
+                    "id": "call_ask",
                     "type": "function",
-                    "function": {"name": "delegate", "arguments": "{}"},
+                    "function": {"name": "ask_user", "arguments": "{}"},
                 }
             ],
             finish_reason="tool_calls",
@@ -62,22 +65,22 @@ def _pause_journal_entries() -> list[dict]:
         .to_fact()
         .entry(),
         {
-            "kind": "plan_review_required",
-            "payload": {"checkpoint_id": "ck1", "steps": [], "pending": []},
+            "kind": "checkpoint_required",
+            "payload": {"checkpoint_id": "ck1", "question": "A 还是 B?"},
             "ts": None,
         },
     ]
 
 
-def _frame(message_id: str, conversation_id: str, user_id: str) -> PlanReviewSuspension:
+def _frame(message_id: str, conversation_id: str, user_id: str) -> AskUserSuspension:
     journal_entries = _pause_journal_entries()
-    return PlanReviewSuspension(
+    return AskUserSuspension(
         message_id=message_id,
         conversation_id=conversation_id,
         user_id=user_id,
         captain_run_id="cap1",
         checkpoint_id="ck1",
-        tool_call_id="call_del",
+        tool_call_id="call_ask",
         base_system_prompt="base sys",
         user_message="原始请求",
         transcript=[
@@ -87,27 +90,46 @@ def _frame(message_id: str, conversation_id: str, user_id: str) -> PlanReviewSus
                 content=None,
                 tool_calls=[
                     ToolCall(
-                        id="call_del",
-                        function=ToolCallFunction(name="delegate", arguments="{}"),
+                        id="call_ask",
+                        function=ToolCallFunction(name="ask_user", arguments="{}"),
                     )
                 ],
             ),
         ],
-        plan=RunPlan(
-            nodes=[
-                RunSpec(run_id="del_a_1", task="调研", role="研究员"),
-                RunSpec(run_id="del_a_2", task="撰写", role="写手", depends_on=["del_a_1"]),
-            ]
-        ),
-        completed={"del_a_1": RunState(phase=RunPhase.COMPLETED, content="S1OUT")},
         journal_entries=journal_entries,
-        steps=[{"run_id": "del_a_1", "role": "研究员", "summary": "…"}],
-        pending=[{"run_id": "del_a_2", "role": "写手"}],
+        question="A 还是 B?",
+        questions=[
+            {
+                "id": "q0",
+                "prompt": "A 还是 B?",
+                "kind": "choice",
+                "options": ["A", "B"],
+                "multiple": False,
+                "default": "",
+            }
+        ],
         trace_id="trace1",
     )
 
 
-async def _seed_turn_journal(session_factory, frame: PlanReviewSuspension) -> None:
+def _leftover_plan_review_frame(
+    message_id: str, conversation_id: str, user_id: str
+) -> dict:
+    """Stored leftover JSON — PlanReviewSuspension is gone; no live codec."""
+    return {
+        "kind": "plan_review",
+        "message_id": message_id,
+        "conversation_id": conversation_id,
+        "user_id": user_id,
+        "captain_run_id": "cap1",
+        "checkpoint_id": "ck1",
+        "tool_call_id": "call_del",
+        "base_system_prompt": "base sys",
+        "user_message": "原始请求",
+    }
+
+
+async def _seed_turn_journal(session_factory, frame: AskUserSuspension) -> None:
     """Simulate append-on-emit: facts already in ``turn_journal`` before pause save."""
     async with session_factory() as s:
         await TurnJournalRepository(s).record(
@@ -134,13 +156,9 @@ async def test_upsert_then_claim_round_trips(session_factory):
         row = await PausedTurnRepository(s).claim(mid, conversation_id=cid, decision="continue")
     assert row is not None
     restored = suspension_from_json(row.frame)
-    assert isinstance(restored, PlanReviewSuspension)
-    assert restored.tool_call_id == "call_del"
-    # NEITHER ``plan`` NOR ``completed`` is serialized into the frame (执行级事件溯源 Phase 2) —
-    # both are re-projected from the journal's plan_snapshot / run-final facts on resume, so a
-    # claimed frame carries an empty plan placeholder + no completed.
-    assert restored.plan.nodes == []
-    assert restored.completed == {}
+    assert isinstance(restored, AskUserSuspension)
+    assert restored.tool_call_id == "call_ask"
+    assert restored.question == "A 还是 B?"
 
     # Claimed once → gone (a second claim sees nothing), and the winner's conclusion
     # is readable the instant the frame stops being: 帧 ⊕ 结论, one transaction.
@@ -151,7 +169,7 @@ async def test_upsert_then_claim_round_trips(session_factory):
     assert again is None
     assert outcome is not None
     assert (outcome.outcome, outcome.decision) == (PAUSED_TURN_SETTLED, "continue")
-    assert (outcome.card_kind, outcome.checkpoint_id) == ("plan_review", "ck1")
+    assert (outcome.card_kind, outcome.checkpoint_id) == ("ask_user", "ck1")
 
 
 async def test_upsert_overwrites_in_place(session_factory):
@@ -248,14 +266,14 @@ async def test_claim_aligns_journal_resolved_to_the_winners_decision(
         entries = await repo.load(mid)
         entries.append(
             {
-                "kind": "plan_review_resolved",
+                "kind": "checkpoint_resolved",
                 "payload": {"checkpoint_id": "ck1", "decision": "stop", "note": "from-a"},
                 "ts": "t-loser",
             }
         )
         entries.append(
             {
-                "kind": "plan_review_resolved",
+                "kind": "checkpoint_resolved",
                 "payload": {
                     "checkpoint_id": "ck1",
                     "decision": "continue",
@@ -275,14 +293,14 @@ async def test_claim_aligns_journal_resolved_to_the_winners_decision(
         mid, conversation_id=cid, decision="continue"
     )
     assert claimed is not None
-    resolved = [e for e in claimed.journal_entries if e["kind"] == "plan_review_resolved"]
+    resolved = [e for e in claimed.journal_entries if e["kind"] == "checkpoint_resolved"]
     assert len(resolved) == 1
     assert resolved[0]["payload"]["decision"] == "continue"
 
     async with session_factory() as s:
         stored = await TurnJournalRepository(s).load(mid)
         outcome = await PausedTurnRepository(s).get_outcome(mid, conversation_id=cid)
-    stored_resolved = [e for e in stored if e["kind"] == "plan_review_resolved"]
+    stored_resolved = [e for e in stored if e["kind"] == "checkpoint_resolved"]
     assert len(stored_resolved) == 1
     assert stored_resolved[0]["payload"]["decision"] == "continue"
     assert outcome is not None
@@ -442,34 +460,53 @@ async def test_save_claim_bridge_round_trips(session_factory, monkeypatch):
         "turn_started",
         "round_boundary",
         "llm_call",
-        "plan_review_required",
+        "checkpoint_required",
     ]
 
     claimed = await persist_mod.claim_paused_turn(mid, conversation_id=cid, decision="continue")
     assert claimed is not None
     assert claimed.message_id == mid
     assert claimed.user_message == "原始请求"
-    # transcript / completed / plan are NOT serialized into the frame (执行级事件溯源 Phase 2
-    # ⑤/⑥ + plan 退场) — resume rebuilds the CEO window, re-seeds finished workers, AND
-    # rebuilds the DAG from turn_journal; only the suspended call id survives (tool_call_id).
     assert claimed.transcript == []
-    assert claimed.completed == {}
-    assert claimed.plan.nodes == []
-    assert claimed.tool_call_id == "call_del"
+    assert claimed.tool_call_id == "call_ask"
     # The journal-so-far is re-hydrated from turn_journal (唯一事实源, not the frame): the
     # display ``journal`` (resume seed) AND the raw ``journal_entries`` (the window source
     # _resumed_captain_window folds) both come back, so resume replays the pre-pause graph.
-    assert any(e.get("type") == "plan_review_required" for e in claimed.journal)
+    assert any(e.get("type") == "checkpoint_required" for e in claimed.journal)
     assert [e["kind"] for e in claimed.journal_entries] == [
         "turn_started",
         "round_boundary",
         "llm_call",
-        "plan_review_required",
+        "checkpoint_required",
     ]
 
     # Claimed → no longer pending, and a re-claim misses (atomic once).
     assert await persist_mod.list_paused_turns(cid) == []
     assert await persist_mod.claim_paused_turn(mid, conversation_id=cid, decision="continue") is None
+
+
+async def test_list_skips_leftover_plan_review_and_load_is_gone(
+    session_factory, monkeypatch
+):
+    """存量 kind=plan_review：list skip；peek GoneError 410；帧留在盘上不删。"""
+    monkeypatch.setattr(persist_mod, "async_session_factory", session_factory)
+    mid, cid, uid = str(uuid4()), str(uuid4()), str(uuid4())
+    leftover = _leftover_plan_review_frame(mid, cid, uid)
+    async with session_factory() as s:
+        await PausedTurnRepository(s).upsert(
+            message_id=mid, conversation_id=cid, user_id=uid, frame=leftover
+        )
+
+    with pytest.raises(ValueError, match="unknown suspension kind"):
+        suspension_from_json(leftover)
+    assert await persist_mod.list_paused_turns(cid) == []
+    with pytest.raises(GoneError, match="该检查点已不再可用"):
+        await persist_mod.load_paused_turn(mid, conversation_id=cid)
+    assert await persist_mod.paused_turn_exists(mid, conversation_id=cid) is False
+    async with session_factory() as s:
+        row = await PausedTurnRepository(s).get(mid)
+    assert row is not None
+    assert row.frame["kind"] == "plan_review"
 
 
 async def test_save_paused_turn_persists_journal_snapshot_without_prior_db_rows(
@@ -494,7 +531,7 @@ async def test_save_paused_turn_persists_journal_snapshot_without_prior_db_rows(
     assert claimed.transcript == []
     window = resumed_captain_window(claimed, history=[])
     assert window is not None
-    assert window[-1].tool_calls[0].function.name == "delegate"
+    assert window[-1].tool_calls[0].function.name == "ask_user"
 
 
 async def test_delete_bridge_drops_frame(session_factory, monkeypatch):
@@ -530,7 +567,7 @@ async def test_restore_paused_turn_after_claim_allows_retry(session_factory, mon
         "turn_started",
         "round_boundary",
         "llm_call",
-        "plan_review_required",
+        "checkpoint_required",
     ]
 
 

@@ -271,6 +271,17 @@ class PermissionAxesUpdate(BaseModel):
     permission_axes: PermissionAxesModel
 
 
+class DuplicateConversationRequest(BaseModel):
+    """Clone the transcript through one message (克隆对话 / 行业 fork).
+
+    ``until_message_id`` is required — there is no whole-conversation clone without
+    a cutoff. The copy includes that row and every earlier row in render order;
+    later turns stay only on the source. Original conversation is unchanged.
+    """
+
+    until_message_id: str = Field(..., min_length=1)
+
+
 class AutoTitleRequest(BaseModel):
     """Local-first parallel title mint: first user message only (no assistant reply)."""
 

@@ -77,7 +77,6 @@ from .path_hints import enrich_missing_path_message
 # tool_clear ``min_chars`` and worker token ceilings — do not reuse those.
 FILE_READ_SAFETY_LINE_CAP = 2000
 FILE_READ_SAFETY_CHAR_CAP = 80_000
-# Alias: folder_fs tests patch this name; value tracks the line cap.
 _DEFAULT_READ_LINES = FILE_READ_SAFETY_LINE_CAP
 
 def _format_numbered_lines(lines: list[str], start_line: int) -> str:
@@ -450,7 +449,8 @@ class FileReadTool:
         return ToolSchema(
             name="file_read",
             description=(
-                "读取工作区文件。http(s) 用 web_fetch；目录用 file_list；"
+                "读取工作区文件。图片发给当前模型（不收图则说明限制）。"
+                "http(s) 用 web_fetch；目录用 file_list；"
                 "定位用 grep / glob。"
                 "本机绝对路径可直接填（HOW→consult(local_desk)）。"
             ),
@@ -492,6 +492,17 @@ class FileReadTool:
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         start = time.monotonic()
+        result = await self._read_on_desk(arguments, context, start)
+        from .named_desk_read import maybe_named_desk_file_read
+
+        retried = await maybe_named_desk_file_read(
+            result, arguments, context, start, self._read_on_desk
+        )
+        return retried if retried is not None else result
+
+    async def _read_on_desk(
+        self, arguments: dict[str, Any], context: ToolContext, start: float
+    ) -> ToolResult:
         rel_path = arguments.get("path", "")
         offset = arguments.get("offset")
         limit = arguments.get("limit")
@@ -522,6 +533,15 @@ class FileReadTool:
         path_key = (rel_path or "").strip().replace("\\", "/")
         ext = extension_of(path_key or rel_path)
         pdf_start = _effective_start_page(start_page_arg)
+
+        from agentcore.workspace.image_files import is_raster_image_path
+
+        if is_raster_image_path(path_key or rel_path):
+            from agentcore.tools.builtin.file_ops.raster import read_raster_image
+
+            return await read_raster_image(
+                rel_path, path_key=path_key, context=context, start=start
+            )
 
         if ext in SKIP_EXTENSIONS and not _is_run_landed_path(context, path_key):
             assembled = _code_execute_assembled(context)

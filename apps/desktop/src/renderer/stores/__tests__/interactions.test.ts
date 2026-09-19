@@ -3,12 +3,10 @@ import {
   type InteractionEntry,
   applyInteractionWireEvent,
   entryToCheckpoint,
-  entryToPlanReview,
   hydrateInteractionsFromJournal,
   isAwaitingUserEntry,
   isHotGateInteractionKind,
   messageCheckpoints,
-  messagePlanReviews,
   noteColdServerSettled,
   useInteractionStore,
 } from "../interactions";
@@ -87,32 +85,30 @@ describe("InteractionStore", () => {
 
   it("cold required on a new host messageId replaces a prior resolved entry", () => {
     store().upsertRequired({
-      kind: "plan_review",
+      kind: "ask_user",
       conversationId: "c1",
       messageId: "m-turn1",
       payload: {
-        checkpoint_id: "pr-reuse",
-        steps: [],
-        pending: [],
+        checkpoint_id: "cp-reuse",
+        question: "第一轮？",
       },
     });
     store().markResolved({
-      kind: "plan_review",
-      id: "pr-reuse",
+      kind: "ask_user",
+      id: "cp-reuse",
       resolution: { decision: "continue" },
     });
     store().upsertRequired({
-      kind: "plan_review",
+      kind: "ask_user",
       conversationId: "c1",
       messageId: "m-turn2",
       payload: {
-        checkpoint_id: "pr-reuse",
-        steps: [{ run_id: "r2", role: "研", summary: "t" }],
-        pending: [],
+        checkpoint_id: "cp-reuse",
+        question: "第二轮？",
       },
     });
-    expect(store().get("pr-reuse")?.status).toBe("pending");
-    expect(store().get("pr-reuse")?.messageId).toBe("m-turn2");
+    expect(store().get("cp-reuse")?.status).toBe("pending");
+    expect(store().get("cp-reuse")?.messageId).toBe("m-turn2");
   });
 
   it("status:pending force replaces a resolved cold entry (recovery)", () => {
@@ -136,15 +132,14 @@ describe("InteractionStore", () => {
     ).toBe("恢复");
   });
 
-  it("orphaned-before-required builds terminal stub; required cannot resurrect pending", () => {
+  it("leftover stage_card required / orphaned is skipped (not a live kind)", () => {
     applyInteractionWireEvent(
       "interaction_orphaned",
       { interaction_id: "sc1", kind: "stage_card" },
       "c1",
       "m1",
     );
-    expect(store().get("sc1")?.status).toBe("orphaned");
-    expect(store().get("sc1")?.kind).toBe("stage_card");
+    expect(store().get("sc1")).toBeUndefined();
     applyInteractionWireEvent(
       "stage_card_required",
       {
@@ -156,7 +151,7 @@ describe("InteractionStore", () => {
       "c1",
       "m1",
     );
-    expect(store().get("sc1")?.status).toBe("orphaned");
+    expect(store().get("sc1")).toBeUndefined();
   });
 
   it("beginSubmit / reopen / markOrphaned lifecycle", () => {
@@ -177,35 +172,33 @@ describe("InteractionStore", () => {
 
   it("reopen does not flip a server-settled cold card back to pending", () => {
     store().upsertRequired({
-      kind: "plan_review",
+      kind: "ask_user",
       conversationId: "c1",
       messageId: "m1",
       payload: {
-        checkpoint_id: "pr-settled",
-        steps: [],
-        pending: [],
+        checkpoint_id: "cp-settled",
+        question: "q",
       },
     });
-    expect(store().beginSubmit("pr-settled")).toBe(true);
-    noteColdServerSettled("pr-settled");
-    store().reopen("pr-settled");
-    expect(store().get("pr-settled")?.status).toBe("submitting");
+    expect(store().beginSubmit("cp-settled")).toBe(true);
+    noteColdServerSettled("cp-settled");
+    store().reopen("cp-settled");
+    expect(store().get("cp-settled")?.status).toBe("submitting");
   });
 
   it("reopen still returns an unsettled cold card to pending", () => {
     store().upsertRequired({
-      kind: "plan_review",
+      kind: "ask_user",
       conversationId: "c1",
       messageId: "m1",
       payload: {
-        checkpoint_id: "pr-live",
-        steps: [],
-        pending: [],
+        checkpoint_id: "cp-live",
+        question: "q",
       },
     });
-    expect(store().beginSubmit("pr-live")).toBe(true);
-    store().reopen("pr-live");
-    expect(store().get("pr-live")?.status).toBe("pending");
+    expect(store().beginSubmit("cp-live")).toBe(true);
+    store().reopen("cp-live");
+    expect(store().get("cp-live")?.status).toBe("pending");
   });
 
   it("orphanConversation flips only hot pending cards", () => {
@@ -349,17 +342,6 @@ describe("InteractionStore", () => {
       payload: { checkpoint_id: "cp1", question: "继续吗？" },
     });
     store().upsertRequired({
-      kind: "plan_review",
-      conversationId: "c1",
-      messageId: "m1",
-      origin: "server",
-      payload: {
-        checkpoint_id: "pr1",
-        steps: [],
-        pending: [],
-      },
-    });
-    store().upsertRequired({
       kind: "approval",
       conversationId: "c1",
       messageId: "m1",
@@ -368,7 +350,6 @@ describe("InteractionStore", () => {
     });
     store().hydratePending("c1", [], { confirmed: ["server"] });
     expect(store().get("cp1")?.status).toBe("pending");
-    expect(store().get("pr1")?.status).toBe("pending");
     expect(store().get("a1")?.status).toBe("resolved");
   });
 
@@ -413,20 +394,8 @@ describe("InteractionStore", () => {
       origin: "server",
       payload: { escalation_id: "e1", question: "q", assumption: "a" },
     });
-    store().upsertRequired({
-      kind: "stage_card",
-      conversationId: "c1",
-      messageId: "m1",
-      origin: "server",
-      payload: {
-        stage_card_id: "sc1",
-        motion: "是否开辩",
-        sides: [],
-        form: "debate",
-      },
-    });
     store().hydratePending("c1", [], { confirmed: ["server"] });
-    for (const id of ["a1", "e1", "sc1"] as const) {
+    for (const id of ["a1", "e1"] as const) {
       const entry = store().get(id);
       expect(entry?.status).toBe("resolved");
       expect(entry?.settledElsewhere).toBe(true);
@@ -450,17 +419,6 @@ describe("InteractionStore", () => {
       origin: "server",
       payload: { checkpoint_id: "cp-gone", question: "q" },
     });
-    store().upsertRequired({
-      kind: "plan_review",
-      conversationId: "c1",
-      messageId: "m2",
-      origin: "sidecar",
-      payload: {
-        checkpoint_id: "pr-gone",
-        steps: [],
-        pending: [],
-      },
-    });
     store().settleUnseenCold("c1", new Set(), {
       confirmed: ["server", "sidecar"],
     });
@@ -470,7 +428,6 @@ describe("InteractionStore", () => {
       decidedAt: "",
       turnStatus: "unknown",
     });
-    expect(store().get("pr-gone")?.status).toBe("orphaned");
   });
 
   it("settleUnseenCold is per-card (not gated on whole paused=[])", () => {
@@ -597,7 +554,6 @@ describe("isAwaitingUserEntry (侧栏「等你」灯判定)", () => {
 
   it("excludes cold kinds (pausedTurns 帧是权威)", () => {
     expect(isAwaitingUserEntry(entry({ kind: "ask_user" }))).toBe(false);
-    expect(isAwaitingUserEntry(entry({ kind: "plan_review" }))).toBe(false);
   });
 });
 
@@ -629,8 +585,8 @@ describe("escalation_resolved id matching (project frame)", () => {
 
 // Journal reload path (replaces retired conversation/projections *FromEvents helpers).
 describe("hydrateInteractionsFromJournal (history replay)", () => {
-  describe("plan_review", () => {
-    it("folds a required→resolved pair into one resolved card", () => {
+  describe("leftover plan_review", () => {
+    it("skips leftover required→resolved (no IX card)", () => {
       hydrateInteractionsFromJournal("a", "m1", [
         {
           type: "plan_review_required",
@@ -645,65 +601,7 @@ describe("hydrateInteractionsFromJournal (history replay)", () => {
           payload: { checkpoint_id: "c1", decision: "continue", note: "放行" },
         },
       ]);
-      const cards = messagePlanReviews("a", "m1");
-      expect(cards).toHaveLength(1);
-      expect(cards[0]).toMatchObject({
-        id: "c1",
-        status: "resolved",
-        decision: "continue",
-        note: "放行",
-      });
-      expect(cards[0].steps.map((s) => s.run_id)).toEqual(["run-1"]);
-      expect(cards[0].pending.map((p) => p.run_id)).toEqual(["next"]);
-    });
-
-    it("keeps an unresolved required as a pending card", () => {
-      hydrateInteractionsFromJournal("a", "m1", [
-        {
-          type: "plan_review_required",
-          payload: {
-            checkpoint_id: "c1",
-            steps: [{ run_id: "run-1", role: "R", summary: "s" }],
-            pending: [],
-          },
-        },
-      ]);
-      const planEntry = store().get("c1");
-      expect(planEntry).toBeDefined();
-      if (!planEntry) return;
-      expect(entryToPlanReview(planEntry)).toMatchObject({
-        status: "pending",
-        decision: null,
-      });
-    });
-
-    it("preserves raise order across multiple checkpoints", () => {
-      hydrateInteractionsFromJournal("a", "m1", [
-        {
-          type: "plan_review_required",
-          payload: {
-            checkpoint_id: "c1",
-            steps: [{ run_id: "run-1", role: "R", summary: "s" }],
-            pending: [],
-          },
-        },
-        {
-          type: "plan_review_required",
-          payload: {
-            checkpoint_id: "c2",
-            steps: [{ run_id: "run-2", role: "R", summary: "s" }],
-            pending: [],
-          },
-        },
-        {
-          type: "plan_review_resolved",
-          payload: { checkpoint_id: "c1", decision: "stop", note: "" },
-        },
-      ]);
-      const cards = messagePlanReviews("a", "m1");
-      expect(cards.map((c) => c.id)).toEqual(["c1", "c2"]);
-      expect(cards[0].status).toBe("resolved");
-      expect(cards[1].status).toBe("pending");
+      expect(store().get("c1")).toBeUndefined();
     });
   });
 

@@ -5,8 +5,7 @@
 交接与 artifacts 对账残差)、失败 / 未执行
 节点——汇成一条 ``delivery_status`` 事件（已交付文件 / 缺口 / 待操作元数据 /
 ``artifacts`` 验收行），模板拼接、不调 LLM。事件继续发射，供 ``finish_guard``
-与「只合回产物」读路径；聊天流产物清单卡已撤。**用户面**已否决验收大卡——桌面/手机仅
-``delivered``/``notes`` 静默、``partial``/``blocked`` 一句轻提示。
+读路径；聊天流产物清单卡已撤。**用户面**已否决验收大卡——对账档位全部静默。
 
 ``delivered_files`` / CEO「已交付」= 仅 ``accepted``；cite-tier 等合同点名路径为
 ``rejected``，不得因 soft-COMPLETED 进入 delivered_files。主清单认 ``artifacts``
@@ -1107,10 +1106,10 @@ def build_delivery_status(
     Emission gate: at least one accepted file, one gap, or one rejected artifact —
     a pure-prose successful batch stays silent (研究 / 分析类委派不该弹交付卡).
 Callers stamp disk truth (``stamp_results_disk_truth``) before emit; this
-builder does not I/O. ``delivered_files`` = accepted only;
+    builder does not I/O. ``delivered_files`` = accepted only;
     ``artifacts`` carries path-level acceptance (accepted + rejected).
 
-    ``promotion_ledger`` (回合共享台账): 历史 ``promoted`` 路径在这里被重映射；
+    ``promotion_ledger`` (回合共享台账): 旧搬家路径在这里被重映射到现在的位置；
     且 ``reconciliation.artifacts`` 与本波实际落盘路径做并集（同 path 后写覆盖；
     声明命中时备份仍省略）。
     不传（旧调用 / 单测）则本波清单即全文。新回合 promotions 为空时是 no-op。
@@ -1234,8 +1233,8 @@ builder does not I/O. ``delivered_files`` = accepted only;
     # 待用户操作：① 无执行环境 → 按会话 location 诚实分流（已在云≠再「先在云上做」；
     #    wire kind 仍可 bind_local_folder；桌面默认同通道，云是选项）；
     # ② 额度 SKIPPED 未跑节点 → 续跑入口。
-    # 整页 QA 预算 defer 不再挂一键续派（旧磁带 kind=website_verify 仅兼容）。
-    # 成篇未写完不再挂 continue_writing——改由对话框接着说。
+    # 整页 QA 预算 defer 不再挂一键续派。
+    # 成篇未写完不再挂一键续写——改由对话框接着说。
     # ① 判定复用 code_execution_enabled_for 单一真相源（与 worker registry / 委派闸同一谓词）。
     actions: list[dict[str, str]] = []
     skipped_budget_roles = [
@@ -1277,7 +1276,7 @@ builder does not I/O. ``delivered_files`` = accepted only;
             }
         )
 
-    # 历史 ``promoted`` 行：旧路径可能仍写在 worker 台账里（RunState 不会因搬家回写）。
+    # 旧搬家行：旧路径可能仍写在 worker 台账里（RunState 不会因搬家回写）。
     # 重映射后新卡不会复活已经搬走的文件；新回合 promotions 为空时这是 no-op。
     from agentcore.runtime.delegate.promotion import apply_turn_promotions
 
@@ -1525,13 +1524,9 @@ async def maybe_reinject_recent_delivery_for_availability_ask(
         raw_gaps = payload.get("gaps")
         raw_actions = payload.get("actions")
         raw_artifacts = payload.get("artifacts")
-        raw_promoted = payload.get("promoted")
         gaps: list[Any] = raw_gaps if isinstance(raw_gaps, list) else []
         actions: list[Any] = raw_actions if isinstance(raw_actions, list) else []
         artifacts: list[Any] = raw_artifacts if isinstance(raw_artifacts, list) else []
-        # 历史 ``promoted`` 行随卡走：重发同一张卡（同 execution_id，fold 保最新），
-        # 丢掉就把旧路径的回查线索抹了。
-        promoted: list[Any] = raw_promoted if isinstance(raw_promoted, list) else []
         files = list(verdict.delivered_files)
         summary = str(payload.get("summary") or "").strip() or (
             f"已交付 {len(files)} 个文件" if files else "无交付缺口"
@@ -1540,7 +1535,7 @@ async def maybe_reinject_recent_delivery_for_availability_ask(
         from agentcore.runtime.delegate.promotion import adopt_journaled_reconciliation
         from agentcore.runtime.events import delivery_status
 
-        reinjected: dict[str, Any] = {
+        journaled: dict[str, Any] = {
             "execution_id": verdict.execution_id,
             "state": verdict.state,
             "summary": summary,
@@ -1548,11 +1543,9 @@ async def maybe_reinject_recent_delivery_for_availability_ask(
             "gaps": [g for g in gaps if isinstance(g, dict)],
             "actions": [a for a in actions if isinstance(a, dict)],
             "artifacts": [a for a in artifacts if isinstance(a, dict)],
-            "promoted": [p for p in promoted if isinstance(p, dict)],
         }
-        sink.emit(delivery_status(**reinjected))
-        # 复用的对账仍是本回合档位真源；卡上已有的历史 ``promoted`` 行一并接手。
-        adopt_journaled_reconciliation(promotion_ledger, reinjected)
+        adopt_journaled_reconciliation(promotion_ledger, journaled)
+        sink.emit(delivery_status(**journaled))
         return True
     except Exception:  # noqa: BLE001 — short-ask side channel must never break the turn
         logger.warning(

@@ -12,11 +12,13 @@ import {
   HOT_INTERACTION_KINDS,
   INTERACTION_CARD_NAME,
   INTERACTION_REGISTRY,
+  LEFTOVER_INTERACTION_SSE_TYPES,
   STAGE_INTERACTION_KINDS,
   hotGateKindTitle,
   isColdResumeKind,
   isHotGateInteractionKind,
   isHotInteractionKind,
+  isLeftoverInteractionSse,
   isStageInteractionKind,
   submitPathOf,
 } from "../registry";
@@ -24,15 +26,9 @@ import {
 const REGISTERED = INTERACTION_REGISTRY.map((d) => d.kind);
 
 describe("INTERACTION_REGISTRY live kinds", () => {
-  it("registers live UserInteractionKind rows (no kickoff card)", () => {
+  it("registers live UserInteractionKind rows (no kickoff / plan_review card)", () => {
     expect([...new Set(REGISTERED)].sort()).toEqual(
-      [
-        "approval",
-        "ask_user",
-        "escalation",
-        "plan_review",
-        "stage_card",
-      ].sort(),
+      ["approval", "ask_user", "escalation"].sort(),
     );
     for (const kind of REGISTERED) {
       expect(INTERACTION_KIND_WIRE[kind]).toBeDefined();
@@ -48,13 +44,14 @@ describe("kind bags derived from INTERACTION_KIND_WIRE flags", () => {
     }
   });
 
-  it("COLD_RESUME_KINDS = pausesTurn && !hot (current: ask_user / plan_review)", () => {
-    expect(COLD_RESUME_KINDS).toEqual(["ask_user", "plan_review"]);
+  it("COLD_RESUME_KINDS = pausesTurn && !hot (current: ask_user)", () => {
+    expect(COLD_RESUME_KINDS).toEqual(["ask_user"]);
     for (const kind of REGISTERED) {
       const w = INTERACTION_KIND_WIRE[kind];
       expect(isColdResumeKind(kind)).toBe(w.pausesTurn && !w.hot);
     }
     expect(isColdResumeKind("team_preview")).toBe(false);
+    expect(isColdResumeKind("plan_review")).toBe(false);
   });
 
   it("HOT_GATE_INTERACTION_KINDS = hot && pausesTurn (current: approval)", () => {
@@ -84,19 +81,30 @@ describe("kind bags derived from INTERACTION_KIND_WIRE flags", () => {
     }
   });
 
-  it("submitPathOf matches the flag priority (hot / cold / stage)", () => {
+  it("submitPathOf matches the flag priority (hot / cold)", () => {
     expect(submitPathOf("approval")).toBe("hot");
     expect(submitPathOf("escalation")).toBe("hot");
     expect(submitPathOf("ask_user")).toBe("cold");
-    expect(submitPathOf("plan_review")).toBe("cold");
-    expect(submitPathOf("stage_card")).toBe("stage");
     for (const kind of REGISTERED) {
       const w = INTERACTION_KIND_WIRE[kind];
       const path = submitPathOf(kind);
       if (w.hot) expect(path).toBe("hot");
       else if (w.pausesTurn) expect(path).toBe("cold");
-      else if (w.journalSurface) expect(path).toBe("stage");
       else throw new Error(`unexpected leftover submit path for ${kind}`);
     }
+  });
+
+  it("leftover plan_review / team_preview SSE types are consume-and-skip", () => {
+    expect([...LEFTOVER_INTERACTION_SSE_TYPES].sort()).toEqual(
+      [
+        "plan_review_required",
+        "plan_review_resolved",
+        "team_preview_required",
+        "team_preview_resolved",
+      ].sort(),
+    );
+    expect(isLeftoverInteractionSse("plan_review_required")).toBe(true);
+    expect(isLeftoverInteractionSse("plan_review_resolved")).toBe(true);
+    expect(isLeftoverInteractionSse("checkpoint_required")).toBe(false);
   });
 });

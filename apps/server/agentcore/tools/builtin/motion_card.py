@@ -19,7 +19,7 @@ __all__ = [
     "parse_motion_card",
 ]
 
-# parse 接受 DebateForm 全员（历史卡不硬拒）；广告 enum 只留 debate，见 handoff schema。
+# 产品只认正反；历史 / 未知 form 字符串回落 debate，不硬拒旧卡。
 MOTION_CARD_FORMS = frozenset(DEBATE_FORM_VALUES)
 
 _RETRY_TIP = (
@@ -62,12 +62,11 @@ def parse_motion_card(raw: Any) -> tuple[dict[str, Any] | None, str]:
     form_raw = raw.get("form", None)
     if form_raw is None or (isinstance(form_raw, str) and not form_raw.strip()):
         form = "debate"
-    elif isinstance(form_raw, str) and form_raw.strip() in MOTION_CARD_FORMS:
-        form = form_raw.strip()
+    elif isinstance(form_raw, str):
+        token = form_raw.strip()
+        form = token if token in MOTION_CARD_FORMS else "debate"
     else:
-        return None, (
-            f"`motion_card.form` 须为 debate（收到 {form_raw!r}）。{_RETRY_TIP}"
-        )
+        form = "debate"
 
     sides_raw = raw.get("sides")
     if not isinstance(sides_raw, list) or len(sides_raw) < 2:

@@ -83,7 +83,7 @@ describe("profileSlotSummary", () => {
     ).toBe("DeepSeek V4 Pro · GPT-4o mini");
   });
 
-  it("appends 后台 / 识图 only when those slots are configured", () => {
+  it("appends 后台 only when that slot is configured", () => {
     expect(
       profileSlotSummary(
         profile({
@@ -100,7 +100,7 @@ describe("profileSlotSummary", () => {
         }),
         CATALOG,
       ),
-    ).toBe("DeepSeek V4 Pro · 跟随主模型 · 后台 GPT-4o mini · 识图 GPT-4o");
+    ).toBe("DeepSeek V4 Pro · 跟随主模型 · 后台 GPT-4o mini");
   });
 
   it("does not mention 后台 / 识图 when unset (keeps list rows compact)", () => {

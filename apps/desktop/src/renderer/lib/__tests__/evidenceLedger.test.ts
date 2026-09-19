@@ -22,12 +22,12 @@ const entry = (
 });
 
 describe("extractLedgerId", () => {
-  it("extracts pure #eN", () => {
-    expect(extractLedgerId("#e3")).toBe("#e3");
+  it("extracts pure #rN", () => {
+    expect(extractLedgerId("#r3")).toBe("#r3");
   });
 
-  it("extracts #eN from dual-write note", () => {
-    expect(extractLedgerId("街访数据 #e3")).toBe("#e3");
+  it("extracts #rN from dual-write note", () => {
+    expect(extractLedgerId("街访数据 #r3")).toBe("#r3");
   });
 
   it("returns null for free-text legacy notes", () => {
@@ -37,22 +37,22 @@ describe("extractLedgerId", () => {
 
 describe("mergeEvidenceLedger", () => {
   it("appends new ids and overwrites same id", () => {
-    const a = entry({ id: "#e1", site: "a.gov.cn" });
-    const b = entry({ id: "#e2", site: "b.com" });
-    const b2 = entry({ id: "#e2", site: "b2.com", title: "updated" });
+    const a = entry({ id: "#r1", site: "a.gov.cn" });
+    const b = entry({ id: "#r2", site: "b.com" });
+    const b2 = entry({ id: "#r2", site: "b2.com", title: "updated" });
     expect(mergeEvidenceLedger([a], [b, b2])).toEqual([a, b2]);
   });
 });
 
 describe("ledger display helpers", () => {
   it("prefers site then title then id", () => {
-    expect(ledgerBadgeLabel(entry({ id: "#e1", site: "court.gov.cn" }))).toBe(
+    expect(ledgerBadgeLabel(entry({ id: "#r1", site: "court.gov.cn" }))).toBe(
       "court.gov.cn",
     );
-    expect(ledgerBadgeLabel(entry({ id: "#e1", title: "判决书" }))).toBe(
+    expect(ledgerBadgeLabel(entry({ id: "#r1", title: "判决书" }))).toBe(
       "判决书",
     );
-    expect(ledgerBadgeLabel(entry({ id: "#e1" }))).toBe("#e1");
+    expect(ledgerBadgeLabel(entry({ id: "#r1" }))).toBe("#r1");
   });
 
   it("maps empty date", () => {
@@ -61,8 +61,8 @@ describe("ledger display helpers", () => {
   });
 
   it("buildLedgerMap keys by id", () => {
-    const m = buildLedgerMap([entry({ id: "#e1" }), entry({ id: "#e2" })]);
-    expect(m.get("#e1")?.id).toBe("#e1");
-    expect(m.get("#e9")).toBeUndefined();
+    const m = buildLedgerMap([entry({ id: "#r1" }), entry({ id: "#r2" })]);
+    expect(m.get("#r1")?.id).toBe("#r1");
+    expect(m.get("#r9")).toBeUndefined();
   });
 });

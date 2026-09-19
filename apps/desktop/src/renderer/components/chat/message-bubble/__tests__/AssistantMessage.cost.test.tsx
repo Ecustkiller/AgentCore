@@ -26,8 +26,15 @@ vi.mock("@/stores/conversation", async (importOriginal) => {
   return {
     ...actual,
     useConversationStore: (
-      sel: (s: { currentConversationId: string | null }) => unknown,
-    ) => sel({ currentConversationId: "conv-1" }),
+      sel: (s: {
+        currentConversationId: string | null;
+        switchConversation: (id: string) => void;
+      }) => unknown,
+    ) =>
+      sel({
+        currentConversationId: "conv-1",
+        switchConversation: vi.fn(),
+      }),
     getActiveRuntime: () => ({ messages: [] }),
     assistantProjectionId: (m: { id: string }) => m.id,
   };
@@ -66,7 +73,6 @@ vi.mock("@/stores/interactions", async (importOriginal) => {
     ...actual,
     useMessageInteractionCards: () => ({
       checkpoints: [],
-      planReviews: [],
     }),
   };
 });
@@ -77,6 +83,10 @@ vi.mock("@/services/messages", () => ({
 
 vi.mock("@/services/turns", () => ({
   runRegenerate: vi.fn(),
+}));
+
+vi.mock("@/hooks/useConversations", () => ({
+  useDuplicateConversation: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@/components/chat/Markdown", () => ({

@@ -150,66 +150,6 @@ def _collapse_malformed_required_args(name: str, parsed: dict[str, object]) -> d
     return parsed
 
 
-def delivery_idle_nudge_prompt(
-    *,
-    rounds: int,
-    recon: bool = False,
-    report: bool = False,
-    channel_dead: bool = False,
-) -> str:
-    """Soft steer for read-idle.
-
-    Factory only arms the ``recon`` branch (conclude/handoff). Files/report copy
-    remains for explicit LoopController construction; product delivery_idle is
-    retired. ``channel_dead``: workspace write path is sticky-unavailable — never
-    urge ``file_write`` / ``str_replace`` (complements Phase 1 tool retire).
-    """
-    if recon:
-        return (
-            f"[系统提示] 调查空转提醒（已连续 {rounds} 轮仅搜读、无结论交接）："
-            "请立即基于已读内容给出结论，或 escalate / handoff 说明阻塞；"
-            "禁止继续换文件通读摊大饼。不要为「再确认」再开一轮全仓 typecheck。"
-        )
-    if channel_dead:
-        return (
-            f"[系统提示] 交文件空转提醒（已连续 {rounds} 轮仅调查、零落盘）："
-            "工作区写盘通道已不可用。请立即 handoff / escalate 说明阻塞与已读结论；"
-            "禁止继续只搜不交，勿再尝试落盘。"
-        )
-    if report:
-        return (
-            f"[系统提示] 交文件空转提醒（已连续 {rounds} 轮仅调查、零落盘）："
-            "任务要求写报告落盘。请立即基于已读证据 file_write 写出报告，"
-            "或 handoff 交接阻塞；禁止继续只搜不写。"
-            "检索工具仍可用，请转入成稿。"
-        )
-    return (
-        f"[系统提示] 交文件空转提醒（已连续 {rounds} 轮仅调查、零落盘）："
-        "任务要求写盘交付。请立即 str_replace / file_write 落地改动，或 handoff 交接阻塞；"
-        "禁止继续大范围搜读空转。仍不落地将收窄调查类工具。"
-    )
-
-
-def delivery_idle_narrow_prompt(
-    *, rounds: int, channel_dead: bool = False
-) -> str | None:
-    """After soft nudge: tools narrowed — still not FINALIZE.
-
-    Factory never arms this for files_expected. Explicit construction may still
-    set ``narrow_rounds``.
-
-    ``channel_dead`` → ``None`` (caller must skip): narrow copy keeps write tools
-    and would push落盘 after the channel is already sticky-dead.
-    """
-    if channel_dead:
-        return None
-    return (
-        f"[系统提示] 交文件空转收窄（已连续 {rounds} 轮仅调查、零落盘）："
-        "大范围调查类工具已收回；仅保留写盘 / handoff / 必要 file_read。"
-        "请立即改文件或交接，勿再展开新调研。"
-    )
-
-
 class StuckReason(StrEnum):
     """Which mechanical loop pattern was observed."""
 
@@ -256,6 +196,9 @@ class ToolAttempt:
     error_summary: str = ""
     # Optional tool-result metadata forwarded for governance (e.g. delegate batch shape).
     meta: dict[str, Any] = field(default_factory=dict)
+    # OpenAI ``image_url`` parts from this call (workspace rasters). Not in
+    # ``meta`` — that dict is logged / fingerprinted.
+    native_image_parts: tuple[dict[str, Any], ...] = ()
 
 
 def resolve_error_class(attempt: ToolAttempt) -> str | None:
@@ -385,12 +328,10 @@ class CircuitBreak:
                     parts.append(WEB_FETCH_RETIRE_STEER)
                 if other_d:
                     names = "、".join(f"`{n}`" for n in other_d)
-                    parts.append(f"工具 {names} 已停用，无法再调用。")
+                    parts.append(f"工具 {names} 已停用。")
                 if parse_d:
                     names = "、".join(f"`{n}`" for n in parse_d)
-                    parts.append(
-                        f"工具 {names} 因参数不是合法 JSON 已停用，无法再调用。"
-                    )
+                    parts.append(f"工具 {names} 因参数不是合法 JSON 已停用。")
         if self.force_segmented:
             names = "、".join(f"`{n}`" for n in self.force_segmented)
             parts.append(

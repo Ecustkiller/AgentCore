@@ -85,12 +85,6 @@ export function foldInteractions(
   const order = { n: 0 };
 
   for (const ev of events) {
-    if (
-      ev.type === "team_preview_required" ||
-      ev.type === "team_preview_resolved"
-    ) {
-      continue;
-    }
     const p = asRecord(ev.payload);
     switch (ev.type) {
       case "approval_required": {
@@ -151,63 +145,14 @@ export function foldInteractions(
         if (id) settle(map, "ask_user", id, "resolved");
         break;
       }
-      case "plan_review_required": {
-        const id = str(p.checkpoint_id);
-        if (!id) break;
-        const steps = Array.isArray(p.steps) ? p.steps : [];
-        const runIds = steps.map((s) => str(asRecord(s).run_id));
-        upsert(map, order, {
-          kind: "plan_review",
-          id,
-          status: "pending",
-          runIds,
-        });
+      case "plan_review_required":
+      case "plan_review_resolved":
         break;
-      }
-      case "plan_review_resolved": {
-        const id = str(p.checkpoint_id);
-        if (id) settle(map, "plan_review", id, "resolved");
-        break;
-      }
-      case "stage_card_required": {
-        const id = str(p.stage_card_id);
-        if (!id) break;
-        const sides = Array.isArray(p.sides)
-          ? p.sides.map((s) => {
-              const r = asRecord(s);
-              return {
-                key: str(r.key),
-                name: str(r.name),
-                stance: str(r.stance),
-              };
-            })
-          : [];
-        const ptrs = Array.isArray(p.fact_pointers)
-          ? p.fact_pointers.map((x) => str(x))
-          : [];
-        upsert(map, order, {
-          kind: "stage_card",
-          id,
-          status: "pending",
-          motion: str(p.motion),
-          sides,
-          form: str(p.form) || "debate",
-          rationale: str(p.rationale),
-          factPointers: ptrs,
-          maxRounds: Number(p.max_rounds ?? 5) || 5,
-          note: typeof p.note === "string" ? p.note : null,
-        });
-        break;
-      }
-      case "stage_card_resolved": {
-        const id = str(p.stage_card_id);
-        if (id) settle(map, "stage_card", id, "resolved");
-        break;
-      }
       case "interaction_orphaned": {
         const id = str(p.interaction_id);
-        const kind = str(p.kind) as ProjectedInteraction["kind"];
-        if (id && kind) settle(map, kind, id, "orphaned");
+        const kind = str(p.kind);
+        if (!(kind in INTERACTION_KIND_WIRE)) break;
+        if (id && kind) settle(map, kind as ProjectedInteraction["kind"], id, "orphaned");
         break;
       }
       case "turn_end":

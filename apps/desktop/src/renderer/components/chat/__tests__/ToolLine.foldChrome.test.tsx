@@ -104,24 +104,6 @@ const FOLD_FAMILY: {
     },
   },
   {
-    tool: "list_folder_dir",
-    label: "List folder dir",
-    args: {
-      folder_id: "550e8400-e29b-41d4-a716-446655440000",
-      directory: "docs",
-    },
-    result: "f docs/a.md\nf docs/b.md",
-  },
-  {
-    tool: "read_folder_file",
-    label: "Read folder file",
-    args: {
-      folder_id: "550e8400-e29b-41d4-a716-446655440000",
-      path: "README.md",
-    },
-    result: "# 跨文件夹正文不应出现在折叠行",
-  },
-  {
     tool: "remember",
     label: "Remember",
     args: { content: "以后用中文回复" },
@@ -311,7 +293,7 @@ describe("ToolLine · 过程工具折叠一行", () => {
     expect(screen.getAllByText(/3 场对话/)).toHaveLength(1);
   });
 
-  it("file_list / list_folder_dir chip directory; '.' stays off the title", () => {
+  it("file_list chips directory; '.' stays off the title", () => {
     const { rerender, container } = renderWithTooltip(
       <ToolLine
         step={step({
@@ -341,28 +323,6 @@ describe("ToolLine · 过程工具折叠一行", () => {
     );
     expect(screen.getByText("List dir")).toBeTruthy();
     expect(screen.queryByText(/^\.$/)).toBeNull();
-
-    rerender(
-      <TooltipProvider>
-        <ToolLine
-          step={step({
-            id: "call_3",
-            tool_name: "list_folder_dir",
-            arguments: {
-              folder_id: "550e8400-e29b-41d4-a716-446655440000",
-              directory: "docs",
-            },
-            result: "f docs/a.md",
-            status: "success",
-          })}
-        />
-      </TooltipProvider>,
-    );
-    expect(screen.getByText("List folder dir")).toBeTruthy();
-    expect(screen.getByText("docs")).toBeTruthy();
-    expect(
-      screen.queryByText("550e8400-e29b-41d4-a716-446655440000"),
-    ).toBeNull();
   });
 
   it("git title chip is subcommand, not the commit headline", () => {

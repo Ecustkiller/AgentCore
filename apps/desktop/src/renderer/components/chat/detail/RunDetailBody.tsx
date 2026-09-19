@@ -31,10 +31,7 @@ import {
   isThinkingLivePlaceholder,
 } from "./debateModerator";
 import { receivedContextForList, selectRunTaskSection } from "./runTaskSection";
-import {
-  ContinuationChainSection,
-  continuationComparePair,
-} from "./sections/RunContinuationChain";
+import { ContinuationChainSection } from "./sections/RunContinuationChain";
 import { DebriefSection } from "./sections/RunDebrief";
 import { EscalationSection } from "./sections/RunEscalations";
 import { RunOutcomeAcceptSection } from "./sections/RunOutcomeAccept";
@@ -254,20 +251,6 @@ export function RunDetailBody({
           agents={execution.agents}
           execution={execution}
           onSelect={(rid, role) => showRunDetail(messageId, rid, role)}
-          onCompare={
-            conversationId
-              ? () => {
-                  navigate(
-                    turnDetailPath(
-                      conversationId,
-                      messageId,
-                      "compare",
-                      continuationComparePair(chain, run.id),
-                    ),
-                  );
-                }
-              : undefined
-          }
         />
       )}
 
@@ -313,7 +296,6 @@ export function RunDetailBody({
             composingTool={live ? agent.toolProgress : null}
             messageId={timelineKey}
             checkpoints={[]}
-            planReviews={[]}
           />
         )}
         {showDebrief && run.debrief ? (
@@ -351,7 +333,6 @@ export function RunDetailBody({
           messageId={timelineKey}
           conversationId={conversationId}
           checkpoints={[]}
-          planReviews={[]}
           isStreaming={live}
           onOpenWorkspacePath={(path) =>
             openWorkspaceDeliverable(conversationId, path)

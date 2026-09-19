@@ -14,9 +14,6 @@ export const conversationKeys = {
   /** 最近删除（`GET /v1/conversations/trash`）— 已删对话 + 保留天数。Shares the
    * 「最近删除」view with {@link folderKeys.trash}; two trips, one pane. */
   trash: ["conversations", "trash"] as const,
-  /** 项目协作时间线（`GET /v1/folders/{id}/collaboration-timeline`）。 */
-  collaborationTimeline: (folderId: string) =>
-    ["collaboration-timeline", folderId] as const,
 };
 
 /** 项目（folder）自有的查询面。The live folder list itself rides on

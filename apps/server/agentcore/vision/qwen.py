@@ -93,7 +93,7 @@ class QwenVLReader:
         """Return Qwen-VL's reading of ``png_base64`` guided by ``prompt``.
 
         The :class:`VisionReading` carries the text reading + the call's token usage / model,
-        so ``read_image`` / attachment eye→text can bill the sub-call into the turn's
+        so a historical sidecar sub-call can bill into the turn's
         cost ledger. Raises a typed :mod:`agentcore.core.errors` LLM error on auth /
         balance / rate / timeout / server failure or an empty reply — callers map it
         to a clean tool error, so a bad key or down provider never hangs the turn.

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from agentcore.runtime.events import (
     EventSink,
     EventType,
@@ -20,7 +22,6 @@ from agentcore.runtime.events import (
 )
 from agentcore.runtime.events.interaction import (
     checkpoint_required,
-    plan_review_required,
 )
 from agentcore.runtime.events.sink import synthesize_required_marker
 
@@ -139,8 +140,12 @@ def test_seed_run_processes_merge_and_stream_isolation():
     assert sink.raw_run_processes()["r1"] == merged["r1"]
 
 
-def test_synthesize_retired_team_preview_is_noop_before_team():
-    """Leftover team_preview_required does not insert a team_preview marker."""
+@pytest.mark.parametrize(
+    "retired_type",
+    ["team_preview_required", "plan_review_required"],
+)
+def test_synthesize_retired_required_is_noop_before_team(retired_type: str):
+    """Leftover team_preview / plan_review required does not insert a marker."""
     steps: list[dict] = [
         {"kind": "content", "text": "intro"},
         {"kind": "team", "execution_id": "exec-1"},
@@ -148,23 +153,27 @@ def test_synthesize_retired_team_preview_is_noop_before_team():
     ]
     assert not synthesize_required_marker(
         steps,
-        "team_preview_required",
-        {"checkpoint_id": "cp-tp"},
+        retired_type,
+        {"checkpoint_id": "cp-retired"},
     )
     assert [s["kind"] for s in steps] == [
         "content",
         "team",
         "content",
     ]
-    assert not any(s.get("kind") == "team_preview" for s in steps)
+    assert not any(s.get("kind") in {"team_preview", "plan_review"} for s in steps)
 
 
-def test_synthesize_retired_team_preview_is_noop_without_team():
+@pytest.mark.parametrize(
+    "retired_type",
+    ["team_preview_required", "plan_review_required"],
+)
+def test_synthesize_retired_required_is_noop_without_team(retired_type: str):
     steps: list[dict] = [{"kind": "content", "text": "only"}]
     assert not synthesize_required_marker(
         steps,
-        "team_preview_required",
-        {"checkpoint_id": "cp-tp"},
+        retired_type,
+        {"checkpoint_id": "cp-retired"},
     )
     assert steps == [{"kind": "content", "text": "only"}]
 
@@ -194,27 +203,24 @@ def test_live_emit_marker_dedups_against_seeded():
     assert sum(1 for s in timeline if s.get("kind") == "checkpoint") == 1
 
 
-def test_live_retired_team_preview_does_not_insert_marker():
-    """New turns do not emit a team_preview marker; leftover type is skipped."""
+@pytest.mark.parametrize(
+    "retired_type",
+    ["team_preview_required", "plan_review_required"],
+)
+def test_live_retired_required_does_not_insert_marker(retired_type: str):
+    """New turns do not emit leftover markers; unknown type is skipped."""
     sink = EventSink()
     sink.emit(_plan())
     sink.persist_required_marker(
-        "team_preview_required",
-        {"checkpoint_id": "cp-tp"},
+        retired_type,
+        {"checkpoint_id": "cp-retired"},
     )
     timeline = sink.process_timeline()
     assert timeline is not None
     kinds = [s["kind"] for s in timeline]
     assert kinds == ["team"]
     assert "team_preview" not in kinds
-
-
-def test_synthesize_plan_review_append():
-    steps: list[dict] = [{"kind": "content", "text": "x"}]
-    assert synthesize_required_marker(
-        steps, EventType.PLAN_REVIEW_REQUIRED, {"checkpoint_id": "pr-1"}
-    )
-    assert [s["kind"] for s in steps] == ["content", "plan_review"]
+    assert "plan_review" not in kinds
 
 
 def test_content_reset_reinjection_history_and_sse_skip_process_and_checkpointer():
@@ -307,18 +313,3 @@ def test_seeded_structural_gate_still_none_for_pure_prose():
     sink.seed_process([{"kind": "reasoning", "text": "t"}, {"kind": "content", "text": "c"}])
     assert sink.process_timeline() is None
     assert len(sink.raw_process()) == 2
-
-
-def test_plan_review_required_lands_marker():
-    sink = EventSink()
-    sink.emit(
-        plan_review_required(
-            checkpoint_id="pr-1",
-            conversation_id="c1",
-            steps=[],
-            pending=[],
-        )
-    )
-    tl = sink.process_timeline()
-    assert tl is not None
-    assert tl == [{"kind": "plan_review", "checkpoint_id": "pr-1"}]

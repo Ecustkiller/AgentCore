@@ -249,11 +249,9 @@ def _run(llm, runner, config):
 # --- 收敛 / 轮次治理 ---------------------------------------------------------
 
 
-def test_for_form_max_rounds_by_shape():
-    """形态默认仅【安全上限】各异（圆桌 4、正反/红队 5）；轮数由主持人逐轮自判收敛。"""
-    assert RoundPolicy.for_form(DebateForm.ROUNDTABLE).max_rounds == 4
+def test_for_form_max_rounds_is_safety_cap():
+    """正反默认仅【安全上限】5 轮；轮数由主持人逐轮自判收敛。"""
     assert RoundPolicy.for_form(DebateForm.DEBATE).max_rounds == 5
-    assert RoundPolicy.for_form(DebateForm.RED_TEAM).max_rounds == 5
 
 
 def test_node_summary_is_rounds_and_stop_label():
@@ -604,33 +602,9 @@ def test_to_ceo_output_has_brief_and_narrative():
 
     assert "决策简报" in out
     assert "交锋叙事线" in out
+    assert out.index("决策简报") < out.index("交锋叙事线")
     assert "倾向" in out
     assert "要你拍" in out
-
-
-def test_roundtable_narrative_first():
-    """探讨/学习类（圆桌）过程叙事线先行、简报收尾（§4.3 自适应呈现）。"""
-    sides = [
-        DebateSide(key="a", name="视角A", stance="A"),
-        DebateSide(key="b", name="视角B", stance="B"),
-        DebateSide(key="c", name="视角C", stance="C"),
-    ]
-    llm = _ScriptedLLM(judge_results=[_CONVERGE])
-    runner = _RecordingRunner()
-    result = _run(
-        llm,
-        runner,
-        _config(
-            form=DebateForm.ROUNDTABLE,
-            sides=sides,
-            policy=RoundPolicy(max_rounds=3),
-        ),
-    )
-    out = result.to_ceo_output()
-
-    assert result.narrative_first is True
-    assert out.index("交锋叙事线") < out.index("决策简报")
-    assert len(result.rounds[0].turns) == 3
 
 
 # --- 逐轮增量回调（debate_round_started / debate_round 的注入点） -----------------
@@ -1076,29 +1050,9 @@ def test_brief_prompt_carries_user_followups():
 # --- 质询回合（P1，辩论编排设计.md §4-2.1）--------------------------------------
 
 
-def _red_team_sides():
-    return [
-        DebateSide(key="plan", name="方案方", stance="推行该方案", is_subject=True),
-        DebateSide(key="red", name="红队", stance="挑该方案的刺"),
-    ]
-
-
-def test_cross_exam_enabled_only_for_debate_form():
-    """质询回合仅正反 DEBATE 开启（O1：红队三拍取代通用质询）。"""
+def test_cross_exam_enabled_for_debate():
+    """质询回合正反开启。"""
     assert Moderator._cross_exam_enabled(_config(policy=RoundPolicy(max_rounds=5))) is True
-    assert (
-        Moderator._cross_exam_enabled(
-            _config(form=DebateForm.RED_TEAM, sides=_red_team_sides(), policy=RoundPolicy(max_rounds=5))
-        )
-        is False
-    )
-    rt = [DebateSide(key=k, name=k, stance=k) for k in ("a", "b", "c")]
-    assert (
-        Moderator._cross_exam_enabled(
-            _config(form=DebateForm.ROUNDTABLE, sides=rt, policy=RoundPolicy(max_rounds=4))
-        )
-        is False
-    )
 
 
 def test_cross_exam_questions_parsed_and_filters_hallucinated_sides():
@@ -1194,20 +1148,6 @@ def test_cross_exam_beat_populates_round_and_feeds_judge():
     assert assess and "本轮【质询环节】问答" in assess[0]
 
 
-def test_cross_exam_skipped_for_roundtable():
-    """圆桌闸关时质询 runner 从不被调用。"""
-    cx_rt = _RecordingCrossExam()
-    rt = [DebateSide(key=k, name=k, stance=k) for k in ("a", "b", "c")]
-    asyncio.run(
-        Moderator(provider=_ScriptedLLM(judge_results=[_CONVERGE]), model="m").run(
-            _config(form=DebateForm.ROUNDTABLE, sides=rt, policy=RoundPolicy(max_rounds=1)),
-            run_round=_RecordingRunner(),
-            run_cross_exam=cx_rt,
-        )
-    )
-    assert cx_rt.calls == []
-
-
 def test_run_without_cross_exam_runner_is_unchanged():
     """不注入质询 runner（默认）→ 无质询、无记分依赖，逐字回退到「立论→裁判」，零行为变化。"""
     llm = _ScriptedLLM(judge_results=[_CONVERGE])
@@ -1220,21 +1160,8 @@ def test_run_without_cross_exam_runner_is_unchanged():
 
 
 def test_closing_enabled_skipped_for_new_debates():
-    """新场不跑结辩：正反 / 红队 / 圆桌闸均关。"""
+    """新场不跑结辩。"""
     assert Moderator._closing_enabled(_config(policy=RoundPolicy(max_rounds=5))) is False
-    assert (
-        Moderator._closing_enabled(
-            _config(form=DebateForm.RED_TEAM, sides=_red_team_sides(), policy=RoundPolicy(max_rounds=5))
-        )
-        is False
-    )
-    rt = [DebateSide(key=k, name=k, stance=k) for k in ("a", "b", "c")]
-    assert (
-        Moderator._closing_enabled(
-            _config(form=DebateForm.ROUNDTABLE, sides=rt, policy=RoundPolicy(max_rounds=4))
-        )
-        is False
-    )
 
 
 def test_closing_skipped_for_debate():
@@ -1252,20 +1179,6 @@ def test_closing_skipped_for_debate():
     assert result.closings == []
     assert result.brief.crux == _DEFAULT_BRIEF["crux"]
     assert llm.brief_calls == 1
-
-
-def test_closing_skipped_for_roundtable():
-    """圆桌闸关时结辩 runner 从不被调用。"""
-    rt_closing = _RecordingClosing()
-    rt = [DebateSide(key=k, name=k, stance=k) for k in ("a", "b", "c")]
-    asyncio.run(
-        Moderator(provider=_ScriptedLLM(judge_results=[_CONVERGE]), model="m").run(
-            _config(form=DebateForm.ROUNDTABLE, sides=rt, policy=RoundPolicy(max_rounds=1)),
-            run_round=_RecordingRunner(),
-            run_closing=rt_closing,
-        )
-    )
-    assert rt_closing.calls == []
 
 
 def test_closing_skipped_when_all_failed():
@@ -1368,33 +1281,6 @@ def test_brief_parses_decisive_without_score_block():
     assert result.brief.decisive == decisive
     assert "胜负手" in result.to_ceo_output() and decisive in result.to_ceo_output()
     assert result.to_event_payload()["brief"]["decisive"] == decisive
-
-
-def test_roundtable_brief_does_not_cut_winner():
-    """圆桌：简报不裁胜负（不喂记分、不要求 leaning 对齐净分）。"""
-    sides = [
-        DebateSide(key="a", name="视角A", stance="A"),
-        DebateSide(key="b", name="视角B", stance="B"),
-        DebateSide(key="c", name="视角C", stance="C"),
-    ]
-    judge = {
-        **_CONVERGE,
-        "scores": {
-            "a": {"argument": 3, "engagement": 3, "evidence": 3},
-            "b": {"argument": 4, "engagement": 4, "evidence": 4},
-            "c": {"argument": 2, "engagement": 2, "evidence": 2},
-        },
-    }
-    llm = _ScriptedLLM(judge_results=[judge])
-    _run(
-        llm,
-        _RecordingRunner(),
-        _config(form=DebateForm.ROUNDTABLE, sides=sides, policy=RoundPolicy(max_rounds=1)),
-    )
-    brief_prompts = [u for (s, u) in llm.seen if "请据此产出简报" in u]
-    assert brief_prompts
-    assert "不裁谁对谁错" in brief_prompts[0]
-    assert "观点光谱" in brief_prompts[0]
 
 
 def test_round_payload_has_cross_exam_and_scores_without_polluting_verdict():

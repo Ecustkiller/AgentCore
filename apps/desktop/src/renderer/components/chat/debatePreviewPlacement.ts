@@ -14,7 +14,7 @@ function isWorkerRun(run: TeamGraphRun): boolean {
  * turn itself (often emitted before `run_plan` / kickoff) and must not count —
  * live SSE drops that frame; journal hydrate restores it.
  * Hang / stop-before-start stay graph-less unless workers are already running.
- * plan_review mid-wave pause (completed worker nodes exist) still shows the graph.
+ * Mid-wave pause (completed worker nodes exist) still shows the graph.
  */
 export function teamHasStartedRuns(runs: readonly TeamGraphRun[]): boolean {
   return runs.some(

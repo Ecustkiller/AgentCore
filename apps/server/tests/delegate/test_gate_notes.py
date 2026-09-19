@@ -1,4 +1,4 @@
-"""plan_review CONTINUE → gate_notes 注入（llm 压缩；deterministic / 旧帧不下发）。"""
+"""gate_notes 注入（llm 压缩；deterministic / 旧帧不下发）。"""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 def _plan() -> RunPlan:
     return RunPlan(
         nodes=[
-            RunSpec(run_id="r1", task="调研", role="调研", checkpoint_after=True),
+            RunSpec(run_id="r1", task="调研", role="调研"),
             RunSpec(run_id="r2", task="实现", role="实现", depends_on=["r1"]),
             RunSpec(run_id="r3", task="旁支", role="旁支"),  # 非下游
         ]
@@ -134,9 +134,9 @@ def test_old_frame_missing_ceo_review_safe():
     assert plan.by_id("r2").gate_notes == ""
 
 
-def test_plan_review_continue_note_does_not_steer():
-    """定案：plan_review CONTINUE+note 仍不 apply_steer（与 kickoff 分叉）。"""
-    # 行为钉在 resume_plan 条件：仅 plan_review ADJUST 或 kickoff CONTINUE 才 steer。
+def test_continue_note_does_not_steer():
+    """定案：CONTINUE+note 仍不 apply_steer（与 kickoff 分叉）。"""
+    # 行为钉在 resume_plan 条件：仅 ADJUST 或 kickoff CONTINUE 才 steer。
     # 此处钉 gate 与 steer 分通道：CONTINUE 路径只写 gate_notes。
     plan = _plan()
     body = compress_ceo_review_for_gate(

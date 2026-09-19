@@ -24,7 +24,6 @@ def _spec(
     deps: tuple[str, ...] = (),
     *,
     on_failure: str = "degrade",
-    checkpoint_after: bool = False,
 ) -> RunSpec:
     return RunSpec(
         run_id=run_id,
@@ -32,7 +31,6 @@ def _spec(
         agent_id=run_id,
         role=run_id,
         depends_on=list(deps),
-        checkpoint_after=checkpoint_after,
         policy=RunPolicy(on_failure=on_failure),
     )
 
@@ -703,88 +701,7 @@ async def test_child_budget_divides_by_ready_width_not_unready_sink():
     assert seen["lead"] >= 1
 
 
-# --- 受监督的波循环: on_boundary CHECKPOINT arm (结构化挂起 2a) ------------------
-
-
-async def test_on_checkpoint_fires_after_marked_node_with_downstream():
-    # a (checkpoint_after) → b: the hook fires once after a's wave with reason
-    # CHECKPOINT, seeing a as completed and a downstream node still pending; PROCEED
-    # runs b.
-    plan = RunPlan()
-    plan.add(_spec("a", checkpoint_after=True))
-    plan.add(_spec("b", ("a",)))
-    seen: list[tuple] = []
-
-    async def hook(reason, nodes, completed):
-        seen.append((reason, [n.run_id for n in nodes], set(completed)))
-        return BoundaryOutcome.PROCEED
-
-    res = await WaveScheduler().run(plan, _ok, on_boundary=hook)
-    assert seen == [(BoundaryReason.CHECKPOINT, ["a"], {"a"})]
-    assert res["a"].phase is RunPhase.COMPLETED
-    assert res["b"].phase is RunPhase.COMPLETED
-
-
-async def test_on_checkpoint_stop_halts_downstream():
-    # ABORT ends scheduling at the wave boundary: a is kept, b never runs.
-    plan = RunPlan()
-    plan.add(_spec("a", checkpoint_after=True))
-    plan.add(_spec("b", ("a",)))
-
-    async def hook(_reason, _nodes, _completed):
-        return BoundaryOutcome.ABORT
-
-    res = await WaveScheduler().run(plan, _ok, on_boundary=hook)
-    assert res["a"].phase is RunPhase.COMPLETED
-    # The gated downstream is materialised as SKIPPED (clean graph/overview).
-    assert res["b"].phase is RunPhase.SKIPPED
-
-
-async def test_on_checkpoint_not_fired_on_last_wave():
-    # A marked node with nothing downstream must NOT pause — no pending work to gate.
-    plan = RunPlan()
-    plan.add(_spec("a", checkpoint_after=True))
-    calls = {"n": 0}
-
-    async def hook(_reason, _nodes, _completed):
-        calls["n"] += 1
-        return BoundaryOutcome.PROCEED
-
-    res = await WaveScheduler().run(plan, _ok, on_boundary=hook)
-    assert calls["n"] == 0
-    assert res["a"].phase is RunPhase.COMPLETED
-
-
-async def test_on_checkpoint_skips_failed_marked_node():
-    # A checkpoint node that FAILED does not pause — its on_failure governs instead.
-    plan = RunPlan()
-    plan.add(_spec("a", checkpoint_after=True, on_failure="degrade"))
-    plan.add(_spec("b", ("a",)))
-    calls = {"n": 0}
-
-    async def ex(spec: RunSpec, _completed) -> RunState:
-        if spec.run_id == "a":
-            return RunState(phase=RunPhase.FAILED, error="boom")
-        return RunState(phase=RunPhase.COMPLETED, content="b")
-
-    async def hook(_reason, _nodes, _completed):
-        calls["n"] += 1
-        return BoundaryOutcome.PROCEED
-
-    res = await WaveScheduler().run(plan, ex, on_boundary=hook)
-    assert calls["n"] == 0
-    assert res["a"].phase is RunPhase.FAILED
-    assert res["b"].phase is RunPhase.COMPLETED  # degrade lets it proceed
-
-
-async def test_checkpoint_after_inert_without_hook():
-    # The marker is fully inert when no hook is injected (autonomous jobs / tests).
-    plan = RunPlan()
-    plan.add(_spec("a", checkpoint_after=True))
-    plan.add(_spec("b", ("a",)))
-    res = await WaveScheduler().run(plan, _ok)
-    assert res["a"].phase is RunPhase.COMPLETED
-    assert res["b"].phase is RunPhase.COMPLETED
+# --- 受监督的波循环: on_boundary SCOPE arm (偏离信号) -----
 
 
 async def test_run_rejects_cyclic_plan():
@@ -1132,10 +1049,10 @@ async def test_metrics_boundary_counts_zero_for_ordinary_plan():
     assert (m.escalations, m.scope_escalations) == (0, 0)
 
 
-async def test_metrics_counts_checkpoint_boundary():
-    # checkpoint_after → one CHECKPOINT boundary fired (user plan_review arm).
+async def test_metrics_checkpoint_boundaries_stay_zero():
+    """CHECKPOINT arm retired — a DAG with a boundary hook never tallies checkpoint_boundaries."""
     plan = RunPlan()
-    plan.add(_spec("a", checkpoint_after=True))
+    plan.add(_spec("a"))
     plan.add(_spec("b", ("a",)))
 
     async def hook(_reason, _nodes, _completed):
@@ -1144,7 +1061,7 @@ async def test_metrics_counts_checkpoint_boundary():
     sink: list[BatchMetrics] = []
     await WaveScheduler().run(plan, _ok, on_boundary=hook, metrics_sink=sink)
     m = sink[0]
-    assert m.checkpoint_boundaries == 1
+    assert m.checkpoint_boundaries == 0
     assert (m.bind_boundaries, m.scope_boundaries) == (0, 0)
 
 

@@ -14,7 +14,7 @@ describe("message export chrome", () => {
     expect(MESSAGE_EXPORT_DELIVERABLE_HEADING).toBe("【交付】");
     expect(MESSAGE_EXPORT_STEP_CHROME.team).toBe("· （团队协作）");
     expect(MESSAGE_EXPORT_STEP_CHROME.checkpoint).toBe("· （向你确认）");
-    expect(MESSAGE_EXPORT_STEP_CHROME.plan_review).toBe("· （计划复核）");
+    expect("plan_review" in MESSAGE_EXPORT_STEP_CHROME).toBe(false);
     expect("team_preview" in MESSAGE_EXPORT_STEP_CHROME).toBe(false);
     expect(MESSAGE_EXPORT_TOOL_STATUS_SUFFIX.error).toBe("（失败）");
     expect(MESSAGE_EXPORT_TOOL_STATUS_SUFFIX.running).toBe("（进行中）");

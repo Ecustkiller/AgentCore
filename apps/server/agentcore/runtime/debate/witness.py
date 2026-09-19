@@ -378,7 +378,7 @@ def register_witness_answers_in_ledger(
     seat: WitnessSeat,
     exchanges: Sequence[CrossExamQa],
 ) -> list[str]:
-    """答问登记进场级证据台账；返回新登记的 ``#eN`` 列表。"""
+    """答问登记进场级证据台账；返回新登记的 ``#rN`` 列表。"""
     if ledger is None:
         return []
     ids: list[str] = []

@@ -150,7 +150,7 @@ def test_format_for_ceo_rejected_file_acceptance():
     assert "> 文件产出（路径已核）：`AgentCore/文档/research/a.md`" not in out
 
 
-def test_format_for_ceo_appends_tool_failures_and_hard_constraint():
+def test_format_for_ceo_appends_tool_failures():
     t = tool(Provider([]))
     plan = RunPlan(nodes=[RunSpec(run_id="w1", task="跑脚本", role="工程师")])
     results = {
@@ -175,11 +175,9 @@ def test_format_for_ceo_appends_tool_failures_and_hard_constraint():
     assert "failures=2" in out
     assert "succeeded_after=false" in out
     assert "Sandbox crash" in out
-    assert "【工具失败硬约束】" in out
-    assert "禁止宣称已完成" in out
 
 
-def test_format_for_ceo_tool_failures_compensated_no_hard_constraint():
+def test_format_for_ceo_tool_failures_compensated():
     t = tool(Provider([]))
     plan = RunPlan(nodes=[RunSpec(run_id="w1", task="跑脚本", role="工程师")])
     results = {
@@ -199,7 +197,6 @@ def test_format_for_ceo_tool_failures_compensated_no_hard_constraint():
     out = format_for_ceo(t, plan, results)
     assert "### tool_failures" in out
     assert "succeeded_after=true" in out
-    assert "【工具失败硬约束】" not in out
 
 
 def test_format_for_ceo_omits_manifest_when_worker_touched_no_files():

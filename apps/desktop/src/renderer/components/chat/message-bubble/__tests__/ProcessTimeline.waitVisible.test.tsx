@@ -20,7 +20,6 @@ afterEach(cleanup);
 
 const emptyCards = {
   checkpoints: [] as never[],
-  planReviews: [] as never[],
 };
 
 function renderTimeline(process: ProcessStep[], isStreaming: boolean) {
@@ -107,10 +106,10 @@ describe("shouldShowThinkingTail", () => {
   const toolRunning: ProcessStep = { ...toolDone, status: "running" };
   const waitDone: ProcessStep = { ...toolDone, tool_name: "wait" };
   const team: ProcessStep = { kind: "team", execution_id: "e1" };
-  const planReview: ProcessStep = {
+  const leftoverPlanReview = {
     kind: "plan_review",
     checkpoint_id: "pr1",
-  };
+  } as unknown as ProcessStep;
 
   const live = {
     isStreaming: true,
@@ -127,7 +126,9 @@ describe("shouldShowThinkingTail", () => {
 
   it("treats marker tails as no-live-node (orchestration stand-in)", () => {
     expect(shouldShowThinkingTail({ ...live, last: team })).toBe(true);
-    expect(shouldShowThinkingTail({ ...live, last: planReview })).toBe(true);
+    expect(shouldShowThinkingTail({ ...live, last: leftoverPlanReview })).toBe(
+      true,
+    );
   });
 
   it("does not stack on live reasoning/content or composing", () => {

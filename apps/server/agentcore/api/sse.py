@@ -437,7 +437,7 @@ async def _conversation_generator(
 
     The idle gap is the point (云对话多端同权 B2 · §2.3). A端 parked here does not get a
     ``204`` and then miss everything after it: when the next run registers — plain send,
-    FIFO drain, cold-resume wake, stage_card — the hub hands over that sink and this
+    FIFO drain, cold-resume wake — the hub hands over that sink and this
     stream replays + tails it exactly like a fresh attach, boundary comment included
     (clients already treat the catch-up段 as idempotent, so no protocol change).
 

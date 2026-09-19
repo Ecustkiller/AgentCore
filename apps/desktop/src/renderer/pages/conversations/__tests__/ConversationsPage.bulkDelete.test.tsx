@@ -81,10 +81,6 @@ vi.mock("../ConversationManageRow", () => ({
   }) => <div>{row.title}</div>,
 }));
 
-vi.mock("../CollaborationTimeline", () => ({
-  CollaborationTimelinePanel: () => null,
-}));
-
 vi.mock("@/hooks/useConversations", () => ({
   useArchiveConversation: () => ({ mutateAsync: vi.fn() }),
   useDeleteConversation: () => ({ mutateAsync: mocks.deleteAsync }),

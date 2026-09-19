@@ -18,14 +18,13 @@ docs/03-AI核心/Agent协作模式.md（向用户发问）.
 The card's content is one adaptive shape (rich when opening, compact mid-task).
 Every card has at least one ``questions[]`` item; the user-visible stem is
 ``questions[].prompt`` (a one-sentence ask is a single fill-in question).
-Dedicated ``organize_plan`` cards use that prompt as the batch title.
 Each question may pre-fill a ``default`` so a 想省事 user one-clicks through.
 A mid-task A/B is one ``questions`` item.
 
 A submit answer is ``ToolEffect.CONTINUE`` (the CEO resumes with the user's picks); a
 stop is also ``CONTINUE`` with a拒答 breadcrumb + soft guidance (wire ``decision=stop``,
-not empty-continue「按默认」) so the CEO sees the cancel and may short-close — same
-shape as team_preview cancel / timeout. The question + answer are journaled
+not empty-continue「按默认」) so the CEO sees the cancel and may short-close.
+The question + answer are journaled
 (``events._JOURNAL_EVENT_TYPES``) so a reload replays the exchange inline.
 
 结构化挂起 2b + 挂起即收口 (②) / D11 (turn 级落盘 + ``POST .../resume``): like the

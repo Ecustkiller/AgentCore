@@ -84,6 +84,7 @@ function logSettleFailure(failure: ResideFailure, via: SettleVia): void {
 
 /** 有字节要落地的附件（文件类），而非对话 / 目录这类纯文本引用。 */
 function needsResidency(a: PendingAttachment): boolean {
+  if (a.sourceFolderId) return false;
   return (
     a.kind === "file" &&
     Boolean(a.stagingId || a.workspacePath || a.binary || a.fileBlob)
@@ -101,6 +102,7 @@ function passthrough(a: PendingAttachment): OutgoingAttachment {
     document_id: a.documentId,
     binary: a.binary,
     workspace_path: a.workspacePath,
+    ...(a.sourceFolderId ? { source_folder_id: a.sourceFolderId } : {}),
   };
 }
 

@@ -81,13 +81,26 @@ export function ToolInspector({
         data-testid="tool-face-guide"
         className="min-h-0 flex-1 overflow-auto px-3 py-3"
       >
+        {hideChrome ? (
+          <p className="font-mono text-sm text-foreground">{tool.name}</p>
+        ) : null}
         {blurb ? (
-          <p className="text-sm leading-relaxed text-foreground">{blurb}</p>
+          <p
+            className={
+              hideChrome
+                ? "mt-3 text-sm leading-relaxed text-foreground"
+                : "text-sm leading-relaxed text-foreground"
+            }
+          >
+            {blurb}
+          </p>
         ) : null}
         {params.length === 0 ? null : (
           <ul
             className={
-              blurb ? "mt-4 flex flex-col gap-3" : "flex flex-col gap-3"
+              hideChrome || blurb
+                ? "mt-4 flex flex-col gap-3"
+                : "flex flex-col gap-3"
             }
           >
             {params.map((param) => (

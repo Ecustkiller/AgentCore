@@ -38,7 +38,7 @@ _NO_DESKTOP = (
 _CLOUD_ATTACH_RW = (
     "云对话不能把本机目录加成可覆盖写根。"
     "本回合不能改该文件夹原件。"
-    "拷入新文件：先写工作区，再 file_copy（须用户确认整理授权、不覆盖）。"
+    "拷入新文件：先写工作区，再 file_batch copy（须用户确认整理授权、不覆盖）。"
 )
 _FORBIDDEN_ROOT = "不能挂载整盘或系统根；请给出具体文件夹。"
 _HOME_NOT_WELL_KNOWN = (

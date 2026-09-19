@@ -452,7 +452,7 @@ def test_cloud_attach_rw_receipt_is_not_writable_home():
     assert "加成可覆盖写根" in _CLOUD_ATTACH_RW
     assert "原件" in _CLOUD_ATTACH_RW
     assert "不覆盖" in _CLOUD_ATTACH_RW
-    assert "file_copy" in _CLOUD_ATTACH_RW
+    assert "file_batch" in _CLOUD_ATTACH_RW
     assert "已经能改" not in _CLOUD_ATTACH_RW
 
 

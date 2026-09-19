@@ -38,12 +38,9 @@ export const PROCESS_STEP_KIND: Record<ProcessStep["kind"], true> = {
   content: true,
   tool: true,
   team: true,
-  graph_append: true,
   checkpoint: true,
-  plan_review: true,
   escalation: true,
   approval: true,
-  stage_card: true,
   user_interjection: true,
 };
 
@@ -310,7 +307,7 @@ function hasMarker(
  * carries `team` / markers (rAF edge, mid-run reload, stream_segments overlay).
  * Without this, ProcessTimeline's fallback renders the reply AFTER the graph —
  * the local-vs-cloud timing bug in the screenshot. Inserts before the first
- * `team` / `graph_append` so the graph stays below the CEO lead-in. No-op when
+ * `team` so the graph stays below the CEO lead-in. No-op when
  * a content step already exists (same ref).
  */
 export function promoteScalarContentIntoProcess(
@@ -323,7 +320,7 @@ export function promoteScalarContentIntoProcess(
   if (steps.some((s) => s.kind === "content")) return steps;
   const marker: ProcessStep = { kind: "content", text };
   for (let i = 0; i < steps.length; i++) {
-    if (steps[i].kind === "team" || steps[i].kind === "graph_append") {
+    if (steps[i].kind === "team") {
       return [...steps.slice(0, i), marker, ...steps.slice(i)];
     }
   }
@@ -349,45 +346,6 @@ export function appendTeamStep(
   const steps = process ?? [];
   const marker: ProcessStep = { kind: "team", execution_id: executionId };
   return insertStepAt(steps, marker, at);
-}
-
-/** Drop a `graph_append` slot marker on the **appending** turn (旧 journal 兼容).
- * Dedupes by `execution_id` — one marker per host graph per append turn.
- * `actId`/`actKind`/`authorizedBy` 随 fold 保留（conformance 导出时剥离）；
- * 产品聊天不渲染此步。
- *
- * 新路径改用 `run_plan.prev_execution_id`（协议链仍在，用户面不画回链），
- * 不再发 `graph_append`。
- *
- * Optional `at` mirrors {@link appendTeamStep}: hydrate journal-slot insert. */
-export function appendGraphAppendStep(
-  process: ProcessStep[] | undefined,
-  executionId: string,
-  hostMessageId: string,
-  addedCount: number,
-  actId?: string | null,
-  actKind?: string | null,
-  authorizedBy?: string | null,
-  at?: number,
-): ProcessStep[] {
-  if (!executionId || !hostMessageId) return process ?? [];
-  if (hasMarker(process, "graph_append", "execution_id", executionId))
-    return process ?? [];
-  const steps = process ?? [];
-  const step: ProcessStep & {
-    act_id?: string;
-    act_kind?: string;
-    authorized_by?: string;
-  } = {
-    kind: "graph_append",
-    execution_id: executionId,
-    host_message_id: hostMessageId,
-    added_count: Math.max(0, addedCount | 0),
-  };
-  if (actId) step.act_id = actId;
-  if (actKind) step.act_kind = actKind;
-  if (authorizedBy) step.authorized_by = authorizedBy;
-  return insertStepAt(steps, step, at);
 }
 
 /** Insert `marker` at `at`, or append when `at` is omitted / past the end. */
@@ -439,21 +397,6 @@ export function appendUserInterjectionStep(
   return insertStepAt(steps, marker, at);
 }
 
-/** Drop a `plan_review` marker (plan-review gate) at its chronological spot; the card
- * body folds separately, keyed by `checkpointId`. No-op (same ref) if already present. */
-export function appendPlanReviewStep(
-  process: ProcessStep[] | undefined,
-  checkpointId: string,
-): ProcessStep[] {
-  if (!checkpointId) return process ?? [];
-  if (hasMarker(process, "plan_review", "checkpoint_id", checkpointId))
-    return process ?? [];
-  return [
-    ...(process ?? []),
-    { kind: "plan_review", checkpoint_id: checkpointId },
-  ];
-}
-
 /** Drop an `escalation` marker (blocking required or non-blocking raised). */
 export function appendEscalationStep(
   process: ProcessStep[] | undefined,
@@ -479,27 +422,13 @@ export function appendApprovalStep(
   return [...(process ?? []), { kind: "approval", approval_id: approvalId }];
 }
 
-/** Drop a `stage_card` marker (阶段推进卡痕迹锚点；行渲染由 resolved/orphaned 门控). */
-export function appendStageCardStep(
-  process: ProcessStep[] | undefined,
-  stageCardId: string,
-): ProcessStep[] {
-  if (!stageCardId) return process ?? [];
-  if (hasMarker(process, "stage_card", "stage_card_id", stageCardId))
-    return process ?? [];
-  return [
-    ...(process ?? []),
-    { kind: "stage_card", stage_card_id: stageCardId },
-  ];
-}
-
 /** A tool step (narrowed from {@link ProcessStep}). */
 export type ToolStep = Extract<ProcessStep, { kind: "tool" }>;
 
 /**
  * A render node for the inline timeline after consecutive tool steps are coalesced
  * (前端UX设计.md §一B). `reasoning` / `content` and the positional markers (`team` /
- * `checkpoint` / `ask` / `plan_review`) stay 1:1 with their steps — they are the
+ * `checkpoint`) stay 1:1 with their steps — they are the
  * natural boundaries that break a tool run → 保序; a maximal run of ≥2 adjacent tool
  * steps folds into one collapsible `tool-group`; a lone tool stays inline as `tool`
  * (阈值 ≥2 — 单个不套壳，维持现状平铺).
@@ -633,20 +562,14 @@ export function timelineNodeKeys(nodes: TimelineNode[]): string[] {
     switch (node.kind) {
       case "team":
         return `team-${node.execution_id}`;
-      case "graph_append":
-        return `gappend-${node.execution_id}-${node.host_message_id}`;
       case "checkpoint":
         return `cp-${node.checkpoint_id}`;
       case "user_interjection":
         return `inj-${node.interjection_id}`;
-      case "plan_review":
-        return `pr-${node.checkpoint_id}`;
       case "escalation":
         return `esc-${node.escalation_id}`;
       case "approval":
         return `appr-${node.approval_id}`;
-      case "stage_card":
-        return `sc-${node.stage_card_id}`;
       case "tool":
         return `tool-${node.step.id}`;
       case "tool-group":
@@ -666,7 +589,7 @@ export function timelineNodeKeys(nodes: TimelineNode[]): string[] {
  * Coalesce a process timeline's consecutive tool steps into render nodes: a run of
  * ≥2 adjacent `kind:"tool"` steps becomes one `tool-group`, a lone tool stays an
  * inline `tool`, and every non-tool step (`reasoning`/`content` AND the positional
- * markers `team`/`checkpoint`/`ask`/`plan_review`) passes through unchanged as a
+ * markers `team`/`checkpoint`) passes through unchanged as a
  * boundary that breaks runs — so the true chronological order is fully preserved
  * (前端UX设计.md §一B): the team graph and the interaction cards render at their own
  * marker's slot, not stamped at the bottom. Pure & view-only: `process[]` itself is
@@ -691,9 +614,8 @@ export function groupToolRuns(process: ProcessStep[]): TimelineNode[] {
     run = [];
   };
   for (const step of process) {
-    // Old journals may still carry retired `{kind:"ask"}` / `{kind:"team_preview"}`.
-    const retired = (step as { kind: string }).kind;
-    if (retired === "ask" || retired === "team_preview") continue;
+    const kind = (step as { kind: string }).kind;
+    if (!(kind in PROCESS_STEP_KIND)) continue;
     if (step.kind === "tool") {
       run.push(step);
     } else {
@@ -707,32 +629,23 @@ export function groupToolRuns(process: ProcessStep[]): TimelineNode[] {
 
 const EMPTY_PENDING_GATES: ReadonlySet<string> = new Set();
 
-/** 气泡不画的标记：邻接与末段正文判定跳过，避免把答案算成「还在过程里」。 */
-function isUnpaintedCeoNode(node: TimelineNode): boolean {
-  return node.kind === "graph_append" || node.kind === "plan_review";
-}
-
 function nextPaintedIndex(
   nodes: readonly TimelineNode[],
   fromExclusive: number,
 ): number {
-  for (let i = fromExclusive + 1; i < nodes.length; i++) {
-    if (!isUnpaintedCeoNode(nodes[i])) return i;
-  }
-  return -1;
+  const i = fromExclusive + 1;
+  return i < nodes.length ? i : -1;
 }
 
 /**
  * Indices of the trailing painted content run — the answer.
- * Unpainted markers after the answer are skipped so a trailing plan_review
- * does not hide the prose that is the visible question/context.
+ * Leftover retired kinds are already dropped by {@link groupToolRuns}.
  */
 export function trailingAnswerContentIndices(
   nodes: readonly TimelineNode[],
 ): ReadonlySet<number> {
   const out = new Set<number>();
   let i = nodes.length - 1;
-  while (i >= 0 && isUnpaintedCeoNode(nodes[i])) i--;
   while (i >= 0 && nodes[i].kind === "content") {
     out.add(i);
     i--;
@@ -756,8 +669,8 @@ function isContentBeforePendingCheckpoint(
 
 /**
  * CEO 气泡完成态过程折：true = 收进「Thought · Used tools」摘要。
- * 末段正文、待拍板检查点前的正文、待拍板 / 待复核、图 / 插话不进折。
- * 已答复 ask 与已结算开工复核进折。纯渲染；不改 process[] / journal / conformance。
+ * 末段正文、待拍板检查点前的正文、待拍板检查点、图 / 插话不进折。
+ * 已答复 ask 进折。纯渲染；不改 process[] / journal / conformance。
  */
 export function processFoldMask(
   nodes: readonly TimelineNode[],
@@ -770,10 +683,8 @@ export function processFoldMask(
       case "tool":
       case "tool-group":
       case "approval":
-      case "stage_card":
         return true;
       case "checkpoint":
-      case "plan_review":
         return !pendingGateIds.has(node.checkpoint_id);
       case "content":
         if (trailing.has(index)) return false;

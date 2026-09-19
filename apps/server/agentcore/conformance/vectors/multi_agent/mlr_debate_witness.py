@@ -162,7 +162,7 @@ def _multi_agent_mlr_debate_witness() -> list[SSEEvent]:
         "scores": {},
         "evidence_ledger_delta": [
             {
-                "id": "#e1",
+                "id": "#r1",
                 "url": "",
                 "title": "证人·法律：合同第十二条原文如何表述解除条件？",
                 "snippet": "第十二条写明「严重损害品牌声誉时可单方解除」。",
@@ -172,7 +172,7 @@ def _multi_agent_mlr_debate_witness() -> list[SSEEvent]:
                 "side_key": "witness:lens_0",
             },
             {
-                "id": "#e2",
+                "id": "#r2",
                 "url": "https://court.example/contract",
                 "title": "法律 · #r1",
                 "snippet": "约定文档 AgentCore/文档/research/法律透镜报告.md · 幕1 #r1",
@@ -312,7 +312,7 @@ def _multi_agent_mlr_debate_witness() -> list[SSEEvent]:
                 "kind": "debate",
                 "title": "辩论对抗",
                 "anchor_run_id": "synthesizer",
-                "authorized_by": "stage_card",
+                "authorized_by": "auto",
             },
         ),
         run_started(_MOD, _MOD, parent_run_id=_CAPTAIN_2),
@@ -329,7 +329,7 @@ def _multi_agent_mlr_debate_witness() -> list[SSEEvent]:
                 "kind": "debate",
                 "title": "辩论对抗",
                 "anchor_run_id": "synthesizer",
-                "authorized_by": "stage_card",
+                "authorized_by": "auto",
             },
         ),
         run_started(
@@ -359,7 +359,7 @@ def _multi_agent_mlr_debate_witness() -> list[SSEEvent]:
                 "kind": "debate",
                 "title": "辩论对抗",
                 "anchor_run_id": "synthesizer",
-                "authorized_by": "stage_card",
+                "authorized_by": "auto",
             },
         ),
         # 辩手 agent_id 用 plan 卡 id（d_pro/d_con），与 multi_agent_debate 同形——
@@ -375,7 +375,7 @@ def _multi_agent_mlr_debate_witness() -> list[SSEEvent]:
         run_output_delta(
             _PRO,
             "d_pro",
-            "第十二条可解除【已核实·#e2】，应立即终止。",
+            "第十二条可解除【已核实·#r2】，应立即终止。",
         ),
         run_completed(
             _PRO,

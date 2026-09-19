@@ -251,7 +251,7 @@ class TurnCollabMetrics(WirePayload):
     # 「谁做的」分层：下面两个是上面同名计数的**子集**，不是新指标。用户面把「队友互相
     # 把关」算成 总数 − 用户那份，免得把用户自己点的操作说成队友互检；运营口径读总数不变。
     boundary_yields_by_user: int | None = absent(
-        "boundary_yields 中由用户拍板造成的那部分 (plan_review checkpoint)。"
+        "boundary_yields 中由用户拍板造成的那部分。"
     )
     revises_by_user: int | None = absent(
         "revises 中由用户「立即改此人」促成的那部分 (redirect 热修)。"

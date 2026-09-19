@@ -59,10 +59,6 @@ vi.mock("../ConversationManageRow", () => ({
   }) => <div>{row.title}</div>,
 }));
 
-vi.mock("../CollaborationTimeline", () => ({
-  CollaborationTimelinePanel: () => null,
-}));
-
 function renderPage() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },

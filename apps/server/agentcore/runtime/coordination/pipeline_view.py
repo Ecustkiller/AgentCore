@@ -215,7 +215,6 @@ def _labels_for_ids(session: CoordinationSession, run_ids: set[str]) -> list[str
 def format_idle_yield_brief(session: CoordinationSession) -> str:
     """CEO brief when idle-yield wakes with workers still in flight."""
     progress = format_pipeline_progress(session)
-    healthy = is_pipeline_healthy(session)
     lines = ["【团队协调·空转让出】", progress, ""]
     from agentcore.workspace.limits import capability_dead_inject_lines
 
@@ -235,13 +234,5 @@ def format_idle_yield_brief(session: CoordinationSession) -> str:
     conversation_id = getattr(session, "conversation_id", None) or ""
 
     if has_hot_user_pending(conversation_id):
-        hold = format_hot_pending_hold_line(conversation_id)
-        lines.append(hold)
-        lines.append("向用户说明有队员在等你允许；队还在。")
-    elif healthy:
-        lines.append("流水线状态：正常推进，无需追加动作。")
-    else:
-        lines.append(
-            "等待窗口到期且仍有在途工作。可静默听团；疑似卡死再用 cancel_worker。"
-        )
+        lines.append(format_hot_pending_hold_line(conversation_id))
     return "\n".join(lines)

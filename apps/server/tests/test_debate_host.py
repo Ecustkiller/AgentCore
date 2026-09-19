@@ -431,7 +431,7 @@ def test_moderator_plan_event_same_turn_omits_prev():
         _debate_host_message_id="m1",
         _debate_prev_execution_id=None,
         _debate_graph_parent_run_id=None,
-        _debate_authorized_by="preview",
+        _debate_authorized_by="auto",
     )
     cfg = SimpleNamespace(form=DebateForm.DEBATE, motion="命题")
     ev = moderator_plan_event(tool, "exec_host", "mod-1", cfg)  # type: ignore[arg-type]

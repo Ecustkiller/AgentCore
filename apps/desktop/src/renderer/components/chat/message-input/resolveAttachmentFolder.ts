@@ -67,6 +67,38 @@ export function decideDraftFolderAssign(
  * Infer a folder (project) id from an @-mention / browse attachment entry.
  * Returns null when the entry has no mappable project (e.g. bare local root).
  */
+/** Folder-relative POSIX path for a file cited from ``hint``. */
+export function workspaceRelOnHintFolder(
+  hint: AttachmentFolderHint,
+  containerRel: string,
+): string {
+  const folder = getFolders().find((f) => f.id === hint.folderId);
+  const sub = posixRel(folder?.localSubpath ?? "");
+  const rel = posixRel(containerRel);
+  if (sub && (rel === sub || rel.startsWith(`${sub}/`))) {
+    return rel === sub ? "." : rel.slice(sub.length + 1);
+  }
+  return rel;
+}
+
+/**
+ * Other-desk Folder id for this-turn live-file cite, or undefined when the
+ * file already sits on this conversation's desk.
+ */
+export function otherDeskFolderId(
+  conversationId: string | null,
+  hint: AttachmentFolderHint | null,
+): string | undefined {
+  if (!hint?.folderId) return undefined;
+  if (!conversationId) return hint.folderId;
+  const sitting = getConversations().find((c) => c.id === conversationId)
+    ?.folderId;
+  if (typeof sitting === "string" && sitting && sitting === hint.folderId) {
+    return undefined;
+  }
+  return hint.folderId;
+}
+
 export function resolveFolderFromIndexedEntry(
   entry: IndexedEntry,
 ): AttachmentFolderHint | null {

@@ -70,9 +70,9 @@ describe("buildPromptCatalog", () => {
           blurb: "",
         },
         {
-          name: "staffing",
-          summary: "团队拆法",
-          body: "s",
+          name: "debate_and_review",
+          summary: "正反辩论",
+          body: "a",
           group: "编排",
           blurb: "",
         },
@@ -83,23 +83,15 @@ describe("buildPromptCatalog", () => {
           group: "工作区",
           blurb: "",
         },
-        {
-          name: "ask_kickoff",
-          summary: "开场提问",
-          body: "a",
-          group: "编排",
-          blurb: "",
-        },
       ],
     });
     const skills = flattenPromptCatalog(groups).filter(
       (item) => item.kind === "skill",
     );
     expect(skills.map((row) => row.kind === "skill" && row.skill.name)).toEqual(
-      ["staffing", "ask_kickoff", "local_desk", "run"],
+      ["debate_and_review", "local_desk", "run"],
     );
     expect(skills.map((row) => row.kind === "skill" && row.tocGroup)).toEqual([
-      "编排",
       "编排",
       "工作区",
       "工具",

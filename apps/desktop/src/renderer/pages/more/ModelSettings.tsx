@@ -33,19 +33,18 @@ import {
 import { cn } from "@/lib/utils";
 import {
   type CreateLlmModelProfileInput,
-  type LlmModelProfileView,
-  type ModelProfileSlot,
-  createLlmModelProfile,
-  deleteLlmModelProfile,
-  profileSlotSummary,
-  setDefaultLlmModelProfile,
-  updateLlmModelProfile,
+    type LlmModelProfileView,
+    type ModelProfileSlot,
+    createLlmModelProfile,
+    deleteLlmModelProfile,
+    profileSlotSummary,
+    setDefaultLlmModelProfile,
+    updateLlmModelProfile,
 } from "@/services/llmModelProfiles";
 import type { LlmProviderView } from "@/services/llmProviders";
 import {
   type ModelCatalogItem,
   catalogReasoningEffort,
-  slotHasCatalogVision,
 } from "@/services/models";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -69,15 +68,6 @@ function normalizeSaveWarnings(
 ): string[] {
   if (!warnings?.length) return [];
   return warnings.map((w) => w.trim()).filter(Boolean);
-}
-
-/** 草稿主模型目录是否标有 vision（贴图可直送主模型）。 */
-function mainHasCatalogVision(
-  main: ModelProfileSlot | null,
-  catalogModels: ModelCatalogItem[],
-): boolean {
-  if (!main) return false;
-  return slotHasCatalogVision(main, catalogModels);
 }
 
 /** 从分组取第一个可选槽（平台或 BYOK），用于新建种子。 */
@@ -137,40 +127,8 @@ function NoAvailableModelsGuide({
  *
  * 组合 = `{ main, worker?, background?, vision? }`；账号默认组合与会话引用见
  * `/v1/users/me/llm-model-profiles`。凭据与测连见 `/more/providers`。
+ * `vision` 槽 API 仍在、设置页不再编辑（图走当前主模型）。
  */
-
-/** 识图槽：优先只列 catalog 带 `vision` capability 的项；过滤为空则回退全目录。 */
-function catalogForVisionSlot(
-  catalog: ReturnType<typeof useModels>["data"],
-): ReturnType<typeof useModels>["data"] {
-  if (!catalog) return catalog;
-  const visionModels = catalog.models.filter((m) =>
-    (m.capabilities ?? []).includes("vision"),
-  );
-  if (visionModels.length === 0) return catalog;
-  return { ...catalog, models: visionModels };
-}
-
-/**
- * 识图下拉分组。过滤命中时去掉 provider.default_model，避免无 vision 的默认项渗入；
- * 过滤为空时与主槽同形（全目录 + BYOK 手填）。
- */
-function buildVisionProviderGroups(
-  providers: LlmProviderView[],
-  catalog: ReturnType<typeof useModels>["data"],
-  ...slots: (ModelProfileSlot | null | undefined)[]
-): DefaultProviderGroup[] {
-  const visionCatalog = catalogForVisionSlot(catalog);
-  const filtered = visionCatalog !== catalog;
-  const providersForVision = filtered
-    ? providers.map((p) => ({ ...p, default_model: "" }))
-    : providers;
-  return buildDefaultProviderGroups(
-    providersForVision,
-    visionCatalog,
-    ...slots,
-  );
-}
 
 export function ModelSettings() {
   const { data: response, isLoading, isError, error } = useLlmProviders();
@@ -246,8 +204,8 @@ function EmptyProfilesCta() {
 }
 
 /**
- * 模型组合列表 + 编辑：主必填；组队队员 / 后台 / 识图收进「高级 · 其他模型」
- * （有覆盖时默认展开）。组队/后台空 = 跟随主模型；识图空 = 不配置（不 follow main）。
+ * 模型组合列表 + 编辑：主必填；组队队员 / 后台收进「高级 · 其他模型」
+ * （有覆盖时默认展开）。组队/后台空 = 跟随主模型。
  * 系统预置不可删，可设默认 / 复制为用户组合；用户组合可新建 / 改名 / 删。
  */
 function ModelProfilesSection({
@@ -587,24 +545,22 @@ type ProfileDraft = {
 };
 
 function hasAdvancedSlotOverrides(
-  draft: Pick<ProfileDraft, "worker" | "background" | "vision">,
+  draft: Pick<ProfileDraft, "worker" | "background">,
 ): boolean {
-  return Boolean(draft.worker || draft.background || draft.vision);
+  return Boolean(draft.worker || draft.background);
 }
 
 /** 高级区收起时的一行摘要。 */
 function advancedSlotsSummary(
   worker: ModelProfileSlot | null,
   background: ModelProfileSlot | null,
-  vision: ModelProfileSlot | null,
 ): string {
-  if (!worker && !background && !vision) {
-    return "组队/后台：跟随主模型 · 识图：不配置";
+  if (!worker && !background) {
+    return "组队/后台：跟随主模型";
   }
   const workerLabel = worker?.model ?? "跟随主模型";
   const backgroundLabel = background?.model ?? "跟随主模型";
-  const visionLabel = vision?.model ?? "不配置";
-  return `组队：${workerLabel} · 后台：${backgroundLabel} · 识图：${visionLabel}`;
+  return `组队：${workerLabel} · 后台：${backgroundLabel}`;
 }
 
 function ProfileSaveWarnings({
@@ -799,7 +755,7 @@ function ProfileEditor({
   const [main, setMain] = useState(initial.main);
   const [worker, setWorker] = useState(initial.worker);
   const [background, setBackground] = useState(initial.background);
-  const [vision, setVision] = useState(initial.vision);
+  const [vision] = useState(initial.vision);
   const [reasoningEffort, setReasoningEffort] = useState(
     initial.reasoning_effort,
   );
@@ -822,15 +778,9 @@ function ProfileEditor({
       ),
     [providers, catalog, main, worker, background, vision],
   );
-  const visionGroups = useMemo(
-    () => buildVisionProviderGroups(providers, catalog, vision),
-    [providers, catalog, vision],
-  );
 
   const canChoose = canChooseFromGroups(groups);
-  const canChooseVision = canChooseFromGroups(visionGroups);
   const showEmptyGuide = !canChoose;
-  const mainVisionCapable = mainHasCatalogVision(main, catalogModels);
   const effortSpec = catalogReasoningEffort(main, catalogModels);
   const busy = pending || saving;
 
@@ -940,7 +890,7 @@ function ProfileEditor({
             </span>
             {!advancedOpen && (
               <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                {advancedSlotsSummary(worker, background, vision)}
+                {advancedSlotsSummary(worker, background)}
               </span>
             )}
           </span>
@@ -1004,36 +954,6 @@ function ProfileEditor({
                 disabled={busy || !canChoose}
                 followLabel="跟随主模型"
                 onChange={(value) => setBackground(decodePointer(value))}
-              />
-            </SettingField>
-            <SettingField
-              label="识图模型（可选）"
-              htmlFor="profile-vision"
-              hint={
-                mainVisionCapable
-                  ? "主模型已可看图，本槽供白板等按需深读"
-                  : "主模型不能看图时再配；否则走平台识图或不可用"
-              }
-              hintPlacement="label"
-              action={
-                vision ? (
-                  <SlotClearAction
-                    label="清除"
-                    disabled={busy}
-                    onClear={() => setVision(null)}
-                  />
-                ) : undefined
-              }
-            >
-              <ProfileModelSelect
-                id="profile-vision"
-                labelledBy="profile-vision-label"
-                describedBy="profile-vision-hint"
-                groups={visionGroups}
-                value={pointerValue(vision)}
-                disabled={busy || !canChooseVision}
-                followLabel="不配置"
-                onChange={(value) => setVision(decodePointer(value))}
               />
             </SettingField>
           </div>

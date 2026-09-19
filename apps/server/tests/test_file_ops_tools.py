@@ -1,4 +1,4 @@
-"""Tests for the file_write, file_delete and file_move tools (mutating file ops).
+"""Tests for the file_write, file_delete and file_batch tools (mutating file ops).
 
 Hermetic: every test runs against a throwaway ``ServerWorkspace`` rooted at
 ``tmp_path`` and inspects the real on-disk result, mirroring the str_replace tool
@@ -15,10 +15,8 @@ import pytest
 
 from agentcore.tools.builtin.file_ops import (
     FileBatchTool,
-    FileCopyTool,
     FileDeleteTool,
     FileListTool,
-    FileMoveTool,
     FileReadTool,
     FileWriteTool,
     GlobTool,
@@ -559,8 +557,41 @@ async def test_file_read_office_extract_failure_soft(tmp_path: Path):
     assert "抽文本失败" in out
     assert "convert:" not in out
     assert "markitdown" not in out.lower()
-    assert "read_image" in out
+    assert "read_image" not in out
+    assert "按文件名归类" in out
     assert "请用户" not in out
+
+
+_MIN_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+    b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+async def test_file_read_raster_honest_when_model_rejects_images(tmp_path: Path):
+    (tmp_path / "shot.png").write_bytes(_MIN_PNG)
+    result = await FileReadTool().execute({"path": "shot.png"}, _ctx(tmp_path))
+    assert result.success is True
+    out = result.output or ""
+    assert "[观察信封]" in out
+    assert "kind: image" in out
+    assert "当前主模型不收图" in out
+    assert "read_image" not in out
+    assert not (result.metadata or {}).get("native_image_parts")
+
+
+async def test_file_read_raster_native_parts_when_model_accepts(tmp_path: Path):
+    (tmp_path / "shot.png").write_bytes(_MIN_PNG)
+    ctx = replace(_ctx(tmp_path), accepts_images=True)
+    result = await FileReadTool().execute({"path": "shot.png"}, ctx)
+    assert result.success is True
+    assert "已把工作区图片发给当前模型" in (result.output or "")
+    parts = (result.metadata or {}).get("native_image_parts")
+    assert isinstance(parts, list) and len(parts) == 1
+    url = parts[0]["image_url"]["url"]
+    assert url.startswith("data:image/png;base64,")
+
 
 async def test_file_read_same_path_repeated_reads_return_disk_body(tmp_path: Path):
     """同一 path 连续多次成功读仍返回磁盘正文。"""
@@ -1366,24 +1397,28 @@ async def test_delete_refuses_dot_workspace_root(tmp_path: Path):
     assert (tmp_path / "keep.txt").exists()
 
 
-# --- file_move ---
+# --- file_batch move / copy (single-item operations) ---
+
+
+def _one(op: str, **fields: object) -> dict:
+    return {"operations": [{"op": op, **fields}]}
 
 
 async def test_move_renames_file(tmp_path: Path):
     (tmp_path / "old.txt").write_text("data", encoding="utf-8")
-    result = await FileMoveTool().execute(
-        {"source": "old.txt", "destination": "new.txt"}, _ctx(tmp_path)
+    result = await FileBatchTool().execute(
+        _one("move", source="old.txt", destination="new.txt"), _ctx(tmp_path)
     )
     assert result.success is True
-    assert "已把 old.txt 移动到 new.txt" in result.output
+    assert "move old.txt → new.txt" in result.output
     assert not (tmp_path / "old.txt").exists()
     assert (tmp_path / "new.txt").read_text(encoding="utf-8") == "data"
 
 
 async def test_move_creates_destination_parents(tmp_path: Path):
     (tmp_path / "f.txt").write_text("x", encoding="utf-8")
-    result = await FileMoveTool().execute(
-        {"source": "f.txt", "destination": "deep/nested/f.txt"}, _ctx(tmp_path)
+    result = await FileBatchTool().execute(
+        _one("move", source="f.txt", destination="deep/nested/f.txt"), _ctx(tmp_path)
     )
     assert result.success is True
     assert (tmp_path / "deep" / "nested" / "f.txt").read_text(encoding="utf-8") == "x"
@@ -1392,58 +1427,61 @@ async def test_move_creates_destination_parents(tmp_path: Path):
 async def test_move_directory(tmp_path: Path):
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "a.txt").write_text("a", encoding="utf-8")
-    result = await FileMoveTool().execute({"source": "src", "destination": "dst"}, _ctx(tmp_path))
+    result = await FileBatchTool().execute(
+        _one("move", source="src", destination="dst"), _ctx(tmp_path)
+    )
     assert result.success is True
     assert (tmp_path / "dst" / "a.txt").read_text(encoding="utf-8") == "a"
     assert not (tmp_path / "src").exists()
 
 
-async def test_move_refuses_to_overwrite(tmp_path: Path):
+async def test_move_skips_existing_destination(tmp_path: Path):
     (tmp_path / "a.txt").write_text("from", encoding="utf-8")
     (tmp_path / "b.txt").write_text("to", encoding="utf-8")
-    result = await FileMoveTool().execute(
-        {"source": "a.txt", "destination": "b.txt"}, _ctx(tmp_path)
+    result = await FileBatchTool().execute(
+        _one("move", source="a.txt", destination="b.txt"), _ctx(tmp_path)
     )
-    assert result.success is False
-    assert "已存在" in result.error
-    # both files must be untouched
+    assert result.success is True
+    assert "跳过" in result.output
+    assert "已存在" in result.output
     assert (tmp_path / "a.txt").read_text(encoding="utf-8") == "from"
     assert (tmp_path / "b.txt").read_text(encoding="utf-8") == "to"
 
 
 async def test_move_source_not_found(tmp_path: Path):
-    result = await FileMoveTool().execute(
-        {"source": "ghost.txt", "destination": "x.txt"}, _ctx(tmp_path)
+    result = await FileBatchTool().execute(
+        _one("move", source="ghost.txt", destination="x.txt"), _ctx(tmp_path)
     )
     assert result.success is False
-    assert "源路径不存在" in result.error
-    assert result.contract_failure is True
+    assert "源不存在" in (result.error or "") or "源不存在" in result.output
 
 
 async def test_move_rejects_path_outside_workspace(tmp_path: Path):
     ws = tmp_path / "ws"
     ws.mkdir()
     (ws / "inside.txt").write_text("inside", encoding="utf-8")
-    result = await FileMoveTool().execute(
-        {"source": "inside.txt", "destination": "../escaped.txt"}, _ctx(ws)
+    result = await FileBatchTool().execute(
+        _one("move", source="inside.txt", destination="../escaped.txt"), _ctx(ws)
     )
     assert result.success is False
-    assert "超出了工作区范围" in result.error
+    assert "超出了工作区范围" in (result.error or "") or "超出了工作区范围" in result.output
     assert (ws / "inside.txt").read_text(encoding="utf-8") == "inside"
     assert not (tmp_path / "escaped.txt").exists()
 
 
 async def test_move_requires_both_args(tmp_path: Path):
     (tmp_path / "f.txt").write_text("x", encoding="utf-8")
-    result = await FileMoveTool().execute({"source": "f.txt"}, _ctx(tmp_path))
+    result = await FileBatchTool().execute(
+        _one("move", source="f.txt"), _ctx(tmp_path)
+    )
     assert result.success is False
-    assert "必填" in result.error
+    assert "必填" in (result.error or "") or "必填" in result.output
 
 
 async def test_move_identical_paths_is_idempotent(tmp_path: Path):
     (tmp_path / "f.txt").write_text("x", encoding="utf-8")
-    result = await FileMoveTool().execute(
-        {"source": "f.txt", "destination": "f.txt"}, _ctx(tmp_path)
+    result = await FileBatchTool().execute(
+        _one("move", source="f.txt", destination="f.txt"), _ctx(tmp_path)
     )
     assert result.success is True
     assert "相同" in result.output or "无需" in result.output
@@ -1458,8 +1496,8 @@ async def test_move_identical_after_dossier_flatten(tmp_path: Path):
     flat_path.parent.mkdir(parents=True, exist_ok=True)
     flat_path.write_text("review", encoding="utf-8")
 
-    result = await FileMoveTool().execute(
-        {"source": flat, "destination": nested}, _ctx(tmp_path)
+    result = await FileBatchTool().execute(
+        _one("move", source=flat, destination=nested), _ctx(tmp_path)
     )
     assert result.success is True
     assert "相同" in result.output or "无需" in result.output
@@ -1468,13 +1506,13 @@ async def test_move_identical_after_dossier_flatten(tmp_path: Path):
     assert not tmp_path.joinpath(*nested.split("/")).exists()
 
 
-# --- file_copy / mkdir / file_batch ---
+# --- file_batch copy / mkdir ---
 
 
 async def test_copy_file_and_tree(tmp_path: Path):
     (tmp_path / "a.txt").write_text("data", encoding="utf-8")
-    result = await FileCopyTool().execute(
-        {"source": "a.txt", "destination": "b/c.txt"}, _ctx(tmp_path)
+    result = await FileBatchTool().execute(
+        _one("copy", source="a.txt", destination="b/c.txt"), _ctx(tmp_path)
     )
     assert result.success is True
     assert (tmp_path / "a.txt").read_text(encoding="utf-8") == "data"
@@ -1482,8 +1520,8 @@ async def test_copy_file_and_tree(tmp_path: Path):
 
     (tmp_path / "tree" / "sub").mkdir(parents=True)
     (tmp_path / "tree" / "sub" / "x.bin").write_bytes(b"\x00\xff")
-    result = await FileCopyTool().execute(
-        {"source": "tree", "destination": "tree2"}, _ctx(tmp_path)
+    result = await FileBatchTool().execute(
+        _one("copy", source="tree", destination="tree2"), _ctx(tmp_path)
     )
     assert result.success is True
     assert (tmp_path / "tree2" / "sub" / "x.bin").read_bytes() == b"\x00\xff"
@@ -1491,8 +1529,8 @@ async def test_copy_file_and_tree(tmp_path: Path):
 
 async def test_copy_identical_paths_is_idempotent(tmp_path: Path):
     (tmp_path / "f.txt").write_text("x", encoding="utf-8")
-    result = await FileCopyTool().execute(
-        {"source": "f.txt", "destination": "f.txt"}, _ctx(tmp_path)
+    result = await FileBatchTool().execute(
+        _one("copy", source="f.txt", destination="f.txt"), _ctx(tmp_path)
     )
     assert result.success is True
     assert "相同" in result.output or "无需" in result.output
@@ -1507,8 +1545,8 @@ async def test_copy_identical_after_dossier_flatten(tmp_path: Path):
     flat_path.parent.mkdir(parents=True, exist_ok=True)
     flat_path.write_text("review", encoding="utf-8")
 
-    result = await FileCopyTool().execute(
-        {"source": flat, "destination": nested}, _ctx(tmp_path)
+    result = await FileBatchTool().execute(
+        _one("copy", source=flat, destination=nested), _ctx(tmp_path)
     )
     assert result.success is True
     assert "相同" in result.output or "无需" in result.output
@@ -1517,14 +1555,15 @@ async def test_copy_identical_after_dossier_flatten(tmp_path: Path):
     assert not tmp_path.joinpath(*nested.split("/")).exists()
 
 
-async def test_copy_refuses_overwrite(tmp_path: Path):
+async def test_copy_skips_existing_destination(tmp_path: Path):
     (tmp_path / "a.txt").write_text("from", encoding="utf-8")
     (tmp_path / "b.txt").write_text("to", encoding="utf-8")
-    result = await FileCopyTool().execute(
-        {"source": "a.txt", "destination": "b.txt"}, _ctx(tmp_path)
+    result = await FileBatchTool().execute(
+        _one("copy", source="a.txt", destination="b.txt"), _ctx(tmp_path)
     )
-    assert result.success is False
-    assert "已存在" in result.error
+    assert result.success is True
+    assert "跳过" in result.output
+    assert "已存在" in result.output
 
 
 def test_mkdir_schema_teaches_structure_not_app_shell():
@@ -1579,10 +1618,12 @@ def test_expand_brace_globs_basic():
 
 def test_compile_glob_pattern_globstar():
     assert compile_glob_pattern("") is None
+    assert compile_glob_pattern("*") is None
+    assert compile_glob_pattern("**") is None
     assert compile_glob_pattern("*.py") == GlobPlan(None, ".", "*.py", GLOB_DEPTH)
     assert compile_glob_pattern("**/*.py") == GlobPlan(None, ".", "*.py", GLOB_DEPTH)
-    assert compile_glob_pattern("*") == GlobPlan(None, ".", "*", GLOB_DEPTH)
     assert compile_glob_pattern("**/*") == GlobPlan(None, ".", "*", GLOB_DEPTH)
+    assert compile_glob_patterns("{*,*.py}") is None
     assert compile_glob_pattern("src/*.py") == GlobPlan(None, "src", "*.py", 1)
     assert compile_glob_pattern("src/**/*.py") == GlobPlan(
         None, "src", "*.py", GLOB_DEPTH
@@ -1774,6 +1815,23 @@ async def test_glob_empty_pattern_rejected(tmp_path: Path):
     result = await GlobTool().execute({"pattern": "  "}, _ctx(tmp_path))
     assert result.success is False
     assert result.contract_failure is True
+
+
+@pytest.mark.parametrize("pattern", ["*", "**", "{*}"])
+async def test_glob_nameless_star_is_not_a_dump(tmp_path: Path, pattern: str):
+    nested = tmp_path / "apps" / "server"
+    nested.mkdir(parents=True)
+    (nested / "main.py").write_text("x", encoding="utf-8")
+    (tmp_path / "README.md").write_text("desk\n", encoding="utf-8")
+
+    result = await GlobTool().execute({"pattern": pattern}, _ctx(tmp_path))
+    assert result.success is False
+    assert result.contract_failure is True
+    err = result.error or ""
+    assert "file_list" in err
+    assert "`**/*`" in err
+    assert "main.py" not in (result.output or "")
+    assert "README.md" not in (result.output or "")
 
 
 async def test_glob_leftover_recursive_rejected(tmp_path: Path):

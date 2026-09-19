@@ -1,7 +1,7 @@
 /**
- * 统一 ask 卡壳 —— decision 与清单确认（organize_plan）共用三段结构，
- * 差异只剩「体」里的插槽。头一行是内容标题（普通澄清=当前题干；清单=该题 prompt），
- * 右侧 extra（多题编号）。可见面不画「需要你拍板」和图标；套话仅 sr-only。
+ * 统一 ask 卡壳 —— 通用澄清三段结构。
+ * 头一行是内容标题（当前题干），右侧 extra（多题编号）。
+ * 可见面不画「需要你拍板」和图标；套话仅 sr-only。
  *
  * 相对旧开场仪式刻意砍掉的三处硬分区：头部不再铺 `bg-muted/10`、不再压 `border-b`（标题与
  * 首行之间靠留白分段），底栏不再 `backdrop-blur`。卡内不出现品牌色，唯一的彩色出口是底栏主 CTA。
@@ -19,18 +19,15 @@ import type { ReactNode } from "react";
 export function AskCardShell({
   title,
   titleAddon,
-  subtitle,
   extra,
   footer,
   variant,
   children,
 }: {
-  /** 卡头主标题；空则只留 extra / 副标题。 */
+  /** 卡头主标题；空则只留 extra。 */
   title?: string;
   /** 标题行内附注（如「可多选」）。 */
   titleAddon?: ReactNode;
-  /** 可选副标题（organize_plan 的本地总览等）。 */
-  subtitle?: string;
   /** 头部右上角插槽（通用澄清多题时挂编号跳转）。 */
   extra?: ReactNode;
   footer?: ReactNode;
@@ -61,13 +58,6 @@ export function AskCardShell({
             {extra}
           </div>
         ) : null}
-        {subtitle && (
-          <p
-            className={`whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground ${hasTitleRow ? "mt-1" : ""}`}
-          >
-            {subtitle}
-          </p>
-        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">{children}</div>
@@ -93,7 +83,7 @@ export function AskCardFooter({
   ctaDisabled = false,
 }: {
   cta: string;
-  /** 仅有信息量时才传（下一题 / 授权文件夹 / 清单确认）。普通「提交」不挂装饰图标。 */
+  /** 仅有信息量时才传（下一题 / 授权文件夹）。普通「提交」不挂装饰图标。 */
   ctaIcon?: LucideIcon;
   busy: boolean;
   submitting: CheckpointUserDecision | null;
@@ -101,7 +91,7 @@ export function AskCardFooter({
   /** 次要 CTA「取消」；调用方仍发 resume decision=stop（硬停收口）。 */
   onStop: () => void;
   hint?: string;
-  /** 额外禁用主 CTA（如清单体尚未勾选任一项）。busy 时仍会禁用。 */
+  /** 额外禁用主 CTA（如尚未勾选或写人话）。busy 时仍会禁用。 */
   ctaDisabled?: boolean;
 }) {
   return (

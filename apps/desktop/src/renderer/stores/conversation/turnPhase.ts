@@ -25,7 +25,7 @@ export type TurnTerminalOutcome = "stopped" | "completed" | "failed";
 
 /**
  * User-facing interaction `*_required` events from {@link INTERACTION_KIND_WIRE}.
- * Cold pause cards (ask_user / plan_review) may arrive on the
+ * Cold pause cards (ask_user) may arrive on the
  * same connection after `message_end` has already moved turnPhase to terminal;
  * dropping them leaves live UI without ResumePrompt until hard refresh.
  * Hot `*_required` (approval / escalation / …) share the same wire shape and
@@ -91,8 +91,8 @@ function isWorkerScopedToolUse(eventType: string, payload: unknown): boolean {
  * 队员工具不进船长气泡（`appendToolStep` 已按 `run_id` 跳过），只驱动协作图 /
  * 状态条活体；挡掉则 detached 后最长执行窗零相位反馈。CEO 自身工具（无 `run_id`）
  * 仍挡——那是收口后的内容突变。
- * 若挡掉 run_* / 队员 tool_use_* / `team_synthesis_preview`，协作图会冻在收口前
- * 快照（队长节点团队进展预览同窗），直到（若有）execution_completed 刷新。
+ * 若挡掉 run_* / 队员 tool_use_*，协作图会冻在收口前快照，直到（若有）
+ * execution_completed 刷新。不在现行 EventType 的旧名字进 dispatch 后按未知跳过。
  *
  * stopping + terminal 另放行 INTERACTION_KIND_WIRE 的 `*_required`（见上常量）：
  * 冷挂起 ask 常紧挨 `message_end(paused)`，门闩若挡掉则 live 看不到拍板卡。
@@ -172,9 +172,7 @@ export function allowsSseEvent(
     // phase 推进 terminal。挡掉等于把卡永远钉在「提交中」。
     eventType === "resume_settled" ||
     // 异步团队：detached 可落在 message_end 前后；completed 常在 terminal 后同连接到达。
-    // `team_synthesis_preview` 同窗续推（队长节点团队进展，非气泡正文）。
     eventType === "execution_detached" ||
-    eventType === "execution_completed" ||
-    eventType === "team_synthesis_preview"
+    eventType === "execution_completed"
   );
 }

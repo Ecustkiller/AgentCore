@@ -176,18 +176,9 @@ def _assemble_ceo_toolset(
             execution_id=base_tool_context.execution_id
         ),
     )
-    from agentcore.llm.image_accept import model_accepts_images
-    from agentcore.vision import vision_capability_available
-
-    main_model = profiles.model_for("chat") if profiles is not None else ""
-    include_vision = vision_capability_available(
-        vision_reader=base_tool_context.vision_reader,
-        main_native_vision=model_accepts_images(main_model),
-    )
     register_always_ceo_tools(
         chat_tools,
         skill_registry=skill_registry,
-        include_vision=include_vision,
     )
     if checkpoint_enabled:
         chat_tools.register(

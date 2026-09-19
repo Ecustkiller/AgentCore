@@ -38,14 +38,10 @@ import time
 from pathlib import Path
 from typing import Any
 
-from agentcore.core.errors import GoneError
 from agentcore.core.logging import get_logger
-from agentcore.runtime.kickoff.retired import (
-    is_leftover_team_preview_frame,
-    refuse_if_leftover_team_preview,
-)
 from agentcore.runtime.suspension import (
     TurnSuspension,
+    is_live_suspension_kind,
     suspension_from_json,
     suspension_paused_summary,
 )
@@ -277,8 +273,10 @@ class LocalPausedTurnStore:
             return None
         if record is None:
             return None
-        refuse_if_leftover_team_preview(record.get("frame") or {})
-        return _suspension_from_record(record)
+        try:
+            return _suspension_from_record(record)
+        except ValueError:
+            return None
 
     def _load_sync(
         self, message_id: str, conversation_id: str | None
@@ -320,11 +318,10 @@ class LocalPausedTurnStore:
         if record is None:
             return None
         try:
-            refuse_if_leftover_team_preview(record.get("frame") or {})
             return _suspension_from_record(record)
-        except GoneError:
+        except ValueError:
             await self.rollback_claim(message_id)
-            raise
+            return None
 
     def _claim_sync(self, message_id: str, conversation_id: str | None) -> dict[str, Any] | None:
         target = self._path(message_id)
@@ -395,9 +392,14 @@ class LocalPausedTurnStore:
         out: list[TurnSuspension] = []
         for r in records:
             frame = r.get("frame") or {}
-            if is_leftover_team_preview_frame(frame):
+            if not is_live_suspension_kind(
+                frame.get("kind") if isinstance(frame, dict) else None
+            ):
                 continue
-            out.append(_suspension_from_record(r))
+            try:
+                out.append(_suspension_from_record(r))
+            except ValueError:
+                continue
         return out
 
     async def list_summaries(self, conversation_id: str) -> list[dict[str, Any]]:
@@ -410,7 +412,10 @@ class LocalPausedTurnStore:
         records = await self._records(conversation_id)
         summaries: list[dict[str, Any]] = []
         for r in records:
-            if is_leftover_team_preview_frame(r.get("frame") or {}):
+            frame = r.get("frame") or {}
+            if not is_live_suspension_kind(
+                frame.get("kind") if isinstance(frame, dict) else None
+            ):
                 continue
             summaries.append(r.get("summary") or {})
         return summaries

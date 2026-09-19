@@ -3,7 +3,7 @@
 An观察端 follows a **conversation**, not a single turn. Before this, ``GET
 …/conversations/{id}/stream`` bound its lifetime to whatever run happened to be live:
 idle conversation → ``204``, and every later run (FIFO drain / cold-resume wake /
-stage_card / plain send) opened a brand-new sink that the parked端 had no way to hear
+plain send) opened a brand-new sink that the parked端 had no way to hear
 about. A second device could only carry on by luck.
 
 Here a端 registers a :class:`ConversationWatcher` once and is handed each new run's
