@@ -432,7 +432,7 @@ const RETIRED_CHROME = `# 用户记忆
 
 function makeMemorySource(text: string): FileSource {
   return makeSource({
-    id: "memory",
+    id: "documents",
     readForEdit: vi.fn(async () => ({
       text,
       version: { etag: "v1" },
@@ -442,7 +442,7 @@ function makeMemorySource(text: string): FileSource {
   });
 }
 
-describe("MarkdownFileEditor memory 预览", () => {
+describe("MarkdownFileEditor leftover 用户记忆 chrome", () => {
   it("空正文走普通预览，且不写盘", async () => {
     const source = makeMemorySource("");
     await renderLoaded(source);

@@ -25,7 +25,6 @@ class WorkspaceProfile:
     typecheck_commands: list[str] = field(default_factory=list)
     build_commands: list[str] = field(default_factory=list)
     run_commands: list[str] = field(default_factory=list)
-    agents_md_excerpt: str | None = None
 
 
 def _js_package_manager(content: str) -> str:
@@ -89,7 +88,6 @@ async def detect_workspace_profile(backend: WorkspaceBackend) -> WorkspaceProfil
     typecheck_commands: list[str] = []
     build_commands: list[str] = []
     run_commands: list[str] = []
-    agents_md_excerpt: str | None = None
 
     try:
         content = await backend.read("pyproject.toml")
@@ -198,18 +196,6 @@ async def detect_workspace_profile(backend: WorkspaceBackend) -> WorkspaceProfil
     except Exception:
         pass
 
-    for agents_file in ("AGENTS.md", "CLAUDE.md"):
-        try:
-            content = await backend.read(agents_file)
-            if content:
-                excerpt = content[:400]
-                if len(content) > 400:
-                    excerpt += "\n..."
-                agents_md_excerpt = excerpt
-                break
-        except Exception:
-            pass
-
     return WorkspaceProfile(
         languages=languages,
         frameworks=frameworks,
@@ -221,15 +207,13 @@ async def detect_workspace_profile(backend: WorkspaceBackend) -> WorkspaceProfil
         typecheck_commands=typecheck_commands,
         build_commands=build_commands,
         run_commands=run_commands,
-        agents_md_excerpt=agents_md_excerpt,
     )
 
 
 def render_workspace_profile(profile: WorkspaceProfile) -> str:
     """Render profile as concise text. ≤600 chars.
 
-    Prompt injection does **not** use this — ``build_workspace_overview`` only
-    emits a name pointer for ``AGENTS.md`` / ``CLAUDE.md``. ``run_verify`` reads
+    Prompt injection does **not** use this. ``run_verify`` reads
     :class:`WorkspaceProfile` fields directly.
     """
     if not profile.languages and not profile.vcs:
@@ -267,9 +251,6 @@ def render_workspace_profile(profile: WorkspaceProfile) -> str:
         parts.append(f"常用命令：{' · '.join(shown)}")
 
     result = "\n".join(f"- {p}" for p in parts)
-
-    if profile.agents_md_excerpt:
-        result += f"\n- 工程约定摘录：\n  > {profile.agents_md_excerpt[:200]}"
 
     if len(result) > 600:
         result = result[:597] + "..."

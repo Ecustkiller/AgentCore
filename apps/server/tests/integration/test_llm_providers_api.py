@@ -108,7 +108,8 @@ async def test_create_provider_masks_and_seeds_profile(client, byok):
             "label": "OpenAI",
             "api_key": "sk-openai-abcd1234",
             "base_url": "https://api.openai.com/v1",
-            "default_model": "gpt-4o",
+            # Former user-facing field: extra keys are ignored, not a compat layer.
+            "default_model": "should-be-ignored",
         },
     )
     assert r.status_code == 201, r.text
@@ -117,7 +118,7 @@ async def test_create_provider_masks_and_seeds_profile(client, byok):
     assert body["status"] == "unchecked"
     assert body["masked_key"] == "••••1234"
     assert body["base_url"] == "https://api.openai.com/v1"
-    assert body["default_model"] == "gpt-4o"
+    assert "default_model" not in body
     assert "is_default_chat" not in body
 
     listed = (await client.get(_BASE)).json()
@@ -133,7 +134,7 @@ async def test_create_provider_masks_and_seeds_profile(client, byok):
 
 async def test_create_provider_requires_api_key(client, byok):
     await register_and_login(client, "provuser3")
-    r = await client.post(_BASE, json={"label": "X", "default_model": "gpt-4o"})
+    r = await client.post(_BASE, json={"label": "X"})
     assert r.status_code == 422, r.text
 
 
@@ -146,7 +147,7 @@ async def test_create_provider_refused_without_master_key(client, monkeypatch):
     assert r.json()["error"]["code"] == "KEY_STORAGE_UNAVAILABLE"
 
 
-async def test_update_provider_keeps_ciphertext_and_changes_model(client, byok):
+async def test_update_provider_keeps_ciphertext_and_changes_label(client, byok):
     await register_and_login(client, "provuser5")
     created = (
         await client.post(
@@ -154,7 +155,6 @@ async def test_update_provider_keeps_ciphertext_and_changes_model(client, byok):
             json={
                 "api_key": "sk-keep-me-4242",
                 "base_url": "https://api.deepseek.com",
-                "default_model": "deepseek-v4-flash",
             },
         )
     ).json()
@@ -162,12 +162,13 @@ async def test_update_provider_keeps_ciphertext_and_changes_model(client, byok):
 
     r = await client.patch(
         f"{_BASE}/{pid}",
-        json={"default_model": "deepseek-v4-pro"},  # api_key omitted → keep ciphertext
+        json={"label": "DS"},  # api_key omitted → keep ciphertext
     )
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["masked_key"] == "••••4242"
-    assert body["default_model"] == "deepseek-v4-pro"
+    assert body["label"] == "DS"
+    assert "default_model" not in body
 
 
 async def test_multiple_providers_and_delete_retargets_profile(client, byok):
@@ -195,8 +196,8 @@ async def test_multiple_providers_and_delete_retargets_profile(client, byok):
 
 async def test_model_profile_crud_and_set_default(client, byok):
     await register_and_login(client, "provuser8")
-    a = (await client.post(_BASE, json={"api_key": "sk-a-1111", "default_model": "m-a"})).json()
-    b = (await client.post(_BASE, json={"api_key": "sk-b-2222", "default_model": "m-b"})).json()
+    a = (await client.post(_BASE, json={"api_key": "sk-a-1111", "label": "A"})).json()
+    b = (await client.post(_BASE, json={"api_key": "sk-b-2222", "label": "B"})).json()
 
     r = await client.post(
         "/v1/users/me/llm-model-profiles",
@@ -270,9 +271,16 @@ class _FakeProvider:
 
 
 async def test_test_provider_active_on_success(client, byok, monkeypatch):
+    """Custom URL: no auto 模型组合. Non-empty GET /models is enough (no POST probe)."""
     await register_and_login(client, "provuser10")
     created = (
-        await client.post(_BASE, json={"api_key": "sk-good-4242", "default_model": "gpt-4o-mini"})
+        await client.post(
+            _BASE,
+            json={
+                "api_key": "sk-good-4242",
+                "base_url": "https://my-proxy.example/v1",
+            },
+        )
     ).json()
     fake = _FakeProvider(fail=False, supports_tools=True)
     monkeypatch.setattr(
@@ -286,7 +294,7 @@ async def test_test_provider_active_on_success(client, byok, monkeypatch):
     assert body["status"] == "active"
     assert body["supports_tools"] is True
     assert fake.list_models_called is True
-    assert fake.probe_model is None  # /models success → skip probe
+    assert fake.probe_model is None
 
     persisted = (await client.get(_BASE)).json()["providers"][0]
     assert persisted["status"] == "active"
@@ -418,20 +426,23 @@ async def test_preflight_platform_enforces_quota(client, session_factory, monkey
 async def test_single_provider_user_equivalent_to_legacy_key(
     client, session_factory, byok
 ):
-    """After migration a single-provider user resolves BYOK exactly as the old single-key
-    user did: account default = that provider's model, turns run on its key."""
+    """First matching-preset provider seeds「当前配置」; turns run on that key."""
+    from agentcore.llm.byok_provider_presets import seed_model_for_base_url
+
     user_id = await register_and_login(client, "provuser17")
     async with session_factory() as session:
         provider = await LlmProviderService(session).create_provider(
-            user_id, label="DeepSeek", api_key="sk-solo-9999", default_model="deepseek-v4-pro"
+            user_id,
+            label="DeepSeek",
+            api_key="sk-solo-9999",
+            base_url="https://api.deepseek.com",
         )
 
-    # Catalog: current = the sole provider's model, tagged byok + that provider.
     r = await client.get("/v1/users/me/models")
     assert r.status_code == 200, r.text
     cat = r.json()
     assert cat["byok_configured"] is True
-    assert cat["current"]["id"] == "deepseek-v4-pro"
+    assert cat["current"]["id"] == seed_model_for_base_url("https://api.deepseek.com")
     assert cat["current"]["origin"] == "byok"
     assert cat["current"]["provider_id"] == provider.id
 

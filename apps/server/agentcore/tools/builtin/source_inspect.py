@@ -1,4 +1,4 @@
-"""Short-exec dump/grep → ``file_read`` / ``grep`` when the snippet is browsing source.
+"""Short-exec dump/grep → ``read`` / ``grep`` when the snippet is browsing source.
 
 Same shape as :mod:`long_running` (dev servers → ``run`` + ``background``): the
 file tools already exist for this job. Patterns are snippet-shaped so table
@@ -150,13 +150,13 @@ def source_inspect_redirect_message(hit: SourceInspectHit) -> str:
     """Short-path refusal: tip the file tool without running the snippet."""
     if hit.kind == "dump":
         return (
-            f"把工作区文件 dump 到 stdout 请用 file_read（检测到：{hit.matched}）。"
+            f"把工作区文件 dump 到 stdout 请用 read（检测到：{hit.matched}）。"
             "可分页；定位或计数请用 grep。"
             "解析表格、改文件、跑计算仍用 run。"
         )
     return (
         f"打开源码再正则扫描请用 grep（检测到：{hit.matched}）。"
         "在工作区搜符号、字符串或计数请用 grep；"
-        "看命中正文用 file_read。"
+        "看命中正文用 read。"
         "解析表格、改文件、对内存数据跑计算仍用 run。"
     )

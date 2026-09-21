@@ -136,25 +136,22 @@ export interface ProjectedRunCheckpoint {
     | null;
 }
 
-/** 升级实时可见 / 阻塞式求决策: one escalation a worker raised mid-run via `escalate` (its
- * only upward channel). `question` is the self-contained ask; `assumption` is what the worker
- * proceeds on; `blocking` flags that a wrong guess would void its product. Folded onto its
- * {@link ProjectedRun} so every end's node carries the same signal.
+/** 升级：``escalate`` 工人向上通道。``kind`` = wait 停下等 / scope 活派偏了 / dep 缺材料。
+ * Folded onto its {@link ProjectedRun} so every end's node carries the same signal.
  *
- * `status` is the lifecycle (阻塞式求决策): `raised` = non-blocking banner; `pending` =
- * blocking parked; `resolved` = answered; `assumed` = explicit 按假设继续; `timed_out` =
+ * `status` is the lifecycle: `raised` = 协作图标记（scope/dep 或引擎早停）；`pending` =
+ * wait 停下等拍板；`resolved` = answered; `assumed` = explicit 按假设继续; `timed_out` =
  * wall-clock miss. `assumed` and `timed_out` both leave `answer` null (worker falls
  * back to assumption) but must stay distinct — conflating them made「点了按假设继续」
  * look like system timeout. */
-export type EscalationKind = "normal" | "scope" | "dep";
+export type EscalationKind = "wait" | "scope" | "dep";
 
 export interface RunEscalation {
   question: string;
   assumption: string;
-  blocking: boolean;
   status: "raised" | "pending" | "resolved" | "assumed" | "timed_out";
   answer: string | null;
-  /** escalate kind；旧向量缺字段时按 `normal`。 */
+  /** wait / scope / dep。raised 早停可缺。 */
   kind?: EscalationKind;
   /** 谁在仲裁：user=经典可答卡；ceo=协调模式等主管。旧向量缺字段按 user。 */
   awaiting?: "user" | "ceo";
@@ -164,7 +161,7 @@ export interface RunEscalation {
   via_user?: boolean;
   /**
    * 早停 / 打转收口标记（`validation_thrash` / `ceiling_backstop`）。
-   * 缺省 = 真·边干边上报。旧向量无此字段。
+   * 缺省 = scope/dep 协作图标记。
    */
   source?: string;
 }

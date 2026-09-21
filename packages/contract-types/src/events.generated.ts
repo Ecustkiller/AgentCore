@@ -365,25 +365,23 @@ export interface RunPhasePayload {
   tool_name?: string;
 }
 
-export type EscalationKind = "normal" | "scope" | "dep";
+export type EscalationKind = "wait" | "scope" | "dep";
 
 export type RunFailureKind = "model" | "call";
 
-/** 升级实时可见 (非阻塞 raised): a worker flagged a decision/blocker and kept working.
+/** 升级实时可见: ``escalate(reason=scope|dep)`` 或引擎早停，工人继续干。
  * 
- * JOURNALED (DURABLE, 统一时间线二期 D6): ``escalation_id`` keys the raised 轻行's
- * timeline marker (幂等去重 on attach replay) and lets the raised row + node ⚠️ badge
- * reload — the event base is now level with ``escalation_required``.
+ * JOURNALED (DURABLE): ``escalation_id`` keys the raised timeline marker.
+ * Wait 走 ``escalation_required``，不走本事件。
  * 
- * ``source`` distinguishes early-stop / thrashing backstops (``validation_thrash`` /
- * ``ceiling_backstop``) from genuine mid-work escalate (omit / absent). */
+ * ``source`` 区分早停 / 打转（``validation_thrash`` / ``ceiling_backstop``）；
+ * 工具请示带 ``kind`` = scope|dep。 */
 export interface RunEscalationPayload {
   escalation_id: string;
   run_id: string;
   agent_id: string;
   question: string;
   assumption: string;
-  blocking: boolean;
   kind?: EscalationKind;
   source?: string;
 }
@@ -396,12 +394,11 @@ export interface RunEscalationGatePayload {
   signals: Record<string, unknown>[];
 }
 
-/** 阻塞式求决策 (escalate blocking=true): a delegated worker SUSPENDED itself awaiting
- * a decision. JOURNALED (unlike the transport-only `run_escalation` banner); the
- * turn never flips to `paused` (siblings keep running).
+/** ``escalate(reason=wait)``: worker SUSPENDED awaiting a decision.
  * 
- * ``awaiting``: ``user`` (经典路径，可答卡) or ``ceo`` (协调模式下等主管仲裁，初始不可答)。
- * Absent on old journaled events → fold as ``user``. */
+ * JOURNALED; the turn never flips to ``paused`` (siblings keep running).
+ * 
+ * ``awaiting``: ``user`` (经典路径，可答卡) or ``ceo`` (协调模式下等主管仲裁，初始不可答)。 */
 export interface EscalationRequiredPayload {
   escalation_id: string;
   run_id: string;
@@ -410,7 +407,7 @@ export interface EscalationRequiredPayload {
   assumption: string;
   /** Structured forks (同 ask_user 的 questions). Absent on old journaled events (fold with `?? []`); empty for a free-text ask. */
   questions?: AskQuestion[];
-  /** 旧流缺字段时前端按 `normal`。与 blocking 轴正交。 */
+  /** wait / scope / dep。缺省按 wait。 */
   kind?: EscalationKind;
   /** 谁在仲裁：user=经典可答卡；ceo=协调模式等主管。旧流缺字段按 user。 */
   awaiting?: "user" | "ceo";
@@ -729,13 +726,17 @@ export interface ExecutionCompletedPayload {
   error?: string;
 }
 
-/** Token counts in the ledger short-key form. `cache_hit + cache_miss === input`. */
+/** Token counts in the ledger short-key form. `cache_hit + cache_miss === input`.
+ * 
+ * ``last_prompt`` is the largest single-request prompt this run has seen (window
+ * fill / fit-check). ``input`` sums every round (billing). Absent on old journals. */
 export interface UsageBreakdown {
   input: number;
   output: number;
   reasoning: number;
   cache_hit: number;
   cache_miss: number;
+  last_prompt?: number;
 }
 
 /** A run's / turn's cost in integer nano-money (1 unit = 1e9).
@@ -1107,13 +1108,17 @@ export type TeamBatchStatus =
   | { kind: "in_flight"; worker_count: number }
   | { kind: "settled"; worker_count: number };
 
-/** Turn token totals (long-key form, contrast `UsageBreakdown` short keys on runs). */
+/** Turn token totals (long-key form, contrast `UsageBreakdown` short keys on runs).
+ * 
+ * ``last_prompt_tokens`` is the CEO's latest single-request prompt (window fill),
+ * not summed ``input_tokens``. Absent on old journals / error stubs. */
 export interface MessageEndUsage {
   input_tokens: number;
   output_tokens: number;
   reasoning_tokens: number;
   cache_hit_tokens: number;
   cache_miss_tokens: number;
+  last_prompt_tokens?: number;
 }
 
 /** Terminal turn event. `finish_reason=paused` = 挂起即收口: the turn finalized AT a

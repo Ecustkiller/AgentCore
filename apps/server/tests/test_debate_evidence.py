@@ -443,10 +443,9 @@ def test_brief_prompt_injects_ledger_tiers():
 
 
 def _assert_ceo_short_tail(out: str) -> None:
-    """to_ceo_output 短尾：用自己的声音 + 指向 skill，不整段贴铁律/骨架。"""
+    """to_ceo_output 短尾：用自己的声音，不整段贴铁律/骨架。"""
     assert "用自己的声音收尾" in out
     assert "不要粘贴本段指令" in out
-    assert "debate_and_review" in out
     assert "deep_multi_lens_research" not in out
     assert "【收尾铁律·别抹平证据状态】" not in out
     assert "【收尾铁律·原样传达裁决】" not in out
@@ -497,14 +496,14 @@ def test_brief_prompt_includes_background_and_handoff_reconcile():
 
 
 def test_brief_prompt_includes_research_dossier_index():
-    """收场简报：有约定文档索引则注入（文本通道，非新事件字段）。"""
+    """收场简报：有材料索引则注入（文本通道，非新事件字段）。"""
     from agentcore.runtime.debate.research_dossier import format_research_dossier_index
 
-    idx = format_research_dossier_index(["AgentCore/文档/research/汇总与命题卡.md"])
+    idx = format_research_dossier_index(["notes/汇总与命题卡.md"])
     user = _brief_user_prompt(research_dossier_index=idx)
-    assert "【工作区约定文档索引·AgentCore/文档/research/】" in user
-    assert "AgentCore/文档/research/汇总与命题卡.md" in user
-    assert "工作区约定文档索引" not in _brief_user_prompt()
+    assert "【工作区材料索引】" in user
+    assert "notes/汇总与命题卡.md" in user
+    assert "工作区材料索引" not in _brief_user_prompt()
 
 
 def test_brief_prompt_keeps_reversal_condition_after_grounding_insert():
@@ -709,24 +708,11 @@ def test_cx_draft_brief_carries_output_budget():
     assert "冒号" in brief or "截断" in brief
 
 
-def test_background_how_lives_in_skill_not_schema():
-    """background 填法 HOW 在 consult 正文；schema 只留短触发。个案判例不进 skill。"""
-    from agentcore.runtime.skills import build_system_skill_registry
-    from agentcore.runtime.skills.debate_and_review import BACKGROUND_HOW
-
+def test_background_schema_stays_short():
+    """background 本轮不把填法 HOW 折进 schema；只留短触发。"""
     bg_desc = DEBATE_PARAMETERS["properties"]["background"]["description"]
-    assert BACKGROUND_HOW not in bg_desc
     assert "来源" not in bg_desc
     assert "细则" not in bg_desc
-
-    skill = build_system_skill_registry().get("debate_and_review")
-    assert skill is not None
-    body = skill.body
-    assert BACKGROUND_HOW in body
-    assert "二审" not in body
-    assert "被告表示将上诉" not in body
-    assert "纯价值观" in body
-    assert "不必传" in body
 
 
 def test_background_block_prompt_bans_rewriting_pending_as_fact():

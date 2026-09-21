@@ -695,7 +695,7 @@ describe("drainOutbox", () => {
     );
     expect(
       normalizeToolFailureCode(
-        'delegate 缺 tasks：默认顶层放非空 `tasks`，可抄：{"tasks":[{"role":"角色","task":"目标+边界+验收"}]}（deliverable 可选）。',
+        'delegate 缺 tasks：默认顶层放非空 `tasks`，可抄：{"tasks":[{"role":"角色","task":"目标+边界+验收"}]}。',
       ),
     ).toBe("declaration_empty");
     expect(
@@ -779,16 +779,6 @@ describe("drainOutbox", () => {
         "请用 run 启动长驻进程（检测到：npm run dev）。",
       ),
     ).toBe("long_running_redirect");
-    expect(
-      normalizeToolFailureCode(
-        "公网 http(s) 摘字请用 web_fetch（检测到：curl -sS https://example.com）。",
-      ),
-    ).toBe("shell_fetch_redirect");
-    expect(
-      normalizeToolFailureCode(
-        "公网 http(s) 落到工作区请用 download_url（检测到：wget https://example.com/a.bin）。",
-      ),
-    ).toBe("shell_download_redirect");
   });
 
   it("toolFailuresFromJournal prefers tool_call over tool_use_end", () => {
@@ -1483,6 +1473,10 @@ describe("toRecordTurnBody", () => {
     expect(body).not.toHaveProperty("agent_mentions");
     expect(body).not.toHaveProperty("attachments");
     expect(body).not.toHaveProperty("duration_ms");
+    expect(body).not.toHaveProperty("collab");
+    expect(body).not.toHaveProperty("outcome");
+    expect(body.prompt_tokens).toBe(0);
+    expect(body.evidence_ledger).toEqual([]);
   });
 
   it("forwards duration_ms when present", () => {
@@ -1507,6 +1501,24 @@ describe("toRecordTurnBody", () => {
       generation_ms: 1_900,
     });
     expect(body.generation_ms).toBe(1_900);
+  });
+
+  it("forwards prompt_tokens / collab / outcome / evidence_ledger", () => {
+    const body = toRecordTurnBody({
+      user_message_id: "u1",
+      conversation_id: "c1",
+      user_message: "hello",
+      content: "world",
+      trace_id: "a".repeat(32),
+      prompt_tokens: 120_000,
+      collab: { boundary_yields: 1 },
+      outcome: "ok",
+      evidence_ledger: [{ id: "e1" }],
+    });
+    expect(body.prompt_tokens).toBe(120_000);
+    expect(body.collab).toEqual({ boundary_yields: 1 });
+    expect(body.outcome).toBe("ok");
+    expect(body.evidence_ledger).toEqual([{ id: "e1" }]);
   });
 
   it("forwards agent_mentions when present", () => {
@@ -1554,7 +1566,7 @@ describe("toRecordTurnBody", () => {
         "0": {
           kind: "tool_call",
           payload: {
-            name: "file_read",
+            name: "read",
             success: false,
             result: "pause fail",
             code: "too_large",

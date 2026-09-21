@@ -26,7 +26,7 @@ describe("InteractionStore", () => {
       messageId: "m1",
       payload: {
         approval_id: "a1",
-        tool_name: "file_write",
+        tool_name: "write",
         arguments: {},
       },
     });
@@ -292,7 +292,7 @@ describe("InteractionStore", () => {
       conversationId: "c1",
       messageId: "m1",
       origin: "server",
-      payload: { approval_id: "a1", tool_name: "file_write", arguments: {} },
+      payload: { approval_id: "a1", tool_name: "write", arguments: {} },
     });
     store().hydratePending("c1", [], { confirmed: ["server"] });
     expect(store().get("a1")?.status).toBe("resolved");
@@ -483,7 +483,7 @@ describe("InteractionStore", () => {
         approval_id: "a1",
         conversation_id: "c1",
         tool_call_id: "t1",
-        tool_name: "file_write",
+        tool_name: "write",
         arguments: {},
       },
       "c1",

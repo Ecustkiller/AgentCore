@@ -38,10 +38,9 @@ def post_escalation_to_coordination(
     *,
     run_id: str,
     role: str = "",
-    kind: str = "normal",
+    reason: str = "wait",
     question: str = "",
     assumption: str = "",
-    blocking: bool = False,
     source: str = "escalate",
     summary: str = "",
     execution_id: str | None = None,
@@ -59,10 +58,9 @@ def post_escalation_to_coordination(
     payload: dict[str, Any] = {
         "run_id": run_id,
         "role": role or run_id,
-        "kind": kind,
+        "reason": reason,
         "question": question,
         "assumption": assumption,
-        "blocking": blocking,
         "source": source,
         "summary": summary or question,
         "escalation_id": escalation_id,
@@ -89,9 +87,8 @@ def post_escalation_to_coordination(
         logger.info(
             "coordination.escalation_routed",
             run_id=run_id,
-            kind=kind,
+            reason=reason,
             source=source,
-            blocking=blocking,
             execution_id=session.execution_id,
             ownership_paths=ownership_paths or None,
             escalator_is_nested=escalator_is_lock_owner_nested_child,
@@ -122,10 +119,9 @@ def post_completed_escalations(
                     payload={
                         "run_id": run_id,
                         "role": role,
-                        "kind": esc.get("kind") or "normal",
+                        "reason": esc.get("reason") or "wait",
                         "question": esc.get("question") or "",
                         "assumption": esc.get("assumption") or "",
-                        "blocking": bool(esc.get("blocking")),
                         "source": "run_state",
                         "summary": esc.get("question") or "",
                     },
@@ -158,17 +154,16 @@ def coordination_boundary_hook(
                 role = node.role or node.run_id
                 if state is not None:
                     for e in state.escalations:
-                        if e.get("kind") in ("scope", "dep") and not e.get("consumed"):
+                        if e.get("reason") in ("scope", "dep") and not e.get("consumed"):
                             session.post(
                                 CoordinationEvent(
                                     kind=CoordinationEventKind.ESCALATION,
                                     payload={
                                         "run_id": node.run_id,
                                         "role": role,
-                                        "kind": e.get("kind") or "scope",
+                                        "reason": e.get("reason") or "scope",
                                         "question": e.get("question") or "",
                                         "assumption": e.get("assumption") or "",
-                                        "blocking": bool(e.get("blocking")),
                                         "source": "scope_boundary",
                                         "summary": e.get("question") or "",
                                     },

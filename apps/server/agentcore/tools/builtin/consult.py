@@ -22,7 +22,7 @@ from agentcore.runtime.memory_consult_cache import (
     lookup_consult_origin,
     remember_consult,
 )
-from agentcore.tools.on_demand import is_on_demand_tool
+from agentcore.tools.on_demand import is_tool_fc_name
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_BOTH,
@@ -55,9 +55,10 @@ class ConsultTool:
     registration = ToolRegistration(
         surface=ToolSurface.CEO_ORCHESTRATION,
         audience=AUDIENCE_BOTH,
-        # Wired by hand when the merged catalog is non-empty (单一 has_entries 门控).
+        # Wired by hand onto the opening table (empty catalog → soft miss, not omitted).
         ceo_wire=CeoWire.CONSULT,
         catalog_summary="按名查阅按需目录",
+        blurb="翻开官方 HOW 或技能",
     )
 
     source: Consultable
@@ -67,7 +68,7 @@ class ConsultTool:
         return ToolSchema(
             name="consult",
             description=(
-                "按目录 name 拉全文（技能 / 有 HOW 的工具 / 设定）。"
+                "按目录 name 拉全文（技能 / 设定）。"
                 "已装配工具在开场表，不必靠查阅进表。"
             ),
             parameters={
@@ -101,7 +102,7 @@ class ConsultTool:
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         raw = str(arguments.get("name") or "").strip()
-        if raw and not is_on_demand_tool(raw):
+        if raw and not is_tool_fc_name(raw):
             cached = lookup_consult(raw)
             if cached is not None:
                 logger.info("consult.reuse", name=raw)
@@ -133,7 +134,7 @@ class ConsultTool:
             logger.info("consult.miss", name=raw)
             return ToolResult(tool_call_id="", success=True, output=head + tail)
 
-        if not is_on_demand_tool(raw):
+        if not is_tool_fc_name(raw):
             remember_consult(raw, body, origin=origin)
         return ToolResult(
             tool_call_id="",

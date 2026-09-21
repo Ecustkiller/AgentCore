@@ -782,18 +782,6 @@ async def test_soft_delete_hibernates_folder_settings_until_restore(client, sess
 
     uid = await register_and_login(client, "foldersettings")
     folder_id = await _create_cloud_folder(client, "SettingsDesk")
-    assert (
-        await client.put(
-            "/v1/users/me/memory/files/preferences",
-            json={"content": "- 全局偏好别用 emoji", "baseline": None},
-        )
-    ).status_code == 200
-    assert (
-        await client.put(
-            f"/v1/users/me/memory/files/profile?folder_id={folder_id}",
-            json={"content": "- 本仓用 Rust", "baseline": None},
-        )
-    ).status_code == 200
     async with session_factory() as session:
         repo = DocumentRepository(session)
         await repo.upsert_user_rule_doc(uid, None, "全局语言.md", "- 全局必须用中文")

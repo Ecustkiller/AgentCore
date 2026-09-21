@@ -34,7 +34,6 @@ def _provider_to_response(view: ServiceProviderView) -> LlmProviderView:
         id=view.id,
         label=view.label,
         base_url=view.base_url,
-        default_model=view.default_model,
         status=view.status,
         masked_key=view.masked_key,
         supports_tools=view.supports_tools,
@@ -75,14 +74,12 @@ async def create_llm_provider(
         label=body.label,
         api_key=body.api_key,
         base_url=body.base_url,
-        default_model=body.default_model,
     )
     logger.info(
         "llm_provider.created",
         user_id=user.user_id,
         provider_id=view.id,
         base_url=view.base_url,
-        default_model=view.default_model,
     )
     return _provider_to_response(view)
 
@@ -94,7 +91,7 @@ async def update_llm_provider(
     user: AuthUser,
     service: LlmProviderService = Depends(get_llm_provider_service),
 ):
-    """Update a provider (endpoint / model / label; key optional to keep)."""
+    """Update a provider (endpoint / label; key optional to keep)."""
     fields_set = set(body.model_fields_set)
     view = await service.update_provider(
         user.user_id,
@@ -102,7 +99,6 @@ async def update_llm_provider(
         label=body.label,
         api_key=body.api_key,
         base_url=body.base_url,
-        default_model=body.default_model,
         fields_set=fields_set,
     )
     if "api_key" in fields_set and (body.api_key or "").strip():

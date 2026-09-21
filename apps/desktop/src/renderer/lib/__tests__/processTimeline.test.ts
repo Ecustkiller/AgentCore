@@ -10,10 +10,10 @@ import {
   isWaitIdleReasoning,
   omitCoordinationIdleSteps,
   processFoldMask,
+  processTurnLane,
   promoteScalarContentIntoProcess,
   replaceTrailingContentStep,
   timelineNodeKeys,
-  trailingAnswerContentIndices,
 } from "@/lib/processTimeline";
 import type { ProcessStep } from "@/types/events";
 import { describe, expect, it } from "vitest";
@@ -87,7 +87,7 @@ const leftoverTeamPreview = (checkpoint_id: string): ProcessStep =>
   ({ kind: "team_preview", checkpoint_id }) as unknown as ProcessStep;
 const tool = (
   id: string,
-  tool_name = "file_read",
+  tool_name = "read",
   status: "running" | "success" | "error" = "success",
 ): ProcessStep => ({
   kind: "tool",
@@ -149,8 +149,8 @@ describe("groupToolRuns", () => {
 
   it("preserves per-step status inside a group (mixed running/success/error)", () => {
     const nodes = groupToolRuns([
-      tool("a", "file_read", "success"),
-      tool("b", "str_replace", "error"),
+      tool("a", "read", "success"),
+      tool("b", "edit", "error"),
       tool("c", "file_list", "running"),
     ]);
     const group = nodes[0];
@@ -161,8 +161,8 @@ describe("groupToolRuns", () => {
       "running",
     ]);
     expect(group.tools.map((t) => t.tool_name)).toEqual([
-      "file_read",
-      "str_replace",
+      "read",
+      "edit",
       "file_list",
     ]);
   });
@@ -239,7 +239,7 @@ describe("isOrchestrationTool", () => {
   });
 
   it("is false for ordinary read/write tools", () => {
-    expect(isOrchestrationTool("file_read")).toBe(false);
+    expect(isOrchestrationTool("read")).toBe(false);
     expect(isOrchestrationTool("web_search")).toBe(false);
     expect(isOrchestrationTool("")).toBe(false);
   });
@@ -262,7 +262,7 @@ describe("isWaitIdleReasoning / omitCoordinationIdleSteps (S4)", () => {
   });
 
   it("does not mark reasoning before a real tool as idle", () => {
-    const process = [reasoning("要读文件"), tool("a", "file_read")];
+    const process = [reasoning("要读文件"), tool("a", "read")];
     expect(isWaitIdleReasoning(process, 0)).toBe(false);
   });
 
@@ -273,7 +273,7 @@ describe("isWaitIdleReasoning / omitCoordinationIdleSteps (S4)", () => {
   it("omits wait tools and idle reasoning; keeps content / real tools", () => {
     const process = [
       reasoning("派活"),
-      tool("d1", "file_read"),
+      tool("d1", "read"),
       reasoning("空等"),
       tool("w1", "wait"),
       tool("w2", "wait"),
@@ -284,7 +284,7 @@ describe("isWaitIdleReasoning / omitCoordinationIdleSteps (S4)", () => {
     ];
     expect(omitCoordinationIdleSteps(process)).toEqual([
       reasoning("派活"),
-      tool("d1", "file_read"),
+      tool("d1", "read"),
       content("对用户说一句"),
       reasoning("收尾想"),
       tool("a", "update_synthesis"),
@@ -370,7 +370,7 @@ describe("PROCESS_STEP_KIND", () => {
   });
 });
 
-describe("processFoldMask · 非末段正文进过程折", () => {
+describe("processFoldMask · 正文不进过程折", () => {
   const checkpoint = (checkpoint_id: string): ProcessStep => ({
     kind: "checkpoint",
     checkpoint_id,
@@ -387,32 +387,27 @@ describe("processFoldMask · 非末段正文进过程折", () => {
     return processFoldMask(groupToolRuns(process), new Set(pending));
   }
 
-  it("folds mid-content with tools and keeps the trailing answer out", () => {
-    const process = [
-      content("我先找日志"),
-      tool("a"),
-      content("清晰度是 1080p"),
-    ];
-    expect(maskOf(process)).toEqual([true, true, false]);
-    const nodes = groupToolRuns(process);
-    expect([...trailingAnswerContentIndices(nodes)]).toEqual([2]);
+  it("keeps mid-content and the trailing answer out of the fold", () => {
+    expect(
+      maskOf([content("我先找日志"), tool("a"), content("清晰度是 1080p")]),
+    ).toEqual([false, true, false]);
   });
 
-  it("folds every content step when the timeline ends on a tool", () => {
-    expect(maskOf([content("还在找"), tool("a")])).toEqual([true, true]);
+  it("keeps content visible when the timeline ends on a tool", () => {
+    expect(maskOf([content("还在找"), tool("a")])).toEqual([false, true]);
   });
 
-  it("folds CEO lead-in before the team graph when there is no trailing answer", () => {
+  it("keeps CEO lead-in before the team graph", () => {
     expect(maskOf([content("我派了设计师"), team("e1")])).toEqual([
-      true,
+      false,
       false,
     ]);
   });
 
-  it("keeps the final answer after the graph and folds the lead-in", () => {
+  it("keeps lead-in and the final answer after the graph", () => {
     expect(
       maskOf([content("先派出去"), team("e1"), content("结论：用方案 B")]),
-    ).toEqual([true, false, false]);
+    ).toEqual([false, false, false]);
   });
 
   it("keeps content immediately before a pending checkpoint", () => {
@@ -421,10 +416,10 @@ describe("processFoldMask · 非末段正文进过程折", () => {
     ).toEqual([false, false, true]);
   });
 
-  it("folds content before a resolved checkpoint", () => {
+  it("keeps content before a resolved checkpoint (checkpoint still folds)", () => {
     expect(
       maskOf([content("你选哪个？"), checkpoint("cp1"), tool("a")]),
-    ).toEqual([true, true, true]);
+    ).toEqual([false, true, true]);
   });
 
   it("keeps a pending checkpoint out of the fold", () => {
@@ -439,19 +434,13 @@ describe("processFoldMask · 非末段正文进过程折", () => {
     ).toEqual([true, true, false]);
   });
 
-  it("skips leftover trailing plan_review so the prior content is the answer", () => {
-    const process = [
-      tool("a"),
-      content("请过目这份提纲"),
-      leftoverPlanReview("pr1"),
-    ];
-    expect(maskOf(process)).toEqual([true, false]);
-    expect([...trailingAnswerContentIndices(groupToolRuns(process))]).toEqual([
-      1,
-    ]);
+  it("skips leftover trailing plan_review", () => {
+    expect(
+      maskOf([tool("a"), content("请过目这份提纲"), leftoverPlanReview("pr1")]),
+    ).toEqual([true, false]);
   });
 
-  it("skips unknown process kinds when finding the answer", () => {
+  it("skips unknown process kinds", () => {
     expect(
       maskOf([tool("a"), content("最终答案"), leftoverUnknown("e1")]),
     ).toEqual([true, false]);
@@ -477,5 +466,63 @@ describe("processFoldMask · 非末段正文进过程折", () => {
         content("答案"),
       ]),
     ).toEqual([true, true, true, false]);
+  });
+});
+
+describe("processTurnLane · 收起摘要是答案 caption", () => {
+  it("puts every content step on the answer lane and process on chrome", () => {
+    const nodes = groupToolRuns([
+      { kind: "content", text: "我先找日志" },
+      {
+        kind: "tool",
+        id: "t0",
+        tool_name: "wait",
+        arguments: {},
+        result: null,
+        status: "success",
+      },
+      { kind: "content", text: "答案" },
+    ]);
+    const mask = processFoldMask(nodes);
+    expect(nodes.map((n, i) => processTurnLane(n, mask[i] === true))).toEqual([
+      "answer",
+      "chrome",
+      "answer",
+    ]);
+  });
+
+  it("puts trailing content on the answer lane and process on chrome", () => {
+    const nodes = groupToolRuns([
+      { kind: "reasoning", text: "想" },
+      {
+        kind: "tool",
+        id: "t1",
+        tool_name: "wait",
+        arguments: {},
+        result: null,
+        status: "success",
+      },
+      { kind: "content", text: "答案" },
+    ]);
+    const mask = processFoldMask(nodes);
+    expect(nodes.map((n, i) => processTurnLane(n, mask[i] === true))).toEqual([
+      "chrome",
+      "chrome",
+      "answer",
+    ]);
+  });
+
+  it("keeps team / pending checkpoint / interjection on the slot lane", () => {
+    const nodes: TimelineNode[] = [
+      { kind: "team", execution_id: "e1" },
+      { kind: "checkpoint", checkpoint_id: "cp1" },
+      { kind: "user_interjection", interjection_id: "inj-1" },
+    ];
+    const mask = processFoldMask(nodes, new Set(["cp1"]));
+    expect(nodes.map((n, i) => processTurnLane(n, mask[i] === true))).toEqual([
+      "slot",
+      "slot",
+      "slot",
+    ]);
   });
 });

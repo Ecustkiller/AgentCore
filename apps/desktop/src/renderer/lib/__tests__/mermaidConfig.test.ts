@@ -3,7 +3,39 @@ import {
   MERMAID_FLOWCHART_LAYOUT,
   MERMAID_FONT_SIZE_PX,
   mermaidRenderConfig,
+  toMermaidColor,
 } from "../mermaidConfig";
+
+/** hex or comma-rgba — the notations khroma actually parses. */
+const KHROMA_COLOR =
+  /^#[0-9a-f]{6}$|^rgba\(\d{1,3}, \d{1,3}, \d{1,3}, \d+(?:\.\d+)?\)$/;
+
+const COLOR_KEYS = [
+  "background",
+  "primaryColor",
+  "primaryTextColor",
+  "primaryBorderColor",
+  "secondaryColor",
+  "secondaryTextColor",
+  "secondaryBorderColor",
+  "tertiaryColor",
+  "tertiaryTextColor",
+  "tertiaryBorderColor",
+  "lineColor",
+  "textColor",
+  "mainBkg",
+  "nodeBorder",
+  "clusterBkg",
+  "clusterBorder",
+  "titleColor",
+  "edgeLabelBackground",
+  "noteBkgColor",
+  "noteTextColor",
+  "noteBorderColor",
+  "errorBkgColor",
+  "errorTextColor",
+  "altSectionBkgColor",
+] as const;
 
 describe("mermaidRenderConfig", () => {
   it("uses a compact flowchart layout and body-adjacent type", () => {
@@ -28,10 +60,42 @@ describe("mermaidRenderConfig", () => {
     expect(light.themeVariables.darkMode).toBe(false);
     expect(dark.themeVariables.darkMode).toBe(true);
     expect(light.themeVariables.useGradient).toBe(false);
-    expect(dark.themeVariables.primaryColor).toBe("oklch(0.185 0.004 255)");
-    expect(dark.themeVariables.background).toBe("oklch(0.13 0.004 255)");
+    expect(light.themeVariables.background).toBe("#ffffff");
+    expect(light.themeVariables.primaryTextColor).toBe("#080b0f");
+    expect(light.themeVariables.errorBkgColor).toBe("#df2225");
+    expect(dark.themeVariables.background).toBe("#060709");
+    expect(dark.themeVariables.primaryColor).toBe("#111314");
+    expect(dark.themeVariables.primaryBorderColor).toBe(
+      "rgba(255, 255, 255, 0.12)",
+    );
     expect(light.themeVariables.primaryColor).not.toBe(
       dark.themeVariables.primaryColor,
+    );
+    for (const key of COLOR_KEYS) {
+      expect(light.themeVariables[key]).toMatch(KHROMA_COLOR);
+      expect(dark.themeVariables[key]).toMatch(KHROMA_COLOR);
+    }
+  });
+});
+
+describe("toMermaidColor", () => {
+  it("converts oklch to the sRGB notation khroma accepts", () => {
+    expect(toMermaidColor("oklch(1 0 0)", "#000000")).toBe("#ffffff");
+    expect(toMermaidColor("oklch(0.58 0.22 27)", "#000000")).toBe("#df2225");
+    expect(toMermaidColor("oklch(1 0 0 / 0.12)", "#000000")).toBe(
+      "rgba(255, 255, 255, 0.12)",
+    );
+    expect(toMermaidColor("oklch(1 0 0 / 12%)", "#000000")).toBe(
+      "rgba(255, 255, 255, 0.12)",
+    );
+  });
+
+  it("normalizes hex and rgb, and does not forward other notations", () => {
+    expect(toMermaidColor("#fff", "#000000")).toBe("#ffffff");
+    expect(toMermaidColor("rgb(223, 34, 37)", "#000000")).toBe("#df2225");
+    expect(toMermaidColor("lab(50% 0 0)", "oklch(1 0 0)")).toBe("#ffffff");
+    expect(toMermaidColor("color-mix(in oklch, red, blue)", "nope")).toBe(
+      "#000000",
     );
   });
 });

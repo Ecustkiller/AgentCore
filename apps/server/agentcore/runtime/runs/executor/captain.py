@@ -61,6 +61,8 @@ def build_captain_executor(
     turn_evidence_ledger: EvidenceLedgerCore | None = None,
     native_image_parts: list[dict] | None = None,
     chat_envelope: str = "",
+    chat_system_in_history: str = "",
+    opening_tool_defs: list[dict] | None = None,
 ) -> Callable[[RunSpec], Awaitable[RunState]]:
     """Build the executor for the turn's CAPTAIN root run — the CEO chat loop.
 
@@ -98,19 +100,21 @@ def build_captain_executor(
             history=history,
             turn_envelope=chat_envelope,
             user_content=user_content,
+            in_history_system=chat_system_in_history,
         )
         from agentcore.runtime.engine.governance import resolve_openai_tool_defs
 
-        opening_tools = (
-            None
-            if supports_tools is False
-            else resolve_openai_tool_defs(tools, None, set())
-        )
+        if supports_tools is False:
+            opening_tools = None
+        elif opening_tool_defs is not None:
+            opening_tools = opening_tool_defs
+        else:
+            opening_tools = resolve_openai_tool_defs(tools, None, set())
         return await _drive_captain_loop(
             spec=spec,
             messages=messages,
             received_blocks=_build_captain_context_blocks(
-                chat_system_prompt,
+                chat_system_in_history or chat_system_prompt,
                 history,
                 user_message,
                 tool_defs=opening_tools,
@@ -126,6 +130,7 @@ def build_captain_executor(
             approval_gate=approval_gate,
             supports_tools=supports_tools,
             turn_evidence_ledger=turn_evidence_ledger,
+            opening_tool_defs=opening_tools,
         )
 
     return execute
@@ -166,6 +171,23 @@ def build_captain_resumer(
         tool_ctx = replace(
             base_tool_context, run_id=spec.run_id, agent_id=spec.agent_id or spec.run_id
         )
+        from agentcore.observability.session_llm_header import (
+            hydrate_session_header,
+            pin_chat_tools,
+        )
+        from agentcore.runtime.engine.governance import resolve_openai_tool_defs
+
+        opening_tools: list[dict] | None
+        if supports_tools is False:
+            opening_tools = None
+        else:
+            await hydrate_session_header(tool_ctx.conversation_id or "")
+            live = resolve_openai_tool_defs(tools, None, set()) or []
+            opening_tools = pin_chat_tools(
+                tool_ctx.conversation_id or "",
+                live,
+                allow_header_change=False,
+            )
         return await _drive_captain_loop(
             spec=spec,
             messages=messages,
@@ -180,6 +202,7 @@ def build_captain_resumer(
             supports_tools=supports_tools,
             controller_seed=controller_seed,
             turn_evidence_ledger=turn_evidence_ledger,
+            opening_tool_defs=opening_tools,
         )
 
     return execute
@@ -201,6 +224,7 @@ async def _drive_captain_loop(
     supports_tools: bool | None = None,
     controller_seed: dict | None = None,
     turn_evidence_ledger: EvidenceLedgerCore | None = None,
+    opening_tool_defs: list[dict] | None = None,
 ) -> RunState:
     """Run the CEO captain ReAct loop over ``messages`` and fold it into a RunState.
 
@@ -278,6 +302,7 @@ async def _drive_captain_loop(
                 deliverable_only=True,
                 supports_tools=supports_tools,
                 controller_seed=controller_seed,
+                opening_tool_defs=opening_tool_defs,
             )
         duration_ms = int((time.monotonic() - start) * 1000)
         usage_dict = usage.as_dict()

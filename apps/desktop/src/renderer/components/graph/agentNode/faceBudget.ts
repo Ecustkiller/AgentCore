@@ -47,13 +47,7 @@ export interface FaceBadgeSignals {
   escalationPending: number;
   /** 已上报但非待拍板的升级数（scope/dep 才在 face 留 passive 标记 → 过程性）。 */
   escalationRaised: number;
-  escalationKind:
-    | "normal"
-    | "scope"
-    | "dep"
-    | "contradiction"
-    | null
-    | undefined;
+  escalationKind: "wait" | "scope" | "dep" | "contradiction" | null | undefined;
   /** 检查点待放行（待拍板桶）。 */
   checkpointPending: boolean;
   /** 检查点已停止（异常桶）。 */

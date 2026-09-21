@@ -1,4 +1,4 @@
-"""Contract gate with file_write + handoff (empty streamed content)."""
+"""Contract gate with write + handoff (empty streamed content)."""
 
 from agentcore.llm.provider.protocol import LLMChunk, ToolCallDelta
 from agentcore.runtime.events import EventSink
@@ -13,7 +13,7 @@ from tests.runs_executor.conftest import _ContentProvider, _ctx, _FileWriteTool,
 
 
 async def test_file_write_handoff_empty_content_passes_without_retry():
-    """Worker finishes with file_write + handoff and no streamed prose — must not 产出为空 retry."""
+    """Worker finishes with write + handoff and no streamed prose — must not 产出为空 retry."""
     plan, _ = build_run_plan([{"role": "W", "task": "write file"}], id_prefix="t")
     reg = ToolRegistry()
     reg.register(_FileWriteTool())
@@ -25,8 +25,8 @@ async def test_file_write_handoff_empty_content_passes_without_retry():
                     ToolCallDelta(
                         index=0,
                         id="w1",
-                        function_name="file_write",
-                        arguments_delta='{"path": "p.txt", "content": "hi"}',
+                        function_name="write",
+                        arguments_delta='{"file_path": "p.txt", "content": "hi"}',
                     )
                 ]
             )
@@ -305,8 +305,8 @@ async def test_leaf_with_tools_does_not_force_handoff():
                     ToolCallDelta(
                         index=0,
                         id="w1",
-                        function_name="file_write",
-                        arguments_delta='{"path": "notes.md", "content": "# notes"}',
+                        function_name="write",
+                        arguments_delta='{"file_path": "notes.md", "content": "# notes"}',
                     )
                 ]
             )
@@ -387,8 +387,8 @@ async def test_leaf_tool_work_does_not_inject_handoff_gate():
                         ToolCallDelta(
                             index=0,
                             id="w1",
-                            function_name="file_write",
-                            arguments_delta='{"path": "n.md", "content": "x"}',
+                            function_name="write",
+                            arguments_delta='{"file_path": "n.md", "content": "x"}',
                         )
                     ]
                 )
@@ -476,8 +476,8 @@ async def test_artifacts_hit_when_file_write_covers_declared_path():
                     ToolCallDelta(
                         index=0,
                         id="w1",
-                        function_name="file_write",
-                        arguments_delta='{"path": "README.md", "content": "# hi"}',
+                        function_name="write",
+                        arguments_delta='{"file_path": "README.md", "content": "# hi"}',
                     )
                 ]
             )
@@ -544,9 +544,9 @@ async def test_strict_degraded_handoff_completes_when_files_landed():
                     ToolCallDelta(
                         index=0,
                         id="w1",
-                        function_name="file_write",
+                        function_name="write",
                         arguments_delta=(
-                            '{"path": "site/sections/s0.html",'
+                            '{"file_path": "site/sections/s0.html",'
                             ' "content": "<section>hero</section>"}'
                         ),
                     )

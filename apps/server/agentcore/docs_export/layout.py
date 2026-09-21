@@ -56,11 +56,9 @@ OFFICIAL_FOOTER_DISTANCE_CM: Final[float] = 2.0
 LANG_LATIN: Final[str] = "en-US"
 LANG_EAST_ASIA: Final[str] = "zh-CN"
 
-# 工具 schema 复用同一段措辞，两个导出器口径一致。
+# 工具 schema 复用同一段措辞，两个导出器口径一致。版式细则在转换器，不进每轮按钮。
 LAYOUT_PARAM_DESCRIPTION: Final[str] = (
-    "排版档位（可选，默认 standard）：standard=技术文档/报告；"
-    "official=中文正式文书（正文首行缩进两字、两端对齐、公文页边距、页码 — n —）。"
-    "用户要起诉状、公函、通知、声明等可提交的正式文书时传 official，技术文档别传。"
+    "standard=技术文档（默认）；official=中文正式文书排版。"
 )
 
 LAYOUT_INVALID_MESSAGE: Final[str] = (

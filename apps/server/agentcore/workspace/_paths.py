@@ -28,18 +28,12 @@ from pathlib import Path
 
 from agentcore.workspace.stage_dirs import (
     AGENTCORE_ROOT,
-    DEBATE_PREFIX,
-    DRAFTS_PREFIX,
     INTERNAL_ZONE_NAMES,
-    RESEARCH_PREFIX,
-    REVIEWS_PREFIX,
 )
 
-# Write-path unsafe chars (null/controls + Windows reserved). Separators handled
-# separately: kept as directory structure outside dossier prefixes; flattened to
-# ``_`` under 工作稿/research/reviews/debate so nested model paths become one file.
+# Write-path unsafe chars (null/controls + Windows reserved). Separators stay
+# as directory structure; nested ``/`` is not flattened into ``_``.
 _UNSAFE_IN_SEGMENT = re.compile(r'[\0-\x1f:*?"<>|]')
-_UNSAFE_IN_FILENAME = re.compile(r'[\0-\x1f\\/:*?"<>|]+')
 _MULTI_UNDERSCORE = re.compile(r"_+")
 # Windows reserved device names (case-insensitive): bare ``nul`` / ``CON`` and
 # extension forms ``nul.txt``. Neutralized on write sanitize so LocalWorkspace on
@@ -83,14 +77,6 @@ def truncate_filename_utf8(
         stem.encode("utf-8")[:budget].decode("utf-8", errors="ignore").rstrip(" ._")
     )
     return (cut_stem or "untitled") + ext
-
-# Longest-first so prefixes nest correctly if layouts ever share a stem.
-_DOSSIER_WRITE_PREFIXES: tuple[str, ...] = (
-    DRAFTS_PREFIX,
-    RESEARCH_PREFIX,
-    REVIEWS_PREFIX,
-    DEBATE_PREFIX,
-)
 
 # --- System noise (AI + user UI) ---
 # Directory set ↔ desktop ``LIST_FILES_SKIP_DIRS`` (parity gate).
@@ -471,14 +457,6 @@ def _clean_path_segment(segment: str) -> str:
     return clean_path_segment(segment)
 
 
-def _clean_dossier_filename(rest: str) -> str:
-    """Flatten everything after a dossier prefix into one safe file name."""
-    cleaned = _UNSAFE_IN_FILENAME.sub("_", rest.replace("\\", "/"))
-    cleaned = _MULTI_UNDERSCORE.sub("_", cleaned)
-    cleaned = _finalize_cleaned_name(cleaned, empty_fallback="untitled")
-    return _neutralize_win_reserved_segment(cleaned)
-
-
 def sanitize_write_relpath(
     relative_path: str, *, root_label: str | None = "workspace"
 ) -> str:
@@ -487,17 +465,16 @@ def sanitize_write_relpath(
     * Dangerous characters (controls, ``:*?"<>|``) → ``_``.
     * Windows reserved device names (``nul`` / ``CON`` / ``nul.txt`` / …) get a
       leading ``_`` so they never land as hanging Win32 device paths.
-    * Under dossier prefixes (``工作稿`` / ``research`` / ``reviews`` / ``debate``),
-      everything after the prefix is treated as a **single file name**: nested
-      ``/`` ``\\`` become ``_`` so ``…/research/a/b.md`` → ``…/research/a_b.md``.
+    * Nested ``/`` ``\\`` stay as directories. Retired cabinets
+      (``工作稿`` / ``research`` / ``reviews`` / ``debate``) are ordinary paths.
     * Each file / segment name is capped to ``_MAX_FILENAME_BYTES`` UTF-8 bytes
       (below Linux ``NAME_MAX``) so model-supplied angle titles cannot raise
       ``ENAMETOOLONG``.
-    * Elsewhere, directory structure is preserved; each segment is cleaned.
+    * Directory structure is preserved; each segment is cleaned.
     * ``..`` segments are left intact so the containment guard still rejects them.
     * Empty / ``.`` inputs are returned unchanged (callers validate required paths).
     * ``/<root_label>/…`` is rewritten to workspace-relative first so sandbox
-      absolutes still land correctly (and dossier flatten sees the relative form).
+      absolutes still land correctly.
     * Other absolute paths keep a leading ``/`` so containment can still refuse them.
     """
     if not relative_path or relative_path == ".":
@@ -515,16 +492,6 @@ def sanitize_write_relpath(
     raw = unified.replace("\\", "/").strip()
     if not raw or raw == ".":
         return "."
-
-    for prefix in _DOSSIER_WRITE_PREFIXES:
-        bare = prefix.rstrip("/")
-        if raw in (bare, prefix):
-            return bare
-        if raw.startswith(prefix):
-            rest = raw[len(prefix) :]
-            if not rest or rest in (".", "/"):
-                return bare
-            return f"{prefix}{_clean_dossier_filename(rest)}"
 
     absolute = raw.startswith("/")
     parts = [p for p in raw.split("/") if p and p != "."]

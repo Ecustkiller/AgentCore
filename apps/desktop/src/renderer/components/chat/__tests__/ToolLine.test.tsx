@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * Render test for ToolLine 过程工具默认折叠: every process tool (web_search / code_execute /
- * file_write / str_replace / …) stays collapsed on the running→done edge — aligned with
+ * write / edit / …) stays collapsed on the running→done edge — aligned with
  * Cursor/Claude「过程收敛、答案突出」. Folded rows keep inlineMeta / inlineBody /
  * peek; expand is a click away. Failures stay collapsed (red ✗, one line);
  * specific product copy lives in the expanded detail.
@@ -263,13 +263,13 @@ describe("ToolLine · 过程工具默认折叠", () => {
     expect(collapsedSubline(container)).toBeNull();
   });
 
-  it("inlines str_replace +/- into the title and keeps the diff collapsed", () => {
+  it("inlines edit +/- into the title and keeps the diff collapsed", () => {
     const { rerender, container } = render(
       <ToolLine
         step={step({
-          tool_name: "str_replace",
+          tool_name: "edit",
           arguments: {
-            path: "src/foo.ts",
+            file_path: "src/foo.ts",
             old_string: "const x = 1",
             new_string: "const x = 2",
           },
@@ -282,9 +282,9 @@ describe("ToolLine · 过程工具默认折叠", () => {
     rerender(
       <ToolLine
         step={step({
-          tool_name: "str_replace",
+          tool_name: "edit",
           arguments: {
-            path: "src/foo.ts",
+            file_path: "src/foo.ts",
             old_string: "const x = 1",
             new_string: "const x = 2",
           },
@@ -305,13 +305,13 @@ describe("ToolLine · 过程工具默认折叠", () => {
     expect(screen.getAllByText("src/foo.ts")).toHaveLength(1);
   });
 
-  it("omits the zero side of str_replace +/- on the title", () => {
+  it("omits the zero side of edit +/- on the title", () => {
     const { rerender } = render(
       <ToolLine
         step={step({
-          tool_name: "str_replace",
+          tool_name: "edit",
           arguments: {
-            path: "src/foo.ts",
+            file_path: "src/foo.ts",
             old_string: "a\nc",
             new_string: "a\nb\nc",
           },
@@ -326,9 +326,9 @@ describe("ToolLine · 过程工具默认折叠", () => {
     rerender(
       <ToolLine
         step={step({
-          tool_name: "str_replace",
+          tool_name: "edit",
           arguments: {
-            path: "src/foo.ts",
+            file_path: "src/foo.ts",
             old_string: "a\nb\nc",
             new_string: "a\nc",
           },
@@ -342,12 +342,12 @@ describe("ToolLine · 过程工具默认折叠", () => {
     expect(screen.queryByText("+1")).toBeNull();
   });
 
-  it("inlines file_write line count into the title and keeps the card collapsed", () => {
+  it("inlines write line count into the title and keeps the card collapsed", () => {
     const { rerender, container } = render(
       <ToolLine
         step={step({
-          tool_name: "file_write",
-          arguments: { path: "src/new.ts", content: "export const x = 1" },
+          tool_name: "write",
+          arguments: { file_path: "src/new.ts", content: "export const x = 1" },
           status: "running",
         })}
       />,
@@ -357,8 +357,8 @@ describe("ToolLine · 过程工具默认折叠", () => {
     rerender(
       <ToolLine
         step={step({
-          tool_name: "file_write",
-          arguments: { path: "src/new.ts", content: "export const x = 1" },
+          tool_name: "write",
+          arguments: { file_path: "src/new.ts", content: "export const x = 1" },
           result: "已写入 src/new.ts",
           status: "success",
         })}
@@ -380,8 +380,8 @@ describe("ToolLine · 过程工具默认折叠", () => {
     const { container } = render(
       <ToolLine
         step={step({
-          tool_name: "file_write",
-          arguments: { path: "src/new.ts", content: "export const x = 1" },
+          tool_name: "write",
+          arguments: { file_path: "src/new.ts", content: "export const x = 1" },
           result: "已写入 src/new.ts",
           display: {
             kind: "code_diagnostics",
@@ -406,20 +406,20 @@ describe("ToolLine · 过程工具默认折叠", () => {
     expect(collapsedSubline(container)).toBeNull();
   });
 
-  it("suppresses file_append ack peek — title path is enough", () => {
+  it("suppresses write ack peek — title path is enough", () => {
     const { container } = render(
       <ToolLine
         step={step({
-          tool_name: "file_append",
-          arguments: { path: "notes.md", content: "tail" },
-          result: "已追加 notes.md",
+          tool_name: "write",
+          arguments: { file_path: "notes.md", content: "tail" },
+          result: "已写入 notes.md",
           status: "success",
         })}
       />,
     );
-    expect(screen.getByText("Append file")).toBeTruthy();
+    expect(screen.getByText("Write file")).toBeTruthy();
     expect(screen.getByText("notes.md")).toBeTruthy();
-    expect(screen.queryByText(/已追加/)).toBeNull();
+    expect(screen.queryByText(/已写入/)).toBeNull();
     expect(collapsedSubline(container)).toBeNull();
   });
 
@@ -648,12 +648,12 @@ describe("ToolLine · 过程工具默认折叠", () => {
     expect(screen.getByText(ack)).toBeTruthy();
   });
 
-  it("suppresses file_read / file_list result-first-line peeks", () => {
+  it("suppresses read / file_list result-first-line peeks", () => {
     const { rerender } = render(
       <ToolLine
         step={step({
-          tool_name: "file_read",
-          arguments: { path: "lv_jasmine_report/lv_jasmine_synthesis.md" },
+          tool_name: "read",
+          arguments: { file_path: "lv_jasmine_report/lv_jasmine_synthesis.md" },
           result: "# LV诉茉莉奶白案：四路分析交叉验证与综合研判\n\n正文…",
           status: "success",
         })}
@@ -681,12 +681,12 @@ describe("ToolLine · 过程工具默认折叠", () => {
     expect(screen.queryByText(/lv_jasmine_cultural/)).toBeNull();
   });
 
-  it("inlines a file_read window into the title and strips the footer when expanded", () => {
+  it("inlines a read window into the title and strips the footer when expanded", () => {
     const { container } = render(
       <ToolLine
         step={step({
-          tool_name: "file_read",
-          arguments: { path: "src/ui/PropertyPanel.tsx" },
+          tool_name: "read",
+          arguments: { file_path: "src/ui/PropertyPanel.tsx" },
           result: "191| const x = 1\n\n（第 1–200 行，共 242 行）",
           status: "success",
         })}
@@ -705,12 +705,12 @@ describe("ToolLine · 过程工具默认折叠", () => {
     expect(screen.queryByText(/共 242 行/)).toBeNull();
   });
 
-  it("does not hang a full-file line count on a file_read title", () => {
+  it("does not hang a full-file line count on a read title", () => {
     render(
       <ToolLine
         step={step({
-          tool_name: "file_read",
-          arguments: { path: "src/ui/PropertyPanel.tsx" },
+          tool_name: "read",
+          arguments: { file_path: "src/ui/PropertyPanel.tsx" },
           result: "const x = 1\n\n（全文 12 行）",
           status: "success",
         })}
@@ -730,8 +730,8 @@ describe("ToolLine · 过程工具默认折叠", () => {
       <ToolLine
         nested
         step={step({
-          tool_name: "file_read",
-          arguments: { path: "docs/a.md" },
+          tool_name: "read",
+          arguments: { file_path: "docs/a.md" },
           result: "ok",
           status: "success",
         })}
@@ -797,7 +797,7 @@ describe("ToolLine · 过程工具默认折叠", () => {
 });
 
 describe("ToolLine · browser 单步折叠一行", () => {
-  it("inlines click detail into the title and drops the peek line", () => {
+  it("inlines click page identity, not 点击元素 ref", () => {
     const { container } = render(
       <ToolLine
         step={step({
@@ -808,6 +808,7 @@ describe("ToolLine · browser 单步折叠一行", () => {
             kind: "browser",
             action: "click",
             url: "https://example.com",
+            title: "示例首页",
             detail: "点击元素 e13",
           },
           status: "success",
@@ -815,7 +816,57 @@ describe("ToolLine · browser 单步折叠一行", () => {
       />,
     );
     expect(screen.getAllByText("Click")).toHaveLength(1);
-    expect(screen.getByText(/点击元素 e13/)).toBeTruthy();
+    expect(screen.getByText(/示例首页/)).toBeTruthy();
+    expect(screen.queryByText(/点击元素 e13/)).toBeNull();
+    expect(screen.queryByText("e13")).toBeNull();
+    expect(collapsedSubline(container)).toBeNull();
+  });
+
+  it("inlines snapshot page title, not 读取页面结构 version", () => {
+    const { container } = render(
+      <ToolLine
+        step={step({
+          tool_name: "browser",
+          arguments: { action: "snapshot" },
+          result: "ok",
+          display: {
+            kind: "browser",
+            action: "snapshot",
+            url: "https://example.com",
+            title: "示例首页",
+            detail: "读取页面结构（v2）",
+          },
+          status: "success",
+        })}
+      />,
+    );
+    expect(screen.getByText("Snapshot")).toBeTruthy();
+    expect(screen.getByText(/示例首页/)).toBeTruthy();
+    expect(screen.queryByText(/读取页面结构/)).toBeNull();
+    expect(collapsedSubline(container)).toBeNull();
+  });
+
+  it("does not restate Screenshot as 截取当前页面", () => {
+    const { container } = render(
+      <ToolLine
+        step={step({
+          tool_name: "browser",
+          arguments: { action: "screenshot" },
+          result: "ok",
+          display: {
+            kind: "browser",
+            action: "screenshot",
+            url: "https://example.com",
+            title: "示例首页",
+            detail: "截取当前页面",
+          },
+          status: "success",
+        })}
+      />,
+    );
+    expect(screen.getByText("Screenshot")).toBeTruthy();
+    expect(screen.getByText(/示例首页/)).toBeTruthy();
+    expect(screen.queryByText(/截取当前页面/)).toBeNull();
     expect(collapsedSubline(container)).toBeNull();
   });
 
@@ -882,6 +933,7 @@ describe("ToolLine · browser 单步折叠一行", () => {
       />,
     );
     expect(screen.getByText("Click")).toBeTruthy();
+    expect(screen.queryByText("e13")).toBeNull();
     expect(screen.queryByText(/点击元素/)).toBeNull();
     expect(collapsedSubline(container)).toBeNull();
   });
@@ -917,7 +969,8 @@ describe("ToolLine · browser 单步折叠一行", () => {
       />,
     );
     expect(screen.getByText("Click")).toBeTruthy();
-    expect(screen.getByTestId("tool-fault-label").textContent).toBe("未找到");
+    expect(screen.queryByTestId("tool-fault-label")).toBeNull();
+    expect(screen.queryByText("未找到")).toBeNull();
     expect(screen.queryByText("未找到元素 e13。")).toBeNull();
     expect(screen.queryByText(/ElementNotFound/)).toBeNull();
     expect(collapsedSubline(container)).toBeNull();
@@ -925,12 +978,12 @@ describe("ToolLine · browser 单步折叠一行", () => {
 });
 
 describe("ToolLine · live-flow", () => {
-  it("sweeps a running file_read row", () => {
+  it("sweeps a running read row", () => {
     const { container } = render(
       <ToolLine
         step={step({
-          tool_name: "file_read",
-          arguments: { path: "src/foo.ts" },
+          tool_name: "read",
+          arguments: { file_path: "src/foo.ts" },
           status: "running",
           result: null,
         })}
@@ -960,8 +1013,8 @@ describe("ToolLine · live-flow", () => {
     const { container } = render(
       <ToolLine
         step={step({
-          tool_name: "file_read",
-          arguments: { path: "src/foo.ts" },
+          tool_name: "read",
+          arguments: { file_path: "src/foo.ts" },
           status: "success",
           result: "ok",
         })}
@@ -975,15 +1028,15 @@ describe("ToolLineGroup · live-flow", () => {
   const groupTools = [
     step({
       id: "a",
-      tool_name: "file_read",
-      arguments: { path: "src/foo.ts" },
+      tool_name: "read",
+      arguments: { file_path: "src/foo.ts" },
       status: "success",
       result: "ok",
     }),
     step({
       id: "b",
-      tool_name: "file_read",
-      arguments: { path: "src/bar.ts" },
+      tool_name: "read",
+      arguments: { file_path: "src/bar.ts" },
       status: "running",
       result: null,
     }),
@@ -1262,8 +1315,8 @@ describe("ToolLineGroup · 折叠失败脸", () => {
         tools={[
           step({
             id: "f1",
-            tool_name: "file_read",
-            arguments: { path: "a.ts" },
+            tool_name: "read",
+            arguments: { file_path: "a.ts" },
             result: "ok",
             status: "success",
           }),
@@ -1460,7 +1513,8 @@ describe("ToolLine · wait 一行收口", () => {
       />,
     );
     expect(screen.getByText("Wait")).toBeTruthy();
-    expect(screen.getByTestId("tool-fault-label").textContent).toBe("未完成");
+    expect(screen.queryByTestId("tool-fault-label")).toBeNull();
+    expect(screen.queryByText("未完成")).toBeNull();
     expect(screen.queryByText("等待队员超时。")).toBeNull();
     expect(screen.queryByText(/WaitError/)).toBeNull();
     expect(collapsedSubline(container)).toBeNull();
@@ -1506,7 +1560,7 @@ describe("ToolLine · ack 族成功无 peek", () => {
       label: "Host shell",
       args: { action: "shell", command: "Get-Process" },
       ack: '{"exit_code":0}',
-      detail: "Get-Process",
+      detail: null,
     },
     {
       tool: "host_storage",
@@ -1680,6 +1734,34 @@ describe("ToolLine · host action 标签", () => {
       />,
     );
     expect(screen.getByText("Host shell")).toBeTruthy();
+    expect(screen.queryByText("dir")).toBeNull();
+  });
+
+  it("shell 命令在展开里，不在折叠标题", () => {
+    render(
+      <ToolLine
+        step={step({
+          tool_name: "host",
+          arguments: {
+            action: "shell",
+            command: "Get-CimInstance Win32_VideoController",
+          },
+          result: "ok",
+          display: {
+            stdout: "NVIDIA",
+            stderr: "",
+            exit_code: 0,
+            language: "host",
+          },
+          status: "success",
+        })}
+      />,
+    );
+    expect(screen.getByText("Host shell")).toBeTruthy();
+    expect(screen.queryByText(/Get-CimInstance/)).toBeNull();
+    fireEvent.click(screen.getByText("Host shell"));
+    expect(screen.getByText(/Get-CimInstance/)).toBeTruthy();
+    expect(screen.getByText("NVIDIA")).toBeTruthy();
   });
 });
 
@@ -1732,7 +1814,10 @@ describe("toolDetail · title chip", () => {
     ).toBe("typecheck");
     expect(
       toolDetail({ check: "command", command: "pnpm test" }, "test_run"),
-    ).toBe("pnpm test");
+    ).toBe("");
+    expect(toolDetail({ command: "curl.exe" }, "run")).toBe("");
+    expect(toolDetail({ command: "pnpm test" }, "terminal")).toBe("");
+    expect(toolDetail({ command: "dir" }, "host_shell")).toBe("");
   });
 
   it("does not chip handoff summary into toolDetail (ToolLine inlines peek instead)", () => {
@@ -1743,16 +1828,17 @@ describe("toolDetail · title chip", () => {
     expect(
       toolDetail({ action: "navigate", url: "https://example.com" }, "browser"),
     ).toBe("https://example.com");
-    expect(toolDetail({ action: "click", ref: "e13" }, "browser")).toBe("e13");
+    expect(toolDetail({ action: "click", ref: "e13" }, "browser")).toBe("");
     expect(
       toolDetail({ action: "type", ref: "e2", text: "hello" }, "browser"),
     ).toBe("hello");
+    expect(toolDetail({ action: "scroll", dy: 400 }, "browser")).toBe("");
   });
 
   it("host 按 action 出细节", () => {
     expect(
       toolDetail({ action: "shell", command: "Get-Process" }, "host"),
-    ).toBe("Get-Process");
+    ).toBe("");
     expect(
       toolDetail(
         {
@@ -1787,8 +1873,20 @@ describe("toolDetail · title chip", () => {
       ),
     ).toBe("");
     expect(
-      toolDetail({ path: "550e8400-e29b-41d4-a716-446655440000" }, "file_read"),
+      toolDetail({ file_path: "550e8400-e29b-41d4-a716-446655440000" }, "read"),
     ).toBe("");
+  });
+
+  it("chips file_path for read / write / edit; keeps path for file_delete", () => {
+    expect(toolDetail({ file_path: "src/a.ts" }, "read")).toBe("src/a.ts");
+    expect(toolDetail({ path: "src/a.ts" }, "read")).toBe("");
+    expect(toolDetail({ file_path: "src/a.ts", content: "x" }, "write")).toBe(
+      "src/a.ts",
+    );
+    expect(toolDetail({ path: "src/a.ts", content: "x" }, "write")).toBe("");
+    expect(toolDetail({ file_path: "src/a.ts" }, "edit")).toBe("src/a.ts");
+    expect(toolDetail({ path: "gone.txt" }, "file_delete")).toBe("gone.txt");
+    expect(toolDetail({ file_path: "gone.txt" }, "file_delete")).toBe("");
   });
 
   it("git title chip is subcommand, not ApprovalPrompt headline", () => {
@@ -1832,16 +1930,39 @@ describe("toolGroupSummary · web_fetch", () => {
     const tools = [
       step({
         id: "a",
-        tool_name: "file_read",
-        arguments: { path: "src/foo.ts" },
+        tool_name: "read",
+        arguments: { file_path: "src/foo.ts" },
       }),
       step({
         id: "b",
-        tool_name: "file_read",
-        arguments: { path: "src/bar.ts" },
+        tool_name: "read",
+        arguments: { file_path: "src/bar.ts" },
       }),
     ];
     expect(toolGroupSummary(tools)).toBe("Read file foo.ts · bar.ts");
+  });
+
+  it("host shell 组头计数，不拼命令", () => {
+    const tools = [
+      step({
+        id: "a",
+        tool_name: "host",
+        arguments: {
+          action: "shell",
+          command: "Get-CimInstance Win32_VideoController",
+        },
+      }),
+      step({
+        id: "b",
+        tool_name: "host",
+        arguments: {
+          action: "shell",
+          command: '"=== nvidia-smi ==="; nvidia-smi',
+        },
+      }),
+    ];
+    expect(toolGroupSummary(tools)).toBe("Host shell 2");
+    expect(toolGroupSummary(tools)).not.toMatch(/nvidia-smi|Get-CimInstance/);
   });
 });
 
@@ -1860,7 +1981,7 @@ describe("ComposingToolLine · 参数组装心跳", () => {
 
   it("write family shows label + char count, no verb prefix", () => {
     renderWithTooltip(
-      <ComposingToolLine tool={{ toolName: "file_write", chars: 2100 }} />,
+      <ComposingToolLine tool={{ toolName: "write", chars: 2100 }} />,
     );
     expect(screen.getByText(/Write file/)).toBeTruthy();
     expect(screen.getByText(/2\.1k 字/)).toBeTruthy();
@@ -1893,7 +2014,7 @@ describe("ComposingToolLine · 参数组装心跳", () => {
 
   it("does not paint a block composing caret", () => {
     const { unmount } = renderWithTooltip(
-      <ComposingToolLine tool={{ toolName: "file_write", chars: 2100 }} />,
+      <ComposingToolLine tool={{ toolName: "write", chars: 2100 }} />,
     );
     expect(screen.queryByText("▋")).toBeNull();
     unmount();
@@ -1973,8 +2094,8 @@ describe("ToolLine · tool_use_end.failure product face", () => {
     const { container } = renderWithTooltip(
       <ToolLine
         step={step({
-          tool_name: "file_read",
-          arguments: { path: "missing.md" },
+          tool_name: "read",
+          arguments: { file_path: "missing.md" },
           result: "FileNotFoundError: missing.md",
           status: "error",
           failure: {
@@ -1996,13 +2117,12 @@ describe("ToolLine · tool_use_end.failure product face", () => {
 
 describe("ToolLine · git 执行相位", () => {
   // git can sit ~2min behind the repo queue, a credential lookup and a remote round
-  // trip. Each of those waits reports its own phase, so the running row must name the
-  // leg instead of showing a bare pulse — and each backend token needs real copy here.
+  // trip. Those waits name the leg. Ordinary local execution stays unlabeled: the
+  // title sheen already says the row is in flight.
   it.each([
     ["git_queued", "Waiting for repo"],
     ["git_credentials", "Checking credentials"],
     ["git_remote", "Contacting remote"],
-    ["executing", "Running"],
   ] as const)("shows %s as「%s」while the call is in flight", (phase, text) => {
     render(
       <ToolLine
@@ -2018,7 +2138,21 @@ describe("ToolLine · git 执行相位", () => {
     expect(screen.getByText(text)).toBeTruthy();
   });
 
-  it("degrades an unknown backend phase to the generic hint", () => {
+  it("leaves ordinary local execution and an unknown phase unlabeled", () => {
+    const { unmount } = render(
+      <ToolLine
+        step={step({
+          tool_name: "run",
+          arguments: { command: "curl.exe" },
+          result: null,
+          status: "running",
+          phase: "executing",
+        })}
+      />,
+    );
+    expect(screen.queryByText("Running")).toBeNull();
+    expect(screen.queryByText("Working")).toBeNull();
+    unmount();
     render(
       <ToolLine
         step={step({
@@ -2030,7 +2164,9 @@ describe("ToolLine · git 执行相位", () => {
         })}
       />,
     );
-    expect(screen.getByText("Working")).toBeTruthy();
+    expect(screen.queryByText("Running")).toBeNull();
+    expect(screen.queryByText("Working")).toBeNull();
+    expect(screen.getByText("Git")).toBeTruthy();
   });
 });
 
@@ -2177,7 +2313,7 @@ describe("ToolLine · code_execute / test_run / terminal 一行契约", () => {
     expect(screen.queryByText(/退出码/)).toBeNull();
   });
 
-  it("terminal with command in title suppresses result first line", () => {
+  it("terminal success keeps the action label; command and stdout stay collapsed away", () => {
     const { container } = render(
       <ToolLine
         step={step({
@@ -2188,9 +2324,13 @@ describe("ToolLine · code_execute / test_run / terminal 一行契约", () => {
         })}
       />,
     );
-    expect(screen.getByText("pnpm test")).toBeTruthy();
+    expect(screen.getByText("Run terminal")).toBeTruthy();
+    expect(screen.queryByText("pnpm test")).toBeNull();
     expect(screen.queryByText(/first line of output/)).toBeNull();
     expect(collapsedSubline(container)).toBeNull();
+    fireEvent.click(screen.getByText("Run terminal"));
+    expect(screen.getByText("pnpm test")).toBeTruthy();
+    expect(screen.getByText(/first line of output/)).toBeTruthy();
   });
 });
 

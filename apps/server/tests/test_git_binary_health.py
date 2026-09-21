@@ -8,12 +8,12 @@ startup itself, whatever the environment throws.
 
 from __future__ import annotations
 
-import asyncio
 import shutil
 from typing import Any
 
 import pytest
 
+from agentcore.core.spawn import SpawnedProcess
 from agentcore.tools.builtin.git_ops import binary_health
 from agentcore.tools.builtin.git_ops.binary_health import (
     git_binary_health,
@@ -31,32 +31,13 @@ def _reset_probe_cache():
     reset_git_binary_health_for_tests()
 
 
-class _FakeProc:
-    def __init__(self, *, stdout: bytes = b"", returncode: int = 0, hang: bool = False):
-        self._stdout = stdout
-        self.returncode = returncode
-        self._hang = hang
-        self.killed = False
-
-    async def communicate(self) -> tuple[bytes, bytes]:
-        if self._hang:
-            await asyncio.sleep(30)
-        return self._stdout, b""
-
-    def kill(self) -> None:
-        self.killed = True
-
-    async def wait(self) -> int:
-        return -9
-
-
 def _patch_spawn(monkeypatch: pytest.MonkeyPatch, result: Any) -> None:
     async def _spawn(*_args: Any, **_kwargs: Any) -> Any:
         if isinstance(result, BaseException):
             raise result
         return result
 
-    monkeypatch.setattr(binary_health.asyncio, "create_subprocess_exec", _spawn)
+    monkeypatch.setattr(binary_health, "spawn_process", _spawn)
 
 
 @pytest.mark.asyncio
@@ -66,17 +47,13 @@ async def test_unprobed_cache_is_none():
 
 @pytest.mark.asyncio
 async def test_probe_success_caches_available(monkeypatch: pytest.MonkeyPatch):
-    seen_stdin: list[object] = []
+    async def _spawn(*_args: Any, **_kwargs: Any) -> SpawnedProcess:
+        return SpawnedProcess(returncode=0, stdout=b"git version 2.43.0")
 
-    async def _spawn(*_args: Any, **kwargs: Any) -> Any:
-        seen_stdin.append(kwargs.get("stdin"))
-        return _FakeProc(stdout=b"git version 2.43.0")
-
-    monkeypatch.setattr(binary_health.asyncio, "create_subprocess_exec", _spawn)
+    monkeypatch.setattr(binary_health, "spawn_process", _spawn)
     await probe_git_binary_at_startup()
     assert git_binary_health() is True
     assert git_binary_health_failure() is None
-    assert seen_stdin == [asyncio.subprocess.DEVNULL]
 
 
 @pytest.mark.asyncio
@@ -91,7 +68,7 @@ async def test_missing_binary_caches_not_found(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.mark.asyncio
 async def test_nonzero_exit_caches_unavailable(monkeypatch: pytest.MonkeyPatch):
-    _patch_spawn(monkeypatch, _FakeProc(stdout=b"boom", returncode=127))
+    _patch_spawn(monkeypatch, SpawnedProcess(returncode=127, stdout=b"boom"))
     await probe_git_binary_at_startup()
     assert git_binary_health() is False
     failure = git_binary_health_failure()
@@ -99,15 +76,17 @@ async def test_nonzero_exit_caches_unavailable(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.mark.asyncio
-async def test_wedged_probe_is_bounded_and_kills(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(binary_health, "_GIT_PROBE_TIMEOUT", 0.05)
-    proc = _FakeProc(hang=True)
-    _patch_spawn(monkeypatch, proc)
+async def test_wedged_probe_is_bounded(monkeypatch: pytest.MonkeyPatch):
+    """Kill lives in ``spawn_process``; the probe only has to map the timeout."""
+
+    async def _spawn(*_args: Any, **_kwargs: Any) -> SpawnedProcess:
+        raise TimeoutError
+
+    monkeypatch.setattr(binary_health, "spawn_process", _spawn)
     await probe_git_binary_at_startup()
     assert git_binary_health() is False
     failure = git_binary_health_failure()
     assert failure is not None and failure[0] == "probe_timeout"
-    assert proc.killed is True
 
 
 @pytest.mark.asyncio

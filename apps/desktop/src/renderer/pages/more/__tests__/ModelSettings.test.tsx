@@ -57,7 +57,6 @@ function providersResponse(
         id: "p1",
         label: "DeepSeek",
         base_url: "https://api.deepseek.com/v1",
-        default_model: "deepseek-v4-pro",
         status: "active",
         masked_key: "••••abcd",
         supports_tools: true,
@@ -66,7 +65,6 @@ function providersResponse(
         id: "p2",
         label: "OpenAI",
         base_url: "https://api.openai.com/v1",
-        default_model: "gpt-4o",
         status: "unchecked",
         masked_key: "••••wxyz",
       },
@@ -366,7 +364,7 @@ describe("ModelSettings (profiles)", () => {
     expect(screen.getAllByText("跟随主模型")).toHaveLength(2);
     expect(screen.queryByText("不配置")).toBeNull();
     expect(screen.getByText(/辩论仍用主模型/)).toBeTruthy();
-    expect(screen.getByText(/标题、记忆等/)).toBeTruthy();
+    expect(screen.getByText(/标题等/)).toBeTruthy();
     expect(screen.queryByText(/主模型不能看图时再配/)).toBeNull();
   });
 
@@ -597,7 +595,6 @@ describe("ModelSettings (profiles)", () => {
             id: "p1",
             label: "DeepSeek",
             base_url: "https://api.deepseek.com/v1",
-            default_model: "",
             status: "active",
             masked_key: "••••abcd",
             supports_tools: true,
@@ -664,7 +661,6 @@ describe("ModelSettings (profiles)", () => {
             id: "p1",
             label: "DeepSeek",
             base_url: "https://api.deepseek.com/v1",
-            default_model: "",
             status: "active",
             masked_key: "••••abcd",
             supports_tools: true,
@@ -884,7 +880,6 @@ describe("ModelSettings (profiles)", () => {
             id: "p1",
             label: "DeepSeek",
             base_url: "https://api.deepseek.com/v1",
-            default_model: "deepseek-v4-flash",
             status: "active",
             masked_key: "••••abcd",
           },

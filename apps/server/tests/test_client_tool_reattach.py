@@ -335,8 +335,8 @@ async def test_build_hot_approval_fills_wire_ids():
         kind=InteractionKind.APPROVAL,
         payload={
             "tool_call_id": "call-42",
-            "tool_name": "file_write",
-            "arguments": {"path": "a.txt"},
+            "tool_name": "write",
+            "arguments": {"file_path": "a.txt"},
         },
     )
     req = registry.get("call-42")
@@ -348,8 +348,8 @@ async def test_build_hot_approval_fills_wire_ids():
         "approval_id": "call-42",
         "conversation_id": CONV,
         "tool_call_id": "call-42",
-        "tool_name": "file_write",
-        "arguments": {"path": "a.txt"},
+        "tool_name": "write",
+        "arguments": {"file_path": "a.txt"},
     }
     registry.discard("call-42")
 
@@ -460,8 +460,8 @@ async def test_attach_resends_open_approval(monkeypatch):
         kind=InteractionKind.APPROVAL,
         payload={
             "tool_call_id": "appr-open",
-            "tool_name": "file_write",
-            "arguments": {"path": "x.txt"},
+            "tool_name": "write",
+            "arguments": {"file_path": "x.txt"},
         },
     )
 
@@ -489,7 +489,7 @@ async def test_attach_resends_open_approval(monkeypatch):
     card = next(p for p in payloads if p["type"] == EventType.APPROVAL_REQUIRED.value)
     assert card["payload"]["approval_id"] == "appr-open"
     assert card["payload"]["conversation_id"] == CONV
-    assert card["payload"]["tool_name"] == "file_write"
+    assert card["payload"]["tool_name"] == "write"
 
 
 async def test_attach_skips_discarded_approval(monkeypatch):
@@ -537,8 +537,8 @@ async def test_registry_hot_pending_recovery_payload():
         kind=InteractionKind.APPROVAL,
         payload={
             "tool_call_id": "appr-rec",
-            "tool_name": "file_write",
-            "arguments": {"path": "/tmp/x"},
+            "tool_name": "write",
+            "arguments": {"file_path": "/tmp/x"},
         },
     )
     try:
@@ -549,6 +549,6 @@ async def test_registry_hot_pending_recovery_payload():
         assert pending[0].message_id == "msg-live"
         assert pending[0].payload["approval_id"] == "appr-rec"
         assert pending[0].payload["conversation_id"] == CONV
-        assert pending[0].payload["tool_name"] == "file_write"
+        assert pending[0].payload["tool_name"] == "write"
     finally:
         registry.discard("appr-rec")

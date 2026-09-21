@@ -264,8 +264,8 @@ export interface SidecarTurnResult {
    *  The renderer surfaces it on the model badge. */
   model: string;
   rounds: number;
-  /** 全量 token 快照（引擎记账的五项）——原样回写落 `Message.usage`，使 sidecar 回合重载后
-   *  的 meta 行与云回合一致（云 `persist_turn_result` 落同样键）。成本不随行（云代理权威计费）。 */
+  /** Live startTurn bubble totals. Reload-visible ``Message.usage`` is the outbox
+   *  settle snapshot, not this RPC usage block. Spend is not relayed. */
   usage: {
     inputTokens: number;
     outputTokens: number;
@@ -575,6 +575,20 @@ export interface SidecarWarmAccountRulesMemoryRequest {
   /** account 窄票；缺省则主进程跳过 RPC（暖需要票）。 */
   accountAuth?: SidecarAccountAuth;
   /** 登录账号 id（覆盖 initialize 时的 local）；与 startTurn.userId 同形。 */
+  userId?: string;
+}
+
+/**
+ * 输入框首次聚焦时握一次 LLM HTTP 手：ensure + initialize 后踢 `warmLlmHttp`。
+ * sidecar 用推理 hop 做 `GET /models`（可 404），只完成 TLS，不发草稿、不 POST 补全。
+ * 不登记 inflightWarms——不得拖慢 startTurn。失败可忽略；云会话 / 死绑定不 spawn。
+ */
+export interface SidecarWarmLlmHttpRequest {
+  rootId: string;
+  subpath?: string;
+  /** 推理 hop；缺省则 sidecar 用 initialize 时的票，没有则空操作。 */
+  inference?: SidecarInference;
+  /** 登录账号 id（覆盖 initialize 时的 local）。 */
   userId?: string;
 }
 
@@ -917,6 +931,7 @@ export const SIDECAR_CHANNELS = {
   probe: "sidecar:probe",
   warmMcpDiscover: "sidecar:warmMcpDiscover",
   warmAccountRulesMemory: "sidecar:warmAccountRulesMemory",
+  warmLlmHttp: "sidecar:warmLlmHttp",
   refreshLiveAccountRulesMemory: "sidecar:refreshLiveAccountRulesMemory",
   recovery: "sidecar:recovery",
   attach: "sidecar:attach",
@@ -984,6 +999,12 @@ export interface SidecarApi {
   warmAccountRulesMemory(
     req: SidecarWarmAccountRulesMemoryRequest,
   ): Promise<void>;
+  /**
+   * 输入框首次聚焦时握 LLM HTTP 手：ensure + initialize 后踢 `warmLlmHttp`
+   *（带 inference）。失败可忽略；不挡 UI；不登记 startTurn 等待的 inflightWarms。
+   * 回合 ensure / probe 不自动踢。
+   */
+  warmLlmHttp(req: SidecarWarmLlmHttpRequest): Promise<void>;
   /**
    * 文件页写入成功后强制刷新活 sidecar 的 rules/memory 快照（忽略 TTL）。
    * 不 spawn；失败可忽略。

@@ -38,7 +38,7 @@ const mem = (
   id,
   createdAt: at,
   anchorAt,
-  kind: "semantic",
+  kind: "quota",
   items: [],
 });
 
@@ -51,6 +51,26 @@ const pc = (id: string, at: string): PermissionChange => ({
 });
 
 describe("mergeTimeline", () => {
+  it("drops leftover semantic memory cards", () => {
+    const messages = [
+      um("u1", "2026-01-01T00:00:00Z"),
+      am("a1", "2026-01-01T01:00:00Z"),
+    ];
+    const items = mergeTimeline(
+      messages,
+      [],
+      [
+        {
+          id: "s1",
+          createdAt: "2026-01-01T01:30:00Z",
+          kind: "semantic",
+          items: [],
+        },
+      ],
+    );
+    expect(items.map((i) => i.kind)).toEqual(["message", "message"]);
+  });
+
   it("returns a pure message list when there are no tasks or memory cards", () => {
     const items = mergeTimeline(
       [um("u1", "2026-01-01T00:00:00Z"), am("a1", "2026-01-01T01:00:00Z")],

@@ -42,7 +42,7 @@ def _lens_session(run_id: str = "lens_0", role: str = "法律视角") -> RunSess
             agent_id=run_id,
             task=f"{role}调研",
             role=role,
-            tools=["web_search", "file_read", "write_file"],
+            tools=["web_search", "read", "write_file"],
         ),
         transcript=[
             LLMMessage(role="system", content="sys"),

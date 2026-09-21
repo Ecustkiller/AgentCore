@@ -27,6 +27,8 @@ import {
   Terminal,
   Trash2,
 } from "lucide-react";
+import { useState } from "react";
+import { ExportWordDialog } from "./ExportWordDialog";
 import type { FileTreeRowProps } from "./FileTreeRow";
 import type { BatchMenuActions } from "./fileTreeTypes";
 
@@ -42,7 +44,7 @@ function BatchMenu({
   source,
 }: { batch: BatchMenuActions; source: FileSource }) {
   return (
-    <ContextMenuContent className="min-w-36">
+    <ContextMenuContent>
       {source.caps.transfer &&
         source.download &&
         batch.downloadableCount > 0 && (
@@ -100,6 +102,7 @@ export function FileTreeRowMenu({
   | "onPaste"
   | "onReloadDir"
 >) {
+  const [exportOpen, setExportOpen] = useState(false);
   if (batch) return <BatchMenu batch={batch} source={source} />;
   // 系统集成项只在源实现了对应方法时出现（reveal / 终端仅本地源有）——靠「方法是否存在」
   // 门控，组件内不按源 if 分支。「用默认程序打开」两源都有，另过源自己的谓词（云端只放行
@@ -108,9 +111,7 @@ export function FileTreeRowMenu({
   const canOpenShell = !!source.openShellAtPath;
   const canOpenExternal =
     !node.isDir && canOpenPathWithOsDefaultApp(source, node.path);
-  const canCopyPath = !!source.copyOsPath;
-  const hasOsGroup =
-    canReveal || canOpenShell || canOpenExternal || canCopyPath;
+  const hasOsGroup = canReveal || canOpenShell || canOpenExternal;
   // 复制走可选 copy（本地 IPC / 云端 REST）；剪切走必备 move；粘贴仅文件夹行 +
   // 剪贴板非空时出现（粘贴进该文件夹）。
   const canCopy = !!source.copy;
@@ -130,13 +131,6 @@ export function FileTreeRowMenu({
       await source.openWithOsDefaultApp?.(node.path);
     } catch (e) {
       notifyActionError("无法用默认程序打开", e);
-    }
-  };
-  const copyPath = async () => {
-    try {
-      await source.copyOsPath?.(node.path);
-    } catch (e) {
-      notifyActionError("复制路径失败", e);
     }
   };
 
@@ -166,6 +160,8 @@ export function FileTreeRowMenu({
       notifyActionError("导出 Word 失败", e);
     }
   };
+  const canExportWord =
+    canMutate && isMarkdownPath(node.path) && !!source.exportMdToDocx;
   const downloadItem = canDownload ? (
     <ContextMenuItem
       onSelect={() =>
@@ -181,110 +177,108 @@ export function FileTreeRowMenu({
     </ContextMenuItem>
   ) : null;
   return (
-    <ContextMenuContent className="min-w-36">
-      {node.isDir ? (
-        <>
-          {downloadItem}
-          {canMutate ? (
-            <ContextMenuItem
-              onSelect={() => onContextCreate(node.path, "file")}
-            >
-              <FilePlus size={14} className="shrink-0" />
-              <span className="flex-1 truncate">新建文件</span>
+    <>
+      <ContextMenuContent>
+        {node.isDir ? (
+          <>
+            {downloadItem}
+            {canMutate ? (
+              <ContextMenuItem
+                onSelect={() => onContextCreate(node.path, "file")}
+              >
+                <FilePlus size={14} className="shrink-0" />
+                <span className="flex-1 truncate">新建文件</span>
+              </ContextMenuItem>
+            ) : null}
+          </>
+        ) : (
+          <>
+            {downloadItem}
+            <ContextMenuItem onSelect={() => onOpenFile(node.path, node.name)}>
+              <FileText size={14} className="shrink-0" />
+              <span className="flex-1 truncate">打开</span>
             </ContextMenuItem>
-          ) : null}
-        </>
-      ) : (
-        <>
-          {downloadItem}
-          <ContextMenuItem onSelect={() => onOpenFile(node.path, node.name)}>
-            <FileText size={14} className="shrink-0" />
-            <span className="flex-1 truncate">打开</span>
-          </ContextMenuItem>
-          {canMutate && isMarkdownPath(node.path) && source.exportMdToDocx && (
-            <>
+            {canExportWord && (
               <ContextMenuItem
                 onSelect={() => {
-                  void exportMdToDocx(node.path, "standard");
+                  // 菜单先关再出弹窗，避免两层 modal 抢 pointer-events。
+                  window.setTimeout(() => setExportOpen(true), 0);
                 }}
               >
                 <FileType size={14} className="shrink-0" />
                 <span className="flex-1 truncate">导出 Word</span>
               </ContextMenuItem>
-              <ContextMenuItem
-                onSelect={() => {
-                  void exportMdToDocx(node.path, "official");
-                }}
-              >
-                <FileType size={14} className="shrink-0" />
-                <span className="flex-1 truncate">导出 Word（正式文书）</span>
+            )}
+          </>
+        )}
+        {hasOsGroup && (
+          <>
+            <ContextMenuSeparator />
+            {canOpenExternal && (
+              <ContextMenuItem onSelect={() => void openExternal()}>
+                <ExternalLink size={14} className="shrink-0" />
+                <span className="flex-1 truncate">用默认程序打开</span>
               </ContextMenuItem>
-            </>
-          )}
-        </>
+            )}
+            {canReveal && (
+              <ContextMenuItem onSelect={() => void reveal()}>
+                <FolderSearch size={14} className="shrink-0" />
+                <span className="flex-1 truncate">在资源管理器中显示</span>
+              </ContextMenuItem>
+            )}
+            {canOpenShell && (
+              <ContextMenuItem onSelect={() => void openShell()}>
+                <Terminal size={14} className="shrink-0" />
+                <span className="flex-1 truncate">在终端打开</span>
+              </ContextMenuItem>
+            )}
+          </>
+        )}
+        {canMutate && (
+          <>
+            <ContextMenuSeparator />
+            {canCopy && (
+              <ContextMenuItem onSelect={() => onCopy([node.path])}>
+                <Copy size={14} className="shrink-0" />
+                <span className="flex-1 truncate">复制</span>
+              </ContextMenuItem>
+            )}
+            <ContextMenuItem onSelect={() => onCut([node.path])}>
+              <Scissors size={14} className="shrink-0" />
+              <span className="flex-1 truncate">剪切</span>
+            </ContextMenuItem>
+            {node.isDir && hasClipboard && (
+              <ContextMenuItem onSelect={() => onPaste(node.path)}>
+                <ClipboardPaste size={14} className="shrink-0" />
+                <span className="flex-1 truncate">粘贴到此文件夹</span>
+              </ContextMenuItem>
+            )}
+            <ContextMenuSeparator />
+            <ContextMenuItem onSelect={() => onStartRename(node.path)}>
+              <Pencil size={14} className="shrink-0" />
+              <span className="flex-1 truncate">重命名</span>
+            </ContextMenuItem>
+            <ContextMenuItem
+              variant="danger"
+              onSelect={() => void onDelete(node)}
+            >
+              <Trash2 size={14} className="shrink-0" />
+              <span className="flex-1 truncate">删除</span>
+            </ContextMenuItem>
+          </>
+        )}
+      </ContextMenuContent>
+      {canExportWord && (
+        <ExportWordDialog
+          open={exportOpen}
+          fileName={node.name}
+          onOpenChange={setExportOpen}
+          onPick={(layout) => {
+            setExportOpen(false);
+            void exportMdToDocx(node.path, layout);
+          }}
+        />
       )}
-      {hasOsGroup && (
-        <>
-          <ContextMenuSeparator />
-          {canOpenExternal && (
-            <ContextMenuItem onSelect={() => void openExternal()}>
-              <ExternalLink size={14} className="shrink-0" />
-              <span className="flex-1 truncate">用默认程序打开</span>
-            </ContextMenuItem>
-          )}
-          {canReveal && (
-            <ContextMenuItem onSelect={() => void reveal()}>
-              <FolderSearch size={14} className="shrink-0" />
-              <span className="flex-1 truncate">在资源管理器中显示</span>
-            </ContextMenuItem>
-          )}
-          {canOpenShell && (
-            <ContextMenuItem onSelect={() => void openShell()}>
-              <Terminal size={14} className="shrink-0" />
-              <span className="flex-1 truncate">在终端打开</span>
-            </ContextMenuItem>
-          )}
-          {canCopyPath && (
-            <ContextMenuItem onSelect={() => void copyPath()}>
-              <Copy size={14} className="shrink-0" />
-              <span className="flex-1 truncate">复制路径</span>
-            </ContextMenuItem>
-          )}
-        </>
-      )}
-      {canMutate && (
-        <>
-          <ContextMenuSeparator />
-          {canCopy && (
-            <ContextMenuItem onSelect={() => onCopy([node.path])}>
-              <Copy size={14} className="shrink-0" />
-              <span className="flex-1 truncate">复制</span>
-            </ContextMenuItem>
-          )}
-          <ContextMenuItem onSelect={() => onCut([node.path])}>
-            <Scissors size={14} className="shrink-0" />
-            <span className="flex-1 truncate">剪切</span>
-          </ContextMenuItem>
-          {node.isDir && hasClipboard && (
-            <ContextMenuItem onSelect={() => onPaste(node.path)}>
-              <ClipboardPaste size={14} className="shrink-0" />
-              <span className="flex-1 truncate">粘贴到此文件夹</span>
-            </ContextMenuItem>
-          )}
-          <ContextMenuSeparator />
-          <ContextMenuItem onSelect={() => onStartRename(node.path)}>
-            <Pencil size={14} className="shrink-0" />
-            <span className="flex-1 truncate">重命名</span>
-          </ContextMenuItem>
-          <ContextMenuItem
-            variant="danger"
-            onSelect={() => void onDelete(node)}
-          >
-            <Trash2 size={14} className="shrink-0" />
-            <span className="flex-1 truncate">删除</span>
-          </ContextMenuItem>
-        </>
-      )}
-    </ContextMenuContent>
+    </>
   );
 }

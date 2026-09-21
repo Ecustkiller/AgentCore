@@ -58,10 +58,9 @@ export function EscalationCard({
   conversationId: string | null;
   interactive: boolean;
 }) {
-  // 非阻塞上报 (run_escalation): the worker flagged a decision but kept working on its
-  // assumption — a turn-level NOTICE, never a 待拍板 card (no resolve target). Handled
-  // first so it never falls through to the pending path (which POSTs to a null id).
+  // raised：仅引擎早停卡；scope/dep 只走协作图，这里直接不渲染。
   if (escalation.status === "raised") {
+    if (!isEarlyStopSource(escalation.source)) return null;
     return <RaisedEscalation escalation={escalation} role={role} />;
   }
   if (
@@ -425,11 +424,7 @@ function isEarlyStopSource(source: string | undefined): boolean {
   return source === "validation_thrash" || source === "ceiling_backstop";
 }
 
-/** 非阻塞 raised（run_escalation）:
- * - 真·边干边上报：被动 notice，折叠「边干边上报」；有 assumption 才渲染「暂定假设」。
- * - 卡住早停（source=validation_thrash|ceiling_backstop）：折叠「卡住早停」；
- *   正文 question；不写边干边上报 / 已按假设继续 / 无需你拍板。
- * 默认收起为一行（对齐 TeamPreview / ResolvedDecisionRecord），点开再看全文。 */
+/** 卡住早停（source=validation_thrash / ceiling_backstop）。scope/dep 只走协作图，不出留言卡。 */
 function RaisedEscalation({
   escalation,
   role,
@@ -438,25 +433,17 @@ function RaisedEscalation({
   role: string;
 }) {
   const kind = escalationKindTag(escalation);
-  const earlyStop = isEarlyStopSource(escalation.source);
-  const summary = earlyStop
-    ? `${role} · 卡住早停${kind ? ` · ${kind}` : ""}`
-    : `${role} · 边干边上报${kind ? ` · ${kind}` : ""}`;
+  const summary = `${role} · 卡住早停${kind ? ` · ${kind}` : ""}`;
   return (
     <ResolvedDecisionRecord
       layout="neutralCollapsible"
       disclosureKey={escalationDisclosureKey(escalation, role, "raised")}
-      icon={earlyStop ? AlertTriangle : Megaphone}
+      icon={AlertTriangle}
       summary={summary}
     >
       <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
         {escalation.question}
       </p>
-      {!earlyStop && escalation.assumption ? (
-        <p className="mt-1.5 text-sm text-muted-foreground">
-          暂定假设：{escalation.assumption}
-        </p>
-      ) : null}
     </ResolvedDecisionRecord>
   );
 }
@@ -534,14 +521,14 @@ function ResolvedEscalation({
   );
 }
 
-/** 列表序对齐 faceBudget：待拍板 > 已结案 > 边干边上报（raised 置底降噪）。 */
+/** 列表序：待拍板 > 已结案 > 卡住早停。 */
 export function escalationListRank(status: RunEscalation["status"]): number {
   if (status === "pending") return 0;
   if (status === "raised") return 2;
   return 1; // resolved / assumed / timed_out
 }
 
-/** ≥2 条 raised，或同时有待拍板时，默认收起边干边上报。 */
+/** ≥2 条卡住早停，或同时有待拍板时，默认收起早停卡。 */
 export function shouldCollapseRaised(
   raisedCount: number,
   pendingCount: number,
@@ -586,7 +573,9 @@ export function EscalationCards({
       i.esc.status === "assumed" ||
       i.esc.status === "timed_out",
   );
-  const raised = ordered.filter((i) => i.esc.status === "raised");
+  const raised = ordered.filter(
+    (i) => i.esc.status === "raised" && isEarlyStopSource(i.esc.source),
+  );
   const collapseRaised = shouldCollapseRaised(raised.length, pending.length);
   const showRaisedCards = !collapseRaised || raisedOpen;
 
@@ -648,7 +637,7 @@ export function EscalationCards({
           <span className="flex h-5 shrink-0 items-center justify-center text-muted-foreground">
             <Megaphone size={14} />
           </span>
-          {raised.length} 条边干边上报
+          {raised.length} 条卡住早停
           {showRaisedCards ? (
             <ChevronDown size={14} className="shrink-0" />
           ) : (

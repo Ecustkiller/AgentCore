@@ -163,7 +163,7 @@ async def test_registry_hot_cards_only_for_this_users_live_runs(monkeypatch):
         "appr-mine",
         "c-mine",
         kind=InteractionKind.APPROVAL,
-        payload={"tool_name": "file_write"},
+        payload={"tool_name": "write"},
     )
     registry.create(
         "appr-other",

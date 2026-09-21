@@ -109,9 +109,9 @@ export function buildAgentNodePresentation(
       : ""
   }${d.checkpoint ? `，检查点${checkpointBadge(d.checkpoint).label}` : ""}${
     (d.escalationPending ?? 0) > 0
-      ? `，${d.escalationPending} 项待你拍板${d.escalationKind && d.escalationKind !== "normal" ? `（${escalationKindLabel(d.escalationKind)}）` : ""}`
+      ? `，${d.escalationPending} 项待你拍板${d.escalationKind && d.escalationKind !== "wait" ? `（${escalationKindLabel(d.escalationKind)}）` : ""}`
       : (d.escalationRaised ?? 0) > 0
-        ? `，上报 ${d.escalationRaised} 条${d.escalationKind && d.escalationKind !== "normal" ? `（${escalationKindLabel(d.escalationKind)}）` : ""}`
+        ? `，上报 ${d.escalationRaised} 条${d.escalationKind && d.escalationKind !== "wait" ? `（${escalationKindLabel(d.escalationKind)}）` : ""}`
         : ""
   }${
     // a11y 不回归：即便视觉预算挤掉了「含质询」，仍进 aria 播报。
@@ -167,7 +167,7 @@ export function buildAgentNodePresentation(
   if (d.debateCrossExamMark) peekTags.push(d.debateCrossExamMark.label);
   if ((d.escalationPending ?? 0) > 0) {
     const kindTag =
-      d.escalationKind && d.escalationKind !== "normal"
+      d.escalationKind && d.escalationKind !== "wait"
         ? escalationKindLabel(d.escalationKind)
         : null;
     peekTags.push(
@@ -175,7 +175,7 @@ export function buildAgentNodePresentation(
     );
   } else if ((d.escalationRaised ?? 0) > 0) {
     const kindTag =
-      d.escalationKind && d.escalationKind !== "normal"
+      d.escalationKind && d.escalationKind !== "wait"
         ? escalationKindLabel(d.escalationKind)
         : null;
     peekTags.push(

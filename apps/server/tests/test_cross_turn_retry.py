@@ -163,7 +163,7 @@ def test_derivation_copies_stamp_never_infers_from_error_class():
         tool_call_fact_cross_turn_retry(
             ToolAttempt(
                 "f",
-                "file_write",
+                "write",
                 success=False,
                 meta={"error_class": ERROR_CLASS_PERMISSION},
             )
@@ -185,7 +185,7 @@ def test_derivation_copies_stamp_never_infers_from_error_class():
         tool_call_fact_cross_turn_retry(
             ToolAttempt(
                 "f",
-                "file_write",
+                "write",
                 success=False,
                 contract_failure=True,
                 meta={"error_class": ERROR_CLASS_VALIDATION},
@@ -195,7 +195,7 @@ def test_derivation_copies_stamp_never_infers_from_error_class():
     )
     stamped = ToolAttempt(
         "f",
-        "file_write",
+        "write",
         success=False,
         meta={CROSS_TURN_RETRY_KEY: CrossTurnRetry.FUTILE.value},
     )
@@ -208,13 +208,13 @@ async def test_allowlist_deny_reaches_tool_call_fact():
     token = current_fact_log.set(log)
     try:
         await execute_tools(
-            [_call("c1", "file_write", '{"path":"a.md","content":"x"}')],
-            _registry(_OkTool("file_write")),
+            [_call("c1", "write", '{"file_path":"a.md","content":"x"}')],
+            _registry(_OkTool("write")),
             _ctx(),
             EventSink(),
             approval_gate=None,
             run_id="r1",
-            allowed_tool_names=["file_read"],
+            allowed_tool_names=["read"],
         )
     finally:
         current_fact_log.reset(token)
@@ -271,7 +271,7 @@ async def test_write_scope_reject_reaches_tool_call_fact(tmp_path: Path):
     token = current_fact_log.set(log)
     try:
         await execute_tools(
-            [_call("c1", "file_write", '{"path":"src/a.py","content":"x"}')],
+            [_call("c1", "write", '{"file_path":"src/a.py","content":"x"}')],
             _registry(FileWriteTool()),
             ctx,
             EventSink(),
@@ -291,7 +291,7 @@ async def test_outside_workspace_reaches_tool_call_fact(tmp_path: Path):
     token = current_fact_log.set(log)
     try:
         await execute_tools(
-            [_call("c1", "file_write", '{"path":"../escaped.md","content":"x"}')],
+            [_call("c1", "write", '{"file_path":"../escaped.md","content":"x"}')],
             _registry(FileWriteTool()),
             _ctx(tmp_path),
             EventSink(),
@@ -338,8 +338,8 @@ async def test_mount_policy_deny_reaches_tool_call_fact(tmp_path: Path):
             [
                 _call(
                     "c1",
-                    "file_write",
-                    '{"path":"external/AgentCode/out/report.md","content":"leak"}',
+                    "write",
+                    '{"file_path":"external/AgentCode/out/report.md","content":"leak"}',
                 )
             ],
             _registry(FileWriteTool()),

@@ -22,14 +22,10 @@ export const PROMPT_TAG_LABELS: Record<string, string> = {
   记忆主题目录: "记忆主题目录",
   workspace_file_index: "工作区文件索引",
   tool_safety: "工具安全",
-  local_desk: "本机目录进工作区",
-  delivery: "交付环境",
+  local_desk: "本机路径与工作区",
+  本机目录: "本机路径与工作区",
   debate_and_review: "正反辩论",
   page_ui: "页面观感",
-  legal_answer_brief: "民事答辩状",
-  legal_complaint: "民事起诉状",
-  legal_case_analysis: "接案评估与诉讼策略",
-  legal_contract_review: "合同审查",
 };
 
 /** Resolve a prompt section tag to a display title. */

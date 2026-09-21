@@ -110,8 +110,8 @@ function otherStep(id: string): ToolStep {
   return {
     kind: "tool",
     id,
-    tool_name: "file_write",
-    arguments: { path: "a.txt", content: "x" },
+    tool_name: "write",
+    arguments: { file_path: "a.txt", content: "x" },
     result: "已写入 a.txt",
     display: null,
     status: "success",
@@ -123,7 +123,7 @@ describe("browser 聚合判定", () => {
     expect(isBrowserTool("browser")).toBe(true);
     expect(isBrowserTool("browser_navigate")).toBe(true);
     expect(isBrowserTool("browser_screenshot")).toBe(true);
-    expect(isBrowserTool("file_write")).toBe(false);
+    expect(isBrowserTool("write")).toBe(false);
     expect(isBrowserTool("web_fetch")).toBe(false);
   });
 
@@ -166,21 +166,15 @@ describe("browser 聚合判定", () => {
 });
 
 describe("browserSubline · 展开卡一行副文", () => {
-  it("keeps navigate detail when it already contains the url", () => {
+  it("keeps title when it already contains the url", () => {
     expect(
-      browserSubline("打开 http://localhost:5174/", "http://localhost:5174/"),
-    ).toBe("打开 http://localhost:5174/");
+      browserSubline("http://localhost:5174/", "http://localhost:5174/"),
+    ).toBe("http://localhost:5174/");
   });
 
-  it("keeps HTTP status on the navigate line", () => {
-    expect(
-      browserSubline("打开 https://ex.com（HTTP 200）", "https://ex.com"),
-    ).toBe("打开 https://ex.com（HTTP 200）");
-  });
-
-  it("joins distinct click detail and url", () => {
-    expect(browserSubline("点击元素 e13", "https://example.com/login")).toBe(
-      "点击元素 e13 · https://example.com/login",
+  it("joins distinct page title and url", () => {
+    expect(browserSubline("登录", "https://example.com/login")).toBe(
+      "登录 · https://example.com/login",
     );
   });
 
@@ -188,13 +182,13 @@ describe("browserSubline · 展开卡一行副文", () => {
     expect(browserSubline("", "https://example.com")).toBe(
       "https://example.com",
     );
-    expect(browserSubline("截取当前页面", "")).toBe("截取当前页面");
+    expect(browserSubline("示例首页", "")).toBe("示例首页");
     expect(browserSubline(undefined, undefined)).toBe("");
   });
 });
 
 describe("browserResultPeek · 单步折叠一行", () => {
-  it("tail prefers detail over title/url for non-navigate", () => {
+  it("prefers page title over action detail for every action", () => {
     expect(
       browserResultTail({
         kind: "browser",
@@ -203,7 +197,24 @@ describe("browserResultPeek · 单步折叠一行", () => {
         title: "Example",
         detail: "点击元素 e13",
       }),
-    ).toBe("点击元素 e13");
+    ).toBe("Example");
+    expect(
+      browserResultTail({
+        kind: "browser",
+        action: "snapshot",
+        url: "https://ex.com",
+        title: "示例首页",
+        detail: "读取页面结构（v2）",
+      }),
+    ).toBe("示例首页");
+    expect(
+      browserResultTail({
+        kind: "browser",
+        action: "screenshot",
+        url: "https://ex.com",
+        detail: "截取当前页面",
+      }),
+    ).toBe("https://ex.com");
   });
 
   it("navigate prefers page title over 打开-url detail", () => {
@@ -218,7 +229,7 @@ describe("browserResultPeek · 单步折叠一行", () => {
     ).toBe("示例首页");
   });
 
-  it("prefers detail, falls back to title/url", () => {
+  it("peek is verb · identity (title else url), never action restatement", () => {
     expect(
       browserResultPeek({
         kind: "browser",
@@ -243,6 +254,14 @@ describe("browserResultPeek · 单步折叠一行", () => {
         url: "https://ex.com/list",
       }),
     ).toBe("Scroll · https://ex.com/list");
+    expect(
+      browserResultPeek({
+        kind: "browser",
+        action: "snapshot",
+        url: "https://ex.com",
+        detail: "读取页面结构（v2）",
+      }),
+    ).toBe("Snapshot · https://ex.com");
   });
 
   it("expand extras is the url when the title chip is the page title", () => {
@@ -351,11 +370,10 @@ describe("BrowserActivityCard · 卡渲染", () => {
     fireEvent.click(screen.getByText("浏览器 · 2 步"));
     expect(screen.getByText("Navigate")).toBeTruthy();
     expect(screen.getByText("Click")).toBeTruthy();
-    expect(screen.getByText("打开示例站 · https://example.com")).toBeTruthy();
-    expect(
-      screen.getByText("点击登录按钮 · https://example.com/login"),
-    ).toBeTruthy();
-    expect(screen.queryByText("https://example.com/login")).toBeNull();
+    expect(screen.getByText("https://example.com")).toBeTruthy();
+    expect(screen.getByText("https://example.com/login")).toBeTruthy();
+    expect(screen.queryByText("打开示例站")).toBeNull();
+    expect(screen.queryByText("点击登录按钮")).toBeNull();
   });
 
   it("keeps a running (no-display) step's slot from the call args", () => {
@@ -444,8 +462,12 @@ describe("BrowserActivityCard · 含 frame 的回放重建", () => {
     fireEvent.click(screen.getByText("浏览器 · 2 步"));
 
     await waitFor(() => {
-      expect(screen.getByAltText("打开示例站")).toBeTruthy();
-      expect(screen.getByAltText("首页截图")).toBeTruthy();
+      expect(
+        screen.getByAltText("Navigate · https://example.com"),
+      ).toBeTruthy();
+      expect(
+        screen.getByAltText("Screenshot · https://example.com"),
+      ).toBeTruthy();
     });
     expect(mockFetch).toHaveBeenCalledWith("conv-1", "browser/step-0001.jpg");
     expect(mockFetch).toHaveBeenCalledWith("conv-1", "browser/step-0002.jpg");
@@ -460,7 +482,7 @@ describe("BrowserActivityCard · 含 frame 的回放重建", () => {
       />,
     );
     fireEvent.click(screen.getByText("浏览器 · 2 步"));
-    const thumb = await screen.findByTitle("打开示例站");
+    const thumb = await screen.findByTitle("Navigate · https://example.com");
     expect(screen.queryByRole("dialog")).toBeNull();
     fireEvent.click(thumb);
     expect(screen.getByRole("dialog")).toBeTruthy();

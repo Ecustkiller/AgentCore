@@ -1,9 +1,10 @@
 """Shared「this model works on this provider」check.
 
-Used by BYOK connectivity test and model-profile save warnings. Prefer
-``list_models``; fall through to ``probe`` when the list is empty, missing, or
-omits the model (e.g. Ark ``ep-`` endpoints). Save path uses a softer policy so
-list fetch failures never block or slow a successful save.
+Used by BYOK connectivity tests (模型组合 slot ids) and model-profile save
+warnings. Prefer ``list_models``; fall through to ``probe`` when the list is
+empty, missing, or omits the model (e.g. Ark ``ep-`` endpoints). Save path
+uses a softer policy so list fetch failures never block or slow a successful
+save.
 """
 
 from __future__ import annotations
@@ -113,7 +114,7 @@ def _connectivity_probe_auth_copy(
     """Replace probe 401/auth-403 copy using ``upstream_status``, never product text.
 
     A successful non-empty ``GET /models`` already proved the Key; a later probe
-    401/403 then names the connectivity-test model. Soft / empty lists did not
+    401/403 then names the 模型组合 model. Soft / empty lists did not
     prove the Key — mention both Key and model. Balance, 404, 5xx, and non-auth
     403 keep the original sentence.
     """
@@ -128,10 +129,10 @@ def _connectivity_probe_auth_copy(
         return None
     if list_outcome.kind == "ok" and list_outcome.model_ids:
         return (
-            f"连接测试用模型「{model}」不被上游接受（不存在或无权）。"
-            "当前 API Key 已能列出模型，请改该字段；日常聊天看模型组合。"
+            f"模型「{model}」不被上游接受（不存在或无权）。"
+            "当前 API Key 已能列出模型，请改「模型组合」中的该模型。"
         )
     return (
-        f"请核对 API Key 与连接测试用模型「{model}」。"
+        f"请核对 API Key 与模型「{model}」。"
         "未能区分是密钥无效还是该模型不被上游接受。"
     )

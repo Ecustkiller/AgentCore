@@ -1,7 +1,7 @@
 """Wrong-tool-channel steer — a process outcome, not a fault.
 
 The model called a tool that is the wrong *channel* for the job (``code_execute``
-as grep, ``web_fetch`` as ``file_read``, …). Runtime refused to execute and told
+as grep, ``web_fetch`` as ``read``, …). Runtime refused to execute and told
 the model which tool to use instead. User files are untouched.
 
 Wire ``tool_use_end.status`` is ``redirect`` (not ``error``). The LLM transcript
@@ -26,8 +26,6 @@ CHANNEL_REDIRECT_CODES: frozenset[str] = frozenset(
         "not_a_web_url",
         "url_not_workspace_path",
         "loopback_host",
-        "shell_fetch_redirect",
-        "shell_download_redirect",
     }
 )
 

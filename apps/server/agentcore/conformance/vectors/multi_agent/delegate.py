@@ -142,9 +142,9 @@ def _multi_agent_worker_tool() -> list[SSEEvent]:
             runs=plan_runs,
         ),
         run_started("r1", "w1"),
-        run_tool_progress("r1", "w1", "file_write", 1200),
-        tool_use_start("tc1", "file_write", {"path": "a.py", "content": "print(1)"}, run_id="r1"),
-        tool_use_end("tc1", "file_write", success=True, output="已写入", run_id="r1"),
+        run_tool_progress("r1", "w1", "write", 1200),
+        tool_use_start("tc1", "write", {"file_path": "a.py", "content": "print(1)"}, run_id="r1"),
+        tool_use_end("tc1", "write", success=True, output="已写入", run_id="r1"),
         run_output_delta("r1", "w1", "代码就绪"),
         run_completed(
             "r1",

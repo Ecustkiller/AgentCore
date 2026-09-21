@@ -14,7 +14,6 @@ import { describe, expect, it } from "vitest";
 function emptyRail(over: Partial<PromptRail> = {}): PromptRail {
   return {
     constitution: [],
-    memory: [],
     alwaysMine: [],
     folders: [],
     official: [],
@@ -39,7 +38,7 @@ function mineItem(over: {
   label: string;
   content?: string;
   applyMode?: "always" | "on_demand";
-  memoryKind?: "preferences" | "profile" | null;
+  aiMaintained?: boolean;
   disputed?: boolean;
   alwaysChars?: number | null;
   parentId?: string | null;
@@ -58,8 +57,7 @@ function mineItem(over: {
     content,
     version: "v1",
     applyMode,
-    aiMaintained: over.memoryKind != null,
-    memoryKind: over.memoryKind ?? null,
+    aiMaintained: over.aiMaintained ?? false,
     listable: applyMode === "on_demand",
     disputed: over.disputed ?? false,
     alwaysChars:

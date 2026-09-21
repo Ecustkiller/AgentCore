@@ -88,7 +88,7 @@ def test_zero_files_gap_and_write_pass_feedback():
     assert is_zero_files_gap(legacy)
     fb = format_write_pass_feedback(legacy)
     assert "短写盘 pass" in fb
-    assert "file_write" in fb
+    assert "write / edit" in fb
     assert not is_zero_files_gap(
         check_contract("ok", Deliverable(artifacts=["out.md"]), files_written=1)
     )
@@ -252,7 +252,7 @@ def test_form_files_passes_when_file_copy_landed():
 
 
 def test_requires_files_passes_when_str_replace_landed():
-    """str_replace 成功落盘须计入 files_written（分区 worker 增量补丁）。"""
+    """edit 成功落盘须计入 files_written（分区 worker 增量补丁）。"""
     from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
     from agentcore.runtime.runs.serialize import files_touched_from_transcript
     from agentcore.tools.file_products import file_product, with_file_products_marker
@@ -265,8 +265,8 @@ def test_requires_files_passes_when_str_replace_landed():
                 ToolCall(
                     id="s1",
                     function=ToolCallFunction(
-                        name="str_replace",
-                        arguments='{"path": "site/index.html", "old_string": "a", "new_string": "b"}'))
+                        name="edit",
+                        arguments='{"file_path": "site/index.html", "old_string": "a", "new_string": "b"}'))
             ]),
         LLMMessage(
             role="tool",
@@ -288,7 +288,7 @@ def test_requires_files_passes_when_str_replace_landed():
 
 
 def test_file_deliverable_empty_body_passes_when_files_written():
-    """file_write 收尾 + 空 streamed 正文：有落盘即过基线，勿判「产出为空」。"""
+    """write 收尾 + 空 streamed 正文：有落盘即过基线，勿判「产出为空」。"""
     v = check_contract(
         "",
         Deliverable(artifacts=["site/QA.md"]),
@@ -312,14 +312,12 @@ def test_file_deliverable_empty_body_still_fails_baseline_when_nothing_landed():
 
 
 def test_form_files_reviews_landing_counts_as_product():
-    """Dossier notes under reviews count toward files_written (product landing)."""
-    from agentcore.workspace.stage_dirs import REVIEWS_DIR
-
+    """Any landed prose path counts toward files_written (product landing)."""
     v = check_contract(
         "已写修复方案",
         Deliverable(artifacts=["out.md"]),
         files_written=1,
-        workspace_paths=[f"{REVIEWS_DIR}/修复方案.md"])
+        workspace_paths=["notes/修复方案.md"])
     assert v.ok
     assert not is_zero_files_gap(v)
 
@@ -338,11 +336,9 @@ def test_artifact_path_mismatch_is_warning_not_zero_gap():
 
 def test_artifact_dir_miss_with_landing_is_silent():
     """仅 artifact_dir 未命中但已落盘 → 不发约定目录软提醒。"""
-    from agentcore.workspace.stage_dirs import DRAFTS_DIR
-
     v = check_contract(
         "已写",
-        Deliverable( artifact_dir=DRAFTS_DIR, artifacts=[]),
+        Deliverable( artifact_dir="notes", artifacts=[]),
         files_written=1,
         workspace_paths=["docs/法庭迷局侦探游戏_GDD.md"],
     )

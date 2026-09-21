@@ -3,9 +3,9 @@
  * 与 stores/execution/types.toolLabel（英文图节点进度文案）分表维护，勿混成一套。
  */
 export const TOOL_LABELS_ZH: Record<string, string> = {
-  file_write: "写入文件",
-  file_append: "追加文件",
-  str_replace: "修改文件",
+  read: "读取文件",
+  write: "写入文件",
+  edit: "修改文件",
   file_delete: "删除文件",
   file_move: "移动文件",
   file_copy: "复制文件",

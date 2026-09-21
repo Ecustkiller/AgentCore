@@ -1,19 +1,16 @@
-"""OpenCode Go public-list USD (admin windows) and Flash CNY meter (frozen 7.2)."""
+"""OpenCode Go public-list USD (admin windows). Product Flash CNY is official list."""
 
 from datetime import UTC, datetime
-from decimal import Decimal
 
 from agentcore.billing.opencode_go_public_prices import (
-    GO_USD_TO_CNY,
     MODEL_ID,
     PRICE_AS_OF,
     estimate_go_public_usd_nano,
-    go_flash_cny_per_million,
     is_opencode_go_peak,
 )
-from agentcore.llm.profiles import OPENCODE_GO_V41_FLASH
+from agentcore.llm.profiles import DEEPSEEK_V4_FLASH, OPENCODE_GO_V41_FLASH
 
-# Off-Peak noon / Peak 02:00 — same calendar day, different cards.
+# Off-Peak noon / Peak 02:00 — same weekday, different cards.
 _OFF = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
 _PEAK = datetime(2026, 8, 18, 2, 0, tzinfo=UTC)
 
@@ -39,7 +36,7 @@ def test_price_as_of_is_the_verified_capture_date():
     assert PRICE_AS_OF.isoformat() == "2026-09-10"
 
 
-def test_peak_hours_are_half_open_utc_windows():
+def test_peak_hours_are_half_open_utc_windows_on_weekdays():
     assert is_opencode_go_peak(datetime(2026, 8, 18, 0, 59, tzinfo=UTC)) is False
     assert is_opencode_go_peak(datetime(2026, 8, 18, 1, 0, tzinfo=UTC)) is True
     assert is_opencode_go_peak(datetime(2026, 8, 18, 3, 59, tzinfo=UTC)) is True
@@ -48,6 +45,15 @@ def test_peak_hours_are_half_open_utc_windows():
     assert is_opencode_go_peak(datetime(2026, 8, 18, 6, 0, tzinfo=UTC)) is True
     assert is_opencode_go_peak(datetime(2026, 8, 18, 9, 59, tzinfo=UTC)) is True
     assert is_opencode_go_peak(datetime(2026, 8, 18, 10, 0, tzinfo=UTC)) is False
+
+
+def test_weekend_peak_hours_are_off_peak():
+    saturday = datetime(2026, 8, 22, 2, 0, tzinfo=UTC)
+    sunday = datetime(2026, 8, 23, 7, 0, tzinfo=UTC)
+    assert saturday.weekday() == 5
+    assert sunday.weekday() == 6
+    assert is_opencode_go_peak(saturday) is False
+    assert is_opencode_go_peak(sunday) is False
 
 
 def _est(tokens: dict | None, at, *, model: str = MODEL_ID) -> int:
@@ -106,16 +112,6 @@ def test_estimate_go_public_usd_nano_does_not_apply_flash_price_to_other_models(
     # Prefix of the priced id is still a different model.
     assert _est(tokens, _OFF, model="deepseek-v4-flash-pro") == 0
     assert _est(tokens, _OFF, model="") == 0
-    # Same public list as V4 Flash (quota caps differ; token rates do not).
+    # Leftover V4 Flash ledger rows share the public list (quota caps differ).
+    assert _est(tokens, _OFF, model=DEEPSEEK_V4_FLASH) == flash
     assert _est(tokens, _OFF, model=OPENCODE_GO_V41_FLASH) == flash
-
-
-def test_flash_cny_card_is_usd_times_frozen_fx():
-    off = go_flash_cny_per_million(_OFF)
-    assert off["cache_miss"] == Decimal("0.15") * GO_USD_TO_CNY
-    assert off["output"] == Decimal("0.60") * GO_USD_TO_CNY
-    assert off["cache_hit"] == Decimal("0.003") * GO_USD_TO_CNY
-    peak = go_flash_cny_per_million(_PEAK)
-    assert peak["cache_miss"] == Decimal("0.30") * GO_USD_TO_CNY
-    times4 = go_flash_cny_per_million(_OFF, multiplier=Decimal(4))
-    assert times4["cache_miss"] == off["cache_miss"] * 4

@@ -233,7 +233,6 @@ describe("attested outcome production path", () => {
     const outcome = turnOutcomeForAssistant(msg, slot);
     expect(outcome.kind).toBe("paused");
     expect(outcome.recovery.kind).toBe("continue");
-    expect(outcome.showBubbleBanner).toBe(false);
     expect(outcome.showComposerHint).toBe(false);
   });
 

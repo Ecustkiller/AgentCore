@@ -48,12 +48,12 @@ _DEFAULT_CARD_STEMS = (
     "v01_fix_int",
 )
 
-# Fix 烟感短前缀：仅复述产品规则（CEO→delegate；mutation=worker str_replace）。
+# Fix 烟感短前缀：仅复述产品规则（CEO→delegate；mutation=worker edit）。
 # 可用 --no-prefix 关掉。禁幽灵工具名；不平行造 worker 直装。
 _FIX_PROMPT_PREFIX = (
     "[eval smoke] Product path: CEO coordinates then delegate "
     "(handwritten 1-person repair is the default). "
-    "Worker mutates with str_replace (not CEO). Prefer file_read / grep; "
+    "Worker mutates with edit (not CEO). Prefer read / grep; "
     "verify once with the card's pytest command, then stop. "
     "Avoid repeated code_execute or terminal loops."
 )

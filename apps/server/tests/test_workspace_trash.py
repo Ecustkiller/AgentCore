@@ -148,16 +148,16 @@ def test_list_newest_first(tmp_path: Path) -> None:
 def test_soft_delete_rejects_self_nest_under_agentcore(tmp_path: Path) -> None:
     """Mechanical guard: never shutil-move a trash ancestor into its own trash."""
     ac = tmp_path / "AgentCore"
-    _write(ac / "规则" / "r.md", "rule")
+    _write(ac / "rules" / "r.md", "rule")
     (ac / "trash").mkdir(parents=True)
     with pytest.raises(WorkspaceIOError, match="自嵌套"):
         soft_delete_to_trash(root=tmp_path, target=ac, original_rel="AgentCore")
-    assert (ac / "规则" / "r.md").read_text(encoding="utf-8") == "rule"
+    assert (ac / "rules" / "r.md").read_text(encoding="utf-8") == "rule"
 
 
 def test_expand_delete_agentcore_soft_rules_hard_clears_zones(tmp_path: Path) -> None:
     ac = tmp_path / "AgentCore"
-    _write(ac / "规则" / "r.md", "rule-body")
+    _write(ac / "rules" / "r.md", "rule-body")
     _write(ac / "index" / "cache.db", "db")
     _write(ac / "trash" / "stale" / "content", "old")
     (ac / "baselines").mkdir(parents=True)
@@ -165,18 +165,18 @@ def test_expand_delete_agentcore_soft_rules_hard_clears_zones(tmp_path: Path) ->
 
     soft_delete_expanding_trash_ancestor(root=tmp_path, target=ac)
 
-    assert not (ac / "规则").exists()
+    assert not (ac / "rules").exists()
     assert not (ac / "index").exists()
     assert not (ac / "baselines").exists()
     # Soft-deletes recreate trash under AgentCore — shell remains.
     assert (ac / "trash").is_dir()
     entries = list_trash_entries(root=tmp_path, retention_days=30)
     assert len(entries) == 1
-    assert entries[0].original_path == "AgentCore/规则"
+    assert entries[0].original_path == "AgentCore/rules"
     restored = restore_from_trash(
         root=tmp_path, entry_id=entries[0].entry_id, retention_days=30
     )
-    assert restored == "AgentCore/规则"
-    assert (tmp_path / "AgentCore" / "规则" / "r.md").read_text(encoding="utf-8") == (
+    assert restored == "AgentCore/rules"
+    assert (tmp_path / "AgentCore" / "rules" / "r.md").read_text(encoding="utf-8") == (
         "rule-body"
     )

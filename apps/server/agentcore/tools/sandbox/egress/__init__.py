@@ -1,7 +1,7 @@
 """Cloud-desk egress session (netns + SSRF proxy + package cache dir).
 
 The proxy policy is :func:`core.net.resolve_ssrf_dial_target` (same as
-``download_url``). Registry host lists in ``hosts`` pin the *install tool*,
+``web_fetch``). Registry host lists in ``hosts`` pin the *install tool*,
 not the network chokepoint.
 """
 

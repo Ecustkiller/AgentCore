@@ -51,10 +51,10 @@ describe("workspaceIgnore", () => {
       isInternalZoneRelPath(`${AGENTCORE_ROOT}/versions/v1/content.zip`),
     ).toBe(true);
     expect(isInternalZoneRelPath(AGENTCORE_ROOT)).toBe(false);
-    expect(isInternalZoneRelPath(`${AGENTCORE_ROOT}/规则/x.md`)).toBe(false);
+    expect(isInternalZoneRelPath(`${AGENTCORE_ROOT}/rules/x.md`)).toBe(false);
     expect(shouldSkipDirName("index", AGENTCORE_ROOT)).toBe(true);
     expect(shouldSkipDirName("versions", AGENTCORE_ROOT)).toBe(true);
-    expect(shouldSkipDirName("规则", AGENTCORE_ROOT)).toBe(false);
+    expect(shouldSkipDirName("rules", AGENTCORE_ROOT)).toBe(false);
     expect(shouldSkipDirName("index", "")).toBe(false);
     // 裸名 versions（用户项目里的目录）不得误伤
     expect(shouldSkipDirName("versions", "")).toBe(false);

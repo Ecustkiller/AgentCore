@@ -3,8 +3,8 @@
 OpenCode Go requires a stable ``x-opencode-session`` on coding-agent traffic so
 it can route and prompt-cache. Missing it is a hard 400 (as of 2026-09-06).
 Value = our ``conversation_id`` (already sticky for the platform pool). Do not
-freeze this onto a cached HTTP client: ``PlatformProvider`` keys leaves by
-``(api_key, base_url)``, so per-request headers are the only safe seam.
+freeze this — or ``Authorization`` — onto the origin-pooled HTTP client:
+multi-tenant / failover / extra headers must stay per-request.
 
 User-Agent is ``AgentCore/1.0`` (own product name, not ``python-httpx`` and not
 the official CLI). ``GET /models`` does not need the session header.

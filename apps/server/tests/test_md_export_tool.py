@@ -119,6 +119,11 @@ async def test_md_export_requires_format(tmp_path: Path):
 def test_md_export_schema_advertises_format_and_layout():
     schema = MdExportTool().schema
     assert schema.name == "md_export"
+    assert schema.description == (
+        "把工作区 Markdown 导出为同目录同名 Word 或 PDF。≠ `run` 写脚本。"
+    )
+    assert "先落" not in schema.description
+    assert "改交" not in schema.description
     fmt = schema.parameters["properties"]["format"]
     assert fmt["enum"] == ["docx", "pdf"]
     assert "format" in schema.parameters["required"]
@@ -126,10 +131,10 @@ def test_md_export_schema_advertises_format_and_layout():
     layout = schema.parameters["properties"]["layout"]
     assert layout["enum"] == ["standard", "official"]
     assert layout["default"] == "standard"
-    assert "正式文书" in layout["description"]
-    assert "两端对齐" in layout["description"]
-    assert "页码" in layout["description"]
-    assert "— n —" in layout["description"]
+    assert layout["description"] == (
+        "standard=技术文档（默认）；official=中文正式文书排版。"
+    )
+    assert "起诉状" not in layout["description"]
     assert "layout" not in schema.parameters["required"]
 
 

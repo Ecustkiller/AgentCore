@@ -980,15 +980,20 @@ def _dag_policy(item: dict[str, Any]) -> RunPolicy:
 
 
 def _parse_deliverable(item: dict[str, Any]) -> Deliverable:
-    """Parse a task's ``deliverable`` into a :class:`Deliverable`.
+    """Parse pinned paths into a :class:`Deliverable`.
 
-    Nodes always carry a Deliverable. Missing object / empty object → defaults
-    (no landing expectation). Playbook-internal knobs still parse; unknown keys
-    (including leftover ``form``) are ignored, not translated.
+    Nodes always carry a Deliverable. Fill-in is top-level ``artifacts``;
+    leftover nested ``deliverable`` still parses (including ``artifact_dir`` /
+    ``strict``). Missing / empty → defaults (no landing expectation).
+    Unknown keys (including leftover ``form``) are ignored, not translated.
     """
-    raw = item.get("deliverable")
-    if not isinstance(raw, dict):
-        raw = {}
+    nested = item.get("deliverable")
+    if not isinstance(nested, dict):
+        nested = {}
+    raw = dict(nested)
+    top_arts = _str_list(item.get("artifacts"))
+    if top_arts:
+        raw["artifacts"] = top_arts
     return _deliverable_from_dict(raw)
 
 

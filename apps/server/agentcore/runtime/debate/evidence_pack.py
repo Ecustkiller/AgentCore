@@ -281,7 +281,7 @@ def assemble_evidence_pack_from_host(
     disputes = thin_dispute_candidates(sides, source_ids=source_ids) if sides else []
     notes = (
         f"从主持人上下文组装共享证据包（{len(usable)} 份可用正文附件）；"
-        "不对同一附件深度 file_read/grep。"
+        "不对同一附件深度 read/grep。"
     )
     return EvidencePack(
         sources=pack_sources,

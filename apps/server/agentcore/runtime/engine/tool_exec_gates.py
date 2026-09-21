@@ -418,8 +418,12 @@ async def _check_safety_and_approval_gates(
                 ),
             )
 
-        auto_pass = (not force_breaker) and execution_tool_auto_passes(
-            context.backend, name, permission_axes=approval_gate.permission_axes
+        auto_pass = (
+            (not force_breaker)
+            and not always_confirm
+            and execution_tool_auto_passes(
+                context.backend, name, permission_axes=approval_gate.permission_axes
+            )
         )
         # INFO（非 debug）：round_end 后若长时间无 execute_end，靠此定位卡在审批还是执行。
         # will_prompt peeks delegation/session/_granted/_denied short-circuits so

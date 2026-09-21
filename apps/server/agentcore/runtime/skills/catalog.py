@@ -3,51 +3,20 @@
 from __future__ import annotations
 
 from agentcore.runtime.skills.data_file_landing import _DATA_FILE_LANDING
-from agentcore.runtime.skills.debate_and_review import _DEBATE_AND_REVIEW
-from agentcore.runtime.skills.delivery import _DELIVERY
-from agentcore.runtime.skills.local_desk import _LOCAL_DESK
 from agentcore.runtime.skills.page_ui import _PAGE_UI
 from agentcore.runtime.skills.product_help import build_product_help_body
 from agentcore.runtime.skills.registry import (
     AUDIENCE_CEO_ONLY,
     GROUP_DELIVERY,
-    GROUP_ORCHESTRATION,
     GROUP_PRODUCT,
-    GROUP_TOOLS,
-    GROUP_WORKSPACE,
     SkillRegistry,
     SystemSkill,
 )
-from agentcore.runtime.skills.run import _RUN
 
 # --- The system skills (single source of truth) -----------------------------
 # Catalog summaries: name-like (what this is), not a 19-way scene classifier.
 # Python len ≤80; HOW lives in the body. ``blurb`` is toolbox-card only.
 _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
-    SystemSkill(
-        name="debate_and_review",
-        summary="正反辩论",
-        blurb="正反两边对碰，再收到一个可拍板的结论",
-        body=_DEBATE_AND_REVIEW,
-        requires_tools=("debate",),
-        group=GROUP_ORCHESTRATION,
-    ),
-    SystemSkill(
-        name="local_desk",
-        summary="本机目录进工作区",
-        blurb="把这台电脑上的文件夹接到当前工作区",
-        body=_LOCAL_DESK,
-        audience=AUDIENCE_CEO_ONLY,
-        group=GROUP_WORKSPACE,
-    ),
-    SystemSkill(
-        name="delivery",
-        summary="交付环境",
-        blurb="东西交到哪里、以什么形态交给人",
-        body=_DELIVERY,
-        audience=AUDIENCE_CEO_ONLY,
-        group=GROUP_DELIVERY,
-    ),
     SystemSkill(
         name="data_file_landing",
         summary="整理表",
@@ -74,14 +43,6 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
         audience=AUDIENCE_CEO_ONLY,
         group=GROUP_PRODUCT,
     ),
-    SystemSkill(
-        name="run",
-        summary="跑命令 / 启服",
-        blurb="在终端跑命令、起本地服务",
-        body=_RUN,
-        requires_tools=("run",),
-        group=GROUP_TOOLS,
-    ),
 )
 
 
@@ -89,8 +50,7 @@ def build_system_skill_registry() -> SkillRegistry:
     """Register the platform's built-in (system) skills — the single source of truth.
 
     Mirrors ``build_builtin_registry`` for tools: code-defined, always available to
-    the CEO via ``consult``. Domain SOPs (法律等) are first-party store SKUs, not
-    layered into this registry.
+    the CEO via ``consult``. Domain SOPs are user skills, not layered into this registry.
     """
     registry = SkillRegistry()
     for skill in _SYSTEM_SKILLS:

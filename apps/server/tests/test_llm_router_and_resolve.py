@@ -274,7 +274,7 @@ async def test_resolve_provider_credentials_decrypts_row(monkeypatch):
     assert creds is not None
     assert creds.api_key == "sk-user-secret"
     assert creds.base_url == "https://byok.example/v1"
-    assert creds.default_model == "byok-flash"
+    assert creds.default_model == ""
     assert creds.provider_id == "prov-1"
     assert creds.source == "user"
     assert creds.label == "DeepSeek"
@@ -393,7 +393,7 @@ def _mock_background_account(monkeypatch, *, background):
     monkeypatch.setattr("agentcore.llm.resolve._decrypt_provider", lambda _r, _u: user_creds)
 
 
-@pytest.mark.parametrize("purpose", ["title", "memory", "compaction"])
+@pytest.mark.parametrize("purpose", ["title", "compaction"])
 async def test_resolve_model_config_background_explicit_byok_slot_beats_platform(
     monkeypatch, purpose
 ):

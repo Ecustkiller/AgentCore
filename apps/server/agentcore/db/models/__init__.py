@@ -19,7 +19,6 @@ from .admin_mfa import AdminMfa
 from .agent_audit import AgentAuditEvent
 from .auth import Credentials, RefreshToken, UserGitCredential, UserLlmProvider
 from .billing import CostCall, CostEvent, CostLedgerOutbox
-from .boards import Board
 from .chat import Chat, ChatMember, ChatMessage
 from .conversations import (
     Conversation,
@@ -36,7 +35,6 @@ from .docs import Doc, DocShare
 from .documents import DisputedLine, Document
 from .email_auth import EmailChallenge, PendingRegistration
 from .llm_profiles import LlmModelProfile
-from .memory_pipeline import MemoryEpisode, MemoryScopeState
 from .notices import ProductNoticeDismissalRow, ProductNoticeRow
 from .platform import PlatformCredential
 from .runs import (
@@ -72,7 +70,6 @@ __all__ = [
     "AdminAuditLog",
     "AgentAuditEvent",
     "AdminMfa",
-    "Board",
     "Chat",
     "ChatMember",
     "ChatMessage",
@@ -95,8 +92,6 @@ __all__ = [
     "JOURNAL_BAND_LIVE",
     "JOURNAL_BAND_OVERFLOW",
     "LlmModelProfile",
-    "MemoryEpisode",
-    "MemoryScopeState",
     "MemoryUpdateRow",
     "Message",
     "PAUSED_TURN_EXPIRED",

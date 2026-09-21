@@ -1,9 +1,5 @@
 import type { FileNode } from "@/lib/fileSource";
-import {
-  AGENTCORE_ROOT,
-  DOCS_PREFIX,
-  isAgentCoreRootDir,
-} from "@/lib/stageDirs";
+import { AGENTCORE_ROOT, isAgentCoreRootDir } from "@/lib/stageDirs";
 import type { FileSortBy } from "./fileTreeTypes";
 import { sortNodes } from "./useFileTreeData";
 
@@ -43,13 +39,8 @@ export function withVirtualAgentCore(
 }
 
 /**
- * Local watch / silent refresh dirs: root + expanded, plus the flattened
- * ``AgentCore/文档`` seam when the ``.agentcore`` drawer is open.
+ * Local watch / silent refresh dirs: root + expanded.
  */
 export function watchDirsForExpanded(expanded: Iterable<string>): string[] {
-  const dirs = new Set<string>(["", ...expanded]);
-  for (const dir of expanded) {
-    if (isAgentCoreRootDir(dir)) dirs.add(DOCS_PREFIX);
-  }
-  return [...dirs];
+  return [...new Set(["", ...expanded])];
 }

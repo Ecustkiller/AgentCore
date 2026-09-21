@@ -9,6 +9,7 @@ import {
 } from "@/lib/fileSource";
 import { formatBytes } from "@/lib/format";
 import { openWorkspaceHtmlInBrowser } from "@/lib/openWorkspaceHtmlInBrowser";
+import { isAgentCoreMemoryDirPath } from "@/lib/stageDirs";
 import { notifyInfo } from "@/lib/toast";
 import { resolveConversationLocalTarget } from "@/services/sidecarRouting";
 import {
@@ -223,10 +224,13 @@ async function openCloudFileWithOsDefaultApp(
  * `isInternalZoneRelPath`. Inlined on purpose (renderer must not import the
  * main-process module); the zone list is held to the server's by
  * `check_workspace_ignore_parity.py`, so add new zones here too.
+ * `AgentCore/记忆` is a retired leftover dir: hide it in the file tree like trash
+ * without adding it to the parity-gated internal-zone set.
  */
-function isInternalZonePath(path: string): boolean {
+function isHiddenAgentCorePath(path: string): boolean {
   const p = path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
   if (!p || p === ".") return false;
+  if (isAgentCoreMemoryDirPath(p)) return true;
   for (const zone of ["index", "trash", "baselines", "versions"] as const) {
     const prefix = `AgentCore/${zone}`;
     if (p === prefix || p.startsWith(`${prefix}/`)) return true;
@@ -236,7 +240,7 @@ function isInternalZonePath(path: string): boolean {
 
 function toFileNodes(files: WorkspaceFile[]): FileNode[] {
   return files
-    .filter((f) => !isInternalZonePath(f.path))
+    .filter((f) => !isHiddenAgentCorePath(f.path))
     .map((f) => ({
       path: f.path,
       name: baseName(f.path),
@@ -280,7 +284,19 @@ function makeCloudSource(
     listDir: async (dir) => (await listDirBounded(dir)).entries,
     listDirBounded,
     // Feeds the @ index (文件中枢统一 F4) — flat, files-only, server-pruned/capped.
-    ...(fileIndex ? { listFileIndex: fileIndex } : {}),
+    ...(fileIndex
+      ? {
+          listFileIndex: async () => {
+            const listing = await fileIndex();
+            return {
+              ...listing,
+              files: listing.files.filter(
+                (f) => !isAgentCoreMemoryDirPath(f.relPath),
+              ),
+            };
+          },
+        }
+      : {}),
     read: (path) => client.read(path).then(adaptPreview),
     readForEdit: async (path) => {
       const d = await client.readForEdit(path);

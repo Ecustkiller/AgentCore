@@ -237,7 +237,7 @@ def _priced_failure(
     FAILED state so a later hop can hot-continue from that site.
     Omit (empty) when the run died before any messages → still not continuable.
 
-    Landed products already self-reported on that transcript (``file_write`` ok,
+    Landed products already self-reported on that transcript (``write`` ok,
     then the LLM call died) ride on the same FAILED state — ``files_touched`` /
     ``file_acceptance``. Writes succeeded; path status is accepted. The FAILED
     phase is the node gap, not a path-level rejection (contract hard-fail stamps

@@ -1,7 +1,7 @@
 """Same-turn hot attach of conversation external mounts onto a live backend.
 
 Turn entry (``build_turn_backend``) and file-tool host-path mint both call
-:func:`attach_grants_to_backend` so ``file_read external/…`` works without
+:func:`attach_grants_to_backend` so ``read external/…`` works without
 waiting for the next resume.
 
 Sidecar Path-I/O needs ``abs_path``. Grant rows never store it; desktop

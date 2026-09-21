@@ -318,11 +318,11 @@ describe("ToolResultView · web_search", () => {
 });
 
 describe("ToolResultView · error / redirect faces", () => {
-  it("expands a file_read miss to the receipt, without the redundant sentence", () => {
+  it("expands a read miss to the receipt, without the redundant sentence", () => {
     const { container } = render(
       <ToolResultView
         data={data({
-          toolName: "file_read",
+          toolName: "read",
           status: "error",
           result:
             "文件不存在：web/CONVENTIONS.md（父目录 web/ 存在）\n可换 glob/grep 更宽查找后再读。勿对同一路径反复重试。",
@@ -341,11 +341,11 @@ describe("ToolResultView · error / redirect faces", () => {
     expect(container.querySelector(".text-destructive")).toBeNull();
   });
 
-  it("expands a leaked historical file_read receipt without a fallback sentence", () => {
+  it("expands a leaked historical read receipt without a fallback sentence", () => {
     const { container } = render(
       <ToolResultView
         data={data({
-          toolName: "file_read",
+          toolName: "read",
           status: "error",
           result: "文件不存在：web/CONVENTIONS.md\n勿对同一路径反复重试。",
           failure: {
@@ -361,11 +361,11 @@ describe("ToolResultView · error / redirect faces", () => {
     expect(screen.queryByTestId("tool-error-detail-toggle")).toBeNull();
   });
 
-  it("expands a str_replace miss to the receipt, without a second sentence", () => {
+  it("expands an edit miss to the receipt, without a second sentence", () => {
     const { container } = render(
       <ToolResultView
         data={data({
-          toolName: "str_replace",
+          toolName: "edit",
           status: "error",
           result:
             "在 web/src/trial/trialStore.ts 中找不到 old_string；请对照写回执重写精确锚。",
@@ -558,14 +558,14 @@ describe("ToolResultView · code_diagnostics", () => {
     expect(container.innerHTML).not.toContain("text-destructive");
   });
 
-  it("appends diagnostics below str_replace diff", () => {
+  it("appends diagnostics below edit diff", () => {
     const { container } = render(
       <ToolResultView
         data={data({
-          toolName: "str_replace",
+          toolName: "edit",
           status: "success",
           args: {
-            path: "a.ts",
+            file_path: "a.ts",
             old_string: "x",
             new_string: "y",
           },
@@ -595,9 +595,9 @@ describe("ToolResultView · code_diagnostics", () => {
     const { container } = render(
       <ToolResultView
         data={data({
-          toolName: "file_write",
+          toolName: "write",
           status: "success",
-          args: { path: "a.ts", content: " const x = 1" },
+          args: { file_path: "a.ts", content: " const x = 1" },
           display: {
             kind: "code_diagnostics",
             status: "unavailable",
@@ -631,13 +631,13 @@ describe("ToolResultView · code_diagnostics", () => {
 });
 
 describe("ToolResultView · write-family cards have no path header", () => {
-  it("renders a str_replace diff without repeating the path or +/-", () => {
+  it("renders an edit diff without repeating the path or +/-", () => {
     render(
       <ToolResultView
         data={data({
-          toolName: "str_replace",
+          toolName: "edit",
           args: {
-            path: "src/lib/store.ts",
+            file_path: "src/lib/store.ts",
             old_string: "a",
             new_string: "b",
           },
@@ -651,12 +651,12 @@ describe("ToolResultView · write-family cards have no path header", () => {
     expect(screen.getByText("b")).toBeTruthy();
   });
 
-  it("renders a file_write preview without path / 字 chrome", () => {
+  it("renders a write preview without path / 字 chrome", () => {
     render(
       <ToolResultView
         data={data({
-          toolName: "file_write",
-          args: { path: "src/new.ts", content: "export const x = 1" },
+          toolName: "write",
+          args: { file_path: "src/new.ts", content: "export const x = 1" },
         })}
       />,
     );
@@ -667,13 +667,13 @@ describe("ToolResultView · write-family cards have no path header", () => {
   });
 });
 
-describe("ToolResultView · file_read strips the line-window footer", () => {
+describe("ToolResultView · read strips the line-window footer", () => {
   it("keeps the body and drops the window footer", () => {
     render(
       <ToolResultView
         data={data({
-          toolName: "file_read",
-          args: { path: "src/ui/PropertyPanel.tsx" },
+          toolName: "read",
+          args: { file_path: "src/ui/PropertyPanel.tsx" },
           result: "191| const x = 1\n\n（第 1–200 行，共 242 行）",
         })}
       />,
@@ -687,8 +687,8 @@ describe("ToolResultView · file_read strips the line-window footer", () => {
     render(
       <ToolResultView
         data={data({
-          toolName: "file_read",
-          args: { path: "doc.pdf" },
+          toolName: "read",
+          args: { file_path: "doc.pdf" },
           result:
             "extracted\n\n（第 1–200 行，共 500 行）\n\n抽取第 1–3 页，共 12 页。后面的页请用 start_page=4 再读",
         })}
@@ -737,6 +737,29 @@ describe("ToolResultView · host", () => {
     expect(screen.getByText("listed logs")).toBeTruthy();
     expect(screen.queryByText(/退出码 0/)).toBeNull();
     expect(screen.queryByText(/不可信内容/)).toBeNull();
+  });
+
+  it("puts the shell command above stdout", () => {
+    render(
+      <ToolResultView
+        data={data({
+          toolName: "host",
+          args: {
+            action: "shell",
+            command: "Get-CimInstance Win32_VideoController",
+          },
+          result: '{"exit_code":0,"stdout":"ok"}',
+          display: {
+            stdout: "listed logs",
+            stderr: "",
+            exit_code: 0,
+            language: "host",
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText(/Get-CimInstance/)).toBeTruthy();
+    expect(screen.getByText("listed logs")).toBeTruthy();
   });
 
   it("strips historical untrusted XML when display is absent", () => {

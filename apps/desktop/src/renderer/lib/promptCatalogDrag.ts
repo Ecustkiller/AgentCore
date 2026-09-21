@@ -4,11 +4,33 @@ export const PROMPT_DRAG_MIME = "application/x-agentcore-prompt";
 export const PROMPT_SKILL_DRAG_MIME = "application/x-agentcore-prompt-skill";
 
 export type PromptDragPayload =
-  | { kind: "mine"; mineId: string }
+  | { kind: "mine"; mineIds: readonly string[] }
   | { kind: "skill"; slot: string };
 
 export function promptDragPayload(payload: PromptDragPayload): string {
+  if (payload.kind === "mine") {
+    return JSON.stringify({
+      kind: "mine",
+      mineId: payload.mineIds[0] ?? "",
+      mineIds: [...payload.mineIds],
+    });
+  }
   return JSON.stringify(payload);
+}
+
+function readMineIds(record: {
+  mineId?: unknown;
+  mineIds?: unknown;
+}): string[] {
+  if (Array.isArray(record.mineIds)) {
+    return record.mineIds.filter(
+      (id): id is string => typeof id === "string" && id !== "",
+    );
+  }
+  if (typeof record.mineId === "string" && record.mineId !== "") {
+    return [record.mineId];
+  }
+  return [];
 }
 
 export function parsePromptDragPayload(raw: string): PromptDragPayload | null {
@@ -18,6 +40,7 @@ export function parsePromptDragPayload(raw: string): PromptDragPayload | null {
     const record = parsed as {
       kind?: unknown;
       mineId?: unknown;
+      mineIds?: unknown;
       slot?: unknown;
     };
     if (record.kind === "skill") {
@@ -26,9 +49,8 @@ export function parsePromptDragPayload(raw: string): PromptDragPayload | null {
         : null;
     }
     if (record.kind === "mine" || record.kind == null) {
-      return typeof record.mineId === "string" && record.mineId !== ""
-        ? { kind: "mine", mineId: record.mineId }
-        : null;
+      const mineIds = readMineIds(record);
+      return mineIds.length > 0 ? { kind: "mine", mineIds } : null;
     }
     return null;
   } catch {

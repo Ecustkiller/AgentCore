@@ -463,7 +463,7 @@ class TurnMetricsRow(Base):
     # 协作质量 (学·度量, docs/05-平台与运维/管理员后台.md §四): per-turn orchestration signals,
     # the operator面 counterpart of the offline log_stats 方向盘. ``boundary_yields`` = 受监督边界
     # 让出次数 (首计划存活率 = delegated turns whose boundary_yields==0); ``scope_signals`` =
-    # escalate kind=scope count (漂移率); ``revises`` = 定向唤回 次数 (返工率 的一半; contract
+    # escalate reason=scope count (漂移率); ``revises`` = 定向唤回 次数 (返工率 的一半; contract
     # 重试 stays a dev-log signal); ``escalations`` = total worker→captain escalations. 空转·早收
     # reads off the existing ``finish_reason`` (no new column). All default 0 — a plain
     # single-agent turn writes zeros, unchanged.

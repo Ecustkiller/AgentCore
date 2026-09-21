@@ -23,8 +23,8 @@ logger = get_logger(__name__)
 MAX_CONVERSATION_EDIT_PATHS = 8
 MAX_CONVERSATION_EDIT_HITS = 64
 
-_WRITE = "file_write"
-_REPLACE = "str_replace"
+_WRITE = "write"
+_REPLACE = "edit"
 _DELETE = "file_delete"
 _MOVE = "file_move"
 _COPY = "file_copy"
@@ -188,7 +188,8 @@ def edits_from_tool_call(
                 label=_LABEL_MOVE if tool == _MOVE else _LABEL_COPY,
             )
         ]
-    path = _normalize_path(data.get("path") or data.get("file_path"))
+    raw = data.get("file_path") if tool in {_WRITE, _REPLACE} else data.get("path")
+    path = _normalize_path(raw)
     if not path:
         return []
     return [ConversationEdit(path=path, label=_label_for_kind("", tool=tool))]

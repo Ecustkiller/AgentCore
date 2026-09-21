@@ -1,4 +1,4 @@
-// Screenshot harness for 工具箱种类壳 (#/toolbox → 提示词).
+// Screenshot harness for 工具箱（官方 / 我的 / 市场三栏）.
 //
 // Usage:
 //   node scripts/shoot-toolbox.mjs
@@ -55,67 +55,58 @@ const MAX_HEIGHT = Number(process.env.SHOOT_MAX_HEIGHT ?? 4000);
 const filter = (process.argv[2] ?? "").toLowerCase();
 
 /**
- * 种类壳：可见顶栏是种类 tab（右槽市场）；sr-only h1 是当前种类或「市场」。
+ * 三栏页：可见 PageHeader「工具箱」+ 来源 tab。默认落地「我的」。
  * `ready` waits until populated fixtures landed.
  */
 const PAGES = [
   {
     id: "01-toolbox-home",
     hash: "/toolbox",
-    heading: "提示词",
-    ready: "全员共享准则",
-    expectKindNav: true,
+    heading: "工具箱",
+    ready: "必带",
+    expectMarketChrome: true,
   },
   {
     id: "02-tools",
-    hash: "/toolbox/mine/skills",
-    heading: "提示词",
-    ready: "全员共享准则",
-    click: "web_search",
-    clickWithin: "prompt-rail-on-demand-tools",
+    hash: "/toolbox/official",
+    heading: "工具箱",
+    ready: "联网检索",
+    click: "联网检索",
     afterClick: "要填",
-    expectKindNav: true,
+    expectMarketChrome: true,
   },
   {
     id: "03-guidelines",
-    hash: "/toolbox/mine/skills",
-    heading: "提示词",
-    ready: "全员共享准则",
-    overlayReady: "提问卡",
-    click: "正反辩论",
-    afterClick: "对话目录",
-    expectKindNav: true,
+    hash: "/toolbox/official",
+    heading: "工具箱",
+    ready: "页面观感",
+    click: "页面观感",
+    afterClick: "动手前",
+    expectMarketChrome: true,
   },
   {
     id: "04-store",
     hash: "/toolbox/market",
-    heading: "市场",
+    heading: "工具箱",
     ready: "审合同时用",
     click: "合同审查",
     afterClick: "先列争议条款",
-    expectKindNav: true,
-  },
-  {
-    id: "06-creation",
-    hash: "/toolbox/mine/creation",
-    heading: "创作",
-    ready: "尚未开放",
-    expectKindNav: true,
+    expectMarketChrome: true,
   },
   {
     id: "08-connectors",
     hash: "/toolbox/mine/skills?connectors=1",
-    heading: "提示词",
+    heading: "工具箱",
     ready: "新建连接器",
-    expectKindNav: true,
+    expectMarketChrome: true,
   },
   {
     id: "11-market-empty",
     hash: "/toolbox/market",
-    heading: "市场",
+    heading: "工具箱",
     ready: "还没有可安装的内容",
     emptyPaths: ["/v1/skill-store"],
-    expectKindNav: true,
+    expectMarketChrome: true,
   },
 ];
 
@@ -206,16 +197,16 @@ const CAPABILITY_TOOLS = [
     ]),
   ),
   tool(
-    "file_read",
+    "read",
     "filesystem",
     "读取工作区内的文件内容，支持按行区间截取。",
     obj(
       {
-        path: { type: "string", description: "工作区相对路径。" },
+        file_path: { type: "string", description: "工作区相对路径。" },
         offset: { type: "integer", description: "起始行（1 起）。" },
         limit: { type: "integer", description: "读取行数。" },
       },
-      ["path"],
+      ["file_path"],
     ),
     { resident: true },
   ),
@@ -238,29 +229,29 @@ const CAPABILITY_TOOLS = [
     ),
   ),
   tool(
-    "file_write",
+    "write",
     "filesystem",
-    "写入文件（不存在则创建）。覆盖式写入，改局部请用 str_replace。",
+    "写入文件（不存在则创建）。覆盖式写入，改局部请用 edit。",
     obj(
       {
-        path: { type: "string", description: "工作区相对路径。" },
+        file_path: { type: "string", description: "工作区相对路径。" },
         content: { type: "string", description: "完整文件内容。" },
       },
-      ["path", "content"],
+      ["file_path", "content"],
     ),
     { approval: "grantable" },
   ),
   tool(
-    "str_replace",
+    "edit",
     "filesystem",
     "把文件里的一段文本替换成另一段；默认要求唯一匹配，避免改错位置。",
     obj(
       {
-        path: { type: "string", description: "工作区相对路径。" },
+        file_path: { type: "string", description: "工作区相对路径。" },
         old_string: { type: "string", description: "被替换的原文（须唯一）。" },
         new_string: { type: "string", description: "替换后的文本。" },
       },
-      ["path", "old_string", "new_string"],
+      ["file_path", "old_string", "new_string"],
     ),
     { approval: "grantable" },
   ),
@@ -312,7 +303,7 @@ const CAPABILITY_TOOLS = [
   tool(
     "debate",
     "orchestration",
-    "用户点名才开：主持人驱动结构化正反辩论，交回决策简报与交锋叙事。",
+    "不主动启动仅推荐：结构化正反辩论。",
     obj(
       {
         topic: { type: "string", description: "议题一句话。" },
@@ -387,9 +378,9 @@ const THIN_SKILLS = [
     body: "## 团队编排进阶\n\n- 一次给全所有子任务，别挤牙膏式追加。\n- 每个子任务写清交付物形态（form）与必需章节。\n",
   },
   {
-    name: "debate_and_review",
-    summary: "正反辩论",
-    body: "## 正反辩论\n\n- 只有存在真实取舍时才开辩；事实问题直接查。\n- 收口必须给出「选了什么 + 放弃了什么 + 为什么」。\n",
+    name: "page_ui",
+    summary: "页面观感",
+    body: "## 页面观感\n\n- 动手前先用一句人能听懂的方向定调。\n- 从零展示页要有辨识度，不等于套通用模板脸。\n",
   },
   {
     name: "ask_user_card",
@@ -564,28 +555,6 @@ const FIXTURES = new Map([
           source_document_id: "doc_brief",
         },
         {
-          id: "listing_legal_brief",
-          name: "legal_answer_brief",
-          description: "民事答辩状",
-          author: "官方",
-          version_n: 1,
-          installed: true,
-          has_update: false,
-          status: "published",
-          source_document_id: null,
-        },
-        {
-          id: "listing_legal_case",
-          name: "legal_case_analysis",
-          description: "接案评估",
-          author: "官方",
-          version_n: 1,
-          installed: true,
-          has_update: false,
-          status: "published",
-          source_document_id: null,
-        },
-        {
           id: "listing_weekly",
           name: "周报助手",
           description: "把本周材料收成一页",
@@ -632,7 +601,7 @@ const FIXTURES = new Map([
       ],
       page: 1,
       page_size: 24,
-      total: 8,
+      total: 6,
     },
   ],
   [
@@ -777,6 +746,7 @@ async function auditPage(page) {
   return page.evaluate(() => {
     const main = document.querySelector("main");
     if (!main) return null;
+    const hrefPath = (a) => (a.getAttribute("href") ?? "").replace(/^#/, "");
     const nav = main.querySelector('nav[aria-label="工具箱能力"]');
     const kindNav = main.querySelector('nav[aria-label="工具箱种类"]');
     const marketChips = main.querySelector('[aria-label="货架种类"]');
@@ -784,52 +754,48 @@ async function auditPage(page) {
     const hasPageHeader = [...main.querySelectorAll("header h1")].some(
       (h) => !h.classList.contains("sr-only"),
     );
-    const chromeOverflow = kindNav
-      ? Math.max(kindNav.scrollWidth - kindNav.clientWidth, 0)
+    const chrome = main.querySelector("header");
+    const chromeOverflow = chrome
+      ? Math.max(chrome.scrollWidth - chrome.clientWidth, 0)
       : 0;
-    const backs = [...main.querySelectorAll("a")].filter(
+    const backs = [...main.querySelectorAll("a")].filter((a) => {
+      const path = hrefPath(a);
+      return (
+        (a.textContent ?? "").includes("工具箱") &&
+        (path === "/toolbox" || path === "/toolbox/mine/skills")
+      );
+    });
+    const hasMarketChrome = [...main.querySelectorAll("a")].some(
       (a) =>
-        (a.getAttribute("href") ?? "").replace(/^#/, "") === "/toolbox" &&
-        (a.textContent ?? "").includes("工具箱"),
+        hrefPath(a) === "/toolbox/market" &&
+        (a.textContent ?? "").includes("市场"),
     );
-    const chromeLinks = [...(kindNav?.querySelectorAll("a") ?? [])].map((a) =>
-      (a.textContent ?? "").replace(/\d+\+?$/, "").trim(),
+    const hasGuidesChrome = [...main.querySelectorAll("a")].some(
+      (a) =>
+        hrefPath(a) === "/toolbox/guides" &&
+        (a.textContent ?? "").includes("说明书"),
     );
-    const chromeActions = new Set(["市场"]);
-    const kindTabs = chromeLinks.filter((label) => !chromeActions.has(label));
-    const selectedCapsules = [...(kindNav?.querySelectorAll("a") ?? [])]
-      .filter((a) => a.className.split(/\s+/).includes("bg-accent"))
-      .map((a) => (a.textContent ?? "").replace(/\d+\+?$/, "").trim());
-    const kindIconCount = [...(kindNav?.querySelectorAll("a") ?? [])].filter(
-      (a) => {
-        const label = (a.textContent ?? "").replace(/\d+\+?$/, "").trim();
-        return !chromeActions.has(label) && a.querySelector("svg");
-      },
-    ).length;
-    const homeAutomationsBadge = kindNav
-      ?.querySelector("[aria-label$='条待处理']")
-      ?.textContent?.trim();
+    const hasManualLink = [...main.querySelectorAll("a")].some((a) =>
+      (a.textContent ?? "").includes("手册"),
+    );
 
     return {
       hasSegmentNav: !!nav,
       hasKindNav: !!kindNav,
       hasMarketChips: !!marketChips,
       hasAutoTabs: !!autoTabs,
-      h1: [...main.querySelectorAll("h1")].map((h) => (h.textContent ?? "").trim()),
+      h1: [...main.querySelectorAll("h1")].map((h) =>
+        (h.textContent ?? "").trim(),
+      ),
       backLinks: backs.length,
       hasPageHeader,
       chromeOverflow,
-      kindTabs,
-      selectedCapsules,
-      kindIconCount,
-      hasMarketLink: chromeLinks.includes("市场"),
-      hasManualLink: chromeLinks.includes("手册"),
-      homeAutomationsBadge: homeAutomationsBadge ?? null,
+      hasMarketChrome,
+      hasGuidesChrome,
+      hasManualLink,
     };
   });
 }
-
-const EXPECTED_KIND_TABS = ["提示词", "创作"];
 
 /** Turn the audit into human-readable complaints; empty array = clean. */
 function auditProblems(audit, spec) {
@@ -842,49 +808,28 @@ function auditProblems(audit, spec) {
   }
   if (audit.hasSegmentNav) out.push("不该再有能力分段条");
   if (audit.hasAutoTabs) out.push("不该再有自动化分区 tab");
-  if (audit.backLinks !== 0) {
-    out.push(`壳内不应有返回工具箱链接，实际 ${audit.backLinks}`);
-  }
+  if (audit.hasKindNav) out.push("不该再有种类 tab");
+  if (audit.hasManualLink) out.push("顶栏不应再有手册");
   if (audit.chromeOverflow > 0) {
     out.push(`顶栏这一行被撑破 ${audit.chromeOverflow}px`);
   }
-  if (spec.expectKindNav) {
-    if (!audit.hasKindNav) out.push("应有种类 tab");
-    if (audit.kindTabs.join("|") !== EXPECTED_KIND_TABS.join("|")) {
-      out.push(
-        `种类 tab 应为 ${EXPECTED_KIND_TABS.join(" / ")}，实际 ${audit.kindTabs.join(" / ") || "无"}`,
-      );
+  if (spec.deep) {
+    if (!audit.hasPageHeader) out.push("深页应有 PageHeader");
+    if (audit.backLinks < 1) out.push("深页应有返回工具箱");
+    if (audit.hasMarketChrome) out.push("深页不应再挂市场入口");
+    if (audit.hasGuidesChrome) out.push("深页不应再挂说明书入口");
+  } else {
+    if (!audit.hasPageHeader) out.push("目录页应有可见 PageHeader");
+    if (audit.backLinks !== 0) {
+      out.push(`壳内不应有返回工具箱链接，实际 ${audit.backLinks}`);
     }
-    if (!audit.hasMarketLink) out.push("顶栏右槽应有市场");
-    if (audit.hasManualLink) out.push("顶栏右槽不应再有手册");
-    if (audit.kindIconCount !== EXPECTED_KIND_TABS.length) {
-      out.push(
-        `种类 tab 应各有图标，实际 ${audit.kindIconCount}/${EXPECTED_KIND_TABS.length}`,
-      );
+    if (spec.expectMarketChrome && !audit.hasMarketChrome) {
+      out.push("顶栏应有市场");
     }
-    if (audit.hasPageHeader) out.push("壳内不应再有 PageHeader，横线留给种类 tab");
-    if (spec.hash === "/toolbox/market") {
-      if (audit.selectedCapsules.length) {
-        out.push(
-          `市场页不应有选中胶囊，实际「${audit.selectedCapsules.join(" / ")}」`,
-        );
-      }
-    } else if (
-      spec.heading &&
-      audit.selectedCapsules.join("|") !== spec.heading
-    ) {
-      out.push(
-        `选中胶囊应为「${spec.heading}」，实际「${audit.selectedCapsules.join(" / ") || "无"}」`,
-      );
-    }
-  } else if (audit.hasKindNav) {
-    out.push("此页不该有种类 tab");
+    if (audit.hasGuidesChrome) out.push("目录页不应再挂说明书");
   }
   if (spec.hash === "/toolbox/market" && audit.hasMarketChips) {
     out.push("市场页不应再有货架种类 chip");
-  }
-  if (spec.hash === "/toolbox" && audit.homeAutomationsBadge) {
-    out.push("种类 tab 不应再有待处理徽章");
   }
   return out;
 }
@@ -1082,8 +1027,9 @@ async function main() {
     warm.hash = PAGES[0].hash;
     await page.goto(warm.href, { waitUntil: "load", timeout: 60_000 });
     await page
-      .locator('main nav[aria-label="工具箱种类"]')
-      .waitFor({ timeout: 30_000 });
+      .locator("main h1", { hasText: PAGES[0].heading })
+      .first()
+      .waitFor({ state: "attached", timeout: 30_000 });
     await page.waitForTimeout(SETTLE_MS);
   } catch {
     /* best-effort warm-up — the per-page loop reports real failures */
@@ -1108,9 +1054,6 @@ async function main() {
       await page.goto(url.href, { waitUntil: "load", timeout: 30_000 });
 
       // AuthGate resolves (stubbed /v1/auth/me) → AppShell → the page.
-      await page
-        .locator('main nav[aria-label="工具箱种类"]')
-        .waitFor({ state: "visible", timeout: 20_000 });
       if (spec.heading) {
         await page
           .locator("main h1", { hasText: spec.heading })

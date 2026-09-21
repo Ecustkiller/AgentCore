@@ -179,215 +179,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/account/memory/delete": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Delete Account Memory
-         * @description Soft-delete one memory note (no-op if missing).
-         */
-        post: operations["delete_account_memory_v1_account_memory_delete_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/account/memory/episodes/append": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Append Account Memory Episode
-         * @description Append one episodic digest into ``memory_episodes``.
-         */
-        post: operations["append_account_memory_episode_v1_account_memory_episodes_append_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/account/memory/episodes/list-undigested": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** List Account Undigested Episodes */
-        post: operations["list_account_undigested_episodes_v1_account_memory_episodes_list_undigested_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/account/memory/episodes/mark-digested": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Mark Account Episodes Digested */
-        post: operations["mark_account_episodes_digested_v1_account_memory_episodes_mark_digested_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/account/memory/episodes/purge": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Purge Account Digested Episodes */
-        post: operations["purge_account_digested_episodes_v1_account_memory_episodes_purge_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/account/memory/list": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * List Account Memory
-         * @description List memory notes under one scope (global when ``scope`` is null).
-         *
-         *     Carries each note's retrieval ``description`` and its ``disputed`` mark so a sidecar
-         *     warm builds the same directory — and skips the same user-disputed entries — as an
-         *     in-process turn. A soft-deleted folder is an empty scope (设定 hibernates with the desk).
-         */
-        post: operations["list_account_memory_v1_account_memory_list_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/account/memory/load": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Load Account Memory
-         * @description Load one memory note body; missing path / hibernating folder → empty string (soft).
-         */
-        post: operations["load_account_memory_v1_account_memory_load_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/account/memory/project-scopes": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * List Account Memory Project Scopes
-         * @description Folder ids that hold a semantic project memory layer.
-         */
-        post: operations["list_account_memory_project_scopes_v1_account_memory_project_scopes_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/account/memory/save": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Save Account Memory
-         * @description Upsert one memory note (画像/导航/主题/…). Write failures raise HTTP errors.
-         */
-        post: operations["save_account_memory_v1_account_memory_save_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/account/memory/scope-state/get": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Get Account Scope State */
-        post: operations["get_account_scope_state_v1_account_memory_scope_state_get_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/account/memory/scope-state/save": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Save Account Scope State */
-        post: operations["save_account_scope_state_v1_account_memory_scope_state_save_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/account/rules/delete": {
         parameters: {
             query?: never;
@@ -399,7 +190,7 @@ export interface paths {
         put?: never;
         /**
          * Delete Account User Rule
-         * @description Delete one named user-rule markdown under .agentcore/规则/.
+         * @description Delete one named user-rule markdown under .agentcore/rules/.
          */
         post: operations["delete_account_user_rule_v1_account_rules_delete_post"];
         delete?: never;
@@ -439,7 +230,7 @@ export interface paths {
         put?: never;
         /**
          * Read Account User Rule
-         * @description Read one named user-rule markdown under .agentcore/规则/.
+         * @description Read one named user-rule markdown under .agentcore/rules/.
          */
         post: operations["read_account_user_rule_v1_account_rules_read_post"];
         delete?: never;
@@ -459,7 +250,7 @@ export interface paths {
         put?: never;
         /**
          * Write Account User Rule
-         * @description Write a named user-rule markdown under .agentcore/规则/.
+         * @description Write a named user-rule markdown under .agentcore/rules/.
          */
         post: operations["write_account_user_rule_v1_account_rules_write_post"];
         delete?: never;
@@ -1618,65 +1409,6 @@ export interface paths {
          *     unknown / already-revoked token still returns ok (never reveals token validity).
          */
         post: operations["token_revoke_v1_auth_token_revoke_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/boards": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Boards */
-        get: operations["list_boards_v1_boards_get"];
-        put?: never;
-        /** Create Board */
-        post: operations["create_board_v1_boards_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/boards/{board_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Board */
-        get: operations["get_board_v1_boards__board_id__get"];
-        put?: never;
-        post?: never;
-        /** Delete Board */
-        delete: operations["delete_board_v1_boards__board_id__delete"];
-        options?: never;
-        head?: never;
-        /** Update Board */
-        patch: operations["update_board_v1_boards__board_id__patch"];
-        trace?: never;
-    };
-    "/v1/boards/{board_id}/scene": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Write Board Scene
-         * @description CAS-write the scene (autosave). A stale ``baseline`` returns ``conflict=True``
-         *     with the live board (never a blind overwrite); the client reconciles or forces the
-         *     write with ``baseline=null``.
-         */
-        put: operations["write_board_scene_v1_boards__board_id__scene_put"];
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3838,7 +3570,7 @@ export interface paths {
          * @description Create a tree node (always ``ai_maintained=false`` — user-owned).
          *
          *     A child inherits its parent's ``folder_id`` scope; a root node takes the requested scope.
-         *     New ``role='rule'`` documents with no parent land under ``AgentCore/规则/`` (§5.0).
+         *     New ``role='rule'`` documents with no parent land under ``AgentCore/rules/`` (§5.0).
          */
         post: operations["create_document_v1_documents_post"];
         delete?: never;
@@ -3887,9 +3619,8 @@ export interface paths {
          * @description Soft-delete a node and (for a folder) its whole subtree.
          *
          *     AI-maintained core leaves (偏好 / 画像 / 导航) keep their protocol names, so
-         *     this DELETE is refused. Empty the body instead (``PUT …/memory/files/{kind}``
-         *     with empty content) — injection skips the empty note; the list still shows
-         *     a placeholder. On-demand AI topics and user-owned entries remain deletable.
+         *     this DELETE is refused. Empty the body instead; the list still shows a
+         *     placeholder. On-demand topics and user-owned entries remain deletable.
          */
         delete: operations["delete_document_v1_documents__document_id__delete"];
         options?: never;
@@ -4106,7 +3837,7 @@ export interface paths {
          *     lookup and the conditional UPDATE surfaces the same way (「该项目已被清理」);
          *     that window is reported honestly rather than reconciled.
          *
-         *     Boards unbound at delete time and the bare-chat auto cloud desk pointer stay
+         *     The bare-chat auto cloud desk pointer stays
          *     cleared — see :meth:`FolderRepository.restore`.
          */
         post: operations["restore_deleted_folder_v1_folders_trash__folder_id__restore_post"];
@@ -5472,7 +5203,7 @@ export interface paths {
         head?: never;
         /**
          * Update Llm Provider
-         * @description Update a provider (endpoint / model / label; key optional to keep).
+         * @description Update a provider (endpoint / label; key optional to keep).
          */
         patch: operations["update_llm_provider_v1_users_me_llm_providers__provider_id__patch"];
         trace?: never;
@@ -5491,273 +5222,6 @@ export interface paths {
          * @description Probe one provider's endpoint and persist 'active' / 'error' + supports_tools.
          */
         post: operations["test_llm_provider_v1_users_me_llm_providers__provider_id__test_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/users/me/memory": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get My Memory
-         * @description Load the signed-in user's long-term memory (``enabled`` is always true).
-         */
-        get: operations["get_my_memory_v1_users_me_memory_get"];
-        /**
-         * Put My Memory
-         * @description Write the user's long-term memory back (full-document edit, CAS-guarded).
-         *
-         *     Holds the per-user memory lock so the read-compare-write is atomic against the offline
-         *     consolidation pass. A ``baseline`` that no longer matches the current (merged) version
-         *     returns ``ok=False, conflict=True`` with the live version (never a blind overwrite); the
-         *     client then reloads or forces the write with ``baseline=None``. The edited document is
-         *     split back into 偏好.md + 画像.md; the returned version is that of the re-merged result so
-         *     it matches what the next GET serves (split→save→merge normalizes the markdown).
-         */
-        put: operations["put_my_memory_v1_users_me_memory_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/users/me/memory/dispute-line": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Dispute My Memory Line
-         * @description Reject one bullet the user was shown — the line moves out of the entry (纠错通道·行级).
-         *
-         *     Declared before ``/files/{kind}`` so the static segment wins the route match. Holds the
-         *     per-user memory lock. Only an explicit user click reaches here; nothing infers a
-         *     rejection from conversation text.
-         */
-        post: operations["dispute_my_memory_line_v1_users_me_memory_dispute_line_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/users/me/memory/disputed-lines": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List My Disputed Lines
-         * @description Bullets the user rejected, so the editor can show and undo them.
-         *
-         *     Rejected lines are gone from the body — without this surface a mistaken click would be
-         *     unrecoverable, which is exactly the trap the entry-level channel avoided by never
-         *     deleting. ``folder_id`` omitted covers EVERY layer (global + each project with memory)
-         *     rather than the global one alone: a line rejected in a project layer must be findable
-         *     from the one place the editor lists them, or「可撤销」is only true for a few seconds.
-         *     Declared before ``/files/{kind}`` so the static segment wins the route match.
-         */
-        get: operations["list_my_disputed_lines_v1_users_me_memory_disputed_lines_get"];
-        put?: never;
-        post?: never;
-        /**
-         * Clear My Disputed Lines
-         * @description Empty the rejected-line list (「已移走的记忆」的清空入口).
-         *
-         *     The lines stay rejected — bodies are not touched. What goes is the ability to put them
-         *     back, which is why this is an explicit, confirmed action rather than something the cap
-         *     does for the user. Declared before ``/files/{kind}`` so the static segment wins.
-         */
-        delete: operations["clear_my_disputed_lines_v1_users_me_memory_disputed_lines_delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/users/me/memory/files/{kind}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get My Memory File
-         * @description Load ONE memory leaf — 偏好/画像 (global), a project's 画像, or a project's 导航.
-         */
-        get: operations["get_my_memory_file_v1_users_me_memory_files__kind__get"];
-        /**
-         * Put My Memory File
-         * @description Write ONE memory leaf back (CAS-guarded; an empty body drops the file).
-         *
-         *     Holds the per-user memory lock so the read-compare-write is atomic against the offline
-         *     consolidation pass. A ``baseline`` that no longer matches the leaf's current version
-         *     returns ``ok=False, conflict=True`` (never a blind overwrite). Clearing a leaf (empty
-         *     content) deletes the underlying file so it stops being injected.
-         */
-        put: operations["put_my_memory_file_v1_users_me_memory_files__kind__put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/users/me/memory/move-bullet": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Move My Memory Bullet
-         * @description Move one memory bullet between global and the current project (P2-b 搬层纠错).
-         *
-         *     Declared before ``/files/{kind}`` so the static segment wins the route match.
-         *     Holds the per-user memory lock; illegal sections (偏好 / 纠正记录 → project,
-         *     项目约束 → global) return 422 with a clear message.
-         */
-        post: operations["move_my_memory_bullet_v1_users_me_memory_move_bullet_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/users/me/memory/projects": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List My Memory Projects
-         * @description List folder_ids that have project-scoped memory (so the「文件」rail can surface them).
-         *
-         *     Declared before ``/files/{kind}`` so the static segment wins the route match.
-         */
-        get: operations["list_my_memory_projects_v1_users_me_memory_projects_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/users/me/memory/restore-line": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Restore My Memory Line
-         * @description Undo one line-level dispute — the bullet goes back into the entry.
-         *
-         *     An ``id`` that is no longer on file is a 422, never a best-effort restore of some other
-         *     record: putting back a line the user did not name would be worse than doing nothing.
-         */
-        post: operations["restore_my_memory_line_v1_users_me_memory_restore_line_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/users/me/memory/topics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List My Memory Topics
-         * @description List on-demand TOPIC note slugs in one scope (the rail's 主题/ folder listing).
-         *
-         *     ``folder_id`` None = the GLOBAL 主题/ folder; a folder_id = that project's. Same scope
-         *     convention as ``/files/{kind}`` (no separate ``scope`` enum). Declared before
-         *     ``/topics/{slug}`` / ``/files/{kind}`` so the static segment wins the route match.
-         */
-        get: operations["list_my_memory_topics_v1_users_me_memory_topics_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/users/me/memory/topics/{slug}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get My Memory Topic
-         * @description Load ONE on-demand TOPIC note's body — global (``folder_id`` None) or a project's.
-         */
-        get: operations["get_my_memory_topic_v1_users_me_memory_topics__slug__get"];
-        /**
-         * Put My Memory Topic
-         * @description Write ONE TOPIC note back (CAS-guarded; an empty body deletes — mirrors ``/files/{kind}``).
-         *
-         *     Holds the per-user memory lock so the read-compare-write is atomic against the offline
-         *     consolidation pass. A ``baseline`` that no longer matches the note's current version
-         *     returns ``ok=False, conflict=True`` (never a blind overwrite). Clearing a note (empty
-         *     content) deletes the underlying file so it leaves the 记忆主题目录 (and stops being
-         *     consult-able).
-         */
-        put: operations["put_my_memory_topic_v1_users_me_memory_topics__slug__put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/users/me/memory/updates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List My Memory Updates
-         * @description The signed-in user's recent memory updates across ALL conversations (记忆动态 feed).
-         *
-         *     Newest-first; the offline consolidation pass appends a row whenever it changed a memory
-         *     file, so this is the「AI 最近学了什么」stream that powers the editor's「最近更新」view.
-         *     Declared before ``/files/{kind}`` / ``/topics/{slug}`` so the static segment wins the
-         *     route match.
-         */
-        get: operations["list_my_memory_updates_v1_users_me_memory_updates_get"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6344,138 +5808,6 @@ export interface components {
              */
             recorded: boolean;
         };
-        /** AccountEpisodeAppendRequest */
-        AccountEpisodeAppendRequest: {
-            /**
-             * Actions Json
-             * @default
-             */
-            actions_json: string;
-            /** Conversation Id */
-            conversation_id: string;
-            /** Created At */
-            created_at?: string | null;
-            /** Episode Id */
-            episode_id?: string | null;
-            /** Scope */
-            scope?: string | null;
-            /** Summary */
-            summary: string;
-        };
-        /** AccountEpisodeRecord */
-        AccountEpisodeRecord: {
-            /**
-             * Actions Json
-             * @default
-             */
-            actions_json: string;
-            /** Conversation Id */
-            conversation_id: string;
-            /** Created At */
-            created_at: string;
-            /** Id */
-            id: string;
-            /** Summary */
-            summary: string;
-        };
-        /** AccountEpisodesListResponse */
-        AccountEpisodesListResponse: {
-            /** Episodes */
-            episodes: components["schemas"]["AccountEpisodeRecord"][];
-        };
-        /** AccountEpisodesMarkDigestedRequest */
-        AccountEpisodesMarkDigestedRequest: {
-            /** Consolidated At */
-            consolidated_at?: string | null;
-            /**
-             * Episode Ids
-             * @default []
-             */
-            episode_ids: string[];
-            /** Scope */
-            scope?: string | null;
-        };
-        /** AccountEpisodesPurgeRequest */
-        AccountEpisodesPurgeRequest: {
-            /**
-             * Older Than Days
-             * @default 30
-             */
-            older_than_days: number;
-        };
-        /** AccountEpisodesPurgeResponse */
-        AccountEpisodesPurgeResponse: {
-            /** Deleted */
-            deleted: number;
-        };
-        /** AccountMemoryDeleteRequest */
-        AccountMemoryDeleteRequest: {
-            /** Path */
-            path: string;
-            /** Scope */
-            scope?: string | null;
-        };
-        /** AccountMemoryFileMeta */
-        AccountMemoryFileMeta: {
-            /**
-             * Description
-             * @default
-             */
-            description: string;
-            /**
-             * Disputed
-             * @default false
-             */
-            disputed: boolean;
-            /** Path */
-            path: string;
-            /** Version */
-            version: string;
-        };
-        /** AccountMemoryListResponse */
-        AccountMemoryListResponse: {
-            /** Files */
-            files: components["schemas"]["AccountMemoryFileMeta"][];
-        };
-        /** AccountMemoryLoadRequest */
-        AccountMemoryLoadRequest: {
-            /** Path */
-            path: string;
-            /** Scope */
-            scope?: string | null;
-        };
-        /** AccountMemoryLoadResponse */
-        AccountMemoryLoadResponse: {
-            /** Content */
-            content: string;
-        };
-        /** AccountMemoryOkResponse */
-        AccountMemoryOkResponse: {
-            /**
-             * Ok
-             * @default true
-             */
-            ok: boolean;
-        };
-        /** AccountMemoryProjectScopesResponse */
-        AccountMemoryProjectScopesResponse: {
-            /** Scopes */
-            scopes: string[];
-        };
-        /** AccountMemorySaveRequest */
-        AccountMemorySaveRequest: {
-            /** Content */
-            content: string;
-            /** Path */
-            path: string;
-            /** Scope */
-            scope?: string | null;
-        };
-        /** AccountMemoryScopeRequest */
-        AccountMemoryScopeRequest: {
-            /** Scope */
-            scope?: string | null;
-        };
         /** AccountRuleCatalogItem */
         AccountRuleCatalogItem: {
             /**
@@ -6588,36 +5920,6 @@ export interface components {
             project_on_demand_rules?: components["schemas"]["AccountRuleDoc"][];
             /** Project Rules */
             project_rules: components["schemas"]["AccountRuleDoc"][];
-        };
-        /** AccountScopeStateResponse */
-        AccountScopeStateResponse: {
-            /** Explore Fingerprint */
-            explore_fingerprint?: string | null;
-            /**
-             * Explore Fingerprint Dirty
-             * @default false
-             */
-            explore_fingerprint_dirty: boolean;
-            /** Explore Workspace Key */
-            explore_workspace_key?: string | null;
-            /** Last Semantic At */
-            last_semantic_at?: string | null;
-        };
-        /** AccountScopeStateSaveRequest */
-        AccountScopeStateSaveRequest: {
-            /** Explore Fingerprint */
-            explore_fingerprint?: string | null;
-            /**
-             * Explore Fingerprint Dirty
-             * @default false
-             */
-            explore_fingerprint_dirty: boolean;
-            /** Explore Workspace Key */
-            explore_workspace_key?: string | null;
-            /** Last Semantic At */
-            last_semantic_at?: string | null;
-            /** Scope */
-            scope?: string | null;
         };
         /**
          * AccountTokenResponse
@@ -7781,73 +7083,6 @@ export interface components {
             username: string;
         };
         /**
-         * BoardDetail
-         * @description A board plus its full scene (the canvas load payload).
-         */
-        BoardDetail: {
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Id */
-            id: string;
-            /** Scene */
-            scene: {
-                [key: string]: unknown;
-            };
-            /** Title */
-            title: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            /** Version */
-            version: number;
-        };
-        /** BoardSceneWriteRequest */
-        BoardSceneWriteRequest: {
-            /** Baseline */
-            baseline?: number | null;
-            /** Scene */
-            scene: {
-                [key: string]: unknown;
-            };
-        };
-        /** BoardSummary */
-        BoardSummary: {
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Id */
-            id: string;
-            /** Title */
-            title: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            /** Version */
-            version: number;
-        };
-        /** BoardWriteResult */
-        BoardWriteResult: {
-            board?: components["schemas"]["BoardDetail"] | null;
-            /**
-             * Conflict
-             * @default false
-             */
-            conflict: boolean;
-            /** Ok */
-            ok: boolean;
-            /** Version */
-            version: number;
-        };
-        /**
          * BrowserInputRequest
          * @description A batch of input events (owner + live session; else 409).
          */
@@ -8019,11 +7254,18 @@ export interface components {
          *     ``consult`` / ``ask_user``) and the worker-only ``escalate``.
          *     ``available_to`` is a subset of ``["ceo", "worker"]`` so the UI can show which
          *     side of the team holds each tool.
+         *     ``blurb`` is the toolbox shelf description only — not the consult directory
+         *     or the tool schema ``description``.
          */
         CapabilityTool: {
             approval: components["schemas"]["ToolApproval"];
             /** Available To */
             available_to: string[];
+            /**
+             * Blurb
+             * @default
+             */
+            blurb: string;
             /** Description */
             description: string;
             face: components["schemas"]["ToolFace"];
@@ -8680,11 +7922,6 @@ export interface components {
             /** Total */
             total: number;
         };
-        /** CreateBoardRequest */
-        CreateBoardRequest: {
-            /** Title */
-            title?: string | null;
-        };
         /** CreateConversationRequest */
         CreateConversationRequest: {
             /** Client Request Id */
@@ -8775,12 +8012,6 @@ export interface components {
              * @example https://api.deepseek.com
              */
             base_url?: string | null;
-            /**
-             * Default Model
-             * @description This provider's default model name
-             * @example deepseek-v4-flash
-             */
-            default_model?: string | null;
             /**
              * Label
              * @description Display name for this provider (e.g. DeepSeek, 火山方舟)
@@ -10225,8 +9456,6 @@ export interface components {
             base_url: string;
             /** Created At */
             created_at?: string | null;
-            /** Default Model */
-            default_model: string;
             /** Id */
             id: string;
             /** Label */
@@ -10439,272 +9668,6 @@ export interface components {
             last_read_message_id: string;
         };
         /**
-         * MemoryClearDisputedLinesResult
-         * @description How many entries had their rejected-line records dropped.
-         */
-        MemoryClearDisputedLinesResult: {
-            /** Cleared Entries */
-            cleared_entries: number;
-        };
-        /**
-         * MemoryDisputeLineRequest
-         * @description Reject ONE bullet (「这条不对」at sentence granularity, 纠错通道·行级).
-         *
-         *     The line leaves the body and is kept in the entry's disputed record, so the rest of the
-         *     entry keeps working — unlike the entry-level ``disputed`` flag on the documents API,
-         *     which silences everything in the file. ``folder_id`` omitted = the global layer.
-         */
-        MemoryDisputeLineRequest: {
-            /** Baseline */
-            baseline?: string | null;
-            /**
-             * Content
-             * @description Bullet text to reject
-             */
-            content: string;
-            /** Folder Id */
-            folder_id?: string | null;
-            /**
-             * Kind
-             * @default profile
-             * @enum {string}
-             */
-            kind: "preferences" | "profile" | "topic";
-            /**
-             * Section
-             * @description ## section name the bullet sits under
-             * @default
-             */
-            section: string;
-            /** Topic Slug */
-            topic_slug?: string | null;
-        };
-        /** MemoryDisputeLineResult */
-        MemoryDisputeLineResult: {
-            /**
-             * Conflict
-             * @default false
-             */
-            conflict: boolean;
-            /**
-             * Line Id
-             * @default
-             */
-            line_id: string;
-            /** Ok */
-            ok: boolean;
-            /**
-             * Version
-             * @default
-             */
-            version: string;
-        };
-        /**
-         * MemoryDisputedLineView
-         * @description One rejected bullet, addressable for undo by ``(kind, topic_slug, id)``.
-         */
-        MemoryDisputedLineView: {
-            /**
-             * Disputed At
-             * @default
-             */
-            disputed_at: string;
-            /** Folder Id */
-            folder_id?: string | null;
-            /** Id */
-            id: string;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "preferences" | "profile" | "topic";
-            /**
-             * Section
-             * @default
-             */
-            section: string;
-            /** Text */
-            text: string;
-            /** Topic Slug */
-            topic_slug?: string | null;
-        };
-        /** MemoryDisputedLinesResponse */
-        MemoryDisputedLinesResponse: {
-            /** Lines */
-            lines: components["schemas"]["MemoryDisputedLineView"][];
-            /**
-             * Max Per Entry
-             * @default 50
-             */
-            max_per_entry: number;
-        };
-        /**
-         * MemoryFileResponse
-         * @description One memory leaf's body + its CAS tag (a single editor leaf's load payload).
-         */
-        MemoryFileResponse: {
-            /** Content */
-            content: string;
-            /** Version */
-            version: string;
-        };
-        /**
-         * MemoryKind
-         * @description Which always-injected core leaf an editor surface addresses (Agent记忆与知识系统 §1.4).
-         *
-         *     ``preferences`` → 偏好.md (沟通/工作习惯, GLOBAL-only); ``profile`` → 画像.md
-         *     (技术栈/关于用户的事实, global or — with a ``folder_id`` — a project layer);
-         *     ``navigation`` → 导航.md (短入口路由表, PROJECT-only — requires ``folder_id``).
-         * @enum {string}
-         */
-        MemoryKind: "preferences" | "profile" | "navigation";
-        /**
-         * MemoryMoveBulletRequest
-         * @description Move one bullet between GLOBAL and the given project's layer (位置即作用域纠错).
-         *
-         *     ``direction`` ``to_project`` = remove from global + add under the same section in
-         *     ``folder_id``; ``to_global`` is the inverse. Optional CAS baselines mirror the
-         *     per-leaf PUT contract (``None`` = unconditional under the memory lock).
-         */
-        MemoryMoveBulletRequest: {
-            /**
-             * Content
-             * @description Bullet text to move
-             */
-            content: string;
-            /**
-             * Direction
-             * @enum {string}
-             */
-            direction: "to_project" | "to_global";
-            /**
-             * Folder Id
-             * @description Current project folder id
-             */
-            folder_id: string;
-            /**
-             * Kind
-             * @default profile
-             * @enum {string}
-             */
-            kind: "preferences" | "profile" | "topic";
-            /**
-             * Section
-             * @description ## section name (required for core leaves)
-             * @default
-             */
-            section: string;
-            /** Source Baseline */
-            source_baseline?: string | null;
-            /** Target Baseline */
-            target_baseline?: string | null;
-            /** Topic Slug */
-            topic_slug?: string | null;
-        };
-        /** MemoryMoveBulletResult */
-        MemoryMoveBulletResult: {
-            /**
-             * Conflict
-             * @default false
-             */
-            conflict: boolean;
-            /** Message */
-            message?: string | null;
-            /** Ok */
-            ok: boolean;
-            /**
-             * Source Version
-             * @default
-             */
-            source_version: string;
-            /**
-             * Target Version
-             * @default
-             */
-            target_version: string;
-        };
-        /**
-         * MemoryProjectsResponse
-         * @description folder_ids whose PROJECT memory layer is non-empty (the rail shows a node each).
-         */
-        MemoryProjectsResponse: {
-            /** Folders */
-            folders: string[];
-        };
-        /**
-         * MemoryResponse
-         * @description The user's memory document + always-on ``enabled`` (editor load payload).
-         */
-        MemoryResponse: {
-            /** Content */
-            content: string;
-            /** Enabled */
-            enabled: boolean;
-            /** Version */
-            version: string;
-        };
-        /**
-         * MemoryRestoreLineRequest
-         * @description Undo one line-level dispute by the record's stable ``id``.
-         *
-         *     Never by position: rejecting several lines and undoing an earlier one shifts the rest,
-         *     so an index would put back a different line than the one the user pointed at.
-         */
-        MemoryRestoreLineRequest: {
-            /** Folder Id */
-            folder_id?: string | null;
-            /** Id */
-            id: string;
-            /**
-             * Kind
-             * @default profile
-             * @enum {string}
-             */
-            kind: "preferences" | "profile" | "topic";
-            /** Topic Slug */
-            topic_slug?: string | null;
-        };
-        /**
-         * MemoryTopicsResponse
-         * @description On-demand TOPIC note slugs in one scope (the rail's 主题/ folder listing).
-         *
-         *     Names only (``主题/<slug>.md`` → ``slug``), sorted; the body is pulled per-note via
-         *     ``GET …/topics/{slug}`` when the user opens one (渐进披露, mirrors ``consult``).
-         */
-        MemoryTopicsResponse: {
-            /** Topics */
-            topics: string[];
-        };
-        /**
-         * MemoryUpdateFeedItem
-         * @description One memory-write notice in the cross-conversation「记忆动态」feed.
-         *
-         *     Same shape as the conversation-tail card (``kind`` / ``summary`` / ``items``), plus
-         *     ``conversation_id`` so the feed can link back to the source conversation. Projected
-         *     from a ``memory_updates`` row via ``from_attributes``.
-         */
-        MemoryUpdateFeedItem: {
-            /** Conversation Id */
-            conversation_id: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Id */
-            id: string;
-            /** Items */
-            items?: components["schemas"]["MemoryUpdateItemView"][];
-            /**
-             * Kind
-             * @default semantic
-             * @enum {string}
-             */
-            kind: "semantic" | "quota";
-            /** Summary */
-            summary?: string | null;
-        };
-        /**
          * MemoryUpdateItemView
          * @description One applied memory change in a 记忆已更新 card (Agent记忆与知识系统 §1.6).
          *
@@ -10785,37 +9748,6 @@ export interface components {
             kind: "semantic" | "quota";
             /** Summary */
             summary?: string | null;
-        };
-        /**
-         * MemoryUpdatesFeedResponse
-         * @description The user's recent memory updates across ALL conversations, NEWEST-first.
-         *
-         *     Backs the「AI 记忆」editor's「最近更新」view (记忆编辑器的跨对话动态视图): the write side
-         *     of memory is per-user long-term data, so its natural home is one chronological stream —
-         *     a question the per-conversation tail card cannot answer.
-         */
-        MemoryUpdatesFeedResponse: {
-            /** Updates */
-            updates: components["schemas"]["MemoryUpdateFeedItem"][];
-        };
-        /** MemoryWriteRequest */
-        MemoryWriteRequest: {
-            /** Baseline */
-            baseline?: string | null;
-            /** Content */
-            content: string;
-        };
-        /** MemoryWriteResult */
-        MemoryWriteResult: {
-            /**
-             * Conflict
-             * @default false
-             */
-            conflict: boolean;
-            /** Ok */
-            ok: boolean;
-            /** Version */
-            version: string;
         };
         /**
          * MessageAttachment
@@ -11597,12 +10529,11 @@ export interface components {
          *
          *     Carries the assistant outcome the local pipeline returned (content / reasoning /
          *     citations / replay ``runs`` / the pipeline ``message_id`` so streamed and stored
-         *     ids agree). The FULL token snapshot rides on ``Message.usage`` (input / output /
-         *     reasoning / cache hit / cache miss + rounds) so a reloaded sidecar turn's meta row
-         *     matches a cloud turn's. ``duration_ms`` is the whole-turn product-AI wall clock
-         *     (same number as live ``message_end``); older clients omit it. Spend is NOT sent: a
-         *     sidecar turn's LLM calls are metered authoritatively at the cloud inference proxy
-         *     (``/v1/inference``, Slice 4a), so this write-back persists content only.
+         *     ids agree). Reload-visible ``Message.usage`` keys are ``USAGE_SETTLE_KEYS`` —
+         *     the same snapshot cloud ``_usage_metadata`` writes. Additive fields default to
+         *     omit/0 so older desktops still write back. Spend is NOT sent: a sidecar turn's
+         *     LLM calls are metered authoritatively at the cloud inference proxy
+         *     (``/v1/inference``), so this write-back persists content + settle usage only.
          *
          *     ``user_message`` may be empty for process-only salvage (journal/runs): the server
          *     must not insert a visible user row when there is no real user intent.
@@ -11624,6 +10555,10 @@ export interface components {
             cache_miss_tokens: number;
             /** Citations */
             citations?: components["schemas"]["Citation"][];
+            /** Collab */
+            collab?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Content
              * @default
@@ -11631,6 +10566,8 @@ export interface components {
             content: string;
             /** Duration Ms */
             duration_ms?: number | null;
+            /** Error Code */
+            error_code?: string | null;
             /** Evidence Ledger */
             evidence_ledger?: components["schemas"]["EvidenceLedgerEntryRest"][];
             /** Execution Id */
@@ -11654,11 +10591,18 @@ export interface components {
             message_id?: string | null;
             /** Origin */
             origin?: string | null;
+            /** Outcome */
+            outcome?: string | null;
             /**
              * Output Tokens
              * @default 0
              */
             output_tokens: number;
+            /**
+             * Prompt Tokens
+             * @default 0
+             */
+            prompt_tokens: number;
             /** Reasoning Content */
             reasoning_content?: string | null;
             /**
@@ -13029,7 +11973,7 @@ export interface components {
          *     are wired, not a dumpster for this enum.
          * @enum {string}
          */
-        ToolFace: "file" | "folder" | "search" | "web" | "execution" | "host_browser" | "board" | "table" | "doc" | "orchestration";
+        ToolFace: "file" | "folder" | "search" | "web" | "execution" | "host_browser" | "table" | "doc" | "orchestration";
         /**
          * ToolSurfaceLimits
          * @description Operator-declared upstream tool-surface caps on one pool member.
@@ -13315,14 +12259,6 @@ export interface components {
             /** Pending Interactions */
             pending_interactions?: components["schemas"]["PendingInteractionSummary"][];
         };
-        /**
-         * UpdateBoardRequest
-         * @description Rename a board (scene is written via the dedicated scene endpoint).
-         */
-        UpdateBoardRequest: {
-            /** Title */
-            title?: string | null;
-        };
         /** UpdateConversationRequest */
         UpdateConversationRequest: {
             /** Archived */
@@ -13395,7 +12331,7 @@ export interface components {
         /**
          * UpdateLlmProviderRequest
          * @description Partial update of a provider. Only fields present in the body are applied; an
-         *     omitted ``api_key`` keeps the stored ciphertext (edit endpoint/model without
+         *     omitted ``api_key`` keeps the stored ciphertext (edit endpoint without
          *     re-entering the key).
          */
         UpdateLlmProviderRequest: {
@@ -13403,8 +12339,6 @@ export interface components {
             api_key?: string | null;
             /** Base Url */
             base_url?: string | null;
-            /** Default Model */
-            default_model?: string | null;
             /** Label */
             label?: string | null;
         };
@@ -13524,6 +12458,8 @@ export interface components {
          *
          *     ``error`` is optional: present on failed / empty turns that stored a structured
          *     cause on the usage column. Token fields may be zeros when only ``error`` is set.
+         *     ``last_prompt`` is the largest single-request prompt on this message/run
+         *     (window fill). Omitted on window aggregates and old rows — not summed ``input``.
          */
         UsageBreakdown: {
             /** Cache Hit */
@@ -13533,6 +12469,8 @@ export interface components {
             error?: components["schemas"]["UsageError"] | null;
             /** Input */
             input: number;
+            /** Last Prompt */
+            last_prompt?: number | null;
             /** Output */
             output: number;
             /** Reasoning */
@@ -13779,7 +12717,7 @@ export interface components {
          *     ``kind`` names the ``WorkspaceError`` subclass to re-raise on the server (e.g.
          *     ``PathNotFound``, ``OutsideWorkspace``) so the file tool maps it to the same
          *     message as cloud mode; ``count`` carries the match count for ``AmbiguousMatch``
-         *     (str_replace). An unknown ``kind`` degrades to a generic I/O error.
+         *     (``edit``). An unknown ``kind`` degrades to a generic I/O error.
          *
          *     ``reason`` is an optional stable failure category for channels that already
          *     classify on the desktop (e.g. external mount ``not_found`` / ``not_directory`` /
@@ -14083,409 +13021,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConversationSearchResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_account_memory_v1_account_memory_delete_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AccountMemoryDeleteRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccountMemoryOkResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    append_account_memory_episode_v1_account_memory_episodes_append_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AccountEpisodeAppendRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccountEpisodeRecord"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_account_undigested_episodes_v1_account_memory_episodes_list_undigested_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AccountMemoryScopeRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccountEpisodesListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    mark_account_episodes_digested_v1_account_memory_episodes_mark_digested_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AccountEpisodesMarkDigestedRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccountMemoryOkResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    purge_account_digested_episodes_v1_account_memory_episodes_purge_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AccountEpisodesPurgeRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccountEpisodesPurgeResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_account_memory_v1_account_memory_list_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AccountMemoryScopeRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccountMemoryListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    load_account_memory_v1_account_memory_load_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AccountMemoryLoadRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccountMemoryLoadResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_account_memory_project_scopes_v1_account_memory_project_scopes_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccountMemoryProjectScopesResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    save_account_memory_v1_account_memory_save_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AccountMemorySaveRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccountMemoryOkResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_account_scope_state_v1_account_memory_scope_state_get_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AccountMemoryScopeRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccountScopeStateResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    save_account_scope_state_v1_account_memory_scope_state_save_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AccountScopeStateSaveRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccountMemoryOkResponse"];
                 };
             };
             /** @description Validation Error */
@@ -16721,224 +15256,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StatusResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_boards_v1_boards_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoardSummary"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_board_v1_boards_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateBoardRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoardSummary"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_board_v1_boards__board_id__get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                board_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoardDetail"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_board_v1_boards__board_id__delete: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                board_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StatusResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_board_v1_boards__board_id__patch: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                board_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateBoardRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoardSummary"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    write_board_scene_v1_boards__board_id__scene_put: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                board_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BoardSceneWriteRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoardWriteResult"];
                 };
             };
             /** @description Validation Error */
@@ -24596,514 +22913,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LlmProviderView"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_my_memory_v1_users_me_memory_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MemoryResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    put_my_memory_v1_users_me_memory_put: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MemoryWriteRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MemoryWriteResult"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    dispute_my_memory_line_v1_users_me_memory_dispute_line_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MemoryDisputeLineRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MemoryDisputeLineResult"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_my_disputed_lines_v1_users_me_memory_disputed_lines_get: {
-        parameters: {
-            query?: {
-                folder_id?: string | null;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MemoryDisputedLinesResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    clear_my_disputed_lines_v1_users_me_memory_disputed_lines_delete: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MemoryClearDisputedLinesResult"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_my_memory_file_v1_users_me_memory_files__kind__get: {
-        parameters: {
-            query?: {
-                folder_id?: string | null;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                kind: components["schemas"]["MemoryKind"];
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MemoryFileResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    put_my_memory_file_v1_users_me_memory_files__kind__put: {
-        parameters: {
-            query?: {
-                folder_id?: string | null;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                kind: components["schemas"]["MemoryKind"];
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MemoryWriteRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MemoryWriteResult"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    move_my_memory_bullet_v1_users_me_memory_move_bullet_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MemoryMoveBulletRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MemoryMoveBulletResult"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_my_memory_projects_v1_users_me_memory_projects_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MemoryProjectsResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    restore_my_memory_line_v1_users_me_memory_restore_line_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MemoryRestoreLineRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MemoryDisputeLineResult"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_my_memory_topics_v1_users_me_memory_topics_get: {
-        parameters: {
-            query?: {
-                folder_id?: string | null;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MemoryTopicsResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_my_memory_topic_v1_users_me_memory_topics__slug__get: {
-        parameters: {
-            query?: {
-                folder_id?: string | null;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                slug: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MemoryFileResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    put_my_memory_topic_v1_users_me_memory_topics__slug__put: {
-        parameters: {
-            query?: {
-                folder_id?: string | null;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                slug: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MemoryWriteRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MemoryWriteResult"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_my_memory_updates_v1_users_me_memory_updates_get: {
-        parameters: {
-            query?: {
-                limit?: number;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MemoryUpdatesFeedResponse"];
                 };
             };
             /** @description Validation Error */

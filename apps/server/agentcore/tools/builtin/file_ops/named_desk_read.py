@@ -1,4 +1,4 @@
-"""CEO ``file_read`` one-shot bind of a this-turn named neighbor Folder.
+"""CEO ``read`` one-shot bind of a this-turn named neighbor Folder.
 
 Not a schema ``folder_id``. Not list / glob / grep / write. Workers do not
 inherit the pin as an implicit desk switch. Miss never searches every Folder.
@@ -169,10 +169,10 @@ async def maybe_named_desk_file_read(
     start: float,
     read_on_desk: ReadOnDesk,
 ) -> ToolResult | None:
-    """Re-run ``file_read`` on a this-turn named other desk. None = keep ``miss``."""
+    """Re-run ``read`` on a this-turn named other desk. None = keep ``miss``."""
     if not _is_not_found(miss):
         return None
-    folder_id = named_desk_folder_for_read(context, arguments.get("path"))
+    folder_id = named_desk_folder_for_read(context, arguments.get("file_path"))
     if not folder_id:
         return None
     forked = await _fork_named_desk_context(context, folder_id)

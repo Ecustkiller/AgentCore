@@ -55,3 +55,19 @@ def test_append_restamp_envelope_after_history():
     assert messages[-1].content == env
     append_workspace_restamp_envelope(messages, env)
     assert len(messages) == 3
+
+
+def test_restamp_reads_workspace_from_journal_haystack_not_frozen_system():
+    """After facts left ``role: system``, the haystack is envelope / journal text."""
+    frozen = "constitution\n<按需目录>\n- terminal\n</按需目录>"
+    journal = (
+        f"{TURN_ENVELOPE_FENCE}\n"
+        "<工作区>\n执行：云端沙箱\n</工作区>"
+    )
+    new = "<工作区>\n执行：用户本机\n</工作区>"
+    assert _restamp_workspace_facts(frozen, new) == ""
+    out = _restamp_workspace_facts(f"{frozen}\n{journal}", new)
+    assert out.startswith(TURN_ENVELOPE_FENCE)
+    assert "用户本机" in out
+    assert "云端沙箱" not in out
+    assert "constitution" not in out

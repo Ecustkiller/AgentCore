@@ -120,8 +120,40 @@
   overflow-wrap: anywhere;
 }
 
+/* Embedded markdown (GitHub / admin): first/last block don't add chapter
+ * margins. Chat answers often start with `##`; that heading is the body, not
+ * a new section under the Thought caption. */
+.markdown-body > :first-child {
+  margin-top: 0;
+}
+.markdown-body > :last-child {
+  margin-bottom: 0;
+}
+
+/* Process turn lanes: collapsed Thought/tools disclosure is a caption over
+ * the answer (Cursor / ChatGPT), not a peer process row. Vertical gaps follow
+ * UI-Pattern 间距档: row 8px between chrome/answer/caption; block 12px
+ * when a .process-slot (graph / pending ask / interjection) is adjacent. */
+.process-turn {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
+}
+.process-turn > * + * {
+  margin-top: 0.5rem;
+}
+.process-turn > * + .process-slot,
+.process-turn > .process-slot + * {
+  margin-top: 0.75rem;
+}
+
 .process-thought,
-.process-narration {
+.process-narration,
+.process-summary,
+.process-answer,
+.process-slot,
+.process-chrome {
   min-width: 0;
   max-width: 100%;
 }

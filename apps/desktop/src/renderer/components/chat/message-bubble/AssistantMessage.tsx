@@ -1,28 +1,12 @@
 import { Markdown } from "@/components/chat/Markdown";
 import { PausedContinueSurface } from "@/components/chat/PausedContinueSurface";
 import { TurnWarningBanner } from "@/components/chat/TurnWarningBanner";
-import { Button } from "@/components/ui";
 import { Badge } from "@/components/ui/badge";
-import {
-  noticeChipNeutral,
-  statusAccentText,
-  statusChip,
-} from "@/components/ui/tone-presets";
-import { copyText } from "@/lib/clipboard";
 import { resolveTurnDisplayMoney } from "@/lib/cost";
-import {
-  connectivityEscalationSuffix,
-  formatAssistantErrorMessage,
-} from "@/lib/errors";
 import { formatDisplayCost, pickCostMoney } from "@/lib/format";
 import { openWorkspaceDeliverable } from "@/lib/openWorkspaceDeliverable";
 import { completedAtIso } from "@/lib/runningElapsed";
-import {
-  buildSupportDiagnosticPack,
-  formatSupportDiagnosticText,
-  precedingUserMessageId,
-  supportDiagnosticExtrasFromError,
-} from "@/lib/supportDiagnostics";
+import { precedingUserMessageId } from "@/lib/supportDiagnostics";
 import {
   assistantHasTeamStrip,
   isAttestedPauseContinue,
@@ -41,9 +25,8 @@ import {
 import { useExecutionStore, useMessageExecution } from "@/stores/execution";
 import { useMessageInteractionCards } from "@/stores/interactions";
 import { useUsageStore } from "@/stores/usage";
-import { AlertTriangle, Copy, KeyRound, RotateCcw } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 import { useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
 import {
   AssistantMessageFooter,
   AssistantMessageMetaSummary,
@@ -68,7 +51,7 @@ function RecoveredChip() {
       tone="muted"
       pill
       title="本回合中途中断，系统已自动接着跑完；成果就在这条消息里。"
-      className="mb-1.5 inline-flex items-center gap-1.5 px-2 py-0.5 font-normal"
+      className="mb-2 inline-flex items-center gap-1.5 px-2 py-0.5 font-normal"
     >
       <RotateCcw size={14} />
       曾中断恢复
@@ -118,7 +101,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     if (!id) return false;
     return s.byId?.[id]?.waitingForDeskProvision ?? false;
   });
-  const navigate = useNavigate();
   const finishReason = !bubbleLive
     ? (message.finishReason ?? message.runs?.finishReason)
     : undefined;
@@ -154,34 +136,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
             message.error.code === resolvedFace.code)
         ? message.error
         : resolvedFace;
-  const errorAction =
-    outcome.recovery.kind === "configure" && outcome.recovery.href
-      ? {
-          label: outcome.recovery.label ?? "去服务商",
-          href: outcome.recovery.href,
-        }
-      : null;
-  const emptyDiagnosis = message.error?.context?.empty_diagnosis;
-  const supportDiagnosticIds = {
-    conversationId,
-    messageId: assistantProjectionId(message),
-    userMessageId: precedingUserMessageId(
-      getActiveRuntime().messages,
-      message.id,
-    ),
-    traceId: message.traceId,
-    executionId: message.executionId,
-    ...supportDiagnosticExtrasFromError(message.error),
-  };
-  const supportDiagnosticText =
-    formatSupportDiagnosticText(supportDiagnosticIds);
-  const copySupportDiagnostics = () => {
-    if (!supportDiagnosticText) return;
-    void buildSupportDiagnosticPack(supportDiagnosticIds).then((text) => {
-      if (!text) return;
-      void copyText(text);
-    });
-  };
+  const packInMore = outcome.supportPackHost === "more";
   const hasReasoning =
     !!message.reasoning && message.reasoning.trim().length > 0;
   const captainContext = message.captainContext ?? [];
@@ -283,7 +238,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   // 回合正文（时间线或答案）：对话页恒为传统聊天平铺（单 Agent 回合不再退化成 CEO 节点卡——
   // 那条「图主界面化」第一刀已撤，图相关体验只在画布；多 Agent 回合协作图内嵌在
   // `team` 标记槽——CEO 导语 content 步之下（协作图时间线落点））。
-  // 回合级附件（收到的上下文 / 错误卡 / 产物 / 引用 / 检查点 / 操作行）随后平铺。
+  // 回合级附件（收到的上下文 / 产物 / 引用 / 检查点 / 操作行）随后平铺。失败说明在输入区横幅。
   const turnBody = hasProcess ? (
     <ProcessTimeline
       process={message.process ?? []}
@@ -313,7 +268,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       {/* 不变量（时间线一期）：多 Agent 回合必有 `team` 标记（live 由
           setLastAssistantExecutionId 盖章，reload 由 journal 补齐）→ hasProcess 恒真、
           协作图只在 ProcessTimeline 的标记槽渲染；此分支仅剩单 Agent 纯文本回合。 */}
-      {/* 终稿全文：过程折进摘要，答案不夹「展开全文」。复盘扫读夹层只在 admin。 */}
+      {/* 终稿全文：思考/工具折进摘要，正文（含中间段）不夹「展开全文」。复盘扫读夹层只在 admin。 */}
       {hideContentForCheckpoint || !displayContent.trim() ? null : (
         <Markdown
           content={displayContent}
@@ -372,56 +327,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           }}
         />
       )}
-      {/* Tone: 去配置 action → primary；限流 / 无 action → noticeChipNeutral（非危险红）。 */}
-      {outcome.showBubbleBanner && displayError && (
-        <div
-          className={cn(
-            "mt-2 flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm",
-            errorAction ? statusChip.primary : noticeChipNeutral,
-          )}
-        >
-          <AlertTriangle
-            size={15}
-            className={cn(
-              "mt-0.5 shrink-0",
-              errorAction ? statusAccentText.primary : "text-muted-foreground",
-            )}
-          />
-          <p className="min-w-0 flex-1 whitespace-pre-wrap break-words">
-            {formatAssistantErrorMessage(displayError)}
-            {connectivityEscalationSuffix(displayError.code, message.id, {
-              message: displayError.message,
-              upstreamStatus: message.error?.context?.upstream_status,
-              emptyDiagnosis,
-              conversationId,
-            })}
-          </p>
-          {outcome.supportPackHost === "bubble" && supportDiagnosticText && (
-            <Button
-              variant="ghost"
-              className={
-                errorAction
-                  ? "shrink-0 text-primary/70 hover:bg-transparent hover:text-primary"
-                  : "shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
-              }
-              icon={<Copy size={13} />}
-              onClick={copySupportDiagnostics}
-            >
-              复制排查包
-            </Button>
-          )}
-          {errorAction && (
-            <Button
-              variant="primary"
-              className="shrink-0"
-              icon={<KeyRound size={13} />}
-              onClick={() => navigate(errorAction.href)}
-            >
-              {errorAction.label}
-            </Button>
-          )}
-        </div>
-      )}
       {/* 底部堆叠回退已废除（时间线一期）：交互卡只在 ProcessTimeline 标记槽渲染。
           不变量「有交互卡必有时间线标记」由 live 盖章 + reload journal 补标记保证。 */}
       {!bubbleLive && message.syncStatus && (
@@ -437,19 +342,17 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           costText={costText}
           onRegenerate={handleRegenerate}
           displayError={displayError}
-          pinSupportPack={outcome.supportPackHost === "more"}
+          pinSupportPack={packInMore}
           showRegenerate={outcome.showRegenerate}
         />
-      ) : showCostMeta || outcome.supportPackHost === "more" ? (
+      ) : showCostMeta || packInMore ? (
         <div
           className={cn(
             "mt-1 flex items-center gap-2",
-            outcome.supportPackHost === "more"
-              ? "justify-between"
-              : "justify-end",
+            packInMore ? "justify-between" : "justify-end",
           )}
         >
-          {outcome.supportPackHost === "more" ? (
+          {packInMore ? (
             <MessageMoreMenu
               message={message}
               captainContext={captainContext}

@@ -382,13 +382,13 @@ def window_from_journal(
     - ``run_head`` (per ``run_id``) → a **worker / continuation** head: ``system`` +
       opening ``user`` captured when that run assembled its task-prompt. Preferred
       whenever present so a worker is never falsely headed by the CEO turn prompt.
-    - ``turn_started`` → the **captain** head: a ``system`` message (the verbatim
-      frozen prompt) + optional ``[系统提示]`` envelope user + the real ``user``
-      message, with ``history`` (prior turns — supplied by the caller, since the
-      facts carry only its length) spliced between system and envelope exactly as
-      the executor builds it. Used only when the target has no ``run_head``
-      (captain / legacy unscoped fold). Journals without ``turn_envelope`` fold
-      as before (no extra user).
+    - ``turn_started`` → the **captain** head: frozen node-0 ``system`` + optional
+      DeepSeek in-history extra system + optional ``[系统提示]`` envelope user +
+      the real ``user`` message, with ``history`` (prior turns — supplied by the
+      caller, since the facts carry only its length) spliced between node 0 and
+      the extra system exactly as the executor builds it. Used only when the
+      target has no ``run_head`` (captain / legacy unscoped fold). Journals
+      without ``turn_envelope`` / ``in_history_system`` fold as before.
     - each ``llm_call`` of the target run that carried ``tool_calls`` → the ``assistant``
       message (``content`` / ``reasoning_content`` echoed verbatim — DeepSeek thinking
       mode 400s without the reasoning on a tool-call turn, see 平台LLM接入 · DeepSeek
@@ -486,6 +486,7 @@ def window_from_journal(
                 history=history,
                 turn_envelope=started.get("turn_envelope") or "",
                 user_content=started.get("user_message") or "",
+                in_history_system=started.get("in_history_system") or "",
             )
         )
     elif started is None and run_head is None and not target:

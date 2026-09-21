@@ -35,8 +35,8 @@ _OMISSION_RE = re.compile(
 )
 
 # "成篇" threshold: classify_write_kind (research QC / read-back / diagnostics).
-# file_write overwrite and file_delete of a substantial draft are allowed
-# (prefer str_replace for revisions; delete is reversible by default).
+# write overwrite and file_delete of a substantial draft are allowed
+# (prefer edit for revisions; delete is reversible by default).
 # Length is advisory only (skill / schema 可选骨架分段) — no hard reject on oversized bodies.
 _SUBSTANTIAL_FILE_CHARS = 400
 # Eval helper: same ratio the old overwrite nudge used.
@@ -55,7 +55,7 @@ def has_omission_marker(content: str) -> bool:
 def is_severe_shrink(old_chars: int, new_chars: int) -> bool:
     """True when new length is below ``_INTEGRITY_SHRINK_RATIO`` of the old length.
 
-    Used by evals, not by ``file_write``.
+    Used by evals, not by ``write``.
     """
     return old_chars > 0 and new_chars < old_chars * _INTEGRITY_SHRINK_RATIO
 
@@ -114,7 +114,7 @@ def _prose_body_chars(content: str) -> int:
 
 
 def classify_write_kind(content: str) -> Literal["skeleton", "prose"]:
-    """Classify a ``file_write`` body as skeleton or prose (research QC / read-back)."""
+    """Classify a ``write`` body as skeleton or prose (research QC / read-back)."""
     text = content or ""
     stripped = text.strip()
     if not stripped:
@@ -168,7 +168,7 @@ def format_artifact_manifest(
     kind: str,
     action: str = "write",
 ) -> str:
-    """Success receipt = artifact manifest（作者以此验真，勿再 file_read 回读正文）。
+    """Success receipt = artifact manifest（作者以此验真，勿再 read 回读正文）。
 
     规模按**字符**报（``WorkspaceBackend.write`` / ``append`` 返回的就是 chars）。
     曾标成「字节」：中文正文字符数 ≈ UTF-8 字节数 / 3，作者据此判定「写少了」，
@@ -196,7 +196,7 @@ def format_artifact_manifest(
         f"title_tree:\n{tree_block}\n"
         f"end_preview:\n{preview}\n"
         "【验真】请以本 manifest 确认落盘；优先用 manifest 验真，"
-        "勿为空转反复 file_read。"
+        "勿为空转反复 read。"
     )
 
 
@@ -244,7 +244,7 @@ async def _prepare_write_relpath(
 
     ``rename_note`` is only the sanitize tip when the cleaned path differs from
     the request. ``/workspace/…`` strip alone does not count as a rename;
-    dangerous-char / dossier-flatten do.
+    dangerous-char cleanup do.
     """
     from agentcore.workspace._paths import (
         normalize_workspace_path,
@@ -286,9 +286,7 @@ async def _prepare_write_relpath(
 def write_scope_rejection(context: ToolContext, path: str) -> str | None:
     """Chinese error when ``path`` violates ``context.write_scope``; else ``None``.
 
-    ``project`` — no gate. ``none`` — reject all writes. ``explore_memory`` — path
-    must be under ``AgentCore/``. Thick folder dossiers need no path clause here:
-    they are documents entries now, and no worker tool can write one.
+    ``project`` — no gate. ``none`` — reject all writes.
     """
     scope = getattr(context, "write_scope", "project") or "project"
     if scope == "project":
@@ -298,20 +296,6 @@ def write_scope_rejection(context: ToolContext, path: str) -> str | None:
             "当前写范围 write_scope=none：禁止一切写盘。"
             "请改用只读工具，或待主管解除写范围限制后再写。"
         )
-    if scope != "explore_memory":
-        return None
-
-    from agentcore.workspace.stage_dirs import AGENTCORE_ROOT
-
-    norm = _norm_rel_path(path).lstrip("./")
-    root_prefix = f"{AGENTCORE_ROOT}/"
-    if not (norm == AGENTCORE_ROOT or norm.startswith(root_prefix)):
-        return (
-            f"冷启动探索写范围仅允许落在 `{AGENTCORE_ROOT}/` 下"
-            f"（约定记忆与探索笔记）；拒绝路径 `{path}`。"
-            f"请改写到 `{AGENTCORE_ROOT}/文档/research/` 等探索笔记路径，"
-            "或待主管解除写范围限制后再写用户工程文件。"
-        )
     return None
 
 
@@ -320,13 +304,24 @@ def _reject_write_scope(
     path: str,
     start: float,
     *,
-    event: str = "file_write.scope_rejected",
+    event: str = "write.scope_rejected",
 ) -> ToolResult | None:
     """Log + return failed ToolResult when write_scope blocks ``path``."""
     msg = write_scope_rejection(context, path)
     if msg is None:
         return None
-    logger.info(event, path=path, write_scope=getattr(context, "write_scope", None))
+    if event == "edit.scope_rejected":
+        logger.info(
+            "edit.scope_rejected",
+            path=path,
+            write_scope=getattr(context, "write_scope", None),
+        )
+    else:
+        logger.info(
+            "write.scope_rejected",
+            path=path,
+            write_scope=getattr(context, "write_scope", None),
+        )
     return _error(
         msg, start, contract_failure=True, cross_turn_retry=CrossTurnRetry.FUTILE
     )
@@ -384,10 +379,10 @@ def _log_write_collision(
 ) -> None:
     """Log a write-ownership collision with a literal event name (catalog scan)."""
     # Literals required so sync_log_event_registry picks them up.
-    if event == "file_write.collision":
-        logger.info("file_write.collision", path=path, run_id=run_id, owner=owner)
-    elif event == "str_replace.collision":
-        logger.info("str_replace.collision", path=path, run_id=run_id, owner=owner)
+    if event == "write.collision":
+        logger.info("write.collision", path=path, run_id=run_id, owner=owner)
+    elif event == "edit.collision":
+        logger.info("edit.collision", path=path, run_id=run_id, owner=owner)
     elif event == "file_delete.collision":
         logger.info("file_delete.collision", path=path, run_id=run_id, owner=owner)
     elif event == "file_move.collision":
@@ -400,7 +395,7 @@ def stale_overwrite_rejection(path: str) -> str:
     """User/model-facing refuse when whole-file write lost the race to another writer."""
     return (
         f"`{path}` 盘上已经不是你刚读到的版本（期间有人改过）。"
-        "请重新 file_read 后再 file_write，或改用 str_replace 按当前原文局部改。"
+        "请重新 read 后再 write，或改用 edit 按当前原文局部改。"
     )
 
 

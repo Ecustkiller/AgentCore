@@ -73,7 +73,7 @@ const tpPayload = (
   workers: [
     { run_id: "r1", role: "研究员", task: "调研", depends_on: [] as string[] },
   ],
-  tools: ["file_write"],
+  tools: ["write"],
   motion: "",
   form: "",
   sides: [] as string[],

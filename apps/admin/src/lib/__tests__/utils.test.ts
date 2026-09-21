@@ -12,6 +12,7 @@ import {
   fmtInt,
   fmtMoney,
   fmtNanoMoney,
+  roleLabel,
 } from "@/lib/utils";
 import { describe, expect, it } from "vitest";
 
@@ -54,5 +55,12 @@ describe("fmtCount", () => {
 
   it("总数未知时写「—」，不写 0", () => {
     expect(fmtCount(0, false)).toBe("—");
+  });
+});
+
+describe("roleLabel", () => {
+  it("background memory role is 后台整理, not 记忆整理", () => {
+    expect(roleLabel("memory")).toBe("后台整理");
+    expect(roleLabel("title")).toBe("标题生成");
   });
 });

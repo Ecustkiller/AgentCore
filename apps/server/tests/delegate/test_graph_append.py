@@ -15,7 +15,6 @@ from agentcore.runtime.delegate.graph_append import (
 from agentcore.runtime.events import EventSink, run_plan
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
-from agentcore.tools.protocol import ToolResult
 from tests.delegate.conftest import Provider, ctx, tool
 
 
@@ -131,8 +130,8 @@ def test_legacy_host_message_id_run_plan_skips_team_marker():
 
 
 @pytest.mark.asyncio
-async def test_delegate_cross_turn_append_mints_prev_chain(monkeypatch):
-    """跨回合已收口图：新 eid + prev_execution_id，不发 graph_append。"""
+async def test_delegate_closed_graph_without_continuation_is_fresh(monkeypatch):
+    """已收口图、无续派/补缺口：新 eid、不写 prev。"""
     t = tool(Provider([]))
     t._base_tool_context.execution_id = None
     t._message_id = "m2"
@@ -140,22 +139,11 @@ async def test_delegate_cross_turn_append_mints_prev_chain(monkeypatch):
     t._captain_run_id = "cap-2"
     emitted: list[Any] = []
     t._sink.emit = lambda ev: emitted.append(ev)  # type: ignore[method-assign]
-
-    async def fake_resolve(*, conversation_id: str, execution_id: str):
-        assert conversation_id == "conv-1"
-        assert execution_id == "exec-old"
-        return "m-host"
-
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.resolve_host_message_id",
-        fake_resolve,
-    )
     monkeypatch.setattr("agentcore.runtime.plan_only.is_plan_only", lambda: True)
 
     result = await t.execute(
         {
             "tasks": [{"role": "撰写员", "task": "写"}],
-            "append_to_execution_id": "exec-old",
             "coordinate": False,
         },
         ctx(),
@@ -164,10 +152,8 @@ async def test_delegate_cross_turn_append_mints_prev_chain(monkeypatch):
     plans = [e for e in emitted if getattr(e.type, "value", e.type) == "run_plan"]
     assert len(plans) == 1
     payload = plans[0].payload
-    assert payload.get("prev_execution_id") == "exec-old"
-    assert payload.get("execution_id") != "exec-old"
-    assert "host_message_id" not in payload
-    assert "exec-old" not in (result.output or "")
+    assert "prev_execution_id" not in payload
+    assert payload.get("execution_id")
     assert not any(
         getattr(e.type, "value", e.type) == "graph_append" for e in emitted
     )
@@ -197,7 +183,6 @@ async def test_delegate_same_turn_memory_append_keeps_eid(monkeypatch):
     result = await t.execute(
         {
             "tasks": [{"role": "撰写员", "task": "写"}],
-            "append_to_execution_id": "latest",
             "coordinate": False,
         },
         ctx(),
@@ -259,30 +244,3 @@ async def test_delegate_new_turn_live_prev_does_not_reuse_eid(monkeypatch):
     finally:
         current_execution_id.reset(token)
         clear_active_coordination()
-
-
-@pytest.mark.asyncio
-async def test_delegate_missing_prev_host_rejects(monkeypatch):
-    t = tool(Provider([]))
-    t._base_tool_context.execution_id = None
-    t._message_id = "m2"
-    t._conversation_id = "conv-1"
-
-    async def miss(**_k):
-        return None
-
-    monkeypatch.setattr(
-        "agentcore.runtime.delegate.graph_append.resolve_host_message_id",
-        miss,
-    )
-    result = await t.execute(
-        {
-            "tasks": [{"role": "撰写员", "task": "写"}],
-            "append_to_execution_id": "missing-eid",
-            "coordinate": False,
-        },
-        ctx(),
-    )
-    assert isinstance(result, ToolResult)
-    assert not result.success
-    assert "找不到" in (result.error or "")

@@ -3,7 +3,7 @@
 Supports JS (npm/pnpm/yarn) and Python (uv/pip/poetry) with the same discipline.
 
 - **A**：云端装包走桌上常驻 SSRF chokepoint（netns + proxy，与 ``run`` 同一
-  desk guest、与 ``download_url`` 同政策）；辅以 argv 形态白名单 + 固定包装源
+  desk guest、与 ``web_fetch`` 同政策）；辅以 argv 形态白名单 + 固定包装源
   env + 拒绝改 registry/index 的 CLI 参数。本地（``backend.location=local``）
   不走主机 gVisor 门禁，只钉源 + 权限轴。
 - **B**：云端 ``install_cache_env`` → 沙箱 ``/pkg-cache``（OCI bind 到

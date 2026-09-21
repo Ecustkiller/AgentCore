@@ -46,7 +46,7 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         _multi_agent_browser_session,
     ),
     "multi_agent_cross_turn_append": (
-        "跨回合协作图续接：m1 建图完成 → m2 新 execution_id + prev_execution_id=exec1 → "
+        "跨回合协作图续接：m1 建图完成 → m2 同人续派新 execution_id + prev_execution_id=exec1 → "
         "追加批收口；进度分母只含本图",
         _multi_agent_cross_turn_append,
     ),

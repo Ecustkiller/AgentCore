@@ -142,7 +142,7 @@ def test_factory_closes_files_and_recon_delivery_idle():
     assert is_short_write_posture(max_rounds=4)
 
     standard = create_loop_controller(
-        frozenset({"file_read"}),
+        frozenset({"read"}),
         files_expected=True,
         short_write_posture=False,
     )
@@ -151,7 +151,7 @@ def test_factory_closes_files_and_recon_delivery_idle():
     assert standard.delivery_idle_report is False
     assert standard.delivery_idle_recon is False
     report = create_loop_controller(
-        frozenset({"file_read", "grep"}),
+        frozenset({"read", "grep"}),
         files_expected=True,
         report_delivery=True,
     )
@@ -159,7 +159,7 @@ def test_factory_closes_files_and_recon_delivery_idle():
     assert report.delivery_idle_narrow_rounds == 0
     assert report.delivery_idle_report is False
     short_files = create_loop_controller(
-        frozenset({"file_read"}),
+        frozenset({"read"}),
         files_expected=True,
         short_write_posture=True,
     )
@@ -167,7 +167,7 @@ def test_factory_closes_files_and_recon_delivery_idle():
     assert short_files.delivery_idle_narrow_rounds == 0
     assert short_files.delivery_idle_report is False
     prose = create_loop_controller(
-        frozenset({"file_read"}),
+        frozenset({"read"}),
         files_expected=True,
         short_write_posture=True,
         expects_landing=False,
@@ -177,7 +177,7 @@ def test_factory_closes_files_and_recon_delivery_idle():
     assert prose.delivery_idle_recon is False
     assert prose.delivery_idle_report is False
     no_files = create_loop_controller(
-        frozenset({"file_read"}),
+        frozenset({"read"}),
         files_expected=False,
     )
     assert no_files.delivery_idle_nudge_rounds == 0
@@ -185,7 +185,7 @@ def test_factory_closes_files_and_recon_delivery_idle():
     assert no_files.delivery_idle_recon is False
     assert no_files.delivery_idle_report is False
     prose_no_files = create_loop_controller(
-        frozenset({"file_read"}),
+        frozenset({"read"}),
         files_expected=False,
         expects_landing=False,
     )
@@ -195,7 +195,7 @@ def test_factory_closes_files_and_recon_delivery_idle():
 
 
 def test_directed_search_role_guessing_is_absent():
-    """按职称灌检索纪律 / 补工具面已撤；搜法只在 grep / file_read。"""
+    """按职称灌检索纪律 / 补工具面已撤；搜法只在 grep / read。"""
     import agentcore.runtime.runs.worker_budget as wb
 
     assert not hasattr(wb, "is_directed_search_role")
@@ -213,13 +213,13 @@ def test_build_plan_ignores_reviewer_least_privilege_tools():
             {
                 "role": "后端核心审查员",
                 "task": "审查 server/app",
-                "tools": ["file_list", "file_read"],
+                "tools": ["file_list", "read"],
                 "deliverable": {
                     "form": "prose",
                 },
             }
         ],
-        valid_tools={"file_list", "file_read", "grep", "handoff"},
+        valid_tools={"file_list", "read", "grep", "handoff"},
     )
     assert errors == []
     assert plan.nodes[0].tools is None
@@ -256,7 +256,7 @@ def test_should_tighten_verify_exec_thrash_for_repair_verify_posture():
     )
 
     tightened = create_loop_controller(
-        frozenset({"code_execute", "file_read"}),
+        frozenset({"code_execute", "read"}),
         files_expected=False,
         short_write_posture=True,
         tighten_verify_exec_thrash=True,
@@ -315,7 +315,7 @@ def test_factory_delivery_idle_not_finalize():
     from agentcore.runtime.loop_controller import Intervention, ToolAttempt
 
     ctrl = create_loop_controller(
-        frozenset({"file_read", "grep"}),
+        frozenset({"read", "grep"}),
         files_expected=False,
         short_write_posture=True,
         max_rounds=4,
@@ -324,11 +324,11 @@ def test_factory_delivery_idle_not_finalize():
     assert ctrl.delivery_idle_narrow_rounds == 0
     assert ctrl.delivery_idle_recon is False
     for i in range(12):
-        ctrl.record([ToolAttempt(fingerprint=f"r{i}", tool_name="file_read", success=True)])
+        ctrl.record([ToolAttempt(fingerprint=f"r{i}", tool_name="read", success=True)])
     assert ctrl.convergence_action() is Intervention.CONTINUE
 
     files = create_loop_controller(
-        frozenset({"file_read"}),
+        frozenset({"read"}),
         files_expected=True,
         short_write_posture=True,
         max_rounds=4,
@@ -337,7 +337,7 @@ def test_factory_delivery_idle_not_finalize():
     assert files.delivery_idle_narrow_rounds == 0
     assert files.delivery_idle_report is False
     for i in range(12):
-        files.record([ToolAttempt(fingerprint=f"f{i}", tool_name="file_read", success=True)])
+        files.record([ToolAttempt(fingerprint=f"f{i}", tool_name="read", success=True)])
     assert files.convergence_action() is Intervention.CONTINUE
     assert files.delivery_idle_rounds == 0
 
@@ -367,11 +367,11 @@ def test_narrow_for_light_repair_keeps_local_inspect_strips_retrieval():
 
     reg = ToolRegistry()
     for n in (
-        "file_read",
+        "read",
         "grep",
         "handoff",
-        "file_write",
-        "str_replace",
+        "write",
+        "edit",
         "web_search",
         "run",
         "file_list",
@@ -379,8 +379,8 @@ def test_narrow_for_light_repair_keeps_local_inspect_strips_retrieval():
         reg.register(_T(n))
 
     _r, unrestricted = _narrow_for_light_repair(reg, None)
-    assert "file_write" in unrestricted
-    assert "str_replace" in unrestricted
+    assert "write" in unrestricted
+    assert "edit" in unrestricted
     assert "handoff" in unrestricted
     assert "grep" in unrestricted
     assert "run" in unrestricted
@@ -388,15 +388,15 @@ def test_narrow_for_light_repair_keeps_local_inspect_strips_retrieval():
     assert "web_search" not in unrestricted
 
     _r2, narrowed = _narrow_for_light_repair(
-        reg, ["file_read", "grep", "handoff", "file_write", "run"]
+        reg, ["read", "grep", "handoff", "write", "run"]
     )
-    assert "file_write" in narrowed
+    assert "write" in narrowed
     assert "handoff" in narrowed
     assert "grep" in narrowed
     assert "run" in narrowed
     # 缺写盘的显式名单不再补写（真纯丙退役 merge_persist）
-    _r3, no_grant = _narrow_for_light_repair(reg, ["file_read", "grep", "handoff"])
-    assert "file_write" not in no_grant
+    _r3, no_grant = _narrow_for_light_repair(reg, ["read", "grep", "handoff"])
+    assert "write" not in no_grant
     assert "handoff" in no_grant
     assert "grep" in no_grant
 

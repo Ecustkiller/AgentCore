@@ -933,7 +933,7 @@ function ProfileEditor({
             <SettingField
               label="后台任务"
               htmlFor="profile-background"
-              hint="标题、记忆等"
+              hint="标题等"
               hintPlacement="label"
               action={
                 background ? (

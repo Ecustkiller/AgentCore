@@ -53,7 +53,7 @@ const required: RunFrame = {
   agentId: "a1",
   question: "数据库选 Postgres 还是 SQLite？",
   assumption: "暂按 Postgres 继续",
-  escalationKind: "normal",
+  escalationKind: "wait",
 };
 
 afterEach(cleanup);

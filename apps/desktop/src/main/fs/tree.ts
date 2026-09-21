@@ -14,9 +14,44 @@ import { fromErrno, fsErr, locate, realFail, realInside } from "./pathGuard";
 import { ensureReady } from "./roots";
 import { resolveWritable } from "./workspace/write";
 import {
+  AGENTCORE_ROOT,
   shouldSkipSystemWorkspaceEntry,
   shouldSkipWorkspaceEntry,
 } from "./workspaceIgnore";
+
+/** Keep in sync with server `stage_dirs.RULES_DIR_NAME`. */
+const RULES_DIR_NAME = "rules";
+const LEGACY_RULES_DIR_NAME = "规则";
+
+export async function renameLegacyRulesLeaf(
+  workspaceRoot: string,
+): Promise<void> {
+  const src = join(workspaceRoot, AGENTCORE_ROOT, LEGACY_RULES_DIR_NAME);
+  const dst = join(workspaceRoot, AGENTCORE_ROOT, RULES_DIR_NAME);
+  try {
+    await fs.rename(src, dst);
+    return;
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return;
+    if (code !== "EEXIST" && code !== "ENOTEMPTY") return;
+  }
+  try {
+    const kids = await fs.readdir(src, { withFileTypes: true });
+    for (const k of kids) {
+      const from = join(src, k.name);
+      const to = join(dst, k.name);
+      try {
+        await fs.stat(to);
+      } catch {
+        await fs.rename(from, to);
+      }
+    }
+    if ((await fs.readdir(src)).length === 0) await fs.rmdir(src);
+  } catch {
+    // best-effort one-shot; leftover 规则/ is still a visible folder
+  }
+}
 
 /** 扁平收集结果：相对路径 + 可选本机指纹（stat，非全文 hash）。 */
 export type CollectedWorkspaceFile = FsFileRef & {
@@ -72,6 +107,7 @@ export async function collectWorkspaceFiles(
   order: "path" | "recent" = "path",
   opts?: { fingerprint?: boolean; cap?: number },
 ): Promise<{ files: CollectedWorkspaceFile[]; truncated: boolean }> {
+  await renameLegacyRulesLeaf(real);
   const recent = order === "recent";
   const fingerprint = opts?.fingerprint === true;
   const cap = opts?.cap ?? LIST_FILES_CAP;
@@ -164,6 +200,7 @@ export async function listDir(
   await ensureReady();
   const loc = locate(rootId, relPath);
   if ("error" in loc) return loc.error;
+  await renameLegacyRulesLeaf(loc.root.absPath);
   const real = await realInside(loc.root, loc.abs);
   if (!real.ok) return realFail(real);
   try {

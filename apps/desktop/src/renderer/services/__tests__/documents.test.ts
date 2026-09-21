@@ -50,7 +50,7 @@ beforeEach(() => {
 });
 
 describe("documents client", () => {
-  it("listUserRules collects AgentCore/规则 leaves and leftover top-level rules", async () => {
+  it("listUserRules collects AgentCore/rules leaves and leftover top-level rules", async () => {
     vi.mocked(api.get).mockImplementation(async (url: string) => {
       if (url === "/v1/documents") {
         return [
@@ -79,7 +79,7 @@ describe("documents client", () => {
             id: "rules-g",
             kind: "folder",
             role: "general",
-            name: "规则",
+            name: "rules",
             parent_id: "ac-g",
           }),
         ];
@@ -100,7 +100,7 @@ describe("documents client", () => {
             id: "rules-p",
             kind: "folder",
             role: "general",
-            name: "规则",
+            name: "rules",
             parent_id: "ac-p",
             folder_id: "F1",
           }),
@@ -131,7 +131,7 @@ describe("documents client", () => {
     });
   });
 
-  it("listScopeEntries flattens 规则 + 记忆 leaves without role grouping", async () => {
+  it("listScopeEntries flattens rules leaves and skips the 记忆 dir", async () => {
     vi.mocked(api.get).mockImplementation(async (url: string) => {
       if (url === "/v1/documents") {
         return [
@@ -149,7 +149,7 @@ describe("documents client", () => {
             id: "rules",
             kind: "folder",
             role: "general",
-            name: "规则",
+            name: "rules",
             parent_id: "ac",
           }),
           node({
@@ -186,15 +186,12 @@ describe("documents client", () => {
     });
 
     const rows = await listScopeEntries(null);
-    expect(rows.map((r) => r.id).sort()).toEqual(["m1", "r1"]);
-    expect(rows.find((r) => r.id === "r1")).toMatchObject({
+    expect(rows.map((r) => r.id)).toEqual(["r1"]);
+    expect(rows[0]).toMatchObject({
       description: "短硬",
       applyMode: "always",
     });
-    expect(rows.find((r) => r.id === "m1")).toMatchObject({
-      description: "画像摘要",
-      aiMaintained: true,
-    });
+    expect(api.get).not.toHaveBeenCalledWith("/v1/documents?parent_id=mem");
   });
 
   it("getAlwaysQuota maps percent + absolute chars + global/project split", async () => {

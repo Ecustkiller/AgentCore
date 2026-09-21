@@ -95,6 +95,7 @@ class DelegateTool:
         audience=AUDIENCE_CEO_ONLY,
         ceo_wire=CeoWire.ALWAYS,
         catalog_summary="把任务派给队员",
+        blurb="指定角色和任务，让队员平行开工",
     )
 
     def __init__(
@@ -124,10 +125,12 @@ class DelegateTool:
         folder_id: str | None = None,
         permission_axes: PermissionAxes | None = None,
         depth: int = 0,
+        worker_envelope: str = "",
     ) -> None:
         self._llm = llm
         self._sink = sink
         self._system_prompt = system_prompt
+        self._worker_envelope = worker_envelope
         self._user_message = user_message
         self._history = history
         self._tools = tools
@@ -395,7 +398,6 @@ class DelegateTool:
         append_seed = identity.append_seed
         host_plan_for_append = identity.host_plan_for_append
         host_captain_run_id = identity.host_captain_run_id
-        latest_miss_degraded_note = identity.latest_miss_degraded_note
 
         self._calls += 1
         # 冻结本次委派调用的序号：同回合并发的多个 delegate 调用共享 self._calls，若在完成侧
@@ -453,14 +455,11 @@ class DelegateTool:
                 contract_failure=True,
             )
         from agentcore.runtime.delegate.continuation import apply_continuation_tool_merges
-        from agentcore.runtime.runs.research_quality import (
-            batch_declares_review_files,
-        )
 
         # 真纯丙：续派 tools 声明已忽略；merge 保留兼容旧 session 字段（执行层不收窄）。
         await apply_continuation_tool_merges(plan, self)
 
-        batch_includes_review = batch_declares_review_files(tasks_raw)
+        batch_includes_review = False
         from agentcore.runtime.delegate.completion import (
             execution_capability_warning,
         )
@@ -692,8 +691,6 @@ class DelegateTool:
             tails: list[str] = []
             if capability_warning:
                 tails.append(capability_warning)
-            if latest_miss_degraded_note:
-                tails.append(latest_miss_degraded_note)
             if prev_execution_id:
                 tails.append(
                     "【协作图·续接】本回合新开一队、接续上一张图；"
@@ -704,14 +701,8 @@ class DelegateTool:
                     f"【同回合合入】已往本回合协作图追加 "
                     f"{len(added_nodes_for_anchor)} 名成员。"
                 )
-            elif self._depth == 0:
-                # 跨回合接续：latest 解析为主路径（不含图 id）。仅根协调者。
-                tails.append(
-                    "【协作图】本次已开本回合团队。"
-                    '跨回合接续上一张图：delegate 传 append_to_execution_id="latest" '
-                    "→ 新开一队并链回；未命中可接续图时引擎自动新建并写明。"
-                )
-            result.output = f"{result.output}\n\n" + "\n\n".join(tails)
+            if tails:
+                result.output = f"{result.output}\n\n" + "\n\n".join(tails)
         if result.success and execution_id:
             self._last_graph_execution_id = execution_id
             # 同回合二次合入：保留本图节点快照（journal 未命中时仍可作 existing_plan）。

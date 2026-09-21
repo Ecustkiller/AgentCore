@@ -143,6 +143,29 @@ def test_format_trace_incomplete_status_header() -> None:
     assert "Status: ⚠️ 未完成（进行中或仅 kickoff）" in out
 
 
+def test_format_trace_pins_llm_call_prefix_breach() -> None:
+    events = [
+        {
+            "type": "log",
+            "timestamp": "2026-09-20T04:37:48.000000Z",
+            "event": "llm.call",
+            "prefix_breach": "history_rewrite",
+            "tools_changed": False,
+            "cache_hit_tokens": 12,
+            "input_tokens": 6426,
+            "scenario": "chat",
+            "model": "deepseek-v4.1-flash",
+            "finish_reason": "tool_calls",
+            "latency_ms": 2653,
+            "stream": True,
+            "attempt": 1,
+        },
+    ]
+    out = format_trace("t1", events)
+    assert "prefix_breach=history_rewrite" in out
+    assert "cache_hit_tokens=12" in out
+
+
 def test_attach_failure_pack_meta(monkeypatch) -> None:
     from scripts.log_timeline import _attach_failure_pack_meta
 

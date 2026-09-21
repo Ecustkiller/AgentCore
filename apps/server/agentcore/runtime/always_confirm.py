@@ -1,8 +1,7 @@
 """恒确认 (always-confirm) 判据——审批链上任何「跳过」都必须先问这里。
 
-三类调用永远要人点一次确认卡：结构化 ``git push`` / ``git create_pr``
-（[安全权限与治理 §熔断] 普通 push / create_pr 始终弹确认）、以及 ``host(action=install_package)``
-（[工具与能力系统] P2 桶4）。「恒」= 没有任何授权或沙箱姿态
+两类命令永远要人点一次确认卡：``run`` / ``host`` 里的 ``git push`` 与 ``gh pr create``，
+以及 ``host`` 里的 winget / brew / apt install。「恒」= 没有任何授权或沙箱姿态
 可以吃掉这张卡：不吃 ``file_write=session``、不吃开工/委派授权、不吃本轮 turn grant、
 也不吃云端 worker 的逐次卡豁免。
 
@@ -16,28 +15,30 @@ from __future__ import annotations
 
 from typing import Any
 
-_GIT_REMOTE_PUBLISH_SUBCOMMANDS = frozenset({"push", "create_pr"})
-_HOST_INSTALL_ACTION = "install_package"
+from agentcore.runtime.command_policy import (
+    command_text,
+    is_git_publish_command,
+    is_package_install_command,
+)
+
 # 仅按工具名的预筛：这些工具「存在」恒确认形态。当前无生产消费者——它原本服务的
 # 「worker 该不该分到本回合 ApprovalGate」预判已删（gate 一律下传，弹不弹卡由收口点按
 # arguments 判）。再拿它去上游提前吞掉 gate，就是本模块开头警告的那个 bug。
-_ALWAYS_CONFIRM_TOOL_NAMES = frozenset({"git", "host"})
+_ALWAYS_CONFIRM_TOOL_NAMES = frozenset({"run", "host"})
 
 
 def is_git_remote_publish(tool_name: str, arguments: dict[str, Any] | None) -> bool:
-    """True 表示这是结构化 ``git push`` / ``git create_pr``（推远端 = 恒确认）。"""
-    if tool_name != "git":
+    """True 表示 ``run`` / ``host`` 命令是 ``git push`` 或 ``gh pr create``。"""
+    if tool_name not in {"run", "host"}:
         return False
-    sub = str((arguments or {}).get("subcommand") or "").strip().lower()
-    return sub in _GIT_REMOTE_PUBLISH_SUBCOMMANDS
+    return is_git_publish_command(command_text(arguments))
 
 
 def is_host_package_install(tool_name: str, arguments: dict[str, Any] | None) -> bool:
-    """True 表示这是 ``host(action=install_package)``（按参数恒确认）。"""
+    """True 表示 ``host`` 命令是 winget / brew / apt install。"""
     if tool_name != "host":
         return False
-    action = str((arguments or {}).get("action") or "").strip().lower()
-    return action == _HOST_INSTALL_ACTION
+    return is_package_install_command(command_text(arguments))
 
 
 def requires_always_confirm(tool_name: str, arguments: dict[str, Any] | None) -> bool:

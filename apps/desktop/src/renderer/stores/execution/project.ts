@@ -484,9 +484,9 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
       break;
     }
     case "run_escalation": {
-      // 升级实时可见 (非阻塞): a worker flagged a decision/blocker for the CEO — append it
-      // to its run so the node shows a ⚠️ badge and the card raises a live notice the
-      // instant it fires. escalationId → RunEscalation.id（桌面本地；ProjectedTurn 不加 id）。
+      // 升级实时可见: a worker flagged scope/dep (or the engine early-stopped) — append it
+      // to its run so the node shows a mark. Wait 走 escalation_required，不走本帧。
+      // escalationId → RunEscalation.id（桌面本地；ProjectedTurn 不加 id）。
       // source → RunEscalation.source（桌面本地；conformanceFold 勿带出）。
       const run = s.runIndex.get(f.runId);
       if (run)
@@ -494,7 +494,6 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
           id: f.escalationId || null,
           question: f.question,
           assumption: f.assumption,
-          blocking: f.blocking,
           status: "raised",
           answer: null,
           kind: f.escalationKind,
@@ -505,7 +504,7 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
       break;
     }
     case "escalation_required": {
-      // 阻塞式求决策: a worker SUSPENDED on a blocking escalate — append a `pending` card.
+      // Wait: a worker SUSPENDED on escalate(reason=wait) — append a `pending` card.
       // awaiting=ceo → 等主管仲裁（不可答）；缺省 → 经典可答卡。
       const run = s.runIndex.get(f.runId);
       if (run)
@@ -513,7 +512,6 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
           id: f.escalationId,
           question: f.question,
           assumption: f.assumption,
-          blocking: true,
           status: "pending",
           answer: null,
           kind: f.escalationKind,
@@ -828,7 +826,11 @@ export function describeFrame(frame: RunFrame, plan: ExecutionPlan): string {
       return frame.source === "validation_thrash" ||
         frame.source === "ceiling_backstop"
         ? `${role(frame.agentId)} 卡住早停`
-        : `${role(frame.agentId)} 边干边上报`;
+        : frame.escalationKind === "scope"
+          ? `${role(frame.agentId)} 职责偏离`
+          : frame.escalationKind === "dep"
+            ? `${role(frame.agentId)} 缺材料`
+            : `${role(frame.agentId)} 已上报`;
     case "escalation_required":
       return `${role(frame.agentId)} 求决策 · 待你拍板`;
     case "escalation_resolved":

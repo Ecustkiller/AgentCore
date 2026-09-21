@@ -15,7 +15,7 @@ from agentcore.conversation.common import (
     schedule_title_generation,
 )
 from agentcore.conversation.compaction import compact_before_turn
-from agentcore.conversation.history import load_chat_context
+from agentcore.conversation.history import drop_trailing_user_turn, load_chat_context
 from agentcore.conversation.midflight_persist import load_or_create_turn_user_message
 from agentcore.conversation.turn_backend import build_turn_backend
 from agentcore.conversation.turn_persistence import (
@@ -175,7 +175,7 @@ async def stream_chat(
                     user_id=user_id,
                     folder_id=folder_id,
                     sink=sink,
-                    history=history[:-1],
+                    history=drop_trailing_user_turn(history),
                     attachments=resident_attachments,
                     backend=backend,
                     llm_credentials=llm_credentials,
@@ -357,7 +357,7 @@ async def regenerate_chat(
             user_id=user_id,
             folder_id=folder_id,
             sink=sink,
-            history=history[:-1],
+            history=drop_trailing_user_turn(history),
             attachments=None,
             backend=backend,
             llm_credentials=llm_credentials,
@@ -540,7 +540,7 @@ async def resume_chat(
                             selected=response.selected,
                             sink=sink,
                             backend=backend,
-                            history=history[:-1],
+                            history=drop_trailing_user_turn(history),
                             table_id=table_id,
                             llm_credentials=llm_credentials,
                             profile_set=profile_set,
@@ -809,7 +809,7 @@ async def continue_chat(
                         captain_run_id=captain_run_id,
                         sink=sink,
                         backend=backend,
-                        history=history[:-1] if history else None,
+                        history=drop_trailing_user_turn(history) if history else None,
                         table_id=table_id,
                         folder_id=ws_folder_id,
                         llm_credentials=llm_credentials,

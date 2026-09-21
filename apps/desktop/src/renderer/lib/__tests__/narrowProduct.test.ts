@@ -6,10 +6,10 @@ import {
 } from "../narrowProduct";
 
 describe("isNarrowBlockedPath", () => {
-  it("blocks toolbox / whiteboard / hidden settings", () => {
+  it("blocks toolbox / hidden settings", () => {
     expect(isNarrowBlockedPath("/toolbox")).toBe(true);
     expect(isNarrowBlockedPath("/toolbox/manual/intro")).toBe(true);
-    expect(isNarrowBlockedPath("/whiteboard/abc")).toBe(true);
+    expect(isNarrowBlockedPath("/whiteboard/abc")).toBe(false);
     expect(isNarrowBlockedPath("/docs/abc")).toBe(false);
     expect(isNarrowBlockedPath("/tables/abc")).toBe(false);
     expect(isNarrowBlockedPath("/more/shortcuts")).toBe(true);

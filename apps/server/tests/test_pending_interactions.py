@@ -19,7 +19,7 @@ def test_fold_pending_opens_on_required_closes_on_resolved() -> None:
                 "approval_id": "a1",
                 "conversation_id": "c",
                 "tool_call_id": "a1",
-                "tool_name": "file_write",
+                "tool_name": "write",
                 "arguments": {},
             },
         },

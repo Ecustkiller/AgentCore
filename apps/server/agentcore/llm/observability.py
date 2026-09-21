@@ -138,6 +138,19 @@ def log_llm_call(
             extra.update(prefix_probe.as_llm_call_fields())
     except Exception:  # noqa: BLE001 — observability must never break the LLM path
         pass
+    try:
+        from agentcore.core.log_context import get_log_value
+        from agentcore.observability.session_llm_header import record_session_header
+
+        record_session_header(
+            conversation_id=str(get_log_value("conversation_id") or ""),
+            scenario=scenario,
+            model=model,
+            messages=messages,
+            tools=tools,
+        )
+    except Exception:  # noqa: BLE001
+        pass
     logger.info(
         "llm.call",
         scenario=scenario,

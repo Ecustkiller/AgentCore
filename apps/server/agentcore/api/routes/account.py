@@ -8,9 +8,8 @@ Desktop convention (parallel desktop inject):
 - Cloud calls (account ticket **or** access):
   ``POST {baseUrl}/conversations/search|read|chat-context``,
   ``POST {baseUrl}/rules/list|write|read|delete`` (list = always + on_demand bodies for
-  规则目录 / ``consult``),
-  ``POST {baseUrl}/memory/{list,load,save,delete,project-scopes}``.
-- Does **not** open UI conversation / documents / memory-editor CRUD to the
+  规则目录 / ``consult``).
+- Does **not** open UI conversation / documents CRUD to the
   narrow ticket — engine-minimal surface only.
 """
 
@@ -46,7 +45,6 @@ from agentcore.db.repositories import (
     TurnJournalRepository,
 )
 from agentcore.memory.always_quota import AlwaysQuotaExceededError
-from agentcore.memory.document_store import DocumentMemoryStore
 from agentcore.memory.rules_injection import mutate_user_rule
 from agentcore.security.tokens import create_account_token
 
@@ -308,7 +306,7 @@ async def read_account_conversation(
     )
 
 
-# --- Engine-minimal rules / memory (R3b; not the UI documents/memory editors) ---
+# --- Engine-minimal user rules (R3b; not the UI documents editor) ---
 
 
 class AccountRulesListRequest(BaseModel):
@@ -523,7 +521,7 @@ async def write_account_user_rule(
     user: AccountApiUser,
     session: AsyncSession = Depends(get_db),
 ) -> AccountRuleMutationResponse:
-    """Write a named user-rule markdown under .agentcore/规则/."""
+    """Write a named user-rule markdown under .agentcore/rules/."""
     return await _mutate_account_rule(
         user=user,
         session=session,
@@ -542,7 +540,7 @@ async def read_account_user_rule(
     user: AccountApiUser,
     session: AsyncSession = Depends(get_db),
 ) -> AccountRuleMutationResponse:
-    """Read one named user-rule markdown under .agentcore/规则/."""
+    """Read one named user-rule markdown under .agentcore/rules/."""
     return await _mutate_account_rule(
         user=user,
         session=session,
@@ -558,7 +556,7 @@ async def delete_account_user_rule(
     user: AccountApiUser,
     session: AsyncSession = Depends(get_db),
 ) -> AccountRuleMutationResponse:
-    """Delete one named user-rule markdown under .agentcore/规则/."""
+    """Delete one named user-rule markdown under .agentcore/rules/."""
     return await _mutate_account_rule(
         user=user,
         session=session,
@@ -566,343 +564,3 @@ async def delete_account_user_rule(
         name=body.name,
         folder_id=body.folder_id,
     )
-
-
-class AccountMemoryScopeRequest(BaseModel):
-    scope: str | None = None
-
-
-class AccountMemoryFileMeta(BaseModel):
-    path: str
-    version: str
-    # Retrieval summary shown in the 按需目录 ("" = the entry has none yet).
-    description: str = ""
-    # User marked this note wrong (纠错通道) — the sidecar must not inject or consult it.
-    disputed: bool = False
-
-
-class AccountMemoryListResponse(BaseModel):
-    files: list[AccountMemoryFileMeta]
-
-
-@router.post("/memory/list", response_model=AccountMemoryListResponse)
-async def list_account_memory(
-    body: AccountMemoryScopeRequest,
-    user: AccountApiUser,
-    session: AsyncSession = Depends(get_db),
-) -> AccountMemoryListResponse:
-    """List memory notes under one scope (global when ``scope`` is null).
-
-    Carries each note's retrieval ``description`` and its ``disputed`` mark so a sidecar
-    warm builds the same directory — and skips the same user-disputed entries — as an
-    in-process turn. A soft-deleted folder is an empty scope (设定 hibernates with the desk).
-    """
-    if not await _folder_scope_is_live(session, user.user_id, body.scope):
-        return AccountMemoryListResponse(files=[])
-    store = DocumentMemoryStore(session)
-    metas = await store.list(user.user_id, body.scope)
-    return AccountMemoryListResponse(
-        files=[
-            AccountMemoryFileMeta(
-                path=m.path,
-                version=m.version,
-                description=m.description,
-                disputed=m.disputed,
-            )
-            for m in metas
-        ]
-    )
-
-
-class AccountMemoryLoadRequest(BaseModel):
-    path: str
-    scope: str | None = None
-
-
-class AccountMemoryLoadResponse(BaseModel):
-    content: str
-
-
-@router.post("/memory/load", response_model=AccountMemoryLoadResponse)
-async def load_account_memory(
-    body: AccountMemoryLoadRequest,
-    user: AccountApiUser,
-    session: AsyncSession = Depends(get_db),
-) -> AccountMemoryLoadResponse:
-    """Load one memory note body; missing path / hibernating folder → empty string (soft)."""
-    path = (body.path or "").strip()
-    if not path:
-        return AccountMemoryLoadResponse(content="")
-    if not await _folder_scope_is_live(session, user.user_id, body.scope):
-        return AccountMemoryLoadResponse(content="")
-    store = DocumentMemoryStore(session)
-    content = await store.load(user.user_id, path, body.scope)
-    return AccountMemoryLoadResponse(content=content)
-
-
-class AccountMemorySaveRequest(BaseModel):
-    path: str
-    content: str
-    scope: str | None = None
-
-
-class AccountMemoryOkResponse(BaseModel):
-    ok: bool = True
-
-
-@router.post("/memory/save", response_model=AccountMemoryOkResponse)
-async def save_account_memory(
-    body: AccountMemorySaveRequest,
-    user: AccountApiUser,
-    session: AsyncSession = Depends(get_db),
-) -> AccountMemoryOkResponse:
-    """Upsert one memory note (画像/导航/主题/…). Write failures raise HTTP errors."""
-    path = (body.path or "").strip()
-    if not path:
-        raise HTTPException(status_code=422, detail="path required")
-    store = DocumentMemoryStore(session)
-    await store.save(user.user_id, path, body.content, body.scope)
-    return AccountMemoryOkResponse(ok=True)
-
-
-class AccountMemoryDeleteRequest(BaseModel):
-    path: str
-    scope: str | None = None
-
-
-@router.post("/memory/delete", response_model=AccountMemoryOkResponse)
-async def delete_account_memory(
-    body: AccountMemoryDeleteRequest,
-    user: AccountApiUser,
-    session: AsyncSession = Depends(get_db),
-) -> AccountMemoryOkResponse:
-    """Soft-delete one memory note (no-op if missing)."""
-    path = (body.path or "").strip()
-    if not path:
-        raise HTTPException(status_code=422, detail="path required")
-    store = DocumentMemoryStore(session)
-    await store.delete(user.user_id, path, body.scope)
-    return AccountMemoryOkResponse(ok=True)
-
-
-class AccountMemoryProjectScopesResponse(BaseModel):
-    scopes: list[str]
-
-
-@router.post("/memory/project-scopes", response_model=AccountMemoryProjectScopesResponse)
-async def list_account_memory_project_scopes(
-    user: AccountApiUser,
-    session: AsyncSession = Depends(get_db),
-) -> AccountMemoryProjectScopesResponse:
-    """Folder ids that hold a semantic project memory layer."""
-    store = DocumentMemoryStore(session)
-    scopes = await store.project_scopes(user.user_id)
-    return AccountMemoryProjectScopesResponse(scopes=scopes)
-
-
-# --- Consolidation pipeline state (episodes + scope sidecar; not Document-tree) ---
-
-
-class AccountEpisodeAppendRequest(BaseModel):
-    scope: str | None = None
-    conversation_id: str
-    summary: str
-    actions_json: str = ""
-    episode_id: str | None = None
-    created_at: str | None = None
-
-
-class AccountEpisodeRecord(BaseModel):
-    id: str
-    conversation_id: str
-    summary: str
-    created_at: str
-    actions_json: str = ""
-
-
-@router.post("/memory/episodes/append", response_model=AccountEpisodeRecord)
-async def append_account_memory_episode(
-    body: AccountEpisodeAppendRequest,
-    user: AccountApiUser,
-    session: AsyncSession = Depends(get_db),
-) -> AccountEpisodeRecord:
-    """Append one episodic digest into ``memory_episodes``."""
-    from datetime import datetime
-
-    from agentcore.memory.episode_store import DbEpisodeStore
-
-    created: datetime | None = None
-    if body.created_at:
-        try:
-            created = datetime.fromisoformat(body.created_at.replace("Z", "+00:00"))
-        except ValueError:
-            created = None
-    store = DbEpisodeStore(session)
-    rec = await store.append_episode(
-        user.user_id,
-        conversation_id=body.conversation_id,
-        summary=body.summary,
-        scope=body.scope,
-        actions_json=body.actions_json or "",
-        episode_id=body.episode_id,
-        created_at=created,
-    )
-    return AccountEpisodeRecord(
-        id=rec.id,
-        conversation_id=rec.conversation_id,
-        summary=rec.summary,
-        created_at=rec.created_at,
-        actions_json=rec.actions_json,
-    )
-
-
-class AccountEpisodesListResponse(BaseModel):
-    episodes: list[AccountEpisodeRecord]
-
-
-@router.post("/memory/episodes/list-undigested", response_model=AccountEpisodesListResponse)
-async def list_account_undigested_episodes(
-    body: AccountMemoryScopeRequest,
-    user: AccountApiUser,
-    session: AsyncSession = Depends(get_db),
-) -> AccountEpisodesListResponse:
-    from agentcore.memory.episode_store import DbEpisodeStore
-
-    store = DbEpisodeStore(session)
-    rows = await store.list_undigested(user.user_id, scope=body.scope)
-    return AccountEpisodesListResponse(
-        episodes=[
-            AccountEpisodeRecord(
-                id=r.id,
-                conversation_id=r.conversation_id,
-                summary=r.summary,
-                created_at=r.created_at,
-                actions_json=r.actions_json,
-            )
-            for r in rows
-        ]
-    )
-
-
-class AccountEpisodesMarkDigestedRequest(BaseModel):
-    scope: str | None = None
-    episode_ids: list[str] = []
-    consolidated_at: str | None = None
-
-
-@router.post("/memory/episodes/mark-digested", response_model=AccountMemoryOkResponse)
-async def mark_account_episodes_digested(
-    body: AccountEpisodesMarkDigestedRequest,
-    user: AccountApiUser,
-    session: AsyncSession = Depends(get_db),
-) -> AccountMemoryOkResponse:
-    from datetime import UTC, datetime
-
-    from agentcore.memory.episode_store import DbEpisodeStore
-
-    stamp: datetime | None = None
-    if body.consolidated_at:
-        try:
-            stamp = datetime.fromisoformat(body.consolidated_at.replace("Z", "+00:00"))
-            if stamp.tzinfo is None:
-                stamp = stamp.replace(tzinfo=UTC)
-        except ValueError:
-            stamp = None
-    store = DbEpisodeStore(session)
-    await store.mark_digested(
-        user.user_id,
-        list(body.episode_ids or []),
-        scope=body.scope,
-        consolidated_at=stamp,
-    )
-    return AccountMemoryOkResponse(ok=True)
-
-
-class AccountEpisodesPurgeRequest(BaseModel):
-    older_than_days: int = 30
-
-
-class AccountEpisodesPurgeResponse(BaseModel):
-    deleted: int
-
-
-@router.post("/memory/episodes/purge", response_model=AccountEpisodesPurgeResponse)
-async def purge_account_digested_episodes(
-    body: AccountEpisodesPurgeRequest,
-    user: AccountApiUser,
-    session: AsyncSession = Depends(get_db),
-) -> AccountEpisodesPurgeResponse:
-    from agentcore.memory.episode_store import DbEpisodeStore
-
-    store = DbEpisodeStore(session)
-    deleted = await store.purge_digested(
-        older_than_days=body.older_than_days, user_id=user.user_id
-    )
-    return AccountEpisodesPurgeResponse(deleted=deleted)
-
-
-class AccountScopeStateResponse(BaseModel):
-    last_semantic_at: str | None = None
-    explore_workspace_key: str | None = None
-    explore_fingerprint: str | None = None
-    explore_fingerprint_dirty: bool = False
-
-
-@router.post("/memory/scope-state/get", response_model=AccountScopeStateResponse)
-async def get_account_scope_state(
-    body: AccountMemoryScopeRequest,
-    user: AccountApiUser,
-    session: AsyncSession = Depends(get_db),
-) -> AccountScopeStateResponse:
-    from agentcore.memory.episode_store import DbEpisodeStore
-
-    store = DbEpisodeStore(session)
-    meta = await store.load_scope_meta(user.user_id, scope=body.scope)
-    return AccountScopeStateResponse(
-        last_semantic_at=(
-            meta.last_semantic_at.isoformat() if meta.last_semantic_at else None
-        ),
-        explore_workspace_key=meta.explore_workspace_key,
-        explore_fingerprint=meta.explore_fingerprint,
-        explore_fingerprint_dirty=meta.explore_fingerprint_dirty,
-    )
-
-
-class AccountScopeStateSaveRequest(BaseModel):
-    scope: str | None = None
-    last_semantic_at: str | None = None
-    explore_workspace_key: str | None = None
-    explore_fingerprint: str | None = None
-    explore_fingerprint_dirty: bool = False
-
-
-@router.post("/memory/scope-state/save", response_model=AccountMemoryOkResponse)
-async def save_account_scope_state(
-    body: AccountScopeStateSaveRequest,
-    user: AccountApiUser,
-    session: AsyncSession = Depends(get_db),
-) -> AccountMemoryOkResponse:
-    from datetime import UTC, datetime
-
-    from agentcore.memory.episode_store import DbEpisodeStore, ScopeMemoryMeta
-
-    last: datetime | None = None
-    if body.last_semantic_at:
-        try:
-            last = datetime.fromisoformat(body.last_semantic_at.replace("Z", "+00:00"))
-            if last.tzinfo is None:
-                last = last.replace(tzinfo=UTC)
-        except ValueError:
-            last = None
-    store = DbEpisodeStore(session)
-    await store.save_scope_meta(
-        user.user_id,
-        ScopeMemoryMeta(
-            last_semantic_at=last,
-            explore_workspace_key=body.explore_workspace_key,
-            explore_fingerprint=body.explore_fingerprint,
-            explore_fingerprint_dirty=body.explore_fingerprint_dirty,
-        ),
-        scope=body.scope,
-    )
-    return AccountMemoryOkResponse(ok=True)

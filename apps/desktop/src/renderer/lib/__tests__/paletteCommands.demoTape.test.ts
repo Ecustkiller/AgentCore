@@ -64,7 +64,6 @@ describe("paletteCommands narrow restriction", () => {
       forceLightTheme: true,
     });
     expect(cmds.some((c) => c.id === "nav-toolbox")).toBe(false);
-    expect(cmds.some((c) => c.id === "nav-whiteboard")).toBe(false);
     expect(cmds.some((c) => c.id === "nav-conversations")).toBe(true);
     expect(cmds.some((c) => c.id === "theme-dark")).toBe(false);
     expect(cmds.some((c) => c.id === "nav-files")).toBe(true);
@@ -111,17 +110,10 @@ describe("paletteCommands demo tape gate", () => {
 });
 
 describe("paletteCommands · 前往发现性", () => {
-  it("includes 白板 /whiteboard and excludes /explore placeholder", () => {
+  it("excludes 白板 / 文档 / 多维表格 /explore placeholder", () => {
     const cmds = buildPaletteCommands(baseCtx);
-    const board = cmds.find((c) => c.id === "nav-whiteboard");
-    expect(board).toBeTruthy();
-    expect(board?.title).toBe("白板");
-    expect(board?.category).toBe("前往");
-    if (!board) return;
-    expect(commandMatches(board, "baiban")).toBe(true);
-
-    board?.run();
-    expect(baseCtx.navigate).toHaveBeenCalledWith("/whiteboard");
+    expect(cmds.find((c) => c.id === "nav-whiteboard")).toBeUndefined();
+    expect(cmds.some((c) => c.title === "白板")).toBe(false);
 
     expect(cmds.find((c) => c.id === "nav-docs")).toBeUndefined();
     expect(cmds.find((c) => c.id === "nav-tables")).toBeUndefined();
@@ -154,16 +146,28 @@ describe("paletteCommands · 前往发现性", () => {
     expect(baseCtx.navigate).toHaveBeenCalledWith("/toolbox/mine/skills");
   });
 
-  it("不再有独立「工具」前往；搜连接器落到提示词", () => {
+  it("搜 MCP 落到 MCP，搜官方落到官方", () => {
     const cmds = buildPaletteCommands(baseCtx);
     expect(cmds.find((c) => c.id === "nav-tools")).toBeUndefined();
     const guidelines = cmds.find((c) => c.id === "nav-guidelines");
     expect(guidelines).toBeTruthy();
     if (!guidelines) return;
-    expect(commandMatches(guidelines, "连接器")).toBe(true);
-    expect(commandMatches(guidelines, "开场工具")).toBe(true);
-    expect(commandMatches(guidelines, "查阅后启用")).toBe(true);
-    expect(commandMatches(guidelines, "官方")).toBe(true);
+    expect(commandMatches(guidelines, "连接器")).toBe(false);
+    expect(commandMatches(guidelines, "开场工具")).toBe(false);
+    const mcp = cmds.find((c) => c.id === "nav-mcp");
+    expect(mcp).toBeTruthy();
+    if (!mcp) return;
+    expect(commandMatches(mcp, "连接器")).toBe(false);
+    expect(commandMatches(mcp, "MCP")).toBe(true);
+    mcp.run();
+    expect(baseCtx.navigate).toHaveBeenCalledWith("/toolbox/mcp");
+    const official = cmds.find((c) => c.id === "nav-official");
+    expect(official).toBeTruthy();
+    if (!official) return;
+    expect(commandMatches(official, "官方")).toBe(true);
+    expect(commandMatches(official, "开场工具")).toBe(true);
+    official.run();
+    expect(baseCtx.navigate).toHaveBeenCalledWith("/toolbox/official");
   });
 
   it("不再有自动化 / 收件箱 / 工作流命令", () => {

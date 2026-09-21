@@ -419,11 +419,11 @@ async def test_preparse_failure_falls_back(tmp_path: Path):
     assert out[0]["workspace_path"] == "attachments/broken.docx"
     assert not (tmp_path / "attachments" / "broken.docx.md").exists()
 
-    # Prompt steers file_read for office/PDF — not code_execute.
+    # Prompt steers read for office/PDF — not code_execute.
     ctx = await _build_attachment_context(out)
     assert ctx is not None
     assert "[binary / office-pdf]" in ctx
-    assert "file_read" in ctx
+    assert "read" in ctx
     assert "do not default to run" in ctx
     assert "code_execute" not in ctx
     assert "openpyxl" not in ctx

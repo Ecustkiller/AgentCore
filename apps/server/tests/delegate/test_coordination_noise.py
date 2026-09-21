@@ -366,6 +366,7 @@ def test_coordination_tool_schemas_are_short_triggers():
 
     wait_desc = WaitTool().schema.description
     assert "无需处置" in wait_desc
+    assert set(WaitTool().schema.parameters["properties"]) == set()
     assert "可静默" in wait_desc
     assert "请示" in wait_desc
     assert "假装推进" not in wait_desc
@@ -373,21 +374,30 @@ def test_coordination_tool_schemas_are_short_triggers():
 
     cancel = CancelWorkerTool().schema
     assert "终止" in cancel.description
+    assert set(cancel.parameters["properties"]) == {"run_id"}
     run_id = cancel.parameters["properties"]["run_id"]["description"]
     assert "完整 run_id" in run_id
     assert "同时匹配" not in run_id
     assert "不会自动改目标" not in run_id
 
-    resolve_desc = ResolveEscalationTool().schema.description
+    resolve = ResolveEscalationTool().schema
+    resolve_desc = resolve.description
     assert "ask_user" in resolve_desc
-    assert "via_user" in resolve_desc
-    assert "唯一兑现路径" not in resolve_desc
-    assert "过滤器不是墙" not in resolve_desc
+    assert "via_user" not in resolve_desc
+    assert "技术/范围" not in resolve_desc
+    via_user = resolve.parameters["properties"]["via_user"]["description"]
+    assert via_user == "true=已先经 ask_user。"
+    assert "偏好" not in via_user
+    assert "征询" not in via_user
 
-    queue_desc = QueueUserMessageTool(sink=EventSink()).schema.description
+    queue = QueueUserMessageTool(sink=EventSink()).schema
+    queue_desc = queue.description
     assert "无关" in queue_desc
     assert "FIFO" not in queue_desc
     assert "delegate / cancel_worker" not in queue_desc
+    reason = queue.parameters["properties"]["reason"]["description"]
+    assert "用户可见" in reason
+    assert not reason.startswith("可选")
 
 
 def test_inject_footer_does_not_repeat_tool_how():

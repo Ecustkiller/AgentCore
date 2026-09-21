@@ -1,6 +1,6 @@
 """Cloud sandbox Python list is a single file; consumers must read it.
 
-Hand-copied inventories in Dockerfile / consult(run) / docs / data_file_landing
+Hand-copied inventories in Dockerfile / docs / data_file_landing
 drifted (pillow vs Pillow). These tests lock the wiring: the list file is the
 only inventory, and editing a consumer copy in isolation goes red.
 """
@@ -21,9 +21,6 @@ from agentcore.tools.sandbox.cloud_python import (
 
 _REPO = Path(__file__).resolve().parents[3]
 _DOCKERFILE = _REPO / "apps" / "server" / "Dockerfile"
-_RUN_SKILL = (
-    _REPO / "apps" / "server" / "agentcore" / "runtime" / "skills" / "run.py"
-)
 _RUN_TOOL = (
     _REPO / "apps" / "server" / "agentcore" / "tools" / "builtin" / "run.py"
 )
@@ -115,13 +112,10 @@ def test_server_description_is_rendered_from_the_list():
     libs = format_cloud_python_libs()
     for name in load_cloud_python_packages():
         assert name in libs
-    # Schema is location-only; inventory lives on the formatter / consult(run).
+    # Schema is location-only; inventory lives on the formatter.
     assert libs not in run_description("server")
     assert libs not in run_description("local")
     assert libs not in run_description()
-    skill = build_system_skill_registry().get("run")
-    assert skill is not None
-    assert libs not in skill.body
 
 
 def test_dockerfile_installs_from_the_list_file():
@@ -130,12 +124,8 @@ def test_dockerfile_installs_from_the_list_file():
 
 
 def test_run_sources_have_no_inventory_literals():
-    for path, where in (
-        (_RUN_SKILL, "consult(run)"),
-        (_RUN_TOOL, "run.py"),
-    ):
-        src = path.read_text(encoding="utf-8")
-        assert _literal_errors(src, where=where) == []
+    src = _RUN_TOOL.read_text(encoding="utf-8")
+    assert _literal_errors(src, where="run.py") == []
 
 
 def test_data_file_landing_names_no_sandbox_libs():
@@ -173,11 +163,11 @@ def test_inline_dockerfile_list_goes_red():
 
 
 def test_hardcoded_description_list_goes_red():
-    src = _RUN_SKILL.read_text(encoding="utf-8")
-    broken = src.replace("一条 `run`", "一条 `run` python-pptx、pillow")
+    src = _RUN_TOOL.read_text(encoding="utf-8")
+    broken = src.replace("跑命令 / 启服", "跑命令 / 启服 python-pptx、pillow")
     assert broken != src
-    errors = _literal_errors(broken, where="consult(run)")
-    assert errors, "hand-copying names into consult(run) must fail the gate"
+    errors = _literal_errors(broken, where="run.py")
+    assert errors, "hand-copying names into run.py must fail the gate"
 
 
 def test_skill_naming_a_lib_goes_red():

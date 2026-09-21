@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import os
 import re
@@ -35,7 +34,7 @@ from agentcore.core.errors import (
     upstream_rate_limit_error,
 )
 from agentcore.core.logging import get_logger
-from agentcore.core.net import abort_httpx_response, outbound_async_client
+from agentcore.core.net import abort_httpx_response
 from agentcore.core.task_cancel import raise_if_task_cancelled
 from agentcore.llm.errors import (
     apply_locator_context,
@@ -59,6 +58,11 @@ from agentcore.llm.errors import (
     upstream_client_error,
     upstream_error,
     vendor_5xx_product_message,
+)
+from agentcore.llm.http_pool import (
+    acquire_llm_http_client,
+    origin_key,
+    peek_llm_http_client,
 )
 from agentcore.llm.opencode_headers import opencode_client_headers, opencode_session_headers
 from agentcore.llm.provider.call_budget import provider_retry_ceiling
@@ -120,7 +124,7 @@ def _leaf_http_headers(
     base_url: str,
     extra: dict[str, str] | None,
 ) -> dict[str, str]:
-    """Default client headers. OpenCode UA is constant; session is per-request."""
+    """Per-request auth + UA. Session is added separately; do not freeze onto the pool."""
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -151,9 +155,7 @@ _MAX_RETRY_AFTER = MAX_RETRY_AFTER
 _IO_ATTEMPT_CEILING = max(
     _MAX_RETRIES, _RATE_LIMIT_MAX_RETRIES, _CONNECT_MAX_RETRIES, TURN_CONNECT_MAX_RETRIES
 )
-# Unary completions can run 150s+ for long-form writing; streaming read timeout is
-# per-chunk idle, so a generous ceiling avoids false positives on slow generations.
-_REQUEST_TIMEOUT = 300.0
+# Unary / per-chunk idle ceiling is on the origin-pooled client (300s).
 # Thinking models (e.g. DeepSeek V4) burn tokens on reasoning before any tool_calls;
 # keep a floor so the probe is not starved by a tiny completion budget.
 _PROBE_TOOLS_MAX_TOKENS = 256
@@ -505,15 +507,8 @@ class OpenAICompatibleProvider:
                     raise ValidationError(
                         "自定义请求头含有非 ASCII 字符，无法发送。请检查服务商额外 Header。"
                     ) from e
-        self._client = outbound_async_client(
-            base_url=self._base_url,
-            headers=_leaf_http_headers(
-                api_key=self._api_key,
-                base_url=self._base_url,
-                extra=self._extra_headers,
-            ),
-            timeout=httpx.Timeout(_REQUEST_TIMEOUT, connect=10.0),
-        )
+        self._closed = False
+        self._client = acquire_llm_http_client(self._base_url)
         self._cooldown_key = cooldown_key(self._name, self._api_key, self._base_url)
 
     def _cooldown_slot(self, scenario: str) -> str:
@@ -717,18 +712,12 @@ class OpenAICompatibleProvider:
             return False
         new_key = require_http_header_safe_api_key(nxt.api_key)
         new_url = nxt.base_url.rstrip("/")
-        new_client = outbound_async_client(
-            base_url=new_url,
-            headers=_leaf_http_headers(
-                api_key=new_key, base_url=new_url, extra=self._extra_headers
-            ),
-            timeout=httpx.Timeout(_REQUEST_TIMEOUT, connect=10.0),
-        )
-        old = self._client
         from_id = current.id if current is not None else ""
+        old_origin = origin_key(self._base_url)
         self._api_key = new_key
         self._base_url = new_url
-        self._client = new_client
+        if origin_key(new_url) != old_origin:
+            self._client = acquire_llm_http_client(new_url)
         self._cooldown_key = cooldown_key(self._name, self._api_key, self._base_url)
         bind_platform_credential_id(nxt.id)
         logger.info(
@@ -736,8 +725,6 @@ class OpenAICompatibleProvider:
             from_credential_id=from_id,
             to_credential_id=nxt.id,
         )
-        with contextlib.suppress(Exception):
-            await old.aclose()
         return True
 
     def _rate_limit_retry_plan(
@@ -807,8 +794,19 @@ class OpenAICompatibleProvider:
         )
         return wait
 
+    def _auth_headers(self) -> dict[str, str]:
+        return _leaf_http_headers(
+            api_key=self._api_key,
+            base_url=self._base_url,
+            extra=self._extra_headers,
+        )
+
+    def _request_headers(self) -> dict[str, str]:
+        """Auth + billing/session. The pooled client has no tenant secrets."""
+        return {**self._auth_headers(), **_outbound_call_headers(self._base_url)}
+
     def clone(self) -> OpenAICompatibleProvider:
-        """Independent HTTP client with the same credentials (coordination drive ownership)."""
+        """Independent instance (own close flag); HTTP transport is origin-pooled."""
         return OpenAICompatibleProvider(
             name=self._name,
             api_key=self._api_key,
@@ -973,7 +971,7 @@ class OpenAICompatibleProvider:
                     "POST",
                     "/chat/completions",
                     json=payload,
-                    headers=_outbound_call_headers(self._base_url) or None,
+                    headers=self._request_headers() or None,
                 ) as response:
                     in_flight = response
                     body = await response.aread() if response.status_code >= 400 else None
@@ -1722,7 +1720,7 @@ class OpenAICompatibleProvider:
                 response = await self._client.post(
                     "/chat/completions",
                     json=payload,
-                    headers=_outbound_call_headers(self._base_url) or None,
+                    headers=self._request_headers() or None,
                 )
                 body = response.content if response.status_code >= 400 else None
                 if body is not None and self._try_omit_temperature_once(
@@ -1834,7 +1832,7 @@ class OpenAICompatibleProvider:
             response = await self._client.post(
                 "/chat/completions",
                 json=payload,
-                headers=_outbound_call_headers(self._base_url) or None,
+                headers=self._request_headers() or None,
             )
         except httpx.HTTPError as e:
             raise_if_task_cancelled(e)
@@ -1967,7 +1965,7 @@ class OpenAICompatibleProvider:
             response = await self._client.post(
                 "/chat/completions",
                 json=payload,
-                headers=_outbound_call_headers(self._base_url) or None,
+                headers=self._request_headers() or None,
             )
         except (httpx.TimeoutException, httpx.HTTPError):
             return None
@@ -2008,7 +2006,9 @@ class OpenAICompatibleProvider:
         best-effort discovery probe, never a turn-critical path.
         """
         try:
-            response = await self._client.get("/models")
+            response = await self._client.get(
+                "/models", headers=self._auth_headers() or None
+            )
         except httpx.HTTPError as e:
             raise_if_task_cancelled(e)
             raise self._probe_connect_error(e) from e
@@ -2058,8 +2058,8 @@ class OpenAICompatibleProvider:
         return ids
 
     def _ensure_client_open(self) -> None:
-        """Fail fast with a typed non-retryable error when turn teardown closed us."""
-        if self._client.is_closed:
+        """Fail fast when *this instance* was closed. The pooled transport stays up."""
+        if self._closed:
             raise LLMClientClosedError()
 
     @staticmethod
@@ -2070,4 +2070,15 @@ class OpenAICompatibleProvider:
         return exc
 
     async def close(self) -> None:
-        await self._client.aclose()
+        if self._closed:
+            return
+        self._closed = True
+        client = self._client
+        pooled = peek_llm_http_client(self._base_url)
+        if client is pooled:
+            return
+        try:
+            if not client.is_closed:
+                await client.aclose()
+        except Exception:  # noqa: BLE001 — test mock / already-closed transport
+            return

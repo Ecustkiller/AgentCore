@@ -18,7 +18,6 @@ from agentcore.runtime.debate.moderator_common import (
     _sides_block,
     _turns_block,
 )
-from agentcore.runtime.debate.research_dossier import SYNTHESIZER_FILE
 from agentcore.runtime.debate.types import (
     DebateConfig,
     DebateForm,
@@ -105,7 +104,7 @@ async def frame_round(
         dossier = (config.research_dossier_index or "").strip()
         dossier_block = (
             f"\n{dossier}\n"
-            f"定首轮焦点时，可参考汇总文件（如 `{SYNTHESIZER_FILE}`）中标出的分歧作议程线索；"
+            "定首轮焦点时，可参考已注入的材料索引中标出的分歧作议程线索；"
             "索引非全文，勿把文件列表当成已读完的调研正文。\n"
             if dossier
             else ""

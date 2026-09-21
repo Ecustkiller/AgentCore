@@ -734,7 +734,7 @@ def _scope_state(run_id: str) -> RunState:
     return RunState(
         phase=RunPhase.COMPLETED,
         content=run_id,
-        escalations=[{"question": "真问题是X不是Y", "assumption": "暂按X", "kind": "scope"}],
+        escalations=[{"question": "真问题是X不是Y", "assumption": "暂按X", "reason": "scope"}],
     )
 
 
@@ -862,7 +862,7 @@ def _dep_state(run_id: str) -> RunState:
     return RunState(
         phase=RunPhase.COMPLETED,
         content=run_id,
-        escalations=[{"question": "缺错误返回结构才能写测试", "assumption": "暂按X", "kind": "dep"}],
+        escalations=[{"question": "缺错误返回结构才能写测试", "assumption": "暂按X", "reason": "dep"}],
     )
 
 

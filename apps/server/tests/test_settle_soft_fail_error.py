@@ -399,8 +399,8 @@ async def test_settle_refuses_ceo_audience_coordination_echo_on_degraded_rate_li
     """0538c624 shape: empty captain + coordination echo + degraded 429.
 
     Salvage must not copy the host echo into the user bubble. The turn still
-    carries LLM_RATE_LIMIT so the client paints the rate-limit face (not an
-    empty hidden bubble — hideEmptyBubble is cancel-only).
+    carries LLM_RATE_LIMIT so the client paints the rate-limit sentence on the
+    composer banner (an empty shell with no team strip is omitted).
     """
     from agentcore.tools.protocol import TOOL_AUDIENCE_CEO
 

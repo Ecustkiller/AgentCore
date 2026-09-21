@@ -104,7 +104,6 @@ class ByokProviderPreset:
     models: tuple[str, ...]
     base_url_aliases: tuple[str, ...] = ()
     # Exact wire ids omitted from the chat picker after seed ∪ discovery.
-    # Probe ``default_model`` is not a picker source when a preset matches.
     hide_from_picker: tuple[str, ...] = ()
 
 
@@ -199,6 +198,18 @@ def is_opencode_byok_endpoint(base_url: str) -> bool:
     """True for OpenCode Zen or Go canonical endpoints (exact preset match)."""
     preset = match_byok_provider_preset(base_url)
     return preset is not None and preset.id in ("opencode_go", "opencode_zen")
+
+
+def seed_model_for_base_url(base_url: str) -> str:
+    """Preset default model for this endpoint, or empty when unmatched/custom.
+
+    Used to seed the first「模型组合」on provider create. Not a user-facing field
+    and not a connectivity-test model.
+    """
+    preset = match_byok_provider_preset(base_url)
+    if preset is None:
+        return ""
+    return (preset.default_model or "").strip()
 
 
 def preset_models_for_base_url(base_url: str) -> tuple[str, ...]:

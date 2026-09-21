@@ -191,35 +191,6 @@ def _single_agent_tool() -> list[SSEEvent]:
         message_end(FinishReason.END_TURN, input_tokens=1500, output_tokens=200, cost=_COST),
     ]
 
-def _single_agent_consult_memory() -> list[SSEEvent]:
-    """单聊：CEO 翻开一条记忆主题笔记 (记忆文件夹化 §六 · consult_memory 渐进披露 可视化)。系统
-    提示词的「记忆主题目录」列主题名＋一行摘要；CEO 判断「部署流程」与当前任务相关 → 调
-    ``consult_memory(name=部署流程)`` 把该主题笔记**全文**拉回（``tool_use_end`` 携 ``display.topic``
-    + ``result`` 正文），据此作答。consult_memory 是 CEO 召回原语、**不在** ORCHESTRATION_TOOLS
-    丢弃集（那只含 delegate/debate），故它照常落一个 ``tool`` 步——三端 process fold + oracle 据
-    ``display.topic`` 渲染成「查阅记忆：<主题>」卡片 + 可展开全文（镜像 consult_skill 的查阅卡）。"""
-    note = (
-        "## 部署流程\n"
-        "- 前端：pnpm dev 起桌面壳\n"
-        "- 服务端：uv run python -m agentcore\n"
-        "- 数据库：本地 Postgres，迁移 alembic upgrade head\n"
-    )
-    return [
-        message_start("m1", conversation_id=_CONV),
-        reasoning_delta("这事和部署有关，先翻一下记忆里的部署流程。"),
-        tool_use_start("tc1", "consult_memory", {"name": "部署流程"}),
-        tool_use_end(
-            "tc1",
-            "consult_memory",
-            success=True,
-            output=note,
-            display={"topic": "部署流程"},
-        ),
-        content_delta("按你记录的部署流程，"),
-        content_delta("先 pnpm dev 起壳，再 uv run 起服务端即可。"),
-        message_end(FinishReason.END_TURN, input_tokens=1400, output_tokens=180, cost=_COST),
-    ]
-
 def _single_agent_error() -> list[SSEEvent]:
     return [
         message_start("m1", conversation_id=_CONV),
@@ -277,7 +248,7 @@ def _single_agent_tool_channel_redirect() -> list[SSEEvent]:
             output=(
                 "打开源码再正则扫描请用 grep（检测到：re.findall(）。"
                 "在工作区搜符号、字符串或计数请用 grep；"
-                "看命中正文用 file_read。解析表格、改文件、对内存数据跑计算仍用 run。"
+                "看命中正文用 read。解析表格、改文件、对内存数据跑计算仍用 run。"
             ),
             failure=tool_failure_fields(code="source_grep_redirect"),
         ),
@@ -816,7 +787,6 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         "经典+steer 全链：user_interjection received→injected（DURABLE；经典终态）→ 续流单聊",
         _single_agent_user_interjection_steer,
     ),
-    "single_agent_consult_memory": ("单聊：CEO 翻开记忆主题笔记（consult_memory → 查阅记忆卡片 + 全文）", _single_agent_consult_memory),
     "single_agent_cancelled": (
         "单聊：用户取消（message_end finish_reason=cancelled → status=cancelled，半截正文保留）",
         _single_agent_cancelled,

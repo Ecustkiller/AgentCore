@@ -58,7 +58,7 @@ def _accepted_row(path: str, *, kind: str = "", derived_from: str = "") -> dict:
 
 
 async def test_export_tools_self_report_product_with_source_lineage(tmp_path: Path):
-    """导出工具必须自报它真正落的盘 + 源文件（``file_write`` 那套自报契约）。"""
+    """导出工具必须自报它真正落的盘 + 源文件（``write`` 那套自报契约）。"""
     (tmp_path / "报告.md").write_text("# 标题\n\n正文\n", encoding="utf-8")
 
     docx = await MdExportTool().execute(
@@ -92,7 +92,7 @@ async def test_word_request_user_facing_location_points_at_docx(tmp_path: Path):
     ctx = _ctx(tmp_path)
     md = "抚养费起诉状-昝雯.md"
     written = await FileWriteTool().execute(
-        {"path": md, "content": "# 民事起诉状\n\n正文\n"}, ctx
+        {"file_path": md, "content": "# 民事起诉状\n\n正文\n"}, ctx
     )
     assert written.success is True
     exported = await MdExportTool().execute({"path": md, "format": "docx"}, ctx)

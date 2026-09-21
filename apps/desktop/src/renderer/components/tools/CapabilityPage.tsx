@@ -10,7 +10,7 @@ export function CapabilityPage({
   fill = false,
   children,
 }: {
-  /** 填满宿主高度（市场货架）。 */
+  /** 填满宿主高度（市场深页）。 */
   fill?: boolean;
   children: (data: Capabilities) => ReactNode;
 }) {

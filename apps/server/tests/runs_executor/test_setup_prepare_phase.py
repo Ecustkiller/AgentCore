@@ -83,6 +83,7 @@ async def test_target_desktop_phase_emitted_when_folder_set(monkeypatch):
             tool_ctx=kwargs["base_tool_context"],
             worker_tools=kwargs["worker_tools"],
             system_prompt=kwargs["env_system_prompt"],
+            worker_envelope="",
             target_folder_id=kwargs["target_folder_id"],
         )
 
@@ -167,8 +168,8 @@ def _pending_write_transcript() -> list[LLMMessage]:
                 ToolCall(
                     id="fw",
                     function=ToolCallFunction(
-                        name="file_write",
-                        arguments='{"path":"a.md","content":"hi"}',
+                        name="write",
+                        arguments='{"file_path":"a.md","content":"hi"}',
                     ),
                 )
             ],

@@ -193,18 +193,64 @@ async def _summarize(
     pay that wait twice (once staring at nothing, once on the retry that no longer
     fits). See ``llm.provider.call_budget``.
     """
-    system = compact_system_prompt()
-    request = build_selected_request(
-        select_call("compaction", model),
-        [
-            LLMMessage(role="system", content=system),
-            LLMMessage(
-                role="user",
-                content=_render_fold(old_summary, messages, file_ledger=file_ledger),
-            ),
-        ],
-        stream=False,
-    )
+    from agentcore.observability.session_llm_header import hydrate_session_header
+    from agentcore.runtime.resolve.prompt.envelope import TURN_ENVELOPE_FENCE
+
+    header = await hydrate_session_header(conversation_id)
+    if header is not None and header.tools:
+        history_msgs: list[LLMMessage] = []
+        for m in messages:
+            if m.role not in ("user", "assistant"):
+                continue
+            body = (m.content or "").strip()
+            if body and m.role == "user":
+                history_msgs.append(LLMMessage(role="user", content=body))
+            elif body and m.role == "assistant":
+                history_msgs.append(LLMMessage(role="assistant", content=body))
+            elif m.role == "assistant":
+                from agentcore.conversation.failure_visible import export_visible_text
+
+                fail = export_visible_text(m)
+                if fail:
+                    history_msgs.append(
+                        LLMMessage(role="assistant", content=f"（失败）{fail}")
+                    )
+        prior = old_summary.strip() or "（无，这是本对话的首次压缩）"
+        ledger = file_ledger.strip()
+        files = (
+            f"\n\n# 本批涉及的文件（journal 权威路径，必须并入「涉及的文件与标识符」）\n{ledger}"
+            if ledger
+            else ""
+        )
+        tail = (
+            f"{TURN_ENVELOPE_FENCE}\n{compact_system_prompt()}\n\n"
+            f"# 已有滚动摘要\n{prior}{files}\n\n"
+            "较早对话已在上面。只输出更新后的滚动摘要正文。"
+        )
+        req_messages = [
+            LLMMessage(role="system", content=header.system),
+            *history_msgs,
+            LLMMessage(role="user", content=tail),
+        ]
+        request = build_selected_request(
+            select_call("compaction", header.model or model),
+            req_messages,
+            tools=list(header.tools),
+            tool_choice="none",
+            stream=False,
+        )
+    else:
+        request = build_selected_request(
+            select_call("compaction", model),
+            [
+                LLMMessage(role="system", content=compact_system_prompt()),
+                LLMMessage(
+                    role="user",
+                    content=_render_fold(old_summary, messages, file_ledger=file_ledger),
+                ),
+            ],
+            stream=False,
+        )
     try:
         response = await complete_within_budget(
             provider,

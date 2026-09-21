@@ -1,6 +1,6 @@
 {
   "name": "multi_agent_cross_turn_append",
-  "description": "跨回合协作图续接：m1 建图完成 → m2 新 execution_id + prev_execution_id=exec1 → 追加批收口；进度分母只含本图",
+  "description": "跨回合协作图续接：m1 建图完成 → m2 同人续派新 execution_id + prev_execution_id=exec1 → 追加批收口；进度分母只含本图",
   "events": [
     {
       "type": "message_start",
@@ -231,7 +231,7 @@
     {
       "type": "content_delta",
       "payload": {
-        "delta": "再往上一张图加一位撰写员。"
+        "delta": "按上一轮分析把文稿写出来。"
       },
       "timestamp": "2026-01-01T00:00:02.011Z"
     },
@@ -244,10 +244,10 @@
           "tasks": [
             {
               "role": "撰写员",
-              "task": "撰写文稿"
+              "task": "撰写文稿",
+              "continue_from_run_id": "r2"
             }
           ],
-          "append_to_execution_id": "exec1",
           "coordinate": false
         }
       },
@@ -384,13 +384,13 @@
     "finishReason": "end_turn",
     "outcome": "ok",
     "error": null,
-    "content": "再往上一张图加一位撰写员。 已新开撰写队，接续上一张图。",
+    "content": "按上一轮分析把文稿写出来。 已新开撰写队，接续上一张图。",
     "reasoning": "",
     "captainContext": [],
     "process": [
       {
         "kind": "content",
-        "text": "再往上一张图加一位撰写员。"
+        "text": "按上一轮分析把文稿写出来。"
       },
       {
         "kind": "team",

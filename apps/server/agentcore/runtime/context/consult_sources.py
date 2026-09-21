@@ -1,18 +1,16 @@
-"""Consultable adapters + merge for the unified ``consult`` tool (步 1 · 按需三合一).
+"""Consultable adapters + merge for the unified ``consult`` tool.
 
-Four sources (skill / on-demand tool / rule / memory) each implement :class:`Consultable`.
+Three sources (skill / on-demand tool / rule) each implement listing + fetch.
 :class:`MergedConsultSource` is the **single** source shared by prompt ``<按需目录>``
 and tool ``fetch_by_name`` — directory listing and name resolution cannot drift.
 
-On-demand **tools** ride this directory without sharing a Tool base class: they stay
-on the registry (execute / catalog / permission axes). The model catalog only lists
-tools whose HOW lives in consult (host / browser); schemas are already on the
-opening FC table. Namespace priority on collision: skill → tool → rule → memory.
+Namespace priority on collision: skill → tool → rule.
 Shadowed names log ``consult.name_shadowed``.
 """
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -24,7 +22,6 @@ from agentcore.memory.rules_injection import (
     lookup_on_demand_rule_body_from_cloud,
     rule_consult_name,
 )
-from agentcore.memory.store import MemoryStore
 from agentcore.runtime.context.consultable import ConsultDirectoryEntry
 from agentcore.runtime.skills.product_help import (
     PRODUCT_HELP_NAME,
@@ -36,13 +33,12 @@ from agentcore.runtime.skills.registry import SkillRegistry
 logger = get_logger(__name__)
 
 # Fixed resolve order (winner first). Do not reorder without a product decision.
-_SOURCE_PRIORITY: tuple[str, ...] = ("skill", "tool", "rule", "memory")
+_SOURCE_PRIORITY: tuple[str, ...] = ("skill", "tool", "rule")
 ConsultOrigin = Literal["system", "user"]
 _ORIGIN_BY_KIND: dict[str, ConsultOrigin] = {
     "skill": "system",
     "tool": "system",
     "rule": "user",
-    "memory": "user",
 }
 
 
@@ -108,7 +104,7 @@ class ToolConsultSource:
     """HOW-bearing assembled tools: directory row + consult body, never a gate.
 
     ``registry`` is the live CEO/worker toolset for this turn. Listing only includes
-    tools that are assembled **and** have a consult HOW (host / browser). MCP and
+    tools that are assembled **and** have a consult HOW (none today). MCP and
     other on-demand names stay on the FC table but off this catalog.
     """
 
@@ -185,22 +181,6 @@ class ToolConsultSource:
 
 
 @dataclass
-class MemoryConsultSource:
-    """AI topic notes are not consultable. Store is unused on the read path."""
-
-    store: MemoryStore
-    folder_id: str | None = None
-
-    async def list_directory(self, user_id: str) -> Sequence[ConsultDirectoryEntry]:
-        del user_id
-        return ()
-
-    async def fetch_by_name(self, user_id: str, name: str) -> str | None:
-        del user_id, name
-        return None
-
-
-@dataclass
 class RuleConsultSource:
     """On-demand user rules; nearest-folder-then-global resolve.
 
@@ -260,30 +240,16 @@ class RuleConsultSource:
     async def _load_named(
         repo: DocumentRepository, user_id: str, folder_id: str | None, key: str
     ) -> str | None:
-        from agentcore.documents.frontmatter import offers_tools_from_content
-        from agentcore.memory.rules_injection import _skip_always_consult
-
         for doc in await repo.list_on_demand_user_rules(user_id, folder_id):
             if rule_consult_name(doc.name) == key:
                 body = doc.content or ""
                 return body if body.strip() else None
-        for doc in await repo.list_injectable_rules(
-            user_id, folder_id, ai_maintained=False
-        ):
-            if _skip_always_consult(doc.name):
-                continue
-            if rule_consult_name(doc.name) != key:
-                continue
-            body = doc.content or ""
-            if not offers_tools_from_content(body):
-                continue
-            return body if body.strip() else None
         return None
 
 
 @dataclass
 class MergedConsultSource:
-    """Skill → tool → rule → memory merge; prompt directory and fetch share this instance.
+    """Skill → tool → rule merge; prompt directory and fetch share this instance.
 
     Ticketed rule listing and body lookup both read the prepare snapshot — same
     payload, not a live cloud list on fetch.
@@ -292,7 +258,6 @@ class MergedConsultSource:
     skill: SkillConsultSource | None = None
     tool: ToolConsultSource | None = None
     rule: RuleConsultSource | None = None
-    memory: MemoryConsultSource | None = None
 
     def _iters(self) -> list[tuple[str, Any]]:
         out: list[tuple[str, Any]] = []
@@ -303,10 +268,12 @@ class MergedConsultSource:
         return out
 
     async def list_directory(self, user_id: str) -> Sequence[ConsultDirectoryEntry]:
+        pairs = self._iters()
+        listed = await asyncio.gather(*(src.list_directory(user_id) for _, src in pairs))
         ordered: list[ConsultDirectoryEntry] = []
         winners: dict[str, str] = {}
-        for kind, src in self._iters():
-            for entry in await src.list_directory(user_id):
+        for (kind, _), entries in zip(pairs, listed, strict=True):
+            for entry in entries:
                 if entry.name in winners:
                     logger.warning(
                         "consult.name_shadowed",
@@ -338,7 +305,7 @@ class MergedConsultSource:
         raw = name.strip()
         if not raw:
             return None
-        # First hit wins (priority order). Fine kind (skill/tool/rule/memory) is
+        # First hit wins (priority order). Fine kind (skill/tool/rule) is
         # logged here — it must not reach the model or ``display``. Display only
         # gets two-bucket ``origin`` (system | user), computed at this same site.
         for kind, src in self._iters():
@@ -346,10 +313,8 @@ class MergedConsultSource:
             if body is not None:
                 origin = _ORIGIN_BY_KIND[kind]
                 logger.info("consult.hit", name=raw, kind=kind, origin=origin)
-                if self.tool is not None:
-                    body = _apply_consult_tool_offers(
-                        body, kind=kind, name=raw, registry=self.tool.registry
-                    )
+                if kind == "rule":
+                    body = _strip_rule_consult_frontmatter(body)
                 return ConsultHit(body=body, origin=origin)
         return None
 
@@ -360,7 +325,7 @@ def expand_skill_tool_names(
     """Copy a merged source with extra names on the skill filter (nested ``delegate``).
 
     Does not mutate the original — leaf workers share the prepare-time source.
-    Rule / memory / on-demand-tool slices stay as-is.
+    Rule / on-demand-tool slices stay as-is.
     """
     skill = source.skill
     if skill is None or not extra_tools:
@@ -373,7 +338,6 @@ def expand_skill_tool_names(
         ),
         tool=source.tool,
         rule=source.rule,
-        memory=source.memory,
     )
 
 
@@ -381,7 +345,7 @@ def build_merged_consult_source(
     *,
     skill_registry: SkillRegistry | None,
     tool_names: Collection[str],
-    memory_store: MemoryStore | None,
+    memory_store: object | None,
     folder_id: str | None,
     include_rules: bool = True,
     skill_audience: str | None = None,
@@ -389,6 +353,7 @@ def build_merged_consult_source(
     skip_rule_names: Collection[str] | None = None,
 ) -> MergedConsultSource:
     """Assemble the turn's unified consult source (CEO or worker)."""
+    del memory_store
     skill = (
         SkillConsultSource(
             registry=skill_registry,
@@ -403,11 +368,6 @@ def build_merged_consult_source(
         if tool_registry is not None
         else None
     )
-    memory = (
-        MemoryConsultSource(store=memory_store, folder_id=folder_id)
-        if memory_store is not None
-        else None
-    )
     rule = (
         RuleConsultSource(
             folder_id=folder_id, skip_names=skip_rule_names or frozenset()
@@ -415,7 +375,7 @@ def build_merged_consult_source(
         if include_rules
         else None
     )
-    return MergedConsultSource(skill=skill, tool=tool, rule=rule, memory=memory)
+    return MergedConsultSource(skill=skill, tool=tool, rule=rule)
 
 
 async def build_merged_consult_source_for_user(
@@ -423,7 +383,7 @@ async def build_merged_consult_source_for_user(
     user_id: str,
     skill_registry: SkillRegistry | None,
     tool_names: Collection[str],
-    memory_store: MemoryStore | None,
+    memory_store: object | None,
     folder_id: str | None,
     include_rules: bool = True,
     skill_audience: str | None = None,
@@ -442,38 +402,9 @@ async def build_merged_consult_source_for_user(
     )
 
 
-def _apply_consult_tool_offers(
-    body: str, *, kind: str, name: str, registry: object
-) -> str:
-    """Append an on-table note for skill/rule ``offers_tools``. Does not promote."""
-    from agentcore.documents.frontmatter import (
-        FrontmatterError,
-        offers_tools_from_content,
-        parse_entry_frontmatter,
-        strip_entry_frontmatter,
-    )
-    from agentcore.tools.on_demand import (
-        format_enabled_tools_note,
-        offer_bound_tools,
-        offer_skill_promoted_tools,
-    )
+def _strip_rule_consult_frontmatter(body: str) -> str:
+    """Peel entry frontmatter so consult does not leak apply / description keys."""
+    from agentcore.documents.frontmatter import strip_entry_frontmatter
 
-    enabled: list[str] = []
-    if kind == "skill":
-        enabled.extend(offer_skill_promoted_tools(registry, name))
-    elif kind == "rule":
-        enabled.extend(offer_bound_tools(registry, offers_tools_from_content(body)))
-        parsed = parse_entry_frontmatter(body)
-        stripped = strip_entry_frontmatter(body)
-        if stripped is not None:
-            if (
-                not isinstance(parsed, FrontmatterError)
-                and parsed.apply == "always"
-                and parsed.offers_tools
-            ):
-                body = "已在常驻设定中。"
-            else:
-                body = stripped
-    if enabled:
-        body = body.rstrip() + format_enabled_tools_note(enabled)
-    return body
+    stripped = strip_entry_frontmatter(body)
+    return body if stripped is None else stripped

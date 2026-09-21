@@ -55,8 +55,8 @@ export function isEmptyCancelledAssistant(
   if (!message || message.role !== "assistant") {
     return false;
   }
-  return arbitrateTurnOutcome(turnOutcomeInputFromMessage(message))
-    .hideEmptyBubble;
+  const outcome = arbitrateTurnOutcome(turnOutcomeInputFromMessage(message));
+  return outcome.hideEmptyBubble && outcome.kind === "ok";
 }
 
 export const COMPOSER_CONTINUE_PLACEHOLDER = "可输入「继续」接着说…";

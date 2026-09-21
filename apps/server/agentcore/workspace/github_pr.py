@@ -18,6 +18,7 @@ from urllib.parse import quote, unquote, urlparse
 import httpx
 
 from agentcore.core.logging import get_logger
+from agentcore.core.spawn import spawn_process
 
 logger = get_logger(__name__)
 
@@ -118,20 +119,16 @@ async def _gh_auth_token() -> str | None:
     if not shutil.which("gh"):
         return None
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "gh",
-            "auth",
-            "token",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        result = await spawn_process(
+            ["gh", "auth", "token"],
             env={**os.environ, "GH_PROMPT_DISABLED": "1"},
+            timeout=8.0,
         )
-        stdout_b, _ = await asyncio.wait_for(proc.communicate(), timeout=8.0)
     except (TimeoutError, OSError, asyncio.CancelledError):
         return None
-    if (proc.returncode or 0) != 0:
+    if result.returncode != 0:
         return None
-    token = stdout_b.decode("utf-8", errors="replace").strip()
+    token = result.stdout.decode("utf-8", errors="replace").strip()
     return token or None
 
 

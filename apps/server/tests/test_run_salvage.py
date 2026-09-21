@@ -25,7 +25,7 @@ def _escalate_msg(call_id: str, question: str) -> LLMMessage:
                     name="escalate",
                     arguments=(
                         f'{{"question": "{question}", '
-                        f'"assumption": "暂用默认", "blocking": false}}'
+                        f'"assumption": "暂用默认", "reason": "scope"}}'
                     ),
                 ),
             )

@@ -74,9 +74,9 @@ class SectionOrder(IntEnum):
     CEO_VISUALIZATION = 700
     # Per-turn environment facts (location / desktop / capabilities). Volatile with
     # binding changes. Was 250 (in front of the ~19k CEO core); moved 2026-08-19 —
-    # see class docstring Exception. Worker compose and the CEO turn envelope add
-    # this key; it is not baked into ``assemble_system_prompt``. CEO ``role: system``
-    # stays frozen (constitution / identity / catalog).
+    # see class docstring Exception. Worker and CEO envelopes add this key; it is
+    # not baked into ``assemble_system_prompt``. ``role: system`` stays frozen
+    # (constitution / catalog).
     WORKSPACE_FACTS = 750
     # Retired as a separate XML tag 2026-09-01: CEO file index is the last
     # subsection of ``<工作区>`` (attached into WORKSPACE_FACTS). Slot kept so

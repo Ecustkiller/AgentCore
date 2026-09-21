@@ -1,6 +1,6 @@
 """跨回合协作图续接 conformance 向量。
 
-第一回合建图完成 → 第二回合 ``append_to_execution_id`` → **新** ``execution_id`` +
+第一回合建图完成 → 第二回合同人续派 → **新** ``execution_id`` +
 ``prev_execution_id`` 链到旧图（不再 divert / ``graph_append`` / 同 eid merge）。
 消费端契约：(a) 新回合 ``run_plan`` 锚当前 message，带 ``prev_execution_id``；
 (b) 进度分母只含本图节点；(c) 旧 ``graph_append`` / ``host_message_id`` 生长帧不再出现。
@@ -65,7 +65,7 @@ def _worker_run(
 
 
 def _multi_agent_cross_turn_append() -> list[SSEEvent]:
-    """跨回合续接：m1 建图完成 → m2 新图 + prev=exec1 → 新批完成。"""
+    """跨回合续接：m1 建图完成 → m2 同人续派新图 + prev=exec1 → 新批完成。"""
     batch1_agents = [
         _captain_agent(_CAPTAIN_1),
         {"id": "w1", "role": "研究员", "thinking": True},
@@ -133,13 +133,18 @@ def _multi_agent_cross_turn_append() -> list[SSEEvent]:
         message_end(FinishReason.END_TURN, input_tokens=4000, output_tokens=700, cost=_COST),
         # ── 回合 2：新图 + prev 链 ──
         message_start("m2", conversation_id=_CONV),
-        content_delta("再往上一张图加一位撰写员。"),
+        content_delta("按上一轮分析把文稿写出来。"),
         tool_use_start(
             "dc2",
             "delegate",
             {
-                "tasks": [{"role": "撰写员", "task": "撰写文稿"}],
-                "append_to_execution_id": "exec1",
+                "tasks": [
+                    {
+                        "role": "撰写员",
+                        "task": "撰写文稿",
+                        "continue_from_run_id": "r2",
+                    }
+                ],
                 "coordinate": False,
             },
         ),

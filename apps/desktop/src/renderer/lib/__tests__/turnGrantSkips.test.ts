@@ -13,13 +13,13 @@ describe("turnGrantScope", () => {
   it("approve_always 只覆盖卡上那个工具", () => {
     const scope = turnGrantScope("approve_always", "terminal");
     expect(scope?.has("terminal")).toBe(true);
-    expect(scope?.has("file_write")).toBe(false);
+    expect(scope?.has("write")).toBe(false);
   });
 
   it("approve_always_files 覆盖整个文件改动类（含 git 写入）", () => {
-    const scope = turnGrantScope("approve_always_files", "file_write");
-    expect(scope?.has("file_write")).toBe(true);
-    expect(scope?.has("str_replace")).toBe(true);
+    const scope = turnGrantScope("approve_always_files", "write");
+    expect(scope?.has("write")).toBe(true);
+    expect(scope?.has("edit")).toBe(true);
     expect(scope?.has("git")).toBe(true);
     expect(scope?.has("code_execute")).toBe(false);
   });

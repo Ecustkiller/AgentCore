@@ -11,8 +11,8 @@
   "checks": {
     "single": [
       { "name": "FinishReason" },
-      { "name": "ToolCalled", "args": { "tool": "file_read" } },
-      { "name": "ToolArgsValid", "args": { "tool": "file_read", "required": ["path"] } }
+      { "name": "ToolCalled", "args": { "tool": "read" } },
+      { "name": "ToolArgsValid", "args": { "tool": "read", "required": ["file_path"] } }
     ],
     "team": [{ "name": "Delegated" }]
   },

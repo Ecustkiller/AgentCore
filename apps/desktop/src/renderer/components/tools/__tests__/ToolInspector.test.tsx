@@ -11,6 +11,7 @@ const tool: CapabilityTool = {
   face: "web",
   resident: true,
   summary: "联网检索",
+  blurb: "按关键词在网上找资料和链接",
   description:
     "联网检索：给出查询词，返回带出处的结果摘要。一次只搜 2–3 个核心词。",
   parameters: {

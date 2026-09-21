@@ -109,9 +109,9 @@ async def run_chat_pipeline(
     turn's selected row ids (not stored on the message).
 
     ``x_client_platform`` is the raw ``X-Client-Platform`` header (desktop / mobile-web /
-    …). Gates ``ask_user``'s ``action=bind_local_folder`` advertisement and the
-    ``<工作区>`` desktop-online line — cloud web/mobile must not see the bind
-    action. ``None`` / absent / unknown → fail-closed via ``resolve_channel_profile``
+    …). Gates the ``<工作区>`` desktop-online line. Open/bind folder is human-side
+    (Composer / 交付卡芯片)，not an ``ask_user`` option action. ``None`` / absent /
+    unknown → fail-closed via ``resolve_channel_profile``
     (``desktop_online=False``). Auth ``parse_client_platform`` likewise fail-closes
     (raises) on missing / unknown — it does not invent a desktop JWT aud.
 
@@ -288,6 +288,7 @@ async def run_chat_pipeline(
             prepare_account_folder_id.reset(prepare_folder_token)
 
         chat_system_prompt = assembled.chat_system_prompt
+        chat_system_in_history = assembled.chat_system_in_history
         chat_envelope = assembled.chat_envelope
 
         # --- Phase 3: Execute ---
@@ -305,6 +306,7 @@ async def run_chat_pipeline(
                 model_profile=turn_model,
                 history_len=len(history),
                 turn_envelope=chat_envelope,
+                in_history_system=chat_system_in_history,
             ).to_fact()
         )
 
@@ -341,6 +343,8 @@ async def run_chat_pipeline(
             turn_evidence_ledger=evidence_ledger,
             native_image_parts=prepared.native_image_parts,
             chat_envelope=chat_envelope,
+            chat_system_in_history=chat_system_in_history,
+            opening_tool_defs=assembled.chat_tool_defs,
         )
         captain_state = await run_captain(captain_spec)
 

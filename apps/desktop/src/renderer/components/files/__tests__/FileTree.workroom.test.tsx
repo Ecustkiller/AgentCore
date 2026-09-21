@@ -3,13 +3,7 @@
 import { FileTree } from "@/components/files/FileTree";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { FileNode, FileSource } from "@/lib/fileSource";
-import {
-  act,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/files/FileTreeRowMenu", () => ({
@@ -83,7 +77,7 @@ beforeEach(() => {
 });
 
 describe("FileTree .agentcore 抽屉", () => {
-  it("展开后露出工作稿而非 文档/ 壳，并隐藏迁移归档", async () => {
+  it("展开后露出盘上 文档/ 子项，不摊平工作稿", async () => {
     const src = eagerSource([
       { path: "报告.md", name: "报告.md", isDir: false },
       { path: "AgentCore", name: "AgentCore", isDir: true },
@@ -107,9 +101,12 @@ describe("FileTree .agentcore 抽屉", () => {
     expect(screen.queryByText("工作稿")).toBeNull();
 
     fireEvent.click(screen.getByText(".agentcore"));
+    expect(await screen.findByText("文档")).toBeTruthy();
+    expect(screen.queryByText("工作稿")).toBeNull();
+
+    fireEvent.click(screen.getByText("文档"));
     expect(await screen.findByText("工作稿")).toBeTruthy();
-    expect(screen.queryByText("文档")).toBeNull();
-    expect(screen.queryByText("已迁入记忆")).toBeNull();
+    expect(screen.getByText("已迁入记忆")).toBeTruthy();
   });
 
   it("有条目回调且盘上无 AgentCore 时仍挂虚拟 .agentcore，默认折叠", async () => {
@@ -230,7 +227,7 @@ describe("FileTree .agentcore 抽屉", () => {
     expect(screen.queryByText("画像.md")).toBeNull();
   });
 
-  it("懒加载等 AgentCore/文档 时抽屉转圈，不能当成就绪空层", async () => {
+  it("展开抽屉直接列出 AgentCore 子项，不挂等 文档/", async () => {
     const hang = deferred<FileNode[]>();
     const src = lazySource({}, "local:workroom-lazy-docs", {
       listDir: async (dir) => {
@@ -250,22 +247,12 @@ describe("FileTree .agentcore 抽屉", () => {
     renderTree(src);
 
     fireEvent.click(await screen.findByText(".agentcore"));
-    expect(await screen.findByText("加载中…")).toBeTruthy();
+    expect(await screen.findByText("文档")).toBeTruthy();
     expect(screen.queryByText("工作稿")).toBeNull();
-    expect(screen.queryByText("文档")).toBeNull();
-    expect(screen.queryByText("空文件夹")).toBeNull();
-
-    await act(async () => {
-      hang.resolve([
-        { path: "AgentCore/文档/工作稿", name: "工作稿", isDir: true },
-      ]);
-    });
-    expect(await screen.findByText("工作稿")).toBeTruthy();
     expect(screen.queryByText("加载中…")).toBeNull();
-    expect(screen.queryByText("文档")).toBeNull();
   });
 
-  it("展开抽屉时本机 watch 覆盖被摊平的 AgentCore/文档", async () => {
+  it("展开抽屉时本机 watch 只覆盖根与 AgentCore", async () => {
     const watched: string[] = [];
     const src = lazySource(
       {
@@ -292,7 +279,7 @@ describe("FileTree .agentcore 抽屉", () => {
     fireEvent.click(screen.getByText(".agentcore"));
     await waitFor(() => {
       expect(watched).toContain("AgentCore");
-      expect(watched).toContain("AgentCore/文档");
+      expect(watched).not.toContain("AgentCore/文档");
     });
   });
 });

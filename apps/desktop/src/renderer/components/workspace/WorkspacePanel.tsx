@@ -204,8 +204,6 @@ function WorkspaceFolderEntries({
     }),
   );
   const active = tabs.find((t) => t.id === focusId);
-  const memoryActivePath =
-    active?.kind === "file" && active.channel === "memory" ? active.path : null;
   const documentActivePath =
     active?.kind === "file" && active.channel === "document"
       ? active.path
@@ -214,7 +212,6 @@ function WorkspaceFolderEntries({
   return (
     <EntriesSection
       scope={{ kind: "folder", folderId }}
-      memoryActivePath={memoryActivePath}
       documentActivePath={documentActivePath}
       indent={indent}
       onOpen={(target) => openTab(entryFileTab(target))}

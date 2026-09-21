@@ -34,12 +34,11 @@ _WORKER_ONLY_COLLAB = {
     "handoff",
 }
 _CEO_AND_WORKER_MUTATION = {
-    "file_write",
-    "str_replace",
+    "write",
+    "edit",
     "file_delete",
     "file_batch",
     "md_export",
-    "download_url",
     "run",
 }
 
@@ -67,11 +66,37 @@ def test_every_catalog_tool_has_usable_metadata():
         assert summary, f"{schema.name} needs catalog_summary for the toolbox shelf"
         assert summary != schema.name, schema.name
         assert len(summary) <= 80, (schema.name, summary)
+        blurb = entry.blurb.strip()
+        assert blurb, f"{schema.name} needs blurb for the toolbox shelf"
+        assert blurb != summary, schema.name
+        assert blurb != schema.name, schema.name
+        assert blurb != schema.description.strip(), schema.name
+        assert len(blurb) <= 80, (schema.name, blurb)
 
 
 def test_catalog_has_no_duplicate_tools():
     names = [e.schema.name for e in build_capability_catalog()]
     assert len(names) == len(set(names))
+
+
+def test_factory_tools_are_opening_resident():
+    from agentcore.tools.registration import (
+        declared_tool_name,
+        declared_tools,
+        tool_registration,
+    )
+
+    by_name = {
+        declared_tool_name(cls): tool_registration(cls) for cls in declared_tools()
+    }
+    for name in (
+        "host",
+        "browser",
+        "debate",
+        "md_export",
+        "file_batch",
+    ):
+        assert by_name[name].resident is True, name
 
 
 def test_ceo_orchestration_tools_are_present_and_ceo_only():
@@ -97,11 +122,10 @@ def test_read_only_builtins_are_shared_with_ceo():
     for name in (
         "web_search",
         "web_fetch",
-        "file_read",
+        "read",
         "file_list",
         "glob",
         "grep",
-        "git",
     ):
         assert name in entries
         assert set(entries[name].available_to) == {AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER}
@@ -135,31 +159,59 @@ def test_mutation_and_execution_are_shared_with_ceo():
         }
 
 
-def test_ceo_prompt_skill_directory_gates_on_required_tools():
-    """compose_ceo_chat_prompt 按需目录按 requires_tools 显隐（debate 手册跟 debate 工具）。"""
+def test_ceo_prompt_skill_directory_lists_ungated():
+    """compose_ceo_chat_prompt 按需目录列出出厂系统 Skill；不跟 run 工具显隐。"""
     registry = build_system_skill_registry()
     base = assemble_system_prompt()
 
-    with_debate = compose_ceo_chat_prompt(
+    with_run = compose_ceo_chat_prompt(
         base,
         skill_registry=registry,
-        ceo_tool_names={"delegate", "consult", "debate"},
+        ceo_tool_names={"delegate", "consult", "run"},
     )
-    assert "按需目录" in with_debate
-    assert "编排：" in with_debate
-    assert "- debate_and_review：" in with_debate
-    assert "- product_help：" in with_debate
+    assert "按需目录" in with_run
+    assert "编排：" not in with_run
+    assert "- product_help：" in with_run
 
-    without_debate = compose_ceo_chat_prompt(
+    without_run = compose_ceo_chat_prompt(
         base,
         skill_registry=registry,
         ceo_tool_names={"delegate", "consult"},
     )
-    assert "- debate_and_review：" not in without_debate
-    assert "- product_help：" in without_debate
+    assert "- product_help：" in without_run
 
 
-# Display face ≠ ceo_orchestration surface. Pin so Folder / board tools
+def test_tool_blurbs_stay_off_directory_and_prompt():
+    catalog = build_capability_catalog()
+    registry = build_system_skill_registry()
+    base = assemble_system_prompt()
+    ceo_tool_names = {
+        entry.schema.name for entry in catalog if AVAILABLE_TO_CEO in entry.available_to
+    }
+    ceo = compose_ceo_chat_prompt(
+        base,
+        skill_registry=registry,
+        ceo_tool_names=ceo_tool_names,
+    )
+    directory = render_on_demand_directory(
+        [
+            ConsultDirectoryEntry(
+                name=entry.schema.name,
+                summary=entry.summary,
+                section="tool",
+                face=entry.schema.face.value,
+            )
+            for entry in catalog
+            if not entry.resident
+        ]
+    )
+    for entry in catalog:
+        blurb = entry.blurb.strip()
+        assert blurb not in ceo, entry.schema.name
+        assert blurb not in directory, entry.schema.name
+
+
+# Display face ≠ ceo_orchestration surface. Pin so Folder tools
 # cannot slide back into the orchestration dumpster.
 _CATALOG_FACE: dict[str, ToolFace] = {
     "delegate": ToolFace.ORCHESTRATION,
@@ -189,12 +241,10 @@ def test_catalog_faces_are_not_an_orchestration_dumpster():
         assert by_name[name] is face, name
     orchestration = {n for n, f in by_name.items() if f is ToolFace.ORCHESTRATION}
     folder = {n for n, f in by_name.items() if f is ToolFace.FOLDER}
-    board = {n for n, f in by_name.items() if f is ToolFace.BOARD}
     table = {n for n, f in by_name.items() if f is ToolFace.TABLE}
     doc = {n for n, f in by_name.items() if f is ToolFace.DOC}
     assert orchestration == {n for n, f in _CATALOG_FACE.items() if f is ToolFace.ORCHESTRATION}
     assert folder == {n for n, f in _CATALOG_FACE.items() if f is ToolFace.FOLDER}
-    assert board == {n for n, f in _CATALOG_FACE.items() if f is ToolFace.BOARD}
     assert table == {n for n, f in _CATALOG_FACE.items() if f is ToolFace.TABLE}
     assert doc == {n for n, f in _CATALOG_FACE.items() if f is ToolFace.DOC}
 

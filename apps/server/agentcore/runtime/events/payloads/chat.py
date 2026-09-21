@@ -230,13 +230,18 @@ class ErrorPayload(WirePayload):
 
 
 class MessageEndUsage(WirePayload):
-    """Turn token totals (long-key form, contrast `UsageBreakdown` short keys on runs)."""
+    """Turn token totals (long-key form, contrast `UsageBreakdown` short keys on runs).
+
+    ``last_prompt_tokens`` is the CEO's latest single-request prompt (window fill),
+    not summed ``input_tokens``. Absent on old journals / error stubs.
+    """
 
     input_tokens: int
     output_tokens: int
     reasoning_tokens: int
     cache_hit_tokens: int
     cache_miss_tokens: int
+    last_prompt_tokens: int | None = absent()
 
 
 class TurnCollabMetrics(WirePayload):

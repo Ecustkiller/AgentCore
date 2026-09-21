@@ -20,6 +20,22 @@ DEFAULT_GUEST_ROOTFS = "/opt/agentcore/guest-rootfs"
 MARKER_NAME = ".agentcore-guest-rootfs"
 HOST_USERLAND_PATHS = frozenset({"/usr", "/lib", "/lib64", "/bin", "/etc"})
 
+# Model-facing PATH inventory of the packed guest (Dockerfile guest stage).
+# Absence is implied by this list; do not maintain a denylist here.
+CLOUD_GUEST_SURFACE: tuple[str, ...] = (
+    "python3",
+    "node",
+    "npm",
+    "git",
+    "curl",
+    "gcc",
+    "make",
+)
+
+
+def format_cloud_guest_surface() -> str:
+    return " · ".join(CLOUD_GUEST_SURFACE)
+
 # mount(2) / umount2(2) — Linux uapi. Not taken from ``os.MS_*``: this
 # image's CPython does not export ``os.mount``.
 _MS_BIND = 4096

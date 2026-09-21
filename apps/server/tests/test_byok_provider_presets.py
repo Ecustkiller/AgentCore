@@ -12,6 +12,7 @@ from agentcore.llm.byok_provider_presets import (
     normalize_byok_base_url,
     off_protocol_kind,
     preset_models_for_base_url,
+    seed_model_for_base_url,
     uses_anthropic_messages_wire,
 )
 
@@ -26,10 +27,20 @@ def test_deepseek_preset_is_v41_flash_only():
     assert "deepseek-v4-pro" in preset.hide_from_picker
     assert "deepseek-v4-flash" in hide_from_picker_ids("https://api.deepseek.com")
     assert hide_from_picker_ids("https://opencode.ai/zen/go/v1") == frozenset(
-        {"deepseek-flash"}
+        {
+            "deepseek-flash",
+            "deepseek-v4-flash",
+            "deepseek-v4-pro",
+            "deepseek-v4-flash-vision-exp",
+        }
     )
     assert hide_from_picker_ids("https://opencode.ai/zen/v1") == frozenset(
-        {"deepseek-flash"}
+        {
+            "deepseek-flash",
+            "deepseek-v4-flash",
+            "deepseek-v4-pro",
+            "deepseek-v4-flash-vision-exp",
+        }
     )
     assert hide_from_picker_ids("https://my-proxy.example/v1") == frozenset()
 
@@ -75,8 +86,8 @@ def test_opencode_zen_preset_defaults_and_seed():
     assert preset is not None
     assert preset.id == "opencode_zen"
     assert preset.label == "OpenCode Zen"
-    assert preset.default_model == "deepseek-v4-flash"
-    assert preset.models == ("deepseek-v4-flash", "kimi-k2.6", "glm-5.2")
+    assert preset.default_model == "deepseek-v4.1-flash"
+    assert preset.models == ("deepseek-v4.1-flash", "kimi-k2.6", "glm-5.2")
 
 
 def test_opencode_zen_trailing_slash_matches():
@@ -84,7 +95,7 @@ def test_opencode_zen_trailing_slash_matches():
     assert preset is not None
     assert preset.id == "opencode_zen"
     assert preset_models_for_base_url("https://opencode.ai/zen/v1/") == (
-        "deepseek-v4-flash",
+        "deepseek-v4.1-flash",
         "kimi-k2.6",
         "glm-5.2",
     )
@@ -96,7 +107,7 @@ def test_opencode_go_preset_defaults_and_seed():
     assert preset.id == "opencode_go"
     assert preset.label == "OpenCode Go"
     assert preset.default_model == "deepseek-v4.1-flash"
-    assert preset.models == ("deepseek-v4.1-flash", "deepseek-v4-pro", "glm-5.2")
+    assert preset.models == ("deepseek-v4.1-flash", "glm-5.2")
     # /responses and /messages catalog ids stay off the chat/completions seed.
     assert "grok-4.5" not in preset.models
     assert "gpt-5.6-luna" not in preset.models
@@ -111,7 +122,6 @@ def test_opencode_go_trailing_slash_matches():
     assert preset.id == "opencode_go"
     assert preset_models_for_base_url("https://opencode.ai/zen/go/v1/") == (
         "deepseek-v4.1-flash",
-        "deepseek-v4-pro",
         "glm-5.2",
     )
 
@@ -177,12 +187,12 @@ def test_uses_anthropic_messages_wire_only_on_opencode_endpoints():
     assert uses_anthropic_messages_wire("anthropic/claude-sonnet-4", zen) is False
     # /responses ids never take the /messages leaf.
     assert uses_anthropic_messages_wire("grok-4.5", zen) is False
-    assert uses_anthropic_messages_wire("deepseek-v4-flash", zen) is False
+    assert uses_anthropic_messages_wire("deepseek-v4.1-flash", zen) is False
 
 
 def test_chat_completions_seed_is_the_opencode_exclusion_source():
-    assert chat_completions_seed("deepseek-v4-flash", "grok-4.5", "glm-5.2") == (
-        "deepseek-v4-flash",
+    assert chat_completions_seed("deepseek-v4.1-flash", "grok-4.5", "glm-5.2") == (
+        "deepseek-v4.1-flash",
         "glm-5.2",
     )
     assert chat_completions_seed("grok-4.5-fast", "x-ai/grok-4.5") == (
@@ -213,3 +223,9 @@ def test_preset_table_loads_from_json_next_to_module():
     assert raw["offProtocolModels"] == dict(BYOK_OFF_PROTOCOL_MODELS)
     # UI-only; server catalog does not need it.
     assert all("keyHelpUrl" in row for row in raw["presets"])
+
+
+def test_seed_model_for_base_url_matches_preset_or_empty():
+    assert seed_model_for_base_url("https://api.deepseek.com") == "deepseek-flash"
+    assert seed_model_for_base_url("https://api.openai.com/v1") == "gpt-4o"
+    assert seed_model_for_base_url("https://my-proxy.example/v1") == ""

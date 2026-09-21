@@ -39,6 +39,7 @@ from agentcore.conversation.service import record_local_turn
 from agentcore.conversation.store import cloud as cloud_mod
 from agentcore.conversation.store.cloud import _local_metrics_status
 from agentcore.conversation.store.merge import MESSAGE_STATUS_FAILED
+from agentcore.conversation.store.usage_settle import LOCAL_USAGE_EXTRA_KEYS
 from agentcore.conversation.turn_stats import turn_worker_stats
 from agentcore.runtime.events import FinishReason
 from agentcore.runtime.facts import FactKind
@@ -278,11 +279,6 @@ def _patch_persistence(
     monkeypatch.setattr(cloud_mod, "ConversationRepository", _FakeConvRepo)
     monkeypatch.setattr(cloud_mod, "persist_turn_journal", _fake_journal)
     monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", _FakeMetricsRepo)
-    monkeypatch.setattr(
-        cloud_mod,
-        "schedule_consolidation",
-        lambda cid: consolidation_calls.append(cid),
-    )
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
 
     async def _orphan_hot(**kw):
@@ -418,6 +414,48 @@ async def test_record_local_turn_writes_generation_into_usage(monkeypatch):
 
     usage = next(e for e in events if e[0] == "usage")
     assert usage[2]["generation_ms"] == 1_900
+
+
+async def test_record_local_turn_writes_last_prompt_into_usage(monkeypatch):
+    """Settle prompt_tokens lands as last_prompt_tokens (window fill after reload)."""
+    events: list = []
+    _patch_persistence(monkeypatch, events, existing_title="已有标题")
+    settle = {
+        "input_tokens": 10,
+        "output_tokens": 20,
+        "reasoning_tokens": 1,
+        "cache_hit_tokens": 2,
+        "cache_miss_tokens": 3,
+        "rounds": 4,
+        "duration_ms": 5_000,
+        "generation_ms": 900,
+        "prompt_tokens": 120_000,
+        "collab": {"boundary_yields": 1},
+        "outcome": "ok",
+    }
+    cloud = cloud_mod._usage_metadata(
+        {**settle, "finish_reason": FinishReason.END_TURN.value},
+        status="complete",
+    )
+
+    await record_local_turn(
+        conversation_id="c1",
+        user_id="u1",
+        user_message="hi",
+        assistant_content="done",
+        user_message_id=_USER_MSG_ID,
+        message_id="m-last-prompt",
+        trace_id=_TRACE,
+        finish_reason=FinishReason.END_TURN.value,
+        **settle,
+    )
+
+    usage = next(e[2] for e in events if e[0] == "usage")
+
+    assert set(usage) - LOCAL_USAGE_EXTRA_KEYS == set(cloud)
+    for key, value in cloud.items():
+        assert usage[key] == value
+    assert usage["last_prompt_tokens"] == 120_000
 
 
 async def test_record_local_turn_persists_agent_mentions(monkeypatch):
@@ -630,7 +668,7 @@ async def test_record_local_turn_paused_then_empty_final_settles(monkeypatch):
     assert "paused" not in usage[2]
     assert result["assistant_message_id"] == "assistant-id"
     assert result["noop"] is False
-    assert consolidation == ["c1"]
+    assert consolidation == []
 
 
 async def test_record_local_turn_running_then_empty_final_settles(monkeypatch):
@@ -892,6 +930,7 @@ async def test_record_local_turn_paused_skips_title_and_consolidation(monkeypatc
         {
             "status": "running",
             "paused": True,
+            "finish_reason": "paused",
             "input_tokens": 0,
             "output_tokens": 0,
             "reasoning_tokens": 0,
@@ -1229,7 +1268,7 @@ async def test_record_local_turn_resume_after_pause_updates_assistant(monkeypatc
     assert ("upsert", "assistant", "c1") in events
     assert ("journal", "assistant-id") in events
     assert ("title", "c1", "本地回合标题") in events
-    assert consolidation == ["c1"]
+    assert consolidation == []
     assert result["assistant_message_id"] == "assistant-id"
     usage = next(e for e in events if e[0] == "usage")
     assert usage[2]["status"] == "complete"

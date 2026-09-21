@@ -17,7 +17,7 @@ from agentcore.runtime.runs.redrive_sites import (
 from agentcore.runtime.runs.types import RunSpec
 
 
-def _tc(call_id: str = "fw", name: str = "file_write") -> ToolCall:
+def _tc(call_id: str = "fw", name: str = "write") -> ToolCall:
     return ToolCall(
         id=call_id,
         function=ToolCallFunction(name=name, arguments="{}"),

@@ -2,10 +2,8 @@
 
 Authority (no name heuristics)::
 
-    - ``stage_dirs`` — ``AgentCore`` / ``AgentCore/文档`` ancestors, plus
-      ``工作稿`` / ``research`` / ``debate`` / ``reviews`` stage trees
-      (exact or under).
-    - ``attachments.ATTACHMENTS_DIR`` — resident attachment root (exact or under).
+    - ``stage_dirs.AGENTCORE_ROOT`` — the ``AgentCore/`` workroom root
+    - ``attachments.ATTACHMENTS_DIR`` — resident attachment root (exact or under)
 
 Writes already ``mkdir(parents=True)`` into these trees; listing a missing path
 here is a latent empty dir, not a path-guess failure. Arbitrary missing paths
@@ -15,29 +13,9 @@ outside this set still raise ``NotADirectory`` / ``PathNotFound``.
 from __future__ import annotations
 
 from agentcore.workspace.attachments import ATTACHMENTS_DIR
-from agentcore.workspace.stage_dirs import (
-    AGENTCORE_ROOT,
-    DEBATE_DIR,
-    DEBATE_PREFIX,
-    DOCS_PREFIX,
-    DRAFTS_DIR,
-    DRAFTS_PREFIX,
-    RESEARCH_DIR,
-    RESEARCH_PREFIX,
-    REVIEWS_DIR,
-    REVIEWS_PREFIX,
-)
+from agentcore.workspace.stage_dirs import AGENTCORE_ROOT
 
-# Exact ancestors of the stage-docs tree (injected export prefixes).
-_DECLARED_EXACT: frozenset[str] = frozenset({AGENTCORE_ROOT, DOCS_PREFIX, ATTACHMENTS_DIR})
-
-# Stage leaf dirs: exact match or descendant under the matching PREFIX.
-_DECLARED_STAGE: tuple[tuple[str, str], ...] = (
-    (DRAFTS_DIR, DRAFTS_PREFIX),
-    (RESEARCH_DIR, RESEARCH_PREFIX),
-    (DEBATE_DIR, DEBATE_PREFIX),
-    (REVIEWS_DIR, REVIEWS_PREFIX),
-)
+_DECLARED_EXACT: frozenset[str] = frozenset({AGENTCORE_ROOT, ATTACHMENTS_DIR})
 
 _ATTACHMENTS_PREFIX = f"{ATTACHMENTS_DIR}/"
 
@@ -60,12 +38,12 @@ def is_declared_latent_dir(rel_path: str) -> bool:
     """True when ``rel_path`` is a system-declared dir that writes may auto-create.
 
     Basis is the constant set above only — not generic names like ``src``/``lib``.
+    ``AgentCore/`` itself is latent-empty; its children (rules / 记忆 / leftover
+    文档) are ordinary paths and must exist on disk to list.
     """
     p = normalize_workspace_relpath(rel_path)
     if not p or p == ".":
         return False
     if p in _DECLARED_EXACT:
         return True
-    if p.startswith(_ATTACHMENTS_PREFIX):
-        return True
-    return any(p == exact or p.startswith(prefix) for exact, prefix in _DECLARED_STAGE)
+    return p.startswith(_ATTACHMENTS_PREFIX)

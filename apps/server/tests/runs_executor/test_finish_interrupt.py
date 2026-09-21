@@ -1,6 +1,6 @@
 """Worker LLM stream abort at finish must not silently look like a clean COMPLETED.
 
-Accident shape: file_write lands, then the next (handoff) round is post-commit
+Accident shape: write lands, then the next (handoff) round is post-commit
 disconnected → react_loop returns ERROR/DEGRADED via finish_override_sink. Contract
 still passes on files_written>0; we keep COMPLETED but warn + synth degraded debrief
 so CEO collect_worker_gaps surfaces the gap.
@@ -29,8 +29,8 @@ def _file_write_then_abort(*, with_partial: bool) -> list[list[LLMChunk]]:
                 ToolCallDelta(
                     index=0,
                     id="w1",
-                    function_name="file_write",
-                    arguments_delta='{"path": "out.txt", "content": "hi"}',
+                    function_name="write",
+                    arguments_delta='{"file_path": "out.txt", "content": "hi"}',
                 )
             ]
         )

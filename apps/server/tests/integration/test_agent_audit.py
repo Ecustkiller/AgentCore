@@ -29,7 +29,7 @@ async def test_delegate_turn_audit_rows(session_factory, monkeypatch):
                 "depends_on": ["w1"],
             },
         ],
-        valid_tools={"file_write", "file_read", "grep"},
+        valid_tools={"write", "read", "grep"},
         id_prefix="del_x",
     )
     assert not errors
@@ -60,8 +60,8 @@ async def test_delegate_turn_audit_rows(session_factory, monkeypatch):
                 "kind": "tool_use_start",
                 "payload": {
                     "tool_call_id": "tc-1",
-                    "tool_name": "file_write",
-                    "arguments": {"path": "report.md"},
+                    "tool_name": "write",
+                    "arguments": {"file_path": "report.md"},
                     "run_id": plan.nodes[0].run_id,
                 },
             }
@@ -71,7 +71,7 @@ async def test_delegate_turn_audit_rows(session_factory, monkeypatch):
                 "kind": "tool_use_end",
                 "payload": {
                     "tool_call_id": "tc-1",
-                    "tool_name": "file_write",
+                    "tool_name": "write",
                     "status": "success",
                     "run_id": plan.nodes[0].run_id,
                 },
@@ -90,7 +90,7 @@ async def test_delegate_turn_audit_rows(session_factory, monkeypatch):
     actions = [row.action for row in rows]
     assert "delegate.plan" in actions
     assert "run.started" in actions
-    assert "tool.file_write" in actions
+    assert "tool.write" in actions
     assert len(rows) >= 3
 
     plan_row = next(row for row in rows if row.action == "delegate.plan")
@@ -100,6 +100,6 @@ async def test_delegate_turn_audit_rows(session_factory, monkeypatch):
     assert "task_hash" in task_detail
     assert len(task_detail["task"]) <= 200
 
-    tool_row = next(row for row in rows if row.action == "tool.file_write")
+    tool_row = next(row for row in rows if row.action == "tool.write")
     assert tool_row.target_type == "file"
     assert tool_row.target_ref == "report.md"

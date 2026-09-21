@@ -1,7 +1,7 @@
-"""Tests for the file_write, file_delete and file_batch tools (mutating file ops).
+"""Tests for the write, file_delete and file_batch tools (mutating file ops).
 
 Hermetic: every test runs against a throwaway ``ServerWorkspace`` rooted at
-``tmp_path`` and inspects the real on-disk result, mirroring the str_replace tool
+``tmp_path`` and inspects the real on-disk result, mirroring the edit tool
 tests. These tools are thin shells, so the focus is argument handling and the
 typed-failure → user-message mapping (the heavy I/O lives in the backend).
 """
@@ -32,7 +32,6 @@ from agentcore.tools.builtin.file_ops.listing import (
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
-from agentcore.workspace.stage_dirs import REVIEWS_PREFIX
 from tests.user_face_helpers import assert_user_face_clean
 
 
@@ -81,12 +80,12 @@ def _inprocess_extract():
     )
 
 
-# --- file_write ---
+# --- write ---
 
 
 async def test_write_creates_file(tmp_path: Path):
     result = await FileWriteTool().execute(
-        {"path": "notes/report.md", "content": "# Hi"}, _ctx(tmp_path)
+        {"file_path": "notes/report.md", "content": "# Hi"}, _ctx(tmp_path)
     )
     assert result.success is True
     assert (tmp_path / "notes" / "report.md").read_text(encoding="utf-8") == "# Hi"
@@ -98,7 +97,7 @@ async def test_write_rejects_cleared_stub_content(tmp_path: Path):
     target.write_text("keep-me", encoding="utf-8")
 
     stub = await FileWriteTool().execute(
-        {"path": "doc.md", "content": "[已清理]"}, _ctx(tmp_path)
+        {"file_path": "doc.md", "content": "[已清理]"}, _ctx(tmp_path)
     )
     assert stub.success is False
     assert stub.contract_failure is True
@@ -107,8 +106,8 @@ async def test_write_rejects_cleared_stub_content(tmp_path: Path):
 
     landed = await FileWriteTool().execute(
         {
-            "path": "doc.md",
-            "_landed_summary": "【已落盘摘要·只读】file_write 已成功写入",
+            "file_path": "doc.md",
+            "_landed_summary": "【已落盘摘要·只读】write 已成功写入",
             "status": "landed",
         },
         _ctx(tmp_path),
@@ -119,7 +118,7 @@ async def test_write_rejects_cleared_stub_content(tmp_path: Path):
 
     # Prose mentioning 已清理 must not be blocked.
     prose = "本节已清理历史遗留问题。" + ("正文。" * 200)
-    ok = await FileWriteTool().execute({"path": "doc.md", "content": prose}, _ctx(tmp_path))
+    ok = await FileWriteTool().execute({"file_path": "doc.md", "content": prose}, _ctx(tmp_path))
     assert ok.success is True
     assert target.read_text(encoding="utf-8") == prose
 
@@ -128,7 +127,7 @@ async def test_str_replace_rejects_cleared_stub_new_string(tmp_path: Path):
     (tmp_path / "notes.md").write_text("alpha\nbeta\n", encoding="utf-8")
     result = await StrReplaceTool().execute(
         {
-            "path": "notes.md",
+            "file_path": "notes.md",
             "old_string": "alpha",
             "new_string": "[已清理·须重填]",
         },
@@ -147,7 +146,7 @@ async def test_write_allows_substantial_overwrite(tmp_path: Path):
     target.write_text(body, encoding="utf-8")
     new_body = "<html><body>rewrite complete page</body></html>"
     result = await FileWriteTool().execute(
-        {"path": "site/index.html", "content": new_body},
+        {"file_path": "site/index.html", "content": new_body},
         _ctx(tmp_path),
     )
     assert result.success is True
@@ -157,7 +156,7 @@ async def test_write_allows_substantial_overwrite(tmp_path: Path):
 async def test_write_allows_tiny_overwrite(tmp_path: Path):
     (tmp_path / "stub.txt").write_text("tiny", encoding="utf-8")
     result = await FileWriteTool().execute(
-        {"path": "stub.txt", "content": "still small"}, _ctx(tmp_path)
+        {"file_path": "stub.txt", "content": "still small"}, _ctx(tmp_path)
     )
     assert result.success is True
     assert (tmp_path / "stub.txt").read_text(encoding="utf-8") == "still small"
@@ -175,7 +174,7 @@ async def test_write_identical_content_skips_disk(tmp_path: Path, monkeypatch):
         return await real_write(path, content)
 
     monkeypatch.setattr(ctx.backend, "write", _count)
-    result = await FileWriteTool().execute({"path": "note.md", "content": body}, ctx)
+    result = await FileWriteTool().execute({"file_path": "note.md", "content": body}, ctx)
     assert result.success is True
     assert (result.metadata or {}).get("already_applied") is True
     assert writes["n"] == 0
@@ -190,7 +189,7 @@ async def test_write_allows_non_empty_code_overwrite(tmp_path: Path):
     target.write_text(body, encoding="utf-8")
     rewritten = "export function TopBar() {\n  return <header>New</header>;\n}\n"
     result = await FileWriteTool().execute(
-        {"path": "src/TopBar.tsx", "content": rewritten},
+        {"file_path": "src/TopBar.tsx", "content": rewritten},
         _ctx(tmp_path),
     )
     assert result.success is True
@@ -208,10 +207,10 @@ async def test_write_allows_css_js_overwrite(tmp_path: Path):
     css_new = "body { color: blue; }\n"
     js_new = "export const x = 2;\n"
     css_r = await FileWriteTool().execute(
-        {"path": "styles/main.css", "content": css_new}, _ctx(tmp_path)
+        {"file_path": "styles/main.css", "content": css_new}, _ctx(tmp_path)
     )
     js_r = await FileWriteTool().execute(
-        {"path": "scripts/app.js", "content": js_new}, _ctx(tmp_path)
+        {"file_path": "scripts/app.js", "content": js_new}, _ctx(tmp_path)
     )
     assert css_r.success is True
     assert js_r.success is True
@@ -220,13 +219,13 @@ async def test_write_allows_css_js_overwrite(tmp_path: Path):
 
 
 async def test_write_allows_empty_code_shell(tmp_path: Path):
-    """真·空壳（空白）代码文件仍可用 file_write 写入。"""
+    """真·空壳（空白）代码文件仍可用 write 写入。"""
     target = tmp_path / "src" / "NewWidget.tsx"
     target.parent.mkdir(parents=True)
     target.write_text("   \n", encoding="utf-8")
     content = "export function NewWidget() {\n  return null;\n}\n"
     result = await FileWriteTool().execute(
-        {"path": "src/NewWidget.tsx", "content": content},
+        {"file_path": "src/NewWidget.tsx", "content": content},
         _ctx(tmp_path),
     )
     assert result.success is True
@@ -236,7 +235,7 @@ async def test_write_allows_empty_code_shell(tmp_path: Path):
 async def test_write_allows_new_code_file(tmp_path: Path):
     content = "export const x = 1;\n"
     result = await FileWriteTool().execute(
-        {"path": "src/fresh.ts", "content": content},
+        {"file_path": "src/fresh.ts", "content": content},
         _ctx(tmp_path),
     )
     assert result.success is True
@@ -245,10 +244,10 @@ async def test_write_allows_new_code_file(tmp_path: Path):
 
 async def test_write_rejects_empty_path(tmp_path: Path):
     # A worker that omits/empties ``path`` must get a crisp required-arg error — NOT
-    # a backend write onto the workspace root dir (the real-world file_write failure:
+    # a backend write onto the workspace root dir (the real-world write failure:
     # path=None → root → "[Errno 13] Permission denied: <abs server path>").
     (tmp_path / "keep.txt").write_text("keep", encoding="utf-8")
-    result = await FileWriteTool().execute({"path": "", "content": "x" * 5000}, _ctx(tmp_path))
+    result = await FileWriteTool().execute({"file_path": "", "content": "x" * 5000}, _ctx(tmp_path))
     assert result.success is False
     assert "path 不能为空" in result.error
     # the root must be untouched (no clobber, no stray file)
@@ -264,7 +263,7 @@ async def test_write_rejects_missing_path(tmp_path: Path):
 async def test_write_rejects_path_outside_workspace(tmp_path: Path):
     ws = tmp_path / "ws"
     ws.mkdir()
-    result = await FileWriteTool().execute({"path": "../escaped.md", "content": "leak"}, _ctx(ws))
+    result = await FileWriteTool().execute({"file_path": "../escaped.md", "content": "leak"}, _ctx(ws))
     assert result.success is False
     assert "超出了工作区范围" in result.error
     assert not (tmp_path / "escaped.md").exists()
@@ -274,30 +273,29 @@ async def test_write_normalizes_absolute_workspace_path(tmp_path: Path):
     # A worker passing an absolute /workspace/... path now succeeds (normalized at the
     # path-resolution seam) instead of failing OutsideWorkspace and retrying.
     result = await FileWriteTool().execute(
-        {"path": "/workspace/research/x.md", "content": "hi"}, _ctx(tmp_path)
+        {"file_path": "/workspace/research/x.md", "content": "hi"}, _ctx(tmp_path)
     )
     assert result.success is True
     assert (tmp_path / "research" / "x.md").read_text(encoding="utf-8") == "hi"
 
 
 async def test_outside_workspace_error_is_actionable(tmp_path: Path):
-    # The rejection tells the model exactly how to fix it (relative path + example),
-    # not just that the path was out of range. Cloud workspace also nudges the bind card.
+    # The rejection tells the model the relative-path fix; cloud points at Composer.
     ws = tmp_path / "ws"
     ws.mkdir()
-    result = await FileWriteTool().execute({"path": "../escaped.md", "content": "x"}, _ctx(ws))
+    result = await FileWriteTool().execute({"file_path": "../escaped.md", "content": "x"}, _ctx(ws))
     assert result.success is False
     assert "超出了工作区范围" in result.error
     assert result.failure_code == "outside_workspace"
     assert "相对路径" in result.error
     assert "AgentCore/文档/research/report.md" in result.error
-    assert "bind_local_folder" in result.error or "open_local_project" in result.error
-    assert "open_local_project" in result.error or "本机传统" in result.error
+    assert "open_local_project" not in result.error
+    assert "bind_local_folder" not in result.error
+    assert "Composer" in result.error
     assert "先在云上做" in result.error
-    assert "≠离线" in result.error
 
 
-# --- file_read ---
+# --- read ---
 
 
 async def test_file_read_docx_transparent_extract(tmp_path: Path):
@@ -313,7 +311,7 @@ async def test_file_read_docx_transparent_extract(tmp_path: Path):
         "agentcore.workspace.attachment_parse._convert_with_markitdown",
         side_effect=AssertionError("docx must not call markitdown"),
     ):
-        result = await FileReadTool().execute({"path": "docs/brief.docx"}, ctx)
+        result = await FileReadTool().execute({"file_path": "docs/brief.docx"}, ctx)
     assert result.success is True
     assert "Hello from docx" in (result.output or "")
     assert "Widget" in (result.output or "")
@@ -348,7 +346,7 @@ async def test_file_read_pdf_transparent_extract(tmp_path: Path):
         "agentcore.workspace.attachment_parse._extract_pdf_text",
         return_value=(body, "markitdown"),
     ):
-        result = await FileReadTool().execute({"path": "paper.pdf"}, _ctx(tmp_path))
+        result = await FileReadTool().execute({"file_path": "paper.pdf"}, _ctx(tmp_path))
     assert result.success is True
     assert "This paper studies agents" in (result.output or "")
     assert not (tmp_path / "paper.pdf.md").exists()
@@ -375,7 +373,7 @@ async def test_file_read_pdf_start_page_skips_sidecar(tmp_path: Path):
         ),
     ) as mocked:
         result = await FileReadTool().execute(
-            {"path": "paper.pdf", "start_page": 41}, _ctx(tmp_path)
+            {"file_path": "paper.pdf", "start_page": 41}, _ctx(tmp_path)
         )
     assert mocked.await_args is not None
     assert mocked.await_args.kwargs.get("start_page") == 41
@@ -393,7 +391,7 @@ async def test_file_read_xlsx_does_not_extract(tmp_path: Path):
         "agentcore.tools.builtin.file_ops.read._code_execute_assembled",
         return_value=True,
     ):
-        result = await FileReadTool().execute({"path": "report.xlsx"}, _ctx(tmp_path))
+        result = await FileReadTool().execute({"file_path": "report.xlsx"}, _ctx(tmp_path))
     assert result.success is True
     out = result.output or ""
     assert "用 run" in out
@@ -411,8 +409,8 @@ async def test_file_read_table_without_code_execute_omits_tool_name(tmp_path: Pa
         "agentcore.tools.builtin.file_ops.read._code_execute_assembled",
         return_value=False,
     ):
-        xlsx = await FileReadTool().execute({"path": "report.xlsx"}, _ctx(tmp_path))
-        csv = await FileReadTool().execute({"path": "upload.csv"}, _ctx(tmp_path))
+        xlsx = await FileReadTool().execute({"file_path": "report.xlsx"}, _ctx(tmp_path))
+        csv = await FileReadTool().execute({"file_path": "upload.csv"}, _ctx(tmp_path))
     assert xlsx.success is True
     assert csv.success is True
     assert "请用 run" not in (xlsx.output or "")
@@ -425,21 +423,21 @@ async def test_file_read_table_without_code_execute_omits_tool_name(tmp_path: Pa
 
 
 async def test_file_read_landed_csv_is_readable(tmp_path: Path):
-    """Worker 自产表格认落盘台账，可 file_read 回读；未入账的同扩展名仍拒。"""
+    """Worker 自产表格认落盘台账，可 read 回读；未入账的同扩展名仍拒。"""
     ctx = _ctx(tmp_path)
     written = await FileWriteTool().execute(
-        {"path": "out/data.csv", "content": "name,n\nalice,1\n"},
+        {"file_path": "out/data.csv", "content": "name,n\nalice,1\n"},
         ctx,
     )
     assert written.success is True
     assert ctx.landed_artifact_kinds.get("out/data.csv") is not None
 
-    ok = await FileReadTool().execute({"path": "out/data.csv"}, ctx)
+    ok = await FileReadTool().execute({"file_path": "out/data.csv"}, ctx)
     assert ok.success is True
     assert "alice,1" in (ok.output or "")
 
     (tmp_path / "foreign.csv").write_text("x,y\n9,8\n", encoding="utf-8")
-    blocked = await FileReadTool().execute({"path": "foreign.csv"}, ctx)
+    blocked = await FileReadTool().execute({"file_path": "foreign.csv"}, ctx)
     assert blocked.success is True
     assert "kind: table" in (blocked.output or "")
 
@@ -450,7 +448,7 @@ async def test_file_read_scanned_pdf_notice(tmp_path: Path):
         "agentcore.workspace.attachment_parse._extract_pdf_text",
         return_value=("   \n", "pdfminer"),
     ):
-        result = await FileReadTool().execute({"path": "scan.pdf"}, _ctx(tmp_path))
+        result = await FileReadTool().execute({"file_path": "scan.pdf"}, _ctx(tmp_path))
     assert result.success is True
     out = result.output or ""
     assert "扫描" in out or "OCR" in out
@@ -462,7 +460,7 @@ async def test_file_read_scanned_pdf_notice(tmp_path: Path):
 
 async def test_file_read_legacy_doc_is_ole_envelope(tmp_path: Path):
     (tmp_path / "memo.doc").write_bytes(b"\xd0\xcf\x11\xe0" + b"\x00" * 32)
-    result = await FileReadTool().execute({"path": "memo.doc"}, _ctx(tmp_path))
+    result = await FileReadTool().execute({"file_path": "memo.doc"}, _ctx(tmp_path))
     assert result.success is True
     out = result.output or ""
     assert "[观察信封]" in out
@@ -485,7 +483,7 @@ async def test_file_read_utf8_fail_pdf_magic_routes_to_extract(tmp_path: Path):
             )
         ),
     ):
-        result = await FileReadTool().execute({"path": "notes.txt"}, _ctx(tmp_path))
+        result = await FileReadTool().execute({"file_path": "notes.txt"}, _ctx(tmp_path))
     assert result.success is True
     assert "Abstract from sniffed PDF" in (result.output or "")
 
@@ -504,7 +502,7 @@ async def test_file_read_office_offset_limit_on_extracted_lines(tmp_path: Path):
         ),
     ):
         result = await FileReadTool().execute(
-            {"path": "notes.docx", "offset": 2, "limit": 3},
+            {"file_path": "notes.docx", "offset": 2, "limit": 3},
             ctx,
         )
     assert result.success is True
@@ -524,7 +522,7 @@ async def test_file_read_prefers_existing_md_sidecar(tmp_path: Path):
         "agentcore.tools.builtin.file_ops.read._extract_office",
         side_effect=AssertionError("extract must not run when sidecar exists"),
     ):
-        result = await FileReadTool().execute({"path": "memo.docx"}, _ctx(tmp_path))
+        result = await FileReadTool().execute({"file_path": "memo.docx"}, _ctx(tmp_path))
     assert result.success is True
     assert "Sidecar text already prepared" in (result.output or "")
 
@@ -538,7 +536,7 @@ async def test_file_read_scan_sidecar_is_scan_envelope(tmp_path: Path):
         "agentcore.tools.builtin.file_ops.read._extract_office",
         side_effect=AssertionError("extract must not run for scan sidecar"),
     ):
-        result = await FileReadTool().execute({"path": "scan.pdf"}, _ctx(tmp_path))
+        result = await FileReadTool().execute({"file_path": "scan.pdf"}, _ctx(tmp_path))
     assert result.success is True
     out = result.output or ""
     assert "[观察信封]" in out
@@ -548,7 +546,7 @@ async def test_file_read_scan_sidecar_is_scan_envelope(tmp_path: Path):
 
 async def test_file_read_office_extract_failure_soft(tmp_path: Path):
     (tmp_path / "broken.docx").write_bytes(b"not-a-docx")
-    result = await FileReadTool().execute({"path": "broken.docx"}, _ctx(tmp_path))
+    result = await FileReadTool().execute({"file_path": "broken.docx"}, _ctx(tmp_path))
     assert result.success is True
     out = result.output or ""
     assert "[观察信封]" in out
@@ -570,7 +568,7 @@ _MIN_PNG = (
 
 async def test_file_read_raster_honest_when_model_rejects_images(tmp_path: Path):
     (tmp_path / "shot.png").write_bytes(_MIN_PNG)
-    result = await FileReadTool().execute({"path": "shot.png"}, _ctx(tmp_path))
+    result = await FileReadTool().execute({"file_path": "shot.png"}, _ctx(tmp_path))
     assert result.success is True
     out = result.output or ""
     assert "[观察信封]" in out
@@ -583,7 +581,7 @@ async def test_file_read_raster_honest_when_model_rejects_images(tmp_path: Path)
 async def test_file_read_raster_native_parts_when_model_accepts(tmp_path: Path):
     (tmp_path / "shot.png").write_bytes(_MIN_PNG)
     ctx = replace(_ctx(tmp_path), accepts_images=True)
-    result = await FileReadTool().execute({"path": "shot.png"}, ctx)
+    result = await FileReadTool().execute({"file_path": "shot.png"}, ctx)
     assert result.success is True
     assert "已把工作区图片发给当前模型" in (result.output or "")
     parts = (result.metadata or {}).get("native_image_parts")
@@ -598,7 +596,7 @@ async def test_file_read_same_path_repeated_reads_return_disk_body(tmp_path: Pat
     ctx = _ctx(tmp_path)
     tool = FileReadTool()
     for i in range(6):
-        result = await tool.execute({"path": "doc.md"}, ctx)
+        result = await tool.execute({"file_path": "doc.md"}, ctx)
         assert result.success is True, i
         out = result.output or ""
         assert "unique-body-marker" in out
@@ -610,17 +608,17 @@ async def test_file_read_pagination_windows_return_requested_lines(tmp_path: Pat
     (tmp_path / "page.md").write_text(lines + "\n", encoding="utf-8")
     ctx = _ctx(tmp_path)
     tool = FileReadTool()
-    first = await tool.execute({"path": "page.md", "offset": 1, "limit": 5}, ctx)
+    first = await tool.execute({"file_path": "page.md", "offset": 1, "limit": 5}, ctx)
     assert first.success is True
     assert "L1" in (first.output or "")
     assert "未达安全顶，省略 limit 可整读" in (first.output or "")
     assert "已达行顶" not in (first.output or "")
-    expand = await tool.execute({"path": "page.md", "offset": 3, "limit": 8}, ctx)
+    expand = await tool.execute({"file_path": "page.md", "offset": 3, "limit": 8}, ctx)
     assert expand.success is True
     assert "L3" in (expand.output or "")
     for start in (11, 16, 21, 26, 31):
         result = await tool.execute(
-            {"path": "page.md", "offset": start, "limit": 5}, ctx
+            {"file_path": "page.md", "offset": start, "limit": 5}, ctx
         )
         assert result.success is True, start
         assert f"L{start}" in (result.output or "")
@@ -642,8 +640,8 @@ async def test_file_read_after_tool_clear_still_returns_disk_body(tmp_path: Path
                     ToolCall(
                         id=call_id,
                         function=ToolCallFunction(
-                            name="file_read",
-                            arguments=json.dumps({"path": path}),
+                            name="read",
+                            arguments=json.dumps({"file_path": path}),
                         ),
                     )
                 ],
@@ -660,7 +658,7 @@ async def test_file_read_after_tool_clear_still_returns_disk_body(tmp_path: Path
     outputs: list[str] = []
     for _ in range(3):
         result = await tool.execute(
-            {"path": "src/target.py", "offset": 1, "limit": 40}, ctx
+            {"file_path": "src/target.py", "offset": 1, "limit": 40}, ctx
         )
         assert result.success is True
         outputs.append(result.output or "")
@@ -671,13 +669,13 @@ async def test_file_read_after_tool_clear_still_returns_disk_body(tmp_path: Path
     for i, output in enumerate(outputs):
         msgs += pair(f"t{i}", "src/target.py", output)
     for i in range(2):
-        other = await tool.execute({"path": "src/other.py"}, ctx)
+        other = await tool.execute({"file_path": "src/other.py"}, ctx)
         assert other.success is True
         msgs += pair(f"o{i}", "src/other.py", other.output or "")
 
     projected = project_cleared_window(
         msgs,
-        clearable_tools=frozenset({"file_read"}),
+        clearable_tools=frozenset({"read"}),
         keep_recent=2,
         min_chars=100,
         summary_max_chars=0,
@@ -689,7 +687,7 @@ async def test_file_read_after_tool_clear_still_returns_disk_body(tmp_path: Path
     assert "disk=intact" in (stub.content or "")
     assert "reread=omit_offset_limit" in (stub.content or "")
 
-    recovered = await tool.execute({"path": "src/target.py"}, ctx)
+    recovered = await tool.execute({"file_path": "src/target.py"}, ctx)
     assert recovered.success is True
     assert "line-0" in (recovered.output or "")
 
@@ -701,17 +699,17 @@ async def test_file_write_then_file_read_returns_new_body(tmp_path: Path):
     )
     ctx = _ctx(tmp_path)
     tool = FileReadTool()
-    first = await tool.execute({"path": "draft.md", "offset": 2, "limit": 3}, ctx)
+    first = await tool.execute({"file_path": "draft.md", "offset": 2, "limit": 3}, ctx)
     assert first.success is True
     assert "L2" in (first.output or "")
 
     w = await FileWriteTool().execute(
-        {"path": "draft.md", "content": "\n".join(f"N{i}" for i in range(1, 12)) + "\n"},
+        {"file_path": "draft.md", "content": "\n".join(f"N{i}" for i in range(1, 12)) + "\n"},
         ctx,
     )
     assert w.success is True
     assert ctx.landed_artifact_kinds.get("draft.md") is not None
-    verify = await tool.execute({"path": "draft.md", "offset": 2, "limit": 3}, ctx)
+    verify = await tool.execute({"file_path": "draft.md", "offset": 2, "limit": 3}, ctx)
     assert verify.success is True
     assert "N2" in (verify.output or "")
 
@@ -723,7 +721,7 @@ async def test_file_read_long_file_window_footer_and_output_limit(tmp_path: Path
     total = FILE_READ_SAFETY_LINE_CAP + 50
     body = "\n".join(f"line-{i}" for i in range(1, total + 1)) + "\n"
     (tmp_path / "long.md").write_text(body, encoding="utf-8")
-    result = await FileReadTool().execute({"path": "long.md"}, _ctx(tmp_path))
+    result = await FileReadTool().execute({"file_path": "long.md"}, _ctx(tmp_path))
     assert result.success is True
     out = result.output or ""
     assert f"共 {total} 行" in out
@@ -746,7 +744,7 @@ async def test_file_read_800_lines_returns_full_text(tmp_path: Path):
     body = "\n".join(f"line-{i}" for i in range(1, total + 1)) + "\n"
     (tmp_path / "mid.md").write_text(body, encoding="utf-8")
     ctx = _ctx(tmp_path)
-    result = await FileReadTool().execute({"path": "mid.md"}, ctx)
+    result = await FileReadTool().execute({"file_path": "mid.md"}, ctx)
     assert result.success is True
     out = result.output or ""
     assert f"全文 {total} 行" in out
@@ -765,7 +763,7 @@ async def test_file_read_char_cap_truncates_complete_lines(tmp_path: Path):
     line = "x" * 1000
     total = 90
     (tmp_path / "wide.md").write_text("\n".join([line] * total) + "\n", encoding="utf-8")
-    result = await FileReadTool().execute({"path": "wide.md"}, _ctx(tmp_path))
+    result = await FileReadTool().execute({"file_path": "wide.md"}, _ctx(tmp_path))
     assert result.success is True
     out = result.output or ""
     assert "已达字符顶" in out
@@ -798,7 +796,7 @@ async def test_file_read_oversized_single_line_kept_whole(tmp_path: Path):
 
     line = "y" * (FILE_READ_SAFETY_CHAR_CAP + 50)
     (tmp_path / "one.md").write_text(line + "\n", encoding="utf-8")
-    result = await FileReadTool().execute({"path": "one.md"}, _ctx(tmp_path))
+    result = await FileReadTool().execute({"file_path": "one.md"}, _ctx(tmp_path))
     assert result.success is True
     out = result.output or ""
     assert f"     1|{line}" in out
@@ -812,7 +810,7 @@ async def test_file_read_oversized_message_does_not_teach_offset_limit(tmp_path:
     from agentcore.workspace.limits import WORKSPACE_READ_MAX_BYTES
 
     (tmp_path / "huge.txt").write_bytes(b"a" * (WORKSPACE_READ_MAX_BYTES + 1))
-    result = await FileReadTool().execute({"path": "huge.txt"}, _ctx(tmp_path))
+    result = await FileReadTool().execute({"file_path": "huge.txt"}, _ctx(tmp_path))
     assert result.success is False
     err = (result.error or "").lower()
     assert "offset" not in err
@@ -835,7 +833,7 @@ async def test_file_read_office_default_uses_same_full_window(tmp_path: Path):
             return_value=ExtractResult(status=ParseStatus.OK, text=body, detail="ok")
         ),
     ):
-        result = await FileReadTool().execute({"path": "notes.docx"}, ctx)
+        result = await FileReadTool().execute({"file_path": "notes.docx"}, ctx)
     assert result.success is True
     out = result.output or ""
     assert "全文 800 行" in out
@@ -851,7 +849,7 @@ async def test_file_read_office_default_uses_same_full_window(tmp_path: Path):
             return_value=ExtractResult(status=ParseStatus.OK, text=over, detail="ok")
         ),
     ):
-        truncated = await FileReadTool().execute({"path": "big.docx"}, ctx)
+        truncated = await FileReadTool().execute({"file_path": "big.docx"}, ctx)
     tout = truncated.output or ""
     assert truncated.success is True
     assert f"第 1–{FILE_READ_SAFETY_LINE_CAP} 行" in tout
@@ -867,11 +865,14 @@ def test_file_read_schema_teaches_default_full_read():
     assert "省略则尽量整读" in limit["description"]
     assert "超安全顶截断" in limit["description"]
     desc = schema.description
-    assert "web_fetch" in desc
-    assert "consult(local_desk)" in desc
-    path_desc = schema.parameters["properties"]["path"]["description"]
+    assert desc == "读取工作区文件。"
+    assert "web_fetch" not in desc
+    assert "consult" not in desc
+    assert "图片" not in desc
+    path_desc = schema.parameters["properties"]["file_path"]["description"]
     assert "web_fetch" not in path_desc
-    assert "默认不抽文本" in path_desc
+    assert "默认不抽" in path_desc
+    assert "Office/PDF" in path_desc
     offset = schema.parameters["properties"]["offset"]
     assert "起始行号" in offset["description"]
 
@@ -881,7 +882,7 @@ async def test_file_read_directory_fails_and_names_file_list(
     tmp_path: Path, path: str
 ):
     (tmp_path / "pkg").mkdir()
-    result = await FileReadTool().execute({"path": path}, _ctx(tmp_path))
+    result = await FileReadTool().execute({"file_path": path}, _ctx(tmp_path))
     assert result.success is False
     text = f"{result.error or ''}{result.output or ''}"
     assert "目录" in text
@@ -897,7 +898,7 @@ async def test_file_read_directory_fails_and_names_file_list(
     ],
 )
 async def test_file_read_http_url_reroutes_to_web_fetch(tmp_path: Path, path: str):
-    result = await FileReadTool().execute({"path": path}, _ctx(tmp_path))
+    result = await FileReadTool().execute({"file_path": path}, _ctx(tmp_path))
     err = result.error or ""
     assert result.success is False
     assert result.contract_failure is True
@@ -910,7 +911,7 @@ async def test_file_read_http_url_reroutes_to_web_fetch(tmp_path: Path, path: st
 
 async def test_file_read_http_filename_is_not_a_url(tmp_path: Path):
     (tmp_path / "http_client.py").write_text("ok\n", encoding="utf-8")
-    result = await FileReadTool().execute({"path": "http_client.py"}, _ctx(tmp_path))
+    result = await FileReadTool().execute({"file_path": "http_client.py"}, _ctx(tmp_path))
     assert result.success is True
     assert "ok" in result.output
     assert result.metadata.get("code") != "url_not_workspace_path"
@@ -921,7 +922,7 @@ async def test_write_lands_substantial_prose_with_omission(tmp_path: Path):
     body = ("完整段落内容填充字。" * 50) + "\n……（中间省略，已保留首尾）……\n" + ("尾段续写。" * 30)
     assert len(body.strip()) >= 400
     result = await FileWriteTool().execute(
-        {"path": "essay.md", "content": body}, _ctx(tmp_path)
+        {"file_path": "essay.md", "content": body}, _ctx(tmp_path)
     )
     assert result.success is True
     assert (tmp_path / "essay.md").read_text(encoding="utf-8") == body
@@ -932,11 +933,11 @@ async def test_str_replace_then_file_read_returns_new_body(tmp_path: Path):
     (tmp_path / "edit.md").write_text("hello world\n", encoding="utf-8")
     ctx = _ctx(tmp_path)
     ok = await StrReplaceTool().execute(
-        {"path": "edit.md", "old_string": "world", "new_string": "AgentCore"},
+        {"file_path": "edit.md", "old_string": "world", "new_string": "AgentCore"},
         ctx,
     )
     assert ok.success is True
-    verify = await FileReadTool().execute({"path": "edit.md"}, ctx)
+    verify = await FileReadTool().execute({"file_path": "edit.md"}, ctx)
     assert verify.success is True
     assert "AgentCore" in (verify.output or "")
 
@@ -945,7 +946,7 @@ async def test_str_replace_failure_does_not_change_disk(tmp_path: Path):
     (tmp_path / "edit.md").write_text("hello world\n", encoding="utf-8")
     ctx = _ctx(tmp_path)
     fail = await StrReplaceTool().execute(
-        {"path": "edit.md", "old_string": "no-such-token", "new_string": "x"},
+        {"file_path": "edit.md", "old_string": "no-such-token", "new_string": "x"},
         ctx,
     )
     assert fail.success is False
@@ -955,7 +956,7 @@ async def test_str_replace_failure_does_not_change_disk(tmp_path: Path):
     assert_user_face_clean(fail.failure_message)
     assert "old_string" not in (fail.failure_message or "")
     assert (tmp_path / "edit.md").read_text(encoding="utf-8") == "hello world\n"
-    still = await FileReadTool().execute({"path": "edit.md"}, ctx)
+    still = await FileReadTool().execute({"file_path": "edit.md"}, ctx)
     assert still.success is True
     assert "hello world" in (still.output or "")
 
@@ -975,7 +976,7 @@ async def test_str_replace_skips_when_post_state_already_holds(
     monkeypatch.setattr(ctx.backend, "replace", _count)
     result = await StrReplaceTool().execute(
         {
-            "path": "edit.md",
+            "file_path": "edit.md",
             "old_string": "hello world",
             "new_string": "hello AgentCore",
         },
@@ -999,7 +1000,7 @@ async def test_str_replace_skips_when_new_contains_old(tmp_path: Path, monkeypat
 
     monkeypatch.setattr(ctx.backend, "replace", _count)
     result = await StrReplaceTool().execute(
-        {"path": "edit.md", "old_string": "foo", "new_string": "foo bar"},
+        {"file_path": "edit.md", "old_string": "foo", "new_string": "foo bar"},
         ctx,
     )
     assert result.success is True
@@ -1011,7 +1012,7 @@ async def test_str_replace_skips_when_new_contains_old(tmp_path: Path, monkeypat
 async def test_str_replace_empty_new_string_skips_when_span_gone(tmp_path: Path):
     (tmp_path / "edit.md").write_text("keep\n", encoding="utf-8")
     result = await StrReplaceTool().execute(
-        {"path": "edit.md", "old_string": "gone", "new_string": ""},
+        {"file_path": "edit.md", "old_string": "gone", "new_string": ""},
         _ctx(tmp_path),
     )
     assert result.success is True
@@ -1022,7 +1023,7 @@ async def test_str_replace_empty_new_string_skips_when_span_gone(tmp_path: Path)
 async def test_str_replace_empty_new_string_deletes_when_span_present(tmp_path: Path):
     (tmp_path / "edit.md").write_text("keep gone end\n", encoding="utf-8")
     result = await StrReplaceTool().execute(
-        {"path": "edit.md", "old_string": "gone", "new_string": ""},
+        {"file_path": "edit.md", "old_string": "gone", "new_string": ""},
         _ctx(tmp_path),
     )
     assert result.success is True
@@ -1040,20 +1041,20 @@ def test_str_replace_post_state_inverse_and_delete():
 
 
 async def test_file_read_missing_does_not_trip_circuit_breaker(tmp_path: Path):
-    """PathNotFound (env / wrong path) must not warn or disable file_read."""
+    """PathNotFound (env / wrong path) must not warn or disable read."""
     from agentcore.runtime.loop_controller import LoopController, ToolAttempt
 
     tool = FileReadTool()
     c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
     for i in range(6):
-        result = await tool.execute({"path": f"ghost/missing-{i}.md"}, _ctx(tmp_path))
+        result = await tool.execute({"file_path": f"ghost/missing-{i}.md"}, _ctx(tmp_path))
         assert result.success is False
         assert result.contract_failure is True
         c.record(
             [
                 ToolAttempt(
                     f"miss-{i}",
-                    "file_read",
+                    "read",
                     success=False,
                     error_summary=result.error or "",
                     contract_failure=result.contract_failure,
@@ -1064,13 +1065,13 @@ async def test_file_read_missing_does_not_trip_circuit_breaker(tmp_path: Path):
     cb = c.tool_circuit_breaker()
     assert cb.disabled == ()
     assert cb.warned == ()
-    assert c.tool_failure_count("file_read") == 0
+    assert c.tool_failure_count("read") == 0
 
 
-# --- file_write receipts ---
-    # file_write 回执 = artifact manifest；优先 manifest 验真（非身份硬闸）。
+# --- write receipts ---
+    # write 回执 = artifact manifest；优先 manifest 验真（非身份硬闸）。
     result = await FileWriteTool().execute(
-        {"path": "report.md", "content": "# Hi\n\n## A\n"}, _ctx(tmp_path)
+        {"file_path": "report.md", "content": "# Hi\n\n## A\n"}, _ctx(tmp_path)
     )
     assert result.success is True
     assert "artifact manifest" in result.output
@@ -1085,7 +1086,7 @@ async def test_write_receipt_reports_chars_not_bytes(tmp_path: Path):
     body = "# 民事起诉状\n\n原告：昝雯，住青海省西宁市。\n"
     assert len(body.encode("utf-8")) != len(body)  # 中文下两口径必然分叉
     result = await FileWriteTool().execute(
-        {"path": "诉状.md", "content": body}, _ctx(tmp_path)
+        {"file_path": "诉状.md", "content": body}, _ctx(tmp_path)
     )
     assert result.success is True
     assert f"已写入 {len(body)} 字符到 诉状.md" in result.output
@@ -1094,14 +1095,14 @@ async def test_write_receipt_reports_chars_not_bytes(tmp_path: Path):
 
 
 async def test_file_read_allows_author_self_product(tmp_path: Path):
-    """作者写后 body file_read 允许。"""
+    """作者写后 body read 允许。"""
     ctx = _ctx(tmp_path)
     w = await FileWriteTool().execute(
-        {"path": "out.md", "content": "# Title\n\n## Sec\nbody line\n"}, ctx
+        {"file_path": "out.md", "content": "# Title\n\n## Sec\nbody line\n"}, ctx
     )
     assert w.success is True
     assert ctx.landed_artifact_authors.get("out.md") == "a"
-    ok = await FileReadTool().execute({"path": "out.md"}, ctx)
+    ok = await FileReadTool().execute({"file_path": "out.md"}, ctx)
     assert ok.success is True
     assert "body line" in (ok.output or "")
 
@@ -1110,7 +1111,7 @@ async def test_file_read_author_and_reader_share_landed_ledger(tmp_path: Path):
     """同 execution 共享 landed 表；作者与读者都能读已落盘文件。"""
     author_ctx = _ctx(tmp_path, agent_id="writer")
     w = await FileWriteTool().execute(
-        {"path": "shared.md", "content": "# Shared\n\nbody for downstream\n"},
+        {"file_path": "shared.md", "content": "# Shared\n\nbody for downstream\n"},
         author_ctx,
     )
     assert w.success is True
@@ -1119,15 +1120,15 @@ async def test_file_read_author_and_reader_share_landed_ledger(tmp_path: Path):
     reader_ctx = replace(author_ctx, agent_id="ceo", run_id="ceo-run")
     assert reader_ctx.landed_artifact_kinds is author_ctx.landed_artifact_kinds
 
-    allowed = await FileReadTool().execute({"path": "shared.md"}, reader_ctx)
+    allowed = await FileReadTool().execute({"file_path": "shared.md"}, reader_ctx)
     assert allowed.success is True
     assert "body for downstream" in allowed.output
-    still = await FileReadTool().execute({"path": "shared.md"}, author_ctx)
+    still = await FileReadTool().execute({"file_path": "shared.md"}, author_ctx)
     assert still.success is True
     assert "body for downstream" in (still.output or "")
 
 
-# --- file_write overwrite: no completeness heuristic ---
+# --- write overwrite: no completeness heuristic ---
 
 
 async def test_write_overwrite_omission_lands_without_nudge(tmp_path: Path):
@@ -1140,7 +1141,7 @@ async def test_write_overwrite_omission_lands_without_nudge(tmp_path: Path):
         + "B" * 40
     )
     result = await FileWriteTool().execute(
-        {"path": "draft.md", "content": truncated}, _ctx(tmp_path)
+        {"file_path": "draft.md", "content": truncated}, _ctx(tmp_path)
     )
     assert result.success is True
     assert (tmp_path / "draft.md").read_text(encoding="utf-8") == truncated
@@ -1152,7 +1153,7 @@ async def test_write_overwrite_severe_shrink_lands(tmp_path: Path):
     short = "字" * 300
     (tmp_path / "报告.md").write_text(old, encoding="utf-8")
     result = await FileWriteTool().execute(
-        {"path": "报告.md", "content": short}, _ctx(tmp_path)
+        {"file_path": "报告.md", "content": short}, _ctx(tmp_path)
     )
     assert result.success is True
     assert (tmp_path / "报告.md").read_text(encoding="utf-8") == short
@@ -1163,7 +1164,7 @@ async def test_write_no_nudge_on_new_file(tmp_path: Path):
     # New file — even with omission-looking text — must not false-positive.
     body = "开头\n……（中间省略，已保留首尾）……\n结尾"
     result = await FileWriteTool().execute(
-        {"path": "new.md", "content": body}, _ctx(tmp_path)
+        {"file_path": "new.md", "content": body}, _ctx(tmp_path)
     )
     assert result.success is True
     assert "产物疑似不完整" not in result.output
@@ -1176,7 +1177,7 @@ async def test_write_no_nudge_on_modest_edit(tmp_path: Path):
     # ~80% of old length, no omission markers — normal small revision.
     modest = "字" * 400
     result = await FileWriteTool().execute(
-        {"path": "essay.md", "content": modest}, _ctx(tmp_path)
+        {"file_path": "essay.md", "content": modest}, _ctx(tmp_path)
     )
     assert result.success is True
     assert "产物疑似不完整" not in result.output
@@ -1192,15 +1193,15 @@ def test_has_omission_marker_covers_en_and_cn():
     assert not has_omission_marker("正常全文无省略")
 
 
-# --- file_write / append / str_replace: no hard length gate ---
+# --- write / edit: no hard length gate ---
 
 
 async def test_write_allows_oversized_prose(tmp_path: Path):
-    """超阈值正文一次 file_write 须成功落盘（不再硬拒）。"""
+    """超阈值正文一次 write 须成功落盘（不再硬拒）。"""
     # Former hard-gate threshold was ≈2000 tokens × 4 chars ≈ 8000 chars.
     body = "x" * 8000
     result = await FileWriteTool().execute(
-        {"path": "big.html", "content": body}, _ctx(tmp_path)
+        {"file_path": "big.html", "content": body}, _ctx(tmp_path)
     )
     assert result.success is True
     assert result.contract_failure is not True
@@ -1217,7 +1218,7 @@ async def test_str_replace_allows_oversized_new_string(tmp_path: Path):
     new = "z" * 8000
     result = await StrReplaceTool().execute(
         {
-            "path": "a.md",
+            "file_path": "a.md",
             "old_string": "## 参考文献",
             "new_string": new,
         },
@@ -1232,7 +1233,7 @@ async def test_str_replace_allows_oversized_new_string(tmp_path: Path):
 async def test_write_allows_medium_prose_body(tmp_path: Path):
     body = "x" * 4000
     result = await FileWriteTool().execute(
-        {"path": "ok.md", "content": body}, _ctx(tmp_path)
+        {"file_path": "ok.md", "content": body}, _ctx(tmp_path)
     )
     assert result.success is True
     assert (tmp_path / "ok.md").read_text(encoding="utf-8") == body
@@ -1245,24 +1246,31 @@ async def test_write_allows_short_skeleton_with_section_markers(tmp_path: Path):
         "<!-- SECTION:s0 START -->\n<!-- SECTION:s0 END -->\n"
     )
     result = await FileWriteTool().execute(
-        {"path": "report.md", "content": skeleton}, _ctx(tmp_path)
+        {"file_path": "report.md", "content": skeleton}, _ctx(tmp_path)
     )
     assert result.success is True
     assert "kind: skeleton" in result.output
 
 
 def test_write_schema_does_not_teach_completeness_gates():
-    """按钮只留这是什么；完整性硬拒不进 schema。"""
+    """按钮只留这是什么；覆盖/建父目录不进说明。"""
     write_schema = FileWriteTool().schema
     write_desc = write_schema.description
     assert "写入文件" in write_desc
-    assert set(write_schema.parameters["properties"]) == {"path", "content"}
+    assert ".agentcore/rules" in write_desc
+    assert "整体覆盖" not in write_desc
+    assert "创建" not in write_desc
+    assert "上级目录" not in write_desc
+    assert set(write_schema.parameters["properties"]) == {"file_path", "content"}
     content_desc = write_schema.parameters["properties"]["content"]["description"]
     assert "完整正文" in content_desc
     replace_desc = StrReplaceTool().schema.description
     assert "完全匹配" in replace_desc or "精确替换" in replace_desc
     new_desc = StrReplaceTool().schema.parameters["properties"]["new_string"]["description"]
     assert "old_string" in new_desc
+    replace_all = StrReplaceTool().schema.parameters["properties"]["replace_all"]["description"]
+    assert replace_all == "替换所有出现处。"
+    assert "而非" not in replace_all
 
 
 def test_classify_write_kind_helpers():
@@ -1285,11 +1293,15 @@ def test_classify_write_kind_helpers():
 
 
 def test_delete_schema_is_short_trigger():
-    """恢复路径在成功回执，不进每轮 schema。"""
+    """恢复路径在成功回执，不进每轮 schema。填参不广告 permanent。"""
     schema = FileDeleteTool().schema
-    blob = schema.description + schema.parameters["properties"]["permanent"]["description"]
-    assert "可逆" in schema.parameters["properties"]["permanent"]["description"]
-    assert "permanent" in schema.description
+    props = schema.parameters["properties"]
+    assert set(props) == {"path"}
+    blob = schema.description
+    assert "permanent" not in blob
+    assert "递归" not in schema.description
+    assert "不可删" not in schema.description
+    assert ".agentcore/rules" in schema.description
     assert "系统回收站" not in blob
     assert "AgentCore/trash" not in blob
     assert "一键还原" not in blob
@@ -1322,7 +1334,8 @@ async def test_delete_directory_recursive(tmp_path: Path):
     assert (tmp_path / "AgentCore" / "trash").is_dir()
 
 
-async def test_delete_permanent_hard_removes(tmp_path: Path):
+async def test_delete_leftover_permanent_still_hard_removes(tmp_path: Path):
+    """Fill-in no longer advertises permanent; leftover true still hard-deletes."""
     (tmp_path / "f.txt").write_text("bye", encoding="utf-8")
     result = await FileDeleteTool().execute(
         {"path": "f.txt", "permanent": True}, _ctx(tmp_path)
@@ -1396,6 +1409,25 @@ async def test_delete_refuses_dot_workspace_root(tmp_path: Path):
 # --- file_batch move / copy (single-item operations) ---
 
 
+def test_file_batch_schema_omits_permanent():
+    props = FileBatchTool().schema.parameters["properties"]["operations"]["items"][
+        "properties"
+    ]
+    assert set(props) == {"op", "path", "source", "destination"}
+
+
+async def test_file_batch_leftover_permanent_still_hard_removes(tmp_path: Path):
+    (tmp_path / "f.txt").write_text("bye", encoding="utf-8")
+    result = await FileBatchTool().execute(
+        _one("delete", path="f.txt", permanent=True), _ctx(tmp_path)
+    )
+    assert result.success is True
+    assert "永久删除" in result.output
+    assert not (tmp_path / "f.txt").exists()
+    trash = tmp_path / "AgentCore" / "trash"
+    assert not trash.exists() or not any(trash.iterdir())
+
+
 def _one(op: str, **fields: object) -> dict:
     return {"operations": [{"op": op, **fields}]}
 
@@ -1439,7 +1471,7 @@ async def test_move_skips_existing_destination(tmp_path: Path):
     )
     assert result.success is True
     assert "跳过" in result.output
-    assert "已存在" in result.output
+    assert "未覆盖" in result.output
     assert (tmp_path / "a.txt").read_text(encoding="utf-8") == "from"
     assert (tmp_path / "b.txt").read_text(encoding="utf-8") == "to"
 
@@ -1484,22 +1516,21 @@ async def test_move_identical_paths_is_idempotent(tmp_path: Path):
     assert (tmp_path / "f.txt").read_text(encoding="utf-8") == "x"
 
 
-async def test_move_identical_after_dossier_flatten(tmp_path: Path):
-    """Source already flat; nested reviews dest sanitizes to same path → idempotent."""
-    flat = f"{REVIEWS_PREFIX}a_b_c.md"
-    nested = f"{REVIEWS_PREFIX}a/b/c.md"
-    flat_path = tmp_path.joinpath(*flat.split("/"))
-    flat_path.parent.mkdir(parents=True, exist_ok=True)
-    flat_path.write_text("review", encoding="utf-8")
+async def test_move_keeps_nested_destination(tmp_path: Path):
+    """Nested dest stays nested; no cabinet flatten."""
+    src = "notes/a.md"
+    nested = "notes/a/b/c.md"
+    src_path = tmp_path.joinpath(*src.split("/"))
+    src_path.parent.mkdir(parents=True, exist_ok=True)
+    src_path.write_text("review", encoding="utf-8")
 
     result = await FileBatchTool().execute(
-        _one("move", source=flat, destination=nested), _ctx(tmp_path)
+        _one("move", source=src, destination=nested), _ctx(tmp_path)
     )
     assert result.success is True
-    assert "相同" in result.output or "无需" in result.output
-    assert flat_path.read_text(encoding="utf-8") == "review"
-    assert flat_path.exists()
-    assert not tmp_path.joinpath(*nested.split("/")).exists()
+    dest = tmp_path.joinpath(*nested.split("/"))
+    assert dest.read_text(encoding="utf-8") == "review"
+    assert not src_path.exists()
 
 
 # --- file_batch copy / mkdir ---
@@ -1533,22 +1564,21 @@ async def test_copy_identical_paths_is_idempotent(tmp_path: Path):
     assert (tmp_path / "f.txt").read_text(encoding="utf-8") == "x"
 
 
-async def test_copy_identical_after_dossier_flatten(tmp_path: Path):
-    """Source already flat; nested reviews dest sanitizes to same path → idempotent."""
-    flat = f"{REVIEWS_PREFIX}a_b_c.md"
-    nested = f"{REVIEWS_PREFIX}a/b/c.md"
-    flat_path = tmp_path.joinpath(*flat.split("/"))
-    flat_path.parent.mkdir(parents=True, exist_ok=True)
-    flat_path.write_text("review", encoding="utf-8")
+async def test_copy_keeps_nested_destination(tmp_path: Path):
+    """Nested dest stays nested; no cabinet flatten."""
+    src = "notes/a.md"
+    nested = "notes/a/b/c.md"
+    src_path = tmp_path.joinpath(*src.split("/"))
+    src_path.parent.mkdir(parents=True, exist_ok=True)
+    src_path.write_text("review", encoding="utf-8")
 
     result = await FileBatchTool().execute(
-        _one("copy", source=flat, destination=nested), _ctx(tmp_path)
+        _one("copy", source=src, destination=nested), _ctx(tmp_path)
     )
     assert result.success is True
-    assert "相同" in result.output or "无需" in result.output
-    assert flat_path.read_text(encoding="utf-8") == "review"
-    assert flat_path.exists()
-    assert not tmp_path.joinpath(*nested.split("/")).exists()
+    dest = tmp_path.joinpath(*nested.split("/"))
+    assert dest.read_text(encoding="utf-8") == "review"
+    assert src_path.exists()
 
 
 async def test_copy_skips_existing_destination(tmp_path: Path):
@@ -1559,7 +1589,8 @@ async def test_copy_skips_existing_destination(tmp_path: Path):
     )
     assert result.success is True
     assert "跳过" in result.output
-    assert "已存在" in result.output
+    assert "未覆盖" in result.output
+    assert (tmp_path / "b.txt").read_text(encoding="utf-8") == "to"
 
 
 async def test_file_batch_partial_failure_continues(tmp_path: Path):
@@ -1633,6 +1664,10 @@ def test_file_list_schema_is_one_layer_ls():
     schema = FileListTool().schema
     props = schema.parameters["properties"]
     assert set(props) == {"directory"}
+    assert "已知" not in schema.description
+    assert "已证实" not in props["directory"]["description"]
+    assert "external/<别名>/" in schema.description
+    assert ".agentcore/rules" in schema.description
 
 
 def test_glob_schema_requires_pattern():
@@ -1894,7 +1929,7 @@ async def test_file_read_missing_with_parent_gives_landmark(tmp_path: Path):
     (app / "src").mkdir()
 
     result = await FileReadTool().execute(
-        {"path": "apps/desktop/package.json"}, _ctx(tmp_path)
+        {"file_path": "apps/desktop/package.json"}, _ctx(tmp_path)
     )
     assert result.success is False
     assert result.error is not None
@@ -1940,7 +1975,7 @@ async def test_file_read_missing_parent_gives_root_tip(tmp_path: Path):
     """路径与父目录都不在：不编造同层样本，但给根查找 / 勿反复重试提示。"""
     (tmp_path / "apps").mkdir()
     result = await FileReadTool().execute(
-        {"path": "apps/ghost/package.json"}, _ctx(tmp_path)
+        {"file_path": "apps/ghost/package.json"}, _ctx(tmp_path)
     )
     assert result.success is False
     assert result.error is not None
@@ -1955,12 +1990,12 @@ async def test_file_read_missing_parent_gives_root_tip(tmp_path: Path):
 
 
 async def test_file_list_latent_stage_dir_returns_empty_not_error(tmp_path: Path):
-    """约定出口尚未创建：file_list 成功空态（写入会自动创建），不报 NotADirectory。"""
-    from agentcore.workspace.stage_dirs import RESEARCH_DIR
+    """约定根尚未创建：file_list 成功空态（写入会自动创建），不报 NotADirectory。"""
+    from agentcore.workspace.stage_dirs import AGENTCORE_ROOT
 
     assert not (tmp_path / "AgentCore").exists()
     result = await FileListTool().execute(
-        {"directory": RESEARCH_DIR}, _ctx(tmp_path)
+        {"directory": AGENTCORE_ROOT}, _ctx(tmp_path)
     )
     assert result.success is True
     assert result.error is None
@@ -1996,7 +2031,7 @@ async def test_file_read_missing_top_level_uses_root_landmark(tmp_path: Path):
     """顶层缺失文件：父目录为根，仍给同层样本。"""
     (tmp_path / "README.md").write_text("hi", encoding="utf-8")
     (tmp_path / "src").mkdir()
-    result = await FileReadTool().execute({"path": "package.json"}, _ctx(tmp_path))
+    result = await FileReadTool().execute({"file_path": "package.json"}, _ctx(tmp_path))
     assert result.success is False
     assert result.error is not None
     assert result.error.startswith("文件不存在：package.json")
@@ -2140,74 +2175,23 @@ async def test_file_list_bare_external_lists_current_mounts(tmp_path: Path):
     assert "`external/desk/`" in result.error
 
 
-# --- write_scope (冷启动 explore_memory) ---
+# --- write_scope ---
 
 
-def _explore_ctx(workspace: Path) -> ToolContext:
-    ctx = _ctx(workspace)
-    ctx.write_scope = "explore_memory"
-    return ctx
 
 
-async def test_write_scope_explore_memory_allows_research_note(tmp_path: Path):
-    ctx = _explore_ctx(tmp_path)
-    result = await FileWriteTool().execute(
-        {
-            "path": "AgentCore/文档/research/摸底笔记.md",
-            "content": "# 笔记\n",
-        },
-        ctx,
-    )
-    assert result.success is True
-    assert (tmp_path / "AgentCore" / "文档" / "research" / "摸底笔记.md").is_file()
-
-
-async def test_write_scope_explore_memory_rejects_user_project_path(tmp_path: Path):
-    ctx = _explore_ctx(tmp_path)
-    result = await FileWriteTool().execute(
-        {"path": "src/main.py", "content": "print(1)\n"},
-        ctx,
-    )
-    assert result.success is False
-    assert result.contract_failure is True
-    assert "AgentCore/" in (result.error or "")
-    assert "src/main.py" in (result.error or "")
-
-
-async def test_write_scope_explore_memory_has_no_inner_path_ban(tmp_path: Path):
-    """步 3：闸只判「在不在 AgentCore/ 下」——厚约定文档已是条目，worker 无工具可写。"""
-    ctx = _explore_ctx(tmp_path)
-    result = await FileWriteTool().execute(
-        {
-            "path": "AgentCore/文档/背景/架构详解.md",
-            "content": "# 背景资料\n",
-        },
-        ctx,
-    )
-    assert result.success is True
-    assert (tmp_path / "AgentCore" / "文档" / "背景" / "架构详解.md").is_file()
 
 
 async def test_write_scope_none_rejects_all(tmp_path: Path):
     ctx = _ctx(tmp_path)
     ctx.write_scope = "none"
     result = await FileWriteTool().execute(
-        {"path": "AgentCore/文档/research/x.md", "content": "x"},
+        {"file_path": "AgentCore/文档/research/x.md", "content": "x"},
         ctx,
     )
     assert result.success is False
     assert "write_scope=none" in (result.error or "")
 
-
-async def test_write_scope_explore_memory_str_replace_rejects_outside(tmp_path: Path):
-    (tmp_path / "app.py").write_text("a = 1\n", encoding="utf-8")
-    ctx = _explore_ctx(tmp_path)
-    result = await StrReplaceTool().execute(
-        {"path": "app.py", "old_string": "a = 1", "new_string": "a = 2"},
-        ctx,
-    )
-    assert result.success is False
-    assert "AgentCore/" in (result.error or "")
 
 
 def test_mark_landed_files_notifies_on_file_landed(tmp_path: Path):

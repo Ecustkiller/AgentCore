@@ -11,8 +11,6 @@ Missing rg is an explicit ``WorkspaceIOError`` — never PATH / Python walk.
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import os
 import re
 import sys
@@ -20,6 +18,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
+from agentcore.core.spawn import spawn_process
 from agentcore.workspace._paths import (
     AI_ARCHIVE_FILE_SUFFIXES,
     AI_IMAGE_FILE_SUFFIXES,
@@ -240,57 +239,22 @@ async def _run_rg_capped(
     cwd: Path,
     max_lines: int,
 ) -> tuple[int, list[str], str, bool]:
-    """Run one rg; keep at most ``max_lines`` stdout lines, then kill."""
-    proc = await asyncio.create_subprocess_exec(
-        str(rg),
-        *args,
-        cwd=str(cwd),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+    """Run one rg; keep at most ``max_lines`` stdout lines, then kill.
+
+    Spawn goes through :func:`spawn_process` so a Windows SelectorEventLoop
+    (uvicorn ``--reload``) can still start ``rg``, and cancellation still
+    kills the child.
+    """
+    result = await spawn_process(
+        [str(rg), *args],
+        cwd=cwd,
+        max_stdout_lines=max_lines,
     )
-    assert proc.stdout is not None and proc.stderr is not None
-    lines: list[str] = []
-    truncated = False
-    stderr_chunks: list[bytes] = []
-
-    async def _drain_stderr() -> None:
-        assert proc.stderr is not None
-        while True:
-            chunk = await proc.stderr.read(4096)
-            if not chunk:
-                return
-            stderr_chunks.append(chunk)
-
-    stderr_task = asyncio.create_task(_drain_stderr())
-    try:
-        while True:
-            raw = await proc.stdout.readline()
-            if not raw:
-                break
-            line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
-            if not line:
-                continue
-            lines.append(line)
-            if len(lines) > max_lines:
-                truncated = True
-                with contextlib.suppress(ProcessLookupError):
-                    proc.kill()
-                break
-        await proc.wait()
-    except asyncio.CancelledError:
-        with contextlib.suppress(ProcessLookupError):
-            proc.kill()
-        with contextlib.suppress(Exception):
-            await proc.wait()
-        raise
-    finally:
-        await stderr_task
-
-    stderr = b"".join(stderr_chunks).decode("utf-8", errors="replace")
-    code = proc.returncode if proc.returncode is not None else 2
-    if truncated:
-        return 0, lines[:max_lines], stderr, True
-    return code, lines, stderr, False
+    stderr = result.stderr.decode("utf-8", errors="replace")
+    if result.truncated:
+        return 0, list(result.lines), stderr, True
+    code = result.returncode if result.returncode >= 0 else 2
+    return code, list(result.lines), stderr, False
 
 
 def _to_rel(

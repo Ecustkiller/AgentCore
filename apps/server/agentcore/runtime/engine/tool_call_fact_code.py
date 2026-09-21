@@ -13,10 +13,6 @@ def tool_call_fact_code(attempt: ToolAttempt) -> str:
     meta = attempt.meta or {}
     raw = meta.get("code")
     code = raw.strip() if isinstance(raw, str) else ""
-    tool = (attempt.tool_name or "").strip()
-    # Git wall-clock timeout must not collide with exec idle hang buckets.
-    if tool == "git" and code == "timeout":
-        return "git_timeout"
     if code:
         return code
     if attempt.parse_failure:

@@ -27,9 +27,9 @@ Same-batch ``sibling_role`` still rejects at dispatch **before** durable
 ``run_plan`` emit. The try_start defense uses the same seat rule on the
 **new batch only** (:func:`same_batch_plan` drops host terminals).
 
-Cross-turn ``append_to_execution_id`` admits the **new batch only** against the
-host plan + journal completed seed (auto-``replaces`` on free seats) — never
-sibling-scan host∪new as one batch.
+Cross-turn continuation mints a new graph and writes ``prev_execution_id``;
+admit applies to the **new batch only** (auto-``replaces`` on free seats) —
+never sibling-scan host∪new as one batch.
 
 Never-started seats (no ``run_started``) do not occupy the live graph: they are
 not incomplete holders for append / isomorphic, and a failed arm must drop them

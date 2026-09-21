@@ -353,10 +353,10 @@ class ContentMatchesCheck:
 
 @dataclass
 class DeliverableIntegrityCheck:
-    """成品完整性（确定性）：禁省略标记 + 同 path 连续 ``file_write`` 字数骤降。
+    """成品完整性（确定性）：禁省略标记 + 同 path 连续 ``write`` 字数骤降。
 
     复用 ``file_ops.has_omission_marker`` / ``is_severe_shrink``（仅 eval；
-    写路径不做完整性硬拒）。扫 ``outcome.content`` 与全部 ``file_write`` 入参正文；
+    写路径不做完整性硬拒）。扫 ``outcome.content`` 与全部 ``write`` 入参正文；
     任一含省略标记即不过。字数骤降仅在同一 path **有旧稿**（≥2 次 write）时比末次 vs
     前次；无旧稿跳过该维，避免首写误报。默认 gating（不进 ``DIAGNOSTIC_CHECKS``）。
     """
@@ -372,10 +372,10 @@ class DeliverableIntegrityCheck:
         if has_omission_marker(content):
             reasons.append("omission in content")
 
-        # path → 按调用序累积的 content 列表（仅成功解析的 file_write）
+        # path → 按调用序累积的 content 列表（仅成功解析的 write）
         writes_by_path: dict[str, list[str]] = {}
         for tool_name, raw in outcome.tool_calls:
-            if tool_name != "file_write":
+            if tool_name != "write":
                 continue
             try:
                 args = json.loads(raw) if raw else {}
@@ -387,9 +387,9 @@ class DeliverableIntegrityCheck:
             if not isinstance(body, str):
                 continue
             if has_omission_marker(body):
-                path = args.get("path") if isinstance(args.get("path"), str) else "?"
-                reasons.append(f"omission in file_write({path})")
-            path = args.get("path")
+                path = args.get("file_path") if isinstance(args.get("file_path"), str) else "?"
+                reasons.append(f"omission in write({path})")
+            path = args.get("file_path")
             if isinstance(path, str) and path:
                 writes_by_path.setdefault(path, []).append(body)
 

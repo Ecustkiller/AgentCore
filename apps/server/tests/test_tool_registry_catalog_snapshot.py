@@ -29,21 +29,20 @@ from agentcore.tools.catalog import (
 _BUILTIN_ORDER = [
     "web_search",
     "web_fetch",
-    "file_read",
-    "file_write",
-    "str_replace",
+    "read",
+    "write",
+    "edit",
     "file_list",
     "glob",
     "file_delete",
     "file_batch",
     "md_export",
-    "download_url",
     "grep",
-    "git",
     "run",
 ]
 
-# Host face is host_class — only appears when desktop_online=True (not default roster).
+# Host face is host_class — factory table lists it even when the desktop
+# heartbeat is down (execute refuses without a channel).
 _HOST_ORDER = [
     "host",
 ]
@@ -65,7 +64,7 @@ _WORKER_GATED_ORDER = [
     "read_conversation",
 ]
 
-_CEO_BUILTIN_ORDER = list(_BUILTIN_ORDER)
+_CEO_BUILTIN_ORDER = list(_BUILTIN_ORDER) + _HOST_ORDER
 
 # CEO_ORCHESTRATION *surface* roster order (wiring / catalog append), not ToolFace.
 _CATALOG_ORCHESTRATION_ORDER = [
@@ -81,18 +80,16 @@ _CATALOG_AVAILABLE_TO: dict[str, tuple[str, ...]] = {
     # Shared read/retrieval built-ins
     "web_search": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "web_fetch": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
-    "file_read": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
+    "read": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "file_list": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "glob": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "grep": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
-    "git": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     # Write / execute: CEO + worker (same GRANTABLE ApprovalGate)
-    "file_write": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
-    "str_replace": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
+    "write": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
+    "edit": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "file_delete": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "file_batch": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "md_export": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
-    "download_url": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "run": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "host": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "escalate": (AVAILABLE_TO_WORKER,),
@@ -116,7 +113,7 @@ def test_tool_registry_builtin_order_and_roster():
 
 def test_tool_registry_worker_default_order_and_roster():
     names = [s.name for s in build_worker_registry().list_all()]
-    assert names == _BUILTIN_ORDER + _WORKER_ONLY_ORDER
+    assert names == _BUILTIN_ORDER + _HOST_ORDER + _WORKER_ONLY_ORDER
 
 
 def test_tool_registry_ceo_builtin_order_and_roster():
@@ -131,7 +128,7 @@ def test_tool_registry_builtin_includes_navigate_when_include_browser():
 
 def test_tool_registry_ceo_includes_navigate_when_include_browser():
     names = [s.name for s in build_ceo_tool_registry(include_browser=True).list_all()]
-    assert names == _CEO_BUILTIN_ORDER + _BROWSER_CEO_ORDER
+    assert names == _BUILTIN_ORDER + _BROWSER_CEO_ORDER + _HOST_ORDER
 
 
 def test_browser_tools_ceo_holds_interactive_screenshot_worker_only():
@@ -159,11 +156,10 @@ def test_tool_registry_builtin_approvals_snapshot():
     never = {
         "web_search",
         "web_fetch",
-        "file_read",
+        "read",
         "file_list",
         "glob",
         "grep",
-        "git",
     }
     grantable = set(_BUILTIN_ORDER) - never
     for name in never:
@@ -175,15 +171,14 @@ def test_tool_registry_builtin_approvals_snapshot():
 def test_tool_registry_grant_sets_snapshot():
     assert file_mutation_tool_names() == frozenset(
         {
-            "file_write",
-            "str_replace",
+            "write",
+            "edit",
             "file_delete",
             "file_batch",
             "md_export",
-            "download_url",
         }
     )
-    assert approval_class_tool_names() == file_mutation_tool_names() | frozenset({"git"})
+    assert approval_class_tool_names() == file_mutation_tool_names()
     assert delegation_grantable_tool_names() == approval_class_tool_names() | frozenset(
         {
             "run",
@@ -243,11 +238,10 @@ def test_tool_registry_declarations_cover_roster():
     _ceo_grantable = frozenset(_BUILTIN_ORDER) - {
         "web_search",
         "web_fetch",
-        "file_read",
+        "read",
         "file_list",
         "glob",
         "grep",
-        "git",
     } | frozenset(_BROWSER_CEO_ORDER)
 
     declared = declared_tools()

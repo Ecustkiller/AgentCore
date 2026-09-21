@@ -151,7 +151,7 @@ class LoopController(
         # rounds gather no intel → do not spend breadth budget). Calls still feed diagnostics.
         self._investigation_calls = 0
         self._investigation_rounds = 0
-        # Local file peeks only (file_list / glob / file_read / grep) — diagnostics / eval probe.
+        # Local file peeks only (file_list / glob / read / grep) — diagnostics / eval probe.
         self._local_recon_calls = 0
         # Over-investigation safety net (收敛治理, 保险丝): absolute round ceiling plus
         # progress-aware spinning on repeated same-target reads. ``finalize_rounds <= 0``
@@ -593,7 +593,7 @@ class LoopController(
                     landed_echo = tool in LANDING_TOOLS and is_landed_echo_rejection(
                         attempt.error_summary
                     )
-                    # 摘要回灌：首次拒写即 path-stop（点名 file_read），少烧一轮空转；
+                    # 摘要回灌：首次拒写即 path-stop（点名 read），少烧一轮空转；
                     # 其它 validation 仍按 validation_path_streak（默认 2）。
                     need = 1 if landed_echo else self._validation_path_streak
                     if streak >= need:
@@ -632,7 +632,7 @@ class LoopController(
                 if attempt.success:
                     round_investigation_success = True
                 inv_fps.add(attempt.fingerprint)
-                if attempt.tool_name in {"file_list", "glob", "file_read", "grep"}:
+                if attempt.tool_name in {"file_list", "glob", "read", "grep"}:
                     self._local_recon_calls += 1
         # Rounds, not raw calls, drive the safety net: a parallel batch of N reads in one
         # round bumps this once, so fanning out can't guillotine the worker.

@@ -1,32 +1,25 @@
 """批量 / 落字节工具的自报产物 → 交付物台账（契约见 ``tools/file_products.py``）。
 
-``file_write`` 那批「笔」早已自报，但一次能产多件的 ``file_batch``、以及把网络字节
-写进工作区的 ``download_url`` 也曾漏账。这里按事故形状端到端钉死：真跑工具 → 引擎盖章
-→ ``files_touched`` / ``file_acceptance``。断言的是**真正落盘的路径**（已过 sanitize，
-不是模型请求的原始 path），且搬家 / 复制一律不填 ``derived_from``（填错会让源文件在
-用户面被误折叠成中间稿）。
+``write`` 那批「笔」早已自报，但一次能产多件的 ``file_batch`` 也曾漏账。
+这里按事故形状端到端钉死：真跑工具 → 引擎盖章 → ``files_touched`` /
+``file_acceptance``。断言的是**真正落盘的路径**（已过 sanitize，不是模型请求的
+原始 path），且搬家 / 复制一律不填 ``derived_from``（填错会让源文件在用户面被
+误折叠成中间稿）。
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
-
-import httpx
-import pytest
 
 from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.runs.serialize import (
     files_touched_from_transcript,
 )
 from agentcore.tools.builtin.file_ops import FileBatchTool
-from agentcore.tools.builtin.web import download_url as download_mod
-from agentcore.tools.builtin.web.download_url import DownloadUrlTool
 from agentcore.tools.file_products import with_file_products_marker
 from agentcore.tools.protocol import ToolContext, ToolResult
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
-from agentcore.workspace.stage_dirs import REVIEWS_PREFIX
 
 
 def _ctx(workspace: Path) -> ToolContext:
@@ -47,25 +40,6 @@ def _ledger(result: ToolResult) -> list[str]:
         tool_call_id="c1",
     )
     return files_touched_from_transcript([message])
-
-
-def _ok_response(body: bytes) -> httpx.Response:
-    return httpx.Response(
-        200,
-        content=body,
-        headers={
-            "content-type": "application/octet-stream",
-            "content-length": str(len(body)),
-        },
-        request=httpx.Request("GET", "https://example.com/file.bin"),
-    )
-
-
-def _stub_download(monkeypatch: pytest.MonkeyPatch, body: bytes = b"payload") -> None:
-    async def _fake_safe_request(client: Any, method: str, url: str, **kwargs: Any):
-        return _ok_response(body)
-
-    monkeypatch.setattr(download_mod, "_safe_request", _fake_safe_request)
 
 
 async def test_file_batch_reports_every_destination_it_landed(tmp_path: Path):
@@ -96,29 +70,29 @@ async def test_file_batch_reports_every_destination_it_landed(tmp_path: Path):
     assert (tmp_path / "out" / "copy.docx").is_file()
 
 
-async def test_file_batch_reports_sanitized_destination_not_requested(tmp_path: Path):
-    """自报的必须是真正落盘的路径：约定文档区嵌套路径会被压平。"""
-    reviews = tmp_path / "AgentCore" / "文档" / "reviews"
-    reviews.mkdir(parents=True)
-    (reviews / "src.md").write_text("review", encoding="utf-8")
+async def test_file_batch_reports_nested_destination_as_landed(tmp_path: Path):
+    """自报的必须是真正落盘的路径：嵌套 dest 保持嵌套。"""
+    notes = tmp_path / "notes"
+    notes.mkdir(parents=True)
+    (notes / "src.md").write_text("review", encoding="utf-8")
 
+    nested = "notes/a/b.md"
     result = await FileBatchTool().execute(
         {
             "operations": [
                 {
                     "op": "move",
-                    "source": f"{REVIEWS_PREFIX}src.md",
-                    "destination": f"{REVIEWS_PREFIX}a/b.md",
+                    "source": "notes/src.md",
+                    "destination": nested,
                 }
             ]
         },
         _ctx(tmp_path),
     )
 
-    flat = f"{REVIEWS_PREFIX}a_b.md"
     assert result.success is True
-    assert _ledger(result) == [flat]
-    assert (tmp_path / Path(flat)).is_file()
+    assert _ledger(result) == [nested]
+    assert (tmp_path / Path(nested)).is_file()
 
 
 async def test_file_batch_partial_failure_reports_only_the_successes(tmp_path: Path):
@@ -157,37 +131,5 @@ async def test_file_batch_skipped_conflict_reports_no_product(tmp_path: Path):
     )
 
     assert result.metadata["skip"] == 1
-    assert result.file_products == []
-    assert _ledger(result) == []
-
-
-async def test_download_url_reports_the_path_it_actually_wrote(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """下载落盘进台账；报的是 sanitize 之后的真实路径，不是请求里的原始 path。"""
-    _stub_download(monkeypatch, b"hello-download")
-
-    result = await DownloadUrlTool().execute(
-        {
-            "url": "https://example.com/file.bin",
-            "path": f"{REVIEWS_PREFIX}a/data.csv",
-        },
-        _ctx(tmp_path),
-    )
-
-    flat = f"{REVIEWS_PREFIX}a_data.csv"
-    assert result.success is True
-    assert [(p.path, p.kind, p.derived_from) for p in result.file_products] == [
-        (flat, "csv", None)
-    ]
-    assert _ledger(result) == [flat]
-    assert (tmp_path / Path(flat)).read_bytes() == b"hello-download"
-
-
-async def test_download_url_failed_call_reports_no_product(tmp_path: Path):
-    result = await DownloadUrlTool().execute(
-        {"url": "http://127.0.0.1/secret", "path": "out.bin"}, _ctx(tmp_path)
-    )
-    assert result.success is False
     assert result.file_products == []
     assert _ledger(result) == []

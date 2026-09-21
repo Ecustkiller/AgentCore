@@ -4,14 +4,15 @@ Every place that needs a cost calls :func:`calculate_cost` — there is no other
 price table and no per-site arithmetic.
 
 **There is no live FX.** User-facing money is curated **CNY**. Flash SKUs use
-OpenCode Go's public USD list × a frozen ``GO_USD_TO_CNY`` (peak/off-peak by
-call time). Other models stay 国内官价直写. ``credential_source`` only routes
-the same number: platform/vendor → ``cost_total_nano`` (quota); user →
-``cost_estimated_nano`` (display copy, never quota).
+DeepSeek's official 中文列表价 (peak/off-peak by call time). Other models stay
+国内官价直写. ``credential_source`` only routes the same number: platform/vendor
+→ ``cost_total_nano`` (quota); user → ``cost_estimated_nano`` (display copy,
+never quota). OpenCode Go's actual subscription spend is not this meter.
 
-- **curated** ``_PRICING`` — 国内官价, **CNY** (glm / 豆包 / Pro / kimi vision).
-- **Flash** — Go public list × frozen 7.2, peak/off-peak (official / Go / Zen-free
-  share the meter). Admin still sums raw USD for window cards.
+- **curated** ``_PRICING`` — 国内官价, **CNY** (glm / 豆包 / kimi vision).
+- **Flash** — official DeepSeek CNY, peak/off-peak (official / Go V4.1 / retired
+  V4 Flash alias / Zen-free share the meter). Admin still sums Go public USD for
+  window cards.
 
 Money is never a float. Costs are computed in :class:`~decimal.Decimal` and
 returned as integer **nano-units of** ``Cost.currency`` (``1 unit = 1e9 nano``).
@@ -40,7 +41,6 @@ from agentcore.core.logging import get_logger
 from agentcore.llm.profiles import (
     DEEPSEEK_V4_FLASH,
     DEEPSEEK_V4_FLASH_FREE,
-    DEEPSEEK_V4_PRO,
     DEEPSEEK_V41_FLASH,
     OPENCODE_GO_V41_FLASH,
 )
@@ -91,10 +91,10 @@ PLATFORM_RELAY_GROK_45 = "grok-4.5"  # id 常量保留；本步无 curated CNY �
 # fall back to glm-5.2. Keep OFF PLATFORM_MODELS — not a user-selectable chat model.
 PLATFORM_RELAY_KIMI_K25 = "kimi-k2.5"
 
-# CNY per 1M tokens (F4). glm / 豆包 / Pro / kimi vision = 国内官价直写.
-# gpt-4o / grok-4.5 / qwen-vl-max — 仍无 curated（不上架）。
-# Flash：Go 公开单价 × 冻结 7.2，峰谷随调用时间；不进本表。
-_FLASH_GO_METER_IDS = frozenset(
+# CNY per 1M tokens (F4). glm / 豆包 / kimi vision = 国内官价直写.
+# gpt-4o / grok-4.5 / qwen-vl-max / retired Pro — 仍无 curated（不上架）.
+# Flash：DeepSeek 中文官价，峰谷随调用时间；不进本表。
+_FLASH_METER_IDS = frozenset(
     {
         DEEPSEEK_V4_FLASH,
         OPENCODE_GO_V41_FLASH,
@@ -103,12 +103,20 @@ _FLASH_GO_METER_IDS = frozenset(
         "deepseek-v4.1-flash-expires-on-0910",
     }
 )
+# Official DeepSeek V4.1 Flash (api-docs.deepseek.com/zh-cn/quick_start/pricing).
+# Peak = Mon–Fri UTC 01:00–04:00 ∪ 06:00–10:00; weekends off-peak. Chinese
+# public holidays are not encoded (those weekdays may overcharge as peak).
+_FLASH_OFF_PEAK_CNY: dict[str, Decimal] = {
+    "cache_hit": Decimal("0.02"),
+    "cache_miss": Decimal("1"),
+    "output": Decimal("4"),
+}
+_FLASH_PEAK_CNY: dict[str, Decimal] = {
+    "cache_hit": Decimal("0.04"),
+    "cache_miss": Decimal("2"),
+    "output": Decimal("8"),
+}
 _PRICING: dict[str, dict[str, Decimal]] = {
-    DEEPSEEK_V4_PRO: {
-        "cache_hit": Decimal("0.025"),
-        "cache_miss": Decimal("3"),
-        "output": Decimal("6"),
-    },
     # 豆包 doubao-seed-2.1-turbo via 火山方舟. Volcengine 豆包1.6 统一定价,
     # tiered by INPUT length; this is the 0–32K tier (input ¥0.8/1M, output ¥8/1M).
     # No usable cache tier: generic OpenAI-compatible provider doesn't surface a
@@ -197,26 +205,15 @@ def _now_utc() -> datetime:
     return datetime.now(UTC)
 
 
-def _go_cost_multiplier() -> Decimal:
-    try:
-        from agentcore.config import settings
-
-        raw = str(getattr(settings, "go_cost_multiplier", "1") or "1").strip()
-        m = Decimal(raw)
-        return m if m > 0 else Decimal(1)
-    except Exception:  # noqa: BLE001 — pricing must not depend on settings plumbing
-        return Decimal(1)
-
-
-def _flash_go_meter_id(model: str) -> str | None:
+def _flash_meter_id(model: str) -> str | None:
     key = (model or "").strip()
-    return key if key in _FLASH_GO_METER_IDS else None
+    return key if key in _FLASH_METER_IDS else None
 
 
-def _flash_go_cny_card(at: datetime) -> dict[str, Decimal]:
-    from agentcore.billing.opencode_go_public_prices import go_flash_cny_per_million
+def _flash_official_cny_card(at: datetime) -> dict[str, Decimal]:
+    from agentcore.billing.opencode_go_public_prices import is_opencode_go_peak
 
-    return go_flash_cny_per_million(at, multiplier=_go_cost_multiplier())
+    return dict(_FLASH_PEAK_CNY) if is_opencode_go_peak(at) else dict(_FLASH_OFF_PEAK_CNY)
 
 
 def curated_pricing_for(
@@ -341,18 +338,17 @@ def resolve_price_card(
 ) -> ResolvedCard:
     """Resolve the price card + its currency for one call.
 
-    Card lookup is the same for every payer. Flash uses the Go public list
-    (CNY via frozen FX, peak/off-peak from ``at``). Other ids use curated CNY
-    (exact, then date-stem). ``credential_source`` only decides the miss path —
-    user stays ``unpriced`` (never default-tier); platform/vendor fall back to
-    glm-5.2.
+    Card lookup is the same for every payer. Flash uses official DeepSeek CNY
+    (peak/off-peak from ``at``). Other ids use curated CNY (exact, then
+    date-stem). ``credential_source`` only decides the miss path — user stays
+    ``unpriced`` (never default-tier); platform/vendor fall back to glm-5.2.
 
     An ``unpriced`` result still names CNY so callers never have to invent a
     currency for a zero.
     """
-    if _flash_go_meter_id(model):
+    if _flash_meter_id(model):
         when = at if at is not None else _now_utc()
-        return ResolvedCard(_flash_go_cny_card(when), "curated", CURRENCY_CNY)
+        return ResolvedCard(_flash_official_cny_card(when), "curated", CURRENCY_CNY)
     curated, match_kind, matched_key = curated_pricing_for(model)
     if curated is not None:
         if match_kind == "date_stem":
@@ -386,7 +382,7 @@ def has_curated_pricing(model: str) -> bool:
     Dated revisions that share a curated sibling's date-stem count as curated
     (same card) so an id bump like ``…-260715`` is not flagged as 漏配.
     """
-    if _flash_go_meter_id(model):
+    if _flash_meter_id(model):
         return True
     card, _kind, _matched = curated_pricing_for(model)
     return card is not None
@@ -452,8 +448,8 @@ def calculate_cost(
 
     Input is split by cache hit/miss (DeepSeek pre-splits the counts); output is
     priced whole (reasoning already included). Returns integer nano-units of
-    ``Cost.currency`` — always CNY. Flash is Go public USD × frozen FX (peak
-    from ``at``, default now). Other curated cards are 国内官价.
+    ``Cost.currency`` — always CNY. Flash is official DeepSeek CNY (peak from
+    ``at``, default now). Other curated cards are 国内官价.
 
     The card does not depend on who pays. Call-level ``credential_source`` only
     routes the same nano into billed vs estimated ledger columns.

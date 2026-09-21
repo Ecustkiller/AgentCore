@@ -25,7 +25,6 @@ function renderSection(onOpenEntry: () => void = () => undefined) {
     <TooltipProvider>
       <AgentCoreSection
         scope={{ kind: "folder", folderId: "F1" }}
-        memoryActivePath={null}
         documentActivePath={null}
         onOpenEntry={onOpenEntry}
         onEntryDeleted={() => undefined}

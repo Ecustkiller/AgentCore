@@ -175,15 +175,17 @@ function messagePermalink(conversationId: string, messageId: string): string {
 export function MessageMoreMenu({
   message,
   captainContext,
+  showSupportPack = true,
 }: {
   message: Message;
   captainContext: ContextBlockWire[];
+  /** False when this bubble is not the pack host. */
+  showSupportPack?: boolean;
 }) {
   const [contextOpen, setContextOpen] = useState(false);
   const conversationId = useConversationStore((s) => s.currentConversationId);
 
-  // 「复制排查包」恒可用（对齐错误卡；行业常见：支持 ID 可复制）。
-  // 查 bug 走排查包喂 AI，不给人眼检视铬条。
+  // 查 bug 走排查包喂 AI。失败横幅不挂这一项。
   const serverMessageId = assistantProjectionId(message);
   const diagnosticIds = {
     conversationId,
@@ -219,7 +221,7 @@ export function MessageMoreMenu({
             <MoreHorizontal size={14} />
           </IconButton>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="min-w-48">
+        <DropdownMenuContent align="start">
           {conversationId && (
             <DropdownMenuItem
               onSelect={() =>
@@ -258,7 +260,7 @@ export function MessageMoreMenu({
               )}
             </>
           )}
-          {diagnosticText && (
+          {showSupportPack && diagnosticText && (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -339,16 +341,19 @@ export function AssistantMessageFooter({
   onRegenerate,
   displayError,
   pinSupportPack = false,
+  showSupportPack = true,
   showRegenerate,
 }: {
   message: Message;
   captainContext: ContextBlockWire[];
   costText: string | null;
   onRegenerate: () => void;
-  /** Settled empty-failure card (message.error or synthetic); feeds copy via visibleMessageText. */
+  /** Settled failure face; feeds copy via visibleMessageText. */
   displayError?: { code: string; message: string } | null;
-  /** Team-strip fail/partial: keep「更多」visible (not hover-reveal) as the pack host. */
+  /** Keep「更多」visible (not hover-reveal) when it is the pack host. */
   pinSupportPack?: boolean;
+  /** False when this bubble is not the pack host. */
+  showSupportPack?: boolean;
   /** Arbitrator: hide when a named recovery is already the unique retry. */
   showRegenerate: boolean;
 }) {
@@ -375,7 +380,11 @@ export function AssistantMessageFooter({
     ),
   );
   const more = (
-    <MessageMoreMenu message={message} captainContext={captainContext} />
+    <MessageMoreMenu
+      message={message}
+      captainContext={captainContext}
+      showSupportPack={showSupportPack}
+    />
   );
   return (
     <div className="mt-1 flex items-center justify-between gap-2">
@@ -401,7 +410,7 @@ export function AssistantMessageFooter({
                   </IconButton>
                 </DropdownMenuTrigger>
               </SimpleTooltip>
-              <DropdownMenuContent align="start" className="min-w-40">
+              <DropdownMenuContent align="start">
                 <DropdownMenuItem onSelect={() => void onCopy()}>
                   仅交付
                 </DropdownMenuItem>

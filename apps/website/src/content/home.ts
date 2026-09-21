@@ -588,8 +588,8 @@ export const COMPARE = {
         en: "You tune one agent's prompt and tools.",
       },
       ours: {
-        zh: "工具 / 技能 / 规则 / 记忆 / 团队，五类资产可沉淀复用",
-        en: "Tools, skills, rules, memory, teams — five reusable asset types.",
+        zh: "工具 / 技能 / 规则 / 团队，资产可沉淀复用",
+        en: "Tools, skills, rules, and teams — reusable assets you can keep.",
       },
     },
   ],
@@ -637,15 +637,6 @@ export const ECOSYSTEM = {
       body: {
         zh: "团队行为的红线与约束",
         en: "The red lines and constraints your team follows.",
-      },
-      accent: "brand-2" as const,
-    },
-    {
-      code: "Memory",
-      name: { zh: "记忆", en: "Memory" },
-      body: {
-        zh: "你写的规矩跨对话生效；过往事情去查旧对话",
-        en: "Your rules carry across chats; past facts come from old conversations.",
       },
       accent: "brand-2" as const,
     },

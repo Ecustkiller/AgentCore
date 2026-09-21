@@ -503,27 +503,18 @@ def test_schema_no_longer_says_mvp_leave_empty():
     assert "@platform" in model_desc
 
 
-def test_skill_teaches_catalog_ref_not_mvp_empty():
-    from agentcore.runtime.skills import build_system_skill_registry
+def test_schema_teaches_catalog_ref_not_mvp_empty():
     from agentcore.tools.builtin.debate.schema import DEBATE_PARAMETERS
 
-    body = build_system_skill_registry().get("debate_and_review").body
-    assert "MVP 未启用" not in body
-    assert "请留空" not in body
-    # 模型消歧 / 「禁止元问题」在 debate.models 回执，不进 skill 常驻。
-    assert "元问题" not in body
-    assert "消歧" not in body
-    assert "cross_model" not in body
-    assert "【多模型】" not in body
-    assert "platform/xxx" not in body
-    assert "PLATFORM_MODELS" not in body
-    assert "中立槽" not in body
     model_desc = DEBATE_PARAMETERS["properties"]["sides"]["items"]["properties"]["model"][
         "description"
     ]
     assert "@platform" in model_desc or "@byok" in model_desc
     assert "路由键" in model_desc
     assert "cross_model" in DEBATE_PARAMETERS["properties"]
+    cx = DEBATE_PARAMETERS["properties"]["cross_model"]["description"]
+    assert "未点名" in cx
+    assert "无本旗标" not in cx
     assert "moderator_model" in DEBATE_PARAMETERS["properties"]
     moderator_desc = DEBATE_PARAMETERS["properties"]["moderator_model"]["description"]
     assert "sides[].model" in moderator_desc

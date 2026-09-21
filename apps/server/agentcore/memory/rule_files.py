@@ -1,4 +1,4 @@
-"""User-rule path helpers — ``.agentcore/规则/*.md`` is the injectable object.
+"""User-rule path helpers — ``.agentcore/rules/*.md`` is the injectable object.
 
 Workspace ``file_*`` tools overlay this catalog onto ``documents`` (not disk).
 The address is a reserved prompt-entry path, not a workspace-tree file.
@@ -9,16 +9,17 @@ from __future__ import annotations
 
 from typing import Literal
 
-from agentcore.db.repositories.documents import RULES_DIR_NAME
+from agentcore.db.repositories.documents import LEGACY_RULES_DIR_NAME, RULES_DIR_NAME
 from agentcore.memory.rules_injection import normalize_rule_filename
 
 RulePathKind = Literal["agentcore_root", "rules_dir", "rule_file", "invalid"]
 
 RULES_CATALOG_ROOT = ".agentcore"
 RULES_DIR_REL = f"{RULES_CATALOG_ROOT}/{RULES_DIR_NAME}"
+_LEGACY_RULES_DIR_REL = f"{RULES_CATALOG_ROOT}/{LEGACY_RULES_DIR_NAME}"
 WORKER_RULE_WRITE_MSG = "队员不能改用户规则。请把规则改动交给协调者。"
 RULE_TREE_META_MSG = (
-    "请用 file_write / file_read / file_delete / file_list 操作"
+    "请用 write / read / file_delete / file_list 操作"
     f" {RULES_DIR_REL}/ 下的用户规则。"
 )
 
@@ -34,12 +35,15 @@ def classify_rule_path(raw: str) -> tuple[RulePathKind | None, str | None]:
     """Classify a path against the user-rule catalog.
 
     ``None`` kind = not this overlay (ordinary workspace I/O).
+    The retired catalog address ``.agentcore/规则`` is ``invalid`` (reject, not disk).
     """
     rel = posix_relpath(raw)
     if not rel:
         return None, None
     if rel == RULES_CATALOG_ROOT:
         return "agentcore_root", None
+    if rel == _LEGACY_RULES_DIR_REL or rel.startswith(_LEGACY_RULES_DIR_REL + "/"):
+        return "invalid", None
     if rel == RULES_DIR_REL:
         return "rules_dir", None
     prefix = RULES_DIR_REL + "/"

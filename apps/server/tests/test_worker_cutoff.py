@@ -198,7 +198,7 @@ async def test_ceiling_finalize_coordination_tools_pass_approval_gate():
     """硬顶收口再执行工具：GRANTABLE 工具必须过审批闸，不得绕卡直接落盘。
 
     force_finalize 契约允许软轮返回 coordination_tools 由调用方执行；该臂一旦漏传
-    approval_gate，``needs_approval`` 就退化成「仅安全熔断强制时才拦」——file_write
+    approval_gate，``needs_approval`` 就退化成「仅安全熔断强制时才拦」——write
     绕过用户授权卡写盘。与孪生履约点 directive_apply 的 Finalize 臂对齐。
     """
     from pathlib import Path
@@ -226,7 +226,7 @@ async def test_ceiling_finalize_coordination_tools_pass_approval_gate():
         @property
         def schema(self) -> ToolSchema:
             return ToolSchema(
-                name="file_write",
+                name="write",
                 description="stub",
                 parameters={"type": "object", "properties": {}},
                 face=ToolFace.FILE,
@@ -242,7 +242,7 @@ async def test_ceiling_finalize_coordination_tools_pass_approval_gate():
     class _SpyGate:
         # file_write=ask（谨慎）：云端 worker 也不得免逐次卡。
         permission_axes = recipe_to_axes(AutonomyPolicy.CAUTIOUS)
-        file_op_tools = frozenset({"file_write"})
+        file_op_tools = frozenset({"write"})
 
         def __init__(self) -> None:
             self.authorized: list[str] = []
@@ -266,7 +266,7 @@ async def test_ceiling_finalize_coordination_tools_pass_approval_gate():
     write_call = ToolCall(
         id="tc-ceiling",
         function=ToolCallFunction(
-            name="file_write", arguments='{"path":"out.md","content":"x"}'
+            name="write", arguments='{"file_path":"out.md","content":"x"}'
         ),
     )
 
@@ -297,7 +297,7 @@ async def test_ceiling_finalize_coordination_tools_pass_approval_gate():
             active_model="m",
             base_model="m",
             tools=registry,
-            allowed_tool_names=["file_write"],
+            allowed_tool_names=["write"],
             disabled_tools=set(),
             emit_content=lambda _d: None,
             emit_reasoning=lambda _d: None,
@@ -329,7 +329,7 @@ async def test_ceiling_finalize_coordination_tools_pass_approval_gate():
             cutoff_reason_sink=[],
         )
 
-    assert gate.authorized == ["file_write"], "硬顶收口漏传审批闸 → GRANTABLE 绕卡落盘"
+    assert gate.authorized == ["write"], "硬顶收口漏传审批闸 → GRANTABLE 绕卡落盘"
     assert tool.executed is True
 
 
@@ -448,12 +448,12 @@ def test_token_wind_down_threshold_and_tool_narrowing():
     assert should_enter_token_wind_down(1, 30_000, 30_000) is False  # reserve >= ceiling
     assert should_enter_token_wind_down(1, 20_000, 30_000) is False  # reserve > ceiling
 
-    # 收尾窗口本意「落盘 + handoff」；写盘白名单不可漏 file_write / str_replace。
+    # 收尾窗口本意「落盘 + handoff」；写盘白名单不可漏 write / edit。
     assert frozenset(
         {
             "handoff",
-            "file_write",
-            "str_replace",
+            "write",
+            "edit",
             "file_batch",
             "file_list",
             "md_export",
@@ -462,8 +462,8 @@ def test_token_wind_down_threshold_and_tool_narrowing():
     available = {
         "web_search",
         "handoff",
-        "file_write",
-        "str_replace",
+        "write",
+        "edit",
         "file_list",
         "code_execute",
     }
@@ -472,12 +472,12 @@ def test_token_wind_down_threshold_and_tool_narrowing():
         allowed=[
             "web_search",
             "handoff",
-            "file_write",
-            "str_replace",
+            "write",
+            "edit",
             "file_list",
         ],
     )
-    assert set(narrowed) == {"handoff", "file_write", "str_replace", "file_list"}
+    assert set(narrowed) == {"handoff", "write", "edit", "file_list"}
     assert "web_search" not in narrowed
     assert set(narrowed) <= (WIND_DOWN_ALLOWED_TOOLS | {"handoff"})
 
@@ -495,8 +495,8 @@ def test_wind_down_allows_deterministic_md_export():
     available = {
         "web_search",
         "handoff",
-        "file_read",
-        "file_write",
+        "read",
+        "write",
         "md_export",
         "code_execute",
     }
@@ -515,7 +515,7 @@ def test_wind_down_allows_deterministic_md_export():
 
 
 def test_wind_down_keeps_file_read_for_files_deliverable():
-    """交付类（工具面含 file_write）wind_down 保留 file_read；检索类不放回。"""
+    """交付类（工具面含 write）wind_down 保留 read；检索类不放回。"""
     from agentcore.runtime.runs.cutoff import (
         wind_down_allowed_tools,
         wind_down_breach_tool_names,
@@ -526,9 +526,9 @@ def test_wind_down_keeps_file_read_for_files_deliverable():
         "web_search",
         "web_fetch",
         "grep",
-        "file_read",
-        "file_write",
-        "str_replace",
+        "read",
+        "write",
+        "edit",
         "handoff",
         "code_execute",
     }
@@ -536,15 +536,15 @@ def test_wind_down_keeps_file_read_for_files_deliverable():
         "web_search",
         "web_fetch",
         "grep",
-        "file_read",
-        "file_write",
-        "str_replace",
+        "read",
+        "write",
+        "edit",
         "handoff",
     ]
     assert worker_keeps_file_read_in_wind_down(available=available, allowed=allowed)
     narrowed = narrow_tools_for_wind_down(available, allowed=allowed)
-    assert "file_read" in narrowed
-    assert "file_write" in narrowed
+    assert "read" in narrowed
+    assert "write" in narrowed
     assert "handoff" in narrowed
     assert "web_search" not in narrowed
     assert "web_fetch" not in narrowed
@@ -552,18 +552,18 @@ def test_wind_down_keeps_file_read_for_files_deliverable():
     assert "code_execute" not in narrowed
 
     whitelist = wind_down_allowed_tools(keep_file_read=True)
-    assert "file_read" in whitelist
-    assert wind_down_breach_tool_names(["file_read", "handoff"], allowed=whitelist) == []
+    assert "read" in whitelist
+    assert wind_down_breach_tool_names(["read", "handoff"], allowed=whitelist) == []
     assert wind_down_breach_tool_names(["web_search"], allowed=whitelist) == ["web_search"]
 
-    # Prose worker（工具面无 file_write）不保留 file_read。
-    prose_available = {"file_read", "web_search", "handoff", "ask_user"}
-    prose_allowed = ["file_read", "web_search", "handoff", "ask_user"]
+    # Prose worker（工具面无 write）不保留 read。
+    prose_available = {"read", "web_search", "handoff", "ask_user"}
+    prose_allowed = ["read", "web_search", "handoff", "ask_user"]
     assert not worker_keeps_file_read_in_wind_down(
         available=prose_available, allowed=prose_allowed
     )
     prose_narrowed = narrow_tools_for_wind_down(prose_available, allowed=prose_allowed)
-    assert "file_read" not in prose_narrowed
+    assert "read" not in prose_narrowed
     assert "handoff" in prose_narrowed
     assert "web_search" not in prose_narrowed
 
@@ -579,20 +579,20 @@ def test_wind_down_allowed_tools_are_persist_and_handoff():
     available = {
         "web_search",
         "grep",
-        "file_write",
-        "str_replace",
+        "write",
+        "edit",
         "handoff",
         "code_execute",
     }
-    allowed = ["web_search", "grep", "file_write", "str_replace", "handoff"]
+    allowed = ["web_search", "grep", "write", "edit", "handoff"]
     narrowed = narrow_tools_for_wind_down(available, allowed=allowed)
-    assert set(narrowed) == {"file_write", "str_replace", "handoff"}
+    assert set(narrowed) == {"write", "edit", "handoff"}
     assert wind_down_allowed_tools() == WIND_DOWN_ALLOWED_TOOLS
 
     landing = narrow_tools_for_wind_down_breach(
         available, keep_landing=True, allowed=allowed
     )
-    assert set(landing) >= {"file_write", "handoff"}
+    assert set(landing) >= {"write", "handoff"}
     assert "web_search" not in landing
     assert narrow_tools_for_wind_down_breach(available, keep_landing=False) == ["handoff"]
 
@@ -605,33 +605,33 @@ def test_wind_down_breach_detection_and_local_force():
         wind_down_breach_tool_names,
     )
 
-    assert wind_down_breach_tool_names(["handoff", "file_write"]) == []
+    assert wind_down_breach_tool_names(["handoff", "write"]) == []
     assert wind_down_breach_tool_names(["web_search", "handoff"]) == ["web_search"]
     assert wind_down_breach_tool_names(["web_search", "web_search", "web_fetch"]) == [
         "web_search",
         "web_fetch",
     ]
 
-    assert narrow_tools_for_handoff_only({"handoff", "file_write"}) == ["handoff"]
-    assert narrow_tools_for_handoff_only({"file_write"}) == []
+    assert narrow_tools_for_handoff_only({"handoff", "write"}) == ["handoff"]
+    assert narrow_tools_for_handoff_only({"write"}) == []
 
     from agentcore.runtime.runs.cutoff import narrow_tools_for_wind_down_breach
 
     # Pending landing: breach keeps write tools (not handoff-only).
     landing_surface = narrow_tools_for_wind_down_breach(
-        {"handoff", "file_write", "str_replace", "web_search"},
+        {"handoff", "write", "edit", "web_search"},
         keep_landing=True,
         keep_file_read=False,
     )
-    assert "file_write" in landing_surface
-    assert "str_replace" in landing_surface
+    assert "write" in landing_surface
+    assert "edit" in landing_surface
     assert "file_append" not in landing_surface
     assert "handoff" in landing_surface
     assert "web_search" not in landing_surface
 
     # No landing obligation: breach collapses to handoff-only.
     assert narrow_tools_for_wind_down_breach(
-        {"handoff", "file_write", "web_search"},
+        {"handoff", "write", "web_search"},
         keep_landing=False,
     ) == ["handoff"]
 
@@ -746,7 +746,7 @@ async def test_wind_down_breach_journals_denied_tool(monkeypatch):
     reg = ToolRegistry()
     for name, cat in (
         ("web_search", ToolFace.SEARCH),
-        ("file_write", ToolFace.FILE),
+        ("write", ToolFace.FILE),
         ("handoff", ToolFace.ORCHESTRATION),
     ):
         reg.register(_Stub(name, face=cat))
@@ -770,7 +770,7 @@ async def test_wind_down_breach_journals_denied_tool(monkeypatch):
         role="worker",
         run_id="w1",
         token_budget=80_000,
-        allowed_tool_names=["web_search", "file_write", "handoff"],
+        allowed_tool_names=["web_search", "write", "handoff"],
         approval_gate=None,
     )
 
@@ -867,7 +867,7 @@ async def test_single_round_jump_past_soft_still_gets_wind_down(monkeypatch):
     reg = ToolRegistry()
     for name, cat in (
         ("web_search", ToolFace.SEARCH),
-        ("file_write", ToolFace.FILE),
+        ("write", ToolFace.FILE),
         ("handoff", ToolFace.ORCHESTRATION),
     ):
         reg.register(_Stub(name, face=cat))
@@ -891,7 +891,7 @@ async def test_single_round_jump_past_soft_still_gets_wind_down(monkeypatch):
         role="worker",
         run_id="w1",
         token_budget=80_000,
-        allowed_tool_names=["web_search", "file_write", "handoff"],
+        allowed_tool_names=["web_search", "write", "handoff"],
         approval_gate=None,
     )
 
@@ -904,7 +904,7 @@ async def test_single_round_jump_past_soft_still_gets_wind_down(monkeypatch):
     # Second LLM call is the wind-down round (not a ban-write finalize).
     assert len(provider.round_tool_names) >= 2
     wind_tools = set(provider.round_tool_names[1])
-    assert "file_write" in wind_tools
+    assert "write" in wind_tools
     assert "handoff" in wind_tools
     assert "web_search" in wind_tools
     assert "已落盘" in content or content.strip()

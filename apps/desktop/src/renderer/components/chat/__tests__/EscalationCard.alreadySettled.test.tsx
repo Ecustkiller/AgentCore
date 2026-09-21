@@ -33,7 +33,6 @@ function ownershipEsc(): RunEscalation {
     id: "esc-own",
     question: "写入冲突：`site/index.html` 已归队友负责",
     assumption: "等移交后再写",
-    blocking: true,
     status: "pending",
     answer: null,
     kind: "scope",

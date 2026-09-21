@@ -126,9 +126,14 @@
       "id": "opencode_zen",
       "label": "OpenCode Zen",
       "baseUrl": "https://opencode.ai/zen/v1",
-      "defaultModel": "deepseek-v4-flash",
-      "models": ["deepseek-v4-flash", "kimi-k2.6", "glm-5.2"],
-      "hideFromPicker": ["deepseek-flash"],
+      "defaultModel": "deepseek-v4.1-flash",
+      "models": ["deepseek-v4.1-flash", "kimi-k2.6", "glm-5.2"],
+      "hideFromPicker": [
+        "deepseek-flash",
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "deepseek-v4-flash-vision-exp"
+      ],
       "keyHelpUrl": "https://opencode.ai/auth"
     },
     {
@@ -136,8 +141,13 @@
       "label": "OpenCode Go",
       "baseUrl": "https://opencode.ai/zen/go/v1",
       "defaultModel": "deepseek-v4.1-flash",
-      "models": ["deepseek-v4.1-flash", "deepseek-v4-pro", "glm-5.2"],
-      "hideFromPicker": ["deepseek-flash"],
+      "models": ["deepseek-v4.1-flash", "glm-5.2"],
+      "hideFromPicker": [
+        "deepseek-flash",
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "deepseek-v4-flash-vision-exp"
+      ],
       "keyHelpUrl": "https://opencode.ai/auth"
     }
   ]

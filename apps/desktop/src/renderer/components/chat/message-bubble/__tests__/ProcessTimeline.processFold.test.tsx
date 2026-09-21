@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * 完成态过程折：非末段正文与工具/思考一并收进摘要；末段答案留在折外。
+ * 完成态过程折：工具/思考收进摘要；用户可见正文（含中间段）留在折外。
  * disclosure mock 跟真实收场默认（直播展开、收场收起）。
  */
 import { ProcessTimeline } from "@/components/chat/message-bubble/ProcessTimeline";
@@ -51,17 +51,17 @@ function renderTimeline(process: ProcessStep[], isStreaming: boolean) {
   );
 }
 
-describe("ProcessTimeline · 非末段正文进过程折", () => {
+describe("ProcessTimeline · 正文不进过程折", () => {
   const process: ProcessStep[] = [
     { kind: "content", text: "我先找日志目录" },
     toolDone,
     { kind: "content", text: "清晰度是 1080p" },
   ];
 
-  it("hides mid-content behind the summary and keeps the trailing answer", () => {
+  it("keeps mid-content and the trailing answer visible; tools stay behind the summary", () => {
     renderTimeline(process, false);
     expect(screen.getByText("Used 1 tool")).toBeTruthy();
-    expect(screen.queryByText("我先找日志目录")).toBeNull();
+    expect(screen.getByText("我先找日志目录")).toBeTruthy();
     expect(screen.queryByText("Wait")).toBeNull();
     expect(screen.getByText("清晰度是 1080p")).toBeTruthy();
   });
@@ -89,7 +89,7 @@ describe("ProcessTimeline · 非末段正文进过程折", () => {
     expect(screen.getByText("清晰度是 1080p")).toBeTruthy();
   });
 
-  it("hides a resolved ask behind the summary and keeps the trailing answer", () => {
+  it("hides a resolved ask behind the summary and keeps lead-in plus trailing answer", () => {
     const resolvedAsk: CheckpointDisplay = {
       id: "cp-1",
       question: "你心里的「Agent 生态」更接近哪种？",
@@ -117,7 +117,7 @@ describe("ProcessTimeline · 非末段正文进过程折", () => {
       />,
     );
     expect(screen.getByText("Used 1 tool")).toBeTruthy();
-    expect(screen.queryByText("先对齐方向")).toBeNull();
+    expect(screen.getByText("先对齐方向")).toBeTruthy();
     expect(screen.queryByText(/都不太对/)).toBeNull();
     expect(screen.getByText("按这个方向继续")).toBeTruthy();
   });
@@ -150,5 +150,42 @@ describe("ProcessTimeline · 非末段正文进过程折", () => {
     );
     expect(screen.getByText("Used 1 tool")).toBeTruthy();
     expect(screen.getByText("你选哪个？")).toBeTruthy();
+  });
+
+  it("places the collapsed summary as a caption immediately before the answer", () => {
+    const { container } = renderTimeline(
+      [
+        { kind: "reasoning", text: "先想" },
+        toolDone,
+        { kind: "content", text: "## 结论\n\n不是。" },
+      ],
+      false,
+    );
+    const turn = container.querySelector(".process-turn");
+    const summary = container.querySelector(".process-summary");
+    const answer = container.querySelector(".process-answer");
+    expect(turn).toBeTruthy();
+    expect(turn?.className).not.toContain("space-y-2");
+    expect(summary).toBeTruthy();
+    expect(answer).toBeTruthy();
+    expect(summary?.nextElementSibling).toBe(answer);
+    expect(screen.getByText("Thought 1 step · Used 1 tool")).toBeTruthy();
+    expect(screen.getByText("结论")).toBeTruthy();
+  });
+
+  it("puts the team graph on the slot lane immediately after the answer", () => {
+    const { container } = renderTimeline(
+      [
+        { kind: "reasoning", text: "先想" },
+        toolDone,
+        { kind: "content", text: "结论" },
+        { kind: "team", execution_id: "e1" },
+      ],
+      false,
+    );
+    const answer = container.querySelector(".process-answer");
+    const slot = container.querySelector(".process-slot");
+    expect(slot).toBeTruthy();
+    expect(answer?.nextElementSibling).toBe(slot);
   });
 });

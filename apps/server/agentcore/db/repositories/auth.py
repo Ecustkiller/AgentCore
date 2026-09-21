@@ -10,7 +10,6 @@ from agentcore.config import settings
 from agentcore.core.types import new_id
 from agentcore.db.models import Credentials, RefreshToken, UserLlmProvider
 from agentcore.db.repositories._base import _UNSET, commit_or_flush
-from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
 
 
 class CredentialsRepository:
@@ -164,7 +163,7 @@ class UserLlmProviderRepository:
     ) -> UserLlmProvider:
         """Add a provider row (status 'unchecked' — not connectivity-tested yet)."""
         resolved_base_url = (base_url or settings.platform_base_url).strip().rstrip("/")
-        resolved_model = (default_model or DEEPSEEK_V4_FLASH).strip()
+        resolved_model = (default_model or "").strip()
         row = UserLlmProvider(
             id=provider_id or new_id(),
             user_id=user_id,
@@ -206,7 +205,7 @@ class UserLlmProviderRepository:
             row.base_url = str(base_url or settings.platform_base_url).strip().rstrip("/")
             reset_status = True
         if default_model is not _UNSET:
-            row.default_model = str(default_model or DEEPSEEK_V4_FLASH).strip()
+            row.default_model = str(default_model or "").strip()
             reset_status = True
         if reset_status:
             row.status = "unchecked"

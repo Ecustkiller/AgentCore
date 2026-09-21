@@ -11,13 +11,18 @@ from agentcore.runtime.events.payloads._base import WirePayload, absent
 
 
 class UsageBreakdown(WirePayload):
-    """Token counts in the ledger short-key form. `cache_hit + cache_miss === input`."""
+    """Token counts in the ledger short-key form. `cache_hit + cache_miss === input`.
+
+    ``last_prompt`` is the largest single-request prompt this run has seen (window
+    fill / fit-check). ``input`` sums every round (billing). Absent on old journals.
+    """
 
     input: int
     output: int
     reasoning: int
     cache_hit: int
     cache_miss: int
+    last_prompt: int | None = absent()
 
 
 class CostBreakdown(WirePayload):

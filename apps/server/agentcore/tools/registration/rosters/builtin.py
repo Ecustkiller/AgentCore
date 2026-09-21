@@ -18,12 +18,10 @@ def load_roster() -> tuple[type, ...]:
         GlobTool,
         StrReplaceTool,
     )
-    from agentcore.tools.builtin.git_ops import GitTool
     from agentcore.tools.builtin.grep import GrepTool
     from agentcore.tools.builtin.host import HostTool
     from agentcore.tools.builtin.md_export import MdExportTool
     from agentcore.tools.builtin.run import RunTool
-    from agentcore.tools.builtin.web.download_url import DownloadUrlTool
     from agentcore.tools.builtin.web.search import WebSearchTool
     from agentcore.tools.builtin.web.web_fetch import WebFetchTool
 
@@ -39,12 +37,10 @@ def load_roster() -> tuple[type, ...]:
         FileDeleteTool,
         FileBatchTool,
         MdExportTool,
-        DownloadUrlTool,
         GrepTool,
-        GitTool,
         RunTool,
         # L3 团队浏览器：单一 ``browser``（GRANTABLE · action 政策表；CEO+worker）
         BrowserTool,
-        # Host 第三能力面：单一 ``host``（schema NEVER · action 政策表 · host_class）
+        # Host：用户这台电脑上的短命令（schema NEVER · 运行时按 host 轴升审批）
         HostTool,
     )

@@ -101,7 +101,7 @@ describe("statusFaceLabel", () => {
         false,
         null,
         "tool",
-        "file_read",
+        "read",
       ).text,
     ).toBe("Read file");
   });
@@ -474,7 +474,7 @@ describe("buildAgentNodePresentation revision face", () => {
       baseNode({
         status: "running",
         isAnimating: true,
-        toolProgress: { toolName: "file_write", chars: 2100 },
+        toolProgress: { toolName: "write", chars: 2100 },
       }),
     );
     expect(p.peekActivity).toEqual({

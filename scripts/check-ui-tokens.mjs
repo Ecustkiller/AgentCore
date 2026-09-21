@@ -101,6 +101,45 @@ const DESKTOP_CSS_RULES = [
   },
 ];
 
+/** Action-menu width lives on L2 primitive only (UI-Pattern 动作菜单宽度). */
+const ACTION_MENU_PRIMITIVE =
+  /(?:^|\/)components\/ui\/(?:dropdown-menu|context-menu)\.tsx$/;
+const ACTION_MENU_WIDTH_RE =
+  /\b(?:min-w-|max-w-|(?<![a-z-])w-(?:\d+|px|max|min|fit|screen|auto|full|svw|lvw|dvw|\[))/;
+
+function stripJsxComparisons(s) {
+  return s.replace(/=>/g, " ").replace(/[<>]=/g, " ");
+}
+
+function collectJsxOpenTag(lines, start) {
+  let buf = lines[start];
+  if (stripJsxComparisons(buf).includes(">")) return buf;
+  for (let j = start + 1; j < lines.length && j - start < 16; j++) {
+    buf += `\n${lines[j]}`;
+    if (stripJsxComparisons(buf).includes(">")) return buf;
+  }
+  return buf;
+}
+
+function scanActionMenuWidth(relativeFile, lines) {
+  const norm = relativeFile.replace(/\\/g, "/");
+  if (ACTION_MENU_PRIMITIVE.test(norm)) return [];
+  if (!/\.(tsx|ts)$/.test(norm)) return [];
+  /** @type {{ line: number; text: string }[]} */
+  const hits = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!/<(Dropdown|Context)MenuContent\b/.test(lines[i])) continue;
+    const chunk = collectJsxOpenTag(lines, i);
+    if (ACTION_MENU_WIDTH_RE.test(chunk)) {
+      hits.push({
+        line: i + 1,
+        text: lines[i].trim().slice(0, 120),
+      });
+    }
+  }
+  return hits;
+}
+
 function parseArgs(argv) {
   let src = "";
   for (let i = 2; i < argv.length; i++) {
@@ -178,6 +217,17 @@ for (const file of await walk(srcDir)) {
           });
         }
       }
+    }
+  }
+  if (isDesktop) {
+    for (const hit of scanActionMenuWidth(relative(ROOT, file), lines)) {
+      violations.push({
+        file: relative(ROOT, file),
+        line: hit.line,
+        rule: "action-menu-width",
+        hint: "action menus hug L2 primitive (min-w-36 max-w-64); do not set min-w/max-w/w on DropdownMenuContent / ContextMenuContent",
+        text: hit.text,
+      });
     }
   }
 }

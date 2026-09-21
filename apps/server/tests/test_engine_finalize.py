@@ -67,12 +67,12 @@ class _StubTool:
 
 def _registry(*, with_persist: bool = False) -> ToolRegistry:
     reg = ToolRegistry()
-    reg.register(_StubTool("file_read", face=ToolFace.FILE))
+    reg.register(_StubTool("read", face=ToolFace.FILE))
     reg.register(_StubTool("delegate", face=ToolFace.ORCHESTRATION))
     reg.register(_StubTool("consult", face=ToolFace.ORCHESTRATION))
     reg.register(_StubTool("ask_user", face=ToolFace.ORCHESTRATION))
     if with_persist:
-        reg.register(_StubTool("file_write", face=ToolFace.FILE))
+        reg.register(_StubTool("write", face=ToolFace.FILE))
         reg.register(_StubTool("handoff", face=ToolFace.ORCHESTRATION))
     return reg
 
@@ -83,11 +83,11 @@ def test_resolve_finalize_coordination_tools_filters_to_allowlist():
     defs = resolve_finalize_coordination_tools(reg, None, set())
     names = {d["function"]["name"] for d in (defs or [])}
     assert names == FINALIZE_COORDINATION_TOOLS
-    assert "file_read" not in names
+    assert "read" not in names
 
 
 def test_files_form_force_finalize_surface_keeps_file_write_and_handoff():
-    """form=files / artifacts：finalize 执行门含 file_write+handoff。"""
+    """form=files / artifacts：finalize 执行门含 write+handoff。"""
     reg = _registry(with_persist=True)
     assert finalize_allows_persist(reg, None, expects_landing=True) is True
     defs = resolve_finalize_coordination_tools(
@@ -95,25 +95,25 @@ def test_files_form_force_finalize_surface_keeps_file_write_and_handoff():
     )
     names = {d["function"]["name"] for d in (defs or [])}
     assert names >= FINALIZE_PERSIST_TOOLS
-    assert "file_write" in names
+    assert "write" in names
     assert "handoff" in names
-    assert "file_read" not in names
-    # prose path: file_write withheld from allow-list → coordination only
-    prose_allowed = ["delegate", "consult", "ask_user", "file_read"]
+    assert "read" not in names
+    # prose path: write withheld from allow-list → coordination only
+    prose_allowed = ["delegate", "consult", "ask_user", "read"]
     assert finalize_allows_persist(reg, prose_allowed) is False
     prose_defs = resolve_finalize_coordination_tools(reg, prose_allowed, set())
     prose_names = {d["function"]["name"] for d in (prose_defs or [])}
     assert prose_names == FINALIZE_COORDINATION_TOOLS
-    assert "file_write" not in prose_names
+    assert "write" not in prose_names
     # files_expected + narrow allowlist missing write → still persist (催写补授权)
-    narrow = ["file_read", "grep", "handoff"]
+    narrow = ["read", "grep", "handoff"]
     assert finalize_allows_persist(reg, narrow, files_expected=True, expects_landing=True) is True
     assert finalize_allows_persist(reg, narrow, files_expected=True, expects_landing=False) is False
     narrow_defs = resolve_finalize_coordination_tools(
         reg, narrow, set(), files_expected=True, expects_landing=True
     )
     narrow_names = {d["function"]["name"] for d in (narrow_defs or [])}
-    assert "file_write" in narrow_names
+    assert "write" in narrow_names
     assert "handoff" in narrow_names
 
 
@@ -130,7 +130,7 @@ def test_channel_dead_finalize_disables_persist():
         reg, None, set(), files_expected=True, workspace_channel_dead=True
     )
     names = {d["function"]["name"] for d in (defs or [])}
-    assert "file_write" not in names
+    assert "write" not in names
     assert names == FINALIZE_COORDINATION_TOOLS
 
 
@@ -145,7 +145,7 @@ async def test_channel_dead_finalize_round_uses_coordination_tools_not_files():
         profile=make_profile_params(),
         active_model="m",
         tools=reg,
-        allowed_tool_names=["file_write", "handoff", "delegate", "ask_user"],
+        allowed_tool_names=["write", "handoff", "delegate", "ask_user"],
         disabled_tools=set(),
         emit_content=lambda _d: None,
         emit_reasoning=lambda _d: None,
@@ -153,7 +153,7 @@ async def test_channel_dead_finalize_round_uses_coordination_tools_not_files():
         workspace_channel_dead=True,
     )
     assert result.kind == "answer"
-    assert "file_write" in (provider.last_tool_names or [])
+    assert "write" in (provider.last_tool_names or [])
     assert "handoff" in (provider.last_tool_names or [])
     assert "delegate" in (provider.last_tool_names or [])
     assert not any("[系统提示]" in (m.content or "") for m in messages)
@@ -167,14 +167,14 @@ async def test_channel_dead_finalize_round_uses_coordination_tools_not_files():
         profile=make_profile_params(),
         active_model="m",
         tools=reg,
-        allowed_tool_names=["file_write", "handoff", "web_search", "delegate"],
+        allowed_tool_names=["write", "handoff", "web_search", "delegate"],
         disabled_tools=set(),
         emit_content=lambda _d: None,
         emit_reasoning=lambda _d: None,
         expects_landing=True,
     )
     assert result.kind == "answer"
-    assert "file_write" in (provider.last_tool_names or [])
+    assert "write" in (provider.last_tool_names or [])
     assert "handoff" in (provider.last_tool_names or [])
     assert "web_search" in (provider.last_tool_names or [])
     assert not any("[系统提示]" in (m.content or "") for m in messages)
@@ -199,7 +199,7 @@ async def test_soft_finalize_uses_coordination_tools_not_none():
     assert result.kind == "answer"
     assert provider.last_tool_choice == "auto"
     assert set(provider.last_tool_names or []) == set(reg.names)
-    assert "file_read" in (provider.last_tool_names or [])
+    assert "read" in (provider.last_tool_names or [])
 
 
 @pytest.mark.asyncio
@@ -382,13 +382,13 @@ async def test_hard_tool_free_keeps_opening_table():
     assert result.kind == "answer"
     assert provider.last_tool_choice == "none"
     assert set(provider.last_tool_names or []) == set(reg.names)
-    assert "file_read" in (provider.last_tool_names or [])
+    assert "read" in (provider.last_tool_names or [])
 
 
 @pytest.mark.asyncio
 async def test_soft_finalize_drops_investigation_calls_keeps_table():
     provider = _ScriptedProvider(
-        [[_content_chunk("收尾答案"), _tool_chunk("file_read")]]
+        [[_content_chunk("收尾答案"), _tool_chunk("read")]]
     )
     messages = [LLMMessage(role="user", content="go")]
     reg = _registry()
@@ -406,5 +406,5 @@ async def test_soft_finalize_drops_investigation_calls_keeps_table():
     assert result.kind == "answer"
     assert result.tool_calls is None
     assert provider.last_tool_choice == "auto"
-    assert "file_read" in (provider.last_tool_names or [])
+    assert "read" in (provider.last_tool_names or [])
     assert set(provider.last_tool_names or []) == set(reg.names)

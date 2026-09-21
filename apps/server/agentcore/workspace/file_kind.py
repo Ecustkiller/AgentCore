@@ -1,4 +1,4 @@
-"""Sniff workspace bytes so file_read does not UTF-8-decode binary/OLE/PDF.
+"""Sniff workspace bytes so read does not UTF-8-decode binary/OLE/PDF.
 
 Magic-only: no filename heuristics beyond what the caller already knows.
 """

@@ -712,10 +712,10 @@ export function errorActionForCode(
   if (code === "QUOTA_EXCEEDED") {
     return { label: "接入自己的 Key", href: "/more/providers" };
   }
-  // Always-entry write gate (记忆 · 配额闸在写侧): create / promote past the cap —
+  // Always-entry write gate (常驻用户规则配额闸在写侧): create / promote past the cap —
   // send the user to the file rail to shrink or demote always entries.
   if (code === "ALWAYS_QUOTA_EXCEEDED") {
-    return { label: "去整理", href: "/files" };
+    return { label: "去文件页", href: "/files" };
   }
   return null;
 }

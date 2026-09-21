@@ -7,8 +7,10 @@ import type { ComponentProps } from "react";
  * Dropdown-menu primitives over Radix — roving-focus keyboard navigation,
  * type-ahead, outside-click and Esc dismissal, and portal positioning come for
  * free; we only supply tokenised chrome (menus = `rounded-lg`, popover surface,
- * `focus`/highlight → `accent`). `DropdownMenuItem` fires `onSelect` and the menu
- * auto-closes, so callers don't manage open state by hand.
+ * `focus`/highlight → `accent`). Width is owned here: shrink-to-fit the longest
+ * row (`min-w-36 max-w-64`); callers must not pass `min-w-*` / `max-w-*` /
+ * `w-*`. `DropdownMenuItem` fires `onSelect` and the menu auto-closes, so
+ * callers don't manage open state by hand.
  */
 export const DropdownMenu = DropdownMenuPrimitive.Root;
 export const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
@@ -30,7 +32,7 @@ export function DropdownMenuContent({
         <DropdownMenuPrimitive.Content
           sideOffset={sideOffset}
           className={cn(
-            "z-50 min-w-44 overflow-hidden rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-overlay",
+            "z-50 min-w-36 max-w-64 overflow-hidden rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-overlay",
             "data-[state=open]:animate-dropdown-in",
             className,
           )}
@@ -55,7 +57,7 @@ export function DropdownMenuItem({
   return (
     <DropdownMenuPrimitive.Item
       className={cn(
-        "flex w-full cursor-default select-none items-center gap-2 px-3 py-1.5 text-left text-sm outline-none transition-colors",
+        "flex w-full min-w-0 cursor-default select-none items-center gap-2 px-3 py-1.5 text-left text-sm outline-none transition-colors",
         "focus:bg-accent data-[highlighted]:bg-accent",
         variant === "danger"
           ? "text-destructive focus:text-destructive data-[highlighted]:text-destructive"

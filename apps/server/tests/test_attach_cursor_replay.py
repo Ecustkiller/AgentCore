@@ -1187,8 +1187,8 @@ _CEO_LEAD_IN_JOURNAL = [
     *_ceo_tool(
         10,
         call_id="c3",
-        name="file_write",
-        arguments={"path": "docs/00-创作基准.md"},
+        name="write",
+        arguments={"file_path": "docs/00-创作基准.md"},
     ),
     {
         "seq": 13,
@@ -1222,7 +1222,7 @@ def test_ceo_lead_in_journal_skips_process_tool_mirrors():
     assert EventType.TOOL_USE_START in kinds
     assert kinds.count(EventType.TOOL_USE_START) == 3
     names = [e.payload.get("tool_name") for e in events if e.type == EventType.TOOL_USE_START]
-    assert names == ["consult", "list_folders", "file_write"]
+    assert names == ["consult", "list_folders", "write"]
     start_seqs = [e.seq for e in events if e.type == EventType.TOOL_USE_START]
     plan = next(e for e in events if e.type == EventType.RUN_PLAN)
     assert plan.seq == _CEO_PLAN_SEQ
@@ -1246,7 +1246,7 @@ def test_incremental_from_before_tools_reships_all_three_starts():
     events = journal_rows_to_sse(_CEO_LEAD_IN_JOURNAL)
     kept = _slice_after_cursor(events, after_seq=1)
     names = [e.payload.get("tool_name") for e in kept if e.type == EventType.TOOL_USE_START]
-    assert names == ["consult", "list_folders", "file_write"]
+    assert names == ["consult", "list_folders", "write"]
     assert any(e.type == EventType.RUN_PLAN for e in kept)
 
 
@@ -1277,7 +1277,7 @@ def test_get_projection_keeps_ceo_tools_before_team():
     team_at = next(i for i, s in enumerate(process) if s.get("kind") == "team")
     before = [s.get("tool_name") for s in process[:team_at] if s.get("kind") == "tool"]
     after = [s.get("tool_name") for s in process[team_at + 1 :] if s.get("kind") == "tool"]
-    assert before == ["consult", "list_folders", "file_write"]
+    assert before == ["consult", "list_folders", "write"]
     assert after == []
 
 
@@ -1295,7 +1295,7 @@ async def test_build_cursor_replay_from_reasoning_cursor_reships_starts(monkeypa
     assert events[0].type == EventType.MESSAGE_START
     assert "full_replay" not in events[0].payload
     names = [e.payload.get("tool_name") for e in events if e.type == EventType.TOOL_USE_START]
-    assert names == ["consult", "list_folders", "file_write"]
+    assert names == ["consult", "list_folders", "write"]
 
 
 async def test_build_cursor_replay_from_run_plan_does_not_reship_starts(monkeypatch):

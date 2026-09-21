@@ -287,10 +287,9 @@ def test_multi_agent_escalation_nonblocking_banner(projected):
         {
             "question": "数据库选 Postgres 还是 MySQL？这关系到后续所有选型。",
             "assumption": "暂按 Postgres 推进",
-            "blocking": True,
             "status": "raised",
             "answer": None,
-            "kind": "normal",
+            "kind": "scope",
         }
     ]
     assert r2["escalations"] == []
@@ -307,10 +306,9 @@ def test_multi_agent_blocking_escalate_resolved(projected):
         {
             "question": "数据库选 Postgres 还是 MySQL？这关系到后续所有选型，且猜错基本要整段返工。",
             "assumption": "暂按 Postgres 推进",
-            "blocking": True,
             "status": "resolved",
             "answer": "用 Postgres。",
-            "kind": "normal",
+            "kind": "wait",
         }
     ]
 
@@ -499,7 +497,7 @@ def test_preview_skip_writes_false_only():
 # Vectors with no hand-verified assertion in any sentinel module. Ratchet: only down.
 # Raising it means a new vector shipped judged solely by "both folds agree with the
 # golden the oracle wrote" — legal, but it has to be an explicit line in the diff.
-_SENTINEL_UNCOVERED_BASELINE = 12
+_SENTINEL_UNCOVERED_BASELINE = 11
 
 
 def _sentinel_sources() -> str:

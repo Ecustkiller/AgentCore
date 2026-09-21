@@ -11,17 +11,20 @@ export const APP_PATHS = {
       skills: "/toolbox/mine/skills",
       tools: "/toolbox/mine/tools",
       creation: "/toolbox/mine/creation",
-      mcp: "/toolbox/mine/mcp",
       automations: "/toolbox/mine/automations",
       workflows: "/toolbox/mine/workflows",
     },
     market: "/toolbox/market",
+    /** 出厂只读：提示词（准则与教法）/ 工具。 */
+    official: "/toolbox/official",
+    /** 旧说明书深页书签；?tool= / ?skill= 收到官方读卡，其余收到我的。 */
+    guides: "/toolbox/guides",
     /** Canonical aliases — 旧名仍可用，指向现行壳。 */
     tools: "/toolbox/mine/tools",
     guidelines: "/toolbox/mine/skills",
     store: "/toolbox/market",
-    /** 提示词目录（出厂工具 / 官方 HOW / 连接器都在这本）。旧 `#/toolbox/connectors` / `mine/mcp` / `mine/tools` 收向这里。 */
-    connectors: "/toolbox/mine/skills?connectors=1",
+    /** 本机 MCP。 */
+    mcp: "/toolbox/mcp",
     /** 旧书签，路由收向提示词。 */
     automations: {
       root: "/toolbox/mine/automations",

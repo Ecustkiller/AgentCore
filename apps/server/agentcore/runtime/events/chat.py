@@ -243,6 +243,7 @@ def message_end(
     reasoning_tokens: int = 0,
     cache_hit_tokens: int = 0,
     cache_miss_tokens: int = 0,
+    last_prompt_tokens: int = 0,
     rounds: int = 0,
     cost: dict[str, Any] | None = None,
     collab: dict[str, int] | None = None,
@@ -273,6 +274,8 @@ def message_end(
         "cost": _wire_cost(cost),
         "rounds": rounds,
     }
+    if last_prompt_tokens > 0:
+        payload["usage"]["last_prompt_tokens"] = int(last_prompt_tokens)
     if collab is not None:
         payload["collab"] = collab
     if duration_ms is not None:

@@ -424,7 +424,7 @@ def format_boundary_for_ceo(
 
 
 def format_scope_boundary(plan: RunPlan, results: dict, nodes: list[RunSpec]) -> str:
-    """Reactive-arm brief — 职责偏离 (kind=scope) AND/OR 依赖缺口·卡在缺输入 (kind=dep, §2.4).
+    """Reactive-arm brief — 职责偏离 (reason=scope) AND/OR 依赖缺口·卡在缺输入 (reason=dep, §2.4).
 
     Both kinds ride the SAME reactive boundary (``BoundaryReason.SCOPE``); this brief tells the
     captain which is which so it picks the right ``replan`` lever — ``steers`` to re-aim an
@@ -435,7 +435,7 @@ def format_scope_boundary(plan: RunPlan, results: dict, nodes: list[RunSpec]) ->
     # Does any surfaced node carry a dep (依赖缺口) signal? Tailor the header / closing guidance
     # so a pure-scope yield reads exactly as before, while a dep yield steers toward replan(add).
     has_dep = any(
-        e.get("kind") == "dep"
+        e.get("reason") == "dep"
         for n in nodes
         for e in (results.get(n.run_id).escalations if results.get(n.run_id) else [])
     )
@@ -444,8 +444,8 @@ def format_scope_boundary(plan: RunPlan, results: dict, nodes: list[RunSpec]) ->
     )
     lines = [
         f"## 计划已让出（{headline}，请校准未跑步骤）",
-        "下列【已完成】步骤报告了「职责/范围偏离」(escalate kind=scope) 或「卡在缺输入·依赖缺口」"
-        "(escalate kind=dep)：前者发现真正要做的与初始计划不符，后者缺一个还不存在的输入 / 依赖"
+        "下列【已完成】步骤报告了职责偏离 (escalate reason=scope) 或缺材料"
+        "(escalate reason=dep)：前者发现真正要做的与初始计划不符，后者缺一个还不存在的输入 / 依赖"
         "（没人产出过、计划也没安排）才能做好。请阅读它们的产出与信号说明，再用 `replan` 续跑同一"
         "计划——偏离用 `steers` 操舵未跑步骤，缺输入用 `add` 追加一个产出它的步骤 / 接一条依赖边。",
     ]
@@ -454,7 +454,7 @@ def format_scope_boundary(plan: RunPlan, results: dict, nodes: list[RunSpec]) ->
         summary = review_summary_text(state)
         esc_lines: list[str] = []
         for e in state.escalations if state else []:
-            kind = e.get("kind")
+            kind = e.get("reason")
             if kind not in ("scope", "dep"):
                 continue
             question = str(e.get("question") or "").strip()

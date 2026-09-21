@@ -185,8 +185,6 @@ const fsApi: FsApi = {
     ipcRenderer.invoke(FS_CHANNELS.reveal, { rootId, relPath }),
   openPath: (rootId, relPath) =>
     ipcRenderer.invoke(FS_CHANNELS.openPath, { rootId, relPath }),
-  copyPath: (rootId, relPath) =>
-    ipcRenderer.invoke(FS_CHANNELS.copyPath, { rootId, relPath }),
   trashPath: (rootId, relPath) =>
     ipcRenderer.invoke(FS_CHANNELS.trashPath, { rootId, relPath }),
   listWorkspaceTrash: (rootId) =>
@@ -274,6 +272,7 @@ const sidecarApi: SidecarApi = {
     ipcRenderer.invoke(SIDECAR_CHANNELS.warmMcpDiscover, req),
   warmAccountRulesMemory: (req) =>
     ipcRenderer.invoke(SIDECAR_CHANNELS.warmAccountRulesMemory, req),
+  warmLlmHttp: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.warmLlmHttp, req),
   refreshLiveAccountRulesMemory: (req) =>
     ipcRenderer.invoke(SIDECAR_CHANNELS.refreshLiveAccountRulesMemory, req),
   recovery: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.recovery, req),

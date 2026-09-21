@@ -142,14 +142,15 @@ describe("cloud FileSource listing (fc35aece root zip visibility)", () => {
         { path: "AgentCore/index", isDir: true },
         { path: "AgentCore/trash", isDir: true },
         { path: "AgentCore/baselines", isDir: true },
-        { path: "AgentCore/规则", isDir: true },
+        { path: "AgentCore/记忆", isDir: true },
+        { path: "AgentCore/rules", isDir: true },
       ],
       truncated: false,
     });
 
     const source = createCloudWorkspaceSource("conv:c1", "工作区");
     const acKids = await source.listDir("AgentCore");
-    expect(acKids.map((n) => n.path).sort()).toEqual(["AgentCore/规则"]);
+    expect(acKids.map((n) => n.path).sort()).toEqual(["AgentCore/rules"]);
 
     // Root path also drops leaked zone entries if a payload includes them.
     listWorkspaceFiles.mockResolvedValue({

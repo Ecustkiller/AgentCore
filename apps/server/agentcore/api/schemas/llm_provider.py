@@ -1,16 +1,13 @@
 """BYOK LLM provider configuration (多服务商列表, llm/provider_service.py) schemas.
 
-A user configures a LIST of OpenAI-compatible providers (each: label + key + endpoint +
-default model). Account / conversation model selection uses **model combination
-profiles** (see ``llm_model_profiles`` schemas) — not bare per-slot pointers on
-this response.
+A user configures a LIST of OpenAI-compatible providers (each: label + key + endpoint).
+Account / conversation model selection uses **model combination profiles**
+(see ``llm_model_profiles`` schemas) — not a model id on the provider itself.
 """
 
 from datetime import datetime
 
 from pydantic import BaseModel, Field
-
-from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
 
 # Stable OpenAPI example — do NOT use settings.platform_base_url (env-dependent → CI drift).
 _OPENAPI_BASE_URL_EXAMPLE = "https://api.deepseek.com"
@@ -35,23 +32,16 @@ class CreateLlmProviderRequest(BaseModel):
         description="OpenAI-compatible endpoint including version prefix",
         examples=[_OPENAPI_BASE_URL_EXAMPLE],
     )
-    default_model: str | None = Field(
-        default=None,
-        max_length=200,
-        description="This provider's default model name",
-        examples=[DEEPSEEK_V4_FLASH],
-    )
 
 
 class UpdateLlmProviderRequest(BaseModel):
     """Partial update of a provider. Only fields present in the body are applied; an
-    omitted ``api_key`` keeps the stored ciphertext (edit endpoint/model without
+    omitted ``api_key`` keeps the stored ciphertext (edit endpoint without
     re-entering the key)."""
 
     label: str | None = Field(default=None, max_length=100)
     api_key: str | None = Field(default=None, max_length=400)
     base_url: str | None = Field(default=None, max_length=500)
-    default_model: str | None = Field(default=None, max_length=200)
 
 
 class LlmProviderView(BaseModel):
@@ -60,7 +50,6 @@ class LlmProviderView(BaseModel):
     id: str
     label: str
     base_url: str
-    default_model: str
     status: str = Field(description="Connectivity result: unchecked | active | error")
     masked_key: str | None = None
     supports_tools: bool | None = None

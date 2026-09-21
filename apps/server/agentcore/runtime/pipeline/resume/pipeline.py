@@ -93,7 +93,8 @@ async def resume_chat_pipeline(
     or settle itself re-suspended (``ToolEffect.SUSPEND`` at a downstream
     checkpoint) — run the CEO loop on the rebuilt window to its reply. ``history``
     is the reloaded prior
-    context (the caller passes ``load_chat_context(...)[:-1]`` exactly as a fresh send),
+    context (the caller passes ``drop_trailing_user_turn(load_chat_context(...))``
+    exactly as a fresh send),
     spliced into the window head since the journal stores only its length. The whole turn
     is billed ONCE here, under the ORIGINAL ``message_id`` so the assistant row + ledger
     reuse it. A downstream checkpoint can pause again — the same hooks re-persist a fresh

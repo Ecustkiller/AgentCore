@@ -87,24 +87,21 @@ class FileBatchTool:
         # 一次调用可产多件（move / copy 逐件自报；mkdir / delete 没有产物）。
         file_products=FileProductsContract.SELF_REPORT,
         workspace_io=True,
-        resident=False,
         catalog_summary="工作区移动/复制/删除/建目录",
+        blurb="一次处理多个路径的搬家或清理",
     )
 
     @property
     def schema(self) -> ToolSchema:
         return ToolSchema(
             name="file_batch",
-            description=(
-                "工作区 move / copy / delete / mkdir。"
-                f"最多 {_BATCH_MAX_OPS} 项。逐项执行：单项失败不中断整批。"
-            ),
+            description="工作区 move / copy / delete / mkdir。",
             parameters={
                 "type": "object",
                 "properties": {
                     "operations": {
                         "type": "array",
-                        "description": "按顺序执行的操作列表",
+                        "description": "按顺序执行。",
                         "minItems": 1,
                         "maxItems": _BATCH_MAX_OPS,
                         "items": {
@@ -113,7 +110,6 @@ class FileBatchTool:
                                 "op": {
                                     "type": "string",
                                     "enum": ["move", "copy", "delete", "mkdir"],
-                                    "description": "操作类型",
                                 },
                                 "path": {
                                     "type": "string",
@@ -127,13 +123,8 @@ class FileBatchTool:
                                     "type": "string",
                                     "description": (
                                         "move / copy 的目标相对路径"
-                                        "（已存在则跳过该项）。"
+                                        "（已存在则跳过、不覆盖）。"
                                     ),
-                                },
-                                "permanent": {
-                                    "type": "boolean",
-                                    "description": "仅 delete：true = 永久删除（区外禁止）",
-                                    "default": False,
                                 },
                             },
                             "required": ["op"],
@@ -247,7 +238,7 @@ class FileBatchTool:
             scope_err = write_scope_rejection(context, path)
             if scope_err is not None:
                 logger.info(
-                    "file_write.scope_rejected",
+                    "write.scope_rejected",
                     path=path,
                     write_scope=getattr(context, "write_scope", None),
                     op=op,
@@ -285,12 +276,13 @@ class FileBatchTool:
             scope_err = write_scope_rejection(context, path)
             if scope_err is not None:
                 logger.info(
-                    "file_write.scope_rejected",
+                    "write.scope_rejected",
                     path=path,
                     write_scope=getattr(context, "write_scope", None),
                     op=op,
                 )
                 return "fail", scope_err, []
+            # Leftover ``permanent`` still hard-deletes and still trips always-confirm.
             permanent = bool(item.get("permanent", False))
             try:
                 await context.backend.delete(path, permanent=permanent)
@@ -328,7 +320,7 @@ class FileBatchTool:
         if not destination:
             return "fail", f"{op} · source 与 destination 均为必填", []
         if source == destination:
-            # Same as cleaned dest (e.g. flat → nested dossier request): idempotent OK.
+            # Same as cleaned dest (idempotent rename / no-op move).
             detail = f"{op} {source} → {destination}（源与目标相同，无需操作）"
             if rename_note:
                 detail = f"{detail}。{rename_note}"
@@ -338,7 +330,7 @@ class FileBatchTool:
             scope_err = write_scope_rejection(context, p)
             if scope_err is not None:
                 logger.info(
-                    "file_write.scope_rejected",
+                    "write.scope_rejected",
                     path=p,
                     write_scope=getattr(context, "write_scope", None),
                     op=op,
@@ -353,7 +345,7 @@ class FileBatchTool:
             return "fail", f"{op} {source} → {destination}：源不存在", []
         except AlreadyExists:
             # MVP conflict policy: skip into report (提案钉死).
-            return "skip", f"{op} {source} → {destination}：目标已存在", []
+            return "skip", f"{op} {source} → {destination}：目标已存在，未覆盖", []
         except OutsideWorkspace as e:
             return (
                 "fail",

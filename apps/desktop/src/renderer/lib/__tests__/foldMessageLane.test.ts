@@ -498,8 +498,8 @@ function foldCeoLeadInThenTeam() {
     { id: "c2", name: "list_folders", args: {} },
     {
       id: "c3",
-      name: "file_write",
-      args: { path: "docs/00-创作基准.md" },
+      name: "write",
+      args: { file_path: "docs/00-创作基准.md" },
     },
   ];
   for (const [i, t] of tools.entries()) {
@@ -534,7 +534,7 @@ describe("协作图下重复工具 · 同一批 tool_use_start 再折", () => {
       "reasoning",
       "list_folders",
       "reasoning",
-      "file_write",
+      "write",
       "reasoning",
       "team",
     ]);
@@ -563,7 +563,7 @@ describe("协作图下重复工具 · 同一批 tool_use_start 再折", () => {
       lane,
       startPayload({
         tool_call_id: "c3",
-        tool_name: "file_write",
+        tool_name: "write",
         arguments: { path: "docs/00-创作基准.md" },
       }),
     );

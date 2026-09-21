@@ -88,7 +88,7 @@ async def test_spreadsheet_without_preview_omits_run_when_unassembled():
                 "workspace_path": "attachments/report.xlsx",
             }
         ],
-        available_tools=frozenset({"file_read", "file_write"}),
+        available_tools=frozenset({"read", "write"}),
     )
     assert out is not None
     assert "[表格 / 仅路径]" in out
@@ -111,7 +111,7 @@ async def test_spreadsheet_mentions_run_only_when_in_tool_table():
         "workspace_path": "attachments/report.xlsx",
     }
     with_exec = await _build_attachment_context(
-        [att], available_tools=frozenset({"file_read", "run"})
+        [att], available_tools=frozenset({"read", "run"})
     )
     assert with_exec is not None
     assert "includes run" in with_exec
@@ -692,7 +692,7 @@ async def test_office_extract_declares_lossy_tables_without_run():
                 "text": "转账时间 收款方 金额\n2024-01-01 张三 12.00",
             }
         ],
-        available_tools=frozenset({"file_read"}),
+        available_tools=frozenset({"read"}),
     )
     assert out is not None
     assert "lossy for tabular content" in out

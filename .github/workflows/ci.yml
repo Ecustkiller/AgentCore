@@ -110,9 +110,6 @@ jobs:
         working-directory: apps/server
         run: uv run python -m agentcore.conformance.export
 
-      - name: Check legal Markdown mirror (desktop content.ts ↔ TERMS/PRIVACY)
-        run: node scripts/sync-legal-md.mjs --check
-
       - name: Check doc section pointers (compound §N title → heading)
         run: node scripts/check-doc-section-pointers.mjs
 

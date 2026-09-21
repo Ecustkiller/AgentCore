@@ -18,17 +18,17 @@ from agentcore.workspace.turn_baseline import (
 
 
 def test_tool_warrants_file_mutation_not_reads():
-    assert tool_warrants_turn_baseline("file_write", {"path": "a.ts"}) is True
-    assert tool_warrants_turn_baseline("str_replace", {"path": "a.ts"}) is True
+    assert tool_warrants_turn_baseline("write", {"file_path": "a.ts"}) is True
+    assert tool_warrants_turn_baseline("edit", {"file_path": "a.ts"}) is True
     assert tool_warrants_turn_baseline("file_delete", {"path": "a.ts"}) is True
-    assert tool_warrants_turn_baseline("file_read", {"path": "a.ts"}) is False
+    assert tool_warrants_turn_baseline("read", {"file_path": "a.ts"}) is False
     assert tool_warrants_turn_baseline("web_search", {"query": "hi"}) is False
     assert tool_warrants_turn_baseline("run", {"command": "ls"}) is False
 
 
-def test_tool_warrants_git_write_not_status():
+def test_tool_warrants_ignores_retired_git_tool_name():
     assert tool_warrants_turn_baseline("git", {"subcommand": "status"}) is False
-    assert tool_warrants_turn_baseline("git", {"subcommand": "commit"}) is True
+    assert tool_warrants_turn_baseline("git", {"subcommand": "commit"}) is False
 
 
 @pytest.mark.asyncio
@@ -94,15 +94,15 @@ async def test_mutation_gate_captures_on_file_write_not_read(tmp_path: Path):
     token = current_journal_writer.set(writer)
     try:
         await _maybe_capture_mutation_baseline(
-            tool_name="file_read",
-            args={"path": "a.txt"},
+            tool_name="read",
+            args={"file_path": "a.txt"},
             context=context,  # type: ignore[arg-type]
         )
         assert not local_baseline_ready(root, "turn-w")
 
         await _maybe_capture_mutation_baseline(
-            tool_name="file_write",
-            args={"path": "b.txt", "content": "y"},
+            tool_name="write",
+            args={"file_path": "b.txt", "content": "y"},
             context=context,  # type: ignore[arg-type]
         )
         assert local_baseline_ready(root, "turn-w")
@@ -127,8 +127,8 @@ async def test_mutation_gate_noops_without_journal(tmp_path: Path):
         spy,
     ):
         await _maybe_capture_mutation_baseline(
-            tool_name="file_write",
-            args={"path": "a.txt"},
+            tool_name="write",
+            args={"file_path": "a.txt"},
             context=context,  # type: ignore[arg-type]
         )
     spy.assert_not_called()

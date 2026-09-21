@@ -305,7 +305,6 @@ export const FS_CHANNELS = {
   grantSessionRun: "fs:grantSessionRun",
   reveal: "fs:reveal",
   openPath: "fs:openPath",
-  copyPath: "fs:copyPath",
   /** 将根内相对路径移入系统回收站（软删）。 */
   trashPath: "fs:trashPath",
   /** 列出工作区 AgentCore/trash（产品一键还原；非 OS 回收站）。 */
@@ -348,7 +347,7 @@ export const FS_CHANNELS = {
    * 单文件「另存为」：renderer 把已取到的字节交主进程，弹系统保存对话框后原子落盘。
    * Electron 不支持 `<a download>` + blob:（不触发 will-download，且 blob: 导航被
    * will-navigate 安全守卫拦截），故桌面端所有下载（云工作区文件 / 快照 zip / 对话
-   * 导出 / IM 附件 / 图表·白板导出）统一走本通道；web 端保留 anchor 方案。
+   * 导出 / IM 附件 / 图表导出）统一走本通道；web 端保留 anchor 方案。
    */
   saveFile: "fs:saveFile",
   /**
@@ -647,11 +646,6 @@ export interface FsApi {
    * 经 `shell.openPath`；同样在主进程解析 + 校验在根内。仅本地源有意义。
    */
   openPath(rootId: string, relPath: string): Promise<FsResult>;
-  /**
-   * 把该路径的**绝对路径**写入系统剪贴板。写入在主进程完成（`clipboard.writeText`），
-   * 故绝对路径不进 renderer。仅本地源有意义。
-   */
-  copyPath(rootId: string, relPath: string): Promise<FsResult>;
   /**
    * 将根内相对路径移入系统回收站（`shell.trashItem`，软删）。空 `relPath`（根自身）拒绝。
    * 路径尚不存在（懒建 scratch 未物化）视为成功。仅本地源有意义。

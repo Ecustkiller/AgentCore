@@ -26,7 +26,6 @@ from agentcore.memory.account_prepare_cache import (
     warm_account_rules_memory,
 )
 from agentcore.memory.document_store import DocumentMemoryStore
-from agentcore.memory.injection import MemoryTopic, load_memory_topics
 from agentcore.memory.rules_injection import assemble_turn_rules, load_on_demand_user_rules
 from agentcore.sidecar.protocol import INVALID_REQUEST, NOT_INITIALIZED
 from agentcore.sidecar.server import SidecarServer
@@ -84,25 +83,19 @@ def _injectable_snapshot(*, degraded: bool = False) -> AccountPrepareSnapshot:
             ("", "偏好.md"): "- 沟通偏好\n",
             ("F1", "画像.md"): "- 项目画像\n",
         },
-        memory_topics=(MemoryTopic(name="api", summary="API 约定"),),
         degraded=degraded,
     )
 
 
 async def _prepare_injection(user_id: str, folder_id: str | None):
-    """What prepare would inject right now: (rules markdown, topics, on-demand rules)."""
+    """What prepare would inject right now: (rules markdown, on-demand rules)."""
     rules_md = await assemble_turn_rules(
         _EmptyMemoryStore(),  # type: ignore[arg-type]
         user_id,
         folder_id=folder_id,
     )
-    topics = await load_memory_topics(
-        _EmptyMemoryStore(),  # type: ignore[arg-type]
-        user_id,
-        folder_id=folder_id,
-    )
     on_demand = await load_on_demand_user_rules(user_id, folder_id=folder_id)
-    return rules_md, topics, on_demand
+    return rules_md, on_demand
 
 
 def _forbid_cloud(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -111,7 +104,7 @@ def _forbid_cloud(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _boom(*_a, **_k):
         raise AssertionError("cloud must not be called under prepare_reads_cache_only")
 
-    for name in ("cloud_list_user_rules", "cloud_memory_list", "cloud_memory_load"):
+    for name in ("cloud_list_user_rules",):
         monkeypatch.setattr(f"agentcore.account.credentials.{name}", _boom)
 
 
@@ -123,22 +116,8 @@ async def test_ticketed_miss_skips_cloud(monkeypatch: pytest.MonkeyPatch, accoun
         calls.append("rules")
         raise AssertionError("unexpected cloud call: rules")
 
-    async def _mem_list(*_a, **_k):
-        calls.append("mem_list")
-        raise AssertionError("unexpected cloud call: mem_list")
-
-    async def _mem_load(*_a, **_k):
-        calls.append("mem_load")
-        raise AssertionError("unexpected cloud call: mem_load")
-
     monkeypatch.setattr(
         "agentcore.account.credentials.cloud_list_user_rules", _rules
-    )
-    monkeypatch.setattr(
-        "agentcore.account.credentials.cloud_memory_list", _mem_list
-    )
-    monkeypatch.setattr(
-        "agentcore.account.credentials.cloud_memory_load", _mem_load
     )
 
     with account_credentials_scope(account_creds):
@@ -147,15 +126,9 @@ async def test_ticketed_miss_skips_cloud(monkeypatch: pytest.MonkeyPatch, accoun
             "u1",
             folder_id="F1",
         )
-        topics = await load_memory_topics(
-            _EmptyMemoryStore(),  # type: ignore[arg-type]
-            "u1",
-            folder_id="F1",
-        )
         on_demand = await load_on_demand_user_rules("u1", folder_id="F1")
 
     assert rules_md == ""
-    assert topics == []
     assert on_demand == []
     assert calls == []
 
@@ -182,17 +155,11 @@ async def test_seed_then_hit(account_creds):
                 ("F1", "画像.md"): "- 项目画像\n",
                 ("F1", "导航.md"): "- 项目导航\n",
             },
-            memory_topics=(MemoryTopic(name="api", summary="API 约定"),),
         ),
     )
 
     with account_credentials_scope(account_creds):
         rules_md = await assemble_turn_rules(
-            _EmptyMemoryStore(),  # type: ignore[arg-type]
-            "u1",
-            folder_id="F1",
-        )
-        topics = await load_memory_topics(
             _EmptyMemoryStore(),  # type: ignore[arg-type]
             "u1",
             folder_id="F1",
@@ -204,7 +171,6 @@ async def test_seed_then_hit(account_creds):
     assert "沟通偏好" not in rules_md
     assert "项目画像" not in rules_md
     assert "项目导航" not in rules_md
-    assert topics == []
     assert len(on_demand) == 1
     assert on_demand[0].name == "合规"
 
@@ -248,10 +214,9 @@ async def test_snapshot_lapses_after_ttl_and_prepare_injects_nothing(
     seed_account_rules_memory_cache("u1", "F1", _injectable_snapshot())
 
     with account_credentials_scope(account_creds):
-        rules_md, topics, on_demand = await _prepare_injection("u1", "F1")
+        rules_md, on_demand = await _prepare_injection("u1", "F1")
     assert "总是用中文回答" in rules_md
     assert "项目画像" not in rules_md
-    assert topics == []
     assert len(on_demand) == 1
 
     cache_clock.advance(299.0)
@@ -260,9 +225,8 @@ async def test_snapshot_lapses_after_ttl_and_prepare_injects_nothing(
     cache_clock.advance(2.0)
     assert get_account_rules_memory_snapshot("u1", "F1") is None
     with account_credentials_scope(account_creds):
-        rules_md, topics, on_demand = await _prepare_injection("u1", "F1")
+        rules_md, on_demand = await _prepare_injection("u1", "F1")
     assert rules_md == ""
-    assert topics == []
     assert on_demand == []
 
 
@@ -319,39 +283,20 @@ async def test_rewarm_after_lapse_restores_injection(
             "project_on_demand_rules": [],
         }
 
-    async def _mem_list(creds, *, scope):
-        return [{"path": "偏好.md", "version": "1"}] if scope is None else []
-
-    async def _mem_load(creds, *, path, scope):
-        return "- 沟通偏好\n"
-
-    async def _scope_state(creds, *, scope):
-        return {"last_semantic_at": None}
-
     monkeypatch.setattr(
         "agentcore.memory.account_prepare_cache.cloud_list_user_rules", _rules
-    )
-    monkeypatch.setattr(
-        "agentcore.memory.account_prepare_cache.cloud_memory_list", _mem_list
-    )
-    monkeypatch.setattr(
-        "agentcore.memory.account_prepare_cache.cloud_memory_load", _mem_load
-    )
-    monkeypatch.setattr(
-        "agentcore.memory.account_prepare_cache.cloud_memory_scope_state_get",
-        _scope_state,
     )
 
     await warm_account_rules_memory(account_creds, user_id="u1", folder_id="F1")
     cache_clock.advance(301.0)
     with account_credentials_scope(account_creds):
-        lapsed_md, _, _ = await _prepare_injection("u1", "F1")
+        lapsed_md, _ = await _prepare_injection("u1", "F1")
     assert lapsed_md == ""
 
     await warm_account_rules_memory(account_creds, user_id="u1", folder_id="F1")
     assert account_rules_memory_ttl_remaining("u1", "F1") == pytest.approx(300.0)
     with account_credentials_scope(account_creds):
-        renewed_md, _, _ = await _prepare_injection("u1", "F1")
+        renewed_md, _ = await _prepare_injection("u1", "F1")
     assert "总是用中文回答" in renewed_md
     assert "沟通偏好" not in renewed_md
 
@@ -383,7 +328,7 @@ async def test_keepalive_rewarm_keeps_harvest_cache_only_hit_past_ttl(
 
         token = bind_user_message_origin("execution_harvest")
         try:
-            rules_md, _, _ = await _prepare_injection("u1", "F1")
+            rules_md, _ = await _prepare_injection("u1", "F1")
         finally:
             reset_user_message_origin(token)
     assert "总是用中文回答" in rules_md
@@ -437,37 +382,8 @@ async def test_warm_rules_list_once_and_seeds(
             "project_on_demand_rules": [],
         }
 
-    async def _mem_list(creds, *, scope):
-        if scope is None:
-            return [
-                {"path": "偏好.md", "version": "1"},
-                {"path": "主题/foo.md", "version": "1"},
-            ]
-        return [{"path": "画像.md", "version": "1"}]
-
-    async def _mem_load(creds, *, path, scope):
-        return f"# {path}\n- body for {scope}\n"
-
-    async def _scope_state(creds, *, scope):
-        return {
-            "last_semantic_at": None,
-            "explore_workspace_key": None,
-            "explore_fingerprint": None,
-            "explore_fingerprint_dirty": False,
-        }
-
     monkeypatch.setattr(
         "agentcore.memory.account_prepare_cache.cloud_list_user_rules", _rules
-    )
-    monkeypatch.setattr(
-        "agentcore.memory.account_prepare_cache.cloud_memory_list", _mem_list
-    )
-    monkeypatch.setattr(
-        "agentcore.memory.account_prepare_cache.cloud_memory_load", _mem_load
-    )
-    monkeypatch.setattr(
-        "agentcore.memory.account_prepare_cache.cloud_memory_scope_state_get",
-        _scope_state,
     )
 
     snap = await warm_account_rules_memory(
@@ -485,16 +401,10 @@ async def test_warm_rules_list_once_and_seeds(
             "u1",
             folder_id="F1",
         )
-        topics = await load_memory_topics(
-            _EmptyMemoryStore(),  # type: ignore[arg-type]
-            "u1",
-            folder_id="F1",
-        )
         on_demand = await load_on_demand_user_rules("u1", folder_id="F1")
 
     assert " - r" in rules_md or "r" in rules_md
     assert "偏好" not in rules_md
-    assert topics == []
     assert len(on_demand) == 1
     assert rules_calls["n"] == 1  # prepare did not re-hit cloud
 
@@ -592,7 +502,6 @@ def test_warm_account_rules_memory_seeds_cache(
             rules_payload={
                 "global_rules": [{"name": "用户规则.md", "content": "- warm"}],
             },
-            memory_topics=(MemoryTopic(name="t", summary="s"),),
         )
         seed_account_rules_memory_cache(user_id, folder_id, snap)
         return snap
@@ -640,7 +549,7 @@ def test_warm_account_rules_memory_seeds_cache(
     assert init["result"]["capabilities"]["warmAccountRulesMemory"] is True
     ok = next(m for m in sent if m.get("id") == 2)
     assert ok["result"]["ok"] is True
-    assert ok["result"]["topicCount"] == 1
+    assert ok["result"]["topicCount"] == 0
     hit = get_account_rules_memory_snapshot("user-1", "F1")
     assert hit is not None
     assert "warm" in str(hit.rules_payload)
@@ -713,67 +622,11 @@ def test_warm_account_rules_memory_reply_carries_renewal_ttl(
     assert get_account_rules_memory_snapshot("user-1", "F1") is None
 
 
-async def test_warm_includes_scope_state_alongside_memory_bodies(
-    monkeypatch: pytest.MonkeyPatch, account_creds
-):
-    """Scope state is warmed via ``/scope-state/get``, not as a document-tree meta file."""
-    clear_account_rules_memory_cache()
-    state_scopes: list[str | None] = []
-
-    async def _rules(*_a, **_k):
-        return {
-            "global_rules": [],
-            "project_rules": [],
-            "global_on_demand_rules": [],
-            "project_on_demand_rules": [],
-        }
-
-    async def _mem_list(creds, *, scope):
-        if scope is None:
-            return [{"path": "偏好.md", "version": "1"}]
-        return [{"path": "画像.md", "version": "1"}, {"path": "导航.md", "version": "1"}]
-
-    async def _mem_load(creds, *, path, scope):
-        return f"# {path}\n"
-
-    async def _scope_state(creds, *, scope):
-        state_scopes.append(scope)
-        return {
-            "last_semantic_at": None,
-            "explore_workspace_key": "ws:1",
-            "explore_fingerprint": "fp1",
-            "explore_fingerprint_dirty": False,
-        }
-
-    monkeypatch.setattr(
-        "agentcore.memory.account_prepare_cache.cloud_list_user_rules", _rules
-    )
-    monkeypatch.setattr(
-        "agentcore.memory.account_prepare_cache.cloud_memory_list", _mem_list
-    )
-    monkeypatch.setattr(
-        "agentcore.memory.account_prepare_cache.cloud_memory_load", _mem_load
-    )
-    monkeypatch.setattr(
-        "agentcore.memory.account_prepare_cache.cloud_memory_scope_state_get",
-        _scope_state,
-    )
-
-    snap = await warm_account_rules_memory(
-        account_creds, user_id="u1", folder_id="F1"
-    )
-    assert None in state_scopes and "F1" in state_scopes
-    assert snap.scope_states["F1"].explore_workspace_key == "ws:1"
-    assert snap.memory_bodies[("F1", "画像.md")].startswith("#")
-    assert all(path != "_memory_meta.json" for (_, path) in snap.memory_bodies)
-
-
 async def test_warm_pulls_the_ancestor_folders_the_cloud_resolved(
     monkeypatch: pytest.MonkeyPatch, account_creds
 ):
     """A sidecar has no folders table: the chain (and its layers) can only come from云."""
     clear_account_rules_memory_cache()
-    listed_scopes: list[str | None] = []
 
     async def _rules(creds, *, folder_id):
         return {
@@ -785,32 +638,14 @@ async def test_warm_pulls_the_ancestor_folders_the_cloud_resolved(
             "folder_chain": ["F_outer", folder_id],
         }
 
-    async def _mem_list(creds, *, scope):
-        listed_scopes.append(scope)
-        return [{"path": "画像.md", "version": "1"}]
-
-    async def _mem_load(creds, *, path, scope):
-        return f"- {scope or 'global'} 画像\n"
-
-    async def _scope_state(creds, *, scope):
-        del scope
-        return {"last_semantic_at": None}
-
-    for name, fn in (
-        ("cloud_list_user_rules", _rules),
-        ("cloud_memory_list", _mem_list),
-        ("cloud_memory_load", _mem_load),
-        ("cloud_memory_scope_state_get", _scope_state),
-    ):
-        monkeypatch.setattr(f"agentcore.memory.account_prepare_cache.{name}", fn)
+    monkeypatch.setattr(
+        "agentcore.memory.account_prepare_cache.cloud_list_user_rules", _rules
+    )
 
     snap = await warm_account_rules_memory(
         account_creds, user_id="u1", folder_id="F1"
     )
     assert snap.folder_chain == ("F_outer", "F1")
-    assert "F_outer" in listed_scopes
-    assert snap.memory_bodies[("F_outer", "画像.md")] == "- F_outer 画像\n"
-    assert snap.scope_states["F_outer"].last_semantic_at is None
     assert not snap.degraded
 
     with account_credentials_scope(account_creds):
@@ -838,33 +673,15 @@ async def test_warm_empty_folder_chain_drops_the_dead_desk(
             "folder_chain": [],
         }
 
-    async def _mem_list(creds, *, scope):
-        del creds
-        return [{"path": "画像.md", "version": "1"}]
-
-    async def _mem_load(creds, *, path, scope):
-        del creds, path
-        return f"- {scope or 'global'} 画像\n"
-
-    async def _scope_state(creds, *, scope):
-        del creds, scope
-        return {"last_semantic_at": None}
-
-    for name, fn in (
-        ("cloud_list_user_rules", _rules),
-        ("cloud_memory_list", _mem_list),
-        ("cloud_memory_load", _mem_load),
-        ("cloud_memory_scope_state_get", _scope_state),
-    ):
-        monkeypatch.setattr(f"agentcore.memory.account_prepare_cache.{name}", fn)
+    monkeypatch.setattr(
+        "agentcore.memory.account_prepare_cache.cloud_list_user_rules", _rules
+    )
 
     snap = await warm_account_rules_memory(
         account_creds, user_id="u1", folder_id="F1"
     )
     assert snap.folder_chain == ()
-    assert ("F1", "画像.md") not in snap.memory_bodies
-    assert ("", "画像.md") in snap.memory_bodies
-    assert "F1" not in snap.scope_states
+    assert snap.memory_bodies == {}
 
     with account_credentials_scope(account_creds):
         rules_md = await assemble_turn_rules(
@@ -872,15 +689,9 @@ async def test_warm_empty_folder_chain_drops_the_dead_desk(
             "u1",
             folder_id="F1",
         )
-        topics = await load_memory_topics(
-            _EmptyMemoryStore(),  # type: ignore[arg-type]
-            "u1",
-            folder_id="F1",
-        )
     assert "全局规则" in rules_md
     assert "当前规则" not in rules_md
     assert "F1 画像" not in rules_md
-    assert topics == []
 
 
 async def test_hibernate_drops_only_the_named_folder_snapshots():
@@ -904,10 +715,6 @@ async def test_document_store_cache_only_miss_skips_cloud(
         calls.append("cloud")
         raise AssertionError("cloud must not be called under prepare_reads_cache_only")
 
-    monkeypatch.setattr("agentcore.account.credentials.cloud_memory_load", _boom)
-    monkeypatch.setattr("agentcore.account.credentials.cloud_memory_list", _boom)
-    monkeypatch.setattr("agentcore.account.credentials.cloud_memory_save", _boom)
-
     store = DocumentMemoryStore()
     token = prepare_reads_cache_only.set(True)
     folder_token = prepare_account_folder_id.set("F1")
@@ -920,60 +727,3 @@ async def test_document_store_cache_only_miss_skips_cloud(
         prepare_reads_cache_only.reset(token)
         prepare_account_folder_id.reset(folder_token)
     assert calls == []
-
-
-async def test_document_store_cache_only_seed_serves_explore_profile(
-    monkeypatch: pytest.MonkeyPatch, account_creds
-):
-    from agentcore.memory.episode_store import ScopeMemoryMeta
-    from agentcore.memory.explore_profile import (
-        folder_profile_explore_reason,
-        load_folder_profile,
-    )
-    from agentcore.memory.store import CORE_MEMORY_FILE
-
-    clear_account_rules_memory_cache()
-    seed_account_rules_memory_cache(
-        "u1",
-        "F1",
-        AccountPrepareSnapshot(
-            memory_bodies={
-                ("F1", CORE_MEMORY_FILE): "## 技术栈与工具\n- Go\n",
-            },
-            scope_states={
-                "F1": ScopeMemoryMeta(
-                    last_semantic_at=None,
-                    explore_workspace_key="ws:abc",
-                    explore_fingerprint=None,
-                    explore_fingerprint_dirty=False,
-                ),
-            },
-        ),
-    )
-
-    async def _boom(*_a, **_k):
-        raise AssertionError("must not call cloud on cache hit")
-
-    monkeypatch.setattr("agentcore.account.credentials.cloud_memory_load", _boom)
-    monkeypatch.setattr("agentcore.account.credentials.cloud_memory_save", _boom)
-    monkeypatch.setattr(
-        "agentcore.account.credentials.cloud_memory_scope_state_get", _boom
-    )
-    monkeypatch.setattr(
-        "agentcore.account.credentials.cloud_memory_scope_state_save", _boom
-    )
-
-    store = DocumentMemoryStore()
-    token = prepare_reads_cache_only.set(True)
-    folder_token = prepare_account_folder_id.set("F1")
-    try:
-        with account_credentials_scope(account_creds):
-            profile = await load_folder_profile(store, "u1", "F1")
-            assert "Go" in profile
-            reason = await folder_profile_explore_reason(
-                store, "u1", "F1", current_workspace_key="ws:abc"
-            )
-            assert reason is None  # non-empty + matching key → no explore
-    finally:
-        prepare_reads_cache_only.reset(token)
-        prepare_account_folder_id.reset(folder_token)

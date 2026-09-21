@@ -1,4 +1,4 @@
-"""Parallel tool execution + same-round file_read coalesce for one ReAct round."""
+"""Parallel tool execution + same-round read coalesce for one ReAct round."""
 
 from __future__ import annotations
 
@@ -67,7 +67,7 @@ async def execute_tools(
     ``allowed_tool_names`` is the run's least-privilege allow-list (``None`` = no
     restriction). Schema offering already filters to this list; this parameter
     **also enforces at execute** so a model cannot land side effects by calling a
-    registered tool that was never granted (e.g. debater ``file_write``).
+    registered tool that was never granted (e.g. debater ``write``).
 
     ``disabled_tools`` is the mid-chain execute-deny set (circuit breaker,
     workspace channel dead, web_fetch retirement). Those names stay on the
@@ -85,7 +85,7 @@ async def execute_tools(
     ``content_delta``); ``ToolCallFact`` and circuit-breaker audit still keep
     ``run_id`` for §8.3 fold / audit. Workers keep ``run_id`` on SSE too.
 
-    Same-round parallel ``file_read`` calls that share a normalized path execute
+    Same-round parallel ``read`` calls that share a normalized path execute
     the underlying read once; sibling tool_calls receive fan-out clones (one
     count bump when the shared result is a full read).
     """
@@ -93,7 +93,7 @@ async def execute_tools(
     event_run_id = "" if role == "captain" else run_id
     allowed_set = None if allowed_tool_names is None else frozenset(allowed_tool_names)
     disabled_set = frozenset(disabled_tools) if disabled_tools else frozenset()
-    # Same-round file_read path coalesce (leader Future → fan-out clones).
+    # Same-round read path coalesce (leader Future → fan-out clones).
     file_read_inflight: dict[str, asyncio.Future[ToolResult]] = {}
 
     async def _run_one(tc: ToolCall) -> ToolCallQuad:
@@ -134,7 +134,7 @@ async def execute_tools(
     async def _gather_in_order(batch: list[ToolCall]) -> dict[str, ToolCallQuad]:
         # Same-batch handoff after writes: ``landed_artifact_kinds`` is a shared dict, but
         # parallel gather can still let handoff observe an empty stamp if it races ahead of
-        # file_write. Run non-handoff tools first (still parallel among
+        # write. Run non-handoff tools first (still parallel among
         # themselves), then handoff — message order stays call-list order below.
         by_id: dict[str, ToolCallQuad] = {}
         has_handoff = any(_is_handoff_call(tc) for tc in batch)
@@ -285,7 +285,7 @@ def _append_native_image_user_message(
         LLMMessage(
             role="user",
             content=build_multimodal_user_content(
-                "以下是本轮 file_read 发给当前模型的工作区图片。",
+                "以下是本轮 read 发给当前模型的工作区图片。",
                 parts,
             ),
         )

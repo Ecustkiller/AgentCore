@@ -43,13 +43,10 @@
 
 from __future__ import annotations
 
-import shutil
-import subprocess
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-import httpx
 import pytest
 
 from agentcore.core.types import ToolApproval
@@ -58,11 +55,8 @@ from agentcore.tools.builtin.file_ops import (
     FileWriteTool,
     StrReplaceTool,
 )
-from agentcore.tools.builtin.git_ops import GitTool
 from agentcore.tools.builtin.md_export import MdExportTool
 from agentcore.tools.builtin.run import RunTool
-from agentcore.tools.builtin.web import download_url as download_mod
-from agentcore.tools.builtin.web.download_url import DownloadUrlTool
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     FileProductsContract,
@@ -74,10 +68,8 @@ from agentcore.tools.sandbox.protocol import ExecutionRequest, ExecutionResult
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace._paths import is_internal_zone_relpath
 from agentcore.workspace.server import ServerWorkspace
-from agentcore.workspace.write_claims import WriteCoordinator
 
-# 待接清单：**只减不增**，现已清空（最后一项 ``git`` 定性为 NO_PRODUCT，见本文件末尾那条
-# 断言）。列在这里 = 「会往工作区落盘、自报还没接」，并且下面必须有一条真跑用例证明它此刻
+# 待接清单：**只减不增**，现已清空。列在这里 = 「会往工作区落盘、自报还没接」，并且下面必须有一条真跑用例证明它此刻
 # 确实一件都没报（所以没法拿已接好的工具来凑数，也没法让接完的名字赖着不走）。往这里加一个
 # 名字 = 明知故犯地放一支会漏账的笔进生产——先想清楚再加。
 _PENDING_SELF_REPORT: frozenset[str] = frozenset()
@@ -150,7 +142,7 @@ def _snapshot(root: Path) -> frozenset[str]:
 
 
 async def _run_file_write(root: Path, _mp: pytest.MonkeyPatch) -> ToolResult:
-    return await FileWriteTool().execute({"path": "报告.md", "content": "# 标题"}, _ctx(root))
+    return await FileWriteTool().execute({"file_path": "报告.md", "content": "# 标题"}, _ctx(root))
 
 
 def _seed_src_txt(root: Path) -> None:
@@ -159,7 +151,7 @@ def _seed_src_txt(root: Path) -> None:
 
 async def _run_str_replace(root: Path, _mp: pytest.MonkeyPatch) -> ToolResult:
     return await StrReplaceTool().execute(
-        {"path": "src.txt", "old_string": "alpha", "new_string": "beta"}, _ctx(root)
+        {"file_path": "src.txt", "old_string": "alpha", "new_string": "beta"}, _ctx(root)
     )
 
 
@@ -187,21 +179,6 @@ def _seed_note_md(root: Path) -> None:
 async def _run_md_export(root: Path, _mp: pytest.MonkeyPatch) -> ToolResult:
     return await MdExportTool().execute(
         {"path": "note.md", "format": "docx"}, _ctx(root)
-    )
-
-
-async def _run_download_url(root: Path, monkeypatch: pytest.MonkeyPatch) -> ToolResult:
-    async def _fake_request(_client, _method, url, **_kwargs):
-        return httpx.Response(
-            200,
-            content=b"hello-download",
-            headers={"content-type": "text/plain", "content-length": "14"},
-            request=httpx.Request("GET", url),
-        )
-
-    monkeypatch.setattr(download_mod, "_safe_request", _fake_request)
-    return await DownloadUrlTool().execute(
-        {"url": "https://example.com/file.bin", "path": "uploads/file.bin"}, _ctx(root)
     )
 
 
@@ -255,8 +232,8 @@ class _Case:
 
 
 _CASES: tuple[_Case, ...] = (
-    _Case("file_write", _run_file_write, (("报告.md", "md", None),)),
-    _Case("str_replace", _run_str_replace, (("src.txt", "txt", None),), _seed_src_txt),
+    _Case("write", _run_file_write, (("报告.md", "md", None),)),
+    _Case("edit", _run_str_replace, (("src.txt", "txt", None),), _seed_src_txt),
     _Case(
         "file_batch",
         _run_file_batch,
@@ -265,7 +242,6 @@ _CASES: tuple[_Case, ...] = (
     ),
     # 导出件：产物是 .docx / .pdf，入参那份 md 是它的源（``derived_from``），不是产物。
     _Case("md_export", _run_md_export, (("note.docx", "docx", "note.md"),), _seed_note_md),
-    _Case("download_url", _run_download_url, (("uploads/file.bin", "file", None),)),
     # 间接落盘（沙箱 copy-out）：报的是 copy-out 的 EXACT 路径，含中文顿号也不会被散文切错。
     _Case(
         "run",
@@ -376,62 +352,3 @@ async def test_tool_self_reports_what_it_landed(
     )
 
 
-def _git(cwd: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
-
-
-def _seed_git_branches(root: Path) -> None:
-    """两条分支：``feature/work`` 上有 ``note.md``，当前停在没有它的 ``feature/base``。"""
-    _git(root, "init", "-b", "feature/base")
-    _git(root, "config", "user.email", "tester@example.com")
-    _git(root, "config", "user.name", "Tester")
-    (root / "base.md").write_text("base\n", encoding="utf-8")
-    _git(root, "add", "base.md")
-    _git(root, "commit", "-m", "base")
-    _git(root, "checkout", "-b", "feature/work")
-    (root / "note.md").write_text("note\n", encoding="utf-8")
-    _git(root, "add", "note.md")
-    _git(root, "commit", "-m", "note")
-    _git(root, "checkout", "feature/base")
-    assert not (root / "note.md").exists()
-
-
-async def _run_git_checkout(root: Path) -> ToolResult:
-    """切分支把 ``note.md`` 换回工作树——git 确实会让文件落到盘上（但不是本 run 的产物）。"""
-    # Worker 上下文（协调通道在场即解除 CEO 写禁）；审批是引擎层的事，不在工具里。
-    return await GitTool().execute(
-        {"subcommand": "checkout", "branch": "feature/work"},
-        _ctx(root, write_coordinator=WriteCoordinator()),
-    )
-
-
-async def test_git_swaps_the_worktree_but_lands_no_products(tmp_path: Path):
-    """``git`` 换工作树 ≠ 产交付物：文件真换了，台账里一件都没有（定案，非待接）。
-
-    台账语义是「本 run 产出的交付物」而不是「盘上多了什么」：checkout / pull 落下的
-    是别人或过去已提交的版本，一次切分支能带上千个 worker 根本没碰过的文件。更硬的理由在
-    ``runtime/runs/executor/terminal.py``：对账用 ``files_touched`` 判有没有落盘产物
-    （blocked vs partial）。若换工作树算落盘，一个毫无产出的 worker 只要切一次分支就能把
-    无产物批次刷成有落盘——正是自报重设计要防的假装交付。想推翻这条定案，先答：那次假装交付怎么防。
-    """
-    if not shutil.which("git"):
-        pytest.skip("git not installed")
-
-    _seed_git_branches(tmp_path)
-    before = _snapshot(tmp_path)
-    result = await _run_git_checkout(tmp_path)
-
-    assert result.success is True, f"git checkout 没跑成功：{result.error}"
-    # 前提：这次调用确实换了工作树上的文件，否则下面那条断言什么都没钉住。
-    assert "note.md" in (_snapshot(tmp_path) - before), (
-        "git checkout 没把 note.md 换上工作树——场景失效了，请修夹具而不是删断言。"
-    )
-    assert result.file_products == [], (
-        f"git 自报了产物 {[p.path for p in result.file_products]}，但它被定性为不产交付物。\n"
-        "切分支带上来的是别人或过去已提交的版本，不是本 run 的产出；接进台账会让"
-        "「切一次分支就把 blocked 刷成 delivered」重新成立（见本用例 docstring）。"
-    )
-    assert tool_registration(GitTool).file_products is FileProductsContract.NO_PRODUCT, (
-        "git 的契约声明被改了。它不是待接项（SELF_REPORT_PENDING），是定案的 NO_PRODUCT："
-        "会动盘，但落的不是本 run 产出的交付物。"
-    )

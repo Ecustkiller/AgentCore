@@ -396,6 +396,10 @@ function primaryArg(
     const cmd = args.command;
     if (typeof cmd === "string" && cmd.trim()) return cmd.trim();
   }
+  if (toolName === "read" || toolName === "write" || toolName === "edit") {
+    const fp = typeof args.file_path === "string" ? args.file_path.trim() : "";
+    return fp || null;
+  }
   for (const key of [
     "path",
     "file_path",
@@ -431,15 +435,15 @@ function isFacePreviewKey(toolName: string, key: string): boolean {
     return true;
   }
   if (
-    (toolName === "file_write" || toolName === "file_append") &&
-    key === "content"
+    (toolName === "read" || toolName === "write" || toolName === "edit") &&
+    key === "file_path"
   ) {
     return true;
   }
-  if (
-    toolName === "str_replace" &&
-    (key === "old_string" || key === "new_string")
-  ) {
+  if (toolName === "write" && key === "content") {
+    return true;
+  }
+  if (toolName === "edit" && (key === "old_string" || key === "new_string")) {
     return true;
   }
   return false;
@@ -650,8 +654,7 @@ export function ApprovalCard({
   );
   const codeTruncated = codeText != null && isPreviewTruncated(codeText);
   const writeBody =
-    (approval.toolName === "file_write" ||
-      approval.toolName === "file_append") &&
+    approval.toolName === "write" &&
     typeof approval.arguments.content === "string" &&
     approval.arguments.content
       ? approval.arguments.content
@@ -659,13 +662,13 @@ export function ApprovalCard({
   const writeLineCount =
     writeBody != null ? countApprovalLines(writeBody) : null;
   const replaceOld =
-    approval.toolName === "str_replace" &&
+    approval.toolName === "edit" &&
     typeof approval.arguments.old_string === "string" &&
     approval.arguments.old_string
       ? approval.arguments.old_string
       : null;
   const replaceNew =
-    approval.toolName === "str_replace" &&
+    approval.toolName === "edit" &&
     typeof approval.arguments.new_string === "string" &&
     approval.arguments.new_string
       ? approval.arguments.new_string

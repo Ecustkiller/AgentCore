@@ -46,8 +46,8 @@ afterEach(() => {
 });
 
 describe("tool_use_end / delivery_status → file tree notify", () => {
-  it("notifies conversation workspace sources on successful file_write", () => {
-    handleExecutionEvent(endEvent("file_write"), {
+  it("notifies conversation workspace sources on successful write", () => {
+    handleExecutionEvent(endEvent("write"), {
       conversationId: CID,
       source: "server",
     });
@@ -62,27 +62,23 @@ describe("tool_use_end / delivery_status → file tree notify", () => {
     });
   });
 
-  it.each([
-    "file_append",
-    "str_replace",
-    "file_delete",
-    "file_move",
-    "file_copy",
-    "file_batch",
-  ])("notifies on successful %s", (tool) => {
-    handleExecutionEvent(endEvent(tool), {
-      conversationId: CID,
-      source: "server",
-    });
-    expect(notifyFileTreeChanged).toHaveBeenCalled();
-  });
+  it.each(["edit", "file_delete", "file_batch"])(
+    "notifies on successful %s",
+    (tool) => {
+      handleExecutionEvent(endEvent(tool), {
+        conversationId: CID,
+        source: "server",
+      });
+      expect(notifyFileTreeChanged).toHaveBeenCalled();
+    },
+  );
 
   it("skips failed writes and non-write tools", () => {
-    handleExecutionEvent(endEvent("file_write", "error"), {
+    handleExecutionEvent(endEvent("write", "error"), {
       conversationId: CID,
       source: "server",
     });
-    handleExecutionEvent(endEvent("file_read"), {
+    handleExecutionEvent(endEvent("read"), {
       conversationId: CID,
       source: "server",
     });
@@ -90,7 +86,7 @@ describe("tool_use_end / delivery_status → file tree notify", () => {
   });
 
   it("skips journal replay", () => {
-    handleExecutionEvent(endEvent("file_write"), {
+    handleExecutionEvent(endEvent("write"), {
       conversationId: CID,
       source: "server",
       replay: true,

@@ -71,14 +71,6 @@ from .auth import (
     UpdateProfileRequest,
     UserResponse,
 )
-from .boards import (
-    BoardDetail,
-    BoardSceneWriteRequest,
-    BoardSummary,
-    BoardWriteResult,
-    CreateBoardRequest,
-    UpdateBoardRequest,
-)
 from .browser import (
     BrowserInputEvent,
     BrowserInputRequest,
@@ -425,9 +417,6 @@ __all__ = [
     "DeletedFolderSummary",
     "DeletedFolderListResponse",
     "GroupedConversationsResponse",
-    # boards (AI 协作白板)
-    "CreateBoardRequest",
-    "UpdateBoardRequest",
     "CreateTableRequest",
     "UpdateTableRequest",
     "TableSummary",
@@ -435,10 +424,6 @@ __all__ = [
     "TableOpsRequest",
     "TableOpsResult",
     "TableConversationResponse",
-    "BoardSummary",
-    "BoardDetail",
-    "BoardSceneWriteRequest",
-    "BoardWriteResult",
     # docs (creation-tool 文档)
     "CreateDocRequest",
     "UpdateDocRequest",

@@ -50,7 +50,7 @@ class WorkspaceSettings(BaseModel):
     workspace_retention_sweep_interval_seconds: int = 6 * 3600
     workspace_retention_batch_limit: int = 100
 
-    # Product ingest (panel PUT / attachments / download_url). Distinct from
+    # Product ingest (panel PUT / attachments). Distinct from
     # AI text read (5 MiB) and from channel extract IPC (25 MiB). Desktop
     # mirrors this literal — it cannot import server settings.
     workspace_upload_max_bytes: int = 50 * 1024 * 1024
@@ -186,7 +186,7 @@ class WorkspaceSettings(BaseModel):
     browser_veth_subnet_base: str = "10.201"
 
     # Desk guest egress (SSRF proxy + netns; same classify_url policy as
-    # download_url / browser proxy; different port + veth range). Registry
+    # web_fetch / browser proxy; different port + veth range). Registry
     # host lists pin the install *tool*, not this listener.
     package_egress_proxy_port: int = 8898
     package_veth_subnet_base: str = "10.202"

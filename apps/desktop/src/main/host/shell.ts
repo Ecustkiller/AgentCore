@@ -71,7 +71,7 @@ export function shellSilentInstallBlocks(command: string): string | null {
       return (
         "host_shell 熔断：命令匹配静默安装启发式（msiexec /quiet、Setup /S、" +
         "Start-Process quiet 等）。此为启发式兜底，并非完整拦截；" +
-        "请改用结构化 host_package_install（winget/brew/apt 点名包）。"
+        "请改用 winget / brew / apt install（该命令会再确认）。"
       );
     }
   }

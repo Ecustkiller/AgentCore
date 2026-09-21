@@ -5,6 +5,7 @@ export type IconButtonSize = "sm" | "md";
 export type IconButtonTone =
   | "default"
   | "sidebar"
+  | "muted"
   | "primary"
   | "destructive"
   | "inverse";
@@ -17,6 +18,8 @@ const sizeClass: Record<IconButtonSize, string> = {
 const toneClass: Record<IconButtonTone, string> = {
   default: "text-muted-foreground hover:bg-accent hover:text-foreground",
   sidebar: "text-sidebar-foreground/60 hover:bg-sidebar-accent",
+  muted:
+    "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-100",
   primary:
     "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground",
   destructive:
@@ -28,7 +31,10 @@ const toneClass: Record<IconButtonTone, string> = {
 export interface IconButtonProps
   extends ButtonHTMLAttributes<HTMLButtonElement> {
   size?: IconButtonSize;
-  /** Muted toolbar / sidebar chrome / filled primary·danger·inverse. */
+  /**
+   * Ghost chrome (`default` / `sidebar`) vs filled
+   * (`muted` tonal · `primary` · danger · `inverse`).
+   */
   tone?: IconButtonTone;
 }
 

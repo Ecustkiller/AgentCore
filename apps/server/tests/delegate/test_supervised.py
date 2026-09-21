@@ -280,7 +280,7 @@ async def test_scope_yield_rejournals_consumed_for_durable_seed():
     consumed = [
         esc
         for esc in (finals[-1]["payload"].get("escalations") or [])
-        if esc.get("kind") == "scope" and esc.get("consumed")
+        if esc.get("reason") == "scope" and esc.get("consumed")
     ]
     assert consumed, "the re-journaled run-final must carry the consumed scope escalation"
 

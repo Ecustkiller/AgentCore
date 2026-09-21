@@ -199,7 +199,8 @@ def spawn_independent_llm(llm: LLMProvider) -> tuple[LLMProvider, bool]:
     """Spawn a client the coordination background drive owns and must close.
 
     Returns ``(client, owns)``. Production routers / OpenAI-compatible providers
-    are cloned so turn teardown ``llm.close()`` cannot ReadError-kill workers.
+    are cloned so turn teardown ``llm.close()`` cannot mark the worker instance
+    closed. HTTP transport is origin-pooled and survives both close() calls.
     Test fakes without ``clone`` are returned as-is with ``owns=False``.
     """
     clone_fn = getattr(llm, "clone", None)

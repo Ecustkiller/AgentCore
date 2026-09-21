@@ -258,7 +258,7 @@ async def _build_attachment_prompt(
 
     Text files carry pre-extracted text; pre-parsed binaries (docx/pdf/…) carry
     inline text (context-capped) plus a pointer to the ``*.md`` workspace copy;
-    office/PDF that missed pre-parse steer ``file_read`` (transparent extract);
+    office/PDF that missed pre-parse steer ``read`` (transparent extract);
     spreadsheet / delimited files carry **column names, types, and sample rows**
     only (never the full table). ``code_execute`` steer follows ``available_tools`` (this turn's
     assembled table); when the table is omitted or lacks the tool, the block
@@ -452,7 +452,7 @@ async def _build_attachment_prompt(
                 add_block(
                     f"--- File: {name} ({path}) [binary / office-pdf] ---\n"
                     "No inline text for this office/PDF attachment (pre-parse missed or "
-                    "failed). Use file_read on the workspace-relative path above — "
+                    "failed). Use read on the workspace-relative path above — "
                     "text is extracted automatically. Do NOT default to run "
                     "for office/PDF. Do NOT use an OS absolute path."
                 )
@@ -513,7 +513,7 @@ async def _build_attachment_prompt(
             else ""
         ),
         office_note=(
-            " Office/PDF attachments without inline text: use file_read on the "
+            " Office/PDF attachments without inline text: use read on the "
             "workspace path (automatic text extract); do not default to run."
             if has_office_unparsed
             else ""

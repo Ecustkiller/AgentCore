@@ -180,15 +180,14 @@ export type RunFrame =
       agentId: string;
       question: string;
       assumption: string;
-      blocking: boolean;
       /** 统一时间线二期 D6: raised 轻行幂等键（桌面填入 RunEscalation.id；golden 不加）。 */
       escalationId: string;
       escalationKind: import("./types").EscalationKind;
-      /** Wire `source`（桌面本地；ProjectedTurn 不加）。旧流缺字段 → undefined。 */
+      /** Wire `source`（桌面本地；ProjectedTurn 不加）。 */
       source?: string;
     }
   | {
-      // 阻塞式求决策: a worker SUSPENDED on a blocking escalate, awaiting the user.
+      // Wait: a worker SUSPENDED on escalate(reason=wait), awaiting the user.
       t: number;
       kind: "escalation_required";
       // The interaction id the EscalationCard resolves against (POST …/interactions/{id}).
@@ -466,10 +465,11 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         agentId: p.agent_id,
         question: p.question,
         assumption: p.assumption,
-        blocking: p.blocking,
         escalationId: p.escalation_id ?? "",
         escalationKind:
-          p.kind === "scope" || p.kind === "dep" ? p.kind : "normal",
+          p.kind === "scope" || p.kind === "dep" || p.kind === "wait"
+            ? p.kind
+            : "wait",
         ...(source ? { source } : {}),
       };
     }
@@ -489,7 +489,9 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         question: p.question,
         assumption: p.assumption,
         escalationKind:
-          p.kind === "scope" || p.kind === "dep" ? p.kind : "normal",
+          p.kind === "scope" || p.kind === "dep" || p.kind === "wait"
+            ? p.kind
+            : "wait",
         questions: p.questions ?? [],
         awaiting: p.awaiting === "ceo" ? "ceo" : "user",
         ...(paths.length > 0 ? { ownershipPaths: paths } : {}),

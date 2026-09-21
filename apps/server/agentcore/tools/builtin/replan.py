@@ -4,7 +4,7 @@ delegate plan (受监督的波循环).
 The companion to ``delegate``. The ``WaveScheduler``
 YIELDs control back to the CEO at a *decision boundary* (instead of running a
 mis-specified tail) when a finished worker flagged a 职责/范围 deviation
-(``escalate kind=scope``) or a 依赖缺口 (``escalate kind=dep``). The CEO reads the
+(``escalate reason=scope``) or a 依赖缺口 (``escalate reason=dep``). The CEO reads the
 signal + output and re-steers the not-yet-run tail (``steers``), appends a producer
 (``add``), resumes as-is, or wraps up (``stop``).
 
@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolFace
 from agentcore.runtime.delegate.task_models import TASK_MODEL_SCHEMA_PROPS
-from agentcore.tools.builtin.delegate.schema import TASK_DELIVERABLE_SCHEMA
+from agentcore.tools.builtin.delegate.schema import TASK_ARTIFACTS_SCHEMA
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_CEO_ONLY,
@@ -46,7 +46,7 @@ logger = get_logger(__name__)
 
 # Schema layer: short trigger. 字段 HOW 在让出简报与参数，不指空 consult。
 _REPLAN_DESCRIPTION = (
-    "在 delegate 让出『计划已让出』后续跑同一计划（非终结）。"
+    "在已派出的计划上操舵、加步或收口。"
 )
 
 _REPLAN_PARAMETERS = {
@@ -54,7 +54,7 @@ _REPLAN_PARAMETERS = {
     "properties": {
         "steers": {
             "type": "array",
-            "description": "可选：给未跑步骤追加操舵说明。",
+            "description": "给未跑步骤追加操舵说明。",
             "items": {
                 "type": "object",
                 "properties": {
@@ -73,14 +73,14 @@ _REPLAN_PARAMETERS = {
         "add": {
             "type": "array",
             "description": (
-                "可选：追加全新步骤（role+task 必填；可 depends_on 现有 run_id 或本批 id）。"
+                "追加全新步骤（role+task；可 depends_on 现有 run_id 或本批 id）。"
             ),
             "items": {
                 "type": "object",
                 "properties": {
                     "id": {
                         "type": "string",
-                        "description": "可选：本批临时 id，供其它新步 depends_on。",
+                        "description": "本批临时 id，供其它新步 depends_on。",
                     },
                     "role": {
                         "type": "string",
@@ -88,14 +88,14 @@ _REPLAN_PARAMETERS = {
                     },
                     "task": {
                         "type": "string",
-                        "description": "子任务（自包含）。",
+                        "description": "子任务。",
                     },
                     "depends_on": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "可选：上游 run_id 或本批 id。",
+                        "description": "上游 run_id 或本批 id。",
                     },
-                    "deliverable": TASK_DELIVERABLE_SCHEMA,
+                    "artifacts": TASK_ARTIFACTS_SCHEMA,
                     **TASK_MODEL_SCHEMA_PROPS,
                 },
                 "required": ["role", "task"],
@@ -103,7 +103,7 @@ _REPLAN_PARAMETERS = {
         },
         "stop": {
             "type": "boolean",
-            "description": "可选：true=跳过未跑步并收口。",
+            "description": "true=跳过未跑步并收口。",
         },
     },
     "required": [],
@@ -122,6 +122,7 @@ class ReplanTool:
         audience=AUDIENCE_CEO_ONLY,
         ceo_wire=CeoWire.COORDINATION,
         catalog_summary="调整已派出的计划",
+        blurb="改正在跑的分工，而不是从头再派",
     )
 
     def __init__(self, *, delegate: DelegateTool) -> None:

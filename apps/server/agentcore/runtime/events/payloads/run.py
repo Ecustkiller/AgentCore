@@ -12,7 +12,7 @@ from agentcore.runtime.events.payloads.shared import CostBreakdown, RunDebrief, 
 from agentcore.runtime.runs.types import RunKind
 
 Stance = Literal["pro", "con"]
-EscalationKind = Literal["normal", "scope", "dep"]
+EscalationKind = Literal["wait", "scope", "dep"]
 PlanRevisionKind = Literal["bind", "steer"]
 # 幕类型 = 能力档取用键（首批 multi_agent / debate；single_agent 不进幕序列）。
 ActKind = Literal["multi_agent", "debate"]
@@ -202,14 +202,13 @@ class RunPhasePayload(WirePayload):
 
 
 class RunEscalationPayload(WirePayload):
-    """升级实时可见 (非阻塞 raised): a worker flagged a decision/blocker and kept working.
+    """升级实时可见: ``escalate(reason=scope|dep)`` 或引擎早停，工人继续干。
 
-    JOURNALED (DURABLE, 统一时间线二期 D6): ``escalation_id`` keys the raised 轻行's
-    timeline marker (幂等去重 on attach replay) and lets the raised row + node ⚠️ badge
-    reload — the event base is now level with ``escalation_required``.
+    JOURNALED (DURABLE): ``escalation_id`` keys the raised timeline marker.
+    Wait 走 ``escalation_required``，不走本事件。
 
-    ``source`` distinguishes early-stop / thrashing backstops (``validation_thrash`` /
-    ``ceiling_backstop``) from genuine mid-work escalate (omit / absent).
+    ``source`` 区分早停 / 打转（``validation_thrash`` / ``ceiling_backstop``）；
+    工具请示带 ``kind`` = scope|dep。
     """
 
     escalation_id: str
@@ -217,7 +216,6 @@ class RunEscalationPayload(WirePayload):
     agent_id: str
     question: str
     assumption: str
-    blocking: bool
     kind: EscalationKind | None = absent()
     source: str | None = absent()
 

@@ -676,22 +676,23 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             # escalation_id (raised 轻行 slot; ProjectedTurn escalations[] 形状不加 id).
             run = run_by_id(p.get("run_id", ""))
             if run is not None:
-                run["escalations"].append(
-                    {
-                        "question": p.get("question", ""),
-                        "assumption": p.get("assumption", ""),
-                        "blocking": bool(p.get("blocking")),
-                        "status": "raised",
-                        "answer": None,
-                        "kind": p.get("kind") or "normal",
-                    }
-                )
+                entry: dict = {
+                    "question": p.get("question", ""),
+                    "assumption": p.get("assumption", ""),
+                    "status": "raised",
+                    "answer": None,
+                }
+                if p.get("kind") in ("wait", "scope", "dep"):
+                    entry["kind"] = p["kind"]
+                if p.get("source"):
+                    entry["source"] = p["source"]
+                run["escalations"].append(entry)
             eid = p.get("escalation_id") or ""
             if eid and not has_marker("escalation", "escalation_id", eid):
                 process.append({"kind": "escalation", "escalation_id": eid})
 
         elif etype == "escalation_required":
-            # 阻塞式求决策: a worker SUSPENDED on a blocking escalate — append a "pending"
+            # Wait: a worker SUSPENDED on escalate(reason=wait) — append a "pending"
             # card to its run. The turn does NOT pause (siblings keep running), so unlike
             # the halting gates this sets no `pending` interaction.
             # ``awaiting=ceo`` is projected; classic user path omits (default).
@@ -704,10 +705,9 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 entry: dict = {
                     "question": p.get("question", ""),
                     "assumption": p.get("assumption", ""),
-                    "blocking": True,
                     "status": "pending",
                     "answer": None,
-                    "kind": p.get("kind") or "normal",
+                    "kind": p.get("kind") or "wait",
                 }
                 if awaiting == "ceo":
                     entry["awaiting"] = "ceo"

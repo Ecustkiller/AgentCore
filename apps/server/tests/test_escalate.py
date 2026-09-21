@@ -1,12 +1,4 @@
-"""EscalateTool logging — ``worker.escalate`` records「为什么升级」(question + assumption).
-
-决策可观测回归：``worker.escalate`` used to carry only ``run_id`` / ``blocking`` / ``kind`` /
-``has_assumption`` — i.e. that AN escalation happened and its type, but never its substance.
-Now it also logs ``question`` (the待决问题原文, preview-capped) and ``assumption`` (the超时
-回落), so an offline analysis of the product-AI logs can read WHY a worker escalated and where
-it was blocked, straight from the line — no DB round-trip. These drive the non-blocking path
-(no live escalation channel), which still emits the log before returning its CONTINUE ack.
-"""
+"""EscalateTool — ``reason`` 三选一；日志带 question / assumption / reason。"""
 
 import json
 from pathlib import Path
@@ -34,15 +26,14 @@ def test_escalate_schema_has_no_recommended_field():
     assert "放第一" not in props["label"]["description"]
 
 
-def _ctx() -> ToolContext:
-    # No escalation channel / on_escalate callback → the non-blocking escalate path, which
-    # still emits worker.escalate before returning the "proceed on your assumption" ack.
+def _ctx(**kwargs) -> ToolContext:
     return ToolContext.create(
         execution_id="e",
         run_id="w1",
         agent_id="a",
         backend=ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
         user_id="u",
+        **kwargs,
     )
 
 
@@ -51,35 +42,39 @@ async def test_worker_escalate_logs_question_and_assumption(monkeypatch):
     monkeypatch.setattr(escalate_mod, "logger", spy)
 
     result = await EscalateTool().execute(
-        {"question": "该走方案A还是方案B?", "assumption": "暂按方案A继续", "kind": "scope"},
+        {
+            "question": "该走方案A还是方案B?",
+            "assumption": "暂按方案A继续",
+            "reason": "scope",
+        },
         _ctx(),
     )
 
-    assert result.success is True  # non-blocking escalate never stops the worker
+    assert result.success is True
     esc = spy.get("worker.escalate")
     assert esc["run_id"] == "w1"
-    assert esc["kind"] == "scope"
-    assert esc["blocking"] is False
+    assert esc["reason"] == "scope"
+    assert "blocking" not in esc
+    assert "kind" not in esc
     assert esc["has_assumption"] is True
-    # the WHY + the fallback — the substance the enrichment adds
     assert esc["question"] == "该走方案A还是方案B?"
     assert esc["assumption"] == "暂按方案A继续"
 
 
 async def test_worker_escalate_question_preview_is_capped(monkeypatch):
-    # A long question is clipped to a bounded preview (铁律: never the full 正文); no
-    # assumption given → the assumption preview is empty (blocking defaults false, so an
-    # assumption is not required).
     spy = LogSpy()
     monkeypatch.setattr(escalate_mod, "logger", spy)
 
-    await EscalateTool().execute({"question": "为" * 500}, _ctx())
+    await EscalateTool().execute(
+        {"question": "为" * 500, "assumption": "暂按已有口径", "reason": "scope"},
+        _ctx(),
+    )
 
     esc = spy.get("worker.escalate")
     assert esc["question"].endswith("…")
     assert len(esc["question"]) == 201  # 200-char cap + the one ellipsis char
-    assert esc["has_assumption"] is False
-    assert esc["assumption"] == ""
+    assert esc["has_assumption"] is True
+    assert esc["reason"] == "scope"
 
 
 def test_escalation_required_carries_timeout_only_when_ops_configured_one():
@@ -105,28 +100,25 @@ def test_escalation_required_carries_timeout_only_when_ops_configured_one():
     assert with_ceiling.payload["timeout_seconds"] == 1800.0
 
 
-def test_escalate_schema_teaches_blocking_choice():
-    """Worker 按题自选 blocking：默认 false / 猜错作废只留 blocking 参数。"""
+def test_escalate_schema_teaches_reason_not_blocking():
     schema = EscalateTool().schema
+    props = schema.parameters["properties"]
+    assert "blocking" not in props
+    assert "kind" not in props
     desc = schema.description
-    assert "必须由上级" in desc or "拍板" in desc
-    assert "小事勿升级" not in desc
-    assert "报一声" in desc
-    assert "猜错作废" in desc
-    assert "勿自己改" not in desc
-    assert "勿只标假设" not in desc
+    assert "向上请示" in desc
+    assert "等人定" in desc
+    assert "小假设写进交差" in desc
+    assert "报一声" not in desc
+    assert "猜错作废" not in desc
     assert "默认 false" not in desc
-    assert "kind：" not in desc
-    kind = schema.parameters["properties"]["kind"]["description"]
-    assert "别硬猜" not in kind
-    blocking = schema.parameters["properties"]["blocking"]["description"]
-    assert "报一声继续" in blocking or "原地等" in blocking
-    assert "已拒凭据" in blocking and "false" in blocking
-    # 身份段整句不进按钮
-    assert "挂起等密钥" not in blocking
-    assert "已明确拒绝已有凭据" not in blocking
-    # default philosophy unchanged: missing blocking stays non-blocking
-    assert schema.parameters["properties"]["blocking"].get("default") in (None, False)
+    reason = props["reason"]["description"]
+    assert "wait" in reason and "scope" in reason and "dep" in reason
+    assert "已拒凭据不要 wait" in reason
+    assert props["reason"]["enum"] == ["wait", "scope", "dep"]
+    question = props["question"]["description"]
+    assert "必填" not in question
+    assert "要拍板" in question
 
 
 def test_escalate_schema_stays_off_engine_internals():
@@ -166,7 +158,6 @@ def test_escalate_questions_share_ask_user_card_shape():
     assert set(esc["items"]["properties"]) == set(ask["items"]["properties"])
     assert set(esc["items"]["properties"]) == {
         "prompt",
-        "kind",
         "options",
         "multiple",
     }
@@ -175,32 +166,38 @@ def test_escalate_questions_share_ask_user_card_shape():
     assert ask.get("minItems") == 1
     assert "minItems" not in esc
     assert "required" not in esc
-    desktop = AskUserTool(
-        sink=EventSink(),
-        conversation_id="c1",
-        timeout_seconds=30.0,
-        advertise_bind_local_folder=True,
-    ).schema.parameters["properties"]["questions"]["items"]["properties"]["options"]["items"][
-        "properties"
-    ]
-    assert "action" in desktop
-    assert "action" not in esc["items"]["properties"]["options"]["items"]["properties"]
+    assert not esc["description"].startswith("可选")
+    multiple = ask["items"]["properties"]["multiple"]["description"]
+    assert not multiple.startswith("可选")
 
 
 @pytest.mark.asyncio
-async def test_blocking_escalate_drops_option_detail():
+async def test_wait_without_assumption_is_rejected():
+    result = await EscalateTool().execute({"question": "选哪个库?"}, _ctx())
+    assert result.success is False
+    assert "assumption" in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_unknown_reason_defaults_to_wait_and_requires_assumption():
+    result = await EscalateTool().execute(
+        {"question": "选哪个库?", "reason": "weird"},
+        _ctx(),
+    )
+    assert result.success is False
+    assert "assumption" in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_wait_escalate_drops_option_detail():
     seen: dict = {}
 
-    async def _request(q, a, questions, kind, awaiting="user", **kwargs):
+    async def _request(q, a, questions, reason, awaiting="user", **kwargs):
         seen["questions"] = questions
+        seen["reason"] = reason
         return EscalationOutcome(status="resolved", answer="方案A")
 
-    ctx = ToolContext.create(
-        execution_id="e",
-        run_id="w1",
-        agent_id="a",
-        backend=ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
-        user_id="u",
+    ctx = _ctx(
         conversation_id="c1",
         escalation=EscalationChannel(armed=True, request=_request),
     )
@@ -208,7 +205,7 @@ async def test_blocking_escalate_drops_option_detail():
         {
             "question": "该走哪个方案?",
             "assumption": "暂按方案A继续",
-            "blocking": True,
+            "reason": "wait",
             "questions": [
                 {
                     "prompt": "选一个方案",
@@ -222,6 +219,7 @@ async def test_blocking_escalate_drops_option_detail():
         ctx,
     )
     assert result.success is True
+    assert seen["reason"] == "wait"
     opts = seen["questions"][0]["options"]
     assert [o["label"] for o in opts] == ["方案A：先出契约", "方案B：先一条主路径"]
     assert all("detail" not in o for o in opts)
@@ -232,16 +230,11 @@ async def test_bracketed_recommendation_label_reaches_the_escalation_card():
     """Tendency markup in the option name is accepted; the card still opens."""
     seen: dict = {}
 
-    async def _request(q, a, questions, kind, awaiting="user", **kwargs):
+    async def _request(q, a, questions, reason, awaiting="user", **kwargs):
         seen["questions"] = questions
         return EscalationOutcome(status="resolved", answer="选方案A（推荐）")
 
-    ctx = ToolContext.create(
-        execution_id="e",
-        run_id="w1",
-        agent_id="a",
-        backend=ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
-        user_id="u",
+    ctx = _ctx(
         conversation_id="c1",
         escalation=EscalationChannel(armed=True, request=_request),
     )
@@ -249,7 +242,6 @@ async def test_bracketed_recommendation_label_reaches_the_escalation_card():
         {
             "question": "该走哪个方案?",
             "assumption": "暂按方案A继续",
-            "blocking": True,
             "questions": [
                 {
                     "id": "plan",
@@ -274,16 +266,11 @@ async def test_clean_labels_still_reach_the_escalation_card():
     """Bare「推荐」in a product name is not tendency markup; the card still opens."""
     seen: dict = {}
 
-    async def _request(q, a, questions, kind, awaiting="user", **kwargs):
+    async def _request(q, a, questions, reason, awaiting="user", **kwargs):
         seen["questions"] = questions
         return EscalationOutcome(status="resolved", answer="选方案A")
 
-    ctx = ToolContext.create(
-        execution_id="e",
-        run_id="w1",
-        agent_id="a",
-        backend=ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
-        user_id="u",
+    ctx = _ctx(
         conversation_id="c1",
         escalation=EscalationChannel(armed=True, request=_request),
     )
@@ -291,7 +278,6 @@ async def test_clean_labels_still_reach_the_escalation_card():
         {
             "question": "该走哪个方案?",
             "assumption": "暂按方案A继续",
-            "blocking": True,
             "questions": [
                 {
                     "id": "plan",
@@ -308,3 +294,29 @@ async def test_clean_labels_still_reach_the_escalation_card():
 
     assert result.success is True
     assert seen["questions"][0]["options"][0]["label"] == "推荐算法重写"
+
+
+@pytest.mark.asyncio
+async def test_old_blocking_and_kind_args_are_ignored():
+    """不认旧参数：blocking/kind 不影响分流；缺 reason 按 wait。"""
+    seen: list[str] = []
+
+    async def _request(q, a, questions, reason, awaiting="user", **kwargs):
+        seen.append(reason)
+        return EscalationOutcome(status="resolved", answer="用 Postgres")
+
+    result = await EscalateTool().execute(
+        {
+            "question": "选库?",
+            "assumption": "暂用 PG",
+            "blocking": False,
+            "kind": "scope",
+        },
+        _ctx(
+            conversation_id="c1",
+            escalation=EscalationChannel(armed=True, request=_request),
+        ),
+    )
+    assert result.success is True
+    assert seen == ["wait"]
+    assert "用户就你的升级问题答复" in result.output

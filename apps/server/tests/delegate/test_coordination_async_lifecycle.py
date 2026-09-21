@@ -76,6 +76,7 @@ def test_spawn_independent_llm_clones_router_and_openai():
     assert owns is True
     assert cloned is not router
     assert cloned._default is not leaf
+    assert cloned._default._client is leaf._client
     assert cloned._default._api_key == "k"
     assert cloned._default._extra_headers == {"X-Test": "1"}
 

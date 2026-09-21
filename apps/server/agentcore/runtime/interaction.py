@@ -44,7 +44,7 @@ class InteractionKind(StrEnum):
     APPROVAL = "approval"  # GRANTABLE tool gate → result: ApprovalDecision
     ASK_USER = "ask_user"  # CEO checkpoint → result: CheckpointResponse
     CLIENT_TOOL = "client_tool"  # desktop workspace op → result: envelope dict
-    # 阻塞式求决策 (escalate blocking=true): a delegated worker hit a「猜错就作废」fork and
+    # 阻塞式求决策 (escalate reason=wait): a delegated worker hit a「猜错就作废」fork and
     # suspended. Classic path asks the user directly; coordination-active path awaits CEO
     # ``resolve_escalation`` (awaiting=ceo, not user-answerable) →
     # result: ``{answer | use_assumption}``.

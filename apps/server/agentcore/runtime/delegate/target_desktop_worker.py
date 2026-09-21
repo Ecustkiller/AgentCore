@@ -8,12 +8,12 @@ from agentcore.memory import default_memory_store
 from agentcore.memory.rules_injection import assemble_turn_rules
 from agentcore.runtime.context import (
     build_workspace_context,
-    collect_outlet_inventory,
     detect_workspace_git,
 )
 from agentcore.runtime.resolve.prompt import (
     assemble_system_prompt,
     compose_worker_base_prompt,
+    render_worker_turn_envelope,
 )
 from agentcore.tools.registry import ToolRegistry
 from agentcore.workspace.protocol import WorkspaceBackend
@@ -34,7 +34,6 @@ async def registry_rewire_consult_tools(
     from agentcore.tools.builtin.consult import ConsultTool
 
     registry = _registry_without(base, "consult")
-    registry = _registry_without(registry, "consult_memory")
     registry = _registry_without(registry, "consult_rule")
     registry = _registry_without(registry, "consult_skill")
     tool_names = {schema.name for schema in registry.list_all()}
@@ -60,8 +59,8 @@ async def rebuild_worker_prompt_for_target(
     attachment_context: str | None = None,
     desktop_online: bool = False,
     permission_axes: Any = None,
-) -> str:
-    """Reassemble worker system prompt with target-folder rules + workspace facts."""
+) -> tuple[str, str]:
+    """Reassemble worker frozen system + envelope for a target-folder desk."""
     from agentcore.runtime.context.consult_sources import (
         build_merged_consult_source_for_user,
     )
@@ -86,7 +85,6 @@ async def rebuild_worker_prompt_for_target(
         exec_languages=exec_languages,
         permission_axes=permission_axes,
         git_fact=git_fact,
-        outlet_inventory=await collect_outlet_inventory(backend),
         desk_folder_id=folder_id,
         desk_folder_label=(getattr(backend, "root_label", None) or "").strip() or None,
         desk_is_birth=False,
@@ -111,9 +109,12 @@ async def rebuild_worker_prompt_for_target(
         tool_registry=provisional,
     )
     entries = list(await source.list_directory(user_id))
-    return compose_worker_base_prompt(
+    system = compose_worker_base_prompt(
         shared_base,
         on_demand_entries=entries,
-        attachment_context=attachment_context,
-        workspace_context=workspace_facts,
     )
+    envelope = render_worker_turn_envelope(
+        workspace_context=workspace_facts,
+        attachment_context=attachment_context,
+    )
+    return system, envelope

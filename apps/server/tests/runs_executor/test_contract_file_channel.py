@@ -21,11 +21,10 @@ from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
-from agentcore.workspace.stage_dirs import RESEARCH_DIR
 
 
 class _RealFileWriteTool:
-    """A ``file_write`` that actually persists to the run's workspace backend, so the
+    """A ``write`` that actually persists to the run's workspace backend, so the
     contract's file-content channel can read the paper back."""
 
     def __init__(self) -> None:
@@ -34,12 +33,12 @@ class _RealFileWriteTool:
     @property
     def schema(self) -> ToolSchema:
         return ToolSchema(
-            name="file_write",
+            name="write",
             description="write file",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string"},
+                    "file_path": {"type": "string"},
                     "content": {"type": "string"},
                 },
             },
@@ -49,13 +48,13 @@ class _RealFileWriteTool:
 
     async def execute(self, arguments, context) -> ToolResult:  # noqa: ANN001
         self.calls += 1
-        await context.backend.write(arguments["path"], arguments["content"])
+        await context.backend.write(arguments["file_path"], arguments["content"])
         # 自报产物: what a run landed comes off the RESULT, so even a stub must report it.
         return ToolResult(
             tool_call_id="",
             success=True,
             output="written",
-            file_products=[file_product(arguments["path"])],
+            file_products=[file_product(arguments["file_path"])],
         )
 
 
@@ -70,9 +69,9 @@ class _WriteThenTerseProse:
                         ToolCallDelta(
                             index=0,
                             id="w1",
-                            function_name="file_write",
+                            function_name="write",
                             arguments_delta=json.dumps(
-                                {"path": path, "content": paper}, ensure_ascii=False
+                                {"file_path": path, "content": paper}, ensure_ascii=False
                             ),
                         )
                     ]
@@ -107,9 +106,7 @@ async def test_file_deliverable_sections_and_length_read_from_written_file(tmp_p
     root = tmp_path / "ws"
     root.mkdir()
     ctx = _ctx_over(root)
-    # artifact_dir 由声明的 artifacts 反推（role 不再是输入）；约定文档路径本身
-    # 就算产品落盘，无需另行声明。
-    paper_path = f"{RESEARCH_DIR}/paper.md"
+    paper_path = "notes/paper.md"
     plan, _ = build_run_plan(
         [
             {

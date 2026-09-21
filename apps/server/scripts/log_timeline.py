@@ -13,7 +13,8 @@ Thin CLI over ``agentcore.observability.query``. Run from apps/server:
     uv run python scripts/log_timeline.py --pack <dir> --full --trace <trace_id>
 
 Default output is ``decision_spine`` (human + ``--json`` isomorphic). Pass
-``--raw`` for the full ``log_events`` firehose. ``--pack`` writes an investigation
+``--raw`` for the full ``log_events`` firehose (``llm.call`` lines pin
+``prefix_breach`` before the 120-char cut). ``--pack`` writes an investigation
 pack (decision_spine.json + timeline.jsonl + meta.json; optional previews /
 turn_metrics; redacted journal when the store has rows; ``--full`` adds
 messages.json without LLM bodies — never raw turn_journal). Exact-ID queries
@@ -234,13 +235,26 @@ def _parse_cli_args(
     return log_file, export_dir, since, as_json, raw, pack_dir, full, positional
 
 
+# Human --raw truncates at 120 chars; pin these so prefix-cache triage survives the cut.
+_LLM_CALL_PIN = ("prefix_breach", "tools_changed", "cache_hit_tokens", "input_tokens")
+
+
 def _fmt_log_line(item: dict, indent: str = "  ", hide: tuple[str, ...] = ()) -> str:
     ts = item.get("timestamp", "")[:19]
     event = item.get("event", "?")
     icon = {"error": "[E]", "warning": "[W]"}.get(item.get("level", ""), "   ")
     skip = ("type", "timestamp", "event", "level", *hide)
     detail_keys = {k: v for k, v in item.items() if k not in skip}
-    detail = " ".join(f"{k}={v}" for k, v in detail_keys.items())
+    if event == "llm.call":
+        bits: list[str] = []
+        rest = dict(detail_keys)
+        for key in _LLM_CALL_PIN:
+            if key in rest:
+                bits.append(f"{key}={rest.pop(key)}")
+        bits.extend(f"{k}={v}" for k, v in rest.items())
+        detail = " ".join(bits)
+    else:
+        detail = " ".join(f"{k}={v}" for k, v in detail_keys.items())
     if len(detail) > 120:
         detail = detail[:120] + "..."
     return f"{indent}{ts}  {icon} {event}  {detail}"

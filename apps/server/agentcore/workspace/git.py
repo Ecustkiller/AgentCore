@@ -5,7 +5,7 @@ existing repo into the project space. Cloud mode runs ``git`` as a server
 subprocess into the resolved workspace root.
 
 Safety:
-- ``git`` is invoked via argv (``create_subprocess_exec``) — never a shell
+- ``git`` is invoked via argv (``core.spawn.spawn_process``) — never a shell
   string — so a hostile URL cannot inject commands.
 - Only ``http(s)`` URLs are accepted. ``ssh``/``file``/etc. are rejected so the
   server can't be coerced into reading local repos or arbitrary hosts via a
@@ -24,7 +24,6 @@ Safety:
 
 from __future__ import annotations
 
-import asyncio
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -32,6 +31,7 @@ from urllib.parse import urlparse
 
 from agentcore.config import settings
 from agentcore.core.net import PRIVATE_IP_BLOCKS, URLBlock, classify_url
+from agentcore.core.spawn import spawn_process
 from agentcore.workspace._paths import resolve_safe_path
 from agentcore.workspace.locate import resolve_workspace_root, workspace_storage_key
 from agentcore.workspace.locks import workspace_lock
@@ -155,25 +155,15 @@ async def _git_clone(repo_url: str, dest: Path, *, depth: int, timeout: int) -> 
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
 
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-        )
+        result = await spawn_process(args, env=env, timeout=timeout)
+    except TimeoutError:
+        # TimeoutError is an OSError subclass; it must be caught first.
+        raise CloneError(f"git clone 超时（{timeout} 秒）") from None
     except OSError as e:  # git not installed / not on PATH
         raise CloneError(f"无法启动 git：{e}") from e
 
-    try:
-        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except TimeoutError:
-        proc.kill()
-        await proc.wait()
-        raise CloneError(f"git clone 超时（{timeout} 秒）") from None
-
-    if proc.returncode != 0:
-        detail = stderr.decode(errors="replace").strip() or "git clone 失败"
+    if result.returncode != 0:
+        detail = result.stderr.decode(errors="replace").strip() or "git clone 失败"
         detail = _sanitize_clone_error(detail)
         if _looks_like_auth_failure(detail):
             detail = (

@@ -4,13 +4,18 @@ import {
   uniqueNumberedName,
 } from "@/components/files/dedupeName";
 import {
+  type MineBatchConfirmState,
+  type MineBatchFailure,
+  type MineBatchFailureState,
+  PromptCatalogBatchDialogs,
+} from "@/components/tools/PromptCatalogBatchDialogs";
+import { PromptCatalogSelectionBar } from "@/components/tools/PromptCatalogSelectionBar";
+import {
   type PromptDropDest,
   PromptOverview,
 } from "@/components/tools/PromptOverview";
-import {
-  type ConnectorPick,
-  PromptReadDialog,
-} from "@/components/tools/PromptReadDialog";
+import { PromptReadDialog } from "@/components/tools/PromptReadDialog";
+import { Button, SearchField } from "@/components/ui";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -29,14 +34,13 @@ import {
   OTHER_FOLDER_NAME,
   OVERVIEW_CATALOG_ID,
   type PromptCatalogItem,
-  type PromptCatalogLocationState,
   type PromptRailFolder,
   buildMineCatalogRows,
   buildPromptRail,
-  catalogIdForMemoryTarget,
   flattenPromptRail,
   mineCatalogId,
   onDemandDropFolder,
+  skillCatalogId,
   toolCatalogId,
 } from "@/lib/promptCatalog";
 import {
@@ -46,11 +50,20 @@ import {
   promptDragPayload,
 } from "@/lib/promptCatalogDrag";
 import {
-  ConnectorStatusBadge,
-  NEW_CONNECTOR_ID,
-  connectorCatalogId,
-  useMcpConnectors,
-} from "@/pages/toolbox/ConnectorsPage";
+  EMPTY_MINE_SELECTION,
+  type MineSelectedItem,
+  clickIntent,
+  dropFromSelection,
+  flattenVisibleMineItems,
+  isSelectionOnlyClick,
+  mineItemOf,
+  selectRow,
+  selectionCatalogIds,
+  selectionForContextMenu,
+  selectionHas,
+} from "@/lib/promptCatalogSelection";
+import { ToolboxSourceTabs } from "@/pages/toolbox/ToolboxSourceTabs";
+import { APP_PATHS } from "@/pages/toolbox/manual/paths";
 import { ApiError } from "@/services/api";
 import type { Capabilities } from "@/services/capabilities";
 import {
@@ -67,7 +80,6 @@ import { defaultChatSupportsTools } from "@/services/llmProviders";
 import {
   EMPTY_SKILL_CATALOG,
   type SkillCatalog,
-  bindableToolOptions,
   composeOnDemandSkillContent,
   composeSkillContent,
   getSkillCatalog,
@@ -90,7 +102,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Navigate, useLocation, useSearchParams } from "react-router-dom";
 
 function overlayErrorMessage(err: unknown): string {
   if (err instanceof ApiError) {
@@ -137,9 +149,11 @@ function toScopeEntry(
 
 /** Portrait overview + centered read dialog for the 工具箱「提示词」page. */
 export function PromptCatalog({ data }: { data: Capabilities }) {
-  const navigate = useNavigate();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
+  const pane = location.pathname.startsWith(APP_PATHS.toolbox.official)
+    ? "official"
+    : "mine";
+  const [searchParams, setSearchParams] = useSearchParams();
   const [overlay, setOverlay] = useState<SkillCatalog>(EMPTY_SKILL_CATALOG);
   const [accountEntries, setAccountEntries] = useState<AccountScopeEntry[]>([]);
   const [listings, setListings] = useState<SkillStoreListing[]>([]);
@@ -148,8 +162,6 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
   >([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [accountReady, setAccountReady] = useState(false);
-  const [pendingLeaf, setPendingLeaf] = useState<string | null>(null);
   const [rulesDirId, setRulesDirId] = useState<string | null>(null);
   const [promptFolders, setPromptFolders] = useState<
     { id: string; name: string }[]
@@ -158,8 +170,6 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [renamingMineId, setRenamingMineId] = useState<string | null>(null);
   const [dropDest, setDropDest] = useState<PromptDropDest | null>(null);
-  const [mcpBusyId, setMcpBusyId] = useState<string | null>(null);
-  const mcp = useMcpConnectors();
   const { data: llmProviders } = useLlmProviders();
   const { data: modelCatalog } = useModels();
   const showToolsHint = needsToolsGateHint(
@@ -176,47 +186,67 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
   );
   const items = useMemo(() => flattenPromptRail(rail), [rail]);
   const otherDrop = useMemo(() => onDemandDropFolder(rail), [rail]);
-  const connectorPicks = useMemo<ConnectorPick[]>(
-    () =>
-      mcp.servers.map((server) => ({
-        kind: "connector" as const,
-        id: connectorCatalogId(server.id),
-        label: server.name,
-        server,
-      })),
-    [mcp.servers],
-  );
-  const bindableTools = useMemo(
-    () => bindableToolOptions(data.tools, mcp.servers),
-    [data.tools, mcp.servers],
-  );
-
+  const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string>(() => {
     const tool = searchParams.get("tool");
     if (tool) return toolCatalogId(tool);
-    if (searchParams.get("connectors") === "1") return NEW_CONNECTOR_ID;
+    const skill = searchParams.get("skill");
+    if (skill) return skillCatalogId(skill);
     return OVERVIEW_CATALOG_ID;
   });
+  const [selection, setSelection] = useState(EMPTY_MINE_SELECTION);
+  const [deleteConfirm, setDeleteConfirm] =
+    useState<MineBatchConfirmState | null>(null);
+  const [batchFailure, setBatchFailure] =
+    useState<MineBatchFailureState | null>(null);
 
-  const selectedConnector: ConnectorPick | null =
-    selectedId === NEW_CONNECTOR_ID
-      ? {
-          kind: "connector",
-          id: NEW_CONNECTOR_ID,
-          label: "添加连接器",
-          server: null,
-        }
-      : (connectorPicks.find((row) => row.id === selectedId) ?? null);
-  const selectedItem =
-    items.find((item) => item.id === selectedId) ?? selectedConnector ?? null;
+  const visibleMine = useMemo(
+    () => flattenVisibleMineItems(rail, query),
+    [rail, query],
+  );
+  const pickedIds = useMemo(() => selectionCatalogIds(selection), [selection]);
+
+  const selectedItem = items.find((item) => item.id === selectedId) ?? null;
   const dialogOpen = selectedItem != null;
+
+  useEffect(() => {
+    const live = new Set(
+      items.filter((row) => row.kind === "mine").map((row) => row.id),
+    );
+    setSelection((sel) =>
+      dropFromSelection(
+        sel,
+        sel.items
+          .filter((row) => !live.has(row.catalogId))
+          .map((row) => row.catalogId),
+      ),
+    );
+  }, [items]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (deleteConfirm || batchFailure) return;
+      if (dialogOpen) return;
+      if (selection.items.length === 0) return;
+      setSelection(EMPTY_MINE_SELECTION);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [batchFailure, deleteConfirm, dialogOpen, selection.items.length]);
 
   const closeDialog = useCallback(() => {
     setSelectedId(OVERVIEW_CATALOG_ID);
     setCreateFolderId(null);
     setRenamingMineId(null);
     setRenamingFolderId(null);
-  }, []);
+    if (searchParams.has("tool") || searchParams.has("skill")) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("tool");
+      next.delete("skill");
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const loadAccountLayer = useCallback(async (): Promise<SkillCatalog> => {
     const [catalog, entries, tree] = await Promise.all([
@@ -247,9 +277,6 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
           setOverlay(EMPTY_SKILL_CATALOG);
           setAccountEntries([]);
         }
-      })
-      .finally(() => {
-        if (!cancelled) setAccountReady(true);
       });
     void Promise.all([listMySkillListings(), listInstalledSkills()])
       .then(([mine, installed]) => {
@@ -266,26 +293,6 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
       cancelled = true;
     };
   }, [loadAccountLayer]);
-
-  useEffect(() => {
-    const leaf = (location.state as PromptCatalogLocationState | null)
-      ?.openMineLeaf;
-    if (!leaf) return;
-    setPendingLeaf(leaf);
-    navigate(
-      { pathname: location.pathname, search: location.search },
-      { replace: true, state: {} },
-    );
-  }, [location.state, location.pathname, location.search, navigate]);
-
-  useEffect(() => {
-    if (!pendingLeaf || !accountReady) return;
-    const id = catalogIdForMemoryTarget(pendingLeaf, items);
-    if (id) {
-      setSelectedId(id);
-    }
-    setPendingLeaf(null);
-  }, [pendingLeaf, accountReady, items]);
 
   async function persist(
     action: () => Promise<SkillCatalog | undefined>,
@@ -377,32 +384,66 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
     });
   }
 
-  async function moveMineItem(
-    item: PromptCatalogItem,
+  function alreadyAtDest(
+    item: Extract<PromptCatalogItem, { kind: "mine" }>,
+    dest: PromptRailFolder | "root",
+  ): boolean {
+    if (dest === "root") return item.applyMode === "always";
+    return Boolean(dest.documentId && item.parentId === dest.documentId);
+  }
+
+  async function reparentMine(
+    item: Extract<PromptCatalogItem, { kind: "mine" }>,
     dest: PromptRailFolder | "root",
   ) {
-    if (item.kind !== "mine" || !item.mineId) return;
     if (dest === "root") {
-      if (item.applyMode === "always") return;
-    } else if (dest.documentId && item.parentId === dest.documentId) {
+      let parent = rulesDirId;
+      if (!parent) {
+        await createRuleFolder(OTHER_FOLDER_NAME);
+        parent = (await listAccountPromptTree()).rulesDirId;
+      }
+      if (!parent) throw new Error("没找到常驻目录");
+      await reparentDocument(item.mineId, parent, "always");
       return;
     }
-    await persist(async () => {
-      if (dest === "root") {
-        let parent = rulesDirId;
-        if (!parent) {
-          await createRuleFolder(OTHER_FOLDER_NAME);
-          parent = (await listAccountPromptTree()).rulesDirId;
+    let folderId = dest.documentId;
+    if (!folderId) folderId = await ensureNamedFolder(dest.name);
+    await reparentDocument(item.mineId, folderId, "on_demand");
+  }
+
+  async function moveMineItems(
+    mineIds: readonly string[],
+    dest: PromptRailFolder | "root",
+  ) {
+    const failures: MineBatchFailure[] = [];
+    setBusy(true);
+    setError(null);
+    try {
+      for (const mineId of mineIds) {
+        const item = items.find(
+          (row) => row.kind === "mine" && row.mineId === mineId,
+        );
+        if (!item || item.kind !== "mine") continue;
+        if (alreadyAtDest(item, dest)) continue;
+        try {
+          await reparentMine(item, dest);
+        } catch (err) {
+          failures.push({
+            id: item.id,
+            name: item.label,
+            reason: overlayErrorMessage(err),
+          });
         }
-        if (!parent) return undefined;
-        await reparentDocument(item.mineId, parent, "always");
-        return undefined;
       }
-      let folderId = dest.documentId;
-      if (!folderId) folderId = await ensureNamedFolder(dest.name);
-      await reparentDocument(item.mineId, folderId, "on_demand");
-      return undefined;
-    });
+      setOverlay(await loadAccountLayer());
+      if (failures.length > 0) {
+        setBatchFailure({ title: "有些条目没有移过去", failures });
+      }
+    } catch (err) {
+      setError(overlayErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   function acceptPromptDrag(event: DragEvent, dest: PromptDropDest) {
@@ -420,11 +461,7 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
     setDropDest(null);
     const payload = readPromptDrag(event);
     if (!payload || payload.kind === "skill") return;
-    const item = items.find(
-      (row) => row.kind === "mine" && row.mineId === payload.mineId,
-    );
-    if (!item) return;
-    void moveMineItem(item, dest);
+    void moveMineItems(payload.mineIds, dest);
   }
 
   function rejectPromptDrag(event: DragEvent) {
@@ -433,6 +470,24 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
     event.stopPropagation();
     event.dataTransfer.dropEffect = "none";
     setDropDest(null);
+  }
+
+  function handleActivate(
+    id: string,
+    event?: Pick<MouseEvent, "ctrlKey" | "metaKey" | "shiftKey">,
+  ) {
+    const item = items.find((row) => row.id === id);
+    const mine = item ? mineItemOf(item) : null;
+    const intent = event ? clickIntent(event) : { toggle: false, range: false };
+    if (mine) {
+      setSelection((sel) => selectRow(sel, mine, intent, visibleMine));
+      if (isSelectionOnlyClick(intent)) return;
+      setSelectedId(id);
+      return;
+    }
+    if (isSelectionOnlyClick(intent)) return;
+    setSelection(EMPTY_MINE_SELECTION);
+    setSelectedId(id);
   }
 
   function startRenameMine(item: PromptCatalogItem) {
@@ -452,14 +507,51 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
     });
   }
 
-  async function deleteMineItem(item: PromptCatalogItem) {
-    if (item.kind !== "mine" || !item.mineId) return;
-    if (!window.confirm(`确定删除「${item.label}」？此操作不可撤销。`)) return;
-    await persist(async () => {
-      await deleteDocument(item.mineId);
-      setSelectedId(OVERVIEW_CATALOG_ID);
-      return undefined;
-    });
+  function requestDelete(rows: readonly MineSelectedItem[]) {
+    if (rows.length === 0) return;
+    const hasMarket = rows.some((row) =>
+      installedListings.some(
+        (listing) => listing.installDocumentId === row.mineId,
+      ),
+    );
+    setDeleteConfirm({ items: rows, hasMarket, busy: false });
+  }
+
+  async function confirmDelete() {
+    if (!deleteConfirm) return;
+    const doomed = deleteConfirm.items;
+    setDeleteConfirm({ ...deleteConfirm, busy: true });
+    const failures: MineBatchFailure[] = [];
+    const deleted: string[] = [];
+    setError(null);
+    try {
+      for (const row of doomed) {
+        try {
+          await deleteDocument(row.mineId);
+          deleted.push(row.catalogId);
+        } catch (err) {
+          failures.push({
+            id: row.catalogId,
+            name: row.label,
+            reason: overlayErrorMessage(err),
+          });
+        }
+      }
+      setOverlay(await loadAccountLayer());
+      setSelection((sel) => dropFromSelection(sel, deleted));
+      if (doomed.some((row) => row.catalogId === selectedId)) {
+        setSelectedId(OVERVIEW_CATALOG_ID);
+      }
+      setDeleteConfirm(null);
+      if (failures.length > 0) {
+        setBatchFailure({ title: "有些条目没有删掉", failures });
+      }
+    } catch (err) {
+      setError(overlayErrorMessage(err));
+      setDeleteConfirm((current) =>
+        current ? { ...current, busy: false } : null,
+      );
+    }
   }
 
   function wrapMineTile({
@@ -474,7 +566,7 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
     }
     if (item.mineId === renamingMineId) {
       return (
-        <div className="flex min-h-[7.5rem] items-center rounded-xl border border-border px-4">
+        <div className="flex min-h-10 items-center rounded-xl border border-border px-4">
           <InlineInput
             initial={item.label}
             ariaLabel="条目名称"
@@ -484,14 +576,27 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
         </div>
       );
     }
+    const mine = mineItemOf(item);
+    const inBatch =
+      Boolean(mine) &&
+      selection.items.length >= 2 &&
+      selectionHas(selection, item.id);
     const inner = (
       <div
-        className="h-full min-w-0"
+        className="min-h-10 min-w-0"
         draggable
+        onContextMenu={() => {
+          if (mine) setSelection((sel) => selectionForContextMenu(sel, mine));
+        }}
         onDragStart={(event) => {
+          const inSelection =
+            selectionHas(selection, item.id) && selection.items.length > 0;
+          const mineIds = inSelection
+            ? selection.items.map((row) => row.mineId)
+            : [item.mineId];
           event.dataTransfer.setData(
             PROMPT_DRAG_MIME,
-            promptDragPayload({ kind: "mine", mineId: item.mineId }),
+            promptDragPayload({ kind: "mine", mineIds }),
           );
           event.dataTransfer.effectAllowed = "move";
         }}
@@ -503,29 +608,85 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
     return (
       <ContextMenu>
         <ContextMenuTrigger asChild>{inner}</ContextMenuTrigger>
-        <ContextMenuContent className="min-w-36">
-          <ContextMenuItem onSelect={() => startRenameMine(item)}>
-            <Pencil size={14} className="shrink-0" />
-            重命名
-          </ContextMenuItem>
-          <ContextMenuItem
-            variant="danger"
-            onSelect={() => void deleteMineItem(item)}
-          >
-            <Trash2 size={14} className="shrink-0" />
-            删除
-          </ContextMenuItem>
+        <ContextMenuContent>
+          {inBatch ? (
+            <ContextMenuItem
+              variant="danger"
+              onSelect={() => requestDelete(selection.items)}
+            >
+              <Trash2 size={14} className="shrink-0" />
+              删除 {selection.items.length} 项
+            </ContextMenuItem>
+          ) : (
+            <>
+              <ContextMenuItem onSelect={() => startRenameMine(item)}>
+                <Pencil size={14} className="shrink-0" />
+                重命名
+              </ContextMenuItem>
+              <ContextMenuItem
+                variant="danger"
+                onSelect={() => {
+                  if (mine) requestDelete([mine]);
+                }}
+              >
+                <Trash2 size={14} className="shrink-0" />
+                删除
+              </ContextMenuItem>
+            </>
+          )}
         </ContextMenuContent>
       </ContextMenu>
     );
   }
 
+  if (
+    pane === "mine" &&
+    (searchParams.get("tool") || searchParams.get("skill"))
+  ) {
+    const qs = searchParams.toString();
+    return (
+      <Navigate
+        to={`${APP_PATHS.toolbox.official}${qs ? `?${qs}` : ""}`}
+        replace
+      />
+    );
+  }
   return (
     <div className="w-full" data-testid="prompt-catalog">
+      <ToolboxSourceTabs
+        action={
+          <>
+            <SearchField
+              aria-label={pane === "official" ? "搜提示词、工具" : "搜提示词"}
+              placeholder={pane === "official" ? "搜提示词、工具" : "搜提示词"}
+              value={query}
+              onValueChange={setQuery}
+              className="w-52"
+            />
+            {pane === "mine" ? (
+              <Button
+                size="md"
+                disabled={busy}
+                onClick={() => void onCreateMine()}
+              >
+                新建
+              </Button>
+            ) : null}
+          </>
+        }
+      />
       {error ? (
         <p className="mb-3 text-destructive text-xs" role="alert">
           {error}
         </p>
+      ) : null}
+      {selection.items.length >= 2 ? (
+        <PromptCatalogSelectionBar
+          count={selection.items.length}
+          busy={busy || Boolean(deleteConfirm?.busy)}
+          onDelete={() => requestDelete(selection.items)}
+          onClear={() => setSelection(EMPTY_MINE_SELECTION)}
+        />
       ) : null}
       <div
         onDragOver={(event) => {
@@ -539,38 +700,22 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
         }}
       >
         <PromptOverview
+          pane={pane}
           rail={rail}
           selectedId={selectedId === OVERVIEW_CATALOG_ID ? null : selectedId}
+          pickedIds={pickedIds}
           dropDest={dropDest}
           otherFolder={otherDrop}
-          connectors={connectorPicks.map((row) => ({
-            id: row.id,
-            label: row.label,
-            runtimeError: row.server?.runtimeError ?? null,
-            accessory: row.server ? (
-              <ConnectorStatusBadge server={row.server} />
-            ) : undefined,
-          }))}
-          connectorError={mcp.error}
-          showConnectors={Boolean(mcp.api)}
           renamingFolderId={renamingFolderId}
           busy={busy}
           listings={listings}
           installedListings={installedListings}
-          onOpenItem={(id) => {
-            setSelectedId(id);
-          }}
+          query={query}
+          onOpenItem={handleActivate}
           onCreateMine={() => void onCreateMine()}
           onCreateFolder={() => void createUntitledPromptFolder()}
           onSubmitRenameFolder={(id, name) => void submitRenameFolder(id, name)}
           onCancelRenameFolder={() => setRenamingFolderId(null)}
-          onAddConnector={
-            mcp.api
-              ? () => {
-                  setSelectedId(NEW_CONNECTOR_ID);
-                }
-              : null
-          }
           onAcceptAlwaysDrag={(event) =>
             acceptPromptDrag(event, { kind: "root" })
           }
@@ -593,16 +738,8 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
         showToolsHint={showToolsHint}
         toolsHint={TOOLS_GATE_HINT}
         toolCallingNames={TOOL_CALLING_TOOL_NAMES}
-        mcpApi={mcp.api}
-        mcpBusyId={mcpBusyId}
-        bindableTools={bindableTools}
         onOpenChange={(open) => {
           if (!open) closeDialog();
-        }}
-        onMcpBusy={setMcpBusyId}
-        onMcpSaved={mcp.reload}
-        onCloseNewConnector={() => {
-          setSelectedId(OVERVIEW_CATALOG_ID);
         }}
         onSaveMine={(item, draft) =>
           persist(
@@ -617,7 +754,6 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
                   item.applyMode,
                   draft.description,
                   draft.body,
-                  draft.offeredTools,
                 ),
                 item.version,
               );
@@ -658,6 +794,15 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
             return undefined;
           })
         }
+      />
+      <PromptCatalogBatchDialogs
+        confirm={deleteConfirm}
+        onConfirmDelete={() => void confirmDelete()}
+        onCancelDelete={() => {
+          if (!deleteConfirm?.busy) setDeleteConfirm(null);
+        }}
+        failure={batchFailure}
+        onCloseFailure={() => setBatchFailure(null)}
       />
     </div>
   );

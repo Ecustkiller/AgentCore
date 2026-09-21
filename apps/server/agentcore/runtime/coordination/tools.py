@@ -45,16 +45,7 @@ class WaitTool:
                 "协调中无需处置时调用：确认继续等团队事件。"
                 f"{COORDINATION_PERIOD_HINT}"
             ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "reason": {
-                        "type": "string",
-                        "description": "可选：为何无需处置（仅记日志，用户不可见）。",
-                    },
-                },
-                "required": [],
-            },
+            parameters={"type": "object", "properties": {}, "required": []},
             face=ToolFace.ORCHESTRATION,
             approval=ToolApproval.NEVER,
         )
@@ -126,10 +117,6 @@ class CancelWorkerTool:
                     "run_id": {
                         "type": "string",
                         "description": "完整 run_id，或能唯一对应的角色名。",
-                    },
-                    "reason": {
-                        "type": "string",
-                        "description": "可选：终止原因（记入协调日志）。",
                     },
                 },
                 "required": ["run_id"],
@@ -300,10 +287,7 @@ class ResolveEscalationTool:
     def schema(self) -> ToolSchema:
         return ToolSchema(
             name="resolve_escalation",
-            description=(
-                "协调中兑现队员阻塞升级。技术/范围直接答；"
-                "偏好、授权、花钱先 ask_user 再调，并 via_user=true。"
-            ),
+            description="兑现队员阻塞升级。偏好/授权/花钱先 ask_user。",
             parameters={
                 "type": "object",
                 "properties": {
@@ -317,10 +301,7 @@ class ResolveEscalationTool:
                     },
                     "via_user": {
                         "type": "boolean",
-                        "description": (
-                            "可选，默认 false。true=本裁决经 ask_user 征询用户后作出"
-                            "（偏好/授权/费用类必须如此）。"
-                        ),
+                        "description": "true=已先经 ask_user。",
                     },
                 },
                 "required": ["run_id", "answer"],
@@ -374,7 +355,7 @@ class ResolveEscalationTool:
 
         if pending is None:
             # Worker may already have been cancelled (ask_user soft-stop); stash for
-            # the re-armed worker's next escalate(blocking=true).
+            # the re-armed worker's next escalate(reason=wait).
             session.stash_resolution(run_id, answer=answer, via_user=via_user)
             from agentcore.runtime.coordination.journal import record_coordination_snapshot
 
@@ -471,7 +452,7 @@ class QueueUserMessageTool:
                     },
                     "reason": {
                         "type": "string",
-                        "description": "可选：为何转入排队（用户可见）。",
+                        "description": "为何转入排队（用户可见）。",
                     },
                 },
                 "required": ["interjection_id"],

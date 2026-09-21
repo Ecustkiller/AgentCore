@@ -10,7 +10,7 @@ import { Section } from "./shared";
  */
 function escalationRowKey(esc: RunEscalation): string {
   if (esc.id) return esc.id;
-  return `${esc.status}:${esc.question}:${esc.assumption}:${esc.blocking}`;
+  return `${esc.status}:${esc.question}:${esc.assumption}:${esc.kind}`;
 }
 
 /**
@@ -55,9 +55,7 @@ export function EscalationSection({
   );
 }
 
-/** A non-blocking escalation (`run_escalation`): the worker flagged a 待决问题 but kept
- * working under its assumption, so this is read-only — the CEO resolves it at synthesis.
- * A「阻断性」flag marks one where a wrong guess would void the product. */
+/** scope/dep 或早停：工人继续干，这里只读。 */
 function RaisedEscalationRow({ esc }: { esc: RunEscalation }) {
   const kindLabel = escalationRowKindLabel(esc);
   return (
@@ -68,11 +66,6 @@ function RaisedEscalationRow({ esc }: { esc: RunEscalation }) {
         {kindLabel && (
           <span className="rounded-full bg-muted px-1.5 py-0.5 text-muted-foreground">
             {kindLabel}
-          </span>
-        )}
-        {esc.blocking && (
-          <span className="rounded-full bg-destructive/15 px-1.5 py-0.5 text-destructive">
-            阻断性
           </span>
         )}
       </div>

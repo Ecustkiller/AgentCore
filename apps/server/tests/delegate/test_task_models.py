@@ -53,9 +53,19 @@ def test_schema_exposes_single_model_field_on_tasks_and_replan():
     assert "@platform" in str(task_props["model"].get("description", ""))
     assert "勿写未加" not in str(task_props["model"].get("description", ""))
     add_props = _REPLAN_PARAMETERS["properties"]["add"]["items"]["properties"]
+    assert set(add_props) == {
+        "id",
+        "role",
+        "task",
+        "depends_on",
+        "artifacts",
+        "model",
+    }
     assert "binds" not in _REPLAN_PARAMETERS["properties"]
     assert set(TASK_MODEL_SCHEMA_PROPS).issubset(add_props)
     assert "origin" not in add_props
+    assert add_props["task"]["description"] == "子任务。"
+    assert "自包含" not in add_props["task"]["description"]
 
 
 @pytest.mark.asyncio

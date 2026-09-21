@@ -62,7 +62,6 @@ def tool_would_assemble(
     include_execution: bool,
     include_browser: bool,
     include_host: bool,
-    include_git: bool,
     desktop_online: bool,
     location: _Location | None,
 ) -> bool:
@@ -76,8 +75,6 @@ def tool_would_assemble(
     if reg.host_class and not include_host:
         return False
     if reg.desktop_online_class and not desktop_online:
-        return False
-    if reg.git_class and not include_git:
         return False
     return not (reg.local_only and location != "local")
 
@@ -102,7 +99,6 @@ def assembled_format_producer_names(
     include_execution: bool,
     include_browser: bool,
     include_host: bool,
-    include_git: bool,
     desktop_online: bool,
     location: _Location | None,
 ) -> frozenset[str]:
@@ -114,7 +110,6 @@ def assembled_format_producer_names(
             include_execution=include_execution,
             include_browser=include_browser,
             include_host=include_host,
-            include_git=include_git,
             desktop_online=desktop_online,
             location=location,
         ):
@@ -159,7 +154,6 @@ def format_artifact_capability_line(
     include_execution: bool,
     include_browser: bool,
     include_host: bool,
-    include_git: bool,
     desktop_online: bool,
     location: _Location | None,
     assembled_names: Collection[str] | None = None,
@@ -172,7 +166,6 @@ def format_artifact_capability_line(
             include_execution=include_execution,
             include_browser=include_browser,
             include_host=include_host,
-            include_git=include_git,
             desktop_online=desktop_online,
             location=location,
         )

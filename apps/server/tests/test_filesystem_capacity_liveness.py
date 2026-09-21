@@ -124,7 +124,7 @@ async def test_resolve_for_download_rejects_over_upload_ceiling(tmp_path: Path):
 async def test_file_read_oversized_is_contract_failure(tmp_path: Path):
     big = tmp_path / "huge.txt"
     big.write_bytes(b"a" * (WORKSPACE_READ_MAX_BYTES + 1))
-    result = await FileReadTool().execute({"path": "huge.txt"}, _ctx(_ws(tmp_path)))
+    result = await FileReadTool().execute({"file_path": "huge.txt"}, _ctx(_ws(tmp_path)))
     assert result.success is False
     assert result.contract_failure is True
     assert result.failure_code == "too_large"
@@ -151,7 +151,7 @@ async def test_file_read_office_midsize_extracts_not_budget_failure(tmp_path: Pa
             )
         ),
     ):
-        result = await FileReadTool().execute({"path": "deck.pdf"}, _ctx(_ws(tmp_path)))
+        result = await FileReadTool().execute({"file_path": "deck.pdf"}, _ctx(_ws(tmp_path)))
     assert result.success is True
     assert "Abstract in output" in (result.output or "")
     assert "抽取预算" not in (result.output or "")
@@ -176,7 +176,7 @@ async def test_file_read_office_over_text_gate_still_extracts(tmp_path: Path):
         ),
     ):
         result = await FileReadTool().execute(
-            {"path": "contract.pdf"}, _ctx(_ws(tmp_path))
+            {"file_path": "contract.pdf"}, _ctx(_ws(tmp_path))
         )
     assert result.success is True
     assert "Loan contract clause" in (result.output or "")
@@ -213,7 +213,7 @@ async def test_file_read_office_parent_does_not_read_bytes(tmp_path: Path):
         ),
     ):
         result = await FileReadTool().execute(
-            {"path": "deck.pdf"}, _ctx(_ws(tmp_path))
+            {"file_path": "deck.pdf"}, _ctx(_ws(tmp_path))
         )
     assert result.success is True
     assert "Abstract in output" in (result.output or "")
@@ -234,7 +234,7 @@ async def test_file_read_ole_does_not_read_bytes(tmp_path: Path):
 
     with patch.object(ServerWorkspace, "read_bytes", spy):
         result = await FileReadTool().execute(
-            {"path": "memo.doc"}, _ctx(_ws(tmp_path))
+            {"file_path": "memo.doc"}, _ctx(_ws(tmp_path))
         )
     assert result.success is True
     assert "ole" in (result.output or "").lower()
@@ -275,7 +275,7 @@ async def test_file_read_misnamed_oversize_pdf_is_truncated_envelope(tmp_path: P
 
     (tmp_path / "notes.txt").write_bytes(b"%PDF-x")
     result = await FileReadTool().execute(
-        {"path": "notes.txt"},
+        {"file_path": "notes.txt"},
         _ctx(_PeekBackend(tmp_path, sandbox=SubprocessSandbox())),
     )
     assert result.success is True
@@ -308,7 +308,7 @@ async def test_file_read_office_source_over_extract_cap_is_truncated_envelope(
 
     (tmp_path / "huge.pdf").write_bytes(b"%PDF-x")
     result = await FileReadTool().execute(
-        {"path": "huge.pdf"}, _ctx(_CapBackend(tmp_path, sandbox=SubprocessSandbox()))
+        {"file_path": "huge.pdf"}, _ctx(_CapBackend(tmp_path, sandbox=SubprocessSandbox()))
     )
     assert result.success is True
     out = result.output or ""
@@ -332,7 +332,7 @@ async def test_file_read_office_extract_timeout_is_observation_not_liveness(tmp_
             )
         ),
     ):
-        result = await FileReadTool().execute({"path": "slow.pdf"}, _ctx(_ws(tmp_path)))
+        result = await FileReadTool().execute({"file_path": "slow.pdf"}, _ctx(_ws(tmp_path)))
     assert result.success is True
     out = result.output or ""
     assert result.metadata.get("liveness_timeout") is not True
@@ -360,7 +360,7 @@ async def test_file_read_channel_liveness_maps_meta(tmp_path: Path):
             raise WorkspaceIOError("local workspace op 'read_lines' timed out（活性挂起）")
 
     result = await FileReadTool().execute(
-        {"path": "a.txt"}, _ctx(_HangBackend(tmp_path, sandbox=SubprocessSandbox()))
+        {"file_path": "a.txt"}, _ctx(_HangBackend(tmp_path, sandbox=SubprocessSandbox()))
     )
     assert result.success is False
     assert result.contract_failure is False
@@ -422,19 +422,19 @@ async def test_file_read_typed_channel_failures_do_not_need_sentence_markers(
             raise WorkspaceReconnect("blip")
 
     ctx = _ctx(_Presence(tmp_path, sandbox=SubprocessSandbox()))
-    dead = await FileReadTool().execute({"path": "a.txt"}, ctx)
+    dead = await FileReadTool().execute({"file_path": "a.txt"}, ctx)
     assert dead.metadata.get("workspace_channel_dead") is True
     assert dead.metadata.get("retire_tools")
 
     hang = await FileReadTool().execute(
-        {"path": "a.txt"},
+        {"file_path": "a.txt"},
         _ctx(_Hang(tmp_path, sandbox=SubprocessSandbox())),
     )
     assert hang.metadata.get("liveness_timeout") is True
     assert not hang.metadata.get("retire_tools")
 
     reconnect = await FileReadTool().execute(
-        {"path": "a.txt"},
+        {"file_path": "a.txt"},
         _ctx(_Reconnect(tmp_path, sandbox=SubprocessSandbox())),
     )
     assert reconnect.error == "blip"
@@ -454,7 +454,7 @@ async def test_file_read_reconnect_fail_fast_is_retryable(tmp_path: Path):
             raise WorkspaceIOError(WORKSPACE_RECONNECT_DETAIL)
 
     result = await FileReadTool().execute(
-        {"path": "a.txt"}, _ctx(_HangBackend(tmp_path, sandbox=SubprocessSandbox()))
+        {"file_path": "a.txt"}, _ctx(_HangBackend(tmp_path, sandbox=SubprocessSandbox()))
     )
     assert result.success is False
     assert result.contract_failure is False
@@ -480,13 +480,13 @@ async def test_file_read_channel_dead_stamps_family_retire(tmp_path: Path):
             )
 
     result = await FileReadTool().execute(
-        {"path": "a.txt"}, _ctx(_HangBackend(tmp_path, sandbox=SubprocessSandbox()))
+        {"file_path": "a.txt"}, _ctx(_HangBackend(tmp_path, sandbox=SubprocessSandbox()))
     )
     assert result.success is False
     assert result.contract_failure is False
     assert result.metadata.get("liveness_timeout") is not True
     assert result.metadata.get("workspace_channel_dead") is True
-    assert "file_write" in (result.metadata.get("retire_tools") or [])
+    assert "write" in (result.metadata.get("retire_tools") or [])
     assert "file_batch" in (result.metadata.get("retire_tools") or [])
     assert "连不上" in (result.error or "")
     from agentcore.workspace.limits import WORKSPACE_CHANNEL_DEAD_RETIRE_STEER
@@ -500,7 +500,7 @@ async def test_file_read_channel_dead_stamps_family_retire(tmp_path: Path):
     [
         (FileListTool(), {"directory": "."}, "list"),
         (GlobTool(), {"pattern": "*.py"}, "glob_files"),
-        (FileWriteTool(), {"path": "a.txt", "content": "x"}, "write"),
+        (FileWriteTool(), {"file_path": "a.txt", "content": "x"}, "write"),
         (FileBatchTool(), {"operations": [{"op": "mkdir", "path": "nested/d"}]}, "mkdir"),
         (GrepTool(), {"pattern": "x"}, "grep"),
     ],
@@ -545,7 +545,7 @@ async def test_filesystem_tools_single_timeout_no_family_retire(
     [
         (FileListTool(), {"directory": "."}, "list"),
         (GlobTool(), {"pattern": "*.py"}, "glob_files"),
-        (FileWriteTool(), {"path": "a.txt", "content": "x"}, "write"),
+        (FileWriteTool(), {"file_path": "a.txt", "content": "x"}, "write"),
         (FileBatchTool(), {"operations": [{"op": "mkdir", "path": "nested/d"}]}, "mkdir"),
         (GrepTool(), {"pattern": "x"}, "grep"),
     ],
@@ -612,7 +612,7 @@ async def test_file_write_preread_timeout_does_not_pretend_success(tmp_path: Pat
             raise AssertionError("write must not be called after timed-out pre-read")
 
     result = await FileWriteTool().execute(
-        {"path": "a.txt", "content": "x"},
+        {"file_path": "a.txt", "content": "x"},
         _ctx(_HangBackend(tmp_path, sandbox=SubprocessSandbox())),
     )
     assert result.success is False
@@ -635,7 +635,7 @@ async def test_file_write_preread_channel_dead_does_not_pretend_success(tmp_path
             raise AssertionError("write must not be called after channel-dead pre-read")
 
     result = await FileWriteTool().execute(
-        {"path": "a.txt", "content": "x"},
+        {"file_path": "a.txt", "content": "x"},
         _ctx(_HangBackend(tmp_path, sandbox=SubprocessSandbox())),
     )
     assert result.success is False
@@ -669,7 +669,7 @@ def test_liveness_circuit_first_fail_retires():
         [
             ToolAttempt(
                 "fp",
-                "file_read",
+                "read",
                 success=False,
                 error_summary="活性挂起",
                 meta={"liveness_timeout": True, "error_class": "permanent"},
@@ -677,7 +677,7 @@ def test_liveness_circuit_first_fail_retires():
         ]
     )
     br = ctrl.tool_circuit_breaker()
-    assert br.disabled == ("file_read",)
+    assert br.disabled == ("read",)
     assert br.warned == ()
     assert br.message() is None
 

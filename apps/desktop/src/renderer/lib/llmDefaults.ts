@@ -14,8 +14,7 @@ import { findCatalogItem } from "@/services/models";
  * `@platform/{id}` / `@byok/{provider_id}/{id}`。按服务商分组呈现 BYOK 候选，
  * 并在平台可用时追加「平台额度」分组；每个服务商的候选 = 模型目录里该服务商
  * 带出的模型；再把**当前编辑组合**的槽位并入（查目录补显示名），保证现值始终
- * 可选。连接测试用 `default_model` 不进候选。已删服务商的孤儿槽会单独成组，
- * 避免 select 静默错位。
+ * 可选。已删服务商的孤儿槽会单独成组，避免 select 静默错位。
  */
 
 /** 目录项可选 curated 徽章（后端并行加字段；本地窄扩展读取）。 */

@@ -230,7 +230,7 @@ function AgentNodeMeta({
     (d.escalationPending ?? 0) === 0 &&
     (d.escalationRaised ?? 0) > 0 &&
     Boolean(d.escalationKind) &&
-    d.escalationKind !== "normal" &&
+    d.escalationKind !== "wait" &&
     p.visibleFaceBadges.has("escalation");
   const hasChips =
     showCrossExam ||
@@ -258,7 +258,7 @@ function AgentNodeMeta({
         <span className={`${graphBadgePrimary} whitespace-nowrap`}>
           <ArrowUp size={10} />
           待你拍板
-          {d.escalationKind && d.escalationKind !== "normal"
+          {d.escalationKind && d.escalationKind !== "wait"
             ? ` · ${escalationKindLabel(d.escalationKind)}`
             : ""}
           {(d.escalationPending ?? 0) > 1 ? ` ${d.escalationPending}` : ""}

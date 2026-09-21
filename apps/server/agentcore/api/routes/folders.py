@@ -256,7 +256,7 @@ async def restore_deleted_folder(
     lookup and the conditional UPDATE surfaces the same way (「该项目已被清理」);
     that window is reported honestly rather than reconciled.
 
-    Boards unbound at delete time and the bare-chat auto cloud desk pointer stay
+    The bare-chat auto cloud desk pointer stays
     cleared — see :meth:`FolderRepository.restore`.
     """
     folder = await repo.get_deleted_by_id(folder_id, user_id=user.user_id)

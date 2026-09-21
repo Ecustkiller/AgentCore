@@ -768,9 +768,9 @@
       "type": "tool_use_start",
       "payload": {
         "tool_call_id": "fr1",
-        "tool_name": "file_read",
+        "tool_name": "read",
         "arguments": {
-          "path": "AgentCore/文档/research/汇总与命题卡.md"
+          "file_path": "AgentCore/文档/research/汇总与命题卡.md"
         },
         "run_id": "debate_mod_sc_r1_pro"
       }
@@ -779,9 +779,9 @@
       "type": "tool_use_start",
       "payload": {
         "tool_call_id": "fr2",
-        "tool_name": "file_read",
+        "tool_name": "read",
         "arguments": {
-          "path": "AgentCore/文档/research/法律透镜报告.md"
+          "file_path": "AgentCore/文档/research/法律透镜报告.md"
         },
         "run_id": "debate_mod_sc_r1_con"
       }

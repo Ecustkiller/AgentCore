@@ -25,7 +25,7 @@ def test_maybe_inject_exec_verify_gate_removed():
 
 def test_run_fix_style_message_does_not_inject_or_strip_tools():
     """Former hard-fork inputs must no longer fire gate / reclaim tools."""
-    controller = create_loop_controller(frozenset({"file_list", "file_read", "grep"}))
+    controller = create_loop_controller(frozenset({"file_list", "read", "grep"}))
     messages = [
         LLMMessage(
             role="user",

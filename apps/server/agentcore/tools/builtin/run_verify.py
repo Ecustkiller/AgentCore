@@ -769,7 +769,7 @@ def _format_test_output(
             parts.append("- 命令返回成功码，但解析到失败用例")
 
     if result.failed or result.errors:
-        parts.append("\n（用 file_read 查看失败测试的完整上下文）")
+        parts.append("\n（用 read 查看失败测试的完整上下文）")
     elif result.framework == "unknown" and result.raw_output:
         parts.append("\n### 原始输出\n")
         parts.append(result.raw_output)

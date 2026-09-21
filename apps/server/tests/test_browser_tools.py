@@ -739,9 +739,7 @@ async def test_type_password_blocked_maps_to_tool_result(tmp_path):
 
 
 def test_browser_type_schema_guides_password_login():
-    """约束在 type 参数；登录接管在 consult HOW，不进按钮。"""
-    from agentcore.runtime.resolve.prompt.ceo_core import capability_how_suffix
-
+    """密码约束在 type 参数；代码硬拒。不进按钮百科。"""
     text_desc = BrowserTypeTool().schema.parameters["properties"]["text"]["description"]
     assert "密码" in text_desc
     assert "password_blocked" not in text_desc
@@ -749,34 +747,22 @@ def test_browser_type_schema_guides_password_login():
     assert "escalate" not in text_desc
     assert "M0 不支持登录" not in text_desc
     assert "M0 不支持登录" not in BrowserTypeTool().schema.description
-    how = capability_how_suffix({"browser"})
-    assert "永不代填密码" in how
 
 
 def test_navigate_schema_keeps_value_not_desktop_vs_cloud_playbook():
-    from agentcore.runtime.resolve.prompt.ceo_core import capability_how_suffix
-
     url_desc = BrowserNavigateTool().schema.parameters["properties"]["url"]["description"]
     assert "相对" in url_desc
     assert "file://" in url_desc
+    assert "完整预览同源" not in url_desc
     assert "Local Bridge" not in url_desc
     assert "云端沙箱" not in url_desc
-    how = capability_how_suffix({"browser"})
-    assert "Local Bridge" in how
-    assert "云端沙箱" in how
 
 
-def test_mutation_schemas_require_receipt_verification():
-    """验收 HOW 在 consult(browser)，不进 action 参数百科。"""
-    from agentcore.runtime.resolve.prompt.ceo_core import capability_how_suffix
-
+def test_mutation_schemas_do_not_repeat_receipt_fields():
+    """验收字段在回执，不进 action 参数百科。"""
     blob = json.dumps(BrowserTool().schema.parameters, ensure_ascii=False)
     assert "typed.matched" not in blob
     assert "clicked.was_disabled" not in blob
-    how = capability_how_suffix({"browser"})
-    assert "typed.matched" in how
-    assert "clicked.was_disabled" in how
-    assert "snapshot" in how
     assert "仅必要" not in blob
     assert "可直接用于下一步；仅当" not in blob
 

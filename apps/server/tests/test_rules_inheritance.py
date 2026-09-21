@@ -21,11 +21,9 @@ from agentcore.memory.account_prepare_cache import (
     clear_account_rules_memory_cache,
     seed_account_rules_memory_cache,
 )
-from agentcore.memory.injection import (
+from agentcore.memory.rules_injection import (
     _ANCESTOR_SETTINGS_LABEL,
     _FOLDER_SETTINGS_LABEL,
-)
-from agentcore.memory.rules_injection import (
     _user_rule_fragments,
     _user_rule_fragments_from_cloud,
     assemble_injected_rules,

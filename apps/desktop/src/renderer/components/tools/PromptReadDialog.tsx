@@ -1,6 +1,5 @@
 import { PromptDocument } from "@/components/prompt/PromptDocument";
 import { PromptWorkbench } from "@/components/prompt/PromptWorkbench";
-import type { BindableToolOption } from "@/components/prompt/PromptWorkbench";
 import { PublishSkillDialog } from "@/components/tools/PublishSkillDialog";
 import { ToolInspector } from "@/components/tools/ToolInspector";
 import { Badge, Button, SegmentedControl } from "@/components/ui";
@@ -20,29 +19,13 @@ import {
 } from "@/lib/promptShelfTile";
 import { publishBlockReason } from "@/lib/skillStoreCopy";
 import { cn } from "@/lib/utils";
-import {
-  ConnectorInspector,
-  ConnectorStatusBadge,
-  NEW_CONNECTOR_ID,
-} from "@/pages/toolbox/ConnectorsPage";
 import { getDocument } from "@/services/documents";
 import {
   type SkillCatalog,
-  parseOffersTools,
   skillBodyFromContent,
 } from "@/services/skillCatalog";
 import type { SkillStoreGroup, SkillStoreListing } from "@/services/skillStore";
-import type { McpServerListItem } from "@shared/mcp-contract";
 import { useEffect, useState } from "react";
-
-export type ConnectorPick = {
-  kind: "connector";
-  id: string;
-  label: string;
-  server: McpServerListItem | null;
-};
-
-export type PromptReadLeaf = PromptCatalogItem | ConnectorPick;
 
 type MineView = "preview" | "edit";
 
@@ -56,19 +39,13 @@ export function PromptReadDialog({
   showToolsHint,
   toolsHint,
   toolCallingNames,
-  mcpApi,
-  mcpBusyId,
-  bindableTools = [],
   onOpenChange,
-  onMcpBusy,
-  onMcpSaved,
-  onCloseNewConnector,
   onSaveMine,
   onPublishMine,
   onUnpublishMine,
 }: {
   open: boolean;
-  item: PromptReadLeaf | null;
+  item: PromptCatalogItem | null;
   overlay: SkillCatalog;
   listings: SkillStoreListing[];
   installedListings: SkillStoreListing[];
@@ -76,20 +53,13 @@ export function PromptReadDialog({
   showToolsHint: boolean;
   toolsHint: string;
   toolCallingNames: ReadonlySet<string>;
-  mcpApi: Window["mcpApi"];
-  mcpBusyId: string | null;
-  bindableTools?: BindableToolOption[];
   onOpenChange: (open: boolean) => void;
-  onMcpBusy: (id: string | null) => void;
-  onMcpSaved: () => Promise<void>;
-  onCloseNewConnector: () => void;
   onSaveMine: (
     item: Extract<PromptCatalogItem, { kind: "mine" }>,
     draft: {
       name: string;
       description: string;
       body: string;
-      offeredTools: string[];
     },
   ) => Promise<boolean>;
   onPublishMine: (
@@ -175,9 +145,6 @@ export function PromptReadDialog({
                     {chip.label}
                   </Badge>
                 ))}
-                {item?.kind === "connector" && item.server ? (
-                  <ConnectorStatusBadge server={item.server} />
-                ) : null}
               </div>
               {canPublish || canUnpublish ? (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -222,12 +189,6 @@ export function PromptReadDialog({
               showToolsHint={showToolsHint}
               toolsHint={toolsHint}
               toolCallingNames={toolCallingNames}
-              mcpApi={mcpApi}
-              mcpBusyId={mcpBusyId}
-              bindableTools={bindableTools}
-              onMcpBusy={onMcpBusy}
-              onMcpSaved={onMcpSaved}
-              onCloseNewConnector={onCloseNewConnector}
               onSaveMine={onSaveMine}
             />
           ) : null}
@@ -260,7 +221,7 @@ function readHeader({
   installedListings,
 }: {
   showItem: boolean;
-  item: PromptReadLeaf | null;
+  item: PromptCatalogItem | null;
   listings: SkillStoreListing[];
   installedListings: SkillStoreListing[];
 }): {
@@ -269,13 +230,6 @@ function readHeader({
   description: string;
 } {
   if (showItem && item) {
-    if (item.kind === "connector") {
-      return {
-        title: item.id === NEW_CONNECTOR_ID ? "新建连接器" : "编辑连接器",
-        chips: [],
-        description: item.label,
-      };
-    }
     const mineOpts =
       item.kind === "mine"
         ? promptMineShelfOpts(item, listings, installedListings)
@@ -300,51 +254,22 @@ function ReadBody({
   showToolsHint,
   toolsHint,
   toolCallingNames,
-  mcpApi,
-  mcpBusyId,
-  bindableTools,
-  onMcpBusy,
-  onMcpSaved,
-  onCloseNewConnector,
   onSaveMine,
 }: {
-  item: PromptReadLeaf;
+  item: PromptCatalogItem;
   overlay: SkillCatalog;
   showToolsHint: boolean;
   toolsHint: string;
   toolCallingNames: ReadonlySet<string>;
-  mcpApi: Window["mcpApi"];
-  mcpBusyId: string | null;
-  bindableTools?: BindableToolOption[];
-  onMcpBusy: (id: string | null) => void;
-  onMcpSaved: () => Promise<void>;
-  onCloseNewConnector: () => void;
   onSaveMine: (
     item: Extract<PromptCatalogItem, { kind: "mine" }>,
     draft: {
       name: string;
       description: string;
       body: string;
-      offeredTools: string[];
     },
   ) => Promise<boolean>;
 }) {
-  if (item.kind === "connector") {
-    if (!mcpApi) return null;
-    return (
-      <ConnectorInspector
-        key={item.id}
-        server={item.server}
-        api={mcpApi}
-        busyId={mcpBusyId}
-        onBusy={onMcpBusy}
-        onCloseNew={onCloseNewConnector}
-        onSaved={onMcpSaved}
-        hideChrome
-      />
-    );
-  }
-
   if (item.kind === "tool") {
     return (
       <ToolInspector
@@ -390,7 +315,6 @@ function ReadBody({
         key={item.id}
         item={item}
         writable={overlay.writable}
-        bindableTools={bindableTools}
         onSave={onSaveMine}
       />
     );
@@ -406,19 +330,16 @@ function initialMineView(content: string): MineView {
 function MineSkillEditor({
   item,
   writable,
-  bindableTools,
   onSave,
 }: {
   item: Extract<PromptCatalogItem, { kind: "mine" }>;
   writable: boolean;
-  bindableTools?: BindableToolOption[];
   onSave: (
     item: Extract<PromptCatalogItem, { kind: "mine" }>,
     draft: {
       name: string;
       description: string;
       body: string;
-      offeredTools: string[];
     },
   ) => Promise<boolean>;
 }) {
@@ -428,16 +349,12 @@ function MineSkillEditor({
     pendingBody ? "preview" : initialMineView(item.content),
   );
   const [body, setBody] = useState(() => skillBodyFromContent(item.content));
-  const [offeredTools, setOfferedTools] = useState(() =>
-    parseOffersTools(item.content),
-  );
   const [version, setVersion] = useState(item.version);
   const [loading, setLoading] = useState(Boolean(item.mineId) && !item.content);
 
   useEffect(() => {
     if (!item.mineId || item.content) {
       setBody(skillBodyFromContent(item.content));
-      setOfferedTools(parseOffersTools(item.content));
       setVersion(item.version);
       setLoading(false);
       return;
@@ -448,7 +365,6 @@ function MineSkillEditor({
       .then((doc) => {
         if (cancelled) return;
         setBody(skillBodyFromContent(doc.content));
-        setOfferedTools(parseOffersTools(doc.content));
         setVersion(doc.version);
         setLoading(false);
         setView((current) =>
@@ -485,9 +401,6 @@ function MineSkillEditor({
       previewing={view === "preview"}
       initialTrigger={item.description}
       triggerEnabled={onDemand}
-      initialOfferedTools={offeredTools}
-      bindableTools={bindableTools}
-      canAddOfferedTools={onDemand}
       initialBody={body}
       bodyLoading={loading}
       readOnly={!writable}
@@ -500,7 +413,6 @@ function MineSkillEditor({
                   name: draft.title,
                   description: onDemand ? draft.trigger : item.description,
                   body: draft.body,
-                  offeredTools: draft.offeredTools,
                 },
               )
           : undefined

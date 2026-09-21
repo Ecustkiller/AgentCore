@@ -194,7 +194,7 @@ export interface FileSource {
   /**
    * 系统集成（桌面专属 → UI 据「方法是否存在」门控菜单，组件内不按源分支）。
    *
-   * `reveal` / `copyOsPath` / `openShellAtPath` 仅本地源有意义：文件在用户机器上、有真实 OS
+   * `reveal` / `openShellAtPath` 仅本地源有意义：文件在用户机器上、有真实 OS
    * 路径；云端工作区文件在服务器上，故这几者一律省略。绝对路径全程只在主进程出现，不下发
    * renderer——沿用 IPC 契约的安全约束。
    */
@@ -235,8 +235,6 @@ export interface FileSource {
    * `""` / `"."` = 工作区根。
    */
   openShellAtPath?(path: string): Promise<void>;
-  /** 把该路径的绝对路径写入系统剪贴板（写入在主进程完成）。失败抛异常。 */
-  copyOsPath?(path: string): Promise<void>;
 }
 
 /**

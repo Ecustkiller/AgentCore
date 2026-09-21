@@ -1,7 +1,7 @@
 """Host-side CONNECT/HTTP proxy — cloud-desk egress chokepoint.
 
-Policy is :func:`core.net.resolve_ssrf_dial_target` (same as ``download_url`` /
-``web_fetch`` / the sandbox browser proxy): public http(s) is allowed; private /
+Policy is :func:`core.net.resolve_ssrf_dial_target` (same as ``web_fetch`` /
+the sandbox browser proxy): public http(s) is allowed; private /
 loopback / link-local / metadata is refused. Packaging registry *pinning* stays
 on the install tool (env + reject ``--registry``), not this proxy.
 """

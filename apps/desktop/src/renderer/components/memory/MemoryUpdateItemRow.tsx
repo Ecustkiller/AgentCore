@@ -1,16 +1,10 @@
 import { countPillMuted, statusPillInline } from "@/components/ui/tone-presets";
 import { getFolders } from "@/hooks/useFolders";
 import type { MemoryUpdateItem } from "@/stores/conversation";
-import { ChevronRight } from "lucide-react";
 
 /**
- * One applied memory change (新增/更新/移除 + 目标叶子 + 正文), used by the
- * in-conversation「记忆已更新」card. Read-only: expand the card and open the
- * leftover file; no row-level 纠错 / 搬层.
- *
- * Quota cards reuse these rows so「什么没写进来 / 谁占着配额」reads like any other
- * memory row and deep-links the same way; {@link visibleMemoryUpdateItems} hides
- * the internal fingerprint row.
+ * One applied change row on the always-on user-rule quota card.
+ * {@link visibleMemoryUpdateItems} hides the internal fingerprint row.
  */
 
 const ACTION_META: Record<
@@ -77,71 +71,38 @@ export function memoryScopeOverview(
 
 export function MemoryUpdateItemRow({
   item,
-  onOpenLeaf,
 }: {
   item: MemoryUpdateItem;
-  onOpenLeaf: (target: string, projectId?: string | null) => void;
 }) {
   const meta = ACTION_META[item.action];
   const leafLabel = item.section ? `${item.file} · ${item.section}` : item.file;
   const removed = item.action === "remove";
   const dimmed = removed || item.action === "quota_denied";
 
-  const metaBlock = (
-    <>
-      <div className="flex min-w-0 items-center gap-1.5 text-xs">
-        <span className="min-w-0 truncate font-medium text-foreground">
-          {leafLabel}
-        </span>
-        <span className={countPillMuted}>
-          {memoryScopePillLabel(item.scope, item.projectId)}
-        </span>
-      </div>
-      {item.content && (
-        <p
-          className={`mt-0.5 whitespace-pre-wrap break-words text-sm ${
-            dimmed ? "text-muted-foreground" : "text-foreground"
-          } ${removed ? "line-through" : ""}`}
-        >
-          {item.content}
-        </p>
-      )}
-    </>
-  );
-
-  const main = (
-    <>
+  return (
+    <li className="flex items-start gap-2 px-1.5 py-1">
       <span className={`shrink-0 ${statusPillInline[meta.tone]}`}>
         {meta.label}
       </span>
-      <div className="min-w-0 flex-1">{metaBlock}</div>
-      {item.target ? (
-        <ChevronRight
-          size={14}
-          className="mt-0.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-        />
-      ) : null}
-    </>
-  );
-
-  return (
-    <li
-      className={`flex items-start gap-2 px-1.5 py-1 ${
-        item.target ? "rounded-lg hover:bg-accent/50" : ""
-      }`}
-    >
-      {item.target ? (
-        <button
-          type="button"
-          onClick={() => onOpenLeaf(item.target, item.projectId)}
-          title={`在设定中打开${item.file}`}
-          className="group flex min-w-0 flex-1 items-start gap-2 text-left"
-        >
-          {main}
-        </button>
-      ) : (
-        <div className="flex min-w-0 flex-1 items-start gap-2">{main}</div>
-      )}
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-1.5 text-xs">
+          <span className="min-w-0 truncate font-medium text-foreground">
+            {leafLabel}
+          </span>
+          <span className={countPillMuted}>
+            {memoryScopePillLabel(item.scope, item.projectId)}
+          </span>
+        </div>
+        {item.content && (
+          <p
+            className={`mt-0.5 whitespace-pre-wrap break-words text-sm ${
+              dimmed ? "text-muted-foreground" : "text-foreground"
+            } ${removed ? "line-through" : ""}`}
+          >
+            {item.content}
+          </p>
+        )}
+      </div>
     </li>
   );
 }

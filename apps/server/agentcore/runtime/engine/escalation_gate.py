@@ -65,7 +65,6 @@ def apply_escalation_gate(
                 agent_id,
                 question=str(payload.get("question", "")),
                 assumption=str(payload.get("assumption", "")),
-                blocking=False,
-                kind=str(payload.get("kind", "normal")),
+                source=str(payload.get("source") or "escalation_gate") or None,
             )
         )

@@ -64,7 +64,7 @@ import {
   toolDetail,
   toolGroupSummary,
   toolMeta,
-  toolPhaseText,
+  toolRowPhaseLabel,
 } from "./message-bubble/constants";
 
 /** Tools whose collapsed title already names the target (path / topic / skill / action)
@@ -81,11 +81,13 @@ const PEEK_SUPPRESSED = new Set([
   "web_search",
   "web_fetch",
   "read_conversation",
-  // 执行类：成功 stdout 不进折叠行；失败/未完成 inlineMeta 并进标题。
+  // 执行类：成功 stdout 不进折叠行；失败「未通过」并进标题。
+  // terminal 与 run 同：命令在展开里，不靠标题芯片来压住输出预览。
   "run",
   "code_execute",
   "test_run",
-  "file_read",
+  "terminal",
+  "read",
   "file_list",
   "glob",
   // 文件夹指挥面 + 同类漏网：折叠一行，结果只在展开。
@@ -100,7 +102,6 @@ const PEEK_SUPPRESSED = new Set([
   "md_to_docx",
   "md_to_pdf",
   "md_export",
-  "download_url",
   "read_image",
   "code_search",
   "git",
@@ -108,11 +109,10 @@ const PEEK_SUPPRESSED = new Set([
   "external_mount_readonly",
   // 派出回执不是过程信息；折叠会贴「已派出…」。
   "delegate",
-  // 写盘家族：标题已有 path / source→destination；成功 ack 与路径重复。
+  // 写盘家族：标题已有 file_path / source→destination；成功 ack 与路径重复。
   // 类型诊断不走第二行，折叠态并进标题（见 writeFamilyDiagnosticPeek）。
-  "file_write",
-  "file_append",
-  "str_replace",
+  "write",
+  "edit",
   "file_delete",
   "file_move",
   "file_copy",
@@ -210,7 +210,7 @@ function useRunTargetRole(
   return looksLikeInternalId(raw) ? "" : raw;
 }
 
-/** str_replace +/- (omit zeros), file_write「N 行」, or a file_read window
+/** edit +/- (omit zeros), write「N 行」, or a read window
  * (`42–53 行`) — shrink-0 so the path truncates first. Diagnostics stay in
  * inlineMeta (warning) after this. */
 function ToolLineStat({ stat }: { stat: ToolLineTitleStat }) {
@@ -238,8 +238,8 @@ function ToolLineStat({ stat }: { stat: ToolLineTitleStat }) {
   );
 }
 
-/** 行尾指示：进行中不跟秒（流光即心跳）；没做成挂灰色短词；验证未完成走 warning 三角；
- *  顶层可展开行补 chevron。成功不挂标记。 */
+/** 行尾指示：进行中不跟秒（流光即心跳）；验证没过挂灰色「未通过」；验证未完成走 warning 三角；
+ *  顶层可展开行补 chevron。成功不挂标记。查找失败 / 默认失败不挂同义词。 */
 function ToolRowTail({
   status,
   nested,
@@ -254,7 +254,7 @@ function ToolRowTail({
   open: boolean;
   /** Verify budget exceeded — warning affordance, not a fault word. */
   verifyBudgetExceeded?: boolean;
-  /** 未通过 / 未找到 / 未完成 — uncolored, replaces the fault X. */
+  /** 未通过 — uncolored. Lookup / generic faults hang nothing. */
   faultLabel?: string | null;
 }) {
   if (status === "running") {
@@ -441,17 +441,16 @@ export function ToolLine({
   const verifyBudgetExceeded =
     step.status === "error" && isVerifyBudgetExceeded(step.display);
   const faultLabel = toolRowFaultLabel(step);
-  // Collapsed error rows stay one line (title + 未通过/未找到 / warning 三角).
-  // 验证未完成（idle/灾难顶）与其它失败态 inlineMeta 并进标题。
+  // Collapsed error rows stay one line (title + 未通过 / warning 三角).
+  // 验证未完成（idle/灾难顶）inlineMeta 并进标题；查找失败 / 默认失败不挂同义词。
   const suppressesPeek =
     status === "redirect" ||
     status === "error" ||
     PEEK_SUPPRESSED.has(step.tool_name) ||
-    isBrowserTool(step.tool_name) ||
-    (step.tool_name === "terminal" && detail);
-  const phaseText = running ? toolPhaseText(step.phase) : null;
-  // 完成态元信息并进标题行、不另起 peek：str_replace +/-、file_write「N 行」、
-  // file_read 窗口「a–b 行」、write 家族 / code_diagnostics、browser_* detail、
+    isBrowserTool(step.tool_name);
+  const phaseText = running ? toolRowPhaseLabel(step.phase) : null;
+  // 完成态元信息并进标题行、不另起 peek：edit +/-、write「N 行」、
+  // read 窗口「a–b 行」、write 家族 / code_diagnostics、browser 页标题或 URL、
   // web_fetch / read_conversation 标题。检索 / 盘点条数不进折叠行。
   const titleStat = toolLineTitleStat(data);
   const writeDiagPeek =
@@ -738,7 +737,7 @@ function DefaultToolLineGroup({
         </Button>
       </LiveFlow>
       {expanded && (
-        <div className="mt-1.5 space-y-2 pl-3">
+        <div className="mt-2 space-y-2 pl-3">
           {tools.map((t) => (
             <ToolLine
               key={t.id}

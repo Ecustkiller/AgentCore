@@ -33,10 +33,9 @@ const pending: RunEscalation = {
   id: "esc-1",
   question: "数据库选 Postgres 还是 SQLite？",
   assumption: "暂按 Postgres 继续",
-  blocking: true,
   status: "pending",
   answer: null,
-  kind: "normal",
+  kind: "wait",
   questions: [],
 };
 

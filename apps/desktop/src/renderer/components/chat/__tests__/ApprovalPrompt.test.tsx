@@ -419,8 +419,8 @@ describe("ApprovalCard CTA (工具审批 A+B)", () => {
   it("file tools keep 允许一次 before 本轮内都允许", () => {
     renderCard(
       card({
-        toolName: "file_write",
-        arguments: { path: "a.txt", content: "x" },
+        toolName: "write",
+        arguments: { file_path: "a.txt", content: "x" },
       }),
     );
     const buttons = screen.getAllByRole("button");
@@ -486,9 +486,9 @@ describe("ApprovalCard escalation tracks (熔断 vs 敏感读)", () => {
   it("force_one_shot file-op fuse: also hides 本轮内允许所有文件改动", () => {
     renderCard(
       card({
-        toolName: "file_write",
+        toolName: "write",
         arguments: {
-          path: "a.txt",
+          file_path: "a.txt",
           content: "x",
           force_one_shot: true,
           circuit_breaker_hint: "工作区顶层整树删除",
@@ -505,9 +505,9 @@ describe("ApprovalCard escalation tracks (熔断 vs 敏感读)", () => {
   it("sensitive.path_read_ask: turn grants + sensitive copy, no fuse boilerplate", () => {
     renderCard(
       card({
-        toolName: "file_read",
+        toolName: "read",
         arguments: {
-          path: ".env",
+          file_path: ".env",
           rule_id: "sensitive.path_read_ask",
           circuit_breaker_hint:
             "读取凭据类路径需确认\n键名预览：API_KEY, DATABASE_URL",
@@ -524,9 +524,9 @@ describe("ApprovalCard escalation tracks (熔断 vs 敏感读)", () => {
   it("allow_turn_grant without force_one_shot tracks as sensitive read", () => {
     renderCard(
       card({
-        toolName: "file_read",
+        toolName: "read",
         arguments: {
-          path: ".env.local",
+          file_path: ".env.local",
           allow_turn_grant: true,
           circuit_breaker_hint: "敏感读需确认",
         },
@@ -555,9 +555,9 @@ describe("ApprovalCard escalation tracks (熔断 vs 敏感读)", () => {
   it("force_one_shot wins over sensitive rule_id / allow_turn_grant", () => {
     renderCard(
       card({
-        toolName: "file_read",
+        toolName: "read",
         arguments: {
-          path: ".env",
+          file_path: ".env",
           force_one_shot: true,
           rule_id: "sensitive.path_read_ask",
           allow_turn_grant: true,
@@ -577,11 +577,11 @@ describe("ApprovalCard extra payload (omit restatements of the headline)", () =>
     expect(screen.queryByText(/subcommand/)).toBeNull();
   });
 
-  it("shows file_write body under the path, not as JSON", () => {
+  it("shows write body under the path, not as JSON", () => {
     renderCard(
       card({
-        toolName: "file_write",
-        arguments: { path: "a.txt", content: "hello body" },
+        toolName: "write",
+        arguments: { file_path: "a.txt", content: "hello body" },
       }),
     );
     expect(screen.getByText("a.txt")).toBeTruthy();
@@ -591,7 +591,7 @@ describe("ApprovalCard extra payload (omit restatements of the headline)", () =>
     expect(screen.queryByText(/"content"/)).toBeNull();
   });
 
-  it("clamps a long file_write body until 展开", () => {
+  it("clamps a long write body until 展开", () => {
     const content = [
       "# 示例文件",
       "",
@@ -603,8 +603,8 @@ describe("ApprovalCard extra payload (omit restatements of the headline)", () =>
     ].join("\n");
     renderCard(
       card({
-        toolName: "file_write",
-        arguments: { path: "示例.md", content },
+        toolName: "write",
+        arguments: { file_path: "示例.md", content },
       }),
     );
     expect(screen.getByText("7 行")).toBeTruthy();
@@ -666,12 +666,12 @@ describe("ApprovalCard extra payload (omit restatements of the headline)", () =>
     expect(screen.queryByText(/permanent/)).toBeNull();
   });
 
-  it("shows str_replace as a compact red/green summary", () => {
+  it("shows edit as a compact red/green summary", () => {
     renderCard(
       card({
-        toolName: "str_replace",
+        toolName: "edit",
         arguments: {
-          path: "a.txt",
+          file_path: "a.txt",
           old_string: "alpha",
           new_string: "beta",
         },
@@ -685,14 +685,14 @@ describe("ApprovalCard extra payload (omit restatements of the headline)", () =>
     expect(screen.queryByText(/"old_string"/)).toBeNull();
   });
 
-  it("expands a long str_replace to labeled previews", () => {
+  it("expands a long edit to labeled previews", () => {
     const oldString = ["line a", "line b", "line c", "line d"].join("\n");
     const newString = ["line a", "line x", "line c", "line d"].join("\n");
     renderCard(
       card({
-        toolName: "str_replace",
+        toolName: "edit",
         arguments: {
-          path: "a.txt",
+          file_path: "a.txt",
           old_string: oldString,
           new_string: newString,
         },
@@ -713,8 +713,12 @@ describe("ApprovalCard extra payload (omit restatements of the headline)", () =>
   it("renders leftover flags as labeled rows, not a JSON dump", () => {
     renderCard(
       card({
-        toolName: "file_write",
-        arguments: { path: "a.txt", content: "hello body", overwrite: true },
+        toolName: "write",
+        arguments: {
+          file_path: "a.txt",
+          content: "hello body",
+          overwrite: true,
+        },
       }),
     );
     expect(screen.getByText("覆盖")).toBeTruthy();

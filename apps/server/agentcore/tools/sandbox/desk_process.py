@@ -225,21 +225,35 @@ def _resolve_guest_cwd(backend: object, cwd: str) -> str:
     return "/workspace" if posix == "." else f"/workspace/{posix}"
 
 
-def _launch_script(*, guest_dir: str, guest_cwd: str) -> str:
+def _launch_script(
+    *, guest_dir: str, guest_cwd: str, env: dict[str, str] | None = None
+) -> str:
     log_q = shlex.quote(f"{guest_dir}/log")
     pid_q = shlex.quote(f"{guest_dir}/pid")
     cmd_q = shlex.quote(f"{guest_dir}/command.sh")
     cwd_q = shlex.quote(guest_cwd)
+    exports = _export_lines(env)
     return (
         "set -eu\n"
         f"LOG={log_q}\n"
         f"PIDF={pid_q}\n"
         f"CMD={cmd_q}\n"
+        f"{exports}"
         ': > "$LOG"\n'
         f"cd {cwd_q}\n"
         'setsid nohup bash "$CMD" >>"$LOG" 2>&1 < /dev/null &\n'
         'echo $! > "$PIDF"\n'
     )
+
+
+def _export_lines(env: dict[str, str] | None) -> str:
+    """Shell exports for the background command. Keys must be plain env names."""
+    lines: list[str] = []
+    for key, value in (env or {}).items():
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+            continue
+        lines.append(f"export {key}={shlex.quote(value)}\n")
+    return "".join(lines)
 
 
 def _stop_script(*, guest_dir: str) -> str:
@@ -473,6 +487,7 @@ async def start_desk_process(
     wait_for: str = "",
     wait_timeout_seconds: float = 30.0,
     cache_bucket: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Background ``command`` in the desk guest; return as soon as launch.sh exits."""
     conv = (conversation_id or "").strip()
@@ -521,7 +536,7 @@ async def start_desk_process(
         host_dir=host_dir,
         guest_dir=guest_dir,
         filename="launch.sh",
-        body=_launch_script(guest_dir=guest_dir, guest_cwd=guest_cwd),
+        body=_launch_script(guest_dir=guest_dir, guest_cwd=guest_cwd, env=env),
         cache_bucket=cache_bucket,
     )
     if code != 0:

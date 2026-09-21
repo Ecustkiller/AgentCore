@@ -48,7 +48,7 @@ class MessageAttachment(BaseModel):
     # ``persist_attachments`` skips rewriting and keeps this path.
     workspace_path: str | None = None
     # This-turn @ citation of a live file on another registered Folder.
-    # Server does not copy it onto the sitting desk; ``file_read`` binds that
+    # Server does not copy it onto the sitting desk; ``read`` binds that
     # Folder once. Omit when the file is on the sitting desk.
     source_folder_id: str | None = Field(default=None, max_length=64)
 
@@ -196,7 +196,7 @@ class WorkspaceOpError(BaseModel):
     ``kind`` names the ``WorkspaceError`` subclass to re-raise on the server (e.g.
     ``PathNotFound``, ``OutsideWorkspace``) so the file tool maps it to the same
     message as cloud mode; ``count`` carries the match count for ``AmbiguousMatch``
-    (str_replace). An unknown ``kind`` degrades to a generic I/O error.
+    (``edit``). An unknown ``kind`` degrades to a generic I/O error.
 
     ``reason`` is an optional stable failure category for channels that already
     classify on the desktop (e.g. external mount ``not_found`` / ``not_directory`` /
@@ -816,6 +816,9 @@ class MessageDetail(BaseModel):
                     int(input_n), int(cache_hit_n), int(cache_miss_n)
                 ),
             }
+            last_prompt = int(v.get("last_prompt_tokens") or v.get("last_prompt") or 0)
+            if last_prompt > 0:
+                out["last_prompt"] = last_prompt
             if usage_error is not None:
                 out["error"] = usage_error
             return out
@@ -962,8 +965,6 @@ LOCAL_TURN_TOOL_FAILURE_CODES = frozenset(
         "source_dump_redirect",
         "long_running_redirect",
         "loopback_host",
-        "shell_fetch_redirect",
-        "shell_download_redirect",
         "access_denied",
         "outside_workspace",
         "other",
@@ -988,10 +989,6 @@ def _remap_path_or_verify_failure(message: str) -> str | None:
         return "source_dump_redirect"
     if "禁止用 code_execute 启动长驻进程" in raw or "请用 run 启动长驻进程" in raw:
         return "long_running_redirect"
-    if "公网 http(s) 摘字请用 web_fetch" in raw:
-        return "shell_fetch_redirect"
-    if "公网 http(s) 落到工作区请用 download_url" in raw:
-        return "shell_download_redirect"
     if any(
         needle in raw
         for needle in (
@@ -1129,12 +1126,11 @@ class RecordTurnRequest(BaseModel):
 
     Carries the assistant outcome the local pipeline returned (content / reasoning /
     citations / replay ``runs`` / the pipeline ``message_id`` so streamed and stored
-    ids agree). The FULL token snapshot rides on ``Message.usage`` (input / output /
-    reasoning / cache hit / cache miss + rounds) so a reloaded sidecar turn's meta row
-    matches a cloud turn's. ``duration_ms`` is the whole-turn product-AI wall clock
-    (same number as live ``message_end``); older clients omit it. Spend is NOT sent: a
-    sidecar turn's LLM calls are metered authoritatively at the cloud inference proxy
-    (``/v1/inference``, Slice 4a), so this write-back persists content only.
+    ids agree). Reload-visible ``Message.usage`` keys are ``USAGE_SETTLE_KEYS`` —
+    the same snapshot cloud ``_usage_metadata`` writes. Additive fields default to
+    omit/0 so older desktops still write back. Spend is NOT sent: a sidecar turn's
+    LLM calls are metered authoritatively at the cloud inference proxy
+    (``/v1/inference``), so this write-back persists content + settle usage only.
 
     ``user_message`` may be empty for process-only salvage (journal/runs): the server
     must not insert a visible user row when there is no real user intent.
@@ -1164,21 +1160,26 @@ class RecordTurnRequest(BaseModel):
     # duplicate the user/assistant rows (双模式工作区 §一.1 回写可靠性).
     user_message_id: str = Field(..., min_length=1, max_length=64)
     message_id: str | None = Field(None, max_length=64)
-    # Full usage snapshot — persisted verbatim into ``Message.usage`` to match the cloud
-    # turn's 6-key row (cloud ``persist_turn_result``). reasoning / cache tokens are additive
-    # (default 0), so an older desktop that omits them degrades to today's partial snapshot.
+    # Settle → usage snapshot (``USAGE_SETTLE_KEYS``). Additive defaults so older
+    # desktops that omit a key degrade to a partial row, not a second dialect.
     input_tokens: int = Field(0, ge=0)
     output_tokens: int = Field(0, ge=0)
     reasoning_tokens: int = Field(0, ge=0)
     cache_hit_tokens: int = Field(0, ge=0)
     cache_miss_tokens: int = Field(0, ge=0)
     rounds: int = Field(0, ge=0)
+    # CEO's latest single-request prompt (window fill). Distinct from summed
+    # ``input_tokens``. Cloud maps this onto ``usage.last_prompt_tokens``.
+    prompt_tokens: int = Field(0, ge=0)
     # Whole-turn product-AI wall clock (ms). Same number as live ``message_end``.
     # Optional so older desktops still write back; omitted → usage has no duration.
     duration_ms: int | None = Field(None, ge=0)
     # Decode-window sum (ms). Same number as live ``message_end.generation_ms``.
     # Optional so older desktops still write back; omitted → no 输出速度 on reload.
     generation_ms: int | None = Field(None, ge=0)
+    error_code: str | None = Field(None, max_length=64)
+    collab: dict[str, Any] | None = None
+    outcome: str | None = Field(None, max_length=32)
     # The local turn's trace_id (32-hex), stamped by the desktop on every cloud
     # inference-proxy LLM call this turn made. Reusing it for the persisted reply joins
     # the reasoning logs + the bubble under ONE trace (打通气泡↔日志).

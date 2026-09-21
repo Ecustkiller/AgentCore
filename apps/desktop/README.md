@@ -27,7 +27,7 @@ src/
   preload/    # 桥接 API
   renderer/   # React UI：chat / graph / workspace / settings…
   shared/     # main ↔ renderer 契约
-scripts/      # shoot 截图、发版、sidecar 打包等
+scripts/      # shoot / 发版 / sidecar；清单见 scripts/README.md
 e2e/          # Playwright
 ```
 
@@ -83,6 +83,4 @@ pnpm -C apps/desktop shoot:graph-perf-live
 
 改 SSE 载荷、fold、InteractionKind 后：根目录 `pnpm gen:types` **与** `pnpm conformance`。
 
-## 贡献
-
-[`CONTRIBUTING.md`](../../CONTRIBUTING.md) · 门禁 `pnpm release:gate`（可 `--only desktop`）。
+发版门禁：仓库根 `pnpm release:gate`（可 `--only desktop`）。

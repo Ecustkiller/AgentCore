@@ -94,7 +94,7 @@ export interface AgentNodeData {
   checkpoint?: RunCheckpoint | null;
   escalationPending?: number;
   escalationRaised?: number;
-  /** 节点上最严重的升级展示类（真 scope > 需求矛盾 > dep > normal）。 */
+  /** 节点上最严重的升级展示类（真 scope > 需求矛盾 > dep；wait 不出种类标）。 */
   escalationKind?: EscalationDisplayKind | null;
   /** Failure reason from `run_failed` — drives face「模型中断/调用失败」+ peek. */
   error?: string | null;
@@ -412,11 +412,7 @@ export function revisedBadge(kind: PlanRevisionKind): {
   return { label: "方向已校准", hint: "CEO 据中途发现调整了这一步的方向" };
 }
 
-export type EscalationDisplayKind =
-  | "normal"
-  | "scope"
-  | "dep"
-  | "contradiction";
+export type EscalationDisplayKind = "wait" | "scope" | "dep" | "contradiction";
 
 /**
  * Legacy-tape display: older Gate runs mapped contradiction → wire `kind=scope`
@@ -439,22 +435,22 @@ export function escalationKindLabel(
   if (kind === "contradiction") return "需求矛盾";
   if (kind === "scope") return "职责偏离";
   if (kind === "dep") return "缺输入";
-  return "普通";
+  return "";
 }
 
 /** Label for one escalation row (prefer question-side contradiction over wire scope). */
 export function escalationRowKindLabel(esc: {
-  kind?: "normal" | "scope" | "dep";
+  kind?: "wait" | "scope" | "dep";
   question?: string;
 }): string | null {
   if (isContradictionEscalation(esc)) return "需求矛盾";
-  if (!esc.kind || esc.kind === "normal") return null;
+  if (!esc.kind || esc.kind === "wait") return null;
   return escalationKindLabel(esc.kind);
 }
 
-/** Pick the most severe escalate kind on a run (true scope > contradiction > dep > normal). */
+/** Pick the most severe escalate kind on a run (true scope > contradiction > dep). */
 export function pickEscalationKind(
-  escalations: { kind?: "normal" | "scope" | "dep"; question?: string }[],
+  escalations: { kind?: "wait" | "scope" | "dep"; question?: string }[],
 ): EscalationDisplayKind | null {
   if (escalations.length === 0) return null;
   const scopeOnes = escalations.filter((e) => e.kind === "scope");
@@ -462,7 +458,7 @@ export function pickEscalationKind(
   if (scopeOnes.some((e) => isContradictionEscalation(e)))
     return "contradiction";
   if (escalations.some((e) => e.kind === "dep")) return "dep";
-  return "normal";
+  return null;
 }
 
 export function checkpointBadge(c: RunCheckpoint): {

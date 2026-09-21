@@ -33,9 +33,6 @@ INTERNAL_VOCABULARY: tuple[str, ...] = (
     # Tool identifiers.
     "web_search",
     "web_fetch",
-    "file_read",
-    "file_write",
-    "str_replace",
     "工具 '",
     "Tool '",
 )

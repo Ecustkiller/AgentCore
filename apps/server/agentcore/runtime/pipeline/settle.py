@@ -131,11 +131,13 @@ async def settle_successful_turn(
     # both accumulated on their tool instances across the turn. ``delegate`` is
     # non-terminal, so the captain loop never metered their tokens; the cache
     # split rides along so the folded total stays priceable.
+    captain_usage = TokenUsage.from_usage_dict(captain_state.usage)
     turn_usage = (
-        TokenUsage.from_usage_dict(captain_state.usage)
+        captain_usage
         + TokenUsage.from_usage_dict(delegate_tool.usage)
         + TokenUsage.from_usage_dict(debate_tool.usage)
     )
+    captain_prompt_tokens = captain_usage.last_prompt_tokens
 
     # Per-run cost ledger for 落账 (决策②: captain root + one row per member).
     # The captain was priced once in the executor (captain_state.cost); read it
@@ -225,6 +227,7 @@ async def settle_successful_turn(
             reasoning_tokens=turn_usage.reasoning_tokens,
             cache_hit_tokens=turn_usage.cache_hit_tokens,
             cache_miss_tokens=turn_usage.cache_miss_tokens,
+            last_prompt_tokens=captain_prompt_tokens,
             rounds=rounds,
             cost=turn_cost,
             collab=collab,
@@ -256,7 +259,7 @@ async def settle_successful_turn(
         "reasoning_content": final_reasoning,
         "input_tokens": turn_usage.input_tokens,
         "output_tokens": turn_usage.output_tokens,
-        "prompt_tokens": TokenUsage.from_usage_dict(captain_state.usage).last_prompt_tokens,
+        "prompt_tokens": captain_prompt_tokens,
         "reasoning_tokens": turn_usage.reasoning_tokens,
         "cache_hit_tokens": turn_usage.cache_hit_tokens,
         "cache_miss_tokens": turn_usage.cache_miss_tokens,
@@ -335,7 +338,14 @@ async def salvage_failed_captain(
     )
     duration_ms = turn_wall_ms()
     sink.emit(
-        message_end(FinishReason.ERROR, outcome=outcome, duration_ms=duration_ms)
+        message_end(
+            FinishReason.ERROR,
+            outcome=outcome,
+            duration_ms=duration_ms,
+            last_prompt_tokens=TokenUsage.from_usage_dict(
+                captain_state.usage or {}
+            ).last_prompt_tokens,
+        )
     )
     # A captain that died mid-loop still burned tokens (B-deep 失败计费): the
     # executor priced them onto captain_state, so carry the captain ledger row

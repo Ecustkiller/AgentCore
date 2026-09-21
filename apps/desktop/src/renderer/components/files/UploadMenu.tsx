@@ -1,9 +1,10 @@
-import { Button, IconButton } from "@/components/ui";
+import { IconButton } from "@/components/ui";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { FolderUp, Loader2, Upload } from "lucide-react";
 import { useState } from "react";
@@ -23,9 +24,9 @@ export function UploadMenu({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <SimpleTooltip label="上传">
-        <PopoverTrigger asChild>
+        <DropdownMenuTrigger asChild>
           <IconButton
             disabled={uploading}
             aria-label="上传"
@@ -38,32 +39,18 @@ export function UploadMenu({
               <Upload size={14} />
             )}
           </IconButton>
-        </PopoverTrigger>
+        </DropdownMenuTrigger>
       </SimpleTooltip>
-      <PopoverContent align="start" className="w-44 p-1.5">
-        <Button
-          variant="ghost"
-          onClick={() => {
-            setOpen(false);
-            onUploadFiles();
-          }}
-          className="h-auto w-full justify-start px-2.5 py-1.5 text-left text-xs font-medium"
-          icon={<Upload size={14} />}
-        >
+      <DropdownMenuContent align="start">
+        <DropdownMenuItem onSelect={() => onUploadFiles()}>
+          <Upload size={14} className="shrink-0" />
           上传文件
-        </Button>
-        <Button
-          variant="ghost"
-          onClick={() => {
-            setOpen(false);
-            onUploadFolder();
-          }}
-          className="h-auto w-full justify-start px-2.5 py-1.5 text-left text-xs font-medium"
-          icon={<FolderUp size={14} />}
-        >
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onUploadFolder()}>
+          <FolderUp size={14} className="shrink-0" />
           上传文件夹
-        </Button>
-      </PopoverContent>
-    </Popover>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

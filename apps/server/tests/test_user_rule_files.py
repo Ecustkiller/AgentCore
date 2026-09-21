@@ -1,4 +1,4 @@
-"""User-rule overlay — .agentcore/规则/*.md via file_* onto documents.
+"""User-rule overlay — .agentcore/rules/*.md via file_* onto documents.
 
 DB-free here: path classify + mutate helpers + tool overlay (mutates mocked).
 End-to-end write is in ``tests/integration/test_documents.py``.
@@ -52,19 +52,21 @@ def _ctx(*, agent_role: str = "", write_coordinator: object | None = None) -> To
 
 def test_classify_rule_path():
     assert classify_rule_path(".agentcore") == ("agentcore_root", None)
-    assert classify_rule_path(".agentcore/规则") == ("rules_dir", None)
-    assert classify_rule_path(".agentcore/规则/回复语言.md") == (
+    assert classify_rule_path(".agentcore/rules") == ("rules_dir", None)
+    assert classify_rule_path(".agentcore/rules/回复语言.md") == (
         "rule_file",
         "回复语言.md",
     )
-    assert classify_rule_path(".agentcore/规则/回复语言") == ("rule_file", "回复语言.md")
-    assert classify_rule_path(".agentcore/规则/sub/x.md") == ("invalid", None)
+    assert classify_rule_path(".agentcore/rules/回复语言") == ("rule_file", "回复语言.md")
+    assert classify_rule_path(".agentcore/rules/sub/x.md") == ("invalid", None)
     assert classify_rule_path("notes.md") == (None, None)
-    assert classify_rule_path(".agentcore/规则/画像.md") == ("invalid", None)
+    assert classify_rule_path(".agentcore/rules/画像.md") == ("invalid", None)
     assert classify_rule_path("AgentCore") == (None, None)
-    assert classify_rule_path("AgentCore/规则") == (None, None)
-    assert classify_rule_path("AgentCore/规则/回复语言.md") == (None, None)
+    assert classify_rule_path("AgentCore/rules") == (None, None)
+    assert classify_rule_path("AgentCore/rules/回复语言.md") == (None, None)
     assert classify_rule_path("规则/回复语言.md") == (None, None)
+    assert classify_rule_path(".agentcore/规则") == ("invalid", None)
+    assert classify_rule_path(".agentcore/规则/回复语言.md") == ("invalid", None)
 
 
 def test_normalize_rule_filename():
@@ -286,11 +288,33 @@ class _FakeSession:
 @pytest.mark.anyio
 async def test_file_write_rule_empty_content():
     result = await FileWriteTool().execute(
-        {"path": f"{RULES_DIR_REL}/回复语言.md", "content": "   "},
+        {"file_path": f"{RULES_DIR_REL}/回复语言.md", "content": "   "},
         _ctx(),
     )
     assert result.success is False
     assert "缺少 content" in _tool_err(result)
+
+
+@pytest.mark.anyio
+async def test_file_write_legacy_catalog_path_rejected(tmp_path):
+    ctx = ToolContext.create(
+        execution_id="e",
+        run_id="r",
+        agent_id="ceo",
+        backend=ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox()),
+        user_id="u1",
+    )
+    result = await FileWriteTool().execute(
+        {
+            "file_path": ".agentcore/规则/回复语言.md",
+            "content": "以后都用中文回复",
+        },
+        ctx,
+    )
+    assert result.success is False
+    assert "rules" in _tool_err(result)
+    assert not (tmp_path / ".agentcore").exists()
+    assert not (tmp_path / "AgentCore" / "规则").exists()
 
 
 @pytest.mark.anyio
@@ -324,7 +348,7 @@ async def test_file_write_rule_complete_content_still_writes(
 
     result = await FileWriteTool().execute(
         {
-            "path": f"{RULES_DIR_REL}/回复语言.md",
+            "file_path": f"{RULES_DIR_REL}/回复语言.md",
             "content": "以后都用中文回复",
         },
         _ctx(),
@@ -368,7 +392,7 @@ async def test_file_write_rule_allows_trailing_ellipsis(
 
     result = await FileWriteTool().execute(
         {
-            "path": f"{RULES_DIR_REL}/回复语言.md",
+            "file_path": f"{RULES_DIR_REL}/回复语言.md",
             "content": "遇到这种事就先等等……",
         },
         _ctx(),
@@ -381,7 +405,7 @@ async def test_file_write_rule_allows_trailing_ellipsis(
 async def test_file_write_rule_worker_denied():
     result = await FileWriteTool().execute(
         {
-            "path": f"{RULES_DIR_REL}/回复语言.md",
+            "file_path": f"{RULES_DIR_REL}/回复语言.md",
             "content": "以后都用中文回复",
         },
         _ctx(agent_role="研究员", write_coordinator=MagicMock()),
@@ -414,7 +438,7 @@ async def test_file_write_rule_quota_denied_message(monkeypatch: pytest.MonkeyPa
     )
     result = await FileWriteTool().execute(
         {
-            "path": f"{RULES_DIR_REL}/回复语言.md",
+            "file_path": f"{RULES_DIR_REL}/回复语言.md",
             "content": "以后都用中文回复",
         },
         _ctx(),
@@ -456,12 +480,14 @@ async def test_file_write_rule_does_not_touch_workspace_disk(tmp_path, monkeypat
     )
     result = await FileWriteTool().execute(
         {
-            "path": f"{RULES_DIR_REL}/回复语言.md",
+            "file_path": f"{RULES_DIR_REL}/回复语言.md",
             "content": "以后都用中文回复",
         },
         ctx,
     )
     assert result.success is True
+    assert not (tmp_path / ".agentcore" / "rules" / "回复语言.md").exists()
+    assert not (tmp_path / "AgentCore" / "rules" / "回复语言.md").exists()
     assert not (tmp_path / ".agentcore" / "规则" / "回复语言.md").exists()
     assert not (tmp_path / "AgentCore" / "规则" / "回复语言.md").exists()
 
@@ -496,7 +522,7 @@ async def test_file_read_rule_returns_body(monkeypatch: pytest.MonkeyPatch):
 
     _patch_local_rule_mutate(monkeypatch, _fake_mutate)
     result = await FileReadTool().execute(
-        {"path": f"{RULES_DIR_REL}/回复语言.md"},
+        {"file_path": f"{RULES_DIR_REL}/回复语言.md"},
         _ctx(),
     )
     assert result.success is True
@@ -582,7 +608,7 @@ async def test_str_replace_rule_rewrites(monkeypatch: pytest.MonkeyPatch):
     _patch_local_rule_mutate(monkeypatch, _fake_mutate)
     result = await StrReplaceTool().execute(
         {
-            "path": f"{RULES_DIR_REL}/回复语言.md",
+            "file_path": f"{RULES_DIR_REL}/回复语言.md",
             "old_string": "中文",
             "new_string": "英文",
         },

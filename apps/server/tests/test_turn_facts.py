@@ -42,6 +42,7 @@ def test_turn_started_fact_entry_shape():
         "model_profile": "chat",
         "history_len": 4,
         "turn_envelope": "",
+        "in_history_system": "",
     }
 
 
@@ -168,7 +169,7 @@ def test_tool_call_fact_omits_unknown_cross_turn_retry():
 
 def test_tool_call_fact_omits_empty_working_set_digest():
     empty = (
-        ToolCallFact(run_id="r", tool_call_id="c", name="file_read", result="x")
+        ToolCallFact(run_id="r", tool_call_id="c", name="read", result="x")
         .to_fact()
         .entry()["payload"]
     )
@@ -177,7 +178,7 @@ def test_tool_call_fact_omits_empty_working_set_digest():
         ToolCallFact(
             run_id="r",
             tool_call_id="c",
-            name="file_read",
+            name="read",
             result="x",
             working_set_digest="Foo, bar()",
         )

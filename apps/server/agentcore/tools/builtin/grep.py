@@ -1,10 +1,10 @@
 """Built-in tool: grep — regex search over workspace file CONTENTS.
 
 Complements the rest of the file family: ``glob`` finds files by NAME,
-``file_list`` lists one known-directory layer, and ``file_read`` opens one
+``file_list`` lists one known-directory layer, and ``read`` opens one
 file, while ``grep`` finds WHERE a string / symbol / pattern appears across
 many files, returning ripgrep-style ``path:line: text`` hits the model can
-then open with ``file_read``.
+then open with ``read``.
 
 Thin shell over ``ToolContext.backend``: this tool builds a ``GrepQuery`` and
 renders the bounded ``GrepResult`` the backend returns. Search itself is
@@ -55,6 +55,7 @@ class GrepTool:
         file_products=FileProductsContract.READ_ONLY,
         workspace_io=True,
         catalog_summary="在工作区搜正文",
+        blurb="按关键词扫文件内容，给出命中行",
     )
 
     @property
@@ -73,12 +74,12 @@ class GrepTool:
                     },
                     "path": {
                         "type": "string",
-                        "description": "相对目录或单文件（默认整仓）。",
+                        "description": "相对目录或单文件。",
                         "default": ".",
                     },
                     "glob": {
                         "type": "string",
-                        "description": "可选：按文件名过滤。",
+                        "description": "按文件名过滤。",
                     },
                     "case_insensitive": {
                         "type": "boolean",
@@ -87,9 +88,7 @@ class GrepTool:
                     },
                     "files_only": {
                         "type": "boolean",
-                        "description": (
-                            "只返回匹配到的文件列表及每个文件的匹配数，而非匹配行。"
-                        ),
+                        "description": "只回文件路径与匹配数。",
                         "default": False,
                     },
                 },

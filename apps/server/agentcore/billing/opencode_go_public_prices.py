@@ -1,16 +1,11 @@
-"""OpenCode Go public list — Flash product meter (CNY) and admin USD window.
+"""OpenCode Go public list — admin USD window estimates only.
 
 USD / 1M token rates (Peak / Off-Peak) captured 2026-09-10 (DeepSeek V4.1 Flash
-public list; V4 Flash token rates match). Flash SKUs share this table.
-Cached Write is 「-」 — no such tier.
+public list; retired V4 Flash token rates match). Product Flash money is
+official DeepSeek CNY in ``llm/pricing.py``, not this table.
 
-Product money (``calculate_cost`` / quota / 用户面 ¥) for Flash is this table
-times a **frozen** ``GO_USD_TO_CNY`` (not live FX). Admin Go windows still
-sum raw nano-USD (no FX) so ops can read distance to $12 / $30 / $60.
-
-SKU ``costMultiplier`` (V4.1 4× vs V4 Flash 2×) is **not** in the unit rates;
-``GO_COST_MULTIPLIER`` (default 1) may scale the CNY card. Update USD numbers,
-``PRICE_AS_OF``, and ``GO_USD_TO_CNY`` together when the public list retags.
+SKU ``costMultiplier`` is **not** in the unit rates. Update USD numbers and
+``PRICE_AS_OF`` together when the public list retags.
 """
 
 from __future__ import annotations
@@ -24,13 +19,11 @@ from agentcore.llm.profiles import DEEPSEEK_V4_FLASH, OPENCODE_GO_V41_FLASH
 from agentcore.llm.provider.protocol import TokenUsage
 
 # Admin card ``estimate_model``: representative id. ``PRICED_MODEL_IDS`` is the
-# match set — both Go Flash SKUs use this public list.
-MODEL_ID = DEEPSEEK_V4_FLASH
+# match set — leftover V4 Flash ledger rows share this public list.
+MODEL_ID = OPENCODE_GO_V41_FLASH
 PRICED_MODEL_IDS = frozenset({DEEPSEEK_V4_FLASH, OPENCODE_GO_V41_FLASH})
 PRICE_AS_OF = date(2026, 9, 10)
 CURRENCY_USD = "USD"
-# Frozen USD→CNY for Flash user/quota money. Not a live rate; bump with PRICE_AS_OF.
-GO_USD_TO_CNY = Decimal("7.2")
 
 # USD / 1M tokens. Peak is exactly 2× Off-Peak on every published tier.
 _OFF_PEAK: dict[str, Decimal] = {
@@ -47,39 +40,23 @@ _PEAK: dict[str, Decimal] = {
 # tokens × (USD / 1M) → nano-USD. Same scale as billing nano (1 unit = 1e9).
 _PER_MILLION_TO_NANO = Decimal(1000)
 
-# Peak = UTC [01:00, 04:00) ∪ [06:00, 10:00). Half-open so 04:00 and 10:00
-# are Off-Peak (no double-count at the published boundaries).
+# Peak = UTC [01:00, 04:00) ∪ [06:00, 10:00) Monday–Friday. Half-open so 04:00
+# and 10:00 are Off-Peak. Weekends are Off-Peak (official DeepSeek + Go).
+# Chinese public holidays are not encoded.
 _PEAK_HOURS = frozenset({1, 2, 3, 6, 7, 8, 9})
 
 
 def is_opencode_go_peak(ts: datetime) -> bool:
-    """Whether ``ts`` falls in an OpenCode Go Peak hour (UTC)."""
-    hour = _as_utc(ts).hour
-    return hour in _PEAK_HOURS
+    """Whether ``ts`` falls in a DeepSeek / OpenCode Go Peak hour (UTC)."""
+    utc = _as_utc(ts)
+    if utc.weekday() >= 5:
+        return False
+    return utc.hour in _PEAK_HOURS
 
 
 def go_public_card(ts: datetime) -> dict[str, Decimal]:
     """Peak or Off-Peak card for this call's timestamp — never a blended rate."""
     return _PEAK if is_opencode_go_peak(ts) else _OFF_PEAK
-
-
-def go_flash_cny_per_million(
-    ts: datetime,
-    *,
-    multiplier: Decimal = Decimal(1),
-) -> dict[str, Decimal]:
-    """Flash CNY / 1M for ``calculate_cost``: Go USD card × frozen FX × SKU multiplier.
-
-    Maps Go ``input`` → ``cache_miss``, ``cache_hit`` → ``cache_hit``,
-    ``output`` → ``output``. ``multiplier`` default 1 (promo 1×); ops may set 4.
-    """
-    usd = go_public_card(ts)
-    fx = GO_USD_TO_CNY * (multiplier if multiplier > 0 else Decimal(1))
-    return {
-        "cache_hit": usd["cache_hit"] * fx,
-        "cache_miss": usd["input"] * fx,
-        "output": usd["output"] * fx,
-    }
 
 
 def estimate_go_public_usd_nano(
@@ -90,7 +67,7 @@ def estimate_go_public_usd_nano(
 ) -> int:
     """Public-list USD estimate for one ``cost_calls`` row, as integer nano-USD.
 
-    ``model`` must be one of ``PRICED_MODEL_IDS`` (Go V4 Flash / V4.1 Flash).
+    ``model`` must be one of ``PRICED_MODEL_IDS`` (Go V4.1 Flash / leftover V4 Flash).
     Other catalog ids (``glm-5.2``, ``deepseek-v4-flash-free``, …) return 0 —
     do not apply the Flash card to a different model.
 
@@ -120,10 +97,10 @@ def estimate_go_public_usd_nano(
     Peak / Off-Peak is chosen from **this call's** ``at``, never a window average.
 
     Two uncertainties the admin card must keep visible (not encoded in the
-    number): Go may apply an unpublished ``costMultiplier`` (default 1) before
-    the window; and we have not packet-verified that the gateway forwards
-    DeepSeek cache-hit fields. If it does not, Go prices those tokens as Input
-    while we price recorded hits as Cached Read — this estimate undershoots.
+    number): Go may apply an unpublished ``costMultiplier`` before the window;
+    and we have not packet-verified that the gateway forwards DeepSeek cache-hit
+    fields. If it does not, Go prices those tokens as Input while we price
+    recorded hits as Cached Read — this estimate undershoots.
     """
     if (model or "").strip() not in PRICED_MODEL_IDS:
         return 0

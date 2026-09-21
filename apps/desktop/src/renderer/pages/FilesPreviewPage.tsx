@@ -104,7 +104,6 @@ export function FilesPreviewPage() {
             renderWorkroomLead={(indent) => (
               <EntriesSection
                 scope={{ kind: "folder", folderId: PROJECT_FOLDER_ID }}
-                memoryActivePath={null}
                 documentActivePath={null}
                 onOpen={() => undefined}
                 onDeleted={() => undefined}

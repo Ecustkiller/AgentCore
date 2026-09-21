@@ -5,9 +5,10 @@
 
 三条出路（与 `graph_append` 的宿主查找配套）：
 
-- 同回合二次派发（含用户插话触发的）→ 合入本回合当前图（``append_to``，不写 prev）
-- 跨回合 → 本回合新图 + ``prev_execution_id`` 链回上一张（无论上一张是否还在后台跑）
-- ``latest`` 未命中 → 自动降级为不带 append 新建，并带回一段如实告知文案
+- 同回合二次派发（含用户插话触发的）→ 合入本回合当前图（内部 ``append_to``，不写 prev）
+- 跨回合且上一张仍在跑，或点名 ``continue_from_run_id`` / ``replaces_run_id``
+  → 本回合新图 + ``prev_execution_id``
+- 跨回合已收口且无续派 / 补缺口 → 新图、不链
 
 图归属由回合边界机械决定。观测领养（wait / cancel / 插话）走
 ``current_execution_id``，派单落图走本回合 mint 的 ``context_execution_id``。
@@ -123,7 +124,6 @@ class GraphIdentity:
     append_seed: dict | None = None
     host_plan_for_append: RunPlan | None = None
     host_captain_run_id: str | None = None
-    latest_miss_degraded_note: str | None = None
 
 
 async def resolve_graph_identity(
@@ -144,124 +144,39 @@ async def resolve_graph_identity(
     ``calls`` / ``last_graph_*`` = 工具实例上的同回合上一张图快照（`_calls` /
     `_last_graph_execution_id` / `_last_graph_plan` / `_last_graph_seed`）。
     """
-    # 同回合二次派发 → 合入同一 execution_id；跨回合 → 新图 + prev（不 divert）。
-    append_raw = arguments.get("append_to_execution_id")
-    append_to = (
-        append_raw.strip()
-        if isinstance(append_raw, str) and append_raw.strip()
-        else None
-    )
+    append_to: str | None = None
     prev_execution_id: str | None = None
     append_seed: dict | None = None
     host_plan_for_append = None
-    latest_miss_degraded_note: str | None = None
-    if append_to and depth > 0:
-        msg = (
-            "append_to_execution_id 仅根协调者可用：嵌套 lead 不能跨回合追加协作图。"
-            "请去掉该参数，直接在本子团队内委派。"
-        )
-        return ToolResult(
-            tool_call_id="",
-            success=False,
-            output="",
-            error=msg,
-            contract_failure=True,
-        )
-    turn_session = coordination_session.active_coordination(context_execution_id)
-    if append_to and append_to.lower() == "latest":
-        # 真同回合二次：吞 latest，走 live merge（不 prev）。
-        if _is_same_turn_merge(
-            turn_session,
+
+    # 同回合注入 existing_plan：活跃 live_plan；否则本 tool 实例二次+ 合入上一张图。
+    # 跨回合默认新图——仅同回合（活跃 session / _calls≥1）自动合入。
+    active = coordination_session.active_coordination(context_execution_id)
+    if (
+        active is not None
+        and active.active
+        and getattr(active, "live_plan", None) is not None
+        and _is_same_turn_merge(
+            active,
             message_id=message_id,
             calls=calls,
             context_execution_id=context_execution_id,
             last_graph_execution_id=last_graph_execution_id,
-        ):
-            append_to = None
-        else:
-            # 同回合第一波已收口：内存宿主优先于跨 message DB latest，禁静默挂旧图。
-            last_eid = last_graph_execution_id
-            if calls >= 1 and isinstance(last_eid, str) and last_eid.strip():
-                append_to = last_eid.strip()
-                last_plan = last_graph_plan
-                if last_plan is not None:
-                    host_plan_for_append = last_plan
-                    last_seed = last_graph_seed
-                    if last_seed is not None and append_seed is None:
-                        append_seed = last_seed
-                logger.info(
-                    "delegate.graph_append_latest",
-                    conversation_id=conversation_id or "",
-                    resolved=append_to,
-                    prefer_message_id=message_id,
-                    exclude_message_id=None,
-                    via="same_turn_memory",
-                )
-            else:
-                resolved = await graph_append.resolve_latest_appendable_execution(
-                    conversation_id=conversation_id or "",
-                    prefer_message_id=message_id,
-                )
-                if not resolved:
-                    # 无图可追加：自动降级为不带 append 新建（勿 success=False 空转）。
-                    latest_miss_degraded_note = (
-                        '【latest 未命中·已自动新建】append_to_execution_id="latest" '
-                        "未解析到可接续的上一张协作图（旧图已收口或本对话尚无图）；"
-                        "已自动不带 append 新开团队。"
-                        "向用户如实告知：本次是新组建团队、未接续上一张图。"
-                    )
-                    append_to = None
-                else:
-                    append_to = resolved
-    # 同回合显式 append_to 命中当前活跃协作图 ≡ 不传 append。
-    if append_to:
-        active = coordination_session.active_coordination(context_execution_id)
-        if (
-            active is not None
-            and active.active
-            and _is_live_execution_merge(active, append_to)
-            and _is_same_turn_merge(
-                active,
-                message_id=message_id,
-                calls=calls,
-                context_execution_id=context_execution_id,
-                last_graph_execution_id=last_graph_execution_id,
-            )
-        ):
-            # Soft-clear：热图合入由 drive merging_into_active / live_plan 承担。
-            append_to = None
+        )
+    ):
+        host_plan_for_append = active.live_plan
+    elif calls >= 1:
+        last_eid = last_graph_execution_id
+        last_plan = last_graph_plan
+        if isinstance(last_eid, str) and last_eid.strip():
+            append_to = last_eid.strip()
+            # 同回合内存宿主：无 journal 亦可合入（阻塞单人跑完常见）。
+            if last_plan is not None:
+                host_plan_for_append = last_plan
+                last_seed = last_graph_seed
+                if last_seed is not None:
+                    append_seed = last_seed
 
-    # 同回合注入 existing_plan：append 已加载则保持；否则活跃 live_plan；
-    # 再否则本 tool 实例二次+ 自动合入上一张图（与显式 append 同路径）。
-    # 跨回合无 append 仍默认新图——仅同回合（活跃 session / _calls≥1）自动合入。
-    if host_plan_for_append is None and not append_to:
-        active = coordination_session.active_coordination(context_execution_id)
-        if (
-            active is not None
-            and active.active
-            and getattr(active, "live_plan", None) is not None
-            and _is_same_turn_merge(
-                active,
-                message_id=message_id,
-                calls=calls,
-                context_execution_id=context_execution_id,
-                last_graph_execution_id=last_graph_execution_id,
-            )
-        ):
-            host_plan_for_append = active.live_plan
-        elif calls >= 1:
-            last_eid = last_graph_execution_id
-            last_plan = last_graph_plan
-            if isinstance(last_eid, str) and last_eid.strip():
-                append_to = last_eid.strip()
-                # 同回合内存宿主：无 journal 亦可合入（阻塞单人跑完常见）。
-                if last_plan is not None:
-                    host_plan_for_append = last_plan
-                    last_seed = last_graph_seed
-                    if last_seed is not None and append_seed is None:
-                        append_seed = last_seed
-
-    # append_to 仍在：区分同回合合入 vs 跨回合 → prev 链（含上一张仍在后台跑）。
     host_captain_run_id: str | None = None
     if append_to:
         memory_host = host_plan_for_append is not None
@@ -279,66 +194,27 @@ async def resolve_graph_identity(
             _is_live_execution_merge(active, append_to) or memory_host
         )
 
-        if live_merge:
-            # 同回合内存 / 本回合热图：合入同一 eid（不写 prev、不 divert）。
-            if host_plan_for_append is None and active is not None:
-                host_plan_for_append = getattr(active, "live_plan", None)
-            if host_plan_for_append is None:
-                msg = (
-                    f"既有协作图 `{append_to}` 缺少可合并的计划快照（plan_snapshot），"
-                    "无法合入。请新建团队执行。"
-                )
-                return ToolResult(
-                    tool_call_id="",
-                    success=False,
-                    output="",
-                    error=msg,
-                    contract_failure=True,
-                )
-            host_captain_run_id = graph_append.parse_host_captain_run_id(
-                await graph_append.load_host_journal_entries(
-                    (getattr(active, "host_turn_id", None) or "")
-                    if active is not None
-                    else ""
-                )
-            ) or captain_run_id
-        else:
-            # 跨回合（含上一张仍在跑）：验证存在 → 转为 prev，本回合新图。
-            host_mid = await graph_append.resolve_host_message_id(
-                conversation_id=conversation_id or "",
-                execution_id=append_to,
+        if live_merge and host_plan_for_append is None and active is not None:
+            host_plan_for_append = getattr(active, "live_plan", None)
+        if not live_merge or host_plan_for_append is None:
+            msg = (
+                f"既有协作图 `{append_to}` 缺少可合并的计划快照（plan_snapshot），"
+                "无法合入。请新建团队执行。"
             )
-            if not host_mid:
-                live_host = coordination_session.active_coordination(append_to)
-                host_mid = (
-                    (getattr(live_host, "host_turn_id", None) or "").strip()
-                    if live_host is not None
-                    else ""
-                )
-            if not host_mid:
-                msg = (
-                    f"找不到 `{append_to}` 对应的既有协作图。"
-                    '跨回合接续请把 append_to_execution_id 填成 `"latest"`'
-                    "（不要填图 id，引擎会解析到最近一张）；"
-                    "不需要接续则去掉该参数以新建图。"
-                )
-                return ToolResult(
-                    tool_call_id="",
-                    success=False,
-                    output="",
-                    error=msg,
-                    contract_failure=True,
-                )
-            prev_execution_id = append_to
-            append_to = None
-            host_plan_for_append = None
-            append_seed = None
-            logger.info(
-                "delegate.graph_prev",
-                conversation_id=conversation_id or "",
-                prev_execution_id=prev_execution_id,
-                host_message_id=host_mid,
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output="",
+                error=msg,
+                contract_failure=True,
             )
+        host_captain_run_id = graph_append.parse_host_captain_run_id(
+            await graph_append.load_host_journal_entries(
+                (getattr(active, "host_turn_id", None) or "")
+                if active is not None
+                else ""
+            )
+        ) or captain_run_id
 
     # 跨回合首派：机械链回上一张（观测领养的 live 图，或 continue_from / replaces）。
     if (
@@ -393,5 +269,4 @@ async def resolve_graph_identity(
         append_seed=append_seed,
         host_plan_for_append=host_plan_for_append,
         host_captain_run_id=host_captain_run_id,
-        latest_miss_degraded_note=latest_miss_degraded_note,
     )

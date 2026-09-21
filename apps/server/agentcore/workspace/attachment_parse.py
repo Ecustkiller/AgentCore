@@ -6,9 +6,9 @@
 列名 / 行数 / 推断类型 / 样例行，原始数据留在工作区文件。扫描版
 PDF 首版不做 OCR，写入明确降级提示。解析失败不阻塞驻留，回落路径提示。
 
-工作区 ``file_read`` 与附件预解析共用公开核 ``extract_office_file`` /
+工作区 ``read`` 与附件预解析共用公开核 ``extract_office_file`` /
 ``extract_office_bytes``（可杀子进程；墙钟超时 = FAILED / extract_timeout，由
-``file_read`` 收成成功观察信封，不是通道活性挂起；读时默认不写 ``*.md``）。
+``read`` 收成成功观察信封，不是通道活性挂起；读时默认不写 ``*.md``）。
 磁盘后端父进程只 stat，子进程 ``--extract-path`` 打开文件（磁盘摄入 100 MiB）；过桥 Local 仍
 ``read_bytes`` 再 ``extract_office_bytes``（IPC 摄入 25 MiB）。PDF 认 ``start_page`` 开窗。
 ``convert_with_markitdown`` 仅服务非 docx 桶；``preparse_resident`` 仍只服务附件驻留。
@@ -48,7 +48,7 @@ _IS_WINDOWS = sys.platform == "win32"
 _EXTRACT_OUTPUT_ENV = "AGENTCORE_OFFICE_EXTRACT_OUTPUT"
 # 已是文本层：直接 UTF-8 解码；原件本身即工作区可读副本。
 PLAIN_TEXT_EXTENSIONS = frozenset({".txt", ".md", ".markdown", ".html", ".htm"})
-# 大表 / 计算场景：不预解析全表进 prompt；只产列名 / 行数 / 类型 / 样例。``file_read`` 亦不透明抽。
+# 大表 / 计算场景：不预解析全表进 prompt；只产列名 / 行数 / 类型 / 样例。``read`` 亦不透明抽。
 SKIP_EXTENSIONS = frozenset({".xlsx", ".xlsm", ".xls", ".csv", ".tsv"})
 TABLE_EXTENSIONS = SKIP_EXTENSIONS
 
@@ -59,7 +59,7 @@ _SCAN_LARGE_BYTES = 50_000
 _SCAN_LARGE_MIN_ALNUM = 200
 
 # 首轮 prompt 内联上限（字符）。约 6k tokens，给历史/工具/记忆留预算；
-# 全文落在 ``*.md`` 副本，Agent 可用 file_read 续读。多附件时各自独立截断。
+# 全文落在 ``*.md`` 副本，Agent 可用 read 续读。多附件时各自独立截断。
 ATTACHMENT_INLINE_MAX_CHARS = 24_000
 
 # 表格预览：只读到此字节数；样例/列/单元格各自封顶。全量行不进 prompt。
@@ -708,7 +708,7 @@ async def extract_office_bytes(
 
     Skip checks run in-process. Conversion runs in a killable child
     (``sys.executable -m``). Wall-clock timeout is ``extract_timeout`` (an
-    observation for ``file_read``, not channel liveness). Worker must call
+    observation for ``read``, not channel liveness). Worker must call
     ``extract_office_payload``, never this coroutine. Used by channel
     ``LocalWorkspace`` (IPC ingest) and tests that already hold bytes.
     """

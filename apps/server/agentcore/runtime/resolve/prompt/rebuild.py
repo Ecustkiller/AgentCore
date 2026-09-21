@@ -1,8 +1,8 @@
 """Rebuild worker base system prompt without a suspension frame.
 
-Same helpers as :func:`prepare_fresh_turn` / crash-delegate redrive: fresh rules,
-workspace facts, and ``<按需目录>`` from MergedConsultSource — not the CEO chat
-prompt captured on ``turn_started``.
+Same helpers as :func:`prepare_fresh_turn` / crash-delegate redrive: fresh rules
+and ``<按需目录>`` from MergedConsultSource — not the CEO chat prompt captured
+on ``turn_started``. Workspace facts ride the worker envelope, not this string.
 """
 
 from __future__ import annotations
@@ -10,11 +10,6 @@ from __future__ import annotations
 from typing import Any
 
 from agentcore.memory import assemble_turn_rules, default_memory_store
-from agentcore.runtime.context import (
-    build_workspace_context,
-    collect_outlet_inventory,
-    detect_workspace_git,
-)
 from agentcore.runtime.context.consult_sources import build_merged_consult_source_for_user
 from agentcore.runtime.resolve.prompt.compose import (
     assemble_system_prompt,
@@ -23,7 +18,6 @@ from agentcore.runtime.resolve.prompt.compose import (
 from agentcore.runtime.skills import build_system_skill_registry
 from agentcore.tools.builtin import build_worker_registry
 from agentcore.tools.sandbox.exec_languages import resolve_exec_languages
-from agentcore.workspace.desk_empty import desk_is_visibly_empty
 from agentcore.workspace.protocol import WorkspaceBackend
 
 
@@ -43,18 +37,6 @@ async def rebuild_fresh_worker_base_prompt(
         folder_id=folder_id,
     )
     exec_languages = await resolve_exec_languages(backend)
-    workspace_facts = build_workspace_context(
-        backend,
-        desktop_online=desktop_online,
-        exec_languages=exec_languages,
-        permission_axes=permission_axes,
-        git_fact=await detect_workspace_git(backend),
-        outlet_inventory=await collect_outlet_inventory(backend),
-        desk_folder_id=folder_id,
-        desk_folder_label=(getattr(backend, "root_label", None) or "").strip() or None,
-        desk_is_birth=True,
-        desk_visibly_empty=await desk_is_visibly_empty(backend),
-    )
     system_prompt = assemble_system_prompt(
         rules_markdown=rules_markdown,
     )
@@ -78,6 +60,4 @@ async def rebuild_fresh_worker_base_prompt(
     return compose_worker_base_prompt(
         system_prompt,
         on_demand_entries=on_demand_entries,
-        attachment_context="",
-        workspace_context=workspace_facts,
     )

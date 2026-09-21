@@ -13,7 +13,7 @@ MAX_PARALLEL_TOOLS = 5
 # Trade-off — it's a char step, so #events = args_len / STEP and the counter jumps by
 # STEP each tick, *independent of stream speed*:
 #   • smaller → 更跟手 (counter climbs smoothly, feels live) but more SSE events →
-#     more store writes / bubble re-renders, and short calls (a tiny str_replace)
+#     more store writes / bubble re-renders, and short calls (a tiny edit)
 #     emit ticks they don't need;
 #   • larger → cheaper but the number lurches / lags on a long task book.
 # 64 puts a typical DeepSeek arg stream (~150–300 chars/s) at ~3–5 ticks/s — clearly
@@ -30,18 +30,18 @@ FINALIZE_COORDINATION_TOOLS = frozenset({"delegate", "consult", "ask_user"})
 
 # Persist tools still executable on finalize when landing is in play
 # (pinned landing / artifacts / wind_down) — mirrors wind_down intent.
-FINALIZE_PERSIST_TOOLS = frozenset({"file_write", "handoff"})
+FINALIZE_PERSIST_TOOLS = frozenset({"write", "handoff"})
 
 # Investigation + execution names blocked at execute on finalize (by name).
-# ``file_write`` leaves this set when persist finalize is on.
+# ``write`` leaves this set when persist finalize is on.
 FINALIZE_FORBIDDEN_TOOLS = frozenset(
     {
-        "file_read",
+        "read",
         "grep",
         "web_search",
         "web_fetch",
-        "file_write",
-        "str_replace",
+        "write",
+        "edit",
         "run",
     }
 )
@@ -51,5 +51,5 @@ FINALIZE_FORBIDDEN_TOOLS = frozenset(
 # their own lifecycle instead — delegate/revise drive sub-DAGs (each constituent
 # tool call is itself bounded), ask_user waits on the user behind its own checkpoint
 # timeout. A flat ceiling here would wrongly kill a legitimate long wait.
-# FOLDER / BOARD are display groups, not this exemption.
+# FOLDER is a display group, not this exemption.
 TIMEOUT_EXEMPT_FACES = frozenset({ToolFace.ORCHESTRATION})

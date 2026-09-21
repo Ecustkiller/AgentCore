@@ -1,5 +1,5 @@
 /**
- * file_read result footers from the server (`_format_line_window`):
+ * read result footers from the server (`_format_line_window`):
  * `（全文 N 行）` or `（第 a–b 行，共 N 行[；已达行顶|字符顶|未达安全顶，省略 limit 可整读]）`.
  * Title chrome only wants the window range (`42–53 行`), not the file total;
  * the expanded body strips the footer so it isn't a second scroll-to-end label.

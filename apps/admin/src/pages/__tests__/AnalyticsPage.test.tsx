@@ -149,7 +149,7 @@ describe("AnalyticsPage", () => {
     expect(screen.getByText("5 小时窗")).toBeTruthy();
     expect(screen.getByText("本周（UTC 周一）")).toBeTruthy();
     expect(screen.getByText("本月（订阅日 15）")).toBeTruthy();
-    expect(screen.getByText(/不是上游美元用量/)).toBeTruthy();
+    expect(screen.getByText(/不是上游账单或余额/)).toBeTruthy();
     expect(screen.getByText(/costMultiplier/)).toBeTruthy();
     expect(screen.getByText(/会低估/)).toBeTruthy();
     expect(screen.getByText(/≈\$1\.23/)).toBeTruthy();

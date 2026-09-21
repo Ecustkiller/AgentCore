@@ -183,7 +183,7 @@ async def run_retention_sweep() -> dict[str, int]:
             continue
         async with async_session_factory() as session:
             # Clear membership on any remaining (archived) conversations before
-            # the folder row disappears. Soft-pointers (auto desk / boards) via
+            # the folder row disappears. Soft-pointers (auto desk) via
             # the shared fan-out — no user scope (global sweep). The archive
             # provenance flag goes with it: nothing can restore this project now,
             # so a lingering「因项目删除而归档」mark would name a folder that is gone.

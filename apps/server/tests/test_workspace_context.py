@@ -1,7 +1,7 @@
 """Tests for ``<工作区>`` environment-facts injection.
 
 本文件只测事实坐标与「HOW 不进本块」：开场表看不出来的短坐标
-（执行、桌、系统、Git、客户端、缺口、非空挂载、非空约定文档出口），
+（执行、桌、系统、Git、客户端、缺口、非空挂载），
 以及工具名 / 字段名 / 围栏 / ``consult(`` 不进事实层。
 不成对复述 skill / product_help / schema 教学句——那些各有测试所有者。
 空状态不写。沙箱探测失败另起一行。禁止按能力复写成散文。
@@ -19,6 +19,7 @@ from agentcore.runtime.resolve.prompt import (
     compose_ceo_chat_prompt,
     compose_worker_base_prompt,
     render_ceo_turn_envelope,
+    render_worker_turn_envelope,
 )
 from agentcore.tools.builtin import build_ceo_tool_registry
 
@@ -134,10 +135,10 @@ def test_channel_profile_for_turn_drops_desktop_for_members():
     assert web.can_bind_folder is False
 
 
-def test_web_and_missing_header_ceo_registry_omits_host():
-    """Acceptance: web / missing header → no ``host`` on CEO registry (web-safe)."""
+def test_web_and_missing_header_ceo_registry_keeps_host():
+    """DeepSeek frozen tools: web / missing header still list ``host``; execute refuses."""
     web_names = {s.name for s in build_ceo_tool_registry(desktop_online=False).list_all()}
-    assert "host" not in web_names
+    assert "host" in web_names
 
     # Profile wiring: web / None → desktop_online False → same roster.
     assert resolve_channel_profile("web").desktop_online is False
@@ -148,7 +149,7 @@ def test_web_and_missing_header_ceo_registry_omits_host():
             desktop_online=resolve_channel_profile(None).desktop_online
         ).list_all()
     }
-    assert "host" not in missing
+    assert "host" in missing
 
     desktop_names = {
         s.name
@@ -195,7 +196,7 @@ def test_cloud_scratch_facts():
     )
     assert out.startswith("<工作区>")
     assert "执行：云端" in out
-    assert "执行：云端 · 出站：产品网络" in out
+    assert "执行：云端 · 出站：产品网络 · 原件：不能改" in out
     assert "执行：云端沙箱" not in out
     assert "桌：本会话草稿（云端）" in out
     assert "host" not in _gaps(out)  # desktop_online
@@ -208,6 +209,60 @@ def test_cloud_scratch_facts():
     assert "folder_id=" not in out
     _assert_no_capability_restatements(out)
     _assert_how_identifiers_not_in_facts(out)
+
+
+def _system_line(ctx: str) -> str:
+    for line in ctx.splitlines():
+        if line.startswith("系统："):
+            return line
+    return ""
+
+
+def test_cloud_system_line_declares_guest_surface_when_run_on():
+    from agentcore.tools.sandbox.guest_rootfs import CLOUD_GUEST_SURFACE
+
+    out = build_workspace_context(
+        _FakeBackend("server"),
+        desktop_online=True,
+        run_enabled=True,
+    )
+    system = _system_line(out)
+    assert system.startswith("系统：")
+    assert "Linux" in system
+    assert "bash" in system
+    for name in CLOUD_GUEST_SURFACE:
+        assert name in system
+    assert "禁止" not in system
+    assert "consult(" not in out
+    _assert_how_identifiers_not_in_facts(out)
+
+
+def test_cloud_system_line_omits_guest_surface_when_run_off():
+    from agentcore.tools.sandbox.guest_rootfs import CLOUD_GUEST_SURFACE
+
+    out = build_workspace_context(
+        _FakeBackend("server"),
+        desktop_online=True,
+        run_enabled=False,
+    )
+    system = _system_line(out)
+    assert "Linux" in system
+    assert "bash" in system
+    for name in CLOUD_GUEST_SURFACE:
+        assert name not in system
+
+
+def test_local_system_line_does_not_paste_cloud_guest_surface():
+    from agentcore.tools.sandbox.guest_rootfs import format_cloud_guest_surface
+
+    out = build_workspace_context(
+        _FakeBackend("local"),
+        desktop_online=True,
+        run_enabled=True,
+    )
+    system = _system_line(out)
+    assert format_cloud_guest_surface() not in system
+    assert "python3" not in system
 
 
 def test_empty_desk_adds_operational_root_fact():
@@ -322,7 +377,7 @@ def test_local_remote_channel_facts():
         browser_enabled=False,
     )
     assert "执行：用户本机" in out
-    assert "执行：用户本机 · 出站：这台电脑" in out
+    assert "执行：用户本机 · 出站：这台电脑 · 原件：能改" in out
     assert "同一出站" not in out
     assert "请人贴" not in out
     assert "桌：MyProject" in out
@@ -600,7 +655,7 @@ def test_mount_mode_labels_are_capability_facts_not_how():
     out = build_workspace_context(backend, desktop_online=True, run_enabled=False)
     assert "区外：" in out
     assert "`external/desk/`（只能看）" in out
-    assert "`external/org/`（整理）" in out
+    assert "`external/org/`（可拷入、不覆盖）" in out
     assert "`external/home/`（可改原件）" in out
     assert "（只读）" not in out
     assert "（可读写）" not in out
@@ -650,23 +705,29 @@ def test_workspace_facts_follow_resident_core_for_ceo_and_worker():
         include_runtime=False,
     )
     worker = compose_worker_base_prompt(base, workspace_context=facts)
+    worker_env = render_worker_turn_envelope(
+        workspace_context=facts,
+        include_runtime=False,
+    )
     assert "<工作区>\n" not in ceo
     assert "<工作区>\n" in env
-    assert "<工作区>\n" in worker
-    assert "执行：云端" in env and "执行：云端" in worker
-    assert "出站：产品网络" in env and "出站：产品网络" in worker
-    assert "同一出站" not in env and "同一出站" not in worker
-    assert "执行：云端沙箱" not in env and "执行：云端沙箱" not in worker
+    assert "<工作区>\n" not in worker
+    assert "<工作区>\n" in worker_env
+    assert "执行：云端" in env and "执行：云端" in worker_env
+    assert "出站：产品网络" in env and "出站：产品网络" in worker_env
+    assert "同一出站" not in env and "同一出站" not in worker_env
+    assert "执行：云端沙箱" not in env and "执行：云端沙箱" not in worker_env
     assert "<身份>" not in ceo
-    assert worker.index("</运行时>") < worker.index("<工作区>\n")
+    assert "<运行时>" not in worker
     assert "文件：空" in env
     assert env.index("文件：空") < env.index("</工作区>")
     assert facts.count("</工作区>") == 1
     assert env.count("</工作区>") == 1
-    assert worker.count("</工作区>") == 1
+    assert worker_env.count("</工作区>") == 1
     assert env.count("<工作区>\n") == 1
     assert "<工作区文件>" not in env
     assert "文件：空" not in worker
+    assert "文件：空" not in worker_env
     _assert_how_identifiers_not_in_facts(facts)
 
 
@@ -719,7 +780,7 @@ def test_git_unassembled_states_channel_without_enable_steps():
         git_tool_enabled=False,
         git_fact=WorkspaceGitFact(present=True, branch="main"),
     )
-    assert "git" in _gaps(out)
+    assert "git" not in _gaps(out)
     assert "Git：" not in out
     assert "装配启用" not in out
     assert "打开本对话" not in out
@@ -943,32 +1004,15 @@ def test_local_exec_withheld_never_claims_sandbox_probe():
     _assert_no_capability_restatements(out)
 
 
-def test_outlet_inventory_empty_and_named_suffixes():
-    from agentcore.runtime.context.outlet_inventory import OUTLET_DIRS, OutletDirListing
-    from agentcore.workspace.stage_dirs import REVIEWS_DIR
-
-    empty = {d: OutletDirListing() for d in OUTLET_DIRS}
-    empty_out = build_workspace_context(
+def test_workspace_facts_omit_stage_cabinets():
+    out = build_workspace_context(
         _FakeBackend("server"),
         desktop_online=True,
         run_enabled=False,
-        outlet_inventory=empty,
     )
-    assert "约定文档出口" not in empty_out
-    assert "当前为空" not in empty_out
+    assert "过程稿：" not in out
+    assert "调研：" not in out
+    assert "辩论：" not in out
+    assert "审查：" not in out
+    assert "约定文档出口" not in out
 
-    named = {
-        **empty,
-        REVIEWS_DIR: OutletDirListing(names=("协作图审计-架构.md", "协作图审计-渲染链路.md")),
-    }
-    named_out = build_workspace_context(
-        _FakeBackend("server"),
-        desktop_online=True,
-        run_enabled=False,
-        outlet_inventory=named,
-    )
-    assert "（现有：协作图审计-架构.md；协作图审计-渲染链路.md）" in named_out
-    assert "审查：" in named_out
-    assert "调研：" not in named_out
-    assert "约定文档出口" not in named_out
-    assert "记忆注入审计.md" not in named_out

@@ -185,7 +185,7 @@ const ROLE_LABELS: Record<string, string> = {
   member: "队员",
   arena: "辩论",
   title: "标题生成",
-  memory: "记忆整理",
+  memory: "后台整理",
   vision: "视觉读图",
 };
 

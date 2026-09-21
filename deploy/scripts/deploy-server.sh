@@ -4,7 +4,6 @@
 #
 #   git checkout <sha> → pull 镜像 → 起基础设施 → 迁移前 DB 快照 → 迁移前 workspaces/ 快照 →
 #   停 api → alembic upgrade head → schema gate → workspace tree 迁移 →
-#   memory pipeline migrate (contract self-lags one deploy) → project docs 迁移 →
 #   compose up → /readyz → 记 SHA
 #
 # 用法：
@@ -254,16 +253,10 @@ if [[ "$IS_ROLLBACK" -eq 0 ]]; then
   stage "alembic upgrade head"
   dc_oneshot run --rm api python scripts/check_schema_gate.py --live
   stage "schema gate (live)"
-  # 依赖上面回填的 folders.rel_path；必须早于 project docs（它读迁移后的 tree/ 落点）。
+  # 依赖上面回填的 folders.rel_path。
   migrate_step "workspace tree relocation" 2 \
     dc_oneshot run --rm api python scripts/migrate_workspace_tree.py
   stage "workspace tree relocation"
-  # Memory migrate + self-lagged contract (sources cleared on the *next* deploy).
-  dc_oneshot run --rm api python scripts/migrate_memory_pipeline.py
-  stage "memory pipeline migrate/contract (lagged)"
-  migrate_step "project docs migration" 3 \
-    dc_oneshot run --rm api python scripts/migrate_project_docs.py
-  stage "project docs → memory entries"
 else
   warn "回退：跳过 alembic（如 schema 不一致，从 $BACKUP_DIR 手动恢复对齐）"
 fi

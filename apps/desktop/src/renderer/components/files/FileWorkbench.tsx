@@ -66,11 +66,6 @@ import {
   isSharedWithMeFolder,
 } from "@/services/folders";
 import { createDocumentSource } from "@/services/sources/documentSource";
-import {
-  MEMORY_UPDATES_PATH,
-  createMemorySource,
-  parseProjectMemoryFolderId,
-} from "@/services/sources/memorySource";
 import { asReadOnlyFileSource } from "@/services/sources/readOnlyFileSource";
 import {
   createCloudWorkspaceSource,
@@ -82,16 +77,10 @@ import { UNSAVED_CLOSE_COPY } from "@/stores/sidePanel";
 import { FileText, FolderOpen, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-/** Synthetic workspace id every memory leaf's tab lives under — they belong to no real
- * workspace (private per-user data), so they're resolved to {@link createMemorySource}
- * directly (path-aware: one source serves all leaves) and exempted from the "workspace
- * gone → close its tabs" cleanup. */
-const MEMORY_WS = "__memory__";
-
 /** Synthetic workspace id every rule-doc tab lives under — user rules are private per-user
  * documents belonging to no real workspace, resolved to {@link createDocumentSource} directly
  * (path-aware: the tab path IS the doc id) and exempted from the "workspace gone → close its
- * tabs" cleanup, 照 {@link MEMORY_WS}. */
+ * tabs" cleanup. */
 const RULES_WS = "__rules__";
 
 /**
@@ -135,7 +124,6 @@ export function FileWorkbench({
   showMemory,
   focusWsId,
   focusKey,
-  openMemoryLeaf,
   probeLocalScratchHasFiles,
 }: {
   workspaces: WorkspaceInfo[];
@@ -151,14 +139,6 @@ export function FileWorkbench({
    * 嵌套文件夹连同祖先一起展开）。`focusKey` (= navigation key) makes re-focusing the
    * same folder on a later jump fire again. */
   focusWsId?: string | null;
-  /** When navigated here from a对话页「记忆已更新」card deep-link, open this exact memory
-   * leaf as a tab (记忆更新对话内可见 §1.6). Gated on `focusKey` so it fires once per
-   * navigation. Optional `projectId` falls back when `path` does not encode a folder id. */
-  openMemoryLeaf?: {
-    path: string;
-    name: string;
-    projectId?: string | null;
-  } | null;
   focusKey?: string;
   /**
    * Local `conv:` desks appear only when the scratch has user-visible files.
@@ -185,12 +165,7 @@ export function FileWorkbench({
   const [sortBy, setSortBy] = useState<FileSortBy>(() => loadFileSort());
   // 从 /conversations「浏览文件」跳来时高亮的工作区根（1.5s 后消失，呼应对话页的 flash）。
   const [flashWsId, setFlashWsId] = useState<string | null>(null);
-  // 对话卡深链到文件夹条目时，强制展开该文件夹下的 AgentCore（一次性）。
-  const [revealMemoryFolderId, setRevealMemoryFolderId] = useState<
-    string | null
-  >(null);
   const appliedFocusRef = useRef<string | null>(null);
-  const appliedMemoryLeafRef = useRef<string | null>(null);
 
   const conversations = useConversations();
   const folders = useFolders();
@@ -318,25 +293,6 @@ export function FileWorkbench({
     });
   }, []);
 
-  const clearMemoryReveal = useCallback(() => {
-    setRevealMemoryFolderId(null);
-  }, []);
-
-  /** Expand project AgentCore for a deep-linked memory leaf. */
-  const revealMemoryInRail = useCallback(
-    (path: string, projectId?: string | null) => {
-      const folderId = parseProjectMemoryFolderId(path) ?? projectId ?? null;
-      setFilter("");
-      if (!folderId) return;
-      const wsId = `folder:${folderId}`;
-      expandWs(wsId);
-      setRevealMemoryFolderId(folderId);
-      setFlashWsId(wsId);
-      window.setTimeout(() => setFlashWsId(null), 1500);
-    },
-    [expandWs],
-  );
-
   // 拖拽分隔条调左栏宽度：拖动期用窗口级监听 + 锁 body 光标/选区（避免拖过右侧编辑器时选中文本），
   // 松手落盘最终宽度（持久化，下次进页面沿用）。
   const startRailDrag = (e: React.PointerEvent) => {
@@ -369,13 +325,12 @@ export function FileWorkbench({
     });
   };
 
-  // 工作区被删/消失 → 关掉它名下的标签页，并修正激活项。记忆 tab（合成 ws）不属任何工作区，
+  // 工作区被删/消失 → 关掉它名下的标签页，并修正激活项。规则 tab（合成 ws）不属任何工作区，
   // 故豁免，否则它会被立刻清掉。协作桌与自有夹都是 `folder:` ws_id。
   useEffect(() => {
     const liveWsIds = new Set(railWorkspaces.map((w) => w.wsId));
     const live = tabs.filter(
-      (t) =>
-        t.wsId === MEMORY_WS || t.wsId === RULES_WS || liveWsIds.has(t.wsId),
+      (t) => t.wsId === RULES_WS || liveWsIds.has(t.wsId),
     );
     if (live.length === tabs.length) return;
     setTabs(live);
@@ -452,25 +407,6 @@ export function FileWorkbench({
     finishUntitledCreate,
   ]);
 
-  // 对话页「记忆已更新」卡片深链跳来：打开目标记忆叶子的 tab。每个
-  // focusKey（导航键）只应用一次。记忆源与工作区列表无关，故无需等 workspaces 就绪即可打开。
-  // 文件夹叶子额外展开对应文件夹 + ``.agentcore`` 节点；主题叶再展「主题」。
-  useEffect(() => {
-    if (!openMemoryLeaf || !focusKey) return;
-    if (appliedMemoryLeafRef.current === focusKey) return;
-    appliedMemoryLeafRef.current = focusKey;
-    const { path, name, projectId } = openMemoryLeaf;
-    if (path === MEMORY_UPDATES_PATH) return;
-    const key = tabKey(MEMORY_WS, path);
-    setTabs((prev) =>
-      prev.some((t) => tabKey(t.wsId, t.path) === key)
-        ? prev
-        : [...prev, { wsId: MEMORY_WS, path, name }],
-    );
-    setActiveKey(key);
-    revealMemoryInRail(path, projectId);
-  }, [openMemoryLeaf, focusKey, revealMemoryInRail]);
-
   // 每个工作区一个稳定的 FileSource（树与详情共用，按 ws 复用，避免重复构建/反复重载）。
   // N4-A：离线时本地源只读包装；云源仍解析但 UI 灰显（不隐藏）。
   const sourceByWs = useMemo(() => {
@@ -500,11 +436,7 @@ export function FileWorkbench({
     return m;
   }, [railWorkspaces, folders, fsAvailable, offline]);
 
-  // 记忆叶子的路径感知单一源（所有记忆叶子共用一例，按 tab path 解析作用域；与工作区源同构，
-  // 故复用 FileDetail/编辑器）。
-  const memorySource = useMemo(() => createMemorySource(), []);
-
-  // 规则叶子的路径感知单一源（tab path 即文档 id；与记忆源同构，故复用 FileDetail/编辑器）。
+  // 规则叶子的路径感知单一源（tab path 即文档 id；与工作区源同构，故复用 FileDetail/编辑器）。
   const documentSource = useMemo(() => createDocumentSource(), []);
 
   // 名字匹配保留；已展开段也保留（否则按文件名筛时段落被名过滤藏掉，树内过滤无法露出）。
@@ -611,23 +543,17 @@ export function FileWorkbench({
   };
 
   const openEntry = (target: EntryOpenTarget) => {
-    if (target.channel === "memory") {
-      openFile(MEMORY_WS, target.path, target.name);
-    } else {
-      openFile(RULES_WS, target.path, target.name);
-    }
+    openFile(RULES_WS, target.path, target.name);
   };
 
   const closeEntry = (target: EntryOpenTarget) => {
-    const wsId = target.channel === "memory" ? MEMORY_WS : RULES_WS;
-    closeTab(tabKey(wsId, target.path));
+    closeTab(tabKey(RULES_WS, target.path));
   };
 
   const renameEntryTab = (target: EntryOpenTarget, name: string) => {
-    const wsId = target.channel === "memory" ? MEMORY_WS : RULES_WS;
     setTabs((prev) =>
       prev.map((t) =>
-        t.wsId === wsId && t.path === target.path ? { ...t, name } : t,
+        t.wsId === RULES_WS && t.path === target.path ? { ...t, name } : t,
       ),
     );
   };
@@ -674,9 +600,6 @@ export function FileWorkbench({
       ? (folder, indent) => (
           <EntriesSection
             scope={{ kind: "folder", folderId: folder.id }}
-            memoryActivePath={
-              activeTab?.wsId === MEMORY_WS ? activeTab.path : null
-            }
             documentActivePath={
               activeTab?.wsId === RULES_WS ? activeTab.path : null
             }
@@ -694,8 +617,8 @@ export function FileWorkbench({
             openEntry,
           )
       : undefined,
-    revealWorkroomFolderId: revealMemoryFolderId,
-    onWorkroomRevealApplied: clearMemoryReveal,
+    revealWorkroomFolderId: null,
+    onWorkroomRevealApplied: undefined,
   };
 
   const narrowDetail = isNarrow && tabs.length > 0;
@@ -902,7 +825,6 @@ export function FileWorkbench({
                   const key = tabKey(t.wsId, t.path);
                   // 版本 / 软删区面板：挂在真实工作区下的合成 tab，不是文件，故不解析文件源。
                   const wsPanel =
-                    t.wsId === MEMORY_WS ||
                     t.wsId === RULES_WS ||
                     (t.path !== WS_VERSIONS_PATH && t.path !== WS_TRASH_PATH)
                       ? null
@@ -910,11 +832,9 @@ export function FileWorkbench({
                   const panelWsName =
                     railWorkspaceByWsId.get(t.wsId)?.name ?? t.name;
                   const src =
-                    t.wsId === MEMORY_WS
-                      ? memorySource
-                      : t.wsId === RULES_WS
-                        ? documentSource
-                        : (sourceByWs.get(t.wsId) ?? null);
+                    t.wsId === RULES_WS
+                      ? documentSource
+                      : (sourceByWs.get(t.wsId) ?? null);
                   return (
                     <div
                       key={key}

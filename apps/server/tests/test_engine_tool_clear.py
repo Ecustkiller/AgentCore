@@ -25,7 +25,7 @@ from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 from tests.llm_helpers import make_profile_params
 
-CLEARABLE = frozenset({"file_read", "grep", "web_search"})
+CLEARABLE = frozenset({"read", "grep", "web_search"})
 
 
 def test_production_keep_recent_default() -> None:
@@ -36,8 +36,9 @@ def test_production_keep_recent_default() -> None:
     assert frozenset({"host", "run"}) == EXEC_OUTPUT_CLEAR_TOOLS
 
 
-def _read_pair(call_id: str, path: str, result: str, *, tool: str = "file_read") -> list[LLMMessage]:
+def _read_pair(call_id: str, path: str, result: str, *, tool: str = "read") -> list[LLMMessage]:
     """An assistant tool-call round + its tool result, as the loop accumulates them."""
+    arg_key = "path" if tool == "grep" else "file_path"
     return [
         LLMMessage(
             role="assistant",
@@ -45,7 +46,9 @@ def _read_pair(call_id: str, path: str, result: str, *, tool: str = "file_read")
             tool_calls=[
                 ToolCall(
                     id=call_id,
-                    function=ToolCallFunction(name=tool, arguments=json.dumps({"path": path})),
+                    function=ToolCallFunction(
+                        name=tool, arguments=json.dumps({arg_key: path})
+                    ),
                 )
             ],
         ),
@@ -54,11 +57,11 @@ def _read_pair(call_id: str, path: str, result: str, *, tool: str = "file_read")
 
 
 def _read_batch(ids_and_paths: list[tuple[str, str]], result: str) -> list[LLMMessage]:
-    """One assistant message that issued several file_reads in parallel."""
+    """One assistant message that issued several reads in parallel."""
     tool_calls = [
         ToolCall(
             id=call_id,
-            function=ToolCallFunction(name="file_read", arguments=json.dumps({"path": path})),
+            function=ToolCallFunction(name="read", arguments=json.dumps({"file_path": path})),
         )
         for call_id, path in ids_and_paths
     ]
@@ -89,7 +92,7 @@ def _exec_pair(
     ]
 
 
-def _window(n_pairs: int, *, size: int = 200, tool: str = "file_read") -> list[LLMMessage]:
+def _window(n_pairs: int, *, size: int = 200, tool: str = "read") -> list[LLMMessage]:
     msgs: list[LLMMessage] = [LLMMessage(role="user", content="go")]
     for i in range(n_pairs):
         msgs += _read_pair(f"c{i}", f"src/f{i}.py", "X" * size, tool=tool)
@@ -118,7 +121,7 @@ def test_keeps_recent_clears_old():
 
 
 def test_parallel_batch_kept_as_one_round():
-    """One assistant with six file_reads is one keep unit — none of the batch clears."""
+    """One assistant with six reads is one keep unit — none of the batch clears."""
     msgs = [LLMMessage(role="user", content="go")]
     msgs += _read_batch([(f"b{i}", f"src/f{i}.py") for i in range(6)], "X" * 200)
     out = project_cleared_window(msgs, clearable_tools=CLEARABLE, keep_recent=1, min_chars=100)
@@ -210,15 +213,15 @@ def test_idempotent():
 
 
 def test_placeholder_names_the_call():
-    ph = cleared_placeholder("file_read", json.dumps({"path": "src/foo.py"}), 8421)
-    assert "file_read" in ph and "src/foo.py" in ph and "8421" in ph
+    ph = cleared_placeholder("read", json.dumps({"file_path": "src/foo.py"}), 8421)
+    assert "read" in ph and "src/foo.py" in ph and "8421" in ph
     assert "status=content_cleared" in ph
     assert "disk=intact" in ph
     assert "reread=omit_offset_limit" in ph
     assert "非全文" not in ph
-    assert "path='src/foo.py'" in ph
+    assert "file_path='src/foo.py'" in ph
     # deterministic
-    assert ph == cleared_placeholder("file_read", json.dumps({"path": "src/foo.py"}), 8421)
+    assert ph == cleared_placeholder("read", json.dumps({"file_path": "src/foo.py"}), 8421)
 
 
 def test_grep_placeholder_keeps_refetch_invite():
@@ -272,9 +275,9 @@ class _FakeReadTool:
     @property
     def schema(self) -> ToolSchema:
         return ToolSchema(
-            name="file_read",
+            name="read",
             description="read a file",
-            parameters={"type": "object", "properties": {"path": {"type": "string"}}},
+            parameters={"type": "object", "properties": {"file_path": {"type": "string"}}},
             face=ToolFace.FILE,
             approval=ToolApproval.NEVER,
         )
@@ -347,7 +350,7 @@ async def test_loop_no_clear_when_keep_recent_high(monkeypatch):
     assert all(len(m.content or "") == 200 for m in window if m.role == "tool")
 
 
-# ── R1: file_read digest + sticky re-read ───────────────────────────────────
+# ── R1: read digest + sticky re-read ───────────────────────────────────
 
 
 def test_file_read_clear_keeps_structural_summary_under_min_chars():
@@ -373,7 +376,7 @@ def test_file_read_clear_keeps_structural_summary_under_min_chars():
     assert cleared
     for m in cleared:
         assert len(m.content or "") < 200
-        # file_read of the md path should carry a digest when room allows
+        # read of the md path should carry a digest when room allows
         if "docs/spec.md" in (m.content or ""):
             assert "磁盘未截" in (m.content or "")
             assert "非全文" not in (m.content or "")
@@ -559,8 +562,8 @@ def test_build_request_window_does_not_slide_write_args():
                 ToolCall(
                     id="w0",
                     function=ToolCallFunction(
-                        name="file_write",
-                        arguments=json.dumps({"path": "a.md", "content": old}),
+                        name="write",
+                        arguments=json.dumps({"file_path": "a.md", "content": old}),
                     ),
                 )
             ],
@@ -572,9 +575,9 @@ def test_build_request_window_does_not_slide_write_args():
                 ToolCall(
                     id="w1",
                     function=ToolCallFunction(
-                        name="str_replace",
+                        name="edit",
                         arguments=json.dumps(
-                            {"path": "a.md", "old_string": "x", "new_string": new}
+                            {"file_path": "a.md", "old_string": "x", "new_string": new}
                         ),
                     ),
                 )

@@ -11,9 +11,20 @@ an empty stub — a one-line extra tool cannot falsify「vendor keys cache on to
 Hop 4 keeps that table and rewrites one character of ``system``: if append hits
 stay high here too, the vendor ``cache_hit`` field is not a real prefix cache.
 
+A second test asks the cross-user-turn question: product T2 splices the previous
+``[系统提示]`` envelope into history (``opening_ceo_messages``) and appends a new
+envelope only when it differs, plus the new utterance. History body is padded so a system-only hit is
+distinguishable from history reuse. Classification of growth is asserted; vendor
+``cache_hit`` is printed and warned, not asserted.
+
+A third test is the cheap anti-pattern (two hops, ``max_tokens=16``): T2 drops the
+prior envelope. Classification must be ``history_rewrite``; vendor hit is printed,
+not asserted. Do not add window-compact live hops.
+
 Run (apps/server, your own Key — never the production pool)::
 
     AGENTCORE_LIVE_PREFIX_CACHE=1 uv run pytest tests/test_prefix_cache_live.py -q -s
+    AGENTCORE_LIVE_PREFIX_CACHE=1 uv run pytest tests/test_prefix_cache_live.py::test_vendor_prefix_cache_dropped_envelope_logs_history_rewrite -q -s
 
 Credentials: ``eval_credentials()`` (EVAL_DEEPSEEK_* → seeded dev BYOK). Platform
 pool fallback is refused. Rate-limit / auth / empty-wallet skip, they do not fail
@@ -39,9 +50,14 @@ from agentcore.llm.provider.protocol import LLMMessage, LLMRequest
 from agentcore.observability.prefix_cache import (
     BREACH_COLD_CHAIN,
     BREACH_HISTORY_GROWTH,
+    BREACH_HISTORY_REWRITE,
     BREACH_SYSTEM_PROMPT,
     BREACH_TOOLS,
     reset_prefix_cache_state,
+)
+from agentcore.runtime.resolve.prompt.envelope import (
+    TURN_ENVELOPE_FENCE,
+    opening_ceo_messages,
 )
 
 _LIVE_FLAG = "AGENTCORE_LIVE_PREFIX_CACHE"
@@ -105,6 +121,15 @@ async def _live_credentials():
     return byok
 
 
+# Long enough that a system-only hit cannot be mistaken for "history survived".
+_STABLE_USER = ("Prior user turn body for vendor prompt-cache. " * 80).strip()
+_ENV1 = f"{TURN_ENVELOPE_FENCE}\n<运行时>\n当前日期：2026-09-20 UTC\n</运行时>"
+_ENV2 = (
+    f"{TURN_ENVELOPE_FENCE}\n<运行时>\n当前日期：2026-09-20 UTC\n</运行时>\n"
+    "<已登记来源>\n#r1 example.com\n</已登记来源>"
+)
+
+
 def _req(messages: list[LLMMessage], *, model: str, tools: list) -> LLMRequest:
     return LLMRequest(
         messages=messages,
@@ -118,6 +143,19 @@ def _req(messages: list[LLMMessage], *, model: str, tools: list) -> LLMRequest:
         thinking=False,
         retry_patience_seconds=0.0,
     )
+
+
+def _skip_llm_error(exc: LLMError, *, model: str) -> None:
+    bits = [f"upstream {type(exc).__name__}: {exc}", f"model={model}"]
+    details = getattr(exc, "details", None)
+    if isinstance(details, dict):
+        status = details.get("upstream_status")
+        preview = details.get("upstream_body_preview")
+        if status is not None:
+            bits.append(f"status={status}")
+        if preview:
+            bits.append(str(preview)[:800])
+    pytest.skip("; ".join(bits))
 
 
 def _llm_calls(caps: list[dict]) -> list[dict]:
@@ -176,16 +214,7 @@ async def test_vendor_prefix_cache_append_then_tools_mutation():
                 ]
                 await provider.complete(_req(hop4_messages, model=model, tools=promoted))
             except LLMError as exc:
-                bits = [f"upstream {type(exc).__name__}: {exc}", f"model={model}"]
-                details = getattr(exc, "details", None)
-                if isinstance(details, dict):
-                    status = details.get("upstream_status")
-                    preview = details.get("upstream_body_preview")
-                    if status is not None:
-                        bits.append(f"status={status}")
-                    if preview:
-                        bits.append(str(preview)[:800])
-                pytest.skip("; ".join(bits))
+                _skip_llm_error(exc, model=model)
     finally:
         close = getattr(provider, "close", None)
         if close is not None:
@@ -237,3 +266,139 @@ async def test_vendor_prefix_cache_append_then_tools_mutation():
             "vendor cache field may be sticky — do not trust the tools[] result",
             stacklevel=1,
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.live_llm
+@pytest.mark.timeout(180)
+async def test_vendor_prefix_cache_envelope_cross_turn():
+    """Product T2 keeps the prior envelope and only appends the new turn."""
+    creds = await _live_credentials()
+    model = (creds.default_model or "").strip()
+    if not model:
+        pytest.skip("eval credentials have no default_model")
+
+    provider = build_provider(creds)
+    system = _STABLE_SYSTEM
+    user1 = f"{_STABLE_USER}\nReply with the single word ping."
+    user2 = "Reply with the single word pong."
+    cid = f"live-env-product-{uuid.uuid4().hex}"
+
+    turn1 = opening_ceo_messages(
+        system_prompt=system,
+        history=None,
+        turn_envelope=_ENV1,
+        user_content=user1,
+    )
+
+    try:
+        with (
+            log_context(
+                conversation_id=cid,
+                trace_id=new_trace_id(),
+                cost_role=ROLE_CAPTAIN,
+            ),
+            capture_logs() as caps,
+        ):
+            try:
+                hop1 = await provider.complete(_req(turn1, model=model, tools=_TOOL_A))
+                product_t2 = opening_ceo_messages(
+                    system_prompt=system,
+                    history=[
+                        LLMMessage(role="user", content=_ENV1),
+                        LLMMessage(role="user", content=user1),
+                        LLMMessage(role="assistant", content=hop1.content or "ping"),
+                    ],
+                    turn_envelope=_ENV2,
+                    user_content=user2,
+                )
+                await provider.complete(_req(product_t2, model=model, tools=_TOOL_A))
+            except LLMError as exc:
+                _skip_llm_error(exc, model=model)
+    finally:
+        close = getattr(provider, "close", None)
+        if close is not None:
+            await close()
+
+    calls = _llm_calls(caps)
+    assert len(calls) == 2, f"product hops: {len(calls)}"
+
+    assert calls[0]["prefix_breach"] == BREACH_COLD_CHAIN
+    assert calls[1]["prefix_breach"] == BREACH_HISTORY_GROWTH
+
+    t2_hit = int(calls[1].get("cache_hit_tokens") or 0)
+    t2_in = int(calls[1].get("input_tokens") or 0)
+    t1_in = int(calls[0].get("input_tokens") or 0)
+    print(
+        f"vendor envelope: product_t2 hit={t2_hit}/{t2_in} "
+        f"t1_input={t1_in} model={model}"
+    )
+    if t2_hit <= 0:
+        warnings.warn(
+            "vendor reported 0 cache_hit on the keep-envelope append "
+            f"(input_tokens={t2_in}, model={model}); "
+            "threshold / best-effort, not a product classification bug",
+            stacklevel=1,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.live_llm
+@pytest.mark.timeout(90)
+async def test_vendor_prefix_cache_dropped_envelope_logs_history_rewrite():
+    """Two hops, max_tokens=16: dropped prior envelope must log history_rewrite."""
+    creds = await _live_credentials()
+    model = (creds.default_model or "").strip()
+    if not model:
+        pytest.skip("eval credentials have no default_model")
+
+    provider = build_provider(creds)
+    cid = f"live-env-drop-{uuid.uuid4().hex}"
+    user1 = f"{_STABLE_USER}\nReply with the single word ping."
+    turn1 = opening_ceo_messages(
+        system_prompt=_STABLE_SYSTEM,
+        history=None,
+        turn_envelope=_ENV1,
+        user_content=user1,
+    )
+
+    try:
+        with (
+            log_context(
+                conversation_id=cid,
+                trace_id=new_trace_id(),
+                cost_role=ROLE_CAPTAIN,
+            ),
+            capture_logs() as caps,
+        ):
+            try:
+                hop1 = await provider.complete(_req(turn1, model=model, tools=_TOOL_A))
+                dropped_t2 = opening_ceo_messages(
+                    system_prompt=_STABLE_SYSTEM,
+                    history=[
+                        LLMMessage(role="user", content=user1),
+                        LLMMessage(role="assistant", content=hop1.content or "ping"),
+                    ],
+                    turn_envelope=_ENV2,
+                    user_content="Reply with the single word pong.",
+                )
+                await provider.complete(_req(dropped_t2, model=model, tools=_TOOL_A))
+            except LLMError as exc:
+                _skip_llm_error(exc, model=model)
+    finally:
+        close = getattr(provider, "close", None)
+        if close is not None:
+            await close()
+
+    calls = _llm_calls(caps)
+    assert len(calls) == 2, f"dropped-envelope hops: {len(calls)}"
+    assert calls[0]["prefix_breach"] == BREACH_COLD_CHAIN
+    assert calls[1]["prefix_breach"] == BREACH_HISTORY_REWRITE
+    assert calls[1]["tools_changed"] is False
+
+    t2_hit = int(calls[1].get("cache_hit_tokens") or 0)
+    t2_in = int(calls[1].get("input_tokens") or 0)
+    print(
+        f"vendor dropped-envelope: t2 hit={t2_hit}/{t2_in} "
+        f"breach={calls[1]['prefix_breach']} model={model}"
+    )

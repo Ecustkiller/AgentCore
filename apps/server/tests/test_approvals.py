@@ -138,7 +138,7 @@ async def test_gate_authorize_approve_emits_event_pair():
         _resolve_when_ready(reg, "call-1", ApprovalDecision.APPROVE, "conv-1")
     )
     decision = await gate.authorize(
-        tool_name="file_write", tool_call_id="call-1", arguments={"path": "a.txt"}
+        tool_name="write", tool_call_id="call-1", arguments={"file_path": "a.txt"}
     )
     await resolver
 
@@ -168,12 +168,12 @@ async def test_gate_per_tool_timeout_override():
         sink,
         reg,
         timeout_seconds=0.05,
-        timeout_overrides={"file_write": 0.35},
+        timeout_overrides={"write": 0.35},
     )
 
     started = time.monotonic()
     pending = asyncio.create_task(
-        gate.authorize(tool_name="file_write", tool_call_id="fw-1", arguments={"path": "a.md"})
+        gate.authorize(tool_name="write", tool_call_id="fw-1", arguments={"file_path": "a.md"})
     )
     await asyncio.sleep(0.12)
     assert not pending.done()
@@ -201,7 +201,7 @@ def test_approval_settings_default_infinite_wait():
     settings = ApprovalSettings()
     assert settings.approval_timeout_seconds is None
     assert settings.approval_timeout_overrides == {}
-    assert settings.approval_timeout_for("file_write") is None
+    assert settings.approval_timeout_for("write") is None
     assert settings.approval_timeout_for("run") is None
 
 
@@ -213,19 +213,19 @@ async def test_gate_approve_always_skips_second_prompt():
     resolver = asyncio.create_task(
         _resolve_when_ready(reg, "id1", ApprovalDecision.APPROVE_ALWAYS, "conv-1")
     )
-    first = await gate.authorize(tool_name="file_write", tool_call_id="id1", arguments={})
+    first = await gate.authorize(tool_name="write", tool_call_id="id1", arguments={})
     await resolver
     assert first is ApprovalDecision.APPROVE_ALWAYS
 
     _drain(sink)  # clear the first pair
     # Second call to the SAME tool returns immediately, with no new prompt.
-    second = await gate.authorize(tool_name="file_write", tool_call_id="id2", arguments={})
+    second = await gate.authorize(tool_name="write", tool_call_id="id2", arguments={})
     assert second is ApprovalDecision.APPROVE
     assert _drain(sink) == []
 
 
 async def test_approve_always_sweeps_pending_same_tool():
-    """'本轮内都允许' on one file_write retroactively approves the OTHER file_writes
+    """'本轮内都允许' on one write retroactively approves the OTHER writes
     already suspended on the shared gate (parallel workers in local mode), so one
     click clears every pending same-tool prompt; a different tool stays gated.
 
@@ -237,9 +237,9 @@ async def test_approve_always_sweeps_pending_same_tool():
     sink = EventSink()
     gate = _gate(sink, reg)
 
-    # Two file_writes + one run suspended in parallel on the SAME gate.
-    a = asyncio.create_task(gate.authorize(tool_name="file_write", tool_call_id="a", arguments={}))
-    b = asyncio.create_task(gate.authorize(tool_name="file_write", tool_call_id="b", arguments={}))
+    # Two writes + one run suspended in parallel on the SAME gate.
+    a = asyncio.create_task(gate.authorize(tool_name="write", tool_call_id="a", arguments={}))
+    b = asyncio.create_task(gate.authorize(tool_name="write", tool_call_id="b", arguments={}))
     c = asyncio.create_task(
         gate.authorize(tool_name="run", tool_call_id="c", arguments={})
     )
@@ -250,7 +250,7 @@ async def test_approve_always_sweeps_pending_same_tool():
         await asyncio.sleep(0)
     assert len(reg.list_pending("conv-1")) == 3
 
-    # Grant file_write for the turn on call "a".
+    # Grant write for the turn on call "a".
     assert reg.resolve("a", ApprovalDecision.APPROVE_ALWAYS, conversation_id="conv-1")
 
     assert await a is ApprovalDecision.APPROVE_ALWAYS
@@ -275,10 +275,11 @@ async def test_approve_always_files_grants_whole_class():
     sink = EventSink()
     file_ops = frozenset(
         {
-            "file_write",
-            "str_replace",
+            "write",
+            "edit",
             "file_delete",
             "file_batch",
+            "md_export",
         }
     )
     gate = ApprovalGate(
@@ -290,9 +291,9 @@ async def test_approve_always_files_grants_whole_class():
         permission_axes=recipe_to_axes(AutonomyPolicy.CAUTIOUS),
     )
 
-    # A file_write (the clicked card), a parallel str_replace, and a run.
-    w = asyncio.create_task(gate.authorize(tool_name="file_write", tool_call_id="w", arguments={}))
-    r = asyncio.create_task(gate.authorize(tool_name="str_replace", tool_call_id="r", arguments={}))
+    # A write (the clicked card), a parallel edit, and a run.
+    w = asyncio.create_task(gate.authorize(tool_name="write", tool_call_id="w", arguments={}))
+    r = asyncio.create_task(gate.authorize(tool_name="edit", tool_call_id="r", arguments={}))
     x = asyncio.create_task(
         gate.authorize(tool_name="run", tool_call_id="x", arguments={})
     )
@@ -302,19 +303,24 @@ async def test_approve_always_files_grants_whole_class():
         await asyncio.sleep(0)
     assert len(reg.list_pending("conv-1")) == 3
 
-    # Click "allow all file edits" on the file_write card.
+    # Click "allow all file edits" on the write card.
     assert reg.resolve("w", ApprovalDecision.APPROVE_ALWAYS_FILES, conversation_id="conv-1")
     assert await w is ApprovalDecision.APPROVE_ALWAYS_FILES
-    # str_replace (in the class) was swept to APPROVE without its own resolve.
+    # edit (in the class) was swept to APPROVE without its own resolve.
     assert await r is ApprovalDecision.APPROVE
     # run (NOT in the class) is untouched — still gated until resolved.
     assert reg.resolve("x", ApprovalDecision.DENY, conversation_id="conv-1")
     assert await x is ApprovalDecision.DENY
 
-    # A LATER file_delete (also in the class) is now auto-approved, no new prompt.
+    # A LATER file_delete / md_export (also in the class) is now auto-approved, no new prompt.
     _drain(sink)
     later = await gate.authorize(tool_name="file_delete", tool_call_id="d", arguments={})
     assert later is ApprovalDecision.APPROVE
+    assert _drain(sink) == []
+    later_export = await gate.authorize(
+        tool_name="md_export", tool_call_id="e", arguments={}
+    )
+    assert later_export is ApprovalDecision.APPROVE
     assert _drain(sink) == []
     # A LATER run after the earlier deny short-circuits — no second card.
     later_exec = await gate.authorize(tool_name="run", tool_call_id="x2", arguments={})
@@ -379,8 +385,8 @@ async def test_per_call_tool_grant_downgraded_to_one_shot():
 
 
 async def test_per_call_tool_does_not_affect_other_tools_turn_grant():
-    """The per-call exemption is scoped to its tools: a file_write APPROVE_ALWAYS still
-    whitelists file_write for the turn (the existing batch放行 path is unchanged)."""
+    """The per-call exemption is scoped to its tools: a write APPROVE_ALWAYS still
+    whitelists write for the turn (the existing batch放行 path is unchanged)."""
     reg = InteractionRegistry()
     sink = EventSink()
     gate = ApprovalGate(
@@ -393,12 +399,12 @@ async def test_per_call_tool_does_not_affect_other_tools_turn_grant():
     resolver = asyncio.create_task(
         _resolve_when_ready(reg, "w1", ApprovalDecision.APPROVE_ALWAYS, "conv-1")
     )
-    first = await gate.authorize(tool_name="file_write", tool_call_id="w1", arguments={})
+    first = await gate.authorize(tool_name="write", tool_call_id="w1", arguments={})
     await resolver
     assert first is ApprovalDecision.APPROVE_ALWAYS
 
     _drain(sink)
-    second = await gate.authorize(tool_name="file_write", tool_call_id="w2", arguments={})
+    second = await gate.authorize(tool_name="write", tool_call_id="w2", arguments={})
     assert second is ApprovalDecision.APPROVE  # whitelisted for the turn, no new prompt
     assert _drain(sink) == []
 
@@ -434,7 +440,7 @@ async def test_gate_truncates_large_argument_preview():
 
     big = "x" * 5000
     resolver = asyncio.create_task(_resolve_when_ready(reg, "id1", ApprovalDecision.DENY, "conv-1"))
-    await gate.authorize(tool_name="file_write", tool_call_id="id1", arguments={"content": big})
+    await gate.authorize(tool_name="write", tool_call_id="id1", arguments={"content": big})
     await resolver
 
     required = next(e for e in _drain(sink) if e.type is EventType.APPROVAL_REQUIRED)
@@ -518,7 +524,7 @@ class _ScriptedProvider:
 class _GrantableTool:
     """A GRANTABLE stub that records whether it actually executed."""
 
-    def __init__(self, name: str = "file_write") -> None:
+    def __init__(self, name: str = "write") -> None:
         self._name = name
         self.calls = 0
 
@@ -580,7 +586,7 @@ def _profile():
 
 async def test_engine_gates_grantable_tool_runs_on_approve():
     provider = _ScriptedProvider(
-        [[_tool_chunk("file_write", '{"path": "a.txt"}')], [_content_chunk("done")]]
+        [[_tool_chunk("write", '{"file_path": "a.txt"}')], [_content_chunk("done")]]
     )
     tool = _GrantableTool()
     reg = InteractionRegistry()
@@ -609,7 +615,7 @@ async def test_engine_gates_grantable_tool_runs_on_approve():
 
 async def test_engine_gates_grantable_tool_skips_on_deny():
     provider = _ScriptedProvider(
-        [[_tool_chunk("file_write", '{"path": "a.txt"}')], [_content_chunk("ok")]]
+        [[_tool_chunk("write", '{"file_path": "a.txt"}')], [_content_chunk("ok")]]
     )
     tool = _GrantableTool()
     reg = InteractionRegistry()
@@ -641,8 +647,8 @@ async def test_denied_tool_skips_reprompt_on_later_call():
     """After an explicit deny, a later call to the same tool must not re-open a card."""
     provider = _ScriptedProvider(
         [
-            [_tool_chunk("file_write", '{"path": "a.txt"}', call_id="c1")],
-            [_tool_chunk("file_write", '{"path": "b.txt"}', call_id="c2")],
+            [_tool_chunk("write", '{"file_path": "a.txt"}', call_id="c1")],
+            [_tool_chunk("write", '{"file_path": "b.txt"}', call_id="c2")],
             [_content_chunk("done")],
         ]
     )
@@ -694,9 +700,9 @@ async def test_approval_denials_do_not_trip_circuit_breaker():
 
     provider = _RecordingProvider(
         [
-            [_content_chunk("t0"), _tool_chunk("file_write", '{"path": "a"}', call_id="c1")],
-            [_content_chunk("t1"), _tool_chunk("file_write", '{"path": "b"}', call_id="c2")],
-            [_content_chunk("t2"), _tool_chunk("file_write", '{"path": "c"}', call_id="c3")],
+            [_content_chunk("t0"), _tool_chunk("write", '{"file_path": "a"}', call_id="c1")],
+            [_content_chunk("t1"), _tool_chunk("write", '{"file_path": "b"}', call_id="c2")],
+            [_content_chunk("t2"), _tool_chunk("write", '{"file_path": "c"}', call_id="c3")],
             [_content_chunk("done")],
         ]
     )
@@ -723,8 +729,8 @@ async def test_approval_denials_do_not_trip_circuit_breaker():
     await resolver
 
     assert tool.calls == 0
-    # Circuit breaker must NOT remove file_write — denials are governance, not exec fails.
-    assert all("file_write" in offered for offered in provider.offered)
+    # Circuit breaker must NOT remove write — denials are governance, not exec fails.
+    assert all("write" in offered for offered in provider.offered)
     steers = [m.content or "" for m in messages if m.role == "user"]
     assert not any("停用" in s for s in steers)
 
@@ -914,8 +920,8 @@ def test_delegation_grantable_tool_names_includes_execution_and_file_ops():
     assert "code_execute" not in names
     assert "test_run" not in names
     assert "terminal" not in names
-    assert "git" in names
-    assert "file_write" in names
+    assert "git" not in names
+    assert "write" in names
 
 
 async def test_session_file_trust_skips_file_write_under_first_grant():
@@ -936,9 +942,9 @@ async def test_session_file_trust_skips_file_write_under_first_grant():
     )
 
     decision = await gate.authorize(
-        tool_name="file_write",
+        tool_name="write",
         tool_call_id="w-1",
-        arguments={"path": "AgentCore/文档/research/设计.md"},
+        arguments={"file_path": "AgentCore/文档/research/设计.md"},
     )
     assert decision is ApprovalDecision.APPROVE
     assert _drain(sink) == []
@@ -992,20 +998,19 @@ async def test_session_file_trust_still_prompts_git_push():
     )
 
     assert gate.will_prompt(
-        tool_name="git", arguments={"subcommand": "push", "remote": "origin"}
+        tool_name="run", arguments={"command": "git push origin feature/x"}
     )
-    # Local writes still session-trusted under LESS_INTERRUPT.
-    assert not gate.will_prompt(
-        tool_name="git", arguments={"subcommand": "commit", "message": "x"}
-    )
+    from agentcore.runtime.always_confirm import requires_always_confirm
+
+    assert not requires_always_confirm("run", {"command": "git commit -m x"})
 
     resolver = asyncio.create_task(
         _resolve_when_ready(reg, "push-1", ApprovalDecision.APPROVE, "conv-1")
     )
     decision = await gate.authorize(
-        tool_name="git",
+        tool_name="run",
         tool_call_id="push-1",
-        arguments={"subcommand": "push", "remote": "origin"},
+        arguments={"command": "git push origin feature/x"},
     )
     await resolver
     assert decision is ApprovalDecision.APPROVE
@@ -1039,18 +1044,18 @@ async def test_delegation_grant_does_not_cover_git_push():
     )
     gate.grant_delegation("exec-1")
     assert not gate.will_prompt(
-        tool_name="git",
-        arguments={"subcommand": "add", "paths": ["a"]},
+        tool_name="run",
+        arguments={"command": "git add a.py"},
         execution_id="exec-1",
     )
     assert gate.will_prompt(
-        tool_name="git",
-        arguments={"subcommand": "push"},
+        tool_name="run",
+        arguments={"command": "git push"},
         execution_id="exec-1",
     )
     assert gate.will_prompt(
-        tool_name="git",
-        arguments={"subcommand": "create_pr", "title": "x"},
+        tool_name="run",
+        arguments={"command": "gh pr create --title x"},
         execution_id="exec-1",
     )
 
@@ -1085,16 +1090,11 @@ async def test_session_host_trust_still_prompts_package_install():
     # Ordinary Host GRANTABLE action is session-trusted under host=session.
     assert "host" in host_tools
     assert not gate.will_prompt(
-        tool_name="host", arguments={"action": "open_settings", "panel": "sound"}
+        tool_name="host", arguments={"command": "Get-Date"}
     )
-    # Package install still prompts (恒确认).
     assert gate.will_prompt(
         tool_name="host",
-        arguments={
-            "action": "install_package",
-            "manager": "winget",
-            "package_id": "Microsoft.VisualStudioCode",
-        },
+        arguments={"command": "winget install Microsoft.VisualStudioCode"},
     )
 
     resolver = asyncio.create_task(
@@ -1103,11 +1103,7 @@ async def test_session_host_trust_still_prompts_package_install():
     decision = await gate.authorize(
         tool_name="host",
         tool_call_id="pkg-1",
-        arguments={
-            "action": "install_package",
-            "manager": "winget",
-            "package_id": "Microsoft.VisualStudioCode",
-        },
+        arguments={"command": "winget install Microsoft.VisualStudioCode"},
     )
     await resolver
     assert decision is ApprovalDecision.APPROVE
@@ -1133,14 +1129,14 @@ async def test_session_host_trust_still_prompts_package_install():
     d1 = await gate2.authorize(
         tool_name="host",
         tool_call_id="pkg-2",
-        arguments={"action": "install_package", "manager": "brew", "package_id": "git"},
+        arguments={"command": "brew install git"},
     )
     await resolver2
     assert d1 is ApprovalDecision.APPROVE
     assert "host" not in gate2._granted
     assert gate2.will_prompt(
         tool_name="host",
-        arguments={"action": "install_package", "manager": "brew", "package_id": "wget"},
+        arguments={"command": "brew install wget"},
     )
 
 
@@ -1175,7 +1171,7 @@ async def test_session_file_trust_does_not_cover_run():
 
 
 async def test_observe_policy_ignores_session_file_trust():
-    """只观察：文件会话信任关闭，file_write 仍出卡。"""
+    """只观察：文件会话信任关闭，write 仍出卡。"""
     from agentcore.core.types import AutonomyPolicy, recipe_to_axes
     from agentcore.tools.builtin import approval_class_tool_names
 
@@ -1195,9 +1191,9 @@ async def test_observe_policy_ignores_session_file_trust():
         _resolve_when_ready(reg, "w-1", ApprovalDecision.APPROVE, "conv-1")
     )
     decision = await gate.authorize(
-        tool_name="file_write",
+        tool_name="write",
         tool_call_id="w-1",
-        arguments={"path": "docs/x.md"},
+        arguments={"file_path": "docs/x.md"},
     )
     await resolver
     assert decision is ApprovalDecision.APPROVE
@@ -1210,15 +1206,12 @@ def test_host_actions_require_approval_like_git_writes():
 
     schema = HostTool().schema
     assert schema.approval is ToolApproval.NEVER
-    assert not tool_call_requires_approval("host", schema.approval, {"action": "status"})
-    assert not tool_call_requires_approval("host", schema.approval, {"action": "os_log"})
+    assert not tool_call_requires_approval("host", schema.approval, {})
     assert tool_call_requires_approval(
-        "host", schema.approval, {"action": "shell", "command": "echo hi"}
+        "host", schema.approval, {"command": "echo hi"}
     )
     assert tool_call_requires_approval(
-        "host",
-        schema.approval,
-        {"action": "install_package", "manager": "winget", "package_id": "git"},
+        "host", schema.approval, {"command": "winget install Git.Git"}
     )
 
 
@@ -1261,12 +1254,23 @@ def test_will_prompt_matrix_short_circuits_and_force():
     assert gate.will_prompt(tool_name="run", arguments={}) is True
 
     # Session file trust (LESS_INTERRUPT) covers reversible file ops.
-    assert gate.will_prompt(tool_name="file_write", arguments={"path": "docs/x.md"}) is False
-    # Permanent delete still prompts under session file trust.
+    assert gate.will_prompt(tool_name="write", arguments={"file_path": "docs/x.md"}) is False
+    # Leftover permanent still prompts under session file trust (fill-in omits the key).
     assert (
         gate.will_prompt(
             tool_name="file_delete",
             arguments={"path": "tmp.txt", "permanent": True},
+        )
+        is True
+    )
+    assert (
+        gate.will_prompt(
+            tool_name="file_batch",
+            arguments={
+                "operations": [
+                    {"op": "delete", "path": "gone.md", "permanent": True},
+                ]
+            },
         )
         is True
     )
@@ -1293,8 +1297,8 @@ def test_will_prompt_matrix_short_circuits_and_force():
     )
     assert (
         gate.will_prompt(
-            tool_name="file_write",
-            arguments={"path": "docs/x.md"},
+            tool_name="write",
+            arguments={"file_path": "docs/x.md"},
             force=True,
         )
         is True
@@ -1304,5 +1308,5 @@ def test_will_prompt_matrix_short_circuits_and_force():
     gate._granted.add("run")  # noqa: SLF001
     assert gate.will_prompt(tool_name="run", arguments={}) is False
     gate._granted.clear()  # noqa: SLF001
-    gate._denied.add("file_write")  # noqa: SLF001
-    assert gate.will_prompt(tool_name="file_write", arguments={"path": "a"}) is False
+    gate._denied.add("write")  # noqa: SLF001
+    assert gate.will_prompt(tool_name="write", arguments={"file_path": "a"}) is False

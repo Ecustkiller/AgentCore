@@ -64,6 +64,31 @@ describe("createLocalRootSource lazy workspace", () => {
       code: "out_of_root",
     });
   });
+
+  it("listDir hides AgentCore/记忆 like trash", async () => {
+    listDir.mockResolvedValue({
+      ok: true,
+      data: [
+        {
+          relPath: "AgentCore/rules",
+          name: "rules",
+          kind: "dir",
+          size: null,
+          modifiedMs: 1,
+        },
+        {
+          relPath: "AgentCore/记忆",
+          name: "记忆",
+          kind: "dir",
+          size: null,
+          modifiedMs: 1,
+        },
+      ],
+    });
+    const src = createLocalRootSource("r1", "project", "");
+    const kids = await src.listDir("AgentCore");
+    expect(kids.map((n) => n.path)).toEqual(["AgentCore/rules"]);
+  });
 });
 
 describe("createLocalRootSource listFileIndex", () => {
@@ -103,6 +128,27 @@ describe("createLocalRootSource listFileIndex", () => {
       truncated: true,
     });
     expect(listFiles).toHaveBeenCalledWith("r1", { order: "recent" });
+  });
+
+  it("hides AgentCore/记忆 from the file index", async () => {
+    listFiles.mockResolvedValue({
+      ok: true,
+      data: {
+        files: [
+          { relPath: "AgentCore/rules/a.md", name: "a.md", mtimeMs: 1 },
+          { relPath: "AgentCore/记忆", name: "记忆", mtimeMs: 2 },
+          { relPath: "AgentCore/记忆/画像.md", name: "画像.md", mtimeMs: 3 },
+        ],
+        truncated: false,
+      },
+    });
+    const src = createLocalRootSource("r1", "project", "");
+    const listFileIndex = src.listFileIndex;
+    if (listFileIndex == null) throw new Error("expected listFileIndex");
+    await expect(listFileIndex()).resolves.toEqual({
+      files: [{ relPath: "AgentCore/rules/a.md", mtimeMs: 1 }],
+      truncated: false,
+    });
   });
 });
 

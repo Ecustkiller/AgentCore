@@ -84,15 +84,6 @@ vi.mock("@/services/documents", async (importOriginal) => {
   };
 });
 
-vi.mock("@/services/memory", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/memory")>();
-  return {
-    ...actual,
-    getMemoryFile: vi.fn(async () => ({ content: "", version: "v0" })),
-    writeMemoryFile: vi.fn(),
-  };
-});
-
 vi.mock("@/services/skillCatalog", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/services/skillCatalog")>();

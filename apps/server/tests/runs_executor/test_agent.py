@@ -47,9 +47,14 @@ async def test_parallel_workers_complete_with_usage():
     assert all("input" in s.usage for s in res.values())
 
 
-async def test_worker_usage_split_and_cost_priced():
-    # Worker strong tier → DeepSeek V4 Flash (pinned via profile_set; platform default may differ).
-    # Flash Go 尺（谷 7.2×公开价）→ nano-CNY ledger.
+async def test_worker_usage_split_and_cost_priced(monkeypatch):
+    # Worker → DeepSeek Flash (pinned via profile_set). Official CNY, off-peak.
+    from datetime import UTC, datetime
+
+    monkeypatch.setattr(
+        "agentcore.llm.pricing._now_utc",
+        lambda: datetime(2026, 8, 18, 12, 0, tzinfo=UTC),
+    )
     plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
     res = await WaveScheduler().run(
         plan,
@@ -60,10 +65,10 @@ async def test_worker_usage_split_and_cost_priced():
     # The cache split survives into RunState.usage (not collapsed to one input).
     assert state.usage["cache_hit"] == 1_000_000
     assert state.usage["cache_miss"] == 1_000_000
-    # Cost is computed once, in nano-CNY, on the state (Go USD × 7.2).
-    assert state.cost["cached"] == 21_600_000
-    assert state.cost["output"] == 4_320_000_000
-    assert state.cost["total"] == 21_600_000 + 1_080_000_000 + 4_320_000_000
+    # Cost is computed once, in nano-CNY, on the state (official Flash CNY).
+    assert state.cost["cached"] == 20_000_000
+    assert state.cost["output"] == 4_000_000_000
+    assert state.cost["total"] == 20_000_000 + 1_000_000_000 + 4_000_000_000
     assert state.cost["currency"] == "CNY"
     assert state.cost["pricing_source"] == "curated"
 
@@ -854,12 +859,12 @@ async def test_worker_with_explicit_tools_is_not_restricted():
 
 async def test_debater_path_offers_file_write_without_readonly_box():
     """真纯丙·H4：辩手路径不再靠系统只读箱；遗留 tools 声明仍被忽略，写盘可执行。"""
-    legacy_readonly = ("web_search", "web_fetch", "file_read", "file_list", "grep")
+    legacy_readonly = ("web_search", "web_fetch", "read", "file_list", "grep")
 
     plan, errs = build_run_plan(
         [{"role": "正方", "task": "立论取证", "tools": list(legacy_readonly)}],
         id_prefix="debate_r1",
-        valid_tools=set(legacy_readonly) | {"file_write", "escalate"},
+        valid_tools=set(legacy_readonly) | {"write", "escalate"},
     )
     assert errs == []
     assert plan.nodes[0].tools is None
@@ -871,8 +876,8 @@ async def test_debater_path_offers_file_write_without_readonly_box():
     reg.register(fw)
     reg.register(_GrantableTool("escalate"))
     provider = _ToolCallThenContent(
-        "file_write",
-        '{"path":"AgentCore/文档/research/证据笔记.md","content":"should-not-land"}',
+        "write",
+        '{"file_path":"AgentCore/文档/research/证据笔记.md","content":"should-not-land"}',
         "DONE",
     )
     executor = build_agent_executor(

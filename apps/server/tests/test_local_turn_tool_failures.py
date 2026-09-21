@@ -91,17 +91,6 @@ _TRACE = "0123456789abcdef0123456789abcdef"
             None,
             "long_running_redirect",
         ),
-        (
-            "公网 http(s) 摘字请用 web_fetch（检测到：curl -sS https://example.com）。",
-            None,
-            "shell_fetch_redirect",
-        ),
-        ("anything", "shell_fetch_redirect", "shell_fetch_redirect"),
-        (
-            "公网 http(s) 落到工作区请用 download_url（检测到：wget https://example.com/a.bin）。",
-            None,
-            "shell_download_redirect",
-        ),
         ("缺少参数", "schema", "schema"),
         ("这份文件太大", "too_large", "too_large"),
         ("[WinError 5] 拒绝访问", "other", "access_denied"),
@@ -356,7 +345,7 @@ def test_to_record_turn_body_resume_after_seq_filters_only_tool_failures():
         "0": {
             "kind": "tool_call",
             "payload": {
-                "name": "file_read",
+                "name": "read",
                 "success": False,
                 "result": "pause-turn fail",
                 "code": "too_large",
@@ -398,7 +387,7 @@ def test_tool_call_fact_code_schema_is_parse_only_not_all_contract_failure():
 
     too_large = ToolAttempt(
         fingerprint="a",
-        tool_name="file_read",
+        tool_name="read",
         success=False,
         contract_failure=True,
         meta={"code": "too_large"},
@@ -407,7 +396,7 @@ def test_tool_call_fact_code_schema_is_parse_only_not_all_contract_failure():
 
     parse = ToolAttempt(
         fingerprint="b",
-        tool_name="file_read",
+        tool_name="read",
         success=False,
         parse_failure=True,
     )
@@ -415,7 +404,7 @@ def test_tool_call_fact_code_schema_is_parse_only_not_all_contract_failure():
 
     contract_only = ToolAttempt(
         fingerprint="c",
-        tool_name="file_read",
+        tool_name="read",
         success=False,
         contract_failure=True,
     )
@@ -495,7 +484,7 @@ async def test_record_local_turn_logs_tool_failures(monkeypatch):
             {"tool": "web_search", "code": "searxng_unreachable", "message": "down"},
             {"tool": "web_fetch", "code": "other", "message": "HTTP 403 from example.com"},
             {
-                "tool": "file_read",
+                "tool": "read",
                 "code": "other",
                 "message": "Timeout: execution exceeded 30s",
             },
@@ -510,7 +499,7 @@ async def test_record_local_turn_logs_tool_failures(monkeypatch):
                 "message_id": "m1",
                 "count": 3,
                 "codes": ["searxng_unreachable", "other", "other"],
-                "tools": ["web_search", "web_fetch", "file_read"],
+                "tools": ["web_search", "web_fetch", "read"],
                 "messages": [
                     "down",
                     "HTTP 403 from example.com",

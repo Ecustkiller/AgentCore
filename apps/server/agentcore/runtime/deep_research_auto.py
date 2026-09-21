@@ -43,7 +43,7 @@ def may_auto_debate(
     auto_debate_count: int = 0,
     limit: int = AUTO_DEBATE_SESSION_LIMIT,
 ) -> bool:
-    """Always False：调研旗标不代开辩论；开辩须用户点名。
+    """Always False：调研旗标不代开辩论；开辩须用户同意，不主动启动。
 
     保留签名供既有调用；``deep_research_auto`` 只表示调研可自行往下做。
     """

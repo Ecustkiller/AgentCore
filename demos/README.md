@@ -2,7 +2,7 @@
 
 把一次真实运行的事件流做成磁带，之后在**真实桌面前端**准备一条云端会话并按原节奏重放，便于人工录屏。不进产品功能面——靠环境变量开关；关闭后 API 404、命令面板无入口。
 
-> **边界归属**：磁带回放与演示磁带属本目录（`demos/`）；宣传静帧 / 短片 / Remotion 成片属 [`apps/promo/`](/apps/promo/README.md)。
+> **边界归属**：磁带回放与演示磁带属本目录（`demos/`）；静帧 / 短片 / Remotion 片子属 [`apps/video/`](/apps/video/README.md)。
 
 ## 阶段 0 结论（本仓库打样素材）
 
@@ -218,15 +218,15 @@ Seek 语义：目标点之前的事件去延时爆发注入；向后 seek = 重�
 
 开 `DEMO_TAPE_RECORD_ENABLED=true` 跑任何满意的真实回合 → 云端落 `demos/recordings/`、sidecar 本地落 `<userData>/sidecar/recordings/` → `demo_tape_recordings.py` 定位原片 → `demo_tape_export.py --message-id <id> --title … --out ../../demos/tapes/<新名字>.json`（sidecar 录制加 `--recording <绝对路径>`）→ 命令面板自动多出该磁带的准备/立即两条入口。也可：`uv run python scripts/log_timeline.py <conversation_id>`。
 
-Promo 捕获（任意磁带 → `apps/promo/assets/<tape-id>/`）见 [`apps/promo/README.md`](/apps/promo/README.md) §二。导演台全流程在 `full` 子命令：
+真机捕获（任意磁带 → `apps/video/assets/<tape-id>/`）见 [`apps/video/README.md`](/apps/video/README.md) §三。导演台全流程在 `full` 子命令：
 
 ```bash
 cd apps/desktop
-pnpm promo:capture full --tape <tape-id>
-# 等价：node scripts/promo_capture.mjs full --tape <tape-id>
+pnpm video:capture full --tape <tape-id>
+# 等价：node scripts/video_capture.mjs full --tape <tape-id>
 ```
 
-也可用环境变量 `PROMO_TAPE` / `PROMO_OUT`。
+也可用环境变量 `VIDEO_TAPE` / `VIDEO_OUT`（旧名 `PROMO_*` 仍可读）。
 
 ## 边界
 
@@ -234,7 +234,7 @@ pnpm promo:capture full --tape <tape-id>
 - `demos/recordings/` 已 gitignore（原样录制、可能含真实对话内容）；入库素材只放剪辑后的 `demos/tapes/`。
 - 回放 `cost_runs=[]`，尽量不写成本账本。
 - 磁带交互点均已接线：冷路 `checkpoint`（ask_user，落帧 + resume）；leftover `team_preview` / `plan_review` skip；热路 `approval_*`（InteractionRegistry + 热 resolve，回合不收口）。决策均按录制内容续播，不分支。
-- 一盘磁带可含多幕（`turns[]`）：演示者逐条消息推进下一幕；`start` 只自动发第一幕；末幕播完自动解绑。存量单幕盘（顶层 `events`）读时归一为单幕，不改写文件。导出可按序传多个 `--message-id` / `--recording` 拼幕；单 id 用法与产物不变。导演台幕内 seek/章节照常，跨幕导航与 promo 多幕本期不做。
+- 一盘磁带可含多幕（`turns[]`）：演示者逐条消息推进下一幕；`start` 只自动发第一幕；末幕播完自动解绑。存量单幕盘（顶层 `events`）读时归一为单幕，不改写文件。导出可按序传多个 `--message-id` / `--recording` 拼幕；单 id 用法与产物不变。导演台幕内 seek/章节照常，跨幕导航与 video 捕获多幕本期不做。
 - 桌面误绑本地会话 → 发消息走 sidecar，服务端绑定无效。防护：`demo_tape_bind.py` 默认拒绑本地；回放开关开启时 sidecar 对已绑定会话返回显式错误（日志 `demo_tape.sidecar_local_session_bound`）；一键「演示回放」入口本身只建云端会话。
 - `DEMO_TAPE_RECORD_ENABLED` / `DEMO_TAPE_REPLAY_ENABLED` 开启时启动日志会明示 **WatchFiles reload 已关闭**及原因；改代码后需手动重启后端。
 - 入库素材须过脱敏扫描（用户记忆不进 `demos/tapes/`）；不建工具替身层——将来全链路回放若短路有副作用工具，落点在 `execute_tools`（按 `tool_call_id` 用录制 I/O），见执行引擎 §二边界。

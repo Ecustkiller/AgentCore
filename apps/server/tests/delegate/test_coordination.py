@@ -462,7 +462,7 @@ async def test_wait_tool_listens_when_hot_user_pending(monkeypatch):
 
     reg = InteractionRegistry()
     reg.create(
-        "a1", "c-wait", kind=InteractionKind.APPROVAL, payload={"tool_name": "file_write"}
+        "a1", "c-wait", kind=InteractionKind.APPROVAL, payload={"tool_name": "write"}
     )
     monkeypatch.setattr(
         "agentcore.runtime.interaction_orphan.default_interaction_registry",
@@ -475,7 +475,7 @@ async def test_wait_tool_listens_when_hot_user_pending(monkeypatch):
         assert result.success is True
         assert result.error is None
         assert "等你允许" in text
-        assert "file_write" in text
+        assert "write" in text
         assert "听团" in text
         assert "无需处置" not in text
         assert "团队已取消" not in text
@@ -996,20 +996,20 @@ async def test_escalate_routes_to_coordination_queue():
     assert post_escalation_to_coordination(
         run_id="r1",
         role="研究员",
-        kind="scope",
+        reason="scope",
         question="真实需求变了",
         assumption="按原 brief 继续",
     )
     events = session.drain_nowait()
     assert len(events) == 1
     assert events[0].kind is CoordinationEventKind.ESCALATION
-    assert events[0].payload["kind"] == "scope"
+    assert events[0].payload["reason"] == "scope"
     assert events[0].payload["question"] == "真实需求变了"
     # Dedupe: same signal twice → one event.
     assert not post_escalation_to_coordination(
         run_id="r1",
         role="研究员",
-        kind="scope",
+        reason="scope",
         question="真实需求变了",
     )
     assert session.drain_nowait() == []
@@ -1021,7 +1021,7 @@ async def test_escalate_ignored_outside_coordination():
     from agentcore.runtime.coordination.bridge import post_escalation_to_coordination
 
     assert not post_escalation_to_coordination(
-        run_id="r1", kind="normal", question="无人协调"
+        run_id="r1", reason="wait", question="无人协调"
     )
 
 
@@ -1040,7 +1040,7 @@ async def test_coordination_scope_boundary_proceeds():
     state = RunState(
         phase=RunPhase.COMPLETED,
         content="ok",
-        escalations=[{"kind": "scope", "question": "范围偏了", "consumed": False}],
+        escalations=[{"reason": "scope", "question": "范围偏了", "consumed": False}],
     )
     outcome = await hook(BoundaryReason.SCOPE, [node], {"a": state})
     assert outcome is BoundaryOutcome.PROCEED
@@ -2179,10 +2179,8 @@ async def test_wait_still_injects_queued_escalation_despite_pending_arbitration(
             payload={
                 "run_id": "w1",
                 "role": "研究员",
-                "kind": "normal",
+                "reason": "wait",
                 "question": "选 Postgres 还是 MySQL？",
-                "assumption": "暂按 Postgres",
-                "blocking": True,
                 "source": "blocking_arbitrate",
             },
         )
@@ -2198,7 +2196,7 @@ async def test_wait_still_injects_queued_escalation_despite_pending_arbitration(
 
     assert len(msgs) == 1
     text = msgs[0].content or ""
-    assert "阻塞仲裁" in text
+    assert "等拍板" in text
     assert "选 Postgres 还是 MySQL？" in text
     assert "等待团队事件超时" not in text
 
@@ -2240,13 +2238,13 @@ async def test_retired_criteria_kind_still_posts_all_completed_without_host_back
                     "role": "工程师",
                     "task": "修并验绿",
                     "deliverable": {"form": "files"},
-                    "tools": ["file_write", "code_execute", "test_run"],
+                    "tools": ["write", "code_execute", "test_run"],
                 },
                 {
                     "role": "测试",
                     "task": "跑通验证",
                     "deliverable": {"form": "files"},
-                    "tools": ["file_write", "code_execute", "test_run"],
+                    "tools": ["write", "code_execute", "test_run"],
                 },
             ],
             "coordinate": True,
@@ -2304,13 +2302,13 @@ async def test_retired_criteria_kind_wait_drains_without_shortcircuit(monkeypatc
                     "role": "工程师",
                     "task": "修并验绿",
                     "deliverable": {"form": "files"},
-                    "tools": ["file_write", "code_execute", "test_run"],
+                    "tools": ["write", "code_execute", "test_run"],
                 },
                 {
                     "role": "测试",
                     "task": "跑通验证",
                     "deliverable": {"form": "files"},
-                    "tools": ["file_write", "code_execute", "test_run"],
+                    "tools": ["write", "code_execute", "test_run"],
                 },
             ],
             "coordinate": True,

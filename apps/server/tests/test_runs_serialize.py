@@ -52,12 +52,12 @@ def _landed(call_id: str, content: str, *paths: str) -> LLMMessage:
 def test_files_touched_from_transcript_collects_produced_paths_in_order():
     transcript = [
         LLMMessage(role="user", content="建站"),
-        _assistant_call("c1", "file_write", '{"path": "index.html", "content": "<html>"}'),
+        _assistant_call("c1", "write", '{"file_path": "index.html", "content": "<html>"}'),
         _landed("c1", "已写入", "index.html"),
         _assistant_call("c2", "web_search", '{"query": "x"}'),  # produced nothing → ignored
         _tool_result("c2", "搜索结果…"),
         _assistant_call(
-            "c3", "str_replace", '{"path": "index.html", "old_string": "a", "new_string": "b"}'
+            "c3", "edit", '{"file_path": "index.html", "old_string": "a", "new_string": "b"}'
         ),
         _landed("c3", "已替换", "index.html"),
         _assistant_call("c4", "file_move", '{"source": "a.txt", "destination": "docs/b.txt"}'),
@@ -90,7 +90,7 @@ def test_file_products_from_transcript_keeps_kind_and_derived_from():
     from agentcore.runtime.runs.serialize import file_products_from_transcript
 
     transcript = [
-        _assistant_call("c1", "file_write", '{"path": "报告.md", "content": "# 标题"}'),
+        _assistant_call("c1", "write", '{"file_path": "报告.md", "content": "# 标题"}'),
         _landed("c1", "已写入", "报告.md"),
         _assistant_call("c2", "md_export", '{"path": "报告.md", "format": "docx"}'),
         _tool_result(
@@ -115,7 +115,7 @@ def test_landing_write_failure_kind_channel_dead_vs_write_failed():
     from agentcore.runtime.runs.serialize import landing_write_failure_kind
 
     dead = [
-        _assistant_call("c1", "file_write", '{"path": "a.md", "content": "x"}'),
+        _assistant_call("c1", "write", '{"file_path": "a.md", "content": "x"}'),
         _tool_result(
             "c1",
             with_tool_failed_marker(
@@ -150,9 +150,9 @@ def test_files_touched_ignores_prose_receipts_without_self_report():
     re-derives paths from call arguments.
     """
     transcript = [
-        _assistant_call("c1", "file_write", "not valid json"),
+        _assistant_call("c1", "write", "not valid json"),
         _tool_result("c1", "已写入"),
-        _assistant_call("c2", "file_read", '{"path": "x"}'),  # read produces nothing
+        _assistant_call("c2", "read", '{"file_path": "x"}'),  # read produces nothing
         _tool_result("c2", "内容"),
         LLMMessage(role="assistant", content="我已经写好了 report.md"),
     ]
@@ -166,13 +166,13 @@ def test_files_touched_skips_failed_or_denied_file_write():
     from agentcore.runtime.runs.serialize import _TOOL_FAILED_MARKER, _tool_result_failed
 
     transcript = [
-        _assistant_call("c1", "file_write", '{"path": "ghost.md", "content": "x"}'),
+        _assistant_call("c1", "write", '{"file_path": "ghost.md", "content": "x"}'),
         _tool_result("c1", with_tool_failed_marker("工具不在允许列表中，未执行。")),
-        _assistant_call("c2", "file_write", '{"path": "ok.md", "content": "y"}'),
+        _assistant_call("c2", "write", '{"file_path": "ok.md", "content": "y"}'),
         _landed("c2", "已写入 3 字节到 ok.md", "ok.md"),
         _assistant_call("c3", "file_move", '{"source": "a", "destination": "b/out.txt"}'),
         _tool_result("c3", with_tool_failed_marker("未获用户授权，该操作未执行。")),
-        _assistant_call("c4", "file_write", '{"path": "bare.md", "content": "z"}'),
+        _assistant_call("c4", "write", '{"file_path": "bare.md", "content": "z"}'),
         # no tool result → not counted
     ]
     assert files_touched_from_transcript(transcript) == ["ok.md"]
@@ -188,7 +188,7 @@ def _tool_result(call_id: str, content: str) -> LLMMessage:
 
 def test_files_touched_harvests_code_execute_write_back():
     # 间接落盘同一通道: a script's sandbox copy-out paths ride the SAME self-report as
-    # file_write, so a product landed by an executed script is visible to requires_files /
+    # write, so a product landed by an executed script is visible to requires_files /
     # the manifest WITHOUT parsing the fragile「已写回工作区」prose (文件名可含「、」).
     transcript = [
         _assistant_call("c1", "code_execute", '{"code": "make()", "language": "python"}'),
@@ -199,7 +199,7 @@ def test_files_touched_harvests_code_execute_write_back():
 
 def test_files_touched_merges_code_execute_and_file_tools_first_seen_order():
     transcript = [
-        _assistant_call("c1", "file_write", '{"path": "a.txt", "content": "x"}'),
+        _assistant_call("c1", "write", '{"file_path": "a.txt", "content": "x"}'),
         _landed("c1", "已写入", "a.txt"),
         _assistant_call("c2", "code_execute", '{"code": "gen()"}'),
         _landed("c2", "stdout:\n", "b.csv", "a.txt"),
@@ -220,13 +220,13 @@ def test_files_touched_collects_multiple_code_execute_calls():
 
 def test_files_touched_skips_malformed_marker_and_echoed_one():
     # A truncated / malformed marker is skipped (best-effort: 宁可漏账也不臆造产物).
-    # An ECHOED marker (file_read returning a text that itself contains one) is stripped
+    # An ECHOED marker (read returning a text that itself contains one) is stripped
     # by the producer before the engine stamps this call's真实产物 — so nothing a tool
     # merely READ can enter the ledger.
     transcript = [
         _assistant_call("c1", "code_execute", "{}"),
         _tool_result("c1", '<!--agentcore:file_products:[{"path": "broken'),
-        _assistant_call("c2", "file_read", '{"path": "notes.md"}'),
+        _assistant_call("c2", "read", '{"file_path": "notes.md"}'),
         _landed("c2", '正文…<!--agentcore:file_products:[{"path": "ghost.md"}]-->'),
     ]
     assert files_touched_from_transcript(transcript) == []
@@ -321,7 +321,7 @@ def test_escalations_from_transcript_collects_in_call_order():
         _assistant_call(
             "c1",
             "escalate",
-            '{"question": "Postgres 还是 MySQL?", "assumption": "暂用 PG", "blocking": true}',
+            '{"question": "Postgres 还是 MySQL?", "assumption": "暂用 PG", "reason": "wait"}',
         ),
         LLMMessage(role="tool", content="已记录", tool_call_id="c1"),
         _assistant_call("c2", "web_search", '{"query": "x"}'),  # not an escalation
@@ -333,42 +333,38 @@ def test_escalations_from_transcript_collects_in_call_order():
         {
             "question": "Postgres 还是 MySQL?",
             "assumption": "暂用 PG",
-            "blocking": True,
-            "kind": "normal",
+            "reason": "wait",
             "status": "raised",
             "answer": None,
         },
         {
             "question": "目标受众是谁?",
             "assumption": "",
-            "blocking": False,
-            "kind": "normal",
+            "reason": "wait",
             "status": "raised",
             "answer": None,
         },
     ]
 
 
-def test_escalations_from_transcript_marks_scope_and_dep_kinds():
-    # 受监督的波循环: escalate(kind="scope") 职责偏离 and escalate(kind="dep") 依赖缺口
-    # (§2.4 卡在缺输入 X) are BOTH harvested with their kind (the WaveScheduler consumes both
-    # at the reactive boundary); an unknown kind degrades to "normal", a plain escalate defaults.
+def test_escalations_from_transcript_marks_scope_and_dep_reasons():
+    # escalate(reason=scope|dep) harvested as-is; unknown / omitted reason → wait.
     transcript = [
         _assistant_call(
             "c1",
             "escalate",
-            '{"question": "真问题是X不是Y", "assumption": "暂按X", "kind": "scope"}',
+            '{"question": "真问题是X不是Y", "assumption": "暂按X", "reason": "scope"}',
         ),
         _assistant_call(
             "c2",
             "escalate",
-            '{"question": "缺错误返回结构才能写测试", "assumption": "暂按 {code,msg}", "kind": "dep"}',
+            '{"question": "缺错误返回结构才能写测试", "assumption": "暂按 {code,msg}", "reason": "dep"}',
         ),
-        _assistant_call("c3", "escalate", '{"question": "未知档", "kind": "weird"}'),
+        _assistant_call("c3", "escalate", '{"question": "未知档", "reason": "weird"}'),
         _assistant_call("c4", "escalate", '{"question": "普通问题"}'),
     ]
     out = escalations_from_transcript(transcript)
-    assert [e["kind"] for e in out] == ["scope", "dep", "normal", "normal"]
+    assert [e["reason"] for e in out] == ["scope", "dep", "wait", "wait"]
     assert out[0]["question"] == "真问题是X不是Y"
     assert out[1]["question"] == "缺错误返回结构才能写测试"
 
@@ -386,23 +382,23 @@ def test_state_json_round_trips_escalations():
     state = RunState(
         phase=RunPhase.COMPLETED,
         content="x",
-        escalations=[{"question": "q1", "assumption": "a1", "blocking": True}],
+        escalations=[{"question": "q1", "assumption": "a1", "reason": "wait"}],
     )
     restored = state_from_json(state_to_json(state))
-    assert restored.escalations == [{"question": "q1", "assumption": "a1", "blocking": True}]
+    assert restored.escalations == [{"question": "q1", "assumption": "a1", "reason": "wait"}]
 
 
 def test_state_json_round_trips_scope_consumed_escalation():
-    # 受监督的波循环 P5: a scope escalation's ``kind`` AND the scheduler-set ``consumed``
+    # 受监督的波循环 P5: a scope escalation's ``reason`` AND the scheduler-set ``consumed``
     # flag must survive the seed round-trip, so a re-drive does not re-fire a SCOPE boundary
     # already handled (state_from_json/to_json copy the dicts whole — every key rides).
     state = RunState(
         phase=RunPhase.COMPLETED,
         content="A 的产出",
-        escalations=[{"question": "真问题是X", "kind": "scope", "consumed": True}],
+        escalations=[{"question": "真问题是X", "reason": "scope", "consumed": True}],
     )
     restored = state_from_json(state_to_json(state))
-    assert restored.escalations == [{"question": "真问题是X", "kind": "scope", "consumed": True}]
+    assert restored.escalations == [{"question": "真问题是X", "reason": "scope", "consumed": True}]
 
 
 def test_run_final_fact_completed_from_journal_preserves_scope_consumed():
@@ -413,14 +409,14 @@ def test_run_final_fact_completed_from_journal_preserves_scope_consumed():
     state = RunState(
         phase=RunPhase.COMPLETED,
         content="A 的产出",
-        escalations=[{"question": "真问题是X", "kind": "scope", "consumed": True}],
+        escalations=[{"question": "真问题是X", "reason": "scope", "consumed": True}],
     )
     fact = run_final_fact("a", state)
     entry = {"kind": fact.kind, "payload": fact.payload}
     rebuilt = completed_from_journal([entry])
     assert set(rebuilt) == {"a"}
     assert rebuilt["a"].escalations == [
-        {"question": "真问题是X", "kind": "scope", "consumed": True}
+        {"question": "真问题是X", "reason": "scope", "consumed": True}
     ]
 
 

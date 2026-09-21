@@ -679,7 +679,7 @@ async def test_web_fetch_loopback_refusal_survives_dns_rebinding(monkeypatch):
     ],
 )
 async def test_web_fetch_not_a_web_url_reroutes_to_file_read(url: str):
-    """非 http(s)：改道 file_read，不贴收口话术，也不教补 https://。"""
+    """非 http(s)：改道 read，不贴收口话术，也不教补 https://。"""
     result = await WebFetchTool().execute({"url": url}, _ctx())
     err = result.error or ""
 
@@ -687,7 +687,7 @@ async def test_web_fetch_not_a_web_url_reroutes_to_file_read(url: str):
     assert result.metadata.get("code") == "not_a_web_url"
     assert result.metadata.get("policy_failure") is True
     assert "不要再空转外网深读" not in err
-    assert "file_read" in err
+    assert "read" in err
     assert "不要给本参数补 https://" in err
     assert "请补 https" not in err
     assert "加上 https://" not in err
@@ -711,16 +711,16 @@ async def test_web_fetch_not_a_web_url_survives_file_redirect(monkeypatch):
     assert result.metadata.get("code") == "not_a_web_url"
     assert result.metadata.get("policy_failure") is True
     assert "不要再空转外网深读" not in err
-    assert "file_read" in err
+    assert "read" in err
 
 
 def test_web_fetch_schema_routes_workspace_paths_to_file_read():
     schema = WebFetchTool().schema
-    assert "file_read" in schema.description
+    assert "http" in schema.description
     assert "不要补 https://" not in schema.description
     url_desc = schema.parameters["properties"]["url"]["description"]
-    assert "http://" in url_desc and "https://" in url_desc
-    assert "file_read" not in url_desc
+    assert "公网" in url_desc
+    assert "read" not in url_desc
 
 
 @pytest.mark.parametrize(
@@ -807,7 +807,7 @@ async def test_web_fetch_connect_timeout_internal_cancel_is_tool_failure(monkeyp
 
 
 async def test_safe_request_redirect_block_keeps_value_error_contract(monkeypatch):
-    """逐跳拦截仍是 ValueError（download_url 按前缀分支），但带上了拒绝原因。"""
+    """逐跳拦截仍是 ValueError，但带上了拒绝原因。"""
     from agentcore.tools.builtin.web.web_fetch import BlockedRedirectError, _safe_request
 
     async def _blocked(_url: str):
@@ -2499,7 +2499,7 @@ async def test_web_search_empty_long_query_suggests_trim_to_core_words(monkeypat
 
 
 async def test_web_search_hit_receipt_has_no_search_how(monkeypatch):
-    """有命中且未过滤：回执不灌下一招 HOW（when-to-use 在按钮）。"""
+    """有命中且未过滤：回执不灌下一招 HOW（填参合同在 query 参数）。"""
 
     class _Backend:
         async def search(self, query, max_results=5, on_phase=None, *, language=None):
@@ -2695,21 +2695,25 @@ async def test_web_search_rejects_oversized_latin_query_without_backend(monkeypa
 
 
 def test_web_search_schema_documents_query_contract():
-    """契约进 schema：≤12 拉丁词 / ≤48 字 / 书名号·引号豁免。拆分策略在超限回执，不进按钮。"""
+    """query 机械上限进参数；拆分策略在超限回执。该不该搜不进按钮。"""
     schema = WebSearchTool().schema
     assert "max_results" not in schema.parameters["properties"]
-    blob = schema.description + schema.parameters["properties"]["query"]["description"]
+    desc = schema.description
+    query_desc = schema.parameters["properties"]["query"]["description"]
+    blob = desc + query_desc
     assert "max_results" not in blob
-    assert str(_QUERY_LATIN_WORD_LIMIT) in blob  # 拉丁词上限 12
-    assert str(_QUERY_CJK_CHAR_LIMIT) in blob  # 字数上限 48
+    assert str(_QUERY_LATIN_WORD_LIMIT) in query_desc  # 拉丁词上限 12
+    assert str(_QUERY_CJK_CHAR_LIMIT) in query_desc  # 字数上限 48
     assert "加权" not in blob and "折" not in blob  # 折算权重是执行层
-    assert "引号" in blob  # 引号短语豁免
-    assert "书名号" in blob  # 中文专名豁免
-    assert "摘要优先" in blob  # 默认摘要优先基调
+    assert "引号" in query_desc  # 引号短语豁免
+    assert "书名号" in query_desc  # 中文专名豁免
+    assert "才搜" not in desc
+    assert "缺窗口" not in desc
+    assert "摘要优先" not in blob
     assert "搜到 ≠ 可挂来源号" not in blob
-    assert "聚焦查询" not in schema.description
-    assert "补搜" not in schema.description
-    assert "不要一上来并行" not in schema.description
+    assert "聚焦查询" not in desc
+    assert "补搜" not in desc
+    assert "不要一上来并行" not in desc
     assert "规范化" not in blob
     assert "截断" not in blob
     assert "极端过长" not in blob

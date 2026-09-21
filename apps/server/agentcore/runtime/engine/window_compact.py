@@ -315,7 +315,8 @@ def _path_from_args(arguments: str) -> str:
         return ""
     if not isinstance(data, dict):
         return ""
-    raw = data.get("path") or data.get("file_path") or ""
+    # Mixed tools in one fold: read/write/edit use file_path; grep/delete use path.
+    raw = data.get("file_path") or data.get("path") or ""
     if not isinstance(raw, str):
         return ""
     return raw.strip().replace("\\", "/")
@@ -340,6 +341,7 @@ async def maybe_compact_worker_window(
     conversation_id: str,
     user_id: str,
     model_id: str | None,
+    tools: list[dict] | None = None,
 ) -> bool:
     """If due, fold older worker rounds and record a ``window_compact`` fact.
 
@@ -400,6 +402,9 @@ async def maybe_compact_worker_window(
             folded,
             conversation_id=conversation_id,
             user_id=user_id,
+            window=messages,
+            tools=tools,
+            model_id=model_id,
         )
     except Exception as exc:
         _cooldown_until_round[run_id] = round_idx + settings.engine_window_compact_cooldown_rounds
@@ -444,27 +449,49 @@ async def _summarize_worker_fold(
     *,
     conversation_id: str,
     user_id: str,
+    window: Sequence[LLMMessage] | None = None,
+    tools: list[dict] | None = None,
+    model_id: str | None = None,
 ) -> str:
-    """One non-thinking compaction call. ``""`` on skip / timeout / empty."""
+    """One non-thinking compaction call. ``""`` on skip / timeout / empty.
+
+    When ``window`` + ``tools`` are the live ReAct request, reuse that header
+    (append a fenced instruction) and the worker's ``model_id``. Otherwise fall
+    back to the isolated dump.
+    """
     from agentcore.billing.gate import BackgroundLlmSkip, run_compaction_llm
     from agentcore.llm.credentials import LLMCredentials
     from agentcore.llm.factory import build_provider
     from agentcore.llm.model_selection import build_selected_request, select_call
     from agentcore.llm.provider.call_budget import complete_within_budget
     from agentcore.llm.resolve import resolve_turn_model as resolve_user_model
+    from agentcore.runtime.resolve.prompt.envelope import TURN_ENVELOPE_FENCE
 
-    system = worker_compact_system_prompt()
-    payload = render_window_fold(old_summary, folded)
+    live = list(window or ())
+    reuse_header = bool(live and tools)
+    if reuse_header:
+        instruction = (
+            f"{TURN_ENVELOPE_FENCE}\n{worker_compact_system_prompt()}\n\n"
+            f"# 已有滚动摘要\n{old_summary.strip() or '（无，这是本任务的首次压缩）'}\n\n"
+            "较早步骤已在上面的对话里；最近若干轮会保留原文。"
+            "只输出更新后的滚动摘要正文。"
+        )
+        req_messages = [*live, LLMMessage(role="user", content=instruction)]
+    else:
+        req_messages = [
+            LLMMessage(role="system", content=worker_compact_system_prompt()),
+            LLMMessage(role="user", content=render_window_fold(old_summary, folded)),
+        ]
 
     async def _runner(credentials: LLMCredentials) -> str:
-        model = resolve_user_model(credentials)
+        pinned = (model_id or "").strip()
+        model = pinned if reuse_header and pinned else resolve_user_model(credentials)
         provider = build_provider(credentials, purpose="platform_internal")
         request = build_selected_request(
             select_call("compaction", model),
-            [
-                LLMMessage(role="system", content=system),
-                LLMMessage(role="user", content=payload),
-            ],
+            req_messages,
+            tools=list(tools) if reuse_header and tools is not None else None,
+            tool_choice="none" if reuse_header else "auto",
             stream=False,
         )
         try:

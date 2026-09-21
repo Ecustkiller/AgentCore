@@ -86,23 +86,19 @@ export function composeSkillContent(
   applyMode: "always" | "on_demand",
   description: string,
   body: string,
-  offersTools: readonly string[] = [],
 ): string {
   const desc = description.replace(/\s+/g, " ").trim();
   const apply = applyMode === "always" ? "always" : "on_demand";
-  const offers = normalizeOfferTools(offersTools);
   const lines = [`apply: ${apply}`];
   if (desc) lines.push(`description: ${desc}`);
-  if (offers.length) lines.push(`offers_tools: ${offers.join(", ")}`);
   return `---\n${lines.join("\n")}\n---\n${body.replace(/^\r?\n/, "")}`;
 }
 
 export function composeOnDemandSkillContent(
   description: string,
   body: string,
-  offersTools: readonly string[] = [],
 ): string {
-  return composeSkillContent("on_demand", description, body, offersTools);
+  return composeSkillContent("on_demand", description, body);
 }
 
 export function skillBodyFromContent(content: string): string {
@@ -135,30 +131,6 @@ export function parseOffersTools(content: string): string[] {
     .replace(/^\s*offers_tools\s*:\s*/i, "")
     .replace(/\s+#.*$/, "");
   return normalizeOfferTools(raw.split(/[,，、]/));
-}
-
-export interface BindableToolOption {
-  id: string;
-  label: string;
-}
-
-export function bindableToolOptions(
-  tools: { name: string; resident: boolean; summary?: string }[],
-  connectors: { id: string; name: string }[] = [],
-): BindableToolOption[] {
-  const builtin = tools
-    .filter((tool) => !tool.resident)
-    .map((tool) => ({
-      id: tool.name,
-      label: (tool.summary || tool.name).trim() || tool.name,
-    }));
-  const mcp = connectors
-    .filter((server) => server.id.trim())
-    .map((server) => ({
-      id: server.id,
-      label: (server.name || server.id).trim() || server.id,
-    }));
-  return [...builtin, ...mcp];
 }
 
 function splitFrontmatter(

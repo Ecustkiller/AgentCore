@@ -294,6 +294,9 @@ async def test_go_windows_usd_estimate_prices_peak_and_off_peak_separately(
         peak_at = week_start + timedelta(hours=2)
     if off_at < week_start:
         off_at = week_start + timedelta(hours=12)
+    # Peak hours are weekdays only (official DeepSeek / Go).
+    if peak_at.weekday() >= 5:
+        peak_at = week_start + timedelta(hours=2)
 
     await _seed_call(
         session_factory,

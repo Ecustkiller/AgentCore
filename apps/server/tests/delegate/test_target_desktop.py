@@ -86,6 +86,8 @@ def test_task_structurally_requires_write_desk():
     assert task_structurally_requires_write_desk(
         {"deliverable": {"artifact_dir": "docs"}}
     ) is True
+    assert task_structurally_requires_write_desk({"artifacts": ["a.py"]}) is True
+    assert task_structurally_requires_write_desk({"artifacts": []}) is False
 
 
 def test_resolve_bare_chat_write_scope():
@@ -101,9 +103,9 @@ def test_resolve_bare_chat_write_scope():
         resolve_bare_chat_write_scope(
             target_folder_id=None,
             session_folder_id=None,
-            base_write_scope="explore_memory",
+            base_write_scope="none",
         )
-        == "explore_memory"
+        == "none"
     )
     assert (
         resolve_bare_chat_write_scope(
@@ -125,7 +127,7 @@ def test_resolve_bare_chat_write_scope():
         resolve_bare_chat_write_scope(
             target_folder_id="new-desk",
             session_folder_id="birth",
-            base_write_scope="explore_memory",
+            base_write_scope="none",
             turn_created_folder_ids={"new-desk"},
         )
         == "project"
@@ -134,16 +136,16 @@ def test_resolve_bare_chat_write_scope():
         resolve_bare_chat_write_scope(
             target_folder_id="birth",
             session_folder_id="birth",
-            base_write_scope="explore_memory",
+            base_write_scope="none",
             turn_created_folder_ids={"new-desk"},
         )
-        == "explore_memory"
+        == "none"
     )
     assert (
         resolve_bare_chat_write_scope(
             target_folder_id="new-desk",
             session_folder_id=None,
-            base_write_scope="explore_memory",
+            base_write_scope="none",
             turn_created_folder_ids={"new-desk"},
         )
         == "project"
@@ -161,7 +163,7 @@ def test_resolve_bare_chat_write_scope():
         resolve_bare_chat_write_scope(
             target_folder_id=None,
             session_folder_id=None,
-            base_write_scope="explore_memory",
+            base_write_scope="none",
             allow_local_scratch_write=True,
         )
         == "project"
@@ -527,7 +529,7 @@ async def test_apply_target_desktop_switches_backend_and_memory():
     )
 
     async def _fake_rebuild(**_kwargs):
-        return "TARGET_PROMPT"
+        return "TARGET_PROMPT", ""
 
     with (
         patch(
@@ -862,7 +864,7 @@ async def test_apply_target_desktop_allows_second_local_root():
     )
 
     async def _fake_rebuild(**_kwargs):
-        return "LOCAL_B_PROMPT"
+        return "LOCAL_B_PROMPT", ""
 
     with (
         patch(
@@ -924,7 +926,7 @@ async def test_apply_target_desktop_mixed_local_and_cloud():
     )
 
     async def _fake_rebuild(**_kwargs):
-        return "CLOUD_PROMPT"
+        return "CLOUD_PROMPT", ""
 
     with (
         patch(
@@ -1010,10 +1012,10 @@ async def test_apply_target_desktop_sidecar_strips_cloud_exec_tools(
     )
     worker_tools = ToolRegistry()
     worker_tools.register(_NamedTool("run"))
-    worker_tools.register(_NamedTool("file_read"))
+    worker_tools.register(_NamedTool("read"))
 
     async def _fake_rebuild(**_kwargs):
-        return "CLOUD_PROMPT"
+        return "CLOUD_PROMPT", ""
 
     with (
         patch(
@@ -1045,7 +1047,7 @@ async def test_apply_target_desktop_sidecar_strips_cloud_exec_tools(
 
     names = set(applied.worker_tools.names)
     assert "run" not in names
-    assert "file_read" in names
+    assert "read" in names
     assert "run" in set(worker_tools.names)
 
 
@@ -1081,10 +1083,10 @@ async def test_apply_target_desktop_cloud_api_keeps_exec_when_sandbox_healthy(
     )
     worker_tools = ToolRegistry()
     worker_tools.register(_NamedTool("run"))
-    worker_tools.register(_NamedTool("file_read"))
+    worker_tools.register(_NamedTool("read"))
 
     async def _fake_rebuild(**_kwargs):
-        return "CLOUD_PROMPT"
+        return "CLOUD_PROMPT", ""
 
     with (
         patch(
@@ -1116,7 +1118,7 @@ async def test_apply_target_desktop_cloud_api_keeps_exec_when_sandbox_healthy(
 
     names = set(applied.worker_tools.names)
     assert "run" in names
-    assert "file_read" in names
+    assert "read" in names
 
 
 class _ProvisionDesk:
@@ -1177,10 +1179,10 @@ async def test_apply_target_desktop_provisions_before_execution_class(
     )
     worker_tools = ToolRegistry()
     worker_tools.register(_NamedTool("run"))
-    worker_tools.register(_NamedTool("file_read"))
+    worker_tools.register(_NamedTool("read"))
 
     async def _fake_rebuild(**_kwargs):
-        return "CLOUD_PROMPT"
+        return "CLOUD_PROMPT", ""
 
     with (
         patch(
@@ -1214,7 +1216,7 @@ async def test_apply_target_desktop_provisions_before_execution_class(
     assert target.ready is True
     names = set(applied.worker_tools.names)
     assert "run" in names
-    assert "file_read" in names
+    assert "read" in names
 
 
 @pytest.mark.asyncio
@@ -1240,10 +1242,10 @@ async def test_apply_target_desktop_strips_run_when_provision_fails(
     )
     worker_tools = ToolRegistry()
     worker_tools.register(_NamedTool("run"))
-    worker_tools.register(_NamedTool("file_read"))
+    worker_tools.register(_NamedTool("read"))
 
     async def _fake_rebuild(**_kwargs):
-        return "CLOUD_PROMPT"
+        return "CLOUD_PROMPT", ""
 
     with (
         patch(
@@ -1277,7 +1279,7 @@ async def test_apply_target_desktop_strips_run_when_provision_fails(
     assert target.ready is False
     names = set(applied.worker_tools.names)
     assert "run" not in names
-    assert "file_read" in names
+    assert "read" in names
 
 
 def test_auto_cloud_desk_name_takes_name_shaped_title():

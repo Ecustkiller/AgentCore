@@ -194,7 +194,7 @@ class WaveScheduler:
           ``should_stop`` (partial map, un-run tail LEFT OUT for a resume). Three
           reasons fire it:
           • ``SCOPE`` (偏离信号 / 自底向上反应臂) — a COMPLETED node flagged a 职责/范围
-            deviation (``escalate kind=scope``) while not-yet-run downstream remains; the
+            deviation (``escalate reason=scope``) while not-yet-run downstream remains; the
             CEO re-steers the un-run tail. Fires once per signal (surfacing marks it
             consumed), no live user needed.
           No hook ⇒ all markers inert (a scope escalation just rides to synthesis);
@@ -534,8 +534,8 @@ class WaveScheduler:
                         self._propagate_cancel_skip(plan, run_id, skipped, dispatched)
 
                 # 反应臂边界 (受监督的波循环 SCOPE arm / 自底向上反应臂): a COMPLETED node
-                # flagged a 职责/范围 deviation (escalate kind=scope) OR a 依赖缺口·卡在缺输入
-                # (escalate kind=dep, §2.4 变·worker 的「拉」). Once in-flight work has drained
+                # flagged a 职责/范围 deviation (escalate reason=scope) OR a 依赖缺口·卡在缺输入
+                # (escalate reason=dep, §2.4 变·worker 的「拉」). Once in-flight work has drained
                 # (quiescent) and not-yet-run downstream remains, yield to the CEO/lead — it reads
                 # the signal + the node's output and re-steers (scope) / replan(add)s a producer
                 # (dep) for the un-run tail. Each signal fires ONCE: surfacing it marks it consumed,
@@ -553,7 +553,7 @@ class WaveScheduler:
                             state = completed.get(node.run_id)
                             if state is not None:
                                 for e in state.escalations:
-                                    if e.get("kind") in ("scope", "dep"):
+                                    if e.get("reason") in ("scope", "dep"):
                                         e["consumed"] = True
                         if outcome is BoundaryOutcome.ABORT:
                             aborted = True
@@ -620,7 +620,7 @@ class WaveScheduler:
             # run that produced them, not this resumed slice).
             escalations = sum(len(s.escalations) for s in ran)
             scope_escalations = sum(
-                1 for s in ran for e in s.escalations if e.get("kind") == "scope"
+                1 for s in ran for e in s.escalations if e.get("reason") == "scope"
             )
             metrics_sink.append(
                 BatchMetrics(
@@ -709,7 +709,7 @@ class WaveScheduler:
         completed: Mapping[str, RunState],
     ) -> list[RunSpec]:
         """COMPLETED nodes carrying an unconsumed reactive-boundary escalation — a 职责/范围
-        deviation (``escalate kind=scope``) OR a 依赖缺口·卡在缺输入 (``escalate kind=dep``,
+        deviation (``escalate reason=scope``) OR a 依赖缺口·卡在缺输入 (``escalate reason=dep``,
         §2.4) — the SCOPE boundary's triggers (自底向上反应臂). Both ride the SAME boundary:
         the CEO/lead re-steers (scope) or replan(add)s a producer (dep) for the un-run tail.
         A consumed signal (already surfaced at a prior boundary) is skipped, so each yields the
@@ -722,7 +722,7 @@ class WaveScheduler:
             if state is None or state.phase is not RunPhase.COMPLETED:
                 continue
             if any(
-                e.get("kind") in ("scope", "dep") and not e.get("consumed")
+                e.get("reason") in ("scope", "dep") and not e.get("consumed")
                 for e in state.escalations
             ):
                 ready.append(node)

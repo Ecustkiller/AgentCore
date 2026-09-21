@@ -10,7 +10,7 @@ P0–P1（均已落地）：types + harness + 确定性 Check + seed_lint + runn
 （``lint`` / ``run routing|core|compare`` / ``prompt`` / ``calibrate`` / ``observe``）+
 LLMJudge（语义打分）+ milestone 覆盖裁判 + 成对裁判（团队 vs 单体）+ 相对基线观测
 （``observe.py``，翻转方向区分方差/单方向变差，不当硬门）+ kappa 校准回路 + MAST 字段聚合。
-裁判被评口径 = ``judged_text``（聊天 ``content`` + 终版 ``artifacts``，末次 file_write）；
+裁判被评口径 = ``judged_text``（聊天 ``content`` + 终版 ``artifacts``，末次 write）；
 多评委可选 ``EnsemblePairwiseJudge``（``EVAL_JUDGE_ENSEMBLE``）。
 真跑为本地自愿、不挡 PR；gold-set 人工核验（kappa 门，``cases/gold/labels.json``）。
 

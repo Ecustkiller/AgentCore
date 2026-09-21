@@ -22,11 +22,8 @@ import { scheduleAccountRulesMemoryRefresh } from "@/services/refreshAccountRule
 /** Cloud-documents convention root name (§5.0). ≠ local disk `~/Documents/AgentCore`. */
 export const AGENTCORE_ROOT_NAME = "AgentCore";
 
-/** Legacy rules directory under the convention root (server still parents new rules here). */
-export const RULES_DIR_NAME = "规则";
-
-/** Legacy memory directory under the convention root (AI-maintained notes). */
-export const MEMORY_DIR_NAME = "记忆";
+/** User-owned rules directory under the convention root (server parents new rules here). */
+export const RULES_DIR_NAME = "rules";
 
 /**
  * User-facing injection mode (§5.4 / 目标形态). API may still store other values;
@@ -180,8 +177,9 @@ export function listDocuments(
 
 /**
  * Flat list of inject-able **entries** for one scope (global when `folderId` is null).
- * Walks `AgentCore/{规则,记忆}/` (and one nested level) plus leftover top-level docs.
- * Does **not** group by `role` — UI partitions by scope only.
+ * Walks `AgentCore/rules/` (and one nested level) plus leftover top-level docs.
+ * Does **not** group by `role` — UI partitions by scope only. The retired
+ * `AgentCore/记忆` dir is not listed.
  */
 export async function listScopeEntries(
   folderId: string | null = null,
@@ -211,10 +209,7 @@ export async function listScopeEntries(
             takeDoc(kid);
             return;
           }
-          if (
-            kid.kind !== "folder" ||
-            (kid.name !== RULES_DIR_NAME && kid.name !== MEMORY_DIR_NAME)
-          ) {
+          if (kid.kind !== "folder" || kid.name !== RULES_DIR_NAME) {
             return;
           }
           const leaves = await listDocuments(kid.id);
@@ -237,7 +232,7 @@ export async function listScopeEntries(
   return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, "zh"));
 }
 
-/** Account-layer `AgentCore/规则/` children: 夹 + one level of documents. */
+/** Account-layer `AgentCore/rules/` children: 夹 + one level of documents. */
 export async function listAccountPromptTree(): Promise<{
   rulesDirId: string | null;
   folders: DocumentNode[];
@@ -350,7 +345,7 @@ export function getDocument(id: string): Promise<DocumentDetail> {
 
 /**
  * Create a user-owned entry in a scope (`folderId` null = global).
- * Server still parents under `AgentCore/规则/` until role 三分 is removed.
+ * Server still parents under `AgentCore/rules/` until role 三分 is removed.
  */
 export function createRuleDocument(
   name: string,
@@ -376,7 +371,7 @@ export function createRuleDocument(
     });
 }
 
-/** User-made 夹 under `AgentCore/规则/` (`role=rule` + `kind=folder`). */
+/** User-made 夹 under `AgentCore/rules/` (`role=rule` + `kind=folder`). */
 export function createRuleFolder(name: string): Promise<DocumentNode> {
   return api
     .post<DocumentNodeWire>("/v1/documents", {

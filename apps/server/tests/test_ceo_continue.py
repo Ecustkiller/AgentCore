@@ -582,29 +582,13 @@ async def test_continue_ceo_rebuilds_worker_base_not_chat_prompt(monkeypatch):
 
     backend = SimpleNamespace(location="server")
     monkeypatch.setattr(
-        rebuild_mod, "collect_outlet_inventory", AsyncMock(return_value=())
-    )
-    monkeypatch.setattr(
-        rebuild_mod, "desk_is_visibly_empty", AsyncMock(return_value=False)
-    )
-    monkeypatch.setattr(
         rebuild_mod, "assemble_turn_rules", AsyncMock(return_value="")
     )
     monkeypatch.setattr(
         rebuild_mod, "resolve_exec_languages", AsyncMock(return_value=())
     )
     monkeypatch.setattr(
-        rebuild_mod, "detect_workspace_git", AsyncMock(return_value=None)
-    )
-    monkeypatch.setattr(
-        rebuild_mod, "build_workspace_context", lambda *_a, **_k: ""
-    )
-    monkeypatch.setattr(
         "agentcore.memory.rules_injection.load_on_demand_user_rules",
-        AsyncMock(return_value=[]),
-    )
-    monkeypatch.setattr(
-        "agentcore.memory.injection.load_memory_topics",
         AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(

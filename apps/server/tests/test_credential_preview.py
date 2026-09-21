@@ -54,7 +54,7 @@ async def test_build_keys_preview_line_from_backend():
             return "ALPHA=1\nBETA=two\n"
 
     line = await build_keys_preview_line(
-        _Backend(), tool_name="file_read", arguments={"path": ".env"}
+        _Backend(), tool_name="read", arguments={"file_path": ".env"}
     )
     assert "ALPHA" in line and "BETA" in line
     assert "two" not in line
@@ -68,13 +68,13 @@ async def test_build_keys_preview_line_soft_fails():
 
     assert (
         await build_keys_preview_line(
-            _Backend(), tool_name="file_read", arguments={"path": ".env"}
+            _Backend(), tool_name="read", arguments={"file_path": ".env"}
         )
         == ""
     )
     assert (
         await build_keys_preview_line(
-            object(), tool_name="file_read", arguments={"path": "README.md"}
+            object(), tool_name="read", arguments={"file_path": "README.md"}
         )
         == ""
     )
@@ -88,16 +88,16 @@ async def test_build_keys_preview_ignores_non_ask_paths():
     assert (
         await build_keys_preview_line(
             _Backend(),
-            tool_name="file_read",
-            arguments={"path": ".env.example"},
+            tool_name="read",
+            arguments={"file_path": ".env.example"},
         )
         == ""
     )
     assert (
         await build_keys_preview_line(
             _Backend(),
-            tool_name="file_read",
-            arguments={"path": "id_rsa"},
+            tool_name="read",
+            arguments={"file_path": "id_rsa"},
         )
         == ""
     )
@@ -105,7 +105,7 @@ async def test_build_keys_preview_ignores_non_ask_paths():
         await build_keys_preview_line(
             _Backend(),
             tool_name="web_search",
-            arguments={"path": ".env"},
+            arguments={"file_path": ".env"},
         )
         == ""
     )
@@ -118,7 +118,7 @@ async def test_preview_line_never_embeds_dotenv_values():
             return "API_KEY=sk-live-should-never-leak\nREGION=us-east-1\n"
 
     line = await build_keys_preview_line(
-        _Backend(), tool_name="file_read", arguments={"path": ".env"}
+        _Backend(), tool_name="read", arguments={"file_path": ".env"}
     )
     assert line.startswith("键名预览（无值")
     assert "API_KEY" in line and "REGION" in line

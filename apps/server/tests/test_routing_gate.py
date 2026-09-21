@@ -29,7 +29,7 @@ def test_execution_layer_tool_failure_continues():
 
 def test_write_report_yuequan_does_not_scheme_escalate():
     """样本根因：报告含「越权」不得 → CONTRACT → wire scope → UI 职责偏离。"""
-    attempts = [ToolAttempt("fp1", "file_write", success=True)]
+    attempts = [ToolAttempt("fp1", "write", success=True)]
     outputs = [
         "# 审计报告\n发现上游步骤存在越权写最终交付物的风险，建议复核权限边界。"
     ]
@@ -43,16 +43,16 @@ def test_write_report_yuequan_does_not_scheme_escalate():
 def test_scheme_flavored_tool_outputs_do_not_escalate():
     """弱内容词扫不得产 scheme_escalation（契约 / 矛盾 / 职责 / 缺输入）。"""
     cases = [
-        ("file_write", False, "继续执行会破坏对外契约 / 改接口契约，超出权限"),
-        ("str_replace", True, "需求矛盾：无法同时满足 A 与 B"),
-        ("str_replace", False, "卡在缺输入：依赖不存在，还没人产出"),
-        ("file_write", True, "职责偏离：真正该做的是改文档而非改代码"),
-        ("str_replace", False, "this is the wrong scope for the worker"),
-        ("str_replace", True, "these requirements contradict each other; cannot ship both"),
-        ("file_write", False, "this is a breaking change to the api contract"),
-        ("file_write", False, "that is beyond my authority"),
-        ("file_write", False, "违反接口契约，接口不兼容"),
-        ("file_write", False, "this change is out of scope for the worker"),
+        ("write", False, "继续执行会破坏对外契约 / 改接口契约，超出权限"),
+        ("edit", True, "需求矛盾：无法同时满足 A 与 B"),
+        ("edit", False, "卡在缺输入：依赖不存在，还没人产出"),
+        ("write", True, "职责偏离：真正该做的是改文档而非改代码"),
+        ("edit", False, "this is the wrong scope for the worker"),
+        ("edit", True, "these requirements contradict each other; cannot ship both"),
+        ("write", False, "this is a breaking change to the api contract"),
+        ("write", False, "that is beyond my authority"),
+        ("write", False, "违反接口契约，接口不兼容"),
+        ("write", False, "this change is out of scope for the worker"),
     ]
     for tool, success, text in cases:
         attempts = [ToolAttempt("fp1", tool, success=success)]
@@ -63,7 +63,7 @@ def test_scheme_flavored_tool_outputs_do_not_escalate():
 
 def test_corpus_and_coordination_tools_stay_silent():
     for name in (
-        "file_read",
+        "read",
         "grep",
         "web_search",
         "web_fetch",
@@ -80,7 +80,7 @@ def test_corpus_and_coordination_tools_stay_silent():
 def test_bare_contradict_and_mixed_failures_stay_execution():
     attempts = [
         ToolAttempt("fp1", "code_execute", success=False),
-        ToolAttempt("fp2", "file_write", success=False),
+        ToolAttempt("fp2", "write", success=False),
     ]
     outputs = [
         "Traceback (most recent call last):\nFileNotFoundError: No such file",
@@ -106,23 +106,22 @@ def test_classify_problem_never_scheme_from_free_text():
     assert classify_problem("completely opaque gibberish xyz") is ProblemLayer.EXECUTION
 
 
-def test_signals_wire_kind_contract_maps_to_normal_not_scope():
-    """若仍构造 CONTRACT 信号，wire kind 诚实为 normal，不得占职责偏离。"""
+def test_signals_wire_contract_does_not_occupy_scope():
+    """若仍构造 CONTRACT 信号，不得占职责偏离；gate_kind 保留。"""
     signal = EscalationSignal(
         layer=ProblemLayer.SCHEME,
         kind=EscalationKind.CONTRACT,
         question="继续执行可能改动接口契约",
         evidence="越权",
-        tool_name="file_write",
+        tool_name="write",
         source="escalation_gate",
     )
     payloads = signals_as_dicts([signal])
-    assert payloads[0]["kind"] == "normal"
+    assert "reason" not in payloads[0]
     assert payloads[0]["gate_kind"] == "contract"
-    assert payloads[0]["kind"] != "scope"
 
 
-def test_signals_wire_kind_contradiction_maps_to_normal_not_scope():
+def test_signals_wire_contradiction_does_not_occupy_scope():
     signal = EscalationSignal(
         layer=ProblemLayer.SCHEME,
         kind=EscalationKind.CONTRADICTION,
@@ -130,12 +129,12 @@ def test_signals_wire_kind_contradiction_maps_to_normal_not_scope():
         source="escalation_gate",
     )
     payloads = signals_as_dicts([signal])
-    assert payloads[0]["kind"] == "normal"
+    assert "reason" not in payloads[0]
     assert payloads[0]["gate_kind"] == "contradiction"
 
 
-def test_signals_wire_kind_explicit_scope_still_scope():
-    """结构化 escalate(kind=scope) 同源语义：SCOPE 仍占 wire scope。"""
+def test_signals_wire_explicit_scope_still_scope():
+    """结构化 escalate(reason=scope) 同源语义：SCOPE 仍占 wire reason。"""
     signal = EscalationSignal(
         layer=ProblemLayer.SCHEME,
         kind=EscalationKind.SCOPE,
@@ -143,11 +142,11 @@ def test_signals_wire_kind_explicit_scope_still_scope():
         source="escalate_tool",
     )
     payloads = signals_as_dicts([signal])
-    assert payloads[0]["kind"] == "scope"
+    assert payloads[0]["reason"] == "scope"
     assert payloads[0]["gate_kind"] == "scope"
 
 
-def test_signals_wire_kind_dep_still_dep():
+def test_signals_wire_dep_still_dep():
     signal = EscalationSignal(
         layer=ProblemLayer.SCHEME,
         kind=EscalationKind.DEP,
@@ -155,5 +154,5 @@ def test_signals_wire_kind_dep_still_dep():
         source="escalate_tool",
     )
     payloads = signals_as_dicts([signal])
-    assert payloads[0]["kind"] == "dep"
+    assert payloads[0]["reason"] == "dep"
     assert payloads[0]["gate_kind"] == "dep"

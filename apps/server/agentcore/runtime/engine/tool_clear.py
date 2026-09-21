@@ -25,14 +25,14 @@ Design — a PURE projection, **not** a mutation of the canonical window:
 
 Investigation clear = the run's ``investigation_tools`` (NEVER + FILESYSTEM /
 SEARCH / RESEARCH) past ``keep_recent`` **assistant rounds** (not N calls) and
-≥ ``min_chars``. A ReAct round that issued several ``file_read`` in parallel
+≥ ``min_chars``. A ReAct round that issued several ``read`` in parallel
 keeps the whole batch until that round falls out — same unit as write-args
 clear. Exec clear = ``EXEC_OUTPUT_CLEAR_TOOLS`` on a separate pass. Never
-cleared: ``file_write`` / interaction cards / steers / assistant / system.
+cleared: ``write`` / interaction cards / steers / assistant / system.
 
-R1 (file_read): complete views (footer ``（全文 N 行）``) stay — clearing them
+R1 (read): complete views (footer ``（全文 N 行）``) stay — clearing them
 made models treat a context digest as a truncated file. Windowed / grep /
-search results still collapse. Cleared ``file_read`` stubs are structured
+search results still collapse. Cleared ``read`` stubs are structured
 (path / content_cleared / disk=intact / reread=omit_offset_limit) plus an
 optional structural digest (no LLM).
 """
@@ -44,15 +44,16 @@ import re
 
 from agentcore.llm.provider.protocol import LLMMessage
 
-# Last non-empty line of a complete file_read view (`_format_line_window`).
+# Last non-empty line of a complete read view (`_format_line_window`).
 _COMPLETE_FILE_FOOTER = re.compile(r"^（全文 \d+ 行）$")
 FILE_READ_DIGEST_STRUCTURE = "【结构摘录·磁盘未截】 "
 FILE_READ_DIGEST_PREVIEW = "【摘录·磁盘未截】 "
 
 # Argument keys, in priority order, that identify WHICH call was cleared.
+# Distinct tools use distinct keys (read/write/edit → file_path; grep/delete → path).
 _HINT_KEYS = (
-    "path",
     "file_path",
+    "path",
     "query",
     "url",
     "pattern",
@@ -97,14 +98,14 @@ def _key_arg(arguments: str) -> str:
 
 
 def _path_from_arguments(arguments: str) -> str:
-    """Normalize ``path`` / ``file_path`` from tool-call args (empty on failure)."""
+    """Normalize ``file_path`` from a ``read`` call (empty on failure)."""
     try:
         data = json.loads(arguments) if arguments else {}
     except (json.JSONDecodeError, TypeError, ValueError):
         return ""
     if not isinstance(data, dict):
         return ""
-    raw = data.get("path") or data.get("file_path") or ""
+    raw = data.get("file_path") or ""
     if not isinstance(raw, str):
         return ""
     return raw.strip().replace("\\", "/")
@@ -134,7 +135,7 @@ def cleared_placeholder(
     ``already_executed``: exec-family stdout (host / run). The command
     already ran; the pointer must not invite a re-issue just to recover text.
 
-    ``file_read`` stubs are structured (path / content_cleared / disk=intact /
+    ``read`` stubs are structured (path / content_cleared / disk=intact /
     reread=omit_offset_limit) so the model re-reads the whole file from disk.
     """
     hint = _key_arg(arguments)
@@ -145,11 +146,11 @@ def cleared_placeholder(
             "已从上下文窗口移除以节省 token；"
             "该调用已发生，勿仅为回看而重跑（长驻新日志用 run action=read）。]"
         )
-    if tool_name == "file_read":
+    if tool_name == "read":
         path = _path_from_arguments(arguments)
-        path_part = f" path={path!r}" if path else ""
+        path_part = f" file_path={path!r}" if path else ""
         return (
-            f"{_CLEARED_PREFIX}: file_read{path_part} "
+            f"{_CLEARED_PREFIX}: read{path_part} "
             f"chars={original_len} status=content_cleared disk=intact "
             "reread=omit_offset_limit]"
         )
@@ -161,7 +162,7 @@ def cleared_placeholder(
 
 
 def structural_file_read_summary(path: str, content: str, *, max_chars: int) -> str | None:
-    """Deterministic digest of a cleared ``file_read`` body (no LLM).
+    """Deterministic digest of a cleared ``read`` body (no LLM).
 
     Aligns with ``structural_write_summary`` (class/id / selectors / headings…).
     When no structure is found, returns a short head preview; returns ``None`` when
@@ -196,7 +197,7 @@ def cleared_tool_content(
     summary_max_chars: int,
     already_executed: bool = False,
 ) -> str:
-    """Pointer (+ optional ``file_read`` digest) replacing a cleared tool body.
+    """Pointer (+ optional ``read`` digest) replacing a cleared tool body.
 
     Hard invariant: ``len(result) < min_chars`` so the stub is never re-cleared
     (idempotent projection / prefix-cache). Exec-family stubs never append a digest.
@@ -207,7 +208,7 @@ def cleared_tool_content(
     )
     if (
         already_executed
-        or tool_name != "file_read"
+        or tool_name != "read"
         or summary_max_chars <= 0
         or min_chars <= 0
     ):
@@ -241,7 +242,7 @@ def project_cleared_window(
 
     ``keep_recent`` counts assistant **rounds** that issued a completed clearable
     call (write-args clear uses the same unit). A parallel batch of six
-    ``file_read`` in one assistant message is one round: all six stay until that
+    ``read`` in one assistant message is one round: all six stay until that
     round falls out. ``keep_recent=0`` collapses every qualifying result.
 
     Returns the SAME list object unchanged when nothing qualifies (a short turn with
@@ -254,7 +255,7 @@ def project_cleared_window(
     Idempotent: a pointer (optionally + digest) is below ``min_chars`` and so is
     never re-cleared, hence ``project(project(x)) == project(x)``.
 
-    ``summary_max_chars``: only ``file_read`` may append a digest; ``0`` = pointer only
+    ``summary_max_chars``: only ``read`` may append a digest; ``0`` = pointer only
     (rollback knob). Grep / web_search stay pointer-only.
     """
     if not clearable_tools or keep_recent < 0:
@@ -286,7 +287,7 @@ def project_cleared_window(
             continue
         if len(message.content or "") < min_chars:
             continue
-        if name == "file_read" and _is_complete_file_read_view(message.content or ""):
+        if name == "read" and _is_complete_file_read_view(message.content or ""):
             continue
         clearable.append((index, assistant_index))
 

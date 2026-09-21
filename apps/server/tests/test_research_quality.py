@@ -15,7 +15,6 @@ from agentcore.runtime.runs.research_quality import (
     academic_usable_citation_count,
     brief_may_satisfy_body_floor,
     collect_evidence_deficit_gaps,
-    deliverable_is_report_delivery,
     has_landed_prose_artifact,
     is_academic_usable_url,
     literature_evidence_deficit_hit,
@@ -35,27 +34,11 @@ _PROSE_BODY = "# 报告\n\n" + ("这是实质正文段落。" * 50)
 _SKELETON_BODY = "# 报告\n\n## 一\n\n## 二\n\n<!-- OUTLINE -->\n"
 
 
-def test_deliverable_is_report_delivery_structured_or():
-    """Report-post predicate: gates / citation / dossier paths; not bare form=files."""
-    from agentcore.workspace.stage_dirs import DEBATE_DIR, RESEARCH_DIR, REVIEWS_DIR
-
-    assert deliverable_is_report_delivery(
-        Deliverable(artifacts=[f"{REVIEWS_DIR}/审校.md"])
-    )
-    assert deliverable_is_report_delivery(
-        Deliverable( artifacts=[f"{RESEARCH_DIR}/报告.md"])
-    )
-    assert deliverable_is_report_delivery(
-        Deliverable( artifacts=[f"{DEBATE_DIR}/纪要.md"])
-    )
-    # Bare repair/build files — not a report post.
-    assert not deliverable_is_report_delivery(
-        Deliverable( artifacts=["src/foo.py"])
-    )
-    assert not deliverable_is_report_delivery(None)
-    assert not deliverable_is_report_delivery(
-        Deliverable()
-    )
+def test_cabinet_path_no_longer_marks_report_delivery():
+    """``reviews/`` / ``research/`` 路径不再抬 report_delivery 闸。"""
+    assert plan_is_literature_report_delivery(
+        [Deliverable(artifacts=["AgentCore/文档/reviews/审校.md"])]
+    ) is False
 
 
 def _ctx(tmp_path: Path, **kwargs) -> ToolContext:
@@ -90,7 +73,6 @@ def test_long_form_audit_does_not_scan_task_free_text():
 
 def test_paper_parallel_merge_discipline_constant():
     from agentcore.runtime.runs.research_quality import (
-        DEFAULT_RESEARCH_REPORT_ARTIFACT,
         PAPER_PARALLEL_MERGE_DISCIPLINE,
         research_report_main_artifact,
     )
@@ -98,7 +80,7 @@ def test_paper_parallel_merge_discipline_constant():
     assert "单主文件" in PAPER_PARALLEL_MERGE_DISCIPLINE
     assert "合并责任" in PAPER_PARALLEL_MERGE_DISCIPLINE
     assert "建站" in PAPER_PARALLEL_MERGE_DISCIPLINE  # 明示不误伤多产物
-    assert research_report_main_artifact(None) == DEFAULT_RESEARCH_REPORT_ARTIFACT
+    assert research_report_main_artifact(None) == ""
     assert research_report_main_artifact("paper/thesis.md") == "paper/thesis.md"
     assert research_report_main_artifact("\\drafts\\a.md") == "drafts/a.md"
 
@@ -351,7 +333,7 @@ async def test_handoff_allows_empty_body_when_only_skeleton_landed(tmp_path: Pat
 
 @pytest.mark.asyncio
 async def test_handoff_prose_landed_survives_replace_empty_body(tmp_path: Path):
-    """生产路径：多轮 replace + file_write 置位后，下一轮空 body handoff 应成功。"""
+    """生产路径：多轮 replace + write 置位后，下一轮空 body handoff 应成功。"""
     assert len(_PROSE_BODY) >= 400
     base = _ctx(
         tmp_path,
@@ -361,7 +343,7 @@ async def test_handoff_prose_landed_survives_replace_empty_body(tmp_path: Path):
     write_round = replace(base, round_content_chars=12)
     write_ctx = replace(write_round)
     written = await FileWriteTool().execute(
-        {"path": "miro-research.md", "content": _PROSE_BODY}, write_ctx
+        {"file_path": "miro-research.md", "content": _PROSE_BODY}, write_ctx
     )
     assert written.success is True
     assert write_ctx.landed_artifact_kinds.get("miro-research.md") == "prose"
@@ -382,7 +364,7 @@ async def test_handoff_skeleton_write_after_replace_still_handoffs(tmp_path: Pat
 )
     write_ctx = replace(replace(base, round_content_chars=0))
     written = await FileWriteTool().execute(
-        {"path": "outline.md", "content": _SKELETON_BODY}, write_ctx
+        {"file_path": "outline.md", "content": _SKELETON_BODY}, write_ctx
     )
     assert written.success is True
     assert base.landed_artifact_kinds.get("outline.md") == "skeleton"
@@ -406,7 +388,7 @@ async def test_write_marks_landed_files(tmp_path: Path):
     ctx = _ctx(tmp_path)
     assert ctx.has_landed_files is False
     result = await FileWriteTool().execute(
-        {"path": "a.md", "content": "hello"}, ctx
+        {"file_path": "a.md", "content": "hello"}, ctx
     )
     assert result.success is True
     assert ctx.has_landed_files is True
@@ -472,7 +454,7 @@ def test_plan_is_literature_report_delivery_binds_reviews_not_role_name():
                 },
             },
         ]
-    )
+    ) is False
     assert plan_is_literature_report_delivery(
         [
             {"role": "方向专员", "task": "摸底兼容"},
@@ -507,7 +489,6 @@ def test_academic_usable_url_and_citation_count():
 
 def test_collect_evidence_deficit_gaps_combinable_triggers():
     from agentcore.runtime.runs.types import Deliverable, RunPhase, RunState
-    from agentcore.workspace.stage_dirs import RESEARCH_PREFIX, REVIEWS_PREFIX
 
     nodes = [
         RunSpec(
@@ -515,14 +496,14 @@ def test_collect_evidence_deficit_gaps_combinable_triggers():
             role="撰稿人",
             task="写",
             deliverable=Deliverable(
-                artifacts=[f"{RESEARCH_PREFIX}报告.md"]),
+                artifacts=["notes/报告.md"]),
         ),
         RunSpec(
             run_id="review",
             role="学术审校员",
             task="审",
             deliverable=Deliverable(
-                artifacts=[f"{REVIEWS_PREFIX}审校报告.md"])),
+                artifacts=["notes/审校报告.md"])),
     ]
     # Adequate → no gap
     ok = {
@@ -540,7 +521,6 @@ def test_collect_evidence_deficit_gaps_combinable_triggers():
     assert hit is False
     assert bits == []
 
-    # Junk citations only
     junk = {
         "write": RunState(
             phase=RunPhase.COMPLETED,
@@ -551,12 +531,8 @@ def test_collect_evidence_deficit_gaps_combinable_triggers():
             ]),
         "review": RunState(phase=RunPhase.COMPLETED, content="ok"),
     }
-    gaps = collect_evidence_deficit_gaps(nodes, junk)
-    assert len(gaps) == 1
-    assert gaps[0]["reason"] == "evidence_deficit"
-    assert "几乎无学术可用源" in gaps[0]["description"]
+    assert collect_evidence_deficit_gaps(nodes, junk) == []
 
-    # Structured seam only (academic cites present — still trips on search true source)
     stamped_writer = RunState(
         phase=RunPhase.COMPLETED,
         content="成稿",
@@ -569,34 +545,8 @@ def test_collect_evidence_deficit_gaps_combinable_triggers():
         "write": stamped_writer,
         "review": RunState(phase=RunPhase.COMPLETED, content="ok"),
     }
-    gaps2 = collect_evidence_deficit_gaps(nodes, stamped)
-    assert gaps2 and gaps2[0]["reason"] == "evidence_deficit"
-    assert "结构化证据差" in gaps2[0]["description"]
-
-    # Compat: legacy evidence_deficit stamp still trips
-    legacy_writer = RunState(
-        phase=RunPhase.COMPLETED,
-        content="成稿",
-        citations=[{"url": "https://arxiv.org/abs/1"}])
-    legacy_writer.evidence_meta = {"evidence_deficit": True}
-    gaps3 = collect_evidence_deficit_gaps(
-        nodes,
-        {
-            "write": legacy_writer,
-            "review": RunState(phase=RunPhase.COMPLETED, content="ok"),
-        })
-    assert gaps3 and gaps3[0]["reason"] == "evidence_deficit"
-
-    # Sticky attr path (executor copies RetrievalBudgetState.evidence_gap → state)
-    sticky = RunState(
-        phase=RunPhase.COMPLETED,
-        content="成稿",
-        citations=[{"url": "https://arxiv.org/abs/1"}])
-    sticky.evidence_gap = True
-    gaps4 = collect_evidence_deficit_gaps(
-        nodes,
-        {"write": sticky, "review": RunState(phase=RunPhase.COMPLETED, content="ok")})
-    assert gaps4 and gaps4[0]["reason"] == "evidence_deficit"
+    assert collect_evidence_deficit_gaps(nodes, stamped) == []
+    assert literature_evidence_deficit_hit(nodes, stamped) == (False, [])
 
 
 def test_stamp_retrieval_evidence_gap_copies_sticky_budget(tmp_path: Path):
@@ -624,9 +574,8 @@ def test_stamp_retrieval_evidence_gap_copies_sticky_budget(tmp_path: Path):
 
 
 def test_transcript_web_search_evidence_gap_triggers_deficit():
-    """web_search tool JSON with evidence_gap + academic_literature → 结构化降档信号。"""
+    """web_search tool JSON with evidence_gap no longer keys a reviews/ literature gate."""
     from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
-    from agentcore.workspace.stage_dirs import RESEARCH_PREFIX, REVIEWS_PREFIX
 
     nodes = [
         RunSpec(
@@ -634,14 +583,14 @@ def test_transcript_web_search_evidence_gap_triggers_deficit():
             role="撰稿人",
             task="写",
             deliverable=Deliverable(
-                artifacts=[f"{RESEARCH_PREFIX}报告.md"]),
+                artifacts=["notes/报告.md"]),
         ),
         RunSpec(
             run_id="review",
             role="学术审校员",
             task="审",
             deliverable=Deliverable(
-                artifacts=[f"{REVIEWS_PREFIX}审校报告.md"])),
+                artifacts=["notes/审校报告.md"])),
     ]
     transcript = [
         LLMMessage(
@@ -665,35 +614,15 @@ def test_transcript_web_search_evidence_gap_triggers_deficit():
         content="成稿",
         citations=[{"url": "https://arxiv.org/abs/1"}],
         transcript=transcript)
-    gaps = collect_evidence_deficit_gaps(
+    assert collect_evidence_deficit_gaps(
         nodes,
-        {"write": writer, "review": RunState(phase=RunPhase.COMPLETED, content="ok")})
-    assert gaps and gaps[0]["reason"] == "evidence_deficit"
-    assert "结构化证据差" in gaps[0]["description"]
+        {"write": writer, "review": RunState(phase=RunPhase.COMPLETED, content="ok")},
+    ) == []
 
 
 def test_named_review_without_files_not_elevated():
-    """名叫审校但未声明 files 不再被抬契约；声明 reviews/ 才算审校座。"""
+    """名叫审校但未声明 files 不再被抬契约。"""
     from agentcore.runtime.runs.builder import build_run_plan
-    from agentcore.runtime.runs.research_quality import (
-        INDEPENDENT_REVIEW_REPORT_DISCIPLINE,
-        batch_declares_review_files,
-    )
-    from agentcore.workspace.stage_dirs import REVIEWS_DIR
-
-    assert not batch_declares_review_files(
-        [{"role": "独立复核员", "task": "核"}]
-    )
-    assert batch_declares_review_files(
-        [
-            {
-                "role": "轻量审校",
-                "deliverable": {
-                    "artifacts": [f"{REVIEWS_DIR}/审校报告.md"],
-                },
-            }
-        ]
-    )
 
     plan, errors = build_run_plan(
         [
@@ -722,7 +651,6 @@ def test_named_review_without_files_not_elevated():
     review = by_role["独立复核员"]
     assert review.deliverable is not None
     assert review.deliverable.artifacts == []
-    assert INDEPENDENT_REVIEW_REPORT_DISCIPLINE not in (review.task or "")
 
     verify = by_role["验证员"]
     assert verify.deliverable is not None

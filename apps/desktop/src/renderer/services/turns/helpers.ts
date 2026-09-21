@@ -217,8 +217,8 @@ const RECONNECT_QUIET_BANNERS = new Set<string>([
 ]);
 
 /**
- * Reconnect copy that is not a confirmed-bad outcome — RetryBanner uses the
- * existing Info + {@link noticeChipNeutral} notice chrome (not the triangle).
+ * Reconnect copy that is not a confirmed-bad outcome — the composer failure
+ * banner uses Info on notice chrome (not the triangle).
  */
 export function isReconnectQuietBanner(
   message: string | null | undefined,

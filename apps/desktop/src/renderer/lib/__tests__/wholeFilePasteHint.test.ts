@@ -26,10 +26,10 @@ function toolStep(
 describe("collectSuccessfulFileWrites", () => {
   it("collects successful file ops from process", () => {
     const arts = collectSuccessfulFileWrites([
-      toolStep("file_write", "success", { path: "a.ts", content: "x" }),
+      toolStep("write", "success", { file_path: "a.ts", content: "x" }),
       toolStep("host_shell", "success"),
-      toolStep("str_replace", "error", {
-        path: "b.ts",
+      toolStep("edit", "error", {
+        file_path: "b.ts",
         old_string: "a",
         new_string: "b",
       }),
@@ -40,7 +40,7 @@ describe("collectSuccessfulFileWrites", () => {
   it("returns empty when no successful file writes", () => {
     expect(
       collectSuccessfulFileWrites([
-        toolStep("file_write", "error", { path: "a.ts", content: "x" }),
+        toolStep("write", "error", { file_path: "a.ts", content: "x" }),
         toolStep("web_search", "success"),
       ]),
     ).toEqual([]);
@@ -55,8 +55,8 @@ describe("collectSuccessfulFileWrites", () => {
         finishReason: "end_turn",
         runProcesses: {
           worker_a: [
-            toolStep("file_write", "success", {
-              path: "src/w.ts",
+            toolStep("write", "success", {
+              file_path: "src/w.ts",
               content: "ok",
             }),
           ],
@@ -69,7 +69,7 @@ describe("collectSuccessfulFileWrites", () => {
   it("does not treat failed process write as success even if journal empty", () => {
     expect(
       collectSuccessfulFileWrites([
-        toolStep("file_write", "error", { path: "a.ts", content: "x" }),
+        toolStep("write", "error", { file_path: "a.ts", content: "x" }),
       ]),
     ).toEqual([]);
   });
@@ -99,9 +99,9 @@ describe("looksLikeWholeFilePasteHandoff", () => {
         "把下面这段代码粘贴到 `main` 函数里即可。",
       ),
     ).toBe(false);
-    expect(
-      looksLikeWholeFilePasteHandoff("我已用 str_replace 改了相关片段。"),
-    ).toBe(false);
+    expect(looksLikeWholeFilePasteHandoff("我已用 edit 改了相关片段。")).toBe(
+      false,
+    );
     expect(looksLikeWholeFilePasteHandoff("")).toBe(false);
     expect(looksLikeWholeFilePasteHandoff(undefined)).toBe(false);
   });

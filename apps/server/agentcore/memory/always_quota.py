@@ -1,18 +1,15 @@
 """Write-side always-entry quota (闸在写侧，读侧全量).
 
 Meters injectable always-on **user-rule** bodies (``ai_maintained=false``) by
-character count. AI-maintained cores (偏好 / 画像 / 导航) do not occupy the pool.
-User edits of an existing always entry may exceed the cap (allow + warning); AI
-create/merge of a user rule that would grow past the cap is refused and may push
-one ``memory_updates`` card per pending fingerprint (same state + same refused
-entries → one card; user fix / content change resets).
+character count. User edits of an existing always entry may exceed the cap
+(allow + warning); AI create/merge of a user rule that would grow past the cap
+is refused and may push one ``memory_updates`` card per pending fingerprint
+(same state + same refused entries → one card; user fix / content change resets).
 
-A full pool must never read as「AI 从此记不住东西」(审计 CTX-A2): the card names
-every entry this pass could not write AND the biggest entries currently holding the
-pool, so the user can see what to trim. Nothing is silently evicted — the write is
+A full pool must never read as「AI 从此写不进新的」: the card names every entry
+this pass could not write AND the biggest entries currently holding the pool,
+so the user can see what to trim. Nothing is silently evicted — the write is
 refused, the existing entries stay.
-
-See docs/03-AI核心/Agent记忆与知识系统.md「配额：闸在写侧，读侧全量」.
 """
 
 from __future__ import annotations
@@ -31,16 +28,11 @@ from agentcore.core.logging import get_logger
 from agentcore.db.models import Document
 from agentcore.db.repositories import DocumentRepository, MemoryUpdateRepository
 from agentcore.documents.frontmatter import strip_entry_frontmatter
-from agentcore.memory.maintenance import (
-    MemoryUpdateItem,
-    _memory_file_label,
-    _memory_leaf_target,
-)
 from agentcore.memory.store import memory_version
 
 logger = get_logger(__name__)
 
-# Set by consolidation / AI write paths that own a conversation_id for quota cards.
+# Set by AI write paths that own a conversation_id for quota cards.
 memory_write_conversation_id: ContextVar[str | None] = ContextVar(
     "memory_write_conversation_id", default=None
 )
@@ -49,21 +41,45 @@ Writer = Literal["user", "ai"]
 
 QUOTA_CARD_KIND = "quota"
 _USER_OVER_WARNING = (
-    "常驻太多了。这次改动已保存；请删减或改为按需，以免 AI 记不下新的。"
+    "常驻太多了。这次改动已保存；请删减或改为按需，以免 AI 写不进新的。"
 )
 _USER_CREATE_DENIED = (
     "常驻太多了。请先删减已有常驻或改为按需，再新建或改成常驻。"
 )
 _AI_DENIED_MESSAGE = (
-    "常驻太多，AI 暂时记不下新的。请删减或改为按需后再试。"
+    "常驻太多，AI 暂时写不进新的。请删减或改为按需后再试。"
 )
 _CARD_SUMMARY = (
-    "常驻太多，AI 暂时记不下新的：以下 {denied} 条没能写进常驻，"
+    "常驻太多，AI 暂时写不进新的：以下 {denied} 条没能写进常驻，"
     "现有条目一条也没被删。删减或改为按需后即可继续。"
 )
 # How many current always entries the card names as「谁占着配额」. Enough to act on,
 # short enough that the card stays a card.
 _HOLDER_ROWS = 5
+
+
+@dataclass
+class MemoryUpdateItem:
+    """One row on a conversation-tail ``kind=quota`` card (``memory_updates.items``)."""
+
+    action: str  # "quota" | "quota_denied" | "quota_holder"
+    file: str
+    section: str
+    scope: str  # "global" | "project"
+    content: str
+    target: str
+    project_id: str | None = None
+
+
+def _entry_label(file: str) -> str:
+    """Card label: the document filename as stored."""
+    return file
+
+
+def _entry_target(file: str, scope: str | None) -> str:
+    """No AI-memory leaf deep-link; quota cards name the rule file only."""
+    del file, scope
+    return ""
 
 
 @dataclass(frozen=True)
@@ -349,11 +365,11 @@ def _denied_rows(denials: Sequence[DeniedAlwaysWrite]) -> list[MemoryUpdateItem]
         rows.append(
             MemoryUpdateItem(
                 action="quota_denied",
-                file=_memory_file_label(d.file),
+                file=_entry_label(d.file),
                 section="",
                 scope="project" if d.scope else "global",
                 content=f"这次的更新没能写入常驻（{d.attempted_chars} 字符）",
-                target=_memory_leaf_target(d.file, d.scope),
+                target=_entry_target(d.file, d.scope),
                 project_id=d.scope,
             )
         )
@@ -371,11 +387,11 @@ async def _holder_rows(
     return [
         MemoryUpdateItem(
             action="quota_holder",
-            file=_memory_file_label(doc.name),
+            file=_entry_label(doc.name),
             section="",
             scope="project" if doc.folder_id else "global",
             content=f"占用 {chars} 字符",
-            target=_memory_leaf_target(doc.name, doc.folder_id),
+            target=_entry_target(doc.name, doc.folder_id),
             project_id=doc.folder_id,
         )
         for chars, doc in sized[:_HOLDER_ROWS]

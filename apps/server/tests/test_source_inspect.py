@@ -1,4 +1,4 @@
-"""Unit tests for ``code_execute`` source-inspect routing (dump → file_read, regex → grep)."""
+"""Unit tests for ``code_execute`` source-inspect routing (dump → read, regex → grep)."""
 
 from agentcore.tools.builtin.source_inspect import source_inspect_match
 

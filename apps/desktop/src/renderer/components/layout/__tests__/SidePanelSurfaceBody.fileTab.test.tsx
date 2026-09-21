@@ -75,26 +75,26 @@ describe("SidePanelSurfaceBody — 文件 tab 的未知期", () => {
     );
   });
 
-  it("memory 通道用设定源，不走工作区盘", () => {
+  it("document 通道用条目源，不走工作区盘", () => {
     useFileTabSourceState.mockReturnValue({
       source: { id: "workspace:cloud" } as FileSource,
       pending: false,
     });
-    const memoryTab: DetailTab = {
-      id: "file:memory:project/f1/profile",
+    const documentTab: DetailTab = {
+      id: "file:document:doc-1",
       kind: "file",
-      title: "画像.md",
-      path: "project/f1/profile",
-      name: "画像.md",
-      channel: "memory",
+      title: "语气.md",
+      path: "doc-1",
+      name: "语气.md",
+      channel: "document",
     };
     useSidePanelStore.setState({
-      tabs: [memoryTab],
-      activeTabId: memoryTab.id,
+      tabs: [documentTab],
+      activeTabId: documentTab.id,
     });
-    render(<SidePanelSurfaceBody tabId={memoryTab.id} />);
+    render(<SidePanelSurfaceBody tabId={documentTab.id} />);
     expect(screen.getByTestId("file-detail").getAttribute("data-source")).toBe(
-      "memory",
+      "documents",
     );
   });
 });

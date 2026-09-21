@@ -152,10 +152,10 @@ async def test_every_deny_code_has_curated_user_copy():
 
 async def test_user_denied_approval_is_not_answered_with_an_order():
     """User clicks 拒绝 → the model is told to stop; the user is not ordered around."""
-    tool = _Stub("file_write", approval=ToolApproval.GRANTABLE)
+    tool = _Stub("write", approval=ToolApproval.GRANTABLE)
     sink = EventSink()
     _messages, _terminal, attempts = await execute_tools(
-        [_call("c1", "file_write")],
+        [_call("c1", "write")],
         _registry(tool),
         _ctx(),
         sink,
@@ -167,7 +167,7 @@ async def test_user_denied_approval_is_not_answered_with_an_order():
     assert attempts[0].policy_failure is True
     model, user = _faces(sink)
     assert model == (
-        "工具 'file_write' 未获用户授权，该操作未执行。"
+        "工具 'write' 未获用户授权，该操作未执行。"
         "请改用其他方案或询问如何继续，不要再调用此工具。"
     )
     assert_user_face_clean(user)
@@ -200,10 +200,10 @@ async def test_grantable_without_gate_does_not_promise_a_missing_screen():
 
 async def test_always_confirm_without_gate_does_not_promise_a_missing_screen():
     """恒确认 (git push) with nobody to ask — same split, same curated sentence."""
-    tool = _Stub("git")
+    tool = _Stub("run")
     sink = EventSink()
     await execute_tools(
-        [_call("c1", "git", '{"subcommand":"push"}')],
+        [_call("c1", "run", '{"command":"git push origin feature/x"}')],
         _registry(tool),
         _ctx(),
         sink,
@@ -214,7 +214,7 @@ async def test_always_confirm_without_gate_does_not_promise_a_missing_screen():
     assert tool.executed is False
     model, user = _faces(sink)
     assert model == (
-        "工具 'git' 必须由用户逐次确认，但当前路径弹不出确认卡，已拒绝执行。"
+        "工具 'run' 必须由用户逐次确认，但当前路径弹不出确认卡，已拒绝执行。"
         "请改用其他方案，或让用户在可确认的界面重试。"
     )
     assert_user_face_clean(user)
@@ -223,14 +223,14 @@ async def test_always_confirm_without_gate_does_not_promise_a_missing_screen():
 
 async def test_safety_breaker_deny_keeps_steer_off_the_user_face():
     """Fuse DENY: the model keeps the rule reason, the user gets a plain safety sentence."""
-    args = '{"subcommand":"reset"}'
-    hit = evaluate_tool_call("git", {"subcommand": "reset"})
+    args = '{"command":"git reset --hard"}'
+    hit = evaluate_tool_call("run", {"command": "git reset --hard"})
     assert hit is not None
 
     sink = EventSink()
-    tool = _Stub("git", face=ToolFace.EXECUTION)
+    tool = _Stub("run", face=ToolFace.EXECUTION)
     await execute_tools(
-        [_call("c1", "git", args)],
+        [_call("c1", "run", args)],
         _registry(tool),
         _ctx(),
         sink,
@@ -240,7 +240,7 @@ async def test_safety_breaker_deny_keeps_steer_off_the_user_face():
 
     assert tool.executed is False
     model, user = _faces(sink)
-    assert model == (f"工具 'git' 被安全熔断拒绝：{hit.reason}请改用其他方案，不要原样重试该路径。")
+    assert model == (f"工具 'run' 被安全熔断拒绝：{hit.reason}请改用其他方案，不要原样重试该路径。")
     assert_user_face_clean(user)
     assert user == _CURATED_BY_CODE["safety_breaker_deny"]
 
@@ -273,22 +273,22 @@ async def test_safety_breaker_without_gate_keeps_steer_off_the_user_face():
 
 async def test_run_allowlist_deny_keeps_engine_words_off_the_user_face():
     """Landing tool outside the run allow-list: 「本 run 的允许列表」is ours, not theirs."""
-    tool = _Stub("file_write", face=ToolFace.FILE)
+    tool = _Stub("write", face=ToolFace.FILE)
     sink = EventSink()
     await execute_tools(
-        [_call("c1", "file_write", '{"path":"a.md","content":"x"}')],
-        _registry(tool, _Stub("file_read", face=ToolFace.FILE)),
+        [_call("c1", "write", '{"file_path":"a.md","content":"x"}')],
+        _registry(tool, _Stub("read", face=ToolFace.FILE)),
         _ctx(),
         sink,
         approval_gate=None,
         run_id="r1",
-        allowed_tool_names=["file_read"],
+        allowed_tool_names=["read"],
     )
 
     assert tool.executed is False
     model, user = _faces(sink)
     assert model == (
-        "工具 'file_write' 不在本 run 的允许列表中，未执行。"
+        "工具 'write' 不在本 run 的允许列表中，未执行。"
         "本回合未授权该写盘工具；请改用已提供的工具，或 escalate / "
         "handoff 说明缺写盘权限（勿用正文冒充落盘）。"
     )
@@ -421,7 +421,7 @@ async def test_landed_status_bait_keeps_the_rewrite_recipe_off_the_user_face():
     model, user = _faces(sink)
     assert model == (
         "拒绝：`_write_landed` 是请求窗里的「已落盘」压缩状态，不是可调用工具。"
-        "勿仿调该名称。改稿：先 file_read 取盘上真文，再 str_replace（优先）或 file_write。"
+        "勿仿调该名称。改稿：先 read 取盘上真文，再 edit（优先）或 write。"
     )
     assert_user_face_clean(user)
     assert user == _CURATED_BY_CODE["landed_status_name"]
@@ -435,10 +435,10 @@ async def test_write_args_parse_failure_is_the_one_legitimate_authored_face():
     """
     from agentcore.runtime.engine.tool_exec_args import _USER_WRITE_PARSE_MSG
 
-    tool = _Stub("file_write", face=ToolFace.FILE)
+    tool = _Stub("write", face=ToolFace.FILE)
     sink = EventSink()
     await execute_tools(
-        [_call("c1", "file_write", '{"path": "a.md", "content": "abc')],
+        [_call("c1", "write", '{"file_path": "a.md", "content": "abc')],
         _registry(tool),
         _ctx(),
         sink,
@@ -452,7 +452,7 @@ async def test_write_args_parse_failure_is_the_one_legitimate_authored_face():
     assert_user_face_clean(user)
     # Recipe stays model-side, verbatim.
     assert "更短但完整" in model
-    assert "str_replace" in model
+    assert "edit" in model
     assert "end_preview" in model
     assert "file_append" not in model
 

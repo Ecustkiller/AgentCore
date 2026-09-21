@@ -93,7 +93,7 @@ def test_run_description_does_not_role_split_ceo():
     assert "验收与短命令由队员" not in desc
     assert "ceo_run_scope" not in desc
     assert "命令" in desc
-    assert "HOW→consult(run)" in desc
+    assert "HOW→consult(run)" not in desc
 
 
 class _FakeShortBackend:

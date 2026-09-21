@@ -18,7 +18,7 @@ describe("ORCHESTRATION_TOOLS / MARKER_STANDIN_TOOLS", () => {
     expect(isOrchestrationTool("delegate")).toBe(true);
     expect(isOrchestrationTool("debate")).toBe(true);
     expect(isOrchestrationTool("ask_user")).toBe(false);
-    expect(isOrchestrationTool("file_read")).toBe(false);
+    expect(isOrchestrationTool("read")).toBe(false);
   });
 
   it("pins ask_user as marker stand-in alongside orchestration", () => {

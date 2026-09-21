@@ -13,7 +13,7 @@ describe("memoryUpdatedToastCopy", () => {
 
   it("heads-up quota refusals when away", () => {
     expect(memoryUpdatedToastCopy("quota", false)).toBe(
-      "常驻条目已满，有内容没能记下",
+      "常驻用户规则已满，有内容没能写入",
     );
   });
 });

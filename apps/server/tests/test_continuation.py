@@ -634,8 +634,8 @@ async def test_continue_from_failed_run_is_allowed():
 
 
 def test_merge_continuation_tools_undeclared_keeps_prior():
-    assert merge_continuation_tools(["file_read", "grep"], None) == [
-        "file_read",
+    assert merge_continuation_tools(["read", "grep"], None) == [
+        "read",
         "grep",
     ]
     assert merge_continuation_tools(None, None) is None
@@ -643,25 +643,25 @@ def test_merge_continuation_tools_undeclared_keeps_prior():
 
 def test_merge_continuation_tools_superset_adds():
     assert merge_continuation_tools(
-        ["file_read", "grep"],
-        ["file_read", "grep", "test_run"],
-    ) == ["file_read", "grep", "test_run"]
-    assert merge_continuation_tools(["file_read"], ["test_run"]) == [
-        "file_read",
+        ["read", "grep"],
+        ["read", "grep", "test_run"],
+    ) == ["read", "grep", "test_run"]
+    assert merge_continuation_tools(["read"], ["test_run"]) == [
+        "read",
         "test_run",
     ]
 
 
 def test_merge_continuation_tools_subset_does_not_shrink():
     assert merge_continuation_tools(
-        ["file_read", "grep", "test_run"],
-        ["file_read"],
-    ) == ["file_read", "grep", "test_run"]
+        ["read", "grep", "test_run"],
+        ["read"],
+    ) == ["read", "grep", "test_run"]
 
 
 def test_merge_continuation_tools_unrestricted_prior_stays_open():
     """原现场 tools=None（无限制）不得被白名单声明减面。"""
-    assert merge_continuation_tools(None, ["file_read"]) is None
+    assert merge_continuation_tools(None, ["read"]) is None
 
 
 async def test_continue_from_tools_declaration_ignored_keeps_prior_session_tools():
@@ -676,14 +676,14 @@ async def test_continue_from_tools_declaration_ignored_keeps_prior_session_tools
 
     session.spec = replace(
         session.spec,
-        tools=["file_read", "grep", "web_search"],
+        tools=["read", "grep", "web_search"],
     )
     store.put(session)
 
     sink = EventSink()
     tool = _tool(store, provider, sink)
     _register_names(
-        tool._tools, "file_read", "grep", "web_search", "test_run", "str_replace"
+        tool._tools, "read", "grep", "web_search", "test_run", "edit"
     )
 
     result = await tool.execute(
@@ -693,7 +693,7 @@ async def test_continue_from_tools_declaration_ignored_keeps_prior_session_tools
                     "role": "研究员",
                     "task": "按结论改码并验",
                     "continue_from_run_id": "t_1",
-                    "tools": ["file_read", "grep", "web_search", "test_run", "str_replace"],
+                    "tools": ["read", "grep", "web_search", "test_run", "edit"],
                 }
             ],
             "coordinate": False,
@@ -704,7 +704,7 @@ async def test_continue_from_tools_declaration_ignored_keeps_prior_session_tools
     assert result.success is True
     # builder 忽略声明 → node.tools=None → merge 沿用 prior，不扩面
     effective = store.get("t_1").spec.tools
-    assert effective == ["file_read", "grep", "web_search"]
+    assert effective == ["read", "grep", "web_search"]
 
 
 async def test_continue_from_tools_subset_does_not_shrink_session():
@@ -717,12 +717,12 @@ async def test_continue_from_tools_subset_does_not_shrink_session():
 
     session.spec = replace(
         session.spec,
-        tools=["file_read", "grep", "test_run"],
+        tools=["read", "grep", "test_run"],
     )
     store.put(session)
 
     tool = _tool(store, provider)
-    _register_names(tool._tools, "file_read", "grep", "test_run")
+    _register_names(tool._tools, "read", "grep", "test_run")
 
     result = await tool.execute(
         {
@@ -731,7 +731,7 @@ async def test_continue_from_tools_subset_does_not_shrink_session():
                     "role": "研究员",
                     "task": "只读复核",
                     "continue_from_run_id": "t_1",
-                    "tools": ["file_read"],
+                    "tools": ["read"],
                 }
             ],
             "coordinate": False,
@@ -741,7 +741,7 @@ async def test_continue_from_tools_subset_does_not_shrink_session():
     )
     assert result.success is True
     effective = store.get("t_1").spec.tools
-    assert effective == ["file_read", "grep", "test_run"]
+    assert effective == ["read", "grep", "test_run"]
 
 
 async def test_continue_from_undeclared_tools_keeps_session_tools():
@@ -751,11 +751,11 @@ async def test_continue_from_undeclared_tools_keeps_session_tools():
     session = store.get("t_1")
     from dataclasses import replace
 
-    session.spec = replace(session.spec, tools=["file_read", "grep"])
+    session.spec = replace(session.spec, tools=["read", "grep"])
     store.put(session)
 
     tool = _tool(store, provider)
-    _register_names(tool._tools, "file_read", "grep")
+    _register_names(tool._tools, "read", "grep")
 
     result = await tool.execute(
         {
@@ -772,7 +772,7 @@ async def test_continue_from_undeclared_tools_keeps_session_tools():
         _ctx(),
     )
     assert result.success is True
-    assert store.get("t_1").spec.tools == ["file_read", "grep"]
+    assert store.get("t_1").spec.tools == ["read", "grep"]
 
 
 def test_continuation_prompt_includes_team_brief():

@@ -125,7 +125,7 @@ def test_event_text_reads_codes_and_tools_arrays_not_content():
         {
             "event": "chat.local_turn_tool_failures",
             "codes": ["exec_env_probe_timeout", "schema"],
-            "tools": ["code_execute", "file_read"],
+            "tools": ["code_execute", "read"],
             "content": "用户说：预算耗尽",
             "args_preview": '{"summary": "本轮预算耗尽"}',
         }
@@ -279,7 +279,7 @@ def test_local_turn_id_invalid_claims_clipped_uuid_encode_frame():
             "event": "tool.execute_end",
             "level": "error",
             "exception": exc,
-            "tool": "file_read",
+            "tool": "read",
         }
     )
     assert "local_turn_id_invalid" not in reg.match(

@@ -1,12 +1,11 @@
 {
   "name": "agentcore-mobile",
-  "version": "0.4.32",
+  "version": "0.4.33",
   "private": true,
   "type": "module",
   "description": "AgentCore Capacitor 壳（产品页挂 desktop dist-web；前端技术与架构 §五）",
   "scripts": {
     "build": "node scripts/prepare-cap-web.mjs",
-    "deploy:pages": "node scripts/deploy-pages.mjs",
     "cap:sync": "pnpm build && cap sync",
     "android:open": "cap open android",
     "android:sync-version": "node scripts/sync-android-version.mjs",

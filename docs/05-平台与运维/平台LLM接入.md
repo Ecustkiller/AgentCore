@@ -20,15 +20,15 @@ skip_if:
 | **多厂商 provider 路由** | model 串带 `厂商/` 前缀 | 豆包 / Moonshot / 智谱 等（§四） |
 | **platform 平台凭据** | `billing_mode=platform` / 显式 platform | `PLATFORM_*` 三项 |
 
-**BYOK 去向**：每用户多服务商列表（`user_llm_providers`：AES-GCM 密文 key + base_url + `default_model`）；账号/会话选的是**模型组合**（`llm_model_profiles` → `{main, worker?, background?, vision?}` 槽，每槽解析为目录身份 `@platform/{id}` / `@byok/{provider_id}/{id}`，库内仍存 `(model, origin, provider_id)`）。服务商上的 `default_model` 仅作连接测试（UI 在「高级选项 · 连接测试用模型」，Input+datalist 可手填；换厂商预设时保留已填自定义值），**不是**日常聊天默认，匹配到厂商预设时也**不**并进聊天目录。测连：优先 `GET /models`（合法 JSON）；空列表或不在列表的 default → `POST /chat/completions` **且验 body**（拒 HTML/非 JSON/缺 choices）。目录已成功列出模型后 probe 仍 401/403（非余额）→ 点名「连接测试用模型」不被上游接受，**禁止**说 Key 无效；目录未证明 Key 时同时请核 Key 与该模型。连通≠聊天就绪写在服务商列表页脚（并指向模型组合）；自定义 Base URL 通常需含 `/v1` 写在字段 hint 与失败错误，不进测连成功徽章。服务商卡片露出测试用模型 id（不是聊天默认）。key **不在 `.env`**。BYOK 且无服务商、又无 platform 回退 → `402 LLM_KEY_REQUIRED`。
+**BYOK 去向**：每用户多服务商列表（`user_llm_providers`：AES-GCM 密文 key + base_url）；账号/会话选的是**模型组合**（`llm_model_profiles` → `{main, worker?, background?, vision?}` 槽，每槽解析为目录身份 `@platform/{id}` / `@byok/{provider_id}/{id}`，库内仍存 `(model, origin, provider_id)`）。服务商表单不收模型 id。测连只认 `GET /models`（合法 JSON 且非空即连通）；空列表 / 无该接口 → 诚实「未列出，请到模型组合手填」，**不**用猜测的 chat 模型刷绿灯。已有模型组合槽指向该服务商时，才对这些 id 做 `POST /chat/completions` 探针（火山 `ep-…` 等目录未列出的 id）。目录已成功列出后槽位探针仍 401/403（非余额）→ 点名该模型不被上游接受，**禁止**说 Key 无效；目录未证明 Key 时同时请核 Key 与该模型。第一个服务商且 `base_url` 命中厂商预设时，用代码里的预设种子建「当前配置」；自定义端点不自动建组合。连通≠聊天就绪写在服务商列表页脚（并指向模型组合）；自定义 Base URL 通常需含 `/v1` 写在字段 hint 与失败错误，不进测连成功徽章。key **不在 `.env`**。BYOK 且无服务商、又无 platform 回退 → `402 LLM_KEY_REQUIRED`。
 
 ## 二、模型与凭据解析
 
 **模型组合**：CRUD `/v1/users/me/llm-model-profiles`；会话只认 `model_profile_id`（**新建拍快照**：create 写入当时账号默认或客户端所选 uuid；改账号默认不改旧会话）。存量 `null` 仍按账号默认展开（兼容活跟随）。PATCH 显式 `null` = 再钉当时默认（非清成活跟随）。设默认只在设置 / `PUT …/default`；输入框 picker 只选具体组合。可选 `reasoning_effort`：厂商官方 token（目录 `reasoning_effort.options`），null = 该主模型默认；主模型换到不列该 token 的叶则清掉。**元数据事实源** = `llm/catalog.py`（上架集）+ `llm/model_metadata.py`（展示 enrichment）；`model_profiles` 只做组合 CRUD / expand，系统预置 = 对 catalog 可见上架集的 uuid5 投影（`uuid5(…, agentcore:platform-preset:{model_id})`，无硬编码产品 UUID）。逻辑默认 = `PLATFORM_MODEL` 对应预置（须在上架集内）否则 allowlist 首个。明确不做：质量档矩阵、账号级角色→模型矩阵、输入框双 picker /「跟随账号默认」行。✅ **Per-worker 节点显式覆盖**（执行链 + sidecar proxy；确认面不提供人改模）与组合槽正交 → [编排器 · Per-worker 模型覆盖](/docs/03-AI核心/编排器与CEO主Agent.md#per-worker-模型覆盖abc-同一功能)。
 
-**识图槽 `vision`（可选，已停用）**：组合列与 API 仍保留该槽，设置页不再编辑。图只进**当前主力**原生多模态（贴图挂当前 user；工作区光栅走 `file_read`）。主模型不收图 → 诚实说明，**不**走 VisionReader / `VISION_*` / 推理代理 `X-AgentCore-Role: vision`。历史 `role=vision` 入账行仍可折账。visual critic **已退役**。能力位只认该厂商契约（精确 id + 进程内负例），不是展示元数据家族继承、也不是 id 关键词。
+**识图槽 `vision`（可选，已停用）**：组合列与 API 仍保留该槽，设置页不再编辑。图只进**当前主力**原生多模态（贴图挂当前 user；工作区光栅走 `read`）。主模型不收图 → 诚实说明，**不**走 VisionReader / `VISION_*` / 推理代理 `X-AgentCore-Role: vision`。历史 `role=vision` 入账行仍可折账。visual critic **已退役**。能力位只认该厂商契约（精确 id + 进程内负例），不是展示元数据家族继承、也不是 id 关键词。
 
-**对话贴图路由**：main 收图（`llm/image_accept.model_accepts_images`）→ 原生 multimodal（`image_url` 挂当前 user）；否则诚实「当前主模型不收图」，不静默丢像素、不另开眼睛轨。工作区图片同一条：`file_read` 把像素发给这只模型。
+**对话贴图路由**：main 收图（`llm/image_accept.model_accepts_images`）→ 原生 multimodal（`image_url` 挂当前 user）；否则诚实「当前主模型不收图」，不静默丢像素、不另开眼睛轨。工作区图片同一条：`read` 把像素发给这只模型。
 
 `llm/resolve.py` 单点：
 
@@ -38,7 +38,7 @@ skip_if:
 - **回合内鉴权死短路（甲+乙）**：同一用户回合、同一付款方（`credential_source`）首次确认真 API Key `LLMAuthError`（不含 `INFERENCE_TOKEN_EXPIRED`）或余额不足后，`llm/turn_auth_dead.py` 按来源闩死后续未启动的同源 LLM（主聊后续轮 / 未开跑 worker / 本回合 chrome）；另一付款方不受影响（平台 chrome 死亡不得短路同回合 BYOK chat，反之亦然）。已在飞可自然失败。**不做**跨回合 TTL 负缓存（丙暂缓）。用户文案 / CTA 按 `credential_source` 分流（BYOK→去设置；平台→改用自己的 Key / 联系管理员）。
 - **`platform_billing_selectable`**：仅 `billing_mode=platform` 时可选；BYOK 部署不开放平台代付。
 - **Worker 槽**：空 = 跟随主模型；跨 origin 时 `build_turn_router` 注入 extras。Sidecar `cost_role=member`：请求 body `model` 为目录路由键（`platform/{id}` / `{provider_id}/{id}`）且合法 → **按该身份重解析凭据/model**；裸 mint/chat id 或未带显式 → 仍跟本槽。非法路由键 **硬失败**（`VALIDATION_ERROR`），禁 silent 回退野模型。→ [编排器 · Per-worker](/docs/03-AI核心/编排器与CEO主Agent.md#per-worker-模型覆盖abc-同一功能)。
-- **统一目录** `GET /v1/users/me/models`：产品身份 = `ref`（`@platform/{id}` / `@byok/{provider_id}/{id}`）；行属性仍带 `(id, origin, provider_id)` 供分组。BYOK 行 = 按 `base_url` 匹配的厂商预设 seeds ∪ 上游 `GET /models` 发现（发现失败/空仍保留预设）；匹配到预设后按 `hideFromPicker` **精确 id** 对新选隐藏（退役官方别名，或该端点不得使用的官方 id；已钉组合仍能跑）。无预设（自定义端点）才并 `default_model`，以免发现失败下拉全空。**不是**用前端硬编码清单取代发现。组合槽对 BYOK = **始终可手填 combobox**（服务商 + model id，目录进 datalist 建议；火山 `ep-…`、私有中转等）；platform 仍只 allowlist。platform 行有补贴才列。
+- **统一目录** `GET /v1/users/me/models`：产品身份 = `ref`（`@platform/{id}` / `@byok/{provider_id}/{id}`）；行属性仍带 `(id, origin, provider_id)` 供分组。BYOK 行 = 按 `base_url` 匹配的厂商预设 seeds ∪ 上游 `GET /models` 发现（发现失败/空仍保留预设）；匹配到预设后按 `hideFromPicker` **精确 id** 对新选隐藏（退役官方别名，或该端点不得使用的官方 id；已钉组合仍能跑）。无预设（自定义端点）只并发现结果；发现失败则目录为空，**手填** model id。**不是**用前端硬编码清单取代发现。组合槽对 BYOK = **始终可手填 combobox**（服务商 + model id，目录进 datalist 建议；火山 `ep-…`、私有中转等）；platform 仍只 allowlist。platform 行有补贴才列。
 
 ## 三、sidecar 推理代理
 
@@ -66,7 +66,7 @@ skip_if:
 
 | 项 | 约束 |
 |---|---|
-| 模型名 | 官方现行 `deepseek-flash`（V4.1 Flash）。旧名 `deepseek-v4-flash` / `deepseek-v4-flash-vision-exp` 暂时转到 4.1；`deepseek-v4-pro` 自 **2026-09-14 12:00 北京时间**同样转 4.1（直到 V4.1-Pro）。`deepseek-chat` / `deepseek-reasoner` 已停用。官方 BYOK picker **隐藏**这些退役兼容名（`hideFromPicker`；发现仍跑）。**平台 / OpenCode Go 现网临时钉** `deepseek-v4.1-flash`（Go 表上 V4.1 Flash 月帽划掉 $15、促销 $60 / **额度 4×**，**2026-09-20 结束**后常驻 $15；V4 Flash 常驻 $30 / 额度 2×）。9/20 若不续 $60 → 改回 `deepseek-v4-flash`。官方 id 与 Go `deepseek-v4.1-flash` 识图契约不同：Go / Zen 预设 `hideFromPicker` **对新选隐藏** `deepseek-flash`（发现仍跑；已钉组合仍能跑）。产品 `GO_COST_MULTIPLIER` 默认 1，与上游额度倍数不是同一旋钮 |
+| 模型名 | 官方现行 `deepseek-flash`（V4.1 Flash）。旧名 `deepseek-v4-flash` / `deepseek-v4-flash-vision-exp` / `deepseek-v4-pro` 仍可能被上游接受，产品 **hideFromPicker**（官方 / Go / Zen 对新选隐藏；已钉组合仍能跑）。`deepseek-chat` / `deepseek-reasoner` 已停用。**平台 / OpenCode Go 现网钉** `deepseek-v4.1-flash`（不是官方 id）。官方 id 与 Go 识图契约不同：Go / Zen 亦隐藏 `deepseek-flash`。产品计价走 DeepSeek 中文官价，不跟 OpenCode 额度倍数 |
 | 识图 | 官方 `deepseek-flash` 收图。产品契约：`deepseek-v4-flash` / `deepseek-v4.1-flash` / Pro 文本 id 不收（Go 仍把 Vision Exp 列成独立 SKU）；旧 `deepseek-v4-flash-vision-exp` 仍收 |
 | 上下文 | 官方 **1M**（input+output 合计）；max output 384K。目录 `context_length` 与近顶压缩跟这条，不跟过期的 128K 记忆 |
 | base_url | `https://api.deepseek.com`（兼容 `/v1`） |
@@ -109,8 +109,8 @@ OpenCode 两条 OpenAI 兼容上游，**计费与目录不同，必须按精确 
 | 预设 id / label | `opencode_zen` · OpenCode Zen | `opencode_go` · OpenCode Go |
 | base_url | `https://opencode.ai/zen/v1` | `https://opencode.ai/zen/go/v1` |
 | 计费 | 按量余额（含 `-free` 档） | $10/月订阅配额（5 小时 / 周 / 月）；目录**没有** `-free` |
-| 默认模型 | `deepseek-v4-flash` | `deepseek-v4.1-flash` |
-| 短种子 | Flash / `kimi-k2.6` / `glm-5.2` | V4.1 Flash / Pro / `glm-5.2` |
+| 默认模型 | `deepseek-v4.1-flash` | `deepseek-v4.1-flash` |
+| 短种子 | V4.1 Flash / `kimi-k2.6` / `glm-5.2` | V4.1 Flash / `glm-5.2` |
 
 | 项 | 约束 |
 |---|---|
@@ -138,25 +138,27 @@ OpenCode 两条 OpenAI 兼容上游，**计费与目录不同，必须按精确 
 
 **本机系统代理**：产品出网 httpx 默认 `trust_env=False`（不继承 `HTTP(S)_PROXY` / `ALL_PROXY`）。用户装 Clash 等把 `ALL_PROXY` 设成 `socks5://…` 时，旧行为会因缺少可选依赖 `socksio` 报「调用失败」；桌面 sidecar 启动时另剥离 SOCKS 类代理环境变量（HTTP 代理保留）。显式应用内代理配置仍可后续加，不靠默吃系统 SOCKS。
 
+**出站连接复用**：LLM 叶子按 `base_url` 进程内共用一条 httpx 客户端（keep-alive **60s**；httpx 默认 5s 跨不了回合间隔）。鉴权、自定义头、OpenCode session、Anthropic version **每请求带**，不冻在客户端上——多用户、平台换号、队员 clone 共用同一条 TCP/TLS。回合 `close()` 只关掉该叶子实例，不拆连接。进程关停（API lifespan / sidecar 退出）才真正 aclose。桌面本机会话在输入框**首次聚焦**时经 sidecar `warmLlmHttp` 对推理 hop 握一次手（`GET /models`，404 也算握上；不发草稿、不 POST 补全）；API 进程不预连默认厂商。与 SearXNG 长活客户端同构，只是按上游源分槽。→ 见代码 `llm/http_pool.py`
+
 ## 五·附、现网单模型：OpenCode Go · DeepSeek V4 Flash
 
 > 运维定案：平台目录只上架 **一个**模型；BYOK 仍为高级选项（F7）。改生产 `.env` 的 `PLATFORM_*` / `QUOTA_*` 后**必须重启 api**（无热更）。**加 / 改 / 禁用池成员不须重启**（admin「供给 · 额度」· 平台额度账号）——但**每个新成员入池前必须单独完成下条硬前置**（opt-in 是逐工作区的，老号做过不代表新号做过；漏做的号上游回 403 `RegionError`）。真实 key 只在不入仓的部署凭据文件或加密库里。
 >
-> 官方已上架 `deepseek-flash`（V4.1 Flash）。**现网平台临时钉 Go 的** `deepseek-v4.1-flash`（不是官方 id）：OpenCode 表上 V4.1 Flash 月帽划掉 $15、促销 $60（**额度 4×**，**2026-09-20 结束**）；结束后常驻 $15。V4 Flash 常驻 $30（额度 2×）。产品 `GO_COST_MULTIPLIER` 默认 1，不是上游额度倍数。9/20 前看是否续 $60，不续则 `PLATFORM_*` 改回 `deepseek-v4-flash` 并重启。BYOK 直连官方 API 的种子仍是 `deepseek-flash`。Go 预设默认 / 短种子是 `deepseek-v4.1-flash`；Zen 仍是 `deepseek-v4-flash`。Go / Zen `hideFromPicker` 对新选隐藏官方 `deepseek-flash`。平台 **不**开原生贴图。
+> 官方已上架 `deepseek-flash`（V4.1 Flash）。**现网平台钉 Go 的** `deepseek-v4.1-flash`（不是官方 id）。V4 Flash / Pro 新品选择隐藏。BYOK 直连官方 API 的种子仍是 `deepseek-flash`。Go / Zen 预设默认 / 短种子是 `deepseek-v4.1-flash`。Go / Zen `hideFromPicker` 对新选隐藏官方 `deepseek-flash`、退役 V4 Flash / Pro。平台 **不**开原生贴图。
 >
 > **上游修订**：从 Zen 限时免费档切到 OpenCode **Go** 端点上的付费 `deepseek-v4-flash`。Zen 控制台同一把 key 两个端点通用（不必换 `PLATFORM_API_KEY`）。Go 目录**没有** `-free`。这不是免费档，也不是无限算力。
 >
-> **硬前置**：贴这套 `.env` / 上线前，必须先在 OpenCode 控制台为该工作区完成 DeepSeek 的中国区托管 opt-in，并用同一把 key 打 `POST https://opencode.ai/zen/go/v1/chat/completions` + **现网 id**（现为 `deepseek-v4.1-flash`；回滚后为 `deepseek-v4-flash`）实测通过。未同意时上游回结构化 `RegionError`，平台代付一上线**全体用户**一起撞（不是个别账号）。已证事实仅限 **Go 端点的 DeepSeek**；换 id 须再打一枪，不能口头继承。
+> **硬前置**：贴这套 `.env` / 上线前，必须先在 OpenCode 控制台为该工作区完成 DeepSeek 的中国区托管 opt-in，并用同一把 key 打 `POST https://opencode.ai/zen/go/v1/chat/completions` + **现网 id**（`deepseek-v4.1-flash`）实测通过。未同意时上游回结构化 `RegionError`，平台代付一上线**全体用户**一起撞（不是个别账号）。已证事实仅限 **Go 端点的 DeepSeek**；换 id 须再打一枪，不能口头继承。
 
 | 项 | 值 |
 |---|---|
 | `BILLING_MODE` | `platform` |
 | `PLATFORM_BASE_URL` | `https://opencode.ai/zen/go/v1` |
-| `PLATFORM_MODEL` / `PLATFORM_MODELS` | `deepseek-v4.1-flash`（仅此；须有 CNY curated 价卡，否则启动后不上架 / allowlist 与默认冲突则 fail-fast）。**2026-09-20** 若不续 Go $60 月帽 → 改回 `deepseek-v4-flash` |
+| `PLATFORM_MODEL` / `PLATFORM_MODELS` | `deepseek-v4.1-flash`（仅此；须有 CNY curated 价卡，否则启动后不上架 / allowlist 与默认冲突则 fail-fast） |
 | 后台档 | 同钉现网 id（可显式 `PLATFORM_BACKGROUND_MODEL`，须 ∈ allowlist） |
 | `PLATFORM_API_KEY` | 与 Zen 控制台同一把（不换） |
 | 额度 | 月 ¥10 · 日 ¥10 · 日请求 500（`quota_*`） |
-| 价卡 | Flash = Go 公开单价 × **冻结 7.2**（截至 **2026-09-10**：谷时约 ¥1.08 / ¥4.32 / ¥0.0216 每百万；峰时 2×；`GO_COST_MULTIPLIER` 默认 1）。平台与用户 BYOK 同一把尺；额度只扣平台列。现金 COGS 仍是订阅月费，不是这把尺 |
+| 价卡 | Flash = DeepSeek 中文官价（空闲 ¥0.02 / ¥1 / ¥4 每百万；高峰 2×）。平台与用户 BYOK 同一把尺；额度只扣平台列。现金 COGS 仍是 Go 订阅月费，不是这把尺 |
 | 上下文窗 | 现网 Go Flash SKU **1M**（`deepseek-v4.1-flash` 与 `deepseek-v4-flash` 同）。目录展示与近顶压缩（窗 × 80% ≈ 800K）跟 SKU，禁止按端点猜成 Zen free 的 200K |
 | Vision | 不配 `VISION_*`。对话贴图 / 工作区光栅走当前主力多模态；主模型不收图则诚实说明 |
 | 公告 | 恢复时归档 `quota_unavailable`（以及仍在线的旧 `quota_jiurelay`）；发模板 **`quota_platform_restored`** → [产品公告文案模板 §4.2](/docs/05-平台与运维/产品公告文案模板.md) |
@@ -168,7 +170,7 @@ OpenCode 两条 OpenAI 兼容上游，**计费与目录不同，必须按精确 
 
 **Go 订阅共享限额（不得省略）**：OpenCode Go 的 5 小时 $12 / 周 $30 / 月 $60 是**整个订阅共享**，不是按 AgentCore 用户分。单账号窗口打满时池会换到下一个号；**全池**打满时全体用户一起被挡（产品侧每用户 ¥10 额度拦不住这条上游共享帽）。上游类型是 **`GoUsageLimitError`（429）**，不是 `CreditsError`。兜底见上条 `Use balance`，以及用户侧「接入自己的 Key」。
 
-Admin「供给 · 成本」展示这三个窗口的**我方名义价累计**（Flash 已是同一把 Go 尺 × 冻结 7.2），外加一列按公开单价读时估算的美元（`GET /v1/admin/usage/go-windows`）——人民币列用来在撞 429 时对上「那一刻我们记了多少」；美元列只用来看离 $12 / $30 / $60 还有多远。**禁止**把任一列当成上游账单或余额。冻结 7.2 是产品编码，不是 live 汇率。估算有两处未证死：Go 计入窗口前可能乘未公开的 `costMultiplier`（产品侧用 `GO_COST_MULTIPLIER`，默认 1）；上游网关是否识别 DeepSeek cache 命中未经实包验证，若不识别则估算偏低。空池时月窗锚 `PLATFORM_GO_SUBSCRIPTION_DAY`（UTC 日，短月钳到月末），须配成 env 那把 key 的真实 Go 订阅日，默认 1 只是能启动的回退。池中每个成员带自己的订阅日（号是分批买的，锚点不同）；响应 `members[]` 按账号拆窗。周窗按 UTC 周一；5 小时是固定窗 + 空闲超窗归零，不是近 5 小时滑动求和。→ [管理员后台](/docs/05-平台与运维/管理员后台.md)
+Admin「供给 · 成本」展示这三个窗口的**我方名义价累计**（Flash = DeepSeek 中文官价，已在 `calculate_cost` 入账），外加一列按 Go 公开单价读时估算的美元（`GET /v1/admin/usage/go-windows`）——人民币列用来在撞 429 时对上「那一刻我们记了多少」；美元列只用来看离 $12 / $30 / $60 还有多远。**禁止**把任一列当成上游账单或余额。估算有两处未证死：Go 计入窗口前可能乘未公开的 `costMultiplier`；上游网关是否识别 DeepSeek cache 命中未经实包验证，若不识别则估算偏低。空池时月窗锚 `PLATFORM_GO_SUBSCRIPTION_DAY`（UTC 日，短月钳到月末），须配成 env 那把 key 的真实 Go 订阅日，默认 1 只是能启动的回退。池中每个成员带自己的订阅日（号是分批买的，锚点不同）；响应 `members[]` 按账号拆窗。周窗按 UTC 周一；5 小时是固定窗 + 空闲超窗归零，不是近 5 小时滑动求和。→ [管理员后台](/docs/05-平台与运维/管理员后台.md)
 
 **隐私**：Go 路上的 DeepSeek 走 zero-retention（ZDR **声明写到 2026-08-31，且按月续约**，以 OpenCode 当期条款为准；**不得写成永久承诺**，月底复查）。与 Zen `-free`「限时免费、可能用于改进模型」不是同一事实；公告与对外叙述不得沿用免费档措辞，也不得把 Go 说成免费或无限。
 

@@ -297,7 +297,7 @@ def test_resync_binding_follows_hot_graph_merge():
     落在共享 _base_tool_context 上。回绑前工具面判空（复现「CEO 用正文收口、把在跑
     的队员甩成 detached」），回绑后协调四件套装上。
 
-    跨回合 append 进【已收口】的图现在改走「新图 + prev_execution_id」不再改绑；
+    跨回合已收口图走「新图 + prev_execution_id」不再改绑；
     同回合合入热图仍走 tool.py 的改绑，本钉照旧有效。跨回合 live 图的 adopt 绑定
     不得被尚无 session 的本回合 mint 冲掉——见
     ``test_resync_binding_preserves_adopted_live_when_mint_has_no_session``。
@@ -516,7 +516,7 @@ def _assemble(
 def test_assembled_idle_surface_split():
     """闲聊态：delegate / ask_user / debate 与协调套件都在开场表。
 
-    ``consult`` is has_entries-gated via async ``wire_ceo_consult`` (not in sync assemble).
+    ``consult`` is hand-wired via async ``wire_ceo_consult`` (not in sync assemble).
     debate 已装配即进 OpenAI 表；idle 的 wait/replan 在 execute 失败。
     """
     reg = _assemble()
@@ -565,14 +565,14 @@ def test_register_always_ceo_tools_declare_loop():
     names = set(reg.names)
     assert "folders" in names
     assert "create_folder" not in names
-    assert "consult" not in names  # CeoWire.CONSULT — hand-wired with has_entries
+    assert "consult" not in names  # CeoWire.CONSULT — hand-wired, not ALWAYS helper
     assert names.isdisjoint(
         {"delegate", "debate", "ask_user", "remember", "wait", "code_search"}
     )
 
 
 def test_assembled_omits_retired_read_image():
-    """read_image 已卸：图走 file_read / 贴图原生多模态。"""
+    """read_image 已卸：图走 read / 贴图原生多模态。"""
     names = set(_assemble().names)
     assert "read_image" not in names
     names_reader = set(_assemble(vision_reader=object()).names)
@@ -593,15 +593,6 @@ def test_assembled_coordination_surface_split():
     finally:
         clear_active_coordination()
         current_execution_id.reset(token)
-
-
-def test_debate_and_review_listed_in_idle_directory():
-    """debate 仍注册 ⇒ debate_and_review（requires_tools=debate）闲聊态回到按需目录。"""
-    from agentcore.runtime.skills import build_system_skill_registry, render_skill_directory
-
-    idle_names = set(_assemble().names)
-    directory = render_skill_directory(build_system_skill_registry(), idle_names)
-    assert "debate_and_review" in directory
 
 
 # --- COST-004 tools 面 token 口径 --------------------------------------------
@@ -638,7 +629,7 @@ def test_a_chinese_schema_no_longer_reads_as_a_quarter_of_its_chars(monkeypatch)
 def test_an_ascii_schema_band_brackets_the_classic_four_chars_per_token(monkeypatch):
     line = _tools_offered_line(
         monkeypatch,
-        [{"function": {"name": "file_read", "description": "Read a file and return its text."}}],
+        [{"function": {"name": "read", "description": "Read a file and return its text."}}],
     )
     assert line["cjk_chars"] == 0
     assert line["approx_tokens_low"] <= line["total_chars"] // 4 <= line["approx_tokens_high"]

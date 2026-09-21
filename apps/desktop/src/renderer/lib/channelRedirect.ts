@@ -16,13 +16,11 @@ export const CHANNEL_REDIRECT_FACE: Record<
   { label: string; toolName: string }
 > = {
   source_grep_redirect: { label: "改用搜索", toolName: "grep" },
-  source_dump_redirect: { label: "改用读文件", toolName: "file_read" },
+  source_dump_redirect: { label: "改用读文件", toolName: "read" },
   long_running_redirect: { label: "改用终端", toolName: "terminal" },
-  not_a_web_url: { label: "改用读文件", toolName: "file_read" },
+  not_a_web_url: { label: "改用读文件", toolName: "read" },
   url_not_workspace_path: { label: "改用读网页", toolName: "web_fetch" },
   loopback_host: { label: "改用本机查看", toolName: "browser" },
-  shell_fetch_redirect: { label: "改用读网页", toolName: "web_fetch" },
-  shell_download_redirect: { label: "改用下载", toolName: "download_url" },
 };
 
 export function isChannelRedirectCode(

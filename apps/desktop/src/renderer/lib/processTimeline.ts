@@ -599,7 +599,7 @@ export function timelineNodeKeys(nodes: TimelineNode[]): string[] {
  * the answer can never be hidden inside a collapsed group.
  *
  * CEO-bubble *process summary* collapse is a separate gate ({@link processFoldMask}):
- * non-trailing content (旁白) folds with reasoning/tools; the trailing answer does not.
+ * reasoning / tools fold; every `content` step stays out (中间正文 ≠ 旁白).
  */
 export function groupToolRuns(process: ProcessStep[]): TimelineNode[] {
   const nodes: TimelineNode[] = [];
@@ -629,55 +629,50 @@ export function groupToolRuns(process: ProcessStep[]): TimelineNode[] {
 
 const EMPTY_PENDING_GATES: ReadonlySet<string> = new Set();
 
-function nextPaintedIndex(
-  nodes: readonly TimelineNode[],
-  fromExclusive: number,
-): number {
-  const i = fromExclusive + 1;
-  return i < nodes.length ? i : -1;
-}
-
 /**
- * Indices of the trailing painted content run — the answer.
- * Leftover retired kinds are already dropped by {@link groupToolRuns}.
+ * Visual lane after fold (CEO bubble). Not a protocol change.
+ *
+ * - `chrome` — reasoning / tools / resolved gates (the process)
+ * - `answer` — every user-visible `content` step（含中间段）
+ * - `slot` — team graph / pending gate / interjection / escalation
+ *
+ * Collapsed summary is a caption over `answer`, not a `chrome` row.
  */
-export function trailingAnswerContentIndices(
-  nodes: readonly TimelineNode[],
-): ReadonlySet<number> {
-  const out = new Set<number>();
-  let i = nodes.length - 1;
-  while (i >= 0 && nodes[i].kind === "content") {
-    out.add(i);
-    i--;
-  }
-  return out;
-}
+export type ProcessTurnLane = "chrome" | "answer" | "slot";
 
-function isContentBeforePendingCheckpoint(
-  nodes: readonly TimelineNode[],
-  index: number,
-  pendingCheckpointIds: ReadonlySet<string>,
-): boolean {
-  if (nodes[index]?.kind !== "content" || pendingCheckpointIds.size === 0) {
-    return false;
+export function processTurnLane(
+  node: TimelineNode,
+  folded: boolean,
+): ProcessTurnLane {
+  switch (node.kind) {
+    case "content":
+      return "answer";
+    case "team":
+    case "user_interjection":
+    case "escalation":
+      return "slot";
+    case "checkpoint":
+      return folded ? "chrome" : "slot";
+    case "reasoning":
+    case "tool":
+    case "tool-group":
+    case "approval":
+      return "chrome";
+    default:
+      return assertNever(node);
   }
-  const j = nextPaintedIndex(nodes, index);
-  if (j < 0) return false;
-  const n = nodes[j];
-  return n.kind === "checkpoint" && pendingCheckpointIds.has(n.checkpoint_id);
 }
 
 /**
  * CEO 气泡完成态过程折：true = 收进「Thought · Used tools」摘要。
- * 末段正文、待拍板检查点前的正文、待拍板检查点、图 / 插话不进折。
- * 已答复 ask 进折。纯渲染；不改 process[] / journal / conformance。
+ * 用户可见正文（含中间段）/ 待拍板 / 图 / 插话不进折；已答复 ask 进折。
+ * 纯渲染；不改 process[] / journal / conformance。
  */
 export function processFoldMask(
   nodes: readonly TimelineNode[],
   pendingGateIds: ReadonlySet<string> = EMPTY_PENDING_GATES,
 ): boolean[] {
-  const trailing = trailingAnswerContentIndices(nodes);
-  return nodes.map((node, index) => {
+  return nodes.map((node) => {
     switch (node.kind) {
       case "reasoning":
       case "tool":
@@ -687,8 +682,7 @@ export function processFoldMask(
       case "checkpoint":
         return !pendingGateIds.has(node.checkpoint_id);
       case "content":
-        if (trailing.has(index)) return false;
-        return !isContentBeforePendingCheckpoint(nodes, index, pendingGateIds);
+        return false;
       default:
         return false;
     }

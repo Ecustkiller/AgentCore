@@ -68,7 +68,6 @@ const fsApi: FsApi = {
   grantSessionRun: async () => {},
   reveal: async () => fail(),
   openPath: async () => fail(),
-  copyPath: async () => fail(),
   trashPath: async () => fail(),
   listWorkspaceTrash: async () => fail(),
   restoreWorkspaceTrash: async () => fail(),
@@ -125,6 +124,7 @@ const sidecarApi: SidecarApi = {
   probe: async () => {},
   warmMcpDiscover: async () => {},
   warmAccountRulesMemory: async () => {},
+  warmLlmHttp: async () => {},
   refreshLiveAccountRulesMemory: async () => {},
   recovery: async () => ({
     liveRunning: false,

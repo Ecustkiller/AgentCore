@@ -3,8 +3,10 @@
 import time
 
 # 全员基座（CEO + 每位 worker）：只写两工种同真的句子。一段无标签。
-# 开场并发；中段输出形状（emoji 吸引子；已写进文件则给路径、要点和增量；跟用户语言；
-# 适合可视化则优先呈现，不点 mermaid / 不教分隔符）；末句诚实（主张对得上回执·编号·工具表·按需目录）。
+# 开场并发；中段输出形状（emoji 吸引子；跟用户语言；
+# 适合可视化则优先呈现，不点 mermaid / 不教分隔符）；末句诚实（已做以这回合回执为准）。
+# 来源编号在回执尾；目录行 ≠ 已查阅在 `<按需目录>` 前言，不进本基座。
+# 「已写进文件则结论给路径」不进本基座：条件句每回合都在，会被读成催写盘。写盘场面才成立，不预写进常驻。
 # 听谁的：真用户 role=user；引擎信封/纠偏 = [系统提示] 围栏的合成 user；回执 role=tool。
 # 不进本基座。用户指令 vs <设定>：设定块前言 + 路由硬约束。
 # 工种不对称（卡住问谁）进工具 description。CEO 工厂身份现空（回潮走入场闸）。路由在 delegate description。
@@ -17,14 +19,13 @@ import time
 # 凭据落盘：写侧熔断硬拒。不进本基座。
 # 某时刻长到需要目录再套该时刻标签；不要预留空壳。
 _DEFAULT_SYSTEM_PROMPT = """\
-互不依赖的工具调用同一轮会被并发执行。不使用 emoji。完整稿已经写进文件时，结论是路径、要点和文件里没有的增量。\
-用与用户相同的语言回复。适合可视化的内容，优先采用可视化呈现。主张须对得上这回合的工具回执、来源编号、工具表或按需目录。"""
+互不依赖的工具调用同一轮会被并发执行。不使用 emoji。\
+用与用户相同的语言回复。适合可视化的内容，优先采用可视化呈现。对用户说已做的，以这回合回执为准。"""
 
-# Date granularity (NOT second-precision time) on purpose. CEO: this block rides
-# the per-turn user envelope (history can stay in the exact-prefix cache when the
-# date/workspace/ledger change). Workers this slice: still spliced into system
-# after the shared base. A date is byte-identical within a day. Time-of-day, if
-# ever needed, stays out of the frozen system prefix.
+# Date granularity (NOT second-precision time) on purpose. CEO and workers:
+# this block rides a per-turn ``[系统提示]`` envelope so ``role: system`` stays
+# frozen. A date is byte-identical within a day. Time-of-day stays out of the
+# frozen system prefix.
 _RUNTIME_CONTEXT_TEMPLATE = """
 <运行时>
 当前日期：{date}
@@ -32,7 +33,7 @@ _RUNTIME_CONTEXT_TEMPLATE = """
 
 
 def render_runtime_date_block() -> str:
-    """``<运行时>`` date line — CEO envelope and worker system share this render."""
+    """``<运行时>`` date line — CEO and worker envelopes share this render."""
     return _RUNTIME_CONTEXT_TEMPLATE.format(
         date=time.strftime("%Y-%m-%d %Z", time.localtime())
     ).strip()

@@ -7,7 +7,8 @@ import type { ComponentProps } from "react";
  * Right-click context-menu primitives over Radix — pointer positioning, roving
  * focus, type-ahead, outside-click and Esc dismissal are handled for us; we only
  * supply tokenised chrome (matches `dropdown-menu.tsx` so menus look identical
- * regardless of how they're triggered). Wrap the right-clickable surface with
+ * regardless of how they're triggered, including hug width
+ * `min-w-36 max-w-64`). Wrap the right-clickable surface with
  * `ContextMenuTrigger` (`asChild`) and put items in `ContextMenuContent`.
  */
 export const ContextMenu = ContextMenuPrimitive.Root;
@@ -28,7 +29,7 @@ export function ContextMenuContent({
       <ContextMenuPrimitive.Portal>
         <ContextMenuPrimitive.Content
           className={cn(
-            "z-50 min-w-44 overflow-hidden rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-overlay",
+            "z-50 min-w-36 max-w-64 overflow-hidden rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-overlay",
             "data-[state=open]:animate-dropdown-in",
             className,
           )}
@@ -53,7 +54,7 @@ export function ContextMenuItem({
   return (
     <ContextMenuPrimitive.Item
       className={cn(
-        "flex w-full cursor-default select-none items-center gap-2 px-3 py-1.5 text-left text-sm outline-none transition-colors",
+        "flex w-full min-w-0 cursor-default select-none items-center gap-2 px-3 py-1.5 text-left text-sm outline-none transition-colors",
         "focus:bg-accent data-[highlighted]:bg-accent",
         variant === "danger"
           ? "text-destructive focus:text-destructive data-[highlighted]:text-destructive"

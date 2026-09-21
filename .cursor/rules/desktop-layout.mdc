@@ -7,7 +7,7 @@ alwaysApply: false
 
 # 桌面端布局规范
 
-完整规格（宽度梯度、padding、字体、圆角、按钮、图标） → [`UI-Pattern索引.md` §桌面端布局规格](/docs/04-前端/UI-Pattern索引.md)。
+完整规格（宽度梯度、padding、字体、圆角、间距、按钮、图标） → [`UI-Pattern索引.md` §布局规格](/docs/04-前端/UI-Pattern索引.md)。
 
 ## 速查
 
@@ -18,8 +18,9 @@ alwaysApply: false
 | 对话页 | `max-w-3xl mx-auto` | 消息区 + 输入区（768px） |
 | IM 会话列 | `max-w-[52rem] mx-auto` | 消息页右栏：消息区 + 输入区（832px；≠ 对话页 768px） |
 | 鉴权列 | `max-w-xs mx-auto` | 登录/注册/找回、服务不可用；admin 登录/强制改密/居中闸同源（320px）。MFA 设密钥/恢复码内容更密，仍 `max-w-md` |
+| 动作菜单 | `min-w-36 max-w-64` | `DropdownMenu` / `ContextMenu` hug 最长项（144–256px）。只写在 L2 primitive；调用方禁止再写 `min-w-*` / `max-w-*` / `w-*`。权威 → [`UI-Pattern索引.md` · 动作菜单宽度](/docs/04-前端/UI-Pattern索引.md#动作菜单宽度) |
 
-自有布局豁免：对话页、文件页、设置页、全屏页、消息页两栏壳不走 content/canvas 梯度。消息页右栏内走 IM 会话列。工具箱（含提示词）走 `PageContainer` `canvas` + `padding page`，与创作同一套画布留白。
+自有布局豁免：对话页、文件页、设置页、全屏页、消息页两栏壳不走 content/canvas 梯度。消息页右栏内走 IM 会话列。工具箱（含提示词）走 `PageContainer` `canvas` + `padding page`。
 
 窄屏（`<768px`）：`AppShell` 收成 ☰ overlay 侧栏 + 右坞全屏 sheet，**不要**把侧栏和 ≥280px 坞挤进主列。权威 → [前端技术 §五](/docs/04-前端/前端技术与架构.md)。字号仍 4 级：`sm` 14→16、`base` 16→17，`xs`/`xl` 不动（按钮、工具行保持密度）；`.markdown-body` 必须走 token。实现 → `globals.css`。
 
@@ -29,10 +30,25 @@ alwaysApply: false
 
 - 产品工作面：一行标题（+ 右动作 / 同行 `meta`）。禁止 h1 下第二行说明。种类页 / 侧栏面板同样禁止标题下 lede。
 - 说明**默认不写**。只有会改变下一步的约束才落字段 hint / 区块 description（一句）/ `EmptyHint` 下一步。卡片/磁贴条目摘要不是页头，保留。不可逆后果只活在确认框。
-- 一律 `PageHeader`：单行标题 + 可选同行 meta / 右动作；工具箱深页传 `back`。窄屏返回栏已点名则不画 h1。**否决**用模式开关（如「我的 | 市场」）下划线 tab 顶替标题。页内切块用 `SectionTabs`（选中 accent 胶囊，不走 inverse）；表单里就地互斥用 `SegmentedControl`，不要混。工具箱壳：侧栏已点名，不重复可见 h1；顶栏 = 种类 `SectionTabs` + 右槽市场 → [前端 UX · 工具箱](/docs/04-前端/前端UX设计.md)。认路选中规范 → [`UI-Pattern索引.md` · 认路选中](/docs/04-前端/UI-Pattern索引.md)。
+- 一律 `PageHeader`：单行标题 + 可选同行 meta / 右动作。窄屏返回栏已点名则不画 h1。**否决**用模式开关（如「我的 | 市场」）下划线 tab 顶替标题。页内切块用 `SectionTabs`（选中 accent 胶囊，不走 inverse）；表单里就地互斥用 `SegmentedControl`，不要混。工具箱不画可见标题（侧栏已点名）：一行 `SectionTabs` 在左（官方 / 我的 / MCP / 市场；无本机通道不画 MCP），搜索在右（「我的」同行「新建」，「MCP」同行「添加」）；不可见 h1 留滚动锚。不把提示词 / 出厂工具拆成种类 tab。→ [前端 UX · 工具箱](/docs/04-前端/前端UX设计.md)。认路选中规范 → [`UI-Pattern索引.md` · 认路选中](/docs/04-前端/UI-Pattern索引.md)。
 - 页顶留白与对话管理页对齐：`PageContainer` / 设置内容列 `py-6`。
+
+## 间距（竖向块距）
+
+权威（何时用哪档）→ [`UI-Pattern索引.md` · 间距档](/docs/04-前端/UI-Pattern索引.md#间距档)。过程折实现：`.process-turn`。
+
+| 档 | 类 | 用在 |
+|---|---|---|
+| row | `mt-2` / `gap-2` / `space-y-2` / `0.5rem` | 过程行、caption↔答案、展开头↔体 |
+| block | `mt-3` / `0.75rem` | 协作图 / 待拍板 / 插话；Markdown 段 |
+| section | `space-y-4` | ChatView 列 |
+| turn | `space-y-6` / `py-6` | 消息与消息；页面留白 |
+
+行内图标组 `gap-0.5`、图标+标签 `gap-1.5` 不是竖向档。
 
 ## 禁止
 
 - **字号**：禁 `text-[10px]`/`text-[11px]`/`text-[13px]`/`text-lg` 及自定义像素值（4 级：xs/sm/base/xl）。
 - **圆角**：禁 `rounded-sm`/`rounded-md`/`rounded-2xl`/`rounded-3xl`（3 级：lg/xl/full）。
+- **竖向块距**：过程折 / caption / 槽禁 `mt-1.5`、`space-y-1.5`、4px caption。新写选上表四档。
+- **动作菜单宽度**：禁在 `DropdownMenuContent` / `ContextMenuContent` 手写 `min-w-*` / `max-w-*` / `w-*`（高 `max-h-*` 除外）。宽只走 L2 primitive。名单 / 筛选走 `Popover`，不要给动作菜单抬到侧栏宽或 Dialog 档。

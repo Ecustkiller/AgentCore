@@ -7,8 +7,8 @@ that still exist on disk (tool self-report is not enough; see
 Contract failures that name a path reject that path even when the
 run soft-COMPLETEDs — so soft-COMPLETED must not smuggle those paths into the
 delivered list. Declared artifact / ``artifact_dir`` vs landed path: exact / dir / glob after
-normalize, **or** the write-sanitizer flatten (dossier nested ``a/b.md`` →
-``a_b.md``). A landed path that misses the declaration is omitted from the card **when
+normalize, **or** the write-sanitizer (unsafe chars / reserved names). A landed path that misses the
+declaration is omitted from the card **when
 the declared path did land** (backups). If the pin missed, extras stay on
 the card — they are the product. Missing declared paths are a
 ``path_mismatch`` **warning** gap, not a row on the extra file, and do not
@@ -59,8 +59,8 @@ def landed_matches_declared(landed: str, declared: str) -> bool:
 
     Exact equality after normalize; trailing-``/`` is a directory prefix; glob
     chars in the declaration match the full relative path only. File patterns
-    also match the write-sanitizer flatten so ``工作稿/主题/01.md`` equals the
-    landed ``工作稿/主题_01.md``.
+    also match the write-sanitizer so declared unsafe-char names equal the
+    cleaned landed path.
     """
     actual = normalize_delivery_relpath(landed)
     pattern = normalize_delivery_relpath(declared)

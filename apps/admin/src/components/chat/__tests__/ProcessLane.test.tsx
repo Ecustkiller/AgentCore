@@ -71,18 +71,18 @@ describe("ProcessLane", () => {
   it("groups consecutive tools and hides names until the group opens", () => {
     render(
       <ProcessLane
-        steps={[tool("grep", "g1"), tool("file_read", "f1"), tool("write", "w1")]}
+        steps={[tool("grep", "g1"), tool("read", "f1"), tool("write", "w1")]}
       />,
     );
     expect(screen.getByText("使用 3 个工具")).toBeTruthy();
     expect(screen.queryByText("grep")).toBeNull();
-    expect(screen.queryByText("file_read")).toBeNull();
+    expect(screen.queryByText("read")).toBeNull();
 
     fireEvent.click(screen.getByText("使用 3 个工具"));
     const groupButtons = screen.getAllByText("使用 3 个工具");
     fireEvent.click(groupButtons[groupButtons.length - 1]!);
     expect(screen.getByText("grep")).toBeTruthy();
-    expect(screen.getByText("file_read")).toBeTruthy();
+    expect(screen.getByText("read")).toBeTruthy();
     expect(screen.getByText("write")).toBeTruthy();
   });
 
@@ -184,5 +184,21 @@ describe("ProcessLane", () => {
       />,
     );
     expect(screen.queryByText(/推进/)).toBeNull();
+  });
+
+  it("keeps mid-content when hideContentSteps only omits the trailing answer", () => {
+    render(
+      <ProcessLane
+        hideContentSteps
+        steps={[
+          { kind: "content", text: "我先找日志" },
+          tool("web_search", "t1"),
+          { kind: "content", text: "清晰度是 1080p" },
+        ]}
+      />,
+    );
+    expect(screen.getByText("我先找日志")).toBeTruthy();
+    expect(screen.queryByText("清晰度是 1080p")).toBeNull();
+    expect(screen.getByText("使用 1 个工具")).toBeTruthy();
   });
 });

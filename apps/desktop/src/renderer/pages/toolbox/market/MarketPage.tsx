@@ -1,3 +1,4 @@
+import { PageContainer } from "@/components/layout/PageContainer";
 import { PromptDocument } from "@/components/prompt/PromptDocument";
 import {
   Badge,
@@ -19,13 +20,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { artifactColorVar } from "@/lib/catalogColors";
-import { MARKET_CATALOG_CAPTION } from "@/lib/skillStoreCopy";
-import { notifyError, notifySuccess } from "@/lib/toast";
 import {
-  type MarketKind,
-  TOOLBOX_KIND_LABEL,
-  isMarketKind,
-} from "@/pages/toolbox/kinds";
+  MARKET_CATALOG_CAPTION,
+  MARKET_OFFERS_CAPTION,
+} from "@/lib/skillStoreCopy";
+import { notifyError, notifySuccess } from "@/lib/toast";
+import { ToolboxSourceTabs } from "@/pages/toolbox/ToolboxSourceTabs";
+import { TOOLBOX_PROMPT_NOUN } from "@/pages/toolbox/kinds";
 import { ShelfRail } from "@/pages/toolbox/market/ShelfRail";
 import { StoreListingCard } from "@/pages/toolbox/market/StoreListingCard";
 import {
@@ -58,7 +59,6 @@ import { Loader2, Store } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
-const SHELF_CAP = 12;
 const SKILL_GRID_CLASS = `mt-3 ${CATALOG_GRID_CLASS}`;
 
 function errMsg(err: unknown, fallback: string): string {
@@ -79,17 +79,15 @@ function installCta(row: { hasUpdate: boolean; installed: boolean }): {
 }
 
 function searchLabel(): string {
-  return `搜索${TOOLBOX_KIND_LABEL.skills}`;
+  return `搜索${TOOLBOX_PROMPT_NOUN}`;
 }
 
 /**
- * 工具箱 · 市场：技能货架。发现首页按集合折行网格（封顶 + 查看全部）；
- * 查看全部 / 分组 chip 进网格；搜索切到结果面。
+ * 工具箱 · 市场：技能货架深页。进场即整库（库顶官方精选 + 有货的场景组）；
+ * 分组 chip 在顶栏下一行，筛一组；搜索在顶栏右侧，切到结果面。顶栏与目录同三栏。
  */
 export function MarketPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const kindParam = searchParams.get("kind");
-  const kind = isMarketKind(kindParam) ? kindParam : null;
   const groupParam = searchParams.get("group");
   const skillGroup = isSkillStoreGroup(groupParam) ? groupParam : null;
 
@@ -215,29 +213,17 @@ export function MarketPage() {
     }
   };
 
-  const setKind = (next: MarketKind | null) => {
-    const params = new URLSearchParams(searchParams);
-    if (next) params.set("kind", next);
-    else params.delete("kind");
-    if (next !== "skills") params.delete("group");
-    const search = params.toString();
-    setSearchParams(search ? params : {}, { replace: true });
-  };
-
   const setGroup = (next: SkillStoreGroup | null) => {
     const params = new URLSearchParams(searchParams);
-    if (next) {
-      params.set("kind", "skills");
-      params.set("group", next);
-    } else {
-      params.delete("group");
-    }
+    params.delete("kind");
+    if (next) params.set("group", next);
+    else params.delete("group");
     const search = params.toString();
     setSearchParams(search ? params : {}, { replace: true });
   };
 
   const searching = Boolean(debouncedQ);
-  const discover = !searching && kind == null && skillGroup == null;
+  const browsingAll = !searching && skillGroup == null;
   const featured = useMemo(
     () => items.filter((row) => isOfficialAuthor(row.author)),
     [items],
@@ -248,13 +234,14 @@ export function MarketPage() {
         ...g,
         rows: items.filter(
           (row) =>
-            row.group === g.id && !(discover && isOfficialAuthor(row.author)),
+            row.group === g.id &&
+            !(browsingAll && isOfficialAuthor(row.author)),
         ),
       })).filter((g) => g.rows.length > 0),
-    [items, discover],
+    [items, browsingAll],
   );
   const visibleGroupChips = SKILL_STORE_GROUPS.filter((g) => groups[g.id] > 0);
-  const featuredRail = discover ? featured.slice(0, SHELF_CAP) : [];
+  const featuredRail = browsingAll ? featured : [];
   const cta = selected ? installCta(selected) : null;
   const selectedCopy = selected ? listingCopy(selected) : null;
   const description = detail?.description || selected?.description || "";
@@ -262,31 +249,28 @@ export function MarketPage() {
     Boolean(description) && selectedCopy?.title !== description;
   const offeredTools = detail?.content ? parseOffersTools(detail.content) : [];
   const skillBody = detail?.content ? skillBodyFromContent(detail.content) : "";
-  const hasMore =
-    (searching || skillGroup != null) &&
-    items.length < total &&
-    !loading &&
-    !discover;
+  const hasMore = items.length < total && !loading && !error;
   const queryLabel = searchLabel();
-  const seeAllSkills = {
-    label: "查看全部",
-    onClick: () => setKind("skills"),
-  };
   const skillsEmpty = !loading && items.length === 0 && !error;
   const searchMiss = searching && !loading && !error && items.length === 0;
-  const discoverEmpty = discover && skillsEmpty;
+  const catalogEmpty = browsingAll && skillsEmpty;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 flex-col gap-2">
-        <SearchField
-          aria-label={queryLabel}
-          placeholder={queryLabel}
-          value={q}
-          onValueChange={setQ}
-        />
+    <PageContainer width="canvas" fill padding="page">
+      <ToolboxSourceTabs
+        action={
+          <SearchField
+            aria-label={queryLabel}
+            placeholder={queryLabel}
+            value={q}
+            onValueChange={setQ}
+            className="w-52"
+          />
+        }
+      />
+      <div className="flex min-h-0 flex-1 flex-col">
         {!searching && visibleGroupChips.length > 0 ? (
-          <fieldset className="m-0 flex flex-wrap gap-1.5 border-0 p-0">
+          <fieldset className="m-0 mt-3 flex shrink-0 flex-wrap gap-1.5 border-0 p-0">
             <legend className="sr-only">提示词分组</legend>
             {visibleGroupChips.map((g) => {
               const pressed = skillGroup === g.id;
@@ -306,68 +290,59 @@ export function MarketPage() {
             })}
           </fieldset>
         ) : null}
-      </div>
 
-      {error ? (
-        <p className="mt-4 shrink-0 text-sm text-muted-foreground" role="alert">
-          {error}
-        </p>
-      ) : null}
+        {error ? (
+          <p
+            className="mt-4 shrink-0 text-sm text-muted-foreground"
+            role="alert"
+          >
+            {error}
+          </p>
+        ) : null}
 
-      <div className="mt-6 min-h-0 flex-1 overflow-y-auto">
-        <div data-testid="skill-store-shelf">
-          {discover && featuredRail.length > 0 ? (
-            <ShelfRail title="官方精选" action={seeAllSkills}>
-              {featuredRail.map((row) => (
-                <StoreListingCard
-                  key={row.id}
-                  row={row}
-                  onOpen={() => setOpenId(row.id)}
-                />
-              ))}
-            </ShelfRail>
-          ) : null}
+        <div className="mt-6 min-h-0 flex-1 overflow-y-auto">
+          <div data-testid="skill-store-shelf">
+            {browsingAll && featuredRail.length > 0 ? (
+              <ShelfRail title="官方精选">
+                {featuredRail.map((row) => (
+                  <StoreListingCard
+                    key={row.id}
+                    row={row}
+                    onOpen={() => setOpenId(row.id)}
+                  />
+                ))}
+              </ShelfRail>
+            ) : null}
 
-          {discover
-            ? groupRails.map((g) => (
-                <ShelfRail
-                  key={g.id}
-                  title={g.label}
-                  action={{
-                    label: "查看全部",
-                    onClick: () => setGroup(g.id),
-                  }}
-                >
-                  {g.rows.slice(0, SHELF_CAP).map((row) => (
-                    <StoreListingCard
-                      key={row.id}
-                      row={row}
-                      onOpen={() => setOpenId(row.id)}
-                    />
-                  ))}
-                </ShelfRail>
-              ))
-            : null}
+            {browsingAll
+              ? groupRails.map((g) => (
+                  <ShelfRail key={g.id} title={g.label}>
+                    {g.rows.map((row) => (
+                      <StoreListingCard
+                        key={row.id}
+                        row={row}
+                        onOpen={() => setOpenId(row.id)}
+                      />
+                    ))}
+                  </ShelfRail>
+                ))
+              : null}
 
-          {!discover &&
-          (items.length > 0 ||
-            loading ||
-            kind === "skills" ||
-            skillGroup != null) ? (
-            <>
-              {loading && items.length === 0 ? (
-                <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground text-sm">
-                  <Loader2 size={16} className="animate-spin" />
-                  加载中…
-                </div>
-              ) : null}
-              {searching || skillGroup != null ? (
-                items.length > 0 ? (
+            {!browsingAll &&
+            (items.length > 0 || loading || skillGroup != null) ? (
+              <>
+                {loading && items.length === 0 ? (
+                  <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground text-sm">
+                    <Loader2 size={16} className="animate-spin" />
+                    加载中…
+                  </div>
+                ) : null}
+                {items.length > 0 ? (
                   <>
                     <SectionLabel>
                       {skillGroup
                         ? skillStoreGroupLabel(skillGroup)
-                        : TOOLBOX_KIND_LABEL.skills}
+                        : TOOLBOX_PROMPT_NOUN}
                     </SectionLabel>
                     <div className={SKILL_GRID_CLASS}>
                       {items.map((row) => (
@@ -378,200 +353,186 @@ export function MarketPage() {
                         />
                       ))}
                     </div>
-                    {hasMore ? (
-                      <div className="mt-4 flex justify-center">
-                        <Button
-                          variant="neutral"
-                          disabled={loading}
-                          onClick={() => void load(page + 1, debouncedQ)}
-                        >
-                          更多
-                        </Button>
-                      </div>
-                    ) : null}
                   </>
-                ) : null
-              ) : (
-                groupRails.map((g) => (
-                  <section key={g.id} className="mb-8">
-                    <SectionLabel>{g.label}</SectionLabel>
-                    <div className={SKILL_GRID_CLASS}>
-                      {g.rows.map((row) => (
-                        <StoreListingCard
-                          key={row.id}
-                          row={row}
-                          onOpen={() => setOpenId(row.id)}
-                        />
-                      ))}
-                    </div>
-                  </section>
-                ))
-              )}
-            </>
+                ) : null}
+              </>
+            ) : null}
+
+            {browsingAll && loading && items.length === 0 ? (
+              <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground text-sm">
+                <Loader2 size={16} className="animate-spin" />
+                加载中…
+              </div>
+            ) : null}
+
+            {hasMore ? (
+              <div className="mt-4 flex justify-center">
+                <Button
+                  variant="neutral"
+                  disabled={loading}
+                  onClick={() => void load(page + 1, debouncedQ)}
+                >
+                  更多
+                </Button>
+              </div>
+            ) : null}
+
+            {skillsEmpty && skillGroup != null ? (
+              <EmptyHint
+                className="mt-10"
+                title={`还没有${TOOLBOX_PROMPT_NOUN}`}
+              />
+            ) : null}
+          </div>
+
+          {catalogEmpty ? (
+            <EmptyHint className="mt-10" title="还没有可安装的内容" />
           ) : null}
 
-          {discover && loading && items.length === 0 ? (
-            <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground text-sm">
-              <Loader2 size={16} className="animate-spin" />
-              加载中…
-            </div>
-          ) : null}
-
-          {skillsEmpty &&
-          !searching &&
-          (kind === "skills" || skillGroup != null) ? (
+          {searchMiss ? (
             <EmptyHint
               className="mt-10"
-              title={`还没有${TOOLBOX_KIND_LABEL.skills}`}
+              title="没有匹配的结果"
+              hint="换个关键词试试。"
             />
           ) : null}
         </div>
 
-        {discoverEmpty ? (
-          <EmptyHint className="mt-10" title="还没有可安装的内容" />
-        ) : null}
-
-        {searchMiss ? (
-          <EmptyHint
-            className="mt-10"
-            title="没有匹配的结果"
-            hint="换个关键词试试。"
-          />
-        ) : null}
-      </div>
-
-      <Dialog
-        open={openId !== null}
-        onOpenChange={(next) => {
-          if (!next && !reportOpen) setOpenId(null);
-        }}
-      >
-        <DialogContent
-          size="lg"
-          className="flex max-h-[min(80vh,36rem)] flex-col"
-          data-testid="skill-store-dialog"
-          onPointerDownOutside={(event) => {
-            if (reportOpen) event.preventDefault();
-          }}
-          onFocusOutside={(event) => {
-            if (reportOpen) event.preventDefault();
+        <Dialog
+          open={openId !== null}
+          onOpenChange={(next) => {
+            if (!next && !reportOpen) setOpenId(null);
           }}
         >
-          <DialogHeader>
-            <div className="flex items-center gap-3">
-              <CatalogIconShell
-                colorVar={artifactColorVar("guidelines")}
-                size="lg"
-              >
-                <Store size={20} />
-              </CatalogIconShell>
-              <div className="min-w-0">
-                <DialogTitle>
-                  {selectedCopy?.title ?? TOOLBOX_KIND_LABEL.skills}
-                </DialogTitle>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {[
-                    selected?.author,
-                    selectedCopy?.ident,
-                    selected?.version ? `v${selected.version}` : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </p>
-              </div>
-            </div>
-          </DialogHeader>
-          <DialogBody className="flex min-h-0 flex-1 flex-col gap-4">
-            {detailError ? (
-              <p className="text-sm text-muted-foreground" role="alert">
-                {detailError}
-              </p>
-            ) : null}
-            {showDescription ? (
-              <div>
-                <p className="text-muted-foreground text-xs">
-                  {MARKET_CATALOG_CAPTION}
-                </p>
-                <p className="mt-1.5 text-sm text-foreground">{description}</p>
-              </div>
-            ) : null}
-            {offeredTools.length > 0 ? (
-              <div data-testid="skill-store-offers">
-                <p className="text-muted-foreground text-xs">
-                  查阅后启用这些手脚（本机没有的不会装上，审批照旧）
-                </p>
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {offeredTools.map((name) => (
-                    <Badge key={name} pill>
-                      {name}
-                    </Badge>
-                  ))}
+          <DialogContent
+            size="lg"
+            className="flex max-h-[min(80vh,36rem)] flex-col"
+            data-testid="skill-store-dialog"
+            onPointerDownOutside={(event) => {
+              if (reportOpen) event.preventDefault();
+            }}
+            onFocusOutside={(event) => {
+              if (reportOpen) event.preventDefault();
+            }}
+          >
+            <DialogHeader>
+              <div className="flex items-center gap-3">
+                <CatalogIconShell
+                  colorVar={artifactColorVar("guidelines")}
+                  size="lg"
+                >
+                  <Store size={20} />
+                </CatalogIconShell>
+                <div className="min-w-0">
+                  <DialogTitle>
+                    {selectedCopy?.title ?? TOOLBOX_PROMPT_NOUN}
+                  </DialogTitle>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {[
+                      selected?.author,
+                      selectedCopy?.ident,
+                      selected?.version ? `v${selected.version}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
                 </div>
               </div>
-            ) : null}
-            {skillBody ? (
-              <PromptDocument
-                text={skillBody}
-                compact={false}
-                maxHeightClass="max-h-none"
-              />
-            ) : null}
-          </DialogBody>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              disabled={busy || !openId}
-              onClick={() => setReportOpen(true)}
-            >
-              举报
-            </Button>
-            {cta ? (
+            </DialogHeader>
+            <DialogBody className="flex min-h-0 flex-1 flex-col gap-4">
+              {detailError ? (
+                <p className="text-sm text-muted-foreground" role="alert">
+                  {detailError}
+                </p>
+              ) : null}
+              {showDescription ? (
+                <div>
+                  <p className="text-muted-foreground text-xs">
+                    {MARKET_CATALOG_CAPTION}
+                  </p>
+                  <p className="mt-1.5 text-sm text-foreground">
+                    {description}
+                  </p>
+                </div>
+              ) : null}
+              {offeredTools.length > 0 ? (
+                <div data-testid="skill-store-offers">
+                  <p className="text-muted-foreground text-xs">
+                    {MARKET_OFFERS_CAPTION}
+                  </p>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {offeredTools.map((name) => (
+                      <Badge key={name} pill>
+                        {name}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {skillBody ? (
+                <PromptDocument
+                  text={skillBody}
+                  compact={false}
+                  maxHeightClass="max-h-none"
+                />
+              ) : null}
+            </DialogBody>
+            <DialogFooter>
               <Button
-                disabled={busy || cta.disabled}
-                onClick={() => {
-                  if (selected) void onInstallSkill(selected);
-                }}
+                variant="outline"
+                disabled={busy || !openId}
+                onClick={() => setReportOpen(true)}
               >
-                {cta.label}
+                举报
               </Button>
-            ) : null}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              {cta ? (
+                <Button
+                  disabled={busy || cta.disabled}
+                  onClick={() => {
+                    if (selected) void onInstallSkill(selected);
+                  }}
+                >
+                  {cta.label}
+                </Button>
+              ) : null}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
-      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
-        <DialogContent size="md">
-          <DialogHeader>
-            <DialogTitle>举报{TOOLBOX_KIND_LABEL.skills}</DialogTitle>
-            <DialogDescription>说明原因，我们会人工查看。</DialogDescription>
-          </DialogHeader>
-          <DialogBody className="space-y-1">
-            <span className="text-muted-foreground text-xs">举报原因</span>
-            <Textarea
-              aria-label="举报原因"
-              rows={4}
-              value={reportReason}
-              onChange={(event) => setReportReason(event.target.value)}
-              disabled={busy}
-            />
-          </DialogBody>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              disabled={busy}
-              onClick={() => setReportOpen(false)}
-            >
-              取消
-            </Button>
-            <Button
-              disabled={busy || !reportReason.trim()}
-              onClick={() => void onReport()}
-            >
-              提交举报
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+        <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+          <DialogContent size="md">
+            <DialogHeader>
+              <DialogTitle>举报{TOOLBOX_PROMPT_NOUN}</DialogTitle>
+              <DialogDescription>说明原因，我们会人工查看。</DialogDescription>
+            </DialogHeader>
+            <DialogBody className="space-y-1">
+              <span className="text-muted-foreground text-xs">举报原因</span>
+              <Textarea
+                aria-label="举报原因"
+                rows={4}
+                value={reportReason}
+                onChange={(event) => setReportReason(event.target.value)}
+                disabled={busy}
+              />
+            </DialogBody>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={() => setReportOpen(false)}
+              >
+                取消
+              </Button>
+              <Button
+                disabled={busy || !reportReason.trim()}
+                onClick={() => void onReport()}
+              >
+                提交举报
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </PageContainer>
   );
 }

@@ -579,10 +579,9 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     escalations: r.escalations.map((e) => ({
       question: e.question,
       assumption: e.assumption,
-      blocking: e.blocking,
       status: e.status,
       answer: e.answer,
-      kind: e.kind ?? "normal",
+      ...(e.kind ? { kind: e.kind } : {}),
       ...(e.awaiting === "ceo" ? { awaiting: "ceo" as const } : {}),
       ...(e.arbitrated_by === "ceo"
         ? {

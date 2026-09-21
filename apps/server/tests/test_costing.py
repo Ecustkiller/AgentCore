@@ -159,13 +159,13 @@ def test_captain_run_cost_from_state_reads_priced_state():
     assert row.cost["cached"] == priced.cached
     assert row.cost["output"] == priced.output
     assert row.cost["total"] == priced.total
-    # Flash = Go 公开价 × 7.2（谷：命中 ¥0.0216 / 未命中 ¥1.08 / 输出 ¥4.32）。
+    # Flash = DeepSeek 中文官价（谷：命中 ¥0.02 / 未命中 ¥1 / 输出 ¥4）。
     assert row.cost["pricing_source"] == "curated"
     assert row.cost_total_nano == priced.total
-    assert row.cost["cached"] == 21_600_000
-    assert row.cost["input"] == 21_600_000 + 1_080_000_000
-    assert row.cost["output"] == 4_320_000_000
-    assert row.cost["total"] == 5_421_600_000
+    assert row.cost["cached"] == 20_000_000
+    assert row.cost["input"] == 20_000_000 + 1_000_000_000
+    assert row.cost["output"] == 4_000_000_000
+    assert row.cost["total"] == 5_020_000_000
     assert row.rounds == 3
     assert row.duration_ms == 4321
     assert row.currency == "CNY"

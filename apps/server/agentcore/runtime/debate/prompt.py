@@ -27,7 +27,6 @@ from agentcore.runtime.debate.match_ledger import (
 from agentcore.runtime.debate.speech_parse import parse_speech_arguments
 from agentcore.runtime.debate.types import LedgerEvent
 from agentcore.runtime.runs.types import ContextBlock
-from agentcore.workspace.stage_dirs import RESEARCH_DIR
 
 # 后续轮把【对手上一轮发言】喂回本辩手时，每份的头尾截断上限。多方圆桌每轮要塞 N-1 份对手
 # 全文，不裁会让 prompt 暴涨、烧钱且稀释焦点（主持人侧 judge/brief 早已 _clip，唯独喂辩手没裁）。
@@ -263,8 +262,8 @@ def debater_task(
         take_evidence = "请为开场立论做取证，然后产出【证据笔记】。"
     else:
         take_evidence = (
-            f"请为开场立论做取证：优先用 file_read / file_list / grep 阅读工作区 {RESEARCH_DIR}/ "
-            "约定文档（若有）；独立检索（web_search / web_fetch）仅补约定文档没有的缺口；"
+            "请为开场立论做取证：优先阅读本场 background / 附件 / 已声明材料（#rN）；"
+            "独立检索（web_search / web_fetch）仅补没有的缺口；"
             "然后产出【证据笔记】。"
         )
     research_task = (

@@ -33,15 +33,21 @@ Multi-Agent First：组合优于堆叠；单 Agent = 无成员的 Team（统一�
 
 ### `escalate`
 
-worker 唯一向上通道。`blocking=false`（默认）= 已有合理默认、报后按假设续跑、主管收尾纠偏；`blocking=true` = 猜错作废 / 用户要不确定就问 / 只有上级能定 → 挂起求决（须写 assumption；默认无限期等 +「按假设继续」按钮）。经典路径直挂**用户**（否决挂 CEO——会死锁）；协调模式例外：CEO 波内存活 → 等 `resolve_escalation`（单 worker 同样进协调，一并适用）。等 CEO 时该队员不算短调用 in-flight，wait 不得空等该队员。仅嵌套 lead 等阻塞路径永不走 resolve——那时 CEO 卡在 `delegate` 内，挂 CEO 必死锁。快跑还是停下由 **worker 按题自选** `blocking`（省着用、该停别装非阻塞），不设用户总开关。
+worker 唯一向上通道。`reason` 三选一（缺省 / 无法识别 = `wait`，宁停不留言）：
 
-前端分卡：真·非阻塞 escalate →「边干边上报」+「暂定假设」；引擎早停 / 硬顶打转（wire `source=validation_thrash|ceiling_backstop`）→「卡住早停」，**不**冒充边干边上报或「已按假设继续」。真挂起 →「请你拍板」。
+- `wait`：猜错后面白干 → 原地挂起。须写 `assumption`（「按假设继续」、未武装 / 并发满退化、或运维超时回落都落在这句上）。经典路径直挂**用户**（否决挂 CEO——会死锁）；协调模式例外：CEO 波内存活 → 等 `resolve_escalation`（单 worker 同样进协调，一并适用）。等 CEO 时该队员不算短调用 in-flight，wait 不得空等该队员。仅嵌套 lead 等阻塞路径永不走 resolve——那时 CEO 卡在 `delegate` 内，挂 CEO 必死锁。
+- `scope`：活派偏了。自己这份做完；未跑的后续由主管改安排（波边界操舵）。
+- `dep`：缺一块还没人做的材料。自己这份做完；主管补人补材料。
 
-| kind | 语义 |
+不认旧参数 `blocking` / `kind`。留言式上报已撤：小假设写进交差。不设用户总开关。
+
+前端分卡：`wait` 真挂起 →「请你拍板」。引擎早停 / 硬顶打转（wire `source=validation_thrash|ceiling_backstop`）→「卡住早停」。`scope` / `dep` 只走协作图标记，**不出**留言卡、**不**冒充「边干边上报」。
+
+| reason | 语义 |
 |---|---|
-| `normal` | 普通上报 |
-| `scope` | 职责偏离 → 波边界操舵 |
-| `dep` | 缺尚不存在的输入 → `replan(add)` |
+| `wait` | 停下等拍板 |
+| `scope` | 活派偏了 → 自己这份做完，波边界操舵 |
+| `dep` | 缺尚不存在的输入 → 自己这份做完，主管 `replan(add)` |
 
 ### 交付三面（正文 / 产出 / 简报）
 
@@ -55,7 +61,7 @@ worker 唯一向上通道。`blocking=false`（默认）= 已有合理默认、�
 
 铁律：正文与简报**只指向产出、不复述其内容**——钉路径时正文只交代路径 / 怎么运行 / 关键取舍，落盘产物才装完整说明。不催写时产出 ≡ 正文；简报要不要再带结论见下节矩阵。
 
-下游整合（扇入写总稿）：引擎把上游落盘路径注入「前置结果」；终端环**先读这些路径再写**，不把开工做成全仓勘探。CEO 派单应点名路径；缺稿用同一整合员续派。**否决**「整合员必须 `file_write`」硬闸。
+下游整合（扇入写总稿）：引擎把上游落盘路径注入「前置结果」；终端环**先读这些路径再写**，不把开工做成全仓勘探。CEO 派单应点名路径；缺稿用同一整合员续派。**否决**「整合员必须 `write`」硬闸。
 
 ### `handoff`
 
@@ -78,7 +84,7 @@ worker 唯一向上通道。`blocking=false`（默认）= 已有合理默认、�
 
 琐碎自修 → 执行层试一轮再 escalate → 方案层立刻 escalate。与用户会话 **PermissionAxes** / 权限配方正交。
 
-Worker 工具后还有确定性 **Escalation Gate**：只把工具失败当执行层自愈，**不**扫工具输出自由文猜方案层。方案层 /「职责偏离」只走结构化 `escalate(kind=scope|dep|…)`（真写越界由写工具层硬拒）。同 run 同 question 只 live 上报一次。若仍产出内部 `gate_kind=contract|contradiction`，**wire** `kind` 诚实落为 `normal`（保留 `gate_kind`），**不得**占用户面 `scope` 职责偏离——仅结构化 `scope`/`dep` 占对应 wire kind。→ 见代码: `runtime/routing/models.py` · `runtime/routing/gate.py`
+Worker 工具后还有确定性 **Escalation Gate**：只把工具失败当执行层自愈，**不**扫工具输出自由文猜方案层。方案层 /「职责偏离」只走结构化 `escalate(reason=scope|dep)`（真写越界由写工具层硬拒）。同 run 同 question 只 live 上报一次。若仍产出内部 `gate_kind=contract|contradiction`，**不得**占用户面 `scope` 职责偏离——仅结构化 `scope`/`dep` 占对应 wire `kind`。→ 见代码: `runtime/routing/models.py` · `runtime/routing/gate.py`
 
 ### 协调态与视图（写/读分工）
 
@@ -92,9 +98,9 @@ CEO 唯一裁决；置信度低才 `ask_user`。资源先后靠 DAG（`depends_o
 
 ### 写占用 = 这一次工具调用
 
-Agent 没有「文件开在编辑器里」。写盘占用只包住**这一次** `file_write` / `str_replace`（以及同族改盘工具）：磁盘短串行（`workspace_lock`）+ 整篇覆盖须对得上刚读的版本（CAS）。写完（成败）即放开；人还在队里也不占着。
+Agent 没有「文件开在编辑器里」。写盘占用只包住**这一次** `write` / `edit`（以及同族改盘工具）：磁盘短串行（`workspace_lock`）+ 整篇覆盖须对得上刚读的版本（CAS）。写完（成败）即放开；人还在队里也不占着。
 
-并肩两人可以点名同一份产出、同时开工。冲突 = 原文或整篇版本对不上（`str_replace` 找不到原文；`file_write` 盘上已不是刚读到的那一版），不是「这份文件归谁」。新建空路径两人同时创建 = 后写覆盖，可接受。
+并肩两人可以点名同一份产出、同时开工。冲突 = 原文或整篇版本对不上（`edit` 找不到原文；`write` 盘上已不是刚读到的那一版），不是「这份文件归谁」。新建空路径两人同时创建 = 后写覆盖，可接受。
 
 **留下**：真有先后的 `depends_on`（下游吃上游产出）；同一岗位不要同时坐两个人（`sibling_role`）；写权限 / 哪张桌 / `write_scope`。
 

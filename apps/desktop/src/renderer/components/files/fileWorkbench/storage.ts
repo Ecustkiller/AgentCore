@@ -55,65 +55,6 @@ export function saveExpandedWs(set: Set<string>): void {
   saveStringSet(WS_EXPANDED_KEY, set);
 }
 
-// 设定段折叠态：全局段**默认展开**（保住老肌肉记忆），故只持久化「被折叠」的键——空集 =
-// 展开（新用户零配置即得默认）。现仅全局段（键 "global"）使用；项目段默认折叠、走下方
-// MEMORY_PROJECTS_EXPANDED_KEY 的「记展开」语义（旧挂载时代的 folderId 残留条目无害，被忽略）。
-const MEMORY_COLLAPSED_KEY = "files-memory-collapsed";
-
-export function loadMemoryCollapsed(): Set<string> {
-  return loadStringSet(MEMORY_COLLAPSED_KEY);
-}
-
-export function saveMemoryCollapsed(set: Set<string>): void {
-  saveStringSet(MEMORY_COLLAPSED_KEY, set);
-}
-
-// 主题子夹展开态：**默认折叠**（懒列），故只持久化「被展开」的作用域——空集 = 全部折叠。
-const MEMORY_TOPICS_EXPANDED_KEY = "files-memory-topics-expanded";
-
-export function loadMemoryTopicsExpanded(): Set<string> {
-  return loadStringSet(MEMORY_TOPICS_EXPANDED_KEY);
-}
-
-export function saveMemoryTopicsExpanded(set: Set<string>): void {
-  saveStringSet(MEMORY_TOPICS_EXPANDED_KEY, set);
-}
-
-// 旧「项目记忆」聚合夹的 "__projects__" 残留键无害、被忽略。
-const MEMORY_PROJECTS_EXPANDED_KEY = "files-memory-projects-expanded";
-
-export function loadMemoryProjectsExpanded(): Set<string> {
-  return loadStringSet(MEMORY_PROJECTS_EXPANDED_KEY);
-}
-
-export function saveMemoryProjectsExpanded(set: Set<string>): void {
-  saveStringSet(MEMORY_PROJECTS_EXPANDED_KEY, set);
-}
-
-// 规则段折叠态：主段（「你的规则」）**默认展开**（与记忆段同肌肉记忆），故只持久化「被折叠」
-// 的键——空集 = 展开。键名 "root"。
-const RULES_COLLAPSED_KEY = "files-rules-collapsed";
-
-export function loadRulesCollapsed(): Set<string> {
-  return loadStringSet(RULES_COLLAPSED_KEY);
-}
-
-export function saveRulesCollapsed(set: Set<string>): void {
-  saveStringSet(RULES_COLLAPSED_KEY, set);
-}
-
-// 项目「规则」节点展开态：挂在每个项目下的「规则」子节点**默认折叠**，故只持久化「被展开」
-// 的 folderId——空集 = 全部折叠。（旧「项目规则」聚合夹的 "__projects__" 残留键无害、被忽略。）
-const RULES_EXPANDED_KEY = "files-rules-expanded";
-
-export function loadRulesExpanded(): Set<string> {
-  return loadStringSet(RULES_EXPANDED_KEY);
-}
-
-export function saveRulesExpanded(set: Set<string>): void {
-  saveStringSet(RULES_EXPANDED_KEY, set);
-}
-
 // 文件夹 ``.agentcore`` 的展开态走 FileTree
 // per-source 折叠（默认折叠）；AGENTCORE_EXPANDED_KEY 仅 AgentCoreSection 的 folder 残留路径还读。
 const AGENTCORE_COLLAPSED_KEY = "files-agentcore-collapsed";
@@ -164,11 +105,10 @@ export function tabKey(wsId: string, path: string): string {
 
 /**
  * Synthetic tab paths for a workspace's **non-file** panels (版本 / 软删区). They ride
- * the real ws id — unlike the memory / rules synthetic workspaces — so a workspace
+ * the real ws id — unlike the rules synthetic workspace — so a workspace
  * that disappears takes its panels' tabs with it, and so 打开 goes through the same
  * `onOpenFile(path, name)` seam every rail row already has. The double-underscore
- * shape keeps them from colliding with a real workspace-relative path (照
- * `MEMORY_UPDATES_PATH`).
+ * shape keeps them from colliding with a real workspace-relative path.
  */
 export const WS_VERSIONS_PATH = "__ws_versions__";
 export const WS_TRASH_PATH = "__ws_trash__";

@@ -33,13 +33,6 @@ from agentcore.tools.builtin.run_verify import (
     _shell_command_runner,
     execute_verify,
 )
-from agentcore.tools.builtin.shell_http import (
-    SHELL_DOWNLOAD_REDIRECT,
-    SHELL_FETCH_REDIRECT,
-    ShellHttpHit,
-    shell_http_match,
-    shell_http_redirect_message,
-)
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_BOTH,
@@ -56,15 +49,10 @@ def run_description(location: Literal["server", "local"] | None = None) -> str:
     if location == "local":
         where = "在用户本机工作区跑命令。"
     elif location == "server":
-        where = "在云桌执行环境跑命令。公网 HTTP 与 download_url 同政策；私网不可达。"
+        where = "在云桌执行环境跑命令。公网 HTTP 与 web_fetch 同政策；私网不可达。"
     else:
         where = "在当前工作区跑命令。"
-    return (
-        where
-        + "验证与短命令直接跑；dev/watch 设 background=true；"
-        + "已有进程 action=read|stop|list。"
-        + "HOW→consult(run)。"
-    )
+    return where
 
 
 def run_op_timeout_seconds(
@@ -123,6 +111,7 @@ class RunTool:
         file_products=FileProductsContract.SELF_REPORT,
         produces_formats=(".xlsx", ".pptx"),
         catalog_summary="跑命令 / 启服",
+        blurb="在工作区终端执行命令，或把本地服务拉起来",
     )
 
     def __init__(self, *, location: Literal["server", "local"] | None = None) -> None:
@@ -142,7 +131,7 @@ class RunTool:
                     },
                     "cwd": {
                         "type": "string",
-                        "description": "工作区相对目录，可选。",
+                        "description": "工作区相对目录。",
                     },
                     "background": {
                         "type": "boolean",
@@ -152,7 +141,7 @@ class RunTool:
                     "wait_for": {
                         "type": "string",
                         "description": (
-                            "可选。匹配此正则再返回；省略则起来就返回。"
+                            "匹配此正则再返回；省略则起来就返回。"
                         ),
                     },
                     "action": {
@@ -177,10 +166,6 @@ class RunTool:
 
         if action in _PROCESS_ACTIONS:
             return await self._dispatch_process(action, arguments, context)
-        if command:
-            http_hit = shell_http_match(command)
-            if http_hit is not None:
-                return _shell_http_redirect(http_hit)
         if _wants_background(arguments):
             if not command:
                 return _arg_error("background 启动需要 command")
@@ -283,30 +268,19 @@ class RunTool:
         }
         if install_payloads:
             short_args["env"] = registry_pin_env()
+        from agentcore.runtime.command_policy import command_receives_git_credentials
+
+        if command_receives_git_credentials(command):
+            from agentcore.tools.builtin.git_ops.spawn import cloud_git_auth_env
+
+            git_env = await cloud_git_auth_env(context)
+            if git_env:
+                short_args["env"] = {**(short_args.get("env") or {}), **git_env}
         return await execute_short(
             {k: v for k, v in short_args.items() if v is not None},
             context,
             location=self._location,
         )
-
-
-def _shell_http_redirect(hit: ShellHttpHit) -> ToolResult:
-    code = SHELL_FETCH_REDIRECT if hit.dest == "web_fetch" else SHELL_DOWNLOAD_REDIRECT
-    return ToolResult(
-        tool_call_id="",
-        success=False,
-        output="",
-        error=shell_http_redirect_message(hit),
-        duration_ms=0,
-        contract_failure=True,
-        failure_code=code,
-        metadata={
-            "code": code,
-            "matched": hit.matched,
-            "url": hit.url,
-            "dest": hit.dest,
-        },
-    )
 
 
 def _arg_error(error: str) -> ToolResult:

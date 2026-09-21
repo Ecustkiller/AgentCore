@@ -72,11 +72,9 @@ async def test_skill_store_publish_list_install_update_unpublish_report(client):
     assert community["has_update"] is False
     assert community["group"] == "writing"
     assert shelf.json()["groups"]["writing"] >= 1
-    assert shelf.json()["groups"]["legal"] >= 4
+    assert shelf.json()["groups"]["legal"] == 0
     names = {r["name"] for r in rows}
-    from agentcore.runtime.skills.platform_shelf import platform_templates
-
-    assert {s.title for s in platform_templates()} <= names
+    assert "合同审查" in names
 
     detail = await client.get(f"/v1/skill-store/{lid}")
     assert detail.status_code == 200, detail.text
@@ -271,64 +269,16 @@ async def test_skill_store_admin_sees_reports(client, make_admin):
     assert body.json()["id"] == lid
 
 
-async def test_platform_legal_skus_list_install_and_refuse_author_ops(client):
-    from agentcore.runtime.legal_skills import LEGAL_SKILLS
-    from agentcore.runtime.skills.platform_shelf import (
-        platform_listing_id,
-        platform_templates,
-    )
-
-    await register_and_login(client, "sslegal")
-    templates = platform_templates()
-    shelf_ids = {s.name: platform_listing_id(s.name) for s in templates}
-
+async def test_skill_store_shelf_starts_empty(client):
+    await register_and_login(client, "ssempty")
     shelf = await client.get("/v1/skill-store")
     assert shelf.status_code == 200, shelf.text
-    by_id = {row["id"]: row for row in shelf.json()["data"]}
-    for skill in templates:
-        listing_id = shelf_ids[skill.name]
-        assert listing_id in by_id
-        assert by_id[listing_id]["author"] == "官方"
-        assert by_id[listing_id]["name"] == skill.title
-        assert by_id[listing_id]["description"] == skill.summary
-        assert by_id[listing_id]["installed"] is False
-        assert by_id[listing_id]["group"] == skill.group
-
-    brief = next(s for s in LEGAL_SKILLS if s.name == "legal_answer_brief")
-    brief_id = shelf_ids[brief.name]
-
-    detail = await client.get(f"/v1/skill-store/{brief_id}")
-    assert detail.status_code == 200, detail.text
-    assert detail.json()["name"] == brief.title
-    assert detail.json()["description"] == brief.summary
-    assert detail.json()["content"] == brief.body
-
-    installed = await client.post(f"/v1/skill-store/{brief_id}/install")
-    assert installed.status_code == 200, installed.text
-    assert installed.json()["installed"] is True
-    assert installed.json()["name"] == brief.title
-    copy_id = installed.json()["document_id"]
-
-    catalog = await client.get("/v1/skill-catalog")
-    copy = next(m for m in catalog.json()["mine"] if m["id"] == copy_id)
-    assert "occupies" not in copy
-    assert copy["name"] == brief.title
-    assert copy["description"] == brief.summary
-    assert "原告红队" in copy["content"]
-
-    again = await client.post(f"/v1/skill-store/{brief_id}/install")
-    assert again.status_code == 200, again.text
-    assert again.json()["document_id"] == copy_id
-
-    assert (await client.delete(f"/v1/skill-store/{brief_id}")).status_code == 403
-    assert (await client.post(f"/v1/skill-store/{brief_id}/versions")).status_code == 403
-    reported = await client.post(
-        f"/v1/skill-store/{brief_id}/reports", json={"reason": "测试"}
-    )
-    assert reported.status_code == 400
-
-    installed_list = await client.get("/v1/skill-store/installed")
-    assert any(row["id"] == brief_id for row in installed_list.json()["data"])
+    body = shelf.json()
+    assert body["data"] == []
+    assert body["total"] == 0
+    assert body["groups"]["legal"] == 0
+    missing = await client.get("/v1/skill-store/00000000-0000-0000-0000-000000000001")
+    assert missing.status_code == 404
 
 
 async def test_delete_installed_copy_clears_shelf_and_allows_reinstall(client):
@@ -383,30 +333,6 @@ async def test_delete_installed_copy_clears_shelf_and_allows_reinstall(client):
     assert again.json()["document_id"] != copy_id
 
 
-async def test_delete_platform_install_clears_official_update_badge(client):
-    from agentcore.runtime.legal_skills import LEGAL_SKILLS
-    from agentcore.runtime.skills.platform_shelf import platform_listing_id
-
-    await register_and_login(client, "ssdellegal")
-    brief_id = platform_listing_id(
-        next(s.name for s in LEGAL_SKILLS if s.name == "legal_answer_brief")
-    )
-    installed = await client.post(f"/v1/skill-store/{brief_id}/install")
-    assert installed.status_code == 200, installed.text
-    copy_id = installed.json()["document_id"]
-
-    gone = await client.delete(f"/v1/documents/{copy_id}")
-    assert gone.status_code == 200, gone.text
-
-    shelf = await client.get("/v1/skill-store")
-    row = next(r for r in shelf.json()["data"] if r["id"] == brief_id)
-    assert row["installed"] is False
-    assert row["has_update"] is False
-    again = await client.post(f"/v1/skill-store/{brief_id}/install")
-    assert again.json()["document_id"] != copy_id
-    assert again.json()["installed"] is True
-
-
 async def test_skill_store_publish_requires_group_and_filters_shelf(client):
     await register_and_login(client, "ssgroup")
     doc = await _create_on_demand(
@@ -431,7 +357,7 @@ async def test_skill_store_publish_requires_group_and_filters_shelf(client):
     assert writing.status_code == 200, writing.text
     assert all(row["id"] != lid for row in writing.json()["data"])
     assert writing.json()["groups"]["research"] >= 1
-    assert writing.json()["groups"]["legal"] >= 4
+    assert writing.json()["groups"]["legal"] == 0
 
     research = await client.get("/v1/skill-store", params={"group": "research"})
     assert research.status_code == 200, research.text

@@ -190,14 +190,21 @@ apps/server/--trace/
 
 # Server local data (MVP long-term memory files, see apps/server/agentcore/memory/store.py)
 apps/server/data/
-# 仅仓根本地运行时。禁止写成无前缀 `data/`——会误伤 apps/promo 源数据。
+# 仅仓根本地运行时。禁止写成无前缀 `data/`——会误伤 apps/video 源数据。
 /data/
 
-# Retired AI Town: Unity Library cache may remain on old checkouts
+# AI Town permanently extracted from AgentCore (independent product later).
+# Do not re-add; leftover engine caches on old machines are local-only.
 /apps/town/
+/apps/server/agentcore/simulation/
+# Shared-spaces product dropped (tables gone, route 404); leftover pycache only.
+/apps/server/agentcore/shared_spaces/
 
 # Eval fixture workspaces may grow AgentCore/ trash when a probe mutates them
 apps/server/agentcore/evals/fixtures/**/.agentcore/
+evals/code-capability/workspaces/**/.agentcore/
+# LLM 烟感 copytree 副本（r_llm_smoke.py 每次重生，不入仓）
+evals/code-capability/workspaces/llm-smoke/
 
 # Code-capability LLM smoke / timestamped matrix dumps (regenerated locally).
 # Ratchet stays: reports/baselines/ + reports/*_baseline_latest.json
@@ -228,11 +235,11 @@ apps/desktop/src/renderer/assets/support/*.webp
 # Dev-only demo tape session bindings (local conversation_id → tape map)
 demos/bindings.json
 demos/tapes/_*.json
-# Full-session demo tapes / promo capture media (real runs — keep local, do not publish)
+# Full-session demo tapes / video capture media (real runs — keep local, do not publish)
 demos/tapes/*.json
-apps/promo/assets/**/clips/
-apps/promo/assets/**/stills/
-apps/promo/assets/**/manifest.json
+apps/video/assets/**/clips/
+apps/video/assets/**/stills/
+apps/video/assets/**/manifest.json
 # Dev-only live-stream recordings (DEMO_TAPE_RECORD_ENABLED tap output; may carry
 # real conversation content — export curated tapes into demos/tapes/ instead)
 demos/recordings/

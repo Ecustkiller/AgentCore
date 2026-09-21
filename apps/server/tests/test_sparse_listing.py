@@ -63,7 +63,7 @@ def test_internal_zone_relpath_is_path_aware():
     assert is_internal_zone_relpath("AgentCore/trash/x")
     assert is_internal_zone_relpath("AgentCore/baselines/m.zip")
     assert not is_internal_zone_relpath("AgentCore")
-    assert not is_internal_zone_relpath("AgentCore/规则/x.md")
+    assert not is_internal_zone_relpath("AgentCore/rules/x.md")
     assert not is_internal_zone_relpath("AgentCore/记忆/y.md")
     assert not is_internal_zone_relpath("AgentCore/文档/z.md")
     assert not is_internal_zone_relpath("index")
@@ -76,7 +76,7 @@ def test_ignored_dir_entry_path_aware_and_ancestor_noise():
     assert is_ignored_dir_entry(parent_rel="AgentCore", name="trash")
     assert is_ignored_dir_entry(parent_rel="AgentCore", name="baselines")
     assert not is_ignored_dir_entry(parent_rel="", name="index")
-    assert not is_ignored_dir_entry(parent_rel="AgentCore", name="规则")
+    assert not is_ignored_dir_entry(parent_rel="AgentCore", name="rules")
     # Recursive glob under .git: parent carries the noise segment.
     assert is_ignored_dir_entry(parent_rel=".git", name="config")
     assert is_ignored_dir_entry(parent_rel="node_modules/pkg", name="index.js")
@@ -137,7 +137,7 @@ def test_ignored_relpath_prunes_nested_noise():
     assert is_ignored_relpath("debug.log")  # AI noise suffix (combined ignore)
     assert not is_ignored_relpath("src/app.ts")
     assert not is_ignored_relpath("index/app.ts")  # bare user index/
-    assert not is_ignored_relpath("AgentCore/规则/x.md")
+    assert not is_ignored_relpath("AgentCore/rules/x.md")
 
 
 def test_partition_bare_lists_all_with_labels():
@@ -338,7 +338,7 @@ async def test_index_files_skips_internal_zone_db_and_media(tmp_path: Path):
     paths, _ = await ServerWorkspace(
         root=tmp_path, sandbox=SubprocessSandbox()
     ).index_files()
-    assert paths == ["AgentCore/规则/x.md", "index/user.py", "ok.txt"]
+    assert paths == ["AgentCore/rules/x.md", "index/user.py", "ok.txt"]
 
 
 async def test_list_shows_media_hides_system_noise(tmp_path: Path):
@@ -364,7 +364,7 @@ async def test_list_shows_media_hides_system_noise(tmp_path: Path):
             root=tmp_path, sandbox=SubprocessSandbox()
         ).list("AgentCore", "*")
     }
-    assert "规则" in ac_names
+    assert "rules" in ac_names
     assert "index" not in ac_names
 
 
@@ -391,8 +391,8 @@ async def test_recursive_list_hides_internal_zones_keeps_bare_index(tmp_path: Pa
     }
     assert "ok.txt" in paths
     assert "AgentCore" in paths
-    assert "AgentCore/规则" in paths
-    assert "AgentCore/规则/r.md" in paths
+    assert "AgentCore/rules" in paths
+    assert "AgentCore/rules/r.md" in paths
     assert "index" in paths
     assert "index/user.py" in paths
     assert "AgentCore/index" not in paths
@@ -463,3 +463,16 @@ async def test_list_tree_name_filter_emits_matches_not_prefix_dirs(tmp_path: Pat
     assert "d0/d1/d2/d3/hit.py" in paths
     assert "pad0" not in paths
     assert all(e.path.endswith(".py") or e.path.endswith(".PY") for e in tree.entries)
+
+
+def test_rename_legacy_rules_leaf(tmp_path: Path):
+    from agentcore.workspace.stage_dirs import rename_legacy_rules_leaf
+
+    src = tmp_path / "AgentCore" / "规则"
+    src.mkdir(parents=True)
+    (src / "r.md").write_text("keep", encoding="utf-8")
+    assert rename_legacy_rules_leaf(tmp_path) is True
+    dst = tmp_path / "AgentCore" / "rules" / "r.md"
+    assert dst.read_text(encoding="utf-8") == "keep"
+    assert not (tmp_path / "AgentCore" / "规则").exists()
+    assert rename_legacy_rules_leaf(tmp_path) is False

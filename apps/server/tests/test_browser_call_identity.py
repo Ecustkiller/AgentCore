@@ -21,7 +21,7 @@ def test_action_from_legacy_name_or_unified_args():
     assert browser_call_action("browser_console") == "console"
     assert browser_call_action("browser", {"action": "snapshot"}) == "snapshot"
     assert browser_call_action("browser", '{"action":"click"}') == "click"
-    assert browser_call_action("file_read") == ""
+    assert browser_call_action("read") == ""
 
 
 def test_navigate_call_dual_recognition():

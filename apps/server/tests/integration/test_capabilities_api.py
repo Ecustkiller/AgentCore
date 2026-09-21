@@ -30,7 +30,7 @@ async def test_capabilities_returns_full_catalog(client):
     assert set(tools["consult"]["available_to"]) == {"ceo", "worker"}
     # Mutation + unified `run` are CEO+worker (solo CEO writes and executes).
     # `run` replaced code_execute / test_run / terminal — those names must stay gone.
-    for name in ("file_write", "run"):
+    for name in ("write", "run"):
         assert name in tools
         assert set(tools[name]["available_to"]) == {"ceo", "worker"}
     for retired in ("code_execute", "test_run", "terminal"):
@@ -52,6 +52,8 @@ async def test_capabilities_returns_full_catalog(client):
     assert sample["face"]
     assert isinstance(sample["resident"], bool)
     assert "summary" in sample
+    assert sample["blurb"]
+    assert sample["blurb"] != sample["summary"]
 
 
 async def test_capabilities_lists_system_skills_with_body(client):
@@ -70,14 +72,7 @@ async def test_capabilities_lists_system_skills_with_body(client):
         assert skill["blurb"] != skill["summary"]
         assert "requires_tools" in skill
         assert isinstance(skill["requires_tools"], list)
-    assert skills["debate_and_review"]["requires_tools"] == ["debate"]
-    assert skills["run"]["requires_tools"] == ["run"]
     assert skills["page_ui"]["requires_tools"] == []
-    # Skills are the system repertoire; domain SOPs are store SKUs, not this blueprint.
-    from agentcore.runtime.skills.platform_shelf import platform_templates
-
-    capability_names = {s["name"] for s in body["skills"]}
-    assert {s.name for s in platform_templates()}.isdisjoint(capability_names)
     assert "packs" not in body
 
 

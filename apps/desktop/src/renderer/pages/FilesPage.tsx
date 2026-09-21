@@ -24,17 +24,6 @@ export function FilesPage() {
   const focusWsId =
     (location.state as { focusWsId?: string } | null)?.focusWsId ?? null;
 
-  const openMemoryLeaf =
-    (
-      location.state as {
-        openMemoryLeaf?: {
-          path: string;
-          name: string;
-          projectId?: string | null;
-        };
-      } | null
-    )?.openMemoryLeaf ?? null;
-
   return (
     <FileWorkbench
       workspaces={workspaces}
@@ -44,7 +33,6 @@ export function FilesPage() {
       fsAvailable={hasLocalFiles()}
       showMemory
       focusWsId={focusWsId}
-      openMemoryLeaf={openMemoryLeaf}
       focusKey={location.key}
     />
   );

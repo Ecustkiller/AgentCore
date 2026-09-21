@@ -1,4 +1,4 @@
-"""用例级预置用户规则 / AI 记忆（DB ``documents`` 行）.
+"""用例级预置用户规则（DB ``documents`` 行）.
 
 心智对齐 ``workspace_fixture``：``fixtures/<name>/`` + ``EvalCase.documents_fixture`` +
 ``seed_lint`` 校验。与工作区夹具不同，本夹具写入共享 ``_EVAL_USER_ID`` 的 DB 行，故
@@ -20,22 +20,16 @@ harness **每例前后硬清**，避免用例间污染。
       "name": "合规附录.md",
       "apply_mode": "on_demand",
       "file": "bodies/合规附录.md"
-    },
-    {
-      "layer": "memory",
-      "path": "主题/部署口令.md",
-      "content": "…"
     }
   ]
 }
 ```
 
-``layer=user_rule`` → ``AgentCore/规则/``（``ai_maintained=false``）；
-``layer=memory`` → ``DocumentMemoryStore.save``（``主题/*.md`` 等 store 相对路径）。
+``layer=user_rule`` → ``AgentCore/rules/``（``ai_maintained=false``）。
 ``content`` 与 ``file``（相对夹具根）二选一。
 
 本模块顶层只依赖 stdlib + ``EvalConfigError``，好让 ``seed_lint`` / ``evals lint``
-不拖 DB / memory 实现。
+不拖 DB 实现。
 """
 
 from __future__ import annotations
@@ -53,22 +47,21 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 ApplyMode = Literal["always", "on_demand"]
-Layer = Literal["user_rule", "memory"]
+Layer = Literal["user_rule"]
 
 _MANIFEST_NAME = "documents.json"
-_LAYERS = frozenset({"user_rule", "memory"})
+_LAYERS = frozenset({"user_rule"})
 _APPLY_MODES = frozenset({"always", "on_demand"})
 
 
 @dataclass(frozen=True)
 class DocumentsEntry:
-    """一条预置：用户规则或记忆笔记。"""
+    """一条预置用户规则。"""
 
     layer: Layer
     content: str
-    name: str | None = None  # user_rule: 文档名（含 .md）
-    apply_mode: ApplyMode | None = None  # user_rule only
-    path: str | None = None  # memory: store-relative path
+    name: str | None = None  # 文档名（含 .md）
+    apply_mode: ApplyMode | None = None
 
 
 @dataclass(frozen=True)
@@ -113,7 +106,6 @@ def load_documents_manifest(fixture_root: Path) -> DocumentsManifest:
                 content=content,
                 name=item.get("name"),
                 apply_mode=item.get("apply_mode"),
-                path=item.get("path"),
             )
         )
     return DocumentsManifest(entries=tuple(out))
@@ -155,25 +147,16 @@ def _lint_manifest_raw(cid: str, raw: Any, fixture_root: Path) -> list[str]:
         elif not isinstance(item.get("content"), str):
             errors.append(f"{prefix}.content 须为字符串")
 
-        if layer == "user_rule":
-            name = item.get("name")
-            if not isinstance(name, str) or not name.strip():
-                errors.append(f"{prefix} user_rule 缺 name")
-            mode = item.get("apply_mode", "always")
-            if mode not in _APPLY_MODES:
-                errors.append(
-                    f"{prefix}.apply_mode={mode!r} 非法（须属 {sorted(_APPLY_MODES)}）"
-                )
-            if item.get("path") is not None:
-                errors.append(f"{prefix} user_rule 勿用 path（用 name）")
-        else:  # memory
-            mem_path = item.get("path")
-            if not isinstance(mem_path, str) or not mem_path.strip():
-                errors.append(f"{prefix} memory 缺 path")
-            elif not mem_path.endswith(".md"):
-                errors.append(f"{prefix}.path 须以 .md 结尾")
-            if item.get("name") is not None or item.get("apply_mode") is not None:
-                errors.append(f"{prefix} memory 勿用 name/apply_mode（用 path）")
+        name = item.get("name")
+        if not isinstance(name, str) or not name.strip():
+            errors.append(f"{prefix} user_rule 缺 name")
+        mode = item.get("apply_mode", "always")
+        if mode not in _APPLY_MODES:
+            errors.append(
+                f"{prefix}.apply_mode={mode!r} 非法（须属 {sorted(_APPLY_MODES)}）"
+            )
+        if item.get("path") is not None:
+            errors.append(f"{prefix} user_rule 勿用 path（用 name）")
     return errors
 
 
@@ -227,31 +210,23 @@ async def apply_documents_fixture(
     调用方须先 :func:`purge_user_documents`（harness 每例开头已做）。
     """
     from agentcore.db.repositories import DocumentRepository
-    from agentcore.memory.document_store import DocumentMemoryStore
 
     manifest = load_documents_manifest(fixture_root)
     async with _session_scope(session) as sess:
         repo = DocumentRepository(sess)
-        store = DocumentMemoryStore(session=sess)
         n = 0
         for entry in manifest.entries:
-            if entry.layer == "user_rule":
-                assert entry.name is not None
-                mode: ApplyMode = entry.apply_mode or "always"
-                rules_dir = await repo.ensure_rules_dir(user_id, None)
-                await repo.create(
-                    user_id,
-                    name=entry.name,
-                    parent_id=rules_dir.id,
-                    role="rule",
-                    ai_maintained=False,
-                    apply_mode=mode,
-                    content=entry.content,
-                )
-                n += 1
-            else:
-                assert entry.path is not None
-                # store 按 path 分类：主题/*.md → on_demand；偏好/画像 → always。
-                await store.save(user_id, entry.path, entry.content, scope=None)
-                n += 1
+            assert entry.name is not None
+            mode: ApplyMode = entry.apply_mode or "always"
+            rules_dir = await repo.ensure_rules_dir(user_id, None)
+            await repo.create(
+                user_id,
+                name=entry.name,
+                parent_id=rules_dir.id,
+                role="rule",
+                ai_maintained=False,
+                apply_mode=mode,
+                content=entry.content,
+            )
+            n += 1
         return n

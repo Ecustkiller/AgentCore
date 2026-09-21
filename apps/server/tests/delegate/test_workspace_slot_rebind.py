@@ -171,7 +171,7 @@ async def test_bind_landing_desk_rebinds_shared_slot_and_moves_tree(tmp_path: Pa
 
     worker = replace(base, run_id="w1", agent_id="worker")
     read = await FileReadTool().execute(
-        {"path": "attachments/合同.docx.md"},
+        {"file_path": "attachments/合同.docx.md"},
         worker,
     )
     assert read.success is True
@@ -212,7 +212,7 @@ async def test_apply_target_desktop_forks_slot_and_passes_attachment_context(
 
     async def _fake_rebuild(**kwargs):
         seen.update(kwargs)
-        return "TARGET_PROMPT"
+        return "TARGET_PROMPT", ""
 
     with (
         patch(

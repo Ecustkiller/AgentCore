@@ -28,4 +28,4 @@ pnpm deploy:pages    # Cloudflare Pages（需 .env.deploy.local）
 
 ## 设计依据
 
-文案与定位取自 [`docs/01-产品/产品定位与品牌.md`](../../docs/01-产品/产品定位与品牌.md)。五类资产：Tool / Skill / Rule / Memory / Team。
+文案与定位取自 [`docs/01-产品/产品定位与品牌.md`](../../docs/01-产品/产品定位与品牌.md)。资产：Tool / Skill / Rule / Team。

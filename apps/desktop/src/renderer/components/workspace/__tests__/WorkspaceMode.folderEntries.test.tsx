@@ -65,13 +65,13 @@ vi.mock("@/components/files/fileWorkbench/EntriesSection", () => ({
     onOpen,
     onDeleted,
   }: {
-    onOpen: (t: { channel: "memory"; path: string; name: string }) => void;
-    onDeleted: (t: { channel: "memory"; path: string; name: string }) => void;
+    onOpen: (t: { channel: "document"; path: string; name: string }) => void;
+    onDeleted: (t: { channel: "document"; path: string; name: string }) => void;
   }) => {
     const target = {
-      channel: "memory" as const,
-      path: "project/f1/profile",
-      name: "画像.md",
+      channel: "document" as const,
+      path: "doc-1",
+      name: "语气.md",
     };
     return (
       <div>
@@ -125,12 +125,12 @@ describe("WorkspaceMode · .agentcore 条目", () => {
     const opened = useSidePanelStore.getState().tabs[0];
     expect(opened).toMatchObject({
       kind: "file",
-      channel: "memory",
-      path: "project/f1/profile",
-      name: "画像.md",
+      channel: "document",
+      path: "doc-1",
+      name: "语气.md",
     });
-    expect(opened?.id).toBe(fileTabId("project/f1/profile", null, "memory"));
-    expect(opened?.id).not.toBe(fileTabId("project/f1/profile"));
+    expect(opened?.id).toBe(fileTabId("doc-1", null, "document"));
+    expect(opened?.id).not.toBe(fileTabId("doc-1"));
 
     fireEvent.click(screen.getByRole("button", { name: "删除条目" }));
     expect(useSidePanelStore.getState().tabs).toHaveLength(0);

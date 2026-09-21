@@ -30,14 +30,14 @@ def _empty_ctx(workspace: Path, *, agent_id: str = "ceo") -> ToolContext:
 async def test_empty_desk_write_keeps_requested_dir(tmp_path: Path):
     ctx = _empty_ctx(tmp_path)
     result = await FileWriteTool().execute(
-        {"path": "测试/worker-a.md", "content": "hello"}, ctx
+        {"file_path": "测试/worker-a.md", "content": "hello"}, ctx
     )
     assert result.success is True
     landed = tmp_path / "测试" / "worker-a.md"
     assert landed.read_text(encoding="utf-8") == "hello"
     assert not (tmp_path / "worker-a.md").exists()
 
-    read = await FileReadTool().execute({"path": "测试/worker-a.md"}, ctx)
+    read = await FileReadTool().execute({"file_path": "测试/worker-a.md"}, ctx)
     assert read.success is True
     assert "hello" in read.output
 
@@ -57,7 +57,7 @@ async def test_empty_desk_mkdir_creates_named_dir(tmp_path: Path):
 async def test_empty_desk_ascii_wrapper_also_kept(tmp_path: Path):
     ctx = _empty_ctx(tmp_path)
     result = await FileWriteTool().execute(
-        {"path": "court-game/x", "content": "hello"}, ctx
+        {"file_path": "court-game/x", "content": "hello"}, ctx
     )
     assert result.success is True
     assert (tmp_path / "court-game" / "x").read_text(encoding="utf-8") == "hello"

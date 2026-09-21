@@ -36,12 +36,8 @@ describe("channelRedirectFace", () => {
     expect(channelRedirectFace("source_grep_redirect")?.label).toBe("改用搜索");
   });
 
-  it("titles a shell fetch steer as 改用读网页", () => {
-    expect(channelRedirectFace("shell_fetch_redirect")?.label).toBe(
-      "改用读网页",
-    );
-    expect(channelRedirectFace("shell_download_redirect")?.label).toBe(
-      "改用下载",
-    );
+  it("steers dump / non-url reads to the read pen", () => {
+    expect(channelRedirectFace("source_dump_redirect")?.toolName).toBe("read");
+    expect(channelRedirectFace("not_a_web_url")?.toolName).toBe("read");
   });
 });

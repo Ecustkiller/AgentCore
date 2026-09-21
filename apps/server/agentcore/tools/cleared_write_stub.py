@@ -74,17 +74,17 @@ def cleared_write_stub_rejection(arguments: dict[str, Any]) -> str | None:
     """
     if not is_cleared_write_stub_args(arguments):
         return None
-    path = arguments.get("path") or arguments.get("file_path")
+    path = arguments.get("file_path")
     path_s = path.strip().replace("\\", "/") if isinstance(path, str) else ""
     path_bit = f"`{path_s}`" if path_s else "该文件"
     read_hint = (
-        f'file_read(path="{path_s}")' if path_s else "file_read(该 path)"
+        f'read(file_path="{path_s}")' if path_s else "read(该 file_path)"
     )
     if LANDED_SUMMARY_KEY in arguments or LEGACY_CLEARED_KEY in arguments:
         return (
             f"拒绝：参数是上下文窗口里的只读「已落盘摘要」/清理占位，{REJECTION_MARKER}。"
             f"下一步（针对 {path_bit}）：① {read_hint} 取盘上真文；"
-            "② 再 str_replace（优先）或 file_write，按真文填完整 "
+            "② 再 edit（优先）或 write，按真文填完整 "
             "content / old_string / new_string。"
             "禁止把 `_landed_summary`、清理条或摘要原样当写盘参数重发。"
         )
@@ -93,7 +93,7 @@ def cleared_write_stub_rejection(arguments: dict[str, Any]) -> str | None:
             "拒绝：参数是请求窗里的只读「已落盘」压缩状态，不是可提交写参，"
             f"{REJECTION_MARKER}。"
             f"下一步（针对 {path_bit}）：① {read_hint} 取盘上真文；"
-            "② 再 str_replace（优先）或 file_write，按真文填完整 "
+            "② 再 edit（优先）或 write，按真文填完整 "
             "content / old_string / new_string。"
             "禁止把 landed 状态原样当写盘参数重发。"
         )
@@ -111,7 +111,7 @@ def cleared_write_stub_rejection(arguments: dict[str, Any]) -> str | None:
                 "拒绝：正文参数仍是清理占位"
                 f"（{val.strip()}），{REJECTION_MARKER}。"
                 f"下一步（针对 {path_bit}）：① {read_hint} 取盘上真文；"
-                "② 再 str_replace（优先）或按真文重填后再写。禁止原样重发 stub。"
+                "② 再 edit（优先）或按真文重填后再写。禁止原样重发 stub。"
             )
     return None
 
@@ -135,5 +135,5 @@ def landed_status_name_rejection(tool_name: str) -> str | None:
         return None
     return (
         "拒绝：`_write_landed` 是请求窗里的「已落盘」压缩状态，不是可调用工具。"
-        "勿仿调该名称。改稿：先 file_read 取盘上真文，再 str_replace（优先）或 file_write。"
+        "勿仿调该名称。改稿：先 read 取盘上真文，再 edit（优先）或 write。"
     )

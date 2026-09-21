@@ -49,6 +49,8 @@ class UsageBreakdown(BaseModel):
 
     ``error`` is optional: present on failed / empty turns that stored a structured
     cause on the usage column. Token fields may be zeros when only ``error`` is set.
+    ``last_prompt`` is the largest single-request prompt on this message/run
+    (window fill). Omitted on window aggregates and old rows — not summed ``input``.
     """
 
     input: int
@@ -56,6 +58,7 @@ class UsageBreakdown(BaseModel):
     reasoning: int
     cache_hit: int
     cache_miss: int
+    last_prompt: int | None = None
     error: UsageError | None = None
 
 

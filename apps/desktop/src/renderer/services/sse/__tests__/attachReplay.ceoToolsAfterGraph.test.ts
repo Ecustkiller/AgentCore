@@ -65,12 +65,12 @@ function liveLeadIn(): SSEEvent[] {
     ev("reasoning_delta", { delta: "想 3" }),
     ev("tool_use_start", {
       tool_call_id: "c3",
-      tool_name: "file_write",
+      tool_name: "write",
       arguments: { path: "docs/00-创作基准.md" },
     }),
     ev("tool_use_end", {
       tool_call_id: "c3",
-      tool_name: "file_write",
+      tool_name: "write",
       result: "ok",
       status: "success",
     }),
@@ -152,7 +152,7 @@ describe("attachReplay · 协作图下 CEO 工具重复", () => {
       }),
       ev("tool_use_start", {
         tool_call_id: "c3",
-        tool_name: "file_write",
+        tool_name: "write",
         arguments: { path: "docs/00-创作基准.md" },
       }),
       RUN_PLAN,
@@ -199,7 +199,7 @@ describe("attachReplay · 协作图下 CEO 工具重复", () => {
         {
           kind: "tool",
           id: "c3",
-          tool_name: "file_write",
+          tool_name: "write",
           arguments: { path: "docs/00-创作基准.md" },
           result: "ok",
           status: "success",
@@ -223,7 +223,7 @@ describe("attachReplay · 协作图下 CEO 工具重复", () => {
       }),
       ev("tool_use_start", {
         tool_call_id: "c3",
-        tool_name: "file_write",
+        tool_name: "write",
         arguments: { path: "docs/00-创作基准.md" },
       }),
       RUN_PLAN,

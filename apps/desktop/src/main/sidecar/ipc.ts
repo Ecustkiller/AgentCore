@@ -28,6 +28,7 @@ import {
   type SidecarTurnFilesDiffResult,
   type SidecarTurnResult,
   type SidecarWarmAccountRulesMemoryRequest,
+  type SidecarWarmLlmHttpRequest,
   type SidecarWarmMcpDiscoverRequest,
   type SidecarWorkspaceVersionResult,
 } from "@shared/sidecar-contract";
@@ -298,6 +299,23 @@ export function registerSidecarIpc(): void {
           userId: req.userId,
         },
       );
+    },
+  );
+
+  ipcMain.handle(
+    SIDECAR_CHANNELS.warmLlmHttp,
+    async (_e, req: SidecarWarmLlmHttpRequest): Promise<void> => {
+      assertSidecarShape(
+        SIDECAR_CHANNELS.warmLlmHttp,
+        req,
+        ["rootId"],
+        ["subpath", "userId"],
+      );
+      const workspaceRoot = await liveWorkspaceRoot(req.rootId, req.subpath);
+      await manager.warmLlmHttp(req.rootId, req.subpath ?? "", workspaceRoot, {
+        inference: req.inference,
+        userId: req.userId,
+      });
     },
   );
 

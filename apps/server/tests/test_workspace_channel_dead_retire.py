@@ -167,17 +167,17 @@ def test_apply_retire_from_backend_channel_is_dead():
         )
         is True
     )
-    assert "file_read" in disabled
-    assert "file_write" in disabled
+    assert "read" in disabled
+    assert "write" in disabled
     assert "index_files" in disabled
     assert controller._workspace_channel_dead is True  # noqa: SLF001
 
 
 def test_backend_write_tools_retire_with_the_file_family():
-    """Backend-bound export / land-bytes / read-bytes tools retire with the family.
+    """Backend-bound export / read-bytes tools retire with the family.
 
-    Left on the surface they fail on every call (``download_url`` even burns its
-    network fetch first), which is exactly the thrash the family retire prevents.
+    Left on the surface they fail on every call, which is exactly the thrash
+    the family retire prevents.
     """
     clear_active_coordination()
     backend = _absent_local_backend()
@@ -200,7 +200,6 @@ def test_backend_write_tools_retire_with_the_file_family():
     )
     for name in (
         "md_export",
-        "download_url",
     ):
         assert name in WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS
         assert name in disabled
@@ -221,7 +220,7 @@ def test_single_op_timeout_does_not_seed_disabled_family():
             [
                 ToolAttempt(
                     "op-to",
-                    "file_read",
+                    "read",
                     success=False,
                     error_summary="活性挂起",
                     meta={
@@ -246,8 +245,8 @@ def test_single_op_timeout_does_not_seed_disabled_family():
         assert disabled == set()
         # Per-tool permanent retire still applies via breaker; family pens stay open.
         cb = c.tool_circuit_breaker()
-        assert "file_read" in cb.disabled
-        assert "file_write" not in cb.disabled
+        assert "read" in cb.disabled
+        assert "write" not in cb.disabled
     finally:
         clear_active_coordination()
 
@@ -270,7 +269,7 @@ def test_hang_latch_not_revived_by_presence():
             [
                 ToolAttempt(
                     "h1",
-                    "file_write",
+                    "write",
                     success=False,
                     error_summary="活性挂起",
                     meta=hang,
@@ -281,7 +280,7 @@ def test_hang_latch_not_revived_by_presence():
             [
                 ToolAttempt(
                     "h2",
-                    "file_read",
+                    "read",
                     success=False,
                     error_summary="活性挂起",
                     meta=hang,
@@ -297,7 +296,7 @@ def test_hang_latch_not_revived_by_presence():
             )
             is True
         )
-        assert "file_write" in disabled
+        assert "write" in disabled
         assert "file_list" in disabled
         assert c._channel_hang_dead is True  # noqa: SLF001
         assert session.workspace_channel_dead is False
@@ -316,8 +315,8 @@ async def test_sibling_worker_seeds_disabled_from_session_channel_dead():
     session.workspace_channel_dead = True
     set_active_coordination(session)
     try:
-        read = _StubTool("file_read")
-        write = _StubTool("file_write")
+        read = _StubTool("read")
+        write = _StubTool("write")
         other = _StubTool("other")
         reg = ToolRegistry()
         reg.register(read)
@@ -325,7 +324,7 @@ async def test_sibling_worker_seeds_disabled_from_session_channel_dead():
         reg.register(other)
         provider = _ToolsRecordingProvider(
             [
-                [_tool_chunk("file_read", "{}")],
+                [_tool_chunk("read", "{}")],
                 [_content_chunk("done")],
             ]
         )
@@ -345,8 +344,8 @@ async def test_sibling_worker_seeds_disabled_from_session_channel_dead():
         assert provider.offered
         offered = provider.offered[0]
         assert "other" in offered
-        assert "file_read" in offered
-        assert "file_write" in offered
+        assert "read" in offered
+        assert "write" in offered
         assert read.calls == 0
         denied = [m.content or "" for m in messages if m.role == "tool"]
         assert any("本地文件读写工具已停用" in s for s in denied)
@@ -437,7 +436,7 @@ def test_apply_retire_revives_when_fulfiller_returns():
         )
         is True
     )
-    assert "file_write" in disabled
+    assert "write" in disabled
     hub = default_fulfiller_hub()
     session = hub.register(
         uid, "dev-revive", caps=["workspace"], roots=[root]
@@ -452,7 +451,7 @@ def test_apply_retire_revives_when_fulfiller_returns():
             )
             is True
         )
-        assert "file_write" not in disabled
+        assert "write" not in disabled
         assert controller._workspace_channel_dead is False  # noqa: SLF001
     finally:
         hub.unregister(session)

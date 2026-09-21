@@ -16,11 +16,6 @@ from agentcore.runtime.debate.research_dossier import format_research_dossier_in
 from agentcore.runtime.runs.retrieval_budget import (
     DEFAULT_RETRIEVAL_BUDGET_DEBATER_WITH_DOSSIER,
 )
-from agentcore.workspace.stage_dirs import (
-    DEBATE_PREFIX,
-    RESEARCH_DIR,
-    RESEARCH_PREFIX,
-)
 
 RingStatus = Literal["PASS", "FAIL", "N/A"]
 
@@ -32,16 +27,18 @@ BASELINE_DEBATER_SEARCHES = 56
 # 线性膨胀，任何场级常数都会与轮次策略隐性耦合。
 SEARCH_BUDGET_PER_RUN = DEFAULT_RETRIEVAL_BUDGET_DEBATER_WITH_DOSSIER
 
+# 黄金场磁带里的幕1 落盘路径（历史快照，不是活柜常量）。
+_GOLDEN_RESEARCH_PREFIX = "AgentCore/文档/research/"
 EXPECTED_RESEARCH_FILES: tuple[str, ...] = (
-    f"{RESEARCH_DIR}/法律透镜报告.md",
-    f"{RESEARCH_DIR}/品牌商业透镜报告.md",
-    f"{RESEARCH_DIR}/舆情公关透镜报告.md",
-    f"{RESEARCH_DIR}/文化社会透镜报告.md",
-    f"{RESEARCH_DIR}/汇总与命题卡.md",
+    f"{_GOLDEN_RESEARCH_PREFIX}法律透镜报告.md",
+    f"{_GOLDEN_RESEARCH_PREFIX}品牌商业透镜报告.md",
+    f"{_GOLDEN_RESEARCH_PREFIX}舆情公关透镜报告.md",
+    f"{_GOLDEN_RESEARCH_PREFIX}文化社会透镜报告.md",
+    f"{_GOLDEN_RESEARCH_PREFIX}汇总与命题卡.md",
 )
 
 _SEARCH_TOOLS = frozenset({"web_search", "web_fetch"})
-_FILE_READ_TOOLS = frozenset({"file_read"})
+_FILE_READ_TOOLS = frozenset({"read"})
 _LENS_RUN_PREFIXES = ("lens_0", "lens_1", "lens_2", "lens_3")
 _BRIEF_SKELETON_KEYS = ("crux", "leaning", "confidence", "recommendation")
 
@@ -566,16 +563,16 @@ def collect_metrics(bundle: GoldenBundle) -> dict[str, Any]:
                 other_search_total += 1
 
         if name in _FILE_READ_TOOLS:
-            blob = str(args.get("path") or args.get("file") or args.get("target") or "")
+            blob = str(args.get("file_path") or "")
             if not blob:
                 blob = str(args)
-            if RESEARCH_PREFIX in blob.replace("\\", "/"):
+            if _GOLDEN_RESEARCH_PREFIX in blob.replace("\\", "/"):
                 file_read_research += 1
 
     research_paths = [
         p.replace("\\", "/")
         for p in bundle.workspace_files
-        if p.replace("\\", "/").startswith(RESEARCH_PREFIX)
+        if p.replace("\\", "/").startswith(_GOLDEN_RESEARCH_PREFIX)
     ]
     dossier_index = format_research_dossier_index(research_paths)
     dossier_index_len = len(dossier_index)
@@ -842,11 +839,9 @@ def evaluate_rings(bundle: GoldenBundle) -> GoldenReport:
         },
     )
 
-    debate_files = [p for p in files if p.startswith(DEBATE_PREFIX)]
-    has_brief = any("决策简报" in p for p in debate_files)
-    has_narrative = any("交锋叙事线" in p for p in debate_files)
-    has_merged = any(p.rsplit("/", 1)[-1].startswith("辩论·") for p in debate_files)
-    has_legacy_pair = has_brief and has_narrative
+    debate_files = [
+        p for p in files if p.startswith("AgentCore/文档/debate/")
+    ]
     brief_skeleton: dict[str, bool] = {}
     debate_result_n = 0
     for e in events:
@@ -869,19 +864,16 @@ def evaluate_rings(bundle: GoldenBundle) -> GoldenReport:
     )
     if debate_result_n == 0:
         gaps.append("debate_result：journal 未见该事件，无法检四维骨架")
-    ring5_pass = (has_merged or has_legacy_pair) and skeleton_ok
+    ring5_pass = skeleton_ok
     ring5 = RingResult(
         5,
-        "双产物落盘+debate_result 四维骨架",
+        "debate_result 四维骨架",
         "PASS" if ring5_pass else "FAIL",
         (
-            f"merged_file={has_merged} legacy_pair={has_legacy_pair} "
             f"skeleton={brief_skeleton} debate_result_n={debate_result_n}"
         ),
         {
             "debate_files": debate_files,
-            "has_merged_file": has_merged,
-            "has_legacy_pair": has_legacy_pair,
             "brief_skeleton": brief_skeleton,
             "debate_result_count": debate_result_n,
         },

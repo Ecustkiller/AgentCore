@@ -30,13 +30,11 @@ export async function resolveApproval(
 /** 本轮内允许所有文件改动 — 对齐后端 ``approval_class_tool_names()``
  * （GRANTABLE ∩ FILESYSTEM ∪ {git}）。 */
 export const FILE_OP_TOOLS: ReadonlySet<string> = new Set([
-  "file_write",
-  "file_append",
-  "str_replace",
+  "write",
+  "edit",
   "file_delete",
-  "file_move",
-  "file_copy",
   "file_batch",
+  "md_export",
   "git",
 ]);
 

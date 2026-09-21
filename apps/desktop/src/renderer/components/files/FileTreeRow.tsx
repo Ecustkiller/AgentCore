@@ -1,17 +1,12 @@
 import { Button, SurfaceRow, surfaceRowIndent } from "@/components/ui";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
-import { statusPillSoft } from "@/components/ui/tone-presets";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import type { FileNode, FileSource } from "@/lib/fileSource";
 import { type DropUploadCapture, captureDropUpload } from "@/lib/folderUpload";
 import {
   AGENTCORE_ROOT_LABEL,
   AGENTCORE_ROOT_TOOLTIP,
-  DOCS_PREFIX,
-  countDescendantFiles,
   isAgentCoreRootDir,
-  stageDirCaption,
-  stageDirMeta,
 } from "@/lib/stageDirs";
 import { cn } from "@/lib/utils";
 import { ChevronDown, ChevronRight, FilePlus, Loader2 } from "lucide-react";
@@ -186,12 +181,8 @@ export function FileTreeRow(props: FileTreeRowProps) {
   const isCut = props.cutPaths.has(node.path);
   const status = data.statusOf(node.path);
   const children = data.childrenOf(node.path);
-  const stage = stageDirMeta(node.path);
-  const stageCaption = stage
-    ? stageDirCaption(stage, countDescendantFiles(node.path, data.childrenOf))
-    : null;
   // 约定根改叫 ``.agentcore`` 并退成次要行（钉顶、不跟用户文件抢视觉权重）：
-  // 条目 + 过程稿同一抽屉，默认折叠。
+  // 设定条目同一抽屉，默认折叠。
   const isWorkroom = isAgentCoreRootDir(node.path);
 
   return (
@@ -244,10 +235,7 @@ export function FileTreeRow(props: FileTreeRowProps) {
               style={rowStyle}
             >
               <SimpleTooltip
-                label={
-                  stage?.tooltip ??
-                  (isWorkroom ? AGENTCORE_ROOT_TOOLTIP : node.path)
-                }
+                label={isWorkroom ? AGENTCORE_ROOT_TOOLTIP : node.path}
               >
                 <Button
                   variant="ghost"
@@ -277,13 +265,6 @@ export function FileTreeRow(props: FileTreeRowProps) {
                   <span className="min-w-0 flex-1 truncate">
                     {isWorkroom ? AGENTCORE_ROOT_LABEL : node.name}
                   </span>
-                  {stageCaption && (
-                    <span
-                      className={`shrink-0 rounded-full px-1.5 py-0.5 text-xs leading-none ${statusPillSoft.muted}`}
-                    >
-                      {stageCaption}
-                    </span>
-                  )}
                   {/* 抽屉行是刻意压低的次要行，不给它挂元信息。 */}
                   {!isWorkroom && <FileRowMeta node={node} />}
                 </Button>
@@ -377,8 +358,7 @@ export function FileTreeRow(props: FileTreeRowProps) {
                 depth={depth + 1}
               />
             ))}
-          {(data.truncatedOf(node.path) ||
-            (isWorkroom && data.truncatedOf(DOCS_PREFIX))) && (
+          {data.truncatedOf(node.path) && (
             <TruncatedNotice
               indent={(depth + 1) * 14 + 8 + indentBase}
               shown={children?.length ?? 0}

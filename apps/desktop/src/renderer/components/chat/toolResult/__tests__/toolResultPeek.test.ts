@@ -138,21 +138,21 @@ describe("toolResultPeek", () => {
     ).toBe("执行已强制中止");
   });
 
-  it("names the path for a str_replace edit", () => {
+  it("names the path for an edit", () => {
     expect(
       toolResultPeek(
         data({
-          toolName: "str_replace",
-          args: { path: "a.ts", old_string: "x", new_string: "y" },
+          toolName: "edit",
+          args: { file_path: "a.ts", old_string: "x", new_string: "y" },
         }),
       ),
     ).toBe("已编辑 a.ts");
   });
 
-  it("names the path for a file_write", () => {
+  it("names the path for a write", () => {
     expect(
       toolResultPeek(
-        data({ toolName: "file_write", args: { path: "a.ts", content: "x" } }),
+        data({ toolName: "write", args: { file_path: "a.ts", content: "x" } }),
       ),
     ).toBe("已写入 a.ts");
   });
@@ -367,8 +367,8 @@ describe("toolResultPeek", () => {
     expect(
       toolResultPeek(
         data({
-          toolName: "str_replace",
-          args: { path: "a.ts", old_string: "x", new_string: "y" },
+          toolName: "edit",
+          args: { file_path: "a.ts", old_string: "x", new_string: "y" },
           display: {
             kind: "code_diagnostics",
             status: "ok",
@@ -398,8 +398,8 @@ describe("toolResultPeek", () => {
     expect(
       toolResultPeek(
         data({
-          toolName: "file_write",
-          args: { path: "a.ts", content: "x" },
+          toolName: "write",
+          args: { file_path: "a.ts", content: "x" },
           display: {
             kind: "code_diagnostics",
             status: "ok",
@@ -426,12 +426,12 @@ describe("hasToolResultBody", () => {
     ).toBe(true);
   });
 
-  it("is true for a file_write derived from its content arg", () => {
+  it("is true for a write derived from its content arg", () => {
     expect(
       hasToolResultBody(
         data({
-          toolName: "file_write",
-          args: { path: "a", content: "x" },
+          toolName: "write",
+          args: { file_path: "a", content: "x" },
           result: null,
         }),
       ),
@@ -481,11 +481,11 @@ describe("hasToolResultBody", () => {
     ).toBe(true);
   });
 
-  it("is true for a file_read miss so the row can expand", () => {
+  it("is true for a read miss so the row can expand", () => {
     expect(
       hasToolResultBody(
         data({
-          toolName: "file_read",
+          toolName: "read",
           status: "error",
           result: "文件不存在：missing.md",
           failure: {
@@ -695,24 +695,24 @@ describe("hasToolResultBody", () => {
 });
 
 describe("writeFamilyTitleStat", () => {
-  it("returns +/- counts for a finished str_replace", () => {
+  it("returns +/- counts for a finished edit", () => {
     expect(
       writeFamilyTitleStat(
         data({
-          toolName: "str_replace",
-          args: { path: "a.ts", old_string: "x", new_string: "y" },
+          toolName: "edit",
+          args: { file_path: "a.ts", old_string: "x", new_string: "y" },
         }),
       ),
     ).toEqual({ kind: "diff", adds: 1, dels: 1 });
   });
 
-  it("is null while str_replace is still running", () => {
+  it("is null while edit is still running", () => {
     expect(
       writeFamilyTitleStat(
         data({
-          toolName: "str_replace",
+          toolName: "edit",
           status: "running",
-          args: { path: "a.ts", old_string: "x", new_string: "y" },
+          args: { file_path: "a.ts", old_string: "x", new_string: "y" },
         }),
       ),
     ).toBeNull();
@@ -722,19 +722,19 @@ describe("writeFamilyTitleStat", () => {
     expect(
       writeFamilyTitleStat(
         data({
-          toolName: "str_replace",
-          args: { path: "a.ts", old_string: "x", new_string: "x" },
+          toolName: "edit",
+          args: { file_path: "a.ts", old_string: "x", new_string: "x" },
         }),
       ),
     ).toBeNull();
   });
 
-  it("returns the line count for a finished file_write", () => {
+  it("returns the line count for a finished write", () => {
     expect(
       writeFamilyTitleStat(
         data({
-          toolName: "file_write",
-          args: { path: "a.ts", content: "one\ntwo" },
+          toolName: "write",
+          args: { file_path: "a.ts", content: "one\ntwo" },
         }),
       ),
     ).toEqual({ kind: "lines", lines: 2 });
@@ -742,12 +742,12 @@ describe("writeFamilyTitleStat", () => {
 });
 
 describe("fileReadTitleStat", () => {
-  it("returns a window for a truncated file_read", () => {
+  it("returns a window for a truncated read", () => {
     expect(
       fileReadTitleStat(
         data({
-          toolName: "file_read",
-          args: { path: "a.ts" },
+          toolName: "read",
+          args: { file_path: "a.ts" },
           result: "body\n\n（第 1–200 行，共 242 行）",
         }),
       ),
@@ -758,21 +758,21 @@ describe("fileReadTitleStat", () => {
     expect(
       fileReadTitleStat(
         data({
-          toolName: "file_read",
-          args: { path: "a.ts" },
+          toolName: "read",
+          args: { file_path: "a.ts" },
           result: "body\n\n（全文 242 行）",
         }),
       ),
     ).toBeNull();
   });
 
-  it("is null while file_read is still running", () => {
+  it("is null while read is still running", () => {
     expect(
       fileReadTitleStat(
         data({
-          toolName: "file_read",
+          toolName: "read",
           status: "running",
-          args: { path: "a.ts" },
+          args: { file_path: "a.ts" },
           result: "body\n\n（第 1–200 行，共 242 行）",
         }),
       ),

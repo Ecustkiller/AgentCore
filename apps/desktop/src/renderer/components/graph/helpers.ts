@@ -11,7 +11,7 @@ import {
 import type { GraphEdge } from "@/stores/graph";
 import { subTeamGroupId } from "./ids";
 
-const PRODUCING_TOOLS = new Set(["file_write", "file_append", "str_replace"]);
+const PRODUCING_TOOLS = new Set(["write", "edit"]);
 
 /** CEO bookend run (`run_started.kind=captain`) — never a graph worker. */
 export function isCaptainKind(r: { kind?: string | null }): boolean {
@@ -114,7 +114,7 @@ export function deriveArtifacts(
   for (const tc of toolCalls) {
     if (tc.status !== "success") continue;
     if (!PRODUCING_TOOLS.has(tc.toolName)) continue;
-    const path = tc.arguments.path;
+    const path = tc.arguments.file_path;
     if (typeof path !== "string" || path.length === 0) continue;
     if (seen.has(path)) continue;
     seen.add(path);

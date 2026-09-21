@@ -129,7 +129,7 @@ class ScopeProvider:
         is_b = "撰写最终报告" in user
         if not is_b and not has_tool_result:
             args = json.dumps(
-                {"question": "真问题是X不是Y", "assumption": "暂按X继续", "kind": "scope"}
+                {"question": "真问题是X不是Y", "assumption": "暂按X继续", "reason": "scope"}
             )
             yield LLMChunk(
                 delta_tool_calls=[
@@ -163,7 +163,7 @@ class DepProvider:
                 {
                     "question": "缺错误返回结构才能写完整测试",
                     "assumption": "暂按 {code,msg}",
-                    "kind": "dep",
+                    "reason": "dep",
                 }
             )
             yield LLMChunk(

@@ -49,15 +49,14 @@ class GlobTool:
         file_products=FileProductsContract.READ_ONLY,
         workspace_io=True,
         catalog_summary="按文件名模式找文件",
+        blurb="用通配符找路径，不打开文件内容",
     )
 
     @property
     def schema(self) -> ToolSchema:
         return ToolSchema(
             name="glob",
-            description=(
-                "globstar 查找。省略 path=整仓。勿只填 `*`。"
-            ),
+            description="globstar 按文件名查找。",
             parameters={
                 "type": "object",
                 "properties": {

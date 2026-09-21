@@ -45,10 +45,10 @@ async def _wire_consult_if_entries(
     user_id: str,
     skill_audience: str,
 ) -> bool:
-    """Register unified ``consult`` when the merged catalog is non-empty.
+    """Register unified ``consult`` on the opening table (empty catalog is a soft miss).
 
-    Returns whether the tool was wired (for prompt directory↔tool gate).
-    Prompt listing and fetch share the same :class:`MergedConsultSource` instance.
+    Returns whether the tool was wired. Prompt listing still omits ``<按需目录>``
+    when there are no entries; the tool stays so the table does not flicker.
     ``skill_audience`` is the reader role (``ceo`` / ``worker``) — not a task guess.
     """
     from agentcore.runtime.resolve.prepare import default_memory_store
@@ -64,10 +64,8 @@ async def _wire_consult_if_entries(
         skill_audience=skill_audience,
         tool_registry=registry,
     )
-    entries = await source.list_directory(user_id)
-    if not entries:
-        return False
-    registry.register(ConsultTool(source=source))
+    if registry.get_optional("consult") is None:
+        registry.register(ConsultTool(source=source))
     return True
 
 
@@ -97,12 +95,13 @@ def _assemble_ceo_toolset(
     permission_axes=None,
     advertise_bind_local_folder: bool = False,
     desktop_online: bool = False,
+    worker_envelope: str = "",
 ) -> tuple[DelegateTool, Any, ToolRegistry]:
     """Wire the CEO coordinator's toolset (delegate + read/retrieval + consult + …).
 
     ``consult`` is registered asynchronously by the caller via
     :func:`wire_ceo_consult` after this sync assemble (needs ``user_id`` + await
-    ``list_directory``). Returns ``(delegate_tool, debate_tool, chat_tools)``.
+    the merged source). Returns ``(delegate_tool, debate_tool, chat_tools)``.
     """
     delegate_tool = DelegateTool(
         llm=llm,
@@ -127,15 +126,13 @@ def _assemble_ceo_toolset(
         suspension_deleter=suspension_deleter,
         folder_id=folder_id,
         permission_axes=permission_axes,
+        worker_envelope=worker_envelope,
     )
     chat_tools = build_ceo_tool_registry(
         desktop_online=desktop_online,
         permission_axes=permission_axes,
         backend_location=backend_location,
         include_browser="browser" in worker_tools.names,
-        # The worker roster already asked ``git_execution_enabled_for`` / execution
-        # class with the live backend; reuse those verdicts so CEO and workers agree.
-        include_git="git" in worker_tools.names,
         include_execution_tools="run" in worker_tools.names,
     )
     chat_tools.register(delegate_tool)
@@ -203,7 +200,7 @@ async def wire_ceo_consult(
     folder_id: str | None,
     user_id: str,
 ) -> bool:
-    """Async companion to :func:`_assemble_ceo_toolset` — wires ``consult`` if catalog nonempty."""
+    """Async companion to :func:`_assemble_ceo_toolset` — wires ``consult`` on the opening table."""
     return await _wire_consult_if_entries(
         chat_tools,
         skill_registry=skill_registry,
@@ -220,7 +217,7 @@ async def wire_worker_consult(
     folder_id: str | None = None,
     user_id: str,
 ) -> bool:
-    """Register unified ``consult`` on the worker toolset when the merged catalog is nonempty."""
+    """Register unified ``consult`` on the worker toolset (empty catalog is a soft miss)."""
     return await _wire_consult_if_entries(
         worker_tools,
         skill_registry=skill_registry,

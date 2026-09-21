@@ -58,7 +58,6 @@ describe("arbitrateTurnOutcome", () => {
     expect(o.recovery.kind).not.toBe("wait_then_retry");
     expect(o.recovery.kind).not.toBe("send_next");
     expect(o.showComposerHint).toBe(false);
-    expect(o.showBubbleBanner).toBe(false);
     expect(o.showSessionBanner).toBe(false);
     expect(o.showFooter).toBe(false);
     expect(o.showRegenerate).toBe(false);
@@ -88,12 +87,11 @@ describe("arbitrateTurnOutcome", () => {
     expect(o.message).toBe(LLM_RATE_LIMIT_WHY);
     expect(o.message).not.toMatch(/请约|稍后再试/);
     expect(attestedWaitHint(4)).toBe("约 4 秒后可继续");
-    expect(o.showBubbleBanner).toBe(false);
   });
 
   it("does not light interrupted send-next beside attested paused", () => {
     const o = arbitrateTurnOutcome(measuredCase({ attestedKind: "paused" }));
-    expect(o.showBubbleBanner && o.showComposerHint).toBe(false);
+    expect(o.showComposerHint).toBe(false);
     expect(o.recovery.kind).toBe("continue");
   });
 
@@ -127,7 +125,6 @@ describe("arbitrateTurnOutcome", () => {
     expect(o.message).not.toMatch(/\d+\s*秒/);
     expect(o.message).not.toMatch(/请稍后再试/);
     expect(o.showComposerHint).toBe(false);
-    expect(o.showBubbleBanner).toBe(false);
   });
 
   it("rate-limit without attested pause still waits (landed partial)", () => {
@@ -135,9 +132,8 @@ describe("arbitrateTurnOutcome", () => {
     expect(o.kind).toBe("partial");
     expect(o.recovery.kind).toBe("wait_then_retry");
     expect(o.recovery.kind).not.toBe("send_next");
-    expect(o.showBubbleBanner).toBe(false);
     expect(o.showComposerHint).toBe(true);
-    expect(o.supportPackHost).toBe("composer");
+    expect(o.supportPackHost).toBe("none");
     expect(o.showStripFailure).toBe(false);
     expect(o.message).toBe(LLM_RATE_LIMIT_WHY);
     expect(o.message).not.toMatch(/请约|稍后再试/);
@@ -155,9 +151,8 @@ describe("arbitrateTurnOutcome", () => {
       }),
     );
     expect(o.kind).toBe("partial");
-    expect(o.showBubbleBanner).toBe(false);
     expect(o.showComposerHint).toBe(true);
-    expect(o.supportPackHost).toBe("composer");
+    expect(o.supportPackHost).toBe("none");
     expect(o.recovery.kind).toBe("wait_then_retry");
     expect(o.message).toBe(`${LLM_RATE_LIMIT_WHY}约 4 秒后可继续。`);
     expect(o.recovery.retryAfterSec).toBe(4);
@@ -213,10 +208,10 @@ describe("arbitrateTurnOutcome", () => {
     expect(o.kind).toBe("error");
     expect(o.recovery.kind).toBe("configure");
     expect(o.recovery.kind).not.toBe("wait_then_retry");
-    expect(o.showComposerHint).toBe(false);
+    expect(o.showComposerHint).toBe(true);
     expect(o.showFooter).toBe(false);
-    expect(o.showBubbleBanner).toBe(true);
-    expect(o.supportPackHost).toBe("bubble");
+    expect(o.hideEmptyBubble).toBe(true);
+    expect(o.supportPackHost).toBe("none");
   });
 
   it("interrupted-only recovery is send_next, not wait", () => {
@@ -227,12 +222,11 @@ describe("arbitrateTurnOutcome", () => {
     expect(o.kind).toBe("error");
     expect(o.recovery.kind).toBe("send_next");
     expect(o.showComposerHint).toBe(true);
-    expect(o.showBubbleBanner).toBe(false);
     expect(o.showFooter).toBe(false);
-    expect(o.supportPackHost).toBe("composer");
+    expect(o.supportPackHost).toBe("none");
     expect(o.message).toBe(TURN_INTERRUPTED_EMPTY_MESSAGE);
     expect(o.face?.message).toBe(TURN_INTERRUPTED_EMPTY_MESSAGE);
-    expect(o.hideEmptyBubble).toBe(false);
+    expect(o.hideEmptyBubble).toBe(true);
   });
 
   it("empty shell with no verdict hides the bubble instead of inventing interrupted", () => {
@@ -273,7 +267,6 @@ describe("arbitrateTurnOutcome", () => {
     expect(o.kind).toBe("paused");
     expect(o.recovery.kind).toBe("continue");
     expect(o.recovery.label).toBe(PAUSED_CONTINUE_LABEL);
-    expect(o.showBubbleBanner).toBe(false);
     expect(PAUSED_STATUS_LABEL).toBe("已暂停");
   });
 
@@ -328,14 +321,13 @@ describe("arbitrateTurnOutcome", () => {
     expect(o.kind).toBe("partial");
   });
 
-  it("empty cancelled hides the bubble; rate-limit on the same turn does not", () => {
+  it("empty cancelled and empty rate-limit both omit the assistant bubble", () => {
     const cancelled = arbitrateTurnOutcome({
       content: "",
       finishReason: "cancelled",
     });
     expect(cancelled.kind).toBe("ok");
     expect(cancelled.hideEmptyBubble).toBe(true);
-    expect(cancelled.showBubbleBanner).toBe(false);
     expect(cancelled.showComposerHint).toBe(false);
     expect(cancelled.showStripStopped).toBe(false);
     expect(cancelled.supportPackHost).toBe("none");
@@ -349,12 +341,11 @@ describe("arbitrateTurnOutcome", () => {
       },
     });
     expect(rateLimit.kind).toBe("error");
-    expect(rateLimit.hideEmptyBubble).toBe(false);
-    expect(rateLimit.showBubbleBanner).toBe(true);
+    expect(rateLimit.hideEmptyBubble).toBe(true);
     expect(rateLimit.face?.code).toBe("LLM_RATE_LIMIT");
-    expect(rateLimit.showComposerHint).toBe(false);
+    expect(rateLimit.showComposerHint).toBe(true);
     expect(rateLimit.showStripStopped).toBe(false);
-    expect(rateLimit.supportPackHost).toBe("bubble");
+    expect(rateLimit.supportPackHost).toBe("none");
   });
 
   it("exposes 部分完成 label for partial turns", () => {
@@ -391,7 +382,6 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
     expect(o.hideEmptyBubble).toBe(false);
     expect(o.showStripStopped).toBe(true);
     expect(o.showStripFailure).toBe(false);
-    expect(o.showBubbleBanner).toBe(false);
     expect(o.showComposerHint).toBe(false);
     expect(o.showFooter).toBe(true);
     expect(o.showRegenerate).toBe(true);
@@ -411,7 +401,6 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
     });
     expect(withSession.kind).toBe("ok");
     expect(withSession.showStripStopped).toBe(true);
-    expect(withSession.showBubbleBanner).toBe(false);
     expect(withSession.showSessionBanner).toBe(false);
     expect(withSession.showTurnWarning).toBe(false);
 
@@ -422,7 +411,7 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
       hasTeamStrip: false,
       processLength: 1,
     });
-    expect(attestedError.showBubbleBanner).toBe(false);
+    expect(attestedError.showComposerHint).toBe(false);
     expect(attestedError.showSessionBanner).toBe(false);
     expect(attestedError.showTurnWarning).toBe(false);
 
@@ -436,7 +425,7 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
     });
     expect(withPreflight.showStripStopped).toBe(true);
     expect(withPreflight.showTurnWarning).toBe(false);
-    expect(withPreflight.showBubbleBanner).toBe(false);
+    expect(withPreflight.showComposerHint).toBe(false);
   });
 
   it("user-stop after resolved ask is ok, not paused — no bubble 已停止", () => {
@@ -450,7 +439,6 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
     });
     expect(o.kind).toBe("ok");
     expect(o.kind).not.toBe("paused");
-    expect(o.showBubbleBanner).toBe(false);
     expect(o.showStripStopped).toBe(true);
     expect(o.showTurnWarning).toBe(false);
     expect(o.face?.code).toBe("TURN_CANCELLED");
@@ -467,7 +455,6 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
       processLength: 2,
     });
     expect(o.kind).toBe("ok");
-    expect(o.showBubbleBanner).toBe(false);
     expect(o.showStripStopped).toBe(true);
   });
 
@@ -480,7 +467,6 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
     expect(o.kind).toBe("ok");
     expect(o.showTurnWarning).toBe(true);
     expect(o.showStripStopped).toBe(false);
-    expect(o.showBubbleBanner).toBe(false);
   });
 
   it("rate-limit on cancelled status follows kind, never 已停止", () => {
@@ -494,9 +480,8 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
     expect(o.kind).toBe("partial");
     expect(o.showStripStopped).toBe(false);
     expect(o.showStripFailure).toBe(false);
-    expect(o.showBubbleBanner).toBe(false);
     expect(o.showComposerHint).toBe(true);
-    expect(o.supportPackHost).toBe("composer");
+    expect(o.supportPackHost).toBe("more");
   });
 
   it("partial + rate-limit: composer owns why with or without a team strip", () => {
@@ -506,9 +491,8 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
       expect(o.recovery.kind).toBe("wait_then_retry");
       expect(o.recovery.kind).not.toBe("send_next");
       expect(o.showComposerHint).toBe(true);
-      expect(o.showBubbleBanner).toBe(false);
       expect(o.showStripFailure).toBe(false);
-      expect(o.supportPackHost).toBe("composer");
+      expect(o.supportPackHost).toBe(hasTeamStrip ? "more" : "none");
       expect(o.message).toBe(LLM_RATE_LIMIT_WHY);
       expect(o.message).not.toBe("已交付 3 个文件；1 项未完成");
     }
@@ -529,7 +513,7 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
     expect(o.message).toBe("已交付 1 个文件；1 项未完成");
   });
 
-  it("team strip owns the red card; bubble does not repeat it", () => {
+  it("team strip keeps the scoreboard; the timeout sentence is on the composer banner", () => {
     const o = arbitrateTurnOutcome({
       content: "",
       finishReason: "error",
@@ -542,10 +526,11 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
     });
     expect(o.kind).toBe("error");
     expect(o.showStripFailure).toBe(true);
-    expect(o.showBubbleBanner).toBe(false);
     expect(o.showSessionBanner).toBe(false);
-    expect(o.showComposerHint).toBe(false);
+    expect(o.showComposerHint).toBe(true);
+    expect(o.hideEmptyBubble).toBe(false);
     expect(o.supportPackHost).toBe("more");
+    expect(o.message).toBe("连接超时，请检查网络后重试。");
     expect(o.recovery.kind).toBe("wait_then_retry");
     expect(o.showFooter).toBe(false);
   });
@@ -560,10 +545,9 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
     expect(o.kind).toBe("error");
     expect(o.recovery.kind).toBe("send_next");
     expect(o.showComposerHint).toBe(true);
-    expect(o.showBubbleBanner).toBe(false);
     expect(o.showStripFailure).toBe(false);
     expect(o.showStripStopped).toBe(false);
-    expect(o.supportPackHost).toBe("composer");
+    expect(o.supportPackHost).toBe("more");
     expect(o.message).toBe(TURN_INTERRUPTED_EMPTY_MESSAGE);
   });
 
@@ -595,36 +579,38 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
     expect(o.recovery.label).toBe("接入自己的 Key");
     expect(o.recovery.kind).not.toBe("wait_then_retry");
     expect(o.showFooter).toBe(false);
-    expect(o.showComposerHint).toBe(false);
+    expect(o.showComposerHint).toBe(true);
+    expect(o.hideEmptyBubble).toBe(true);
+    expect(o.supportPackHost).toBe("none");
     expect(o.message).toContain("本月平台额度已用完。");
     expect(o.message).toMatch(/额度将于 .+ 重置。/);
   });
 
-  it("empty degraded matches retryable hard-fail: footer retry, no composer hint", () => {
+  it("empty degraded is a composer banner, not a bubble card", () => {
     const o = arbitrateTurnOutcome({
       content: "",
       finishReason: "degraded",
     });
     expect(o.kind).toBe("error");
     expect(o.recovery.kind).toBe("none");
-    expect(o.showBubbleBanner).toBe(true);
-    expect(o.showComposerHint).toBe(false);
-    expect(o.showFooter).toBe(true);
-    expect(o.showRegenerate).toBe(true);
-    expect(o.supportPackHost).toBe("bubble");
+    expect(o.showComposerHint).toBe(true);
+    expect(o.hideEmptyBubble).toBe(true);
+    expect(o.showFooter).toBe(false);
+    expect(o.showRegenerate).toBe(false);
+    expect(o.supportPackHost).toBe("none");
   });
 
-  it("empty unproductive is a failure card with footer retry", () => {
+  it("empty unproductive is a composer banner, not a bubble card", () => {
     const o = arbitrateTurnOutcome({
       content: "",
       finishReason: "unproductive",
     });
     expect(o.kind).toBe("error");
-    expect(o.showBubbleBanner).toBe(true);
-    expect(o.showComposerHint).toBe(false);
-    expect(o.showFooter).toBe(true);
-    expect(o.showRegenerate).toBe(true);
-    expect(o.supportPackHost).toBe("bubble");
+    expect(o.showComposerHint).toBe(true);
+    expect(o.hideEmptyBubble).toBe(true);
+    expect(o.showFooter).toBe(false);
+    expect(o.showRegenerate).toBe(false);
+    expect(o.supportPackHost).toBe("none");
   });
 
   it("max_rounds with body is a normal complete, not a failure face", () => {
@@ -633,7 +619,6 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
       finishReason: "max_rounds",
     });
     expect(o.kind).toBe("ok");
-    expect(o.showBubbleBanner).toBe(false);
     expect(o.showComposerHint).toBe(false);
     expect(o.recovery.kind).toBe("none");
     expect(o.showFooter).toBe(true);
@@ -647,7 +632,6 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
       finishReason: "interrupted",
     });
     expect(o.kind).toBe("ok");
-    expect(o.showBubbleBanner).toBe(false);
     expect(o.showComposerHint).toBe(false);
     expect(o.showFooter).toBe(true);
     expect(o.showRegenerate).toBe(true);
@@ -661,18 +645,19 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
       messageError: { code: "LLM_ERROR", message: "模型调用失败，请重试。" },
       conversationError: "模型调用失败，请重试。",
     });
-    expect(owned.showBubbleBanner).toBe(true);
+    expect(owned.showComposerHint).toBe(true);
     expect(owned.showSessionBanner).toBe(false);
-    expect(owned.supportPackHost).toBe("bubble");
+    expect(owned.supportPackHost).toBe("none");
+    expect(owned.hideEmptyBubble).toBe(true);
 
     const sessionOnly = arbitrateTurnOutcome({
       content: "已写出正文",
       conversationError: "网络中断，请重试。",
     });
     expect(sessionOnly.kind).toBe("error");
-    expect(sessionOnly.showBubbleBanner).toBe(false);
+    expect(sessionOnly.showComposerHint).toBe(false);
     expect(sessionOnly.showSessionBanner).toBe(true);
-    expect(sessionOnly.supportPackHost).toBe("session");
+    expect(sessionOnly.supportPackHost).toBe("more");
     expect(sessionOnly.message).toBe("网络中断，请重试。");
   });
 
@@ -707,23 +692,17 @@ describe("arbitrateTurnOutcome · rest-of-states flag contract", () => {
     expect(v).not.toHaveProperty("surface");
   });
 
-  it("rejects contradictory host combos on the envelope", () => {
+  it("rejects a pack host on a hidden empty bubble", () => {
     expect(
       turnVerdictHostContradiction({
-        hasTeamStrip: true,
-        supportPackHost: "bubble",
-      }),
-    ).toMatch(/互斥/);
-    expect(
-      turnVerdictHostContradiction({
-        hasTeamStrip: false,
+        hideEmptyBubble: true,
         supportPackHost: "more",
       }),
     ).toMatch(/互斥/);
     expect(
       turnVerdictHostContradiction({
-        hasTeamStrip: true,
-        supportPackHost: "composer",
+        hideEmptyBubble: false,
+        supportPackHost: "more",
       }),
     ).toBeNull();
   });
@@ -737,7 +716,6 @@ describe("arbitrateTurnOutcome · utility footer vs regenerate", () => {
     expect(isAttestedPauseContinue(o)).toBe(true);
     expect(o.showFooter).toBe(true);
     expect(o.showRegenerate).toBe(false);
-    expect(o.showBubbleBanner).toBe(false);
   });
 
   it("attested paused with process-only keeps copy footer, hides regenerate", () => {

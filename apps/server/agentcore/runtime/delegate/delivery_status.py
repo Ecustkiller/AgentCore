@@ -17,7 +17,7 @@
 但没走完正式交付声明的产物仍计入交付账）。每行随带工具自报的 ``kind`` /
 ``derived_from``（导出件 ← 源 md），客户端据此把源折成中间稿，口径同
 ``fold_exported_sources``。blocked = 有硬缺口且本波无任何 ``files_touched`` /
-声明产物；partial = 有落盘有缺口。未声明但已 ``file_write`` 的路径仍把整轮从
+声明产物；partial = 有落盘有缺口。未声明但已 ``write`` 的路径仍把整轮从
 blocked 抬成 partial（空交/零声明清单 ≠ 整轮失败）。
 
 ``degraded_handoff`` 一律 warning。空交接风暴 / 取消零落盘附加缺口 **已撤**。
@@ -35,17 +35,13 @@ blocked 抬成 partial（空交/零声明清单 ≠ 整轮失败）。
 ``asyncio.create_task(_background_drive)`` 的 ``set`` 到不了 CEO 父任务的
 ``finish_guard``。禁止改去查 turn_journal。
 
-文献成文（批内已声明 ``reviews/`` 审校座）：证据不足时注入
-``reason=evidence_deficit`` blocking gap → state 不得 ``delivered``（见
-``research_quality.collect_evidence_deficit_gaps``）；消费搜索真源
-``evidence_gap`` + ``search_policy=academic_literature``（兼容旧
-``evidence_deficit`` 戳）；不扫完成话术词。
+文献成文证据不足：工人 ``delivery_gaps`` 若已戳 ``evidence_deficit``，仍经
+``collect_worker_gaps`` 进卡。不再按 ``reviews/`` 路径前缀生成该缺口。
 
-已声明复核落盘（钉 ``reviews/`` artifacts）：声明路径未 accepted / 拒收 /
-空壳 → ``reason=thin_review`` blocking（见
-``research_quality.collect_thin_review_gaps``）；不扫角色名；有合格报告则短
-handoff 不硬降档。``requires_draft_ack`` 扩至 ``evidence_deficit`` /
-``thin_review`` / ``verify_failed`` / ``node_failed`` / ``artifact_rejected``
+已声明路径未落盘走通用 ``files_not_landed``。历史 ``reason=thin_review`` 若工人
+已戳，仍可读；本模块不再按 ``reviews/`` 柜生成。``requires_draft_ack`` 扩至
+``evidence_deficit`` / ``thin_review`` / ``verify_failed`` / ``node_failed`` /
+``artifact_rejected``
 （契约硬失败·节点 FAILED·拒收产物同 thin_review 闩；正向缺口承认，不扩姿势 A 词表）。
 ``path_mismatch``：已有落盘时不闩 ``requires_draft_ack``（声明未命中仍可 ``delivered``）；
 零落盘仍闩。
@@ -1166,30 +1162,6 @@ Callers stamp disk truth (``stamp_results_disk_truth``) before emit; this
                 continue
             reason = str(row.get("reason") or REASON_VERIFY_FAILED).strip()
             raw_gaps.append(_annotate_gap(role, text, reason=reason or REASON_VERIFY_FAILED))
-    # ①c 文献成文证据不足（学术综述诚实性）——仅批内已声明 reviews/ 审校座；
-    # 无该结构不套。blocking → 不得 delivered（partial/blocked）；不扫完成话术词。
-    # 接缝真源：web_search / RunState.evidence_gap（academic_literature）；gap reason
-    # 仍为 evidence_deficit（交付卡契约）。
-    from agentcore.runtime.runs.research_quality import (
-        collect_evidence_deficit_gaps,
-        collect_thin_review_gaps,
-    )
-
-    for row in collect_evidence_deficit_gaps(plan.nodes, results):
-        text = str(row.get("description") or "").strip()
-        if not text:
-            continue
-        reason = str(row.get("reason") or REASON_EVIDENCE_DEFICIT).strip()
-        raw_gaps.append(_annotate_gap("验收", text, reason=reason or REASON_EVIDENCE_DEFICIT))
-    # ①c2 已声明复核落盘未对齐合格报告（案 thin-review A′）——blocking thin_review；
-    # 不扫角色名；有 accepted 合格报告则豁免短 handoff。
-    for row in collect_thin_review_gaps(plan.nodes, results):
-        text = str(row.get("description") or "").strip()
-        if not text:
-            continue
-        reason = str(row.get("reason") or REASON_THIN_REVIEW).strip()
-        role = str(row.get("role") or "").strip() or "验收"
-        raw_gaps.append(_annotate_gap(role, text, reason=reason or REASON_THIN_REVIEW))
     # ② 完成验收未满足 / soft overlay notes（批次级）。
     # Soft markers（「不阻断验收」等）经 _annotate_gap → severity=warning → state=notes。
     for gap in criteria_gaps or []:
@@ -1220,12 +1192,6 @@ Callers stamp disk truth (``stamp_results_disk_truth``) before emit; this
         )
     # 刀1 / 方案 A：有落盘时 degraded_handoff 降为 warning 备注。
     gaps = _soften_landed_degraded_gaps(gaps, files_landed=files_landed)
-    # 文献证据降档仅绑已声明 reviews/ 审校座的成文综述；非该形态丢弃误入的
-    # evidence_deficit（摸清批等不得因此离开 delivered）。
-    from agentcore.runtime.runs.research_quality import plan_is_literature_report_delivery
-
-    if not plan_is_literature_report_delivery(plan.nodes):
-        gaps = [g for g in gaps if g.get("reason") != REASON_EVIDENCE_DEFICIT]
 
     blocking = [g for g in gaps if _is_blocking(g)]
     warnings = [g for g in gaps if not _is_blocking(g)]

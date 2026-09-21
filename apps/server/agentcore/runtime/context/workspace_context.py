@@ -1,34 +1,24 @@
 """Per-turn ``<工作区>`` — short environment coordinates for CEO and workers.
 
 只写开场工具表看不出来的现场：执行、出站坐标、桌、系统、Git、客户端、未装配缺口、
-已挂区外、非空约定文档出口。已装配不报（开场表就是通道）；产物格式 / 出站 HOW /
+已挂区外。已装配不报（开场表就是通道）；产物格式 / 出站 HOW /
 表格解析 / 通道履约剧本不在这里。本机「桌」写文件夹名 / ``root_label``，不写 OS 绝对路径
 （工具 path 只认相对 POSIX；盘符进任务会让队员按错坐标系）。
 
 空状态不写。空桌只标「顶层空」。CEO 文件索引仍拼在本块末节（工人不加）。
-HOW → ``product_help`` / ``delivery`` / ``local_desk`` / 工具 description / consult。
+HOW → ``product_help`` / 工具 description / consult。
 分层 → docs/03-AI核心/上下文工程.md「提示词设计原则」。
 """
 
 from __future__ import annotations
 
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from agentcore.runtime.context.outlet_inventory import (
-    OutletDirListing,
-    format_outlet_line,
-)
 from agentcore.workspace.layout import CONV_SEGMENT, INTERNAL_SEGMENT, TREE_SEGMENT
-from agentcore.workspace.stage_dirs import (
-    DEBATE_DIR,
-    DRAFTS_DIR,
-    RESEARCH_DIR,
-    REVIEWS_DIR,
-)
 
 if TYPE_CHECKING:
     from agentcore.core.types import HostAxis, PermissionAxes
@@ -223,10 +213,22 @@ def _system_line(
     is_local: bool,
     is_remote_local: bool,
     langs: Sequence[str] | None,
+    exec_on: bool = False,
 ) -> str:
-    """OS · shell. Cloud is the guest; remote-local does not use the API host OS."""
+    """OS · shell. Cloud is the guest; remote-local does not use the API host OS.
+
+    When cloud ``run`` is assembled, append the declared guest PATH inventory.
+    Local stays the user's machine — do not paste the cloud menu there.
+    """
     if not is_local:
-        return "系统：Linux · bash"
+        line = "系统：Linux · bash"
+        if exec_on:
+            from agentcore.tools.sandbox.guest_rootfs import format_cloud_guest_surface
+
+            surface = format_cloud_guest_surface()
+            if surface:
+                line = f"{line} · {surface}"
+        return line
     os_name = None if is_remote_local else _OS_LABEL.get(sys.platform)
     if langs is not None:
         shell = "bash" if "bash" in langs else "PowerShell"
@@ -305,7 +307,6 @@ def build_workspace_context(
     mcp_enabled: bool = False,
     mcp_label: str | None = None,
     git_fact: WorkspaceGitFact | None = None,
-    outlet_inventory: Mapping[str, OutletDirListing] | None = None,
     desk_folder_id: str | None = None,
     desk_folder_label: str | None = None,
     desk_is_birth: bool = True,
@@ -332,13 +333,11 @@ def build_workspace_context(
 
     ``exec_languages`` is the probed (local/sidecar) or fixed (cloud) language
     surface advertised on ``run``. Incomplete local probes get a short
-    ``解释器：`` line; the full set is omitted.
+    ``解释器：`` line; the full set is omitted. Cloud ``run`` assembled also
+    lists ``CLOUD_GUEST_SURFACE`` on the system line (declared guest PATH).
 
     ``git_fact`` is the root-``.git`` probe. Unassembled git is a gap, not a
     Git line. Repo-policy lives in git tool receipts.
-
-    ``outlet_inventory`` lists the four 约定文档出口 dirs. Empty / ``None`` omit
-    (layout HOW → ``delivery``).
 
     ``desk_folder_id`` / ``desk_folder_label`` name the sitting desk.
     ``desk_is_birth`` is accepted for call-site compatibility; the label is enough.
@@ -358,9 +357,9 @@ def build_workspace_context(
     is_remote_local = is_local and channel is not None
 
     location_line = (
-        "执行：用户本机 · 出站：这台电脑"
+        "执行：用户本机 · 出站：这台电脑 · 原件：能改"
         if is_local
-        else "执行：云端 · 出站：产品网络"
+        else "执行：云端 · 出站：产品网络 · 原件：不能改"
     )
     desktop_line = "客户端：桌面已连接" if desktop_online else "客户端：未连接"
 
@@ -375,7 +374,7 @@ def build_workspace_context(
             mode_zh = (
                 "只能看"
                 if mode == "readonly"
-                else ("可改原件" if mode == "attach_rw" else "整理")
+                else ("可改原件" if mode == "attach_rw" else "可拷入、不覆盖")
             )
             parts.append(f"`external/{alias}/`（{mode_zh}）")
         mounts_line = "区外：" + "；".join(parts)
@@ -431,16 +430,6 @@ def build_workspace_context(
 
         interpreters_line = format_interpreters_line(tuple(langs))
 
-    outlet_lines = [
-        line
-        for title, rel in (
-            ("过程稿：", DRAFTS_DIR),
-            ("调研：", RESEARCH_DIR),
-            ("辩论：", DEBATE_DIR),
-            ("审查：", REVIEWS_DIR),
-        )
-        if (line := format_outlet_line(title, rel, outlet_inventory))
-    ]
     resolved_git = git_fact if git_fact is not None else detect_workspace_git_sync(backend)
     git_line = format_workspace_git_line(resolved_git, tool_enabled=git_on)
     desk_line = _desk_line(
@@ -458,16 +447,15 @@ def build_workspace_context(
             is_local=is_local,
             is_remote_local=is_remote_local,
             langs=tuple(langs) if langs is not None else None,
+            exec_on=exec_on,
         ),
         git_line,
         desktop_line,
-        *outlet_lines,
         *([mounts_line] if mounts_line else []),
         _gap_line(
             (
                 ("run", exec_on),
                 ("package_install", pkg_on),
-                ("git", git_on),
                 ("browser", browser_on),
                 ("local_open", local_open_on),
                 ("host", host_on),

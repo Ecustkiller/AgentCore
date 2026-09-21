@@ -15,7 +15,6 @@ from agentcore.api.routes import (
     admin,
     auth,
     autonomy,
-    boards,
     capabilities,
     conversations,
     demo_tape,
@@ -30,7 +29,6 @@ from agentcore.api.routes import (
     inference,
     llm_model_profiles,
     llm_providers,
-    memory,
     messages,
     model_catalog,
     notices,
@@ -53,8 +51,6 @@ from agentcore.core.errors import AgentCoreError, wire_moments
 from agentcore.core.logging import get_logger, setup_logging
 from agentcore.db.migration_check import check_migrations
 from agentcore.mail.sender import is_smtp_configured
-from agentcore.memory.consolidation import consolidation_loop, shutdown_scheduler
-from agentcore.memory.explore_refresh import shutdown_explore_refresh_scheduler
 from agentcore.middleware.client_version import ClientMinVersionMiddleware
 from agentcore.middleware.csrf import CsrfMiddleware
 from agentcore.middleware.errors import JSONErrorMiddleware
@@ -338,17 +334,6 @@ async def lifespan(app: FastAPI):
     if settings.workspace_retention_enabled:
         retention_task = asyncio.create_task(retention_loop())
 
-    # Long-term-memory consolidation backstop (Agent记忆 §1.5): periodically sweep
-    # settled conversations whose latest message is past the watermark and fold them
-    # into the user's memory — covers a debounce dropped by a restart / closed
-    # client. The live path is the per-turn idle debounce (memory/consolidation.py).
-    consolidation_task: asyncio.Task | None = None
-    if settings.memory_consolidation_enabled:
-        consolidation_task = asyncio.create_task(consolidation_loop())
-
-    # Memory layout / documents→tables backfill runs in deploy (stop-api window),
-    # not at lifespan — see scripts/migrate_memory_pipeline.py.
-
     # Dev-only demo-tape recorder (录制层): tap every live turn's SSE stream into
     # demos/recordings/ so a satisfying run can be exported as a tape verbatim.
     # No-op unless DEMO_TAPE_RECORD_ENABLED; never enabled in production.
@@ -473,10 +458,6 @@ async def lifespan(app: FastAPI):
                 retention_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await retention_task
-            if consolidation_task is not None:
-                consolidation_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await consolidation_task
             if session_retention_task is not None:
                 session_retention_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -512,13 +493,13 @@ async def lifespan(app: FastAPI):
             from agentcore.tools.sandbox.gvisor import close_all_desk_sessions
 
             await close_all_desk_sessions()
-            # Flush in-flight debounced passes and cancel pending timers.
-            await shutdown_scheduler()
-            await shutdown_explore_refresh_scheduler()
             # Flush in-flight long-conversation compaction folds.
             await shutdown_compaction()
             # Release the shared SearXNG keep-alive pool.
             await aclose_search_backend()
+            from agentcore.llm.http_pool import aclose_llm_http_pool
+
+            await aclose_llm_http_pool()
             if settings.demo_tape_record_enabled:
                 from agentcore.demo_tape.recorder import uninstall_recorder
 
@@ -607,7 +588,6 @@ app.include_router(admin.router, prefix="/v1")
 app.include_router(account.router, prefix="/v1")
 app.include_router(auth.router, prefix="/v1")
 app.include_router(autonomy.router, prefix="/v1")
-app.include_router(boards.router, prefix="/v1")
 app.include_router(capabilities.router, prefix="/v1")
 app.include_router(conversations.router, prefix="/v1")
 app.include_router(demo_tape.router, prefix="/v1")
@@ -624,7 +604,6 @@ app.include_router(preview.router, prefix="/v1")
 app.include_router(inference.router, prefix="/v1")
 app.include_router(llm_providers.router, prefix="/v1")
 app.include_router(llm_model_profiles.router, prefix="/v1")
-app.include_router(memory.router, prefix="/v1")
 app.include_router(messages.router, prefix="/v1")
 app.include_router(model_catalog.router, prefix="/v1")
 app.include_router(realtime.router, prefix="/v1")

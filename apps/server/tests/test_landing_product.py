@@ -4,23 +4,13 @@ from __future__ import annotations
 
 from agentcore.runtime.runs.landing_product import (
     filter_product_landing_paths,
-    is_dossier_intermediate_path,
     is_product_landing_path,
     landing_tool_path_from_args,
 )
-from agentcore.workspace.stage_dirs import RESEARCH_DIR, REVIEWS_DIR
 
 
-def test_dossier_intermediate_paths():
-    assert is_dossier_intermediate_path(f"{REVIEWS_DIR}/修复方案.md")
-    assert is_dossier_intermediate_path(f"{RESEARCH_DIR}/报告.md")
-    assert is_dossier_intermediate_path(f"{RESEARCH_DIR}/")
-    assert not is_dossier_intermediate_path("apps/server/foo.py")
-    assert not is_dossier_intermediate_path("site/index.html")
-
-
-def test_reviews_md_counts_as_product_without_artifacts():
-    path = f"{REVIEWS_DIR}/某修复方案.md"
+def test_md_counts_as_product_without_artifacts():
+    path = "notes/某修复方案.md"
     assert is_product_landing_path(path, None)
     assert is_product_landing_path(path, [])
     assert filter_product_landing_paths([path, "src/a.py"], None) == [
@@ -29,10 +19,10 @@ def test_reviews_md_counts_as_product_without_artifacts():
     ]
 
 
-def test_research_artifact_still_product():
-    art = f"{RESEARCH_DIR}/报告.md"
+def test_nested_artifact_still_product():
+    art = "notes/报告.md"
     assert is_product_landing_path(art, [art])
-    assert is_product_landing_path(art, [f"{RESEARCH_DIR}/"])
+    assert is_product_landing_path(art, ["notes/"])
     assert filter_product_landing_paths([art], [art]) == [art]
 
 
@@ -43,7 +33,7 @@ def test_missing_path_compat_counts_as_product():
 
 def test_landing_tool_path_from_args():
     assert (
-        landing_tool_path_from_args("file_write", {"path": "a.py"}) == "a.py"
+        landing_tool_path_from_args("write", {"file_path": "a.py"}) == "a.py"
     )
     assert (
         landing_tool_path_from_args(
@@ -79,7 +69,7 @@ def test_landing_tool_path_from_args():
         )
         is None
     )
-    assert landing_tool_path_from_args("file_read", {"path": "a.py"}) is None
+    assert landing_tool_path_from_args("read", {"file_path": "a.py"}) is None
 
 
 def test_landing_tools_is_one_object_everywhere():
@@ -106,18 +96,22 @@ def test_landing_tools_is_one_object_everywhere():
         assert seen is LANDING_TOOLS
     # Every pen names its target through the shared arg reader (no per-tool key table).
     for name in LANDING_TOOLS:
-        assert (
-            landing_tool_path_from_args(name, {"path": "p.txt"}) == "p.txt"
-            or landing_tool_path_from_args(
-                name,
-                {
-                    "operations": [
-                        {"op": "copy", "source": "src", "destination": "dst.txt"}
-                    ]
-                },
+        if name == "file_batch":
+            assert (
+                landing_tool_path_from_args(
+                    name,
+                    {
+                        "operations": [
+                            {"op": "copy", "source": "src", "destination": "dst.txt"}
+                        ]
+                    },
+                )
+                == "dst.txt"
             )
-            == "dst.txt"
-        )
+        else:
+            assert (
+                landing_tool_path_from_args(name, {"file_path": "p.txt"}) == "p.txt"
+            )
 
 
 async def test_every_landing_tool_self_reports_its_product(tmp_path):
@@ -148,11 +142,11 @@ async def test_every_landing_tool_self_reports_its_product(tmp_path):
 
     (tmp_path / "src.txt").write_text("alpha\n", encoding="utf-8")
     cases: list[tuple[str, object, dict, str, str]] = [
-        ("file_write", FileWriteTool(), {"path": "报告.md", "content": "# 标题"}, "报告.md", "md"),
+        ("write", FileWriteTool(), {"file_path": "报告.md", "content": "# 标题"}, "报告.md", "md"),
         (
-            "str_replace",
+            "edit",
             StrReplaceTool(),
-            {"path": "src.txt", "old_string": "alpha", "new_string": "beta"},
+            {"file_path": "src.txt", "old_string": "alpha", "new_string": "beta"},
             "src.txt",
             "txt",
         ),
@@ -179,9 +173,6 @@ async def test_every_landing_tool_self_reports_its_product(tmp_path):
         assert (tmp_path / landed).exists()
 
 
-def test_landing_tool_path_sanitizes_dossier_nested():
-    nested = f"{RESEARCH_DIR}/子目录/笔记.md"
-    assert (
-        landing_tool_path_from_args("file_write", {"path": nested})
-        == f"{RESEARCH_DIR}/子目录_笔记.md"
-    )
+def test_landing_tool_path_keeps_nested():
+    nested = "notes/子目录/笔记.md"
+    assert landing_tool_path_from_args("write", {"file_path": nested}) == nested

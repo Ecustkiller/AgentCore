@@ -45,12 +45,12 @@ def _has_deep_deliverable_signal(tasks_raw: list[Any]) -> bool:
     """True when any task declares a landing deliverable (non-empty artifacts
     or artifact_dir). Omitted / empty object does not expect landing.
     """
-    from agentcore.runtime.runs.types import raw_deliverable_expects_landing
+    from agentcore.runtime.runs.types import task_raw_expects_landing
 
     for task in tasks_raw:
         if not isinstance(task, dict):
             continue
-        if raw_deliverable_expects_landing(task.get("deliverable")):
+        if task_raw_expects_landing(task):
             return True
     return False
 

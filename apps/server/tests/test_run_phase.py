@@ -24,8 +24,8 @@ def test_run_phase_factory_tool_name_only_for_tool():
         "agent_id": "w1",
         "phase": "thinking",
     }
-    tool = run_phase("r1", "w1", "tool", tool_name="file_read")
-    assert tool.payload["tool_name"] == "file_read"
+    tool = run_phase("r1", "w1", "tool", tool_name="read")
+    assert tool.payload["tool_name"] == "read"
     waiting = run_phase("r1", "w1", "waiting_children", tool_name="ignored")
     assert "tool_name" not in waiting.payload
 

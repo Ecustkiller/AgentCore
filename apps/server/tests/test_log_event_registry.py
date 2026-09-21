@@ -91,7 +91,7 @@ def test_stream_detach_timing_fields_registered():
 def test_catalog_registers_failure_and_build_provenance_fields():
     """两个定性字段登记在册：包装层归因 + 线上版本归属（勿手改 catalog，跑同步脚本）。"""
     reg = get_registry()
-    assert "error_type" in reg.requires("memory.consolidation_failed").fields
+    assert "error_type" in reg.requires("engine.llm_round_exception").fields
     started = reg.requires("server.started").fields
     assert "version" in started
     assert "git_sha" in started

@@ -14,8 +14,8 @@ class PlatformSettings(BaseModel):
     # Empty = stable hash of (api_key, base_url). Never a key / last-4.
     platform_credential_id: str = ""
     platform_base_url: str = "https://api.deepseek.com"
-    platform_model: str = "deepseek-v4-flash"
-    # Background purposes (title/memory/compaction); empty = follow platform_model.
+    platform_model: str = "deepseek-v4.1-flash"
+    # Background purposes (title/compaction); empty = follow platform_model.
     platform_background_model: str = ""
     # Explicit platform model catalog allowlist (运营配置, 成本配额与计费 §〇·六 F3):
     # comma-separated ids the operator subsidizes on the partner relay. Empty = fall
@@ -61,9 +61,8 @@ class PlatformSettings(BaseModel):
 
     # --- 计费模式 ---
     billing_mode: str = "byok"
-    # Flash CNY meter: Go public USD × frozen 7.2. This scales that card (default 1).
-    # OpenCode's published 4× on V4.1 Flash is an *allowance* multiplier ($15 → promo
-    # $60), not this knob.
+    # Leftover env: no longer scales the product Flash meter (official DeepSeek CNY).
+    # OpenCode's published allowance multiplier is also not this knob.
     go_cost_multiplier: str = "1"
 
     # OpenCode Go monthly window anniversary (UTC day-of-month, 1–31). Short

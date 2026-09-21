@@ -244,7 +244,7 @@ class _LeadScopeSteerProvider:
             # sub-worker sa, first round: report a scope deviation (kind=scope), non-blocking
             self.sa_calls += 1
             args = json.dumps(
-                {"question": "真问题是X不是Y", "assumption": "暂按X继续", "kind": "scope"}
+                {"question": "真问题是X不是Y", "assumption": "暂按X继续", "reason": "scope"}
             )
             yield LLMChunk(
                 delta_tool_calls=[

@@ -110,7 +110,7 @@ async def test_code_execute_display_unchanged_without_write_back():
 
 async def test_code_execute_self_reports_write_back_products():
     # 落盘产物自报 (台账事实口径): the sandbox copy-out paths ride ``ToolResult.file_products``
-    # — the same channel as file_write — so the ledger counts them WITHOUT parsing the human
+    # — the same channel as write — so the ledger counts them WITHOUT parsing the human
     #「已写回工作区」line, which cannot be split safely when a filename contains「、」.
     from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
     from agentcore.runtime.runs.serialize import files_touched_from_transcript
@@ -238,7 +238,7 @@ async def test_code_execute_blocks_source_dump_without_sandbox():
     assert result.contract_failure is True
     assert result.metadata.get("code") == "source_dump_redirect"
     err = result.error or ""
-    assert "file_read" in err
+    assert "read" in err
     assert "code_execute" not in err
     assert "run" in err
     assert backend.requests == []
@@ -264,7 +264,7 @@ async def test_code_execute_blocks_source_grep_without_sandbox():
     assert result.metadata.get("code") == "source_grep_redirect"
     err = result.error or ""
     assert "grep" in err
-    assert "file_read" in err
+    assert "read" in err
     assert backend.requests == []
 
 

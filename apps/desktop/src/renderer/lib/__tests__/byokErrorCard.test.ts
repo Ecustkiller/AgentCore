@@ -352,7 +352,7 @@ describe("error action by type", () => {
     expect(errorActionForCode("LLM_TIMEOUT")).toBeNull();
     expect(errorActionForCode("INFERENCE_TOKEN_EXPIRED")).toBeNull();
     expect(errorActionForCode("ALWAYS_QUOTA_EXCEEDED")).toEqual({
-      label: "去整理",
+      label: "去文件页",
       href: "/files",
     });
     expect(isConnectivityErrorCode("LLM_TIMEOUT")).toBe(true);

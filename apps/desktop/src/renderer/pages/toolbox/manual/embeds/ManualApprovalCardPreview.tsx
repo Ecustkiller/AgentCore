@@ -11,7 +11,7 @@ const DEMO_APPROVAL: ApprovalView = {
   approvalId: "manual-demo-approval",
   conversationId: "manual-demo",
   toolCallId: "manual-demo-tc",
-  toolName: "file_write",
+  toolName: "write",
   arguments: {
     path: "reports/week-summary.md",
     content:

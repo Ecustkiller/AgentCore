@@ -44,7 +44,7 @@ export interface AgentAuditEvent {
   /** turn 内单调序（审计独立编号，不与 journal seq 对齐）。 */
   seq: number;
   category: AuditCategory;
-  /** 如 `delegate.plan` / `tool.file_write` / `approval.granted`。 */
+  /** 如 `delegate.plan` / `tool.write` / `approval.granted`。 */
   action: string;
   actor_kind: AuditActorKind;
   target_type: AuditTargetType | null;

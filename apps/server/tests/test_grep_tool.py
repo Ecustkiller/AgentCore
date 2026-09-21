@@ -187,6 +187,9 @@ def test_grep_schema_teaches_omit_path_when_unsure():
     assert "不要猜测" not in path
     assert "禁止猜测" not in path
     assert "Desktop" not in path
+    files_only = schema.parameters["properties"]["files_only"]["description"]
+    assert files_only == "只回文件路径与匹配数。"
+    assert "而非" not in files_only
     from agentcore.tools.builtin.grep import _empty_result_note
 
     note = _empty_result_note(pattern="x", rel_dir=".", glob="")

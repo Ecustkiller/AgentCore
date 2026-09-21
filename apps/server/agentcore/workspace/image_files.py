@@ -1,4 +1,4 @@
-"""Raster image extensions / MIME — conversation attachments and ``file_read``.
+"""Raster image extensions / MIME — conversation attachments and ``read``.
 
 Single set so workspace files and uploads agree on what is a pixel image
 (not SVG markup, not Office).

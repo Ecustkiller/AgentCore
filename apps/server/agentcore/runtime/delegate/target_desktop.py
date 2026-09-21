@@ -476,6 +476,7 @@ class AppliedTargetDesktop:
     tool_ctx: ToolContext
     worker_tools: ToolRegistry
     system_prompt: str
+    worker_envelope: str
     target_folder_id: str
 
 
@@ -501,6 +502,7 @@ async def apply_target_desktop(
             tool_ctx=base_tool_context,
             worker_tools=worker_tools,
             system_prompt=env_system_prompt,
+            worker_envelope="",
             target_folder_id=target_folder_id,
         )
 
@@ -541,7 +543,7 @@ async def apply_target_desktop(
 
     desktop_online = base_tool_context.desktop_channel is not None
     attachment_context = base_tool_context.attachment_context or None
-    worker_prompt = await rebuild_worker_prompt_for_target(
+    worker_prompt, worker_envelope = await rebuild_worker_prompt_for_target(
         user_id=base_tool_context.user_id,
         folder_id=binding.folder_id,
         backend=backend,
@@ -598,5 +600,6 @@ async def apply_target_desktop(
         tool_ctx=tool_ctx,
         worker_tools=tools,
         system_prompt=worker_prompt,
+        worker_envelope=worker_envelope,
         target_folder_id=binding.folder_id,
     )

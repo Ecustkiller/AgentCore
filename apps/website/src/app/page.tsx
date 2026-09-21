@@ -216,7 +216,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* ══ 3 · 白纸：跑马灯 + 五类资产 ══ 塞进上一张纸的下缘 ══ */}
+        {/* ══ 3 · 白纸：跑马灯 + 资产卡片 ══ 塞进上一张纸的下缘 ══ */}
         <section
           id="ecosystem"
           className="paper-panel noise relative z-10 -mt-16 overflow-hidden pb-[6.5rem] pt-[8.5rem] md:-mt-24 md:pb-[9rem] md:pt-[12rem]"
@@ -262,7 +262,7 @@ export default function Home() {
                 </Reveal>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-5">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
                 {ECOSYSTEM.assets.map((asset, i) => (
                   <Reveal key={asset.code} delay={i * 70} className="h-full">
                     <div

@@ -25,7 +25,7 @@ from agentcore.conversation.compaction import (
     _truncate_head_tail,
 )
 from agentcore.conversation.history import _summary_block
-from agentcore.llm import LLMRequest, LLMResponse
+from agentcore.llm import LLMMessage, LLMRequest, LLMResponse
 from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
 
 
@@ -430,6 +430,113 @@ async def test_summarize_returns_empty_on_timeout(monkeypatch):
     assert out == ""
 
 
+async def test_summarize_reuses_chat_header_tools_and_does_not_redump_fold():
+    from agentcore.observability.session_llm_header import (
+        record_session_header,
+        reset_session_headers,
+    )
+    from agentcore.runtime.resolve.prompt.envelope import TURN_ENVELOPE_FENCE
+
+    reset_session_headers()
+    cid = "c-header-reuse"
+    record_session_header(
+        conversation_id=cid,
+        scenario="chat",
+        model="deepseek-v4-pro",
+        messages=[LLMMessage(role="system", content="FROZEN CEO")],
+        tools=[{"type": "function", "function": {"name": "delegate", "parameters": {}}}],
+    )
+    provider = _FakeProvider("## 已确立的事实\n- X")
+    out = await _summarize(
+        provider,
+        "先前摘要",
+        [_msg("user", "hi"), _msg("assistant", "ok")],
+        model=DEEPSEEK_V4_FLASH,
+        conversation_id=cid,
+        file_ledger="- src/a.py",
+    )
+    reset_session_headers()
+    assert out == "## 已确立的事实\n- X"
+    req = provider.requests[0]
+    assert req.messages[0].role == "system"
+    assert req.messages[0].content == "FROZEN CEO"
+    assert req.messages[1].content == "hi"
+    assert req.messages[2].content == "ok"
+    tail = req.messages[-1].content or ""
+    assert tail.startswith(TURN_ENVELOPE_FENCE)
+    assert "先前摘要" in tail
+    assert "src/a.py" in tail
+    assert "# 待并入摘要的更早对话片段" not in tail
+    assert req.tools is not None
+    assert req.tools[0]["function"]["name"] == "delegate"
+    assert req.tool_choice == "none"
+    assert req.model == "deepseek-v4-pro"
+    assert req.thinking is False
+
+
+async def test_summarize_hydrates_header_from_user_usage(monkeypatch):
+    from agentcore.observability.session_llm_header import (
+        CHAT_HEADER_MODEL_USAGE_KEY,
+        CHAT_HEADER_TOOLS_USAGE_KEY,
+        FROZEN_CHAT_SYSTEM_USAGE_KEY,
+        reset_session_headers,
+    )
+    from agentcore.runtime.resolve.prompt.envelope import TURN_ENVELOPE_FENCE
+
+    reset_session_headers()
+    cid = "c-header-hydrate"
+
+    class _Repo:
+        def __init__(self, _s: object) -> None:
+            pass
+
+        async def list_recent(self, conversation_id: str, *, limit: int) -> list:
+            assert conversation_id == cid
+            return [
+                SimpleNamespace(
+                    role="user",
+                    usage={
+                        FROZEN_CHAT_SYSTEM_USAGE_KEY: "FROZEN CEO",
+                        CHAT_HEADER_TOOLS_USAGE_KEY: [
+                            {
+                                "type": "function",
+                                "function": {"name": "delegate", "parameters": {}},
+                            }
+                        ],
+                        CHAT_HEADER_MODEL_USAGE_KEY: "deepseek-v4-pro",
+                    },
+                )
+            ]
+
+    class _SessionCM:
+        async def __aenter__(self) -> object:
+            return object()
+
+        async def __aexit__(self, *_a: object) -> None:
+            return None
+
+    monkeypatch.setattr("agentcore.db.base.async_session_factory", lambda: _SessionCM())
+    monkeypatch.setattr("agentcore.db.repositories.MessageRepository", _Repo)
+
+    provider = _FakeProvider("## 已确立的事实\n- X")
+    out = await _summarize(
+        provider,
+        "先前摘要",
+        [_msg("user", "hi"), _msg("assistant", "ok")],
+        model=DEEPSEEK_V4_FLASH,
+        conversation_id=cid,
+    )
+    reset_session_headers()
+    assert out == "## 已确立的事实\n- X"
+    req = provider.requests[0]
+    assert req.messages[0].content == "FROZEN CEO"
+    assert req.messages[-1].content.startswith(TURN_ENVELOPE_FENCE)
+    assert req.tools is not None
+    assert req.tools[0]["function"]["name"] == "delegate"
+    assert req.tool_choice == "none"
+    assert req.model == "deepseek-v4-pro"
+
+
 # --- schedule_compaction_if_due (dual trigger + dedupe) ---
 
 
@@ -814,7 +921,6 @@ async def test_finalize_cloud_and_local_call_if_due(monkeypatch):
     monkeypatch.setattr(cloud_mod, "ConversationRepository", ConvRepo)
     monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", MetricsRepo)
     monkeypatch.setattr(cloud_mod, "persist_turn_journal", AsyncMock())
-    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", _if_due)
     monkeypatch.setattr(CloudStore, "clear_stream_segments", AsyncMock(return_value=None))
     monkeypatch.setattr(

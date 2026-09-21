@@ -63,7 +63,7 @@ export function ToolInspector({
             {tool.name}
           </h2>
           <Badge tone="muted" pill>
-            {tool.resident ? RESIDENT_LABEL.resident : RESIDENT_LABEL.deferred}
+            {RESIDENT_LABEL.resident}
           </Badge>
           {meta ? (
             <Badge tone="muted" pill>

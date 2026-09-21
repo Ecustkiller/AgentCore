@@ -130,10 +130,10 @@ describe("ApprovalTrace · 本轮授权的知情痕迹", () => {
 
   it("文件类授权说出更宽的范围，并覆盖同类其它工具", () => {
     seed(
-      [approvalEntry("f1", "file_write", "approve_always_files")],
+      [approvalEntry("f1", "write", "approve_always_files")],
       [
-        toolStep("f1", "file_write"),
-        toolStep("f2", "str_replace"),
+        toolStep("f1", "write"),
+        toolStep("f2", "edit"),
         toolStep("f3", "file_delete"),
         toolStep("x1", "code_execute"),
       ],

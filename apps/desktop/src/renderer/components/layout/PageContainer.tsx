@@ -29,7 +29,7 @@ interface PageContainerProps {
   fill?: boolean;
   /**
    * 内层留白。`page`（默认）= `px-6 py-6`。
-   * `none` = 贴边（种类 tab 自己留顶/左右白，工作台铺满剩余）。
+   * `none` = 贴边（工作台铺满剩余）。
    */
   padding?: PagePadding;
   /** 合并到外层滚动容器（如作为 flex 子项时传 `flex-1`）。 */

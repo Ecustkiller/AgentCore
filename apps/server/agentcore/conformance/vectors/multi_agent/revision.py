@@ -587,8 +587,8 @@ def _multi_agent_lead_subplan_bind_replan() -> list[SSEEvent]:
 def _multi_agent_lead_subplan_scope_steer() -> list[SSEEvent]:
     """多 Agent·嵌套 lead 据子队员偏离操舵子计划 (受监督子计划 B 的 SCOPE 臂, 自底向上)。CEO 把整块
     交给 lead（L1）；L1 扇出子队（sa 子调研 + sb 子撰写，sb 依赖 sa）。sa 执行中发现真正要做的与初始
-    子计划不符，调 ``escalate kind=scope`` 报偏离 → 三端把该升级折到子节点 sa（⚠️ 实时可见、非阻塞，
-    回合不 paused）。其未跑下游 sb 触发 L1 子计划的 SCOPE 波边界 → L1【自己】调 replan 操舵 sb
+    子计划不符，调 ``escalate reason=scope`` 报偏离 → 三端把该升级折到子节点 sa（协作图标记，
+    工人继续干，回合不 paused）。其未跑下游 sb 触发 L1 子计划的 SCOPE 波边界 → L1【自己】调 replan 操舵 sb
     （``plan_revised`` kind=steer）→ revised=steer 折到 sb；据偏离续跑 sb。验「lead 自底向上据证据
     重规划在 UI 折叠层成立、嵌套图不串层」。"""
     lead_agent = {
@@ -653,13 +653,12 @@ def _multi_agent_lead_subplan_scope_steer() -> list[SSEEvent]:
             runs=sub_runs,
         ),
         run_started("sa", "sa", parent_run_id="L1"),
-        # 子队员 sa 报告职责偏离（escalate kind=scope）→ 折到 sa 节点（实时可见、非阻塞）。
+        # 子队员 sa 报告职责偏离（escalate reason=scope）→ 折到 sa 节点（协作图标记）。
         escalation_raised(
             "sa",
             "sa",
             question="真正要做的是 X 而非初始子计划的 Y，下游写法应随之调整。",
             assumption="暂按 X 推进",
-            blocking=False,
             kind="scope",
             # 固定 id 保 golden 稳定（缺省会随机 uuid，导出不幂等）。
             escalation_id="esc-scope1",

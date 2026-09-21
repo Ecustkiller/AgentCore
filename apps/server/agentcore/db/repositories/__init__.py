@@ -34,7 +34,6 @@ from .auth import (
     UserLlmProviderRepository,
 )
 from .billing import CostEventRepository
-from .boards import BoardRepository
 from .chat import ChatRepository
 from .conversation_shares import ConversationShareRepository
 from .conversations import ConversationRepository
@@ -48,7 +47,6 @@ from .folder_members import FolderMemberRepository
 from .folders import FolderRepository
 from .friends import FriendRepository
 from .llm_profiles import LlmModelProfileRepository
-from .memory_pipeline import MemoryPipelineRepository
 from .memory_updates import MemoryUpdateRepository
 from .messages import MessageRepository
 from .notices import ProductNoticeRepository
@@ -75,7 +73,6 @@ __all__ = [
     "AdminAuditRepository",
     "AgentAuditEventRepository",
     "AdminMfaRepository",
-    "BoardRepository",
     "ChatRepository",
     "ConversationRepository",
     "ConversationShareRepository",
@@ -90,7 +87,6 @@ __all__ = [
     "FolderRepository",
     "HandoffJobRepository",
     "LlmModelProfileRepository",
-    "MemoryPipelineRepository",
     "MemoryUpdateRepository",
     "MessageRepository",
     "PausedTurnRepository",

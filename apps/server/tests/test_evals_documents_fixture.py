@@ -29,8 +29,6 @@ def test_shipped_rules_memory_suite_lints_clean():
 
 def test_shipped_documents_fixtures_lint_clean():
     names = [
-        "docs_memory_launch_code",
-        "docs_memory_two_ports",
         "docs_always_rule_token",
         "docs_always_rule_eli5",
         "docs_ondemand_rule_secret",
@@ -118,8 +116,9 @@ def test_lint_suite_accepts_valid_documents_fixture(tmp_path: Path):
             {
                 "entries": [
                     {
-                        "layer": "memory",
-                        "path": "主题/x.md",
+                        "layer": "user_rule",
+                        "name": "x.md",
+                        "apply_mode": "always",
                         "content": "hi",
                     }
                 ]

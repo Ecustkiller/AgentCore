@@ -76,7 +76,7 @@ export function WindowFrameMenu() {
           {activeLabel}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-52">
+      <DropdownMenuContent align="end">
         <DropdownMenuLabel>窗口拍摄比例</DropdownMenuLabel>
         <DropdownMenuSeparator />
         <PresetRow

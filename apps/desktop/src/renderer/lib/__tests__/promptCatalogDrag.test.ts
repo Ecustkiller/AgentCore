@@ -11,14 +11,24 @@ import { describe, expect, it } from "vitest";
 describe("promptCatalogDrag", () => {
   it("round-trips mine kind", () => {
     expect(
-      parsePromptDragPayload(promptDragPayload({ kind: "mine", mineId: "d1" })),
-    ).toEqual({ kind: "mine", mineId: "d1" });
+      parsePromptDragPayload(
+        promptDragPayload({ kind: "mine", mineIds: ["d1"] }),
+      ),
+    ).toEqual({ kind: "mine", mineIds: ["d1"] });
+  });
+
+  it("round-trips a batch of mine ids", () => {
+    expect(
+      parsePromptDragPayload(
+        promptDragPayload({ kind: "mine", mineIds: ["d1", "d2"] }),
+      ),
+    ).toEqual({ kind: "mine", mineIds: ["d1", "d2"] });
   });
 
   it("accepts legacy { mineId }", () => {
     expect(parsePromptDragPayload(JSON.stringify({ mineId: "d1" }))).toEqual({
       kind: "mine",
-      mineId: "d1",
+      mineIds: ["d1"],
     });
   });
 

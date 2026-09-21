@@ -13,7 +13,6 @@ function raisedEsc(overrides: Partial<RunEscalation> = {}): RunEscalation {
     question:
       "本轮工具清单未包含 file_write，无法将第5轮审查报告落盘。\n请授予写盘或由主管代为持久化。",
     assumption: "主管将据正文内容持久化报告或于下波授予写盘工具",
-    blocking: false,
     status: "raised",
     answer: null,
     kind: "dep",
@@ -28,10 +27,9 @@ function resolvedEsc(overrides: Partial<RunEscalation> = {}): RunEscalation {
     question:
       "目标文件被其他 run 锁定，无法 file_write 落位 v1.2。\n请移交写权或改路径。",
     assumption: "保持原主，跳过该路径修订",
-    blocking: true,
     status: "resolved",
     answer: "我的答复：\n· 是否移交写权：移交写权，继续落位 v1.2 定稿",
-    kind: "normal",
+    kind: "wait",
     questions: [],
     arbitrated_by: "user",
     ...overrides,
@@ -39,9 +37,8 @@ function resolvedEsc(overrides: Partial<RunEscalation> = {}): RunEscalation {
 }
 
 describe("EscalationCard · raised collapse", () => {
-  it("默认收起为一行结论，点击可展开全文与暂定假设", () => {
-    // Spread `role` — prop is teammate display name, not ARIA role (biome a11y).
-    render(
+  it("scope/dep 上报不出留言卡", () => {
+    const { container } = render(
       <EscalationCard
         escalation={raisedEsc()}
         conversationId="conv-1"
@@ -49,39 +46,7 @@ describe("EscalationCard · raised collapse", () => {
         {...{ role: "渲染与几何层审查员" }}
       />,
     );
-
-    const toggle = screen.getByRole("button", {
-      name: /渲染与几何层审查员 · 边干边上报/,
-    });
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    const summary = screen.getByText(/渲染与几何层审查员 · 边干边上报/);
-    expect(summary.className).toContain("text-sm");
-    expect(summary.className).not.toContain("text-xs");
-    expect(summary.className).not.toContain("font-medium");
-    expect(screen.queryByText(/无需你拍板/)).toBeNull();
-    expect(screen.queryByText(/无法将第5轮审查报告落盘/)).toBeNull();
-    expect(screen.queryByText(/暂定假设/)).toBeNull();
-
-    fireEvent.click(toggle);
-    expect(
-      screen
-        .getByRole("button", {
-          name: /渲染与几何层审查员 · 边干边上报/,
-        })
-        .getAttribute("aria-expanded"),
-    ).toBe("true");
-    expect(screen.getByText(/请授予写盘或由主管代为持久化/)).toBeTruthy();
-    expect(
-      screen.getByText(
-        "暂定假设：主管将据正文内容持久化报告或于下波授予写盘工具",
-      ).className,
-    ).toContain("text-sm");
-    expect(
-      screen.getByText(
-        "暂定假设：主管将据正文内容持久化报告或于下波授予写盘工具",
-      ).className,
-    ).not.toContain("text-xs");
-    expect(screen.queryByText(/已按假设继续/)).toBeNull();
+    expect(container.firstChild).toBeNull();
   });
 
   it("卡住早停 source：标题含卡住早停，无边干边上报/已按假设继续", () => {
@@ -194,10 +159,9 @@ describe("EscalationCard · dormant", () => {
           id: "esc-dormant",
           question: "是否移交写权？",
           assumption: "保持原主",
-          blocking: true,
           status: "pending",
           answer: null,
-          kind: "normal",
+          kind: "wait",
           questions: [],
         }}
         conversationId="conv-1"

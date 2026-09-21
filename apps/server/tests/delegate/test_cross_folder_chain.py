@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agentcore.llm.provider.protocol import LLMProvider
-from agentcore.runtime.context.consult_sources import MemoryConsultSource, MergedConsultSource
+from agentcore.runtime.context.consult_sources import MergedConsultSource
 from agentcore.runtime.delegate.target_desktop import (
     NO_TARGET_SCRATCH_GATE_MSG,
     LocalRootClaimBook,
@@ -97,7 +97,7 @@ async def test_resolve_delegate_target_desk_and_memory(
     # Seed birth-scoped consult so rewire must replace it with target scope.
     birth_tools = ToolRegistry()
     birth_tools.register(
-        ConsultTool(source=MergedConsultSource(memory=MemoryConsultSource(store=MagicMock(), folder_id="birth_f")))
+        ConsultTool(source=MergedConsultSource())
     )
     binding = SimpleNamespace(
         folder_id="folder_alpha",
@@ -107,7 +107,7 @@ async def test_resolve_delegate_target_desk_and_memory(
     )
 
     async def _fake_rebuild(**_kwargs):
-        return "PROMPT_FOR_ALPHA"
+        return "PROMPT_FOR_ALPHA", ""
 
     with (
         patch(
@@ -141,10 +141,11 @@ async def test_resolve_delegate_target_desk_and_memory(
     assert applied.tool_ctx.backend is target_backend
     assert applied.tool_ctx.backend is not session_backend
     assert applied.system_prompt == "PROMPT_FOR_ALPHA"
-    memory_tool = applied.worker_tools.get("consult")
-    assert isinstance(memory_tool, ConsultTool)
-    assert memory_tool.source.memory.folder_id == "folder_alpha"
-    assert memory_tool.source.memory.folder_id != "birth_f"
+    consult_tool = applied.worker_tools.get("consult")
+    assert isinstance(consult_tool, ConsultTool)
+    assert consult_tool.source.rule is not None
+    assert consult_tool.source.rule.folder_id == "folder_alpha"
+    assert consult_tool.source.rule.folder_id != "birth_f"
 
 
 @pytest.mark.asyncio

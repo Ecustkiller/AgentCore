@@ -45,7 +45,7 @@ def test_non_empty_threshold():
 def test_tool_called():
     oc = _outcome(tool_calls=[("web_search", '{"query": "x"}')])
     assert _run({"name": "ToolCalled", "args": {"tool": "web_search"}}, oc).passed
-    assert not _run({"name": "ToolCalled", "args": {"tool": "file_read"}}, oc).passed
+    assert not _run({"name": "ToolCalled", "args": {"tool": "read"}}, oc).passed
 
 
 def test_tool_args_valid():
@@ -62,7 +62,7 @@ def test_tool_args_valid():
     assert not _run({"name": "ToolArgsValid", "args": {"tool": "web_search"}}, bad).passed
     # 未调用该工具
     assert not _run(
-        {"name": "ToolArgsValid", "args": {"tool": "file_read"}},
+        {"name": "ToolArgsValid", "args": {"tool": "read"}},
         _outcome(tool_calls=[]),
     ).passed
 
@@ -186,11 +186,11 @@ def test_deliverable_integrity_omission_in_file_write():
     body = "首段\n……（中间省略，已保留首尾）……\n末段"
     oc = _outcome(
         content="已落盘",
-        tool_calls=[("file_write", json.dumps({"path": "report.md", "content": body}))],
+        tool_calls=[("write", json.dumps({"file_path": "report.md", "content": body}))],
     )
     r = _run({"name": "DeliverableIntegrity"}, oc)
     assert not r.passed
-    assert "omission in file_write" in r.detail
+    assert "omission in write" in r.detail
 
 
 def test_deliverable_integrity_severe_shrink():
@@ -201,8 +201,8 @@ def test_deliverable_integrity_severe_shrink():
     oc = _outcome(
         content="ok",
         tool_calls=[
-            ("file_write", json.dumps({"path": "a.md", "content": old})),
-            ("file_write", json.dumps({"path": "a.md", "content": new})),
+            ("write", json.dumps({"file_path": "a.md", "content": old})),
+            ("write", json.dumps({"file_path": "a.md", "content": new})),
         ],
     )
     r = _run({"name": "DeliverableIntegrity"}, oc)
@@ -217,8 +217,8 @@ def test_deliverable_integrity_clean_sample_passes():
     oc = _outcome(
         content=body,
         tool_calls=[
-            ("file_write", json.dumps({"path": "out.md", "content": body})),
-            ("file_write", json.dumps({"path": "out.md", "content": body + "\n修订补一段。"})),
+            ("write", json.dumps({"file_path": "out.md", "content": body})),
+            ("write", json.dumps({"file_path": "out.md", "content": body + "\n修订补一段。"})),
         ],
     )
     assert _run({"name": "DeliverableIntegrity"}, oc).passed
@@ -230,7 +230,7 @@ def test_deliverable_integrity_no_prior_draft_skips_shrink():
 
     oc = _outcome(
         content="短答",
-        tool_calls=[("file_write", json.dumps({"path": "short.md", "content": "短"}))],
+        tool_calls=[("write", json.dumps({"file_path": "short.md", "content": "短"}))],
     )
     assert _run({"name": "DeliverableIntegrity"}, oc).passed
 

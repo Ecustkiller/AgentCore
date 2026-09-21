@@ -378,6 +378,13 @@ async def _cloud_start(
     if not command:
         return _arg_error("start 需要 command 参数", start)
     wait_for = effective_wait_for(command, arguments.get("wait_for"))
+    from agentcore.runtime.command_policy import command_receives_git_credentials
+
+    git_env = None
+    if command_receives_git_credentials(command):
+        from agentcore.tools.builtin.git_ops.spawn import cloud_git_auth_env
+
+        git_env = await cloud_git_auth_env(context)
     value = await start_desk_process(
         context.backend,
         conversation_id=context.conversation_id or "",
@@ -387,6 +394,7 @@ async def _cloud_start(
         wait_for=wait_for,
         wait_timeout_seconds=_DEFAULT_WAIT_TIMEOUT_SECONDS,
         cache_bucket=cache_bucket,
+        env=git_env,
     )
     return _process_result("start", value, start, had_wait_for=bool(wait_for), cloud=True)
 

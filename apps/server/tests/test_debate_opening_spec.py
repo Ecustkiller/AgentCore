@@ -13,10 +13,7 @@ from agentcore.runtime.debate import (
     RoundResult,
 )
 from agentcore.runtime.debate.moderator_agenda import _FRAME_SYSTEM, _OPENING_SPEC, frame_round
-from agentcore.runtime.debate.research_dossier import (
-    SYNTHESIZER_FILE,
-    format_research_dossier_index,
-)
+from agentcore.runtime.debate.research_dossier import format_research_dossier_index
 
 
 class _CaptureJson:
@@ -64,13 +61,13 @@ def test_frame_system_anchors_moderator_register():
 
 
 def test_frame_round_injects_research_dossier_agenda_hint():
-    """首轮定焦 brief：有约定文档索引则注入，并提示可用汇总分歧作议程参考。"""
+    """首轮定焦 brief：有材料索引则注入，并提示可用汇总分歧作议程参考。"""
     sides = [
         DebateSide(key="pro", name="正方", stance="支持"),
         DebateSide(key="con", name="反方", stance="反对"),
     ]
     idx = format_research_dossier_index(
-        ["AgentCore/文档/research/法律透镜报告.md", SYNTHESIZER_FILE]
+        ["notes/法律透镜报告.md", "notes/汇总与命题卡.md"]
     )
     cfg = DebateConfig(
         motion="该不该做 X",
@@ -83,8 +80,8 @@ def test_frame_round_injects_research_dossier_agenda_hint():
     focus, opening = asyncio.run(frame_round(cap, cfg, []))
     assert focus == "成本净影响"
     assert opening == "开场白占位"
-    assert "【工作区约定文档索引·AgentCore/文档/research/】" in cap.user
-    assert SYNTHESIZER_FILE in cap.user
+    assert "【工作区材料索引】" in cap.user
+    assert "notes/汇总与命题卡.md" in cap.user
     assert "分歧作议程" in cap.user or "议程线索" in cap.user
 
 
@@ -101,7 +98,7 @@ def test_frame_round_omits_dossier_when_empty():
     )
     cap = _CaptureJson()
     asyncio.run(frame_round(cap, cfg, []))
-    assert "工作区约定文档索引" not in cap.user
+    assert "工作区材料索引" not in cap.user
 
 
 def test_later_round_frame_omits_roundtable_exception():

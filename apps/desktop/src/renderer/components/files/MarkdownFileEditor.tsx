@@ -382,7 +382,6 @@ export function MarkdownFileEditor({
 
   // 系统集成（reveal 仅本地源有；外部打开两源都有但云端过白名单谓词 → 按能力显隐，不按源分支）。
   const canOpenExternal = canOpenPathWithOsDefaultApp(source, path);
-  const isMemorySource = source.id === "memory";
   const onReveal = async () => {
     try {
       await source.revealInOsFileManager?.(path);
@@ -665,13 +664,7 @@ export function MarkdownFileEditor({
         ) : (
           <div className="h-full overflow-auto">
             <div className="mx-auto max-w-3xl px-6 py-6">
-              <Markdown
-                content={
-                  isMemorySource
-                    ? stripRetiredUserMemoryChrome(content)
-                    : content
-                }
-              />
+              <Markdown content={stripRetiredUserMemoryChrome(content)} />
             </div>
           </div>
         )}

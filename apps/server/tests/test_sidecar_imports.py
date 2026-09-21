@@ -81,14 +81,14 @@ def test_workspace_git_url_helpers_do_not_load_git_credentials() -> None:
     )
 
 
-def test_git_tool_import_does_not_load_password_or_jwt_stack() -> None:
-    """Worker registry may import GitTool; still must not pull pwdlib/jose."""
+def test_git_auth_import_does_not_load_password_or_jwt_stack() -> None:
+    """Cloud run's git auth helper must not pull pwdlib/jose."""
     _assert_subprocess(
         """
         import sys
-        from agentcore.tools.builtin.git_ops import GitTool
+        from agentcore.tools.builtin.git_ops.spawn import cloud_git_auth_env
 
-        assert GitTool is not None
+        assert cloud_git_auth_env is not None
         blocked = (
             "pwdlib",
             "jose",

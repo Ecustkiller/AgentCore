@@ -11,8 +11,6 @@ export const CHANNEL_REDIRECT_CODE_LIST = [
   "not_a_web_url",
   "url_not_workspace_path",
   "loopback_host",
-  "shell_fetch_redirect",
-  "shell_download_redirect",
 ] as const;
 
 export type ChannelRedirectCode = (typeof CHANNEL_REDIRECT_CODE_LIST)[number];

@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
+from agentcore.runtime.delegate.empty_tasks import (
+    EMPTY_DELEGATE_MSG,
+    HANDWRITTEN_TASKS_SKELETON,
+)
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.contract import describe_deliverable, is_file_deliverable
 from agentcore.runtime.runs.types import (
     Deliverable,
     deliverable_expects_landing,
     raw_deliverable_expects_landing,
+    task_raw_expects_landing,
 )
 from agentcore.tools.builtin.delegate.schema import (
     DELEGATE_DESCRIPTION,
-    TASK_DELIVERABLE_SCHEMA,
+    DELEGATE_PARAMETERS,
+    TASK_ARTIFACTS_SCHEMA,
 )
 
 
@@ -44,6 +50,19 @@ def test_raw_omitted_empty_does_not_expect_landing():
     assert raw_deliverable_expects_landing({"artifacts": ["a.md"]}) is True
     assert raw_deliverable_expects_landing({"artifact_dir": "docs"}) is True
     assert raw_deliverable_expects_landing({"artifacts": ["  "]}) is False
+
+
+def test_task_top_level_artifacts_expect_landing():
+    assert task_raw_expects_landing({"artifacts": ["a.md"]}) is True
+    assert task_raw_expects_landing({"artifacts": []}) is False
+    assert task_raw_expects_landing({"deliverable": {"artifacts": ["a.md"]}}) is True
+    plan, errs = build_run_plan(
+        [{"role": "A", "task": "写报告", "artifacts": ["note.md"]}],
+    )
+    assert errs == []
+    d = plan.nodes[0].deliverable
+    assert d.artifacts == ["note.md"]
+    assert deliverable_expects_landing(d) is True
 
 
 def test_leftover_form_key_is_discarded_not_translated():
@@ -80,7 +99,7 @@ def test_artifacts_survive_leftover_form_key():
     assert errs == []
     d = plan.nodes[0].deliverable
     assert d is not None
-    assert d.artifacts == ["AgentCore/文档/工作稿/note.md"]
+    assert d.artifacts == ["note.md"]
     assert deliverable_expects_landing(d) is True
 
 
@@ -114,12 +133,32 @@ def test_describe_deliverable_empty_without_instance_facts():
     assert "交付路径" in desc
 
 
-def test_ceo_schema_deliverable_is_artifacts_only():
-    props = TASK_DELIVERABLE_SCHEMA["properties"]
-    assert set(props) == {"artifacts"}
-    assert "form" not in props
+def test_ceo_schema_advertises_task_artifacts():
+    task_props = DELEGATE_PARAMETERS["properties"]["tasks"]["items"]["properties"]
+    assert set(task_props) == {
+        "role",
+        "task",
+        "artifacts",
+        "id",
+        "depends_on",
+        "replaces_run_id",
+        "continue_from_run_id",
+        "target_folder_id",
+        "model",
+    }
+    assert TASK_ARTIFACTS_SCHEMA["type"] == "array"
+    assert "form=prose" not in (TASK_ARTIFACTS_SCHEMA.get("description") or "")
+    arts = TASK_ARTIFACTS_SCHEMA.get("description") or ""
+    assert "流水线写死" not in arts
+    assert "不催写盘" in arts
+    tasks_desc = DELEGATE_PARAMETERS["properties"]["tasks"]["description"]
+    assert HANDWRITTEN_TASKS_SKELETON not in tasks_desc
+    assert "可抄" not in tasks_desc
+    assert HANDWRITTEN_TASKS_SKELETON in EMPTY_DELEGATE_MSG
+    assert "省略即可" not in DELEGATE_PARAMETERS["properties"]["team_brief"][
+        "description"
+    ]
     assert "【看】" not in DELEGATE_DESCRIPTION
     assert "【存文档】" not in DELEGATE_DESCRIPTION
     assert "【改工程】" not in DELEGATE_DESCRIPTION
-    assert "form=prose" not in (TASK_DELIVERABLE_SCHEMA.get("description") or "")
     assert "摸底抄骨架" not in DELEGATE_DESCRIPTION

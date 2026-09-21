@@ -25,12 +25,10 @@ from agentcore.runtime.safety_breaker import (
     command_text_for_tool,
     evaluate_tool_call,
     fuse_aligned_deny_rule_ids,
-    git_forbidden_subcommands,
     is_sensitive_path,
     scan_destructive_text,
 )
 from agentcore.runtime.sandbox_approval import execution_tool_auto_passes
-from agentcore.tools.builtin.git_ops import _FORBIDDEN_PATTERNS
 from agentcore.tools.builtin.host import shell_fuse_blocks
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
@@ -113,7 +111,13 @@ def test_scan_git_force_push_protected_denies(text: str):
 
 def test_scan_git_push_feature_branch_ok():
     assert scan_destructive_text("git push origin feature/foo") is None
-    assert scan_destructive_text("git push --force origin feature/foo") is None
+
+
+def test_scan_git_force_push_any_branch_denies():
+    hit = scan_destructive_text("git push --force origin feature/foo")
+    assert hit is not None
+    assert hit.rule_id == "destructive.git_force_push"
+    assert hit.verdict is BreakerVerdict.DENY
 
 
 @pytest.mark.parametrize(
@@ -177,7 +181,7 @@ def test_non_sensitive_paths(path: str):
 
 
 def test_evaluate_file_read_credential_asks():
-    hit = evaluate_tool_call("file_read", {"path": ".env.local"})
+    hit = evaluate_tool_call("read", {"file_path": ".env.local"})
     assert hit is not None
     assert hit.verdict is BreakerVerdict.FORCE_APPROVAL
     assert hit.rule_id == "sensitive.path_read_ask"
@@ -187,7 +191,7 @@ def test_evaluate_file_read_credential_asks():
 
 
 def test_evaluate_file_read_key_material_denies():
-    hit = evaluate_tool_call("file_read", {"path": "id_rsa"})
+    hit = evaluate_tool_call("read", {"file_path": "id_rsa"})
     assert hit is not None
     assert hit.verdict is BreakerVerdict.DENY
     assert hit.rule_id == "sensitive.path_read"
@@ -199,17 +203,17 @@ def test_evaluate_file_read_key_material_denies():
 
 
 def test_evaluate_file_read_template_passes():
-    assert evaluate_tool_call("file_read", {"path": "apps/mobile/.env.example"}) is None
-    assert evaluate_tool_call("file_write", {"path": ".env.example", "content": "A=\n"}) is None
+    assert evaluate_tool_call("read", {"file_path": "apps/mobile/.env.example"}) is None
+    assert evaluate_tool_call("write", {"file_path": ".env.example", "content": "A=\n"}) is None
 
 
 def test_evaluate_file_read_normal_passes():
-    assert evaluate_tool_call("file_read", {"path": "src/app.py"}) is None
+    assert evaluate_tool_call("read", {"file_path": "src/app.py"}) is None
 
 
 def test_evaluate_file_write_sensitive_path_denies():
     """案 image-gen B：敏感路径写盘硬拒（含凭据 Ask 类路径）。"""
-    hit = evaluate_tool_call("file_write", {"path": ".env", "content": "FOO=1"})
+    hit = evaluate_tool_call("write", {"file_path": ".env", "content": "FOO=1"})
     assert hit is not None
     assert hit.verdict is BreakerVerdict.DENY
     assert hit.rule_id == "sensitive.path_write"
@@ -218,8 +222,8 @@ def test_evaluate_file_write_sensitive_path_denies():
 def test_evaluate_file_write_secret_content_denies():
     """案 image-gen B：正文含 API Key 形状 → 拒写入工作区明文。"""
     hit = evaluate_tool_call(
-        "file_write",
-        {"path": "env", "content": "OPENAI_API_KEY=sk-abcdEFGH1234567890\n"},
+        "write",
+        {"file_path": "env", "content": "OPENAI_API_KEY=sk-abcdEFGH1234567890\n"},
     )
     assert hit is not None
     assert hit.verdict is BreakerVerdict.DENY
@@ -229,9 +233,9 @@ def test_evaluate_file_write_secret_content_denies():
 
 def test_evaluate_str_replace_secret_new_string_denies():
     hit = evaluate_tool_call(
-        "str_replace",
+        "edit",
         {
-            "path": "scripts/generate_image.py",
+            "file_path": "scripts/generate_image.py",
             "old_string": 'MODEL = "imega1"',
             "new_string": 'API_KEY = "sk-abcdEFGH1234567890"',
         },
@@ -244,9 +248,9 @@ def test_evaluate_str_replace_secret_new_string_denies():
 def test_evaluate_file_write_erp_field_names_not_secret_deny():
     """ERP md 表字段（task_created_at 等）不得误触发 sensitive.secret_write。"""
     hit = evaluate_tool_call(
-        "file_write",
+        "write",
         {
-            "path": "docs/erp-schema.md",
+            "file_path": "docs/erp-schema.md",
             "content": (
                 "| field | type |\n"
                 "| task_created_at | datetime |\n"
@@ -260,9 +264,9 @@ def test_evaluate_file_write_erp_field_names_not_secret_deny():
 def test_evaluate_file_write_safe_scaffold_passes():
     assert (
         evaluate_tool_call(
-            "file_write",
+            "write",
             {
-                "path": "scripts/generate_image.py",
+                "file_path": "scripts/generate_image.py",
                 "content": "import os\nKEY = os.environ['OPENAI_API_KEY']\n",
             },
         )
@@ -374,13 +378,13 @@ def test_evaluate_host_shell_ordinary_push_passes():
         )
         is None
     )
-    assert (
-        evaluate_tool_call(
-            "host",
-            {"action": "shell", "command": "git push --force origin feature/foo"},
-        )
-        is None
+    hit = evaluate_tool_call(
+        "host",
+        {"command": "git push --force origin feature/foo"},
     )
+    assert hit is not None
+    assert hit.verdict is BreakerVerdict.DENY
+    assert hit.rule_id == "destructive.git_force_push"
 
 
 # Samples that both host_shell fuse and breaker destructive rules cover.
@@ -431,7 +435,7 @@ def test_host_shell_silent_install_denies(command: str):
     assert hit.verdict is BreakerVerdict.DENY
     assert hit.rule_id == "host.silent_install"
     assert "并非完整拦截" in hit.reason
-    assert "install_package" in hit.reason
+    assert "winget" in hit.reason
 
 
 @pytest.mark.parametrize("command,rule_id", _FUSE_SUBSET_DENY_SAMPLES)
@@ -455,45 +459,50 @@ def test_fuse_aligned_deny_rule_ids_exclude_git():
     assert {rid for _, rid in _FUSE_SUBSET_DENY_SAMPLES} <= ids
 
 
-def test_git_forbidden_list_shared_with_git_ops():
-    assert git_forbidden_subcommands() == _FORBIDDEN_PATTERNS
-    assert "push" not in git_forbidden_subcommands()
-    assert {"reset", "clean"} <= git_forbidden_subcommands()
-    assert git_forbidden_subcommands().isdisjoint({"stash", "merge", "rebase"})
-
-
-def test_evaluate_git_forbidden_denies():
-    hit = evaluate_tool_call("git", {"subcommand": "reset"})
+def test_evaluate_git_reset_or_clean_denies():
+    hit = evaluate_tool_call("run", {"command": "git reset --hard"})
     assert hit is not None
     assert hit.verdict is BreakerVerdict.DENY
-    assert hit.rule_id == "git.forbidden_subcommand"
-    clean = evaluate_tool_call("git", {"subcommand": "clean"})
+    assert hit.rule_id == "destructive.git_reset_or_clean"
+    clean = evaluate_tool_call("host", {"command": "git clean -fd"})
     assert clean is not None
-    assert clean.rule_id == "git.forbidden_subcommand"
+    assert clean.rule_id == "destructive.git_reset_or_clean"
 
 
 def test_evaluate_git_ordinary_push_passes():
-    """Ordinary push is allowlisted — breaker must not DENY (approval path)."""
-    assert evaluate_tool_call("git", {"subcommand": "push"}) is None
-    assert evaluate_tool_call("git", {"subcommand": "push", "remote": "origin"}) is None
+    """Ordinary push is not a breaker DENY (always-confirm is the approval path)."""
+    assert evaluate_tool_call("run", {"command": "git push"}) is None
+    assert evaluate_tool_call("run", {"command": "git push origin feature/x"}) is None
+    assert evaluate_tool_call("run", {"command": "git -C repo push origin feature/x"}) is None
+
+
+def test_evaluate_git_dash_c_force_denies():
+    hit = evaluate_tool_call("run", {"command": "git -C repo push --force"})
+    assert hit is not None
+    assert hit.verdict is BreakerVerdict.DENY
+    assert hit.rule_id == "destructive.git_force_push"
+    wrapped = evaluate_tool_call(
+        "host", {"command": 'powershell -c "git push --force"'}
+    )
+    assert wrapped is None
 
 
 @pytest.mark.parametrize(
-    "args",
+    ("command", "rule_id"),
     [
-        {"subcommand": "push", "force": True},
-        {"subcommand": "push", "force_with_lease": True},
-        {"subcommand": "push", "branch": "main"},
-        {"subcommand": "push", "branch": "master"},
-        {"subcommand": "push", "refspec": "feature:main"},
-        {"subcommand": "push", "remote": "--force"},
+        ("git push --force origin feature/x", "destructive.git_force_push"),
+        ("git push --force-with-lease", "destructive.git_force_push"),
+        ("git push origin main", "destructive.git_push_protected"),
+        ("git push origin master", "destructive.git_push_protected"),
+        ("git push origin feature:main", "destructive.git_push_protected"),
+        ("git push --force", "destructive.git_force_push"),
     ],
 )
-def test_evaluate_git_push_force_or_protected_denies(args: dict[str, Any]):
-    hit = evaluate_tool_call("git", args)
+def test_evaluate_git_push_force_or_protected_denies(command: str, rule_id: str):
+    hit = evaluate_tool_call("run", {"command": command})
     assert hit is not None
     assert hit.verdict is BreakerVerdict.DENY
-    assert hit.rule_id == "git.push_force_or_protected"
+    assert hit.rule_id == rule_id
 
 
 # ── Gate + full_trust: force still prompts ───────────────────────────────────
@@ -696,7 +705,7 @@ async def test_sensitive_credential_read_forces_approval():
         @property
         def schema(self) -> ToolSchema:
             return ToolSchema(
-                name="file_read",
+                name="read",
                 description="t",
                 parameters={"type": "object", "properties": {}},
                 face=ToolFace.FILE,
@@ -719,7 +728,7 @@ async def test_sensitive_credential_read_forces_approval():
     )
     tc = ToolCall(
         id="tc-read-ask",
-        function=ToolCallFunction(name="file_read", arguments='{"path": ".env"}'),
+        function=ToolCallFunction(name="read", arguments='{"file_path": ".env"}'),
     )
 
     async def _approve() -> None:
@@ -749,7 +758,7 @@ async def test_sensitive_credential_read_forces_approval():
     assert "super-secret-value" not in str(gate_args)
     assert secret_body not in str(gate_args)
     assert "super-secret-value" not in (messages[0].content or "")
-    assert executed_args.get("path") == ".env"
+    assert executed_args.get("file_path") == ".env"
     assert "circuit_breaker_hint" not in executed_args
     assert "rule_id" not in executed_args
     assert "force_one_shot" not in executed_args
@@ -780,7 +789,7 @@ async def test_sensitive_path_read_ask_approve_always_grants_same_tool():
         @property
         def schema(self) -> ToolSchema:
             return ToolSchema(
-                name="file_read",
+                name="read",
                 description="t",
                 parameters={"type": "object", "properties": {}},
                 face=ToolFace.FILE,
@@ -788,7 +797,7 @@ async def test_sensitive_path_read_ask_approve_always_grants_same_tool():
             )
 
         async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
-            read_paths.append(str(arguments.get("path") or ""))
+            read_paths.append(str(arguments.get("file_path") or ""))
             return ToolResult(tool_call_id="", success=True, output="ok")
 
     tools = ToolRegistry()
@@ -804,7 +813,7 @@ async def test_sensitive_path_read_ask_approve_always_grants_same_tool():
 
     tc1 = ToolCall(
         id="tc-grant-1",
-        function=ToolCallFunction(name="file_read", arguments='{"path": ".env"}'),
+        function=ToolCallFunction(name="read", arguments='{"file_path": ".env"}'),
     )
 
     async def _approve_always() -> None:
@@ -819,7 +828,7 @@ async def test_sensitive_path_read_ask_approve_always_grants_same_tool():
     await approve_task
     assert attempts1[0].success is True
     assert messages1[0].content == "ok"
-    assert "file_read" in gate._granted  # noqa: SLF001
+    assert "read" in gate._granted  # noqa: SLF001
     required1 = [e for e in _drain(sink) if e.type is EventType.APPROVAL_REQUIRED]
     assert len(required1) == 1
     assert required1[0].payload["arguments"]["rule_id"] == "sensitive.path_read_ask"
@@ -828,7 +837,7 @@ async def test_sensitive_path_read_ask_approve_always_grants_same_tool():
     tc2 = ToolCall(
         id="tc-grant-2",
         function=ToolCallFunction(
-            name="file_read", arguments='{"path": ".env.local"}'
+            name="read", arguments='{"file_path": ".env.local"}'
         ),
     )
     messages2, _, attempts2 = await tool_exec_mod.execute_tools(
@@ -864,7 +873,7 @@ async def test_sensitive_credential_preview_soft_fail_still_asks():
         @property
         def schema(self) -> ToolSchema:
             return ToolSchema(
-                name="file_read",
+                name="read",
                 description="t",
                 parameters={"type": "object", "properties": {}},
                 face=ToolFace.FILE,
@@ -886,7 +895,7 @@ async def test_sensitive_credential_preview_soft_fail_still_asks():
     )
     tc = ToolCall(
         id="tc-read-soft",
-        function=ToolCallFunction(name="file_read", arguments='{"path": ".env"}'),
+        function=ToolCallFunction(name="read", arguments='{"file_path": ".env"}'),
     )
 
     async def _approve() -> None:
@@ -918,7 +927,7 @@ async def test_sensitive_key_read_denied_as_policy_failure():
         @property
         def schema(self) -> ToolSchema:
             return ToolSchema(
-                name="file_read",
+                name="read",
                 description="t",
                 parameters={"type": "object", "properties": {}},
                 face=ToolFace.FILE,
@@ -933,7 +942,7 @@ async def test_sensitive_key_read_denied_as_policy_failure():
     ctx = _ctx()
     tc = ToolCall(
         id="tc-read-1",
-        function=ToolCallFunction(name="file_read", arguments='{"path": "id_rsa"}'),
+        function=ToolCallFunction(name="read", arguments='{"file_path": "id_rsa"}'),
     )
     messages, _, attempts = await tool_exec_mod.execute_tools(
         [tc], tools, ctx, sink, approval_gate=None, run_id="run-r"

@@ -109,7 +109,6 @@ def test_warm_account_rules_memory_seeds_cache(
     snap = AccountPrepareSnapshot(
         rules_payload={"global_rules": [{"content": "- always"}]},
         memory_bodies={("", "偏好.md"): "- prefer concise"},
-        memory_topics=(),
         degraded=False,
     )
     warm = AsyncMock(return_value=snap)
@@ -169,7 +168,6 @@ def test_seed_then_lookup_hits() -> None:
     snap = AccountPrepareSnapshot(
         rules_payload={"global_rules": []},
         memory_bodies={},
-        memory_topics=(),
         degraded=False,
     )
     seed_account_rules_memory_cache("u-seed", None, snap)

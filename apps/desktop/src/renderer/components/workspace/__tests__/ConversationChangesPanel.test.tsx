@@ -130,8 +130,8 @@ describe("ConversationChangesPanel P0c entry", () => {
     const write: ProcessStep = {
       kind: "tool",
       id: "t-write",
-      tool_name: "file_write",
-      arguments: { path: "a.ts", content: "x" },
+      tool_name: "write",
+      arguments: { file_path: "a.ts", content: "x" },
       result: null,
       status: "success",
     };

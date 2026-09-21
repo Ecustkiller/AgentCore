@@ -8,12 +8,12 @@ export interface DiffLine {
 }
 
 /** Above this old×new line-product an exact LCS diff isn't worth its O(n·m) cost
- * (and a giant str_replace is rare) — fall back to a whole-block replace so the
+ * (and a giant edit is rare) — fall back to a whole-block replace so the
  * UI never janks. */
 const LCS_CELL_BUDGET = 250_000;
 
 /**
- * Minimal line-level diff (`old_string` → `new_string`) for the str_replace edit
+ * Minimal line-level diff (`old_string` → `new_string`) for the edit
  * card (工具结果富渲染). Pure + dependency-free so it unit-tests in isolation and
  * runs in the render path without pulling a diff library.
  *

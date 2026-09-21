@@ -25,7 +25,6 @@ from agentcore.runtime.runs.types import (
     RunSpec,
     RunState,
 )
-from agentcore.workspace.stage_dirs import DRAFTS_DIR
 
 logger = get_logger(__name__)
 
@@ -133,6 +132,7 @@ def _build_messages(
     team_brief: str | None = None,
     context_inject: Mapping[str, str] | None = None,
     tool_defs: list[dict] | None = None,
+    turn_envelope: str | None = None,
 ) -> list[LLMMessage]:
     """Assemble the worker's OPENING (system, user) messages from its inline role,
     the original request, its upstream dependency products, and its task.
@@ -184,6 +184,22 @@ def _build_messages(
             blocks_sink.append(tools_block)
         blocks_sink.extend(blocks)
     user_content = "\n\n".join(f"## {b.heading}\n{b.body}" for b in blocks)
+    env = (turn_envelope or "").strip()
+    if env:
+        if blocks_sink is not None:
+            from agentcore.runtime.resolve.prompt.envelope import strip_turn_envelope_fence
+
+            xml = strip_turn_envelope_fence(env)
+            if xml:
+                blocks_sink.insert(
+                    1 if blocks_sink and blocks_sink[0].channel == "system" else 0,
+                    ContextBlock(
+                        channel="envelope",
+                        heading="本回合环境",
+                        body=xml,
+                    ),
+                )
+        user_content = f"{env}\n\n{user_content}" if user_content else env
     return [
         LLMMessage(role="system", content=system_content),
         LLMMessage(role="user", content=user_content),
@@ -209,7 +225,7 @@ def _build_context_blocks(
 
     团队位置（DAG 拓扑感知）: the worker sees the team-level 原始用户请求 verbatim; on its own
     that reads as a personal mandate, so an UPSTREAM link — blind to the writer downstream —
-    used to chase the final artifact itself (上游越权写整篇 + 无文件名的空路径 file_write).
+    used to chase the final artifact itself (上游越权写整篇 + 无文件名的空路径 write).
     The position block hands the node its TOPOLOGY (peers + where its output GOES), symmetric
     to :func:`_dep_context_blocks` handing a downstream node its upstream PRODUCTS; the
     request header is reframed as a team goal only when the node is actually on a team (a
@@ -295,14 +311,27 @@ def _build_context_blocks(
 
 
 def _format_captain_history(history: list[dict]) -> str:
-    """Render the prior-turn messages the captain carries into「用户：… / CEO：…」prose for
-    its ``history`` context block — the SAME turns fed to the LLM, made legible to the user
-    (单一源: what the user sees == what the LLM eats). Empty for a first turn."""
+    """Render the prior-turn messages the captain carries into「用户：… / CEO：…」prose.
+
+    Engine ``[系统提示]`` envelopes stay in the LLM window but are omitted here —
+    the current envelope already rides the system catalog block. DeepSeek
+    in-history extra systems likewise stay out of this prose (they belong in
+    the system catalog block as the live compose).
+    """
+    from agentcore.runtime.resolve.prompt.envelope import (
+        IN_HISTORY_SYSTEM_ORIGIN,
+        is_turn_envelope_content,
+    )
+
     label = {"user": "用户", "assistant": "CEO", "system": "系统"}
     parts = [
         f"{label.get(m.get('role', ''), m.get('role') or '')}：{m.get('content') or ''}"
         for m in history
         if (m.get("content") or "").strip()
+        and m.get("origin") != IN_HISTORY_SYSTEM_ORIGIN
+        and not is_turn_envelope_content(
+            m.get("content") if isinstance(m, dict) else None
+        )
     ]
     return "\n\n".join(parts)
 
@@ -463,15 +492,12 @@ def _context_block_payloads(blocks: list[ContextBlock]) -> list[dict[str, Any]]:
 
 
 def _upstream_intermediate_persist_hint(spec: RunSpec) -> str:
-    """A1: where upstream links may park large intermediates for downstream ``file_read``.
+    """A1: where upstream links may park large intermediates for downstream ``read``.
 
     Declared ``artifacts`` win (strict task-book paths). Otherwise free-form
-    teams self-locate; if they cannot, park under ``DRAFTS_DIR`` with a descriptive
-    filename — never workspace-root ``findings-<role>.md``. Does not replace
-    pinned artifacts; only guides free teams.
-
-    不知放哪才进工作稿，不把省略 deliverable 钉成工作稿义务；``research/`` 仍只接
-    显式声明 → [术语表 · 成品归位].
+    teams self-locate and write into handoff; do not invent a dump path.
+    Never workspace-root ``findings-<role>.md``. Does not replace pinned
+    artifacts; only guides free teams.
     """
     pinned = [
         p.strip().replace("\\", "/")
@@ -482,14 +508,14 @@ def _upstream_intermediate_persist_hint(spec: RunSpec) -> str:
         paths = "、".join(f"`{p}`" for p in pinned)
         return (
             "中间产物怎么交：零散发现直接写进你的文字产出即可（会自动转交下游）；若产物较大、"
-            "值得落盘供下游 file_read 取用，就调 file_write 并【严格按任务书路径】落盘"
+            "值得落盘供下游 read 取用，就调 write 并【严格按任务书路径】落盘"
             f"（{paths}），切勿用空路径或另起工作区根文件名。"
         )
     return (
         "中间产物怎么交：零散发现直接写进你的文字产出即可（会自动转交下游）；若产物较大、"
-        "值得落盘供下游 file_read 取用，就调 file_write，按桌上已有结构自定位；"
-        f"不知放哪再落 `{DRAFTS_DIR}/` 下【自起描述性文件名】"
-        "（勿用工作区根 `findings-<角色>.md`），切勿用空路径。"
+        "值得落盘供下游 read 取用，就调 write，按桌上已有结构自定位，"
+        "或按任务书已声明路径落盘——不要发明新的约定柜，也勿用工作区根 "
+        "`findings-<角色>.md`，切勿用空路径。"
     )
 
 
@@ -500,10 +526,10 @@ def _team_position_block(plan: RunPlan, spec: RunSpec) -> str:
 
     Closes the「上游越权写最终交付物」gap: an upstream link sees the team-level
     原始用户请求 ("…保存一份报告…") but, blind to the writer downstream, used to chase the
-    final artifact itself (and, lacking a filename, fire empty-path file_write). It now
+    final artifact itself (and, lacking a filename, fire empty-path write). It now
     learns it is one link that hands off — and, when it does want to PERSIST a large
-    intermediate product for the downstream to ``file_read``, A1 tells it either the
-    task-book ``artifacts`` path (strict) or ``DRAFTS_DIR`` + a descriptive filename
+    intermediate product for the downstream to ``read``, A1 tells it either the
+    task-book ``artifacts`` path (strict) or to write into handoff / self-locate
     (free teams; never workspace-root ``findings-<role>.md``). A TERMINAL node instead
     learns it IS the final author (reinforcing structure ownership, the worker-side L3
     lever). Blank for a solo single worker (no team → the request simply is its whole job).
@@ -540,7 +566,7 @@ def _team_position_block(plan: RunPlan, spec: RunSpec) -> str:
         parts.append(
             f"你的位置：你是这条流水线的【终端环】。上游【{joined}】的产出已在下方「前置结果」"
             "交给你，你的职责是据此整合、产出团队交给老板的【最终交付物】。"
-            "「前置结果」若已列出工作区路径：先 file_read 这些路径再写总稿；"
+            "「前置结果」若已列出工作区路径：先 read 这些路径再写总稿；"
             "【禁止】把开工做成全仓 glob / grep / 再调研一遍。"
             "路径含糊或列表缺文件时才 glob / file_list 补钉（见身份【找路径】）。"
         )
@@ -567,7 +593,7 @@ def _context_inject_blocks(
     return [
         ContextBlock(
             channel="dependency",
-            heading="强制注入·骨架/契约摘要（优先用此，勿反复 file_read 同文件）",
+            heading="强制注入·骨架/契约摘要（优先用此，勿反复 read 同文件）",
             body="\n\n".join(parts),
             fidelity="inject",
             truncated=True,
@@ -626,7 +652,7 @@ def _dep_context_blocks(
 
     - A dep that WROTE FILES to the workspace (``files_touched`` non-empty) becomes a
       POINTER (``fidelity.pointer_body``): a tight prose digest + the artifact paths to
-      ``file_read``. The product is already on disk and reachable, so re-shipping it
+      ``read``. The product is already on disk and reachable, so re-shipping it
       whole through the prompt wastes tokens and risks tail-trimming (递指针不递全文,
       Agent协作模式.md). A pointer does NOT draw on the pass_through budget.
     - ``summarize`` deps (no files) get a tight head+tail digest (``DEP_SUMMARY_CHARS``),

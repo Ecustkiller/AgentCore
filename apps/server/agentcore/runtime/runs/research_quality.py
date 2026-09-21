@@ -6,17 +6,8 @@
 delivery_status 复用——不新建子系统。
 
 成篇硬审计不扫 task/角色自由文猜意图；不认已删字数字段腿。
-审校落盘**不**靠角色名抬落盘——只认已声明的 ``reviews/`` artifacts。
-
-文献成文证据降档（学术综述诚实性）：批内已声明 ``reviews/`` 审校座且证据不足时
-由 ``delivery_status`` 注入 ``reason=evidence_deficit`` blocking gap → state 不得
-``delivered``（仅 partial/blocked）。**不**扫「综述已完成」等完成话术词。
-消费学术搜索块真源 ``evidence_gap``（见接缝常量；``evidence_deficit`` 仍兼容）。
-
-已声明复核落盘对账（案 thin-review A′）：钉 ``reviews/`` artifacts
-未 accepted / 拒收 / 空壳 → ``reason=thin_review`` blocking；不扫角色名；有合格
-accepted 报告则短 handoff 豁免。``requires_draft_ack`` 与 evidence_deficit /
-verify_failed 同闩。
+``reviews/`` 路径前缀闸已卸：不再按约定柜生成 thin_review / literature
+证据降档；声明未落盘仍走通用 ``files_not_landed``。
 """
 
 from __future__ import annotations
@@ -25,15 +16,6 @@ import json
 import re
 from typing import Any
 from urllib.parse import urlparse
-
-from agentcore.workspace.stage_dirs import (
-    DEBATE_DIR,
-    DEBATE_PREFIX,
-    RESEARCH_DIR,
-    RESEARCH_PREFIX,
-    REVIEWS_DIR,
-    REVIEWS_PREFIX,
-)
 
 # 论文/综述/长文成篇：允许并行拆章起草，但最终验收必须单一主文件（定案：
 # 禁的是「并行拆章无合并门禁」，不是双文件本身；调研/代码/建站多产物不受本条约束）。
@@ -54,127 +36,10 @@ MD_EXPORT_DISCIPLINE = (
     "（确定性 `md_export` 才是主路径）。"
 )
 
-# 成篇主文件权威默认（手写 ``artifacts`` 可另钉路径）。
-# 单角调研中间产物勿与本路径抢名。
-DEFAULT_RESEARCH_REPORT_ARTIFACT = f"{RESEARCH_DIR}/报告.md"
+# 成篇主文件：手写 ``output_path`` / ``artifacts`` 钉路径；引擎不发明默认柜。
 
 # 本地改文件 / 广度摸底 / 成篇意图 / 字数承诺：用户·task 文 RE 猜意图腿已撤；
 # 成篇硬门不扫自由文分叉；选型靠提示词，硬门只认结构字段。
-
-# 独立复核短报告：案 20260803-longfix-thin-review-claim-pass B——须 files_written，禁薄 handoff。
-# 纪律文案由已声明 artifacts 的 task 自带；运行时不再扫角色名抬契约。
-INDEPENDENT_REVIEW_REPORT_DISCIPLINE = (
-    "【复核落盘】须将带行号的短复核报告 file_write 到约定文档 reviews/；"
-    "逐条写清结论与证据指针（文件:行号）；"
-    "禁止仅用十余字 handoff 冒充过闸；handoff 只作速览+路径。"
-)
-
-
-def _deliverable_files_shaped(deliverable: Any) -> bool:
-    """True when deliverable already declares a pinned-path landing contract."""
-    from agentcore.runtime.runs.types import (
-        Deliverable,
-        deliverable_expects_landing,
-        raw_deliverable_expects_landing,
-    )
-
-    if deliverable is None:
-        return False
-    if isinstance(deliverable, dict):
-        return raw_deliverable_expects_landing(deliverable)
-    if isinstance(deliverable, Deliverable):
-        return deliverable_expects_landing(deliverable)
-    return deliverable_expects_landing(
-        Deliverable(
-            artifacts=list(getattr(deliverable, "artifacts", None) or []),
-            artifact_dir=str(getattr(deliverable, "artifact_dir", "") or ""),
-        )
-    )
-
-
-def _deliverable_candidate_paths(deliverable: Any) -> list[str]:
-    artifacts: list[str] = []
-    artifact_dir = ""
-    if deliverable is None:
-        return []
-    if isinstance(deliverable, dict):
-        raw = deliverable.get("artifacts") or []
-        if isinstance(raw, list):
-            artifacts = [str(a) for a in raw if a]
-        ad = deliverable.get("artifact_dir") or ""
-        artifact_dir = ad if isinstance(ad, str) else ""
-    else:
-        artifacts = [str(a) for a in (getattr(deliverable, "artifacts", None) or []) if a]
-        artifact_dir = str(getattr(deliverable, "artifact_dir", "") or "")
-    out = list(artifacts)
-    if artifact_dir.strip():
-        out.append(artifact_dir.strip())
-    return out
-
-
-def _path_under_reviews(path: str) -> bool:
-    p = (path or "").strip().lstrip("/")
-    return p == REVIEWS_DIR or p.startswith(REVIEWS_PREFIX)
-
-
-def _path_under_research(path: str) -> bool:
-    p = (path or "").strip().lstrip("/")
-    return p == RESEARCH_DIR or p.startswith(RESEARCH_PREFIX)
-
-
-def _path_under_debate(path: str) -> bool:
-    p = (path or "").strip().lstrip("/")
-    return p == DEBATE_DIR or p.startswith(DEBATE_PREFIX)
-
-
-def deliverable_declares_reviews_files(deliverable: Any) -> bool:
-    """True when deliverable already declares files under ``reviews/`` (no role scan)."""
-    if not _deliverable_files_shaped(deliverable):
-        return False
-    return any(_path_under_reviews(p) for p in _deliverable_candidate_paths(deliverable))
-
-
-def deliverable_declares_research_files(deliverable: Any) -> bool:
-    """True when deliverable already declares files under ``research/`` (no role scan)."""
-    if not _deliverable_files_shaped(deliverable):
-        return False
-    return any(_path_under_research(p) for p in _deliverable_candidate_paths(deliverable))
-
-
-def deliverable_declares_debate_files(deliverable: Any) -> bool:
-    """True when deliverable already declares files under ``debate/`` (no role scan)."""
-    if not _deliverable_files_shaped(deliverable):
-        return False
-    return any(_path_under_debate(p) for p in _deliverable_candidate_paths(deliverable))
-
-
-def deliverable_is_report_delivery(deliverable: Any) -> bool:
-    """Structured report-landing stamp (compat; factory no longer drives idle).
-
-    OR of structured stamps / path declarations only — no role-name regex, no bare
-    ``files_expected`` / omitted empty deliverable (those would mis-classify repair/build).
-    Callers may still pass the result as ``report_delivery``; factory ignores it
-    for delivery_idle.
-    """
-    if deliverable is None:
-        return False
-    return (
-        deliverable_declares_reviews_files(deliverable)
-        or deliverable_declares_research_files(deliverable)
-        or deliverable_declares_debate_files(deliverable)
-    )
-
-
-def batch_declares_review_files(tasks: object) -> bool:
-    """True when any task already declares a reviews/ files deliverable."""
-    if not isinstance(tasks, list):
-        return False
-    for task in tasks:
-        if not isinstance(task, dict):
-            continue
-        if deliverable_declares_reviews_files(task.get("deliverable")):
-            return True
-    return False
 
 
 def has_landed_prose_artifact(kinds: object) -> bool:
@@ -271,7 +136,7 @@ def research_report_main_artifact(output_path: str | None = None) -> str:
     cleaned = (output_path or "").strip().replace("\\", "/")
     if cleaned:
         return cleaned.lstrip("/")
-    return DEFAULT_RESEARCH_REPORT_ARTIFACT
+    return cleaned.lstrip("/") if cleaned else ""
 
 
 # ── 文献成文证据降档（delivery_status 消费）────────────────────────────────
@@ -376,29 +241,13 @@ _NO_REFS_OR_PRIOR_MARKERS: tuple[str, ...] = (
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
-def _node_deliverable(node: Any) -> Any:
-    if isinstance(node, dict):
-        return node.get("deliverable")
-    return getattr(node, "deliverable", None)
-
-
-def _node_role(node: Any) -> str:
-    if isinstance(node, dict):
-        return str(node.get("role") or "").strip()
-    return str(getattr(node, "role", "") or "").strip()
-
-
 def plan_is_literature_report_delivery(plan_nodes: object) -> bool:
-    """True for 批内已声明 reviews/ files 审校座的成文综述.
+    """Retired: literature shape no longer keys off a ``reviews/`` cabinet.
 
-    判定（结构字段，不扫 task/角色自由文）：批内已声明 reviews/ files 审校座。
+    Always False. Kept so delivery_status / tests can assert the leg is gone.
     """
-    if not isinstance(plan_nodes, (list, tuple)) or not plan_nodes:
-        return False
-    as_tasks = [
-        {"role": _node_role(n), "deliverable": _node_deliverable(n)} for n in plan_nodes
-    ]
-    return batch_declares_review_files(as_tasks)
+    _ = plan_nodes
+    return False
 
 
 def is_academic_usable_url(url: str) -> bool:
@@ -570,32 +419,9 @@ def _batch_has_no_refs_or_prior_gap(
     plan_nodes: object,
     results: dict[str, Any],
 ) -> bool:
-    """True when writer/reviewer surfaces (content/warnings/debrief/gaps) admit no-refs/prior."""
-    reviewish_ids: set[str] = set()
-    writerish_ids: set[str] = set()
-    if isinstance(plan_nodes, (list, tuple)):
-        for node in plan_nodes:
-            deliverable = _node_deliverable(node)
-            rid = ""
-            if isinstance(node, dict):
-                rid = str(node.get("run_id") or node.get("id") or "")
-            else:
-                rid = str(getattr(node, "run_id", "") or "")
-            if not rid:
-                continue
-            if deliverable_declares_reviews_files(deliverable):
-                reviewish_ids.add(rid)
-            if deliverable_declares_research_files(deliverable):
-                writerish_ids.add(rid)
-
-    for rid, state in (results or {}).items():
+    """True when any worker surface admits no-refs/prior."""
+    for _rid, state in (results or {}).items():
         if state is None:
-            continue
-        # Prefer writer / reviewer surfaces; also accept any delivery_gap already tagged.
-        prefer = (not reviewish_ids and not writerish_ids) or (
-            rid in reviewish_ids or rid in writerish_ids
-        )
-        if not prefer:
             continue
         surfaces: list[str] = [
             str(getattr(state, "content", "") or ""),
@@ -656,146 +482,17 @@ def collect_evidence_deficit_gaps(
     ]
 
 
-# ── 已声明复核落盘对账（案 thin-review-claim-pass A′）────────────────────
-# 只认钉路径 + reviews/ artifacts（或 artifact_dir）；不扫角色名。
-# 声明路径未 accepted / 拒收 / 空壳信号 → blocking thin_review → partial + draft-ack。
-# 有合格 accepted 报告时短 handoff 不硬降档（厚度仅作缺口文案备注）。
-# 不推翻刀1：有落盘时 degraded_handoff 仍可 soft。
+# ── 复核落盘对账 ────────────────────────────────────────────────────────
+# ``reviews/`` 路径前缀闸已卸。历史 ``reason=thin_review`` 仍可出现在工人
+# ``delivery_gaps``（经 collect_worker_gaps 进卡）；本模块不再按路径生成。
 
 REASON_THIN_REVIEW = "thin_review"
-
-# 空壳：骨架占位硬软信号（已有 warnings，不重读盘）。
-_REVIEW_SHELL_MARKERS: tuple[str, ...] = (
-    "含未替换骨架占位",
-    "篇幅提醒（软）",
-)
-
-
-def _review_artifact_patterns(deliverable: Any) -> list[str]:
-    """Declared reviews/ paths (artifacts + artifact_dir under reviews/)."""
-    return [p for p in _deliverable_candidate_paths(deliverable) if _path_under_reviews(p)]
-
-
-def _acceptance_rows(state: Any) -> list[dict[str, Any]]:
-    rows = getattr(state, "file_acceptance", None) or []
-    return [r for r in rows if isinstance(r, dict)]
-
-
-def _accepted_workspace_paths(state: Any) -> list[str]:
-    from agentcore.runtime.runs.file_acceptance import accepted_paths
-
-    return list(accepted_paths(_acceptance_rows(state)))
-
-
-def _state_signals_review_shell(state: Any) -> bool:
-    """True when warnings/delivery_gaps already note skeleton or soft length shortfall."""
-    surfaces: list[str] = [str(w) for w in (getattr(state, "warnings", None) or [])]
-    for row in getattr(state, "delivery_gaps", None) or []:
-        if isinstance(row, dict):
-            surfaces.append(str(row.get("description") or ""))
-    return any(any(m in s for m in _REVIEW_SHELL_MARKERS) for s in surfaces)
-
-
-def _is_reviews_dir_pattern(path: str) -> bool:
-    p = (path or "").strip().replace("\\", "/").rstrip("/")
-    return p == REVIEWS_DIR
-
-
-def _review_paths_gap_bits(
-    deliverable: Any,
-    state: Any,
-) -> list[str]:
-    """Human bits when declared reviews paths are missing / rejected / shell."""
-    from agentcore.runtime.runs.contract import artifact_present, missing_artifacts
-
-    patterns = _review_artifact_patterns(deliverable)
-    if not patterns:
-        return []
-    accepted = _accepted_workspace_paths(state)
-    bits: list[str] = []
-
-    # File-shaped artifacts vs directory-only (artifact_dir == reviews/).
-    file_patterns = [p for p in patterns if not _is_reviews_dir_pattern(p)]
-
-    if file_patterns:
-        missing = missing_artifacts(file_patterns, accepted)
-        if missing:
-            listed = "、".join(f"`{p}`" for p in missing[:4])
-            more = f" 等 {len(missing)} 处" if len(missing) > 4 else ""
-            bits.append(f"声明复核路径未验收通过：{listed}{more}")
-    else:
-        # artifact_dir / reviews/：任一 accepted 落在 reviews/ 即过。
-        if not any(_path_under_reviews(p) for p in accepted):
-            bits.append("已声明 reviews/ 落盘契约，但无验收通过的复核报告路径")
-
-    rejected: list[str] = []
-    for row in _acceptance_rows(state):
-        if str(row.get("status") or "") != "rejected":
-            continue
-        path = str(row.get("path") or "").strip()
-        if not path or not _path_under_reviews(path):
-            continue
-        if not file_patterns or any(artifact_present(pat, [path]) for pat in file_patterns):
-            rejected.append(path)
-    if rejected:
-        listed = "、".join(f"`{p}`" for p in rejected[:4])
-        bits.append(f"复核报告路径被拒收：{listed}")
-
-    # 空壳：路径已 accepted 仍带骨架/篇幅软提醒 → 不得当合格报告。
-    if (
-        not bits
-        and _state_signals_review_shell(state)
-        and (
-            (file_patterns and not missing_artifacts(file_patterns, accepted))
-            or (not file_patterns and any(_path_under_reviews(p) for p in accepted))
-        )
-    ):
-        bits.append("声明复核报告疑似空壳（骨架占位或篇幅不足）")
-
-    return bits
 
 
 def collect_thin_review_gaps(
     plan_nodes: object,
     results: dict[str, Any],
 ) -> list[dict[str, str]]:
-    """Blocking gaps when a node declared reviews/ files but lacks a qualified report.
-
-    Predicate（结构契约，不扫角色名 / 完成话术）：
-    ``deliverable_declares_reviews_files`` ∧（声明路径未 accepted ∨ 拒收 ∨ 空壳信号）。
-    Handoff 厚度不单独硬降档；有合格 accepted 报告则豁免。
-    """
-    from agentcore.runtime.runs.types import RunPhase
-
-    if not isinstance(plan_nodes, (list, tuple)) or not plan_nodes:
-        return []
-    out: list[dict[str, str]] = []
-    for node in plan_nodes:
-        deliverable = _node_deliverable(node)
-        if not deliverable_declares_reviews_files(deliverable):
-            continue
-        if isinstance(node, dict):
-            rid = str(node.get("run_id") or node.get("id") or "")
-        else:
-            rid = str(getattr(node, "run_id", "") or "")
-        if not rid:
-            continue
-        state = (results or {}).get(rid)
-        if state is None or getattr(state, "phase", None) is not RunPhase.COMPLETED:
-            continue
-        bits = _review_paths_gap_bits(deliverable, state)
-        if not bits:
-            continue
-        role = _node_role(node) or rid or "复核"
-        detail = "；".join(bits)
-        out.append(
-            {
-                "description": (
-                    f"已声明复核落盘契约未对齐合格报告（{detail}）——"
-                    "不得无承认宣称全链路/复核通过；请补 reviews/ 短报告或开场承认缺口"
-                ),
-                "reason": REASON_THIN_REVIEW,
-                "role": role,
-            }
-        )
-    return out
+    """Retired: no ``reviews/`` cabinet gate. Always empty."""
+    _ = plan_nodes, results
+    return []

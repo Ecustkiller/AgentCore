@@ -44,6 +44,32 @@ function formatLaneSummary(reasoningCount: number, toolCount: number): string {
   return parts.join(" · ");
 }
 
+const PAINTED_STEP_KINDS = new Set([
+  "reasoning",
+  "content",
+  "tool",
+  "team",
+  "checkpoint",
+  "escalation",
+  "approval",
+  "user_interjection",
+]);
+
+/** Trailing `content` run (deliverable). Mid-content has a later painted non-content step. */
+function isTrailingContentStep(
+  steps: ProcessStep[],
+  index: number,
+): boolean {
+  if (steps[index]?.kind !== "content") return false;
+  for (let i = index + 1; i < steps.length; i++) {
+    const kind = (steps[i] as { kind: string }).kind;
+    if (kind === "content") continue;
+    if (!PAINTED_STEP_KINDS.has(kind)) continue;
+    return false;
+  }
+  return true;
+}
+
 type LaneRow =
   | { key: string; folded: true; kind: "reasoning"; text: string }
   | { key: string; folded: true; kind: "tool"; step: ToolStep }
@@ -114,7 +140,7 @@ function buildRows(
       return;
     }
     if (step.kind === "content") {
-      if (hideContentSteps) return;
+      if (hideContentSteps && isTrailingContentStep(steps, i)) return;
       rows.push({ key, folded: false, kind: "content", text: step.text });
       return;
     }
@@ -136,8 +162,9 @@ function countTools(rows: LaneRow[]): number {
 /**
  * CEO process lane: settled fold matches the desktop bubble.
  * Reasoning/tools collapse to a one-line summary (except a single pure thought);
- * collapsed thought shows the button only — no body preview. Content steps that
- * duplicate the deliverable are omitted by the caller.
+ * collapsed thought shows the button only — no body preview. `hideContentSteps`
+ * omits the trailing content run (caller shows it as the clamped deliverable);
+ * mid-content stays visible.
  */
 export function ProcessLane({
   steps,

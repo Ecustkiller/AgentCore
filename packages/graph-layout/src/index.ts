@@ -1,6 +1,6 @@
 /**
  * @agentcore/graph-layout — pure ELK layout for the collaboration graph.
- * Shared by desktop renderer and promo precompute scripts (no @/ aliases).
+ * Shared by desktop renderer and video precompute scripts (no @/ aliases).
  */
 export type {
   GraphEdge,

@@ -1,4 +1,4 @@
-"""File operations tools (read, write, list, precise str_replace edit, delete,
+"""File operations tools (read, write, list, precise edit, delete,
 batch).
 
 Thin shells over ``ToolContext.backend``: each tool parses arguments, calls the
@@ -10,9 +10,9 @@ local (desktop) workspace.
 Split axes (implementation modules):
 - ``integrity`` — integrity & write-scope policy
 - ``errors`` — error / result mapping
-- ``read`` — file_read / file_list (one-layer LS; FileListTool still in read.py)
+- ``read`` — read / file_list (one-layer LS; FileListTool still in read.py)
 - ``listing`` / ``glob`` — listing helpers + globstar search
-- ``mutate`` — write / str_replace
+- ``mutate`` — write / edit
 - ``meta`` — delete
 - ``batch`` — file_batch
 

@@ -78,7 +78,7 @@ RUN mkdir -p /out \
 # ② nodejs + npm：code_execute 声明支持 javascript；npm 供外环验绿 / Vite build。
 #    随基础镜像 Debian 版本，当前 trixie ≈ node 20。
 # ⑥ git：guest 内 `run` 与脚本用的系统 git（AI 结构化 git 工具走 API 进程，runtime 另装）。
-# ⑦ curl：公网 HTTP 与 download_url 同政策后，bash / 脚本需要 HTTP 客户端。不装 wget。
+# ⑦ curl：公网 HTTP 与 web_fetch 同政策后，bash / 脚本需要 HTTP 客户端。不装 wget。
 # ⑧ gcc / make：网页/手机克隆 native 仓要能编 C。用 build-essential（gcc、g++、make、
 #    libc 头文件）；不装 cmake / go / rust。只进 guest 阶，禁止装进 runtime /usr。
 FROM python:3.12-slim AS guest

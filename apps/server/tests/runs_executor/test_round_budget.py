@@ -106,8 +106,8 @@ async def test_main_pass_honors_explicit_max_rounds_without_extra_investigation(
                     ToolCallDelta(
                         index=0,
                         id="w1",
-                        function_name="file_write",
-                        arguments_delta='{"path": "p.txt", "content": "hi"}',
+                        function_name="write",
+                        arguments_delta='{"file_path": "p.txt", "content": "hi"}',
                     )
                 ]
             )
@@ -118,8 +118,8 @@ async def test_main_pass_honors_explicit_max_rounds_without_extra_investigation(
                     ToolCallDelta(
                         index=0,
                         id="w2",
-                        function_name="file_write",
-                        arguments_delta='{"path": "q.txt", "content": "hi"}',
+                        function_name="write",
+                        arguments_delta='{"file_path": "q.txt", "content": "hi"}',
                     )
                 ]
             )
@@ -194,8 +194,8 @@ async def test_react_stamps_coord_live_spend_for_ceo_brief():
                     ToolCallDelta(
                         index=0,
                         id="w1",
-                        function_name="file_write",
-                        arguments_delta='{"path": "p.txt", "content": "hi"}',
+                        function_name="write",
+                        arguments_delta='{"file_path": "p.txt", "content": "hi"}',
                     )
                 ]
             ),

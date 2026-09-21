@@ -37,7 +37,7 @@ from agentcore.evals.types import EvalConfigError
 from agentcore.llm.factory import build_provider
 from agentcore.llm.profiles import TurnProfiles
 from agentcore.llm.provider.protocol import LLMMessage
-from agentcore.runtime.context import build_workspace_context, collect_outlet_inventory
+from agentcore.runtime.context import build_workspace_context
 from agentcore.runtime.engine.governance import resolve_openai_tool_defs
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.pipeline import _assemble_ceo_toolset
@@ -151,7 +151,6 @@ async def _build_ceo_context(
         desktop_online=True,
         run_enabled=code_execute,
         browser_enabled=browser,
-        outlet_inventory=await collect_outlet_inventory(backend),
         desk_visibly_empty=await desk_is_visibly_empty(backend),
     )
     base = assemble_system_prompt()

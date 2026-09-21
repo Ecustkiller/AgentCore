@@ -29,9 +29,9 @@ from agentcore.runtime.runs.constants import (
 
 def pointer_body(content: str, files: list[str]) -> str:
     """A file-producing product's POINTER body: a tight digest of its prose handoff +
-    the artifact paths to ``file_read``.
+    the artifact paths to ``read``.
 
-    The full product lives in the shared workspace (it called ``file_write``), so a
+    The full product lives in the shared workspace (it called ``write``), so a
     reader pulls only what it needs rather than carrying the whole artifact in-prompt
     (递指针不递全文). The digest keeps the worker's own orientation note (改了哪些文件 /
     怎么用 / 关键取舍); the path list is the pointer. Both are bounded
@@ -49,7 +49,7 @@ def pointer_body(content: str, files: list[str]) -> str:
     more = f"\n……（共 {len(files)} 个文件）" if len(files) > len(listed) else ""
     parts.append(
         "已写入共享工作区的文件（下列是磁盘真实路径；约定文档会把子文件夹压进文件名。"
-        "先 file_read 这些路径再写你的交付物，勿用任务书里带一层子目录的旧写法；"
+        "先 read 这些路径再写你的交付物，勿用任务书里带一层子目录的旧写法；"
         "不要凭空臆测，也勿全仓 glob / grep 重搜）：\n" + lines + more
     )
     return "\n\n".join(parts)

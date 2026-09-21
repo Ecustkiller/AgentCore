@@ -466,6 +466,8 @@ class SidecarServer(HandlerMixin, DeliveryMixin, TurnExecutionMixin):
             await self._on_warm_mcp_discover(request_id, params)
         elif method == "warmAccountRulesMemory":
             await self._on_warm_account_rules_memory(request_id, params)
+        elif method == "warmLlmHttp":
+            await self._on_warm_llm_http(request_id, params)
         elif method == "updateExternalMounts":
             await self._on_update_external_mounts(request_id, params)
         elif method == "shutdown":

@@ -9,7 +9,7 @@ import {
 } from "../constants";
 import { realInside, resolveLexical, toReason } from "../pathGuard";
 import type { StoredRoot } from "../roots";
-import { collectWorkspaceFiles } from "../tree";
+import { collectWorkspaceFiles, renameLegacyRulesLeaf } from "../tree";
 import {
   type AiListSkipOptions,
   shouldSkipAiListEntry,
@@ -94,6 +94,7 @@ export async function opList(
   listOptions?: AiListSkipOptions,
   cap?: number,
 ): Promise<WorkspaceOpResult> {
+  await renameLegacyRulesLeaf(root.absPath);
   const baseAbs = resolveLexical(root, directory);
   if (!baseAbs) return opErr("OutsideWorkspace", directory);
   const baseReal = await realInside(root, baseAbs);
@@ -283,6 +284,7 @@ export async function opListTree(
   revealPaths?: ReadonlySet<string>,
   listOptions?: AiListSkipOptions,
 ): Promise<WorkspaceOpResult> {
+  await renameLegacyRulesLeaf(root.absPath);
   const baseAbs = resolveLexical(root, directory);
   if (!baseAbs) return opErr("OutsideWorkspace", directory);
   const baseReal = await realInside(root, baseAbs);

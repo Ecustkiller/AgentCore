@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { CatalogIconShell } from "@/components/ui/catalog-icon-shell";
 import { cn } from "@/lib/utils";
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 
 /** Shelf columns: min 240px, grow with the 1200 canvas (four columns ≈ 280px). */
 export const CATALOG_GRID_CLASS =
@@ -22,7 +22,7 @@ export interface CatalogTileProps {
   /** Bottom chips: classification metadata, not status. */
   tags?: ReactNode;
   muted?: boolean;
-  onClick?: () => void;
+  onClick?: (event: MouseEvent<HTMLButtonElement>) => void;
   /** Keep description to two lines. */
   descriptionClamp?: boolean;
   /** Extra body between description and the bottom chips (expanded params). */
@@ -34,7 +34,8 @@ export interface CatalogTileProps {
 
 /**
  * Catalog shelf tile: identity row, two-line description, optional tags.
- * Toolbox hub, skill store, and tool cards share this shell.
+ * Skill store (市场) and the toolbox「官方」提示词 / 工具 shelf use this shell.
+
  * The description slot always occupies two lines, even when copy is empty.
  *
  * Slots: icon+title(+subtitle) | accessory → description → children → tags → footer.

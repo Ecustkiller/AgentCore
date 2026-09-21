@@ -21,7 +21,7 @@ What lives here (stateless):
 - :func:`classify_url` / :func:`is_safe_url` / :func:`resolve_ssrf_dial_target`
   — the SSRF guard: reject non-http(s), reserved hostnames, and any host
   that resolves to a private/loopback/link-local/reserved address (blocks
-  cloud-metadata SSRF). ``web_fetch`` / ``download_url`` / 云桌 guest 出站 /
+  cloud-metadata SSRF). ``web_fetch`` / 云桌 guest 出站 /
   云端浏览器代理共用这一把尺。
 
 The *stateful* per-host egress circuit breaker lives in
@@ -420,7 +420,7 @@ async def resolve_ssrf_dial_target(
     Same policy as :func:`classify_url` + :class:`PinnedIPTransport`: every
     resolved address must be globally routable, then dial the first safe IP.
     Used by the cloud-desk egress proxy and the sandbox browser proxy so
-    guest ``run`` HTTP matches ``download_url``.
+    guest ``run`` HTTP matches ``web_fetch``.
     """
     block = await classify_url(f"{scheme}://{host}:{port}/")
     if block is not None:

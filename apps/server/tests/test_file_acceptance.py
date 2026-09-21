@@ -27,14 +27,13 @@ def test_landed_matches_declared_dir_prefix_and_glob():
     assert landed_matches_declared(landed, "AgentCore/文档/reviews/*.txt") is False
 
 
-def test_landed_matches_declared_dossier_flatten():
+def test_landed_matches_declared_keeps_nested_path():
     from agentcore.runtime.runs.contract import matching_artifact_paths
-    from agentcore.workspace.stage_dirs import DRAFTS_DIR
 
-    declared = f"{DRAFTS_DIR}/主题/01.md"
-    landed = f"{DRAFTS_DIR}/主题_01.md"
+    declared = "notes/主题/01.md"
+    landed = "notes/主题/01.md"
     assert landed_matches_declared(landed, declared) is True
-    assert landed_matches_declared(landed, f"{DRAFTS_DIR}/其它/01.md") is False
+    assert landed_matches_declared("notes/主题_01.md", declared) is False
     assert matching_artifact_paths(declared, [landed]) == [landed]
 
 

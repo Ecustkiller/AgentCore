@@ -1,4 +1,4 @@
-"""Mutating file tools: write / str_replace."""
+"""Mutating file tools: write / edit."""
 
 from __future__ import annotations
 
@@ -59,11 +59,11 @@ logger = get_logger(__name__)
 # 写类工具「回显结果」：worker 写 / 替换后，常会为「确认写对没」再花一整轮 read 回读自检
 # （trace 4d715ea0 实测：多 worker 读→改→回读→handoff，那一轮回读零信息增量）。
 # Artifact-first：写成功回执 = artifact manifest（path/chars/lines/hash/标题树/末段预览），
-# 并硬拒对本 run 已落盘 path 的 body file_read。
+# 并硬拒对本 run 已落盘 path 的 body read。
 # 回显有界（行数 + 字符双上限），大文件不炸 token。
 _EDIT_ECHO_CONTEXT = 3
 _EDIT_ECHO_MAX_LINES = 24
-# str_replace 失败回执：从磁盘带回有界片段（编辑以盘为真源）。
+# edit 失败回执：从磁盘带回有界片段（编辑以盘为真源）。
 _EDIT_FAIL_CONTEXT = 3
 _EDIT_FAIL_MAX_LINES = 24
 _EDIT_FAIL_FUZZY_MAX = 3
@@ -254,7 +254,7 @@ async def _assemble_str_replace_fail_receipt(
     kind: Literal["no_match", "ambiguous"],
     match_count: int | None = None,
 ) -> str:
-    """Disk-backed failure receipt for ``str_replace`` (bounded snippets).
+    """Disk-backed failure receipt for ``edit`` (bounded snippets).
 
     Backend still raises ``NoMatch`` / ``AmbiguousMatch``; this only enriches the tool
     error so the model can re-anchor from disk instead of inventing a skeleton rewrite.
@@ -273,7 +273,7 @@ async def _assemble_str_replace_fail_receipt(
         else:
             head += (
                 "\n整段 old_string 均不在文件中（不是某一行像不像）。"
-                "请对照写回执 end_preview 重写精确锚，或先 file_read 再 str_replace。"
+                "请对照写回执 end_preview 重写精确锚，或先 read 再 edit。"
             )
     else:
         head = (
@@ -287,7 +287,7 @@ async def _assemble_str_replace_fail_receipt(
     except WorkspaceError as e:
         return (
             f"{head}\n（无法读取磁盘：{e}）\n"
-            "请 escalate 或改用其它路径；优先对照盘文再 str_replace，"
+            "请 escalate 或改用其它路径；优先对照盘文再 edit，"
             "确需整盖须写出完整正文（勿残缺骨架交差）。"
         )
 
@@ -334,13 +334,13 @@ async def _assemble_str_replace_fail_receipt(
 
     if kind == "no_match" and not short_anchor:
         guidance = (
-            "\n确需整文件覆盖可用 file_write（须完整正文，勿残缺骨架交差）；"
+            "\n确需整文件覆盖可用 write（须完整正文，勿残缺骨架交差）；"
             "仍对不上则 escalate。"
         )
     else:
         guidance = (
-            "\n请对照上方盘片段重写精确 old_string 后再 str_replace；"
-            "确需整文件覆盖可用 file_write（须完整正文，勿残缺骨架交差）；仍对不上则 escalate。"
+            "\n请对照上方盘片段重写精确 old_string 后再 edit；"
+            "确需整文件覆盖可用 write（须完整正文，勿残缺骨架交差）；仍对不上则 escalate。"
         )
     joined = "\n\n".join(blocks)
     return head + ("\n\n" + joined if joined else "") + guidance
@@ -378,7 +378,7 @@ async def _already_applied_str_replace(
 ) -> ToolResult | None:
     """Succeed without rewriting when this replace already landed on disk.
 
-    Same as ``file_write`` identical-body skip: live retries and crash replay
+    Same as ``write`` identical-body skip: live retries and crash replay
     both no-op when the unique/replace_all post-state already holds. Genuine
     NoMatch (old never matched and inverse cannot reconstruct) stays an error.
     """
@@ -414,21 +414,21 @@ class FileWriteTool:
         file_products=FileProductsContract.SELF_REPORT,
         workspace_io=True,
         catalog_summary="写工作区文件",
+        blurb="新建文件，或整篇覆盖已有内容",
     )
 
     @property
     def schema(self) -> ToolSchema:
         # Schema layer: 这是什么。
         return ToolSchema(
-            name="file_write",
+            name="write",
             description=(
-                "把内容写入文件：创建（含上级目录）或整体覆盖已有文件。"
-                "用户规则写 .agentcore/规则/*.md。"
+                "写入文件。用户规则写 .agentcore/rules/*.md。"
             ),
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {
+                    "file_path": {
                         "type": "string",
                         "description": "工作区内的相对文件路径。",
                     },
@@ -437,7 +437,7 @@ class FileWriteTool:
                         "description": "要写入的完整正文。",
                     },
                 },
-                "required": ["path", "content"],
+                "required": ["file_path", "content"],
             },
             face=ToolFace.FILE,
             approval=ToolApproval.GRANTABLE,
@@ -449,15 +449,18 @@ class FileWriteTool:
         if stub_err is not None:
             return _error(stub_err, start, contract_failure=True)
 
-        requested_path = arguments.get("path", "")
+        requested_path = arguments.get("file_path", "")
         content = arguments.get("content", "")
 
         # A missing/empty path resolves to the workspace root (a directory); writing
         # onto it raises a cryptic OS error (Permission denied / IsADirectory) that
         # leaks the absolute server path and gives the model nothing to act on. Fail
-        # fast with the required-arg message instead (parity with str_replace/move).
+        # fast with the required-arg message instead (parity with edit/move).
         if not requested_path:
-            return _error("path 不能为空：请提供工作区内的相对文件路径（如 report.md）", start)
+            return _error(
+                "file_path 不能为空：请提供工作区内的相对文件路径（如 report.md）",
+                start,
+            )
 
         from .user_rules import maybe_user_rule_write
 
@@ -477,10 +480,13 @@ class FileWriteTool:
             return prepared
         rel_path, rename_note = prepared
         if not rel_path:
-            return _error("path 不能为空：请提供工作区内的相对文件路径（如 report.md）", start)
+            return _error(
+                "file_path 不能为空：请提供工作区内的相对文件路径（如 report.md）",
+                start,
+            )
 
         scope_denied = _reject_write_scope(
-            context, rel_path, start, event="file_write.scope_rejected"
+            context, rel_path, start, event="write.scope_rejected"
         )
         if scope_denied is not None:
             return scope_denied
@@ -488,7 +494,7 @@ class FileWriteTool:
         # Occupancy is this tool call (disk serial + CAS). Run-lifetime ledger
         # owners never refuse a write.
         denied, release_on_fail = _claim_write_path(
-            context, rel_path, event="file_write.collision", start=start
+            context, rel_path, event="write.collision", start=start
         )
         if denied is not None:
             return denied
@@ -551,7 +557,7 @@ class FileWriteTool:
                     return dead
                 latest = None
             if latest != old_content:
-                logger.info("file_write.stale_overwrite_rejected", path=rel_path)
+                logger.info("write.stale_overwrite_rejected", path=rel_path)
                 return _error(
                     stale_overwrite_rejection(rel_path),
                     start,
@@ -615,18 +621,19 @@ class StrReplaceTool:
         file_products=FileProductsContract.SELF_REPORT,
         workspace_io=True,
         catalog_summary="改工作区文件里的一段",
+        blurb="只替换其中几行，不整篇重写",
     )
 
     @property
     def schema(self) -> ToolSchema:
         # Schema layer: 这是什么。
         return ToolSchema(
-            name="str_replace",
+            name="edit",
             description="精确替换已有文件中【完全匹配】的文本片段。",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {
+                    "file_path": {
                         "type": "string",
                         "description": "工作区内的相对文件路径。",
                     },
@@ -641,11 +648,11 @@ class StrReplaceTool:
                     },
                     "replace_all": {
                         "type": "boolean",
-                        "description": "替换所有出现处，而非要求唯一匹配。",
+                        "description": "替换所有出现处。",
                         "default": False,
                     },
                 },
-                "required": ["path", "old_string", "new_string"],
+                "required": ["file_path", "old_string", "new_string"],
             },
             face=ToolFace.FILE,
             approval=ToolApproval.GRANTABLE,
@@ -657,7 +664,7 @@ class StrReplaceTool:
         if stub_err is not None:
             return _error(stub_err, start, contract_failure=True)
 
-        rel_path = arguments.get("path", "")
+        rel_path = arguments.get("file_path", "")
         old_string = arguments.get("old_string", "")
         new_string = arguments.get("new_string", "")
         replace_all = bool(arguments.get("replace_all", False))
@@ -681,7 +688,7 @@ class StrReplaceTool:
             )
 
         if not rel_path:
-            return _error("path 不能为空：请提供工作区内的相对文件路径", start)
+            return _error("file_path 不能为空：请提供工作区内的相对文件路径", start)
 
         from .user_rules import maybe_user_rule_str_replace
 
@@ -702,13 +709,13 @@ class StrReplaceTool:
         rel_path, rename_note = prepared
 
         scope_denied = _reject_write_scope(
-            context, rel_path, start, event="str_replace.scope_rejected"
+            context, rel_path, start, event="edit.scope_rejected"
         )
         if scope_denied is not None:
             return scope_denied
 
         denied, release_on_fail = _claim_write_path(
-            context, rel_path, event="str_replace.collision", start=start
+            context, rel_path, event="edit.collision", start=start
         )
         if denied is not None:
             return denied

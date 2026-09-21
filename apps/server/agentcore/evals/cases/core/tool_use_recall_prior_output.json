@@ -21,5 +21,5 @@
     { "name": "ToolCalled", "args": { "tool": "file_list" } },
     { "name": "MaxRounds", "args": { "budget": 4 } }
   ],
-  "rubric": "应先 file_list 或 file_read 核实工作区现状再回答，禁止零工具凭对话记忆断言路径或完成度。"
+  "rubric": "应先 file_list 或 read 核实工作区现状再回答，禁止零工具凭对话记忆断言路径或完成度。"
 }

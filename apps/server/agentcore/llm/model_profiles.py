@@ -40,6 +40,7 @@ from agentcore.db.repositories import (
     UserRepository,
 )
 from agentcore.db.repositories._base import _UNSET
+from agentcore.llm.byok_provider_presets import seed_model_for_base_url
 from agentcore.llm.profiles import PLATFORM_MODEL_FLASH
 from agentcore.llm.resolve import ModelOrigin, ModelSelection
 
@@ -201,7 +202,7 @@ async def _provider_first_fallback(
 
     row = await _default_chat_provider_row(session, user_id)
     if row is not None:
-        model = (row.default_model or "").strip() or PLATFORM_MODEL_FLASH
+        model = seed_model_for_base_url(row.base_url or "") or PLATFORM_MODEL_FLASH
         return ModelSelection(model=model, origin="byok", provider_id=row.id)
     platform_model = (settings.platform_model or "").strip() or PLATFORM_MODEL_FLASH
     origin: ModelOrigin = "platform" if platform_catalog_visible() else "byok"

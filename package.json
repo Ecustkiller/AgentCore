@@ -9,8 +9,6 @@
   "scripts": {
     "conformance": "pnpm -r run conformance",
     "gen:types": "node scripts/gen-types.mjs",
-    "sync:legal": "node scripts/sync-legal-md.mjs",
-    "sync:legal:check": "node scripts/sync-legal-md.mjs --check",
     "sync:manual-corpus": "node scripts/sync-manual-corpus.mjs",
     "sync:manual-corpus:check": "node scripts/sync-manual-corpus.mjs --check",
     "check:doc-sections": "node scripts/check-doc-section-pointers.mjs",

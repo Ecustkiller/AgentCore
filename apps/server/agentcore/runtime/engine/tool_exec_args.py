@@ -52,7 +52,7 @@ _TOOL_ERROR_REASON_MAX = 200
 _SHELL_OBSERVE_TOOLS = frozenset({"run", "host"})
 _SHELL_COMMAND_PREVIEW_MAX = 160
 _SHELL_CWD_PREVIEW_MAX = 80
-_URL_OBSERVE_TOOLS = frozenset({"web_fetch", "download_url"})
+_URL_OBSERVE_TOOLS = frozenset({"web_fetch"})
 _URL_PREVIEW_MAX = 200
 
 
@@ -94,7 +94,7 @@ def _short_tool_error_reason(text: str, *, limit: int = _TOOL_ERROR_REASON_MAX) 
 
 
 def _url_observe_log_fields(name: str, args: Any) -> dict[str, Any]:
-    """``url`` / ``host`` for web_fetch / download_url execute_* logs."""
+    """``url`` / ``host`` for web_fetch execute_* logs."""
     if name not in _URL_OBSERVE_TOOLS or not isinstance(args, dict):
         return {}
     raw = args.get("url")
@@ -118,7 +118,7 @@ def _shell_observe_log_fields(name: str, args: Any) -> dict[str, Any]:
 
     CEO 可持 run/host，落盘不进 ``file_products``；查询时靠 preview + action
     由人判断是否写了工作区。命令可能含 token / key，故先 ``redact_secrets`` 再 clip。
-    ``web_fetch`` / ``download_url`` 带 url/host，对照 in_flight 挂起用。
+    ``web_fetch`` 带 url/host，对照 in_flight 挂起用。
     """
     if not isinstance(args, dict):
         return {}
@@ -314,9 +314,9 @@ def _strategy_for_args_parse(tool_name: str, parse_class: ArgsParseClass) -> str
             else "【策略】这通常是整篇正文塞进一次工具调用导致的转义失败——"
         )
         return (
-            trunc_hint + "不要原样重发整段导致再次截断；可一次更短但完整的 file_write"
-            "或用 str_replace 在唯一锚（含写回执 end_preview）后续写"
-            "（每节远小于一次输出上限）；成篇后修订用 str_replace。"
+            trunc_hint + "不要原样重发整段导致再次截断；可一次更短但完整的 write"
+            "或用 edit 在唯一锚（含写回执 end_preview）后续写"
+            "（每节远小于一次输出上限）；成篇后修订用 edit。"
             "勿向用户讲解 JSON 引号转义。"
         )
     if tool_name in _ORCH_PARSE_TOOLS:

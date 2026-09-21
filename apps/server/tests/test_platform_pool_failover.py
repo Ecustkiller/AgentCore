@@ -133,7 +133,7 @@ def _patch_client_factory(monkeypatch, handler) -> None:
         )
 
     monkeypatch.setattr(
-        "agentcore.llm.provider.openai_compatible.outbound_async_client",
+        "agentcore.llm.http_pool.outbound_async_client",
         factory,
     )
 

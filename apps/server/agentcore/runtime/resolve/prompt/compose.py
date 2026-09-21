@@ -14,7 +14,6 @@ from agentcore.runtime.resolve.profile import (
 )
 from agentcore.runtime.resolve.prompt.base import (
     _DEFAULT_SYSTEM_PROMPT,
-    render_runtime_date_block,
 )
 from agentcore.runtime.resolve.prompt.ceo_core import _CEO_CORE_HINT
 from agentcore.runtime.resolve.prompt.memory_rules import _format_rules
@@ -33,10 +32,8 @@ def assemble_system_prompt(
     block. This base prompt is shared by the CEO
     chat agent and the delegated workers (runs/executor/), so both reach every agent.
 
-    Per-turn ``<运行时>`` / ``<工作区>`` are NOT in this base. Workers add both on
-    :func:`compose_worker_base_prompt`. CEO date + workspace ride the turn envelope
-    (:func:`~agentcore.runtime.resolve.prompt.envelope.render_ceo_turn_envelope`),
-    not ``role: system``.
+    Per-turn ``<运行时>`` / ``<工作区>`` are NOT in this base. Workers and CEO
+    both put them on a ``[系统提示]`` envelope (opening user), not ``role: system``.
 
     Sections are stitched by :class:`ContextAssembler` (上下文注入统一): base →
     memory <设定> → attachment context, joined with "\n". Empty
@@ -69,14 +66,15 @@ def assemble_system_prompt(
 def _on_demand_preamble(*, with_summaries: bool) -> list[str]:
     """Shared intro lines for ``<按需目录>`` (CEO and worker both get name＋摘要).
 
-    The preamble states ONLY that this is the on-demand catalog and how to pull
-    full text. WHEN / deferred-tool promotion / family enable live in the consult
-    tool description. Kinds are section headings, not preamble.
+    The preamble states this is the on-demand catalog, how to pull full text, and
+    that a catalog row is not a completed consult. WHEN / deferred-tool promotion /
+    family enable live in the consult tool description. Kinds are section headings,
+    not preamble.
     """
     detail = "name＋一行摘要" if with_summaries else "name"
     return [
         "<按需目录>",
-        f"这是按需目录（{detail}）。用 `consult(name)` 拉全文。",
+        f"这是按需目录（{detail}）。用 `consult(name)` 拉全文。目录行 ≠ 已查阅。",
     ]
 
 
@@ -84,7 +82,6 @@ _SECTION_HEADINGS: tuple[tuple[str, str], ...] = (
     ("skill", "能力指引"),
     ("tool", "低频工具"),
     ("rule", "设定"),
-    ("memory", "主题"),
 )
 
 
@@ -179,8 +176,9 @@ def render_on_demand_directory(
 ) -> str:
     """Render the unified ``<按需目录>`` block (name＋摘要；production always on).
 
-    Returns "" when empty so the caller appends nothing (directory↔tool: only when
-    ``consult`` is wired this turn). Entries must come from the same
+    Returns "" when empty so the caller appends nothing. ``consult`` stays on the
+    opening table even when this block is omitted (empty catalog is a soft miss).
+    Entries must come from the same
     :class:`~agentcore.runtime.context.consult_sources.MergedConsultSource` the tool holds.
     ``with_summaries=False`` remains a test/compat switch — workers no longer use it.
     Grouped headings appear only when entries carry ``section``; unsectioned
@@ -246,32 +244,31 @@ def compose_worker_base_prompt(
     shared_base: str,
     *,
     on_demand_entries: Sequence[ConsultDirectoryEntry] = (),
+    # Deprecated kwargs: date / workspace / attachments ride the worker envelope.
     attachment_context: str | None = None,
     workspace_context: str | None = None,
-    # Deprecated kwargs kept so older call sites / tests fail loudly if still passed
-    # with old semantics — prefer ``on_demand_entries``.
-    memory_topics: Sequence[object] = (),
+    # Deprecated: prefer ``on_demand_entries``. Tests still pass ``on_demand_rules``.
     on_demand_rules: Sequence[object] = (),
 ) -> str:
-    """Build the delegated worker's system prompt from the shared base.
+    """Build the delegated worker's frozen ``role: system``.
 
-    Layers date (``<运行时>``), the same ``<按需目录>`` (name＋摘要) the CEO sees when
-    ``on_demand_entries`` is non-empty, then per-turn workspace facts, then the
-    attachment block last (缓存友好). CEO date + workspace live in the turn envelope
-    instead; workers keep both in system this slice. Summaries are the existing
-    ``description`` / skill ``summary`` strings — this does not rewrite them.
+    Shared base + the same ``<按需目录>`` (name＋摘要) the CEO sees when
+    ``on_demand_entries`` is non-empty. Date, workspace, and attachments ride
+    :func:`~agentcore.runtime.resolve.prompt.envelope.render_worker_turn_envelope`
+    on the opening user message. ``attachment_context`` / ``workspace_context``
+    are ignored here so a missed call site cannot splice them back into system.
     """
+    del attachment_context, workspace_context
     if on_demand_entries:
         entries = on_demand_entries
-    elif memory_topics or on_demand_rules:
-        # Legacy bridge: convert old topic/rule lists (tests mid-migration).
+    elif on_demand_rules:
         entries = [
             ConsultDirectoryEntry(
                 name=getattr(t, "name", str(t)),
                 summary=getattr(t, "summary", "") or "",
-                section="memory" if t in memory_topics else "rule",
+                section="rule",
             )
-            for t in (*memory_topics, *on_demand_rules)
+            for t in on_demand_rules
         ]
     else:
         entries = ()
@@ -279,10 +276,7 @@ def compose_worker_base_prompt(
     return (
         ContextAssembler()
         .add("shared_base", shared_base, SectionOrder.BASE)
-        .add("runtime_context", render_runtime_date_block(), SectionOrder.RUNTIME_CONTEXT)
         .add("on_demand_directory", on_demand_block, SectionOrder.SKILL_DIRECTORY)
-        .add("workspace_facts", workspace_context, SectionOrder.WORKSPACE_FACTS)
-        .add("attachment_context", attachment_context, SectionOrder.ATTACHMENT)
         .observe(scope="worker_base", soft_cap=settings.prompt_budget_char_soft_cap)
         .render()
     )
@@ -293,15 +287,15 @@ def compose_ceo_chat_prompt(
     *,
     ceo_tool_names: set[str],
     on_demand_entries: Sequence[ConsultDirectoryEntry] = (),
-    # Deprecated: skill_registry / memory_topics / on_demand_rules — prefer on_demand_entries.
+    # Deprecated: skill_registry / on_demand_rules — prefer on_demand_entries.
     skill_registry: object | None = None,
-    memory_topics: Sequence[object] = (),
     on_demand_rules: Sequence[object] = (),
 ) -> str:
     """Compose the frozen CEO system prompt from the clean base.
 
-    Layers the entry coordinator's residual identity (empty unless proven) + unified ``<按需目录>`` (only when
-    ``consult`` is wired). Date, workspace (+ CEO file index), scene gates,
+    Layers the entry coordinator's residual identity (empty unless proven) + unified
+    ``<按需目录>`` (omitted when the catalog is empty; ``consult`` stays on the
+    opening table). Date, workspace (+ CEO file index), scene gates,
     attachments, table, and the source ledger ride the turn envelope — not this
     string. ``on_demand_entries`` must match the tool's merged source.
     Host / terminal / browser / grant HOW is consult-owned and must not
@@ -315,9 +309,9 @@ def compose_ceo_chat_prompt(
             ConsultDirectoryEntry(
                 name=getattr(t, "name", str(t)),
                 summary=getattr(t, "summary", "") or "",
-                section="memory" if t in memory_topics else "rule",
+                section="rule",
             )
-            for t in (*memory_topics, *on_demand_rules)
+            for t in on_demand_rules
         ]
         # Test / catalog bridge: skills from registry when no merged entries passed.
         if skill_registry is not None and hasattr(skill_registry, "available"):

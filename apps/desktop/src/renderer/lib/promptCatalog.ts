@@ -3,11 +3,6 @@ import type {
   CapabilitySkill,
   CapabilityTool,
 } from "@/services/capabilities";
-import {
-  GLOBAL_PREFERENCES_PATH,
-  GLOBAL_PROFILE_PATH,
-  parseProjectMemoryFolderId,
-} from "@/services/sources/memorySource";
 
 export type PromptCatalogGroupId = "always" | "on_demand";
 
@@ -53,7 +48,6 @@ export type PromptCatalogItem =
       version: string;
       applyMode: "always" | "on_demand";
       aiMaintained: boolean;
-      memoryKind: "preferences" | "profile" | null;
       listable: boolean;
       disputed: boolean;
       /** Chars this entry contributes to the always pool; null when not always. */
@@ -102,7 +96,6 @@ const TOOL_FACE_ORDER = [
   "web",
   "execution",
   "host_browser",
-  "board",
   "table",
   "doc",
   "orchestration",
@@ -193,46 +186,6 @@ export function mineCatalogId(id: string): string {
   return `mine:${id}`;
 }
 
-export function placeholderCatalogId(kind: "preferences" | "profile"): string {
-  return `placeholder:${kind}`;
-}
-
-/** Location state when a conversation card / feed row should land on a「我的」entry. */
-export interface PromptCatalogLocationState {
-  openMineLeaf?: string;
-}
-
-const GLOBAL_TOPIC_RE = /^global\/topics\/(.+)$/;
-
-/** Map a global memory-leaf path to the matching「我的」catalog row, or null. */
-export function catalogIdForMemoryTarget(
-  target: string,
-  items: readonly PromptCatalogItem[],
-): string | null {
-  if (!target) return null;
-  if (parseProjectMemoryFolderId(target)) return null;
-  const mine = items.filter(
-    (item): item is Extract<PromptCatalogItem, { kind: "mine" }> =>
-      item.kind === "mine",
-  );
-  if (target === GLOBAL_PREFERENCES_PATH) {
-    return mine.find((row) => row.memoryKind === "preferences")?.id ?? null;
-  }
-  if (target === GLOBAL_PROFILE_PATH) {
-    return mine.find((row) => row.memoryKind === "profile")?.id ?? null;
-  }
-  const topic = GLOBAL_TOPIC_RE.exec(target);
-  const leafName = topic
-    ? topic[1]
-    : (target.split("/").pop()?.replace(/\.md$/i, "") ?? "");
-  if (!leafName) return null;
-  return (
-    mine.find(
-      (row) => row.label === leafName || row.label === displayName(leafName),
-    )?.id ?? null
-  );
-}
-
 export interface OverlayMineRow {
   id: string;
   name: string;
@@ -260,33 +213,16 @@ export interface MineCatalogRow {
   version: string;
   applyMode: "always" | "on_demand";
   aiMaintained: boolean;
-  memoryKind: "preferences" | "profile" | null;
   listable: boolean;
   disputed: boolean;
   alwaysChars: number | null;
   parentId: string | null;
 }
 
-const CORE_LEAVES: {
-  name: string;
-  memoryKind: "preferences" | "profile";
-}[] = [
-  { name: "偏好.md", memoryKind: "preferences" },
-  { name: "画像.md", memoryKind: "profile" },
-];
+const RETIRED_CORE_NAMES = new Set(["偏好.md", "画像.md"]);
 
 function displayName(name: string): string {
   return name.replace(/\.md$/i, "");
-}
-
-function memoryKindFor(
-  name: string,
-  aiMaintained: boolean,
-): "preferences" | "profile" | null {
-  if (!aiMaintained) return null;
-  if (name === "偏好.md") return "preferences";
-  if (name === "画像.md") return "profile";
-  return null;
 }
 
 function isListableEntry(entry: {
@@ -300,7 +236,6 @@ function isListableEntry(entry: {
 }
 
 function mineItemCatalogId(row: MineCatalogRow): string {
-  if (!row.id && row.memoryKind) return placeholderCatalogId(row.memoryKind);
   return mineCatalogId(row.id);
 }
 
@@ -319,7 +254,6 @@ function toMineCatalogItem(
     version: row.version,
     applyMode: row.applyMode,
     aiMaintained: row.aiMaintained,
-    memoryKind: row.memoryKind,
     listable: row.listable,
     disputed: row.disputed,
     alwaysChars: row.alwaysChars,
@@ -334,7 +268,7 @@ export function buildMineCatalogRows(
 ): MineCatalogRow[] {
   const overlayById = new Map(overlayMine.map((row) => [row.id, row]));
   const byId = new Map<string, MineCatalogRow>();
-  const coreNames = new Set(CORE_LEAVES.map((leaf) => leaf.name));
+  const coreNames = RETIRED_CORE_NAMES;
 
   for (const doc of scopeEntries) {
     if (doc.aiMaintained && coreNames.has(doc.name)) continue;
@@ -350,7 +284,6 @@ export function buildMineCatalogRows(
       version: overlay?.version ?? "",
       applyMode,
       aiMaintained,
-      memoryKind: memoryKindFor(doc.name, aiMaintained),
       listable: isListableEntry({ applyMode, aiMaintained, disputed }),
       disputed,
       alwaysChars: doc.alwaysChars,
@@ -368,7 +301,6 @@ export function buildMineCatalogRows(
       version: overlay.version,
       applyMode: "on_demand",
       aiMaintained: false,
-      memoryKind: null,
       listable: true,
       disputed: false,
       alwaysChars: null,
@@ -395,18 +327,16 @@ export interface PromptRailFolder {
 export interface PromptRail {
   /** 全员准则 — product constitution, read-only. */
   constitution: PromptCatalogItem[];
-  /** Retired AI memory cores; always empty. User rules live in alwaysMine. */
-  memory: PromptCatalogItem[];
   /** User-written always files; dragging to 按需 turns them on-demand. */
   alwaysMine: PromptCatalogItem[];
   folders: PromptRailFolder[];
   official: PromptCatalogItem[];
-  /** Factory tools; the overview splits this list by `tool.resident` into 常驻 / 按需. */
+  /** Factory tools stay on the rail for flatten/read; 官方栏「工具」铺 CatalogTile. */
   tools: Extract<PromptCatalogItem, { kind: "tool" }>[];
 }
 
 export function promptRailAlways(rail: PromptRail): PromptCatalogItem[] {
-  return [...rail.constitution, ...rail.memory, ...rail.alwaysMine];
+  return [...rail.constitution, ...rail.alwaysMine];
 }
 
 /** Dropping on the 按需 zone (not a named 夹) lands in 其他. */
@@ -439,7 +369,7 @@ function bucketItems(map: Map<string, PromptCatalogItem[]>, key: string) {
   return next;
 }
 
-/** 常驻 = constitution + user always + resident tools; 用户夹 / 官方 HOW / 查阅后启用工具 = 按需. 产品件用卡右上「官方」，不另起出厂项壳. */
+/** 必带 = constitution + user always；用户夹 = 按需. 官方 HOW / 出厂工具收在 rail 上，概览铺货架卡. */
 export function buildPromptRail(
   data: Capabilities,
   mine: MineCatalogRow[],
@@ -511,7 +441,6 @@ export function buildPromptRail(
 
   return {
     constitution: standing,
-    memory: [],
     alwaysMine,
     folders: result,
     official,

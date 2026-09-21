@@ -122,7 +122,7 @@ def _inject_witness_into_events(events: list) -> list:
 
 
 def _enrich_mlr_acts_positive() -> list:
-    """以 mlr_debate_acts 为骨，补齐六环所需事件（ask / 约定文档 file_read / 证人）。"""
+    """以 mlr_debate_acts 为骨，补齐六环所需事件（ask / 约定文档 read / 证人）。"""
     base = list(_multi_agent_mlr_debate_acts())
     head = [
         message_start("m0", conversation_id="conv_golden"),
@@ -144,14 +144,14 @@ def _enrich_mlr_acts_positive() -> list:
     dossier_tools = [
         tool_use_start(
             "fr1",
-            "file_read",
-            {"path": "AgentCore/文档/research/汇总与命题卡.md"},
+            "read",
+            {"file_path": "AgentCore/文档/research/汇总与命题卡.md"},
             run_id="debate_mod_act2_r1_pro",
         ),
         tool_use_start(
             "fr2",
-            "file_read",
-            {"path": "AgentCore/文档/research/法律透镜报告.md"},
+            "read",
+            {"file_path": "AgentCore/文档/research/法律透镜报告.md"},
             run_id="debate_mod_act2_r1_con",
         ),
         tool_use_start(
@@ -229,7 +229,7 @@ def test_negative_sample_fails_expected_rings():
     assert by[1].status == "FAIL"  # 超笼统无 ask
     assert by[2].status == "FAIL"  # 缺四透镜/文件/保真
     assert by[3].status == "FAIL"  # 无幕2 authorized_by=auto
-    assert by[5].status == "FAIL"  # 无 debate/ 双产物
+    assert by[5].status == "FAIL"  # 无 debate_result 四维骨架
     assert by[6].status == "N/A"  # 无幕2 辩论
 
 
@@ -319,7 +319,7 @@ def test_ring6_na_when_roster_empty():
 
 
 def test_mlr_debate_acts_vector_partial_pass_ring3_structure():
-    """mlr_debate_acts：环3 无推进卡事件 + authorized_by=auto；缺证人 → 环6 FAIL；缺约定文档 → 环2/5 FAIL。"""
+    """mlr_debate_acts：环3 无推进卡事件 + authorized_by=auto；缺证人 → 环6 FAIL；缺调研文件 → 环2 FAIL。环5 只认 debate_result 骨架，不认盘上 debate/。"""
     bundle = sse_events_to_bundle(
         _multi_agent_mlr_debate_acts(),
         user_prompt=_TOPIC,
@@ -330,9 +330,8 @@ def test_mlr_debate_acts_vector_partial_pass_ring3_structure():
     assert by[3].checks["stage_card_required"] == 0
     assert by[3].checks["stage_card_resolved"] == 0
     assert by[3].checks["authorized_by"] == "auto"
-    # 无工作区文件 → 环2/5 FAIL；有透镜+辩论无证人 → 环6 FAIL
     assert by[2].status == "FAIL"
-    assert by[5].status == "FAIL"
+    assert by[5].status == "PASS"
     assert by[6].status == "FAIL"
 
 

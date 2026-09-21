@@ -21,7 +21,7 @@ from agentcore.llm.provider.protocol import TokenUsage
 
 
 def _fw(path: str, content: str) -> tuple[str, str]:
-    return ("file_write", json.dumps({"path": path, "content": content}, ensure_ascii=False))
+    return ("write", json.dumps({"file_path": path, "content": content}, ensure_ascii=False))
 
 
 # --- artifacts 还原 -----------------------------------------------------------
@@ -33,8 +33,8 @@ def test_artifacts_from_tool_calls_last_write_wins_per_path():
         ("web_search", '{"query": "x"}'),
         _fw("b.md", "only-b"),
         _fw("a.md", "final-a"),  # 同 path 末次覆盖
-        ("file_write", "{not json}"),  # 坏 JSON 跳过
-        ("file_write", json.dumps({"path": "c.md"})),  # 无 content 跳过
+        ("write", "{not json}"),  # 坏 JSON 跳过
+        ("write", json.dumps({"file_path": "c.md"})),  # 无 content 跳过
     ]
     assert artifacts_from_tool_calls(calls) == {"a.md": "final-a", "b.md": "only-b"}
 

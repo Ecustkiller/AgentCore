@@ -827,7 +827,7 @@ def test_window_folds_note_as_user_message_in_order():
 def test_window_scopes_to_captain_ignoring_worker_facts():
     # A delegated turn: worker facts interleave during the captain's delegate call. The
     # captain window must contain ONLY the captain's assistant(delegate) + the delegate
-    # result — the worker's own assistant (different run_id) and its file_write tool
+    # result — the worker's own assistant (different run_id) and its write tool
     # (different tool_call_id) are excluded, proving run-scope + tool_call_id pairing.
     entries = [
         _started(system_prompt="SYS", user_message="build it"),
@@ -836,7 +836,7 @@ def test_window_scopes_to_captain_ignoring_worker_facts():
         _fact("tool_use_start", {"tool_call_id": "d1", "tool_name": "delegate"}),
         # --- worker runs inside the delegate call ---
         _boundary(run_id="w1", round_idx=0, role="worker"),
-        _llm(run_id="w1", round_idx=0, tool_calls=[_tc("fw", "file_write", "{}")]),
+        _llm(run_id="w1", round_idx=0, tool_calls=[_tc("fw", "write", "{}")]),
         _tool_call("fw", "written", run_id="w1"),
         _boundary(run_id="w1", round_idx=1, role="worker"),
         _llm(run_id="w1", round_idx=1, content="worker done"),
@@ -876,7 +876,7 @@ def test_window_scopes_to_captain_ignoring_worker_facts():
             ToolCall(
                 id="fw",
                 type="function",
-                function=ToolCallFunction(name="file_write", arguments="{}"),
+                function=ToolCallFunction(name="write", arguments="{}"),
             )
         ],
         reasoning_content=None,
@@ -898,7 +898,7 @@ def test_window_worker_run_head_not_turn_started():
             user_message="## 你的任务\n写文件",
         ),
         _boundary(run_id="w1", round_idx=0, role="worker"),
-        _llm(run_id="w1", round_idx=0, tool_calls=[_tc("fw", "file_write", "{}")]),
+        _llm(run_id="w1", round_idx=0, tool_calls=[_tc("fw", "write", "{}")]),
         _tool_call("fw", "written", run_id="w1"),
         _tool_call("d1", "team product"),
     ]
@@ -913,7 +913,7 @@ def test_window_worker_run_head_not_turn_started():
                 ToolCall(
                     id="fw",
                     type="function",
-                    function=ToolCallFunction(name="file_write", arguments="{}"),
+                    function=ToolCallFunction(name="write", arguments="{}"),
                 )
             ],
             reasoning_content=None,

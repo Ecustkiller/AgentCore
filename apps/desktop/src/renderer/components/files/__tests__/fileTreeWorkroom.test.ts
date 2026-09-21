@@ -56,15 +56,14 @@ describe("withVirtualAgentCore", () => {
 });
 
 describe("watchDirsForExpanded", () => {
-  it("展开 .agentcore 时覆盖被摊平的 AgentCore/文档", () => {
+  it("展开 .agentcore 时只 watch 根 + AgentCore", () => {
     expect(watchDirsForExpanded(new Set(["AgentCore"]))).toEqual([
       "",
       "AgentCore",
-      "AgentCore/文档",
     ]);
   });
 
-  it("未展开约定根时不加 文档", () => {
+  it("未展开约定根时不加 AgentCore", () => {
     expect(watchDirsForExpanded(new Set(["docs"]))).toEqual(["", "docs"]);
   });
 });

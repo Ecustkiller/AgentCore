@@ -150,15 +150,6 @@ def _unregister_named(chat_tools: ToolRegistry, names: tuple[str, ...]) -> list[
     return removed
 
 
-EXPLORE_PROFILE_TOOL = "update_folder_profile"
-
-
-def apply_explore_profile_surface(chat_tools: ToolRegistry, *, pending: bool) -> None:
-    """``update_folder_profile`` is never on the live CEO table."""
-    del pending
-    _unregister_named(chat_tools, (EXPLORE_PROFILE_TOOL,))
-
-
 def register_coordination_surface(
     chat_tools: ToolRegistry,
     *,

@@ -95,12 +95,12 @@ _LOOPBACK_REROUTE_HINT = (
     "② 用 terminal 在用户本机跑 `curl -sS <url>` 取内容。"
     "两者都不可用时，请用户把页面内容贴过来。"
 )
-# 工作区路径 / file:// / 盘符误喂 web_fetch：同构 loopback——工具没坏，换 file_read
+# 工作区路径 / file:// / 盘符误喂 web_fetch：同构 loopback——工具没坏，换 read
 # 就能做。贴收口话术会让模型放弃一次本可完成的读文件；补 https:// 会去抓公网
 # （文件夹名长得像域名时更糟，例如工作区 `_scratch/zoogame.cc/`）。
 _NOT_A_WEB_URL_REROUTE_HINT = (
     "。web_fetch 只接受 http/https 公网网页，不是读工作区文件的工具："
-    "工作区相对路径、file://、盘符请改用 file_read(path=相对路径)。"
+    "工作区相对路径、file://、盘符请改用 read(file_path=相对路径)。"
     "不要给本参数补 https:// 再调 web_fetch——那会去抓公网，读不到工作区文件。"
 )
 
@@ -134,7 +134,7 @@ def _query_len(url: str) -> int:
 class BlockedRedirectError(ValueError):
     """A hop failed the per-hop SSRF re-check in :func:`_safe_request`.
 
-    Stays a ``ValueError`` with the original message so ``download_url``'s prefix branch
+    Stays a ``ValueError`` with the original message so callers' prefix branch
     keeps working; ``block`` carries the reason so the failure code is read off the
     classification instead of re-parsed from the text.
     """
@@ -243,7 +243,7 @@ def _loopback_refusal(reason: str, start: float) -> ToolResult:
 
 
 def _not_a_web_url_refusal(reason: str, start: float) -> ToolResult:
-    """Refuse a non-http(s) target with a file_read reroute instead of a stop-read.
+    """Refuse a non-http(s) target with a read reroute instead of a stop-read.
 
     Same posture as :func:`_loopback_refusal`: the tool is fine; this call used the
     wrong one. Must not spend run-breaker budget, and must not carry
@@ -461,6 +461,7 @@ class WebFetchTool:
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_BOTH,
         catalog_summary="把网址读成正文",
+        blurb="抓一个链接的页面文字回来",
     )
 
     @staticmethod
@@ -511,16 +512,13 @@ class WebFetchTool:
     def schema(self) -> ToolSchema:
         return ToolSchema(
             name="web_fetch",
-            description=(
-                "公网 http(s) 网页正文（web_search 摘要不够或须核对原文时再深读）。"
-                "工作区路径用 file_read。"
-            ),
+            description="公网 http(s) URL 的网页正文进上下文。",
             parameters={
                 "type": "object",
                 "properties": {
                     "url": {
                         "type": "string",
-                        "description": "http:// 或 https:// 公网地址。",
+                        "description": "公网 URL。",
                     },
                 },
                 "required": ["url"],

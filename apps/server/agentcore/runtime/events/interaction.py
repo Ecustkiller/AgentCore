@@ -80,7 +80,7 @@ def escalation_required(
     question: str,
     assumption: str,
     questions: list[dict[str, Any]] | None = None,
-    kind: str = "normal",
+    kind: str = "wait",
     awaiting: str = "user",
     ownership_paths: list[str] | None = None,
     lock_owner_run_id: str | None = None,
@@ -89,9 +89,7 @@ def escalation_required(
     """``question`` is the worker's headline ask; ``questions`` is the optional
     structured-fork list (同 ask_user 的 questions) the card renders as choice/text so
     the user one-taps a decision instead of free-typing. Journaled, so the structured
-    prompt replays inline on reload. ``kind`` is the escalate taxonomy
-    (normal / scope / dep), orthogonal to blocking. ``awaiting`` is ``user`` (经典可答卡)
-    or ``ceo`` (协调模式等主管仲裁，初始不作为用户可答卡).
+    prompt replays inline on reload. ``kind`` is wait / scope / dep（本事件几乎总是 wait）。
     ``ownership_paths`` / ``lock_owner_run_id``: write-lock conflict 结构化裁决（移交写权）。
     ``timeout_seconds``: the wall-clock ceiling this suspend actually got. ABSENT is the
     default deployment (D2 ``checkpoint_timeout_seconds=None``) = waits indefinitely, so a
@@ -105,7 +103,7 @@ def escalation_required(
         "question": question,
         "assumption": assumption,
         "questions": questions or [],
-        "kind": kind if kind in ("normal", "scope", "dep") else "normal",
+        "kind": kind if kind in ("wait", "scope", "dep") else "wait",
         "awaiting": who,
     }
     paths = [p for p in (ownership_paths or []) if isinstance(p, str) and p.strip()]

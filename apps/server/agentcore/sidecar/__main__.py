@@ -74,6 +74,9 @@ async def _serve(real_stdout: TextIO) -> None:
             break
         await server.handle_line(line)
     logger.info("sidecar.exiting")
+    from agentcore.llm.http_pool import aclose_llm_http_pool
+
+    await aclose_llm_http_pool()
 
 
 def main() -> None:

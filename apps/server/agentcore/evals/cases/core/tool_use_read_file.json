@@ -8,8 +8,8 @@
   "workspace_fixture": "sample_repo",
   "checks": [
     { "name": "FinishReason" },
-    { "name": "ToolCalled", "args": { "tool": "file_read" } },
-    { "name": "ToolArgsValid", "args": { "tool": "file_read", "required": ["path"] } },
+    { "name": "ToolCalled", "args": { "tool": "read" } },
+    { "name": "ToolArgsValid", "args": { "tool": "read", "required": ["file_path"] } },
     { "name": "MaxRounds", "args": { "budget": 5 } }
   ],
   "rubric": "概括是否基于文件真实内容（提到 TaskFlow / 任务管理），未脱离原文编造。"

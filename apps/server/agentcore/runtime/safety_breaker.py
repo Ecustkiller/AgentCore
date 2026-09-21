@@ -11,8 +11,8 @@ Permission presets (including ``full_trust``), delegation grants, and turn-wide
 「本轮放行」never override these rules. Aligns with Claude Code's practice that
 bypass mode still trips the circuit breaker.
 
-Git's hard-forbidden subcommand set lives here as the single source of truth;
-``tools.builtin.git_ops`` keeps its boundary behavior by importing that set.
+Git force / protected-branch / reset / clean rules live in the command-text
+deny table below. There is no structured git tool.
 """
 
 from __future__ import annotations
@@ -22,24 +22,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
-
-# ── Git hard-ban (single source for git_ops + breaker) ───────────────────────
-
-# Ordinary ``push`` is allowlisted (approval + CEO-delegate); force / protected
-# targets stay hard-denied below. reset/clean remain banned. Collaboration verbs
-# (stash/merge/rebase/…) are not on the git tool allowlist.
-GIT_FORBIDDEN_SUBCOMMANDS: frozenset[str] = frozenset({"reset", "clean"})
-GIT_PROTECTED_BRANCHES: frozenset[str] = frozenset({"main", "master"})
-
-
-def git_forbidden_subcommands() -> frozenset[str]:
-    """Subcommands the git tool hard-rejects (not grantable, not mode-dependent)."""
-    return GIT_FORBIDDEN_SUBCOMMANDS
-
-
-def git_protected_branches() -> frozenset[str]:
-    return GIT_PROTECTED_BRANCHES
-
 
 # ── Verdicts ────────────────────────────────────────────────────────────────
 
@@ -109,19 +91,6 @@ _DESTRUCTIVE_RULES: tuple[tuple[str, re.Pattern[str], str], ...] = (
         "检测到疑似格式化或写入块设备的命令（启发式兜底，并非完整拦截）。需人工确认后才能执行。",
     ),
     (
-        "destructive.git_force_push_protected",
-        re.compile(
-            r"(?i)git\s+push\b[^\n;|&]*"
-            r"(?:--force(?:-with-lease)?\b|(?<![-\w])-f(?![-\w]))"
-            r"[^\n;|&]*\b(?:main|master)\b"
-            r"|"
-            r"git\s+push\b[^\n;|&]*\b(?:main|master)\b[^\n;|&]*"
-            r"(?:--force(?:-with-lease)?\b|(?<![-\w])-f(?![-\w]))"
-        ),
-        "检测到疑似向 main/master 强制推送的命令（启发式兜底，并非完整拦截）。"
-        "已硬拒，不可由权限模式或本轮放行放开；请改用功能分支或在本机终端手动处理。",
-    ),
-    (
         "destructive.shutdown",
         re.compile(
             r"(?i)(?:^|[\s;&|`(])"
@@ -149,12 +118,17 @@ FUSE_ALIGNED_DENY_RULE_IDS: frozenset[str] = frozenset(
 # Shell/command text rules that hard-deny (not FORCE_APPROVAL). Distinct from
 # fuse⊆DENY: applies on terminal / code_execute / test_run / host(action=shell) alike.
 _TEXT_DENY_RULE_IDS: frozenset[str] = frozenset(
-    {"destructive.git_force_push_protected"}
+    {
+        "destructive.git_force_push_protected",
+        "destructive.git_force_push",
+        "destructive.git_reset_or_clean",
+        "destructive.git_push_protected",
+    }
 )
 
 _HOST_SHELL_FUSE_DENY_REASON = (
-    "检测到疑似毁灭性命令，且与 host(action=shell) 执行侧熔断重叠（启发式兜底，并非完整拦截）。"
-    "已硬拒，不可由权限模式或本轮放行放开；请缩小命令范围或改用结构化 host action。"
+    "检测到疑似毁灭性命令，且与 host 执行侧熔断重叠（启发式兜底，并非完整拦截）。"
+    "已硬拒，不可由权限模式或本轮放行放开；请缩小命令范围。"
 )
 
 
@@ -326,6 +300,15 @@ def scan_destructive_text(text: str) -> BreakerHit | None:
     """Scan free-form command/code text for catastrophic patterns."""
     if not text or not text.strip():
         return None
+    from agentcore.runtime.command_policy import git_command_deny
+
+    denied = git_command_deny(text)
+    if denied is not None:
+        return BreakerHit(
+            verdict=BreakerVerdict.DENY,
+            rule_id=denied.rule_id,
+            reason=denied.reason,
+        )
     for rule_id, pattern, reason in _DESTRUCTIVE_RULES:
         if pattern.search(text):
             verdict = (
@@ -396,20 +379,12 @@ def _command_text_for_tool(tool_name: str, arguments: dict[str, Any]) -> str:
             str(arguments.get("code") or ""),
         ]
         return "\n".join(p for p in parts if p)
-    if tool_name == "git":
-        # Extra surface if shell wrappers somehow call through — primary ban is
-        # still the allowed-subcommand list in git_ops.
-        sub = str(arguments.get("subcommand") or "").strip().lower()
-        branch = str(arguments.get("branch") or "")
-        return f"git {sub} {branch}".strip()
     return ""
 
 
 def _path_args_for_tool(tool_name: str, arguments: dict[str, Any]) -> list[str]:
-    if tool_name == "file_read":
-        return [str(arguments.get("path") or "")]
-    if tool_name in {"file_write", "str_replace"}:
-        return [str(arguments.get("path") or "")]
+    if tool_name in {"read", "write", "edit"}:
+        return [str(arguments.get("file_path") or "")]
     if tool_name == "grep":
         paths = [str(arguments.get("path") or "")]
         glob = str(arguments.get("glob") or "").strip()
@@ -421,58 +396,11 @@ def _path_args_for_tool(tool_name: str, arguments: dict[str, Any]) -> list[str]:
 
 def _write_content_for_secret_scan(tool_name: str, arguments: dict[str, Any]) -> str:
     """Body about to land on disk (heuristic secret gate; 案 image-gen B)."""
-    if tool_name == "file_write":
+    if tool_name == "write":
         return str(arguments.get("content") or "")
-    if tool_name == "str_replace":
+    if tool_name == "edit":
         return str(arguments.get("new_string") or "")
     return ""
-
-
-def _truthy_flag(value: Any) -> bool:
-    if value is True:
-        return True
-    if isinstance(value, (int, float)) and value != 0:
-        return True
-    return isinstance(value, str) and value.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _git_push_breaker_hit(args: dict[str, Any]) -> BreakerHit | None:
-    """DENY structured git push when force-like or protected-branch target is requested.
-
-    Ordinary feature-branch push returns ``None`` so approval / execute can proceed.
-    Current-branch main/master is also hard-rejected inside ``git_ops._cmd_push``.
-    """
-    force_tokens = {"-f", "--force", "--force-with-lease"}
-    remote = str(args.get("remote") or "").strip()
-    branch = str(args.get("branch") or "").strip()
-    refspec = str(args.get("refspec") or "").strip()
-    force_like = (
-        _truthy_flag(args.get("force"))
-        or _truthy_flag(args.get("force_with_lease"))
-        or _truthy_flag(args.get("forceWithLease"))
-        or remote in force_tokens
-        or branch in force_tokens
-    )
-    protected_target = branch.lower() in GIT_PROTECTED_BRANCHES
-    if refspec:
-        # Custom refspec is never an ordinary push (blocks ``feature:main`` bypass).
-        force_like = True
-        rhs = refspec.rsplit(":", 1)[-1].strip().lower()
-        # Strip common heads/ prefix noise.
-        rhs_name = rhs.rsplit("/", 1)[-1]
-        if rhs_name in GIT_PROTECTED_BRANCHES:
-            protected_target = True
-    if force_like or protected_target:
-        return BreakerHit(
-            verdict=BreakerVerdict.DENY,
-            rule_id="git.push_force_or_protected",
-            reason=(
-                "Git push 禁止 force（含 --force-with-lease），且禁止以 main/master"
-                " 为推送目标（硬拒，不可由权限模式或本轮放行放开）。"
-                "普通功能分支 push 需用户授权；无凭据/无 remote 时会失败。"
-            ),
-        )
-    return None
 
 
 def evaluate_tool_call(tool_name: str, arguments: dict[str, Any] | None) -> BreakerHit | None:
@@ -484,7 +412,7 @@ def evaluate_tool_call(tool_name: str, arguments: dict[str, Any] | None) -> Brea
     name = (tool_name or "").strip()
 
     # Sensitive path reads: templates allow; credentials ASK; key material DENY.
-    if name in {"file_read", "grep"}:
+    if name in {"read", "grep"}:
         for path in _path_args_for_tool(name, args):
             kind = classify_sensitive_path(path)
             if kind is SensitivePathClass.DENY:
@@ -501,7 +429,7 @@ def evaluate_tool_call(tool_name: str, arguments: dict[str, Any] | None) -> Brea
                 )
 
     # Sensitive writes + pasted-key content (案 20260803-image-gen-byok-egress-boundary B).
-    if name in {"file_write", "str_replace"}:
+    if name in {"write", "edit"}:
         for path in _path_args_for_tool(name, args):
             if classify_sensitive_path(path) is not SensitivePathClass.NONE:
                 return BreakerHit(
@@ -519,27 +447,7 @@ def evaluate_tool_call(tool_name: str, arguments: dict[str, Any] | None) -> Brea
                 reason=SECRET_WRITE_DENY_REASON,
             )
 
-    # Git hard-ban at the breaker layer (git_ops still enforces at execute).
-    if name == "git":
-        sub = str(args.get("subcommand") or "").strip().lower()
-        if sub in GIT_FORBIDDEN_SUBCOMMANDS or any(
-            pat in sub for pat in GIT_FORBIDDEN_SUBCOMMANDS
-        ):
-            return BreakerHit(
-                verdict=BreakerVerdict.DENY,
-                rule_id="git.forbidden_subcommand",
-                reason=(
-                    f"Git 子命令 '{sub}' 被硬禁清单拒绝（reset/clean 等不可由"
-                    "权限模式或本轮放行放开）。请改由用户在本机终端手动完成。"
-                ),
-            )
-        # Ordinary push may proceed to approval; force / protected-branch target DENY.
-        if sub == "push":
-            push_hit = _git_push_breaker_hit(args)
-            if push_hit is not None:
-                return push_hit
-
-    # Destructive text on execution / terminal / host(action=shell) surfaces.
+    # Destructive text on run / host command surfaces.
     # host shell: fuse-aligned families → DENY (方案 C). git force→main|master
     # text → DENY on all shell paths (scanner; fuse still does not scan git).
     # Ordinary push stays on the Host GRANTABLE axis. Other catastrophic shapes

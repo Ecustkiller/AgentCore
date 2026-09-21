@@ -7,7 +7,6 @@ import {
   type LucideIcon,
   Monitor,
   Network,
-  Presentation,
   Search,
   Table2,
   Terminal,
@@ -22,7 +21,6 @@ export const FACE_META: Record<ToolFace, { label: string; icon: LucideIcon }> =
     web: { label: "网络", icon: Globe },
     execution: { label: "执行", icon: Terminal },
     host_browser: { label: "本机 · 浏览器", icon: Monitor },
-    board: { label: "白板", icon: Presentation },
     table: { label: "表格", icon: Table2 },
     doc: { label: "文档", icon: FileText },
     orchestration: { label: "编排", icon: Network },
@@ -36,7 +34,6 @@ export const FACE_ORDER: ToolFace[] = [
   "web",
   "execution",
   "host_browser",
-  "board",
   "table",
   "doc",
   "orchestration",
@@ -49,10 +46,9 @@ export const APPROVAL_LABEL: Record<ToolApproval, string> = {
 
 export const RESIDENT_LABEL = {
   resident: "开场即用",
-  deferred: "查阅后启用",
 } as const;
 
-/** Shelf tag: this card is a factory tool, or consulting it enables tools. */
+/** Shelf tag: this card is a tool (factory or a plugged connector action). */
 export const PROMPT_TOOLS_TAG = "工具";
 
 /** Which side of the team holds a tool — the CEO coordinator, the 队员 (workers),

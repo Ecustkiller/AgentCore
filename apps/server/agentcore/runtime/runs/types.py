@@ -134,6 +134,15 @@ def raw_deliverable_expects_landing(raw: object) -> bool:
     return isinstance(dir_raw, str) and bool(dir_raw.strip())
 
 
+def task_raw_expects_landing(task: object) -> bool:
+    """Landing on a task dict: top-level ``artifacts`` or leftover nested deliverable."""
+    if not isinstance(task, dict):
+        return False
+    if raw_deliverable_expects_landing({"artifacts": task.get("artifacts")}):
+        return True
+    return raw_deliverable_expects_landing(task.get("deliverable"))
+
+
 @dataclass
 class RunPolicy:
     """Node-level policy slots.
@@ -227,7 +236,7 @@ class RunSpec:
     # the default lenient fan-in (≥1 success → run) and to ``require_upstream``.
     force_continue: bool = False
     # Wave3 B：开局从工作区注入这些相对路径的截断正文（契约/设计摘要），
-    # 减少分区 worker 对同文件的反复 file_read。空 = 不注入。
+    # 减少分区 worker 对同文件的反复 read。空 = 不注入。
     context_inject_files: list[str] = field(default_factory=list)
     # Strict fan-in: when True, every upstream must succeed (FAILED with
     # on_failure∈{skip, retry} or CANCELLED without force_continue → cascade-skip),
@@ -359,7 +368,7 @@ class RunState:
     # the run completed cleanly with no residual shortfall.
     delivery_gaps: list[dict[str, str]] = field(default_factory=list)
     # 向上升级（worker → CEO）: decisions / blockers this worker raised via the
-    # ``escalate`` tool — each ``{question, assumption, blocking}`` — harvested from the
+    # ``escalate`` tool — each ``{question, assumption, reason}`` — harvested from the
     # transcript when the run finishes (mirrors ``files_touched``). The DelegateTool
     # surfaces these PROMINENTLY in the CEO-facing aggregate so the CEO resolves them
     # (ask_user / revise / re-delegate) before finalizing. Distinct from ``warnings``:
@@ -493,7 +502,7 @@ class BatchMetrics:
     checkpoint_boundaries: int = 0  # leftover CHECKPOINT arm; stays 0
     # ── escalate 信号埋点 (raw → host derives scope 占比) ──
     escalations: int = 0  # total escalations harvested across THIS run's nodes
-    scope_escalations: int = 0  # of which carried kind=scope (deviation signal)
+    scope_escalations: int = 0  # of which carried reason=scope (deviation signal)
     # ── 多任务并行图 (并行时间线): per-node occupancy windows (offsets from wall start) ──
     # so the host can render real temporal parallelism. Dispatched nodes only (skipped
     # omitted); ordered by completion (the host sorts by start for display).

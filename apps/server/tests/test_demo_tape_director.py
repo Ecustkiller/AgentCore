@@ -480,8 +480,8 @@ async def test_player_burst_auto_resolves_approval(monkeypatch):
             "payload": {
                 "approval_id": "ap-src",
                 "tool_call_id": "tc-src",
-                "tool_name": "file_write",
-                "arguments": {"path": "x"},
+                "tool_name": "write",
+                "arguments": {"file_path": "x"},
             },
             "t_ms": 100,
         },

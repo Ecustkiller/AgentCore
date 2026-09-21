@@ -1,9 +1,9 @@
 """交付事实口径 (executor wiring): a worker that lands its deliverable ONLY through
 ``run`` (sandbox copy-out) satisfies ``requires_files`` — no wasted rewrite
-forcing it to regenerate the whole product via ``file_write``.
+forcing it to regenerate the whole product via ``write``.
 
 Reproduces the collab-graph waste: the product really landed (staging write-back), a
-downstream worker read it, but ``requires_files`` counted only ``file_write`` intents
+downstream worker read it, but ``requires_files`` counted only ``write`` intents
 and failed — burning a multi-thousand-token regeneration. The structured write-back
 channel makes the landing a fact the gate honours (and the CEO manifest inherits it).
 甲⁺：纯正文零落盘改为 soft-complete（warning），不再硬 FAILED。
@@ -126,14 +126,14 @@ async def test_requires_files_satisfied_by_code_execute_landing(tmp_path):
     # form=files satisfied by the run landing → no contract shortfall / retry.
     # 落在工作区根：收口认盘，不再发约定目录软提醒。
     assert state.warnings == []
-    assert provider.calls == 2  # no wasted regenerate-via-file_write round
+    assert provider.calls == 2  # no wasted regenerate-via-write round
     assert state.files_touched == ["report.md"]
     # CEO handoff manifest (collect_delivered_files reads files_touched) inherits it.
     assert collect_delivered_files(res) == ["report.md"]
 
 
 async def test_files_form_soft_completes_on_pure_prose_no_landing():
-    """甲⁺：无 run / file_write，仅散文；钉路径仍 soft-complete（form 已废，认 artifacts）。"""
+    """甲⁺：无 run / write，仅散文；钉路径仍 soft-complete（form 已废，认 artifacts）。"""
     plan, _ = build_run_plan(
         [
             {

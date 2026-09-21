@@ -463,7 +463,6 @@ async def test_finalize_cloud_settles_empty_error_with_error_code(monkeypatch):
     )
     monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", MetricsRepo)
     monkeypatch.setattr(cloud_mod, "persist_turn_journal", _persist_journal)
-    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
     monkeypatch.setattr(CloudStore, "clear_stream_segments", AsyncMock(return_value=None))
 
@@ -573,7 +572,6 @@ async def test_finalize_cloud_synthesizes_error_when_missing(monkeypatch):
     )
     monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", MetricsRepo)
     monkeypatch.setattr(cloud_mod, "persist_turn_journal", _persist_journal)
-    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
     monkeypatch.setattr(CloudStore, "clear_stream_segments", AsyncMock(return_value=None))
 
@@ -821,7 +819,6 @@ async def test_finalize_cloud_merges_error_into_incomplete_progressive_journal(
     )
     monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", MetricsRepo)
     monkeypatch.setattr(cloud_mod, "persist_turn_journal", _persist_journal)
-    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
     monkeypatch.setattr(CloudStore, "clear_stream_segments", AsyncMock(return_value=None))
 
@@ -912,7 +909,6 @@ async def test_finalize_cloud_keeps_existing_partial_on_empty_error(monkeypatch)
     )
     monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", MetricsRepo)
     monkeypatch.setattr(cloud_mod, "persist_turn_journal", AsyncMock())
-    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
     monkeypatch.setattr(CloudStore, "clear_stream_segments", AsyncMock(return_value=None))
 
@@ -1001,7 +997,6 @@ async def test_finalize_cloud_auto_snapshot_passes_folder_id(monkeypatch):
     )
     monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", MetricsRepo)
     monkeypatch.setattr(cloud_mod, "persist_turn_journal", AsyncMock())
-    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
     monkeypatch.setattr(CloudStore, "clear_stream_segments", AsyncMock(return_value=None))
     monkeypatch.setattr(settings, "workspace_snapshot_enabled", True)
@@ -1087,7 +1082,6 @@ async def test_finalize_cloud_auto_snapshot_failure_emits_sse(monkeypatch):
     )
     monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", MetricsRepo)
     monkeypatch.setattr(cloud_mod, "persist_turn_journal", AsyncMock())
-    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
     monkeypatch.setattr(CloudStore, "clear_stream_segments", AsyncMock(return_value=None))
     monkeypatch.setattr(settings, "workspace_snapshot_enabled", True)
@@ -1166,7 +1160,6 @@ async def test_finalize_local_settles_empty_error_with_error_code(monkeypatch):
     monkeypatch.setattr(cloud_mod, "ConversationRepository", ConvRepo)
     monkeypatch.setattr(cloud_mod, "persist_turn_journal", _persist_journal)
     monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", _NoopMetricsRepo)
-    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
     monkeypatch.setattr(
         cloud_mod, "build_provider", lambda *_a, **_k: SimpleNamespace(close=AsyncMock())
@@ -1257,7 +1250,6 @@ async def test_finalize_local_synthesizes_error_when_missing(monkeypatch):
     monkeypatch.setattr(cloud_mod, "ConversationRepository", ConvRepo)
     monkeypatch.setattr(cloud_mod, "persist_turn_journal", _persist_journal)
     monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", _NoopMetricsRepo)
-    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
     monkeypatch.setattr(
         cloud_mod, "build_provider", lambda *_a, **_k: SimpleNamespace(close=AsyncMock())
@@ -1344,7 +1336,6 @@ async def test_finalize_local_merges_error_into_incomplete_progressive_journal(
     monkeypatch.setattr(cloud_mod, "ConversationRepository", ConvRepo)
     monkeypatch.setattr(cloud_mod, "persist_turn_journal", _persist_journal)
     monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", _NoopMetricsRepo)
-    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
     monkeypatch.setattr(
         cloud_mod, "build_provider", lambda *_a, **_k: SimpleNamespace(close=AsyncMock())
@@ -1446,7 +1437,6 @@ async def test_finalize_local_keeps_existing_partial_on_empty_error(monkeypatch)
     monkeypatch.setattr(cloud_mod, "ConversationRepository", ConvRepo)
     monkeypatch.setattr(cloud_mod, "persist_turn_journal", AsyncMock())
     monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", _NoopMetricsRepo)
-    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
     monkeypatch.setattr(
         cloud_mod, "build_provider", lambda *_a, **_k: SimpleNamespace(close=AsyncMock())
@@ -1597,7 +1587,6 @@ async def test_finalize_local_fills_journal_via_persist(monkeypatch):
     monkeypatch.setattr(cloud_mod, "ConversationRepository", ConvRepo)
     monkeypatch.setattr(cloud_mod, "persist_turn_journal", fake_persist)
     monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", _NoopMetricsRepo)
-    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
 
     async def _run_bg(user_id, *, purpose="title", runner):
@@ -1756,7 +1745,6 @@ async def test_finalize_local_does_not_mint_followups(monkeypatch):
     monkeypatch.setattr(cloud_mod, "ConversationRepository", ConvRepo)
     monkeypatch.setattr(cloud_mod, "persist_turn_journal", AsyncMock())
     monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", _NoopMetricsRepo)
-    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
 
     result = await CloudStore().finalize(
@@ -1817,7 +1805,6 @@ async def test_finalize_local_end_turn_does_not_emit_stage_card(monkeypatch):
     monkeypatch.setattr(cloud_mod, "ConversationRepository", ConvRepo)
     monkeypatch.setattr(cloud_mod, "persist_turn_journal", AsyncMock())
     monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", _NoopMetricsRepo)
-    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
 
     result = await CloudStore().finalize(
@@ -1897,7 +1884,6 @@ async def test_finalize_local_skips_stage_when_not_end_turn(monkeypatch):
     monkeypatch.setattr(cloud_mod, "ConversationRepository", ConvRepo)
     monkeypatch.setattr(cloud_mod, "persist_turn_journal", AsyncMock())
     monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", _NoopMetricsRepo)
-    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
 
     result = await CloudStore().finalize(

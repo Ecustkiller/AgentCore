@@ -217,8 +217,12 @@ def test_folders_schema_and_registration():
     assert "name" not in props
     assert tool.schema.parameters["required"] == ["action"]
     path_desc = props["path"]["description"]
-    assert "精确" in path_desc
-    assert "子串" in path_desc
+    assert "POSIX" in path_desc
+    assert "云盘" in path_desc
+    assert "可唯一" in path_desc
+    assert "口述" not in path_desc
+    assert "精确" not in path_desc
+    assert "子串" not in path_desc
     assert "后缀" not in path_desc
     action_desc = props["action"]["description"]
     assert "list" in action_desc
@@ -335,8 +339,9 @@ async def test_list_folders_empty(monkeypatch: pytest.MonkeyPatch):
     # Empty roster: create is human-side; auto-desk covers write, not a tool.
     assert "自动建云文件夹" in result.output
     assert "过写盘闸" in result.output or "勿" in result.output
-    # Empty roster must not default-nudge open_local_project as the create path.
-    assert "勿默认催 open_local_project" in result.output or "先在云上做" in result.output
+    # Empty roster must not default-nudge a model open-folder action.
+    assert "open_local_project" not in result.output
+    assert "先在云上做" in result.output
     assert _FOLDER_HOW_CONSULT not in result.output
     assert "开发双仓" not in result.output
 
@@ -388,9 +393,9 @@ async def test_resolve_zero(monkeypatch: pytest.MonkeyPatch):
     assert "禁止静默猜" in result.output
     # Nested rosters: tell the model to check the level before giving up.
     assert "层级" in result.output
-    # Must not default-urge open_local_project as the create path (§4.9 ③A).
-    assert "新建本机项目才用 open_local_project" not in result.output
-    assert "open_local_project" in result.output or "先在云上做" in result.output
+    # Must not default-urge a model open-folder action as the create path.
+    assert "open_local_project" not in result.output
+    assert "先在云上做" in result.output
     assert "本机 scratch" in result.output or "先在云上做" in result.output
 
 
@@ -412,7 +417,7 @@ async def test_resolve_ambiguous(monkeypatch: pytest.MonkeyPatch):
     assert result.display["status"] == "ambiguous"
     assert result.display["match_count"] == 2
     assert "ask_user" in result.output
-    assert "kind=choice" in result.output
+    assert "options" in result.output
     assert "禁止静默猜" in result.output
     # Ambiguity is only actionable when the候选 carry their full path.
     assert "完整路径" in result.output

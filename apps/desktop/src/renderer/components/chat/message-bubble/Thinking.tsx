@@ -88,7 +88,7 @@ export function ThinkingPanel({
         onToggle={toggle}
       />
       {expanded && (
-        <div className="mt-1.5 min-w-0 max-w-full text-muted-foreground">
+        <div className="mt-2 min-w-0 max-w-full text-muted-foreground">
           <Markdown content={reasoning} isStreaming={isStreaming} muted />
         </div>
       )}

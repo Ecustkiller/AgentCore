@@ -103,7 +103,7 @@ def test_apply_escalation_gate_yuequan_report_is_silent():
     sink = _RecordingSink()
     gate_sink: list[dict] = []
     apply_escalation_gate(
-        attempts=[ToolAttempt("fp1", "file_write", success=True)],
+        attempts=[ToolAttempt("fp1", "write", success=True)],
         tool_results=[
             LLMMessage(
                 role="tool",
@@ -126,7 +126,7 @@ def test_apply_escalation_gate_scheme_flavored_output_is_silent():
     sink = _RecordingSink()
     gate_sink: list[dict] = []
     apply_escalation_gate(
-        attempts=[ToolAttempt("fp1", "file_write", success=False)],
+        attempts=[ToolAttempt("fp1", "write", success=False)],
         tool_results=[
             LLMMessage(role="tool", content="超出权限，需改接口契约", tool_call_id="c1")
         ],
@@ -169,7 +169,7 @@ def test_apply_escalation_gate_ignores_non_tool_attempt_objects():
     sink = _RecordingSink()
     gate_sink: list[dict] = []
     apply_escalation_gate(
-        attempts=[{"tool_name": "file_write", "success": False}],  # wrong type
+        attempts=[{"tool_name": "write", "success": False}],  # wrong type
         tool_results=[
             LLMMessage(role="tool", content="需求矛盾：A vs B", tool_call_id="c1")
         ],
@@ -184,13 +184,13 @@ def test_apply_escalation_gate_ignores_non_tool_attempt_objects():
 
 async def test_worker_react_loop_scheme_output_does_not_fill_gate_sink():
     tool = _OutputTool(
-        "file_write",
+        "write",
         "继续执行会破坏对外契约 / 改接口契约 / 越权",
         success=False,
     )
     provider = _ScriptedProvider(
         [
-            [_tool_chunk("file_write", '{"path":"x"}')],
+            [_tool_chunk("write", '{"file_path":"x"}')],
             [_content_chunk("先做能做的部分")],
         ]
     )
@@ -252,13 +252,13 @@ async def test_worker_react_loop_execution_failure_does_not_escalate():
 async def test_captain_role_does_not_wire_escalation_gate():
     """Same scheme-flavored tool output under captain must not fill gate_sink."""
     tool = _OutputTool(
-        "file_write",
+        "write",
         "超出权限，需改接口契约",
         success=False,
     )
     provider = _ScriptedProvider(
         [
-            [_tool_chunk("file_write", "{}")],
+            [_tool_chunk("write", "{}")],
             [_content_chunk("captain answer")],
         ]
     )
@@ -284,13 +284,13 @@ async def test_captain_role_does_not_wire_escalation_gate():
 
 async def test_worker_without_gate_sink_is_noop_even_on_scheme():
     tool = _OutputTool(
-        "file_write",
+        "write",
         "需求矛盾：无法同时满足",
         success=True,
     )
     provider = _ScriptedProvider(
         [
-            [_tool_chunk("file_write", "{}")],
+            [_tool_chunk("write", "{}")],
             [_content_chunk("ok")],
         ]
     )

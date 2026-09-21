@@ -73,20 +73,6 @@ vi.mock("@/services/documents", async (importOriginal) => {
   };
 });
 
-vi.mock("@/services/memory", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/memory")>();
-  return {
-    ...actual,
-    getMemoryFile: vi.fn(async () => ({ content: "画像正文", version: "v0" })),
-    writeMemoryFile: vi.fn(),
-    listMemoryUpdates: vi.fn(async () => []),
-    listDisputedMemoryLines: vi.fn(async () => ({
-      lines: [],
-      maxPerEntry: 50,
-    })),
-  };
-});
-
 vi.mock("@/services/skillCatalog", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/services/skillCatalog")>();
@@ -122,6 +108,7 @@ const { getSkillCatalog } = await import("@/services/skillCatalog");
 const { listInstalledSkills } = await import("@/services/skillStore");
 const {
   createRuleFolder,
+  deleteDocument,
   getDocument,
   listAccountPromptTree,
   listScopeEntries,
@@ -163,8 +150,20 @@ function renderCatalog(
       <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route
+            path="/toolbox/official"
+            element={<PromptCatalog data={data} />}
+          />
+          <Route
             path="/toolbox/mine/skills"
             element={<PromptCatalog data={data} />}
+          />
+          <Route
+            path="/toolbox/market"
+            element={<div data-testid="market-page" />}
+          />
+          <Route
+            path="/toolbox/guides"
+            element={<div data-testid="guides-page" />}
           />
           <Route path="/files" element={<div data-testid="files-page" />} />
         </Routes>
@@ -267,24 +266,63 @@ describe("PromptCatalog 概览", () => {
       expect(screen.getByTestId("prompt-overview")).toBeTruthy();
     });
     expect(screen.queryByText("自带")).toBeNull();
-    expect(screen.getByRole("heading", { name: "常驻" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "必带" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "按需" })).toBeTruthy();
-    expect(screen.getByText("每回合都带着")).toBeTruthy();
-    expect(screen.getByText("用到才翻")).toBeTruthy();
+    const title = screen.getByRole("heading", { level: 1, name: "工具箱" });
+    expect(title.className).toContain("sr-only");
+    const source = screen.getByRole("navigation", { name: "工具箱" });
+    expect(within(source).getByLabelText("搜提示词")).toBeTruthy();
+    expect(within(source).getByRole("button", { name: /^新建$/ })).toBeTruthy();
+    expect(screen.queryByText("下一回合会带这些")).toBeNull();
+    expect(screen.queryByText("每回合都带着")).toBeNull();
+    expect(screen.queryByText("用到才翻")).toBeNull();
     expect(screen.queryByText("记忆")).toBeNull();
     expect(
       within(onDemandRail()).queryByRole("heading", { name: "官方" }),
     ).toBeNull();
-    expect(previewText(onDemandRail(), "薄技能")).toBeTruthy();
-    expect(within(alwaysRail()).queryByText("薄技能")).toBeNull();
+    expect(screen.queryByRole("button", { name: "薄技能" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "全员共享准则" })).toBeNull();
     expect(screen.queryByText("偏好")).toBeNull();
     expect(screen.queryByText("画像")).toBeNull();
     expect(screen.queryByRole("button", { name: "概览" })).toBeNull();
-    expect(screen.getByRole("button", { name: "新建条目" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^新建$/ })).toBeTruthy();
+    expect(
+      within(screen.getByRole("navigation", { name: "工具箱" })).getByRole(
+        "link",
+        { name: "市场" },
+      ),
+    ).toBeTruthy();
+    expect(
+      within(screen.getByRole("navigation", { name: "工具箱" })).getByRole(
+        "link",
+        { name: "官方" },
+      ),
+    ).toBeTruthy();
+    expect(
+      within(screen.getByRole("navigation", { name: "工具箱" })).getByRole(
+        "link",
+        { name: "我的" },
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "说明书" })).toBeNull();
     expect(screen.queryByTestId("prompt-overview-updates")).toBeNull();
     expect(screen.queryByRole("button", { name: "最近学到" })).toBeNull();
     expect(screen.queryByText("角色身份")).toBeNull();
-    const dialog = await openReadDialog(alwaysRail(), "全员共享准则");
+    expect(screen.queryByTestId("memory-updates-view")).toBeNull();
+    expect(screen.getByTestId("prompt-overview")).toBeTruthy();
+  });
+
+  it("官方栏打开准则读卡", async () => {
+    renderCatalog("/toolbox/official");
+    await waitFor(() => {
+      expect(screen.getByTestId("prompt-overview")).toBeTruthy();
+    });
+    expect(screen.queryByRole("button", { name: /^新建$/ })).toBeNull();
+    const prompts = screen.getByTestId("prompt-rail-prompts");
+    expect(within(prompts).getByText("每回合都在的工作宪法")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "准则" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "教法" })).toBeNull();
+    const dialog = await openReadDialog(prompts, "全员共享准则");
     expect(
       within(dialog).getByRole("heading", { name: "全员共享准则" }),
     ).toBeTruthy();
@@ -301,8 +339,8 @@ describe("PromptCatalog 概览", () => {
     expect(screen.getByTestId("prompt-overview")).toBeTruthy();
   });
 
-  it("点两条官方 HOW 各自打开正文", async () => {
-    renderCatalog("/toolbox/mine/skills", {
+  it("官方 HOW 进提示词货架，不进我的必带/按需", async () => {
+    renderCatalog("/toolbox/official", {
       ...base,
       skills: [
         {
@@ -324,84 +362,44 @@ describe("PromptCatalog 概览", () => {
       ],
     });
     await waitFor(() => {
-      expect(previewText(onDemandRail(), "团队拆法")).toBeTruthy();
+      expect(screen.getByTestId("prompt-overview")).toBeTruthy();
     });
-    const dialog = await openReadDialog(onDemandRail(), "跑命令 / 启服");
-    const first = await screen.findByTestId("factory-skill-editor");
+    expect(screen.queryByTestId("prompt-rail-always")).toBeNull();
+    expect(screen.queryByTestId("prompt-rail-on-demand")).toBeNull();
+    const prompts = screen.getByTestId("prompt-rail-prompts");
     expect(
-      within(dialog).getByRole("heading", { name: "跑命令 / 启服" }),
-    ).toBeTruthy();
-    expect(within(dialog).getByText("官方")).toBeTruthy();
-    expect(within(first).getByText("run-how-body")).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole("button", { name: "关闭" }));
-    await openReadDialog(onDemandRail(), "团队拆法");
-    const second = await screen.findByTestId("factory-skill-editor");
-    expect(within(second).getByText("staffing-how-body")).toBeTruthy();
-    expect(within(second).queryByText("run-how-body")).toBeNull();
-  });
-
-  it("官方 HOW 扁列在按需，不出官方夹、不出五组夹名", async () => {
-    renderCatalog("/toolbox/mine/skills", {
-      ...base,
-      skills: [
-        {
-          name: "run",
-          summary: "跑命令 / 启服",
-          body: "r",
-          group: "工具",
-          blurb: "",
-          requires_tools: ["run"],
-        },
-        {
-          name: "staffing",
-          summary: "团队拆法",
-          body: "s",
-          group: "编排",
-          blurb: "",
-          audience: ["ceo"],
-        },
-      ],
-    });
-    await waitFor(() => {
-      expect(previewText(onDemandRail(), "团队拆法")).toBeTruthy();
-    });
+      within(prompts)
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label"))[0],
+    ).toBe("全员共享准则");
     expect(
-      within(onDemandRail()).queryByRole("heading", { name: "官方" }),
-    ).toBeNull();
-    expect(
-      within(onDemandRail()).queryByRole("heading", { name: "编排" }),
-    ).toBeNull();
-    expect(
-      within(onDemandRail()).queryByRole("heading", { name: "工作区" }),
-    ).toBeNull();
-    expect(
-      within(onDemandRail()).queryByRole("heading", { name: "交付" }),
-    ).toBeNull();
-    expect(
-      within(onDemandRail()).queryByRole("heading", { name: "产品" }),
-    ).toBeNull();
-    expect(within(onDemandRail()).queryByText("编排")).toBeNull();
-    expect(within(onDemandRail()).getByText("CEO")).toBeTruthy();
-    expect(previewText(onDemandRail(), "跑命令 / 启服")).toBeTruthy();
-    expect(
-      within(screen.getByTestId("prompt-tile-skill:run")).getByText("工具"),
+      within(prompts).getByRole("button", {
+        name: "团队拆法",
+      }),
     ).toBeTruthy();
     expect(
-      within(screen.getByTestId("prompt-tile-skill:staffing")).queryByText(
-        "工具",
-      ),
-    ).toBeNull();
+      within(prompts).getByRole("button", {
+        name: "跑命令 / 启服",
+      }),
+    ).toBeTruthy();
+    expect(screen.queryByTestId("prompt-rail-official")).toBeNull();
   });
 
-  it("无官方 HOW 时不出现官方货架块", async () => {
-    renderCatalog("/toolbox/mine/skills", { ...base, skills: [] });
+  it("无官方 HOW 时提示词货架仍留准则卡", async () => {
+    renderCatalog("/toolbox/official", { ...base, skills: [] });
     await waitFor(() => {
       expect(screen.getByTestId("prompt-overview")).toBeTruthy();
     });
+    expect(screen.queryByTestId("prompt-rail-how")).toBeNull();
+    expect(screen.queryByTestId("prompt-rail-constitution")).toBeNull();
     expect(screen.queryByTestId("prompt-rail-official")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "教法" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "准则" })).toBeNull();
     expect(
-      within(onDemandRail()).queryByRole("heading", { name: "官方" }),
-    ).toBeNull();
+      within(screen.getByTestId("prompt-rail-prompts")).getByRole("button", {
+        name: "全员共享准则",
+      }),
+    ).toBeTruthy();
   });
 
   it("自建条目夹里不标我的", async () => {
@@ -524,7 +522,7 @@ describe("PromptCatalog 拖拽搬家", () => {
   }
 
   function dropTransfer(mineId: string) {
-    const raw = promptDragPayload({ kind: "mine", mineId });
+    const raw = promptDragPayload({ kind: "mine", mineIds: [mineId] });
     return {
       types: [PROMPT_DRAG_MIME],
       getData: (type: string) => (type === PROMPT_DRAG_MIME ? raw : ""),
@@ -583,13 +581,13 @@ describe("PromptCatalog 拖拽搬家", () => {
     const started = startDrag("合同审查", onDemandRail());
     expect(started.setData).toHaveBeenCalledWith(
       PROMPT_DRAG_MIME,
-      promptDragPayload({ kind: "mine", mineId: "d1" }),
+      promptDragPayload({ kind: "mine", mineIds: ["d1"] }),
     );
   });
 
   it("拖到常驻区里的条目也写成常驻", async () => {
     await renderMineCatalog();
-    fireEvent.drop(screen.getByText("全员共享准则"), {
+    fireEvent.drop(alwaysRail(), {
       dataTransfer: dropTransfer("d1"),
     });
     await waitFor(() => {
@@ -622,11 +620,11 @@ describe("PromptCatalog 拖拽搬家", () => {
     });
   });
 
-  it("官方 HOW 拖不动", async () => {
+  it("我的目录没有官方 HOW 可拖", async () => {
     await renderMineCatalog();
-    expect(
-      startDrag("团队拆法", onDemandRail()).setData,
-    ).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "团队拆法" })).toBeNull();
+    expect(screen.queryByTestId("prompt-rail-official")).toBeNull();
+    expect(screen.queryByTestId("prompt-rail-how")).toBeNull();
   });
 
   it("拖进其他调 reparentDocument 不写官方 home", async () => {
@@ -644,18 +642,10 @@ describe("PromptCatalog 拖拽搬家", () => {
     });
   });
 
-  it("官方 HOW 拖到根不搬家", async () => {
+  it("技能拖到根不搬家", async () => {
     await renderMineCatalog();
-    fireEvent.drop(screen.getByText("全员共享准则"), {
+    fireEvent.drop(alwaysRail(), {
       dataTransfer: dropSkillTransfer("staffing"),
-    });
-    expect(reparentDocument).not.toHaveBeenCalled();
-  });
-
-  it("官方 HOW 区拒拖放", async () => {
-    await renderMineCatalog();
-    fireEvent.drop(screen.getByTestId("prompt-rail-official"), {
-      dataTransfer: dropTransfer("d1"),
     });
     expect(reparentDocument).not.toHaveBeenCalled();
   });
@@ -672,6 +662,7 @@ const webSearchTool = {
   face: "web" as const,
   resident: true,
   summary: "联网检索",
+  blurb: "按关键词在网上找资料和链接",
   description: "联网检索：给出查询词。",
   parameters: {
     type: "object",
@@ -687,60 +678,17 @@ const webSearchTool = {
 const hostTool = {
   name: "host",
   face: "host_browser" as const,
-  resident: false,
+  resident: true,
   summary: "本机",
+  blurb: "看本机屏幕、键鼠和已打开的应用",
   description: "本机",
   parameters: { type: "object", properties: {} },
   approval: "grantable" as const,
   available_to: ["worker"],
 };
 
-describe("PromptCatalog 工具与连接器", () => {
-  it("我的条目可勾选查阅后启用的手脚", async () => {
-    vi.mocked(writeDocument).mockResolvedValue({
-      ok: true,
-      conflict: false,
-      version: "v2",
-      frontmatterError: null,
-      quotaWarning: null,
-    });
-    vi.mocked(getSkillCatalog).mockResolvedValue({
-      slots: [],
-      mine: [
-        {
-          id: "d1",
-          name: "合同审查",
-          description: "审合同时用",
-          content:
-            "---\napply: on_demand\ndescription: 审合同时用\n---\n怎么审",
-          version: "v1",
-        },
-      ],
-      folderId: null,
-      writable: true,
-    });
-    renderCatalog("/toolbox/mine/skills", {
-      ...base,
-      tools: [hostTool],
-    });
-    await waitFor(() => {
-      expect(previewText(onDemandRail(), "合同审查")).toBeTruthy();
-    });
-    await openReadDialog(onDemandRail(), "合同审查");
-    fireEvent.click(screen.getByRole("tab", { name: "编辑" }));
-    expect(await screen.findByTestId("offered-tools")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "本机" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "添加" }));
-    fireEvent.click(screen.getByRole("button", { name: "本机" }));
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
-    await waitFor(() => {
-      expect(writeDocument).toHaveBeenCalled();
-    });
-    const content = vi.mocked(writeDocument).mock.calls[0]?.[1] as string;
-    expect(content).toContain("offers_tools: host");
-  });
-
-  it("常驻条目默认预览，编辑面不铺查阅后启用全表", async () => {
+describe("PromptCatalog 工具与 MCP 深链", () => {
+  it("常驻条目默认预览，编辑面不出目录句", async () => {
     vi.mocked(listScopeEntries).mockResolvedValue([
       {
         id: "d1",
@@ -787,14 +735,12 @@ describe("PromptCatalog 工具与连接器", () => {
     ).toBe("true");
     expect(within(dialog).getByText("规则生效", { exact: false })).toBeTruthy();
     expect(within(dialog).queryByLabelText("名称")).toBeNull();
-    expect(within(dialog).queryByTestId("offered-tools")).toBeNull();
     fireEvent.click(within(dialog).getByRole("tab", { name: "编辑" }));
     expect(within(dialog).getByLabelText("名称")).toHaveProperty(
       "value",
       "测试规则",
     );
     expect(within(dialog).queryByLabelText("一句话介绍")).toBeNull();
-    expect(within(dialog).queryByTestId("offered-tools")).toBeNull();
     expect(within(dialog).queryByText("本机")).toBeNull();
   });
 
@@ -889,76 +835,22 @@ describe("PromptCatalog 工具与连接器", () => {
     );
   });
 
-  it("出厂工具按开场轴并进常驻/按需，不另起出厂项壳；点开弹窗即说明书", async () => {
-    renderCatalog("/toolbox/mine/skills", {
+  it("开场即用的出厂工具铺官方货架卡", async () => {
+    renderCatalog("/toolbox/official", {
       ...base,
       tools: [webSearchTool, hostTool],
     });
     await waitFor(() => {
-      expect(screen.getByTestId("prompt-rail-on-demand-tools")).toBeTruthy();
+      expect(screen.getByTestId("prompt-overview")).toBeTruthy();
     });
-    expect(screen.queryByTestId("prompt-rail-tools")).toBeNull();
-    expect(screen.queryByTestId("prompt-rail-factory")).toBeNull();
-    expect(screen.queryByTestId("prompt-rail-factory-resident")).toBeNull();
-    expect(screen.queryByTestId("prompt-rail-factory-deferred")).toBeNull();
-    expect(screen.queryByRole("heading", { name: "工具" })).toBeNull();
-    expect(screen.queryByRole("heading", { name: "网络" })).toBeNull();
-    expect(screen.queryByRole("heading", { name: "出厂项" })).toBeNull();
-    const dialog = await openReadDialog(alwaysRail(), "联网检索");
-    expect(screen.getByRole("heading", { name: "联网检索" })).toBeTruthy();
-    expect(within(alwaysRail()).getByText("联网检索")).toBeTruthy();
-    expect(within(onDemandRail()).queryByText("联网检索")).toBeNull();
-    expect(within(alwaysRail()).queryByText("web_search")).toBeNull();
-    expect(
-      within(screen.getByTestId("prompt-tile-tool:web_search")).queryByText(
-        "开场即用",
-      ),
-    ).toBeNull();
-    expect(
-      within(screen.getByTestId("prompt-tile-tool:web_search")).getByText(
-        "官方",
-      ),
-    ).toBeTruthy();
-    expect(
-      within(screen.getByTestId("prompt-tile-tool:web_search")).getByText(
-        "工具",
-      ),
-    ).toBeTruthy();
-    expect(within(dialog).queryByRole("button", { name: "返回" })).toBeNull();
-    const guide = screen.getByTestId("tool-face-guide");
-    expect(guide.textContent).toContain("web_search");
-    expect(guide.textContent).toContain("联网检索：给出查询词。");
-    expect(guide.textContent).not.toMatch(/全员/);
-    expect(within(dialog).queryByRole("tab", { name: "源码" })).toBeNull();
-    expect(within(dialog).queryByRole("tab", { name: "说明" })).toBeNull();
-    expect(within(dialog).getByText("官方")).toBeTruthy();
-    expect(within(dialog).getByText("开场即用")).toBeTruthy();
-    expect(within(dialog).getByText("工具")).toBeTruthy();
-    expect(screen.getByText("query")).toBeTruthy();
-    expect(screen.getByText("要填")).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole("button", { name: "关闭" }));
-    const hostDialog = await openReadDialog(onDemandRail(), "本机");
-    expect(screen.getByRole("heading", { name: "本机" })).toBeTruthy();
-    expect(within(onDemandRail()).getByText("本机")).toBeTruthy();
-    expect(within(alwaysRail()).queryByText("本机")).toBeNull();
-    expect(within(hostDialog).getByText("host")).toBeTruthy();
-    expect(within(hostDialog).queryByText("没有要填的参数")).toBeNull();
-    expect(within(hostDialog).getByText("官方")).toBeTruthy();
-    expect(within(hostDialog).getByText("查阅后启用")).toBeTruthy();
-    expect(within(hostDialog).getByText("需审批")).toBeTruthy();
-    expect(within(hostDialog).getByText("队员")).toBeTruthy();
-    expect(
-      within(screen.getByTestId("prompt-rail-on-demand-tools")).getByText(
-        "本机",
-      ),
-    ).toBeTruthy();
-    expect(screen.queryByTestId("prompt-rail-resident-tools")).toBeNull();
-    expect(screen.queryByTestId("prompt-rail-deferred-tools")).toBeNull();
-    expect(screen.getByTestId("prompt-rail-official")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "联网检索" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "本机" })).toBeTruthy();
+    expect(screen.queryByTestId("prompt-rail-on-demand-tools")).toBeNull();
+    expect(screen.queryByTestId("prompt-rail-official")).toBeNull();
   });
 
-  it("?tool= 直达该工具，不先出夹名单", async () => {
-    renderCatalog("/toolbox/mine/skills?tool=web_search", {
+  it("?tool= 直达工具读卡", async () => {
+    renderCatalog("/toolbox/official?tool=web_search", {
       ...base,
       tools: [webSearchTool, hostTool],
     });
@@ -966,28 +858,30 @@ describe("PromptCatalog 工具与连接器", () => {
     expect(
       within(dialog).getByRole("heading", { name: "联网检索" }),
     ).toBeTruthy();
-    expect(within(dialog).queryByRole("button", { name: "返回" })).toBeNull();
-    expect(screen.getByTestId("tool-face-guide")).toBeTruthy();
+    expect(screen.queryByTestId("guides-page")).toBeNull();
   });
 
-  it("?connectors=1 直达添加连接器，不先出夹名单", async () => {
-    vi.stubGlobal("mcpApi", {
-      runOp: vi.fn(),
-      listServers: vi.fn(async () => ({ ok: true as const, servers: [] })),
-      upsertServer: vi.fn(),
-      removeServer: vi.fn(),
-      setServerEnabled: vi.fn(),
-      testServer: vi.fn(),
+  it("?skill= 直达官方 HOW 读卡", async () => {
+    renderCatalog("/toolbox/official?skill=thin_skill", {
+      ...base,
+      skills: [
+        {
+          name: "thin_skill",
+          summary: "薄技能",
+          body: "thin-body",
+          group: "",
+          blurb: "",
+        },
+      ],
     });
-    renderCatalog("/toolbox/mine/skills?connectors=1");
     const dialog = await screen.findByRole("dialog");
     expect(
-      within(dialog).getByRole("heading", { name: "新建连接器" }),
+      within(dialog).getByRole("heading", { name: "薄技能" }),
     ).toBeTruthy();
-    expect(within(dialog).queryByRole("button", { name: "返回" })).toBeNull();
+    expect(screen.queryByTestId("guides-page")).toBeNull();
   });
 
-  it("无 mcpApi 时不出现连接器区", async () => {
+  it("我的不铺 MCP 列表", async () => {
     renderCatalog("/toolbox/mine/skills", {
       ...base,
       tools: [webSearchTool],
@@ -995,104 +889,9 @@ describe("PromptCatalog 工具与连接器", () => {
     await waitFor(() => {
       expect(screen.getByTestId("prompt-overview")).toBeTruthy();
     });
-    expect(screen.queryByTestId("prompt-rail-connectors")).toBeNull();
-    expect(screen.queryByRole("button", { name: "添加连接器" })).toBeNull();
-  });
-
-  it("插头在按需区的连接器组，不把报出的动作再铺一层", async () => {
-    const listServers = vi.fn(async () => ({
-      ok: true as const,
-      servers: [
-        {
-          id: "fs",
-          name: "Filesystem",
-          enabled: true,
-          command: "npx",
-          args: ["-y", "@modelcontextprotocol/server-filesystem"],
-          runtimeStatus: "ready" as const,
-        },
-        {
-          id: "gh",
-          name: "GitHub",
-          enabled: true,
-          command: "npx",
-          args: [],
-          runtimeStatus: "failed" as const,
-          runtimeError: "GITHUB_TOKEN 未配置",
-        },
-      ],
-    }));
-    vi.stubGlobal("mcpApi", {
-      runOp: vi.fn(),
-      listServers,
-      upsertServer: vi.fn(),
-      removeServer: vi.fn(),
-      setServerEnabled: vi.fn(),
-      testServer: vi.fn(),
-    });
-    renderCatalog("/toolbox/mine/skills", { ...base, tools: [webSearchTool] });
-    expect(
-      await screen.findByRole("button", { name: "Filesystem" }),
-    ).toBeTruthy();
-    const connectors = screen.getByTestId("prompt-rail-connectors");
-    expect(onDemandRail().contains(connectors)).toBe(true);
-    expect(alwaysRail().contains(connectors)).toBe(false);
-    expect(screen.queryByTestId("prompt-rail-tools")).toBeNull();
-    expect(
-      within(connectors).getByRole("button", { name: "Filesystem" }),
-    ).toBeTruthy();
-    expect(screen.getByRole("button", { name: "添加连接器" })).toBeTruthy();
-    expect(screen.queryByText("mcp_fs_read_file")).toBeNull();
-    expect(within(connectors).getByText("GitHub")).toBeTruthy();
-    expect(within(connectors).getByText("已握手")).toBeTruthy();
-    expect(within(connectors).getByText("失败")).toBeTruthy();
-    const dialog = await openReadDialog(connectors, "Filesystem");
-    expect(screen.getByRole("heading", { name: "编辑连接器" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "测试握手" })).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole("button", { name: "关闭" }));
-    await openReadDialog(connectors, "GitHub");
-    const badges = screen.getAllByText("失败");
-    expect(badges.some((node) => node.className.includes("destructive"))).toBe(
-      true,
-    );
-  });
-
-  it("listServers 失败时诚实说明，出厂工具仍在常驻/按需", async () => {
-    vi.stubGlobal("mcpApi", {
-      runOp: vi.fn(),
-      listServers: vi.fn(async () => ({
-        ok: false as const,
-        error: { kind: "io", detail: "读配置失败" },
-      })),
-      upsertServer: vi.fn(),
-      removeServer: vi.fn(),
-      setServerEnabled: vi.fn(),
-      testServer: vi.fn(),
-    });
-    renderCatalog("/toolbox/mine/skills", { ...base, tools: [webSearchTool] });
-    expect(await screen.findByText("读配置失败")).toBeTruthy();
-    const alert = screen.getByRole("alert");
-    expect(alert.textContent).toBe("读配置失败");
-    expect(alert.className).toContain("text-muted-foreground");
-    expect(alert.className).not.toContain("destructive");
-    const dialog = await openReadDialog(alwaysRail(), "联网检索");
-    expect(
-      within(dialog).getByRole("heading", { name: "联网检索" }),
-    ).toBeTruthy();
-  });
-
-  it("点添加连接器打开新建表单", async () => {
-    vi.stubGlobal("mcpApi", {
-      runOp: vi.fn(),
-      listServers: vi.fn(async () => ({ ok: true as const, servers: [] })),
-      upsertServer: vi.fn(),
-      removeServer: vi.fn(),
-      setServerEnabled: vi.fn(),
-      testServer: vi.fn(),
-    });
-    renderCatalog();
-    fireEvent.click(await screen.findByRole("button", { name: "添加连接器" }));
-    expect(screen.getByRole("heading", { name: "新建连接器" })).toBeTruthy();
+    expect(screen.queryByTestId("mcp-list")).toBeNull();
+    expect(screen.queryByRole("button", { name: "添加 MCP" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "联网检索" })).toBeNull();
   });
 });
 
@@ -1235,5 +1034,157 @@ describe("PromptCatalog 就地命名", () => {
     await waitFor(() => {
       expect(renameDocument).toHaveBeenCalledWith("d1", "新合同.md");
     });
+  });
+});
+
+describe("PromptCatalog 我的条目多选", () => {
+  async function renderTwoMine() {
+    vi.mocked(getSkillCatalog).mockResolvedValue({
+      slots: [],
+      mine: [
+        {
+          id: "d1",
+          name: "合同审查",
+          description: "审合同时用",
+          content: "HOW",
+          version: "v1",
+        },
+        {
+          id: "d2",
+          name: "尽调清单",
+          description: "尽调时用",
+          content: "HOW",
+          version: "v1",
+        },
+      ],
+      folderId: null,
+      writable: true,
+    });
+    renderCatalog();
+    await waitFor(() => {
+      expect(previewText(onDemandRail(), "合同审查")).toBeTruthy();
+      expect(previewText(onDemandRail(), "尽调清单")).toBeTruthy();
+    });
+  }
+
+  it("Ctrl 点两张卡进入选区，不打开读卡；≥2 项出条", async () => {
+    await renderTwoMine();
+    fireEvent.click(
+      within(onDemandRail()).getByRole("button", { name: "合同审查" }),
+      { ctrlKey: true },
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByTestId("prompt-selection-bar")).toBeNull();
+    fireEvent.click(
+      within(onDemandRail()).getByRole("button", { name: "尽调清单" }),
+      { ctrlKey: true },
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByTestId("prompt-selection-bar").textContent).toContain(
+      "已选择 2 项",
+    );
+  });
+
+  it("Shift 从锚点连选；Esc 清空", async () => {
+    await renderTwoMine();
+    fireEvent.click(
+      within(onDemandRail()).getByRole("button", { name: "合同审查" }),
+      { ctrlKey: true },
+    );
+    fireEvent.click(
+      within(onDemandRail()).getByRole("button", { name: "尽调清单" }),
+      { shiftKey: true },
+    );
+    expect(screen.getByTestId("prompt-selection-bar")).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByTestId("prompt-selection-bar")).toBeNull();
+  });
+
+  it("官方 HOW Ctrl 点不进选区", async () => {
+    renderCatalog("/toolbox/official");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "薄技能" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "薄技能" }), {
+      ctrlKey: true,
+    });
+    expect(screen.queryByTestId("prompt-selection-bar")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("选区右键只出整批删除；确认后逐条删除", async () => {
+    vi.mocked(deleteDocument).mockReset();
+    vi.mocked(deleteDocument).mockResolvedValue({
+      ok: true,
+      version: "v",
+      conflict: false,
+      frontmatterError: null,
+      quotaWarning: null,
+    });
+    await renderTwoMine();
+    fireEvent.click(
+      within(onDemandRail()).getByRole("button", { name: "合同审查" }),
+      { ctrlKey: true },
+    );
+    fireEvent.click(
+      within(onDemandRail()).getByRole("button", { name: "尽调清单" }),
+      { ctrlKey: true },
+    );
+    fireEvent.contextMenu(within(onDemandRail()).getByText("合同审查"));
+    expect(await screen.findByText("删除 2 项")).toBeTruthy();
+    expect(screen.queryByText("重命名")).toBeNull();
+    fireEvent.click(screen.getByText("删除 2 项"));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("删除这 2 条？")).toBeTruthy();
+    expect(within(dialog).getByText(/不可撤销/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
+    await waitFor(() => {
+      expect(deleteDocument).toHaveBeenCalledWith("d1");
+      expect(deleteDocument).toHaveBeenCalledWith("d2");
+    });
+  });
+
+  it("拖选区发出整批 mineIds", async () => {
+    await renderTwoMine();
+    fireEvent.click(
+      within(onDemandRail()).getByRole("button", { name: "合同审查" }),
+      { ctrlKey: true },
+    );
+    fireEvent.click(
+      within(onDemandRail()).getByRole("button", { name: "尽调清单" }),
+      { ctrlKey: true },
+    );
+    const dataTransfer = { setData: vi.fn(), effectAllowed: "" };
+    fireEvent.dragStart(within(onDemandRail()).getByText("合同审查"), {
+      dataTransfer,
+    });
+    expect(dataTransfer.setData).toHaveBeenCalledWith(
+      PROMPT_DRAG_MIME,
+      promptDragPayload({ kind: "mine", mineIds: ["d1", "d2"] }),
+    );
+  });
+
+  it("单项删除走确认框，不再用 window.confirm", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm");
+    vi.mocked(deleteDocument).mockReset();
+    vi.mocked(deleteDocument).mockResolvedValue({
+      ok: true,
+      version: "v",
+      conflict: false,
+      frontmatterError: null,
+      quotaWarning: null,
+    });
+    await renderTwoMine();
+    fireEvent.contextMenu(within(onDemandRail()).getByText("合同审查"));
+    fireEvent.click(await screen.findByText("删除"));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("删除「合同审查」？")).toBeTruthy();
+    expect(confirmSpy).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
+    await waitFor(() => {
+      expect(deleteDocument).toHaveBeenCalledWith("d1");
+    });
+    confirmSpy.mockRestore();
   });
 });

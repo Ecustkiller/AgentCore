@@ -7,7 +7,7 @@ import type { ExecutionJournal } from "@/stores/execution/types";
 import type { ProcessStep } from "@/types/events";
 
 /**
- * B′paste：本轮成功写盘产物——复用 fileArtifactsFromProcess（成功 file_* / str_replace）。
+ * B′paste：本轮成功写盘产物——复用 fileArtifactsFromProcess（成功 write / edit / file_delete）。
  * 多 Agent：合并 journal.runProcesses 各 run（与 unproductive 同源 journal；
  * 勿把 delivery_status 验收 artifacts 当写盘成功）。
  */

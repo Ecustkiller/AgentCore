@@ -157,6 +157,7 @@ async def _prepare_agent_node(
     # 跨文件夹指挥 · 形状甲：有目标 folder → 换 backend + 记忆跟桌（不改会话挂载）。
     worker_tools_base = env.tools
     system_prompt = env.system_prompt
+    turn_envelope = env.worker_envelope
     base_ctx = env.base_tool_context
     if spec.target_folder_id:
         from agentcore.runtime.delegate.target_desktop import apply_target_desktop
@@ -176,9 +177,11 @@ async def _prepare_agent_node(
         )
         worker_tools_base = applied.worker_tools
         system_prompt = applied.system_prompt
+        if applied.worker_envelope:
+            turn_envelope = applied.worker_envelope
         base_ctx = applied.tool_ctx
 
-    # 无出生且无 target → 坐会话 scratch。云端默认禁写（冷启动 explore_memory 例外）；
+    # 无出生且无 target → 坐会话 scratch。云端默认禁写；
     # 本机裸聊 scratch 就是桌，允许写盘。
     from agentcore.llm.image_accept import model_accepts_images
     from agentcore.runtime.delegate.target_desktop import (
@@ -212,22 +215,20 @@ async def _prepare_agent_node(
         _explore_gate=fork_explore_write_scope(base_ctx, worker_write_scope),
         # 升级实时可见: give this worker's escalate tool a live channel back to the
         # run's SSE stream. The executor owns event shape (引擎纯化) — escalate just
-        # hands it the (question, assumption, blocking) triple. run_id/agent_id are
-        # bound here so the team UI attributes the escalation to the right node.
-        on_escalate=lambda question, assumption, blocking, kind="normal", _rid=spec.run_id, _aid=agent_id: (  # noqa: E501
+        # hands it (question, assumption, reason). run_id/agent_id are bound here
+        # so the team UI attributes the escalation to the right node.
+        on_escalate=lambda question, assumption, reason="wait", _rid=spec.run_id, _aid=agent_id: (  # noqa: E501
             env.sink.emit(
                 escalation_raised(
                     _rid,
                     _aid,
                     question=question,
                     assumption=assumption,
-                    blocking=blocking,
-                    kind=kind,
+                    kind=reason if reason in ("scope", "dep") else None,
                 )
             )
         ),
-        # 阻塞式求决策: the suspend-for-the-user channel for escalate(blocking=true).
-        # None when no bridge (CEO / tests) → escalate stays non-blocking.
+        # Wait-escalate suspend channel. None when no bridge → wait 按假设做完。
         escalation=build_escalation_channel(env, spec.run_id, agent_id, resolutions),
         agent_role=spec.role or "",
         # 检索预算 (提案 A1): per-run counter for tool_exec; None = no enforce.
@@ -301,9 +302,7 @@ async def _prepare_agent_node(
     # Short-round repair posture tool strip retired.
     # CEO may still stamp max_rounds; tools stay full surface.
     files_expected = _files_expected(deliverable)
-    from agentcore.runtime.runs.research_quality import deliverable_is_report_delivery
-
-    report_delivery = deliverable_is_report_delivery(deliverable)
+    report_delivery = False
     product_landing_artifacts: list[str] | None = (
         list(deliverable.artifacts)
         if deliverable is not None and deliverable.artifacts
@@ -350,7 +349,7 @@ async def _prepare_agent_node(
         depth=spec.depth,
     )
 
-    # Wave3 B: force-inject skeleton/contract summaries before first file_read.
+    # Wave3 B: force-inject skeleton/contract summaries before first read.
     context_inject = await load_context_inject_files(
         tool_ctx.backend,
         list(getattr(spec, "context_inject_files", None) or []),
@@ -402,6 +401,7 @@ async def _prepare_agent_node(
                 team_brief=env.team_brief,
                 context_inject=context_inject or None,
                 tool_defs=resolve_openai_tool_defs(worker_tools, allowed_tools, set()),
+                turn_envelope=turn_envelope,
             )
         # Worker window head (§8.3): journal the opening task-prompt so
         # ``window_from_journal(run_id=…)`` anchors on THIS run's system+user, not the

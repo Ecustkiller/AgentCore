@@ -1,7 +1,7 @@
 """把存量云工作区目录搬到可见名的真目录树（双模式工作区 §5.4 的盘上那一半）。
 
 **部署链里的位置是硬约束**：停 api → ``alembic upgrade head``（回填 ``folders.rel_path``）
-→ **本脚本** → ``scripts/migrate_project_docs.py`` → 起 api。
+→ **本脚本** → 起 api。旧记忆文件与 ``文档/项目/`` 厚稿不在这步导入。
 
 必须跑在 api 起来之前：``resolve_workspace_root`` 是无条件 ``mkdir`` 的，升级后第一个
 打开云文件夹的用户会当场把迁移目标建成一个空目录；而本脚本「目标已存在就跳过、绝不

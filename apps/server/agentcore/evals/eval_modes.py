@@ -6,7 +6,8 @@ import os
 
 from agentcore.llm.profiles import (
     DEEPSEEK_V4_FLASH,
-    DEEPSEEK_V4_PRO,
+    DEEPSEEK_V41_FLASH,
+    OPENCODE_GO_V41_FLASH,
     TurnProfiles,
 )
 
@@ -20,17 +21,18 @@ ROLE_TO_PROFILE: dict[str, str] = {
 
 CONFIGURABLE_ROLES: tuple[str, ...] = (ROLE_CEO, ROLE_WORKER)
 
-KNOWN_MODELS: tuple[str, ...] = (DEEPSEEK_V4_FLASH, DEEPSEEK_V4_PRO)
+KNOWN_MODELS: tuple[str, ...] = (
+    DEEPSEEK_V4_FLASH,
+    OPENCODE_GO_V41_FLASH,
+    DEEPSEEK_V41_FLASH,
+)
 
 Assignments = dict[str, str]
 
 SYSTEM_DEFAULT_MODE = "economy"
 SYSTEM_PRESETS: dict[str, Assignments] = {
     "economy": {},
-    "quality": {
-        ROLE_CEO: DEEPSEEK_V4_PRO,
-        ROLE_WORKER: DEEPSEEK_V4_PRO,
-    },
+    "quality": {},
 }
 
 

@@ -24,6 +24,7 @@ from agentcore.llm.provider.protocol import (
     llm_content_text,
     normalize_thinking_blocks,
 )
+from agentcore.runtime.runs.escalate_reason import parse_escalate_reason
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.session import RunSession
 from agentcore.runtime.runs.types import (
@@ -176,7 +177,7 @@ def file_products_from_transcript(transcript: list[LLMMessage]) -> list[FileProd
     - 落盘通道不止工具调用（沙箱写回、换树），凡自报者一律记账，无需在任何名单里登记；
     - 失败 / 被拒的调用不自报，天然不入账（引擎只在 ``success`` 时盖章）。
 
-    回显防护也在生产侧：盖章前先清掉输出里回显的尾注（``file_read`` 读到一份带尾注的文本
+    回显防护也在生产侧：盖章前先清掉输出里回显的尾注（``read`` 读到一份带尾注的文本
     不算它产的），所以这里无需按 ``tool_call_id`` 反查工具名。只读 ``role="tool"`` 消息——
     模型正文里复述一段尾注不是事实。
 
@@ -219,21 +220,13 @@ def files_touched_from_transcript(transcript: list[LLMMessage]) -> list[str]:
 def escalations_from_transcript(transcript: list[LLMMessage]) -> list[dict[str, Any]]:
     """Best-effort list of a worker's escalations (``escalate`` tool calls), call order.
 
-    Each item is ``{question, assumption, blocking, kind, status, answer}`` parsed from
-    the call's arguments (assumption defaults to "", blocking to False, kind to
-    ``"normal"``). ``kind="scope"`` (职责/范围偏离) and ``kind="dep"`` (依赖缺口·卡在缺输入 X,
-    §2.4) are BOTH consumed by the WaveScheduler at the reactive wave boundary
-    (``BoundaryReason.SCOPE``) so the CEO re-steers / replan(add)s the not-yet-run tail
-    (执行引擎架构设计.md §受监督的波循环); ``"normal"`` is an ordinary 待决问题 resolved at
-    synthesis. ``status`` defaults to ``"raised"`` (a non-blocking escalate, or a blocking
-    one that degraded) with no ``answer``; the executor overrides these to ``"resolved"``
-    / ``"assumed"`` / ``"timed_out"`` for a blocking escalate that actually suspended (阻塞式求
-    决策 §4.7). Unlike :func:`files_touched_from_transcript` (which correlates tool results
-    for success), escalations are intent-level: read off the call itself; a call
-    with malformed args or an empty ``question`` is skipped. The DelegateTool surfaces
-    these to the CEO as「队员升级了待决问题」so it resolves them before finalizing.
-    The tool name is the literal ``"escalate"`` (= ``ESCALATE_TOOL_NAME``); kept inline
-    here to keep this serialization module dependency-light, as the file-tool names are.
+    Each item is ``{question, assumption, reason, status, answer}``. ``reason`` is
+    ``wait`` / ``scope`` / ``dep`` (缺省 / 无法识别 = ``wait``). ``scope`` / ``dep``
+    are consumed at the reactive wave boundary so the CEO re-steers / adds a
+    producer for the un-run tail. ``wait`` is a parked decision (or a wait that
+    degraded to finish-under-assumption). ``status`` defaults to ``"raised"``;
+    the executor overrides to ``"resolved"`` / ``"assumed"`` / ``"timed_out"``
+    when wait actually suspended. Malformed args or empty ``question`` are skipped.
     """
     out: list[dict[str, Any]] = []
     for msg in transcript:
@@ -251,22 +244,12 @@ def escalations_from_transcript(transcript: list[LLMMessage]) -> list[dict[str, 
             question = str(parsed.get("question") or "").strip()
             if not question:
                 continue
-            kind = str(parsed.get("kind") or "normal").strip().lower()
-            if kind not in ("normal", "scope", "dep"):
-                kind = "normal"
+            reason = parse_escalate_reason(parsed.get("reason"))
             out.append(
                 {
                     "question": question,
                     "assumption": str(parsed.get("assumption") or "").strip(),
-                    "blocking": bool(parsed.get("blocking")),
-                    # 执行引擎架构设计.md §受监督的波循环: "scope" (职责/范围偏离) and "dep"
-                    # (依赖缺口·卡在缺输入 X, §2.4) are BOTH consumed at the reactive wave
-                    # boundary — the CEO re-steers ("scope") / replan(add)s a producer ("dep")
-                    # for the un-run tail; "normal" is an ordinary 待决问题 resolved at synthesis.
-                    "kind": kind,
-                    # 阻塞式求决策: lifecycle of a blocking escalate. Default for a
-                    # non-blocking / degraded one; the executor folds in the user's
-                    # resolution for one that suspended (设计 §4.7).
+                    "reason": reason,
                     "status": "raised",
                     "answer": None,
                 }

@@ -25,27 +25,25 @@ _ALLOWED_OPTION_ACTIONS = frozenset(_LOCAL_PROJECT_ACTIONS)
 def advertised_option_actions(
     *, desktop: bool, workspace_location: str | None
 ) -> tuple[str, ...]:
-    """Desktop AskOption.action enum for this turn's workspace location.
+    """Open / bind folder is a human entry (Composer / 文件树 / 交付卡芯片).
 
-    Cloud / unknown：本机传统入口（open/register/bind）。
-    已在本机传统：不再广告 open/register/bind（进桌已完成）。
+    Never advertised on the ``ask_user`` button. ``desktop`` / location are
+    accepted so assemble / resume signatures stay; the enum is always empty.
+    Wire still accepts known actions on already-persisted cards.
     """
-    if not desktop:
-        return ()
-    if (workspace_location or "").strip().lower() == "local":
-        return ()
-    return _LOCAL_PROJECT_ACTIONS
+    _ = (desktop, workspace_location)
+    return ()
 
 
 # Shared questions[] card shape (ask_user + escalate). Per-tool overlays:
-# array description / minItems / option.action 短触发.
+# array description / minItems。option.action 不进按钮（开夹走人侧）。
 # 填卡合同只叠在 ask_user（写参当轮必见）；escalate 不抄推荐 / 桌上结果。
 # 倾向只在 label 名末「（推荐）」；不广告 questions[].default。
+# 卡种由有无 options 决定，不广告 kind。
 _PROMPT_DESC = "问句。"
-_KIND_DESC = "choice 或 text，默认 choice。"
-_OPTIONS_DESC = f"kind=choice 候选项（最多 {_MAX_OPTIONS}）。"
+_OPTIONS_DESC = f"候选项（最多 {_MAX_OPTIONS}）。"
 _LABEL_DESC = "选项名（回传答案）。"
-_MULTIPLE_DESC = "可选：允许多选。"
+_MULTIPLE_DESC = "允许多选。"
 
 # WHEN 短触发。填卡合同在 prompt/label。consult 赶不上这张卡。
 ASK_WHEN = "向用户发问（唯一；调用即停）。"
@@ -65,8 +63,9 @@ def questions_array_schema(
 ) -> dict[str, Any]:
     """JSON Schema for ``questions`` — one card shape, two callers.
 
-    ``option_properties`` merge onto ``{label}`` (CEO desktop may add ``action``).
-    Escalate omits ``action`` and ``minItems``; array description stays per-tool.
+    ``option_properties`` merge onto ``{label}``.
+    Escalate omits ``minItems``; array description stays per-tool.
+    ``action`` is never advertised (Composer / 交付卡芯片).
     Tendency is label markup only; ``default`` is not advertised.
     """
     option_props: dict[str, Any] = {
@@ -83,11 +82,6 @@ def questions_array_schema(
                 "prompt": {
                     "type": "string",
                     "description": prompt_description or _PROMPT_DESC,
-                },
-                "kind": {
-                    "type": "string",
-                    "enum": ["choice", "text"],
-                    "description": _KIND_DESC,
                 },
                 "options": {
                     "type": "array",
@@ -274,12 +268,9 @@ def normalize_questions(
 
     Tendency lives in option labels (``（推荐）``). A leftover model ``default`` is
     dropped, not copied onto the card. ``max_options`` forwards to
-    :func:`normalize_options`.
-
-    Choice with no options after absorb is lowered to ``text`` so the card is
-    fill-in, never a zero-button choice. A question-level ``label`` with absent
-    ``options`` becomes a one-item choice (model flattened the option onto the
-    question). ``question`` is accepted as an alias for ``prompt``.
+    :func:`normalize_options`. Leftover ``kind`` is ignored: options (including a
+    flattened question-level ``label``) → choice; none → text. Never a
+    zero-button choice. ``question`` is accepted as an alias for ``prompt``.
     """
     items = coerce_list_arg(raw, field="questions")
     out: list[dict[str, Any]] = []
@@ -289,16 +280,14 @@ def normalize_questions(
         prompt = _question_prompt(it)
         if not prompt:
             continue
-        kind = "text" if str(it.get("kind") or "").strip() == "text" else "choice"
-        if kind == "choice":
-            raw_options = it.get("options")
-            if _options_absent(raw_options):
-                absorbed = _flattened_option_raw(it)
-                if absorbed:
-                    raw_options = absorbed
-            options = normalize_options(
-                raw_options, max_options=max_options
-            )
+        raw_options = it.get("options")
+        if _options_absent(raw_options):
+            absorbed = _flattened_option_raw(it)
+            if absorbed:
+                raw_options = absorbed
+        options = normalize_options(raw_options, max_options=max_options)
+        if options:
+            kind = "choice"
             multiple = bool(it.get("multiple") or False)
             # Models sometimes put a desktop action on the question. Promote onto
             # the first option that does not already have one — never every
@@ -309,11 +298,8 @@ def normalize_questions(
                     if "action" not in opt:
                         opt["action"] = q_action
                         break
-            if not options:
-                kind = "text"
-                options = []
-                multiple = False
         else:
+            kind = "text"
             options = []
             multiple = False
         out.append(

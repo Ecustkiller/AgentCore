@@ -80,19 +80,19 @@ function renderDir(
   );
 }
 
-describe("FileTreeRow stage dir badges", () => {
-  it("AgentCore/文档/research/debate 显示徽章副文案，普通目录零噪音", () => {
+describe("FileTreeRow leftover dirs", () => {
+  it("存量 文档/research 当普通目录，无约定柜徽章", () => {
     const { unmount } = renderDir("AgentCore/文档/research", "research", 2);
-    expect(screen.getByText("调研约定文档 · 2 件")).toBeTruthy();
+    expect(screen.getByText("research")).toBeTruthy();
+    expect(screen.queryByText("调研约定文档 · 2 件")).toBeNull();
     unmount();
 
     renderDir("AgentCore/文档/debate", "debate", 1);
-    expect(screen.getByText("辩论产物 · 1 件")).toBeTruthy();
-    // 同屏再渲普通目录不应出徽章
+    expect(screen.getByText("debate")).toBeTruthy();
+    expect(screen.queryByText("辩论产物 · 1 件")).toBeNull();
     renderDir("src", "src", 3);
     expect(screen.queryByText(/src ·/)).toBeNull();
     expect(screen.getByText("src")).toBeTruthy();
-    expect(screen.queryByText("调研约定文档 · 3 件")).toBeNull();
   });
 });
 

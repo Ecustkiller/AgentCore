@@ -26,11 +26,9 @@ from agentcore.tools.builtin.host import (
     HostTool,
     host_call_requires_approval,
     host_tool_timeout_seconds,
-    normalize_os_log_args,
     shell_cmd_env_blocks,
     shell_fuse_blocks,
     shell_silent_install_blocks,
-    validate_package_install_args,
 )
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registration import execution_class_tool_names, host_class_tool_names
@@ -70,282 +68,6 @@ def _ctx(
         desktop_channel=channel,
         write_coordinator=WriteCoordinator() if as_worker else None,
     )
-
-
-@pytest.mark.asyncio
-async def test_host_status_requires_channel():
-    result = await HostTool().execute({"action": "status"}, _ctx())
-    assert not result.success
-    assert "桌面" in (result.error or "")
-
-
-@pytest.mark.asyncio
-async def test_host_status_fanout_all_facets():
-    channel = MagicMock()
-
-    async def _reply(op, args, timeout=None):
-        return {"op": op.value, "ok": True}
-
-    channel.request_host = AsyncMock(side_effect=_reply)
-    result = await HostTool().execute({"action": "status"}, _ctx(channel=channel))
-    assert result.success
-    payload = json.loads(result.output)
-    assert "<不可信内容>" not in result.output
-    assert payload["info"]["ok"] is True
-    assert result.display is not None
-    assert result.display["kind"] == "host"
-    assert result.display["action"] == "status"
-    ops = [c.args[0] for c in channel.request_host.await_args_list]
-    assert ops == [
-        HostOp.INFO,
-        HostOp.AUDIO_DEVICES,
-        HostOp.STORAGE,
-        HostOp.POWER,
-        HostOp.NETWORK_SUMMARY,
-        HostOp.APPS,
-    ]
-    assert HostOp.PING not in ops
-    assert HostOp.OS_LOG_SUMMARY not in ops
-    for facet in (
-        "info",
-        "audio_devices",
-        "storage",
-        "power",
-        "network_summary",
-        "apps",
-    ):
-        assert facet in result.output
-
-
-@pytest.mark.asyncio
-async def test_host_status_ignores_leftover_facets():
-    channel = MagicMock()
-
-    async def _reply(op, args, timeout=None):
-        return {"op": op.value, "ok": True}
-
-    channel.request_host = AsyncMock(side_effect=_reply)
-    result = await HostTool().execute(
-        {"action": "status", "facets": ["info"]},
-        _ctx(channel=channel),
-    )
-    assert result.success
-    ops = [c.args[0] for c in channel.request_host.await_args_list]
-    assert ops == [
-        HostOp.INFO,
-        HostOp.AUDIO_DEVICES,
-        HostOp.STORAGE,
-        HostOp.POWER,
-        HostOp.NETWORK_SUMMARY,
-        HostOp.APPS,
-    ]
-
-
-@pytest.mark.asyncio
-async def test_host_open_settings_rejects_unknown_panel():
-    result = await HostTool().execute(
-        {"action": "open_settings", "panel": "bluetooth"},
-        _ctx(as_worker=True, channel=MagicMock()),
-    )
-    assert not result.success
-    assert "sound" in (result.error or "")
-    assert "display" in (result.error or "")
-
-
-@pytest.mark.asyncio
-async def test_host_open_settings_accepts_display():
-    channel = MagicMock()
-    channel.request_host = AsyncMock(
-        return_value={"opened": True, "panel": "display", "uri": "ms-settings:display"}
-    )
-    result = await HostTool().execute(
-        {"action": "open_settings", "panel": "display"},
-        _ctx(as_worker=True, channel=channel),
-    )
-    assert result.success
-    channel.request_host.assert_awaited_once_with(
-        HostOp.OPEN_SETTINGS, {"panel": "display"}, timeout=30.0
-    )
-
-
-@pytest.mark.asyncio
-async def test_host_ceo_l3_action_same_path_as_worker():
-    channel = MagicMock()
-    channel.request_host = AsyncMock(
-        return_value={"opened": True, "panel": "sound", "uri": "ms-settings:sound"}
-    )
-    result = await HostTool().execute(
-        {"action": "open_settings", "panel": "sound"},
-        _ctx(as_worker=False, channel=channel),
-    )
-    assert result.success
-    assert result.contract_failure is not True
-    assert "delegate" not in (result.error or "")
-    channel.request_host.assert_awaited_once_with(
-        HostOp.OPEN_SETTINGS, {"panel": "sound"}, timeout=30.0
-    )
-
-
-@pytest.mark.asyncio
-async def test_host_audio_set_default_requires_device():
-    result = await HostTool().execute(
-        {"action": "set_audio"},
-        _ctx(as_worker=True, channel=MagicMock()),
-    )
-    assert not result.success
-    assert "device_name" in (result.error or "")
-    assert "device_id" not in (result.error or "")
-
-
-@pytest.mark.asyncio
-async def test_host_audio_set_default_forwards():
-    channel = MagicMock()
-    channel.request_host = AsyncMock(
-        return_value={"set": True, "device_id": "{0.0.0.00000000}.{abc}", "name": "Speakers"}
-    )
-    result = await HostTool().execute(
-        {"action": "set_audio", "device_name": "Speakers"},
-        _ctx(as_worker=True, channel=channel),
-    )
-    assert result.success
-    channel.request_host.assert_awaited_once_with(
-        HostOp.AUDIO_SET_DEFAULT, {"device_name": "Speakers"}, timeout=45.0
-    )
-
-
-@pytest.mark.asyncio
-async def test_host_audio_set_default_ignores_device_id():
-    channel = MagicMock()
-    channel.request_host = AsyncMock(
-        return_value={"set": True, "device_id": "{0.0.0.00000000}.{abc}", "name": "Speakers"}
-    )
-    result = await HostTool().execute(
-        {
-            "action": "set_audio",
-            "device_id": "{0.0.0.00000000}.{abc}",
-            "device_name": "Speakers",
-        },
-        _ctx(as_worker=True, channel=channel),
-    )
-    assert result.success
-    channel.request_host.assert_awaited_once_with(
-        HostOp.AUDIO_SET_DEFAULT, {"device_name": "Speakers"}, timeout=45.0
-    )
-
-
-@pytest.mark.asyncio
-async def test_host_audio_set_default_rejects_device_id_only():
-    result = await HostTool().execute(
-        {"action": "set_audio", "device_id": "{0.0.0.00000000}.{abc}"},
-        _ctx(as_worker=True, channel=MagicMock()),
-    )
-    assert not result.success
-    assert "device_name" in (result.error or "")
-
-
-@pytest.mark.asyncio
-async def test_host_service_restart_ignores_extra_service():
-    channel = MagicMock()
-    channel.request_host = AsyncMock(
-        return_value={"restarted": True, "service": "Audiosrv", "status": "Running"}
-    )
-    result = await HostTool().execute(
-        {"action": "restart_service", "service": "Spooler"},
-        _ctx(as_worker=True, channel=channel),
-    )
-    assert result.success
-    channel.request_host.assert_awaited_once_with(
-        HostOp.SERVICE_RESTART, {"service": "Audiosrv"}, timeout=60.0
-    )
-
-
-@pytest.mark.asyncio
-async def test_host_service_restart_without_service_field():
-    channel = MagicMock()
-    channel.request_host = AsyncMock(
-        return_value={"restarted": True, "service": "Audiosrv", "status": "Running"}
-    )
-    result = await HostTool().execute(
-        {"action": "restart_service"},
-        _ctx(as_worker=True, channel=channel),
-    )
-    assert result.success
-    channel.request_host.assert_awaited_once_with(
-        HostOp.SERVICE_RESTART, {"service": "Audiosrv"}, timeout=60.0
-    )
-
-
-@pytest.mark.asyncio
-async def test_host_os_log_via_channel():
-    channel = MagicMock()
-    channel.request_host = AsyncMock(
-        return_value={
-            "platform": "win32",
-            "bounded": True,
-            "entries": [{"time": "t", "level": "Error", "source": "App", "message": "x"}],
-            "note": "os_event_log_bounded_summary",
-        }
-    )
-    result = await HostTool().execute(
-        {
-            "action": "os_log",
-            "source": "App",
-            "level": "error",
-            "minutes": 30,
-            "max_entries": 5,
-        },
-        _ctx(channel=channel),
-    )
-    assert result.success
-    payload = json.loads(result.output)
-    assert payload["bounded"] is True
-    assert "max_entries" not in payload
-    assert "max_bytes" not in payload
-    channel.request_host.assert_awaited_once_with(
-        HostOp.OS_LOG_SUMMARY,
-        {
-            "source": "App",
-            "level": "error",
-            "minutes": 60,
-            "max_entries": 40,
-            "max_bytes": 24_000,
-        },
-        timeout=45.0,
-    )
-
-
-@pytest.mark.asyncio
-async def test_host_os_log_truncated_note_teaches_narrowing():
-    channel = MagicMock()
-    channel.request_host = AsyncMock(
-        return_value={
-            "platform": "win32",
-            "bounded": True,
-            "truncated": True,
-            "entries": [{"time": "t", "level": "Error", "source": "App", "message": "x"}],
-            "max_entries": 40,
-            "max_bytes": 24_000,
-            "note": "os_event_log_bounded_summary",
-        }
-    )
-    result = await HostTool().execute({"action": "os_log"}, _ctx(channel=channel))
-    assert result.success
-    payload = json.loads(result.output)
-    assert payload["truncated"] is True
-    assert "max_entries" not in payload
-    assert "max_bytes" not in payload
-    assert "os_event_log_bounded_summary" not in payload["note"]
-    assert "收窄来源或级别" in payload["note"]
-
-
-def test_normalize_os_log_args_ignores_leftover_minutes():
-    out = normalize_os_log_args(
-        {"minutes": 99999, "max_entries": 999, "max_bytes": 9_999_999, "level": "nope"}
-    )
-    assert out["minutes"] == 60
-    assert out["max_entries"] == 40
-    assert out["max_bytes"] == 24_000
-    assert out["level"] == "warning"
 
 
 @pytest.mark.asyncio
@@ -505,48 +227,25 @@ async def test_host_shell_cloud_does_not_forward_model_cwd():
 def test_host_dynamic_timeout_aligns_today_tiers():
     schema = HostTool().schema
     assert schema.timeout_seconds is None
-    assert "service" not in schema.parameters["properties"]
-    assert "device_id" not in schema.parameters["properties"]
-    assert "max_entries" not in schema.parameters["properties"]
-    assert "max_bytes" not in schema.parameters["properties"]
-    assert "facets" not in schema.parameters["properties"]
-    assert "timeout_seconds" not in schema.parameters["properties"]
-    assert "minutes" not in schema.parameters["properties"]
-    assert host_tool_timeout_seconds({"action": "status"}) == 45.0
-    assert host_tool_timeout_seconds({"action": "status", "facets": ["info"]}) == 45.0
-    assert host_tool_timeout_seconds({"action": "os_log"}) == 45.0
-    assert host_tool_timeout_seconds({"action": "open_settings"}) == 30.0
-    assert host_tool_timeout_seconds({"action": "set_audio"}) == 45.0
-    assert host_tool_timeout_seconds({"action": "restart_service"}) == 60.0
-    assert host_tool_timeout_seconds({"action": "shell"}) == 75.0
-    assert host_tool_timeout_seconds({"action": "shell", "timeout_seconds": 120}) == 75.0
-    assert host_tool_timeout_seconds({"action": "install_package"}) == 630.0
-    assert (
-        host_tool_timeout_seconds({"action": "install_package", "timeout_seconds": 900})
-        == 630.0
-    )
-    assert resolve_tool_timeout(schema, {"action": "install_package"}) == 630.0
-    assert resolve_tool_timeout(schema, {"action": "shell"}) == 75.0
+    assert set(schema.parameters["properties"]) == {"command"}
+    assert schema.parameters["required"] == ["command"]
+    assert host_tool_timeout_seconds({"command": "echo ok"}) == 75.0
+    assert host_tool_timeout_seconds({"command": "winget install Git.Git"}) == 630.0
+    assert resolve_tool_timeout(schema, {"command": "echo ok"}) == 75.0
+    assert resolve_tool_timeout(schema, {"command": "brew install --cask docker"}) == 630.0
 
 
-def test_host_call_requires_approval_by_action():
-    assert not host_call_requires_approval({"action": "status"})
-    assert not host_call_requires_approval({"action": "os_log"})
-    assert host_call_requires_approval({"action": "shell"})
-    assert host_call_requires_approval({"action": "open_settings"})
-    assert host_call_requires_approval({"action": "set_audio"})
-    assert host_call_requires_approval({"action": "restart_service"})
-    assert host_call_requires_approval({"action": "install_package"})
-    assert not host_call_requires_approval({"action": "nope"})
+def test_host_call_requires_approval_for_command():
+    assert host_call_requires_approval({"command": "echo ok"})
+    assert host_call_requires_approval({"command": "winget install Git.Git"})
+    assert not host_call_requires_approval({})
+    assert not host_call_requires_approval({"command": "  "})
 
 
-def test_host_action_description_is_ceo_and_worker():
-    action = HostTool().schema.parameters["properties"]["action"]
-    desc = action["description"]
-    enum = set(action["enum"])
-    assert "仅 worker" not in desc
-    assert "有界探测" not in desc
-    assert {"status", "os_log", "shell"} <= enum
+def test_host_schema_is_command_only():
+    props = HostTool().schema.parameters["properties"]
+    assert set(props) == {"command"}
+    assert "action" not in props
 
 
 @pytest.mark.asyncio
@@ -593,9 +292,9 @@ async def test_channel_maps_host_failure():
         await channel.request_host(HostOp.AUDIO_DEVICES)
 
 
-def test_host_tools_gated_on_desktop_online_and_host_axis():
+def test_host_tools_gated_on_host_axis_not_desktop_heartbeat():
     names_off = {s.name for s in build_worker_registry(desktop_online=False).list_all()}
-    assert "host" not in names_off
+    assert "host" in names_off
     assert names_off.isdisjoint(_RETIRED_HOST_NAMES)
 
     axes_off = PermissionAxes(
@@ -615,6 +314,11 @@ def test_host_tools_gated_on_desktop_online_and_host_axis():
     assert "host" in names_on
     assert names_on.isdisjoint(_RETIRED_HOST_NAMES)
 
+    ceo_offline = {
+        s.name
+        for s in build_ceo_tool_registry(desktop_online=False).list_all()
+    }
+    assert "host" in ceo_offline
     ceo = {
         s.name
         for s in build_ceo_tool_registry(desktop_online=True).list_all()
@@ -643,43 +347,25 @@ def test_host_is_audit_grantable():
 
 
 @pytest.mark.asyncio
-async def test_host_package_install_rejects_non_allowlisted_manager():
-    ctx = _ctx(as_worker=True, channel=MagicMock())
-    result = await HostTool().execute(
-        {"action": "install_package", "manager": "choco", "package_id": "git"},
-        ctx,
-    )
-    assert not result.success
-    assert "winget" in (result.error or "")
-    ctx.desktop_channel.request_host.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_host_package_install_forwards_winget():
+async def test_host_package_install_forwards_as_shell():
     channel = MagicMock()
     channel.request_host = AsyncMock(
         return_value={
             "timed_out": False,
             "exit_code": 0,
-            "manager": "winget",
-            "package_id": "Microsoft.VisualStudioCode",
+            "stdout": "ok",
+            "stderr": "",
         }
     )
     result = await HostTool().execute(
-        {
-            "action": "install_package",
-            "manager": "winget",
-            "package_id": "Microsoft.VisualStudioCode",
-            "timeout_seconds": 120,
-        },
+        {"command": "winget install Microsoft.VisualStudioCode"},
         _ctx(as_worker=True, channel=channel),
     )
     assert result.success
     channel.request_host.assert_awaited_once()
     call = channel.request_host.await_args
-    assert call.args[0] is HostOp.PACKAGE_INSTALL
-    assert call.args[1]["manager"] == "winget"
-    assert call.args[1]["package_id"] == "Microsoft.VisualStudioCode"
+    assert call.args[0] is HostOp.SHELL
+    assert call.args[1]["command"] == "winget install Microsoft.VisualStudioCode"
     assert call.args[1]["timeout_seconds"] == 600
     assert call.kwargs["timeout"] == 630.0
 
@@ -693,7 +379,7 @@ async def test_host_shell_silent_install_fuse():
     )
     assert not result.success
     assert "静默安装" in (result.error or "") or "启发式" in (result.error or "")
-    assert "install_package" in (result.error or "")
+    assert "winget" in (result.error or "")
     ctx.desktop_channel.request_host.assert_not_called()
 
 
@@ -708,22 +394,13 @@ def test_shell_silent_install_and_package_helpers():
     for cmd in samples:
         assert shell_silent_install_blocks(cmd), cmd
     assert shell_silent_install_blocks("echo hi") is None
+    assert shell_silent_install_blocks("winget install Git.Git") is None
     assert shell_fuse_blocks("echo hi") is None
-    assert validate_package_install_args(manager="choco", package_id="git")
-    assert validate_package_install_args(
-        manager="winget", package_id="Microsoft.VisualStudioCode"
-    ) is None
-    assert validate_package_install_args(
-        manager="brew", package_id="docker", cask=True
-    ) is None
-    assert validate_package_install_args(
-        manager="apt", package_id="docker.io", cask=True
-    )
 
 
-def test_host_absent_without_desktop_online():
+def test_host_stays_listed_without_desktop_online():
     names_off = {s.name for s in build_worker_registry(desktop_online=False).list_all()}
-    assert "host" not in names_off
+    assert "host" in names_off
     assert names_off.isdisjoint(_RETIRED_HOST_NAMES)
 
 

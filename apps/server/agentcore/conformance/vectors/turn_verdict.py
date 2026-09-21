@@ -26,7 +26,7 @@ from ._common import _CONV, _COST
 
 
 def _turn_verdict_team_host() -> list[SSEEvent]:
-    """Team graph + attested error: strip owns the verdict on both native encodings."""
+    """Team graph + attested error: strip is the scoreboard; pack hangs in bubble「更多」."""
     agents = [{"id": "w1", "role": "研究员", "thinking": True}]
     plan_runs = [{"id": "r1", "agent_id": "w1", "task": "调研", "depends_on": []}]
     return [

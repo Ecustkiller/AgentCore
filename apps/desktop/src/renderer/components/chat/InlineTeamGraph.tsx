@@ -159,7 +159,7 @@ export function InlineTeamGraph({
     <ExecutionScopeContext.Provider value={messageId}>
       <div
         ref={setHostNode}
-        className="animate-task-card-enter mb-3 overflow-hidden rounded-xl border border-border bg-card"
+        className="animate-task-card-enter overflow-hidden rounded-xl border border-border bg-card"
       >
         {/* 辩论全过程不再内联聊天——归全屏辩论室；聊天正文状态条只留战绩 + 入口 CTA
             （协作图与双视图UX.md §三 两个入口：聊天内嵌 ⇄ 全屏放大）。

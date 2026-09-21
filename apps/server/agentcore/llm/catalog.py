@@ -19,14 +19,12 @@ A」vs「on provider B」vs「on platform free quota」are genuinely different o
 
 * **byok** rows — per provider: vendor presets matched by normalized
   ``base_url`` ``∪`` proxied ``GET /models`` (cached ~10min per
-  ``(provider_id, base_url)``). Probe ``default_model`` is **not** a picker
-  source when a preset matches (it is connection-test only). Unmatched /
-  custom ``base_url`` still uses ``default_model ∪`` discovery so a failed
-  list is not an empty dropdown. Discovery failure / empty still keeps the
-  preset seed (never a 500). After the union, exact ids in the preset's
-  ``hideFromPicker`` are omitted from new rows (retired official aliases);
-  already-pinned profile slots stay runnable. OpenCode Go/Zen ``/responses``
-  ids in the shared off-protocol map
+  ``(provider_id, base_url)``). Unmatched / custom ``base_url`` uses discovery
+  only (empty catalog if the list fails — 模型组合 still accepts a typed id).
+  Discovery failure / empty still keeps the preset seed (never a 500). After
+  the union, exact ids in the preset's ``hideFromPicker`` are omitted from new
+  rows (retired official aliases); already-pinned profile slots stay runnable.
+  OpenCode Go/Zen ``/responses`` ids in the shared off-protocol map
   (:data:`agentcore.llm.byok_provider_presets.BYOK_OFF_PROTOCOL_MODELS`) stay
   listed (not silently dropped) but ``available=False`` with
   :class:`ModelUnavailableReason`. ``/messages`` ids (Claude / Union Alpha /
@@ -41,7 +39,7 @@ A keyless user on a deployment with no platform subsidy gets an EMPTY catalog �
 shows an empty state that guides to 设置·模型配置 (no greyed-out「add a key」guide rows).
 
 BYOK id set = (matched preset: seed ∪ discovery, minus hideFromPicker;
-unmatched: default ∪ discovery). ``model_metadata`` only ENRICHES display fields.
+unmatched: discovery only). ``model_metadata`` only ENRICHES display fields.
 Catalog ``vision`` is stamped there from
 :mod:`agentcore.llm.image_accept`. Pricing reuses the community chain
 (:func:`pricing_for_model`).
@@ -71,6 +69,7 @@ from agentcore.llm.byok_provider_presets import (
     match_byok_provider_preset,
     off_protocol_kind,
     preset_models_for_base_url,
+    seed_model_for_base_url,
 )
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.model_metadata import model_metadata_for
@@ -271,7 +270,7 @@ async def _discover_provider_models(row, creds: LLMCredentials) -> list[str] | N
 def _provider_entries(
     row, creds: LLMCredentials, discovered: list[str] | None
 ) -> list[ModelCatalogEntry]:
-    """One provider's byok rows: seed ∪ discovery (or default ∪ discovery if unmatched)."""
+    """One provider's byok rows: seed ∪ discovery (discovery only if unmatched)."""
     presets = preset_models_for_base_url(creds.base_url)
     discovered_ids = discovered if discovered is not None else []
     if match_byok_provider_preset(creds.base_url) is not None:
@@ -280,8 +279,7 @@ def _provider_entries(
         if hidden:
             ids = [mid for mid in ids if mid not in hidden]
     else:
-        current = (creds.default_model or "").strip() or PLATFORM_MODEL_FLASH
-        ids = _dedupe([current, *discovered_ids])
+        ids = _dedupe(list(discovered_ids))
     label = (row.label or "").strip() or None
     entries: list[ModelCatalogEntry] = []
     for mid in ids:
@@ -466,12 +464,15 @@ async def resolve_model_catalog(session: AsyncSession, user_id: str) -> ModelCat
     for row in providers:
         creds = _decrypt_provider(row, user_id)
         if creds is None:
-            # Undecryptable provider (rotated master key / corrupt cipher): still surface
-            # its default model row so the settings UI shows the provider, greyed out.
+            # Undecryptable provider (rotated master key / corrupt cipher): still
+            # surface a preset seed row so settings shows the 服务商, greyed out.
+            seed = seed_model_for_base_url(row.base_url)
+            if not seed:
+                continue
             label = (row.label or "").strip() or None
             _add(
                 _entry(
-                    (row.default_model or "").strip() or PLATFORM_MODEL_FLASH,
+                    seed,
                     origin="byok",
                     available=False,
                     credential_source="user",

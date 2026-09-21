@@ -46,6 +46,11 @@ def _stub_prepare_io(monkeypatch, *, on_attach, on_registry) -> None:
     monkeypatch.setattr(
         "agentcore.runtime.pipeline.prepare.resolve_desk_folder_label", _no_desk_label
     )
+
+    async def _fake_router(*_a, **_k):
+        return object()
+
+    monkeypatch.setattr("agentcore.runtime.pipeline.build_turn_router", _fake_router)
     monkeypatch.setattr(
         "agentcore.runtime.pipeline.prepare.build_worker_registry",
         on_registry,

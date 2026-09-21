@@ -38,9 +38,8 @@ def test_team_position_block_four_dag_shapes():
     # not authors the final artifact) and the terminal-ownership boost (a writer learns
     # it IS the final author) can't silently regress. Also pins A1 (递指针 affordance):
     # the upstream branch — and ONLY it — grants intermediate persist guidance:
-    # task-book artifacts (strict) or self-locate / 不知放哪 → DRAFTS_DIR (free teams);
+    # task-book artifacts (strict) or self-locate into handoff (free teams);
     # never workspace-root findings-<role>.md. Terminal / parallel / solo must NOT get A1.
-    from agentcore.workspace.stage_dirs import DRAFTS_DIR
 
     plan, errs = build_run_plan(
         [
@@ -64,10 +63,9 @@ def test_team_position_block_four_dag_shapes():
     assert "不要自己产出整个最终交付物" in up
     assert "调研员B" in up  # parallel-peer awareness still present
     assert "不一定全是你的活" in up  # request reframed as a team goal, not a mandate
-    # A1 free-team path: self-locate; 不知放哪 → DRAFTS_DIR + descriptive name.
-    # research/ 不再当杂物入口。
-    assert DRAFTS_DIR in up and "自起描述性文件名" in up and "切勿用空路径" in up
-    assert "自定位" in up
+    # A1 free-team path: self-locate; do not invent a dump cabinet.
+    assert "自定位" in up and "切勿用空路径" in up
+    assert "自起描述性文件名" not in up
     assert "findings-" in up
     assert "工作区根" in up
 
@@ -76,9 +74,9 @@ def test_team_position_block_four_dag_shapes():
     term = _build_messages(plan, w, {}, "SYS", "原始请求")[1].content or ""
     assert "你：写手（本职见「你的任务」）" in term
     assert "终端环" in term and "最终交付物" in term
-    assert "先 file_read" in term and "全仓" in term
+    assert "先 read" in term and "全仓" in term
     assert "不要自己产出整个最终交付物" not in term  # not an upstream link
-    assert "自起描述性文件名" not in term  # A1 is upstream-only
+    assert "约定柜" not in term  # A1 is upstream-only
     assert w.sibling_summary == ""  # lone fan-in → no parallel-peer line
 
     # (3) PARALLEL batch (siblings only, no up/down): peer coordination, no flow framing.
@@ -90,7 +88,7 @@ def test_team_position_block_four_dag_shapes():
     assert "你：A（本职见「你的任务」）" in par
     assert "切面：做B" in par
     assert "上游一环" not in par and "终端环" not in par
-    assert "自起描述性文件名" not in par  # no hand-off → no A1 intermediate-persist hint
+    assert "约定柜" not in par  # no hand-off → no A1 intermediate-persist hint
 
     # (4) SOLO single worker (no team): no position block, plain request header.
     solo_plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="s")
@@ -104,7 +102,7 @@ def test_team_position_block_four_dag_shapes():
 
 def test_team_position_a1_respects_pinned_artifacts():
     """A1 with task-book artifacts: strict path, not RESEARCH_DIR free naming."""
-    from agentcore.workspace.stage_dirs import RESEARCH_DIR
+    research_dir = "notes"
 
     plan, errs = build_run_plan(
         [
@@ -114,7 +112,7 @@ def test_team_position_a1_respects_pinned_artifacts():
                 "task": "查A",
                 "deliverable": {
                     "form": "files",
-                    "artifacts": [f"{RESEARCH_DIR}/选型调研报告.md"],
+                    "artifacts": [f"{research_dir}/选型调研报告.md"],
                 },
             },
             {"id": "w", "role": "写手", "task": "写报告", "depends_on": ["r1"]},
@@ -124,7 +122,7 @@ def test_team_position_a1_respects_pinned_artifacts():
     assert errs == []
     up = _build_messages(plan, plan.by_id("pin_r1"), {}, "SYS", "原始请求")[1].content or ""
     assert "严格按任务书路径" in up
-    assert f"{RESEARCH_DIR}/选型调研报告.md" in up
+    assert f"{research_dir}/选型调研报告.md" in up
     assert "自起描述性文件名" not in up
     assert "findings-" not in up
 
@@ -336,6 +334,20 @@ def test_captain_context_blocks_channels_order_and_single_source():
     assert blocks[-1].body == "帮我润色这段话。"
 
 
+def test_captain_history_omits_turn_envelope():
+    history = [
+        {"role": "user", "content": "[系统提示]\n<运行时>\n当前日期：2026-09-20 UTC\n</运行时>"},
+        {"role": "user", "content": "你好"},
+        {"role": "assistant", "content": "你好，有什么可以帮你？"},
+    ]
+    blocks = _build_captain_context_blocks("你是 CEO。", history, "下一问")
+    assert [b.channel for b in blocks] == ["system", "history", "request"]
+    assert "[系统提示]" not in blocks[1].body
+    assert "<运行时>" not in blocks[1].body
+    assert blocks[1].body == "用户：你好\n\nCEO：你好，有什么可以帮你？"
+    assert blocks[-1].body == "下一问"
+
+
 def test_captain_context_blocks_first_turn_omits_history():
     # A fresh conversation (no prior turns) → only system + request, no empty history block.
     blocks = _build_captain_context_blocks("你是 CEO。", [], "第一条消息")
@@ -430,12 +442,12 @@ def test_captain_system_block_concatenates_envelope_xml():
         {
             "type": "function",
             "function": {
-                "name": "file_read",
+                "name": "read",
                 "description": "读文件",
                 "parameters": {
                     "type": "object",
-                    "properties": {"path": {"type": "string"}},
-                    "required": ["path"],
+                    "properties": {"file_path": {"type": "string"}},
+                    "required": ["file_path"],
                 },
             },
         }
@@ -452,9 +464,9 @@ def test_captain_system_block_concatenates_envelope_xml():
     )
     assert sink[0].channel == "system"
     assert sink[1].channel == "tools"
-    assert "**file_read**" in sink[1].body
+    assert "**read**" in sink[1].body
     user = msgs[1].content or ""
-    assert "**file_read**" not in user
+    assert "**read**" not in user
     assert "## 本回合工具" not in user
     material = _build_context_blocks(_plan(spec), spec, {}, "原始请求", None)
     assert [b.channel for b in sink[2:]] == [b.channel for b in material]
@@ -492,3 +504,25 @@ def test_build_messages_omits_retired_working_set_xml():
     system = msgs[0].content or ""
     assert "<工作集>" not in system
     assert "正文以磁盘为准" not in system
+
+
+def test_worker_opening_envelope_is_user_prefix_not_system():
+    spec = RunSpec(run_id="x", agent_id="x", role="调研员", task="t")
+    env = "[系统提示]\n<工作区>\n执行：云端\n</工作区>"
+    sink: list[ContextBlock] = []
+    msgs = _build_messages(
+        _plan(spec),
+        spec,
+        {},
+        "SYS",
+        "原始请求",
+        blocks_sink=sink,
+        turn_envelope=env,
+    )
+    system = msgs[0].content or ""
+    user = msgs[1].content or ""
+    assert system == "SYS"
+    assert "<工作区>" not in system
+    assert user.startswith(env)
+    assert "你的任务" in user
+    assert any(b.channel == "envelope" for b in sink)

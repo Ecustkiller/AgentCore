@@ -1,11 +1,7 @@
-"""Unit tests for GitHub-only structured create_pr (G4)."""
+"""Unit tests for GitHub pull-request helpers and the run-command confirm."""
 
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -19,9 +15,6 @@ from agentcore.workspace.github_pr import (
     parse_github_remote_url,
     resolve_github_token,
 )
-
-_needs_git = pytest.mark.skipif(not shutil.which("git"), reason="git not installed")
-_GIT_ENV = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
 
 
 @pytest.mark.parametrize(
@@ -202,183 +195,10 @@ async def test_fetch_default_branch() -> None:
     assert result == "develop"
 
 
-def _init_githubish_repo(path: Path, *, remote_url: str) -> Path:
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["git", "init", "-b", "feature"],
-        cwd=path,
-        check=True,
-        env=_GIT_ENV,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "config", "user.email", "t@e.com"],
-        cwd=path,
-        check=True,
-        env=_GIT_ENV,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "config", "user.name", "T"],
-        cwd=path,
-        check=True,
-        env=_GIT_ENV,
-        capture_output=True,
-    )
-    (path / "a.txt").write_text("x\n", encoding="utf-8")
-    subprocess.run(
-        ["git", "add", "a.txt"], cwd=path, check=True, env=_GIT_ENV, capture_output=True
-    )
-    subprocess.run(
-        ["git", "commit", "-m", "init"],
-        cwd=path,
-        check=True,
-        env=_GIT_ENV,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "remote", "add", "origin", remote_url],
-        cwd=path,
-        check=True,
-        env=_GIT_ENV,
-        capture_output=True,
-    )
-    return path
+def test_gh_pr_create_always_confirms() -> None:
+    from agentcore.runtime.always_confirm import requires_always_confirm
 
-
-def _worker_ctx(workspace: Path):
-    from agentcore.tools.protocol import ToolContext
-    from agentcore.tools.sandbox.subprocess import SubprocessSandbox
-    from agentcore.workspace.server import ServerWorkspace
-    from agentcore.workspace.write_claims import WriteCoordinator
-
-    return ToolContext.create(
-        execution_id="e",
-        run_id="s",
-        agent_id="worker",
-        backend=ServerWorkspace(root=workspace, sandbox=SubprocessSandbox()),
-        user_id="u1",
-        write_coordinator=WriteCoordinator(),
-    )
-
-
-@_needs_git
-@pytest.mark.asyncio
-async def test_git_tool_create_pr_unauthenticated(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from agentcore.tools.builtin.git_ops import GitTool
-
-    repo = _init_githubish_repo(
-        tmp_path / "repo", remote_url="https://github.com/acme/demo.git"
-    )
-
-    async def _no_tok(*, user_id: str | None) -> None:
-        return None
-
-    monkeypatch.setattr(
-        "agentcore.workspace.github_pr.resolve_github_token",
-        _no_tok,
-    )
-
-    result = await GitTool().execute(
-        {"subcommand": "create_pr", "title": "Hello"},
-        _worker_ctx(repo),
-    )
-    assert result.success is False
-    assert result.metadata and result.metadata.get("code") == "unauthenticated"
-    assert "Git 凭据" in (result.error or "")
-
-
-@_needs_git
-@pytest.mark.asyncio
-async def test_git_tool_create_pr_not_github(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from agentcore.tools.builtin.git_ops import GitTool
-
-    repo = _init_githubish_repo(
-        tmp_path / "repo", remote_url="https://gitlab.com/acme/demo.git"
-    )
-
-    async def _tok(*, user_id: str | None) -> str:
-        return "tok"
-
-    monkeypatch.setattr(
-        "agentcore.workspace.github_pr.resolve_github_token",
-        _tok,
-    )
-
-    result = await GitTool().execute(
-        {"subcommand": "create_pr", "title": "Hello"},
-        _worker_ctx(repo),
-    )
-    assert result.success is False
-    assert result.metadata and result.metadata.get("code") == "not_github"
-
-
-@_needs_git
-@pytest.mark.asyncio
-async def test_git_tool_create_pr_success_mocked(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from agentcore.tools.builtin.git_ops import GitTool
-
-    repo = _init_githubish_repo(
-        tmp_path / "repo", remote_url="https://github.com/acme/demo.git"
-    )
-
-    async def _tok(*, user_id: str | None) -> str:
-        return "tok"
-
-    async def _create(**kwargs: Any) -> CreatePullRequestOk:
-        assert kwargs["owner"] == "acme"
-        assert kwargs["repo"] == "demo"
-        assert kwargs["title"] == "Hello"
-        assert kwargs["head"] == "feature"
-        assert kwargs["base"] == "main"
-        return CreatePullRequestOk(
-            html_url="https://github.com/acme/demo/pull/7",
-            number=7,
-            title="Hello",
-            base="main",
-            head="feature",
-        )
-
-    monkeypatch.setattr(
-        "agentcore.workspace.github_pr.resolve_github_token",
-        _tok,
-    )
-    monkeypatch.setattr(
-        "agentcore.workspace.github_pr.create_pull_request",
-        _create,
-    )
-
-    result = await GitTool().execute(
-        {
-            "subcommand": "create_pr",
-            "title": "Hello",
-            "base": "main",
-            "head": "main",
-        },
-        _worker_ctx(repo),
-    )
-    assert result.success is True
-    assert "https://github.com/acme/demo/pull/7" in (result.output or "")
-    assert result.metadata and result.metadata.get("pr_url") == (
-        "https://github.com/acme/demo/pull/7"
-    )
-
-
-def test_git_call_is_write_create_pr() -> None:
-    from agentcore.core.types import ToolApproval
-    from agentcore.runtime.approvals import tool_call_requires_approval
-    from agentcore.tools.builtin.git_ops import git_call_is_write
-
-    assert git_call_is_write({"subcommand": "create_pr", "title": "x"}) is True
-    assert tool_call_requires_approval(
-        "git", ToolApproval.NEVER, {"subcommand": "create_pr", "title": "x"}
-    )
+    assert requires_always_confirm("run", {"command": "gh pr create --title x"})
 
 
 def test_create_pr_always_prompts_like_push() -> None:
@@ -400,11 +220,10 @@ def test_create_pr_always_prompts_like_push() -> None:
         delegation_grantable_tools=delegation_grantable_tool_names(),
         permission_axes=recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT),
     )
+    from agentcore.runtime.always_confirm import requires_always_confirm
+
     assert gate.will_prompt(
-        tool_name="git",
-        arguments={"subcommand": "create_pr", "title": "x"},
+        tool_name="run",
+        arguments={"command": "gh pr create --title x"},
     )
-    assert not gate.will_prompt(
-        tool_name="git",
-        arguments={"subcommand": "commit", "message": "x"},
-    )
+    assert not requires_always_confirm("run", {"command": "git commit -m x"})

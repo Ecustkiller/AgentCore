@@ -59,7 +59,7 @@ describe("parseSearchHits · code_search", () => {
       "      return 1",
       "  score=0.91",
       "",
-      "（共 1 条结果；用 file_read path offset/limit 查看全文）",
+      "（共 1 条结果；用 read file_path offset/limit 查看全文）",
     ].join("\n");
     const segs = parseSearchHits(text, "code_search");
     expect(segs[0]).toEqual({

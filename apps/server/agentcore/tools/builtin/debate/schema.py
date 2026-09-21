@@ -63,11 +63,8 @@ _STANCE_RETRY_TIP = (
     "请改写成一句立场倾向后重试本工具。"
 )
 
-# Schema layer: short trigger. 入口分流 HOW → debate_and_review skill（不在此逐句双写）。
-DEBATE_DESCRIPTION = (
-    "用户点名才开：主持人驱动结构化正反辩论，交回【决策简报+交锋叙事线】（非终结）。"
-    "HOW→consult(debate_and_review)。"
-)
+# Schema layer: 入口合同。不主动开、仅推荐；HOW 不另立 consult 手册。
+DEBATE_DESCRIPTION = "不主动启动仅推荐：结构化正反辩论。"
 
 DEBATE_PARAMETERS = {
     "type": "object",
@@ -84,7 +81,7 @@ DEBATE_PARAMETERS = {
                 "properties": {
                     "key": {
                         "type": "string",
-                        "description": "唯一英文短词（如 pro/con）。",
+                        "description": "省略由引擎编号。",
                     },
                     "name": {
                         "type": "string",
@@ -103,19 +100,16 @@ DEBATE_PARAMETERS = {
                         ),
                     },
                 },
-                "required": ["key", "name", "stance"],
+                "required": ["name", "stance"],
             },
         },
         "cross_model": {
             "type": "boolean",
-            "description": (
-                "仅说「跨模型」未点名时置 true 且各方 model 留空→默认对阵；"
-                "无本旗标=同模型场。"
-            ),
+            "description": "未点名各方模型时的跨模型对阵。",
         },
         "background": {
             "type": "string",
-            "description": "可选。赛前客观事实。",
+            "description": "赛前客观事实。",
         },
         "moderator_model": {
             "type": "string",
@@ -166,20 +160,33 @@ def validate_stance(stance: str, *, side_key: str = "") -> str | None:
     return None
 
 
+def _mint_side_key(seen: set[str]) -> str:
+    n = 1
+    while True:
+        cand = f"s{n}"
+        if cand not in seen:
+            return cand
+        n += 1
+
+
 def parse_sides(raw: Any) -> tuple[list[DebateSide], str]:
-    """把 sides 原始数组解析为 :class:`DebateSide` 列表；返回 (sides, 错误信息)。"""
+    """把 sides 原始数组解析为 :class:`DebateSide` 列表；返回 (sides, 错误信息)。
+
+    Fill-in ``key`` is optional; omitted keys are ``s1`` / ``s2`` / … in
+    array order. Leftover unique keys still win. Does not slugify ``name``.
+    """
     if not isinstance(raw, list) or len(raw) < 2:
-        return [], "debate 需要 sides（参与方数组，至少 2 个，每个含 key/name/stance）。"
+        return [], "debate 需要 sides（参与方数组，至少 2 个，每个含 name/stance）。"
     sides: list[DebateSide] = []
     seen: set[str] = set()
     for item in raw:
         if not isinstance(item, dict):
             continue
-        key = str(item.get("key") or "").strip()
         name = str(item.get("name") or "").strip()
         stance = str(item.get("stance") or "").strip()
-        if not key or not name or not stance:
+        if not name or not stance:
             continue
+        key = str(item.get("key") or "").strip() or _mint_side_key(seen)
         if key in seen:
             return [], f"sides 的 key 重复：`{key}`（每个参与方需唯一 key）。"
         stance_err = validate_stance(stance, side_key=key)
@@ -217,7 +224,7 @@ def parse_sides(raw: Any) -> tuple[list[DebateSide], str]:
             )
         )
     if len(sides) < 2:
-        return [], "debate 至少需要 2 个有效参与方（每个含非空 key/name/stance）。"
+        return [], "debate 至少需要 2 个有效参与方（每个含非空 name/stance）。"
     return sides, ""
 
 

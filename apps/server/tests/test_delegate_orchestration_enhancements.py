@@ -75,19 +75,19 @@ def test_projected_write_args_carry_nothing_worth_echoing():
     """参数槽只剩 path：不是可提交载荷，也就没有可照抄的东西。"""
     from agentcore.tools.cleared_write_stub import LANDED_STATUS_TOOL
 
-    args = json.dumps({"path": "docs/spec.md", "content": "X" * 2000}, ensure_ascii=False)
+    args = json.dumps({"file_path": "docs/spec.md", "content": "X" * 2000}, ensure_ascii=False)
     projected = write_args_identity(args)
-    assert json.loads(projected) == {"path": "docs/spec.md"}
+    assert json.loads(projected) == {"file_path": "docs/spec.md"}
     # 历代被回灌过的形态一个都不许再出现在参数槽里。
     for bait in ("status", "landed", "via", "chars", "_landed_summary", "_cleared", "[已清理]"):
         assert bait not in projected
     # Constant kept for residual-imitation rejection only — never a projected name.
     assert LANDED_STATUS_TOOL == "_write_landed"
-    assert LANDED_STATUS_TOOL not in {"file_write", "str_replace"}
+    assert LANDED_STATUS_TOOL not in {"write", "edit"}
 
 
 def test_projected_str_replace_drops_body_keys():
-    """str_replace 清参：old/new 全部消失，正文不回流参数槽。"""
+    """edit 清参：old/new 全部消失，正文不回流参数槽。"""
     anchor = (
         "- 本轮检索未获得阿里 AI 板块单独营收数据（阿里整体财报口径以集团为主），"
         "标注为待核实。\n\n---\n"
@@ -95,14 +95,14 @@ def test_projected_str_replace_drops_body_keys():
     body = "## 百度\n" + ("段落内容。" * 80)
     args = json.dumps(
         {
-            "path": "research/ai_cn_notes.md",
+            "file_path": "research/ai_cn_notes.md",
             "old_string": anchor,
             "new_string": anchor + body,
         },
         ensure_ascii=False,
     )
     projected = write_args_identity(args)
-    assert json.loads(projected) == {"path": "research/ai_cn_notes.md"}
+    assert json.loads(projected) == {"file_path": "research/ai_cn_notes.md"}
     assert body not in projected
     assert "[已清理" not in projected
     # 规模落在结果侧，供模型判断改法（整写 vs 定点替换）。
@@ -129,7 +129,7 @@ def test_landed_result_note_keeps_html_structure():
     assert "app" in summary and "cta" in summary
     assert "hero" in summary and "btn" in summary and "primary" in summary
 
-    args = json.dumps({"path": "index.html", "content": html}, ensure_ascii=False)
+    args = json.dumps({"file_path": "index.html", "content": html}, ensure_ascii=False)
     note = landed_result_note(args, len(html))
     assert note is not None
     assert "classes=[" in note and "hero" in note and "primary" in note
@@ -153,9 +153,9 @@ def test_project_cleared_write_args_collapses_completed_writes():
                 ToolCall(
                     id=call_id,
                     function=ToolCallFunction(
-                        name="file_write",
+                        name="write",
                         arguments=json.dumps(
-                            {"path": "docs/a.md", "content": big}, ensure_ascii=False
+                            {"file_path": "docs/a.md", "content": big}, ensure_ascii=False
                         ),
                     ),
                 )
@@ -168,9 +168,9 @@ def test_project_cleared_write_args_collapses_completed_writes():
     assert out is not msgs
     call = out[1].tool_calls[0]
     # Keep original write name — never emit _write_landed as function.name bait.
-    assert call.function.name == "file_write"
+    assert call.function.name == "write"
     assert call.function.name != LANDED_STATUS_TOOL
-    assert json.loads(call.function.arguments) == {"path": "docs/a.md"}
+    assert json.loads(call.function.arguments) == {"file_path": "docs/a.md"}
     assert big not in call.function.arguments
     # 规模落在结果侧，原结果文案保留。
     assert out[2].role == "tool"
@@ -184,7 +184,7 @@ def test_project_cleared_write_args_collapses_completed_writes():
     # 幂等：再投影一次不得二次追加摘要，也不得改动参数。
     out2 = project_cleared_write_args(out, min_chars=100, keep_recent=0)
     assert out2[1].tool_calls[0].function.arguments == call.function.arguments
-    assert out2[1].tool_calls[0].function.name == "file_write"
+    assert out2[1].tool_calls[0].function.name == "write"
     assert out2[2].content == out[2].content
 
 
@@ -202,10 +202,10 @@ def test_project_cleared_write_args_str_replace_readonly_summary():
                 ToolCall(
                     id=call_id,
                     function=ToolCallFunction(
-                        name="str_replace",
+                        name="edit",
                         arguments=json.dumps(
                             {
-                                "path": "notes.md",
+                                "file_path": "notes.md",
                                 "old_string": anchor,
                                 "new_string": anchor + big,
                             },
@@ -220,9 +220,9 @@ def test_project_cleared_write_args_str_replace_readonly_summary():
     out = project_cleared_write_args(msgs, min_chars=100, keep_recent=0)
     assert out is not msgs
     call = out[0].tool_calls[0]
-    assert call.function.name == "str_replace"
+    assert call.function.name == "edit"
     assert call.function.name != LANDED_STATUS_TOOL
-    assert json.loads(call.function.arguments) == {"path": "notes.md"}
+    assert json.loads(call.function.arguments) == {"file_path": "notes.md"}
     assert big not in call.function.arguments
     assert "已替换 notes.md" in out[1].content
     assert big not in out[1].content
@@ -236,9 +236,9 @@ def test_project_cleared_write_args_migrates_legacy_write_landed_name():
     status = json.dumps(
         {
             "status": "landed",
-            "via": "file_write",
+            "via": "write",
             "chars": 900,
-            "path": "docs/a.md",
+            "file_path": "docs/a.md",
             "note": "已写入",
         },
         ensure_ascii=False,
@@ -257,9 +257,9 @@ def test_project_cleared_write_args_migrates_legacy_write_landed_name():
     ]
     out = project_cleared_write_args(msgs, min_chars=100)
     assert out is not msgs
-    assert out[0].tool_calls[0].function.name == "file_write"
+    assert out[0].tool_calls[0].function.name == "write"
     assert out[0].tool_calls[0].function.name != LANDED_STATUS_TOOL
-    assert json.loads(out[0].tool_calls[0].function.arguments)["via"] == "file_write"
+    assert json.loads(out[0].tool_calls[0].function.arguments)["via"] == "write"
 
 
 def test_project_cleared_write_args_skips_pending_write():
@@ -272,8 +272,8 @@ def test_project_cleared_write_args_skips_pending_write():
                 ToolCall(
                     id=call_id,
                     function=ToolCallFunction(
-                        name="file_write",
-                        arguments=json.dumps({"path": "a.md", "content": "Y" * 800}),
+                        name="write",
+                        arguments=json.dumps({"file_path": "a.md", "content": "Y" * 800}),
                     ),
                 )
             ],
@@ -283,12 +283,12 @@ def test_project_cleared_write_args_skips_pending_write():
 
 
 def _write_round(
-    call_id: str, path: str, body: str, *, tool: str = "file_write"
+    call_id: str, path: str, body: str, *, tool: str = "write"
 ) -> list[LLMMessage]:
-    if tool == "str_replace":
-        args = {"path": path, "old_string": "OLD_MARK", "new_string": body}
+    if tool == "edit":
+        args = {"file_path": path, "old_string": "OLD_MARK", "new_string": body}
     else:
-        args = {"path": path, "content": body}
+        args = {"file_path": path, "content": body}
     return [
         LLMMessage(
             role="assistant",
@@ -310,7 +310,7 @@ def test_project_cleared_write_args_keeps_sole_completed_write():
     """默认 keep_recent=1：刚落下的唯一一刀全文留着，供下一刀当 old_string。"""
     body = "章节正文" * 200
     msgs = [LLMMessage(role="user", content="go")] + _write_round(
-        "s1", "notes.md", body, tool="str_replace"
+        "s1", "notes.md", body, tool="edit"
     )
     out = project_cleared_write_args(msgs, min_chars=100)
     assert out is msgs
@@ -326,13 +326,13 @@ def test_project_cleared_write_args_collapses_older_keeps_recent():
     msgs = (
         [LLMMessage(role="user", content="go")]
         + _write_round("w0", "a.md", old_body)
-        + _write_round("w1", "a.md", new_body, tool="str_replace")
+        + _write_round("w1", "a.md", new_body, tool="edit")
     )
     out = project_cleared_write_args(msgs, min_chars=100)
     assert out is not msgs
     older = json.loads(out[1].tool_calls[0].function.arguments)
     recent = json.loads(out[3].tool_calls[0].function.arguments)
-    assert older == {"path": "a.md"}
+    assert older == {"file_path": "a.md"}
     assert old_body not in out[1].tool_calls[0].function.arguments
     assert "已落盘" in out[2].content
     assert recent["new_string"] == new_body
@@ -364,7 +364,7 @@ def test_project_cleared_write_args_collapses_after_non_write_round():
     out = project_cleared_write_args(msgs, min_chars=100)
     assert out is not msgs
     collapsed = json.loads(out[1].tool_calls[0].function.arguments)
-    assert collapsed == {"path": "src/main.ts"}
+    assert collapsed == {"file_path": "src/main.ts"}
     assert body not in out[1].tool_calls[0].function.arguments
     assert "已落盘" in (out[2].content or "")
 
@@ -380,15 +380,15 @@ def test_project_cleared_write_args_keeps_parallel_writes_in_same_round():
                 ToolCall(
                     id="p0",
                     function=ToolCallFunction(
-                        name="str_replace",
-                        arguments=json.dumps({"path": "a.ts", "old_string": "x", "new_string": a}),
+                        name="edit",
+                        arguments=json.dumps({"file_path": "a.ts", "old_string": "x", "new_string": a}),
                     ),
                 ),
                 ToolCall(
                     id="p1",
                     function=ToolCallFunction(
-                        name="str_replace",
-                        arguments=json.dumps({"path": "b.ts", "old_string": "y", "new_string": b}),
+                        name="edit",
+                        arguments=json.dumps({"file_path": "b.ts", "old_string": "y", "new_string": b}),
                     ),
                 ),
             ],
@@ -406,38 +406,38 @@ def test_project_cleared_write_args_keeps_parallel_writes_in_same_round():
 
 def test_cleared_write_stub_rejection_exact_markers_only():
     """硬拒仅命中 stub / landed 形；正常短文 / 含「已清理」散文不拦。"""
-    assert cleared_write_stub_rejection({"path": "a.md", "content": "[已清理]"}) is not None
+    assert cleared_write_stub_rejection({"file_path": "a.md", "content": "[已清理]"}) is not None
     assert (
         cleared_write_stub_rejection(
-            {"path": "a.md", "old_string": "x", "new_string": "[已清理·须重填]"}
+            {"file_path": "a.md", "old_string": "x", "new_string": "[已清理·须重填]"}
         )
         is not None
     )
     assert (
         cleared_write_stub_rejection(
-            {"path": "a.md", "_landed_summary": "只读", "status": "landed"}
+            {"file_path": "a.md", "_landed_summary": "只读", "status": "landed"}
         )
         is not None
     )
     assert (
-        cleared_write_stub_rejection({"path": "a.md", "content": "hi", "_cleared": "legacy"})
+        cleared_write_stub_rejection({"file_path": "a.md", "content": "hi", "_cleared": "legacy"})
         is not None
     )
     # Compact landed-status echo under a write tool name.
     landed_err = cleared_write_stub_rejection(
-        {"path": "a.md", "status": "landed", "via": "file_write", "chars": 100}
+        {"file_path": "a.md", "status": "landed", "via": "write", "chars": 100}
     )
     assert landed_err is not None
     assert "已落盘" in landed_err
     assert "不是可提交写参" in landed_err or "落盘" in landed_err
     # Normal short / prose must pass.
-    assert cleared_write_stub_rejection({"path": "a.md", "content": "短文"}) is None
+    assert cleared_write_stub_rejection({"file_path": "a.md", "content": "短文"}) is None
     assert (
-        cleared_write_stub_rejection({"path": "a.md", "content": "本节已清理历史遗留问题。"})
+        cleared_write_stub_rejection({"file_path": "a.md", "content": "本节已清理历史遗留问题。"})
         is None
     )
     assert (
-        cleared_write_stub_rejection({"path": "a.md", "old_string": "a", "new_string": "b"}) is None
+        cleared_write_stub_rejection({"file_path": "a.md", "old_string": "a", "new_string": "b"}) is None
     )
 
 
@@ -454,8 +454,8 @@ def test_landed_status_name_rejection_is_explicit():
     assert "落盘" in err
     assert "不是可调用工具" in err
     assert "not_found" not in err.lower()
-    assert "file_read" in err
-    assert landed_status_name_rejection("file_write") is None
+    assert "read" in err
+    assert landed_status_name_rejection("write") is None
     assert landed_status_name_rejection("web_search") is None
 
 
@@ -464,21 +464,21 @@ def test_landed_summary_echo_fingerprint_collapses_per_path():
     from agentcore.runtime.loop_controller import fingerprint_tool_call
 
     fp_a = fingerprint_tool_call(
-        "file_write",
+        "write",
         json.dumps(
             {
-                "path": "docs/a.md",
-                "_landed_summary": "【已落盘摘要·只读】file_write 已成功写入 A",
+                "file_path": "docs/a.md",
+                "_landed_summary": "【已落盘摘要·只读】write 已成功写入 A",
                 "status": "landed",
             },
             ensure_ascii=False,
         ),
     )
     fp_b = fingerprint_tool_call(
-        "file_write",
+        "write",
         json.dumps(
             {
-                "path": "docs\\a.md",
+                "file_path": "docs\\a.md",
                 "_landed_summary": "完全不同的摘要正文 B · 约 9000 字符",
                 "status": "landed",
             },
@@ -486,24 +486,24 @@ def test_landed_summary_echo_fingerprint_collapses_per_path():
         ),
     )
     fp_stub = fingerprint_tool_call(
-        "file_write",
-        json.dumps({"path": "docs/a.md", "content": "[已清理]"}, ensure_ascii=False),
+        "write",
+        json.dumps({"file_path": "docs/a.md", "content": "[已清理]"}, ensure_ascii=False),
     )
     fp_other = fingerprint_tool_call(
-        "file_write",
+        "write",
         json.dumps(
             {
-                "path": "docs/other.md",
-                "_landed_summary": "【已落盘摘要·只读】file_write 已成功写入 A",
+                "file_path": "docs/other.md",
+                "_landed_summary": "【已落盘摘要·只读】write 已成功写入 A",
                 "status": "landed",
             },
             ensure_ascii=False,
         ),
     )
     fp_ok = fingerprint_tool_call(
-        "file_write",
+        "write",
         json.dumps(
-            {"path": "docs/a.md", "content": "正常完整正文，不是摘要。"},
+            {"file_path": "docs/a.md", "content": "正常完整正文，不是摘要。"},
             ensure_ascii=False,
         ),
     )
@@ -514,12 +514,12 @@ def test_landed_summary_echo_fingerprint_collapses_per_path():
 
     # Compact landed-status echo (no _landed_summary) also collapses per path.
     fp_status = fingerprint_tool_call(
-        "file_write",
+        "write",
         json.dumps(
             {
-                "path": "docs/a.md",
+                "file_path": "docs/a.md",
                 "status": "landed",
-                "via": "file_write",
+                "via": "write",
                 "chars": 1200,
             },
             ensure_ascii=False,
@@ -528,10 +528,10 @@ def test_landed_summary_echo_fingerprint_collapses_per_path():
     assert fp_status == fp_a
 
     fp_sr_a = fingerprint_tool_call(
-        "str_replace",
+        "edit",
         json.dumps(
             {
-                "path": "docs/a.md",
+                "file_path": "docs/a.md",
                 "_landed_summary": "摘要一",
                 "status": "landed",
             },
@@ -539,10 +539,10 @@ def test_landed_summary_echo_fingerprint_collapses_per_path():
         ),
     )
     fp_sr_b = fingerprint_tool_call(
-        "str_replace",
+        "edit",
         json.dumps(
             {
-                "path": "docs/a.md",
+                "file_path": "docs/a.md",
                 "old_string": "[已清理]",
                 "new_string": "x",
             },
@@ -553,7 +553,7 @@ def test_landed_summary_echo_fingerprint_collapses_per_path():
 
 
 def test_landed_summary_echo_validation_stop_names_file_read():
-    """摘要回灌：首次拒写即 path-stop（点名 file_read→str_replace/真文）；写工具保持可用。"""
+    """摘要回灌：首次拒写即 path-stop（点名 read→edit/真文）；写工具保持可用。"""
     from agentcore.runtime.loop_controller import (
         LoopController,
         ToolAttempt,
@@ -562,7 +562,7 @@ def test_landed_summary_echo_validation_stop_names_file_read():
     from agentcore.tools.cleared_write_stub import cleared_write_stub_rejection
 
     args = {
-        "path": "docs/a.md",
+        "file_path": "docs/a.md",
         "_landed_summary": "【已落盘摘要·只读】不可当写盘参数",
         "status": "landed",
     }
@@ -570,15 +570,15 @@ def test_landed_summary_echo_validation_stop_names_file_read():
     assert err is not None
     assert "已落盘摘要" in err
     assert "docs/a.md" in err
-    assert "file_read" in err
+    assert "read" in err
     assert "真文" in err
-    assert "str_replace" in err
-    fp = fingerprint_tool_call("file_write", json.dumps(args, ensure_ascii=False))
+    assert "edit" in err
+    fp = fingerprint_tool_call("write", json.dumps(args, ensure_ascii=False))
 
     c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
     rej = ToolAttempt(
         fp,
-        "file_write",
+        "write",
         success=False,
         contract_failure=True,
         error_summary=err,
@@ -589,13 +589,13 @@ def test_landed_summary_echo_validation_stop_names_file_read():
     cb = c.tool_circuit_breaker()
     assert cb.validation_stop is not None
     stop = cb.validation_stop or ""
-    assert "file_read" in stop
+    assert "read" in stop
     assert "真文" in stop
-    assert "str_replace" in stop
-    assert "file_write" in stop
+    assert "edit" in stop
+    assert "write" in stop
     assert "docs/a.md" in stop
     assert cb.disabled == ()
-    assert c.tool_failure_count("file_write") == 0
+    assert c.tool_failure_count("write") == 0
     # 同指纹再撞 → thrash 早停。
     c.record([rej])
     assert c.is_thrashing() or c.take_validation_hard_stop()
@@ -610,9 +610,9 @@ def test_every_landed_rejection_is_recognized_by_early_stop():
 
     # 现投影已不再产出这些形态（参数槽只剩 path），它们仅作为回灌安全网留存。
     shapes = {
-        "landed_status": {"path": "site/main.js", "status": "landed", "chars": 800},
-        "legacy_summary": {"path": "docs/a.md", "_landed_summary": "【已落盘摘要·只读】"},
-        "cleared_body": {"path": "docs/a.md", "content": "[已清理]"},
+        "landed_status": {"file_path": "site/main.js", "status": "landed", "chars": 800},
+        "legacy_summary": {"file_path": "docs/a.md", "_landed_summary": "【已落盘摘要·只读】"},
+        "cleared_body": {"file_path": "docs/a.md", "content": "[已清理]"},
     }
     for label, args in shapes.items():
         err = cleared_write_stub_rejection(args)
@@ -629,7 +629,7 @@ def test_landed_status_echo_gets_one_strike_stop():
     )
     from agentcore.tools.cleared_write_stub import cleared_write_stub_rejection
 
-    args = {"path": "site/main.js", "status": "landed", "chars": 800}
+    args = {"file_path": "site/main.js", "status": "landed", "chars": 800}
     err = cleared_write_stub_rejection(args)
     assert err is not None
     assert "已落盘摘要" not in err  # 走的是 landed-status 分支，不是旧措辞
@@ -638,8 +638,8 @@ def test_landed_status_echo_gets_one_strike_stop():
     c.record(
         [
             ToolAttempt(
-                fingerprint_tool_call("file_write", json.dumps(args, ensure_ascii=False)),
-                "file_write",
+                fingerprint_tool_call("write", json.dumps(args, ensure_ascii=False)),
+                "write",
                 success=False,
                 contract_failure=True,
                 error_summary=err,
@@ -648,7 +648,7 @@ def test_landed_status_echo_gets_one_strike_stop():
         ]
     )
     stop = c.tool_circuit_breaker().validation_stop or ""
-    assert "file_read" in stop
+    assert "read" in stop
     assert "site/main.js" in stop
 
 
@@ -671,15 +671,15 @@ async def test_consult_reuses_turn_cache():
     tool = _handbook_consult()
     token = consulted_memory_cache.set({})
     try:
-        first = await tool.execute({"name": "debate_and_review"}, _ctx())
+        first = await tool.execute({"name": "page_ui"}, _ctx())
         assert first.success
-        assert "未点名" in first.output
+        assert "方向先于像素" in first.output
         assert first.display["origin"] == "system"
         assert "kind" not in first.display
-        assert "debate_and_review" in get_consult_cache()
-        second = await tool.execute({"name": "debate_and_review"}, _ctx())
+        assert "page_ui" in get_consult_cache()
+        second = await tool.execute({"name": "page_ui"}, _ctx())
         assert second.success
-        assert "未点名" in second.output
+        assert "方向先于像素" in second.output
         assert (second.display or {}).get("reused") is True
         assert (second.display or {}).get("origin") == "system"
         assert "kind" not in (second.display or {})
@@ -691,9 +691,9 @@ async def test_consult_reuse_from_frame_omits_origin():
     """Resume-from-frame only restores bodies; display must not invent origin."""
     body = "cached handbook body"
     tool = _handbook_consult()
-    token = consulted_memory_cache.set({"debate_and_review": body})
+    token = consulted_memory_cache.set({"page_ui": body})
     try:
-        result = await tool.execute({"name": "debate_and_review"}, _ctx())
+        result = await tool.execute({"name": "page_ui"}, _ctx())
         assert result.success and result.output == body
         assert (result.display or {}).get("reused") is True
         assert "origin" not in (result.display or {})

@@ -73,7 +73,7 @@ import {
 import { entryKey } from "./workspace";
 
 // 本地回合的审批门（双模式工作区 §十）。开启后，sidecar 引擎对 worker 的「碰真实
-// 机器」工具（file_write / code_execute 等 GRANTABLE）挂起审批，与云端 local 模式同语义——
+// 机器」工具（write / code_execute 等 GRANTABLE）挂起审批，与云端 local 模式同语义——
 // 审批请求随回合事件流回 renderer，用户的决定经 `window.sidecarApi.respond` 结算回这条 stdio
 // 链路（renderer 把统一结算入口 `resolveInteraction` 在本地回合改走 sidecar）。
 const SIDECAR_APPROVALS_ENABLED = true;
@@ -453,6 +453,7 @@ export class SidecarManager {
    * `warmAccountRulesMemory` / `warmMcpDiscover`：ensure 本身不踢；
    * {@link startTurn} / {@link resume}（及显式暖）在有票且该快照键**已过期**时续暖
    * （见 `accountRulesMemoryFreshUntil` / `mcpDiscoverFreshUntil`）；无票跳过不锁死。
+   * {@link warmLlmHttp} 同样不在此处踢，且**不**登记 inflightWarms（不得拖慢开跑）。
    * 回合发 RPC 前 await 在途 warm（失败只记日志）。keepalive 绑 **detached
    * execution 存活期**（`execution_detached` → `execution_completed` 的
    * `turn/event`），不绑 startTurn RPC 在途：CEO 已 pause 返回后团队仍跑时继续续暖。
@@ -742,6 +743,40 @@ export class SidecarManager {
     // 不传 inference：探活只验证环境能起；真实回合的 startTurn 会按回合重发云代理凭据。
     const entry = this.ensure(rootId, subpath, workspaceRoot, undefined);
     await entry.ready;
+  }
+
+  /**
+   * 输入框首次聚焦：ensure + initialize 后踢 ``warmLlmHttp``，把推理 hop 的 TLS
+   * 握在发第一句话之前。带 ``inference`` 以便探活拉起的无票进程也能绑 hop。
+   * **不**登记 inflightWarms——握手失败或慢不得挡住 startTurn。
+   */
+  async warmLlmHttp(
+    rootId: string,
+    subpath: string,
+    workspaceRoot: string,
+    opts: { inference?: SidecarInference; userId?: string } = {},
+  ): Promise<void> {
+    const entry = this.ensure(
+      rootId,
+      subpath,
+      workspaceRoot,
+      opts.inference,
+      opts.userId,
+    );
+    await entry.ready;
+    try {
+      await entry.client.request("warmLlmHttp", {
+        ...(opts.inference ? { inference: opts.inference } : {}),
+        ...(opts.userId?.trim() ? { userId: opts.userId.trim() } : {}),
+      });
+    } catch (err: unknown) {
+      const detail = err instanceof Error ? err.message : String(err);
+      logDesktop({
+        level: "info",
+        event: "sidecar.warm_llm_http_failed",
+        fields: { rootId, detail },
+      });
+    }
   }
 
   /**

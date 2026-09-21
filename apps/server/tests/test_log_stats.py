@@ -206,7 +206,7 @@ def test_collab_drift_pause_resume_uses_terminal_close_not_paused_snapshot():
         ("delegate.started", {}),
         ("delegate.completed", {"escalations": 0, "scope": 0, "scope_ratio": 0.0}),
         ("delegate.started", {}),
-        ("worker.escalate", {"kind": "normal", "blocking": False}),
+        ("worker.escalate", {"reason": "scope"}),
         ("delegate.completed", {"escalations": 1, "scope": 0, "scope_ratio": 0.0}),
         (
             "chat.resume_complete",
@@ -254,3 +254,36 @@ def test_collab_drift_counts_redirect_hot_as_revise():
     drift = log_stats.collab_drift({"t1": rec})
     assert drift["checked_turns"] == 1
     assert drift["by_field"] == {}
+
+
+def test_print_prefix_cache_lists_rewrite_samples(capsys):
+    from agentcore.observability.prefix_cache import BREACH_HISTORY_REWRITE
+
+    log_stats._print_prefix_cache(
+        [
+            {
+                "prefix_breach": "history_growth",
+                "cache_hit_tokens": 900,
+                "cache_miss_tokens": 100,
+                "input_tokens": 1000,
+                "trace_id": "t-grow",
+                "conversation_id": "c-grow",
+            },
+            {
+                "prefix_breach": BREACH_HISTORY_REWRITE,
+                "cache_hit_tokens": 200,
+                "cache_miss_tokens": 800,
+                "input_tokens": 6426,
+                "trace_id": "t-rw1",
+                "conversation_id": "c-rw",
+                "scenario": "chat",
+                "cost_role": "captain",
+            },
+        ],
+        source="llm.call",
+    )
+    out = capsys.readouterr().out
+    assert "t-rw1" in out
+    assert "cid=c-rw" in out
+    assert "in=6426" in out
+    assert "t-grow" not in out

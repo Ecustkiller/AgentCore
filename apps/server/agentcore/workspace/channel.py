@@ -160,7 +160,7 @@ _ERROR_KINDS: dict[str, type[WorkspaceError]] = {
 def raise_op_error(error: dict[str, Any]) -> NoReturn:
     """Re-raise a serialized desktop op failure as its typed ``WorkspaceError``.
 
-    ``AmbiguousMatch`` carries a ``count`` (used in the str_replace message), so it
+    ``AmbiguousMatch`` carries a ``count`` (used in the ``edit`` message), so it
     is reconstructed specially; every other kind maps by name.
     """
     kind = str(error.get("kind", ""))

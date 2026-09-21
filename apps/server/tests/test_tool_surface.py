@@ -167,7 +167,7 @@ async def test_complete_does_not_post_when_declared_cap_is_exceeded(monkeypatch)
         )
 
     monkeypatch.setattr(
-        "agentcore.llm.provider.openai_compatible.outbound_async_client",
+        "agentcore.llm.http_pool.outbound_async_client",
         factory,
     )
     provider = OpenAICompatibleProvider(name="platform", api_key="sk-a", base_url=_GO)
@@ -227,7 +227,7 @@ async def test_byok_leaf_does_not_apply_pool_member_caps(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "agentcore.llm.provider.openai_compatible.outbound_async_client",
+        "agentcore.llm.http_pool.outbound_async_client",
         factory,
     )
     provider = OpenAICompatibleProvider(name="user", api_key="sk-a", base_url=_GO)

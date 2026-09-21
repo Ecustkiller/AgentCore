@@ -3,8 +3,8 @@
 import { FileTreeRowMenu } from "@/components/files/FileTreeRowMenu";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import type { FileNode, FileSource } from "@/lib/fileSource";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/toast", () => ({
   notifySuccess: vi.fn(),
@@ -13,6 +13,10 @@ vi.mock("@/lib/toast", () => ({
   notifyWarning: vi.fn(),
   notifyInfo: vi.fn(),
 }));
+
+afterEach(() => {
+  cleanup();
+});
 
 beforeAll(() => {
   globalThis.ResizeObserver ??= class {
@@ -114,8 +118,24 @@ describe("FileTreeRowMenu 目录下载", () => {
   });
 });
 
+describe("FileTreeRowMenu 系统集成", () => {
+  it("本机源不出现复制路径", async () => {
+    openMenu(
+      { path: "a.md", name: "a.md", isDir: false },
+      stubSource({
+        revealInOsFileManager: vi.fn(),
+        openShellAtPath: vi.fn(),
+        openWithOsDefaultApp: vi.fn(),
+      }),
+    );
+    expect(await screen.findByText("在资源管理器中显示")).toBeTruthy();
+    expect(screen.getByText("在终端打开")).toBeTruthy();
+    expect(screen.queryByText("复制路径")).toBeNull();
+  });
+});
+
 describe("FileTreeRowMenu 导出 Word", () => {
-  it("Markdown 可写源出现两档，正式文书传 official", async () => {
+  it("Markdown 可写源只出现一行，点开后选正式文书传 official", async () => {
     const exportMdToDocx = vi
       .fn()
       .mockResolvedValue({ path: "a.docx", warnings: [] });
@@ -124,19 +144,23 @@ describe("FileTreeRowMenu 导出 Word", () => {
       stubSource({ exportMdToDocx }),
     );
     expect(await screen.findByText(/^导出 Word$/)).toBeTruthy();
-    fireEvent.click(screen.getByText("导出 Word（正式文书）"));
+    expect(screen.queryByText("导出 Word（正式文书）")).toBeNull();
+    fireEvent.click(screen.getByText(/^导出 Word$/));
+    expect(exportMdToDocx).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: /正式文书/ }));
     expect(exportMdToDocx).toHaveBeenCalledWith("a.md", "official");
   });
 
-  it("导出 Word 传 standard", async () => {
+  it("弹窗选技术报告传 standard", async () => {
     const exportMdToDocx = vi
       .fn()
-      .mockResolvedValue({ path: "a.docx", warnings: [] });
+      .mockResolvedValue({ path: "note.docx", warnings: [] });
     openMenu(
       { path: "note.md", name: "note.md", isDir: false },
       stubSource({ exportMdToDocx }),
     );
     fireEvent.click(await screen.findByText(/^导出 Word$/));
+    fireEvent.click(await screen.findByRole("button", { name: /技术报告/ }));
     expect(exportMdToDocx).toHaveBeenCalledWith("note.md", "standard");
   });
 });

@@ -59,7 +59,7 @@ export function notifyError(
   const title = context ?? described.message;
   const description = context ? described.message : undefined;
   // Config remedy (去配置) — a blue info toast with a one-click fix-it action, matching
-  // RetryBanner where the 去配置 affordance is the primary (蓝) action (极简中性：行动=蓝).
+  // Composer failure banner: 去配置 is the primary (蓝) action (极简中性：行动=蓝).
   if (action) {
     toast(title, {
       description,
@@ -96,8 +96,8 @@ export function notifySuccess(
 
 /**
  * Surface a failed *client-side* action whose own thrown message is the
- * user-facing detail — e.g. local FS / IPC ops (在资源管理器中显示 / 用默认程序打开 /
- * 复制路径) whose zh reason ("没有访问权限" …) would otherwise be swallowed by
+ * user-facing detail — e.g. local FS / IPC ops (在资源管理器中显示 / 用默认程序打开)
+ * whose zh reason ("没有访问权限" …) would otherwise be swallowed by
  * {@link notifyError}'s backend-oriented {@link describeError} fallback. Title =
  * `context`; description = the caught error's message verbatim (omitted when empty).
  *

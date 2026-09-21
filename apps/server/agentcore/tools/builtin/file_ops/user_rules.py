@@ -1,4 +1,4 @@
-"""Overlay: ``.agentcore/规则/`` file_* calls land on user-rule documents, not disk."""
+"""Overlay: ``.agentcore/rules/`` file_* calls land on user-rule documents, not disk."""
 
 from __future__ import annotations
 
@@ -320,7 +320,7 @@ async def maybe_user_rule_str_replace(
     if isinstance(applied, TextReplaceNoMatch):
         return _error(
             f"在 {rel_path} 中找不到 old_string；它必须与规则正文完全一致，"
-            "包括空白与缩进。请先 file_read 再 str_replace。",
+            "包括空白与缩进。请先 read 再 edit。",
             start,
             contract_failure=True,
         )
@@ -476,14 +476,14 @@ async def maybe_user_rule_list(
 
 
 def merge_rule_dir_entries(directory: str, entries: list[DirEntry]) -> list[DirEntry]:
-    """Ensure ``.agentcore/规则`` appears when listing ``.agentcore``."""
+    """Ensure ``.agentcore/rules`` appears when listing ``.agentcore``."""
     kind, _name = classify_rule_path(directory)
     if kind != "agentcore_root":
         return entries
     needle = RULES_DIR_REL.replace("\\", "/")
     for entry in entries:
         path = (entry.path or "").replace("\\", "/").rstrip("/")
-        if path == needle or path.endswith("/规则") or path == "规则":
+        if path == needle or path.endswith("/rules") or path == "rules":
             return entries
     merged = list(entries)
     merged.append(DirEntry(path=RULES_DIR_REL, is_dir=True))

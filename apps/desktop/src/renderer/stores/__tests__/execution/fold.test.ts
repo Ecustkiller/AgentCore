@@ -67,7 +67,7 @@ describe("projectExecution (fold)", () => {
         runId: "run-1",
         agentId: "agent-1",
         phase: "tool",
-        toolName: "file_read",
+        toolName: "read",
       },
       {
         t: 4,
@@ -357,7 +357,7 @@ describe("projectExecution (fold)", () => {
         t: 2,
         kind: "run_tool_progress",
         agentId: "agent-1",
-        toolName: "file_write",
+        toolName: "write",
         chars: 800,
       },
       {
@@ -403,7 +403,7 @@ describe("projectExecution (fold)", () => {
         t: 2,
         kind: "run_tool_progress",
         agentId: "agent-1",
-        toolName: "file_write",
+        toolName: "write",
         chars: 40,
       },
       {
@@ -803,9 +803,8 @@ describe("projectExecution (fold)", () => {
         agentId: "agent-1",
         question: "用 Postgres 还是 MySQL?",
         assumption: "暂用 Postgres",
-        blocking: true,
         escalationId: "esc-raised-1",
-        escalationKind: "normal",
+        escalationKind: "scope",
       },
       {
         t: 3,
@@ -818,18 +817,17 @@ describe("projectExecution (fold)", () => {
     ];
     const exec = projectExecution(plan, frames, "running");
     const run1 = exec.runs.find((s) => s.id === "run-1");
-    // Non-blocking: the run still completed despite escalating.
+    // scope/dep: the run still completed despite escalating.
     expect(run1?.status).toBe("completed");
-    // A non-blocking `raised` banner: no resolve target (id null), `raised` status, no answer.
+    // A `raised` graph mark: no resolve target, `raised` status, no answer.
     expect(run1?.escalations).toEqual([
       {
         id: "esc-raised-1",
         question: "用 Postgres 还是 MySQL?",
         assumption: "暂用 Postgres",
-        blocking: true,
         status: "raised",
         answer: null,
-        kind: "normal",
+        kind: "scope",
         questions: [],
       },
     ]);
@@ -846,7 +844,6 @@ describe("projectExecution (fold)", () => {
         agent_id: "agent-1",
         question: "Q?",
         assumption: "A",
-        blocking: false,
       },
     } as SSEEvent);
     expect(frame).toEqual({
@@ -856,13 +853,12 @@ describe("projectExecution (fold)", () => {
       agentId: "agent-1",
       question: "Q?",
       assumption: "A",
-      blocking: false,
       escalationId: "",
-      escalationKind: "normal",
+      escalationKind: "wait",
     });
   });
 
-  // 阻塞式求决策: the blocking-escalate pair (escalation_required → escalation_resolved)
+  // wait 停下等拍板: the wait-escalate pair (escalation_required → escalation_resolved)
   // folds onto the raising run's escalations[]. A worker is sequential ⇒ at most one pending
   // at a time (设计 §4.7); a pending one gates only its own worker, never a sibling.
   it("folds a blocking escalate: pending carries the resolve id, then resolved carries the answer", () => {
@@ -876,10 +872,10 @@ describe("projectExecution (fold)", () => {
         agentId: "agent-1",
         question: "用哪个数据库？",
         assumption: "暂用 Postgres",
-        escalationKind: "normal",
+        escalationKind: "wait",
       },
     ];
-    // Pending: a blocking escalation with its resolve id, status pending, no answer yet.
+    // Pending: a wait escalation with its resolve id, status pending, no answer yet.
     expect(
       projectExecution(plan, frames, "running").runs.find(
         (s) => s.id === "run-1",
@@ -889,10 +885,9 @@ describe("projectExecution (fold)", () => {
         id: "esc-1",
         question: "用哪个数据库？",
         assumption: "暂用 Postgres",
-        blocking: true,
         status: "pending",
         answer: null,
-        kind: "normal",
+        kind: "wait",
         questions: [],
       },
     ]);
@@ -913,10 +908,9 @@ describe("projectExecution (fold)", () => {
       id: "esc-1",
       question: "用哪个数据库？",
       assumption: "暂用 Postgres",
-      blocking: true,
       status: "resolved",
       answer: "用 Postgres。",
-      kind: "normal",
+      kind: "wait",
       questions: [],
     });
   });
@@ -934,7 +928,7 @@ describe("projectExecution (fold)", () => {
         agentId: "agent-1",
         question: "选型需要你拍板",
         assumption: "暂用 Postgres",
-        escalationKind: "normal",
+        escalationKind: "wait",
         questions: [
           {
             id: "q0",
@@ -982,7 +976,7 @@ describe("projectExecution (fold)", () => {
       agentId: "agent-1",
       question: "Q?",
       assumption: "暂用 A",
-      escalationKind: "normal" as const,
+      escalationKind: "wait" as const,
     };
     const unlimited = projectExecution(
       plan,
@@ -1034,7 +1028,7 @@ describe("projectExecution (fold)", () => {
         agentId: "agent-1",
         question: "Q?",
         assumption: "暂用 A",
-        escalationKind: "normal",
+        escalationKind: "wait",
       },
       {
         t: 3,
@@ -1065,7 +1059,7 @@ describe("projectExecution (fold)", () => {
         agentId: "agent-1",
         question: "Q?",
         assumption: "A",
-        escalationKind: "normal",
+        escalationKind: "wait",
       },
     ];
     const exec = projectExecution(plan, frames, "running");
@@ -1089,7 +1083,7 @@ describe("projectExecution (fold)", () => {
         agentId: "agent-1",
         question: "Q1?",
         assumption: "A1",
-        escalationKind: "normal",
+        escalationKind: "wait",
       },
       {
         t: 3,
@@ -1130,17 +1124,15 @@ describe("projectExecution (fold)", () => {
         id: "esc-1",
         question: "Q1?",
         assumption: "A1",
-        blocking: true,
         status: "resolved",
         answer: "答1",
-        kind: "normal",
+        kind: "wait",
         questions: [],
       },
       {
         id: "esc-2",
         question: "Q2?",
         assumption: "A2",
-        blocking: true,
         status: "timed_out",
         answer: null,
         kind: "dep",
@@ -1160,7 +1152,7 @@ describe("projectExecution (fold)", () => {
         agentId: "agent-1",
         question: "old?",
         assumption: "A",
-        escalationKind: "normal",
+        escalationKind: "wait",
       },
       {
         t: 3,
@@ -1170,7 +1162,7 @@ describe("projectExecution (fold)", () => {
         agentId: "agent-1",
         question: "new?",
         assumption: "B",
-        escalationKind: "normal",
+        escalationKind: "wait",
       },
       {
         t: 4,

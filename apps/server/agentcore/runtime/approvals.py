@@ -33,7 +33,7 @@ from agentcore.runtime.ports import ClientRequestBridge
 logger = get_logger(__name__)
 
 # Argument values longer than this are truncated in the SSE preview so a big
-# file_write body does not bloat the approval event.
+    # write body does not bloat the approval event.
 _PREVIEW_VALUE_MAX = 600
 # code_execute's ``code`` is the review surface — users must see enough to approve.
 _PREVIEW_CODE_EXECUTE_CODE_MAX = 20_000
@@ -45,9 +45,8 @@ def tool_call_requires_approval(
 ) -> bool:
     """Whether a tool call must pass ``ApprovalGate`` before execution.
 
-    GRANTABLE tools always do. ``git`` / ``host`` are ``NEVER`` at schema
-    level but mutating subcommands / Host GRANTABLE actions are gated here —
-    same posture as ``file_write``. ``run`` is GRANTABLE except process manage
+    GRANTABLE tools always do. ``host`` is ``NEVER`` at schema level but a
+    non-empty command is gated here. ``run`` is GRANTABLE except process manage
     (read/stop/list).
     """
     if tool_name == "run":
@@ -56,10 +55,6 @@ def tool_call_requires_approval(
             return False
     if approval is ToolApproval.GRANTABLE:
         return True
-    if tool_name == "git":
-        from agentcore.tools.builtin.git_ops import git_call_is_write
-
-        return git_call_is_write(arguments)
     if tool_name == "host":
         from agentcore.tools.builtin.host import host_call_requires_approval
 
@@ -72,8 +67,8 @@ class ApprovalDecision(StrEnum):
 
     APPROVE = "approve"  # allow this one call
     APPROVE_ALWAYS = "approve_always"  # allow this tool for the rest of the turn
-    # allow the whole file-mutation class (file_write / str_replace / file_delete /
-    # file_batch) for the rest of the turn — one click for a multi-file or mixed-op
+    # allow the whole file-mutation class (write / edit / file_delete /
+    # file_batch / md_export) for the rest of the turn — one click for a multi-file or mixed-op
     # task instead of granting each tool name separately. code_execute is NOT in the
     # class (a higher-risk side effect) and keeps its own per-tool gate (安全权限与
     # 治理 §三 边界2: 信任"这类操作", 不是"随便干").
@@ -98,7 +93,10 @@ def _preview_value_max(tool_name: str, key: str) -> int:
 
 
 def _is_permanent_delete(tool_name: str, arguments: dict[str, Any]) -> bool:
-    """True when the call permanently deletes (still requires an approval card)."""
+    """True when the call permanently deletes (still requires an approval card).
+
+    Fill-in no longer advertises ``permanent``; leftover ``true`` still trips this.
+    """
     if tool_name == "file_delete":
         return bool(arguments.get("permanent"))
     if tool_name == "file_batch":
@@ -166,7 +164,7 @@ class ApprovalGate:
     # Per-tool approval wait ceilings; unset tools use timeout_seconds.
     timeout_overrides: dict[str, float] = field(default_factory=dict)
     # The file-mutation tool class an APPROVE_ALWAYS_FILES grant covers
-    # (file_write / str_replace / file_delete / file_batch, PLUS git write
+    # (write / edit / file_delete / file_batch / md_export, PLUS git write
     # subcommands). Injected at construction via approval_class_tool_names()
     # (GRANTABLE ∩ FILESYSTEM + git) — see run.py / resume/pipeline.py wiring — so
     # one file-class grant also clears git writes; single source of truth.

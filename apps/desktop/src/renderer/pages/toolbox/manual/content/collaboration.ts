@@ -528,10 +528,6 @@ export const collaborationChapter: ManualChapterContent = {
               title: "自家模板可以冻",
               desc: "口吻、检查单、交付形态随你。产品不会把「写得更专业」做成出厂课。",
             },
-            {
-              title: "查阅后启用",
-              desc: "需要本机连接器或查阅后才打开的手，在编辑里勾选。不会多装工具，审批照旧。",
-            },
           ],
         },
         {

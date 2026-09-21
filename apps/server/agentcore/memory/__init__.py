@@ -1,14 +1,8 @@
-"""Memory system.
+"""Turn helpers that still live under the ``memory`` package name.
 
-Layers (see docs/03-AI核心/Agent记忆与知识系统.md; two-layer long-term refactor):
-- working memory: in-memory conversation history + per-turn run state (runtime data)
-- episodic long-term: per-session ≤200-char digests in ``memory_episodes``
-  (consolidation input only)
-- semantic long-term: 偏好/画像/主题 files, maintained by the file page
-  (idle session digests do not rewrite always-files); user rules are
-  ``.agentcore/规则/*.md`` via ``file_write``
-
-Plus auto conversation titles (a sidebar UX feature, not a memory layer).
+User-rule injection / mutate, write-side always quota, conversation titles, and
+the unused ``MemoryStore`` seam for ``assemble_turn_rules(store, …)``. AI-maintained
+preference / profile / topic notes are not injected or scheduled.
 """
 
 from agentcore.memory.account_prepare_cache import (
@@ -21,6 +15,7 @@ from agentcore.memory.account_prepare_cache import (
     seed_account_rules_memory_cache,
     warm_account_rules_memory,
 )
+from agentcore.memory.always_quota import MemoryUpdateItem
 from agentcore.memory.conversation_title import (
     TITLE_MAX_CHARS,
     ChatMessage,
@@ -30,14 +25,7 @@ from agentcore.memory.conversation_title import (
     TitleResult,
 )
 from agentcore.memory.document_store import DocumentMemoryStore
-from agentcore.memory.episodic import (
-    EpisodeRecord,
-    clamp_summary,
-    should_run_semantic,
-)
 from agentcore.memory.followups import select_motion_card_from_journal
-from agentcore.memory.injection import MemoryTopic, load_memory_topics
-from agentcore.memory.maintenance import MemoryUpdateItem, maintain_user_memory
 from agentcore.memory.rules_injection import (
     OnDemandUserRule,
     RuleFragment,
@@ -79,22 +67,6 @@ from agentcore.memory.store import (
     topic_path,
     topic_slug,
 )
-from agentcore.memory.user_memory import (
-    MEMORY_SECTIONS,
-    PREFERENCES_SECTIONS,
-    PROFILE_SECTIONS,
-    LLMMemoryExtractor,
-    MarkdownMemoryApplier,
-    MemoryAction,
-    MemoryApplier,
-    MemoryExtractInput,
-    MemoryExtractor,
-    MemoryOp,
-    core_file_for_section,
-    merge_global_core,
-    parse_memory_ops,
-    split_global_core,
-)
 
 __all__ = [
     "ChatMessage",
@@ -104,20 +76,6 @@ __all__ = [
     "LLMTitleGenerator",
     "TITLE_MAX_CHARS",
     "select_motion_card_from_journal",
-    "MEMORY_SECTIONS",
-    "PREFERENCES_SECTIONS",
-    "PROFILE_SECTIONS",
-    "core_file_for_section",
-    "MemoryAction",
-    "MemoryOp",
-    "MemoryExtractInput",
-    "MemoryExtractor",
-    "MemoryApplier",
-    "MarkdownMemoryApplier",
-    "LLMMemoryExtractor",
-    "parse_memory_ops",
-    "merge_global_core",
-    "split_global_core",
     "MemoryStore",
     "MemoryScope",
     "MemoryFileMeta",
@@ -137,13 +95,7 @@ __all__ = [
     "is_episodic_path",
     "default_memory_store",
     "memory_version",
-    "maintain_user_memory",
     "MemoryUpdateItem",
-    "EpisodeRecord",
-    "clamp_summary",
-    "should_run_semantic",
-    "load_memory_topics",
-    "MemoryTopic",
     "AccountPrepareSnapshot",
     "account_rules_memory_ttl_remaining",
     "clear_account_rules_memory_cache",

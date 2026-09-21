@@ -444,7 +444,7 @@ export function WorkspaceSection({
       ) : (
         <ContextMenu>
           <ContextMenuTrigger asChild>{header}</ContextMenuTrigger>
-          <ContextMenuContent className="min-w-44">
+          <ContextMenuContent>
             {!localUnavailable && !offlineCloud && source?.caps.edit && (
               <>
                 <ContextMenuItem onSelect={() => requestTreeAction("file")}>

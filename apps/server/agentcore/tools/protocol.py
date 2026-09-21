@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
-WriteScope = Literal["none", "explore_memory", "project"]
+WriteScope = Literal["none", "project"]
 # Tool-output audience: stamped at production. User-bubble writers refuse ``ceo``.
 ToolAudience = Literal["user", "ceo"]
 TOOL_AUDIENCE_USER: ToolAudience = "user"
@@ -58,12 +58,11 @@ def fork_workspace_slot(
 
 @dataclass
 class TurnExploreGate:
-    """CEO-turn explore pending + write_scope, shared across ``replace()`` copies.
+    """CEO-turn write_scope, shared across ``replace()`` copies.
 
     Engine injects per-call ``on_phase`` via ``dataclasses.replace``, which copies
     bool / str fields by value. This object is copied by reference (same as
-    :class:`WorkspaceSlot`), so ``update_folder_profile`` close-out is visible to
-    ``delegate`` on the pipeline base context.
+    :class:`WorkspaceSlot`).
 
     Worker forks that need a different write_scope must pass a fresh gate
     (:func:`fork_explore_write_scope`) so siblings do not share write permission.
@@ -71,7 +70,7 @@ class TurnExploreGate:
     ``turn_created_folder_ids`` is a turn-level ledger (shared by reference on
     fork): folders minted this turn via first auto-desk.
     A worker whose ``target_folder_id`` is in this set may write the project
-    tree even while explore-pending still locks the birth folder.
+    tree even while the birth folder is still ``write_scope=none``.
     """
 
     pending: bool = False
@@ -98,8 +97,6 @@ def fork_explore_write_scope(
     scope: WriteScope = "project"
     if write_scope == "none":
         scope = "none"
-    elif write_scope == "explore_memory":
-        scope = "explore_memory"
     elif write_scope == "project":
         scope = "project"
     return TurnExploreGate(
@@ -111,14 +108,13 @@ def fork_explore_write_scope(
 
 @dataclass(frozen=True)
 class EscalationOutcome:
-    """The result of a worker's blocking escalate (阻塞式求决策 §4.4).
+    """The result of a worker's ``escalate(reason=wait)`` (停下等拍板).
 
     ``status``:
     - ``"resolved"`` — answered (``answer`` carries it);
     - ``"assumed"`` — explicit 按假设继续 (user or CEO);
     - ``"timed_out"`` — wall-clock miss (no answer within the window);
-    - ``"degraded"`` — never suspended (concurrency cap) → proceed on assumption
-      like a non-blocking escalate.
+    - ``"degraded"`` — never suspended (concurrency cap) → finish under assumption.
 
     ``assumed`` and ``timed_out`` share the worker fallback (use stated assumption)
     but must stay distinct on the wire — conflating them as ``timeout`` made
@@ -131,24 +127,20 @@ class EscalationOutcome:
 
 @dataclass
 class EscalationChannel:
-    """Per-run wiring that lets a worker's ``escalate(blocking=true)`` suspend.
+    """Per-run wiring that lets a worker's ``escalate(reason=wait)`` suspend.
 
     Built by ``build_agent_executor`` for each delegated worker and ``None`` on the
-    CEO / tests / unarmed turns (then ``escalate`` keeps its non-blocking behaviour).
-    ``armed`` is the live-user gate (the SAME gate as ``ask_user`` — a live
-    interactive client). ``request`` owns the mechanism the tool must stay clear of
-    (引擎纯化): it enforces the concurrency cap, suspends on the interaction bridge,
-    emits the ``escalation_required`` / ``escalation_resolved`` pair, records the
-    resolution into the worker's ``RunState`` for CEO synthesis, and returns the
-    :class:`EscalationOutcome`. The tool only decides WHETHER to block and maps the
-    outcome to its ``ToolResult``.
+    CEO / tests / unarmed turns (then wait degrades to finish-under-assumption).
+    ``armed`` is the live-user gate (the SAME gate as ``ask_user``). ``request`` owns
+    cap / suspend / events / RunState recording. The tool chooses ``reason`` and
+    maps the outcome to ``ToolResult``.
 
     ``awaiting`` on ``request``: ``"user"`` (经典直挂用户) or ``"ceo"`` (协调模式等主管
     仲裁；初始不发用户可答卡，由 ``resolve_escalation`` 兑现).
     """
 
     armed: bool
-    # ``request(question, assumption, questions, kind, awaiting="user")``.
+    # ``request(question, assumption, questions, reason, awaiting="user")``.
     request: Callable[..., Awaitable[EscalationOutcome]]
 
 
@@ -203,7 +195,7 @@ class TurnTargetDeskHint:
 class TurnNamedFilePins:
     """This-turn @ citations of files on other registered Folders.
 
-    Shared mutable (``replace`` keeps the same object). ``file_read`` may
+    Shared mutable (``replace`` keeps the same object). ``read`` may
     one-shot bind that Folder when the path is missing on the sitting desk.
     Same relative path pinned to two folders is dropped (no search-all).
     """
@@ -396,7 +388,7 @@ class ToolContext:
     deep_research_auto_debate_count: int = 0
     # Intra-batch write-conflict guard (并行写隔离·硬约束). Set per delegated-worker
     # node by ``build_agent_executor``; ``None`` for the CEO / tests (no concurrent
-    # siblings to coordinate, so ``file_write`` skips the check). ``write_ancestors`` is
+    # siblings to coordinate, so ``write`` skips the check). ``write_ancestors`` is
     # this node's ``depends_on`` transitive closure ∪ nested ``parent_run_id``, so it
     # MAY overwrite a file owned by an upstream / lead it consolidates but not one a
     # concurrent sibling did.
@@ -407,23 +399,11 @@ class ToolContext:
     # declare-time desk so claim and dispatch reserve the same composite key.
     ownership_desk_id: str | None = None
     agent_role: str = ""
-    # 升级实时可见 (escalation 实时 SSE): a run-scoped live channel for the worker-only
-    # ``escalate`` tool to surface its escalation the INSTANT it is raised, called with
-    # ``(question, assumption, blocking, kind)`` — kind is normal/scope/dep. Set per
-    # delegated-worker node by ``build_agent_executor`` (it closes over the run's EventSink
-    # + run/agent id to emit ``escalation_raised``); ``None`` for the CEO / tests — the tool
-    # keeps working (escalate 非阻塞), the live banner is simply skipped, and the durable
-    # record still rides the transcript into ``RunState.escalations``. A narrow callback
-    # (not the EventSink itself) keeps tools off the event vocabulary — the executor owns
-    # event shape (引擎纯化).
-    on_escalate: Callable[[str, str, bool, str], None] | None = None
-    # 阻塞式求决策 (escalate blocking=true): the per-run channel that suspends this worker
-    # for the user when it hits a「只有用户能定、且猜错就作废」fork. Set per delegated-worker
-    # node by ``build_agent_executor`` (closes over the interaction bridge + EventSink +
-    # run/agent id); ``None`` for the CEO / tests / unarmed turns — then ``escalate`` stays
-    # non-blocking (its existing behaviour). The tool owns the decision (whether to block,
-    # the assumption fallback); this channel owns the mechanism (cap / suspend / events /
-    # RunState recording) so the tool stays off the event vocabulary (引擎纯化).
+    # Live graph mark for ``escalate(reason=scope|dep)``: ``(question, assumption, reason)``.
+    # Wait uses ``escalation`` (suspend), not this callback. ``None`` for CEO / tests.
+    on_escalate: Callable[[str, str, str], None] | None = None
+    # Wait-escalate suspend channel. ``None`` for CEO / tests / unarmed turns — then
+    # ``reason=wait`` degrades to finish-under-assumption (no user card).
     escalation: EscalationChannel | None = None
     # Creation-tool 多维表格: this-turn bound table (``@`` csv or dedicated session).
     # Lives on a shared slot so mid-turn ingest survives ``replace``. Tools talk to DB.
@@ -503,8 +483,8 @@ class ToolContext:
     # True when this node expects on-disk landing (pinned artifacts / artifact_dir).
     # Not-landing + 有下游：禁止用 summary 升格冒充交接地板正文。
     handoff_expects_landing: bool = False
-    # True when this run already landed at least one file (file_write /
-    # str_replace) on the *current* ToolContext object. Best-effort same-ctx
+    # True when this run already landed at least one file (write /
+    # edit) on the *current* ToolContext object. Best-effort same-ctx
     # signal only — ``dataclasses.replace`` drops this bool. Handoff / executor
     # body-floor exemption must read ``landed_artifact_kinds`` (prose) instead.
     has_landed_files: bool = False
@@ -516,9 +496,7 @@ class ToolContext:
     )
     # path → 首次落盘该 path 的 ``agent_id``（共享可变 dict，与 kinds 同生命周期）。
     landed_artifact_authors: dict[str, str] = field(default_factory=dict)
-    # 冷启动探索幕未完成 + 写盘范围。放在共享盒里：引擎 ``replace(on_phase=…)``
-    # 拷的是引用，``update_folder_profile`` 翻转后 ``delegate`` 在 pipeline base
-    # 上立刻看见。bool 字段会被 replace 按值拷走，写在副本上正本仍 pending。
+    # write_scope 共享盒：引擎 ``replace(on_phase=…)`` 拷的是引用。
     # Worker 要不同 write_scope 时必须 :func:`fork_explore_write_scope` 换新盒，
     # 禁止 ``replace(..., write_scope=)``（那不再是字段）。
     _explore_gate: TurnExploreGate = field(
@@ -536,7 +514,7 @@ class ToolContext:
     turn_target_desk: TurnTargetDeskHint = field(default_factory=TurnTargetDeskHint)
     # This-turn @ citations on other desks (shared mutable).
     named_file_pins: TurnNamedFilePins = field(default_factory=TurnNamedFilePins)
-    # CEO ``file_read`` may one-shot bind a this-turn named other Folder on
+    # CEO ``read`` may one-shot bind a this-turn named other Folder on
     # PathNotFound. Workers stay false so they do not inherit CEO pins as a
     # desk switch. Default true so tests / CEO share the same path.
     named_desk_read: bool = True
@@ -571,7 +549,7 @@ class ToolContext:
             if write_scope is not None:
                 gate.write_scope = (
                     write_scope
-                    if write_scope in ("none", "explore_memory", "project")
+                    if write_scope in ("none", "project")
                     else "project"
                 )
             fields["_explore_gate"] = gate
@@ -685,7 +663,7 @@ class ToolResult:
     ``events._cap_display``), so a live turn and its reloaded twin render the
     same card. 形状是数据不是模式: the frontend keys the renderer off the tool
     name, so ``display`` is just the data that name's view needs (most tools
-    leave it ``None``; edits like ``str_replace`` need nothing here — the client
+    leave it ``None``; edits like ``edit`` need nothing here — the client
     derives their diff from the call ``arguments`` it already has).
     """
 
@@ -739,7 +717,7 @@ class ToolResult:
     def __post_init__(self):
         limit = self.output_limit if self.output_limit is not None else self._MAX_OUTPUT_LEN
         if len(self.output) > limit:
-            # HEAD+TAIL, not a head-only chop: an agentic CEO leans on grep / file_read,
+            # HEAD+TAIL, not a head-only chop: an agentic CEO leans on grep / read,
             # whose hits / numbers / 法条编号 often sit at the END — a head cut drops them
             # silently. Same primitive the dep-injection / compaction paths already use.
             self.output = truncate_head_tail(self.output, limit)

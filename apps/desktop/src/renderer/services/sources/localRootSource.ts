@@ -8,6 +8,7 @@ import {
   isMarkdownPath,
   parentDir,
 } from "@/lib/fileSource";
+import { isAgentCoreMemoryDirPath } from "@/lib/stageDirs";
 import { convertMdToDocx } from "@/services/workspaces";
 import type {
   FsErrorCode,
@@ -100,15 +101,17 @@ export function createLocalRootSource(
         if (base && res.code === "not_found") return [];
         throwFs(res.reason, res.code);
       }
-      return res.data.map(
-        (e): FileNode => ({
-          path: outPath(e.relPath),
-          name: e.name,
-          isDir: e.kind === "dir",
-          sizeBytes: e.size,
-          mtimeMs: e.modifiedMs,
-        }),
-      );
+      return res.data
+        .map(
+          (e): FileNode => ({
+            path: outPath(e.relPath),
+            name: e.name,
+            isDir: e.kind === "dir",
+            sizeBytes: e.size,
+            mtimeMs: e.modifiedMs,
+          }),
+        )
+        .filter((n) => !isAgentCoreMemoryDirPath(n.path));
     },
     async listFileIndex() {
       // Flat file list for the @ index (文件中枢统一 F4); the IPC already prunes
@@ -133,10 +136,12 @@ export function createLocalRootSource(
       const { files, truncated } = res.data;
       if (!base) {
         return {
-          files: files.map((f) => ({
-            relPath: f.relPath,
-            mtimeMs: f.mtimeMs,
-          })),
+          files: files
+            .filter((f) => !isAgentCoreMemoryDirPath(f.relPath))
+            .map((f) => ({
+              relPath: f.relPath,
+              mtimeMs: f.mtimeMs,
+            })),
           truncated,
         };
       }
@@ -147,7 +152,8 @@ export function createLocalRootSource(
           .map((f) => ({
             relPath: f.relPath.slice(prefix.length),
             mtimeMs: f.mtimeMs,
-          })),
+          }))
+          .filter((f) => !isAgentCoreMemoryDirPath(f.relPath)),
         truncated,
       };
     },
@@ -275,10 +281,6 @@ export function createLocalRootSource(
     // 「在浏览器打开」本地 HTML：文件已在磁盘，直接用系统默认程序打开（= 系统浏览器）。
     async openInBrowser(path) {
       const res = await window.fsApi.openPath(rootId, inPath(path));
-      if (!res.ok) throwFs(res.reason, res.code);
-    },
-    async copyOsPath(path) {
-      const res = await window.fsApi.copyPath(rootId, inPath(path));
       if (!res.ok) throwFs(res.reason, res.code);
     },
     async openShellAtPath(path) {

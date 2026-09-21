@@ -5,9 +5,9 @@ cannot encode — Assembler skips a falsy fragment. 署名 / 「你是谁」走 
 何时派在 ``delegate`` description。共享诚实 / 输出在基座一段；consult 钩在
 ``<按需目录>`` / consult description。
 何时用 ``delegate`` / ``ask_user`` / ``debate`` 写在各工具 description（``delegate`` = 信息判据四问，不进核）；场面 HOW 的
-唯一所有者是 skill / consult 正文（``capability_how_suffix`` 只给 consult 拼；``run`` 走 skill body）；编制 HOW 在 ``delegate`` 按钮；填卡 HOW 在 ``ask_user`` 按钮。
-``<工作区>`` 只陈述本回合事实；``<按需目录>`` 只列这是什么。
-主张对照结构面在 ``prompt/base.py``；未装配 ≠ 写进队员任务 在 ``delegate.task``。
+唯一所有者是 skill 正文；编制 HOW 在 ``delegate`` 按钮；填卡 HOW 在 ``ask_user`` 按钮。
+``<工作区>`` 只陈述本回合事实；``<按需目录>`` 只列这是什么（前言另切目录行 ≠ 已查阅）。
+已做以回执为准在 ``prompt/base.py``；未装配 ≠ 写进队员任务 在 ``delegate.task``。
 不写编号判决树。每条纪律在装配后的提示串里只应出现一次。
 """
 
@@ -22,46 +22,14 @@ _CEO_CORE_HINT = ""
 # 何时用工具写在各工具 description。目录只写这是什么。无第二处会对打。
 _CEO_CORE_HINT_TEMPLATE = _CEO_CORE_HINT
 
-# Capability HOW — consult payload for on-demand faces (host / browser).
-# ``run`` HOW is skill ``run``.
-# Not appended to the frozen CEO core;
-# ``compose_ceo_chat_prompt`` must not hang these manuals (catalog/eval used
-# to, by falling back to the full registry when ``offered`` was omitted).
-_HOST_HOW = """
-日志分三处看：系统事件走 `host(action=os_log)`（Win=Get-WinEvent / Linux=journalctl，不要用 shell 整段倒出来）；\
-沙箱或构建的 stdout 走 `run`；对话走 `search_conversations`。\
-查或修这台电脑 → 本回合工具表有 `host` 则直接调 `host(action=status)` / `host(action=os_log)` / `host(action=shell)`\
- / `host(action=open_settings)` / `host(action=set_audio)` / `host(action=restart_service)`\
- / `host(action=install_package)`；通用知识问答 ≠ 已经查过这台电脑。\
-装包 ≠ `shell` → `install_package`；长驻 ≠ `shell` → `run`。\
-`shell`：Windows 写 PowerShell（`$env:VAR`）；Unix 写 POSIX。勿 `%VAR%` / `||` / `&&`。\
-已知文件夹（桌面/下载）→ `file_read` / `file_list` 本机路径 ≠ `host(action=shell)` 乱找路径。
-"""
-
-_BROWSER_HOW = """
-右坞浏览器与完整预览是同一个窗口。已装配且用户要开页 / 右坞打开 / 直播 / 页上短操作 → 自己 `browser`；\
-`web_fetch` / `web_search` ≠ 已开页（只要摘要且未点名浏览器才用 `web_fetch`）。\
-云端 `browser` 与 `web_fetch` 同一出站；一边被挡自动抓取，换另一边同一页也不会通——请人贴，或改在「执行：用户本机」的对话做。\
-「跑起来 / 打开看一下」≠ 本条（见 run）。\
-打开网页先 `navigate`（空白页也一样）。桌面 Local Bridge 可用工作区相对 HTML 作 url；\
-云端沙箱相对路径会失败。须凭回执与页面证据验收，不要只看没报错；\
-click 看 clicked.was_disabled；type 看 typed.matched。缺 ref / 验收失败再 snapshot。\
-省略 session_id：本 run 已绑定 → 对话内唯一/激活 → 新建并绑定本 run。\
-永不代填密码。
-"""
+# 工具侧已无 consult 手册（host / browser 装配即在开场表，选错通道靠回执）。
+# ``capability_how_suffix`` 仍给 consult 拼，现恒为空。
 
 
 def capability_how_suffix(ceo_tool_names: set[str]) -> str:
-    """CEO consult HOW for on-demand faces. Not a system-prompt suffix.
-
-    ``run`` is omitted: consult(run) resolves the skill body.
-    """
-    parts: list[str] = []
-    if "host" in ceo_tool_names:
-        parts.append(_HOST_HOW.strip())
-    if "browser" in ceo_tool_names:
-        parts.append(_BROWSER_HOW.strip())
-    return "\n".join(parts)
+    """CEO consult HOW for on-demand tool faces. Empty: no tool handbooks remain."""
+    del ceo_tool_names
+    return ""
 
 
 def assemble_ceo_core(ceo_tool_names: set[str]) -> str:

@@ -8,10 +8,6 @@ import {
   type MarkdownSourceEditorHandle,
 } from "@/components/markdown/MarkdownSourceEditor";
 import { SourceToolbar } from "@/components/markdown/sourceToolbar";
-import {
-  type BindableToolOption,
-  OfferedToolsField,
-} from "@/components/prompt/OfferedToolsField";
 import { PromptDocument } from "@/components/prompt/PromptDocument";
 import { Button, Input, SegmentedControl, Textarea } from "@/components/ui";
 import { cn } from "@/lib/utils";
@@ -25,8 +21,6 @@ import {
   useState,
 } from "react";
 
-export type { BindableToolOption };
-
 export type PromptSaveState = "idle" | "saving" | "saved" | "error";
 export type PromptApplyMode = "always" | "on_demand";
 
@@ -38,8 +32,6 @@ const APPLY_MODE_ITEMS = [
 const TITLE_LABEL = "名称";
 const CATALOG_LINE_LABEL = "一句话介绍";
 const CATALOG_LINE_PLACEHOLDER = "干什么、什么时候该翻开";
-const CATALOG_LINE_EMPTY_HINT =
-  "没写这句，CEO 不会主动翻开。要当场用，在输入框 @ 这一条。";
 const AUTOSAVE_DEBOUNCE_MS = 1500;
 
 const TITLE_FIELD_CLASS =
@@ -51,7 +43,6 @@ export interface PromptWorkbenchDraft {
   title: string;
   trigger: string;
   body: string;
-  offeredTools: string[];
 }
 
 export function PromptWorkbench({
@@ -62,9 +53,6 @@ export function PromptWorkbench({
   onApplyModeChange,
   initialTrigger,
   triggerEnabled = false,
-  initialOfferedTools,
-  bindableTools,
-  canAddOfferedTools = true,
   initialBody,
   bodyLoading = false,
   readOnly = false,
@@ -83,10 +71,6 @@ export function PromptWorkbench({
   initialTrigger?: string;
   /** Show the catalog line (even when the seed is empty). */
   triggerEnabled?: boolean;
-  initialOfferedTools?: string[];
-  bindableTools?: BindableToolOption[];
-  /** When false, only already-bound tools appear (no 添加). */
-  canAddOfferedTools?: boolean;
   initialBody: string;
   bodyLoading?: boolean;
   readOnly?: boolean;
@@ -99,12 +83,8 @@ export function PromptWorkbench({
 }) {
   const titleId = useId();
   const catalogLineId = useId();
-  const catalogHintId = useId();
   const [titleValue, setTitleValue] = useState(title);
   const [trigger, setTrigger] = useState(initialTrigger ?? "");
-  const [offeredTools, setOfferedTools] = useState<string[]>(
-    initialOfferedTools ?? [],
-  );
   const [body, setBody] = useState(initialBody);
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState<PromptSaveState>("idle");
@@ -113,7 +93,6 @@ export function PromptWorkbench({
     title,
     trigger: initialTrigger ?? "",
     body: initialBody,
-    offeredTools: initialOfferedTools ?? [],
   });
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
@@ -123,7 +102,6 @@ export function PromptWorkbench({
   latestRef.current = {
     title: titleValue,
     trigger,
-    offeredTools,
     body,
   };
   dirtyRef.current = dirty;
@@ -207,11 +185,7 @@ export function PromptWorkbench({
 
   const showCatalogLine = applyMode !== "always" && triggerEnabled;
   const showTitleRow = titleEditable || applyMode !== undefined;
-  const offerOptions = offeredToolOptions(bindableTools ?? [], offeredTools);
-  const showOfferedTools =
-    offeredTools.length > 0 || (canAddOfferedTools && offerOptions.length > 0);
-  const showCover =
-    !previewing && (showTitleRow || showCatalogLine || showOfferedTools);
+  const showCover = !previewing && (showTitleRow || showCatalogLine);
   const triggerText = trigger.trim();
   const showSave = Boolean(!readOnly && onSave && (!previewing || dirty));
 
@@ -274,7 +248,6 @@ export function PromptWorkbench({
               <Textarea
                 id={catalogLineId}
                 aria-label={CATALOG_LINE_LABEL}
-                aria-describedby={triggerText ? undefined : catalogHintId}
                 placeholder={CATALOG_LINE_PLACEHOLDER}
                 rows={2}
                 value={trigger}
@@ -290,28 +263,6 @@ export function PromptWorkbench({
               />
             </label>
           )}
-          {!readOnly && !triggerText ? (
-            <p
-              id={catalogHintId}
-              className="mt-1 text-muted-foreground text-xs"
-            >
-              {CATALOG_LINE_EMPTY_HINT}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-      {showOfferedTools ? (
-        <div className={cn((showTitleRow || showCatalogLine) && "mt-3")}>
-          <OfferedToolsField
-            selected={offeredTools}
-            options={offerOptions}
-            canAdd={canAddOfferedTools}
-            readOnly={readOnly}
-            onChange={(next) => {
-              setOfferedTools(next);
-              markDirty({ offeredTools: next });
-            }}
-          />
         </div>
       ) : null}
     </div>
@@ -405,16 +356,4 @@ export function PromptWorkbench({
       </div>
     </div>
   );
-}
-
-function offeredToolOptions(
-  bindable: BindableToolOption[],
-  selected: string[],
-): BindableToolOption[] {
-  if (bindable.length === 0 && selected.length === 0) return [];
-  const known = new Set(bindable.map((tool) => tool.id));
-  const extra = selected
-    .filter((id) => !known.has(id))
-    .map((id) => ({ id, label: id }));
-  return extra.length ? [...bindable, ...extra] : bindable;
 }

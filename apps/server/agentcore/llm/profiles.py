@@ -15,20 +15,21 @@ if TYPE_CHECKING:
 
 from agentcore.llm.provider.protocol import LLMMessage, LLMRequest
 
-# Platform model id constants (eval / pricing / migration defaults).
-PLATFORM_MODEL_FLASH = "deepseek-v4-flash"
-PLATFORM_MODEL_PRO = "deepseek-v4-pro"
-DEEPSEEK_V4_FLASH = PLATFORM_MODEL_FLASH
-DEEPSEEK_V4_PRO = PLATFORM_MODEL_PRO
-# OpenCode Zen free SKU (upstream ¥0); product still meters at Flash Go-list CNY.
-DEEPSEEK_V4_FLASH_FREE = "deepseek-v4-flash-free"
+# Platform / catalog model id constants.
 # Official V4.1 Flash (BYOK DeepSeek API). Distinct from the OpenCode Go wire id.
 DEEPSEEK_V41_FLASH = "deepseek-flash"
-# OpenCode Go V4.1 Flash. Platform allowlist may pin this through 2026-09-20
-# (Go promo monthly cap $60 / allowance 4×); rollback id is ``deepseek-v4-flash``.
-# Not the official ``deepseek-flash`` id — Go/Zen hideFromPicker omits it
-# (vision contract differs).
+# OpenCode Go V4.1 Flash — current platform pin. Not the official ``deepseek-flash``
+# id (Go/Zen hideFromPicker omits it; vision contract differs).
 OPENCODE_GO_V41_FLASH = "deepseek-v4.1-flash"
+PLATFORM_MODEL_FLASH = OPENCODE_GO_V41_FLASH
+# Retired V4 Flash / Pro: leftover chats, eval aliases, hideFromPicker.
+# Flash alias still meters at official V4.1 CNY (DeepSeek still routes the old
+# name). Pro has no product card.
+DEEPSEEK_V4_FLASH = "deepseek-v4-flash"
+PLATFORM_MODEL_PRO = "deepseek-v4-pro"
+DEEPSEEK_V4_PRO = PLATFORM_MODEL_PRO
+# OpenCode Zen free SKU (upstream ¥0); product still meters at official Flash CNY.
+DEEPSEEK_V4_FLASH_FREE = "deepseek-v4-flash-free"
 
 # Router / ``agent_provider_id`` sentinel when a worker override runs on platform credentials
 # (main turn may be BYOK). ``route_model_for("agent")`` prefixes ``platform/{model}``;
@@ -48,7 +49,7 @@ class ProfileParams:
     max_rounds: int = 0
     name: str = ""
     # True = send thinking.type=enabled. False = force off for background
-    # one-shots (title / memory / …) so a tight max_tokens budget is not eaten
+    # one-shots (title / compaction / …) so a tight max_tokens budget is not eaten
     # by reasoning_content (平台LLM接入 · DeepSeek 易错). None = no profile
     # opinion; the wire still sends enabled for thinking_type_switch models
     # (do not rely on omit=on — OpenCode Go treats omit as off).
@@ -62,7 +63,6 @@ PROFILES: dict[str, ProfileParams] = {
     # Single delegated-worker profile: no product round fuse (0). 力度差异由
     # 委派协作结构（拆分 / 复审 / replan）表达；防失控靠 token / 墙钟 / spin / 熔断 / Stop。
     "agent": ProfileParams(temperature=0.7, max_rounds=0, thinking=True),
-    "memory": ProfileParams(temperature=0.3, max_rounds=1, thinking=False),
     "compaction": ProfileParams(temperature=0.3, max_rounds=1, thinking=False),
     "file.rewrite": ProfileParams(temperature=0.4, max_rounds=1, thinking=False),
     "title": ProfileParams(temperature=0.3, max_tokens=1024, max_rounds=1, thinking=False),

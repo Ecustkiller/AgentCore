@@ -16,7 +16,7 @@ async def test_worker_escalate_then_turn_closes(monkeypatch, tmp_path):
         monkeypatch, tmp_path, mode="escalate"
     )
 
-    # Unarmed / non-blocking escalate: worker continues, CEO synthesizes, END_TURN.
+    # Unarmed wait would not emit run_escalation; scope marks the graph and the worker continues.
     assert result["finish_reason"] == FinishReason.END_TURN
     assert CEO_FINAL in (result.get("content") or "")
     assert turn_end_finish(result) == FinishReason.END_TURN.value
@@ -40,7 +40,8 @@ async def test_worker_escalate_then_turn_closes(monkeypatch, tmp_path):
 
     raised = next(e for e in events if e.type is EventType.RUN_ESCALATION)
     assert raised.payload.get("question") == ESC_QUESTION
-    assert raised.payload.get("blocking") is False
+    assert raised.payload.get("kind") == "scope"
+    assert "blocking" not in raised.payload
 
     kinds = journal_kinds(result)
     assert "run_escalation" in kinds

@@ -14,7 +14,6 @@ from agentcore.folders.desk import caller_is_desk_member
 from agentcore.llm.profiles import TurnProfiles
 from agentcore.runtime.context import (
     build_workspace_context,
-    collect_outlet_inventory,
     detect_workspace_git,
     resolve_channel_profile,
 )
@@ -60,12 +59,27 @@ def _workspace_block(text: str) -> str:
     return (match.group(0) if match else "").strip()
 
 
+def _journal_haystack(journal_entries: list[dict[str, Any]]) -> str:
+    """Flatten journal payloads that may carry a prior ``<工作区>`` snapshot."""
+    chunks: list[str] = []
+    for entry in journal_entries or []:
+        payload = entry.get("payload") or {}
+        if not isinstance(payload, dict):
+            continue
+        for key in ("system_prompt", "user_message", "turn_envelope", "content"):
+            val = payload.get(key)
+            if isinstance(val, str) and val.strip():
+                chunks.append(val)
+    return "\n".join(chunks)
+
+
 def restamp_workspace_facts(prompt: str, facts: str) -> str:
     """Post-history ``[系统提示]`` envelope when frozen ``<工作区>`` is stale.
 
-    Empty string = no restamp (prompt has no workspace block, or it already
-    matches). Never rewrites ``prompt``. Facts-only — CEO file index is not
-    attached (workers must not receive it).
+    ``prompt`` is any haystack that may still hold the last ``<工作区>`` (legacy
+    worker system, opening user envelope, journal dump). Empty string = no
+    restamp (no prior block, or it already matches). Never rewrites ``prompt``.
+    Facts-only — CEO file index is not attached (workers must not receive it).
     """
     from agentcore.runtime.resolve.prompt.envelope import TURN_ENVELOPE_FENCE
 
@@ -329,15 +343,24 @@ async def _wire_continuation_toolset(
         mcp_enabled=mcp_discover.tool_count > 0,
         mcp_label=mcp_label,
         git_fact=git_fact,
-        outlet_inventory=await collect_outlet_inventory(backend),
         desk_folder_id=sitting_folder_id,
         desk_folder_label=(getattr(backend, "root_label", None) or "").strip() or None,
         desk_is_birth=folder_id is not None,
         desk_visibly_empty=await desk_is_visibly_empty(backend),
     )
     workspace_restamp_envelope = restamp_workspace_facts(
-        base_system_prompt,
+        "\n".join(
+            part
+            for part in (base_system_prompt, _journal_haystack(journal_entries))
+            if part
+        ),
         workspace_facts,
+    )
+    from agentcore.runtime.resolve.prompt.envelope import render_worker_turn_envelope
+
+    worker_envelope = render_worker_turn_envelope(
+        workspace_context=workspace_facts,
+        attachment_context="",
     )
     spawn_base = base_system_prompt
     if workspace_restamp_envelope:
@@ -378,6 +401,7 @@ async def _wire_continuation_toolset(
         permission_axes=permission_axes,
         advertise_bind_local_folder=checkpoint_enabled and channel.can_bind_folder,
         desktop_online=desktop_online,
+        worker_envelope=worker_envelope,
     )
     from agentcore.tools.ceo_toolset import wire_ceo_consult
 
@@ -390,10 +414,6 @@ async def _wire_continuation_toolset(
         folder_id=folder_id,
         user_id=user_id,
     )
-
-    from agentcore.runtime.resolve.ceo_surface import apply_explore_profile_surface
-
-    apply_explore_profile_surface(chat_tools, pending=False)
 
     return ResumedWiring(
         base_tool_context=base_tool_context,

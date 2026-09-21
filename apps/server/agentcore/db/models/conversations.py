@@ -126,14 +126,6 @@ class Conversation(Base):
     # "" = the root itself (an explicitly-bound directory). A non-empty segment scopes
     # the workspace under a shared container root.
     local_subpath: Mapped[str | None] = mapped_column(String(400), nullable=True)
-    # Long-term memory consolidation watermark (Agent记忆与知识系统 §1.5): the
-    # created_at of the last message folded into the user's memory file by the
-    # offline consolidation pass. NULL = never consolidated. The runner skips when
-    # no message is newer than this, and the sweeper backstop selects conversations
-    # whose latest message is newer than it (有未整合的新内容) yet has settled.
-    memory_synced_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
     # Long-conversation compaction (执行引擎架构设计 §三 长对话压缩 / conversation/
     # compaction.py). A rolling summary folds turns OLDER than the recency window into
     # 已确立事实 / 决策 / 未决问题 / 文件路径, so a long chat feeds [summary] + recent
@@ -203,7 +195,7 @@ class Folder(Base):
     # NULL = local-mode folder (its files live on the user's own disk; the
     # ``local_root_id`` + ``local_subpath`` branch below is unchanged).
     # Renames / moves rewrite this for the whole subtree in one transaction and
-    # ``mv`` the directory; ``id`` stays put so standing tasks / memory / boards /
+    # ``mv`` the directory; ``id`` stays put so standing tasks / memory /
     # write-claim ledgers keep resolving.
     rel_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     # Local-mode binding: desktop FS root id. NULL + NULL ``local_subpath`` = cloud

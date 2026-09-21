@@ -40,7 +40,7 @@ from agentcore.llm.resolve import ModelConfig, ModelOrigin
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-_BACKGROUND_PURPOSES = frozenset({"title", "memory", "compaction"})
+_BACKGROUND_PURPOSES = frozenset({"title", "compaction"})
 
 __all__ = [
     "SelectedCall",
@@ -223,7 +223,7 @@ async def select_model_config(
     (``preflight_llm_credentials`` / ``resolve_and_gate_background`` /
     ``run_background_llm``) is the authorization choke point.
 
-Background purposes (title/memory) are **platform-first**
+Background purposes (title/compaction) are **platform-first**
     product chrome when :func:`platform_catalog_visible` — *unless* the user pointed
     the combo's background slot at their own key, which outranks the platform default:
     「平台优先」 exists to stop BYOK accounts freeloading platform quota, and an account

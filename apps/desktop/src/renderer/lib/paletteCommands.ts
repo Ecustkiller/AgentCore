@@ -39,7 +39,6 @@ import {
   MessagesSquare,
   Monitor,
   Moon,
-  Palette,
   PanelLeft,
   Plus,
   ScrollText,
@@ -49,6 +48,7 @@ import {
   Store,
   Sun,
   Terminal,
+  Unplug,
   UserCog,
   Workflow,
 } from "lucide-react";
@@ -92,7 +92,7 @@ export interface CommandContext {
    * Absent / empty → no palette entry (zero product surface when replay is off).
    */
   demoTapes?: DemoTapeSummary[];
-  /** Hide toolbox / whiteboard / conversation-admin commands (窄屏视口政策). */
+  /** Hide toolbox / conversation-admin commands (窄屏视口政策). */
   restrictNarrow?: boolean;
   /** Hide dark / system theme (窄屏 / Capacitor 仅浅色). */
   forceLightTheme?: boolean;
@@ -343,14 +343,6 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       run: go("/files"),
     },
     {
-      id: "nav-whiteboard",
-      title: "白板",
-      category: "前往",
-      icon: Palette,
-      keywords: ["whiteboard", "canvas", "board", "baiban", "huaban", "画板"],
-      run: go("/whiteboard"),
-    },
-    {
       id: "nav-messages",
       title: "消息",
       category: "前往",
@@ -367,7 +359,7 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       run: go("/toolbox"),
     },
     {
-      // 我的 · 提示词。搜「技能」/「连接器」/「开场工具」/「官方」也落到这里。
+      // 我的 · 提示词。搜「技能」落到这里。
       id: "nav-guidelines",
       title: "提示词",
       category: "前往",
@@ -377,19 +369,37 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
         "prompt",
         "skills",
         "consult",
-        "zhunze",
         "tishici",
         "jineng",
         "nengli",
         "技能",
-        "tools",
-        "connectors",
-        "连接器",
-        "开场工具",
-        "查阅后启用",
-        "官方",
       ],
       run: go(APP_PATHS.toolbox.guidelines),
+    },
+    {
+      id: "nav-mcp",
+      title: "MCP",
+      category: "前往",
+      icon: Unplug,
+      keywords: ["mcp", "stdio"],
+      run: go(APP_PATHS.toolbox.mcp),
+    },
+    {
+      id: "nav-official",
+      title: "官方",
+      category: "前往",
+      icon: ScrollText,
+      keywords: [
+        "official",
+        "guidelines",
+        "zhunze",
+        "准则",
+        "教法",
+        "提示词",
+        "开场工具",
+        "出厂",
+      ],
+      run: go(APP_PATHS.toolbox.official),
     },
     {
       id: "nav-store",

@@ -87,7 +87,7 @@ def _unsettled_session(eid: str, cid: str) -> CoordinationSession:
 async def test_emit_skips_unsettled_cancel_while_hot_pending(monkeypatch):
     """pending APPROVAL + 非 user_stopped → 不得 _cancel_unsettled / cancelled 终态."""
     cid = "conv-hold-emit"
-    _pending_approval(monkeypatch, cid, tool_name="file_write")
+    _pending_approval(monkeypatch, cid, tool_name="write")
     writer = _RecordingWriter()
     session = _unsettled_session("exec-hold-emit", cid)
     bind_host_journal(session, writer=writer)
@@ -107,7 +107,7 @@ async def test_emit_skips_unsettled_cancel_while_hot_pending(monkeypatch):
 @pytest.mark.asyncio
 async def test_user_stop_still_cancels_unsettled_with_hot_pending(monkeypatch):
     cid = "conv-hold-stop"
-    _pending_approval(monkeypatch, cid, tool_name="file_write")
+    _pending_approval(monkeypatch, cid, tool_name="write")
     writer = _RecordingWriter()
     session = _unsettled_session("exec-hold-stop", cid)
     session.user_stopped = True
@@ -127,7 +127,7 @@ async def test_user_stop_still_cancels_unsettled_with_hot_pending(monkeypatch):
 @pytest.mark.asyncio
 async def test_finish_detached_holds_harvest_while_hot_pending(monkeypatch):
     cid = "conv-hold-finish"
-    _pending_approval(monkeypatch, cid, tool_name="file_write")
+    _pending_approval(monkeypatch, cid, tool_name="write")
     writer = _RecordingWriter()
     session = _unsettled_session("exec-hold-finish", cid)
     bind_host_journal(session, writer=writer)
@@ -154,7 +154,7 @@ async def test_finish_detached_holds_harvest_while_hot_pending(monkeypatch):
 @pytest.mark.asyncio
 async def test_finish_detached_resumes_harvest_after_pending_clears(monkeypatch):
     cid = "conv-hold-resume"
-    reg = _pending_approval(monkeypatch, cid, tool_name="file_write")
+    reg = _pending_approval(monkeypatch, cid, tool_name="write")
     session = _unsettled_session("exec-hold-resume", cid)
     set_active_coordination(session)
 
@@ -175,7 +175,7 @@ async def test_finish_detached_resumes_harvest_after_pending_clears(monkeypatch)
 @pytest.mark.asyncio
 async def test_harvest_detached_skips_close_while_hot_pending(monkeypatch):
     cid = "conv-hold-detached"
-    _pending_approval(monkeypatch, cid, tool_name="file_write")
+    _pending_approval(monkeypatch, cid, tool_name="write")
     session = _unsettled_session("exec-hold-detached", cid)
     session.harvest_scheduled = True
     session.mark_settled("detached")
@@ -197,7 +197,7 @@ async def test_drive_cancelled_not_posted_while_hot_pending(monkeypatch):
 
     drive_mod = importlib.import_module("agentcore.runtime.delegate.drive")
     cid = "conv-hold-drive"
-    _pending_approval(monkeypatch, cid, tool_name="file_write")
+    _pending_approval(monkeypatch, cid, tool_name="write")
     from agentcore.runtime.runs import build_run_plan
 
     plan, errors = build_run_plan(
@@ -242,7 +242,7 @@ async def test_drive_cancelled_not_posted_while_hot_pending(monkeypatch):
 @pytest.mark.asyncio
 async def test_inject_close_line_is_waiting_not_cancelled(monkeypatch):
     cid = "conv-hold-inject"
-    _pending_approval(monkeypatch, cid, tool_name="file_write")
+    _pending_approval(monkeypatch, cid, tool_name="write")
     session = CoordinationSession(
         execution_id="e-hold-inject", total_workers=2, conversation_id=cid
     )
@@ -254,7 +254,7 @@ async def test_inject_close_line_is_waiting_not_cancelled(monkeypatch):
     ]
     text = format_coordination_events(session, events)
     assert "等你允许" in text
-    assert "file_write" in text
+    assert "write" in text
     assert "团队已取消" not in text
     assert "调度已停" not in text
     assert "协调被打断" not in text
@@ -285,7 +285,7 @@ async def test_drive_cancel_keeps_approval_future_and_registry(monkeypatch):
             "hot-wave",
             cid,
             kind=InteractionKind.APPROVAL,
-            payload={"tool_name": "file_write"},
+            payload={"tool_name": "write"},
             timeout=None,
             on_suspended=started.set,
         )
@@ -337,7 +337,7 @@ async def test_user_stop_wave_cancel_still_kills_approval(monkeypatch):
                 "hot-stop",
                 cid,
                 kind=InteractionKind.APPROVAL,
-                payload={"tool_name": "file_write"},
+                payload={"tool_name": "write"},
                 timeout=None,
                 on_suspended=started.set,
             )
@@ -362,7 +362,7 @@ async def test_user_stop_wave_cancel_still_kills_approval(monkeypatch):
 @pytest.mark.asyncio
 async def test_hold_harvest_waits_for_running_workers_after_pending_clears(monkeypatch):
     cid = "conv-hold-running"
-    reg = _pending_approval(monkeypatch, cid, tool_name="file_write")
+    reg = _pending_approval(monkeypatch, cid, tool_name="write")
     session = _unsettled_session("exec-hold-running", cid)
     session._running_workers["r2"] = "写手"
     set_active_coordination(session)

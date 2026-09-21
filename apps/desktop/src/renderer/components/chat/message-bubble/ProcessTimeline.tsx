@@ -10,9 +10,11 @@ import { shouldShowTeamGraph } from "@/components/chat/debatePreviewPlacement";
 import { absorbHandoffBriefContent } from "@/components/chat/handoffBrief";
 import { executionGraphCapabilities } from "@/components/graph/planCapabilities";
 import {
+  type ProcessTurnLane,
   type TimelineNode,
   groupToolRuns,
   processFoldMask,
+  processTurnLane,
   timelineNodeKeys,
 } from "@/lib/processTimeline";
 import type { CheckpointDisplay } from "@/stores/conversation";
@@ -25,13 +27,28 @@ import type {
   RunDebrief,
   TurnEvidenceLedgerEntry,
 } from "@/types/events";
-import { ChevronDown, ChevronRight } from "lucide-react";
-import { Fragment, memo } from "react";
+import { type ReactNode, memo } from "react";
 import { LiveWaitLabel } from "./LiveFlow";
 import { ThinkingHeader } from "./Thinking";
 
-/** Thought 折叠覆盖面：推理/工具/非末段正文 + 弱式决策痕迹（批准/委派授权/推进卡）
- * + 已答复 ask / 已结算开工复核。末段正文、待拍板、协作图、插话仍外置可见。 */
+/** Thought 折叠覆盖面：推理/工具 + 弱式决策痕迹（批准/委派授权/推进卡）
+ * + 已答复 ask / 已结算开工复核。用户可见正文（含中间段）、待拍板、协作图、插话仍外置可见。
+ * 收起摘要是答案 caption（Cursor / ChatGPT），不与答案平级占时间线行距。 */
+
+type ProcessTurnFace = "summary" | ProcessTurnLane;
+
+function processTurnFaceClass(face: ProcessTurnFace): string {
+  switch (face) {
+    case "summary":
+      return "process-summary";
+    case "answer":
+      return "process-answer";
+    case "slot":
+      return "process-slot";
+    default:
+      return "process-chrome";
+  }
+}
 
 function countProcessStats(nodes: TimelineNode[]) {
   let reasoningCount = 0;
@@ -87,7 +104,7 @@ const InlineReasoning = memo(function InlineReasoning({
         onToggle={toggle}
       />
       {expanded && (
-        <div className="mt-1.5 min-w-0 max-w-full text-muted-foreground">
+        <div className="mt-2 min-w-0 max-w-full text-muted-foreground">
           <Markdown content={text} isStreaming={streaming} muted />
         </div>
       )}
@@ -215,7 +232,7 @@ export function TimelineNodeView({
       },
     );
     if (!card) return null;
-    return <div>{card}</div>;
+    return <div className="[&>:first-child]:mt-0">{card}</div>;
   }
   if (node.kind === "tool-group") {
     return (
@@ -368,7 +385,6 @@ export function ProcessTimeline({
     checkpoints.filter((c) => c.status === "pending").map((c) => c.id),
   );
   const foldMask = processFoldMask(nodes, pendingGateIds);
-  const firstFoldIndex = foldMask.indexOf(true);
   // 仅有弱痕迹、无推理/工具时不折叠（避免空摘要按钮）；单段纯 Thought 也不折。
   const shouldCollapseProcess =
     collapseProcessSteps &&
@@ -392,11 +408,8 @@ export function ProcessTimeline({
   const showFallbackAfter =
     !hasContentStep && Boolean(fallbackContent) && fallbackBeforeTeamIdx < 0;
 
-  const renderFallback = (key: string) => (
-    <div
-      key={key}
-      className="process-narration min-w-0 max-w-full text-foreground"
-    >
+  const answerMarkdown = (
+    <div className="process-narration min-w-0 max-w-full text-foreground">
       <Markdown
         content={fallbackContent}
         conversationId={conversationId}
@@ -426,63 +439,65 @@ export function ProcessTimeline({
     />
   );
 
-  return (
-    <div className="min-w-0 max-w-full space-y-2">
-      {nodes.map((node, i) => {
-        const prefix =
-          i === fallbackBeforeTeamIdx
-            ? renderFallback("fallback-before-team")
-            : null;
-        if (shouldCollapseProcess) {
-          const isFirstProcess = i === firstFoldIndex;
+  type TurnItem = { key: string; face: ProcessTurnFace; node: ReactNode };
+  const items: TurnItem[] = [];
+  let summaryInserted = false;
+  const pushSummary = (key: string) => {
+    if (summaryInserted) return;
+    summaryInserted = true;
+    items.push({
+      key,
+      face: "summary",
+      node: (
+        <ThinkingHeader
+          isStreaming={false}
+          expanded={processExpanded}
+          streamingLabel="Thinking…"
+          doneLabel={processSummary}
+          onToggle={toggleProcess}
+        />
+      ),
+    });
+  };
 
-          if (!processExpanded) {
-            if (foldMask[i]) {
-              if (!isFirstProcess) return null;
-              return (
-                <Fragment key={`sum-${nodeKeys[i]}`}>
-                  {prefix}
-                  <button
-                    type="button"
-                    onClick={toggleProcess}
-                    className="inline-flex items-center gap-1 text-sm text-muted-foreground"
-                  >
-                    {processSummary}
-                    <ChevronRight className="size-4 shrink-0" aria-hidden />
-                  </button>
-                </Fragment>
-              );
-            }
-          } else if (isFirstProcess) {
-            return (
-              <Fragment key="process-expanded">
-                {prefix}
-                <button
-                  type="button"
-                  onClick={toggleProcess}
-                  className="inline-flex items-center gap-1 text-sm text-muted-foreground"
-                >
-                  {processSummary}
-                  <ChevronDown className="size-4 shrink-0" aria-hidden />
-                </button>
-                {renderNode(node, i)}
-              </Fragment>
-            );
-          }
-        }
-        if (prefix) {
-          return (
-            <Fragment key={`wrap-${nodeKeys[i]}`}>
-              {prefix}
-              {renderNode(node, i)}
-            </Fragment>
-          );
-        }
-        return <Fragment key={nodeKeys[i]}>{renderNode(node, i)}</Fragment>;
-      })}
+  for (let i = 0; i < nodes.length; i++) {
+    if (i === fallbackBeforeTeamIdx) {
+      items.push({
+        key: "fallback-before-team",
+        face: "answer",
+        node: answerMarkdown,
+      });
+    }
+    if (shouldCollapseProcess && foldMask[i]) {
+      if (!processExpanded) {
+        pushSummary(`sum-${nodeKeys[i] ?? String(i)}`);
+        continue;
+      }
+      pushSummary("process-expanded");
+    }
+    items.push({
+      key: nodeKeys[i] ?? String(i),
+      face: processTurnLane(nodes[i], foldMask[i] === true),
+      node: renderNode(nodes[i], i),
+    });
+  }
+  if (showFallbackAfter) {
+    items.push({
+      key: "fallback-after",
+      face: "answer",
+      node: answerMarkdown,
+    });
+  }
+
+  return (
+    <div className="process-turn">
+      {items.map((item) => (
+        <div key={item.key} className={processTurnFaceClass(item.face)}>
+          {item.node}
+        </div>
+      ))}
       {/* 无 team 标记的图兜底已移除（时间线一期）：多 Agent 回合必有 `team` 标记
           （live 盖章 + reload journal 补齐），图只在标记槽渲染。 */}
-      {showFallbackAfter && renderFallback("fallback-after")}
       <ProcessEndChrome
         process={process}
         isStreaming={isStreaming}

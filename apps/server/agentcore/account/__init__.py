@@ -1,1 +1,1 @@
-"""Account narrow-ticket surface (conversation logs + engine rules/memory for sidecar)."""
+"""Account narrow-ticket surface (conversation logs + engine user-rules for sidecar)."""

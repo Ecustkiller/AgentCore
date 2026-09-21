@@ -40,8 +40,8 @@ class LeadSubteam:
 DelegateFactory = Callable[[str, int], LeadSubteam]
 
 # 阻塞式求决策 并发上限 (设计 §4.6): at most this many workers may be suspended on a
-# blocking escalate at once (per conversation). Beyond it a further blocking escalate
-# degrades to non-blocking (proceed on assumption) — caps card-flood + stops a whole
+# wait-escalate at once (per conversation). Beyond it a further wait-escalate
+# degrades to finish-under-assumption — caps card-flood + stops a whole
 # wave's width being parked on the user. Tunable; start conservative.
 ESCALATION_CONCURRENCY_CAP = 3
 

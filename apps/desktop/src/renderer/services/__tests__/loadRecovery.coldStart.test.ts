@@ -409,7 +409,7 @@ describe("loadRecovery cold start (no React Query / no resolveSidecarRoot)", () 
       origin: "server",
       payload: {
         approval_id: "a-done",
-        tool_name: "file_write",
+        tool_name: "write",
         arguments: {},
       },
     });

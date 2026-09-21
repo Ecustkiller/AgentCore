@@ -8,6 +8,9 @@ Thin CLI over ``agentcore.observability.query``. Run from apps/server:
     uv run python scripts/log_stats.py --json           # structured (Cursor AI)
     uv run python scripts/log_stats.py --file ../../logs/prod-export/events.jsonl
 
+Prefix Cache 段会列出非纯追加样本（``history_rewrite`` / ``cold_chain`` / ``tools``
+等，每种最多 8 个对话），供 ``log_timeline --trace``。纯追加不抽样。
+
 Reads the repo-root ``logs/dev.jsonl`` by default (plus rotating backups).
 Default excludes synthetic ``traffic=eval|test``; use ``--include-synthetic``.
 See .cursor/rules/conversation-logs.mdc.
@@ -172,6 +175,26 @@ def _print_prefix_cache(rows: list[dict], *, source: str) -> None:
                 f"    {label:<16} {b['calls']:>4} calls  hit {b['hit_ratio'] * 100:5.1f}%"
                 f"{extra}"
             )
+    samples = s.get("samples_by_breach") or {}
+    if samples:
+        print("  样本（非纯追加；每种最多 8 个对话，供 log_timeline --trace）:")
+        for breach, rows in sorted(samples.items()):
+            for row in rows:
+                tid = row.get("trace_id") or "-"
+                cid = row.get("conversation_id") or ""
+                extra = f"  cid={cid}" if cid else ""
+                scene = row.get("scenario") or ""
+                role = row.get("cost_role") or ""
+                tail = "  ".join(p for p in (scene, role) if p)
+                if tail:
+                    extra = f"{extra}  {tail}" if extra else f"  {tail}"
+                section = row.get("breach_section") or ""
+                if section:
+                    extra = f"{extra}  section={section}"
+                tokens = row.get("input_tokens") or ""
+                if tokens:
+                    extra = f"{extra}  in={tokens}"
+                print(f"    {breach:<16} {tid}{extra}")
 
 
 def _print_convergence_governance(

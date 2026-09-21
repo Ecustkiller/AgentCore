@@ -228,7 +228,7 @@ async def test_catalog_discovery_unions_with_vendor_presets(monkeypatch):
 
 
 async def test_catalog_custom_base_url_has_no_presets(monkeypatch):
-    """Unknown base_url: only default + discovery (no vendor preset injection)."""
+    """Unknown base_url: discovery only (no vendor preset, no stored default)."""
     reset_discovery_cache_for_tests()
     row = _prov(
         "prov-custom",
@@ -246,7 +246,7 @@ async def test_catalog_custom_base_url_has_no_presets(monkeypatch):
     )
     cat = await resolve_model_catalog(None, "u1")
     byok_ids = [m.id for m in cat.models if m.origin == "byok"]
-    assert byok_ids == ["my-default"]
+    assert byok_ids == []
 
 
 async def test_catalog_same_model_id_under_two_providers(monkeypatch):
@@ -420,7 +420,7 @@ async def test_opencode_go_catalog_marks_off_protocol_unselectable(monkeypatch):
     reset_discovery_cache_for_tests()
     row = _prov(
         "prov-go",
-        default_model="deepseek-v4-flash",
+        default_model="deepseek-v4.1-flash",
         label="OpenCode Go",
         base_url="https://opencode.ai/zen/go/v1",
     )
@@ -430,10 +430,11 @@ async def test_opencode_go_catalog_marks_off_protocol_unselectable(monkeypatch):
         monkeypatch,
         providers=[row],
         selection=ModelSelection(
-            model="deepseek-v4-flash", origin="byok", provider_id="prov-go"
+            model="deepseek-v4.1-flash", origin="byok", provider_id="prov-go"
         ),
         discovered={
             "prov-go": [
+                "deepseek-v4.1-flash",
                 "deepseek-v4-flash",
                 "grok-4.5",
                 "gpt-5.6-luna",
@@ -472,7 +473,7 @@ async def test_opencode_go_catalog_marks_off_protocol_unselectable(monkeypatch):
     assert haiku.available is True
     assert haiku.unavailable_reason is None
 
-    flash = _byok_off_protocol_row("deepseek-v4-flash", cat.models)
+    flash = _byok_off_protocol_row("deepseek-v4.1-flash", cat.models)
     assert flash.available is True
     assert flash.unavailable_reason is None
     glm = _byok_off_protocol_row("glm-5.2", cat.models)
@@ -490,17 +491,17 @@ async def test_opencode_go_catalog_marks_off_protocol_unselectable(monkeypatch):
         is True
     )
     assert (
-        await validate_model_choice(None, "u1", "deepseek-v4-flash", "byok", "prov-go")
+        await validate_model_choice(None, "u1", "deepseek-v4.1-flash", "byok", "prov-go")
         is True
     )
 
 
 async def test_opencode_go_hides_official_deepseek_flash_from_picker(monkeypatch):
-    """Go discovery lists official ``deepseek-flash``; new picker rows omit it."""
+    """Go discovery lists official ``deepseek-flash`` and retired V4 ids; new picker omits them."""
     reset_discovery_cache_for_tests()
     row = _prov(
         "prov-go",
-        default_model="deepseek-v4-flash",
+        default_model="deepseek-v4.1-flash",
         label="OpenCode Go",
         base_url="https://opencode.ai/zen/go/v1",
     )
@@ -510,21 +511,23 @@ async def test_opencode_go_hides_official_deepseek_flash_from_picker(monkeypatch
         monkeypatch,
         providers=[row],
         selection=ModelSelection(
-            model="deepseek-v4-flash", origin="byok", provider_id="prov-go"
+            model="deepseek-v4.1-flash", origin="byok", provider_id="prov-go"
         ),
         discovered={
             "prov-go": [
                 "deepseek-flash",
                 "deepseek-v4.1-flash",
                 "deepseek-v4-flash",
+                "deepseek-v4-pro",
             ]
         },
     )
     cat = await resolve_model_catalog(None, "u1")
     byok_ids = {m.id for m in cat.models if m.origin == "byok" and m.provider_id == "prov-go"}
     assert "deepseek-flash" not in byok_ids
+    assert "deepseek-v4-flash" not in byok_ids
+    assert "deepseek-v4-pro" not in byok_ids
     assert "deepseek-v4.1-flash" in byok_ids
-    assert "deepseek-v4-flash" in byok_ids
     assert (
         await validate_model_choice(None, "u1", "deepseek-flash", "byok", "prov-go")
         is False
@@ -677,7 +680,7 @@ def test_has_curated_pricing_flags_uncurated():
     assert not has_curated_pricing("gpt-4o")
     assert has_curated_pricing("deepseek-v4-flash")
     assert has_curated_pricing("deepseek-v4.1-flash")
-    assert has_curated_pricing("deepseek-v4-pro")
+    assert not has_curated_pricing("deepseek-v4-pro")
     assert has_curated_pricing("glm-5.2")
     assert not has_curated_pricing("grok-4.5")
     assert has_curated_pricing("doubao/doubao-seed-2-1-turbo-260628")

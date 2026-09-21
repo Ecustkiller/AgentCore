@@ -170,7 +170,6 @@ async def test_llm_provider_key_updated_and_deleted_emit(monkeypatch):
             id="prov-1",
             label="x",
             base_url="https://api.example",
-            default_model="m",
             status="unchecked",
             masked_key="••••1234",
             supports_tools=None,
@@ -186,7 +185,6 @@ async def test_llm_provider_key_updated_and_deleted_emit(monkeypatch):
     body.label = None
     body.api_key = "sk-new-secret-key"
     body.base_url = None
-    body.default_model = None
     body.model_fields_set = {"api_key"}
 
     await routes.update_llm_provider("prov-1", body, user, service)

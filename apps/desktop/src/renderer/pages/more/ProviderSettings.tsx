@@ -124,7 +124,6 @@ export function ProviderSettings() {
                 providerId={provider.id}
                 initialLabel={provider.label}
                 initialBaseUrl={provider.base_url}
-                initialModel={provider.default_model}
                 hideTestHint
                 onSaved={onSavedProvider}
                 onCancel={() => setForm(null)}
@@ -263,12 +262,9 @@ function ProviderCard({
 }) {
   const host = hostFromBaseUrl(provider.base_url);
   const busy = testing;
-  const testModel = provider.default_model?.trim();
-  const metaParts = [
-    host || null,
-    provider.masked_key ?? "已配置",
-    testModel ? `测试用模型 ${testModel}` : null,
-  ].filter(Boolean);
+  const metaParts = [host || null, provider.masked_key ?? "已配置"].filter(
+    Boolean,
+  );
 
   return (
     <Card className="px-4 py-3">

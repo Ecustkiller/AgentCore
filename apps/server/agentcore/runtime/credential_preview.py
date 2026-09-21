@@ -54,8 +54,13 @@ async def build_keys_preview_line(
     arguments: dict[str, Any],
 ) -> str:
     """Best-effort keys line for Ask-class credential reads; empty on any failure."""
-    path = str(arguments.get("path") or "").strip()
-    if not path or tool_name not in {"file_read", "grep"}:
+    if tool_name == "read":
+        path = str(arguments.get("file_path") or "").strip()
+    elif tool_name == "grep":
+        path = str(arguments.get("path") or "").strip()
+    else:
+        return ""
+    if not path:
         return ""
     from agentcore.runtime.safety_breaker import SensitivePathClass, classify_sensitive_path
 

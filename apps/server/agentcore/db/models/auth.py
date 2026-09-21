@@ -45,8 +45,8 @@ class Credentials(Base):
 
 # --- User LLM providers (BYOK · 多服务商列表) ---
 # 用户自带的 OpenAI 兼容服务商配置。一人多行（多服务商），每行是一个独立端点：
-# label（显示名）+ api_key_enc（AES-256-GCM 密文）+ base_url + default_model +
-# supports_tools + 连通状态（各服务商各测各的）。明文 key 永不落库
+# label（显示名）+ api_key_enc（AES-256-GCM 密文）+ base_url + 内部 default_model
+# （厂商预设种子，不上 API）+ supports_tools + 连通状态。明文 key 永不落库
 # （security.KeyEncryptor 加密，解析见 llm/resolve.py）。账号级 chat/后台默认指针
 # （(provider_id, model) 一对）落在 users 表；会话覆盖指针落在 conversations.model_provider_id。
 
@@ -73,8 +73,7 @@ class UserLlmProvider(Base):
     base_url: Mapped[str] = mapped_column(
         String(500), server_default=text("'https://api.deepseek.com'")
     )
-    # This provider's default model name (e.g. deepseek-v4-flash) — discovery seed +
-    # sensible default when the account/conversation pointer omits a model.
+    # Internal preset seed (first 模型组合 / delete retarget). Not user-facing.
     default_model: Mapped[str] = mapped_column(
         String(200), server_default=text("'deepseek-v4-flash'")
     )

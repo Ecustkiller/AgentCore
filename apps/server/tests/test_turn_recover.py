@@ -133,7 +133,7 @@ async def test_recover_turn_binds_inflight_window_as_crash_redrive_site():
             tool_calls=[
                 ToolCall(
                     id="fw",
-                    function=ToolCallFunction(name="file_write", arguments="{}"),
+                    function=ToolCallFunction(name="write", arguments="{}"),
                 )
             ],
         ),
@@ -1323,12 +1323,6 @@ async def test_production_crash_factory_base_prompt_lists_system_skills(monkeypa
             return None
 
     backend = SimpleNamespace(location="server")
-    monkeypatch.setattr(
-        rebuild_mod, "collect_outlet_inventory", AsyncMock(return_value=())
-    )
-    monkeypatch.setattr(
-        rebuild_mod, "desk_is_visibly_empty", AsyncMock(return_value=False)
-    )
     monkeypatch.setattr(crash_mod, "async_session_factory", lambda: _FakeSession())
     monkeypatch.setattr(crash_mod, "ConversationRepository", _FakeConvRepo)
     monkeypatch.setattr(crash_mod, "TableRepository", _FakeBoardRepo)
@@ -1366,19 +1360,9 @@ async def test_production_crash_factory_base_prompt_lists_system_skills(monkeypa
     monkeypatch.setattr(
         rebuild_mod, "resolve_exec_languages", AsyncMock(return_value=())
     )
-    monkeypatch.setattr(
-        rebuild_mod, "detect_workspace_git", AsyncMock(return_value=None)
-    )
-    monkeypatch.setattr(
-        rebuild_mod, "build_workspace_context", lambda *_a, **_k: ""
-    )
     # Rules / memory IO must not block the skill-directory assertion.
     monkeypatch.setattr(
         "agentcore.memory.rules_injection.load_on_demand_user_rules",
-        AsyncMock(return_value=[]),
-    )
-    monkeypatch.setattr(
-        "agentcore.memory.injection.load_memory_topics",
         AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(crash_mod, "wire_crash_turn", _fake_wire)

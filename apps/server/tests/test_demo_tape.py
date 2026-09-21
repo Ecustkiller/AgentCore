@@ -1183,7 +1183,6 @@ async def test_tape_followups_ignored_on_persist(monkeypatch, tmp_path: Path):
         AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(cloud_mod, "persist_turn_journal", AsyncMock())
-    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
     monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
     monkeypatch.setattr(
         cloud_mod.settings, "workspace_snapshot_enabled", False, raising=False
@@ -2138,8 +2137,8 @@ def test_export_allows_wired_cold_and_hot_approval_pauses():
                         "payload": {
                             "approval_id": "a1",
                             "tool_call_id": "tc1",
-                            "tool_name": "file_write",
-                            "arguments": {"path": "x"},
+                            "tool_name": "write",
+                            "arguments": {"file_path": "x"},
                         },
                         "timestamp": None,
                         "t_ms": 0,
@@ -2428,8 +2427,8 @@ async def test_player_hot_approval_awaits_resolve_and_continues(monkeypatch, tmp
             "payload": {
                 "approval_id": "ap-src",
                 "tool_call_id": "tc-src",
-                "tool_name": "file_write",
-                "arguments": {"path": "a.txt"},
+                "tool_name": "write",
+                "arguments": {"file_path": "a.txt"},
             },
             "t_ms": 100,
         },
@@ -2541,7 +2540,7 @@ async def test_hot_approval_remint_distinct_across_replays(monkeypatch, tmp_path
             "payload": {
                 "approval_id": "ap-recorded",
                 "tool_call_id": "tc-recorded",
-                "tool_name": "file_write",
+                "tool_name": "write",
                 "arguments": {},
             },
             "t_ms": 0,
@@ -2649,7 +2648,7 @@ async def test_hot_approval_wait_does_not_drift_pacing(monkeypatch, tmp_path: Pa
             "payload": {
                 "approval_id": "ap1",
                 "tool_call_id": "tc1",
-                "tool_name": "file_write",
+                "tool_name": "write",
                 "arguments": {},
             },
             "t_ms": 100,
@@ -2734,7 +2733,7 @@ async def test_hot_approval_cancel_clears_registry(monkeypatch, tmp_path: Path):
             "payload": {
                 "approval_id": "ap-cancel",
                 "tool_call_id": "tc-cancel",
-                "tool_name": "file_write",
+                "tool_name": "write",
                 "arguments": {},
             },
             "t_ms": 0,
@@ -3209,7 +3208,7 @@ async def test_multi_act_hot_approval_within_act(tmp_path: Path, monkeypatch):
                             "payload": {
                                 "approval_id": "ap-m",
                                 "tool_call_id": "tc-m",
-                                "tool_name": "file_write",
+                                "tool_name": "write",
                                 "arguments": {},
                             },
                             "timestamp": None,

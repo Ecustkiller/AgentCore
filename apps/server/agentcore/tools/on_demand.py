@@ -1,15 +1,14 @@
 """HOW roster for tools whose handbook lives in ``consult``.
 
-``resident=False`` means HOW is in consult (host / browser), **not** that the
-schema is withheld from the opening FC table. Assembled tools — including
-``mcp_*`` — are on the table from register. Consult does not promote schemas.
-
-Not an intent classifier: the builtin split is ``ToolRegistration.resident``.
+``resident`` is a human catalog chip (开场即用), **not** a FC-table gate.
+Factory builtins and assembled MCP actions are opening-resident; unplugged
+connectors simply do not list actions. No builtin currently has a consult
+handbook. Consult does not promote schemas.
 """
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Sequence
 from functools import lru_cache
 
 # Retired model-facing names → current on-demand tool. Did-you-mean for unknown
@@ -24,11 +23,6 @@ RETIRED_ON_DEMAND_NAMES: dict[str, str] = {
 _FAMILIES: tuple[frozenset[str], ...] = ()
 
 _FAMILY_LABELS: dict[frozenset[str], str] = {}
-
-# Skill consult → names the matching on-demand tool (HOW 与按钮同一查阅)。
-_SKILL_OFFERS_TOOLS: dict[str, frozenset[str]] = {
-    "debate_and_review": frozenset({"debate"}),
-}
 
 
 @lru_cache(maxsize=1)
@@ -73,6 +67,19 @@ def is_on_demand_tool(name: str) -> bool:
     return name in on_demand_builtin_names() or is_mcp_tool_name(name)
 
 
+@lru_cache(maxsize=1)
+def _declared_tool_names() -> frozenset[str]:
+    from agentcore.tools.registration import declared_tool_name, declared_tools
+
+    return frozenset(declared_tool_name(cls) for cls in declared_tools())
+
+
+def is_tool_fc_name(name: str) -> bool:
+    """Declared builtin or MCP FC name — not a skill/rule consult key."""
+    key = (name or "").strip()
+    return bool(key) and (key in _declared_tool_names() or is_mcp_tool_name(key))
+
+
 def family_of(name: str, *, registry: object | None = None) -> frozenset[str]:
     """Name plus any family siblings (always includes ``name`` itself).
 
@@ -107,54 +114,6 @@ def family_catalog_meta(name: str) -> tuple[str, str]:
         if name in family:
             return "+".join(sorted(family)), _FAMILY_LABELS.get(family, "")
     return "", ""
-
-
-def tools_offered_by_consult_name(name: str) -> frozenset[str]:
-    """On-demand tools a catalog consult name mentions (skill or tool)."""
-    key = (name or "").strip()
-    if not key:
-        return frozenset()
-    return _SKILL_OFFERS_TOOLS.get(key, frozenset())
-
-
-def format_enabled_tools_note(names: Sequence[str]) -> str:
-    """Consult suffix: these names are already on the opening table."""
-    listed = [n.strip() for n in names if str(n).strip()]
-    if not listed:
-        return ""
-    ticks = "、".join(f"`{n}`" for n in listed)
-    return (
-        f"\n\n工具 {ticks} 已在开场表，可直接调用。"
-    )
-
-
-def offer_bound_tools(registry: object, names: Collection[str]) -> list[str]:
-    """On-table on-demand names (and family). Does not promote onto the FC table."""
-    get = getattr(registry, "get_optional", None)
-    if not callable(get):
-        return []
-    enabled: list[str] = []
-    seen: set[str] = set()
-    for raw in names:
-        key = str(raw or "").strip()
-        if not key:
-            continue
-        resolved = resolve_on_demand_name(registry, key)
-        if resolved is None or not is_on_demand_tool(resolved):
-            continue
-        if get(resolved) is None:
-            continue
-        for member in sorted(family_of(resolved, registry=registry)):
-            if member in seen or get(member) is None or not is_on_demand_tool(member):
-                continue
-            seen.add(member)
-            enabled.append(member)
-    return enabled
-
-
-def offer_skill_promoted_tools(registry: object, skill_name: str) -> list[str]:
-    """Names a system skill consult mentions; already on the opening table."""
-    return offer_bound_tools(registry, tools_offered_by_consult_name(skill_name))
 
 
 def resolve_on_demand_name(registry: object | None, name: str) -> str | None:
@@ -199,7 +158,7 @@ def on_demand_summary(name: str, *, description: str = "") -> str:
 
 
 def has_consult_how(name: str) -> bool:
-    """True when this tool's handbook lives in ``consult`` (host / browser)."""
+    """True when this tool's handbook lives in ``consult`` (none today)."""
     return bool(_ceo_how_for(name))
 
 
@@ -212,8 +171,7 @@ def render_tool_consult_body(
 ) -> str:
     """HOW body for catalog tools already on the opening FC table.
 
-    CEO + host/browser: consult HOW only (no schema reprint). Workers get the
-    on-table ack without CEO routing manuals.
+    No builtin handbook remains; body is the on-table ack (no schema reprint).
     """
     del description
     siblings = [n for n in enabled if n != name]

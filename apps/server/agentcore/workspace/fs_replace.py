@@ -3,8 +3,8 @@
 ``os.replace`` on Windows needs DELETE-share on the destination. Antivirus /
 search indexers often hold a file with read sharing only, so replace raises
 WinError 5/32 while an in-place ``write_bytes`` still succeeds. Outbox already
-retried this; workspace ``str_replace`` did not — same-directory edits then
-failed after a successful ``file_write``.
+retried this; workspace ``edit`` did not — same-directory edits then
+failed after a successful ``write``.
 """
 
 from __future__ import annotations
@@ -98,7 +98,7 @@ def atomic_write_bytes(
 ) -> None:
     """Write ``data`` via temp file + replace; optionally fall back to in-place.
 
-    Fallback matches ``file_write`` durability (truncating write) and is only
+    Fallback matches ``write`` durability (truncating write) and is only
     used after replace retries exhaust on a transient lock. Crash mid-fallback
     can truncate; that is the same contract ``ServerWorkspace.write`` already
     accepted.

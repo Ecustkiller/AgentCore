@@ -46,11 +46,11 @@ _ACTION_LIST = "list"
 _ACTION_RESOLVE = "resolve"
 
 _AMBIGUOUS_HINT = (
-    "多个命中：请用 ask_user（kind=choice，multiple=false）让用户选一个；"
+    "多个命中：请用 ask_user（给出 options，multiple=false）让用户选一个；"
     "选项 label 须含**完整路径** rel_path（及 mode / local_subpath 等可区分信息）——"
     "只写末段名分不清 `设计/图标` 与 `归档/图标`；"
     "或改用更长的路径重新 resolve（如 `设计/图标` 而不是 `图标`）。"
-    "禁止静默猜「最近」；禁止用 open_local_project 冒充选已有文件夹（那会新会话）。"
+    "禁止静默猜「最近」。"
 )
 _NOT_FOUND_HINT = (
     "零命中：请向用户确认文件夹名 / 路径，或用 folders 核对后再 ask_user；"
@@ -59,8 +59,8 @@ _NOT_FOUND_HINT = (
     "裸聊写盘：云会话由运行时自动建云文件夹；"
     "桌面本地对话已在本机 scratch（本次对话），勿再「先在云上做」当默认。"
     "用户要新开云文件夹：在「我的文件」新建（人侧）。"
-    "用户点名本机目录：Composer「直接改这个文件夹」或 open_local_project / "
-    "register_local_project / bind_local_folder（≠离线）；换设备才「先在云上做」。"
+    "用户点名本机目录：请人在 Composer 选「直接改这个文件夹」（新开对话）；"
+    "换设备才「先在云上做」。"
     "禁止静默猜「最近」。"
 )
 _EMPTY_LIST_HINT = (
@@ -69,7 +69,6 @@ _EMPTY_LIST_HINT = (
     "裸聊写盘：云会话由运行时自动建云文件夹；桌面本地对话已在本机 scratch。"
     "用户要新开云文件夹：在「我的文件」新建（人侧）；"
     "用户点名本机目录走 Composer「直接改这个文件夹」；换设备才「先在云上做」。"
-    "勿默认催 open_local_project / register_local_project（≠离线）。"
 )
 _RESOLVED_TIP = (
     "空/近空先 ask_user 钉目标，勿连续 file_list 确认空；"
@@ -268,7 +267,7 @@ async def soft_delete_folder(*, user_id: str, folder_id: str) -> bool:
     Blast radius is exactly: the folder row (and its nested children) stamped
     ``deleted_at``, the directory parked in the tombstone area so the name frees up
     immediately, member conversations archived in place (membership kept), soft
-    pointers (boards / bare-chat auto desk) NULLed. Server-side workspace +
+    pointers (bare-chat auto desk) NULLed. Server-side workspace +
     snapshots are reclaimed later by the retention sweeper. The user's OS directory
     behind ``local_root_id`` is never touched, and the ``/permanent`` twin is
     unreachable from here by construction.
@@ -341,6 +340,7 @@ class FoldersTool:
         audience=AUDIENCE_CEO_ONLY,
         ceo_wire=CeoWire.ALWAYS,
         catalog_summary="列出或解析云文件夹",
+        blurb="查云端文件夹名单，或解析某个文件夹",
     )
 
     @property
@@ -363,8 +363,7 @@ class FoldersTool:
                     "path": {
                         "type": "string",
                         "description": (
-                            "resolve：文件夹路径（POSIX、相对云盘树根）"
-                            "或用户口述的单个名字（精确或可唯一子串）。"
+                            "resolve：相对云盘树根的 POSIX，或可唯一对上的名字。"
                         ),
                     },
                 },

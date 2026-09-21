@@ -97,7 +97,7 @@ DEP_SUMMARY_CHARS = 600
 # 递指针不递全文 (Agent协作模式.md 远期 → 现状): when an upstream dependency already
 # WROTE its product to the shared workspace (its ``files_touched`` is non-empty), a
 # downstream worker gets a POINTER — a tight prose digest + the artifact paths to
-# ``file_read`` — instead of the whole product re-shipped through the prompt. The
+# ``read`` — instead of the whole product re-shipped through the prompt. The
 # artifact is on disk and reachable; re-injecting it whole wastes tokens and risks
 # tail-trimming (the budgeted full-text path). These bound the pointer: how far the
 # prose digest is cut, and how many paths to list before eliding. A pointer dep does
@@ -106,7 +106,7 @@ DEP_SUMMARY_CHARS = 600
 DEP_POINTER_SUMMARY_CHARS = 600
 DEP_POINTER_MAX_FILES = 20
 
-# Wave3 B：分区 worker 开局强制注入上游契约/设计摘要（少反复 file_read）。
+# Wave3 B：分区 worker 开局强制注入上游契约/设计摘要（少反复 read）。
 # 单文件截断上限；多文件合计另受调用方清单约束。
 CONTEXT_INJECT_CHARS = 2400
 

@@ -5,7 +5,7 @@
  */
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Message } from "@/stores/conversation";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -215,38 +215,31 @@ describe("AssistantMessage footer gate", () => {
     expect(screen.queryByTestId("assistant-footer")).toBeNull();
   });
 
-  it("空正文 + message.error 时显示 footer", () => {
-    renderBubble(
+  it("空正文 + message.error 不占气泡", () => {
+    const { container } = renderBubble(
       settledMessage({
         content: "",
         error: { code: "LLM_ERROR", message: "模型调用失败，请重试。" },
       }),
     );
-    expect(screen.getByTestId("assistant-footer")).toBeTruthy();
+    expect(container.textContent).toBe("");
+    expect(screen.queryByTestId("assistant-footer")).toBeNull();
   });
 
-  it("错误卡不挂重新生成（定案 A；底栏 footer 另测）", () => {
+  it("空失败不在气泡挂重新生成", () => {
     renderBubble(
       settledMessage({
         content: "",
         error: { code: "LLM_ERROR", message: "模型调用失败，请重试。" },
       }),
     );
-    const errText = screen.getByText("模型调用失败，请重试。");
-    const errCard = errText.closest("div");
-    expect(errCard).toBeTruthy();
-    expect(
-      within(errCard as HTMLElement).queryByRole("button", {
-        name: "重新生成",
-      }),
-    ).toBeNull();
+    expect(screen.queryByText("模型调用失败，请重试。")).toBeNull();
+    expect(screen.queryByRole("button", { name: "重新生成" })).toBeNull();
     expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
-    // 本测 mock 了 Footer；只断言错误卡已摘按钮，footer 仍挂载。
-    expect(screen.getByTestId("assistant-footer")).toBeTruthy();
   });
 
-  it("空正文 + runs.error 时显示 footer", () => {
-    renderBubble(
+  it("空正文 + runs.error 不占气泡", () => {
+    const { container } = renderBubble(
       settledMessage({
         content: "",
         // Duck-typed journal error only (no message.error / non-synthesizable finish).
@@ -257,12 +250,16 @@ describe("AssistantMessage footer gate", () => {
         } as Message["runs"],
       }),
     );
-    expect(screen.getByTestId("assistant-footer")).toBeTruthy();
+    expect(container.textContent).toBe("");
+    expect(screen.queryByTestId("assistant-footer")).toBeNull();
   });
 
-  it("空正文 + 可合成空失败（finishReason=error）时显示 footer", () => {
-    renderBubble(settledMessage({ content: "", finishReason: "error" }));
-    expect(screen.getByTestId("assistant-footer")).toBeTruthy();
+  it("空正文 + 可合成空失败（finishReason=error）不占气泡", () => {
+    const { container } = renderBubble(
+      settledMessage({ content: "", finishReason: "error" }),
+    );
+    expect(container.textContent).toBe("");
+    expect(screen.queryByTestId("assistant-footer")).toBeNull();
   });
 
   it("空正文 + cancelled 不占聊天面；interrupted 不在气泡画失败卡（P1）", () => {
@@ -323,7 +320,7 @@ describe("AssistantMessage footer gate", () => {
     expect(screen.getByTestId("assistant-footer")).toBeTruthy();
   });
 
-  it("限流 + interrupted finish：只亮限流横幅，不并写「直接发送下一条」", () => {
+  it("限流 + interrupted finish：句子不进气泡", () => {
     renderBubble(
       settledMessage({
         content: "",
@@ -334,7 +331,7 @@ describe("AssistantMessage footer gate", () => {
         },
       }),
     );
-    expect(screen.getByText(/上游限流/)).toBeTruthy();
+    expect(screen.queryByText(/上游限流/)).toBeNull();
     expect(screen.queryByText(/直接发送下一条/)).toBeNull();
     expect(screen.queryByText("已中断")).toBeNull();
   });
@@ -358,7 +355,7 @@ describe("AssistantMessage footer gate", () => {
 });
 
 describe("AssistantMessage empty-response single surface", () => {
-  it("LLM_EMPTY_RESPONSE：只错误卡，不叠软收尾灰标 / 连通升级句", () => {
+  it("LLM_EMPTY_RESPONSE：空壳不进气泡，不叠软收尾灰标 / 连通升级句", () => {
     renderBubble(
       settledMessage({
         id: "empty-1",
@@ -371,16 +368,16 @@ describe("AssistantMessage empty-response single surface", () => {
         },
       }),
     );
-    expect(screen.getByText(/模型多次空响应/)).toBeTruthy();
+    expect(screen.queryByText(/模型多次空响应/)).toBeNull();
     expect(screen.queryByText("空响应收尾")).toBeNull();
     expect(screen.queryByText(/降级完成/)).toBeNull();
-    expect(screen.queryByText(/模型返回空内容/)).toBeTruthy();
+    expect(screen.queryByText(/模型返回空内容/)).toBeNull();
     // Chip would show diagnosis alone; error card already has it — no separate chip row.
     expect(screen.queryByText("Base URL")).toBeNull();
     expect(screen.queryByText(/设置 · 服务商/)).toBeNull();
   });
 
-  it("legacy oauth_expired diagnosis：错误卡唯一面，无 Sub2API / 降级完成", () => {
+  it("legacy oauth_expired diagnosis：空壳不进气泡，无 Sub2API / 降级完成", () => {
     renderBubble(
       settledMessage({
         id: "empty-oauth",
@@ -394,7 +391,7 @@ describe("AssistantMessage empty-response single surface", () => {
         },
       }),
     );
-    expect(screen.getByText(/上游返回了网页或登录页/)).toBeTruthy();
+    expect(screen.queryByText(/上游返回了网页或登录页/)).toBeNull();
     expect(screen.queryByText(/Sub2API/)).toBeNull();
     expect(screen.queryByText(/降级完成/)).toBeNull();
     expect(screen.queryByText("空响应收尾")).toBeNull();
@@ -419,8 +416,8 @@ describe("AssistantMessage empty-response single surface", () => {
         finishReason: "degraded",
       }),
     );
-    expect(screen.getByText("模型返回空内容，请重试。")).toBeTruthy();
-    expect(screen.getByTestId("assistant-footer")).toBeTruthy();
+    expect(screen.queryByText("模型返回空内容，请重试。")).toBeNull();
+    expect(screen.queryByTestId("assistant-footer")).toBeNull();
   });
 
   it("空正文 + usage.error（刷新 REST 路径）有脸", () => {
@@ -441,10 +438,10 @@ describe("AssistantMessage empty-response single surface", () => {
         },
       }),
     );
-    expect(screen.getByText(/上游账户余额不足/)).toBeTruthy();
+    expect(screen.queryByText(/上游账户余额不足/)).toBeNull();
   });
 
-  it("有正文 + finishReason=error + 无 message.error：错误卡不静默，无灰标调用失败", () => {
+  it("有正文 + finishReason=error：句子不进气泡，无灰标调用失败", () => {
     renderBubble(
       settledMessage({
         id: "hard-body-1",
@@ -461,13 +458,13 @@ describe("AssistantMessage empty-response single surface", () => {
         } as Message["runs"],
       }),
     );
-    expect(screen.getByText(/平台模型暂时不可用/)).toBeTruthy();
+    expect(screen.queryByText(/平台模型暂时不可用/)).toBeNull();
     expect(screen.getByText("部分已生成正文")).toBeTruthy();
     // Chip must not stack on the error card.
     expect(screen.queryByText("调用失败")).toBeNull();
   });
 
-  it("空正文硬失败：只错误卡，不叠灰标调用失败", () => {
+  it("空正文硬失败：不占气泡，不叠灰标调用失败", () => {
     renderBubble(
       settledMessage({
         id: "hard-empty-1",
@@ -480,14 +477,14 @@ describe("AssistantMessage empty-response single surface", () => {
         },
       }),
     );
-    expect(screen.getByText(/平台模型暂时不可用/)).toBeTruthy();
+    expect(screen.queryByText(/平台模型暂时不可用/)).toBeNull();
     expect(screen.queryByText("调用失败")).toBeNull();
   });
 });
 
-describe("AssistantMessage error card chrome", () => {
-  it("限流 / 无 action：错误卡灰底，复制排查包不走红", () => {
-    renderBubble(
+describe("AssistantMessage leaves failure copy off the bubble", () => {
+  it("empty rate-limit does not render a card", () => {
+    const { container } = renderBubble(
       settledMessage({
         content: "",
         error: {
@@ -496,69 +493,7 @@ describe("AssistantMessage error card chrome", () => {
         },
       }),
     );
-    const errCard = screen
-      .getByText("上游限流，暂时无法继续本回合。请稍后再试。")
-      .closest("div");
-    expect(errCard?.className).toContain("bg-muted/40");
-    expect(errCard?.className).not.toContain("bg-primary/10");
-    const copyBtn = screen.getByRole("button", { name: "复制排查包" });
-    expect(copyBtn.className).toContain("text-muted-foreground");
-    expect(copyBtn.className).not.toContain("destructive");
-    expect(screen.queryByRole("button", { name: "去服务商" })).toBeNull();
-  });
-
-  it("有去配置：错误卡蓝底，动作钮 primary，复制排查包跟蓝档", () => {
-    renderBubble(
-      settledMessage({
-        content: "",
-        error: {
-          code: "LLM_KEY_REQUIRED",
-          message: "请先接入自己的 API Key，再发起对话。",
-        },
-      }),
-    );
-    const errCard = screen
-      .getByText("请先接入自己的 API Key，再发起对话。")
-      .closest("div");
-    expect(errCard?.className).toContain("bg-primary/10");
-    expect(errCard?.className).not.toContain("bg-muted/40");
-    const actionBtn = screen.getByRole("button", { name: "去服务商" });
-    expect(actionBtn.className).toContain("bg-primary");
-    expect(actionBtn.className).not.toContain("bg-destructive");
-    const copyBtn = screen.getByRole("button", { name: "复制排查包" });
-    expect(copyBtn.className).toContain("text-primary/70");
-    expect(copyBtn.className).not.toContain("destructive");
-  });
-
-  it("credential_source=platform：接入自己的 Key，不是去服务商", () => {
-    renderBubble(
-      settledMessage({
-        content: "",
-        error: {
-          code: "LLM_KEY_INVALID",
-          message:
-            "平台模型暂时不可用（上游鉴权失败）。请改用自己的 API Key，或联系管理员。",
-          context: { credential_source: "platform" },
-        },
-      }),
-    );
-    expect(screen.getByRole("button", { name: "接入自己的 Key" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "去服务商" })).toBeNull();
-  });
-
-  it("credential_source=user：去服务商", () => {
-    renderBubble(
-      settledMessage({
-        content: "",
-        error: {
-          code: "LLM_KEY_INVALID",
-          message: "API Key 无效或已过期，请检查后重试。",
-          context: { credential_source: "user" },
-        },
-      }),
-    );
-    expect(screen.getByRole("button", { name: "去服务商" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "接入自己的 Key" })).toBeNull();
+    expect(container.textContent).toBe("");
   });
 });
 

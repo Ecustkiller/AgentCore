@@ -80,7 +80,7 @@ class TurnOutcome:
 
     ``content`` 保持**聊天正文**（不改写——``NonEmpty`` / ``ContentMatches`` /
     baseline 快照依赖它）。
-    ``artifacts`` 是工作区终版成品：``path → 末次 file_write 正文``（从 ``tool_calls`` 还原）。
+    ``artifacts`` 是工作区终版成品：``path → 末次 write 正文``（从 ``tool_calls`` 还原）。
     裁判口径用 :func:`judged_text`（正文 + 成品），与产品「文件交付」形态对齐。
     """
 
@@ -100,7 +100,7 @@ class TurnOutcome:
     plan_type: str | None = None
     # 协作互动事件计数（升级 / replan / 续派 …），键为短标签、值为次数。
     collab_interactions: dict[str, int] = field(default_factory=dict)
-    # 终版成品：path → 该 path 末次 file_write 的 content（空 dict = 无落盘 / 旧 outcome）。
+    # 终版成品：path → 该 path 末次 write 的 content（空 dict = 无落盘 / 旧 outcome）。
     artifacts: dict[str, str] = field(default_factory=dict)
     # 工作区根（copytree 隔离副本）。``TestExitCode`` / ``TestsUnchanged`` 等盘面 Check 用；
     # 旧 outcome / 无 workspace 路径为 None。
@@ -110,14 +110,14 @@ class TurnOutcome:
 
 
 def artifacts_from_tool_calls(tool_calls: list[tuple[str, str]]) -> dict[str, str]:
-    """从 ``tool_calls`` 还原每 path **末次** ``file_write`` 的 content。
+    """从 ``tool_calls`` 还原每 path **末次** ``write`` 的 content。
 
-    与 P2 手工修正同构：只认 ``file_write``；同 path 多次写入取最后一次；坏 JSON /
-    缺 path/content 跳过。不改写聊天 ``content``。
+    与 P2 手工修正同构：只认 ``write``；同 path 多次写入取最后一次；坏 JSON /
+    缺 file_path/content 跳过。不改写聊天 ``content``。
     """
     out: dict[str, str] = {}
     for name, raw in tool_calls:
-        if name != "file_write":
+        if name != "write":
             continue
         try:
             args = json.loads(raw) if raw else {}
@@ -125,7 +125,7 @@ def artifacts_from_tool_calls(tool_calls: list[tuple[str, str]]) -> dict[str, st
             continue
         if not isinstance(args, dict):
             continue
-        path = args.get("path")
+        path = args.get("file_path")
         body = args.get("content")
         if isinstance(path, str) and path and isinstance(body, str):
             out[path] = body  # 末次覆盖

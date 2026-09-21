@@ -1,30 +1,18 @@
-"""批 D2：约定文档台账锚写入 / 开赛预登记 / 无幕1 零行为（零 LLM）。"""
+"""调研正文 ``#rN`` 锚写入（零 LLM）；约定柜预登记已卸。"""
 
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
-
-from agentcore.runtime.debate.evidence_ledger import EvidenceLedger
 from agentcore.runtime.debate.research_dossier import (
-    DOSSIER_SIDE_KEY,
-    SYNTHESIZER_FILE,
     dossier_label_from_path,
     ensure_research_file_anchors,
     extract_research_ledger_anchors,
     format_research_dossier_index,
-    preregister_research_dossier,
-    workspace_has_synthesizer,
 )
-from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
-from agentcore.tools.sandbox.subprocess import SubprocessSandbox
-from agentcore.workspace.server import ServerWorkspace
 
 
 def test_dossier_label_from_path():
-    assert dossier_label_from_path("AgentCore/文档/research/法律透镜报告.md") == "法律"
-    assert dossier_label_from_path("AgentCore/文档/research/汇总与命题卡.md") == "汇总"
+    assert dossier_label_from_path("notes/法律透镜报告.md") == "法律"
+    assert dossier_label_from_path("notes/汇总与命题卡.md") == "汇总"
 
 
 def test_extract_anchors_from_inline_and_footer():
@@ -75,93 +63,10 @@ def test_ensure_anchors_skips_footer_when_unbound_bibliography():
     assert "## 来源台账锚" not in out
 
 
-@pytest.mark.asyncio
-async def test_preregister_research_dossier_reuses_r_ids(tmp_path: Path):
-    research = tmp_path / "AgentCore" / "文档" / "research"
-    research.mkdir(parents=True)
-    (research / "法律透镜报告.md").write_text(
-        "条款原文#r1。\n\n## 来源台账锚\n\n"
-        "- #r1 · https://court.example/x · 合同\n",
-        encoding="utf-8",
-    )
-    (research / "汇总与命题卡.md").write_text("综述无锚。", encoding="utf-8")
-
-    ws = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
-    led = EvidenceLedger()
-    idx = await preregister_research_dossier(led, ws)
-
-    assert "【工作区约定文档索引·AgentCore/文档/research/】" in idx
-    assert "【约定文档预登记台账·引用须用下列 #rN】" in idx
-    assert "AgentCore/文档/research/法律透镜报告.md" in idx
-    assert led.ids  # 至少一条
-    legal = next(
-        e for e in led.all_entries() if e.get("dossier_path", "").endswith("法律透镜报告.md")
-    )
-    assert legal["side_key"] == DOSSIER_SIDE_KEY
-    assert legal["id"] == "#r1"
-    assert legal["dossier_label"] == "法律"
-    assert legal["url"] == "https://court.example/x"
-    synth = next(
-        e for e in led.all_entries() if e.get("dossier_path") == SYNTHESIZER_FILE
-    )
-    assert synth["dossier_label"] == "汇总"
-
-
-@pytest.mark.asyncio
-async def test_preregister_research_dossier_reuses_turn_core_id(tmp_path: Path):
-    """开辩继承当轮核：约定文档 #r1 复用既有条目，不另开号。"""
-    research = tmp_path / "AgentCore" / "文档" / "research"
-    research.mkdir(parents=True)
-    (research / "法律透镜报告.md").write_text(
-        "条款原文#r1。\n\n## 来源台账锚\n\n"
-        "- #r1 · https://court.example/x · 合同\n",
-        encoding="utf-8",
-    )
-    core = EvidenceLedgerCore()
-    assert (
-        core.register_sync(
-            url="https://court.example/x",
-            title="合同",
-            registrant="ceo",
-        )
-        == "#r1"
-    )
-    ws = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
-    led = EvidenceLedger(core=core)
-    idx = await preregister_research_dossier(led, ws)
-    legal = next(
-        e for e in led.all_entries() if e.get("dossier_path", "").endswith("法律透镜报告.md")
-    )
-    assert legal["id"] == "#r1"
-    assert legal["url"] == "https://court.example/x"
-    assert legal["dossier_label"] == "法律"
-    assert [e["id"] for e in led.all_entries() if e["id"] == "#r1"] == ["#r1"]
-    assert "#r1" in idx
-
-
-@pytest.mark.asyncio
-async def test_preregister_no_research_is_noop(tmp_path: Path):
-    ws = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
-    led = EvidenceLedger()
-    idx = await preregister_research_dossier(led, ws)
-    assert idx == ""
-    assert led.all_entries() == []
-
-
-@pytest.mark.asyncio
-async def test_workspace_has_synthesizer(tmp_path: Path):
-    ws = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
-    assert await workspace_has_synthesizer(ws) is False
-    research = tmp_path / "AgentCore" / "文档" / "research"
-    research.mkdir(parents=True)
-    (research / "汇总与命题卡.md").write_text("x", encoding="utf-8")
-    assert await workspace_has_synthesizer(ws) is True
-
-
 def test_format_index_with_ledger_lines():
     text = format_research_dossier_index(
-        ["AgentCore/文档/research/a.md"],
-        ledger_lines=["- research/a.md → #r1"],
+        ["notes/a.md"],
+        ledger_lines=["- notes/a.md → #r1"],
     )
-    assert "约定文档预登记台账" in text
+    assert "材料预登记台账" in text
     assert "#r1" in text

@@ -3,16 +3,15 @@ import { MentionMenu } from "@/components/chat/MentionMenu";
 import { Button, IconButton } from "@/components/ui";
 import { useConversations } from "@/hooks/useConversations";
 import { useFolders } from "@/hooks/useFolders";
-import { copyText } from "@/lib/clipboard";
 import {
   COMPOSER_CONTINUE_PLACEHOLDER,
-  COMPOSER_EMPTY_INTERRUPTED_HINT,
   isContinuableAssistant,
 } from "@/lib/composerContinueHint";
 import {
   useCoordinationActive,
   useLiveCoordinatingTurn,
 } from "@/lib/composerDelivery";
+import { connectivityEscalationSuffix } from "@/lib/errors";
 import {
   dropInlineIndex,
   insertInlineToken,
@@ -20,22 +19,26 @@ import {
   plainText,
 } from "@/lib/inlineBody";
 import {
-  buildSupportDiagnosticPack,
-  formatSupportDiagnosticText,
-  precedingUserMessageId,
-  supportDiagnosticExtrasFromError,
-} from "@/lib/supportDiagnostics";
-import {
   assistantHasTeamStrip,
   turnOutcomeForAssistant,
 } from "@/lib/turnOutcome";
 import { selectVisibleColdResumes } from "@/services/resume";
+import { warmLlmHttpOnComposerFocus } from "@/services/warmLlmHttp";
 import { draftKeyFor, useComposerDraftStore } from "@/stores/composer";
+import {
+  clearFailureBannerDismiss,
+  dismissFailureBanner,
+  useFailureBannerDismissed,
+} from "@/stores/composerFailureDismiss";
+import {
+  clearComposerSendError,
+  useComposerSendError,
+} from "@/stores/composerSendError";
 import {
   activeRuntime,
   assistantProjectionId,
-  getActiveRuntime,
   useActiveError,
+  useActiveErrorAction,
   useActiveGenerating,
   useActiveTurnPhase,
   useConversationStore,
@@ -48,7 +51,7 @@ import {
 } from "@/stores/interactions";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import { useServerHealthStore } from "@/stores/serverHealth";
-import { AtSign, Copy, ListPlus, Loader2, Send, Square, X } from "lucide-react";
+import { AtSign, ListPlus, Loader2, Send, Square, X } from "lucide-react";
 import type { ChangeEvent, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -56,13 +59,14 @@ import {
   type ComposerBodyHandle,
 } from "./ComposerBodyEditor";
 import { ComposerContextCompactedHint } from "./ComposerContextCompactedHint";
+import { ComposerFailureBanner } from "./ComposerFailureBanner";
 import { ComposerGitStatusChip } from "./ComposerGitStatusChip";
 import {
   ComposerPlusMenu,
   useComposerPlusClose,
   useComposerPlusHost,
 } from "./ComposerPlusMenu";
-import { ComposerSendErrorNotice } from "./ComposerSendErrorNotice";
+import { ComposerReceivedContextButton } from "./ComposerReceivedContextButton";
 import { ComposerVisionHint } from "./ComposerVisionHint";
 import { ComposerWorkspaceChip } from "./ComposerWorkspaceChip";
 import { ModelPicker } from "./ModelPicker";
@@ -102,6 +106,12 @@ const MIN_COMPOSER_HEIGHT_CARD = 56;
 const MIN_COMPOSER_HEIGHT_BAR = 36;
 const MAX_COMPOSER_HEIGHT = 200;
 
+/** bar 底排盒：＋ / 输入 / 语音 / 发送 与窗外环共用，环跟按钮对齐，不跟卡片边框底边对齐。 */
+const COMPOSER_BAR_ROW = "flex items-end gap-1 py-1";
+const COMPOSER_BAR_CLUSTER = "flex shrink-0 items-center pb-0.5";
+/** card 底栏：窗外环与工具条同一 `pb-3`，不跟卡片边框底边对齐。 */
+const COMPOSER_CARD_ENDCAP = "flex items-end pb-3";
+
 /** Align with backend `MessageCreate.content` max_length. */
 const MESSAGE_CHAR_LIMIT = 32_000;
 
@@ -116,6 +126,7 @@ export type TurnComposerVariant = "card" | "bar";
  *
  * `variant="bar"` is the compact single-row chrome used only by the chat bottom dock:
  * `[＋]` · textarea · 语音 · 发送；工作区/Git/模型/权限/@ 收进＋菜单。
+ * 窗口环贴在整块输入框外侧右边，不进卡片；与底排同一行盒（不是贴边框底边）。
  * default `card` keeps textarea-above-toolbar（居中草稿），左簇摊开。
  * 离线态靠 {@link ComposerConnectionNotice} 与发送硬禁，不再用安静连接绿点。
  *
@@ -201,30 +212,18 @@ export function TurnComposer({
       : null;
   const showComposerHint =
     !deskOccupied && Boolean(lastOutcome?.showComposerHint);
-  const supportDiagnosticIds =
+  const turnMessageId =
     lastMessage?.role === "assistant"
-      ? {
-          conversationId,
-          messageId: assistantProjectionId(lastMessage),
-          userMessageId: precedingUserMessageId(
-            getActiveRuntime().messages,
-            lastMessage.id,
-          ),
-          traceId: lastMessage.traceId,
-          executionId: lastMessage.executionId,
-          ...supportDiagnosticExtrasFromError(lastMessage.error),
-        }
+      ? assistantProjectionId(lastMessage)
       : null;
-  const supportDiagnosticText = supportDiagnosticIds
-    ? formatSupportDiagnosticText(supportDiagnosticIds)
-    : "";
-  const copySupportDiagnostics = () => {
-    if (!supportDiagnosticIds || !supportDiagnosticText) return;
-    void buildSupportDiagnosticPack(supportDiagnosticIds).then((text) => {
-      if (!text) return;
-      void copyText(text);
-    });
-  };
+  const bannerDismissed = useFailureBannerDismissed(
+    conversationId,
+    turnMessageId,
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: conversationId is the reset key — clear the banner dismiss when the chat changes.
+  useEffect(() => {
+    return () => clearFailureBannerDismiss();
+  }, [conversationId]);
   const serverStatus = useServerHealthStore((s) => s.status);
   const serverUnhealthy = serverStatus === "offline";
   const resolvedPlaceholder = useMemo(() => {
@@ -235,6 +234,66 @@ export function TurnComposer({
     return placeholder;
   }, [liveDebate, deskOccupied, lastMessage, placeholder]);
   const draftKey = draftKeyFor(conversationId);
+  const composerError = useComposerSendError(draftKey);
+  const sessionAction = useActiveErrorAction();
+  const turnBannerMessage = (() => {
+    if (
+      !showComposerHint ||
+      !lastOutcome?.message ||
+      bannerDismissed ||
+      lastMessage?.role !== "assistant"
+    ) {
+      return null;
+    }
+    if (lastOutcome.kind !== "error") return lastOutcome.message;
+    const suffix = connectivityEscalationSuffix(
+      lastMessage.error?.code ?? lastOutcome.code ?? undefined,
+      turnMessageId ?? lastMessage.id,
+      {
+        message: lastMessage.error?.message,
+        upstreamStatus: lastMessage.error?.context?.upstream_status,
+        emptyDiagnosis: lastMessage.error?.context?.empty_diagnosis,
+        conversationId,
+      },
+    );
+    return suffix ? `${lastOutcome.message}${suffix}` : lastOutcome.message;
+  })();
+  const suppressSession = Boolean(
+    lastOutcome && !lastOutcome.showSessionBanner,
+  );
+  const turnAction =
+    lastOutcome?.recovery.kind === "configure" &&
+    lastOutcome.recovery.href &&
+    lastOutcome.recovery.label
+      ? {
+          label: lastOutcome.recovery.label,
+          href: lastOutcome.recovery.href,
+        }
+      : null;
+  const failureNotice = composerError?.message
+    ? {
+        message: composerError.message,
+        action: composerError.action,
+        onDismiss: () => {
+          clearComposerSendError(draftKey);
+          useConversationStore.getState().clearError();
+        },
+      }
+    : showComposerHint && turnBannerMessage && turnMessageId
+      ? {
+          message: turnBannerMessage,
+          action: turnAction,
+          onDismiss: () => dismissFailureBanner(conversationId, turnMessageId),
+        }
+      : !suppressSession && sessionError
+        ? {
+            message: sessionError,
+            action: sessionAction,
+            onDismiss: () => {
+              useConversationStore.getState().clearError();
+            },
+          }
+        : null;
   const value = useComposerDraftStore((s) => s.drafts[draftKey]?.value ?? "");
   const attachments = useComposerDraftStore(
     (s) => s.drafts[draftKey]?.attachments ?? EMPTY_ATTACHMENTS,
@@ -640,12 +699,13 @@ export function TurnComposer({
     ? Boolean(plainText(value).trim())
     : composerHasSendableDraft(value, attachments, agentMentions);
   const queueDisabled = !hasDraft || sendBlocked || isSending;
+  const sendReady = !sendBlocked && (hasDraft || isSending);
   const midFlightLabel = "排队发送";
   const midFlightHint = "排队至本回合结束后发送（Enter）；Ctrl/Cmd+Enter 插队";
   const stopLabel = isStopping ? "停止中…" : "停止生成";
   const stopButton = (
     <IconButton
-      size="sm"
+      size="md"
       tone="inverse"
       onClick={stopGeneration}
       aria-label={stopLabel}
@@ -662,8 +722,8 @@ export function TurnComposer({
   );
   const primarySendButton = (
     <IconButton
-      size="sm"
-      tone={hasDraft && !sendBlocked ? "inverse" : "default"}
+      size="md"
+      tone={sendReady ? "primary" : "muted"}
       onClick={() => void handleSend()}
       disabled={!hasDraft || sendBlocked || isSending}
       aria-label="发送"
@@ -682,7 +742,7 @@ export function TurnComposer({
     <div className="flex items-center gap-1.5">
       <Button
         variant="neutral"
-        size="sm"
+        size="md"
         className="border-border text-foreground"
         onClick={() => void handleSend({ delivery: "steer" })}
         disabled={queueDisabled}
@@ -696,7 +756,7 @@ export function TurnComposer({
       </Button>
       <Button
         variant="primary"
-        size="sm"
+        size="md"
         icon={<ListPlus size={14} aria-hidden />}
         onClick={() => void handleSend()}
         disabled={queueDisabled}
@@ -712,7 +772,7 @@ export function TurnComposer({
     <div className="flex items-center gap-1.5">
       <Button
         variant="neutral"
-        size="sm"
+        size="md"
         className="border-border text-foreground"
         onClick={() => void handleSend({ delivery: "queue" })}
         disabled={queueDisabled}
@@ -773,177 +833,166 @@ export function TurnComposer({
         onCaret={handleCaret}
         onKeyDown={handleKeyDown}
         onPaste={drop.handlePaste}
+        onFocus={() => {
+          void warmLlmHttpOnComposerFocus(conversationId);
+        }}
       />
     </div>
   );
 
   return (
-    <div
-      className={`relative border bg-card shadow-sm transition-colors ${
-        attachedBelowApproval
-          ? "rounded-b-xl rounded-t-none border-t-0"
-          : "rounded-xl"
-      } ${
-        drop.dragOver
-          ? "border-primary ring-2 ring-primary/40"
-          : "border-border"
-      }`}
-      onDragOver={drop.handleDragOver}
-      onDragLeave={drop.handleDragLeave}
-      onDrop={drop.handleDrop}
-      data-composer-variant={variant}
-      data-composer-attached-approval={
-        attachedBelowApproval ? "true" : undefined
-      }
-    >
-      <input
-        ref={fileInputRef}
-        type="file"
-        className="hidden"
-        multiple
-        tabIndex={-1}
-        aria-hidden
-        onChange={(e) => void onBrowserFilesSelected(e)}
-      />
-      {drop.dragOver && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-card/80 text-sm font-medium text-primary">
-          拖放文件以添加为附件
-        </div>
-      )}
-      {drop.dropError && (
-        <output
-          aria-live="polite"
-          className="flex items-start gap-2 px-3 pt-2 text-xs text-muted-foreground"
-        >
-          <span className="min-w-0 flex-1">{drop.dropError}</span>
-          <button
-            type="button"
-            className="shrink-0 rounded-lg p-0.5 text-muted-foreground hover:bg-transparent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label="关闭提示"
-            onClick={drop.clearDropError}
-          >
-            <X size={12} />
-          </button>
-        </output>
-      )}
-      <ComposerSendErrorNotice
-        draftKey={draftKey}
-        suppressSession={Boolean(lastOutcome && !lastOutcome.showSessionBanner)}
-        onCopySupportPack={
-          lastOutcome?.supportPackHost === "session" && supportDiagnosticText
-            ? copySupportDiagnostics
-            : undefined
-        }
-      />
-      {menuOpen && !liveDebate && (
-        <MentionMenu
-          placement={isBar ? "above" : "below"}
-          sections={mention.sections}
-          flatItems={mention.flatItems}
-          activeIndex={mention.activeIndex}
-          loading={mention.indexLoading}
-          error={mention.menuError}
-          query={mention.query}
-          showSearch={mention.menuMode === "browse"}
-          noFileSources={
-            mention.indexLoadedRef.current && mention.sourceCount === 0
-          }
-          showCategoryLevel={mention.showCategoryLevel}
-          categories={mention.categories}
-          canGoBack={mention.canGoBack}
-          focusedSectionLabel={mention.focusedSectionLabel}
-          onQueryChange={mention.setQuery}
-          onKeyDown={(e) => {
-            mention.handleMenuNavKey(e);
-          }}
-          onSelect={(item) => mention.selectItem(item)}
-          onHover={mention.setActiveIndex}
-          onDrill={mention.drillCategory}
-          onAttach={() => void mention.pickLocalFile()}
-          onBack={mention.goBack}
-          onAddRoot={mention.handleAddRoot}
-          searchInputRef={mention.searchInputRef}
-        />
-      )}
-
-      {!conversationId && assignHint && (
-        <DraftWorkspaceAssignPrompt
-          attachmentFolderName={assignHint.folderName}
-          currentFolderName={currentFolderName}
-          onAssign={acceptAssignHint}
-          onKeep={dismissAssignHint}
-        />
-      )}
-
-      {/* 断连提示：仅在心跳判定服务器不可达时出现，主动告知「发送前」状态。 */}
-      <ComposerConnectionNotice />
-
-      {/* 草稿有图且当前主模型不能看图：发送前轻提示（不拦发送）。 */}
-      <ComposerVisionHint />
-
-      {/* 压缩没跟上才出声（成功态在时间线隔断，不占输入区）。 */}
-      <ComposerContextCompactedHint />
-
-      {/* 输入区轻提示：空中断 send_next / 部分完成+限流 wait_then_retry。发送下一条即恢复。报障跟 supportPackHost。 */}
-      {showComposerHint && (
+    <div className="flex items-end gap-1">
+      <div className="flex min-w-0 flex-1 flex-col">
+        {failureNotice && (
+          <ComposerFailureBanner
+            message={failureNotice.message}
+            action={failureNotice.action}
+            onDismiss={failureNotice.onDismiss}
+          />
+        )}
         <div
-          aria-live="polite"
-          data-testid="composer-empty-interrupted-hint"
-          className="flex items-center gap-1.5 px-4 pt-2 text-xs text-muted-foreground"
+          className={`relative min-w-0 w-full border bg-card shadow-sm transition-colors ${
+            attachedBelowApproval
+              ? "rounded-b-xl rounded-t-none border-t-0"
+              : "rounded-xl"
+          } ${
+            drop.dragOver
+              ? "border-primary ring-2 ring-primary/40"
+              : "border-border"
+          }`}
+          onDragOver={drop.handleDragOver}
+          onDragLeave={drop.handleDragLeave}
+          onDrop={drop.handleDrop}
+          data-composer-variant={variant}
+          data-composer-attached-approval={
+            attachedBelowApproval ? "true" : undefined
+          }
         >
-          <span className="min-w-0 flex-1">
-            {lastOutcome?.message ?? COMPOSER_EMPTY_INTERRUPTED_HINT}
-          </span>
-          {lastOutcome?.supportPackHost === "composer" &&
-            supportDiagnosticText && (
-              <Button
-                variant="ghost"
-                className="shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
-                icon={<Copy size={13} />}
-                onClick={copySupportDiagnostics}
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            multiple
+            tabIndex={-1}
+            aria-hidden
+            onChange={(e) => void onBrowserFilesSelected(e)}
+          />
+          {drop.dragOver && (
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-card/80 text-sm font-medium text-primary">
+              拖放文件以添加为附件
+            </div>
+          )}
+          {drop.dropError && (
+            <output
+              aria-live="polite"
+              className="flex items-start gap-2 px-3 pt-2 text-xs text-muted-foreground"
+            >
+              <span className="min-w-0 flex-1">{drop.dropError}</span>
+              <button
+                type="button"
+                className="shrink-0 rounded-lg p-0.5 text-muted-foreground hover:bg-transparent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label="关闭提示"
+                onClick={drop.clearDropError}
               >
-                复制排查包
-              </Button>
-            )}
-        </div>
-      )}
+                <X size={12} />
+              </button>
+            </output>
+          )}
+          {menuOpen && !liveDebate && (
+            <MentionMenu
+              placement={isBar ? "above" : "below"}
+              sections={mention.sections}
+              flatItems={mention.flatItems}
+              activeIndex={mention.activeIndex}
+              loading={mention.indexLoading}
+              error={mention.menuError}
+              query={mention.query}
+              showSearch={mention.menuMode === "browse"}
+              noFileSources={
+                mention.indexLoadedRef.current && mention.sourceCount === 0
+              }
+              showCategoryLevel={mention.showCategoryLevel}
+              categories={mention.categories}
+              canGoBack={mention.canGoBack}
+              focusedSectionLabel={mention.focusedSectionLabel}
+              onQueryChange={mention.setQuery}
+              onKeyDown={(e) => {
+                mention.handleMenuNavKey(e);
+              }}
+              onSelect={(item) => mention.selectItem(item)}
+              onHover={mention.setActiveIndex}
+              onDrill={mention.drillCategory}
+              onAttach={() => void mention.pickLocalFile()}
+              onBack={mention.goBack}
+              onAddRoot={mention.handleAddRoot}
+              searchInputRef={mention.searchInputRef}
+            />
+          )}
 
-      {voice.isRecording && (
-        <RecordingBar duration={voice.duration} onCancel={voice.cancel} />
-      )}
+          {!conversationId && assignHint && (
+            <DraftWorkspaceAssignPrompt
+              attachmentFolderName={assignHint.folderName}
+              currentFolderName={currentFolderName}
+              onAssign={acceptAssignHint}
+              onKeep={dismissAssignHint}
+            />
+          )}
 
-      {isBar ? (
-        <div className="flex items-end gap-1 px-2 py-1">
-          <div className="flex shrink-0 items-center pb-0.5">
-            <ComposerPlusMenu>
-              {sessionChrome}
-              {liveDebate ? null : mentionButton}
-            </ComposerPlusMenu>
-          </div>
-          {editorBlock}
-          <div className="flex shrink-0 items-center gap-1 pb-0.5">
-            {voice.isSupported && (
-              <VoiceButton state={voice.state} onClick={voice.toggle} />
-            )}
-            {sendControls}
-          </div>
+          {/* 失败横幅亮着时，连接 / 看图 / 压缩让位。 */}
+          {!failureNotice && (
+            <>
+              <ComposerConnectionNotice />
+              <ComposerVisionHint />
+              <ComposerContextCompactedHint />
+            </>
+          )}
+
+          {voice.isRecording && (
+            <RecordingBar duration={voice.duration} onCancel={voice.cancel} />
+          )}
+
+          {isBar ? (
+            <div className={`${COMPOSER_BAR_ROW} px-2`}>
+              <div className={COMPOSER_BAR_CLUSTER}>
+                <ComposerPlusMenu>
+                  {sessionChrome}
+                  {liveDebate ? null : mentionButton}
+                </ComposerPlusMenu>
+              </div>
+              {editorBlock}
+              <div className={`${COMPOSER_BAR_CLUSTER} gap-1`}>
+                {voice.isSupported && (
+                  <VoiceButton state={voice.state} onClick={voice.toggle} />
+                )}
+                {sendControls}
+              </div>
+            </div>
+          ) : (
+            <>
+              {editorBlock}
+              <div className="flex items-center justify-between px-4 pb-3">
+                <div className="flex min-w-0 flex-1 items-center gap-1">
+                  {leftCluster}
+                </div>
+                <div className="flex items-center gap-1">
+                  {voice.isSupported && (
+                    <VoiceButton state={voice.state} onClick={voice.toggle} />
+                  )}
+                  {sendControls}
+                </div>
+              </div>
+            </>
+          )}
         </div>
-      ) : (
-        <>
-          {editorBlock}
-          <div className="flex items-center justify-between px-4 pb-3">
-            <div className="flex min-w-0 flex-1 items-center gap-1">
-              {leftCluster}
-            </div>
-            <div className="flex items-center gap-3">
-              {voice.isSupported && (
-                <VoiceButton state={voice.state} onClick={voice.toggle} />
-              )}
-              {sendControls}
-            </div>
-          </div>
-        </>
-      )}
+      </div>
+      <div
+        data-composer-endcap={isBar ? "bar" : "card"}
+        className={isBar ? COMPOSER_BAR_ROW : COMPOSER_CARD_ENDCAP}
+      >
+        <div className={isBar ? COMPOSER_BAR_CLUSTER : "flex items-center"}>
+          <ComposerReceivedContextButton />
+        </div>
+      </div>
     </div>
   );
 }

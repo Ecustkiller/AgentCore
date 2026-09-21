@@ -826,7 +826,7 @@ def test_resolve_tool_timeout_by_face():
 
     # ORCHESTRATION is exempt (delegate sub-DAG / ask_user round-trip). INTERACTION is
     # gone — ask_user is ORCHESTRATION; host uses a name-based timeout.
-    # FOLDER / BOARD left the dumpster and take the default, not the exemption.
+    # FOLDER left the dumpster and takes the default, not the exemption.
     assert frozenset({ToolFace.ORCHESTRATION}) == TIMEOUT_EXEMPT_FACES
     assert resolve_tool_timeout(_schema(ToolFace.ORCHESTRATION)) is None
     # HOST_BROWSER and EXECUTION share the execution ceiling; FILE gets the default.
@@ -847,10 +847,6 @@ def test_resolve_tool_timeout_by_face():
     )
     assert (
         resolve_tool_timeout(_schema(ToolFace.FOLDER))
-        == settings.tool_default_timeout_seconds
-    )
-    assert (
-        resolve_tool_timeout(_schema(ToolFace.BOARD))
         == settings.tool_default_timeout_seconds
     )
     assert (
@@ -1493,7 +1489,7 @@ def _read_then_answer(reads: int) -> _ScriptedProvider:
     # Distinct args so spin / repeated-call never trip. Trailing tool-free answer
     # is the model's own wrap-up (not salvage).
     rounds: list[list[LLMChunk]] = [
-        [_tool_chunk("file_read", '{"p": "%d"}' % i)] for i in range(reads)
+        [_tool_chunk("read", '{"p": "%d"}' % i)] for i in range(reads)
     ]
     rounds.append([_content_chunk("done")])
     return _ScriptedProvider(rounds)
@@ -1531,7 +1527,7 @@ def _convergence_steers(messages: list[LLMMessage]) -> list[LLMMessage]:
 async def test_few_different_target_reads_have_no_convergence_steer():
     # A short different-target read run that answers itself: no soft nudge, no finalize.
     reg = ToolRegistry()
-    reg.register(_StubTool(name="file_read"))  # investigation (SEARCH + NEVER approval)
+    reg.register(_StubTool(name="read"))  # investigation (SEARCH + NEVER approval)
     content, messages = await _run_with_registry(_read_then_answer(3), reg)
 
     assert content == "done"
@@ -1540,9 +1536,9 @@ async def test_few_different_target_reads_have_no_convergence_steer():
 
 
 async def test_many_different_target_reads_do_not_force_finalize():
-    # Many distinct file_read targets still reach the model's own answer; no 收工 prompt.
+    # Many distinct read targets still reach the model's own answer; no 收工 prompt.
     reg = ToolRegistry()
-    reg.register(_StubTool(name="file_read"))
+    reg.register(_StubTool(name="read"))
     provider = _read_then_answer(12)
     content, messages = await _run_with_registry(provider, reg)
 
@@ -1555,7 +1551,7 @@ async def test_many_different_target_reads_do_not_force_finalize_with_delegate()
     # Same contract with an ORCHESTRATION tool present — no flavor-specific
     # round-count finalize either.
     reg = ToolRegistry()
-    reg.register(_StubTool(name="file_read"))
+    reg.register(_StubTool(name="read"))
     reg.register(_StubTool(name="delegate", face=ToolFace.ORCHESTRATION))
     provider = _read_then_answer(12)
     content, messages = await _run_with_registry(provider, reg)

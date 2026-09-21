@@ -272,12 +272,12 @@ async def test_delete_agentcore_soft_deletes_whole_dir(client, _fs_data_dir):
     ws = f"conv:{conv_id}"
 
     await client.put(
-        f"/v1/workspaces/{ws}/files/AgentCore/规则/r.md", content=b"rule-body"
+        f"/v1/workspaces/{ws}/files/AgentCore/rules/r.md", content=b"rule-body"
     )
     r = await client.delete(f"/v1/workspaces/{ws}/files/AgentCore")
     assert r.status_code == 200, r.text
     assert (
-        await client.get(f"/v1/workspaces/{ws}/files/AgentCore/规则/r.md")
+        await client.get(f"/v1/workspaces/{ws}/files/AgentCore/rules/r.md")
     ).status_code == 404
 
     listed = await client.get(f"/v1/workspaces/{ws}/trash")
@@ -289,7 +289,7 @@ async def test_delete_agentcore_soft_deletes_whole_dir(client, _fs_data_dir):
         await client.post(f"/v1/workspaces/{ws}/trash/{entry['entry_id']}/restore")
     ).status_code == 200
     assert (
-        await client.get(f"/v1/workspaces/{ws}/files/AgentCore/规则/r.md")
+        await client.get(f"/v1/workspaces/{ws}/files/AgentCore/rules/r.md")
     ).content == b"rule-body"
 
 

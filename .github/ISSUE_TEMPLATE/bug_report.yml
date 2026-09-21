@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to report a bug. Security issues → see [SECURITY.md](../../SECURITY.md) (do not file a public issue).
+        Thanks for taking the time to report a bug. Security issues → see [SECURITY.md](../SECURITY.md) (do not file a public issue).
   - type: textarea
     id: summary
     attributes:

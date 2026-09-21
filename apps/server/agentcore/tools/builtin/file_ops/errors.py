@@ -96,12 +96,12 @@ def looks_like_http_url(path: str) -> bool:
 
 
 def _url_not_workspace_path_error(path: str, start: float) -> ToolResult:
-    """file_read was given a public URL — reroute to web_fetch; do not treat as a path."""
+    """read was given a public URL — reroute to web_fetch; do not treat as a path."""
     clipped = path if len(path) <= 200 else path[:199] + "…"
     return _error(
         (
             f"`{clipped}` 是 http(s) 网页地址，不是工作区相对路径。"
-            "请改用 web_fetch(url=该地址) 深读正文；工作区文件才用 file_read。"
+            "请改用 web_fetch(url=该地址) 深读正文；工作区文件才用 read。"
             "不要把 URL 改写成路径再重试本工具。"
         ),
         start,
@@ -218,7 +218,7 @@ def _path_missing_error(
     """Path / entry does not exist — fix by changing args; skip breaker tally.
 
     Platform bugs (missing attachment in a delegated workspace) and model path
-    mistakes share this marker: neither should disable ``file_read`` / mutate tools.
+    mistakes share this marker: neither should disable ``read`` / mutate tools.
     Same-path thrash is constrained by validation fingerprint streak, not by
     burning the run-scoped tool fuse.
     """
@@ -295,16 +295,15 @@ def _outside_workspace_msg(
     if location == "server":
         return (
             f"路径 '{path}' 超出了工作区范围。"
-            "若要把该本机目录进当前云桌：引导 Composer「先在云上做」；"
+            "若要把该本机目录进当前云桌：请人在 Composer 选「先在云上做」；"
+            "要在本机打开该目录当这场对话：请人在 Composer 选「直接改这个文件夹」（新开对话）；"
             "云会话裸聊写盘缺桌由运行时自动建云桌；"
-            "用户要新开云文件夹：在「我的文件」新建；"
-            "打开本机目录用 open_local_project / register_local_project / "
-            "bind_local_folder（≠离线）。"
+            "用户要新开云文件夹：在「我的文件」新建。"
             f"若本意是工作区内文件：{relative_fix}"
         )
     return (
         f"路径 '{path}' 超出了工作区范围。"
-        "若要把该本机目录加入本对话可改可覆盖：对该路径 `file_write` / `file_batch` copy"
+        "若要把该本机目录加入本对话可改可覆盖：对该路径 `write` / `file_batch` copy"
         "（运行时会请用户确认可写授权）。"
         "不要去改权限徽章。"
         f"{relative_fix}"

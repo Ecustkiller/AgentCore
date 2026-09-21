@@ -17,7 +17,6 @@ from agentcore.evals.types import EvalCase
 from agentcore.llm.provider.protocol import LLMChunk
 from agentcore.memory import assemble_injected_rules
 from agentcore.memory.document_store import DocumentMemoryStore
-from agentcore.memory.injection import load_memory_topics
 
 pytestmark = pytest.mark.asyncio
 
@@ -66,25 +65,6 @@ def patch_eval_docs_session(session_factory, monkeypatch):
     return session_factory
 
 
-async def test_apply_and_purge_memory_fixture(session_factory):
-    root = _FIXTURES / "docs_memory_launch_code"
-    async with session_factory() as session:
-        await purge_user_documents(_EVAL_USER_ID, session=session)
-        n = await apply_documents_fixture(root, _EVAL_USER_ID, session=session)
-        assert n == 1
-        store = DocumentMemoryStore(session=session)
-        topics = await load_memory_topics(store, _EVAL_USER_ID, folder_id=None)
-        assert topics == []
-        body = await store.load(_EVAL_USER_ID, "主题/发射口令.md")
-        assert "MARKER_LAUNCH_7F3A" in body
-
-    async with session_factory() as session:
-        deleted = await purge_user_documents(_EVAL_USER_ID, session=session)
-        assert deleted >= 1
-        store = DocumentMemoryStore(session=session)
-        topics = await load_memory_topics(store, _EVAL_USER_ID, folder_id=None)
-        assert topics == []
-
 
 async def test_apply_user_rules_always_and_ondemand(session_factory):
     always_root = _FIXTURES / "docs_always_rule_token"
@@ -122,7 +102,7 @@ async def test_harness_seeds_then_clears_between_cases(patch_eval_docs_session):
         user_message="x",
         path="single",
         checks=[],
-        documents_fixture="docs_memory_launch_code",
+        documents_fixture="docs_always_rule_eli5",
     )
     case_b = EvalCase(
         id="t_docs_b",
@@ -137,14 +117,16 @@ async def test_harness_seeds_then_clears_between_cases(patch_eval_docs_session):
 
     async def _probe_a(*args, **kwargs):
         async with session_factory() as session:
+            repo = DocumentRepository(session)
             store = DocumentMemoryStore(session=session)
-            seen_marker.append(await store.load(_EVAL_USER_ID, "主题/发射口令.md"))
+            rules_md = await assemble_injected_rules(store, repo, _EVAL_USER_ID, folder_id=None)
+            seen_marker.append(rules_md)
         return await orig_single(*args, **kwargs)
 
     harness._run_single = _probe_a  # type: ignore[method-assign]
     outcome_a = await harness.run_case(case_a)
     assert outcome_a.error is None
-    assert any("MARKER_LAUNCH_7F3A" in b for b in seen_marker)
+    assert any("10 岁" in b for b in seen_marker)
     assert await _live_doc_count(session_factory, _EVAL_USER_ID) == 0
 
     async def _probe_b(*args, **kwargs):

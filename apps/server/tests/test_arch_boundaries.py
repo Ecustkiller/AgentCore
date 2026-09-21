@@ -176,7 +176,7 @@ def test_leaf_web_tools_do_not_import_runtime_or_llm() -> None:
 
 
 def test_file_write_does_not_import_debate_or_suspension() -> None:
-    """file_write is I/O; research ledger / dossier must not hide in the write tool."""
+    """write is I/O; research ledger / dossier must not hide in the write tool."""
     mutate = _PKG_ROOT / "tools" / "builtin" / "file_ops" / "mutate.py"
     hits = {
         imp
@@ -297,7 +297,7 @@ _RUNTIME_OVERSIZE_EXEMPT: frozenset[str] = frozenset(
         "engine/loop.py",
         "engine/tool_exec_call.py",
         "runs/builder.py",
-        "runs/research_quality.py",
+        "runs/executor/context.py",
         "runs/wave.py",
         "turn/runs.py",
     }

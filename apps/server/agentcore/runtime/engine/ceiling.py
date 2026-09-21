@@ -43,8 +43,6 @@ def thrashing_backstop_payload(
     return {
         "question": question,
         "assumption": "",
-        "blocking": False,
-        "kind": "normal",
         "source": source,
         "gate_kind": "normal",
         "evidence": evidence,
@@ -76,8 +74,6 @@ def record_thrashing_backstop(
             agent_id,
             question=question,
             assumption="",
-            blocking=False,
-            kind="normal",
             source=source,
         )
     )
@@ -129,7 +125,7 @@ async def ceiling_finalize(
     ``turn_evidence_ledger`` / ``ledger_registrant`` are required (no defaults):
     收口轮仍可能调 GRANTABLE / 调研工具，本臂的 ``execute_tools`` 必须带上与孪生履约点
     (``directive_apply`` 的 Finalize 臂) 相同的审批闸与引用/台账汇聚通道。收口点转
-    fail-closed 后，漏传 ``approval_gate`` 不再意味着 file_write 绕卡落盘，而是这一臂
+    fail-closed 后，漏传 ``approval_gate`` 不再意味着 write 绕卡落盘，而是这一臂
     本该弹卡的调用整类被拒（该问却没人可问）——两种都是坏的，故签名不留默认值，让漏传
     在类型层面就是 ``TypeError``。
     """
@@ -226,7 +222,7 @@ async def ceiling_finalize(
             return text
 
     # force_finalize contract: when soft round returns tools, caller must execute.
-    # Files workers may call file_write/handoff here — discarding would leave
+    # Files workers may call write/handoff here — discarding would leave
     # pinned landing / artifacts unmet after we explicitly kept those tools on the surface.
     if coordination is not None and coordination.kind == "coordination_tools":
         if coordination.content:

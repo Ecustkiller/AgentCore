@@ -7,7 +7,7 @@
   "checks": [
     { "name": "FinishReason" },
     { "name": "NotDelegated" },
-    { "name": "ToolCalled", "tool": "file_write" }
+    { "name": "ToolCalled", "tool": "write" }
   ],
-  "rubric": "全文已在窗里的一行新建：切不出去、编码≈做完，CEO 自己 file_write。不是『有落盘就派』。"
+  "rubric": "全文已在窗里的一行新建：切不出去、编码≈做完，CEO 自己 write。不是『有落盘就派』。"
 }

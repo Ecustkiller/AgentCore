@@ -55,15 +55,6 @@ export function buildAlwaysRows(rail: PromptRail): AlwaysListRow[] {
       item,
     });
   }
-  for (const item of rail.memory) {
-    if (item.kind !== "mine") continue;
-    rows.push({
-      catalogId: item.id,
-      label: item.label,
-      chars: alwaysItemChars(item),
-      item,
-    });
-  }
   for (const item of rail.alwaysMine) {
     if (item.kind !== "mine") continue;
     rows.push({

@@ -1,4 +1,4 @@
-"""``file_read`` of workspace raster images → native multimodal on the same model."""
+"""``read`` of workspace raster images → native multimodal on the same model."""
 
 from __future__ import annotations
 

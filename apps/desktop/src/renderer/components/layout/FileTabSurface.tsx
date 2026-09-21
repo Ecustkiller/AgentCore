@@ -2,7 +2,6 @@ import { FileDetail, type FileDirtyState } from "@/components/files/FileDetail";
 import { EmptyHint } from "@/components/files/parts";
 import { useFileTabSourceState } from "@/hooks/useConversationFileSource";
 import { createDocumentSource } from "@/services/sources/documentSource";
-import { createMemorySource } from "@/services/sources/memorySource";
 import { useConversationStore } from "@/stores/conversation";
 import { type FileTabChannel, useSidePanelStore } from "@/stores/sidePanel";
 import { FileText } from "lucide-react";
@@ -10,8 +9,8 @@ import { useCallback, useMemo } from "react";
 
 /**
  * File content-tab body for the docked SidePanel and float hosts.
- * Disk tabs resolve via {@link useFileTabSourceState}; entry tabs (memory /
- * document) use the same FileSource + FileDetail pair as the files page.
+ * Disk tabs resolve via {@link useFileTabSourceState}; entry tabs (document)
+ * use the same FileSource + FileDetail pair as the files page.
  */
 export function FileTabSurface({
   tabId,
@@ -44,15 +43,9 @@ export function FileTabSurface({
     channel ? null : currentConversationId,
     channel ? undefined : workspaceId,
   );
-  const memorySource = useMemo(() => createMemorySource(), []);
   const documentSource = useMemo(() => createDocumentSource(), []);
 
-  const source =
-    channel === "memory"
-      ? memorySource
-      : channel === "document"
-        ? documentSource
-        : disk.source;
+  const source = channel === "document" ? documentSource : disk.source;
   const pending = channel ? false : disk.pending;
 
   if (!path || !name) {

@@ -71,7 +71,7 @@ export function WebFetchSourceCollection({
 
   return (
     <div>
-      <LiveFlow active={running} className="mb-1.5 w-full">
+      <LiveFlow active={running} className="mb-2 w-full">
         <Button
           variant="ghost"
           onClick={toggleExpanded}

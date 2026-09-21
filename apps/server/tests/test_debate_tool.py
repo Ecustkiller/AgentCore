@@ -227,11 +227,8 @@ async def test_quick_debate_returns_dual_products_non_terminal(tmp_path: Path):
     assert "决策简报" in result.output
     assert "交锋叙事线" in result.output
     assert "你更看重速度还是稳妥" in result.output  # 交接进 CEO 文本；有交接则不写建议
-    # 收口机制性落盘 + CEO 尾部路径可引用
-    assert "【工作区落盘】" in result.output
-    debate_files = list((tmp_path / "AgentCore" / "文档" / "debate").glob("*.md"))
-    assert len(debate_files) == 1
-    assert debate_files[0].name.startswith("辩论·")
+    assert "【工作区落盘】" not in result.output
+    assert not (tmp_path / "AgentCore" / "文档" / "debate").exists()
     # quick = 单轮：2 辩手 = 2 次 stream
     assert llm.stream_calls == 2
     # token 折算回 metadata（与 delegate 同形）
@@ -617,7 +614,13 @@ def test_debate_schema_omits_form_and_is_subject():
     props = DEBATE_PARAMETERS["properties"]
     assert "form" not in props
     assert "form" not in DEBATE_PARAMETERS["required"]
-    assert "is_subject" not in props["sides"]["items"]["properties"]
+    items = props["sides"]["items"]
+    assert "is_subject" not in items["properties"]
+    assert items["required"] == ["name", "stance"]
+    assert "key" in items["properties"]
+    assert "pro/con" not in items["properties"]["key"]["description"]
+    assert not items["properties"]["key"]["description"].startswith("可选")
+    assert not props["background"]["description"].startswith("可选")
 
 
 def test_parse_sides_accepts_thin_stance():
@@ -779,6 +782,45 @@ def test_parse_sides_ignores_is_subject():
     assert err == ""
     assert len(sides) == 2
     assert all(s.is_subject is False for s in sides)
+
+
+def test_parse_sides_mints_keys_when_omitted():
+    from agentcore.tools.builtin.debate.schema import parse_sides
+
+    sides, err = parse_sides(
+        [
+            {"name": "正方", "stance": "支持一审判决正确"},
+            {"name": "反方", "stance": "认为判赔过重"},
+        ]
+    )
+    assert err == ""
+    assert [s.key for s in sides] == ["s1", "s2"]
+
+
+def test_parse_sides_leftover_key_wins():
+    from agentcore.tools.builtin.debate.schema import parse_sides
+
+    sides, err = parse_sides(
+        [
+            {"key": "pro", "name": "正方", "stance": "支持一审判决正确"},
+            {"name": "反方", "stance": "认为判赔过重"},
+        ]
+    )
+    assert err == ""
+    assert [s.key for s in sides] == ["pro", "s1"]
+
+
+def test_parse_sides_mints_around_leftover_s1():
+    from agentcore.tools.builtin.debate.schema import parse_sides
+
+    sides, err = parse_sides(
+        [
+            {"key": "s1", "name": "正方", "stance": "支持一审判决正确"},
+            {"name": "反方", "stance": "认为判赔过重"},
+        ]
+    )
+    assert err == ""
+    assert [s.key for s in sides] == ["s1", "s2"]
 
 
 async def test_debate_ignores_unadvertised_form_and_is_subject():
@@ -1115,16 +1157,16 @@ def test_debate_start_omits_debater_tools_allowlist():
 
 
 def test_debater_task_injects_research_dossier_index():
-    """有约定文档索引：首轮 task / draft_brief 注入索引块 + 取证纪律；无索引则不注入。"""
+    """有材料索引：首轮 task / draft_brief 注入索引块 + 取证纪律；无索引则不注入。"""
     from agentcore.runtime.debate.prompt import opening_draft_brief
     from agentcore.runtime.debate.research_dossier import format_research_dossier_index
 
     sides = [DebateSide("pro", "正方", "支持"), DebateSide("con", "反方", "反对")]
     idx = format_research_dossier_index(
-        ["AgentCore/文档/research/法律透镜报告.md", "AgentCore/文档/research/汇总与命题卡.md"]
+        ["notes/法律透镜报告.md", "notes/汇总与命题卡.md"]
     )
-    assert "【工作区约定文档索引·AgentCore/文档/research/】" in idx
-    assert "AgentCore/文档/research/法律透镜报告.md" in idx
+    assert "【工作区材料索引】" in idx
+    assert "notes/法律透镜报告.md" in idx
 
     from agentcore.runtime.runs.retrieval_budget import (
         DEFAULT_RETRIEVAL_BUDGET_DEBATER_WITH_DOSSIER,
@@ -1132,8 +1174,8 @@ def test_debater_task_injects_research_dossier_index():
 
     empty_cfg = DebateConfig(motion="X", form=DebateForm.DEBATE, sides=sides)
     empty_payload = debater_task(empty_cfg, sides[0], 0, round_no=1, focus="焦点")
-    assert "工作区约定文档索引" not in empty_payload["task"]
-    # 无约定文档路径：不写入残搜预算（走默认 root，不收紧为 WITH_DOSSIER）
+    assert "工作区材料索引" not in empty_payload["task"]
+    # 无材料路径：不写入残搜预算（走默认 root，不收紧为 WITH_DOSSIER）
     assert "retrieval_budget" not in empty_payload
 
     cfg = DebateConfig(
@@ -1143,8 +1185,8 @@ def test_debater_task_injects_research_dossier_index():
     task = payload["task"]
     brief = opening_draft_brief(cfg, sides[0], focus="焦点")
     for text in (task, brief):
-        assert "【工作区约定文档索引·AgentCore/文档/research/】" in text
-        assert "AgentCore/文档/research/法律透镜报告.md" in text
+        assert "【工作区材料索引】" in text
+        assert "notes/法律透镜报告.md" in text
         assert "【已核实·#rN】" in text
         assert "选读" in text
     assert "勿无差别" in task or "勿全量" in task

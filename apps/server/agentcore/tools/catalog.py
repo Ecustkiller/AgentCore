@@ -37,14 +37,15 @@ class CatalogTool:
     available_to: tuple[str, ...]
     resident: bool
     summary: str
+    blurb: str
 
 
-def _policy_by_name() -> dict[str, tuple[bool, str]]:
-    """``resident`` + ``catalog_summary`` for every declared class."""
-    out: dict[str, tuple[bool, str]] = {}
+def _policy_by_name() -> dict[str, tuple[bool, str, str]]:
+    """``resident`` + ``catalog_summary`` + ``blurb`` for every declared class."""
+    out: dict[str, tuple[bool, str, str]] = {}
     for cls in declared_tools():
         reg = tool_registration(cls)
-        out[declared_tool_name(cls)] = (reg.resident, reg.catalog_summary)
+        out[declared_tool_name(cls)] = (reg.resident, reg.catalog_summary, reg.blurb)
     return out
 
 
@@ -82,12 +83,13 @@ def build_capability_catalog() -> list[CatalogTool]:
     catalog: list[CatalogTool] = []
 
     def _entry(schema: ToolSchema, available: tuple[str, ...]) -> CatalogTool:
-        resident, summary = policy_by_name.get(schema.name, (True, ""))
+        resident, summary, blurb = policy_by_name.get(schema.name, (True, "", ""))
         return CatalogTool(
             schema=schema,
             available_to=available,
             resident=resident,
             summary=summary,
+            blurb=blurb,
         )
 
     # Catalog advertises Host tools even when the calling session has no desktop —

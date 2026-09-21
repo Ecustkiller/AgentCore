@@ -82,6 +82,7 @@ from agentcore.workspace.protocol import (
 )
 from agentcore.workspace.rg_grep import run_files_rg, run_grep_rg
 from agentcore.workspace.sparse_listing import is_ai_list_hidden_file
+from agentcore.workspace.stage_dirs import rename_legacy_rules_leaf
 from agentcore.workspace.text_replace import (
     TextReplaceAmbiguous,
     TextReplaceNoMatch,
@@ -324,7 +325,7 @@ class ServerWorkspace:
     ``location`` defaults to ``"server"`` (an isolated cloud sandbox — a worker's
     server-sandbox calls skip the per-call approval card). The sidecar reuses this exact
     backend but passes ``location="local"``: there the engine runs ON the user's machine
-    and ``root`` IS their real disk, so a delegated worker's ``file_write`` /
+    and ``root`` IS their real disk, so a delegated worker's ``write`` /
     ``code_execute`` needs the same consent the cloud's local mode demands — that
     per-call decision keys off ``backend.location == "local"`` inside
     ``runtime/sandbox_approval`` (the turn's ``ApprovalGate`` is always handed down;
@@ -808,6 +809,7 @@ class ServerWorkspace:
             bridge = self._require_external_bridge()
             bridge.ai_list_reveal_archives = self.ai_list_reveal_archives
             return await bridge.list(directory, pattern, cap=cap)
+        await asyncio.to_thread(rename_legacy_rules_leaf, self._root)
         base = self._safe(directory)
         if not base.is_dir():
             # Declared stage / attachments trees: writes mkdir parents — missing
@@ -899,6 +901,7 @@ class ServerWorkspace:
                 max_depth=max_depth,
                 max_entries=max_entries,
             )
+        await asyncio.to_thread(rename_legacy_rules_leaf, self._root)
         base = self._safe(directory)
         if not base.is_dir():
             if not base.exists() and is_declared_latent_dir(directory):
@@ -1023,9 +1026,12 @@ class ServerWorkspace:
         cap = cap or _MAX_INDEX_FILES
         recent = order == "recent"
         root = self._root.resolve()
-        return await asyncio.to_thread(
-            _collect_index_files_sync, root, cap=cap, recent=recent
-        )
+
+        def _walk() -> IndexFilesResult:
+            rename_legacy_rules_leaf(root)
+            return _collect_index_files_sync(root, cap=cap, recent=recent)
+
+        return await asyncio.to_thread(_walk)
 
     async def mkdir(self, path: str) -> None:
         if self._external_needs_channel(path):
@@ -1246,8 +1252,8 @@ class ServerWorkspace:
 
     async def grep(self, query: GrepQuery) -> GrepResult:
         # Path checks stay on the event loop so OutsideWorkspace / PathNotFound
-        # surface immediately. The ripgrep child is awaited with
-        # ``create_subprocess_exec`` so a tool-level ``asyncio.wait_for`` /
+        # surface immediately. The ripgrep child runs off-loop
+        # (``core.spawn.spawn_process``) so a tool-level ``asyncio.wait_for`` /
         # cancellation can kill the process (no silent Python walk fallback).
         if self._external_needs_channel(query.directory):
             return await self._require_external_bridge().grep(query)

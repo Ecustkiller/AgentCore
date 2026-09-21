@@ -354,28 +354,39 @@ async def test_execute_tools_unknown_tool_returns_error_message():
 
 
 async def test_execute_tools_unknown_tool_suggests_alias():
-    """Hallucinated names (write) get did-you-mean — message only, no auto-exec."""
+    """Hallucinated old names (file_write / file_read / str_replace) are unknown.
+
+    Did-you-mean may suggest write / read / edit — message only, no auto-exec.
+    """
     from agentcore.llm.provider.protocol import ToolCall, ToolCallFunction
 
-    write_tool = _StubTool("file_write")
-    reg = ToolRegistry()
-    reg.register(write_tool)
-    sink = EventSink()
-    messages, terminal, attempts = await execute_tools(
-        [ToolCall(id="c1", function=ToolCallFunction(name="write", arguments="{}"))],
-        reg,
-        _context(),
-        sink,
-        approval_gate=None,
-        run_id="r1",
+    pens = (
+        ("file_write", "write"),
+        ("file_read", "read"),
+        ("str_replace", "edit"),
     )
+    for old_name, live_name in pens:
+        live_tool = _StubTool(live_name)
+        reg = ToolRegistry()
+        reg.register(live_tool)
+        sink = EventSink()
+        messages, terminal, attempts = await execute_tools(
+            [ToolCall(id="c1", function=ToolCallFunction(name=old_name, arguments="{}"))],
+            reg,
+            _context(),
+            sink,
+            approval_gate=None,
+            run_id="r1",
+        )
 
-    assert terminal is None
-    assert attempts[0].success is False
-    content = messages[0].content or ""
-    assert "not found" in content
-    assert "你是否想用：file_write" in content
-    assert write_tool.calls == 0
+        assert terminal is None
+        assert attempts[0].success is False
+        content = messages[0].content or ""
+        assert "not found" in content
+        assert live_tool.calls == 0
+        if "你是否想用" in content:
+            assert live_name in content
+            assert f"你是否想用：{old_name}" not in content
 
 
 async def test_execute_tools_retired_md_export_names_suggest_no_exec():
@@ -407,7 +418,7 @@ async def test_execute_tools_unknown_file_append_suggests_str_replace_no_exec():
     """废名 file_append 只 did-you-mean，永不自动改写执行。"""
     from agentcore.llm.provider.protocol import ToolCall, ToolCallFunction
 
-    replace_tool = _StubTool("str_replace")
+    replace_tool = _StubTool("edit")
     reg = ToolRegistry()
     reg.register(replace_tool)
     sink = EventSink()
@@ -424,7 +435,7 @@ async def test_execute_tools_unknown_file_append_suggests_str_replace_no_exec():
     assert attempts[0].success is False
     content = messages[0].content or ""
     assert "not found" in content
-    assert "你是否想用：str_replace" in content
+    assert "你是否想用：edit" in content
     assert replace_tool.calls == 0
 
 
@@ -462,19 +473,19 @@ def test_registry_suggest_names_alias_and_close_match():
     reg = ToolRegistry()
     reg.register(_StubTool("web_search"))
     reg.register(_StubTool("web_fetch"))
-    reg.register(_StubTool("download_url"))
-    reg.register(_StubTool("file_write"))
-    reg.register(_StubTool("str_replace"))
+    reg.register(_StubTool("run"))
+    reg.register(_StubTool("write"))
+    reg.register(_StubTool("read"))
+    reg.register(_StubTool("edit"))
     reg.register(_StubTool("file_list"))
     reg.register(_StubTool("glob"))
 
     reg.register(_StubTool("md_export"))
 
-    assert reg.suggest_names("fetch") == ["download_url"]
-    assert reg.suggest_names("wget") == ["download_url"]
-    assert reg.suggest_names("curl") == ["download_url"]
-    assert reg.suggest_names("write") == ["file_write"]
-    assert reg.suggest_names("file_append") == ["str_replace"]
+    assert reg.suggest_names("fetch") == ["run"]
+    assert reg.suggest_names("wget") == ["run"]
+    assert reg.suggest_names("curl") == ["run"]
+    assert reg.suggest_names("file_append") == ["edit"]
     assert reg.suggest_names("md_to_docx") == ["md_export"]
     assert reg.suggest_names("md_to_pdf") == ["md_export"]
     assert reg.suggest_names("ls") == ["file_list"]
@@ -483,6 +494,17 @@ def test_registry_suggest_names_alias_and_close_match():
     assert reg.suggest_names("glob_file_search") == ["glob"]
     assert "web_search" in reg.suggest_names("web_serch")  # typo → close match
     assert reg.suggest_names("totally_unknown_zzzz") == []
+    # Old product names are not aliases and are not registered.
+    from agentcore.tools.registry import _KNOWN_TOOL_ALIASES
+
+    assert "file_write" not in _KNOWN_TOOL_ALIASES
+    assert "file_read" not in _KNOWN_TOOL_ALIASES
+    assert "str_replace" not in _KNOWN_TOOL_ALIASES
+    assert "file_write" not in reg.names
+    assert "file_read" not in reg.names
+    assert "str_replace" not in reg.names
+    assert "write" in reg.suggest_names("file_write")
+    assert "read" in reg.suggest_names("file_read")
 
 
 async def test_execute_tools_happy_path_emits_start_and_end():

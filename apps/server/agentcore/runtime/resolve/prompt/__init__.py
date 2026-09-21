@@ -35,9 +35,11 @@ from agentcore.runtime.resolve.prompt.envelope import (
     TURN_ENVELOPE_FENCE,
     opening_ceo_messages,
     render_ceo_turn_envelope,
+    render_worker_turn_envelope,
     strip_turn_envelope_fence,
     visualization_system_body,
 )
+from agentcore.runtime.resolve.prompt.in_history import in_history_system_delta
 from agentcore.runtime.resolve.prompt.memory_rules import (
     _MEMORY_ROUTING_FENCE,
     _RULES_ROUTING_FENCE,
@@ -64,10 +66,12 @@ __all__ = [
     "compose_ceo_chat_prompt",
     "compose_worker_base_prompt",
     "derive_ceo_addon",
+    "in_history_system_delta",
     "opening_ceo_messages",
     "render_ceo_turn_envelope",
     "render_on_demand_directory",
     "render_runtime_date_block",
+    "render_worker_turn_envelope",
     "splice_on_demand_directory",
     "strip_turn_envelope_fence",
     "visualization_system_body",

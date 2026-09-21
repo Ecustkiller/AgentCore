@@ -11,8 +11,8 @@ share the same rows:
   core (``ai_maintained=true``) are ``role='rule', apply_mode='always'`` nodes, gathered per
   scope by ``list_injectable_rules`` for the two-tier ``<设定>`` block (§二). Collection
   stays role + folder_id + apply_mode (not parent-tree walk); when the convention dirs exist,
-  results are further restricted to ``AgentCore/规则/`` / ``AgentCore/记忆/`` (bare ``记忆/``
-  still accepted for memory during transition). Writes land under ``AgentCore/{规则,记忆}/``.
+  results are further restricted to ``AgentCore/rules/`` / ``AgentCore/记忆/`` (bare ``记忆/``
+  still accepted for memory during transition). Writes land under ``AgentCore/{rules,记忆}/``.
 - **Generic tree CRUD**: the ``/documents`` API creates / reads / renames / moves / deletes any
   node (user rules are just ``role='rule', ai_maintained=false`` documents, §5.2).
 
@@ -22,10 +22,10 @@ mirrored from frontmatter on body writes; async AI fill may set the column alone
 when frontmatter has none (never mutates ``content``). ``ai_maintained`` stays DB-only.
 
 All reads filter ``deleted_at IS NULL`` explicitly (this codebase has no global soft-delete
-event listener — 照 boards.py / folders.py). Owner scoping is the structural default: mutations
+event listener — 照 folders.py). Owner scoping is the structural default: mutations
 resolve a node owner-scoped so a non-owner id is treated as absent (SEC-002). No DB FK — refs
 are app-level ``*_id`` fields (§6.2). CAS is the caller's job (content-hash baseline under the
-per-user memory lock, 照 api/routes/memory.py) so the repo stays db-only, no upward import.
+per-user lock) so the repo stays db-only, no upward import.
 """
 
 from __future__ import annotations
@@ -57,8 +57,11 @@ from ._base import _UNSET, commit_or_flush
 # path ``~/Documents/AgentCore/`` (workspace container) — same product name, different carrier.
 AGENTCORE_ROOT_NAME = "AgentCore"
 
-# User-owned rules directory under the convention root (§5.0 ``AgentCore/规则/``).
-RULES_DIR_NAME = "规则"
+# User-owned rules directory under the convention root (§5.0 ``AgentCore/rules/``).
+# Keep in sync with ``workspace.stage_dirs.RULES_DIR_NAME`` (repo stays db-only).
+RULES_DIR_NAME = "rules"
+# One-shot storage repair only — not a write address.
+LEGACY_RULES_DIR_NAME = "规则"
 
 # AI-memory notes folder under the convention root (§5.0 ``AgentCore/记忆/``). Reserved: a
 # user's own folder is ``ai_maintained=false``, so it never collides with this node.
@@ -177,28 +180,83 @@ class DocumentRepository:
         await self._session.flush()
         return root
 
-    async def get_rules_dir(self, user_id: str, folder_id: str | None) -> Document | None:
-        """The ``AgentCore/规则/`` folder for one scope, or None."""
-        ac = await self.get_agentcore_root(user_id, folder_id)
-        if ac is None:
-            return None
+    async def _named_child_folder(
+        self, user_id: str, parent_id: str, name: str
+    ) -> Document | None:
         result = await self._session.execute(
             select(Document).where(
                 Document.user_id == user_id,
-                Document.parent_id == ac.id,
+                Document.parent_id == parent_id,
                 Document.kind == "folder",
-                Document.name == RULES_DIR_NAME,
+                Document.name == name,
                 Document.deleted_at.is_(None),
             )
         )
         return result.scalars().first()
 
+    async def _adopt_legacy_rules_dir(
+        self, user_id: str, ac: Document
+    ) -> Document | None:
+        """Rename leftover ``规则/`` to ``rules/``. Not a dual write address."""
+        current = await self._named_child_folder(user_id, ac.id, RULES_DIR_NAME)
+        legacy = await self._named_child_folder(user_id, ac.id, LEGACY_RULES_DIR_NAME)
+        if legacy is None:
+            return current
+        if current is None:
+            legacy.name = RULES_DIR_NAME
+            await commit_or_flush(self._session, commit=True)
+            return legacy
+        children = (
+            await self._session.execute(
+                select(Document).where(
+                    Document.user_id == user_id,
+                    Document.parent_id == legacy.id,
+                    Document.deleted_at.is_(None),
+                )
+            )
+        ).scalars().all()
+        for child in children:
+            clash = await self._session.execute(
+                select(Document.id).where(
+                    Document.user_id == user_id,
+                    Document.parent_id == current.id,
+                    Document.name == child.name,
+                    Document.deleted_at.is_(None),
+                )
+            )
+            if clash.scalars().first() is not None:
+                continue
+            child.parent_id = current.id
+        remaining = await self._session.execute(
+            select(func.count())
+            .select_from(Document)
+            .where(
+                Document.user_id == user_id,
+                Document.parent_id == legacy.id,
+                Document.deleted_at.is_(None),
+            )
+        )
+        if int(remaining.scalar_one()) == 0:
+            legacy.deleted_at = datetime.now()
+        await commit_or_flush(self._session, commit=True)
+        return current
+
+    async def get_rules_dir(self, user_id: str, folder_id: str | None) -> Document | None:
+        """The ``AgentCore/rules/`` folder for one scope, or None."""
+        ac = await self.get_agentcore_root(user_id, folder_id)
+        if ac is None:
+            return None
+        return await self._adopt_legacy_rules_dir(user_id, ac)
+
     async def ensure_rules_dir(self, user_id: str, folder_id: str | None) -> Document:
-        """Find-or-create ``AgentCore/规则/`` for one scope (user-owned)."""
+        """Find-or-create ``AgentCore/rules/`` for one scope (user-owned)."""
         existing = await self.get_rules_dir(user_id, folder_id)
         if existing is not None:
             return existing
         ac = await self.ensure_agentcore_root(user_id, folder_id)
+        adopted = await self._adopt_legacy_rules_dir(user_id, ac)
+        if adopted is not None:
+            return adopted
         rules = Document(
             id=new_id(),
             user_id=user_id,
@@ -412,7 +470,7 @@ class DocumentRepository:
         """Restrict injectables to the convention tree when that tree already exists.
 
         No convention dir → ``None`` (legacy scope-wide collect; avoids half-migration empty
-        reads). User rules require ``parent_id == AgentCore/规则/``. Memory always-cores require
+        reads). User rules require ``parent_id == AgentCore/rules/``. Memory always-cores require
         ``AgentCore/记忆/``; a still-live bare ``记忆/`` parent is also accepted (transition /
         name-clash leftovers).
         """
@@ -530,7 +588,7 @@ class DocumentRepository:
     async def get_user_rule_doc(
         self, user_id: str, folder_id: str | None, name: str
     ) -> Document | None:
-        """One live user-rule document under ``AgentCore/规则/``, or None."""
+        """One live user-rule document under ``AgentCore/rules/``, or None."""
         rules_dir = await self.get_rules_dir(user_id, folder_id)
         if rules_dir is None or not name:
             return None
@@ -556,7 +614,7 @@ class DocumentRepository:
         apply: str = "always",
         description: str | None = None,
     ) -> Document:
-        """Create-or-replace one named user-rule markdown under ``AgentCore/规则/``."""
+        """Create-or-replace one named user-rule markdown under ``AgentCore/rules/``."""
         rules_dir = await self.ensure_rules_dir(user_id, folder_id)
         doc = await self.get_user_rule_doc(user_id, folder_id, name)
         mode: ApplyMode = "on_demand" if apply == "on_demand" else "always"
@@ -690,6 +748,10 @@ class DocumentRepository:
         self, user_id: str, *, parent_id: str | None
     ) -> list[Document]:
         """A folder's direct children (``parent_id`` None = the user's top-level nodes)."""
+        if parent_id is not None:
+            parent = await self.get(parent_id, user_id=user_id)
+            if parent is not None and parent.name == AGENTCORE_ROOT_NAME:
+                await self._adopt_legacy_rules_dir(user_id, parent)
         stmt = select(Document).where(
             Document.user_id == user_id,
             Document.deleted_at.is_(None),

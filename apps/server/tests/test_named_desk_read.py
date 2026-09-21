@@ -1,4 +1,4 @@
-"""CEO ``file_read`` one-shot bind of a this-turn named neighbor Folder."""
+"""CEO ``read`` one-shot bind of a this-turn named neighbor Folder."""
 
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -118,7 +118,7 @@ async def test_file_read_retries_unique_other_desk(desks: tuple[Path, Path, Tool
             return_value=other_ws,
         ),
     ):
-        result = await FileReadTool().execute({"path": "secret.md"}, ctx)
+        result = await FileReadTool().execute({"file_path": "secret.md"}, ctx)
     assert result.success
     assert "from-other" in result.output
     assert "邻桌" in result.output
@@ -134,7 +134,7 @@ async def test_file_read_miss_without_pin_does_not_scan(
         "agentcore.runtime.delegate.target_desktop_binding.load_target_folder_binding",
         new=AsyncMock(),
     ) as load:
-        result = await FileReadTool().execute({"path": "missing.md"}, ctx)
+        result = await FileReadTool().execute({"file_path": "missing.md"}, ctx)
     assert result.success is False
     assert result.failure_code == "not_found"
     load.assert_not_called()
@@ -151,7 +151,7 @@ async def test_file_read_worker_does_not_inherit_pin(
         "agentcore.runtime.delegate.target_desktop_binding.load_target_folder_binding",
         new=AsyncMock(),
     ) as load:
-        result = await FileReadTool().execute({"path": "secret.md"}, ctx)
+        result = await FileReadTool().execute({"file_path": "secret.md"}, ctx)
     assert result.success is False
     assert result.failure_code == "not_found"
     load.assert_not_called()

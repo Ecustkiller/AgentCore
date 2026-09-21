@@ -82,6 +82,7 @@ def test_leaf_freezes_user_agent_not_session() -> None:
     ds = OpenAICompatibleProvider(name="user", api_key="k", base_url=_DEEPSEEK)
     assert go._client.headers["user-agent"] == OPENCODE_USER_AGENT
     assert OPENCODE_SESSION_HEADER not in go._client.headers
+    assert "authorization" not in go._client.headers
     assert ds._client.headers["user-agent"].startswith("python-httpx/")
 
 

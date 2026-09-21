@@ -56,7 +56,7 @@ describe("conversationHasFileArtifacts", () => {
           msg({
             id: "a1",
             role: "assistant",
-            process: [toolStep("file_write", { path: "a.ts", content: "x" })],
+            process: [toolStep("write", { file_path: "a.ts", content: "x" })],
           }),
         ],
         {},

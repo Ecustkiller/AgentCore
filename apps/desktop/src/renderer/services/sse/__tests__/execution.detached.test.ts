@@ -44,7 +44,7 @@ function toolProgress(agentId: string, t = 2): RunFrame {
     t,
     kind: "run_tool_progress",
     agentId,
-    toolName: "file_write",
+    toolName: "write",
     chars: 1200,
   };
 }
@@ -124,7 +124,7 @@ describe("execution_detached / execution_completed live path", () => {
         tool_call_id: "c1",
         run_id: "r1",
         phase: "writing",
-        tool_name: "file_write",
+        tool_name: "write",
       },
       MID,
     );
@@ -145,16 +145,16 @@ describe("execution_detached / execution_completed live path", () => {
     );
 
     expect(rt().workerToolPhases).toEqual({
-      r1: { phase: "writing", toolName: "file_write" },
+      r1: { phase: "writing", toolName: "write" },
     });
     const after = projectRuntime(rt());
     const agent = after?.agents.find((a) => a.id === "a1");
     expect(agent?.toolProgress).toEqual({
-      toolName: "file_write",
+      toolName: "write",
       chars: 1200,
     });
     expect(agent?.toolExecutionLive).toEqual({
-      toolName: "file_write",
+      toolName: "write",
       phase: "writing",
     });
   });

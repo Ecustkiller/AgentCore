@@ -54,7 +54,7 @@ def test_prepare_and_resume_fold_member_into_channel():
     assert "resolve_desk_folder_label(folder_rules_user_id" in prepare_src
     assert "resolve_folder_owner_user_id" in prepare_src
 
-    assemble_src = inspect.getsource(assemble_mod.assemble_ceo_turn)
+    assemble_src = inspect.getsource(assemble_mod._assemble_ceo_wired)
     assert ".for_turn(" in assemble_src
 
     resume_src = inspect.getsource(wire_mod._wire_continuation_toolset)
@@ -73,6 +73,7 @@ def _prepared(tmp_path: Path, *, member_turn: bool) -> PreparedTurn:
         system_prompt="",
         workspace_facts="",
         worker_base_prompt="",
+        worker_envelope="",
         worker_tools=ToolRegistry(),
         skill_registry=object(),
         table_context="",
@@ -190,6 +191,11 @@ async def _capture_prepare_registry(
         "agentcore.runtime.pipeline.prepare.resolve_desk_folder_label",
         _no_desk_label,
     )
+
+    async def _fake_router(*_a, **_k):
+        return object()
+
+    monkeypatch.setattr("agentcore.runtime.pipeline.build_turn_router", _fake_router)
 
     channel_built = False
 

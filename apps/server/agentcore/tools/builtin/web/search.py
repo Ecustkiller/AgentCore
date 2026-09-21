@@ -512,16 +512,14 @@ class WebSearchTool:
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_BOTH,
         catalog_summary="联网检索",
+        blurb="按关键词在网上找资料和链接",
     )
 
     @property
     def schema(self) -> ToolSchema:
         return ToolSchema(
             name="web_search",
-            description=(
-                "缺窗口里没有的公网事实（版本、出处、是否存在）才搜。"
-                "摘要优先。"
-            ),
+            description="公网检索，回摘要与链接。",
             parameters={
                 "type": "object",
                 "properties": {

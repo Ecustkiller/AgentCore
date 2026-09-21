@@ -1,4 +1,0 @@
-flit
-setuptools
-twine
-wheel

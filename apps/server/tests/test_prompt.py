@@ -29,13 +29,10 @@ from agentcore.runtime.resolve.prompt import (
 from agentcore.runtime.resolve.prompt.compose import _on_demand_preamble
 from agentcore.runtime.resolve.prompt.memory_rules import _RULES_ROUTING_FENCE
 from agentcore.runtime.skills import (
-    _DELIVERY,
-    _LOCAL_DESK,
     build_system_skill_registry,
     render_skill_directory,
 )
 from agentcore.runtime.skills.registry import AUDIENCE_WORKER
-from agentcore.runtime.skills.run import _RUN
 from agentcore.tools.builtin.delegate.schema import (
     DELEGATE_DESCRIPTION,
     DELEGATE_PARAMETERS,
@@ -113,7 +110,11 @@ def test_runtime_context_uses_date_granularity_for_cache_stability():
     env = render_ceo_turn_envelope()
     assert re.search(r"当前日期：\d{4}-\d{2}-\d{2}", env)
     worker = compose_worker_base_prompt(assemble_system_prompt())
-    assert re.search(r"当前日期：\d{4}-\d{2}-\d{2}", worker)
+    assert re.search(r"当前日期：\d{4}-\d{2}-\d{2}", worker) is None
+    from agentcore.runtime.resolve.prompt import render_worker_turn_envelope
+
+    worker_env = render_worker_turn_envelope()
+    assert re.search(r"当前日期：\d{4}-\d{2}-\d{2}", worker_env)
     assert "<运行时>" not in assemble_system_prompt()
 
 
@@ -140,21 +141,21 @@ def test_style_precedes_ceo_only_core_when_composed():
 
 
 def test_capability_how_gated_on_ceo_tool_names():
-    """本机/Host/浏览器 HOW 唯一所有者 = consult；冻结核与 compose 开场都不挂手册。"""
+    """工具侧无 consult 手册；冻结核与 compose 开场都不挂旧手册字。"""
     spine = _CEO_CORE_HINT
     for sig in _HANDBOOK_SIGNATURES:
         assert sig not in spine
     assert capability_how_suffix({"run"}) == ""
+    assert capability_how_suffix({"host"}) == ""
+    assert capability_how_suffix({"browser"}) == ""
     assert capability_how_suffix({"external_mount_readonly"}) == ""
     run_how = capability_how_suffix({"run"})
     host = capability_how_suffix({"host"})
     browser = capability_how_suffix({"browser"})
-    assert host.strip() and browser.strip()
     assert "wait_for" not in run_how
     assert "永不代填密码" not in run_how
     assert "wait_for" not in host
     assert "wait_for" not in browser
-    assert "wait_for" not in _LOCAL_DESK
     assert "delegate" not in host
 
     for names in (
@@ -207,8 +208,8 @@ def test_consult_hook_lives_only_in_the_core():
     assert "consult(name)" in preamble
     assert "<按需目录>" in preamble and "</按需目录>" not in preamble
     assert ceo.count("<按需目录>") == 1 and ceo.count("</按需目录>") == 1
-    assert "debate_and_review" in directory
-    assert "debate_and_review" in ceo
+    assert "page_ui" in directory
+    assert "page_ui" in ceo
     assert "HOW→consult" not in hint
 
 
@@ -217,11 +218,11 @@ def test_delegate_schema_keys_one_layer():
     props = DELEGATE_PARAMETERS["properties"]
     assert "depends_on" in _TASK_PROPS
     assert "target_folder_id" in _TASK_PROPS
-    assert "append_to_execution_id" in props
+    assert "artifacts" in _TASK_PROPS
+    assert set(props) == {"tasks", "team_brief"}
     for key in (
         "depends_on",
         "target_folder_id",
-        "append_to_execution_id",
     ):
         assert key not in hint
         assert key not in DELEGATE_DESCRIPTION
@@ -240,17 +241,14 @@ def test_how_identifiers_not_in_resident_core():
         "consult(browser)",
         "HOW→consult",
         "delegate",
-        "debate_and_review",
         ".mdc",
         "Cursor",
     ):
         assert key not in hint
-    assert "create_folder" not in _DELIVERY
     for fence in (
         "【本轮材料收窄】",
         "【已确认约束】",
         "【执行 / 运行 / 打开】",
-        "【产物路径】",
         "【落盘前对齐】",
         "【对人说】",
     ):
@@ -312,8 +310,6 @@ def test_worker_opening_drops_ceo_orchestration_context():
     )
     assert "page_ui" in worker_dir
     assert "data_file_landing" in worker_dir
-    assert "delivery" not in worker_dir
-    assert "local_desk" not in worker_dir
     lead_dir = compose_worker_base_prompt(
         base,
         on_demand_entries=[
@@ -322,12 +318,11 @@ def test_worker_opening_drops_ceo_orchestration_context():
         ],
     )
     assert "page_ui" in lead_dir
-    assert "delivery" not in lead_dir
 
 
-def test_run_skill_does_not_ban_curl():
+def test_run_description_does_not_ban_curl():
     """公网门是改道，不是禁止句。"""
-    for hay in (_RUN, run_description("server"), run_description("local")):
+    for hay in (run_description("server"), run_description("local")):
         assert "不要用 curl" not in hay
         assert "禁止用 curl" not in hay
 

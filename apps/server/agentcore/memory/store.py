@@ -323,8 +323,8 @@ class FileMemoryStore:
 def default_file_memory_store() -> FileMemoryStore:
     """The legacy file-backed store under ``<settings.data_dir>/memory``.
 
-    Retained only as the SOURCE the one-time file→document migration copies from
-    (``memory/migrate_documents.py``) and its tests — no longer the process default.
+    On-disk source ``DocumentMemoryStore`` still deletes through. Not a deploy
+    step, and not the process default.
     """
     from agentcore.config import settings
 

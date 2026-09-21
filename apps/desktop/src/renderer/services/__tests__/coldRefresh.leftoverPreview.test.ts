@@ -52,7 +52,7 @@ const WORKERS = [
   { run_id: "r4", role: "编辑", task: "修订", depends_on: ["r3"] },
   { run_id: "r5", role: "统稿", task: "成文", depends_on: ["r4"] },
 ];
-const TOOLS = ["code_execute", "file_write", "test_run"];
+const TOOLS = ["code_execute", "write", "test_run"];
 const AGENTS = [
   { id: "w1", role: "调研", thinking: true },
   { id: "w2", role: "撰写", thinking: true },

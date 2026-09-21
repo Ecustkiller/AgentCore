@@ -58,7 +58,7 @@ def test_dep_block_file_writer_becomes_pointer():
     body = block.body
     assert "已生成数据集" in body  # the worker's prose handoff digest is kept
     assert "data/out.csv" in body and "data/schema.json" in body  # the pointer
-    assert "file_read" in body  # told how to pull the full content
+    assert "read" in body  # told how to pull the full content
     assert block.files == ["data/out.csv", "data/schema.json"]  # artifact paths carried
 
 
@@ -195,7 +195,7 @@ def test_dep_summarize_mechanical_cap_logs(monkeypatch):
 
 async def test_dag_file_writing_upstream_passes_pointer_downstream():
     # End-to-end: the upstream WRITES a file; the downstream's opening prompt carries
-    # a pointer (path + file_read hint), proving files_touched flows RunState→prompt.
+    # a pointer (path + read hint), proving files_touched flows RunState→prompt.
     tasks = [
         {"id": "s1", "role": "构建器", "task": "生成数据文件"},
         {"id": "s2", "role": "分析师", "task": "分析数据", "depends_on": ["s1"]},
@@ -211,8 +211,8 @@ async def test_dag_file_writing_upstream_passes_pointer_downstream():
                     ToolCallDelta(
                         index=0,
                         id="c1",
-                        function_name="file_write",
-                        arguments_delta='{"path": "data/out.csv", "content": "a,b\\n1,2"}',
+                        function_name="write",
+                        arguments_delta='{"file_path": "data/out.csv", "content": "a,b\\n1,2"}',
                     )
                 ]
             )
@@ -222,7 +222,7 @@ async def test_dag_file_writing_upstream_passes_pointer_downstream():
                 LLMChunk(
                     delta_content=(
                         "已生成 data/out.csv。"
-                        "上游构建器已将数据集写入工作区，下游可用 file_read 按路径读取完整内容后继续分析。"
+                        "上游构建器已将数据集写入工作区，下游可用 read 按路径读取完整内容后继续分析。"
                         "表头与样例行已落盘，请据此完成统计分析。"
                     )
                 )
@@ -247,4 +247,4 @@ async def test_dag_file_writing_upstream_passes_pointer_downstream():
     assert res["t_s2"].phase is RunPhase.COMPLETED
     downstream_user = provider.user_messages[-1]  # the analyst's opening prompt
     assert "data/out.csv" in downstream_user  # got the pointer
-    assert "file_read" in downstream_user
+    assert "read" in downstream_user

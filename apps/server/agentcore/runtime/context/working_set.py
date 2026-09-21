@@ -5,7 +5,7 @@ sees user/assistant prose. This module extracts path + last action + optional
 digest from journal so ``_render_fold`` can keep identifiers. Product models do
 not get a ``<工作集>`` block each turn — CEO uses the workspace file index
 (folder chats name this-conversation mutations via ``conversation_edits``);
-workers use glob / file_read.
+workers use glob / read.
 """
 
 from __future__ import annotations
@@ -26,8 +26,8 @@ logger = get_logger(__name__)
 
 Action = Literal["read", "write"]
 
-READ_TOOLS = frozenset({"file_read"})
-WRITE_TOOLS = frozenset({"file_write", "str_replace"})
+READ_TOOLS = frozenset({"read"})
+WRITE_TOOLS = frozenset({"write", "edit"})
 FILE_TOOLS = READ_TOOLS | WRITE_TOOLS
 
 # Newest unique paths kept in the compaction ledger.
@@ -83,7 +83,7 @@ def _parse_arguments(arguments: str) -> dict[str, Any]:
 
 def _path_and_range(name: str, arguments: str) -> tuple[str, int | None, int | None]:
     data = _parse_arguments(arguments)
-    path = _normalize_path(data.get("path") or data.get("file_path"))
+    path = _normalize_path(data.get("file_path"))
     if not path:
         return "", None, None
     if name not in READ_TOOLS:
@@ -139,7 +139,7 @@ def file_working_set_digest(
 
     Product models do not get a ``<工作集>`` block each turn — CEO uses the
 workspace file index (folder chats name this-conversation mutations separately;
-see ``conversation_edits``); workers use glob / file_read.
+see ``conversation_edits``); workers use glob / read.
     """
     if not _success(success):
         return ""

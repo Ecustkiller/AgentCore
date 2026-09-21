@@ -370,12 +370,13 @@ def test_normalize_questions_does_not_overwrite_existing_options_with_question_l
     assert [o["label"] for o in qs[0]["options"]] == ["A", "B"]
 
 
-def test_normalize_questions_text_ignores_question_level_label():
+def test_normalize_questions_question_level_label_is_choice():
+    """有 label 即 choice；leftover kind=text 不当暗开关。"""
     qs = normalize_questions(
         [{"prompt": "补充？", "kind": "text", "label": "不是选项"}]
     )
-    assert qs[0]["kind"] == "text"
-    assert qs[0]["options"] == []
+    assert qs[0]["kind"] == "choice"
+    assert [o["label"] for o in qs[0]["options"]] == ["不是选项"]
 
 
 async def test_ask_user_rejects_unparseable_questions_string():
@@ -506,6 +507,7 @@ def test_ask_user_schema_wires_fill_how_on_this_tool():
     )
     assert tool.schema.description == ASK_WHEN
     q = tool.schema.parameters["properties"]["questions"]["items"]["properties"]
+    assert set(q) == {"prompt", "options", "multiple"}
     assert q["prompt"]["description"] == ASK_PROMPT_HOW
     assert "default" not in q
     props = q["options"]["items"]["properties"]
@@ -518,86 +520,54 @@ def test_ask_user_schema_wires_fill_how_on_this_tool():
     assert "card" not in tool.schema.parameters["properties"]
 
 
-def test_ask_user_schema_advertises_action_only_when_flagged():
+def test_ask_user_schema_never_advertises_folder_actions():
     sink = EventSink()
     base = dict(
         sink=sink,
         conversation_id="c1",
         timeout_seconds=30.0,
     )
-    plain = AskUserTool(**base, advertise_bind_local_folder=False)
-    props = plain.schema.parameters["properties"]["questions"]["items"]["properties"]["options"][
-        "items"
-    ]["properties"]
-    assert "action" not in props
-    assert "well_known" not in props
-    assert "target_name" not in props
-    assert "bind_local_folder" not in plain.schema.description
-
+    for flagged in (False, True):
+        tool = AskUserTool(**base, advertise_bind_local_folder=flagged)
+        props = tool.schema.parameters["properties"]["questions"]["items"]["properties"][
+            "options"
+        ]["items"]["properties"]
+        assert "action" not in props
+        assert "well_known" not in props
+        assert "target_name" not in props
+        assert "path" not in props
+        blob = tool.schema.description
+        assert "open_local_project" not in blob
+        assert "register_local_project" not in blob
+        assert "bind_local_folder" not in blob
+        assert "grant_readonly_folder" not in blob
+        assert "grant_organize_folder" not in blob
+        assert "external_mount_readonly" not in blob
+        assert "HOW→consult(external_mount_readonly)" not in blob
+        assert "grant_attach_folder" not in blob
+        assert "只读用" not in blob
+        assert "桌面分流" not in blob
+        assert "改导" not in blob
+        assert "口头同意" not in blob
+        assert "2～3" not in blob
+        assert "2-3" not in blob
     advertised = AskUserTool(**base, advertise_bind_local_folder=True)
-    props2 = advertised.schema.parameters["properties"]["questions"]["items"]["properties"][
-        "options"
-    ]["items"]["properties"]
-    # 未标 location = 云桌：本机传统入口；不广告 grant。
-    assert props2["action"]["enum"] == [
-        "open_local_project",
-        "register_local_project",
-        "bind_local_folder",
-    ]
-    assert "well_known" not in props2
-    assert "target_name" not in props2
-    assert "path" not in props2
-    assert "open_local_project" not in advertised.schema.description
-    assert "register_local_project" not in advertised.schema.description
-    assert "bind_local_folder" not in advertised.schema.description
-    assert "grant_readonly_folder" not in advertised.schema.description
-    assert "grant_organize_folder" not in advertised.schema.description
-    assert "external_mount_readonly" not in advertised.schema.description
-    assert "HOW→consult(external_mount_readonly)" not in advertised.schema.description
-    assert "grant_attach_folder" not in advertised.schema.description
-    assert "只读用" not in advertised.schema.description
-    assert "桌面分流" not in advertised.schema.description
-    assert "改导" not in advertised.schema.description
-    # 口头同意闭环 / 歧义 2～3 候选怎么填：HOW 在 skill，不进工具 description。
-    assert "口头同意" not in advertised.schema.description
-    assert "2～3" not in advertised.schema.description
-    assert "2-3" not in advertised.schema.description
-    action_desc = props2["action"]["description"]
-    assert "整题接到工作区" in action_desc
-    assert "open/register/bind_local_*" in action_desc
-    assert "grant_organize_folder" not in action_desc
-    assert "grant_organize_folder=整理" not in action_desc
-    assert "本机传统" not in action_desc
-    assert "改导" not in action_desc
-    assert "grant_readonly_folder" not in action_desc
-    assert "grant_readonly_folder" not in props2["action"]["enum"]
-    assert "grant_attach_folder" not in action_desc
-    assert "本机可写" not in action_desc
-    assert "口头同意" not in action_desc
-    assert "2～3" not in action_desc
-    assert "2-3" not in action_desc
-    assert "well_known" not in props2
-    assert "target_name" not in props2
-    # Desktop advertise must stay compact; 填卡合同在按钮，本机 action 另计。
+    plain = AskUserTool(**base, advertise_bind_local_folder=False)
     adv_blob = advertised.schema.description + json.dumps(
         advertised.schema.parameters, ensure_ascii=False
     )
     plain_blob = plain.schema.description + json.dumps(
         plain.schema.parameters, ensure_ascii=False
     )
-    assert len(adv_blob) < 3600, f"desktop ask_user schema too fat: {len(adv_blob)}"
-    assert len(plain_blob) < len(adv_blob)
+    assert len(adv_blob) == len(plain_blob)
     assert len(plain_blob) < 1800
 
 
-def test_advertised_option_actions_splits_local_vs_cloud():
+def test_advertised_option_actions_never_lists_folder_bind():
     assert advertised_option_actions(desktop=False, workspace_location="local") == ()
-    assert advertised_option_actions(desktop=True, workspace_location=None) == (
-        "open_local_project",
-        "register_local_project",
-        "bind_local_folder",
-    )
+    assert advertised_option_actions(desktop=True, workspace_location=None) == ()
     assert advertised_option_actions(desktop=True, workspace_location="local") == ()
+    assert advertised_option_actions(desktop=True, workspace_location="server") == ()
 
 
 def test_ask_user_local_schema_omits_grant_and_open_bind():
@@ -617,26 +587,22 @@ def test_ask_user_local_schema_omits_grant_and_open_bind():
     assert "grant_attach_folder" not in tool.schema.description
 
 
-def test_ask_user_organize_how_lives_in_skill():
-    """口头同意闭环 / 歧义 2～3 候选：HOW 钉 consult(local_desk)，不进 ask_user。"""
-    from agentcore.runtime.skills import build_system_skill_registry
-
-    registry = build_system_skill_registry()
-    desk = registry.get("local_desk")
-    assert desk is not None
+def test_ask_user_omits_folder_bind_and_organize_how():
+    """开夹 / 整理不进 ask_user 按钮。钉键与层，不钉教学句。"""
     from agentcore.runtime.resolve.prompt import capability_how_suffix
 
     granted = capability_how_suffix({"external_mount_readonly"})
     assert granted == ""
-    assert "口头同意" in desk.body
-    assert "grant_organize_folder" not in desk.body
-    assert "consult(external_mount_readonly)" not in desk.body
-    assert "旁边挂上的本机目录" in desk.body
-    assert "旁根" not in desk.body
-    assert "可写授权" in desk.body
     tool = AskUserTool(
         sink=EventSink(),
         conversation_id="c1",
         timeout_seconds=30.0,
+        advertise_bind_local_folder=True,
     )
-    assert "口头同意" not in tool.schema.description
+    blob = tool.schema.description + json.dumps(
+        tool.schema.parameters, ensure_ascii=False
+    )
+    assert "口头同意" not in blob
+    assert "file_batch" not in blob
+    assert "open_local_project" not in blob
+    assert "整题接到工作区" not in blob

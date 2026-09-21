@@ -186,6 +186,48 @@ async def _search_via_db(
     return rows, False
 
 
+_FOLDER_ALL = "all"
+_BARE_CHAT_NOTE = "当前是裸聊（无文件夹）；已按 all 范围检索。"
+
+
+@dataclass(frozen=True)
+class SearchFolderResolution:
+    """Where to search: ``resolved_folder`` None = whole account."""
+
+    resolved_folder: str | None
+    scope: str
+    explicit_folder: str | None
+    soft_note: str | None
+
+
+def resolve_search_folder(
+    *,
+    host_folder_id: str | None,
+    arguments: dict[str, Any],
+) -> SearchFolderResolution:
+    """Fill-in is ``folder_id`` only. Leftover ``scope`` still parsed.
+
+    Omit = this folder (bare chat → all, with a note). Literal ``all`` =
+    account. Any other value = neighbor folder id. Explicit ``folder_id``
+    wins over leftover ``scope``. Invalid leftover ``scope`` is ignored.
+    Does not scan ``query``.
+    """
+    raw = str(arguments.get("folder_id") or "").strip()
+    leftover = str(arguments.get("scope") or "").strip()
+    if leftover not in {"all", "folder"}:
+        leftover = ""
+
+    if raw:
+        if raw.casefold() == _FOLDER_ALL:
+            return SearchFolderResolution(None, "all", None, None)
+        return SearchFolderResolution(raw, "folder", raw, None)
+    if leftover == "all":
+        return SearchFolderResolution(None, "all", None, None)
+    if not host_folder_id:
+        return SearchFolderResolution(None, "all", None, _BARE_CHAT_NOTE)
+    return SearchFolderResolution(host_folder_id, "folder", None, None)
+
+
 @dataclass(frozen=True)
 class ConversationSearchRun:
     rows: list[dict[str, Any]]
@@ -203,46 +245,27 @@ async def run_conversation_search(
 ) -> ConversationSearchRun:
     """Shared search used by ``search_conversations`` and ``read_conversation`` locators."""
     query = str(arguments.get("query") or "").strip()
-    scope = str(arguments.get("scope") or "folder").strip() or "folder"
-    if scope not in {"all", "folder"}:
-        return ConversationSearchRun(
-            rows=[],
-            folder_miss=False,
-            soft_note=None,
-            scope=scope,
-            error=ToolResult(
-                tool_call_id="",
-                success=False,
-                output="scope 须为 all / folder。",
-                error="invalid scope",
-            ),
-        )
+    located = resolve_search_folder(host_folder_id=folder_id, arguments=arguments)
     if not parse_conversation_search_terms(query):
         return ConversationSearchRun(
             rows=[],
             folder_miss=False,
             soft_note=None,
-            scope=scope,
+            scope=located.scope,
             error=ToolResult(
                 tool_call_id="",
                 success=True,
                 output=_EMPTY_QUERY,
-                display={"result_count": 0, "scope": scope},
+                display={"result_count": 0, "scope": located.scope},
             ),
         )
     # leftover ``limit`` is ignored; execute freeze at SEARCH_DEFAULT_LIMIT.
     limit = SEARCH_DEFAULT_LIMIT
 
-    explicit_folder = str(arguments.get("folder_id") or "").strip() or None
-    resolved_folder: str | None = None
-    soft_note: str | None = None
-    if explicit_folder:
-        resolved_folder = explicit_folder
-    elif scope == "folder":
-        if not folder_id:
-            soft_note = "当前是裸聊（无文件夹）；已按 all 范围检索。"
-        else:
-            resolved_folder = folder_id
+    explicit_folder = located.explicit_folder
+    resolved_folder = located.resolved_folder
+    soft_note = located.soft_note
+    scope = located.scope
 
     host_id = context.conversation_id
 
@@ -316,6 +339,7 @@ class SearchConversationsTool:
         audience=AUDIENCE_BOTH,
         manual_wire=True,
         catalog_summary="搜本账号对话",
+        blurb="在你的历史对话里按关键词找",
     )
 
     # Host conversation's folder (None = bare chat). Used when scope=folder.
@@ -328,10 +352,7 @@ class SearchConversationsTool:
     def schema(self) -> ToolSchema:
         return ToolSchema(
             name="search_conversations",
-            description=(
-                "检索本账号历史对话（过往事实）。"
-                "用户规则 ≠ 本工具。"
-            ),
+            description="检索本账号历史对话。用户规则 ≠ 本工具。",
             parameters={
                 "type": "object",
                 "properties": {
@@ -342,15 +363,9 @@ class SearchConversationsTool:
                             "引号包精确短语。"
                         ),
                     },
-                    "scope": {
-                        "type": "string",
-                        "enum": ["all", "folder"],
-                        "default": "folder",
-                        "description": "本文件夹或全账号。",
-                    },
                     "folder_id": {
                         "type": "string",
-                        "description": "其它文件夹 id（须属同一用户）。",
+                        "description": "省略=本夹；all=全账号；其它=邻夹 id。",
                     },
                 },
                 "required": ["query"],

@@ -133,7 +133,7 @@ def test_recording_sink_merges_nested_plan_and_counts_interactions():
     )
     sink.emit(
         escalation_raised(
-            "w2", "w2", question="缺数据", assumption="跳过", blocking=False, kind="dep"
+            "w2", "w2", question="缺数据", assumption="跳过", kind="dep"
         )
     )
     sink.emit(plan_revised(execution_id="e", revisions=[{"run_id": "cmp", "kind": "steer"}]))

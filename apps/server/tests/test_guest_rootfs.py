@@ -9,8 +9,10 @@ import pytest
 
 from agentcore.config import settings
 from agentcore.tools.sandbox.guest_rootfs import (
+    CLOUD_GUEST_SURFACE,
     HOST_USERLAND_PATHS,
     GuestRootfsError,
+    format_cloud_guest_surface,
     is_host_userland_bind,
     looks_like_guest_rootfs,
     prepare_bundle_rootfs,
@@ -18,6 +20,15 @@ from agentcore.tools.sandbox.guest_rootfs import (
     unmount_bundle_rootfs,
 )
 from tests.guest_rootfs_testutil import install_fake_guest_rootfs, write_fake_guest_rootfs
+
+
+def test_cloud_guest_surface_is_declared_command_tokens():
+    assert CLOUD_GUEST_SURFACE
+    assert format_cloud_guest_surface() == " · ".join(CLOUD_GUEST_SURFACE)
+    for name in CLOUD_GUEST_SURFACE:
+        assert name.isascii()
+        assert " " not in name
+        assert name == name.lower()
 
 
 def test_looks_like_guest_rootfs_needs_marker_or_true(tmp_path: Path):

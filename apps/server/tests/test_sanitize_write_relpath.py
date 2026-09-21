@@ -1,14 +1,8 @@
-"""Unit tests for ``sanitize_write_relpath`` (write-path safety + dossier flatten)."""
+"""Unit tests for ``sanitize_write_relpath`` (write-path safety)."""
 
 from __future__ import annotations
 
 from agentcore.workspace._paths import sanitize_write_relpath
-from agentcore.workspace.stage_dirs import (
-    DEBATE_PREFIX,
-    DRAFTS_PREFIX,
-    RESEARCH_PREFIX,
-    REVIEWS_PREFIX,
-)
 
 
 def test_safe_relative_path_unchanged():
@@ -30,39 +24,26 @@ def test_preserves_meaningful_leading_underscore_and_dot():
     # Trailing Windows-dangerous dots/spaces still cleaned.
     assert sanitize_write_relpath("docs/report.") == "docs/report"
     assert sanitize_write_relpath("docs/report ") == "docs/report"
-    # Dossier flatten must also keep a leading underscore in the flat name.
     assert (
-        sanitize_write_relpath(f"{RESEARCH_PREFIX}_inventory/note.md")
-        == f"{RESEARCH_PREFIX}_inventory_note.md"
+        sanitize_write_relpath("notes/_inventory/note.md")
+        == "notes/_inventory/note.md"
     )
 
 
-def test_dossier_flattens_nested_to_filename():
+def test_nested_paths_keep_directory_structure():
     assert (
-        sanitize_write_relpath(f"{RESEARCH_PREFIX}法庭迷局/UX系统设计.md")
-        == f"{RESEARCH_PREFIX}法庭迷局_UX系统设计.md"
+        sanitize_write_relpath("notes/法庭迷局/UX系统设计.md")
+        == "notes/法庭迷局/UX系统设计.md"
     )
-    assert (
-        sanitize_write_relpath(f"{REVIEWS_PREFIX}a/b/c.md")
-        == f"{REVIEWS_PREFIX}a_b_c.md"
-    )
-    assert (
-        sanitize_write_relpath(f"{DEBATE_PREFIX}子题\\笔记.md")
-        == f"{DEBATE_PREFIX}子题_笔记.md"
-    )
-    # 工作稿同样扁平（柜内禁自造子树）。
-    assert (
-        sanitize_write_relpath(f"{DRAFTS_PREFIX}某案/起诉状.md")
-        == f"{DRAFTS_PREFIX}某案_起诉状.md"
-    )
-    # 非阶段目录保留目录结构（步 3 后 ``文档/`` 下只有约定 stage 目录扁平）。
+    assert sanitize_write_relpath("reviews/a/b/c.md") == "reviews/a/b/c.md"
+    assert sanitize_write_relpath("debate/子题\\笔记.md") == "debate/子题/笔记.md"
     assert (
         sanitize_write_relpath("AgentCore/文档/背景/深/案.md")
         == "AgentCore/文档/背景/深/案.md"
     )
 
 
-def test_dossier_filename_truncated_under_name_max():
+def test_filename_truncated_under_name_max():
     """Angle-as-filename must stay under Linux NAME_MAX (255 UTF-8 bytes)."""
     from agentcore.workspace._paths import _MAX_FILENAME_BYTES
 
@@ -71,44 +52,39 @@ def test_dossier_filename_truncated_under_name_max():
         "明道云、飞书项目、ONES_PingCode、Tapd、Jira 中国区等）的定价结构与价位带分布，"
         "重点看 200–500 元_月档的竞争格局与定价策略（按席_按量_免费层）"
     )
-    path = sanitize_write_relpath(f"{RESEARCH_PREFIX}{long_label}方向笔记.md")
-    assert path.startswith(RESEARCH_PREFIX)
-    basename = path[len(RESEARCH_PREFIX) :]
+    path = sanitize_write_relpath(f"notes/{long_label}方向笔记.md")
+    assert path.startswith("notes/")
+    basename = path[len("notes/") :]
     assert len(basename.encode()) <= _MAX_FILENAME_BYTES
     assert basename.endswith(".md")
     assert len(basename.encode()) < len(f"{long_label}方向笔记.md".encode())
 
 
-def test_dossier_collapses_dunder_directory_underscores():
-    """``__tests__`` flattened through reviews collapses consecutive underscores."""
+def test_collapses_dunder_underscores_in_segment():
     assert (
-        sanitize_write_relpath(
-            f"{REVIEWS_PREFIX}code-audit-0-pages___tests___Analytics.md"
-        )
-        == f"{REVIEWS_PREFIX}code-audit-0-pages_tests_Analytics.md"
+        sanitize_write_relpath("reviews/code-audit-0-pages___tests___Analytics.md")
+        == "reviews/code-audit-0-pages_tests_Analytics.md"
     )
 
 
-def test_dossier_strips_isolated_dot_left_by_chopped_extension():
+def test_strips_isolated_dot_left_by_chopped_extension():
     """``Name.tsx`` truncated at the dot must not land as ``Name..md``."""
     assert (
-        sanitize_write_relpath(f"{REVIEWS_PREFIX}code-audit-0-GoWindowsCard..md")
-        == f"{REVIEWS_PREFIX}code-audit-0-GoWindowsCard.md"
+        sanitize_write_relpath("reviews/code-audit-0-GoWindowsCard..md")
+        == "reviews/code-audit-0-GoWindowsCard.md"
     )
 
 
-def test_dossier_unsafe_chars_in_flat_name():
+def test_unsafe_chars_in_filename():
     assert (
-        sanitize_write_relpath(f'{RESEARCH_PREFIX}报告:终稿?.md')
-        == f"{RESEARCH_PREFIX}报告_终稿_.md"
+        sanitize_write_relpath("notes/报告:终稿?.md") == "notes/报告_终稿_.md"
     )
 
 
 def test_absolute_workspace_prefix_stripped_before_sanitize():
     assert sanitize_write_relpath("/workspace/research/x.md") == "research/x.md"
     assert (
-        sanitize_write_relpath(f"/workspace/{RESEARCH_PREFIX}a/b.md")
-        == f"{RESEARCH_PREFIX}a_b.md"
+        sanitize_write_relpath("/workspace/notes/a/b.md") == "notes/a/b.md"
     )
 
 
@@ -137,12 +113,7 @@ def test_windows_reserved_device_names_neutralized():
     assert sanitize_write_relpath("lpt9") == "_lpt9"
     assert sanitize_write_relpath("nul.txt") == "_nul.txt"
     assert sanitize_write_relpath("docs/Con.log") == "docs/_Con.log"
-    # ordinary names
     assert sanitize_write_relpath("null.txt") == "null.txt"
     assert sanitize_write_relpath("console") == "console"
     assert sanitize_write_relpath("com10") == "com10"
-    # dossier flatten also neutralizes
-    assert (
-        sanitize_write_relpath(f"{RESEARCH_PREFIX}nul.md")
-        == f"{RESEARCH_PREFIX}_nul.md"
-    )
+    assert sanitize_write_relpath("notes/nul.md") == "notes/_nul.md"

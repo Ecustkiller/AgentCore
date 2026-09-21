@@ -105,8 +105,7 @@ class RoleScriptedProvider:
                     {
                         "question": ESC_QUESTION,
                         "assumption": ESC_ASSUMPTION,
-                        "kind": "normal",
-                        "blocking": False,
+                        "reason": "scope",
                     },
                     ensure_ascii=False,
                 ),

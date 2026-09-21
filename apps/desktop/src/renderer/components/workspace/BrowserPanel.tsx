@@ -638,7 +638,7 @@ export function BrowserPanel({
                     />
                   </ContextMenuTrigger>
                 </SortableTab>
-                <ContextMenuContent className="min-w-44">
+                <ContextMenuContent>
                   <ContextMenuItem
                     disabled={!tabCanOpenExternal}
                     onSelect={() => openExternalUrl(tabOpenUrl)}
@@ -713,7 +713,7 @@ export function BrowserPanel({
               />
             </div>
           </ContextMenuTrigger>
-          <ContextMenuContent className="min-w-44">
+          <ContextMenuContent>
             <ContextMenuItem
               disabled={!canOpenExternal}
               onSelect={onOpenExternal}

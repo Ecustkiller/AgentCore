@@ -87,16 +87,16 @@ async def resolve_latest_appendable_execution(
     exclude_message_id: str | None = None,
     prefer_message_id: str | None = None,
 ) -> str | None:
-    """Resolve ``append_to_execution_id="latest"``: newest appendable graph (本回合优先).
+    """Newest appendable graph in the conversation (本回合优先).
 
-    可追加 = 本对话内、``plan_type='multi_agent'`` 的团队协作图（辩论图不可追加）；宿主消息
-    可解析等深校验仍由调用方把关。跨回合命中后作为 ``prev_execution_id``（新图 + 链），
-    同回合 / adopt 热图仍合入同一 ``execution_id``。
+    可接续 = 本对话内、``plan_type='multi_agent'`` 的团队协作图（辩论图不可接续）。
+    ``continue_from_run_id`` / ``replaces_run_id`` 命中后作为 ``prev_execution_id``
+    （新图 + 链），不合入旧图。
 
     ``prefer_message_id``：该回合上已有 multi_agent 图则用之（同 turn 第一波收口后再
-    ``latest`` 续派不得静默挂到跨 message 旧宿主）。``exclude_message_id`` 仅 prompt
-    回显等场景排除本回合——delegate append 路径应传 prefer、勿 exclude。
-    ``None`` = 无候选或查询失败——调用方必须把失败显式回给 CEO，禁止静默新建图。
+    续派不得静默挂到跨 message 旧宿主）。``exclude_message_id`` 仅 prompt 回显等场景
+    排除本回合。
+    ``None`` = 无候选或查询失败——调用方不写 prev。
     """
     cid = (conversation_id or "").strip()
     if not cid:
@@ -136,7 +136,7 @@ async def resolve_latest_appendable_execution(
             via=via,
         )
         return resolved
-    except Exception as exc:  # noqa: BLE001 — resolve miss → None；tool 层自动降级新建
+    except Exception as exc:  # noqa: BLE001 — resolve miss → None；调用方不链 prev
         logger.warning(
             "delegate.graph_append_latest",
             conversation_id=cid,

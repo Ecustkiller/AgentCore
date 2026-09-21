@@ -10,7 +10,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 
 const DEGRADED_NOTICE = "简报由系统降级生成";
 
-const BODY_INSET = "mt-1.5 space-y-2 rounded-lg bg-muted px-2.5 py-1.5";
+const BODY_INSET = "mt-2 space-y-2 rounded-lg bg-muted px-2.5 py-1.5";
 
 /**
  * Human-facing 交接简报 — same chrome for a successful `handoff` tool row

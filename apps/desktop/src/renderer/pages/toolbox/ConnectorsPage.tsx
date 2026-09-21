@@ -82,7 +82,7 @@ export function useMcpConnectors() {
 }
 
 /**
- * 本机插头配置：提示词目录读卡。仅 Electron（window.mcpApi）。
+ * 本机 MCP 接线表单。仅 Electron（window.mcpApi）。
  */
 export function ConnectorInspector({
   server,
@@ -204,7 +204,7 @@ export function ConnectorInspector({
       {hideChrome ? null : (
         <header className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border px-3">
           <h2 className="font-medium text-foreground text-sm">
-            {editing ? "编辑连接器" : "新建连接器"}
+            {editing ? "编辑 MCP" : "新建 MCP"}
           </h2>
           {server ? <ConnectorStatusBadge server={server} /> : null}
         </header>

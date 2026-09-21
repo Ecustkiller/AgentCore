@@ -598,6 +598,44 @@ async def test_ensure_cloud_preview_requires_running(
     assert rejected.value.code == PROCESS_NOT_RUNNING
 
 
+async def test_cloud_background_git_exports_account_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Private-repo clone in the background gets the same PAT helper as a short run."""
+    sandbox = _FakeDesk(tmp_path / "scratch")
+    backend = _backend(tmp_path, sandbox)
+    monkeypatch.setattr(desk_process_mod, "_gvisor_sandbox", lambda: sandbox)
+
+    async def _auth(_context: object) -> dict[str, str]:
+        return {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "credential.helper",
+            "GIT_CONFIG_VALUE_0": "sekret",
+        }
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.git_ops.spawn.cloud_git_auth_env", _auth
+    )
+    started = await process_manage(
+        {"subcommand": "start", "command": "git clone https://example.com/a.git"},
+        _ctx(backend),
+    )
+    assert started.success
+    launch = next((tmp_path / "scratch").rglob("launch.sh"))
+    text = launch.read_text(encoding="utf-8")
+    assert "export GIT_CONFIG_VALUE_0=" in text
+    assert "sekret" in text
+    plain = _FakeDesk(tmp_path / "scratch-plain")
+    plain_backend = _backend(tmp_path / "plain", plain)
+    monkeypatch.setattr(desk_process_mod, "_gvisor_sandbox", lambda: plain)
+    await process_manage(
+        {"subcommand": "start", "command": "npm run dev"},
+        _ctx(plain_backend, conversation_id="conv-plain"),
+    )
+    plain_launch = next((tmp_path / "scratch-plain").rglob("launch.sh"))
+    assert "GIT_CONFIG" not in plain_launch.read_text(encoding="utf-8")
+
+
 async def test_close_all_desk_sessions_unregisters_preview(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

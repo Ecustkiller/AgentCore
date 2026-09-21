@@ -12,7 +12,6 @@ vi.mock("../log-service", () => ({
   logDesktop: vi.fn(),
 }));
 
-import { shell } from "electron";
 import { runHostOp } from "../host-service";
 import { logDesktop } from "../log-service";
 
@@ -48,89 +47,17 @@ describe("runHostOp", () => {
     }
   });
 
-  it("host_open_settings rejects unknown panel", async () => {
-    const result = await runHostOp({
-      op: "host_open_settings",
-      args: { panel: "bluetooth" },
-    });
-    expect(result.ok).toBe(false);
-  });
-
-  it("host_open_settings accepts display panel on win32", async () => {
-    if (process.platform !== "win32") {
-      const result = await runHostOp({
-        op: "host_open_settings",
-        args: { panel: "display" },
-      });
-      // Non-Win: whitelist accepts, OS may stub.
-      expect(result.ok).toBe(true);
-      return;
-    }
-    const result = await runHostOp({
-      op: "host_open_settings",
-      args: { panel: "display" },
-    });
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value.panel).toBe("display");
-      expect(result.value.uri).toBe("ms-settings:display");
-    }
-    expect(shell.openExternal).toHaveBeenCalledWith("ms-settings:display");
-  });
-
-  it("host_service_restart rejects unknown service", async () => {
-    const result = await runHostOp({
-      op: "host_service_restart",
-      args: { service: "Spooler" },
-    });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error.kind).toBe("HostServiceNotAllowlisted");
-    }
-  });
-
-  it("host_service_restart allowlisted Audiosrv has real impl or honest failure", async () => {
-    const result = await runHostOp({
-      op: "host_service_restart",
-      args: { service: "Audiosrv" },
-    });
-    if (process.platform !== "win32") {
+  it("retired host ops are unknown", async () => {
+    for (const op of [
+      "host_open_settings",
+      "host_audio_devices",
+      "host_audio_set_default",
+      "host_service_restart",
+      "host_os_log_summary",
+      "host_package_install",
+    ]) {
+      const result = await runHostOp({ op });
       expect(result.ok).toBe(false);
-      if (!result.ok) {
-        expect(result.error.kind).toBe("HostServiceRestartStub");
-      }
-      return;
-    }
-    // Win: Restart-Service may need elevation — accept success or clear error.
-    if (result.ok) {
-      expect(result.value.service).toBe("Audiosrv");
-      expect(result.value.restarted).toBe(true);
-    } else {
-      expect(result.error.kind).toBe("HostServiceRestartError");
-      expect(result.error.detail.length).toBeGreaterThan(0);
-    }
-  });
-
-  it("host_audio_set_default rejects missing device", async () => {
-    const result = await runHostOp({ op: "host_audio_set_default", args: {} });
-    expect(result.ok).toBe(false);
-  });
-
-  it("host_audio_set_default rejects unknown device", async () => {
-    const result = await runHostOp({
-      op: "host_audio_set_default",
-      args: { device_name: "__agentcore_no_such_device__" },
-    });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      if (process.platform === "win32") {
-        // Prefer unknown-device reject; probe failure is also an honest fail-closed.
-        expect(["HostAudioDeviceUnknown", "HostAudioProbeError"]).toContain(
-          result.error.kind,
-        );
-      } else {
-        expect(result.error.kind).toBe("HostAudioSetDefaultStub");
-      }
     }
   });
 

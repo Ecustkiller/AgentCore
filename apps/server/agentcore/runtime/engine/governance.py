@@ -24,8 +24,8 @@ from .outcome import RoundOutcome
 
 logger = get_logger(__name__)
 
-# Local file peeks (file_list / glob / file_read / grep) — diagnostics / eval probe only.
-LOCAL_RECON_TOOLS = frozenset({"file_list", "glob", "file_read", "grep"})
+# Local file peeks (file_list / glob / read / grep) — diagnostics / eval probe only.
+LOCAL_RECON_TOOLS = frozenset({"file_list", "glob", "read", "grep"})
 
 
 def maybe_inject_delivery_idle(
@@ -232,10 +232,10 @@ def finalize_allows_persist(
     expects_landing: bool = False,
     workspace_channel_dead: bool = False,
 ) -> bool:
-    """True when finalize should keep file_write+handoff (pinned landing / wind_down).
+    """True when finalize should keep write+handoff (pinned landing / wind_down).
 
     Not-landing or writes absent from registry → coordination only (finalize
-    does not urge writes). ``files_expected`` → execute persist when ``file_write``
+    does not urge writes). ``files_expected`` → execute persist when ``write``
     is registered. 真纯丙后执行层默认 unrestricted，不再依赖「名单缺写盘补写」。
 
     ``workspace_channel_dead`` / sticky session·channel dead → never retain persist
@@ -243,12 +243,12 @@ def finalize_allows_persist(
     """
     if workspace_channel_dead or is_workspace_channel_sticky_dead():
         return False
-    if not expects_landing or "file_write" not in tools.names:
+    if not expects_landing or "write" not in tools.names:
         return False
     if files_expected:
         return True
     if allowed_tool_names is not None:
-        return "file_write" in allowed_tool_names
+        return "write" in allowed_tool_names
     return True
 
 
@@ -271,7 +271,7 @@ def resolve_finalize_coordination_tools(
     """Execute-allowlist projection for a forced-finalize round (not the wire table).
 
     Wire ``tools[]`` is ``resolve_openai_tool_defs``. Default execute set =
-    coordination only. When landing is in play, also execute ``file_write`` +
+    coordination only. When landing is in play, also execute ``write`` +
     ``handoff`` — never strip persist then claim a report-only wrap.
     """
     if allowed_tool_names is None:
@@ -286,7 +286,7 @@ def resolve_finalize_coordination_tools(
         workspace_channel_dead=workspace_channel_dead,
     )
     allow = finalize_tool_allowlist(persist=persist)
-    # ``allow`` is the sole gate: when persist is on it re-includes file_write.
+    # ``allow`` is the sole gate: when persist is on it re-includes write.
     selected = [
         name for name in candidates if name in allow and name not in disabled_tools
     ]

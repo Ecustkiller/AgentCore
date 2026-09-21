@@ -58,6 +58,10 @@ describe("menu portals (PreviewObstruct sibling)", () => {
     expect(screen.getByText("菜单项")).toBeTruthy();
     // The obstruct marker mounted inside the (now separate) Portal.
     expect(useOverlayStore.getState().count).toBeGreaterThan(0);
+    const menu = screen.getByRole("menu");
+    expect(menu.className).toMatch(/\bmin-w-36\b/);
+    expect(menu.className).toMatch(/\bmax-w-64\b/);
+    expect(menu.className).not.toMatch(/\bw-max\b/);
   });
 
   it("opens a ContextMenu without a Slot crash", () => {
@@ -71,5 +75,8 @@ describe("menu portals (PreviewObstruct sibling)", () => {
     );
     fireEvent.contextMenu(screen.getByText("右键区域"));
     expect(screen.getByText("右键项")).toBeTruthy();
+    const ctx = screen.getByRole("menu");
+    expect(ctx.className).toMatch(/\bmin-w-36\b/);
+    expect(ctx.className).toMatch(/\bmax-w-64\b/);
   });
 });

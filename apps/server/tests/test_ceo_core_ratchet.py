@@ -12,10 +12,9 @@
   Git …）。核里复述一份就会漂——案 0a71 就是核里
   散文断言「``md_export`` 无条件装配」，而装配态只能由开场表表达，模型于是花了整段思考链猜「队员到底有没有」，最后把用户的三个选项
   连同提问一起丢了。**下面那条 assembly-claim 测试就是这个 bug 的回归守卫。**
-- 可履约的操作手册 = **consult 正文**（``capability_how_suffix`` 只给 consult 拼，不挂冻结核）。
-  通道不在的回合，手册是一份证明履行不了的说明书。
-- **诚实底线常驻**：用户可见主张对照本回合结构面（工具回执 / 来源编号 / 工具表 /
-  按需目录）。不按可用性下线。变体表不进核。
+- 可履约的操作手册 = **skill 正文**。工具侧 ``capability_how_suffix`` 现恒为空，不挂冻结核。
+- **诚实底线常驻**：已做以这回合回执为准（基座）。目录行 ≠ 已查阅在按需目录前言。
+  来源编号在回执尾，不进基座。不按可用性下线。变体表不进核。
 
 ## 红了怎么办
 
@@ -33,14 +32,12 @@
 
 from __future__ import annotations
 
-import pytest
-
 from agentcore.runtime.resolve.prompt import (
     _CEO_CORE_HINT,
     assemble_system_prompt,
     capability_how_suffix,
-    compose_ceo_chat_prompt,
 )
+from agentcore.runtime.resolve.prompt.compose import _on_demand_preamble
 
 # 2026-08-19 跨界搬迁：交付验收对照 / 可用性短问 / 概览契约从共享基座迁入核
 # （队员开场用不到；finish_guard 仅 CEO 路径查）。核 +319、基座 −467，
@@ -194,7 +191,7 @@ from agentcore.runtime.resolve.prompt import (
 # cap 降到 1220。
 # 2026-09-18 身份删「短答和单点」路由尺（WHEN 归 delegate description）。核 −14。
 # cap 1220→1210。
-# 2026-09-19 ``<运行时>`` 日期迁出共享基座（CEO 当轮信封 / 工人 compose）。
+# 2026-09-19 ``<运行时>`` 日期迁出共享基座（CEO / 工人当轮信封）。
 # 当次实测 1023。cap 降到 1030。
 # 2026-09-19 基座 <输出>：渲染器清单出核，留公式记号 + mermaid。当次实测 992。
 # cap 降到 1000。
@@ -236,17 +233,12 @@ from agentcore.runtime.resolve.prompt import (
 # cap 降到 190。
 # 2026-09-20 工厂身份清空（出口通道三句出核；无残差不注入）。当次实测 118。
 # cap 降到 120。
-_RESIDENT_CAP = 120
-
-# (门工具, 该手册的签名字面) —— 手册只在门开的回合出现，不许常驻。
-# run 的 HOW 在 skill body（consult(run) 命中 skill），不进 capability_how_suffix。
-_GATED_MANUALS: tuple[tuple[str, str], ...] = (
-    ("run", "wait_for"),
-    ("host", "通用知识问答"),
-    ("host", "Get-WinEvent"),
-    ("browser", "永不代填密码"),
-    ("browser", "同一出站"),
-)
+# 2026-09-20 基座：完整稿已写进文件则结论给路径/增量 出基座
+# （条件句每回合都在，会被读成催写盘；写盘场面才成立）。当次实测 89。
+# cap 降到 90。
+# 2026-09-21 诚实段：基座只留已做以回执为准；来源编号/工具表/按需目录出基座
+# （编号在回执尾；目录行 ≠ 已查阅在前言）。当次实测 77。cap 降到 80。
+_RESIDENT_CAP = 80
 
 
 def _ceo_resident_chars() -> int:
@@ -254,8 +246,8 @@ def _ceo_resident_chars() -> int:
 
     2026-08-19 起这句才名副其实：``workspace_facts`` 已从基座（原 order 250、核前）
     挪到 order 750（核后、紧邻易变尾），所以 ``assemble_system_prompt()`` + 核不再把
-    每回合变的环境事实算进这段前缀。2026-09-19：``<运行时>`` 日期也离开基座（CEO 进当轮信封，
-    工人 compose 另加），量的仍是无 facts 的冻结核。
+    每回合变的环境事实算进这段前缀。2026-09-19：``<运行时>`` 日期也离开基座（CEO / 工人进当轮信封），
+    量的仍是无 facts 的冻结核。
     """
     return len(assemble_system_prompt()) + len(_CEO_CORE_HINT)
 
@@ -284,52 +276,27 @@ def test_core_states_no_tool_assembly_claims():
 def test_core_does_not_restate_computed_workspace_facts():
     """已在事实行算出来的事实，核里不留第二份（第三份就是漂移的开始）。"""
     hint = _CEO_CORE_HINT
-    # 「无原生生图工具」已下沉 consult(run)；出网/生图声称走基座诚实对照，核不点名。
+    # 出网/生图声称走基座诚实对照，核不点名。
     assert "无原生生图工具" not in hint
     assert "出站网络" not in hint
     assert "出站网络" not in assemble_system_prompt()
 
 
-@pytest.mark.parametrize(("gate_tool", "signature"), _GATED_MANUALS)
-def test_gated_manuals_do_not_ride_the_resident_core(gate_tool: str, signature: str):
-    """可履约手册唯一所有者 = consult / skill：核与 compose 开场都不挂。"""
-    assert signature not in _CEO_CORE_HINT, (
-        f"{signature} 属于 {gate_tool} 的手册，不该常驻——交给 consult"
-    )
-    if gate_tool == "run":
-        from agentcore.runtime.skills.run import _RUN
-
-        assert signature in _RUN, (
-            f"run 的手册丢了签名 {signature}（应在 skill body）"
-        )
-        assert signature not in capability_how_suffix({"run"}), (
-            "run HOW 不进 capability_how_suffix"
-        )
-    else:
-        assert signature in capability_how_suffix({gate_tool}), (
-            f"{gate_tool} 的 consult 手册丢了签名 {signature}"
-        )
-    frozen = compose_ceo_chat_prompt(
-        assemble_system_prompt(),
-        ceo_tool_names={"delegate", gate_tool},
-    )
-    assert signature not in frozen, (
-        f"{signature} 不应挂进冻结核（{gate_tool}）"
-    )
+def test_capability_how_suffix_is_empty():
+    """工具侧无 consult 手册。"""
+    assert capability_how_suffix({"browser", "host", "run"}) == ""
 
 
 def test_honesty_floors_stay_resident():
-    """诚实底线不跟门走：对照结构面元规则只在基座；装包/格式细则在 skill。"""
-    from agentcore.runtime.skills.delivery import _DELIVERY
-
+    """诚实底线不跟门走：已做以回执为准只在基座；目录行对照在前言。"""
     hint = _CEO_CORE_HINT
     base = assemble_system_prompt()
-    assert "对得上这回合" in base
-    assert "对得上这回合" not in hint
+    preamble = "\n".join(_on_demand_preamble(with_summaries=True))
+    assert "回执为准" in base
+    assert "回执为准" not in hint
+    assert "目录行" in preamble
+    assert "目录行" not in base
+    assert "目录行" not in hint
     assert "已落盘" not in base
     assert "已落盘" not in hint
-    assert "结构自检" not in _DELIVERY
-    assert "用户机器上已经跑通" in _DELIVERY
-    assert "export_to_local" in _DELIVERY
-    assert "不可产" in _DELIVERY and "等效替代" in _DELIVERY
     assert "邻格" not in base

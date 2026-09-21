@@ -39,37 +39,51 @@ describe("toolRowFaultLabel", () => {
     ).toBe("未通过");
   });
 
-  it("labels missing files / unmatched edits 未找到", () => {
+  it("does not hang 未找到 or 未完成 on lookup / generic faults", () => {
     expect(
       toolRowFaultLabel({
-        tool_name: "file_read",
+        tool_name: "read",
         status: "error",
         failure: { code: "not_found" },
       }),
-    ).toBe("未找到");
+    ).toBeNull();
     expect(
-      toolRowFaultLabel({ tool_name: "str_replace", status: "error" }),
-    ).toBe("未找到");
+      toolRowFaultLabel({ tool_name: "edit", status: "error" }),
+    ).toBeNull();
     expect(
       toolRowFaultLabel({
         tool_name: "browser_click",
         status: "error",
         failure: { code: "NOT_FOUND" },
       }),
-    ).toBe("未找到");
+    ).toBeNull();
+    expect(
+      toolRowFaultLabel({
+        tool_name: "wait",
+        status: "error",
+        failure: { code: "WAIT_TIMEOUT" },
+      }),
+    ).toBeNull();
+    expect(
+      toolRowFaultLabel({
+        tool_name: "browser_screenshot",
+        status: "error",
+        failure: { code: "no_frame" },
+      }),
+    ).toBeNull();
   });
 
   it("treats file lookup misses as skipping the extra sentence", () => {
     expect(
       isSelfExplanatoryLookupError({
-        tool_name: "file_read",
+        tool_name: "read",
         status: "error",
         failure: { code: "not_found" },
       }),
     ).toBe(true);
     expect(
       isSelfExplanatoryLookupError({
-        tool_name: "str_replace",
+        tool_name: "edit",
         status: "error",
       }),
     ).toBe(true);
@@ -82,14 +96,7 @@ describe("toolRowFaultLabel", () => {
     ).toBe(false);
   });
 
-  it("labels other faults 未完成, not verify-incomplete", () => {
-    expect(
-      toolRowFaultLabel({
-        tool_name: "wait",
-        status: "error",
-        failure: { code: "WAIT_TIMEOUT" },
-      }),
-    ).toBe("未完成");
+  it("stays silent on verify-incomplete (warning triangle, not a fault word)", () => {
     expect(
       toolRowFaultLabel({
         tool_name: "test_run",
@@ -110,27 +117,36 @@ describe("toolGroupFaultLabel", () => {
   it("is silent when every child succeeded", () => {
     expect(
       toolGroupFaultLabel([
-        { tool_name: "file_read", status: "success" },
+        { tool_name: "read", status: "success" },
         { tool_name: "run", status: "success" },
       ]),
     ).toBeNull();
   });
 
-  it("repeats a single child word", () => {
+  it("repeats 未通过 when any child is an exec failure", () => {
     expect(
       toolGroupFaultLabel([
-        { tool_name: "file_read", status: "success" },
+        { tool_name: "read", status: "success" },
         { tool_name: "run", status: "error" },
       ]),
     ).toBe("未通过");
   });
 
-  it("uses 未完成 when kinds mix", () => {
+  it("stays silent when kinds mix without an exec failure", () => {
     expect(
       toolGroupFaultLabel([
-        { tool_name: "file_read", status: "error" },
+        { tool_name: "read", status: "error" },
+        { tool_name: "wait", status: "error" },
+      ]),
+    ).toBeNull();
+  });
+
+  it("keeps 未通过 when an exec failure mixes with a lookup miss", () => {
+    expect(
+      toolGroupFaultLabel([
+        { tool_name: "read", status: "error" },
         { tool_name: "run", status: "error" },
       ]),
-    ).toBe("未完成");
+    ).toBe("未通过");
   });
 });

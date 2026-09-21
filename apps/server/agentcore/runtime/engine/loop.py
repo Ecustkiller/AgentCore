@@ -181,6 +181,7 @@ async def react_loop(
     role: str = "",
     deliverable_only: bool = False,
     supports_tools: bool | None = None,
+    opening_tool_defs: list[dict[str, Any]] | None = None,
     token_budget: int = 0,
     controller_seed: Mapping[str, Any] | None = None,
     files_expected: bool = False,
@@ -416,6 +417,8 @@ async def react_loop(
         return wind_down.effective_allowed()
 
     def _resolve_tool_defs() -> list[dict[str, Any]] | None:
+        if opening_tool_defs is not None:
+            return opening_tool_defs or None
         return resolve_openai_tool_defs(tools, _effective_allowed(), disabled_tools)
 
     tool_defs: list[dict[str, Any]] | None = _resolve_tool_defs()
@@ -651,7 +654,7 @@ async def react_loop(
                 raise asyncio.CancelledError(hard_break)
             # B·收尾窗口必须先于硬顶：单轮 token 从软顶下方直接越过硬顶时，若先判硬顶
             # break，会整轮跳过 wind_down，随后 force_finalize 禁写 → worker 把
-            # file_write 糊成正文 DSML。先武装收尾窗；若本轮刚进入，即使已过硬顶也
+            # write 糊成正文 DSML。先武装收尾窗；若本轮刚进入，即使已过硬顶也
             # 先跑这一轮落盘/handoff，下一轮再撞硬顶 finalize。
             already_winding = wind_down.wind_down_active
             wind_down.maybe_arm_wind_down(tokens=total_usage.fuse_tokens)
@@ -793,6 +796,7 @@ async def react_loop(
                         conversation_id=tool_context.conversation_id or "",
                         user_id=tool_context.user_id or "",
                         model_id=active_model,
+                        tools=tool_defs,
                     )
                 round_result = await run_llm_round(
                     llm=llm,

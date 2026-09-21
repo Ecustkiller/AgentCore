@@ -385,7 +385,6 @@ export function WorkspaceGroupHeader({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent
                   align="end"
-                  className="min-w-52"
                   onClick={(e) => e.stopPropagation()}
                 >
                   {dropdownItems}
@@ -408,9 +407,7 @@ export function WorkspaceGroupHeader({
             </span>
           </SurfaceRow>
         </ContextMenuTrigger>
-        <ContextMenuContent className="min-w-52">
-          {menuItems}
-        </ContextMenuContent>
+        <ContextMenuContent>{menuItems}</ContextMenuContent>
       </ContextMenu>
       <DeleteFolderDialog
         open={deleteOpen}

@@ -84,7 +84,7 @@ def is_internal_zone_path(rel_path: str) -> bool:
     """True when ``rel_path`` is an AgentCore internal zone or under one.
 
     Alias kept for call-site clarity (hard-delete bypass). Does **not** match
-    bare ``AgentCore/`` or ``AgentCore/规则|记忆|文档``.
+    bare ``AgentCore/`` or ``AgentCore/rules|记忆|文档``.
     """
     return is_internal_zone_relpath(rel_path)
 

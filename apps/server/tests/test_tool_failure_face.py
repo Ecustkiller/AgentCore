@@ -797,7 +797,6 @@ def test_every_produced_failure_code_has_curated_copy():
         "blocked_host": "工具内部辅助函数 + code 映射表",
         "site_access_denied": "工具内部辅助函数 + 同文件分类函数的返回值",
         "bridge_unauthorized": "工具内部辅助函数 + 跨文件导入的 *_CODE 常量",
-        "repo_unusable": "经模块别名读到的常量（policy_mod._REPO_UNUSABLE_CODE）",
     }.items():
         assert anchor in produced, f"扫描器已看不到「{shape}」这种产出形状（丢了 {anchor}）"
     # Codes riding a *successful* ToolResult are outcomes, not faces — demanding copy for
@@ -863,8 +862,6 @@ def test_pre_registered_codes_for_incoming_paths_have_copy():
         "loopback_host",
         "not_a_web_url",
         "url_not_workspace_path",
-        "shell_fetch_redirect",
-        "shell_download_redirect",
         "workspace_io_error",
     ):
         assert code in NO_USER_FACE_CODES

@@ -1,6 +1,6 @@
 [project]
 name = "agentcore"
-version = "0.7.25"
+version = "0.7.26"
 description = "AgentCore - Multi-Agent AI Workspace Backend"
 requires-python = ">=3.12"
 dependencies = [
@@ -110,9 +110,6 @@ ignore = ["B008", "A002", "E402"]
 # sibling modules (moderator/types/rounds/tool/schema) stay consistent as the feature grows.
 "agentcore/runtime/debate/*.py" = ["E501"]
 "agentcore/tools/builtin/debate/*.py" = ["E501"]
-# Legal-vertical Skill bodies are verbatim Chinese LLM guidance (string literals),
-# same reason-to-exempt as runtime/skills/**: reflowing changes what the CEO consults.
-"agentcore/runtime/legal_skills.py" = ["E501"]
 # Conformance vectors embed long Chinese fixture strings; reflowing hurts diff readability.
 # (vectors became a package — match every vector module, not just the old single file.)
 "agentcore/conformance/vectors/*.py" = ["E501"]
@@ -146,7 +143,6 @@ ignore = ["B008", "A002", "E402"]
 "agentcore/db/repositories/messages.py" = ["E501"]
 "agentcore/llm/resolve.py" = ["E501"]
 "agentcore/llm/sub2api_probe.py" = ["E501"]
-"agentcore/memory/user_memory.py" = ["E501"]
 "agentcore/runtime/context/workspace_overview.py" = ["E501"]
 "agentcore/runtime/engine/round.py" = ["E501"]
 "agentcore/runtime/engine/stream.py" = ["E501"]
@@ -278,7 +274,6 @@ module = [
     "agentcore.evals.harness",
     "agentcore.evals.judge",
     "agentcore.evals.seed_lint",
-    "agentcore.folders.collaboration_timeline",
     "agentcore.llm.catalog",
     "agentcore.llm.factory",
     "agentcore.llm.observability",
@@ -288,17 +283,14 @@ module = [
     "agentcore.llm.provider_service",
     "agentcore.llm.resolve",
     "agentcore.main",
-    "agentcore.memory.consolidation",
     "agentcore.memory.document_store",
     "agentcore.memory.store",
-    "agentcore.memory.user_memory",
     "agentcore.messaging.service",
     "agentcore.middleware.redis_rate_limit",
     "agentcore.runtime.audit.causal",
     "agentcore.runtime.audit.projector",
     "agentcore.runtime.browser.registry",
     "agentcore.runtime.context.workspace_profile",
-    "agentcore.runtime.debate.moderator_phases",
     "agentcore.runtime.debate.rounds",
     "agentcore.runtime.debate.speech_pipeline",
     "agentcore.runtime.delegate.ceo_format",

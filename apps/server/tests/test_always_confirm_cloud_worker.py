@@ -1,11 +1,10 @@
-"""恒确认回归：云端 worker 的 git push / create_pr 不得被审批门前置短路。
+"""恒确认回归：云端 worker 的 ``git push`` / ``gh pr create`` 不得被审批门前置短路。
 
 缺陷形状：恒确认判据原本私藏在 ``ApprovalGate.authorize`` 内，而云端 worker 路径在
-调用 authorize **之前**就把 ``needs_approval`` 置 False（默认 ``file_write=session``
-令 ``cloud_worker_skips_per_call_gate`` 返回 True），于是用户看不到任何确认卡就推了
-远端。定案见 [安全权限与治理 §熔断]：普通 push / create_pr 始终弹确认。
+调用 authorize **之前**就把 ``needs_approval`` 置 False，于是用户看不到任何确认卡就推了
+远端。``run`` 里的 push / 开 PR 始终弹确认。
 
-同时钉住「不外扩」：同条件下只读 git 与非发布类 git 写入仍免逐次卡。
+同时钉住「不外扩」：同条件下 ``git status`` / ``git commit`` 仍免逐次卡。
 """
 
 from __future__ import annotations
@@ -24,7 +23,7 @@ from agentcore.runtime.events import EventSink, EventType, SSEEvent
 from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.sandbox_approval import cloud_worker_skips_per_call_gate
 from agentcore.tools.builtin import approval_class_tool_names, delegation_grantable_tool_names
-from agentcore.tools.builtin.git_ops.tool import GitTool
+from agentcore.tools.builtin.run import RunTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 
@@ -86,9 +85,9 @@ async def _run_worker_gates(
         conversation_id="conv-1",
     )
     return await _check_safety_and_approval_gates(
-        name="git",
+        name="run",
         args=arguments,
-        tool_schema=GitTool().schema,
+        tool_schema=RunTool().schema,
         tc=ToolCall(id=tool_call_id),
         context=context,
         sink=sink,
@@ -112,7 +111,7 @@ async def test_cloud_worker_git_push_still_prompts():
     denied = await _run_worker_gates(
         gate,
         sink,
-        arguments={"subcommand": "push", "remote": "origin", "branch": "feature/x"},
+        arguments={"command": "git push origin feature/x"},
         tool_call_id="push-1",
     )
     await resolver
@@ -133,7 +132,7 @@ async def test_cloud_worker_git_create_pr_still_prompts_and_deny_blocks():
     denied = await _run_worker_gates(
         gate,
         sink,
-        arguments={"subcommand": "create_pr", "title": "feat: x"},
+        arguments={"command": "gh pr create --title \"feat: x\""},
         tool_call_id="pr-1",
     )
     await resolver
@@ -149,13 +148,15 @@ async def test_cloud_worker_readonly_git_unaffected():
     sink = EventSink()
     gate = _session_cloud_gate(sink, reg)
 
-    for idx, sub in enumerate(("status", "log", "diff", "show", "fetch")):
+    for idx, command in enumerate(
+        ("git status", "git log -1", "git diff", "git fetch")
+    ):
         denied = await _run_worker_gates(
-            gate, sink, arguments={"subcommand": sub}, tool_call_id=f"ro-{idx}"
+            gate, sink, arguments={"command": command}, tool_call_id=f"ro-{idx}"
         )
-        assert denied is None, sub
-        assert not reg.list_pending("conv-1"), sub
-        assert not [e for e in _drain(sink) if e.type is EventType.APPROVAL_REQUIRED], sub
+        assert denied is None, command
+        assert not reg.list_pending("conv-1"), command
+        assert not [e for e in _drain(sink) if e.type is EventType.APPROVAL_REQUIRED], command
 
 
 async def test_cloud_worker_non_publish_git_write_stays_ungated():
@@ -166,9 +167,9 @@ async def test_cloud_worker_non_publish_git_write_stays_ungated():
 
     for idx, args in enumerate(
         (
-            {"subcommand": "commit", "message": "wip"},
-            {"subcommand": "add", "paths": ["a.py"]},
-            {"subcommand": "checkout", "branch": "feature/x", "create": True},
+            {"command": "git commit -m wip"},
+            {"command": "git add a.py"},
+            {"command": "git checkout -b feature/x"},
         )
     ):
         denied = await _run_worker_gates(gate, sink, arguments=args, tool_call_id=f"w-{idx}")
@@ -189,7 +190,7 @@ async def test_always_confirm_without_gate_is_denied_not_pushed():
         denied = await _run_worker_gates(
             None,
             sink,
-            arguments={"subcommand": "push", "remote": "origin", "branch": "feature/x"},
+            arguments={"command": "git push origin feature/x"},
             tool_call_id="push-nogate",
         )
 
@@ -205,40 +206,35 @@ def test_cloud_worker_skip_never_covers_always_confirm():
     session = recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)
     file_ops = approval_class_tool_names()
 
-    for sub in ("push", "create_pr"):
+    for command in ("git push origin feature/x", "gh pr create --title feat"):
         assert (
             cloud_worker_skips_per_call_gate(
                 cloud,
-                "git",
-                arguments={"subcommand": sub},
+                "run",
+                arguments={"command": command},
                 permission_axes=session,
                 file_op_tools=file_ops,
             )
             is False
-        ), sub
+        ), command
 
-    for sub in ("status", "log", "commit", "add"):
+    for command in ("git status", "git log -1", "git commit -m wip", "git add a.py"):
         assert (
             cloud_worker_skips_per_call_gate(
                 cloud,
-                "git",
-                arguments={"subcommand": sub},
+                "run",
+                arguments={"command": command},
                 permission_axes=session,
                 file_op_tools=file_ops,
             )
             is True
-        ), sub
+        ), command
 
-    # 同桶的 host(action=install_package)（host_class，这里是第二道）。
     assert (
         cloud_worker_skips_per_call_gate(
             cloud,
             "host",
-            arguments={
-                "action": "install_package",
-                "manager": "winget",
-                "package": "git",
-            },
+            arguments={"command": "winget install Git.Git"},
             permission_axes=session,
             file_op_tools=file_ops,
         )
@@ -256,7 +252,7 @@ def test_resolve_worker_gate_hands_down_gate_regardless_of_roster():
     """
     gate = object()
     registry = ToolRegistry()
-    registry.register(GitTool())
+    registry.register(RunTool())
     tool = SimpleNamespace(
         _approval_gate=gate,
         _tools=registry,

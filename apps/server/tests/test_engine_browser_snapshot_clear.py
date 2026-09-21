@@ -197,8 +197,8 @@ def test_non_browser_and_console_untouched():
                 ToolCall(
                     id="f0",
                     function=ToolCallFunction(
-                        name="file_read",
-                        arguments=json.dumps({"path": "a.py"}),
+                        name="read",
+                        arguments=json.dumps({"file_path": "a.py"}),
                     ),
                 ),
             ],

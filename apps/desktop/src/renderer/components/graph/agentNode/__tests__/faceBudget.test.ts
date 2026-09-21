@@ -30,16 +30,15 @@ describe("buildFaceBadgeDescriptors", () => {
     ).toEqual([{ key: "escalation", bucket: "decision" }]);
   });
 
-  it("keeps a raised scope/dep escalation as a process notice, drops normal", () => {
+  it("keeps a raised scope/dep escalation as a process notice, drops wait", () => {
     expect(
       buildFaceBadgeDescriptors(
         signals({ escalationRaised: 1, escalationKind: "scope" }),
       ),
     ).toEqual([{ key: "escalation", bucket: "process" }]);
-    // normal raised escalation leaves no face badge (matches current render gate).
     expect(
       buildFaceBadgeDescriptors(
-        signals({ escalationRaised: 1, escalationKind: "normal" }),
+        signals({ escalationRaised: 1, escalationKind: "wait" }),
       ),
     ).toEqual([]);
   });

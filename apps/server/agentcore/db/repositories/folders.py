@@ -382,7 +382,7 @@ class FolderRepository:
         """Soft-delete a project; archive its conversations (keep ``folder_id``).
 
         Conversations are archived in place — not ungrouped — so project membership
-        survives soft-delete. Soft-pointers (boards, bare-chat auto desk) NULL out via
+        survives soft-delete. Soft-pointers (bare-chat auto desk) NULL out via
         :func:`clear_folder_session_pointers`; those are deliberately **not** restored
         (see :meth:`restore`).
 

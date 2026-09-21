@@ -89,8 +89,8 @@ class DebateTool:
         surface=ToolSurface.CEO_ORCHESTRATION,
         audience=AUDIENCE_CEO_ONLY,
         ceo_wire=CeoWire.ALWAYS,
-        resident=False,
         catalog_summary="开一场正反辩论",
+        blurb="正反两边对碰，再把结论收回来",
     )
 
     def __init__(
@@ -363,10 +363,6 @@ class DebateTool:
             EvidenceLedger,
             preregister_background,
         )
-        from agentcore.runtime.debate.research_dossier import (
-            format_research_dossier_index,
-            list_research_artifact_paths,
-        )
 
         try:
             from agentcore.runtime.suspension import turn_evidence_ledger as _turn_led
@@ -381,28 +377,6 @@ class DebateTool:
             config.background = preregister_background(
                 self._evidence_ledger, config.background
             )
-
-        # 幕1 约定文档：已有 #rN 则复用；无锚文件登记整文件一条。
-        try:
-            from agentcore.runtime.debate.research_dossier import (
-                preregister_research_dossier,
-            )
-
-            config.research_dossier_index = await preregister_research_dossier(
-                self._evidence_ledger, self._base_tool_context.backend
-            )
-        except Exception:
-            logger.exception("debate.research_dossier_index_failed")
-            config.research_dossier_index = ""
-            # 兜底一层：预登记失败时仍给路径索引（无台账映射）。
-            try:
-                paths = await list_research_artifact_paths(
-                    self._base_tool_context.backend
-                )
-                config.research_dossier_index = format_research_dossier_index(paths)
-            except Exception:
-                logger.exception("debate.research_dossier_probe_failed")
-                config.research_dossier_index = ""
 
         from agentcore.runtime.debate.host import host_graph_binding
 
@@ -592,21 +566,7 @@ class DebateTool:
                     payload=result_payload,
                 )
             )
-            # 双产物机制性落盘（约定文档 ``AgentCore/文档/debate/`` 一场一份）；失败不阻断收口，路径附 CEO 输出尾部。
-            from agentcore.runtime.debate.persist import (
-                artifact_stamp,
-                format_artifact_footer,
-                persist_debate_artifacts,
-            )
-
             ceo_output = result.to_ceo_output()
-            paths = await persist_debate_artifacts(
-                self._base_tool_context.backend,
-                result,
-                stamp=artifact_stamp(moderator_run_id),
-            )
-            if paths is not None:
-                ceo_output += format_artifact_footer(paths)
             logger.info("debate.done", rounds=len(result.rounds), stop=result.stop_reason)
             return ToolResult(
                 tool_call_id="",

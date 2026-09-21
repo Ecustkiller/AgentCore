@@ -51,8 +51,8 @@ REASON_TO_WARNING: dict[str, str] = {
 DEFAULT_TOKEN_WIND_DOWN_RESERVE = 200_000
 
 # 收尾窗口允许的工具（落盘 + handoff；调查/执行类一律剔除）
-# file_read 不在此基础集：仅交付类（钉路径 artifacts，工具面仍含
-# file_write）经 :func:`wind_down_allowed_tools` 叠加——回读自己产物属于写作，
+# read 不在此基础集：仅交付类（钉路径 artifacts，工具面仍含
+# write）经 :func:`wind_down_allowed_tools` 叠加——回读自己产物属于写作，
 # 不是继续调查；web_search / web_fetch / grep 等检索类不放回。
 # 交文件 delivery_idle 收窄已退役；本白名单仍可被显式构造的 idle narrow 复用。
 # md_export：把已成篇 .md 确定性导出为同目录同名 Word / PDF——用户要
@@ -61,15 +61,15 @@ DEFAULT_TOKEN_WIND_DOWN_RESERVE = 200_000
 WIND_DOWN_ALLOWED_TOOLS = frozenset(
     {
         "handoff",
-        "file_write",
-        "str_replace",
+        "write",
+        "edit",
         "file_batch",
         "file_list",
         "md_export",
     }
 )
 
-WIND_DOWN_FILE_READ = "file_read"
+WIND_DOWN_FILE_READ = "read"
 
 
 def wind_down_instruction_token() -> str:
@@ -116,22 +116,22 @@ def worker_keeps_file_read_in_wind_down(
     available: set[str],
     allowed: list[str] | None,
 ) -> bool:
-    """True for files-form / artifacts workers (live surface still offers file_write).
+    """True for files-form / artifacts workers (live surface still offers write).
 
-    Prose workers withhold ``file_write``; deliverable workers keep it — same heuristic
-    as finalize persist. ``file_read`` must also be registered / allowed to keep.
+    Prose workers withhold ``write``; deliverable workers keep it — same heuristic
+    as finalize persist. ``read`` must also be registered / allowed to keep.
     """
     if WIND_DOWN_FILE_READ not in available:
         return False
-    if "file_write" not in available:
+    if "write" not in available:
         return False
     if allowed is None:
         return True
-    return "file_write" in allowed and WIND_DOWN_FILE_READ in allowed
+    return "write" in allowed and WIND_DOWN_FILE_READ in allowed
 
 
 def wind_down_allowed_tools(*, keep_file_read: bool = False) -> frozenset[str]:
-    """Effective wind-down whitelist (optional file_read)."""
+    """Effective wind-down whitelist (optional ``read``)."""
     base: frozenset[str] = WIND_DOWN_ALLOWED_TOOLS
     if keep_file_read:
         base = base | {WIND_DOWN_FILE_READ}
@@ -178,7 +178,7 @@ def narrow_tools_for_wind_down_breach(
 
     Default = handoff-only (strip retrieval thrash). When the run still owes
     workspace landing (``keep_landing``), keep the wind_down write whitelist so
-    ``file_write`` / ``str_replace`` are not allowlist-denied mid-obligation.
+    ``write`` / ``edit`` are not allowlist-denied mid-obligation.
     """
     if keep_landing:
         return narrow_tools_for_wind_down(

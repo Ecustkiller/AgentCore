@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from dataclasses import dataclass
 from typing import Any
 
@@ -34,12 +36,12 @@ from agentcore.tools.registration import (
 from agentcore.tools.registry import ToolRegistry
 from agentcore.workspace.protocol import WorkspaceBackend
 
-from .prepare import PreparedTurn, _timed_phase
+from .prepare import PreparedTurn, _gather_cancel_on_fail, _timed_phase, list_consult_entries
 
 
 @dataclass
 class AssembledTurn:
-    """Phase-2 outputs: wired CEO tools + frozen system prompt + turn envelope."""
+    """Phase-2 outputs: wired CEO tools + frozen node-0 system + in-history extra + envelope."""
 
     approval_gate: ApprovalGate | None
     permission_axes: PermissionAxes
@@ -47,7 +49,9 @@ class AssembledTurn:
     debate_tool: Any
     chat_tools: ToolRegistry
     chat_system_prompt: str
+    chat_system_in_history: str
     chat_envelope: str
+    chat_tool_defs: list[dict[str, Any]]
 
 
 async def assemble_ceo_turn(
@@ -72,11 +76,78 @@ async def assemble_ceo_turn(
     x_client_platform: str | None,
 ) -> AssembledTurn:
     """Assemble the CEO coordinator toolset and the turn's chat system prompt."""
+    # File index is independent of coordinator wiring — start it immediately so a
+    # large desk listing overlaps the toolset / consult work instead of sitting
+    # on the first-token path after both finish.
+    overview_task = asyncio.create_task(
+        _timed_phase(
+            "workspace_overview",
+            build_workspace_overview(
+                backend,
+                shared_workspace=folder_id is not None,
+                conversation_id=conversation_id,
+                exclude_turn_id=message_id,
+            ),
+        )
+    )
+    await asyncio.sleep(0)
+    try:
+        return await _assemble_ceo_wired(
+            prepared=prepared,
+            conversation_id=conversation_id,
+            user_message=user_message,
+            history=history,
+            evidence_ledger=evidence_ledger,
+            sink=sink,
+            backend=backend,
+            folder_id=folder_id,
+            approvals_enabled=approvals_enabled,
+            permission_axes=permission_axes,
+            profiles=profiles,
+            captain_run_id=captain_run_id,
+            message_id=message_id,
+            session_saver=session_saver,
+            session_loader=session_loader,
+            suspension_saver=suspension_saver,
+            suspension_deleter=suspension_deleter,
+            x_client_platform=x_client_platform,
+            overview_task=overview_task,
+        )
+    except BaseException:
+        if not overview_task.done():
+            overview_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await overview_task
+        raise
+
+
+async def _assemble_ceo_wired(
+    *,
+    prepared: PreparedTurn,
+    conversation_id: str,
+    user_message: str,
+    history: list[dict],
+    evidence_ledger: EvidenceLedgerCore | None,
+    sink: EventSink,
+    backend: WorkspaceBackend,
+    folder_id: str | None,
+    approvals_enabled: bool,
+    permission_axes: PermissionAxes | None,
+    profiles: TurnProfiles,
+    captain_run_id: str,
+    message_id: str,
+    session_saver: SessionSaver | None,
+    session_loader: SessionLoader | None,
+    suspension_saver: SuspensionSaver | None,
+    suspension_deleter: SuspensionDeleter | None,
+    x_client_platform: str | None,
+    overview_task: asyncio.Task[str],
+) -> AssembledTurn:
     # The CEO owns the conversation and replies directly, but it is a
     # COORDINATOR: it carries only the read / retrieval built-ins
-    # (``build_ceo_tool_registry`` — web_search/web_fetch/file_read/file_list/
+    # (``build_ceo_tool_registry`` — web_search/web_fetch/read/file_list/
     # grep) plus the on-demand orchestration primitive ``delegate``. It holds
-    # NONE of the production / mutation tools (file_write/str_replace/
+    # NONE of the production / mutation tools (write/edit/
     # file_delete/file_batch/code_execute); any work that produces or changes an
     # artifact is handed to a worker. There is no mandatory pre-turn
     # orchestrator pass — the CEO itself decides when/at what granularity to
@@ -163,6 +234,7 @@ async def assemble_ceo_turn(
         # Same live-user gate as ask_user itself, plus desktop-only: web/mobile omit.
         advertise_bind_local_folder=checkpoint_enabled and channel.can_bind_folder,
         desktop_online=channel.desktop_online,
+        worker_envelope=prepared.worker_envelope,
     )
     from agentcore.runtime.resolve.prepare import _wire_conversation_log_tools
     from agentcore.tools.ceo_toolset import wire_ceo_consult
@@ -179,28 +251,23 @@ async def assemble_ceo_turn(
     )
 
     # The entry chat agent gets the SLIM CEO core + the unified ``<按需目录>``.
-    # Advanced HOW detail is pulled via ``consult``. Never open a write-explore
-    # act; ``update_folder_profile`` stays off the live table.
-    from agentcore.runtime.resolve.ceo_surface import apply_explore_profile_surface
-
-    apply_explore_profile_surface(chat_tools, pending=False)
+    # Advanced HOW detail is pulled via ``consult``.
     ceo_tool_names = {schema.name for schema in chat_tools.list_all()}
-    on_demand_entries: list = []
-    consult_tool = chat_tools.get_optional("consult")
-    if consult_tool is not None and getattr(consult_tool, "source", None) is not None:
-        on_demand_entries = list(
-            await consult_tool.source.list_directory(prepared.base_tool_context.user_id)
-        )
-    # CEO file index: untagged body spliced into ``<工作区>`` (not a second XML tag).
-    # Workers never receive this listing. Generated fresh each turn; "" omits the 文件节.
-    workspace_overview = await _timed_phase(
-        "workspace_overview",
-        build_workspace_overview(
-            backend,
-            shared_workspace=folder_id is not None,
-            conversation_id=conversation_id,
-            exclude_turn_id=message_id,
+    from agentcore.observability.session_llm_header import (
+        hydrate_session_header,
+        pin_chat_system,
+        pin_chat_tools,
+    )
+    from agentcore.runtime.engine.governance import resolve_openai_tool_defs
+
+    # CEO catalog, session header, and the already-running file index overlap.
+    on_demand_entries, _, workspace_overview = await _gather_cancel_on_fail(
+        _timed_phase(
+            "on_demand_dir",
+            list_consult_entries(chat_tools, prepared.base_tool_context.user_id),
         ),
+        hydrate_session_header(conversation_id),
+        overview_task,
     )
     chat_system_prompt = compose_ceo_chat_prompt(
         prepared.system_prompt,
@@ -208,6 +275,10 @@ async def assemble_ceo_turn(
         ceo_tool_names=ceo_tool_names,
         on_demand_entries=on_demand_entries,
     )
+    node0, in_history = pin_chat_system(conversation_id, chat_system_prompt)
+    chat_system_prompt = node0
+    live_tool_defs = resolve_openai_tool_defs(chat_tools, None, set()) or []
+    chat_tool_defs = pin_chat_tools(conversation_id, live_tool_defs)
     # 可用性诚实性 · 甲：偏窄短问 → 复用最近 delivery_status 发卡到本回合答复面。
     from agentcore.runtime.delegate.delivery_status import (
         maybe_reinject_recent_delivery_for_availability_ask,
@@ -237,7 +308,7 @@ async def assemble_ceo_turn(
     # ~10k 字符盲区）。纯 structlog，不改 SSE / API 契约。
     from agentcore.runtime.resolve.ceo_surface import observe_tools_offered
 
-    observe_tools_offered(chat_tools, scope="ceo_turn")
+    observe_tools_offered(chat_tools, scope="ceo_turn", tool_defs=chat_tool_defs)
 
     return AssembledTurn(
         approval_gate=approval_gate,
@@ -246,5 +317,7 @@ async def assemble_ceo_turn(
         debate_tool=debate_tool,
         chat_tools=chat_tools,
         chat_system_prompt=chat_system_prompt,
+        chat_system_in_history=in_history,
         chat_envelope=chat_envelope,
+        chat_tool_defs=chat_tool_defs,
     )

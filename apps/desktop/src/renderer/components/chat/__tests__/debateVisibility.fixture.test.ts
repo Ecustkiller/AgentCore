@@ -57,10 +57,9 @@ function toExecution(name: string): Execution {
       id: null,
       question: e.question,
       assumption: e.assumption,
-      blocking: e.blocking,
       status: e.status,
       answer: e.answer,
-      kind: e.kind ?? "normal",
+      kind: e.kind ?? "wait",
       questions: [],
       ...(e.awaiting === "ceo" ? { awaiting: "ceo" as const } : {}),
       ...(e.arbitrated_by === "ceo"

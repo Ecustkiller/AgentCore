@@ -43,6 +43,7 @@ async def get_capabilities(_user: AuthUser) -> CapabilitiesResponse:
             face=entry.schema.face,
             resident=entry.resident,
             summary=entry.summary,
+            blurb=entry.blurb,
             approval=entry.schema.approval,
             parameters=entry.schema.parameters,
             available_to=list(entry.available_to),

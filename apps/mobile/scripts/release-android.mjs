@@ -13,7 +13,7 @@
  *     this script refuses to ship an unsigned release APK
  *   - `gh auth login` with write access to Lawofall/AgentCore-releases
  *   - GH_TOKEN or `gh auth token` available
- *   - VITE_API_URL / AGENTCORE_APP_API_URL / AGENTCORE_APP_HOST (same as deploy-pages)
+ *   - VITE_API_URL / AGENTCORE_APP_API_URL / AGENTCORE_APP_HOST
  *
  * Tag track: `android-v<ver>` (separate from desktop `v<ver>`).
  * Asset: `AgentCore-<ver>-android.apk`

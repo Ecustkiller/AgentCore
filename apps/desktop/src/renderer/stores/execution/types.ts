@@ -85,9 +85,8 @@ export const TOOL_LABELS: Record<string, string> = {
   terminal: "Run terminal",
   test_run: "Run tests",
   git: "Git",
-  file_read: "Read file",
-  file_write: "Write file",
-  file_append: "Append file",
+  read: "Read file",
+  write: "Write file",
   file_list: "List dir",
   glob: "Glob",
   list_folders: "List folders",
@@ -95,7 +94,7 @@ export const TOOL_LABELS: Record<string, string> = {
   folders: "Folders",
   create_folder: "Create folder",
   delete_folder: "Delete folder",
-  str_replace: "Edit file",
+  edit: "Edit file",
   file_delete: "Delete file",
   file_move: "Move file",
   file_copy: "Copy file",
@@ -104,7 +103,6 @@ export const TOOL_LABELS: Record<string, string> = {
   md_to_docx: "Export Word",
   md_to_pdf: "Export PDF",
   md_export: "Export document",
-  download_url: "Download file",
   read_image: "Read image",
   code_diagnostics: "Check types",
   // CEO captain tools (surfaced by the bubble's tool_progress / process timeline).
@@ -248,35 +246,26 @@ export interface RunCheckpoint {
   decision: CheckpointDecision | null;
 }
 
-/** 升级实时可见 / 阻塞式求决策: one escalation a worker raised mid-run via `escalate` (its
- * only upward channel to the CEO). `question` is the self-contained ask; `assumption` is what
- * the worker proceeds on; `blocking` flags that a wrong guess would void its product. Folded
- * onto its {@link RunNode} so the node shows a ⚠️ badge and `EscalationCards` surfaces it on the
- * turn the moment it fires — a non-blocking `raised` as a passive notice, a `pending` as an
- * interactive 待你拍板 card — not after the CEO synthesizes.
+/** 升级：``escalate`` 工人向上通道。``kind`` = wait 停下等 / scope 活派偏了 / dep 缺材料。
+ * Folded onto its {@link RunNode}. Wait → ``pending`` 请你拍板；scope/dep → 协作图标记
+ * （工人继续干）；引擎早停走 ``source``，不是留言条。
  *
  * `status`: `raised` | `pending` | `resolved` | `assumed` | `timed_out`.
  * `assumed` = explicit 按假设继续; `timed_out` = wall-clock miss. Both leave answer null. */
-export type EscalationKind = "normal" | "scope" | "dep";
+export type EscalationKind = "wait" | "scope" | "dep";
 
 export interface RunEscalation {
-  /** Interaction / raised id (`escalation_id` on wire). Blocking cards POST to this id;
-   * raised banners use it as the timeline marker key (统一时间线二期 D6). `null` only for
-   * legacy frames that predate the field. Desktop-local — STRIPPED from the conformance
-   * `ProjectedTurn` (the golden never carries it). */
+  /** Interaction / raised id (`escalation_id` on wire). Wait cards POST to this id;
+   * raised banners use it as the timeline marker key. `null` only when the frame
+   * omitted it. Desktop-local — STRIPPED from the conformance `ProjectedTurn`. */
   id: string | null;
   question: string;
   assumption: string;
-  blocking: boolean;
   status: "raised" | "pending" | "resolved" | "assumed" | "timed_out";
   answer: string | null;
-  /** escalate kind（普通 / 缺输入 / 职责偏离）；旧流缺字段按 `normal`。 */
+  /** wait / scope / dep；早停帧可缺。 */
   kind: EscalationKind;
-  /** 结构化升级: the worker's optional structured forks (同 ask_user 的 questions) the
-   * `EscalationCard` renders as choice/text so the user one-taps a decision. Folded from a
-   * BLOCKING `escalation_required`; `[]` for a free-text ask or a non-blocking `raised` banner.
-   * Desktop-local — like {@link RunEscalation.id} it is NOT in the conformance ProjectedTurn
-   * (conformanceFold maps only the golden fields), so it never widens the cross-end contract. */
+  /** 结构化升级: wait 卡上的 questions。raised 为 `[]`。 */
   questions: AskQuestion[];
   /** 谁在仲裁：user=经典可答卡；ceo=协调模式等主管（初始不可答）。 */
   awaiting?: "user" | "ceo";
@@ -285,10 +274,9 @@ export interface RunEscalation {
   /** 仅 arbitrated_by=ceo：是否经 ask_user 转交用户。 */
   via_user?: boolean;
   /**
-   * 非阻塞 raised 的来源标记（wire `run_escalation.source`）。
-   * `validation_thrash` / `ceiling_backstop` → 卡住早停卡；缺省 / 其它 → 真·边干边上报。
-   * Desktop-local — 不进 conformance ProjectedTurn（conformanceFold 勿带出）。
-   * 旧流缺字段时按普通边干边上报。
+   * 早停 / 打转收口标记（wire `run_escalation.source`）。
+   * `validation_thrash` / `ceiling_backstop` → 卡住早停卡；缺省 = 协作图标记（scope/dep）。
+   * Desktop-local — 不进 conformance ProjectedTurn。
    */
   source?: string;
   /**
@@ -313,11 +301,11 @@ export interface RunNode {
   task: string;
   status: RunStatus;
   dependsOn: string[];
-  /** The worker's authored 结论 (`debrief.summary`) or "" — a scan line for the whiteboard
-   * card, NOT a truncation; null until `run_completed`. */
+  /** The worker's authored 结论 (`debrief.summary`) or "" — a scan line,
+   * NOT a truncation; null until `run_completed`. */
   outputSummary: string | null;
   /** Workspace file paths the worker wrote (`run_completed.output_files`); empty until
-   * completed. Drives whiteboard `file` artifact cards (WB-003). */
+   * completed. */
   outputFiles: string[];
   /** 完工交接简报 (run_completed): the worker's authored wrap-up — 结论 / 关键要点 / 关键假设 /
    * 建议下一步, each present only when written — rendered structured in the run-detail 摘要.

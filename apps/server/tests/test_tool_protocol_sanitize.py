@@ -238,7 +238,7 @@ async def test_execute_tools_file_write_miss_is_not_assembled():
     reg = ToolRegistry()
     tc = ToolCall(
         id="c1",
-        function=ToolCallFunction(name="file_write", arguments="{}"),
+        function=ToolCallFunction(name="write", arguments="{}"),
     )
     ctx = ToolContext.create(
         execution_id="e",
@@ -314,7 +314,7 @@ def test_parse_does_not_close_truncated_json():
     """截断 ≠ 尾部垃圾：值没写完就诚实失败，不许闭合后冒充成功。
 
     上一条（尾部多个 ``}``）丢掉的只是垃圾，值本身是完整的。截断相反：模型没发出来的内容
-    补不回来，闭合只是给缺失盖章——``file_write`` 会把半截正文落盘并配一张成功回执。
+    补不回来，闭合只是给缺失盖章——``write`` 会把半截正文落盘并配一张成功回执。
     诚实失败那条路的模型面本来就教「缩短单次参数 / 拆成多次调用」。
     """
     from agentcore.runtime.engine.tool_protocol_sanitize import parse_tool_call_arguments
@@ -322,7 +322,7 @@ def test_parse_does_not_close_truncated_json():
     with pytest.raises(json.JSONDecodeError):
         parse_tool_call_arguments('{"query":"半截搜索词', tool_name="web_search")
     with pytest.raises(json.JSONDecodeError):
-        parse_tool_call_arguments('{"path":"a.md","content":"半截正文', tool_name="file_write")
+        parse_tool_call_arguments('{"file_path":"a.md","content":"半截正文', tool_name="write")
 
 
 def test_parse_unrepairable_raises():

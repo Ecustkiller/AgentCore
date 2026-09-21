@@ -14,11 +14,11 @@ from agentcore.tools.file_products import file_product, render_file_products_mar
 
 
 def test_ignores_reads_and_failures():
-    assert edits_from_tool_call(name="file_read", arguments='{"path":"a.md"}') == []
+    assert edits_from_tool_call(name="read", arguments='{"file_path":"a.md"}') == []
     assert (
         edits_from_tool_call(
-            name="file_write",
-            arguments='{"path":"a.md"}',
+            name="write",
+            arguments='{"file_path":"a.md"}',
             success=False,
         )
         == []
@@ -27,10 +27,10 @@ def test_ignores_reads_and_failures():
 
 def test_write_append_replace_delete_labels():
     assert edits_from_tool_call(
-        name="file_write", arguments='{"path":"稿.md"}'
+        name="write", arguments='{"file_path":"稿.md"}'
     ) == [ConversationEdit(path="稿.md", label="写过")]
     assert edits_from_tool_call(
-        name="str_replace", arguments='{"path":"稿.md"}'
+        name="edit", arguments='{"file_path":"稿.md"}'
     ) == [ConversationEdit(path="稿.md", label="更新")]
     assert edits_from_tool_call(
         name="file_delete", arguments='{"path":"稿.md"}'
@@ -113,15 +113,15 @@ def test_merge_last_write_wins_newest_first_capped():
         [
             {
                 "kind": FactKind.TOOL_CALL.value,
-                "payload": {"name": "file_write", "arguments": '{"path":"a.md"}'},
+                "payload": {"name": "write", "arguments": '{"file_path":"a.md"}'},
             },
             {
                 "kind": FactKind.TOOL_CALL.value,
-                "payload": {"name": "str_replace", "arguments": '{"path":"a.md"}'},
+                "payload": {"name": "edit", "arguments": '{"file_path":"a.md"}'},
             },
             {
                 "kind": FactKind.TOOL_CALL.value,
-                "payload": {"name": "file_write", "arguments": '{"path":"b.md"}'},
+                "payload": {"name": "write", "arguments": '{"file_path":"b.md"}'},
             },
         ]
     )

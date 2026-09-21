@@ -19,7 +19,7 @@ async def _seed_audit_rows(session_factory, *, user_id: str, conversation_id: st
             {"id": "w1", "role": "研究员", "task": "调研"},
             {"id": "w2", "role": "写手", "task": "撰写", "depends_on": ["w1"]},
         ],
-        valid_tools={"file_write"},
+        valid_tools={"write"},
         id_prefix="audit_p2",
     )
     assert not errors
@@ -65,8 +65,8 @@ async def _seed_audit_rows(session_factory, *, user_id: str, conversation_id: st
                 "kind": "tool_use_start",
                 "payload": {
                     "tool_call_id": "tc-fw",
-                    "tool_name": "file_write",
-                    "arguments": {"path": "out/report.md"},
+                    "tool_name": "write",
+                    "arguments": {"file_path": "out/report.md"},
                     "run_id": plan.nodes[0].run_id,
                 },
             }
@@ -76,7 +76,7 @@ async def _seed_audit_rows(session_factory, *, user_id: str, conversation_id: st
                 "kind": "tool_use_end",
                 "payload": {
                     "tool_call_id": "tc-fw",
-                    "tool_name": "file_write",
+                    "tool_name": "write",
                     "status": "success",
                     "run_id": plan.nodes[0].run_id,
                 },

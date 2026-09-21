@@ -1,9 +1,8 @@
-"""``git`` assembles only where the workspace can actually run git.
+"""Git is not a model tool. ``run`` / ``host`` carry the commands.
 
-Cloud ``ServerWorkspace`` and the sidecar spawn ``git`` under ``backend.root``; a
-rootless ``LocalWorkspace`` has only ``WorkspaceOp.GIT_RUN`` over the desktop channel,
-so a desktop-offline session must not carry the tool at all (and the capability line
-must say so, the same way the gVisor-less path reports ``code_execute=未装配``).
+``git_execution_enabled_for`` still answers whether this workspace can exec git,
+which the ``<工作区>`` fact line uses. The factory table and the 缺口 do not
+name a ``git`` tool.
 """
 
 from __future__ import annotations
@@ -24,7 +23,7 @@ from agentcore.tools.builtin.git_ops.binary_health import (
     set_git_binary_health_for_tests,
 )
 from agentcore.tools.catalog import build_capability_catalog
-from agentcore.tools.registration import declared_tool_name, declared_tools, tool_registration
+from agentcore.tools.registration import declared_tool_name, declared_tools
 
 
 def _gaps(ctx: str) -> set[str]:
@@ -61,16 +60,13 @@ def _rooted_backend(tmp_path: Path, *, location: str) -> object:
     return ServerWorkspace(root=root, sandbox=SubprocessSandbox(), location=location)
 
 
-def test_git_tool_declares_git_class():
-    reg = {
-        declared_tool_name(cls): tool_registration(cls) for cls in declared_tools()
-    }["git"]
-    assert reg.git_class is True
-    # Orthogonal to the execution / host / browser faces — git is not sandbox-gated.
-    assert not reg.execution_class
-    assert not reg.host_class
-    assert not reg.desktop_online_class
-    assert not reg.browser_class
+def test_git_is_not_a_model_tool():
+    names = {declared_tool_name(cls) for cls in declared_tools()}
+    assert "git" not in names
+    assert "git" not in build_builtin_registry().names
+    assert "git" not in build_worker_registry().names
+    assert "git" not in build_ceo_tool_registry().names
+    assert "git" not in {entry.schema.name for entry in build_capability_catalog()}
 
 
 def test_predicate_cloud_and_sidecar_always_enabled(tmp_path):
@@ -93,55 +89,9 @@ def test_predicate_no_backend_keeps_tool_listed():
     assert git_execution_enabled_for(None) is True
 
 
-def test_worker_registry_drops_git_when_desktop_offline():
-    backend = _ChannelLocalBackend()
-    offline = build_worker_registry(backend=backend, desktop_online=False).names
-    assert "git" not in offline
-    # Withholding git must not disturb the rest of the local roster.
-    assert "file_write" in offline
-    assert "file_read" in offline
-
-    online = build_worker_registry(backend=backend, desktop_online=True).names
-    assert "git" in online
-
-
-def test_worker_registry_keeps_git_for_cloud_and_sidecar(tmp_path):
-    for location in ("server", "local"):
-        backend = _rooted_backend(tmp_path, location=location)
-        names = build_worker_registry(backend=backend, desktop_online=False).names
-        assert "git" in names, location
-
-
-def test_ceo_registry_follows_include_git():
-    assert "git" in build_ceo_tool_registry().names
-    assert "git" not in build_ceo_tool_registry(include_git=False).names
-
-
-def test_ceo_toolset_mirrors_worker_verdict():
-    """``_assemble_ceo_toolset`` derives ``include_git`` from the worker roster."""
-    backend = _ChannelLocalBackend()
-    worker = build_worker_registry(backend=backend, desktop_online=False)
-    ceo = build_ceo_tool_registry(
-        desktop_online=False,
-        backend_location="local",
-        include_git="git" in worker.names,
-    )
-    assert "git" not in ceo.names
-
-
-def test_builtin_registry_include_git_flag():
-    assert "git" in build_builtin_registry().names
-    assert "git" not in build_builtin_registry(include_git=False).names
-
-
-def test_capability_catalog_still_advertises_git():
-    """能力图鉴 lists git like Host tools — runtime assembly is the per-turn gate."""
-    assert "git" in {entry.schema.name for entry in build_capability_catalog()}
-
-
 def test_capability_line_git_unassembled_when_desktop_offline():
     out = build_workspace_context(_ChannelLocalBackend(), desktop_online=False)
-    assert "git" in _gaps(out)
+    assert "git" not in _gaps(out)
     assert "Git：" not in out
     assert "装配启用" not in out
     assert "在桌面客户端打开【本对话】" not in out
@@ -170,8 +120,7 @@ def test_capability_line_git_assembled_for_cloud_and_sidecar(tmp_path):
         assert "git" not in _gaps(out), location
 
 
-def test_capability_line_matches_registry_across_environments(tmp_path):
-    """能力行与 registry 同一谓词（对齐 case 20260803 的执行类口径）。"""
+def test_gaps_never_name_a_git_tool(tmp_path):
     cases = [
         (_ChannelLocalBackend(), False),
         (_ChannelLocalBackend(), True),
@@ -179,11 +128,11 @@ def test_capability_line_matches_registry_across_environments(tmp_path):
         (_rooted_backend(tmp_path, location="local"), False),
     ]
     for backend, desktop_online in cases:
-        assembled = "git" in build_worker_registry(
+        assert "git" not in build_worker_registry(
             backend=backend, desktop_online=desktop_online
         ).names
         out = build_workspace_context(backend, desktop_online=desktop_online)
-        assert ("git" not in _gaps(out)) is assembled, (backend.location, desktop_online)
+        assert "git" not in _gaps(out), (backend.location, desktop_online)
 
 
 # ---- binary axis: the in-process transport also needs a real ``git`` on PATH ----
@@ -198,7 +147,7 @@ def test_missing_binary_withholds_git_from_rooted_workspaces(tmp_path):
         names = build_worker_registry(backend=backend, desktop_online=True).names
         assert "git" not in names, location
         # Withholding git must not disturb the rest of the roster.
-        assert "file_read" in names, location
+        assert "read" in names, location
 
 
 def test_missing_binary_never_touches_the_channel_transport():
@@ -210,7 +159,7 @@ def test_missing_binary_never_touches_the_channel_transport():
     set_git_binary_health_for_tests(False, failure=("not_found", "no git"))
     backend = _ChannelLocalBackend()
     assert git_execution_enabled_for(backend, desktop_online=True) is True
-    assert "git" in build_worker_registry(backend=backend, desktop_online=True).names
+    assert "git" not in build_worker_registry(backend=backend, desktop_online=True).names
     assert "git" not in _gaps(build_workspace_context(backend, desktop_online=True))
 
 
@@ -218,14 +167,14 @@ def test_missing_binary_keeps_catalog_listing():
     """能力图鉴 is environment-free — a dead binary must not erase the entry."""
     set_git_binary_health_for_tests(False, failure=("not_found", "no git"))
     assert git_execution_enabled_for(None) is True
-    assert "git" in {entry.schema.name for entry in build_capability_catalog()}
+    assert "git" not in {entry.schema.name for entry in build_capability_catalog()}
 
 
 def test_healthy_binary_keeps_rooted_workspaces_assembled(tmp_path):
     set_git_binary_health_for_tests(True)
     backend = _rooted_backend(tmp_path, location="server")
     assert git_execution_enabled_for(backend, desktop_online=False) is True
-    assert "git" in build_worker_registry(backend=backend, desktop_online=False).names
+    assert "git" not in build_worker_registry(backend=backend, desktop_online=False).names
 
 
 def test_capability_line_matches_registry_when_binary_missing(tmp_path):
@@ -235,4 +184,4 @@ def test_capability_line_matches_registry_when_binary_missing(tmp_path):
     assembled = "git" in build_worker_registry(backend=backend, desktop_online=False).names
     out = build_workspace_context(backend, desktop_online=False)
     assert assembled is False
-    assert "git" in _gaps(out)
+    assert "git" not in _gaps(out)

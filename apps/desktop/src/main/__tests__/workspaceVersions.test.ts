@@ -212,12 +212,12 @@ describe("workspace named versions (list / delete)", () => {
       "一",
       "2026-01-01T00:00:00+00:00",
     );
-    await mkdir(join(dir, "AgentCore", "规则"), { recursive: true });
+    await mkdir(join(dir, "AgentCore", "rules"), { recursive: true });
 
     const listed = await listDir(root.id, "AgentCore");
     expect(listed.ok).toBe(true);
     if (!listed.ok) return;
     expect(listed.data.map((e) => e.name)).not.toContain("versions");
-    expect(listed.data.map((e) => e.name)).toContain("规则");
+    expect(listed.data.map((e) => e.name)).toContain("rules");
   });
 });

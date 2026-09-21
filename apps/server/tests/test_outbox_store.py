@@ -97,6 +97,46 @@ def test_progressive_begin_journal_finalize(tmp_path):
     assert body["duration_ms"] == 12_000
 
 
+def test_finalize_forwards_usage_settle_snapshot(tmp_path):
+    store = OutboxStore(tmp_path / "outbox")
+    store.bind_turn(
+        conversation_id="c1",
+        user_message_id="u1",
+        user_message="hello",
+        message_id="m1",
+        trace_id="a" * 32,
+    )
+
+    async def run() -> dict:
+        await store.begin_turn(conversation_id="c1", message_id="m1", trace_id="a" * 32)
+        await store.finalize(
+            mode="local",
+            conversation_id="c1",
+            user_message="hello",
+            user_message_id="u1",
+            assistant_content="Hello world",
+            message_id="m1",
+            trace_id="a" * 32,
+            finish_reason="stop",
+            prompt_tokens=120_000,
+            collab={"boundary_yields": 1},
+            outcome="ok",
+            error_code="llm_error",
+            evidence_ledger=[{"id": "e1"}],
+        )
+        return json.loads((tmp_path / "outbox" / "u1.json").read_text(encoding="utf-8"))
+
+    record = _drive(run())
+    assert record["prompt_tokens"] == 120_000
+    assert record["collab"] == {"boundary_yields": 1}
+    body = to_record_turn_body(record)
+    assert body["prompt_tokens"] == 120_000
+    assert body["collab"] == {"boundary_yields": 1}
+    assert body["outcome"] == "ok"
+    assert body["error_code"] == "llm_error"
+    assert body["evidence_ledger"] == [{"id": "e1"}]
+
+
 def test_finalize_complete_overrides_longer_partial(tmp_path):
     """Happy-path finalize may replace a longer mid-stream draft body."""
     store = OutboxStore(tmp_path / "outbox")

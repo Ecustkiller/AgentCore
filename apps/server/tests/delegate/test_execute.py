@@ -664,17 +664,13 @@ def test_schema_omits_retired_completion_criteria():
 
 
 def test_ceo_deliverable_schema_is_artifacts_only():
-    """CEO 填参面只见 artifacts。"""
+    """CEO 填参面只见顶层 artifacts，不套 deliverable 对象。"""
     t = tool(Provider([]))
-    deliverable_props = t.schema.parameters["properties"]["tasks"]["items"]["properties"][
-        "deliverable"
-    ]
-    props = deliverable_props["properties"]
-    assert set(props) == {"artifacts"}
-    assert (
-        "用户点名" in deliverable_props["description"]
-        or "流水线" in deliverable_props["description"]
-    )
+    task_props = t.schema.parameters["properties"]["tasks"]["items"]["properties"]
+    assert "deliverable" not in task_props
+    artifacts = task_props["artifacts"]
+    assert artifacts["type"] == "array"
+    assert artifacts["description"] == "可选路径；省略不催写盘。"
 
 
 def test_nested_delegate_description_switches_at_depth():

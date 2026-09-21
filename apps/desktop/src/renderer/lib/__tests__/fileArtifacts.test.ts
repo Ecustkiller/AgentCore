@@ -30,10 +30,10 @@ function toolStep(
 }
 
 describe("fileArtifacts change previews (A1)", () => {
-  it("str_replace carries edit preview", () => {
+  it("edit carries edit preview", () => {
     const arts = fileArtifactsFromProcess([
-      toolStep("str_replace", {
-        path: "src/a.ts",
+      toolStep("edit", {
+        file_path: "src/a.ts",
         old_string: "const x = 1",
         new_string: "const x = 2",
       }),
@@ -47,39 +47,23 @@ describe("fileArtifacts change previews (A1)", () => {
     expect(hasChangePreviews(arts)).toBe(true);
   });
 
-  it("file_write / file_append carry write preview", () => {
+  it("write carries write preview", () => {
     const write = fileArtifactsFromProcess([
-      toolStep("file_write", { path: "a.md", content: "hello" }),
+      toolStep("write", { file_path: "a.md", content: "hello" }),
     ]);
     expect(write[0].change).toEqual({
       kind: "write",
       content: "hello",
       mode: "overwrite",
     });
-    const append = fileArtifactsFromProcess([
-      toolStep("file_append", { path: "a.md", content: "\nmore" }),
-    ]);
-    expect(append[0].change).toEqual({
-      kind: "write",
-      content: "\nmore",
-      mode: "append",
-    });
   });
 
-  it("file_delete / file_move carry meta preview", () => {
+  it("file_delete carries delete preview", () => {
     const arts = fileArtifactsFromProcess([
       toolStep("file_delete", { path: "gone.ts" }),
-      toolStep("file_move", {
-        source: "old.ts",
-        destination: "new.ts",
-      }),
     ]);
     expect(arts.find((a) => a.path === "gone.ts")?.change).toEqual({
       kind: "delete",
-    });
-    expect(arts.find((a) => a.path === "new.ts")?.change).toEqual({
-      kind: "move",
-      fromPath: "old.ts",
     });
   });
 
@@ -106,9 +90,9 @@ describe("fileArtifacts change previews (A1)", () => {
   it("mergeArtifacts keeps last op per path", () => {
     expect(
       fileArtifactsFromProcess([
-        toolStep("file_write", { path: "a.ts", content: "1" }),
-        toolStep("str_replace", {
-          path: "a.ts",
+        toolStep("write", { file_path: "a.ts", content: "1" }),
+        toolStep("edit", {
+          file_path: "a.ts",
           old_string: "1",
           new_string: "2",
         }),
@@ -123,7 +107,7 @@ describe("fileArtifacts change previews (A1)", () => {
 
   it("failed tool steps are skipped", () => {
     const arts = fileArtifactsFromProcess([
-      toolStep("file_write", { path: "a.md", content: "x" }, "error"),
+      toolStep("write", { file_path: "a.md", content: "x" }, "error"),
     ]);
     expect(arts).toHaveLength(0);
   });
@@ -138,10 +122,10 @@ describe("fileArtifacts change previews (A1)", () => {
   it("mergeArtifacts flattens sources", () => {
     const arts = mergeArtifacts(
       fileArtifactsFromProcess([
-        toolStep("file_write", { path: "a.md", content: "a" }),
+        toolStep("write", { file_path: "a.md", content: "a" }),
       ]),
       fileArtifactsFromProcess([
-        toolStep("file_write", { path: "b.md", content: "b" }),
+        toolStep("write", { file_path: "b.md", content: "b" }),
       ]),
     );
     expect(arts.map((a) => a.path).sort()).toEqual(["a.md", "b.md"]);

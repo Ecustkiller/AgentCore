@@ -14,10 +14,6 @@ from agentcore.runtime.context.artifact_formats import (
 from agentcore.runtime.context.assembler import ContextAssembler, assembly_hash
 from agentcore.runtime.context.consultable import Consultable, ConsultDirectoryEntry
 from agentcore.runtime.context.contributor import PromptContributor, SectionOrder
-from agentcore.runtime.context.outlet_inventory import (
-    OutletDirListing,
-    collect_outlet_inventory,
-)
 from agentcore.runtime.context.workspace_context import (
     ChannelProfile,
     WorkspaceGitFact,
@@ -40,11 +36,9 @@ __all__ = [
     "ContextAssembler",
     "PromptContributor",
     "SectionOrder",
-    "OutletDirListing",
     "WorkspaceGitFact",
     "assembly_hash",
     "build_artifact_format_line",
-    "collect_outlet_inventory",
     "build_workspace_context",
     "format_artifact_capability_line",
     "attach_workspace_file_index",

@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-import httpx
 import pytest
 
 from agentcore.tools.builtin.file_ops import FileReadTool, FileWriteTool
@@ -13,8 +12,6 @@ from agentcore.tools.builtin.file_ops.errors import (
     _outside_workspace_msg,
 )
 from agentcore.tools.builtin.grep import GrepTool
-from agentcore.tools.builtin.web import download_url as download_mod
-from agentcore.tools.builtin.web.download_url import DownloadUrlTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace import external_mounts as em
@@ -97,7 +94,7 @@ async def test_write_organize_mount_rejects_with_real_reason(tmp_path: Path):
     ws.mkdir()
     ext.mkdir()
     result = await FileWriteTool().execute(
-        {"path": "external/AgentCode/out/report.md", "content": "leak"},
+        {"file_path": "external/AgentCode/out/report.md", "content": "leak"},
         _ctx_organize(ws, ext),
     )
     assert result.success is False
@@ -107,36 +104,6 @@ async def test_write_organize_mount_rejects_with_real_reason(tmp_path: Path):
     assert "write" in err
     assert not (ext / "out" / "report.md").exists()
     assert not (ws / "out" / "report.md").exists()
-
-
-async def test_download_url_organize_mount_rejects_with_real_reason(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    ws = tmp_path / "ws"
-    ext = tmp_path / "AgentCode"
-    ws.mkdir()
-    ext.mkdir()
-
-    async def _fake_safe_request(client, method, url, **kwargs):  # noqa: ANN001
-        return httpx.Response(
-            200,
-            content=b"leak",
-            headers={"content-type": "application/octet-stream", "content-length": "4"},
-            request=httpx.Request("GET", url),
-        )
-
-    monkeypatch.setattr(download_mod, "_safe_request", _fake_safe_request)
-    result = await DownloadUrlTool().execute(
-        {
-            "url": "https://example.com/file.bin",
-            "path": "external/AgentCode/out/file.bin",
-        },
-        _ctx_organize(ws, ext),
-    )
-    assert result.success is False
-    _assert_organize_policy(result.error or "")
-    assert not (ext / "out" / "file.bin").exists()
-    assert not (ws / "out" / "file.bin").exists()
 
 
 async def test_file_read_organize_root_surfaces_policy(
@@ -154,7 +121,7 @@ async def test_file_read_organize_root_surfaces_policy(
         raise OutsideWorkspace(organize_deny_error(path, "write"))
 
     monkeypatch.setattr(ctx.backend, "read_lines", _deny)
-    result = await FileReadTool().execute({"path": root}, ctx)
+    result = await FileReadTool().execute({"file_path": root}, ctx)
     assert result.success is False
     _assert_organize_policy(result.error or "")
 

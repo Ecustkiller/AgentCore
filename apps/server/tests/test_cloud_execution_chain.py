@@ -178,7 +178,7 @@ def test_cloud_unprobed_keeps_config_only_semantics(
 def test_server_tool_description_declares_libs_and_write_back():
     desc = RunTool(location="server").schema.description
     assert "云桌" in desc  # 与 test_tools_catalog 的措辞契约保持一致
-    assert "HOW→consult(run)" in desc
+    assert "HOW→consult(run)" not in desc
     libs = format_cloud_python_libs()
     assert "python-pptx" in libs
     assert libs not in desc

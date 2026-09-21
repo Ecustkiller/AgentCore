@@ -99,13 +99,13 @@ def test_release_only_affects_the_owner():
 async def test_concurrent_sibling_write_is_allowed(tmp_path: Path):
     coordinator = WriteCoordinator()
     a = await FileWriteTool().execute(
-        {"path": "report.md", "content": "from-A"},
+        {"file_path": "report.md", "content": "from-A"},
         _ctx(tmp_path, run_id="a", coordinator=coordinator),
     )
     assert a.success is True
 
     b = await FileWriteTool().execute(
-        {"path": "report.md", "content": "from-B"},
+        {"file_path": "report.md", "content": "from-B"},
         _ctx(tmp_path, run_id="b", coordinator=coordinator),
     )
     assert b.success is True
@@ -115,12 +115,12 @@ async def test_concurrent_sibling_write_is_allowed(tmp_path: Path):
 async def test_dependency_overwrite_is_allowed(tmp_path: Path):
     coordinator = WriteCoordinator()
     await FileWriteTool().execute(
-        {"path": "report.md", "content": "draft"},
+        {"file_path": "report.md", "content": "draft"},
         _ctx(tmp_path, run_id="up", coordinator=coordinator),
     )
     # downstream depends on "up" → may consolidate (overwrite) its file.
     d = await FileWriteTool().execute(
-        {"path": "report.md", "content": "final"},
+        {"file_path": "report.md", "content": "final"},
         _ctx(tmp_path, run_id="down", coordinator=coordinator, ancestors=frozenset({"up"})),
     )
     assert d.success is True
@@ -157,7 +157,7 @@ async def test_stale_file_write_is_contract_failure(tmp_path: Path):
         write_coordinator=WriteCoordinator(),
     )
     w = await FileWriteTool().execute(
-        {"path": "report.md", "content": "from-B"},
+        {"file_path": "report.md", "content": "from-B"},
         ctx,
     )
     assert w.success is False
@@ -202,8 +202,8 @@ async def test_stale_write_does_not_trip_run_circuit_breaker(tmp_path: Path):
         tc = ToolCall(
             id="c",
             function=ToolCallFunction(
-                name="file_write",
-                arguments=json.dumps({"path": "report.md", "content": "from-B"}),
+                name="write",
+                arguments=json.dumps({"file_path": "report.md", "content": "from-B"}),
             ),
         )
         _msgs, _terminal, attempts = await execute_tools(
@@ -218,7 +218,7 @@ async def test_stale_write_does_not_trip_run_circuit_breaker(tmp_path: Path):
         assert attempts[0].contract_failure is True
         controller.record(attempts)
 
-    assert controller.tool_failure_count("file_write") == 0
+    assert controller.tool_failure_count("write") == 0
     cb = controller.tool_circuit_breaker()
     assert cb.disabled == ()
     assert cb.warned == ()
@@ -227,20 +227,20 @@ async def test_stale_write_does_not_trip_run_circuit_breaker(tmp_path: Path):
 
 
 async def test_no_coordinator_means_no_guard(tmp_path: Path):
-    # The CEO / tests path: without a coordinator, file_write is unguarded (two writes
+    # The CEO / tests path: without a coordinator, write is unguarded (two writes
     # to the same path just overwrite, last-writer-wins — the pre-existing behaviour).
     first = await FileWriteTool().execute(
-        {"path": "report.md", "content": "one"}, _ctx(tmp_path, run_id="a")
+        {"file_path": "report.md", "content": "one"}, _ctx(tmp_path, run_id="a")
     )
     second = await FileWriteTool().execute(
-        {"path": "report.md", "content": "two"}, _ctx(tmp_path, run_id="b")
+        {"file_path": "report.md", "content": "two"}, _ctx(tmp_path, run_id="b")
     )
     assert first.success is True
     assert second.success is True
     assert (tmp_path / "report.md").read_text(encoding="utf-8") == "two"
 
 
-# --- C3: str_replace / declare / transfer ---
+# --- C3: edit / declare / transfer ---
 
 
 async def test_str_replace_allows_other_run(tmp_path: Path):
@@ -248,11 +248,11 @@ async def test_str_replace_allows_other_run(tmp_path: Path):
 
     coordinator = WriteCoordinator()
     await FileWriteTool().execute(
-        {"path": "App.tsx", "content": "from-integration"},
+        {"file_path": "App.tsx", "content": "from-integration"},
         _ctx(tmp_path, run_id="integration", coordinator=coordinator),
     )
     r = await StrReplaceTool().execute(
-        {"path": "App.tsx", "old_string": "from-integration", "new_string": "hijack"},
+        {"file_path": "App.tsx", "old_string": "from-integration", "new_string": "hijack"},
         _ctx(tmp_path, run_id="frontend", coordinator=coordinator),
     )
     assert r.success is True

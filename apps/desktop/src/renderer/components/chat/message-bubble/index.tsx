@@ -44,8 +44,8 @@ export const MessageBubble = memo(function MessageBubble({
   if (isExecutionHarvestMessage(message)) {
     return null;
   }
-  // 空停止整泡不渲染的唯一列表入口（仲裁器 hideEmptyBubble）。气泡内部不再叠
-  // isUserStopped / 正文挡板；协作图 StatusStrip 仍可画「已停止」。
+  // 空壳整泡不渲染的唯一列表入口（仲裁器 hideEmptyBubble：空停止，以及没有团队图的空失败）。
+  // 气泡内部不再叠 isUserStopped / 正文挡板；协作图 StatusStrip 仍可画「已停止」。
   // 本轮还在写时按直播尾处理，不能只看 message.isStreaming（hydrate settle
   // 可能先把占位转成空壳）。
   if (

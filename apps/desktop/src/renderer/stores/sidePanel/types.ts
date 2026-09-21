@@ -172,7 +172,7 @@ export interface TerminalDetailTab {
 }
 
 /** File tab source channel — entries vs workspace disk. */
-export type FileTabChannel = "memory" | "document";
+export type FileTabChannel = "document";
 
 /** Top-bar File content tab — path reference only; body keep-alives FileDetail. */
 export interface FileDetailTab {
@@ -188,7 +188,7 @@ export interface FileDetailTab {
    */
   workspaceId?: string;
   /**
-   * 条目通道（记忆 / 文档源）。缺省 = 工作区盘（{@link SidePanelState.showFile}）。
+   * 条目通道（文档源）。缺省 = 工作区盘（{@link SidePanelState.showFile}）。
    * 带通道时身份与盘上同路径分 tab。
    */
   channel?: FileTabChannel;
@@ -275,7 +275,7 @@ export const fileTabId = (
   return workspaceId ? `file:${workspaceId}:${path}` : `file:${path}`;
 };
 
-/** Build a File content tab for a memory / document entry (右坞工作区设定轨). */
+/** Build a File content tab for a document entry (右坞工作区设定轨). */
 export function entryFileTab(target: {
   channel: FileTabChannel;
   path: string;

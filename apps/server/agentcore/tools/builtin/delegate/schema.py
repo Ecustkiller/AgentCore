@@ -17,19 +17,14 @@ HANDWRITTEN_TASKS_SKELETON = _empty_tasks.HANDWRITTEN_TASKS_SKELETON
 is_empty_delegate_error = _empty_tasks.is_empty_delegate_error
 
 
-# Shared task-level deliverable shape (delegate tasks + replan add).
-# CEO / replan fill-in: optional artifact paths only. Write-vs-chat is task
+# Shared task-level artifacts (delegate tasks + replan add).
+# CEO / replan fill-in: optional paths only. Write-vs-chat is task
 # acceptance + the model; the engine only recognizes pinned paths.
-TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
-    "type": "object",
-    "description": "可选。用户点名或流水线写死才填 artifacts；省略=不催写盘。",
-    "properties": {
-        "artifacts": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "路径列表。",
-        },
-    },
+# Leftover nested ``deliverable`` still parses; not advertised.
+TASK_ARTIFACTS_SCHEMA: dict[str, object] = {
+    "type": "array",
+    "items": {"type": "string"},
+    "description": "可选路径；省略不催写盘。",
 }
 
 # Shared when-to-use（根 / 嵌套同一条信息判据操作形；场面表不进按钮）。
@@ -50,7 +45,7 @@ DELEGATE_STAFF_HOW = (
     "点名对比 N 个对象 → 至少 N 人。"
 )
 # 开局会注入用户原话 / 前置结果 / 并行队友任务；task 只写这一人的增量。
-# 骨架已写「目标+边界+验收」；不钉「已确认约束：」行格式（引擎不解析）。
+# 拒收回执抄本已写「目标+边界+验收」；不钉「已确认约束：」行格式（引擎不解析）。
 TASK_WINDOW_HOW = (
     "用户原话、前置结果、并行队友任务由引擎注入 ≠ 再抄进 task。"
     "≠逐步改法、章节骨架。"
@@ -58,7 +53,6 @@ TASK_WINDOW_HOW = (
 TASK_FILL_HOW = (
     "已拍板约束写进 task；没有写无；未拍板标假设 ≠ 改法/现状当约束。"
     "点名路径用工作区相对正斜杠。"
-    "验收=了解到什么算够 ≠ 范围内每处都查；公开渠道没有=完成。"
 )
 NESTED_STAFF_HOW = "收工后由你整合交差。"
 
@@ -82,10 +76,7 @@ DELEGATE_PARAMETERS = {
     "properties": {
         "tasks": {
             "type": "array",
-            "description": (
-                f"默认主路（≤{MAX_DELEGATION_TASKS}）。"
-                f"顶层非空数组可抄：{HANDWRITTEN_TASKS_SKELETON}（deliverable 可选）。"
-            ),
+            "description": f"≤{MAX_DELEGATION_TASKS}。",
             "items": {
                 "type": "object",
                 "properties": {
@@ -94,10 +85,10 @@ DELEGATE_PARAMETERS = {
                         "type": "string",
                         "description": TASK_WINDOW_HOW + TASK_FILL_HOW,
                     },
-                    "deliverable": TASK_DELIVERABLE_SCHEMA,
+                    "artifacts": TASK_ARTIFACTS_SCHEMA,
                     "id": {
                         "type": "string",
-                        "description": "可选节点 id。depends_on 可引用此字面值。",
+                        "description": "节点 id。depends_on 可引用此字面值。",
                     },
                     "depends_on": {
                         "type": "array",
@@ -116,9 +107,7 @@ DELEGATE_PARAMETERS = {
                     },
                     "continue_from_run_id": {
                         "type": "string",
-                        "description": (
-                            "同人续派（调查后确认修 / 改稿 / 收口后接着干）；填已完成 run_id。"
-                        ),
+                        "description": "同人续派；填已完成 run_id。",
                     },
                     "target_folder_id": {
                         "type": "string",
@@ -133,18 +122,9 @@ DELEGATE_PARAMETERS = {
                 "required": ["role", "task"],
             },
         },
-        "append_to_execution_id": {
-            "type": "string",
-            "description": (
-                '跨回合接续上一张图：只填 "latest"（引擎解析）；'
-                "同回合再调一般不必传。"
-            ),
-        },
         "team_brief": {
             "type": "string",
-            "description": (
-                "有共享口径才写（一行一条）；各 worker 开局可见。省略即可。"
-            ),
+            "description": "有共享口径才写（一行一条）；各 worker 开局可见。",
         },
     },
 }

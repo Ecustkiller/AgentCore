@@ -58,9 +58,9 @@ def task_structurally_requires_write_desk(task: dict[str, Any]) -> bool:
     Non-empty ``artifacts`` or non-empty ``artifact_dir`` require a write desk.
     Omitted / empty object does not.
     """
-    from agentcore.runtime.runs.types import raw_deliverable_expects_landing
+    from agentcore.runtime.runs.types import task_raw_expects_landing
 
-    return raw_deliverable_expects_landing(task.get("deliverable"))
+    return task_raw_expects_landing(task)
 
 
 def bare_chat_local_scratch_write_ok(
@@ -92,12 +92,11 @@ def resolve_bare_chat_write_scope(
     turn_created_folder_ids: Collection[str] | None = None,
     allow_local_scratch_write: bool = False,
 ) -> str:
-    """Scratch seat (no birth, no target): ``write_scope=none``; keep ``explore_memory``.
+    """Scratch seat (no birth, no target): ``write_scope=none``.
 
     Desktop local 裸聊 (``allow_local_scratch_write``) sits the same scratch with
     ``project`` — that directory *is* the desk. A worker whose ``target_folder_id``
-    was minted this turn (empty new desk) also gets ``project`` even when the CEO
-    turn is still explore-pending; the birth folder stays on ``base_write_scope``.
+    was minted this turn (empty new desk) also gets ``project``.
     """
     target = target_folder_id.strip() if isinstance(target_folder_id, str) else ""
     if target and turn_created_folder_ids and target in turn_created_folder_ids:
@@ -106,8 +105,6 @@ def resolve_bare_chat_write_scope(
         return base_write_scope
     if allow_local_scratch_write:
         return "project"
-    if base_write_scope == "explore_memory":
-        return "explore_memory"
     return "none"
 
 

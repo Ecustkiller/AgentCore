@@ -9,13 +9,8 @@
 import type { ProjectedTurn } from "./projectedTurn";
 import { GATE_INTERACTION_KINDS } from "./projectedTurn";
 
-/** Where「复制排查包」hangs. Primary verdict only — never two hosts. */
-export type TurnSupportPackHost =
-  | "none"
-  | "bubble"
-  | "more"
-  | "composer"
-  | "session";
+/** Where「复制排查包」hangs. The failure banner is not a host. */
+export type TurnSupportPackHost = "none" | "more";
 
 export type ProjectedTurnVerdict = {
   kind?: "ok" | "partial" | "paused" | "error";
@@ -29,16 +24,16 @@ export type ProjectedTurnVerdict = {
 
 /**
  * Hand-filled golden can invent combos the arbitrator never emits.
- * `bubble` requires no team strip; `more` requires one.
+ * `more` needs a bubble that is still on screen.
  */
 export function turnVerdictHostContradiction(
-  verdict: Pick<ProjectedTurnVerdict, "hasTeamStrip" | "supportPackHost">,
+  verdict: Pick<
+    ProjectedTurnVerdict,
+    "hideEmptyBubble" | "supportPackHost"
+  >,
 ): string | null {
-  if (verdict.hasTeamStrip === true && verdict.supportPackHost === "bubble") {
-    return 'hasTeamStrip=true 与 supportPackHost="bubble" 互斥（bubble 仅在无团队条时成立）';
-  }
-  if (verdict.hasTeamStrip === false && verdict.supportPackHost === "more") {
-    return 'hasTeamStrip=false 与 supportPackHost="more" 互斥（more 仅在有团队条时成立）';
+  if (verdict.hideEmptyBubble === true && verdict.supportPackHost === "more") {
+    return 'hideEmptyBubble 与 supportPackHost="more" 互斥（空壳没有「更多」）';
   }
   return null;
 }

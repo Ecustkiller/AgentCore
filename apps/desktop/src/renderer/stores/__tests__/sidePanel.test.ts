@@ -657,18 +657,20 @@ describe("showChanges / showFile / openTerminalTab（方案 B 顶栏 IA）", () 
   });
 
   it("entry channel File tab identity does not collide with disk path", () => {
-    const path = "project/f1/profile";
-    panel().showFile(path, "画像.md");
-    panel().openTab(entryFileTab({ channel: "memory", path, name: "画像.md" }));
+    const path = "doc-1";
+    panel().showFile(path, "语气.md");
+    panel().openTab(
+      entryFileTab({ channel: "document", path, name: "语气.md" }),
+    );
     const fileTabs = panel().tabs.filter((t) => t.kind === "file");
     expect(fileTabs).toHaveLength(2);
     expect(fileTabs.map((t) => t.id)).toEqual([
       fileTabId(path),
-      fileTabId(path, null, "memory"),
+      fileTabId(path, null, "document"),
     ]);
     expect(fileTabs[1]).toMatchObject({
       kind: "file",
-      channel: "memory",
+      channel: "document",
       path,
     });
     expect(fileTabs[0].id).not.toBe(fileTabs[1].id);

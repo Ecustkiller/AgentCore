@@ -253,7 +253,7 @@ async def create_document(
     """Create a tree node (always ``ai_maintained=false`` — user-owned).
 
     A child inherits its parent's ``folder_id`` scope; a root node takes the requested scope.
-    New ``role='rule'`` documents with no parent land under ``AgentCore/规则/`` (§5.0).
+    New ``role='rule'`` documents with no parent land under ``AgentCore/rules/`` (§5.0).
     """
     folder_id = body.folder_id
     parent_id = body.parent_id
@@ -265,7 +265,7 @@ async def create_document(
             raise HTTPException(status_code=400, detail="parent is not a folder")
         folder_id = parent.folder_id
     elif body.role == "rule" and parent_id is None:
-        # Documents *and* user-made 夹 land under AgentCore/规则/.
+        # Documents *and* user-made 夹 land under AgentCore/rules/.
         rules_dir = await repo.ensure_rules_dir(user.user_id, folder_id)
         parent_id = rules_dir.id
         folder_id = rules_dir.folder_id
@@ -477,9 +477,8 @@ async def delete_document(
     """Soft-delete a node and (for a folder) its whole subtree.
 
     AI-maintained core leaves (偏好 / 画像 / 导航) keep their protocol names, so
-    this DELETE is refused. Empty the body instead (``PUT …/memory/files/{kind}``
-    with empty content) — injection skips the empty note; the list still shows
-    a placeholder. On-demand AI topics and user-owned entries remain deletable.
+    this DELETE is refused. Empty the body instead; the list still shows a
+    placeholder. On-demand topics and user-owned entries remain deletable.
     """
     doc = await repo.get(document_id, user_id=user.user_id)
     if doc is None:

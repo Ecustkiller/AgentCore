@@ -62,11 +62,14 @@ def escalation_block(tool: DelegateTool, plan: RunPlan, results: dict) -> str:
                 answer = str(e.get("answer") or "").strip()
                 answered.append(f"- {label}：{question} → 用户已答：{answer}")
                 continue
-            blocking = bool(e.get("blocking"))
-            # 卡在缺输入·依赖缺口 (§2.4 变·worker 的「拉」): if this run got here (synthesis) rather
-            # than being settled at the reactive wave boundary, mark it so the CEO补 a producer.
-            is_dep = e.get("kind") == "dep"
-            mark = "【关键阻塞】" if blocking else ("【缺输入·依赖缺口】" if is_dep else "")
+            blocking = e.get("reason") == "wait"
+            is_dep = e.get("reason") == "dep"
+            is_scope = e.get("reason") == "scope"
+            mark = (
+                "【等拍板】"
+                if blocking
+                else ("【缺输入】" if is_dep else ("【职责偏离】" if is_scope else ""))
+            )
             line = f"- {mark}{label}：{question}"
             assumption = str(e.get("assumption") or "").strip()
             if assumption:
@@ -79,11 +82,14 @@ def escalation_block(tool: DelegateTool, plan: RunPlan, results: dict) -> str:
         pending.sort(key=lambda it: not it[0])
         out += (
             "\n### ⚠️ 队员升级了待决问题（请先处理再收尾）\n"
-            "以下是队员无法独自拍板、需要你定夺的关键岔路 / 缺失信息。它们已按各自的暂定假设"
-            "继续交付，但你应先处理这些问题：能自己答的就在概览里给出并据此判断相关产物是否需"
-            "返工；确需用户拍板的就用 ask_user 问（可把问题 near-verbatim 转给用户）；需要原"
-            "作者据答案重做的就用 delegate 设 continue_from_run_id 带现场续派；标【缺输入·依赖缺口】的是队员卡在缺一个还不存在"
-            "的输入——用 delegate 补一个产出它的步骤，再设 continue_from_run_id 把结果交回原作者据此续写。\n"
+            "以下是队员无法独自拍板、需要你定夺的关键岔路 / 缺失信息。"
+            "【等拍板】的人还停着（或未能挂起、已按假设做完）；"
+            "【职责偏离】/【缺输入】的人自己这份在做完，后面的安排请你改。"
+            "能自己答的就在概览里给出并据此判断相关产物是否需返工；"
+            "确需用户拍板的就用 ask_user 问；"
+            "需要原作者据答案重做的就用 delegate 设 continue_from_run_id 带现场续派；"
+            "标【缺输入】的是队员卡在缺一个还不存在的输入——"
+            "用 delegate 补一个产出它的步骤，再设 continue_from_run_id 把结果交回原作者据此续写。\n"
             + "\n".join(line for _, line in pending)
         )
     if answered:
@@ -511,27 +517,8 @@ def build_ceo_synthesis(
         collect_worker_gaps,
         format_worker_gaps_block,
     )
-    from agentcore.runtime.runs.research_quality import collect_thin_review_gaps
 
     gaps = collect_worker_gaps(plan, results)
-    # 案 thin-review A′：已声明 reviews/ 契约未对齐 → 并入 CEO 契约缺口表（与 delivery 同谓词）。
-    thin_by_role: dict[str, list[dict[str, str]]] = {}
-    for row in collect_thin_review_gaps(plan.nodes, results):
-        role = str(row.get("role") or "").strip() or "验收"
-        thin_by_role.setdefault(role, []).append(
-            {
-                "description": str(row.get("description") or ""),
-                "reason": str(row.get("reason") or "thin_review"),
-            }
-        )
-    if thin_by_role:
-        # Merge into existing worker rows when role matches; else append.
-        existing_roles = {label: i for i, (label, _) in enumerate(gaps)}
-        for role, rows in thin_by_role.items():
-            if role in existing_roles:
-                gaps[existing_roles[role]][1].extend(rows)
-            else:
-                gaps.append((role, rows))
     gaps_block = format_worker_gaps_block(
         gaps, plan_open=getattr(tool, "_supervised", None) is not None
     )

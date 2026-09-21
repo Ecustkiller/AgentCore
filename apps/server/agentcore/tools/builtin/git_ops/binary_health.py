@@ -1,10 +1,9 @@
 """Process-level ``git`` binary availability (boot probe → capability gate).
 
 One-shot at app lifespan, mirroring ``tools.sandbox.cloud_health``: the cached
-result folds into ``git_execution_enabled_for`` so worker registration and the
-``workspace_context`` capability line stay aligned with what this process can
-actually spawn. ``None`` (never probed) keeps the pre-probe semantics for tests
-and unbooted processes.
+result folds into ``git_execution_enabled_for`` so the workspace fact line
+matches what this process can actually spawn. ``None`` (never probed) keeps
+the pre-probe semantics for tests and unbooted processes.
 
 Scope: this answers "can the CURRENT process exec ``git``", which is the right
 question only for the in-process transport (cloud ``ServerWorkspace`` and the
@@ -15,9 +14,8 @@ predicate.
 
 from __future__ import annotations
 
-import asyncio
-
 from agentcore.core.logging import get_logger
+from agentcore.core.spawn import spawn_process
 
 logger = get_logger(__name__)
 
@@ -77,13 +75,14 @@ async def probe_git_binary_at_startup() -> None:
     global _git_binary_available, _git_binary_failure
 
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "git",
-            "--version",
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
+        result = await spawn_process(
+            ["git", "--version"],
+            timeout=_GIT_PROBE_TIMEOUT,
         )
+    except TimeoutError:
+        # TimeoutError is an OSError subclass; it must be caught first.
+        _mark_unavailable("probe_timeout", f"git --version > {_GIT_PROBE_TIMEOUT}s")
+        return
     except OSError as exc:
         _mark_unavailable("not_found", str(exc)[:200])
         return
@@ -91,25 +90,15 @@ async def probe_git_binary_at_startup() -> None:
         _mark_unavailable(type(exc).__name__, str(exc)[:200])
         return
 
-    try:
-        stdout, _ = await asyncio.wait_for(proc.communicate(), _GIT_PROBE_TIMEOUT)
-    except TimeoutError:
-        proc.kill()
-        await proc.wait()
-        _mark_unavailable("probe_timeout", f"git --version > {_GIT_PROBE_TIMEOUT}s")
-        return
-    except Exception as exc:  # noqa: BLE001 — probe must never break startup
-        _mark_unavailable(type(exc).__name__, str(exc)[:200])
-        return
-
-    if proc.returncode != 0:
-        detail = stdout.decode(errors="replace").strip()[:200]
-        _mark_unavailable("nonzero_exit", detail or f"exit={proc.returncode}")
+    raw = result.stdout or result.stderr
+    if result.returncode != 0:
+        detail = raw.decode(errors="replace").strip()[:200]
+        _mark_unavailable("nonzero_exit", detail or f"exit={result.returncode}")
         return
 
     _git_binary_available = True
     _git_binary_failure = None
-    logger.debug("git.binary_ok", version=stdout.decode(errors="replace").strip()[:80])
+    logger.debug("git.binary_ok", version=raw.decode(errors="replace").strip()[:80])
 
 
 def _mark_unavailable(reason: str, detail: str) -> None:

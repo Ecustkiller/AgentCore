@@ -14,6 +14,8 @@ class CapabilityTool(BaseModel):
     ``consult`` / ``ask_user``) and the worker-only ``escalate``.
     ``available_to`` is a subset of ``["ceo", "worker"]`` so the UI can show which
     side of the team holds each tool.
+    ``blurb`` is the toolbox shelf description only — not the consult directory
+    or the tool schema ``description``.
     """
 
     name: str
@@ -21,6 +23,7 @@ class CapabilityTool(BaseModel):
     face: ToolFace
     resident: bool
     summary: str
+    blurb: str = ""
     approval: ToolApproval
     parameters: dict[str, Any]
     available_to: list[str]

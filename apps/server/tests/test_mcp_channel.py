@@ -87,7 +87,7 @@ def test_desktop_touch_tool_names_cover_mcp_and_host():
 
     assert is_desktop_touch_tool("mcp_echo_ping")
     assert is_desktop_touch_tool("host")
-    assert not is_desktop_touch_tool("file_write")
+    assert not is_desktop_touch_tool("write")
     assert not is_desktop_touch_tool("web_search")
 
 

@@ -13,8 +13,8 @@
 
 盘上迁移不放进 alembic：DB 事务回滚不了 ``mv``，把两者绑在一个事务里只会制造「DB 已
 回滚、文件已经搬走」的坏状态。所以拆成部署链里的一步：alembic 回填 →
-``scripts/migrate_workspace_tree.py`` → ``scripts/migrate_project_docs.py``（它读的是
-搬迁**之后**的 ``tree/`` 落点），全部在起 api 之前。中途中断重跑即可。
+``scripts/migrate_workspace_tree.py``，在起 api 之前。中途中断重跑即可。旧记忆文件与
+``文档/项目/`` 厚稿留在原地，不由这一步导入。
 
 「盘上有哪些用户目录」不在这里判——那是
 :mod:`agentcore.workspace.layout` 的单一判据，扫盘的脚本都问它。

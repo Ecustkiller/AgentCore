@@ -33,7 +33,6 @@ export const PROMPT_SHELF_AFFORDANCE = {
   createEntry: { title: "新建条目", description: "写一条按需提示词" },
   createFolder: { title: "新建夹", description: "给提示词分组" },
   dropHere: { title: "拖到这里", description: "放到这个夹" },
-  addConnector: { title: "添加连接器", description: "本机插头" },
 } as const;
 
 export type PromptMineShelfOpts = {
@@ -129,7 +128,7 @@ export function promptItemShelfCopy(
     ];
     return {
       title,
-      description: distinctLine(item.tool.summary, title),
+      description: distinctLine(item.tool.blurb, title),
       tags,
       accessory: [chip("官方")],
     };
@@ -192,7 +191,7 @@ export function promptShelfHeaderChips(
   return [...copy.accessory, ...copy.tags.map((label) => chip(label))];
 }
 
-/** Dialog title chips: same as the card, plus 开场轴 for tools (the section is gone once the dialog is open). */
+/** Dialog title chips: same as the card, plus 开场即用 for listed tools. */
 export function promptReadHeaderChips(
   copy: PromptShelfCopy,
   item: PromptCatalogItem,
@@ -200,9 +199,7 @@ export function promptReadHeaderChips(
   if (item.kind !== "tool") return promptShelfHeaderChips(copy);
   return [
     ...copy.accessory,
-    chip(
-      item.tool.resident ? RESIDENT_LABEL.resident : RESIDENT_LABEL.deferred,
-    ),
+    chip(RESIDENT_LABEL.resident),
     ...copy.tags.map((label) => chip(label)),
   ];
 }

@@ -1,4 +1,4 @@
-"""file_read / file_list (one-layer LS) tools."""
+"""read / file_list (one-layer LS) tools."""
 
 from __future__ import annotations
 
@@ -73,7 +73,7 @@ from .observe import (
 )
 from .path_hints import enrich_missing_path_message
 
-# Safety cap for one file_read view (disk original text). Distinct from
+# Safety cap for one read view (disk original text). Distinct from
 # retired sliding-clear ``min_chars`` and worker token ceilings — do not reuse those.
 FILE_READ_SAFETY_LINE_CAP = 2000
 FILE_READ_SAFETY_CHAR_CAP = 80_000
@@ -166,11 +166,11 @@ def _spreadsheet_skip_error(path: str, *, code_execute_assembled: bool) -> str:
     """Reject-table copy that follows the assembled tool table."""
     if code_execute_assembled:
         return (
-            f"`{path}` 是表格/分隔数据文件，file_read 不自动抽文本；"
+            f"`{path}` 是表格/分隔数据文件，read 不自动抽文本；"
             "请用 run（如 openpyxl / pandas）按工作区相对路径解析。"
         )
     return (
-        f"`{path}` 是表格/分隔数据文件，file_read 不自动抽文本。"
+        f"`{path}` 是表格/分隔数据文件，read 不自动抽文本。"
         "本回合没有按单元格解析表格的执行工具；"
         "请用已给的列名、类型和样例写原件结构报告并落盘待跑变换脚本，不要手抄数据冒充已整理的表。"
     )
@@ -272,7 +272,7 @@ def _select_line_window(
 
 
 def _file_read_ok(output: str, start: float) -> ToolResult:
-    """Successful file_read result; ``output_limit`` covers full view (no 4k head+tail)."""
+    """Successful read result; ``output_limit`` covers full view (no 4k head+tail)."""
     return ToolResult(
         tool_call_id="",
         success=True,
@@ -365,7 +365,7 @@ async def _file_not_found_error(
     start: float,
     context: ToolContext,
 ) -> ToolResult:
-    """``PathNotFound`` for file_read — landmark / root-search tip (shared path_hints)."""
+    """``PathNotFound`` for read — landmark / root-search tip (shared path_hints)."""
     base = f"文件不存在：{rel_path}"
     return _path_missing_error(
         await enrich_missing_path_message(context, rel_path, base=base),
@@ -416,7 +416,7 @@ def _format_extracted_read(
     offset: object,
     limit: object,
 ) -> tuple[str, int, int, int]:
-    """Apply the same file_read window (offset/limit + safety caps) to extract text."""
+    """Apply the same read window (offset/limit + safety caps) to extract text."""
     selected, start_line, end_line, total, cap_kind = _select_line_window(
         text.splitlines(), offset=offset, limit=limit
     )
@@ -442,25 +442,22 @@ class FileReadTool:
         file_products=FileProductsContract.READ_ONLY,
         workspace_io=True,
         catalog_summary="读工作区文件",
+        blurb="打开文本、代码或图片，看里面写了什么",
     )
 
     @property
     def schema(self) -> ToolSchema:
         return ToolSchema(
-            name="file_read",
-            description=(
-                "读取工作区文件。图片发给当前模型（不收图则说明限制）。"
-                "http(s) 用 web_fetch。"
-                "本机绝对路径可直接填（HOW→consult(local_desk)）。"
-            ),
+            name="read",
+            description="读取工作区文件。",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {
+                    "file_path": {
                         "type": "string",
                         "description": (
-                            "工作区相对 POSIX（`.`=根）或本机绝对路径。"
-                            "Office/PDF 自动抽文本；表格（xlsx/csv 等）默认不抽文本。"
+                            "工作区相对 POSIX（`.`=根）。"
+                            "Office/PDF 抽文本；表格默认不抽。"
                         ),
                     },
                     "offset": {
@@ -483,7 +480,7 @@ class FileReadTool:
                         "minimum": 1,
                     },
                 },
-                "required": ["path"],
+                "required": ["file_path"],
             },
             face=ToolFace.FILE,
             approval=ToolApproval.NEVER,
@@ -502,7 +499,7 @@ class FileReadTool:
     async def _read_on_desk(
         self, arguments: dict[str, Any], context: ToolContext, start: float
     ) -> ToolResult:
-        rel_path = arguments.get("path", "")
+        rel_path = arguments.get("file_path", "")
         offset = arguments.get("offset")
         limit = arguments.get("limit")
         start_page_arg = arguments.get("start_page")
@@ -918,6 +915,7 @@ class FileListTool:
         file_products=FileProductsContract.READ_ONLY,
         workspace_io=True,
         catalog_summary="列出工作区当前层",
+        blurb="看这一层有哪些文件和子目录",
     )
 
     @property
@@ -925,18 +923,16 @@ class FileListTool:
         return ToolSchema(
             name="file_list",
             description=(
-                "列出已知目录当前层（默认工作区根）。"
+                "列出目录当前层。"
                 "已挂载区外用 `external/<别名>/`。"
-                "用户规则列 `.agentcore/规则`。"
+                "用户规则列 `.agentcore/rules`。"
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "directory": {
                         "type": "string",
-                        "description": (
-                            "工作区相对 POSIX（默认 `.`）。只填已证实存在的目录。"
-                        ),
+                        "description": "工作区相对 POSIX。",
                         "default": ".",
                     },
                 },

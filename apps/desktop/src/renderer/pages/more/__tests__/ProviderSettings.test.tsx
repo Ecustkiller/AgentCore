@@ -46,7 +46,6 @@ function providersResponse(
         id: "p1",
         label: "DeepSeek",
         base_url: "https://api.deepseek.com/v1",
-        default_model: "deepseek-v4-pro",
         status: "active",
         masked_key: "••••abcd",
         supports_tools: true,
@@ -55,7 +54,6 @@ function providersResponse(
         id: "p2",
         label: "OpenAI",
         base_url: "https://api.openai.com/v1",
-        default_model: "gpt-4o",
         status: "unchecked",
         masked_key: "••••wxyz",
       },
@@ -98,8 +96,7 @@ describe("ProviderSettings", () => {
     expect(screen.getByText("OpenAI")).toBeTruthy();
     expect(screen.getByText(/api\.deepseek\.com/)).toBeTruthy();
     expect(screen.getByText(/••••abcd/)).toBeTruthy();
-    expect(screen.getByText(/测试用模型 deepseek-v4-pro/)).toBeTruthy();
-    expect(screen.getByText(/测试用模型 gpt-4o/)).toBeTruthy();
+    expect(screen.queryByText(/测试用模型/)).toBeNull();
     expect(screen.queryByText(/默认模型/)).toBeNull();
     expect(screen.getByRole("button", { name: "添加服务商" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "模型组合" })).toBeNull();
@@ -108,23 +105,6 @@ describe("ProviderSettings", () => {
         "Key 已加密保存。测连绿≠可聊天；日常用「设置 · 模型组合」。",
       ),
     ).toBeTruthy();
-  });
-
-  it("omits the test-model line when default_model is empty", () => {
-    mockProviders(
-      providersResponse({
-        providers: [
-          {
-            ...providersResponse().providers[0],
-            default_model: "",
-          },
-        ],
-      }),
-    );
-    renderPage();
-    expect(screen.getByText("DeepSeek")).toBeTruthy();
-    expect(screen.queryByText(/测试用模型/)).toBeNull();
-    expect(screen.queryByText(/默认模型/)).toBeNull();
   });
 
   it("does not advertise the page job in a header lede", () => {

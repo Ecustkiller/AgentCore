@@ -31,6 +31,7 @@ from agentcore.db.repositories import (
     UserLlmProviderRepository,
     UserRepository,
 )
+from agentcore.llm.byok_provider_presets import seed_model_for_base_url
 from agentcore.llm.factory import build_provider
 from agentcore.llm.model_profiles import ProfileSlot
 from agentcore.llm.model_reachability import (
@@ -44,12 +45,15 @@ from agentcore.security.keys import KeyEncryptor
 
 logger = get_logger(__name__)
 
-# Shown when connectivity test succeeds with no other message — clarifies that
-# green ≠ chat-ready; daily chat uses 模型组合 main model, not this probe.
+# Shown when connectivity test succeeds with no other message — green ≠ chat-ready.
 CONNECTIVITY_OK_HINT = (
-    "连接正常。已验证服务商连通（模型列表或 chat 试探）。"
+    "连接正常。已验证服务商连通（GET /models 或模型组合）。"
     "日常聊天请到「模型组合」配置主模型；"
     "自定义 Base URL 通常需含 /v1（例如 https://api.example.com/v1）。"
+)
+CONNECTIVITY_NO_CATALOG = (
+    "上游未列出模型（无 GET /models 或列表为空）。"
+    "请到「模型组合」手填模型 ID 后再测；测连不代填模型。"
 )
 
 
@@ -60,7 +64,6 @@ class LlmProviderView:
     id: str
     label: str
     base_url: str
-    default_model: str
     status: str
     masked_key: str | None = None
     supports_tools: bool | None = None
@@ -125,7 +128,6 @@ class LlmProviderService:
             id=row.id,
             label=row.label or "",
             base_url=row.base_url,
-            default_model=row.default_model,
             status=row.status,
             masked_key=_mask_key_ciphertext(enc, row.api_key_enc),
             supports_tools=row.supports_tools,
@@ -157,9 +159,8 @@ class LlmProviderService:
         label: str,
         api_key: str,
         base_url: str | None = None,
-        default_model: str | None = None,
     ) -> LlmProviderView:
-        """Add a provider. First provider auto-creates a「当前配置」profile as default."""
+        """Add a provider. First provider + matching vendor preset seeds「当前配置」."""
         api_key = (api_key or "").strip()
         if not api_key:
             raise ValidationError("API Key 不能为空")
@@ -174,9 +175,7 @@ class LlmProviderService:
         resolved_base_url = (base_url or settings.platform_base_url).strip()
         if not resolved_base_url:
             raise ValidationError("Base URL 不能为空")
-        resolved_model = (default_model or DEEPSEEK_V4_FLASH).strip()
-        if not resolved_model:
-            raise ValidationError("模型名称不能为空")
+        seed = seed_model_for_base_url(resolved_base_url)
 
         was_empty = (await self._repo.count_for_user(user_id)) == 0
         row = await self._repo.create(
@@ -184,17 +183,15 @@ class LlmProviderService:
             label=label,
             api_key_enc=enc.encrypt(api_key.encode()),
             base_url=resolved_base_url,
-            default_model=resolved_model,
+            default_model=seed,
         )
-        if was_empty:
+        if was_empty and seed:
             from agentcore.llm.model_profiles import LlmModelProfileService
 
             await LlmModelProfileService(self._session).create_profile(
                 user_id,
                 name="当前配置",
-                main=ProfileSlot(
-                    origin="byok", model=row.default_model, provider_id=row.id
-                ),
+                main=ProfileSlot(origin="byok", model=seed, provider_id=row.id),
                 set_as_default=True,
             )
         # A different upstream is being asked now: anything cached about the old one
@@ -211,7 +208,6 @@ class LlmProviderService:
         label: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
-        default_model: str | None = None,
         fields_set: set[str],
     ) -> LlmProviderView:
         existing = await self._repo.get(provider_id, user_id=user_id)
@@ -236,17 +232,13 @@ class LlmProviderService:
             if not resolved:
                 raise ValidationError("Base URL 不能为空")
             kwargs["base_url"] = resolved
-        if "default_model" in fields_set:
-            resolved_model = (default_model or "").strip()
-            if not resolved_model:
-                raise ValidationError("模型名称不能为空")
-            kwargs["default_model"] = resolved_model
+            kwargs["default_model"] = seed_model_for_base_url(resolved)
 
         row = await self._repo.update(provider_id, user_id=user_id, **kwargs)  # type: ignore[arg-type]
         assert row is not None
         # Only a credential-shaped edit changes what upstream would answer; renaming
         # the 服务商 does not, so it must not retire a cooldown that still holds.
-        if kwargs.keys() & {"api_key_enc", "base_url", "default_model"}:
+        if kwargs.keys() & {"api_key_enc", "base_url"}:
             invalidate_allowance(user_id, reason="byok_provider_changed")
         return self._view(row, enc=self._encryptor())
 
@@ -258,11 +250,12 @@ class LlmProviderService:
 
         fallback = await self._repo.first_for_user(user_id)
         if fallback is not None:
+            seed = seed_model_for_base_url(fallback.base_url)
             await self._profiles.retarget_main_provider(
                 user_id,
                 from_provider_id=provider_id,
                 to_provider_id=fallback.id,
-                to_model=fallback.default_model,
+                to_model=seed or None,
                 to_origin="byok",
             )
         else:
@@ -295,7 +288,7 @@ class LlmProviderService:
             )
         # User-facing errors use credentials.label (never internal source ``user``).
         provider = build_provider(credentials)
-        model = (credentials.default_model or "").strip()
+        profile_models = await self._profile_models_for_provider(user_id, provider_id)
         base_url = credentials.base_url
         supports_tools: bool | None = None
         logger.info(
@@ -303,16 +296,13 @@ class LlmProviderService:
             user_id=user_id,
             provider_id=provider_id,
             base_url=base_url,
-            model=model,
+            profile_models=profile_models,
             provider_type=type(provider).__name__,
         )
         try:
             status, message, supports_tools = await self._run_connectivity_test(
                 provider,
-                model=model,
-                profile_models=await self._profile_models_for_provider(
-                    user_id, provider_id
-                ),
+                profile_models=profile_models,
             )
             if status == "error":
                 logger.warning(
@@ -320,7 +310,6 @@ class LlmProviderService:
                     user_id=user_id,
                     provider_id=provider_id,
                     base_url=base_url,
-                    model=model,
                     error=message,
                 )
             else:
@@ -329,7 +318,6 @@ class LlmProviderService:
                     user_id=user_id,
                     provider_id=provider_id,
                     base_url=base_url,
-                    model=model,
                     supports_tools=supports_tools,
                 )
         except Exception:
@@ -338,7 +326,6 @@ class LlmProviderService:
                 user_id=user_id,
                 provider_id=provider_id,
                 base_url=base_url,
-                model=model,
                 provider_type=type(provider).__name__,
             )
             raise
@@ -384,41 +371,30 @@ class LlmProviderService:
         self,
         provider: object,
         *,
-        model: str,
         profile_models: list[str] | None = None,
     ) -> tuple[str, str | None, bool | None]:
-        """Prefer ``list_models`` (connection OK); fall back to ``probe(default_model)``.
+        """Prove the endpoint via ``GET /models``; probe only 模型组合 ids.
 
-        Auth / balance failures from ``list_models`` are hard errors. Other
-        ``list_models`` failures fall through to the legacy probe path. When
-        ``list_models`` succeeds but the default model is absent from a
-        non-empty upstream list, also fall through to ``probe`` (e.g. Ark
-        ``ep-`` endpoints that chat but are omitted from ``/models``). An
-        **empty** upstream list also falls through to ``probe`` — a JSON
-        ``data: []`` must not soft-green without a chat body check. After the
-        provider ``default_model`` passes, also check models referenced by the
-        user's 模型组合 slots for this provider — failure names the bad model.
-        Tools probing is best-effort and never flips an otherwise-active result
-        to error.
+        Auth / balance failures from ``list_models`` are hard errors. A non-empty
+        upstream list is enough to mark the provider connected — we do not guess
+        a chat model just to green the test. Empty / missing ``/models`` is not
+        a fake green: if the account already pointed 模型组合 slots at this
+        provider, those ids are probed (Ark ``ep-`` etc.); otherwise the caller
+        is told to fill a model id in 模型组合. Tools probing is best-effort and
+        never flips an otherwise-active result to error.
         """
         model_list = await fetch_model_list(provider)
-        reach, message = await check_model_reachable(
-            provider,
-            model=model,
-            model_list=model_list,
-            policy=CONNECTIVITY_POLICY,
-        )
-        if reach == "error":
-            return "error", message, None
+        if model_list.kind == "hard_error":
+            return "error", model_list.message, None
 
-        supports_tools = await self._best_effort_probe_tools(provider, model=model)
+        listed = model_list.kind == "ok" and bool(model_list.model_ids)
+        extras = [
+            extra.strip() for extra in (profile_models or ()) if extra and extra.strip()
+        ]
+        if not listed and not extras:
+            return "error", CONNECTIVITY_NO_CATALOG, None
 
-        checked = {(model or "").strip()} if (model or "").strip() else set()
-        for extra in profile_models or ():
-            extra_s = (extra or "").strip()
-            if not extra_s or extra_s in checked:
-                continue
-            checked.add(extra_s)
+        for extra_s in extras:
             extra_reach, extra_msg = await check_model_reachable(
                 provider,
                 model=extra_s,
@@ -433,6 +409,12 @@ class LlmProviderService:
                     None,
                 )
 
+        tools_model = ""
+        if model_list.kind == "ok" and model_list.model_ids:
+            tools_model = model_list.model_ids[0]
+        elif extras:
+            tools_model = extras[0]
+        supports_tools = await self._best_effort_probe_tools(provider, model=tools_model)
         return "active", None, supports_tools
 
     @staticmethod

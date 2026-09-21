@@ -1,4 +1,4 @@
-"""约定文档 ``artifact_dir``：裸文件名 join 工作稿；空 artifacts 不钉目录；收口认盘。"""
+"""``artifact_dir``：显式目录 + artifacts 推导公共父目录；裸名不发明柜。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ from agentcore.runtime.runs.artifact_dir import (
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.contract import check_contract, describe_deliverable
 from agentcore.runtime.runs.types import Deliverable
-from agentcore.workspace.stage_dirs import DRAFTS_DIR, RESEARCH_DIR, REVIEWS_DIR
+
+NOTES_DIR = "notes"
 
 
 def test_resolve_empty_artifacts_does_not_pin_drafts():
@@ -17,25 +18,28 @@ def test_resolve_empty_artifacts_does_not_pin_drafts():
     assert resolve_artifact_dir(d) == ""
 
 
-def test_resolve_bare_filename_pins_drafts():
+def test_resolve_bare_filename_does_not_invent_dump():
     d = Deliverable(artifacts=["GDD.md"])
-    assert resolve_artifact_dir(d) == DRAFTS_DIR
-
-
-def test_business_src_path_is_not_twisted_into_docs():
-    d = Deliverable(artifacts=["src/main.py"])
     assert resolve_artifact_dir(d) == ""
     apply_artifact_dir_defaults(d)
     assert d.artifact_dir == ""
+    assert d.artifacts == ["GDD.md"]
+
+
+def test_nested_src_derives_parent_dir():
+    d = Deliverable(artifacts=["src/main.py"])
+    assert resolve_artifact_dir(d) == "src"
+    apply_artifact_dir_defaults(d)
+    assert d.artifact_dir == "src"
     assert d.artifacts == ["src/main.py"]
 
 
 def test_leftover_artifact_dir_still_pins_without_native_short_circuit():
     """No workspace short-circuit: explicit artifact_dir still pins."""
-    d = Deliverable(artifact_dir=RESEARCH_DIR, artifacts=["app.py"])
+    d = Deliverable(artifact_dir=NOTES_DIR, artifacts=["app.py"])
     apply_artifact_dir_defaults(d)
-    assert d.artifact_dir == RESEARCH_DIR
-    assert d.artifacts == [f"{RESEARCH_DIR}/app.py"]
+    assert d.artifact_dir == NOTES_DIR
+    assert d.artifacts == [f"{NOTES_DIR}/app.py"]
 
 
 def test_describe_empty_without_instance_facts():
@@ -44,34 +48,34 @@ def test_describe_empty_without_instance_facts():
     assert describe_deliverable(d) == ""
 
 
-def test_resolve_skips_business_artifacts():
+def test_resolve_derives_parent_from_nested_artifact():
     d = Deliverable(artifacts=["site/index.html"])
-    assert resolve_artifact_dir(d) == ""
+    assert resolve_artifact_dir(d) == "site"
 
 
 def test_resolve_derives_from_existing_stage_artifact():
     d = Deliverable(
-        artifacts=[f"{RESEARCH_DIR}/法律透镜报告.md"],
+        artifacts=[f"{NOTES_DIR}/法律透镜报告.md"],
     )
-    assert resolve_artifact_dir(d) == RESEARCH_DIR
+    assert resolve_artifact_dir(d) == NOTES_DIR
 
 
 def test_resolve_honors_explicit_artifact_dir():
-    d = Deliverable( artifact_dir=RESEARCH_DIR)
-    assert resolve_artifact_dir(d) == RESEARCH_DIR
+    d = Deliverable( artifact_dir=NOTES_DIR)
+    assert resolve_artifact_dir(d) == NOTES_DIR
 
 
-def test_apply_fills_dir_prefix_and_relocates_bare_filename():
-    d = Deliverable( artifacts=["miro-research.md"])
+def test_apply_joins_bare_name_only_under_explicit_dir():
+    d = Deliverable(artifact_dir=NOTES_DIR, artifacts=["miro-research.md"])
     apply_artifact_dir_defaults(d)
-    assert d.artifact_dir == DRAFTS_DIR
-    assert d.artifacts == [f"{DRAFTS_DIR}/miro-research.md"]
+    assert d.artifact_dir == NOTES_DIR
+    assert d.artifacts == [f"{NOTES_DIR}/miro-research.md"]
 
 
-def test_apply_flattens_nested_drafts_artifact_name():
-    d = Deliverable( artifacts=[f"{DRAFTS_DIR}/主题/01.md"])
+def test_apply_keeps_nested_artifact_path():
+    d = Deliverable(artifacts=[f"{NOTES_DIR}/主题/01.md"])
     apply_artifact_dir_defaults(d)
-    assert d.artifacts == [f"{DRAFTS_DIR}/主题_01.md"]
+    assert d.artifacts == [f"{NOTES_DIR}/主题/01.md"]
 
 
 def test_apply_empty_artifacts_keeps_shared_dir_without_fake_artifact():
@@ -83,16 +87,16 @@ def test_apply_empty_artifacts_keeps_shared_dir_without_fake_artifact():
 
 
 def test_describe_mentions_artifact_dir_filename_only():
-    d = Deliverable( artifact_dir=RESEARCH_DIR, artifacts=[])
+    d = Deliverable( artifact_dir=NOTES_DIR, artifacts=[])
     desc = describe_deliverable(d)
-    assert f"落点目录：`{RESEARCH_DIR}/`" in desc
+    assert f"落点目录：`{NOTES_DIR}/`" in desc
     assert "只定文件名" not in desc
     assert "勿写到工作区根" not in desc
 
 
 def test_contract_landed_outside_artifact_dir_is_silent():
     """有落盘即过：仅 artifact_dir 未命中不发约定目录软提醒、不催搬。"""
-    d = Deliverable( artifact_dir=RESEARCH_DIR, artifacts=[])
+    d = Deliverable( artifact_dir=NOTES_DIR, artifacts=[])
     root = check_contract(
         "已写",
         d,
@@ -107,7 +111,7 @@ def test_contract_landed_outside_artifact_dir_is_silent():
         "已写",
         d,
         files_written=1,
-        workspace_paths=[f"{RESEARCH_DIR}/miro-research.md"],
+        workspace_paths=[f"{NOTES_DIR}/miro-research.md"],
     )
     assert ok.ok
     assert not any("约定文档目录" in w for w in ok.warnings)
@@ -124,7 +128,7 @@ def test_artifact_dir_mismatch_is_delivered_without_todo():
     from agentcore.runtime.runs.plan import RunPlan
     from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 
-    d = Deliverable( artifact_dir=RESEARCH_DIR, artifacts=[])
+    d = Deliverable( artifact_dir=NOTES_DIR, artifacts=[])
     verdict = check_contract(
         "已写",
         d,
@@ -183,7 +187,6 @@ def test_build_run_plan_empty_files_does_not_inject_drafts_dir():
     assert d.artifacts == []
     desc = describe_deliverable(d)
     assert desc == ""
-    assert DRAFTS_DIR not in desc
 
 
 def test_build_run_plan_leftover_form_without_artifacts_does_not_pin():
@@ -230,7 +233,7 @@ def test_build_run_plan_src_artifact_not_twisted_into_docs():
     assert errors == []
     d = plan.nodes[0].deliverable
     assert d is not None
-    assert d.artifact_dir == ""
+    assert d.artifact_dir == "src"
     assert d.artifacts == [name]
 
 
@@ -245,7 +248,7 @@ def test_build_run_plan_leftover_native_key_does_not_clear_artifact_dir():
                 "deliverable": {
                     "form": "files",
                     "artifacts": [name],
-                    "artifact_dir": REVIEWS_DIR,
+                    "artifact_dir": NOTES_DIR,
                     "workspace_native": True,
                 },
             }
@@ -254,16 +257,17 @@ def test_build_run_plan_leftover_native_key_does_not_clear_artifact_dir():
     assert errors == []
     d = plan.nodes[0].deliverable
     assert d is not None
-    assert d.artifact_dir == REVIEWS_DIR
-    assert d.artifacts == [f"{REVIEWS_DIR}/{name}"]
+    assert d.artifact_dir == NOTES_DIR
+    assert d.artifacts == [f"{NOTES_DIR}/{name}"]
 
 
 def test_ceo_schema_exposes_artifacts_only():
     """CEO 填参面只有 artifacts。"""
-    from agentcore.tools.builtin.delegate.schema import TASK_DELIVERABLE_SCHEMA
+    from agentcore.tools.builtin.delegate.schema import DELEGATE_PARAMETERS
 
-    props = TASK_DELIVERABLE_SCHEMA["properties"]
-    assert set(props) == {"artifacts"}
+    task_props = DELEGATE_PARAMETERS["properties"]["tasks"]["items"]["properties"]
+    assert "artifacts" in task_props
+    assert task_props["artifacts"]["type"] == "array"
 
 
 def test_shared_artifact_dir_not_sibling_cross():
@@ -275,12 +279,12 @@ def test_shared_artifact_dir_not_sibling_cross():
             {
                 "role": "成本模型研究员",
                 "task": "调研 API 定价",
-                "deliverable": {"form": "files", "artifact_dir": RESEARCH_DIR},
+                "deliverable": {"form": "files", "artifact_dir": NOTES_DIR},
             },
             {
                 "role": "系统架构研究员",
                 "task": "调研调度优化",
-                "deliverable": {"form": "files", "artifact_dir": RESEARCH_DIR},
+                "deliverable": {"form": "files", "artifact_dir": NOTES_DIR},
             },
         ]
     )
@@ -328,7 +332,7 @@ def test_build_run_plan_leaves_website_artifacts_alone():
     assert errors == []
     d = plan.nodes[0].deliverable
     assert d is not None
-    assert d.artifact_dir == ""
+    assert d.artifact_dir == "site"
     assert d.artifacts == ["site/index.html"]
 
 
@@ -350,7 +354,7 @@ def test_landing_never_reads_role_or_task_free_text():
     for task in (
         "调研 Miro 并落盘笔记",
         "审查后端方案并写审查报告",
-        f"阅读 `{RESEARCH_DIR}/旧笔记.md` 后继续调研竞品并落盘",
+        f"阅读 `{NOTES_DIR}/旧笔记.md` 后继续调研竞品并落盘",
     ):
         assert _plan_artifact_dir(task) == ""
     assert _plan_artifact_dir("审查后端方案", role="审查官") == ""
@@ -358,9 +362,9 @@ def test_landing_never_reads_role_or_task_free_text():
 
 def test_resolve_keeps_explicit_dossier_artifacts():
     d = Deliverable(
-        artifacts=[f"{RESEARCH_DIR}/调研笔记.md"],
+        artifacts=[f"{NOTES_DIR}/调研笔记.md"],
     )
-    assert resolve_artifact_dir(d) == RESEARCH_DIR
+    assert resolve_artifact_dir(d) == NOTES_DIR
 
 
 def test_build_run_plan_coding_brief_with_research_path_no_artifact_dir():
@@ -382,7 +386,7 @@ def test_build_run_plan_coding_brief_with_research_path_no_artifact_dir():
     assert errors == []
     d = plan.nodes[0].deliverable
     assert d is not None
-    assert d.artifact_dir == ""
+    assert d.artifact_dir == "src/ui"
     assert d.artifacts == ["src/ui/nav_system.ts"]
 
 
@@ -407,7 +411,7 @@ def test_apply_overrides_mismatched_research_artifact_dir():
         f"{_AI_DEV_DIR}/03-架构与数据流.md",
     ]
     d = Deliverable(
-        artifact_dir=RESEARCH_DIR,
+        artifact_dir=NOTES_DIR,
         artifacts=artifacts,
     )
     apply_artifact_dir_defaults(d)
@@ -424,7 +428,7 @@ def test_writer_ai_dev_no_false_path_hint_while_notes_stay_research():
         f"{_AI_DEV_DIR}/01-仓库地图.md",
     ]
     writer = Deliverable(
-        artifact_dir=RESEARCH_DIR,  # 复现钉错
+        artifact_dir=NOTES_DIR,  # 复现钉错
         artifacts=writer_artifacts,
     )
     apply_artifact_dir_defaults(writer)
@@ -444,15 +448,15 @@ def test_writer_ai_dev_no_false_path_hint_while_notes_stay_research():
     )
 
     note = Deliverable(
-        artifacts=[f"{RESEARCH_DIR}/ai-dev-docs-文档侧笔记.md"],
+        artifacts=[f"{NOTES_DIR}/ai-dev-docs-文档侧笔记.md"],
     )
     apply_artifact_dir_defaults(note)
-    assert note.artifact_dir == RESEARCH_DIR
+    assert note.artifact_dir == NOTES_DIR
     note_verdict = check_contract(
         "已写",
         note,
         files_written=1,
-        workspace_paths=[f"{RESEARCH_DIR}/ai-dev-docs-文档侧笔记.md"],
+        workspace_paths=[f"{NOTES_DIR}/ai-dev-docs-文档侧笔记.md"],
     )
     assert note_verdict.ok
     assert not any("约定文档目录" in w for w in note_verdict.warnings)
@@ -466,7 +470,7 @@ def test_build_run_plan_writer_custom_docs_dir_aligns_artifact_dir():
                 "task": "根据调研笔记撰写便于 AI 开发的文档",
                 "deliverable": {
                     "form": "files",
-                    "artifact_dir": RESEARCH_DIR,
+                    "artifact_dir": NOTES_DIR,
                     "artifacts": [
                         f"{_AI_DEV_DIR}/00-导航与任务路由.md",
                         f"{_AI_DEV_DIR}/01-仓库地图.md",

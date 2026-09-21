@@ -234,6 +234,10 @@ PREFIX_CACHE_BUCKETS: tuple[tuple[str, int], ...] = (
     ("16k-64k", 64_000),
     ("≥64k", 2**62),
 )
+# Pure append / retry is the healthy majority — do not dump thousands of ids.
+# Unusual breaches get a short sample list so ``log_timeline --trace`` can open them.
+PREFIX_SAMPLE_CAP = 8
+PREFIX_SAMPLE_SKIP = frozenset({"history_growth", "identical"})
 
 
 def _bucket_of(input_tokens: int) -> str:
@@ -253,6 +257,51 @@ def _hit_block(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "hit_ratio": round(hit / prompt, 4) if prompt else 0.0,
         "forfeited_tokens": sum(int(r.get("forfeited_tokens") or 0) for r in rows),
     }
+
+
+def _prefix_sample_key(row: dict[str, Any]) -> str:
+    """Dedupe samples by conversation, then trace — one row per chat when possible."""
+    cid = str(row.get("conversation_id") or "").strip()
+    tid = str(row.get("trace_id") or "").strip()
+    return cid or tid
+
+
+def _prefix_samples(reported: list[dict[str, Any]]) -> dict[str, list[dict[str, str]]]:
+    """Up to ``PREFIX_SAMPLE_CAP`` unusual-breach rows for ``log_timeline``."""
+    out: dict[str, list[dict[str, str]]] = {}
+    seen: dict[str, set[str]] = {}
+    for row in reported:
+        breach = str(row.get("breach") or "?")
+        if breach in PREFIX_SAMPLE_SKIP:
+            continue
+        key = _prefix_sample_key(row)
+        if not key:
+            continue
+        bucket = seen.setdefault(breach, set())
+        if key in bucket or len(bucket) >= PREFIX_SAMPLE_CAP:
+            continue
+        bucket.add(key)
+        sample: dict[str, str] = {}
+        tid = str(row.get("trace_id") or "").strip()
+        cid = str(row.get("conversation_id") or "").strip()
+        if tid:
+            sample["trace_id"] = tid
+        if cid:
+            sample["conversation_id"] = cid
+        scenario = str(row.get("scenario") or "").strip()
+        if scenario:
+            sample["scenario"] = scenario
+        role = str(row.get("cost_role") or "").strip()
+        if role:
+            sample["cost_role"] = role
+        section = str(row.get("breach_section") or "").strip()
+        if section:
+            sample["breach_section"] = section
+        tokens = row.get("input_tokens")
+        if tokens not in (None, ""):
+            sample["input_tokens"] = str(int(tokens))
+        out.setdefault(breach, []).append(sample)
+    return out
 
 
 def _normalize_prefix_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -297,6 +346,8 @@ def prefix_cache_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     waste). ``by_section`` names the prompt sections that broke the prefix, ``by_length``
     shows how the ratio moves with conversation size, ``by_tools`` splits table-changed
     vs unchanged, ``by_role`` splits captain vs worker when ``cost_role`` is present.
+    ``samples_by_breach`` lists up to eight unusual (not pure-append) calls so a
+    reviewer can ``log_timeline --trace``.
     """
     rows = [_normalize_prefix_row(r) for r in rows]
     reported = [r for r in rows if r.get("cache_reported")]
@@ -338,6 +389,7 @@ def prefix_cache_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "by_length": by_length,
         "by_tools": by_tools,
         "by_role": by_role,
+        "samples_by_breach": _prefix_samples(reported),
     }
 
 

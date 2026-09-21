@@ -349,8 +349,8 @@ SAMPLES: tuple[CompactionFidelitySample, ...] = (
         turns=(
             FoldTurn("user", "查对账入口，改 apps/billing/omega_ledger.py。"),
             *_call(
-                "file_read",
-                {"path": "apps/billing/omega_ledger.py"},
+                "read",
+                {"file_path": "apps/billing/omega_ledger.py"},
                 "def reconcile_omega_v3():\n    return 18432\n",
                 "c1",
                 "先读对账文件。",
@@ -366,15 +366,15 @@ SAMPLES: tuple[CompactionFidelitySample, ...] = (
         turns=(
             FoldTurn("user", "写入 apps/billing/omega_ledger.py。"),
             *_call(
-                "file_write",
-                {"path": "apps/billing/omega_ledger.py", "content": "x"},
+                "write",
+                {"file_path": "apps/billing/omega_ledger.py", "content": "x"},
                 "PermissionError: PERM-OMEGA-DENIED on apps/billing/omega_ledger.py",
                 "c1",
                 "尝试写入。",
             ),
             FoldTurn(
                 "assistant",
-                "写入失败 PERM-OMEGA-DENIED。不要用同一方式再试 file_write。"
+                "写入失败 PERM-OMEGA-DENIED。不要用同一方式再试 write。"
                 "改走 apps/api/omega_routes.py 的 listOmegaInvoices。",
             ),
         ),
@@ -388,8 +388,8 @@ SAMPLES: tuple[CompactionFidelitySample, ...] = (
         turns=(
             FoldTurn("user", "写登录文案并继续工单 hx9f2a-ticket。"),
             *_call(
-                "file_write",
-                {"path": "apps/web/login_copy.md", "content": "LOGIN_COPY_FROZEN"},
+                "write",
+                {"file_path": "apps/web/login_copy.md", "content": "LOGIN_COPY_FROZEN"},
                 "wrote apps/web/login_copy.md",
                 "c1",
                 "登录文案已落盘，标记 LOGIN_COPY_FROZEN。",
@@ -415,8 +415,8 @@ SAMPLES: tuple[CompactionFidelitySample, ...] = (
         ),
         turns=(
             *_call(
-                "file_read",
-                {"path": "apps/billing/omega_ledger.py"},
+                "read",
+                {"file_path": "apps/billing/omega_ledger.py"},
                 "def reconcile_omega_v3():\n    pass\n",
                 "c1",
             ),

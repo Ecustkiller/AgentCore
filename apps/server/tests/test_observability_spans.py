@@ -375,7 +375,7 @@ def test_log_exporter_truncates_with_markers_and_keeps_late_failures(monkeypatch
         _run_started("w2", "w2", kind="agent", parent="cap", ts="t2"),
         _fact(
             "tool_call",
-            {"run_id": "w2", "tool_call_id": "err2", "name": "file_read", "success": False},
+            {"run_id": "w2", "tool_call_id": "err2", "name": "read", "success": False},
         ),
         _run_started("w3", "w3", kind="agent", parent="cap", ts="t3"),
         _fact(

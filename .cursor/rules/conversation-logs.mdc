@@ -27,7 +27,7 @@ uv run python scripts/log_timeline.py --pack <dir> --full --trace <tid>
 uv run python scripts/log_timeline.py --raw --trace <trace_id>    # 全量仅需要时
 uv run python scripts/log_timeline.py <conversation_id>
 uv run python scripts/log_timeline.py --recent
-uv run python scripts/log_stats.py --json
+uv run python scripts/log_stats.py --json  # Prefix Cache samples_by_breach → --trace
 uv run python scripts/log_patrol.py --export-dir ../../logs/prod-export --since 2d  # 巡检①
 ```
 

@@ -48,7 +48,7 @@ import {
 } from "./roots";
 import { saveBytesToDisk } from "./save";
 import { adoptSessionRootAlias } from "./sessionAlias";
-import { copyPath, openWithDefaultApp, reveal, trashPath } from "./shell";
+import { openWithDefaultApp, reveal, trashPath } from "./shell";
 import {
   type StageDest,
   consumeStagedBytes,
@@ -741,12 +741,6 @@ export function registerFsIpc(): void {
       };
     }
     return openWithDefaultApp(args.rootId, args.relPath);
-  });
-
-  ipcMain.handle(FS_CHANNELS.copyPath, (_e, p: unknown) => {
-    const args = requireStringFields(p, ["rootId", "relPath"]);
-    if (!args) return invalidFsResult();
-    return copyPath(args.rootId, args.relPath);
   });
 
   ipcMain.handle(FS_CHANNELS.trashPath, (_e, p: unknown) => {

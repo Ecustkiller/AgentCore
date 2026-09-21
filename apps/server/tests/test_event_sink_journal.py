@@ -129,7 +129,7 @@ def test_durable_events_after_close_still_journal_display():
 def test_tool_use_end_carries_capped_display():
     # 工具结果富渲染: a tool's structured display rides the event when present and is
     # size-capped (it is journaled / persisted); an absent display omits the key.
-    plain = tool_use_end("t1", "file_read", success=True, output="ok")
+    plain = tool_use_end("t1", "read", success=True, output="ok")
     assert "display" not in plain.payload
 
     ev = tool_use_end(

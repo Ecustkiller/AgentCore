@@ -2,7 +2,19 @@
 import { UploadMenu } from "@/components/files/UploadMenu";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+
+beforeAll(() => {
+  globalThis.ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+  Element.prototype.scrollIntoView ??= () => {};
+  Element.prototype.hasPointerCapture ??= () => false;
+  Element.prototype.setPointerCapture ??= () => {};
+  Element.prototype.releasePointerCapture ??= () => {};
+});
 
 afterEach(() => {
   cleanup();
@@ -22,13 +34,13 @@ describe("UploadMenu", () => {
       </TooltipProvider>,
     );
 
-    expect(screen.queryByRole("button", { name: "上传文件夹" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "上传" }));
-    fireEvent.click(screen.getByRole("button", { name: "上传文件" }));
+    expect(screen.queryByRole("menuitem", { name: "上传文件" })).toBeNull();
+    fireEvent.pointerDown(screen.getByRole("button", { name: "上传" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "上传文件" }));
     expect(onUploadFiles).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "上传" }));
-    fireEvent.click(screen.getByRole("button", { name: "上传文件夹" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "上传" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "上传文件夹" }));
     expect(onUploadFolder).toHaveBeenCalledTimes(1);
   });
 });

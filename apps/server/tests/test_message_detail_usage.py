@@ -41,6 +41,25 @@ def test_usage_row_projects_to_short_keys():
     assert d.usage is not None
     assert (d.usage.input, d.usage.output, d.usage.reasoning) == (100, 40, 12)
     assert (d.usage.cache_hit, d.usage.cache_miss) == (30, 70)
+    assert d.usage.last_prompt is None
+
+
+def test_usage_row_projects_last_prompt_from_long_keys():
+    d = MessageDetail.model_validate(
+        _row(
+            {
+                "input_tokens": 200_000,
+                "output_tokens": 40,
+                "reasoning_tokens": 0,
+                "cache_hit_tokens": 0,
+                "cache_miss_tokens": 200_000,
+                "last_prompt_tokens": 50_000,
+            }
+        )
+    )
+    assert d.usage is not None
+    assert d.usage.last_prompt == 50_000
+    assert d.usage.input == 200_000
 
 
 def test_omitted_cache_split_projects_whole_prompt_as_miss():

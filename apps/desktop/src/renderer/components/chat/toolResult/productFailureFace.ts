@@ -9,7 +9,7 @@
  * ``NO_USER_FACE_CODES`` is a twin of the server set: new events omit ``message``;
  * this hides historical journals that still carry a self-heal aside.
  *
- * Path-missing / str_replace user sentences are byte-equal to
+ * Path-missing / edit user sentences are byte-equal to
  * `apps/server/agentcore/tools/builtin/file_ops/errors.py`.
  */
 
@@ -24,7 +24,7 @@ export const RETIRED_VERIFY_RESULT_MESSAGE =
 /** Missing path — generic fallback when the authored sentence is a model receipt. */
 export const MISSING_PATH_USER_FACE = "没找到这个路径，我会换个方式继续。";
 
-/** str_replace did not match disk — generic fallback for leaked receipts. */
+/** edit did not match disk — generic fallback for leaked receipts. */
 export const STR_REPLACE_NO_MATCH_USER_FACE =
   "这段内容和文件对不上，我会换个方式改。";
 
@@ -41,8 +41,6 @@ export const NO_USER_FACE_CODES = new Set([
   "not_a_web_url",
   "url_not_workspace_path",
   "loopback_host",
-  "shell_fetch_redirect",
-  "shell_download_redirect",
   "verify_contract",
   "run_contract",
   "http_status_error",
@@ -74,9 +72,9 @@ const COMPACT_USER_FACE_MAX = 200;
 const MODEL_RECEIPT_MARKERS = [
   "old_string",
   "反复重试",
-  "file_read",
-  "file_write",
-  "str_replace",
+  "read",
+  "write",
+  "edit",
   "glob",
   "grep",
 ];

@@ -152,19 +152,13 @@ def tool_warrants_turn_baseline(
 ) -> bool:
     """True when this call is about to change workspace files (not a greeting).
 
-    File-mutation tools and mutating ``git`` subcommands. Destructive ``run`` /
-    ``host(action=shell)`` stay on :func:`ensure_local_baseline_for_destructive`.
+    File-mutation tools. Destructive ``run`` / ``host`` stay on
+    :func:`ensure_local_baseline_for_destructive`.
     """
     name = (tool_name or "").strip()
     from agentcore.tools.builtin import file_mutation_tool_names
 
-    if name in file_mutation_tool_names():
-        return True
-    if name == "git":
-        from agentcore.tools.builtin.git_ops import git_call_is_write
-
-        return git_call_is_write(arguments)
-    return False
+    return name in file_mutation_tool_names()
 
 
 def _path_root(backend: Any, workspace_root: Path | None) -> Path | None:

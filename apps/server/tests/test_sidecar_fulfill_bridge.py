@@ -217,8 +217,8 @@ async def _apply_cross_desk_target(
         local_binding=LocalBinding(root_id=target_root_id, root_label="目标项目"),
     )
 
-    async def _fake_rebuild(**_kwargs: Any) -> str:
-        return "TARGET_PROMPT"
+    async def _fake_rebuild(**_kwargs: Any) -> tuple[str, str]:
+        return "TARGET_PROMPT", ""
 
     with (
         patch(

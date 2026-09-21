@@ -29,7 +29,7 @@ function mineItem(over: {
   label: string;
   description?: string;
   content?: string;
-  memoryKind?: "preferences" | "profile" | null;
+  aiMaintained?: boolean;
   disputed?: boolean;
   applyMode?: "always" | "on_demand";
 }): Extract<PromptCatalogItem, { kind: "mine" }> {
@@ -44,8 +44,7 @@ function mineItem(over: {
     content: over.content ?? "",
     version: "v1",
     applyMode: over.applyMode ?? "on_demand",
-    aiMaintained: over.memoryKind != null,
-    memoryKind: over.memoryKind ?? null,
+    aiMaintained: over.aiMaintained ?? false,
     listable: true,
     disputed: over.disputed ?? false,
     alwaysChars: null,
@@ -84,12 +83,14 @@ function toolItem(over: {
   resident: boolean;
   approval?: CapabilityTool["approval"];
   availableTo?: string[];
+  blurb?: string;
 }): Extract<PromptCatalogItem, { kind: "tool" }> {
   const tool: CapabilityTool = {
-    name: "file_read",
+    name: "read",
     face: "file",
     resident: over.resident,
     summary: "读工作区文件",
+    blurb: over.blurb ?? "打开文本、代码或图片，看里面写了什么",
     description: "读工作区文件",
     parameters: {},
     approval: over.approval ?? "never",
@@ -176,9 +177,8 @@ describe("promptItemShelfCopy", () => {
       promptItemShelfCopy(mineItem({ label: "合同审查" })).description,
     ).toBe("");
     expect(
-      promptItemShelfCopy(
-        mineItem({ label: "偏好", memoryKind: "preferences" }),
-      ).description,
+      promptItemShelfCopy(mineItem({ label: "偏好", aiMaintained: true }))
+        .description,
     ).toBe("");
   });
 
@@ -191,9 +191,8 @@ describe("promptItemShelfCopy", () => {
         .accessory,
     ).toEqual([{ label: "我的" }]);
     expect(
-      promptItemShelfCopy(
-        mineItem({ label: "偏好", memoryKind: "preferences" }),
-      ).accessory,
+      promptItemShelfCopy(mineItem({ label: "偏好", aiMaintained: true }))
+        .accessory,
     ).toEqual([]);
   });
 
@@ -243,7 +242,7 @@ describe("promptItemShelfCopy", () => {
   it("出厂工具标题用中文简介，底栏打工具，例外才叠加", () => {
     const copy = promptItemShelfCopy(toolItem({ resident: true }));
     expect(copy.title).toBe("读工作区文件");
-    expect(copy.description).toBe("");
+    expect(copy.description).toBe("打开文本、代码或图片，看里面写了什么");
     expect(copy.tags).toEqual(["工具"]);
     expect(copy.accessory).toEqual([{ label: "官方" }]);
     expect(
@@ -273,21 +272,24 @@ describe("promptItemShelfCopy", () => {
     expect(copy.tags.join(" ")).not.toContain("host");
   });
 
-  it("读卡标题旁为出厂工具补开场轴", () => {
+  it("读卡标题旁为列出的工具补开场即用", () => {
     const resident = toolItem({ resident: true });
     expect(
       promptReadHeaderChips(promptItemShelfCopy(resident), resident),
     ).toEqual([{ label: "官方" }, { label: "开场即用" }, { label: "工具" }]);
-    const deferred = toolItem({
+    const connectorAction = toolItem({
       resident: false,
       approval: "grantable",
       availableTo: ["ceo"],
     });
     expect(
-      promptReadHeaderChips(promptItemShelfCopy(deferred), deferred),
+      promptReadHeaderChips(
+        promptItemShelfCopy(connectorAction),
+        connectorAction,
+      ),
     ).toEqual([
       { label: "官方" },
-      { label: "查阅后启用" },
+      { label: "开场即用" },
       { label: "工具" },
       { label: "需审批" },
       { label: "CEO" },

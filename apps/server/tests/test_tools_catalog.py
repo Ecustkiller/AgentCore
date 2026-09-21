@@ -18,45 +18,41 @@ from agentcore.tools.builtin import (
 _EXPECTED_NAMES = {
     "web_search",
     "web_fetch",
-    "download_url",
-    "file_read",
-    "file_write",
-    "str_replace",
+    "read",
+    "write",
+    "edit",
     "file_list",
     "glob",
     "file_delete",
     "file_batch",
     "md_export",
     "grep",
-    "git",
     "run",
 }
 
-# CEO default roster = builtin surface (read + write + execute). On-demand
+# CEO default roster = builtin surface (read + write + execute + Host). On-demand
 # exporters stay registered; opening FC table withholds them separately.
 _CEO_DEFAULT_NAMES = {
     "web_search",
     "web_fetch",
-    "file_read",
-    "file_write",
-    "str_replace",
+    "read",
+    "write",
+    "edit",
     "file_list",
     "glob",
     "file_delete",
     "file_batch",
     "md_export",
-    "download_url",
     "grep",
-    "git",
     "run",
+    "host",
 }
 _MUTATION_NAMES = {
-    "file_write",
-    "str_replace",
+    "write",
+    "edit",
     "file_delete",
     "file_batch",
     "md_export",
-    "download_url",
 }
 
 
@@ -84,7 +80,7 @@ def test_worker_registry_adds_worker_surface_tools_without_leaking_them():
     ceo = {s.name for s in build_ceo_tool_registry().list_all()}
     assert worker >= _WORKER_SURFACE_NAMES
     # builtins + the worker-surface primitives, nothing else.
-    assert worker == _EXPECTED_NAMES | _WORKER_SURFACE_NAMES
+    assert worker == _EXPECTED_NAMES | _WORKER_SURFACE_NAMES | {"host"}
     assert builtin.isdisjoint(_WORKER_SURFACE_NAMES)
     # Default CEO registry omits worker-surface names (escalate/handoff never join CEO).
     assert ceo.isdisjoint(_WORKER_SURFACE_NAMES)
@@ -92,15 +88,15 @@ def test_worker_registry_adds_worker_surface_tools_without_leaking_them():
 
 def test_write_and_exec_tools_are_grantable():
     approvals = {s.name: s.approval for s in build_builtin_registry().list_all()}
-    assert approvals["file_write"] is ToolApproval.GRANTABLE
-    assert approvals["str_replace"] is ToolApproval.GRANTABLE
+    assert approvals["write"] is ToolApproval.GRANTABLE
+    assert approvals["edit"] is ToolApproval.GRANTABLE
     assert approvals["run"] is ToolApproval.GRANTABLE
     # Destructive / mutating file ops require the same consent as writes.
     assert approvals["file_delete"] is ToolApproval.GRANTABLE
     assert approvals["file_batch"] is ToolApproval.GRANTABLE
     assert approvals["md_export"] is ToolApproval.GRANTABLE
     # Read-only tools auto-run (no approval prompt).
-    assert approvals["file_read"] is ToolApproval.NEVER
+    assert approvals["read"] is ToolApproval.NEVER
     assert approvals["file_list"] is ToolApproval.NEVER
     assert approvals["glob"] is ToolApproval.NEVER
     assert approvals["web_search"] is ToolApproval.NEVER
@@ -112,12 +108,11 @@ def test_file_mutation_class_is_grantable_filesystem_without_code_execute():
     # Pinned so a future tool can't silently widen or narrow what one click grants.
     names = file_mutation_tool_names()
     assert names == {
-        "file_write",
-        "str_replace",
+        "write",
+        "edit",
         "file_delete",
         "file_batch",
         "md_export",
-        "download_url",
     }
     assert "code_execute" not in names
     assert names == _MUTATION_NAMES - {"code_execute"}
@@ -134,24 +129,20 @@ def test_run_description_does_not_overpromise_sandbox():
 
     assert "用户本机" in run_description("local")
     assert "云桌" in run_description("server")
-    assert "download_url" in run_description("server")
+    assert "web_fetch" in run_description("server")
     assert "私网" in run_description("server")
     assert "无任意 HTTPS" not in run_description("server")
     assert "用户本机" in RunTool(location="local").schema.description
     assert "云桌" in RunTool(location="server").schema.description
 
 
-def test_run_consult_is_how_owner_file_read_keeps_dump_steer():
-    from agentcore.runtime.skills import build_system_skill_registry
+def test_run_consult_is_not_how_owner_file_read_keeps_dump_steer():
     from agentcore.tools.builtin.file_ops.read import FileReadTool
     from agentcore.tools.builtin.run import run_description
 
     desc = run_description("local")
-    assert "HOW→consult(run)" in desc
-    skill = build_system_skill_registry().get("run")
-    assert skill is not None
-    assert "命令" in skill.body
-    # dump 纠偏在 source_inspect 回执，不进 file_read 目录行
+    assert "HOW→consult(run)" not in desc
+    # dump 纠偏在 source_inspect 回执，不进 read 目录行
     fr = FileReadTool().schema.description
     assert "dump" not in fr
     assert "code_execute" not in fr
@@ -159,12 +150,11 @@ def test_run_consult_is_how_owner_file_read_keeps_dump_steer():
 
 
 def test_run_description_routes_long_running_to_background():
-    from agentcore.runtime.skills import build_system_skill_registry
     from agentcore.tools.builtin.run import RunTool, run_description
 
     desc = run_description("local")
-    assert "HOW→consult(run)" in desc
-    assert "background=true" in desc
+    assert "HOW→consult(run)" not in desc
+    assert "background=true" not in desc
     schema = RunTool().schema
     assert "wait_for" in schema.parameters["properties"]
     assert "background" in schema.parameters["properties"]
@@ -176,7 +166,6 @@ def test_run_description_routes_long_running_to_background():
     assert "终端" in schema.parameters["properties"]["command"]["description"]
     assert "pnpm" not in schema.parameters["properties"]["command"]["description"]
     assert "purpose" not in schema.parameters["properties"]
-    assert "pnpm" in build_system_skill_registry().get("run").body
     assert "仅本地" not in RunTool(location="server").schema.description
 
 
@@ -209,16 +198,18 @@ def test_run_description_server_omits_local_machine_wording():
 
 def test_web_fetch_description_does_not_overclaim_completeness():
     # 截断是执行回执事实，不进按钮冒充「完整正文」，也不再广告可调配额。
+    # 深不深读由模型自判；按钮只写这是什么。工作区改道在失败回执。
     schemas = {s.name: s for s in build_builtin_registry().list_all()}
     desc = schemas["web_fetch"].description
     props = schemas["web_fetch"].parameters["properties"]
     assert "max_chars" not in props
     assert "完整正文" not in desc
     assert "#rN" not in desc
-    assert "深读" in desc
-    assert "search" in desc
     assert "max_chars" not in desc
     assert "截断" not in desc
+    assert "摘要不够" not in desc
+    assert "核对原文" not in desc
+    assert "http" in desc
 
 
 def test_ceo_registry_holds_full_builtin_surface():
@@ -234,18 +225,22 @@ def test_ceo_registry_includes_mutation_tools():
 def test_ceo_registry_write_tools_are_grantable():
     schemas = {s.name: s for s in build_ceo_tool_registry().list_all()}
     assert schemas, "CEO must retain its builtin tools"
-    for name in ("file_write", "str_replace", "file_delete", "run"):
+    for name in ("write", "edit", "file_delete", "run"):
         assert schemas[name].approval is ToolApproval.GRANTABLE, name
-    for name in ("file_read", "file_list", "web_search"):
+    for name in ("read", "file_list", "web_search"):
         assert schemas[name].approval is ToolApproval.NEVER, name
 
 
-def test_ceo_registry_host_when_desktop_online():
+def test_ceo_registry_holds_host_regardless_of_desktop_online():
     schemas = {
+        s.name: s for s in build_ceo_tool_registry(desktop_online=False).list_all()
+    }
+    assert set(schemas) == _CEO_DEFAULT_NAMES
+    assert schemas["host"].approval is ToolApproval.NEVER
+    online = {
         s.name: s for s in build_ceo_tool_registry(desktop_online=True).list_all()
     }
-    assert set(schemas) == _CEO_DEFAULT_NAMES | {"host"}
-    assert schemas["host"].approval is ToolApproval.NEVER
+    assert set(online) == _CEO_DEFAULT_NAMES
 
 
 def test_ceo_registry_browser_interactive_grantable_when_include_browser():
@@ -254,7 +249,7 @@ def test_ceo_registry_browser_interactive_grantable_when_include_browser():
     }
     assert set(schemas) == _CEO_DEFAULT_NAMES | {"browser"}
     assert schemas["browser"].approval is ToolApproval.GRANTABLE
-    assert schemas["file_write"].approval is ToolApproval.GRANTABLE
+    assert schemas["write"].approval is ToolApproval.GRANTABLE
 
 
 def test_ceo_registry_excludes_browser_navigate_by_default():

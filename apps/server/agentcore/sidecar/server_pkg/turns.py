@@ -9,6 +9,7 @@ import time
 from typing import Any
 
 from agentcore.conversation.common import preview
+from agentcore.conversation.store.usage_settle import usage_settle_finalize_kwargs
 from agentcore.conversation.zero_output_rollback import (
     maybe_discard_zero_output_outbox,
     result_from_unstarted_close,
@@ -430,6 +431,7 @@ class TurnExecutionMixin:
         register_current_turn_run(
             conversation_id=conversation_id, sink=sink, user_id=self._user_id
         )
+        from agentcore.conversation.history import drop_trailing_user_turn
         from agentcore.sidecar.chat_history import (
             ChatContextUnavailableError,
             resolve_sidecar_turn_history,
@@ -444,6 +446,10 @@ class TurnExecutionMixin:
                 fallback=raw_history if desktop_confirmed else None,
                 # Desktop cookie window is the same endpoint; do not fetch twice.
                 prefer_cloud=not desktop_confirmed,
+            )
+            # Cloud load may include this turn's user; desktop fetch may precede insert.
+            history = drop_trailing_user_turn(
+                history, only_if_content=user_message
             )
         except ChatContextUnavailableError as exc:
             logger.warning(
@@ -868,23 +874,17 @@ class TurnExecutionMixin:
             assistant_content=content,
             assistant_reasoning=result.get("reasoning_content"),
             citations=result.get("citations") or [],
+            evidence_ledger=result.get("evidence_ledger") or [],
             runs=runs,
             # Complete result journal replaces progressive mid-run map when present.
             journal_entries=journal_entries if isinstance(journal_entries, list) else None,
             message_id=result.get("message_id"),
-            input_tokens=int(result.get("input_tokens", 0) or 0),
-            output_tokens=int(result.get("output_tokens", 0) or 0),
-            reasoning_tokens=int(result.get("reasoning_tokens", 0) or 0),
-            cache_hit_tokens=int(result.get("cache_hit_tokens", 0) or 0),
-            cache_miss_tokens=int(result.get("cache_miss_tokens", 0) or 0),
-            rounds=int(result.get("rounds", 0) or 0),
-            duration_ms=result.get("duration_ms"),
-            generation_ms=result.get("generation_ms"),
             trace_id=trace_id,
             finish_reason=finish,
             origin=origin,
             execution_id=execution_id,
             harvest_kind=harvest_kind,
+            **usage_settle_finalize_kwargs(result),
         )
 
     async def _outbox_resume_writeback(

@@ -39,7 +39,7 @@ class _ServerBackend:
 
 
 _FILE_OP_CLASS = frozenset(
-    {"file_write", "str_replace", "git"}
+    {"write", "edit", "git"}
 )
 
 
@@ -154,7 +154,7 @@ def test_command_ask_withholds_execution_tools():
     assert "code_execute" not in names
     assert "test_run" not in names
     assert "terminal" not in names
-    assert "file_write" in names
+    assert "write" in names
     assert "web_search" in names
 
 
@@ -253,7 +253,7 @@ def test_cloud_worker_honors_file_write_ask():
     assert (
         cloud_worker_skips_per_call_gate(
             cloud,
-            "file_write",
+            "write",
             permission_axes=cautious,
             file_op_tools=_FILE_OP_CLASS,
         )
@@ -262,7 +262,7 @@ def test_cloud_worker_honors_file_write_ask():
     assert (
         cloud_worker_skips_per_call_gate(
             cloud,
-            "file_write",
+            "write",
             permission_axes=session,
             file_op_tools=_FILE_OP_CLASS,
         )
@@ -280,7 +280,7 @@ def test_cloud_worker_honors_file_write_ask():
     assert (
         cloud_worker_skips_per_call_gate(
             _LocalBackend(),
-            "file_write",
+            "write",
             permission_axes=cautious,
             file_op_tools=_FILE_OP_CLASS,
         )

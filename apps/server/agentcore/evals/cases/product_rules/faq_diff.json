@@ -5,14 +5,14 @@
   "path": "team",
   "mode": "economy",
   "workspace_fixture": "cursor_rules_trap",
-  "_note": "纯 FAQ：对照口径应落到 .agentcore/规则/*.md；skills/*.json 不是『平台规则』迁移目标。",
+  "_note": "纯 FAQ：对照口径应落到 .agentcore/rules/*.md；skills/*.json 不是『平台规则』迁移目标。",
   "checks": [
     { "name": "FinishReason" },
     { "name": "NotDelegated" },
     { "name": "ToolCalled", "args": { "tool": "consult" } },
     {
       "name": "ContentMatches",
-      "args": { "pattern": "\\.agentcore/规则" }
+      "args": { "pattern": "\\.agentcore/rules" }
     },
     {
       "name": "NoFabricationMarker",
@@ -28,5 +28,5 @@
       }
     }
   ],
-  "rubric": "短答区分 Cursor .mdc 与 AgentCore 用户规则落点；正文出现 .agentcore/规则。"
+  "rubric": "短答区分 Cursor .mdc 与 AgentCore 用户规则落点；正文出现 .agentcore/rules。"
 }

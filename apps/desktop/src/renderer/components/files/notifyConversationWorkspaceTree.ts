@@ -16,12 +16,9 @@ import type { WorkspaceInfo } from "@/services/workspaces";
 
 /** 成功写盘会改树的 builtin（与审批 FILE_OP_TOOLS 对齐，不含 git）。 */
 export const TREE_WRITE_TOOLS: ReadonlySet<string> = new Set([
-  "file_write",
-  "file_append",
-  "str_replace",
+  "write",
+  "edit",
   "file_delete",
-  "file_move",
-  "file_copy",
   "file_batch",
 ]);
 

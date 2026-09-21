@@ -398,7 +398,7 @@ class WorkerResultAccumulator:
         # signals rolled up the SAME parent/child path as usage (merge() below), so a nested
         # lead's sub-team folds in for free. ``boundary_yields`` = 受监督边界让出次数 (首计划存活:
         # a supervised bind/scope boundary handed control back to the captain mid-plan);
-        # ``scope_signals`` = escalate kind=scope count (漂移); ``escalations`` = total
+        # ``scope_signals`` = escalate reason=scope count (漂移); ``escalations`` = total
         # worker→captain escalations. The revise count (返工 的另一半) is read off the revise
         # tool's run_ledger, not here.
         # ``*_by_user`` 是同一批事件里「用户亲手促成的那部分」的**子集**计数，不是新指标：

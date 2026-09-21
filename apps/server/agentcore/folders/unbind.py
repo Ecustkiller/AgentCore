@@ -1,4 +1,4 @@
-"""Clear session/board soft-pointers that reference a folder being deleted.
+"""Clear session soft-pointers that reference a folder being deleted.
 
 Birth ``Conversation.folder_id`` (project affiliation) is **not** handled here —
 callers keep their distinct semantics (soft-delete archive, retention NULL,
@@ -14,12 +14,12 @@ from typing import Any
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agentcore.db.models import Board, Conversation
+from agentcore.db.models import Conversation
 
-# Columns on Conversation / Board that soft-point at a Folder and must NULL out
+# Columns on Conversation that soft-point at a Folder and must NULL out
 # when that folder is deleted (or purged). Driven by :func:`clear_folder_session_pointers`.
 #
-# Adding a new folder-pointer column on Conversation or Board? Register it here
+# Adding a new folder-pointer column on Conversation? Register it here
 # (and it will be cleared automatically). Affiliation-only columns go in
 # :data:`FOLDER_AFFILIATION_COLUMNS` instead; leftover unread columns go in
 # :data:`FOLDER_UNREAD_COLUMNS`. The exhaustiveness test will fail if a new
@@ -28,7 +28,7 @@ FOLDER_NULL_ON_DELETE_POINTERS: Sequence[tuple[type[Any], str]] = (
     (Conversation, "auto_desk_folder_id"),
 )
 
-# Conversation/Board columns that reference folders but are **not** cleared by
+# Conversation columns that reference folders but are **not** cleared by
 # :func:`clear_folder_session_pointers` (call-site membership / birth semantics).
 FOLDER_AFFILIATION_COLUMNS: frozenset[tuple[type[Any], str]] = frozenset(
     {
@@ -37,12 +37,7 @@ FOLDER_AFFILIATION_COLUMNS: frozenset[tuple[type[Any], str]] = frozenset(
 )
 
 # Leftover columns still on the table, unread, not written, not cleared on delete.
-# ``Board.folder_id``: 否决 board ∈ folder; column kept to avoid a migration.
-FOLDER_UNREAD_COLUMNS: frozenset[tuple[type[Any], str]] = frozenset(
-    {
-        (Board, "folder_id"),
-    }
-)
+FOLDER_UNREAD_COLUMNS: frozenset[tuple[type[Any], str]] = frozenset()
 
 
 async def clear_folder_session_pointers(
@@ -51,7 +46,7 @@ async def clear_folder_session_pointers(
     folder_id: str,
     user_id: str | None = None,
 ) -> None:
-    """NULL session/board soft-pointers to ``folder_id`` (same session; no commit).
+    """NULL session soft-pointers to ``folder_id`` (same session; no commit).
 
     ``user_id`` scopes the UPDATE when provided (API soft / permanent delete).
     Omit it for retention's global sweep.

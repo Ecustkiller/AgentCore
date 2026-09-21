@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 /**
- * Team-strip fail: 排查包挂气泡「更多」，不挂错误卡 / 状态条。
+ * Team-strip fail that is not the live last turn: 排查包挂气泡「更多」。
+ * 横幅亮着时宿主在输入区；本测 mock 没有消息窗，所以落「更多」。
  */
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Message } from "@/stores/conversation";

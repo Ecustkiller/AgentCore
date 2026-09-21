@@ -61,4 +61,3 @@ tests/          # pytest（含架构边界测试）
 
 - 架构 import 边界：`tests/test_arch_boundaries.py`
 - 发布前：仓库根 `pnpm release:gate`（与 CI 同构）
-- 贡献约定：[`CONTRIBUTING.md`](../../CONTRIBUTING.md)

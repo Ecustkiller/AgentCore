@@ -411,6 +411,41 @@ async def test_expand_dormant_system_falls_to_byok_coherent(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_provider_first_fallback_uses_url_seed_not_stored_column(monkeypatch):
+    """Leftover ``user_llm_providers.default_model`` is not a chat identity."""
+    from agentcore.llm.model_profiles import _provider_first_fallback
+    from agentcore.llm.profiles import PLATFORM_MODEL_FLASH
+
+    row = SimpleNamespace(
+        id="p1",
+        base_url="https://api.openai.com/v1",
+        default_model="stale-user-model",
+    )
+    monkeypatch.setattr(
+        "agentcore.llm.resolve._default_chat_provider_row",
+        AsyncMock(return_value=row),
+    )
+    sel = await _provider_first_fallback(MagicMock(), "u1")
+    assert sel.model == "gpt-4o"
+    assert sel.origin == "byok"
+    assert sel.provider_id == "p1"
+
+    custom = SimpleNamespace(
+        id="p2",
+        base_url="https://my-proxy.example/v1",
+        default_model="stale-user-model",
+    )
+    monkeypatch.setattr(
+        "agentcore.llm.resolve._default_chat_provider_row",
+        AsyncMock(return_value=custom),
+    )
+    sel2 = await _provider_first_fallback(MagicMock(), "u1")
+    assert sel2.model == PLATFORM_MODEL_FLASH
+    assert sel2.origin == "byok"
+    assert sel2.provider_id == "p2"
+
+
+@pytest.mark.asyncio
 async def test_expand_user_profile_includes_vision_slot(monkeypatch):
     """User combo with vision columns → expand surfaces vision; empty stays None."""
     from types import SimpleNamespace

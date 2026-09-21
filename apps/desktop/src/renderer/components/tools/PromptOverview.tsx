@@ -1,6 +1,13 @@
 import { InlineInput } from "@/components/files/FileTreeInline";
 import { FACE_META } from "@/components/tools/catalogMeta";
-import { Badge, CATALOG_GRID_CLASS, CatalogTile } from "@/components/ui";
+import {
+  Badge,
+  CATALOG_GRID_CLASS,
+  Card,
+  CatalogIconShell,
+  CatalogTile,
+  SurfaceRowButton,
+} from "@/components/ui";
 import { artifactColorVar, catalogCategoryColorVar } from "@/lib/catalogColors";
 import type {
   PromptCatalogItem,
@@ -10,56 +17,51 @@ import type {
 import {
   PROMPT_SHELF_AFFORDANCE,
   type PromptShelfChip,
-  promptConnectorShelfCopy,
   promptItemShelfCopy,
   promptMineShelfOpts,
+  promptShelfHeaderChips,
 } from "@/lib/promptShelfTile";
-import { buildAlwaysRows } from "@/lib/promptSizes";
+import { buildAlwaysRows, formatAlwaysRowChars } from "@/lib/promptSizes";
 import { cn } from "@/lib/utils";
 import type { SkillStoreListing } from "@/services/skillStore";
-import {
-  BookOpen,
-  FileText,
-  FolderPlus,
-  Plus,
-  ScrollText,
-  Unplug,
-  Wrench,
-} from "lucide-react";
-import type { DragEvent, ReactNode } from "react";
+import { BookOpen, FileText, ScrollText, Wrench } from "lucide-react";
+import type { DragEvent, MouseEvent, ReactNode } from "react";
 import { useMemo } from "react";
+
+const EMPTY_PICKED: ReadonlySet<string> = new Set();
 
 export type PromptDropDest =
   | { kind: "root" }
   | { kind: "folder"; folder: PromptRailFolder };
 
-export type PromptOverviewConnector = {
-  id: string;
-  label: string;
-  runtimeError?: string | null;
-  accessory?: ReactNode;
-};
+export type PromptOverviewPane = "official" | "mine";
 
-const RAIL_SHELL = "rounded-xl border border-border bg-card/60 p-4";
+function matchQuery(
+  query: string,
+  ...parts: Array<string | undefined>
+): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return parts.some((part) => part?.toLowerCase().includes(q));
+}
 
 export function PromptOverview({
+  pane,
   rail,
   selectedId,
+  pickedIds,
   dropDest,
   otherFolder,
-  connectors,
-  connectorError,
-  showConnectors,
   busy,
   listings = [],
   installedListings = [],
   renamingFolderId = null,
+  query = "",
   onOpenItem,
-  onCreateMine,
+  onCreateMine: _onCreateMine,
   onCreateFolder,
   onSubmitRenameFolder,
   onCancelRenameFolder,
-  onAddConnector,
   onAcceptAlwaysDrag,
   onDropAlways,
   onAcceptFolderDrag,
@@ -67,23 +69,26 @@ export function PromptOverview({
   onRejectDrag,
   renderMineTile,
 }: {
+  pane: PromptOverviewPane;
   rail: PromptRail;
   selectedId: string | null;
+  /** 我的 / 市场多选高亮（catalog id）。与 selectedId（当前读卡）分开。 */
+  pickedIds?: ReadonlySet<string>;
   dropDest: PromptDropDest | null;
   otherFolder: PromptRailFolder;
-  connectors: PromptOverviewConnector[];
-  connectorError: string | null;
-  showConnectors: boolean;
   busy: boolean;
   listings?: SkillStoreListing[];
   installedListings?: SkillStoreListing[];
   renamingFolderId?: string | null;
-  onOpenItem: (id: string) => void;
+  query?: string;
+  onOpenItem: (
+    id: string,
+    event?: Pick<MouseEvent, "ctrlKey" | "metaKey" | "shiftKey">,
+  ) => void;
   onCreateMine: () => void;
   onCreateFolder: () => void;
   onSubmitRenameFolder: (id: string, name: string) => void;
   onCancelRenameFolder: () => void;
-  onAddConnector: (() => void) | null;
   onAcceptAlwaysDrag: (event: DragEvent) => void;
   onDropAlways: (event: DragEvent) => void;
   onAcceptFolderDrag: (event: DragEvent, folder: PromptRailFolder) => void;
@@ -94,358 +99,319 @@ export function PromptOverview({
     children: ReactNode;
   }) => ReactNode;
 }) {
-  const alwaysRows = useMemo(() => buildAlwaysRows(rail), [rail]);
-  const constitutionRows = alwaysRows.filter(
-    (row) => row.item.kind === "shared",
+  const picked = pickedIds ?? EMPTY_PICKED;
+  const q = query.trim();
+  const alwaysRows = useMemo(() => {
+    const rows = buildAlwaysRows(rail);
+    if (pane === "official") {
+      return rows.filter((row) => row.item.kind === "shared");
+    }
+    return rows.filter((row) => row.item.kind === "mine");
+  }, [rail, pane]);
+  const visibleAlways = alwaysRows.filter((row) => {
+    const copy = promptItemShelfCopy(row.item, { alwaysChars: row.chars });
+    return matchQuery(q, copy.title, copy.description, row.label);
+  });
+  const folders = rail.folders
+    .map((folder) => ({
+      ...folder,
+      items: folder.items.filter((item) => {
+        const copy = promptItemShelfCopy(item);
+        return matchQuery(
+          q,
+          folder.name,
+          copy.title,
+          copy.description,
+          item.label,
+        );
+      }),
+    }))
+    .filter(
+      (folder) => !q || folder.items.length > 0 || matchQuery(q, folder.name),
+    );
+  const factoryTools = rail.tools.filter(
+    (item) =>
+      item.tool.resident &&
+      matchQuery(
+        q,
+        item.label,
+        item.tool.summary,
+        item.tool.blurb,
+        item.tool.description,
+      ),
   );
-  const alwaysMineRows = alwaysRows.filter((row) => row.item.kind === "mine");
-  const residentTools = useMemo(
-    () => rail.tools.filter((item) => item.tool.resident),
-    [rail.tools],
+  const deferredTools = rail.tools.filter(
+    (item) =>
+      !item.tool.resident &&
+      matchQuery(
+        q,
+        item.label,
+        item.tool.summary,
+        item.tool.blurb,
+        item.tool.description,
+      ),
   );
-  const onDemandTools = useMemo(
-    () => rail.tools.filter((item) => !item.tool.resident),
-    [rail.tools],
-  );
+  const howItems = rail.official.filter((item) => {
+    const copy = promptItemShelfCopy(item);
+    return matchQuery(q, copy.title, copy.description, item.label);
+  });
+  const promptItems =
+    pane === "official"
+      ? [...visibleAlways.map((row) => row.item), ...howItems]
+      : [];
+  const showDemand = pane === "mine" && (!q || folders.length > 0);
+  const toolItems = [...factoryTools, ...deferredTools];
+  const showPrompts = promptItems.length > 0;
+  const showTools = pane === "official" && toolItems.length > 0;
+  const emptySearch =
+    Boolean(q) &&
+    (pane === "mine" ? visibleAlways.length === 0 : promptItems.length === 0) &&
+    !showDemand &&
+    !showTools;
 
   return (
     <div className="flex w-full flex-col gap-8" data-testid="prompt-overview">
-      <section
-        data-testid="prompt-rail-always"
-        data-prompt-drop="root"
-        className={cn(
-          RAIL_SHELL,
-          dropDest?.kind === "root" && "ring-1 ring-inset ring-primary",
-        )}
-        onDragOver={onAcceptAlwaysDrag}
-        onDrop={onDropAlways}
-      >
-        <RailHeading description="每回合都带着">常驻</RailHeading>
-        <div className={CATALOG_GRID_CLASS}>
-          {constitutionRows.map((row) => (
-            <ItemTile
-              key={row.catalogId}
-              item={row.item}
-              alwaysChars={row.chars}
-              selected={selectedId === row.catalogId}
-              listings={listings}
-              installedListings={installedListings}
-              onOpen={() => onOpenItem(row.catalogId)}
-              renderMineTile={renderMineTile}
-            />
-          ))}
-          {alwaysMineRows.map((row) => (
-            <ItemTile
-              key={row.catalogId}
-              item={row.item}
-              alwaysChars={row.chars}
-              selected={selectedId === row.catalogId}
-              listings={listings}
-              installedListings={installedListings}
-              onOpen={() => onOpenItem(row.catalogId)}
-              renderMineTile={renderMineTile}
-            />
-          ))}
-          {residentTools.map((item) => (
-            <ItemTile
-              key={item.id}
-              item={item}
-              selected={selectedId === item.id}
-              listings={listings}
-              installedListings={installedListings}
-              onOpen={() => onOpenItem(item.id)}
-            />
-          ))}
-        </div>
-      </section>
+      {pane === "mine" ? (
+        <section
+          data-testid="prompt-rail-always"
+          data-prompt-drop="root"
+          className="min-w-0"
+          onDragOver={onAcceptAlwaysDrag}
+          onDrop={onDropAlways}
+        >
+          <RailHeading meta={`${visibleAlways.length} 条`}>必带</RailHeading>
+          {visibleAlways.length === 0 ? (
+            <DropWell highlighted={dropDest?.kind === "root"}>
+              {q ? "没有匹配的必带条目。" : "拖一条进来，下一回合就会带上。"}
+            </DropWell>
+          ) : (
+            <div
+              className={cn(
+                "mt-3 grid grid-cols-3 gap-3",
+                dropDest?.kind === "root" && "rounded-xl ring-2 ring-ring",
+              )}
+            >
+              {visibleAlways.map((row) => (
+                <ItemCard
+                  key={row.catalogId}
+                  item={row.item}
+                  alwaysChars={row.chars}
+                  selected={selectedId === row.catalogId}
+                  picked={picked.has(row.catalogId)}
+                  listings={listings}
+                  installedListings={installedListings}
+                  onOpen={(event) => onOpenItem(row.catalogId, event)}
+                  renderMineTile={renderMineTile}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
 
-      <section
-        data-testid="prompt-rail-on-demand"
-        data-prompt-drop="folder"
-        className={RAIL_SHELL}
-        onDragOver={(event) => onAcceptFolderDrag(event, otherFolder)}
-        onDrop={(event) => onDropFolder(event, otherFolder)}
-      >
-        <RailHeading description="用到才翻">按需</RailHeading>
-        <div data-testid="prompt-rail-create" className={CATALOG_GRID_CLASS}>
-          <CatalogTile
-            icon={<Plus size={18} />}
-            colorVar={artifactColorVar("guidelines")}
-            title={PROMPT_SHELF_AFFORDANCE.createEntry.title}
-            description={PROMPT_SHELF_AFFORDANCE.createEntry.description}
-            onClick={busy ? undefined : onCreateMine}
-          />
-          <CatalogTile
-            icon={<FolderPlus size={18} />}
-            colorVar={artifactColorVar("guidelines")}
-            title={PROMPT_SHELF_AFFORDANCE.createFolder.title}
-            description={PROMPT_SHELF_AFFORDANCE.createFolder.description}
-            onClick={busy ? undefined : onCreateFolder}
-          />
-        </div>
-
-        {rail.folders.length > 0 ? (
-          <div data-testid="my-skills">
-            {rail.folders.map((folder) => {
-              const highlighted =
-                dropDest?.kind === "folder" && dropDest.folder.id === folder.id;
-              return (
-                <ShelfBlock
-                  key={folder.id}
-                  title={
-                    renamingFolderId &&
-                    renamingFolderId === folder.documentId ? (
-                      <InlineInput
-                        initial={folder.name}
-                        ariaLabel="夹名称"
-                        commitOnBlur
-                        onSubmit={(value) => {
-                          if (!folder.documentId) return;
-                          onSubmitRenameFolder(folder.documentId, value);
-                        }}
-                        onCancel={onCancelRenameFolder}
-                      />
-                    ) : (
-                      folder.name
-                    )
-                  }
-                  highlighted={highlighted}
-                  onDragOver={(event) => onAcceptFolderDrag(event, folder)}
-                  onDrop={(event) => onDropFolder(event, folder)}
+      {showDemand ? (
+        <section
+          data-testid="prompt-rail-on-demand"
+          data-prompt-drop="folder"
+          className="min-w-0"
+          onDragOver={(event) => onAcceptFolderDrag(event, otherFolder)}
+          onDrop={(event) => onDropFolder(event, otherFolder)}
+        >
+          <RailHeading
+            meta={`${folders.reduce((sum, folder) => sum + folder.items.length, 0)} 条`}
+            actions={
+              busy || q ? null : (
+                <div
+                  className="flex items-center gap-1"
+                  data-testid="prompt-rail-create"
                 >
-                  {folder.items.length === 0 ? (
-                    <CatalogTile
-                      icon={<Plus size={18} />}
-                      colorVar={artifactColorVar("guidelines")}
-                      title={PROMPT_SHELF_AFFORDANCE.dropHere.title}
-                      description={PROMPT_SHELF_AFFORDANCE.dropHere.description}
-                      className="border-dashed"
-                    />
-                  ) : (
-                    folder.items.map((item) => (
-                      <ItemTile
-                        key={item.id}
-                        item={item}
-                        selected={selectedId === item.id}
-                        listings={listings}
-                        installedListings={installedListings}
-                        onOpen={() => onOpenItem(item.id)}
-                        renderMineTile={renderMineTile}
-                      />
-                    ))
-                  )}
-                </ShelfBlock>
-              );
-            })}
-          </div>
-        ) : null}
-
-        {rail.official.length > 0 ? (
-          <ShelfBlock
-            testId="prompt-rail-official"
-            highlighted={false}
-            onDragOver={onRejectDrag}
-            onDrop={onRejectDrag}
+                  <button
+                    type="button"
+                    className="rounded-lg px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                    onClick={onCreateFolder}
+                  >
+                    新建夹
+                  </button>
+                </div>
+              )
+            }
           >
-            {rail.official.map((item) => (
-              <ItemTile
+            按需
+          </RailHeading>
+          {folders.length === 0 ? (
+            <DropWell
+              highlighted={
+                dropDest?.kind === "folder" &&
+                dropDest.folder.id === otherFolder.id
+              }
+            >
+              还没有夹。
+            </DropWell>
+          ) : (
+            <div data-testid="my-skills" className="mt-3 flex flex-col gap-4">
+              {folders.map((folder) => {
+                const highlighted =
+                  dropDest?.kind === "folder" &&
+                  dropDest.folder.id === folder.id;
+                const renaming =
+                  Boolean(renamingFolderId) &&
+                  renamingFolderId === folder.documentId;
+                return (
+                  <Card
+                    key={folder.id}
+                    className={cn(
+                      "overflow-hidden",
+                      highlighted && "ring-2 ring-ring",
+                    )}
+                    onDragOver={(event) => onAcceptFolderDrag(event, folder)}
+                    onDrop={(event) => onDropFolder(event, folder)}
+                  >
+                    {renaming && folder.documentId ? (
+                      <div className="px-3 py-2.5">
+                        <InlineInput
+                          initial={folder.name}
+                          ariaLabel="夹名称"
+                          commitOnBlur
+                          onSubmit={(value) =>
+                            onSubmitRenameFolder(
+                              folder.documentId as string,
+                              value,
+                            )
+                          }
+                          onCancel={onCancelRenameFolder}
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex items-baseline gap-2 px-3 py-2.5">
+                        <h3 className="text-sm font-medium text-foreground">
+                          {folder.name}
+                        </h3>
+                        <span className="text-xs text-muted-foreground">
+                          {folder.items.length} 条
+                        </span>
+                      </div>
+                    )}
+                    {folder.items.length === 0 ? (
+                      <p className="border-t border-border px-3 py-3 text-sm text-muted-foreground">
+                        {PROMPT_SHELF_AFFORDANCE.dropHere.title}
+                      </p>
+                    ) : (
+                      <div className="divide-y divide-border border-t border-border">
+                        {folder.items.map((item) => (
+                          <ItemRow
+                            key={item.id}
+                            item={item}
+                            selected={selectedId === item.id}
+                            picked={picked.has(item.id)}
+                            listings={listings}
+                            installedListings={installedListings}
+                            onOpen={(event) => onOpenItem(item.id, event)}
+                            renderMineTile={renderMineTile}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {showPrompts ? (
+        <section
+          className="min-w-0"
+          data-testid="prompt-rail-prompts"
+          onDragOver={onRejectDrag}
+          onDrop={onRejectDrag}
+        >
+          <RailHeading meta={`${promptItems.length} 条`}>提示词</RailHeading>
+          <div className={`mt-3 ${CATALOG_GRID_CLASS}`}>
+            {promptItems.map((item) => (
+              <HandsTile
                 key={item.id}
                 item={item}
                 selected={selectedId === item.id}
-                listings={listings}
-                installedListings={installedListings}
-                onOpen={() => onOpenItem(item.id)}
+                onOpen={(event) => onOpenItem(item.id, event)}
               />
             ))}
-          </ShelfBlock>
-        ) : null}
+          </div>
+        </section>
+      ) : null}
 
-        <FactoryToolShelf
-          testId="prompt-rail-on-demand-tools"
-          tools={onDemandTools}
-          selectedId={selectedId}
-          listings={listings}
-          installedListings={installedListings}
-          onOpenItem={onOpenItem}
+      {showTools ? (
+        <section
+          className="min-w-0"
+          data-testid="prompt-rail-tools"
           onDragOver={onRejectDrag}
           onDrop={onRejectDrag}
-        />
-
-        {showConnectors ? (
-          <ShelfBlock
-            testId="prompt-rail-connectors"
-            title="连接器"
-            highlighted={false}
-          >
-            {connectors.map((row) => {
-              const copy = promptConnectorShelfCopy(row);
-              return (
-                <CatalogTile
-                  key={row.id}
-                  icon={<Unplug size={18} />}
-                  colorVar={artifactColorVar("connectors")}
-                  title={copy.title}
-                  description={copy.description}
-                  accessory={row.accessory}
-                  tags={shelfTags(copy.tags)}
-                  className={
-                    selectedId === row.id
-                      ? "ring-1 ring-inset ring-primary"
-                      : undefined
-                  }
-                  onClick={() => onOpenItem(row.id)}
-                />
-              );
-            })}
-            {onAddConnector ? (
-              <CatalogTile
-                icon={<Plus size={18} />}
-                colorVar={artifactColorVar("connectors")}
-                title={PROMPT_SHELF_AFFORDANCE.addConnector.title}
-                description={PROMPT_SHELF_AFFORDANCE.addConnector.description}
-                onClick={onAddConnector}
+        >
+          <RailHeading meta="出厂自带，点开说明书">工具</RailHeading>
+          <div className={`mt-3 ${CATALOG_GRID_CLASS}`}>
+            {toolItems.map((item) => (
+              <HandsTile
+                key={item.id}
+                item={item}
+                selected={selectedId === item.id}
+                onOpen={(event) => onOpenItem(item.id, event)}
               />
-            ) : null}
-            {connectorError ? (
-              <p
-                className="col-span-full text-xs text-muted-foreground"
-                role="alert"
-              >
-                {connectorError}
-              </p>
-            ) : null}
-          </ShelfBlock>
-        ) : null}
-      </section>
-    </div>
-  );
-}
+            ))}
+          </div>
+        </section>
+      ) : null}
 
-function FactoryToolShelf({
-  testId,
-  tools,
-  selectedId,
-  listings,
-  installedListings,
-  onOpenItem,
-  onDragOver,
-  onDrop,
-}: {
-  testId: string;
-  tools: Extract<PromptCatalogItem, { kind: "tool" }>[];
-  selectedId: string | null;
-  listings: SkillStoreListing[];
-  installedListings: SkillStoreListing[];
-  onOpenItem: (id: string) => void;
-  onDragOver: (event: DragEvent<HTMLDivElement>) => void;
-  onDrop: (event: DragEvent<HTMLDivElement>) => void;
-}) {
-  if (tools.length === 0) return null;
-  return (
-    <ShelfBlock
-      testId={testId}
-      highlighted={false}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-    >
-      {tools.map((item) => (
-        <ItemTile
-          key={item.id}
-          item={item}
-          selected={selectedId === item.id}
-          listings={listings}
-          installedListings={installedListings}
-          onOpen={() => onOpenItem(item.id)}
-        />
-      ))}
-    </ShelfBlock>
-  );
-}
-
-function RailHeading({
-  children,
-  description,
-  actions,
-}: {
-  children: ReactNode;
-  description?: string;
-  actions?: ReactNode;
-}) {
-  return (
-    <div className="mb-3 flex items-start justify-between gap-3">
-      <div className="min-w-0">
-        <h2 className="text-base font-medium text-foreground">{children}</h2>
-        {description ? (
-          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-        ) : null}
-      </div>
-      {actions ? (
-        <div className="flex shrink-0 items-center gap-2">{actions}</div>
+      {emptySearch ? (
+        <p className="text-sm text-muted-foreground">没有匹配「{q}」的条目。</p>
       ) : null}
     </div>
   );
 }
 
-function ShelfHeading({ children }: { children: ReactNode }) {
-  return (
-    <h3 className="mb-2 text-xs font-medium text-muted-foreground">
-      {children}
-    </h3>
-  );
-}
-
-function TileShelf({
-  title,
+function DropWell({
   children,
-}: {
-  title?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <>
-      {title ? <ShelfHeading>{title}</ShelfHeading> : null}
-      <div className={CATALOG_GRID_CLASS}>{children}</div>
-    </>
-  );
-}
-
-function ShelfBlock({
-  title,
-  testId,
   highlighted,
-  className,
-  onDragOver,
-  onDrop,
-  children,
 }: {
-  title?: ReactNode;
-  testId?: string;
-  highlighted: boolean;
-  className?: string;
-  onDragOver?: (event: DragEvent<HTMLDivElement>) => void;
-  onDrop?: (event: DragEvent<HTMLDivElement>) => void;
   children: ReactNode;
+  highlighted?: boolean;
 }) {
   return (
     <div
-      data-testid={testId}
       className={cn(
-        "mt-5",
-        className,
-        highlighted && "rounded-xl ring-1 ring-inset ring-primary",
+        "mt-3 flex min-h-[4.5rem] items-center justify-center rounded-xl border border-dashed border-border px-4 text-center text-sm text-muted-foreground",
+        highlighted && "ring-2 ring-ring",
       )}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
     >
-      <TileShelf title={title}>{children}</TileShelf>
+      {children}
     </div>
   );
 }
 
-function ItemTile({
+function RailHeading({
+  children,
+  meta,
+  actions,
+}: {
+  children: ReactNode;
+  meta?: string;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <h2 className="text-sm font-semibold text-foreground">{children}</h2>
+      {meta ? (
+        <span className="text-xs text-muted-foreground">{meta}</span>
+      ) : null}
+      {actions ? <div className="ml-auto">{actions}</div> : null}
+    </div>
+  );
+}
+
+function ItemCard({
   item,
   alwaysChars,
   selected,
+  picked,
   listings,
   installedListings,
   onOpen,
@@ -454,9 +420,10 @@ function ItemTile({
   item: PromptCatalogItem;
   alwaysChars?: number;
   selected: boolean;
+  picked?: boolean;
   listings: SkillStoreListing[];
   installedListings: SkillStoreListing[];
-  onOpen: () => void;
+  onOpen: (event: MouseEvent<HTMLButtonElement>) => void;
   renderMineTile?: (row: {
     item: PromptCatalogItem;
     children: ReactNode;
@@ -468,29 +435,160 @@ function ItemTile({
       : {};
   const copy = promptItemShelfCopy(item, { ...mineOpts, alwaysChars });
   const visual = tileVisual(item);
-  const tile = (
-    <CatalogTile
-      icon={visual.icon}
-      colorVar={visual.colorVar}
-      title={copy.title}
-      subtitle={copy.subtitle}
-      description={copy.description}
-      accessory={shelfChips(copy.accessory)}
-      tags={shelfTags(copy.tags)}
-      className={selected ? "ring-1 ring-inset ring-primary" : undefined}
+  const chars = alwaysChars == null ? null : formatAlwaysRowChars(alwaysChars);
+  const card = (
+    <button
+      type="button"
+      aria-label={copy.title}
+      aria-selected={picked || selected}
       onClick={onOpen}
-    />
+      className={cn(
+        "flex min-h-[4.5rem] w-full items-start gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors",
+        "hover:border-foreground/15 hover:bg-muted/40",
+        picked
+          ? "border-foreground/20 bg-accent text-accent-foreground"
+          : selected
+            ? "border-foreground/20 bg-muted/50"
+            : "border-border/70 bg-card",
+      )}
+    >
+      <CatalogIconShell
+        className="mt-0.5 shrink-0"
+        colorVar={visual.colorVar}
+        size="md"
+      >
+        {visual.icon}
+      </CatalogIconShell>
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-medium text-foreground">
+          {copy.title}
+        </span>
+        {chars ? (
+          <span className="mt-0.5 block text-xs tabular-nums text-muted-foreground">
+            {chars}
+          </span>
+        ) : null}
+      </span>
+    </button>
   );
   const wrapped = renderMineTile
-    ? renderMineTile({ item, children: tile })
-    : tile;
+    ? renderMineTile({ item, children: card })
+    : card;
   return (
     <div
       data-testid={`prompt-tile-${item.id}`}
       data-prompt-tile={item.id}
-      className="h-full min-w-0"
+      className="min-w-0"
     >
       {wrapped}
+    </div>
+  );
+}
+
+function ItemRow({
+  item,
+  selected,
+  picked,
+  listings,
+  installedListings,
+  onOpen,
+  renderMineTile,
+}: {
+  item: PromptCatalogItem;
+  selected: boolean;
+  picked?: boolean;
+  listings: SkillStoreListing[];
+  installedListings: SkillStoreListing[];
+  onOpen: (event: MouseEvent<HTMLButtonElement>) => void;
+  renderMineTile?: (row: {
+    item: PromptCatalogItem;
+    children: ReactNode;
+  }) => ReactNode;
+}) {
+  const mineOpts =
+    item.kind === "mine"
+      ? promptMineShelfOpts(item, listings, installedListings)
+      : {};
+  const copy = promptItemShelfCopy(item, mineOpts);
+  const visual = tileVisual(item);
+  const chips = shelfChips(promptShelfHeaderChips(copy));
+  const row = (
+    <SurfaceRowButton
+      variant="default"
+      aria-label={copy.title}
+      aria-selected={picked || selected}
+      className={cn(
+        "w-full gap-3 rounded-none px-3 py-2.5 text-left",
+        (picked || selected) && "bg-accent text-accent-foreground",
+      )}
+      onClick={onOpen}
+    >
+      <CatalogIconShell
+        colorVar={visual.colorVar}
+        className="size-8 rounded-lg"
+      >
+        {visual.icon}
+      </CatalogIconShell>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-foreground">
+          {copy.title}
+        </span>
+        {copy.description ? (
+          <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+            {copy.description}
+          </span>
+        ) : null}
+      </span>
+      {chips}
+    </SurfaceRowButton>
+  );
+  const wrapped = renderMineTile
+    ? renderMineTile({ item, children: row })
+    : row;
+  return (
+    <div
+      data-testid={`prompt-tile-${item.id}`}
+      data-prompt-tile={item.id}
+      className="min-w-0"
+    >
+      {wrapped}
+    </div>
+  );
+}
+
+function HandsTile({
+  item,
+  selected,
+  onOpen,
+}: {
+  item: PromptCatalogItem;
+  selected: boolean;
+  onOpen: (event: MouseEvent<HTMLButtonElement>) => void;
+}) {
+  const copy = promptItemShelfCopy(item);
+  const visual = tileVisual(item);
+  const accessory = copy.accessory.length ? (
+    <>{shelfBadgeList(copy.accessory)}</>
+  ) : undefined;
+  const tags = copy.tags.length ? (
+    <>{shelfBadgeList(copy.tags.map((label) => ({ label })))}</>
+  ) : undefined;
+  return (
+    <div
+      data-prompt-tile={item.id}
+      data-testid={`prompt-tile-${item.id}`}
+      className="min-w-0"
+    >
+      <CatalogTile
+        icon={visual.icon}
+        colorVar={visual.colorVar}
+        title={copy.title}
+        description={copy.description}
+        accessory={accessory}
+        tags={tags}
+        onClick={onOpen}
+        className={selected ? "border-foreground/20 bg-muted/50" : undefined}
+      />
     </div>
   );
 }
@@ -519,27 +617,25 @@ function tileVisual(item: PromptCatalogItem): {
       colorVar: catalogCategoryColorVar(item.tool.face),
     };
   }
-  if (item.kind === "mine") {
-    return {
-      icon: <FileText size={18} />,
-      colorVar: artifactColorVar("guidelines"),
-    };
-  }
   return {
     icon: <FileText size={18} />,
     colorVar: artifactColorVar("guidelines"),
   };
 }
 
-function shelfTags(tags: string[]) {
-  return shelfChips(tags.map((label) => ({ label })));
-}
-
-function shelfChips(chips: PromptShelfChip[]) {
-  if (!chips.length) return undefined;
+function shelfBadgeList(chips: PromptShelfChip[]) {
   return chips.map((chip) => (
     <Badge key={chip.label} tone={chip.tone ?? "muted"} pill>
       {chip.label}
     </Badge>
   ));
+}
+
+function shelfChips(chips: PromptShelfChip[]) {
+  if (!chips.length) return null;
+  return (
+    <span className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+      {shelfBadgeList(chips)}
+    </span>
+  );
 }

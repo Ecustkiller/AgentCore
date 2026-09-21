@@ -1082,55 +1082,6 @@ class ConversationRepository:
         await self.hard_delete(conversation_id)
         return True
 
-    async def set_memory_synced_at(self, conversation_id: str, synced_at: datetime) -> None:
-        """Advance the long-term-memory consolidation watermark (Agent记忆 §1.5).
-
-        ``synced_at`` is the created_at of the last message folded into the user's
-        memory. The runner stamps it after each pass (even a no-op one) so neither
-        the debounce nor the sweeper reprocesses already-consolidated messages.
-        """
-        await self._session.execute(
-            update(Conversation)
-            .where(Conversation.id == conversation_id)
-            .values(memory_synced_at=synced_at)
-        )
-        await self._session.commit()
-
-    async def reset_memory_synced_at_for_user(self, user_id: str) -> int:
-        """Clear ``memory_synced_at`` on live chat conversations (memory backfill).
-
-        Only rows that currently hold a watermark are updated, so repeated runs are
-        idempotent. Returns the number of conversations reset.
-        """
-        result = await self._session.execute(
-            update(Conversation)
-            .where(
-                Conversation.user_id == user_id,
-                Conversation.deleted_at.is_(None),
-                Conversation.mode == "chat",
-                Conversation.memory_synced_at.isnot(None),
-            )
-            .values(memory_synced_at=None)
-            .returning(Conversation.id)
-        )
-        count = len(result.all())
-        await self._session.commit()
-        return count
-
-    async def count_memory_watermarked_chat_conversations(self, user_id: str) -> int:
-        """Live chat conversations that would be reset by ``reset_memory_synced_at_for_user``."""
-        result = await self._session.execute(
-            select(func.count())
-            .select_from(Conversation)
-            .where(
-                Conversation.user_id == user_id,
-                Conversation.deleted_at.is_(None),
-                Conversation.mode == "chat",
-                Conversation.memory_synced_at.isnot(None),
-            )
-        )
-        return int(result.scalar_one())
-
     async def set_compaction(
         self,
         conversation_id: str,
@@ -1158,39 +1109,6 @@ class ConversationRepository:
             )
         )
         await self._session.commit()
-
-    async def list_pending_memory_consolidation(
-        self, *, idle_before: datetime, limit: int
-    ) -> Sequence[str]:
-        """Ids of settled chats that have un-consolidated messages (sweeper work list).
-
-        A conversation qualifies when its latest message is newer than its
-        ``memory_synced_at`` watermark (有未整合的新内容) yet is at/older than
-        ``idle_before`` (已静默, the debounce window has elapsed). Restricted to
-        normal chats — hidden handoff hosts (P2e) carry agent runs, not user talk.
-        Oldest-settled first, capped by ``limit``. Backs the periodic backstop that
-        covers a debounce dropped by a restart / closed client.
-        """
-        epoch = datetime(1970, 1, 1, tzinfo=UTC)
-        last_msg = func.max(Message.created_at)
-        result = await self._session.execute(
-            select(Conversation.id)
-            .join(Message, Message.conversation_id == Conversation.id)
-            .where(
-                Conversation.deleted_at.is_(None),
-                Conversation.mode == "chat",
-            )
-            .group_by(Conversation.id, Conversation.memory_synced_at)
-            .having(
-                and_(
-                    last_msg > func.coalesce(Conversation.memory_synced_at, epoch),
-                    last_msg <= idle_before,
-                )
-            )
-            .order_by(last_msg.asc())
-            .limit(limit)
-        )
-        return [row[0] for row in result.all()]
 
     async def list_all_by_user(self, user_id: str) -> Sequence[Conversation]:
         """Every live (non-archived) conversation for a user, pinned-first then

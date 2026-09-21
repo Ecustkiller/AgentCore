@@ -25,7 +25,7 @@ alwaysApply: false
 - 产品回合：`scripts/archive/probe_turn.py`（HTTP，与桌面同路）。
 - **多端同权 / 对话级订阅**：`scripts/archive/probe_multiend.py`——挂两条真 SSE（一条扮桌面、一条扮手机 `?follow=true`）断言帧**到没到对端**。多端类缺陷单测普遍抓不到（测里的回合是瞬时的），这条真跑就抓出过「对端晚 12.6s 才看到回合」。连跑 4 场景约十几个回合，容易打满限流窗（见下）。
 - Eval / 多数探针：`EvalHarness` → `await eval_credentials()`（已回落本地账号 Key；**异步路径必须 await**，勿在 running loop 里同步调 `_eval_credentials` 以免 DB Key 静默失败回落到过期 PLATFORM）。
-- **前缀缓存三连跳**（同进程 `complete()`，不走 HTTP / `probe_turn`）：`AGENTCORE_LIVE_PREFIX_CACHE=1 uv run pytest tests/test_prefix_cache_live.py -q -s`。无 Key skip；踩到 `PLATFORM_API_KEY` 也 skip。不扫 jsonl。
+- **前缀缓存三连跳**（同进程 `complete()`，不走 HTTP / `probe_turn`）：`AGENTCORE_LIVE_PREFIX_CACHE=1 uv run pytest tests/test_prefix_cache_live.py -q -s`。无 Key skip；踩到 `PLATFORM_API_KEY` 也 skip。不扫 jsonl。只要日志归因、少耗 token：点名 `::test_vendor_prefix_cache_dropped_envelope_logs_history_rewrite`（两跳、`max_tokens=16`）。勿加 window-compact 真跑。
 
 ## 优先级（勿颠倒）
 

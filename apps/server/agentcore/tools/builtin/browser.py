@@ -62,8 +62,8 @@ from agentcore.tools.sandbox.browser.protocol import (
 logger = get_logger(__name__)
 
 # Shared by mutation receipts conceptually; schema no longer concatenates this
-# into action (consult(browser) HOW owns verification). Ratchet still asserts
-# the tail does not name per-tool receipt fields.
+# into action (receipt fields live on the result, not the button). Ratchet still
+# asserts the tail does not name per-tool receipt fields.
 _MUTATION_VERIFY_TAIL = (
     "回执含抬升后的 snapshot_version 与 untrusted_web_content"
     "（elements=可交互元素 ref 表 / visible_text=可见正文摘要）。"
@@ -115,7 +115,7 @@ _EGRESS_RETIRE_STEER = (
 
 _SESSION_ID_PARAM = {
     "type": "string",
-    "description": "可选：目标浏览器 Session id。",
+    "description": "目标浏览器 Session id。",
 }
 
 # Single face — CEO+worker for every action (including screenshot).
@@ -127,8 +127,8 @@ _BROWSER_REGISTRATION = ToolRegistration(
     # 关键帧 jpeg 确实落在工作区 ``browser/`` 下，但它是给这一步配的画面（已随
     # ``display.frame`` 走），不是本回合的交付物——台账不记它。
     file_products=FileProductsContract.NO_PRODUCT,
-    resident=False,
-    catalog_summary="右坞真实浏览器",
+    catalog_summary="真实浏览器。",
+    blurb="在真实窗口里打开网页、点击、填写",
 )
 
 
@@ -622,14 +622,11 @@ BROWSER_TOOL_PARAMETERS: dict[str, Any] = {
         },
         "url": {
             "type": "string",
-            "description": (
-                "navigate：公网 http(s) 或工作区相对 HTML 路径"
-                "（与完整预览同源；禁 file://）。"
-            ),
+            "description": "navigate：公网 http(s) 或工作区相对 HTML。禁 file://。",
         },
         "ref": {
             "type": "string",
-            "description": "click/type：browser(action=snapshot) 返回的元素 ref（如 e5）",
+            "description": "click/type：browser(action=snapshot) 返回的元素 ref。",
         },
         "text": {
             "type": "string",
@@ -637,7 +634,7 @@ BROWSER_TOOL_PARAMETERS: dict[str, Any] = {
         },
         "snapshot_version": {
             "type": "integer",
-            "description": "click/type：获取该 ref 的 snapshot 版本号（用于校验 ref 是否过期）",
+            "description": "click/type：该 ref 的 snapshot 版本。",
         },
         "session_id": _SESSION_ID_PARAM,
     },
@@ -650,11 +647,7 @@ class BrowserTool(_BrowserToolBase):
     def schema(self) -> ToolSchema:
         return ToolSchema(
             name="browser",
-            description=(
-                "右坞真实 Chromium（本机 Local Bridge 或云端沙箱）。"
-                "静态摘录用 web_fetch（非右坞直播）。"
-                "HOW→consult(browser)。"
-            ),
+            description="真实浏览器。",
             parameters=BROWSER_TOOL_PARAMETERS,
             face=ToolFace.HOST_BROWSER,
             approval=ToolApproval.GRANTABLE,

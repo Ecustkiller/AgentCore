@@ -443,7 +443,7 @@ async def test_hot_approval_signals_required_then_resolved(hub: ChatHub, pushes,
             "appr-1",
             "conv-1",
             kind=InteractionKind.APPROVAL,
-            payload={"tool_call_id": "tc-1", "tool_name": "file_write"},
+            payload={"tool_call_id": "tc-1", "tool_name": "write"},
             timeout=5.0,
         )
     )
@@ -562,7 +562,7 @@ async def test_hot_card_outside_a_turn_signals_nothing(hub: ChatHub, pushes):
             "appr-orphan",
             "conv-1",
             kind=InteractionKind.APPROVAL,
-            payload={"tool_name": "file_write"},
+            payload={"tool_name": "write"},
             timeout=5.0,
         )
     )

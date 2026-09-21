@@ -73,8 +73,10 @@ def _workspace_rel_path(path: str | None) -> str | None:
 
 
 def _file_target_from_arguments(tool_name: str, arguments: dict[str, Any]) -> str | None:
-    if tool_name in {"file_write", "file_read", "file_delete", "file_move", "str_replace"}:
-        return _workspace_rel_path(str(arguments.get("path") or arguments.get("file_path") or ""))
+    if tool_name in {"write", "read", "edit"}:
+        return _workspace_rel_path(str(arguments.get("file_path") or ""))
+    if tool_name in {"file_delete", "file_move"}:
+        return _workspace_rel_path(str(arguments.get("path") or ""))
     if tool_name == "file_batch":
         ops = arguments.get("operations")
         if isinstance(ops, list):
@@ -88,8 +90,6 @@ def _file_target_from_arguments(tool_name: str, arguments: dict[str, Any]) -> st
                 if path:
                     return path
         return None
-    if tool_name == "git":
-        return _workspace_rel_path(str(arguments.get("path") or "."))
     return None
 
 

@@ -18,8 +18,8 @@ const payload = (
   approval_id: "a1",
   conversation_id: "conv-1",
   tool_call_id: "a1",
-  tool_name: "file_write",
-  arguments: { path: "a.txt" },
+  tool_name: "write",
+  arguments: { file_path: "a.txt" },
   ...over,
 });
 
@@ -54,8 +54,8 @@ describe("approval via InteractionStore", () => {
     expect(pending).toHaveLength(1);
     const p = pending[0];
     expect(p.approvalId).toBe("a1");
-    expect(p.toolName).toBe("file_write");
-    expect(p.arguments).toEqual({ path: "a.txt" });
+    expect(p.toolName).toBe("write");
+    expect(p.arguments).toEqual({ file_path: "a.txt" });
     expect(p.resolving).toBe(false);
   });
 
@@ -64,7 +64,7 @@ describe("approval via InteractionStore", () => {
     upsertApproval(payload({ tool_name: "code_execute" }));
     const pending = pendingApprovals();
     expect(pending).toHaveLength(1);
-    expect(pending[0].toolName).toBe("file_write");
+    expect(pending[0].toolName).toBe("write");
   });
 
   it("removes by id and clears, both idempotent", () => {
@@ -100,7 +100,7 @@ const card = (over: Partial<ApprovalView> = {}): ApprovalView => ({
   approvalId: "a1",
   conversationId: "conv-1",
   toolCallId: "a1",
-  toolName: "file_write",
+  toolName: "write",
   arguments: {},
   resolving: false,
   ...over,
@@ -109,16 +109,7 @@ const card = (over: Partial<ApprovalView> = {}): ApprovalView => ({
 describe("autoApproveSiblings (本轮内都允许 batch放行)", () => {
   it("FILE_OP_TOOLS matches backend approval_class_tool_names (文件改动类 ∪ git)", () => {
     expect([...FILE_OP_TOOLS].sort()).toEqual(
-      [
-        "file_append",
-        "file_batch",
-        "file_copy",
-        "file_delete",
-        "file_move",
-        "file_write",
-        "git",
-        "str_replace",
-      ].sort(),
+      ["edit", "file_batch", "file_delete", "git", "md_export", "write"].sort(),
     );
     expect(isFileOpTool("git")).toBe(true);
     expect(isFileOpTool("code_execute")).toBe(false);
@@ -145,7 +136,7 @@ describe("autoApproveSiblings (本轮内都允许 batch放行)", () => {
     const siblings = autoApproveSiblings(
       [
         card(),
-        card({ approvalId: "a2", toolCallId: "a2", toolName: "file_append" }),
+        card({ approvalId: "a2", toolCallId: "a2", toolName: "edit" }),
         card({
           approvalId: "a3",
           toolCallId: "a3",
@@ -291,7 +282,7 @@ describe("isExecutionTool (工具审批 A+B · 主 CTA 偏向 turn grant)", () =
   });
 
   it("excludes file-op tools", () => {
-    expect(isExecutionTool("file_write")).toBe(false);
+    expect(isExecutionTool("write")).toBe(false);
     expect(isExecutionTool("git")).toBe(false);
     for (const name of FILE_OP_TOOLS) {
       expect(isExecutionTool(name)).toBe(false);

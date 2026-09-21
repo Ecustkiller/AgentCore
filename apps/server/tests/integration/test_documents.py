@@ -1,7 +1,7 @@
 """Document 子系统第一期 integration tests (Agent记忆与知识系统 §5.7).
 
 Against a real PG schema: the tree CRUD API, owner-scoping, user-rule injection (two-tier,
-read-side full injection), the ``file_write`` ``.agentcore/规则/`` overlay, and the one-time
+read-side full injection), the ``write`` ``.agentcore/rules/`` overlay, and the one-time
 file→document migration (idempotent, non-clobbering). Auto-skips when PostgreSQL is
 unavailable (integration conftest).
 """
@@ -12,11 +12,9 @@ from pathlib import Path
 from agentcore.db.repositories import DocumentRepository
 from agentcore.documents.frontmatter import set_entry_frontmatter
 from agentcore.memory import DocumentMemoryStore, assemble_injected_rules
-from agentcore.memory.migrate_documents import migrate_file_memory_to_documents
 from agentcore.memory.store import (
     CORE_MEMORY_FILE,
     PREFERENCES_MEMORY_FILE,
-    FileMemoryStore,
     topic_path,
 )
 from agentcore.tools.builtin.file_ops import FileWriteTool
@@ -149,7 +147,7 @@ async def test_user_rule_injects_without_ai_notes(session_factory):
         prefs = await store.load(uid, PREFERENCES_MEMORY_FILE)
         core = await store.load(uid, CORE_MEMORY_FILE)
     assert "必须始终用中文" in rules_md
-    assert "### .agentcore/规则/用户规则.md" in rules_md
+    assert "### .agentcore/rules/用户规则.md" in rules_md
     assert "用 Python" not in rules_md
     assert "倾向简洁" not in rules_md
     assert "倾向简洁" in prefs
@@ -194,7 +192,7 @@ async def test_injection_admits_global_and_project_rules(session_factory):
     assert "项目规则" in rules_md
 
 
-# --- file_write .agentcore/规则 → user rule ----------------------------------------------------------
+# --- write .agentcore/rules → user rule ----------------------------------------------------------
 
 
 def _ctx(user_id: str) -> ToolContext:
@@ -219,7 +217,7 @@ async def test_file_write_rule_writes_user_rule_and_dedupes(session_factory, mon
 
     res = await FileWriteTool().execute(
         {
-            "path": ".agentcore/规则/回复语言.md",
+            "file_path": ".agentcore/rules/回复语言.md",
             "content": "以后都用中文",
         },
         _ctx(uid),
@@ -229,7 +227,7 @@ async def test_file_write_rule_writes_user_rule_and_dedupes(session_factory, mon
 
     res2 = await FileWriteTool().execute(
         {
-            "path": ".agentcore/规则/回复语言.md",
+            "file_path": ".agentcore/rules/回复语言.md",
             "content": "以后都用中文",
         },
         _ctx(uid),
@@ -247,107 +245,14 @@ async def test_file_write_rule_writes_user_rule_and_dedupes(session_factory, mon
 # --- one-time file→document migration --------------------------------------------------------
 
 
-async def test_file_to_document_migration_idempotent_and_non_clobbering(session_factory, tmp_path):
-    uid = str(uuid.uuid4())
-    proj = str(uuid.uuid4())
-    fs = FileMemoryStore(tmp_path)
-    await fs.save(uid, PREFERENCES_MEMORY_FILE, "## 沟通偏好\n- 用中文")
-    await fs.save(uid, CORE_MEMORY_FILE, "## 技术栈与工具\n- Python")
-    await fs.save(uid, topic_path("部署"), "## 要点\n- 先构建")
-    await fs.save(uid, CORE_MEMORY_FILE, "## 关于用户的事实\n- 本项目用 Rust", scope=proj)
 
-    stats = await migrate_file_memory_to_documents(
-        base_dir=tmp_path, session_factory=session_factory
-    )
-    assert stats.notes_migrated == 4 and stats.notes_failed == 0
-
-    async with session_factory() as session:
-        store = DocumentMemoryStore(session=session)
-        assert "用中文" in await store.load(uid, PREFERENCES_MEMORY_FILE)
-        assert "Python" in await store.load(uid, CORE_MEMORY_FILE)
-        assert "先构建" in await store.load(uid, topic_path("部署"))
-        assert "本项目用 Rust" in await store.load(uid, CORE_MEMORY_FILE, scope=proj)
-
-    # Idempotent: a second run migrates nothing (all already present).
-    stats2 = await migrate_file_memory_to_documents(
-        base_dir=tmp_path, session_factory=session_factory
-    )
-    assert stats2.notes_migrated == 0 and stats2.notes_skipped_existing == 4
-
-    # A post-migration edit is NOT clobbered by a later run (skip-if-exists).
-    async with session_factory() as session:
-        await DocumentMemoryStore(session=session).save(
-            uid, CORE_MEMORY_FILE, "## 技术栈与工具\n- Python\n- Rust"
-        )
-    await migrate_file_memory_to_documents(base_dir=tmp_path, session_factory=session_factory)
-    async with session_factory() as session:
-        body = await DocumentMemoryStore(session=session).load(uid, CORE_MEMORY_FILE)
-    assert "Rust" in body  # the edit survived the re-run
-
-
-async def test_delete_memory_note_removes_disk_source(session_factory, tmp_path):
-    """Deleting a memory note soft-deletes the DB row AND unlinks the on-disk source."""
-    uid = str(uuid.uuid4())
-    fs = FileMemoryStore(tmp_path)
-    topic = topic_path("部署流程")
-    await fs.save(uid, topic, "## 要点\n- 先构建")
-    disk = tmp_path / uid / "主题" / "部署流程.md"
-    assert disk.is_file()
-
-    async with session_factory() as session:
-        store = DocumentMemoryStore(session=session, file_store=fs)
-        await store.save(uid, topic, "## 要点\n- 先构建")
-        await store.delete(uid, topic)
-
-    assert not disk.exists()
-    async with session_factory() as session:
-        # Soft-deleted: live load is empty; include_deleted still finds the tombstone.
-        assert await DocumentMemoryStore(session=session).load(uid, topic) == ""
-        note = await DocumentRepository(session).get_memory_note(
-            uid, topic, None, include_deleted=True
-        )
-        assert note is not None and note.deleted_at is not None
-
-
-async def test_migration_skips_soft_deleted_same_name(session_factory, tmp_path):
-    """A leftover disk file must not resurrect a soft-deleted same-name memory note."""
-    uid = str(uuid.uuid4())
-    fs = FileMemoryStore(tmp_path)
-    topic = topic_path("复活陷阱")
-    await fs.save(uid, topic, "## 旧内容\n- 不该回来")
-
-    # Migrate once, then soft-delete (leave the disk file in place — the pre-fix shape).
-    stats = await migrate_file_memory_to_documents(
-        base_dir=tmp_path, session_factory=session_factory
-    )
-    assert stats.notes_migrated == 1
-    async with session_factory() as session:
-        # Soft-delete DB only (bypass DocumentMemoryStore.delete's disk unlink) so the
-        # leftover source remains — exactly the resurrection scenario under test.
-        await DocumentRepository(session).delete_memory_note(uid, topic, None)
-        assert await DocumentMemoryStore(session=session).load(uid, topic) == ""
-    assert (tmp_path / uid / "主题" / "复活陷阱.md").is_file()
-
-    # Re-run: soft-deleted same-name counts as existing → skip, do not re-INSERT.
-    stats2 = await migrate_file_memory_to_documents(
-        base_dir=tmp_path, session_factory=session_factory
-    )
-    assert stats2.notes_migrated == 0 and stats2.notes_skipped_existing == 1
-    async with session_factory() as session:
-        assert await DocumentMemoryStore(session=session).load(uid, topic) == ""
-        live = await DocumentRepository(session).get_memory_note(uid, topic, None)
-        assert live is None
-        tombstone = await DocumentRepository(session).get_memory_note(
-            uid, topic, None, include_deleted=True
-        )
-        assert tombstone is not None and tombstone.deleted_at is not None
 
 
 # --- AgentCore/ convention layout (§5.0) ------------------------------------------------------
 
 
 async def test_new_writes_land_under_agentcore(session_factory):
-    """Memory notes + user-rule writes land under AgentCore/{记忆,规则}/."""
+    """Memory notes + user-rule writes land under AgentCore/{记忆,rules}/."""
     from agentcore.db.repositories.documents import (
         AGENTCORE_ROOT_NAME,
         MEMORY_ROOT_NAME,
@@ -378,84 +283,45 @@ async def test_new_writes_land_under_agentcore(session_factory):
         assert mem_root.name == MEMORY_ROOT_NAME
 
 
-async def test_agentcore_layout_migration_idempotent(session_factory):
-    """Bare 记忆/ + top-level user rules reparent into AgentCore/; second run is a no-op."""
+async def test_legacy_rules_dir_renamed_on_read(session_factory):
+    """Leftover ``规则/`` parent is renamed to ``rules/``; children stay injectable."""
     from agentcore.db.repositories.documents import (
-        AGENTCORE_ROOT_NAME,
-        MEMORY_ROOT_NAME,
+        LEGACY_RULES_DIR_NAME,
         RULES_DIR_NAME,
     )
-    from agentcore.memory.migrate_agentcore import migrate_agentcore_layout
 
     uid = str(uuid.uuid4())
     async with session_factory() as session:
         repo = DocumentRepository(session)
-        # Pre-§5.0 shape: bare memory root + top-level rule.
-        bare = await repo.create(
+        ac = await repo.ensure_agentcore_root(uid, None)
+        legacy = await repo.create(
             uid,
-            name=MEMORY_ROOT_NAME,
+            name=LEGACY_RULES_DIR_NAME,
             kind="folder",
             role="general",
-            ai_maintained=True,
-            parent_id=None,
+            parent_id=ac.id,
         )
-        note = await repo.create(
+        await repo.create(
             uid,
-            name=CORE_MEMORY_FILE,
+            name="语气.md",
             kind="document",
             role="rule",
-            ai_maintained=True,
-            parent_id=bare.id,
-            content="## 技术栈与工具\n- Python",
+            parent_id=legacy.id,
+            content="- 简洁",
         )
-        top_rule = await repo.create(
-            uid, name="语气.md", role="rule", content="- 简洁", parent_id=None
-        )
-        bare_id, note_id, rule_id = bare.id, note.id, top_rule.id
-
-    stats = await migrate_agentcore_layout(session_factory=session_factory)
-    assert stats.scopes_failed == 0
-    assert stats.memory_roots_moved >= 1
-    assert stats.rules_moved >= 1
 
     async with session_factory() as session:
         repo = DocumentRepository(session)
-        mem = await repo.get_memory_root(uid, None)
-        assert mem is not None and mem.id == bare_id
-        ac = await repo.get(mem.parent_id, user_id=uid)
-        assert ac is not None and ac.name == AGENTCORE_ROOT_NAME
         rules_dir = await repo.get_rules_dir(uid, None)
         assert rules_dir is not None and rules_dir.name == RULES_DIR_NAME
-        moved_rule = await repo.get(rule_id, user_id=uid)
-        assert moved_rule is not None and moved_rule.parent_id == rules_dir.id
-        moved_note = await repo.get(note_id, user_id=uid)
-        assert moved_note is not None and moved_note.parent_id == mem.id
-        assert "Python" in moved_note.content
-
-    stats2 = await migrate_agentcore_layout(session_factory=session_factory)
-    assert stats2.memory_roots_moved == 0
-    assert stats2.rules_moved == 0
+        rule = await repo.get_user_rule_doc(uid, None, "语气.md")
+        assert rule is not None and rule.parent_id == rules_dir.id
 
 
-async def test_agentcore_layout_migration_default_factory(session_factory, monkeypatch):
-    """No-arg call resolves the default session factory (the boot path).
-
-    Regression: every other test injects ``session_factory=``, so the ``is None``
-    branch was never executed and a wrong module path there (``agentcore.db.session``)
-    silently no-op'd the migration on every real boot — swallowed by the best-effort
-    ``except`` in ``main.lifespan``.
-    """
-    import agentcore.db.base as db_base
-    from agentcore.memory.migrate_agentcore import migrate_agentcore_layout
-
-    monkeypatch.setattr(db_base, "async_session_factory", session_factory)
-
-    stats = await migrate_agentcore_layout()
-    assert stats.scopes_failed == 0
 
 
 async def test_injectable_rules_skip_stray_outside_convention(session_factory):
-    """With AgentCore/规则/ present, a top-level stray always-rule is not injectable."""
+    """With AgentCore/rules/ present, a top-level stray always-rule is not injectable."""
 
     uid = str(uuid.uuid4())
     async with session_factory() as session:
@@ -480,77 +346,6 @@ async def test_injectable_rules_skip_stray_outside_convention(session_factory):
         assert all(d.parent_id == rules_dir.id for d in docs)
 
 
-async def test_dual_memory_roots_soft_deletes_empty_bare(session_factory):
-    """After dual-root fold, empty bare 记忆/ gets soft-deleted; notes live under convention."""
-    from agentcore.db.models import Document
-    from agentcore.db.repositories.documents import (
-        AGENTCORE_ROOT_NAME,
-        MEMORY_ROOT_NAME,
-    )
-    from agentcore.memory.migrate_agentcore import migrate_agentcore_layout
-
-    uid = str(uuid.uuid4())
-    async with session_factory() as session:
-        repo = DocumentRepository(session)
-        ac = await repo.ensure_agentcore_root(uid, None)
-        under = await repo.create(
-            uid,
-            name=MEMORY_ROOT_NAME,
-            kind="folder",
-            role="general",
-            ai_maintained=True,
-            parent_id=ac.id,
-        )
-        note_under = await repo.create(
-            uid,
-            name=CORE_MEMORY_FILE,
-            kind="document",
-            role="rule",
-            ai_maintained=True,
-            parent_id=under.id,
-            content="## 技术栈与工具\n- under",
-            apply_mode="always",
-        )
-        bare = await repo.create(
-            uid,
-            name=MEMORY_ROOT_NAME,
-            kind="folder",
-            role="general",
-            ai_maintained=True,
-            parent_id=None,
-        )
-        note_bare = await repo.create(
-            uid,
-            name=PREFERENCES_MEMORY_FILE,
-            kind="document",
-            role="rule",
-            ai_maintained=True,
-            parent_id=bare.id,
-            content="## 沟通偏好\n- bare",
-            apply_mode="always",
-        )
-        bare_id, under_id = bare.id, under.id
-        note_bare_id, note_under_id = note_bare.id, note_under.id
-
-    stats = await migrate_agentcore_layout(session_factory=session_factory)
-    assert stats.scopes_failed == 0
-    assert stats.bare_memory_roots_soft_deleted >= 1
-
-    async with session_factory() as session:
-        repo = DocumentRepository(session)
-        bare_row = await session.get(Document, bare_id)
-        assert bare_row is not None and bare_row.deleted_at is not None
-
-        mem = await repo.get_memory_root(uid, None)
-        assert mem is not None and mem.id == under_id
-        ac = await repo.get(mem.parent_id, user_id=uid)
-        assert ac is not None and ac.name == AGENTCORE_ROOT_NAME
-
-        moved_pref = await repo.get(note_bare_id, user_id=uid)
-        assert moved_pref is not None and moved_pref.parent_id == under_id
-        kept = await repo.get(note_under_id, user_id=uid)
-        assert kept is not None and kept.parent_id == under_id
-
 
 async def test_create_rule_api_auto_parents_under_agentcore(client):
     await register_and_login(client, "acrule")
@@ -566,7 +361,7 @@ async def test_create_rule_api_auto_parents_under_agentcore(client):
     r = await client.get(f"/v1/documents/{doc['parent_id']}")
     assert r.status_code == 200
     rules_dir = r.json()
-    assert rules_dir["name"] == "规则" and rules_dir["kind"] == "folder"
+    assert rules_dir["name"] == "rules" and rules_dir["kind"] == "folder"
 
     r = await client.get(f"/v1/documents/{rules_dir['parent_id']}")
     assert r.status_code == 200

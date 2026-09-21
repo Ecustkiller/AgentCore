@@ -34,7 +34,7 @@ from .._common import _CONV, _COST, _USAGE
 # 不得进用户可见文案，也不得冒充 ErrorContext.retry_after（上游 Retry-After）。
 _RATE_LIMIT_RETRY_AFTER = 4.0
 
-# Worker 落盘的三份 CSV（路径即交付账认列；正文只为 file_write 回执逐字对齐生产 manifest）。
+# Worker 落盘的三份 CSV（路径即交付账认列；正文只为 write 回执逐字对齐生产 manifest）。
 # CEO 汇总撞 429 后，把 delegate 交代渲染成回复（降级出口），不再丢成空泡。
 _RATE_LIMIT_CEO_DEBRIEF = (
     "已落盘 订单.csv、明细.csv、汇总.csv。数据分析队员因上游限流失败，未完成其余交付。"
@@ -58,22 +58,22 @@ def _exhausted_rate_limit_signal():
 
 
 def _csv_file_write_events(run_id: str) -> list[SSEEvent]:
-    """三连 ``file_write`` —— 回执走生产 ``format_artifact_manifest``，禁手写占位 output。"""
+    """三连 ``write`` —— 回执走生产 ``format_artifact_manifest``，禁手写占位 output。"""
     events: list[SSEEvent] = []
     for i, (path, content) in enumerate(_RATE_LIMIT_CSV_FILES, start=1):
         kind = product_kind_for_path(path)
         events.append(
             tool_use_start(
                 f"tc{i}",
-                "file_write",
-                {"path": path, "content": content},
+                "write",
+                {"file_path": path, "content": content},
                 run_id=run_id,
             )
         )
         events.append(
             tool_use_end(
                 f"tc{i}",
-                "file_write",
+                "write",
                 success=True,
                 output=format_artifact_manifest(
                     path=path,
@@ -218,7 +218,7 @@ def _multi_agent_delivery_status_partial() -> list[SSEEvent]:
 def _multi_agent_export_docx_artifacts() -> list[SSEEvent]:
     """交付台账·导出件：写 md 再导出 docx，两件都进 ``artifacts``（首条非空产物向量）。
 
-    真实事故形状：worker ``file_write`` 起诉状 md → ``md_to_docx`` 导出真实 .docx；客户端
+    真实事故形状：worker ``write`` 起诉状 md → ``md_export`` 导出真实 .docx；客户端
     只认 ``delivery_status.artifacts``，而两个工具的**入参都只有那份 md**——docx 只存在于
     工具自报的产物里。故本向量钉死 wire 侧的两件事：导出件自成一行（计数不再是 1），且
     它带 ``derived_from`` 指向源 md（客户端据此把源折成中间稿；``kind`` 同为自报）。
@@ -243,16 +243,16 @@ def _multi_agent_export_docx_artifacts() -> list[SSEEvent]:
         run_started("r1", "w1"),
         tool_use_start(
             "tc1",
-            "file_write",
-            {"path": md, "content": "# 民事起诉状\n\n原告：昝雯……"},
+            "write",
+            {"file_path": md, "content": "# 民事起诉状\n\n原告：昝雯……"},
             run_id="r1",
         ),
-        tool_use_end("tc1", "file_write", success=True, output="已写入", run_id="r1"),
+        tool_use_end("tc1", "write", success=True, output="已写入", run_id="r1"),
         # 导出工具的入参也只有源 md——.docx 这个路径只从工具自报的产物来。
-        tool_use_start("tc2", "md_to_docx", {"path": md}, run_id="r1"),
+        tool_use_start("tc2", "md_export", {"path": md, "format": "docx"}, run_id="r1"),
         tool_use_end(
             "tc2",
-            "md_to_docx",
+            "md_export",
             success=True,
             output=(
                 f"已导出 Word：{docx}（38964 字节）\n"

@@ -37,17 +37,10 @@ export const memoryAnchorTime = (update: MemoryUpdate): string =>
   update.anchorAt ?? update.createdAt;
 
 /**
- * 把消息、后台云端任务、记忆更新卡并成一条时间线。
+ * 把消息、后台云端任务、常驻用户规则配额卡并成一条时间线。
  *
- * 消息 + 任务按 `created_at` 排成「基准时间线」；记忆卡则**锚定到它所在那一回合的末尾**
- * ——AI 回答完成之后、下一次提问之前——而非按裸时间戳就地插。原因：offline-consolidation
- * 是回合结束后异步跑的（略滞后），而助手消息落库用的是「回合完成」时刻的时间戳；裸时间戳
- * 排序会让一张滞后的记忆卡正好落在「新提问 ↔ 长回合回答」之间，被夹进问答对里。锚到回合
- * 末尾既不打断问答对，又让每回合各一张、按时间分布，不会退回「全堆在对话最底部」的老毛病
- * （记忆更新对话内可见 §1.6）。无任务且无记忆卡时退化为纯消息列表（最常见路径）。
- *
- * 记忆卡用 {@link memoryAnchorTime} 而非落库时刻定位：固化滞后常常超过用户发下一条消息的
- * 间隔，此时落库时刻已晚于「下一条提问」，卡片会落空锚点冲到列表末尾。
+ * 消息 + 任务按 `created_at` 排成「基准时间线」；配额卡则**锚定到它所在那一回合的末尾**。
+ * leftover 记忆已更新 / 已整理卡不进时间线。
  */
 export function mergeTimeline(
   messages: Message[],
@@ -56,7 +49,8 @@ export function mergeTimeline(
   presetChanges: PermissionChange[] = [],
   compactedThrough?: string | null,
 ): TimelineItem[] {
-  const anchoredCount = memoryUpdates.length + presetChanges.length;
+  const quotaUpdates = memoryUpdates.filter((u) => u.kind === "quota");
+  const anchoredCount = quotaUpdates.length + presetChanges.length;
   if (tasks.length === 0 && anchoredCount === 0) {
     return insertCompactionDivider(
       messages.map((msg) => ({
@@ -101,7 +95,7 @@ export function mergeTimeline(
   // 生效」so anchoring before the next user message puts the「权限模式 A → B」line right ahead of
   // the turn it governs.
   const anchored: TimelineItem[] = [
-    ...memoryUpdates.map(
+    ...quotaUpdates.map(
       (update): TimelineItem => ({
         kind: "memory",
         at: Date.parse(memoryAnchorTime(update)) || 0,

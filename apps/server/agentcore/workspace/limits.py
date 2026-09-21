@@ -35,12 +35,12 @@ WORKSPACE_READ_HEAD_MAX_BYTES = 1024
 # Office/PDF extract ingest — two ceilings, because ingest is not one pipe:
 # on-disk (sidecar / cloud) stats then opens the path in the child; channel
 # Local still slurps via JSON/base64 IPC (desktop has no Python extract stack).
-# Output is still windowed (``OFFICE_EXTRACT_OUTPUT_CHARS`` + file_read caps).
+# Output is still windowed (``OFFICE_EXTRACT_OUTPUT_CHARS`` + read caps).
 # Desktop ``WORKSPACE_EXTRACT_SOURCE_MAX`` mirrors the **channel** cap only.
 OFFICE_EXTRACT_DISK_MAX_BYTES = 100 * 1024 * 1024  # 100 MiB
 OFFICE_EXTRACT_CHANNEL_MAX_BYTES = 25 * 1024 * 1024  # 25 MiB
 
-# Extracted-text window inside the worker (same order as file_read char cap).
+# Extracted-text window inside the worker (same order as read char cap).
 OFFICE_EXTRACT_OUTPUT_CHARS = 80_000
 # PDF page window so a 200-page scan does not burn the full extract timeout.
 OFFICE_EXTRACT_PDF_MAX_PAGES = 40
@@ -98,11 +98,11 @@ WORKSPACE_RECONNECT_DETAIL = "桌面在重连，请再试这一下"
 # Local workspace IO family retired together when the desktop fulfiller is gone
 # (immediate no-fulfiller fail alone still lets the model thrash / re-delegate writers).
 WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS: tuple[str, ...] = (
-    "file_read",
+    "read",
     "file_list",
     "glob",
-    "file_write",
-    "str_replace",
+    "write",
+    "edit",
     "file_delete",
     "file_batch",
     "grep",
@@ -110,12 +110,10 @@ WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS: tuple[str, ...] = (
     # Ambient listing rides the same local channel — retire with the file family
     # so post-dead index_files rejects are not leftover noise.
     "index_files",
-    # Export / land-bytes tools: every call round-trips the same dead backend
-    # (read the .md, write the sibling artifact / downloaded bytes), so leaving
-    # them on the surface only buys guaranteed-failed rounds. download_url even
-    # burns its network fetch first, then fails on write.
+    # Export tools: every call round-trips the same dead backend
+    # (read the .md, write the sibling artifact), so leaving them on the
+    # surface only buys guaranteed-failed rounds.
     "md_export",
-    "download_url",
 )
 
 # Short user-visible honest sentence (chat bubble / harvest fallback). Soft steer

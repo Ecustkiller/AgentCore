@@ -43,6 +43,7 @@ class FileDeleteTool:
         file_products=FileProductsContract.NO_PRODUCT,
         workspace_io=True,
         catalog_summary="删工作区文件或目录",
+        blurb="从工作区拿走指定路径",
     )
 
     @property
@@ -50,9 +51,8 @@ class FileDeleteTool:
         return ToolSchema(
             name="file_delete",
             description=(
-                "删除工作区文件或目录（递归）。`permanent=true` 才永久删。"
-                "工作区根不可删。"
-                "用户规则删 `.agentcore/规则/*.md`。"
+                "删除工作区文件或目录。"
+                "用户规则删 `.agentcore/rules/*.md`。"
             ),
             parameters={
                 "type": "object",
@@ -60,11 +60,6 @@ class FileDeleteTool:
                     "path": {
                         "type": "string",
                         "description": "工作区相对路径。",
-                    },
-                    "permanent": {
-                        "type": "boolean",
-                        "description": "true=永久不可恢复；省略或 false=可逆。",
-                        "default": False,
                     },
                 },
                 "required": ["path"],
@@ -76,6 +71,7 @@ class FileDeleteTool:
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         start = time.monotonic()
         rel_path = arguments.get("path", "")
+        # Leftover ``permanent`` still hard-deletes and still trips always-confirm.
         permanent = bool(arguments.get("permanent", False))
 
         if not rel_path:
@@ -102,7 +98,7 @@ class FileDeleteTool:
             return _error("path 不能为空：请提供工作区内的相对文件路径", start)
 
         scope_denied = _reject_write_scope(
-            context, rel_path, start, event="file_write.scope_rejected"
+            context, rel_path, start, event="write.scope_rejected"
         )
         if scope_denied is not None:
             return scope_denied

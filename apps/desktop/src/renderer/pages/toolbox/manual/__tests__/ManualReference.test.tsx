@@ -80,14 +80,14 @@ describe("ManualReference", () => {
 
   it("marks upcoming tools and BYOK model FAQ", () => {
     renderReference();
-    expect(screen.getByText(/MCP（本机连接器）/)).toBeTruthy();
+    expect(screen.getByText("MCP 在哪？")).toBeTruthy();
     expect(screen.getByText(/A2A（规划中）/)).toBeTruthy();
-    expect(screen.getByText(/其他创作工具（尚未开放）/)).toBeTruthy();
-    expect(screen.getByText(/可自由摆元素的无限画布/)).toBeTruthy();
+    expect(screen.queryByText(/其他创作工具（尚未开放）/)).toBeNull();
+    expect(screen.queryByText(/可自由摆元素的无限画布/)).toBeNull();
     expect(screen.getByText("用的什么模型？")).toBeTruthy();
     expect(screen.getByText(/平台代付，开箱即可对话/)).toBeTruthy();
     expect(screen.getByText(/OpenAI \/ DeepSeek \/ Kimi \/ 智谱/)).toBeTruthy();
-    expect(screen.getByText("画布和白板有什么区别？")).toBeTruthy();
+    expect(screen.queryByText("画布和白板有什么区别？")).toBeNull();
   });
 
   it("links duplicate FAQ answers to collaboration chapter", () => {
@@ -131,7 +131,7 @@ describe("ManualReference", () => {
     expect(screen.getByText("辩论室")).toBeTruthy();
     expect(screen.getByText("接续链")).toBeTruthy();
     expect(screen.getAllByText("画布").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("白板").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("白板")).toBeNull();
     expect(screen.getAllByText("文档").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("自主度").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("工作流")).toBeNull();

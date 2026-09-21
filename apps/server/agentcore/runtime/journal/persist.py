@@ -234,6 +234,39 @@ async def persist_turn_journal(
                 error=str(e),
             )
 
+    try:
+        from agentcore.conversation.history import stamp_user_turn_envelope
+        from agentcore.observability.session_llm_header import get_session_header
+
+        envelope = ""
+        in_history = ""
+        for entry in entries:
+            if (entry.get("kind") or "") != "turn_started":
+                continue
+            payload = entry.get("payload") or {}
+            raw = payload.get("turn_envelope")
+            if isinstance(raw, str) and raw.strip():
+                envelope = raw.strip()
+            extra = payload.get("in_history_system")
+            if isinstance(extra, str) and extra.strip():
+                in_history = extra.strip()
+            break
+        header = get_session_header(conversation_id)
+        if envelope or in_history or header is not None:
+            await stamp_user_turn_envelope(
+                conversation_id=conversation_id,
+                assistant_message_id=message_id,
+                envelope=envelope,
+                in_history_system=in_history,
+                header=header,
+            )
+    except Exception as e:  # noqa: BLE001 — prefix-cache stamp must never break the turn
+        logger.warning(
+            "journal.envelope_stamp_failed",
+            message_id=message_id,
+            error=str(e),
+        )
+
 
 async def persist_sidecar_journal_best_effort(
     *,

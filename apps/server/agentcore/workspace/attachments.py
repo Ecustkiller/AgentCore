@@ -218,7 +218,7 @@ async def persist_attachments(
 
         if kind == "file" and pre and other_desk:
             # Live file on another registered Folder — do not verify/copy on
-            # the sitting desk. ``file_read`` one-shot binds that Folder.
+            # the sitting desk. ``read`` one-shot binds that Folder.
             item["workspace_path"] = pre
             item["source_folder_id"] = source_folder_id
             item["binary"] = binary

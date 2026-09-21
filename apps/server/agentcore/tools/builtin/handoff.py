@@ -4,7 +4,7 @@ Worker-only, terminal. The call itself only means「写完了」. The 便条 liv
 that same assistant message's ``content`` (harvested by
 :func:`~agentcore.runtime.runs.serialize.debrief_from_transcript`), not in
 tool arguments — stuffing a wrap-up into JSON is how argument parse used to
-fail after a long ``file_write``.
+fail after a long ``write``.
 
 When to call (this description + engine gate; identity no longer repeats topology):
 - Has dependents: **must** handoff; the closing-round prose carries the conclusion.
@@ -54,6 +54,7 @@ class HandoffTool:
         surface=ToolSurface.WORKER_ONLY,
         audience=AUDIENCE_WORKER_ONLY,
         catalog_summary="队员交卷收尾",
+        blurb="队员做完后把结果交回",
     )
 
     @property

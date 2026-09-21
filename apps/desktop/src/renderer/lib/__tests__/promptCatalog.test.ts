@@ -6,12 +6,10 @@ import {
   buildMineCatalogRows,
   buildPromptCatalog,
   buildPromptRail,
-  catalogIdForMemoryTarget,
   flattenPromptCatalog,
   flattenPromptRail,
   mineCatalogId,
   onDemandDropFolder,
-  placeholderCatalogId,
   skillCatalogId,
   toolCatalogId,
 } from "@/lib/promptCatalog";
@@ -67,17 +65,17 @@ describe("buildPromptCatalog", () => {
           blurb: "",
         },
         {
-          name: "debate_and_review",
-          summary: "正反辩论",
-          body: "a",
-          group: "编排",
+          name: "page_ui",
+          summary: "页面观感",
+          body: "p",
+          group: "交付",
           blurb: "",
         },
         {
-          name: "local_desk",
-          summary: "本机目录进工作区",
-          body: "d",
-          group: "工作区",
+          name: "product_help",
+          summary: "本产品用法",
+          body: "h",
+          group: "产品",
           blurb: "",
         },
       ],
@@ -86,11 +84,11 @@ describe("buildPromptCatalog", () => {
       (item) => item.kind === "skill",
     );
     expect(skills.map((row) => row.kind === "skill" && row.skill.name)).toEqual(
-      ["debate_and_review", "local_desk", "run"],
+      ["page_ui", "product_help", "run"],
     );
     expect(skills.map((row) => row.kind === "skill" && row.tocGroup)).toEqual([
-      "编排",
-      "工作区",
+      "交付",
+      "产品",
       "工具",
     ]);
     expect([...SKILL_GROUP_ORDER]).toEqual([
@@ -124,10 +122,9 @@ describe("buildPromptCatalog", () => {
 });
 
 describe("buildPromptRail", () => {
-  it("准则在常驻，核不进货架，官方 HOW 在按需轨", () => {
+  it("准则在常驻，核不进货架，官方 HOW 收在 rail.official", () => {
     const rail = buildPromptRail(base, buildMineCatalogRows([], []), [], null);
     expect(rail.constitution.map((row) => row.id)).toEqual(["shared"]);
-    expect(rail.memory).toEqual([]);
     expect(rail.alwaysMine).toEqual([]);
     expect(rail.folders).toEqual([]);
     expect(rail.official.map((row) => row.id)).toEqual([
@@ -143,7 +140,7 @@ describe("buildPromptRail", () => {
     expect(rail.tools).toEqual([]);
   });
 
-  it("出厂工具一份列表，按能力面再开场即用排序；概览按 resident 分进两区", () => {
+  it("出厂工具一份列表，按能力面再名字排序", () => {
     const rail = buildPromptRail(
       {
         ...base,
@@ -151,18 +148,31 @@ describe("buildPromptRail", () => {
           {
             name: "host",
             face: "host_browser",
-            resident: false,
+            resident: true,
             summary: "本机",
+            blurb: "看本机屏幕、键鼠和已打开的应用",
             description: "本机",
             parameters: {},
             approval: "grantable",
             available_to: ["worker"],
           },
           {
-            name: "file_read",
+            name: "mcp_fs_read",
+            face: "file",
+            resident: true,
+            summary: "本机文件",
+            blurb: "连接器报出的读文件动作",
+            description: "本机文件",
+            parameters: {},
+            approval: "never",
+            available_to: ["ceo", "worker"],
+          },
+          {
+            name: "read",
             face: "file",
             resident: true,
             summary: "读文件",
+            blurb: "打开文本、代码或图片，看里面写了什么",
             description: "读文件",
             parameters: {},
             approval: "never",
@@ -175,15 +185,24 @@ describe("buildPromptRail", () => {
       null,
     );
     expect(rail.tools.map((row) => row.id)).toEqual([
-      toolCatalogId("file_read"),
+      toolCatalogId("mcp_fs_read"),
+      toolCatalogId("read"),
       toolCatalogId("host"),
     ]);
-    expect(rail.tools.map((row) => row.tool.resident)).toEqual([true, false]);
+    expect(rail.tools.map((row) => row.tool.resident)).toEqual([
+      true,
+      true,
+      true,
+    ]);
     expect(
       flattenPromptRail(rail)
         .filter((row) => row.kind === "tool")
         .map((row) => row.id),
-    ).toEqual([toolCatalogId("file_read"), toolCatalogId("host")]);
+    ).toEqual([
+      toolCatalogId("mcp_fs_read"),
+      toolCatalogId("read"),
+      toolCatalogId("host"),
+    ]);
   });
 
   it("偏好画像不进货架，按需自建进其他", () => {
@@ -205,7 +224,6 @@ describe("buildPromptRail", () => {
       null,
     );
     expect(rail.constitution.map((row) => row.id)).toEqual(["shared"]);
-    expect(rail.memory).toEqual([]);
     const other = rail.folders.find((folder) => folder.source === "other");
     expect(other?.items.map((row) => row.id)).toEqual([mineCatalogId("d1")]);
     expect(rail.official.map((row) => row.id)).toEqual([
@@ -369,20 +387,7 @@ describe("buildMineCatalogRows", () => {
     ]);
   });
 
-  it("占位目录 id 稳定", () => {
-    expect(placeholderCatalogId("preferences")).toBe("placeholder:preferences");
-  });
-
-  it("global 偏好/画像 不再对上目录行", () => {
-    const items = flattenPromptRail(
-      buildPromptRail(base, buildMineCatalogRows([], []), [], null),
-    );
-    expect(catalogIdForMemoryTarget("global/preferences", items)).toBeNull();
-    expect(catalogIdForMemoryTarget("global/profile", items)).toBeNull();
-    expect(catalogIdForMemoryTarget("project/F1/profile", items)).toBeNull();
-  });
-
-  it("存量账号核也不进目录", () => {
+  it("存量账号核不进目录", () => {
     const items = flattenPromptRail(
       buildPromptRail(
         base,
@@ -405,6 +410,6 @@ describe("buildMineCatalogRows", () => {
         null,
       ),
     );
-    expect(catalogIdForMemoryTarget("global/preferences", items)).toBeNull();
+    expect(items.some((row) => row.id === mineCatalogId("pref"))).toBe(false);
   });
 });

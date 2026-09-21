@@ -1,5 +1,4 @@
 import {
-  bindableToolOptions,
   composeOnDemandSkillContent,
   composeSkillContent,
   parseOffersTools,
@@ -29,32 +28,18 @@ describe("skillCatalog helpers", () => {
     );
   });
 
-  it("offers_tools 写进 frontmatter，解析对得上", () => {
-    const content = composeSkillContent("on_demand", "审", "怎么审", [
-      "host",
-      "debate",
-    ]);
-    expect(content).toContain("offers_tools: host, debate");
-    expect(parseOffersTools(content)).toEqual(["host", "debate"]);
-    expect(skillBodyFromContent(content)).toBe("怎么审");
+  it("存量 offers_tools 仍能解析，新组的稿不写这键", () => {
+    expect(
+      parseOffersTools(
+        "---\napply: on_demand\ndescription: 审\noffers_tools: host, debate\n---\n怎么审",
+      ),
+    ).toEqual(["host", "debate"]);
+    expect(
+      skillBodyFromContent(composeOnDemandSkillContent("审", "怎么审")),
+    ).toBe("怎么审");
     expect(
       parseOffersTools(composeOnDemandSkillContent("审", "怎么审")),
     ).toEqual([]);
-  });
-
-  it("bindableToolOptions 只收查阅后启用的工具和连接器", () => {
-    expect(
-      bindableToolOptions(
-        [
-          { name: "web_search", resident: true, summary: "联网" },
-          { name: "host", resident: false, summary: "本机" },
-        ],
-        [{ id: "fs", name: "Filesystem" }],
-      ),
-    ).toEqual([
-      { id: "host", label: "本机" },
-      { id: "fs", label: "Filesystem" },
-    ]);
   });
 
   it("文件名缺 .md 就补", () => {

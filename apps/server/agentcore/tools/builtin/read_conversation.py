@@ -175,6 +175,7 @@ class ReadConversationTool:
         audience=AUDIENCE_BOTH,
         manual_wire=True,
         catalog_summary="读一条对话全文",
+        blurb="打开指定对话的完整记录",
     )
 
     folder_id: str | None = None

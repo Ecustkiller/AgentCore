@@ -919,13 +919,13 @@ async def test_execute_tools_does_not_unwrap_when_top_level_tasks_present():
 
 async def test_write_tool_parse_failure_splits_user_and_model_copy():
     """Write-tool JSON parse: ``failure.message`` 人话；模型面 ``result`` 完整写入或按锚续写。"""
-    tracked = _OkTool("file_write", output="written")
+    tracked = _OkTool("write", output="written")
     reg = ToolRegistry()
     reg.register(tracked)
-    bad = '{"path":"r.md","content":"查 "foo" 资料"}'
+    bad = '{"file_path":"r.md","content":"查 "foo" 资料"}'
     sink = EventSink()
     messages, terminal, attempts = await execute_tools(
-        [_call("c1", "file_write", bad)],
+        [_call("c1", "write", bad)],
         reg,
         _ctx(),
         sink,
@@ -963,21 +963,21 @@ async def test_code_execute_maps_sandbox_error_to_failed_result():
 
 
 async def test_execute_tools_denies_tool_outside_allowlist():
-    """Least-privilege: registry may hold file_write, but allow-list must block execute."""
-    fw = _OkTool("file_write", output="written")
-    read = _OkTool("file_read", output="ok")
+    """Least-privilege: registry may hold write, but allow-list must block execute."""
+    fw = _OkTool("write", output="written")
+    read = _OkTool("read", output="ok")
     reg = ToolRegistry()
     reg.register(fw)
     reg.register(read)
     sink = EventSink()
     messages, terminal, attempts = await execute_tools(
-        [_call("c1", "file_write", '{"path":"AgentCore/文档/research/x.md","content":"n"}')],
+        [_call("c1", "write", '{"file_path":"AgentCore/文档/research/x.md","content":"n"}')],
         reg,
         _ctx(),
         sink,
         approval_gate=None,
         run_id="debate_r1_plaintiff",
-        allowed_tool_names=["file_read", "web_search"],
+        allowed_tool_names=["read", "web_search"],
     )
     assert fw.executed is False
     assert terminal is None
@@ -999,7 +999,7 @@ async def test_execute_tools_denies_tool_outside_allowlist():
 async def test_execute_tools_rejects_write_landed_imitation_before_allowlist():
     """仿调 `_write_landed` 早拒：落盘状态不是工具；勿落入 allowlist_deny / not_found。"""
     reg = ToolRegistry()
-    reg.register(_OkTool("file_write", output="written"))
+    reg.register(_OkTool("write", output="written"))
     sink = EventSink()
     # Allowlist active (would otherwise be allowlist_deny for unknown names).
     messages, terminal, attempts = await execute_tools(
@@ -1008,7 +1008,7 @@ async def test_execute_tools_rejects_write_landed_imitation_before_allowlist():
                 "c1",
                 "_write_landed",
                 json.dumps(
-                    {"status": "landed", "via": "file_write", "path": "docs/a.md", "chars": 10},
+                    {"status": "landed", "via": "write", "path": "docs/a.md", "chars": 10},
                     ensure_ascii=False,
                 ),
             )
@@ -1018,7 +1018,7 @@ async def test_execute_tools_rejects_write_landed_imitation_before_allowlist():
         sink,
         approval_gate=None,
         run_id="r_landed",
-        allowed_tool_names=["file_write", "file_read"],
+        allowed_tool_names=["write", "read"],
     )
     assert terminal is None
     assert len(messages) == 1
@@ -1049,11 +1049,11 @@ async def test_execute_tools_rejects_write_landed_imitation_before_allowlist():
 
 
 async def test_execute_tools_allowlist_none_permits_registry_tool():
-    fw = _OkTool("file_write", output="written")
+    fw = _OkTool("write", output="written")
     reg = ToolRegistry()
     reg.register(fw)
     messages, _terminal, attempts = await execute_tools(
-        [_call("c1", "file_write")],
+        [_call("c1", "write")],
         reg,
         _ctx(),
         EventSink(),
@@ -1066,7 +1066,7 @@ async def test_execute_tools_allowlist_none_permits_registry_tool():
 
 
 async def test_files_touched_uses_execution_success_not_intent():
-    """DRIFT fix: denied / failed file_write must not enter files_touched; success must.
+    """DRIFT fix: denied / failed write must not enter files_touched; success must.
 
     The ledger reads the tool's OWN self-report off the result — a denied call never
     runs (nothing to report) and a failing write reports nothing, so neither can be
@@ -1078,7 +1078,7 @@ async def test_files_touched_uses_execution_success_not_intent():
     from agentcore.tools.file_products import file_product
 
     class _LandingWrite(_OkTool):
-        """Self-reports the path it landed, like the real ``file_write``."""
+        """Self-reports the path it landed, like the real ``write``."""
 
         async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
             self.executed = True
@@ -1086,7 +1086,7 @@ async def test_files_touched_uses_execution_success_not_intent():
                 tool_call_id="",
                 success=True,
                 output=self._output,
-                file_products=[file_product(str(arguments.get("path") or ""))],
+                file_products=[file_product(str(arguments.get("file_path") or ""))],
             )
 
     class _FailWrite(_OkTool):
@@ -1095,21 +1095,21 @@ async def test_files_touched_uses_execution_success_not_intent():
             return ToolResult(tool_call_id="", success=False, error="disk full")
 
     # 1) allowlist deny → marker + no harvest
-    fw = _LandingWrite("file_write", output="written")
+    fw = _LandingWrite("write", output="written")
     reg = ToolRegistry()
     reg.register(fw)
     denied, _, _ = await execute_tools(
-        [_call("c1", "file_write", '{"path":"ghost.md","content":"n"}')],
+        [_call("c1", "write", '{"file_path":"ghost.md","content":"n"}')],
         reg,
         _ctx(),
         EventSink(),
         approval_gate=None,
-        allowed_tool_names=["file_read"],
+        allowed_tool_names=["read"],
     )
     assistant_deny = LLMMessage(
         role="assistant",
         content=None,
-        tool_calls=[_call("c1", "file_write", '{"path":"ghost.md","content":"n"}')],
+        tool_calls=[_call("c1", "write", '{"file_path":"ghost.md","content":"n"}')],
     )
     assert TOOL_FAILED_MARKER in (denied[0].content or "")
     assert "handoff" in (denied[0].content or "")
@@ -1117,9 +1117,9 @@ async def test_files_touched_uses_execution_success_not_intent():
 
     # 2) successful write → harvested
     ok_reg = ToolRegistry()
-    ok_reg.register(_LandingWrite("file_write", output="written"))
+    ok_reg.register(_LandingWrite("write", output="written"))
     ok_msgs, _, _ = await execute_tools(
-        [_call("c2", "file_write", '{"path":"ok.md","content":"y"}')],
+        [_call("c2", "write", '{"file_path":"ok.md","content":"y"}')],
         ok_reg,
         _ctx(),
         EventSink(),
@@ -1129,16 +1129,16 @@ async def test_files_touched_uses_execution_success_not_intent():
     assistant_ok = LLMMessage(
         role="assistant",
         content=None,
-        tool_calls=[_call("c2", "file_write", '{"path":"ok.md","content":"y"}')],
+        tool_calls=[_call("c2", "write", '{"file_path":"ok.md","content":"y"}')],
     )
     assert TOOL_FAILED_MARKER not in (ok_msgs[0].content or "")
     assert files_touched_from_transcript([assistant_ok, ok_msgs[0]]) == ["ok.md"]
 
     # 3) tool returned success=False → marker + no harvest
     fail_reg = ToolRegistry()
-    fail_reg.register(_FailWrite("file_write"))
+    fail_reg.register(_FailWrite("write"))
     fail_msgs, _, _ = await execute_tools(
-        [_call("c3", "file_write", '{"path":"io_err.md","content":"z"}')],
+        [_call("c3", "write", '{"file_path":"io_err.md","content":"z"}')],
         fail_reg,
         _ctx(),
         EventSink(),
@@ -1148,7 +1148,7 @@ async def test_files_touched_uses_execution_success_not_intent():
     assistant_fail = LLMMessage(
         role="assistant",
         content=None,
-        tool_calls=[_call("c3", "file_write", '{"path":"io_err.md","content":"z"}')],
+        tool_calls=[_call("c3", "write", '{"file_path":"io_err.md","content":"z"}')],
     )
     assert TOOL_FAILED_MARKER in (fail_msgs[0].content or "")
     assert files_touched_from_transcript([assistant_fail, fail_msgs[0]]) == []
@@ -1241,7 +1241,7 @@ def test_shell_observe_log_fields_records_facts_not_write_guess():
     assert clipped["command_preview"] == clip_preview(long_cmd, _SHELL_COMMAND_PREVIEW_MAX)
     assert secret_tail not in clipped["command_preview"]
     assert set(clipped) <= _SHELL_OBSERVE_KEYS
-    assert _shell_observe_log_fields("file_write", {"path": "a.py", "command": "x"}) == {}
+    assert _shell_observe_log_fields("write", {"file_path": "a.py", "command": "x"}) == {}
     assert _shell_observe_log_fields("run", "not-a-dict") == {}
     license_url = "https://www.tldraw.dev/community/license"
     url_fields = _shell_observe_log_fields("web_fetch", {"url": license_url})
@@ -1391,7 +1391,7 @@ async def test_execute_end_other_tool_omits_command_preview():
 
 @pytest.mark.asyncio
 async def test_same_batch_handoff_waits_for_sibling_write(tmp_path: Path):
-    """同批 file_write+handoff：handoff 须在 write 之后执行，才能看到 prose stamp。"""
+    """同批 write+handoff：handoff 须在 write 之后执行，才能看到 prose stamp。"""
     import asyncio
     import json
 
@@ -1427,13 +1427,13 @@ async def test_same_batch_handoff_waits_for_sibling_write(tmp_path: Path):
         handoff_requires_body=True,
         round_content_chars=0,
     )
-    write_args = json.dumps({"path": "notes.md", "content": prose}, ensure_ascii=False)
+    write_args = json.dumps({"file_path": "notes.md", "content": prose}, ensure_ascii=False)
     handoff_args = json.dumps({"summary": "调研已落盘"}, ensure_ascii=False)
     # handoff listed first — without phasing it would race ahead of slow write.
     messages, terminal, attempts = await execute_tools(
         [
             _call("c_h", "handoff", handoff_args),
-            _call("c_w", "file_write", write_args),
+            _call("c_w", "write", write_args),
         ],
         reg,
         ctx,
@@ -1485,7 +1485,7 @@ async def test_test_run_maps_sandbox_error_to_failed_result(monkeypatch: pytest.
 
 
 async def test_parallel_same_path_file_read_coalesces_once(tmp_path: Path):
-    """Same-round parallel file_read on one path+window → one underlying read, fan-out."""
+    """Same-round parallel read on one path+window → one underlying read, fan-out."""
     from agentcore.tools.builtin.file_ops import FileReadTool
 
     (tmp_path / "doc.md").write_text("# Hello\nshared body\n", encoding="utf-8")
@@ -1503,12 +1503,12 @@ async def test_parallel_same_path_file_read_coalesces_once(tmp_path: Path):
     reg.register(FileReadTool())
     ctx = _ctx(backend)
     sink = EventSink()
-    args = '{"path": "doc.md"}'
+    args = '{"file_path": "doc.md"}'
     messages, terminal, attempts = await execute_tools(
         [
-            _call("r1", "file_read", args),
-            _call("r2", "file_read", args),
-            _call("r3", "file_read", args),
+            _call("r1", "read", args),
+            _call("r2", "read", args),
+            _call("r3", "read", args),
         ],
         reg,
         ctx,
@@ -1551,8 +1551,8 @@ async def test_parallel_distinct_path_file_reads_not_coalesced(tmp_path: Path):
     ctx = _ctx(backend)
     messages, _terminal, attempts = await execute_tools(
         [
-            _call("r1", "file_read", '{"path": "a.md"}'),
-            _call("r2", "file_read", '{"path": "b.md"}'),
+            _call("r1", "read", '{"file_path": "a.md"}'),
+            _call("r2", "read", '{"file_path": "b.md"}'),
         ],
         reg,
         ctx,
@@ -1589,8 +1589,8 @@ async def test_parallel_same_path_different_window_file_reads_not_coalesced(
     ctx = _ctx(backend)
     messages, _terminal, attempts = await execute_tools(
         [
-            _call("r1", "file_read", '{"path": "doc.md", "offset": 1, "limit": 1}'),
-            _call("r2", "file_read", '{"path": "doc.md", "offset": 3, "limit": 1}'),
+            _call("r1", "read", '{"file_path": "doc.md", "offset": 1, "limit": 1}'),
+            _call("r2", "read", '{"file_path": "doc.md", "offset": 3, "limit": 1}'),
         ],
         reg,
         ctx,
@@ -1615,7 +1615,7 @@ async def test_ceo_str_replace_miss_still_not_assembled():
     reg.register(_OkTool("delegate"))
     ctx = _ctx()
     messages, _terminal, attempts = await execute_tools(
-        [_call("c1", "str_replace", "{}")],
+        [_call("c1", "edit", "{}")],
         reg,
         ctx,
         EventSink(),
@@ -1628,7 +1628,7 @@ async def test_ceo_str_replace_miss_still_not_assembled():
     assert "form=prose" not in content
 
 
-@pytest.mark.parametrize("name", ["str_replace", "file_batch"])
+@pytest.mark.parametrize("name", ["edit", "file_batch"])
 async def test_write_allowlist_deny_no_handoff_as_write(name: str):
     """写盘工具不在 allowlist 时说明缺授权，勿劝 handoff 正文冒充落盘。"""
     reg = ToolRegistry()
@@ -1640,7 +1640,7 @@ async def test_write_allowlist_deny_no_handoff_as_write(name: str):
         EventSink(),
         approval_gate=None,
         run_id="r1",
-        allowed_tool_names=["file_read", "handoff"],  # write tool not allowed
+        allowed_tool_names=["read", "handoff"],  # write tool not allowed
     )
     content = messages[0].content or ""
     assert "不在本 run 的允许列表" in content or "未授权" in content
@@ -1789,7 +1789,7 @@ async def test_cloud_worker_file_write_ask_still_prompts():
         @property
         def schema(self) -> ToolSchema:
             return ToolSchema(
-                name="file_write",
+                name="write",
                 description="stub",
                 parameters={"type": "object", "properties": {}},
                 face=ToolFace.FILE,
@@ -1825,7 +1825,7 @@ async def test_cloud_worker_file_write_ask_still_prompts():
 
     approve_task = asyncio.create_task(_approve())
     messages, terminal, attempts = await execute_tools(
-        [_call("tc-cloud-ask", "file_write", '{"path":"a.md","content":"x"}')],
+        [_call("tc-cloud-ask", "write", '{"file_path":"a.md","content":"x"}')],
         reg,
         _ctx(),  # ServerWorkspace → location=server
         sink,
@@ -1855,7 +1855,7 @@ async def test_cloud_worker_file_write_session_still_ungated():
         @property
         def schema(self) -> ToolSchema:
             return ToolSchema(
-                name="file_write",
+                name="write",
                 description="stub",
                 parameters={"type": "object", "properties": {}},
                 face=ToolFace.FILE,
@@ -1892,7 +1892,7 @@ async def test_cloud_worker_file_write_session_still_ungated():
     reg = ToolRegistry()
     reg.register(tool)
     messages, terminal, attempts = await execute_tools(
-        [_call("tc-cloud-sess", "file_write", '{"path":"a.md","content":"x"}')],
+        [_call("tc-cloud-sess", "write", '{"file_path":"a.md","content":"x"}')],
         reg,
         _ctx(),
         sink,
@@ -1916,7 +1916,7 @@ class _GrantableWrite:
         from agentcore.core.types import ToolApproval
 
         return ToolSchema(
-            name="file_write",
+            name="write",
             description="stub",
             parameters={"type": "object", "properties": {}},
             face=ToolFace.FILE,
@@ -1931,7 +1931,7 @@ class _GrantableWrite:
 async def test_grantable_without_gate_is_denied_not_run():
     """本该有闸却没传 → 拒绝执行，而不是放行（gate 缺席不再等于免审）。
 
-    桌面 worker 的 file_write 该弹卡（``sandbox_approval`` 只对云端沙箱免卡）。若这条
+    桌面 worker 的 write 该弹卡（``sandbox_approval`` 只对云端沙箱免卡）。若这条
     路的 gate 漏传了，从前会因为「GRANTABLE 判定挂在 gate 存在性上」直接执行；现在先算
     「要不要审批」，再看「有没有人可问」，问不到就拒。
     """
@@ -1945,7 +1945,7 @@ async def test_grantable_without_gate_is_denied_not_run():
     reg.register(tool)
     with capture_logs() as logs:
         messages, terminal, attempts = await execute_tools(
-            [_call("tc-nogate", "file_write", '{"path":"a.md","content":"x"}')],
+            [_call("tc-nogate", "write", '{"file_path":"a.md","content":"x"}')],
             reg,
             _ctx(backend=_DesktopBackend()),
             EventSink(),
@@ -1968,7 +1968,7 @@ async def test_grantable_without_gate_denied_on_cloud_captain_path():
     reg.register(tool)
     with capture_logs() as logs:
         _messages, _terminal, attempts = await execute_tools(
-            [_call("tc-nogate-cap", "file_write", '{"path":"a.md","content":"x"}')],
+            [_call("tc-nogate-cap", "write", '{"file_path":"a.md","content":"x"}')],
             reg,
             _ctx(),  # ServerWorkspace → 云端
             EventSink(),
@@ -2077,7 +2077,7 @@ class _ImageReadTool:
     @property
     def schema(self) -> ToolSchema:
         return ToolSchema(
-            name="file_read",
+            name="read",
             description="stub",
             parameters={"type": "object", "properties": {}},
             face=ToolFace.FILE,
@@ -2106,7 +2106,7 @@ async def test_execute_tools_appends_user_image_parts_not_in_meta():
     reg.register(_ImageReadTool())
     sink = EventSink()
     messages, _terminal, attempts = await execute_tools(
-        [_call("c1", "file_read", '{"path":"shot.png"}')],
+        [_call("c1", "read", '{"file_path":"shot.png"}')],
         reg,
         _ctx(),
         sink,
@@ -2121,5 +2121,5 @@ async def test_execute_tools_appends_user_image_parts_not_in_meta():
     content = users[-1].content
     assert isinstance(content, list)
     assert any(p.get("type") == "image_url" for p in content if isinstance(p, dict))
-    assert "file_read" in llm_content_text(content)
+    assert "read" in llm_content_text(content)
 

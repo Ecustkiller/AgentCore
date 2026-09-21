@@ -28,7 +28,6 @@ export const ENTRIES_SECTION_NAME_FOLDER = AGENTCORE_ROOT_LABEL;
 
 type AgentCoreSectionProps = {
   scope: AgentCoreScope;
-  memoryActivePath: string | null;
   documentActivePath: string | null;
   onOpenEntry: (target: EntryOpenTarget) => void;
   onEntryDeleted: (target: EntryOpenTarget) => void;
@@ -49,7 +48,6 @@ type AgentCoreSectionProps = {
  */
 export function AgentCoreSection({
   scope,
-  memoryActivePath,
   documentActivePath,
   onOpenEntry,
   onEntryDeleted,
@@ -149,7 +147,6 @@ export function AgentCoreSection({
       {sectionOpen && (
         <EntriesSection
           scope={entryScope}
-          memoryActivePath={memoryActivePath}
           documentActivePath={documentActivePath}
           onOpen={onOpenEntry}
           onDeleted={onEntryDeleted}

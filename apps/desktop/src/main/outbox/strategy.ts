@@ -18,6 +18,30 @@ import { app } from "electron";
 export const PHASE_READY = "ready";
 export const PHASE_OPEN = "open";
 
+/** Mirrors server ``USAGE_SETTLE_WIRE_INT_KEYS``. Ratchet: test_usage_settle_parity.py */
+export const USAGE_SETTLE_WIRE_INT_KEYS = [
+  "input_tokens",
+  "output_tokens",
+  "reasoning_tokens",
+  "cache_hit_tokens",
+  "cache_miss_tokens",
+  "rounds",
+  "prompt_tokens",
+] as const;
+
+/** Mirrors server ``USAGE_SETTLE_POSITIVE_INT_KEYS``. */
+export const USAGE_SETTLE_POSITIVE_INT_KEYS = [
+  "duration_ms",
+  "generation_ms",
+] as const;
+
+/** Mirrors server ``USAGE_SETTLE_PASSTHROUGH_KEYS``. */
+export const USAGE_SETTLE_PASSTHROUGH_KEYS = [
+  "error_code",
+  "collab",
+  "outcome",
+] as const;
+
 const CHANNEL_CAPTAIN_CONTENT = "captain:content";
 const CHANNEL_CAPTAIN_REASONING = "captain:reasoning";
 
@@ -73,6 +97,7 @@ export interface OutboxRecord {
   content?: string;
   reasoning_content?: string | null;
   citations?: unknown[];
+  evidence_ledger?: unknown[];
   runs?: unknown;
   /** seq(str) → {kind,payload,ts,ord?} — progressive journal; crash salvage has no runs.
    *  ``ord`` is emission order (outbox twin of Postgres ``created_at``). JS
@@ -90,10 +115,14 @@ export interface OutboxRecord {
   cache_hit_tokens?: number;
   cache_miss_tokens?: number;
   rounds?: number;
+  prompt_tokens?: number;
   /** Whole-turn product-AI wall clock (ms); same number as live message_end. */
   duration_ms?: number;
   /** Decode-window sum (ms); same number as live message_end.generation_ms. */
   generation_ms?: number;
+  error_code?: string | null;
+  collab?: unknown;
+  outcome?: string | null;
   finish_reason?: string | null;
   phase?: string;
   updated_at?: number;
@@ -302,7 +331,7 @@ const TOOL_FAILURE_MESSAGE_MAX = 200;
 
 /** Mirror server ``EMPTY_DELEGATE_MSG`` (delegate.schema). */
 const EMPTY_DELEGATE_MSG =
-  'delegate 缺 tasks：默认顶层放非空 `tasks`，可抄：{"tasks":[{"role":"角色","task":"目标+边界+验收"}]}（deliverable 可选）。';
+  'delegate 缺 tasks：默认顶层放非空 `tasks`，可抄：{"tasks":[{"role":"角色","task":"目标+边界+验收"}]}。';
 
 /** Known local-turn write-back failure codes (mirrors server frozenset). */
 const LOCAL_TURN_TOOL_FAILURE_CODES = new Set([
@@ -333,8 +362,6 @@ const LOCAL_TURN_TOOL_FAILURE_CODES = new Set([
   "source_dump_redirect",
   "long_running_redirect",
   "loopback_host",
-  "shell_fetch_redirect",
-  "shell_download_redirect",
   "access_denied",
   "outside_workspace",
   "other",
@@ -356,12 +383,6 @@ function remapPathOrVerifyFailure(raw: string): string | null {
     raw.includes("请用 run 启动长驻进程")
   ) {
     return "long_running_redirect";
-  }
-  if (raw.includes("公网 http(s) 摘字请用 web_fetch")) {
-    return "shell_fetch_redirect";
-  }
-  if (raw.includes("公网 http(s) 落到工作区请用 download_url")) {
-    return "shell_download_redirect";
   }
   if (
     [
@@ -695,30 +716,28 @@ export function toRecordTurnBody(
     content: record.content || "",
     reasoning_content: record.reasoning_content ?? null,
     citations: record.citations || [],
+    evidence_ledger: record.evidence_ledger || [],
     runs: record.runs ?? null,
     message_id: record.message_id ?? null,
-    input_tokens: record.input_tokens ?? 0,
-    output_tokens: record.output_tokens ?? 0,
-    reasoning_tokens: record.reasoning_tokens ?? 0,
-    cache_hit_tokens: record.cache_hit_tokens ?? 0,
-    cache_miss_tokens: record.cache_miss_tokens ?? 0,
-    rounds: record.rounds ?? 0,
     trace_id: record.trace_id || "",
     finish_reason: record.finish_reason ?? null,
   };
-  if (
-    typeof record.duration_ms === "number" &&
-    Number.isFinite(record.duration_ms) &&
-    record.duration_ms > 0
-  ) {
-    body.duration_ms = Math.floor(record.duration_ms);
+  for (const key of USAGE_SETTLE_WIRE_INT_KEYS) {
+    const raw = record[key];
+    body[key] =
+      typeof raw === "number" && Number.isFinite(raw) ? Math.floor(raw) : 0;
   }
-  if (
-    typeof record.generation_ms === "number" &&
-    Number.isFinite(record.generation_ms) &&
-    record.generation_ms > 0
-  ) {
-    body.generation_ms = Math.floor(record.generation_ms);
+  for (const key of USAGE_SETTLE_POSITIVE_INT_KEYS) {
+    const raw = record[key];
+    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+      body[key] = Math.floor(raw);
+    }
+  }
+  for (const key of USAGE_SETTLE_PASSTHROUGH_KEYS) {
+    const val = record[key];
+    if (val !== undefined && val !== null && val !== "") {
+      body[key] = val;
+    }
   }
   const journal = journalEntriesFromMap(record.journal);
   if (journal) body.journal = journal;

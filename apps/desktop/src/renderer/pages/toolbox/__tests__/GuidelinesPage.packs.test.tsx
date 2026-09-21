@@ -92,15 +92,6 @@ vi.mock("@/services/documents", async (importOriginal) => {
   };
 });
 
-vi.mock("@/services/memory", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/memory")>();
-  return {
-    ...actual,
-    getMemoryFile: vi.fn(async () => ({ content: "", version: "v0" })),
-    writeMemoryFile: vi.fn(),
-  };
-});
-
 vi.mock("@/services/skillCatalog", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/services/skillCatalog")>();
@@ -180,17 +171,13 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-function readDialog() {
-  return screen.getByRole("dialog");
-}
-
-function renderPage() {
+function renderPage(path = "/toolbox/mine/skills") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[path]}>
         <GuidelinesPage />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -208,32 +195,17 @@ describe("GuidelinesPage 提示词阅读器", () => {
     expect(screen.queryByText("共享准则正文")).toBeNull();
 
     expect(screen.queryByText("角色身份")).toBeNull();
-    fireEvent.click(screen.getByText("全员共享准则"));
-    const dialog = readDialog();
-    expect(within(dialog).getByText("共享准则正文")).toBeTruthy();
-    expect(within(dialog).queryByText("主 Agent 身份正文")).toBeNull();
-    expect(screen.queryByText(/共享的基座/)).toBeNull();
+    expect(screen.queryByText("全员共享准则")).toBeNull();
+    expect(screen.getByRole("heading", { name: "必带" })).toBeTruthy();
   });
 
-  it("薄技能目录和详情都用人话，不露出内部名", async () => {
+  it("官方 HOW 以货架卡出现，不露内部名", async () => {
     vi.mocked(getCapabilities).mockResolvedValue(base);
-    renderPage();
-
+    renderPage("/toolbox/official");
     await waitFor(() => {
-      expect(screen.getByText("派单进阶", { exact: false })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "派单进阶" })).toBeTruthy();
     });
     expect(screen.queryByText("delegate_playbook")).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "派单进阶" }));
-    const dialog = await screen.findByRole("dialog");
-    expect(screen.queryByText("delegate_playbook")).toBeNull();
-    expect(within(dialog).getByText("body")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "编辑" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "换用" })).toBeNull();
-    expect(screen.queryByText(/出厂只读/)).toBeNull();
-    expect(screen.queryByText(/出厂正文只读/)).toBeNull();
-    expect(screen.queryByText(/不是独立能力/)).toBeNull();
-    expect(screen.queryByText(/先在「我的技能」里写一份，再来换用/)).toBeNull();
   });
 
   it("货架没有角色身份卡，也不展览工种人格或 addon 正文", async () => {
@@ -267,7 +239,7 @@ describe("GuidelinesPage 提示词阅读器", () => {
     expect(screen.queryByText(contract)).toBeNull();
   });
 
-  it("官方 HOW 只读，不能改这一条", async () => {
+  it("我的目录有手写条目，没有官方 HOW", async () => {
     vi.mocked(getCapabilities).mockResolvedValue(base);
     vi.mocked(getSkillCatalog).mockResolvedValue({
       slots: [
@@ -291,22 +263,27 @@ describe("GuidelinesPage 提示词阅读器", () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("合同审查", { exact: false })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "合同审查" })).toBeTruthy();
     });
-    fireEvent.click(screen.getByRole("button", { name: "派单进阶" }));
-    await screen.findByRole("dialog");
-    await waitFor(() => {
-      expect(screen.getByTestId("factory-skill-editor")).toBeTruthy();
-    });
-    expect(screen.queryByRole("button", { name: "换用" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "恢复出厂" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "编辑" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "派单进阶" })).toBeNull();
   });
 
-  it("没有范围选择器；目录不分来源区；常驻账号条目跟在准则后", async () => {
+  it("官方 HOW 不在目录里改", async () => {
     vi.mocked(getCapabilities).mockResolvedValue(base);
-    renderPage();
+    renderPage("/toolbox/official");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "派单进阶" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "派单进阶" }));
+    const how = await screen.findByRole("dialog");
+    expect(within(how).getByText("body")).toBeTruthy();
+    expect(within(how).queryByRole("tab", { name: "编辑" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "换用" })).toBeNull();
+  });
+
+  it("没有范围选择器；官方栏打开准则读卡", async () => {
+    vi.mocked(getCapabilities).mockResolvedValue(base);
+    renderPage("/toolbox/official");
 
     await waitFor(() => {
       expect(screen.getByTestId("prompt-overview")).toBeTruthy();
@@ -323,14 +300,14 @@ describe("GuidelinesPage 提示词阅读器", () => {
     expect(screen.queryByText("按需注入")).toBeNull();
     expect(screen.queryByText("我的技能")).toBeNull();
     expect(screen.queryByText("自带")).toBeNull();
-    expect(screen.getByTestId("prompt-rail-official")).toBeTruthy();
+    expect(screen.queryByTestId("prompt-rail-official")).toBeNull();
     expect(within(dialog).getByText("官方")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "关闭" }));
     expect(screen.queryByText("偏好")).toBeNull();
     expect(screen.queryByText("画像")).toBeNull();
     expect(screen.queryByText("AI 可能改")).toBeNull();
     expect(screen.queryByTestId("account-entry-editor")).toBeNull();
-    expect(screen.getByText("派单进阶", { exact: false })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "派单进阶" })).toBeTruthy();
     expect(screen.queryByRole("tablist", { name: "加载方式" })).toBeNull();
     expect(screen.queryByRole("button", { name: "上架" })).toBeNull();
   });
@@ -355,7 +332,7 @@ describe("GuidelinesPage 提示词阅读器", () => {
       quotaWarning: null,
     });
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: "新建条目" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^新建$/ }));
     await waitFor(() => {
       expect(createRuleFolder).toHaveBeenCalledWith("其他");
       expect(createRuleDocument).toHaveBeenCalledWith(

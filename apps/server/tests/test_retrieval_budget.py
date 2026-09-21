@@ -105,7 +105,7 @@ def test_retrieval_budget_critical_helpers():
 
 def test_build_plan_applies_unified_default_including_prose():
     """prose 与非 prose 均得统一默认；builder 不因 prose 剥离检索工具。"""
-    valid = {"web_search", "web_fetch", "file_read", "handoff", "escalate"}
+    valid = {"web_search", "web_fetch", "read", "handoff", "escalate"}
     plan, errors = build_run_plan(
         [
             {"id": "r1", "role": "研究员", "task": "调研竞品"},
@@ -141,7 +141,7 @@ def test_build_plan_ignores_task_level_retrieval_budget():
                 "retrieval_budget": 0,
             },
         ],
-        valid_tools={"web_search", "web_fetch", "file_read"},
+        valid_tools={"web_search", "web_fetch", "read"},
     )
     assert errors == []
     by_role = {n.role: n for n in plan.nodes}
@@ -300,7 +300,7 @@ def test_rework_refill_slots_zero_after_wind_down():
 
 
 def test_rework_refill_slots_zero_for_write_disk_form():
-    """写盘形态合同返工：不补检索预算（缺的是 file_write，不是阅读额度）。"""
+    """写盘形态合同返工：不补检索预算（缺的是 write，不是阅读额度）。"""
     assert rework_refill_slots(
         original_limit=14, wind_down_entered=False, write_disk_form=True
     ) == 0

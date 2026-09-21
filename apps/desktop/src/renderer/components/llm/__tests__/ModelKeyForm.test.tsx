@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * Tests for BYOK ModelKeyForm — advanced「连接测试用模型」Input + datalist.
+ * Tests for BYOK ModelKeyForm — Key + Base URL; models live in 模型组合.
  */
 
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -37,7 +37,6 @@ function savedProvider(over: Partial<LlmProviderView> = {}): LlmProviderView {
     id: "p-new",
     label: moonshot.label,
     base_url: moonshot.baseUrl,
-    default_model: moonshot.defaultModel,
     status: "unchecked",
     masked_key: "••••abcd",
     ...over,
@@ -58,7 +57,7 @@ function providerSelect(): HTMLSelectElement {
   return screen.getAllByRole("combobox")[0] as HTMLSelectElement;
 }
 
-/** Open「高级选项」<details> so nested controls become accessible to queries. */
+/** Open「高级选项」<details> so nested Base URL becomes accessible. */
 function openAdvancedOptions(): HTMLDetailsElement {
   const details = screen.getByText("高级选项").closest("details");
   if (!(details instanceof HTMLDetailsElement)) {
@@ -66,25 +65,6 @@ function openAdvancedOptions(): HTMLDetailsElement {
   }
   details.open = true;
   return details;
-}
-
-/** Query「连接测试用模型」after opening advanced options. */
-function defaultModelControl(): HTMLElement {
-  openAdvancedOptions();
-  return screen.getByLabelText("连接测试用模型");
-}
-
-/** Options from the datalist bound to the connection-test model Input. */
-function defaultModelDatalistOptions(input: HTMLInputElement): string[] {
-  const listId = input.getAttribute("list");
-  expect(listId).toBeTruthy();
-  if (!listId) return [];
-  const list = document.getElementById(listId);
-  expect(list?.tagName).toBe("DATALIST");
-  if (!list) return [];
-  return Array.from(list.querySelectorAll("option")).map(
-    (o) => (o as HTMLOptionElement).value,
-  );
 }
 
 beforeEach(() => {
@@ -105,10 +85,11 @@ describe("ModelKeyForm", () => {
     ).toBeTruthy();
   });
 
-  it("keeps default model off the main path; advanced holds 连接测试用模型", () => {
+  it("keeps models off the provider form; advanced holds Base URL for presets", () => {
     renderForm();
 
     expect(screen.queryByText("默认模型")).toBeNull();
+    expect(screen.queryByText("连接测试用模型")).toBeNull();
     expect(screen.getByText("厂商预设")).toBeTruthy();
     expect(screen.getByText("名称")).toBeTruthy();
     expect(screen.getByText(/^API Key/)).toBeTruthy();
@@ -116,41 +97,15 @@ describe("ModelKeyForm", () => {
     expect(
       screen.getByText(/选择后将预填名称与端点；日常选用请到「模型组合」/),
     ).toBeTruthy();
-    expect(defaultModelControl()).toBeTruthy();
-    expect(
-      screen.getByText(/可直接粘贴模型 ID；连接测试与目录兜底用/),
-    ).toBeTruthy();
+    openAdvancedOptions();
+    expect(screen.getByLabelText("Base URL")).toBeTruthy();
   });
 
-  it("shows DeepSeek preset models as Input + datalist including deepseek-flash", () => {
-    renderForm();
-
-    fireEvent.change(providerSelect(), { target: { value: "deepseek" } });
-
-    const modelInput = defaultModelControl() as HTMLInputElement;
-    expect(modelInput.tagName).toBe("INPUT");
-    expect(modelInput.value).toBe(deepseek.defaultModel);
-
-    const optionValues = defaultModelDatalistOptions(modelInput);
-    for (const model of deepseek.models) {
-      expect(optionValues).toContain(model);
-    }
-    expect(screen.queryByText("其他…")).toBeNull();
-  });
-
-  it("lets preset vendors free-type a custom default model in the visible Input", async () => {
+  it("submits preset vendor without a model field", async () => {
     vi.mocked(createLlmProvider).mockResolvedValue(savedProvider());
     const { onSaved } = renderForm();
 
     fireEvent.change(providerSelect(), { target: { value: "moonshot" } });
-
-    const modelInput = defaultModelControl() as HTMLInputElement;
-    expect(modelInput.tagName).toBe("INPUT");
-    expect(modelInput.value).toBe(moonshot.defaultModel);
-
-    fireEvent.change(modelInput, {
-      target: { value: "kimi-custom-test" },
-    });
     fireEvent.change(screen.getByPlaceholderText("sk-..."), {
       target: { value: "sk-test-key" },
     });
@@ -161,90 +116,43 @@ describe("ModelKeyForm", () => {
         expect.objectContaining({
           label: moonshot.label,
           base_url: moonshot.baseUrl,
-          default_model: "kimi-custom-test",
           api_key: "sk-test-key",
         }),
       ),
     );
+    expect(createLlmProvider).toHaveBeenCalledWith(
+      expect.not.objectContaining({ default_model: expect.anything() }),
+    );
     expect(onSaved).toHaveBeenCalled();
   });
 
-  it("preserves a custom typed model when switching preset vendors", () => {
+  it("fills name and Base URL when switching preset vendors", () => {
     renderForm();
 
     fireEvent.change(providerSelect(), { target: { value: "moonshot" } });
-    const modelInput = defaultModelControl() as HTMLInputElement;
-    fireEvent.change(modelInput, {
-      target: { value: "my-custom-model-id" },
-    });
-
     fireEvent.change(providerSelect(), { target: { value: "openai" } });
 
-    const after = defaultModelControl() as HTMLInputElement;
-    expect(after.value).toBe("my-custom-model-id");
     expect((screen.getByLabelText("名称") as HTMLInputElement).value).toBe(
       openai.label,
     );
+    openAdvancedOptions();
     expect((screen.getByLabelText("Base URL") as HTMLInputElement).value).toBe(
       openai.baseUrl,
     );
   });
 
-  it("opens advanced when editing a stored model not in the preset list", async () => {
-    vi.mocked(updateLlmProvider).mockResolvedValue(
-      savedProvider({
-        id: "p1",
-        default_model: "already-saved-model",
-      }),
-    );
-    renderForm({
-      providerId: "p1",
-      initialLabel: moonshot.label,
-      initialBaseUrl: moonshot.baseUrl,
-      initialModel: "already-saved-model",
-    });
-
-    const details = screen.getByText("高级选项").closest("details");
-    expect(details?.open).toBe(true);
-    const modelInput = screen.getByLabelText(
-      "连接测试用模型",
-    ) as HTMLInputElement;
-    expect(modelInput.tagName).toBe("INPUT");
-    expect(modelInput.value).toBe("already-saved-model");
-
-    fireEvent.change(modelInput, {
-      target: { value: "edited-model" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
-
-    await waitFor(() =>
-      expect(updateLlmProvider).toHaveBeenCalledWith(
-        "p1",
-        expect.objectContaining({
-          default_model: "edited-model",
-          label: moonshot.label,
-          base_url: moonshot.baseUrl,
-        }),
-      ),
-    );
-  });
-
-  it("keeps custom provider Base URL on main path; connection-test model in advanced", () => {
+  it("keeps custom provider Base URL on main path and hides 高级选项", () => {
     renderForm();
     fireEvent.change(providerSelect(), { target: { value: "custom" } });
 
     expect(screen.getByLabelText("Base URL").tagName).toBe("INPUT");
-    expect(screen.getByText("高级选项")).toBeTruthy();
+    expect(screen.queryByText("高级选项")).toBeNull();
+    expect(screen.queryByText("连接测试用模型")).toBeNull();
     expect(
       screen.getByText(
         /自定义地址通常需含 \/v1（例 https:\/\/api\.example\.com\/v1）/,
       ),
     ).toBeTruthy();
-
-    const defaultModelInput = defaultModelControl() as HTMLInputElement;
-    expect(defaultModelInput.tagName).toBe("INPUT");
-    expect(defaultModelInput.getAttribute("list")).toBeNull();
-    expect(screen.queryByText("其他…")).toBeNull();
   });
 
   it("shows Base URL /v1 hint in advanced for preset vendors", () => {
@@ -257,14 +165,13 @@ describe("ModelKeyForm", () => {
     ).toBeTruthy();
   });
 
-  it("offers OpenCode Go preset with its own endpoint and chat/completions seed", async () => {
+  it("offers OpenCode Go preset with its own endpoint", async () => {
     const go = getByokProviderPreset("opencode_go");
     vi.mocked(createLlmProvider).mockResolvedValue(
       savedProvider({
         id: "p-go",
         label: go.label,
         base_url: go.baseUrl,
-        default_model: go.defaultModel,
       }),
     );
     renderForm();
@@ -281,17 +188,10 @@ describe("ModelKeyForm", () => {
     expect((screen.getByLabelText("名称") as HTMLInputElement).value).toBe(
       "OpenCode Go",
     );
-
-    const modelInput = defaultModelControl() as HTMLInputElement;
+    openAdvancedOptions();
     expect((screen.getByLabelText("Base URL") as HTMLInputElement).value).toBe(
       "https://opencode.ai/zen/go/v1",
     );
-    expect(modelInput.value).toBe("deepseek-v4.1-flash");
-    expect(defaultModelDatalistOptions(modelInput)).toEqual([
-      "deepseek-v4.1-flash",
-      "deepseek-v4-pro",
-      "glm-5.2",
-    ]);
     expect(
       screen
         .getByRole("link", { name: /前往 OpenCode Go/ })
@@ -308,7 +208,6 @@ describe("ModelKeyForm", () => {
         expect.objectContaining({
           label: "OpenCode Go",
           base_url: "https://opencode.ai/zen/go/v1",
-          default_model: "deepseek-v4.1-flash",
           api_key: "sk-go",
         }),
       ),
@@ -320,7 +219,6 @@ describe("ModelKeyForm", () => {
       providerId: "p-go",
       initialLabel: "OpenCode Go",
       initialBaseUrl: "HTTPS://OPENCODE.AI/ZEN/GO/V1/",
-      initialModel: "deepseek-v4-flash",
     });
     expect(providerSelect().value).toBe("opencode_go");
     unmount();
@@ -329,12 +227,11 @@ describe("ModelKeyForm", () => {
       providerId: "p-zen",
       initialLabel: "OpenCode Zen",
       initialBaseUrl: "https://opencode.ai/zen/v1",
-      initialModel: "deepseek-v4-flash",
     });
     expect(providerSelect().value).toBe("opencode_zen");
   });
 
-  it("pre-fills default_model on preset change when still on prior default and still submits it", async () => {
+  it("saves a DeepSeek preset from the main path without opening advanced", async () => {
     vi.mocked(createLlmProvider).mockResolvedValue(savedProvider());
     renderForm();
 
@@ -342,7 +239,6 @@ describe("ModelKeyForm", () => {
     fireEvent.change(screen.getByPlaceholderText("sk-..."), {
       target: { value: "sk-test-key" },
     });
-    // Main path must not expose「默认模型」; save without opening advanced.
     expect(screen.queryByText("默认模型")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "添加" }));
 
@@ -351,10 +247,34 @@ describe("ModelKeyForm", () => {
         expect.objectContaining({
           label: deepseek.label,
           base_url: deepseek.baseUrl,
-          default_model: deepseek.defaultModel,
           api_key: "sk-test-key",
         }),
       ),
+    );
+  });
+
+  it("patches label and base_url without a model field", async () => {
+    vi.mocked(updateLlmProvider).mockResolvedValue(savedProvider({ id: "p1" }));
+    renderForm({
+      providerId: "p1",
+      initialLabel: moonshot.label,
+      initialBaseUrl: moonshot.baseUrl,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() =>
+      expect(updateLlmProvider).toHaveBeenCalledWith(
+        "p1",
+        expect.objectContaining({
+          label: moonshot.label,
+          base_url: moonshot.baseUrl,
+        }),
+      ),
+    );
+    expect(updateLlmProvider).toHaveBeenCalledWith(
+      "p1",
+      expect.not.objectContaining({ default_model: expect.anything() }),
     );
   });
 });

@@ -1,6 +1,5 @@
 import { invalidateAllFolderSharing } from "@/hooks/useFolderSharing";
 import { clientHeaders } from "@/lib/clientBuildInfo";
-import { queryClient } from "@/lib/queryClient";
 import { bearerAuthHeader, sessionCredentials } from "@/lib/sessionAuth";
 import { notifyInfo } from "@/lib/toast";
 import {
@@ -121,7 +120,7 @@ export function memoryUpdatedToastCopy(
   if (cardShown) return null;
   if (kind === "quota") {
     // Never claim a write that was refused (审计 CTX-A2).
-    return "常驻条目已满，有内容没能记下";
+    return "常驻用户规则已满，有内容没能写入";
   }
   return null;
 }
@@ -159,7 +158,7 @@ function handleFrame(frame: string): void {
       const e = event as MemoryUpdatedEvent;
       const conv = useConversationStore.getState();
       const kind = e.update?.kind ?? e.kind ?? "semantic";
-      if (e.update && e.conversation_id) {
+      if (e.update && e.conversation_id && kind === "quota") {
         conv.addMemoryUpdate(
           toMemoryUpdate({
             ...e.update,
@@ -168,8 +167,8 @@ function handleFrame(frame: string): void {
           e.conversation_id,
         );
       }
-      void queryClient.invalidateQueries({ queryKey: ["memory-updates"] });
       const cardShown =
+        kind === "quota" &&
         !!(e.update && e.conversation_id) &&
         conv.currentConversationId === e.conversation_id;
       const toastCopy = memoryUpdatedToastCopy(kind, cardShown);

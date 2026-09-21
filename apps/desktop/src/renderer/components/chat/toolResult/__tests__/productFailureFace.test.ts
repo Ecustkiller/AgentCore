@@ -96,7 +96,7 @@ describe("compactToolFailureFace", () => {
     expect(
       compactToolFailureFace({
         status: "error",
-        toolName: "file_read",
+        toolName: "read",
         failure: {
           message:
             "文件不存在：web/CONVENTIONS.md\n可换 glob 更宽查找。勿反复重试。",
@@ -106,11 +106,11 @@ describe("compactToolFailureFace", () => {
     ).toBeNull();
   });
 
-  it("hides a leaked str_replace receipt", () => {
+  it("hides a leaked edit receipt", () => {
     expect(
       compactToolFailureFace({
         status: "error",
-        toolName: "str_replace",
+        toolName: "edit",
         failure: {
           message:
             "在 trialStore.ts 中找不到 old_string；请对照写回执重写精确锚。",
@@ -120,7 +120,7 @@ describe("compactToolFailureFace", () => {
     expect(
       compactToolFailureFace({
         status: "error",
-        toolName: "str_replace",
+        toolName: "edit",
         failure: { message: STR_REPLACE_NO_MATCH_USER_FACE },
       }),
     ).toBeNull();

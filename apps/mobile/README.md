@@ -53,7 +53,7 @@ pnpm -C apps/mobile android:open
 | 仓库根 `pnpm release:gate --only mobile` | 手机段（现为 fold-kit 测试；无 SPA 单测） |
 | 仓库根 `pnpm conformance` | 只跑桌面 fold |
 
-`deploy:pages` 已退役：独立 `m.example.com` 站已下线，不要再上传旧 SPA。浏览器窄屏走 `pnpm -C apps/desktop deploy:web`。
+独立 `m.example.com` 站已下线，本包不再提供 Pages 部署入口。浏览器窄屏走 `pnpm -C apps/desktop deploy:web`。
 
 改 SSE / fold 后：仓库根 `pnpm conformance`（桌面）。
 
@@ -104,7 +104,3 @@ pnpm -C apps/mobile android:assemble
 真机验收三步：登录后 `GET /v1/devices` 能看到设备 → 触发「需要你」暂停 → 手机收到通知、点开深链到对应会话。
 
 排查顺着日志走：`push.fcm_token_minted`（服务账号本身可用）→ `push.fcm_sent`（FCM 收下了，带 message_id 可去控制台追）→ 这两条都在却没收到，问题就在设备侧而非我们。`attention.signalled` 的 `push_outcome` 分四态，其中 `skipped_mobile_online` 是**有意不推**（手机 firehose 在线，走 in-app 横幅），别误判成故障。
-
-## 贡献
-
-[`CONTRIBUTING.md`](../../CONTRIBUTING.md)

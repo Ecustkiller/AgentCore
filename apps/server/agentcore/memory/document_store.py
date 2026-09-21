@@ -21,9 +21,9 @@ it is store-agnostic and an in-flight editor baseline survived the file→docume
 resurrect a user-deleted note from a leftover markdown file.
 
 Sidecar dual-path (R3b): when the turn bound account narrow-ticket credentials and this
-store has **no** request session, list/load/save/delete/project_scopes call cloud
-``/v1/account/memory/*``. Bound-session DI (cloud API handlers) always stays on the
-in-process DB. Reads soft-degrade to empty + log; writes raise (no fake success).
+store has **no** request session, list/load stay on the prepare snapshot (empty after
+memory retirement); save/delete are no-ops. Bound-session DI always stays on the
+in-process DB. Reads soft-degrade to empty + log; writes on the DB path still raise.
 
 Prepare→assemble cache_only: when ``prepare_reads_cache_only`` is bound and an
 account ticket is present, list/load read only ``account_prepare_cache`` (miss →
@@ -153,28 +153,7 @@ class DocumentMemoryStore:
                         )
                     )
                 return out
-            try:
-                from agentcore.account.credentials import cloud_memory_list
-
-                files = await cloud_memory_list(creds, scope=scope)
-            except Exception as e:  # noqa: BLE001 - memory read must never break a turn
-                logger.warning("memory.list_failed", user_id=user_id, error=str(e))
-                return []
-            out = []
-            for item in files:
-                path = str(item.get("path") or "")
-                if not path.endswith(".md"):
-                    continue
-                version = str(item.get("version") or memory_version(""))
-                out.append(
-                    MemoryFileMeta(
-                        path=path,
-                        version=version,
-                        description=str(item.get("description") or ""),
-                        disputed=bool(item.get("disputed")),
-                    )
-                )
-            return out
+            return []
         try:
             async with self._repo() as repo:
                 notes = await repo.list_memory_notes(user_id, scope)
@@ -206,13 +185,7 @@ class DocumentMemoryStore:
                 from agentcore.memory.account_prepare_cache import memory_body_from_snapshot
 
                 return memory_body_from_snapshot(snapshot, path, scope=scope)
-            try:
-                from agentcore.account.credentials import cloud_memory_load
-
-                return await cloud_memory_load(creds, path=path, scope=scope)
-            except Exception as e:  # noqa: BLE001 - memory read must never break a turn
-                logger.warning("memory.load_failed", user_id=user_id, error=str(e))
-                return ""
+            return ""
         try:
             async with self._repo() as repo:
                 note = await repo.get_memory_note(user_id, path, scope)
@@ -243,10 +216,12 @@ class DocumentMemoryStore:
                     scope=scope or "global",
                 )
                 return
-            from agentcore.account.credentials import cloud_memory_save
-
-            # Writes must NOT soft-succeed: propagate AccountCloudError to callers.
-            await cloud_memory_save(creds, path=path, content=markdown, scope=scope)
+            logger.info(
+                "memory.save_skipped_no_cloud_api",
+                user_id=user_id,
+                path=path,
+                scope=scope or "global",
+            )
             return
         role, apply_mode = _classify(path)
         async with self._repo() as repo:
@@ -278,9 +253,12 @@ class DocumentMemoryStore:
     async def delete(self, user_id: str, path: str, scope: MemoryScope = None) -> None:
         creds = self._account_cloud_creds()
         if creds is not None:
-            from agentcore.account.credentials import cloud_memory_delete
-
-            await cloud_memory_delete(creds, path=path, scope=scope)
+            logger.info(
+                "memory.delete_skipped_no_cloud_api",
+                user_id=user_id,
+                path=path,
+                scope=scope or "global",
+            )
             return
         async with self._repo() as repo:
             await repo.delete_memory_note(user_id, path, scope)
@@ -292,13 +270,7 @@ class DocumentMemoryStore:
     async def project_scopes(self, user_id: str) -> list[str]:
         creds = self._account_cloud_creds()
         if creds is not None:
-            try:
-                from agentcore.account.credentials import cloud_memory_project_scopes
-
-                return await cloud_memory_project_scopes(creds)
-            except Exception as e:  # noqa: BLE001 - degrade to no project layers
-                logger.warning("memory.project_scopes_failed", user_id=user_id, error=str(e))
-                return []
+            return []
         try:
             async with self._repo() as repo:
                 return await repo.list_memory_project_scopes(user_id)

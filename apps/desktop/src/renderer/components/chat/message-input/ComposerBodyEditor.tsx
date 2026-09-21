@@ -56,6 +56,7 @@ export const ComposerBodyEditor = forwardRef(function ComposerBodyEditor(
     onCaret,
     onKeyDown,
     onPaste,
+    onFocus,
   }: {
     value: string;
     attachments: PendingAttachment[];
@@ -73,6 +74,7 @@ export const ComposerBodyEditor = forwardRef(function ComposerBodyEditor(
     onCaret: (caret: number) => void;
     onKeyDown: (e: ReactKeyboardEvent) => void;
     onPaste: (e: ClipboardEvent) => void;
+    onFocus?: () => void;
   },
   ref: Ref<ComposerBodyHandle>,
 ) {
@@ -299,6 +301,7 @@ export const ComposerBodyEditor = forwardRef(function ComposerBodyEditor(
           emitFromDom();
         }}
         onKeyDown={onKeyDown}
+        onFocus={onFocus}
         onPaste={(e) => {
           onPaste(e);
           if (e.defaultPrevented) return;

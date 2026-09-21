@@ -50,7 +50,7 @@ export const COLLAB_SUMMARY_TOOLTIP =
  *
  * 两处算术，都是为了不把同一件事或不属于队友的事算进来：
  *
- * 1. `escalations − scope_signals`：后端 `scope_signals` 数的是 `kind=scope` 的上报，本身
+ * 1. `escalations − scope_signals`：后端 `scope_signals` 数的是 `reason=scope` 的上报，本身
  *    就在 `escalations` 里（wave.py 从同一份 `state.escalations` 计两次）。两个数直接并列
  *    会把同一次上报数成两处，故减掉重叠，让两段互不相交。
  * 2. `− *_by_user`：这一行说的是「**队友**互相把关」，而 `revises` 里混着用户点「立即改

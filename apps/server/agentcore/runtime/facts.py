@@ -154,8 +154,10 @@ class Fact:
 class TurnStartedFact:
     """The turn's head fact — the **captain** window fold's anchor.
 
-    ``system_prompt`` is the frozen constitution / identity / catalog (captured
-    verbatim). ``turn_envelope`` is the ephemeral ``[系统提示]`` user message
+    ``system_prompt`` is the frozen node-0 constitution / identity / catalog
+    (captured verbatim). When this turn's live compose differs, ``in_history_system``
+    is the full new string appended after history (DeepSeek in-history).
+    ``turn_envelope`` is the ephemeral ``[系统提示]`` user message
     (date / workspace / ledger); omit / empty on journals from before this field.
     ``history_len`` is the number of prior conversation messages folded into the
     opening window (the history itself is a projection of earlier turns, not
@@ -168,6 +170,7 @@ class TurnStartedFact:
     model_profile: str
     history_len: int = 0
     turn_envelope: str = ""
+    in_history_system: str = ""
     kind: ClassVar[FactKind] = FactKind.TURN_STARTED
 
     def to_fact(self, ts: str | None = None) -> Fact:
@@ -179,6 +182,7 @@ class TurnStartedFact:
                 "model_profile": self.model_profile,
                 "history_len": self.history_len,
                 "turn_envelope": self.turn_envelope,
+                "in_history_system": self.in_history_system,
             },
             ts=ts,
         )

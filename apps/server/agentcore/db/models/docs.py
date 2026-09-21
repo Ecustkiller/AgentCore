@@ -3,7 +3,7 @@
 Distinct from ``documents`` (记忆 / 规则 Markdown 树). A Doc hangs on a cloud
 folder — collaboration-desk members see the same live draft. ``body`` is
 ``{"markdown": str}``; ``version`` is the CAS counter so two tabs cannot
-silently clobber (照 boards.scene).
+silently clobber (CAS ``version``).
 """
 
 from datetime import datetime

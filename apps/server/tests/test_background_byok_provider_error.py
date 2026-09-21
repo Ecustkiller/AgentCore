@@ -102,7 +102,7 @@ async def test_no_mark_on_timeout(monkeypatch):
         raise LLMTimeoutError("upstream timeout")
 
     with pytest.raises(LLMTimeoutError):
-        await run_background_llm("u1", purpose="memory", runner=_runner)
+        await run_background_llm("u1", purpose="title", runner=_runner)
 
     update_status.assert_not_awaited()
 

@@ -25,13 +25,13 @@ if TYPE_CHECKING:
 from agentcore.config import settings
 from agentcore.config.platform import parse_platform_model_credentials
 from agentcore.core.logging import get_logger
+from agentcore.llm.byok_provider_presets import seed_model_for_base_url
 from agentcore.llm.credentials import LLMCredentials, derive_platform_credential_id
-from agentcore.llm.profiles import PLATFORM_MODEL_FLASH
 
 logger = get_logger(__name__)
 
 ProviderPurpose = Literal["user_facing", "platform_internal"]
-ModelPurpose = str  # chat | title | memory | compaction | file.rewrite | ...
+ModelPurpose = str  # chat | title | compaction | file.rewrite | ...
 ModelOrigin = Literal["byok", "platform"]
 
 __all__ = [
@@ -180,7 +180,7 @@ def _credentials_from_provider(row: UserLlmProvider, api_key: str) -> LLMCredent
     return LLMCredentials(
         api_key=api_key,
         base_url=row.base_url or settings.platform_base_url,
-        default_model=(row.default_model or "").strip() or PLATFORM_MODEL_FLASH,
+        default_model=seed_model_for_base_url(row.base_url or ""),
         source="user",
         provider_id=row.id,
         label=label,

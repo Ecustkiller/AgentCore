@@ -111,7 +111,7 @@ class _UsageProvider:
 
 class _ScriptedRounds:
     """Fake LLM yielding a pre-scripted chunk list per call (one call = one ReAct
-    round), so a test can script a multi-round attempt that calls file_write.
+    round), so a test can script a multi-round attempt that calls write.
 
     Records each call's first user message so a DAG test can assert what context
     (e.g. a 递指针 pointer block) reached a downstream worker's prompt."""
@@ -140,7 +140,7 @@ class _ScriptedRounds:
 
 
 class _FileWriteTool:
-    """A stub named ``file_write`` that lands a file the way the real pen does.
+    """A stub named ``write`` that lands a file the way the real pen does.
 
     The ledger reads a tool's OWN self-report (``ToolResult.file_products``), not its
     name or its arguments — so a stub must report the path it "landed" for
@@ -153,11 +153,11 @@ class _FileWriteTool:
     @property
     def schema(self) -> ToolSchema:
         return ToolSchema(
-            name="file_write",
+            name="write",
             description="stub file write",
             parameters={
                 "type": "object",
-                "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+                "properties": {"file_path": {"type": "string"}, "content": {"type": "string"}},
             },
             face=ToolFace.EXECUTION,
             approval=ToolApproval.NEVER,
@@ -165,7 +165,7 @@ class _FileWriteTool:
 
     async def execute(self, arguments, context) -> ToolResult:  # noqa: ANN001
         self.calls += 1
-        path = str((arguments or {}).get("path") or "").strip()
+        path = str((arguments or {}).get("file_path") or "").strip()
         return ToolResult(
             tool_call_id="",
             success=True,

@@ -31,7 +31,7 @@ describe("absorbHandoffBriefContent", () => {
       {
         kind: "tool",
         id: "w1",
-        tool_name: "file_write",
+        tool_name: "write",
         arguments: {},
         result: "ok",
         status: "success",
@@ -41,7 +41,7 @@ describe("absorbHandoffBriefContent", () => {
     ]);
     expect(out).toHaveLength(3);
     expect(out[0]).toMatchObject({ kind: "content", text: "长文先交完。" });
-    expect(out[1]).toMatchObject({ tool_name: "file_write" });
+    expect(out[1]).toMatchObject({ tool_name: "write" });
     expect(out[2]).toMatchObject({
       kind: "tool",
       tool_name: "handoff",

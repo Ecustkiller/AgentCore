@@ -104,6 +104,21 @@ function isHostToolName(name: string): boolean {
   return name === "host" || name.startsWith("host_");
 }
 
+/** 折叠标题不挂脚本正文；这些工具的命令出现在展开卡顶部。 */
+const COMMAND_BODY_TOOLS = new Set([
+  "run",
+  "terminal",
+  "host",
+  "host_shell",
+  "test_run",
+]);
+
+function commandBody(data: ToolResultData): string {
+  if (!COMMAND_BODY_TOOLS.has(data.toolName)) return "";
+  const raw = data.args.command;
+  return typeof raw === "string" ? raw.trim() : "";
+}
+
 /** Historical Host journals wrapped model JSON in ``<不可信内容>``; strip for the person. */
 function stripHostUntrustedFrame(text: string): string {
   const trimmed = text.trim();
@@ -215,16 +230,20 @@ export function hasToolResultBody(d: ToolResultData): boolean {
   if (isFileEdit(d)) return true;
   if (isFileWrite(d)) return true;
   if (d.status === "error") {
-    return Boolean(compactToolFailureFace(d) || d.result?.trim());
+    return Boolean(
+      compactToolFailureFace(d) || d.result?.trim() || commandBody(d),
+    );
   }
   if (specificToolFailureMessage(d)) return true;
+  // 命令已离开折叠标题；没有输出时展开仍要能看到脚本。
+  if (commandBody(d)) return true;
   return !!d.result?.trim();
 }
 
 function isFileEdit(d: ToolResultData): boolean {
   return (
     d.status === "success" &&
-    d.toolName === "str_replace" &&
+    d.toolName === "edit" &&
     asString(d.args.old_string) !== null &&
     asString(d.args.new_string) !== null
   );
@@ -233,13 +252,13 @@ function isFileEdit(d: ToolResultData): boolean {
 function isFileWrite(d: ToolResultData): boolean {
   return (
     d.status === "success" &&
-    d.toolName === "file_write" &&
+    d.toolName === "write" &&
     asString(d.args.content) !== null
   );
 }
 
-/** Collapsed-title stat: str_replace +/- (omit zeros at render), file_write
- * line count, or a file_read window (partial reads only — a full file is
+/** Collapsed-title stat: edit +/- (omit zeros at render), write
+ * line count, or a read window (partial reads only — a full file is
  * silent). Null when the call isn't a finished write/read preview. */
 export type ToolLineTitleStat =
   | { kind: "diff"; adds: number; dels: number }
@@ -267,7 +286,7 @@ export function writeFamilyTitleStat(
 export function fileReadTitleStat(
   d: ToolResultData,
 ): Extract<ToolLineTitleStat, { kind: "readWindow" }> | null {
-  if (d.status !== "success" || d.toolName !== "file_read") return null;
+  if (d.status !== "success" || d.toolName !== "read") return null;
   const window = parseFileReadWindow(d.result);
   if (!window || !isPartialFileReadWindow(window)) return null;
   return {
@@ -356,11 +375,11 @@ export function toolResultPeek(d: ToolResultData): string {
     if (!isFileEdit(d) && !isFileWrite(d)) return peek;
   }
   if (isFileEdit(d)) {
-    const path = asString(d.args.path);
+    const path = asString(d.args.file_path);
     return path ? `已编辑 ${path}` : "已编辑";
   }
   if (isFileWrite(d)) {
-    const path = asString(d.args.path);
+    const path = asString(d.args.file_path);
     return path ? `已写入 ${path}` : "已写入文件";
   }
   if (d.status === "error") {
@@ -439,15 +458,28 @@ function WebFetchResult({ display }: { display: WebFetchDisplay }) {
   );
 }
 
-/** Terminal-style stdout/stderr. Exit number lives on the ToolLine. */
-function CodeExecResult({ display }: { display: CodeExecDisplay }) {
+/** Terminal-style stdout/stderr. Exit number lives on the ToolLine.
+ * The command sits above the output: it left the collapsed title. */
+function CodeExecResult({
+  display,
+  command,
+}: {
+  display: CodeExecDisplay;
+  command?: string;
+}) {
   const incomplete = isVerifyBudgetExceeded(display);
   const stdout = (display.stdout ?? "").replace(/\n+$/, "");
   const stderr = (display.stderr ?? "").replace(/\n+$/, "");
+  const cmd = command?.trim() ?? "";
   const empty = !stdout && !stderr;
   return (
     <div className="mt-1 overflow-hidden rounded-lg border border-border">
       <div className="max-h-72 overflow-auto bg-muted/30 px-3 py-2 font-mono text-xs leading-relaxed">
+        {cmd && (
+          <pre className="mb-2 whitespace-pre-wrap break-words border-border/60 border-b pb-2 text-muted-foreground">
+            {cmd}
+          </pre>
+        )}
         {empty && <span className="text-muted-foreground/60">（无输出）</span>}
         {stdout && (
           <pre className="whitespace-pre-wrap break-words text-foreground/90">
@@ -468,8 +500,8 @@ function CodeExecResult({ display }: { display: CodeExecDisplay }) {
   );
 }
 
-/** Consult expand body. Entry name lives on the ToolLine (same as file_write /
- * str_replace); historical consult_skill may still show its one-line summary. */
+/** Consult expand body. Entry name lives on the ToolLine (same as write /
+ * edit); historical consult_skill may still show its one-line summary. */
 function ConsultEntryCard({
   result,
   summary,
@@ -538,7 +570,7 @@ function diffRowClass(type: DiffLine["type"]): string {
   return "text-muted-foreground";
 }
 
-/** Red/green line diff for a str_replace edit, derived from the call arguments
+/** Red/green line diff for an edit, derived from the call arguments
  * (old_string → new_string) the client already has — no backend echo needed.
  * Path and +/- live on the ToolLine title (toolLineTitleStat); this card is
  * body-only. */
@@ -573,10 +605,10 @@ function FileEditDiff({
 }
 
 /** How many lines of a written file to render before truncating with a footer —
- * file_write content is uncapped in the call args, so the preview is bounded here. */
+ * write content is uncapped in the call args, so the preview is bounded here. */
 const FILE_WRITE_PREVIEW_LINES = 300;
 
-/** New/overwritten file card for file_write, with a line-numbered content preview
+/** New/overwritten file card for write, with a line-numbered content preview
  * — built from the call's `content` argument (already client-side), no backend
  * echo needed. Path and「N 行」live on the ToolLine title; this card is body-only
  * (truncation footer stays when the preview is capped). */
@@ -633,7 +665,7 @@ function TextResult({
 /**
  * Rich rendering of a finished tool call (工具结果富渲染), keyed off the tool name
  * (形状是数据不是模式): web_search → result cards, web_fetch → source card + body,
- * code_execute → a terminal view, str_replace → a red/green diff, file_write → a
+ * code_execute → a terminal view, edit → a red/green diff, write → a
  * content card (the last two from the call args). Lookup misses skip the
  * redundant「没找到…」line; expand shows the receipt directly (no nested「详情」).
  */
@@ -702,7 +734,9 @@ function renderRichToolResult(data: ToolResultData): ReactNode {
     return <WebFetchResult display={data.display} />;
   }
   if (isCodeExecDisplay(data.display)) {
-    return <CodeExecResult display={data.display} />;
+    return (
+      <CodeExecResult display={data.display} command={commandBody(data)} />
+    );
   }
   if (isSkillConsultDisplay(data.display)) {
     return (
@@ -768,7 +802,7 @@ function renderRichToolResult(data: ToolResultData): ReactNode {
 }
 
 function ToolResultText({ data }: { data: ToolResultData }) {
-  if (data.toolName === "file_read" && data.status === "success") {
+  if (data.toolName === "read" && data.status === "success") {
     const body = stripFileReadFooter(data.result ?? "");
     if (!body.trim()) return null;
     return <TextResult result={body} status={data.status} />;
@@ -777,5 +811,15 @@ function ToolResultText({ data }: { data: ToolResultData }) {
   const text = isHostToolName(data.toolName)
     ? stripHostUntrustedFrame(raw)
     : raw;
-  return <TextResult result={text} status={data.status} />;
+  const command = commandBody(data);
+  return (
+    <>
+      {command ? (
+        <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">
+          {command}
+        </pre>
+      ) : null}
+      <TextResult result={text} status={data.status} />
+    </>
+  );
 }

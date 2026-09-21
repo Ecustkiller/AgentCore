@@ -28,7 +28,6 @@ from agentcore.runtime.runs.artifact_paths import (
 )
 from agentcore.runtime.runs.types import Deliverable, deliverable_expects_landing
 from agentcore.workspace._paths import strip_root_label_prefix
-from agentcore.workspace.stage_dirs import DRAFTS_DIR
 
 # Sandbox absolute paths models declare (``/workspace/…``) must compare as
 # workspace-relative — same rewrite file tools use before the containment guard.
@@ -244,7 +243,7 @@ def check_contract(
     source data file + a landed spreadsheet/table file is a gap — hand-copied
     result sheets are not no-exec complete delivery.
 
-    Workers often finish with ``file_write`` + ``handoff`` and no streamed prose.
+    Workers often finish with ``write`` + ``handoff`` and no streamed prose.
     The baseline also accepts workspace writes (``files_written > 0``) or a usable
     ``handoff`` debrief.
     """
@@ -376,7 +375,7 @@ def format_write_pass_feedback(verdict: ContractVerdict) -> str:
     return (
         "你尚未把产物写入工作区。本轮是【短写盘 pass】——工具面已收窄为写盘/handoff："
         f"\n{items}\n\n"
-        "请立即用 file_write / str_replace（或等价落盘）把产物写进工作区，"
+        "请立即用 write / edit（或等价落盘）把产物写进工作区，"
         "然后调用 handoff。"
         "禁止重新调查、禁止全仓巡读、禁止只把内容贴在回复正文里。"
     )
@@ -502,14 +501,14 @@ def format_soft_reminders(verdict: ContractVerdict) -> str:
 def describe_deliverable(deliverable: Deliverable | None) -> str:
     """This node's contract for the worker opening: instance facts only.
 
-    Paths / a non-drafts directory render when declared. No HOW line for
+    Paths / a declared directory render when present. No HOW line for
     write-vs-chat. ``None`` / no instance facts → empty (omit the channel).
     """
     if deliverable is None:
         return ""
     lines: list[str] = []
     dir_norm = (deliverable.artifact_dir or "").replace("\\", "/").rstrip("/")
-    if dir_norm and dir_norm != DRAFTS_DIR:
+    if dir_norm:
         lines.append(f"- 落点目录：`{dir_norm}/`")
     if deliverable.artifacts:
         dir_prefix = f"{dir_norm}/" if dir_norm else ""

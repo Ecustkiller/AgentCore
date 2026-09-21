@@ -21,7 +21,10 @@ from agentcore.conversation.log_export import (
 from agentcore.runtime.resolve.prepare import _wire_conversation_log_tools
 from agentcore.tools.builtin import build_ceo_tool_registry, build_worker_registry
 from agentcore.tools.builtin.read_conversation import ReadConversationTool
-from agentcore.tools.builtin.search_conversations import SearchConversationsTool
+from agentcore.tools.builtin.search_conversations import (
+    SearchConversationsTool,
+    resolve_search_folder,
+)
 from agentcore.tools.protocol import ToolContext, ToolResult
 from agentcore.tools.registration import (
     AUDIENCE_BOTH,
@@ -843,7 +846,8 @@ async def test_search_tool_excludes_host(monkeypatch):
 def test_search_schema_is_folder_default_and_body_when():
     schema = SearchConversationsTool().schema
     desc = schema.description
-    assert "过往事实" in desc
+    assert desc == "检索本账号历史对话。用户规则 ≠ 本工具。"
+    assert "过往事实" not in desc
     assert "用户规则" in desc
     assert "偏好" not in desc
     assert "巩固" not in desc
@@ -851,19 +855,79 @@ def test_search_schema_is_folder_default_and_body_when():
     assert "不含本场" not in desc
     assert "记忆主题" not in desc
     props = schema.parameters["properties"]
+    assert set(props) == {"query", "folder_id"}
     query = props["query"]
     assert "标题与可见用户/助手正文" in query["description"]
     assert "同场都出现" in query["description"]
     assert "空则" not in query["description"]
     assert schema.parameters.get("required") == ["query"]
-    scope = props["scope"]
-    assert scope.get("default") == "folder"
-    assert scope.get("enum") == ["all", "folder"]
+    folder = props["folder_id"]
+    assert "省略=本夹" in folder["description"]
+    assert "all=全账号" in folder["description"]
+    assert not folder["description"].startswith("可选")
     assert "global_chats" not in props
     assert "include_archived" not in props
     assert "updated_within_hours" not in props
     assert "limit" not in props
     assert "limit" not in desc
+
+
+def test_resolve_search_folder_omit_uses_host():
+    located = resolve_search_folder(host_folder_id="F1", arguments={})
+    assert located.resolved_folder == "F1"
+    assert located.scope == "folder"
+    assert located.explicit_folder is None
+    assert located.soft_note is None
+
+
+def test_resolve_search_folder_all_literal():
+    located = resolve_search_folder(
+        host_folder_id="F1", arguments={"folder_id": "all"}
+    )
+    assert located.resolved_folder is None
+    assert located.scope == "all"
+    assert located.explicit_folder is None
+
+
+def test_resolve_search_folder_neighbor_is_explicit():
+    located = resolve_search_folder(
+        host_folder_id="F1", arguments={"folder_id": "F2"}
+    )
+    assert located.resolved_folder == "F2"
+    assert located.explicit_folder == "F2"
+    assert located.scope == "folder"
+
+
+def test_resolve_search_folder_leftover_scope_all():
+    located = resolve_search_folder(
+        host_folder_id="F1", arguments={"scope": "all"}
+    )
+    assert located.resolved_folder is None
+    assert located.scope == "all"
+
+
+def test_resolve_search_folder_folder_id_wins_over_leftover_scope():
+    located = resolve_search_folder(
+        host_folder_id="F1",
+        arguments={"folder_id": "F2", "scope": "all"},
+    )
+    assert located.resolved_folder == "F2"
+    assert located.explicit_folder == "F2"
+
+
+def test_resolve_search_folder_bare_chat_falls_to_all():
+    located = resolve_search_folder(host_folder_id=None, arguments={})
+    assert located.resolved_folder is None
+    assert located.scope == "all"
+    assert located.soft_note
+
+
+def test_resolve_search_folder_ignores_invalid_leftover_scope():
+    located = resolve_search_folder(
+        host_folder_id="F1", arguments={"scope": "weird"}
+    )
+    assert located.resolved_folder == "F1"
+    assert located.scope == "folder"
 
 
 @pytest.mark.asyncio

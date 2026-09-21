@@ -226,18 +226,16 @@ def escalation_raised(
     *,
     question: str,
     assumption: str,
-    blocking: bool,
-    kind: str = "normal",
+    kind: str | None = None,
     escalation_id: str | None = None,
     source: str | None = None,
 ) -> SSEEvent:
-    """非阻塞 raised 升级（DURABLE, 统一时间线二期 D6）。
+    """Raised 升级（DURABLE）：scope/dep 协作图标记，或引擎早停。
 
-    ``escalation_id`` 键给 raised 轻行的时间线标记（attach replay 幂等去重）；
-    生产调用点缺省即自动生成，conformance 向量传固定值保 golden 稳定。
+    ``escalation_id`` 键给 raised 轻行；生产缺省自动生成，conformance 向量传固定值。
 
-    ``source`` 仅早停 / 打转收口路径写入（如 ``validation_thrash`` /
-    ``ceiling_backstop``）；真·边干边上报省略，保持 wire 形状不变。
+    ``source`` 仅早停 / 打转收口（``validation_thrash`` / ``ceiling_backstop``）。
+    工具请示写 ``kind`` = scope|dep。wait 不走本事件。
     """
     payload: dict[str, Any] = {
         "escalation_id": escalation_id or new_id(),
@@ -245,9 +243,9 @@ def escalation_raised(
         "agent_id": agent_id,
         "question": question,
         "assumption": assumption,
-        "blocking": blocking,
-        "kind": kind if kind in ("normal", "scope", "dep") else "normal",
     }
+    if kind in ("wait", "scope", "dep"):
+        payload["kind"] = kind
     if source:
         payload["source"] = source
     return SSEEvent(

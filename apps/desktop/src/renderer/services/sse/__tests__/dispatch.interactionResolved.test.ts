@@ -89,7 +89,7 @@ describe("dispatchSSEEvent · *_resolved 收口帧", () => {
     send("approval_required", {
       approval_id: "ap_1",
       tool_call_id: "tc_1",
-      tool_name: "file_write",
+      tool_name: "write",
     });
     expect(entry("ap_1")?.status).toBe("pending");
 
@@ -158,7 +158,7 @@ describe("dispatchSSEEvent · *_resolved 收口帧", () => {
     send("approval_required", {
       approval_id: "ap_stop",
       tool_call_id: "tc_stop",
-      tool_name: "file_write",
+      tool_name: "write",
     });
     useConversationStore.getState().setTurnPhase("stopping", CID);
 

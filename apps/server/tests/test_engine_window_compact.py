@@ -34,15 +34,15 @@ from agentcore.runtime.facts import (
     record_turn_fact,
 )
 
-CLEARABLE = frozenset({"file_read", "grep"})
+CLEARABLE = frozenset({"read", "grep"})
 
 
 def _round(i: int, *, path: str | None = None, body: str = "x") -> list[LLMMessage]:
-    name = "file_read"
+    name = "read"
     p = path or f"f{i}.py"
     call = ToolCall(
         id=f"c{i}",
-        function=ToolCallFunction(name=name, arguments=json.dumps({"path": p})),
+        function=ToolCallFunction(name=name, arguments=json.dumps({"file_path": p})),
     )
     return [
         LLMMessage(role="assistant", content=f"read {p}", tool_calls=[call]),
@@ -148,7 +148,7 @@ def test_window_from_journal_ignores_compact_watermark() -> None:
                 {
                     "id": "c0",
                     "type": "function",
-                    "function": {"name": "file_read", "arguments": "{}"},
+                    "function": {"name": "read", "arguments": "{}"},
                 }
             ],
         )
@@ -157,7 +157,7 @@ def test_window_from_journal_ignores_compact_watermark() -> None:
         ToolCallFact(
             run_id="w1",
             tool_call_id="c0",
-            name="file_read",
+            name="read",
             arguments="{}",
             result="FULL-0",
             success=True,
@@ -176,7 +176,7 @@ def test_window_from_journal_ignores_compact_watermark() -> None:
                 {
                     "id": "c1",
                     "type": "function",
-                    "function": {"name": "file_read", "arguments": "{}"},
+                    "function": {"name": "read", "arguments": "{}"},
                 }
             ],
         )
@@ -185,7 +185,7 @@ def test_window_from_journal_ignores_compact_watermark() -> None:
         ToolCallFact(
             run_id="w1",
             tool_call_id="c1",
-            name="file_read",
+            name="read",
             arguments="{}",
             result="FULL-1",
             success=True,
@@ -214,7 +214,7 @@ def test_render_includes_paths_and_prior() -> None:
     text = render_window_fold("旧摘要", folded)
     assert "旧摘要" in text
     assert "src/a.py" in text
-    assert "file_read" in text
+    assert "read" in text
     assert "hello" in text
 
 
@@ -395,3 +395,61 @@ def test_react_loop_skips_window_compact_on_debate_research() -> None:
     src = inspect.getsource(loop_mod.react_loop)
     assert "maybe_compact_worker_window" in src
     assert "turn_evidence_ledger is None" in src
+
+
+@pytest.mark.asyncio
+async def test_summarize_worker_fold_reuses_live_window_and_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from agentcore.runtime.engine.window_compact import _summarize_worker_fold
+    from agentcore.runtime.resolve.prompt.envelope import TURN_ENVELOPE_FENCE
+
+    captured: dict = {}
+
+    def fake_build(selected, messages, **kwargs):
+        captured["messages"] = messages
+        captured["tools"] = kwargs.get("tools")
+        captured["tool_choice"] = kwargs.get("tool_choice")
+        captured["model"] = selected.model
+        return MagicMock()
+
+    async def fake_complete(provider, request, **kwargs):
+        return SimpleNamespace(content="## 已确立的事实\n- z")
+
+    async def fake_run(user_id, conversation_id, *, runner):
+        return SimpleNamespace(value=await runner(MagicMock()))
+
+    monkeypatch.setattr("agentcore.llm.model_selection.build_selected_request", fake_build)
+    monkeypatch.setattr("agentcore.llm.provider.call_budget.complete_within_budget", fake_complete)
+    monkeypatch.setattr(
+        "agentcore.llm.factory.build_provider",
+        lambda *a, **k: SimpleNamespace(close=AsyncMock()),
+    )
+    monkeypatch.setattr("agentcore.billing.gate.run_compaction_llm", fake_run)
+
+    live = [
+        LLMMessage(role="system", content="WORKER SYS"),
+        LLMMessage(role="user", content="task"),
+        LLMMessage(role="assistant", content="did"),
+    ]
+    tools = [{"type": "function", "function": {"name": "read", "parameters": {}}}]
+    out = await _summarize_worker_fold(
+        "old",
+        live[2:],
+        conversation_id="c-win",
+        user_id="u1",
+        window=live,
+        tools=tools,
+        model_id="deepseek-v4-pro",
+    )
+    assert out == "## 已确立的事实\n- z"
+    assert captured["messages"][0].content == "WORKER SYS"
+    tail = captured["messages"][-1].content or ""
+    assert tail.startswith(TURN_ENVELOPE_FENCE)
+    assert "不要调用工具" not in tail
+    assert captured["tools"] == tools
+    assert captured["tool_choice"] == "none"
+    assert captured["model"] == "deepseek-v4-pro"

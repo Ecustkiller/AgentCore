@@ -583,7 +583,7 @@ describe("InspectorPanel worker dock", () => {
       spans: [
         span({
           kind: "tool",
-          name: "file_read",
+          name: "read",
           run_id: "r1",
           result_preview: "ok",
         }),
@@ -607,7 +607,7 @@ describe("InspectorPanel worker dock", () => {
     expect(screen.getByRole("tab", { name: "写手" })).toBeTruthy();
     expect(screen.getByText("队员正文在此")).toBeTruthy();
     expect(screen.getByText("起草")).toBeTruthy();
-    expect(screen.getByText("file_read")).toBeTruthy();
+    expect(screen.getByText("read")).toBeTruthy();
     expect(screen.queryByText(/过程明细/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "关闭 写手" }));
     expect(onCloseWorkerTab).toHaveBeenCalledWith("r1");

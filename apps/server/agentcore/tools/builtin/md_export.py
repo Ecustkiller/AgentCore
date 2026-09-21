@@ -60,19 +60,15 @@ class MdExportTool:
         file_products=FileProductsContract.SELF_REPORT,
         produces_formats=(".docx", ".pdf"),
         workspace_io=True,
-        resident=False,
         catalog_summary="导出 Word 或 PDF",
+        blurb="把 Markdown 转成可下载的文档",
     )
 
     @property
     def schema(self) -> ToolSchema:
         return ToolSchema(
             name=MD_EXPORT_TOOL_NAME,
-            description=(
-                "把工作区内的 Markdown 确定性导出为同目录同名 Word（.docx）或 PDF（.pdf）。"
-                "覆盖标题、列表、表格、代码；Word 可嵌相对路径图片（缺图回执警告）；"
-                "PDF 不嵌图、中文缺字体时回执警告。"
-            ),
+            description="把工作区 Markdown 导出为同目录同名 Word 或 PDF。≠ `run` 写脚本。",
             parameters={
                 "type": "object",
                 "properties": {

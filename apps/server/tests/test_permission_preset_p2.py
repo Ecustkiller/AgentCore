@@ -47,10 +47,10 @@ def test_approval_resolved_includes_decided_by_user():
     )
     draft = project_approval_resolved(
         recorder,
-        tool_name="file_write",
+        tool_name="write",
         tool_call_id="tc1",
         decision="approve",
-        arguments={"path": "a.md"},
+        arguments={"file_path": "a.md"},
     )
     assert draft.detail["decided_by"] == "user"
     assert draft.action == "approval.granted"
@@ -69,10 +69,10 @@ async def test_approval_force_schedules_without_delegation():
     token = current_audit_recorder.set(recorder)
     try:
         on_approval_resolved(
-            tool_name="file_write",
+            tool_name="write",
             tool_call_id="tc1",
             decision="approve",
-            arguments={"path": "a.md"},
+            arguments={"file_path": "a.md"},
         )
         assert len(recorder._pending) == 1  # noqa: SLF001
         await recorder.flush()

@@ -1,6 +1,6 @@
-"""Scope-first always-on ``<设定>`` join (slots then that layer's user rules).
+"""Scope-first always-on ``<设定>`` join (user rules only).
 
-Not an author split. Nearer folders come later; 导航 does not inherit.
+Not an author split. Nearer folders come later.
 """
 
 from __future__ import annotations
@@ -39,30 +39,21 @@ def join_always_layers(
     *,
     folder_settings_label: str,
     ancestor_settings_label: str,
-    folder_nav_label: str,
-    global_pref: str | None = None,
-    global_profile: str | None = None,
     global_rules: Sequence[str] = (),
     ancestor_layers: Sequence[tuple[str | None, Sequence[str]]] = (),
-    current_profile: str | None = None,
-    current_nav: str | None = None,
     current_rules: Sequence[str] = (),
     include_current: bool = False,
 ) -> list[LayerFragment]:
     frags: list[LayerFragment] = []
-    global_frag = layer_fragment(None, [global_pref, global_profile, *global_rules])
+    global_frag = layer_fragment(None, list(global_rules))
     if global_frag:
         frags.append(global_frag)
-    for profile, rules in ancestor_layers:
-        frag = layer_fragment(ancestor_settings_label, [profile, *rules])
+    for _ignored, rules in ancestor_layers:
+        frag = layer_fragment(ancestor_settings_label, list(rules))
         if frag:
             frags.append(frag)
     if include_current:
-        nav_part = f"{folder_nav_label}\n{current_nav}" if current_nav else None
-        frag = layer_fragment(
-            folder_settings_label,
-            [current_profile, nav_part, *current_rules],
-        )
+        frag = layer_fragment(folder_settings_label, list(current_rules))
         if frag:
             frags.append(frag)
     return frags

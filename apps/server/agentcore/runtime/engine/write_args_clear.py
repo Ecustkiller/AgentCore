@@ -33,7 +33,7 @@ from agentcore.tools.cleared_write_stub import (
     LEGACY_CLEARED_KEY,
 )
 
-WRITE_ARG_TOOLS = frozenset({"file_write", "str_replace"})
+WRITE_ARG_TOOLS = frozenset({"write", "edit"})
 
 # Argument keys that hold the bulky body for each write tool.
 _BODY_KEYS = ("content", "new_str", "new_string", "replacement")
@@ -200,7 +200,7 @@ def _is_projected_write_args(arguments: str) -> bool:
     if data.get("status") == "landed":
         return True
     # Identity-only projection: path survived, every body key is gone.
-    return bool(data) and set(data) <= {"path", "file_path"}
+    return bool(data) and set(data) <= {"file_path"}
 
 
 def _path_and_body(arguments: str) -> tuple[str, str]:
@@ -210,21 +210,21 @@ def _path_and_body(arguments: str) -> tuple[str, str]:
         return "", ""
     if not isinstance(data, dict):
         return "", ""
-    return str(data.get("path") or data.get("file_path") or ""), _body_text(data)
+    return str(data.get("file_path") or ""), _body_text(data)
 
 
 def write_args_identity(arguments: str) -> str:
-    """Identity-only args for a landed write: keep ``path``, drop the body.
+    """Identity-only args for a landed write: keep ``file_path``, drop the body.
 
     Earlier projections left a rich status object in this slot (``_landed_summary``,
     then ``_write_landed``, then ``{"status": "landed", …}``) and each one got echoed
     back as a write submission — reusing the previous call's arguments is ordinary
-    tool-calling behaviour, so no amount of rewording stopped it. A bare ``path`` is
+    tool-calling behaviour, so no amount of rewording stopped it. A bare ``file_path`` is
     visibly not a payload; an echo of it fails plain "content is required" validation.
     The outcome moves to the tool result, where a result belongs.
     """
     path, _ = _path_and_body(arguments)
-    return json.dumps({"path": path} if path else {}, ensure_ascii=False)
+    return json.dumps({"file_path": path} if path else {}, ensure_ascii=False)
 
 
 def landed_result_note(arguments: str, original_len: int) -> str | None:
@@ -282,9 +282,9 @@ def project_cleared_write_args(
 
     Keeps the original write ``function.name``. Completed bulky writes **older than**
     the last ``keep_recent`` assistant messages (all thoughts, not write-only rounds)
-    reduce args to ``path`` alone, and append a size / structure digest to that call's
+    reduce args to ``file_path`` alone, and append a size / structure digest to that call's
     tool result. The near window keeps full bodies so the next thought can chain
-    ``str_replace``. ``keep_recent=0`` collapses every completed bulky write (legacy).
+    ``edit``. ``keep_recent=0`` collapses every completed bulky write (legacy).
     ``keep_recent<0`` is a no-op. Also migrates leftover ``_write_landed`` names back
     to ``via``. Returns the same list when nothing qualifies. Prefix-cache safe for a
     given collapsed write: the projection is a pure function of (path, body, original_len).
@@ -303,7 +303,7 @@ def project_cleared_write_args(
             name = call.function.name
             args = call.function.arguments or ""
             if name == LANDED_STATUS_TOOL:
-                restore = _via_from_landed_args(args) or "file_write"
+                restore = _via_from_landed_args(args) or "write"
                 bait_ids[call.id] = (restore, mi, ci)
                 continue
             if name not in WRITE_ARG_TOOLS:

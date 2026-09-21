@@ -181,9 +181,9 @@ describe("ProfileModelSelect", () => {
   it("renders catalog unit prices in CNY, not a dollar sign", () => {
     const priced = opt("flash", "Flash", {
       vendor: "DeepSeek",
-      price: { cache_miss: "1.08", output: "4.32", currency: "CNY" },
+      price: { cache_miss: "1", output: "4", currency: "CNY" },
     });
-    expect(modelOptionSecondary(priced)).toBe("DeepSeek · ¥1.08 / ¥4.32");
+    expect(modelOptionSecondary(priced)).toBe("DeepSeek · ¥1 / ¥4");
     expect(modelOptionSecondary(priced)).not.toContain("$");
   });
 });

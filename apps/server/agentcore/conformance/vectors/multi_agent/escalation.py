@@ -22,11 +22,11 @@ from ._builders import _blocking_escalate_team
 
 
 def _multi_agent_escalation() -> list[SSEEvent]:
-    """多 Agent：worker 升级实时可见 (escalation 实时 SSE)。被委派的 r1 撞到只有上级能定的关键
-    岔路，调 ``escalate`` 走唯一向上通道——执行器在【调用瞬间】emit ``run_escalation``（run 级），
-    三端 fold + oracle 把它折到 r1 的 ``escalations``（节点 ⚠️ 标记 + 回合级实时提示），r2 的
-    ``escalations`` 恒空。escalate 非阻塞：r1 报完仍按假设继续交付并 COMPLETED（升级的持久副本另走
-    RunState.escalations → CEO 综述，本事件只补「进行中可见」）。"""
+    """多 Agent：worker ``escalate(reason=scope)`` 实时可见。被委派的 r1 发现活派偏了，
+    调 ``escalate``——执行器在【调用瞬间】emit ``run_escalation``（run 级），
+    三端 fold + oracle 把它折到 r1 的 ``escalations``（协作图标记），r2 的
+    ``escalations`` 恒空。r1 自己这份做完并 COMPLETED（升级的持久副本另走
+    RunState.escalations → CEO 综述）。"""
     agents = [
         {
             "id": "w1",
@@ -60,7 +60,7 @@ def _multi_agent_escalation() -> list[SSEEvent]:
             "w1",
             question="数据库选 Postgres 还是 MySQL？这关系到后续所有选型。",
             assumption="暂按 Postgres 推进",
-            blocking=True,
+            kind="scope",
             # 固定 id 保 golden 稳定（缺省会随机 uuid，导出不幂等）。
             escalation_id="esc1",
         ),
@@ -92,11 +92,11 @@ def _multi_agent_escalation() -> list[SSEEvent]:
     ]
 
 def _multi_agent_blocking_escalate() -> list[SSEEvent]:
-    """多 Agent：阻塞式求决策 (escalate blocking=true) — 答复路径。经典阻塞路径
-    （coordinate=false / 用户直挂；本向量无 tool_use，wire 从 run_plan 起）。r1 撞到「只有用户能定、且猜错
-    就作废」的关键岔路，调 escalate(blocking=true) 原地挂起 → 执行器 emit ``escalation_required``
+    """多 Agent：``escalate(reason=wait)`` 答复路径。经典路径
+    （coordinate=false / 用户直挂；本向量无 tool_use，wire 从 run_plan 起）。r1 撞到「猜错
+    就作废」的岔路，调 escalate(reason=wait) 原地挂起 → 执行器 emit ``escalation_required``
     （run 级，``escalation_id`` 键给 resolve 端点），三端 fold + oracle 把它折成 r1 的一条 pending
-    升级（``status="pending"``）。关键：阻塞升级【不】把回合翻 paused——兄弟仍可跑（区别于 approval/
+    升级（``status="pending"``）。关键：wait 升级【不】把回合翻 paused——兄弟仍可跑（区别于 approval/
     ask_user/plan_review 的 halting gate），故 ``pendingInteraction`` 恒 None。用户答复 →
     ``escalation_resolved(status="resolved", answer)``（单一发射者：仅挂起的工具发）→ 该项翻
     ``{status:"resolved", answer}``，r1 据答续跑并 COMPLETED。"""

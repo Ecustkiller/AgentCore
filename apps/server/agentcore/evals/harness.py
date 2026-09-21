@@ -67,9 +67,8 @@ from agentcore.workspace.server import ServerWorkspace
 
 logger = get_logger(__name__)
 
-# Eval exercises the FULL model catalog (incl. Pro), decoupled from user BYOK model
-# selection. Eval must still resolve ``quality`` → Pro to compare Flash-vs-Pro CEO and
-# run the Pro judge — see ``evals/eval_modes.py``.
+# Eval exercises the Flash catalog (official / Go / retired alias), decoupled from
+# user BYOK model selection. ``quality`` no longer pins a Pro SKU.
 _EVAL_CEILING = frozenset(KNOWN_MODELS)
 
 # eval 运行的固定隔离身份：独立 user_id（避免读到真实用户的记忆/配额），workspace 由

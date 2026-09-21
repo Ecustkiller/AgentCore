@@ -76,8 +76,8 @@ _VALIDATION_PATH_STOP_STEER = (
 # Landing tools that echoed a landed status / cleared stub back as write args.
 _LANDED_SUMMARY_ECHO_STOP_STEER = (
     "同因把请求窗里的已落盘状态/清理占位当写盘参数："
-    "下一拍必须先 file_read 该 path 取盘上真文，"
-    "再 str_replace（优先）或按真文重填 content/new_string；"
+    "下一拍必须先 read 该 file_path 取盘上真文，"
+    "再 edit（优先）或按真文重填 content/new_string；"
     "禁止再次原样重发该只读状态条；工具保持可用。"
     "若同 path 再原样回灌将早停。"
 )
@@ -87,15 +87,15 @@ _LANDED_SUMMARY_ECHO_STOP_STEER = (
 # (no tool call at all → degraded ladder).
 DEFAULT_UNPRODUCTIVE_THRESHOLD = 3
 # Progress tools that reset same-target investigation spin when a recent round
-# succeeded (stage advance / delivery / handoff / ask). ``str_replace``
+# succeeded (stage advance / delivery / handoff / ask). ``edit``
 # counts: coding repair lands via patch, not only whole-file write.
 # (Periodic B2 进度复盘 inject was retired — soft cadence had little effect and
 # false-nagged interactive browser runs.)
 PROGRESS_TOOLS = frozenset(
     {
         "delegate",
-        "file_write",
-        "str_replace",
+        "write",
+        "edit",
         "handoff",
         "ask_user",
     }
@@ -111,30 +111,30 @@ ORCHESTRATION_TOOLS = frozenset({"delegate", "ask_user"})
 def _collapse_malformed_required_args(name: str, parsed: dict[str, object]) -> dict[str, object]:
     """Collapse empty-required-field / no-op edit calls so stuck detection sees one path.
 
-    Distinct ``path`` / ``new_string`` with empty ``old_string`` must not mint a new
+    Distinct ``file_path`` / ``new_string`` with empty ``old_string`` must not mint a new
     fingerprint each time — that let workers burn token budgets on free validation
-    retries. Non-empty identical ``old_string``/``new_string`` collapses per path
+    retries. Non-empty identical ``old_string``/``new_string`` collapses per file_path
     (longdoc revise thrash: different noop payloads still melt). Sentinel shape is
     stable and intentional (not a real tool schema).
 
     Landed-summary / cleared-stub echo (same surface as
-    ``is_cleared_write_stub_args``) collapses per path for write pens so different
+    ``is_cleared_write_stub_args``) collapses per file_path for write pens so different
     summary texts still trip validation path-stop.
     """
-    if name in {"file_write", "str_replace"}:
+    if name in {"write", "edit"}:
         from agentcore.tools.cleared_write_stub import is_cleared_write_stub_args
 
         if is_cleared_write_stub_args(parsed):
-            path = parsed.get("path")
+            path = parsed.get("file_path")
             path_key = path.strip().replace("\\", "/") if isinstance(path, str) else ""
-            return {"__malformed__": "landed_summary_echo", "path": path_key}
-    if name == "str_replace":
+            return {"__malformed__": "landed_summary_echo", "file_path": path_key}
+    if name == "edit":
         old = parsed.get("old_string")
         if old is None or (isinstance(old, str) and not old.strip()):
             return {"__malformed__": "old_string"}
-        path = parsed.get("path")
+        path = parsed.get("file_path")
         if path is None or (isinstance(path, str) and not path.strip()):
-            return {"__malformed__": "path"}
+            return {"__malformed__": "file_path"}
         new = parsed.get("new_string")
         if (
             isinstance(old, str)
@@ -142,11 +142,11 @@ def _collapse_malformed_required_args(name: str, parsed: dict[str, object]) -> d
             and old == new
         ):
             path_key = path.strip().replace("\\", "/") if isinstance(path, str) else ""
-            return {"__malformed__": "identical_edit", "path": path_key}
-    if name == "file_write":
-        path = parsed.get("path")
+            return {"__malformed__": "identical_edit", "file_path": path_key}
+    if name == "write":
+        path = parsed.get("file_path")
         if path is None or (isinstance(path, str) and not path.strip()):
-            return {"__malformed__": "path"}
+            return {"__malformed__": "file_path"}
     return parsed
 
 
@@ -274,7 +274,7 @@ class CircuitBreak:
 
     ``force_segmented`` names write/landing tools that hit the disable threshold
     but stay enabled — steer keeps the pen（长文落盘定案：失败不关写文件）
-    and points at a shorter complete ``file_write`` or ``str_replace`` after a
+    and points at a shorter complete ``write`` or ``edit`` after a
     unique anchor. The live toolset is not narrowed.
 
     ``retire_message`` is an optional hard-stop steer (e.g. browser egress
@@ -321,7 +321,7 @@ def fingerprint_tool_call(name: str, arguments: str) -> str:
     Args are normalized via key-sorted JSON so semantically identical calls map
     to one fingerprint; malformed JSON falls back to the raw argument string so
     verbatim repeats are still caught. Empty required fields and identical
-    str_replace no-ops collapse to a stable sentinel (see
+    edit no-ops collapse to a stable sentinel (see
     ``_collapse_malformed_required_args``).
     """
     try:

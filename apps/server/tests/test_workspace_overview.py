@@ -76,7 +76,7 @@ async def test_lists_files_in_backend_order_under_caps():
     assert out.index("报告.md") < out.index("input.csv") < out.index("main.py")
     assert "另有" not in out
     assert "必须" not in out
-    assert "file_read" not in out
+    assert "read" not in out
 
 
 async def test_labels_attachments():
@@ -180,7 +180,7 @@ async def test_convention_file_is_name_pointer_not_excerpt_or_fingerprint():
     assert "工程约定摘录" not in out
     assert "当前工作区工程概览" not in out
     assert "常用命令" not in out
-    assert "file_read" not in out
+    assert "read" not in out
 
 
 async def test_project_mode_convention_pointer_without_listing_src():

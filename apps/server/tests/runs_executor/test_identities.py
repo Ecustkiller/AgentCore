@@ -227,7 +227,8 @@ async def test_captain_identity_carries_when_to_split_guidance():
     assert "计划已让出" not in sys
     from agentcore.tools.builtin.replan import _REPLAN_DESCRIPTION
 
-    assert "计划已让出" in _REPLAN_DESCRIPTION
+    assert "计划已让出" not in _REPLAN_DESCRIPTION
+    assert "非终结" not in _REPLAN_DESCRIPTION
     assert "binds=" not in _REPLAN_DESCRIPTION
     # Path-B encyclopedia 仍不进 identity。
     from agentcore.runtime.runs.executor.identities import build_worker_identity
@@ -435,7 +436,7 @@ def test_worker_identity_states_no_execution_capability():
     assert with_exec == build_worker_identity(has_dependents=False)
 
 
-def test_worker_identity_teaches_escalate_blocking_choice():
+def test_worker_identity_teaches_escalate_reason():
     """何时 escalate 写在工具 description；身份不写小中大三档、不抄凭据卫生。"""
     from agentcore.runtime.runs.executor.identities import build_worker_identity
     from agentcore.tools.builtin.escalate import EscalateTool
@@ -453,12 +454,13 @@ def test_worker_identity_teaches_escalate_blocking_choice():
     assert "再向用户索要" not in body
     assert "已明确拒绝" not in body
     desc = EscalateTool().schema.description
-    blocking = EscalateTool().schema.parameters["properties"]["blocking"]["description"]
-    assert "报一声" in desc or "报一声" in blocking
-    assert "猜错作废" in desc
-    assert "拍板" in desc
-    assert "职责偏离" in desc
-    assert "已拒凭据" in blocking
+    props = EscalateTool().schema.parameters["properties"]
+    assert "blocking" not in props
+    assert "kind" not in props
+    assert "向上请示" in desc
+    assert "等人定" in desc
+    assert "活派偏了" in desc
+    assert "已拒凭据不要 wait" in props["reason"]["description"]
     captain = build_worker_identity(has_dependents=False, captain=True)
     assert "小问题（路径拼写" not in captain
     assert "标假设继续" not in captain
@@ -507,7 +509,7 @@ async def test_executor_passes_registry_capability_into_identity():
     assert "本回合执行环境未装配" in provider.user_messages[0]
 
 
-async def test_worker_escalation_is_harvested_and_nonblocking():
+async def test_worker_escalation_is_harvested_and_continues_on_scope():
     plan, _ = build_run_plan([{"role": "调研", "task": "查不清楚的事"}], id_prefix="t")
     reg = ToolRegistry()
     reg.register(EscalateTool())
@@ -521,7 +523,7 @@ async def test_worker_escalation_is_harvested_and_nonblocking():
                         function_name="escalate",
                         arguments_delta=(
                             '{"question": "用 Postgres 还是 MySQL?", '
-                            '"assumption": "暂用 Postgres", "blocking": true}'
+                            '"assumption": "暂用 Postgres", "reason": "scope"}'
                         ),
                     )
                 ]
@@ -543,19 +545,18 @@ async def test_worker_escalation_is_harvested_and_nonblocking():
     )
     res = await WaveScheduler().run(plan, executor)
     state = res["t_1"]
-    assert state.phase is RunPhase.COMPLETED  # non-blocking: it still delivered
+    assert state.phase is RunPhase.COMPLETED
     assert state.content == "已按 Postgres 完成调研"
     assert len(state.escalations) == 1
     esc = state.escalations[0]
     assert esc["question"] == "用 Postgres 还是 MySQL?"
     assert esc["assumption"] == "暂用 Postgres"
-    assert esc["blocking"] is True
+    assert esc["reason"] == "scope"
+    assert "blocking" not in esc
 
 
 async def test_worker_escalation_emits_live_event_before_completion():
-    # 升级实时可见: the executor wires the worker's escalate to a run-scoped RUN_ESCALATION
-    # so the team UI surfaces it the INSTANT it is raised — well before the worker's node
-    # completes (ordering proves "live", not a post-hoc harvest at run end).
+    # 升级实时可见: scope/dep 走 run_escalation；wait 走 escalation_required。
     plan, _ = build_run_plan([{"role": "调研", "task": "查不清楚的事"}], id_prefix="t")
     reg = ToolRegistry()
     reg.register(EscalateTool())
@@ -569,7 +570,7 @@ async def test_worker_escalation_emits_live_event_before_completion():
                         function_name="escalate",
                         arguments_delta=(
                             '{"question": "用 Postgres 还是 MySQL?", '
-                            '"assumption": "暂用 Postgres", "blocking": true}'
+                            '"assumption": "暂用 Postgres", "reason": "scope"}'
                         ),
                     )
                 ]
@@ -598,7 +599,8 @@ async def test_worker_escalation_emits_live_event_before_completion():
     assert esc.payload["run_id"] == "t_1"
     assert esc.payload["question"] == "用 Postgres 还是 MySQL?"
     assert esc.payload["assumption"] == "暂用 Postgres"
-    assert esc.payload["blocking"] is True
+    assert esc.payload["kind"] == "scope"
+    assert "blocking" not in esc.payload
     # Live, not a harvest: the escalation surfaces strictly before the run finishes.
     assert types.index(EventType.RUN_ESCALATION) < types.index(EventType.RUN_COMPLETED)
 
@@ -609,52 +611,49 @@ async def test_worker_without_escalation_has_empty_list():
     assert res["t_1"].escalations == []
 
 
-async def test_escalate_tool_rejects_empty_question_and_acks_otherwise():
+async def test_escalate_tool_rejects_empty_question_and_acks_scope():
     tool = EscalateTool()
     bad = await tool.execute({"question": "  "}, _ctx())
     assert bad.success is False and "question" in (bad.error or "")
-    # A valid escalation is acknowledged with a CONTINUE (non-terminal) result that
-    # steers the worker to keep delivering — it is not a stop.
-    ok = await tool.execute({"question": "Postgres 还是 MySQL?"}, _ctx())
-    assert ok.success is True and ok.is_terminal is False
-    assert "继续" in ok.output
-
-
-async def test_escalate_invokes_on_escalate_callback_with_triple():
-    # 升级实时可见: the tool hands the executor-provided live channel its (question,
-    # assumption, blocking, kind) quadruple. An empty question is rejected BEFORE any emit.
-    tool = EscalateTool()
-    seen: list[tuple[str, str, bool, str]] = []
-    ctx = replace(
-        _ctx(), on_escalate=lambda q, a, b, k="normal": seen.append((q, a, b, k))
+    ok = await tool.execute(
+        {"question": "Postgres 还是 MySQL?", "reason": "scope", "assumption": "暂用 PG"},
+        _ctx(),
     )
+    assert ok.success is True and ok.is_terminal is False
+    assert "做完" in ok.output
+
+
+async def test_escalate_invokes_on_escalate_callback_for_scope():
+    tool = EscalateTool()
+    seen: list[tuple[str, str, str]] = []
+    ctx = replace(_ctx(), on_escalate=lambda q, a, r="wait": seen.append((q, a, r)))
     await tool.execute({"question": "  "}, ctx)
-    assert seen == []  # rejected first, nothing surfaced
-    await tool.execute({"question": "Q?", "assumption": "暂定 A", "blocking": True}, ctx)
-    assert seen == [("Q?", "暂定 A", True, "normal")]
+    assert seen == []
+    await tool.execute(
+        {"question": "Q?", "assumption": "暂定 A", "reason": "scope"}, ctx
+    )
+    assert seen == [("Q?", "暂定 A", "scope")]
 
 
 async def test_escalate_callback_failure_is_non_fatal():
-    # The durable path (transcript → RunState.escalations) is unconditional, so a live-emit
-    # hiccup must never sink the escalation or the worker — the tool still ACKs CONTINUE.
-    def _boom(_q: str, _a: str, _b: bool, _k: str = "normal") -> None:
+    def _boom(_q: str, _a: str, _r: str = "wait") -> None:
         raise RuntimeError("sink closed")
 
     ctx = replace(_ctx(), on_escalate=_boom)
-    ok = await EscalateTool().execute({"question": "Q?"}, ctx)
-    assert ok.success is True and ok.is_terminal is False
-
-
-async def test_escalate_dep_kind_acks_with_replan_add_steer():
-    # §2.4 变·worker 的「拉」(case b): escalate(kind="dep") flags a依赖缺口·卡在缺输入. It is a
-    # non-blocking CONTINUE — the worker keeps going on its assumption while the CEO/lead补 a
-    # producer at the boundary; the ACK names the replan(add) lever and the「绝不空等」rule.
     ok = await EscalateTool().execute(
-        {"question": "缺错误返回结构才能写测试", "kind": "dep"}, _ctx()
+        {"question": "Q?", "reason": "scope", "assumption": "暂定 A"}, ctx
     )
     assert ok.success is True and ok.is_terminal is False
-    assert "replan" in ok.output
-    assert "继续" in ok.output
+
+
+async def test_escalate_dep_acks_finish_own_work():
+    ok = await EscalateTool().execute(
+        {"question": "缺错误返回结构才能写测试", "reason": "dep"}, _ctx()
+    )
+    assert ok.success is True and ok.is_terminal is False
+    assert "缺材料" in ok.output
+    assert "做完" in ok.output
+    assert "replan" not in ok.output
 
 
 async def test_cancel_worker_keeps_escalations_and_member_usage():
@@ -694,7 +693,7 @@ async def test_cancel_worker_keeps_escalations_and_member_usage():
                         function_name="escalate",
                         arguments_delta=(
                             f'{{"question": "Q{idx}?", '
-                            f'"assumption": "A{idx}", "blocking": false}}'
+                            f'"assumption": "A{idx}", "reason": "scope"}}'
                         ),
                     )
                 ]

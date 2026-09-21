@@ -176,7 +176,7 @@ def file_products_from_text(content: str) -> list[FileProduct]:
 def strip_file_products_markers(content: str) -> str:
     """删掉 ``content`` 里所有产物尾注。
 
-    工具输出可能**回显**别处的尾注（``file_read`` 读到一份带尾注的文本、写回执预览
+    工具输出可能**回显**别处的尾注（``read`` 读到一份带尾注的文本、写回执预览
     末段正好含尾注），那不是本次调用的产物。引擎盖章前先清一遍，台账便无需再按工具名
     做关联过滤（这正是名单要消失的地方）。
     """
@@ -201,8 +201,8 @@ def with_file_products_marker(content: str, products: Iterable[FileProduct]) -> 
 # ``code_execute`` 的写回是间接落盘，治理面不当它是笔（散文清单另见
 # ``serialize.file_landing_tool_names``）。顺序即散文清单顺序。
 LANDING_TOOL_NAMES: tuple[str, ...] = (
-    "file_write",
-    "str_replace",
+    "write",
+    "edit",
     "file_batch",
 )
 LANDING_TOOLS: frozenset[str] = frozenset(LANDING_TOOL_NAMES)

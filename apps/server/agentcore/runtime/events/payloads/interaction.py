@@ -92,12 +92,11 @@ class CheckpointResolvedPayload(WirePayload):
 
 
 class EscalationRequiredPayload(WirePayload):
-    """阻塞式求决策 (escalate blocking=true): a delegated worker SUSPENDED itself awaiting
-    a decision. JOURNALED (unlike the transport-only `run_escalation` banner); the
-    turn never flips to `paused` (siblings keep running).
+    """``escalate(reason=wait)``: worker SUSPENDED awaiting a decision.
+
+    JOURNALED; the turn never flips to ``paused`` (siblings keep running).
 
     ``awaiting``: ``user`` (经典路径，可答卡) or ``ceo`` (协调模式下等主管仲裁，初始不可答)。
-    Absent on old journaled events → fold as ``user``.
     """
 
     escalation_id: str
@@ -109,7 +108,7 @@ class EscalationRequiredPayload(WirePayload):
         "Structured forks (同 ask_user 的 questions). Absent on old journaled events "
         "(fold with `?? []`); empty for a free-text ask."
     )
-    kind: EscalationKind | None = absent("旧流缺字段时前端按 `normal`。与 blocking 轴正交。")
+    kind: EscalationKind | None = absent("wait / scope / dep。缺省按 wait。")
     awaiting: Literal["user", "ceo"] | None = absent(
         "谁在仲裁：user=经典可答卡；ceo=协调模式等主管。旧流缺字段按 user。"
     )

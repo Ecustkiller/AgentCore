@@ -14,6 +14,7 @@ function renderEditor(
     value?: string;
     maxLength?: number;
     onPaste?: (e: ReactClipboardEvent) => void;
+    onFocus?: () => void;
   } = {},
 ) {
   const onPaste = over.onPaste ?? vi.fn();
@@ -30,6 +31,7 @@ function renderEditor(
       onCaret={vi.fn()}
       onKeyDown={vi.fn()}
       onPaste={onPaste}
+      onFocus={over.onFocus}
     />,
   );
   return { onPaste, body: screen.getByTestId("composer-body") };
@@ -92,5 +94,12 @@ describe("ComposerBodyEditor paste", () => {
       clipboardData: clipboardData("hello"),
     });
     expect(insert).toHaveBeenCalledWith("insertText", false, "he");
+  });
+
+  it("notifies onFocus", () => {
+    const onFocus = vi.fn();
+    const { body } = renderEditor({ onFocus });
+    fireEvent.focus(body);
+    expect(onFocus).toHaveBeenCalledTimes(1);
   });
 });

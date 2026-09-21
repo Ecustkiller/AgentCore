@@ -201,7 +201,7 @@ describe("agentNodeLiveSig", () => {
           role: "研究员",
           status: "working",
           currentRunId: "r1",
-          toolProgress: { toolName: "file_write", chars: 12 },
+          toolProgress: { toolName: "write", chars: 12 },
         }),
       ],
       runs: [run({ id: "r1", agentId: "a1", status: "running" })],
@@ -214,7 +214,7 @@ describe("agentNodeLiveSig", () => {
       agents: [
         {
           ...agent0,
-          toolProgress: { toolName: "file_write", chars: 4800 },
+          toolProgress: { toolName: "write", chars: 4800 },
         },
       ],
     };

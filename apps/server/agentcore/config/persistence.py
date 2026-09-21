@@ -1,4 +1,4 @@
-"""Turn persistence: roster, memory consolidation, compaction."""
+"""Turn persistence: roster, compaction."""
 
 from pydantic import BaseModel
 
@@ -17,55 +17,11 @@ class PersistenceSettings(BaseModel):
     audit_retention_sweep_interval_seconds: int = 24 * 3600
     audit_retention_sweep_batch_limit: int = 500
 
-    memory_consolidation_enabled: bool = True
-    # Episodic layer: idle debounce / turn-cap still trigger a per-conversation session
-    # summary write (not a direct semantic write). Names kept for existing env overrides.
-    memory_consolidation_idle_seconds: float = 90.0
-    memory_consolidation_turn_cap: int = 8
-    memory_consolidation_window_messages: int = 40
-    memory_consolidation_sweep_interval_seconds: int = 300
-    memory_consolidation_sweep_batch_limit: int = 100
-    # After a retryable consolidation failure that is conversation-local (not shared
-    # upstream), the sweeper / live debounce skip that conversation until this
-    # cooldown elapses. 0 = no per-conversation cooldown. In-process only (same
-    # posture as compaction_failure_cooldown_seconds); multi-worker skew is OK.
-    memory_consolidation_failure_cooldown_seconds: int = 600
-    # Shared-upstream failures (rate limit / quota / upstream unavailable): abort the
-    # rest of the current sweep batch and refuse new consolidations until cooldown
-    # elapses. Base grows exponentially with consecutive shared failures, capped at
-    # max — expiry is the recovery path (never permanent). 0 base or max = disabled.
-    memory_consolidation_shared_failure_cooldown_base_seconds: int = 300
-    memory_consolidation_shared_failure_cooldown_max_seconds: int = 1800
-    # Episodic session summary hard cap (chars); LLM output is truncated to this.
-    memory_episodic_summary_max_chars: int = 200
-    # Digested episodes have no reader left (idle path marks them digested without
-    # merging into always-files); the sweeper hard-deletes them past this window.
-    # 0 disables the purge (keeps them forever).
-    memory_episode_retention_days: int = 30
-    # Unused by the live idle path (episodes are digested without rewriting
-    # always-files). Kept so tests of :func:`should_run_semantic` stay stable.
-    # historical: non-eager leak-scan backstop (undigested count, or hours since
-    # the last successful semantic pass for that (user, scope)).
-    memory_semantic_min_episodes: int = 3
-    memory_semantic_max_age_hours: float = 24.0
-    memory_section_bullet_cap: int = 20
-    # Max on-demand topic notes (主题/<slug>.md) per user; new ones beyond this are
-    # dropped by the consolidation pass (anti-bloat backstop, 记忆文件夹化 §七).
-    memory_max_topic_files: int = 24
-    # Retired: ``schedule_explore_refresh`` is an unconditional no-op.
-    # Kept so existing env/config keys do not fail to parse.
-    memory_explore_refresh_enabled: bool = False
-    memory_explore_refresh_idle_seconds: float = 45.0
     # Write-side always-entry quota (闸在写侧，读侧全量). Caps the sum of frontmatter-stripped
     # always rule bodies in an injection context (global + optional project). Anchored to the
     # retired read-side ``max_instruction_chars`` (24_000) so behaviour does not jump. 0 = off.
-    # Sole bound on the always pool — no read-side per-file char cap (COST-001 read-side
-    # backstop retired with 读侧全量定案).
+    # Sole bound on the always pool — no read-side per-file char cap.
     memory_always_max_chars: int = 24_000
-
-    # One-time file→document memory migration (§5.7 换底): copy file-backed memory into the
-    # documents tree at startup. Idempotent + best-effort; safe to leave on (a no-op once done).
-    memory_documents_migration_enabled: bool = True
 
     # Dual-trigger compaction (长对话压缩定案 P0): schedule when token≥threshold OR
     # DB watermark-after batch passes ``_select_fold`` with message_trigger_min_fold.

@@ -50,7 +50,7 @@ export function DetailTabs({
                 className="max-w-[180px]"
               />
             </ContextMenuTrigger>
-            <ContextMenuContent className="min-w-40">
+            <ContextMenuContent>
               <ContextMenuItem onSelect={() => onClose(key)}>
                 <X size={14} className="shrink-0" />
                 <span className="flex-1 truncate">关闭</span>

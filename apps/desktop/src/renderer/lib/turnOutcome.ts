@@ -5,9 +5,8 @@
  * Pipes: `execution.status`, per-run `run_failed`, `message.error`,
  * `finishReason`, `conversation.error`.
  *
- * Flag contract (rest-of-states; `kind=paused` is a frozen read-only path):
- * consumers must paint from these flags, not from `execution.status` or leaf
- * ifs. See {@link TurnOutcome}.
+ * Flag contract: consumers paint from these flags, not from `execution.status`
+ * or leaf ifs. Failure sentences share one composer banner. See {@link TurnOutcome}.
  */
 
 import {
@@ -73,13 +72,8 @@ export type StructuredErr = {
   } | null;
 } | null;
 
-/** Where「复制排查包」hangs. Primary verdict only — never two hosts. */
-export type TurnSupportPackHost =
-  | "none"
-  | "bubble"
-  | "more"
-  | "composer"
-  | "session";
+/** Where「复制排查包」hangs. The failure banner never hosts it. */
+export type TurnSupportPackHost = "none" | "more";
 
 export type TurnFailedRun = {
   id: string;
@@ -136,27 +130,22 @@ export type TurnOutcome = {
   recovery: TurnRecovery;
   face: { code: string; message: string } | null;
   /**
-   * Assistant bubble error card. Exclusive with strip / composer-hint /
-   * silent-ok. Single-chat owns the red card; team graph does not repeat it.
-   */
-  showBubbleBanner: boolean;
-  /**
-   * Composer light hint. Rest-of-states that light this (error card off):
-   * empty interrupt (`send_next`) and partial+rate-limit (`wait_then_retry`).
-   * Sending the next message clears it. `kind=paused` never lights this.
+   * Failure sentence on the dismissible banner above the composer.
+   * Stall, timeout, empty interrupt, rate-limit why, and configure copy
+   * share that slot. Pending decisions and attested pause (why sits on
+   * 「继续」) do not light it.
    */
   showComposerHint: boolean;
   /**
-   * Gate for ComposerSendErrorNotice **sessionError** (not `composerError`).
-   * True only when `conversationError` copy exists AND this turn has no other
-   * primary verdict. Block D: `suppressSession={!showSessionBanner}`.
+   * Session copy owns the same banner when this turn has no failure sentence.
+   * A just-failed send still outranks it. `suppressSession={!showSessionBanner}`.
    */
   showSessionBanner: boolean;
   /**
    * Assistant utility chrome (copy / clone / feedback / cost / time).
    * True once the turn has stopped writing and there is copyable product
-   * (body / reasoning / process) or an empty hard-fail card whose unique
-   * retry is footer 重新生成. Named recovery does **not** hide this.
+   * (body / reasoning / process). Named recovery does **not** hide this.
+   * An empty failure has no bubble, so it has no footer.
    */
   showFooter: boolean;
   /**
@@ -167,8 +156,9 @@ export type TurnOutcome = {
    */
   showRegenerate: boolean;
   /**
-   * Empty user-stop, or an empty shell with no engine/server verdict: omit the
-   * bubble. kind is `ok`. Do not invent ``interrupted`` to fill the hole.
+   * Omit the assistant bubble: empty user-stop, an empty shell with no verdict,
+   * or an empty failure whose sentence lives on the composer banner.
+   * A team strip keeps the bubble (the graph is the product).
    */
   hideEmptyBubble: boolean;
   /**
@@ -193,9 +183,9 @@ export type TurnOutcome = {
    */
   showTurnWarning: boolean;
   /**
-   * 「复制排查包」host. Follows the unique verdict: empty interrupt and
-   * partial+rate-limit → composer; hard fail without a team strip → bubble;
-   * team-strip fail / partial → bubble「更多」; paused → none.
+   * 「复制排查包」host. `more` while the assistant bubble is still on screen
+   * (body or a team strip). An empty shell has no bubble and no pack.
+   * The failure banner and the status strip never host it.
    */
   supportPackHost: TurnSupportPackHost;
 };
@@ -278,6 +268,26 @@ function emptyShell(input: TurnOutcomeInput): boolean {
   if (input.turnWarning) return false;
   if ((input.citationCount ?? 0) > 0) return false;
   return true;
+}
+
+/** Pack stays in bubble「更多」only while that reply is still on screen. */
+function supportPackHostFor(args: {
+  input: TurnOutcomeInput;
+  hideEmptyBubble: boolean;
+  hasTeamStrip: boolean;
+  kind: TurnOutcomeKind;
+  showComposerHint: boolean;
+  showStripFailure: boolean;
+  showSessionBanner: boolean;
+}): TurnSupportPackHost {
+  const replyOnScreen =
+    !args.hideEmptyBubble && (args.hasTeamStrip || !emptyShell(args.input));
+  const owesPack =
+    args.showComposerHint ||
+    args.showStripFailure ||
+    args.showSessionBanner ||
+    (args.kind === "partial" && args.hasTeamStrip);
+  return replyOnScreen && owesPack ? "more" : "none";
 }
 
 function pauseSignal(input: TurnOutcomeInput): boolean {
@@ -436,7 +446,6 @@ function deriveRecovery(
 
 function quietFlags(): Pick<
   TurnOutcome,
-  | "showBubbleBanner"
   | "showComposerHint"
   | "showSessionBanner"
   | "showFooter"
@@ -449,7 +458,6 @@ function quietFlags(): Pick<
   | "supportPackHost"
 > {
   return {
-    showBubbleBanner: false,
     showComposerHint: false,
     showSessionBanner: false,
     showFooter: false,
@@ -535,38 +543,43 @@ export function arbitrateTurnOutcome(input: TurnOutcomeInput): TurnOutcome {
   const recovery = deriveRecovery(input, face, kind);
   const attestedContinue = isAttestedPauseContinue({ kind, recovery });
 
-  const hideEmptyBubble =
-    emptyShell(input) &&
-    (isCancelCode(face?.code) || (kind === "ok" && face == null));
   const sessionCopy = (input.conversationError ?? "").trim();
   const hasTeamStrip = Boolean(input.hasTeamStrip);
+  const decisionOwns =
+    Boolean(input.hasPendingDecision) ||
+    Boolean(input.hasDedicatedPauseOrAskUi);
+  const composerFailure =
+    !decisionOwns &&
+    face != null &&
+    !isCancelCode(face.code) &&
+    kind === "error";
+  const hideEmptyBubble =
+    emptyShell(input) &&
+    !hasTeamStrip &&
+    (isCancelCode(face?.code) ||
+      (kind === "ok" && face == null) ||
+      composerFailure ||
+      (kind === "partial" && face?.code === "LLM_RATE_LIMIT"));
 
   const fr = input.finishReason ?? undefined;
 
   // `kind=paused` recovery / why stay frozen. Utility chrome follows
-  // copyable product (not a second recovery).
+  // copyable product (not a second recovery). Attested continue keeps its
+  // why on the Continue control; other pause sentences use the composer banner.
   if (kind === "paused") {
-    // Cancel face must not become a warning card if kind is still paused
-    // (attested leftover / resolved-card pauseSignal). Stop is not an error.
-    const showBubbleBanner =
-      face != null &&
-      !hideEmptyBubble &&
-      !attestedContinue &&
-      !isCancelCode(face.code);
     const showComposerHint =
-      recovery.kind === "send_next" &&
-      !input.hasPendingDecision &&
-      !input.hasDedicatedPauseOrAskUi &&
-      !attestedContinue;
+      !attestedContinue &&
+      !decisionOwns &&
+      !isCancelCode(face?.code) &&
+      (recovery.kind === "send_next" || face != null);
     const showSessionBanner = Boolean(
-      sessionCopy && !showBubbleBanner && !attestedContinue,
+      sessionCopy && !showComposerHint && !attestedContinue,
     );
     const { showFooter, showRegenerate } = footerFlags({
       hideEmptyBubble,
       input,
       recoveryKind: recovery.kind,
-      errorFaceCopyable:
-        Boolean(showBubbleBanner && face) && !isCancelCode(face?.code),
+      errorFaceCopyable: false,
     });
     let message: string | null = null;
     if (attestedContinue) {
@@ -575,8 +588,8 @@ export function arbitrateTurnOutcome(input: TurnOutcomeInput): TurnOutcome {
         face?.code === "LLM_RATE_LIMIT"
           ? LLM_RATE_LIMIT_WHY
           : (face?.message ?? (sessionCopy || null));
-    } else if (showBubbleBanner) {
-      message = face?.message ?? null;
+    } else if (showComposerHint) {
+      message = withOutcomeMoment(input, face?.message ?? null);
     } else if (showSessionBanner) {
       message = sessionCopy;
     }
@@ -586,7 +599,6 @@ export function arbitrateTurnOutcome(input: TurnOutcomeInput): TurnOutcome {
       code: face?.code ?? null,
       recovery,
       face,
-      showBubbleBanner,
       showComposerHint,
       showSessionBanner,
       showFooter,
@@ -596,34 +608,34 @@ export function arbitrateTurnOutcome(input: TurnOutcomeInput): TurnOutcome {
       showStripStopped: false,
       showStripIdle: false,
       showTurnWarning: Boolean(input.turnWarning),
-      supportPackHost: "none",
+      supportPackHost: supportPackHostFor({
+        input,
+        hideEmptyBubble,
+        hasTeamStrip,
+        kind,
+        showComposerHint,
+        showStripFailure: false,
+        showSessionBanner,
+      }),
     };
   }
 
-  // Partial + upstream 429: why hangs on this hint; the strip stays a scoreboard.
+  // Partial + upstream 429: why hangs on the banner; the strip stays a scoreboard.
   // Do not require wait_then_retry — retryable=false still owes the same sentence.
   const composerOwnsRateLimitWhy =
     kind === "partial" && face?.code === "LLM_RATE_LIMIT";
   const showComposerHint =
-    (recovery.kind === "send_next" || composerOwnsRateLimitWhy) &&
-    !input.hasPendingDecision &&
-    !input.hasDedicatedPauseOrAskUi;
+    !decisionOwns &&
+    (recovery.kind === "send_next" ||
+      composerOwnsRateLimitWhy ||
+      composerFailure);
   const showStripStopped =
     hasTeamStrip && kind === "ok" && isCancelCode(face?.code);
   const showStripFailure =
     hasTeamStrip && kind === "error" && recovery.kind !== "send_next";
   const showStripIdle = hasTeamStrip && recovery.kind === "send_next";
-  const showBubbleBanner =
-    face != null &&
-    !hideEmptyBubble &&
-    kind !== "partial" &&
-    kind !== "ok" &&
-    recovery.kind !== "send_next" &&
-    !hasTeamStrip &&
-    !isCancelCode(face.code);
   const showSessionBanner = Boolean(
     sessionCopy &&
-      !showBubbleBanner &&
       !showComposerHint &&
       !showStripFailure &&
       !showStripStopped &&
@@ -644,16 +656,18 @@ export function arbitrateTurnOutcome(input: TurnOutcomeInput): TurnOutcome {
     input,
     recoveryKind: recovery.kind,
     errorFaceCopyable:
-      Boolean((showBubbleBanner || showStripFailure) && face) &&
-      !isCancelCode(face?.code),
+      Boolean(showStripFailure && face) && !isCancelCode(face?.code),
   });
 
-  let supportPackHost: TurnSupportPackHost = "none";
-  if (showBubbleBanner) supportPackHost = "bubble";
-  else if (showComposerHint) supportPackHost = "composer";
-  else if (showStripFailure || (kind === "partial" && hasTeamStrip)) {
-    supportPackHost = "more";
-  } else if (showSessionBanner) supportPackHost = "session";
+  const supportPackHost = supportPackHostFor({
+    input,
+    hideEmptyBubble,
+    hasTeamStrip,
+    kind,
+    showComposerHint,
+    showStripFailure,
+    showSessionBanner,
+  });
 
   let message: string | null = null;
   if (kind === "partial") {
@@ -661,10 +675,13 @@ export function arbitrateTurnOutcome(input: TurnOutcomeInput): TurnOutcome {
       partialCardReason(face, recovery.retryAfterSec) ??
       input.deliverySummary?.trim() ??
       null;
-  } else if (showBubbleBanner || showStripFailure) {
-    message = withOutcomeMoment(input, face?.message ?? null);
   } else if (showComposerHint) {
-    message = recovery.label ?? face?.message ?? TURN_INTERRUPTED_EMPTY_MESSAGE;
+    message =
+      withOutcomeMoment(input, face?.message ?? null) ??
+      recovery.label ??
+      TURN_INTERRUPTED_EMPTY_MESSAGE;
+  } else if (showStripFailure) {
+    message = withOutcomeMoment(input, face?.message ?? null);
   } else if (showSessionBanner) {
     message = withOutcomeMoment(input, sessionCopy);
   } else if (kind === "error") {
@@ -677,7 +694,6 @@ export function arbitrateTurnOutcome(input: TurnOutcomeInput): TurnOutcome {
     code: face?.code ?? null,
     recovery,
     face,
-    showBubbleBanner,
     showComposerHint,
     showSessionBanner,
     showFooter,

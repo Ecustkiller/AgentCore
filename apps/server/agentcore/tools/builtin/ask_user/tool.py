@@ -61,6 +61,7 @@ class AskUserTool:
         audience=AUDIENCE_CEO_ONLY,
         ceo_wire=CeoWire.CHECKPOINT,
         catalog_summary="向用户提问或请拍板",
+        blurb="把选择题或填空推到对话里等人回",
     )
 
     sink: EventSink
@@ -80,16 +81,15 @@ class AskUserTool:
     # captures it into the frame — the resumed toolset re-wires consult to the same
     # project (Agent记忆与知识系统 §二). ``None`` for 裸聊 / local. Capture-only (unused live).
     folder_id: str | None = None
-    # Advertise desktop-only ask_user option actions when the desktop client can
-    # fulfil them. Which actions appear depends on ``workspace_location``
-    # (本机传统 already-local drops open/register/bind; attach_rw only on local).
+    # Unused for schema: open/bind folder is human-side. Kept so assemble / resume
+    # signatures stay; ``advertised_option_actions`` is always empty.
     advertise_bind_local_folder: bool = False
     workspace_location: str | None = None
 
     @property
     def schema(self) -> ToolSchema:
         # Schema: when-to-use + 填卡合同（写参当轮必见）。卡形与 escalate 共用；
-        # 推荐 / 桌上结果只叠在本按钮。本机 action 仍是本工具覆盖。
+        # 推荐 / 桌上结果只叠在本按钮。开夹不进本按钮。
         allowed_actions = advertised_option_actions(
             desktop=self.advertise_bind_local_folder,
             workspace_location=self.workspace_location,

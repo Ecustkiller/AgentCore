@@ -10,8 +10,8 @@ def test_recovery_fold_payload_is_required_wire_verbatim() -> None:
         "approval_id": "call-1",
         "conversation_id": "conv-a",
         "tool_call_id": "call-1",
-        "tool_name": "file_write",
-        "arguments": {"path": "/tmp/x.txt"},
+        "tool_name": "write",
+        "arguments": {"file_path": "/tmp/x.txt"},
     }
     entries = [{"kind": "approval_required", "payload": required_payload}]
     pending = fold_pending_interactions(entries, message_id="msg-1")

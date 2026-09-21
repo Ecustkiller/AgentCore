@@ -425,7 +425,7 @@ async def test_external_ns_write_skips_mint_when_mode_covers(tmp_path):
 
 @pytest.mark.asyncio
 async def test_external_ns_cloud_attach_rw_does_not_upgrade():
-    """Cloud file_write on an existing mount must not mint attach_rw.
+    """Cloud write on an existing mount must not mint attach_rw.
 
     Backend organize/readonly policy is the model-facing reason.
     """

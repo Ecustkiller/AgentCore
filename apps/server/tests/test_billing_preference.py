@@ -94,19 +94,19 @@ def test_production_go_flash_allowlist_membership_and_curated_card():
     """现网 allowlist 仅付费 Flash：membership 过 fail-fast，且必须有 CNY curated 卡。"""
     from agentcore.config.platform import PlatformSettings
     from agentcore.llm.pricing import has_curated_pricing
-    from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
+    from agentcore.llm.profiles import OPENCODE_GO_V41_FLASH
 
-    assert has_curated_pricing(DEEPSEEK_V4_FLASH)
+    assert has_curated_pricing(OPENCODE_GO_V41_FLASH)
     cfg = PlatformSettings(
         platform_base_url="https://opencode.ai/zen/go/v1",
-        platform_model=DEEPSEEK_V4_FLASH,
-        platform_models=DEEPSEEK_V4_FLASH,
-        platform_background_model=DEEPSEEK_V4_FLASH,
+        platform_model=OPENCODE_GO_V41_FLASH,
+        platform_models=OPENCODE_GO_V41_FLASH,
+        platform_background_model=OPENCODE_GO_V41_FLASH,
     )
     assert cfg.platform_base_url == "https://opencode.ai/zen/go/v1"
-    assert cfg.platform_model == DEEPSEEK_V4_FLASH
-    assert cfg.platform_models == DEEPSEEK_V4_FLASH
-    assert cfg.platform_background_model == DEEPSEEK_V4_FLASH
+    assert cfg.platform_model == OPENCODE_GO_V41_FLASH
+    assert cfg.platform_models == OPENCODE_GO_V41_FLASH
+    assert cfg.platform_background_model == OPENCODE_GO_V41_FLASH
 
 
 def _mock_provider_default(monkeypatch, *, user, row):
@@ -330,7 +330,7 @@ async def test_resolve_and_gate_background_quota_exceeded_returns_none(monkeypat
             AsyncMock(side_effect=QuotaExceededError("exhausted")),
         ),
     ):
-        result = await resolve_and_gate_background(MagicMock(), "u1", purpose="memory")
+        result = await resolve_and_gate_background(MagicMock(), "u1", purpose="title")
     assert result.credentials is None
     assert result.quota_skipped_at_admission is True
 
@@ -349,7 +349,7 @@ async def test_run_background_llm_admission_quota_skip_is_quota_exceeded(monkeyp
 
     monkeypatch.setattr("agentcore.billing.gate.resolve_and_gate_background", _resolve)
 
-    outcome = await run_background_llm("u1", purpose="memory", runner=AsyncMock())
+    outcome = await run_background_llm("u1", purpose="title", runner=AsyncMock())
     assert outcome == BackgroundLlmSkip(reason=BackgroundSkipReason.QUOTA_EXCEEDED)
 
 
@@ -473,7 +473,7 @@ async def test_run_background_llm_no_byok_after_platform_auth_skips(monkeypatch)
         AsyncMock(return_value=None),
     )
 
-    result = await run_background_llm("u1", purpose="memory", runner=_runner)
+    result = await run_background_llm("u1", purpose="title", runner=_runner)
     assert result == BackgroundLlmSkip(reason=BackgroundSkipReason.AUTH_REJECTED)
 
 
@@ -620,7 +620,7 @@ async def test_run_background_llm_byok_balance_skips_without_raising(monkeypatch
         fallback,
     )
 
-    result = await run_background_llm("u1", purpose="memory", runner=_runner)
+    result = await run_background_llm("u1", purpose="title", runner=_runner)
     assert result == BackgroundLlmSkip(
         reason=BackgroundSkipReason.INSUFFICIENT_BALANCE
     )

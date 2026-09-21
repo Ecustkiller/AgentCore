@@ -22,10 +22,10 @@ def build_escalation_channel(
     agent_id: str,
     resolutions: dict[str, dict[str, Any]],
 ) -> EscalationChannel | None:
-    """Wire one worker's ``escalate(blocking=true)`` to suspend for the user (设计 §4.2).
+    """Wire one worker's ``escalate(reason=wait)`` to suspend for the user.
 
-    ``None`` when no interaction bridge is wired (CEO / standalone / tests) — then the
-    tool keeps its non-blocking behaviour. The returned channel carries ``armed`` (the
+    ``None`` when no interaction bridge is wired (CEO / standalone / tests) — then
+    ``reason=wait`` degrades to finish-under-assumption. The returned channel carries ``armed`` (the
     live-user gate) and a ``request`` that owns the whole mechanism the tool stays clear
     of (引擎纯化): the per-turn concurrency cap, the suspend on the shared bridge, the
     ``escalation_required`` / ``escalation_resolved`` pair (单一发射者: emitted here, the
@@ -40,13 +40,13 @@ def build_escalation_channel(
         question: str,
         assumption: str,
         questions: list[dict[str, Any]],
-        kind: str = "normal",
+        reason: str = "wait",
         awaiting: str = "user",
         *,
         ownership_paths: list[str] | None = None,
         lock_owner_run_id: str = "",
     ) -> EscalationOutcome:
-        # Cap: count this conversation's already-parked blocking escalates. The check
+        # Cap: count this conversation's already-parked wait-escalates. The check
         # and the suspend's create() run with no await between them (single loop), so
         # the count can't race (设计 §4.7). Over cap ⇒ degrade (proceed on assumption).
         # Write-lock ownership is always user-facing — never CEO.
@@ -96,7 +96,7 @@ def build_escalation_channel(
             logger.info("worker.escalate.cap_degraded", run_id=run_id, parked=parked)
             return EscalationOutcome(status="degraded")
         escalation_id = new_id()
-        esc_kind = kind if kind in ("normal", "scope", "dep") else "normal"
+        esc_kind = reason if reason in ("wait", "scope", "dep") else "wait"
 
         if awaiting_ceo:
             from agentcore.runtime.coordination.bridge import (
@@ -145,10 +145,9 @@ def build_escalation_channel(
                 post_escalation_to_coordination(
                     run_id=run_id,
                     role="",
-                    kind=esc_kind,
+                    reason=esc_kind,
                     question=question,
                     assumption=assumption,
-                    blocking=True,
                     source="blocking_arbitrate",
                     execution_id=env.base_tool_context.execution_id,
                     escalation_id=escalation_id,

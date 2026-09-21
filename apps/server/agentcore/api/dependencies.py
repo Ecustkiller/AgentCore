@@ -27,7 +27,6 @@ from agentcore.db.repositories import (
     AdminAuditRepository,
     AdminMfaRepository,
     AgentAuditEventRepository,
-    BoardRepository,
     ChatRepository,
     ConversationRepository,
     ConversationShareRepository,
@@ -207,10 +206,6 @@ def get_memory_store(session: AsyncSession = Depends(get_db)) -> "DocumentMemory
     from agentcore.memory import DocumentMemoryStore
 
     return DocumentMemoryStore(session=session)
-
-
-def get_board_repo(session: AsyncSession = Depends(get_db)) -> BoardRepository:
-    return BoardRepository(session)
 
 
 def get_doc_repo(session: AsyncSession = Depends(get_db)) -> DocRepository:

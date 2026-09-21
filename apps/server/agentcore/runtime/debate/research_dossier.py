@@ -1,8 +1,7 @@
-"""工作区幕 1 调研约定文档（``AgentCore/文档/research/``）——辩论开工探测、台账锚与索引文案。
+"""材料索引与调研正文里的 ``#rN`` 锚——辩论侧只读文案，不扫约定柜。
 
-约定文档由多维调研落盘；辩论侧只读索引（文件列表 + 一行说明），
-全文由辩手 ``file_read`` 自取。开赛时约定文档内 ``#rN`` 若已在当轮台账则复用，
-否则新登记；不另起字头。不碰 persist / 轮次原语。
+约定文档抽屉已卸。开赛材料走 CEO ``background`` / 附件 / 已声明 ``#rN``；
+本模块只格式化调用方传入的路径列表，并从正文抽锚。
 """
 
 from __future__ import annotations
@@ -10,23 +9,13 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from agentcore.runtime.citations import extract_ledger_ref_ids, normalize_citation_url
-from agentcore.workspace.protocol import NotADirectory, PathNotFound, WorkspaceError
-from agentcore.workspace.stage_dirs import RESEARCH_DIR
+from agentcore.runtime.citations import extract_ledger_ref_ids
 
-if TYPE_CHECKING:
-    from agentcore.runtime.debate.evidence_ledger import EvidenceLedger
-    from agentcore.workspace.protocol import WorkspaceBackend
-
-# 汇总文件名（议程提示用；不强制文件必须存在）。
-SYNTHESIZER_FILE = f"{RESEARCH_DIR}/汇总与命题卡.md"
-
-# 约定文档预登记的登记方键（非辩手 side_key；与 moderator 底料并列）。
+# 预登记的登记方键（非辩手 side_key；与 moderator 底料并列）。
 DOSSIER_SIDE_KEY = "dossier"
 
-_INDEX_CAP = 40
 _ANCHOR_SECTION = "## 来源台账锚"
 # 落盘脚注行：`- #r1 · https://… · 标题`（机制兜底写入；亦接受模型自写同形）。
 _FOOTER_LINE_RE = re.compile(
@@ -39,7 +28,7 @@ _BIBLIO_TYPE_MARKER_RE = re.compile(r"\[(?:D|J|M|C|N)\]")
 
 @dataclass(frozen=True)
 class ResearchLedgerAnchor:
-    """约定文档正文中的一条可解析调研台账锚（幕 1 ``#rN``）。"""
+    """正文中的一条可解析调研台账锚（``#rN``）。"""
 
     origin_id: str  # #rN
     url: str = ""
@@ -47,7 +36,7 @@ class ResearchLedgerAnchor:
 
 
 def dossier_label_from_path(path: str) -> str:
-    """从约定文档路径推导人话透镜/角色标签（徽章溯源用）。"""
+    """从路径推导人话透镜/角色标签（徽章溯源用）。"""
     name = (path or "").replace("\\", "/").rsplit("/", 1)[-1]
     stem = name.removesuffix(".md").removesuffix(".MD")
     if stem.endswith("透镜报告"):
@@ -58,7 +47,7 @@ def dossier_label_from_path(path: str) -> str:
 
 
 def extract_research_ledger_anchors(content: str) -> list[ResearchLedgerAnchor]:
-    """从约定文档正文抽取 ``#rN`` 锚（正文行尾 + 脚注节）；保首次出现序。"""
+    """从正文抽取 ``#rN`` 锚（正文行尾 + 脚注节）；保首次出现序。"""
     text = content or ""
     by_id: dict[str, ResearchLedgerAnchor] = {}
     order: list[str] = []
@@ -134,29 +123,6 @@ def ensure_research_file_anchors(
     return body + "\n\n" + footer
 
 
-async def list_research_artifact_paths(backend: WorkspaceBackend) -> list[str]:
-    """列出 ``AgentCore/文档/research/`` 下文件路径；目录不存在或空 → ``[]``。"""
-    try:
-        entries = await backend.list(RESEARCH_DIR, "*")
-    except (PathNotFound, NotADirectory):
-        return []
-    except WorkspaceError:
-        return []
-    paths = sorted(e.path.replace("\\", "/") for e in entries if not e.is_dir and e.path)
-    return paths[:_INDEX_CAP]
-
-
-async def workspace_has_research_artifacts(backend: WorkspaceBackend) -> bool:
-    """工作区是否已有幕 1 调研产物文件（供调研链证据并集判据）。"""
-    return bool(await list_research_artifact_paths(backend))
-
-
-async def workspace_has_synthesizer(backend: WorkspaceBackend) -> bool:
-    """幕 1 汇总文件是否存在（辩论双产物互链头用；无则零行为）。"""
-    paths = await list_research_artifact_paths(backend)
-    return SYNTHESIZER_FILE in paths
-
-
 def _format_char_size(n: int) -> str:
     if n >= 1000:
         return f"约{max(1, n // 1000)}k字"
@@ -186,7 +152,7 @@ def format_research_dossier_index(
     ledger_lines: Sequence[str] | None = None,
     file_hints: dict[str, str] | None = None,
 ) -> str:
-    """约定文档文件索引块（非全文）。空路径 → 空串（调用方跳过注入）。
+    """材料文件索引块（非全文）。空路径 → 空串（调用方跳过注入）。
 
     ``ledger_lines`` 可选：预登记后的 ``#rN`` 行（每行已格式化）。
     ``file_hints`` 可选：path → 「约Nk字 · 标签：摘要」附注，助选读。
@@ -201,110 +167,16 @@ def format_research_dossier_index(
         bullet_lines.append(f"- {p}" + (f"（{hint}）" if hint else ""))
     lines = "\n".join(bullet_lines)
     block = (
-        f"【工作区约定文档索引·{RESEARCH_DIR}/】\n"
-        "幕1 多视角调研产物已落盘（下列为文件列表+字数/摘要，非全文；"
-        "按本轮议题选读相关文件，用 file_read 按路径自取——勿无差别全量通读）。\n"
+        "【工作区材料索引】\n"
+        "下列为文件列表+字数/摘要，非全文；"
+        "按本轮议题选读相关文件，用 read 按路径自取——勿无差别全量通读。\n"
         f"{lines}"
     )
     if ledger_lines:
         mapped = "\n".join(ledger_lines)
         block += (
-            "\n\n【约定文档预登记台账·引用须用下列 #rN】\n"
-            "引用约定文档事实写成【已核实·#rN】（id 见下；徽章可溯源到约定文档文件）。\n"
+            "\n\n【材料预登记台账·引用须用下列 #rN】\n"
+            "引用材料事实写成【已核实·#rN】（id 见下；徽章可溯源到文件）。\n"
             f"{mapped}"
         )
     return block
-
-
-def _anchor_reuses_existing(ledger: EvidenceLedger, anchor: ResearchLedgerAnchor) -> bool:
-    """约定文档 ``#rN`` 仅在当轮核已是同一来源时复用；不把无锚文件占走的号当成原锚。"""
-    existing = ledger.get(anchor.origin_id)
-    if existing is None:
-        return False
-    want = normalize_citation_url(anchor.url) if (anchor.url or "").strip() else ""
-    have = normalize_citation_url(existing.get("url") or "")
-    if want and have:
-        return want == have
-    if want and not have:
-        return False
-    return not (existing.get("dossier_path") or "").strip()
-
-
-async def preregister_research_dossier(
-    ledger: EvidenceLedger,
-    backend: WorkspaceBackend,
-) -> str:
-    """开赛约定文档预登记：读约定文档 → 抽 ``#rN`` 锚 → 已有同 URL id 复用，否则新登记。
-
-    先登记有锚文件，再给无锚文件整文件一条，避免无锚文件占走 ``#r1`` 后误复用。
-    无约定文档 → 空串（零行为）。
-    """
-    paths = await list_research_artifact_paths(backend)
-    if not paths:
-        return ""
-
-    path_eids: dict[str, list[str]] = {p: [] for p in paths}
-    file_hints: dict[str, str] = {}
-    loaded: list[tuple[str, list[ResearchLedgerAnchor], str]] = []
-
-    for path in paths:
-        try:
-            content = await backend.read(path)
-        except WorkspaceError:
-            content = ""
-        file_hints[path] = dossier_file_hint(path, content)
-        loaded.append(
-            (path, extract_research_ledger_anchors(content), dossier_label_from_path(path))
-        )
-
-    for path, anchors, label in loaded:
-        if not anchors:
-            continue
-        for a in anchors:
-            if _anchor_reuses_existing(ledger, a):
-                ledger.stamp_dossier(
-                    a.origin_id,
-                    dossier_path=path,
-                    dossier_label=label,
-                )
-                ledger.ensure_committed(a.origin_id)
-                path_eids[path].append(a.origin_id)
-                continue
-            title = (a.title or "").strip() or f"{label} · {a.origin_id}"
-            eid = ledger.register(
-                url=a.url,
-                title=title,
-                snippet=f"约定文档 {path}",
-                site=label,
-                side_key=DOSSIER_SIDE_KEY,
-                tier="unknown",
-                dossier_path=path,
-                dossier_label=label,
-            )
-            path_eids[path].append(eid)
-
-    for path, anchors, label in loaded:
-        if anchors:
-            continue
-        eid = ledger.register(
-            url="",
-            title=f"约定文档 · {label}",
-            snippet=f"约定文档文件 {path}（正文无 #rN 锚）",
-            site=label,
-            side_key=DOSSIER_SIDE_KEY,
-            tier="unknown",
-            dossier_path=path,
-            dossier_label=label,
-        )
-        path_eids[path].append(eid)
-
-    ledger_lines: list[str] = []
-    for path in paths:
-        eids = path_eids.get(path) or []
-        if not eids:
-            continue
-        ledger_lines.append(f"- {path} → {', '.join(eids)}")
-
-    return format_research_dossier_index(
-        paths, ledger_lines=ledger_lines, file_hints=file_hints
-    )

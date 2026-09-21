@@ -221,10 +221,10 @@ class CoordinationSession(
     _timeout_force_cancelled: set[str] = field(default_factory=set, repr=False)
     # Dedupe escalation injections (live escalate + completion inject + SCOPE boundary).
     _escalation_keys: set[str] = field(default_factory=set, repr=False)
-    # D1: blocking escalate → CEO arbitration. run_id → live bridge metadata.
+    # D1: wait-escalate → CEO arbitration. run_id → live bridge metadata.
     pending_arbitrations: dict[str, dict[str, Any]] = field(default_factory=dict)
     # Answers stashed when the live Future is gone (ask_user soft-stop cancelled the worker);
-    # re-armed workers pick these up on the next escalate(blocking=true).
+    # re-armed workers pick these up on the next escalate(reason=wait).
     resolved_arbitrations: dict[str, dict[str, Any]] = field(default_factory=dict)
     # Mid-flight user interjections awaiting CEO disposition. Credentials are
     # process-local only — journal snapshots strip ``llm_credentials``.

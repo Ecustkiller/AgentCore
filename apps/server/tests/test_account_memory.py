@@ -14,8 +14,6 @@ from agentcore.account.credentials import (
     AccountCredentials,
     account_credentials_scope,
     cloud_list_user_rules,
-    cloud_memory_load,
-    cloud_memory_save,
     cloud_write_user_rule,
 )
 from agentcore.memory.document_store import DocumentMemoryStore
@@ -201,35 +199,6 @@ async def test_cloud_write_user_rule_payload(monkeypatch: pytest.MonkeyPatch, ac
 
 
 
-async def test_cloud_memory_save_raises_on_5xx(
-    monkeypatch: pytest.MonkeyPatch, account_creds
-):
-    async def _handler(request: httpx.Request) -> httpx.Response:
-        del request
-        return httpx.Response(503, json={"detail": "down"})
-
-    monkeypatch.setattr(
-        "agentcore.account.credentials.outbound_async_client",
-        lambda **kwargs: httpx.AsyncClient(transport=_FakeTransport(_handler), **kwargs),
-    )
-    with pytest.raises(AccountCloudError) as ei:
-        await cloud_memory_save(
-            account_creds, path="画像.md", content="## x", scope=None
-        )
-    assert ei.value.code == "account_cloud_server"
-
-
-async def test_cloud_memory_load_ok(monkeypatch: pytest.MonkeyPatch, account_creds):
-    async def _handler(request: httpx.Request) -> httpx.Response:
-        assert str(request.url).endswith("/memory/load")
-        return httpx.Response(200, json={"content": "## 画像\n- rust"})
-
-    monkeypatch.setattr(
-        "agentcore.account.credentials.outbound_async_client",
-        lambda **kwargs: httpx.AsyncClient(transport=_FakeTransport(_handler), **kwargs),
-    )
-    body = await cloud_memory_load(account_creds, path="画像.md", scope="folder-1")
-    assert "rust" in body
 
 
 # --- assemble / file overlay / store with ContextVar ------------------------------
@@ -281,7 +250,6 @@ async def test_assemble_turn_rules_ticketed_hit_after_seed(
                 "project_rules": [],
             },
             memory_bodies={("", "偏好.md"): "- 偏好偏好\n"},
-            memory_topics=(),
         ),
     )
 
@@ -290,9 +258,6 @@ async def test_assemble_turn_rules_ticketed_hit_after_seed(
 
     monkeypatch.setattr(
         "agentcore.account.credentials.cloud_list_user_rules", _boom
-    )
-    monkeypatch.setattr(
-        "agentcore.account.credentials.cloud_memory_load", _boom
     )
 
     with account_credentials_scope(account_creds):
@@ -365,7 +330,7 @@ async def test_file_write_rule_cloud_success(
 
     with account_credentials_scope(account_creds):
         result = await FileWriteTool().execute(
-            {"path": ".agentcore/规则/回复语言.md", "content": "以后都用中文"},
+            {"file_path": ".agentcore/rules/回复语言.md", "content": "以后都用中文"},
             _ctx(),
         )
     assert result.success is True
@@ -400,7 +365,7 @@ async def test_file_delete_rule_cloud(
     )
     with account_credentials_scope(account_creds):
         result = await FileDeleteTool().execute(
-            {"path": ".agentcore/规则/回复语言.md"}, _ctx()
+            {"path": ".agentcore/rules/回复语言.md"}, _ctx()
         )
     assert result.success is True
     assert "已删除" in (result.output or "")
@@ -416,60 +381,19 @@ async def test_file_write_rule_cloud_failure_explicit(
 
     with account_credentials_scope(account_creds):
         result = await FileWriteTool().execute(
-            {"path": ".agentcore/规则/回复语言.md", "content": "完整一篇规则正文"},
+            {"file_path": ".agentcore/rules/回复语言.md", "content": "完整一篇规则正文"},
             _ctx(),
         )
     assert result.success is False
     assert "请稍后再试" in (result.error or result.output or "")
 
 
-async def test_document_store_cloud_load_and_soft_fail(
-    monkeypatch: pytest.MonkeyPatch, account_creds
-):
-    async def _load(creds, *, path, scope):
-        assert path == "画像.md"
-        return "## 画像\n- ok"
-
-    monkeypatch.setattr("agentcore.account.credentials.cloud_memory_load", _load)
-    store = DocumentMemoryStore()
-    with account_credentials_scope(account_creds):
-        body = await store.load("u1", "画像.md")
-    assert "ok" in body
-
-    async def _boom(*_a, **_k):
-        raise AccountCloudError("down")
-
-    monkeypatch.setattr("agentcore.account.credentials.cloud_memory_load", _boom)
-    with account_credentials_scope(account_creds):
-        body2 = await store.load("u1", "画像.md")
-    assert body2 == ""
-
-
-async def test_document_store_cloud_save_raises(
-    monkeypatch: pytest.MonkeyPatch, account_creds
-):
-    async def _boom(*_a, **_k):
-        raise AccountCloudError("write failed", code="account_cloud_server")
-
-    monkeypatch.setattr("agentcore.account.credentials.cloud_memory_save", _boom)
-    store = DocumentMemoryStore()
-    with account_credentials_scope(account_creds), pytest.raises(AccountCloudError):
-        await store.save("u1", "画像.md", "## x")
 
 
 async def test_document_store_bound_session_skips_cloud(
-    monkeypatch: pytest.MonkeyPatch, account_creds
+    account_creds,
 ):
     """Request DI path (session bound) must stay on DB even if ContextVar is set."""
-    cloud_called = False
-
-    async def _cloud_load(*_a, **_k):
-        nonlocal cloud_called
-        cloud_called = True
-        return "cloud"
-
-    monkeypatch.setattr("agentcore.account.credentials.cloud_memory_load", _cloud_load)
-
     class _FakeRepo:
         async def get_memory_note(self, *_a, **_k):
             return SimpleNamespace(content="from-db")
@@ -484,7 +408,6 @@ async def test_document_store_bound_session_skips_cloud(
     with account_credentials_scope(account_creds):
         body = await store.load("u1", "画像.md")
     assert body == "from-db"
-    assert cloud_called is False
 
 
 # --- on_demand rules via account narrow ticket (禁静默空转) --------------------

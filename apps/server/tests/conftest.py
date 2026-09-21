@@ -81,6 +81,15 @@ def _isolate_prompt_profile():
 
 
 @pytest.fixture(autouse=True)
+async def _reset_llm_http_pool():
+    """Drop origin-pooled LLM httpx clients so the next test's loop is clean."""
+    yield
+    from agentcore.llm.http_pool import aclose_llm_http_pool
+
+    await aclose_llm_http_pool()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_coordination_registry():
     """Clear the module-global coordination session registry around every test.
 

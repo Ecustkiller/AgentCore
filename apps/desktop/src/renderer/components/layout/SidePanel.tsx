@@ -478,7 +478,7 @@ export function SidePanel() {
               <Plus size={15} />
             </IconButton>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-36">
+          <DropdownMenuContent align="end">
             <DropdownMenuItem onSelect={() => openFileTab()}>
               <FileText size={14} />
               文件

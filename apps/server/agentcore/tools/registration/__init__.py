@@ -144,8 +144,8 @@ def register_always_ceo_tools(
 
     Consumed only from ``tools.ceo_toolset._assemble_ceo_toolset`` so fresh turn
     and 2b resume cannot diverge. Skips ``delegate`` / ``debate`` (heavy deps).
-    ``skill_registry`` is retained for call-site compatibility (consult no longer
-    takes it here — merged consult is hand-wired with has_entries).
+    ``skill_registry`` is retained for call-site compatibility (consult is
+    hand-wired onto the opening table, empty catalog included).
     """
     del skill_registry  # consult wiring moved; keep kwarg so callers need not change
     for cls in declared_tools(surface=ToolSurface.CEO_ORCHESTRATION):

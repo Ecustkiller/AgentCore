@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * ≥2 条边干边上报的收纳行：过程行密度（贴字箭头），不是灰底分组卡。
+ * ≥2 条卡住早停的收纳行：过程行密度（贴字箭头），不是灰底分组卡。
  */
 import { EscalationCards } from "@/components/chat/EscalationCard";
 import type { Execution, RunEscalation } from "@/stores/execution";
@@ -26,11 +26,11 @@ function raised(id: string, question: string): RunEscalation {
     id,
     question,
     assumption: "先按假设继续",
-    blocking: false,
     status: "raised",
     answer: null,
-    kind: "normal",
+    kind: "wait",
     questions: [],
+    source: "validation_thrash",
   };
 }
 
@@ -56,7 +56,7 @@ function execWithRaised(questions: [string, string]): Execution {
 }
 
 describe("EscalationCards · raised grouper", () => {
-  it("默认收成过程行：N 条边干边上报，无灰底、无展开套话", () => {
+  it("默认收成过程行：N 条卡住早停，无灰底、无展开套话", () => {
     execSlot.current = execWithRaised([
       "无法将第5轮审查报告落盘。",
       "目标文件被锁定。",
@@ -65,7 +65,7 @@ describe("EscalationCards · raised grouper", () => {
       <EscalationCards messageId="msg-1" conversationId="conv-1" interactive />,
     );
 
-    const face = screen.getByRole("button", { name: "2 条边干边上报" });
+    const face = screen.getByRole("button", { name: "2 条卡住早停" });
     expect(face.getAttribute("aria-expanded")).toBe("false");
     expect(face.className).toContain("w-auto");
     expect(face.className).toContain("text-sm");
@@ -89,12 +89,12 @@ describe("EscalationCards · raised grouper", () => {
       <EscalationCards messageId="msg-1" conversationId="conv-1" interactive />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "2 条边干边上报" }));
-    const face = screen.getByRole("button", { name: "2 条边干边上报" });
+    fireEvent.click(screen.getByRole("button", { name: "2 条卡住早停" }));
+    const face = screen.getByRole("button", { name: "2 条卡住早停" });
     expect(face.getAttribute("aria-expanded")).toBe("true");
     expect(screen.queryByText(/展开/)).toBeNull();
     expect(screen.queryByText(/收起/)).toBeNull();
-    expect(screen.getByText("审查员 · 边干边上报")).toBeTruthy();
-    expect(screen.getByText("落盘员 · 边干边上报")).toBeTruthy();
+    expect(screen.getByText("审查员 · 卡住早停")).toBeTruthy();
+    expect(screen.getByText("落盘员 · 卡住早停")).toBeTruthy();
   });
 });

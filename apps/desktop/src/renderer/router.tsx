@@ -12,9 +12,6 @@ import { MorePage } from "@/pages/MorePage";
 import { OnboardingPreviewPage } from "@/pages/OnboardingPreviewPage";
 import { PreviewPage } from "@/pages/PreviewPage";
 import { TurnDetailPage } from "@/pages/TurnDetailPage";
-import { WhiteboardCanvasPage } from "@/pages/WhiteboardCanvasPage";
-import { WhiteboardPage } from "@/pages/WhiteboardPage";
-import { WhiteboardPreviewPage } from "@/pages/WhiteboardPreviewPage";
 import { LegalSettingsPage } from "@/pages/legal/LegalSettingsPage";
 import { AboutSettings } from "@/pages/more/AboutSettings";
 import { AccountSettings } from "@/pages/more/AccountSettings";
@@ -28,7 +25,7 @@ import { RedirectToOfficialChat } from "@/pages/more/RedirectToOfficialChat";
 import { ShortcutsSettings } from "@/pages/more/ShortcutsSettings";
 import { SponsorSettings } from "@/pages/more/SponsorSettings";
 import { UsageSettings } from "@/pages/more/UsageSettings";
-import { CreationPage } from "@/pages/toolbox/CreationPage";
+import { FactoryGuidePage } from "@/pages/toolbox/FactoryGuidePage";
 import { GuidelinesPage } from "@/pages/toolbox/GuidelinesPage";
 import { ToolboxShell } from "@/pages/toolbox/ToolboxShell";
 import {
@@ -40,6 +37,7 @@ import {
 } from "@/pages/toolbox/manual";
 import { APP_PATHS } from "@/pages/toolbox/manual/paths";
 import { MarketPage } from "@/pages/toolbox/market/MarketPage";
+import { McpPage } from "@/pages/toolbox/mcp/McpPage";
 import { Navigate, createHashRouter } from "react-router-dom";
 
 export const router = createHashRouter([
@@ -73,19 +71,11 @@ export const router = createHashRouter([
       { path: "files", element: <FilesPage /> },
       {
         path: "whiteboard",
-        element: (
-          <NarrowBlockedPage>
-            <WhiteboardPage />
-          </NarrowBlockedPage>
-        ),
+        element: <Navigate to={APP_PATHS.toolbox.mine.skills} replace />,
       },
       {
         path: "whiteboard/:boardId",
-        element: (
-          <NarrowBlockedPage>
-            <WhiteboardCanvasPage />
-          </NarrowBlockedPage>
-        ),
+        element: <Navigate to={APP_PATHS.toolbox.mine.skills} replace />,
       },
       { path: "messages", element: <MessagesPage /> },
       { path: "messages/:chatId", element: <MessagesPage /> },
@@ -103,15 +93,15 @@ export const router = createHashRouter([
         ),
         children: [
           { index: true, element: <Navigate to="mine/skills" replace /> },
+          { path: "official", element: <GuidelinesPage /> },
           { path: "mine/skills", element: <GuidelinesPage /> },
           {
             path: "mine/tools",
             element: <Navigate to={APP_PATHS.toolbox.mine.skills} replace />,
           },
-          { path: "mine/creation", element: <CreationPage /> },
           {
-            path: "mine/mcp",
-            element: <Navigate to={APP_PATHS.toolbox.connectors} replace />,
+            path: "mine/creation",
+            element: <Navigate to={APP_PATHS.toolbox.mine.skills} replace />,
           },
           {
             path: "mine/automations",
@@ -121,8 +111,31 @@ export const router = createHashRouter([
             path: "mine/workflows",
             element: <Navigate to={APP_PATHS.toolbox.mine.skills} replace />,
           },
-          { path: "market", element: <MarketPage /> },
         ],
+      },
+      {
+        path: "toolbox/mcp",
+        element: (
+          <NarrowBlockedPage>
+            <McpPage />
+          </NarrowBlockedPage>
+        ),
+      },
+      {
+        path: "toolbox/market",
+        element: (
+          <NarrowBlockedPage>
+            <MarketPage />
+          </NarrowBlockedPage>
+        ),
+      },
+      {
+        path: "toolbox/guides",
+        element: (
+          <NarrowBlockedPage>
+            <FactoryGuidePage />
+          </NarrowBlockedPage>
+        ),
       },
       {
         path: "toolbox/tools",
@@ -135,10 +148,6 @@ export const router = createHashRouter([
       {
         path: "toolbox/store",
         element: <Navigate to={APP_PATHS.toolbox.market} replace />,
-      },
-      {
-        path: "toolbox/connectors",
-        element: <Navigate to={APP_PATHS.toolbox.connectors} replace />,
       },
       {
         path: "toolbox/automations",
@@ -191,9 +200,6 @@ export const router = createHashRouter([
       // committed conformance vectors through the real dispatch to eyeball every AI
       // state offline (no backend / LLM). See preview/replay.ts.
       { path: "preview", element: <PreviewPage /> },
-      // Companion offline preview for the self-built whiteboard canvas (a scene surface, not an
-      // SSE vector — see preview/whiteboardScenes.ts + scripts/shoot-whiteboard.mjs).
-      { path: "preview/whiteboard", element: <WhiteboardPreviewPage /> },
       // Preview 首启体验（草稿空态两态 + composer 生成中插话态）.
       { path: "preview/onboarding", element: <OnboardingPreviewPage /> },
       // Preview 全部对话管理页（时间线列表 · mock 数据离线自检）.

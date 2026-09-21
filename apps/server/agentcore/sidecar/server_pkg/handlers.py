@@ -113,6 +113,10 @@ class HandlerMixin:
                     "warmMcpDiscover": True,
                     # Non-turn warm: parallel account HTTP → seed prepare rules/memory cache.
                     "warmAccountRulesMemory": True,
+                    # Idle TLS handshake against the inference hop. Desktop kicks
+                    # on composer first-focus; initialize must not auto-schedule
+                    # (probe / unit tests use fake hosts).
+                    "warmLlmHttp": True,
                     "deliverMessage": True,
                     "cancelQueuedTurn": True,
                     "listQueuedTurns": True,
@@ -206,8 +210,6 @@ class HandlerMixin:
                 user_id=user_id,
                 folder_id=folder_id,
                 degraded=snapshot.degraded,
-                topic_count=len(snapshot.memory_topics),
-                memory_file_count=len(snapshot.memory_bodies),
                 ttl_seconds=ttl_seconds,
             )
             await self._reply(
@@ -215,8 +217,8 @@ class HandlerMixin:
                 {
                     "ok": True,
                     "degraded": snapshot.degraded,
-                    "topicCount": len(snapshot.memory_topics),
-                    "memoryFileCount": len(snapshot.memory_bodies),
+                    "topicCount": 0,
+                    "memoryFileCount": 0,
                     # 续期握手：本条快照的剩余寿命。缓存过期即空注入（不回落云端），
                     # 故调用方必须在此窗口内重暖，不能把「暖过一次」当永久有效。
                     "ttlSeconds": ttl_seconds,
@@ -266,6 +268,47 @@ class HandlerMixin:
             else None
         )
         self._schedule_account_rules_memory_warm(request_id, folder_id)
+
+    def _schedule_llm_http_warm(self) -> None:
+        """Fire-and-forget TLS handshake; caller already replied ``{ok: true}``."""
+        creds = self._creds
+        if creds is None:
+            return
+        base_url = creds.base_url
+        api_key = creds.api_key
+
+        async def _run() -> None:
+            from agentcore.llm.http_pool import warm_llm_origin
+
+            try:
+                ok = await warm_llm_origin(base_url, authorization=api_key)
+            except Exception as e:  # noqa: BLE001 - warm must not kill the sidecar
+                logger.warning("sidecar.warm_llm_http_failed", error=str(e))
+                return
+            logger.info("sidecar.warm_llm_http", ok=ok)
+
+        task = asyncio.create_task(_run())
+        self._pending_sends.add(task)
+        task.add_done_callback(self._pending_sends.discard)
+
+    async def _on_warm_llm_http(self, request_id: Any, params: dict[str, Any]) -> None:
+        """Non-turn RPC: handshake the pooled LLM HTTP client (no chat POST).
+
+        Reply is immediate so stdin stays free. Probe initialize has no
+        inference URL; this RPC binds creds via ``_refresh_creds`` then
+        schedules ``GET /models``. Missing creds → still ``ok`` (nothing to warm).
+        """
+        if not self._initialized:
+            await self._send(
+                protocol.make_error(
+                    request_id, protocol.NOT_INITIALIZED, "initialize must be called first"
+                )
+            )
+            return
+        self._refresh_creds(params)
+        self._refresh_user_id(params)
+        await self._reply(request_id, {"ok": True})
+        self._schedule_llm_http_warm()
 
     @staticmethod
     def _install_recorder_if_enabled(data_dir: str) -> None:

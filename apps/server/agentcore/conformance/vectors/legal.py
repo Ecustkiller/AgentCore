@@ -33,7 +33,7 @@ def _multi_agent_legal_war_room() -> list[SSEEvent]:
     复用现有事件类型**组合**出法律 hero 的玻璃箱全流程——协议向量（``preview: false``，不进 ``#/preview`` / shoot），
     **不新增事件类型 → fold 不碰**（守协议边界）。流程与 M2 实测形态一致：① CEO
     `consult_skill(legal_answer_brief)` 翻作战室打法；② `delegate` 起草律师出 `答辩状初稿.md`
-    （worker 内 `file_write`）；③ `debate` 正反（我方答辩 vs 原告）交锋，收场 `debate_result` 承
+    （worker 内 `write`）；③ `debate` 正反（我方答辩 vs 原告）交锋，收场 `debate_result` 承
     「决策简报 + 交锋叙事线」双产物，挖出 3 个攻击点（送达举证 / 质量异议具体性 / 沉默推定）；④ `delegate` 核验
     律师 `web_search` + 落 `法条核验报告.md`（带**出处** + `[待核验]`）；⑤ 终稿前 `checkpoint`
     人审闸门**暂停**（status=paused、pendingInteraction=checkpoint），把攻防 / 核验结论摊给律师
@@ -220,7 +220,7 @@ def _multi_agent_legal_war_room() -> list[SSEEvent]:
             },
         ),
         content_delta("按作战室打法组队：先起草，再开正反辩论，核验法条，最后请你拍板。"),
-        # ① delegate 起草律师 → 答辩状初稿.md（worker 内 file_write）
+        # ① delegate 起草律师 → 答辩状初稿.md（worker 内 write）
         tool_use_start("dc1", "delegate", {"tasks": [{"role": "起草律师"}]}),
         run_plan(
             execution_id="exec1",
@@ -230,11 +230,11 @@ def _multi_agent_legal_war_room() -> list[SSEEvent]:
             runs=draft_runs,
         ),
         run_started(r_draft, w_draft),
-        run_tool_progress(r_draft, w_draft, "file_write", len(draft_md)),
+        run_tool_progress(r_draft, w_draft, "write", len(draft_md)),
         tool_use_start(
-            "fw1", "file_write", {"path": "答辩状初稿.md", "content": draft_md}, run_id=r_draft
+            "fw1", "write", {"file_path": "答辩状初稿.md", "content": draft_md}, run_id=r_draft
         ),
-        tool_use_end("fw1", "file_write", success=True, output="已写入", run_id=r_draft),
+        tool_use_end("fw1", "write", success=True, output="已写入", run_id=r_draft),
         run_output_delta(r_draft, w_draft, "答辩状初稿就绪：程序抗辩 + 实体抗辩 + 质证 + 法律依据。"),
         run_completed(
             r_draft,
@@ -330,11 +330,11 @@ def _multi_agent_legal_war_room() -> list[SSEEvent]:
             output="命中：合同编通则解释第 65 条；送达规则未取到权威原文。",
             run_id=r_verify,
         ),
-        run_tool_progress(r_verify, w_verify, "file_write", len(verify_md)),
+        run_tool_progress(r_verify, w_verify, "write", len(verify_md)),
         tool_use_start(
-            "fw2", "file_write", {"path": "法条核验报告.md", "content": verify_md}, run_id=r_verify
+            "fw2", "write", {"file_path": "法条核验报告.md", "content": verify_md}, run_id=r_verify
         ),
-        tool_use_end("fw2", "file_write", success=True, output="已写入", run_id=r_verify),
+        tool_use_end("fw2", "write", success=True, output="已写入", run_id=r_verify),
         run_output_delta(
             r_verify,
             w_verify,
@@ -569,7 +569,7 @@ def _multi_agent_legal_war_room_settled() -> list[SSEEvent]:
             },
         ),
         content_delta("按作战室打法组队：先起草，再开正反辩论，核验法条，最后请你拍板。"),
-        # ① delegate 起草律师 → 答辩状初稿.md（worker 内 file_write）
+        # ① delegate 起草律师 → 答辩状初稿.md（worker 内 write）
         tool_use_start("dc1", "delegate", {"tasks": [{"role": "起草律师"}]}),
         run_plan(
             execution_id="exec1",
@@ -579,11 +579,11 @@ def _multi_agent_legal_war_room_settled() -> list[SSEEvent]:
             runs=draft_runs,
         ),
         run_started(r_draft, w_draft),
-        run_tool_progress(r_draft, w_draft, "file_write", len(draft_md)),
+        run_tool_progress(r_draft, w_draft, "write", len(draft_md)),
         tool_use_start(
-            "fw1", "file_write", {"path": "答辩状初稿.md", "content": draft_md}, run_id=r_draft
+            "fw1", "write", {"file_path": "答辩状初稿.md", "content": draft_md}, run_id=r_draft
         ),
-        tool_use_end("fw1", "file_write", success=True, output="已写入", run_id=r_draft),
+        tool_use_end("fw1", "write", success=True, output="已写入", run_id=r_draft),
         run_output_delta(r_draft, w_draft, "答辩状初稿就绪：程序抗辩 + 实体抗辩 + 质证 + 法律依据。"),
         run_completed(
             r_draft,
@@ -679,11 +679,11 @@ def _multi_agent_legal_war_room_settled() -> list[SSEEvent]:
             output="命中：合同编通则解释第 65 条、民法典第 621 条；送达规则未取到权威原文。",
             run_id=r_verify,
         ),
-        run_tool_progress(r_verify, w_verify, "file_write", len(verify_md)),
+        run_tool_progress(r_verify, w_verify, "write", len(verify_md)),
         tool_use_start(
-            "fw2", "file_write", {"path": "法条核验报告.md", "content": verify_md}, run_id=r_verify
+            "fw2", "write", {"file_path": "法条核验报告.md", "content": verify_md}, run_id=r_verify
         ),
-        tool_use_end("fw2", "file_write", success=True, output="已写入", run_id=r_verify),
+        tool_use_end("fw2", "write", success=True, output="已写入", run_id=r_verify),
         run_output_delta(
             r_verify,
             w_verify,
@@ -735,7 +735,7 @@ def _multi_agent_legal_case_analysis() -> list[SSEEvent]:
     两方独立对称对抗**两轮**收敛（第 2 轮辩手为首轮 `revision=2` 续写、
     `converged` 收场），收场 `debate_result` 承「决策简报 + 交锋叙事线」双产物，交锋收敛到「质量异议
     的举证」；③ `delegate` **中立法官研判** worker 读交锋 → 按举证责任出实体研判、落 `接案研判.md`
-    （worker 内 `file_write`）；④ `delegate` 核验 worker `web_search` + 落 `法条核验报告.md`（带
+    （worker 内 `write`）；④ `delegate` 核验 worker `web_search` + 落 `法条核验报告.md`（带
     **出处** + `[待核验]`）；⑤ CEO **收口** `message_end` 出结论提要 + 指向产出文件（标**倾向研判·
     非判决结果预测** + 中国大陆**法域** + **免责** + 人审复核提示）。人审闸门**暂停**态由
     `single_agent_checkpoint` 单独覆盖，本向量取**收场**态（status=success）。"""
@@ -1023,7 +1023,7 @@ def _multi_agent_legal_case_analysis() -> list[SSEEvent]:
             cost=_COST,
         ),
         debate_result(execution_id="exec1", moderator_run_id=mod, payload=debate_payload),
-        # ② delegate 中立法官研判 → 接案研判.md（worker 内 file_write）
+        # ② delegate 中立法官研判 → 接案研判.md（worker 内 write）
         content_delta("现在请中立法官按举证责任研判，并出具《接案研判》。"),
         tool_use_start("dc1", "delegate", {"tasks": [{"role": "法官研判"}]}),
         run_plan(
@@ -1034,11 +1034,11 @@ def _multi_agent_legal_case_analysis() -> list[SSEEvent]:
             runs=judge_runs,
         ),
         run_started(r_judge, w_judge),
-        run_tool_progress(r_judge, w_judge, "file_write", len(judge_md)),
+        run_tool_progress(r_judge, w_judge, "write", len(judge_md)),
         tool_use_start(
-            "fw1", "file_write", {"path": "接案研判.md", "content": judge_md}, run_id=r_judge
+            "fw1", "write", {"file_path": "接案研判.md", "content": judge_md}, run_id=r_judge
         ),
-        tool_use_end("fw1", "file_write", success=True, output="已写入", run_id=r_judge),
+        tool_use_end("fw1", "write", success=True, output="已写入", run_id=r_judge),
         run_output_delta(r_judge, w_judge, "研判完成：胜算中偏低，关键在买方质量异议的举证。"),
         run_completed(
             r_judge,
@@ -1076,11 +1076,11 @@ def _multi_agent_legal_case_analysis() -> list[SSEEvent]:
             output="命中：民法典第 621 / 622 条；买卖合同司法解释举证细则未取到权威原文。",
             run_id=r_verify,
         ),
-        run_tool_progress(r_verify, w_verify, "file_write", len(verify_md)),
+        run_tool_progress(r_verify, w_verify, "write", len(verify_md)),
         tool_use_start(
-            "fw2", "file_write", {"path": "法条核验报告.md", "content": verify_md}, run_id=r_verify
+            "fw2", "write", {"file_path": "法条核验报告.md", "content": verify_md}, run_id=r_verify
         ),
-        tool_use_end("fw2", "file_write", success=True, output="已写入", run_id=r_verify),
+        tool_use_end("fw2", "write", success=True, output="已写入", run_id=r_verify),
         run_output_delta(
             r_verify,
             w_verify,

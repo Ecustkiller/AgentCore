@@ -12,7 +12,19 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { createRef } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+beforeAll(() => {
+  globalThis.ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+  Element.prototype.scrollIntoView ??= () => {};
+  Element.prototype.hasPointerCapture ??= () => false;
+  Element.prototype.setPointerCapture ??= () => {};
+  Element.prototype.releasePointerCapture ??= () => {};
+});
 
 vi.mock("@/components/files/FileTreeRowMenu", () => ({
   FileTreeRowMenu: () => null,
@@ -160,8 +172,8 @@ describe("整个文件夹上传到当前工作区", () => {
     expect(folderInput).toBeTruthy();
 
     const click = vi.spyOn(folderInput as HTMLInputElement, "click");
-    fireEvent.click(screen.getByRole("button", { name: "上传" }));
-    fireEvent.click(screen.getByRole("button", { name: "上传文件夹" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "上传" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "上传文件夹" }));
     expect(click).toHaveBeenCalledTimes(1);
 
     ref.current?.triggerUploadFolder();

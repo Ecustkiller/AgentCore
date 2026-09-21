@@ -29,6 +29,10 @@ from agentcore.conversation.store.merge import (
     pick_merged_content,
     pick_monotonic_content,
 )
+from agentcore.conversation.store.usage_settle import (
+    apply_usage_settle_to_record_turn_body,
+    copy_usage_settle_into_record,
+)
 from agentcore.core.logging import get_logger
 from agentcore.db.repositories.stream_state import resolve_stream_upsert
 from agentcore.workspace.fs_replace import (
@@ -701,18 +705,7 @@ class OutboxStore:
                 record["journal"] = replace_prefix_map(
                     journal_entries, record.get("journal")
                 )
-            for key in (
-                "input_tokens",
-                "output_tokens",
-                "reasoning_tokens",
-                "cache_hit_tokens",
-                "cache_miss_tokens",
-                "rounds",
-                "duration_ms",
-                "generation_ms",
-            ):
-                if key in kwargs and kwargs[key] is not None:
-                    record[key] = int(kwargs[key] or 0)
+            copy_usage_settle_into_record(kwargs, record)
             if kwargs.get("finish_reason") is not None:
                 record["finish_reason"] = kwargs["finish_reason"]
             for key in ("origin", "execution_id", "harvest_kind"):
@@ -1182,31 +1175,10 @@ def to_record_turn_body(record: dict[str, Any]) -> dict[str, Any]:
         "evidence_ledger": record.get("evidence_ledger") or [],
         "runs": record.get("runs"),
         "message_id": record.get("message_id"),
-        "input_tokens": int(record.get("input_tokens") or 0),
-        "output_tokens": int(record.get("output_tokens") or 0),
-        "reasoning_tokens": int(record.get("reasoning_tokens") or 0),
-        "cache_hit_tokens": int(record.get("cache_hit_tokens") or 0),
-        "cache_miss_tokens": int(record.get("cache_miss_tokens") or 0),
-        "rounds": int(record.get("rounds") or 0),
         "trace_id": record.get("trace_id") or "",
         "finish_reason": record.get("finish_reason"),
     }
-    raw_duration = record.get("duration_ms")
-    if raw_duration is not None:
-        try:
-            duration_ms = int(raw_duration)
-        except (TypeError, ValueError):
-            duration_ms = 0
-        if duration_ms > 0:
-            body["duration_ms"] = duration_ms
-    raw_generation = record.get("generation_ms")
-    if raw_generation is not None:
-        try:
-            generation_ms = int(raw_generation)
-        except (TypeError, ValueError):
-            generation_ms = 0
-        if generation_ms > 0:
-            body["generation_ms"] = generation_ms
+    apply_usage_settle_to_record_turn_body(record, body)
     for key in ("origin", "execution_id", "harvest_kind"):
         val = record.get(key)
         if isinstance(val, str) and val.strip():

@@ -60,26 +60,26 @@ def test_fingerprint_empty_args_stable():
 def test_fingerprint_empty_old_string_collapses_across_paths():
     """不同 path/new_string 的空 old_string → 同一 fingerprint（畸形收敛）。"""
     a = fingerprint_tool_call(
-        "str_replace",
-        '{"path": "a.md", "old_string": "", "new_string": "AAA"}',
+        "edit",
+        '{"file_path": "a.md", "old_string": "", "new_string": "AAA"}',
     )
     b = fingerprint_tool_call(
-        "str_replace",
-        '{"path": "b.md", "old_string": "   ", "new_string": "BBB"}',
+        "edit",
+        '{"file_path": "b.md", "old_string": "   ", "new_string": "BBB"}',
     )
     assert a == b
     # Non-empty old_string must not collapse into the same bucket.
     ok = fingerprint_tool_call(
-        "str_replace",
-        '{"path": "a.md", "old_string": "x", "new_string": "y"}',
+        "edit",
+        '{"file_path": "a.md", "old_string": "x", "new_string": "y"}',
     )
     assert ok != a
 
 
 def test_fingerprint_empty_write_path_collapses():
     assert fingerprint_tool_call(
-        "file_write", '{"path": "", "content": "x"}'
-    ) == fingerprint_tool_call("file_write", '{"path": "  ", "content": "other"}')
+        "write", '{"file_path": "", "content": "x"}'
+    ) == fingerprint_tool_call("write", '{"file_path": "  ", "content": "other"}')
 
 
 # --- detect: nothing below threshold ---
@@ -101,28 +101,28 @@ def test_detect_distinct_calls_returns_none():
 
 
 def test_detect_repeated_success_is_not_stuck():
-    c = LoopController(investigation_tools=frozenset({"file_read"}))
-    c.record([_ok("a", "file_read"), _ok("a", "file_read"), _ok("a", "file_read")])
+    c = LoopController(investigation_tools=frozenset({"read"}))
+    c.record([_ok("a", "read"), _ok("a", "read"), _ok("a", "read")])
     assert c.detect() is None
 
 
 def test_detect_repeated_success_across_rounds_is_not_stuck():
-    c = LoopController(investigation_tools=frozenset({"file_read"}))
-    c.record([_ok("a", "file_read")])
-    c.record([_ok("a", "file_read")])
+    c = LoopController(investigation_tools=frozenset({"read"}))
+    c.record([_ok("a", "read")])
+    c.record([_ok("a", "read")])
     assert c.detect() is None
-    c.record([_ok("a", "file_read")])
+    c.record([_ok("a", "read")])
     assert c.detect() is None
 
 
 def test_detect_three_identical_parallel_success_is_not_stuck():
-    c = LoopController(investigation_tools=frozenset({"file_read"}))
-    c.record([_ok("a", "file_read"), _ok("a", "file_read"), _ok("a", "file_read")])
+    c = LoopController(investigation_tools=frozenset({"read"}))
+    c.record([_ok("a", "read"), _ok("a", "read"), _ok("a", "read")])
     assert c.detect() is None
 
 
 def test_detect_repeated_execution_success_is_stuck():
-    c = LoopController(investigation_tools=frozenset({"file_read"}))
+    c = LoopController(investigation_tools=frozenset({"read"}))
     c.record([_ok("a", "compute"), _ok("a", "compute"), _ok("a", "compute")])
     signal = c.detect()
     assert signal is not None
@@ -159,14 +159,14 @@ def test_detect_alternating():
 
 
 def test_detect_identical_success_is_not_alternating():
-    c = LoopController(investigation_tools=frozenset({"file_read"}))
+    c = LoopController(investigation_tools=frozenset({"read"}))
     # a,a,a,a → not stuck (investigation paging) and not alternation
     c.record(
         [
-            _ok("a", "file_read"),
-            _ok("a", "file_read"),
-            _ok("a", "file_read"),
-            _ok("a", "file_read"),
+            _ok("a", "read"),
+            _ok("a", "read"),
+            _ok("a", "read"),
+            _ok("a", "read"),
         ]
     )
     assert c.detect() is None
@@ -343,39 +343,39 @@ def test_circuit_breaker_ignores_approval_denial_policy_failures():
     # Approval denials are stamped policy_failure=True in tool_exec — same posture
     # as SSRF/egress blocks: honest for the model, invisible to the breaker.
     c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
-    denial = ToolAttempt("a", "file_write", success=False, policy_failure=True)
+    denial = ToolAttempt("a", "write", success=False, policy_failure=True)
     c.record([denial, denial, denial])
     assert not c.tool_circuit_breaker()
-    assert c.tool_failure_count("file_write") == 0
+    assert c.tool_failure_count("write") == 0
 
 
 def test_circuit_breaker_still_counts_real_execution_failures():
     c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
-    real = ToolAttempt("a", "file_write", success=False, policy_failure=False)
+    real = ToolAttempt("a", "write", success=False, policy_failure=False)
     c.record([real, real, real])
     cb = c.tool_circuit_breaker()
     # Write tools stay enabled — force segmented instead of circuit-disable.
     assert cb.disabled == ()
-    assert "file_write" in cb.force_segmented
-    assert c.tool_failure_count("file_write") == 3
+    assert "write" in cb.force_segmented
+    assert c.tool_failure_count("write") == 3
     assert cb.message() is None
 
 
 def test_circuit_breaker_parse_only_write_tools_force_segmented_not_disable():
-    """Parse-only file_write failures must not retire the pen."""
+    """Parse-only write failures must not retire the pen."""
     c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
-    parse = ToolAttempt("a", "file_write", success=False, parse_failure=True)
+    parse = ToolAttempt("a", "write", success=False, parse_failure=True)
     c.record([parse])
     assert not c.tool_circuit_breaker()
-    c.record([ToolAttempt("b", "file_write", success=False, parse_failure=True)])
+    c.record([ToolAttempt("b", "write", success=False, parse_failure=True)])
     warn = c.tool_circuit_breaker()
-    assert warn.warned == ("file_write",)
-    assert "file_write" in warn.parse_only
+    assert warn.warned == ("write",)
+    assert "write" in warn.parse_only
     assert warn.message() is None  # warn-only: no sermon
-    c.record([ToolAttempt("c", "file_write", success=False, parse_failure=True)])
+    c.record([ToolAttempt("c", "write", success=False, parse_failure=True)])
     disable = c.tool_circuit_breaker()
     assert disable.disabled == ()
-    assert "file_write" in disable.force_segmented
+    assert "write" in disable.force_segmented
     assert disable.message() is None
 
 
@@ -463,8 +463,8 @@ def test_workspace_channel_dead_disables_landing_tools():
         ]
     )
     cb = c.tool_circuit_breaker()
-    assert "file_write" in cb.disabled
-    assert "str_replace" in cb.disabled
+    assert "write" in cb.disabled
+    assert "edit" in cb.disabled
     assert "file_list" in cb.disabled
     assert "index_files" in cb.disabled
     assert not cb.force_segmented
@@ -496,7 +496,7 @@ def test_single_op_channel_timeout_does_not_sticky_or_notice():
             [
                 ToolAttempt(
                     "op-to",
-                    "file_read",
+                    "read",
                     success=False,
                     error_summary="活性挂起",
                     meta={
@@ -513,8 +513,8 @@ def test_single_op_channel_timeout_does_not_sticky_or_notice():
         assert deltas == []
         # Per-tool permanent retire still applies; family pens stay available.
         cb = c.tool_circuit_breaker()
-        assert "file_read" in cb.disabled
-        assert "file_write" not in cb.disabled
+        assert "read" in cb.disabled
+        assert "write" not in cb.disabled
     finally:
         clear_active_coordination()
 
@@ -545,7 +545,7 @@ def test_two_channel_op_timeouts_latch_hang_dead_without_session_sticky():
             [
                 ToolAttempt(
                     "h1",
-                    "file_write",
+                    "write",
                     success=False,
                     error_summary="活性挂起",
                     meta=hang,
@@ -558,7 +558,7 @@ def test_two_channel_op_timeouts_latch_hang_dead_without_session_sticky():
             [
                 ToolAttempt(
                     "h2",
-                    "file_read",
+                    "read",
                     success=False,
                     error_summary="活性挂起",
                     meta=hang,
@@ -572,8 +572,8 @@ def test_two_channel_op_timeouts_latch_hang_dead_without_session_sticky():
         for name in WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS:
             assert name in c._tool_force_retire  # noqa: SLF001
         cb = c.tool_circuit_breaker()
-        assert "file_write" in cb.disabled
-        assert "file_read" in cb.disabled
+        assert "write" in cb.disabled
+        assert "read" in cb.disabled
         assert "file_list" in cb.disabled
     finally:
         clear_active_coordination()
@@ -611,7 +611,7 @@ def test_workspace_channel_dead_emits_user_notice_once():
             [
                 ToolAttempt(
                     "dead1",
-                    "file_read",
+                    "read",
                     success=False,
                     error_summary="连不上",
                     meta=meta,
@@ -832,14 +832,14 @@ def test_permission_access_retires_tool_allowlist_does_not():
     c2 = LoopController(tool_failure_warn=2, tool_failure_disable=3)
     deny = ToolAttempt(
         "a",
-        "file_write",
+        "write",
         success=False,
         policy_failure=True,
         meta={"error_class": "permission", "permission_kind": "allowlist"},
     )
     c2.record([deny, deny, deny])
     assert not c2.tool_circuit_breaker()
-    assert c2.tool_failure_count("file_write") == 0
+    assert c2.tool_failure_count("write") == 0
 
 
 def test_permission_does_not_affect_transient_thresholds():
@@ -916,7 +916,7 @@ def test_validation_stopped_fps_seed_round_trip_hard_stops_on_rehit():
     c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
     rej = ToolAttempt(
         "same-fp",
-        "str_replace",
+        "edit",
         success=False,
         contract_failure=True,
         meta={"error_class": "validation"},
@@ -943,18 +943,18 @@ def test_validation_empty_old_string_collapse_same_fp_thrash():
     from agentcore.runtime.loop_controller import fingerprint_tool_call
 
     fp = fingerprint_tool_call(
-        "str_replace",
-        '{"path": "a.md", "old_string": "", "new_string": "AAA"}',
+        "edit",
+        '{"file_path": "a.md", "old_string": "", "new_string": "AAA"}',
     )
     fp2 = fingerprint_tool_call(
-        "str_replace",
-        '{"path": "b.md", "old_string": "   ", "new_string": "BBB"}',
+        "edit",
+        '{"file_path": "b.md", "old_string": "   ", "new_string": "BBB"}',
     )
     assert fp == fp2
     c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
     rej = ToolAttempt(
         fp,
-        "str_replace",
+        "edit",
         success=False,
         contract_failure=True,
         meta={"error_class": "validation"},
@@ -967,7 +967,7 @@ def test_validation_empty_old_string_collapse_same_fp_thrash():
     assert c.is_thrashing()
     assert c.take_validation_hard_stop()
     # Landing tools stay available (no disable / force_segmented from this path).
-    assert c.tool_failure_count("str_replace") == 0
+    assert c.tool_failure_count("edit") == 0
 
 
 def test_govern_validation_rehit_finalizes_without_burning_rounds():
@@ -980,7 +980,7 @@ def test_govern_validation_rehit_finalizes_without_burning_rounds():
     c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
     rej = ToolAttempt(
         "same-fp",
-        "str_replace",
+        "edit",
         success=False,
         contract_failure=True,
         meta={"error_class": "validation"},
@@ -1117,10 +1117,10 @@ def test_circuit_breaker_contract_failures_across_rounds_still_ignored():
 
 
 def test_circuit_breaker_ignores_path_not_found_env_failures():
-    """Environment / wrong-path missing files must not disable file_read.
+    """Environment / wrong-path missing files must not disable read.
 
     Accident shape: platform left an attachment out of a delegated workspace →
-    repeated file_read PathNotFound must not warn/disable the tool. Distinct
+    repeated read PathNotFound must not warn/disable the tool. Distinct
     missing paths stay free of the fuse; same-fingerprint thrash still hits
     validation path-stop (tool remains available).
     """
@@ -1130,7 +1130,7 @@ def test_circuit_breaker_ignores_path_not_found_env_failures():
             [
                 ToolAttempt(
                     f"missing-{i}",
-                    "file_read",
+                    "read",
                     success=False,
                     contract_failure=True,
                     error_summary=f"文件不存在：ghost/{i}.md",
@@ -1140,13 +1140,13 @@ def test_circuit_breaker_ignores_path_not_found_env_failures():
     cb = c.tool_circuit_breaker()
     assert cb.disabled == ()
     assert cb.warned == ()
-    assert c.tool_failure_count("file_read") == 0
+    assert c.tool_failure_count("read") == 0
     assert cb.validation_stop is None
 
     # Same call fingerprint ×2 → validation path-stop; still no disable.
     same = ToolAttempt(
         "same-missing",
-        "file_read",
+        "read",
         success=False,
         contract_failure=True,
         error_summary="文件不存在：ghost/same.md",
@@ -1158,8 +1158,8 @@ def test_circuit_breaker_ignores_path_not_found_env_failures():
     assert stop.disabled == ()
     assert stop.warned == ()
     assert stop.validation_stop is not None
-    assert "file_read" in (stop.validation_stop or "")
-    assert c.tool_failure_count("file_read") == 0
+    assert "read" in (stop.validation_stop or "")
+    assert c.tool_failure_count("read") == 0
 
 
 def test_circuit_breaker_counts_only_real_failures_when_mixed_with_contract():
@@ -1252,12 +1252,12 @@ def test_circuit_breaker_other_parse_warn_is_class_aware():
 
 
 def test_apply_circuit_breaker_force_segmented_keeps_write_pens():
-    """force_segmented keeps file_write / str_replace on the table; does not name retired pens."""
+    """force_segmented keeps write / edit on the table; does not name retired pens."""
     from agentcore.llm.provider.protocol import LLMMessage
     from agentcore.runtime.engine.governance import apply_circuit_breaker
 
     c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
-    real = ToolAttempt("a", "file_write", success=False, policy_failure=False)
+    real = ToolAttempt("a", "write", success=False, policy_failure=False)
     c.record([real, real, real])
     disabled: set[str] = set()
     messages: list[LLMMessage] = []
@@ -1265,8 +1265,8 @@ def test_apply_circuit_breaker_force_segmented_keeps_write_pens():
         c, messages=messages, run_id="r1", round_idx=0, disabled_tools=disabled
     )
     assert out.message is None
-    assert "file_write" not in disabled
-    assert "str_replace" not in disabled
+    assert "write" not in disabled
+    assert "edit" not in disabled
 
 
 # --- B2: no-output early stop (unproductive rounds) ---
@@ -1342,8 +1342,8 @@ def test_progress_tools_reset_investigation_spin():
     from agentcore.runtime.loop_controller import PROGRESS_TOOLS
 
     assert {
-        "file_write",
-        "str_replace",
+        "write",
+        "edit",
         "handoff",
         "delegate",
         "ask_user",
@@ -1356,7 +1356,7 @@ def test_progress_tools_reset_investigation_spin():
     c.record([_ok("r1", "web_search")])
     c.record([_ok("r1", "web_search")])
     assert c.same_target_investigation_streak >= 1
-    c.record([_ok("w", "file_write")])
+    c.record([_ok("w", "write")])
     assert c.same_target_investigation_streak == 0
 
 
@@ -1373,7 +1373,7 @@ def _worker(finalize_rounds: int = 6) -> LoopController:
     # delegation do not change the knob.
     return LoopController(
         convergence_finalize_rounds=finalize_rounds,
-        investigation_tools=frozenset({"web_search", "web_fetch", "file_read"}),
+        investigation_tools=frozenset({"web_search", "web_fetch", "read"}),
     )
 
 
@@ -1407,26 +1407,26 @@ def test_safety_net_counts_rounds_not_calls_so_a_batch_is_one():
 def test_all_fail_investigation_round_does_not_spend_budget():
     """一轮内调查工具全失败：calls 照记，rounds 不扣；同目标 spin 仍推进。"""
     c = _worker(finalize_rounds=6)
-    c.record([_fail("a", "web_search"), _fail("b", "file_read")])
+    c.record([_fail("a", "web_search"), _fail("b", "read")])
     assert c.investigation_calls == 2
     assert c.investigation_rounds == 0
     # Mix: one success in the batch → round counts once
-    c.record([_fail("c", "web_search"), _ok("d", "file_read")])
+    c.record([_fail("c", "web_search"), _ok("d", "read")])
     assert c.investigation_calls == 4
     assert c.investigation_rounds == 1
     # Same-target spin still advances on all-fail rounds (fingerprint bookkeeping)
     spin = LoopController(
         convergence_finalize_rounds=30,
         convergence_spin_rounds=3,
-        investigation_tools=frozenset({"file_read"}),
+        investigation_tools=frozenset({"read"}),
     )
     fp = "same"
     for _ in range(3):
         spin.record(
-            [ToolAttempt(fingerprint=fp, tool_name="file_read", success=False)]
+            [ToolAttempt(fingerprint=fp, tool_name="read", success=False)]
         )
         assert spin.convergence_action() is Intervention.CONTINUE
-    spin.record([ToolAttempt(fingerprint=fp, tool_name="file_read", success=False)])
+    spin.record([ToolAttempt(fingerprint=fp, tool_name="read", success=False)])
     assert spin.investigation_rounds == 0  # never succeeded
     assert spin.convergence_action() is Intervention.FINALIZE  # spin still trips
 
@@ -1456,10 +1456,10 @@ def test_safety_net_is_flavor_agnostic():
     # constructor's finalize_rounds (no leaf-only exception).
     c = LoopController(
         convergence_finalize_rounds=6,
-        investigation_tools=frozenset({"file_read", "grep"}),
+        investigation_tools=frozenset({"read", "grep"}),
     )
     for i in range(6):
-        c.record([_ok(f"r{i}", "file_read")])
+        c.record([_ok(f"r{i}", "read")])
     assert c.investigation_rounds == 6
     assert c.convergence_action() is Intervention.FINALIZE
 
@@ -1468,7 +1468,7 @@ def test_safety_net_ignores_non_investigation_tools():
     # Only read-only investigation tools advance the clock — a worker writing files /
     # asking the user / consulting a skill is making progress, not over-investigating.
     c = _worker(finalize_rounds=6)
-    c.record([_ok("a", "file_write"), _ok("b", "ask_user")])
+    c.record([_ok("a", "write"), _ok("b", "ask_user")])
     c.record([_ok("c", "consult")])
     assert c.investigation_rounds == 0
     assert c.convergence_action() is Intervention.CONTINUE
@@ -1491,13 +1491,13 @@ def test_spinning_same_target_triggers_finalize_before_absolute_cap():
     c = LoopController(
         convergence_finalize_rounds=30,
         convergence_spin_rounds=3,
-        investigation_tools=frozenset({"file_read"}),
+        investigation_tools=frozenset({"read"}),
     )
     fp = "same"
     for _ in range(3):
-        c.record([ToolAttempt(fingerprint=fp, tool_name="file_read", success=True)])
+        c.record([ToolAttempt(fingerprint=fp, tool_name="read", success=True)])
         assert c.convergence_action() is Intervention.CONTINUE
-    c.record([ToolAttempt(fingerprint=fp, tool_name="file_read", success=True)])
+    c.record([ToolAttempt(fingerprint=fp, tool_name="read", success=True)])
     assert c.convergence_action() is Intervention.FINALIZE
 
 
@@ -1505,10 +1505,10 @@ def test_different_investigation_targets_do_not_spin():
     c = LoopController(
         convergence_finalize_rounds=30,
         convergence_spin_rounds=3,
-        investigation_tools=frozenset({"file_read"}),
+        investigation_tools=frozenset({"read"}),
     )
     for i in range(10):
-        c.record([ToolAttempt(fingerprint=f"f{i}", tool_name="file_read", success=True)])
+        c.record([ToolAttempt(fingerprint=f"f{i}", tool_name="read", success=True)])
         assert c.convergence_action() is Intervention.CONTINUE
 
 
@@ -1516,10 +1516,10 @@ def test_progress_tool_resets_spin_streak():
     c = LoopController(
         convergence_finalize_rounds=30,
         convergence_spin_rounds=2,
-        investigation_tools=frozenset({"file_read"}),
+        investigation_tools=frozenset({"read"}),
     )
-    c.record([ToolAttempt(fingerprint="same", tool_name="file_read", success=True)])
-    c.record([ToolAttempt(fingerprint="same", tool_name="file_read", success=True)])
+    c.record([ToolAttempt(fingerprint="same", tool_name="read", success=True)])
+    c.record([ToolAttempt(fingerprint="same", tool_name="read", success=True)])
     assert c.same_target_investigation_streak == 1
     c.record([ToolAttempt(fingerprint="d1", tool_name="delegate", success=True)])
     assert c.same_target_investigation_streak == 0
@@ -1538,9 +1538,9 @@ def test_factory_convergence_finalize_setting_absent():
     assert not hasattr(settings, "engine_delivery_idle_nudge_rounds")
     assert not hasattr(settings, "engine_delivery_idle_narrow_rounds")
     assert not hasattr(settings, "engine_recon_idle_nudge_rounds")
-    c = create_loop_controller(frozenset({"file_read", "web_search"}))
+    c = create_loop_controller(frozenset({"read", "web_search"}))
     for i in range(12):
-        c.record([ToolAttempt(fingerprint=f"f{i}", tool_name="file_read", success=True)])
+        c.record([ToolAttempt(fingerprint=f"f{i}", tool_name="read", success=True)])
     assert c.investigation_rounds == 12
     assert c.convergence_action() is Intervention.CONTINUE
 
@@ -1550,7 +1550,7 @@ def test_delivery_idle_does_not_finalize_mid_loop():
     from agentcore.runtime.engine.governance import create_loop_controller
 
     c = create_loop_controller(
-        frozenset({"file_read", "file_list", "grep"}),
+        frozenset({"read", "file_list", "grep"}),
         files_expected=True,
         short_write_posture=False,
     )
@@ -1558,7 +1558,7 @@ def test_delivery_idle_does_not_finalize_mid_loop():
     assert c.delivery_idle_narrow_rounds == 0
     assert c.delivery_idle_report is False
     for i in range(12):
-        c.record([ToolAttempt(fingerprint=f"f{i}", tool_name="file_read", success=True)])
+        c.record([ToolAttempt(fingerprint=f"f{i}", tool_name="read", success=True)])
     assert c.convergence_action() is Intervention.CONTINUE
     assert not c.is_thrashing()
     assert c.delivery_idle_rounds == 0
@@ -1566,7 +1566,7 @@ def test_delivery_idle_does_not_finalize_mid_loop():
     assert not c.delivery_idle_narrow_due()
 
     recon = create_loop_controller(
-        frozenset({"file_read"}),
+        frozenset({"read"}),
         files_expected=False,
         short_write_posture=True,
         max_rounds=4,
@@ -1575,7 +1575,7 @@ def test_delivery_idle_does_not_finalize_mid_loop():
     assert recon.delivery_idle_narrow_rounds == 0
     assert recon.delivery_idle_recon is False
     for i in range(6):
-        recon.record([ToolAttempt(fingerprint=f"p{i}", tool_name="file_read", success=True)])
+        recon.record([ToolAttempt(fingerprint=f"p{i}", tool_name="read", success=True)])
     assert recon.convergence_action() is Intervention.CONTINUE
 
 
@@ -1587,14 +1587,14 @@ def test_factory_does_not_inject_files_or_report_delivery_idle():
     )
 
     files = create_loop_controller(
-        frozenset({"file_read", "file_list", "grep", "web_search"}),
+        frozenset({"read", "file_list", "grep", "web_search"}),
         files_expected=True,
     )
     assert files.delivery_idle_nudge_rounds == 0
     assert files.delivery_idle_narrow_rounds == 0
     assert files.delivery_idle_report is False
     for i in range(12):
-        files.record([ToolAttempt(fingerprint=f"r{i}", tool_name="file_read", success=True)])
+        files.record([ToolAttempt(fingerprint=f"r{i}", tool_name="read", success=True)])
     assert (
         maybe_inject_delivery_idle(
             files, messages=[], run_id="files", round_idx=12, role="worker"
@@ -1604,7 +1604,7 @@ def test_factory_does_not_inject_files_or_report_delivery_idle():
     assert not files.take_delivery_idle_narrow_apply()
 
     report = create_loop_controller(
-        frozenset({"grep", "file_read"}),
+        frozenset({"grep", "read"}),
         files_expected=True,
         report_delivery=True,
     )
@@ -1630,7 +1630,7 @@ def test_recon_idle_factory_never_nudges():
     )
 
     plain = create_loop_controller(
-        frozenset({"file_read"}),
+        frozenset({"read"}),
         files_expected=False,
     )
     assert plain.delivery_idle_recon is False
@@ -1638,7 +1638,7 @@ def test_recon_idle_factory_never_nudges():
     assert plain.delivery_idle_narrow_rounds == 0
     for i in range(12):
         plain.record(
-            [ToolAttempt(fingerprint=f"p{i}", tool_name="file_read", success=True)]
+            [ToolAttempt(fingerprint=f"p{i}", tool_name="read", success=True)]
         )
     assert plain.delivery_idle_rounds == 0
     messages: list = []
@@ -1657,12 +1657,12 @@ def test_explicit_controller_does_not_inject_delivery_idle():
     from agentcore.runtime.engine.governance import maybe_inject_delivery_idle
 
     explicit = LoopController(
-        investigation_tools=frozenset({"file_read"}),
+        investigation_tools=frozenset({"read"}),
         delivery_idle_nudge_rounds=2,
         delivery_idle_recon=True,
     )
-    explicit.record([ToolAttempt(fingerprint="p0", tool_name="file_read", success=True)])
-    explicit.record([ToolAttempt(fingerprint="p1", tool_name="file_read", success=True)])
+    explicit.record([ToolAttempt(fingerprint="p0", tool_name="read", success=True)])
+    explicit.record([ToolAttempt(fingerprint="p1", tool_name="read", success=True)])
     messages: list = []
     assert (
         maybe_inject_delivery_idle(
@@ -1678,10 +1678,10 @@ def test_landing_success_latches_for_wind_down():
     c = LoopController(
         convergence_finalize_rounds=30,
         convergence_spin_rounds=0,
-        investigation_tools=frozenset({"file_read"}),
+        investigation_tools=frozenset({"read"}),
     )
-    c.record([ToolAttempt(fingerprint="f0", tool_name="file_read", success=True)])
-    c.record([ToolAttempt(fingerprint="w", tool_name="str_replace", success=True)])
+    c.record([ToolAttempt(fingerprint="f0", tool_name="read", success=True)])
+    c.record([ToolAttempt(fingerprint="w", tool_name="edit", success=True)])
     assert c.landing_succeeded
 
 
@@ -1690,12 +1690,12 @@ def test_landing_attempt_does_not_require_zero_write_bar():
     c = LoopController(
         convergence_finalize_rounds=30,
         convergence_spin_rounds=0,
-        investigation_tools=frozenset({"file_read"}),
+        investigation_tools=frozenset({"read"}),
     )
     c.record(
         [
-            ToolAttempt(fingerprint="r", tool_name="file_read", success=True),
-            ToolAttempt(fingerprint="w", tool_name="str_replace", success=False),
+            ToolAttempt(fingerprint="r", tool_name="read", success=True),
+            ToolAttempt(fingerprint="w", tool_name="edit", success=False),
         ]
     )
     assert not c.landing_succeeded
@@ -1704,20 +1704,20 @@ def test_landing_attempt_does_not_require_zero_write_bar():
 
 def test_reviews_md_landing_latches():
     """Writing dossier notes counts as product landing."""
-    from agentcore.workspace.stage_dirs import REVIEWS_DIR
+    reviews_dir = "notes"
 
     c = LoopController(
         convergence_finalize_rounds=30,
         convergence_spin_rounds=0,
-        investigation_tools=frozenset({"file_read", "file_list", "grep"}),
+        investigation_tools=frozenset({"read", "file_list", "grep"}),
     )
     c.record(
         [
             ToolAttempt(
                 fingerprint="w",
-                tool_name="file_write",
+                tool_name="write",
                 success=True,
-                meta={"path": f"{REVIEWS_DIR}/某修复方案.md"},
+                meta={"path": f"{reviews_dir}/某修复方案.md"},
             )
         ]
     )
@@ -1726,30 +1726,30 @@ def test_reviews_md_landing_latches():
     c2 = LoopController(
         convergence_finalize_rounds=30,
         convergence_spin_rounds=0,
-        investigation_tools=frozenset({"file_read"}),
+        investigation_tools=frozenset({"read"}),
     )
     c2.record(
-        [ToolAttempt(fingerprint="legacy", tool_name="str_replace", success=True)]
+        [ToolAttempt(fingerprint="legacy", tool_name="edit", success=True)]
     )
     assert c2.landing_succeeded
 
 
 def test_declared_research_artifact_latches_landing():
-    from agentcore.workspace.stage_dirs import RESEARCH_DIR
+    research_dir = "notes"
 
-    art = f"{RESEARCH_DIR}/报告.md"
+    art = f"{research_dir}/报告.md"
     c = LoopController(
         convergence_finalize_rounds=30,
         convergence_spin_rounds=0,
-        investigation_tools=frozenset({"file_read"}),
+        investigation_tools=frozenset({"read"}),
         product_landing_artifacts=(art,),
     )
-    c.record([ToolAttempt(fingerprint="f0", tool_name="file_read", success=True)])
+    c.record([ToolAttempt(fingerprint="f0", tool_name="read", success=True)])
     c.record(
         [
             ToolAttempt(
                 fingerprint="w",
-                tool_name="file_write",
+                tool_name="write",
                 success=True,
                 meta={"path": art},
             )
@@ -1763,10 +1763,10 @@ def test_different_targets_no_longer_trip_zero_write():
     c = LoopController(
         convergence_finalize_rounds=30,
         convergence_spin_rounds=0,
-        investigation_tools=frozenset({"file_read", "file_list", "grep"}),
+        investigation_tools=frozenset({"read", "file_list", "grep"}),
     )
     for i in range(8):
-        c.record([ToolAttempt(fingerprint=f"path{i}", tool_name="file_read", success=True)])
+        c.record([ToolAttempt(fingerprint=f"path{i}", tool_name="read", success=True)])
     assert c.same_target_investigation_streak == 0
     assert c.convergence_action() is Intervention.CONTINUE
     assert not c.is_thrashing()

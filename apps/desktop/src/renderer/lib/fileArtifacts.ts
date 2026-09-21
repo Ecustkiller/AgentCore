@@ -17,7 +17,7 @@
 // ConversationChangesPanel）：写/改/删/移经 builtin file_ops，抽成功变更 + 参数预览。
 // 不把工具名当交付成功。
 //
-// A1「查看改动」：从工具参数附带只读预览（str_replace → old/new；file_write → 写入正文；
+// A1「查看改动」：从工具参数附带只读预览（edit → old/new；write → 写入正文；
 // delete/move → 元信息）。无 before 快照、不改写盘契约。
 //
 // 纯函数、只读已有运行时状态，不碰协议 fold（故不触发 conformance、零持久化）。
@@ -72,16 +72,13 @@ export function isPreviewScreenshot(artifact: FileArtifact): boolean {
 }
 
 /**
- * 写文件的 builtin 工具名 → 变更类型。只读工具（file_read / list 等）与未知/外部
+ * 写文件的 builtin 工具名 → 变更类型。只读工具（read / list 等）与未知/外部
  * 工具不在表内 —— 它们不产出文件，不进卡。
  */
 const OP_BY_TOOL: Record<string, FileOp> = {
-  file_write: "write",
-  file_append: "write",
-  str_replace: "edit",
+  write: "write",
+  edit: "edit",
   file_delete: "delete",
-  file_move: "move",
-  file_copy: "write",
 };
 
 function basename(path: string): string {
@@ -113,7 +110,7 @@ function changeFromTool(
     return {
       kind: "write",
       content,
-      mode: toolName === "file_append" ? "append" : "overwrite",
+      mode: "overwrite",
     };
   }
   if (op === "delete") return { kind: "delete" };
@@ -184,7 +181,8 @@ function artifactFromTool(
       change: changeFromTool(toolName, args, op, from || undefined),
     };
   }
-  const path = toWorkspaceRelPath(asStr(args.path));
+  const rawPath = op === "delete" ? asStr(args.path) : asStr(args.file_path);
+  const path = toWorkspaceRelPath(rawPath);
   if (!path) return null;
   return {
     path,

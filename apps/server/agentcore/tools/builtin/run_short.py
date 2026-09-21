@@ -39,11 +39,11 @@ __all__ = [
 
 # 结构化写回自报 (交付物台账事实口径 · 契约见 tools/file_products.py):
 # 输出里的「已写回工作区：…」是给模型看的自然语言；产物则在 ``ToolResult.file_products``
-# 上自报本次执行 EXACT 的写回路径，让「脚本间接落盘」与 file_write 走同一条台账通道 ——
+# 上自报本次执行 EXACT 的写回路径，让「脚本间接落盘」与 write 走同一条台账通道 ——
 # 不必解析那行中文散文（脆弱：文件名可能含分隔符「、」、措辞会变、被截断）。
 #
 # C3 边界：短跑写回本期明确不走 WriteCoordinator 硬拦（可观测即可）；
-# file_write / append / str_replace / delete / move 才是互斥闭包。
+# write / edit / delete / move 才是互斥闭包。
 
 
 def _resolved_languages(languages: Sequence[str] | None) -> tuple[str, ...]:

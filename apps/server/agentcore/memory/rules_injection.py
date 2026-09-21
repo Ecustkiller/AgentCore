@@ -21,7 +21,6 @@ from agentcore.documents.frontmatter import (
     ApplyMode,
     FrontmatterEditError,
     FrontmatterError,
-    offers_tools_from_content,
     parse_entry_frontmatter,
     set_entry_frontmatter,
     strip_entry_frontmatter,
@@ -29,11 +28,6 @@ from agentcore.documents.frontmatter import (
 from agentcore.memory.always_join import (
     ancestor_rule_bodies_by_scope,
     join_always_layers,
-)
-from agentcore.memory.injection import (
-    _ANCESTOR_SETTINGS_LABEL,
-    _FOLDER_NAV_LABEL,
-    _FOLDER_SETTINGS_LABEL,
 )
 from agentcore.memory.scope_chain import (
     ancestor_scopes,
@@ -53,6 +47,13 @@ if TYPE_CHECKING:
     from agentcore.memory.account_prepare_cache import AccountPrepareSnapshot
 
 logger = get_logger(__name__)
+
+# Layer labels inside the shared <设定> block (scope, not author).
+_FOLDER_SETTINGS_LABEL = "（以下为「当前文件夹」专属设定，仅在本文件夹内适用）"
+_ANCESTOR_SETTINGS_LABEL = (
+    "（以下为「上层文件夹」的设定，其下所有文件夹一并适用；"
+    "与更靠近当前文件夹的设定冲突时，以更近的为准）"
+)
 
 _RULE_MUTATE_ACTIONS = frozenset({"write", "read", "delete", "list"})
 _MAX_RULE_NAME_CHARS = 80
@@ -370,7 +371,6 @@ def _join_frags(**kwargs: object) -> list[RuleFragment]:
         for item in join_always_layers(
             folder_settings_label=_FOLDER_SETTINGS_LABEL,
             ancestor_settings_label=_ANCESTOR_SETTINGS_LABEL,
-            folder_nav_label=_FOLDER_NAV_LABEL,
             **kwargs,  # type: ignore[arg-type]
         )
     ]
@@ -568,8 +568,7 @@ async def assemble_turn_rules(
 class OnDemandUserRule:
     """One entry in the「规则目录」: consult name + optional one-line summary.
 
-    Separate from :class:`~agentcore.memory.injection.MemoryTopic` — on_demand rules are
-    constraint appendices (应遵守); topics are thick facts (供查阅). Do not merge the two.
+    On-demand rules are constraint appendices (应遵守), listed in the consult directory.
     """
 
     name: str
@@ -631,10 +630,6 @@ def on_demand_user_rules_from_cloud(
     if chain:
         _collect_cloud_on_demand(summaries, payload, "ancestor_on_demand_rules")
         _collect_cloud_on_demand(summaries, payload, "project_on_demand_rules")
-    _collect_cloud_always_offering(summaries, payload, "global_rules")
-    if chain:
-        _collect_cloud_always_offering(summaries, payload, "ancestor_rules")
-        _collect_cloud_always_offering(summaries, payload, "project_rules")
     return [OnDemandUserRule(name=name, summary=summaries[name]) for name in sorted(summaries)]
 
 
@@ -670,7 +665,7 @@ def lookup_on_demand_rule_body_from_cloud(
     hit = _body_in("global_on_demand_rules")
     if hit is not None:
         return hit
-    return lookup_always_offering_rule_body_from_cloud(payload, folder_id=folder_id, name=key)
+    return None
 
 
 async def load_on_demand_user_rules(
@@ -701,11 +696,6 @@ async def load_on_demand_user_rules(
             for scope in await db_scope_chain(user_id, folder_id, session=session):
                 for name, summary in await _scope_on_demand_user_rules(repo, user_id, scope):
                     summaries.setdefault(name, summary)
-            for name, summary in await _scope_always_offering_user_rules(repo, user_id, None):
-                summaries.setdefault(name, summary)
-            for scope in await db_scope_chain(user_id, folder_id, session=session):
-                for name, summary in await _scope_always_offering_user_rules(repo, user_id, scope):
-                    summaries.setdefault(name, summary)
             return [
                 OnDemandUserRule(name=name, summary=summaries[name]) for name in sorted(summaries)
             ]
@@ -713,64 +703,3 @@ async def load_on_demand_user_rules(
         logger.warning("memory.on_demand_rules_load_failed", user_id=user_id, error=str(e))
         return []
 
-
-def _skip_always_consult(doc_name: str) -> bool:
-    return doc_name in _SKIP_ALWAYS_CONSULT_FILES
-
-
-def _collect_cloud_always_offering(
-    summaries: dict[str, str], payload: Mapping[str, object], key: str
-) -> None:
-    for doc in _iter_cloud_rule_docs(payload, key):
-        filename = str(doc.get("name") or "")
-        if _skip_always_consult(filename):
-            continue
-        name = rule_consult_name(filename)
-        if not name or not offers_tools_from_content(str(doc.get("content") or "")):
-            continue
-        summaries.setdefault(name, str(doc.get("description") or ""))
-
-
-def lookup_always_offering_rule_body_from_cloud(
-    payload: Mapping[str, object], *, folder_id: str | None, name: str
-) -> str | None:
-    """Always-mode user skills with ``offers_tools`` — consultable so hands can come out."""
-    key = rule_consult_name(name)
-    if not key:
-        return None
-
-    def _body_in(scope_key: str, *, innermost_first: bool = False) -> str | None:
-        docs = _iter_cloud_rule_docs(payload, scope_key)
-        for doc in reversed(docs) if innermost_first else docs:
-            filename = str(doc.get("name") or "")
-            if _skip_always_consult(filename):
-                continue
-            if rule_consult_name(filename) != key:
-                continue
-            body = str(doc.get("content") or "")
-            if not offers_tools_from_content(body):
-                continue
-            return body if body.strip() else None
-        return None
-
-    if cloud_scope_chain(payload, folder_id):
-        hit = _body_in("project_rules")
-        if hit is None:
-            hit = _body_in("ancestor_rules", innermost_first=True)
-        if hit is not None:
-            return hit
-    return _body_in("global_rules")
-
-
-async def _scope_always_offering_user_rules(
-    repo: DocumentRepository, user_id: str, folder_id: str | None
-) -> list[tuple[str, str]]:
-    out: list[tuple[str, str]] = []
-    for doc in await repo.list_injectable_rules(user_id, folder_id, ai_maintained=False):
-        if _skip_always_consult(doc.name):
-            continue
-        name = rule_consult_name(doc.name)
-        if not name or not offers_tools_from_content(doc.content or ""):
-            continue
-        out.append((name, doc.description or ""))
-    return out

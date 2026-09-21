@@ -43,7 +43,7 @@ class SessionWorkersMixin:
         conversation_id: str,
         question: str = "",
         assumption: str = "",
-        kind: str = "normal",
+        kind: str = "wait",
         ownership_paths: list[str] | None = None,
         lock_owner_run_id: str = "",
         escalator_is_lock_owner_nested_child: bool | None = None,

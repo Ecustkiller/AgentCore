@@ -60,9 +60,8 @@ export const TOOL_META: Record<string, { Icon: LucideIcon; label: string }> = {
   terminal: { Icon: Terminal, label: "Run terminal" },
   test_run: { Icon: TestTube2, label: "Run tests" },
   git: { Icon: GitBranch, label: "Git" },
-  file_read: { Icon: FileText, label: "Read file" },
-  file_write: { Icon: FileText, label: "Write file" },
-  file_append: { Icon: FileText, label: "Append file" },
+  read: { Icon: FileText, label: "Read file" },
+  write: { Icon: FileText, label: "Write file" },
   file_list: { Icon: Folder, label: "List dir" },
   glob: { Icon: Folder, label: "Glob" },
   list_folders: { Icon: Folder, label: "List folders" },
@@ -70,7 +69,7 @@ export const TOOL_META: Record<string, { Icon: LucideIcon; label: string }> = {
   folders: { Icon: Folder, label: "Folders" },
   create_folder: { Icon: Folder, label: "Create folder" },
   delete_folder: { Icon: Trash2, label: "Delete folder" },
-  str_replace: { Icon: Pencil, label: "Edit file" },
+  edit: { Icon: Pencil, label: "Edit file" },
   file_delete: { Icon: Trash2, label: "Delete file" },
   file_move: { Icon: FileText, label: "Move file" },
   file_copy: { Icon: FileText, label: "Copy file" },
@@ -79,7 +78,6 @@ export const TOOL_META: Record<string, { Icon: LucideIcon; label: string }> = {
   md_to_docx: { Icon: FileText, label: "Export Word" },
   md_to_pdf: { Icon: FileText, label: "Export PDF" },
   md_export: { Icon: FileText, label: "Export document" },
-  download_url: { Icon: Globe, label: "Download file" },
   read_image: { Icon: ScanText, label: "Read image" },
   code_diagnostics: { Icon: Code2, label: "Check types" },
   delegate: { Icon: Users, label: "Delegate" },
@@ -178,12 +176,8 @@ const toolSummaryLabel = (
   args?: Record<string, unknown>,
 ): string => toolMeta(name, args).label;
 
-/** 写盘家族：折叠标题已点名路径；类型诊断 peek 也只认这三类。 */
-export const WRITE_FAMILY_TOOLS = new Set([
-  "file_write",
-  "file_append",
-  "str_replace",
-]);
+/** 写盘家族：折叠标题已点名 file_path；类型诊断 peek 只认 write / edit。 */
+export const WRITE_FAMILY_TOOLS = new Set(["write", "edit"]);
 
 /** 组装心跳报字数：写盘（长正文）+ 编排原语（长 task / 辩题 JSON）。其余工具只出标签。 */
 const COMPOSING_CHAR_TOOLS = new Set([
@@ -245,12 +239,13 @@ export const toolMeta = (
   return TOOL_META[name] ?? { Icon: Wrench, label: name };
 };
 
-/** Tool execution phase → waiting-state chrome (network UX): a running tool's coarse phase
- * (from a `tool_use_progress` event) as user-facing text — a slow builtin fires these while its
- * blocking leg is in flight so the waiting row is live instead of a dead spinner. web_search:
- * Searching / Queued / Trying fallback; web_fetch: Fetching page / Extracting; code_execute: Running.
- * git can wait ~2min, and each of its waits names itself: queued behind another write on the same
- * repo, resolving credentials, on the remote round trip, or running the local command. */
+/** Tool execution phase → waiting-state copy. A slow builtin fires these while its
+ * blocking leg is in flight. The tool row shows only legs that name a distinct wait
+ * ({@link toolRowPhaseLabel}): web_search Queued / Searching / Trying fallback;
+ * web_fetch Fetching page / Extracting / Network blocked; git Waiting for repo /
+ * Checking credentials / Contacting remote. Ordinary local execution (`executing` →
+ * Running) and an unrecognized phase (Working) stay off that row — the title sheen
+ * already marks it live. Graph faces still use every token via {@link toolPhaseText}. */
 const TOOL_PHASE_TEXT: Record<ToolPhase, string> = {
   queued: "Queued",
   querying: "Searching",
@@ -265,10 +260,18 @@ const TOOL_PHASE_TEXT: Record<ToolPhase, string> = {
 };
 
 /** Waiting-state text for a running tool step's `phase`, or null when it has none yet.
- * An unrecognized (newer-backend) phase degrades to a generic "Working" rather than vanishing. */
+ * An unrecognized (newer-backend) phase degrades to a generic "Working" rather than vanishing.
+ * Tool rows do not render that generic — see {@link toolRowPhaseLabel}. */
 export function toolPhaseText(phase: string | undefined): string | null {
   if (!phase) return null;
   return TOOL_PHASE_TEXT[phase as ToolPhase] ?? "Working";
+}
+
+/** Phase copy for a tool row. Silent for ordinary local execution and any phase
+ * this client does not name: both only restate the title sheen. */
+export function toolRowPhaseLabel(phase: string | undefined): string | null {
+  if (!phase || phase === "executing") return null;
+  return TOOL_PHASE_TEXT[phase as ToolPhase] ?? null;
 }
 
 /** Locator args — safe to chip into the collapsed ToolLine title.
@@ -280,14 +283,15 @@ export function toolPhaseText(phase: string | undefined): string | null {
  * `summary` 故意不在此列：handoff 摘要走 `HandoffBriefCard`，不经 toolDetail
  * 再塞一遍（否则和卡片折叠行重复）。
  * `source` / `destination` 也不单列：file_move / file_copy 没有 `path`，须成对
- * 拼进标题，见 {@link fileTransferDetail}。 */
+ * 拼进标题，见 {@link fileTransferDetail}。
+ * read / write / edit 只用 `file_path`，不走本表。
+ * `command` 不在此列：shell / run / terminal 的脚本正文进展开，不要再加回来。 */
 const TOOL_DETAIL_KEYS = [
   "query",
   "url",
   "pattern",
   "path",
   "directory",
-  "command",
   "q",
   "name", // consult / consult_skill / consult_memory / consult_rule / create_folder
 ];
@@ -340,6 +344,19 @@ function asTitleDetail(raw: string): string {
     : line;
 }
 
+/** read / write / edit 过程行芯片：只认 `file_path`。file_list / file_delete 仍走 `path`。 */
+const FILE_PATH_CHIP_TOOLS = new Set(["read", "write", "edit"]);
+
+function filePathChip(
+  args: Record<string, unknown>,
+  toolName?: string,
+): string {
+  if (!toolName || !FILE_PATH_CHIP_TOOLS.has(toolName)) return "";
+  const raw = typeof args.file_path === "string" ? args.file_path : "";
+  if (!raw.trim() || skipTitleChip("file_path", raw, toolName)) return "";
+  return asTitleDetail(raw);
+}
+
 /** file_move / file_copy 标题：成对路径，避免只剩「Move file」动词。 */
 function fileTransferDetail(args: Record<string, unknown>): string {
   const src = typeof args.source === "string" ? args.source.trim() : "";
@@ -349,27 +366,13 @@ function fileTransferDetail(args: Record<string, unknown>): string {
   return asTitleDetail(`${src} → ${dest}`);
 }
 
-/** `browser` 过程行 / 组摘要的 action 细节（同构 host 的 action 芯片）。 */
+/** `browser` 过程行芯片：只挂页面身份（url）。ref / 滚动量 / 动作名不进标题。 */
 export function browserToolDetail(args: Record<string, unknown>): string {
   const action = browserActionOf(args);
-  if (action === "navigate") {
-    return asTitleDetail(typeof args.url === "string" ? args.url : "");
-  }
-  if (action === "click") {
-    return asTitleDetail(typeof args.ref === "string" ? args.ref : "");
-  }
   if (action === "type") {
     const text =
       typeof args.text === "string" && args.text.trim() ? args.text.trim() : "";
     if (text) return asTitleDetail(text);
-    return asTitleDetail(typeof args.ref === "string" ? args.ref : "");
-  }
-  if (action === "scroll") {
-    const dy = args.dy;
-    if (typeof dy === "number" && Number.isFinite(dy)) {
-      return asTitleDetail(`${dy}px`);
-    }
-    return asTitleDetail(typeof dy === "string" ? dy : "");
   }
   return asTitleDetail(typeof args.url === "string" ? args.url : "");
 }
@@ -384,7 +387,8 @@ export function gitToolDetail(args: Record<string, unknown>): string {
 export function hostToolDetail(args: Record<string, unknown>): string {
   const action = hostActionOf(args);
   if (action === "shell") {
-    return asTitleDetail(typeof args.command === "string" ? args.command : "");
+    // 命令正文进展开。折叠标题只留「Host shell」。
+    return "";
   }
   if (action === "install_package") {
     const manager =
@@ -447,8 +451,9 @@ export function toolDetail(
   }
   if (toolName === "test_run") {
     const check = typeof args.check === "string" ? args.check.trim() : "";
-    // check=command 时芯片用真实命令；枚举词 "command" 本身不进标题。
+    // 枚举检查名是身份。check=command 的命令正文进展开，枚举词本身也不进标题。
     if (check && check !== "command") return asTitleDetail(check);
+    return "";
   }
   if (toolName === "file_batch") {
     const ops = args.operations;
@@ -469,6 +474,9 @@ export function toolDetail(
     if (Array.isArray(ops) && ops.length > 1) {
       return asTitleDetail(`本次共 ${ops.length} 项`);
     }
+  }
+  if (toolName && FILE_PATH_CHIP_TOOLS.has(toolName)) {
+    return filePathChip(args, toolName);
   }
   const transfer = fileTransferDetail(args);
   if (transfer) return transfer;

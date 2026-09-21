@@ -5,17 +5,17 @@
 流量，第一个打开云文件夹的用户就把搬迁目标建成空目录；搬迁「目标已存在就跳过、绝不合并」，
 运维事后补跑一律被判 skipped，文件永远停在旧的平铺目录里。
 
-所以这里钉的是**顺序**，不只是「有没有调」：alembic 回填 rel_path 在前，tree 搬迁居中，
-读 ``tree/<rel_path>/`` 的 project-docs 在后，全部在起 api 之前。
+所以这里钉的是**顺序**，不只是「有没有调」：alembic 回填 rel_path 在前，tree 搬迁在后，
+全部在起 api 之前。
 
 另两件同源的事也钉在这里：
 
 * 那次搬迁**单向不可逆**（无反向脚本），而部署前快照只 ``pg_dump`` 了库。所以盘上
   ``workspaces/`` 必须先备份、备不成就不许往下走；且备份要排在**停 api 之前**，失败时
   只是取消这次部署，而不是把「保护数据的闸」变成新的停机源。
-* 迁移脚本用非零退出码表达的不都是致命错误（tree 的 2 = 已安全跳过待人工确认，docs 的
-  3 = 一个工作区目录都没扫到的保险）。``set -e`` 一视同仁会把这种「什么都没做」变成
-  停机，而且稳定复现——之后每次部署都卡在同一步。
+* 迁移脚本用非零退出码表达的不都是致命错误（tree 的 2 = 已安全跳过待人工确认）。
+  ``set -e`` 一视同仁会把这种「什么都没做」变成停机，而且稳定复现——之后每次部署都
+  卡在同一步。
 """
 
 import re
@@ -93,10 +93,9 @@ def test_disk_migrations_run_between_alembic_and_starting_the_api(
     stopped = _first_exact(lines, stop_api)
     alembic = _first_containing(lines, "alembic upgrade head")
     tree = _first_containing(lines, "scripts/migrate_workspace_tree.py")
-    docs = _first_containing(lines, "scripts/migrate_project_docs.py")
     started = _first_exact(lines, start_api)
 
-    assert stopped < alembic < tree < docs < started
+    assert stopped < alembic < tree < started
 
 
 @pytest.mark.parametrize(("filename", "stop_api", "start_api"), _SCRIPTS)
@@ -159,10 +158,9 @@ def test_no_op_migration_exit_codes_do_not_strand_the_api(
 ):
     """「安全地什么都没做」的退出码不该造成停机，但真失败仍须硬停。
 
-    ``migrate_workspace_tree.py`` 的 2 是「目标目录已存在、已跳过、请人工确认」，
-    ``migrate_project_docs.py`` 的 3 是「一个工作区目录都没扫到」的保险。两步都排在起 api
-    之前，``set -e`` 一视同仁就会让这种无操作态把 api 停在地上；更糟的是它稳定复现，之后
-    每次部署都卡在同一步。
+    ``migrate_workspace_tree.py`` 的 2 是「目标目录已存在、已跳过、请人工确认」。
+    排在起 api 之前，``set -e`` 一视同仁就会让这种无操作态把 api 停在地上；更糟的是它
+    稳定复现，之后每次部署都卡在同一步。
 
     所以放行必须**点名退出码**：``|| true`` 那种一锅端会连真正的迁移失败一起吞掉，新 api
     就带着半截盘上布局接流量了。换别的做法（比如失败路径也把 api 起回来）请连同本用例一起
@@ -171,12 +169,9 @@ def test_no_op_migration_exit_codes_do_not_strand_the_api(
     lines = _logical_lines(_DEPLOY_SCRIPTS / filename)
 
     tree = lines[_first_containing(lines, "scripts/migrate_workspace_tree.py")]
-    docs = lines[_first_containing(lines, "scripts/migrate_project_docs.py")]
 
     assert re.match(r'^migrate_step "[^"]+" 2\b', tree), tree
-    assert re.match(r'^migrate_step "[^"]+" 3\b', docs), docs
     assert "|| true" not in tree
-    assert "|| true" not in docs
 
 
 @pytest.mark.parametrize(("filename", "stop_api", "start_api"), _SCRIPTS)

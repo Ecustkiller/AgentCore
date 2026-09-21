@@ -41,14 +41,12 @@ from agentcore.tools.builtin.delegate.schema import (
     DELEGATE_PARAMETERS,
 )
 from agentcore.tools.builtin.folders import FoldersTool
-from agentcore.tools.builtin.git_ops.policy import GIT_TOOL_PARAMETERS
-from agentcore.tools.builtin.git_ops.tool import GitTool
 from agentcore.tools.builtin.host import HostTool
 from agentcore.tools.builtin.replan import _REPLAN_DESCRIPTION, _REPLAN_PARAMETERS
 from agentcore.tools.builtin.run import RunTool
 from agentcore.tools.protocol import ToolSchema
 
-# 桌面 CEO 回合会同时挂上的那一份（ask_user 取桌面态——它比 web 态更胖）。
+# 桌面 CEO 回合会同时挂上的那一份（ask_user 桌面与 web 同形：开夹不进按钮）。
 # host / terminal / browser 按需进表后仍每轮重发，钉住短触发 + HOW→consult。
 # 2026-08-28 debate 形态：删 schema 复述（用/不用、过闸禁令、挂号、启服手册、action 表）。
 # debate 实测 1640 作短触发锚；ask_user 桌面 2588→2590、web 1892→1900。
@@ -183,6 +181,7 @@ from agentcore.tools.protocol import ToolSchema
 # 2026-09-20 folders/create_folder：file_list 互指、open_local_project 补集、parent 例子出按钮。
 # 实测 folders 395 / create_folder 364。cap 410→400、470→370。
 # 2026-09-20 folders.path：路径例子出按钮。实测 385。cap 400→390。
+# 2026-09-20 folders.path：口述/精确/子串出按钮。实测 369。cap 390→370。
 # 2026-09-20 冻填参旋钮：git oneline/remote/max_count；host facets/timeout_seconds；
 # glob max_entries；browser dy。执行写死现行默认，不加 leftover 解析。
 # 实测 browser 822、git 1305、host 1249、glob 329。
@@ -190,19 +189,40 @@ from agentcore.tools.protocol import ToolSchema
 # 2026-09-20 冻填参二批：run wait_timeout_seconds；host minutes；git create_pr.head；
 # include_untracked 极性改 true；set_upstream 恒 -u。执行写死，不加 leftover 解析。
 # 实测 git 1070、host 1140、run 699。cap 1310→1070、1250→1140、790→700。
+# 2026-09-20 run：background/action HOW 出按钮（consult + 参数已有）；
+# browser：实现地理出按钮。实测 run 634 / browser 792。cap 700→640、830→800。
+# 2026-09-20 同名 HOW→consult 出按钮（目录+consult 已有）。实测 run 617 / host 1122 / browser 771。
+# cap 640→620、1140→1130、800→780。
+# 2026-09-20 debate：产出形状/非终结出按钮（手册已有）。实测 1023。cap 1050→1030。
+# 2026-09-20 delegate：默认主路/验收菜谱/续派例子出按钮；debate.cross_model 收到填参。
+# 实测 delegate 1678 / debate 992。cap 1740→1680、1030→1000。
+# 2026-09-20 删 debate_and_review Skill：入口合同只留按钮短句。实测 debate 963。cap 1000→970。
+# 2026-09-20 ask_user 不再广告开夹 action（Composer / 交付卡芯片）。实测桌面=web 801。
+# cap 970→810；web 仍 810。
+# 2026-09-20 browser：url 实现黑话 / ref 例子 / snapshot HOW 出按钮。实测 737。cap 780→740。
+# 2026-09-20 ask_user.kind：enum 复述出按钮（默认仍写）。实测 787。cap 810→790。
+# 2026-09-21 填参面去铬条：deliverable 压成 artifacts；ask_user 不广告 kind。
+# 实测 delegate 1577 / ask_user 690。cap 1680→1580、790→690。
+# 2026-09-21 sides[].key 可选。实测 949。cap 970→950。
+# 2026-09-21 可抄骨架出按钮；必填/省略复述出取值说明。实测 delegate 1476。cap 1580→1480。
+# 2026-09-21 「可选」前缀出取值说明。实测 delegate 1470。cap 1480→1470。
+# 2026-09-21 删 append_to_execution_id（跨回合链改由续派/热图机械写 prev）。
+# 实测 delegate 1385。cap 1470→1390。
+# 2026-09-21 删 host 按需手册；description 收成「这台电脑」。实测 1093。cap 1130→1100。
+# 2026-09-21 删 browser 按需手册；description 收成「真实浏览器」。实测 710。cap 740→710。
+# 2026-09-22 模型面不再有 git 工具；host 只留 command。实测 214。cap 1100→220。
 _CAPS: dict[str, int] = {
-    "browser": 830,
-    "git": 1070,
-    "host": 1140,
-    "run": 700,
-    "delegate": 1740,
-    "debate": 1050,
-    "ask_user": 970,
-    "folders": 390,
+    "browser": 710,
+    "host": 220,
+    "run": 620,
+    "delegate": 1390,
+    "debate": 950,
+    "ask_user": 690,
+    "folders": 370,
 }
 _TOTAL_CAP = sum(_CAPS.values())
 
-# 非桌面（web）态 ask_user：桌面独有的 action / well_known 等选项不装配。
+# 非桌面（web）态 ask_user：开夹 action 已出按钮，与桌面同形。
 # 2026-09-10 填卡 HOW 出按钮。实测 1212。cap 1240→1220。
 # 2026-09-16 删 options.detail。实测 1127。cap 1210→1130。
 # 2026-09-16 删 message。实测 1083。cap 1130→1090。
@@ -214,7 +234,9 @@ _TOTAL_CAP = sum(_CAPS.values())
 # 2026-09-19 ask_user when/填卡再收。实测 878。cap 900→880。
 # 2026-09-20 WHEN 收短触发。实测 810。cap 880→810。
 # 2026-09-20 ask_user 多选默认括号出按钮。实测桌面 969。cap 980→970。
-_ASK_USER_WEB_CAP = 810
+# 2026-09-20 ask_user.kind：enum 复述出按钮。实测 787。cap 810→790。
+# 2026-09-21 不广告 kind。实测 690。cap 790→690。
+_ASK_USER_WEB_CAP = 690
 
 # Worker-only：escalate / handoff / 写盘三件套曾把身份段或 consult HOW 再抄一遍到按钮上。
 # 2026-08-29 escalate blocking：已拒凭据→false 短触发（身份段不进按钮）。当次实测 1698。cap 1690→1700。
@@ -232,6 +254,9 @@ _ASK_USER_WEB_CAP = 810
 # 2026-09-19 删 escalate.browser_login。实测 1152。cap 1280→1160。
 # 2026-09-20 escalate：例子与 questions 填法出按钮。实测 1102。cap 1160→1110。
 # 2026-09-20 escalate.blocking：默认括号出按钮。实测 1090。cap 1110→1090。
+# 2026-09-20 escalate：blocking HOW 出按钮（参数已有）。实测 1063。cap 1090→1070。
+# 2026-09-20 escalate：reason 三选一替换 blocking/kind。实测 1040。cap 1070→1040。
+# 2026-09-20 escalate.kind：enum 复述出按钮（与 ask_user 共用卡形）。实测 1026。cap 1040→1030。
 # 2026-09-20 str_replace：质量菜谱 / 空串复述 / 默认括号 / 唯一性 HOW 出按钮。
 # 实测 503。cap 560→510。
 # 2026-09-08 撤 long_form_landing：写工具 description 去掉 HOW→consult。实测 write 334 /
@@ -251,18 +276,30 @@ _ASK_USER_WEB_CAP = 810
 # 2026-09-16 撤空位晚绑定：replan 去掉 binds。实测 1286。cap 1960→1290。
 # 2026-09-20 wait/cancel_worker/replan：协调互指出按钮。
 # 实测 wait 269 / cancel_worker 305 / replan 1262。cap 310→270、340→310、1290→1270。
+# 2026-09-20 resolve_escalation：补集与 via_user 出按钮；replan：让出黑话/非终结出按钮。
+# 实测 resolve 449 / replan 1246。cap 480→450、1270→1250。
+# 2026-09-20 resolve.via_user 分类器出按钮；replan.add.task 自包含出按钮。
+# 实测 resolve 413 / replan 1241。cap 450→420；replan 仍 1250。
+# 2026-09-21 wait/cancel reason 出填参面；replan.add 压成 artifacts。
+# 实测 wait 200 / cancel 240 / replan 1156。cap 270→200、310→240、1250→1160。
+# 2026-09-21 artifacts 取值说明收短。实测 replan 1144。cap 1160→1150。
+# 2026-09-21 「可选」前缀出取值说明。实测 replan 1122。cap 1150→1130。
 _COORD_CAPS: dict[str, int] = {
-    "wait": 270,
-    "cancel_worker": 310,
-    "resolve_escalation": 480,
+    "wait": 200,
+    "cancel_worker": 240,
+    "resolve_escalation": 420,
     "queue_user_message": 340,
-    "replan": 1270,
+    "replan": 1130,
 }
+# 2026-09-20 write：DSH file_path 硬切（path→file_path）。实测 311。cap 310→320。
+# 2026-09-20 edit.replace_all：补集出按钮。实测 497。cap 510→500。
+# 2026-09-21 escalate questions 不广告 kind。实测 929。cap 1030→930。
+# 2026-09-21 「可选」前缀出取值说明。实测 escalate 920。cap 930→920。
 _WORKER_CAPS: dict[str, int] = {
-    "escalate": 1090,
+    "escalate": 920,
     "handoff": 250,
-    "file_write": 330,
-    "str_replace": 510,
+    "write": 320,
+    "edit": 500,
 }
 # 2026-09-06 区外路径改走 file_* 本机路径（运行时挂载）：when-to-use 进 description。
 # 2026-09-06 已挂 external/ 写升档：file_copy dest 补已挂路径。实测 file_copy 431。
@@ -284,20 +321,37 @@ _WORKER_CAPS: dict[str, int] = {
 # 2026-09-20 grep：目录行方言、glob 例子、bool 默认括号出按钮。实测 583。cap 640→590。
 # 2026-09-20 mkdir：补集禁止句出按钮。实测 214。cap 240→220。
 # 2026-09-18 file_write：用户规则写 AgentCore/规则/*.md 进 description。实测 327。cap 310→330。
+# 2026-09-20 file_write：创建/覆盖出说明（名字与 str_replace 切开）。实测 306。cap 330→310。
 # 2026-09-19 用户规则条目地址改 `.agentcore/规则`：file_list / file_delete when-to-use。
 # 实测 file_list 314 / file_delete 380。cap 300→320、360→380。
 # 2026-09-19 file_batch 吸收 file_move / file_copy（单条也走 operations 一项；
 # dest 已存在则跳过）。实测 1077。cap 占位 900→1080（抬顶=并入两把笔，非回潮抄写）。
 # 2026-09-20 file_batch：单条互指出按钮。实测 776。cap 1080→780。
 # 2026-09-20 file_delete：目录行默认可逆出按钮（参数已有）。实测 371。cap 保持 380。
+# 2026-09-20 file_delete / file_batch：说明收到「这是什么」+ 用户规则路径；
+# 上限/部分失败留参数与回执。实测 file_delete 337 / file_batch 753。cap 380→340、780→760。
 # 2026-09-20 冻 glob.max_entries（执行硬默认 50）。实测 329。cap 450→330。
+# 2026-09-20 file_read 说明收到「这是什么」；file_list 去探索分类器；
+# glob 硬拒进 pattern（一层列举切开）。实测 file_read 561 / file_list 290 / glob 357。
+# cap 640→570、310→290；glob 330→360（抬顶=填参合同，非回潮抄写）。
+# 2026-09-20 read.file_path：绝对路径教法出按钮；grep.files_only 补集出按钮。
+# 实测 read 543 / grep 567。cap 570→550、590→570。
+# 2026-09-20 同层去重：glob path 默认/nameless 硬拒出按钮（回执仍有）；
+# file_list / grep JSON default 不再中文复述；file_delete 可逆默认出按钮；
+# file_batch op 枚举不再复述。实测 glob 314 / file_list 274 / grep 561 /
+# file_delete 324 / file_batch 728。cap 360→320、290→280、570 仍 570、
+# 340→330、760→730。
+# 2026-09-21 用户规则目录英文化 `.agentcore/规则` → `.agentcore/rules`：
+# write / file_list / file_delete description +3（实测见本轮棘轮；默认只降不升）。
+# 2026-09-21 file_delete / file_batch 不广告 permanent。实测 244 / 631。cap 330→250、730→640。
+# 2026-09-21 grep.glob 「可选」前缀出按钮。实测 558。cap 570→560。
 _FILE_CAPS: dict[str, int] = {
-    "file_delete": 380,
-    "file_read": 640,
-    "grep": 590,
-    "file_batch": 780,
-    "glob": 330,
-    "file_list": 310,
+    "file_delete": 250,
+    "read": 550,
+    "grep": 560,
+    "file_batch": 640,
+    "glob": 320,
+    "file_list": 280,
 }
 # 2026-09-09 query 定位（唯一命中打开 / 多场列出）。
 # 实测 search_conversations 857 / read_conversation 825。
@@ -313,14 +367,19 @@ _FILE_CAPS: dict[str, int] = {
 # 2026-09-16 search 对齐 Cursor：query 必填 + AND/引号教法。实测 582。cap 540→590。
 # 2026-09-20 search_conversations：打开互指与 1–2 词 HOW 出按钮（回执仍有）。实测 540。cap 590→540。
 # 2026-09-20 search_conversations：limit 出按钮，执行冻 SEARCH_DEFAULT_LIMIT。实测 441。cap 540→450。
+# 2026-09-20 search_conversations：「过往事实」同义复述出按钮。实测 435。cap 450→440。
+# 2026-09-21 scope 收进 folder_id。实测 339。cap 440→340。
 _LOG_CAPS: dict[str, int] = {
-    "search_conversations": 450,
+    "search_conversations": 340,
     "read_conversation": 540,
 }
 # 2026-09-20 常驻联网检索补棘轮（按钮未改字；防回潮抄写）。实测 289。cap 290。
 # 2026-09-20 web_search：核对原文互指出按钮。实测 273。cap 290→280。
+# 2026-09-20 web_search：该不该搜出按钮（模型自判）；说明只留回执形状。实测 254。cap 280→260。
+# 2026-09-20 web_fetch：工作区互指出按钮（回执仍改道 read）。实测 223。cap 230。
 _WEB_CAPS: dict[str, int] = {
-    "web_search": 280,
+    "web_search": 260,
+    "web_fetch": 230,
 }
 
 
@@ -370,7 +429,6 @@ def _measured() -> dict[str, int]:
         cls().schema.name: measure_openai_tool_chars(cls().schema)
         for cls in BROWSER_TOOL_CLASSES
     }
-    sizes["git"] = measure_openai_tool_chars(GitTool().schema)
     sizes["host"] = measure_openai_tool_chars(HostTool().schema)
     sizes["run"] = measure_openai_tool_chars(RunTool().schema)
     sizes["delegate"] = measure_openai_tool_chars(_delegate_schema())
@@ -391,8 +449,8 @@ def _measured_worker() -> dict[str, int]:
     return {
         "escalate": measure_openai_tool_chars(EscalateTool().schema),
         "handoff": measure_openai_tool_chars(HandoffTool().schema),
-        "file_write": measure_openai_tool_chars(FileWriteTool().schema),
-        "str_replace": measure_openai_tool_chars(StrReplaceTool().schema),
+        "write": measure_openai_tool_chars(FileWriteTool().schema),
+        "edit": measure_openai_tool_chars(StrReplaceTool().schema),
     }
 
 
@@ -428,7 +486,7 @@ def _measured_file() -> dict[str, int]:
 
     return {
         "file_delete": measure_openai_tool_chars(FileDeleteTool().schema),
-        "file_read": measure_openai_tool_chars(FileReadTool().schema),
+        "read": measure_openai_tool_chars(FileReadTool().schema),
         "grep": measure_openai_tool_chars(GrepTool().schema),
         "file_batch": measure_openai_tool_chars(FileBatchTool().schema),
         "glob": measure_openai_tool_chars(GlobTool().schema),
@@ -450,33 +508,29 @@ def test_total_ceo_tool_schema_chars_within_cap():
     assert total <= _TOTAL_CAP, f"这批工具合计 {total} 字符 > 上限 {_TOTAL_CAP}"
 
 
-def test_ask_user_web_surface_stays_lighter_than_desktop():
+def test_ask_user_web_surface_matches_desktop():
+    """开夹不进按钮后 web / 桌面同形。"""
     web = measure_openai_tool_chars(_ask_user_schema(desktop=False))
+    desktop = measure_openai_tool_chars(_ask_user_schema(desktop=True))
     assert web <= _ASK_USER_WEB_CAP, f"web 态 ask_user 变胖：{web}"
-    assert web < _CAPS["ask_user"]
+    assert web == desktop
 
 
 def test_delegate_top_level_parameter_keys():
     """delegate 顶层参数钉现行集合（键从 schema.py 读出，不预埋废字段）。"""
     assert set(DELEGATE_PARAMETERS["properties"]) == {
         "tasks",
-        "append_to_execution_id",
         "team_brief",
     }
 
 
 def test_shared_mutation_tail_does_not_repeat_per_tool_receipts():
-    """共用尾巴不点名 typed / clicked；回执字段在 consult HOW，不进 action 参数。"""
-    from agentcore.runtime.resolve.prompt.ceo_core import capability_how_suffix
-
+    """共用尾巴不点名 typed / clicked；回执字段在结果里，不进 action 参数。"""
     assert "typed.matched" not in _MUTATION_VERIFY_TAIL
     assert "clicked.was_disabled" not in _MUTATION_VERIFY_TAIL
     action_desc = BrowserTool().schema.parameters["properties"]["action"]["description"]
     assert "typed.matched" not in action_desc
     assert "clicked.was_disabled" not in action_desc
-    how = capability_how_suffix({"browser"})
-    assert "typed.matched" in how
-    assert "clicked.was_disabled" in how
 
 
 _GO_UNSUPPORTED_SCHEMA_KEYS = frozenset(
@@ -497,8 +551,8 @@ def _schema_keys(node: object) -> list[str]:
 
 
 def test_swiss_army_schemas_stay_flat_for_go_gateway():
-    """git / host / browser 保持单名 + 扁平 object；禁止 oneOf 过 Go 网关。"""
-    for schema in (GitTool().schema, HostTool().schema, BrowserTool().schema):
+    """host / browser 保持单名 + 扁平 object；禁止 oneOf 过 Go 网关。"""
+    for schema in (HostTool().schema, BrowserTool().schema):
         params = schema.parameters
         assert params.get("type") == "object"
         assert "properties" in params
@@ -506,55 +560,22 @@ def test_swiss_army_schemas_stay_flat_for_go_gateway():
         assert not hits, f"{schema.name} 含 Go 拒收关键字 {sorted(hits)}"
 
 
-def test_git_policy_matrix_lives_in_receipts_not_schema():
-    """审批 / 无仓 / ff-only 合同在代码与失败回执，不进按钮。"""
-    sub_desc = GIT_TOOL_PARAMETERS["properties"]["subcommand"]["description"]
-    assert "须审批" not in sub_desc
-    assert "审批" not in sub_desc
-    assert "无仓" not in sub_desc
-    assert "delegate" not in sub_desc
-    dest_desc = GIT_TOOL_PARAMETERS["properties"]["dest"]["description"]
-    assert "非空拒绝" not in dest_desc
-    tool_desc = GitTool().schema.description
-    assert "须审批" not in tool_desc
-    assert "no_repo" not in tool_desc
-    assert "dirty_skip" not in tool_desc
-    assert "ff-only" not in tool_desc
-    assert "init_baseline" not in tool_desc
-    assert "HOW→consult(git)" not in tool_desc
-    assert "请确认" in tool_desc
-    assert "回执" in tool_desc
-    assert "delegate" not in tool_desc
-    assert "CEO 拒写" not in tool_desc
-    url_desc = GIT_TOOL_PARAMETERS["properties"]["url"]["description"]
-    assert "GitHub" not in url_desc
-    props = GIT_TOOL_PARAMETERS["properties"]
-    assert "max_count" not in props
-    assert "oneline" not in props
-    assert "remote" not in props
-    assert "object" not in props
-    assert "action" not in props
-    assert "ref" not in props
-    assert "name" not in props
-    assert "force" not in props
-    assert "head" not in props
-    assert "include_untracked" not in props
-    assert "set_upstream" not in props
-
-
 def test_run_description_is_one_command_face():
     desc = RunTool().schema.description
     assert "command" in desc.lower() or "命令" in desc
     assert "subcommand" not in desc
-    assert "HOW→consult(run)" in desc
+    assert "HOW→consult(run)" not in desc
 
 
 def test_on_demand_faces_point_how_to_consult():
-    """host / browser 工具描述短触发，手册走 consult。"""
-    assert "HOW→consult(host)" in HostTool().schema.description
-    assert "HOW→consult(run)" in RunTool().schema.description
-    assert "HOW→consult(browser)" in BrowserTool().schema.description
-    assert "HOW→consult(debate_and_review)" in DEBATE_DESCRIPTION
+    """同名手册不在按钮复指；debate 入口合同写在 description。"""
+    assert "HOW→consult(host)" not in HostTool().schema.description
+    assert "HOW→consult(run)" not in RunTool().schema.description
+    assert "HOW→consult(browser)" not in BrowserTool().schema.description
+    assert DEBATE_DESCRIPTION == "不主动启动仅推荐：结构化正反辩论。"
+    assert "HOW→consult" not in DEBATE_DESCRIPTION
+    assert "决策简报" not in DEBATE_DESCRIPTION
+    assert "非终结" not in DEBATE_DESCRIPTION
     assert "HOW→consult" not in DELEGATE_DESCRIPTION
     from agentcore.tools.builtin.delegate.schema import (
         DELEGATE_STAFF_HOW,
@@ -570,32 +591,20 @@ def test_on_demand_faces_point_how_to_consult():
     assert DELEGATE_WHEN in DELEGATE_DESCRIPTION
     assert DELEGATE_WHEN in NESTED_DELEGATE_DESCRIPTION
     assert "成篇落盘" not in NESTED_DELEGATE_DESCRIPTION
-    host_action = HostTool().schema.parameters["properties"]["action"]["description"]
-    assert "Get-WinEvent" not in host_action
+    host_cmd_desc = HostTool().schema.parameters["properties"]["command"]["description"]
+    assert "Get-WinEvent" not in host_cmd_desc
     from agentcore.runtime.resolve.prompt import capability_how_suffix
 
-    host_how = capability_how_suffix({"host"})
-    assert "Get-WinEvent" in host_how
-    assert "PowerShell" in host_how
+    assert capability_how_suffix({"host"}) == ""
+    assert capability_how_suffix({"browser"}) == ""
     host_cmd = HostTool().schema.parameters["properties"]["command"]["description"]
     assert "PowerShell" not in host_cmd
     text_desc = BrowserTool().schema.parameters["properties"]["text"]["description"]
     assert "密码" in text_desc
     sid_desc = BrowserTool().schema.parameters["properties"]["session_id"]["description"]
     assert "缺省解析" not in sid_desc
-    how_br = capability_how_suffix({"browser"})
-    assert "session_id" in how_br and "本 run 已绑定" in how_br
-    assert set(HostTool().schema.parameters["properties"]) == {
-        "action",
-        "source",
-        "level",
-        "command",
-        "panel",
-        "device_name",
-        "manager",
-        "package_id",
-        "cask",
-    }
+    assert not sid_desc.startswith("可选")
+    assert set(HostTool().schema.parameters["properties"]) == {"command"}
     assert set(BrowserTool().schema.parameters["properties"]) == {
         "action",
         "url",
@@ -631,9 +640,38 @@ def test_on_demand_faces_point_how_to_consult():
     wait_desc = RunTool().schema.parameters["properties"]["wait_for"]["description"]
     assert "省略" in wait_desc
     assert "默认就绪" not in wait_desc
+    assert not wait_desc.startswith("可选")
+    cwd_desc = RunTool().schema.parameters["properties"]["cwd"]["description"]
+    assert not cwd_desc.endswith("可选。")
+    assert not cwd_desc.startswith("可选")
+    task_props = DELEGATE_PARAMETERS["properties"]["tasks"]["items"]["properties"]
+    assert not task_props["id"]["description"].startswith("可选")
+    assert not task_props["model"]["description"].startswith("（可选）")
+    add_props = _REPLAN_PARAMETERS["properties"]["add"]
+    assert not add_props["description"].startswith("可选")
+    assert "必填" not in add_props["description"]
+    assert not add_props["items"]["properties"]["id"]["description"].startswith("可选")
+    assert not add_props["items"]["properties"]["depends_on"]["description"].startswith(
+        "可选"
+    )
+    assert not _REPLAN_PARAMETERS["properties"]["steers"]["description"].startswith(
+        "可选"
+    )
+    assert not _REPLAN_PARAMETERS["properties"]["stop"]["description"].startswith("可选")
+    key_desc = DEBATE_PARAMETERS["properties"]["sides"]["items"]["properties"]["key"][
+        "description"
+    ]
+    assert not key_desc.startswith("可选")
+    assert not DEBATE_PARAMETERS["properties"]["background"]["description"].startswith(
+        "可选"
+    )
+    from agentcore.tools.builtin.grep import GrepTool
+
+    glob_desc = GrepTool().schema.parameters["properties"]["glob"]["description"]
+    assert not glob_desc.startswith("可选")
     # description 不复述 action 表（取值语义留在 action 参数；enum 不再抄进 description）。
     assert "navigate/click/type" not in BrowserTool().schema.description
-    for schema in (HostTool().schema, BrowserTool().schema):
+    for schema in (BrowserTool().schema,):
         action = schema.parameters["properties"]["action"]
         desc = action["description"]
         names = sorted(action["enum"])
@@ -707,8 +745,12 @@ def test_conversation_log_tool_schema_chars_within_cap():
 
 def _measured_web() -> dict[str, int]:
     from agentcore.tools.builtin.web.search import WebSearchTool
+    from agentcore.tools.builtin.web.web_fetch import WebFetchTool
 
-    return {"web_search": measure_openai_tool_chars(WebSearchTool().schema)}
+    return {
+        "web_search": measure_openai_tool_chars(WebSearchTool().schema),
+        "web_fetch": measure_openai_tool_chars(WebFetchTool().schema),
+    }
 
 
 def test_web_search_tool_schema_chars_within_cap():

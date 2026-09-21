@@ -38,4 +38,4 @@ pnpm release:notice -- --phase done …               # 收口；全端必发
 # tag prod-* / desktop-v*
 ```
 
-独立 `m.` 站已下线，勿再上传手机 Pages。
+独立 `m.` 站已下线，勿再加手机 Pages 脚本或 `deploy-mobile-web` workflow。

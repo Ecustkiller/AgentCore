@@ -145,9 +145,9 @@ def test_pure_append_is_history_growth_and_reuses_the_measured_prompt():
     assert probe.chain_calls == 2
 
 
-_TOOL_A = [{"type": "function", "function": {"name": "file_read", "parameters": {}}}]
+_TOOL_A = [{"type": "function", "function": {"name": "read", "parameters": {}}}]
 _TOOL_B = [
-    {"type": "function", "function": {"name": "file_read", "parameters": {}}},
+    {"type": "function", "function": {"name": "read", "parameters": {}}},
     {"type": "function", "function": {"name": "consult", "parameters": {}}},
 ]
 
@@ -272,6 +272,129 @@ def test_mid_history_rewrite_keeps_only_the_leading_messages():
     assert probe.forfeited_tokens == max(probe.reusable_tokens - 200, 0)
 
 
+def test_dropped_ceo_envelope_across_turns_is_history_rewrite_not_growth():
+    """Anti-pattern: T2 rebuilds ``system → history → new envelope → new user``.
+
+    The previous turn's envelope is not in chat history, so it vanishes from the
+    prefix. That is a mid-list rewrite (DeepSeek Example 2), not a pure append.
+    """
+    from agentcore.runtime.resolve.prompt.envelope import (
+        TURN_ENVELOPE_FENCE,
+        opening_ceo_messages,
+    )
+
+    env1 = f"{TURN_ENVELOPE_FENCE}\n<运行时/>"
+    env2 = f"{TURN_ENVELOPE_FENCE}\n<运行时/>\n<已登记来源/>"
+    turn1 = opening_ceo_messages(
+        system_prompt="SYS",
+        history=None,
+        turn_envelope=env1,
+        user_content="q1",
+    )
+    previous = _chain(*turn1, input_tokens=900)
+    turn2 = opening_ceo_messages(
+        system_prompt="SYS",
+        history=[_m("user", "q1"), _m("assistant", "a1")],
+        turn_envelope=env2,
+        user_content="q2",
+    )
+    probe = _probe(turn2, previous, hit=200, miss=1000, input_tokens=1200)
+    assert probe.breach == BREACH_HISTORY_REWRITE
+    assert probe.stable_prefix_messages == 1  # frozen system only
+    assert probe.reusable_basis == BASIS_ESTIMATED
+
+
+def test_product_cross_turn_replays_stored_envelope_as_history_growth():
+    """Product T2: prior envelope stays in the window; this turn only appends."""
+    from agentcore.runtime.resolve.prompt.envelope import (
+        TURN_ENVELOPE_FENCE,
+        opening_ceo_messages,
+    )
+
+    env1 = f"{TURN_ENVELOPE_FENCE}\n<运行时/>"
+    env2 = f"{TURN_ENVELOPE_FENCE}\n<已登记来源/>"
+    turn1 = opening_ceo_messages(
+        system_prompt="SYS",
+        history=None,
+        turn_envelope=env1,
+        user_content="q1",
+    )
+    previous = _chain(*turn1, input_tokens=900)
+    turn2 = opening_ceo_messages(
+        system_prompt="SYS",
+        history=[
+            _m("user", env1),
+            _m("user", "q1"),
+            _m("assistant", "a1"),
+        ],
+        turn_envelope=env2,
+        user_content="q2",
+    )
+    probe = _probe(turn2, previous, hit=896, miss=200, input_tokens=1100)
+    assert probe.breach == BREACH_HISTORY_GROWTH
+    assert probe.reusable_tokens == 900
+    assert probe.reusable_basis == BASIS_MEASURED
+
+
+def test_keeping_prior_ceo_envelope_is_history_growth():
+    """Industry shape: once an envelope is sent, it stays; the next turn only appends."""
+    from agentcore.runtime.resolve.prompt.envelope import (
+        TURN_ENVELOPE_FENCE,
+        opening_ceo_messages,
+    )
+
+    env1 = f"{TURN_ENVELOPE_FENCE}\n<运行时/>"
+    env2 = f"{TURN_ENVELOPE_FENCE}\n<已登记来源/>"
+    turn1 = opening_ceo_messages(
+        system_prompt="SYS",
+        history=None,
+        turn_envelope=env1,
+        user_content="q1",
+    )
+    previous = _chain(*turn1, input_tokens=900)
+    kept = [
+        *turn1,
+        _m("assistant", "a1"),
+        _m("user", env2),
+        _m("user", "q2"),
+    ]
+    probe = _probe(kept, previous, hit=896, miss=200, input_tokens=1100)
+    assert probe.breach == BREACH_HISTORY_GROWTH
+    assert probe.reusable_tokens == 900
+    assert probe.reusable_basis == BASIS_MEASURED
+
+
+def test_identical_ceo_envelope_omitted_is_history_growth():
+    """Unchanged environment: do not re-append the snapshot; user text still grows."""
+    from agentcore.runtime.resolve.prompt.envelope import (
+        TURN_ENVELOPE_FENCE,
+        opening_ceo_messages,
+    )
+
+    env = f"{TURN_ENVELOPE_FENCE}\n<运行时/>"
+    turn1 = opening_ceo_messages(
+        system_prompt="SYS",
+        history=None,
+        turn_envelope=env,
+        user_content="q1",
+    )
+    previous = _chain(*turn1, input_tokens=900)
+    turn2 = opening_ceo_messages(
+        system_prompt="SYS",
+        history=[
+            _m("user", env),
+            _m("user", "q1"),
+            _m("assistant", "a1"),
+        ],
+        turn_envelope=env,
+        user_content="q2",
+    )
+    probe = _probe(turn2, previous, hit=896, miss=80, input_tokens=980)
+    assert probe.breach == BREACH_HISTORY_GROWTH
+    assert probe.reusable_tokens == 900
+    assert [m.content for m in turn2].count(env) == 1
+
+
 def test_first_message_change_without_a_system_message_is_not_blamed_on_the_prompt():
     previous = _chain(_m("user", "q1"), _m("assistant", "a1"), input_tokens=100)
     messages = [_m("user", "q1-edited"), _m("assistant", "a1")]
@@ -306,8 +429,8 @@ def test_tool_call_arguments_are_part_of_a_message_identity():
     # every round would look "identical" and the growth attribution would be wrong.
     from agentcore.llm.provider.protocol import ToolCall, ToolCallFunction
 
-    call_a = ToolCall(id="c1", function=ToolCallFunction(name="file_read", arguments='{"p":"a"}'))
-    call_b = ToolCall(id="c1", function=ToolCallFunction(name="file_read", arguments='{"p":"b"}'))
+    call_a = ToolCall(id="c1", function=ToolCallFunction(name="read", arguments='{"p":"a"}'))
+    call_b = ToolCall(id="c1", function=ToolCallFunction(name="read", arguments='{"p":"b"}'))
     a, _ = message_fingerprints([LLMMessage(role="assistant", tool_calls=[call_a])])
     b, _ = message_fingerprints([LLMMessage(role="assistant", tool_calls=[call_b])])
     assert a != b
@@ -876,6 +999,47 @@ def test_summary_buckets_tools_changed():
     assert summary["by_breach"][BREACH_TOOLS]["calls"] == 1
 
 
+def test_summary_samples_unusual_breaches_not_pure_append():
+    from agentcore.observability.query.stats import PREFIX_SAMPLE_CAP, prefix_cache_summary
+
+    rows = [
+        _row(trace_id="t-grow", conversation_id="c-grow"),
+        _row(
+            breach=BREACH_HISTORY_REWRITE,
+            trace_id="t-rw1",
+            conversation_id="c-rw",
+            scenario="chat",
+            cost_role="captain",
+        ),
+        _row(
+            breach=BREACH_HISTORY_REWRITE,
+            trace_id="t-rw2",
+            conversation_id="c-rw",
+        ),
+        _row(
+            breach=BREACH_COLD_CHAIN,
+            trace_id="t-cold",
+            conversation_id="c-cold",
+            scenario="agent",
+        ),
+    ]
+    for i in range(PREFIX_SAMPLE_CAP + 2):
+        rows.append(
+            _row(
+                breach=BREACH_COLD_CHAIN,
+                trace_id=f"t-cold-{i}",
+                conversation_id=f"c-cold-{i}",
+            )
+        )
+    summary = prefix_cache_summary(rows)
+    samples = summary["samples_by_breach"]
+    assert "history_growth" not in samples
+    assert [s["trace_id"] for s in samples["history_rewrite"]] == ["t-rw1"]
+    assert samples["history_rewrite"][0]["conversation_id"] == "c-rw"
+    assert samples["history_rewrite"][0]["input_tokens"] == "1000"
+    assert len(samples["cold_chain"]) == PREFIX_SAMPLE_CAP
+
+
 def test_summary_reads_llm_call_compact_fields():
     from agentcore.observability.query.stats import (
         prefix_cache_summary,
@@ -948,6 +1112,64 @@ def test_log_llm_call_attaches_compact_prefix_fields():
     assert calls[1]["tools_count"] == 2
     assert "forfeited_tokens" not in calls[1]
     assert "reusable_tokens" not in calls[1]
+
+
+def test_log_llm_call_dropped_envelope_is_history_rewrite():
+    """Writing llm.call (no live model) still attributes T2 dropped-envelope as rewrite."""
+    from structlog.testing import capture_logs
+
+    from agentcore.llm.observability import log_llm_call
+    from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
+    from agentcore.runtime.resolve.prompt.envelope import (
+        TURN_ENVELOPE_FENCE,
+        opening_ceo_messages,
+    )
+
+    env1 = f"{TURN_ENVELOPE_FENCE}\n<运行时/>"
+    env2 = f"{TURN_ENVELOPE_FENCE}\n<运行时/>\n<已登记来源/>"
+    turn1 = opening_ceo_messages(
+        system_prompt="SYS",
+        history=None,
+        turn_envelope=env1,
+        user_content="q1",
+    )
+    turn2 = opening_ceo_messages(
+        system_prompt="SYS",
+        history=[_m("user", "q1"), _m("assistant", "a1")],
+        turn_envelope=env2,
+        user_content="q2",
+    )
+    bind_log_context(conversation_id="conv-rw-log", trace_id="t-rw-log", cost_role="captain")
+    usage0 = TokenUsage(input_tokens=800, cache_hit_tokens=0, cache_miss_tokens=800)
+    usage1 = TokenUsage(input_tokens=1200, cache_hit_tokens=200, cache_miss_tokens=1000)
+    with capture_logs() as caps:
+        log_llm_call(
+            scenario="chat",
+            model=DEEPSEEK_V4_FLASH,
+            usage=usage0,
+            finish_reason="stop",
+            latency_ms=10,
+            stream=False,
+            messages=turn1,
+            tools=_TOOL_A,
+            credential_source="platform",
+        )
+        log_llm_call(
+            scenario="chat",
+            model=DEEPSEEK_V4_FLASH,
+            usage=usage1,
+            finish_reason="stop",
+            latency_ms=12,
+            stream=False,
+            messages=turn2,
+            tools=_TOOL_A,
+            credential_source="platform",
+        )
+    calls = [c for c in caps if c.get("event") == "llm.call"]
+    assert len(calls) == 2
+    assert calls[0]["prefix_breach"] == BREACH_COLD_CHAIN
+    assert calls[1]["prefix_breach"] == BREACH_HISTORY_REWRITE
+    assert calls[1]["tools_changed"] is False
 
 
 # --- 装配行为一行未改 ---------------------------------------------------------------------

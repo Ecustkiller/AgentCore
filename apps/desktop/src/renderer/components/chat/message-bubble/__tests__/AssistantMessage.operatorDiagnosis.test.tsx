@@ -115,10 +115,10 @@ function renderBubble(message: Message) {
 afterEach(cleanup);
 
 describe("AssistantMessage platform 503 error card", () => {
-  it("只说上游暂时不可用，不转述运营方账号的诊断", () => {
+  it("空失败不在气泡里转述运营方账号的诊断", () => {
     const { container } = renderBubble(failedMessage());
 
-    expect(screen.getByText(UPSTREAM_503)).toBeTruthy();
+    expect(screen.queryByText(UPSTREAM_503)).toBeNull();
 
     const shown = container.textContent ?? "";
     for (const operatorLeak of [

@@ -146,12 +146,6 @@ const FOLD_FAMILY: {
     result: "已导出 PDF：报告.pdf",
   },
   {
-    tool: "download_url",
-    label: "Download file",
-    args: { url: "https://example.com/a.pdf", path: "a.pdf" },
-    result: "已下载 a.pdf",
-  },
-  {
     tool: "read_image",
     label: "Read image",
     args: { path: "shot.png", prompt: "描述" },

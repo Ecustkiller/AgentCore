@@ -279,6 +279,10 @@ export function handleMessageStreamEvent(
                 reasoning: usage.reasoning_tokens,
                 cache_hit: usage.cache_hit_tokens,
                 cache_miss: usage.cache_miss_tokens,
+                ...(typeof usage.last_prompt_tokens === "number" &&
+                usage.last_prompt_tokens > 0
+                  ? { last_prompt: usage.last_prompt_tokens }
+                  : {}),
               }
             : undefined,
           rounds: payload.rounds,

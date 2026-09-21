@@ -250,8 +250,8 @@ def test_zero_landing_worker_keeps_role_blocking_gap():
             delivery_gaps=[
                 {
                     "description": (
-                        "本队员本波未交卷：未把产物写入工作区：交付物须用 file_write / "
-                        "str_replace 或 code_execute / file_copy 落盘，"
+                        "本队员本波未交卷：未把产物写入工作区：交付物须用 write / "
+                        "edit 或 code_execute / file_copy 落盘，"
                         "而非粘在回复正文里"
                     ),
                     "severity": "warning",
@@ -314,7 +314,7 @@ def test_zero_landing_mixed_batch_attributes_empty_worker_only():
                 {
                     "description": (
                         "本队员本波未交卷：未把产物写入工作区：交付物须用 "
-                        "file_write 落盘，而非粘在回复正文里"
+                        "write 落盘，而非粘在回复正文里"
                     ),
                     "severity": "warning",
                     "reason": "files_not_landed",
@@ -355,8 +355,8 @@ def test_zero_landing_gap_attributes_channel_dead_from_transcript():
                 ToolCall(
                     id="w1",
                     function=ToolCallFunction(
-                        name="file_write",
-                        arguments='{"path": "a.md", "content": "x"}',
+                        name="write",
+                        arguments='{"file_path": "a.md", "content": "x"}',
                     ),
                 )
             ],
@@ -411,8 +411,8 @@ def test_batch_zero_landing_gap_channel_dead_asks_prose_handoff():
                 ToolCall(
                     id="w1",
                     function=ToolCallFunction(
-                        name="file_write",
-                        arguments='{"path": "a.md", "content": "x"}',
+                        name="write",
+                        arguments='{"file_path": "a.md", "content": "x"}',
                     ),
                 )
             ],
@@ -711,10 +711,10 @@ def test_declared_path_a_landed_b_is_the_product():
 
 
 def test_workspace_leftover_dir_keeps_bare_names_delivered_at_worker_path():
-    """workspace leftover 目录不 join；worker 落在裸名上 → accepted。"""
+    """显式 leftover 目录仍 join 裸名；worker 落在 join 后路径上 → accepted。"""
     from agentcore.runtime.runs.artifact_dir import apply_artifact_dir_defaults
-    from agentcore.workspace.stage_dirs import REVIEWS_DIR
 
+    leftover_dir = "notes"
     names = [
         "前端刷新审计-对话页面.md",
         "前端刷新审计-工作台.md",
@@ -725,11 +725,11 @@ def test_workspace_leftover_dir_keeps_bare_names_delivered_at_worker_path():
     for i, name in enumerate(names, start=1):
         deliverable = Deliverable(
             artifacts=[name],
-            artifact_dir=REVIEWS_DIR,
+            artifact_dir=leftover_dir,
         )
         apply_artifact_dir_defaults(deliverable)
-        joined = f"{REVIEWS_DIR}/{name}"
-        assert deliverable.artifact_dir == REVIEWS_DIR
+        joined = f"{leftover_dir}/{name}"
+        assert deliverable.artifact_dir == leftover_dir
         assert deliverable.artifacts == [joined]
         run_id = f"w{i}"
         nodes.append(
@@ -753,7 +753,7 @@ def test_workspace_leftover_dir_keeps_bare_names_delivered_at_worker_path():
     )
     assert payload is not None
     assert payload["state"] == "delivered"
-    expected = [f"{REVIEWS_DIR}/{n}" for n in names]
+    expected = [f"{leftover_dir}/{n}" for n in names]
     assert payload["delivered_files"] == expected
     by_path = {a["path"]: a for a in payload["artifacts"]}
     for path in expected:
@@ -1734,7 +1734,7 @@ def test_priced_failure_landings_are_partial_not_blocked():
 
 
 def test_failed_undeclared_transcript_landings_count_as_partial():
-    """失败前 file_write 已 ok、未盖 file_acceptance → 计入交付账，state=partial。"""
+    """失败前 write 已 ok、未盖 file_acceptance → 计入交付账，state=partial。"""
     from agentcore.llm.provider.protocol import LLMMessage
     from agentcore.tools.file_products import file_product, with_file_products_marker
 
@@ -1906,11 +1906,10 @@ def test_artifacts_omit_workspace_id_without_target_folder():
 
 
 def _literature_report_plan() -> RunPlan:
-    """Minimal literature-shaped plan: writer + review + pinned files."""
+    """Writer + review with leftover path literals (not product cabinets)."""
     from agentcore.runtime.runs.types import Deliverable
-    from agentcore.workspace.stage_dirs import RESEARCH_PREFIX, REVIEWS_PREFIX
 
-    main = f"{RESEARCH_PREFIX}报告.md"
+    main = "notes/报告.md"
     return _plan(
         RunSpec(
             run_id="write",
@@ -1926,17 +1925,15 @@ def _literature_report_plan() -> RunPlan:
             role="学术审校员",
             depends_on=["write"],
             deliverable=Deliverable(
-                artifacts=[f"{REVIEWS_PREFIX}审校报告.md"],
+                artifacts=["notes/审校报告.md"],
             ),
         ),
     )
 
 
-def test_literature_evidence_deficit_depresses_delivered():
-    """证据不足（几乎无学术源）→ 已声明 reviews/ 对账不得 delivered。"""
-    from agentcore.workspace.stage_dirs import RESEARCH_PREFIX
-
-    main = f"{RESEARCH_PREFIX}报告.md"
+def test_path_prefix_does_not_generate_evidence_deficit():
+    """Junk citations no longer key a reviews/ literature gate."""
+    main = "notes/报告.md"
     plan = _literature_report_plan()
     results = {
         "write": RunState(
@@ -1950,99 +1947,22 @@ def test_literature_evidence_deficit_depresses_delivered():
                 {"url": "https://www.163.com/dy/article/a.html", "title": "门户"},
             ],
         ),
-        "review": RunState(phase=RunPhase.COMPLETED, content="审校通过（形式）"),
+        "review": RunState(
+            phase=RunPhase.COMPLETED,
+            content="审校通过（形式）",
+            files_touched=["notes/审校报告.md"],
+            file_acceptance=_accepted("notes/审校报告.md"),
+        ),
     }
     payload = build_delivery_status(plan, results, execution_id="e-ev-def")
     assert payload is not None
-    assert payload["state"] == "partial"
-    assert payload["state"] != "delivered"
-    assert any(g.get("reason") == "evidence_deficit" for g in payload["gaps"])
-    assert any("证据不足" in g["description"] for g in payload["gaps"])
-
-
-def test_literature_evidence_deficit_from_prior_knowledge_marker():
-    """审校标明无参考文献 / 靠先验 → blocking evidence_deficit。"""
-    from agentcore.workspace.stage_dirs import RESEARCH_PREFIX
-
-    main = f"{RESEARCH_PREFIX}报告.md"
-    plan = _literature_report_plan()
-    results = {
-        "write": RunState(
-            phase=RunPhase.COMPLETED,
-            content="基于对该领域的了解整理成文",
-            files_touched=[main],
-            file_acceptance=_accepted(main),
-            citations=[{"url": "https://arxiv.org/abs/2301.00001", "title": "paper"}],
-        ),
-        "review": RunState(
-            phase=RunPhase.COMPLETED,
-            content="主要问题：无参考文献表；对比表缺引用。",
-        ),
-    }
-    payload = build_delivery_status(plan, results, execution_id="e-ev-prior")
-    assert payload is not None
-    assert payload["state"] != "delivered"
-    assert any(g.get("reason") == "evidence_deficit" for g in payload["gaps"])
-
-
-def test_literature_evidence_deficit_from_search_seam_signal():
-    """学术搜索块接缝：RunState.evidence_meta.evidence_gap + academic_literature → 降档。"""
-    from agentcore.workspace.stage_dirs import RESEARCH_PREFIX
-
-    main = f"{RESEARCH_PREFIX}报告.md"
-    plan = _literature_report_plan()
-    writer = RunState(
-        phase=RunPhase.COMPLETED,
-        content="成稿",
-        files_touched=[main],
-        file_acceptance=_accepted(main),
-        citations=[{"url": "https://arxiv.org/abs/2301.00001", "title": "ok"}],
-    )
-    # Search true source: evidence_gap + academic_literature (executor may also
-    # copy RetrievalBudgetState sticky onto state.evidence_gap / evidence_meta).
-    writer.evidence_meta = {
-        "evidence_gap": True,
-        "search_policy": "academic_literature",
-    }
-    results = {
-        "write": writer,
-        "review": RunState(phase=RunPhase.COMPLETED, content="形式审校"),
-    }
-    payload = build_delivery_status(plan, results, execution_id="e-ev-seam")
-    assert payload is not None
-    assert payload["state"] == "partial"
-    assert any(g.get("reason") == "evidence_deficit" for g in payload["gaps"])
-
-
-def test_literature_evidence_deficit_from_legacy_evidence_deficit_stamp():
-    """兼容：旧 evidence_deficit 戳仍可触发降档。"""
-    from agentcore.workspace.stage_dirs import RESEARCH_PREFIX
-
-    main = f"{RESEARCH_PREFIX}报告.md"
-    plan = _literature_report_plan()
-    writer = RunState(
-        phase=RunPhase.COMPLETED,
-        content="成稿",
-        files_touched=[main],
-        file_acceptance=_accepted(main),
-        citations=[{"url": "https://arxiv.org/abs/2301.00001", "title": "ok"}],
-    )
-    writer.evidence_meta = {"evidence_deficit": True, "evidence_quality": "poor"}
-    results = {
-        "write": writer,
-        "review": RunState(phase=RunPhase.COMPLETED, content="形式审校"),
-    }
-    payload = build_delivery_status(plan, results, execution_id="e-ev-seam-legacy")
-    assert payload is not None
-    assert payload["state"] == "partial"
-    assert any(g.get("reason") == "evidence_deficit" for g in payload["gaps"])
+    assert payload["state"] == "delivered"
+    assert all(g.get("reason") != "evidence_deficit" for g in payload["gaps"])
 
 
 def test_literature_worker_delivery_gap_evidence_deficit_depresses():
     """Worker 已 stamp delivery_gaps.reason=evidence_deficit → 经 collect_worker_gaps 降档。"""
-    from agentcore.workspace.stage_dirs import RESEARCH_PREFIX
-
-    main = f"{RESEARCH_PREFIX}报告.md"
+    main = "notes/报告.md"
     plan = _literature_report_plan()
     results = {
         "write": RunState(
@@ -2064,17 +1984,14 @@ def test_literature_worker_delivery_gap_evidence_deficit_depresses():
     assert payload is not None
     assert payload["state"] == "partial"
     assert any(g.get("reason") == "evidence_deficit" for g in payload["gaps"])
-    # 不因接缝谓词再叠一条重复的验收缺口
     ev_gaps = [g for g in payload["gaps"] if g.get("reason") == "evidence_deficit"]
     assert len(ev_gaps) == 1
 
 
 def test_literature_adequate_evidence_stays_delivered():
-    """学术源充足且无先验缺口 → 不误伤，仍可为 delivered。"""
-    from agentcore.workspace.stage_dirs import RESEARCH_PREFIX, REVIEWS_PREFIX
-
-    main = f"{RESEARCH_PREFIX}报告.md"
-    review_path = f"{REVIEWS_PREFIX}审校报告.md"
+    """落盘齐全且无工人 stamp → 仍可为 delivered。"""
+    main = "notes/报告.md"
+    review_path = "notes/审校报告.md"
     plan = _literature_report_plan()
     results = {
         "write": RunState(
@@ -2103,11 +2020,10 @@ def test_literature_adequate_evidence_stays_delivered():
 
 
 def test_map_fanout_junk_citations_not_evidence_deficit():
-    """未声明 reviews/ 时不套证据降档（即使 citation 全是水站）。"""
+    """未 stamp 的摸底批不套证据降档（即使 citation 全是水站）。"""
     from agentcore.runtime.runs.types import Deliverable
-    from agentcore.workspace.stage_dirs import RESEARCH_PREFIX
 
-    note = f"{RESEARCH_PREFIX}方向笔记.md"
+    note = "notes/方向笔记.md"
     plan = _plan(
         RunSpec(
             run_id="brief_0",
@@ -2164,7 +2080,6 @@ def test_non_literature_landed_files_unaffected():
 
 
 def _thin_review_plan(report_path: str):
-    """Declared reviews/ files contract on the independent review node (no role scan)."""
     from agentcore.runtime.runs.types import Deliverable
 
     return _plan(
@@ -2186,12 +2101,11 @@ def _thin_review_plan(report_path: str):
     )
 
 
-def test_thin_review_missing_report_partial_and_draft_ack():
-    """案 A′：已声明 reviews/ 无合格报告 → partial + thin_review + requires_draft_ack。"""
+def test_missing_declared_review_is_path_mismatch_not_generated_thin_review():
+    """声明路径未命中走通用对账；不再按柜生成 thin_review。"""
     from agentcore.runtime.delegate.delivery_status import current_delivery_verdict
-    from agentcore.workspace.stage_dirs import REVIEWS_PREFIX
 
-    report = f"{REVIEWS_PREFIX}M1-复核报告.md"
+    report = "notes/M1-复核报告.md"
     plan = _thin_review_plan(report)
     results = {
         "fix": RunState(
@@ -2200,7 +2114,6 @@ def test_thin_review_missing_report_partial_and_draft_ack():
             files_touched=["src/a.ts"],
             file_acceptance=_accepted("src/a.ts"),
         ),
-        # COMPLETED + 短 handoff + 写了别的路径，声明复核报告未 accepted。
         "review": RunState(
             phase=RunPhase.COMPLETED,
             content="通过",
@@ -2212,24 +2125,17 @@ def test_thin_review_missing_report_partial_and_draft_ack():
     current_delivery_verdict.set(None)
     payload = build_delivery_status(plan, results, execution_id="e-thin-miss")
     assert payload is not None
-    assert payload["state"] == "partial"
-    assert any(g.get("reason") == "thin_review" for g in payload["gaps"])
-    assert any("复核落盘契约" in (g.get("description") or "") for g in payload["gaps"])
-
-    sink = EventSink()
-    maybe_emit_delivery_status(sink, plan, results, execution_id="e-thin-miss")
+    assert all(g.get("reason") != "thin_review" for g in payload["gaps"])
+    maybe_emit_delivery_status(EventSink(), plan, results, execution_id="e-thin-miss")
     verdict = current_delivery_verdict.get()
     assert verdict is not None
-    assert verdict.state == "partial"
-    assert verdict.requires_draft_ack is True
+    assert verdict.requires_draft_ack is False
     current_delivery_verdict.set(None)
 
 
 def test_thin_review_accepted_report_short_handoff_not_hurt():
     """有合格 accepted 报告时短 handoff 不误伤降档。"""
-    from agentcore.workspace.stage_dirs import REVIEWS_PREFIX
-
-    report = f"{REVIEWS_PREFIX}M1-复核报告.md"
+    report = "notes/M1-复核报告.md"
     plan = _thin_review_plan(report)
     results = {
         "fix": RunState(
@@ -2240,7 +2146,7 @@ def test_thin_review_accepted_report_short_handoff_not_hurt():
         ),
         "review": RunState(
             phase=RunPhase.COMPLETED,
-            content="ok",  # 短 handoff 叙事
+            content="ok",
             debrief={"summary": "通过"},
             files_touched=[report],
             file_acceptance=_accepted(report),
@@ -2252,11 +2158,9 @@ def test_thin_review_accepted_report_short_handoff_not_hurt():
     assert all(g.get("reason") != "thin_review" for g in payload["gaps"])
 
 
-def test_thin_review_shell_report_depresses():
-    """声明路径已 accepted 但骨架/篇幅软提醒 → 空壳 thin_review。"""
-    from agentcore.workspace.stage_dirs import REVIEWS_PREFIX
-
-    report = f"{REVIEWS_PREFIX}审校报告.md"
+def test_length_warning_does_not_generate_thin_review():
+    """篇幅软提醒不再按柜生成空壳 thin_review。"""
+    report = "notes/审校报告.md"
     plan = _thin_review_plan(report)
     results = {
         "fix": RunState(
@@ -2275,9 +2179,35 @@ def test_thin_review_shell_report_depresses():
     }
     payload = build_delivery_status(plan, results, execution_id="e-thin-shell")
     assert payload is not None
+    assert payload["state"] == "delivered"
+    assert all(g.get("reason") != "thin_review" for g in payload["gaps"])
+
+
+def test_worker_stamped_thin_review_still_reads():
+    """工人已 stamp reason=thin_review 仍经 collect_worker_gaps 进卡。"""
+    report = "notes/审校报告.md"
+    plan = _thin_review_plan(report)
+    results = {
+        "fix": RunState(
+            phase=RunPhase.COMPLETED,
+            content="已修",
+            files_touched=["src/a.ts"],
+            file_acceptance=_accepted("src/a.ts"),
+        ),
+        "review": RunState(
+            phase=RunPhase.COMPLETED,
+            content="骨架",
+            files_touched=[report],
+            file_acceptance=_accepted(report),
+            delivery_gaps=[
+                {"description": "复核落盘契约未对齐", "reason": "thin_review"},
+            ],
+        ),
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-thin-stamp")
+    assert payload is not None
     assert payload["state"] == "partial"
     assert any(g.get("reason") == "thin_review" for g in payload["gaps"])
-    assert any("空壳" in (g.get("description") or "") for g in payload["gaps"])
 
 
 def test_thin_review_does_not_expand_posture_a():
@@ -2561,9 +2491,7 @@ def test_promoted_absent_when_nothing_was_promoted():
 
 def test_promoted_paths_are_rewritten_on_a_later_batch():
     """同回合第二批的对账从 worker 台账重建，仍记旧路径——必须重映射到归位后的位置。"""
-    from agentcore.workspace.stage_dirs import DRAFTS_DIR
-
-    old = f"{DRAFTS_DIR}/讲稿.md"
+    old = "notes/讲稿.md"
     ledger = _promotion_ledger()
     ledger.promotions.append({"from": old, "to": "讲稿.md"})
 
@@ -2591,9 +2519,7 @@ async def test_availability_reinject_does_not_adopt_leftover_promoted(monkeypatc
         maybe_reinject_recent_delivery_for_availability_ask,
     )
     from agentcore.runtime.delegate.promotion import turn_promotions
-    from agentcore.workspace.stage_dirs import DRAFTS_DIR
-
-    old = f"{DRAFTS_DIR}/讲稿.md"
+    old = "notes/讲稿.md"
     journaled = {
         "execution_id": "e-short-ask",
         "state": "delivered",

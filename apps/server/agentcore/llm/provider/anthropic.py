@@ -18,7 +18,7 @@ from agentcore.core.errors import (
     upstream_rate_limit_error,
 )
 from agentcore.core.logging import get_logger
-from agentcore.core.net import abort_httpx_response, outbound_async_client
+from agentcore.core.net import abort_httpx_response
 from agentcore.core.task_cancel import raise_if_task_cancelled
 from agentcore.llm.credentials import require_http_header_safe_api_key
 from agentcore.llm.errors import (
@@ -36,6 +36,7 @@ from agentcore.llm.errors import (
     upstream_error,
     vendor_5xx_product_message,
 )
+from agentcore.llm.http_pool import acquire_llm_http_client, peek_llm_http_client
 from agentcore.llm.provider.anthropic_messages import (
     ANTHROPIC_VERSION,
     AnthropicSseAssembler,
@@ -48,7 +49,6 @@ from agentcore.llm.provider.openai_compatible import (
     _INITIAL_BACKOFF,
     _IO_ATTEMPT_CEILING,
     _MAX_RETRIES,
-    _REQUEST_TIMEOUT,
     _leaf_http_headers,
     _outbound_call_headers,
 )
@@ -90,17 +90,8 @@ class AnthropicMessagesProvider:
         self._api_key = require_http_header_safe_api_key(api_key)
         self._base_url = base_url.rstrip("/")
         self._extra_headers = dict(extra_headers) if extra_headers else None
-        headers = _leaf_http_headers(
-            api_key=self._api_key,
-            base_url=self._base_url,
-            extra=self._extra_headers,
-        )
-        headers["anthropic-version"] = ANTHROPIC_VERSION
-        self._client = outbound_async_client(
-            base_url=self._base_url,
-            headers=headers,
-            timeout=httpx.Timeout(_REQUEST_TIMEOUT, connect=10.0),
-        )
+        self._closed = False
+        self._client = acquire_llm_http_client(self._base_url)
 
     @property
     def name(self) -> str:
@@ -124,11 +115,19 @@ class AnthropicMessagesProvider:
         )
 
     def _ensure_client_open(self) -> None:
-        if self._client.is_closed:
+        if self._closed:
             raise LLMClientClosedError()
 
     def _call_headers(self) -> dict[str, str]:
-        return {**_outbound_call_headers(self._base_url), "anthropic-version": ANTHROPIC_VERSION}
+        return {
+            **_leaf_http_headers(
+                api_key=self._api_key,
+                base_url=self._base_url,
+                extra=self._extra_headers,
+            ),
+            **_outbound_call_headers(self._base_url),
+            "anthropic-version": ANTHROPIC_VERSION,
+        }
 
     def _insufficient_balance(self, *, status: int, body: bytes | None) -> LLMError:
         from agentcore.core.errors import LLMInsufficientBalanceError
@@ -464,7 +463,17 @@ class AnthropicMessagesProvider:
 
     async def list_models(self) -> list[str]:
         try:
-            response = await self._client.get("/models")
+            response = await self._client.get(
+                "/models",
+                headers={
+                    **_leaf_http_headers(
+                        api_key=self._api_key,
+                        base_url=self._base_url,
+                        extra=self._extra_headers,
+                    ),
+                    "anthropic-version": ANTHROPIC_VERSION,
+                },
+            )
         except httpx.HTTPError:
             return []
         if response.status_code >= 400:
@@ -486,4 +495,15 @@ class AnthropicMessagesProvider:
         return ids
 
     async def close(self) -> None:
-        await self._client.aclose()
+        if self._closed:
+            return
+        self._closed = True
+        client = self._client
+        pooled = peek_llm_http_client(self._base_url)
+        if client is pooled:
+            return
+        try:
+            if not client.is_closed:
+                await client.aclose()
+        except Exception:  # noqa: BLE001 — test mock / already-closed transport
+            return

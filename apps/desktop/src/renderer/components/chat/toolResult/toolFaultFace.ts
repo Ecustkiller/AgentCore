@@ -4,9 +4,9 @@ import { isVerifyBudgetExceeded } from "./verifyBudget";
 const EXEC_TOOLS = new Set(["run", "code_execute", "test_run", "terminal"]);
 
 const LOOKUP_TOOLS = new Set([
-  "file_read",
+  "read",
   "file_list",
-  "str_replace",
+  "edit",
   "glob",
   "grep",
   "file_delete",
@@ -19,7 +19,9 @@ const LOOKUP_TOOLS = new Set([
 ]);
 
 /** Collapsed-row / folded-group word for a tool that didn't work. Uncolored.
- *  Redirect and verify-incomplete are not this face. */
+ *  Only verification/exec failures hang a word (未通过). Lookup misses and
+ *  generic faults stay title-only — the path/verb is the identity; copy lives
+ *  in the expanded detail. Redirect and verify-incomplete are not this face. */
 export function toolRowFaultLabel(step: {
   tool_name: string;
   status: string;
@@ -29,25 +31,24 @@ export function toolRowFaultLabel(step: {
   const status = resolveToolWireStatus(step.status, step.failure);
   if (status !== "error") return null;
   if (isVerifyBudgetExceeded(step.display)) return null;
-  const code = (step.failure?.code ?? "").toLowerCase();
   if (EXEC_TOOLS.has(step.tool_name)) return "未通过";
-  if (code === "not_found" || LOOKUP_TOOLS.has(step.tool_name)) return "未找到";
-  return "未完成";
+  return null;
 }
 
-/** File / lookup misses already say「未找到」on the row — skip the extra sentence. */
+/** File / lookup misses already name the path on the title — skip the extra sentence. */
 export function isSelfExplanatoryLookupError(step: {
   tool_name: string;
   status: string;
   failure?: { code?: string | null } | null;
   display?: unknown;
 }): boolean {
-  return (
-    LOOKUP_TOOLS.has(step.tool_name) && toolRowFaultLabel(step) === "未找到"
-  );
+  const status = resolveToolWireStatus(step.status, step.failure);
+  if (status !== "error") return false;
+  if (isVerifyBudgetExceeded(step.display)) return false;
+  return LOOKUP_TOOLS.has(step.tool_name);
 }
 
-/** One word for a collapsed group. Mixed kinds collapse to 未完成. */
+/** One word for a collapsed group. Only 未通过 hangs; mixed/other faults stay silent. */
 export function toolGroupFaultLabel(
   tools: Array<{
     tool_name: string;
@@ -56,12 +57,8 @@ export function toolGroupFaultLabel(
     display?: unknown;
   }>,
 ): string | null {
-  const words = new Set<string>();
   for (const t of tools) {
-    const word = toolRowFaultLabel(t);
-    if (word) words.add(word);
+    if (toolRowFaultLabel(t) === "未通过") return "未通过";
   }
-  if (words.size === 0) return null;
-  if (words.size === 1) return [...words][0] ?? null;
-  return "未完成";
+  return null;
 }

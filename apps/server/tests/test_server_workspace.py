@@ -184,10 +184,10 @@ async def test_list_tree_file_raises_not_a_directory(tmp_path: Path):
 
 
 async def test_list_missing_declared_stage_dir_returns_empty(tmp_path: Path):
-    """约定出口尚未落盘：list → []（不预创建、不抛 NotADirectory）。"""
-    from agentcore.workspace.stage_dirs import RESEARCH_DIR
+    """约定根尚未落盘：list → []（不预创建、不抛 NotADirectory）。"""
+    from agentcore.workspace.stage_dirs import AGENTCORE_ROOT
 
-    listing = await _ws(tmp_path).list(RESEARCH_DIR, "*")
+    listing = await _ws(tmp_path).list(AGENTCORE_ROOT, "*")
     assert listing.entries == []
     assert listing.truncated is False
     assert not (tmp_path / "AgentCore").exists()
@@ -327,8 +327,8 @@ async def test_read_only_ops_do_not_dirty(tmp_path: Path):
 async def test_grep_wait_for_timeout_fires_while_scan_runs(tmp_path: Path, monkeypatch):
     """``asyncio.wait_for`` must be able to expire while grep is still running.
 
-    Ripgrep is awaited via ``create_subprocess_exec``; cancellation must not
-    wait for a stuck scan the way a blocking walk on the event loop would.
+    Ripgrep runs off the event loop; cancellation must not wait for a stuck
+    scan the way a blocking walk on the event loop would.
     """
     import asyncio
 
@@ -573,8 +573,8 @@ async def test_delete_missing_raises_path_not_found(tmp_path: Path):
 async def test_delete_agentcore_expands_rules_restorable(tmp_path: Path):
     """Deleting bare AgentCore/ expands children — no self-nest 500 path."""
     ac = tmp_path / "AgentCore"
-    (ac / "规则").mkdir(parents=True)
-    (ac / "规则" / "r.md").write_text("keep-me", encoding="utf-8")
+    (ac / "rules").mkdir(parents=True)
+    (ac / "rules" / "r.md").write_text("keep-me", encoding="utf-8")
     (ac / "index").mkdir(parents=True)
     (ac / "index" / "x.db").write_text("db", encoding="utf-8")
     (ac / "trash").mkdir(parents=True)
@@ -582,17 +582,17 @@ async def test_delete_agentcore_expands_rules_restorable(tmp_path: Path):
     ws = _ws(tmp_path)
     await ws.delete("AgentCore")
 
-    assert not (ac / "规则").exists()
+    assert not (ac / "rules").exists()
     assert not (ac / "index").exists()
     from agentcore.workspace.trash import list_trash_entries, restore_from_trash
 
     entries = list_trash_entries(root=tmp_path, retention_days=30)
     assert len(entries) == 1
-    assert entries[0].original_path == "AgentCore/规则"
+    assert entries[0].original_path == "AgentCore/rules"
     assert restore_from_trash(root=tmp_path, entry_id=entries[0].entry_id) == (
-        "AgentCore/规则"
+        "AgentCore/rules"
     )
-    assert (ac / "规则" / "r.md").read_text(encoding="utf-8") == "keep-me"
+    assert (ac / "rules" / "r.md").read_text(encoding="utf-8") == "keep-me"
 
 
 async def test_delete_root_raises_outside_workspace(tmp_path: Path):

@@ -262,14 +262,14 @@ def test_format_for_ceo_surfaces_escalations_blockers_first():
             phase=RunPhase.COMPLETED,
             content="软的备注",
             escalations=[
-                {"question": "目标受众是谁?", "assumption": "暂按大众", "blocking": False}
+                {"question": "目标受众是谁?", "assumption": "暂按大众", "reason": "scope"}
             ],
         ),
         "w2": RunState(
             phase=RunPhase.COMPLETED,
             content="后端骨架",
             escalations=[
-                {"question": "用 Postgres 还是 MySQL?", "assumption": "暂用 PG", "blocking": True}
+                {"question": "用 Postgres 还是 MySQL?", "assumption": "暂用 PG", "reason": "wait"}
             ],
         ),
     }
@@ -277,7 +277,7 @@ def test_format_for_ceo_surfaces_escalations_blockers_first():
     assert "队员升级了待决问题" in out
     assert "用 Postgres 还是 MySQL?" in out and "目标受众是谁?" in out
     assert "其暂用假设：暂用 PG" in out
-    assert "【关键阻塞】" in out
+    assert "【等拍板】" in out
     assert out.index("Postgres") < out.index("目标受众")
     assert "ask_user" in out and "continue_from_run_id" in out
     assert "已升级 1 项待决问题" in out
@@ -441,8 +441,8 @@ def test_worker_products_failed_with_body_surfaces_error_not_pass_through():
     results = {
         "w_pr": RunState(
             phase=RunPhase.FAILED,
-            content="invoke tool file_write path=lv_jasmine_pr.md",
-            error="未把产物写入工作区：交付物须用 file_write 落盘",
+            content="invoke tool write path=lv_jasmine_pr.md",
+            error="未把产物写入工作区：交付物须用 write 落盘",
         )
     }
     products = worker_products(t, plan, results)
@@ -451,7 +451,7 @@ def test_worker_products_failed_with_body_surfaces_error_not_pass_through():
     assert products[0]["fidelity"] == ""
     assert "失败" in products[0]["body"]
     assert "未把产物写入工作区" in products[0]["body"]
-    assert "invoke tool file_write" not in products[0]["body"]
+    assert "invoke tool write" not in products[0]["body"]
 
 
 def test_worker_products_empty_body_with_files_and_debrief_is_pointer():

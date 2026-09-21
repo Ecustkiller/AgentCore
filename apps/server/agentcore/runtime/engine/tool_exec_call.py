@@ -501,7 +501,7 @@ async def run_one_tool(
         tool.schema, args, location=getattr(getattr(context, "backend", None), "location", None)
     )
     deadline_token = set_tool_deadline(timeout)
-    coalesce_key = _file_read_round_coalesce_key(args) if name == "file_read" else None
+    coalesce_key = _file_read_round_coalesce_key(args) if name == "read" else None
     try:
         if coalesce_key is not None:
             existing = file_read_inflight.get(coalesce_key)
@@ -566,8 +566,6 @@ async def run_one_tool(
             "timeout_layer": "outer",
             "liveness_timeout": True,
         }
-        if name == "git" and isinstance(args.get("subcommand"), str):
-            timeout_fields["subcommand"] = args["subcommand"]
         timeout_fields.update(_shell_observe_log_fields(name, args))
         logger.warning("tool.execute_end", **timeout_fields)
         return (

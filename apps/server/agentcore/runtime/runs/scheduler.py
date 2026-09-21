@@ -39,7 +39,7 @@ class BoundaryReason(Enum):
     arm is in play:
 
     - ``SCOPE`` (偏离信号 / 自底向上反应臂): a COMPLETED node flagged a 职责/范围 deviation
-      (``escalate kind=scope``) while not-yet-run downstream remains — the CEO reads the
+      (``escalate reason=scope``) while not-yet-run downstream remains — the CEO reads the
       deviation + the node's output and re-steers the un-run tail (``replan``).
 
     → 见设计: docs/03-AI核心/执行引擎架构设计.md §受监督的波循环

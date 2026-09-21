@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * TurnComposer variants: `card` 摊开左簇；`bar` 用「＋」收纳会话配置，常显仅输入与发送。
+ * TurnComposer variants: `card` 摊开左簇；`bar` 用「＋」收纳会话配置，常显输入与发送（收到的上下文有数据才贴在整块输入框外侧右边）。
  */
 
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -24,7 +24,6 @@ vi.mock("@/hooks/useLlmProviders", () => ({
           id: "p1",
           label: "DeepSeek",
           base_url: "https://api.deepseek.com/v1",
-          default_model: "deepseek-test",
           status: "active",
           supports_tools: true,
         },
@@ -555,6 +554,62 @@ describe("TurnComposer variants", () => {
     expect(within(menu).queryByRole("button", { name: /后台云端/ })).toBeNull();
   });
 
+  it("bar: 收到的上下文 sits outside the input card, not in send cluster or ＋ — even while streaming", () => {
+    genMock.value = true;
+    useConversationStore.setState({
+      currentConversationId: OUTCOME_CID,
+      byId: {
+        [OUTCOME_CID]: {
+          ...EMPTY_RUNTIME,
+          isGenerating: true,
+          messages: [
+            {
+              id: "a-live",
+              role: "assistant",
+              content: "",
+              createdAt: new Date().toISOString(),
+              executionId: null,
+              isStreaming: true,
+              captainContext: [
+                {
+                  channel: "request",
+                  heading: "h",
+                  body: "目标",
+                  chars: 2,
+                  truncated: false,
+                  files: [],
+                  source_role: "",
+                  source_run_id: "",
+                  fidelity: "",
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    renderComposer("bar");
+    const card = document.querySelector('[data-composer-variant="bar"]');
+    const endcap = document.querySelector('[data-composer-endcap="bar"]');
+    const ctx = screen.getByTestId("composer-received-context");
+    const stop = screen.getByRole("button", { name: "停止生成" });
+    expect(card).toBeTruthy();
+    expect(endcap).toBeTruthy();
+    expect(card?.contains(ctx)).toBe(false);
+    expect(card?.contains(stop)).toBe(true);
+    expect(endcap?.contains(ctx)).toBe(true);
+    expect(card?.parentElement?.nextElementSibling).toBe(endcap);
+    expect(endcap?.classList.contains("py-1")).toBe(true);
+    expect(endcap?.classList.contains("items-end")).toBe(true);
+    expect(ctx.classList.contains("size-8")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "更多选项" }));
+    expect(
+      within(screen.getByTestId("composer-plus-menu")).queryByTestId(
+        "composer-received-context",
+      ),
+    ).toBeNull();
+  });
+
   it("bar: 模型在＋内展开，不另开一层；返回回到列表", () => {
     renderComposer("bar");
     fireEvent.click(screen.getByRole("button", { name: "更多选项" }));
@@ -590,6 +645,9 @@ describe("TurnComposer variants", () => {
     renderComposer("bar");
     const send = screen.getByRole("button", { name: "发送" });
     expect((send as HTMLButtonElement).disabled).toBe(true);
+    expect(send.className).toContain("bg-muted");
+    expect(send.className).toContain("size-8");
+    expect(send.className).not.toContain("bg-primary");
     expect(send.className).not.toContain("bg-foreground");
     const offline = screen.getByText(/可浏览已缓存的对话与本机文件（只读）/);
     expect(offline.className).toContain("text-muted-foreground");
@@ -612,6 +670,7 @@ describe("TurnComposer variants", () => {
     expect(screen.queryByRole("button", { name: "插队" })).toBeNull();
     const stop = screen.getByRole("button", { name: "停止生成" });
     expect(stop.className).toContain("bg-foreground");
+    expect(stop.className).toContain("size-8");
     expect(stop.className).not.toContain("bg-destructive");
   });
 
@@ -924,18 +983,22 @@ describe("TurnComposer variants", () => {
     renderComposer("bar");
     const send = screen.getByRole("button", { name: "发送" });
     expect((send as HTMLButtonElement).disabled).toBe(true);
+    expect(send.className).toContain("bg-muted");
+    expect(send.className).toContain("size-8");
     expect(send.className).not.toContain("bg-primary");
     expect(send.className).not.toContain("bg-foreground");
   });
 
-  it("idle: draft fills 发送 with inverse ink, not brand blue", async () => {
+  it("idle: draft fills 发送 with brand blue, not inverse ink", async () => {
     const { useComposerDraftStore } = await import("@/stores/composer");
     useComposerDraftStore.getState().setValue("__draft__", "试试效果");
     renderComposer("bar");
     const send = screen.getByRole("button", { name: "发送" });
     expect((send as HTMLButtonElement).disabled).toBe(false);
-    expect(send.className).toContain("bg-foreground");
-    expect(send.className).not.toContain("bg-primary");
+    expect(send.className).toContain("bg-primary");
+    expect(send.className).toContain("size-8");
+    expect(send.className).not.toContain("bg-foreground");
+    expect(send.className).not.toContain("bg-muted");
   });
 
   it("does not show a live character count on card or bar", async () => {
@@ -1003,7 +1066,7 @@ describe("TurnComposer variants", () => {
     const copy = "发送失败：没有可用的模型密钥";
     setComposerSendError("__draft__", { message: copy, action: null });
     renderComposer();
-    expect(screen.getByTestId("composer-send-error").textContent).toContain(
+    expect(screen.getByTestId("composer-failure-banner").textContent).toContain(
       copy,
     );
     const body = screen.getByTestId("composer-body");
@@ -1014,7 +1077,7 @@ describe("TurnComposer variants", () => {
     const copy = "重新生成失败，请稍后重试";
     useConversationStore.getState().setError(copy, null);
     renderComposer();
-    expect(screen.getByTestId("composer-send-error").textContent).toContain(
+    expect(screen.getByTestId("composer-failure-banner").textContent).toContain(
       copy,
     );
     const body = screen.getByTestId("composer-body");
@@ -1027,26 +1090,25 @@ describe("TurnComposer variants", () => {
     useConversationStore.getState().setError(copy, null);
     renderComposer();
     fireEvent.click(screen.getByRole("button", { name: "关闭" }));
-    expect(screen.queryByTestId("composer-send-error")).toBeNull();
+    expect(screen.queryByTestId("composer-failure-banner")).toBeNull();
     expect(
       useComposerSendErrorStore.getState().byKey.__draft__,
     ).toBeUndefined();
     expect(getActiveRuntime().error).toBeNull();
   });
 
-  it("empty interrupt: composer hint hosts 复制排查包", () => {
+  it("empty interrupt: composer hint is the sentence only", () => {
     seedLastAssistant({ finishReason: "interrupted", content: "" });
     renderComposer();
-    const hint = screen.getByTestId("composer-empty-interrupted-hint");
+    const hint = screen.getByTestId("composer-failure-banner");
     expect(hint.textContent).toContain("发送下一条");
     expect(hint.textContent).toContain(COMPOSER_EMPTY_INTERRUPTED_HINT);
     expect(
-      within(hint).getByRole("button", { name: "复制排查包" }),
-    ).toBeTruthy();
-    expect(screen.queryByTestId("composer-send-error")).toBeNull();
+      within(hint).queryByRole("button", { name: "复制排查包" }),
+    ).toBeNull();
   });
 
-  it("partial + rate-limit: composer hint hosts why and 复制排查包", () => {
+  it("partial + rate-limit: composer banner hosts the why only", () => {
     seedLastAssistant({
       finishReason: "error",
       content: "",
@@ -1057,36 +1119,33 @@ describe("TurnComposer variants", () => {
       },
     });
     renderComposer();
-    const hint = screen.getByTestId("composer-empty-interrupted-hint");
+    const hint = screen.getByTestId("composer-failure-banner");
     expect(hint.textContent).toContain(LLM_RATE_LIMIT_WHY);
     expect(hint.textContent).not.toContain("发送下一条");
     expect(hint.textContent).not.toContain("未能交付");
     expect(
-      within(hint).getByRole("button", { name: "复制排查包" }),
-    ).toBeTruthy();
-    expect(screen.queryByTestId("composer-send-error")).toBeNull();
+      within(hint).queryByRole("button", { name: "复制排查包" }),
+    ).toBeNull();
   });
 
-  it("empty interrupt: sessionError is suppressed (hint is the unique verdict)", () => {
+  it("empty interrupt: sessionError is suppressed (banner is the unique verdict)", () => {
     seedLastAssistant(
       { finishReason: "interrupted", content: "" },
       "网络中断，请重试。",
     );
     renderComposer();
-    expect(screen.getByTestId("composer-empty-interrupted-hint")).toBeTruthy();
+    const banner = screen.getByTestId("composer-failure-banner");
+    expect(banner.textContent).toContain("发送下一条");
+    expect(banner.textContent).not.toContain("网络中断");
     expect(
-      within(screen.getByTestId("composer-empty-interrupted-hint")).getByRole(
-        "button",
-        { name: "复制排查包" },
-      ),
-    ).toBeTruthy();
-    expect(screen.queryByTestId("composer-send-error")).toBeNull();
+      within(banner).queryByRole("button", { name: "复制排查包" }),
+    ).toBeNull();
   });
 
   it("empty user-stop is not an error: no composer hint", () => {
     seedLastAssistant({ finishReason: "cancelled", content: "" });
     renderComposer();
-    expect(screen.queryByTestId("composer-empty-interrupted-hint")).toBeNull();
+    expect(screen.queryByTestId("composer-failure-banner")).toBeNull();
     expect(screen.queryByRole("button", { name: "复制排查包" })).toBeNull();
   });
 
@@ -1100,8 +1159,7 @@ describe("TurnComposer variants", () => {
       "已停止",
     );
     renderComposer();
-    expect(screen.queryByTestId("composer-send-error")).toBeNull();
-    expect(screen.queryByTestId("composer-empty-interrupted-hint")).toBeNull();
+    expect(screen.queryByTestId("composer-failure-banner")).toBeNull();
   });
 
   it("session banner lights when the arbitrator has no other verdict", () => {
@@ -1110,13 +1168,12 @@ describe("TurnComposer variants", () => {
       "网络中断，请重试。",
     );
     renderComposer();
-    const banner = screen.getByTestId("composer-send-error");
+    const banner = screen.getByTestId("composer-failure-banner");
     expect(banner.textContent).toContain("网络中断，请重试。");
-    expect(screen.getByRole("button", { name: "复制排查包" })).toBeTruthy();
-    expect(screen.queryByTestId("composer-empty-interrupted-hint")).toBeNull();
+    expect(screen.queryByRole("button", { name: "复制排查包" })).toBeNull();
   });
 
-  it("bubble-owned failure does not duplicate sessionError on the composer", () => {
+  it("turn failure owns the banner; session copy is not a second line", () => {
     seedLastAssistant(
       {
         finishReason: "error",
@@ -1126,8 +1183,31 @@ describe("TurnComposer variants", () => {
       "模型调用失败，请重试。",
     );
     renderComposer();
-    expect(screen.queryByTestId("composer-send-error")).toBeNull();
-    expect(screen.queryByTestId("composer-empty-interrupted-hint")).toBeNull();
+    const banners = screen.getAllByTestId("composer-failure-banner");
+    expect(banners).toHaveLength(1);
+    expect(banners[0]?.textContent).toContain("模型调用失败，请重试。");
+  });
+
+  it("closing a stall banner hides it and keeps the turn error", () => {
+    seedLastAssistant({
+      finishReason: "error",
+      content: "",
+      error: {
+        code: "LLM_TIMEOUT",
+        message: "模型流式响应停滞（长时间无输出），请稍后重试",
+      },
+    });
+    renderComposer();
+    expect(screen.getByTestId("composer-failure-banner").textContent).toContain(
+      "模型流式响应停滞",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    expect(screen.queryByTestId("composer-failure-banner")).toBeNull();
+    const last = getActiveRuntime().messages.at(-1);
+    expect(last?.role).toBe("assistant");
+    if (last?.role === "assistant") {
+      expect(last.error?.message).toContain("模型流式响应停滞");
+    }
   });
 
   it("composerError still shows when the turn would suppress sessionError", () => {
@@ -1144,13 +1224,12 @@ describe("TurnComposer variants", () => {
       action: null,
     });
     renderComposer();
-    expect(screen.getByTestId("composer-send-error").textContent).toContain(
-      "发送失败：没有可用的模型密钥",
-    );
-    expect(screen.queryByTestId("composer-empty-interrupted-hint")).toBeNull();
+    const banner = screen.getByTestId("composer-failure-banner");
+    expect(banner.textContent).toContain("发送失败：没有可用的模型密钥");
+    expect(banner.textContent).not.toContain("模型调用失败");
   });
 
-  it("composerError with supportPack hosts 复制排查包 after bubbles are gone", () => {
+  it("composerError after bubbles are gone is the sentence only", () => {
     setComposerSendError("__draft__", {
       message: "上游限流，暂时无法继续本回合。",
       action: null,
@@ -1162,10 +1241,10 @@ describe("TurnComposer variants", () => {
       },
     });
     renderComposer();
-    expect(screen.getByTestId("composer-send-error").textContent).toContain(
+    expect(screen.getByTestId("composer-failure-banner").textContent).toContain(
       "上游限流",
     );
-    expect(screen.getByRole("button", { name: "复制排查包" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "复制排查包" })).toBeNull();
   });
 
   it("interrupted-with-body: continue placeholder, no empty-interrupt hint", () => {
@@ -1174,7 +1253,7 @@ describe("TurnComposer variants", () => {
     expect(
       screen.getByRole("textbox", { name: COMPOSER_CONTINUE_PLACEHOLDER }),
     ).toBeTruthy();
-    expect(screen.queryByTestId("composer-empty-interrupted-hint")).toBeNull();
+    expect(screen.queryByTestId("composer-failure-banner")).toBeNull();
   });
 
   it("发送中：按钮进入 in-flight 态并挡住连点", async () => {
@@ -1187,7 +1266,8 @@ describe("TurnComposer variants", () => {
     expect(send.getAttribute("data-sending")).toBe("true");
     expect(send.getAttribute("aria-busy")).toBe("true");
     expect((send as HTMLButtonElement).disabled).toBe(true);
-    expect(send.className).toContain("bg-foreground");
+    expect(send.className).toContain("bg-primary");
+    expect(send.className).not.toContain("bg-foreground");
     fireEvent.click(send);
     expect(handleSendMock).not.toHaveBeenCalled();
   });
@@ -1203,6 +1283,7 @@ describe("TurnComposer variants", () => {
     expect(screen.getByTestId("composer-body")).toBeTruthy();
     const send = screen.getByRole("button", { name: "发送" });
     expect((send as HTMLButtonElement).disabled).toBe(true);
+    expect(send.className).toContain("bg-muted");
     expect(send.getAttribute("title")).toBe(COMPOSER_FOLDER_READ_ONLY_HINT);
     fireEvent.keyDown(screen.getByTestId("composer-body"), { key: "Enter" });
     expect(handleSendMock).not.toHaveBeenCalled();

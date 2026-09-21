@@ -3,7 +3,7 @@
 Pins the money math: input is split by cache hit/miss, output includes
 reasoning, everything is integer nano-CNY, and an unknown model degrades to
 glm-5.2 instead of crashing. Curated CNY cards: glm-5.2 (bigmodel.cn) /
-doubao-seed turbo (火山 0–32K). Flash = Go public list × frozen 7.2.
+doubao-seed turbo (火山 0–32K). Flash = official DeepSeek CNY (peak/off-peak).
 """
 
 from datetime import UTC, datetime
@@ -247,19 +247,19 @@ def test_zero_usage_is_zero_cost():
 
 def test_byok_uses_same_curated_card_not_community():
     usage = _usage(input_tokens=1_000_000, cache_miss_tokens=1_000_000, output_tokens=1_000_000)
-    byok = calculate_cost(DEEPSEEK_V4_PRO, usage, billing_mode="byok")
-    platform = calculate_cost(DEEPSEEK_V4_PRO, usage, billing_mode="platform")
+    byok = calculate_cost(OPENCODE_GO_V41_FLASH, usage, billing_mode="byok")
+    platform = calculate_cost(OPENCODE_GO_V41_FLASH, usage, billing_mode="platform")
     assert byok.pricing_source == "curated"
     assert byok.credential_source == "user"
     assert byok.currency == "CNY"
     assert byok.total == platform.total
     assert platform.pricing_source == "curated"
-    user = calculate_cost(DEEPSEEK_V4_PRO, usage, credential_source="user")
+    user = calculate_cost(OPENCODE_GO_V41_FLASH, usage, credential_source="user")
     assert user.pricing_source == "curated"
     assert user.total == platform.total
-    assert calculate_cost(DEEPSEEK_V4_PRO, usage, credential_source="platform").pricing_source == (
-        "curated"
-    )
+    assert calculate_cost(
+        OPENCODE_GO_V41_FLASH, usage, credential_source="platform"
+    ).pricing_source == ("curated")
 
 
 def test_pricing_for_model_user_returns_curated_or_none():
@@ -277,8 +277,8 @@ def test_small_token_counts_round_half_up():
     assert calculate_cost(PLATFORM_RELAY_GLM_52, _usage(output_tokens=1)).output == 28_000
 
 
-def test_deepseek_flash_go_public_list_cny():
-    """Flash 名义价 = Go 公开 USD × 冻结 7.2（谷 $0.15/$0.60/$0.003）。"""
+def test_deepseek_flash_official_cny():
+    """Flash 名义价 = DeepSeek 中文官价（谷 ¥0.02 / ¥1 / ¥4）。"""
     at = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
     usage = _usage(
         input_tokens=1_000_000,
@@ -288,8 +288,8 @@ def test_deepseek_flash_go_public_list_cny():
     flash = calculate_cost(
         DEEPSEEK_V4_FLASH, usage, credential_source="platform", at=at
     )
-    assert flash.input == 1_080_000_000  # ¥1.08
-    assert flash.output == 4_320_000_000  # ¥4.32
+    assert flash.input == 1_000_000_000  # ¥1
+    assert flash.output == 4_000_000_000  # ¥4
     assert flash.pricing_source == "curated"
     hit = calculate_cost(
         DEEPSEEK_V4_FLASH,
@@ -297,8 +297,8 @@ def test_deepseek_flash_go_public_list_cny():
         credential_source="platform",
         at=at,
     )
-    assert hit.cached == 21_600_000  # ¥0.0216
-    # Zen free SKU meters at Flash Go-meter (upstream free; product quota anti-abuse).
+    assert hit.cached == 20_000_000  # ¥0.02
+    # Zen free SKU meters at official Flash (upstream free; product quota anti-abuse).
     free = calculate_cost(
         DEEPSEEK_V4_FLASH_FREE, usage, credential_source="platform", at=at
     )
@@ -324,11 +324,12 @@ def test_deepseek_flash_go_public_list_cny():
     assert go_user.pricing_source == "curated"
     assert go_user.total == flash.total
     assert go_user.credential_source == "user"
-    # Pro 有卡但本部署可不进 allowlist；数值钉中文官价。
-    pro = calculate_cost(DEEPSEEK_V4_PRO, usage, credential_source="platform")
-    assert pro.input == 3_000_000_000  # ¥3
-    assert pro.output == 6_000_000_000  # ¥6
-    assert pro.total != flash.total
+    # Retired Pro: no product card. Platform falls back to glm; user is unpriced.
+    pro_platform = calculate_cost(DEEPSEEK_V4_PRO, usage, credential_source="platform")
+    assert pro_platform.total == calculate_cost(PLATFORM_RELAY_GLM_52, usage).total
+    pro_user = calculate_cost(DEEPSEEK_V4_PRO, usage, credential_source="user")
+    assert pro_user.pricing_source == "unpriced"
+    assert pro_user.total == 0
 
 
 def test_deepseek_flash_peak_is_double_off_peak():
@@ -345,18 +346,35 @@ def test_deepseek_flash_peak_is_double_off_peak():
         credential_source="platform",
         at=datetime(2026, 8, 18, 2, 0, tzinfo=UTC),
     )
-    assert off.input == 1_080_000_000
-    assert peak.input == 2_160_000_000
+    assert off.input == 1_000_000_000
+    assert peak.input == 2_000_000_000
     assert peak.input == off.input * 2
 
 
-def test_flash_go_cost_multiplier_scales_cny_card(monkeypatch):
+def test_deepseek_flash_weekend_is_off_peak():
+    usage = _usage(input_tokens=1_000_000, cache_miss_tokens=1_000_000)
+    saturday_peak_hour = calculate_cost(
+        OPENCODE_GO_V41_FLASH,
+        usage,
+        credential_source="platform",
+        at=datetime(2026, 8, 22, 2, 0, tzinfo=UTC),
+    )
+    weekday_off = calculate_cost(
+        OPENCODE_GO_V41_FLASH,
+        usage,
+        credential_source="platform",
+        at=datetime(2026, 8, 18, 12, 0, tzinfo=UTC),
+    )
+    assert saturday_peak_hour.input == weekday_off.input == 1_000_000_000
+
+
+def test_flash_go_cost_multiplier_does_not_scale_cny_card(monkeypatch):
     usage = _usage(input_tokens=1_000_000, cache_miss_tokens=1_000_000)
     at = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
     one = calculate_cost(DEEPSEEK_V4_FLASH, usage, credential_source="platform", at=at)
     monkeypatch.setattr(settings, "go_cost_multiplier", "4")
     four = calculate_cost(DEEPSEEK_V4_FLASH, usage, credential_source="platform", at=at)
-    assert four.input == one.input * 4
+    assert four.input == one.input
 
 
 def test_non_deepseek_usd_curated_still_withdrawn():
@@ -365,7 +383,7 @@ def test_non_deepseek_usd_curated_still_withdrawn():
     assert has_curated_pricing(DEEPSEEK_V41_FLASH)
     assert has_curated_pricing(OPENCODE_GO_V41_FLASH)
     assert has_curated_pricing(DEEPSEEK_V4_FLASH_FREE)
-    assert has_curated_pricing(DEEPSEEK_V4_PRO)
+    assert not has_curated_pricing(DEEPSEEK_V4_PRO)
     assert not has_curated_pricing(PLATFORM_GPT_4O)
     assert not has_curated_pricing(PLATFORM_RELAY_GROK_45)
     assert not has_curated_pricing("qwen-vl-max")

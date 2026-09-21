@@ -1,14 +1,14 @@
-"""Single builtin ``host`` — observe / assist the user's machine via desktop backfill.
+"""Single builtin ``host`` — a short command on the user's machine.
 
-Orthogonal to Workspace / Browser. Transport is ``DesktopClientChannel.request_host``
-(ClientTool SSE); HostOp enum values are unchanged. Model surface is one tool with
-an ``action`` policy table (schema ``NEVER``, runtime elevation — same posture as
-``git`` / ``run``). ``host_ping`` is transport-only and is not registered.
+Orthogonal to workspace ``run``. Transport is ``DesktopClientChannel.request_host``
+(``HostOp.SHELL``). The model surface is one required ``command``. Catastrophic
+shapes and silent installers are fuse-denied; package-manager installs always
+confirm (see ``command_policy``). ``host_ping`` is transport-only and is not
+registered.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 from pathlib import Path
@@ -17,6 +17,7 @@ from typing import Any
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolFace
 from agentcore.desktop.channel import HostOp, HostOpError
+from agentcore.runtime.command_policy import is_package_install_command
 from agentcore.tools.builtin.long_running import long_running_command_match
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
@@ -27,80 +28,15 @@ from agentcore.tools.registration import (
 
 logger = get_logger(__name__)
 
-# Frozen action set (docs/03-AI核心/工具与能力系统.md §四B).
-_ACTION_STATUS = "status"
-_ACTION_OS_LOG = "os_log"
-_ACTION_SHELL = "shell"
-_ACTION_OPEN_SETTINGS = "open_settings"
-_ACTION_SET_AUDIO = "set_audio"
-_ACTION_RESTART_SERVICE = "restart_service"
-_ACTION_INSTALL_PACKAGE = "install_package"
-
-_ALLOWED_ACTIONS = frozenset(
-    {
-        _ACTION_STATUS,
-        _ACTION_OS_LOG,
-        _ACTION_SHELL,
-        _ACTION_OPEN_SETTINGS,
-        _ACTION_SET_AUDIO,
-        _ACTION_RESTART_SERVICE,
-        _ACTION_INSTALL_PACKAGE,
-    }
-)
-_NEVER_APPROVE_ACTIONS = frozenset({_ACTION_STATUS, _ACTION_OS_LOG})
-_APPROVAL_ACTIONS = _ALLOWED_ACTIONS - _NEVER_APPROVE_ACTIONS
-
-# L1 os_log: model path freezes minutes / entry / byte budgets to defaults.
-# Desktop still clamps incoming HostOp args (pathology valve; model cannot raise them).
-_OS_LOG_MINUTES_DEFAULT = 60
-_OS_LOG_ENTRIES_DEFAULT = 40
-_OS_LOG_BYTES_DEFAULT = 24_000
-_OS_LOG_LEVELS = frozenset({"error", "warning", "info", "any"})
-_OS_LOG_SOURCE_MAX = 120
-_OS_LOG_TRUNCATED_NOTE = (
-    "摘要已截断；请收窄来源或级别后再查，勿据此断言已覆盖全部事件。"
-)
-
-# L2 panel whitelist — closed set (安全权限与治理 / Host 定案 P1).
-_OPEN_SETTINGS_PANELS = frozenset({"sound", "display", "network", "apps", "about"})
-
-# L3 package managers — closed set (桶4 · 点名包；否决任意 exe 静默装).
-_PACKAGE_MANAGERS = frozenset({"winget", "brew", "apt"})
-_PACKAGE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+\-/@]{0,199}$")
-
 # action=shell: frozen timeout. Desktop kills the process at this budget.
 _SHELL_TIMEOUT_DEFAULT = 60
 _SHELL_CHANNEL_SLACK_SECONDS = 15.0
 
-# action=install_package: Docker Desktop / VS Code installs often exceed shell 60s.
+# Package-manager installs (Docker Desktop / VS Code) often exceed the short budget.
 _PACKAGE_TIMEOUT_DEFAULT = 600
 _PACKAGE_CHANNEL_SLACK_SECONDS = 30.0
 
-# status facets → (HostOp, today's per-op engine ceiling). Ping / os_log excluded.
-_STATUS_FACET_ORDER: tuple[str, ...] = (
-    "info",
-    "audio_devices",
-    "storage",
-    "power",
-    "network_summary",
-    "apps",
-)
-_STATUS_FACETS: dict[str, tuple[HostOp, float]] = {
-    "info": (HostOp.INFO, 20.0),
-    "audio_devices": (HostOp.AUDIO_DEVICES, 30.0),
-    "storage": (HostOp.STORAGE, 30.0),
-    "power": (HostOp.POWER, 20.0),
-    "network_summary": (HostOp.NETWORK_SUMMARY, 20.0),
-    "apps": (HostOp.APPS, 45.0),
-}
-_ACTION_TIMEOUTS: dict[str, float] = {
-    _ACTION_OS_LOG: 45.0,
-    _ACTION_OPEN_SETTINGS: 30.0,
-    _ACTION_SET_AUDIO: 45.0,
-    _ACTION_RESTART_SERVICE: 60.0,
-}
-
-# Heuristic fuse — not a complete security boundary (Host 定案 P3).
+# Heuristic fuse — not a complete security boundary.
 _SHELL_FUSE_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     re.compile(p, re.IGNORECASE)
     for p in (
@@ -121,8 +57,8 @@ _SHELL_FUSE_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     )
 )
 
-# Silent / unattended installer heuristics — not a complete boundary (桶4).
-# Keep in rough lockstep with desktop ``shellSilentInstallBlocks``.
+# Silent / unattended installer heuristics — not a complete boundary.
+# Package managers (winget / brew / apt) are ordinary commands that always confirm.
 _SHELL_SILENT_INSTALL_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     re.compile(p, re.IGNORECASE)
     for p in (
@@ -135,73 +71,31 @@ _SHELL_SILENT_INSTALL_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
 )
 
 _SHELL_SILENT_INSTALL_REASON = (
-    "host(action=shell) 熔断：命令匹配静默安装启发式（msiexec /quiet、Setup /S、"
-    "Start-Process quiet 等）。此为启发式兜底，并非完整拦截；"
-    "请改用 host(action=install_package)（manager∈winget/brew/apt + package id）。"
+    "host 熔断：命令匹配静默安装启发式（msiexec /quiet、Setup /S、"
+    "Start-Process quiet 等）。此为启发式兜底，并非完整拦截。"
+    "装包请写 winget / brew / apt 的 install 命令，该命令会请人确认。"
 )
 
 HOST_TOOL_PARAMETERS: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "action": {
-            "type": "string",
-            "enum": sorted(_ALLOWED_ACTIONS),
-            "description": "本机动作。",
-        },
-        "source": {
-            "type": "string",
-            "description": "os_log 来源子串。",
-            "maxLength": _OS_LOG_SOURCE_MAX,
-        },
-        "level": {
-            "type": "string",
-            "enum": sorted(_OS_LOG_LEVELS),
-            "default": "warning",
-            "description": "os_log 最低级别。",
-        },
         "command": {
             "type": "string",
-            "description": "shell：本机短时命令（非空）。",
-        },
-        "panel": {
-            "type": "string",
-            "enum": sorted(_OPEN_SETTINGS_PANELS),
-            "description": "open_settings 面板。",
-        },
-        "device_name": {
-            "type": "string",
-            "description": "set_audio：设备友好名（与 status 音频设备返回的 name 一致）。",
-        },
-        "manager": {
-            "type": "string",
-            "enum": sorted(_PACKAGE_MANAGERS),
-            "description": "install_package 包管理器。",
-        },
-        "package_id": {
-            "type": "string",
-            "description": "install_package：包管理器点名 id。",
-        },
-        "cask": {
-            "type": "boolean",
-            "description": "install_package 仅 brew：true 时用 brew install --cask（GUI 应用）。",
+            "description": "本机短命令（非空）。",
         },
     },
-    "required": ["action"],
+    "required": ["command"],
 }
 
 
-def host_action_name(arguments: dict[str, Any] | None) -> str:
-    """Normalized ``action`` (empty when missing)."""
-    return str((arguments or {}).get("action") or "").strip().lower()
-
-
 def host_call_is_shell(arguments: dict[str, Any] | None) -> bool:
-    return host_action_name(arguments) == _ACTION_SHELL
+    """True when this host call carries a command (the only model shape)."""
+    return bool(str((arguments or {}).get("command") or "").strip())
 
 
 def host_call_requires_approval(arguments: dict[str, Any] | None) -> bool:
-    """Runtime elevation: host-axis actions + install_package (status/os_log skip)."""
-    return host_action_name(arguments) in _APPROVAL_ACTIONS
+    """Every host command is on the host axis (installs also always-confirm)."""
+    return host_call_is_shell(arguments)
 
 
 def shell_fuse_blocks(command: str) -> str | None:
@@ -212,9 +106,9 @@ def shell_fuse_blocks(command: str) -> str | None:
     for pat in _SHELL_FUSE_PATTERNS:
         if pat.search(text):
             return (
-                "host(action=shell) 熔断：命令匹配毁灭性启发式黑名单（格式化磁盘 / "
+                "host 熔断：命令匹配毁灭性启发式黑名单（格式化磁盘 / "
                 "rm -rf / / shutdown 等）。此为兜底、非完整安全边界；"
-                "请改用更安全的结构化 host action 或缩小命令范围。"
+                "请缩小命令范围。"
             )
     return None
 
@@ -230,31 +124,7 @@ def shell_silent_install_blocks(command: str) -> str | None:
     return None
 
 
-def validate_package_install_args(
-    *,
-    manager: str,
-    package_id: str,
-    cask: bool = False,
-) -> str | None:
-    """Return an error string if manager / package id are invalid; else None."""
-    mgr = manager.strip().lower()
-    if mgr not in _PACKAGE_MANAGERS:
-        return (
-            f"host(action=install_package) 不支持 manager={manager!r}；"
-            f"仅允许：{', '.join(sorted(_PACKAGE_MANAGERS))}。"
-        )
-    pkg = package_id.strip()
-    if not pkg or not _PACKAGE_ID_RE.fullmatch(pkg):
-        return (
-            "host(action=install_package) 需要合法 package_id（字母数字开头，"
-            "可含 ._+-/@，最长 200；禁空格与 shell 元字符）。"
-        )
-    if cask and mgr != "brew":
-        return "host(action=install_package) 的 cask=true 仅适用于 manager=brew。"
-    return None
-
-
-# cmd.exe %VAR% — PowerShell does not expand these (prod thrash: %APPDATA% → NOT_FOUND).
+# cmd.exe %VAR% — PowerShell does not expand these.
 _SHELL_CMD_ENV_RE = re.compile(r"%[A-Za-z_][A-Za-z0-9_]*%")
 
 
@@ -263,39 +133,26 @@ def shell_cmd_env_blocks(command: str) -> str | None:
     if not _SHELL_CMD_ENV_RE.search(command):
         return None
     return (
-        "host(action=shell) 在 Windows 上走 PowerShell，不会展开 cmd 风格 %VAR%。"
+        "host 在 Windows 上走 PowerShell，不会展开 cmd 风格 %VAR%。"
         "请改用 $env:APPDATA / $env:LOCALAPPDATA / $env:USERPROFILE 等；"
         "Unix 请用 $VAR 或 ${VAR}。"
         "路径含空格时加引号，例如 "
-        "Get-ChildItem -LiteralPath \"$env:APPDATA\\Microsoft\\Windows\"。"
+        'Get-ChildItem -LiteralPath "$env:APPDATA\\Microsoft\\Windows"。'
     )
-
-
-def normalize_os_log_args(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Clamp level / source; minutes / entry / byte budgets are frozen defaults."""
-    source = str(arguments.get("source") or "").strip()[:_OS_LOG_SOURCE_MAX]
-    raw_level = str(arguments.get("level") or "warning").strip().lower()
-    level = raw_level if raw_level in _OS_LOG_LEVELS else "warning"
-    return {
-        "source": source,
-        "level": level,
-        "minutes": _OS_LOG_MINUTES_DEFAULT,
-        "max_entries": _OS_LOG_ENTRIES_DEFAULT,
-        "max_bytes": _OS_LOG_BYTES_DEFAULT,
-    }
 
 
 def host_tool_timeout_seconds(arguments: dict[str, Any] | None = None) -> float:
     """Engine wall-clock ceiling for one ``host`` call (must outlive channel + slack)."""
-    args = arguments or {}
-    action = host_action_name(args)
-    if action == _ACTION_SHELL:
-        return float(_SHELL_TIMEOUT_DEFAULT) + _SHELL_CHANNEL_SLACK_SECONDS
-    if action == _ACTION_INSTALL_PACKAGE:
+    command = str((arguments or {}).get("command") or "")
+    if is_package_install_command(command):
         return float(_PACKAGE_TIMEOUT_DEFAULT) + _PACKAGE_CHANNEL_SLACK_SECONDS
-    if action == _ACTION_STATUS:
-        return max(timeout for _, timeout in _STATUS_FACETS.values())
-    return _ACTION_TIMEOUTS.get(action, _STATUS_FACETS["apps"][1])
+    return float(_SHELL_TIMEOUT_DEFAULT) + _SHELL_CHANNEL_SLACK_SECONDS
+
+
+def _shell_budget(command: str) -> tuple[int, float]:
+    if is_package_install_command(command):
+        return _PACKAGE_TIMEOUT_DEFAULT, _PACKAGE_CHANNEL_SLACK_SECONDS
+    return _SHELL_TIMEOUT_DEFAULT, _SHELL_CHANNEL_SLACK_SECONDS
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -304,18 +161,7 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return {"value": value}
 
 
-def _os_log_model_payload(value: Any) -> dict[str, Any]:
-    """Model-facing os_log JSON: frozen budgets stay off the receipt."""
-    payload = dict(_as_dict(value))
-    payload.pop("max_entries", None)
-    payload.pop("max_bytes", None)
-    if payload.get("truncated"):
-        payload["note"] = _OS_LOG_TRUNCATED_NOTE
-    return payload
-
-
 def _model_json(payload: dict[str, Any]) -> str:
-    """Compact model-facing JSON. No wrapper tag: isolation is ``role=tool``, not a receipt note."""
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -345,13 +191,12 @@ def _process_display(payload: dict[str, Any]) -> dict[str, Any] | None:
     return display
 
 
-def _host_display(payload: dict[str, Any], *, action: str) -> dict[str, Any]:
+def _host_display(payload: dict[str, Any]) -> dict[str, Any]:
     process = _process_display(payload)
     if process is not None:
         return process
     return {
         "kind": "host",
-        "action": action,
         "body": json.dumps(payload, ensure_ascii=False, indent=2),
     }
 
@@ -359,7 +204,6 @@ def _host_display(payload: dict[str, Any], *, action: str) -> dict[str, Any]:
 def _host_result(
     value: Any,
     *,
-    action: str,
     success: bool = True,
     error: str | None = None,
 ) -> ToolResult:
@@ -369,7 +213,7 @@ def _host_result(
         success=success,
         output=_model_json(payload),
         error=error,
-        display=_host_display(payload, action=action),
+        display=_host_display(payload),
     )
 
 
@@ -380,7 +224,7 @@ def _no_channel_error() -> ToolResult:
         output="",
         error=(
             "host 需要桌面回填通道：当前无在线桌面客户端，"
-            "无法观测或操作用户本机。请如实说明限制，勿假装已查本机。"
+            "无法在用户本机跑命令。请如实说明限制，勿假装已查本机。"
         ),
     )
 
@@ -393,97 +237,6 @@ def _fail(error: str, *, contract_failure: bool = False) -> ToolResult:
         error=error,
         contract_failure=contract_failure,
     )
-
-
-async def _host_call(
-    context: ToolContext,
-    *,
-    op: HostOp,
-    action: str,
-    args: dict[str, Any] | None = None,
-    timeout: float | None = None,
-) -> ToolResult:
-    channel = context.desktop_channel
-    if channel is None:
-        return _no_channel_error()
-    logger.info(
-        "desktop.host_op_request",
-        run_id=context.run_id,
-        conversation_id=context.conversation_id,
-        op=op.value,
-    )
-    try:
-        kwargs: dict[str, Any] = {}
-        if timeout is not None:
-            kwargs["timeout"] = timeout
-        value = await channel.request_host(op, args or {}, **kwargs)
-    except HostOpError as e:
-        return ToolResult(
-            tool_call_id="",
-            success=False,
-            output="",
-            error=str(e),
-        )
-    return _host_result(value, action=action)
-
-
-async def _execute_status(context: ToolContext) -> ToolResult:
-    channel = context.desktop_channel
-    if channel is None:
-        return _no_channel_error()
-
-    async def _one(facet: str) -> tuple[str, dict[str, Any]]:
-        op, facet_timeout = _STATUS_FACETS[facet]
-        logger.info(
-            "desktop.host_op_request",
-            run_id=context.run_id,
-            conversation_id=context.conversation_id,
-            op=op.value,
-        )
-        try:
-            value = await channel.request_host(op, {}, timeout=facet_timeout)
-        except HostOpError as e:
-            return facet, {"error": str(e)}
-        if isinstance(value, dict):
-            return facet, value
-        return facet, {"value": value}
-
-    pairs = await asyncio.gather(*(_one(facet) for facet in _STATUS_FACET_ORDER))
-    payload = {facet: value for facet, value in pairs}
-    failed = [
-        f"{facet}: {value['error']}"
-        for facet, value in pairs
-        if isinstance(value, dict) and value.get("error")
-    ]
-    if failed and len(failed) == len(pairs):
-        return _host_result(
-            payload,
-            action=_ACTION_STATUS,
-            success=False,
-            error="; ".join(failed),
-        )
-    return _host_result(payload, action=_ACTION_STATUS)
-
-
-async def _execute_os_log(
-    arguments: dict[str, Any], context: ToolContext
-) -> ToolResult:
-    args = normalize_os_log_args(arguments)
-    payload = {k: v for k, v in args.items() if not (k == "source" and v == "")}
-    result = await _host_call(
-        context,
-        op=HostOp.OS_LOG_SUMMARY,
-        action=_ACTION_OS_LOG,
-        args=payload,
-        timeout=_ACTION_TIMEOUTS[_ACTION_OS_LOG],
-    )
-    if not result.success:
-        return result
-    try:
-        raw = json.loads(result.output) if result.output else {}
-    except json.JSONDecodeError:
-        return result
-    return _host_result(_os_log_model_payload(raw), action=_ACTION_OS_LOG)
 
 
 def _host_shell_transport_args(
@@ -515,7 +268,7 @@ async def _execute_shell(
 ) -> ToolResult:
     command = str(arguments.get("command") or "").strip()
     if not command:
-        return _fail("host(action=shell) 需要非空 command。", contract_failure=True)
+        return _fail("host 需要非空 command。", contract_failure=True)
     fuse = shell_fuse_blocks(command)
     if fuse:
         return _fail(fuse)
@@ -528,13 +281,13 @@ async def _execute_shell(
     matched_long = long_running_command_match(command)
     if matched_long is not None:
         return _fail(
-            f"禁止用 host(action=shell) 启动长驻进程（检测到：{matched_long}）。"
-            "host(action=shell) 有超时上限、不托管后台进程。"
+            f"禁止用 host 启动长驻进程（检测到：{matched_long}）。"
+            "host 有超时上限、不托管后台进程。"
             "请改用 run：同一命令设 background=true。"
             "省略 wait_for 则起来就返回。"
             "用 action=read|list 确认进程仍在跑。"
         )
-    timeout_seconds = _SHELL_TIMEOUT_DEFAULT
+    timeout_seconds, slack = _shell_budget(command)
     channel = context.desktop_channel
     if channel is None:
         return _no_channel_error()
@@ -549,126 +302,29 @@ async def _execute_shell(
         value = await channel.request_host(
             HostOp.SHELL,
             _host_shell_transport_args(command, timeout_seconds, context),
-            timeout=float(timeout_seconds) + _SHELL_CHANNEL_SLACK_SECONDS,
+            timeout=float(timeout_seconds) + slack,
         )
     except HostOpError as e:
         return _fail(str(e))
-    return _host_result(value, action=_ACTION_SHELL)
-
-
-async def _execute_open_settings(
-    arguments: dict[str, Any], context: ToolContext
-) -> ToolResult:
-    panel = str(arguments.get("panel") or "").strip().lower()
-    if panel not in _OPEN_SETTINGS_PANELS:
-        return _fail(
-            f"host(action=open_settings) 不支持 panel={panel!r}；"
-            f"仅允许：{', '.join(sorted(_OPEN_SETTINGS_PANELS))}。",
-            contract_failure=True,
-        )
-    return await _host_call(
-        context,
-        op=HostOp.OPEN_SETTINGS,
-        action=_ACTION_OPEN_SETTINGS,
-        args={"panel": panel},
-        timeout=_ACTION_TIMEOUTS[_ACTION_OPEN_SETTINGS],
-    )
-
-
-async def _execute_set_audio(
-    arguments: dict[str, Any], context: ToolContext
-) -> ToolResult:
-    device_name = str(arguments.get("device_name") or "").strip()
-    if not device_name:
-        return _fail(
-            "host(action=set_audio) 需要 device_name；"
-            "请先 host(action=status) 观测音频设备后再指定。",
-            contract_failure=True,
-        )
-    return await _host_call(
-        context,
-        op=HostOp.AUDIO_SET_DEFAULT,
-        action=_ACTION_SET_AUDIO,
-        args={"device_name": device_name},
-        timeout=_ACTION_TIMEOUTS[_ACTION_SET_AUDIO],
-    )
-
-
-async def _execute_restart_service(
-    arguments: dict[str, Any], context: ToolContext
-) -> ToolResult:
-    # Model face has no service field; desktop channel still allowlists Audiosrv.
-    del arguments
-    return await _host_call(
-        context,
-        op=HostOp.SERVICE_RESTART,
-        action=_ACTION_RESTART_SERVICE,
-        args={"service": "Audiosrv"},
-        timeout=_ACTION_TIMEOUTS[_ACTION_RESTART_SERVICE],
-    )
-
-
-async def _execute_install_package(
-    arguments: dict[str, Any], context: ToolContext
-) -> ToolResult:
-    manager = str(arguments.get("manager") or "").strip()
-    package_id = str(arguments.get("package_id") or "").strip()
-    cask = bool(arguments.get("cask"))
-    invalid = validate_package_install_args(
-        manager=manager, package_id=package_id, cask=cask
-    )
-    if invalid:
-        return _fail(invalid, contract_failure=True)
-    timeout_seconds = _PACKAGE_TIMEOUT_DEFAULT
-    channel = context.desktop_channel
-    if channel is None:
-        return _no_channel_error()
-    args: dict[str, Any] = {
-        "manager": manager.strip().lower(),
-        "package_id": package_id.strip(),
-        "timeout_seconds": timeout_seconds,
-    }
-    if cask:
-        args["cask"] = True
-    logger.info(
-        "desktop.host_op_request",
-        run_id=context.run_id,
-        conversation_id=context.conversation_id,
-        op=HostOp.PACKAGE_INSTALL.value,
-        manager=args["manager"],
-        package_id=args["package_id"],
-        timeout_seconds=timeout_seconds,
-    )
-    try:
-        value = await channel.request_host(
-            HostOp.PACKAGE_INSTALL,
-            args,
-            timeout=float(timeout_seconds) + _PACKAGE_CHANNEL_SLACK_SECONDS,
-        )
-    except HostOpError as e:
-        return _fail(str(e))
-    return _host_result(value, action=_ACTION_INSTALL_PACKAGE)
+    return _host_result(value)
 
 
 class HostTool:
-    """本机 Host 面：单一 ``host`` + ``action`` 政策表。"""
+    """本机 Host 面：一条短命令。"""
 
     registration = ToolRegistration(
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_BOTH,
         host_class=True,
-        resident=False,
-        catalog_summary="本机排查 / 修理 / 查看这台电脑",
+        catalog_summary="这台电脑。",
+        blurb="在这台电脑上跑短命令",
     )
 
     @property
     def schema(self) -> ToolSchema:
         return ToolSchema(
             name="host",
-            description=(
-                "本机 Host（仅桌面回填通道；与 folder/bind 正交）。"
-                "HOW→consult(host)。"
-            ),
+            description="这台电脑上的短命令。",
             parameters=HOST_TOOL_PARAMETERS,
             face=ToolFace.HOST_BROWSER,
             approval=ToolApproval.NEVER,
@@ -676,26 +332,4 @@ class HostTool:
         )
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
-        action = host_action_name(arguments)
-        if not action:
-            return _fail("action 为必填参数", contract_failure=True)
-        if action not in _ALLOWED_ACTIONS:
-            return _fail(
-                f"action '{action}' 不在允许列表中："
-                f"{', '.join(sorted(_ALLOWED_ACTIONS))}。",
-                contract_failure=True,
-            )
-
-        if action == _ACTION_STATUS:
-            return await _execute_status(context)
-        if action == _ACTION_OS_LOG:
-            return await _execute_os_log(arguments, context)
-        if action == _ACTION_SHELL:
-            return await _execute_shell(arguments, context)
-        if action == _ACTION_OPEN_SETTINGS:
-            return await _execute_open_settings(arguments, context)
-        if action == _ACTION_SET_AUDIO:
-            return await _execute_set_audio(arguments, context)
-        if action == _ACTION_RESTART_SERVICE:
-            return await _execute_restart_service(arguments, context)
-        return await _execute_install_package(arguments, context)
+        return await _execute_shell(arguments, context)

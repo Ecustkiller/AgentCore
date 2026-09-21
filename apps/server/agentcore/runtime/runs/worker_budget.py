@@ -6,7 +6,7 @@
 
 共享谓词（``is_deep_deliverable`` 等）与本模块的统一 token 回填正交。
 ``verify_policy`` 只规范化 CEO 显式的 inner/outer，不按角色名猜测。
-检索 HOW 只写在 grep / file_read 工具说明，不按职称灌纪律。
+检索 HOW 只写在 grep / read 工具说明，不按职称灌纪律。
 """
 
 from __future__ import annotations

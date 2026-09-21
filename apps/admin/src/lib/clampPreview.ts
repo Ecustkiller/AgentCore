@@ -1,4 +1,4 @@
-/** Cap dumped tool JSON so a grep / file_read cannot inflate the replay column. */
+/** Cap dumped tool JSON so a grep / read cannot inflate the replay column. */
 export const PREVIEW_CHAR_CAP = 4000;
 
 export function clampPreview(

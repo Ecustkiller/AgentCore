@@ -18,6 +18,14 @@ bare user utterance. New turns do not mint these rows.
 Empty user turns that carry attachment metadata become a short system note
 listing names / workspace paths, so later turns still see that files were sent.
 No fake user prose; empty user turns without attachments stay dropped.
+
+CEO ``[系统提示]`` envelopes stamped on ``usage.turn_envelope`` are spliced in
+front of that user utterance so the LLM window stays append-only. A DeepSeek
+in-history extra system (``usage.in_history_system``) is spliced immediately
+before that envelope. Consecutive identical extras / envelopes are skipped so
+later turns do not rewrite the prefix. Compaction and memory consolidation
+read raw bodies and never see those rows. UI bubbles still show the original
+user text.
 """
 
 from datetime import datetime
@@ -37,6 +45,12 @@ from agentcore.core.inline_body import (
     render_inline_labels,
 )
 from agentcore.db.repositories import ConversationRepository, MessageRepository
+from agentcore.runtime.resolve.prompt.envelope import (
+    IN_HISTORY_SYSTEM_ORIGIN,
+    IN_HISTORY_SYSTEM_USAGE_KEY,
+    TURN_ENVELOPE_USAGE_KEY,
+    is_turn_envelope_content,
+)
 
 # Re-export detection helpers for existing tests / callers.
 _is_failed_empty_assistant = is_failed_empty_assistant
@@ -211,6 +225,97 @@ def _harvest_note(msg: Any) -> dict:
     return {"role": "user", "content": body}
 
 
+def _stored_turn_envelope(msg: Any) -> str:
+    """Replay snapshot from ``usage.turn_envelope``; empty when missing or unfenced."""
+    raw = usage_of(msg).get(TURN_ENVELOPE_USAGE_KEY)
+    if not isinstance(raw, str):
+        return ""
+    text = raw.strip()
+    return text if is_turn_envelope_content(text) else ""
+
+
+def _stored_in_history_system(msg: Any) -> str:
+    """Replay DeepSeek extra system from ``usage.in_history_system``."""
+    raw = usage_of(msg).get(IN_HISTORY_SYSTEM_USAGE_KEY)
+    if not isinstance(raw, str):
+        return ""
+    return raw.strip()
+
+
+def _last_folded_in_history_system(history: list[dict]) -> str:
+    for item in reversed(history):
+        if (
+            item.get("role") == "system"
+            and item.get("origin") == IN_HISTORY_SYSTEM_ORIGIN
+        ):
+            return (item.get("content") or "").strip()
+    return ""
+
+
+def _last_folded_envelope(history: list[dict]) -> str:
+    for item in reversed(history):
+        text = (item.get("content") or "").strip()
+        if is_turn_envelope_content(text):
+            return text
+    return ""
+
+
+def _append_user_with_envelope(history: list[dict], msg: Any, item: dict) -> None:
+    """Keep a prior turn's in-history system + envelope in front of that utterance.
+
+    Identical extra / envelope already in the folded window is skipped so later
+    turns do not rewrite the prefix by re-splicing the same snapshot.
+    """
+    extra = _stored_in_history_system(msg)
+    if extra and extra != _last_folded_in_history_system(history):
+        history.append(
+            {
+                "role": "system",
+                "content": extra,
+                "origin": IN_HISTORY_SYSTEM_ORIGIN,
+            }
+        )
+    envelope = _stored_turn_envelope(msg)
+    if envelope and envelope != _last_folded_envelope(history):
+        history.append({"role": "user", "content": envelope})
+    history.append(item)
+
+
+def drop_trailing_user_turn(
+    history: list[dict],
+    *,
+    only_if_content: str | None = None,
+) -> list[dict]:
+    """Drop this turn's user utterance (and its stored envelope / in-history system).
+
+    Cloud loads after insert, so the last user row is this turn — same as the old
+    ``history[:-1]``. When ``only_if_content`` is set (sidecar may have fetched
+    *before* insert), only drop when that trailing user text matches.
+    """
+    if not history:
+        return []
+    out = list(history)
+    last = out[-1]
+    if last.get("role") != "user":
+        return out
+    if only_if_content is not None and (last.get("content") or "") != only_if_content:
+        return out
+    out.pop()
+    last_left = out[-1] if out else None
+    last_content = last_left.get("content") if isinstance(last_left, dict) else None
+    if out and is_turn_envelope_content(last_content):
+        out.pop()
+    last_left = out[-1] if out else None
+    if (
+        out
+        and isinstance(last_left, dict)
+        and last_left.get("role") == "system"
+        and last_left.get("origin") == IN_HISTORY_SYSTEM_ORIGIN
+    ):
+        out.pop()
+    return out
+
+
 def _fold_history_messages(messages: list[Any]) -> list[dict]:
     """Fold ORM message rows into ``[{role, content}]``, merging consecutive failures."""
     history: list[dict] = []
@@ -236,10 +341,12 @@ def _fold_history_messages(messages: list[Any]) -> list[dict]:
             if _is_harvest_user(msg):
                 history.append(_harvest_note(msg))
             else:
-                history.append({"role": "user", "content": content})
+                _append_user_with_envelope(
+                    history, msg, {"role": "user", "content": content}
+                )
         elif role == "user" and atts:
             flush_failures()
-            history.append(_user_attachment_note(atts))
+            _append_user_with_envelope(history, msg, _user_attachment_note(atts))
         elif role == "assistant" and content:
             flush_failures()
             item: dict[str, Any] = {"role": "assistant", "content": content}
@@ -398,7 +505,7 @@ async def load_history_for_turn(
 ) -> list[dict]:
     """Reconstruct the prior-turn history spliced into a turn's LLM window head.
 
-    Mirrors ``load_chat_context(...)[:-1]`` at send time: the journal stores only
+    Mirrors :func:`drop_trailing_user_turn` at send time: the journal stores only
     ``history_len``; the caller supplies the tail of messages strictly older than the
     triggering user message. When compaction was active before that user message, the
     synthetic summary block counts toward ``history_len``.
@@ -428,3 +535,52 @@ async def load_history_for_turn(
     if len(items) > history_len:
         return items[-history_len:]
     return items
+
+
+async def stamp_user_turn_envelope(
+    *,
+    conversation_id: str,
+    assistant_message_id: str,
+    envelope: str,
+    in_history_system: str = "",
+    header: Any | None = None,
+) -> None:
+    """Copy envelope / in-history system / frozen chat header onto the prompting user.
+
+    Later ``load_chat_context`` replays envelope and extra system in front of that
+    utterance. Empty / unfenced envelope snapshots are ignored. The frozen chat
+    header is not spliced into history — it only hydrates the process LRU after
+    restart. A missing user row is a no-op.
+    """
+    from agentcore.observability.session_llm_header import (
+        SessionLlmHeader,
+        header_to_usage,
+    )
+
+    usage: dict[str, Any] = {}
+    text = (envelope or "").strip()
+    if is_turn_envelope_content(text):
+        usage[TURN_ENVELOPE_USAGE_KEY] = text
+    extra = (in_history_system or "").strip()
+    if extra:
+        usage[IN_HISTORY_SYSTEM_USAGE_KEY] = extra
+    if isinstance(header, SessionLlmHeader) and (header.system or "").strip():
+        usage.update(header_to_usage(header))
+    if not usage:
+        return
+    from agentcore.db.base import async_session_factory
+    from agentcore.db.repositories import MessageRepository
+
+    async with async_session_factory() as session:
+        repo = MessageRepository(session)
+        user = await repo.user_message_for_assistant(
+            conversation_id=conversation_id,
+            assistant_message_id=assistant_message_id,
+        )
+        if user is None:
+            return
+        await repo.merge_usage(
+            user.id,
+            conversation_id=conversation_id,
+            usage=usage,
+        )

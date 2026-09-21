@@ -33,7 +33,7 @@ def test_turn_profiles_agent_uses_single_worker_profile():
 def test_turn_profiles_model_overrides():
     ps = TurnProfiles(model="base", model_overrides={"chat": "pro-model"})
     assert ps.model_for("chat") == "pro-model"
-    assert ps.model_for("memory") == "base"
+    assert ps.model_for("title") == "base"
 
 
 def test_turn_profiles_route_model_for_cross_provider_agent():

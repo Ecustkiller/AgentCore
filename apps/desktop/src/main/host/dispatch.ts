@@ -1,14 +1,9 @@
 import type { HostOpInput, HostOpResult } from "@shared/host-contract";
 import { hostApps } from "./apps";
-import { listAudioDevices, setDefaultAudio } from "./audio";
 import { hostInfo, hostPing } from "./info";
-import { hostOsLogSummary } from "./logs";
 import { hostNetworkSummary } from "./network";
-import { clampPackageTimeout, hostPackageInstall } from "./package";
 import { hostPower } from "./power";
 import { err } from "./result";
-import { restartService } from "./service";
-import { openSettings } from "./settings";
 import { clampShellTimeout, hostShell } from "./shell";
 import { hostStorage } from "./storage";
 
@@ -20,8 +15,6 @@ export async function runHostOp(input: HostOpInput): Promise<HostOpResult> {
       return hostPing();
     case "host_info":
       return hostInfo();
-    case "host_audio_devices":
-      return listAudioDevices();
     case "host_storage":
       return hostStorage();
     case "host_power":
@@ -30,8 +23,6 @@ export async function runHostOp(input: HostOpInput): Promise<HostOpResult> {
       return hostNetworkSummary();
     case "host_apps":
       return hostApps();
-    case "host_os_log_summary":
-      return hostOsLogSummary(args);
     case "host_shell": {
       const command = String(args.command ?? "");
       const timeoutSeconds = clampShellTimeout(args.timeout_seconds);
@@ -43,28 +34,6 @@ export async function runHostOp(input: HostOpInput): Promise<HostOpResult> {
             : undefined,
         rootId: typeof args.root_id === "string" ? args.root_id : undefined,
       });
-    }
-    case "host_open_settings": {
-      const panel = String(args.panel ?? "")
-        .trim()
-        .toLowerCase();
-      if (!panel) return err("panel is required");
-      return openSettings(panel);
-    }
-    case "host_audio_set_default": {
-      const deviceName = String(args.device_name ?? "").trim();
-      return setDefaultAudio(deviceName);
-    }
-    case "host_service_restart": {
-      const service = String(args.service ?? "").trim();
-      return restartService(service);
-    }
-    case "host_package_install": {
-      const manager = String(args.manager ?? "").trim();
-      const packageId = String(args.package_id ?? "").trim();
-      const cask = args.cask === true;
-      const timeoutSeconds = clampPackageTimeout(args.timeout_seconds);
-      return hostPackageInstall(manager, packageId, timeoutSeconds, cask);
     }
     default:
       return err(`unknown host op: ${op}`);

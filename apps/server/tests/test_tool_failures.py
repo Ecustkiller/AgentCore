@@ -45,12 +45,12 @@ def test_aggregate_ignores_policy_failures_like_circuit_breaker():
     c.record(
         [
             ToolAttempt(
-                "a", "file_write", success=False, policy_failure=True, error_summary="denied"
+                "a", "write", success=False, policy_failure=True, error_summary="denied"
             )
         ]
     )
     assert c.tool_failure_facts() == []
-    assert c.tool_failure_count("file_write") == 0
+    assert c.tool_failure_count("write") == 0
 
 
 def test_fail_after_success_reopens_outstanding():

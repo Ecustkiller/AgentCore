@@ -48,7 +48,6 @@ from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.factory import build_provider
 from agentcore.llm.resolve import resolve_turn_model as resolve_user_model
 from agentcore.memory import TitleResult
-from agentcore.memory.consolidation import schedule_consolidation
 from agentcore.observability.cost_log import log_cost_recorded
 from agentcore.runtime.events import (
     EventSink,
@@ -306,6 +305,11 @@ def _usage_metadata(
     gm = _positive_duration_ms(result.get("generation_ms"))
     if gm is not None:
         meta["generation_ms"] = gm
+    prompt_tokens = int(result.get("prompt_tokens", 0) or 0)
+    if prompt_tokens > 0:
+        # CEO's latest single-request prompt (window fill). Distinct from summed
+        # ``input_tokens``. Same watermark compaction reads off turn_metrics.
+        meta["last_prompt_tokens"] = prompt_tokens
     if extra:
         meta.update(extra)
     return meta
@@ -1007,10 +1011,9 @@ class CloudStore:
             with contextlib.suppress(Exception):
                 await self.clear_stream_segments(turn_id=message_id)
 
-        # END_TURN 不再因 motion_card 登记阶段推进卡（开辩须用户点名）。
+        # END_TURN 不再因 motion_card 登记阶段推进卡（开辩须用户同意，不主动启动）。
         # CEO→user followups 仍下线。
 
-        schedule_consolidation(conversation_id)
         await schedule_compaction_if_due(conversation_id, result.get("input_tokens", 0))
 
         if (
@@ -1185,6 +1188,10 @@ class CloudStore:
         rounds: int = 0,
         duration_ms: int | None = None,
         generation_ms: int | None = None,
+        prompt_tokens: int = 0,
+        error_code: str | None = None,
+        collab: dict | None = None,
+        outcome: str | None = None,
         trace_id: str,
         finish_reason: str | None = None,
         llm_credentials: LLMCredentials | None = None,
@@ -1386,46 +1393,43 @@ class CloudStore:
             if filled:
                 content_to_write = filled
 
-        usage_metadata: dict[str, Any] = {
-            "status": terminal_status,
+        wall_ms = _positive_duration_ms(
+            duration_ms,
+            runs.get("duration_ms") if isinstance(runs, dict) else None,
+        )
+        gen_ms = _positive_duration_ms(
+            generation_ms,
+            runs.get("generation_ms") if isinstance(runs, dict) else None,
+        )
+        local_outcome = coerce_produced_outcome(outcome)
+        if local_outcome is None and isinstance(runs, dict):
+            local_outcome = coerce_produced_outcome(runs.get("outcome"))
+        settle: dict[str, Any] = {
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "reasoning_tokens": reasoning_tokens,
             "cache_hit_tokens": cache_hit_tokens,
             "cache_miss_tokens": cache_miss_tokens,
             "rounds": rounds,
+            "prompt_tokens": prompt_tokens,
         }
-        wall_ms = _positive_duration_ms(
-            duration_ms,
-            runs.get("duration_ms") if isinstance(runs, dict) else None,
-        )
-        if wall_ms is not None:
-            usage_metadata["duration_ms"] = wall_ms
-        gen_ms = _positive_duration_ms(
-            generation_ms,
-            runs.get("generation_ms") if isinstance(runs, dict) else None,
-        )
-        if gen_ms is not None:
-            usage_metadata["generation_ms"] = gen_ms
-        local_outcome = (
-            coerce_produced_outcome(runs.get("outcome"))
-            if isinstance(runs, dict)
-            else None
-        )
+        if finish_value is not None:
+            settle["finish_reason"] = finish_value
+        elif is_incomplete:
+            settle["finish_reason"] = FinishReason.CANCELLED.value
+        if error_code:
+            settle["error_code"] = error_code
+        if collab:
+            settle["collab"] = collab
         if local_outcome is not None:
-            usage_metadata["outcome"] = local_outcome
-        if is_paused:
-            usage_metadata["paused"] = True
-        else:
-            # Resume / non-pause local settle: clear cold pause latch.
-            usage_metadata["paused"] = False
-            if is_incomplete:
-                usage_metadata["incomplete"] = True
-                usage_metadata["finish_reason"] = (
-                    finish_value or FinishReason.CANCELLED.value
-                )
-            elif finish_value is not None:
-                usage_metadata["finish_reason"] = finish_value
+            settle["outcome"] = local_outcome
+        if wall_ms is not None:
+            settle["duration_ms"] = wall_ms
+        if gen_ms is not None:
+            settle["generation_ms"] = gen_ms
+        extra: dict[str, Any] = {"paused": bool(is_paused)}
+        if not is_paused and is_incomplete:
+            extra["incomplete"] = True
         run_error = runs.get("error") if isinstance(runs, dict) else None
         runs_for_journal = runs
         if terminal_status == MESSAGE_STATUS_FAILED:
@@ -1438,8 +1442,8 @@ class CloudStore:
                     run_error.get("message") if isinstance(run_error, dict) else None
                 ),
             )
-            usage_metadata["error_code"] = run_error["code"]
-            usage_metadata["error"] = run_error
+            extra["error_code"] = run_error["code"]
+            extra["error"] = run_error
             # Ensure journal projection carries structured error even when the
             # client omitted ``runs.error`` on an ERROR finish.
             if isinstance(runs, dict):
@@ -1452,9 +1456,12 @@ class CloudStore:
         elif isinstance(run_error, dict):
             err_code = run_error.get("code")
             if err_code:
-                usage_metadata["error_code"] = err_code
+                extra["error_code"] = err_code
             if err_code or run_error.get("message"):
-                usage_metadata["error"] = run_error
+                extra["error"] = run_error
+        usage_metadata = _usage_metadata(
+            settle, status=terminal_status, extra=extra
+        )
 
         # Settle whenever the turn has a terminal/pause surface — including empty
         # ERROR (soft-fail / first-turn crash) and empty bubble with process state
@@ -1706,7 +1713,6 @@ class CloudStore:
                     reason=reason,
                 )
 
-        schedule_consolidation(conversation_id)
         await schedule_compaction_if_due(conversation_id, input_tokens)
 
         _log_local_turn_recorded(

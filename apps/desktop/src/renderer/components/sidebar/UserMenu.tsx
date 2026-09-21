@@ -68,7 +68,7 @@ export function UserMenu() {
                 {avatar}
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent side="right" align="end" className="min-w-36">
+            <DropdownMenuContent side="right" align="end">
               <DropdownMenuItem onSelect={goSettings}>
                 <Settings size={14} />
                 设置

@@ -442,7 +442,6 @@ export function ConversationItem({
                     </DropdownMenuTrigger>
                     <DropdownMenuContent
                       align="end"
-                      className="min-w-52"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <DropdownMenuItem onSelect={() => startEdit()}>
@@ -524,7 +523,7 @@ export function ConversationItem({
         </TooltipContent>
       </Tooltip>
 
-      <ContextMenuContent className="min-w-52">
+      <ContextMenuContent>
         <ContextMenuItem onSelect={() => startEdit()}>
           <Pencil size={14} className="shrink-0" />
           <span className="flex-1 truncate">重命名</span>

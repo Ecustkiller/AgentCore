@@ -174,16 +174,16 @@ def _format_one(
     if ev.kind is CoordinationEventKind.ESCALATION:
         role = p.get("role") or p.get("run_id") or "?"
         run_id = p.get("run_id") or "?"
-        esc_kind = p.get("kind") or "normal"
+        esc_kind = p.get("reason") or "wait"
         src = p.get("source") or "escalate"
         question = p.get("question") or p.get("summary") or ""
         assumption = p.get("assumption") or ""
         ownership_bit = _format_ownership_escalation_hint(p)
-        if p.get("blocking"):
+        if esc_kind == "wait":
             assume_bit = f"；队员假设：{assumption}" if assumption else ""
             timeout_bit = "；超时无响应时队员会按假设继续。" if assumption else ""
             return (
-                f"- escalation【阻塞仲裁】【{role}】run_id={run_id} "
+                f"- escalation【等拍板】【{role}】run_id={run_id} "
                 f"{esc_kind}（via {src}）：{question}{assume_bit}"
                 f"{ownership_bit}{timeout_bit}"
             )

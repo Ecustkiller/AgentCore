@@ -45,7 +45,7 @@ class EngineSettings(BaseModel):
     engine_tool_clear_exec_keep_recent: int = 1
     # 写参 keep-recent（library projection only; 不进热路径）。
     engine_write_args_clear_keep_recent: int = 1
-    # R1: when clearing a large file_read result, append a deterministic structural
+    # R1: when clearing a large read result, append a deterministic structural
     # digest (chars). 0 = pointer-only rollback (no summary). Must keep
     # pointer+summary strictly below engine_tool_clear_min_chars (idempotency).
     engine_tool_clear_file_read_summary_max_chars: int = 1200

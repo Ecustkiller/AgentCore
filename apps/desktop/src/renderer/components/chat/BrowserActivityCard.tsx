@@ -60,7 +60,6 @@ interface BrowserStepView {
   status: ToolStep["status"];
   url: string;
   title?: string;
-  detail?: string;
   frame?: string;
 }
 
@@ -92,7 +91,6 @@ function browserStepsFromTools(tools: ToolStep[]): BrowserStepView[] {
         status: t.status,
         url: t.display.url,
         title: t.display.title,
-        detail: t.display.detail,
         frame: t.display.frame,
       };
     }
@@ -102,13 +100,14 @@ function browserStepsFromTools(tools: ToolStep[]): BrowserStepView[] {
   });
 }
 
-/** A one-line human label for a frame (lightbox caption / img alt). */
+/** A one-line human label for a frame (lightbox caption / img alt). Identity, not action restatement. */
 function frameAlt(step: {
   action: string;
-  detail?: string;
+  title?: string;
   url?: string;
 }): string {
-  if (step.detail) return step.detail;
+  const title = step.title?.trim() ?? "";
+  if (title) return title;
   const { label } = browserActionMeta(step.action);
   return step.url ? `${label} · ${step.url}` : label;
 }
@@ -306,7 +305,7 @@ function BrowserStepRow({
 }) {
   const { Icon, label } = browserActionMeta(step.action);
   const alt = frameAlt(step);
-  const subline = browserSubline(step.detail, step.url);
+  const subline = browserSubline(step.title, step.url);
   return (
     <LiveFlow
       active={step.status === "running"}
@@ -396,7 +395,7 @@ export function BrowserActivityCard({
 
   return (
     <div>
-      <LiveFlow active={headerLive} className="mb-1.5 min-w-0 w-full">
+      <LiveFlow active={headerLive} className="mb-2 min-w-0 w-full">
         <button
           type="button"
           onClick={toggleExpanded}
@@ -500,25 +499,22 @@ export function BrowserResult({
   );
 }
 
-/** Expanded-card subline: one row. If detail already contains url (navigate「打开 {url}」),
- * keep detail only; otherwise join distinct facts as「detail · url」. */
-export function browserSubline(detail?: string, url?: string): string {
-  const d = detail?.trim() ?? "";
+/** Expanded-card subline: page identity. Title + url when they are distinct;
+ * never action restatement / ref / snapshot version. */
+export function browserSubline(title?: string, url?: string): string {
+  const t = title?.trim() ?? "";
   const u = url?.trim() ?? "";
-  if (d && u && d.includes(u)) return d;
-  if (d && u) return `${d} · ${u}`;
-  return d || u;
+  if (t && u && t.includes(u)) return t;
+  if (t && u) return `${t} · ${u}`;
+  return t || u;
 }
 
-/** Collapsed ToolLine chip for one browser step.
- * Navigate: page title (the destination's identity), else url — not「打开 {url}」.
- * Other actions: what happened (detail), else title, else url. */
+/** Collapsed ToolLine chip for one browser step: page title, else url.
+ * Action restatement (读取页面结构 / 截取当前页面 / 点击元素 ref) stays off the row. */
 export function browserResultTail(display: BrowserDisplay): string {
   const title = display.title?.trim() ?? "";
-  const detail = display.detail?.trim() ?? "";
   const url = display.url?.trim() ?? "";
-  if (display.action === "navigate") return title || url;
-  return detail || title || url;
+  return title || url;
 }
 
 /** True when `tail` already names `url` (trailing-slash variants count as the same). */

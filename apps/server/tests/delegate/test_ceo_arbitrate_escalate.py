@@ -58,16 +58,15 @@ def test_inject_blocking_escalation_states_facts():
                 payload={
                     "run_id": "r1",
                     "role": "研究员",
-                    "kind": "normal",
+                    "reason": "wait",
                     "question": "选 Postgres 还是 MySQL？",
                     "assumption": "暂按 Postgres",
-                    "blocking": True,
                     "source": "blocking_arbitrate",
                 },
             )
         ],
     )
-    assert "阻塞仲裁" in text
+    assert "等拍板" in text
     assert "选 Postgres 还是 MySQL？" in text
     assert "暂按 Postgres" in text
     assert "transfer_ownership" not in text
@@ -83,10 +82,9 @@ def test_inject_ownership_conflict_flags_nested_child():
                 payload={
                     "run_id": "storage",
                     "role": "存储层",
-                    "kind": "dep",
+                    "reason": "dep",
                     "question": "写入冲突：`src/storage/db.ts` 已归队友",
                     "assumption": "等主管移交",
-                    "blocking": True,
                     "source": "blocking_arbitrate",
                     "ownership_paths": ["src/storage/db.ts"],
                     "lock_owner_run_id": "backend-fix",
@@ -158,7 +156,6 @@ async def test_blocking_escalate_routes_to_ceo_when_coordination_active():
             {
                 "question": "选库？",
                 "assumption": "暂按 Postgres",
-                "blocking": True,
             },
             _ctx(escalation=channel),
         )
@@ -191,7 +188,6 @@ async def test_blocking_escalate_stays_user_without_coordination():
         {
             "question": "选库？",
             "assumption": "暂按 Postgres",
-            "blocking": True,
         },
         _ctx(execution_id="e-classic", escalation=channel),
     )
@@ -224,7 +220,6 @@ async def test_ownership_question_escalate_goes_to_ceo_under_coordination():
             {
                 "question": "写入冲突：`site/index.html` 已归队友负责",
                 "assumption": "等移交后再写",
-                "blocking": True,
             },
             _ctx(execution_id="e-own-u", escalation=channel, run_id="skeleton"),
         )
@@ -258,7 +253,6 @@ async def test_completed_owner_ownership_escalate_goes_to_ceo():
             {
                 "question": "写入冲突：`trip-plan/transport-stay.md` 已归队友负责",
                 "assumption": "等主管同座续派",
-                "blocking": True,
             },
             _ctx(execution_id="e-own-done", escalation=channel, run_id="transport-stay-v2"),
         )
@@ -294,7 +288,6 @@ async def test_ended_owner_ownership_escalate_goes_to_ceo():
             {
                 "question": "写入冲突：`docs/plan.md` 已归队友负责",
                 "assumption": "等主管同座续派",
-                "blocking": True,
             },
             _ctx(execution_id="e-own-ended", escalation=channel, run_id="merger"),
         )
@@ -362,7 +355,6 @@ async def test_nested_ended_escalate_uses_parent_coordination():
             {
                 "question": "写入冲突：`docs/plan.md` 已归队友负责",
                 "assumption": "等主管",
-                "blocking": True,
             },
             _ctx(execution_id="nested-only", escalation=channel, run_id="merger"),
         )

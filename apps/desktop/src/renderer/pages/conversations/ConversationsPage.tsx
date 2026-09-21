@@ -228,7 +228,7 @@ export function ConversationsPage() {
                     最近优先
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="min-w-40">
+                <DropdownMenuContent align="start">
                   <DropdownMenuItem disabled>
                     <Check size={14} className="shrink-0 text-primary" />
                     <span className="flex-1">最近优先</span>

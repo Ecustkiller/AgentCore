@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from collections.abc import Awaitable
@@ -20,7 +21,6 @@ from agentcore.llm.profiles import TurnProfiles
 from agentcore.memory import assemble_turn_rules
 from agentcore.runtime.context import (
     build_workspace_context,
-    collect_outlet_inventory,
     detect_workspace_git,
     resolve_channel_profile,
 )
@@ -35,6 +35,7 @@ from agentcore.runtime.resolve.prepare import (
 from agentcore.runtime.resolve.prompt import (
     assemble_system_prompt,
     compose_worker_base_prompt,
+    render_worker_turn_envelope,
 )
 from agentcore.runtime.skills import build_system_skill_registry
 from agentcore.tools.builtin import build_worker_registry
@@ -44,12 +45,85 @@ from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 from agentcore.workspace.cloud_tree import normalize_rel_path
 from agentcore.workspace.locate import (
-    resolve_conversation_local_binding,
     workspace_channel_for_tools,
 )
 from agentcore.workspace.protocol import WorkspaceBackend
 
 logger = get_logger(__name__)
+
+
+async def list_consult_entries(registry: ToolRegistry, user_id: str) -> list:
+    """``<按需目录>`` rows for this registry's consult source. Empty if unwired."""
+    consult = registry.get_optional("consult")
+    source = getattr(consult, "source", None) if consult is not None else None
+    if source is None:
+        return []
+    return list(await source.list_directory(user_id))
+
+
+async def _probe_local_workspace(
+    backend: WorkspaceBackend, attachments: list[dict] | None
+) -> tuple[object, object, bool, object]:
+    """Git / empty-desk / exec-language probes share one local-IO budget; run together."""
+    from agentcore.runtime.pipeline.errors import (
+        await_prepare_local_io,
+        prepare_local_io_span,
+    )
+    from agentcore.tools.sandbox.exec_languages import resolve_exec_languages
+    from agentcore.workspace.desk_empty import desk_is_visibly_empty
+    from agentcore.workspace.sparse_listing import collect_turn_material_paths
+
+    material_paths = collect_turn_material_paths(attachments)
+    backend.ai_list_materials = material_paths
+    with prepare_local_io_span(backend):
+        exec_languages, git_fact, desk_visibly_empty = await _gather_cancel_on_fail(
+            _timed_phase(
+                "exec_languages",
+                await_prepare_local_io(resolve_exec_languages(backend)),
+            ),
+            _timed_phase("git", await_prepare_local_io(detect_workspace_git(backend))),
+            _timed_phase(
+                "desk_empty",
+                await_prepare_local_io(desk_is_visibly_empty(backend)),
+            ),
+        )
+    return exec_languages, git_fact, desk_visibly_empty, material_paths
+
+
+async def _resolve_table_context(
+    *,
+    table_id: str | None,
+    table_selection: list[str] | None,
+    user_id: str,
+    conversation_id: str,
+    folder_id: str | None,
+    attachments: list[dict] | None,
+) -> tuple[str | None, str]:
+    if table_id is None:
+        from agentcore.table.bind import lookup_table_id_for_turn
+
+        try:
+            table_id = await lookup_table_id_for_turn(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                folder_id=folder_id,
+                attachments=attachments,
+            )
+        except Exception:
+            table_id = None
+    table_context = ""
+    if table_id:
+        from agentcore.table.context import render_table_context, sanitize_table_selection
+
+        try:
+            table_context = await render_table_context(
+                table_id=table_id,
+                user_id=user_id,
+                selected_ids=sanitize_table_selection(table_selection),
+            )
+        except Exception:
+            table_context = ""
+    return table_id, table_context
 
 
 async def _timed_phase[T](phase: str, awaitable: Awaitable[T]) -> T:
@@ -63,6 +137,22 @@ async def _timed_phase[T](phase: str, awaitable: Awaitable[T]) -> T:
             phase=phase,
             ms=int((time.monotonic() - started) * 1000),
         )
+
+
+async def _gather_cancel_on_fail(*aws: Awaitable) -> tuple:
+    """Like ``asyncio.gather`` but cancel siblings when one fails (no leaked probes)."""
+    tasks = [
+        aw if isinstance(aw, asyncio.Task) else asyncio.create_task(aw)
+        for aw in aws
+    ]
+    try:
+        return tuple(await asyncio.gather(*tasks))
+    except BaseException:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
 
 
 async def resolve_desk_folder_label(
@@ -135,6 +225,7 @@ class PreparedTurn:
     system_prompt: str
     workspace_facts: str
     worker_base_prompt: str
+    worker_envelope: str
     worker_tools: ToolRegistry
     skill_registry: object
     table_context: str
@@ -147,8 +238,6 @@ class PreparedTurn:
     execution_id_token: object
     mcp_discover: McpDiscoverResult
     member_turn: bool
-    folder_explore_reason: str | None = None
-    explore_workspace_key: str | None = None
 
 
 async def prepare_fresh_turn(
@@ -178,47 +267,16 @@ async def prepare_fresh_turn(
     from agentcore.runtime.pipeline import run as run_mod
 
     memory_store = run_mod.default_memory_store()
-    desk_owner_id = await resolve_folder_owner_user_id(folder_id)
-    folder_rules_user_id = desk_owner_id or user_id
-    member_turn = await caller_is_desk_member(user_id=user_id, folder_id=folder_id)
-    # Member turns still inject the owner's folder-layer 规则; account-level stays private.
-    injected_binding = None
-    folder_explore_reason: str | None = None
-    explore_workspace_key: str | None = None
-    if folder_id:
-        from agentcore.memory.explore_profile import resolve_turn_explore_gate
-
-        if folder_binding_injected:
-            injected_binding = resolve_conversation_local_binding(
-                local_root_id=folder_local_root_id,
-                local_subpath=folder_local_subpath,
-            )
-        folder_explore_reason, explore_workspace_key = await _timed_phase(
-            "explore_gate",
-            resolve_turn_explore_gate(
-                memory_store,
-                folder_rules_user_id,
-                folder_id,
-                binding=injected_binding,
-                binding_injected=folder_binding_injected,
-            ),
-        )
-    rules_markdown = await _timed_phase(
-        "rules",
-        assemble_turn_rules(
-            memory_store,
-            user_id,
-            folder_id=folder_id,
-            folder_user_id=folder_rules_user_id,
-        ),
+    desk_owner_id, member_turn = await _gather_cancel_on_fail(
+        resolve_folder_owner_user_id(folder_id),
+        caller_is_desk_member(user_id=user_id, folder_id=folder_id),
     )
-    # Clean, stable base (base + date + workspace facts + memory): NO attachments,
-    # NO CEO hints. This is the cacheable prefix shared by the CEO and reused
-    # verbatim by workers. Environment facts ride the shared base so workers also
-    # know execution location (防止空云 scratch 里幻觉装软件). The (per-turn, variable)
-    # attachment block is appended LAST below — after the stable CEO hint stack —
-    # so a turn carrying attached files does not bust DeepSeek's prefix cache for
-    # the hints (缓存友好: 易变内容置于稳定前缀之后).
+    folder_rules_user_id = desk_owner_id or user_id
+    # Member turns still inject the owner's folder-layer 规则; account-level stays private.
+    # Clean shared base (constitution + always-on ``<设定>``): NO date, NO
+    # workspace facts, NO attachments, NO CEO hints. Cacheable prefix shared by
+    # the CEO and workers. Date / workspace / attachments ride ``[系统提示]``
+    # envelopes (opening user), not ``role: system``.
     # Host / MCP backfill needs a desktop client — orthogonal to workspace location.
     # Member turns: same client header, but no desktop fulfill (协作桌 · 否决本地共享).
     channel = resolve_channel_profile(x_client_platform).for_turn(
@@ -229,8 +287,6 @@ async def prepare_fresh_turn(
     # turn-wide deadline (baseline already spent part of it) and starts its own
     # when prepare is invoked alone, e.g. tests / stage-card / workflow entries.
     from agentcore.runtime.pipeline.errors import (
-        await_prepare_local_io,
-        prepare_local_io_span,
         raise_if_local_workspace_fulfiller_absent,
     )
 
@@ -250,64 +306,71 @@ async def prepare_fresh_turn(
             backend = adopted.backend
             auto_desk_folder_id = adopted.folder_id
     sitting_folder_id = folder_id or auto_desk_folder_id
-    desk_folder_label = await _timed_phase(
-        "desk_folder_label",
-        resolve_desk_folder_label(folder_rules_user_id, sitting_folder_id),
+    # Desktop channel early: MCP discovery (stdio on desktop) must complete before
+    # workspace_context stamps mcp= — same ClientTool sink the turn will stream.
+    desktop_channel = (
+        DesktopClientChannel(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            registry=default_interaction_registry(),
+            timeout_seconds=settings.board_op_timeout_seconds,
+        )
+        if desktop_online
+        else None
     )
-    with prepare_local_io_span(backend):
-        from agentcore.tools.sandbox.exec_languages import resolve_exec_languages
-
-        exec_languages = await _timed_phase(
-            "exec_languages",
-            await_prepare_local_io(resolve_exec_languages(backend)),
-        )
-        # Desktop channel early: MCP discovery (stdio on desktop) must complete before
-        # workspace_context stamps mcp= — same ClientTool sink the turn will stream.
-        desktop_channel = (
-            DesktopClientChannel(
-                user_id=user_id,
-                conversation_id=conversation_id,
-                registry=default_interaction_registry(),
-                timeout_seconds=settings.board_op_timeout_seconds,
-            )
-            if desktop_online
-            else None
-        )
-        from agentcore.tools.mcp import discover_mcp_tools, mcp_capability_label, register_mcp_tools
-
-        mcp_discover = await _timed_phase(
-            "mcp",
-            discover_mcp_tools(desktop_channel, cache_scope=user_id, cache_only=True),
-        )
-        mcp_label = mcp_capability_label(mcp_discover, desktop_online=desktop_online)
-        git_fact = await _timed_phase(
-            "git", await_prepare_local_io(detect_workspace_git(backend))
-        )
-        from agentcore.workspace.sparse_listing import collect_turn_material_paths
-
-        material_paths = collect_turn_material_paths(attachments)
-        backend.ai_list_materials = material_paths
-        outlet_inventory = await _timed_phase(
-            "outlet_inventory",
-            await_prepare_local_io(collect_outlet_inventory(backend)),
-        )
-        from agentcore.workspace.desk_empty import desk_is_visibly_empty
-
-        desk_visibly_empty = await _timed_phase(
-            "desk_empty",
-            await_prepare_local_io(desk_is_visibly_empty(backend)),
-        )
+    from agentcore.llm.credentials import bind_credential_pricing_context
+    from agentcore.tools.mcp import discover_mcp_tools, mcp_capability_label, register_mcp_tools
     from agentcore.tools.sandbox.desk_provision import provision_server_desk
 
+    # Call-level pricing + optional user unit card (同路贯穿 calculate_cost).
+    # Bind before the gather so the LLM-router task inherits the context.
+    bind_credential_pricing_context(llm_credentials)
+    # Independent IO: rules / desk name / LLM router / cache-only MCP / local
+    # probes / cloud guest boot. Presence + auto-desk already settled the sitting root.
     # Outside the local-IO span: cloud guest boot must not spend the 20s local
     # presence budget. Chat-path ``run`` never waits this. Air bubble uses
     # ``desk_provision_wait`` (preparing-cloud), not empty Thinking…
-    await _timed_phase(
-        "cloud_desk",
-        provision_server_desk(
-            backend, conversation_id=conversation_id, sink=sink
+    (
+        rules_markdown,
+        desk_folder_label,
+        llm,
+        mcp_discover,
+        local_probe,
+        _,
+    ) = await _gather_cancel_on_fail(
+        _timed_phase(
+            "rules",
+            assemble_turn_rules(
+                memory_store,
+                user_id,
+                folder_id=folder_id,
+                folder_user_id=folder_rules_user_id,
+            ),
+        ),
+        _timed_phase(
+            "desk_folder_label",
+            resolve_desk_folder_label(folder_rules_user_id, sitting_folder_id),
+        ),
+        _timed_phase(
+            "llm",
+            pipeline_pkg.build_turn_router(
+                llm_credentials, user_id=user_id, profiles=profiles
+            ),
+        ),
+        _timed_phase(
+            "mcp",
+            discover_mcp_tools(desktop_channel, cache_scope=user_id, cache_only=True),
+        ),
+        _probe_local_workspace(backend, attachments),
+        _timed_phase(
+            "cloud_desk",
+            provision_server_desk(
+                backend, conversation_id=conversation_id, sink=sink
+            ),
         ),
     )
+    exec_languages, git_fact, desk_visibly_empty, material_paths = local_probe
+    mcp_label = mcp_capability_label(mcp_discover, desktop_online=desktop_online)
     workspace_facts = build_workspace_context(
         backend,
         desktop_online=desktop_online,
@@ -316,7 +379,6 @@ async def prepare_fresh_turn(
         mcp_enabled=mcp_discover.tool_count > 0,
         mcp_label=mcp_label,
         git_fact=git_fact,
-        outlet_inventory=outlet_inventory,
         desk_folder_id=sitting_folder_id,
         desk_folder_label=desk_folder_label,
         desk_is_birth=folder_id is not None,
@@ -342,18 +404,57 @@ async def prepare_fresh_turn(
         languages=exec_languages if backend.location == "local" else None,
         desktop_online=desktop_online,
     )
-    attachment_prompt = await _timed_phase(
-        "attachments",
-        _build_attachment_prompt(
-            attachments,
-            user_id=user_id,
-            host_conversation_id=conversation_id,
-            backend=backend,
-            main_native_vision=main_native_vision,
-            native_image_parts=native_image_parts if main_native_vision else None,
-            available_tools=worker_tools.names,
-        ),
+    # Snapshot names before consult/MCP mutate the registry (attachments read-only).
+    opening_tool_names = worker_tools.names
+    skill_registry = build_system_skill_registry()
+    register_mcp_tools(worker_tools, mcp_discover)
+    _wire_conversation_log_tools(
+        worker_tools,
+        folder_id=folder_id,
     )
+
+    async def _worker_on_demand() -> list:
+        await wire_worker_consult(
+            worker_tools,
+            skill_registry=skill_registry,
+            folder_id=folder_id,
+            user_id=user_id,
+        )
+        return await _timed_phase(
+            "on_demand_dir",
+            list_consult_entries(worker_tools, user_id),
+        )
+
+    from agentcore.runtime.deep_research_auto import load_deep_research_auto_state
+
+    attachment_prompt, on_demand_entries, table_resolved, deep_research_state = (
+        await _gather_cancel_on_fail(
+            _timed_phase(
+                "attachments",
+                _build_attachment_prompt(
+                    attachments,
+                    user_id=user_id,
+                    host_conversation_id=conversation_id,
+                    backend=backend,
+                    main_native_vision=main_native_vision,
+                    native_image_parts=native_image_parts if main_native_vision else None,
+                    available_tools=opening_tool_names,
+                ),
+            ),
+            _worker_on_demand(),
+            _resolve_table_context(
+                table_id=table_id,
+                table_selection=table_selection,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                folder_id=folder_id,
+                attachments=attachments,
+            ),
+            load_deep_research_auto_state(conversation_id),
+        )
+    )
+    table_id, table_context = table_resolved
+    deep_research_auto, deep_research_auto_debate_count = deep_research_state
     attachment_context = merge_attachment_and_mention_context(
         attachment_prompt.envelope, agent_mentions
     )
@@ -370,83 +471,21 @@ async def prepare_fresh_turn(
         attachment_slim,
     )
     attachment_context = attachment_context or ""
-    # Workers hold no CEO hints; their base is the shared base + the same
-    # ``<按需目录>`` (name＋摘要) + workspace facts (after the directory, same
-    # SectionOrder as the CEO) + the same attachment block at the end.
-    skill_registry = build_system_skill_registry()
-    register_mcp_tools(worker_tools, mcp_discover)
-    await wire_worker_consult(
-        worker_tools,
-        skill_registry=skill_registry,
-        folder_id=folder_id,
-        user_id=user_id,
-    )
-    _wire_conversation_log_tools(
-        worker_tools,
-        folder_id=folder_id,
-    )
-    on_demand_entries: list = []
-    worker_consult = worker_tools.get_optional("consult")
-    if worker_consult is not None and getattr(worker_consult, "source", None) is not None:
-        on_demand_entries = list(await worker_consult.source.list_directory(user_id))
+    # Workers hold no CEO hints; frozen system is shared base + ``<按需目录>``.
+    # Date / workspace / attachments ride ``worker_envelope`` (opening user).
     worker_base_prompt = compose_worker_base_prompt(
         system_prompt,
         on_demand_entries=on_demand_entries,
-        attachment_context=attachment_context,
+    )
+    worker_envelope = render_worker_turn_envelope(
         workspace_context=workspace_facts,
+        attachment_context=attachment_context,
     )
-    # System skills back the unified consult tool + ``<按需目录>`` (CEO wires later).
-    # 真·多模型辩手：回合 llm = DeepSeek 默认（``build_provider``，保留可测试打桩的 seam）
-    # 外包一层 ProviderRouter。无前缀模型（CEO / 委派 / 主持人）照走默认，仅辩论辩手 side
-    # 带 ``provider/model`` 前缀的调用路由到对应厂商。无厂商 key 时只是空包一层，零行为变化。
-    # Cross-provider Worker 默认经 ``build_turn_router`` 注入 BYOK extras。
-    # 路由器接管默认 + 厂商 client 的生命周期，由下方 finally 的 ``await llm.close()`` 释放。
-    from agentcore.llm.credentials import bind_credential_pricing_context
-
-    # Call-level pricing + optional user unit card (同路贯穿 calculate_cost).
-    bind_credential_pricing_context(llm_credentials)
-    llm = await _timed_phase(
-        "llm",
-        pipeline_pkg.build_turn_router(
-            llm_credentials, user_id=user_id, profiles=profiles
-        ),
-    )
-    if table_id is None:
-        from agentcore.table.bind import lookup_table_id_for_turn
-
-        try:
-            table_id = await lookup_table_id_for_turn(
-                user_id=user_id,
-                conversation_id=conversation_id,
-                folder_id=folder_id,
-                attachments=attachments,
-            )
-        except Exception:
-            table_id = None
-    table_context = ""
-    if table_id:
-        from agentcore.table.context import render_table_context, sanitize_table_selection
-
-        try:
-            table_context = await render_table_context(
-                table_id=table_id,
-                user_id=user_id,
-                selected_ids=sanitize_table_selection(table_selection),
-            )
-        except Exception:
-            table_context = ""
     # desktop_channel created earlier (MCP discovery); reuse the same instance.
     workspace_channel = workspace_channel_for_tools(
         backend,
         user_id=user_id,
         conversation_id=conversation_id,
-    )
-
-    # 深度研究自治：会话旗标 + 自动开辩计数（kickoff / ceo_format 经 ToolContext 读取）。
-    from agentcore.runtime.deep_research_auto import load_deep_research_auto_state
-
-    deep_research_auto, deep_research_auto_debate_count = (
-        await load_deep_research_auto_state(conversation_id)
     )
 
     # The workspace backend is resolved per conversation by the caller
@@ -526,6 +565,7 @@ async def prepare_fresh_turn(
         system_prompt=system_prompt,
         workspace_facts=workspace_facts,
         worker_base_prompt=worker_base_prompt,
+        worker_envelope=worker_envelope,
         worker_tools=worker_tools,
         skill_registry=skill_registry,
         table_context=table_context,
@@ -538,6 +578,4 @@ async def prepare_fresh_turn(
         execution_id_token=execution_id_token,
         mcp_discover=mcp_discover,
         member_turn=member_turn,
-        folder_explore_reason=folder_explore_reason,
-        explore_workspace_key=explore_workspace_key,
     )

@@ -48,7 +48,7 @@ class FileProductsContract(StrEnum):
     # 迁移中：会落盘、自报还没接。待接清单**只减不增**（棘轮用真跑用例证明它确实还没自报），
     # 现已清空——再用这一档要先推翻棘轮里那条「下界是空」的断言。
     SELF_REPORT_PENDING = "self_report_pending"
-    # 不往工作区写任何字节（file_read / file_list / glob / grep）。
+    # 不往工作区写任何字节（read / file_list / glob / grep）。
     # 与审批面互锁：``workspace_io`` 里只有 ``ToolApproval.NEVER`` 才配声明只读——要写盘授权
     # 又自称只读的组合会被棘轮拦下。
     READ_ONLY = "read_only"
@@ -62,8 +62,8 @@ class CeoWire(StrEnum):
     """When a CEO-orchestration tool is wired at runtime (catalog always lists it)."""
 
     ALWAYS = "always"
-    MEMORY = "memory"
-    # Unified on-demand catalog non-empty → ``consult`` (技能 ∪ 规则 ∪ 低频工具).
+    # Unified on-demand catalog → ``consult`` (技能 ∪ 规则 ∪ 低频工具). Always on the
+    # opening table; empty catalog is a soft miss, not an omitted tool.
     CONSULT = "consult"
     CHECKPOINT = "checkpoint"
     # Advertised in catalog; runtime inject via ``ceo_surface`` (idle/coord gate).
@@ -95,9 +95,6 @@ class ToolRegistration:
     # Desktop-online-only tools (≠ Host face): gated solely by ``desktop_online``.
     # Not gated by ``host≠off``.
     desktop_online_class: bool = False
-    # Workspace-git face (``git``): gated by ``git_execution_enabled_for`` — a root
-    # to spawn ``git`` under (cloud / sidecar), else a live desktop channel.
-    git_class: bool = False
     # Catalog-gated tools: listed on the roster + capability catalog, but NOT
     # auto-registered by ``build_worker_registry``. Callers wire them after the
     # registry is built (e.g. ``_wire_conversation_log_tools``). Same
@@ -112,11 +109,13 @@ class ToolRegistration:
     # 工具只写「没有专用导出器、靠脚本才能产」的格式。事实行读本字段 + 本回合装配闸，
     # 不另维护一份格式白名单。
     produces_formats: tuple[str, ...] = ()
-    # Opening FC table when assembled. False → ``<按需目录>`` until ``consult``.
+    # Human catalog chip: True = 开场即用. Does not gate the opening FC table.
+    # Factory builtins stay True; assembled MCP actions are also opening-resident.
     resident: bool = True
-    # One-line "这是什么" for the toolbox shelf (and the on-demand directory when
-    # ``resident`` is False). Required for every declared tool — empty = blank card.
+    # One-line "这是什么" for the toolbox shelf. Required — empty = blank card.
     catalog_summary: str = ""
+    # Toolbox-card description only — never the consult directory or schema.
+    blurb: str = ""
     # Takes workspace-relative paths / may land files. Ratchet landing surface
     # (with ``execution_class``); not a grouping axis — grouping is ``ToolFace``.
     workspace_io: bool = False

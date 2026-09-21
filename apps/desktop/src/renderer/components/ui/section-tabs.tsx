@@ -13,7 +13,7 @@ export interface SectionTabItem {
 export interface SectionTabsProps {
   "aria-label": string;
   items: SectionTabItem[];
-  /** Same-row trailing slot (toolbox: 市场). */
+  /** Same-row trailing slot. */
   action?: ReactNode;
   className?: string;
 }

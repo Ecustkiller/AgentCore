@@ -79,7 +79,7 @@ describe("AgentNodeCardFace · debate identity", () => {
 
   it("live tool composing has no block caret", () => {
     const d = debateNode({
-      toolProgress: { toolName: "file_write", chars: 2100 },
+      toolProgress: { toolName: "write", chars: 2100 },
     });
     const p = buildAgentNodePresentation(d);
     render(

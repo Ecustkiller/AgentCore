@@ -7,7 +7,7 @@
   "checks": [
     { "name": "FinishReason" },
     { "name": "NotDelegated" },
-    { "name": "ToolCalled", "tool": "file_write" }
+    { "name": "ToolCalled", "tool": "write" }
   ],
-  "rubric": "全文已在窗里的一眼小落盘：切不出去、编码≈做完，CEO 自己 file_write。对照成篇/800 字落盘该派——不是『有路径就派』。"
+  "rubric": "全文已在窗里的一眼小落盘：切不出去、编码≈做完，CEO 自己 write。对照成篇/800 字落盘该派——不是『有路径就派』。"
 }

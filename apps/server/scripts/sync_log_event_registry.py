@@ -117,6 +117,10 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "max_properties_per_tool": "int",
         "exceeded": "list",
     },
+    "llm.http_pool.warmed": {
+        "host": "str",
+        "ok": "bool",
+    },
     "platform_pool.blocked": {
         "credential_id": "str",
         "reason": "str",
@@ -341,6 +345,12 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "folder_id": "str",
         "error": "str",
     },
+    "sidecar.warm_llm_http": {
+        "ok": "bool",
+    },
+    "sidecar.warm_llm_http_failed": {
+        "error": "str",
+    },
     "delegate.started": {
         "nodes": "int",
         "call": "str",
@@ -413,8 +423,7 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "gaps_count": "int",
     },
     "worker.escalate": {
-        "kind": "str",
-        "blocking": "bool",
+        "reason": "str",
         "question": "str",
         "assumption": "str",
     },
@@ -703,19 +712,6 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "limit": "int",
         "model": "str",
         "scenario": "str",
-    },
-    "memory.consolidation_failed": {
-        "conversation_id": "str",
-        "error": "str",
-        "error_type": "str",
-        "reason": "str",
-    },
-    "memory.consolidation_window_dropped": {
-        "conversation_id": "str",
-        "error": "str",
-        "error_type": "str",
-        "reason": "str",
-        "window_through": "str",
     },
     "server.started": {
         "host": "str",
@@ -1095,13 +1091,13 @@ HISTORICAL_COMPAT: dict[str, str] = {
         "历史兼容：曾在白板 AI 视觉读失败时发出；白板 AI 工具面已卸，不再发此事件"
     ),
     "read_image.read": (
-        "历史兼容：曾为独立 read_image 工具读图；现并入 file_read，不再发此事件"
+        "历史兼容：曾为独立 read_image 工具读图；现并入 read，不再发此事件"
     ),
     "read_image.vision_failed": (
-        "历史兼容：曾为独立 read_image 视觉失败；现并入 file_read，不再发此事件"
+        "历史兼容：曾为独立 read_image 视觉失败；现并入 read，不再发此事件"
     ),
     "attachment.vision_billing_failed": (
-        "历史兼容：曾为附件视觉计费失败；现并入 file_read 路径，不再发此事件"
+        "历史兼容：曾为附件视觉计费失败；现并入 read 路径，不再发此事件"
     ),
 }
 
@@ -1202,7 +1198,7 @@ KEY_DESC: dict[str, str] = {
         "交付卡已发射（state + artifacts/accepted/rejected/gaps 计数）"
     ),
     "worker.escalate": "worker 升级求决策",
-    "tool.execute_start": "工具开始执行（web_fetch/download_url 带 url/host）",
+    "tool.execute_start": "工具开始执行（web_fetch 带 url/host）",
     "tool.execute_end": "工具执行结束（status/duration_ms；error 时带 reason；URL 工具带 url/host）",
     "tool.web_fetch_error": "web_fetch 抓取失败（url/host/error）",
     "tool.args_salvaged": "参数 JSON 结构修复成功（完整值后的尾部多余字符被丢掉）",
@@ -1247,6 +1243,9 @@ KEY_DESC: dict[str, str] = {
     "llm.stream_stalled": (
         "LLM 流式空闲超时（model/credential_source；可取则带 provider_id / "
         "platform_credential_id）"
+    ),
+    "llm.http_pool.warmed": (
+        "出站 LLM HTTP 握手（GET /models；ok=False 为握手失败，不发补全）"
     ),
     "cost.recorded": "回合落账成功（含 by_role 角色拆解）",
     "cost.currency_mixed": (
@@ -1309,10 +1308,6 @@ KEY_DESC: dict[str, str] = {
     "compaction.failed": "长对话压缩失败（顶层异常；不推水位）",
     "compaction.timeout": "长对话压缩 LLM 超时（空摘要；不推水位）",
     "compaction.schedule_failed": "压缩调度 due 判定异常",
-    "memory.consolidation_failed": (
-        "consolidation 失败但保留水位（下轮重选）；error_type = 异常类名，"
-        "与 reason 对照可定位是哪一层把上游异常包装丢了分类"
-    ),
     "server.started": (
         "服务端启动完成；version（包元数据 semver）+ git_sha（构建期注入）"
         "标明该进程构建来源，与 GET /version 同源"
@@ -1351,9 +1346,6 @@ KEY_DESC: dict[str, str] = {
     "sandboxd.preview_registered": "sandboxd 已登记一条用户预览上游（guest bridge）",
     "sandboxd.preview_unregistered": "sandboxd 已去掉一条用户预览上游",
     "compaction.shutdown_timeout": "停机 flush 在飞 fold 超时（best-effort，取消剩余 task）",
-    "memory.consolidation_window_dropped": (
-        "不可重试 consolidation 失败：推进水位并丢弃本窗口（防 sweeper 无限重选）"
-    ),
     "rate_limit.redis_fail_open": (
         "Redis 限流请求中途失败 → fail-open 放行本请求（可告警；与 construct 期 "
         "security.rate_limit_redis_fallback 对偶）"
@@ -1397,7 +1389,7 @@ KEY_DESC: dict[str, str] = {
         "工作区原子写 os.replace 遇到短暂占用，按退避重试"
     ),
     "workspace.atomic_write_inplace_fallback": (
-        "工作区原子写 replace 重试耗尽后降级原地 write_bytes（与 file_write 同档）"
+        "工作区原子写 replace 重试耗尽后降级原地 write_bytes（与 write 同档）"
     ),
     "workspace.index_failed": "工作区文件清单 listing 失败（best-effort，不挡回合）",
     "sidecar.warm_mcp_discover": "静默暖 MCP 列表进进程缓存（warmMcpDiscover RPC seed）",
@@ -1405,6 +1397,8 @@ KEY_DESC: dict[str, str] = {
         "静默暖账户 rules/memory 进 prepare 快照缓存（warmAccountRulesMemory）"
     ),
     "sidecar.warm_account_rules_memory_failed": "warmAccountRulesMemory 拉取失败",
+    "sidecar.warm_llm_http": "输入框首次聚焦后握手 LLM 出站连接（GET /models，不发补全）",
+    "sidecar.warm_llm_http_failed": "warmLlmHttp 握手任务意外失败",
     "account.rules_memory_cache_hit": "prepare rules/memory 命中进程快照缓存",
     "account.rules_memory_cache_miss": (
         "prepare rules/memory 只读缓存未命中（空注入；不 await 云；"

@@ -29,7 +29,6 @@ from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 
 # debate / delegate are wired on every path; ask_user is live-user only.
-# run skill is gated on the run tool (CEO+worker HOW).
 # data_file_landing / page_ui ride consult audience (worker loop vs CEO 派工).
 # 编制 HOW 在 delegate 按钮；填卡 HOW 在 ask_user 按钮。均不进本 registry。
 _FULL_TOOLS = {"delegate", "ask_user", "debate", "run"}
@@ -70,11 +69,7 @@ def test_registry_registers_the_system_skills():
     reg = build_system_skill_registry()
     names = {s.name for s in reg.list_all()}
     assert names == {
-        "delivery",
-        "local_desk",
         "product_help",
-        "debate_and_review",
-        "run",
         "data_file_landing",
         "page_ui",
     }
@@ -82,7 +77,7 @@ def test_registry_registers_the_system_skills():
 
 def test_registry_get_hit_and_miss():
     reg = build_system_skill_registry()
-    assert reg.get("debate_and_review") is not None
+    assert reg.get("page_ui") is not None
     assert reg.get("no_such_skill") is None
 
 
@@ -97,34 +92,16 @@ def test_registry_rejects_duplicate_name():
         raise AssertionError("duplicate skill name should raise ValueError")
 
 
-def test_available_hides_gated_skills_without_required_tools():
-    # run needs the run tool. On the autonomous (no live user) path it is not
-    # wired, so it drops out of the catalog. data_file_landing is ungated
-    # (CEO still consults to brief) — not tied to delegate.
+def test_available_system_skills_are_ungated():
+    """出厂系统 Skill 现无 requires_tools 门；有无 run 工具同一份目录。"""
     reg = build_system_skill_registry()
-    available = {s.name for s in reg.available(_NO_LIVE_USER)}
-    assert available == {
+    expected = {
         "product_help",
-        "debate_and_review",
-        "data_file_landing",
-        "page_ui",
-        "delivery",
-        "local_desk",
-    }
-
-
-def test_available_shows_gated_skills_when_tools_wired():
-    reg = build_system_skill_registry()
-    available = {s.name for s in reg.available(_FULL_TOOLS)}
-    assert available == {
-        "delivery",
-        "local_desk",
-        "product_help",
-        "debate_and_review",
-        "run",
         "data_file_landing",
         "page_ui",
     }
+    assert {s.name for s in reg.available(_NO_LIVE_USER)} == expected
+    assert {s.name for s in reg.available(_FULL_TOOLS)} == expected
 
 
 def test_available_audience_hides_ceo_only_from_workers():
@@ -136,11 +113,7 @@ def test_available_audience_hides_ceo_only_from_workers():
     assert lead == worker
     ceo = {s.name for s in reg.available(_FULL_TOOLS, audience="ceo")}
     assert ceo == {
-        "delivery",
-        "local_desk",
         "product_help",
-        "debate_and_review",
-        "run",
         "data_file_landing",
         "page_ui",
     }
@@ -157,8 +130,6 @@ async def test_worker_consult_source_hides_ceo_only_listing_and_fetch():
     assert names == {"data_file_landing", "page_ui"}
     assert await source.fetch_by_name("u", "product_help") is None
     assert await source.fetch_by_name("u", "product_help:workspace") is None
-    assert await source.fetch_by_name("u", "delivery") is None
-    assert await source.fetch_by_name("u", "local_desk") is None
     assert await source.fetch_by_name("u", "no_such_skill") is None
     assert await source.fetch_by_name("u", "data_file_landing") is not None
     assert await source.fetch_by_name("u", "page_ui") is not None
@@ -182,18 +153,22 @@ async def test_expand_skill_tool_names_unlocks_gated_skill():
         expand_skill_tool_names,
     )
 
+    gated = SkillRegistry()
+    gated.register(
+        SystemSkill(name="gated", summary="s", body="b", requires_tools=("run",))
+    )
     leaf = MergedConsultSource(
         skill=SkillConsultSource(
-            registry=build_system_skill_registry(),
+            registry=gated,
             tool_names=set(),
             audience="ceo",
         )
     )
-    assert await leaf.fetch_by_name("u", "run") is None
+    assert await leaf.fetch_by_name("u", "gated") is None
     expanded = expand_skill_tool_names(leaf, {"run"})
     assert expanded is not leaf
-    assert await expanded.fetch_by_name("u", "run") is not None
-    assert await leaf.fetch_by_name("u", "run") is None
+    assert await expanded.fetch_by_name("u", "gated") is not None
+    assert await leaf.fetch_by_name("u", "gated") is None
 
 
 def test_splice_on_demand_directory_replaces_block():
@@ -224,11 +199,7 @@ async def test_ceo_consult_source_keeps_product_help():
     )
     names = {e.name for e in await source.list_directory("u")}
     assert names == {
-        "delivery",
-        "local_desk",
         "product_help",
-        "debate_and_review",
-        "run",
         "data_file_landing",
         "page_ui",
     }
@@ -253,13 +224,13 @@ def test_directory_lists_only_available_skills_with_names_and_summaries():
 
 
 def test_directory_groups_skills_under_chinese_subtitles():
-    """CEO 能力指引按编排/工作区/交付/产品/工具分组；空组不出现。"""
+    """CEO 能力指引按交付/产品分组；空组不出现。"""
     ceo = render_skill_directory(build_system_skill_registry(), _FULL_TOOLS)
-    for heading in ("编排：", "工作区：", "交付：", "产品：", "工具："):
+    for heading in ("交付：", "产品："):
         assert heading in ceo
-    assert "- debate_and_review：" in ceo
-    assert "- local_desk：" in ceo
-    assert "- delivery：" in ceo
+    assert "编排：" not in ceo
+    assert "工作区：" not in ceo
+    assert "工具：" not in ceo
     assert "- page_ui：" in ceo
     worker_src_names = {
         s.name
@@ -270,8 +241,6 @@ def test_directory_groups_skills_under_chinese_subtitles():
     assert worker_src_names == {
         "data_file_landing",
         "page_ui",
-        "debate_and_review",
-        "run",
     }
     from agentcore.runtime.context.consultable import ConsultDirectoryEntry
     from agentcore.runtime.resolve.prompt.compose import render_on_demand_directory
@@ -285,20 +254,15 @@ def test_directory_groups_skills_under_chinese_subtitles():
         )
     ]
     worker = render_on_demand_directory(worker_entries, with_summaries=True)
-    assert "编排：" in worker
-    assert "- debate_and_review：" in worker
+    assert "编排：" not in worker
     assert "- page_ui：" in worker
     assert "工作区：" not in worker
     assert "产品：" not in worker
 
 
 def test_system_skill_summaries_are_short_when_triggers():
-    """目录行只写这是什么；Python len ≤80（对照 run 一句名字）。"""
+    """目录行只写这是什么；Python len ≤80。"""
     for skill in build_system_skill_registry().list_all():
-        assert len(skill.summary) <= 80, (skill.name, len(skill.summary), skill.summary)
-    from agentcore.runtime.skills.platform_shelf import platform_templates
-
-    for skill in platform_templates():
         assert len(skill.summary) <= 80, (skill.name, len(skill.summary), skill.summary)
 
 
@@ -357,8 +321,8 @@ async def test_consult_product_help_section_alias():
     assert result.output == fetch_product_help_section("briefing")
 
 
-def test_product_help_pins_section_ids_manual_paths_and_internal_action():
-    """节 id / 手册路径；action= 只在内部节，不在对外节。不钉 FAQ 整句。"""
+def test_product_help_pins_section_ids_and_manual_paths():
+    """节 id / 手册路径 / 合同键；不钉 FAQ 整句。"""
     from agentcore.runtime.skills.product_help import (
         format_product_help_section,
         list_product_help_section_ids,
@@ -368,6 +332,11 @@ def test_product_help_pins_section_ids_manual_paths_and_internal_action():
     help_body = _body("product_help")
     assert 'consult("product_help:' in help_body
     assert "#/toolbox/manual/" in help_body
+    assert "https://fashitianxia.xyz" in help_body
+    assert "https://fashitianxia.xyz/download" in help_body
+    assert "https://app.fashitianxia.xyz" in help_body
+    assert ".cursor/rules" in help_body
+    assert ".agentcore/rules" in help_body
     ids = list_product_help_section_ids()
     assert "workspace" in ids
     assert "what" in ids
@@ -377,23 +346,14 @@ def test_product_help_pins_section_ids_manual_paths_and_internal_action():
         assert href.startswith("#/toolbox/manual/")
         assert f"?s={sec['id']}" in href
         assert "action=" not in format_product_help_section(sec)
-    internal = help_body.split("【用户规则·内部】", 1)[1].split(
-        "【用户规则·对人怎么说】", 1
-    )[0]
-    assert "file_write" in internal
-    assert "file_read" in internal
-    assert "file_delete" in internal
-    assert "file_list" in internal
-    assert "action=" not in internal
-    external = help_body.split("【用户规则·对人怎么说】", 1)[1].split("【", 1)[0]
-    assert "action=" not in external
 
 
-def test_directory_omits_gated_skills_on_autonomous_path():
+def test_directory_on_autonomous_path_lists_ungated():
     reg = build_system_skill_registry()
     out = render_skill_directory(reg, _NO_LIVE_USER)
     assert "product_help" in out
-    assert "- run：" not in out
+    assert "page_ui" in out
+    assert "data_file_landing" in out
 
 
 def test_directory_empty_when_nothing_available():
@@ -419,9 +379,9 @@ def test_consult_schema_is_ceo_orchestration_primitive():
 async def test_consult_returns_body_on_hit():
     reg = build_system_skill_registry()
     tool = _skill_consult(reg)
-    result = await tool.execute({"name": "debate_and_review"}, _ctx())
+    result = await tool.execute({"name": "page_ui"}, _ctx())
     assert result.success
-    assert result.output == reg.get("debate_and_review").body
+    assert result.output == reg.get("page_ui").body
 
 
 async def test_consult_product_help_hit():
@@ -445,7 +405,7 @@ async def test_consult_degrades_on_unknown_name():
     assert result.success
     assert result.error is None
     assert "没有名为" in result.output
-    assert "debate_and_review" in result.output
+    assert "page_ui" in result.output
 
 
 async def test_consult_unknown_name_is_plain_soft_miss():
@@ -473,17 +433,10 @@ def test_skill_layer_keys_and_pointers():
         DELEGATE_PARAMETERS,
     )
 
-    desk = _body("local_desk")
-    run = _body("run")
     task_props = DELEGATE_PARAMETERS["properties"]["tasks"]["items"]["properties"]
     top_props = DELEGATE_PARAMETERS["properties"]
 
     assert "target_folder_id" not in DELEGATE_DESCRIPTION
-    assert "consult(delivery)" not in DELEGATE_DESCRIPTION
-    assert "create_folder" not in desk
-    assert "mkdir" not in desk
-    assert "wait_for" in run
     assert "depends_on" in task_props
     assert "playbook" not in top_props
     assert "playbook_args" not in top_props
-    assert "append_to_execution_id" in top_props

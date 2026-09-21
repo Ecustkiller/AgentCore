@@ -8,8 +8,7 @@
 # 保留份数 WORKSPACE_BACKUP_KEEP（默认 2），落点 BACKUP_DIR（默认 $AGENTCORE_HOME/backups）。
 #
 # 顺序铁律（破坏性迁移）：停旧 api → alembic upgrade → schema gate →
-# workspace tree（盘上目录搬迁）→ memory pipeline migrate/contract（自滞后一轮保回滚）
-# → project docs（读迁移后的 tree/ 落点）→ 起新 api。
+# workspace tree（盘上目录搬迁）→ 起新 api。
 # 禁止在旧容器仍接流量时 DROP COLUMN/TABLE（2026-07-20 单日 582×500 根因）。
 #
 # 盘上迁移同样必须在窗口内、起 api 之前：resolve_workspace_root 无条件 mkdir，新 api
@@ -209,17 +208,10 @@ migrate_step() {
   return "$rc"
 }
 
-# 依赖 [7] 回填的 folders.rel_path；必须早于 [11]（它读迁移后的 tree/ 落点）。
+# 依赖 alembic 回填的 folders.rel_path。
 echo "== [9/13] workspace tree 迁移（平铺目录 -> tree/<rel_path>）=="
 migrate_step "workspace tree" 2 \
   "${COMPOSE_BASE[@]}" run --rm api python scripts/migrate_workspace_tree.py
-
-echo "== [10/13] memory pipeline migrate/contract (self-lagged) =="
-"${COMPOSE_BASE[@]}" run --rm api python scripts/migrate_memory_pipeline.py
-
-echo "== [11/13] project docs 迁移（厚约定文档 -> 记忆条目）=="
-migrate_step "project docs" 3 \
-  "${COMPOSE_BASE[@]}" run --rm api python scripts/migrate_project_docs.py
 
 echo "== [12/13] 起 api =="
 "${COMPOSE[@]}" up -d

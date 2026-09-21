@@ -39,9 +39,21 @@ def test_message_end_exposes_cache_split_and_cost():
     assert usage["cache_hit_tokens"] == 1_000_000
     assert usage["cache_miss_tokens"] == 1_000_000
     assert usage["input_tokens"] == 2_000_000
+    assert "last_prompt_tokens" not in usage
     # Wire cost is normalized additively: pricing_source rides along (default curated).
     assert ev.payload["cost"] == {**cost, "pricing_source": "curated"}
     assert ev.payload["rounds"] == 3
+
+
+def test_message_end_carries_captain_last_prompt_when_positive():
+    ev = message_end(FinishReason.END_TURN, input_tokens=200_000, last_prompt_tokens=50_000)
+    assert ev.payload["usage"]["last_prompt_tokens"] == 50_000
+    assert ev.payload["usage"]["input_tokens"] == 200_000
+
+
+def test_message_end_omits_zero_last_prompt():
+    ev = message_end(FinishReason.END_TURN, input_tokens=10)
+    assert "last_prompt_tokens" not in ev.payload["usage"]
 
 
 def test_message_end_stamps_byok_nominal_as_estimated_slice():
@@ -146,6 +158,22 @@ def test_run_completed_carries_role_model_usage_cost():
     assert ev.payload["model"] == "deepseek-v4-pro"
     assert ev.payload["usage"] == usage
     assert ev.payload["cost"] == {**cost, "pricing_source": "curated"}
+
+
+def test_run_completed_keeps_last_prompt_from_token_usage():
+    usage = {
+        "input": 100,
+        "output": 10,
+        "reasoning": 0,
+        "cache_hit": 0,
+        "cache_miss": 100,
+        "last_prompt": 80,
+    }
+    ev = run_completed("r1", "a1", output_summary="ok", duration_ms=1, usage=usage)
+    assert ev.payload["usage"]["last_prompt"] == 80
+    from agentcore.runtime.events.payloads.shared import UsageBreakdown
+
+    UsageBreakdown.model_validate(ev.payload["usage"])
 
 
 def test_run_completed_stamps_byok_nominal_as_estimated_slice():

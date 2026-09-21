@@ -387,7 +387,7 @@ describe("conversation store", () => {
           approval_id: "x",
           conversation_id: "a",
           tool_call_id: "t",
-          tool_name: "file_write",
+          tool_name: "write",
           arguments: {},
         },
       });

@@ -20,7 +20,6 @@ function provider(
   return {
     label: "",
     base_url: "https://api.example.com/v1",
-    default_model: "model-default",
     status: "unchecked",
     ...over,
   };
@@ -110,9 +109,8 @@ describe("buildDefaultProviderGroups", () => {
         provider({
           id: "p1",
           label: "DeepSeek",
-          default_model: "deepseek-v4-pro",
         }),
-        provider({ id: "p2", label: "OpenAI", default_model: "gpt-4o" }),
+        provider({ id: "p2", label: "OpenAI" }),
       ],
       catalog([
         catalogItem({
@@ -145,7 +143,6 @@ describe("buildDefaultProviderGroups", () => {
         provider({
           id: "p1",
           label: "DeepSeek",
-          default_model: "deepseek-v4-pro",
         }),
       ],
       catalog([
@@ -178,7 +175,6 @@ describe("buildDefaultProviderGroups", () => {
         provider({
           id: "p1",
           label: "DeepSeek",
-          default_model: "deepseek-v4-pro",
         }),
       ],
       catalog([
@@ -209,7 +205,6 @@ describe("buildDefaultProviderGroups", () => {
       provider({
         id: "p1",
         label: "DeepSeek",
-        default_model: "deepseek-v4-flash",
       }),
     ];
     const cat = catalog([
@@ -266,7 +261,7 @@ describe("buildDefaultProviderGroups", () => {
 
   it("surfaces orphan provider groups for deleted providers", () => {
     const groups = buildDefaultProviderGroups(
-      [provider({ id: "p1", label: "DeepSeek", default_model: "" })],
+      [provider({ id: "p1", label: "DeepSeek" })],
       catalog([]),
       {
         origin: "byok",
@@ -302,7 +297,7 @@ describe("buildDefaultProviderGroups", () => {
 
   it("modelInChannelCatalog ignores custom-only fold-ins", () => {
     const groups = buildDefaultProviderGroups(
-      [provider({ id: "p1", label: "DeepSeek", default_model: "" })],
+      [provider({ id: "p1", label: "DeepSeek" })],
       catalog([
         catalogItem({
           id: "deepseek-v4-flash",
@@ -322,7 +317,6 @@ describe("buildDefaultProviderGroups", () => {
         provider({
           id: "p1",
           label: "OpenCode Go",
-          default_model: "kimi-k2.5",
         }),
       ],
       catalog([
@@ -355,13 +349,12 @@ describe("buildDefaultProviderGroups", () => {
     );
   });
 
-  it("does not inject provider default_model when it is absent from the catalog", () => {
+  it("lists only catalog ids for a provider group", () => {
     const groups = buildDefaultProviderGroups(
       [
         provider({
           id: "p1",
           label: "DeepSeek",
-          default_model: "deepseek-v4-flash",
         }),
       ],
       catalog([

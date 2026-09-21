@@ -9,12 +9,9 @@ from agentcore.memory.always_join import (
     ancestor_rule_bodies_by_scope,
     join_always_layers,
 )
-from agentcore.memory.injection import (
-    _ANCESTOR_SETTINGS_LABEL,
-    _FOLDER_NAV_LABEL,
-    _FOLDER_SETTINGS_LABEL,
-)
 from agentcore.memory.rules_injection import (
+    _ANCESTOR_SETTINGS_LABEL,
+    _FOLDER_SETTINGS_LABEL,
     RuleFragment,
     _labeled_rule_body,
     compose_injected_rules,
@@ -27,30 +24,21 @@ def test_join_always_layers_scope_not_author():
     frags = join_always_layers(
         folder_settings_label=_FOLDER_SETTINGS_LABEL,
         ancestor_settings_label=_ANCESTOR_SETTINGS_LABEL,
-        folder_nav_label=_FOLDER_NAV_LABEL,
-        global_pref="偏好体",
         global_rules=["全局规则"],
-        ancestor_layers=[("外层画像", ["外层规则"])],
-        current_profile="当前画像",
-        current_nav="当前导航",
+        ancestor_layers=[(None, ["外层规则"])],
         current_rules=["当前规则"],
         include_current=True,
     )
     md = "\n\n".join(f.body for f in frags)
     order = (
-        "偏好体",
         "全局规则",
-        "外层画像",
         "外层规则",
-        "当前画像",
-        "当前导航",
         "当前规则",
     )
     positions = [md.index(t) for t in order]
     assert positions == sorted(positions)
-    assert md.index(_ANCESTOR_SETTINGS_LABEL) < md.index("外层画像")
-    assert md.index(_FOLDER_SETTINGS_LABEL) < md.index("当前画像")
-    assert _FOLDER_NAV_LABEL in md
+    assert md.index(_ANCESTOR_SETTINGS_LABEL) < md.index("外层规则")
+    assert md.index(_FOLDER_SETTINGS_LABEL) < md.index("当前规则")
 
 
 def _body(doc: dict) -> str:
@@ -89,7 +77,7 @@ def test_ancestor_rule_bodies_untagged_bag_on_outermost_when_counts_differ():
 
 def test_labeled_rule_body_prefixes_filename():
     out = _labeled_rule_body("回复语言.md", "---\napply: always\n---\n用中文回复")
-    assert out == "### .agentcore/规则/回复语言.md\n用中文回复"
+    assert out == "### .agentcore/rules/回复语言.md\n用中文回复"
 
 
 def test_compose_joins_all_fragments_in_order():

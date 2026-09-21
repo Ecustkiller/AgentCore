@@ -60,21 +60,20 @@ class EscalationSignal(BaseModel):
     def to_run_escalation_payload(self) -> dict[str, Any]:
         """Shape compatible with ``RunState.escalations`` / CEO aggregate harvest."""
         kind = self.kind.value
-        # CEO / wave 边界只认 normal|scope|dep。contract/contradiction 不得占 wire
-        # ``scope``（用户面「职责偏离」）——职责偏离只来自结构化 escalate(kind=scope)
-        # 或写路径真越界；其它 gate_kind 诚实落为 normal。
-        wire_kind = kind if kind in ("normal", "scope", "dep") else "normal"
-        return {
+        # 职责偏离只来自结构化 escalate(reason=scope)；gate_kind 不得占 wire reason。
+        reason = kind if kind in ("scope", "dep") else ""
+        payload: dict[str, Any] = {
             "question": self.question,
             "assumption": self.assumption,
-            "blocking": False,
-            "kind": wire_kind,
             "source": self.source,
             "gate_kind": kind,
             "evidence": self.evidence,
             "tool_name": self.tool_name,
             "layer": self.layer.value,
         }
+        if reason:
+            payload["reason"] = reason
+        return payload
 
 
 class GateVerdict(BaseModel):

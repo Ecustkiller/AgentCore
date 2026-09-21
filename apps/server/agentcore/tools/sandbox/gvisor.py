@@ -8,7 +8,7 @@ Execution model (安全权限与治理.md §五):
 - OCI uid/gid ≡ API ``os.getuid`` / ``os.getgid`` (``app``). No nobody, no
   chmod of the workspace, no guest root, no replica disk, no copy-in/out.
 - Outbound is the desk-resident SSRF chokepoint (netns + proxy opened once
-  per guest; same ``classify_url`` policy as ``download_url``), not a
+  per guest; same ``classify_url`` policy as ``web_fetch``), not a
   packaging-host allowlist and not a per-install hole punch.
 - Concurrent exec slots + memory/duration ceilings still apply.
 - Cloud Chromium is ``sandboxd exec`` stdio into this same guest (not a second
