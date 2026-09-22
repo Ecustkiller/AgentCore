@@ -675,7 +675,7 @@ def _auto_permission_ctx(backend: _FakeBackend) -> ToolContext:
         agent_id="a",
         backend=backend,  # type: ignore[arg-type]
         user_id="u",
-        permission_axes='{"file_write":"session","command":"auto","team_kickoff":"rules","host":"session"}',
+        permission_axes='{"boundary":"folder"}',
     )
 
 
@@ -761,7 +761,7 @@ async def test_check_install_omits_cache_bucket_without_user_id(
         agent_id="a",
         backend=backend,  # type: ignore[arg-type]
         user_id="",
-        permission_axes='{"file_write":"session","command":"auto","team_kickoff":"rules","host":"session"}',
+        permission_axes='{"boundary":"folder"}',
     )
     result = await execute_verify({"check": "install"}, ctx)
     assert result.success is True

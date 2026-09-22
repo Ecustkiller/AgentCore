@@ -40,8 +40,7 @@ export function SteerWaitingBar({
         if (!message || message.role !== "assistant") return undefined;
         const key = assistantProjectionId(message);
         return (
-          byId[key]?.userInterjections ??
-          byId[message.id]?.userInterjections
+          byId[key]?.userInterjections ?? byId[message.id]?.userInterjections
         );
       },
       queuedIds,
@@ -59,7 +58,9 @@ export function SteerWaitingBar({
     >
       {items.map((item) => {
         const preview =
-          item.content.length > 48 ? `${item.content.slice(0, 48)}…` : item.content;
+          item.content.length > 48
+            ? `${item.content.slice(0, 48)}…`
+            : item.content;
         return (
           <div
             key={item.interjectionId}
@@ -68,9 +69,7 @@ export function SteerWaitingBar({
             data-interjection-id={item.interjectionId}
           >
             <Loader2 size={12} className="shrink-0 animate-spin" aria-hidden />
-            <span className="min-w-0 flex-1 truncate">
-              等待读取：{preview}
-            </span>
+            <span className="min-w-0 flex-1 truncate">等待读取：{preview}</span>
           </div>
         );
       })}

@@ -43,8 +43,6 @@ describe("steerWaitingItems", () => {
           : undefined,
       new Set(["ij-q"]),
     );
-    expect(items).toEqual([
-      { interjectionId: "ij-1", content: "改看支付" },
-    ]);
+    expect(items).toEqual([{ interjectionId: "ij-1", content: "改看支付" }]);
   });
 });

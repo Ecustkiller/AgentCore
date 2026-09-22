@@ -133,12 +133,20 @@ def _fm_error(doc: Document) -> str | None:
 
 
 def _always_chars(doc: Document) -> int | None:
-    """Pool chars for always-injected user rules; null for AI cores, disputed, and the rest."""
-    if doc.kind != "document" or doc.role != "rule" or doc.apply_mode != "always":
+    """Pool chars for user rules that occupy the 常驻 pool; null otherwise.
+
+    Same predicate as the write-side quota: ``always``, and path rules whose
+    patterns match every file. Bounded path rules stay null.
+    """
+    if doc.kind != "document" or doc.role != "rule":
         return None
     if doc.ai_maintained:
         return None
     if getattr(doc, "disputed_at", None) is not None:
+        return None
+    from agentcore.memory.rule_resolve import counts_as_always_content
+
+    if not counts_as_always_content(doc.content or ""):
         return None
     return always_entry_chars(doc.content)
 

@@ -86,6 +86,7 @@ import {
   looksLikeInferenceTokenFailure,
   resolveSidecarInference,
 } from "@/services/inferenceToken";
+import * as permissionAxes from "@/services/permissionAxes";
 import { takeRecentSidecarFailure } from "@/services/sidecarStatus";
 import { dispatchSSEEvent } from "@/services/streamConversation";
 import {
@@ -208,6 +209,12 @@ beforeEach(() => {
   looksLikeWorkspacesTokenFailureMock.mockReturnValue(false);
   fetchChatContextMock.mockReset();
   fetchChatContextMock.mockResolvedValue([]);
+  vi.spyOn(
+    permissionAxes,
+    "resolveConversationPermissionAxes",
+  ).mockResolvedValue({
+    boundary: "folder",
+  });
 
   onEventCb = null;
   resumeMock = vi.fn();
@@ -932,6 +939,55 @@ describe("streamConversationViaSidecar", () => {
     });
 
     expect(turnCommit.committed).toBe(true);
+  });
+
+  it("flushes a pending outbox row before loading chat-context", async () => {
+    const order: string[] = [];
+    const status = vi.fn(async () => {
+      order.push("status");
+      return {
+        pending: [
+          {
+            userMessageId: "u-prev",
+            conversationId: "c1",
+            phase: "ready" as const,
+            updatedAt: 1,
+          },
+        ],
+      };
+    });
+    flushTurnMock.mockImplementation(async () => {
+      order.push("flush");
+      return {
+        ok: true,
+        synced: {
+          conversationId: "c1",
+          userMessageId: "u-opt",
+          cloudUserMessageId: "real-uid",
+          assistantMessageId: "m-asst",
+          title: "续跑标题",
+        },
+      };
+    });
+    fetchChatContextMock.mockImplementation(async () => {
+      order.push("context");
+      return [];
+    });
+    (
+      window as unknown as { outboxApi: { status: typeof status } }
+    ).outboxApi.status = status;
+    seedOriginalUserBubble("c1", "u-opt", "接着");
+    startTurnMock.mockResolvedValue(turnResult());
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "接着",
+      optimisticUserId: "u-opt",
+    });
+
+    expect(order).toEqual(["status", "flush", "context", "flush"]);
+    expect(flushTurnMock).toHaveBeenCalledWith({ userMessageId: "u-prev" });
   });
 
   it("passes cookie chat-context as history fallback even when accountAuth is present", async () => {

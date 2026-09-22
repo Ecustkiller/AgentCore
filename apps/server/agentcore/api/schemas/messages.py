@@ -1320,11 +1320,12 @@ class StopTurnResponse(BaseModel):
 
 
 class QueuedTurnItem(BaseModel):
-    """One process-local FIFO queued turn (排队条权威内容源；GET / 快照).
+    """One FIFO queued turn (排队条权威内容源；GET / 快照).
 
     ``turn_queued`` / ``turn_queue_cancelled`` remain change signals only.
-    ``turn_queue_started`` is the timeline user-bubble entrance (content on the
-    frame), not a change-only ping.
+    Timeline entrance is the ``message_start`` that names this user row.
+    ``turn_queue_started`` early-inserts the same row on a connection that
+    already holds that frame; it is not the entrance authority.
     ``interjection_id`` is set when the entry was promoted from a user interjection
     (协调升队 / 经典 steer leftover); omitted / null for plain ``delivery=queue``.
     ``user_message_id`` is the persisted user-row id (cancel deletes it; drain
@@ -1361,7 +1362,7 @@ class QueuedTurnItem(BaseModel):
 
 
 class QueuedTurnListResponse(BaseModel):
-    """Current conversation FIFO queue snapshot (进程内；重启后为空)."""
+    """Current conversation FIFO snapshot. Unstarted items survive an engine restart."""
 
     items: list[QueuedTurnItem] = Field(default_factory=list)
 

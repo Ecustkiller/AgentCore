@@ -1,4 +1,3 @@
-import { describe, expect, it } from "vitest";
 import {
   BOUNDARY_LABELS,
   BOUNDARY_ORDER,
@@ -9,6 +8,7 @@ import {
   normalizeAxes,
   permissionAxesShortLabel,
 } from "@/services/permissionAxes";
+import { describe, expect, it } from "vitest";
 
 describe("workspace boundary", () => {
   it("defaults to folder and only accepts the three ids", () => {
@@ -41,7 +41,9 @@ describe("workspace boundary", () => {
     expect(boundaryShortLabel("computer")).toBe("这台电脑");
     expect(permissionAxesShortLabel({ boundary: "folder" })).toBe("这个文件夹");
     expect(permissionAxesShortLabel("read")).toBe("只看");
-    expect(permissionAxesShortLabel('{"boundary":"computer"}')).toBe("这台电脑");
+    expect(permissionAxesShortLabel('{"boundary":"computer"}')).toBe(
+      "这台电脑",
+    );
     expect(permissionAxesShortLabel("less_interrupt")).toBeNull();
     expect(
       permissionAxesShortLabel({

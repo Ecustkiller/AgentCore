@@ -1,14 +1,14 @@
 import { getConversations } from "@/hooks/useConversations";
 import { ApiError, api } from "@/services/api";
-import type {
-  OutgoingAgentMention,
-  OutgoingAttachment,
-} from "@/services/streamConversation";
 import {
   getActiveSidecarTarget,
   getLastSidecarTarget,
   resolveConversationLocalTarget,
 } from "@/services/sidecarRouting";
+import type {
+  OutgoingAgentMention,
+  OutgoingAttachment,
+} from "@/services/streamConversation";
 import { ignoresCloudTurnActivity } from "@/stores/aiTurnActivity";
 import { useConversationStore } from "@/stores/conversation";
 import { useQueuedTurnsStore } from "@/stores/queuedTurns";
@@ -117,18 +117,19 @@ export async function cancelQueuedTurn(
 }
 
 function snapshotQueue(conversationId: string) {
-  return useQueuedTurnsStore.getState().list(conversationId).map((entry) => ({
-    ...entry,
-  }));
+  return useQueuedTurnsStore
+    .getState()
+    .list(conversationId)
+    .map((entry) => ({
+      ...entry,
+    }));
 }
 
 function restoreQueue(
   conversationId: string,
   prev: ReturnType<typeof snapshotQueue>,
 ): void {
-  useQueuedTurnsStore
-    .getState()
-    .replaceConversation(conversationId, prev);
+  useQueuedTurnsStore.getState().replaceConversation(conversationId, prev);
 }
 
 /**
@@ -152,10 +153,9 @@ export async function reorderQueuedTurns(
       });
       return;
     }
-    await api.post(
-      `/v1/conversations/${conversationId}/queued-turns/reorder`,
-      { queue_ids: queueIds },
-    );
+    await api.post(`/v1/conversations/${conversationId}/queued-turns/reorder`, {
+      queue_ids: queueIds,
+    });
   } catch (err) {
     restoreQueue(conversationId, prev);
     throw err;
@@ -174,10 +174,7 @@ export async function stopAndSendQueuedTurn(
   if (!ids.includes(queueId)) return;
   useQueuedTurnsStore
     .getState()
-    .reorder(conversationId, [
-      queueId,
-      ...ids.filter((id) => id !== queueId),
-    ]);
+    .reorder(conversationId, [queueId, ...ids.filter((id) => id !== queueId)]);
   try {
     if (routesQueuedTurnToSidecar(conversationId)) {
       const target = await resolveSidecarQueueTarget(conversationId);

@@ -159,6 +159,31 @@ function toSidecarAttachments(
 }
 
 /** 一个轻量 turnId（cancel 的寻址键）。crypto.randomUUID 在 Electron renderer 可用。 */
+/**
+ * 下一轮拉窗之前，把本会话还没写完的 outbox 冲进云端。
+ * 停止后界面已可再发，回写仍可能在途；先落 journal 和正文，chat-context 才读得到上一轮记录。
+ */
+async function settlePriorOutbox(conversationId: string): Promise<void> {
+  const api = window.outboxApi;
+  if (!api?.status || !api.flushTurn) return;
+  let pending: { userMessageId: string; conversationId: string }[] = [];
+  try {
+    const snap = await api.status();
+    pending = (snap?.pending ?? []).filter(
+      (row) => row.conversationId === conversationId && row.userMessageId,
+    );
+  } catch {
+    return;
+  }
+  for (const row of pending) {
+    try {
+      await api.flushTurn({ userMessageId: row.userMessageId });
+    } catch {
+      // 落盘失败仍开跑：空等不会补上已经丢失的回写。
+    }
+  }
+}
+
 function newTurnId(): string {
   return `t_${crypto.randomUUID()}`;
 }
@@ -312,6 +337,8 @@ export async function streamConversationViaSidecar({
   // （引擎硬拒空凭据；无本机平台模型回退）。folders / account / workspaces 缺票仍可下发，工具侧诚实失败。
   // 开跑前鉴权失败（尚无事件）可对各票 force remint 一次，不对每回合 force。
   // 调用方已确认（含空窗）则不再拉；regenerate 必须等 occupy 截断后再由 sidecar 拉。
+  // 先等上一轮 outbox 落云，再读 chat-context，避免停完立刻再发读到空助手行。
+  await settlePriorOutbox(conversationId);
   const needCookieWindow = historyArg === undefined && !regenerate;
   const [
     inferenceRaw,
@@ -804,6 +831,11 @@ async function runSidecarTurn({
 
 const queuedSidecarStarts = new Set<string>();
 
+/** Test-only: a timed-out start must not keep the next case from opening. */
+export function resetQueuedSidecarStartsForTests(): void {
+  queuedSidecarStarts.clear();
+}
+
 /**
  * 本机 FIFO 出队：先认领这个 turn 的事件，再 startTurn。
  * 用户行等首帧 ``turn_queue_started`` 放入时间线，这里不预画。
@@ -815,23 +847,37 @@ export async function startQueuedSidecarTurn(
   if (queuedSidecarStarts.has(key)) return;
   queuedSidecarStarts.add(key);
   const turnId = crypto.randomUUID();
+  const conversationId = notice.conversationId;
   try {
-    if (blocksStreamOpen(getTurnPhase(notice.conversationId))) {
-      useConversationStore
-        .getState()
-        .setTurnPhase("idle", notice.conversationId);
+    if (blocksStreamOpen(getTurnPhase(conversationId))) {
+      useConversationStore.getState().setTurnPhase("idle", conversationId);
     }
+    const [inferenceRaw, foldersAuthRaw, accountAuthRaw, workspacesAuthRaw] =
+      await Promise.all([
+        resolveSidecarInference({ conversationId }),
+        resolveSidecarFoldersAuth(),
+        resolveSidecarAccountAuth(),
+        resolveSidecarWorkspacesAuth(),
+      ]);
+    let inference = inferenceRaw ?? undefined;
+    let foldersAuth = foldersAuthRaw ?? undefined;
+    let accountAuth = accountAuthRaw ?? undefined;
+    let workspacesAuth = workspacesAuthRaw ?? undefined;
+    const permissionAxes =
+      await resolveConversationPermissionAxes(conversationId);
+    const { folderId, localRootId, localSubpath } =
+      resolveProjectTurnBinding(conversationId);
     await runSidecarTurn({
-      conversationId: notice.conversationId,
+      conversationId,
       rootId: notice.rootId,
       subpath: notice.subpath,
       turnId,
       op: "startTurn",
-      hasInference: true,
+      hasInference: inference !== undefined,
       failMessage: "本地引擎未能完成排队回合，请重试",
       invoke: () =>
         window.sidecarApi.startTurn({
-          conversationId: notice.conversationId,
+          conversationId,
           rootId: notice.rootId,
           subpath: notice.subpath,
           turnId,
@@ -848,7 +894,53 @@ export async function startQueuedSidecarTurn(
             ? { attachments: notice.attachments }
             : {}),
           ...tableSelectionPayload(notice.tableSelection),
+          inference,
+          foldersAuth,
+          accountAuth,
+          workspacesAuth,
+          permissionAxes,
+          folderId,
+          localRootId,
+          localSubpath,
         }),
+      remintInference: async () => {
+        clearSidecarInference();
+        inference =
+          (await resolveSidecarInference({
+            force: true,
+            conversationId,
+          })) ?? undefined;
+        if (!inference) {
+          throw new StreamError("sidecar", undefined, {
+            code: "INFERENCE_TOKEN_EXPIRED",
+            recoverable: false,
+          });
+        }
+      },
+      remintFolders: async () => {
+        clearSidecarFoldersAuth();
+        foldersAuth =
+          (await resolveSidecarFoldersAuth({ force: true })) ?? undefined;
+        if (!foldersAuth) {
+          throw new Error("folders 凭证续铸失败，请重新登录后再试");
+        }
+      },
+      remintAccount: async () => {
+        clearSidecarAccountAuth();
+        accountAuth =
+          (await resolveSidecarAccountAuth({ force: true })) ?? undefined;
+        if (!accountAuth) {
+          throw new Error("account 凭证续铸失败，请重新登录后再试");
+        }
+      },
+      remintWorkspaces: async () => {
+        clearSidecarWorkspacesAuth();
+        workspacesAuth =
+          (await resolveSidecarWorkspacesAuth({ force: true })) ?? undefined;
+        if (!workspacesAuth) {
+          throw new Error("workspaces 凭证续铸失败，请重新登录后再试");
+        }
+      },
       writeBack: async () => {
         await persistAndReconcile(notice.conversationId, notice.userMessageId);
       },

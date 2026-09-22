@@ -11,8 +11,8 @@ from __future__ import annotations
 import pytest
 
 from agentcore.config import settings
-from agentcore.runtime.events import EventSink
 from agentcore.memory.rules_injection import TurnRuleView
+from agentcore.runtime.events import EventSink
 from agentcore.runtime.pipeline.prepare import prepare_fresh_turn
 from agentcore.tools.builtin import build_worker_registry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox

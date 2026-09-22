@@ -5,9 +5,10 @@ assistant rows keep empty content and put the cause on usage / journal
 (``turn_end.error``). Export, log transcripts, search snippets, and compaction
 fold text must still surface a readable sentence from that metadata.
 
-History for the LLM window is different: it folds empty failures into a short
-system note (see ``history.py``) and must never inject error prose as ordinary
-assistant content.
+History for the LLM window folds an empty failure into a short system note
+only when that turn has no tool record (see ``history.py``). A turn that
+already has tool rounds keeps that transcript. Error prose is never injected
+as ordinary assistant content.
 """
 
 from __future__ import annotations

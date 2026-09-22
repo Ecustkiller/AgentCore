@@ -6,7 +6,7 @@
 发（队列比宿主回合活得久，空档里取消 = 对端零信号）。
 
 这里锁住新的对话级信号道：**每端一份、不重复、无 live run 也送到**。仍是「变了」信号——
-内容权威还是 ``GET …/queued-turns``，队列本身仍在进程内（不做 durable queue）。
+内容权威还是 ``GET …/queued-turns``。未开跑的项落在 ``turn_queue_items``，引擎重启后续跑。
 
 No DB, no HTTP — plain async tests (asyncio_mode=auto).
 """

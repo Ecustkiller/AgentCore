@@ -193,11 +193,25 @@ class ConversationReadResponse(BaseModel):
     total_chars: int = 0
 
 
-class ChatContextItem(BaseModel):
-    """One ``load_chat_context`` row (role/content; ledger is engine-only)."""
+class HistoryToolCallFunction(BaseModel):
+    name: str = ""
+    arguments: str = ""
 
-    role: Literal["user", "assistant"]
+
+class HistoryToolCall(BaseModel):
+    id: str = ""
+    type: Literal["function"] = "function"
+    function: HistoryToolCallFunction = Field(default_factory=HistoryToolCallFunction)
+
+
+class ChatContextItem(BaseModel):
+    """One CEO-window row: user, assistant (optional tool_calls), or tool."""
+
+    role: Literal["user", "assistant", "tool"]
     content: str
+    tool_calls: list[HistoryToolCall] | None = None
+    tool_call_id: str | None = None
+    reasoning_content: str | None = None
     evidence_ledger: list[Any] | None = None
 
 
@@ -214,13 +228,23 @@ def _chat_context_items(rows: list[dict[str, Any]]) -> list[ChatContextItem]:
     for row in rows:
         role = row.get("role")
         content = row.get("content")
-        if role not in ("user", "assistant") or not isinstance(content, str):
+        if role not in ("user", "assistant", "tool") or not isinstance(content, str):
+            continue
+        if role == "tool" and not (
+            isinstance(row.get("tool_call_id"), str) and row.get("tool_call_id")
+        ):
             continue
         ledger = row.get("evidence_ledger")
+        calls = row.get("tool_calls")
+        tcid = row.get("tool_call_id")
+        reasoning = row.get("reasoning_content")
         items.append(
             ChatContextItem(
                 role=role,
                 content=content,
+                tool_calls=calls if isinstance(calls, list) and calls else None,
+                tool_call_id=tcid if isinstance(tcid, str) and tcid else None,
+                reasoning_content=reasoning if isinstance(reasoning, str) and reasoning else None,
                 evidence_ledger=ledger if isinstance(ledger, list) and ledger else None,
             )
         )

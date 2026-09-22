@@ -13,6 +13,7 @@ from agentcore.api.schemas.llm_window import (
 from agentcore.llm.provider.protocol import LLMMessage, llm_content_text
 from agentcore.runtime.facts import FactKind
 from agentcore.runtime.journal import window_from_journal
+from agentcore.runtime.resolve.prompt.envelope import history_row_to_llm_message
 
 
 def _history_len(entries: list[dict[str, Any]]) -> int:
@@ -73,7 +74,7 @@ def project_run_llm_window(
         return RunLlmWindowResponse(run_id=run_id, available=False, messages=[])
 
     history_msgs = (
-        [LLMMessage(role=h["role"], content=h["content"]) for h in history] if history else None
+        [history_row_to_llm_message(h) for h in history] if history else None
     )
     window = window_from_journal(entries, run_id=run_id, history=history_msgs)
     if not window:

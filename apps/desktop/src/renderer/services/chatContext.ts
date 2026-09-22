@@ -21,9 +21,13 @@ export async function fetchChatContext(
   if (!Array.isArray(rows)) {
     throw new Error(CHAT_CONTEXT_UNAVAILABLE_MESSAGE);
   }
-  return rows.filter(
-    (row): row is SidecarHistoryEntry =>
-      (row.role === "user" || row.role === "assistant") &&
-      typeof row.content === "string",
-  );
+  return rows.filter((row): row is SidecarHistoryEntry => {
+    if (typeof row?.content !== "string") return false;
+    if (row.role === "user" || row.role === "assistant") return true;
+    return (
+      row.role === "tool" &&
+      typeof row.tool_call_id === "string" &&
+      row.tool_call_id.length > 0
+    );
+  });
 }

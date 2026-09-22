@@ -89,15 +89,12 @@ def cloud_worker_skips_per_call_gate(
         return False
     if is_desktop_touch_tool(tool_name):
         return False
-    if requires_always_confirm(tool_name, arguments):
-        return False
-    if (
+    read_denies_file_op = (
         permission_axes is not None
         and not permission_axes.allows_write
         and tool_name in file_op_tools
-    ):
-        return False
-    return True
+    )
+    return not (requires_always_confirm(tool_name, arguments) or read_denies_file_op)
 
 
 def is_desktop_touch_tool(tool_name: str) -> bool:

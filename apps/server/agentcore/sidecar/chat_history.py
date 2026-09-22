@@ -26,8 +26,23 @@ class ChatContextUnavailableError(Exception):
         self.message = message
 
 
+def _replay_extras(item: dict[str, Any], row: dict[str, Any]) -> None:
+    calls = item.get("tool_calls")
+    if isinstance(calls, list) and calls:
+        row["tool_calls"] = calls
+    tcid = item.get("tool_call_id")
+    if isinstance(tcid, str) and tcid:
+        row["tool_call_id"] = tcid
+    reasoning = item.get("reasoning_content")
+    if isinstance(reasoning, str) and reasoning:
+        row["reasoning_content"] = reasoning
+    ledger = item.get("evidence_ledger")
+    if isinstance(ledger, list) and ledger:
+        row["evidence_ledger"] = list(ledger)
+
+
 def coerce_history_rows(raw: object) -> list[dict[str, Any]]:
-    """Keep ``{role, content}`` (+ optional evidence_ledger) rows only."""
+    """Keep user / assistant / tool rows the CEO window can replay."""
     if not isinstance(raw, list):
         return []
     out: list[dict[str, Any]] = []
@@ -36,12 +51,19 @@ def coerce_history_rows(raw: object) -> list[dict[str, Any]]:
             continue
         role = item.get("role")
         content = item.get("content")
-        if role not in ("user", "assistant") or not isinstance(content, str):
+        if not isinstance(content, str):
             continue
-        row: dict[str, Any] = {"role": role, "content": content}
-        ledger = item.get("evidence_ledger")
-        if isinstance(ledger, list) and ledger:
-            row["evidence_ledger"] = list(ledger)
+        if role == "tool":
+            tcid = item.get("tool_call_id")
+            if not isinstance(tcid, str) or not tcid:
+                continue
+            row = {"role": "tool", "content": content, "tool_call_id": tcid}
+            out.append(row)
+            continue
+        if role not in ("user", "assistant"):
+            continue
+        row = {"role": role, "content": content}
+        _replay_extras(item, row)
         out.append(row)
     return out
 

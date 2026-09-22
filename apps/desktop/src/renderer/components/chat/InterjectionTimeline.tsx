@@ -15,13 +15,13 @@ import {
 } from "@/components/chat/message-bubble/UserInlineBody";
 import { getConversations } from "@/hooks/useConversations";
 import { hasInlineMarkers } from "@/lib/inlineBody";
+import { ignoresCloudTurnActivity } from "@/stores/aiTurnActivity";
 import {
   type MessageAttachmentMeta,
   activeRuntime,
   assistantProjectionId,
   useConversationStore,
 } from "@/stores/conversation";
-import { ignoresCloudTurnActivity } from "@/stores/aiTurnActivity";
 import type { UserInterjection } from "@/stores/execution";
 import { useExecutionStore } from "@/stores/execution";
 import { useInterjectionQueueWithdrawn } from "@/stores/queuedTurns";
@@ -82,8 +82,7 @@ export function InterjectionTimeline({
     if (!id) return false;
     const via = s.byId[id]?.executionVia ?? null;
     const localContainerRootId =
-      getConversations().find((c) => c.id === id)?.localContainerRootId ??
-      null;
+      getConversations().find((c) => c.id === id)?.localContainerRootId ?? null;
     return ignoresCloudTurnActivity(via, localContainerRootId);
   });
   const queueWithdrawn = useInterjectionQueueWithdrawn(

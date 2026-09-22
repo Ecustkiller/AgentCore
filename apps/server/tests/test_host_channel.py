@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agentcore.core.types import (
-    WorkspaceBoundary,
     ToolApproval,
+    WorkspaceBoundary,
 )
 from agentcore.desktop.channel import DesktopClientChannel, HostOp, HostOpError
 from agentcore.runtime.engine import resolve_tool_timeout

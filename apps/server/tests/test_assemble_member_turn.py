@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 
 from agentcore.desktop.channel import DesktopClientChannel
+from agentcore.memory.rules_injection import TurnRuleView
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.pipeline.assemble import assemble_ceo_turn
-from agentcore.memory.rules_injection import TurnRuleView
 from agentcore.runtime.pipeline.prepare import PreparedTurn, prepare_fresh_turn
 from agentcore.runtime.pipeline.resume.wire import _wire_continuation_toolset
 from agentcore.tools.mcp.wire import McpDiscoverResult

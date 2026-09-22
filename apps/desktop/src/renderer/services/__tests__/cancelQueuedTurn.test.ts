@@ -257,6 +257,8 @@ describe("editQueuedTurn", () => {
         agentMentions: [],
       }),
     ).resolves.toBe("already_gone");
-    expect(useQueuedTurnsStore.getState().list(CID)[0]?.content).not.toBe("改过");
+    expect(useQueuedTurnsStore.getState().list(CID)[0]?.content).not.toBe(
+      "改过",
+    );
   });
 });

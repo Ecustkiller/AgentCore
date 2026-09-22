@@ -133,7 +133,7 @@ export interface SidecarStartTurnRequest {
    */
   agentMentions?: SidecarAgentMention[];
   /**
-   * 先前对话历史（`{role, content}` 列表）。已提供（含空窗 = 新会话）= 桌面
+   * 先前对话历史（user / assistant / tool，与 ``chat-context`` 同形）。已提供（含空窗 = 新会话）= 桌面
    * 已用会话 cookie 拉过同一 ``chat-context`` 窗口，sidecar **不再**打云。
    * 缺省 = 窗口未知：sidecar 用 account 窄票拉；拉不到 → 回合明确失败，
    * 禁止空窗开跑。``regenerate`` 必须缺省（占用截断之后才拉），禁止带截断前的 cookie 窗。
@@ -216,10 +216,22 @@ export interface SidecarQueueNeedStart {
   tableSelection?: string[];
 }
 
+/** 一条历史里的工具调用（与服务端 ``HistoryToolCall`` 同形）。 */
+export interface SidecarHistoryToolCall {
+  id: string;
+  type?: "function";
+  function: { name: string; arguments: string };
+}
+
 /** 一条历史消息（与引擎 `run_chat_pipeline` 的 history 形状对齐）。 */
 export interface SidecarHistoryEntry {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "tool";
   content: string;
+  tool_calls?: SidecarHistoryToolCall[];
+  tool_call_id?: string;
+  /** 思考模型在带 tool_calls 的助手行上要求回传。正文行不带。 */
+  reasoning_content?: string;
+  evidence_ledger?: unknown[];
 }
 
 /** 一条 web 来源（对齐服务端 `Citation`：url/title/snippet/site 恒在；台账加宽字段可选）。

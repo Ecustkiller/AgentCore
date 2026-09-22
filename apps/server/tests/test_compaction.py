@@ -17,6 +17,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 import agentcore.conversation.compaction as compaction
+from agentcore.conversation.compact_prompt import (
+    IDENTITY_LEDGER_FENCE,
+    attach_identity_ledger,
+    render_identity_ledger,
+    strip_identity_ledger,
+)
 from agentcore.conversation.compaction import (
     _COMPACT_SYSTEM_PROMPT,
     _render_fold,
@@ -24,15 +30,17 @@ from agentcore.conversation.compaction import (
     _summarize,
     _truncate_head_tail,
 )
-from agentcore.conversation.compact_prompt import (
-    IDENTITY_LEDGER_FENCE,
-    attach_identity_ledger,
-    render_identity_ledger,
-    strip_identity_ledger,
-)
 from agentcore.conversation.history import _summary_block
 from agentcore.llm import LLMMessage, LLMRequest, LLMResponse
 from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
+
+
+class _EmptyJournalRepo:
+    def __init__(self, _session: object) -> None:
+        pass
+
+    async def load_map(self, _ids: object) -> dict:
+        return {}
 
 
 def _msg(role: str, content: str, created_at: int = 0, *, id: str | None = None) -> SimpleNamespace:
@@ -102,7 +110,7 @@ def test_conversation_summary_context_compacted_flag_only():
             local_container_root_id=None,
             pinned=False,
             archived=False,
-            permission_axes={},
+            permission_axes={"boundary": "folder"},
             deep_research_auto=False,
             model_profile_id=None,
         )
@@ -122,7 +130,7 @@ def test_conversation_summary_context_compacted_flag_only():
             local_container_root_id=None,
             pinned=False,
             archived=False,
-            permission_axes={},
+            permission_axes={"boundary": "folder"},
             deep_research_auto=False,
             model_profile_id=None,
         )
@@ -140,7 +148,7 @@ def test_conversation_summary_context_compacted_flag_only():
             local_container_root_id=None,
             pinned=False,
             archived=False,
-            permission_axes={},
+            permission_axes={"boundary": "folder"},
             deep_research_auto=False,
             model_profile_id=None,
         )
@@ -215,15 +223,52 @@ def test_render_fold_includes_journal_file_ledger():
     assert out.index("本批涉及的文件") < out.index("待并入摘要")
 
 
-def test_render_fold_includes_clipped_tool_traces():
+def test_render_fold_includes_tool_rounds_from_the_same_transcript():
+    assistant = _msg("assistant", "查完了")
+    assistant.id = "a1"
+    journals = {
+        "a1": [
+            {
+                "kind": "round_boundary",
+                "payload": {"run_id": "cap", "role": "captain"},
+            },
+            {
+                "kind": "llm_call",
+                "payload": {
+                    "run_id": "cap",
+                    "content": "先看文件",
+                    "tool_calls": [
+                        {
+                            "id": "c1",
+                            "type": "function",
+                            "function": {
+                                "name": "read",
+                                "arguments": '{"file_path": "src/a.py"}',
+                            },
+                        }
+                    ],
+                },
+            },
+            {
+                "kind": "tool_call",
+                "payload": {
+                    "run_id": "cap",
+                    "tool_call_id": "c1",
+                    "result": "print('hi')",
+                },
+            },
+        ]
+    }
     out = _render_fold(
         "旧摘要",
-        [_msg("user", "你好")],
-        tool_traces="read({\"file_path\": \"src/a.py\"})\nprint('hi')",
+        [_msg("user", "你好"), assistant],
+        journals=journals,
     )
-    assert "被折轮的工具轨迹" in out
+    assert "read" in out
     assert "src/a.py" in out
-    assert out.index("被折轮的工具轨迹") < out.index("待并入摘要")
+    assert "print('hi')" in out
+    assert "被折轮的工具轨迹" not in out
+    assert out.index("待并入摘要") < out.index("工具调用")
 
 
 def test_render_fold_omits_file_ledger_when_empty():
@@ -271,7 +316,8 @@ def test_render_fold_keeps_pure_failure_brief():
         created_at=0,
     )
     out = _render_fold("", [failed, _msg("user", "real")])
-    assert "（失败）连接超时" in out
+    assert "未产生有效回复" in out
+    assert "连接超时" in out
     assert "real" in out
 
 
@@ -343,6 +389,9 @@ async def test_load_chat_context_no_consecutive_roles_after_pair_fold(monkeypatc
 
     monkeypatch.setattr(history_mod, "ConversationRepository", _FakeConvRepo)
     monkeypatch.setattr(history_mod, "MessageRepository", _FakeMsgRepo)
+    monkeypatch.setattr(
+        "agentcore.db.repositories.TurnJournalRepository", _EmptyJournalRepo
+    )
     monkeypatch.setattr(history_mod.settings, "compaction_context_max_messages", 40, raising=True)
 
     out = await history_mod.load_chat_context(SimpleNamespace(), "c1")
@@ -390,6 +439,9 @@ async def test_load_chat_context_realigns_when_cap_drops_the_boundary_user(monke
 
     monkeypatch.setattr(history_mod, "ConversationRepository", _FakeConvRepo)
     monkeypatch.setattr(history_mod, "MessageRepository", _FakeMsgRepo)
+    monkeypatch.setattr(
+        "agentcore.db.repositories.TurnJournalRepository", _EmptyJournalRepo
+    )
     # One under the tail length: the cap drops exactly tail[0], the boundary user.
     monkeypatch.setattr(
         history_mod.settings,
@@ -450,6 +502,9 @@ async def test_load_chat_context_does_not_slide_cut_tail_to_token_budget(monkeyp
 
     monkeypatch.setattr(history_mod, "ConversationRepository", _FakeConvRepo)
     monkeypatch.setattr(history_mod, "MessageRepository", _FakeMsgRepo)
+    monkeypatch.setattr(
+        "agentcore.db.repositories.TurnJournalRepository", _EmptyJournalRepo
+    )
     monkeypatch.setattr(history_mod.settings, "compaction_context_max_messages", 40, raising=True)
 
     out = await history_mod.load_chat_context(SimpleNamespace(), "c1")
@@ -486,6 +541,9 @@ async def test_load_chat_context_keeps_identity_ledger_in_summary_block(monkeypa
 
     monkeypatch.setattr(history_mod, "ConversationRepository", _FakeConvRepo)
     monkeypatch.setattr(history_mod, "MessageRepository", _FakeMsgRepo)
+    monkeypatch.setattr(
+        "agentcore.db.repositories.TurnJournalRepository", _EmptyJournalRepo
+    )
     monkeypatch.setattr(history_mod.settings, "compaction_context_max_messages", 40, raising=True)
 
     out = await history_mod.load_chat_context(SimpleNamespace(), "c1")
@@ -890,13 +948,50 @@ def test_compaction_message_due_uses_select_fold_not_history_len():
     """
     assert compaction.compaction_message_due(_msgs(20), token_budget=12, min_fold=16) is False
     # 12 + 16 = 28 short user msgs → foldable exactly at message-trigger boundary.
-    batch = [_msg("user", f"m{i}", i) for i in range(28)]
     # All-user fold ends on user and is dropped; use alternating so the watermark
     # can sit on an assistant.
     assert compaction.compaction_message_due(_msgs(28), token_budget=12, min_fold=16) is True
     # Explicit: due helper does not take / consult history_len.
     assert "history_len" not in compaction.compaction_message_due.__code__.co_varnames
     assert "history_len" not in compaction.schedule_compaction_if_due.__code__.co_varnames
+
+
+def test_recency_keep_counts_replayed_tool_receipt():
+    from agentcore.conversation.compact_prompt import recency_keep_index
+
+    batch = _msgs(4)
+    assert recency_keep_index(batch, token_budget=80) == 0
+    journals = {
+        "m1": [
+            {
+                "kind": "round_boundary",
+                "payload": {"run_id": "cap", "role": "captain"},
+            },
+            {
+                "kind": "llm_call",
+                "payload": {
+                    "run_id": "cap",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "c1",
+                            "type": "function",
+                            "function": {"name": "read", "arguments": "{}"},
+                        }
+                    ],
+                },
+            },
+            {
+                "kind": "tool_call",
+                "payload": {
+                    "run_id": "cap",
+                    "tool_call_id": "c1",
+                    "result": "字" * 400,
+                },
+            },
+        ]
+    }
+    assert recency_keep_index(batch, token_budget=80, journals=journals) == 2
 
 
 def test_select_fold_token_budget_not_message_count():
@@ -1194,6 +1289,16 @@ class _FakeSession:
     async def __aexit__(self, *exc):
         return False
 
+    async def execute(self, *_args, **_kwargs):
+        class _Result:
+            def scalars(self):
+                return self
+
+            def all(self):
+                return []
+
+        return _Result()
+
 
 class _CloseProvider(_FakeProvider):
     """_FakeProvider + the ``close()`` the runner awaits in its finally block."""
@@ -1360,7 +1465,7 @@ async def test_compact_conversation_attaches_identity_ledger(monkeypatch):
     assert prose == "## 已确立的事实\n- X"
     assert "src/a.py" in ledger
     user_payload = provider.requests[0].messages[1].content
-    assert "被折轮的工具轨迹" in user_payload
+    assert "被折轮的工具轨迹" not in user_payload
     assert "本批涉及的文件" in user_payload
     assert IDENTITY_LEDGER_FENCE not in user_payload
 
@@ -2057,7 +2162,7 @@ def test_rest_summary_stays_quiet_unless_the_count_was_actually_taken():
         local_container_root_id=None,
         pinned=False,
         archived=False,
-        permission_axes={},
+        permission_axes={"boundary": "folder"},
         deep_research_auto=False,
         model_profile_id=None,
     )

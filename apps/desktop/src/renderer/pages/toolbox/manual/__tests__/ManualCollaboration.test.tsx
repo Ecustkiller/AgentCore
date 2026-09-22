@@ -45,7 +45,9 @@ describe("ManualCollaboration", () => {
     expect(sectionText("autonomy")).not.toMatch(/组团卡/);
     expect(sectionText("checkpoint")).not.toMatch(/组团卡/);
     expect(document.body.textContent).not.toMatch(/拒开工/);
-    expect(document.getElementById("autonomy")?.textContent).toMatch(/对话边界/);
+    expect(document.getElementById("autonomy")?.textContent).toMatch(
+      /对话边界/,
+    );
     expect(document.getElementById("control")?.textContent).toMatch(/中途插手/);
     expect(document.getElementById("checkpoint")?.textContent).toMatch(
       /检查点与审批/,

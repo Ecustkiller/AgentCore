@@ -3,8 +3,9 @@
  *
  * Allows stdout flags only (--trace / --messages / --json / --since /
  * --export-dir / --file, plus one trace or conversation id). --pack, --raw,
- * --full, --help, redirects, and command chaining stay on the normal approval
- * path (permission "ask"). Other shell commands never reach this hook.
+ * --full, --help, redirects, command substitution, and chaining stay on the
+ * normal approval path (permission "ask"). The script basename must be
+ * exactly log_timeline.py. Other shell commands never reach this hook.
  *
  * Fail-open: a crash exits non-zero so Cursor keeps its default review.
  * Schema: https://cursor.com/docs/hooks (beforeShellExecution)
@@ -12,7 +13,7 @@
 
 "use strict";
 
-const META = /[|&;<>`\r\n]/;
+const META = /[|&;<>`\r\n$()]/;
 const TRACE_ID = /^[0-9a-f]{32}$/i;
 const CONVERSATION_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -33,9 +34,11 @@ function isReadOnlyLogTimeline(command) {
   if (typeof command !== "string" || !command.trim()) return false;
   if (META.test(command)) return false;
   const tokens = tokenize(command.trim());
-  const idx = tokens.findIndex((token) =>
-    token.replace(/\\/g, "/").endsWith("log_timeline.py"),
-  );
+  const idx = tokens.findIndex((token) => {
+    const norm = token.replace(/\\/g, "/");
+    const base = norm.slice(norm.lastIndexOf("/") + 1);
+    return base === "log_timeline.py";
+  });
   if (idx < 0) return false;
 
   let launcher = tokens.slice(0, idx);

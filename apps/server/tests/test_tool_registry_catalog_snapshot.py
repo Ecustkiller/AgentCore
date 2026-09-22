@@ -7,7 +7,7 @@ this snapshot alongside their declaration.
 
 from __future__ import annotations
 
-from agentcore.core.types import ToolApproval, ToolFace
+from agentcore.core.types import ToolApproval, ToolFace, WorkspaceBoundary
 from agentcore.runtime.always_confirm import requires_always_confirm
 from agentcore.tools.builtin import (
     approval_class_tool_names,
@@ -113,12 +113,12 @@ def test_tool_registry_builtin_order_and_roster():
 
 def test_tool_registry_worker_default_order_and_roster():
     names = [s.name for s in build_worker_registry().list_all()]
-    assert names == _BUILTIN_ORDER + _HOST_ORDER + _WORKER_ONLY_ORDER
+    assert names == _BUILTIN_ORDER + _WORKER_ONLY_ORDER
 
 
 def test_tool_registry_ceo_builtin_order_and_roster():
     names = [s.name for s in build_ceo_tool_registry().list_all()]
-    assert names == _CEO_BUILTIN_ORDER
+    assert names == _BUILTIN_ORDER
 
 
 def test_tool_registry_builtin_includes_navigate_when_include_browser():
@@ -128,7 +128,7 @@ def test_tool_registry_builtin_includes_navigate_when_include_browser():
 
 def test_tool_registry_ceo_includes_navigate_when_include_browser():
     names = [s.name for s in build_ceo_tool_registry(include_browser=True).list_all()]
-    assert names == _BUILTIN_ORDER + _BROWSER_CEO_ORDER + _HOST_ORDER
+    assert names == _BUILTIN_ORDER + _BROWSER_CEO_ORDER
 
 
 def test_browser_tools_ceo_holds_interactive_screenshot_worker_only():
@@ -190,12 +190,27 @@ def test_tool_registry_grant_sets_snapshot():
 
 
 def test_tool_registry_worker_with_host_order():
-    names = [s.name for s in build_worker_registry(desktop_online=True).list_all()]
+    names = [
+        s.name
+        for s in build_worker_registry(
+            permission_axes=WorkspaceBoundary.COMPUTER
+        ).list_all()
+    ]
     assert names == (
         _BUILTIN_ORDER
         + _HOST_ORDER
         + _WORKER_ONLY_ORDER
     )
+
+
+def test_tool_registry_ceo_computer_includes_host():
+    names = [
+        s.name
+        for s in build_ceo_tool_registry(
+            permission_axes=WorkspaceBoundary.COMPUTER
+        ).list_all()
+    ]
+    assert names == _CEO_BUILTIN_ORDER
 
 
 def test_catalog_order_and_available_to_snapshot():

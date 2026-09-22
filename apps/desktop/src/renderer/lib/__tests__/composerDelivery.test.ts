@@ -82,14 +82,16 @@ describe("composerDelivery", () => {
     expect(resolveOccupiedShortcutDelivery(CID)).toBe("queue");
     const runtime = useConversationStore.getState().byId[CID];
     const message = runtime?.messages[0];
-    expect(message).toBeTruthy();
+    if (runtime == null || message == null) {
+      throw new Error("expected a live assistant message");
+    }
     useConversationStore.setState({
       byId: {
         [CID]: {
-          ...runtime!,
+          ...runtime,
           messages: [
             {
-              ...message!,
+              ...message,
               process: [
                 {
                   kind: "tool",

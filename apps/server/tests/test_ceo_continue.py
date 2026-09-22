@@ -540,6 +540,7 @@ async def test_continue_ceo_rebuilds_worker_base_not_chat_prompt(monkeypatch):
     from unittest.mock import AsyncMock
 
     import agentcore.runtime.pipeline as pipeline_pkg
+    from agentcore.memory.rules_injection import TurnRuleView
     from agentcore.runtime.events import EventSink, FinishReason
     from agentcore.runtime.pipeline import continue_ceo as continue_mod
     from agentcore.runtime.pipeline.continue_ceo import continue_ceo_pipeline
@@ -547,7 +548,6 @@ async def test_continue_ceo_rebuilds_worker_base_not_chat_prompt(monkeypatch):
         assemble_system_prompt,
         compose_ceo_chat_prompt,
     )
-    from agentcore.memory.rules_injection import TurnRuleView
     from agentcore.runtime.resolve.prompt import rebuild as rebuild_mod
     from agentcore.runtime.runs.types import RunPhase, RunState
 

@@ -433,7 +433,10 @@ describe("PromptCatalog 概览", () => {
     ).toBe("true");
     fireEvent.click(within(dialog).getByRole("tab", { name: "编辑" }));
     expect(screen.getByLabelText("名称")).toHaveProperty("value", "合同审查");
-    expect(screen.queryByRole("tablist", { name: "加载方式" })).toBeNull();
+    expect(screen.getByRole("tablist", { name: "加载方式" })).toBeTruthy();
+    expect(
+      screen.getByRole("tab", { name: "按需" }).getAttribute("aria-selected"),
+    ).toBe("true");
     expect(screen.queryByRole("button", { name: "停用" })).toBeNull();
   });
 

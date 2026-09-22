@@ -2472,10 +2472,10 @@ export interface paths {
         get?: never;
         /**
          * Set Permission Axes
-         * @description Switch the session permission axes (降档/升档确认由客户端负责).
+         * @description Switch the conversation boundary (升到「这台电脑」的确认由客户端负责).
          *
          *     Takes effect on the next turn / durable resume (gate is built at turn entry).
-         *     Illegal combo ``command=auto`` ∧ ``file_write=ask`` is rejected by the schema.
+         *     Body is ``{"boundary": "read" | "folder" | "computer"}``.
          */
         put: operations["set_permission_axes_v1_conversations__conversation_id__permission_axes_put"];
         post?: never;
@@ -2494,12 +2494,14 @@ export interface paths {
         };
         /**
          * List Queued Turns
-         * @description List the conversation's process-local FIFO queued turns (条权威仍是 GET / 快照).
+         * @description List the conversation's FIFO queued turns (条权威仍是 GET / 快照).
          *
-         *     Owner-gated like send / cancel. Returns the current in-memory snapshot in FIFO
-         *     order (``position`` 1-based). EPHEMERAL ``turn_queued`` / ``turn_queue_cancelled``
-         *     remain change signals only; ``turn_queue_started`` is the timeline entrance
-         *     frame (content on the frame). Restart empties the queue (no durable queue).
+         *     Owner-gated like send / cancel. Returns the current snapshot in FIFO order
+         *     (``position`` 1-based). EPHEMERAL ``turn_queued`` / ``turn_queue_cancelled``
+         *     remain change signals only. Timeline entrance is the ``message_start`` that
+         *     names the persisted user row; ``turn_queue_started`` only early-inserts for a
+         *     connection that already holds that frame. Unstarted items survive an engine
+         *     restart (``turn_queue_items``; credentials are resolved again at drain).
          */
         get: operations["list_queued_turns_v1_conversations__conversation_id__queued_turns_get"];
         put?: never;
@@ -10510,11 +10512,12 @@ export interface components {
         };
         /**
          * QueuedTurnItem
-         * @description One process-local FIFO queued turn (排队条权威内容源；GET / 快照).
+         * @description One FIFO queued turn (排队条权威内容源；GET / 快照).
          *
          *     ``turn_queued`` / ``turn_queue_cancelled`` remain change signals only.
-         *     ``turn_queue_started`` is the timeline user-bubble entrance (content on the
-         *     frame), not a change-only ping.
+         *     Timeline entrance is the ``message_start`` that names this user row.
+         *     ``turn_queue_started`` early-inserts the same row on a connection that
+         *     already holds that frame; it is not the entrance authority.
          *     ``interjection_id`` is set when the entry was promoted from a user interjection
          *     (协调升队 / 经典 steer leftover); omitted / null for plain ``delivery=queue``.
          *     ``user_message_id`` is the persisted user-row id (cancel deletes it; drain
@@ -10541,7 +10544,7 @@ export interface components {
         };
         /**
          * QueuedTurnListResponse
-         * @description Current conversation FIFO queue snapshot (进程内；重启后为空).
+         * @description Current conversation FIFO snapshot. Unstarted items survive an engine restart.
          */
         QueuedTurnListResponse: {
             /** Items */

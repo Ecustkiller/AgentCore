@@ -14,9 +14,9 @@ import {
   pendingAttachments,
   pendingMentions,
 } from "./QueuedTurnEditor";
-import {
-  type PendingAgentMention,
-  type PendingAttachment,
+import type {
+  PendingAgentMention,
+  PendingAttachment,
 } from "./message-input/composerAttachments";
 
 interface QueueEditDraft {

@@ -55,6 +55,20 @@ def test_always_chars_null_for_non_always_rows():
         )
         is None
     )
+    unbounded = _Row(
+        kind="document",
+        role="rule",
+        apply_mode="paths",
+        content="---\napply: paths\npaths: **\n---\nhello",
+    )
+    assert _always_chars(unbounded) == len("hello")  # type: ignore[arg-type]
+    bounded = _Row(
+        kind="document",
+        role="rule",
+        apply_mode="paths",
+        content="---\napply: paths\npaths: src/*.ts\n---\nhello",
+    )
+    assert _always_chars(bounded) is None  # type: ignore[arg-type]
     assert (
         _always_chars(
             _Row(kind="folder", role="general", apply_mode="always", content="")  # type: ignore[arg-type]

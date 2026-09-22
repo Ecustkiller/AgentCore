@@ -26,7 +26,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from agentcore.config import settings
-from agentcore.llm.provider.protocol import LLMMessage, llm_content_text
+from agentcore.llm.provider.protocol import (
+    LLMMessage,
+    ToolCall,
+    ToolCallFunction,
+    llm_content_text,
+)
 from agentcore.runtime.context import ContextAssembler, SectionOrder
 from agentcore.runtime.context.workspace_overview import attach_workspace_file_index
 from agentcore.runtime.resolve.prompt.base import render_runtime_date_block
@@ -73,6 +78,38 @@ def visualization_system_body(system: str, envelope: str) -> str:
     return f"{frozen}\n\n{xml}"
 
 
+def history_row_to_llm_message(msg: dict) -> LLMMessage:
+    """One chat-context row → ``LLMMessage``, including tool rounds."""
+    tool_calls: list[ToolCall] | None = None
+    raw_calls = msg.get("tool_calls")
+    if isinstance(raw_calls, list) and raw_calls:
+        parsed: list[ToolCall] = []
+        for tc in raw_calls:
+            if not isinstance(tc, dict):
+                continue
+            fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+            parsed.append(
+                ToolCall(
+                    id=str(tc.get("id") or ""),
+                    type="function",
+                    function=ToolCallFunction(
+                        name=str(fn.get("name") or ""),
+                        arguments=str(fn.get("arguments") or ""),
+                    ),
+                )
+            )
+        tool_calls = parsed or None
+    reasoning = msg.get("reasoning_content")
+    tcid = msg.get("tool_call_id")
+    return LLMMessage(
+        role=msg["role"],
+        content=msg.get("content"),
+        tool_calls=tool_calls,
+        tool_call_id=str(tcid) if isinstance(tcid, str) and tcid else None,
+        reasoning_content=reasoning if isinstance(reasoning, str) and reasoning else None,
+    )
+
+
 def opening_ceo_messages(
     *,
     system_prompt: str,
@@ -95,7 +132,7 @@ def opening_ceo_messages(
         if isinstance(msg, LLMMessage):
             messages.append(msg)
         else:
-            messages.append(LLMMessage(role=msg["role"], content=msg["content"]))
+            messages.append(history_row_to_llm_message(msg))
     extra = (in_history_system or "").strip()
     if extra and extra != (system_prompt or "").strip():
         last_extra = ""

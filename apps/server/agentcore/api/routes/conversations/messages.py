@@ -588,12 +588,14 @@ async def list_queued_turns(
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
 ):
-    """List the conversation's process-local FIFO queued turns (条权威仍是 GET / 快照).
+    """List the conversation's FIFO queued turns (条权威仍是 GET / 快照).
 
-    Owner-gated like send / cancel. Returns the current in-memory snapshot in FIFO
-    order (``position`` 1-based). EPHEMERAL ``turn_queued`` / ``turn_queue_cancelled``
-    remain change signals only; ``turn_queue_started`` is the timeline entrance
-    frame (content on the frame). Restart empties the queue (no durable queue).
+    Owner-gated like send / cancel. Returns the current snapshot in FIFO order
+    (``position`` 1-based). EPHEMERAL ``turn_queued`` / ``turn_queue_cancelled``
+    remain change signals only. Timeline entrance is the ``message_start`` that
+    names the persisted user row; ``turn_queue_started`` only early-inserts for a
+    connection that already holds that frame. Unstarted items survive an engine
+    restart (``turn_queue_items``; credentials are resolved again at drain).
     """
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
     from agentcore.runtime.turn.delivery import list_queued_items

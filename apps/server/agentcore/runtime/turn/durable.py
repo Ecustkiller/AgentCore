@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, Protocol
 
 from agentcore.core.logging import get_logger
@@ -77,6 +77,14 @@ def install_turn_queue_store(
     global _store, _blocker
     _store = store
     _blocker = blocker
+    from agentcore.db.repositories.conversations import bind_conversations_removed
+    from agentcore.runtime.turn.queue import turn_queue
+
+    def _clear(conversation_ids: Sequence[str]) -> None:
+        for conversation_id in conversation_ids:
+            turn_queue.clear(conversation_id)
+
+    bind_conversations_removed(_clear)
 
 
 def set_drain_credential_resolver(resolver: CredentialResolver | None) -> None:
@@ -91,6 +99,9 @@ def reset_turn_queue_durable() -> None:
     _store = None
     _blocker = None
     _resolver = None
+    from agentcore.db.repositories.conversations import bind_conversations_removed
+
+    bind_conversations_removed(None)
 
 
 def durable_payload(conversation_id: str, item: Any, position: int) -> dict[str, Any]:

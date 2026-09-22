@@ -48,9 +48,7 @@ describe("Markdown body paths stay code", () => {
   });
 
   it("leaves fence contents untouched", () => {
-    render(
-      <Markdown content={"```\nAgentCore/文档/工作稿/白板PRD.md\n```"} />,
-    );
+    render(<Markdown content={"```\nAgentCore/文档/工作稿/白板PRD.md\n```"} />);
     expect(screen.queryByRole("button", { name: /打开 / })).toBeNull();
     expect(screen.queryByRole("link")).toBeNull();
     expect(

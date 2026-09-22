@@ -1,9 +1,25 @@
+import { queryClient } from "@/lib/queryClient";
+import { conversationKeys } from "@/lib/queryKeys";
+import * as accountToken from "@/services/accountToken";
+import * as foldersToken from "@/services/foldersToken";
+import * as inferenceToken from "@/services/inferenceToken";
+import * as permissionAxes from "@/services/permissionAxes";
 import { resetSidecarEventPumpForTests } from "@/services/sidecarEventPump";
-import { startQueuedSidecarTurn } from "@/services/streamConversationViaSidecar";
+import {
+  resetQueuedSidecarStartsForTests,
+  startQueuedSidecarTurn,
+} from "@/services/streamConversationViaSidecar";
 import { resetStreamOwnershipForTests } from "@/services/turns/streamOwnership";
+import * as workspacesToken from "@/services/workspacesToken";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import type { SidecarEventPush } from "@shared/sidecar-contract";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const inference = {
+  baseUrl: "http://127.0.0.1/v1/inference/v1",
+  apiKey: "tok",
+  model: "m",
+};
 
 const CID = "conv-queue-start";
 
@@ -12,6 +28,19 @@ let onEventCb: ((push: SidecarEventPush) => void) | null = null;
 beforeEach(() => {
   resetSidecarEventPumpForTests();
   resetStreamOwnershipForTests();
+  vi.spyOn(inferenceToken, "resolveSidecarInference").mockResolvedValue(
+    inference,
+  );
+  vi.spyOn(foldersToken, "resolveSidecarFoldersAuth").mockResolvedValue(null);
+  vi.spyOn(accountToken, "resolveSidecarAccountAuth").mockResolvedValue(null);
+  vi.spyOn(workspacesToken, "resolveSidecarWorkspacesAuth").mockResolvedValue(
+    null,
+  );
+  vi.spyOn(
+    permissionAxes,
+    "resolveConversationPermissionAxes",
+  ).mockResolvedValue({ boundary: "folder" });
+  queryClient.removeQueries({ queryKey: conversationKeys.grouped });
   useConversationStore.setState({ currentConversationId: null, byId: {} });
   useConversationStore.getState().switchConversation(CID);
   useConversationStore.getState().setTurnPhase("completed", CID);
@@ -25,9 +54,9 @@ beforeEach(() => {
         };
       },
       startTurn: vi.fn(async (req: { turnId: string }) => {
-        expect(
-          getRuntime(CID).messages.some((m) => m.role === "user"),
-        ).toBe(false);
+        expect(getRuntime(CID).messages.some((m) => m.role === "user")).toBe(
+          false,
+        );
         onEventCb?.({
           conversationId: CID,
           turnId: req.turnId,
@@ -69,10 +98,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetQueuedSidecarStartsForTests();
   resetSidecarEventPumpForTests();
   resetStreamOwnershipForTests();
   useConversationStore.setState({ currentConversationId: null, byId: {} });
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("startQueuedSidecarTurn", () => {
@@ -95,10 +126,38 @@ describe("startQueuedSidecarTurn", () => {
         queueId: "q1",
         userMessageId: "u-queued",
         userMessage: "好的",
+        inference,
+        folderId: null,
+        localRootId: null,
+        localSubpath: null,
       }),
     );
-    expect(
-      getRuntime(CID).messages.filter((m) => m.role === "user"),
-    ).toEqual([expect.objectContaining({ id: "u-queued", content: "好的" })]);
+    expect(getRuntime(CID).messages.filter((m) => m.role === "user")).toEqual([
+      expect.objectContaining({ id: "u-queued", content: "好的" }),
+    ]);
+  });
+
+  it("项目会话出队带上文件夹绑定", async () => {
+    queryClient.setQueryData(conversationKeys.grouped, {
+      folders: [{ id: "f1", localRootId: "root-a", localSubpath: "src" }],
+      conversations: [{ id: CID, folderId: "f1" }],
+    });
+    await startQueuedSidecarTurn({
+      conversationId: CID,
+      rootId: "r1",
+      subpath: "",
+      queueId: "q1",
+      userMessageId: "u-queued",
+      messageId: "m-asst",
+      traceId: "a".repeat(32),
+      userMessage: "好的",
+    });
+    expect(vi.mocked(window.sidecarApi.startTurn)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        folderId: "f1",
+        localRootId: "root-a",
+        localSubpath: "src",
+      }),
+    );
   });
 });

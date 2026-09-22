@@ -96,7 +96,7 @@ def _fake_conversation(**overrides: Any) -> SimpleNamespace:
         "mode": "chat",
         "pinned": False,
         "archived": False,
-        "permission_axes": {},
+        "permission_axes": {"boundary": "folder"},
         "deep_research_auto": False,
         "model_profile_id": None,
         "compaction_summary": None,
@@ -162,6 +162,10 @@ async def test_soft_delete_does_not_restamp_updated_at():
 
     set_clause = _updates(session)[0].split("WHERE")[0]
     assert "updated_at=conversations.updated_at" in set_clause
+    deleted_tables = [
+        s.table.name for s in session.statements if isinstance(s, Delete)
+    ]
+    assert "turn_queue_items" in deleted_tables
     # 若误写成绑定值（编译期渲染成 <ts:…>），就是把「最近活动」改成了删除时刻。
     assert "updated_at=<ts:" not in set_clause
 
@@ -456,6 +460,7 @@ async def test_hard_delete_clears_conversation_preferences_first():
     tables = [s.table.name for s in deletes]
     assert tables[0] == "conversation_preferences"
     assert tables.index("conversation_preferences") < tables.index("conversations")
+    assert tables.index("turn_queue_items") < tables.index("conversations")
     sql = _sql(deletes[0])
     assert f"conversation_preferences.conversation_id = '{CONV_ID}'" in sql
     assert session.commits == 1

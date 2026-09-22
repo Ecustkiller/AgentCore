@@ -28,6 +28,26 @@ def test_coerce_history_rows_keeps_ledger_drops_junk():
     ]
 
 
+def test_coerce_history_rows_keeps_tool_rounds():
+    rows = coerce_history_rows(
+        [
+            {
+                "role": "assistant",
+                "content": "看",
+                "tool_calls": [{"id": "c1", "function": {"name": "read", "arguments": "{}"}}],
+                "reasoning_content": "想",
+            },
+            {"role": "tool", "content": "正文", "tool_call_id": "c1"},
+            {"role": "tool", "content": "缺 id"},
+            {"role": "system", "content": "no"},
+        ]
+    )
+    assert rows[0]["tool_calls"][0]["id"] == "c1"
+    assert rows[0]["reasoning_content"] == "想"
+    assert rows[1] == {"role": "tool", "content": "正文", "tool_call_id": "c1"}
+    assert len(rows) == 2
+
+
 async def test_resolve_uses_fallback_without_creds():
     out = await resolve_sidecar_turn_history(
         "c1",

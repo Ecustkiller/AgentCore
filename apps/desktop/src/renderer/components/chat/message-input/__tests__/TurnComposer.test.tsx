@@ -150,8 +150,7 @@ vi.mock("@/services/permissionAxes", () => ({
   DEFAULT_PERMISSION_AXES: { boundary: "folder" },
   boundaryShortLabel: () => "这个文件夹",
   axesEqual: () => false,
-  resolveDefaultPermissionAxes: () =>
-    Promise.resolve({ boundary: "folder" }),
+  resolveDefaultPermissionAxes: () => Promise.resolve({ boundary: "folder" }),
   setConversationPermissionAxes: vi.fn(),
   setComposerDraftAxes: vi.fn(),
   setUserDefaultRecipe: vi.fn(),
@@ -691,9 +690,7 @@ describe("TurnComposer variants", () => {
     useComposerDraftStore.getState().setValue("__draft__", "下一句");
     renderComposer("bar");
     const send = screen.getByRole("button", { name: "发送" });
-    expect(send.getAttribute("title")).toBe(
-      "排队至本回合结束后发送",
-    );
+    expect(send.getAttribute("title")).toBe("排队至本回合结束后发送");
     expect(screen.queryByRole("button", { name: "排队" })).toBeNull();
     expect(screen.queryByRole("button", { name: "排队发送" })).toBeNull();
     expect(screen.queryByRole("button", { name: "插队" })).toBeNull();
@@ -730,9 +727,7 @@ describe("TurnComposer variants", () => {
     expect(send.className).toContain("bg-foreground");
     expect(send.className).not.toContain("bg-primary");
     expect(send.className).toContain("size-8");
-    expect(send.getAttribute("title")).toBe(
-      "排队至本回合结束后发送",
-    );
+    expect(send.getAttribute("title")).toBe("排队至本回合结束后发送");
     expect(screen.queryByRole("button", { name: "排队" })).toBeNull();
     expect(screen.queryByRole("button", { name: "排队发送" })).toBeNull();
     expect(screen.queryByRole("button", { name: "插队" })).toBeNull();
@@ -820,9 +815,9 @@ describe("TurnComposer variants", () => {
     const { useComposerDraftStore } = await import("@/stores/composer");
     useComposerDraftStore.getState().setValue(OUTCOME_CID, "改用另一份");
     renderComposer("bar");
-    expect(screen.getByRole("button", { name: "发送" }).getAttribute("title")).toBe(
-      "排队至本回合结束后发送（Enter）；Ctrl/Cmd+Enter 送进当前回合",
-    );
+    expect(
+      screen.getByRole("button", { name: "发送" }).getAttribute("title"),
+    ).toBe("排队至本回合结束后发送（Enter）；Ctrl/Cmd+Enter 送进当前回合");
     fireEvent.keyDown(screen.getByTestId("composer-body"), {
       key: "Enter",
       ctrlKey: true,

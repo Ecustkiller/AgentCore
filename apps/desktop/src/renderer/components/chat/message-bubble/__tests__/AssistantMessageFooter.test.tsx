@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Message } from "@/stores/conversation";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 

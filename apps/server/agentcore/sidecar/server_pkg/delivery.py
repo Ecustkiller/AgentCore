@@ -378,13 +378,8 @@ class DeliveryMixin:
             return
         from agentcore.core.task_cancel import cancel_task
 
-        turn_id = ""
-        for tid, cid in self._turn_conversations.items():
-            if cid == conversation_id:
-                turn_id = tid
-                break
-        task = self._turns.get(turn_id) if turn_id else None
-        if task is not None and not task.done():
+        task = self.live_turn_task(conversation_id)
+        if task is not None:
             cancel_task(task, "user_stop")
         await self._reply(request_id, {"ok": True, "queueId": queue_id})
 

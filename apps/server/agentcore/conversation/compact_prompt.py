@@ -143,20 +143,62 @@ def merge_identity_items(
     return paths, commands
 
 
-def estimate_message_tokens(message: Any) -> int:
-    """Fold-cut estimate of one chat row (user/assistant prose only)."""
-    return estimate_text_tokens((getattr(message, "content", None) or "").strip())
+def _journal_entries(
+    message: Any, journals: dict[str, list[dict[str, Any]]] | None
+) -> list[dict[str, Any]] | None:
+    if not journals or getattr(message, "role", None) != "assistant":
+        return None
+    mid = getattr(message, "id", None)
+    if not mid:
+        return None
+    return journals.get(str(mid))
+
+
+def _replay_tokens(entries: list[dict[str, Any]] | None) -> int:
+    """Tokens the next window pays for this turn's tool rounds (not the bubble)."""
+    if not entries:
+        return 0
+    from agentcore.conversation.transcript import transcript_rows
+
+    total = 0
+    for row in transcript_rows(entries, ""):
+        total += estimate_text_tokens(row.get("content") or "")
+        total += estimate_text_tokens(row.get("reasoning_content") or "")
+        calls = row.get("tool_calls") if isinstance(row.get("tool_calls"), list) else []
+        for call in calls:
+            if not isinstance(call, dict):
+                continue
+            fn = call.get("function") if isinstance(call.get("function"), dict) else {}
+            total += estimate_text_tokens(str(fn.get("name") or ""))
+            total += estimate_text_tokens(str(fn.get("arguments") or ""))
+    return total
+
+
+def estimate_message_tokens(
+    message: Any,
+    journals: dict[str, list[dict[str, Any]]] | None = None,
+) -> int:
+    """Fold-cut estimate: bubble prose plus this turn's replayed tool rounds."""
+    prose = estimate_text_tokens((getattr(message, "content", None) or "").strip())
+    return prose + _replay_tokens(_journal_entries(message, journals))
 
 
 def _user_led_starts(batch: Sequence[Any]) -> list[int]:
     return [i for i, m in enumerate(batch) if getattr(m, "role", None) == "user"]
 
 
-def recency_keep_index(batch: Sequence[Any], *, token_budget: int) -> int:
+def recency_keep_index(
+    batch: Sequence[Any],
+    *,
+    token_budget: int,
+    journals: dict[str, list[dict[str, Any]]] | None = None,
+) -> int:
     """Index of the first kept message: newest user-led turns packed to ``token_budget``.
 
-    Always keeps the latest user-led turn, even when it alone exceeds the budget.
-    Returns ``len(batch)`` when there is no user-led turn (fold nothing — no keep
+    The budget counts replayed tool rounds when ``journals`` is supplied, so a short
+    bubble with a long receipt does not stay verbatim forever. Always keeps the
+    latest user-led turn, even when it alone exceeds the budget. Returns
+    ``len(batch)`` when there is no user-led turn (fold nothing — no keep
     boundary). Returns ``0`` when the whole batch fits (or is that one turn).
     """
     n = len(batch)
@@ -164,10 +206,12 @@ def recency_keep_index(batch: Sequence[Any], *, token_budget: int) -> int:
     if not starts:
         return n
     keep_from = starts[-1]
-    used = sum(estimate_message_tokens(m) for m in batch[keep_from:])
+    used = sum(estimate_message_tokens(m, journals) for m in batch[keep_from:])
     budget = max(0, token_budget)
     for start in reversed(starts[:-1]):
-        turn_tokens = sum(estimate_message_tokens(m) for m in batch[start:keep_from])
+        turn_tokens = sum(
+            estimate_message_tokens(m, journals) for m in batch[start:keep_from]
+        )
         if used + turn_tokens > budget:
             break
         used += turn_tokens
@@ -182,18 +226,23 @@ def _clip_args(text: str) -> str:
     return stripped[: _TOOL_ARG_CLIP - 1] + "…"
 
 
+def _row_field(row: Any, key: str) -> str:
+    value = getattr(row, key, None)
+    if not value and isinstance(row, dict):
+        value = row.get(key)
+    return "" if value is None else str(value)
+
+
 def render_tool_traces(traces: Sequence[Any]) -> str:
     """Clipped tool name / args / head-tail receipt for the summarizer only."""
     lines: list[str] = []
     for row in traces:
-        name = str(getattr(row, "name", None) or (row.get("name") if isinstance(row, dict) else "") or "?")
-        args = _clip_args(
-            str(getattr(row, "arguments", None) or (row.get("arguments") if isinstance(row, dict) else "") or "")
+        name = str(_row_field(row, "name") or "?")
+        args = _clip_args(str(_row_field(row, "arguments")))
+        result = str(_row_field(row, "result"))
+        receipt = truncate_head_tail(
+            result.strip(), _TOOL_RESULT_CLIP, marker=_TOOL_TRACE_ELISION
         )
-        result = str(
-            getattr(row, "result", None) or (row.get("result") if isinstance(row, dict) else "") or ""
-        )
-        receipt = truncate_head_tail(result.strip(), _TOOL_RESULT_CLIP, marker=_TOOL_TRACE_ELISION)
         head = f"{name}({args})" if args else name
         if receipt:
             lines.append(f"{head}\n{receipt}")
@@ -202,36 +251,48 @@ def render_tool_traces(traces: Sequence[Any]) -> str:
     return "\n\n".join(lines)
 
 
+def _transcript_line(row: dict[str, Any]) -> str | None:
+    role = row.get("role")
+    if role not in ("user", "assistant", "tool"):
+        return None
+    body = (row.get("content") or "").strip()
+    calls = row.get("tool_calls") if isinstance(row.get("tool_calls"), list) else []
+    labels: list[str] = []
+    for call in calls:
+        if not isinstance(call, dict):
+            continue
+        fn = call.get("function") if isinstance(call.get("function"), dict) else {}
+        name = str(fn.get("name") or "?")
+        args = _clip_args(str(fn.get("arguments") or ""))
+        labels.append(f"{name}({args})" if args else name)
+    if labels:
+        head = f"{role}：{body}" if body else f"{role}："
+        return f"{head}\n工具调用：{', '.join(labels)}"
+    if body:
+        return f"{role}：{body}"
+    return None
+
+
 def _render_fold(
     old_summary: str,
     messages: Sequence[Any],
     file_ledger: str = "",
-    tool_traces: str = "",
+    journals: dict[str, list[dict[str, Any]]] | None = None,
 ) -> str:
-    """The user-turn payload: prior prose summary + 片段 + file list + tool traces."""
-    lines: list[str] = []
-    for m in messages:
-        if m.role not in ("user", "assistant"):
-            continue
-        body = (m.content or "").strip()
-        if body:
-            lines.append(f"{m.role}：{body}")
-            continue
-        if m.role == "assistant":
-            from agentcore.conversation.failure_visible import export_visible_text
+    """Prior summary + file list + the same transcript the live window replays."""
+    from agentcore.conversation.history import _fold_history_messages
 
-            fail = export_visible_text(m)
-            if fail:
-                lines.append(f"assistant：（失败）{fail}")
+    lines: list[str] = []
+    for row in _fold_history_messages(messages, journals=journals):
+        line = _transcript_line(row)
+        if line:
+            lines.append(line)
     convo = "\n\n".join(lines) if lines else "（无正文）"
     prior = strip_identity_ledger(old_summary).strip() or "（无，这是本对话的首次压缩）"
     extras: list[str] = []
     ledger = file_ledger.strip()
     if ledger:
         extras.append(f"# 本批涉及的文件\n{ledger}")
-    traces = tool_traces.strip()
-    if traces:
-        extras.append(f"# 被折轮的工具轨迹\n{traces}")
     extra = ("\n\n".join(extras) + "\n\n") if extras else ""
     return (
         f"# 已有滚动摘要\n{prior}\n\n"
@@ -245,9 +306,7 @@ def render_conversation_fold(
     old_summary: str,
     messages: Sequence[Any],
     file_ledger: str = "",
-    tool_traces: str = "",
+    journals: dict[str, list[dict[str, Any]]] | None = None,
 ) -> str:
     """Public alias of ``_render_fold`` — evals must share production bytes."""
-    return _render_fold(
-        old_summary, messages, file_ledger=file_ledger, tool_traces=tool_traces
-    )
+    return _render_fold(old_summary, messages, file_ledger=file_ledger, journals=journals)

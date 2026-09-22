@@ -146,6 +146,34 @@ describe("ipc-validate（IPC 边界结构校验 · IPC-004）", () => {
       }
     });
 
+    it("reorderQueuedTurns：queueIds 是字符串数组，不是单个字符串", () => {
+      const required = ["rootId", "conversationId"] as const;
+      expect(() =>
+        assertShape(
+          "sidecar:reorderQueuedTurns",
+          {
+            rootId: "r",
+            conversationId: "c",
+            queueIds: ["q1", "q2"],
+          },
+          required,
+          ["subpath"],
+          [],
+          ["queueIds"],
+        ),
+      ).not.toThrow();
+      expect(() =>
+        assertShape(
+          "sidecar:reorderQueuedTurns",
+          { rootId: "r", conversationId: "c", queueIds: "q1" },
+          required,
+          ["subpath"],
+          [],
+          ["queueIds"],
+        ),
+      ).toThrow(IpcInvalidArgsError);
+    });
+
     it("runStop：runId null（停整队）放行，脏值仍拒", () => {
       const required = ["rootId", "conversationId", "executionId"] as const;
       expect(() =>

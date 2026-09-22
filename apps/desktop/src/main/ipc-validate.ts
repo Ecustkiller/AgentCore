@@ -69,6 +69,8 @@ export class IpcInvalidArgsError extends Error {
  * - `optionalStrings`：**可缺省**；一旦出现必须是 string（`null` 不合法）。
  * - `nullableIds`：三态标识（`string | null | undefined`）——如 `runId`（null=停整队）、
  *   `folderId`（null=裸聊）。对象业务载荷（如 `permissionAxes` / `accountAuth`）不要放进来。
+ * - `stringArrays`：必填的 string 数组（如排队重排的 `queueIds`）。不要塞进 `required`，
+ *   否则合法数组会在边界被当成「不是 string」拒掉。
  */
 export function assertShape(
   channel: string,
@@ -76,6 +78,7 @@ export function assertShape(
   required: readonly string[],
   optionalStrings: readonly string[] = [],
   nullableIds: readonly string[] = [],
+  stringArrays: readonly string[] = [],
 ): void {
   if (!isRecord(payload)) {
     throw new IpcInvalidArgsError(channel, "(payload)", "object");
@@ -95,6 +98,15 @@ export function assertShape(
     const value = payload[key];
     if (value !== undefined && value !== null && typeof value !== "string") {
       throw new IpcInvalidArgsError(channel, key, "string | null");
+    }
+  }
+  for (const key of stringArrays) {
+    const value = payload[key];
+    if (
+      !Array.isArray(value) ||
+      value.some((item) => typeof item !== "string")
+    ) {
+      throw new IpcInvalidArgsError(channel, key, "string[]");
     }
   }
 }

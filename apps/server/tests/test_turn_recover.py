@@ -1292,8 +1292,8 @@ async def test_production_crash_factory_base_prompt_lists_system_skills(monkeypa
 
     from agentcore.conversation import crash_delegate as crash_mod
     from agentcore.conversation.crash_delegate import production_crash_delegate_factory
-    from agentcore.runtime.facts import FactKind
     from agentcore.memory.rules_injection import TurnRuleView
+    from agentcore.runtime.facts import FactKind
     from agentcore.runtime.resolve.prompt import rebuild as rebuild_mod
 
     captured: dict = {}

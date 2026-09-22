@@ -88,14 +88,10 @@ describe("user_interjection · 经典单聊（无 run_plan）", () => {
   it("received 不进时间线；injected 用已记下的用户行 id 放入一次", () => {
     startTurn();
     emitInterjection("received", { user_message_id: "u-steer" });
-    expect(getRuntime(CID).messages.some((m) => m.role === "user")).toBe(
-      false,
-    );
+    expect(getRuntime(CID).messages.some((m) => m.role === "user")).toBe(false);
 
     emitInterjection("injected");
-    expect(
-      getRuntime(CID).messages.filter((m) => m.role === "user"),
-    ).toEqual([
+    expect(getRuntime(CID).messages.filter((m) => m.role === "user")).toEqual([
       expect.objectContaining({
         id: "u-steer",
         content: "改成用中文总结",
@@ -112,9 +108,7 @@ describe("user_interjection · 经典单聊（无 run_plan）", () => {
     startTurn();
     emitInterjection("received", { user_message_id: "u-steer" });
     emitInterjection("queued");
-    expect(getRuntime(CID).messages.some((m) => m.role === "user")).toBe(
-      false,
-    );
+    expect(getRuntime(CID).messages.some((m) => m.role === "user")).toBe(false);
   });
 
   it("经典单聊无 plan 也不丢插话", () => {

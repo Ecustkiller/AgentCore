@@ -12,14 +12,13 @@ import {
   type SidecarListBrowserSessionsResult,
   type SidecarListQueuedTurnsRequest,
   type SidecarListQueuedTurnsResult,
-  type SidecarReorderQueuedTurnsRequest,
-  type SidecarStopAndSendQueuedTurnRequest,
   type SidecarOccupancyRequest,
   type SidecarOccupancyResponse,
   type SidecarProbeRequest,
   type SidecarRecoveryRequest,
   type SidecarRecoveryResponse,
   type SidecarRefreshLiveAccountRulesMemoryRequest,
+  type SidecarReorderQueuedTurnsRequest,
   type SidecarRespondRequest,
   type SidecarRestoreTurnBaselineRequest,
   type SidecarRestoreWorkspaceVersionRequest,
@@ -27,6 +26,7 @@ import {
   type SidecarRunRedirectRequest,
   type SidecarRunStopRequest,
   type SidecarStartTurnRequest,
+  type SidecarStopAndSendQueuedTurnRequest,
   type SidecarTurnFilesDiffRequest,
   type SidecarTurnFilesDiffResult,
   type SidecarTurnResult,
@@ -67,9 +67,17 @@ function assertSidecarShape(
   required: readonly string[],
   optionalStrings: readonly string[] = [],
   nullableIds: readonly string[] = [],
+  stringArrays: readonly string[] = [],
 ): void {
   try {
-    assertShape(channel, payload, required, optionalStrings, nullableIds);
+    assertShape(
+      channel,
+      payload,
+      required,
+      optionalStrings,
+      nullableIds,
+      stringArrays,
+    );
   } catch (err) {
     if (err instanceof IpcInvalidArgsError) {
       logDesktop({
@@ -229,8 +237,10 @@ export function registerSidecarIpc(): void {
       assertSidecarShape(
         SIDECAR_CHANNELS.reorderQueuedTurns,
         req,
-        ["rootId", "conversationId", "queueIds"],
+        ["rootId", "conversationId"],
         ["subpath"],
+        [],
+        ["queueIds"],
       );
       return manager.reorderQueuedTurns(req);
     },

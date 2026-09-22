@@ -78,8 +78,8 @@ from agentcore.billing.allowance import allowance_epoch
 from agentcore.billing.gate import BackgroundLlmSkip, run_compaction_llm
 from agentcore.config import settings
 from agentcore.conversation.compact_prompt import (
-    IDENTITY_LEDGER_FENCE,  # noqa: F401 — tests import this name from compaction
     _COMPACT_SYSTEM_PROMPT,  # noqa: F401 — tests import this name from compaction
+    IDENTITY_LEDGER_FENCE,  # noqa: F401 — tests import this name from compaction
     attach_identity_ledger,
     compact_system_prompt,
     estimate_message_tokens,  # noqa: F401 — tests
@@ -88,7 +88,6 @@ from agentcore.conversation.compact_prompt import (
     recency_keep_index,
     render_conversation_fold,
     render_identity_ledger,
-    render_tool_traces,  # noqa: F401 — tests
     strip_identity_ledger,
 )
 from agentcore.core.errors import recovery_at_iso
@@ -135,6 +134,7 @@ def _select_fold(
     token_budget: int | None = None,
     min_fold: int,
     recency: int | None = None,
+    journals: dict | None = None,
 ) -> list[Message]:
     """Oldest messages to fold this pass: everything before the token-budget keep window.
 
@@ -152,7 +152,7 @@ def _select_fold(
     budget = (
         settings.compaction_recency_token_budget if token_budget is None else token_budget
     )
-    keep_from = recency_keep_index(batch, token_budget=budget)
+    keep_from = recency_keep_index(batch, token_budget=budget, journals=journals)
     fold = list(batch[:keep_from])
     while fold and getattr(fold[-1], "role", None) == "user":
         fold.pop()
@@ -206,7 +206,7 @@ async def _summarize(
     conversation_id: str,
     user_waiting: bool = False,
     file_ledger: str = "",
-    tool_traces: str = "",
+    journals: dict | None = None,
 ) -> str:
     """One flash, non-thinking call → the updated rolling summary ("" on failure).
 
@@ -220,31 +220,19 @@ async def _summarize(
 
     header = await hydrate_session_header(conversation_id)
     if header is not None and header.tools:
-        history_msgs: list[LLMMessage] = []
-        for m in messages:
-            if m.role not in ("user", "assistant"):
-                continue
-            body = (m.content or "").strip()
-            if body and m.role == "user":
-                history_msgs.append(LLMMessage(role="user", content=body))
-            elif body and m.role == "assistant":
-                history_msgs.append(LLMMessage(role="assistant", content=body))
-            elif m.role == "assistant":
-                from agentcore.conversation.failure_visible import export_visible_text
+        from agentcore.conversation.history import _fold_history_messages
+        from agentcore.runtime.resolve.prompt.envelope import history_row_to_llm_message
 
-                fail = export_visible_text(m)
-                if fail:
-                    history_msgs.append(
-                        LLMMessage(role="assistant", content=f"（失败）{fail}")
-                    )
+        history_msgs: list[LLMMessage] = []
+        for row in _fold_history_messages(list(messages), journals=journals):
+            if row.get("role") not in ("user", "assistant", "tool"):
+                continue
+            history_msgs.append(history_row_to_llm_message(row))
         prior = strip_identity_ledger(old_summary).strip() or "（无，这是本对话的首次压缩）"
         extras: list[str] = []
         ledger = file_ledger.strip()
         if ledger:
             extras.append(f"# 本批涉及的文件\n{ledger}")
-        traces = tool_traces.strip()
-        if traces:
-            extras.append(f"# 被折轮的工具轨迹\n{traces}")
         extra = ("\n\n" + "\n\n".join(extras)) if extras else ""
         tail = (
             f"{TURN_ENVELOPE_FENCE}\n{compact_system_prompt()}\n\n"
@@ -274,7 +262,7 @@ async def _summarize(
                         old_summary,
                         messages,
                         file_ledger=file_ledger,
-                        tool_traces=tool_traces,
+                        journals=journals,
                     ),
                 ),
             ],
@@ -312,12 +300,41 @@ async def _load_unfolded_batch(conversation_id: str) -> list[Message]:
         )
 
 
+def _assistant_turn_ids(messages: Sequence[Message]) -> list[str]:
+    ids: list[str] = []
+    seen: set[str] = set()
+    for msg in messages:
+        if getattr(msg, "role", None) != "assistant":
+            continue
+        mid = getattr(msg, "id", None)
+        if not mid:
+            continue
+        key = str(mid)
+        if key in seen:
+            continue
+        seen.add(key)
+        ids.append(key)
+    return ids
+
+
+async def _load_turn_journals(turn_ids: Sequence[str]) -> dict:
+    """Journal facts for a fold plan. Missing turns are absent."""
+    ids = list(dict.fromkeys(turn_ids))
+    if not ids:
+        return {}
+    from agentcore.db.repositories import TurnJournalRepository
+
+    async with async_session_factory() as session:
+        return await TurnJournalRepository(session).load_map(ids)
+
+
 def _fold_before_keep(
     newest: Sequence[Message],
     oldest: Sequence[Message],
     *,
     token_budget: int,
     min_fold: int,
+    journals: dict | None = None,
 ) -> list[Message]:
     """Oldest rows strictly before the newest-side keep window, if ≥ ``min_fold``.
 
@@ -327,11 +344,17 @@ def _fold_before_keep(
     """
     if not newest:
         return []
-    keep_from = recency_keep_index(newest, token_budget=token_budget)
+    keep_from = recency_keep_index(
+        newest, token_budget=token_budget, journals=journals
+    )
     if keep_from >= len(newest):
         return []
     cutoff = newest[keep_from].created_at
-    fold = [m for m in oldest if getattr(m, "created_at", None) is not None and m.created_at < cutoff]
+    fold = [
+        m
+        for m in oldest
+        if getattr(m, "created_at", None) is not None and m.created_at < cutoff
+    ]
     while fold and getattr(fold[-1], "role", None) == "user":
         fold.pop()
     if len(fold) < min_fold:
@@ -374,10 +397,13 @@ async def _plan_fold(
 ) -> list[Message]:
     """Fold candidates for due / compact / dull-line (empty = nothing to fold)."""
     newest, oldest, _summary = await _load_fold_windows(conversation_id)
+    journals = await _load_turn_journals(_assistant_turn_ids(newest))
     budget = (
         settings.compaction_recency_token_budget if token_budget is None else token_budget
     )
-    return _fold_before_keep(newest, oldest, token_budget=budget, min_fold=min_fold)
+    return _fold_before_keep(
+        newest, oldest, token_budget=budget, min_fold=min_fold, journals=journals
+    )
 
 
 async def _is_message_due(conversation_id: str) -> bool:
@@ -447,11 +473,17 @@ async def compact_conversation(
                 )
                 oldest = list(oldest)
 
+            from agentcore.db.repositories import TurnJournalRepository
+
+            journals = await TurnJournalRepository(session).load_map(
+                _assistant_turn_ids([*newest, *oldest])
+            )
             fold_msgs = _fold_before_keep(
                 newest,
                 oldest,
                 token_budget=settings.compaction_recency_token_budget,
                 min_fold=settings.compaction_min_fold_messages,
+                journals=journals,
             )
             if not fold_msgs:
                 return False
@@ -470,7 +502,6 @@ async def compact_conversation(
 
         file_ledger = await build_fold_file_ledger(fold_turn_ids)
         trace_rows = await load_fold_tool_traces(fold_turn_ids)
-        tool_traces = render_tool_traces(trace_rows)
         prior_ledger = ""
         if IDENTITY_LEDGER_FENCE in (old_summary or ""):
             prior_ledger = old_summary.split(IDENTITY_LEDGER_FENCE, 1)[1]
@@ -493,7 +524,7 @@ async def compact_conversation(
                     conversation_id=conversation_id,
                     user_waiting=user_waiting,
                     file_ledger=file_ledger,
-                    tool_traces=tool_traces,
+                    journals=journals,
                 )
             finally:
                 close = getattr(provider, "close", None)

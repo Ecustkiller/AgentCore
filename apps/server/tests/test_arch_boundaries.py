@@ -300,6 +300,8 @@ _RUNTIME_OVERSIZE_EXEMPT: frozenset[str] = frozenset(
         "runs/executor/context.py",
         "runs/wave.py",
         "turn/runs.py",
+        # Journal → SSE replay is one path (cursor, segment deltas, hot orphan).
+        "events/attach_replay.py",
     }
 )
 

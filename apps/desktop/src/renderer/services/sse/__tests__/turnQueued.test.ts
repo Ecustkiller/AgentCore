@@ -401,13 +401,18 @@ describe("turn_queue_started · 契约出队清轻态", () => {
     expect(users[0]?.content).toBe("好的");
     expect(messages.at(-1)?.role).toBe("assistant");
     expect(messages.at(-1)?.serverMessageId).toBe("asst-1");
-    expect(useQueuedTurnsStore.getState().list(CID).map((e) => e.queueId)).toEqual([
-      "q-b",
-    ]);
+    expect(
+      useQueuedTurnsStore
+        .getState()
+        .list(CID)
+        .map((e) => e.queueId),
+    ).toEqual(["q-b"]);
 
     handleMessageStreamEvent(named, { conversationId: CID, source: "server" });
     const again = useConversationStore.getState().byId[CID]?.messages ?? [];
-    expect(again.filter((m) => m.role === "user" && m.id === "u-a")).toHaveLength(1);
+    expect(
+      again.filter((m) => m.role === "user" && m.id === "u-a"),
+    ).toHaveLength(1);
     expect(useQueuedTurnsStore.getState().list(CID)).toHaveLength(1);
   });
 

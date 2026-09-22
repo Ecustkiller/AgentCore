@@ -20,6 +20,7 @@ from agentcore.core.errors import (
 )
 from agentcore.fulfill.hub import default_fulfiller_hub
 from agentcore.fulfill.origin import origin_device
+from agentcore.memory.rules_injection import TurnRuleView
 from agentcore.runtime.context import detect_workspace_git
 from agentcore.runtime.error_fields import error_fields_for
 from agentcore.runtime.events import EventSink
@@ -34,7 +35,6 @@ from agentcore.runtime.pipeline.errors import (
     remaining_prepare_local_io_budget,
     reset_prepare_local_io_deadline,
 )
-from agentcore.memory.rules_injection import TurnRuleView
 from agentcore.runtime.pipeline.prepare import prepare_fresh_turn
 from agentcore.tools.sandbox.exec_languages import resolve_exec_languages
 from agentcore.workspace.channel import WorkspaceChannel, WorkspaceOp

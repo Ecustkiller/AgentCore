@@ -23,11 +23,14 @@ describe("fetchChatContext", () => {
         { role: "user", content: "hi" },
         { role: "assistant", content: "ok" },
         { role: "system", content: "no" },
+        { role: "tool", content: "正文", tool_call_id: "c1" },
+        { role: "tool", content: "缺 id" },
       ],
     });
     await expect(fetchChatContext("c1")).resolves.toEqual([
       { role: "user", content: "hi" },
       { role: "assistant", content: "ok" },
+      { role: "tool", content: "正文", tool_call_id: "c1" },
     ]);
     expect(post).toHaveBeenCalledWith(
       "/v1/account/conversations/chat-context",

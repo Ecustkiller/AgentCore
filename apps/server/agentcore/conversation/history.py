@@ -1,10 +1,13 @@
 """History reconstruction and replay.
 
 Loads conversation history from the database for LLM context injection.
-Only user/assistant text messages are replayed — tool I/O is not included
-to avoid burning tokens on cross-turn accumulated tool output.
+The uncompacted tail replays each user turn plus that turn's captain
+transcript (tool rounds from the journal, then the assistant prose; a call
+that never returned is closed with a short receipt). Compaction is what
+replaces older rounds with the summary. Memory
+consolidation reads raw bodies and does not see the transcript.
 
-Failed assistant turns (empty content + failed status) are folded into a short
+Failed assistant turns with no prose and no tool record fold into a short
 system-framed note so the next turn can attribute prior failures correctly
 instead of inventing causes. Error prose stays in the note — never as ordinary
 assistant content back to the LLM.
@@ -23,9 +26,8 @@ CEO ``[系统提示]`` envelopes stamped on ``usage.turn_envelope`` are spliced 
 front of that user utterance so the LLM window stays append-only. A DeepSeek
 in-history extra system (``usage.in_history_system``) is spliced immediately
 before that envelope. Consecutive identical extras / envelopes are skipped so
-later turns do not rewrite the prefix. Compaction and memory consolidation
-read raw bodies and never see those rows. UI bubbles still show the original
-user text.
+later turns do not rewrite the prefix. Memory consolidation reads raw bodies
+and never sees those rows. UI bubbles still show the original user text.
 """
 
 from datetime import datetime
@@ -40,6 +42,7 @@ from agentcore.conversation.failure_visible import (
     is_failed_empty_assistant,
     usage_of,
 )
+from agentcore.conversation.transcript import transcript_rows
 from agentcore.core.inline_body import (
     has_inline_markers,
     render_inline_labels,
@@ -316,8 +319,45 @@ def drop_trailing_user_turn(
     return out
 
 
-def _fold_history_messages(messages: list[Any]) -> list[dict]:
-    """Fold ORM message rows into ``[{role, content}]``, merging consecutive failures."""
+def _journal_for(
+    msg: Any, journals: dict[str, list[dict[str, Any]]] | None
+) -> list[dict[str, Any]]:
+    if not journals:
+        return []
+    mid = getattr(msg, "id", None)
+    if not mid:
+        return []
+    return journals.get(str(mid)) or []
+
+
+async def _assistant_journals(
+    session: AsyncSession, messages: list[Any]
+) -> dict[str, list[dict[str, Any]]]:
+    """Batch-load journals for assistant rows. Missing turns are absent."""
+    ids: list[str] = []
+    for msg in messages:
+        if getattr(msg, "role", None) != "assistant":
+            continue
+        mid = getattr(msg, "id", None)
+        if mid:
+            ids.append(str(mid))
+    if not ids:
+        return {}
+    from agentcore.db.repositories import TurnJournalRepository
+
+    return await TurnJournalRepository(session).load_map(ids)
+
+
+def _fold_history_messages(
+    messages: list[Any],
+    journals: dict[str, list[dict[str, Any]]] | None = None,
+) -> list[dict]:
+    """Fold ORM rows into the CEO window, merging consecutive empty failures.
+
+    ``journals`` maps assistant message id → journal facts. When present, an
+    assistant row expands into that turn's captain transcript. Callers that
+    omit it (unit folds, memory) keep prose only.
+    """
     history: list[dict] = []
     pending_failures: list[str] = []
     pending_details: list[str] = []
@@ -347,19 +387,21 @@ def _fold_history_messages(messages: list[Any]) -> list[dict]:
         elif role == "user" and atts:
             flush_failures()
             _append_user_with_envelope(history, msg, _user_attachment_note(atts))
-        elif role == "assistant" and content:
-            flush_failures()
-            item: dict[str, Any] = {"role": "assistant", "content": content}
-            # 引擎跨回合 hydrate 用；拼 LLMMessage 时只取 role/content，不带入模型窗口。
+        elif role == "assistant":
             ledger = getattr(msg, "evidence_ledger", None)
-            if isinstance(ledger, list) and ledger:
-                item["evidence_ledger"] = list(ledger)
-            history.append(item)
-        elif _is_failed_empty_assistant(msg):
-            pending_failures.append(_failure_category_label(msg))
-            detail = _failure_detail(msg)
-            if detail:
-                pending_details.append(detail)
+            replay = transcript_rows(
+                _journal_for(msg, journals),
+                content,
+                ledger if isinstance(ledger, list) else None,
+            )
+            if replay:
+                flush_failures()
+                history.extend(replay)
+            elif _is_failed_empty_assistant(msg):
+                pending_failures.append(_failure_category_label(msg))
+                detail = _failure_detail(msg)
+                if detail:
+                    pending_details.append(detail)
         # else: empty non-failed assistant / other roles — skip
     flush_failures()
     return history
@@ -402,7 +444,8 @@ async def load_recent_history(
         else await repo.list_recent_after(conversation_id, after=after, limit=max_messages)
     )
     if fold_failures:
-        return _fold_history_messages(messages)
+        journals = await _assistant_journals(session, messages)
+        return _fold_history_messages(messages, journals=journals)
     history = []
     for msg in messages:
         if msg.role in ("user", "assistant") and msg.content:
@@ -418,6 +461,16 @@ async def load_recent_history(
                     item["evidence_ledger"] = list(ledger)
             history.append(item)
     return history
+
+
+def _history_tail(items: list[dict], history_len: int) -> list[dict]:
+    """Last ``history_len`` rows, pulled back so the slice does not open on a tool."""
+    if history_len <= 0 or len(items) <= history_len:
+        return items
+    start = len(items) - history_len
+    while start > 0 and items[start].get("role") == "tool":
+        start -= 1
+    return items[start:]
 
 
 def _from_first_user(history: list[dict]) -> list[dict]:
@@ -489,7 +542,10 @@ async def load_chat_context(
             limit=settings.compaction_context_max_messages,
         )
         history: list[dict] = [_summary_block(conv.compaction_summary)]
-        history.extend(_from_first_user(_fold_history_messages(rows)))
+        journals = await _assistant_journals(session, rows)
+        history.extend(
+            _from_first_user(_fold_history_messages(rows, journals=journals))
+        )
         return history
 
     return await load_recent_history(
@@ -531,11 +587,9 @@ async def load_history_for_turn(
     ):
         items.append(_summary_block(conv.compaction_summary))
 
-    items.extend(_fold_history_messages(rows))
-
-    if len(items) > history_len:
-        return items[-history_len:]
-    return items
+    journals = await _assistant_journals(session, rows)
+    items.extend(_fold_history_messages(rows, journals=journals))
+    return _history_tail(items, history_len)
 
 
 async def stamp_user_turn_envelope(

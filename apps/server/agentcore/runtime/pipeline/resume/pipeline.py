@@ -8,7 +8,7 @@ import json
 import agentcore.runtime.pipeline as pipeline_pkg
 from agentcore.attention import bind_attention_scope, reset_attention_scope
 from agentcore.core.logging import get_logger
-from agentcore.core.types import DEFAULT_PERMISSION_AXES, WorkspaceBoundary, ToolEffect, new_id
+from agentcore.core.types import DEFAULT_PERMISSION_AXES, ToolEffect, WorkspaceBoundary, new_id
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.profiles import TurnProfiles as ProfileSet
 from agentcore.llm.profiles import turn_profiles_for_turn

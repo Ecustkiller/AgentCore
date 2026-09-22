@@ -1036,7 +1036,7 @@ async def test_create_conversation_snapshots_account_default(monkeypatch):
         local_container_root_id=None,
         pinned=False,
         archived=False,
-        permission_axes={},
+        permission_axes={"boundary": "folder"},
         deep_research_auto=False,
         model_profile_id="sys-default",
         compaction_summary=None,
@@ -1053,7 +1053,7 @@ async def test_create_conversation_snapshots_account_default(monkeypatch):
 
     monkeypatch.setattr(
         "agentcore.api.routes.conversations.crud.default_permission_axes_for_user",
-        AsyncMock(return_value=SimpleNamespace(to_dict=lambda: {})),
+        AsyncMock(return_value=SimpleNamespace(to_dict=lambda: {"boundary": "folder"})),
     )
     monkeypatch.setattr(
         "agentcore.llm.model_profiles.LlmModelProfileService.snapshot_default_profile_id",

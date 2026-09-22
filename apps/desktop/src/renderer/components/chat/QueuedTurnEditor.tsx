@@ -324,7 +324,9 @@ export function QueuedTurnEditor({
           if (index >= 0) {
             setValue((prev) => dropInlineIndex(prev, "mention", index));
           }
-          setAgentMentions((prev) => prev.filter((mention) => mention.id !== id));
+          setAgentMentions((prev) =>
+            prev.filter((mention) => mention.id !== id),
+          );
         }}
         onCaret={(caret) => mention.syncMention(value, caret)}
         onKeyDown={(event) => {

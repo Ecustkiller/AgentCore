@@ -11,11 +11,11 @@ import {
   useConversationStore,
 } from "@/stores/conversation";
 import { useExecutionStore } from "@/stores/execution";
-import { useQueuedTurns } from "@/stores/queuedTurns";
 import {
   usePermissionChanges,
   usePermissionChangesSync,
 } from "@/stores/permissionChanges";
+import { useQueuedTurns } from "@/stores/queuedTurns";
 import { useMemo } from "react";
 import { BackgroundTaskCard } from "./BackgroundTaskCard";
 import { CompactionDivider } from "./CompactionDivider";

@@ -36,13 +36,7 @@ import {
   CACHE_BILLED_AS_MISS_LABEL,
   cacheUsageDisplay,
 } from "@agentcore/protocol-fold-kit";
-import {
-  Check,
-  Copy,
-  Gauge,
-  Layers,
-  Package,
-} from "lucide-react";
+import { Check, Copy, Gauge, Layers, Package } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import {
   CloneMessageAction,

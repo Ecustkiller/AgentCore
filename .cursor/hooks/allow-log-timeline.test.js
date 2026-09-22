@@ -46,6 +46,19 @@ test("asks before pack, raw, help, redirects, and chained commands", () => {
   }
 });
 
+test("asks on command substitution and lookalike script names", () => {
+  const blocked = [
+    `uv run python scripts/log_timeline.py --export-dir $(whoami) --trace ${TRACE}`,
+    `uv run python scripts/log_timeline.py --file $(Remove-Item x) --trace ${TRACE}`,
+    `uv run python scripts/evil_log_timeline.py --trace ${TRACE}`,
+    `uv run python scripts/not_log_timeline.py ${CONV}`,
+  ];
+  for (const command of blocked) {
+    assert.equal(isReadOnlyLogTimeline(command), false, command);
+    assert.deepEqual(decide(command), { permission: "ask" });
+  }
+});
+
 test("asks when the trace id was padded or truncated", () => {
   assert.equal(
     isReadOnlyLogTimeline(

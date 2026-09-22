@@ -1,6 +1,6 @@
 """Conversation data access (the chat itself; shares/folders/messages are siblings)."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -24,6 +24,7 @@ from agentcore.db.models import (
     Message,
     TurnLeaseRow,
     TurnMetricsRow,
+    TurnQueueItem,
     User,
 )
 from agentcore.db.repositories._desk_visibility import (
@@ -40,6 +41,25 @@ from ._base import (
 )
 from ._journal_cascade import delete_journal_for_conversation
 from ._stream_state_cascade import delete_stream_state_for_conversation
+
+_after_conversations_removed: Callable[[Sequence[str]], None] | None = None
+
+
+def bind_conversations_removed(fn: Callable[[Sequence[str]], None] | None) -> None:
+    """Runtime registers the in-process FIFO drop. ``db`` does not import runtime."""
+    global _after_conversations_removed
+    _after_conversations_removed = fn
+
+
+def _drop_turn_queue_memory(conversation_ids: Sequence[str]) -> None:
+    """Drop in-process FIFO rows after the durable rows are already gone.
+
+    Restart reloads ``turn_queue_items``. The hook stops a live process from
+    draining a conversation that was just soft- or hard-deleted.
+    """
+    hook = _after_conversations_removed
+    if hook is not None:
+        hook(conversation_ids)
 
 
 def _title_or_visible_body_hit(term: str):
@@ -837,12 +857,16 @@ class ConversationRepository:
 
         await RunSessionRepository(self._session).delete_for_conversation(conversation_id)
         await self._session.execute(
+            delete(TurnQueueItem).where(TurnQueueItem.conversation_id == conversation_id)
+        )
+        await self._session.execute(
             update(Conversation)
             .where(Conversation.id == conversation_id)
             .values(deleted_at=datetime.now(UTC), updated_at=Conversation.updated_at)
             .execution_options(synchronize_session=False)
         )
         await self._session.commit()
+        _drop_turn_queue_memory([conversation_id])
         return True
 
     async def soft_delete_all_for_user(self, user_id: str) -> int:
@@ -868,12 +892,16 @@ class ConversationRepository:
         await self._session.execute(
             delete(RunSessionRow).where(RunSessionRow.conversation_id.in_(conv_ids))
         )
+        await self._session.execute(
+            delete(TurnQueueItem).where(TurnQueueItem.conversation_id.in_(conv_ids))
+        )
         result = await self._session.execute(
             update(Conversation)
             .where(Conversation.id.in_(conv_ids))
             .values(deleted_at=datetime.now(UTC))
         )
         await self._session.commit()
+        _drop_turn_queue_memory(conv_ids)
         return int(result.rowcount or 0)
 
     async def list_deleted_by_user(
@@ -1053,8 +1081,12 @@ class ConversationRepository:
         from agentcore.db.repositories.runs import RunSessionRepository
 
         await RunSessionRepository(self._session).delete_for_conversation(conversation_id)
+        await self._session.execute(
+            delete(TurnQueueItem).where(TurnQueueItem.conversation_id == conversation_id)
+        )
         await self._session.execute(delete(Conversation).where(Conversation.id == conversation_id))
         await self._session.commit()
+        _drop_turn_queue_memory([conversation_id])
 
     async def hard_delete_if_soft_deleted(
         self, conversation_id: str, *, user_id: str, not_before: datetime

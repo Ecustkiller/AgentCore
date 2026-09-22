@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import delete, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.db.models.turn_queue import TurnQueueItem
@@ -122,7 +123,7 @@ class TurnQueueRepository:
             delete(TurnQueueItem).where(TurnQueueItem.queue_id == queue_id)
         )
         await commit_or_flush(self._session, commit=commit)
-        return int(result.rowcount or 0)
+        return int(cast(CursorResult[Any], result).rowcount or 0)
 
     async def delete_conversation(self, conversation_id: str, *, commit: bool = True) -> None:
         await self._session.execute(

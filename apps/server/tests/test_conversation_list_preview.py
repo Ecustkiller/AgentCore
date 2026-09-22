@@ -103,7 +103,7 @@ def _conv(**overrides: Any) -> SimpleNamespace:
         "local_container_root_id": None,
         "pinned": False,
         "archived": False,
-        "permission_axes": {},
+        "permission_axes": {"boundary": "folder"},
         "deep_research_auto": False,
         "model_profile_id": None,
         "compaction_summary": None,

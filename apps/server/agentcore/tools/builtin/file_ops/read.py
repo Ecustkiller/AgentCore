@@ -6,7 +6,7 @@ import json
 import time
 from typing import Any
 
-from agentcore.core.types import WorkspaceBoundary, ToolApproval, ToolFace
+from agentcore.core.types import ToolApproval, ToolFace, WorkspaceBoundary
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_BOTH,

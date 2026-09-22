@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from agentcore.core.types import WorkspaceBoundary
 from agentcore.tools.builtin import build_worker_registry
 from agentcore.tools.protocol import ToolSchema
 from agentcore.tools.registration import (
@@ -92,10 +93,10 @@ def build_capability_catalog() -> list[CatalogTool]:
             blurb=blurb,
         )
 
-    # Catalog advertises Host tools even when the calling session has no desktop —
-    # runtime registries still gate on desktop_online ∧ host≠off.
+    # Platform roster, not this session's boundary. Host is on ``computer``;
+    # a folder session's runtime registry still withholds it.
     for schema in build_worker_registry(
-        desktop_online=True,
+        permission_axes=WorkspaceBoundary.COMPUTER,
     ).list_all():
         available = audience_by_name.get(schema.name, (AVAILABLE_TO_WORKER,))
         catalog.append(_entry(schema, available))

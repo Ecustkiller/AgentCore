@@ -6,6 +6,7 @@ from agentcore.core.errors import ResumeJournalDegradedError
 from agentcore.llm.provider.protocol import LLMMessage, llm_content_text
 from agentcore.runtime.engine import join_segments
 from agentcore.runtime.journal import window_from_journal
+from agentcore.runtime.resolve.prompt.envelope import history_row_to_llm_message
 from agentcore.runtime.suspension import TurnSuspension
 
 _DEGRADED_MSG = (
@@ -33,7 +34,7 @@ def resumed_captain_window(
     :class:`ResumeJournalDegradedError` rather than continuing on a silently empty context.
     """
     history_msgs = (
-        [LLMMessage(role=h["role"], content=h["content"]) for h in history] if history else None
+        [history_row_to_llm_message(h) for h in history] if history else None
     )
     window = window_from_journal(suspension.journal_entries, history=history_msgs)
     if window:

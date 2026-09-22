@@ -117,6 +117,8 @@ describe("AssistantMessage team-strip support pack host", () => {
     });
     expect(screen.queryByText("连接超时，请检查网络后重试。")).toBeNull();
     expect(screen.queryByTestId("assistant-footer")).toBeNull();
-    expect(screen.getAllByRole("button", { name: "复制排查包" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "复制排查包" })).toHaveLength(
+      1,
+    );
   });
 });

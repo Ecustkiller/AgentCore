@@ -2,15 +2,9 @@
 import { ApprovalCard } from "@/components/chat/ApprovalPrompt";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { ApprovalView } from "@/stores/interactions";
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-} from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-
 
 vi.mock("@/services/approvals", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/approvals")>();
