@@ -170,14 +170,15 @@ async def test_user_rule_survives_when_ai_notes_exist(session_factory):
 
 
 async def test_injection_admits_global_and_project_rules(session_factory):
-    # Read-side full injection: both global and project always rules survive.
+    # Different consult names both inject (global, then this folder). The same
+    # name is nearest-only and is covered by the inheritance unit tests.
     uid = str(uuid.uuid4())
     proj = str(uuid.uuid4())
     async with session_factory() as session:
         repo = DocumentRepository(session)
         store = DocumentMemoryStore(session=session)
         await repo.create(
-            uid, name="用户规则.md", role="rule", apply_mode="always", content="全局规则"
+            uid, name="全局约定.md", role="rule", apply_mode="always", content="全局规则"
         )
         await repo.create(
             uid,
@@ -190,6 +191,7 @@ async def test_injection_admits_global_and_project_rules(session_factory):
         rules_md = await assemble_injected_rules(store, repo, uid, folder_id=proj)
     assert "全局规则" in rules_md
     assert "项目规则" in rules_md
+    assert rules_md.index("全局规则") < rules_md.index("项目规则")
 
 
 # --- write .agentcore/rules → user rule ----------------------------------------------------------
