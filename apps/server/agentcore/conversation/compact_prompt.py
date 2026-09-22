@@ -164,11 +164,13 @@ def _replay_tokens(entries: list[dict[str, Any]] | None) -> int:
     for row in transcript_rows(entries, ""):
         total += estimate_text_tokens(row.get("content") or "")
         total += estimate_text_tokens(row.get("reasoning_content") or "")
-        calls = row.get("tool_calls") if isinstance(row.get("tool_calls"), list) else []
+        raw_calls = row.get("tool_calls")
+        calls: list[Any] = raw_calls if isinstance(raw_calls, list) else []
         for call in calls:
             if not isinstance(call, dict):
                 continue
-            fn = call.get("function") if isinstance(call.get("function"), dict) else {}
+            function = call.get("function")
+            fn: dict[str, Any] = function if isinstance(function, dict) else {}
             total += estimate_text_tokens(str(fn.get("name") or ""))
             total += estimate_text_tokens(str(fn.get("arguments") or ""))
     return total
@@ -256,12 +258,14 @@ def _transcript_line(row: dict[str, Any]) -> str | None:
     if role not in ("user", "assistant", "tool"):
         return None
     body = (row.get("content") or "").strip()
-    calls = row.get("tool_calls") if isinstance(row.get("tool_calls"), list) else []
+    raw_calls = row.get("tool_calls")
+    calls: list[Any] = raw_calls if isinstance(raw_calls, list) else []
     labels: list[str] = []
     for call in calls:
         if not isinstance(call, dict):
             continue
-        fn = call.get("function") if isinstance(call.get("function"), dict) else {}
+        function = call.get("function")
+        fn: dict[str, Any] = function if isinstance(function, dict) else {}
         name = str(fn.get("name") or "?")
         args = _clip_args(str(fn.get("arguments") or ""))
         labels.append(f"{name}({args})" if args else name)
@@ -273,17 +277,38 @@ def _transcript_line(row: dict[str, Any]) -> str | None:
     return None
 
 
+def rows_for_summarizer(
+    messages: Sequence[Any],
+    journals: dict[str, list[dict[str, Any]]] | None = None,
+) -> list[dict[str, Any]]:
+    """Transcript rows for the rolling summary.
+
+    Same captain tool rounds and prose as the live window. Engine envelopes and
+    in-history system stay in that window and are not rewritten into the summary.
+    """
+    from agentcore.conversation.history import _fold_history_messages
+    from agentcore.runtime.resolve.prompt.envelope import is_turn_envelope_content
+
+    rows: list[dict[str, Any]] = []
+    for row in _fold_history_messages(list(messages), journals=journals):
+        role = row.get("role")
+        if role not in ("user", "assistant", "tool"):
+            continue
+        if role == "user" and is_turn_envelope_content(row.get("content")):
+            continue
+        rows.append(row)
+    return rows
+
+
 def _render_fold(
     old_summary: str,
     messages: Sequence[Any],
     file_ledger: str = "",
     journals: dict[str, list[dict[str, Any]]] | None = None,
 ) -> str:
-    """Prior summary + file list + the same transcript the live window replays."""
-    from agentcore.conversation.history import _fold_history_messages
-
+    """Prior summary + file list + transcript, without engine envelopes."""
     lines: list[str] = []
-    for row in _fold_history_messages(messages, journals=journals):
+    for row in rows_for_summarizer(messages, journals):
         line = _transcript_line(row)
         if line:
             lines.append(line)

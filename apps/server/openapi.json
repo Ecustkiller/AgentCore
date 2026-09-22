@@ -3520,7 +3520,7 @@
         "type": "object"
       },
       "ChatContextItem": {
-        "description": "One ``load_chat_context`` row (role/content; ledger is engine-only).",
+        "description": "One CEO-window row: user, assistant (optional tool_calls), or tool.",
         "properties": {
           "content": {
             "title": "Content",
@@ -3538,13 +3538,50 @@
             ],
             "title": "Evidence Ledger"
           },
+          "reasoning_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Content"
+          },
           "role": {
             "enum": [
               "user",
-              "assistant"
+              "assistant",
+              "tool"
             ],
             "title": "Role",
             "type": "string"
+          },
+          "tool_call_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Call Id"
+          },
+          "tool_calls": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/HistoryToolCall"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Calls"
           }
         },
         "required": [
@@ -8137,6 +8174,42 @@
           "finished_at"
         ],
         "title": "HandoffJobSummary",
+        "type": "object"
+      },
+      "HistoryToolCall": {
+        "properties": {
+          "function": {
+            "$ref": "#/components/schemas/HistoryToolCallFunction"
+          },
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "function",
+            "default": "function",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "title": "HistoryToolCall",
+        "type": "object"
+      },
+      "HistoryToolCallFunction": {
+        "properties": {
+          "arguments": {
+            "default": "",
+            "title": "Arguments",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "title": "HistoryToolCallFunction",
         "type": "object"
       },
       "InferenceTokenRequest": {

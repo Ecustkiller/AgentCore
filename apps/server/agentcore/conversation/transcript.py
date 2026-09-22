@@ -45,7 +45,8 @@ def _tool_call_row(raw: Any) -> dict[str, Any] | None:
     tcid = str(raw.get("id") or "").strip()
     if not tcid:
         return None
-    fn = raw.get("function") if isinstance(raw.get("function"), dict) else {}
+    function = raw.get("function")
+    fn: dict[str, Any] = function if isinstance(function, dict) else {}
     return {
         "id": tcid,
         "type": "function",

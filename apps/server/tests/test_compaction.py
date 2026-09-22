@@ -271,6 +271,30 @@ def test_render_fold_includes_tool_rounds_from_the_same_transcript():
     assert out.index("待并入摘要") < out.index("工具调用")
 
 
+def test_render_fold_skips_engine_envelope_and_keeps_the_utterance():
+    from agentcore.runtime.resolve.prompt.envelope import (
+        IN_HISTORY_SYSTEM_USAGE_KEY,
+        TURN_ENVELOPE_FENCE,
+        TURN_ENVELOPE_USAGE_KEY,
+    )
+
+    envelope = f"{TURN_ENVELOPE_FENCE}\n<工作区>SECRET_PATH</工作区>"
+    user = SimpleNamespace(
+        role="user",
+        content="你好",
+        id="u1",
+        usage={
+            TURN_ENVELOPE_USAGE_KEY: envelope,
+            IN_HISTORY_SYSTEM_USAGE_KEY: "EXTRA_SYSTEM_BLOCK",
+        },
+    )
+    out = _render_fold("旧摘要", [user, _msg("assistant", "在的")])
+    assert "user：你好" in out
+    assert "assistant：在的" in out
+    assert "SECRET_PATH" not in out
+    assert "EXTRA_SYSTEM_BLOCK" not in out
+
+
 def test_render_fold_omits_file_ledger_when_empty():
     out = _render_fold("旧摘要", [_msg("user", "你好")])
     assert "本批涉及的文件" not in out
@@ -667,6 +691,52 @@ async def test_summarize_reuses_chat_header_tools_and_does_not_redump_fold():
     assert req.tool_choice == "none"
     assert req.model == "deepseek-v4-pro"
     assert req.thinking is False
+
+
+async def test_summarize_header_path_skips_engine_envelope():
+    from agentcore.observability.session_llm_header import (
+        record_session_header,
+        reset_session_headers,
+    )
+    from agentcore.runtime.resolve.prompt.envelope import (
+        IN_HISTORY_SYSTEM_USAGE_KEY,
+        TURN_ENVELOPE_FENCE,
+        TURN_ENVELOPE_USAGE_KEY,
+    )
+
+    reset_session_headers()
+    cid = "c-header-skip-envelope"
+    record_session_header(
+        conversation_id=cid,
+        scenario="chat",
+        model="deepseek-v4-pro",
+        messages=[LLMMessage(role="system", content="FROZEN CEO")],
+        tools=[{"type": "function", "function": {"name": "delegate", "parameters": {}}}],
+    )
+    envelope = f"{TURN_ENVELOPE_FENCE}\n<工作区>SECRET_PATH</工作区>"
+    user = SimpleNamespace(
+        role="user",
+        content="你好",
+        id="u1",
+        usage={
+            TURN_ENVELOPE_USAGE_KEY: envelope,
+            IN_HISTORY_SYSTEM_USAGE_KEY: "EXTRA_SYSTEM_BLOCK",
+        },
+    )
+    provider = _FakeProvider("## 已确立的事实\n- X")
+    await _summarize(
+        provider,
+        "先前摘要",
+        [user, _msg("assistant", "在的")],
+        model=DEEPSEEK_V4_FLASH,
+        conversation_id=cid,
+    )
+    reset_session_headers()
+    bodies = [msg.content or "" for msg in provider.requests[0].messages]
+    assert "你好" in bodies
+    assert "在的" in bodies
+    assert all("SECRET_PATH" not in body for body in bodies)
+    assert all("EXTRA_SYSTEM_BLOCK" not in body for body in bodies)
 
 
 async def test_summarize_hydrates_header_from_user_usage(monkeypatch):

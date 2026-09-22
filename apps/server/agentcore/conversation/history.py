@@ -519,8 +519,8 @@ async def load_chat_context(
     """The CEO chat window: the rolling compaction summary (when present) prefixed to
     the un-folded recent tail; otherwise just the plain recent window.
 
-    Same ``[{role, content}]`` shape as :func:`load_recent_history`, so the pipeline is
-    unchanged — this only swaps WHAT fills the window. When the conversation has a
+    Rows are ``user`` / ``assistant`` / ``tool``. An assistant turn with a journal
+    expands into that captain's tool rounds plus the sealed prose. When the conversation has a
     summary, the tail is everything strictly newer than the watermark (recent-biased
     and capped at ``compaction_context_max_messages``, not the fold-time 24k token
     budget — that budget decides where to fold, never a per-request sliding cut),

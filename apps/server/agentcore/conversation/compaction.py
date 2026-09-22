@@ -88,6 +88,7 @@ from agentcore.conversation.compact_prompt import (
     recency_keep_index,
     render_conversation_fold,
     render_identity_ledger,
+    rows_for_summarizer,
     strip_identity_ledger,
 )
 from agentcore.core.errors import recovery_at_iso
@@ -220,14 +221,12 @@ async def _summarize(
 
     header = await hydrate_session_header(conversation_id)
     if header is not None and header.tools:
-        from agentcore.conversation.history import _fold_history_messages
         from agentcore.runtime.resolve.prompt.envelope import history_row_to_llm_message
 
-        history_msgs: list[LLMMessage] = []
-        for row in _fold_history_messages(list(messages), journals=journals):
-            if row.get("role") not in ("user", "assistant", "tool"):
-                continue
-            history_msgs.append(history_row_to_llm_message(row))
+        history_msgs = [
+            history_row_to_llm_message(row)
+            for row in rows_for_summarizer(messages, journals)
+        ]
         prior = strip_identity_ledger(old_summary).strip() or "（无，这是本对话的首次压缩）"
         extras: list[str] = []
         ledger = file_ledger.strip()

@@ -24,6 +24,7 @@ See docs/03-AI核心/执行引擎架构设计.md §七.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 from agentcore.config import settings
 from agentcore.llm.provider.protocol import (
@@ -87,7 +88,8 @@ def history_row_to_llm_message(msg: dict) -> LLMMessage:
         for tc in raw_calls:
             if not isinstance(tc, dict):
                 continue
-            fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+            function = tc.get("function")
+            fn: dict[str, Any] = function if isinstance(function, dict) else {}
             parsed.append(
                 ToolCall(
                     id=str(tc.get("id") or ""),

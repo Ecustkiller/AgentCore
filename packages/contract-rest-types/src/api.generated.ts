@@ -7337,18 +7337,24 @@ export interface components {
         };
         /**
          * ChatContextItem
-         * @description One ``load_chat_context`` row (role/content; ledger is engine-only).
+         * @description One CEO-window row: user, assistant (optional tool_calls), or tool.
          */
         ChatContextItem: {
             /** Content */
             content: string;
             /** Evidence Ledger */
             evidence_ledger?: unknown[] | null;
+            /** Reasoning Content */
+            reasoning_content?: string | null;
             /**
              * Role
              * @enum {string}
              */
-            role: "user" | "assistant";
+            role: "user" | "assistant" | "tool";
+            /** Tool Call Id */
+            tool_call_id?: string | null;
+            /** Tool Calls */
+            tool_calls?: components["schemas"]["HistoryToolCall"][] | null;
         };
         /** ChatContextRequest */
         ChatContextRequest: {
@@ -9358,6 +9364,34 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /** HistoryToolCall */
+        HistoryToolCall: {
+            function?: components["schemas"]["HistoryToolCallFunction"];
+            /**
+             * Id
+             * @default
+             */
+            id: string;
+            /**
+             * Type
+             * @default function
+             * @constant
+             */
+            type: "function";
+        };
+        /** HistoryToolCallFunction */
+        HistoryToolCallFunction: {
+            /**
+             * Arguments
+             * @default
+             */
+            arguments: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
         };
         /**
          * InferenceTokenRequest
